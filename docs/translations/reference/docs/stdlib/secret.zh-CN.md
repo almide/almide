@@ -48,6 +48,8 @@ fn main() -> Unit = {
 }
 ```
 
+<a id="decoding-into-a-secret"></a>
+
 ### 解码到 Secret
 
 ```almd check
@@ -63,6 +65,8 @@ effect fn main() -> Unit = {
 ```
 
 > 原文生成签名索引的固定副本（本译文不是生成目标）。
+
+<a id="signature-index-2-functions"></a>
 
 ## 签名索引（2 个函数）
 

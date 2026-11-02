@@ -1,6 +1,8 @@
 
 > これは固定コミットの読者向け参考訳であり、正本・規範は原文です。自動同期しません。Accepted や実装・計測値は記録当時の状態です。翻訳では計測や GCE を再実行していません。「すべての入力」「モデルのコードは到達しない」「OS のサンドボックス不要」および他コンパイラとの比較は、この ADR の主張・設計範囲であり、訳者による独立した安全性保証や運用上の推奨ではありません。原文の主張を保持しつつ、実運用では現行の仕様・実装・脅威モデルを別途確認してください。
 
+<a id="adr-0030-compile-cost-is-a-contract--every-phase-has-a-counted-budget-the-source-cannot-raise-it-and-exceeding-it-is-a-defined-diagnostic"></a>
+
 # ADR-0030: コンパイルコストを契約にする — 各フェーズに計数式の予算を設け、ソースから引き上げられなくし、超過は定義済みの診断とする
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](0030-compile-cost-is-a-contract.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](0030-compile-cost-is-a-contract.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](0030-compile-cost-is-a-contract.zh-CN.md)
@@ -20,6 +22,8 @@
   - #4128：信頼できないプロジェクトに対する LSP の動作。
   - #4129：環境スイッチ。
   - ADR-0017：flight profile は規範的な部分集合。
+
+<a id="context"></a>
 
 ## 背景
 
@@ -51,6 +55,8 @@ Almide のランタイム側は、信頼できない入力でも文書化した�
 - すべてのフェーズに上限がある。
 - ソースから上限を変更できない。
 - 判定がマシンに依存しない。
+
+<a id="decision"></a>
 
 ## 決定
 
@@ -86,11 +92,15 @@ Almide のランタイム側は、信頼できない入力でも文書化した�
 
 負の対照：型共有と型サイズ予算を無効にすると #4114 の生成器が予算を超え、ゲートは失敗する。
 
+<a id="consequences"></a>
+
 ## 帰結
 
 - 行 9 のランタイム上限と組み合わせて、「Almide にどのような入力を与えても、文書化された範囲内で定義済みの結果に至る」という主張を、プログラムからツールチェーンに拡張する。
 - 予算は互換性の対象となる。引き上げは追加的な変更だが、引き下げは以前コンパイルできたコードを拒否し得るため、`proofs/dialect-epochs.toml` の項目が必要になる。
 - LSP や採点器は、資源枯渇対策のための OS レベルのサンドボックスなしで信頼できないソース上で動かせる、という帰結を掲げる。副作用からの隔離は別の問題（#4128）。
+
+<a id="rulings-2026-10-27"></a>
 
 ## 裁定（2026-10-27）
 

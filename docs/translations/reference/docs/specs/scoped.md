@@ -1,3 +1,5 @@
+<a id="scoped--宣言できるリクレイム境界"></a>
+
 # scoped — declarable reclamation boundaries
 
 [![English](https://img.shields.io/badge/English-24292f?style=flat-square)](scoped.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](scoped.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](scoped.zh-CN.md)
@@ -26,6 +28,8 @@ fn sum_to(n: Int) -> Int = scoped { total(build(n, Nil), 0) }
 ```
 
 Tests: `spec/wasm_cross/scoped_region_value.almd` (C-362), `spec/wasm_cross/scoped_worker_in_and_out.almd` (C-363), `spec/lang/scoped_test.almd`, `tests/scoped_region_test.rs`, `tests/diagnostics/e08{6,7,8}-scope-*` (C-364).
+
+<a id="構文--scoped-は文脈キーワード"></a>
 
 ## Syntax — `scoped` is a contextual keyword
 
@@ -79,6 +83,8 @@ Shapes outside the fragment are refused **at check time**. Checking precedes tar
 E086 has two lines, `= allocated at <file:line:col>` and `= scope ends at <file:line:col>`; E087 names “what may be retained” and “which declaration required this”; E088 names “what remains after the call”.
 
 Tree-walking shapes (two or more self-calls in one arm) cannot be rewritten into an accumulator, so they are **accepted as ordinary workers**. E088 catches single non-tail recursion that can be fixed by accumulator conversion, and mutual recursion that retains activations while going back and forth.
+
+<a id="stage-1-で未了なこと"></a>
 
 ## What is unfinished in stage 1
 

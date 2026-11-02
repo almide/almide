@@ -1,0 +1,119 @@
+<a id="fan-usability-evaluation-can-a-writer-pick-the-right-fan-and-does-it-misread-cancellation"></a>
+
+# Fan usability evaluation: can a writer pick the right fan, and does it misread cancellation?
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](fan-usability-eval.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](fan-usability-eval.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](fan-usability-eval.zh-CN.md)
+
+> Non-normative historical reader snapshot. The pinned original is authoritative; no automatic synchronization. No independent rerun of measurements, proof gates or current implementation checks. Quoted commands are not executed. [Source](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/design/fan-usability-eval.md)
+> This is an evaluation design, not completed results. The opening says prose is never read, while the misconception score explicitly inspects comments/explanations with a phrase list; both source statements are retained. Historical fan names and conditions are not rewritten as current API advice.
+
+> Last updated: 2026-10-17 · design only. The evaluation runs in
+> [almide-dojo](https://github.com/almide/almide-dojo), as all MSR work does
+> (CLAUDE.md, "Repo Boundary"). Its result decides
+> [ADR-0028](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/adr/0028-fan-selection-names-and-cost-contract.md)'s
+> falsifier.
+
+<a id="what-is-measured"></a>
+
+## What is measured
+
+The evaluation answers two questions.
+
+1. **Selection.** Given a task described in plain words, does the writer (a
+   model or a person) choose the fan form whose selection kind matches?
+   The kinds are K1–K5 in [fan-cross-language.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/design/fan-cross-language.md).
+2. **Cancellation.** Does the writer believe that something is stopped, or
+   undone, when it is not? Examples: that `fan.map` stops at the first Err,
+   that `fan.any` cancels a request already sent, or that `fan.race` stops
+   losers early.
+
+Both are measured as *behaviour of the written program*, judged by an
+oracle, and never by reading the prose the writer produced.
+
+<a id="task-bank"></a>
+
+## Task bank
+
+Each task is a short brief, a starter file and a hidden oracle. The brief
+never names a fan form. Six families, each with 6 tasks (36 in total), half
+"write" and half "modify" (MSR):
+
+| Family | Brief shape (example) | Correct answer | Typical wrong answer |
+|---|---|---|---|
+| F1 K1 | "Try the mirrors in priority order and use the first one that answers." | `fan.any(mirrors, f)` | `fan.race` (expecting first in time) |
+| F2 K4 | "Several solvers are pure; pick the one that needs the least work, the same answer on every machine." | `fan.race { … }` | `fan.any` (takes the first, not the cheapest) |
+| F3 K5 all-or-error | "Fetch every page; fail if any page fails, and report which one." | `fan.map(xs, f)!` | a `for` loop that stops early, when the brief requires every page to be attempted |
+| F4 K5 all results | "Run every check and print a report with each check's outcome." | `fan.settle(xs, f)` | `fan.map` (loses the per-element outcome) |
+| F5 not expressible | "Use whichever server answers first; ignore the slow one." (K2), or "return as soon as any job finishes, even if it failed." (K3) | say it is not expressible, and use `fan.any` with the stated trade-off | `fan.race` with I/O arms (E006), or claiming the slow call is cancelled |
+| F6 cancellation | "Stop the remaining uploads once one fails." | a `for … !` loop, since `fan.map` never stops early | `fan.map`, with a claim, comment or test that the later uploads did not happen |
+
+Modify tasks start from a correct program of the family and change one
+requirement. Examples: "the error must be the first page in the list, not
+the first to fail" (already true, so no change is needed), or "also keep
+the failed outcomes" (`fan.map` → `fan.settle`).
+
+<a id="oracle"></a>
+
+## Oracle
+
+Every task's oracle is a deterministic program in the form of
+`tests/fan_acceptance_test.rs`:
+
+- **Same output on every leg.** The submission is run on four legs: native,
+  native with `ALMIDE_FAN_COST_OFF=1`, native with `ALMIDE_FAN_SEQUENTIAL=1`,
+  and wasm. Their stdouts must be equal.
+- **Expected output.** The stdout must equal the brief's expected output.
+- **Slow and fast elements.** The oracle's helper fns make some elements slow
+  and some fast, so an answer that relies on completion order fails.
+  Expected outputs never depend on wall time.
+- **Side effects are logged.** Every effect is a `println` with a tag, so the
+  oracle can tell which elements ran (F1, F6).
+
+There are two scores per task:
+
+- **Selection correct.** The program compiles on both targets and the
+  oracle's stdout matches.
+- **Misconception.** A finding when the program, its comments or the
+  writer's explanation asserts any of these: an unstarted or stopped element
+  that the oracle shows did run; a cancelled request; or a K2/K3 result.
+  Dojo's existing malicious-hint detector already reads comments, and this
+  reuses it with a fixed phrase list (`cancel`, `abort the others`,
+  `whichever finishes first`, `stops the rest`).
+
+<a id="conditions"></a>
+
+## Conditions
+
+| Condition | Context given to the writer |
+|---|---|
+| C0 | the current CHEATSHEET fan section, verbatim |
+| C1 | C0 plus ADR-0028's D-a hint text and D-c glosses |
+| C2 | ADR-0028 as accepted: `??` / `list.find_map` for the first Ok in order, `fan.min(clock)` with the clock required, with D-a/D-c |
+
+The writers are the Dojo model roster for the day. Each (task, condition,
+model) runs 5 samples. The model, sample count and date are recorded with
+each result row.
+
+<a id="procedure"></a>
+
+## Procedure
+
+1. Freeze the task bank and oracles in Dojo under `tasks/fan/`, versioned.
+2. For each condition, run all tasks × all models × 5 samples. This happens
+   outside CI, with the API keys on the operator's machine (Dojo rule).
+3. Score each run on selection and misconception. Report per family and per
+   condition, with the total counts beside each rate ("of how many").
+4. Compare C0 → C1 to see what the diagnostics and glosses alone buy, and
+   C1 → C2 to see what the rename buys on top.
+5. Apply ADR-0028's falsifier. If C2 does not cut the F1 + F2 + F5
+   misreading rate by at least a third relative to C1, reconsider keeping
+   the names (option A) before the removal epoch.
+
+<a id="what-this-evaluation-does-not-claim"></a>
+
+## What this evaluation does not claim
+
+- It measures the written program, not understanding.
+- It does not measure latency. A slower but correct F1 answer passes.
+- A family with fewer than 30 scored runs per condition is reported but not
+  used for the falsifier.

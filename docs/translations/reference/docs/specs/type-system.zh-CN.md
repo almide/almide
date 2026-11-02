@@ -1,3 +1,5 @@
+<a id="type-system-specification"></a>
+
 # 类型系统规格
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](type-system.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](type-system.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](type-system.zh-CN.md)
@@ -13,6 +15,8 @@ Almide 使用基于约束的类型系统，包含双向推断、记录的结构�
 > 原文范围说明：“没有运行时类型检查”不能扩展为没有任何运行时检查，或整体安全性已获证明。§3 的“自动解包”保留原文措辞，但其描述带有显式 `!`，不意味着引入隐式传播。
 
 ---
+
+<a id="1-primitive-types"></a>
 
 ## 1. 基本类型
 
@@ -41,6 +45,8 @@ let u = ()          // Unit
 测试：`spec/lang/expr_test.almd`、`spec/lang/bytes_test.almd`、`spec/lang/matrix_test.almd`
 
 ---
+
+<a id="2-collection-types"></a>
 
 ## 2. 集合类型
 
@@ -90,6 +96,8 @@ test "tuples" {
 
 ---
 
+<a id="3-optiont-and-resultt-e"></a>
+
 ## 3. Option[T] 与 Result[T, E]
 
 用于可缺失值及错误处理的内建参数化类型。两者均为具有专用构造器的 `Applied` 类型。
@@ -137,7 +145,11 @@ effect fn read(path: String) -> Result[String, String] = {
 
 ---
 
+<a id="4-record-types"></a>
+
 ## 4. 记录类型
+
+<a id="named-records"></a>
 
 ### 具名记录
 
@@ -151,6 +163,8 @@ let px = p.x                          // Float
 let p2 = { ...p, y: 5.0 }            // spread update
 ```
 
+<a id="anonymous-records"></a>
+
 ### 匿名记录
 
 无类型名的记录字面量按结构赋型。
@@ -159,6 +173,8 @@ let p2 = { ...p, y: 5.0 }            // spread update
 let user = { name: "alice", age: 30 }   // { name: String, age: Int }
 let n = user.name                        // String
 ```
+
+<a id="open-records-row-polymorphism"></a>
 
 ### 开放记录（行多态）
 
@@ -196,9 +212,13 @@ fn get_port(app: { config: { port: Int, .. }, .. }) -> Int = app.config.port
 
 ---
 
+<a id="5-variant-types"></a>
+
 ## 5. Variant 类型
 
 代数数据类型（带标签联合）。通过 `|` 分隔的分支声明。
+
+<a id="unit-payload-enum-like"></a>
 
 ### Unit 载荷（类似枚举）
 
@@ -213,6 +233,8 @@ fn to_str(d: Direction) -> String = match d {
 }
 ```
 
+<a id="tuple-payload"></a>
+
 ### 元组载荷
 
 ```almide
@@ -223,6 +245,8 @@ fn area(s: Shape) -> Float = match s {
   Rect(w, h) => w * h,
 }
 ```
+
+<a id="record-payload"></a>
 
 ### 记录载荷
 
@@ -258,6 +282,8 @@ test "record-payload construction and matching" {
 }
 ```
 
+<a id="recursive-variants"></a>
+
 ### 递归 Variant
 
 variant 类型可以引用自身。类型检查器通过环检测防止 Eq／Hash 检查无限循环。
@@ -265,6 +291,8 @@ variant 类型可以引用自身。类型检查器通过环检测防止 Eq／Has
 ```almide
 type Tree[T] = | Leaf(T) | Node(T, List[Tree[T]])
 ```
+
+<a id="inline-variants-no-leading-pipe"></a>
 
 ### 行内 Variant（无前导竖线）
 
@@ -277,6 +305,8 @@ type AppError = NotFound(String) | Io(String)
 测试：`spec/lang/data_types_test.almd`、`spec/lang/type_system_test.almd`、`spec/lang/variant_record_test.almd`
 
 ---
+
+<a id="6-function-types"></a>
 
 ## 6. 函数类型
 
@@ -297,6 +327,8 @@ test "function values" {
 
 函数类型永远不具有 Eq，也永远不可哈希。
 
+<a id="effect-functions"></a>
+
 ### Effect 函数
 
 `effect fn` 标记执行副作用的函数。类型检查器强制纯函数不得调用 effect 函数（错误 E006）。`FnSig` 上的 `is_effect` 标志跟踪这一属性。
@@ -306,6 +338,8 @@ import fs
 
 effect fn read_file(path: String) -> Result[String, String] = fs.read_text(path)
 ```
+
+<a id="type-aliases-for-function-types"></a>
 
 ### 函数类型的类型别名
 
@@ -317,9 +351,13 @@ type Handler = (String) -> String
 
 ---
 
+<a id="7-user-defined-generics"></a>
+
 ## 7. 用户定义的泛型
 
 泛型类型参数使用 `[]` 语法（不是 `<>`）。
+
+<a id="generic-functions"></a>
 
 ### 泛型函数
 
@@ -339,6 +377,8 @@ test "type arguments" {
 }
 ```
 
+<a id="generic-record-types"></a>
+
 ### 泛型记录类型
 
 ```almide
@@ -346,6 +386,8 @@ type Box[T] = { value: T, label: String }
 
 fn unbox[T](b: Box[T]) -> T = b.value
 ```
+
+<a id="generic-variant-types"></a>
 
 ### 泛型 Variant 类型
 
@@ -358,6 +400,8 @@ fn map_right[A, B, C](e: Either[A, B], f: fn(B) -> C) -> Either[A, C] = match e 
 }
 ```
 
+<a id="structural-bounds-on-generics"></a>
+
 ### 泛型的结构约束
 
 泛型参数可以要求特定记录字段：
@@ -369,6 +413,8 @@ fn set_name[T: { name: String, .. }](x: T, n: String) -> T = { ...x, name: n }
 ```
 
 约束 `T: { name: String, .. }` 是 `OpenRecord` 约束。检查器将它存储于 `FnSig.structural_bounds`，并在每个调用点验证。
+
+<a id="protocol-bounds-on-generics"></a>
 
 ### 泛型的 Protocol 约束
 
@@ -390,9 +436,13 @@ fn show_named[T: Showable + Nameable](item: T) -> String = item.get_name() + ": 
 
 ---
 
+<a id="8-type-inference"></a>
+
 ## 8. 类型推断
 
 Almide 使用基于约束的类型推断，配合 Union-Find 数据结构。
+
+<a id="three-pass-architecture"></a>
 
 ### 三遍架构
 
@@ -400,9 +450,13 @@ Almide 使用基于约束的类型推断，配合 Union-Find 数据结构。
 2. **求解**（`solving.rs`）：通过合一处理约束。Union-Find 合并等价类型变量并将其绑定到具体类型。
 3. **替换**（`mod.rs`）：将 `expr_types` 中所有推断变量替换为已解析的具体类型。
 
+<a id="inference-variables"></a>
+
 ### 推断变量
 
 新类型变量命名为 `?N`（例如 `?0`、`?1`）。它们不同于用户声明的 `TypeVar`（`T`、`U`）。`UnionFind` 通过按秩合并与路径压缩管理等价类。
+
+<a id="bidirectional-inference"></a>
 
 ### 双向推断
 
@@ -417,6 +471,8 @@ test "inference from annotation and from use" {
 }
 ```
 
+<a id="let-polymorphism"></a>
+
 ### Let 多态
 
 泛型函数在每个调用点使用新的推断变量实例化：
@@ -430,6 +486,8 @@ test "instantiated per call" {
 }
 ```
 
+<a id="lambda-parameter-inference"></a>
+
 ### Lambda 参数推断
 
 lambda 参数从其使用方式推断：
@@ -439,6 +497,8 @@ test "lambda parameter inferred from the list" {
   assert_eq(list.map([1, 2, 3], (x) => x * 2), [2, 4, 6])   // x: Int inferred from List[Int]
 }
 ```
+
+<a id="constraint-solving"></a>
 
 ### 约束求解
 
@@ -455,9 +515,13 @@ test "lambda parameter inferred from the list" {
 
 ---
 
+<a id="9-structural-typing-and-open-records"></a>
+
 ## 9. 结构化类型与开放记录
 
 Almide 通过开放记录类型支持记录的结构化子类型关系。
+
+<a id="compatibility-rules"></a>
 
 ### 兼容性规则
 
@@ -469,9 +533,13 @@ Almide 通过开放记录类型支持记录的结构化子类型关系。
 | `{ a: Int, .. }` | 含字段 `a: Int` 的 `Named` | 成功（解析具名类型） |
 | `{ a: Int, .. }` | `{ a: Int }` | 成功（也允许精确匹配） |
 
+<a id="unification-with-open-records"></a>
+
 ### 与开放记录合一
 
 开放记录按与顺序无关的方式匹配字段。对于 `{ a: Int, .. }` 与 `{ a: Int, b: String }`，若实际类型中每个所需字段都有按名称对应的字段，则合一成功。
+
+<a id="chain-calling"></a>
 
 ### 链式调用
 
@@ -486,9 +554,13 @@ fn chain_a(x: { name: String, breed: String, .. }) -> String = chain_b(x)
 
 ---
 
+<a id="10-protocol-system"></a>
+
 ## 10. Protocol 系统
 
 protocol 定义符合类型必须实现的一组方法。它们发挥与 Rust 的 trait 或 Haskell 的类型类相同的作用。
+
+<a id="defining-a-protocol"></a>
 
 ### 定义 Protocol
 
@@ -499,6 +571,8 @@ protocol Showable {
 ```
 
 方法签名中的 `Self` 是 `TypeVar("Self")`，在每个符合性声明位置替换为具体类型。
+
+<a id="declaring-conformance"></a>
 
 ### 声明符合性
 
@@ -521,6 +595,8 @@ test "conformance by convention method" {
 
 约定方法在函数环境中注册为 `Type.method`。
 
+<a id="built-in-protocols"></a>
+
 ### 内建 Protocol
 
 | Protocol | 方法 | 说明 |
@@ -531,6 +607,8 @@ test "conformance by convention method" {
 | `Hash` | `fn hash(v: Self) -> Int` | 哈希值。不允许 `Float`、`Fn` 或 `Map`。 |
 | `Codec` | `fn encode(v: Self) -> Value`、`fn decode(v: Value) -> Result[Self, String]` | 序列化。记录类型还派生 `fn decode_strict(v: Value) -> Result[Self, String]`，拒绝不属于其解码字段的键（C-429）；字段可带 `@skip` / `@skip_decode`（C-428）。 |
 
+<a id="protocol-validation"></a>
+
 ### Protocol 验证
 
 注册全部声明后，检查器验证：
@@ -539,6 +617,8 @@ test "conformance by convention method" {
 2. 方法签名匹配 protocol 定义（参数类型、返回类型、元数）。
 3. `Self` 已正确替换为具体类型。
 
+<a id="using-protocols-as-generic-bounds"></a>
+
 ### 将 Protocol 用作泛型约束
 
 ```almide
@@ -546,6 +626,8 @@ fn display[T: Showable](item: T) -> String = item.show()
 ```
 
 每个调用点都会检查 `T` 的具体类型是否已声明符合 `Showable`。
+
+<a id="multiple-protocols"></a>
 
 ### 多个 Protocol
 
@@ -567,6 +649,8 @@ test "multiple bounds" {
   assert_eq(show_named(Widget { id: 1, name: "knob" }), "knob: #1")
 }
 ```
+
+<a id="generic-protocols-explicit-conformance"></a>
 
 ### 泛型 Protocol（显式符合性）
 
@@ -613,6 +697,8 @@ test "generic protocol through an applied bound" {
 
 测试：`spec/wasm_cross/generic_protocol_conformance.almd`（C-365）、`spec/integration/generic_protocol_ports/`（跨模块的 ports / adapters / service）、`tests/diagnostics/protocol-*`、`tests/protocol_qualification_test.rs`
 
+<a id="marker-protocols"></a>
+
 ### 标记 Protocol
 
 没有方法的 protocol 用作标记：
@@ -625,6 +711,8 @@ type Marker: Serializable = { tag: String }
 测试：`spec/lang/protocol_test.almd`、`spec/lang/trait_impl_test.almd`、`spec/lang/protocol_generics_test.almd`、`spec/lang/protocol_advanced_test.almd`、`spec/lang/derive_conventions_test.almd`
 
 ---
+
+<a id="11-type-aliases"></a>
 
 ## 11. 类型别名
 
@@ -643,6 +731,8 @@ let total = s + 50      // works: Score is Int
 测试：`spec/lang/type_alias_test.almd`
 
 ---
+
+<a id="12-tagged-variants-and-internal-union-types"></a>
 
 ## 12. 带标签 Variant 与内部 Union 类型
 
@@ -667,6 +757,8 @@ fn render(value: StringOrInt) -> String = match value {
 与 union 合一时，使用绑定快照逐个尝试成员，提交第一个成功结果。
 
 ---
+
+<a id="13-how-types-flow-through-the-compiler"></a>
 
 ## 13. 类型如何流经编译器
 
@@ -695,6 +787,8 @@ Source (.almd)
              └── emits target-specific type representations
 ```
 
+<a id="key-data-structures"></a>
+
 ### 关键数据结构
 
 - **`Ty` 枚举**（`crates/almide-types/src/types/mod.rs`）：内部类型表示；该枚举是权威清单，包括定宽数值类型、函数 effect 标志和编译期常量参数。
@@ -704,6 +798,8 @@ Source (.almd)
 - **`Kind`**（`crates/almide-types/src/types/constructor.rs`）：“类型构造器的类型”，即 `*`、`* -> *`、`* -> * -> *`。
 - **`UnionFind`**（`crates/almide-frontend/src/check/types.rs`）：用于推断变量等价关系的并查集结构，按秩合并并进行路径压缩。
 - **`Checker`**（`crates/almide-frontend/src/check/mod.rs`）：统筹三遍类型检查管线。
+
+<a id="unification-cratesalmide-typessrctypesunifyrs"></a>
 
 ### 合一（`crates/almide-types/src/types/unify.rs`）
 
@@ -716,6 +812,8 @@ Source (.almd)
 5. 其他情况：委托给 `Ty::compatible`。
 
 `substitute` 将类型中已绑定的 `TypeVar` 替换成其绑定值。
+
+<a id="type-constructor-registry-cratesalmide-typessrctypesconstructorrs"></a>
 
 ### 类型构造器注册表（`crates/almide-types/src/types/constructor.rs`）
 

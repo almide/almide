@@ -35,6 +35,8 @@ effect fn main() -> Unit = {
 
 
 
+<a id="signature-index-24-functions"></a>
+
 ## 固定快照 API 索引 (24 个函数)
 
 ```
@@ -137,6 +139,8 @@ bigint.from(x: S) -> BigInt
 // @since unreleased
 bigint.from_checked(x: S) -> Option[BigInt]
 ```
+
+<a id="type-index-1-types"></a>
 
 ## 固定快照类型索引（1 个类型）
 

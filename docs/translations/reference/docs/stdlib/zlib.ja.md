@@ -62,6 +62,8 @@ gzip コンテナ。ディスク上の `.gz` 形式、および `Content-Encodin
 
 
 
+<a id="signature-index-11-functions"></a>
+
 ## 固定スナップショットの API 索引 (11 関数)
 
 ```

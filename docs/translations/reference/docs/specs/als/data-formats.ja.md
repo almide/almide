@@ -1,0 +1,121 @@
+<a id="als--データ形式data-formats"></a>
+
+# ALS — データ形式（Data Formats）
+
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](data-formats.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](data-formats.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](data-formats.zh-CN.md)
+
+> 正本：[docs/specs/als/data-formats.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/specs/als/data-formats.md)、固定コミット `35297a612fb29e3f78f6587aba253aa91d51f466`。非規範的な読者向けスナップショットであり、元の ALS や検査器・台帳・生成器の入力を置き換えず、自動同期もしない。要求・歴史的状態・証拠・安全性の主張は原文の範囲を保つ。この版で独立の実行・計測・認証・証明は行っていない。原文言語版は読者用コピー、他言語版は翻訳である。
+
+> 歴史的な表記の注記：`bytes.read_f16_le` と `json.stringify_pretty` は原文の要求にある表記を保持し、ここで現行 API 名だと主張しない。固定版／現行 API リファレンスを別途確認すること。規則や識別子を暗黙に書き換えてはいない。
+
+
+> Last updated: 2026-10-26
+
+JSON / 正規表現 / バイナリ形式の観測規範。参照方法は [strings.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/specs/als/strings.md)
+冒頭と同じ。
+
+<a id="als-d1-json-パス操作"></a>
+
+## ALS-D1 JSON パス操作
+
+`value.get_path`・`set_path`・`remove_path` のエッジケース（欠損キー・配列
+範囲外・型不一致ノード・空パス）は infallible native oracle（serde_json 上の
+参照実装）と観測等価: 欠損は none / no-op に縮退し、trap しない。
+Contracts: C-031。
+
+<a id="als-d2-value-の-json-テキスト表現"></a>
+
+## ALS-D2 Value の JSON テキスト表現
+
+動的 `Value` の文字列化はその **JSON テキスト**と byte 一致する（キー順・
+数値表現・エスケープを含む）。裸でも Repr レコードのフィールドとしても同形。
+Contracts: C-060。
+
+<a id="als-d3-異種ネスト文書の走査"></a>
+
+## ALS-D3 異種ネスト文書の走査
+
+異種ネスト JSON（glTF 級: 配列の配列・混在型・深いネスト）のパースと
+要素単位の走査（`as_array` / 添字 / フィールド）は両ターゲットで byte 一致。
+Contracts: C-063。
+
+<a id="als-d4-正規表現エンジン"></a>
+
+## ALS-D4 正規表現エンジン
+
+正規表現エンジン（match / find / replace / captures）は native エンジンと
+**fuzz された文法全域で** byte 一致する。方言差（PCRE vs RE2 等の齟齬）は
+不適合 — 対応構文は単一の規範文法。
+Contracts: C-032。
+
+<a id="als-d5-半精度浮動小数のデコード"></a>
+
+## ALS-D5 半精度浮動小数のデコード
+
+`bytes.read_f16_le` は IEEE-754 binary16 を f64 へ正確に拡張する（subnormal・
+±inf・NaN・±0 を含む）。
+Contracts: C-037。
+
+<a id="als-d6-codec-と-json-デコード"></a>
+
+## ALS-D6 Codec と JSON デコード
+
+JSON 数値・`\u` エスケープのデコード、整数形数値の f64 への拡張、
+`json.stringify_pretty` のインデント出力、derive された Codec のクロス
+モジュール dispatch、動的 Value モデル（merge / array 往復）、および
+decode エラーメッセージの文言はターゲット間で byte 一致する。
+
+`Codec` は `Encode` と `Decode` の合成である（C-435）。`: Decode` を宣言した型
+`T` は `T.decode` と `T.decode_strict` だけを、`: Encode`
+を宣言した型は `T.encode` だけを derive し、`: Codec` は両方を derive する。
+`: Codec` の型は `Encode` と `Decode` の両方に適合する（`[T: Decode]` の境界を
+満たす）。宣言していない向きのメソッドの参照は E002 で拒否する。`Encode` で
+ない `: Decode` の型を入力の型と呼び、そのフィールドはすべて入力である。入力の
+型のフィールドに `@skip` / `@skip_decode` を付けると E053 で拒否する。
+`: Codec` を宣言した型 `T` は静的メソッド `T.encode` / `T.decode` を持つ。
+レコードの encode は宣言順に走り、`none` のフィールドを省略する（明示
+null は出さない。`Value?` の `some(null)` だけが明示 null になる）。
+default 付きフィールドは実値をそのまま出し、`Value` フィールドは素通し。
+decode は宣言順にフィールドを walk して最初のエラーを返す: object 以外に
+`expected Object`、必須キーの欠落に `missing field '<key>'`、型不一致に
+Value variant 名を使う `expected Int` / `expected Float` / `expected Str` /
+`expected Bool`（C-084 の語彙）。未知キーは無視する。派生の
+`T.decode_strict`（record と variant）は decode の前に値を walk して、どの
+深さでも型の外にある最初のキー `k` に `unknown key 'k'` を返す。入れ子の
+キーにはその record の経路を `, at address.geo` / `, at tags[1]` の形で付ける。
+record では自身のキー（文書順。decode されるフィールドの wire キーでないもの）
+を先に見て、次に `Decode` の型を持つフィールドを宣言順に walk する。variant
+では最初のキーが tag で、その後のキーは未知キーである。tag の case の
+payload（record なら record として、tuple なら要素ごとに `[i]` を付けて）を
+case 名の経路で walk する。何も無ければ `T.decode` と同じ結果を返す（C-429）。
+`@skip` のフィールドは decode も encode もされず、`@skip_decode` の
+フィールドは decode されず encode はされる。どちらも default を取り、その
+キーは未知キーとして扱う。default の無い skip フィールドは E104 で拒否
+する（C-428、`spec/wasm_cross/codec_field_skip_matrix.almd`）。
+`Secret[A]` のフィールドは `A` の wire 形から decode して包む。Secret を持つ
+型には `T.encode` を derive せず、`T.encode` の参照は E023 で拒否する（C-427、
+`spec/wasm_cross/secret_eq_and_decode.almd`）。Option フィールドは
+欠落も明示 null も `none` に畳むが、`Value?` は三状態（欠落 → `none`、
+明示 null → `some(null)`、値 → `some(v)`）。default 付きフィールドは欠落
+時に default 値を取る。`Float` フィールドは整数形 JSON 数値を f64 へ拡張
+して受け（C-085）、`List[U]` は配列を要素ごとに decode して最初の err を
+そのまま表面化する（インデックス修飾は付かない）。ネストした Codec
+レコードは再帰し、レコード位置の非 object は `expected Object`。variant
+の Codec は externally-tagged（`{"Case": [payload…]}`、unit case は
+`{"Case": null}`）で、未知タグは `unknown variant for <T>` を返す。挙動の
+行列は C-298 の corpus — `spec/wasm_cross/codec_decode_errors.almd`・
+`spec/wasm_cross/codec_none_omission.almd`・
+`spec/wasm_cross/codec_variant_roundtrip.almd`・
+`spec/wasm_cross/codec_extra_keys.almd`・
+`spec/wasm_cross/codec_float_int.almd` — が固定する。
+Contracts: C-084, C-085, C-087, C-095, C-098, C-103, C-209, C-427, C-428, C-429, C-435。
+
+<a id="als-d7-バイト列ブリッジ"></a>
+
+## ALS-D7 バイト列ブリッジ
+
+RawPtr / 線形メモリのバイト移動はバイト値をそのまま写す。
+`bytes.from_list(List[Int])` はバイト域(0..=255)の値をそのまま写し、域外は
+**mod-256 でラップ**する(`[65, 300, -1]` → 65, 44, 255 — 0.59.1 両ターゲット
+実測。全 Int 域の無切り詰め規範は存在しない)。
+Contracts: C-062, C-090。

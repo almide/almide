@@ -1,3 +1,5 @@
+<a id="result-option-effect--完全仕様"></a>
+
 # Result, Option, Effect — complete specification
 
 [![English](https://img.shields.io/badge/English-24292f?style=flat-square)](result-option-effect.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](result-option-effect.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](result-option-effect.zh-CN.md)
@@ -13,6 +15,8 @@
 
 > Source caveat: the §2 table broadly renders propagation from Option as `err("none")`; the separate [effect-call specification](../../../../specs/effect-fn-call-semantics.md) distinguishes an enclosing Option channel, which propagates `none`. The table below preserves its original scope and wording rather than silently reconciling the two sources. The measured-matrix and working-code claims above are historical source claims, not an independent run performed for this translation.
 
+<a id="1-型"></a>
+
 ## 1. Types
 
 ### Result[T, E]
@@ -26,6 +30,8 @@ err(e)  : Result[T, E]   // エラー値
 some(v) : Option[T]       // 値あり
 none    : Option[T]       // 値なし
 ```
+
+<a id="option-糖衣-tadr-0010"></a>
 
 ### Option sugar `T?` (ADR-0010)
 
@@ -56,6 +62,8 @@ The canonical form is `T?`: `almide fmt` normalizes `Option[T]` to `T?` (D3). Th
 process.exit(n) : Never   // 戻らない関数の戻り値型
 ```
 Never is assignable to any type. It can be used in guard else, if then, and match arms.
+
+<a id="可謬マーカー---t----te"></a>
 
 ### Fallibility markers `-> T!` / `-> T!E`
 
@@ -89,6 +97,8 @@ fn checked(s: String) -> Int! = {
 ```
 
 Tests: `spec/lang/fallible_marker_test.almd`, `spec/lang/fallible_typed_error_test.almd`, `spec/lang/fallible_lambda_test.almd`.
+
+<a id="2-演算子"></a>
 
 ## 2. Operators
 
@@ -125,6 +135,8 @@ fn twice(s: String) -> Result[Int, String] = ok(int.parse(s)! * 2)   // pure + !
 
 Tests: `spec/lang/unwrap_operators_test.almd`, `spec/lang/fallible_marker_test.almd`, `spec/wasm_cross/pure_bang_propagation.almd`.
 
+<a id="expr--result--option-変換"></a>
+
 ### `expr?` — Result → Option conversion
 
 | Input type | Output type |
@@ -157,6 +169,8 @@ Conversion affects **only the outermost layer**: `Result[Result[T, E], E]?` is `
 
 Tests: `spec/lang/unwrap_operators_test.almd`, `tests/diagnostics/e038-qq-line-crossing/`, `tests/diagnostics/e034-off-type-bang/`.
 
+<a id="exprfield--optional-chainingoption-専用"></a>
+
 ### `expr?.field` — optional chaining (Option only)
 
 ```almide
@@ -176,6 +190,8 @@ Tests: `spec/lang/unwrap_operators_test.almd`.
 
 ## 3. effect fn
 
+<a id="宣言と-lift"></a>
+
 ### Declaration and lifting
 
 ```almide
@@ -189,6 +205,8 @@ effect fn read_file(path: String) -> String = fs.read_text(path)!
 | `effect fn f() -> T` | `fn f() -> Result<T, String>` (implicit lift) |
 | `effect fn f() -> Result[T, E]` | `fn f() -> Result<T, E>` (no double wrapping) |
 | `fn f() -> T` | `fn f() -> T` (no conversion) |
+
+<a id="伝搬は全明示adr-0008--auto--は削除済み"></a>
 
 ### All propagation is explicit (ADR-0008 — auto-`?` removed)
 
@@ -207,6 +225,8 @@ Effect fn bodies once had position-dependent implicit propagation (auto-`?`): it
 `e()?` / `e() ?? fb` are ordinary ADR-0005 value operations (no exceptional rule): `e()?` ≡ Result→Option conversion; `e() ?? fb` ≡ unwrap_or_else.
 
 Regression tests: `spec/lang/explicit_propagation_test.almd` (removal of two hazards + A/B for `let _`), `spec/wasm_cross/let_wildcard_discard.almd` (C-217), `spec/wasm_cross/effect_option_explicit_bang.almd` (C-216).
+
+<a id="lambda-の可謬性adr-0006-d1--adr-0009--1108-phase-2b"></a>
 
 ### Lambda fallibility (ADR-0006 D1 / ADR-0009 — #1108 Phase 2b)
 
@@ -247,6 +267,8 @@ Tests: `spec/lang/fallible_lambda_test.almd` (pins L1–L9), `spec/lang/typed_er
 - An unhandled Err reaching main gives **exit 1 + stderr `Error: <msg>` on both targets** (Display, without quotes). An Option none propagated with `!` (`err("none")`) follows the same route and agrees across targets. The old statement about “a remaining divergence where wasm silently exits 0” has been resolved: measurements confirmed exit 1 + `Error:` on both targets.
 
 Tests: `tests/wasm_runtime_test_parts/p3.rs::unhandled_main_error_terminates_consistently`, `spec/lang/result_option_matrix_test.almd`.
+
+<a id="5-test-ブロック"></a>
 
 ## 5. Test blocks
 
@@ -304,13 +326,19 @@ test "guard else returns the else value" {
 
 Tests: `spec/lang/fallible_marker_test.almd` (guard else err), `tests/guard_exit_gate_test.rs`.
 
+<a id="7-match-の網羅性"></a>
+
 ## 7. Match exhaustiveness
 
 Missing match arms, including Result / Option (no err / none arm), are **hard error E010**, not a warning, with a hint to add an arm.
 
 Tests: `tests/diagnostics/` (E010-family fixtures).
 
+<a id="8-エラー値のドクトリンadr-0004"></a>
+
 ## 8. Error-value doctrine (ADR-0004)
+
+<a id="80-二層モデル--どちらの層に置くかadr-0012-d1"></a>
 
 ### 8.0 The two-layer model — choosing the layer (ADR-0012 D1)
 
@@ -327,6 +355,8 @@ Choosing error type `E` is **layer assignment**, not taste. This paragraph is th
 
 This is stated as the **terminal state**. Overturning it requires **measured evidence** named by the Falsifiers in ADR-0004 / ADR-0012, not just a new opinion.
 
+<a id="81-規則"></a>
+
 ### 8.1 Rules
 
 - Error values converge on String (no tags or error sets introduced).
@@ -337,6 +367,8 @@ This is stated as the **terminal state**. Overturning it requires **measured evi
 - fs “absence” is a value: `fs.read_text_if_exists(p)! ?? default` (C-215).
 
 Tests: `tests/diagnostics/e035-*/`, `e036-*/`, `spec/stdlib/fs_if_exists_test.almd`.
+
+<a id="9-非目標--検討して採らなかったものadr-0012-d4"></a>
 
 ## 9. Non-goals — considered and rejected (ADR-0012 D4)
 

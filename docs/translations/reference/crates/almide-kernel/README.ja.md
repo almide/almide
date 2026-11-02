@@ -18,6 +18,8 @@ Almide 向けのターゲット別 SIMD 数値カーネル — **高速、かつ
 > [almide-graphics/nn](https://github.com/almide-graphics/nn)（モジュール `nn.kernels`）へ移動しました。現在この crate にあるのは `matmul`、
 > `scale`、`transpose`、`transpose_f64`、`bridge` です。以下の q1_0 の測定と証明はその作業の記録です。コードは git 履歴にあります。
 
+<a id="at-a-glance"></a>
+
 ## 概要
 
 ```
@@ -38,6 +40,8 @@ Standalone: zero deps, 16 tests green, builds native + wasm
 
 これは Exo の系譜（アルゴリズムとスケジュールの分離 + 構築による正しさ）を Rust で、Almide ネイティブとして実現したものです。置換・選択カーネルでは *Exo より軽量* です（SMT ソルバー不要。構造が決定可能です）。
 
+<a id="the-form"></a>
+
 ## 構成
 
 ```
@@ -53,6 +57,8 @@ differential test       = bridge       : SIMD == the same naive reference Wyve
 
 Wyve はリンクされません（Racket/wyvec/LLVM-clang へのビルド依存はありません）。Wyve はカーネルを *証明する* 場所で、この crate はそれを *出荷する* 場所です。新しいカーネルは、Wyve で設計・証明 → ここで Rust に移植 → 差分テストでビット単位の完全一致を確認、という流れです。
 
+<a id="kernels"></a>
+
 ## カーネル
 
 | カーネル | 実装 | 正しさ | 速度 |
@@ -60,6 +66,8 @@ Wyve はリンクされません（Racket/wyvec/LLVM-clang へのビルド依存
 | `transpose_8x8` | wasm simd128 シャッフル。それ以外では通常のタイル（x86 AVX の 3 パスネットワークはどのプログラムにも使われず、`unsafe` とともに削除、#4342） | ビット単位で完全一致、100 パターン | AVX の測定値は **デフォルト 1.57× / native 4.23×**。通常のタイルはそれより 1.28× 遅い（GCE Intel、2026-10-30） |
 | `scale` | 素朴な実装（自動ベクトル化）。測定専用の `scale_avx` は削除済み（#4342） | ビット単位で完全一致（avx == naive） | **native 0.99×** → 素朴な実装を維持 |
 | `q1_0_dot` | AVX2 ビット展開 + 符号付き加算 + リダクション | 許容誤差内（結合順序を変えるリダクション） | **3.5×（デフォルト、native とも）** |
+
+<a id="beating-rust--where-and-the-right-correctness-bar"></a>
 
 ### Rust を上回る箇所と、適切な正しさの基準
 
@@ -72,6 +80,8 @@ scale (elementwise)   : 1.0× native, bitwise-exact     — autovec already wins
 勝るのは、まさに rustc の自動ベクトル化が *構造的に* 妨げられる箇所、つまりシャッフルネットワークとパックされたビットのアドレッシングです。q1_0 は target-cpu に関係なく Rust を 3.5× 上回ります。自動ベクトル化にできることがないため、ベースラインが追いつくことはありません。
 
 正しさの基準は演算によります。**データ移動（transpose）→ ビット単位の完全一致**、**リダクション（q1_0）→ 許容誤差内**。SIMD スケジュールが浮動小数点加算の結合順序を変えるためです（誤差幅は |result| ではなく *各項の絶対値の和*。結果は相殺でほぼゼロにもなります）。演算ごとに適切な基準を選ぶことが大切です。
+
+<a id="static-equivalence--exos-idea-lighter-for-permutations"></a>
 
 ### 静的等価性 — Exo の発想を、置換ではさらに軽量に
 
@@ -111,6 +121,8 @@ q1_0 correctness:  sign placement → PROVEN (256 exhaustive)
 - 浮動小数点リダクション（q1_0 の和）→ 指定順序にビット単位で一致 + 有界誤差
 「約束」のまま残るものはありません。
 
+<a id="4-quadrant-beat-rust-and-almide-on-native-and-wasm-q1_0"></a>
+
 ### 4 象限：native と wasm の両方で Rust と Almide の両方を上回る（q1_0）
 
 |               | native (AVX2) | wasm (simd128) |
@@ -144,6 +156,8 @@ almide-kernel は **ターゲット別 SIMD**（x86 AVX/AVX2、wasm simd128）�
 
 これが `almide_rt` との接続の中核です。任意の行列をタイルに分け、固定サイズの SIMD カーネルに載せます。
 
+<a id="the-abi-shape-decides-the-simd-win-measured"></a>
+
 ### ABI の形が SIMD の優位性を決める（測定済み）
 
 `bridge.rs` は完全な接続（`Vec<Vec<f64>>` → カーネル → `Vec<Vec<f64>>`）で、ビット単位で完全一致します。しかし 512×512 で測定すると、**同じカーネル** でも次の結果になります。
@@ -159,6 +173,8 @@ ABI だけで 7× の振れ幅です。ネスト→フラット / フラット�
 
 AVX 転置は Wyve の検証済み 3 パスシャッフルネットワーク（隣接行を unpack → 64-bit グループを shuffle → 128-bit レーンを permute）を反映します。
 
+<a id="the-design-rule-confirmed-by-measurement"></a>
+
 ### 測定で確認された設計原則
 
 ```
@@ -169,6 +185,8 @@ elementwise (scale)       : autovec ties explicit AVX at target-cpu=native
 ```
 
 *デフォルト* ビルドでの `scale` の 1.23× は見かけのものでした。自動ベクトル化が SSE2 ベースラインに制限されていたためです。`target-cpu=native` では互角です。したがって almide-kernel が明示的 SIMD を書くのは、自動ベクトル化が *構造上* 追随できないデータ移動だけです。それ以外は素朴な実装を保ちます。（要素単位の速度を直すのは Almide のビルドフラグであり、この crate の余計な仕組みではありません。）
+
+<a id="exo-style-algorithm--schedule-separation"></a>
 
 ## Exo 流：アルゴリズムとスケジュールの分離
 
@@ -193,11 +211,15 @@ store(pass_permute(pass_shuffle(pass_unpack(load(input)))))
 
 測定結果：名前付きパスに分割してもビット単位の完全一致を保ち、4.19x（ひとまとまりのときは 4.23x）でした。`#[inline(always)]` が合成を畳み込んで消します。スケジュールは明示的かつ再合成可能で、実行時コストは **ゼロ** です。
 
+<a id="why-a-separate-crate"></a>
+
 ## crate を分ける理由
 
 - **依存なし、prelude 注入なし** — 単独でビルド・テストできます。
   （`almide_rt` はできません。src が Almide の prelude による `use` 項目の注入を前提とし、完全なパイプライン内でのみコンパイルされるためです。この crate は通常の Rust です。）
 - `almide_rt` は、native でも明示的 SIMD が自動ベクトル化を上回る **データ移動演算**（転置、シャッフル）にこれを呼びます。そこが実測で確認された Wyve の優位性の所在です。
+
+<a id="bench-honesty"></a>
 
 ## ベンチマークの誠実さ
 
@@ -206,6 +228,8 @@ store(pass_permute(pass_shuffle(pass_unpack(load(input)))))
 2. 64 個すべての出力を合計すると `sum` が支配的になり、転置の差が埋もれました（1.03×）。
 
 反復ごとに変わる入力と `black_box(&o)` により、転置全体の計算と格納を強制し、シャッフルネットワークだけを測定できます：**1.57×**。マイクロベンチが DCE や別のホットループを測っていないか、必ず確認してください。
+
+<a id="run"></a>
 
 ## 実行
 

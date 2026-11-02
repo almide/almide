@@ -22,6 +22,8 @@ duration.min(10)
 
 負の引数は決定的な実行時中止になります。生成時にオーバーフローすると、表現可能な最大時間に飽和します。
 
+<a id="algebra-adr-0001-s3"></a>
+
 ### 代数演算（ADR-0001 S3）
 
 同じ時計の範囲内では `Compute` と同じ操作が使えます。
@@ -36,6 +38,8 @@ duration.ms(1) < duration.s(1)     // Bool
 どの演算子でも `Duration ⊕ Compute` は型エラーです。実時間の期限が決定的な予算へ入り込むことはありません（`fan.bounded(duration.ms(5))` は拒否され、`compute.ms(...)` / `fan.timeout` が案内されます）。
 
 
+
+<a id="signature-index-7-functions"></a>
 
 ## 固定スナップショットの API 索引（7関数）
 

@@ -1,3 +1,5 @@
+<a id="runtimers--the-native-runtime-source-template"></a>
+
 # runtime/rs — native ランタイムのソーステンプレート
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](README.zh-CN.md)
@@ -9,6 +11,8 @@
 > 原文上の注意: エラー数やモジュール数は記載日時の記録です。最後の自己完結性に関する例外説明も原文時点の説明であり、現在の依存関係を独立に再検証したものではありません。
 
 `runtime/rs/src/*.rs` は、`stdlib/*.almd` の `@intrinsic("almide_rt_*")` 宣言を支える native (`almide_rt_*`) 実装を格納します。**ビルドするクレートでも、workspace メンバーでもありません。** 本文書はその理由と、実際に動作を検証する場所を記録します。
+
+<a id="how-this-directory-is-consumed"></a>
 
 ## このディレクトリの利用方法
 
@@ -26,6 +30,8 @@
 七つのテストモジュールの削除（#2507）による出力テキストの変化は、空行かコメントだけのちょうど八行でした。変更前後のソースに `strip_test_blocks` を実行して確認しました。六ファイルで空行が一つ減り、`regex.rs` には過剰削除されていたコメントが戻りました。コード行は動いていません。
 
 `runtime/rs/src` の編集は埋め込まれるテキストを変えるため、CI は `rust_runtime.rs` / `runtime_fn_modes.rs` を再生成し、差分があれば失敗します（ci.yml の "Generated runtime registry matches committed sources"）。`almide-codegen` を再ビルドし、編集と一緒に生成ファイルもコミットしてください。
+
+<a id="why-it-is-not-a-workspace-member-2507-measured-2026-09-22"></a>
 
 ## workspace メンバーではない理由（#2507、2026-09-22 計測）
 
@@ -53,11 +59,15 @@
 
 `Cargo.toml` はランタイムソースが必要とするものの記録として残しています（crates.io 依存。#4007 で、どのビルドも設定しない `have_blas` BLAS 経路とともに `build.rs` を削除）。ビルド単位ではなく、ここで cargo を呼ぶ CI job もスクリプトもありません。
 
+<a id="the-behavioural-oracle-is-spec"></a>
+
 ## 動作の oracle は `spec/`
 
 **`runtime/rs` の動作の oracle は、実行可能な `spec/` スイートです。** 実プログラムと同じく stdlib を通して native と構造的 Wasm の両経路でコードを動かし、CI もこれを実行します。ここに書いた Rust の `#[cfg(test)]` ブロックはどこでも実行されません。cargo ビルドがこのディレクトリをコンパイルせず、`strip_test_blocks` が全出力クレートからブロックを削除するためです。
 
 したがって、**`runtime/rs` 配下に `#[cfg(test)]` を追加しないでください。** テストは `spec/stdlib/`（クロスターゲットの約束なら `spec/wasm_cross/`）に書きます。`scripts/check-runtime-test-placement.sh` が CI で強制します。
+
+<a id="the-one-narrow-exception-a-self-contained-module-included-by-a-root-test"></a>
 
 ### 唯一の限定的な例外: ルートテストが取り込む自己完結モジュール
 

@@ -1,6 +1,8 @@
 
 > 本文是面向读者的参考译文。以上固定提交的原文为权威版本，本译文不修订规范。状态、数字及实现情况均为作出决定时的记录。Accepted 表示设计已采纳，不表示实现已经完成或当前验证已通过。本译文不会自动同步。原文中的外部调研 ../almide-references、QUALIFICATION.md 等均为原文引用，翻译时未另行获取或复核。
 
+<a id="adr-0014-pinned-expectations-are-machine-derived-or-absent--never-hand-maintained"></a>
+
 # ADR-0014：固定的预期结果必须由机器推导，否则不固定；绝不手工维护
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](0014-expectations-are-derived.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](0014-expectations-are-derived.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](0014-expectations-are-derived.zh-CN.md)

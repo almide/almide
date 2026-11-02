@@ -134,6 +134,8 @@ effect fn fill(out: Region, byte: Int) -> Int = {
 
 
 
+<a id="signature-index-8-functions"></a>
+
 ## シグネチャ索引（8 関数）
 
 ```

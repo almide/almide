@@ -1,3 +1,5 @@
+<a id="github-linguist-への言語追加--準備台帳"></a>
+
 # 向 GitHub Linguist 添加语言——准备台账
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](linguist-submission.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](linguist-submission.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](linguist-submission.zh-CN.md)
@@ -9,6 +11,8 @@
 让 GitHub 将 `.almd` 识别为语言的计划。**截至 2026-09-22 还不能提交**。原因只有一个：第三方采用不足。文法、示例、颜色等其余事项今天就能准备好。
 
 来源为 [linguist/CONTRIBUTING.md](https://github.com/github-linguist/linguist/blob/main/CONTRIBUTING.md) 和 [PR 模板](https://github.com/github-linguist/linguist/blob/main/.github/PULL_REQUEST_TEMPLATE.md)。数字于 2026-09-22 通过 GitHub API 实测。
+
+<a id="1-条件と現状"></a>
 
 ## 1. 条件与现状
 
@@ -24,6 +28,8 @@
 可接受许可证为 apache-2.0, bsd-2-clause, bsd-3-clause, cc0-1.0, isc, mit, mpl-2.0, ncsa, permissive, unlicense, wtfpl, zlib。
 
 **过早提交适得其反**。2026 年提交给 Linguist 的语言添加 PR 约 240 个，合并 31 个，其余因使用情况不足被关闭。被关闭的 PR 会留下记录。
+
+<a id="通った言語は実際に何ファイルあったか2026-09-22-実測"></a>
 
 ### 获准语言实际有多少文件（2026-09-22 实测）
 
@@ -46,6 +52,8 @@ Bend 的 PR #8218 直接展示了评估方式。正文写明 `extension:bend` �
 
 维护者的说法也很明确。某次拒绝中写道：“2000 是标准。此外，评估受欢迎程度时会排除语言所有者及最主要的贡献者。无论如何，最终都会排除你和你的组织。”
 
+<a id="15-文法の検査結果2026-09-22-実測"></a>
+
 ## 1.5 文法检查结果（2026-09-22 实测）
 
 文法并非进入 Linguist 的障碍。已使用 TextMate 引擎（`vscode-textmate` + `vscode-oniguruma`）实际分词测量。
@@ -66,6 +74,8 @@ Bend 的 PR #8218 直接展示了评估方式。正文写明 `extension:bend` �
 - `keyword.declaration` 数量仍为 104，整体覆盖率也不变。
 
 **另 1 项是写法不一致。** 文法将 `strict` 标为修饰符关键字，但编译器的 `KEYWORDS`（34 个词）没有 `strict`，它只出现在 `keyword_typo.rs` 的拼写提示中。没有实际危害，但作为唯一权威来源的 `grammar/tokens.toml` 记载比实现更宽。
+
+<a id="2-今日そろえられるもの"></a>
 
 ## 2. 今天可以准备的事项
 
@@ -93,6 +103,8 @@ Almide:
   ace_mode: text
 ```
 
+<a id="3-条件を満たす唯一の道第三者の採用"></a>
+
 ## 3. 满足条件的唯一途径：第三方采用
 
 当前索引中的 `.almd` 全部位于 `almide`、`O6lvl4`、`almide-graphics` 三者之下。`almide-graphics` 是自己所属的组织，而且单个仓库就占非所有者部分的三分之一。此时已不满足分布条件。**自己批量创建仓库来凑数是在钻评估方法的空子，而审查者会用 `-user:` 排除**，因此也毫无意义。
@@ -113,6 +125,8 @@ gh api -X GET search/code -f q='extension:almd -user:almide -user:O6lvl4 -user:a
 
 审查者看 Web UI 的数字，因此提交前还应在登录状态下打开 `https://github.com/search?type=code&q=NOT+is%3Afork+path%3A*.almd` 确认。
 
+<a id="4-出す日の手順"></a>
+
 ## 4. 提交当天的步骤
 
 1. Fork `github-linguist/linguist` 并创建分支。
@@ -130,6 +144,8 @@ PR 正文骨架：
 > 示例：取自 `almide/almide`，MIT / Apache-2.0 双许可证。
 > 文法：`https://github.com/almide/vscode-almide`（MIT），`scopeName: source.almide`。
 > 颜色 `#7c5cbf`：Almide playground 与文档网站的强调色。
+
+<a id="5-先に取れる条件の軽いレジストリ"></a>
 
 ## 5. 可先进入、要求较轻的注册表
 

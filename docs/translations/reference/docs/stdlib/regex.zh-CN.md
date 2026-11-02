@@ -15,6 +15,8 @@
 
 由于第一个参数是 `Regex`，将目标字符串管道传入操作会产生类型错误：以前 `s |> regex.find("[0-9]+")` 会不作提示地在模式中搜索目标字符串，现在会指出 `regex.find(regex.new("[0-9]+"), s)`。创建一次 `Regex`，在循环中复用。
 
+<a id="regexnewpattern-string---regex-and-regexcompilepattern-string---resultregex-string"></a>
+
 ### `regex.new(pattern: String) -> Regex` 与 `regex.compile(pattern: String) -> Result[Regex, String]`
 
 ```almd run
@@ -45,6 +47,8 @@ pattern too large: more than 20000 states
 ```
 原因取自左侧第一个违规位置：`unclosed group`、`unmatched )`、`unclosed character class`、`nothing to repeat`、`malformed repetition`、`repetition minimum exceeds maximum`、`invalid class range`、`trailing backslash`、`unsupported escape \X`（以及 `… in a class`）、`named groups are not supported`、`lookaround is not supported`、`flags are only supported at the start of the pattern`、`unsupported group syntax`、`groups nested deeper than 250`、`pattern too large: more than 20000 states`（C-395）。
 
+<a id="regexis_matchre-regex-s-string---bool-and-regexis_full_matchre-regex-s-string---bool"></a>
+
 ### `regex.is_match(re: Regex, s: String) -> Bool` 与 `regex.is_full_match(re: Regex, s: String) -> Bool`
 
 `is_match`：re 匹配 s 的某处。`is_full_match`：re 匹配整个 s（`regex.full_match` 是其已弃用的旧名称，计划在 epoch 16 删除）。
@@ -64,6 +68,8 @@ true
 true
 false
 ```
+
+<a id="regexfindre-regex-s-string---optionstring-and-regexindex_ofre-regex-s-string---optionint"></a>
 
 ### `regex.find(re: Regex, s: String) -> Option[String]` 与 `regex.index_of(re: Regex, s: String) -> Option[Int]`
 
@@ -135,6 +141,8 @@ fn main() -> Unit = {
 ["a", "b", "c"]
 ```
 
+<a id="regexcapturesre-regex-s-string---optionlistoptionstring-and-regexcaptures_all"></a>
+
 ### `regex.captures(re: Regex, s: String) -> Option[List[Option[String]]]` 与 `regex.captures_all`
 
 第一个匹配的 `[whole, group 1, ...]`，没有匹配则 `none`。索引 0 是整个匹配，始终为 `some`；未参与的组为 `none`（R-regex-08），组匹配到空字符串则不是这种情况。`captures_all` 按顺序为每个匹配返回同样形式的列表。
@@ -178,6 +186,8 @@ fn main() -> Unit = {
 true
 ```
 
+<a id="supported-syntax"></a>
+
 ## 支持的语法
 
 匹配取最左侧；从该位置开始的匹配中，按以下顺序取第一个：分支从左到右，贪婪量词最长优先，懒惰量词最短优先；导致模式其余部分失败的组或量词以其下一选择重试。重复组的捕获取最后一次实例；没有匹配任何内容的实例也计入，但会结束重复。原生和 wasm 逐字节一致。
@@ -202,6 +212,8 @@ true
 拒绝（C-395）：环视、反向引用及上面未列出的字母或数字转义、命名组、非开头位置的标志、不构成完整量词的 `{`、没有可重复对象的量词，以及超过 20,000 个状态。
 
 
+
+<a id="signature-index-16-functions"></a>
 
 ## 签名索引（16 个函数）
 
@@ -270,6 +282,8 @@ regex.captures_all(re: Regex, s: String) -> List[List[Option[String]]]
 // @since unreleased
 regex.escape(s: String) -> String
 ```
+
+<a id="type-index-1-types"></a>
 
 ## 类型索引（1 个类型）
 

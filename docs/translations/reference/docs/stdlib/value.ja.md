@@ -70,6 +70,8 @@ Object から指定キーを削除します。
 
 
 
+<a id="signature-index-29-functions"></a>
+
 ## 固定スナップショットの API 索引 (29 関数)
 
 ```

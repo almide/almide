@@ -1,3 +1,5 @@
+<a id="file-backed-snapshot-testing--on-hold"></a>
+
 # ファイルベースのスナップショットテスト — 保留
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](snapshot-testing.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](snapshot-testing.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](snapshot-testing.zh-CN.md)
@@ -8,11 +10,15 @@
 
 > 原文の説明：提供済みのソースリテラルによるスナップショットアサーションを超える、任意のファイルベーススナップショット。
 
+<a id="already-available"></a>
+
 ## すでに利用可能なもの
 
 `testing.assert_snapshot(actual, expected)` は出力を期待する**ソースリテラル**と比較します。`almide test --update-snapshots <file>` はそのリテラルを書き換えることで、新しい値や変化した値を受け入れます。通常のテスト実行は書き込まず、CI モードは受け入れを拒否します。付随するスナップショットファイルはありません。
 
 現在の API と受け入れ規則は [CLI リファレンス](../../../../../specs/cli.md#スナップショット-testingassert_snapshot) にあります。実装：`stdlib/testing.almd` と `src/cli/commands.rs::cmd_test_update_snapshots`。根拠：`spec/stdlib/testing_snapshot_test.almd` と `tests/snapshot_update_test.rs`（正確な書き換え、受け入れの反復、通常の失敗、CI の書き込み拒否）。
+
+<a id="remaining-design-question"></a>
 
 ## 残る設計上の問い
 

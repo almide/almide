@@ -1,3 +1,5 @@
+<a id="wasm-http-client"></a>
+
 # WASM HTTP 客户端
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](wasm-http-client.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](wasm-http-client.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](wasm-http-client.zh-CN.md)
@@ -11,6 +13,8 @@
 
 说明：已提供的 wasm HTTP 客户端路径，以及尚余的默认组件迁移。
 
+<a id="shipped-surface"></a>
+
 ## 已提供的功能范围
 
 每个函数的权威依据是 [target-availability.toml](../../../../../../proofs/target-availability.toml)；当前 API 见 [HTTP 参考](../../../../../stdlib/http.md)。不要根据旧的功能族名称或存在 wasm 目标就推断可用性。
@@ -20,6 +24,8 @@
 - 可用性按操作区分：调用句柄和服务端功能需分别查看矩阵，不能把完整响应的结论扩展到所有 HTTP API。
 
 依据：[http_response_cross_test.rs](../../../../../../tests/http_response_cross_test.rs) 将完整响应的状态、标头、正文和失败与原生目标对比；[target-availability.toml](../../../../../../proofs/target-availability.toml) 将 `http.get_response` 和 `http.send` 记录为仅在 `stock-p1` 上不可用。
+
+<a id="remaining-plan"></a>
 
 ## 剩余计划
 

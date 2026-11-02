@@ -273,10 +273,14 @@ fn main() -> Unit = {
 0
 ```
 
+<a id="matrix-completeness-956"></a>
+
 ## 转换矩阵的完整性 (#956)
 
 转换以其构造的类型命名（R-L0-40）：`int.from(x)`（超出范围时中止）、`int.from_checked(x)`（`none`）、`int.from_saturating(x)`（限制范围，NaN 为0）和 `int.from_wrapping(x)`（整数输入，二进制补码）接受数值输入，包括高端范围无法容纳于 `Int` 的 `UInt64 → Int`。每个有指定位宽的模块都为自身类型提供相同的转换族，每个固定宽度数值类型都有 `min_value()`/`max_value()`。
 
+
+<a id="signature-index-47-functions"></a>
 
 ## 原文固定快照 API 索引（47个函数）
 

@@ -59,6 +59,8 @@ code`）。超过 30 s 的响应替换为 `503`。
 
 **在 wasm 上**（C-367），`almide run app.almd --target wasm` 在嵌入式宿主上提供同一程序。一个实例逐个处理所有请求，与 native 进程完全一样：`main` 只运行一次。宿主通过与 native 相同的服务器代码读取连接，使用相同限制（64 个连接、10 s 请求头部期限及其 `408`），因此慢客户端也不会阻塞其他客户端。状态行、头部和正文与 native 逐字节一致。`almide build --target wasm` 生成的标准产物没有监听套接字，所以 `almide build` 和 `almide check --target wasm` 仍拒绝 `http.serve`（E081、#2659）。
 
+<a id="routing-and-middleware"></a>
+
 ## 路由与中间件
 
 处理器是从请求到响应的 effect 函数值，即 `type HttpHandler = effect (HttpRequest) -> HttpResponse`，路由器和包装后的应用也是如此。`http.serve` 是运行处理器的一种方式；`http.new_request` 是另一种：测试在代码中构建请求，直接调用应用，不使用套接字。路由和请求构建是纯操作，在 native 和 wasm 上行为一致，路由器也像其他处理器一样提供服务。
@@ -263,6 +265,8 @@ fn main() -> Unit = {
 418
 ```
 
+<a id="headers-and-body-of-either-message"></a>
+
 ## 两种消息共用的头部与正文
 
 本节每个函数都接受 `HttpRequest` 或 `HttpResponse`（`[M: HttpMessage]`）；写入函数返回相同种类。由 `http.new_request` 构建的请求和由 `http.response` 构建的响应，使用相同调用读取和修改。
@@ -414,6 +418,8 @@ fn main() -> Unit = {
 hi
 ```
 
+<a id="reading-a-request"></a>
+
 ## 读取请求
 
 `http.new_request(method, target, body, headers)` 在代码中构建请求，用于测试无套接字调用应用，也用于构建 `http.send` / `http.start` 的请求；后一种情况下目标是完整 URL。
@@ -525,6 +531,8 @@ effect fn main() -> Unit = {
 }
 ```
 
+<a id="decoding-a-form-value"></a>
+
 ### 解码表单值
 
 `http` 没有自己的解码器：`http.url_decode` 已移除。使用 `url` 模块解码表单编码值（`+` 为空格，`%XX` 为一个字节）；它会拒绝错误转义或非 UTF-8 百分号数据，而不是保留它们。输入可能不合法时回退到输入：
@@ -537,6 +545,8 @@ fn main() -> Unit = {
   println(url.decode_form("a+b%20c") ?? "a+b%20c")
 }
 ```
+
+<a id="client"></a>
 
 ## 客户端
 
@@ -582,6 +592,8 @@ effect fn main() -> Unit = {
 }
 ```
 
+<a id="read-timeout-almide_http_timeout_secs"></a>
+
 #### 读取超时（`ALMIDE_HTTP_TIMEOUT_SECS`）
 
 每个不接收限制的客户端调用最多等待服务器 **30 秒**。环境变量 `ALMIDE_HTTP_TIMEOUT_SECS` 为所有这些调用覆盖该默认值；`0` 表示**无超时**，阻塞直到服务器响应。这只是默认值：自带限制的调用（`http.start`）忽略它；参见[逐次调用限制与取消](#per-call-limits-and-cancellation)。限制作用于字节之间，而非整个调用，所以持续发送的服务器不会触发它。缓慢端点（本地 LLM 评估长提示时，首字节前通常需要 30–120 s）超限后以如下错误失败：
@@ -597,6 +609,8 @@ ALMIDE_HTTP_TIMEOUT_SECS=0 ./app     # wait forever
 
 同一变量也限制**连接**（#2825）：没有应答的连接尝试会在 30 s（Go dialer 的默认值）后放弃，而非使用 OS 默认值（macOS 为 75 s，Linux 更长），错误文本相同。
 
+<a id="client-limits-per-path"></a>
+
 #### 各路径的客户端限制
 
 | | 连接 | 两次读取之间 | 整个调用 | 响应大小 |
@@ -608,6 +622,8 @@ ALMIDE_HTTP_TIMEOUT_SECS=0 ./app     # wait forever
 - 大小上限按实际接收的响应计算（头部和带分帧的正文）：`ALMIDE_HTTP_MAX_RESPONSE_BYTES` 可覆盖，`0` = 无上限。超限时调用为 `err("response from \"<url>\" is larger than N bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)")`。
 - 每条路径都拒绝超过 1 MiB 的响应 HEAD（Go 默认值）。
 - 没有默认的全调用期限，curl、Go、Python、Node、reqwest 都没有。需要时通过 `http.start` 和 `total_ms` 指定。
+
+<a id="error-texts-adr-0023-42"></a>
 
 #### 错误文本（ADR-0023 §4.2）
 
@@ -628,6 +644,8 @@ userinfo 密码永不出现：从 userinfo 的第一个 `:` 到 `@` 之间全部
 
 代理自身的失败和无法加载的信任存储保留自己的文本（会点明代理或变量）。组件中，这些类别之外的宿主错误显示为 `http request to "<url>" failed (<wasi:http case>)`，宿主的 `internal-error` 文本直接传递。组件从自己的环境（`wasmtime run --env …`）读取 `ALMIDE_HTTP_TIMEOUT_SECS` 和 `ALMIDE_HTTP_MAX_RESPONSE_BYTES`；在那里，超时 `0` 保留宿主默认值。URL 原因中，组件自己识别三种协议方案问题（缺失、不支持、`expected "//"`）；错误主机或端口由运行时拒绝，显示为未分类文本。
 
+<a id="urls-2821"></a>
+
 #### URL（#2821）
 
 URL 按 curl、Go 和 WHATWG URL 标准的方式拆分：
@@ -644,9 +662,13 @@ URL 按 curl、Go 和 WHATWG URL 标准的方式拆分：
 
 被拒绝的 URL 以 `err` 返回，文本为 `invalid URL "…": <what is wrong>`，在任何连接尝试之前返回。`http.start` 同步返回它。
 
+<a id="header-injection-2822"></a>
+
 #### 头部注入（#2822）
 
 头名称必须是 token（RFC 9110）。头值不得包含 CR、LF、NUL 或其他控制字符（HTAB 可以）。方法也必须是 token。客户端或运行时管理的字段——`connection`、`keep-alive`、`proxy-authenticate`、`proxy-authorization`、`proxy-connection`、`transfer-encoding`、`upgrade`、`host`、`http2-settings`——无论大小写都不能设置（C-370；标准 WASI 运行时也拒绝这九项）。否则请求会在发送任何内容前被拒绝：调用是以 `invalid header value for "X-A": …`、`invalid header name …`、`forbidden header name "Host": …` 或 `invalid HTTP method …` 开头的 `err`。绝不会清理请求后仍然发送。Python、Go 和 Node 拒绝相同输入。
+
+<a id="proxies-2819"></a>
 
 #### 代理（#2819）
 
@@ -666,6 +688,8 @@ URL 按 curl、Go 和 WHATWG URL 标准的方式拆分：
 Basic`，SOCKS5 使用 RFC 1929。任何其他代理方案都会报错并指出变量，绝不静默直接连接。错误会指出代理（`proxy 127.0.0.1:3128 (from HTTPS_PROXY) refused CONNECT
 api.example.com:443: HTTP/1.1 407 …`），从不重复其凭据。
 
+<a id="tls-trust-2820"></a>
+
 #### TLS 信任（#2820）
 
 HTTPS 信任两组根证书：
@@ -680,11 +704,15 @@ certificates SSL_CERT_FILE names: …`）。证书或握手失败显示为 tls �
 TLS handshake with "https://internal.example/" failed
 ```
 
+<a id="interim-responses-and-chunk-extensions-2824"></a>
+
 #### 中间响应与分块扩展（#2824）
 
 - 所有路径都跳过最终响应之前的 `1xx` 响应（`100 Continue`、`103 Early Hints`）。`101` 是最终响应。
 - 分块大小行中的 `;extension` 被忽略。大小行不是十六进制时是错误（protocol 类别，`malformed or incomplete response from
   "<url>"`），而不是空正文。
+
+<a id="the-whole-response--get_response-and-send"></a>
 
 ### 完整响应 — `get_response` 与 `send`
 
@@ -839,6 +867,8 @@ effect fn main() -> Unit = {
 在 wasm 目标上，`almide run --target wasm` 以与 native 相同的行为提供 `start`、`poll`、`read_new`、`wait` 和 `cancel`：嵌入式宿主运行 native 调用核心，因此限制和取消错误的文本相同，丢弃句柄的最后一份副本也会取消调用。通过 `almide build --target wasm` 构建的独立 `.wasm` 尚无法支持它们（没有可承载进行中调用的标准 WASI 宿主），因此检查构建路径的 `almide check --target wasm` 仍会拒绝它们。
 
 
+<a id="signature-index-36-functions"></a>
+
 ## 固定快照 API 索引（36 个函数）
 
 ```
@@ -986,6 +1016,8 @@ http.wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler
 // @since unreleased
 http.decode_json(req: HttpRequest) -> Result[T, HttpResponse]
 ```
+
+<a id="type-index-4-types"></a>
 
 ## 固定快照类型索引（4 个类型）
 

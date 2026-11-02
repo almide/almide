@@ -59,6 +59,8 @@ code`）。30 s より遅いレスポンスは `503` に置き換えます。
 
 **wasm では**（C-367）、`almide run app.almd --target wasm` が同じプログラムを埋め込みホストで提供します。native プロセスとまったく同様、1 インスタンスがすべてのリクエストを 1 件ずつ処理し、`main` は 1 回だけ実行されます。ホストは native と同じサーバーコード、同じ制限（64 接続、リクエストヘッドの 10 s 期限と `408`）で接続を読むため、ここでも遅いクライアントは他を妨げません。ステータス行、ヘッダー、ボディは native とバイト単位で同一です。`almide build --target wasm` の標準成果物には待ち受けソケットがないため、`almide build` と `almide check --target wasm` は引き続き `http.serve` を拒否します（E081、#2659）。
 
+<a id="routing-and-middleware"></a>
+
 ## ルーティングとミドルウェア
 
 ハンドラーはリクエストからレスポンスへの effect 関数値、`type HttpHandler = effect (HttpRequest) -> HttpResponse` です。ルーターとラップされたアプリも同様です。`http.serve` はハンドラーを動かす方法の 1 つで、`http.new_request` も別の方法です。テストがコード内でリクエストを作り、ソケットなしでアプリを直接呼びます。ルーティングとリクエスト構築は純粋で、native と wasm で同じ動作をし、ルーターも他のハンドラーと同様に提供できます。
@@ -263,6 +265,8 @@ fn main() -> Unit = {
 418
 ```
 
+<a id="headers-and-body-of-either-message"></a>
+
 ## どちらのメッセージでも使えるヘッダーとボディ
 
 この節の各関数は `HttpRequest` または `HttpResponse`（`[M: HttpMessage]`）を取り、書き込み関数は同じ種類を返します。`http.new_request` で構築したリクエストと `http.response` で構築したレスポンスを、同じ呼び出しで読み書きします。
@@ -414,6 +418,8 @@ fn main() -> Unit = {
 hi
 ```
 
+<a id="reading-a-request"></a>
+
 ## リクエストの読み取り
 
 `http.new_request(method, target, body, headers)` はコード内でリクエストを作ります。テストからソケットなしでアプリを呼ぶ方法であり、`http.send` / `http.start` に渡すリクエストの構築方法でもあります。その場合、ターゲットは完全な URL です。
@@ -525,6 +531,8 @@ effect fn main() -> Unit = {
 }
 ```
 
+<a id="decoding-a-form-value"></a>
+
 ### フォーム値のデコード
 
 `http` に独自のデコーダーはありません。`http.url_decode` は削除されました。フォームエンコード値（`+` は空白、`%XX` はバイト）は `url` モジュールでデコードします。不正なエスケープや UTF-8 でないパーセントデータを保持せず拒否します。不正な可能性がある場合は入力にフォールバックします。
@@ -537,6 +545,8 @@ fn main() -> Unit = {
   println(url.decode_form("a+b%20c") ?? "a+b%20c")
 }
 ```
+
+<a id="client"></a>
 
 ## クライアント
 
@@ -582,6 +592,8 @@ effect fn main() -> Unit = {
 }
 ```
 
+<a id="read-timeout-almide_http_timeout_secs"></a>
+
 #### 読み取りタイムアウト（`ALMIDE_HTTP_TIMEOUT_SECS`）
 
 制限を受け取らない各クライアント呼び出しは、サーバーの応答を最大 **30 秒**待ちます。環境変数 `ALMIDE_HTTP_TIMEOUT_SECS` は全呼び出しのこのデフォルトを上書きします。`0` は**タイムアウトなし**で、サーバーが応答するまでブロックします。これはデフォルトにすぎず、独自の制限を持つ呼び出し（`http.start`）は無視します。[呼び出しごとの制限とキャンセル](#per-call-limits-and-cancellation)を参照してください。制限は呼び出し全体ではなくバイト間に適用され、送信し続けるサーバーでは発動しません。遅いエンドポイント（長いプロンプトを評価するローカル LLM は最初のバイトまで普通に 30–120 s かかる）は、制限を超えると次のように失敗します。
@@ -597,6 +609,8 @@ ALMIDE_HTTP_TIMEOUT_SECS=0 ./app     # wait forever
 
 同じ変数が**接続**にも制限を設けます（#2825）。応答のない接続試行は OS のデフォルト（macOS では 75 s、Linux ではさらに長い）ではなく、30 s（Go の dialer のデフォルト）で同じテキストを返して断念します。
 
+<a id="client-limits-per-path"></a>
+
 #### 経路ごとのクライアント制限
 
 | | 接続 | 読み取り間 | 呼び出し全体 | レスポンスサイズ |
@@ -608,6 +622,8 @@ ALMIDE_HTTP_TIMEOUT_SECS=0 ./app     # wait forever
 - サイズ上限は受信したままのレスポンス（ヘッドとフレーミング付きボディ）を数えます。`ALMIDE_HTTP_MAX_RESPONSE_BYTES` で上書きし、`0` = 上限なしです。超えると呼び出しは `err("response from \"<url>\" is larger than N bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)")` になります。
 - すべての経路で 1 MiB を超えるレスポンス HEAD を拒否します（Go のデフォルト）。
 - 呼び出し全体の期限はデフォルトではありません。curl、Go、Python、Node、reqwest のいずれにもありません。必要なら `http.start` と `total_ms` で指定します。
+
+<a id="error-texts-adr-0023-42"></a>
 
 #### エラーテキスト（ADR-0023 §4.2）
 
@@ -628,6 +644,8 @@ userinfo のパスワードは表示しません。最初の `:` から `@` ま�
 
 プロキシ自体の失敗と読み込めないトラストストアは、固有のテキストを維持します（プロキシや変数の名前を示します）。コンポーネントでは、これらのクラス外のホストエラーは `http request to "<url>" failed (<wasi:http case>)` と表示し、ホストの `internal-error` テキストはそのまま渡します。コンポーネントは自身の環境（`wasmtime run --env …`）から `ALMIDE_HTTP_TIMEOUT_SECS` と `ALMIDE_HTTP_MAX_RESPONSE_BYTES` を読みます。そこではタイムアウト `0` はホストのデフォルトを維持します。URL の理由のうち、スキームの 3 種（欠落、未サポート、`expected "//"`）はコンポーネント自身が見つけます。不正なホストやポートはランタイムが拒否し、未分類のテキストで表示します。
 
+<a id="urls-2821"></a>
+
 #### URL（#2821）
 
 URL は curl、Go、WHATWG URL 標準と同じ方法で分割します。
@@ -644,9 +662,13 @@ URL は curl、Go、WHATWG URL 標準と同じ方法で分割します。
 
 拒否された URL は `invalid URL "…": <what is wrong>` という `err` になり、接続試行前に返します。`http.start` はこれを同期的に返します。
 
+<a id="header-injection-2822"></a>
+
 #### ヘッダーインジェクション（#2822）
 
 ヘッダー名はトークンでなければなりません（RFC 9110）。値には CR、LF、NUL、その他の制御文字を含められません（HTAB は可）。メソッドもトークンが必要です。クライアントまたはランタイムが管理するフィールド、`connection`、`keep-alive`、`proxy-authenticate`、`proxy-authorization`、`proxy-connection`、`transfer-encoding`、`upgrade`、`host`、`http2-settings` は、大文字・小文字を問わず設定できません（C-370、標準 WASI ランタイムも同じ 9 個を拒否）。違反すると送信前にリクエストを拒否し、呼び出しは `invalid header value for "X-A": …`、`invalid header name …`、`forbidden header name "Host": …`、または `invalid HTTP method …` で始まる `err` になります。不正箇所を除去してそのまま送ることはありません。Python、Go、Node も同じ入力を拒否します。
+
+<a id="proxies-2819"></a>
 
 #### プロキシ（#2819）
 
@@ -666,6 +688,8 @@ URL は curl、Go、WHATWG URL 標準と同じ方法で分割します。
 Basic`、SOCKS5 では RFC 1929 を使います。それ以外のプロキシスキームは、変数名を示すエラーです。黙って直接接続しません。エラーはプロキシ名を示し（`proxy 127.0.0.1:3128 (from HTTPS_PROXY) refused CONNECT
 api.example.com:443: HTTP/1.1 407 …`）、その認証情報を再掲しません。
 
+<a id="tls-trust-2820"></a>
+
 #### TLS の信頼（#2820）
 
 HTTPS は 2 種類のルートを信頼します。
@@ -680,11 +704,15 @@ certificates SSL_CERT_FILE names: …`）。証明書またはハンドシェイ
 TLS handshake with "https://internal.example/" failed
 ```
 
+<a id="interim-responses-and-chunk-extensions-2824"></a>
+
 #### 中間レスポンスとチャンク拡張（#2824）
 
 - 最終レスポンスより前の `1xx` レスポンス（`100 Continue`、`103 Early Hints`）は、全経路で読み飛ばします。`101` は最終です。
 - チャンクサイズ行の `;extension` は無視します。サイズ行が 16 進数でなければ、空ボディではなくエラーです（protocol クラス、`malformed or incomplete response from
   "<url>"`）。
+
+<a id="the-whole-response--get_response-and-send"></a>
 
 ### レスポンス全体 — `get_response` と `send`
 
@@ -839,6 +867,8 @@ effect fn main() -> Unit = {
 wasm ターゲットでは `almide run --target wasm` が `start`、`poll`、`read_new`、`wait`、`cancel` を native と同じ動作で提供します。埋め込みホストが native の呼び出しコアを実行するため、制限とキャンセルのエラーテキストは同じで、最後のハンドルコピーの破棄も呼び出しをキャンセルします。`almide build --target wasm` で作る単独の `.wasm` は、まだこれらを扱えません（実行中呼び出し用の標準 WASI ホストがないため）。そのためビルド経路を検査する `almide check --target wasm` は、引き続きこれらを拒否します。
 
 
+<a id="signature-index-36-functions"></a>
+
 ## 固定スナップショットの API 索引（36 関数）
 
 ```
@@ -986,6 +1016,8 @@ http.wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler
 // @since unreleased
 http.decode_json(req: HttpRequest) -> Result[T, HttpResponse]
 ```
+
+<a id="type-index-4-types"></a>
 
 ## 固定スナップショットの型索引（4 型）
 

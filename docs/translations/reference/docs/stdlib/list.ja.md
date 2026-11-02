@@ -773,6 +773,8 @@ true
 ```
 
 
+<a id="fallible-pipelines--the-polymorphic-core-adr-0006"></a>
+
 ## 失敗可能なパイプライン — 多相的な中核（ADR-0006）
 
 `!` で伝播するコールバック（または名前付きの `-> T!E` 関数）は、中核コンビネータの失敗可能な形をインスタンス化します。呼び出しはコールバックのエラー型（単なる `T!` では `String`）を持つ `Result[_, E]` を返し、**最初の err で短絡します**（それ以降の要素は評価されません）。コンビネータごとに名前は 1 つで、マーカーが戦略を指定します。
@@ -793,6 +795,8 @@ list.try_fold(xs, z, f)  →  list.fold(xs, z, (a, x) => f(a, x)!)!
 
 エラーを返さないコールバックによって `E` に制約が付かない場合は、結果に型注釈を付けてください：`let evens: Result[List[Int], String] = list.filter(xs, (n) => ok(n % 2 == 0)!)`。
 
+
+<a id="signature-index-74-functions"></a>
 
 ## 固定スナップショットの API 索引（74 関数）
 

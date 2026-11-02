@@ -13,11 +13,17 @@
 
 ---
 
+<a id="構文"></a>
+
 ## Syntax
+
+<a id="-nullish-coalescing-演算子--撤回済み-adr-0005"></a>
 
 ### ~~The `??` (nullish coalescing) operator~~ — **Rejection withdrawn (ADR-0005)**
 
 Originally rejected as “a Canonicity violation because `unwrap_or` provides the same functionality.” **ADR-0005 reversed this decision**: `??` is canonical, and its desugaring definition (`a ?? b ≡ unwrap_or_else`) is in [docs/specs/result-option-effect.md §“Operator definitions”](../../../../specs/result-option-effect.md). Instead, the `unwrap_or` function is slated for removal (ADR-0005 D4, almide#1107). Kept as rejection history—the “three spellings” problem is resolved by removing the function, not the operator.
+
+<a id="return-キーワード"></a>
 
 ### The `return` keyword
 
@@ -25,19 +31,27 @@ Originally rejected as “a Canonicity violation because `unwrap_or` provides th
 - `guard ... else <expr>` expresses early escape structurally.
 - Multiple return paths are expressed using `if/then/else` or `match`.
 
+<a id="si-文字列インデックス"></a>
+
 ### `s[i]` (string indexing)
 
 **Current API**: Use `string.get(s, i)` to retrieve a character from a string. This does not mean protocol dispatch for existing operators is also forbidden.
 
+<a id="match-arm-の--省略--現行構文では許可"></a>
+
 ### Omitting `{}` in match arms — allowed by current syntax
 
 The old rejection description does not match the current parser. An arm body is an expression, so it can be written as `some(x) => x`. Use `{ ... }` for a block with multiple statements (`crates/almide-syntax/src/parser/compounds.rs::parse_match_arm`).
+
+<a id="ternary---演算子"></a>
 
 ### The ternary `? :` operator
 
 **Reason for rejection**: `if/then/else` is an expression. A ternary is unnecessary and would require an LLM to learn two conditional-expression syntaxes.
 
 ---
+
+<a id="型システム"></a>
 
 ## Type system
 
@@ -49,9 +63,13 @@ The old rejection description does not match the current parser. An arm body is 
 
 **Reason for rejection**: Explicit conversion with `int.to_string(n)`, `int.from_saturating(x)`. Implicit conversions cause silent behavioral changes like the `/` operator (int→float) from Python 2→3.
 
+<a id="custom-operator-syntax--protocol-dispatch-とは区別"></a>
+
 ### custom operator syntax — distinct from protocol dispatch
 
 There is no feature for users to define new operator symbols or syntax. Existing operators, however, can dispatch to requirement methods according to declared protocols. For example, `Eq`'s `==` maps to `Type.eq`, and `Numeric`'s `+` to `add`. The old explanation that “all operator overloading is forbidden” does not match the current implementation (`canonicalize/protocols.rs`, `spec/lang/operator_protocol_test.almd`, `spec/stdlib/bigint_operators_test.almd`).
+
+<a id="algebraic-effects-拡張-effect-system"></a>
 
 ### algebraic effects (an extended effect system)
 
@@ -65,6 +83,8 @@ There is no feature for users to define new operator symbols or syntax. Existing
 
 **Reason for rejection**: Haskell's orphan instances, Scala's implicit resolution—these require global searches and do not fit LLMs' local reasoning well.
 
+<a id="trait--interface-キーワード"></a>
+
 ### The `trait` / `interface` keywords
 
 **Reason for rejection**: Almide adopts the `protocol` keyword. Reasons:
@@ -73,12 +93,16 @@ There is no feature for users to define new operator symbols or syntax. Existing
 - `protocol` is Swift/Python (PEP 544) vocabulary. Almide's existing `: Convention` syntax (`type Dog: Eq`) matches Swift's `: Protocol` syntax.
 - It is vocabulary that new languages in 2024–2026 tend to choose.
 
+<a id="impl-ブロック"></a>
+
 ### `impl` blocks
 
 **Reason for rejection**: Almide implements protocols through convention methods (`fn Type.method()`). An `impl Protocol for Type { ... }` block is unnecessary:
 - Convention methods are top-level functions—flat, without nesting.
 - Easier for LLMs to generate accurately (no increase in indentation depth).
 - Fully consistent with the existing convention-method system.
+
+<a id="暗黙的プロトコル満足-go-式-structural-interfaces"></a>
 
 ### Implicit protocol satisfaction (Go-style structural interfaces)
 
@@ -96,11 +120,15 @@ There is no feature for users to define new operator symbols or syntax. Existing
 
 ---
 
+<a id="ランタイム並行処理"></a>
+
 ## Runtime and concurrency
 
 ### mutable by default
 
 **Reason for rejection**: `let` is immutable, `var` is mutable. Ruby's mutable-by-default led to incompatibility with Ractor. Capturing `var` inside a `fan` block is forbidden.
+
+<a id="async--await-キーワード"></a>
 
 ### async / await keywords
 
@@ -115,11 +143,15 @@ Almide's `fan` expresses only the “intent to run concurrently.” The compiler
 
 **Reason for rejection**: Structured concurrency with `fan` is sufficient. Avoids goroutine leaks (Go) and Ractor incompatibility (Ruby). Supervision/Actor is on hold for future consideration.
 
+<a id="futuret--promise-型の露出"></a>
+
 ### Exposing `Future[T]` / `Promise` types
 
 **Reason for rejection**: Do not expose them to users. The return type of `effect fn foo() -> Int` is `Int`, not `Future[Int]`. This prevents LLM confusion with `Future[Future[Int]]`.
 
 ---
+
+<a id="メタプログラミング"></a>
 
 ## Metaprogramming
 
@@ -137,17 +169,25 @@ Almide's `fan` expresses only the “intent to run concurrently.” The compiler
 
 ---
 
+<a id="パッケージ設定"></a>
+
 ## Packages and configuration
+
+<a id="複数の設定ファイル形式"></a>
 
 ### Multiple configuration file formats
 
 **Reason for rejection**: `almide.toml` is the sole configuration. Python took 23 years to go from `setup.py` → `setup.cfg` → `pyproject.toml`.
+
+<a id="実行可能な-build-script"></a>
 
 ### Executable build scripts
 
 **Reason for rejection**: `almide.toml` is declarative TOML only. Executable configuration like Python's `setup.py` destroys reproducibility.
 
 ---
+
+<a id="このリストの運用"></a>
 
 ## Maintaining this list
 

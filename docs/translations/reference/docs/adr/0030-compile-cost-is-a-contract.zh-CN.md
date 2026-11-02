@@ -1,6 +1,8 @@
 
 > 本文是固定提交的读者参考译文，原文仍为权威规范；不会自动同步。Accepted、实现状态及测量数字均属于记录当时。翻译时没有重新运行测量或 GCE。“所有输入”“模型代码不会触及预算”“无需操作系统沙箱”及与其他编译器的比较，均是本 ADR 的主张和设计范围，不是译者独立作出的安全保证或部署建议。保留原文主张不代表已经复核；实际使用需另查当前规范、实现与威胁模型。
 
+<a id="adr-0030-compile-cost-is-a-contract--every-phase-has-a-counted-budget-the-source-cannot-raise-it-and-exceeding-it-is-a-defined-diagnostic"></a>
+
 # ADR-0030：编译成本是一项契约——每个阶段都有计数预算，源码不能提高预算，超限产生定义明确的诊断
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](0030-compile-cost-is-a-contract.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](0030-compile-cost-is-a-contract.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](0030-compile-cost-is-a-contract.zh-CN.md)
@@ -20,6 +22,8 @@
   - #4128：LSP 处理不可信项目。
   - #4129：环境开关。
   - ADR-0017：flight profile 是规范性子集。
+
+<a id="context"></a>
 
 ## 背景
 
@@ -51,6 +55,8 @@ Almide 的运行时一侧承诺，不可信输入会在文档所述边界内，�
 - 每个阶段都有界；
 - 源码不能改变界限；
 - 判定不依赖机器。
+
+<a id="decision"></a>
 
 ## 决定
 
@@ -86,11 +92,15 @@ Almide 的运行时一侧承诺，不可信输入会在文档所述边界内，�
 
 负面对照：禁用类型共享和类型大小预算，会使 #4114 生成器超出预算，门禁失败。
 
+<a id="consequences"></a>
+
 ## 后果
 
 - 结合第 9 行的运行时边界，将“无论向 Almide 提供什么输入，都在文档所述边界内以定义明确的结果结束”的主张从程序扩展到工具链。
 - 预算是兼容性界面。提高预算是增量变更；降低预算可能拒绝此前能够编译的代码，因此需要在 `proofs/dialect-epochs.toml` 中加入条目。
 - 其提出的后果是：LSP 与评分器可处理不可信源码，而无需为资源耗尽问题设置操作系统级沙箱。副作用隔离是另一回事（#4128）。
+
+<a id="rulings-2026-10-27"></a>
 
 ## 裁定（2026-10-27）
 

@@ -8,6 +8,8 @@
 
 文件系统。import fs，effect。
 
+<a id="the-_if_exists-content-readers--absence-as-a-value"></a>
+
 ### `_if_exists` 内容读取器——将不存在作为值
 
 `read_text_if_exists` / `read_bytes_if_exists` / `read_lines_if_exists` 返回 `Result[Option[T], String]`：路径（或父目录）不存在时为 `ok(none)`，可读时为 `ok(some(content))`，实际失败（权限、路径是目录、IO）时为 `err(msg)`。分类在同一次读取内部完成，没有竞态——不同于事先检查 `fs.exists`。契约 C-215；支持原生和两条 wasm 路径，各目标可用性记录在路由清单中。
@@ -29,6 +31,8 @@ effect fn main() -> Unit = {
 default
 port = 8080
 ```
+
+<a id="the-whole-file-readers-read-regular-files-of-at-most-1-gib"></a>
 
 ### 整文件读取器读取最多 1 GiB 的普通文件
 
@@ -614,6 +618,8 @@ not a symlink
 
 
 
+<a id="signature-index-37-functions"></a>
+
 ## 签名索引（37 个函数）
 
 ```
@@ -765,6 +771,8 @@ effect fs.root_exists(root: FsRoot, path: String) -> Bool
 // @since unreleased
 effect fs.root_remove(root: FsRoot, path: String) -> Unit
 ```
+
+<a id="type-index-1-types"></a>
 
 ## 类型索引（1 个类型）
 

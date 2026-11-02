@@ -1,3 +1,5 @@
+<a id="cross-target-decisions-which-ones-read-one-source"></a>
+
 # ターゲット間の判断：どの判断が単一の情報源を読むか
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](cross-target-decisions.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](cross-target-decisions.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](cross-target-decisions.zh-CN.md)
@@ -18,6 +20,8 @@
 
 このページは 2026-09-29 の監査時の一覧である。記録する規則は、一つの問いには**一つ**の回答関数を用意し、すべての側がそれを呼ぶというものだ。
 
+<a id="the-inventory"></a>
+
 ## 一覧
 
 | 問い | native の参照元 | wasm の参照元 | 現在の単一の参照元 | ゲート |
@@ -30,6 +34,8 @@
 | トップレベルの `let` の初期化式はいつ実行するか（C-007） | 遅延実行で、**直接の** `/`/`%` がある場合だけ起動時に強制（#2954） | 常に起動時 | 投機実行が安全でない場合に限り強制（`almide_ir::speculation`） | C-007 フィクスチャ |
 | パイプラインの段階を要素ごとに実行してよいか（stream fusion） | IR 本体の純粋性に `EFFECT_MODULES`/`TOTAL_MODULES` と「中断する段階は最大一つ」を併用 | 独自の 7 モジュール拒否リストがあり、中断規則がないため、ユーザーモジュールのコールバック出力が交互に混ざった（#2953） | `almide_ir::fusion`：モジュールの分類語彙、トラップ規則、段階の実行順序規則 | 単体テスト、C-001 フィクスチャ |
 
+<a id="checked-and-consistent"></a>
+
 ## 確認済みで整合しているもの
 
 以下はそれぞれ実験または読解で確認し、両側が同じ参照元から答えるか、別の理由で整合していると分かった。
@@ -41,10 +47,14 @@
 - **LICM が停止しない呼び出しを反復回数ゼロのループより前へ移動すること。** 実験済みで、両側は一致する。
 - **既存 MIR の線形化された `if`**（`almide-mir/src/lower/control.rs`、呼び出しのない分岐は両方実行）。トラップする分岐で実験済みで、両側は一致する。この既存実装は廃止作業中（#2930 / #2935）。
 
+<a id="known-tracked-elsewhere"></a>
+
 ## 既知で、別の場所で追跡しているもの
 
 - **#2503。** effect 呼び出し先は wasm の呼び出し地点の copy-on-write から除外され、レコードのフィールドである mut 引数も除外される（`param_mut` は `!is_effect` を要求し、`lower_mut_param_arg` は `Var` だけを受け取る）。native はどちらも束縛時に clone する。
 - **`almide-mir/src/purity.rs`。** その `PURE_MODULES` は MIR lowering とインライナが読む capability-witness の受け入れリストである。これは三つ目のモジュール分類語彙で、`zlib` はここでは純粋だが fusion では effect である。現在はスカラーを返す標準ライブラリ呼び出しだけをインライン化本体へ受け入れ、それらは呼び出しのまま残るため、不一致は見つかっていない。`almide_ir::fusion` の語彙へ統一すべきである。
+
+<a id="when-you-add-a-decision"></a>
 
 ## 判断を追加するとき
 

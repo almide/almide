@@ -12,11 +12,17 @@
 
 ---
 
+<a id="1-clone-自動挿入-rust-target"></a>
+
 ## 1. Automatic clone insertion (Rust target)
+
+<a id="何が起きるか"></a>
 
 ### What happens
 
 When a variable of a non-Copy type (String, List, Map, Record, Variant) is used more than once, the compiler automatically inserts `.clone()`.
+
+<a id="条件"></a>
 
 ### Conditions
 
@@ -24,10 +30,14 @@ When a variable of a non-Copy type (String, List, Map, Record, Variant) is used 
 - `!is_copy` — no insertion for Copy types such as Int, Float, Bool.
 - No clone on the final use (the value is moved).
 
+<a id="ファイル"></a>
+
 ### Files
 
 - `crates/almide-codegen/src/pass_clone.rs` — clone insertion pass
 - `crates/almide-ir/src/use_count.rs` — use-count analysis
+
+<a id="ユーザーへの影響"></a>
 
 ### Impact on users
 
@@ -35,6 +45,8 @@ When a variable of a non-Copy type (String, List, Map, Record, Variant) is used 
 - Optimization: borrow inference (`pass_borrow_inference*.rs`) reduces clones (without changing the behavior of existing code). Alias analysis on the v1 spine side is in `crates/almide-mir/src/alias_safety.rs`.
 
 ---
+
+<a id="2-エラー伝播--隠さないauto--は廃止済み"></a>
 
 ## 2. Error propagation — **not hidden** (auto-`?` has been retired)
 
@@ -54,6 +66,8 @@ A fallible call without `!` is a Result **value**, not control flow:
 - Discarding in statement position → **E042** (must-use: `f()!` or `let _ = f()`)
 - The `list.try_*` spelling → **E043** (the callback's `!` is the strategy)
 
+<a id="ファイル-1"></a>
+
 ### Files
 
 - `crates/almide-frontend/src/lower/auto_try.rs` — the name is historical. It now inserts `Try` driven by the `!` marker; it does not perform implicit insertion.
@@ -62,7 +76,11 @@ A fallible call without `!` is a Result **value**, not control flow:
 
 ---
 
+<a id="3-runtime-埋め込み"></a>
+
 ## 3. Runtime embedding
+
+<a id="何が起きるか-1"></a>
 
 ### What happens
 
@@ -83,11 +101,17 @@ The stdlib's self-hosted Almide implementations are linked with user code, and t
 
 ---
 
+<a id="4-perceus-rc-挿入-native-mir--structural-wasm"></a>
+
 ## 4. Perceus RC insertion (native MIR / structural Wasm)
+
+<a id="何が起きるか-2"></a>
 
 ### What happens
 
 The v1 MIR (`crates/almide-mir`) automatically inserts reference-counting operations (dup / drop) and uniqueness checks (MakeUnique) for in-place mutation, using the Perceus approach. This MIR is the route for the native renderer and the MIR witness producer; current Wasm uses a separate structural emitter to handle RC/layout.
+
+<a id="ユーザーへの影響-1"></a>
 
 ### Impact on users
 
@@ -97,7 +121,11 @@ The v1 MIR (`crates/almide-mir`) automatically inserts reference-counting operat
 
 ---
 
+<a id="5-fan-の並行化-rust-target"></a>
+
 ## 5. Parallelizing fan (Rust target)
+
+<a id="何が起きるか-3"></a>
 
 ### What happens
 
@@ -111,17 +139,23 @@ std::thread::scope(|__s| -> Result<_, String> {
 })?
 ```
 
+<a id="ユーザーへの影響-2"></a>
+
 ### Impact on users
 
 - External variables are captured by `move` (possibly cloned).
 - Capturing `var` is a compile error (E008).
 - The compiler/host determines the execution infrastructure and eligibility for parallel execution. Ordinary `fan` joins all siblings and returns the first error in arm order.
 
+<a id="ファイル-2"></a>
+
 ### Files
 
 - `crates/almide-codegen/src/pass_fan_lowering.rs`, `pass_rust_lowering_fan.rs` — fan lowering and native parallel routing
 
 ---
+
+<a id="隠さない操作"></a>
 
 ## Operations that are not hidden
 

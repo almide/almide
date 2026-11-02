@@ -1,3 +1,5 @@
+<a id="the-published-almide-grammar"></a>
+
 # 公開 Almide 文法
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](README.zh-CN.md)
@@ -10,6 +12,8 @@
 
 この方式の根拠：CangjieBench（arXiv 2603.14501）では、低リソース言語において構文制約付き生成が精度とコストの最善のトレードオフである。CRANE（arXiv 2502.09061）では、制約するのは*出力*であり、推論ではない。
 
+<a id="files"></a>
+
 ## ファイル
 
 | ファイル | 内容 |
@@ -18,6 +22,8 @@
 | `negative-fixtures.txt` | 文法が拒否しなければならない不正なプログラム |
 | `../../scripts/check-lark-grammar.sh` | 陳腐化防止ゲート |
 | `../../scripts/lib/lark-gate.py` | ゲートの実装 |
+
+<a id="using-it"></a>
 
 ## 使用方法
 
@@ -29,6 +35,8 @@ parser.parse(open("app.almd").read())
 ```
 
 llguidance / XGrammar には、同じファイルをエンジンの Lark フロントエンドへ渡す。
+
+<a id="the-anti-rot-gate--exactly-what-it-checks"></a>
 
 ## 陳腐化防止ゲートが正確に検査すること
 
@@ -42,12 +50,16 @@ llguidance / XGrammar には、同じファイルをエンジンの Lark フロ�
 
 **3. 識別能力。** `negative-fixtures.txt` のすべてのフィクスチャを、文法*と*コンパイラの両方が拒否しなければならない。これがなければ、`.*` に退化した文法も検査 2 を難なく通る。ゲートはフィクスチャ数の下限も強制する。
 
+<a id="what-the-gate-does-not-prove"></a>
+
 ## ゲートが証明しないこと
 
 - **健全性ではない。** 文法が妥当な Almide *だけ*を受理するとは証明しない。設計上、上位集合である。検査 2 が失敗するのは受理不足の方向だけであり、検査 3 が固定するのは `negative-fixtures.txt` 内の明示された反例だけである。
 - **コーパス外の網羅性ではない。** `spec/`、`examples/`、`stdlib/` のどのファイルも使わない構文機能は検査されない。spec フィクスチャ*なし*で新しい構文が入ってもここでは検出されない。新構文を常に `spec/` テストとともに導入する理由が、もう一つあるということだ。
 - **意味論については何も証明しない。** `--emit-ast` は構文解析のみであり、型、effect、モジュール解決、checker 全体は対象外である。
 - **エンジン間の移植性ではない。** ゲートは Python の `lark`（Earley + basic lexer）を使う。llguidance や XGrammar がこの厳密な方言をコンパイルできるとは証明しない。それらは独自の制約を持つ Lark *風*構文を受理する。
+
+<a id="known-gaps--what-the-grammar-cannot-express"></a>
 
 ## 既知の差分：文法で表現できないこと
 
@@ -69,6 +81,8 @@ llguidance / XGrammar には、同じファイルをエンジンの Lark フロ�
 | G11 | **深さ制限がない。** パーサは式の入れ子を 500（`MAX_DEPTH`）に制限するが、成果物にはこの制限がない。 | より緩い |
 | G12 | **モジュール修飾されたレコードリテラル**（`mod.TypeName { … }`）を、パーサが要求する単独の識別子の後だけでなく、任意の後置式の後に受理する。 | より緩い |
 | G13 | **非 ASCII 名**（#1456）。コンパイラは UAX #31 識別子（XID_Start の後に XID_Continue、NFC）を受け入れ、互換文字（`ａ`、`１`、`ﬁ`）を拒否し、大文字小文字のない名前の区分は宣言で決める。`住所` が型名になるのは、`type 住所` または case `| 住所` を宣言したモジュール内だけである。成果物の `UNAME` は非 ASCII の字母（letter）で始まる任意の名前で、値と型の両位置で受理し、続きの `\w` は互換文字も受理する。 | より緩い |
+
+<a id="relationship-to-the-grammar-submodule"></a>
 
 ## `grammar/` サブモジュールとの関係
 

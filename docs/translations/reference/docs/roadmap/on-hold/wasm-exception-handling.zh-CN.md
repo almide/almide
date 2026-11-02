@@ -1,3 +1,5 @@
+<a id="wasm-exception-handling"></a>
+
 # WASM 异常处理
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](wasm-exception-handling.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](wasm-exception-handling.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](wasm-exception-handling.zh-CN.md)
@@ -8,15 +10,21 @@
 
 > 原文说明：拟议的 Wasm 异常降级转换；上游默认值取决于版本和引擎。
 
+<a id="proposed-lowering"></a>
+
 ## 拟议的降级转换
 
 探索使用原生 `try_table` / `throw` / `exnref` 传播错误，取代当前 Result 表示和显式 `!` 处理。原计划中逐个 `?` 的术语属于旧语法。表示方式、分配和性能方面的收益需要实际实现转换并测量；本记录不声称 Almide 已实现 EH。
+
+<a id="upstream-prerequisite-update-2026-10-31"></a>
 
 ## 上游前提更新（2026-10-31）
 
 “Wasmtime 默认关闭 EH”这一笼统障碍已过时。在为 Wasmtime 50.0.1 固定的源码中，`Config::wasm_exceptions` 默认开启，只有 `Strategy::Winch` 默认关闭。该 API 受 `gc` 构建特性控制，配置要求 GC 支持。见[固定的配置源码](https://github.com/bytecodealliance/wasmtime/blob/c307ec81de02852d815e9849f7c89d955c03c30d/crates/wasmtime/src/config.rs#L1438-L1453)。这是源码／配置观察，不是执行测试。
 
 不要仅从 Wasmtime 推断 Spin、wasmCloud、Docker/Wasm 或其他嵌入式宿主的默认值：必须检查各宿主版本、引擎策略、构建特性和配置。更改交付路径之前，也需比较 Almide 自身固定的工具／依赖版本。
+
+<a id="resume-criteria"></a>
 
 ## 恢复条件
 

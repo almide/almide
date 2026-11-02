@@ -1,0 +1,231 @@
+> 説明（固定履歴）: Stdlib L2/L3 regex再設計。コンパイル済みRegex型で不正パターンとpipe取り違えを止め、is_full_matchとescape/位置/全捕捉/replace_withの不足を補う。
+<a id="l2l3-regex"></a>
+
+# L2/L3: regex
+
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](L2-regex.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](L2-regex.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](L2-regex.zh-CN.md)
+
+> 非規範的な歴史再設計参照版。固定原本が正本で不変更。自動同期・再取得・独立probe/benchmark/安全性試験・現行API確認なし。(F)、出力、言語比較は原著者主張。初期String捕捉要素と後Option化、parse/compile履歴、初期純Almide共通エンジンと後native/wasm別バックトラック記述を併存保持。末尾8+7件数・新增全先頭Regexという記述と表の不一致も原文どおり。Pike VM/線形時間と時間gateは採用案で今回実測のReDoS無害保証ではない。 [Source](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-regex.md)
+
+> 最終更新: 2026-10-21
+> 前提: [L0](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L0-conventions.md)・[L1](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L1-categories.md)
+> 出典: Rust https://docs.rs/regex/latest/regex/ （標準外のクレート）・ Go https://pkg.go.dev/regexp (F) ・ Python https://docs.python.org/3/library/re.html (F) ・ TS/JS https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp (F) ・ Gleam https://hexdocs.pm/gleam_regexp/ （標準外のパッケージ）・ Elixir https://elixir.hexdocs.pm/Regex.html (F) ・ OCaml https://ocaml.org/manual/latest/api/Str.html (F) ・ Kotlin https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.text/-regex/ (F) ・ Swift https://developer.apple.com/documentation/swift/regex
+
+`regex` は 8 関数で、`import regex` が要ります。いまはパターンを文字列のまま渡し、コンパイル済みの型はありません（R-regex-02 で `Regex` 型を入れます）。エンジンは純粋な Almide（`stdlib/regex_engine.almd`）なので、native と wasm で同じ結果になります（probe-regex/p.almd を両 target で実行し、出力が一致）。
+
+<a id="l2-役割の比較"></a>
+
+## L2: 役割の比較
+
+| 役割 | Almide | Rust (regex) | Go | Python | TS/JS | Gleam (regexp) | Elixir | OCaml (Str) | Kotlin | Swift |
+|---|---|---|---|---|---|---|---|---|---|---|
+| どこかに一致するか | `regex.is_match` | `is_match` | `MatchString` (F) | `search` (F) | `test` (F) | `check` | `match?` (F) | `search_forward` (F) | `containsMatchIn` (F) | `contains` |
+| 全体が一致するか | `regex.full_match` | `^…$` で `is_match` | `^…$` | `fullmatch` (F) | `^…$` で `test` | — | — | `string_match` + 長さ | `matches` (F) | `wholeMatch` |
+| 最初の一致の文字列 | `regex.find` | `find` | `FindString` (F) | `search().group()` | `match` (F) | `scan` | `run` (F) | `matched_string` (F) | `find` (F) | `firstMatch` |
+| すべての一致 | `regex.find_all` | `find_iter` | `FindAllString` (F) | `findall` (F) | `matchAll` (F) | `scan` | `scan` (F) | — | `findAll` (F) | `matches` |
+| 全部置換（文字そのまま） | `regex.replace` | `replace_all` + `NoExpand` | `ReplaceAllLiteralString` (F) | `sub`（`\1` を解釈） | `replaceAll` | `replace` | `replace` (F) | `global_replace` (F) | `replace` (F) | `replacing` |
+| 最初だけ置換 | `regex.replace_first` | `replace` | — | `sub(count=1)` | `replace` | — | `replace(global: false)` | `replace_first` (F) | `replaceFirst` (F) | — |
+| 一致で分割 | `regex.split` | `split` | `Split` (F) | `split` (F) | `split` (F) | `split` | `split` (F) | `split` (F) | `split` (F) | `split` |
+| 最初の一致のグループ | `regex.captures` | `captures` | `FindStringSubmatch` (F) | `search().groups()` | `exec` (F) | `scan` | `run` (F) | `matched_group` (F) | `find().groupValues` | `firstMatch().output` |
+| すべての一致のグループ | — | `captures_iter` | `FindAllStringSubmatch` (F) | `finditer` (F) | `matchAll` (F) | `scan` | `scan` (F) | — | `findAll().groupValues` | `matches` |
+| 一致の位置 | — | `find().start()` | `FindStringIndex` (F) | `search().start()` | `search` (F) | — | `run(return: :index)` | `search_forward` の戻り値 (F) | `find().range` | `firstMatch().range` |
+| 特殊文字のエスケープ | — | `escape` | `QuoteMeta` (F) | `escape` (F) | `RegExp.escape`（ES2025） | — | `escape` (F) | `quote` (F) | `Regex.escape` | — |
+| グループを使う置換（関数） | — | `replace_all(closure)` | `ReplaceAllStringFunc` (F) | `sub(fn)` (F) | `replace(fn)` | `match_map` | `replace(fn)` (F) | `global_substitute` (F) | `replace(transform)` (F) | `replacing(with: closure)` |
+| 置換文字列の `$1` | — | `$1` | `$1` (F) | `\1` | `$1` | — | `\1` | `\1` | `$1` | — |
+| 大文字小文字を区別しない | — | `(?i)` | `(?i)` | `re.I` / `(?i)` | `i` フラグ | `case_insensitive` | `i` (F) | `regexp_case_fold` (F) | `IGNORE_CASE` | `ignoresCase()` |
+| 名前つきグループ | — | `(?P<n>)` / `(?<n>)` | `(?P<n>)` / `SubexpNames` (F) | `(?P<n>)` のみ (F) | `(?<n>)` | — | `named_captures` (F) | — (F) | `groups["n"]` | `Capture` |
+| 不正なパターンを知らせる | — （黙って通る） | `Regex::new` が `Result` | `Compile` が error (F) | `re.error` | `SyntaxError` | `compile` が `Result` | `compile` が `{:error, _}` (F) | 例外 | 例外 | `throws` |
+| 引数の順 | パターンが先 | パターンが主語 | パターンが主語 | パターンが先 (F) | パターンが主語 | パターンが先 | パターンが先 (F) | パターンが先 (F) | パターンが主語 | 文字列が主語 |
+
+<a id="完全性の規則"></a>
+
+### 完全性の規則
+
+- 文字列モジュールとの対: `regex.replace`/`replace_first`/`split`/`find_all` は、`string.replace`/`replace_first`/`split` と同じ動詞・同じ意味（`replace` は全部、空の断片は残す）です。この対応を崩しません。
+- 位置は `string.index_of` と同じくコードポイントの添字で返します。
+- 判定（Bool）は `is_` で始めます（R-L0-09）。
+
+<a id="l2-の判定"></a>
+
+### L2 の判定
+
+- R-L0-09 の例外: `regex.full_match`（R-regex-01）。
+- 黙って間違える箇所が 2 つ（実測）:
+  1. 不正なパターンがエラーにならない。`regex.is_match("(", "abc")` は `true`、`regex.find("[", "abc")` は `none`、`(?i)ABC` は `abc` に一致せず `false`、名前つきグループ `(?P<n>a)` / `(?<n>a)` は `none`（probe-regex/p.almd・q.almd、native と wasm で同じ）。9/9 言語は不正なパターンを知らせます（R-regex-02）。
+  2. `|>` でパイプすると、文字列がパターンの位置に入る。`"order 42" |> regex.is_match("[0-9]+")` は `false`、`|> regex.find(..)` は `none`（probe-regex/swap.almd）。`"  a \t b\nc  " |> string.trim |> regex.split("\\s+")` も黙って違う結果になります（probe-string/e.almd）。両方の引数が String なので、いまの型検査では止まりません。`Regex` 型で止めます（R-regex-02）。
+- 抜けている役割で 5/9 以上: エスケープ（7）、一致の位置（8）、すべての一致のグループ（8）、大文字小文字の区別なし（9）、関数による置換（9）、名前つきグループ（7）。前の 4 つは足します（R-regex-04）。関数による置換は `replace_with` で足します（R-regex-05）。名前つきグループは足しません（R-regex-06）。
+
+<a id="案"></a>
+
+## 案
+
+<a id="r-regex-01-regexfull_match-を-regexis_full_match-に改名する---採用"></a>
+
+### R-regex-01 `regex.full_match` を `regex.is_full_match` に改名する — ○ 採用
+
+- 内容: `regex.is_full_match(pat: String, s: String) -> Bool` を追加し、`regex.full_match` に `@deprecated(since=15, use="regex.is_full_match")` を付けます。`[[deprecation]]` ブロックで `removal_epoch = 16`。
+- 根拠の L0 規則: R-L0-09（L0 が名指ししている例外）、R-L0-14
+- (a) 綴りは割れています（Python `fullmatch`、Kotlin `matches`、Swift `wholeMatch`）。Almide 内の `regex.is_match` と並べると `is_full_match` が自然に読めます。
+- (b) 影響なし。同じ実行時の本体を呼びます。
+- (c) `is_match` と `full_match` の対は、片方だけ `is_` がないので、書き手が `regex.is_full_match` と書いて E002 になる形でした。
+- (d) 改名。`almide fix` が 1 対 1 で書き換えます。使用数: spec 69 / tests 1 / docs 7 / stdlib 0。
+- ゲート: R-L0-09 のゲートの許容リストから `regex.full_match` を外します。
+- issue: #3940
+
+<a id="r-regex-02-コンパイル済みの-regex-型を入れ不正なパターンを作る時点で止める---採用"></a>
+
+### R-regex-02 コンパイル済みの `Regex` 型を入れ、不正なパターンを作る時点で止める — ○ 採用
+
+- 内容:
+  1. 不透明な型 `Regex` を足します。作り方は 2 つです。
+     - `regex.new(pat: String) -> Regex`: パターンが文字列リテラルなら `almide check` の段階で構文を検査し、不正なら新しい E コードで止めます（対応していない構文、例えば名前つきグループも「対応していない」と言って止めます）。実行時に組み立てた不正なパターンは、呼び出し側の契約違反として abort します（R-L0-06 の 3。Go の `regexp.MustCompile` と同じ形）。
+     - `regex.compile(pat: String) -> Result[Regex, String]`: 実行時に組み立てたパターンを、理由つきで確かめながら作ります（R-L0-06 の 1。Go の `regexp.Compile`、Rust の `Regex::new`、Gleam の `regexp.from_string`、Elixir の `Regex.compile`）。
+  2. 一致・検索・置換・分割の関数は、第 1 引数に `Regex` を取ります（`regex.is_match(re: Regex, s: String) -> Bool` など）。名前は変えません。
+  3. abort のメッセージは `Error: invalid regex: <理由>` の 1 行、終了コード 1 で、native と wasm で同じにします（新しい契約 C-NNN と fixture。als の台帳を先に通します）。
+- 根拠の L0 規則: R-L0-00（9/9 が正規表現の型を持つ）、R-L0-02（主語＝`Regex`）、R-L0-03、R-L0-06、R-L0-14
+- (a) 9 言語すべてが、コンパイル済みの正規表現の型を持っています（Rust `Regex`、Go `*regexp.Regexp`、Python `re.Pattern`、JS `RegExp`、Gleam `Regexp`、Elixir `Regex`（`~r` 印）、OCaml `Str.regexp`、Kotlin `Regex`、Swift `Regex`）。文字列のパターンをそのまま関数に渡せるのは Python の `re` のモジュール関数だけで、その Python にも `re.compile` があります。
+- (b) エンジンは純粋な Almide（`stdlib/regex_engine.almd`）なので、`Regex` はコンパイル済みの状態を持つ値として両 target に同じ形で乗ります。host の機能は要りません。
+- (c) 実測した 2 つの「黙って間違える」箇所が、どちらも型で止まります。
+  1. 不正なパターン（`regex.is_match("(", "abc")` が `true`、`(?i)ABC` が一致しないなど）は、`regex.new` の時点でエラーになります。
+  2. `|>` でパイプしたときの取り違え（`"order 42" |> regex.is_match("[0-9]+")` が `false`）は、`String` を `Regex` の位置に渡す型エラーになります。宣言に印を付けて検査器に読ませる仕組み（旧 R-regex-03 案）は要りません。
+- (d) 引数の型の変更です。旧い呼び出し `regex.find("[0-9]+", s)` は、黙って別の意味になるのではなく、型エラーになります。ヒントは `regex.find(regex.new("[0-9]+"), s)` です（R-L0-14 の 4 が禁じるのは「型が合ったまま意味が変わる」変更で、これは当てはまりません）。`almide fix` は、文字列リテラルのパターンを `regex.new(...)` で包む書き換えを機械的に行います。`String` を `Regex` に自動で変換する仕組みは入れません（書き方が 2 つになるため）。epoch 15 の `breaks` に入れ、spec（約 500 か所）・tests・下流の件数を `summary` に書きます。
+- 速さ: いまは呼び出しのたびにパターンを解析しています。`let re = regex.new(p)` を一度作ってループで使えば、解析が 1 回で済みます。
+- ゲート: 不正なパターンの行列 fixture（`(`、`[`、`*`、`a{`、`(?P<n>a)`）で、check 時のエラー、`regex.new` の abort、`regex.compile` の err の 3 つを確かめます。native と wasm の一致は `spec/wasm_cross/` の fixture で確かめます。`tests/diagnostics/` に、文字列をパターンの位置へパイプした broken と、`regex.new` を使う fixed を置きます。
+- issue: #3942
+
+<a id="r-regex-03-パイプの取り違えを宣言の印で止める---不採用r-regex-02-の型で止まるため"></a>
+
+### R-regex-03 パイプの取り違えを、宣言の印で止める — × 不採用（R-regex-02 の型で止まるため）
+
+- 理由: 印を付けても、取り違えた呼び出しがコンパイルエラーになる点は型で分けた場合と同じで、生存率は変わりません。そのために新しい言語の仕組みを足す理由がありません。R-regex-02 で第 1 引数が `Regex` 型になるので、`s |> regex.find(re)` の形の取り違えは型エラーになります。引数に「パイプ禁止」の印を付けて検査器に読ませる新しい言語の仕組みは、足しません（同じ取り違えは、型を分ければ他のモジュールでも止められます）。
+
+<a id="r-regex-04-エスケープ位置全一致のグループ大文字小文字の区別なしを足す---採用"></a>
+
+### R-regex-04 エスケープ・位置・全一致のグループ・大文字小文字の区別なしを足す — ○ 採用
+
+- 内容:
+  - `regex.escape(s: String) -> String`: 特殊文字の前に `\` を付けます。
+  - `regex.index_of(re: Regex, s: String) -> Option[Int]`: 最初の一致の開始位置（コードポイントの添字）。`string.index_of` と同じ綴り・同じ単位です。
+  - `regex.captures_all(re: Regex, s: String) -> List[List[String]]`: 一致ごとの `[全体, グループ1, ...]`。
+  - パターンの先頭の `(?i)` を、大文字小文字を区別しない印として受け付けます（関数は増やしません）。
+- 根拠の L0 規則: R-L0-01（`index_of` は string と同じ綴り）、R-L0-03、R-L0-12（位置の単位）
+- (a) エスケープ 7/9、位置 8/9、全一致のグループ 8/9、大文字小文字 9/9（多くは (F)）。
+- (b) 純粋な計算です。
+- (c) `regex.escape` がないと、ユーザーの入力を埋め込んだパターンが黙って別の意味になります。
+- (d) 追加。使用数 0。
+- ゲート: `captures_all` と `captures`・`find_all` の整合を性質テストで確かめます。`index_of` は R-L0-12 の境界入力の行列に入れます。
+- issue: #3941
+
+<a id="r-regex-05-一致ごとに関数で置換文字列を作る-regexreplace_with---採用"></a>
+
+### R-regex-05 一致ごとに関数で置換文字列を作る `regex.replace_with` — ○ 採用
+
+- 内容: `regex.replace_with(re: Regex, s: String, f: (List[String]) -> String) -> String`。`f` は `[全体, グループ1, ...]` を受け取ります。`replace` と同じく、すべての一致を置き換えます。
+- 根拠の L0 規則: R-L0-10（`_with` = 値の代わりに関数を受け取る版）
+- (a) 9/9 言語が持ちます（Rust `replace_all(closure)`、Go `ReplaceAllStringFunc`、Python `sub(fn)`、JS `replace(fn)`、Elixir `replace(fn)`、Kotlin `replace(transform)` など）。
+- (b) 純粋な計算です。
+- (d) 追加。
+- 置換文字列の中の `$1` を解釈するようにはしません（× 不採用）。いまの `regex.replace` は `$1` を文字そのままとして扱います（probe: `replace("(a)", "xax", "$1$1")` → `x$1$1x`）。解釈を変えると `$` を含む既存の置換が黙って別の結果になり、R-L0-14 の 4 に反します。グループを使う置換は `replace_with` で書きます。
+- issue: #3941
+
+<a id="r-regex-06-名前つきグループを足さない---不採用"></a>
+
+### R-regex-06 名前つきグループを足さない — × 不採用
+
+- 内容: `(?<name>...)` と、名前で取り出す API は足しません。
+- (a) 7/9 が持ちますが、構文が割れています（Python は `(?P<n>)` だけ (F)、JS は `(?<n>)`）。
+- (c) 位置で取り出す `captures` と同じ役割に 2 つ目の形ができます（R-L0-01）。名前つきの構文を書いた場合は、R-regex-02 で `regex.new` が「対応していない」と止めるので、黙って間違えることはありません。
+- issue: なし
+
+<a id="r-regex-07-replace_first_with-を足して置換の-22-を閉じる---採用"></a>
+
+### R-regex-07 `replace_first_with` を足して、置換の 2×2 を閉じる — ○ 採用
+
+- いま: `replace`（全部・文字列）、`replace_first`（最初・文字列）、`replace_with`（全部・関数）。最初だけを関数で置換するセルがありません。
+- 案: `fn regex.replace_first_with(re: Regex, s: String, f: (List[String]) -> String) -> String`。
+- 根拠の L0 規則: CLAUDE.md「族は行列で広げる」、R-L0-10（`_with`）。
+- (a) Rust の regex ライブラリ `replace`（関数）、Python `sub(fn, s, count=1)`、JS `replace(re, fn)`、Elixir `Regex.replace(..., global: false)`、OCaml `Str.substitute_first` の 5 言語です。
+- (c) `replace_first` と `replace_with` を知っている LLM は、規則から `replace_first_with` を書きます。
+- (d) 追加 1。
+- 完全性の規則: 置換は {全部, 最初} × {文字列, 関数} の 4 セルです。
+- ゲート案: `replace_first_with(re, s, (g) => rep) == replace_first(re, s, rep)` の性質テスト。
+- issue: #3971
+
+<a id="r-regex-08-捕捉グループを-string-で返す---採用"></a>
+
+### R-regex-08 捕捉グループを `String?` で返す — ○ 採用
+
+- いま: `captures` は `Option[List[String]]` で、一致に参加しなかったグループを `""` にします（L3 の表の注）。`(a)?(b)` を `"b"` に当てたときの 1 つめと、`(a*)(b)` の空の一致が区別できません。
+- 案: グループの要素を `String?` にします。
+  - `fn captures(re: Regex, s: String) -> List[String?]?`
+  - `fn captures_all(re: Regex, s: String) -> List[List[String?]]`
+  - `replace_with`・`replace_first_with` のコールバックも `(List[String?]) -> String`
+  - 要素 0（一致全体）は必ず some です。
+- 根拠の L0 規則: R-L0-06（失敗の目印の値 `""` を返さない）、R-L0-24。
+- (a) Rust `Captures::get` → `Option<Match>`、Python `groups()` → `None`、JS `exec` → `undefined`、Kotlin `groups[i]` → `null`、Swift `Regex` の出力 → `Substring?`。Go だけが `""` を返します（位置の関数では -1 で区別できる）。
+- (b) native と wasm の両方の正規表現の実装で、参加しなかったグループの印をそのまま運びます。
+- (d) 意味変更（要素の型が変わるので、文字列として使うと型エラーで気づく）。`captures` は R-regex-0x の第 1 引数の変更と同じ epoch で入れます。
+- issue: #3977
+
+<a id="r-regex-09-対象の文字列を第-1-引数にする---不採用"></a>
+
+### R-regex-09 対象の文字列を第 1 引数にする — × 不採用
+
+- 理由: `regex` のモジュールの主語は `Regex` で、R-L0-02・R-L0-03（関数は主語の型のモジュールに置き、主語を先頭にする）のとおりです。Rust `re.replace_all(s, …)`、Go `re.ReplaceAllString(s, …)`、Elixir `Regex.replace(re, s, …)` も正規表現が先です。文字列の側から書きたいときは `string.replace` を使います。
+- issue: なし
+
+<a id="r-regex-11-パターンを確かめて作る関数を-regexcompile-と綴る---採用"></a>
+
+### R-regex-11 パターンを確かめて作る関数を `regex.compile` と綴る — ○ 採用
+
+- 内容: R-regex-02 で足す `regex.parse(pat) -> Result[Regex, String]` を `regex.compile` と綴ります（ほかは R-regex-02 のまま）。
+- 理由: protocol の階層では、`parse` は「`to_string` と往復する値の文字列表現を読む」関数です（`Parse`、Swift の `LosslessStringConvertible`）。パターンを組み立てる関数は役割が違います。Go `regexp.Compile`、Python `re.compile`、Elixir `Regex.compile` が `compile` です。
+- (d) このリデザインで足す関数の名前の変更です。
+- issue: #4004
+
+<a id="r-regex-12-一致の照合を線形時間にする---採用"></a>
+
+### R-regex-12 一致の照合を線形時間にする — ○ 採用
+
+- いま: native（`runtime/rs/src/regex.rs`）も wasm（`stdlib/regex_engine.almd`）もバックトラックで照合し、歩数に上限がありません。`(a+)+$` に `"aaaa…a!"` を渡すと、時間が入力の長さに対して指数的に伸びます。
+- 案: 照合を Pike VM（Thompson の NFA を、捕捉グループつきで同時に進める方式）にし、時間をパターンの大きさ × 入力の長さに比例させます。Almide の正規表現は後方参照も先読み・後読みも持たない（`docs/stdlib/regex.md`）ので、RE2・Go・Rust と同じく、結果（最左で、優先順位つきの一致と捕捉グループ）を変えずに置き換えられます。
+- 根拠の L0 規則: R-L0-47 の 1。
+- (a) Go `regexp`、Rust `regex`、RE2 が線形時間です。Python・JS・Kotlin・Swift はバックトラックで、ReDoS の脆弱性の多くがここから出ています。
+- (b) native と wasm で同じ本体（self-host の Pike VM）か、同じ意味の 2 本の実装にし、いまの regex の cross fixture すべてが同じ答えを返すことを確かめます。
+- (d) 意味は変わりません（一致の結果は同じで、時間だけが変わる）。
+- ゲート案: 病的なパターン（`(a+)+$`、`(a|aa)*b`）と 10 万文字の入力が、決まった時間の内に終わる fixture。
+- issue: #4019
+
+<a id="l3-関数表"></a>
+
+## L3: 関数表
+
+| 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
+|---|---|---|---|---|
+| `regex.is_match` | `is_match(pat: String, s: String) -> Bool` | Rust is_match / Go MatchString / Python search / JS test / Kotlin containsMatchIn | 意味変更（第 1 引数を `Regex` に） | R-regex-02 |
+| `regex.full_match` | `full_match(pat: String, s: String) -> Bool` | Python fullmatch / Kotlin matches / Swift wholeMatch | 改名（`is_full_match`、第 1 引数は `Regex`） | R-regex-01、R-regex-02 |
+| `regex.find` | `find(pat: String, s: String) -> Option[String]` | Rust find / Go FindString / Kotlin find / Swift firstMatch | 意味変更（第 1 引数を `Regex` に） | R-regex-02 |
+| `regex.find_all` | `find_all(pat: String, s: String) -> List[String]` | Python findall / Go FindAllString / Kotlin findAll / Elixir scan | 意味変更（第 1 引数を `Regex` に） | R-regex-02 |
+| `regex.replace` | `replace(pat: String, s: String, rep: String) -> String` | Rust replace_all / Go ReplaceAllLiteralString / JS replaceAll / Kotlin replace | 意味変更（第 1 引数を `Regex` に） | R-regex-02、R-regex-05（`$1` は解釈しない） |
+| `regex.replace_first` | `replace_first(pat: String, s: String, rep: String) -> String` | Rust replace / Kotlin replaceFirst / OCaml replace_first | 意味変更（第 1 引数を `Regex` に） | R-regex-02 |
+| `regex.split` | `split(pat: String, s: String) -> List[String]` | 全言語 split | 意味変更（第 1 引数を `Regex` に） | R-regex-02 |
+| `regex.captures` | `captures(re: Regex, s: String) -> Option[List[Option[String]]]` | Rust captures / Go FindStringSubmatch / JS exec / Elixir run | 意味変更（第 1 引数を `Regex` に。グループは `String?`） | R-regex-08 |
+| `regex.is_full_match` | `is_full_match(re: Regex, s: String) -> Bool` | （上の full_match と同じ） | 追加 | R-regex-01 |
+| `regex.new` | `new(pat: String) -> Regex` | Go MustCompile / Rust Regex::new / Kotlin Regex() / JS RegExp / Swift Regex | 追加 | R-regex-02 |
+| `regex.compile` | `compile(pat: String) -> Result[Regex, String]` | Go Compile / Rust Regex::new / Gleam from_string / Elixir compile | 追加 | R-regex-02 |
+| `regex.replace_with` | `replace_with(re: Regex, s: String, f: (List[Option[String]]) -> String) -> String` | Rust replace_all(closure) / Go ReplaceAllStringFunc / Python sub(fn) / JS replace(fn) | 追加 | R-regex-05、R-regex-08 |
+| `regex.escape` | `escape(s: String) -> String` | Rust escape / Go QuoteMeta / Python escape / Elixir escape / OCaml quote | 追加 | R-regex-04 |
+| `regex.index_of` | `index_of(re: Regex, s: String) -> Option[Int]` | Go FindStringIndex / JS search / Rust find().start() | 追加 | R-regex-04 |
+| `regex.captures_all` | `captures_all(re: Regex, s: String) -> List[List[Option[String]]]` | Rust captures_iter / Go FindAllStringSubmatch / Elixir scan | 追加 | R-regex-04、R-regex-08 |
+| `regex.replace_first_with` | `replace_first_with(re: Regex, s: String, f: (List[Option[String]]) -> String) -> String`（案） | Python `sub(fn, s, count=1)` / JS `replace(re, fn)` / OCaml `substitute_first` | 追加 | R-regex-07、R-regex-08 |
+
+（現行 8 関数 + 追加 7 行。追加した関数の第 1 引数はすべて `Regex` です）
+
+R-L0-05 との関係: regex の関数はすべて値を返す純粋な関数で、文として書く誤用はまれです。特記事項はありません。
+
+<a id="l0-への差し戻し処理済み"></a>
+
+## L0 への差し戻し（処理済み）
+
+- 「1 引数の関数で値を作る」接尾辞: R-L0-10 で `_with` を「値の代わりに関数を受け取る版」と定めたので、`regex.replace_with` にしました（R-regex-05）。
+- パイプの取り違えを宣言の印で止める仕組み: 足しません。型を分けて止めます（R-regex-02・R-regex-03）。

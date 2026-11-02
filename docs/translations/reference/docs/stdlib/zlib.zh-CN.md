@@ -62,6 +62,8 @@ gzip 容器，即磁盘上的 `.gz` 格式和 `Content-Encoding: gzip`。
 
 
 
+<a id="signature-index-11-functions"></a>
+
 ## 固定快照 API 索引 (11 个函数)
 
 ```

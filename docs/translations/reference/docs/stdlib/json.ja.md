@@ -89,6 +89,8 @@ fn main() -> Unit = {
 {"name":"Alice","age":30}
 ```
 
+<a id="typed-decode-tdecode-and-tdecode_strict"></a>
+
 ### 型付きデコード：`T.decode` と `T.decode_strict`
 
 `: Codec` レコード型 `T` は `T.decode`、`T.decode_strict`（および `T.encode`）を導出します。`T.decode` は未知のキーを無視し、`T.decode_strict` は入れ子のレコードやコンテナーを含め、未知のキーを再帰的に拒否します。各レコードではフィールドのデコード前にキーを検査し、入れ子のエラーには失敗した値へのパスを含めます。`@skip_decode` 付きフィールドは入力から読み取らず（既定値を維持）、エンコードは行います。`@skip` は読み取りも書き込みもしません。信頼できない入力は、クライアントが設定してよいものだけを持つ型へデコードするのが適切です（CHEATSHEET、JSON Rule 5）。
@@ -138,6 +140,8 @@ fn main() -> Unit = {
 ```
 
 
+
+<a id="signature-index-3-functions"></a>
 
 ## 固定スナップショットの API 索引（3関数）
 

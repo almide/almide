@@ -1,3 +1,5 @@
+<a id="effect-fn-call-semantics--呼び出し式の型"></a>
+
 # Effect Fn 调用语义——调用表达式的类型
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](effect-fn-call-semantics.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](effect-fn-call-semantics.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](effect-fn-call-semantics.zh-CN.md)
@@ -8,9 +10,13 @@
 
 > 最后更新：2026-08-20
 
+<a id="規則"></a>
+
 ## 规则
 
 `effect fn foo() -> T` 的调用 `foo()` 在**所有上下文中**都是 `Result[T, String]` 类型的**值**（若声明为 `-> Result[T, E]`，则是该 `Result[T, E]`，不双重包装）。checker 和 codegen 看到相同类型。传播只有显式 `!`（ADR-0008）；依赖位置的隐式传播（auto-`?`）已在 0.55 连同机制整体删除。完整当前行为见 [result-option-effect.md §3](../../../../specs/result-option-effect.md) 及 [effect-system.md](../../../../specs/effect-system.md)。本章仅讨论调用表达式。
+
+<a id="1-宣言型"></a>
 
 ## 1. 声明类型
 
@@ -25,6 +31,8 @@ foo : (Int) -> Result[String, String]
 ```
 
 不过，**函数体内**可以直接写 `String`。尾表达式隐式包装为 `ok(...)`。
+
+<a id="2-呼び出し型--どの文脈でも-result-値"></a>
 
 ## 2. 调用类型——任何上下文中都是 Result 值
 
@@ -42,6 +50,8 @@ test "the call is a Result value" {
   assert_eq(foo(), ok("x"))
 }
 ```
+
+<a id="3-暗黙伝搬は存在しないe041--e042"></a>
 
 ## 3. 不存在隐式传播（E041 / E042）
 
@@ -79,11 +89,15 @@ effect fn run(cmd: String) -> Unit =
 
 回归测试：`spec/lang/explicit_propagation_test.almd`、`tests/diagnostics/e042-tail-call-in-branches/`。
 
+<a id="4--演算子"></a>
+
 ## 4. `!` 运算符
 
 `!` 提取成功值，失败处理遵循**当前通道**。在可失败 fn / lambda 中，沿自身失败通道传播，不跨越闭包边界传播到外层函数。在 test 块中解包，失败即测试失败。
 
 `Option[T]` 的 `none` 在包围它的 Option 返回通道中以 `none` 传播。允许转换到 Result 通道时，变为 `err("none")`。不要忽略错误类型兼容性或 pure/infallible 上下文的处理，将其解释为“总是返回 Err”。完整上下文表及验证示例见 [Result / Option / Effect](../../../../specs/result-option-effect.md#2-演算子)。回归测试：`spec/lang/unwrap_operators_test.almd`、`spec/lang/fallible_lambda_test.almd`。
+
+<a id="5-test-ブロック"></a>
 
 ## 5. test 块
 
@@ -122,9 +136,13 @@ test "effect calls in lambdas are Result values" {
 }
 ```
 
+<a id="経緯完了済み"></a>
+
 ## 历史（已完成）
 
 旧方式由 checker 返回 `T`、codegen 提升到 `Result`，造成 `!` 类型错误及跨模块调用不一致。checker lift（将调用类型统一为 Result）已在 v0.34.x 连同 ABI 实现（#840 / #841）；其上的 auto-`?` 已由 ADR-0008（v0.55）删除。设计选项比较及反例见 ADR-0008。
+
+<a id="検証テスト"></a>
 
 ## 验证测试
 

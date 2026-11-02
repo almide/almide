@@ -1,0 +1,126 @@
+<!-- description: Stdlib redesign L2/L3 — unix (new, #3853): the Unix-socket and shared-memory IPC floor leaves net under an explicit import, with an opaque Fd type and one readiness wait -->
+<a id="l2l3-unix新しいモジュール"></a>
+
+# L2/L3: unix（新しいモジュール）
+
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](L2-unix.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](L2-unix.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](L2-unix.zh-CN.md)
+
+> 非規範的な日付付き再設計の参照版。原本は不変の正本。自動同期、新たな使用数調査、現行実装・host監査はしない。採用案は段階順に保持し、初期wait/send/recv/closeからselect、総称ioとwrite_fdsへ進むが、旧表・コードを黙って書換えない。暫定embedded操作はstock WASIの対応を意味せず、移行またはpackage化は条件付き。他言語の完全性や移行費用ゼロは原文の主張で、独立再確認した保証ではない。コードとコメントは原文保持。 [Source](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-unix.md)
+
+> Last updated: 2026-10-21
+> 前提: [L0](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L0-conventions.md)・[L1](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L1-categories.md)（R-L1-26: Unix ソケットと共有メモリを `unix` に移す、#3853）
+> 出典: Rust https://doc.rust-lang.org/std/os/unix/net/ ・ Go https://pkg.go.dev/net#UnixConn ・ Python https://docs.python.org/3/library/socket.html#socket.send_fds ・ https://docs.python.org/3/library/multiprocessing.shared_memory.html ・ TS/JS https://nodejs.org/api/net.html#ipc-support ・ Gleam —（無い）・ Elixir https://www.erlang.org/doc/apps/kernel/gen_tcp.html （`{:local, path}`）・ OCaml https://ocaml.org/manual/latest/api/Unix.html ・ Kotlin https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/UnixDomainSocketAddress.html ・ Swift —（標準に無い）
+> 実体: `crates/almide-rt-core/src/net_unix_core.rs`、`docs/roadmap/active/net-unix-shm-embedded.md`（#3620、暫定 op 104〜116）
+
+<a id="l2-役割の比較"></a>
+
+## L2: 役割の比較
+
+| 役割 | Almide（いま → 案） | Rust | Go | Python | TS/JS | Gleam | Elixir | OCaml | Kotlin | Swift |
+|---|---|---|---|---|---|---|---|---|---|---|
+| つなぐ・待ち受ける・受け入れる | `net.unix_connect`・`unix_listen`・`unix_accept` → `unix.connect`・`listen`・`accept` | `UnixStream::connect`・`UnixListener::bind`・`accept` | `DialUnix`・`ListenUnix`・`AcceptUnix` | `socket(AF_UNIX)`・`bind`・`accept` | `net.connect({path})` | — | `:gen_tcp.connect({:local, p})` | `Unix.connect`（`ADDR_UNIX`） | `SocketChannel.open(UnixDomainSocketAddress)` | — |
+| 送る（記述子つき） | `net.unix_send` → `unix.send` | `send_vectored_with_ancillary`（unstable） | `WriteMsgUnix` | `send_fds` | — | — | — | — | — | — |
+| 受け取る・届いた記述子を取る | `net.unix_recv`・`unix_take_fds` → `unix.recv`・`take_fds` | `recv_vectored_with_ancillary`（unstable） | `ReadMsgUnix` | `recv_fds` | — | — | — | — | — | — |
+| 読めるまで待つ | `net.unix_poll`・`unix_wait` → `unix.wait` | —（`mio` は外部） | — | `select.select`・`poll` | — | — | — | `Unix.select` | `Selector` | — |
+| 閉じる | `net.unix_close` → `unix.close` | drop | `Close` | `os.close` | `destroy` | — | `close` | `Unix.close` | `close` | — |
+| 共有メモリ | `net.shm_*` → `unix.shm_create`・`shm_resize`・`shm_write`・`shm_read` | — | — | `SharedMemory` | — | — | — | `Unix.map_file` | — | — |
+
+<a id="完全性の規則"></a>
+
+### 完全性の規則
+
+- 役割は #2912 が置いた「Wayland・PipeWire・D-Bus の記述子渡しの床」に閉じます: {つなぐ, 待ち受ける, 受け入れる, 記述子つきで送る, 受け取る, 記述子を取る, 待つ, 閉じる} と、共有メモリ {作る, 大きさを変える, 書く, 読む}。
+- 記述子は不透明な型 `unix.Fd` にします。`net` の TCP のハンドル（`Int`）と混ぜられません（#3853 の 2）。
+- 待つ関数は `wait` の 1 つだけです。1 つの記述子を待つのは `unix.wait([fd], t)`。Bool を返す `unix_poll` は R-L0-09 に反するうえ、`wait` と同じ役割なので移しません。
+- `shm_` は「このモジュールの中の共有メモリの族」を表す接頭辞です。`net` の `tcp_`・`udp_` と同じ使い方です。
+- `import unix` が要ります（自動では import しません）。
+- 位置を指定した書き込み `shm_write` は、`offset` が負か、`offset + bytes.len(data)` が大きさを超えると abort します（L0 の「範囲外の書き込みは abort」）。大きさを広げたいときは先に `shm_resize` を呼びます。読み取り `shm_read` は、R-L0-12 のとおり末尾で短くなります。
+
+<a id="l2-の判定"></a>
+
+### L2 の判定
+
+- 新しいモジュールです。抜けている役割はありません。Rust・Go のほうが少ない（記述子渡しは Rust で unstable、共有メモリは無い）。
+
+<a id="案"></a>
+
+## 案
+
+<a id="r-unix-01-unix-モジュールを作りnetunix_netshm_-を移す---採用"></a>
+
+### R-unix-01 `unix` モジュールを作り、`net.unix_*`・`net.shm_*` を移す — ○ 採用
+
+- 内容:
+  ```almide
+  type Fd                                                        // 不透明。Int に変換しない
+  effect fn connect(path: String) -> Fd
+  effect fn listen(path: String) -> Fd                            // path はまだ無いこと
+  effect fn accept(listener: Fd) -> Fd
+  effect fn send(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit    // fds は最初のバイトと一緒に渡る
+  effect fn recv(sock: Fd, max: Int) -> Bytes                     // 相手が閉じたら空
+  effect fn take_fds(sock: Fd) -> List[Fd]                        // 届いて未取得の記述子、古い順
+  effect fn wait(fds: List[Fd], timeout_ms: Int) -> List[Fd]      // 読めるものを順に。< 0 は 1 つ読めるまで
+  effect fn close(fd: Fd) -> Unit
+  effect fn shm_create(size: Int) -> Fd                           // 0 で埋めた名前のないファイル
+  effect fn shm_resize(fd: Fd, size: Int) -> Unit
+  effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Unit
+  effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Bytes      // 末尾では短くなる
+  ```
+- 根拠の L0 規則: R-L0-02（主語は記述子で、ネットワークではない）、R-L0-09（`unix_poll` を残さない）、R-L0-14 の 4（型を `Fd` にするのは新しい名前の側だけ）、R-L0-15。
+- (a) Unix ソケットを TCP と同じモジュールに置くのは Go だけで、Rust は `std::os::unix::net` に分けています。共有メモリを標準に持つのは Python だけです。
+- (b) native: 同じ `net_unix_core.rs`。wasm: WASI（p1・0.2・0.3）には Unix ソケットも共有メモリもありません。組み込み host は裁定済みの暫定 op 104〜116 で運び（ADR-0023 step 7 で退役）、structural leg は `stdlib/net_wasm.almd` の本体を使います。stock の wasm host（暫定 op を持たない host）の行は、TCP の暫定 op と同じ「暫定の組み込み host op」の扱いで記録します。native だけの行にはしません。ADR-0027 D5 の Unix echo の fixture で、native と組み込み host の両方を検品します（D8: native だけの印は付けない）。暫定 op が ADR-0023 step 7 で退役する時の道は、R-L0-15 で決まっています。その時点で Unix ソケットと共有メモリを運ぶ WASI のインタフェースがあれば、それに乗せ替えます。無ければ `unix` を標準から外し、package（`almide/unix`）にします。
+- (c) `net.tcp_*` の隣にこの 13 関数が並ばなくなります。TCP のハンドルを `shm_read` に渡す誤りが型エラーになります。
+- (d) 追加（新しいモジュール）と、`net` の側の撤去（L2-net R-net-01）。`net.unix_*`・`net.shm_*` に `@deprecated(since=15, use="unix.…")`、`removal_epoch = 16`。`Int` → `Fd` は型が変わるので、`almide fix` は名前だけを書き換え（`net.unix_send` → `unix.send` と `import unix` の追加）、型の不一致は検査器が示します。`shm_write` の範囲外が abort になるのも新しい名前の側だけの変化です。使用数（spec/tests/docs/stdlib、旧 `net.` の名前で）: connect 6/3/6/1、listen 4/1/5/1、accept 6/2/5/1、send 11/3/5/1、recv 10/2/5/1、take_fds 7/2/5/1、poll 9/3/6/1、wait 5/2/4/1、close 17/8/5/1、shm_create 6/4/5/1、shm_resize 5/1/4/1、shm_write 7/4/5/1、shm_read 14/4/5/1。
+- 移すもの（#3853 の一覧）: `proofs/target-availability.toml` の 13 行、semantics manifest の `file-descriptor` の単位、検品の台帳、`docs/stdlib/net.md` の該当節。
+- ゲート案: `unix.Fd` が `Int` と単一化しないことの checker テスト。`net` に `native-only-forever` の行が残らないこと（L2-net）。
+- issue: #3853（既存）
+
+<a id="r-unix-02-unixwait-を-unixselect-にする---採用"></a>
+
+### R-unix-02 `unix.wait` を `unix.select` にする — ○ 採用
+
+- いま: `unix.wait(fds, timeout_ms) -> List[Fd]` は「読める記述子が出るまで待つ」関数です。`http.wait(c)` と `process.wait(c)` は「1 つのハンドルが終わるまで待って結果を返す」関数です。
+- 案: `effect fn unix.select(fds: List[Fd], timeout_ms: Int) -> List[Fd]`。`wait` は「ハンドルが終わるまで待つ」の意味だけに使います。
+- 根拠の L0 規則: R-L0-00 の 1（同じ動詞がモジュールによって違う意味）。
+- (a) Python `select.select`、OCaml `Unix.select`、JVM `Selector.select`。`wait` と呼ぶ言語はありません。
+- (d) `unix` は新しいモジュールなので費用は 0 です。`net.unix_wait`・`unix_poll` の `@deprecated` の `use` を `unix.select` にします。
+- issue: #3974
+
+<a id="r-unix-03-unixrecvunixsend-を-unixreadunixwrite-にする---採用"></a>
+
+### R-unix-03 `unix.recv`・`unix.send` を `unix.read`・`unix.write` にする — ○ 採用
+
+- いま: つながったストリームの読み書きが、TCP では `net.tcp_read`・`tcp_write`、Unix ソケットでは `unix.recv`・`send` です。
+- 案: `effect fn unix.read(sock: Fd, max: Int) -> Bytes`、`effect fn unix.write(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit`。
+- 根拠の L0 規則: R-L0-01。L2-net の規則「つながる TCP は `read`/`write`、つながらない UDP は `send_to`/`recv_from`」を Unix ソケットにも当てはめます。
+- (a) Rust `UnixStream` は `Read`・`Write` を実装し、`recv`・`send` を持ちません (F)。Go `UnixConn`・OCaml も `read`・`write` です。
+- (d) 新しいモジュールなので費用は 0 です。
+- 完全性の規則: つながるストリームは {connect, listen, accept, read, write, close} が TCP と Unix で同じ形です。
+- issue: #3974
+
+<a id="r-unix-04-読み書きと閉じるを-io-の総称関数にし記述子つきの書き込みを-write_fds-にする---採用"></a>
+
+### R-unix-04 読み書きと閉じるを `io` の総称関数にし、記述子つきの書き込みを `write_fds` にする — ○ 採用
+
+- 内容: `unix.Fd` を `Read`・`Write`・`Close` に準拠させ（R-L0-44）、`unix.read`・`unix.close` は置かずに `io.read`・`io.close` を使います。記述子を一緒に渡す書き込みは `effect fn unix.write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit` にします（`io.write(sock, data)` は記述子なし）。受け取りは `io.read` と `unix.take_fds` の組のままです。
+- 根拠の L0 規則: R-L0-44、R-L0-01。R-unix-03 の「TCP と Unix で同じ形」は、`io` の 1 組で TCP と完全に同じ呼び方になります。
+- (a) Rust `UnixStream` は `Read`・`Write` を実装し、記述子つきは別の関数（`send_vectored_with_ancillary`）です。Python は `send_fds`、Go は `WriteMsgUnix` で、どれも記述子なしの読み書きと名前を分けています。
+- (d) `unix` は新しいモジュールなので費用は 0 です。
+- issue: #4015
+
+<a id="l3-関数表"></a>
+
+## L3: 関数表
+
+| 関数 | シグネチャ(案) | 他言語の主な綴り | 判定 | 案 |
+|---|---|---|---|---|
+| `unix.connect` | `effect fn connect(path: String) -> Fd` | Rust `UnixStream::connect` / Go `DialUnix` | 追加（`net.unix_connect` から移動） | R-unix-01 |
+| `unix.listen` | `effect fn listen(path: String) -> Fd` | Rust `UnixListener::bind` / Go `ListenUnix` | 追加（移動） | R-unix-01 |
+| `unix.accept` | `effect fn accept(listener: Fd) -> Fd` | Rust・Python `accept` / Go `AcceptUnix` | 追加（移動） | R-unix-01 |
+| `unix.write_fds` | `effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit` | Python `send_fds` / Go `WriteMsgUnix` | 追加（移動） | R-unix-01、R-unix-04 |
+| `unix.take_fds` | `effect fn take_fds(sock: Fd) -> List[Fd]` | — | 追加（移動） | R-unix-01 |
+| `unix.select` | `effect fn select(fds: List[Fd], timeout_ms: Int) -> List[Fd]` | Python `select.select` / OCaml `Unix.select` | 追加（移動。`unix_poll` を吸収） | R-unix-01、R-unix-02 |
+| `unix.shm_create` | `effect fn shm_create(size: Int) -> Fd` | Python `SharedMemory(create=True, size=)` | 追加（移動） | R-unix-01 |
+| `unix.shm_resize` | `effect fn shm_resize(fd: Fd, size: Int) -> Unit` | POSIX `ftruncate` | 追加（移動） | R-unix-01 |
+| `unix.shm_write` | `effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Unit` | POSIX `pwrite` | 追加（移動） | R-unix-01 |
+| `unix.shm_read` | `effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Bytes` | POSIX `pread` | 追加（移動） | R-unix-01 |

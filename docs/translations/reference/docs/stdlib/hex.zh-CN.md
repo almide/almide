@@ -70,6 +70,8 @@ fn main() -> Unit = {
 
 > 原文生成签名索引的固定副本（本译文不是生成目标）。
 
+<a id="signature-index-3-functions"></a>
+
 ## 签名索引（3 个函数）
 
 ```

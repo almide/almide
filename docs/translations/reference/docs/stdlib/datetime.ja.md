@@ -254,6 +254,8 @@ fn main() -> Unit = {
 ```
 
 
+<a id="signature-index-18-functions"></a>
+
 ## 原文固定スナップショットの API 索引（18関数）
 
 ```

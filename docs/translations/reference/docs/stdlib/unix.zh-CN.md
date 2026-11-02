@@ -20,6 +20,8 @@ Unix 域套接字、它们传递的文件描述符，以及共享内存文件—
 
 **目标。** 原生目标在 Unix 平台（Linux、macOS、各 BSD）提供所有函数，其他平台返回 `err`。`almide run --target wasm`（嵌入式宿主）通过临时宿主操作提供同样的代码（#3620；当 ADR-0023 步骤7将该通道作为 WASI 0.3 组件运行时退役）。原文指出 WASI 既没有 Unix 域套接字，也没有共享内存，因此标准产物（`almide build --target wasm`）在构建时拒绝此模块（E081）。
 
+<a id="sockets"></a>
+
 ## 套接字
 
 ### `unix.connect(path: String) -> Result[Fd, String]`
@@ -65,6 +67,8 @@ effect fn main() -> Unit = {
 }
 ```
 
+<a id="shared-memory-files"></a>
+
 ## 共享内存文件
 
 填入内容并交给对端映射的无名文件，例如 Wayland 缓冲区的像素、音频环。写入会立即对持有该文件的每个进程可见，无论是否已映射。
@@ -105,6 +109,8 @@ effect fn main() -> Unit = {
 }
 ```
 
+
+<a id="signature-index-10-functions"></a>
 
 ## 原文固定快照 API 索引（10个函数）
 

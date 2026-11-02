@@ -1,3 +1,5 @@
+<a id="make-verify--the-trust-demo"></a>
+
 # make-verify — 信頼のデモ
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](README.zh-CN.md)
@@ -10,6 +12,8 @@
 
 例が比較するのは具体的なコンパイラ診断と Python の `py_compile` ゲートであり、他言語で利用できるすべての道具や安全技法ではない。
 
+<a id="why-this-framing-not-modification-survival-rate"></a>
+
 ## この捉え方にする理由（「modification survival rate」ではなく）
 
 modification-survival を直接計測した（LLM が動いているコードを変更しても、引き続き合格するか）。強いモデル（Claude 級）で中程度のタスクなら、**すべての**言語で約 100% になる。これは天井効果であり、有能なモデルはそもそも間違いをしない。それは測る対象として適切でない。
@@ -21,6 +25,8 @@ modification-survival を直接計測した（LLM が動いているコードを
 
 この応答は**言語 + コンパイラ + proof spine**の性質であり、モデルが強くなっても消えない。
 
+<a id="the-reported-eight-case-experiment"></a>
+
 ## 報告された八ケースの実験
 
 元のデモ実験では、**AI が作成した変更の間違いを 8 件**注入し（各件は別々のエージェントが Almide と Python の両方で作成）、作成時/CI 時に*言語*へ、検出して修復できるか、それとも黙って通るかを問うた。
@@ -29,6 +35,8 @@ modification-survival を直接計測した（LLM が動いているコードを
 - **Python のコンパイルゲート（`py_compile`）は 0/8 を検出。** これらは構文コンパイルのゲートを通過し、その後、誤った値または実行時エラーを生じた。Python のすべての linter やテストの計測ではない。
 
 `./run.sh` はそのうち三つを、実際のコンパイラ出力でその場で再現する（以下は一つ目）。
+
+<a id="the-scenarios"></a>
 
 ## シナリオ
 
@@ -42,6 +50,8 @@ AI に「`Shape` へ `Triangle` variant を追加して」と依頼する。AI �
 ./run.sh
 ```
 
+<a id="1-correct-program--fully-type-checked-compiles-runs"></a>
+
 ### 1. 正しいプログラム — 完全に型検査され、コンパイルされ、実行される
 
 ```
@@ -51,6 +61,8 @@ $ almide run shape.almd
 ```
 
 網羅的に型検査されている（手順 2 に注目。欠けた case は実行時の驚きではなくコンパイルエラーになる）。より深い**証明**の層は以下に説明する。
+
+<a id="2-the-wrong-modification-in-almide--caught-at-compile-with-the-fix"></a>
 
 ### 2. **Almide** での誤った変更 — コンパイル時に修正方法付きで検出
 
@@ -71,6 +83,8 @@ compile failed
 
 失敗は**明確**（正確な欠落 case）で、**位置が分かり**（キャレット）、**修復可能**（追加する arm を渡す。Elm 級）である。これを読んだモデルは一段階で修正でき、人間も同様である。
 
+<a id="3-the-same-wrong-modification-in-python--ships-silently"></a>
+
 ### 3. **Python** での同じ誤った変更 — 黙って出荷される
 
 ```
@@ -81,12 +95,16 @@ None
 
 コンパイルされ、実行され、0 で終了し、三角形の面積に `None` を返す。エラーはない。バグは本番へ届き、見つかるとしても下流のテストやエンドユーザーが見つける。
 
+<a id="the-two-trust-layers-this-shows"></a>
+
 ## ここで示す二つの信頼の層
 
 1. **失敗が明確かつ修復可能**（このデモ）：誤った変更を、行動に移せる診断とともにコンパイル時に検出する。モデルに依存せず、間違えるすべてのモデルに役立つ。
 2. **モデル化した性質を検査する**（trust spine — 別の層）：`almide verify` は構造的な Wasm witness を生成し、独立した `almide-verify` に検査を委ねる。対応する core artifact は SHA-256 で bundle に結び付けられるが、この経路は component に対応しない。所有権の balance、名前、capability の境界には適用範囲と信頼の仮定がある。バイトの binding は実装済み（#4011）だが、完全なメモリ安全性や機能的正しさを確立するものではない。[gap 表](../../../../design/MEMORY-SAFETY.md) と [proven vs trusted](../../../../contracts/proven-vs-trusted.md) を参照。
 
 実演する違いは、この例における行動に移せる診断と、黙って通る失敗または後で起こる失敗との違いである。証明書の根拠は別個の限定された主張であり、すべての誤った変更を検出すると確立するものではない。
+
+<a id="honest-scope"></a>
 
 ## 率直な適用範囲
 

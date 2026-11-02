@@ -92,6 +92,8 @@ effect fn main() -> Unit = {
 
 
 
+<a id="signature-index-10-functions"></a>
+
 ## 固定スナップショットの API 索引 (10 関数)
 
 ```

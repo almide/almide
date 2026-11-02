@@ -1,0 +1,96 @@
+<a id="almide-research-laboratory"></a>
+
+# Almide 研究ラボ
+
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](CLAUDE.reader.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](CLAUDE.reader.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](CLAUDE.reader.zh-CN.md)
+
+> [正本](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/research/CLAUDE.md)（固定コミット 35297a612fb29e3f78f6587aba253aa91d51f466）の非規範・不活性な読者用スナップショット。履歴参照資料であり、有効なエージェント指示や生成用プロジェクトテンプレートではなく、コマンド実行権限を与えない。自動同期されない。原文の主張は独立した現時点の測定ではなく、コマンド実行やモデル呼び出しは行っていない。
+
+Almide の設計判断を実験データで裏付けるための研究基盤。
+
+**原則: 設計判断は「勘」ではなく「数字」で行う。** 新しい構文提案は Grammar Lab で実験してから採否を決める。
+
+## Beyond-Rust Lab (`beyond-rust/`)
+
+rustc と LLVM を通したまま、手書きの Rust より速いコードを生成する方法を実験で探す。
+1 実験 = (カーネル, レバー) の 4 列計測（手書き Rust / 今の生成 / レバーを手で当てた生成 / 専門家の Rust）。
+実装の前に手で当てて測り、卒業条件を満たしたレバーだけをコンパイラの仕事にする。方法論と結果は [beyond-rust/README.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/research/beyond-rust/README.md)。
+
+## Grammar Lab (`grammar-lab/`)
+
+構文バリアントの A/B テストフレームワーク。複数の LLM に対して構文の違いが modification survival rate に与える影響を定量的に測定する。ツール自体が Almide で実装されている（dogfooding）。
+
+### 構成
+
+```
+grammar-lab/
+├── src/mod.almd              Runner (Almide)
+├── prompts/                  Prompt テンプレート (3 層設計)
+│   ├── layer1_rules.md       共通ルール (~200 tok)
+│   └── layer2_*.md           Variant 別の例示コード
+├── experiments/              実験定義
+│   └── lambda-syntax/        最初の実験
+│       ├── experiment.json   実験設定
+│       ├── variant-fn/       fn(x) => 版のソースコード
+│       ├── variant-paren/    (x) => 版のソースコード
+│       └── tasks/            タスク定義 + テスト
+├── results/                  実験結果 (JSON)
+├── outputs/                  LLM の生出力 (デバッグ用)
+├── REPORT.md                 実験レポート
+└── LESSONS.md                開発で学んだ知見
+```
+
+### 使い方
+
+```bash
+cd research/grammar-lab
+export ALMIDE_BIN=/path/to/almide
+almide build src/mod.almd -o /tmp/grammar-lab-bin
+/tmp/grammar-lab-bin experiments/law-spec/ --trials 3 --model claude-haiku-4-5
+```
+
+現行 runner は task の `source_dir`、visible/hidden tests、任意の laws と
+repair round を読む。`lambda-syntax` は旧実験設定を保持した資料で、現行
+runner schema にそのまま適合する quick start ではない。新規実験は
+`law-spec` の設定を参照する。実験実行はモデル呼び出しを伴う。
+
+### 主な機能
+
+- **Claude Code provider**: API key 不要。`claude -p` 経由で LLM を呼び出す
+- **Transpile**: 未実装構文を現行構文に変換してコンパイル。構文を実装する前に survival rate を測定可能
+- **Fisher's exact test**: Almide で実装。p 値付きで summary を出力
+- **生出力保存**: `outputs/` に LLM の出力を保存。transpile バグと LLM エラーを切り分け可能
+
+### 歴史的実験結果（lambda-syntax）
+
+| 実験 | Variant A | Variant B | Sonnet 4.6 | Haiku 4.5 | p-value | 結論 |
+|------|-----------|-----------|------------|-----------|---------|------|
+| Lambda syntax | `fn(x) =>` | `(x) =>` | 100% / 100% | 86% / 86% | 1.0 | **差なし。`fn` 廃止を決定** |
+
+### 実験設計の学び
+
+- **Haiku をベンチマークに使う** — Sonnet は天井に張り付く。弱いモデルで差が見える
+- **transpile の品質を先に確認する** — transpile バグが結果を支配する。生出力を保存して切り分ける
+- **実験基盤のバグを先に潰す** — 型二重定義、test block 重複などインフラ起因の fail を排除してからデータを見る
+- **Layer 1 ルールは直接効く** — `if then` ルール 1 行追加で fail が消えた
+
+### 次にやるべき実験
+
+| 実験 | Variant A | Variant B | 目的 |
+|------|-----------|-----------|------|
+| Template keyword | `template name(...)` | `fn name(...) -> HtmlDoc` | `template` keyword は survival rate を上げるか |
+| Builder insertion | keyword (`emit`/`embed`) | type dispatch (bare expr) | keyword なしでも同等か |
+| UFCS | `web.param(req, "id")` | `req.param("id")` | method style は正答率を上げるか |
+| `println` | `io.print(s ++ "\n")` | `println(s)` | 短い名前は survival rate を上げるか |
+
+### 新しい実験を追加するには
+
+1. `experiments/<name>/experiment.json` を作成
+2. variant ディレクトリにソースコードを配置
+3. `tasks/` の JSON に `source_dir` / `test_file` を指定し、必要に応じ `hidden_file` / `laws_file` / `laws_compiled_file` を配置（`law-spec/tasks/` が現行例）
+4. 未実装構文がある場合は `transpile_regex` を設定
+5. `prompts/layer2_<variant>.md` を作成
+
+---
+
+lambda-syntax の割合と p 値は歴史的実験結果であり、一般的な性能保証や独立した Dojo 再実行ではない。今後の実験案は案のまま保持する。ディレクトリ図とコメントは原文のバイト列を保持する。

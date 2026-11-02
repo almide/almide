@@ -1,3 +1,5 @@
+<a id="type-where-constraints"></a>
+
 # 型の Where 制約
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](type-where-constraints.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](type-where-constraints.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](type-where-constraints.zh-CN.md)
@@ -13,6 +15,8 @@
 
 > **状態: 設計。独立した `where` 構文は提案であり、現在の構文ではない。**
 
+<a id="already-supported"></a>
+
 ## すでにサポートされているもの
 
 ジェネリック関数では、プロトコル境界と構造的境界をすでにインラインで表現できる。
@@ -23,6 +27,8 @@ fn describe[T: { name: String, .. }](item: T) -> String = item.name
 ```
 
 最初の断片の `Showable` はユーザーが宣言したプロトコルである。複数のプロトコル境界には `+` を使う。現在の規則と完全な例は [type-system.md](../../../../../specs/type-system.md#protocol-bounds-on-generics) にあり、[protocol_generics_test.almd](../../../../../../spec/lang/protocol_generics_test.almd) と [open_record_test.almd](../../../../../../spec/lang/open_record_test.almd) で検証されている。したがって、ジェネリック制約がまったく存在しないと説明するのは誤りである。
+
+<a id="remaining-proposal"></a>
 
 ## 残る提案
 

@@ -89,6 +89,8 @@ fn main() -> Unit = {
 {"name":"Alice","age":30}
 ```
 
+<a id="typed-decode-tdecode-and-tdecode_strict"></a>
+
 ### 带类型解码：`T.decode` 和 `T.decode_strict`
 
 `: Codec` 记录类型 `T` 派生 `T.decode`、`T.decode_strict`（以及 `T.encode`）。`T.decode` 忽略未知键；`T.decode_strict` 递归拒绝未知键，包括嵌套记录和容器。它在每个记录中先检查键再解码字段；嵌套错误包括到失败值的路径。标有 `@skip_decode` 的字段从不读取输入（保留默认值），但仍编码；`@skip` 既不读取也不写入。对于不可信输入，最好解码到仅包含客户端可设置内容的类型（CHEATSHEET，JSON Rule 5）。
@@ -138,6 +140,8 @@ fn main() -> Unit = {
 ```
 
 
+
+<a id="signature-index-3-functions"></a>
 
 ## 固定快照 API 索引（3个函数）
 

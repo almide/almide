@@ -185,6 +185,8 @@ fn main() -> Unit = {
 
 
 
+<a id="signature-index-27-functions"></a>
+
 ## 固定スナップショットの API 索引 (27 関数)
 
 ```

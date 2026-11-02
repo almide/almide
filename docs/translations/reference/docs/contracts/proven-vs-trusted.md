@@ -1,0 +1,232 @@
+<a id="proven-vs-trusted--the-boundary-map"></a>
+
+# Proven vs trusted — the boundary map
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](proven-vs-trusted.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](proven-vs-trusted.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](proven-vs-trusted.zh-CN.md)
+
+> Non-normative fixed-source reader snapshot. The unchanged pinned original remains authoritative; no autosync or independent rerun of proofs, gates or benchmarks. Proven modeled properties, checked finite fixtures and trusted implementation seams are deliberately separate. Formal-credit/DO333-shaped documentation is not a claim of certification or tool qualification. The retired MIR pipeline and the shipped structural byte pipeline are not interchangeable; recording, unmodeled heap accesses, Rust/Lean compilation and host behavior retain their stated limits. Dated counts and implementation descriptions are not independently updated here. The source calls the bridge three layers but lists four standings; that wording is retained, not silently renumbered. Commands are historical reproduction references, not execution instructions for this translation. [Source](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/contracts/proven-vs-trusted.md)
+
+The first question an auditor asks about a compiler that ships proofs is *which
+part is proven*. This page answers it, and points at the evidence for each
+answer.
+
+The full ledger — toolchain pins, the irreducible trust roots, the tamper drill,
+the per-bug-class regression pins — is [`proofs/TRUSTED_BASE.md`](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/proofs/TRUSTED_BASE.md).
+This page is the map; that page is the territory.
+
+The objective-shaped statement of the same boundary — each proof family as
+a formal-credit claim with its assumptions and coverage limit (#575, the
+DO-333 shape) — is [`proofs/FORMAL-CREDIT.md`](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/proofs/FORMAL-CREDIT.md).
+
+<a id="the-one-sentence-version"></a>
+
+## The one-sentence version
+
+An **accepted certificate establishes the property its checker models**, within
+that witness's coverage and assumptions: for example RC balance, name totality
+or capability bounds. This is not a proof of complete artifact memory safety;
+recording and unmodeled accesses remain trust boundaries. It proves **nothing
+about whether lowering picked the right semantics**: a certified function can
+still print the wrong string.
+
+<a id="which-leg-is-this-page-about"></a>
+
+## Which leg is this page about?
+
+Since v0.60.0 (#1599) there were two wasm legs. The boundary map below
+describes the **MIR certificate pipeline** — the pipeline the incumbent v1 leg
+shipped. Since #2752 no route reached that leg, and #2761 deleted its renderer,
+so **no shipped wasm byte comes from this pipeline**: its rows now describe what
+proofs/gate.sh witnesses over MIR (since #4011 `almide verify` judges the
+structural leg's bundle instead), not a property re-checked on the
+bytes you run. The Coq theorems `WasmEncode.v` / `WasmExec.v` / `WasmRcDec.v`
+stand about a *modeled* runtime (the retired incumbent's).
+
+The `--target wasm` leg — the structural emitter in `crates/almide-wasm`, the
+only wasm renderer — records its own certificate at emission time (#1696,
+closed): an ownership witness per frame, call modes, name totality and
+capabilities over the shipped stock-WASI bytes, and the `bounds` witness of
+every `xs[i]` / `b[i]` read and store (#4005). `proofs/structural-wall.sh`
+judges every certified fixture's bundle with the extracted checker, the Rocq
+kernel and `almide-verify`, all three agreeing, and pins the SHA-256 of the
+file `almide build --target wasm` wrote. The rows below do not apply to it;
+what it trusts is that the recorded events are the instructions the bytes
+contain (the recording discipline), and every heap access outside the index
+operator. Per clause of `MemorySafe`, the proven / checked-per-build / trusted
+split is the gap table in
+[docs/design/MEMORY-SAFETY.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/design/MEMORY-SAFETY.md#the-gap-table-2026-10-24-4011).
+Its other evidence is differential and CI-gated: byte-identity against native
+and the interpreter on the whole `spec/wasm_cross` corpus (grow-only),
+semantic-mutation nets over the emitter, per-fixture allocation and size
+ledgers, a refusal ratchet (a shape it refuses must stay refused — silently
+emitting it again is the #1688 regression class), and
+`proofs/check-structural-bytes.sh`, which grounds the structural runtime's
+bytes against the Coq decoder model `StructuralDecode.v`.
+
+<a id="where-the-boundary-runs-the-mir-certificate-pipeline"></a>
+
+## Where the boundary runs (the MIR certificate pipeline)
+
+| Stage | Status | What backs it |
+|---|---|---|
+| Lexer, parser | trusted | differential fuzz, the spec corpus |
+| MIR witness checkers (ownership, type concretization, names) | **proven for their modeled properties** | `proofs/OwnershipChecker.v`, `TypeConcretization.v`, `NameTotality.v`; not a proof of the whole frontend type checker |
+| Coown patterns | **proven** | `proofs/CoownCompose.v`, `CoownLoop.v`, `CowSafety.v` |
+| AST → IR lowering | trusted | the checker's `TypeMap` is the source of truth; 974-file emit baselines |
+| IR → MIR lowering | **trusted** | ← *this is the gap F3 (#777) is about* |
+| MIR ownership witness | **proven to be re-checkable** | `proofs/gate.sh`: the untrusted producer emits a witness, the kernel-proven checker re-verifies it |
+| `almide-verify` (the checker a binary distribution runs, #2152) | trusted — agreement-gated, not proven | an independently versioned Rust transcription of the five Coq checkers, linking no compiler crate; `proofs/gate.sh` holds it to the extracted checker's verdict on every row plus a seeded random differential, `proofs/corpus-wall.sh` on the whole corpus witness set |
+| MIR → wasm bytes | retired (#2761) | the incumbent renderer is deleted; `WasmEncode.v` / `WasmExec.v` / `WasmRcDec.v` now stand about its modeled runtime. The shipped structural runtime's bytes: `proofs/check-structural-bytes.sh` against `StructuralDecode.v` |
+| wasmtime | unqualified tool | out of scope by construction |
+
+<a id="why-the-ir--mir-row-is-the-one-that-matters"></a>
+
+## Why the IR → MIR row is the one that matters
+
+Every one of the five output-breaking bugs found in the 2026-07-03 audit lived
+in that row, and all five were *accepted by the certificate* — the MIR was
+RC-balanced and name-resolvable, it simply computed something else.
+
+They share a shape, quoted from the trusted-base ledger:
+
+> a REGISTRY or CONVENTION (tracking sets, layout tables, calling convention,
+> the scalar deferred-Const fallback) drifted between producer and consumer
+> inside the trusted zone.
+
+A certificate cannot catch that, because drift produces *valid* MIR. What
+catches it is a post-pass over the lowering's own output, checking invariants
+the lowering is supposed to maintain — the same shape as
+`assert_names_resolvable` and the `ConcretizeTypes` gate. That gate exists now
+(`crates/almide-mir/src/mir_wellformed.rs`, #777 item 2): every function the
+lowering emits is checked for def-before-use over its op stream, the
+defines/reads split is asserted to partition `op_values` on every real op (so
+the three occurrence functions cannot drift), and a violation surfaces as a
+named wall rather than rendering. It runs inside `lower_function_all`, so every
+CI leg that lowers — Test WASM, Cross-Target, Trust Spine — exercises it on
+every build.
+
+The per-class regression pins for all five are in
+[`proofs/TRUSTED_BASE.md`](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/proofs/TRUSTED_BASE.md#the-five-2026-07-03-trusted-zone-bug-classes-and-their-regression-pins).
+
+The row stayed live after that gate shipped. #1537 (2026-08, reported from a
+real downstream project) was another instance: `desugar_guard`'s nested rewrite
+left a Result-typed arm under a Unit-typed statement-`if`, and the branch
+lowering's deferred-value fallthrough silently dropped the early return — the
+guard's `err` never propagated, and the function returned `ok` with the
+guard-skipped state. The MIR was again valid: RC-balanced, name-total,
+certified. Def-before-use cannot see it because nothing was unresolved; a
+well-formed wrong value flowed. The repair is one more named invariant of the
+same post-pass shape (a strict-mode wall on Result/Option-typed tails inside
+unit-typed arms, `crates/almide-mir/src/lower/control.rs`), and full support
+for the shape is tracked under the #1527 wall burn-down. The honest reading of
+this row: it produces a new accepted-but-wrong instance every few months, each
+retired by one more invariant — so the map keeps it **trusted**, and what
+would move it is a quiet quarter, not a gate count.
+
+<a id="the-edit-locality-kernel-seam-stage-3"></a>
+
+## The edit-locality kernel seam (Stage 3)
+
+The λ_almd kernel (`crates/almide-edit-belt`, the third 0-sorry Lean belt)
+gives the language a machine-checked reference semantics for its core:
+`ev_agree`/`edit_frame`/`ev_det` (L1 with determinism), `typing_modular`,
+`pure_silent`, and `eval_sound` (the executable evaluator agrees with the
+relation). The bridge to the shipping compiler runs through three layers
+with different standings:
+
+- **kernel-checked (proven)** — the hand-written family's observables:
+  `k1_obs`…`kAll_obs` and `corpus_total` are theorems proved `:= by rfl`,
+  i.e. by Lean KERNEL reduction, and their axiom sets are pinned with
+  `#guard_msgs in #print axioms` (`propext` only). `eval_sound` +
+  `ev_det` lift each pinned `evalE` output to THE derivation of `Ev`
+  (`kAll_ev`). For the generated corpus, what is kernel-checked is
+  TOTALITY — every one of the 48 programs evaluates to `some`
+  observables (`corpus_total`).
+- **evaluator-pinned (trusted)** — the VALUES in
+  `proofs/kernel-conformance/*.expected`: they are emitted by the
+  COMPILED Lean evaluator (`lake exe conformancegen --write`), so
+  trusting them means trusting the Lean compiler — the exact seam lean4
+  itself names with its `trustCompiler` axiom. The unproven completeness
+  direction of `evalE` is likewise an enumerable object, not a doc
+  comment: `EvalCompleteness` states it, the marker axiom
+  `trustEvalCompleteness` (kept at `True`) tags any argument that needs
+  it, and the CI axiom ratchet enumerates every `axiom` in the belts.
+- **trusted (reviewed seam)** — the `eraseE`/`eraseChain` + `render*` pair
+  in `Corpus.lean`: two ~40-line functions walking the same surface
+  grammar, one producing the λ_almd term the evaluator scores, one the
+  almide text the compiler eats. Reviewing that they agree
+  constructor-by-constructor IS the trust obligation — reviewed once, not
+  per program. (The hand-written family adds the same seam by hand:
+  `spec/wasm_cross/kernel_conformance.almd` ↔ `kAll`, Rust literal ↔ Lean
+  literal.)
+- **gated** — that both backends produce those observables:
+  `tests/kernel_conformance_test.rs` runs the whole corpus on native and
+  (with a wasm runtime present) on wasm; the `wasm_cross` harness carries
+  the family; the `conformancegen --check` CI step pins the committed
+  corpus to `Corpus.lean` byte-for-byte. All under contract C-280.
+
+Lean's own three-tier vocabulary, which the classification above adopts
+(the correction came from reading lean4's source — Survey 4):
+
+| Lean idiom | Trust level | Why |
+|---|---|---|
+| `decide` / `:= by rfl` | kernel proof | the kernel re-reduces the term itself |
+| `#guard` | untrusted pin, **not a proof** | runs the untrusted elaborator evaluator (lean4 `src/Init/Guard.lean`) |
+| `native_decide` | compiled-evaluator proof **modulo a named axiom** | materializes `Lean.ofReduceBool`/`trustCompiler` so `#print axioms` shows the seam |
+
+The belts use tier 1 for every conformance claim; the `.expected` files
+sit at tier 3's trust level (compiled evaluation) with the seam recorded
+here instead of in an axiom, because the consumer is a shell gate, not a
+Lean proof.
+
+"Backends are refinements of the kernel" is therefore enforced over the
+GENERATED λ_almd-expressible fragment — machine-computed programs,
+compiled-evaluator expected values (not kernel-checked), machine-diffed backends — with one
+reviewed ~80-line seam. What remains out of reach without rewriting the
+compiler in a prover: a verified surface-core→λ_almd translation and
+per-pass simulation proofs over the Rust implementation itself. Those are
+recorded as the research-grade residual in
+`docs/roadmap/active/edit-locality-theory.md`, and the fragment gate is
+the ratchet that holds until then. Day one of running it, the corpus
+caught two real compiler bugs (almide#1428: checker-accepted program dies
+in codegen; almide#1429: the v1 renderer splits an effect fn's signature
+from its body on a bare-parameter tail) — the gate bites.
+
+<a id="above-l1-l4-and-l5-edit-localitymd-1a"></a>
+
+### Above L1: L4 and L5 (`edit-locality.md` §1a)
+
+Each obligation is split by what can be said about it, because the halves
+have different standings and a single "L4 holds" would hide which one was
+checked. All theorems below are in
+`crates/almide-edit-belt/AlmideEditBelt/Contract.lean`, 0 `sorry`, no new
+axiom.
+
+| Obligation | Standing | Claims | Does NOT claim |
+|---|---|---|---|
+| L4, effect frame | **proven** (`l4_pure_replacement_silent`) | a replacement of a pure-declared definition that checks against the unchanged signature produces an empty trace, in any environment, in the edited λ_almd program | anything about the replacement's return value, or about what a caller does with it — the caller may print something different next |
+| L4, non-vacuity | **proven** (`l4_witness`, `l4_loud_replacement_prints`) | the four hypotheses hold together, and without the purity hypothesis the conclusion is false (an effectful replacement prints `"hi"`) | that the hypotheses are the weakest possible |
+| L4, resource frame (`scoped`, #1997) | **gated**, not proven — C-362 / C-363 / C-364 fixtures | a `scoped` block's observables are its body's; a `scoped fn` answers the same inside and outside a region; an out-of-fragment shape is refused at check time on both targets | any property of λ_almd: the kernel has no heap and no regions, so there is no statement to make there until a region component is added |
+| L5, composition | **proven** (`l5_edits_compose`, `l5_pure_silent_after_edits`) | any sequence of signature-preserving replacements keeps the program well-typed, and every pure-declared definition in the result is silent | that the sequence preserves any observable other than the empty trace of pure code |
+| L5, realization on both targets | **trusted** — backend refinement | — | that the checked lowering (#1995's ExitPlan, #1996's E-OWN-LOWERING) preserves the above on native and wasm. That is the same kernel-to-backend seam as every other row in this section, gated by `spec/wasm_cross` and the contract ledger, not proven |
+
+<a id="what-each-gate-actually-claims"></a>
+
+## What each gate actually claims
+
+| Gate | Claim | NOT a claim |
+|---|---|---|
+| `proofs/gate.sh` | the witnessed MIR is RC-safe, name-total, capability-bounded; `almide-verify` gives the extracted checker's verdict on every row and on 1,000 seeded random witnesses | that the wasm bytes match the witness; that `almide-verify` agrees on inputs outside those rows (it carries no theorem) |
+| `proofs/structural-wall.sh` | for every fixture in `witness-fixtures.txt`, the shipped file's SHA-256 is the one the bundle pins, and every ownership, call-mode, name, capability, bounds and init witness of the structural build is accepted by the extracted checker, the kernel and `almide-verify` alike; by `accepts_spatial`, an accepted bounds witness's every run keeps each recorded index access inside its block; by `site_window`, an accepted init witness's every recorded construction site leaves its block initialized over its whole extent; and, by `almide-anchor-check` over the shipped file (#4011 (d)), every located bounds and init event is the instruction it names — a site's allocation size, its stores' width, offset and address local, a fill's countdown, a check's compare-and-abort, an access's load or store — and every located access is held to its check's operands (same index, the count of the block it addresses in its slot size, within one slot, nothing changing either between) | that the ownership witness's events are the RC instructions in the bytes; that a located judge call is a copy-on-write judge and only a call handed a block shrinks it in place; the representation; anything about a heap access the bounds witness does not record (record fields, string bytes, map slots, `for`-loop element reads, the runtime's routines) |
+| `proofs/native-wall.sh` | for every program on `proofs/native-verified-floor.txt`, the ownership witness of each function the verified native renderer rendered — taken from the exact MIR it rendered — is accepted by the extracted checker, the kernel and `almide-verify`, and the bundle pins the rendered Rust source's SHA-256; a release-dropped render's witness is rejected | that rustc keeps the MIR's balance in the binary; anything about a program off the floor (the standard-codegen fallback) |
+| `scripts/witness-reinject.sh` | each re-injected lost bounds check (the store route's, the read route's, a stale #3345 fact) leaves a bounds witness `almide-verify` rejects, and a re-injected lost list-literal store leaves an init witness it rejects; the unpatched emitter's witness for the same program is accepted; `anchors`: each re-injected changed instruction whose recording call survives (a guard made dead, a slot store misplaced, a fill cursor doubled) leaves witnesses the proven checkers still accept and bytes `almide-anchor-check` rejects, and so does each re-injected operand bug (a count in bytes, a kill neither recorded nor applied, a zero-width Bytes room) | that a changed instruction the anchor check does not inspect is caught (the representation, an RC instruction) |
+| `scripts/check-build-certifies.sh` | with `almide-verify` installed beside the compiler, `almide build --target wasm` refuses to write an artifact whose own certificate the verifier rejects: each re-injected lost bounds check makes the build exit 1 with no file written, the unpatched build writes it, and the patched build writes it once the verifier is moved away | that a build without the verifier installed is checked (it is not); anything the certificate does not record (the rows above) |
+| `proofs/corpus-wall.sh` | `lower_function` is total over the corpus: every function is `Ok` or an explicit `Unsupported` | that an `Ok` function has correct output |
+| `proofs/output-parity.sh` | native and the structural wasm build agree, for the baseline set; the structural walls inside it are exactly the rows of `proofs/output-parity-walled-baseline.txt` (#2793) | anything outside that set |
+| `scripts/check-contracts.sh` | every observable cross-target promise has executable evidence | that the promise is the right one |
+| the greenfield parity gates (`ast_parity`, `check_parity`, `run_parity`, `backend_parity`, the WASI gate) | the ported parser / checker / interpreter / structural wasm leg reproduce, byte for byte, what the CLI built from the SAME commit prints (`--emit-ast`, `check --json`, `run --target wasm`) over the corpus; `scripts/check-parity-goldens.sh` regenerates the goldens from that binary in CI and fails on any row diff, so a golden cannot be hand-edited or recorded from a stale build (#2183) | that the CLI's own output is correct — the oracle is the tree under test, not an independent reference; correctness of the CLI is what the contract ledger, the kernel pin and the cross-target fuzz claim, and the legs' agreement is a port-fidelity claim only |
+| the cross-target fuzz | no divergence found in N programs | no divergence exists |
+| the E083 exit validator (`exit_plan.rs`, #1996) | every function's emitted exit windows implement its checked ExitPlan — each released credit decremented there, nothing carried or foreign decremented, the transfer instruction the plan names, no credit outstanding across a frame-replacing edge — read back from the wasm bytes, or the build stops with a compiler-defect diagnostic (never a wall, never a reroute) | that the plan's CONTENT is right (that is the credit harness and the witness); anything downstream of the bytes (wasmtime, the host) |
+| the kernel-conformance pin (C-280) | the compiled family's observables equal the kernel-checked λ_almd trace, on both targets; the generated corpus matches the compiled evaluator's traces | that every almide program refines the kernel — only the fragment's image is pinned; corpus `.expected` values are evaluator-pinned (compiled Lean), not kernel-checked |
+
+Reproduce all of it: `make verify-trust`.

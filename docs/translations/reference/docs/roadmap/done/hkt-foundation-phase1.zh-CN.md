@@ -1,3 +1,5 @@
+<a id="hkt-foundation--phase-1-4--stream-fusion-all-6-laws"></a>
+
 # HKT 基础 — 阶段 1–4 + 流融合（全部 6 条定律）
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](hkt-foundation-phase1.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](hkt-foundation-phase1.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](hkt-foundation-phase1.zh-CN.md)
@@ -15,7 +17,11 @@
 **完成日期：** 2026-03-19
 **PR：** #49
 
+<a id="implementation-details"></a>
+
 ## 实现细节
+
+<a id="phase-1-ty-helpers--typeconstructor-foundation"></a>
 
 ### 阶段 1：Ty 辅助方法 + TypeConstructor 基础
 - `TypeConstructorId`、`Kind`、`AlgebraicLaw` 类型定义
@@ -27,11 +33,15 @@
 - 在 IrProgram 中添加 `type_registry` 字段，在 lowering 期间自动注册
 - 简化 14 个函数中的 match 分支（-120 行）
 
+<a id="phase-2-algebraic-law-table"></a>
+
 ### 阶段 2：代数定律表
 - 6 条定律：FunctorComposition、FunctorIdentity、FilterComposition、MapFoldFusion、MapFilterFusion、MonadAssociativity
 - List：Functor + Filterable + Foldable
 - Option：Functor + Monad
 - Result：Functor
+
+<a id="phase-3-stream-fusion--ir-rewrite-for-all-6-algebraic-laws"></a>
 
 ### 阶段 3：流融合 — 全部 6 条代数定律的 IR 重写
 - 管道链检测（嵌套调用和 let 绑定链）
@@ -44,6 +54,8 @@
 - Lambda 组合 + 谓词组合 + 变量替换
 - 通过 ALMIDE_DEBUG_FUSION=1 输出分析结果
 
+<a id="phase-4-tyapplied-unification"></a>
+
 ### 阶段 4：统一为 Ty::Applied
 - 移除 `Ty::List`、`Ty::Option`、`Ty::Result`、`Ty::Map`
 - 统一为 `Ty::Applied(TypeConstructorId, Vec<Ty>)`
@@ -52,12 +64,16 @@
 - 更改 23 个文件
 - 更新 build.rs（generated/ 也自动处理）
 
+<a id="remaining-at-completion-2026-03-19"></a>
+
 ## 完成时（2026-03-19）的剩余事项
 
 原始 `active/hkt-foundation.md` 计划已不存在。以下是完成时记录的剩余工作快照，不是当前任务清单。
 
 - 阶段 5：编译器内部的效应信息注解（无语法变更）→ 2.x
 - 阶段 6：Trait 集成 → 2.x
+
+<a id="tests"></a>
 
 ## 测试
 - 617+ 个 Rust 单元测试（56→617）

@@ -16,6 +16,8 @@ RFC 9562 标识符：随机的 version 4、按时间排序的 version 7、8-4-4-
 
 **目标。** 每个函数都在 native 和 wasm 上运行。在 wasm 上，`v7` 将最后的 stamp 保存在模块实例中，因此与 native 一样，同次运行中生成的每个 `Uuid` 都大于前一个。
 
+<a id="making-one"></a>
+
 ## 生成
 
 ### `uuid.v4() -> Uuid`
@@ -44,6 +46,8 @@ effect fn main() -> Unit = {
   println(if uuid.compare(a, b) < 0 then "ordered" else "not ordered")
 }
 ```
+
+<a id="text-and-bytes"></a>
 
 ## 文本与字节
 
@@ -77,6 +81,8 @@ effect fn main() -> Unit = {
 16 bytes
 ```
 
+<a id="ordering"></a>
+
 ## 排序
 
 ### `uuid.compare(a: Uuid, b: Uuid) -> Int`
@@ -84,6 +90,8 @@ effect fn main() -> Unit = {
 从第一个字节起逐字节比较，`a` 位于 `b` 之前、相同或之后时分别为负、零或正。对 `v7` 值，这就是生成顺序。
 
 
+
+<a id="signature-index-7-functions"></a>
 
 ## 固定快照 API 索引 (7 个函数)
 

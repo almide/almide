@@ -273,10 +273,14 @@ fn main() -> Unit = {
 0
 ```
 
+<a id="matrix-completeness-956"></a>
+
 ## 変換行列の完全性 (#956)
 
 変換は生成する型にちなんで命名します（R-L0-40）。`int.from(x)`（範囲外では中断）、`int.from_checked(x)`（`none`）、`int.from_saturating(x)`（範囲内に制限、NaN は0）、`int.from_wrapping(x)`（整数入力、2の補数）は数値を入力に取り、上位の範囲が `Int` に収まらない `UInt64 → Int` も含みます。ビット幅を持つ各モジュールには、その型用の同じ変換群があり、固定幅の数値型はすべて `min_value()`/`max_value()` を持ちます。
 
+
+<a id="signature-index-47-functions"></a>
 
 ## 原文固定スナップショットの API 索引（47関数）
 

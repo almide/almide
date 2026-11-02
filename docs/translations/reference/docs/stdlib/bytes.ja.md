@@ -14,6 +14,8 @@
 
 ソースのスキャナーでは `bytes.from_string(source)` で一度変換し、走査中は `bytes.get(buffer, offset) ?? -1` を使います。ネイティブではコンパクトな `u8` 記憶域を使います。一方、これに `bytes.to_list` を適用すると `List[Int]`（`i64` 要素）になります。どちらの変換もゼロコピーの借用ビューではありません。バイト位置で UTF-8 トークンを取り出すには `string.byte_slice(source, start, end)` を使います。
 
+<a id="naming-convention"></a>
+
 ## 命名規則
 
 `<t>` は `u8 | i8 | u16 | i16 | u32 | i32 | i64 | f16 | f32 | f64` のいずれかです。`u8`/`i8` 以外の各幅には `_le` と `_be` があります。Almide の `Int` は i64、`Float` は f64 です。より小さい幅は読み取り時に符号拡張またはゼロ拡張し、書き込み時は切り詰めます。`f16`/`f32` は最近接偶数に丸めます。
@@ -37,6 +39,8 @@ fn main() -> Unit = {
 }
 ```
 
+<a id="construction--inspection"></a>
+
 ## 構築と調査
 
 | 署名 | 目的 |
@@ -52,6 +56,8 @@ fn main() -> Unit = {
 | `bytes.get(b, i) -> Int?` | 単一バイト |
 | `bytes.compare(a, b) -> Int` | 辞書順 |
 
+<a id="slicing--combining"></a>
+
 ## 切り出しと結合
 
 | 署名 | 目的 |
@@ -66,6 +72,8 @@ fn main() -> Unit = {
 | `bytes.append_bytes(b, other)` | バッファ全体を追加（変更する） |
 | `bytes.clear(b)` | 長さ0に切り詰め（変更する） |
 
+<a id="typed-reads-and-writes"></a>
+
 ## 型付き読み書き
 
 | 系列 | 形 | 範囲外 |
@@ -78,6 +86,8 @@ fn main() -> Unit = {
 
 型 × バイト順 × 操作の全組み合わせが存在し、どれかが欠ければ `almide docs-gen --check` が失敗します。下記の署名索引に各項目があります。
 
+<a id="strings-inside-a-buffer"></a>
+
 ## バッファ内の文字列
 
 | 形 | 組み合わせ |
@@ -86,10 +96,14 @@ fn main() -> Unit = {
 | `pos` の u32 長さ接頭部付き文字列 | `bytes.next_u32_le(b, pos)`（または `_be`）、次に `bytes.next_bytes(b, p, n)` |
 | u32 長さ接頭部付き文字列を追加 | `bytes.append_u32_be(b, n)`、次に `bytes.append_bytes(b, bytes.from_string(s))` |
 
+<a id="pointer-interop"></a>
+
 ## ポインターとの相互運用
 
 `bytes` の生ポインター関数（`as_ptr`、`as_mut_ptr`、`from_raw_ptr`、`copy_to_ptr`、`data_ptr`）は方言エポック15で削除されました（ADR-0031）。`Bytes` 値は境界検査付きの [`ffi`](../../../../stdlib/ffi.md) Region として外部コードへ渡します。読み取り専用ビューは `ffi.region(b)`、外部コードまたは `ffi.write` が埋められるバッファは `ffi.alloc(n)!` です。
 
+
+<a id="signature-index-178-functions"></a>
 
 ## 原文固定スナップショットの API 索引（178関数）
 

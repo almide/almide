@@ -1,0 +1,836 @@
+<a id="module-system-specification"></a>
+
+# モジュールシステム仕様
+
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](module-system.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](module-system.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](module-system.zh-CN.md)
+
+> 非規範の固定読者用翻訳。固定原文を正本とし、自動同期、独立した実行検証・安全性監査を意味しない。最終更新日とテスト数は原文時点の記録である。拡張メソッドの比較や native/wasm 一致は原文の主張であり、新たな比較検証ではない。Region のホスト入力に関する信頼条件と呼び出し中の寿命制限を保持する。安全なラッパという表現は任意の外部コードの安全性認証ではない。一般的な自身の長さの説明と、後段のホスト申告長の例外は、勝手に統一せず保持する。
+> [Source / 原文](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/specs/module-system.md)
+
+
+> 最終更新：2026-09-30。`spec/integration/modules/`（25 テスト + 4 エラーテスト）、`spec/wasm_cross/stdlib_type_shadow.almd`、`tests/module_shadow_member_test.rs`、`tests/extern_rust_abi_test.rs`、`tests/diagnostics/e090-*` により検証済み。
+
+---
+
+<a id="1-package-structure"></a>
+
+## 1. パッケージ構造
+
+```text
+mypackage/
+  almide.toml              [package] name = "mypackage", version = "0.1.0"
+  src/
+    mod.almd               パッケージのエントリポイント
+    utils.almd             サブモジュール → mypackage.utils
+    parser.almd            サブモジュール → mypackage.parser
+    bindings/              ディレクトリ = 名前空間（mod.almd 不要）
+      python.almd          サブモジュール → mypackage.bindings.python
+      go.almd              サブモジュール → mypackage.bindings.go
+      internal/
+        helpers.almd       サブモジュール → mypackage.bindings.internal.helpers
+```
+
+**ルール:**
+- `src/mod.almd` がパッケージのトップレベル。`import mypackage` → `mypackage.func()` で呼べる
+- 同階層の `.almd` ファイル（`mod.almd`, `lib.almd`, `main.almd` を除く）が自動的にサブモジュールになる
+- サブディレクトリは名前空間として機能する。`mod.almd` がなくてもドットパスの中間ノードになる
+- 再帰的に任意の深さまでスキャンされる
+- パッケージ名は `almide.toml` の `[package] name` で定義。ソースファイル内に module 宣言は不要
+
+---
+
+<a id="2-import"></a>
+
+## 2. インポート
+
+<a id="21-構文"></a>
+
+### 2.1 構文
+
+```almide project
+// file: almide.toml
+[package]
+name = "myapp"
+version = "0.1.0"
+// file: src/mod.almd
+fn hello() -> String = "hello from myapp"
+// file: src/utils.almd
+fn helper() -> String = "helper"
+// file: pkg/src/mod.almd
+fn version() -> String = "1.0"
+// file: pkg/src/sub.almd
+fn func() -> String = "pkg.sub"
+// file: main.almd
+import pkg                    // パッケージ全体 → pkg.version()
+import pkg.sub                // 特定のサブモジュール → sub.func() で呼べる
+import pkg as p               // エイリアス → p.version()
+import self                   // 自パッケージの mod.almd → myapp.hello()(almide.toml の name)
+import self.utils             // 自パッケージのサブモジュール → utils.helper()
+
+test "every import form resolves" {
+  assert_eq(pkg.version(), "1.0")
+  assert_eq(sub.func(), "pkg.sub")
+  assert_eq(p.version(), "1.0")
+  assert_eq(myapp.hello(), "hello from myapp")
+  assert_eq(utils.helper(), "helper")
+}
+```
+
+- `import pkg.sub` は最後のセグメント名で参照可能: `sub.func()`
+- 最後のセグメント名は**そのファイルの中だけの束縛名**で、モジュールの同一性ではない。
+  モジュールの同一性は `src/` からのパス全体（`import self.a.util` は `src/a/util.almd`）なので、
+  `src/a/util.almd` と `src/b/util.almd` を別々のファイルから `import self.a.util` /
+  `import self.b.util` すればそれぞれ別のモジュールに解決される（#2654）。
+  同じファイルで両方を import すると束縛名 `util` が衝突してエラーになり、
+  片方に `import self.b.util as butil` の別名が要る
+- 選択 import `import pkg.{func}` は指定した名前だけを非修飾で束縛する。
+  同名のローカル関数との衝突は E050（暗黙の上書きはしない）。
+- ワイルドカード `import pkg.*` は不可
+- 循環インポートはコンパイルエラー
+
+<a id="22-stdlib-の-auto-import-層"></a>
+
+### 2.2 stdlib の auto-import 層
+
+名前解決には auto-import されるモジュールと、明示 import が必要なものがある。
+現在の集合は `crates/almide-types/src/stdlib_info.rs` の
+`TIER1_ALWAYS_ACCESSIBLE` / `AUTO_IMPORT_BUNDLED` が定義する。
+
+**import 文不要:** `string`, `list`, `map`, `set`, `int`, `float`, `bool`,
+`value`, `result`, `option`, `bytes`, `matrix`, `math`, `datetime`, `deque`,
+`heap`、各 sized integer / float モジュール。
+`compute` / `duration` は同様に名前を使える checker の時間・計算量サーフェス。
+
+**明示 import の例:** `json`, `regex`, `testing`, `path`, `args`, `fs`,
+`env`, `process`, `io`, `http`, `random`, `ffi`, `bigint`。
+削除された `error` モジュールはこの一覧に含まれない。
+
+Auto-import は名前解決の規則であり、すべての実装を全プログラムにリンクする意味ではない。
+Bundled source は到達性に従って読み込まれる（`bundled_reach`）。
+
+<a id="23-import-ヒントと自動修正"></a>
+
+### 2.3 import ヒントと自動修正
+
+未 import のモジュールを使った場合、コンパイラが候補を提示する。
+
+```text
+error[E003]: undefined variable 'json'
+  --> app.almd:3:11
+  hint: Add `import json` (stdlib: JSON parsing and querying)
+        Or run `almide fmt` to auto-add missing imports
+```
+
+外部パッケージ（`almide.toml` に依存あり）の場合:
+```text
+error[E003]: undefined variable 'yaml'
+  --> app.almd:5:11
+  hint: Add `import yaml` (dependency: almide/yaml)
+        Or run `almide fmt` to auto-add missing imports
+```
+
+<a id="24-almide-fmt-の-auto-import"></a>
+
+### 2.4 `almide fmt` の auto-import
+
+`almide fmt` は import 文を自動管理する（Go の `goimports` と同等）。
+
+**自動追加:**
+- 使用されているのに import がない Tier 2 stdlib モジュール → `import` を挿入
+- `almide.toml` の依存パッケージ名と一致する識別子 → `import pkg` を挿入
+- 依存パッケージのサブモジュール（`python.generate()` 等）→ `import pkg.bindings.python` を挿入
+
+**自動削除:**
+- import されているが使われていないモジュール → `import` を削除
+
+**保持:**
+- `_` prefix の import、`import self` は削除しない
+- Tier 1 は対象外（既にスコープにあるため追加しない）
+
+**サブモジュール発見:**
+依存パッケージのキャッシュディレクトリ (`~/.almide/cache/.sources/<scheme>/<host>/<owner>/<repo>/@/<ref-or-commit>/` 配下の package source（`subdir` があればその内側）) を再帰スキャンし、`.almd` ファイルの末尾セグメントと使用中の識別子を照合する。ローカルディレクトリ（`{name}/`）も検索対象。
+
+```bash
+$ almide fmt app.almd
+app.almd: Added `import json`
+app.almd: Added `import bindgen.bindings.python`
+app.almd: Removed 2 unused import(s)
+Formatted app.almd
+```
+
+---
+
+<a id="3-呼び出し"></a>
+
+## 3. 呼び出し
+
+```almide project
+// file: bindgen/src/mod.almd
+fn version() -> String = "0.1.0"
+// file: bindgen/src/scaffolding.almd
+fn generate(iface: String) -> String = "scaffold:" + iface
+// file: bindgen/src/bindings/python.almd
+fn generate(iface: String) -> String = "py:" + iface
+// file: main.almd
+import bindgen
+import bindgen.scaffolding
+import bindgen.bindings.python
+
+test "call by the last segment" {
+  let iface = "Api"
+
+  // トップレベル関数
+  assert_eq(bindgen.version(), "0.1.0")
+
+  // サブモジュール関数（最後のセグメント名で呼ぶ）
+  assert_eq(scaffolding.generate(iface), "scaffold:Api")
+
+  // 深いサブモジュール
+  assert_eq(python.generate(iface), "py:Api")
+}
+```
+
+import したモジュールの直接の関数のみアクセス可能。サブモジュールにアクセスするには別途 import する（Go, Gleam と同じ方式）。
+
+---
+
+<a id="4-モジュール境界"></a>
+
+## 4. モジュール境界
+
+**直接 import したパッケージのみアクセス可能。推移的依存は不可視。**
+
+```almide project check-fail=E003
+// file: d/mod.almd
+fn func() -> String = "d"
+// file: b/mod.almd
+import d
+fn func() -> String = "b via " + d.func()
+// file: main.almd
+import b       // b は内部で d を import している
+
+fn direct() -> String = b.func()       // ✓ 直接 import した
+fn phantom() -> String = d.func()      // ✗ E003 undefined variable 'd'
+```
+
+D を使いたければ `import D` を明示する。npm の phantom dependency 問題を防ぐ設計。
+
+<a id="41-convention-method-の越境定義1591-批准"></a>
+
+### 4.1 Convention method の越境定義(#1591 批准)
+
+**呼び出し側モジュールが、import した型に対して convention method を追加定義できる**
+(open extension — Go / Kotlin / Swift の拡張メソッドと同型)。convention method は
+UFCS の糖衣にすぎず、インスタンス解決の一貫性問題を持たないため、これは意図された
+表面である。
+
+```almide
+import self.boxlib
+
+// boxlib.Box への後付け拡張 — 合法
+fn Box.double(self) -> Int = self.n * 2
+```
+
+**ただし同一型・同名メソッドの重複定義はエラー(E012)。** 定義側と呼び出し側の
+双方が同じ `Type.method` を宣言した場合、勝者は定義されない(実測でバックエンド間の
+乖離を生んだ — #1726)。重複は check 時に両定義位置を挙げて拒否される。
+
+```almide
+// boxlib が fn Box.tag を持つとき、呼び出し側で
+fn Box.tag(self) -> String = "caller"   // ✗ E012: defined in more than one module
+```
+
+同名の**別型**(`moda.Box` と `modb.Box`)はそれぞれ独立にメソッドを持てる。
+派生メソッド(derived `repr` 等)への明示的 override は従来どおり合法(#1087)。
+
+<a id="42-stdlib-所有型と同名のユーザ型-1828"></a>
+
+### 4.2 stdlib 所有型と同名のユーザ型 (#1828)
+
+`Value` / `HttpRequest` / `HttpResponse` / `FileStat` / `ProcessStatus` /
+`Url` / `TcpStream` / `TcpListener` / `SafeHtml` / `IpAddr` / `Path` は
+stdlib モジュールが所有する型で、その**裸名が正準の同一性**である(`json.parse` の
+返り値は常に stdlib の `Value`)。台帳は `stdlib_info::STDLIB_OWNED_TYPES`
+(`tests/runtime_backed_types_matrix.rs` が bundled 宣言との一致を機械検査する)。
+
+ユーザがこの名前で型を宣言すると、その型は #433 のモジュール修飾同一性を取る —
+エントリファイルなら `self.Value`、モジュール `m` なら `m.Value` — ので、stdlib の
+シグネチャが指す型は決して置き換わらない。両者が同じファイルに共存でき、
+native と wasm で byte-identical に動く。
+
+宣言の形は問わない (#1835): opaque alias `mod type Value = String` の newtype も
+同じ `self.Value` / `m.Value` を同一性とし、コンストラクタ呼び出し `Value(s)` と
+パターン `Value(s)` はその名前を IR まで運ぶ(native の flatten mangle、wasm の
+newtype 消去、interp が一つの綴りを見る)。同じ配管で、モジュール自身の
+`mod type Token = String` も `m.Token` として構築・分解できる(以前は native が
+rustc E0531、wasm は両レグ拒否)。bundled stdlib 自身の newtype(`html` の
+`SafeHtml` 等)は裸名のままである。
+
+```almide
+import json
+type Value = { n: Int }           // これは self.Value
+
+effect fn main() -> Unit = {
+  let mine = Value { n: 7 }       // ユーザの型
+  let doc = json.parse("{}")!     // stdlib の Value
+  println("${mine.n} ${json.stringify(doc)}")
+}
+```
+
+`json.parse("{}")!.n` は E013(stdlib の `Value` にフィールドはない)で、hint がどちらの
+型かを名指しする。`let v: Value = json.parse("{}")!` は E001(`self.Value` と `Value` は
+別の型)。`${mine}` の repr はソースの綴り `Value { n: 7 }` で表示される。
+
+テスト: `spec/wasm_cross/stdlib_type_shadow.almd`,
+`tests/diagnostics/e013-stdlib-type-shadowed-*/`
+
+<a id="43-モジュール名と同名のローカル束縛-2345"></a>
+
+### 4.3 モジュール名と同名のローカル束縛 (#2345)
+
+**ローカル束縛はモジュールに勝つ。メンバアクセスでも勝つ。** `list` / `string` /
+`map` / `set` のような名前をローカルに束縛すると、そのスコープでは `x.f(..)` の
+`x` はモジュールではなく**その束縛**を指す。裸の識別子では以前からそうだったが、
+メンバ位置だけがモジュールを先に見ていた。
+
+```almide
+fn main() -> Unit = {
+  let list = [3, 1, 2]
+  println(int.to_string(list.len(list)))   // ✗ E004
+}
+```
+
+`list.len(list)` は「ローカル `list` の `len` メソッドを、引数 1 個で呼ぶ」と読まれる
+— レシーバが第一引数なので、書いた引数は第二引数になる。E004 の hint がそれを言い、
+束縛位置を secondary span で指す。修正は引数を落とすか、束縛の名前を変えるか。
+
+以前はこの形が **check を通って codegen に届き、無効な Rust を生んでいた**
+(`0.62.0` は `No errors found` と答える)。
+
+束縛の形は問わない: `let` / `var` / タプル分解 / `for` / 関数パラメータ /
+ラムダパラメータ / `match` バインダのいずれでも同じ。
+
+| 形 | 結果 |
+|---|---|
+| 明示 `import` したモジュールを覆う | ローカルが勝ち、import は死んで **E060** が出る |
+| auto-import モジュール(`list`/`string`/`map`/`set` 等)を覆う | ローカルが勝つ。**import 文が無いので何も警告しない** — 沈黙するこちらが普通の形 |
+| ローカルの型がそのメンバを持たない | **E002**(未定義メソッド) |
+| 覆っていないモジュール呼び出し | 影響なし |
+
+テスト: `tests/module_shadow_member_test.rs`(8 セル)
+
+<a id="44-variant-ケース名の見え方-2636"></a>
+
+### 4.4 variant ケース名の見え方 (#2636)
+
+**裸のケース名が見えるのは、そのファイル自身・直接 import したモジュール・同梱 stdlib
+のケースだけ。推移的依存のケースは見えない。** ファイル自身が同じ名前の型を宣言して
+いれば、裸の名前は**常にその型**を指す。
+
+```almide
+// file: finish/mod.almd
+type Finish = | Stop | Length
+// file: middle/mod.almd
+import finish
+fn describe() -> String = finish.name(finish.Stop)
+// file: main.almd
+import middle            // finish は import していない
+type Stop = { message: String }
+
+let s = Stop { message: "halt" }   // ✓ main 自身の Stop(レコード)
+```
+
+| 形 | 結果 |
+|---|---|
+| 推移的依存(import していないモジュール)のケースと同名 | 見えない。自分の型・自分の import 先だけで解決する |
+| 直接 import したモジュールのケースと、自分で宣言した型が同名 | **自分の型が勝つ**。import 先のケースは修飾して `finish.Stop` と書く |
+| 直接 import した 2 つのモジュールが同じケース名を宣言 | 裸の名前は **E019**(曖昧)。hint が `a.Stop` / `b.Stop` の修飾形を示す |
+| 直接 import した 1 つのモジュールだけが宣言 | 裸でも修飾でも書ける(従来どおり) |
+
+以前はケース名がプログラム全体で 1 つの表に載っていたため、依存ライブラリが `Stop`
+のようなありふれたケース名を足すだけで、それを import していない利用側のレコード型
+`Stop { .. }` が E021 になった。
+
+テスト: `spec/integration/modules/case_leak_transitive_test.almd`,
+`spec/integration/modules/case_leak_direct_test.almd`, `tests/ctor_ambiguity_test.rs`
+
+<a id="45-型名プロトコル名の見え方-2715"></a>
+
+### 4.5 型名・プロトコル名の見え方 (#2715)
+
+**裸の型名・プロトコル名が見えるのは、そのファイル自身・直接 import したモジュール・
+stdlib の宣言だけ。** import していないモジュール(推移的依存を含む)の型は裸では
+解決されず **E029**(`type 'X' is not in scope here`)になり、hint が import すべき
+モジュールと修飾形(`b.X`)を示す。プロトコルも同じ(`type T: P` / `[S: P]`)。
+
+| 形 | 結果 |
+|---|---|
+| 自分で宣言した型 | 自分の型(宣言順は問わない) |
+| 直接 import したモジュールのうち 1 つだけが宣言 | そのモジュールの型。import していない別モジュールが同名を宣言していても変わらない |
+| import していないモジュールだけが宣言 | **E029**。修飾して書くには、そのモジュールを import する |
+| 直接 import した 2 つ以上のモジュールが宣言 | 修飾して書く(`a.X` / `b.X`) |
+| 組み込みの型(`Int` `String` `List[T]` `Map[K, V]` など)・組み込みのプロトコル(`Eq` `Hash` `Codec` など)と同名 | 組み込みのまま。import していないモジュールが同名(`type Map` など)を宣言していても E029 にならない (#2839) |
+| 自分のファイルが組み込みの型と同名の型を宣言(`src/int.almd` の `type Int`、`main.almd` の `type Path` など) | そのファイルの中では、裸の `Int` はどの位置(シグネチャ・フィールド・レコードリテラル)でも自分の型。組み込みの `Int` はそのファイルでは書けないので、フィールドに `Int` を使う型は `type Int = { v: Int }` と書くと自己参照になる。他のファイルでは裸の `Int` は組み込みのままで、宣言した型は修飾して書く(`int.Int`)。引数つきの綴り(`Map[K, V]`)は組み込みのまま (#2858)。`type Unit` を宣言したファイルでは `main` の `-> Unit` もその型なので、組み込みの Unit を返す `main` は書けない。`check` が E044 / E001 で、どちらの `Unit` かを示して拒否する (#2880) |
+
+以前は裸の名前がプログラム全体で解決され、同名の型がいくつあるかと、モジュールの
+登録順(import 順・ディレクトリ順)で意味が変わった。触っていないファイルが、別の
+モジュールに同名の型が増えただけで壊れたり、OS によって結果が変わったりした。
+
+テスト: `tests/bare_type_visibility_test.rs`, `tests/own_type_forward_reference_test.rs`, `tests/rust_reserved_type_name_gate_test.rs`
+
+---
+
+<a id="5-ダイヤモンド依存"></a>
+
+## 5. ダイヤモンド依存
+
+```text
+main → B → D
+main → C → D
+```
+
+D は1回だけロードされ、1回だけコンパイル出力に含まれる。B と C は同じ D を参照する。
+
+```almide project
+// file: d/mod.almd
+fn shared() -> String = "from D"
+// file: b/mod.almd
+import d
+fn from_b() -> String = "B says: " + d.shared()
+// file: c/mod.almd
+import d
+fn from_c() -> String = "C says: " + d.shared()
+// file: main.almd
+import b
+import c
+import d
+
+test "one D, reached three ways" {
+  assert_eq(b.from_b(), "B says: from D")   // B 経由で D を呼ぶ
+  assert_eq(c.from_c(), "C says: from D")   // C 経由で D を呼ぶ
+  assert_eq(d.shared(), "from D")           // 直接 D を呼ぶ
+}
+```
+
+<a id="型の同一性"></a>
+
+### 型の同一性
+
+D が定義した型は、B 経由でも C 経由でも同一の型として扱われる。
+
+```almide project
+// file: d/mod.almd
+type Logger = { name: String }
+fn make_logger(n: String) -> Logger = Logger { name: n }
+fn log_name(l: Logger) -> String = l.name
+// file: b/mod.almd
+import d
+fn make_logger() -> d.Logger = d.make_logger("b")
+// file: c/mod.almd
+import d
+fn process_logger(l: d.Logger) -> String = "C got " + d.log_name(l)
+// file: main.almd
+import b
+import c
+import d
+
+test "D's type is one type through B and C" {
+  let logger = b.make_logger()                       // D.Logger 型を返す
+  assert_eq(c.process_logger(logger), "C got b")     // ✓ B が作った D.Logger を C が受け取れる
+  assert_eq(d.log_name(logger), "b")                 // ✓ 直接 D に渡すのも同じ型
+}
+```
+
+<a id="バージョン違いのダイヤモンド"></a>
+
+### バージョン違いのダイヤモンド
+
+`PkgId(name, major)` で管理。同じ `(name, major)` は1つに統一（MVS: 最大の最小バージョンを選択）。異なる major は別モジュールとして共存し、codegen でシンボル名にバージョンが付く（`pkg_v1_func`, `pkg_v2_func`）。異なる major の同名型は互換性がない。
+
+```text
+B requires D v1.x → almide_rt_D_v1_func()
+C requires D v2.x → almide_rt_D_v2_func()
+D_v1.Logger ≠ D_v2.Logger
+```
+
+---
+
+<a id="6-可視性"></a>
+
+## 6. 可視性
+
+| 修飾子 | スコープ | 例 |
+|---|---|---|
+| `fn` | public — どこからでもアクセス可 | `fn version() -> String` |
+| `mod fn` | 同一プロジェクト内のみ | `mod fn internal() -> String` |
+| `local fn` | 同一ファイル内のみ | `local fn helper() -> String` |
+
+外部から `mod fn` / `local fn` にアクセスするとコンパイルエラー:
+
+```text
+error: function 'internal' is not accessible from module 'extlib'
+  hint: 'internal' has restricted visibility
+```
+
+---
+
+<a id="7-import-self"></a>
+
+## 7. `import self`
+
+自パッケージの `src/mod.almd` を参照する。`main.almd` からライブラリ関数を呼ぶ場合に使う。
+
+```almide project
+// file: almide.toml
+[package]
+name = "mylib"
+version = "0.1.0"
+// file: src/mod.almd
+fn exported_function() -> String = "exported"
+// file: main.almd
+import self as mylib
+
+test "main reaches its own package through self" {
+  assert_eq(mylib.exported_function(), "exported")
+}
+```
+
+`almide.toml` の `name` がデフォルトのモジュール名。`as` でエイリアス可。`src/mod.almd` が存在しない場合はエラー。
+
+---
+
+<a id="8-サブモジュールの依存解決"></a>
+
+## 8. サブモジュールの依存解決
+
+サブモジュールは stdlib や他パッケージを自由に import できる。親パッケージのロード時に再帰的に解決される。
+
+```almide project
+// file: extlib/src/mod.almd
+fn info() -> String = "ext"
+// file: mypackage/src/mod.almd
+fn name() -> String = "mypackage"
+// file: mypackage/src/formatter.almd
+fn format_upper(s: String) -> String = string.to_upper(s)   // stdlib
+// file: mypackage/src/utils.almd
+import extlib
+fn describe(s: String) -> String = extlib.info() + ": " + s  // 他パッケージ
+// file: main.almd
+import mypackage.formatter
+import mypackage.utils
+
+test "a submodule's own imports resolve when the parent is loaded" {
+  assert_eq(formatter.format_upper("a"), "A")
+  assert_eq(utils.describe("x"), "ext: x")
+}
+```
+
+サブモジュール内の型チェックでは、そのサブモジュールが import した stdlib / ユーザーモジュールが正しく認識される。
+
+---
+
+<a id="9-依存管理"></a>
+
+## 9. 依存管理
+
+<a id="almidetoml"></a>
+
+### almide.toml
+
+```toml
+[package]
+name = "myapp"
+version = "0.1.0"
+
+[dependencies]
+bindgen = { git = "https://github.com/almide/almide-bindgen.git", tag = "v0.1.0" }
+json = { git = "https://github.com/almide/json.git", tag = "v2.0.0" }
+# 複数パッケージを持つリポジトリの 1 つ(#3381): subdir でディレクトリを指定
+ceangal = { git = "https://github.com/almide-graphics/ceangal2", tag = "v0.1.0", subdir = "ceangal" }
+```
+
+`subdir` の検証・lock・キャッシュ共有の規則は [package-system.md §6.1](./package-system.ja.md)。
+
+<a id="cli"></a>
+
+### CLI
+
+```bash
+almide add almide/almide-bindgen          # github.com/almide/ がデフォルト
+almide add almide/almide-bindgen@v0.1.0   # バージョン指定
+almide add user/repo                      # 任意の GitHub リポジトリ
+almide deps                               # 依存一覧
+almide dep-path bindgen                   # キャッシュディレクトリを出力
+```
+
+<a id="almidelock"></a>
+
+### almide.lock
+
+`almide.lock` は正確なコミットハッシュを記録する。`git` と `ref` が manifest と
+一致するとき、そのコミットを使う。取得元 `git` の変更は黙って再解決せず拒否し、
+`almide update <name>` で新しい取得元を明示的に再ロックする。ref の変更や未ロックの
+依存の解決も trust / `--locked` の規則に従う（[package-system](package-system.ja.md) §6.3）。
+lock は VCS にコミットすべき。
+
+lock は「第三者が同じバイト列を再構築できる」ために存在するので、記録される `(git, ref, commit)` は**実際に同時に成り立った三つ組**でなければならない。
+以前は名前だけで引いていたため、tag を上げても古いコミットのまま `ref` のラベルだけが新しい tag に書き換わり、lock は更新済みに見えてビルドは旧 tag をコンパイルしていた (#2522)。
+
+<a id="キャッシュ"></a>
+
+### キャッシュ
+
+現在の clone root は
+`~/.almide/cache/.sources/<scheme>/<host>/<owner>/<repo>/@/`。
+取得元 URL の成分を可逆にエンコードし、その下に ref / commit ごとの checkout を置く。
+同じ取得元・ref の `subdir` 依存も通常の依存も checkout を共有し、各 package の
+ディレクトリを読む。実装は `src/project_fetch.rs::dep_cache_root`。
+
+以前の name-keyed / `.src-<64bit hash>` / `.repos` 配置は履歴であり、現在は再利用しない。
+古いエントリは `almide clean` まで容量だけ占める。
+
+<a id="バージョン解決"></a>
+
+### バージョン解決
+
+**Minimal Version Selection (MVS):** 複数の依存が同じパッケージを要求する場合、要求される最小バージョンの最大値を選択。SAT ソルバー不要、決定的。
+
+---
+
+<a id="10-codegen"></a>
+
+## 10. コード生成
+
+<a id="rust-ターゲット"></a>
+
+### Rust ターゲット
+
+```rust
+// トップレベル関数
+pub fn almide_rt_mypackage_version() -> String { ... }
+
+// サブモジュール関数（ドット → アンダースコア）
+pub fn almide_rt_mypackage_utils_format(s: String) -> String { ... }
+
+// 深いサブモジュール
+pub fn almide_rt_mypackage_bindings_python_generate(iface: String) -> String { ... }
+```
+
+<a id="バージョン付き異-major-共存時"></a>
+
+### バージョン付き（異 major 共存時）
+
+```rust
+pub fn almide_rt_mypackage_v2_version() -> String { ... }
+```
+
+`IrModule.versioned_name` が設定されている場合、codegen プレフィックスに使われる。
+
+<a id="struct--enum"></a>
+
+### struct / enum
+
+```rust
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
+pub struct Logger {
+    pub level: i64,
+    pub name: String,
+}
+```
+
+`--repr-c` フラグで `#[repr(C)]` 付き出力。Module Interface JSON に ABI 情報（size, align, field offset）を含む。
+
+---
+
+<a id="11-extern"></a>
+
+## 11. @extern
+
+ターゲット固有の実装に委譲する。
+
+```almide
+@extern(rs, "std::cmp", "min")
+fn my_min(a: Int, b: Int) -> Int = if a < b then a else b   // フォールバック body
+
+@extern(rust, "std::cmp", "max")
+fn my_max(a: Int, b: Int) -> Int = if a > b then a else b // 他ターゲット用の body
+```
+
+<a id="111-externrust--の引数-abi"></a>
+
+### 11.1 `@extern(rust, …)` の引数 ABI
+
+`@extern(rust, "crate::host", "f")`（旧綴り `rs` も同じ）は `crate::host::f(..)` を呼ぶ薄いラッパを生成する。ホスト側（パッケージの `native/*.rs`）が受け取る型は引数の Almide 型だけで決まる（本体から推論しない）。読み取り専用のヒープ値は借用、スカラーと値型は所有で渡る。`String` / `List` と同じく、`Bytes` / `Matrix` も中身のスライス・値への参照で渡り、ホストが `AlmideRcCow` を見ることはない。
+
+| Almide 引数型 | ホスト側の Rust 型 |
+|---|---|
+| `Int` / `Int8`〜`Int64` / `UInt8`〜`UInt64` | `i64` / `i8`〜`i64` / `u8`〜`u64`（所有） |
+| `Float` / `Float32` / `Float64` / `Bool` / `Unit` | `f64` / `f32` / `f64` / `bool` / `()`（所有） |
+| `String` | `&str` |
+| `List[T]` | `&[T]` |
+| `Bytes` | `&[u8]` |
+| `Matrix` | `&AlmideMatrix` |
+| `Map[K, V]` / `Set[T]` | `&AlmideMap<K, V>` / `&AlmideSet<T>` |
+| 名前付きレコード `P` | `&crate::P` |
+| バリアント / `Option[T]` / `Result[T, E]` / タプル | 所有（`crate::Sh` / `Option<T>` / `Result<T, E>` / `(A, B)`） |
+| 関数値 `(A) -> B` | `&dyn Fn(A) -> B`（借用 — 呼び出し中に呼ぶ） |
+| `Handle` | `*mut u8`（所有） |
+| `Region` | **二つの引数** `(base: *mut u8, len: usize)` — 下記 |
+| `mut v: T` | `&mut T`（`mut v: Bytes` は `&mut Vec<u8>`、`mut v: Matrix` は `&mut AlmideMatrix`。書き込みは呼び出し側の `var` に copy-on-write で反映） |
+
+戻り値はその型の生成コード表現（`Int` → `i64`、`String` → `String` …）で返す。生成コードの文字列は共有バッファ `AlmideString`（ADR-0013）だが、ホストは `String` のままでよい: ラッパが境界で変換する（`String` を含む `List` / `Set` / `Map` / `Option` / `Result` / タプルの引数はホスト側の `String` 形に複製して渡し、`mut` 引数は呼び出し後に書き戻し、戻り値は `AlmideString` 形に複製する。`AlmideString` をそのまま返すホストも受け付ける）。`Bytes` / `Matrix` の戻り値は生の `Vec<u8>` / `AlmideMatrix` でよい（ラッパが `.into()` する）。
+
+```rust
+// native/host.rs
+use crate::*;
+pub fn checksum(data: &[u8]) -> i64 { data.iter().map(|b| *b as i64).sum() }
+pub fn fill(n: i64) -> Vec<u8> { vec![0u8; n as usize] }
+```
+
+```almide
+@extern(rust, "crate::host", "checksum")
+fn checksum(data: Bytes) -> Int = _
+
+@extern(rust, "crate::host", "fill")
+fn fill(n: Int) -> Bytes = _
+```
+
+規則は `extern_rust_borrow_mode`（`crates/almide-codegen/src/pass_borrow_inference_ownership.rs`）一箇所にあり、呼び出し側の借用とラッパの引数型が同じ規則を読む。
+
+`Region` 引数（ADR-0031）はホストに二つの引数として渡る: 先頭アドレス `*mut u8` と、ランタイムが保持している長さ `usize`。`@extern(c)` が C に渡す組（§11.2）、`@extern(wasm)` がホストに渡す `(base, len)` と同じ形で、ホストはランタイムの `Region` レコード型を名指ししない。長さは呼び出し側が書いた値ではなく Region 自身の長さ。読むなら `std::slice::from_raw_parts(base, len)`、書き込みは `ffi.alloc` で作った書き込み可能な Region に対してだけ許される（`ffi.region(b)` の Region は読み取り専用）。ポインタは呼び出し中だけ有効。
+
+```rust
+// native/sys.rs
+pub fn log(base: *mut u8, len: usize) {
+    let bytes = unsafe { std::slice::from_raw_parts(base, len) };
+    println!("{}", String::from_utf8_lossy(bytes));
+}
+```
+
+```almide
+import ffi
+
+@extern(wasm, "sys", "log")
+@extern(rust, "crate::sys", "log")
+fn log(buf: Region) -> Unit = _
+```
+
+`@extern(wasm)` と `@extern(rust)` を両方持つ束縛（#4353）では、どちらのホストも同じ位置に同じ二つの値を受け取る。wasm では Region 引数が `(base, len)` の import に分けられ、ネイティブ側の束縛は wasm には無関係。
+
+<a id="112-externc--の型"></a>
+
+### 11.2 `@extern(c, …)` の型
+
+`@extern(c, "lib", "f")` は `extern "C"` ブロックと安全なラッパを生成する。C を渡れる型は閉じた表（`almide_lang::types::extern_abi`）で、チェッカとレンダラが同じ表を読む。
+
+| Almide | C 側 |
+|---|---|
+| `Int` | `int`（`i32`、`as` で縮小） |
+| `Int8`〜`Int64` / `UInt8`〜`UInt64` | 同じ幅の整数 |
+| `Float` / `Float64` / `Float32` | `double` / `double` / `float` |
+| `Bool` | `int`（1 / 0） |
+| `Handle` | `*mut u8`（不透明な foreign token） |
+| `Region`（引数） | `uint8_t *` と `size_t` の二引数 — 先頭アドレスとランタイムが保持する長さ（ADR-0031 D3） |
+| `Region`（戻り値） | `@region(len = …, release = "…")` で長さと解放を宣言したポインタ |
+| `String`（引数のみ） | `*const u8` — 最初の NUL までの NUL 終端コピー、呼び出し中のみ有効 |
+| `Unit`（戻り値のみ） | `void` |
+
+それ以外の型（リスト・`Bytes`・マップ・レコード・バリアント・`Option`・タプル・関数値・`String` の戻り値）と `mut` 引数は C 表現を持たず、`check` が E090 で拒否する。そうした値は §11.1 の `@extern(rust)` シム経由で渡す。
+
+```almide
+@extern(c, "m", "sqrt")
+fn c_sqrt(x: Float) -> Float = _
+```
+
+テスト: `tests/extern_rust_abi_test.rs`（`rust` / `rs` / `c` の各ターゲット × 全引数型。rust 系は上の表のホスト型で一つのパッケージにまとめてビルド・実行、c は `extern "C"` のホスト関数で往復し、表にない型は一つずつ E090 になることを確かめる。`Ty` の全バリアントがどの行で被覆されるかは網羅 match で固定）、`tests/diagnostics/e090-*`。
+
+<a id="113-ホストとの境界での-regionadr-0031-補遺4354"></a>
+
+### 11.3 ホストとの境界での `Region`（ADR-0031 補遺、#4354）
+
+`Region` はホスト境界を**先頭アドレスと長さの二つの値** `(base, len)` で渡る。長さは常に Region 自身が保持している値で、呼び出し側が書いた数ではない。wasm では二つの値はメモリのアドレス幅で渡る: wasm32 では `i32` 二つ、memory64 では `i64` 二つ（今のエミッタは 32 ビットのメモリだけを宣言する）。ネイティブのホストは `(*mut u8, usize)`（`@extern(rust)`、§11.1）／`(uint8_t *, size_t)`（`@extern(c)`、§11.2）で受け取る。どの方向でも `Bytes` へのコピーは起きない。
+
+| 形 | 渡り方 | 所有と寿命 |
+|---|---|---|
+| `@export(wasm)` fn が `Region` を**返す**（push） | マルチバリューの戻り値 `(ptr, len)`。ビューのデータ先頭と長さで、Region レコードのアドレスではない | ホストがブロックの参照を一つ持つ。ホストが `ptr` をモジュールの `__region_release` に返すまでブロックは解放されず、場所も動かない。返さなければインスタンスの寿命まで残る（漏れであって、ぶら下がりではない） |
+| 同上、`ffi.slice` の部分 Region を返す | 親ブロック内の自分のアドレスと長さ | モジュール内の表がアドレス→ブロックを引く。部分 Region の参照が残る間は親も生きる。表にないアドレス（解放済み・未発行）の解放は trap、0 の解放は何もしない。空の Region は `(0, 0)` |
+| `@export(wasm)` fn が `Region` を**受け取る** | ホストが `(base, len)` を渡す（import に渡すのと同じ組） | 呼び出しの間だけ貸される読み取り専用の Region。何も所有せず、長さはホストの申告（信頼する一行）。アクセスはその長さで境界検査される。本体が top-level `var` に入れる・返す・クロージャに捕まえるのは E119 |
+| `@extern(wasm)` に `Region` を渡す（pull） | import の引数 `(base, len)` | 呼び出しの間だけ貸す。`ffi.alloc` の書き込み可能な Region ならホストがその場で書き込み、プログラムが読み戻す |
+| `@export(c)` fn が `Region` を受け取る | `(const uint8_t *, size_t)`、`@region(out = p)` なら `(uint8_t *, size_t)` で書き込み可 | 呼び出しの間だけ貸す。逃がすのは E119、それ以外の経路で残れば呼び出し後にプロセスを止める |
+| `@export(c)` fn が `Region` を返す | なし — `check` が E090 で拒否する | C の呼び出し側が解放できる形がないため。呼び出し側のバッファを `@region(out = p)` で受け取る |
+
+書き込める Region は `ffi.alloc` のものだけ（`ffi.region(b)` と `ffi.slice` は読み取り専用）。ホストが push で受け取った `ffi.alloc` の Region に書き込み、次の export がプログラム側のコピー（top-level `var`）を通して読む。
+
+```almide
+import ffi
+
+var inbox: Region = ffi.region(bytes.new())
+
+@export(wasm, "inbox_open")
+effect fn inbox_open(n: Int) -> Region = {
+  inbox = ffi.alloc(n)!
+  inbox
+}
+
+@export(wasm, "inbox_show")
+effect fn inbox_show() -> Unit = println(bytes.to_string_lossy(ffi.read(inbox, 0, ffi.len(inbox))!))
+```
+
+```js
+const [ptr, len] = instance.exports.inbox_open(16n);   // i32 二つ
+new Uint8Array(instance.exports.memory.buffer, ptr, len).set(data);
+instance.exports.inbox_show();
+instance.exports.__region_release(ptr);                // ホストの参照を返す
+```
+
+`--host js` のグルーは Region を返す export を `f(…) → [ptr, len]` で包み、`regionRelease(ptr)` を足す。Region を受け取る export は `f(…, base, len, …)` になる。
+
+仕組み: `crates/almide-wasm/src/extern_region.rs`（IR 書き換え: 受け取りは `ffi.__lend` を呼ぶラッパ、返却は `ffi.__export_view` を返すラッパ）と `crates/almide-wasm/src/region_export.rs`（アダプタ・アドレス表・`__region_release`）。テスト: `spec/wasm_host_js/region_export_push.almd`（push、部分 Region と解放、受け取り）、`spec/wasm_host_js/region_extern_pull.almd`（pull）、`crates/almide-wasm/tests/ffi_host_boundary.rs`、`tests/ffi_host_boundary_test.rs`（E119、`@export(c)`）。
+
+---
+
+<a id="12-ファイル解決順序"></a>
+
+## 12. ファイル解決順序
+
+`import pkg` の解決:
+
+1. `{base_dir}/pkg.almd`
+2. `{base_dir}/pkg/mod.almd`
+3. `{base_dir}/pkg/src/mod.almd`
+4. `{base_dir}/pkg/src/lib.almd` (非推奨)
+5. `almide.toml` の `[dependencies]` → `~/.almide/cache/.sources/<encoded-source>/@/<ref-or-commit>/...`
+   （`subdir` 依存はその checkout 内の指定ディレクトリ）
+
+依存パッケージの `src/mod.almd` が見つかった場合、同ディレクトリのサブモジュールとサブディレクトリを再帰スキャン。
+
+---
+
+<a id="テスト"></a>
+
+## テスト
+
+| ファイル | テスト数 | カバー範囲 |
+|---|---|---|
+| `spec/integration/modules/diamond_test.almd` | 11 | ダイヤモンド依存、型同一性、サブモジュール（個別import） |
+| `spec/integration/modules/alias_test.almd` | 5 | import alias: トップレベル、サブモジュール、深いネスト、型生成 |
+| `spec/integration/modules/submodule_call_test.almd` | 7 | サブモジュール（Go方式: 個別import + 最後セグメント名で呼び出し） |
+| `spec/integration/modules/vis_effect_test.almd` | 2 | effect fn のクロスモジュール呼び出し |
+| `spec/integration/modules/vis_mod_error_test.almd` | error | `mod fn` の外部アクセス拒否 |
+| `spec/integration/modules/vis_local_error_test.almd` | error | `local fn` の外部アクセス拒否 |
+| `spec/integration/modules/phantom_dep_error_test.almd` | error | 推移的依存の直接アクセス拒否 |
+| `spec/integration/modules/deep_phantom_test.almd` | error | 推移的依存のサブモジュールアクセス拒否 |
+
+<a id="テスト用パッケージ"></a>
+
+### テスト用パッケージ
+
+| パッケージ | 構造 | 目的 |
+|---|---|---|
+| `mylib` | mod.almd + parser + formatter + utils | サブモジュール基本 |
+| `deeplib` | mod.almd + http/mod.almd + http/client.almd | 3段ネスト |
+| `dmod_b`, `dmod_c`, `dmod_d` | B→D, C→D のダイヤモンド。D に型定義 + サブモジュール | ダイヤモンド + 型同一性 |
+| `dmod_d/nested/deep.almd` | 4段ドット呼び出し | mod.almd なしディレクトリの名前空間 |
+| `extlib` | fn + mod fn + local fn | 可視性 |
+| `effectlib` | effect fn + pure fn | エフェクト関数 |
+| `nomod_lib` | parser.almd のみ（mod.almd なし） | トップレベルなしパッケージ |

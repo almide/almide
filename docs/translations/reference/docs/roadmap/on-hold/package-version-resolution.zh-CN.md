@@ -1,3 +1,5 @@
+<a id="dependency-version-constraints"></a>
+
 # 依赖版本约束
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](package-version-resolution.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](package-version-resolution.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](package-version-resolution.zh-CN.md)
@@ -11,6 +13,8 @@
 
 说明：在已提供的 MVS 解析器之外，尚余的依赖范围语义和可用版本选择。
 
+<a id="shipped-foundation"></a>
+
 ## 已提供的基础
 
 MVS、semver 排序、锁文件和 `almide update` 已经实现。当前行为应归入 [包系统规范](../../../../../specs/package-system.md)，而不是另一份实施计划：
@@ -18,6 +22,8 @@ MVS、semver 排序、锁文件和 `almide update` 已经实现。当前行为�
 - 对于同一包身份，选择请求的最大版本；不同主版本可以共存。`src/project_fetch.rs::semver_of` 和依赖遍历实现了这一点。`tests/mvs_resolution_test.rs` 固定测试选择行为及其与声明顺序无关的性质。
 - `almide.lock` 为每个直接依赖记录选定检出内容的来源、ref 和提交。`tests/dep_lock_pairing_test.rs` 和 `tests/lock_roundtrip_test.rs` 覆盖所选版本的配对和格式。
 - `almide update [dep]` 推进浮动 ref；固定的标签不会推进。参见 [CLI 参考](../../../../../specs/cli.md#almide-update) 和 `src/project_fetch.rs::update_locked_deps`。
+
+<a id="remaining-proposal--on-hold"></a>
 
 ## 剩余提案 — 暂缓
 
@@ -29,6 +35,8 @@ MVS、semver 排序、锁文件和 `almide update` 已经实现。当前行为�
 - 决定新选版本所需的完整性元数据；注册表来源追溯由 [中央注册表工作](../../../../../roadmap/on-hold/package-registry.md) 负责。
 
 不要仅为实现此提案就添加第二个 semver 解析器或替换现有锁格式。复用现有基础并扩展其可执行测试。
+
+<a id="design-references"></a>
 
 ## 设计参考
 

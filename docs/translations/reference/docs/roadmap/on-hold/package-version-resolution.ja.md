@@ -1,3 +1,5 @@
+<a id="dependency-version-constraints"></a>
+
 # 依存関係のバージョン制約
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](package-version-resolution.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](package-version-resolution.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](package-version-resolution.zh-CN.md)
@@ -11,6 +13,8 @@
 
 説明: 提供済み MVS リゾルバーを超える、依存範囲の意味論と利用可能なバージョン選択の残る作業。
 
+<a id="shipped-foundation"></a>
+
 ## 提供済みの基盤
 
 MVS、semver の順序づけ、ロックファイル、`almide update` は実装済みである。現在の動作は 2 つ目の実装計画ではなく、[パッケージシステム仕様](../../../../../specs/package-system.md) に属する。
@@ -18,6 +22,8 @@ MVS、semver の順序づけ、ロックファイル、`almide update` は実装
 - 同じパッケージ識別子に対しては、要求された最大バージョンが選ばれる。異なるメジャーバージョンは共存する。`src/project_fetch.rs::semver_of` と依存関係の走査がこれを実装する。`tests/mvs_resolution_test.rs` が選択と宣言順序への非依存性を固定して検証する。
 - `almide.lock` は直接依存ごとに、選択したチェックアウトの取得元、ref、コミットを記録する。`tests/dep_lock_pairing_test.rs` と `tests/lock_roundtrip_test.rs` は選択バージョンの対応づけと形式を検証する。
 - `almide update [dep]` は追従型 ref を進める。タグによる固定は進めない。[CLI リファレンス](../../../../../specs/cli.md#almide-update) と `src/project_fetch.rs::update_locked_deps` を参照。
+
+<a id="remaining-proposal--on-hold"></a>
 
 ## 残る提案 — 保留中
 
@@ -29,6 +35,8 @@ MVS、semver の順序づけ、ロックファイル、`almide update` は実装
 - 新たに選択するバージョンに必要な完全性メタデータを決める。レジストリの来歴は [中央レジストリの作業](../../../../../roadmap/on-hold/package-registry.md) が担当する。
 
 この提案を実装するためだけに 2 つ目の semver パーサーを追加したり、既存のロック形式を置き換えたりしない。既存の基盤を再利用し、その実行可能テストを拡張する。
+
+<a id="design-references"></a>
 
 ## 設計の参考資料
 

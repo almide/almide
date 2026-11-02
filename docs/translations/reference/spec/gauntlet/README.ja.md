@@ -1,3 +1,5 @@
+<a id="the-ddd-gauntlet"></a>
+
 # DDD gauntlet
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](README.zh-CN.md)
@@ -15,6 +17,8 @@
 ```
 
 この試みから 24 件の欠陥を追跡しました（#1539、#1547、#1549–#1583）。既存実装では 22 件が解決し、2 件が未解決です。価値は修正そのものではありません。**適合性コーパスを再実行するだけでは一件も到達できなかった**こと、そして複数件が姿を変えた同じ誤りだったことです。
+
+<a id="1-the-closure-target-moved"></a>
 
 ## 1. 完了条件が移動した
 
@@ -37,7 +41,11 @@ spec/wasm_cross/fuel_cut_in_arm_loop.almd                 tests/nested_package_i
 
 **教訓は「数字を増やせ」ではありません。** コーパスは、すでに判断した事項の閉じた列挙です。誰も発見するプログラムを書いていない欠陥は含められません。それに依拠して完了を主張するなら、その限界を明示すべきです。Greenfield 版のゲートには第二軸が必要です。*tracker から収穫するのでなく、言語に対して書く、実プログラム形状の受入スイート*です。このディレクトリが出発点です。
 
+<a id="2-the-defect-classes-and-the-invariant-that-kills-each"></a>
+
 ## 2. 欠陥のクラスと、それぞれを排除する不変条件
+
+<a id="a-check-accepts-the-backend-cannot-emit-it--the-dominant-class"></a>
 
 ### A. `check` は受理するが backend は出力できない — 最大のクラス
 
@@ -56,17 +64,23 @@ spec/wasm_cross/fuel_cut_in_arm_loop.almd                 tests/nested_package_i
 
 **不変条件**: 型の正しいプログラムは出力可能でなければなりません。backend が lower できない形状は、*check 時にソースレベルの診断で拒否*します。受理してから後段で失敗させてはいけません。上の各行は、何が言語なのかについて frontend と backend が不一致な例です。Greenfield は一致を強制する場所を示せるべきであり、ユーザーを待たず、不一致を fuzz するゲートを持つべきです。
 
+<a id="b-names-resolved-from-the-wrong-namespace--a-recurring-family"></a>
+
 ### B. 間違った名前空間から名前を解決 — 繰り返す系列
 
 上の `c7`/`c8` に加え、`#1558`（リンクされた stdlib fn と裸の名前が同じユーザー fn が、書換えから黙って除外された。`fn replace` は wall、`fn bump` は実行）と、既存実装の以前の `#1087` です。毎回同じ形状です。**裸の名前を、別モジュールも書き込むテーブルで検索しています。** 影響範囲は見えず（どのモジュールをリンクしたかに依存）、安定しません（`import` の追加で無関係な関数が変わる）。
 
 **不変条件**: 解決のキーは解決済みの識別情報であり、裸の表記ではありません。パスが名前をキーにする必要があれば、キーにスコープを含めます。一文字の型名も普通の名前です。
 
+<a id="c-silent-wrong-value--exactly-one"></a>
+
 ### C. 黙って間違った値 — ちょうど一件
 
 `w1_qq_record_fallback`: record literal の fallback を持つ `Result[record, String]` に対する `??` が、間違った値を読みました。この集合で拒否でなく誤答した唯一の行です。fuzzer ではなく、*フィクスチャを広げる*ことで見つかりました。
 
 **不変条件**: payload クラスに対応できない経路は処理を断ります。router の失敗は wall であるべきで、誤読であってはなりません。
+
+<a id="d-surface-holes-the-writer-trips-over--2-fixed-5-still-unfiled"></a>
 
 ### D. 書き手がつまずく表層の穴 — 2 件修正、5 件まだ未起票
 
@@ -82,11 +96,15 @@ spec/wasm_cross/fuel_cut_in_arm_loop.almd                 tests/nested_package_i
 
 **greenfield の不変条件**: これは bug ではなく設計判断です。意図的に決めてください。`self` の意味はどの位置でも同じにします。protocol の意味も一様にします（bound だけか、型でもあるか）。どの表記を正規形とするにせよ、他方が解析できる場所では正規形も解析できなければなりません。
 
+<a id="e-cross-target-parity-is-a-matrix-and-it-was-closed-cell-by-cell"></a>
+
 ### E. クロスターゲット同等性はマトリクスであり、セルごとに閉じられた
 
 `x01`–`x16` は native で動き、wasm 側が追いつく必要があった形状です。学びになるのは*バーンダウンの形*です。五つの別 issue（`#1547 → #1564 → #1578 → #1579 → #1580 → #1581 → #1583`）が、結局一つのマトリクス（payload 種類 × producer × 表記 × 位置）のセルを一つずつ閉じました。毎回、完了コミットの文言（"completing the matrix cells"）が実際にカバーした範囲を超えて一般化し、次の probe が隣のセルを発見しました。
 
 **不変条件**: 系列は、報告された一例の修正ではなく、*セルを列挙する実行可能なマトリクスゲート*で完了します。既存実装は stdlib API について `CLAUDE.md` にこの規則を掲げています（"API families are extended by matrix, never point-wise… a gated matrix cannot drift"）。単に codegen 系列には適用されていませんでした。Greenfield は構造的な規則にすべきです。lowering 経路が対応セルを宣言し、ゲートがその宣言を検査します。
+
+<a id="3-what-the-verification-process-taught--the-most-transferable-part"></a>
 
 ## 3. 検証プロセスの教訓 — 最も転用できる部分
 
@@ -102,6 +120,8 @@ spec/wasm_cross/fuel_cut_in_arm_loop.almd                 tests/nested_package_i
 
 5. **wall メッセージは機構でなく原因を示すべきです。** `#1558` の wall は "mut params are not in this brick" と言いましたが、実際の修正は*関数名を変える*ことでした。そのメッセージから書き手は対処にたどり着けません。
 
+<a id="4-current-snapshot-incumbent--4e5a15696"></a>
+
 ## 4. 現在のスナップショット（既存実装 @ `4e5a15696`）
 
 ```
@@ -110,11 +130,15 @@ clean rows: 25    rows with a check/native/wasm gap: 9
 
 9 件の内訳は、五つの未起票の表層の穴（`s3`–`s7`）、意図的な wasm decline 一つ（`x09`、`List[record]` 要素）、`x13`（record-literal field 内の call/operator/interpolation の下に入れ子になった `!` — **#1583、未解決**）、そして二つの layered package です。後者は `x13`（functional port）と `#1576`（mut port — `mut`-param の err-path 意味論に正式決定が必要。callee が変更後に `err` を返したとき caller の引数は何を保持するのか）で止まっています。`#1576` は構造的経路（0.61.2）で正式決定され解決しました。err が write-back より前に伝播するため、caller の slot は呼出し前の束縛を保持し、`pkg/mut_port` は下記 greenfield gate で native とバイト同一に動きます。#1871 は 2026-09-30 に逆方向（(B)、write visible、#2917）を採用しました。err arm も buffer を運ぶため、err より前の書込みは native と同様 caller に届きます。`cells/x18` がこれを固定します。
 
+<a id="5-what-to-do-with-this-here"></a>
+
 ## 5. ここで何をするか
 
 - greenfield が表層を扱えるようになったらすぐ `./run.sh` を実行します。各行は合成した edge case ではなく、実プログラムが生んだ形状です。
 - §2 の不変条件を bug リストではなく設計レビューの問いとして扱います。frontend と backend が一つの言語に一致し、識別情報で解決し、系列をマトリクスで閉じる設計では、これらの多くのクラスは表現できなくなります。
 - 五つの未起票の表層の穴（`s3`–`s7`）は、既存実装の未解決の言語上の問いです。Greenfield は現在の偶然を引き継がず、一度、意図的に答えを決められます。
+
+<a id="6-the-greenfield-gate-2026-08-26"></a>
 
 ## 6. greenfield gate（2026-08-26）
 

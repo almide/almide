@@ -18,6 +18,8 @@
 > [almide-graphics/nn](https://github.com/almide-graphics/nn) 包（模块 `nn.kernels`）。此 crate 现包含 `matmul`、
 > `scale`、`transpose`、`transpose_f64` 和 `bridge`。下面的 q1_0 测量与证明是那项工作的记录；代码在 git 历史中。
 
+<a id="at-a-glance"></a>
+
 ## 概览
 
 ```
@@ -38,6 +40,8 @@ Standalone: zero deps, 16 tests green, builds native + wasm
 
 这是用 Rust 实现、原生面向 Almide 的 Exo 路线（算法/调度分离 + 构造即正确）；对于置换/选择内核，它*比 Exo 更轻量*（无需 SMT 求解器；该结构可判定）。
 
+<a id="the-form"></a>
+
 ## 组织形式
 
 ```
@@ -53,6 +57,8 @@ differential test       = bridge       : SIMD == the same naive reference Wyve
 
 Wyve 不参与链接（没有 Racket/wyvec/LLVM-clang 构建依赖）。它是*证明*内核的地方，而此 crate 是*交付*内核的地方。新内核的流程：在 Wyve 中设计并证明 → 在此移植为 Rust → 用差分测试验证逐位精确一致。
 
+<a id="kernels"></a>
+
 ## 内核
 
 | 内核 | 实现 | 正确性 | 速度 |
@@ -60,6 +66,8 @@ Wyve 不参与链接（没有 Racket/wyvec/LLVM-clang 构建依赖）。它是*�
 | `transpose_8x8` | wasm simd128 shuffle；其他目标用普通分块（x86 AVX 的 3 遍网络没有服务任何程序，已随其 `unsafe` 一起移除，#4342） | 逐位精确一致，100 种模式 | AVX 测得 **默认 1.57× / native 4.23×**；普通分块比它慢 1.28×（GCE Intel，2026-10-30） |
 | `scale` | 朴素实现（自动向量化）；仅用于测量的 `scale_avx` 已移除（#4342） | 逐位精确一致（avx == naive） | **native 0.99×** → 保留朴素实现 |
 | `q1_0_dot` | AVX2 位解包 + 带符号求和 + 归约 | 容差范围内（重结合归约） | **3.5×（默认和 native 均如此）** |
+
+<a id="beating-rust--where-and-the-right-correctness-bar"></a>
 
 ### 在哪里超越 Rust，以及正确性应采用什么标准
 
@@ -72,6 +80,8 @@ scale (elementwise)   : 1.0× native, bitwise-exact     — autovec already wins
 优势恰好来自 rustc 自动向量化器受到*结构性*阻碍的地方：shuffle 网络和打包位寻址。无论 target-cpu 如何，q1_0 都以 3.5× 超越 Rust；自动向量化无从下手，因此基线始终无法赶上。
 
 正确性标准取决于操作：**数据移动（transpose）→ 逐位精确一致**；**归约（q1_0）→ 容差范围内**，因为 SIMD 调度重新结合了浮点求和（误差界是*各项绝对值之和*，不是 |result|；结果可能相消到接近零）。为每个操作选择合适的标准才是应遵守的原则。
+
+<a id="static-equivalence--exos-idea-lighter-for-permutations"></a>
 
 ### 静态等价 — Exo 的思想，置换时更轻量
 
@@ -111,6 +121,8 @@ q1_0 correctness:  sign placement → PROVEN (256 exhaustive)
 - 浮点归约（q1_0 求和）→ 与指定顺序逐位一致 + 有界误差
 没有任何部分仍停留在“承诺”。
 
+<a id="4-quadrant-beat-rust-and-almide-on-native-and-wasm-q1_0"></a>
+
 ### 4 象限：在 native 和 wasm 上同时超越 Rust 和 Almide（q1_0）
 
 |               | native (AVX2) | wasm (simd128) |
@@ -144,6 +156,8 @@ almide-kernel 提供**各目标 SIMD**（x86 AVX/AVX2、wasm simd128）及朴素
 
 这就是 `almide_rt` 接入的核心：将任意矩阵分块映射到固定尺寸的 SIMD 内核。
 
+<a id="the-abi-shape-decides-the-simd-win-measured"></a>
+
 ### ABI 形态决定 SIMD 的收益（已测量）
 
 `bridge.rs` 是完整接入（`Vec<Vec<f64>>` → 内核 → `Vec<Vec<f64>>`），逐位精确一致。但在 512×512 下，**同一内核**测得：
@@ -159,6 +173,8 @@ almide-kernel 提供**各目标 SIMD**（x86 AVX/AVX2、wasm simd128）及朴素
 
 AVX 转置复现了 Wyve 已验证的 3 遍 shuffle 网络（解包相邻行 → shuffle 64-bit 组 → 置换 128-bit 通道）。
 
+<a id="the-design-rule-confirmed-by-measurement"></a>
+
 ### 经测量确认的设计原则
 
 ```
@@ -169,6 +185,8 @@ elementwise (scale)       : autovec ties explicit AVX at target-cpu=native
 ```
 
 `scale` 在*默认*构建下的 1.23× 是假象：自动向量化被限制在 SSE2 基线。到了 `target-cpu=native` 就是平局。所以 almide-kernel 只在自动向量化器*结构上*无法跟进的地方编写显式 SIMD，即数据移动。其余保持朴素实现。（元素级速度的修复在于 Almide 构建标志，而非此 crate 中的额外形式。）
+
+<a id="exo-style-algorithm--schedule-separation"></a>
 
 ## Exo 风格：算法 / 调度分离
 
@@ -193,11 +211,15 @@ store(pass_permute(pass_shuffle(pass_unpack(load(input)))))
 
 测量结果：拆成具名 pass 后仍逐位精确一致，性能为 4.19x（单一整体时为 4.23x）；`#[inline(always)]` 消除了组合开销。调度显式、可重新组合，运行时成本为**零**。
 
+<a id="why-a-separate-crate"></a>
+
 ## 为什么单独建 crate
 
 - **没有依赖，无需注入 prelude** — 可独立构建和测试。
   （`almide_rt` 不行：其 src 假定 Almide 的 prelude 会注入 `use` 项，因此只能在完整流水线内编译。此 crate 是普通 Rust。）
 - `almide_rt` 为**数据移动操作**（转置、shuffle）调用它，这些操作即使在 native 上，显式 SIMD 也能超越自动向量化器；这正是实测确认的 Wyve 优势所在。
+
+<a id="bench-honesty"></a>
 
 ## 基准测试的诚实性
 
@@ -206,6 +228,8 @@ store(pass_permute(pass_shuffle(pass_unpack(load(input)))))
 2. 把全部 64 个输出求和会让 `sum` 占据主导，掩盖转置差异（1.03×）。
 
 `black_box(&o)` 配合每次迭代变化的输入，强制计算并存储完整转置，仅测量 shuffle 网络：**1.57×**。务必检查微基准没有在测 DCE 或错误的热循环。
+
+<a id="run"></a>
 
 ## 运行
 

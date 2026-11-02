@@ -2,9 +2,11 @@
 
 Snapshot: 9a95b28519b90ae535dc9918bfed04805dc4675c. Read-only repository inspection, 2026-11-02. 80 originally “Handwritten documentation — consumer audit pending” rows. No repository edits made by this audit.
 
+Inert agent-instruction and embedded-template readers use the documented `.reader` aliases and routing listed in the inventory rather than creating new auto-discovered instructions. Canonical instruction and template files remain unchanged.
+
 ## Current reader layout and coverage (2026-11-02)
 
-The inspection below is historical evidence at its stated snapshot, not a fresh CI-policy guarantee. Current cumulative phases 1–7 supply 229 of the frozen 556 inventory rows; 327 remain pending. There are 210 separate reader groups (630 files), 16 retained English-source adjacent sibling groups, and the 3 preserved root README variants. See [the per-file inventory](TRANSLATION-INVENTORY.md) for current language links and completion status.
+The inspection below is historical evidence at its stated snapshot, not a fresh CI-policy guarantee. All 556 frozen inventory rows now have existing translations or supplied reader variants. There are 537 separate reader groups (1611 files), 16 retained English-source adjacent sibling groups, and the 3 preserved root README variants. This is coverage of the frozen inventory, not a promise that later upstream changes are synchronized or independently validated. See [the per-file inventory](TRANSLATION-INVENTORY.md) for current language links and completion status.
 
 Reader naming is now consistently `name.md` (English), `name.ja.md` (Japanese), and `name.zh-CN.md` (Simplified Chinese). Protected originals—including Japanese/mixed-language sources, diagnostics, generated API inputs, normative specifications, roadmap items and immutable history—are not renamed or treated as English merely because they end in `.md`. Their reading variants use `docs/translations/reference/<full-source-path-stem>{,.ja,.zh-CN}.md`, outside canonical discovery globs. The earlier language-directory and `.en.md` reader layout is retired. No generator, registry, source code or CI changes are part of this migration; existing consumer evidence still requires checks against the selected checkout.
 
@@ -13,8 +15,8 @@ Reader naming is now consistently `name.md` (English), `name.ja.md` (Japanese), 
 
 - Word count means whitespace-separated tokens; not a reliable Japanese linguistic word count. Character count included. Language is a character-assisted provisional label unless prose review is stated; English code tokens do not make a Japanese source English.
 - Exact full-path references searched across tests/, src/, crates/, scripts/, build.rs (all non-Markdown file types). Generic Markdown enumeration was additionally inspected; known enumerators target stdlib/diagnostics/specs/als rather than design/project/wasm. This is not proof that no indirect or external consumer exists.
-- No-reference results are not automatically safe. “Candidate” means a reader translation is plausible after the stated inspection, not certification of all build consumers. Unreviewed bodies remain Pending. No CI changes proposed or made.
-- Current scripts/ci_prose.py:29–65 recognizes fixed root/top-level names and design/project directories; new top-level localized siblings, mcp, wasm are outside its narrow lane. That may run full CI. Do not change the classifier in this task.
+- No-reference results are not automatically safe. “Candidate” means a reader translation is plausible after the stated inspection, not certification of all build consumers. The Pending labels in the original per-file inspection remain historical consumer-audit results; current reader coverage is stated separately. A completed body translation does not prove the absence of indirect consumers. No CI changes proposed or made.
+- At this audit snapshot, scripts/ci_prose.py:29–65 recognizes fixed root/top-level names and design/project directories; new top-level localized siblings, mcp, wasm are outside its narrow lane. That may run full CI. Do not change the classifier in this task.
 - The original audit did not duplicate parallel translations of SECURITY.md, docs/mcp.md and docs/design/EQUIVALENCE.md. Those reader groups are now supplied; current status is recorded per file below.
 
 ## Significant reclassifications
@@ -24,7 +26,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
 ## Per-file routing
 
 ### `SECURITY.md`
-- Current reader status: **Supplied** — [en](../../SECURITY.md) / [ja](../../SECURITY.ja.md) / [zh-CN](../../SECURITY.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../../SECURITY.md) / [ja](../../SECURITY.ja.md) / [zh-CN](../../SECURITY.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 391 whitespace tokens / 2875 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -33,7 +35,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `scripts/test_ci_prose.py:103:        for path in ["README.md", "CLAUDE.md", "SUPPORT.md", "SECURITY.md", "docs/SPEC.md",`
 
 ### `crates/README.md`
-- Current reader status: **Supplied** — [en](../../crates/README.md) / [ja](../../crates/README.ja.md) / [zh-CN](../../crates/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../../crates/README.md) / [ja](../../crates/README.ja.md) / [zh-CN](../../crates/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 547 whitespace tokens / 4398 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -41,7 +43,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `crates/almide-egg-lab/README.md`
-- Current reader status: **Supplied** — [en](../translations/reference/crates/almide-egg-lab/README.md) / [ja](../translations/reference/crates/almide-egg-lab/README.ja.md) / [zh-CN](../translations/reference/crates/almide-egg-lab/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/crates/almide-egg-lab/README.md) / [ja](../translations/reference/crates/almide-egg-lab/README.ja.md) / [zh-CN](../translations/reference/crates/almide-egg-lab/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 795 whitespace tokens / 5699 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -49,7 +51,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `crates/almide-kernel/README.md`
-- Current reader status: **Supplied** — [en](../translations/reference/crates/almide-kernel/README.md) / [ja](../translations/reference/crates/almide-kernel/README.ja.md) / [zh-CN](../translations/reference/crates/almide-kernel/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/crates/almide-kernel/README.md) / [ja](../translations/reference/crates/almide-kernel/README.ja.md) / [zh-CN](../translations/reference/crates/almide-kernel/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 1874 whitespace tokens / 12898 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -57,6 +59,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `crates/almide-perceus-belt/README.md`
+- Current reader status: **Supplied** — [en](../translations/reference/crates/almide-perceus-belt/README.md) / [ja](../translations/reference/crates/almide-perceus-belt/README.ja.md) / [zh-CN](../translations/reference/crates/almide-perceus-belt/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 2 whitespace tokens / 21 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -64,6 +67,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `crates/almide-wasm-vm/REQUIREMENTS.md`
+- Current reader status: **Supplied** — [en](../translations/reference/crates/almide-wasm-vm/REQUIREMENTS.md) / [ja](../translations/reference/crates/almide-wasm-vm/REQUIREMENTS.ja.md) / [zh-CN](../translations/reference/crates/almide-wasm-vm/REQUIREMENTS.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 1373 whitespace tokens / 8657 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -71,7 +75,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `demo/make-verify/README.md`
-- Current reader status: **Supplied** — [en](../translations/reference/demo/make-verify/README.md) / [ja](../translations/reference/demo/make-verify/README.ja.md) / [zh-CN](../translations/reference/demo/make-verify/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/demo/make-verify/README.md) / [ja](../translations/reference/demo/make-verify/README.ja.md) / [zh-CN](../translations/reference/demo/make-verify/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 846 whitespace tokens / 5481 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -79,7 +83,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/ARCHITECTURE.md`
-- Current reader status: **Supplied** — [en](../translations/reference/docs/ARCHITECTURE.md) / [ja](../translations/reference/docs/ARCHITECTURE.ja.md) / [zh-CN](../translations/reference/docs/ARCHITECTURE.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/docs/ARCHITECTURE.md) / [ja](../translations/reference/docs/ARCHITECTURE.ja.md) / [zh-CN](../translations/reference/docs/ARCHITECTURE.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 5792 whitespace tokens / 42437 characters.
 - Status: **Machine-read prose — controlled translation**.
 - Reason: scripts/check-pass-roster.sh:29 parses exact original roster. Siblings are not automatically checked. Preserve original headings/roster and gate coverage; translation not a second canonical roster.
@@ -90,7 +94,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `scripts/check-pass-roster.sh:113:  echo "PASS ROSTER FAIL — a pass exists in the code that docs/ARCHITECTURE.md's roster does not name (#929). Add its row to the section \"$HEADING\"." >&2`
 
 ### `docs/CHEATSHEET.md`
-- Current reader status: **Supplied** — [en](../translations/reference/docs/CHEATSHEET.md) / [ja](../translations/reference/docs/CHEATSHEET.ja.md) / [zh-CN](../translations/reference/docs/CHEATSHEET.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/docs/CHEATSHEET.md) / [ja](../translations/reference/docs/CHEATSHEET.ja.md) / [zh-CN](../translations/reference/docs/CHEATSHEET.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English with Japanese fragments (provisional); size: 11119 whitespace tokens / 70604 characters.
 - Status: **LLM surface — validation coverage needed**.
 - Reason: scripts/check-llm-surface.sh:34 selects exact original; translated checked fences would not automatically be exercised. Source-pinned companion with explicit coverage required.
@@ -105,7 +109,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `tests/diagnostics/e002-module-fn-no-candidate/meta.toml:3:hint_substring = "See docs/CHEATSHEET.md"`
 
 ### `docs/STABILITY.md`
-- Current reader status: **Supplied** — [en](../translations/reference/docs/STABILITY.md) / [ja](../translations/reference/docs/STABILITY.ja.md) / [zh-CN](../translations/reference/docs/STABILITY.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/docs/STABILITY.md) / [ja](../translations/reference/docs/STABILITY.ja.md) / [zh-CN](../translations/reference/docs/STABILITY.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 654 whitespace tokens / 4423 characters.
 - Status: **Normative — special authority handling**.
 - Reason: Body explicitly says this page is normative. Preserve source authority; label translations non-normative/source-pinned, do not infer new guarantees.
@@ -113,6 +117,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/bugfix-research-2026-09-09.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/bugfix-research-2026-09-09.md) / [ja](../translations/reference/docs/bugfix-research-2026-09-09.ja.md) / [zh-CN](../translations/reference/docs/bugfix-research-2026-09-09.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 807 whitespace tokens / 6186 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -120,6 +125,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/bugfix-research-2026-09-12.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/bugfix-research-2026-09-12.md) / [ja](../translations/reference/docs/bugfix-research-2026-09-12.ja.md) / [zh-CN](../translations/reference/docs/bugfix-research-2026-09-12.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 6789 whitespace tokens / 44643 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -127,7 +133,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/cross-target-decisions.md`
-- Current reader status: **Supplied** — [en](../translations/reference/docs/cross-target-decisions.md) / [ja](../translations/reference/docs/cross-target-decisions.ja.md) / [zh-CN](../translations/reference/docs/cross-target-decisions.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/docs/cross-target-decisions.md) / [ja](../translations/reference/docs/cross-target-decisions.ja.md) / [zh-CN](../translations/reference/docs/cross-target-decisions.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 936 whitespace tokens / 6102 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -135,7 +141,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/design/DESIGN.md`
-- Current reader status: **Supplied** — [en](../translations/reference/docs/design/DESIGN.md) / [ja](../translations/reference/docs/design/DESIGN.ja.md) / [zh-CN](../translations/reference/docs/design/DESIGN.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/docs/design/DESIGN.md) / [ja](../translations/reference/docs/design/DESIGN.ja.md) / [zh-CN](../translations/reference/docs/design/DESIGN.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 1810 whitespace tokens / 11754 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Priority opening/role reviewed, but full body and indirect consumers still pending; retain source identity and evidence qualifiers.
@@ -143,7 +149,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/design/EQUIVALENCE.md`
-- Current reader status: **Supplied** — [en](../design/EQUIVALENCE.md) / [ja](../design/EQUIVALENCE.ja.md) / [zh-CN](../design/EQUIVALENCE.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../design/EQUIVALENCE.md) / [ja](../design/EQUIVALENCE.ja.md) / [zh-CN](../design/EQUIVALENCE.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 576 whitespace tokens / 4591 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Priority opening/role reviewed, but full body and indirect consumers still pending; retain source identity and evidence qualifiers.
@@ -151,7 +157,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/design/HIDDEN_OPERATIONS.md`
-- Current reader status: **Supplied** — [en](../translations/reference/docs/design/HIDDEN_OPERATIONS.md) / [ja](../translations/reference/docs/design/HIDDEN_OPERATIONS.ja.md) / [zh-CN](../translations/reference/docs/design/HIDDEN_OPERATIONS.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/docs/design/HIDDEN_OPERATIONS.md) / [ja](../translations/reference/docs/design/HIDDEN_OPERATIONS.ja.md) / [zh-CN](../translations/reference/docs/design/HIDDEN_OPERATIONS.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: Japanese or mixed (provisional); size: 473 whitespace tokens / 3677 characters.
 - Status: **Adjacent translation candidate — limited audit**.
 - Reason: Japanese prose reviewed; no exact consumer found in requested roots. Historical placement recommendation: .en.md / .zh-CN.md companions without relabeling the Japanese original; superseded by the reference-tree sibling map above. Preserve code comments unchanged.
@@ -159,6 +165,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/design/MEMORY-SAFETY.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/design/MEMORY-SAFETY.md) / [ja](../translations/reference/docs/design/MEMORY-SAFETY.ja.md) / [zh-CN](../translations/reference/docs/design/MEMORY-SAFETY.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 2626 whitespace tokens / 18878 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Priority opening/role reviewed, but full body and indirect consumers still pending; retain source identity and evidence qualifiers.
@@ -166,7 +173,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/design/REJECTED_PATTERNS.md`
-- Current reader status: **Supplied** — [en](../translations/reference/docs/design/REJECTED_PATTERNS.md) / [ja](../translations/reference/docs/design/REJECTED_PATTERNS.ja.md) / [zh-CN](../translations/reference/docs/design/REJECTED_PATTERNS.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/docs/design/REJECTED_PATTERNS.md) / [ja](../translations/reference/docs/design/REJECTED_PATTERNS.ja.md) / [zh-CN](../translations/reference/docs/design/REJECTED_PATTERNS.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: Japanese or mixed (provisional); size: 588 whitespace tokens / 4892 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Priority opening/role reviewed, but full body and indirect consumers still pending; retain source identity and evidence qualifiers.
@@ -174,6 +181,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/design/fan-cross-language.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/design/fan-cross-language.md) / [ja](../translations/reference/docs/design/fan-cross-language.ja.md) / [zh-CN](../translations/reference/docs/design/fan-cross-language.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 1927 whitespace tokens / 13068 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Priority opening/role reviewed, but full body and indirect consumers still pending; retain source identity and evidence qualifiers.
@@ -181,6 +189,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/design/fan-semantics-audit.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/design/fan-semantics-audit.md) / [ja](../translations/reference/docs/design/fan-semantics-audit.ja.md) / [zh-CN](../translations/reference/docs/design/fan-semantics-audit.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 3499 whitespace tokens / 23280 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Priority opening/role reviewed, but full body and indirect consumers still pending; retain source identity and evidence qualifiers.
@@ -191,6 +200,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `crates/almide-mir/src/lower/desugar_fan.rs:8:/// least-(spend, index) fold (docs/design/fan-semantics-audit.md §5).`
 
 ### `docs/design/fan-usability-eval.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/design/fan-usability-eval.md) / [ja](../translations/reference/docs/design/fan-usability-eval.ja.md) / [zh-CN](../translations/reference/docs/design/fan-usability-eval.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 911 whitespace tokens / 5453 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Priority opening/role reviewed, but full body and indirect consumers still pending; retain source identity and evidence qualifiers.
@@ -198,6 +208,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/fan-capture-ownership-review.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/fan-capture-ownership-review.md) / [ja](../translations/reference/docs/fan-capture-ownership-review.ja.md) / [zh-CN](../translations/reference/docs/fan-capture-ownership-review.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 332 whitespace tokens / 2460 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -205,6 +216,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/fan-parallel-safety-review.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/fan-parallel-safety-review.md) / [ja](../translations/reference/docs/fan-parallel-safety-review.ja.md) / [zh-CN](../translations/reference/docs/fan-parallel-safety-review.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 496 whitespace tokens / 3756 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -212,7 +224,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/grammar/README.md`
-- Current reader status: **Supplied** — [en](../translations/reference/docs/grammar/README.md) / [ja](../translations/reference/docs/grammar/README.ja.md) / [zh-CN](../translations/reference/docs/grammar/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/docs/grammar/README.md) / [ja](../translations/reference/docs/grammar/README.ja.md) / [zh-CN](../translations/reference/docs/grammar/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 1425 whitespace tokens / 9272 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -220,7 +232,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `scripts/check-lark-grammar.sh:30:# docs/grammar/README.md for the enumerated gap list.`
 
 ### `docs/mcp.md`
-- Current reader status: **Supplied** — [en](../mcp.md) / [ja](../mcp.ja.md) / [zh-CN](../mcp.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../mcp.md) / [ja](../mcp.ja.md) / [zh-CN](../mcp.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 1126 whitespace tokens / 7534 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -228,6 +240,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/native-projection-ownership-review.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/native-projection-ownership-review.md) / [ja](../translations/reference/docs/native-projection-ownership-review.ja.md) / [zh-CN](../translations/reference/docs/native-projection-ownership-review.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 474 whitespace tokens / 3450 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -235,6 +248,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/native-read-borrow-review.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/native-read-borrow-review.md) / [ja](../translations/reference/docs/native-read-borrow-review.ja.md) / [zh-CN](../translations/reference/docs/native-read-borrow-review.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 472 whitespace tokens / 3282 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -242,6 +256,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/project/BENCHMARKS.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/project/BENCHMARKS.md) / [ja](../translations/reference/docs/project/BENCHMARKS.ja.md) / [zh-CN](../translations/reference/docs/project/BENCHMARKS.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 4640 whitespace tokens / 29342 characters.
 - Status: **Measurement evidence — companion / coverage review**.
 - Reason: scripts/check-readme-numbers.sh:75 scans exact original for fossils. Historical dated measurements and comparison qualifiers must stay intact; sibling would not receive this check.
@@ -250,7 +265,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `scripts/gen-readme-stats.sh:277:    'Measured '"${vic_date}"' with '"${vic_binary}"' (\`'"${vic_version}"'\`) on x86 = '"${vic_x86}"' and arm = '"${vic_arm}"'; the reference: '"${vic_rustc}"'. Two ratios per cell are the two input sizes (the size is in e [... omitted end of long line]`
 
 ### `docs/project/BREAKING_CHANGE_POLICY.md`
-- Current reader status: **Supplied** — [en](../translations/reference/docs/project/BREAKING_CHANGE_POLICY.md) / [ja](../translations/reference/docs/project/BREAKING_CHANGE_POLICY.ja.md) / [zh-CN](../translations/reference/docs/project/BREAKING_CHANGE_POLICY.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/docs/project/BREAKING_CHANGE_POLICY.md) / [ja](../translations/reference/docs/project/BREAKING_CHANGE_POLICY.ja.md) / [zh-CN](../translations/reference/docs/project/BREAKING_CHANGE_POLICY.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: Japanese or mixed (provisional); size: 232 whitespace tokens / 1780 characters.
 - Status: **Adjacent translation candidate — limited audit**.
 - Reason: Japanese source read in full. Future post-1.0/edition proposal explicitly separated from existing implementation. Keep the canonical .md Japanese identity. The earlier .en.md companion recommendation is superseded by the reference-tree sibling map above.
@@ -258,7 +273,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/project/GENERATED-RUST-REVIEW.md`
-- Current reader status: **Supplied** — [en](GENERATED-RUST-REVIEW.md) / [ja](GENERATED-RUST-REVIEW.ja.md) / [zh-CN](GENERATED-RUST-REVIEW.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](GENERATED-RUST-REVIEW.md) / [ja](GENERATED-RUST-REVIEW.ja.md) / [zh-CN](GENERATED-RUST-REVIEW.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 382 whitespace tokens / 2813 characters.
 - Status: **Adjacent translation candidate — limited audit**.
 - Reason: Full prose reviewed. No direct machine reader found; code and trace-map conditions must remain exact. Qualification model explicitly not current certification.
@@ -266,7 +281,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/project/ISSUE-TAXONOMY.md`
-- Current reader status: **Supplied** — [en](../translations/reference/docs/project/ISSUE-TAXONOMY.md) / [ja](../translations/reference/docs/project/ISSUE-TAXONOMY.ja.md) / [zh-CN](../translations/reference/docs/project/ISSUE-TAXONOMY.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/docs/project/ISSUE-TAXONOMY.md) / [ja](../translations/reference/docs/project/ISSUE-TAXONOMY.ja.md) / [zh-CN](../translations/reference/docs/project/ISSUE-TAXONOMY.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English with Japanese fragments (provisional); size: 1285 whitespace tokens / 7704 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Priority opening/role reviewed, but full body and indirect consumers still pending; retain source identity and evidence qualifiers.
@@ -274,7 +289,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `scripts/count-release-blockers.sh:4:# docs/project/ISSUE-TAXONOMY.md:`
 
 ### `docs/project/PARTITIONED-RUNTIME.md`
-- Current reader status: **Supplied** — [en](PARTITIONED-RUNTIME.md) / [ja](PARTITIONED-RUNTIME.ja.md) / [zh-CN](PARTITIONED-RUNTIME.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](PARTITIONED-RUNTIME.md) / [ja](PARTITIONED-RUNTIME.ja.md) / [zh-CN](PARTITIONED-RUNTIME.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 499 whitespace tokens / 3753 characters.
 - Status: **Adjacent translation candidate — limited audit**.
 - Reason: Full prose reviewed; tests/static_memory_test.rs:19 is documentation comment, not input. Preserve PID-reference scope, per-deployment host assumptions.
@@ -282,7 +297,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `tests/static_memory_test.rs:19://! docs/project/PARTITIONED-RUNTIME.md.`
 
 ### `docs/project/RUST-LINT-GATES.md`
-- Current reader status: **Supplied** — [en](../translations/reference/docs/project/RUST-LINT-GATES.md) / [ja](../translations/reference/docs/project/RUST-LINT-GATES.ja.md) / [zh-CN](../translations/reference/docs/project/RUST-LINT-GATES.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/docs/project/RUST-LINT-GATES.md) / [ja](../translations/reference/docs/project/RUST-LINT-GATES.ja.md) / [zh-CN](../translations/reference/docs/project/RUST-LINT-GATES.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 984 whitespace tokens / 6964 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Priority opening/role reviewed, but full body and indirect consumers still pending; retain source identity and evidence qualifiers.
@@ -290,7 +305,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `scripts/check-clippy-warnings.sh:35:# and its adoption plan are recorded in docs/project/RUST-LINT-GATES.md.`
 
 ### `docs/project/WCET-STORY.md`
-- Current reader status: **Supplied** — [en](WCET-STORY.md) / [ja](WCET-STORY.ja.md) / [zh-CN](WCET-STORY.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](WCET-STORY.md) / [ja](WCET-STORY.ja.md) / [zh-CN](WCET-STORY.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 419 whitespace tokens / 2993 characters.
 - Status: **Adjacent translation candidate — limited audit**.
 - Reason: Full prose reviewed; tests/wcet_kernel_test.rs:4 is documentation comment. Explicitly no hardware WCET result claimed; keep this boundary.
@@ -298,7 +313,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `tests/wcet_kernel_test.rs:4://! fns' bodies. The story is docs/project/WCET-STORY.md; the kernel is`
 
 ### `docs/project/linguist-submission.md`
-- Current reader status: **Supplied** — [en](../translations/reference/docs/project/linguist-submission.md) / [ja](../translations/reference/docs/project/linguist-submission.ja.md) / [zh-CN](../translations/reference/docs/project/linguist-submission.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/docs/project/linguist-submission.md) / [ja](../translations/reference/docs/project/linguist-submission.ja.md) / [zh-CN](../translations/reference/docs/project/linguist-submission.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: Japanese or mixed (provisional); size: 787 whitespace tokens / 6955 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Priority opening/role reviewed, but full body and indirect consumers still pending; retain source identity and evidence qualifiers.
@@ -306,6 +321,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/project/org-trust-status.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/project/org-trust-status.md) / [ja](../translations/reference/docs/project/org-trust-status.ja.md) / [zh-CN](../translations/reference/docs/project/org-trust-status.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 2158 whitespace tokens / 11982 characters.
 - Status: **Historical generated evidence — separate companion**.
 - Reason: scripts/org-trust-status.sh:37 overwrites original. Header records legacy generator and prohibits unmeasured refreshed verdicts. Do not clone active generation markers or present as current status.
@@ -315,6 +331,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `scripts/org-trust-status.sh:37:OUT="$work_root/docs/project/org-trust-status.md"`
 
 ### `docs/record-option-cells-verification.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/record-option-cells-verification.md) / [ja](../translations/reference/docs/record-option-cells-verification.ja.md) / [zh-CN](../translations/reference/docs/record-option-cells-verification.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 258 whitespace tokens / 1801 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -322,6 +339,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/stream-fusion-safety-review.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/stream-fusion-safety-review.md) / [ja](../translations/reference/docs/stream-fusion-safety-review.ja.md) / [zh-CN](../translations/reference/docs/stream-fusion-safety-review.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 501 whitespace tokens / 3620 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -329,6 +347,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/wasm-decoder-reclaim-review.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/wasm-decoder-reclaim-review.md) / [ja](../translations/reference/docs/wasm-decoder-reclaim-review.ja.md) / [zh-CN](../translations/reference/docs/wasm-decoder-reclaim-review.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 351 whitespace tokens / 2516 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -336,6 +355,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `docs/wasm/JS-HOST-ASYNC-IMPORTS.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/wasm/JS-HOST-ASYNC-IMPORTS.md) / [ja](../translations/reference/docs/wasm/JS-HOST-ASYNC-IMPORTS.ja.md) / [zh-CN](../translations/reference/docs/wasm/JS-HOST-ASYNC-IMPORTS.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English with Japanese fragments (provisional); size: 1935 whitespace tokens / 12213 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Priority opening/role reviewed, but full body and indirect consumers still pending; retain source identity and evidence qualifiers.
@@ -345,6 +365,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `src/cli/js_host_async.rs:14://! one sync that can suspend. Design: docs/wasm/JS-HOST-ASYNC-IMPORTS.md.`
 
 ### `docs/wasm/README.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/wasm/README.md) / [ja](../translations/reference/docs/wasm/README.ja.md) / [zh-CN](../translations/reference/docs/wasm/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 1154 whitespace tokens / 8153 characters.
 - Status: **Machine-checked host guide — controlled translation**.
 - Reason: scripts/check-readme-numbers.sh:75 scans exact original; sibling not checked. Keep component/core limits and host distinctions; not blocked structurally, but validation coverage needs explicit review.
@@ -352,6 +373,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `scripts/check-readme-numbers.sh:75:for f in "${README_NUMBER_PAGES[@]}" docs/wasm/README.md docs/project/BENCHMARKS.md; do`
 
 ### `docs/wasm/WASM-OUTPUT.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/wasm/WASM-OUTPUT.md) / [ja](../translations/reference/docs/wasm/WASM-OUTPUT.ja.md) / [zh-CN](../translations/reference/docs/wasm/WASM-OUTPUT.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 3796 whitespace tokens / 24399 characters.
 - Status: **Machine-checked evidence — controlled translation**.
 - Reason: src/cli/docs_gen.rs:318 exact-path count validation. Header has historic retired-backend measurements. Do not imply sibling has automatic count validation.
@@ -361,6 +383,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `src/cli/docs_gen.rs:318:        "docs/wasm/WASM-OUTPUT.md",`
 
 ### `docs/wasm/capability-system.md`
+- Current reader status: **Supplied** — [en](../translations/reference/docs/wasm/capability-system.md) / [ja](../translations/reference/docs/wasm/capability-system.ja.md) / [zh-CN](../translations/reference/docs/wasm/capability-system.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 1299 whitespace tokens / 9642 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Priority opening/role reviewed, but full body and indirect consumers still pending; retain source identity and evidence qualifiers.
@@ -368,7 +391,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `examples/almd-outline/README.md`
-- Current reader status: **Supplied** — [en](../../examples/almd-outline/README.md) / [ja](../../examples/almd-outline/README.ja.md) / [zh-CN](../../examples/almd-outline/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../../examples/almd-outline/README.md) / [ja](../../examples/almd-outline/README.ja.md) / [zh-CN](../../examples/almd-outline/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 446 whitespace tokens / 3195 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -376,6 +399,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/benchmark/exercises/BENCHMARK.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/exercises/BENCHMARK.md) / [ja](../translations/reference/research/benchmark/exercises/BENCHMARK.ja.md) / [zh-CN](../translations/reference/research/benchmark/exercises/BENCHMARK.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 904 whitespace tokens / 5521 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -383,6 +407,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/benchmark/fuzz-green/README.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/fuzz-green/README.md) / [ja](../translations/reference/research/benchmark/fuzz-green/README.ja.md) / [zh-CN](../translations/reference/research/benchmark/fuzz-green/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 163 whitespace tokens / 1064 characters.
 - Status: **Machine-read evidence ledger — separate companion**.
 - Reason: scripts/lib/ledger-counts.sh:69 parses dated rows; scripts/fuzz-green-streak.sh refreshes ledger. Not ordinary reader prose.
@@ -391,6 +416,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `scripts/fuzz-green-streak.sh:43:# research/benchmark/fuzz-green/README.md is refreshed (BENCHMARKS.md`
 
 ### `research/benchmark/lang-bench/README.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/lang-bench/README.md) / [ja](../translations/reference/research/benchmark/lang-bench/README.ja.md) / [zh-CN](../translations/reference/research/benchmark/lang-bench/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 1107 whitespace tokens / 7746 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -398,6 +424,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/benchmark/lang-bench/tasks-example/xlang/README.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/lang-bench/tasks-example/xlang/README.md) / [ja](../translations/reference/research/benchmark/lang-bench/tasks-example/xlang/README.ja.md) / [zh-CN](../translations/reference/research/benchmark/lang-bench/tasks-example/xlang/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 70 whitespace tokens / 473 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -405,6 +432,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/01-add-sub/prompt.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/01-add-sub/prompt.md) / [ja](../translations/reference/research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/01-add-sub/prompt.ja.md) / [zh-CN](../translations/reference/research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/01-add-sub/prompt.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 56 whitespace tokens / 306 characters.
 - Status: **Experiment input — separate explanatory translation**.
 - Reason: research/grammar-lab/run-experiment.sh:31,103–104 and src/mod.almd:92–96 load prompt filenames; lang-bench/runner_edits.rb:94 loads prompt.md. Preserve experimental stimulus identity; do not replace or feed translations into original benchmark.
@@ -412,6 +440,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/02-rename-show-to-print/prompt.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/02-rename-show-to-print/prompt.md) / [ja](../translations/reference/research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/02-rename-show-to-print/prompt.ja.md) / [zh-CN](../translations/reference/research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/02-rename-show-to-print/prompt.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 49 whitespace tokens / 300 characters.
 - Status: **Experiment input — separate explanatory translation**.
 - Reason: research/grammar-lab/run-experiment.sh:31,103–104 and src/mod.almd:92–96 load prompt filenames; lang-bench/runner_edits.rb:94 loads prompt.md. Preserve experimental stimulus identity; do not replace or feed translations into original benchmark.
@@ -419,7 +448,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/benchmark/perf/README.md`
-- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/perf/README.md) / [ja](../translations/reference/research/benchmark/perf/README.ja.md) / [zh-CN](../translations/reference/research/benchmark/perf/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/perf/README.md) / [ja](../translations/reference/research/benchmark/perf/README.ja.md) / [zh-CN](../translations/reference/research/benchmark/perf/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 2885 whitespace tokens / 18852 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -427,6 +456,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/benchmark/perf/hot-issues-2026-09-10/README.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/perf/hot-issues-2026-09-10/README.md) / [ja](../translations/reference/research/benchmark/perf/hot-issues-2026-09-10/README.ja.md) / [zh-CN](../translations/reference/research/benchmark/perf/hot-issues-2026-09-10/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 837 whitespace tokens / 6035 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -434,6 +464,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/benchmark/perf/hot-issues-2026-09-10/gramide-cached-operators/README.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/perf/hot-issues-2026-09-10/gramide-cached-operators/README.md) / [ja](../translations/reference/research/benchmark/perf/hot-issues-2026-09-10/gramide-cached-operators/README.ja.md) / [zh-CN](../translations/reference/research/benchmark/perf/hot-issues-2026-09-10/gramide-cached-operators/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 579 whitespace tokens / 4396 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -441,6 +472,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/benchmark/perf/spectralnorm/README.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/perf/spectralnorm/README.md) / [ja](../translations/reference/research/benchmark/perf/spectralnorm/README.ja.md) / [zh-CN](../translations/reference/research/benchmark/perf/spectralnorm/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 1766 whitespace tokens / 10897 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -448,6 +480,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `tests/counted_index_chain_test.rs:31://!   (research/benchmark/perf/spectralnorm/README.md).`
 
 ### `research/benchmark/perf/string-gap-1004.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/perf/string-gap-1004.md) / [ja](../translations/reference/research/benchmark/perf/string-gap-1004.ja.md) / [zh-CN](../translations/reference/research/benchmark/perf/string-gap-1004.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 2028 whitespace tokens / 12837 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -456,6 +489,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `scripts/check-perf-ratio.sh:82:# turn out to be anchorable. See research/benchmark/perf/string-gap-1004.md.`
 
 ### `research/benchmark/stdlib/HANDOFF.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/stdlib/HANDOFF.md) / [ja](../translations/reference/research/benchmark/stdlib/HANDOFF.ja.md) / [zh-CN](../translations/reference/research/benchmark/stdlib/HANDOFF.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: Japanese or mixed (provisional); size: 352 whitespace tokens / 3475 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -463,6 +497,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/benchmark/three-way/README.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/benchmark/three-way/README.md) / [ja](../translations/reference/research/benchmark/three-way/README.ja.md) / [zh-CN](../translations/reference/research/benchmark/three-way/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 343 whitespace tokens / 1655 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -470,6 +505,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `scripts/check-abstain-classes.sh:11:# research/benchmark/three-way/README.md.`
 
 ### `research/beyond-rust/README.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/beyond-rust/README.md) / [ja](../translations/reference/research/beyond-rust/README.ja.md) / [zh-CN](../translations/reference/research/beyond-rust/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: Japanese or mixed (provisional); size: 1402 whitespace tokens / 10096 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -477,7 +513,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/fan-audit/probes/README.md`
-- Current reader status: **Supplied** — [en](../../research/fan-audit/probes/README.md) / [ja](../../research/fan-audit/probes/README.ja.md) / [zh-CN](../../research/fan-audit/probes/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../../research/fan-audit/probes/README.md) / [ja](../../research/fan-audit/probes/README.ja.md) / [zh-CN](../../research/fan-audit/probes/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 109 whitespace tokens / 887 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -485,6 +521,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/grammar-lab/LESSONS.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/grammar-lab/LESSONS.md) / [ja](../translations/reference/research/grammar-lab/LESSONS.ja.md) / [zh-CN](../translations/reference/research/grammar-lab/LESSONS.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: Japanese or mixed (provisional); size: 982 whitespace tokens / 7148 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -492,7 +529,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/grammar-lab/README.md`
-- Current reader status: **Supplied** — [en](../../research/grammar-lab/README.md) / [ja](../../research/grammar-lab/README.ja.md) / [zh-CN](../../research/grammar-lab/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../../research/grammar-lab/README.md) / [ja](../../research/grammar-lab/README.ja.md) / [zh-CN](../../research/grammar-lab/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 463 whitespace tokens / 3575 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -500,6 +537,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/grammar-lab/REPORT.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/grammar-lab/REPORT.md) / [ja](../translations/reference/research/grammar-lab/REPORT.ja.md) / [zh-CN](../translations/reference/research/grammar-lab/REPORT.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: Japanese or mixed (provisional); size: 639 whitespace tokens / 3811 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -507,6 +545,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/grammar-lab/experiments/optional-handling/REPORT.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/grammar-lab/experiments/optional-handling/REPORT.md) / [ja](../translations/reference/research/grammar-lab/experiments/optional-handling/REPORT.ja.md) / [zh-CN](../translations/reference/research/grammar-lab/experiments/optional-handling/REPORT.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 596 whitespace tokens / 3840 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -514,6 +553,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/grammar-lab/prompts/layer1_rules.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/grammar-lab/prompts/layer1_rules.md) / [ja](../translations/reference/research/grammar-lab/prompts/layer1_rules.ja.md) / [zh-CN](../translations/reference/research/grammar-lab/prompts/layer1_rules.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 175 whitespace tokens / 888 characters.
 - Status: **Experiment input — separate explanatory translation**.
 - Reason: research/grammar-lab/run-experiment.sh:31,103–104 and src/mod.almd:92–96 load prompt filenames; lang-bench/runner_edits.rb:94 loads prompt.md. Preserve experimental stimulus identity; do not replace or feed translations into original benchmark.
@@ -521,6 +561,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/grammar-lab/prompts/layer2_combinator.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/grammar-lab/prompts/layer2_combinator.md) / [ja](../translations/reference/research/grammar-lab/prompts/layer2_combinator.ja.md) / [zh-CN](../translations/reference/research/grammar-lab/prompts/layer2_combinator.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 99 whitespace tokens / 783 characters.
 - Status: **Experiment input — separate explanatory translation**.
 - Reason: research/grammar-lab/run-experiment.sh:31,103–104 and src/mod.almd:92–96 load prompt filenames; lang-bench/runner_edits.rb:94 loads prompt.md. Preserve experimental stimulus identity; do not replace or feed translations into original benchmark.
@@ -528,6 +569,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/grammar-lab/prompts/layer2_laws.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/grammar-lab/prompts/layer2_laws.md) / [ja](../translations/reference/research/grammar-lab/prompts/layer2_laws.ja.md) / [zh-CN](../translations/reference/research/grammar-lab/prompts/layer2_laws.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 76 whitespace tokens / 467 characters.
 - Status: **Experiment input — separate explanatory translation**.
 - Reason: research/grammar-lab/run-experiment.sh:31,103–104 and src/mod.almd:92–96 load prompt filenames; lang-bench/runner_edits.rb:94 loads prompt.md. Preserve experimental stimulus identity; do not replace or feed translations into original benchmark.
@@ -535,6 +577,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/grammar-lab/prompts/layer2_match.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/grammar-lab/prompts/layer2_match.md) / [ja](../translations/reference/research/grammar-lab/prompts/layer2_match.ja.md) / [zh-CN](../translations/reference/research/grammar-lab/prompts/layer2_match.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 108 whitespace tokens / 731 characters.
 - Status: **Experiment input — separate explanatory translation**.
 - Reason: research/grammar-lab/run-experiment.sh:31,103–104 and src/mod.almd:92–96 load prompt filenames; lang-bench/runner_edits.rb:94 loads prompt.md. Preserve experimental stimulus identity; do not replace or feed translations into original benchmark.
@@ -542,6 +585,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/grammar-lab/prompts/layer2_variant_fn.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/grammar-lab/prompts/layer2_variant_fn.md) / [ja](../translations/reference/research/grammar-lab/prompts/layer2_variant_fn.ja.md) / [zh-CN](../translations/reference/research/grammar-lab/prompts/layer2_variant_fn.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 72 whitespace tokens / 511 characters.
 - Status: **Experiment input — separate explanatory translation**.
 - Reason: research/grammar-lab/run-experiment.sh:31,103–104 and src/mod.almd:92–96 load prompt filenames; lang-bench/runner_edits.rb:94 loads prompt.md. Preserve experimental stimulus identity; do not replace or feed translations into original benchmark.
@@ -549,6 +593,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/grammar-lab/prompts/layer2_variant_paren.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/grammar-lab/prompts/layer2_variant_paren.md) / [ja](../translations/reference/research/grammar-lab/prompts/layer2_variant_paren.ja.md) / [zh-CN](../translations/reference/research/grammar-lab/prompts/layer2_variant_paren.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 72 whitespace tokens / 507 characters.
 - Status: **Experiment input — separate explanatory translation**.
 - Reason: research/grammar-lab/run-experiment.sh:31,103–104 and src/mod.almd:92–96 load prompt filenames; lang-bench/runner_edits.rb:94 loads prompt.md. Preserve experimental stimulus identity; do not replace or feed translations into original benchmark.
@@ -556,6 +601,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/spike/charge-probe/BURNDOWN.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/spike/charge-probe/BURNDOWN.md) / [ja](../translations/reference/research/spike/charge-probe/BURNDOWN.ja.md) / [zh-CN](../translations/reference/research/spike/charge-probe/BURNDOWN.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: Japanese or mixed (provisional); size: 2299 whitespace tokens / 17009 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -563,6 +609,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/spike/charge-probe/REPORT.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/spike/charge-probe/REPORT.md) / [ja](../translations/reference/research/spike/charge-probe/REPORT.ja.md) / [zh-CN](../translations/reference/research/spike/charge-probe/REPORT.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: Japanese or mixed (provisional); size: 1770 whitespace tokens / 13448 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -570,6 +617,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `tests/charge_probe_test.rs:3://! Three layers, per research/spike/charge-probe/REPORT.md:`
 
 ### `research/spike/logical-time-race/GATE.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/spike/logical-time-race/GATE.md) / [ja](../translations/reference/research/spike/logical-time-race/GATE.ja.md) / [zh-CN](../translations/reference/research/spike/logical-time-race/GATE.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: Japanese or mixed (provisional); size: 200 whitespace tokens / 1559 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -577,6 +625,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/spike/substrate-observability/README.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/spike/substrate-observability/README.md) / [ja](../translations/reference/research/spike/substrate-observability/README.ja.md) / [zh-CN](../translations/reference/research/spike/substrate-observability/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 330 whitespace tokens / 2238 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -584,6 +633,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `research/spike/v1-mir/GATE.md`
+- Current reader status: **Supplied** — [en](../translations/reference/research/spike/v1-mir/GATE.md) / [ja](../translations/reference/research/spike/v1-mir/GATE.ja.md) / [zh-CN](../translations/reference/research/spike/v1-mir/GATE.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: Japanese or mixed (provisional); size: 389 whitespace tokens / 3072 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -591,7 +641,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `runtime/rs/README.md`
-- Current reader status: **Supplied** — [en](../translations/reference/runtime/rs/README.md) / [ja](../translations/reference/runtime/rs/README.ja.md) / [zh-CN](../translations/reference/runtime/rs/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/runtime/rs/README.md) / [ja](../translations/reference/runtime/rs/README.ja.md) / [zh-CN](../translations/reference/runtime/rs/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 1018 whitespace tokens / 7270 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -602,7 +652,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `tests/runtime_random_float_construction_test.rs:5:// there runs nowhere (runtime/rs/README.md; scripts/check-runtime-test-placement.sh`
 
 ### `spec/churn/README.md`
-- Current reader status: **Supplied** — [en](../translations/reference/spec/churn/README.md) / [ja](../translations/reference/spec/churn/README.ja.md) / [zh-CN](../translations/reference/spec/churn/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/spec/churn/README.md) / [ja](../translations/reference/spec/churn/README.ja.md) / [zh-CN](../translations/reference/spec/churn/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 232 whitespace tokens / 1669 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -610,7 +660,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `spec/gauntlet/README.md`
-- Current reader status: **Supplied** — [en](../translations/reference/spec/gauntlet/README.md) / [ja](../translations/reference/spec/gauntlet/README.ja.md) / [zh-CN](../translations/reference/spec/gauntlet/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/spec/gauntlet/README.md) / [ja](../translations/reference/spec/gauntlet/README.ja.md) / [zh-CN](../translations/reference/spec/gauntlet/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 1875 whitespace tokens / 12667 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -619,7 +669,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `crates/almide-tools/tests/fmt_corpus_test.rs:58:        // (the manifest pins their front rejection — spec/gauntlet/README.md);`
 
 ### `stdlib/README.md`
-- Current reader status: **Supplied** — [en](../translations/reference/stdlib/README.md) / [ja](../translations/reference/stdlib/README.ja.md) / [zh-CN](../translations/reference/stdlib/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/stdlib/README.md) / [ja](../translations/reference/stdlib/README.ja.md) / [zh-CN](../translations/reference/stdlib/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 347 whitespace tokens / 3230 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -627,7 +677,7 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - `scripts/test_ci_prose.py:112:                     "docs/GRAMMAR.md", "docs/stdlib/list.md", "docs/stdlib/README.md", "docs/roadmap/README.md",`
 
 ### `tools/claude-plugin/README.md`
-- Current reader status: **Supplied** — [en](../../tools/claude-plugin/README.md) / [ja](../../tools/claude-plugin/README.ja.md) / [zh-CN](../../tools/claude-plugin/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../../tools/claude-plugin/README.md) / [ja](../../tools/claude-plugin/README.ja.md) / [zh-CN](../../tools/claude-plugin/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 93 whitespace tokens / 725 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
@@ -635,14 +685,14 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
   - None found in searched roots (not proof of no consumers).
 
 ### `tools/xtarget-fuzz/README.md`
-- Current reader status: **Supplied** — [en](../translations/reference/tools/xtarget-fuzz/README.md) / [ja](../translations/reference/tools/xtarget-fuzz/README.ja.md) / [zh-CN](../translations/reference/tools/xtarget-fuzz/README.zh-CN.md). The inspection status below records the earlier audit, not current translation completion.
+- Current reader status: **Supplied** — [en](../translations/reference/tools/xtarget-fuzz/README.md) / [ja](../translations/reference/tools/xtarget-fuzz/README.ja.md) / [zh-CN](../translations/reference/tools/xtarget-fuzz/README.zh-CN.md). Body translation/review and reference-tree placement do not certify the absence of all indirect or external consumers. Earlier inspection findings below remain historical.
 - Language: English (provisional); size: 2196 whitespace tokens / 14923 characters.
 - Status: **Pending — body/indirect consumers not fully reviewed**.
 - Reason: Exact-reference search only; no safety approval.
 - Direct references:
   - None found in searched roots (not proof of no consumers).
 
-## Status counts
+## Historical inspection status counts
 
 - Pending — body/indirect consumers not fully reviewed: 59
 - Machine-read prose — controlled translation: 1
@@ -657,6 +707,8 @@ STABILITY is normative, org-trust-status is legacy generated evidence, fuzz-gree
 - Experiment input — separate explanatory translation: 8
 
 ## Follow-up pass — next coherent batch (2026-11-02 01:58 UTC)
+
+This dated follow-up records the candidate selection and unresolved consumer questions at 01:58 UTC. The final inventory records subsequently supplied reader variants; the historical body-inspection and indirect-consumer limits below are not retroactively cleared.
 
 This pass read the complete short reader guides below and inspected nearby manifest/runner consumers, not merely exact-path matches. Existing canonical source remains English. The following **five originals / ten sibling translations** are the next practical group, without generator or CI edits. Existing docs-only classifier may still schedule normal CI; do not weaken it.
 
@@ -711,7 +763,7 @@ Current placement is `docs/translations/reference/docs/diagnostics/E001.md`, `E0
 
 ## Generation / broad scanners
 
-- `almide docs-gen` is currently check-only; src/cli/docs_gen.rs:32–36 rejects generation without --check. No diagnosis-page translation regeneration exists.
+- At this audit snapshot, `almide docs-gen` is check-only; src/cli/docs_gen.rs:32–36 rejects generation without --check. No diagnosis-page translation regeneration exists.
 - Search covered build.rs, src/, crates/, tests/, scripts/, tools/, .github/, .claude/ for literal diagnostic paths, related dir variables and Markdown/glob scans. All discovered direct diagnostic readers are listed above.
 - scripts/check-llm-surface.sh:34 scopes fences to llms.txt and docs/CHEATSHEET.md, and scripts/check-doc-fences.sh:39 scopes fences to docs/stdlib/*.md. Translated diagnostic fences outside those paths are not automatically checked by these gates; separately compare code-fence bytes to their originals and test any new link mapping.
 - No repository-wide Markdown link checker targeting this new tree was identified in the inspected scripts/tools/workflows; this is a search result, not a promise that no indirect future consumer exists. Validate relative file links and fragments explicitly.

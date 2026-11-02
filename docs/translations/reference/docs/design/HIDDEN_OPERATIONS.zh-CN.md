@@ -1,3 +1,5 @@
+<a id="hidden-operations"></a>
+
 # 隐藏操作
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](HIDDEN_OPERATIONS.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](HIDDEN_OPERATIONS.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](HIDDEN_OPERATIONS.zh-CN.md)
@@ -12,7 +14,11 @@
 
 ---
 
+<a id="1-clone-自動挿入-rust-target"></a>
+
 ## 1. 自动插入 Clone（Rust target）
+
+<a id="何が起きるか"></a>
 
 ### 会发生什么
 
@@ -24,10 +30,14 @@
 - `!is_copy` — 不对 Int、Float、Bool 等 Copy 类型插入。
 - 最后一次使用时不 clone（以 move 传递）。
 
+<a id="ファイル"></a>
+
 ### 文件
 
 - `crates/almide-codegen/src/pass_clone.rs` — Clone 插入 pass
 - `crates/almide-ir/src/use_count.rs` — use-count 分析
+
+<a id="ユーザーへの影響"></a>
 
 ### 对用户的影响
 
@@ -35,6 +45,8 @@
 - 优化：borrow inference（`pass_borrow_inference*.rs`）会减少 clone（不改变已有代码的行为）。v1 spine 侧的别名分析位于 `crates/almide-mir/src/alias_safety.rs`。
 
 ---
+
+<a id="2-エラー伝播--隠さないauto--は廃止済み"></a>
 
 ## 2. 错误传播——**不隐藏**（auto-`?` 已废止）
 
@@ -54,6 +66,8 @@ effect fn load() -> String = {
 - 在语句位置丢弃 → **E042**（must-use。使用 `f()!` 或 `let _ = f()`）
 - `list.try_*` 写法 → **E043**（以回调的 `!` 作为策略）
 
+<a id="ファイル-1"></a>
+
 ### 文件
 
 - `crates/almide-frontend/src/lower/auto_try.rs` — 名称源于历史。目前根据 `!` 标记插入 `Try`，不进行隐式插入。
@@ -62,7 +76,11 @@ effect fn load() -> String = {
 
 ---
 
+<a id="3-runtime-埋め込み"></a>
+
 ## 3. 嵌入 Runtime
+
+<a id="何が起きるか-1"></a>
 
 ### 会发生什么
 
@@ -83,11 +101,17 @@ stdlib 中自举的 Almide 实现与用户代码一起链接，由 `almide-wasm`
 
 ---
 
+<a id="4-perceus-rc-挿入-native-mir--structural-wasm"></a>
+
 ## 4. Perceus RC 插入（native MIR / structural Wasm）
+
+<a id="何が起きるか-2"></a>
 
 ### 会发生什么
 
 v1 MIR（`crates/almide-mir`）采用 Perceus 方式，自动插入引用计数操作（dup / drop）及用于原地修改的唯一性检查（MakeUnique）。该 MIR 用于 native renderer 和 MIR witness producer 路径；当前 Wasm 由独立的 structural emitter 处理 RC/layout。
+
+<a id="ユーザーへの影響-1"></a>
 
 ### 对用户的影响
 
@@ -97,7 +121,11 @@ v1 MIR（`crates/almide-mir`）采用 Perceus 方式，自动插入引用计数�
 
 ---
 
+<a id="5-fan-の並行化-rust-target"></a>
+
 ## 5. fan 的并行化（Rust target）
+
+<a id="何が起きるか-3"></a>
 
 ### 会发生什么
 
@@ -111,17 +139,23 @@ std::thread::scope(|__s| -> Result<_, String> {
 })?
 ```
 
+<a id="ユーザーへの影響-2"></a>
+
 ### 对用户的影响
 
 - 外部变量通过 `move` 捕获（可能被 clone）。
 - 捕获 `var` 会产生编译错误（E008）。
 - 执行基础设施及是否可以并行由 compiler/host 决定。普通 `fan` 会 join 全部 sibling，并返回按 arm 顺序遇到的第一个错误。
 
+<a id="ファイル-2"></a>
+
 ### 文件
 
 - `crates/almide-codegen/src/pass_fan_lowering.rs`、`pass_rust_lowering_fan.rs` — fan lowering 与 native parallel routing
 
 ---
+
+<a id="隠さない操作"></a>
 
 ## 不隐藏的操作
 

@@ -1,3 +1,5 @@
+<a id="issue-label-taxonomy-1482"></a>
+
 # Issue ラベルの分類（#1482）
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](ISSUE-TAXONOMY.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](ISSUE-TAXONOMY.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](ISSUE-TAXONOMY.zh-CN.md)
@@ -7,6 +9,8 @@
 > 原文：[docs/project/ISSUE-TAXONOMY.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/project/ISSUE-TAXONOMY.md)（固定コミット `35297a612fb29e3f78f6587aba253aa91d51f466`）。読者向けの非規範的なスナップショット訳であり、自動同期されない。原文の時点・適用範囲・主張を維持したもので、翻訳時に独立した実測や実装検証は行っていない。
 
 このファイルができる前、トラッカーには分類ラベル（`bug`、wasm 分類、`fuzz` など）はあったが、**重大度の区分がなかった**。そのため「未解決のリリース阻害要因はあるか」を検索できず、リリースのたびに記憶で答えていた。このファイルは重大度の閉じた集合、各区分への受け入れ条件、それらを利用する一つの規則を定義する。さらに下では、もう一つの検索できなかった問い、**この issue はどの crate に属するか**に答える領域軸を定義する。
+
+<a id="the-closed-set-severity"></a>
 
 ## 閉じた集合（重大度）
 
@@ -24,6 +28,8 @@
 - 一つの issue が複数の区分を持ってよい（`I-divergence` + `regression`）。
 - wall、未実装機能、性能差、文書のずれは `I-*` 区分では**ない**。`enhancement` / `documentation` と領域ラベル（下記）を付ける。
 
+<a id="the-blocking-rule"></a>
+
 ## リリースを阻止する規則
 
 **`I-unsound`、`I-miscompile`、`I-divergence`、`regression` のいずれかのラベルが付いた issue が未解決の間は、正式版のリリースタグを出してはならない。**
@@ -31,6 +37,8 @@
 - [`scripts/count-release-blockers.sh`](../../../../../scripts/count-release-blockers.sh) で計測する。リリース workflow は正式版作成前に `--gate` で実行するため、規則は記憶に頼らず強制される。出力される数は**異なる**未解決 issue の数である。二つの区分を持つ一つの issue は二件ではなく一件の阻害要因になる（#2400）。合計の上のラベル別内訳には重複が表れる。
 - `-rc` プレリリースタグは例外である（RC はまさにツリーの soak のために存在する。`CLAUDE.md` の RC 手順を参照）。件数は引き続き出力する。
 - 逃げ道は**免除ではなく降格**である。阻害要因がリリースに許容可能だと判断する場合、それは mob の決定として、理由を issue に記してラベルを削除または変更し、release seal の `known_problems` フィールドに処置を記録する。ゲート自体にスキップ用引数はない。
+
+<a id="the-area-axis-which-crate"></a>
 
 ## 領域軸（どの crate か）
 
@@ -56,6 +64,8 @@
 - ラベルは issue 自身の `触る場所` 行（下記）と一致しなければならない。同じ主張を二度書いているのであり、不一致ならどちらかが古い。
 - `A-wasm` は従来の `wasm-codegen` をその場で改名したもので、issue は引き継いでいる。旧名を使う script や workflow はなかった。一方 `fuzz`、`fuzz-findings`、`fuzz-perf` は `.github/workflows/fuzz-nightly.yml` が利用しており、綴りを保たなければならない。
 - 領域軸は重大度の集合のようには閉じて**いない**。リポジトリへの crate 追加でラベルを追加してよい。削除や範囲の変更は、引き続き `gh label` の変更と同じコミットでこのファイルに記録する。
+
+<a id="the-issue-header-what-to-do-in-the-issue"></a>
 
 ## Issue のヘッダー（issue 内で何をするか）
 
@@ -89,6 +99,8 @@
 - `根拠` は判断を支えるフィールドである。issue が計測に基づくか、もっともらしい文章に基づくかを示す。`未測定` は正当な値であり、自信のある推測より役立つ。次の読者に、最初の手順は計測だと伝えるからだ。
 - `完了条件` は「終わった気がする」とは決して書かない。検証可能な終わりを示せない issue では、何があれば*判断*できるかを完了条件とし、それが作業になる。
 - このブロックはラッパーであり、本文にない主張を加えない。新しい根拠は従来どおりコメントに書く。
+
+<a id="amending-the-set"></a>
 
 ## 集合の変更
 

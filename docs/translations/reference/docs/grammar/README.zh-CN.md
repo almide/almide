@@ -1,3 +1,5 @@
+<a id="the-published-almide-grammar"></a>
+
 # 已发布的 Almide 文法
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](README.zh-CN.md)
@@ -10,6 +12,8 @@
 
 这种方法的依据：CangjieBench（arXiv 2603.14501）——对于低资源语言，语法约束生成提供最佳的准确率/成本权衡。CRANE（arXiv 2502.09061）——约束的是*输出*，绝不是推理。
 
+<a id="files"></a>
+
 ## 文件
 
 | 文件 | 内容 |
@@ -18,6 +22,8 @@
 | `negative-fixtures.txt` | 文法必须拒绝的无效程序 |
 | `../../scripts/check-lark-grammar.sh` | 防止过时的门禁 |
 | `../../scripts/lib/lark-gate.py` | 门禁的实现 |
+
+<a id="using-it"></a>
 
 ## 使用方法
 
@@ -29,6 +35,8 @@ parser.parse(open("app.almd").read())
 ```
 
 对于 llguidance / XGrammar，将同一个文件交给引擎的 Lark 前端。
+
+<a id="the-anti-rot-gate--exactly-what-it-checks"></a>
 
 ## 防止过时的门禁——它确切检查什么
 
@@ -42,12 +50,16 @@ parser.parse(open("app.almd").read())
 
 **3. 区分能力。** `negative-fixtures.txt` 中的每个测试夹具都必须被文法*和*编译器拒绝。没有这一条，退化成 `.*` 的文法也能轻松通过检查 2。门禁还强制要求测试夹具数量达到下限。
 
+<a id="what-the-gate-does-not-prove"></a>
+
 ## 门禁没有证明什么
 
 - **不是健全性。** 它没有证明文法*只*接受有效 Almide。它按设计就是超集；检查 2 只能在接受不足的方向失败，检查 3 只固定 `negative-fixtures.txt` 中列明的反例。
 - **不是语料之外的覆盖率。** `spec/`、`examples/` 或 `stdlib/` 中没有文件使用的语法特性不会得到测试。如果新结构落地时*没有*附带 spec 测试夹具，此处就捕捉不到——这也是新语法总要带上 `spec/` 测试的另一个理由。
 - **不涉及任何语义。** `--emit-ast` 仅做解析：类型、effect、模块解析和整个 checker 都不在范围内。
 - **不是引擎可移植性。** 门禁使用 Python `lark`（Earley + basic lexer）。它没有证明 llguidance 或 XGrammar 能编译这一精确方言；这些引擎接受具有各自限制的*类* Lark 语法。
+
+<a id="known-gaps--what-the-grammar-cannot-express"></a>
 
 ## 已知差距——文法无法表达什么
 
@@ -69,6 +81,8 @@ parser.parse(open("app.almd").read())
 | G11 | **没有深度限制。** 解析器将表达式嵌套上限设为 500（`MAX_DEPTH`）；该产物不设此限制。 | 更宽松 |
 | G12 | **带模块限定的记录字面量**（`mod.TypeName { … }`）可以出现在任意后缀表达式之后，而不只是解析器要求的单独标识符之后。 | 更宽松 |
 | G13 | **非 ASCII 名称**（#1456）。编译器接受 UAX #31 标识符（XID_Start 后接 XID_Continue，NFC），拒绝兼容字符（`ａ`、`１`、`ﬁ`），并通过声明判断无大小写名称的类别：`住所` 只在声明 `type 住所` 或 case `| 住所` 的模块中是类型名。产物的 `UNAME` 是任何以非 ASCII 字母开头的名称，在值位置和类型位置都可接受，后续的 `\w` 还允许兼容字符。 | 更宽松 |
+
+<a id="relationship-to-the-grammar-submodule"></a>
 
 ## 与 `grammar/` 子模块的关系
 

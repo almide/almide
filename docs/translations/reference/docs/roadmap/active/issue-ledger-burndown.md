@@ -1,3 +1,5 @@
+<a id="issue-ledger-burn-down--完全性キャンペーンの残量計"></a>
+
 # Issue Ledger Burn-down — the completeness campaign's remaining-work gauge
 
 [![English](https://img.shields.io/badge/English-24292f?style=flat-square)](issue-ledger-burndown.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](issue-ledger-burndown.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](issue-ledger-burndown.zh-CN.md)
@@ -10,13 +12,19 @@
 
 > As of 2026-06-11. The ledger → tracker injection is complete: **the number of open GitHub issues = known remaining completeness work**. Closure discipline = eliminate the entire class (each issue already states structural closure conditions; a patch does not close it). Stopping condition = #535's loop-until-dry.
 
+<a id="戦果2026-06-1011-の-2-日間"></a>
+
 ## Results (the two days 2026-06-10–11)
 
 Releases: v0.26.20 → **v0.27.3** (6 releases). Closed: the #484-490 group + #500/501/502/505 + #522/523/524/525/526/527/517 (all by eliminating the class).
 PRs: #487–#543. Matrix gates 0→29 cells; churn gates 0→3;
 contracts 58→67 (including C-066); wasm memory model “everything leaks” → “O(1) by default”.
 
+<a id="残-15-件の地形"></a>
+
 ## Landscape of the remaining 15 issues
+
+<a id="week-級--8-件1-件--1-集中セッション"></a>
 
 ### Week-scale — 8 issues (1 issue = 1 focused session)
 
@@ -31,6 +39,8 @@ contracts 58→67 (including C-066); wasm memory model “everything leaks” �
 | #533 | §13+PR-3 divergence queue + []-typing | Zero recorded cross-target divergences |
 | #534 | Specification-contradiction burn-down (??/Never/fan order/empty pages) | prose↔behavior agreement |
 
+<a id="weeks-級背骨-6-件"></a>
+
 ### Weeks-scale (backbone) — 6 issues
 
 | issue | Work | Scale |
@@ -42,14 +52,20 @@ contracts 58→67 (including C-066); wasm memory model “everything leaks” �
 | #519 | Allocator policy (monotonically growing acc × first-fit) | Research-oriented |
 | #520 | Extend runtime frees in Lean (proof of the allocator state machine) | Research-oriented |
 
+<a id="プロセス--1-件"></a>
+
 ### Process — 1 issue
 
 - **#535 loop-until-dry**: rotate the lens used for hole-hunting; only after 2–3 consecutive empty rounds is it “complete to the best of current knowledge”. Round 1 (multi-truth / silent-fallback / rule-bypass) found 6 classes → all handled. **Round 2 has not been run**. Candidate next lenses: pass-order assumptions, checker-accepts-lowering-reinterprets, interp semantic differences, diagnostic divergence, and host-environment dependencies other than hash order.
+
+<a id="見積もり"></a>
 
 ## Estimates
 
 - Zero known holes (all week-scale issues cleared): **4–7 days** (at the observed pace).
 - A state that can be called “complete” (3 backbone items + a dry hunt): **another 3–6 weeks**.
+
+<a id="推奨順"></a>
 
 ## Recommended order
 

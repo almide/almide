@@ -1,0 +1,166 @@
+> 原文の説明：コマンドパイプラインを値として構築し、実行を一つの明示的な手順にする。実際の需要が出るまで保留
+<a id="process-composition-a-pipeline-is-a-value-running-it-is-a-separate-step"></a>
+
+# プロセス合成：パイプラインは値、実行は別の手順
+
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](process-composition.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](process-composition.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](process-composition.zh-CN.md)
+
+> 非規範の固定読者用スナップショット。原文を正本とし、自動同期せず、実装・実測・安全性を独立に再検証したものではない。
+> [Source / 原文](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/on-hold/process-composition.md)
+> 保留案であり、着手や実行を許可するものではない。既存 ProcessCommand API と未実装のパイプライン構文、将来のメモリ・effect 特性の主張を区別する。需要・静的検査・must-use・終端形式・fan との関係は記述どおり未解決。原文の断定的設計論や先行例の十年の主張を保持するが、ここで独立に立証したものではない。
+
+
+> [shell-scripting-surface.md](../../../../../roadmap/active/shell-scripting-surface.md) の Phase 4
+> （遅延パイプライン合成）を独立させたもの。**あちらの保留判断は覆していない** —
+> 設計に居場所を与えて、起こす条件を書いておくのが本項の目的である。
+>
+> 設計参照: `../almide-references/RESEARCH-shell-composition.md`
+> （plumbum / sh / xonsh を読んだ記録。clone も同ディレクトリにある）
+
+<a id="現行-api-との境界-2026-10-31"></a>
+
+## 現行 API との境界 (2026-10-31)
+
+既存 API は `ProcessCommand` の設定値を `process.output` / `process.start` /
+`process.run` で実行する形である。stdin はレコードの `stdin` フィールドに渡す。
+[`stdlib/process.almd`](../../../../../../stdlib/process.almd) が現行の定義。
+以下の `process.cmd` / `pipe_to` / `capture` は未実装の合成 API 案であり、
+単一プロセスを設定値で表す機構自体は既にある。
+
+<a id="状態-保留"></a>
+
+## 状態: 保留
+
+親項目が保留にした理由をそのまま引く:
+
+> このリポジトリのゲート移植では一度も必要にならなかった（Unit 0.46 の記録）ので、
+> 本項も需要が出るまで着手しない。大きな中間出力を扱う実例が一つ出たら起こす。
+
+**先行実装が存在することは需要の証拠ではない。** 十年動いているライブラリがあるという
+事実は、設計を早める材料であって、着手を早める材料ではない。
+
+<a id="起こす条件"></a>
+
+## 起こす条件
+
+次のどれか一つが観測されたら active に移す。
+
+1. **大きな中間出力を扱う実例が一つ出る。** 現状 `ProcessCommand.stdin` は文字列を丸ごと
+   受け渡すので、中間出力がメモリに載る。ログや大きなダンプを流すゲートが一本でも
+   書かれたら、その時点で条件を満たす
+2. **`head` 相当の打ち切りが要るパイプラインが出る。** 下流が先に終わったとき上流を
+   止める必要が生じたら、遅延合成なしには書けない
+3. **同じパイプラインを二箇所で走らせる需要が出る。** 値でないと使い回せない
+
+<a id="何を作るのか"></a>
+
+## 何を作るのか
+
+コマンドを値にして、合成し、最後に一手で走らせる。
+
+```almide
+// 構築 — 純粋。プロセスは起きない
+let chain = process.cmd("grep", ["-v", "\\.py"])
+  |> process.pipe_to(process.cmd("wc", ["-l"]))
+
+// 実行 — ここだけが effect
+let n = chain |> process.capture()!
+```
+
+ユーザ定義の演算子オーバーロードは無い（CHEATSHEET「No macros, no operator overloading,
+no implicit conversions」）ので、合成は名前付き関数になる。`|>` は関数適用なので
+そのまま使える。
+
+<a id="なぜ値にするが-almide-に効くのか"></a>
+
+## なぜ「値にする」が Almide に効くのか
+
+三つある。どれも見た目の話ではない。
+
+**1. effect の境界が合成の形と一致する。** `process.cmd` と `process.pipe_to` は `fn`、
+終端の `capture` / `status` / `spawn` だけが `effect fn` になる。いま
+`process.output` の結果を次の `ProcessCommand.stdin` に手で渡す書き方は、途中の各段が effect なので、合成の途中に
+`!` が散らばる。値にすると **effect が一点に集まる**。
+
+**2. パイプラインが検査できる。** 値なので `let` に入り、比較でき、テストで
+「この入力からこの木が建つ」と書ける。プロセスを起こさずにパイプラインの正しさを
+テストできるのは、ゲートを移植する側にとって実利がある。
+
+**3. 中間出力がメモリに載らない。** 実配線が OS パイプになるので、上流の出力を
+文字列として持たない。これが保留を解除する一番の理由になる見込み。
+
+<a id="先行例から取るもの"></a>
+
+## 先行例から取るもの
+
+`plumbum`（tomerfiliba/plumbum、`plumbum/commands/base.py` 725 行）が同じ設計を
+十年動かしている。取るのは二点。
+
+**構築と実行の分離。** `__or__` / `__gt__` / `__getitem__` はノードを建てるだけで、
+`__call__` だけが `run()` を呼ぶ。副作用の入口が一つしかない。
+
+**SIGPIPE を落とさない配線。** `Pipeline.popen` は下流の stdin に上流の stdout を
+繋いだあと、**親側の複製を明示的に閉じる**:
+
+```python
+srcproc.stdout.close()   # allow p1 to receive a SIGPIPE if p2 exits
+```
+
+これを忘れると、下流が死んでも上流が永久に走る。Almide は既に SIGPIPE の扱いを
+持っている（`MAIN_SIGPIPE_PRELUDE`）ので接続できる見込みがあるが、**ここは実装時に
+必ず踏む穴**として記録しておく。`wait()` が上流も待つ後始末も同様。
+
+<a id="採らないもの"></a>
+
+## 採らないもの
+
+- **モード推論**（`xonsh`）— 1 行を「言語として妥当なら言語、さもなくばコマンド」と
+  解釈する方式。間違えても構文エラーにならず**別の妥当な意味に化ける**ので、診断が
+  原理的に出せない。親項目が戦略面で却下しているが、機構の側にも独立した理由がある
+- **属性ディスパッチ**（`sh`）— `sh.git.log(...)` のようにコマンド名を動的解決する方式。
+  打ち間違いが実行時に落ちる。診断で稼いでいる分をそのまま捨てる
+
+<a id="未解決の設計論点"></a>
+
+## 未解決の設計論点
+
+着手前に決める必要があるもの。
+
+1. **コマンド名の静的検査をするのか。** `process.cmd("gre", ...)` は今のところ誰も
+   止められない。`PATH` 解決を check 時にやるのは環境依存を持ち込むので却下だろうが、
+   **「何もしない」を明示的に選ぶ**必要がある
+2. **`Pipeline` 値に E042(must-use) が効くべきか。** 構築を純粋にすると、chain を
+   作って**実行し忘れる**ことが起きる。型が effect を持たないぶん、いまの E042 は
+   これを捕まえない
+3. **終端をいくつ用意するか。** 既存の主な実行形は `output` / `run` / `start` (`exec` は簡便形)。
+   端末にも流しつつ捕まえる形（plumbum の `run_tee` 相当）が要るかは、
+   [zero-committed-shell.md](../../../../../roadmap/active/zero-committed-shell.md) のゲート移植が実測材料になる
+4. **`fan` との関係。** パイプラインは逐次合成、`fan` は並列。`A | B` が
+   「B が A の出力を待つ」なのに対し `fan` は独立枝である。両者が同じ `|>` の上に
+   乗ったとき読み分けられるか
+
+<a id="done-criteria"></a>
+
+## 完了条件
+
+（着手したときの完了条件。保留中は評価しない）
+
+- パイプラインが値として構築でき、構築が `fn`、終端だけが `effect fn` である
+- 中間出力がメモリに載らない（大きな出力で実測する）
+- 下流の早期終了が上流に伝わる（`head` 相当で実測する）
+- 上記を使った実寸の例が [CHEATSHEET.md](../../../../../CHEATSHEET.md) に
+  ```` ```almide check ```` 付きで載っている
+
+<a id="risks"></a>
+
+## リスク
+
+- **R1 — 保留のまま設計だけ膨らむ。** 吸収: 本項は起こす条件を持ち、それが観測される
+  まで着手しない。設計論点が増えても着手の根拠にはならない
+- **R2 — 対話シェルへのスコープ漏れ。** パイプライン合成が入ると「あとはプロンプトだけでは」
+  となる。吸収: 親項目の決定が境界線であり、越えるなら MSR デルタの見積りを添えて
+  あちらを書き換えること
+- **R3 — SIGPIPE 配線の取りこぼし。** 吸収: 上記の `stdout.close()` と `wait()` の
+  後始末を実装時のチェック項目として本項に固定してある
+
+> 保持した Python コメントは、p2 が終了したとき p1 が SIGPIPE を受け取れるようにする、という意味である。

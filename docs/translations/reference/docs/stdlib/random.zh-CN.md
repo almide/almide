@@ -92,6 +92,8 @@ effect fn main() -> Unit = {
 
 
 
+<a id="signature-index-10-functions"></a>
+
 ## 固定快照 API 索引 (10 个函数)
 
 ```

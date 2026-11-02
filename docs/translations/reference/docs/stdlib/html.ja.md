@@ -117,6 +117,8 @@ fn main() -> Unit = {
 
 
 
+<a id="signature-index-8-functions"></a>
+
 ## シグネチャ索引 (8 個の関数)
 
 ```

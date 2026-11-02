@@ -8,6 +8,8 @@
 
 ファイルシステム。import fs、effect。
 
+<a id="the-_if_exists-content-readers--absence-as-a-value"></a>
+
 ### `_if_exists` 内容リーダー — 不在を値として扱う
 
 `read_text_if_exists` / `read_bytes_if_exists` / `read_lines_if_exists` は `Result[Option[T], String]` を返す。パス（または親）がなければ `ok(none)`、読めれば `ok(some(content))`、実際の失敗（権限、パスがディレクトリ、IO）なら `err(msg)`。分類は 1 回の読取りの内側で行うため、`fs.exists` の事前チェックと異なり競合を生まない。契約 C-215。ネイティブと wasm の両経路に対応し、ターゲットでの利用可否はルート一覧に記載される。
@@ -29,6 +31,8 @@ effect fn main() -> Unit = {
 default
 port = 8080
 ```
+
+<a id="the-whole-file-readers-read-regular-files-of-at-most-1-gib"></a>
 
 ### ファイル全体のリーダーは最大 1 GiB の通常ファイルを読む
 
@@ -614,6 +618,8 @@ not a symlink
 
 
 
+<a id="signature-index-37-functions"></a>
+
 ## シグネチャ索引（37 関数）
 
 ```
@@ -765,6 +771,8 @@ effect fs.root_exists(root: FsRoot, path: String) -> Bool
 // @since unreleased
 effect fs.root_remove(root: FsRoot, path: String) -> Unit
 ```
+
+<a id="type-index-1-types"></a>
 
 ## 型索引（1 型）
 

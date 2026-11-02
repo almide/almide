@@ -26,6 +26,8 @@
 
 **目标。** 原生与 wasm 都提供标准流和句柄函数。其他模块的句柄在该模块函数可用的环境中工作：见 [net](../../../../stdlib/net.md) 和 [unix](../../../../stdlib/unix.md)。
 
+<a id="text-shortcuts"></a>
+
 ## 文本快捷函数
 
 ### `io.read_line() -> String?`
@@ -104,11 +106,15 @@ effect fn main() -> Unit = {
 }
 ```
 
+<a id="the-stream-handles"></a>
+
 ## 流句柄
 
 ### `io.stdin() -> Stdin` / `io.stdout() -> Stdout` / `io.stderr() -> Stderr`
 
 以句柄形式提供标准流，供下列函数使用。每次调用都需要 `!`。它们与文本快捷函数共享流：`io.read_line` 和 `io.read(io.stdin()!, n)` 读取相同输入，`println` 和 `io.write(io.stdout()!, b)` 使用相同缓冲区。
+
+<a id="bytes-over-any-handle"></a>
 
 ## 任意句柄上的字节操作
 
@@ -184,6 +190,8 @@ effect fn main() -> Unit = {
 ```
 
 
+
+<a id="signature-index-12-functions"></a>
 
 ## 固定快照 API 索引（12个函数）
 

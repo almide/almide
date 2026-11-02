@@ -1,3 +1,5 @@
+<a id="externalize-try-snippets-from-rust-literals"></a>
+
 # `try:` スニペットを Rust リテラルから外部化する
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](diagnostic-snippet-externalization.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](diagnostic-snippet-externalization.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](diagnostic-snippet-externalization.zh-CN.md)
@@ -11,6 +13,8 @@
 
 説明: Rust リテラルから検査済みソーステンプレートへ診断修正スニペットを移行する、残る作業。
 
+<a id="current-state"></a>
+
 ## 現状
 
 前提となる [同梱 Almide ディスパッチ](../../../../../roadmap/done/bundled-almide-dispatch.md) は 2026-04-16 に提供済みであり、もはや障害ではない。スニペット移行自体は提案のままで、`stdlib/diagnostics/` テンプレートディレクトリは存在しない。
@@ -22,6 +26,8 @@
 - [`stdlib.rs`](../../../../../../crates/almide-frontend/src/stdlib.rs): `try_snippet_for_alias` がより豊かな別名修正を提供する。
 
 これらは例であり、固定したファイル／件数一覧ではない。言語のパーサーと切り離されたテキストが古い修正方法を教えてしまう、という乖離のリスクは残る。
+
+<a id="remaining-design-and-work"></a>
 
 ## 残る設計と作業
 

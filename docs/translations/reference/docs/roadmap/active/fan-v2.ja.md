@@ -1,0 +1,273 @@
+原文 description メタデータ：Fan v2 設計・移行履歴。現行選択表面は ADR-0028 と SPEC に従う
+<a id="fan-v2--execution-policy-design-and-migration-record"></a>
+
+# Fan v2 — 実行ポリシー設計・移行記録
+
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](fan-v2.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](fan-v2.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](fan-v2.zh-CN.md)
+
+> 原文コミット固定の非規範閲覧用スナップショット。原文を正本とし、自動同期しない。独立した実行、実装検証、証明検査、測定は行っていない。歴史的コマンドや設計指示は資料であり、実行した指示ではない。
+> [Original source / 原文](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/active/fan-v2.md)
+
+> 原文注記：6 head matrix、race の任意予算、thunk 移行、Wave 残件、MSR の理由づけは歴史的設計記録であり、第二の現行文法や測定済み生存率保証ではない。冒頭 ADR-0028 案内が旧 any/race 名・任意時計規則に優先し、現 min は Compute 必須、Duration min は拒否/未了、timeout は存在し T1 は完了記録がある。Compute の決定性は meter 版に限定し、任意 compiler 版間の不変性ではない。host 相対 timeout は host 非依存の発火判断を保証しない。旧 pure/effect・Result 条件、trap window、min-cap は記載範囲を保持する。record 追加と edition 移行残件は別。旧例と件数を保持し、compiler/test/benchmark は実行していない。
+
+<a id="current-navigation"></a>
+
+## 現行の案内
+
+正本の表面は [SPEC §13](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/SPEC.md#13-concurrency-fan)。本設計の後に [ADR-0028](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/adr/0028-fan-selection-names-and-cost-contract.md) が選択名と時計を定めた。
+
+- `fan.any` は撤去済み。`??` / `list.find_map` を使う。
+- `fan.race` は `fan.min` へ改名。現行呼び出しには Compute 時計が必須。Duration min は ADR-0028 の設計決定で #3788 待ち、現行 checker は拒否する。Compute は決定層に属し、論理コストの範囲は meter 版であり、任意の compiler 版間で不変ではない。
+- `fan.timeout(duration.ms(n)) { body }` は存在し、未実装の tombstone ではない。
+- 下記8月の T1-1/T1-2 は [BURNDOWN.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/research/spike/charge-probe/BURNDOWN.md) で完了した。
+- 現行の受理/拒否形は `tests/fan_surface_matrix_test.rs` が覆う。下の歴史的6 head matrix は第二の現行文法仕様ではない。
+
+<a id="implementation-records"></a>
+
+## 実装記録
+
+> **実装状況（worktree-stage1-charge-probe、2026-08-02）**: 表面は実装済み —
+> block heads 全部（fan{} / any / settle / race / bounded、settle は tuple 契約）、
+> mapper 形 any/settle、budgets（compute.* 構築子 + S3 代数 + min-cap）、
+> Result arm の Err スキップ、裸形 Result（native Res carrier 含む）、full block
+> body/arm。fixtures = spec/wasm_cross/fuel_* / time_* / fan_settle_tuple、契約 =
+> C-202..C-207。未了: strict cap + unwind（T1-1）と metered-clone（T1-2）—
+> research/spike/charge-probe/BURNDOWN.md が正。本文の表と食い違う場合は
+> BURNDOWN/契約台帳が勝つ。
+>
+> **#1388（2026-10-18）**: 無印 head の record 形 `fan { a: e1, b: e2 }` を実装 —
+> 値は匿名レコード、arm は tuple 形と同じ Fan ノードで走る（lowering で tuple 形 +
+> 分解 + レコード literal に落とす）、契約 C-386（serial elision と source order の
+> 先頭 Err）。`!` なしの Result フィールドは E041（settle 統合で「Result のまま残す」
+> 読みを与える余地を残す）。未了: `fan.settle { }` tuple head の退役と tuple 形からの
+> 移行（edition 境界）。
+
+
+> 当初の憲章: [async-inception.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/active/async-inception.md)。以下は導入時の設計理由と
+> 移行計画を保存する。現在の文法・契約を上書きするものではない。
+>
+> [logical-time-async.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/active/logical-time-async.md)（意味論）の上に、fan の**表面全体**を
+> 一つの文法に畳む設計。[concurrency-stance.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/active/concurrency-stance.md) の決定
+> （決定的データ並列）は前提であり、変更しない。
+
+<a id="導入時の統一テーゼ"></a>
+
+## 導入時の統一テーゼ
+
+**fan は「実行ポリシー」の文法である。** すべての fan 構文は
+
+    head（ポリシー） × form（block = 静的 arm 列 | mapper = 動的リスト）
+
+の 1 セルであり、それ以外の形は存在しない。thunk（`() => …`）は表面から**全廃**する。
+
+v2 導入前の fan 表面は 3 つの呼び出し規約が混在している — block は式の列、`fan.map` は
+(list, mapper)、`fan.any`/`fan.settle` は thunk リスト。しかも auto-wrap 契約が
+コンビネータごとに違う（「race/any/settle の thunk は auto-wrap するが map の mapper はしない」）。
+v2 はこれを **head × form の直積 1 枚**に置き換える。
+
+<a id="導入時の-v2-マトリクス履歴--現行文法ではない"></a>
+
+## 導入時の v2 マトリクス（履歴 — 現行文法ではない）
+
+| head | 選択規則 | block form（静的 arm） | mapper form（動的） | arm 効果上限 | 並列化 |
+|---|---|---|---|---|---|
+| （無印）all | 全部。リスト順先頭 Err | `fan { a; b }` → `(A, B)` | `fan.map(xs, f)` → `List[B]` | effect 可 | 可（観測はリスト順） |
+| settle | 選択しない。全収集 | `fan.settle { a; b }` → `(Result[A], Result[B])` | `fan.settle(xs, f)` → `List[Result[B]]` | effect 可 | 可 |
+| any | **index 最小**の成功 | `fan.any { a; b }` → `T` | `fan.any(xs, f)` → `T` | effect 可 | 逐次（意味論ごと逐次） |
+| race | **(spend, index) 最小**の成功 | `fan.race { a; b }` → `T`（`fan.race(compute.ms(500)) { … }` は任意の発散ガード） | `fan.race(xs, f)` / `fan.race(compute.ms(500), xs, f)` → `T`（**実装済み 2026-08-03、T7-1** — f は pure な 1 引数 lambda で `Result` 必須、budget は per-element、同着はリスト順） | **pure**（Rung 0） | 可（枝刈り付き） |
+| bounded | 単一 body の計量 | `fan.bounded(compute.ms(100)) { body }` → `T` | —（map と合成） | **pure** | — |
+| timeout | 環境が切る（壁時計 — oracle 層、[ADR-0001 S8](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/adr/0001-deterministic-time-units.md)） | `fan.timeout(duration.s(5)) { body }` → `T` | — | oracle 可 | ホスト相対 |
+
+- block form の arm は **式**（`fan {}` と同じ arm 契約: Result auto-unwrap、外側 `var`
+  キャプチャ禁止）。any/race の arm は同一の `T` に unify する。all/settle は tuple なので
+  異型でよい。
+- mapper form の mapper は **Result を返す**（`fan.map` の既存契約に統一。pure mapper は
+  今までどおり `list.map` へ誘導する #547 の診断を全 head に広げる）。
+- bounded / timeout は arm 列ではなく **単一 body**（通常のブロック。`let` も書ける）を
+  取る。「N-arm head」と「body head」の 2 種があることは文法表に明記する。
+- 空の arm 列・空 body はコンパイルエラー（旧 race の空リスト規則を継承）。
+
+**auto-wrap の不統一は form 単位の規則に置き換わる**: block form の arm は常に
+`fan {}` 流（auto-unwrap）、mapper form の mapper は常に `fan.map` 流（Result 必須）。
+head ごとの例外はゼロになる。
+
+<a id="thunk-全廃が買うもの"></a>
+
+## thunk 全廃が買うもの
+
+<a id="1-表面から---が消える"></a>
+
+### 1. 表面から `() =>` が消える
+
+```almide
+// v2 導入前の v1
+fan.any([() => http_fetch(a), () => http_fetch(b)])
+fan.any(mirrors |> list.map((m) => () => fetch(m)))
+
+// v2
+fan.any { http_fetch(a); http_fetch(b) }
+fan.any(mirrors, (m) => fetch(m))
+```
+
+fan-concurrency.md §3.4「thunk が必要な理由」は、fan.* が**関数だから**遅延に thunk が
+要るという説明だった。v2 では全 head が構文なので、この節ごと言語から削除される。
+動的形も「thunk リストを組み立ててから渡す」2 段が「リスト + mapper」の 1 段になり、
+コードは厳密に短くなる。
+
+<a id="2-wasm-の-wall-クラスが-1-つ死ぬ"></a>
+
+### 2. wasm の wall クラスが 1 つ死ぬ
+
+当時の動的 thunk リスト（非リテラル）は v1 で `List[funcref]` が表現できず、
+`desugar_fan.rs` はリテラル・let 束縛リテラルだけを inline し、真に動的なリストは
+purity wall に落としている。mapper form は「データのリスト + 閉包 1 個」— `fan.map` と
+同じ形 — なので、**この wall クラスは構文の変更だけで消滅する**。意味論の犠牲はゼロ。
+
+<a id="3-予算引数がラベルを必要としなくなる"></a>
+
+### 3. 予算引数がラベルを必要としなくなる
+
+言語にラベル引数構文は**存在しない**（logical-time-async.md 初稿はここを `limit:` の
+前例ありと誤認していた — 訂正済み）。当初は fan head が構文であることを利用して
+`ticks:` / `ms:` を fan 文法自身の要素として供給する設計だったが、**[ADR-0001](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/adr/0001-deterministic-time-units.md)
+でラベルごと不要になった** — 予算は単位付きの構築関数（`compute.ms(100)` / `duration.s(5)`）で
+書き、区別は型が持つ。パーサに head-args のラベル解析を入れる必要が消え、v2 の表面は
+一段縮む。
+
+```almide
+fan.bounded(compute.ms(100)) { body }   // 決定的時計（Compute 型）
+fan.timeout(duration.s(5))   { body }   // 壁時計（Duration 型）
+fan.bounded(compute.ms(n))   { body }   // 変数もそのまま
+fan.bounded(100)                        // 型エラー: expected Compute, found Int
+```
+
+単位名の集合は `ns`/`us`/`ms`/`s`/`min`/`h` で、完備性 matrix としてゲートに載せる。
+**新しいリテラル構文は追加しない** — `100ms` のような数値接尾辞は lexer の拡張が要り、
+fan の表面のためだけに字句規則を広げる取引は割に合わない（将来足す場合の脱糖先が
+この関数形になる）。
+
+<a id="導入時に整理した各-head-の意味論後続変更は上の-current-navigation-参照"></a>
+
+## 導入時に整理した各 head の意味論（後続変更は上の Current navigation 参照）
+
+- **all / settle**: 現行のまま。C-004 / C-199 / C-200 は statement ごと生存する。
+  arm 出力のバッファリング（リスト順 flush、C-004 EXCEPTION 節の退役）は
+  logical-time-async.md の Rung 1 と部品を共有する別ワークストリーム。
+- **any**: 現行の脱糖（match チェーン）が既に定義している**逐次フォールバック**を正式な
+  意味論に昇格する。「リスト順に試し、最初の Ok で**打ち切る**。先行候補の効果は起こり、
+  後続候補の効果は起こらない」。any は並行構文ではなく**フォールバック構文**である —
+  これを仕様の文として明記する（pure arm に限り投機実行は不可観測な最適化として許す）。
+  全滅時の Err は台帳定数（現行どおり）。
+- **race / bounded**: 意味論は logical-time-async.md の全項（lockstep ≡ least-spend、
+  per-branch 予算、trap 可視窓、EVM 式 min-cap、CM-1）。v2 はその表面を block form に
+  確定させる。**bounded + `??` が主要イディオムになる**:
+
+  ```almide
+  let plan = fan.bounded(compute.ms(100)) { optimal_plan(g) } ?? greedy_plan(g)
+
+  let ans = fan.race(compute.s(1)) {
+    exact_solve(input)
+    heuristic_solve(input)
+  } ?? default_answer
+  ```
+
+- **timeout（当初の段階計画）**: Stage 4（Path C / R_Ω）まで保留していた。再導入時の形だけここで
+  確定する — `fan.timeout(duration.s(5)) { body }`、中断点は charge site（logical-time-async の
+  中断点統一原理）、契約クラスは oracle-relative。
+
+<a id="導入時の完備性規則matrix-gate-の設計"></a>
+
+## 導入時の完備性規則（matrix gate の設計）
+
+1. すべての head は block form を持つ。
+2. mapper form を持つのは「同型の動的データに対して arm を量産できる head」
+   （all / settle / any / race）に限る。bounded / timeout は単一 body head なので持たない
+   — これは意図的省略である。
+3. 予算引数は bounded で**必須**（bound することが存在理由）、race で**任意**
+   （選択は予算を要さない — 予算の役割は発散ガードだけ。
+   [ticks-interface-audit.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/active/ticks-interface-audit.md)）。timeout は壁時計の
+   duration を取る。無印 fan / map / any / settle に予算引数はない — 予算の
+   次元は `fan.bounded` の合成で届くため（logical-time-async の完備性規則そのまま）。
+4. 新しい head を足すときは、この表に行を足し、全列（選択規則・両 form の型・効果上限・
+   並列化可能性）を埋めることが PR の受理条件（API 族の matrix 原則）。
+
+<a id="当初の移行--何が壊れてどれだけか"></a>
+
+## 当初の移行 — 何が壊れて、どれだけか
+
+**不動**: `fan { }` と `fan.map(xs, f)` — 最多使用の 2 表面は文字も変わらない。
+契約（C-004/C-005/C-199/C-200）も statement ごと生存。
+
+**破壊的**: `fan.any(thunks)` / `fan.settle(thunks)` の thunk リスト形。E0xx 移行
+tombstone（check 時、書き換え例つき）にする。共存させない — 同じ意味の 2 綴りは
+この repo が繰り返し払ってきた種類の負債である。
+
+爆風半径は測定済み: リポジトリ内の使用は **spec 8 ファイル ~60 行**（stdlib はコメント
+1 件、CHEATSHEET は 0 件）。各 fixture が何を pin しているかを読んで移す —
+`fan.race` 撤去（#1024）で学んだとおり、機械置換は「通るが誤ったことを主張するテスト」
+を作る。契約 C-005 系の statement は新形式の綴りに更新する（振る舞いは同一なので
+契約の主張自体は不変）。
+
+<a id="却下したものv2-の輪郭は否定側で確定する"></a>
+
+## 却下したもの（v2 の輪郭は否定側で確定する）
+
+| 候補 | 判定 | 理由 |
+|---|---|---|
+| `fan.rush`（最速を返し敗者は走り続ける） | **恒久却下** | 敗者の効果が採用後も漏れ続ける構文は、決定的モデルで意味を与えられない。「リスト順の意味を与えられないものは言語に入れない」の適用例 |
+| `fan.spawn` / `fan.link` | 地平送り | 非構造化・チャネルは logical-time-async の「将来の地平」（決定的並行性）が土台になってから。v2 には入れない |
+| 汎用ラベル引数 | 導入しない | 言語全体の呼び出し規約の問いであり、fan 経由で密輸しない。ADR-0001 で予算がラベルごと不要になり、この問い自体が消えた |
+| trailing lambda（`fan.map(xs) { x => … }`） | 導入しない | 綴りが 2 通りになるだけで意味が増えない |
+| `fan.map(xs, limit: n, f)` | 入れない | 実装されていなかった（fan-concurrency-next の ✅ は stale、checker は 2 引数固定）。観測を変えないスケジューリングヒントは必要が実証されてから、別の機構（pragma 類）で |
+| `fan.all { }`（無印の別名） | 導入しない | 最頻の形が最短であるべき。別名は共存負債 |
+
+<a id="msr--v2-が生存率に効く形"></a>
+
+## MSR — v2 が生存率に効く形
+
+- **決定木が浅くなる**: 「静的に並べるか（block）、データで量産するか（mapper）」×
+  「全部要るか（無印/settle）、最初の成功か（any）、最安の成功か（race）、上限だけか
+  （bounded）」。LLM が選ぶのはこの 2 択 × 4 択だけで、全セルの型が表から読める。
+- **thunk 消滅**は「`() =>` を忘れる／余計に付ける」という編集破壊クラスをゼロにする。
+- **arm 契約の単一化**（block は auto-unwrap、mapper は Result 必須）で、head を
+  入れ替える編集（any → race 等）が型契約の再学習なしに生存する。
+- 走るたび同じ、はそのまま: v2 に非決定的なセルは 1 つもない（timeout は oracle 層で
+  契約クラスごと分離）。
+
+<a id="当初の実装-wave現在の未完了一覧ではない"></a>
+
+## 当初の実装 Wave（現在の未完了一覧ではない）
+
+1. **Wave 1 — 表面統一（fuel 不要、今すぐ可能）**: any/settle の block form + mapper
+   form、thunk リスト形の E0xx tombstone、spec 8 ファイル移行、SPEC.md §13 再記述、
+   CHEATSHEET、formatter、interp ブリッジ、matrix gate 新設。parser は
+   `fan.IDENT` の後の `(head-args)` と `{`/`(` の分岐を追加。
+   あわせて **async/await の死骸を AST/IR から撤去する**: lexer にキーワードは既に
+   存在せず parser の `async_` は false 固定（2026-08-01 確認）だが、
+   `ExprKind::Await` / `IrExprKind::Await` / `Decl::Fn` の `r#async` フィールドと
+   fmt / interp / optimize の形骸アームが残っている。「文法から書けない」を
+   「表現できない」に格上げする。
+2. **Wave 2 — 決定層の完成**: `fan.bounded`（logical-time Stage 2）→ `fan.race`
+   （Stage 3）を v2 の形で。E027 改訂もここ。
+3. **Wave 3 — oracle 層**: `fan.timeout(duration.s(5)) { }`（Stage 4）。
+
+Wave 1 が独立に着手可能であることが v2 の要点の一つ — 表面の統一は fuel 意味論の
+実装を待たない。
+
+<a id="反証条件"></a>
+
+## 反証条件
+
+- parser の `fan.IDENT ( … ) { … }` 分岐が既存の式文法と衝突する（member call +
+  後続 block の曖昧性）。→ fan が予約語で primary から専用パースである限り起きない
+  はずだが、Wave 1 の最初に fixture で確定させる。
+- any/settle の移行で pin が壊れる fixture が出る。→ #1024 の手順（1 ファイルずつ
+  pin を読む）を踏む。8 ファイルは半日仕事の規模。
+- mapper form の race に実ユースが出ない。→ セルは宣言のまま Wave 2 では
+  block form だけ実装し、matrix gate に「宣言済み・未実装」を明示させる。
+  （2026-08-03 発効: `tests/fan_surface_matrix_test.rs` が 6 head × 2 form の
+  全セルを機械固定。**同日、ユーザー指示でセルを実装で閉じた（T7-1）** — gate は
+  race mapper を implemented 側へ遷移済み。bounded / timeout の mapper は
+  設計上不在のまま。セルを変えるなら同 PR で gate を更新する）
+- 「block か mapper か」の 2 択が LLM に不利に働く証拠が dojo の計測で出る。→
+  MSR タスクバンクに fan v2 セットを足して測る。設計の当否は計測が決める。

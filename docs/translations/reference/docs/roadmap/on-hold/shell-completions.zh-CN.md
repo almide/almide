@@ -1,3 +1,5 @@
+<a id="shell-completions"></a>
+
 # Shell 补全
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](shell-completions.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](shell-completions.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](shell-completions.zh-CN.md)
@@ -10,6 +12,8 @@
 
 通过 `almide completions` 子命令生成 bash/zsh/fish 的补全脚本。这是从 distribution-ux 分离出来的剩余工作。
 
+<a id="想定する使い方"></a>
+
 ## 预期用法
 
 ```bash
@@ -18,17 +22,23 @@ almide completions zsh  > ~/.local/share/zsh/site-functions/_almide
 almide completions fish > ~/.config/fish/completions/almide.fish
 ```
 
+<a id="実装方針"></a>
+
 ## 实现方针
 
 - 使用 clap 的 `clap_complete` crate 自动生成。
 - 接收 `Shell` 参数，用 `generate()` 将脚本写入 stdout。
 - 也为 `tools/install.sh` / `tools/install.ps1` 添加安装时自动放置补全文件的选项（可选）。
 
+<a id="変更が必要なファイル"></a>
+
 ## 需要修改的文件
 
 - `Cargo.toml` — 添加 `clap_complete` 依赖。
 - `src/cli/mod.rs` — 添加 `Completions { shell: Shell }` 子命令。
 - `src/main.rs` — 实现处理器。
+
+<a id="なぜ-on-hold-か"></a>
 
 ## 为何搁置？
 

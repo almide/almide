@@ -42,6 +42,8 @@ effect fn main() -> Unit = {
 
 负参数会确定性地在运行时 abort（`Error: negative time: compute.us(-5)`，exit 1，两个目标相同）；构造溢出时饱和为可表示的最大时间。
 
+<a id="algebra-adr-0001-s3"></a>
+
 ### 代数（ADR-0001 S3）
 
 ```almd run
@@ -79,6 +81,8 @@ less
 
 `T * T`（时间 × 时间）、混合 `Compute` 与 `Duration` 或裸 `Int` 的任意操作，以及 `/` 都是类型错误；每个单元为何封闭请见 ADR。
 
+<a id="consumers"></a>
+
 ### 使用者
 
 ```almd run
@@ -111,6 +115,8 @@ effect fn main() -> Unit = {
 `almide run --time-report` 将程序的确定性时间打印在测得的实际经过时间旁（`time: 0.15ms deterministic (≈38.7ms wall here)`）；两者是不同的时钟，从不声称是同一个量。
 
 
+
+<a id="signature-index-7-functions"></a>
 
 ## 固定快照 API 索引 (7 个函数)
 

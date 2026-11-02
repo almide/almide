@@ -1,3 +1,5 @@
+<a id="ci-warnings-cleanup"></a>
+
 # CI 警告の整理
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](ci-warnings-cleanup.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](ci-warnings-cleanup.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](ci-warnings-cleanup.zh-CN.md)
@@ -12,11 +14,17 @@
 > **観測時点**：v0.23.10、Windows と macOS の両 CI
 > **影響**：CI ログのノイズ、4 件の ICE メッセージ（致命的ではない）
 
+<a id="summary"></a>
+
 ## 概要
 
 CI 出力には、spec テスト全体で約 40 件の警告と 4 件の ICE メッセージがある。全テストは合格しており、これらは失敗ではなく診断ノイズである。ただし ICE メッセージは、実際に単相化に不足があることを示す。
 
+<a id="categories"></a>
+
 ## 分類
+
+<a id="critical-ice--typevar-remains-after-monomorphization-4-files"></a>
 
 ### 重大：ICE — 単相化後に TypeVar が残る（4 ファイル）
 
@@ -35,6 +43,8 @@ CI 出力には、spec テスト全体で約 40 件の警告と 4 件の ICE メ
 
 **関連**：`spec/lang/function_test.almd` にも残存 TypeVar が 1 つある（ジェネリックな階乗か？）。
 
+<a id="critical-postcondition-violation--lambda-param-unresolved-1-file"></a>
+
 ### 重大：POSTCONDITION VIOLATION — ラムダ引数が未解決（1 ファイル）
 
 ```
@@ -46,11 +56,15 @@ CI 出力には、spec テスト全体で約 40 件の警告と 4 件の ICE メ
 
 **根本原因**：引数型が Unknown のラムダが ConcretizeTypes 後も残る。上書き／シャドーイングのパターンが型解決を混乱させている可能性がある。
 
+<a id="noise-unused-variable-warnings-25-instances"></a>
+
 ### ノイズ：未使用変数警告（約 25 件）
 
 spec テストファイルでは副作用だけのために変数を使う（例：`for (k, v) in m { ... }` で `v` だけを使う）。
 
 **修正案**：spec ファイルで `_` を前置するか、テストモードで抑制する。
+
+<a id="noise-unused-import-warnings-4-instances"></a>
 
 ### ノイズ：未使用インポート警告（4 件）
 
@@ -58,6 +72,8 @@ spec テストファイルでは副作用だけのために変数を使う（例
 - stdlib テストの `fs`、`env`、`process` インポート
 
 **修正案**：未使用インポートを削除するか、`_` を前置する。
+
+<a id="noise-e015--stdlib-shadow-warnings-5-instances"></a>
 
 ### ノイズ：E015 — stdlib のシャドーイング警告（5 件）
 
@@ -68,6 +84,8 @@ warning[E015]: fn 'factorial' has the same signature as stdlib `math.factorial`
 ファイル：`codegen_stress_test`、`function_test`、`generics_test`、`regression_v0_11_test`、`type_system_test`
 
 **バグではない**：テストファイル内の意図的な再実装である。テストブロック内の E015 を抑制できるかもしれない。
+
+<a id="recommended-actions"></a>
 
 ## 推奨アクション
 

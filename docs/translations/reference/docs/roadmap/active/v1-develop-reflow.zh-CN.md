@@ -1,3 +1,5 @@
+<a id="v1--develop-reflow-strategy"></a>
+
 # v1 → develop 回流策略
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](v1-develop-reflow.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](v1-develop-reflow.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](v1-develop-reflow.zh-CN.md)
@@ -8,11 +10,15 @@
 
 > 原文描述元数据：2026 年 7 月整合 develop-v1 的历史提案，不是尚待执行的请求。
 
+<a id="historical-branch-integration-decision-record"></a>
+
 ## 历史分支整合决策记录
 
 这是 2026 年 7 月 3 日的 `develop-v1` 整合提案。要求所有者作出 Go 决定及在分支内执行的内容是历史记录，不是针对当前检出的待审批请求。MIR、自托管源码及证明基础设施已经在本仓库中；当前交付的 Wasm 路径是 [structural](../../../../../../src/wasm_route.rs)。以下保留原有顺序及风险评估，并非重新发布指令。
 
 > **定位**：关于何时、以什么单位将留在 develop-v1 中的 v1 成果（MIR trust spine、自托管源码、证据门禁）回流到 develop 的方针提案。**执行等待用户的 Go 决定**——本文整理决策材料。
+
+<a id="還流資産の棚卸し2026-07-03-時点"></a>
 
 ## 回流资产盘点（截至 2026-07-03）
 
@@ -24,11 +30,15 @@
 | **整个 MIR spine**（almide-mir crate + registry 自托管源码 + render_program） | v1 核心；引入 develop 后作为“第二个后端”并存 | 高——develop 的 CI 时间和维护面积翻倍 | **第3波**：与“v1 替换 v0 的父级”的决定同时；此前常驻原分支 |
 | **stdlib 自托管（.almd）** | v0 路径不使用（registry 专用） | 低（不影响 v0），但单独无意义 | 与第3波同时 |
 
+<a id="順序の原則"></a>
+
 ## 顺序原则
 
 1. **证据优先**（第1波）：验证基础设施先于实现合流——提升 v0 绿灯的可信度，成为承接后续实现回流的网。
 2. **1 修复 = 1 PR**（第2波）：将 v1 工作中发现的 v0 缺陷修复与 v1 分离，拆成可独立说明的粒度（原 governing directive 为“不需要 v0 回移”，因此这一方针变化需要明确批准）。
 3. **替换当天才回流 spine**（第3波）：MIR spine 的回流与“退役 emit_wasm，将 render path 作为生产路径”的决定绑定。此前 develop-v1 是其归属分支。
+
+<a id="未解決の判断ユーザー入力待ち"></a>
 
 ## 未决判断（等待用户输入）
 

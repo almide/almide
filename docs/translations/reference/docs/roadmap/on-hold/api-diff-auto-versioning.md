@@ -8,11 +8,15 @@
 
 > Source description: Package-facing API diff and version advice beyond the shipped stdlib interface gate.
 
+<a id="実装済みの土台"></a>
+
 ## Implemented foundation
 
 Changes to the standard library's public API are already checked by [`scripts/check-interface-diff.sh`](../../../../../../scripts/check-interface-diff.sh). This release gate compares generated signature indexes between git refs, classifies changes as `identical` / `additive` / `breaking`, and fails on breaking changes that have not been explicitly allowed.
 
 [`check-interface-diff-negative.sh`](../../../../../../scripts/check-interface-diff-negative.sh) provides negative controls using removals and additions of pure / effect functions. This mechanism already exists, but it is neither a general package-facing CLI nor automatic version updating.
+
+<a id="残る提案"></a>
 
 ## Remaining proposal
 
@@ -28,6 +32,8 @@ almide diff v0.1.0..v0.2.0
 # Changed: yaml.stringify return type String → Result[String, String] (MAJOR)
 # Suggested version: v1.0.0
 ```
+
+<a id="設計参考"></a>
 
 ## Design reference
 

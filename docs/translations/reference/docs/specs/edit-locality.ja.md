@@ -1,3 +1,5 @@
+<a id="edit-locality"></a>
+
 # 編集の局所性
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](edit-locality.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](edit-locality.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](edit-locality.zh-CN.md)
@@ -16,6 +18,8 @@ Almide のミッション指標を支える不変条件。MSR（modification sur
 
 **以下の L1〜L5 は使用済みである。** この体系で新しい証明義務を追加するなら **L6** 以降を使い、空いて見える小さい番号を使わない。almide/almide#2009 と #1998 は、このファイルが L1 しか命名していなかった旧版に基づき、ここでの定義とは異なる義務に「L2」「L3」を提案している（#2009 では宣言フレームの保存と、合成可能な検査済み lowering）。それらは §1a の **L4 と L5** であり、#1997 が量化対象の `scoped` 構文を確定した後に採用された。番号を別の意味に再利用することこそ、この文書がプログラムから排除しようとしている欠陥であり、文書自身にあってはならない。
 
+<a id="1-the-invariant"></a>
+
 ## 1. 不変条件
 
 **L1 — 編集フレーム。** `P` を正しく型付けされたプログラムとし、`e` を定義 `f` 一つの本体への編集とする。この編集は `f` のシグネチャ、すなわち名前、引数型、戻り値型、`effect` マーカー、可視性を保つものとする。このとき、トレースが一度も `f` に入らない `P[e]` の各実行は、`P` の対応する同じ実行と同一の観測結果を持つ。
@@ -29,6 +33,8 @@ Almide のミッション指標を支える不変条件。MSR（modification sur
 カーネル計算体系 λ_almd では、L1 は機械検証済みの定理である。`crates/almide-edit-belt`（3 番目の 0-sorry Lean ベルト、CI の `lean-proofs` ジョブ）は、`edit_frame` と決定性（観測結果が同一となる形）、`typing_modular`（同一シグネチャの本体交換は、他のすべての導出に触れずに型の正しさを保つ）、`pure_silent`（`effect fn` の外で型付けされたコードのトレースは空）を証明する。言語全体についての実装レベルの主張は、`docs/contracts/README.md` に従い、引き続き §2 の証拠による制約を受ける。
 
 > 訳注：実装済み言語一般についての上記比較は原文の主張であり、この翻訳で独立に比較検証した結果ではない。カーネルの定理を全実装の証明へ拡張しない。
+
+<a id="1a-above-l1-the-declared-frame-and-its-composition"></a>
 
 ## 1a. L1 より上：宣言フレームとその合成
 
@@ -49,6 +55,8 @@ L4 は業務上の振る舞いを何も主張しない。純粋な置換が別�
 - *合成 — λ_almd で証明済み。* シグネチャを保つ置換列は、正しく型付けされたプログラムの型の正しさを維持する。全置換の後も、純粋と宣言されたすべての定義は無音のままだ。契約を保つ編集の連鎖がどれほど長くても effect の境界は開かない。証拠：`crates/almide-edit-belt/AlmideEditBelt/Contract.lean` の `l5_edits_compose` と `l5_pure_silent_after_edits`。編集リストに関する帰納法による。
 - *両ターゲットでの実現 — 信頼対象。* 検査済み lowering（#1995 の ExitPlan、#1996 の E-OWN-LOWERING）が native と wasm でこれらの観測を保つことは、λ_almd と二つのバックエンド間の精緻化義務である。本ファイルのあらゆるバックエンドの主張と同様、`spec/wasm_cross` フィクスチャと契約台帳の制約を受け、`docs/contracts/README.md` では証明済みではなく信頼対象として列挙される。
 
+<a id="2-what-enforces-it-today"></a>
+
 ## 2. 現在それを強制するもの
 
 | 規則 | 局所性での役割 | 証拠 |
@@ -66,9 +74,13 @@ L4 は業務上の振る舞いを何も主張しない。純粋な置換が別�
 | ローカル `fn` は選択インポートした関数と非修飾名を共有できない。インポート表の構築時に厳格な E050 エラー | 一つの非修飾名には厳密に一つの解決先が必要。定義追加で既存の呼び出し先を暗黙に変更できない（修正前は検査器と lowering の不一致により、型検査したものとは別の関数が実行された。#1425） | `crates/almide-frontend/src/import_table.rs` (`check_selective_import_fn_collisions`) — テスト：`tests/selective_import_collision_test.rs`, `docs/diagnostics/E050.md` |
 | コンストラクター解決は所有者スコープ。修飾された `mod.Ctor` は `mod` 内だけで解決（`lookup_ctor_owned`）。非修飾名は現モジュール自身のケースを優先し、そのファイル自身、インポート先、バンドル済みのケースだけを見る。推移的なモジュールのものは見ず、ファイル自身の同名型を越えても選ばない（#413、#2636、`lookup_ctor_in`。lowering も同じ）。同一モジュール内のケース名重複は登録時の厳格な E019 エラー | 別の場所への variant 追加で既存のコンストラクター参照を再束縛できない。モジュール内では一つのケース名の宣言は厳密に一つ | `crates/almide-frontend/src/type_env.rs` (`lookup_ctor_owned`), `canonicalize/registration.rs` (登録時の E019, #1426) — テスト：`tests/ctor_ambiguity_test.rs`, `spec/integration/modules/qualified_ctor_test.almd` |
 
+<a id="3-where-it-breaks-today-hunt-of-2026-08-15"></a>
+
 ## 3. 現時点で破れる箇所（2026-08-15 の探索）
 
 以下の探索記録は実装史として保存されている。旧 MIR／従来系のパスは現在出荷中の障害一覧ではない。未解決の欠陥として扱う前に現行ソースを確認する必要がある。借用推論の行は現行ソルバーへ更新済みである。仕組みを併記する。分類：**V** = 言語／コンパイラのバグで、L1 は成立すべきもの。**2026-08-15 に見つかった三つの V はすべて修正済みで、§2 の行へ昇格している**（#1424 LICM の投機、#1425 選択インポートの衝突、#1426 コンストラクターの所有者スコープ。この未修正件数はゼロを維持しなければならない）。**R** = バックエンドの精緻化義務（ロードマップ Stage 3）。**S** = 修正するのではなく §4 で宣言する側条件。
+
+<a id="r--backend-refinement-obligations"></a>
 
 ### R — バックエンドの精緻化義務
 
@@ -85,6 +97,8 @@ L4 は業務上の振る舞いを何も主張しない。純粋な置換が別�
 | `Method`／`Computed` の呼び出し先は到達可能性の名前に寄与しない。UFCS 経由で到達する関数への最後の `Named` 参照を本体編集で削除すると、関数が誤って除去される（パス自身の健全性注記によれば wasm トラップ） | 到達可能性の収集 | `crates/almide-codegen/src/reachability.rs:15-17,66-72` |
 | 潜在的問題：本体からの全プログラム effect 推論がある（現在は解析のみ）。診断や権限がそれを利用した瞬間、本体編集が呼び出し元に見える出力を変える | `pass_effect_inference` | `crates/almide-codegen/src/pass_effect_inference.rs:12,47-70` |
 
+<a id="4-side-conditions"></a>
+
 ## 4. 側条件
 
 §1 の L1 は、以下に宣言する例外を**除いて**成立する。例外はここに記されているか、存在しないかのどちらかである。書かれていない例外はバグだ。
@@ -92,6 +106,8 @@ L4 は業務上の振る舞いを何も主張しない。純粋な置換が別�
 - **S1 — 型注釈のないトップレベルの `let`／`var`。** `TopLet` の型は初期化式から推論され、モジュールを越えて伝播する（`crates/almide-syntax/src/ast.rs:406`、`crates/almide-frontend/src/check/module_inference.rs:65-90`）。したがってトップレベル初期化式の編集は、明示的なシグネチャがなくても*シグネチャを変える*編集である。そのような束縛に保存したラムダも同様だ。（`fn`／`effect fn` は除外される。シグネチャは必須のテキストである。§2 の第 1 行。）
 - **S2 — `test` ブロックはフレームの外。** ファイルスコープの `mod test where { path = expr }` オーバーライドは、そのファイル内の全テストで参照を意図的に再束縛する（`crates/almide-syntax/src/ast.rs:409-432`、`crates/almide-frontend/src/lower/mod.rs:420-423,489-495`）。これは L1 がプログラムコードで禁じる動的スコープを、範囲を限定して宣言した形である。テストブロックは DCE のルートにもなる（§3-R）。L1 の量化対象はプログラムの実行であって、テストの実行ではない。
 - **S3 — モデルの純粋性と実装境界。** ADR-0009 の当初の高階 effect の穴は過去のものだ。関数型の effect マーカーと値フロー検査は、現在は effect の偽装を拒否する（`effect-system.md`、`tests/effect_value_laundering_test.rs` 参照）。ただし、これによってモデルの `pure_silent` 定理がすべての Almide `fn` についての定理になるわけではない。ADR-0022 はその内部で六つの console／abort の prelude 組み込みを許可する。モデル定理は自身の型付け前提を保ち、実装の capability 集計は ADR-0026 に従う。
+
+<a id="5-the-gate"></a>
 
 ## 5. ゲート
 

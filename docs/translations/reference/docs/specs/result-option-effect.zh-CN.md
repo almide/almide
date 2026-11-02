@@ -1,3 +1,5 @@
+<a id="result-option-effect--完全仕様"></a>
+
 # Result、Option、Effect——完整规格
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](result-option-effect.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](result-option-effect.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](result-option-effect.zh-CN.md)
@@ -13,6 +15,8 @@
 
 > 原文差异说明：§2 表格将 Option 的传播概括写为 `err("none")`；另见[effect 调用规格](../../../../specs/effect-fn-call-semantics.md)，它区分外围为 Option 通道时传播 `none`。下表保留原文范围和措辞，不擅自调和两份原文。上文的实测矩阵及工作代码描述属于历史原文主张，并非本译文重新执行的结果。
 
+<a id="1-型"></a>
+
 ## 1. 类型
 
 ### Result[T, E]
@@ -26,6 +30,8 @@ err(e)  : Result[T, E]   // エラー値
 some(v) : Option[T]       // 値あり
 none    : Option[T]       // 値なし
 ```
+
+<a id="option-糖衣-tadr-0010"></a>
 
 ### Option 语法糖 `T?`（ADR-0010）
 
@@ -50,11 +56,15 @@ test "T? in every type position" {
 
 规范形式为 `T?`：`almide fmt` 将 `Option[T]` 规范化为 `T?`（D3）。stdlib 也已用 `fmt --no-import-edit` 规范化（2026-08-07，spec/lang/option_marker_test.almd 是统一的见证）。
 
+<a id="never-bottom-type"></a>
+
 ### Never（底类型）
 ```text
 process.exit(n) : Never   // 戻らない関数の戻り値型
 ```
 Never 可赋给任何类型，可在 guard else、if then、match arm 中使用。
+
+<a id="可謬マーカー---t----te"></a>
 
 ### 可失败标记 `-> T!` / `-> T!E`
 
@@ -89,6 +99,8 @@ fn checked(s: String) -> Int! = {
 
 测试：`spec/lang/fallible_marker_test.almd`、`spec/lang/fallible_typed_error_test.almd`、`spec/lang/fallible_lambda_test.almd`。
 
+<a id="2-演算子"></a>
+
 ## 2. 运算符
 
 所有值级运算符都定义为对具名 stdlib 函数的脱糖（ADR-0005）。定义表：
@@ -101,6 +113,8 @@ o?.x        ≡  option.map(o, (v) => v.x)
 ```
 
 `!` 是控制流（提前 return），没有函数实体（ADR-0005 明示的边界）。
+
+<a id="expr--unwrap-with-propagation"></a>
 
 ### `expr!`——解包并传播
 
@@ -124,6 +138,8 @@ fn twice(s: String) -> Result[Int, String] = ok(int.parse(s)! * 2)   // pure + !
 
 测试：`spec/lang/unwrap_operators_test.almd`、`spec/lang/fallible_marker_test.almd`、`spec/wasm_cross/pure_bang_propagation.almd`。
 
+<a id="expr--result--option-変換"></a>
+
 ### `expr?`——Result → Option 转换
 
 | 输入类型 | 输出类型 |
@@ -132,6 +148,8 @@ fn twice(s: String) -> Result[Int, String] = ok(int.parse(s)! * 2)   // pure + !
 | `Option[T]` | `Option[T]`（恒等，无诊断） |
 
 仅转换**最外一层**：`Result[Result[T, E], E]?` 是 `Option[Result[T, E]]`。不做 flatten（嵌套扁平化由 `result.flatten` / `option.flatten` 负责）。非 Option/Result 操作数为 `E034`。
+
+<a id="expr--fallback--unwrap-with-fallback"></a>
 
 ### `expr ?? fallback`——解包并回退
 
@@ -156,6 +174,8 @@ fn twice(s: String) -> Result[Int, String] = ok(int.parse(s)! * 2)   // pure + !
 
 测试：`spec/lang/unwrap_operators_test.almd`、`tests/diagnostics/e038-qq-line-crossing/`、`tests/diagnostics/e034-off-type-bang/`。
 
+<a id="exprfield--optional-chainingoption-専用"></a>
+
 ### `expr?.field`——可选链（仅 Option）
 
 ```almide
@@ -174,6 +194,8 @@ test "optional chaining" {
 
 ## 3. effect fn
 
+<a id="宣言と-lift"></a>
+
 ### 声明与提升
 
 ```almide
@@ -187,6 +209,8 @@ effect fn read_file(path: String) -> String = fs.read_text(path)!
 | `effect fn f() -> T` | `fn f() -> Result<T, String>`（隐式提升） |
 | `effect fn f() -> Result[T, E]` | `fn f() -> Result<T, E>`（不双重包装） |
 | `fn f() -> T` | `fn f() -> T`（无转换） |
+
+<a id="伝搬は全明示adr-0008--auto--は削除済み"></a>
 
 ### 传播全部显式（ADR-0008——auto-`?` 已删除）
 
@@ -205,6 +229,8 @@ effect fn read_file(path: String) -> String = fs.read_text(path)!
 `e()?` / `e() ?? fb` 是 ADR-0005 普通值操作（无特例规则）：`e()?` ≡ Result→Option 转换，`e() ?? fb` ≡ unwrap_or_else。
 
 回归测试：`spec/lang/explicit_propagation_test.almd`（两类危险消除 + `let _` 的 A/B）、`spec/wasm_cross/let_wildcard_discard.almd`（C-217）、`spec/wasm_cross/effect_option_explicit_bang.almd`（C-216）。
+
+<a id="lambda-の可謬性adr-0006-d1--adr-0009--1108-phase-2b"></a>
 
 ### lambda 的可失败性（ADR-0006 D1 / ADR-0009——#1108 Phase 2b）
 
@@ -245,6 +271,8 @@ test "fallible lambdas (in fn bodies — test bodies keep unwrap semantics, L9)"
 - 未处理 Err 到达 main 时，**两个目标均 exit 1 + stderr `Error: <msg>`**（Display，无引号）。由 `!` 对 Option none 产生的 `err("none")` 走相同路径，双目标一致。旧文所述“wasm 以 exit 0 静默忽略的残留差异”已解决，实测确认两目标都 exit 1 + `Error:`。
 
 测试：`tests/wasm_runtime_test_parts/p3.rs::unhandled_main_error_terminates_consistently`、`spec/lang/result_option_matrix_test.almd`。
+
+<a id="5-test-ブロック"></a>
 
 ## 5. test 块
 
@@ -302,13 +330,19 @@ test "guard else returns the else value" {
 
 测试：`spec/lang/fallible_marker_test.almd`（guard else err）、`tests/guard_exit_gate_test.rs`。
 
+<a id="7-match-の網羅性"></a>
+
 ## 7. match 穷尽性
 
 包含 Result / Option 在内，match 缺少分支（无 err / none 分支）是**硬错误 E010**，不是警告，并提示添加分支。
 
 测试：`tests/diagnostics/`（E010 系 fixture）。
 
+<a id="8-エラー値のドクトリンadr-0004"></a>
+
 ## 8. 错误值原则（ADR-0004）
+
+<a id="80-二層モデル--どちらの層に置くかadr-0012-d1"></a>
 
 ### 8.0 双层模型——置于哪一层（ADR-0012 D1）
 
@@ -325,6 +359,8 @@ test "guard else returns the else value" {
 
 这被表述为**终态**。推翻需要 ADR-0004 / ADR-0012 的 Falsifiers 指定的**实测证据**，仅有新意见不够。
 
+<a id="81-規則"></a>
+
 ### 8.1 规则
 
 - 错误值收敛到 String（不引入标签或 error set）。
@@ -335,6 +371,8 @@ test "guard else returns the else value" {
 - fs 的“不存在”是值：`fs.read_text_if_exists(p)! ?? default`（C-215）。
 
 测试：`tests/diagnostics/e035-*/`、`e036-*/`、`spec/stdlib/fs_if_exists_test.almd`。
+
+<a id="9-非目標--検討して採らなかったものadr-0012-d4"></a>
 
 ## 9. 非目标——考虑过但不采用（ADR-0012 D4）
 

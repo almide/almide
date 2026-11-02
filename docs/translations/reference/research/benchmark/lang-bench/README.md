@@ -1,0 +1,170 @@
+<a id="ai-coding-language-benchmark--almide-runner"></a>
+
+# AI Coding Language Benchmark — Almide Runner
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](README.zh-CN.md)
+
+> Non-normative historical reader snapshot of the pinned original; the original remains authoritative. No automatic synchronization. Reported tests, measurements, implementation state and guarantees are source claims, not independently rerun or current verification. Quoted code and commands were not executed. [Source](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/research/benchmark/lang-bench/README.md)
+> The historical Sonnet 5 label is retained as a source claim, not independently verified model availability. The later saturation statement says every language passed 20/20, whereas the dated table records Gleam v2 at 19/20; both source statements are retained without inventing a reconciliation. MiniGit one-shot trials allow in-session oracle iteration; they are not single-generation or hidden-oracle MSR measurements. Commands that call models may cost money and were not run.
+
+Reproduces the [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) minigit task for Almide, and aggregates results into the chart data.
+
+<a id="layout"></a>
+
+## Layout
+
+| Path | Purpose | Committed? |
+|---|---|---|
+| `data.json` | Aggregated stats for all languages (plot.py input) | yes |
+| `plot.py` | Generates `docs/figures/lang-bench-*.png` | yes |
+| `upstream/` | Git submodule → `mame/ai-coding-lang-bench` (SPEC, test scripts) | yes (pointer) |
+| `runner.rb` | Runs N trials of the minigit task against Almide | yes |
+| `aggregate.rb` | Recomputes Almide stats in `data.json` from `raw/almide.jsonl` | yes |
+| `raw/almide.jsonl` | Append-only trial records (one JSON per line) | yes |
+| `.work/`, `.logs/` | Per-trial generated sources and Claude logs | no (gitignored) |
+
+<a id="setup"></a>
+
+## Setup
+
+```bash
+git submodule update --init research/benchmark/lang-bench/upstream
+```
+
+Requires: `claude` CLI, `almide` in PATH, `ruby`, `python3` + `matplotlib` (for plot).
+
+<a id="run-trials"></a>
+
+## Run trials
+
+```bash
+ruby research/benchmark/lang-bench/runner.rb --trials 10
+```
+
+Each trial runs two phases:
+
+- **v1** — Claude (the runner requests the unversioned `sonnet` alias) implements `init`, `add`, `commit`, `log`.
+- **v2** — Claude extends v1 with `checkout`, `reset`.
+
+Expect ~20–30 min per trial. Trial numbers auto-increment based on existing records in `raw/almide.jsonl`.
+
+Dry run (no LLM calls):
+
+```bash
+ruby research/benchmark/lang-bench/runner.rb --trials 1 --dry-run
+```
+
+<a id="update-charts"></a>
+
+## Update charts
+
+```bash
+ruby research/benchmark/lang-bench/aggregate.rb   # raw/ → data.json Almide entry
+python3 research/benchmark/lang-bench/plot.py     # data.json → docs/figures/lang-bench-*.png
+```
+
+`plot.py` attempts to cache-bust matching README image URLs. That is a no-op
+when those images are absent, as on the current front README. Published
+measurements live in `docs/benchmarks/README.md`; its dated snapshot is distinct
+from the live charts produced here.
+
+<a id="data-notes"></a>
+
+## Data notes
+
+- The other 15 languages in `data.json` come from the upstream benchmark (Opus 4.6, 20 trials each). Those numbers are not regenerated here.
+- The Almide entry in `data.json` `languages[]` was refreshed on 2026-07-15 from the same-model snapshot below (**Sonnet 5**, 20 trials). That historical model label is retained; it is not the current runner's version pin. Training-data inclusion cannot be established from this benchmark.
+- `upstream/benchmark.rb` is the vanilla upstream runner — it does **not** include Almide in its language list. `runner.rb` in this directory is our Almide-specific replacement, referencing only `upstream/SPEC-v*.txt` and `upstream/test-v*.sh`.
+
+<a id="same-model-snapshot-2026-07"></a>
+
+## Same-model snapshot (2026-07)
+
+A one-shot, same-conditions comparison of Almide against its modern peer group
+(Gleam, MoonBit) plus two mainstream anchors (Rust, TypeScript): **one model
+(`claude-sonnet-5`), 20 trials per language, identical prompts and harness**,
+run 2026-07-15 via `runner_multi.rb`. This removes the model mismatch that the
+historic chart documents in its labels.
+
+| Language | Toolchain | v1 pass | v2 pass | avg time (s) | v2 LOC | avg cost |
+|---|---|---|---|---|---|---|
+| Almide | 0.29.0 | 20/20 | **20/20** | 573 ± 112 | **233 ± 27** | $3.19 |
+| Gleam | 1.15.2 | 20/20 | 19/20 | 715 ± 258 | 394 ± 27 | $2.66 |
+| MoonBit | moon 0.1.20260330 | 20/20 | 20/20 | 962 ± 358 | 448 ± 54 | $5.28 |
+| Rust | rustc 1.94.1 | 20/20 | 20/20 | 297 ± 89 | 351 ± 18 | $1.45 |
+| TypeScript | tsx 4.23.1 | 20/20 | 20/20 | 297 ± 99 | 386 ± 138 | $1.44 |
+
+Chart: `docs/figures/lang-bench-snapshot-2026-07.png`. Aggregated data lives in
+`data.json` under `snapshot_2026_07`; raw per-trial records in
+`raw/<lang>-sonnet5.jsonl` (committed, force-added past the `raw/*` ignore).
+
+Methodology notes:
+
+- Prompts are the upstream `benchmark.rb` prompts verbatim. Almide additionally
+  receives `CHEATSHEET.md` in its work dir and a build-command hint (this documents the supplied context, not a verified claim that the
+  language was absent from model training data).
+- **Infra-retry policy**: trials where the `claude` CLI died before attempting
+  the task (≤4 agent turns, 0 LOC written, zero tests executed) were re-run
+  once; the original records are quarantined in `raw/retired/` with reasons.
+  4/100 trials were affected (rust 5 & 11, gleam 16, moonbit 8). Genuine model
+  failures were never retried.
+- The single genuine failure in the snapshot is Gleam trial 20 v2: the model's
+  `checkout`/`reset` implementation fails 12 of 26 executed tests (the harness
+  recorded 0/0 because the suite aborted before its summary line; a manual
+  re-run confirmed the failures — see `v2_note` on the record).
+- Time figures were measured under 6–9× self-parallelism (all languages ran
+  concurrently), so they are comparable within the snapshot but conservative
+  versus the sequential upstream numbers.
+
+Reproduce:
+
+```bash
+ruby runner_multi.rb --lang gleam --trials 20      # one language
+ruby aggregate_multi.rb                            # summary table
+python3 plot_snapshot.py                           # regenerate the chart
+```
+
+`runner_multi.rb` also knows `go` (`go version`) and `zig` (`zig version`) so
+the MiniGit lane can be extended to the current comparison set; neither has a
+committed 20-trial snapshot yet.
+
+<a id="modification-survival-lane"></a>
+
+## Modification-survival lane
+
+MiniGit saturates (every language 20/20 on v1 and v2 — [#1963](https://github.com/almide/almide/issues/1963)):
+the spec and the scoring script are both handed to the model, so it iterates
+against the oracle in-session, and there is no cross-file invariant to break.
+It measures conciseness and cost, not modification survival.
+
+The discriminating lane is a separate task set — a seed program per language
+plus an ORDERED sequence of edits, each scored against a hidden oracle the model
+never sees, with prefix survival (an edit that fails fails every later horizon).
+The tasks live in Dojo (`tasks/xlang/` in
+[almide/almide-dojo](https://github.com/almide/almide-dojo) — all MSR task
+material belongs there, see the repo-boundary rule in the top-level `CLAUDE.md`);
+the cross-language driver lives here in lang-bench because Dojo's harness is
+Almide-only by rule. The design, the scoring conjunction, the ledger format and
+the run cost are laid out on #1963.
+
+| Path | Purpose |
+|---|---|
+| `lib/bench_common.rb` | `run_cmd` / `run_claude` / `run_tests` / `count_loc` / `parse_claude_json`, shared by both runners |
+| `runner_edits.rb` | task-dir driven driver: seed + ordered edits, accumulating tree, hidden oracle, prefix survival; `--dry-run` is the bank gate |
+| `aggregate_edits.rb` | ledger: MSR-seq with Wilson 95 % CI, MSR-edit, first failure mode, $/sequence; prints `INCONCLUSIVE_BANK_SATURATED` at the ceiling |
+| `tasks-example/xlang/` | a two-language smoke fixture so the gate can be exercised locally |
+| `test/aggregate_edits_test.rb` | `ruby -Itest test/aggregate_edits_test.rb` |
+
+```bash
+ruby runner_edits.rb --tasks tasks-example/xlang --dry-run        # gate, no model call
+ruby runner_edits.rb --tasks ../../../../almide-dojo/tasks/xlang --lang rust --trials 5   # measure (spends money)
+ruby aggregate_edits.rb --tasks ../../../../almide-dojo/tasks/xlang                        # ledger
+```
+
+Per edit `k`: `survive_k = compile ∧ visible ∧ hidden ∧ scope_clean`, where
+`scope_clean` means every file the model changed (git diff against the
+pre-edit snapshot, new files included) matches a glob in `scope.txt`. The tree
+contract is language-agnostic: `bash build.sh` leaves an executable at `./app`;
+`visible.sh` / `hidden.sh` run with the tree as cwd, drive `./app` over stdin
+and report `PASSED:`/`FAILED:`. For interpreted languages `build.sh` type-checks
+and writes a `./app` wrapper script.

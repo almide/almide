@@ -1,3 +1,5 @@
+<a id="almide-perceus-type-guided-automatic-memory-management"></a>
+
 # Almide Perceus：类型指导的自动内存管理
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](perceus.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](perceus.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](perceus.zh-CN.md)
@@ -10,9 +12,13 @@
 >
 > 用户代码无需所有权注解或显式 `free`。所有权推断和引用计数机制是实现机制，不是所有被接受的程序或生成产物都内存安全的证明。
 
+<a id="overview"></a>
+
 ## 概述
 
 Almide 使用 Perceus 风格的所有权分析，决定堆值在哪里引入、共享和消耗。执行因目标而异：原生输出使用 Rust 所有权／运行时操作，结构化 Wasm 发射器管理自己的堆和引用计数。关于已证明性质、受信任组件及未解决缺口的当前说明见[内存安全](../../../../design/MEMORY-SAFETY.md)。
+
+<a id="reference-counting-model"></a>
 
 ## 引用计数模型
 
@@ -24,11 +30,15 @@ Almide 使用 Perceus 风格的所有权分析，决定堆值在哪里引入、�
 
 静态字符串、拥有的堆缓冲区和借用引用不是可互换的情况。一个值只使用一次，不意味着可以省略其最终释放。
 
+<a id="optimizations-and-limits"></a>
+
 ## 优化与限制
 
 所有权和唯一性信息允许受支持操作复用内存或原地更新。融合可避免中间容器。这些是有条件的优化，不保证任意 `map` / `filter` / `fold` 流水线都不分配内存。回调行为、表示、别名及选择的降层转换都重要。
 
 单次使用的值及拥有的临时值可避免冗余共享操作，但仍需要正确消耗或清理。单次使用或类型已解析本身，都不能证明所有 RC 操作可删除。
+
+<a id="verification-boundary"></a>
 
 ## 验证边界
 
@@ -39,6 +49,8 @@ Almide 使用 Perceus 风格的所有权分析，决定堆值在哪里引入、�
 - [`almide verify`](../../../../../src/cli/verify.rs) 生成结构化 Wasm 见证，并调用独立的 `almide-verify` 二进制。产物字节绑定将一个包与特定文件关联；它不会把当前检查变为不受限制的整个产物内存安全定理。
 
 尤其是，**目前类型检查器接受，并不蕴含每个生成产物都有已证明的无泄漏／无释放后使用／无重复释放定理**。尚未履行的降层转换、轨迹和原生运行时义务仍列在链接的内存安全缺口表中。不要从类型指导 RC 模型推断它们已成立。
+
+<a id="references"></a>
 
 ## 参考文献
 

@@ -1,0 +1,68 @@
+<a id="almide-interp"></a>
+
+# almide-interp
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](CLAUDE.reader.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](CLAUDE.reader.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](CLAUDE.reader.zh-CN.md)
+
+> Inert, non-normative reader copy of the [canonical agent-instruction source](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/crates/almide-interp/CLAUDE.md), pinned at 35297a612fb29e3f78f6587aba253aa91d51f466. The original CLAUDE.md remains authoritative and unchanged; this separate CLAUDE.reader name is not an automatically loaded instruction file. Quoted rules are historical reference material, not a new instruction hierarchy or authorization to execute commands, change code, commit, push or publish. This snapshot is not automatically synchronized. Implementation, coverage, independence and safety claims have not been independently executed or validated for the current release. Inline code is retained exactly.
+
+A tree-walking interpreter over the **pre-codegen** `IrProgram` — the third leg of the cross-target oracle and an executable spec.
+
+<a id="why-it-exists"></a>
+
+## Why it exists
+
+The cross-target gate (`spec/wasm_cross/*.almd`, enforced by `tests/wasm_runtime_cross_target.rs::wasm_cross_target_spec`) compares the **native** and **WASM** backends and requires byte-identical `(stdout, stderr, exit)`. That 2-way vote is structurally blind to a *both-wrong-the-same-way* bug: if codegen and the WASM emitter share a lowering pass that is wrong, both agree and the gate stays green while the behaviour is wrong.
+
+This crate adds a third, independent judge. It evaluates the IR at the cut point **after** `lower → optimize → mono → ir_link` but **before** any of `almide-codegen`'s target-lowering passes (`ClosureConversion` / `Perceus` / `StdlibLowering` / `IterChain` / …). So it shares *none* of codegen's target passes with either backend. The ~22 codegen-inserted `IrExprKind` variants are unreachable here and `eval.rs` asserts them `unreachable!` to guard the boundary.
+
+`tests/wasm_runtime_interp_oracle.rs::interp_cross_target_spec` (a root-package binary; it shares the corpus SOURCE — `tests/wasm_runtime_test_parts/corpus.rs` — with the equivalence and wasm-opt gates, each binary building its own fixture table) is the 3-way harness:
+- `interp == native == wasm` → corroborated by a spec that cannot share a codegen bug.
+- `native != wasm` → a backend split **owned by the 2-way `@xt-allow` gate**; this harness only logs which backend the interp sides with (tie-break diagnostic), it does NOT fail.
+- `native == wasm` but interp dissents → **LOUD failure** (`BOTH-BACKENDS-WRONG` banner). Diagnose: fix the interpreter, or you just found a both-backends bug the 2-way gate is blind to.
+
+<a id="module-map"></a>
+
+## Module map
+
+- `value.rs` — the dynamic `Value` model + the two display modes (`display_bare` = `println`/Display, `almide_repr` = compound/container form). Both replicate `almide_repr_prelude` (`crates/almide-codegen/src/lib.rs`) so they are byte-identical to native.
+- `env.rs` — `VarId`-keyed, `Rc`-shared frames. Reproduces native `RcCow` capture semantics.
+- `eval.rs` — the tree-walker for every eval-able IR node, fuel accounting, the pattern engine (incl. list patterns, which survive past the cut point), and record-repr nominal-name recovery.
+- `dispatch.rs` — `Call` routing (`Named` / `Module` / `Method` / `Computed`), the variant-ctor registry, and the **HOF allowlist** (`is_hof`).
+- `hofs.rs` — the in-interp HOFs (map/filter/fold/…) and the interp-native container ops, plus the in-place-mutation predicate.
+- `inplace.rs` — the `mut`-receiver mutators (`list.push`, `set.insert`, …), modeled as read → transform → write-back on the receiver's binding. `Rc::make_mut` on the binding's own storage slot IS the COW rule: sole owner mutates in place (a push loop stays linear), an alias forces the copy (C-033).
+- `bridge.rs` — the `prim.*` scalar floor, the scalar/string arms a self-hosted body consumes as its floor INSIDE the pool tier, and the two boundary fallbacks (the sized-numeric `to_string` observers, `bytes.zeros`) — every arm one the corpus reaches, gated by the fallback ledger.
+- `surface.rs` — the public fns written in a BUNDLED module (not a registry source, so the pool has no body for them): thin wrappers forwarded to their registry body (`int.pow` → `math.__pow`), restated bodies (`int.parse_radix`, `bytes.get_*`/`next_*`, `list.binary_search`, `deque.*`), the generic `<T>.from` family with its `Numeric` pivots chosen by the argument's static type, and Matrix operators as the `matrix.*` calls the backends lower them to.
+- `stdlib_pool.rs` — the self-hosted stdlib bodies (the SAME sources the wasm leg links), lowered once; below the container tier they are the vote (#2185).
+
+<a id="coverage-model--does-a-new-stdlib-fn-get-covered-automatically"></a>
+
+## Coverage model — does a NEW stdlib fn get covered automatically?
+
+**Yes, when it is self-hosted over the scalar/heap prim floor — the interp evaluates the registered body itself.** Dispatch is, in order:
+
+1. `dispatch.rs::is_hof` — the closure-taking combinators (the allowlist).
+2. `hofs.rs::eval_container_op` — non-HOF structural container ops (containers are `Value`s here, not linear memory, so this tier stays interp-native).
+3. `dispatch_module.rs::prim_floor` — the prims that hold per-run interpreter state (the block heap, argv/env, the sandboxed fs, `prim.die`).
+4. **the lowered self-hosted body** (`stdlib_pool.rs` — the registry's sources, the SAME definition both backends run) — at the POOL BOUNDARY (`pool_depth == 0`, fixture code calling the stdlib). Its own helper calls, INSIDE the tier, take the bridge first: there the bridge is the floor the body consumes, like `prim.*` (nesting a second body over the block heap is what the tier cannot yet do faithfully — the first body-first measurement voted wrong on 9 fixtures and crashed on 2).
+5. `bridge.rs::dispatch` — at the boundary only where step 4 has no body, cannot take the call's arity, or abstained: the sized-numeric `to_string` observers and `bytes.zeros`. Since #2185 every non-`prim` name the bridge answers, on either tier, is recorded in `RunOutcome::bridge_fallbacks` (tagged floor or fallback) and held equal to `interp-bridge-fallback-ledger.txt` by `tests/wasm_runtime_interp_ledger.rs::interp_bridge_fallback_ledger` (both directions) — a Rust copy voting in place of a body is a reviewed ledger edit, and an arm the corpus stops reaching is a dead arm to delete.
+
+Anything not served falls through to `Flow::Unsupported(...)`, which the 3-way gate records as a **data-driven, reasoned skip** (printed with its concrete reason; there is no hardcoded skip-list). Coverage shrinkage is not silent: the abstain set is audited against the committed `interp-abstain-ledger.txt` by `tests/wasm_runtime_interp_ledger.rs::interp_abstain_ledger` (backend-free, never self-skips — its binary includes only the interp leg, never the corpus table, since touching that would trigger the native+wasm builds and destroy exactly that property). A fixture abstaining without a ledger entry fails CI — so a new stdlib fn whose fixture the interp cannot run forces either interp glue or a reviewed ledger entry in the same PR — and a stale entry whose fixture now evaluates also fails (the ledger only shrinks; CG-1 gap-audit ratchet, issue #564). Widening the prim floor a body may consume is the lever: each prim served converts a skip into a real third vote and deletes ledger lines.
+
+A body's own steps are metered on the pool's budget (`POOL_FUEL`, ten programs' worth), not the fixture's: the executable spec's cost is the spec's, and a fixture's `DEFAULT_FUEL` still bounds the fixture's own loops. Do NOT path-depend on `almide_rt` here — that crate pulls in rustls/webpki (network/TLS) and effectful surface the interp does not need.
+
+<a id="rules"></a>
+
+## Rules
+
+- **The interp must MATCH the backends, not "be correct" in the abstract.** Where the backends share a quirk (e.g. anonymous-record fields render in sorted order; `${float}` uses plain `{}` Display with no `.0`; the `0.30000000000000004` shortest-roundtrip), the interp replicates the quirk. A divergence here is a third vote, and a wrong third vote is worse than a skip.
+- **A wrong vote is worse than an honest skip.** When the interp cannot faithfully model something (a `mut`-receiver mutation whose binding this frame cannot assign to — a `mut` parameter, whose effect the backends return to the CALLER's slot (C-132, issue #1022), or a record-field/temporary receiver; platform-libm transcendentals that diverge from the backends' vendored musl-libm in the last ULP; non-deterministic `fan.*`), return `Flow::Unsupported` with a reason — never guess.
+- **Abstain by NAME, not by family.** When one shape of a capability is modelable and another is not, the abstain must say which shape is missing, so the ledger records a gap someone can close rather than a whole family written off. `inplace.rs` splits three ways for exactly this reason: written back, `mut`-parameter receiver (#1022), byte-level buffer writer (#1021).
+- **Stay at the pre-codegen cut point.** Codegen-inserted IR nodes (`Clone`, `Borrow`, `IterChain`, `ClosureCreate`, `RuntimeCall`, …) are `unreachable!` by construction. If one becomes reachable, the cut point moved — fix the boundary, don't silently handle it.
+- **Skips are data-driven and loud.** Every skip is the interpreter's own `RunStatus::Unsupported`/`FuelExhausted` (or a `StackExhausted` the harness cannot match against the other leg), logged with its reason. Never add a hardcoded skip-list to the harness.
+- **Fuel is mandatory.** Every eval step burns one unit (`DEFAULT_FUEL`); deep recursion is bounded by `MAX_DEPTH`, the interpreter's declared C-196 stack threshold, and ends as `StackExhausted` (`Error: stack overflow`, exit 1 — distinct from step fuel). An adversarial loop must terminate as `FuelExhausted`, never hang.
+- **Display contracts are derived from codegen, with a cite.** When you touch `value.rs` display, point at the exact `almide-codegen` / `runtime/rs` line you are mirroring (as the existing comments do).
+
+## Source caveats
+
+The source's independence claim concerns the pre-codegen cut point and absence of shared target-lowering passes, not an independently parsed source-level oracle. Shared earlier stages and self-hosted stdlib sources remain explicitly described. The harness does not fail a native/wasm split owned by the two-way gate; an interpreter dissent can indicate an interpreter bug, not only a backend bug. Pool-boundary body-first dispatch differs from bridge-first helper calls inside the tier. Historical wrong votes/crashes, two-direction fallback and abstain ledger checks, distinct fixture/pool fuel and stack exhaustion, and honest unsupported outcomes are retained. The instruction to match backend quirks remains a quoted source rule, not a claim that agreement proves universal correctness. No code or ledger change is performed here.

@@ -70,6 +70,8 @@
 
 
 
+<a id="signature-index-29-functions"></a>
+
 ## 固定快照 API 索引 (29 个函数)
 
 ```

@@ -1,0 +1,154 @@
+> Source description: Use almide-lander to call compiled Almide libraries from Almide via shared library FFI
+<a id="almide-to-almide-ffi-via-almide-lander"></a>
+
+# Almide-to-Almide FFI via almide-lander
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](almide-to-almide-ffi.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](almide-to-almide-ffi.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](almide-to-almide-ffi.zh-CN.md)
+
+> Non-normative pinned reader snapshot. The original remains authoritative; this copy is not automatically synchronized and has not independently revalidated implementations, measurements, or safety.
+> [Source / 原文](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/on-hold/almide-to-almide-ffi.md)
+> The pinned source distinguishes existing external generator code from the original proposal. Its sketches are not current runnable compiler syntax; shared-library compilation does not establish capability isolation. The ABI/ownership/build/security validation is explicitly unclaimed. Estimates and future WASM evolution remain proposals.
+
+
+<a id="source-status-2026-10-31"></a>
+
+## Source status (2026-10-31)
+
+The proposed Almide binding target now exists in external source:
+[bindgen's supported-language registry](https://github.com/almide/almide-bindgen/blob/b563e8b9076ff511b9b20b03e2c2e475af2c4c0b/src/mod.almd)
+lists 21 targets including Almide;
+[the Almide generator](https://github.com/almide/almide-bindgen/blob/b563e8b9076ff511b9b20b03e2c2e475af2c4c0b/src/bindings/almide.almd)
+emits C-bridge wrappers, and
+[lander's dispatcher](https://github.com/almide/almide-lander/blob/727d9aeb5337c54908f1adaf1b8710a7d994dcf8/src/mod.almd)
+routes `almide` / `almd` to that generator.
+
+Source existence is not end-to-end compatibility evidence. In particular,
+that pinned generator still emits `RawPtr` / `bytes.as_ptr`-style scaffolding;
+its compatibility with the current provenance-based FFI surface needs a build
+and ABI/ownership tests. No such build or security test is claimed here.
+
+The design and code sketches below are the original proposal, not current
+runnable instructions or a request to add a missing target from scratch.
+
+<a id="original-thesis"></a>
+
+## Original thesis
+
+almide-lander can export Almide modules to 20 languages. Add **Almide itself** as its 21st target. Make it possible to call a compiled Almide library from another Almide project through a shared library.
+
+```
+almide-lander (today):
+  mylib.almd → .so/.dylib → Python/Go/Swift/... から呼べる
+
+almide-lander + Almide target:
+  mylib.almd → .so/.dylib → Almide から呼べる（@extern wrapper 生成）
+```
+
+<a id="why"></a>
+
+## Why
+
+1. **Pre-compiled package distribution** — share only binaries without distributing source. Ideal for proprietary in-house libraries.
+2. **Capability boundary to validate** — independent compilation of a shared library alone does not establish capability isolation. Native code in the same process is an explicit trust boundary; separating permissions requires separate host/process design and validation.
+3. **Reuse almide-lander's existing infrastructure** — the mechanisms for interface.json extraction, shared-library builds, and binding generation can all be reused. Only Almide codegen is new.
+4. **Stepping stone to the WASM Component Model** — shared-library FFI now, evolving to calls between WASM modules in the future. The same interface.json provides the foundation.
+
+<a id="original-architecture-sketch"></a>
+
+## Original architecture sketch
+
+```
+producer (mylib)                    consumer (app)
+─────────────────                   ──────────────
+mylib.almd                          app.almd
+  │                                   │
+  ├─ almide compile --json            ├─ import mylib
+  │  → interface.json                 │    (生成された @extern wrappers)
+  │                                   │
+  ├─ almide --target rust --repr-c    ├─ mylib.distance(a, b)
+  │  → source.rs                      │    → @extern call → .so/.dylib
+  │  → cargo build                    │
+  │  → libalmide_mylib.dylib          │
+  │                                   │
+  └─ almide-lander --lang almide      │
+     → almide_mylib/                  │
+        ├── types.almd    (型定義)     │
+        └── mod.almd      (@extern)   │
+```
+
+<a id="original-generated-code-sketch-not-current-compiler-syntax"></a>
+
+## Original generated-code sketch (not current compiler syntax)
+
+**Original mylib.almd:**
+```almide
+type Point = { x: Float, y: Float }
+type Shape = Circle(Float) | Rect(Float, Float)
+
+fn distance(a: Point, b: Point) -> Float = {
+  let dx = a.x - b.x
+  let dy = a.y - b.y
+  math.sqrt(dx * dx + dy * dy)
+}
+
+fn area(shape: Shape) -> Float = match shape {
+  Circle(r) => math.pi() * r * r,
+  Rect(w, h) => w * h,
+}
+```
+
+**Generated almide_mylib/mod.almd:**
+```almide
+// Auto-generated by almide-lander --lang almide
+// Do not edit manually.
+
+type Point = { x: Float, y: Float }
+type Shape = Circle(Float) | Rect(Float, Float)
+
+@extern(lib: "almide_mylib", "almide_mylib_distance")
+fn distance(a: Point, b: Point) -> Float
+
+@extern(lib: "almide_mylib", "almide_mylib_area")
+fn area(shape: Shape) -> Float
+```
+
+**Consumer app.almd:**
+```almide
+import mylib
+
+fn main() -> Unit = {
+  let a = mylib.Point { x: 0.0, y: 0.0 }
+  let b = mylib.Point { x: 3.0, y: 4.0 }
+  println(float.to_string(mylib.distance(a, b)))  // 5.0
+}
+```
+
+<a id="original-implementation-decomposition-generator-now-exists"></a>
+
+## Original implementation decomposition (generator now exists)
+
+Add an `almide` target to almide-bindgen:
+
+1. **Type mapping** — identity mapping (the types are the same because this is Almide → Almide).
+2. **Function wrapper generation** — generate `@extern(lib: "...", "...")` declarations.
+3. **Type conversions across the C ABI boundary** — marshal between the shared library compiled with `--repr-c` and Almide types (String ↔ C string, Record ↔ C struct).
+
+C ABI, ownership, error, and buffer-length boundaries do not disappear even between Almide components. The ranking of implementation effort is unverified.
+
+<a id="original-scope-estimates"></a>
+
+## Original scope estimates
+
+- **almide-bindgen side**: a new `bindings/almide.almd` generator (estimated ~200 lines).
+- **Almide compiler side**: shared-library specification in `@extern(lib: "...")` (`@extern` already exists; add the `lib:` parameter).
+- **almide-lander side**: add the `--lang almide` option (reuse existing infrastructure).
+
+<a id="relationship-to-other-roadmap-items"></a>
+
+## Relationship to Other Roadmap Items
+
+- **rainbow-bridge.md** — the external-code→Almide direction. This document covers Almide→Almide. almide-lander has an implementation, but this document does not claim verified compatibility for all types and all targets.
+- **wasm-component-model.md** — future evolution from shared-library FFI to calls between WASM modules. interface.json is the common foundation.
+- **effect-system-capability.md** — consistent with the model in which the called WASM module has its own capability scope.
+
+> The unchanged diagrams say: the current lander sketch permits calls from Python/Go/Swift and others; adding the Almide target permits calls from Almide through generated @extern wrappers. In the architecture sketch, the import uses generated @extern wrappers and types.almd contains type definitions. The generated-code comments identify almide-lander --lang almide as the generator and say not to edit the generated code manually. These remain original sketches, not executable current instructions.

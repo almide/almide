@@ -112,6 +112,8 @@ TLS、AEAD、署名、非対称暗号は意図的に対象外です（#2596 の 
 
 
 
+<a id="signature-index-11-functions"></a>
+
 ## 固定スナップショットの API 索引 (11 関数)
 
 ```

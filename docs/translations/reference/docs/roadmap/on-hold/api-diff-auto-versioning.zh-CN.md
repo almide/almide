@@ -1,3 +1,5 @@
+<a id="api-diff--automatic-versioning"></a>
+
 # API 差异与自动版本管理
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](api-diff-auto-versioning.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](api-diff-auto-versioning.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](api-diff-auto-versioning.zh-CN.md)
@@ -8,11 +10,15 @@
 
 > 原文说明：在已提供的 stdlib 接口检查关卡之外，面向包的 API 差异与版本建议。
 
+<a id="実装済みの土台"></a>
+
 ## 已实现的基础
 
 标准库的公开 API 差异已经由 [`scripts/check-interface-diff.sh`](../../../../../../scripts/check-interface-diff.sh) 检查。该发布关卡比较 git ref 之间生成的签名索引，将差异分类为 `identical` / `additive` / `breaking`，并使未经明确允许的 breaking change 检查失败。
 
 [`check-interface-diff-negative.sh`](../../../../../../scripts/check-interface-diff-negative.sh) 使用 pure / effect 函数的删除和添加作为负对照。此机制已存在，但不是面向一般包的 CLI，也不是自动版本更新。
+
+<a id="残る提案"></a>
 
 ## 剩余提案
 
@@ -28,6 +34,8 @@ almide diff v0.1.0..v0.2.0
 # Changed: yaml.stringify return type String → Result[String, String] (MAJOR)
 # Suggested version: v1.0.0
 ```
+
+<a id="設計参考"></a>
 
 ## 设计参考
 

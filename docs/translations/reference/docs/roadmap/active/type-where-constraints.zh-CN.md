@@ -1,3 +1,5 @@
+<a id="type-where-constraints"></a>
+
 # 类型 Where 约束
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](type-where-constraints.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](type-where-constraints.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](type-where-constraints.zh-CN.md)
@@ -13,6 +15,8 @@
 
 > **状态：设计。独立的 `where` 语法仍是提案，并非当前语法。**
 
+<a id="already-supported"></a>
+
 ## 已支持的内容
 
 泛型函数已经可以内联表达协议约束和结构约束：
@@ -23,6 +27,8 @@ fn describe[T: { name: String, .. }](item: T) -> String = item.name
 ```
 
 第一个片段中的 `Showable` 是用户声明的协议。多个协议约束使用 `+`。当前规则和完整示例见 [type-system.md](../../../../../specs/type-system.md#protocol-bounds-on-generics)，覆盖测试见 [protocol_generics_test.almd](../../../../../../spec/lang/protocol_generics_test.almd) 和 [open_record_test.almd](../../../../../../spec/lang/open_record_test.almd)。因此，将泛型约束描述为完全不存在是不正确的。
+
+<a id="remaining-proposal"></a>
 
 ## 剩余提案
 

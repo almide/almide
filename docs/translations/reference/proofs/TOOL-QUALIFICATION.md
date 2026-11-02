@@ -1,0 +1,136 @@
+<a id="tool-qualification-data-package--the-index-574-do-330-shape"></a>
+
+# Tool-qualification data package — the index (#574, DO-330 shape)
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](TOOL-QUALIFICATION.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](TOOL-QUALIFICATION.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](TOOL-QUALIFICATION.zh-CN.md)
+
+> Non-normative reader snapshot of the pinned original. The original remains authoritative; no automatic synchronization. Historical status, proof and qualification claims are reproduced without independent current execution, audit or verification. A DO-330-shaped package or preparation for qualification is not certification; scope, assumptions, unqualified tools and open gaps remain as stated. Quoted operational commands are not executed here.
+> [Source / 原文](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/proofs/TOOL-QUALIFICATION.md)
+
+
+The package a qualification engineer takes to an audit. It is an INDEX,
+not a new artifact: every section points at a standing, CI-gated document
+or ledger — the point of building those first is that qualification is
+assembly, not reorganization. Gaps are listed at the bottom by name; the
+package asserts no certification status (that determination belongs to an
+applicant and an authority).
+
+<a id="1-tool-identification-and-environment"></a>
+
+## 1. Tool identification and environment
+
+- Tool, version identity, claim scope: `proofs/TOR.md` §1 — a release IS
+  its git tag; its evidence state is the seal (`proofs/releases/<tag>.toml`),
+  re-measured against the tag by CI forever.
+- Compiler-below-the-tool: the Ferrocene lane
+  (`scripts/check-ferrocene-lane.sh`, weekly workflow) tests generated
+  Rust with stock rustc 1.95.0, the recorded upstream compatibility pin.
+  The lane explicitly awaits access to a qualified Ferrocene binary;
+  matching its upstream version does not confer qualification on stock rustc.
+- Release integrity: every asset Sigstore-attested
+  (`gh attestation verify <asset> -R almide/almide`), checksummed, and the
+  dependency tree audited against RustSec weekly (`SECURITY.md`, #1534).
+
+<a id="2-tool-operational-requirements"></a>
+
+## 2. Tool Operational Requirements
+
+`proofs/TOR.md` — each requirement names the instrument that ENFORCES it,
+and `scripts/check-tor-refs.sh` fails CI when a row points at a deleted
+instrument. Evidence is operator-re-derivable by construction (TOR-2: CI
+is outside the trust base; `make verify-trust && make receipt` locally).
+
+<a id="3-tool-verification-data"></a>
+
+## 3. Tool verification data
+
+- The gate ledger: `proofs/gate-verification.toml` — verdict-bearing
+  gates, each classified by how it can fail (KERNEL_PROVEN /
+  MUTATION_TESTED / NEGATIVE_TESTED / EXERCISED; UNVERIFIED ceiling 0,
+  shrink-only). A gate without demonstrated failure evidence cannot ship.
+- Structural coverage: `proofs/coverage.sh` ratchet + per-file safety
+  floors (`proofs/coverage-safety-baseline.txt`); MC/DC-grade evidence
+  for the safety set: `proofs/mcdc-ledger.toml` — zero unresolved
+  multi-condition decisions, independence-pair vectors mechanically
+  verified by operator-swap mutants (`proofs/mcdc-mutation.sh`, nightly)
+  (#566, closed).
+- The proof spine: `make verify-trust` (Rocq kernel + coqchk + axiom
+  audit + the PCC gate + corpus wall), receipt via `proofs/receipt.sh`
+  with the tree+toolchain fingerprint honesty rail.
+
+<a id="4-qualification-test-cases-derived-from-the-als"></a>
+
+## 4. Qualification test cases, derived from the ALS
+
+The adopted ALS sections and their contract links are tracked in the
+repository's conformance ledgers; the Almide-side derivation:
+
+- The contract ledger: `docs/contracts/contracts.toml` — cross-target
+  contracts (current totals in the ledger; dated aggregate in STAGE-STATUS), each citing its ALS section (`spec = "ALS-…"`), every
+  normative section cited by ≥1 contract, every fixture bidirectionally
+  linked (`scripts/check-contracts.sh`).
+- The executable corpora: `spec/` (the run/check/ast parity manifests —
+  ratified hashes over 630+ fixtures), the wall corpus, the differential
+  fuzz legs, and the 3-way oracle (native / wasm / reference interpreter,
+  with the abstain ledger shrink-only).
+- The independent reference evaluator (als `ref/`, Ferrocene-pinned by
+  the same convention) — the N-version leg.
+
+<a id="5-formal-credit"></a>
+
+## 5. Formal credit
+
+`proofs/FORMAL-CREDIT.md` (#575) — the seven Rocq proof families as
+objective-shaped claims (FC-1..FC-7), each with assumptions and coverage
+boundary; the model/implementation split per row; the Lean belts
+explicitly excluded from credit.
+
+<a id="6-known-limitations"></a>
+
+## 6. Known limitations
+
+- Per-release: the seal's `known_problems` field (mandatory).
+- Standing: the trusted rows of `docs/contracts/README.md`
+  (the IR→MIR row above all), the design walls (a wall is a refusal, not
+  an error — TOR-3; the target-availability doctrine #1423), and the
+  contract ledger's flagged-for-revision list (currently zero; the count
+  may only shrink).
+
+<a id="7-configuration-management"></a>
+
+## 7. Configuration management
+
+Git tags as identity; seals re-measured against tags forever
+(`scripts/release-seal.sh check` in CI); the release-blocker gate (#1482)
+refusing a final tag over open I-severity issues; Sigstore attestation on
+assets and the dossier; the dependency-audit lane on every lockfile
+change.
+
+<a id="8-the-assembled-bundle"></a>
+
+## 8. The assembled bundle
+
+`scripts/gen-dossier.sh <tag>` (#571) emits the per-release bundle —
+receipt + seal + formal credit + stage block + gate summary + contract
+summary with KNOWN PROBLEMS + MC/DC state + a sha256 input manifest —
+attested and attached to the release by the trust-spine tag run.
+
+<a id="gaps-by-name-the-honest-bottom-line"></a>
+
+## Gaps, by name (the honest bottom line)
+
+| Gap | Issue | State |
+|---|---|---|
+| WCET-analyzable codegen for the Critical profile | #569 | story + gated reference kernel (`docs/project/WCET-STORY.md`); target calibration external |
+| Line-level source traceability in generated Rust | #572 | closed — `--trace-map` + review guide |
+| Lean/Rocq proof coverage of the RUNTIME (allocator, free-list, RC ops as shipped) | #576 | closed — the StructuralRuntime arc (`StructuralRuntime/Alloc/Decode/Run.v`): emitted bytes decode to proven trees, trees realize the model transitions, and whole runs preserve `RINV` on the concrete memory; the F-class is a violated lemma of the emitted code. Grow retry / unclassed bump stay at the declared abstraction boundary |
+| Qualified/minimal wasm execution environment | #865 | not started |
+| Critical-profile subset (`almide check --profile critical`) | #567 | closed — bounded profile on every fn, deny-all capabilities with `--allow` grants, subset property CI-enforced |
+| Static memory mode for the Critical profile | #568 | closed — the reference app is critical-clean with allocation-free kernel emission and completes under a fixed enforced `--heap-cap` budget; host requirements in `docs/project/PARTITIONED-RUNTIME.md` |
+| Flight reference app through `make verify` | #776 | closed — G-F4 chain evidenced end to end; the receipt derives all six stages (`proofs/receipt.sh`) |
+| First dossier-carrying release (fires #571/#1534 closure) | #571, #1534 | assembly/attestation machinery live; verify the dossier attached to the particular release |
+
+A qualification engineer reading this package starts at §2 (what the
+operator must do), verifies §3's ledgers re-derive (`make verify-trust`),
+and samples §4's corpora; the gaps table is the scope boundary of what
+may be claimed today.

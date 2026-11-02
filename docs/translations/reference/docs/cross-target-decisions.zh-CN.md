@@ -1,3 +1,5 @@
+<a id="cross-target-decisions-which-ones-read-one-source"></a>
+
 # 跨目标决策：哪些决策读取同一个来源
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](cross-target-decisions.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](cross-target-decisions.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](cross-target-decisions.zh-CN.md)
@@ -18,6 +20,8 @@
 
 本页是 2026-09-29 审计时的清单。它记录的规则是：一个问题有**一个**回答函数，每一端都调用它。
 
+<a id="the-inventory"></a>
+
 ## 清单
 
 | 问题 | native 读取 | wasm 读取 | 现在的唯一来源 | 门禁 |
@@ -30,6 +34,8 @@
 | 顶层 `let` 的初始化器何时执行？（C-007） | 惰性执行，仅对**直接的** `/`/`%` 强制在启动时执行（#2954） | 始终在启动时 | 当且仅当不适合安全的推测执行时强制执行（`almide_ir::speculation`） | C-007 测试夹具 |
 | 流水线各阶段能否逐元素执行？（流融合） | IR 函数体的纯度，加上 `EFFECT_MODULES`/`TOTAL_MODULES`，再加上“至多一个会中止的阶段” | 自己的 7 模块拒绝列表，没有中止规则，因此用户模块回调的输出发生交错（#2953） | `almide_ir::fusion`：模块分类词汇、trap 规则、阶段顺序规则 | 单元测试；C-001 测试夹具 |
 
+<a id="checked-and-consistent"></a>
+
 ## 已检查且一致
 
 以下各项经过探测或代码阅读，确认两端从同一个来源回答，或由于其他原因保持一致。
@@ -41,10 +47,14 @@
 - **LICM 将不终止的调用提升到零次迭代循环之前。** 已探测：两端一致。
 - **现有 MIR 的线性化 `if`**（`almide-mir/src/lower/control.rs`，无调用的两个分支都会执行）。已用触发 trap 的分支探测：两端一致。现有实现正在退役（#2930 / #2935）。
 
+<a id="known-tracked-elsewhere"></a>
+
 ## 已知且在其他地方跟踪
 
 - **#2503。** effect 被调用方被排除在 wasm 调用点的写时复制之外，作为记录字段的 mut 参数也一样（`param_mut` 要求 `!is_effect`；`lower_mut_param_arg` 只接受 `Var`）。native 在这两种情况下都在绑定时克隆。
 - **`almide-mir/src/purity.rs`。** 其中的 `PURE_MODULES` 是 MIR lowering 和内联器读取的 capability-witness 允许列表。它是第三套模块分类词汇：`zlib` 在这里是纯的，在融合中却是 effect。当前它只允许返回标量的标准库调用进入内联函数体，而这些仍保留为调用，因此没有发现分歧。它应统一到 `almide_ir::fusion` 的词汇。
+
+<a id="when-you-add-a-decision"></a>
 
 ## 添加决策时
 

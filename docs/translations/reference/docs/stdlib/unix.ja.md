@@ -20,6 +20,8 @@ Unix ドメインソケット、そこで受け渡すファイル記述子、共
 
 **ターゲット。** ネイティブでは Unix プラットフォーム（Linux、macOS、BSD 群）ですべての関数を提供し、それ以外では `err` を返します。`almide run --target wasm`（組み込みホスト）は暫定ホスト操作経由で同じコードを提供します（#3620。ADR-0023 の手順7でこの経路を WASI 0.3 コンポーネントとして動かすときに廃止）。原文では WASI は Unix ドメインソケットも共有メモリも持たないため、標準成果物（`almide build --target wasm`）ではビルド時にこのモジュールを拒否するとしています（E081）。
 
+<a id="sockets"></a>
+
 ## ソケット
 
 ### `unix.connect(path: String) -> Result[Fd, String]`
@@ -65,6 +67,8 @@ effect fn main() -> Unit = {
 }
 ```
 
+<a id="shared-memory-files"></a>
+
 ## 共有メモリファイル
 
 内容を埋めて相手に渡し、相手がマップする無名ファイルです。Wayland バッファのピクセルやオーディオリングなどに使います。書き込みは、マップの有無にかかわらず、そのファイルを保持するすべてのプロセスに即座に見えます。
@@ -105,6 +109,8 @@ effect fn main() -> Unit = {
 }
 ```
 
+
+<a id="signature-index-10-functions"></a>
 
 ## 原文固定スナップショットの API 索引（10関数）
 

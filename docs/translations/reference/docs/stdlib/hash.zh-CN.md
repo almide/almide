@@ -112,6 +112,8 @@ MD5 和 SHA-1 不在 stdlib 中：其 security 性质已被攻破，`hash.md5`�
 
 
 
+<a id="signature-index-11-functions"></a>
+
 ## 固定快照 API 索引 (11 个函数)
 
 ```

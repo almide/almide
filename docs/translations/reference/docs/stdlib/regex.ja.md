@@ -15,6 +15,8 @@
 
 第 1 引数が `Regex` なので、対象文字列を操作にパイプすると型エラーになる。以前の `s |> regex.find("[0-9]+")` は警告せずパターンの中から対象文字列を検索していたが、今は `regex.find(regex.new("[0-9]+"), s)` を示す。`Regex` は一度作り、ループ内で再利用する。
 
+<a id="regexnewpattern-string---regex-and-regexcompilepattern-string---resultregex-string"></a>
+
 ### `regex.new(pattern: String) -> Regex` および `regex.compile(pattern: String) -> Result[Regex, String]`
 
 ```almd run
@@ -45,6 +47,8 @@ pattern too large: more than 20000 states
 ```
 理由は左から最初の違反：`unclosed group`、`unmatched )`、`unclosed character class`、`nothing to repeat`、`malformed repetition`、`repetition minimum exceeds maximum`、`invalid class range`、`trailing backslash`、`unsupported escape \X`（および `… in a class`）、`named groups are not supported`、`lookaround is not supported`、`flags are only supported at the start of the pattern`、`unsupported group syntax`、`groups nested deeper than 250`、`pattern too large: more than 20000 states`（C-395）。
 
+<a id="regexis_matchre-regex-s-string---bool-and-regexis_full_matchre-regex-s-string---bool"></a>
+
 ### `regex.is_match(re: Regex, s: String) -> Bool` および `regex.is_full_match(re: Regex, s: String) -> Bool`
 
 `is_match`：re が s のどこかに一致する。`is_full_match`：re が s 全体に一致する（`regex.full_match` は非推奨の旧名で、epoch 16 で削除予定）。
@@ -64,6 +68,8 @@ true
 true
 false
 ```
+
+<a id="regexfindre-regex-s-string---optionstring-and-regexindex_ofre-regex-s-string---optionint"></a>
 
 ### `regex.find(re: Regex, s: String) -> Option[String]` および `regex.index_of(re: Regex, s: String) -> Option[Int]`
 
@@ -135,6 +141,8 @@ fn main() -> Unit = {
 ["a", "b", "c"]
 ```
 
+<a id="regexcapturesre-regex-s-string---optionlistoptionstring-and-regexcaptures_all"></a>
+
 ### `regex.captures(re: Regex, s: String) -> Option[List[Option[String]]]` および `regex.captures_all`
 
 最初のマッチの `[whole, group 1, ...]`。マッチがなければ `none`。添字 0 はマッチ全体で、常に `some`。参加しなかったグループは `none`（R-regex-08）だが、グループの空マッチはそうではない。`captures_all` は各マッチに対して同じ形式のリストを順に返す。
@@ -178,6 +186,8 @@ fn main() -> Unit = {
 true
 ```
 
+<a id="supported-syntax"></a>
+
 ## 対応構文
 
 マッチは最左のものを選び、同じ位置から始まるものの中では次の順で最初のものを選ぶ。選択肢は左から右、貪欲量指定子は長い順、非貪欲量指定子は短い順。グループまたは量指定子がパターンの残りを失敗させる場合、次の選択肢で再試行する。繰り返すグループのキャプチャは最後のインスタンス。空文字列にマッチしたインスタンスも数えるが、繰り返しはそこで終わる。ネイティブと wasm はバイト単位で一致する。
@@ -202,6 +212,8 @@ true
 拒否するもの（C-395）：先読み・後読み、後方参照と上にない英数字のエスケープ、名前付きグループ、先頭以外のフラグ、完全な量指定子になっていない `{`、繰り返す対象のない量指定子、20,000 を超える状態数。
 
 
+
+<a id="signature-index-16-functions"></a>
 
 ## シグネチャ索引（16 関数）
 
@@ -270,6 +282,8 @@ regex.captures_all(re: Regex, s: String) -> List[List[Option[String]]]
 // @since unreleased
 regex.escape(s: String) -> String
 ```
+
+<a id="type-index-1-types"></a>
 
 ## 型索引（1 型）
 

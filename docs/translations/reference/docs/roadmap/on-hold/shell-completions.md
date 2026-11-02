@@ -10,6 +10,8 @@
 
 Generate completion scripts for bash/zsh/fish with the `almide completions` subcommand. This is remaining work separated from distribution-ux.
 
+<a id="想定する使い方"></a>
+
 ## Intended usage
 
 ```bash
@@ -18,17 +20,23 @@ almide completions zsh  > ~/.local/share/zsh/site-functions/_almide
 almide completions fish > ~/.config/fish/completions/almide.fish
 ```
 
+<a id="実装方針"></a>
+
 ## Implementation approach
 
 - Generate automatically with clap's `clap_complete` crate.
 - Take a `Shell` argument and write the script to stdout with `generate()`.
 - Also add an option to `tools/install.sh` / `tools/install.ps1` to place completions automatically during installation (optional).
 
+<a id="変更が必要なファイル"></a>
+
 ## Files requiring changes
 
 - `Cargo.toml` — add the `clap_complete` dependency.
 - `src/cli/mod.rs` — add the `Completions { shell: Shell }` subcommand.
 - `src/main.rs` — implement the handler.
+
+<a id="なぜ-on-hold-か"></a>
 
 ## Why on hold?
 

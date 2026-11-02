@@ -26,6 +26,8 @@
 
 **ターゲット。** ネイティブと wasm は標準ストリームもハンドル関数も提供します。他のモジュールのハンドルは、そのモジュールの関数が動く環境で動作します。[net](../../../../stdlib/net.md) と [unix](../../../../stdlib/unix.md) を参照してください。
 
+<a id="text-shortcuts"></a>
+
 ## テキスト用ショートカット
 
 ### `io.read_line() -> String?`
@@ -104,11 +106,15 @@ effect fn main() -> Unit = {
 }
 ```
 
+<a id="the-stream-handles"></a>
+
 ## ストリームのハンドル
 
 ### `io.stdin() -> Stdin` / `io.stdout() -> Stdout` / `io.stderr() -> Stderr`
 
 以下の関数で使う、標準ストリームのハンドルです。呼び出しごとに `!` が必要です。テキスト用ショートカットと同じストリームを共有します。`io.read_line` と `io.read(io.stdin()!, n)` は同じ入力、`println` と `io.write(io.stdout()!, b)` は同じバッファーを使います。
+
+<a id="bytes-over-any-handle"></a>
 
 ## 任意のハンドルで扱うバイト
 
@@ -184,6 +190,8 @@ effect fn main() -> Unit = {
 ```
 
 
+
+<a id="signature-index-12-functions"></a>
 
 ## 固定スナップショットの API 索引（12関数）
 

@@ -48,6 +48,8 @@ fn main() -> Unit = {
 }
 ```
 
+<a id="decoding-into-a-secret"></a>
+
 ### Secret へのデコード
 
 ```almd check
@@ -63,6 +65,8 @@ effect fn main() -> Unit = {
 ```
 
 > 原文の生成済みシグネチャ索引の固定コピー（この訳は生成対象ではない）。
+
+<a id="signature-index-2-functions"></a>
 
 ## シグネチャ索引（2 関数）
 

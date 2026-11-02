@@ -10,6 +10,8 @@
 
 `Float64` 与规范的 `Float` 共享表示但属于不同类型，因此 `Float64` 与 `float32` 一样拥有独立模块。
 
+<a id="conversions"></a>
+
 ## 转换
 
 转换以其构造的类型命名（R-L0-40）：`float64.from(x)` 接受任意数值输入，包括 `Int`、有指定位宽的整数、`Float` 或有指定位宽的浮点数。
@@ -32,6 +34,8 @@ let text = x.to_string()
 确切的 API 列表见下方保留的原文机器管理签名索引（本译文是固定快照，不由机器维护）。
 
 > 原文既说明 Float64 与 Float 共享表示，又将转换称为 “widens”。此处保留这一表述差异，不作统一。
+
+<a id="signature-index-24-functions"></a>
 
 ## 原文固定快照 API 索引（24个函数）
 

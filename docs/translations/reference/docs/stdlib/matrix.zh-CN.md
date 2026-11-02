@@ -16,12 +16,16 @@
 
 `Matrix` 是行优先、稠密、以 `Float` 为值的矩阵（`f64`）。所有操作都将值视为不可变，组合操作返回新矩阵。
 
+<a id="naming-convention"></a>
+
 ## 命名约定
 
 - `<op>_rows`：独立操作每行并返回 Matrix（`slice_rows`、`gather_rows`、`broadcast_add_row`）。
 - `<op>_cols`：按列版本（`split_cols_even`、`concat_cols`）。
 - `<verb>_<noun>`：第一个词表示函数所做的事（`from_lists`、`to_bytes_f64_le`、`dot_row`）。
 - 字节转换的后缀 `_<dtype>_le` 显式指定字节序。
+
+<a id="constructors"></a>
 
 ## 构造
 
@@ -34,6 +38,8 @@
 | `matrix.from_bytes_f32_le(b, offset, rows, cols) -> Option[Matrix]` | 读取平坦 f32 LE（提升为 f64）；数据容纳不下时为 `none` |
 | `matrix.from_bytes_f16_le(b, offset, rows, cols) -> Option[Matrix]` | 读取平坦 IEEE-754 半精度（GGML 权重）；数据容纳不下时为 `none` |
 
+<a id="conversions"></a>
+
 ## 转换
 
 | 签名 | 用途 |
@@ -43,6 +49,8 @@
 | `matrix.to_bytes_f32_le(m) -> Bytes` | 平坦 f32 LE（逐单元降低精度） |
 | `matrix.transpose(m) -> Matrix` | 转置 |
 
+<a id="inspection"></a>
+
 ## 检查
 
 | 签名 | 用途 |
@@ -51,6 +59,8 @@
 | `matrix.rows(m) -> Int` | 行数 |
 | `matrix.cols(m) -> Int` | 列数 |
 | `matrix.get(m, r, c) -> Option[Float]` | 元素访问；越界为 `none`（C-282） |
+
+<a id="arithmetic"></a>
 
 ## 算术
 
@@ -66,6 +76,8 @@
 | `matrix.map(m, f) -> Matrix` | 对每个单元应用 `(Float) -> Float`，如 `(x) => float.pow(x, e)` |
 | `matrix.concat_rows(ms: List[Matrix]) -> Matrix` | 每个成员的行，从上到下 |
 
+<a id="slicing--assembly"></a>
+
 ## 切片与组装
 
 | 签名 | 用途 |
@@ -76,6 +88,8 @@
 | `matrix.concat_cols(matrices: List[Matrix]) -> Matrix` | 按列拼接（已弃用别名：`concat_cols_many`） |
 | `matrix.dot_row(m, r, vec: List[Float]) -> Float` | 行 `r` 与 `vec` 的点积（已弃用别名：`row_dot`） |
 
+<a id="neural-network-primitives"></a>
+
 ## 神经网络基本操作
 
 | 签名 | 用途 |
@@ -83,6 +97,8 @@
 | `matrix.broadcast_add_row(m, row: List[Float]) -> Matrix` | 将偏置列表加到 m 的每行（zip 截断） |
 
 稠密内核（`linear_row`、`conv1d` 等）位于包 almide-graphics/nn 的 nn.kernels 模块。
+
+<a id="shapes-and-domains"></a>
 
 ## 形状与定义域
 
@@ -103,12 +119,16 @@
 
 **取负遵循 IEEE**（C-355）：`-m` 翻转符号位，因此 `0.0` 单元变为 `-0.0`，两个目标上 `1.0` 除以它都得到 `-inf`。
 
+<a id="byte-decoders"></a>
+
 ## 字节解码器
 
 从字节缓冲区读取行是解码与收集的组合：`matrix.gather_rows(matrix.from_bytes_f32_le(b, offset, rows, cols)!, ids)`（Q1_0 / Q8_0 量化加载器在方言纪元14移至包 almide-graphics/nn 的 nn.kernels 模块，`select_rows_f32` 在纪元15移入）。
 
 `from_bytes_f16_le` / `_f32_le` / `_f64_le` **解码器**保留存储的 `-0.0`：这里符号本身就是数据，因此保留（C-269）。先将负维度限制为0，超出上限的计数以 `Error: matrix dimensions too large` 中止（C-161）；在此之后，除非 `0 <= offset <= len(b)` 且 `rows * cols * width <= len(b) - offset`，否则返回 `none`（C-341）。
 
+
+<a id="signature-index-27-functions"></a>
 
 ## 原文固定快照 API 索引（27个函数）
 

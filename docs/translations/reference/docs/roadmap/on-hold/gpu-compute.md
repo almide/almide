@@ -1,0 +1,225 @@
+# GPU Compute — Matrix Type and Compiler-Driven GPU Execution
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](gpu-compute.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](gpu-compute.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](gpu-compute.zh-CN.md)
+
+> Non-normative pinned reader snapshot. The unchanged original remains authoritative and is not replaced as machine input. No automatic synchronization or independent execution. Historical measurements, proposals and source-time implementation updates remain distinct; this is not an independent proof of current correctness or performance. Code and comments remain verbatim. The October 31 status separates shipped Matrix/CPU foundations and an existing GPU path from unimplemented CUDA/grad/training proposals. Original unchecked historical checklist items stay unchanged. The bug-elimination and backend-support statements express design ambitions, not validated universal guarantees. [Source](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/on-hold/gpu-compute.md)
+
+> Original metadata summary, inactive: Matrix primitive type with compiler-driven CPU/GPU execution.
+
+**Priority:** Phase 3 (Runtime Foundation)
+**Prerequisites:** Bytes type completed, WASM export completed, nanopass pipeline completed
+**Principle:** Users write ordinary Almide code. They don't think about GPUs. `--target cuda` runs on GPU, otherwise CPU.
+**Syntax constraint:** No new keywords. Only a `Matrix` primitive type and a `grad` built-in function are added.
+
+> "You write Almide. Whether it runs on CPU or GPU is the compiler's decision."
+
+---
+
+<a id="current-foundation-and-remaining-proposal-2026-10-31"></a>
+
+## Current foundation and remaining proposal (2026-10-31)
+
+`Matrix` and CPU matrix operations already exist: see
+[`stdlib/matrix.almd`](../../../../../../stdlib/matrix.almd), including constructors,
+shape/transpose and operator lowering helpers. The runtime is in
+[`runtime/rs/src/matrix.rs`](../../../../../../runtime/rs/src/matrix.rs).
+The repository also has [`almide-gpu-run`](../../../../../../crates/almide-gpu-run),
+a separate GPU execution path; its existence does not implement the proposed
+`--target cuda`, `grad`, or automatic training loop below.
+
+The checklist below is the **original staged design**, not a current list of
+missing Matrix features. In particular, Step 1's type/CPU/operator foundation
+has shipped through the `.almd` stdlib (the old `stdlib/defs/*.toml` source
+format is retired). CUDA/autograd integration and the proposed type-level
+shape design remain separate decisions, not inferred completion.
+
+<a id="design-philosophy"></a>
+
+## Design Philosophy
+
+<a id="why"></a>
+
+### Why
+
+The largest untapped area for Almide's mission "the language LLMs can write most accurately" is ML. The most frequent bugs when LLMs write ML code:
+1. Tensor dimension mismatches
+2. Device placement errors (CPU/GPU)
+3. Gradient flow disconnection
+
+Almide's type system + compiler optimization can eliminate these.
+
+<a id="design-principles"></a>
+
+### Design Principles
+
+1. **Add no new concepts** — `Matrix` is a primitive just like `Bytes`. `grad` is a built-in just like `println`
+2. **Write with operators** — `x * w` is matrix multiplication. Not `tensor.matmul(x, w)`
+3. **Hide the GPU** — The backend changes based on the target flag. Code stays the same
+4. **Ride the existing Rust ecosystem** — burn/candle already provide autograd, GPU execution, and memory management. No reinventing the wheel
+5. **Fuse via nanopass** — Same mechanism as `map |> map` fusion turns element-wise ops into fused kernels
+
+---
+
+<a id="phases"></a>
+
+## Phases
+
+<a id="step-1-matrix-primitive-type-historical-foundation"></a>
+
+### Step 1: Matrix Primitive Type (historical foundation)
+
+Same pattern as the Bytes type. Minimal compiler changes.
+
+**Language side:**
+```
+let w = matrix.zeros(512, 1536)
+let x = matrix.randn(32, 512)
+let y = x * w + bias
+let shape = matrix.shape(y)  // → (32, 1536)
+```
+
+**Compiler implementation:**
+- [ ] Add `Ty::Matrix` to the `Ty` enum
+- [ ] Register `TypeConstructorId::Matrix`
+- [ ] Add `"Matrix" => Ty::Matrix` to parser/checker type resolution
+- [ ] Rust codegen: `ndarray::Array2<f64>` (CPU)
+- [ ] `stdlib/defs/matrix.toml` — zeros, randn, shape, transpose, from_lists, to_lists
+- [ ] `runtime/rs/src/matrix.rs` — ndarray wrapper
+- [ ] Tests
+
+**Operator overloading:**
+- [ ] `*` for `(Matrix, Matrix)` → matrix multiplication
+- [ ] `+` `-` for `(Matrix, Matrix)` → element-wise
+- [ ] `*` `/` for `(Matrix, Float)` → scalar operations
+- [ ] Add Matrix patterns to codegen Binary op dispatch
+
+**Current foundation:** Matrix operations run on CPU via `almide run`; the old implementation checklist above records the initial plan.
+
+<a id="step-2-gpu-backend"></a>
+
+### Step 2: GPU Backend
+
+Switch to burn/candle with `--target cuda`. No user code changes.
+
+**codegen dispatch:**
+```
+Ty::Matrix codegen →
+  target == Rust:  ndarray::Array2<f64>      (CPU)
+  target == Cuda:  burn::Tensor<CudaBackend, 2>  (GPU)
+```
+
+**Implementation:**
+- [ ] Add `codegen::pass::Target::Cuda`
+- [ ] Branch Matrix type rendering in Rust codegen based on target
+- [ ] `runtime/rs/src/matrix_gpu.rs` — burn wrapper (matmul, add, transpose, etc.)
+- [ ] Add burn dependency to `Cargo.toml` template
+- [ ] `almide build model.almd --target cuda` generates GPU binary
+- [ ] Tests in CUDA environment
+
+**Verification:** Same .almd returns identical results on both CPU and GPU
+
+<a id="step-3-grad-and-training-loops"></a>
+
+### Step 3: grad and Training Loops
+
+`grad(loss, w)` expands to burn's autodiff.
+
+**Language side:**
+```
+fn train_step(x: Matrix, w: Matrix, target: Matrix, lr: Float) -> Matrix =
+  let pred = x * w |> leaky_relu(0.5) |> square
+  let loss = cross_entropy(pred, target)
+  let dw = grad(loss, w)
+  w - lr * dw
+```
+
+**Compiler implementation:**
+- [ ] Recognize `grad(loss, param)` as a built-in function
+- [ ] codegen: expand to `loss.backward()` + `grads.get(&param)` (burn autodiff)
+- [ ] Mark variables tracked for gradients (burn's `require_grad`)
+- [ ] Add activation functions to stdlib: leaky_relu, relu, softmax, sigmoid, tanh
+- [ ] Add loss functions to stdlib: cross_entropy, mse
+- [ ] Test: small MLP training converges
+
+**Verification:** XOR problem training works
+
+<a id="step-4-nanopass-fusion"></a>
+
+### Step 4: Nanopass Fusion
+
+Fuse element-wise op chains into a single kernel. Directly impacts Parameter Golf.
+
+**Example:**
+```
+x * w |> leaky_relu(0.5) |> square
+// ↓ nanopass rewrite
+fused_elementwise(x * w, [leaky_relu(0.5), square])
+// ↓ codegen
+// 1 fused CUDA kernel (3 kernel launches → 1)
+```
+
+**Implementation:**
+- [ ] IR pattern: `map(map(x, f), g)` → `map(x, f >> g)` (existing)
+- [ ] Element-wise numeric pattern detection pass
+- [ ] Fused kernel codegen (Triton or CUDA C)
+- [ ] Benchmark: fused vs non-fused speed comparison
+
+**Verification:** Parameter Golf baseline forward pass is faster
+
+<a id="step-5-future-type-level-dimension-checking"></a>
+
+### Step 5 (Future): Type-Level Dimension Checking
+
+```
+fn linear(x: Matrix[B, 512], w: Matrix[512, 1536]) -> Matrix[B, 1536] =
+  x * w
+```
+
+Detect dimension mismatches at compile time. A subset of dependent types. Phase 3 and beyond.
+
+---
+
+<a id="target-mapping"></a>
+
+## Target Mapping
+
+```
+Almide type    Rust (CPU)              CUDA (GPU)              WASM
+──────────────────────────────────────────────────────────────────────
+Int            i64                     i64                     i64
+Float          f64                     f64                     f64
+String         String                  String                  i32 ptr
+Bytes          Vec<u8>                 Vec<u8>                 i32 ptr
+Matrix         ndarray::Array2<f64>    burn::Tensor<Cuda, 2>   loops (small scale)
+```
+
+<a id="dependency-crates"></a>
+
+## Dependency Crates
+
+| Step | CPU | GPU |
+|------|-----|-----|
+| 1 | ndarray | — |
+| 2 | — | burn (burn-cuda or burn-candle) |
+| 3 | — | burn-autodiff |
+| 4 | — | burn-fusion or Triton |
+
+<a id="non-goals-for-now"></a>
+
+## Non-Goals (For Now)
+
+| Item | Reason |
+|------|--------|
+| N-dimensional tensors | Matrix (2D) is sufficient. 3D+ is future work |
+| Custom CUDA kernels | burn/candle kernels are sufficient |
+| Distributed training (multi-GPU) | Parameter Golf uses 8xH100, but start with 1 GPU |
+| Custom autograd | Delegate to burn. Compiler AD is future consideration |
+| TPU/ROCm support | Automatically available once burn supports them |
+
+---
+
+<a id="in-one-sentence"></a>
+
+## In One Sentence
+
+> Add a Matrix type as a primitive like Bytes, write matrix operations with operators, take gradients with grad, and the compiler emits CPU/GPU code depending on the target. The user doesn't know GPUs exist.

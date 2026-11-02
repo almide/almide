@@ -1,0 +1,2578 @@
+> 原文说明（固定历史）：标准库重设计——所有已采纳提案落地后的标准库：按模块列出每个公开函数重设计后的签名及撤除项。
+<a id="リデザイン後の標準ライブラリ設計"></a>
+
+# 重设计后的标准库（设计）
+
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](target-surface.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](target-surface.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](target-surface.zh-CN.md)
+
+> 非规范性历史设计目标参照版，不是当前实现清单。固定正本权威且不变；如下文所述，L2/L3 记录优先。不自动同步、不独立执行或测量，也未重新获取官方来源。1001/1300 等数量、(F)、兼容性、数值/确定性陈述均为原作者当时记录。保留带日期迁移、zlib 输出一致性和 map 回调设计的待定状态、后续改判及陈旧/冲突签名，不擅自统一。原文 R-result-06 理由未写完，此处照留。本读者版不是原表生成器的输入，也不是正本生成表或规范性契约来源。日文代码占位符表示模块/名称/参数/返回类型、数值类型/整数或值/下一状态。 [Source](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/target-surface.md)
+
+> 最后更新：2026-10-24
+> 此列表为历史设计目标，不表示所有项目均已实现。与当前 API、迁移、未完成项的区别，请参阅 [README 指引](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/README.md#この記録と現行実装の区別)。
+>
+> 原始记录：[README.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/README.md)（提案索引）与各 L2 页的 L3 函数表。
+
+此表列出应用全部已采纳提案（○）后的标准库公开函数。它由各 L2 页的 L3 函数表机械组装。如有出入，以 L3 表和 L2 提案为准。
+
+- 未应用保留提案（zlib 输出一致、`map.map` callback 形式等），仍保持当前形式。不采纳与保留的提案及原因汇总在末表。
+- 签名统一为 `fn モジュール.名前(引数) -> 戻り型`（模块.名称(参数) → 返回类型）。`mut` 表示原地改写参数，`T?` 为 `Option[T]`（R-L0-24 的规范拼写）。`effect fn` 的返回类型与 docs/stdlib 相同，写成功时的类型（失败为 `String` 的 err，调用方用 `!` 传播）。非 effect 函数返回失败时写 `Result[T, String]`。
+- “变化”列：空白表示不变，新增表示增加，改名附旧名，语义变更说明变动。撤除函数列于各模块末尾，并附迁移目标。
+- 所有迁移均按 R-L0-14（epoch 15 标记 `@deprecated`，epoch 16 撤除，通过 `almide fix` 或提示迁移）。
+
+<a id="一覧に出ない共通の約束"></a>
+
+## 列表中未显示的共同约定
+
+这些约定适用于所有模块，但仅凭签名无法看出。依据在各页面及契约台账（docs/contracts）中。
+
+| 约定 | 内容 | 依据 |
+| --- | --- | --- |
+| 字符串位置 | `string` 的位置和长度（`len`/`get`/`slice`/`index_of`）及 `regex.index_of` 均以代码点为单位。只有以 `byte_` 开头的函数（`byte_len`/`byte_slice`）使用字节单位。 | L2-string、L2-regex |
+| `Float` 的顺序 | `float.compare`（也包括 `float32`/`float64`）及 `list.sort`/`binary_search`/`heap` 的默认顺序使用 IEEE 754 totalOrder（`-0.0 < 0.0`）。NaN 按类型位宽统一为一个值（`Float`/`Float64` 为 `0x7ff8000000000000`，`Float32` 为 `0x7fc00000`），因此 NaN 大于正无穷，NaN 之间相等，严格成立。代价是 NaN 的位不能往返保留。经 `to_bits`/`from_bits` 及 `bytes` 的 `get_f32_le`/`get_f64_le`/`append_f32_le`/`append_f64_le` 等时，所有 NaN 也变为此值。要保留 NaN 载荷往返，须用 `get_u32_le`/`get_u64_le` 作为整数读写。唯独 `<` 运算符与 NaN 比较为 false。 | R-float-09、R-float-10 |
+| `Map`/`Set` 的遍历顺序 | 插入顺序（覆盖相同键不会改变其位置）。native 与 wasm 相同。 | 契约台账（Map/Set 插入顺序） |
+| 数学函数的值 | `math` 的超越函数不交给 libm，而在两种 target 上运行用 Almide 编写的相同实现，返回逐位相同的值。NaN 为一个固定值。 | ADR-0016、L2-math |
+| `_checked` 转换 | 仅当结果与原值精确相等时为 some。越界、小数部分截断、精度损失均为 none（`float.to_int32_checked(1.5)` 和 `int.to_float32_checked(16777217)` 都为 none）。 | R-L0-28 |
+| `next_` 的 none | 值为 none 时，原样返回接收的状态（读取位置/随机数状态）。 | R-L0-27 |
+| 字符串正文 | `http.body` 将非法 UTF-8 作为替代字符读取（请求、响应均如此）。精确字节使用 `body_bytes`。 | R-http-11、R-http-12 |
+| `heap` 的方向 | 默认（`heap.new`/`from_list`）最小值优先。最大值优先时通过 `new_with` 或 `new_by` 传入顺序。`heap.to_list` 的顺序与反复 `pop` 相同，同优先级按插入顺序。 | L2-heap、R-L1-02 |
+| `Matrix` 运算符 | `+`/`-`/`/`/一元 `-` 逐元素运算，`*` 为矩阵乘法（逐元素乘法用 `matrix.zip_with`）。形状不匹配时 abort。 | R-matrix-14、L2-matrix |
+| `min_value` | 整数的 `min_value` 是最小值。浮点数的 `min_value` 与 Rust 的 `MIN` 相同，是“最小的有限值”（`-max_value()`），不是 Java/Kotlin 的“最小正值”。 | L2-float 完整性规则 2 |
+| 整数边界 | `int.bshl`/`bshr` 的移位量对 64 取余（`bshl(1, 64)` 为 1）。`int.abs(int.min_value())` 仍为 `min_value`（回绕）。无后缀转换 `to_<型>` 的目标若为整数，无法表示的值（越界；浮点输入还包括 NaN）会 abort。整数和浮点输入相同。小数部分向 0 截断（`float.to_int(1.5)` 为 1）。目标若为浮点数则不 abort，而舍入到最近值（越界为无穷，NaN 仍为 NaN）。夹在端点用 `_saturating`，整数之间保留低位回绕用 `_wrapping`，无法精确表示则 none 用 `_checked`。`int.wrap(x, bits)` 是 `Int` 内部计算，不用于类型转换。 | R-L0-32、R-L0-34、R-L0-35 |
+| `map.update` | 键不存在时 abort（与 `list.update` 越界相同）。不存在时创建用 `upsert`，不确定是否存在则用 `map.contains` 检查。 | R-map-08 |
+| 换行 | `io.print`/`io.eprint` 不添加换行。添加换行的是内置 `println`/`eprintln`。 | L2-io |
+| protocol 层次 | 标准类型遵循 protocol 层次（[protocol-view.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/protocol-view.md)，以 Swift 为范本），模块函数就是这些 protocol 函数。所有遵循类型的要件函数同名同形。具有 `compare` 的类型通过默认实现获得 `min`/`max`/`clamp`，所有值类型获得 `to_string`（此表只列类型页面中已有行的部分）。 | R-L0-37、R-L0-38 |
+| 越界处理 | 由函数角色决定。提取范围的函数（`slice`/`take`/`drop` 等）夹取超出长度的部分，负位置/负数量 abort。读取一个位置的函数（`get`/`first`/`bytes.get_*`/`next_*`）为 none。写入一个位置的函数（`set`/`update`/`insert`/`remove_at`/`bytes.put_*`）以及依赖形状的函数（`matrix` 运算、`bytes.xor`、`chunk(0)`）会 abort。 | R-L0-33、R-L0-29 |
+| `zlib` 压缩 | 压缩输出字节在 native 与 wasm 上不同。这是“两种 target 结果相同”承诺尚未兑现之处，`effect` 只是标记，不是解决方案。改用相同实现后测量速度、压缩率再决定。往返（压缩再解压）在两种 target 上相同。 | R-zlib-03（保留、未达成） |
+| Codec 输入 | Codec 记录类型 `T` 除 `T.decode` 外还派生 `T.decode_strict`。`decode` 忽略未知键，`decode_strict` 在读取字段前以 `unknown key '<k>'` 拒绝首个未知键。`@skip` 字段既不读也不写，`@skip_decode` 字段不读但写（两者都需要默认值）。字段属性只允许这两种及 `@builtin`/`@location`，其他属性报 E053。 | R-L0-48 |
+
+<a id="全体の数"></a>
+
+## 总体数量
+
+| 当前函数 | 重设计后 | 不变 | 新增 | 改名 | 语义变更 | 撤除 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1001 | 1300 | 408 | 716 | 88 | 88 | 417 |
+
+固定位宽数值（`int8`～`uint64`、`float32`/`float64`）按每种类型计一个函数。
+
+<a id="実体の数"></a>
+
+## 实体数量
+
+此表将同一 protocol 函数按类型分别计一行（共 1,300 行）。按 [protocol 层次](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/protocol-view.md) 重新计数，需记住的名称会少得多。
+
+| 计数方式 | 列表行数 | 需记住的名称 |
+| --- | ---: | ---: |
+| protocol 要件（每个 protocol 计一次） | 796 | 166 |
+| 值类型独有的函数 | 297 | 297 |
+| 没有值类型的模块（`fs`/`http`/`math` 等） | 207 | 207 |
+| 合计 | 1300 | 670 |
+
+<a id="モジュールごとの数"></a>
+
+## 各模块数量
+
+| 模块 | 重设计后 | 新增 | 改名 | 语义变更 | 撤除 | 记录 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| [`args`](#args) | 3 | 1 | 0 | 0 | 4 | [L2-args.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-args.md) |
+| [`base64`](#base64) | 4 | 0 | 0 | 2 | 0 | [L2-base64.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-base64.md) |
+| [`bigint`](#bigint)（新模块） | 24 | 24 | 0 | 0 | 0 | [L2-bigint.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-bigint.md) |
+| [`bool`](#bool) | 3 | 3 | 0 | 0 | 0 | [L2-bool.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-bool.md) |
+| [`bytes`](#bytes) | 178 | 64 | 72 | 6 | 34 | [L2-bytes.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-bytes.md) |
+| [`compute`](#compute) | 7 | 1 | 0 | 0 | 0 | [L2-compute.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-compute.md) |
+| [`datetime`](#datetime) | 18 | 1 | 0 | 1 | 5 | [L2-datetime.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-datetime.md) |
+| [`deque`](#deque)（新模块） | 60 | 60 | 0 | 0 | 0 | [L2-deque.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-deque.md) |
+| [`duration`](#duration) | 7 | 1 | 0 | 0 | 0 | [L2-duration.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-duration.md) |
+| [`env`](#env) | 9 | 3 | 0 | 0 | 3 | [L2-env.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-env.md) |
+| `error`（整个模块撤除） | 0 | 0 | 0 | 0 | 3 | [L2-error.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-error.md) |
+| [`ffi`](#ffi)（新模块） | 7 | 7 | 0 | 0 | 0 | [L2-ffi.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-ffi.md) |
+| [`float`](#float) | 26 | 12 | 1 | 0 | 32 | [L2-float.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-float.md) |
+| [`float32`](#float32) | 24 | 23 | 0 | 0 | 9 | [L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md) |
+| [`float64`](#float64) | 24 | 23 | 0 | 0 | 9 | [L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md) |
+| [`fs`](#fs) | 30 | 1 | 2 | 4 | 5 | [L2-fs.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-fs.md) |
+| [`hash`](#hash) | 11 | 8 | 0 | 2 | 1 | [L2-hash.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-hash.md) |
+| [`heap`](#heap)（新模块） | 16 | 16 | 0 | 0 | 0 | [L2-heap.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-heap.md) |
+| [`hex`](#hex) | 3 | 0 | 0 | 0 | 0 | [L2-hex.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-hex.md) |
+| [`html`](#html) | 5 | 0 | 0 | 0 | 0 | [L2-html.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-html.md) |
+| [`http`](#http) | 34 | 4 | 5 | 10 | 18 | [L2-http.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-http.md) |
+| [`int`](#int) | 45 | 14 | 2 | 4 | 41 | [L2-int.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-int.md) |
+| [`int16`](#int16) | 37 | 34 | 0 | 0 | 19 | [L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md) |
+| [`int32`](#int32) | 37 | 34 | 0 | 0 | 21 | [L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md) |
+| [`int64`](#int64) | 37 | 34 | 0 | 0 | 23 | [L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md) |
+| [`int8`](#int8) | 37 | 34 | 0 | 0 | 17 | [L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md) |
+| [`io`](#io) | 12 | 8 | 0 | 2 | 4 | [L2-io.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-io.md) |
+| [`json`](#json) | 3 | 0 | 0 | 1 | 12 | [L2-json.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-json.md) |
+| [`list`](#list) | 73 | 12 | 0 | 16 | 6 | [L2-list.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-list.md) |
+| [`map`](#map) | 37 | 15 | 1 | 7 | 3 | [L2-map.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-map.md) |
+| [`math`](#math) | 27 | 12 | 0 | 0 | 8 | [L2-math.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-math.md) |
+| [`matrix`](#matrix) | 25 | 3 | 0 | 8 | 24 | [L2-matrix.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-matrix.md) |
+| [`net`](#net) | 16 | 8 | 0 | 8 | 18 | [L2-net.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-net.md) |
+| [`option`](#option) | 13 | 0 | 0 | 0 | 1 | [L2-option.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-option.md) |
+| [`path`](#path) | 10 | 3 | 0 | 0 | 3 | [L2-path.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-path.md) |
+| [`process`](#process) | 13 | 8 | 0 | 2 | 12 | [L2-process.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-process.md) |
+| [`random`](#random) | 10 | 6 | 0 | 0 | 0 | [L2-random.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-random.md) |
+| [`regex`](#regex) | 15 | 7 | 1 | 7 | 0 | [L2-regex.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-regex.md) |
+| [`result`](#result) | 14 | 0 | 0 | 0 | 1 | [L2-result.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-result.md) |
+| [`secret`](#secret) | 2 | 2 | 0 | 0 | 0 | [L2-secret.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-secret.md) |
+| [`set`](#set) | 42 | 23 | 0 | 0 | 0 | [L2-set.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-set.md) |
+| [`string`](#string) | 86 | 41 | 3 | 2 | 5 | [L2-string.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-string.md) |
+| [`testing`](#testing) | 10 | 0 | 0 | 2 | 0 | [L2-testing.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-testing.md) |
+| [`uint16`](#uint16) | 35 | 32 | 0 | 0 | 15 | [L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md) |
+| [`uint32`](#uint32) | 35 | 32 | 0 | 0 | 19 | [L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md) |
+| [`uint64`](#uint64) | 35 | 32 | 0 | 0 | 23 | [L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md) |
+| [`uint8`](#uint8) | 35 | 32 | 0 | 0 | 11 | [L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md) |
+| [`unix`](#unix)（新模块） | 10 | 10 | 0 | 0 | 0 | [L2-unix.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-unix.md) |
+| [`url`](#url) | 9 | 4 | 0 | 1 | 1 | [L2-url.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-url.md) |
+| [`uuid`](#uuid)（新模块） | 7 | 7 | 0 | 0 | 0 | [L2-uuid.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-uuid.md) |
+| [`value`](#value) | 29 | 14 | 1 | 0 | 5 | [L2-value.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-value.md) |
+| [`zlib`](#zlib) | 11 | 3 | 0 | 3 | 2 | [L2-zlib.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-zlib.md) |
+
+<a id="args"></a>
+
+## args
+
+记录：[L2-args.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-args.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `has_flag` | `effect fn args.has_flag(name: String) -> Bool` | 新增 | R-args-01 |
+| `option` | `effect fn args.option(name: String) -> String?` |  |  |
+| `positional` | `effect fn args.positional(options: List[String]) -> List[String]` |  |  |
+
+撤除（4）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `flag` | `has_flag` | R-args-01 |
+| `option_or` | `option(n)! ?? d` | R-args-02 |
+| `positional_at` | `list.get(args.positional(options)!, i)` | R-args-03 |
+| `raw` | `env.args` | R-args-02 |
+
+<a id="base64"></a>
+
+## base64
+
+记录：[L2-base64.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-base64.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `decode` | `fn base64.decode(s: String) -> Result[Bytes, String]` | 语义变更：只接收 `+/` | R-base64-01 |
+| `decode_url` | `fn base64.decode_url(s: String) -> Result[Bytes, String]` | 语义变更：只接收 `-_` | R-base64-01 |
+| `encode` | `fn base64.encode(b: Bytes) -> String` |  |  |
+| `encode_url` | `fn base64.encode_url(b: Bytes) -> String` |  |  |
+
+<a id="bigint"></a>
+
+## bigint
+
+新模块（在 L1 新增）。
+记录：[L2-bigint.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-bigint.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `abs` | `fn bigint.abs(x: BigInt) -> BigInt` | 新增 | R-bigint-01 |
+| `band` | `fn bigint.band(a: BigInt, b: BigInt) -> BigInt` | 新增 | R-bigint-07 |
+| `bit_length` | `fn bigint.bit_length(x: BigInt) -> Int` | 新增 | R-int-11 |
+| `bnot` | `fn bigint.bnot(x: BigInt) -> BigInt` | 新增 | R-bigint-07 |
+| `bor` | `fn bigint.bor(a: BigInt, b: BigInt) -> BigInt` | 新增 | R-bigint-07 |
+| `bshl` | `fn bigint.bshl(a: BigInt, n: Int) -> BigInt` | 新增 | R-bigint-07 |
+| `bshr` | `fn bigint.bshr(a: BigInt, n: Int) -> BigInt` | 新增 | R-bigint-07 |
+| `bxor` | `fn bigint.bxor(a: BigInt, b: BigInt) -> BigInt` | 新增 | R-bigint-07 |
+| `clamp` | `fn bigint.clamp(x: BigInt, lo: BigInt, hi: BigInt) -> BigInt` | 新增 | R-bigint-05 |
+| `compare` | `fn bigint.compare(a: BigInt, b: BigInt) -> Int` | 新增 | R-bigint-01 |
+| `floor_div` | `fn bigint.floor_div(a: BigInt, b: BigInt) -> BigInt` | 新增 | R-bigint-01（与 R-int-03 同拼写） |
+| `from` | `fn bigint.from[S: Numeric](x: S) -> BigInt` | 新增 | R-L0-40 |
+| `from_checked` | `fn bigint.from_checked[S: Numeric](x: S) -> BigInt?` | 新增 | R-L0-40 |
+| `is_even` | `fn bigint.is_even(x: BigInt) -> Bool` | 新增 | R-bigint-01（与 `int.is_even` 同拼写） |
+| `is_odd` | `fn bigint.is_odd(x: BigInt) -> Bool` | 新增 | R-bigint-01 |
+| `max` | `fn bigint.max(a: BigInt, b: BigInt) -> BigInt` | 新增 | R-bigint-01 |
+| `min` | `fn bigint.min(a: BigInt, b: BigInt) -> BigInt` | 新增 | R-bigint-01 |
+| `modulo` | `fn bigint.modulo(a: BigInt, b: BigInt) -> BigInt` | 新增 | R-bigint-01（与 R-int-03 同拼写） |
+| `parse` | `fn bigint.parse(s: String) -> Result[BigInt, String]` | 新增 | R-bigint-01 |
+| `parse_radix` | `fn bigint.parse_radix(s: String, radix: Int) -> Result[BigInt, String]` | 新增 | R-bigint-01 |
+| `pow` | `fn bigint.pow(base: BigInt, exp: Int) -> BigInt` | 新增 | R-bigint-01 |
+| `sign` | `fn bigint.sign(x: BigInt) -> Int` | 新增 | R-bigint-01 |
+| `to_string` | `fn bigint.to_string(x: BigInt) -> String` | 新增 | R-bigint-01 |
+| `to_string_radix` | `fn bigint.to_string_radix(x: BigInt, radix: Int) -> String` | 新增 | R-bigint-01 |
+
+<a id="bool"></a>
+
+## bool
+
+记录：[L2-bool.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-bool.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `compare` | `fn bool.compare(a: Bool, b: Bool) -> Int` | 新增 | R-bool-02 |
+| `parse` | `fn bool.parse(s: String) -> Result[Bool, String]` | 新增 | R-bool-01 |
+| `to_string` | `fn bool.to_string(b: Bool) -> String` | 新增 | R-bool-03 |
+
+<a id="bytes"></a>
+
+## bytes
+
+记录：[L2-bytes.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-bytes.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `all` | `fn bytes.all(b: Bytes, f: (Int) -> Bool) -> Bool` | 新增 | R-bytes-18 |
+| `any` | `fn bytes.any(b: Bytes, f: (Int) -> Bool) -> Bool` | 新增 | R-bytes-18 |
+| `append_bool` | `fn bytes.append_bool(mut b: Bytes, x: Bool) -> Unit` | 改名（原 `write_bool`） | R-bytes-03 |
+| `append_bytes` | `fn bytes.append_bytes(mut b: Bytes, src: Bytes) -> Unit` | 新增 | R-bytes-05 |
+| `append_f16_be` | `fn bytes.append_f16_be(mut b: Bytes, x: Float) -> Unit` | 新增 | R-bytes-03 |
+| `append_f16_le` | `fn bytes.append_f16_le(mut b: Bytes, x: Float) -> Unit` | 新增 | R-bytes-03 |
+| `append_f32_be` | `fn bytes.append_f32_be(mut b: Bytes, x: Float) -> Unit` |  |  |
+| `append_f32_le` | `fn bytes.append_f32_le(mut b: Bytes, x: Float) -> Unit` |  |  |
+| `append_f64_be` | `fn bytes.append_f64_be(mut b: Bytes, x: Float) -> Unit` |  |  |
+| `append_f64_le` | `fn bytes.append_f64_le(mut b: Bytes, x: Float) -> Unit` |  |  |
+| `append_i16_be` | `fn bytes.append_i16_be(mut b: Bytes, x: Int) -> Unit` |  |  |
+| `append_i16_le` | `fn bytes.append_i16_le(mut b: Bytes, x: Int) -> Unit` |  |  |
+| `append_i32_be` | `fn bytes.append_i32_be(mut b: Bytes, x: Int) -> Unit` |  |  |
+| `append_i32_le` | `fn bytes.append_i32_le(mut b: Bytes, x: Int) -> Unit` |  |  |
+| `append_i64_be` | `fn bytes.append_i64_be(mut b: Bytes, x: Int) -> Unit` |  |  |
+| `append_i64_le` | `fn bytes.append_i64_le(mut b: Bytes, x: Int) -> Unit` |  |  |
+| `append_i8` | `fn bytes.append_i8(mut b: Bytes, x: Int) -> Unit` | 新增 | R-bytes-15 |
+| `append_u16_be` | `fn bytes.append_u16_be(mut b: Bytes, x: Int) -> Unit` |  |  |
+| `append_u16_le` | `fn bytes.append_u16_le(mut b: Bytes, x: Int) -> Unit` |  |  |
+| `append_u32_be` | `fn bytes.append_u32_be(mut b: Bytes, x: Int) -> Unit` |  |  |
+| `append_u32_le` | `fn bytes.append_u32_le(mut b: Bytes, x: Int) -> Unit` |  |  |
+| `append_u8` | `fn bytes.append_u8(mut b: Bytes, x: Int) -> Unit` |  | R-bytes-25 |
+| `chunk` | `fn bytes.chunk(b: Bytes, n: Int) -> List[Bytes]` | 改名（原 `chunks`） | R-bytes-08 |
+| `clear` | `fn bytes.clear(mut b: Bytes) -> Unit` |  |  |
+| `compare` | `fn bytes.compare(a: Bytes, b: Bytes) -> Int` | 改名（原 `cmp`） | R-bytes-08 |
+| `contains` | `fn bytes.contains(b: Bytes, needle: Bytes) -> Bool` |  |  |
+| `copy_from` | `fn bytes.copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit` |  |  |
+| `copy_within` | `fn bytes.copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit` |  |  |
+| `count` | `fn bytes.count(b: Bytes, f: (Int) -> Bool) -> Int` | 新增 | R-bytes-18 |
+| `count_matches` | `fn bytes.count_matches(b: Bytes, needle: Bytes) -> Int` | 新增 | R-bytes-27 |
+| `dedup` | `fn bytes.dedup(b: Bytes) -> Bytes` | 新增 | R-L0-42 |
+| `drop` | `fn bytes.drop(b: Bytes, n: Int) -> Bytes` | 新增。负数 abort。R-L0-29 | R-bytes-08 |
+| `drop_end` | `fn bytes.drop_end(b: Bytes, n: Int) -> Bytes` | 新增。负数 abort。R-L0-29 | R-bytes-08 |
+| `drop_while` | `fn bytes.drop_while(b: Bytes, f: (Int) -> Bool) -> Bytes` | 新增 | R-L0-42 |
+| `ends_with` | `fn bytes.ends_with(b: Bytes, suffix: Bytes) -> Bool` |  |  |
+| `enumerate` | `fn bytes.enumerate(b: Bytes) -> List[(Int, Int)]` | 新增 | R-L0-42 |
+| `fill` | `fn bytes.fill(mut b: Bytes, x: Int) -> Unit` |  |  |
+| `filter` | `fn bytes.filter(b: Bytes, f: (Int) -> Bool) -> Bytes` | 新增 | R-bytes-18 |
+| `filter_map` | `fn bytes.filter_map(b: Bytes, f: (Int) -> B?) -> List[B]` | 新增 | R-L0-42 |
+| `find` | `fn bytes.find(b: Bytes, f: (Int) -> Bool) -> Int?` | 新增 | R-bytes-18 |
+| `find_index` | `fn bytes.find_index(b: Bytes, f: (Int) -> Bool) -> Int?` | 新增 | R-L0-42 |
+| `find_map` | `fn bytes.find_map(b: Bytes, f: (Int) -> B?) -> B?` | 新增 | R-L0-42 |
+| `first` | `fn bytes.first(b: Bytes) -> Int?` | 新增 | R-bytes-20 |
+| `fold` | `fn bytes.fold(b: Bytes, init: B, f: (B, Int) -> B) -> B` | 新增 | R-bytes-18 |
+| `from_list` | `fn bytes.from_list(xs: List[Int]) -> Bytes` |  |  |
+| `from_string` | `fn bytes.from_string(s: String) -> Bytes` |  | R-bytes-10 |
+| `get` | `fn bytes.get(b: Bytes, i: Int) -> Int?` |  | R-bytes-09 |
+| `get_bool` | `fn bytes.get_bool(b: Bytes, pos: Int) -> Bool?` | 改名（原 `read_bool`）。越界为 none 而非 false | R-bytes-09 |
+| `get_f16_be` | `fn bytes.get_f16_be(b: Bytes, pos: Int) -> Float?` | 新增 | R-bytes-03 |
+| `get_f16_be_array` | `fn bytes.get_f16_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]?` | 新增 | R-bytes-03 |
+| `get_f16_le` | `fn bytes.get_f16_le(b: Bytes, pos: Int) -> Float?` | 改名（原 `read_f16_le`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_f16_le_array` | `fn bytes.get_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]?` | 改名（原 `read_f16_le_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_f32_be` | `fn bytes.get_f32_be(b: Bytes, pos: Int) -> Float?` | 改名（原 `read_f32_be`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_f32_be_array` | `fn bytes.get_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]?` | 改名（原 `read_f32_be_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_f32_le` | `fn bytes.get_f32_le(b: Bytes, pos: Int) -> Float?` | 改名（原 `read_f32_le`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_f32_le_array` | `fn bytes.get_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]?` | 改名（原 `read_f32_le_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_f64_be` | `fn bytes.get_f64_be(b: Bytes, pos: Int) -> Float?` | 改名（原 `read_f64_be`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_f64_be_array` | `fn bytes.get_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]?` | 改名（原 `read_f64_be_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_f64_le` | `fn bytes.get_f64_le(b: Bytes, pos: Int) -> Float?` | 改名（原 `read_f64_le`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_f64_le_array` | `fn bytes.get_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]?` | 改名（原 `read_f64_le_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i16_be` | `fn bytes.get_i16_be(b: Bytes, pos: Int) -> Int?` | 改名（原 `read_i16_be`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i16_be_array` | `fn bytes.get_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（原 `read_i16_be_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i16_le` | `fn bytes.get_i16_le(b: Bytes, pos: Int) -> Int?` | 改名（原 `read_i16_le`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i16_le_array` | `fn bytes.get_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（原 `read_i16_le_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i32_be` | `fn bytes.get_i32_be(b: Bytes, pos: Int) -> Int?` | 改名（原 `read_i32_be`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i32_be_array` | `fn bytes.get_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（原 `read_i32_be_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i32_le` | `fn bytes.get_i32_le(b: Bytes, pos: Int) -> Int?` | 改名（原 `read_i32_le`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i32_le_array` | `fn bytes.get_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（原 `read_i32_le_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i64_be` | `fn bytes.get_i64_be(b: Bytes, pos: Int) -> Int?` | 改名（原 `read_i64_be`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i64_be_array` | `fn bytes.get_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（原 `read_i64_be_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i64_le` | `fn bytes.get_i64_le(b: Bytes, pos: Int) -> Int?` | 改名（原 `read_i64_le`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i64_le_array` | `fn bytes.get_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（原 `read_i64_le_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_i8` | `fn bytes.get_i8(b: Bytes, pos: Int) -> Int?` | 新增 | R-bytes-15 |
+| `get_u16_be` | `fn bytes.get_u16_be(b: Bytes, pos: Int) -> Int?` | 改名（原 `read_u16_be`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_u16_be_array` | `fn bytes.get_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（原 `read_u16_be_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_u16_le` | `fn bytes.get_u16_le(b: Bytes, pos: Int) -> Int?` | 改名（原 `read_u16_le`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_u16_le_array` | `fn bytes.get_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（原 `read_u16_le_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_u32_be` | `fn bytes.get_u32_be(b: Bytes, pos: Int) -> Int?` | 改名（原 `read_u32_be`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_u32_be_array` | `fn bytes.get_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（原 `read_u32_be_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_u32_le` | `fn bytes.get_u32_le(b: Bytes, pos: Int) -> Int?` | 改名（原 `read_u32_le`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_u32_le_array` | `fn bytes.get_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（原 `read_u32_le_array`）。越界为 none 而非 0 | R-bytes-09 |
+| `get_u8` | `fn bytes.get_u8(b: Bytes, pos: Int) -> Int?` | 新增 | R-bytes-25 |
+| `group_by` | `fn bytes.group_by(b: Bytes, f: (Int) -> B) -> Map[B, List[Int]]` | 新增 | R-L0-42 |
+| `index_of` | `fn bytes.index_of(b: Bytes, needle: Bytes) -> Int?` |  |  |
+| `insert` | `fn bytes.insert(b: Bytes, i: Int, x: Int) -> Bytes` | 语义变更：`0..=len` 之外 abort | R-bytes-11 |
+| `intersperse` | `fn bytes.intersperse(b: Bytes, sep: Int) -> Bytes` | 新增 | R-L0-42 |
+| `is_empty` | `fn bytes.is_empty(b: Bytes) -> Bool` |  |  |
+| `is_equal_constant_time` | `fn bytes.is_equal_constant_time(a: Bytes, b: Bytes) -> Bool` | 新增 | R-bytes-29 |
+| `is_eof` | `fn bytes.is_eof(b: Bytes, pos: Int) -> Bool` | 改名（原 `eof`） | R-bytes-07 |
+| `is_valid_utf8` | `fn bytes.is_valid_utf8(b: Bytes) -> Bool` |  |  |
+| `last` | `fn bytes.last(b: Bytes) -> Int?` | 新增 | R-bytes-20 |
+| `last_index_of` | `fn bytes.last_index_of(b: Bytes, needle: Bytes) -> Int?` | 新增 | R-bytes-27 |
+| `len` | `fn bytes.len(b: Bytes) -> Int` |  |  |
+| `map` | `fn bytes.map(b: Bytes, f: (Int) -> Int) -> Bytes` | 改名（原 `map_each`） | R-bytes-08 |
+| `max` | `fn bytes.max(b: Bytes) -> Int?` | 新增 | R-L0-42 |
+| `max_by` | `fn bytes.max_by(b: Bytes, f: (Int) -> K) -> Int?` | 新增 | R-L0-42 |
+| `max_with` | `fn bytes.max_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int?` | 新增 | R-L0-42 |
+| `min` | `fn bytes.min(b: Bytes) -> Int?` | 新增 | R-L0-42 |
+| `min_by` | `fn bytes.min_by(b: Bytes, f: (Int) -> K) -> Int?` | 新增 | R-L0-42 |
+| `min_with` | `fn bytes.min_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int?` | 新增 | R-L0-42 |
+| `new` | `fn bytes.new() -> Bytes` | 新增 | R-bytes-28 |
+| `next_bool` | `fn bytes.next_bool(b: Bytes, pos: Int) -> (Bool?, Int)` | 改名（原 `read_bool_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_bytes` | `fn bytes.next_bytes(b: Bytes, pos: Int, n: Int) -> (Bytes?, Int)` | 改名（原 `take_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_f16_be` | `fn bytes.next_f16_be(b: Bytes, pos: Int) -> (Float?, Int)` | 新增 | R-bytes-03、R-bytes-13 |
+| `next_f16_le` | `fn bytes.next_f16_le(b: Bytes, pos: Int) -> (Float?, Int)` | 改名（原 `read_f16_le_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_f32_be` | `fn bytes.next_f32_be(b: Bytes, pos: Int) -> (Float?, Int)` | 改名（原 `read_f32_be_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_f32_le` | `fn bytes.next_f32_le(b: Bytes, pos: Int) -> (Float?, Int)` | 改名（原 `read_f32_le_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_f64_be` | `fn bytes.next_f64_be(b: Bytes, pos: Int) -> (Float?, Int)` | 改名（原 `read_f64_be_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_f64_le` | `fn bytes.next_f64_le(b: Bytes, pos: Int) -> (Float?, Int)` | 改名（原 `read_f64_le_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_i16_be` | `fn bytes.next_i16_be(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（原 `read_i16_be_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_i16_le` | `fn bytes.next_i16_le(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（原 `read_i16_le_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_i32_be` | `fn bytes.next_i32_be(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（原 `read_i32_be_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_i32_le` | `fn bytes.next_i32_le(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（原 `read_i32_le_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_i64_be` | `fn bytes.next_i64_be(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（原 `read_i64_be_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_i64_le` | `fn bytes.next_i64_le(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（原 `read_i64_le_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_i8` | `fn bytes.next_i8(b: Bytes, pos: Int) -> (Int?, Int)` | 新增 | R-bytes-15、R-bytes-13 |
+| `next_u16_be` | `fn bytes.next_u16_be(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（原 `read_u16_be_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_u16_le` | `fn bytes.next_u16_le(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（原 `read_u16_le_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_u32_be` | `fn bytes.next_u32_be(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（原 `read_u32_be_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_u32_le` | `fn bytes.next_u32_le(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（原 `read_u32_le_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `next_u8` | `fn bytes.next_u8(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（原 `read_u8_at`）。返回 `(値, 次の位置)` | R-bytes-13 |
+| `pad_end` | `fn bytes.pad_end(b: Bytes, n: Int, fill: Int) -> Bytes` | 改名（原 `pad_right`） | R-bytes-08 |
+| `pad_start` | `fn bytes.pad_start(b: Bytes, n: Int, fill: Int) -> Bytes` | 改名（原 `pad_left`） | R-bytes-08 |
+| `partition` | `fn bytes.partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int])` | 新增 | R-L0-42 |
+| `pop` | `fn bytes.pop(mut b: Bytes) -> Int?` | 新增 | R-bytes-20 |
+| `product` | `fn bytes.product(b: Bytes) -> Int` | 新增 | R-L0-42 |
+| `push` | `fn bytes.push(mut b: Bytes, x: Int) -> Unit` |  | R-bytes-02 |
+| `put_bool` | `fn bytes.put_bool(mut b: Bytes, pos: Int, x: Bool) -> Unit` | 新增。越界 abort | R-bytes-03、R-bytes-11 |
+| `put_f16_be` | `fn bytes.put_f16_be(mut b: Bytes, pos: Int, x: Float) -> Unit` | 新增 | R-bytes-03 |
+| `put_f16_le` | `fn bytes.put_f16_le(mut b: Bytes, pos: Int, x: Float) -> Unit` | 新增 | R-bytes-03 |
+| `put_f32_be` | `fn bytes.put_f32_be(mut b: Bytes, pos: Int, x: Float) -> Unit` | 改名（原 `set_f32_be`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_f32_le` | `fn bytes.put_f32_le(mut b: Bytes, pos: Int, x: Float) -> Unit` | 改名（原 `set_f32_le`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_f64_be` | `fn bytes.put_f64_be(mut b: Bytes, pos: Int, x: Float) -> Unit` | 改名（原 `set_f64_be`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_f64_le` | `fn bytes.put_f64_le(mut b: Bytes, pos: Int, x: Float) -> Unit` | 改名（原 `set_f64_le`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_i16_be` | `fn bytes.put_i16_be(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（原 `set_i16_be`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_i16_le` | `fn bytes.put_i16_le(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（原 `set_i16_le`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_i32_be` | `fn bytes.put_i32_be(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（原 `set_i32_be`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_i32_le` | `fn bytes.put_i32_le(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（原 `set_i32_le`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_i64_be` | `fn bytes.put_i64_be(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（原 `set_i64_be`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_i64_le` | `fn bytes.put_i64_le(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（原 `set_i64_le`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_i8` | `fn bytes.put_i8(mut b: Bytes, pos: Int, x: Int) -> Unit` | 新增 | R-bytes-15 |
+| `put_u16_be` | `fn bytes.put_u16_be(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（原 `set_u16_be`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_u16_le` | `fn bytes.put_u16_le(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（原 `set_u16_le`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_u32_be` | `fn bytes.put_u32_be(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（原 `set_u32_be`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_u32_le` | `fn bytes.put_u32_le(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（原 `set_u32_le`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `put_u8` | `fn bytes.put_u8(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（原 `set_u8`）。越界 abort | R-bytes-01、R-bytes-11 |
+| `reduce` | `fn bytes.reduce(b: Bytes, f: (Int, Int) -> Int) -> Int?` | 新增 | R-L0-42 |
+| `remove_at` | `fn bytes.remove_at(b: Bytes, i: Int) -> Bytes` | 语义变更：越界 abort | R-bytes-11 |
+| `repeat` | `fn bytes.repeat(b: Bytes, n: Int) -> Bytes` |  |  |
+| `replace` | `fn bytes.replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes` | 新增 | R-bytes-27 |
+| `replace_first` | `fn bytes.replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes` | 新增 | R-bytes-27 |
+| `reverse` | `fn bytes.reverse(b: Bytes) -> Bytes` |  |  |
+| `scan` | `fn bytes.scan(b: Bytes, init: B, f: (B, Int) -> B) -> List[B]` | 新增 | R-L0-42 |
+| `set` | `fn bytes.set(b: Bytes, i: Int, x: Int) -> Bytes` | 语义变更：越界 abort | R-bytes-11 |
+| `skip` | `fn bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` | 语义变更：`n < 0` 会 abort | R-bytes-13、R-bytes-21 |
+| `slice` | `fn bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` | 语义变更：负位置 abort。R-L0-29 | R-bytes-12、R-L0-29 |
+| `sort` | `fn bytes.sort(b: Bytes) -> List[Int]` | 新增 | R-L0-42 |
+| `sort_by` | `fn bytes.sort_by(b: Bytes, f: (Int) -> B) -> List[Int]` | 新增 | R-L0-42 |
+| `sort_with` | `fn bytes.sort_with(b: Bytes, cmp: (Int, Int) -> Int) -> List[Int]` | 新增 | R-L0-42 |
+| `split` | `fn bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]` |  |  |
+| `split_at` | `fn bytes.split_at(b: Bytes, n: Int) -> (Bytes, Bytes)` | 新增 | R-L0-42 |
+| `starts_with` | `fn bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool` |  |  |
+| `strip_prefix` | `fn bytes.strip_prefix(b: Bytes, prefix: Bytes) -> Bytes?` | 新增 | R-bytes-27 |
+| `strip_suffix` | `fn bytes.strip_suffix(b: Bytes, suffix: Bytes) -> Bytes?` | 新增 | R-bytes-27 |
+| `sum` | `fn bytes.sum(b: Bytes) -> Int` | 新增 | R-L0-42 |
+| `take` | `fn bytes.take(b: Bytes, n: Int) -> Bytes` | 新增。负数 abort。R-L0-29 | R-bytes-08 |
+| `take_end` | `fn bytes.take_end(b: Bytes, n: Int) -> Bytes` | 新增。负数 abort。R-L0-29 | R-bytes-08 |
+| `take_while` | `fn bytes.take_while(b: Bytes, f: (Int) -> Bool) -> Bytes` | 新增 | R-L0-42 |
+| `to_list` | `fn bytes.to_list(b: Bytes) -> List[Int]` |  |  |
+| `to_string` | `fn bytes.to_string(b: Bytes) -> Result[String, String]` |  | R-bytes-10 |
+| `to_string_lossy` | `fn bytes.to_string_lossy(b: Bytes) -> String` |  | R-bytes-10 |
+| `unique` | `fn bytes.unique(b: Bytes) -> Bytes` | 新增 | R-L0-42 |
+| `unique_by` | `fn bytes.unique_by(b: Bytes, f: (Int) -> K) -> Bytes` | 新增 | R-L0-42 |
+| `window` | `fn bytes.window(b: Bytes, n: Int) -> List[Bytes]` | 新增 | R-L0-42 |
+| `xor` | `fn bytes.xor(a: Bytes, b: Bytes) -> Bytes` | 语义变更：长度不同则 abort | R-bytes-23 |
+| `zeros` | `fn bytes.zeros(n: Int) -> Bytes` | 改名（原 `new`） | R-bytes-28 |
+| `zip` | `fn bytes.zip(b: Bytes, ys: List[B]) -> List[(Int, B)]` | 新增 | R-L0-42 |
+| `zip_with` | `fn bytes.zip_with(b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C]` | 新增 | R-L0-42 |
+
+撤除（34）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `as_mut_ptr` | `ffi.alloc` | R-bytes-06 |
+| `as_ptr` | `ffi.region` | R-bytes-06 |
+| `concat` | `+` | R-bytes-16 |
+| `copy_to_ptr` | `ffi.write` | R-bytes-06 |
+| `data_ptr` | `ffi.region` | R-bytes-06 |
+| `from_raw_ptr` | `ffi.read` | R-bytes-06 |
+| `get_or` | `get(b, i) ?? d` | R-bytes-07 |
+| `heap_restore` | 改为内部名称 | R-bytes-14 |
+| `heap_save` | 改为内部名称 | R-bytes-14 |
+| `lines` | `string.lines(bytes.to_string(b)!)` 或 `bytes.split` | R-bytes-17 |
+| `read_float32` | 后缀族 `get_`/`append_`/`put_` | R-bytes-04 |
+| `read_int32` | 后缀族 `get_`/`append_`/`put_` | R-bytes-04 |
+| `read_length_prefixed_strings_le` | `get_u32_le` 与 `slice` 的组合 | R-bytes-05 |
+| `read_string_at` | `slice` ＋ `to_string_lossy` | R-bytes-05 |
+| `read_string_be` | `get_u32_be` 与 `slice` 的组合 | R-bytes-05 |
+| `read_string_be_at` | `next_u32_be` 与 `next_bytes` 的组合 | R-bytes-05 |
+| `read_u8` | `get`（相同角色，越界 none） | R-bytes-09 |
+| `read_uint16` | 后缀族 `get_`/`append_`/`put_` | R-bytes-04 |
+| `read_uint32` | 后缀族 `get_`/`append_`/`put_` | R-bytes-04 |
+| `set_at` | `put_u8`（越界 abort） | R-bytes-02、R-bytes-11 |
+| `set_float32` | 后缀族 `get_`/`append_`/`put_` | R-bytes-04 |
+| `set_int32` | 后缀族 `get_`/`append_`/`put_` | R-bytes-04 |
+| `set_uint16` | 后缀族 `get_`/`append_`/`put_` | R-bytes-04 |
+| `set_uint32` | 后缀族 `get_`/`append_`/`put_` | R-bytes-04 |
+| `skip_length_prefixed_le` | `get_u32_le` 与 `slice` 的组合 | R-bytes-05 |
+| `write_f64_be` | `append_f64_be` | R-bytes-03 |
+| `write_float32` | 后缀族 `get_`/`append_`/`put_` | R-bytes-04 |
+| `write_i64_be` | `append_i64_be` | R-bytes-03 |
+| `write_int32` | 后缀族 `get_`/`append_`/`put_` | R-bytes-04 |
+| `write_string_be` | `append_u32_be` ＋ `append_bytes` | R-bytes-05 |
+| `write_u32_be` | `append_u32_be` | R-bytes-03 |
+| `write_u8` | `push` | R-bytes-02 |
+| `write_uint16` | 后缀族 `get_`/`append_`/`put_` | R-bytes-04 |
+| `write_uint32` | 后缀族 `get_`/`append_`/`put_` | R-bytes-04 |
+
+<a id="compute"></a>
+
+## compute
+
+记录：[L2-compute.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-compute.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `compare` | `fn compute.compare(a: Compute, b: Compute) -> Int` | 新增 | R-compute-01 |
+| `h` | `fn compute.h(n: Int) -> Compute` |  |  |
+| `min` | `fn compute.min(n: Int) -> Compute` |  |  |
+| `ms` | `fn compute.ms(n: Int) -> Compute` |  |  |
+| `ns` | `fn compute.ns(n: Int) -> Compute` |  |  |
+| `s` | `fn compute.s(n: Int) -> Compute` |  |  |
+| `us` | `fn compute.us(n: Int) -> Compute` |  |  |
+
+<a id="datetime"></a>
+
+## datetime
+
+记录：[L2-datetime.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-datetime.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `add_days` | `fn datetime.add_days(ts: Int, n: Int) -> Int` |  |  |
+| `add_hours` | `fn datetime.add_hours(ts: Int, n: Int) -> Int` |  |  |
+| `add_minutes` | `fn datetime.add_minutes(ts: Int, n: Int) -> Int` |  |  |
+| `add_seconds` | `fn datetime.add_seconds(ts: Int, n: Int) -> Int` |  |  |
+| `day` | `fn datetime.day(ts: Int) -> Int` |  |  |
+| `format` | `fn datetime.format(ts: Int, pattern: String) -> String` |  | R-datetime-05 |
+| `from_parts` | `fn datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String]` | 语义变更：越界 err。`-> Result[Int, String]` | R-datetime-07 |
+| `hour` | `fn datetime.hour(ts: Int) -> Int` |  |  |
+| `minute` | `fn datetime.minute(ts: Int) -> Int` |  |  |
+| `monotonic_ns` | `effect fn datetime.monotonic_ns() -> Int` |  |  |
+| `month` | `fn datetime.month(ts: Int) -> Int` |  |  |
+| `now` | `effect fn datetime.now() -> Int` |  | R-datetime-01（`env.unix_timestamp` 保留的一侧） |
+| `now_ms` | `effect fn datetime.now_ms() -> Int` | 新增 | R-datetime-01 |
+| `parse_iso` | `fn datetime.parse_iso(s: String) -> Result[Int, String]` |  |  |
+| `second` | `fn datetime.second(ts: Int) -> Int` |  |  |
+| `to_iso` | `fn datetime.to_iso(ts: Int) -> String` |  |  |
+| `weekday` | `fn datetime.weekday(ts: Int) -> String` |  | R-datetime-04 |
+| `year` | `fn datetime.year(ts: Int) -> Int` |  |  |
+
+撤除（5）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `diff_seconds` | `a - b` | R-datetime-03（`a - b`） |
+| `from_unix` | 参数本身 | R-datetime-03（参数本身） |
+| `is_after` | `a > b` | R-datetime-03（`a > b`） |
+| `is_before` | `a < b` | R-datetime-03（`a < b`） |
+| `to_unix` | 参数本身 | R-datetime-03（参数本身） |
+
+<a id="deque"></a>
+
+## deque
+
+新模块（在 L1 新增）。
+记录：[L2-deque.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-deque.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `all` | `fn deque.all[A](d: Deque[A], f: (A) -> Bool) -> Bool` | 新增 | R-deque-02 |
+| `any` | `fn deque.any[A](d: Deque[A], f: (A) -> Bool) -> Bool` | 新增 | R-deque-02 |
+| `chunk` | `fn deque.chunk(d: Deque[A], n: Int) -> List[Deque[A]]` | 新增 | R-L0-42 |
+| `clear` | `fn deque.clear[A](mut d: Deque[A]) -> Unit` | 新增 | R-deque-02、R-L0-04 |
+| `contains` | `fn deque.contains[A](d: Deque[A], x: A) -> Bool` | 新增 | R-deque-02 |
+| `count` | `fn deque.count[A](d: Deque[A], f: (A) -> Bool) -> Int` | 新增 | R-deque-02 |
+| `dedup` | `fn deque.dedup(d: Deque[A]) -> Deque[A]` | 新增 | R-L0-42 |
+| `drop` | `fn deque.drop[A](d: Deque[A], n: Int) -> Deque[A]` | 新增 | R-deque-04 |
+| `drop_end` | `fn deque.drop_end[A](d: Deque[A], n: Int) -> Deque[A]` | 新增 | R-deque-04 |
+| `drop_while` | `fn deque.drop_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]` | 新增 | R-L0-42 |
+| `enumerate` | `fn deque.enumerate(d: Deque[A]) -> List[(Int, A)]` | 新增 | R-L0-42 |
+| `filter` | `fn deque.filter[A](d: Deque[A], f: (A) -> Bool) -> Deque[A]` | 新增 | R-deque-02 |
+| `filter_map` | `fn deque.filter_map(d: Deque[A], f: (A) -> B?) -> List[B]` | 新增 | R-L0-42 |
+| `find` | `fn deque.find[A](d: Deque[A], f: (A) -> Bool) -> A?` | 新增 | R-deque-02 |
+| `find_index` | `fn deque.find_index(d: Deque[A], f: (A) -> Bool) -> Int?` | 新增 | R-L0-42 |
+| `find_map` | `fn deque.find_map(d: Deque[A], f: (A) -> B?) -> B?` | 新增 | R-L0-42 |
+| `first` | `fn deque.first[A](d: Deque[A]) -> A?` | 新增 | R-deque-01 |
+| `fold` | `fn deque.fold[A, B](d: Deque[A], init: B, f: (B, A) -> B) -> B` | 新增 | R-deque-02 |
+| `from_list` | `fn deque.from_list[A](xs: List[A]) -> Deque[A]` | 新增 | R-deque-01 |
+| `get` | `fn deque.get[A](d: Deque[A], i: Int) -> A?` | 新增 | R-deque-01 |
+| `group_by` | `fn deque.group_by(d: Deque[A], f: (A) -> B) -> Map[B, List[A]]` | 新增 | R-L0-42 |
+| `insert` | `fn deque.insert[A](d: Deque[A], i: Int, x: A) -> Deque[A]` | 新增 | R-deque-04 |
+| `intersperse` | `fn deque.intersperse(d: Deque[A], sep: A) -> Deque[A]` | 新增 | R-L0-42 |
+| `is_empty` | `fn deque.is_empty[A](d: Deque[A]) -> Bool` | 新增 | R-deque-01 |
+| `last` | `fn deque.last[A](d: Deque[A]) -> A?` | 新增 | R-deque-01 |
+| `len` | `fn deque.len[A](d: Deque[A]) -> Int` | 新增 | R-deque-01 |
+| `map` | `fn deque.map[A, B](d: Deque[A], f: (A) -> B) -> Deque[B]` | 新增 | R-deque-02 |
+| `max` | `fn deque.max(d: Deque[A]) -> A?` | 新增 | R-L0-42 |
+| `max_by` | `fn deque.max_by(d: Deque[A], f: (A) -> K) -> A?` | 新增 | R-L0-42 |
+| `max_with` | `fn deque.max_with(d: Deque[A], cmp: (A, A) -> Int) -> A?` | 新增 | R-L0-42 |
+| `min` | `fn deque.min(d: Deque[A]) -> A?` | 新增 | R-L0-42 |
+| `min_by` | `fn deque.min_by(d: Deque[A], f: (A) -> K) -> A?` | 新增 | R-L0-42 |
+| `min_with` | `fn deque.min_with(d: Deque[A], cmp: (A, A) -> Int) -> A?` | 新增 | R-L0-42 |
+| `new` | `fn deque.new[A]() -> Deque[A]` | 新增 | R-deque-01 |
+| `partition` | `fn deque.partition(d: Deque[A], f: (A) -> Bool) -> (List[A], List[A])` | 新增 | R-L0-42 |
+| `pop` | `fn deque.pop[A](mut d: Deque[A]) -> A?` | 新增 | R-deque-01、R-deque-03 |
+| `pop_front` | `fn deque.pop_front[A](mut d: Deque[A]) -> A?` | 新增 | R-deque-01 |
+| `product` | `fn deque.product[A: Numeric](d: Deque[A]) -> A` | 新增 | R-L0-42 |
+| `push` | `fn deque.push[A](mut d: Deque[A], x: A) -> Unit` | 新增 | R-deque-01、R-deque-03 |
+| `push_front` | `fn deque.push_front[A](mut d: Deque[A], x: A) -> Unit` | 新增 | R-deque-01 |
+| `reduce` | `fn deque.reduce(d: Deque[A], f: (A, A) -> A) -> A?` | 新增 | R-L0-42 |
+| `remove_at` | `fn deque.remove_at[A](d: Deque[A], i: Int) -> Deque[A]` | 新增 | R-deque-04 |
+| `reverse` | `fn deque.reverse[A](d: Deque[A]) -> Deque[A]` | 新增 | R-deque-04 |
+| `scan` | `fn deque.scan(d: Deque[A], init: B, f: (B, A) -> B) -> List[B]` | 新增 | R-L0-42 |
+| `set` | `fn deque.set[A](d: Deque[A], i: Int, x: A) -> Deque[A]` | 新增 | R-deque-04 |
+| `slice` | `fn deque.slice[A](d: Deque[A], start: Int, end: Int) -> Deque[A]` | 新增 | R-deque-04 |
+| `sort` | `fn deque.sort(d: Deque[A]) -> List[A]` | 新增 | R-L0-42 |
+| `sort_by` | `fn deque.sort_by(d: Deque[A], f: (A) -> B) -> List[A]` | 新增 | R-L0-42 |
+| `sort_with` | `fn deque.sort_with(d: Deque[A], cmp: (A, A) -> Int) -> List[A]` | 新增 | R-L0-42 |
+| `split_at` | `fn deque.split_at(d: Deque[A], n: Int) -> (Deque[A], Deque[A])` | 新增 | R-L0-42 |
+| `sum` | `fn deque.sum[A: Numeric](d: Deque[A]) -> A` | 新增 | R-L0-42 |
+| `take` | `fn deque.take[A](d: Deque[A], n: Int) -> Deque[A]` | 新增 | R-deque-04 |
+| `take_end` | `fn deque.take_end[A](d: Deque[A], n: Int) -> Deque[A]` | 新增 | R-deque-04 |
+| `take_while` | `fn deque.take_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]` | 新增 | R-L0-42 |
+| `to_list` | `fn deque.to_list[A](d: Deque[A]) -> List[A]` | 新增 | R-deque-01 |
+| `unique` | `fn deque.unique(d: Deque[A]) -> Deque[A]` | 新增 | R-L0-42 |
+| `unique_by` | `fn deque.unique_by(d: Deque[A], f: (A) -> K) -> Deque[A]` | 新增 | R-L0-42 |
+| `window` | `fn deque.window(d: Deque[A], n: Int) -> List[Deque[A]]` | 新增 | R-L0-42 |
+| `zip` | `fn deque.zip(d: Deque[A], ys: List[B]) -> List[(A, B)]` | 新增 | R-L0-42 |
+| `zip_with` | `fn deque.zip_with(d: Deque[A], ys: List[B], f: (A, B) -> C) -> List[C]` | 新增 | R-L0-42 |
+
+<a id="duration"></a>
+
+## duration
+
+记录：[L2-duration.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-duration.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `compare` | `fn duration.compare(a: Duration, b: Duration) -> Int` | 新增 | R-duration-01 |
+| `h` | `fn duration.h(n: Int) -> Duration` |  |  |
+| `min` | `fn duration.min(n: Int) -> Duration` |  |  |
+| `ms` | `fn duration.ms(n: Int) -> Duration` |  |  |
+| `ns` | `fn duration.ns(n: Int) -> Duration` |  |  |
+| `s` | `fn duration.s(n: Int) -> Duration` |  |  |
+| `us` | `fn duration.us(n: Int) -> Duration` |  |  |
+
+<a id="env"></a>
+
+## env
+
+记录：[L2-env.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-env.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `args` | `effect fn env.args() -> List[String]` |  | R-env-01（集中于此） |
+| `cwd` | `effect fn env.cwd() -> String` |  |  |
+| `get` | `effect fn env.get(name: String) -> String?` |  | R-env-01、R-env-03 |
+| `os` | `fn env.os() -> String` |  |  |
+| `remove` | `effect fn env.remove(name: String) -> Unit` | 新增 | R-env-02 |
+| `secret` | `effect fn env.secret(name: String) -> Secret[String]?` | 新增。值由 `Secret` 产生 | R-env-05 |
+| `set` | `effect fn env.set(name: String, value: String) -> Unit` |  |  |
+| `sleep_ms` | `effect fn env.sleep_ms(ms: Int) -> Unit` |  | R-env-01 |
+| `vars` | `effect fn env.vars() -> Map[String, String]` | 新增 | R-env-02 |
+
+撤除（3）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `millis` | 移至 `datetime.now_ms` | R-env-01 |
+| `temp_dir` | `fs.temp_dir` | R-env-01 |
+| `unix_timestamp` | `datetime.now` | R-env-01 |
+
+<a id="ffi"></a>
+
+## ffi
+
+新模块（在 L1 新增）。
+记录：[L2-ffi.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-ffi.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `alloc` | `effect fn ffi.alloc(n: Int) -> Region` | 新增。来自 `bytes.as_mut_ptr`。带长度的可写区域 | R-ffi-01、ADR-0031 |
+| `is_writable` | `fn ffi.is_writable(r: Region) -> Bool` | 新增 | ADR-0031 |
+| `len` | `fn ffi.len(r: Region) -> Int` | 新增 | ADR-0031 |
+| `read` | `effect fn ffi.read(r: Region, off: Int, n: Int) -> Bytes` | 新增。来自 `bytes.from_raw_ptr`。越界 err | R-ffi-01、ADR-0031 |
+| `region` | `fn ffi.region(b: Bytes) -> Region` | 新增。来自 `bytes.as_ptr`/`data_ptr`。只读区域 | R-ffi-01、ADR-0031 |
+| `to_bytes` | `effect fn ffi.to_bytes(r: Region) -> Bytes` | 新增 | ADR-0031 |
+| `write` | `effect fn ffi.write(r: Region, off: Int, b: Bytes) -> Unit` | 新增。来自 `bytes.copy_to_ptr`。写入目标在前 | R-ffi-01、R-ffi-03、ADR-0031 |
+
+ADR-0031（表第 5 行裁定）将以数值持有地址的 `RawPtr`（`ffi.address`/`ffi.to_int`）替换为带长度的 `Region`。
+
+<a id="float"></a>
+
+## float
+
+记录：[L2-float.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-float.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `abs` | `fn float.abs(x: Float) -> Float` |  |  |
+| `ceil` | `fn float.ceil(x: Float) -> Float` |  |  |
+| `clamp` | `fn float.clamp(x: Float, lo: Float, hi: Float) -> Float` |  |  |
+| `compare` | `fn float.compare(a: Float, b: Float) -> Int` | 新增 | R-sized-02 |
+| `epsilon` | `fn float.epsilon() -> Float` | 新增 | R-float-03 |
+| `floor` | `fn float.floor(x: Float) -> Float` |  |  |
+| `from` | `fn float.from[S: Numeric](x: S) -> Float` | 新增 | R-L0-40 |
+| `from_bits` | `fn float.from_bits(bits: Int) -> Float` | 新增 | R-float-02 |
+| `from_checked` | `fn float.from_checked[S: Numeric](x: S) -> Float?` | 新增 | R-L0-40 |
+| `infinity` | `fn float.infinity() -> Float` | 新增 | R-float-03 |
+| `is_finite` | `fn float.is_finite(x: Float) -> Bool` | 新增 | R-float-04 |
+| `is_infinite` | `fn float.is_infinite(x: Float) -> Bool` |  |  |
+| `is_nan` | `fn float.is_nan(x: Float) -> Bool` |  |  |
+| `max` | `fn float.max(a: Float, b: Float) -> Float` |  | R-math-01（`math.fmax` 保留的一侧） |
+| `max_value` | `fn float.max_value() -> Float` | 新增 | R-float-03 |
+| `min` | `fn float.min(a: Float, b: Float) -> Float` |  | R-math-01（`math.fmin` 保留的一侧） |
+| `min_value` | `fn float.min_value() -> Float` | 新增 | R-float-03 |
+| `nan` | `fn float.nan() -> Float` | 新增 | R-float-03 |
+| `parse` | `fn float.parse(s: String) -> Result[Float, String]` |  |  |
+| `pow` | `fn float.pow(base: Float, exp: Float) -> Float` | 新增 | R-math-01 |
+| `round` | `fn float.round(x: Float) -> Float` |  |  |
+| `signum` | `fn float.signum(x: Float) -> Float` | 改名（原 `sign`）。行为不变 | R-float-05 |
+| `to_bits` | `fn float.to_bits(f: Float) -> Int` |  | R-float-02（与 `from_bits` 成对） |
+| `to_fixed` | `fn float.to_fixed(x: Float, decimals: Int) -> String` |  |  |
+| `to_string` | `fn float.to_string(x: Float) -> String` |  |  |
+| `trunc` | `fn float.trunc(x: Float) -> Float` | 新增 | R-float-04 |
+
+撤除（34）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `from_float32` | `float32.to_float` | R-float-01（`float32.to_float`） |
+| `from_float64` | `float64.to_float` | R-float-01（`float64.to_float`） |
+| `from_int` | 与 `int.to_float` 相同 | R-float-01（与 `int.to_float` 相同；R-L0-07 第 3 项） |
+| `sqrt` | `math.sqrt` | R-math-03 |
+| `to_float32` | `float32.from` | R-L0-40 |
+| `to_float32_checked` | `float32.from_checked` | R-L0-40 |
+| `to_float64` | `float64.from` | R-L0-40 |
+| `to_int` | `int.from` | R-L0-40 |
+| `to_int_checked` | `int.from_checked` | R-L0-40 |
+| `to_int_saturating` | `int.from_saturating` | R-L0-40 |
+| `to_int16` | `int16.from` | R-L0-40 |
+| `to_int16_checked` | `int16.from_checked` | R-L0-40 |
+| `to_int16_saturating` | `int16.from_saturating` | R-L0-40 |
+| `to_int32` | `int32.from` | R-L0-40 |
+| `to_int32_checked` | `int32.from_checked` | R-L0-40 |
+| `to_int32_saturating` | `int32.from_saturating` | R-L0-40 |
+| `to_int64` | `int64.from` | R-L0-40 |
+| `to_int64_checked` | `int64.from_checked` | R-L0-40 |
+| `to_int64_saturating` | `int64.from_saturating` | R-L0-40 |
+| `to_int8` | `int8.from` | R-L0-40 |
+| `to_int8_checked` | `int8.from_checked` | R-L0-40 |
+| `to_int8_saturating` | `int8.from_saturating` | R-L0-40 |
+| `to_uint16` | `uint16.from` | R-L0-40 |
+| `to_uint16_checked` | `uint16.from_checked` | R-L0-40 |
+| `to_uint16_saturating` | `uint16.from_saturating` | R-L0-40 |
+| `to_uint32` | `uint32.from` | R-L0-40 |
+| `to_uint32_checked` | `uint32.from_checked` | R-L0-40 |
+| `to_uint32_saturating` | `uint32.from_saturating` | R-L0-40 |
+| `to_uint64` | `uint64.from` | R-L0-40 |
+| `to_uint64_checked` | `uint64.from_checked` | R-L0-40 |
+| `to_uint64_saturating` | `uint64.from_saturating` | R-L0-40 |
+| `to_uint8` | `uint8.from` | R-L0-40 |
+| `to_uint8_checked` | `uint8.from_checked` | R-L0-40 |
+| `to_uint8_saturating` | `uint8.from_saturating` | R-L0-40 |
+
+<a id="float32"></a>
+
+## float32
+
+记录：[L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `abs` | `fn float32.abs(x: Float32) -> Float32` | 新增 | R-sized-11 |
+| `ceil` | `fn float32.ceil(x: Float32) -> Float32` | 新增 | R-sized-11 |
+| `clamp` | `fn float32.clamp(x: Float32, lo: Float32, hi: Float32) -> Float32` | 新增 | R-sized-08 |
+| `compare` | `fn float32.compare(a: Float32, b: Float32) -> Int` | 新增 | R-sized-02 |
+| `epsilon` | `fn float32.epsilon() -> Float32` | 新增 | R-sized-03 |
+| `floor` | `fn float32.floor(x: Float32) -> Float32` | 新增 | R-sized-11 |
+| `from` | `fn float32.from[S: Numeric](x: S) -> Float32` | 新增 | R-L0-40 |
+| `from_bits` | `fn float32.from_bits(bits: Int) -> Float32` | 新增 | R-sized-03 |
+| `from_checked` | `fn float32.from_checked[S: Numeric](x: S) -> Float32?` | 新增 | R-L0-40 |
+| `infinity` | `fn float32.infinity() -> Float32` | 新增 | R-sized-03 |
+| `is_finite` | `fn float32.is_finite(x: Float32) -> Bool` | 新增 | R-sized-08 |
+| `is_infinite` | `fn float32.is_infinite(x: Float32) -> Bool` | 新增 | R-sized-08 |
+| `is_nan` | `fn float32.is_nan(x: Float32) -> Bool` | 新增 | R-sized-08 |
+| `max` | `fn float32.max(a: Float32, b: Float32) -> Float32` | 新增 | R-sized-08 |
+| `max_value` | `fn float32.max_value() -> Float32` | 新增 | R-sized-03 |
+| `min` | `fn float32.min(a: Float32, b: Float32) -> Float32` | 新增 | R-sized-08 |
+| `min_value` | `fn float32.min_value() -> Float32` | 新增 | R-sized-03 |
+| `nan` | `fn float32.nan() -> Float32` | 新增 | R-sized-03 |
+| `parse` | `fn float32.parse(s: String) -> Result[Float32, String]` | 新增 | R-sized-02 |
+| `round` | `fn float32.round(x: Float32) -> Float32` | 新增 | R-sized-11 |
+| `signum` | `fn float32.signum(x: Float32) -> Float32` | 新增 | R-sized-11 |
+| `to_bits` | `fn float32.to_bits(x: Float32) -> Int` | 新增 | R-sized-03 |
+| `to_string` | `fn float32.to_string(x: Float32) -> String` |  |  |
+| `trunc` | `fn float32.trunc(x: Float32) -> Float32` | 新增 | R-sized-11 |
+
+撤除（9）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `to_float64` | `float64.from` | R-L0-40 |
+| `to_int16` | `int16.from` | R-L0-40 |
+| `to_int32` | `int32.from` | R-L0-40 |
+| `to_int64` | `int64.from` | R-L0-40 |
+| `to_int8` | `int8.from` | R-L0-40 |
+| `to_uint16` | `uint16.from` | R-L0-40 |
+| `to_uint32` | `uint32.from` | R-L0-40 |
+| `to_uint64` | `uint64.from` | R-L0-40 |
+| `to_uint8` | `uint8.from` | R-L0-40 |
+
+<a id="float64"></a>
+
+## float64
+
+记录：[L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `abs` | `fn float64.abs(x: Float64) -> Float64` | 新增 | R-sized-11 |
+| `ceil` | `fn float64.ceil(x: Float64) -> Float64` | 新增 | R-sized-11 |
+| `clamp` | `fn float64.clamp(x: Float64, lo: Float64, hi: Float64) -> Float64` | 新增 | R-sized-08 |
+| `compare` | `fn float64.compare(a: Float64, b: Float64) -> Int` | 新增 | R-sized-02 |
+| `epsilon` | `fn float64.epsilon() -> Float64` | 新增 | R-sized-03 |
+| `floor` | `fn float64.floor(x: Float64) -> Float64` | 新增 | R-sized-11 |
+| `from` | `fn float64.from[S: Numeric](x: S) -> Float64` | 新增 | R-L0-40 |
+| `from_bits` | `fn float64.from_bits(bits: Int) -> Float64` | 新增 | R-sized-03 |
+| `from_checked` | `fn float64.from_checked[S: Numeric](x: S) -> Float64?` | 新增 | R-L0-40 |
+| `infinity` | `fn float64.infinity() -> Float64` | 新增 | R-sized-03 |
+| `is_finite` | `fn float64.is_finite(x: Float64) -> Bool` | 新增 | R-sized-08 |
+| `is_infinite` | `fn float64.is_infinite(x: Float64) -> Bool` | 新增 | R-sized-08 |
+| `is_nan` | `fn float64.is_nan(x: Float64) -> Bool` | 新增 | R-sized-08 |
+| `max` | `fn float64.max(a: Float64, b: Float64) -> Float64` | 新增 | R-sized-08 |
+| `max_value` | `fn float64.max_value() -> Float64` | 新增 | R-sized-03 |
+| `min` | `fn float64.min(a: Float64, b: Float64) -> Float64` | 新增 | R-sized-08 |
+| `min_value` | `fn float64.min_value() -> Float64` | 新增 | R-sized-03 |
+| `nan` | `fn float64.nan() -> Float64` | 新增 | R-sized-03 |
+| `parse` | `fn float64.parse(s: String) -> Result[Float64, String]` | 新增 | R-sized-02 |
+| `round` | `fn float64.round(x: Float64) -> Float64` | 新增 | R-sized-11 |
+| `signum` | `fn float64.signum(x: Float64) -> Float64` | 新增 | R-sized-11 |
+| `to_bits` | `fn float64.to_bits(x: Float64) -> Int` | 新增 | R-sized-03 |
+| `to_string` | `fn float64.to_string(x: Float64) -> String` |  |  |
+| `trunc` | `fn float64.trunc(x: Float64) -> Float64` | 新增 | R-sized-11 |
+
+撤除（9）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `to_float32` | `float32.from` | R-L0-40 |
+| `to_int16` | `int16.from` | R-L0-40 |
+| `to_int32` | `int32.from` | R-L0-40 |
+| `to_int64` | `int64.from` | R-L0-40 |
+| `to_int8` | `int8.from` | R-L0-40 |
+| `to_uint16` | `uint16.from` | R-L0-40 |
+| `to_uint32` | `uint32.from` | R-L0-40 |
+| `to_uint64` | `uint64.from` | R-L0-40 |
+| `to_uint8` | `uint8.from` | R-L0-40 |
+
+<a id="fs"></a>
+
+## fs
+
+记录：[L2-fs.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-fs.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `append_bytes` | `effect fn fs.append_bytes(path: String, data: Bytes) -> Unit` | 新增 | R-fs-05 |
+| `append_text` | `effect fn fs.append_text(path: String, content: String) -> Unit` | 改名（原 `append`） | R-fs-04、R-fs-05 |
+| `copy` | `effect fn fs.copy(src: String, dst: String) -> Unit` |  |  |
+| `create_temp_dir` | `effect fn fs.create_temp_dir(prefix: String) -> String` |  |  |
+| `create_temp_file` | `effect fn fs.create_temp_file(prefix: String) -> String` |  |  |
+| `exists` | `effect fn fs.exists(path: String) -> Bool` |  |  |
+| `fold_lines` | `effect fn fs.fold_lines[A](path: String, init: A, f: (A, String) -> A) -> A` |  |  |
+| `fold_lines_chunked` | `effect fn fs.fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> List[A]` |  |  |
+| `fold_lines_range` | `effect fn fs.fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A` | 语义变更：负位置 abort | R-L0-29、R-L0-46 |
+| `for_each_line` | `effect fn fs.for_each_line(path: String, f: (String) -> Unit) -> Unit` |  |  |
+| `glob` | `effect fn fs.glob(pattern: String) -> List[String]` |  |  |
+| `is_dir` | `effect fn fs.is_dir(path: String) -> Bool` |  |  |
+| `is_file` | `effect fn fs.is_file(path: String) -> Bool` |  |  |
+| `is_symlink` | `effect fn fs.is_symlink(path: String) -> Bool` |  |  |
+| `list_dir` | `effect fn fs.list_dir(path: String) -> List[String]` |  |  |
+| `mkdir_p` | `effect fn fs.mkdir_p(path: String) -> Unit` |  | R-fs-04 |
+| `read_bytes` | `effect fn fs.read_bytes(path: String) -> Bytes` | 语义变更：改为 `-> Bytes`。唯一的字节读取 | R-fs-01 |
+| `read_bytes_if_exists` | `effect fn fs.read_bytes_if_exists(path: String) -> Bytes?` | 语义变更：改为 `-> Bytes?` | R-fs-01・R-fs-03 |
+| `read_lines` | `effect fn fs.read_lines(path: String) -> List[String]` |  |  |
+| `read_lines_if_exists` | `effect fn fs.read_lines_if_exists(path: String) -> List[String]?` |  | R-fs-03 |
+| `read_text` | `effect fn fs.read_text(path: String) -> String` |  |  |
+| `read_text_if_exists` | `effect fn fs.read_text_if_exists(path: String) -> String?` |  | R-fs-03 |
+| `remove` | `effect fn fs.remove(path: String) -> Unit` |  |  |
+| `remove_all` | `effect fn fs.remove_all(path: String) -> Unit` |  |  |
+| `rename` | `effect fn fs.rename(src: String, dst: String) -> Unit` |  |  |
+| `stat` | `effect fn fs.stat(path: String) -> FileStat` |  | R-fs-02 |
+| `temp_dir` | `effect fn fs.temp_dir() -> String` |  | L2-env R-env-01 |
+| `walk` | `effect fn fs.walk(dir: String) -> List[String]` |  |  |
+| `write_bytes` | `effect fn fs.write_bytes(path: String, data: Bytes) -> Unit` | 语义变更：改为 `data: Bytes` | R-fs-01 |
+| `write_text` | `effect fn fs.write_text(path: String, content: String) -> Unit` | 改名（原 `write`） | R-fs-05 |
+
+撤除（5）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `file_size` | `stat(p)!.size` | R-fs-02 |
+| `modified_at` | `stat(p)!.modified` | R-fs-02 |
+| `read_bytes_raw` | `read_bytes` | R-fs-01 |
+| `read_bytes_raw_if_exists` | `read_bytes_if_exists` | R-fs-01・R-fs-03 |
+| `write_bytes_raw` | `write_bytes` | R-fs-01 |
+
+<a id="hash"></a>
+
+## hash
+
+记录：[L2-hash.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-hash.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `adler32` | `fn hash.adler32(b: Bytes) -> Int` | 新增 | R-hash-02 |
+| `crc32` | `fn hash.crc32(b: Bytes) -> Int` | 新增 | R-hash-02 |
+| `fnv1a32` | `fn hash.fnv1a32(b: Bytes) -> Int` | 语义变更：参数改为 `Bytes`。`fnv1a32(bytes.from_string(s))` | R-hash-01 |
+| `hmac_sha256` | `fn hash.hmac_sha256(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]` | 新增 | R-hash-06、R-hash-07 |
+| `hmac_sha512` | `fn hash.hmac_sha512(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]` | 新增 | R-hash-06、R-hash-07 |
+| `is_valid_hmac_sha256` | `fn hash.is_valid_hmac_sha256(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool` | 新增 | R-hash-06、R-hash-07 |
+| `is_valid_hmac_sha512` | `fn hash.is_valid_hmac_sha512(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool` | 新增 | R-hash-06、R-hash-07 |
+| `sha256` | `fn hash.sha256(b: Bytes) -> Bytes` |  |  |
+| `sha256_hex` | `fn hash.sha256_hex(b: Bytes) -> String` | 语义变更：接收 `Bytes` | R-hash-05 |
+| `sha512` | `fn hash.sha512(b: Bytes) -> Bytes` | 新增 | R-hash-03 |
+| `sha512_hex` | `fn hash.sha512_hex(b: Bytes) -> String` | 新增。接收 `Bytes` | R-hash-03、R-hash-05 |
+
+撤除（1）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `fnv1a32_bytes` | `fnv1a32` | R-hash-01 |
+
+不新增（R-hash-07）：`md5`/`md5_hex`/`sha1`/`sha1_hex`（不可用于安全用途的摘要，epoch 15 撤除，替代为 `sha256`），以及 HMAC 的 `_hex` 格 `hmac_sha256_hex`/`hmac_sha512_hex`（十六进制用 `hex.encode(secret.reveal(tag))`）。
+
+<a id="heap"></a>
+
+## heap
+
+新模块（在 L1 新增）。
+记录：[L2-heap.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-heap.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `all` | `fn heap.all[A](h: Heap[A], f: (A) -> Bool) -> Bool` | 新增 | R-heap-02 |
+| `any` | `fn heap.any[A](h: Heap[A], f: (A) -> Bool) -> Bool` | 新增 | R-heap-02 |
+| `clear` | `fn heap.clear[A](mut h: Heap[A]) -> Unit` | 新增 | R-heap-02、R-L0-04 |
+| `contains` | `fn heap.contains[A](h: Heap[A], x: A) -> Bool` | 新增 | R-heap-02 |
+| `count` | `fn heap.count[A](h: Heap[A], f: (A) -> Bool) -> Int` | 新增 | R-heap-02 |
+| `filter` | `fn heap.filter[A](h: Heap[A], f: (A) -> Bool) -> Heap[A]` | 新增 | R-heap-02 |
+| `from_list` | `fn heap.from_list[A](xs: List[A]) -> Heap[A]` | 新增 | R-heap-01 |
+| `is_empty` | `fn heap.is_empty[A](h: Heap[A]) -> Bool` | 新增 | R-heap-01 |
+| `len` | `fn heap.len[A](h: Heap[A]) -> Int` | 新增 | R-heap-01 |
+| `new` | `fn heap.new[A]() -> Heap[A]` | 新增 | R-heap-01 |
+| `new_by` | `fn heap.new_by[A, K](f: (A) -> K) -> Heap[A]` | 新增 | R-heap-01 |
+| `new_with` | `fn heap.new_with[A](cmp: (A, A) -> Int) -> Heap[A]` | 新增 | R-heap-01 |
+| `peek` | `fn heap.peek[A](h: Heap[A]) -> A?` | 新增 | R-heap-01 |
+| `pop` | `fn heap.pop[A](mut h: Heap[A]) -> A?` | 新增 | R-heap-01 |
+| `push` | `fn heap.push[A](mut h: Heap[A], x: A) -> Unit` | 新增 | R-heap-01 |
+| `to_list` | `fn heap.to_list[A](h: Heap[A]) -> List[A]` | 新增 | R-heap-01 |
+
+<a id="hex"></a>
+
+## hex
+
+记录：[L2-hex.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-hex.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `decode` | `fn hex.decode(s: String) -> Result[Bytes, String]` |  | R-hex-01 |
+| `encode` | `fn hex.encode(b: Bytes) -> String` |  | R-hex-01 |
+| `encode_upper` | `fn hex.encode_upper(b: Bytes) -> String` |  | R-hex-01 |
+
+<a id="html"></a>
+
+## html
+
+记录：[L2-html.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-html.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `concat` | `fn html.concat(a: SafeHtml, b: SafeHtml) -> SafeHtml` |  | R-html-01 |
+| `empty` | `fn html.empty() -> SafeHtml` |  | R-html-01 |
+| `escape` | `fn html.escape(s: String) -> SafeHtml` |  | R-html-01 |
+| `raw` | `fn html.raw(s: String) -> SafeHtml` |  | R-html-01 |
+| `to_string` | `fn html.to_string(h: SafeHtml) -> String` |  | R-html-01 |
+
+<a id="http"></a>
+
+## http
+
+记录：[L2-http.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-http.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `body` | `fn http.body[M: HttpMessage](m: M) -> String` | 语义变更：也接收 `HttpRequest` | R-http-12 |
+| `body_bytes` | `fn http.body_bytes[M: HttpMessage](m: M) -> Bytes` | 新增。也接收 `HttpRequest` | R-http-12 |
+| `cancel` | `effect fn http.cancel(c: HttpCall) -> Unit` |  | R-http-01 |
+| `decode_json` | `fn http.decode_json[A: Decode](req: HttpRequest) -> Result[A, HttpResponse]` | 类型参数 `A` 为输入类型（只标注 `: Decode` 的 record）。具有 `Codec` 的类型报 E110。正文用 `A.decode_strict` 读取，类型外的键为 `400 Bad Request: unknown key '<k>'`（decode 函数参数撤除） | 行 22，C-436 |
+| `get` | `effect fn http.get(url: String) -> String` |  | R-http-01 |
+| `get_response` | `effect fn http.get_response(url: String) -> HttpResponse` |  | R-http-01 |
+| `header` | `fn http.header[M: HttpMessage](m: M, name: String) -> String?` | 改名（原 `get_header`）。也接收 `HttpRequest` | R-http-12 |
+| `header_values` | `fn http.header_values[M: HttpMessage](m: M, name: String) -> List[String]` | 语义变更：也接收 `HttpRequest` | R-http-12 |
+| `headers` | `fn http.headers[M: HttpMessage](m: M) -> List[(String, String)]` | 语义变更：也接收 `HttpRequest` | R-http-12 |
+| `json` | `fn http.json(status: Int, body: String) -> HttpResponse` |  |  |
+| `method` | `fn http.method(req: HttpRequest) -> String` | 改名（原 `req_method`） | R-http-14 |
+| `mount` | `fn http.mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` |  |  |
+| `new_request` | `fn http.new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest` | 语义变更：`headers` 改为 `List[(String, String)]` | R-http-09 |
+| `param` | `fn http.param(req: HttpRequest, name: String) -> String?` |  |  |
+| `path` | `fn http.path(req: HttpRequest) -> String` | 改名（原 `req_path`）。文档明确说明包含查询 | R-http-14 |
+| `poll` | `effect fn http.poll(c: HttpCall) -> Result[HttpResponse, String]?` |  | R-http-01 |
+| `query_params` | `fn http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]` | 语义变更：与 `url.parse_query` 使用同一个解码器（非法转义 err；#4117、C-404） | R-http-10 |
+| `read_new` | `effect fn http.read_new(c: HttpCall) -> String` |  | R-http-01 |
+| `redirect` | `fn http.redirect(url: String) -> HttpResponse` |  |  |
+| `request` | `effect fn http.request(method: String, url: String, body: String, headers: List[(String, String)]) -> String` | 语义变更：`headers` 改为 `List[(String, String)]` | R-http-09 |
+| `response` | `fn http.response[B: Body](status: Int, body: B) -> HttpResponse` | 语义变更：`body` 为 `Body`（ADR-0032） | ADR-0032 |
+| `route` | `fn http.route(pattern: String, handler: HttpHandler) -> HttpRoute` |  |  |
+| `router` | `fn http.router(xs: List[HttpRoute]) -> Result[HttpHandler, String]` |  |  |
+| `send` | `effect fn http.send(req: HttpRequest) -> HttpResponse` | 新增 | R-http-13 |
+| `serve` | `effect fn http.serve(port: Int, handler: HttpHandler) -> Unit` |  |  |
+| `set_body` | `fn http.set_body[M: HttpMessage](m: M, body: String) -> M` | 新增。也接收 `HttpRequest` | R-http-12 |
+| `set_body_bytes` | `fn http.set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M` | 新增。也接收 `HttpRequest` | R-http-12 |
+| `set_header` | `fn http.set_header[M: HttpMessage](m: M, name: String, value: String) -> M` | 语义变更：也接收 `HttpRequest` | R-http-12 |
+| `set_status` | `fn http.set_status(resp: HttpResponse, code: Int) -> HttpResponse` | 改名（原 `status`）。`set_status` | R-http-02 |
+| `start` | `effect fn http.start(req: HttpRequest, limits: HttpLimits) -> HttpCall` | 语义变更：改为 `start(req: HttpRequest, limits: HttpLimits)` | R-http-09、R-http-14 |
+| `status` | `fn http.status(resp: HttpResponse) -> Int` | 改名（原 `status_code`）。epoch 17。也移除 `0` 哨兵 | R-http-04、R-http-08 |
+| `wait` | `effect fn http.wait(c: HttpCall) -> HttpResponse` |  | R-http-01 |
+| `with_headers` | `fn http.with_headers[B: Body](status: Int, body: B, headers: List[(String, String)]) -> HttpResponse` | 语义变更：`headers` 改为 `List[(String, String)]` | R-http-09 |
+| `wrap` | `fn http.wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler` |  |  |
+
+撤除（18）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `delete` | `request("DELETE", …)` | R-http-01 |
+| `delete_response` | `send(new_request("DELETE", …))` | R-http-01 |
+| `get_bytes` | `body_bytes(get_response(u)!)` | R-http-01 |
+| `get_status` | `get_response` | R-http-01 |
+| `patch` | `request("PATCH", …)` | R-http-01 |
+| `patch_response` | `send(new_request("PATCH", …))` | R-http-01 |
+| `post` | `request("POST", …)` | R-http-01 |
+| `post_response` | `send(new_request("POST", …))` | R-http-01 |
+| `put` | `request("PUT", …)` | R-http-01 |
+| `put_response` | `send(new_request("PUT", …))` | R-http-01 |
+| `req_body` | `http.body` | R-http-12 |
+| `req_header` | `http.header` | R-http-12 |
+| `request_bytes` | `body_bytes(send(new_request(…))!)` | R-http-01 |
+| `request_response` | `send(new_request(method, url, body, headers))` | R-http-14 |
+| `request_status` | `send` | R-http-01 |
+| `request_stream` | 句柄 | R-http-01 |
+| `request_stream_with_limits` | 句柄 | R-http-01 |
+| `url_decode` | `url.decode_form(s) ?? s` | R-http-04 |
+
+<a id="int"></a>
+
+## int
+
+记录：[L2-int.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-int.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `abs` | `fn int.abs(x: Int) -> Int` |  | R-math-01（`math.abs` 保留的一侧） |
+| `band` | `fn int.band(a: Int, b: Int) -> Int` |  | R-int-05 ×（不改名） |
+| `bit_length` | `fn int.bit_length(x: Int) -> Int` | 改名（原 `bit_width`） | R-int-11 |
+| `bit_reverse` | `fn int.bit_reverse(x: Int) -> Int` |  |  |
+| `bnot` | `fn int.bnot(x: Int) -> Int` |  | R-int-05 × |
+| `bor` | `fn int.bor(a: Int, b: Int) -> Int` |  | R-int-05 × |
+| `bshl` | `fn int.bshl(a: Int, n: Int) -> Int` |  | R-int-05 × |
+| `bshr` | `fn int.bshr(a: Int, n: Int) -> Int` |  | R-int-05 × |
+| `bshr_logical` | `fn int.bshr_logical(a: Int, n: Int) -> Int` | 新增 | R-int-06 |
+| `bxor` | `fn int.bxor(a: Int, b: Int) -> Int` |  | R-int-05 × |
+| `byte_swap` | `fn int.byte_swap(x: Int) -> Int` |  |  |
+| `clamp` | `fn int.clamp(x: Int, lo: Int, hi: Int) -> Int` |  |  |
+| `compare` | `fn int.compare(a: Int, b: Int) -> Int` | 新增 | R-sized-02 |
+| `count_leading_zeros` | `fn int.count_leading_zeros(x: Int) -> Int` |  |  |
+| `count_ones` | `fn int.count_ones(x: Int) -> Int` | 改名（原 `pop_count`） | R-int-07 |
+| `count_trailing_zeros` | `fn int.count_trailing_zeros(x: Int) -> Int` |  |  |
+| `floor_div` | `fn int.floor_div(a: Int, b: Int) -> Int` | 新增 | R-int-03 |
+| `from` | `fn int.from[S: Numeric](x: S) -> Int` | 新增 | R-L0-40 |
+| `from_checked` | `fn int.from_checked[S: Numeric](x: S) -> Int?` | 新增 | R-L0-40 |
+| `from_saturating` | `fn int.from_saturating[S: Numeric](x: S) -> Int` | 新增 | R-L0-40 |
+| `from_wrapping` | `fn int.from_wrapping[S: Integer](x: S) -> Int` | 新增 | R-L0-40 |
+| `is_even` | `fn int.is_even(x: Int) -> Bool` |  |  |
+| `is_odd` | `fn int.is_odd(x: Int) -> Bool` |  |  |
+| `log2_ceil` | `fn int.log2_ceil(x: Int) -> Int` |  |  |
+| `log2_floor` | `fn int.log2_floor(x: Int) -> Int` |  |  |
+| `max` | `fn int.max(a: Int, b: Int) -> Int` |  | R-math-01（`math.max` 保留的一侧） |
+| `max_value` | `fn int.max_value() -> Int` |  |  |
+| `min` | `fn int.min(a: Int, b: Int) -> Int` |  | R-math-01（`math.min` 保留的一侧） |
+| `min_value` | `fn int.min_value() -> Int` |  |  |
+| `modulo` | `fn int.modulo(a: Int, b: Int) -> Int` | 新增 | R-int-03 |
+| `next_power_of_two` | `fn int.next_power_of_two(x: Int) -> Int` |  |  |
+| `parse` | `fn int.parse(s: String) -> Result[Int, String]` |  |  |
+| `parse_radix` | `fn int.parse_radix(s: String, radix: Int) -> Result[Int, String]` | 新增 | R-int-04 |
+| `pow` | `fn int.pow(base: Int, exp: Int) -> Int` | 新增 | R-math-01 |
+| `prev_power_of_two` | `fn int.prev_power_of_two(x: Int) -> Int` |  |  |
+| `rotate_left` | `fn int.rotate_left(a: Int, n: Int) -> Int` | 语义变更：去掉 `bits`，在 64 bit 上旋转 | R-int-12 |
+| `rotate_right` | `fn int.rotate_right(a: Int, n: Int) -> Int` | 语义变更：去掉 `bits`，在 64 bit 上旋转 | R-int-12 |
+| `sign` | `fn int.sign(x: Int) -> Int` | 新增 | R-math-01 |
+| `to_hex` | `fn int.to_hex(x: Int) -> String` |  | R-int-04（64 bit 位模式的十六进制；带符号基数转换用 `to_string_radix`） |
+| `to_string` | `fn int.to_string(x: Int) -> String` |  |  |
+| `to_string_radix` | `fn int.to_string_radix(x: Int, radix: Int) -> String` | 新增 | R-int-04 |
+| `wrap` | `fn int.wrap(x: Int, bits: Int) -> Int` | 新增 | R-int-02 |
+| `wrap_add` | `fn int.wrap_add(a: Int, b: Int) -> Int` | 语义变更：去掉 `bits`，在 64 bit 上回绕。N bit 与 `int.wrap` 组合 | R-int-12 |
+| `wrap_mul` | `fn int.wrap_mul(a: Int, b: Int) -> Int` | 语义变更：去掉 `bits`，在 64 bit 上回绕。N bit 与 `int.wrap` 组合 | R-int-12 |
+| `wrap_sub` | `fn int.wrap_sub(a: Int, b: Int) -> Int` | 新增 | R-int-02、R-int-12 |
+
+撤除（41）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `bits_to_f32` | `float32.from_bits` → `float32.to_float` | R-float-02（`float32.from_bits` → `float32.to_float`） |
+| `bits_to_float` | `float.from_bits` | R-float-02（`float.from_bits`） |
+| `from_hex` | 统一为 `int.parse_radix(s, 16)` | R-int-04（统一为 `int.parse_radix(s, 16)`） |
+| `from_int16` | 移至 `int16.to_int` | R-sized-01（移至 `int16.to_int`；R-L0-07） |
+| `from_int32` | 移至 `int32.to_int` | R-sized-01（移至 `int32.to_int`；R-L0-07） |
+| `from_int64` | 移至 `int64.to_int` | R-sized-01（移至 `int64.to_int`；R-L0-07） |
+| `from_int8` | 移至 `int8.to_int` | R-sized-01（移至 `int8.to_int`；R-L0-07） |
+| `from_uint16` | 移至 `uint16.to_int` | R-sized-01（移至 `uint16.to_int`；R-L0-07） |
+| `from_uint32` | 移至 `uint32.to_int` | R-sized-01（移至 `uint32.to_int`；R-L0-07） |
+| `from_uint64` | 移至 `uint64.to_int` | R-sized-01（移至 `uint64.to_int`；R-L0-07） |
+| `from_uint64_checked` | `uint64.to_int_checked` | R-sized-01（`uint64.to_int_checked`） |
+| `from_uint64_saturating` | `uint64.to_int_saturating` | R-sized-01（`uint64.to_int_saturating`） |
+| `from_uint8` | 移至 `uint8.to_int` | R-sized-01（移至 `uint8.to_int`；R-L0-07） |
+| `to_float` | `float.from` | R-L0-40 |
+| `to_float32` | `float32.from` | R-L0-40 |
+| `to_float32_checked` | `float32.from_checked` | R-L0-40 |
+| `to_float64` | `float64.from` | R-L0-40 |
+| `to_int16` | `int16.from` | R-L0-40 |
+| `to_int16_checked` | `int16.from_checked` | R-L0-40 |
+| `to_int16_saturating` | `int16.from_saturating` | R-L0-40 |
+| `to_int32` | `int32.from` | R-L0-40 |
+| `to_int32_checked` | `int32.from_checked` | R-L0-40 |
+| `to_int32_saturating` | `int32.from_saturating` | R-L0-40 |
+| `to_int64` | `int64.from` | R-L0-40 |
+| `to_int8` | `int8.from` | R-L0-40 |
+| `to_int8_checked` | `int8.from_checked` | R-L0-40 |
+| `to_int8_saturating` | `int8.from_saturating` | R-L0-40 |
+| `to_u32` | `int.wrap(x, 32)` | R-int-02（`int.wrap(x, 32)`。#3851 E） |
+| `to_u8` | `int.wrap(x, 8)` | R-int-02（`int.wrap(x, 8)`。#3851 E） |
+| `to_uint16` | `uint16.from` | R-L0-40 |
+| `to_uint16_checked` | `uint16.from_checked` | R-L0-40 |
+| `to_uint16_saturating` | `uint16.from_saturating` | R-L0-40 |
+| `to_uint32` | `uint32.from` | R-L0-40 |
+| `to_uint32_checked` | `uint32.from_checked` | R-L0-40 |
+| `to_uint32_saturating` | `uint32.from_saturating` | R-L0-40 |
+| `to_uint64` | `uint64.from` | R-L0-40 |
+| `to_uint64_checked` | `uint64.from_checked` | R-L0-40 |
+| `to_uint64_saturating` | `uint64.from_saturating` | R-L0-40 |
+| `to_uint8` | `uint8.from` | R-L0-40 |
+| `to_uint8_checked` | `uint8.from_checked` | R-L0-40 |
+| `to_uint8_saturating` | `uint8.from_saturating` | R-L0-40 |
+
+<a id="int16"></a>
+
+## int16
+
+记录：[L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `abs` | `fn int16.abs(x: Int16) -> Int16` | 新增 | R-sized-10 |
+| `band` | `fn int16.band(a: Int16, b: Int16) -> Int16` | 新增 | R-sized-10 |
+| `bit_length` | `fn int16.bit_length(x: Int16) -> Int` | 新增 | R-int-11 |
+| `bnot` | `fn int16.bnot(x: Int16) -> Int16` | 新增 | R-sized-10 |
+| `bor` | `fn int16.bor(a: Int16, b: Int16) -> Int16` | 新增 | R-sized-10 |
+| `bshl` | `fn int16.bshl(a: Int16, n: Int) -> Int16` | 新增 | R-sized-10 |
+| `bshr` | `fn int16.bshr(a: Int16, n: Int) -> Int16` | 新增 | R-sized-10 |
+| `bxor` | `fn int16.bxor(a: Int16, b: Int16) -> Int16` | 新增 | R-sized-10 |
+| `byte_swap` | `fn int16.byte_swap(x: Int16) -> Int16` | 新增 | R-sized-10 |
+| `clamp` | `fn int16.clamp(x: Int16, lo: Int16, hi: Int16) -> Int16` | 新增 | R-sized-08 |
+| `compare` | `fn int16.compare(a: Int16, b: Int16) -> Int` | 新增 | R-sized-02 |
+| `count_leading_zeros` | `fn int16.count_leading_zeros(x: Int16) -> Int` | 新增 | R-sized-10 |
+| `count_ones` | `fn int16.count_ones(x: Int16) -> Int` | 新增 | R-sized-10 |
+| `count_trailing_zeros` | `fn int16.count_trailing_zeros(x: Int16) -> Int` | 新增 | R-sized-10 |
+| `floor_div` | `fn int16.floor_div(a: Int16, b: Int16) -> Int16` | 新增 | R-sized-10 |
+| `from` | `fn int16.from[S: Numeric](x: S) -> Int16` | 新增 | R-L0-40 |
+| `from_checked` | `fn int16.from_checked[S: Numeric](x: S) -> Int16?` | 新增 | R-L0-40 |
+| `from_saturating` | `fn int16.from_saturating[S: Numeric](x: S) -> Int16` | 新增 | R-L0-40 |
+| `from_wrapping` | `fn int16.from_wrapping[S: Integer](x: S) -> Int16` | 新增 | R-L0-40 |
+| `is_even` | `fn int16.is_even(x: Int16) -> Bool` | 新增 | R-sized-10 |
+| `is_odd` | `fn int16.is_odd(x: Int16) -> Bool` | 新增 | R-sized-10 |
+| `max` | `fn int16.max(a: Int16, b: Int16) -> Int16` | 新增 | R-sized-08 |
+| `max_value` | `fn int16.max_value() -> Int16` |  |  |
+| `min` | `fn int16.min(a: Int16, b: Int16) -> Int16` | 新增 | R-sized-08 |
+| `min_value` | `fn int16.min_value() -> Int16` |  |  |
+| `modulo` | `fn int16.modulo(a: Int16, b: Int16) -> Int16` | 新增 | R-sized-10 |
+| `parse` | `fn int16.parse(s: String) -> Result[Int16, String]` | 新增 | R-sized-02 |
+| `parse_radix` | `fn int16.parse_radix(s: String, radix: Int) -> Result[Int16, String]` | 新增 | R-sized-06 |
+| `pow` | `fn int16.pow(base: Int16, exp: Int) -> Int16` | 新增 | R-sized-10 |
+| `rotate_left` | `fn int16.rotate_left(a: Int16, n: Int) -> Int16` | 新增 | R-int-12 |
+| `rotate_right` | `fn int16.rotate_right(a: Int16, n: Int) -> Int16` | 新增 | R-int-12 |
+| `sign` | `fn int16.sign(x: Int16) -> Int` | 新增 | R-sized-10 |
+| `to_string` | `fn int16.to_string(x: Int16) -> String` |  |  |
+| `to_string_radix` | `fn int16.to_string_radix(x: Int16, radix: Int) -> String` | 新增 | R-sized-06 |
+| `wrap_add` | `fn int16.wrap_add(a: Int16, b: Int16) -> Int16` | 新增 | R-int-12 |
+| `wrap_mul` | `fn int16.wrap_mul(a: Int16, b: Int16) -> Int16` | 新增 | R-int-12 |
+| `wrap_sub` | `fn int16.wrap_sub(a: Int16, b: Int16) -> Int16` | 新增 | R-int-12 |
+
+撤除（19）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `to_float32` | `float32.from` | R-L0-40 |
+| `to_float64` | `float64.from` | R-L0-40 |
+| `to_int32` | `int32.from` | R-L0-40 |
+| `to_int64` | `int64.from` | R-L0-40 |
+| `to_int8` | `int8.from` | R-L0-40 |
+| `to_int8_checked` | `int8.from_checked` | R-L0-40 |
+| `to_int8_saturating` | `int8.from_saturating` | R-L0-40 |
+| `to_uint16` | `uint16.from` | R-L0-40 |
+| `to_uint16_checked` | `uint16.from_checked` | R-L0-40 |
+| `to_uint16_saturating` | `uint16.from_saturating` | R-L0-40 |
+| `to_uint32` | `uint32.from` | R-L0-40 |
+| `to_uint32_checked` | `uint32.from_checked` | R-L0-40 |
+| `to_uint32_saturating` | `uint32.from_saturating` | R-L0-40 |
+| `to_uint64` | `uint64.from` | R-L0-40 |
+| `to_uint64_checked` | `uint64.from_checked` | R-L0-40 |
+| `to_uint64_saturating` | `uint64.from_saturating` | R-L0-40 |
+| `to_uint8` | `uint8.from` | R-L0-40 |
+| `to_uint8_checked` | `uint8.from_checked` | R-L0-40 |
+| `to_uint8_saturating` | `uint8.from_saturating` | R-L0-40 |
+
+<a id="int32"></a>
+
+## int32
+
+记录：[L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `abs` | `fn int32.abs(x: Int32) -> Int32` | 新增 | R-sized-10 |
+| `band` | `fn int32.band(a: Int32, b: Int32) -> Int32` | 新增 | R-sized-10 |
+| `bit_length` | `fn int32.bit_length(x: Int32) -> Int` | 新增 | R-int-11 |
+| `bnot` | `fn int32.bnot(x: Int32) -> Int32` | 新增 | R-sized-10 |
+| `bor` | `fn int32.bor(a: Int32, b: Int32) -> Int32` | 新增 | R-sized-10 |
+| `bshl` | `fn int32.bshl(a: Int32, n: Int) -> Int32` | 新增 | R-sized-10 |
+| `bshr` | `fn int32.bshr(a: Int32, n: Int) -> Int32` | 新增 | R-sized-10 |
+| `bxor` | `fn int32.bxor(a: Int32, b: Int32) -> Int32` | 新增 | R-sized-10 |
+| `byte_swap` | `fn int32.byte_swap(x: Int32) -> Int32` | 新增 | R-sized-10 |
+| `clamp` | `fn int32.clamp(x: Int32, lo: Int32, hi: Int32) -> Int32` | 新增 | R-sized-08 |
+| `compare` | `fn int32.compare(a: Int32, b: Int32) -> Int` | 新增 | R-sized-02 |
+| `count_leading_zeros` | `fn int32.count_leading_zeros(x: Int32) -> Int` | 新增 | R-sized-10 |
+| `count_ones` | `fn int32.count_ones(x: Int32) -> Int` | 新增 | R-sized-10 |
+| `count_trailing_zeros` | `fn int32.count_trailing_zeros(x: Int32) -> Int` | 新增 | R-sized-10 |
+| `floor_div` | `fn int32.floor_div(a: Int32, b: Int32) -> Int32` | 新增 | R-sized-10 |
+| `from` | `fn int32.from[S: Numeric](x: S) -> Int32` | 新增 | R-L0-40 |
+| `from_checked` | `fn int32.from_checked[S: Numeric](x: S) -> Int32?` | 新增 | R-L0-40 |
+| `from_saturating` | `fn int32.from_saturating[S: Numeric](x: S) -> Int32` | 新增 | R-L0-40 |
+| `from_wrapping` | `fn int32.from_wrapping[S: Integer](x: S) -> Int32` | 新增 | R-L0-40 |
+| `is_even` | `fn int32.is_even(x: Int32) -> Bool` | 新增 | R-sized-10 |
+| `is_odd` | `fn int32.is_odd(x: Int32) -> Bool` | 新增 | R-sized-10 |
+| `max` | `fn int32.max(a: Int32, b: Int32) -> Int32` | 新增 | R-sized-08 |
+| `max_value` | `fn int32.max_value() -> Int32` |  |  |
+| `min` | `fn int32.min(a: Int32, b: Int32) -> Int32` | 新增 | R-sized-08 |
+| `min_value` | `fn int32.min_value() -> Int32` |  |  |
+| `modulo` | `fn int32.modulo(a: Int32, b: Int32) -> Int32` | 新增 | R-sized-10 |
+| `parse` | `fn int32.parse(s: String) -> Result[Int32, String]` | 新增 | R-sized-02 |
+| `parse_radix` | `fn int32.parse_radix(s: String, radix: Int) -> Result[Int32, String]` | 新增 | R-sized-06 |
+| `pow` | `fn int32.pow(base: Int32, exp: Int) -> Int32` | 新增 | R-sized-10 |
+| `rotate_left` | `fn int32.rotate_left(a: Int32, n: Int) -> Int32` | 新增 | R-int-12 |
+| `rotate_right` | `fn int32.rotate_right(a: Int32, n: Int) -> Int32` | 新增 | R-int-12 |
+| `sign` | `fn int32.sign(x: Int32) -> Int` | 新增 | R-sized-10 |
+| `to_string` | `fn int32.to_string(x: Int32) -> String` |  |  |
+| `to_string_radix` | `fn int32.to_string_radix(x: Int32, radix: Int) -> String` | 新增 | R-sized-06 |
+| `wrap_add` | `fn int32.wrap_add(a: Int32, b: Int32) -> Int32` | 新增 | R-int-12 |
+| `wrap_mul` | `fn int32.wrap_mul(a: Int32, b: Int32) -> Int32` | 新增 | R-int-12 |
+| `wrap_sub` | `fn int32.wrap_sub(a: Int32, b: Int32) -> Int32` | 新增 | R-int-12 |
+
+撤除（21）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `to_float32` | `float32.from` | R-L0-40 |
+| `to_float64` | `float64.from` | R-L0-40 |
+| `to_int16` | `int16.from` | R-L0-40 |
+| `to_int16_checked` | `int16.from_checked` | R-L0-40 |
+| `to_int16_saturating` | `int16.from_saturating` | R-L0-40 |
+| `to_int64` | `int64.from` | R-L0-40 |
+| `to_int8` | `int8.from` | R-L0-40 |
+| `to_int8_checked` | `int8.from_checked` | R-L0-40 |
+| `to_int8_saturating` | `int8.from_saturating` | R-L0-40 |
+| `to_uint16` | `uint16.from` | R-L0-40 |
+| `to_uint16_checked` | `uint16.from_checked` | R-L0-40 |
+| `to_uint16_saturating` | `uint16.from_saturating` | R-L0-40 |
+| `to_uint32` | `uint32.from` | R-L0-40 |
+| `to_uint32_checked` | `uint32.from_checked` | R-L0-40 |
+| `to_uint32_saturating` | `uint32.from_saturating` | R-L0-40 |
+| `to_uint64` | `uint64.from` | R-L0-40 |
+| `to_uint64_checked` | `uint64.from_checked` | R-L0-40 |
+| `to_uint64_saturating` | `uint64.from_saturating` | R-L0-40 |
+| `to_uint8` | `uint8.from` | R-L0-40 |
+| `to_uint8_checked` | `uint8.from_checked` | R-L0-40 |
+| `to_uint8_saturating` | `uint8.from_saturating` | R-L0-40 |
+
+<a id="int64"></a>
+
+## int64
+
+记录：[L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `abs` | `fn int64.abs(x: Int64) -> Int64` | 新增 | R-sized-10 |
+| `band` | `fn int64.band(a: Int64, b: Int64) -> Int64` | 新增 | R-sized-10 |
+| `bit_length` | `fn int64.bit_length(x: Int64) -> Int` | 新增 | R-int-11 |
+| `bnot` | `fn int64.bnot(x: Int64) -> Int64` | 新增 | R-sized-10 |
+| `bor` | `fn int64.bor(a: Int64, b: Int64) -> Int64` | 新增 | R-sized-10 |
+| `bshl` | `fn int64.bshl(a: Int64, n: Int) -> Int64` | 新增 | R-sized-10 |
+| `bshr` | `fn int64.bshr(a: Int64, n: Int) -> Int64` | 新增 | R-sized-10 |
+| `bxor` | `fn int64.bxor(a: Int64, b: Int64) -> Int64` | 新增 | R-sized-10 |
+| `byte_swap` | `fn int64.byte_swap(x: Int64) -> Int64` | 新增 | R-sized-10 |
+| `clamp` | `fn int64.clamp(x: Int64, lo: Int64, hi: Int64) -> Int64` | 新增 | R-sized-08 |
+| `compare` | `fn int64.compare(a: Int64, b: Int64) -> Int` | 新增 | R-sized-02 |
+| `count_leading_zeros` | `fn int64.count_leading_zeros(x: Int64) -> Int` | 新增 | R-sized-10 |
+| `count_ones` | `fn int64.count_ones(x: Int64) -> Int` | 新增 | R-sized-10 |
+| `count_trailing_zeros` | `fn int64.count_trailing_zeros(x: Int64) -> Int` | 新增 | R-sized-10 |
+| `floor_div` | `fn int64.floor_div(a: Int64, b: Int64) -> Int64` | 新增 | R-sized-10 |
+| `from` | `fn int64.from[S: Numeric](x: S) -> Int64` | 新增 | R-L0-40 |
+| `from_checked` | `fn int64.from_checked[S: Numeric](x: S) -> Int64?` | 新增 | R-L0-40 |
+| `from_saturating` | `fn int64.from_saturating[S: Numeric](x: S) -> Int64` | 新增 | R-L0-40 |
+| `from_wrapping` | `fn int64.from_wrapping[S: Integer](x: S) -> Int64` | 新增 | R-L0-40 |
+| `is_even` | `fn int64.is_even(x: Int64) -> Bool` | 新增 | R-sized-10 |
+| `is_odd` | `fn int64.is_odd(x: Int64) -> Bool` | 新增 | R-sized-10 |
+| `max` | `fn int64.max(a: Int64, b: Int64) -> Int64` | 新增 | R-sized-08 |
+| `max_value` | `fn int64.max_value() -> Int64` |  |  |
+| `min` | `fn int64.min(a: Int64, b: Int64) -> Int64` | 新增 | R-sized-08 |
+| `min_value` | `fn int64.min_value() -> Int64` |  |  |
+| `modulo` | `fn int64.modulo(a: Int64, b: Int64) -> Int64` | 新增 | R-sized-10 |
+| `parse` | `fn int64.parse(s: String) -> Result[Int64, String]` | 新增 | R-sized-02 |
+| `parse_radix` | `fn int64.parse_radix(s: String, radix: Int) -> Result[Int64, String]` | 新增 | R-sized-06 |
+| `pow` | `fn int64.pow(base: Int64, exp: Int) -> Int64` | 新增 | R-sized-10 |
+| `rotate_left` | `fn int64.rotate_left(a: Int64, n: Int) -> Int64` | 新增 | R-int-12 |
+| `rotate_right` | `fn int64.rotate_right(a: Int64, n: Int) -> Int64` | 新增 | R-int-12 |
+| `sign` | `fn int64.sign(x: Int64) -> Int` | 新增 | R-sized-10 |
+| `to_string` | `fn int64.to_string(x: Int64) -> String` |  |  |
+| `to_string_radix` | `fn int64.to_string_radix(x: Int64, radix: Int) -> String` | 新增 | R-sized-06 |
+| `wrap_add` | `fn int64.wrap_add(a: Int64, b: Int64) -> Int64` | 新增 | R-int-12 |
+| `wrap_mul` | `fn int64.wrap_mul(a: Int64, b: Int64) -> Int64` | 新增 | R-int-12 |
+| `wrap_sub` | `fn int64.wrap_sub(a: Int64, b: Int64) -> Int64` | 新增 | R-int-12 |
+
+撤除（23）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `to_float32` | `float32.from` | R-L0-40 |
+| `to_float64` | `float64.from` | R-L0-40 |
+| `to_int16` | `int16.from` | R-L0-40 |
+| `to_int16_checked` | `int16.from_checked` | R-L0-40 |
+| `to_int16_saturating` | `int16.from_saturating` | R-L0-40 |
+| `to_int32` | `int32.from` | R-L0-40 |
+| `to_int32_checked` | `int32.from_checked` | R-L0-40 |
+| `to_int32_saturating` | `int32.from_saturating` | R-L0-40 |
+| `to_int8` | `int8.from` | R-L0-40 |
+| `to_int8_checked` | `int8.from_checked` | R-L0-40 |
+| `to_int8_saturating` | `int8.from_saturating` | R-L0-40 |
+| `to_uint16` | `uint16.from` | R-L0-40 |
+| `to_uint16_checked` | `uint16.from_checked` | R-L0-40 |
+| `to_uint16_saturating` | `uint16.from_saturating` | R-L0-40 |
+| `to_uint32` | `uint32.from` | R-L0-40 |
+| `to_uint32_checked` | `uint32.from_checked` | R-L0-40 |
+| `to_uint32_saturating` | `uint32.from_saturating` | R-L0-40 |
+| `to_uint64` | `uint64.from` | R-L0-40 |
+| `to_uint64_checked` | `uint64.from_checked` | R-L0-40 |
+| `to_uint64_saturating` | `uint64.from_saturating` | R-L0-40 |
+| `to_uint8` | `uint8.from` | R-L0-40 |
+| `to_uint8_checked` | `uint8.from_checked` | R-L0-40 |
+| `to_uint8_saturating` | `uint8.from_saturating` | R-L0-40 |
+
+<a id="int8"></a>
+
+## int8
+
+记录：[L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `abs` | `fn int8.abs(x: Int8) -> Int8` | 新增 | R-sized-10 |
+| `band` | `fn int8.band(a: Int8, b: Int8) -> Int8` | 新增 | R-sized-10 |
+| `bit_length` | `fn int8.bit_length(x: Int8) -> Int` | 新增 | R-int-11 |
+| `bnot` | `fn int8.bnot(x: Int8) -> Int8` | 新增 | R-sized-10 |
+| `bor` | `fn int8.bor(a: Int8, b: Int8) -> Int8` | 新增 | R-sized-10 |
+| `bshl` | `fn int8.bshl(a: Int8, n: Int) -> Int8` | 新增 | R-sized-10 |
+| `bshr` | `fn int8.bshr(a: Int8, n: Int) -> Int8` | 新增 | R-sized-10 |
+| `bxor` | `fn int8.bxor(a: Int8, b: Int8) -> Int8` | 新增 | R-sized-10 |
+| `byte_swap` | `fn int8.byte_swap(x: Int8) -> Int8` | 新增 | R-sized-10 |
+| `clamp` | `fn int8.clamp(x: Int8, lo: Int8, hi: Int8) -> Int8` | 新增 | R-sized-08 |
+| `compare` | `fn int8.compare(a: Int8, b: Int8) -> Int` | 新增 | R-sized-02 |
+| `count_leading_zeros` | `fn int8.count_leading_zeros(x: Int8) -> Int` | 新增 | R-sized-10 |
+| `count_ones` | `fn int8.count_ones(x: Int8) -> Int` | 新增 | R-sized-10 |
+| `count_trailing_zeros` | `fn int8.count_trailing_zeros(x: Int8) -> Int` | 新增 | R-sized-10 |
+| `floor_div` | `fn int8.floor_div(a: Int8, b: Int8) -> Int8` | 新增 | R-sized-10 |
+| `from` | `fn int8.from[S: Numeric](x: S) -> Int8` | 新增 | R-L0-40 |
+| `from_checked` | `fn int8.from_checked[S: Numeric](x: S) -> Int8?` | 新增 | R-L0-40 |
+| `from_saturating` | `fn int8.from_saturating[S: Numeric](x: S) -> Int8` | 新增 | R-L0-40 |
+| `from_wrapping` | `fn int8.from_wrapping[S: Integer](x: S) -> Int8` | 新增 | R-L0-40 |
+| `is_even` | `fn int8.is_even(x: Int8) -> Bool` | 新增 | R-sized-10 |
+| `is_odd` | `fn int8.is_odd(x: Int8) -> Bool` | 新增 | R-sized-10 |
+| `max` | `fn int8.max(a: Int8, b: Int8) -> Int8` | 新增 | R-sized-08 |
+| `max_value` | `fn int8.max_value() -> Int8` |  |  |
+| `min` | `fn int8.min(a: Int8, b: Int8) -> Int8` | 新增 | R-sized-08 |
+| `min_value` | `fn int8.min_value() -> Int8` |  |  |
+| `modulo` | `fn int8.modulo(a: Int8, b: Int8) -> Int8` | 新增 | R-sized-10 |
+| `parse` | `fn int8.parse(s: String) -> Result[Int8, String]` | 新增 | R-sized-02 |
+| `parse_radix` | `fn int8.parse_radix(s: String, radix: Int) -> Result[Int8, String]` | 新增 | R-sized-06 |
+| `pow` | `fn int8.pow(base: Int8, exp: Int) -> Int8` | 新增 | R-sized-10 |
+| `rotate_left` | `fn int8.rotate_left(a: Int8, n: Int) -> Int8` | 新增 | R-int-12 |
+| `rotate_right` | `fn int8.rotate_right(a: Int8, n: Int) -> Int8` | 新增 | R-int-12 |
+| `sign` | `fn int8.sign(x: Int8) -> Int` | 新增 | R-sized-10 |
+| `to_string` | `fn int8.to_string(x: Int8) -> String` |  |  |
+| `to_string_radix` | `fn int8.to_string_radix(x: Int8, radix: Int) -> String` | 新增 | R-sized-06 |
+| `wrap_add` | `fn int8.wrap_add(a: Int8, b: Int8) -> Int8` | 新增 | R-int-12 |
+| `wrap_mul` | `fn int8.wrap_mul(a: Int8, b: Int8) -> Int8` | 新增 | R-int-12 |
+| `wrap_sub` | `fn int8.wrap_sub(a: Int8, b: Int8) -> Int8` | 新增 | R-int-12 |
+
+撤除（17）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `to_float32` | `float32.from` | R-L0-40 |
+| `to_float64` | `float64.from` | R-L0-40 |
+| `to_int16` | `int16.from` | R-L0-40 |
+| `to_int32` | `int32.from` | R-L0-40 |
+| `to_int64` | `int64.from` | R-L0-40 |
+| `to_uint16` | `uint16.from` | R-L0-40 |
+| `to_uint16_checked` | `uint16.from_checked` | R-L0-40 |
+| `to_uint16_saturating` | `uint16.from_saturating` | R-L0-40 |
+| `to_uint32` | `uint32.from` | R-L0-40 |
+| `to_uint32_checked` | `uint32.from_checked` | R-L0-40 |
+| `to_uint32_saturating` | `uint32.from_saturating` | R-L0-40 |
+| `to_uint64` | `uint64.from` | R-L0-40 |
+| `to_uint64_checked` | `uint64.from_checked` | R-L0-40 |
+| `to_uint64_saturating` | `uint64.from_saturating` | R-L0-40 |
+| `to_uint8` | `uint8.from` | R-L0-40 |
+| `to_uint8_checked` | `uint8.from_checked` | R-L0-40 |
+| `to_uint8_saturating` | `uint8.from_saturating` | R-L0-40 |
+
+<a id="io"></a>
+
+## io
+
+记录：[L2-io.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-io.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `close` | `effect fn io.close[H: Close](h: H) -> Unit` | 新增 | R-L0-44 |
+| `eprint` | `effect fn io.eprint(s: String) -> Unit` | 新增 | R-io-03 |
+| `print` | `effect fn io.print(s: String) -> Unit` |  |  |
+| `read` | `effect fn io.read[H: Read](h: H, max: Int) -> Bytes` | 新增 | R-L0-44 |
+| `read_all` | `effect fn io.read_all() -> String` |  |  |
+| `read_exact` | `effect fn io.read_exact[H: Read](h: H, n: Int) -> Bytes` | 新增 | R-L0-44 |
+| `read_line` | `effect fn io.read_line() -> String?` | 语义变更：改为 `-> String?`。唯一的单行读取 | R-io-01 |
+| `read_to_end` | `effect fn io.read_to_end[H: Read](h: H) -> Bytes` | 新增 | R-L0-44 |
+| `stderr` | `effect fn io.stderr() -> Stderr` | 新增 | R-io-05 |
+| `stdin` | `effect fn io.stdin() -> Stdin` | 新增 | R-io-05 |
+| `stdout` | `effect fn io.stdout() -> Stdout` | 新增 | R-io-05 |
+| `write` | `effect fn io.write[H: Write](h: H, data: Bytes) -> Unit` | 语义变更：改为 `Write` 的泛型函数 `write(h, data)`。旧单参数调用为类型错误 | R-L0-44・R-io-05 |
+
+撤除（4）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `read_byte` | `io.read(io.stdin(), 1)` | R-io-01・R-io-05 |
+| `read_line_opt` | `read_line` | R-io-01 |
+| `read_n_bytes` | `io.read(io.stdin(), n)` | R-io-01・R-io-05 |
+| `write_bytes` | `io.write(io.stdout(), data)` | R-io-01・R-io-02・R-io-05 |
+
+<a id="json"></a>
+
+## json
+
+记录：[L2-json.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-json.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `parse` | `fn json.parse(text: String) -> Result[Value, String]` | 语义变更：尾部多余字符 err。嵌套超过 1000 层 err | R-json-02、R-json-04 |
+| `stringify` | `fn json.stringify(v: Value) -> String` |  | R-json-03 |
+| `stringify_pretty` | `fn json.stringify_pretty(v: Value) -> String` |  | R-json-03 |
+
+撤除（12）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `field` | `value.key` | R-json-01 |
+| `get_array` | `value.get_array` | R-json-01 |
+| `get_bool` | `value.get_bool` | R-json-01 |
+| `get_float` | `value.get_float` | R-json-01 |
+| `get_int` | `value.get_int` | R-json-01 |
+| `get_path` | `value.get_path` | R-json-01 |
+| `get_string` | `value.get_string` | R-json-01 |
+| `index` | `value.index`（负下标越界） | R-json-01 |
+| `remove_path` | `value.remove_path` | R-json-01 |
+| `root` | `value.root` | R-json-01 |
+| `set_path` | `value.set_path` | R-json-01 |
+| `to_map` | `value.as_object(v) \|> result.map(map.from_list)` | R-json-01 |
+
+<a id="list"></a>
+
+## list
+
+记录：[L2-list.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-list.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `all` | `fn list.all(xs: List[A], f: (A) -> Bool) -> Bool` |  |  |
+| `any` | `fn list.any(xs: List[A], f: (A) -> Bool) -> Bool` |  |  |
+| `binary_search` | `fn list.binary_search(xs: List[A], target: A) -> Int?` | 语义变更：元素类型扩展至所有有序类型 | R-list-15 |
+| `binary_search_by` | `fn list.binary_search_by(xs: List[A], target: K, f: (A) -> K) -> Int?` | 新增 | R-list-17 |
+| `binary_search_with` | `fn list.binary_search_with(xs: List[A], target: A, cmp: (A, A) -> Int) -> Int?` | 新增 | R-list-17 |
+| `chunk` | `fn list.chunk(xs: List[A], n: Int) -> List[List[A]]` | 语义变更：`n <= 0` 会 abort | R-list-10 |
+| `clear` | `fn list.clear(mut xs: List[A]) -> Unit` |  | R-list-00 |
+| `contains` | `fn list.contains(xs: List[A], x: A) -> Bool` |  |  |
+| `count` | `fn list.count(xs: List[A], f: (A) -> Bool) -> Int` |  |  |
+| `dedup` | `fn list.dedup(xs: List[A]) -> List[A]` |  |  |
+| `drop` | `fn list.drop(xs: List[A], n: Int) -> List[A]` | 语义变更：负数 abort。R-L0-29 | R-L0-12、R-L0-29 |
+| `drop_end` | `fn list.drop_end(xs: List[A], n: Int) -> List[A]` | 语义变更：负数 abort。R-L0-29 | R-L0-12、R-L0-29 |
+| `drop_while` | `fn list.drop_while(xs: List[A], f: (A) -> Bool) -> List[A]` |  |  |
+| `enumerate` | `fn list.enumerate(xs: List[A]) -> List[(Int, A)]` |  |  |
+| `filter` | `fn list.filter(xs: List[A], f: (A) -> Bool) -> List[A]` |  |  |
+| `filter_map` | `fn list.filter_map(xs: List[A], f: (A) -> B?) -> List[B]` |  |  |
+| `find` | `fn list.find(xs: List[A], f: (A) -> Bool) -> A?` |  |  |
+| `find_index` | `fn list.find_index(xs: List[A], f: (A) -> Bool) -> Int?` |  |  |
+| `find_map` | `fn list.find_map(xs: List[A], f: (A) -> B?) -> B?` |  |  |
+| `first` | `fn list.first(xs: List[A]) -> A?` |  |  |
+| `flat_map` | `fn list.flat_map(xs: List[A], f: (A) -> List[B]) -> List[B]` |  |  |
+| `flatten` | `fn list.flatten(xs: List[List[A]]) -> List[A]` |  |  |
+| `fold` | `fn list.fold(xs: List[A], init: B, f: (B, A) -> B) -> B` |  |  |
+| `from_list` | `fn list.from_list(xs: List[A]) -> List[A]` | 新增 | R-list-20 |
+| `get` | `fn list.get(xs: List[A], i: Int) -> A?` |  |  |
+| `group_by` | `fn list.group_by(xs: List[A], f: (A) -> B) -> Map[B, List[A]]` |  |  |
+| `index_of` | `fn list.index_of(xs: List[A], x: A) -> Int?` |  |  |
+| `insert` | `fn list.insert(xs: List[A], i: Int, x: A) -> List[A]` | 语义变更：`0..=len` 之外 abort | R-list-00、R-list-13 |
+| `intersperse` | `fn list.intersperse(xs: List[A], sep: A) -> List[A]` |  |  |
+| `is_empty` | `fn list.is_empty(xs: List[A]) -> Bool` |  |  |
+| `iterate` | `fn list.iterate(seed: A, f: (A) -> A, n: Int) -> List[A]` |  |  |
+| `join` | `fn list.join[T: Text](xs: List[T], sep: T) -> T` | 语义变更：将 `String`/`Bytes` 两种形式合为一个 `Text` 泛型函数 | R-L0-42 |
+| `last` | `fn list.last(xs: List[A]) -> A?` |  |  |
+| `len` | `fn list.len(xs: List[A]) -> Int` |  | R-L0-11 |
+| `map` | `fn list.map(xs: List[A], f: (A) -> B) -> List[B]` |  |  |
+| `max` | `fn list.max(xs: List[A]) -> A?` |  |  |
+| `max_by` | `fn list.max_by(xs: List[A], f: (A) -> K) -> A?` | 新增 | R-list-06 |
+| `max_with` | `fn list.max_with(xs: List[A], cmp: (A, A) -> Int) -> A?` | 新增 | R-list-19 |
+| `min` | `fn list.min(xs: List[A]) -> A?` |  |  |
+| `min_by` | `fn list.min_by(xs: List[A], f: (A) -> K) -> A?` | 新增 | R-list-06 |
+| `min_with` | `fn list.min_with(xs: List[A], cmp: (A, A) -> Int) -> A?` | 新增 | R-list-19 |
+| `new` | `fn list.new() -> List[A]` | 新增 | R-list-20 |
+| `partition` | `fn list.partition(xs: List[A], f: (A) -> Bool) -> (List[A], List[A])` |  |  |
+| `pop` | `fn list.pop(mut xs: List[A]) -> A?` |  | R-list-00 |
+| `product` | `fn list.product[A: Numeric](xs: List[A]) -> A` | 语义变更：将 `Int`/`Float` 两种形式合为接收所有数值类型的一个泛型函数 | R-L0-42 |
+| `push` | `fn list.push(mut xs: List[A], x: A) -> Unit` |  | R-list-00 |
+| `range` | `fn list.range(start: Int, end: Int) -> List[Int]` |  |  |
+| `range_step` | `fn list.range_step(start: Int, end: Int, step: Int) -> List[Int]` | 新增 | R-list-09 |
+| `reduce` | `fn list.reduce(xs: List[A], f: (A, A) -> A) -> A?` |  |  |
+| `remove_at` | `fn list.remove_at(xs: List[A], i: Int) -> List[A]` | 语义变更：越界 abort | R-list-00、R-list-13 |
+| `repeat` | `fn list.repeat(x: A, n: Int) -> List[A]` |  |  |
+| `reverse` | `fn list.reverse(xs: List[A]) -> List[A]` |  | R-list-00 |
+| `scan` | `fn list.scan(xs: List[A], init: B, f: (B, A) -> B) -> List[B]` |  |  |
+| `set` | `fn list.set(xs: List[A], i: Int, x: A) -> List[A]` | 语义变更：越界 abort | R-list-00、R-list-13 |
+| `slice` | `fn list.slice(xs: List[A], start: Int, end: Int) -> List[A]` | 语义变更：负位置 abort。R-L0-29 | R-list-10、R-L0-29 |
+| `sort` | `fn list.sort(xs: List[A]) -> List[A]` |  | R-list-00 |
+| `sort_by` | `fn list.sort_by(xs: List[A], f: (A) -> B) -> List[A]` |  | R-list-06 |
+| `sort_with` | `fn list.sort_with(xs: List[A], cmp: (A, A) -> Int) -> List[A]` | 新增 | R-list-06 |
+| `split_at` | `fn list.split_at(xs: List[A], n: Int) -> (List[A], List[A])` |  |  |
+| `sum` | `fn list.sum[A: Numeric](xs: List[A]) -> A` | 语义变更：将 `Int`/`Float` 两种形式合为接收所有数值类型的一个泛型函数 | R-L0-42 |
+| `swap` | `fn list.swap(xs: List[A], i: Int, j: Int) -> List[A]` | 语义变更：越界 abort | R-list-00、R-list-13 |
+| `take` | `fn list.take(xs: List[A], n: Int) -> List[A]` | 语义变更：负数 abort。R-L0-29 | R-L0-12、R-L0-29 |
+| `take_end` | `fn list.take_end(xs: List[A], n: Int) -> List[A]` | 语义变更：负数 abort。R-L0-29 | R-L0-12、R-L0-29 |
+| `take_while` | `fn list.take_while(xs: List[A], f: (A) -> Bool) -> List[A]` |  |  |
+| `to_list` | `fn list.to_list(xs: List[A]) -> List[A]` | 新增 | R-list-20 |
+| `unique` | `fn list.unique(xs: List[A]) -> List[A]` |  |  |
+| `unique_by` | `fn list.unique_by(xs: List[A], f: (A) -> K) -> List[A]` |  |  |
+| `unzip` | `fn list.unzip(xs: List[(A, B)]) -> (List[A], List[B])` | 新增 | R-list-07 |
+| `update` | `fn list.update(xs: List[A], i: Int, f: (A) -> A) -> List[A]` | 语义变更：越界 abort | R-list-00、R-list-13 |
+| `window` | `fn list.window(xs: List[A], n: Int) -> List[List[A]]` | 语义变更：`n <= 0` 会 abort。`windows` 保留的一侧 | R-list-03、R-list-10 |
+| `with_capacity` | `fn list.with_capacity(cap: Int) -> List[A]` |  | R-list-00 |
+| `zip` | `fn list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]` |  |  |
+| `zip_with` | `fn list.zip_with(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]` |  |  |
+
+撤除（6）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `bundled_probe` | `n + 1` | R-list-04 |
+| `get_or` | `list.get(xs, i) ?? d` | R-list-01 |
+| `length` | `list.len` | R-list-02 |
+| `shuffle` | `random.shuffle` | R-list-05 |
+| `tail` | `list.drop(xs, 1)` | R-list-14 |
+| `windows` | `list.window` | R-list-03 |
+
+<a id="map"></a>
+
+## map
+
+记录：[L2-map.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-map.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `all` | `fn map.all(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool` | 语义变更：callback 接收一个元组。`(k, v) =>` 仍可原样书写 | R-map-09 |
+| `any` | `fn map.any(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool` | 语义变更：callback 接收一个元组。`(k, v) =>` 仍可原样书写 | R-map-09 |
+| `clear` | `fn map.clear(mut m: Map[K, V]) -> Unit` |  | —（R-L0-04 的动词） |
+| `contains` | `fn map.contains(m: Map[K, V], key: K) -> Bool` |  |  |
+| `count` | `fn map.count(m: Map[K, V], f: ((K, V)) -> Bool) -> Int` | 语义变更：callback 接收一个元组。`(k, v) =>` 仍可原样书写 | R-map-09 |
+| `enumerate` | `fn map.enumerate(m: Map[K, V]) -> List[(Int, (K, V))]` | 新增 | R-L0-42 |
+| `filter` | `fn map.filter(m: Map[K, V], f: ((K, V)) -> Bool) -> Map[K, V]` | 语义变更：callback 接收一个元组。`(k, v) =>` 仍可原样书写 | R-map-09 |
+| `filter_map` | `fn map.filter_map(m: Map[K, V], f: ((K, V)) -> B?) -> List[B]` | 新增 | R-L0-42 |
+| `find` | `fn map.find(m: Map[K, V], f: ((K, V)) -> Bool) -> (K, V)?` | 语义变更：callback 接收一个元组。`(k, v) =>` 仍可原样书写 | R-map-09 |
+| `find_map` | `fn map.find_map(m: Map[K, V], f: ((K, V)) -> B?) -> B?` | 新增 | R-L0-42 |
+| `fold` | `fn map.fold(m: Map[K, V], init: A, f: (A, (K, V)) -> A) -> A` | 语义变更：callback 的第二个参数为元组。`almide fix` 负责改写 | R-map-09 |
+| `from_list` | `fn map.from_list(xs: List[(K, V)]) -> Map[K, V]` |  | — (R-L0-07) |
+| `get` | `fn map.get(m: Map[K, V], key: K) -> V?` |  |  |
+| `group_by` | `fn map.group_by(m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]]` | 新增 | R-L0-42 |
+| `is_empty` | `fn map.is_empty(m: Map[K, V]) -> Bool` |  |  |
+| `keys` | `fn map.keys(m: Map[K, V]) -> List[K]` |  |  |
+| `len` | `fn map.len(m: Map[K, V]) -> Int` |  | — (R-L0-11) |
+| `map` | `fn map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]` |  | R-map-04 |
+| `max_by` | `fn map.max_by(m: Map[K, V], f: ((K, V)) -> U) -> (K, V)?` | 新增 | R-L0-42 |
+| `max_with` | `fn map.max_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)?` | 新增 | R-L0-42 |
+| `merge` | `fn map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]` |  |  |
+| `min_by` | `fn map.min_by(m: Map[K, V], f: ((K, V)) -> U) -> (K, V)?` | 新增 | R-L0-42 |
+| `min_with` | `fn map.min_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)?` | 新增 | R-L0-42 |
+| `new` | `fn map.new() -> Map[K, V]` |  |  |
+| `partition` | `fn map.partition(m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)])` | 新增 | R-L0-42 |
+| `reduce` | `fn map.reduce(m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> (K, V)?` | 新增 | R-L0-42 |
+| `remove` | `fn map.remove(m: Map[K, V], key: K) -> Map[K, V]` |  | R-map-01（替代） |
+| `scan` | `fn map.scan(m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B]` | 新增 | R-L0-42 |
+| `set` | `fn map.set(m: Map[K, V], key: K, value: V) -> Map[K, V]` |  | R-map-01（替代） |
+| `sort_by` | `fn map.sort_by(m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)]` | 新增 | R-L0-42 |
+| `sort_with` | `fn map.sort_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)]` | 新增 | R-L0-42 |
+| `to_list` | `fn map.to_list(m: Map[K, V]) -> List[(K, V)]` | 改名（原 `entries`） | R-map-07 |
+| `update` | `fn map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]` | 语义变更：键不存在时 abort | R-map-08 |
+| `upsert` | `fn map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]` |  |  |
+| `values` | `fn map.values(m: Map[K, V]) -> List[V]` |  |  |
+| `zip` | `fn map.zip(m: Map[K, V], ys: List[B]) -> List[((K, V), B)]` | 新增 | R-L0-42 |
+| `zip_with` | `fn map.zip_with(m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C]` | 新增 | R-L0-42 |
+
+撤除（3）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `delete` | `m = map.remove(m, k)` | R-map-01 |
+| `get_or` | `map.get(m, k) ?? d` | R-map-02 |
+| `insert` | `m[k] = v`，或 `m = map.set(m, k, v)` | R-map-01 |
+
+<a id="math"></a>
+
+## math
+
+记录：[L2-math.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-math.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `acos` | `fn math.acos(x: Float) -> Float` | 新增 | R-math-02 |
+| `acosh` | `fn math.acosh(x: Float) -> Float` | 新增 | R-math-05 |
+| `asin` | `fn math.asin(x: Float) -> Float` | 新增 | R-math-02 |
+| `asinh` | `fn math.asinh(x: Float) -> Float` | 新增 | R-math-05 |
+| `atan` | `fn math.atan(x: Float) -> Float` |  |  |
+| `atan2` | `fn math.atan2(y: Float, x: Float) -> Float` | 新增 | R-math-02 |
+| `atanh` | `fn math.atanh(x: Float) -> Float` | 新增 | R-math-05 |
+| `cbrt` | `fn math.cbrt(x: Float) -> Float` | 新增 | R-math-02 |
+| `choose` | `fn math.choose(n: Int, k: Int) -> Int` |  |  |
+| `cos` | `fn math.cos(x: Float) -> Float` |  |  |
+| `cosh` | `fn math.cosh(x: Float) -> Float` | 新增 | R-math-02 |
+| `e` | `fn math.e() -> Float` |  |  |
+| `exp` | `fn math.exp(x: Float) -> Float` |  |  |
+| `expm1` | `fn math.expm1(x: Float) -> Float` | 新增 | R-math-04 |
+| `factorial` | `fn math.factorial(n: Int) -> Int` |  | —（大数值见 [L2-bigint](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-bigint.md)） |
+| `hypot` | `fn math.hypot(a: Float, b: Float) -> Float` | 新增 | R-math-02 |
+| `log` | `fn math.log(x: Float) -> Float` |  |  |
+| `log10` | `fn math.log10(x: Float) -> Float` |  |  |
+| `log1p` | `fn math.log1p(x: Float) -> Float` | 新增 | R-math-04 |
+| `log2` | `fn math.log2(x: Float) -> Float` |  |  |
+| `log_gamma` | `fn math.log_gamma(x: Float) -> Float` |  |  |
+| `pi` | `fn math.pi() -> Float` |  |  |
+| `sin` | `fn math.sin(x: Float) -> Float` |  |  |
+| `sinh` | `fn math.sinh(x: Float) -> Float` | 新增 | R-math-02 |
+| `sqrt` | `fn math.sqrt(x: Float) -> Float` |  | R-math-03（重新审视 R-math-01） |
+| `tan` | `fn math.tan(x: Float) -> Float` |  |  |
+| `tanh` | `fn math.tanh(x: Float) -> Float` |  |  |
+
+撤除（8）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `abs` | `int.abs` | R-math-01（`int.abs`） |
+| `fmax` | `float.max` | R-math-01（`float.max`） |
+| `fmin` | `float.min` | R-math-01（`float.min`） |
+| `fpow` | `float.pow` | R-math-01（`float.pow`） |
+| `max` | `int.max` | R-math-01（`int.max`） |
+| `min` | `int.min` | R-math-01（`int.min`） |
+| `pow` | `int.pow` | R-math-01（`int.pow`） |
+| `sign` | `int.sign` | R-math-01（`int.sign`） |
+
+<a id="matrix"></a>
+
+## matrix
+
+记录：[L2-matrix.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-matrix.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `broadcast_add_row` | `fn matrix.broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix` | 语义变更：范围/形状不匹配 abort | R-matrix-05（长度不同 abort） |
+| `cols` | `fn matrix.cols(m: Matrix) -> Int` |  |  |
+| `concat_cols` | `fn matrix.concat_cols(xs: List[Matrix]) -> Matrix` |  |  |
+| `concat_rows` | `fn matrix.concat_rows(xs: List[Matrix]) -> Matrix` | 新增 | R-matrix-11 |
+| `dot_row` | `fn matrix.dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float` | 语义变更：范围/形状不匹配 abort | R-matrix-05（越界 abort） |
+| `from_bytes_f16_le` | `fn matrix.from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix?` | 语义变更：负形状 abort，数据不足 none | R-matrix-05、R-matrix-15 |
+| `from_bytes_f32_le` | `fn matrix.from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix?` | 语义变更：负形状 abort，数据不足 none | R-matrix-05、R-matrix-15 |
+| `from_bytes_f64_le` | `fn matrix.from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix?` | 语义变更：负形状 abort，数据不足 none | R-matrix-05、R-matrix-15 |
+| `from_lists` | `fn matrix.from_lists(xs: List[List[Float]]) -> Matrix` |  |  |
+| `gather_rows` | `fn matrix.gather_rows(m: Matrix, indices: List[Int]) -> Matrix` | 语义变更：范围/形状不匹配 abort | R-matrix-04 / R-matrix-05（越界 abort） |
+| `get` | `fn matrix.get(m: Matrix, row: Int, col: Int) -> Float?` | 语义变更：返回 `Option[Float]` | R-matrix-08 |
+| `map` | `fn matrix.map(m: Matrix, f: (Float) -> Float) -> Matrix` |  |  |
+| `ones` | `fn matrix.ones(rows: Int, cols: Int) -> Matrix` |  |  |
+| `rows` | `fn matrix.rows(m: Matrix) -> Int` |  |  |
+| `scale` | `fn matrix.scale(m: Matrix, s: Float) -> Matrix` |  |  |
+| `shape` | `fn matrix.shape(m: Matrix) -> (Int, Int)` |  |  |
+| `slice_rows` | `fn matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix` | 语义变更：负位置 abort，正侧夹取 | R-L0-29、R-L0-46 |
+| `split_cols_even` | `fn matrix.split_cols_even(m: Matrix, n: Int) -> List[Matrix]` |  |  |
+| `to_bytes_f16_le` | `fn matrix.to_bytes_f16_le(m: Matrix) -> Bytes` | 新增 | R-matrix-12 |
+| `to_bytes_f32_le` | `fn matrix.to_bytes_f32_le(m: Matrix) -> Bytes` |  |  |
+| `to_bytes_f64_le` | `fn matrix.to_bytes_f64_le(m: Matrix) -> Bytes` |  |  |
+| `to_lists` | `fn matrix.to_lists(m: Matrix) -> List[List[Float]]` |  |  |
+| `transpose` | `fn matrix.transpose(m: Matrix) -> Matrix` |  |  |
+| `zeros` | `fn matrix.zeros(rows: Int, cols: Int) -> Matrix` |  |  |
+| `zip_with` | `fn matrix.zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix` | 新增 | R-matrix-09 |
+
+撤除（24）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `add` | `a + b` | R-matrix-14 |
+| `append_rows` | `concat_rows([a, b])` | R-matrix-11 |
+| `concat_cols_many` | `matrix.concat_cols` | R-matrix-06 |
+| `conv1d` | nn.kernels | R-matrix-01（nn.kernels） |
+| `div` | `a / b` | R-matrix-14 |
+| `fma` | 内部 `__fma` | R-matrix-02（内部 `__fma`） |
+| `fma3` | 内部 `__fma3` | R-matrix-02（内部 `__fma3`） |
+| `linear_f32_row_no_bias` | nn.kernels | R-matrix-01（nn.kernels） |
+| `linear_row` | nn.kernels | R-matrix-01（nn.kernels） |
+| `linear_row_no_bias` | nn.kernels | R-matrix-01（nn.kernels） |
+| `mul` | `a * b` | R-matrix-14 |
+| `mul_f32` | `a * b` | R-matrix-03 |
+| `mul_f32_scaled` | `matrix.scale(a * b, s)` | R-matrix-03 |
+| `mul_f32_t` | `a * matrix.transpose(b)` | R-matrix-03 |
+| `mul_f32_t_scaled` | `matrix.scale(a * matrix.transpose(b), s)` | R-matrix-03 |
+| `mul_scaled` | 内部 `__mul_scaled` | R-matrix-02（内部 `__mul_scaled`） |
+| `neg` | `-m` | R-matrix-14 |
+| `ones_f32` | `matrix.ones` | R-matrix-03 |
+| `pow` | `matrix.map(m, (x) => float.pow(x, e))` | R-matrix-13 |
+| `row_dot` | `matrix.dot_row` | R-matrix-06 |
+| `select_rows` | `matrix.gather_rows` | R-matrix-04 |
+| `select_rows_f32` | nn.kernels | R-matrix-01（nn.kernels） |
+| `sub` | `a - b` | R-matrix-14 |
+| `zeros_f32` | `matrix.zeros`（f32 数据用 from_bytes_f32_le 读取） | R-matrix-03 |
+
+<a id="net"></a>
+
+## net
+
+记录：[L2-net.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-net.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `ip_to_string` | `fn net.ip_to_string(ip: IpAddr) -> String` | 新增 | R-net-03 |
+| `is_loopback` | `fn net.is_loopback(ip: IpAddr) -> Bool` | 新增 | R-net-03 |
+| `lookup_host` | `effect fn net.lookup_host(host: String) -> List[IpAddr]` | 新增 | R-net-03 |
+| `parse_ip` | `fn net.parse_ip(s: String) -> Result[IpAddr, String]` | 新增 | R-net-03 |
+| `tcp_accept` | `effect fn net.tcp_accept(listener: TcpListener) -> TcpStream` | 语义变更：句柄改为 `TcpStream`/`TcpListener` | R-net-05 |
+| `tcp_available` | `effect fn net.tcp_available(stream: TcpStream) -> Int` | 语义变更：句柄改为 `TcpStream`/`TcpListener` | R-net-05 |
+| `tcp_connect` | `effect fn net.tcp_connect(host: String, port: Int) -> TcpStream` | 语义变更：句柄改为 `TcpStream`/`TcpListener` | R-net-05 |
+| `tcp_is_open` | `effect fn net.tcp_is_open(stream: TcpStream) -> Bool` | 语义变更：改为 effect fn，使用 `stream: TcpStream` | R-net-04、R-net-05 |
+| `tcp_listen` | `effect fn net.tcp_listen(host: String, port: Int) -> TcpListener` | 语义变更：句柄改为 `TcpStream`/`TcpListener` | R-net-05 |
+| `tcp_local_port` | `effect fn net.tcp_local_port(listener: TcpListener) -> Int` | 语义变更：句柄改为 `TcpStream`/`TcpListener` | R-net-05 |
+| `tcp_read_timeout` | `effect fn net.tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Bytes` | 语义变更：句柄改为 `TcpStream`/`TcpListener` | R-net-05 |
+| `tcp_set_timeout` | `effect fn net.tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Unit` | 语义变更：句柄改为 `TcpStream`/`TcpListener` | R-net-05 |
+| `udp_bind` | `effect fn net.udp_bind(host: String, port: Int) -> UdpSocket` | 新增 | R-net-02 |
+| `udp_local_port` | `effect fn net.udp_local_port(sock: UdpSocket) -> Int` | 新增 | R-net-02 |
+| `udp_recv_from` | `effect fn net.udp_recv_from(sock: UdpSocket, max: Int) -> UdpPacket` | 新增。返回 `UdpPacket` | R-net-01、R-net-06 |
+| `udp_send_to` | `effect fn net.udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Unit` | 新增 | R-net-02 |
+
+撤除（18）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `shm_create` | `unix.shm_create` | R-net-01 |
+| `shm_read` | `unix.shm_read` | R-net-01 |
+| `shm_resize` | `unix.shm_resize` | R-net-01 |
+| `shm_write` | `unix.shm_write` | R-net-01 |
+| `tcp_close` | `io.close` | R-net-07 |
+| `tcp_close_listener` | `io.close` | R-net-07 |
+| `tcp_read` | `io.read` | R-net-07 |
+| `tcp_read_exact` | `io.read_exact` | R-net-07 |
+| `tcp_write` | `io.write` | R-net-07 |
+| `unix_accept` | `unix.accept` | R-net-01 |
+| `unix_close` | `io.close` | R-net-01 |
+| `unix_connect` | `unix.connect` | R-net-01 |
+| `unix_listen` | `unix.listen` | R-net-01 |
+| `unix_poll` | `unix.select([fd], t)` | R-net-01 |
+| `unix_recv` | `io.read` | R-net-01 |
+| `unix_send` | `unix.write_fds` | R-net-01 |
+| `unix_take_fds` | `unix.take_fds` | R-net-01 |
+| `unix_wait` | `unix.select` | R-net-01 |
+
+<a id="option"></a>
+
+## option
+
+记录：[L2-option.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-option.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `collect` | `fn option.collect(xs: List[A?]) -> List[A]?` |  | R-option-02 |
+| `collect_map` | `fn option.collect_map(xs: List[A], f: (A) -> B?) -> List[B]?` |  | R-option-02 |
+| `filter` | `fn option.filter(o: A?, f: (A) -> Bool) -> A?` |  | R-option-04 |
+| `flat_map` | `fn option.flat_map(o: A?, f: (A) -> B?) -> B?` |  | R-L0-10（`flat_map` 的拼写由规则固定） |
+| `flatten` | `fn option.flatten(o: A??) -> A?` |  |  |
+| `is_none` | `fn option.is_none(o: A?) -> Bool` |  |  |
+| `is_some` | `fn option.is_some(o: A?) -> Bool` |  |  |
+| `map` | `fn option.map(o: A?, f: (A) -> B) -> B?` |  |  |
+| `or_else` | `fn option.or_else(o: A?, f: () -> A?) -> A?` |  | R-option-03 |
+| `to_list` | `fn option.to_list(o: A?) -> List[A]` |  |  |
+| `to_result` | `fn option.to_result(o: A?, e: E) -> Result[A, E]` |  | 注：E 是多态的（在 probe-error/p.almd 确认了自定义 variant E）。ADR-0007 D4 中“E 固定为 String”的文字较旧 |
+| `unwrap_or_else` | `fn option.unwrap_or_else(o: A?, f: () -> A) -> A` |  | `??` 的脱糖目标（ADR-0005 D1） |
+| `zip` | `fn option.zip(a: A?, b: B?) -> (A, B)?` |  | R-option-04 |
+
+撤除（1）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `unwrap_or` | `o ?? d` | R-option-01 |
+
+<a id="path"></a>
+
+## path
+
+记录：[L2-path.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-path.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `basename` | `fn path.basename(path: String) -> String` |  |  |
+| `components` | `fn path.components(path: String) -> List[String]` | 新增 | R-path-01 |
+| `dirname` | `fn path.dirname(path: String) -> String` |  |  |
+| `extension` | `fn path.extension(path: String) -> String?` |  |  |
+| `is_absolute` | `fn path.is_absolute(path: String) -> Bool` |  |  |
+| `join` | `fn path.join(base: String, child: String) -> String` |  |  |
+| `normalize` | `fn path.normalize(path: String) -> String` |  |  |
+| `relative_to` | `fn path.relative_to(path: String, base: String) -> String?` | 新增 | R-path-01 |
+| `stem` | `fn path.stem(path: String) -> String` |  |  |
+| `with_extension` | `fn path.with_extension(path: String, ext: String) -> String` | 新增 | R-path-03 |
+
+撤除（3）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `from_string` | 按 `SafePath` | R-path-02 |
+| `to_string` | 按 `SafePath` | R-path-02 |
+| `trusted` | 按 `SafePath` | R-path-02 |
+
+<a id="process"></a>
+
+## process
+
+记录：[L2-process.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-process.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `child_pid` | `effect fn process.child_pid(c: ProcessChild) -> Int` | 新增 | R-process-06 |
+| `exec` | `effect fn process.exec(cmd: String, args: List[String]) -> String` |  | R-process-02 |
+| `exit` | `effect fn process.exit(code: Int) -> Never` |  |  |
+| `kill` | `effect fn process.kill(pid: Int, signal: Int) -> Unit` |  | R-process-03 |
+| `output` | `effect fn process.output(c: ProcessCommand) -> ProcessStatus` | 新增 | R-process-02 |
+| `pid` | `effect fn process.pid() -> Int` | 语义变更：改为 effect fn | R-process-04 |
+| `poll` | `effect fn process.poll(c: ProcessChild) -> Result[ProcessStatus, String]?` | 新增 | R-process-03 |
+| `read_new_stderr` | `effect fn process.read_new_stderr(c: ProcessChild) -> String` | 新增 | R-process-03 |
+| `read_new_stdout` | `effect fn process.read_new_stdout(c: ProcessChild) -> String` | 新增 | R-process-03 |
+| `run` | `effect fn process.run(c: ProcessCommand) -> Int` | 语义变更：接收 `ProcessCommand` | R-process-07 |
+| `start` | `effect fn process.start(c: ProcessCommand) -> ProcessChild` | 新增 | R-process-03 |
+| `stop` | `effect fn process.stop(c: ProcessChild, grace_ms: Int) -> ProcessStatus` | 新增 | R-process-03 |
+| `wait` | `effect fn process.wait(c: ProcessChild) -> ProcessStatus` | 新增 | R-process-03 |
+
+撤除（12）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `args` | `env.args` | R-process-01 |
+| `env` | `env.get` | R-process-01 |
+| `exec_attached` | `run` | R-process-02 |
+| `exec_in` | `output` | R-process-02 |
+| `exec_status` | `output` | R-process-02 |
+| `exec_status_timeout` | `output` 的 `timeout_ms` | R-process-02 |
+| `exec_with_stdin` | `output` | R-process-02 |
+| `is_alive` | `poll` | R-process-03 |
+| `run_in` | `run(ProcessCommand { dir: … })` | R-process-07 |
+| `sleep` | `env.sleep_ms` | R-process-01 |
+| `spawn` | `start` | R-process-03 |
+| `stdin_lines` | `string.lines(io.read_all()!)` | R-process-01 |
+
+<a id="random"></a>
+
+## random
+
+记录：[L2-random.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-random.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `bytes` | `effect fn random.bytes(n: Int) -> Bytes` | 新增 | R-random-02 |
+| `choice` | `effect fn random.choice(xs: List[A]) -> A?` |  |  |
+| `float` | `effect fn random.float() -> Float` |  |  |
+| `int` | `effect fn random.int(min: Int, max: Int) -> Int` |  | R-random-04 |
+| `next_choice` | `fn random.next_choice[A](rng: Rng, xs: List[A]) -> (A?, Rng)` | 新增 | R-random-01 |
+| `next_float` | `fn random.next_float(rng: Rng) -> (Float, Rng)` | 新增 | R-random-01 |
+| `next_int` | `fn random.next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng)` | 新增 | R-random-01 |
+| `next_shuffle` | `fn random.next_shuffle[A](rng: Rng, xs: List[A]) -> (List[A], Rng)` | 新增 | R-random-01 |
+| `seeded` | `fn random.seeded(seed: Int) -> Rng` | 新增 | R-random-01 |
+| `shuffle` | `effect fn random.shuffle(xs: List[A]) -> List[A]` |  | R-random-03 |
+
+<a id="regex"></a>
+
+## regex
+
+记录：[L2-regex.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-regex.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `captures` | `fn regex.captures(re: Regex, s: String) -> List[String?]?` | 语义变更：第一参数改为 `Regex`，分组为 `String?` | R-regex-08 |
+| `captures_all` | `fn regex.captures_all(re: Regex, s: String) -> List[List[String?]]` | 新增 | R-regex-04、R-regex-08 |
+| `compile` | `fn regex.compile(pattern: String) -> Result[Regex, String]` | 新增 | R-regex-02 |
+| `escape` | `fn regex.escape(s: String) -> String` | 新增 | R-regex-04 |
+| `find` | `fn regex.find(re: Regex, s: String) -> String?` | 语义变更：第一参数改为 `Regex` | R-regex-02 |
+| `find_all` | `fn regex.find_all(re: Regex, s: String) -> List[String]` | 语义变更：第一参数改为 `Regex` | R-regex-02 |
+| `index_of` | `fn regex.index_of(re: Regex, s: String) -> Int?` | 新增 | R-regex-04 |
+| `is_full_match` | `fn regex.is_full_match(re: Regex, s: String) -> Bool` | 改名（原 `full_match`）。第一参数为 `Regex` | R-regex-01、R-regex-02 |
+| `is_match` | `fn regex.is_match(re: Regex, s: String) -> Bool` | 语义变更：第一参数改为 `Regex` | R-regex-02 |
+| `new` | `fn regex.new(pattern: String) -> Regex` | 新增 | R-regex-02 |
+| `replace` | `fn regex.replace(re: Regex, s: String, rep: String) -> String` | 语义变更：第一参数改为 `Regex` | R-regex-02、R-regex-05（不解释 `$1`） |
+| `replace_first` | `fn regex.replace_first(re: Regex, s: String, rep: String) -> String` | 语义变更：第一参数改为 `Regex` | R-regex-02 |
+| `replace_first_with` | `fn regex.replace_first_with(re: Regex, s: String, f: (List[String?]) -> String) -> String` | 新增 | R-regex-07、R-regex-08 |
+| `replace_with` | `fn regex.replace_with(re: Regex, s: String, f: (List[String?]) -> String) -> String` | 新增 | R-regex-05、R-regex-08 |
+| `split` | `fn regex.split(re: Regex, s: String) -> List[String]` | 语义变更：第一参数改为 `Regex` | R-regex-02 |
+
+<a id="result"></a>
+
+## result
+
+记录：[L2-result.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-result.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `filter` | `fn result.filter(r: Result[A, E], f: (A) -> Bool, err_val: E) -> Result[A, E]` |  | R-result-02 |
+| `flat_map` | `fn result.flat_map(r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E]` |  | R-L0-10 |
+| `flatten` | `fn result.flatten(r: Result[Result[A, E], E]) -> Result[A, E]` |  | R-option-04 |
+| `is_err` | `fn result.is_err(r: Result[A, E]) -> Bool` |  |  |
+| `is_ok` | `fn result.is_ok(r: Result[A, E]) -> Bool` |  |  |
+| `map` | `fn result.map(r: Result[A, E], f: (A) -> B) -> Result[B, E]` |  |  |
+| `map_err` | `fn result.map_err(r: Result[A, E], f: (E) -> F) -> Result[A, F]` |  | ADR-0004 D2 的规范形式 |
+| `or_else` | `fn result.or_else(r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F]` |  |  |
+| `partition` | `fn result.partition(xs: List[Result[A, E]]) -> (List[A], List[E])` |  | R-result-05 |
+| `to_err_option` | `fn result.to_err_option(r: Result[A, E]) -> E?` |  | R-result-03 |
+| `to_list` | `fn result.to_list(r: Result[A, E]) -> List[A]` |  | R-option-04 |
+| `to_option` | `fn result.to_option(r: Result[A, E]) -> A?` |  | `?` 的脱糖目标 |
+| `unwrap_or_else` | `fn result.unwrap_or_else(r: Result[A, E], f: (E) -> A) -> A` |  | `??` 的脱糖目标（ADR-0005 D1） |
+| `zip` | `fn result.zip(a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]` |  | R-option-04 |
+
+撤除（1）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `unwrap_or` | `r ?? d` | R-result-01 |
+
+<a id="secret"></a>
+
+## secret
+
+记录：[L2-secret.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-secret.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `new` | `fn secret.new[A](x: A) -> Secret[A]` | 新增 | R-secret-01 |
+| `reveal` | `fn secret.reveal[A](s: Secret[A]) -> A` | 新增 | R-secret-01 |
+
+<a id="set"></a>
+
+## set
+
+记录：[L2-set.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-set.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `all` | `fn set.all(s: Set[A], f: (A) -> Bool) -> Bool` |  | R-map-06 |
+| `any` | `fn set.any(s: Set[A], f: (A) -> Bool) -> Bool` |  | R-map-06 |
+| `clear` | `fn set.clear(mut s: Set[A]) -> Unit` | 新增 | R-L0-04（`clear` 的矩阵） |
+| `contains` | `fn set.contains(s: Set[A], x: A) -> Bool` |  |  |
+| `count` | `fn set.count(s: Set[A], f: (A) -> Bool) -> Int` | 新增 | R-set-01 |
+| `difference` | `fn set.difference(a: Set[A], b: Set[A]) -> Set[A]` |  |  |
+| `enumerate` | `fn set.enumerate(s: Set[A]) -> List[(Int, A)]` | 新增 | R-L0-42 |
+| `filter` | `fn set.filter(s: Set[A], f: (A) -> Bool) -> Set[A]` |  | R-map-06 |
+| `filter_map` | `fn set.filter_map(s: Set[A], f: (A) -> B?) -> List[B]` | 新增 | R-L0-42 |
+| `find` | `fn set.find(s: Set[A], f: (A) -> Bool) -> A?` | 新增 | R-set-01 |
+| `find_map` | `fn set.find_map(s: Set[A], f: (A) -> B?) -> B?` | 新增 | R-L0-42 |
+| `fold` | `fn set.fold(s: Set[A], init: B, f: (B, A) -> B) -> B` |  | R-map-06 |
+| `from_list` | `fn set.from_list(xs: List[A]) -> Set[A]` |  | — (R-L0-07) |
+| `group_by` | `fn set.group_by(s: Set[A], f: (A) -> B) -> Map[B, List[A]]` | 新增 | R-L0-42 |
+| `insert` | `fn set.insert(s: Set[A], x: A) -> Set[A]` |  | R-set-04 |
+| `intersection` | `fn set.intersection(a: Set[A], b: Set[A]) -> Set[A]` |  |  |
+| `is_disjoint` | `fn set.is_disjoint(a: Set[A], b: Set[A]) -> Bool` |  |  |
+| `is_empty` | `fn set.is_empty(s: Set[A]) -> Bool` |  |  |
+| `is_subset` | `fn set.is_subset(a: Set[A], b: Set[A]) -> Bool` |  | R-set-02 |
+| `len` | `fn set.len(s: Set[A]) -> Int` |  | — (R-L0-11) |
+| `map` | `fn set.map(s: Set[A], f: (A) -> B) -> Set[B]` |  | R-map-06 |
+| `max` | `fn set.max(s: Set[A]) -> A?` | 新增 | R-L0-42 |
+| `max_by` | `fn set.max_by(s: Set[A], f: (A) -> K) -> A?` | 新增 | R-L0-42 |
+| `max_with` | `fn set.max_with(s: Set[A], cmp: (A, A) -> Int) -> A?` | 新增 | R-L0-42 |
+| `min` | `fn set.min(s: Set[A]) -> A?` | 新增 | R-L0-42 |
+| `min_by` | `fn set.min_by(s: Set[A], f: (A) -> K) -> A?` | 新增 | R-L0-42 |
+| `min_with` | `fn set.min_with(s: Set[A], cmp: (A, A) -> Int) -> A?` | 新增 | R-L0-42 |
+| `new` | `fn set.new() -> Set[A]` |  |  |
+| `partition` | `fn set.partition(s: Set[A], f: (A) -> Bool) -> (List[A], List[A])` | 新增 | R-L0-42 |
+| `product` | `fn set.product[A: Numeric](s: Set[A]) -> A` | 新增 | R-L0-42 |
+| `reduce` | `fn set.reduce(s: Set[A], f: (A, A) -> A) -> A?` | 新增 | R-L0-42 |
+| `remove` | `fn set.remove(s: Set[A], x: A) -> Set[A]` |  |  |
+| `scan` | `fn set.scan(s: Set[A], init: B, f: (B, A) -> B) -> List[B]` | 新增 | R-L0-42 |
+| `sort` | `fn set.sort(s: Set[A]) -> List[A]` | 新增 | R-L0-42 |
+| `sort_by` | `fn set.sort_by(s: Set[A], f: (A) -> B) -> List[A]` | 新增 | R-L0-42 |
+| `sort_with` | `fn set.sort_with(s: Set[A], cmp: (A, A) -> Int) -> List[A]` | 新增 | R-L0-42 |
+| `sum` | `fn set.sum[A: Numeric](s: Set[A]) -> A` | 新增 | R-L0-42 |
+| `symmetric_difference` | `fn set.symmetric_difference(a: Set[A], b: Set[A]) -> Set[A]` |  |  |
+| `to_list` | `fn set.to_list(s: Set[A]) -> List[A]` |  |  |
+| `union` | `fn set.union(a: Set[A], b: Set[A]) -> Set[A]` |  |  |
+| `zip` | `fn set.zip(s: Set[A], ys: List[B]) -> List[(A, B)]` | 新增 | R-L0-42 |
+| `zip_with` | `fn set.zip_with(s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C]` | 新增 | R-L0-42 |
+
+<a id="string"></a>
+
+## string
+
+记录：[L2-string.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-string.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `byte_len` | `fn string.byte_len(s: String) -> Int` | 新增 | R-string-06 |
+| `byte_slice` | `fn string.byte_slice(s: String, start: Int, end: Int) -> String?` |  |  |
+| `capitalize` | `fn string.capitalize(s: String) -> String` |  |  |
+| `chunk` | `fn string.chunk(s: String, n: Int) -> List[String]` | 新增 | R-L0-42 |
+| `clear` | `fn string.clear(mut s: String) -> Unit` |  |  |
+| `compare` | `fn string.compare(a: String, b: String) -> Int` | 新增 | R-string-05（R-L0-16） |
+| `contains` | `fn string.contains(s: String, needle: String) -> Bool` |  |  |
+| `count` | `fn string.count(s: String, f: (String) -> Bool) -> Int` | 新增 | R-string-18、R-L0-42 |
+| `count_matches` | `fn string.count_matches(s: String, needle: String) -> Int` | 改名（原 `count`） | R-string-18 |
+| `dedup` | `fn string.dedup(s: String) -> String` | 新增 | R-L0-42 |
+| `drop` | `fn string.drop(s: String, n: Int) -> String` |  |  |
+| `drop_end` | `fn string.drop_end(s: String, n: Int) -> String` |  |  |
+| `drop_while` | `fn string.drop_while(s: String, f: (String) -> Bool) -> String` | 新增 | R-L0-42 |
+| `ends_with` | `fn string.ends_with(s: String, suffix: String) -> Bool` |  |  |
+| `enumerate` | `fn string.enumerate(s: String) -> List[(Int, String)]` | 新增 | R-L0-42 |
+| `filter` | `fn string.filter(s: String, f: (String) -> Bool) -> String` | 新增 | R-string-16 |
+| `filter_map` | `fn string.filter_map(s: String, f: (String) -> B?) -> List[B]` | 新增 | R-L0-42 |
+| `find_index` | `fn string.find_index(s: String, f: (String) -> Bool) -> Int?` | 新增 | R-L0-42 |
+| `find_map` | `fn string.find_map(s: String, f: (String) -> B?) -> B?` | 新增 | R-L0-42 |
+| `first` | `fn string.first(s: String) -> String?` |  |  |
+| `fold` | `fn string.fold(s: String, init: B, f: (B, String) -> B) -> B` | 新增 | R-string-16 |
+| `from_codepoint` | `fn string.from_codepoint(n: Int) -> String?` | 语义变更：返回 `Option[String]` | R-string-11 |
+| `from_list` | `fn string.from_list(xs: List[String]) -> String` | 新增 | R-string-17 |
+| `from_utf16` | `fn string.from_utf16(xs: List[Int]) -> Result[String, String]` | 新增 | R-string-07 |
+| `get` | `fn string.get(s: String, i: Int) -> String?` |  |  |
+| `group_by` | `fn string.group_by(s: String, f: (String) -> B) -> Map[B, List[String]]` | 新增 | R-L0-42 |
+| `index_of` | `fn string.index_of(s: String, needle: String) -> Int?` |  |  |
+| `insert` | `fn string.insert(s: String, i: Int, x: String) -> String` | 新增 | R-string-16 |
+| `intersperse` | `fn string.intersperse(s: String, sep: String) -> String` | 新增 | R-L0-42 |
+| `is_alpha` | `fn string.is_alpha(s: String) -> Bool` |  |  |
+| `is_alphanumeric` | `fn string.is_alphanumeric(s: String) -> Bool` |  |  |
+| `is_digit` | `fn string.is_digit(s: String) -> Bool` |  |  |
+| `is_empty` | `fn string.is_empty(s: String) -> Bool` |  |  |
+| `is_equal_constant_time` | `fn string.is_equal_constant_time(a: String, b: String) -> Bool` | 新增 | R-string-19 |
+| `is_lower` | `fn string.is_lower(s: String) -> Bool` |  |  |
+| `is_upper` | `fn string.is_upper(s: String) -> Bool` |  |  |
+| `is_whitespace` | `fn string.is_whitespace(s: String) -> Bool` |  |  |
+| `last` | `fn string.last(s: String) -> String?` |  |  |
+| `last_index_of` | `fn string.last_index_of(s: String, needle: String) -> Int?` |  |  |
+| `len` | `fn string.len(s: String) -> Int` |  |  |
+| `lines` | `fn string.lines(s: String) -> List[String]` |  |  |
+| `max` | `fn string.max(s: String) -> String?` | 新增 | R-L0-42 |
+| `max_by` | `fn string.max_by(s: String, f: (String) -> K) -> String?` | 新增 | R-L0-42 |
+| `max_with` | `fn string.max_with(s: String, cmp: (String, String) -> Int) -> String?` | 新增 | R-L0-42 |
+| `min` | `fn string.min(s: String) -> String?` | 新增 | R-L0-42 |
+| `min_by` | `fn string.min_by(s: String, f: (String) -> K) -> String?` | 新增 | R-L0-42 |
+| `min_with` | `fn string.min_with(s: String, cmp: (String, String) -> Int) -> String?` | 新增 | R-L0-42 |
+| `new` | `fn string.new() -> String` | 新增 | R-string-17 |
+| `pad_end` | `fn string.pad_end(s: String, n: Int, fill: String) -> String` |  |  |
+| `pad_start` | `fn string.pad_start(s: String, n: Int, fill: String) -> String` |  |  |
+| `partition` | `fn string.partition(s: String, f: (String) -> Bool) -> (List[String], List[String])` | 新增 | R-L0-42 |
+| `pop` | `fn string.pop(mut s: String) -> String?` | 新增 | R-string-16 |
+| `push` | `fn string.push(mut s: String, x: String) -> Unit` |  |  |
+| `reduce` | `fn string.reduce(s: String, f: (String, String) -> String) -> String?` | 新增 | R-L0-42 |
+| `remove_at` | `fn string.remove_at(s: String, i: Int) -> String` | 新增 | R-string-16 |
+| `repeat` | `fn string.repeat(s: String, n: Int) -> String` |  |  |
+| `replace` | `fn string.replace(s: String, from: String, to: String) -> String` |  |  |
+| `replace_first` | `fn string.replace_first(s: String, from: String, to: String) -> String` |  |  |
+| `reverse` | `fn string.reverse(s: String) -> String` |  |  |
+| `scan` | `fn string.scan(s: String, init: B, f: (B, String) -> B) -> List[B]` | 新增 | R-L0-42 |
+| `slice` | `fn string.slice(s: String, start: Int, end: Int) -> String` | 语义变更：去掉 `end` 默认值。双参数形式为 `drop` | R-string-15 |
+| `sort` | `fn string.sort(s: String) -> List[String]` | 新增 | R-L0-42 |
+| `sort_by` | `fn string.sort_by(s: String, f: (String) -> B) -> List[String]` | 新增 | R-L0-42 |
+| `sort_with` | `fn string.sort_with(s: String, cmp: (String, String) -> Int) -> List[String]` | 新增 | R-L0-42 |
+| `split` | `fn string.split(s: String, sep: String) -> List[String]` |  |  |
+| `split_at` | `fn string.split_at(s: String, n: Int) -> (String, String)` | 新增 | R-L0-42 |
+| `split_once` | `fn string.split_once(s: String, sep: String) -> (String, String)?` |  |  |
+| `starts_with` | `fn string.starts_with(s: String, prefix: String) -> Bool` |  |  |
+| `strip_prefix` | `fn string.strip_prefix(s: String, prefix: String) -> String?` |  |  |
+| `strip_suffix` | `fn string.strip_suffix(s: String, suffix: String) -> String?` |  |  |
+| `take` | `fn string.take(s: String, n: Int) -> String` |  |  |
+| `take_end` | `fn string.take_end(s: String, n: Int) -> String` |  |  |
+| `take_while` | `fn string.take_while(s: String, f: (String) -> Bool) -> String` | 新增 | R-L0-42 |
+| `to_codepoint` | `fn string.to_codepoint(s: String) -> Int?` | 改名（原 `codepoint`）。不恰好为一个代码点则 none | R-string-12、R-string-14 |
+| `to_list` | `fn string.to_list(s: String) -> List[String]` | 改名（原 `chars`） | R-string-17 |
+| `to_lower` | `fn string.to_lower(s: String) -> String` |  |  |
+| `to_upper` | `fn string.to_upper(s: String) -> String` |  |  |
+| `to_utf16` | `fn string.to_utf16(s: String) -> List[Int]` | 新增 | R-string-07 |
+| `trim` | `fn string.trim(s: String) -> String` |  |  |
+| `trim_end` | `fn string.trim_end(s: String) -> String` |  |  |
+| `trim_start` | `fn string.trim_start(s: String) -> String` |  |  |
+| `unique` | `fn string.unique(s: String) -> String` | 新增 | R-L0-42 |
+| `unique_by` | `fn string.unique_by(s: String, f: (String) -> K) -> String` | 新增 | R-L0-42 |
+| `window` | `fn string.window(s: String, n: Int) -> List[String]` | 新增 | R-L0-42 |
+| `zip` | `fn string.zip(s: String, ys: List[B]) -> List[(String, B)]` | 新增 | R-L0-42 |
+| `zip_with` | `fn string.zip_with(s: String, ys: List[B], f: (String, B) -> C) -> List[C]` | 新增 | R-L0-42 |
+
+撤除（5）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `from_bytes` | `bytes.from_list(xs) \|> bytes.to_string_lossy` | R-string-02 |
+| `join` | `list.join` | R-string-01 |
+| `length` | `string.len` | R-string-04 |
+| `run_length_encode` | `string.chars` 与 `list.fold` | R-string-03 |
+| `to_bytes` | `bytes.from_string` | R-string-02 |
+
+<a id="testing"></a>
+
+## testing
+
+记录：[L2-testing.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-testing.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `assert_aborts` | `fn testing.assert_aborts[A](expected: String, f: () -> A) -> Unit` |  |  |
+| `assert_approx` | `fn testing.assert_approx(a: Float, b: Float, tolerance: Float) -> Unit` |  |  |
+| `assert_contains` | `fn testing.assert_contains(haystack: String, needle: String) -> Unit` |  | R-testing-01 |
+| `assert_err` | `fn testing.assert_err[A, B](r: Result[A, B]) -> Unit` |  |  |
+| `assert_gt` | `fn testing.assert_gt[A](a: A, b: A) -> Unit` | 语义变更：扩展至所有有序类型 | R-testing-02 |
+| `assert_lt` | `fn testing.assert_lt[A](a: A, b: A) -> Unit` | 语义变更：扩展至所有有序类型 | R-testing-02 |
+| `assert_none` | `fn testing.assert_none[A](o: A?) -> Unit` |  |  |
+| `assert_ok` | `fn testing.assert_ok[A, B](r: Result[A, B]) -> Unit` |  |  |
+| `assert_snapshot` | `fn testing.assert_snapshot(actual: String, expected: String) -> Unit` |  |  |
+| `assert_some` | `fn testing.assert_some[A](o: A?) -> Unit` |  |  |
+
+<a id="uint16"></a>
+
+## uint16
+
+记录：[L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `band` | `fn uint16.band(a: UInt16, b: UInt16) -> UInt16` | 新增 | R-sized-10 |
+| `bit_length` | `fn uint16.bit_length(x: UInt16) -> Int` | 新增 | R-int-11 |
+| `bnot` | `fn uint16.bnot(x: UInt16) -> UInt16` | 新增 | R-sized-10 |
+| `bor` | `fn uint16.bor(a: UInt16, b: UInt16) -> UInt16` | 新增 | R-sized-10 |
+| `bshl` | `fn uint16.bshl(a: UInt16, n: Int) -> UInt16` | 新增 | R-sized-10 |
+| `bshr` | `fn uint16.bshr(a: UInt16, n: Int) -> UInt16` | 新增 | R-sized-10 |
+| `bxor` | `fn uint16.bxor(a: UInt16, b: UInt16) -> UInt16` | 新增 | R-sized-10 |
+| `byte_swap` | `fn uint16.byte_swap(x: UInt16) -> UInt16` | 新增 | R-sized-10 |
+| `clamp` | `fn uint16.clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16` | 新增 | R-sized-08 |
+| `compare` | `fn uint16.compare(a: UInt16, b: UInt16) -> Int` | 新增 | R-sized-02 |
+| `count_leading_zeros` | `fn uint16.count_leading_zeros(x: UInt16) -> Int` | 新增 | R-sized-10 |
+| `count_ones` | `fn uint16.count_ones(x: UInt16) -> Int` | 新增 | R-sized-10 |
+| `count_trailing_zeros` | `fn uint16.count_trailing_zeros(x: UInt16) -> Int` | 新增 | R-sized-10 |
+| `floor_div` | `fn uint16.floor_div(a: UInt16, b: UInt16) -> UInt16` | 新增 | R-sized-10 |
+| `from` | `fn uint16.from[S: Numeric](x: S) -> UInt16` | 新增 | R-L0-40 |
+| `from_checked` | `fn uint16.from_checked[S: Numeric](x: S) -> UInt16?` | 新增 | R-L0-40 |
+| `from_saturating` | `fn uint16.from_saturating[S: Numeric](x: S) -> UInt16` | 新增 | R-L0-40 |
+| `from_wrapping` | `fn uint16.from_wrapping[S: Integer](x: S) -> UInt16` | 新增 | R-L0-40 |
+| `is_even` | `fn uint16.is_even(x: UInt16) -> Bool` | 新增 | R-sized-10 |
+| `is_odd` | `fn uint16.is_odd(x: UInt16) -> Bool` | 新增 | R-sized-10 |
+| `max` | `fn uint16.max(a: UInt16, b: UInt16) -> UInt16` | 新增 | R-sized-08 |
+| `max_value` | `fn uint16.max_value() -> UInt16` |  |  |
+| `min` | `fn uint16.min(a: UInt16, b: UInt16) -> UInt16` | 新增 | R-sized-08 |
+| `min_value` | `fn uint16.min_value() -> UInt16` |  |  |
+| `modulo` | `fn uint16.modulo(a: UInt16, b: UInt16) -> UInt16` | 新增 | R-sized-10 |
+| `parse` | `fn uint16.parse(s: String) -> Result[UInt16, String]` | 新增 | R-sized-02 |
+| `parse_radix` | `fn uint16.parse_radix(s: String, radix: Int) -> Result[UInt16, String]` | 新增 | R-sized-06 |
+| `pow` | `fn uint16.pow(base: UInt16, exp: Int) -> UInt16` | 新增 | R-sized-10 |
+| `rotate_left` | `fn uint16.rotate_left(a: UInt16, n: Int) -> UInt16` | 新增 | R-int-12 |
+| `rotate_right` | `fn uint16.rotate_right(a: UInt16, n: Int) -> UInt16` | 新增 | R-int-12 |
+| `to_string` | `fn uint16.to_string(x: UInt16) -> String` |  |  |
+| `to_string_radix` | `fn uint16.to_string_radix(x: UInt16, radix: Int) -> String` | 新增 | R-sized-06 |
+| `wrap_add` | `fn uint16.wrap_add(a: UInt16, b: UInt16) -> UInt16` | 新增 | R-int-12 |
+| `wrap_mul` | `fn uint16.wrap_mul(a: UInt16, b: UInt16) -> UInt16` | 新增 | R-int-12 |
+| `wrap_sub` | `fn uint16.wrap_sub(a: UInt16, b: UInt16) -> UInt16` | 新增 | R-int-12 |
+
+撤除（15）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `to_float32` | `float32.from` | R-L0-40 |
+| `to_float64` | `float64.from` | R-L0-40 |
+| `to_int16` | `int16.from` | R-L0-40 |
+| `to_int16_checked` | `int16.from_checked` | R-L0-40 |
+| `to_int16_saturating` | `int16.from_saturating` | R-L0-40 |
+| `to_int32` | `int32.from` | R-L0-40 |
+| `to_int64` | `int64.from` | R-L0-40 |
+| `to_int8` | `int8.from` | R-L0-40 |
+| `to_int8_checked` | `int8.from_checked` | R-L0-40 |
+| `to_int8_saturating` | `int8.from_saturating` | R-L0-40 |
+| `to_uint32` | `uint32.from` | R-L0-40 |
+| `to_uint64` | `uint64.from` | R-L0-40 |
+| `to_uint8` | `uint8.from` | R-L0-40 |
+| `to_uint8_checked` | `uint8.from_checked` | R-L0-40 |
+| `to_uint8_saturating` | `uint8.from_saturating` | R-L0-40 |
+
+<a id="uint32"></a>
+
+## uint32
+
+记录：[L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `band` | `fn uint32.band(a: UInt32, b: UInt32) -> UInt32` | 新增 | R-sized-10 |
+| `bit_length` | `fn uint32.bit_length(x: UInt32) -> Int` | 新增 | R-int-11 |
+| `bnot` | `fn uint32.bnot(x: UInt32) -> UInt32` | 新增 | R-sized-10 |
+| `bor` | `fn uint32.bor(a: UInt32, b: UInt32) -> UInt32` | 新增 | R-sized-10 |
+| `bshl` | `fn uint32.bshl(a: UInt32, n: Int) -> UInt32` | 新增 | R-sized-10 |
+| `bshr` | `fn uint32.bshr(a: UInt32, n: Int) -> UInt32` | 新增 | R-sized-10 |
+| `bxor` | `fn uint32.bxor(a: UInt32, b: UInt32) -> UInt32` | 新增 | R-sized-10 |
+| `byte_swap` | `fn uint32.byte_swap(x: UInt32) -> UInt32` | 新增 | R-sized-10 |
+| `clamp` | `fn uint32.clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32` | 新增 | R-sized-08 |
+| `compare` | `fn uint32.compare(a: UInt32, b: UInt32) -> Int` | 新增 | R-sized-02 |
+| `count_leading_zeros` | `fn uint32.count_leading_zeros(x: UInt32) -> Int` | 新增 | R-sized-10 |
+| `count_ones` | `fn uint32.count_ones(x: UInt32) -> Int` | 新增 | R-sized-10 |
+| `count_trailing_zeros` | `fn uint32.count_trailing_zeros(x: UInt32) -> Int` | 新增 | R-sized-10 |
+| `floor_div` | `fn uint32.floor_div(a: UInt32, b: UInt32) -> UInt32` | 新增 | R-sized-10 |
+| `from` | `fn uint32.from[S: Numeric](x: S) -> UInt32` | 新增 | R-L0-40 |
+| `from_checked` | `fn uint32.from_checked[S: Numeric](x: S) -> UInt32?` | 新增 | R-L0-40 |
+| `from_saturating` | `fn uint32.from_saturating[S: Numeric](x: S) -> UInt32` | 新增 | R-L0-40 |
+| `from_wrapping` | `fn uint32.from_wrapping[S: Integer](x: S) -> UInt32` | 新增 | R-L0-40 |
+| `is_even` | `fn uint32.is_even(x: UInt32) -> Bool` | 新增 | R-sized-10 |
+| `is_odd` | `fn uint32.is_odd(x: UInt32) -> Bool` | 新增 | R-sized-10 |
+| `max` | `fn uint32.max(a: UInt32, b: UInt32) -> UInt32` | 新增 | R-sized-08 |
+| `max_value` | `fn uint32.max_value() -> UInt32` |  |  |
+| `min` | `fn uint32.min(a: UInt32, b: UInt32) -> UInt32` | 新增 | R-sized-08 |
+| `min_value` | `fn uint32.min_value() -> UInt32` |  |  |
+| `modulo` | `fn uint32.modulo(a: UInt32, b: UInt32) -> UInt32` | 新增 | R-sized-10 |
+| `parse` | `fn uint32.parse(s: String) -> Result[UInt32, String]` | 新增 | R-sized-02 |
+| `parse_radix` | `fn uint32.parse_radix(s: String, radix: Int) -> Result[UInt32, String]` | 新增 | R-sized-06 |
+| `pow` | `fn uint32.pow(base: UInt32, exp: Int) -> UInt32` | 新增 | R-sized-10 |
+| `rotate_left` | `fn uint32.rotate_left(a: UInt32, n: Int) -> UInt32` | 新增 | R-int-12 |
+| `rotate_right` | `fn uint32.rotate_right(a: UInt32, n: Int) -> UInt32` | 新增 | R-int-12 |
+| `to_string` | `fn uint32.to_string(x: UInt32) -> String` |  |  |
+| `to_string_radix` | `fn uint32.to_string_radix(x: UInt32, radix: Int) -> String` | 新增 | R-sized-06 |
+| `wrap_add` | `fn uint32.wrap_add(a: UInt32, b: UInt32) -> UInt32` | 新增 | R-int-12 |
+| `wrap_mul` | `fn uint32.wrap_mul(a: UInt32, b: UInt32) -> UInt32` | 新增 | R-int-12 |
+| `wrap_sub` | `fn uint32.wrap_sub(a: UInt32, b: UInt32) -> UInt32` | 新增 | R-int-12 |
+
+撤除（19）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `to_float32` | `float32.from` | R-L0-40 |
+| `to_float64` | `float64.from` | R-L0-40 |
+| `to_int16` | `int16.from` | R-L0-40 |
+| `to_int16_checked` | `int16.from_checked` | R-L0-40 |
+| `to_int16_saturating` | `int16.from_saturating` | R-L0-40 |
+| `to_int32` | `int32.from` | R-L0-40 |
+| `to_int32_checked` | `int32.from_checked` | R-L0-40 |
+| `to_int32_saturating` | `int32.from_saturating` | R-L0-40 |
+| `to_int64` | `int64.from` | R-L0-40 |
+| `to_int8` | `int8.from` | R-L0-40 |
+| `to_int8_checked` | `int8.from_checked` | R-L0-40 |
+| `to_int8_saturating` | `int8.from_saturating` | R-L0-40 |
+| `to_uint16` | `uint16.from` | R-L0-40 |
+| `to_uint16_checked` | `uint16.from_checked` | R-L0-40 |
+| `to_uint16_saturating` | `uint16.from_saturating` | R-L0-40 |
+| `to_uint64` | `uint64.from` | R-L0-40 |
+| `to_uint8` | `uint8.from` | R-L0-40 |
+| `to_uint8_checked` | `uint8.from_checked` | R-L0-40 |
+| `to_uint8_saturating` | `uint8.from_saturating` | R-L0-40 |
+
+<a id="uint64"></a>
+
+## uint64
+
+记录：[L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `band` | `fn uint64.band(a: UInt64, b: UInt64) -> UInt64` | 新增 | R-sized-10 |
+| `bit_length` | `fn uint64.bit_length(x: UInt64) -> Int` | 新增 | R-int-11 |
+| `bnot` | `fn uint64.bnot(x: UInt64) -> UInt64` | 新增 | R-sized-10 |
+| `bor` | `fn uint64.bor(a: UInt64, b: UInt64) -> UInt64` | 新增 | R-sized-10 |
+| `bshl` | `fn uint64.bshl(a: UInt64, n: Int) -> UInt64` | 新增 | R-sized-10 |
+| `bshr` | `fn uint64.bshr(a: UInt64, n: Int) -> UInt64` | 新增 | R-sized-10 |
+| `bxor` | `fn uint64.bxor(a: UInt64, b: UInt64) -> UInt64` | 新增 | R-sized-10 |
+| `byte_swap` | `fn uint64.byte_swap(x: UInt64) -> UInt64` | 新增 | R-sized-10 |
+| `clamp` | `fn uint64.clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64` | 新增 | R-sized-08 |
+| `compare` | `fn uint64.compare(a: UInt64, b: UInt64) -> Int` | 新增 | R-sized-02 |
+| `count_leading_zeros` | `fn uint64.count_leading_zeros(x: UInt64) -> Int` | 新增 | R-sized-10 |
+| `count_ones` | `fn uint64.count_ones(x: UInt64) -> Int` | 新增 | R-sized-10 |
+| `count_trailing_zeros` | `fn uint64.count_trailing_zeros(x: UInt64) -> Int` | 新增 | R-sized-10 |
+| `floor_div` | `fn uint64.floor_div(a: UInt64, b: UInt64) -> UInt64` | 新增 | R-sized-10 |
+| `from` | `fn uint64.from[S: Numeric](x: S) -> UInt64` | 新增 | R-L0-40 |
+| `from_checked` | `fn uint64.from_checked[S: Numeric](x: S) -> UInt64?` | 新增 | R-L0-40 |
+| `from_saturating` | `fn uint64.from_saturating[S: Numeric](x: S) -> UInt64` | 新增 | R-L0-40 |
+| `from_wrapping` | `fn uint64.from_wrapping[S: Integer](x: S) -> UInt64` | 新增 | R-L0-40 |
+| `is_even` | `fn uint64.is_even(x: UInt64) -> Bool` | 新增 | R-sized-10 |
+| `is_odd` | `fn uint64.is_odd(x: UInt64) -> Bool` | 新增 | R-sized-10 |
+| `max` | `fn uint64.max(a: UInt64, b: UInt64) -> UInt64` | 新增 | R-sized-08 |
+| `max_value` | `fn uint64.max_value() -> UInt64` |  |  |
+| `min` | `fn uint64.min(a: UInt64, b: UInt64) -> UInt64` | 新增 | R-sized-08 |
+| `min_value` | `fn uint64.min_value() -> UInt64` |  |  |
+| `modulo` | `fn uint64.modulo(a: UInt64, b: UInt64) -> UInt64` | 新增 | R-sized-10 |
+| `parse` | `fn uint64.parse(s: String) -> Result[UInt64, String]` | 新增 | R-sized-02 |
+| `parse_radix` | `fn uint64.parse_radix(s: String, radix: Int) -> Result[UInt64, String]` | 新增 | R-sized-06 |
+| `pow` | `fn uint64.pow(base: UInt64, exp: Int) -> UInt64` | 新增 | R-sized-10 |
+| `rotate_left` | `fn uint64.rotate_left(a: UInt64, n: Int) -> UInt64` | 新增 | R-int-12 |
+| `rotate_right` | `fn uint64.rotate_right(a: UInt64, n: Int) -> UInt64` | 新增 | R-int-12 |
+| `to_string` | `fn uint64.to_string(x: UInt64) -> String` |  |  |
+| `to_string_radix` | `fn uint64.to_string_radix(x: UInt64, radix: Int) -> String` | 新增 | R-sized-06 |
+| `wrap_add` | `fn uint64.wrap_add(a: UInt64, b: UInt64) -> UInt64` | 新增 | R-int-12 |
+| `wrap_mul` | `fn uint64.wrap_mul(a: UInt64, b: UInt64) -> UInt64` | 新增 | R-int-12 |
+| `wrap_sub` | `fn uint64.wrap_sub(a: UInt64, b: UInt64) -> UInt64` | 新增 | R-int-12 |
+
+撤除（23）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `to_float32` | `float32.from` | R-L0-40 |
+| `to_float64` | `float64.from` | R-L0-40 |
+| `to_int16` | `int16.from` | R-L0-40 |
+| `to_int16_checked` | `int16.from_checked` | R-L0-40 |
+| `to_int16_saturating` | `int16.from_saturating` | R-L0-40 |
+| `to_int32` | `int32.from` | R-L0-40 |
+| `to_int32_checked` | `int32.from_checked` | R-L0-40 |
+| `to_int32_saturating` | `int32.from_saturating` | R-L0-40 |
+| `to_int64` | `int64.from` | R-L0-40 |
+| `to_int64_checked` | `int64.from_checked` | R-L0-40 |
+| `to_int64_saturating` | `int64.from_saturating` | R-L0-40 |
+| `to_int8` | `int8.from` | R-L0-40 |
+| `to_int8_checked` | `int8.from_checked` | R-L0-40 |
+| `to_int8_saturating` | `int8.from_saturating` | R-L0-40 |
+| `to_uint16` | `uint16.from` | R-L0-40 |
+| `to_uint16_checked` | `uint16.from_checked` | R-L0-40 |
+| `to_uint16_saturating` | `uint16.from_saturating` | R-L0-40 |
+| `to_uint32` | `uint32.from` | R-L0-40 |
+| `to_uint32_checked` | `uint32.from_checked` | R-L0-40 |
+| `to_uint32_saturating` | `uint32.from_saturating` | R-L0-40 |
+| `to_uint8` | `uint8.from` | R-L0-40 |
+| `to_uint8_checked` | `uint8.from_checked` | R-L0-40 |
+| `to_uint8_saturating` | `uint8.from_saturating` | R-L0-40 |
+
+<a id="uint8"></a>
+
+## uint8
+
+记录：[L2-sized-numbers.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `band` | `fn uint8.band(a: UInt8, b: UInt8) -> UInt8` | 新增 | R-sized-10 |
+| `bit_length` | `fn uint8.bit_length(x: UInt8) -> Int` | 新增 | R-int-11 |
+| `bnot` | `fn uint8.bnot(x: UInt8) -> UInt8` | 新增 | R-sized-10 |
+| `bor` | `fn uint8.bor(a: UInt8, b: UInt8) -> UInt8` | 新增 | R-sized-10 |
+| `bshl` | `fn uint8.bshl(a: UInt8, n: Int) -> UInt8` | 新增 | R-sized-10 |
+| `bshr` | `fn uint8.bshr(a: UInt8, n: Int) -> UInt8` | 新增 | R-sized-10 |
+| `bxor` | `fn uint8.bxor(a: UInt8, b: UInt8) -> UInt8` | 新增 | R-sized-10 |
+| `byte_swap` | `fn uint8.byte_swap(x: UInt8) -> UInt8` | 新增 | R-sized-10 |
+| `clamp` | `fn uint8.clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8` | 新增 | R-sized-08 |
+| `compare` | `fn uint8.compare(a: UInt8, b: UInt8) -> Int` | 新增 | R-sized-02 |
+| `count_leading_zeros` | `fn uint8.count_leading_zeros(x: UInt8) -> Int` | 新增 | R-sized-10 |
+| `count_ones` | `fn uint8.count_ones(x: UInt8) -> Int` | 新增 | R-sized-10 |
+| `count_trailing_zeros` | `fn uint8.count_trailing_zeros(x: UInt8) -> Int` | 新增 | R-sized-10 |
+| `floor_div` | `fn uint8.floor_div(a: UInt8, b: UInt8) -> UInt8` | 新增 | R-sized-10 |
+| `from` | `fn uint8.from[S: Numeric](x: S) -> UInt8` | 新增 | R-L0-40 |
+| `from_checked` | `fn uint8.from_checked[S: Numeric](x: S) -> UInt8?` | 新增 | R-L0-40 |
+| `from_saturating` | `fn uint8.from_saturating[S: Numeric](x: S) -> UInt8` | 新增 | R-L0-40 |
+| `from_wrapping` | `fn uint8.from_wrapping[S: Integer](x: S) -> UInt8` | 新增 | R-L0-40 |
+| `is_even` | `fn uint8.is_even(x: UInt8) -> Bool` | 新增 | R-sized-10 |
+| `is_odd` | `fn uint8.is_odd(x: UInt8) -> Bool` | 新增 | R-sized-10 |
+| `max` | `fn uint8.max(a: UInt8, b: UInt8) -> UInt8` | 新增 | R-sized-08 |
+| `max_value` | `fn uint8.max_value() -> UInt8` |  |  |
+| `min` | `fn uint8.min(a: UInt8, b: UInt8) -> UInt8` | 新增 | R-sized-08 |
+| `min_value` | `fn uint8.min_value() -> UInt8` |  |  |
+| `modulo` | `fn uint8.modulo(a: UInt8, b: UInt8) -> UInt8` | 新增 | R-sized-10 |
+| `parse` | `fn uint8.parse(s: String) -> Result[UInt8, String]` | 新增 | R-sized-02 |
+| `parse_radix` | `fn uint8.parse_radix(s: String, radix: Int) -> Result[UInt8, String]` | 新增 | R-sized-06 |
+| `pow` | `fn uint8.pow(base: UInt8, exp: Int) -> UInt8` | 新增 | R-sized-10 |
+| `rotate_left` | `fn uint8.rotate_left(a: UInt8, n: Int) -> UInt8` | 新增 | R-int-12 |
+| `rotate_right` | `fn uint8.rotate_right(a: UInt8, n: Int) -> UInt8` | 新增 | R-int-12 |
+| `to_string` | `fn uint8.to_string(x: UInt8) -> String` |  |  |
+| `to_string_radix` | `fn uint8.to_string_radix(x: UInt8, radix: Int) -> String` | 新增 | R-sized-06 |
+| `wrap_add` | `fn uint8.wrap_add(a: UInt8, b: UInt8) -> UInt8` | 新增 | R-int-12 |
+| `wrap_mul` | `fn uint8.wrap_mul(a: UInt8, b: UInt8) -> UInt8` | 新增 | R-int-12 |
+| `wrap_sub` | `fn uint8.wrap_sub(a: UInt8, b: UInt8) -> UInt8` | 新增 | R-int-12 |
+
+撤除（11）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `to_float32` | `float32.from` | R-L0-40 |
+| `to_float64` | `float64.from` | R-L0-40 |
+| `to_int16` | `int16.from` | R-L0-40 |
+| `to_int32` | `int32.from` | R-L0-40 |
+| `to_int64` | `int64.from` | R-L0-40 |
+| `to_int8` | `int8.from` | R-L0-40 |
+| `to_int8_checked` | `int8.from_checked` | R-L0-40 |
+| `to_int8_saturating` | `int8.from_saturating` | R-L0-40 |
+| `to_uint16` | `uint16.from` | R-L0-40 |
+| `to_uint32` | `uint32.from` | R-L0-40 |
+| `to_uint64` | `uint64.from` | R-L0-40 |
+
+<a id="unix"></a>
+
+## unix
+
+新模块（在 L1 新增）。
+记录：[L2-unix.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-unix.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `accept` | `effect fn unix.accept(listener: Fd) -> Fd` | 新增。移入 | R-unix-01 |
+| `connect` | `effect fn unix.connect(path: String) -> Fd` | 新增。从 `net.unix_connect` 移入 | R-unix-01 |
+| `listen` | `effect fn unix.listen(path: String) -> Fd` | 新增。移入 | R-unix-01 |
+| `select` | `effect fn unix.select(xs: List[Fd], timeout_ms: Int) -> List[Fd]` | 新增。移入，并吸收 `unix_poll` | R-unix-01、R-unix-02 |
+| `shm_create` | `effect fn unix.shm_create(size: Int) -> Fd` | 新增。移入 | R-unix-01 |
+| `shm_read` | `effect fn unix.shm_read(fd: Fd, offset: Int, len: Int) -> Bytes` | 新增。移入 | R-unix-01 |
+| `shm_resize` | `effect fn unix.shm_resize(fd: Fd, size: Int) -> Unit` | 新增。移入 | R-unix-01 |
+| `shm_write` | `effect fn unix.shm_write(fd: Fd, offset: Int, data: Bytes) -> Unit` | 新增。移入 | R-unix-01 |
+| `take_fds` | `effect fn unix.take_fds(sock: Fd) -> List[Fd]` | 新增。移入 | R-unix-01 |
+| `write_fds` | `effect fn unix.write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit` | 新增。移入 | R-unix-01、R-unix-04 |
+
+<a id="url"></a>
+
+## url
+
+记录：[L2-url.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-url.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `build_query` | `fn url.build_query(xs: List[(String, String)]) -> String` |  | R-url-02 |
+| `decode_component` | `fn url.decode_component(s: String) -> Result[String, String]` |  | R-url-01 |
+| `decode_form` | `fn url.decode_form(s: String) -> Result[String, String]` | 新增。替代 `http.url_decode` | R-url-01 |
+| `encode_component` | `fn url.encode_component(s: String) -> String` |  | R-url-01 |
+| `encode_form` | `fn url.encode_form(s: String) -> String` | 新增 | R-url-01 |
+| `parse` | `fn url.parse(s: String) -> Result[Url, String]` | 语义变更：接收 userinfo，给 `Url` 增加 `userinfo` 字段 | R-url-05 |
+| `parse_query` | `fn url.parse_query(query: String) -> Result[List[(String, String)], String]` | 新增 | R-url-02 |
+| `resolve` | `fn url.resolve(base: Url, ref: String) -> Result[Url, String]` | 新增 | R-url-03 |
+| `to_string` | `fn url.to_string(u: Url) -> String` |  |  |
+
+撤除（1）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `query_pairs` | `parse_query` | R-url-02 |
+
+<a id="uuid"></a>
+
+## uuid
+
+新模块（在 L1 新增）。
+记录：[L2-uuid.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-uuid.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `compare` | `fn uuid.compare(a: Uuid, b: Uuid) -> Int` | 新增 | R-uuid-01 |
+| `from_bytes` | `fn uuid.from_bytes(b: Bytes) -> Result[Uuid, String]` | 新增 | R-uuid-01 |
+| `parse` | `fn uuid.parse(s: String) -> Result[Uuid, String]` | 新增 | R-uuid-01 |
+| `to_bytes` | `fn uuid.to_bytes(u: Uuid) -> Bytes` | 新增 | R-uuid-01 |
+| `to_string` | `fn uuid.to_string(u: Uuid) -> String` | 新增 | R-uuid-01 |
+| `v4` | `effect fn uuid.v4() -> Uuid` | 新增 | R-uuid-01 |
+| `v7` | `effect fn uuid.v7() -> Uuid` | 新增 | R-uuid-01 |
+
+<a id="value"></a>
+
+## value
+
+记录：[L2-value.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-value.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `array` | `fn value.array(xs: List[Value]) -> Value` |  | R-value-02 |
+| `as_array` | `fn value.as_array(v: Value) -> Result[List[Value], String]` |  | R-value-02 |
+| `as_bool` | `fn value.as_bool(v: Value) -> Result[Bool, String]` |  | R-value-02 |
+| `as_float` | `fn value.as_float(v: Value) -> Result[Float, String]` |  | R-value-02 |
+| `as_int` | `fn value.as_int(v: Value) -> Result[Int, String]` |  | R-value-02 |
+| `as_object` | `fn value.as_object(v: Value) -> Result[List[(String, Value)], String]` | 新增 | R-value-02 |
+| `as_string` | `fn value.as_string(v: Value) -> Result[String, String]` |  | R-value-02 |
+| `bool` | `fn value.bool(b: Bool) -> Value` |  | R-value-02 |
+| `float` | `fn value.float(f: Float) -> Value` |  | R-value-02 |
+| `get` | `fn value.get(v: Value, key: String) -> Value?` | 新增 | R-value-07 |
+| `get_array` | `fn value.get_array(v: Value, key: String) -> List[Value]?` | 新增。从 `json.get_array` 移入 | R-value-02 |
+| `get_bool` | `fn value.get_bool(v: Value, key: String) -> Bool?` | 新增。从 `json.get_bool` 移入 | R-value-02 |
+| `get_float` | `fn value.get_float(v: Value, key: String) -> Float?` | 新增。从 `json.get_float` 移入 | R-value-02 |
+| `get_int` | `fn value.get_int(v: Value, key: String) -> Int?` | 新增。从 `json.get_int` 移入 | R-value-02 |
+| `get_object` | `fn value.get_object(v: Value, key: String) -> List[(String, Value)]?` | 新增 | R-value-02 |
+| `get_path` | `fn value.get_path(v: Value, p: Path) -> Value?` | 新增。从 `json.get_path` 移入 | R-value-03 |
+| `get_string` | `fn value.get_string(v: Value, key: String) -> String?` | 新增。从 `json.get_string` 移入 | R-value-02 |
+| `index` | `fn value.index(p: Path, i: Int) -> Path` | 新增。从 `json.index` 移入。负值越界 | R-value-03 |
+| `int` | `fn value.int(n: Int) -> Value` |  | R-value-02 |
+| `key` | `fn value.key(p: Path, name: String) -> Path` | 新增。从 `json.field` 移入 | R-value-03 |
+| `merge` | `fn value.merge(a: Value, b: Value) -> Value` |  |  |
+| `null` | `fn value.null() -> Value` |  |  |
+| `object` | `fn value.object(xs: List[(String, Value)]) -> Value` |  | R-value-02 |
+| `omit` | `fn value.omit(v: Value, keys: List[String]) -> Value` |  |  |
+| `pick` | `fn value.pick(v: Value, keys: List[String]) -> Value` |  |  |
+| `remove_path` | `fn value.remove_path(v: Value, p: Path) -> Value` | 新增。从 `json.remove_path` 移入 | R-value-03 |
+| `root` | `fn value.root() -> Path` | 新增。从 `json.root` 移入 | R-value-03 |
+| `set_path` | `fn value.set_path(v: Value, p: Path, x: Value) -> Result[Value, String]` | 新增。从 `json.set_path` 移入 | R-value-03 |
+| `string` | `fn value.string(s: String) -> Value` | 改名（原 `str`） | R-value-08 |
+
+撤除（5）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `field` | `value.get`（Option） | R-value-07 |
+| `keys` | `as_object` | R-value-04 |
+| `stringify` | `json.stringify` | R-value-01 |
+| `to_camel_case` | 无替代（使用者自行编写） | R-value-05 |
+| `to_snake_case` | 无替代（使用者自行编写） | R-value-05 |
+
+<a id="zlib"></a>
+
+## zlib
+
+记录：[L2-zlib.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-zlib.md)
+
+| 函数 | 签名（重设计后） | 变化 | 提案 |
+| --- | --- | --- | --- |
+| `compress` | `effect fn zlib.compress(b: Bytes) -> Bytes` |  | R-zlib-03 |
+| `compress_level` | `effect fn zlib.compress_level(b: Bytes, level: Int) -> Bytes` |  | R-zlib-03 |
+| `decompress` | `fn zlib.decompress(b: Bytes) -> Result[Bytes, String]` | 语义变更：去掉 effect，改为 `fn … -> Result[Bytes, String]`。输出超过 256 MiB 则 err | R-zlib-02、R-zlib-04 |
+| `decompress_max` | `fn zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` | 新增 | R-zlib-04 |
+| `deflate` | `effect fn zlib.deflate(b: Bytes) -> Bytes` |  | R-zlib-03 |
+| `deflate_level` | `effect fn zlib.deflate_level(b: Bytes, level: Int) -> Bytes` |  | R-zlib-03 |
+| `gunzip` | `fn zlib.gunzip(b: Bytes) -> Result[Bytes, String]` | 语义变更：去掉 effect，改为 `fn … -> Result[Bytes, String]`。输出超过 256 MiB 则 err | R-zlib-02、R-zlib-04 |
+| `gunzip_max` | `fn zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` | 新增 | R-zlib-04 |
+| `gzip` | `effect fn zlib.gzip(b: Bytes) -> Bytes` |  | R-zlib-03 |
+| `inflate` | `fn zlib.inflate(b: Bytes) -> Result[Bytes, String]` | 语义变更：去掉 effect，改为 `fn … -> Result[Bytes, String]`。输出超过 256 MiB 则 err | R-zlib-02、R-zlib-04 |
+| `inflate_max` | `fn zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` | 新增 | R-zlib-04 |
+
+撤除（2）：
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `adler32` | `hash.adler32` | R-zlib-01 |
+| `crc32` | `hash.crc32` | R-zlib-01 |
+
+<a id="errorモジュールごと撤去"></a>
+
+## error（整个模块撤除）
+
+| 函数 | 替代 | 提案 |
+| --- | --- | --- |
+| `chain` | `"${a}: ${b}"`（字符串插值） | R-error-01 |
+| `context` | `result.map_err(r, (e) => "${msg}: ${e}")` | R-error-01、R-error-02 |
+| `message` | `match`，或 `result.to_err_option(r) ?? ""` | R-error-01 |
+
+
+<a id="採らなかった案保留の案と理由"></a>
+
+## 未采用和保留待定的提案及原因
+
+为避免审查时重复同样指摘，以下列出仍有效的 × 和保留待定提案（54 项），附原因的前一至两句。全文见各页相应提案。
+
+| 提案 | 内容 | 判定 | 理由 |
+|---|---|---|---|
+| [R-L0-18](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L0-conventions.md#r-l0-18-型を変換する演算子-as-は足さない---不採用) | 不添加类型转换运算符 `as` | × 不采用 | 数值转换已有 R-L0-08 的具名函数，这会违反 R-L0-01（一个职责只用一种拼写）。其他三种用途在 Almide 的类型设计中要么不需要，要么违背目的。 |
+| [R-L1-20](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L1-categories.md#r-l1-20-固定幅の数のモジュールint8uint64float32float64---統合しない) | 固定宽度数值模块（`int8`～`uint64`、`float32`、`float64`） | × 不合并 | (a) 每种类型各设模块的语言为 0。不过，多数语言把方法附在类型上。 |
+| [R-L1-21](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L1-categories.md#r-l1-21-compute-と-duration---統合しないadr-0001) | `compute` 与 `duration` | × 不合并（ADR-0001） | ADR-0001 将确定性计算时间（`Compute`）与实际时间（`Duration`）规定为互不可转换的不同类型。 |
+| [R-L1-23](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L1-categories.md#r-l1-23-hex-と-base64-を別のモジュールのまま残す---まとめない) | 让 `hex` 与 `base64` 保持独立模块 | × 不归并 | 5 种语言将其合在一处，但合并后的模块名称不一致（Elixir 是 `Base`，Deno 是 `@std/encoding`，Python 是 `base64` 中的 `b16encode`）。 |
+| [R-L1-29](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L1-categories.md#r-l1-29-html-と-testing---動かさない) | `html` 与 `testing` | × 不移动 | `html` 有 5 个函数。“将转义后的 HTML 设为独立类型”（SafeHtml）与 Go `html/template` 的思路相同，通过类型防止混淆。 |
+| [R-base64-02](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-base64.md#r-base64-02--を付けない符号化を足す---不採用) | 添加不带 `=` 的编码 | × 不采用 | 5 种语言支持，但都通过参数或配置（`padding: false`、`omitPadding`），而不是另设名称。 |
+| [R-base64-03](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-base64.md#r-base64-03-hex-とモジュールをまとめる---不採用r-l1-23) | 与 hex 合并模块 | × 不采用（R-L1-23） | 如 R-L1-23 所述，合并模块的名称没有多数派。 |
+| [R-bigint-02](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-bigint.md#r-bigint-02-123n-のような-bigint-のリテラルを足す---不採用) | 添加类似 `123n` 的 BigInt 字面量 | × 不采用 | 不添加。写作 `bigint.parse("123…")!` 或 `int.to_bigint(123)`。 |
+| [R-bigint-03](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-bigint.md#r-bigint-03-int-と-bigint-を混ぜた演算を自動で広げる---不採用) | 自动扩宽混合 `Int` 与 `BigInt` 的运算 | × 不采用 | 不这样做。`a + b` 一侧是 `Int`、另一侧是 `BigInt` 时产生类型错误，并在诊断提示中给出 `int.to_bigint(a)`。 |
+| [R-bytes-21](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-bytes.md#r-bytes-21-bytesskip-を-next_-の形にする---不採用) | 将 `bytes.skip` 改为 `next_` 形式 | × 不采用 | `skip` 不读取值，只推进位置，所以没有 `(値, 次の状態)`（值、下一个状态）中的值。返回 `(Unit, Int)` 只会多出调用方需要丢弃的值。 |
+| [R-bytes-24](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-bytes.md#r-bytes-24-bytesset-と-put_u8-を-1-つにする---不採用) | 统一 `bytes.set` 与 `put_u8` | × 不采用 | `set(b, i, v) -> Bytes` 返回副本，`put_u8(mut b, pos, v)` 原地修改，两者构成 R-L0-04 的配对：默认复制，原地修改使用规定动词。 |
+| [R-compute-02](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-compute.md#r-compute-02-duration-と統合するまたは読み出し関数を足す---不採用) | 与 `duration` 合并，或添加读出函数 | × 不采用 | 两者都不做，遵循 ADR-0001 的决定（两种时钟为互不可转换的独立类型，S7 省略读出）及 L1 R-L1-21。 |
+| [R-datetime-02](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-datetime.md#r-datetime-02-時刻専用の型instant-などを作る---不採用) | 创建时刻专用类型（如 `Instant`） | × 不采用 | R-L0-00。依据 R-L0-14 第 4 项，若旧写法变成类型错误，现在可以在保留名称的同时改变类型。 |
+| [R-datetime-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-datetime.md#r-datetime-04-weekday-を数を返す関数にする---不採用) | 让 `weekday` 返回数值 | × 不采用 | R-L0-00。返回类型改为 `Int` 后，旧写法（`== "Monday"`）会产生类型错误，因此 R-L0-14 第 4 项允许此变更。 |
+| [R-datetime-05](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-datetime.md#r-datetime-05-format-の--を--にする---不採用) | 将 `format` 的 `%%` 改为 `%` | × 不采用 | R-L0-14 第 4 项禁止保留同名、却让旧写法通过类型检查后得到不同结果的变更；改变 `%%` 输出恰好属于此类。 |
+| [R-duration-02](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-duration.md#r-duration-02-読み出し関数小数の構築子日の単位を足す---不採用) | 添加读出函数、小数构造器、天单位 | × 不采用 | 不添加。遵循 ADR-0001 S7 台账，也与 2026-10-16 撤回读出函数提案的裁定一致。 |
+| [R-duration-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-duration.md#r-duration-04-min分を-minutes-などの完全な綴りにする---不採用) | 把 `min`（分钟）改为 `minutes` 等完整拼写 | × 不采用 | 六个单位的拼写由 ADR-0001 S2 规定。如果把 `duration.min(a, b)` 当成求最小值来写，参数个数不符会报 E004，不会悄悄变成其他值。 |
+| [R-error-02](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-error.md#r-error-02-errorcontext-を-resultcontext-として残す---不採用) | 以 `result.context` 保留 `error.context` | × 不采用 | R-L0-01。ADR-0004 Alternatives 7 已因此否决 `result.context`（#1104 以否决关闭）。 |
+| [R-float-06](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-float.md#r-float-06-floatminmax-の-nan-の扱いを-listminmax-とそろえる--保留) | 让 `float.min`/`max` 的 NaN 处理与 `list.min`/`max` 一致 | 保留待定 | 传播 NaN 的语言（Go、JS、Kotlin、OCaml）和忽略 NaN 的语言（Rust、Swift）都不足 5 种；而且这涉及改变契约 C-049、C-306 所定行为。 |
+| [R-float-08](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-float.md#r-float-08-float-の床方向の剰余-floatmod-を足す---不採用) | 添加 Float 向下取整余数 `float.mod` | × 不采用 | 为 Float 提供向下取整余数的只有 Python `%`、Kotlin `mod`、Gleam `float.modulo` 三种，未达到 5 种语言的标准。 |
+| [R-fs-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-fs.md#r-fs-04-59-以上が持つが-almide-に無い役割---不採用いまは足さない) | 至少 5/9 语言拥有而 Almide 缺少的职责 | × 不采用（目前不添加） | 各职责要么现有函数足够（`mkdir` 用 `mkdir_p`，句柄用逐行流族和 `append`），要么 WASI 没有路径（chmod），要么尚无需求。各职责原因见下方各行。 |
+| [R-heap-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-heap.md#r-heap-04-new_minnew_max-に分ける---不採用) | 拆为 `new_min` 与 `new_max` | × 不采用 | 默认“最小值优先”，与 Python、Go、OCaml、Kotlin 相同（R-L1-02）。最大值优先可写 `heap.new_with((a, b) => int.compare(b, a))`（不用差值 `b - a`，因为会在 `Int` 边界溢出），或用 `new_by`。 |
+| [R-hex-02](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-hex.md#r-hex-02-decode_upper-を足す---不採用) | 添加 `decode_upper` | × 不采用 | 只有 Python `b16decode` 把区分并拒绝不同大小写的解码设为标准默认行为 (F)。按规则 2，拼写差异由 `decode` 接受。 |
+| [R-html-02](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-html.md#r-html-02-unescape-を足す---不採用) | 添加 `unescape` | × 不采用 | 标准库中拥有它的仅 Go、Python、Deno 三种，未达到 L1 的至少 5 种标准。读取 HTML 属于 package（HTML 解析器）的职责。 |
+| [R-html-03](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-html.md#r-html-03-safehtml-の列をまとめる-htmljoin-を足す---不採用) | 添加合并 `SafeHtml` 序列的 `html.join` | × 不采用 | 只有两种语言拥有转义类型，不足 5 种标准。可写 `list.fold(xs, html.empty(), html.concat)`。 |
+| [R-int-05](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-int.md#r-int-05-bandborbxor-などを多数派の綴りに改名する---不採用改名しないr-int-10-で確かめた) | 将 `band`/`bor`/`bxor` 等改为多数派拼写 | × 不采用（不改名，R-int-10 已核对） | R-L0-00。用函数名表达位运算的四种语言拼写分散：Gleam `bitwise_and`、Elixir `band`、OCaml `logand`、Kotlin `and`，全部 (F)。 |
+| [R-list-12](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-list.md#r-list-12-多数派に届かない役割は足さない---不採用) | 不添加未达多数派的职责 | × 不采用 | 与 L1 “添加类别标准”相同的 5/9 界线，以及 R-L0-01。 |
+| [R-list-18](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-list.md#r-list-18-listrepeat-を列全体の繰り返しにする---不採用) | 让 `list.repeat` 重复整个序列 | × 不采用 | `string.repeat` 与 `bytes.repeat` 重复整个序列，而 `list.repeat(v, n)` 将一个值排列 n 次。 |
+| [R-map-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-map.md#r-map-04-mapmap-を-map_values-に改名するまたはコールバックを-k-v-にする--保留六巡目に--から変更dojo-で測る) | 将 `map.map` 改名为 `map_values`，或将回调改为 `(K, V)` | 保留待定（第六轮从 × 改为此项，用 Dojo 测量） | 原理由是“写错也会类型报错”，但按 R-L0-36，仅此不足以否决。候选有三种：现有 `map.map` 的 `(V)`、把 `map.map` 改为 `(K, V)`、改名 `map_values`。其他语言也分散：Swift/Kotlin `mapValues`，OCaml `map`（值）与 `mapi`（键和值），Gleam `map_values`（键和值）。 |
+| [R-map-05](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-map.md#r-map-05-取り出して消す-pop合わせ方つきの-merge_withキーを変換する-map_keys-を足す---不採用) | 添加取出并删除的 `pop`、可指定合并方式的 `merge_with`、转换键的 `map_keys` | × 不采用 | R-L0-04（`pop` 是原地从末尾取出的动词）、L1 添加标准（至少 5/9）、R-L0-00。 |
+| [R-option-03](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-option.md#r-option-03-抜けている役割の関数を足さない---不採用) | 不添加缺失职责的函数 | × 不采用 | R-L0-00、R-L0-01、R-L0-06。 |
+| [R-random-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-random.md#r-random-04-randomint-の-max--min-を-abort-にする---不採用) | 让 `random.int` 在 `max < min` 时 abort | × 不采用 | 不改变。`max <= min` 时返回 `min` 并非隐藏失败的值，而是范围缩成一点时的规定答案，也不属于 R-L0-06 第 4 项（可能失败的构造、转换不返回哨兵值）的对象。 |
+| [R-random-06](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-random.md#r-random-06-randomintmin-max-の上端を含むことを変える---不採用文書だけ) | 改变 `random.int(min, max)` 包含上界的行为 | × 不采用（仅文档） | 虽然不含上界的语言较多（Go、Kotlin、OCaml、Gleam、Rust），R-L0-14.4 不允许同名改变含义。 |
+| [R-regex-03](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-regex.md#r-regex-03-パイプの取り違えを宣言の印で止める---不採用r-regex-02-の型で止まるため) | 用声明标记阻止管道混淆 | × 不采用（R-regex-02 的类型已能阻止） | 加标记与使用不同类型一样，错误调用都会变成编译错误，生存率不变，因此没有理由为此添加新的语言机制。 |
+| [R-regex-06](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-regex.md#r-regex-06-名前つきグループを足さない---不採用) | 不添加命名组 | × 不采用 | 不添加 `(?<name>...)` 或按名称取出的 API。 |
+| [R-regex-09](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-regex.md#r-regex-09-対象の文字列を第-1-引数にする---不採用) | 让目标字符串作为第一个参数 | × 不采用 | `regex` 模块的主语是 `Regex`，遵循 R-L0-02、R-L0-03：函数放在主语类型的模块中，主语排在首位。 |
+| [R-result-02](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-result.md#r-result-02-resultfilter-の-3-引数を据え置く---不採用撤去も改名もしない) | 保持 `result.filter` 的三个参数 | × 不采用（既不移除，也不改名） | R-L0-00、R-L0-14 第 4 项（禁止替换含义）。 |
+| [R-result-03](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-result.md#r-result-03-resultto_err_option-を改名しない---不採用) | 不改名 `result.to_err_option` | × 不采用 | R-L0-00、R-L0-07。 |
+| [R-result-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-result.md#r-result-04-抜けている役割の関数を足さない---不採用) | 不添加缺失职责的函数 | × 不采用 | R-L0-00、R-L0-01、R-L0-06。 |
+| [R-set-02](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-set.md#r-set-02-setis_superset-を足す---不採用) | 添加 `set.is_superset` | × 不采用 | R-L0-01（只是交换参数的同一判断不设两种拼写）、L1 添加标准（至少 5/9）。 |
+| [R-set-03](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-set.md#r-set-03-setpartition-を足す---不採用) | 添加 `set.partition` | × 不采用 | L1 添加标准（至少 5/9）、完整性规则 1（family 的七个成员不含 `partition`）。 |
+| [R-set-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-set.md#r-set-04-setinsert-を-setadd-に改名する---不採用) | 把 `set.insert` 改名为 `set.add` | × 不采用 | R-L0-00（没有多数派则不动）、R-L0-04（所有模块统一将 `insert` 用作复制侧动词）。 |
+| [R-sized-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md#r-sized-04-floatto_整数_saturating-8-関数を撤去する---取り消しr-l0-32) | 移除八个 `float.to_<整数>_saturating` 函数 | × 撤回（R-L0-32） | R-L0-32 使无标记的 `float.to_int8` 等在超出范围时 abort，因此 `_saturating` 不再是同义词，而成为唯一保留现有饱和行为的单元。 |
+| [R-string-08](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-string.md#r-string-08-stringsplit_whitespace-を足す---不採用) | 添加 `string.split_whitespace` | × 不采用 | 只有 4/9 拥有专用函数：Rust (F)、Go `Fields` (F)、Python `split()` (F)、Elixir `split/1` (F)，未达 L1 “至少 5 种语言”标准。 |
+| [R-string-10](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-string.md#r-string-10-指定文字の-trimsplitnコードポイントのリスト化を足す---不採用) | 添加指定字符 trim、`splitn`、代码点列表化 | × 不采用 | R-L0-00、L1 判定标准。 |
+| [R-string-13](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-string.md#r-string-13-stringcount-を述語で数える形にする---不採用) | 让 `string.count` 按谓词计数 | × 不采用 | 字符串“计数”的多数派含义是子串出现次数：Rust `matches().count()`、Go `strings.Count`、Python `str.count`、Elixir `String.count` 等。 |
+| [R-url-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-url.md#r-url-04-url-の欄を-option-にする---不採用) | 让 `Url` 字段变为 Option | × 不采用 | 需要区分 `query`、`fragment` “不存在”与“空”的场景较少；改变字段类型会破坏所有 `u.query` 读取（R-L0-14 第 4 项）。 |
+| [R-zlib-03](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-zlib.md#r-zlib-03-圧縮の出力を両-target-で同じにしeffect-を外す--保留) | 让两个 target 的压缩输出一致，并去除 `effect` | 保留待定 | 将 native 的 host zlib 换成 self-host 编码器，预计速度和压缩率会下降。 |
+| [R-env-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-env.md#r-env-04-待ち時間タイムアウトの引数を-duration-にする---不採用) | 将等待和超时参数改为 `Duration` | × 不采用 | 九种语言中，以时间类型接受等待时长的只有 Go（`time.Duration`）、Rust（`Duration`）、Swift（`Duration`）、Kotlin（`delay` 的 `Duration` 版本）四种，未达五种标准。 |
+| [R-heap-05](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-heap.md#r-heap-05-heapfoldheapfind-を足す---不採用) | 添加 `heap.fold`、`heap.find` | × 不采用 | 按内部排列（数组顺序）迭代会暴露该排列，改变实现就改变结果。按取出顺序（升序）迭代则隐藏了从名称看不出的排序。 |
+| [R-result-06](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-result.md#r-result-06-resultcollect-を戻す---不採用) | 恢复 `result.collect` | × 不采用 | 这是 ADR-0007 D1 移除的函数。可能失败的元素序列，写成在 `list.map` 回调中使用 `!` 的形式（遇到首个 err 就停止。 |
+| [R-int-08](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-int.md#r-int-08-intto_hex-を-to_string_radixx-16-にまとめる---不採用) | 把 `int.to_hex` 归并进 `to_string_radix(x, 16)` | × 不采用 | 两者在负数时结果不同，不是同义词。`int.to_hex(-1)` 返回 64 bit 位模式的十六进制（`"ffffffffffffffff"`），`int.to_string_radix(-1, 16)` 返回带符号形式（`"-1"`）。 |
+| [R-int-09](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-int.md#r-int-09-intsign-と-floatsignum-の綴りを-1-つにする---不採用) | 统一 `int.sign` 与 `float.signum` 的拼写 | × 不采用 | 零的处理不同，同名会重新引入 R-float-05 所避免的错误。`int.sign(0)`、`bigint.sign(0)` 是 0，`float.signum(0.0)` 是 1.0，与 Rust `signum` 相同。 |
+| [R-bytes-26](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-bytes.md#r-bytes-26-bytesget_u8-と-getappend_u8-と-push-を-1-つにする---不採用役割の違いを明記) | 统一 `bytes.get_u8` 与 `get`、`append_u8` 与 `push` | × 不采用（明确职责区别） | 两对结果相同，但所属族不同。`get`、`push` 属于容器族（与 `list.get`、`deque.push` 同形）；`get_u8`、`append_u8` 属于编码族，是 `get_u16_le`、`append_u16_le` … 中的单字节单元。 |
+
+<a id="後の案で判定を変えた案"></a>
+
+## 被后续提案改变判定的提案
+
+以下 11 项先被否决或保留待定，后由后续提案改为采用或替换。当前有效的是右列提案，不再列入上表。
+
+| 提案 | 内容 | 原判定 | 当前有效提案 |
+|---|---|---|---|
+| [R-L0-20](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L0-conventions.md#r-l0-20-critical-プロファイルで黙って折り返す-to_型-を拒む---取り消し-r-l0-32-で解消) | 在 critical profile 拒绝静默回绕的 `to_<型>` | × 撤回（→ R-L0-32 已解决） | R-L0-32 |
+| [R-L0-21](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L0-conventions.md#r-l0-21-無印の-to_型-をはみ出したら失敗する版に変える--保留--r-l0-32r-l0-34-で解消) | 将无标记 `to_<型>` 改为超出范围即失败的版本 | 保留待定 → R-L0-32、R-L0-34 已解决 | R-L0-32・R-L0-34 |
+| [R-hash-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-hash.md#r-hash-04-_hex-のセルの入力を-bytes-に変える---不採用-r-hash-05-で採用に変更) | 将 `_hex` 单元的输入改为 Bytes | × 不采用（→ R-hash-05 改为采用） | R-hash-05 |
+| [R-http-07](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-http.md#r-http-07-応答のヘッダの-get_header-と要求の-req_header-の不揃い---不採用規則を書く-r-http-12-で解消) | 响应头 `get_header` 与请求头 `req_header` 不一致 | × 不采用（写明规则；→ R-http-12 已解决） | R-http-12 |
+| [R-io-04](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-io.md#r-io-04-標準入力をバイト列で全部読む-ioread_all_bytes-を足す---取り消し十三巡目ioread_to_endiostdin-で書く--r-io-05) | 添加以字节序列读取全部标准输入的 `io.read_all_bytes` | × 撤回（第十三轮，写作 `io.read_to_end(io.stdin())` → R-io-05） | R-io-05 |
+| [R-map-03](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-map.md#r-map-03-mapto_list-を足す---不採用-r-map-07-で採用に変更) | 添加 `map.to_list` | × 不采用（→ R-map-07 改为采用） | R-map-07 |
+| [R-matrix-07](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-matrix.md#r-matrix-07-mul-を-matmul-に改名し要素ごとの積を足す---不採用-r-matrix-14-で--に置き換え) | 将 `mul` 改名为 `matmul`，添加逐元素乘法 | × 不采用（→ R-matrix-14 改为 `*`） | R-matrix-14 |
+| [R-sized-05](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md#r-sized-05-固定幅のモジュールをまとめる算術関数を足す---不採用算術の部分は--r-sized-10-で見直し) | 合并固定宽度模块、添加算术函数 | × 不采用（算术部分由 → R-sized-10 重新审视） | R-sized-10 |
+| [R-sized-07](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-sized-numbers.md#r-sized-07-float32float64-に-is_nan-などの判定を足す---不採用-r-sized-08-で見直し) | 为 `float32`、`float64` 添加 `is_nan` 等判断 | × 不采用（→ R-sized-08 重新审视） | R-sized-08 |
+| [R-value-06](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L2-value.md#r-value-06-構築子-str-を-string-に改名する---不採用-r-value-08-で採用に変更) | 将构造器 `str` 改名为 `string` | × 不采用（→ R-value-08 改为采用） | R-value-08 |
+| [R-L0-41](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/stdlib-redesign/L0-conventions.md#r-l0-41-ビット演算を演算子にし-を関数の合成から外す---取り消し十二巡目記号の意味を入れ替えないため--r-l0-43) | 将位运算改为运算符，把 `>>` 从函数组合中移除 | × 撤回（第十二轮，为避免交换符号含义 → R-L0-43） | R-L0-43 |
+

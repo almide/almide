@@ -20,6 +20,8 @@ TCP、UDP、ホスト名検索と IP アドレス。`wasi:sockets` が扱うも�
 
 **ターゲット。** ネイティブは全関数に対応する。`almide run --target wasm`（組込みホスト）も同じ。`almide build --target wasm` は TCP、UDP、`lookup_host` 関数を呼ぶプログラムを、`wasi:sockets@0.3` を使う WASI 0.3 コンポーネントとしてビルドし、必要な権限を表示する。WASI preview 1 にはソケットがないためフラグは不要。ネットワークを許可して実行する（`wasmtime run -S inherit-network -S allow-ip-name-lookup app.wasm`）。そうしなければ各 bind と connect は `<call>(<host>:<port>): permission denied` となる。ソケット呼出しがないプログラムは従来通り preview 1 モジュールになる。`parse_ip`、`ip_to_string`、`is_loopback` は純粋で、どこでも実行できる。
 
+<a id="tcp-client"></a>
+
 ## TCP クライアント
 
 ### `net.tcp_connect(host: String, port: Int) -> Result[TcpStream, String]`
@@ -50,6 +52,8 @@ effect fn main() -> Unit = {
 
 `io.close` でストリームを閉じた後は `false`。相手側のクローズはここでは分からず、`io.read` が空になることで現れる。
 
+<a id="timeouts-and-readiness"></a>
+
 ## タイムアウトと読取り可能状態
 
 ### `net.tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String]`
@@ -77,6 +81,8 @@ effect fn main() -> Unit = {
   io.close(s)!
 }
 ```
+
+<a id="tcp-server"></a>
 
 ## TCP サーバー
 
@@ -143,6 +149,8 @@ effect fn main() -> Unit = {
 }
 ```
 
+<a id="names-and-addresses"></a>
+
 ## 名前とアドレス
 
 アドレスは `type IpAddr = V4(Int, Int, Int, Int) | V6(List[Int])` の値。4 オクテット、または 8 個の 16 ビットグループ。
@@ -187,6 +195,8 @@ loopback
 ```
 
 
+
+<a id="signature-index-16-functions"></a>
 
 ## シグネチャ索引（16 関数）
 
@@ -255,6 +265,8 @@ net.ip_to_string(ip: IpAddr) -> String
 // @since unreleased
 net.is_loopback(ip: IpAddr) -> Bool
 ```
+
+<a id="type-index-2-types"></a>
 
 ## 型索引（2 型）
 

@@ -10,6 +10,8 @@
 
 `Float32` 具有 binary32 精度：转换和算术结果均舍入到该精度。超出 binary32 有限范围的转换会变为无穷大，而不是错误。
 
+<a id="conversions"></a>
+
 ## 转换
 
 转换以其构造的类型命名（R-L0-40）：`float32.from(x)` 接受任意数值输入，包括 `Int`、有指定位宽的整数、`Float` 或有指定位宽的浮点数。
@@ -32,6 +34,8 @@ let text = x.to_string()
 确切的 API 列表见下方保留的原文机器管理签名索引（本译文是固定快照，不由机器维护）。
 
 > 溢出得到 inf 是本 Float32 原文的说明，不将其推广为所有 Float 的 parse 行为；签名索引对 float.parse 语法的引用也保持原文含义。
+
+<a id="signature-index-24-functions"></a>
 
 ## 原文固定快照 API 索引（24个函数）
 

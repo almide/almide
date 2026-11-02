@@ -1,3 +1,5 @@
+<a id="stability--the-freeze-declaration-and-the-breaking-change-policy"></a>
+
 # 稳定性 — 冻结声明与破坏性变更政策
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](STABILITY.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](STABILITY.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](STABILITY.zh-CN.md)
@@ -7,6 +9,8 @@
 > 这是[固定原文](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/STABILITY.md)的非规范读者译文。规范效力属于英文原文，而非本译文。本页是不自动同步的固定快照；未独立验证历史状态、保证或未完成项目是否仍为当前情况。
 
 > 声明于2026-08-20（所有者决定；安排在 ADR-0012 D2 落地之后——`-> T!E` 是本声明之前最后一个须通过关卡的语法表面变更）。本页的**英文原文具有规范性**。跟踪：关键任务攻击清单（#1514）中的 A0-1，由 #530 / #1485 / #1483 承载。
+
+<a id="1-the-frozen-surface"></a>
 
 ## 1. 冻结的公开接口
 
@@ -19,6 +23,8 @@
 3. **stdlib 表面与编译器一致**——`tools/gen-stdlib-doc-index.py
    --check` 已根据编译器自身的模块接口检查 `docs/stdlib/`。
 
+<a id="2-the-conformance-clause-530"></a>
+
 ## 2. 一致性条款（#530）
 
 **Almide 语言规范**（`docs/SPEC.md` + `docs/specs/`，包括契约台账引用的 ALS 各节）具有**规范性**：
@@ -26,6 +32,8 @@
 > 当实现与 ALS 不一致时，错误在实现。
 
 解释器（`crates/almide-interp`）是 ALS 的**可执行配套实现**：三方判定机制的第三个裁判，受规范约束，从不自身充当规范。文字、interp 与编译目标不一致时，这就是违反 ALS 的缺陷——在实现侧提交并修复，夹具引用其固定的 ALS 节。（已知文字矛盾是 #530 尚待消除的项目；每关闭一项，就把一页文字变成有引用、由夹具固定的规则。）
+
+<a id="3-the-breaking-change-policy"></a>
 
 ## 3. 破坏性变更政策
 
@@ -38,9 +46,13 @@
 - **增量变更仍可自由进行**：保持所有现有程序含义的新语法、新 stdlib 名称及新能力，与以前一样随次版本发布（`-> T!E` 是典型例子：`T!` 仍表示 `T!String`，所有现有写法均不受影响）。
 - **两种写法、同一含义**只有在完全等价时才允许出现在冻结表面上（`Option[T]`/`T?` 这一对）。如果旨在等价但尚未在整个编译器中确立，则两种写法都保持合法，fmt 不跨越边界改写（`Result[T, E]`/`T!E` 这一对——参见 ADR-0012 的2026-08-20修订，其中三项反证确立了此规则）。
 
+<a id="4-what-stable-will-mean-measurably-1485"></a>
+
 ## 4. 可测量的“稳定”含义（#1485）
 
 冻结声明保持不动的是*表面*。**稳定性主张**——“缺陷曲线已转向”——是另一个可测量陈述，定义于 [`proofs/stability-closure.toml`](../../../../proofs/stability-closure.toml)：六项标准（fuzz 夜数、一致性周数、wasm 前沿、wall 语料、阻碍数量、方言静止期）必须在同一个30天窗口内同时成立，且每个 N 都须在数字到来**之前**固定在该文件中。`scripts/check-stability-closure.sh` 在每次 push 时报告当前状况，不阻止任何操作。改变任意 N 都必须在同一提交中写明理由。
+
+<a id="5-what-this-is-not"></a>
 
 ## 5. 本声明不是什么
 

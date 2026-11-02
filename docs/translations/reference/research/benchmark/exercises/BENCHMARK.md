@@ -1,0 +1,170 @@
+<a id="almide-llm-benchmark-results--historical-typescriptdeno-experiment"></a>
+
+# Almide LLM Benchmark Results — Historical TypeScript/Deno Experiment
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](BENCHMARK.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](BENCHMARK.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](BENCHMARK.zh-CN.md)
+
+> Non-normative historical reader snapshot of the pinned original; the original remains authoritative. No automatic synchronization. Reported tests, measurements, implementation state and guarantees are source claims, not independently rerun or current verification. Quoted code and commands were not executed. [Source](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/research/benchmark/exercises/BENCHMARK.md)
+> Source claims of zero knowledge and sufficiency describe this historical exercise set, not evidence of training-data exclusion or universal correctness. Its old code and instructions are retained, not current syntax guidance; the relative CHEATSHEET link is pinned here to the source snapshot, not asserted to be the exact historical prompt.
+
+This records the former TypeScript-transpiler experiment, not a benchmark of
+the current Rust/Wasm compiler. Its measured results and old syntax are retained
+as evidence; the auto-unwrap, `do`, `++`, and `src/almide.ts` instructions below
+are historical, not current language guidance.
+
+<a id="overview"></a>
+
+## Overview
+
+Can an LLM write correct Almide code with **zero prior knowledge**, using only the [current CHEATSHEET.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/CHEATSHEET.md)?
+
+We tested this by having an LLM agent (Claude) solve 14 Exercism-style exercises from scratch, given only the CHEATSHEET as reference. The same exercises were also solved in Python for comparison.
+
+<a id="results"></a>
+
+## Results
+
+<a id="almide-cheatsheet-only-zero-knowledge"></a>
+
+### Almide (CHEATSHEET only, zero knowledge)
+
+| Exercise | Tests | Passed | Failed | Notes |
+|---|---|---|---|---|
+| affine-cipher | 16 | 16 | 0 | |
+| bob | 25 | 25 | 0 | |
+| collatz-conjecture | 6 | 6 | 0 | |
+| config-merger | 27 | 27 | 0 | `effect fn` + file I/O error propagation |
+| grade-report | 30 | 30 | 0 | Multi-function error propagation |
+| hamming | 9 | 9 | 0 | |
+| isbn-verifier | 14 | 14 | 0 | |
+| isogram | 13 | 13 | 0 | |
+| pangram | 10 | 10 | 0 | |
+| phone-number | 14 | 14 | 0 | |
+| pipeline | 36 | 36 | 0 | `do` block auto error propagation |
+| raindrops | 18 | 18 | 0 | |
+| roman-numerals | 19 | 19 | 0 | |
+| scrabble-score | 11 | 11 | 0 | |
+| **Total** | **248** | **248** | **0** | **100%** |
+
+<a id="python-baseline-comparison"></a>
+
+### Python (baseline comparison)
+
+| Exercise | Tests | Passed | Notes |
+|---|---|---|---|
+| affine-cipher | 16 | 16 | |
+| bob | 25 | 25 | |
+| collatz-conjecture | 6 | 6 | |
+| config-merger | 27 | 27 | |
+| grade-report | 30 | 30 | |
+| hamming | 9 | 9 | |
+| isbn-verifier | 14 | 14 | |
+| isogram | 13 | 13 | |
+| pangram | 10 | 10 | |
+| phone-number | 14 | 14 | |
+| pipeline | 36 | 36 | |
+| raindrops | 18 | 18 | |
+| roman-numerals | 19 | 19 | |
+| scrabble-score | 11 | 11 | |
+| **Total** | **248** | **248** | **100%** |
+
+<a id="methodology"></a>
+
+## Methodology
+
+1. **Exercise design**: Each exercise provides function signatures with `= _` (hole stubs) and test cases. The LLM must implement all functions.
+2. **Almide agent**: Given ONLY `CHEATSHEET.md` — no other documentation, no examples of Almide code, no access to the transpiler source.
+3. **Python agent**: Standard Python knowledge, no special constraints.
+4. **Test runner**: Almide files are transpiled to TypeScript via `src/almide.ts` and tested with `deno test`. Python files are tested with `pytest`.
+5. **Single attempt**: Each exercise was solved in one pass without retries or feedback loops.
+
+<a id="key-findings"></a>
+
+## Key Findings
+
+<a id="the-cheatsheet-is-sufficient"></a>
+
+### The CHEATSHEET is sufficient
+An LLM can write correct Almide code from zero knowledge using only a 340-line quick reference. 248/248 tests pass (100%).
+
+<a id="result-erasure--fold-resolved"></a>
+
+### Result erasure + fold: resolved
+The `let result = list.fold(...); match result { err(_) => ... }` pattern previously failed because `err()` in the fold callback throws out of `Array.reduce`, preventing assignment. This was fixed by detecting the `let x = expr; match x { err(...) => ... }` pattern in codegen and inlining the expression into the match subject, so the try-catch wrapper catches the throw correctly.
+
+<a id="almide-advantages-visible-in-complex-exercises"></a>
+
+### Almide advantages visible in complex exercises
+
+**`do` block auto error propagation** (pipeline exercise):
+```
+fn run_pipeline(input: String) -> Result[String, String] = do {
+  let pairs = parse_pairs(input)       // auto-unwrap Result
+  let pairs2 = validate_keys(pairs)    // error → propagate
+  let pairs3 = validate_values(pairs2) // error → propagate
+  let pairs4 = transform(pairs3)       // error → propagate
+  format_output(pairs4)
+}
+```
+vs Python (implicit exception propagation, no type-level error contract):
+```python
+def run_pipeline(text):
+    pairs = parse_pairs(text)
+    pairs = validate_keys(pairs)
+    pairs = validate_values(pairs)
+    pairs = transform(pairs)
+    return format_output(pairs)
+```
+
+**`match` with `err(e)` pattern** (grade-report exercise):
+```
+match parse_student(line) {
+  ok(student) => { ... },
+  err(e) => err("line " ++ line_num ++ ": " ++ e),  // catch and re-wrap
+}
+```
+
+**`effect fn` with file I/O error propagation** (config-merger exercise):
+```
+effect fn merge_and_save(paths: List[String], output: String) -> Result[Int, String] = {
+  match merge_files(paths) {       // file read errors propagate automatically
+    err(e) => err(e),
+    ok(pairs) => {
+      save_config(output, pairs);  // file write errors propagate
+      ok(list.len(pairs))
+    }
+  }
+}
+```
+vs Python (exceptions are implicit, no type-level contract):
+```python
+def merge_and_save(paths, output):
+    merged = merge_files(paths)     # FileNotFoundError? ValueError? Unknown
+    save_config(output, merged)     # IOError? Unknown
+    return len(merged)
+```
+
+<a id="result-erasure-codegen-auto-inlining"></a>
+
+### Result erasure: codegen auto-inlining
+The codegen now detects `let x = expr; match x { ..., err(e) => ... }` and automatically inlines `expr` into the match subject, wrapping it in try-catch. This means both direct matching (`match fn() { err(e) => ... }`) and the let-then-match pattern work correctly. Use `assert_eq(expr, err("msg"))` to test error cases.
+
+<a id="stdlib-note"></a>
+
+### stdlib note
+`string.to_int`, `string.to_upper`, `string.to_lower` are now in the stdlib, reducing boilerplate from earlier exercises.
+
+<a id="historical-runner-commands"></a>
+
+## Historical runner commands
+
+```bash
+# Run a single exercise
+bash exercises/run_exercise.sh exercises/pipeline/pipeline.almd
+
+# Run all exercises
+for f in exercises/*/*.almd; do
+  echo "=== $(basename $(dirname $f)) ==="
+  bash exercises/run_exercise.sh "$f"
+done
+```

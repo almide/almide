@@ -19,6 +19,8 @@ assessment below are retained, not reissued as instructions.
 
 > **Position**: A proposed policy for when and in what units to bring v1 results—the MIR trust spine, self-host sources and evidence gates, confined to develop-v1—back into develop. **Execution awaits the user's Go decision**. This document organizes material for that decision.
 
+<a id="還流資産の棚卸し2026-07-03-時点"></a>
+
 ## Inventory of assets to bring back (as of 2026-07-03)
 
 | Asset | Value to develop | Risk | Proposal |
@@ -29,11 +31,15 @@ assessment below are retained, not reissued as instructions.
 | **Entire MIR spine** (almide-mir crate + registry self-host sources + render_program) | v1's core; bringing it into develop means it coexists as a “second backend” | High — doubles develop CI time and maintenance surface | **Wave 3**: together with the decision that “v1 replaces v0's parent”; until then it stays on its branch |
 | **stdlib self-host (.almd)** | Unused by the v0 route (registry-only) | Low (no v0 impact), but meaningless alone | Together with Wave 3 |
 
+<a id="順序の原則"></a>
+
 ## Ordering principles
 
 1. **Evidence first** (Wave 1): merge verification infrastructure before implementation. This increases trust in v0's green status and provides a net for subsequent implementation integration.
 2. **1 fix = 1 PR** (Wave 2): split fixes for v0 bugs found during v1 work into individually explainable units, independent of v1. The governing directive was “no v0 backports needed”, so explicit approval of this policy change is required.
 3. **The spine on replacement day** (Wave 3): bringing back the MIR spine is inseparable from deciding to “retire emit_wasm and make the render path the production route”. Until then, develop-v1 remains its home.
+
+<a id="未解決の判断ユーザー入力待ち"></a>
 
 ## Unresolved decisions (awaiting user input)
 

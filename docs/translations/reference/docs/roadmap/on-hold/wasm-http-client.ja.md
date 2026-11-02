@@ -1,3 +1,5 @@
+<a id="wasm-http-client"></a>
+
 # WASM HTTP クライアント
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](wasm-http-client.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](wasm-http-client.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](wasm-http-client.zh-CN.md)
@@ -11,6 +13,8 @@
 
 説明: 提供済みの wasm HTTP クライアント経路と、残る既定コンポーネントへの移行。
 
+<a id="shipped-surface"></a>
+
 ## 提供済みの機能範囲
 
 関数ごとの正本は [target-availability.toml](../../../../../../proofs/target-availability.toml) である。現在の API は [HTTP リファレンス](../../../../../stdlib/http.md) にある。古い機能群の名前や wasm ターゲットが存在することから利用可否を推測してはならない。
@@ -20,6 +24,8 @@
 - 利用可否は操作ごとに異なる。完全レスポンスに関する主張をすべての HTTP API に広げず、呼び出しハンドルとサーバー側の提供機能はマトリクスで個別に確認する。
 
 根拠: [http_response_cross_test.rs](../../../../../../tests/http_response_cross_test.rs) は完全レスポンスのステータス、ヘッダー、本文、失敗をネイティブと比較する。[target-availability.toml](../../../../../../proofs/target-availability.toml) は `http.get_response` と `http.send` を `stock-p1` でのみ利用不可と記録している。
+
+<a id="remaining-plan"></a>
 
 ## 残る計画
 

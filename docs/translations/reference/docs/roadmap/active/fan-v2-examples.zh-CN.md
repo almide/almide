@@ -1,3 +1,5 @@
+<a id="fan-v2--reference-examples"></a>
+
 # Fan v2——参考示例
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](fan-v2-examples.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](fan-v2-examples.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](fan-v2-examples.zh-CN.md)
@@ -11,6 +13,8 @@
 > 此索引保存引入 fan v2 时的设计示例及转录为 fixture 的计划。
 > `fan-v2-examples/` 中的 `.almd` 是历史草图，不是当前语法或诊断的权威来源。不要把旧 `any` / `race` 示例复制进当前程序。
 
+<a id="1-現在の参照先"></a>
+
 ## 1. 当前参考来源
 
 - 语法及语义：[SPEC §13](../../../../../SPEC.md#13-concurrency-fan)。
@@ -20,6 +24,8 @@
 - `fan.timeout(duration.ms(n)) { body }` 作为 body 形式存在。下文 Stage 4/tombstone 是当初的实现顺序，不是当前未实现清单。
 
 此处不重新抄录代码，以可执行 fixture 为准。
+
+<a id="2-歴史的な設計例の索引"></a>
 
 ## 2. 历史设计示例索引
 
@@ -32,6 +38,8 @@
 | [fan_all_unchanged.almd](../../../../../roadmap/active/fan-v2-examples/fan_all_unchanged.almd) | 引入时不变表面的对照；C-004/C-199/C-200 的存续参照点 | 引入时的既有表面 |
 | [diagnostics.almd](../../../../../roadmap/active/fan-v2-examples/diagnostics.almd) | 6 个**不能编译才是正确的**示例及预期诊断（pure 约束、ticks 标签、thunk tombstone、E008 等） | Wave 1～Stage 3 |
 | [migration.almd](../../../../../roadmap/active/fan-v2-examples/migration.almd) | v1 → v2 对照（any/settle/race/timeout）；funcref wall 消除注记 | Wave 1～Stage 4 |
+
+<a id="3-当初の-fixture-転写計画現在の網羅性一覧ではない"></a>
 
 ## 3. 当初的 fixture 转录计划（不是当前覆盖清单）
 

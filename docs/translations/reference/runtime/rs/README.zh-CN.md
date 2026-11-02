@@ -1,3 +1,5 @@
+<a id="runtimers--the-native-runtime-source-template"></a>
+
 # runtime/rs — native 运行时源码模板
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](README.zh-CN.md)
@@ -9,6 +11,8 @@
 > 原文注意：错误数和模块数是所述日期的记录。末尾关于自包含性的例外说明也属于原文时点，并非对当前依赖关系的独立复核。
 
 `runtime/rs/src/*.rs` 保存 `stdlib/*.almd` 中 `@intrinsic("almide_rt_*")` 声明背后的 native (`almide_rt_*`) 实现。它**不是可供构建的 crate，也不是 workspace 成员**。本文记录原因，以及实际测试其行为的位置。
+
+<a id="how-this-directory-is-consumed"></a>
 
 ## 如何使用这个目录
 
@@ -26,6 +30,8 @@
 删除七个测试模块（#2507）使输出文本恰好改变八行，全部为空行或注释；对修改前后源码运行 `strip_test_blocks` 验证了这一点。六个文件各少一空行，`regex.rs` 恢复了之前被越界删除的注释，没有代码行移动。
 
 由于编辑 `runtime/rs/src` 会改变嵌入文本，CI 会重新生成 `rust_runtime.rs` / `runtime_fn_modes.rs`，出现任何差异即失败（ci.yml 的 "Generated runtime registry matches committed sources"）。请重新构建 `almide-codegen`，并将生成文件与修改一起提交。
+
+<a id="why-it-is-not-a-workspace-member-2507-measured-2026-09-22"></a>
 
 ## 为什么不是 workspace 成员（#2507，测于 2026-09-22）
 
@@ -53,11 +59,15 @@
 
 保留 `Cargo.toml` 是为了记录运行时源码所需内容（crates.io 依赖；#4007 随着没有任何构建设置的 `have_blas` BLAS 路径一起删除了 `build.rs`）。它不是构建单元，没有 CI job 或脚本在这里调用 cargo。
 
+<a id="the-behavioural-oracle-is-spec"></a>
+
 ## 行为 oracle 是 `spec/`
 
 **`runtime/rs` 的行为 oracle 是可执行的 `spec/` 套件。** 它像程序一样，通过 stdlib 在 native 和结构化 Wasm 路径上执行这些代码；CI 运行的就是它。写在这里的 Rust `#[cfg(test)]` 块不会在任何地方运行：没有 cargo 构建会编译这个目录，且 `strip_test_blocks` 会从每个输出 crate 中移除该块。
 
 因此，**不要在 `runtime/rs` 下添加 `#[cfg(test)]`。** 请在 `spec/stdlib/` 中编写测试（若修改涉及跨目标承诺，则放在 `spec/wasm_cross/`）。`scripts/check-runtime-test-placement.sh` 在 CI 中执行这一规则。
+
+<a id="the-one-narrow-exception-a-self-contained-module-included-by-a-root-test"></a>
 
 ### 唯一的狭窄例外：由根测试包含的自包含模块
 

@@ -1,0 +1,918 @@
+<a id="trusted-base-ledger-config-management--tier-1-layer-7"></a>
+
+# Trusted base ledger (config management — tier-1 layer 7)
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](TRUSTED_BASE.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](TRUSTED_BASE.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](TRUSTED_BASE.zh-CN.md)
+
+> Non-normative reader snapshot of the pinned source; the original ledger remains authoritative and is not modified. Dates, measurements, proof and CI claims are historical source statements, not newly reproduced verification, external certification, or a universal sandbox/memory-safety guarantee. Later and earlier progress layers coexist (CI versions, higher-order/control-flow admission, and println/byte-binding coverage); they are preserved, not reconciled. Model guarantees, artifact-byte claims and remaining trusted assumptions must be read with their stated scope. No automatic synchronization. [Source](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/proofs/TRUSTED_BASE.md)
+
+The flight-grade discipline: **naming exactly what is trusted is what lets the
+rest be called "proven."** A reviewer reads this page to know the boundary. It
+is the honest counterpart to the receipt's `C-PROVEN` claim.
+
+<a id="toolchain-pin"></a>
+
+## Toolchain pin
+
+| component | version | role |
+|---|---|---|
+| Rocq / Coq | **9.1.1** | kernel + `coqchk` independent re-check (canonical, local source build) |
+| OCaml | **5.4.1** | extraction target (until CertiCoq) |
+
+Reproduce every claim: `make verify-trust` (or `proofs/check.sh` + `proofs/gate.sh`).
+
+**CI cross-version note (honest).** The `Trust Spine` GitHub Actions workflow
+re-derives the whole spine on opam's Rocq **9.3** — rocq-core pinned to 9.3.0
+(`ROCQ_CORE_VERSION`, also the cache key), with rocq-stdlib 9.2.0 (opam has no
+9.1.1; the canonical pin above is a local source build). The proofs are
+kernel-checked and **axiom-clean on 9.1.1, 9.2 and 9.3** — a cross-version
+re-derivation, not a single-version artifact (a strength, not a gap). 9.3
+reserves `is`, so no proof binds it (#3368). Rocq 9.2+
+ships only the `rocq` driver, so CI provides `coqc`/`coqchk` as thin shims over
+`rocq compile` / `rocq check` (the latter IS the Rocq Proof Checker — the
+independent De Bruijn re-check is genuine).
+
+<a id="build-and-run-toolchain-4010"></a>
+
+## Build and run toolchain (#4010)
+
+The proofs below are about Almide's checkers and models. The bytes that run
+are produced and executed by tools no proof here covers, so each is trusted
+by name and version. `scripts/check-toolchain-pins.sh` keeps this list equal
+to what the workflows and `Cargo.toml` actually use
+(`scripts/toolchain-pins.txt` is the machine-readable copy). A version used
+but not listed fails, and so does a version listed but no longer used.
+
+| component | version | what it does | what checks it independently |
+|---|---|---|---|
+| rustc | **1.97.0** (`RUST_TOOLCHAIN`) | builds the compiler, and compiles the native leg's generated Rust | nothing proves it. The native leg is compared byte for byte with the wasm leg on the contract corpus |
+| LLVM | the copy inside that rustc (the 22.1 series for 1.97; `rustc -vV` prints it) | native code generation | as rustc |
+| rustc (Ferrocene) | **1.95.0** | builds the generated Rust of the run-manifest corpus with stock rustc at the recorded Ferrocene upstream pin (#573) | compatibility evidence only; the qualified Ferrocene binary is not used by this lane |
+| rustc (stable, perf) | **1.99.1** (`RUST_STABLE_TOOLCHAIN`) | builds the handwritten-Rust side of the perf ratio in `perf-ratchet` and `perf-profile-arm`; nothing shipped is built with it | the ratio gates themselves; pinning it keeps their baseline still |
+| rustc nightly | **nightly-2026-08-01**, **nightly-2025-06-01** | coverage instrumentation (branch coverage, MC/DC) and Miri over `almide-str`; nothing shipped is built with them | — |
+| wasmtime (embedded crate) | **50.0.1** | `almide run` / `almide test` on wasm, the fan workers | the stock CLI runs below |
+| wasmtime (stock CLI in CI) | **50.0.1** | runs built `.wasm` artifacts in the CI gates, one version everywhere | the runtime `tests/wasm_vm_parity_test.rs` (REQ-VM-9) compares `almide-wasm-vm` against |
+| almide-wasm-vm | this tree | a second, independent wasm interpreter (standard library only, no `unsafe`) for the Critical-profile surface | REQ-VM-9: every `spec/wasm_cross` fixture inside its five WASI imports runs equal to the stock runtime, and to native when it passes `--profile critical` |
+| OS, libc, CPU | the CI runners' and the user's | everything | accepted, not checked |
+
+**What CI fetches (security row 16).** Every binary or archive a workflow
+or CI script downloads is checked against a sha256 stated in
+`.github/pinned-downloads.txt` (`scripts/fetch-pinned.sh`). This covers
+wasmtime, cargo-nextest, wasm-pack, elan, the Lean toolchain and Node. A
+first-party `latest` almide release is checked against its release
+attestation instead. Every `git clone` checks out a 40-hex commit (codopsy),
+the opam repository is pinned to a commit whose opam files carry each source
+archive's checksum, and every third-party action is declared there with what
+it fetches. `scripts/check-action-pins.sh` refuses anything else. Four
+channels are trusted rather than pinned here:
+- **rustup.** `dtolnay/rust-toolchain` runs it for an exact toolchain. rustup
+  checks every component against the sha256 in that release's channel
+  manifest, which static.rust-lang.org serves. The Rust release
+  infrastructure is trusted, as rustc itself is.
+- **apt and Homebrew packages** (binaryen, musl-tools, opam, wabt, valgrind,
+  Vulkan drivers). These are checked against the distribution's signed
+  package index, not against a digest stated here.
+- **`actions/cache` entries.** Only this repository's own runs write them; a
+  pull request's cache is scoped to its own ref. A cached release tarball is
+  re-hashed by `fetch-pinned.sh` before use. An unpacked tree (the Lean
+  toolchain under `~/.elan`, the codopsy binary keyed by its pinned commit,
+  the opam root) is not.
+- **Clones marked `# supply: head-tracked`.** In these the moving head is the
+  thing being measured. The downstream canary tests each project at its
+  default-branch HEAD: it is dispatch-only, its token is read-only, and the
+  leg holds no secrets. The grammar drift check reads `almide-grammar` as
+  data and never builds or runs it.
+
+**Two engines.** wasm execution does not rest on wasmtime alone.
+`almide-wasm-vm` shares no code with wasmtime, and REQ-VM-9 diffs it against
+the stock runtime on the whole `spec/wasm_cross` corpus. Its scope is the
+Critical-profile surface: an artifact that imports more than its five WASI
+calls (fs, env, args) is refused at load, so for those artifacts wasmtime
+remains the only engine.
+
+**The embedded host is not a sandbox.** The core-module lane's
+filesystem operations honor `[permissions] fs` grants; without that key they
+retain access to the host filesystem. The p3 component lane
+(`run_component`, `crates/almide-wasm-run/src/component_host.rs`) preopens
+the granted roots, or the current working directory and temporary directory
+when the key is absent, and inherits the environment. Wasm bounds the guest's memory
+accesses, and the host bounds what the guest can make it allocate: one
+linear-memory budget per run across all its instances, and every guest span
+checked against memory before the host reads it (#4135). It does not bound
+what the guest may ask the host to do. `docs/wasm/README.md` ("What the
+embedded host grants") has the per-lane table. Filesystem scoping (#4022)
+is implemented; it is not a general sandbox for every host capability.
+
+**Floating steps (debt).** The remaining unversioned stable step is
+`fuzz-nightly.yml:coverage-ratchet`, listed in `scripts/toolchain-pins.txt`.
+Pinning it requires re-taking its measured baseline and deleting that ledger
+entry. The two perf jobs use `RUST_STABLE_TOOLCHAIN`; see the table above.
+
+**On a toolchain bump.** Raising `RUST_TOOLCHAIN` or a wasmtime version
+changes a trusted component, so before it lands:
+
+1. Read the upstream issues labelled `I-unsound` (rust-lang/rust) and the
+   security advisories for wasmtime that are fixed or introduced between the
+   two versions. Write in the PR which of them the generated Rust or the
+   emitted wasm can reach. The generated Rust keeps its `unsafe` to
+   `runtime/rs` and two compiler-emitted preludes (the region arena and the
+   SIGPIPE setup, #4007), so a soundness bug in safe-Rust checking is the
+   case that matters most.
+2. Run the cross-target corpus and REQ-VM-9 on the new version. A difference
+   is a finding, not noise.
+3. Update `scripts/toolchain-pins.txt` and this table in the same PR. The
+   gate refuses the PR otherwise.
+
+**The user's rustc (#4110).** CI's pin says nothing about the toolchain on
+the user's machine, and a std security fix reaches a native Almide binary
+only if that toolchain has it (CVE-2024-24576: on Windows, `Command` running
+a `.bat` / `.cmd` passed arguments through cmd.exe unescaped before 1.77.2,
+which would re-open shell injection through `process.exec`). So every native
+build (`almide run` / `build` / `test` / `bench`, the cdylib and install
+routes) reads `rustc --version` before rustc or cargo runs, and refuses
+anything below rustc 1.97.0 — `MIN_RUSTC` in `src/cli/rustc_floor.rs`, the
+one place it is written: max(1.77.2, the `RUST_TOOLCHAIN` the generated code
+is verified with). It is raised when a std fix Almide relies on lands; the
+constant's comment lists the advisory each bump covers.
+`tests/rustc_floor_test.rs` runs a fake rustc reporting 1.77.1 and one patch
+below the floor (refused) and the floor (built and run), and checks this
+paragraph and docs/specs/cli.md against the constant. Out of its reach: the
+Ferrocene lane compiles emitted Rust with its own rustc directly, and a
+binary already in the build cache is reused without a new check.
+
+<a id="the-irreducible-base-cannot-be-discharged-by-proof--消えない底"></a>
+
+## The irreducible base (cannot be discharged by proof — "irreducible floor")
+
+These four are trusted by necessity; everything else is proven against them:
+
+1. **The Coq/Rocq kernel.** Decades of adversarial scrutiny; `coqchk` re-checks
+   every `.vo` independently (the De Bruijn criterion). New logics have zero
+   accumulated scrutiny — hence we borrow, not invent.
+2. **OCaml extraction + the OCaml compiler — RETIRED as a trust root for the
+   gate verdict (brick 6b, 2026-07-09).** The proven checkers still extract to
+   OCaml (`ocamlopt`) as the FAST PATH, but every `gate.sh` row's verdict AND
+   the entire corpus witness set are independently re-certified by the Rocq
+   KERNEL itself: a generated assertion file inlines the witness bytes verbatim
+   and `vm_compute` evaluates the proven checker inside the kernel-checked
+   logic (`kernel_verify` in gate.sh; the batch oracle in corpus-wall.sh,
+   measured ~4 min on the full 27k-object corpus). Binary/kernel divergence
+   fails the build, and a TAMPER DRILL (a corrupted witness + a simulated
+   divergent verdict, both caught) runs every build — so the Thompson hole no
+   longer reaches a verdict: the kernel (item 1) carries it. Residual, honest:
+   the extraction pipeline is trusted only for the convenience binary's
+   correctness-as-fast-path (cross-checked), and `vm_compute`'s bytecode
+   evaluator is part of the kernel's own trusted computing base as always.
+   Upstream, verified extraction (MetaRocq, Rocq 9.1) and CertiRocq (the
+   CertiCoq → Rocq 9.1 port, 2026) now EXIST — recorded as a future fast-path
+   ratchet once the local (source-built 9.1.1, no opam) and CI (opam 9.2)
+   toolchains align; neither is needed for the verdict.
+3. **Hardware.** The CPU executes the machine code faithfully.
+4. **ALS validity** — that the formal semantics captures the INTENDED meaning.
+   This is the one item checked empirically (interp + dojo + use), never proved.
+
+<a id="axiom-ledger-the-print-assumptions--standard-gate"></a>
+
+## Axiom ledger (the "Print Assumptions ⊆ standard" gate)
+
+Every theorem rests on **nothing but the kernel** — `Print Assumptions` reports
+*Closed under the global context* for all of them (no `Admitted`, no extra
+axioms). Verified by `proofs/check.sh`. The table itself is **claim-drift-gated**
+(`check.sh`'s claim-drift gate, #34 / indicator ⑤): every theorem named below is
+mechanically confirmed to be a constant the kernel re-checker (`coqchk`) actually
+verified, so a public claim in this ledger can never drift past what is proven (a
+fabricated row fails the gate). The table is a representative sample of the spine:
+
+| theorem | file | assumptions |
+|---|---|---|
+| `check_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_all_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_cert_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_reuse_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_clc_unroll_sound` | OwnershipChecker.v | Closed under the global context |
+| `eager_copy_refines_safety` | ALS.v | Closed under the global context |
+| `mrun_tracks_exec` | RuntimeModel.v | Closed under the global context |
+| `alloc_not_live` | FreeList.v | Closed under the global context |
+| `region_window_reuse_safe` | FreeList.v | Closed under the global context |
+| `region_reset_leaves_no_free_into_the_region` | FreeList.v | Closed under the global context |
+| `pinned_stays_immortal_forever` | FreeList.v | Closed under the global context |
+| `p_region_reset_preserves_PINV` | FreeList.v | Closed under the global context |
+| `reuse_restores_rc_1` | FreeListRc.v | Closed under the global context |
+| `reuse_hands_back_a_zero_count_block` | FreeListRc.v | Closed under the global context |
+| `double_release_traps` | FreeListRc.v | Closed under the global context |
+| `r_region_reset_preserves_RINV` | FreeListRc.v | Closed under the global context |
+| `rc_dec_prog_realizes_rt_dec` | WasmRcDec.v | Closed under the global context |
+| `rc_inc_bytes_encode_the_instruction_tree` | WasmEncode.v | Closed under the global context |
+| `rc_inc_bytes_execute_to_rt_inc` | WasmExec.v | Closed under the global context |
+| `rc_dec_bytes_trap_on_zero` | WasmExec.v | Closed under the global context |
+| `rc_dec_bytes_frees_when_one` | WasmExec.v | Closed under the global context |
+| `make_unique_yields_unique` | CowSafety.v | Closed under the global context |
+| `check_fill_sound` | CallModes.v | Closed under the global context |
+| `check_modes_cert_sound` | CallModes.v | Closed under the global context |
+| `check_bc_unroll_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_xc_unroll_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_line_abort_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_xc_abort_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_xc_no_resurrection` | OwnershipChecker.v | Closed under the global context |
+| `check_line_prefix_safe` | OwnershipChecker.v | Closed under the global context |
+| `merge_subset_sound` | Subset.v | Closed under the global context |
+| `subset_check_fast_sound` | Subset.v | Closed under the global context |
+| `rc_inc_bytes_isa_effect` | WasmDecode.v | Closed under the global context |
+| `rc_dec_bytes_isa_traps` | WasmDecode.v | Closed under the global context |
+| `rc_dec_bytes_isa_frees` | WasmDecode.v | Closed under the global context |
+| `memory_safe_iff_clauses` | MemorySafe.v | Closed under the global context |
+| `check_trace_sound` | MemorySafe.v | Closed under the global context |
+| `check_trace_complete` | MemorySafe.v | Closed under the global context |
+| `rc_check_gives_temporal` | MemorySafe.v | Closed under the global context |
+| `unguarded_rc_check_misses_resurrection` | MemorySafe.v | Closed under the global context |
+| `unsigned_ge_excludes` | SpatialCert.v | Closed under the global context |
+| `run_sound` | SpatialCert.v | Closed under the global context |
+| `accepts_spatial` | SpatialCert.v | Closed under the global context |
+| `unchecked_run_not_spatial` | SpatialCert.v | Closed under the global context |
+| `check_bounds_cert_sound` | BoundsCert.v | Closed under the global context |
+| `typed_core_memory_safe` | CoreSafe.v | Closed under the global context |
+| `unchecked_index_not_safe` | CoreSafe.v | Closed under the global context |
+| `certified_spatial_temporal` | Certified.v | Closed under the global context |
+| `certified_with_bounds_cert` | Certified.v | Closed under the global context |
+| `certified_memory_safe` | Certified.v | Closed under the global context |
+| `shared_list_survives_mutation` | CoreSafe.v | Closed under the global context |
+| `missing_inc_is_use_after_free` | CoreSafe.v | Closed under the global context |
+| `box_frees_and_keeps_content` | CoreSafe.v | Closed under the global context |
+| `box_store_without_share_is_use_after_free` | CoreSafe.v | Closed under the global context |
+| `site_window` | InitCert.v | Closed under the global context |
+| `sited_init` | InitCert.v | Closed under the global context |
+| `sited_alloc_ok` | InitCert.v | Closed under the global context |
+| `certified_sited_memory_safe` | InitCert.v | Closed under the global context |
+| `reorder_memory_safe` | InitCert.v | Closed under the global context |
+| `check_init_cert_sound` | InitCert.v | Closed under the global context |
+| `fill_window` | InitCert.v | Closed under the global context |
+| `rsite_window` | FieldCert.v | Closed under the global context |
+| `ftrace_safe` | FieldCert.v | Closed under the global context |
+| `fields_memory_safe` | FieldCert.v | Closed under the global context |
+| `check_fields_cert_sound` | FieldCert.v | Closed under the global context |
+
+<a id="known-limitations-what-is-not-yet-proven--recorded-not-hidden"></a>
+
+## Known limitations (what is NOT yet proven — recorded, not hidden)
+
+**What "memory safe" means here (#4013).** `MemorySafe.v` is the one
+definition: over a heap trace (alloc / store / load / inc / dec, each naming a
+block), every load and store is inside its live block (SPATIAL), nothing
+touches a freed block and no allocation hands out a live one (TEMPORAL), every
+byte read was written since allocation (INITIALIZATION), and every access uses
+the block's representation (TYPE). A decidable trace checker is sound and
+complete for it (`check_trace_sound` / `check_trace_complete`). Of the four
+clauses, the spine's earlier theorems reach only TEMPORAL:
+`rc_check_gives_temporal` derives it from the guarded RC check plus the
+allocator's freshness (`FreeList.alloc_not_live`). SPATIAL, INITIALIZATION and
+TYPE have no counterpart in any other file, except that `SpatialCert.v`
+(#4005) proves a static bounds-check certificate checker sound for SPATIAL
+(and TYPE) over the element reads and writes of fixed-length list blocks:
+`accepts_spatial` — every run of an accepted certificate, at every loop count,
+arm and reassigned i64 index, is `Spatial` — with the emitter's one unsigned
+compare excluding negative indices (`unsigned_ge_excludes`). `BoundsCert.v`
+puts the certificate's byte parser inside the proof and extracts
+`check_bounds_cert` (driver mode `bounds`, `check_bounds_cert_sound`), and
+the structural wasm leg emits it per build as the `bounds` witness (crates/almide-wasm/src/witness_bounds.rs) for every index-operator access — each `xs[i]` read and store of a list and each `b[i]` read and store of Bytes, the fact candidates of #3345 in their stretch and every other access under a fresh slot of its own — with the check recorded where the compare is emitted and the access where the load or store is emitted; almide-verify and proofs/structural-wall.sh judge it with the extracted checker and the kernel, and scripts/witness-reinject.sh bounds re-injects three lost-check bugs into the emitter and requires each witness rejected. Coverage on the certified corpus (trust-spine run 40085282713, 2026-10-24): 954/954 bounds witnesses accepted, recording 365 reads and 82 writes against 434 emitted checks in 93 non-empty witnesses — before this every-access recording, 5 witnesses were non-empty. Since #4011 (d) each bounds and init event also carries an ANCHOR into the shipped module, and `almide-anchor-check` (crates/almide-anchor-check — wasmparser's decoder and validator, no compiler code; itself trusted, with 18 accept/refuse unit modules and three byte-level drills, `scripts/witness-reinject.sh anchors`) requires every located event to be the instruction it names on every structural-wall artifact: a check an unsigned compare opening an `if` that aborts, an access a load or store, a site's allocation size and its stores' width, offset and address local with no branch out and no unrecorded store, a fill's exact countdown. Since sec-rows-2-3-4 (2026-10-27) the compare's OPERANDS are checked too (crates/almide-anchor-check/src/operands.rs): each located access is held to its slot's check over the shipped instructions — same index, `len / S` of the block it addresses in its own slot size, within one slot, the check dominating, and no change of the index or the list between (a write only by the list's own copy-on-write judge, whose calls the anchor file's `judges` line locates; no other call handed the list; no store of its count word) — the hoisted count and the payload pointer included, which also checks what the kills stood for; 578 of 578 located accesses on the 995-fixture corpus, and three operand drills in `scripts/witness-reinject.sh anchors`. TRUSTED: that a located judge call is a copy-on-write judge (returns a block of its argument's count), that only a call handed a block shrinks it in place, the representation, that the anchor file's `alloc` index is `$alloc`, and every heap access outside the index operator and the string reads below (#4281), which no witness records. And
+at the SOURCE level, `CoreSafe.v` (#4014) gives a typed core of Almide (ints,
+bools, int lists with value semantics, `let`, assignment, element store,
+`if`, `while`, indexing with its bounds check, `if` expressions and
+recursive one- and two-argument functions, the two parameters distinct and
+each argument given back in order when the call returns) a big-step semantics that
+emits the heap trace — with reference counting: a shared read increments,
+a consumed operand, an overwritten variable and a returning call's
+parameter decrement, a block whose count reaches zero is freed, and freeing
+a box (a block whose one slot holds any value) gives back what its slot
+held — and
+proves `typed_core_memory_safe`: every finishing or
+check-aborted run of a well-typed core program is `MemorySafe`, all four
+clauses, for any function table whose bodies are well typed. It is a core
+(no closures, records, strings, multi-argument calls; a binding is released
+when overwritten, not at scope end, so the rest leaks;
+terminating and aborting runs only), and nothing ties it to the compiler's
+lowering. `Certified.v` composes the two per-build certificates on ONE
+trace: `certified_with_bounds_cert` — the guarded RC check accepting every
+block's stream, a fresh allocator, layout-true allocations, and the trace's
+accesses being a run of an accepted bounds certificate give `Spatial`,
+`Temporal` and `WellTyped`; `certified_memory_safe` adds INITIALIZATION from
+one more hypothesis, the constructor discipline (every allocation is
+immediately followed by the store that initializes its whole extent).
+`InitCert.v` (#4013) replaces that hypothesis and the layout one
+(`alloc_ok`) with a per-build certificate: a construction site (an
+allocation's header, slot width, slot count and representation, then the
+slots it stores) is accepted when every slot is stored and none past the end;
+`site_window` proves an accepted site's window MemorySafe and leaves its block
+initialized over its whole extent; `sited_init` and `sited_alloc_ok` give
+INITIALIZATION and the layout of every allocation in a trace built from
+accepted sites; `certified_sited_memory_safe` composes the RC certificate,
+the bounds certificate and the sites into `MemorySafe`, all four clauses,
+with no hypothesis about initialization or layout left; `reorder_memory_safe`
+proves MemorySafe invariant under swapping adjacent events on different
+blocks, so a site's window may interleave with its elements' own events;
+`check_init_cert_sound` puts the byte parser inside the proof (driver mode
+`init`); `fill_window` extends it to a LOOP FILL — a block sized from a
+run-time count and filled by a countdown loop — accepted when the loop counts
+down the same local the block was sized from and its cursor advances by one
+slot, and then MemorySafe and initializing at every count. The structural leg
+emits the `init` witness per build for every list literal and every range
+list (a loop fill) (crates/almide-wasm/src/witness_init.rs) and proofs/structural-wall.sh
+judges it with the extracted checker, the kernel and almide-verify (on the
+certified corpus, trust-spine run 40094443633: 2973 sites in 554 non-empty
+witnesses, all accepted); every
+other allocation site (records, variants, strings, the runtime's routines)
+records nothing yet, so `sited` — every allocation a recorded site — holds of
+a run only when all its allocations are list literals or ranges. TRUSTED: the recording
+discipline, and that a site's block stays private until its last store. And
+no certificate carries a trace yet, so the theorem the definition is for — `K(c, a) accepts ⟹ MemorySafe a`
+for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
+proven, "memory safe" is a claim about the trace model, not about the bytes.
+
+**Record, tuple and variant fields (#4013 TYPE clause, #4279).** A field is
+read and written at a CONSTANT offset with no check, so it is in bounds and
+initialized exactly when its block was built with the layout the access
+assumes. `FieldCert.v` adds the layout-typed construction site and the field
+access as a third per-build certificate, `fields`: a layout table (per kind —
+a record or tuple, or one case of a variant — its payload size and each
+field's offset and width, a variant case's field 0 its tag word), sites that
+must store every field of their kind, accesses that must name a declared
+field, and tag reads that must be field 0 of every case. `rsite_window` proves
+an accepted site's window MemorySafe and leaves its block of the layout with
+every field initialized; `ftrace_safe` proves every event on a block of a
+recorded kind MemorySafe in a trace whose allocations of such blocks are
+accepted sites and whose loads and stores of them name declared fields of
+their kind, given TEMPORAL; `fields_memory_safe` composes that with the other
+certificates' clauses for every other block into `MemorySafe`;
+`check_fields_cert_sound` puts the byte parser inside the proof (driver mode
+`fields`). The structural leg emits the witness per build
+(crates/almide-wasm/src/witness_fields.rs) for record, tuple and variant
+literals and constructors, member and positional reads, a dying read's slot
+take, pattern tests and binds and spread overwrites, and
+`almide-anchor-check` holds every located event to the shipped bytes against
+the SAME layout table: the allocation's payload size, each store's and each
+access's width and offset, a variant site's tag store of its own case, and
+each variant CASE field's read to a tag test of its own address that
+guards it (an enclosing `if` whose condition implies `tag == C`, the address
+the same variable or the same field re-loaded with nothing that may write
+memory between; a call only when the callee's body writes none, a fixpoint
+over the module). On the 1000-fixture certified corpus (GCE, ba31c7646): 1000/1000
+`fields` witnesses accepted by all three verdicts and FIELDS OK on every
+artifact — 3998 sites / 8636 stores, 5390 field accesses (552 variant case
+fields held to their tag test), 614 tag reads. TRUSTED: that a block's static type is its layout (the
+representation, trusted already for the bounds and init witnesses; the IR is
+cast-free and FieldAssign is refused),
+and the one row #4279 adds (owner ruling, 2026-10-30):
+
+> **TRUSTED (#4279): nothing rewrites a variant block's tag word after its
+> construction window.**
+> Scope: only the case a variant CASE-FIELD read relies on. Both ends are
+> checked on the bytes: the construction site records its tag store as field
+> 0 and `almide-anchor-check` requires that store to store the site's own case
+> constant; every recorded case-field read must sit under a tag test of its
+> own address for that case (`operands.rs` `case_guarded`). What is trusted is
+> only the span between them — that no instruction stores to the tag word in
+> between — because the heap model (`MemorySafe.v`) carries no values. Tag
+> reads themselves need no such row: field 0 is the tag word in every case
+> (`ITag`). The drill `case-field-unguarded` (scripts/witness-reinject.sh
+> anchors) moves a case field's read above its test and must read ANCHORS
+> REJECT.
+
+The runtime's own routines over these blocks (typed drop, copy,
+equality, comparison, display bodies) record nothing yet (#4278), and a
+nullary case is a static pool block outside the allocation model.
+
+**String bytes (#4281).** Every byte the structural leg's string surfaces
+read in user code (`get`, `first` / `last`, `capitalize`, `to_codepoint`,
+`to_list`, `reverse`, `lines`, `pad_*`, `starts_with` / `ends_with`,
+`strip_prefix` / `strip_suffix`, `io.read_line`) is recorded in the
+`bounds` witness, slot of one byte, with the test the surface ALREADY
+emits — no test is added for the record, and the shipped bytes of the
+1030 corpus and perf artifacts are identical to the merge base's or
+smaller (1021 identical, 4 shrink by 27 B in all, 5 differ only in a local
+index). No new event and no new Rocq clause: each test is a `c` or an `e`
+of `BoundsCert.v`, and what makes it cover its read is checked on the
+bytes by `almide-anchor-check` (operands.rs `covers`), one rule per fact:
+- the surface's own `idx >=u len(s)` / `len(s) == 0` opening an `if`, the
+  read (`s + idx` / byte 0) in its `else` — `c` anchored at the `if`;
+- a byte loop's exit test `k >=u n; br_if` over `n = len(s)`, or over an
+  `n` an enclosing test bounds by it (`n >u len(s)` or `len(s) != n`, the
+  loop in its `else`): `k < n <= len(s)`;
+- a suffix read at `(len(s) - n) + k` under the same two facts:
+  `len(s) - n + k < len(s)`;
+- the byte before a cursor, `s + k - 1`, under the exit test and a test
+  making `k` positive (`k >u x`, then-arm): `0 <= k - 1 < len(s)`;
+- a cursor WALKING DOWN, exit `p == 0; br_if` (by induction over the loop):
+  on entry `p = len(s)` or, in the `else` of `len(s) == 0`, `len(s) - 1`;
+  every write of `p` in the loop is `p - 1` after the exit test; the read
+  is `s + p` or `s + p - 1` with the two offsets adding to at least one;
+- a fresh block's own size: `i32.const N; call $alloc` (a `c` anchored at
+  the call), the read inside its N bytes (a live block's allocation never
+  changes size; its liveness is the ownership witness's).
+Each reads `s`'s count unchanged from every `len` read to the access (the
+existing count rule), and a loop-guarded read must lie inside its loop.
+On the 1001-fixture certified corpus (GCE, e23e4ea28): 1001/1001 bounds
+witnesses accepted by all three verdicts, recording 1083 loop exit tests
+(429 before) and 850 emitted checks, and ANCHORS OK on every artifact with
+1899 located accesses held to their guards (1018 before).
+The drills `string-test-one-byte-loose`, `string-loop-exit-loosened` and
+`string-prefix-length-test-loosened` (`scripts/witness-reinject.sh
+anchors`) each read ANCHORS REJECT, and 33 accept/refuse modules sit in
+`crates/almide-anchor-check/tests/string_bytes.rs`. Not recorded: the
+string routines' own bodies, runtime routines owed to #4278's per-helper
+certificates — 25 byte reads in the emitter's helpers (runtime.rs 6,
+runtime_str.rs 6, utf8_helpers.rs 6, kmp.rs 4, value_helpers.rs,
+json_helpers.rs, map_index.rs 1 each) and 120 `prim.load8` in the 24
+self-hosted `stdlib/string_*.almd` bodies.
+
+**The native leg (#4006).** For the programs the verified native renderer
+renders (`proofs/native-verified-floor.txt`, 106 of 958 `spec/wasm_cross`
+programs, grow-only), `proofs/native-wall.sh` judges per build the ownership
+certificate of every rendered function — taken from the exact MIR the
+renderer rendered (`try_render_rust_source_certified`), so the probe charges,
+the result-window rewrite and the make-unique elision are inside what is
+certified — with the extracted checker, the Rocq kernel and almide-verify,
+and pins the rendered Rust source's SHA-256. Its poison leg rejects the
+witness of a render that lost a release with its Rust-mirror check bypassed
+(`scripts/witness-reinject.sh native`). TRUSTED: that rustc compiles the
+rendered source into a binary keeping that balance, and every program off the
+floor, which ships from the standard codegen with no certificate.
+
+<a id="historical-implementation-progression-retained-evidence"></a>
+
+## Historical implementation progression (retained evidence)
+
+The following brick-by-brick narrative records the earlier MIR/incumbent
+renderer work. Its corpus counts, pending work and references to the removed
+`check-wasm-bytes.sh` are historical, not current shipping guarantees. The
+incumbent was retired in #2761; its `Wasm*` theorems remain model theorems.
+Current structural-runtime byte grounding is `check-structural-bytes.sh`,
+artifact/witness checking is `structural-wall.sh`, and the native subset is
+checked by `native-wall.sh`. The current trace-model limits are stated above;
+use the receipt for the exact certified set and trusted boundaries.
+
+The earlier progression described its scope as follows:
+
+- **The flight-grade property SET is complete on the value-semantics subset**:
+  RC balance (the TEMPORAL clause of `MemorySafe`, see below), name totality, capability bound (incl. transitive),
+  type-concretization, memory-model leak-freedom, reuse soundness (a `Reuse` acts
+  only on a UNIQUELY-owned object — no aliased in-place reuse), free-list
+  reuse-safety (a valid allocation never returns a currently-LIVE block — no
+  reuse-after-free, `FreeList.alloc_not_live`), region-reset safety (a
+  `RegionSave`/`RegionRestore` window preserves the allocator invariant across an
+  ARBITRARY body, so the frontier reset leaves NO free-list entry pointing into the
+  reclaimed region and reuse-safety survives the reset —
+  `FreeList.region_window_reuse_safe` /
+  `FreeList.region_reset_leaves_no_free_into_the_region`), PINNED_RC immortality (a
+  block allocated by `$alloc8` / `__alloc_pinned` — every host-written WASI buffer
+  and the preopen tables — is, over an ARBITRARY run, never freed, never on the
+  free-list and never returned by `$alloc`, and survives a region reset:
+  `FreeList.pinned_stays_immortal_forever` / `FreeList.p_region_reset_preserves_PINV`;
+  this is the invariant C-042 violated), the COUNT side of reuse (a block handed back
+  off the free-list carries NO stale reference count — it arrives at exactly 0,
+  `FreeListRc.reuse_hands_back_a_zero_count_block` — and the constructor's store
+  leaves it at exactly `RC_INITIAL` = 1, `FreeListRc.reuse_restores_rc_1`; the
+  free-list holds only zero-count blocks and the live set only positive-count ones
+  over an ARBITRARY run and across a region reset, so a double release provably
+  TRAPS on the `$rc_dec` sentinel — `FreeListRc.double_release_traps` /
+  `r_region_reset_preserves_RINV`), copy-on-write alias-safety
+  (`MakeUnique` yields a uniquely-owned block — no aliased in-place mutation,
+  `CowSafety.make_unique_yields_unique`), byte-binding table + the `$rc_dec` /
+  `$rc_inc` instruction-trees realizing `rt_dec` / `rt_inc` (`WasmRcDec`) + the
+  rc_inc instruction tree encoding to the REAL wasm bytes (`WasmEncode`, grounded
+  against wat2wasm) + those real bytes EXECUTING to `rt_inc` on a wasm stack
+  machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
+  executed on the renderer's real bytes by a general interpreter (`WasmExec`),
+  operand-stack balance, and termination of the loop-free fragment — all
+  kernel-checked and axiom-clean (137 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
+  so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
+  (lowering beyond the subset: control flow, closures, stdlib) — not new properties
+  on the subset.
+- **The MIR-lowering WALL is empirically verified over the WHOLE v0 corpus**
+  (`proofs/corpus-wall.sh`, in `make verify-trust` → CI). The entire v0 spec
+  corpus (465 `.almd` files, 4195 functions reaching MIR) is driven through the
+  REAL frontend → `lower_function`, and two soundness invariants are asserted on
+  real source, not just hand-built MIR: (1) **the wall** — `lower_function` is
+  TOTAL over the corpus: every function is `Ok` (in-profile) or an explicit
+  `Unsupported` (walled); **zero panics, zero undetected refusals** (a program
+  outside the value-semantics subset is rejected with a reason, never quietly
+  mislowered); (2) **accept ⟹ safe on ALL THREE proven properties** — the
+  kernel-proven checker re-verifies EVERY in-profile function's witness and
+  ACCEPTs for ownership (no double-free/leak, `check_sound`), name totality (no
+  dangling MIR reference, `check_names_cert_sound`), and capability bound (no
+  undeclared host effect, `check_caps_cert_sound`). Witness granularity differs
+  by property and the gate respects it: the ownership checker FOLDS over heap
+  objects (one fold over the whole stream), while the name/capability checkers
+  parse a SINGLE `<superset>|<subset>` witness, so those are re-verified one
+  function at a time (a batched file would wrongly fold every function's ids into
+  one superset — surfaced and encoded while building this gate). This is the
+  step-4 "continuous corpus
+  verification = the definition of parity" in its honest first form: it does NOT
+  yet claim the *completion definition* (the proven profile accepting the full
+  corpus), it establishes the *mechanism* that measures progress toward it and
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 4083/4195
+  functions in-profile (97%) for ownership+names (caps-VERIFIED is the lower, parity-binding 3528 — see caps note)** (the value-semantics subset,
+  plus **`Range` values, CLOSURE values, and unresolvable `Method`/`Computed`-target calls** (`f(0..n)`,
+  `var g = (x) => …`, `obj.method()`, `(g)()` — a `Range` and a CLOSURE value (a fresh heap env) are fresh values; an unresolvable callee
+  (dispatch / closure value not known here) is modeled as a DEFERRED fresh value (a
+  heap `Alloc{Opaque}` / scalar `Const`), its receiver's/args' calls captured but the
+  method/computed call itself ELIDED, so the `ir_calls > mir_calls` gate taints the
+  function caps-unverified — honest, the callee's capabilities are unknown), plus
+  **error operators** (`e!`/`e?`/`e ?? d`/`e?.field` yield a FRESH value — the
+  unwrapped/defaulted/mapped result, deferred like every Opaque; the operand's
+  calls are captured. Almide has NO `try`/`catch`: `e ?? d` (unwrap-or-default),
+  `e?` AS `ToOption` (`Result → Option`) and `e?.f` (optional chaining) are TOTAL
+  value maps with NO control flow — always safe to defer. **`e!` (`Unwrap`) and the
+  effect-fn auto-`?` (`Try`) EARLY-RETURN `Err`**, and that early return was a v0 WASM
+  codegen LEAK: the Err path is a bare `return_` that jumps PAST the function's
+  scope-end heap frees (the Perceus rc_decs sat only at the terminal `Ret`), so a heap
+  local live at the early return leaked (Rust was always leak-free: `e!`→`?`→scope-exit
+  `Drop`). A deferred-continue cert is balanced (the checker proves it no_leak), so
+  certifying that shape would have been **accept-but-unsafe**. **FIXED** (the underlying
+  v0 bug, not merely walled): the wasm emitter now frees the heap locals LIVE at each
+  `Try`/`Unwrap`/`Fan` Err-path `return_` before it propagates — `emit_early_return_decs`
+  reads Perceus's own rc_dec liveness (a running owned-heap set, push on heap Bind / pop
+  on RcDec, excluding env-borrows + donate-only `__*` temps; the returned Err ptr is a
+  scratch temp, never freed). Empirically verified leak-free (a 100k-iteration ×100KB
+  err-loop completes instead of OOM-ing) AND double-free-free (the whole 260-file wasm
+  corpus + the cross-target byte gate stay green). So the early-return shape now LOWERS
+  on both targets, faithful — the move/consume model never moves a user heap local
+  without a Dec (alias-by-RcInc, verified), so the running set is the exact live set.
+  See docs/roadmap/active/v0-unwrap-early-return-leak.md), plus
+  **destructuring patterns** (a `match` arm's `Some(x)`/`Ok(v)`/`Foo(a,b)` and a
+  `let Foo{..}=`/`let (a,b)=` bind their payloads CONTAINER-GRAIN — a heap binding
+  aliases the whole subject (`Op::Dup`, reusing the proven `a` event; element/payload-
+  PRECISE identity needs the layout brick, deferred like every Opaque), a scalar
+  binding is a `Const`; a record shorthand field is walled),
+  plus **higher-order pure combinators** (`list.map`/`filter`/`fold`/… with a
+  closure, in VALUE or EFFECT/statement position — a pure combinator INVOKES the
+  closure during the call and discards it, so it never escapes; the closure
+  ARGUMENT is handled by its CAPABILITY (a `Lambda` body's calls, a
+  `ClosureCreate`/`FnRef` callee → effect markers, so the closure's caps reach the
+  witness and the `mir<=ir` gate taints a nested-higher-order/unanalyzable body)
+  with its value DEFERRED and captures BORROWED; an OPAQUE function value
+  (unanalyzable caps) is WALLED; a value result is fresh-owned, a Unit/scalar effect
+  result carries no ownership, a discarded heap result is allocated and dropped),
+  plus **`for`/`while` loops** (a PER-ITERATION scope frame makes one modeled
+  iteration internally balanced ⟹ N runtime iterations are leak-free for any N, NO
+  loop op; a heap iterable is borrowed or materialized via `lower_call_args`, the
+  loop variable aliases the container per iteration (`Op::Dup`, container-grain) or
+  is a scalar `Const`; a `break`/`continue` (nullary, value-less, label-less — Almide
+  has no `break x`/`return`) over a SCALAR-only frame is admitted as a no-op (the frame
+  holds no heap handle, so a real early exit skips no Drop = no leak on either target),
+  but over a HEAP frame (a heap loop variable's `Op::Dup`, a heap body local) it is
+  WALLED — the v0 wasm backend frees AFTER the break branch target, so a real early exit
+  would LEAK the per-iteration heap handle (an accept-but-unsafe case caught by
+  adversarial verification, not shipped); a heap reassignment — the loop
+  ACCUMULATOR `acc = acc + [x]` — is DEFERRED, not rebound: `acc` keeps its still-live
+  pre-loop handle across iterations, so no iteration drops a handle a later iteration
+  reads (memory-safe; the accumulation itself is deferred like every Opaque) and is NOT
+  a frame handle, so a scalar loop + heap accumulator + break is admitted; a scalar
+  reassignment `i = i+1` is admitted), plus **`if`/`match`
+  control flow** (statement / scalar- / Unit- / HEAP-tail and
+  heap-bind position — arms LINEARIZED into the flat op stream with a per-arm scope
+  frame, NO branch op: since brick 5a the per-arm discipline is CHECKED, not trusted —
+  arms must AGREE on each object's leaving count (the branch-grouped cert `{…|…}` +
+  `verify_ownership`'s branch join; release parity inserts the compensating
+  sibling-arm Drop when one arm moves an outer handle out); the
+  result is one merged slot the caller emits — discarded (Unit/statement), a `Const`
+  (scalar), or a fresh `Alloc{Opaque}` (heap, memory-safe by construction, its value
+  CONTENT deferred like every Opaque); a heap `match` subject is MATERIALIZED (a
+  fresh value into an owned temp dropped at scope end, a tracked var borrowed); a
+  payload-binding pattern binds container-grain (see below); an arm guard is WALLED; an
+  arm that reassigns a HEAP variable is DEFERRED — the var keeps its pre-branch handle,
+  so a post-branch read never dereferences a handle the arm dropped (no path-dependent
+  UAF)), plus
+  **tuple destructuring** (`let (a,b) = (x,y)` component-wise, or `(a,b) = t`
+  aliasing the container per component), **field/element assignment** (xs[i]=v / r.field=v → MakeUnique copy-on-write), **println of any heap arg** (`println("x")`/`f()`/`a++b` materialized + borrowed — reaches Stdout so caps-unverified, honest), and **reassignment** — `x = v` rebinds `x`; the old binding rides to scope-end
+  and is dropped exactly once (a conservative lifetime extension, never a
+  double-free); a read of the old `x` inside `v` borrows the still-live old
+  handle (lowered before the rebind), never a UAF. Also incl.
+  plus **field/element extraction** — `xs[i]` / `r.field` / `t.0` / `m[k]`: a
+  scalar result is an unambiguous copy → `Const`; a HEAP result ALIASES the
+  CONTAINER via the existing `Op::Dup` (the v1 container-grain field access) — the
+  extracted value is a second handle on the whole container, which keeps it alive
+  for the value's lifetime (a conservative lifetime widening, never a UAF), reuses
+  the proven `a`/alias event so the Coq checker + backing gate are UNCHANGED, and
+  honestly defers field-PRECISE aliasing (the value's own object) to the layout
+  brick (LayoutId is a placeholder today); a nested-container extraction (`a.b.c`,
+  no single tracked `src`) stays walled. Also incl.
+  expression-bodied functions, direct heap-literal returns, direct
+  named-call-result returns, functions taking **borrowed heap parameters**,
+  **first-order pure stdlib `Module` calls**, **nested CALL arguments** —
+  `f(g(x))` / `assert_eq(g(x), …)` materialized into an owned temp, borrowed into
+  the outer call, dropped at scope end — **literal CALL arguments** — `f("x")` /
+  `f([1,2,3])` / `f(3.14)`, a heap literal via `Alloc` or a scalar literal as a
+  `Const` — **Option·Result constructors** — `Some(x)` / `Ok(e)` / `None` /
+  `Err(e)`, heap variants materialized like a container literal — and **BinOp /
+  UnOp** — `a+b` / `s1++s2` / `-n`, a FRESH computed value (heap concat via
+  `Alloc`, scalar arithmetic/logic as a `Const`; operands carry their own
+  ownership, value-semantics so the result is never an alias)); the rest are
+  walled with a per-feature
+  `Unsupported` histogram that names the next surface to admit (largest buckets
+  now name exact stdlib functions: `list.map`/`filter`/`fold` with a closure
+  argument — the higher-order brick — and call-as-argument materialization).
+  **Stdlib `Module` calls use a PURE-ONLY admission**: a `<module>.<func>` call
+  lowers to an `Op::CallFn` only when first-order (no closure argument) AND the
+  callee is provably PURE (reaches no host capability). This is forced by
+  capability soundness: the proven checker derives `used` capabilities only from
+  `Op::Call`'s typed `RtFn`, so a `CallFn` to an effectful stdlib name would
+  silently omit its capability from `used` = accept-but-unsafe. Pure callees reach
+  the empty capability set, which the empty `used` witness faithfully represents;
+  effectful (`fs`/`http`/`net`/`io`/`env`/`process`/`random`/`zlib` via the
+  `effect fn` keyword) and impure-plain (`datetime`/`args`/`mem`/`testing` — host
+  reach WITHOUT the keyword) and higher-order calls are WALLED, never lowered. The
+  purity registry (`crates/almide-mir/src/purity.rs::PURE_MODULES`) lives entirely
+  in the untrusted emitter; a **drift gate** (`proofs/check-stdlib-purity-registry.sh`,
+  in `corpus-wall.sh`) re-derives the effectful set from `stdlib/*.almd` and fails
+  if any admitted module ever gains an `effect fn`, or if a stdlib module is left
+  unclassified — so a pure→effectful drift cannot silently ship. **The capability
+  property is checked TRANSITIVELY and honestly SCOPED to Stdout.** A function's
+  empty capability witness is only emitted (claimed caps-safe) when a conservative
+  fold (`certificate::reaches_capability_or_unknown`) proves it reaches no Stdout
+  across every `Op::CallFn` edge: an in-profile callee is folded; a pure stdlib
+  `Module` call, a variant constructor, or a known Stdout-free builtin
+  (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
+  Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
+  TAINTS, so the function is reported `caps-unverified` (3528/4083 verified, 555
+  unverified) rather than falsely accepted. **The gate verifies the REAL
+  capability-bound property `reachable ⊆ declared`** (exactly what
+  `proofs/CapabilityBound.v` proves), not a degenerate "reaches no capability at
+  all". `lower_function` lowers each function's effect signature into a
+  `declared_caps` bound — an `effect fn` declares `{Stdout}` (the one modeled
+  cap), a pure `fn` declares ∅ — and the classifier folds the transitive
+  *reachable* cap set (`certificate::reachable_caps_or_tainted`, returning `None`
+  on any taint and `Some(set)` only when every edge is analyzable), then emits
+  `<declared>|<reachable>` for the proven `check_caps_cert` to re-verify
+  `reachable ⊆ declared`. So an effectful function is VERIFIED AGAINST ITS OWN
+  declared bound (a printing `effect fn` is accepted because it declared the
+  Stdout it uses), not merely excluded for touching a capability. A function that
+  reaches a capability it did NOT declare — e.g. a non-`effect fn` that prints,
+  since the frontend `is_effect` flag does not cover every Stdout reach — fails
+  `reachable ⊆ declared` and is conservatively caps-unverified, never falsely
+  accepted. **A call ELIDED by Opaque lowering** (a list element, ctor payload,
+  BinOp operand, or scalar value — its sub-expressions are not lowered) is a
+  second caps blind spot the fold cannot see. `lower::record_elided_calls` SURFACES
+  each such call as a bare EFFECT MARKER `Op::CallFn{dst:None, args:[], result:None}`:
+  the existing handlers treat a result-less, dst-less call as a PURE EFFECT — it
+  emits NO ownership event and references NO value (so ownership/name witnesses and
+  the `+1`-backing gate are unchanged), yet the caps fold matches it by NAME and
+  folds the callee transitively. Only a SOUNDLY-modelled call is surfaced — a
+  first-order `Named` call (the fold opens or honestly taints it) and a first-order
+  PURE `Module` call; a higher-order / effectful-`Module` / `Method` / `Computed`
+  call is left elided so the gate keeps the function tainted (no FALSE de-taint).
+  SOUNDNESS BACKSTOP: a marker is recorded only at a wholesale-elided position, so
+  the MIR call count can only rise TOWARD the IR's — the corpus gate asserts
+  `mir_calls <= ir_calls`, making a double-count (the one way a marker could mask a
+  real elision and falsely de-taint) a WALL BREACH, structurally impossible to
+  ship. A function whose source STILL has more call nodes than its MIR (an
+  un-materializable elided call), or any transitive caller of one, stays
+  conservatively TAINTED — so the caps-verified count is HONEST, never over-claimed.
+  This closes the direct-witness hole
+  (`reachable_caps`'s honest-scope: an unknown callee contributed ∅). HONEST
+  SCOPE: only `Capability::Stdout` is modeled, so the property is "no undeclared
+  **Stdout** effect"; stderr, abort, fs, net are real host effects not yet named
+  (a wider `Capability` set + frontend-lowered `declared_caps` is a later brick).
+  **Heap parameters use
+  a BORROW-BY-DEFAULT calling convention** (the caller owns the reference; a param
+  contributes no owned `+1` to the certificate). This is the only convention sound
+  under the current runtime: an owned-param `+1` would be SYNTHETIC — unbacked by
+  any runtime `Alloc`/`rc_inc` — the gate-blind use-after-free class. Returning or
+  releasing a borrowed param without first acquiring its own reference (a `Dup`)
+  is explicitly walled (`returning a borrowed param directly`), and its
+  certificate would be a release at rc 0 which the proven checker faults. A
+  **non-recurring backing gate** (in `corpus-wall.sh`, mirrored by a unit test)
+  asserts every certificate `+1` is backed by a real `Alloc`/`Dup`/heap-result —
+  so re-introducing a synthetic param ownership is structurally impossible to
+  ship. Note: the proven Coq checker is UNCHANGED by this brick (only the cert
+  *emission* dropped the unbacked param `i`), so the checker-size invariant holds.
+  Coverage is REPORTED, never gated on a brittle exact count — only the soundness
+  invariants are hard, plus an anti-collapse floor (≥1 in-profile witness must
+  reach the checker, so a silent coverage collapse to zero fails the gate).
+- **Index-bounds memory safety — a found-and-walled hole.** The ownership checker
+  proves the RC properties but does NOT check list-index bounds; the renderer's
+  `$list_set`/`$list_get`/`$elem_addr` did no bounds check either, so an
+  out-of-range index would compute an address OUTSIDE the block and a store there
+  would CORRUPT memory — an accept-but-UNSAFE hole (a different memory-safety axis
+  than RC). CLOSED with a WALL (not silent): `$elem_addr` now traps (`unreachable`)
+  on `idx < 0 ∨ idx ≥ cap`, so every element access is bounds-checked and OOB is a
+  controlled halt, never corruption (verified on wasmtime: OOB traps, in-bounds does
+  not; the value-semantics output is byte-unchanged — all real accesses are
+  in-bounds). The SAME audit closed a second unbounded-write gap: `$print_list`
+  built the output line in a fixed buffer `[SCRATCH_ADDR, HEAP_BASE)` with no bound,
+  so a very long list would overflow the line into the heap — it now traps before
+  appending an element that would cross `HEAP_BASE` (the print-buffer wall). The
+  deeper fix — the checker REJECTING OOB statically (a wall at check time, not run
+  time) — is a later brick; today the runtime trap is the wall.
+- **The wasm renderer is in the RC regime (A1.1b): it emits a release per drop.**
+  A `Drop` now renders as `call $rc_dec`, decrementing the refcount cell (laid at
+  heap offset 0 by the A1.1a relayout = `RuntimeModel.RC_OFFSET`) to 0 — so the
+  binary actually FREES at the cell level. The safety basis moved accordingly:
+  no longer `eager_copy_refines_safety` (the artifact is no longer Dec-free) but
+  `RuntimeModel.balanced_cert_no_memory_fault` — an accepted (balanced)
+  certificate has no double-free in the memory machine — together with
+  `balanced_cert_frees_in_memory` — its cell ends FREED (rc 0). Both are already
+  kernel-proven and axiom-clean (this slice is pure proof-REUSE: no `.v` changed).
+  The per-build `validate_translation_perceus` V binds each witness drop to a
+  `call $rc_dec` byte (one release per drop, no fewer), so the proof transfers to
+  the REAL bytes; and the `$rc_dec` runtime SENTINEL traps a double-free at run
+  (`unreachable` on an already-0 cell — verified firing on wasmtime). So `C-SAFE`'s
+  no-double-free AND cell-level leak-freedom are now claimable for the EMITTED
+  artifact, not just the model. PHYSICAL reclamation is now REALIZED (A1.2-render):
+  `$rc_dec` at rc→0 returns the block to a free-list and `$alloc` reuses an
+  exact-size head, REFINING the proven `FreeList.v` model (`alloc_not_live`: a valid
+  allocation never returns a currently-LIVE block — no reuse-after-free). The
+  double-free sentinel is PRESERVED — the free-list link lives in the dead LEN field,
+  NOT the rc cell, so a re-release of a freed block still traps (verified: the
+  double-free trap test and a reuse test, `p1==p2` on alloc/free/realloc, both pass
+  on wasmtime; the value-semantics output is byte-unchanged). Since #909's third
+  sentinel that sentence is PROVEN, not merely verified: `FreeListRc.v` carries the
+  reference COUNT (as `RuntimeModel.read_rc`, the same cell the byte theorems write)
+  alongside the allocator, and proves `double_release_traps` — a free-list block
+  reads 0, so the sentinel fires — plus `reuse_restores_rc_1`, the alloc/store PAIR.
+  What stays TRUSTED is narrower than before and now EXECUTABLY gated rather than
+  asserted: that the emitter writes that `RC_INITIAL` store at every rc-managed
+  `call $alloc` site is checked by `almide-mir`'s
+  `every_rc_managed_alloc_site_initializes_the_rc_cell`, which enumerates all 16
+  `$alloc` sites in the renderer, requires each to initialize the rc cell or be a
+  named raw-scratch site (the proven `alloc_raw` category), and reads `RC_INITIAL`
+  out of the `.v` file so the constant cannot drift. HONEST scope of what is
+  SHARING is now REALIZED too (A1.3-render): `Dup` shares via `rc_inc` (no copy) and
+  `MakeUnique` is a copy-on-write (clone-on-shared — `rc_dec`-FIRST so the alias keeps
+  the original alive and no temp is needed, then `list_copy`), refining
+  `CowSafety.make_unique_yields_unique`. The rc cell now ACTUALLY tracks the abstract
+  refcount (1→2→1→0), exercising the proven rc machine (`WasmRcDec`/`RuntimeModel`),
+  with byte-unchanged value-semantics output. So A1's renderer is now FULLY real-RC —
+  share / cow / free-list / double-free sentinel — every piece REFINING a proof, zero
+  trusted runtime added. NOT yet done (perf/encoding, not safety): the free-list is
+  exact-size HEAD-match only (a mismatched-size freed block is not yet reused — missed
+  reuse, NEVER unsafe; size-classes / walking is a later slice); and the raw-BYTE
+  encoding of the instruction trees (A2's deferred heavy half).
+- **Byte-binding is partial.** The op→wasm-instruction TABLE is a formal Coq
+  object (`Translation.v`) and the runtime heap is modeled as a memory state
+  machine whose rc cell provably tracks the abstract refcount
+  (`RuntimeModel.mrun_tracks_exec`); `validate_translation` re-checks per build
+  that each op's pattern is emitted (a drop's is `call $rc_dec`) and
+  `validate_translation_perceus` that one release is emitted per drop. The model's
+  `RC_OFFSET = 0` now COINCIDES with the renderer's physical rc-cell offset (the
+  A1.1a relayout) and `call $rc_dec` writes that cell. **A2 first slice DONE
+  (instruction-tree level), `WasmRcDec.rc_dec_prog_realizes_rt_dec`**: the EXACT
+  `$rc_dec` instruction tree the renderer emits (modeled as data, with a small
+  operational semantics for the load/add/sub/store/trap fragment) provably computes
+  `RuntimeModel.rt_dec` — same trap (cell 0), same decrement. So the abstract
+  release the leak/no-double-free proofs use is what the emitted INSTRUCTIONS
+  compute, not a token. The byte ENCODING is now bound too (A2 byte slice,
+  `WasmEncode.rc_inc_bytes_encode_the_instruction_tree`): a Coq wasm-binary encoder
+  produces EXACTLY the bytes `wat2wasm` emits for the renderer's `$rc_inc`, GROUNDED
+  per build by `proofs/check-wasm-bytes.sh` — and since #932 the gate is a closed
+  TRIANGLE with no hand-copied constant: the WAT it assembles is extracted from
+  the RENDERER'S own rendered output, and the byte lists it compares against are
+  parsed from the `.v` sources, so a renderer edit that drifts from the proof
+  fails the gate instead of orphaning the theorem (non-circular AND
+  renderer-anchored). Composed with
+  `rc_inc_prog_realizes_rt_inc`, the emitted BYTES encode an instruction tree that
+  computes `rt_inc`. And the EXECUTION is now bound too
+  (`WasmExec.rc_inc_bytes_execute_to_rt_inc`): a minimal wasm STACK MACHINE runs
+  the real rc_inc bytes and the memory effect is EXACTLY `rt_inc` — so the bytes,
+  EXECUTED, compute the abstract acquire (not merely encode an instruction that
+  would). So `rc_inc` is bound END TO END: instruction tree ↔ real bytes ↔
+  execution ↔ rt_inc, the trust chain reaching the ACTUAL wasm bytes. The
+  interpreter also EXECUTES the double-free TRAP control flow
+  (`WasmExec.trap_bytes_trap_on_zero` / `_pass_on_nonzero`: the bytes for
+  `(if (i32.eqz cell) (then unreachable))` trap IFF the cell is 0 — the sentinel,
+  on real grounded bytes), so it handles both straight-line code AND the
+  safety-critical trap. The FOUNDATION for GENERAL structured control flow is also
+  built (`WasmExec.skip_block` + `imm_len`): an immediate-aware structure finder
+  that locates a block's matching `end` WITHOUT being fooled by immediates that
+  collide with opcodes (`i32.const 4` = `41 04` where 0x04 is `if`; `i32.const 11`
+  = `41 0b` where 0x0b is `end`) — proven on those exact collision cases. This
+  shows general control flow needs only a small per-opcode immediate-length table,
+  NOT a full WasmCert-Coq parser. And it is now WIRED into a general `if` EXECUTOR
+  (`WasmExec.run_g` + `split_block`): a fuel-bounded interpreter that runs a general
+  structured `if … end` — the then-body EXECUTES when the condition is nonzero and
+  is SKIPPED otherwise (proven on `if (cond) (then store 0:=42)` — body runs / is
+  skipped), beyond the fixed trap pattern; PLUS `global.get`/`set` (the `$freelist`
+  global as a reserved cell, round-trip proven) and INDEXED locals + `local.set`
+  (a locals env, for the `$rc` temp). With that, the FULL `$rc_dec` bytes — free-list
+  included, with `global.get`/`set` — are GROUNDED against wat2wasm
+  (check-wasm-bytes.sh) and BOTH rc_dec SAFETY properties are EXECUTED-PROVEN on
+  those real bytes by the general interpreter: `rc_dec_bytes_trap_on_zero` (NO
+  double-free — releasing an already-0 cell TRAPS) AND `rc_dec_bytes_frees_when_one`
+  (LEAK-FREEDOM — a valid release leaves the rc cell at 0, the block freed), run on
+  the renderer's ACTUAL `$rc_dec` byte sequence. Per the trust model ("we protect
+  SAFETY, not functional correctness"), these two are the rc_dec byte-binding that
+  matters; the free-list push's ORGANIZATION (which list the freed block joins) is
+  functional, not a safety property. The interpreter's EXECUTION is GROUNDED both
+  ways now: the bytes against wat2wasm, AND the execution against the production
+  engine — a wasmtime differential test (`rc_cell_values_match_the_interpreter_on_-
+  wasmtime`) confirms the REAL engine computes the same rc cell values run_g predicts
+  (rc_inc 1→2, rc_dec 1→0). So the residual shrinks from "trust run_g = the wasm
+  spec" to "wat2wasm/wasmtime = the spec" — production tools at the same trust level
+  as the rest of the toolchain. NOT yet done: the functional list-op runtime (the
+  bootstrap-runtime debt, to be SELF-HOSTED in Almide through the proven path, #30,
+  not hand-bound); and a full in-Coq WasmCert-Coq ISA that would close the
+  interpreter↔spec residual entirely (vs. grounding it against wat2wasm/wasmtime).
+- **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
+  → the actual frontend → MIR → proven checker, for ownership + names — weekly
+  indicator ① 0→1). The lowering covers only the value-semantics subset (heap
+  literals, alias, index-assign copy-on-write, scalar/heap-move-out return — NO
+  calls or control flow yet, #29), so the broader reject cases and the
+  capability witness are still REPRESENTATIVE MIR shapes (emit_cert.rs).
+- **Extraction is a cross-checked fast path, not a verdict root** (item 2
+  above, brick 6b): the kernel oracle re-certifies every gate and corpus
+  verdict; verified extraction / CertiRocq adoption is the recorded future
+  ratchet for the fast path itself.
+- **Single independent checker.** Diversity (≥2 independent checkers) is brick 6.
+
+<a id="proven-vs-trusted-boundary-map-flight-evidence-gaps-f3-1"></a>
+
+## Proven-vs-trusted boundary map (flight-evidence-gaps F3-1)
+
+The one-page answer to the auditor's first question: **what exactly is proven,
+and what is trusted engineering?** (2026-07-03 — written after a hands-on pass
+found five output-breaking bugs, ALL in the trusted zone.)
+
+```
+                         ┌──────────────────────────────────────────────┐
+  .almd source ──parse──▶│ FRONTEND (trusted Rust)                      │
+                         │  check / lower / optimize / mono / ir_link   │
+                         └──────────────┬───────────────────────────────┘
+                                        │ IR
+                         ┌──────────────▼───────────────────────────────┐
+                         │ MIR LOWERING (trusted Rust, WALLED)          │  ← the five 2026-07-03
+                         │  lower_function + pre-desugars               │    bugs lived HERE
+                         │  emits per-function WITNESSES                │
+                         └──────────────┬───────────────────────────────┘
+                                        │ MIR + certificates
+                         ┌──────────────▼───────────────────────────────┐
+                         │ CHECKER (Coq-PROVEN kernel)                  │  ← accept ⟹ ownership ∧
+                         │  check_all_sound / names / caps-transitive   │    names ∧ caps (37 thms)
+                         └──────────────┬───────────────────────────────┘
+                                        │ accepted MIR
+                         ┌──────────────▼───────────────────────────────┐
+                         │ RENDERER render_wasm (trusted Rust;          │
+                         │  rc_dec/rc_inc byte trees PROVEN — WasmExec) │
+                         └──────────────┬───────────────────────────────┘
+                                        │ wat
+                              wasmtime (UNQUALIFIED tool)
+```
+
+What the proof gives: an ACCEPTED function cannot double-free, leak, dangle a
+name, or reach an undeclared capability. What the proof does NOT give: that the
+lowering picked the RIGHT semantics — a certified-sound function can still print
+the wrong string. That gap is covered only by differential evidence
+(output-parity baseline + org suites), whose reach is measured by
+`proofs/coverage.sh`.
+
+<a id="ffi-an-externs-declared-purity-is-the-authors-claim"></a>
+
+### FFI: an `@extern`'s declared purity is the author's claim
+
+An `@extern(wasm, ..)` import is code outside the program, and the
+capability certificate cannot see into it. Every call of one records
+FOREIGN (`cert_project::cap::FOREIGN`), so the report always shows that
+foreign code is reachable. Whether that code has host effects is what the
+extern's declaration says: a plain `fn` extern records FOREIGN alone, which a
+plain `fn`'s bound admits, as the checker does, and an `effect fn` extern
+also records FOREIGN_EFFECT, which only an `effect fn` admits. The purity of a
+plain `fn` extern is trusted, not checked. It is the author's declaration,
+the same trust every FFI boundary takes. Pinned by
+`witness_decls::tests::a_plain_caller_of_an_effect_extern_is_refused` and
+`tests/verify_shim_test.rs::a_plain_fn_calling_a_pure_extern_builds_under_the_verifier_and_reports_foreign`.
+
+<a id="the-five-2026-07-03-trusted-zone-bug-classes-and-their-regression-pins"></a>
+
+### The five 2026-07-03 trusted-zone bug classes and their regression pins
+
+| class | what broke | pin (gate or fixture) |
+|---|---|---|
+| match linearization ran BOTH effectful arms | wrong output under a green wall | call-bearing-arm WALL guard (`lower_branch`) + `mutual_recursive_types` / grammar dispatch fixtures in the parity baseline |
+| never-err strip vs REAL Result blocks | record fields read off a Result handle | `effect_assign_unwrap` (all five legs) in the parity baseline + lifted/self strip gate |
+| scalar module-globals lowered to Const-0 | every use of a top-level `let` read 0 | const-init materialization + WALL for call-bearing inits; `top_let_test` in the baseline |
+| lifted lambdas lost variant/global registries | `filter` dropped every element | sub-ctx inheritance (binds.rs); `closures_and_variants` in the baseline |
+| `$_start` left an explicit-Result main on the stack | invalid wasm for every Result-main CLI | `$_start` tag-read/drop; grammar CLI matrix byte-verified |
+
+| `prim.handle(<literal>)` resolved to deferred-Const **0** | the generated case tables read address 0 — every lookup silently missed (found while landing them, 2026-07-03) | literal materialization in the prim arg loop (calls_p4) + `string_case_unicode` in the parity baseline |
+
+Pattern across all six: a REGISTRY or CONVENTION (tracking sets, layout tables,
+calling convention, the scalar deferred-Const fallback) drifted between producer
+and consumer inside the trusted zone. The deferred-Const fallback (a scalar tail
+outside the subset lowers to `Op::Const` zero, calls elided) is the remaining
+SYSTEMIC instance of this pattern — it trades output correctness for caps
+coverage by design, which was sound when scalar fns were never output-observed
+and is NOT sound now. Retiring it (wall instead of Const on the value-observed
+paths) is recorded in flight-evidence-gaps F2. The structural fix direction is certificate-format-v1 / value-rc-cert
+(shrink the trusted zone); the tactical direction is the wall discipline (every
+consumer of an untracked/unknown shape must wall, never guess) — which is now
+enforced at the match-linearization and Map-repr routing sites.
+
+<a id="use-relativized-completeness"></a>
+
+## Use-relativized completeness
+
+Completeness is declared per model and use, not absolutely. The historical
+eager-copy result concerns its ownership fragment; it is not the shipping
+structural runtime's current completeness boundary. The trace-model theorems,
+runtime refinement and per-artifact certificate checks have distinct
+hypotheses and coverage. None is a proof of full source-to-artifact semantics
+or of `MemorySafe` for every shipped program. The receipt names the claims
+and remaining trusted assumptions for its certified artifacts.

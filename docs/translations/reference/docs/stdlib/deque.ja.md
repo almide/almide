@@ -58,6 +58,8 @@ fn main() -> Unit = {
 ```
 
 
+<a id="signature-index-60-functions"></a>
+
 ## 原文固定スナップショットの API 索引（60関数）
 
 ```

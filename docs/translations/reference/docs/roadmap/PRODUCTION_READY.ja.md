@@ -1,0 +1,316 @@
+<a id="historical-production-readiness-plan"></a>
+
+# 歴史的な本番運用準備計画
+
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](PRODUCTION_READY.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](PRODUCTION_READY.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](PRODUCTION_READY.zh-CN.md)
+
+> 原文コミット固定の非規範閲覧用スナップショット。原文を正本とし、自動同期しない。独立した実行、実装検証、証明検査、測定は行っていない。歴史的コマンドや設計指示は資料であり、実行した指示ではない。
+> [Original source / 原文](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/PRODUCTION_READY.md)
+
+> 原文注記：保存された pre-1.0 計画であり、リリース承認や現在の永続互換契約ではない。退役 TS/JS target、旧 fan 名、TOML template codegen、延期 LSP/package/native 項目は後の訂正と併存し、旧 checklist の印や18/18を現在の検証結果と読まない。旧 security layer・完成した並行モデルの主張は原文の位置づけであり、普遍的安全・全機能完成の保証ではない。異なる test/API/pattern 件数や error code 範囲は別の歴史的 snapshot として保持する。他言語の歴史・予測・時間値を独立検証しておらず、release・実装・test・benchmark は行っていない。
+
+初期の pre-1.0 の位置づけ、スナップショット、提案基準を保持する。現在のリリース承認や永続的互換性の約束ではない。現行 API/target は [SPEC](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/SPEC.md)、[stdlib](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/stdlib/README.md)、[CLI](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/specs/cli.md) を正本とする。LSP と package/native 統合は既に存在し、下記の延期機能表は歴史的なもの。18/18 は現在のチェックリスト結果ではない。
+
+> **1.0 = 安定性契約。** 既存コードが壊れないことの約束。機能チェックリストではない。
+>
+> — Ruby, Rust, TypeScript, Go, Gleam の 1.0 全てがこの原則に従った
+>
+> **日付で切る。** Feature gate で延期し続けると Zig のように 10 年 pre-1.0 になる。
+
+---
+
+<a id="positioning"></a>
+
+## 位置づけ
+
+**"Better Rust for LLMs"** — Kotlin が "Better Java" で成功したように、Almide は Rust の型安全性・パフォーマンスを維持しながら、LLM が躓く複雑さ（borrow checker, async/await, Pin/Unpin, lifetime annotations）を構造的に排除する。
+
+Almide が**既に回避した**他言語の失敗:
+
+| 他言語の失敗 | Almide の設計 |
+|-------------|--------------|
+| Python asyncio: 関数カラーリング問題 | `fan` — async/await なし。コンパイラが自動挿入 |
+| Rust async: Pin/Unpin, runtime 選択 | `fan` — thread backend。ユーザーに runtime を見せない |
+| Go: `if err != nil` 地獄 | `effect fn` + 明示的な `Result` / `!` 処理 + `guard` |
+| Go: nil panic | `Option[T]` — null は存在しない |
+| Go: sum type 不在 | `type | Variant` + exhaustive `match` |
+| Ruby: 可変デフォルト + monkey patching | 不変値、メタプログラミングなし |
+| Python 2→3: str の意味変更 | String は常に UTF-8。core type の意味は変えない |
+| Swift: 3 バージョン連続 breaking | 全 breaking change を 1.0 前に完了 |
+| TypeScript: enum/namespace の後悔 | Rejected Patterns リストで再提案を防ぐ |
+| Zig: feature gate で 1.0 が来ない | 日付で 1.0 を切る |
+
+---
+
+<a id="現在地-v0370この節の詳細は当時のスナップショット--最新は-readme--llmstxt"></a>
+
+## 現在地: v0.37.0（この節の詳細は当時のスナップショット — 最新は README / llms.txt）
+
+```
+コンパイラ          84 ファイル / 19,536 行
+                    生成コードは外部 crate 不要（stdlib ランタイムを自己内包）
+stdlib             22 モジュール / 390 関数 / ランタイム 100%
+テスト             167 .almd テストファイル + Rust unit tests (TypeVar regression 6件含む)
+ターゲット          Rust, WASM（TS/JS/npm は 2026-03-28 に削除 — playground は WASM 実行）
+Exercises          25 本 / 6 tiers
+並行処理           fan { }, fan.map, fan.race, fan.any, fan.settle
+セキュリティ       Layer 1 (Effect Isolation) + Layer 2 (Capability Restriction via almide.toml [permissions])
+Effect推論         自動capability推論 (IO/Net/Env/Time/Rand/Fan) + almide check --effects
+エラー処理         Option + Result の 2 機構のみ (Swift の 3 機構の失敗を回避)
+Codec              auto-derive encode/decode, Value 型, JSON roundtrip
+IR                 Typed IR + constant folding, dead code elimination + 12 nanopass
+最適化             Stream Fusion 全6法則 — map+map, filter+filter, map+fold, map+filter→filter_map, identity消去, flat_map+flat_map
+Borrow             use-count ベースの clone 挿入/削除
+診断               file:line + context + actionable hint + error recovery
+Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
+```
+
+---
+
+<a id="v010--v060"></a>
+
+## v0.1.0 → v0.6.0
+
+| 機能 | v0.1.0 | v0.6.0 |
+|------|--------|--------|
+| 型システム | Int, String, Bool | + Float, List, Map, Tuple, Record, Variant, Option, Result, Generics, Union |
+| エラー処理 | なし | effect fn, auto-?, guard |
+| 並行処理 | なし | fan ファミリー 6 API |
+| セキュリティ | なし | Effect Isolation |
+| Codec | なし | auto-derive, Value, JSON roundtrip |
+| ターゲット | Rust のみ | Rust + WASM |
+| パターンマッチ | 基本 | 網羅性チェック、ネスト、ガード |
+| 診断 | 行番号のみ | file:line + context + hint + error recovery |
+| テスト | 0 | 2,033+ |
+| stdlib | 数関数 | 22 モジュール / 390 関数 |
+| ツール | `almide run` のみ | run, build, test, check, fmt, clean, init |
+
+---
+
+<a id="10-の定義"></a>
+
+## 1.0 の定義
+
+> TypeScript 1.0 は strictNullChecks なしで出荷された。Rust 1.0 は async なしで出荷された。
+> Gleam 1.0 は 19 stdlib モジュールで出荷された。Go 1.0 は generics なしで 12 年間繁栄した。
+> 全て「既存コードは壊れない」という約束だけで 1.0 を名乗った。
+
+<a id="当初提案した-10-安定性方針現行の無期限保証ではない"></a>
+
+### 当初提案した 1.0 安定性方針（現行の無期限保証ではない）
+
+1. **構文凍結**: `effect fn`, `fan`, `guard`, `match`, `for...in`, `while` — 現在の構文は永続
+2. **コア stdlib API 凍結**: 22 モジュール / 390 関数のシグネチャは不変。関数の追加はするが、既存の変更はしない
+3. **クロスターゲット一致の目標**: 現行対象は native と Wasm。TS 出力は退役済み。
+   実際の一致・例外・環境依存は現行の契約と fixture の scope に従う
+4. **edition フィールド**: `almide.toml` に `edition = "2026"` を追加。将来の破壊的変更は新 edition で吸収 (Rust editions の教訓)
+5. **永続互換性**: 今日コンパイルできる `.almd` は永遠にコンパイルできる (Go 1 compatibility promise)
+
+<a id="当初の延期判断現在の実装有無を表す一覧ではない"></a>
+
+### 当初の延期判断（現在の実装有無を表す一覧ではない）
+
+| 延期する機能 | 理由 | 先例 | 予定 |
+|-------------|------|------|------|
+| LSP | `almide check` + hint が LLM の主要 UX | Gleam: LSP は 1.0 前だが最小限 | 1.x |
+| FFI / Rainbow Bridge | stdlib で CLI・Web API は書ける | TypeScript: .d.ts は後から | 1.x |
+| パッケージレジストリ | git ベース依存で十分 | Go: module proxy は 1.13 | 1.x |
+| Go / Python ターゲット | Rust + TS で 90% カバー | Kotlin MP: JVM 優先、他は後 | 2.x |
+| Security Layer 2-5 | Layer 1 だけで十分な差別化 | — | 2.x |
+| Self-Hosting | ユーザー価値薄い | Zig: 自前 backend は罠 | 2.x+ |
+| 700+ 関数 | 390 で実用的。Gleam は 19 モジュールで 1.0 | 全言語 | 1.x |
+| Algebraic effects | `effect fn` は I/O マーカーに留める | Gleam: 効果系なしで成功 | 検討しない |
+
+<a id="当初の-fan-位置づけと現行の参照先"></a>
+
+### 当初の fan 位置づけと現行の参照先
+
+> Rust の async は 1.0 から 4.5 年かかった。Python の asyncio はエコシステムを分断した。
+> Swift は 5.5 まで 7 年待った。Go の goroutine だけが初日から機能した。
+
+Almide は `async` / `await` を利用者に要求しない表面を選んだが、それだけで
+全ての並行ユースケースが完成したとはしない。旧 six-head リストは現行ではなく、
+`fan.any` は `??` / `list.find_map`、`fan.race` は clock 必須の `fan.min` へ変更された。
+現行の表面・制約は [SPEC §13](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/SPEC.md#13-concurrency-fan) と
+[ADR-0028](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/adr/0028-fan-selection-names-and-cost-contract.md) を参照。
+
+---
+
+<a id="当初の-10-チェックリスト履歴"></a>
+
+## 当初の 1.0 チェックリスト（履歴）
+
+```
+Almide 1.0 = ALL of:
+
+安定性契約
+  ■ 構文凍結: 全キーワード・構文の最終確認 (verb reform 完了, protocol 追加)
+  ■ stdlib API 凍結: FROZEN_API.md で 22 モジュール / 390 関数を文書化
+  ■ edition フィールド: almide.toml に edition = "2026" 実装済み
+  ■ 破壊的変更ポリシー: BREAKING_CHANGE_POLICY.md
+  ■ Rejected Patterns リスト: REJECTED_PATTERNS.md (25+ 項目)
+
+コンパイラ正確性
+  ■ クロスターゲット CI: 106/106 (100%) — GitHub Actions 自動化済み
+  ■ ICE = 0: テストスイートで発見される ICE ゼロ (Rust 1.0 も同基準)
+  ■ 生成コードが rustc/tsc 通過
+  ■ stdlib ランタイム 100%
+
+ターゲット品質
+  ■ Tier 1 (Rust): 161/161 テストファイル全通過、全 exercises 動作
+  ■ Tier 2 (TS/JS): 106/106 pass (100%)
+  ■ Tier 3 (WASM): 167/194 pass (0 failed, 27 skipped), mutable collections, fs.write/read_text, top-level let
+
+テスト
+  ■ テスト 2,500+                        (2,681 ✅)
+
+パッケージ管理
+  ■ almide.lock で再現性保証 (実装済み)
+  ■ almide.toml [dependencies] + git ベース解決 (実装済み)
+
+エラー品質
+  ■ 安定エラーコード: E001-E010 実装済み
+  ■ almide check --json: 構造化出力 実装済み
+  ■ almide check < 1 秒: 298 行で 14ms (debug) / 25ms (release)
+
+■ = 当時の達成メモ (18/18)。現行の 1.0 リリース可否は示さない
+
+1.0 後の継続改善 (ブロックしない):
+  ○ ICE の継続的削減 (発見次第修正)
+  ○ hint 適用修復率の計測・改善
+  ○ MSR 計測 (Grammar Lab)
+  ○ 初回正答率ベンチマーク (exercises ベース)
+  ○ 5 showcase プログラムの作成・公開
+```
+
+---
+
+<a id="当初の-pre-10-変更記録"></a>
+
+## 当初の pre-1.0 変更記録
+
+> Pre-1.0 は破壊的変更ができる唯一の窓。
+> Swift は 1→2→3 で 3 回 breaking change があり、移行コストが大きかった。TypeScript は enum の設計を振り返っている。
+> LLM が構文を学習した後では指数関数的に難しくなる。
+
+- [x] Verb system reform 完了 (stdlib-verb-system.md)
+- [x] コア型 API 監査・凍結: `docs/FROZEN_API.md`
+- [x] `fan` の命名最終確認 — fan { }, fan.map, fan.race, fan.any, fan.settle, fan.timeout
+- [x] `effect fn` マーカーの最終確認 — Effect Isolation (Layer 1) 実装済み
+- [x] Rejected Patterns リスト: `docs/design/REJECTED_PATTERNS.md` (20+ 項目)
+- [x] Hidden operations 文書化: `docs/design/HIDDEN_OPERATIONS.md`
+
+---
+
+<a id="当初の-10-への道元のターゲット機能計画を保存"></a>
+
+## 当初の 1.0 への道（元のターゲット/機能計画を保存）
+
+<a id="phase-i-正確性--クロスターゲット-ci"></a>
+
+### Phase I: 正確性 + クロスターゲット CI
+
+> TypeScript: "ターゲット選択がプログラムの挙動を変えてはならない" — これが最重要の品質ゲート
+
+- クロスターゲット CI 構築（全テストを Rust + TS で実行、出力 diff）
+- Borrow/Clone gaps の修正
+- Unknown 伝播 hardening
+- ICE ゼロ化
+
+<a id="phase-ii-安定性契約の準備"></a>
+
+### Phase II: 安定性契約の準備
+
+- Verb system reform 完了（1.0 前の最後の破壊的変更）
+- コア型 API 凍結
+- edition フィールド追加
+- 安定エラーコード (E0001-)
+- `almide check --json` 実装
+- `almide check` を 500 行で < 1 秒に (Go の教訓)
+
+<a id="phase-iii-パッケージ管理--テスト拡充"></a>
+
+### Phase III: パッケージ管理 + テスト拡充
+
+> Cargo は Rust 1.0 の 6 ヶ月前に登場。Go は GOPATH の 6 年間を後悔している。
+
+- `almide.lock` 実装
+- テスト +467 → 2,500+
+- 5 showcase プログラム定義・検証
+- `almide test --json` 実装
+
+<a id="phase-iv-llm-計測--10-リリース"></a>
+
+### Phase IV: LLM 計測 → 1.0 リリース
+
+- Grammar Lab で MSR 計測
+- exercises ベースの初回正答率
+- hint 修復率ベンチマーク
+- Rejected Patterns リスト公開
+- 計測結果を公開 → **1.0 リリース**
+
+---
+
+<a id="1x-エコシステム拡張"></a>
+
+## 1.x: エコシステム拡張
+
+> Ruby: RubyGems (2004) → Rails (2005)。パッケージ基盤がキラーアプリに先行した。
+> Rust: 1.0 後に 6 週間リリースで段階的に強化。
+
+- ~~set モジュール~~ → 1.0 に含む (20 関数実装済み)
+- ~~User-defined generics + protocol~~ → 1.0 に含む (protocol system 実装済み)
+- stdlib 段階的拡充: csv, toml, url, html, sorted (first-party package として)
+- LSP (diagnostics → hover → go-to-def)
+- FFI / Rainbow Bridge
+- `almide doc` 生成 (MoonBit: doc が community adoption を加速)
+- `assert_snapshot` + `almide test --update` (MoonBit の教訓)
+- `almide run` キャッシュ（生成 .rs が同一なら rustc スキップ — MoonBit/Zig の教訓）
+- 月次/隔月リリース (Rust train model)
+
+---
+
+<a id="beyond-1x"></a>
+
+## 1.x より先
+
+| 項目 | roadmap | 先例 |
+|------|---------|------|
+| Go / Python codegen | on-hold/new-codegen-targets.md | Kotlin MP: JVM 優先、他は段階的 |
+| Almide Shell | on-hold/almide-shell.md | Ruby IRB, Gleam: tooling > marketing |
+| Self-Hosting | on-hold/self-hosting.md | Zig: 自前 backend は罠。MoonBit: 成功 |
+| Security Layer 2-5 | active/security-model.md | — |
+| Async Backend | on-hold/async-backend.md | Rust: 4.5 年後。急ぐ必要なし |
+| Streaming | on-hold/streaming.md | — |
+| LLM → IR 直接生成 | on-hold/llm-ir-generation.md | MoonBit: constrained sampler |
+| Web Framework | on-hold/web-framework.md | Ruby: Rails が言語を定義した |
+| Almide UI | on-hold/almide-ui.md | — |
+| パッケージレジストリ | on-hold/package-registry.md | Python: 23 年。Go: module proxy は 1.13 |
+| Typed errors | — | MoonBit: `T!E`, Zig: error union |
+| WASM playground | — | Gleam: playground が adoption を加速 |
+
+---
+
+<a id="10-言語からの教訓"></a>
+
+## 10 言語からの教訓
+
+| 教訓 | 出典 | Almide への反映 |
+|------|------|----------------|
+| 1.0 = 安定性契約 | Rust, TS, Go, Gleam | 構文凍結 + stdlib API 凍結 |
+| 日付で 1.0 を切る | Zig (10 年 pre-1.0) | Feature gate で遅延しない |
+| 破壊的変更は compile error のみ | Python 2→3 | Silent な挙動変更は禁止 |
+| stdlib は lean core | Python, Ruby, Gleam (19 modules) | 22 built-in で十分 |
+| パッケージ管理 > キラーアプリ | Ruby, Rust, Go | almide.lock を 1.0 に |
+| edition で将来の進化を保証 | Rust | edition フィールド |
+| fan は完成した並行モデル | Rust async, Python asyncio, Swift 5.5 | 「async 未実装」ではない |
+| エラーメッセージは製品 | Rust, TS, MoonBit | エラーコード + JSON 出力 |
+| check 速度が採用を決める | Go (sub-second compile) | `almide check` < 1 秒 |
+| Rejected Patterns で feature creep 防止 | Ruby, Python PEP | 明示的な拒否リスト |
+| ターゲット品質階層 | Swift (iOS >> server >> WASM) | Rust > TS > WASM |
+| エラー機構は 2 つまで | Swift (3 つで混乱) | Option + Result のみ |
+| hidden ops を文書化 | Zig (no hidden control flow) | clone, auto-?, runtime |
+| 定期リリース | Rust (6 週), Ruby (年次), TS (3 ヶ月) | 月次/隔月 |
+| tooling > marketing | Gleam (playground, cheatsheets) | WASM playground |
+
+詳細だった `docs/research/lang-lessons-*.md` はツリーから外した（git 履歴に残る）。

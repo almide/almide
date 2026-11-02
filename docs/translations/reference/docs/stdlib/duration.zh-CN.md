@@ -22,6 +22,8 @@ duration.min(10)
 
 负参数会确定性地触发运行时中止；构造溢出时饱和至最大可表示时间。
 
+<a id="algebra-adr-0001-s3"></a>
+
 ### 代数运算（ADR-0001 S3）
 
 在同一种时钟内，接口与 `Compute` 相同：
@@ -36,6 +38,8 @@ duration.ms(1) < duration.s(1)     // Bool
 任何运算符中的 `Duration ⊕ Compute` 都是类型错误——墙钟截止时间不能混入确定性预算（`fan.bounded(duration.ms(5))` 被拒绝，并指向 `compute.ms(...)` / `fan.timeout`）。
 
 
+
+<a id="signature-index-7-functions"></a>
 
 ## 固定快照 API 索引（7个函数）
 

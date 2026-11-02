@@ -1,3 +1,5 @@
+<a id="stability--the-freeze-declaration-and-the-breaking-change-policy"></a>
+
 # 安定性 — 凍結宣言と破壊的変更の方針
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](STABILITY.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](STABILITY.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](STABILITY.zh-CN.md)
@@ -7,6 +9,8 @@
 > [固定原文](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/STABILITY.md)の非規範的な読者向け翻訳です。規範的効力は英語原本にあり、本訳にはありません。自動同期されない固定スナップショットで、歴史的な状態・保証・未完了項目を現況として独立検証したものではありません。
 
 > 2026-08-20 に宣言（オーナーの決定。ADR-0012 D2 の導入後に位置づけられ、`-> T!E` がこの宣言前にゲートを通す最後の構文変更だった）。このページの**英語原本は規範的**です。追跡：ミッションクリティカル攻撃リスト（#1514）の A0-1。#530 / #1485 / #1483 が担います。
+
+<a id="1-the-frozen-surface"></a>
 
 ## 1. 凍結された公開面
 
@@ -19,6 +23,8 @@
 3. **stdlib の公開面はコンパイラと一致します。** `tools/gen-stdlib-doc-index.py
    --check` は、コンパイラ自身のモジュールインターフェースに照らして `docs/stdlib/` をすでに検証しています。
 
+<a id="2-the-conformance-clause-530"></a>
+
 ## 2. 適合性条項（#530）
 
 **Almide 言語仕様**（`docs/SPEC.md` と `docs/specs/`、契約台帳が引用する ALS 節を含む）は**規範的**です。
@@ -26,6 +32,8 @@
 > 実装が ALS と食い違う場合、実装が誤っています。
 
 インタープリター（`crates/almide-interp`）は ALS の**実行可能な伴走実装**です。3方向オラクルの第3の判定役であり、仕様に従うものであって、それ自体が仕様ではありません。文章、interp、コンパイル先ターゲットが食い違う場合、その食い違いは ALS に対するバグです。実装側に報告して修正し、フィクスチャには固定する ALS 節を引用します。（既知の文章上の矛盾は #530 の未解消リストです。1件閉じるごとに、文章のページを引用とフィクスチャで固定された規則へ変えます。）
+
+<a id="3-the-breaking-change-policy"></a>
 
 ## 3. 破壊的変更の方針
 
@@ -38,9 +46,13 @@
 - **追加的変更は引き続き自由です。** 既存のすべてのプログラムの意味を保つ新構文、新 stdlib 名、新機能は、これまでどおりマイナー版で提供します（`-> T!E` が典型例。`T!` は引き続き `T!String` を意味し、既存の表記はすべて影響を受けませんでした）。
 - **2つの表記、1つの意味**が凍結された公開面で許されるのは、等価性が完全な場合だけです（`Option[T]`/`T?` の組）。等価性を意図していてもコンパイラ全体でまだ確立していない場合、両方の表記を合法のままにし、fmt はその境界をまたぐ書き換えを行いません（`Result[T, E]`/`T!E` の組。この規則を定めた3件の反証は ADR-0012 の2026-08-20改訂を参照）。
 
+<a id="4-what-stable-will-mean-measurably-1485"></a>
+
 ## 4. 測定可能な「安定」の意味（#1485）
 
 凍結は*公開面*を動かさない宣言です。**安定性の主張**、すなわち「欠陥曲線の傾向が変わった」は、それとは別の測定可能な主張であり、[`proofs/stability-closure.toml`](../../../../proofs/stability-closure.toml) で定義します。6基準（fuzz の夜数、適合性の週数、wasm の到達範囲、wall コーパス、ブロッカー数、方言の不変期間）が、1つの30日間の窓で同時に成立する必要があります。すべての N は数字が出る**前**にそのファイルで固定します。`scripts/check-stability-closure.sh` は push のたびに現在の状態を報告しますが、何もブロックしません。いずれかの N を変える場合、同じコミットに理由を書かなければなりません。
+
+<a id="5-what-this-is-not"></a>
 
 ## 5. この宣言ではないもの
 

@@ -1,3 +1,5 @@
+<a id="ci-warnings-cleanup"></a>
+
 # CI 警告清理
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](ci-warnings-cleanup.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](ci-warnings-cleanup.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](ci-warnings-cleanup.zh-CN.md)
@@ -12,11 +14,17 @@
 > **观测版本**：v0.23.10，Windows 和 macOS CI
 > **影响**：CI 日志噪声，4 条 ICE 消息（非致命）
 
+<a id="summary"></a>
+
 ## 概要
 
 CI 输出在 spec 测试中包含约 40 条警告和 4 条 ICE 消息。所有测试均通过——这些是诊断噪声，而非失败。但 ICE 消息表明单态化存在真实缺口。
 
+<a id="categories"></a>
+
 ## 类别
+
+<a id="critical-ice--typevar-remains-after-monomorphization-4-files"></a>
 
 ### 严重：ICE——单态化后仍有 TypeVar（4 个文件）
 
@@ -35,6 +43,8 @@ CI 输出在 spec 测试中包含约 40 条警告和 4 条 ICE 消息。所有�
 
 **相关**：`spec/lang/function_test.almd` 也显示还有 1 个 TypeVar（泛型阶乘？）。
 
+<a id="critical-postcondition-violation--lambda-param-unresolved-1-file"></a>
+
 ### 严重：POSTCONDITION VIOLATION——Lambda 参数未解析（1 个文件）
 
 ```
@@ -46,11 +56,15 @@ CI 输出在 spec 测试中包含约 40 条警告和 4 条 ICE 消息。所有�
 
 **根本原因**：参数类型为 Unknown 的 lambda 在 ConcretizeTypes 后仍然存在。覆盖／遮蔽模式可能干扰类型解析。
 
+<a id="noise-unused-variable-warnings-25-instances"></a>
+
 ### 噪声：未使用变量警告（约 25 处）
 
 spec 测试文件仅为副作用使用变量（例如 `for (k, v) in m { ... }` 只使用 `v`）。
 
 **修复方案**：在 spec 文件中添加 `_` 前缀，或在测试模式中抑制。
+
+<a id="noise-unused-import-warnings-4-instances"></a>
 
 ### 噪声：未使用导入警告（4 处）
 
@@ -58,6 +72,8 @@ spec 测试文件仅为副作用使用变量（例如 `for (k, v) in m { ... }` 
 - stdlib 测试中的 `fs`、`env`、`process` 导入
 
 **修复方案**：删除未使用导入或添加 `_` 前缀。
+
+<a id="noise-e015--stdlib-shadow-warnings-5-instances"></a>
 
 ### 噪声：E015——stdlib 遮蔽警告（5 处）
 
@@ -68,6 +84,8 @@ warning[E015]: fn 'factorial' has the same signature as stdlib `math.factorial`
 文件：`codegen_stress_test`、`function_test`、`generics_test`、`regression_v0_11_test`、`type_system_test`
 
 **不是缺陷**：这些是测试文件中有意的重新实现。可以考虑在测试块中抑制 E015。
+
+<a id="recommended-actions"></a>
 
 ## 建议行动
 

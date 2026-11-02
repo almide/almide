@@ -773,6 +773,8 @@ true
 ```
 
 
+<a id="fallible-pipelines--the-polymorphic-core-adr-0006"></a>
+
 ## 可失败流水线 — 多态核心（ADR-0006）
 
 使用 `!` 传播的回调（或具名的 `-> T!E` 函数）会实例化核心组合子的可失败形式：调用产生带有回调错误类型的 `Result[_, E]`（普通 `T!` 的错误类型为 `String`），并在**第一个 err 处短路**（之后的元素不会被求值）。每个组合子只有一个名字，策略由标记承载：
@@ -793,6 +795,8 @@ list.try_fold(xs, z, f)  →  list.fold(xs, z, (a, x) => f(a, x)!)!
 
 若从不报错的回调使 `E` 不受约束，请标注结果类型：`let evens: Result[List[Int], String] = list.filter(xs, (n) => ok(n % 2 == 0)!)`。
 
+
+<a id="signature-index-74-functions"></a>
 
 ## 固定快照 API 索引（74 个函数）
 

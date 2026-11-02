@@ -1,0 +1,197 @@
+<a id="what-is-measured"></a>
+
+# What is measured
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](README.zh-CN.md)
+
+> Non-normative reader snapshot of the pinned original. Original remains authoritative; no automatic synchronization or generation, no machine-consumer input. No independent rerun of benchmarks, proof checks or CI. Historical generated markers are rendered as visible metadata only; their commands are not executed.
+> [Original source (English) / 原文（英語）](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/benchmarks/README.md)
+
+> Source caveat: dates, counts, machine/model conditions and implementation or CI status are historical source claims, not current guarantees. The source itself records unresolved contract-ledger disagreements. Core-artifact certificate checks are not complete memory-safety or native-machine-code proofs. Self-contained Wasm still requires a host compatible with its imports; the no-GC wording does not mean absence of reference counting. The old 999-function/44-module totals and the 38-task September scorecard are preserved rather than reconciled with other pages or later runs. The all-STATUS taxonomy reference is retained even though this excerpt does not enumerate that taxonomy.
+
+
+Every claim on this page is either derived by a script or carries the date it was measured; `scripts/check-readme-numbers.sh` refuses a bare number in CI, and refuses an LLM-writability scorecard that is older than 90 days or that does not name the almide-dojo run it came from. The tables between `generated` markers are rendered from the committed ledgers in this directory (`*.txt`) and from `proofs/`; CI fails when a rendered block and its ledger disagree. Do not edit them by hand. A change to the prose outside the markers runs only CI's documentation checks. A change inside them, or to a marker, runs the full lane. The methodology and the per-benchmark scoreboard are in [docs/project/BENCHMARKS.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/project/BENCHMARKS.md).
+
+<a id="llm-writability"></a>
+
+## LLM writability
+
+Measured by [almide-dojo](https://github.com/almide/almide-dojo) on 2026-09-22 across its bank of 38 tasks (basic / intermediate / advanced), with the pinned compiler `almide 0.62.0`, by that repo's CI lane. Both runs are stamped **`comparable`** by the harness — every planned task reached the model, so each rate is a point and not an interval — and both were sampled at a fixed seed (`20260922`) and temperature 0, recorded in the run's manifest as what the provider actually put on the wire. The runs are committed — [`almide-dojo@8af34bc`](https://github.com/almide/almide-dojo/commit/8af34bc3) — so the table below can be recomputed from their `summary.md` rather than believed; later runs are on the [live dashboard](https://almide.github.io/almide-dojo/). No Anthropic or OpenAI key is in CI by decision, so the models here are the ones the lane can reach without one:
+
+| Model | Pass Rate | 1-Shot Rate |
+|---|---|---|
+| Llama 3.3 70B (fp8-fast) | 65% (25/38) | 39% (15/38) |
+| Llama 3.1 8B | 44% (17/38) | 34% (13/38) |
+
+The most recent same-model comparison is the MiniGit bench: Sonnet 5 × 20 trials on 2026-07-15 with almide 0.29.0 (it has not been re-run on a later compiler), 100% pass, the most concise of 5 languages (233 LOC), and a faster agent wall-clock than Gleam and MoonBit but slower than Rust and TypeScript (573 s against 297 s) — an LLM-writability number, measured under 6–9× self-parallelism, **not** generated-code speed ([chart](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/figures/lang-bench-snapshot-2026-07.png) · [method](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)).
+
+<a id="byte-identical-across-targets"></a>
+
+## Byte-identical across targets
+
+**Cross-target observations are compared within each contract's scope.** The
+byte comparisons cover execution output, not artifact bytes, under matching
+inputs and host assumptions. Randomness, platform reporting, compressed output,
+and oracle-relative deadlines have declared invariants or comparison conditions
+rather than unrestricted equality. An unsupported-operation refusal is not a
+successful parity run. See [the scope](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/design/EQUIVALENCE.md).
+
+This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/contracts), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
+
+Original generated claims block begins: derived from docs/contracts/contracts.toml by scripts/gen-claims.sh. Original instruction: do not edit between markers.
+
+> Original generated counts block begins (as of 2026-10-21): stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR. Original instruction: do not edit between markers.
+
+> **Ledger: 388 contracts — 388 active, 0 flagged-for-revision.**
+
+> Original counts generated block ends.
+
+>
+> **Contracts flagged for revision: none.** Every contract is marked
+> `active`; the ledger gate requires executable evidence of class >= `fixture`.
+> That status does not remove scoped comparison conditions or prove every program equivalent.
+> See [C-189](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/contracts/contracts.toml) (platform reporting),
+> [C-208](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/contracts/contracts.toml) (oracle-relative deadlines), and
+> [C-331](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/contracts/contracts.toml) (leg-dependent compressed bytes).
+
+Original claims generated block ends.
+
+
+**Ledger consistency note:** an `active` status is not proof that every contract
+statement agrees. C-189 still describes only two platform-dependent exceptions
+and an `env.cwd` Wasm wall, while C-227 includes `env.cwd` in a served family and
+C-331 declares leg-dependent compressed bytes. These statements remain in the
+[pinned contract ledger](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/contracts/contracts.toml). This page does not resolve
+that normative disagreement: reconciliation must follow the
+[judge-first procedure](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/scripts/check-als-pin.sh), not silently rewrite a
+contract, pin, or generated count.
+
+Scope, ledger mechanics, and the evidence stack (contract ledger, cross-target fixture gate, differential fuzz, emit-time Σ-probes, Lean belt, org-wide byte-verify sweep): **[docs/design/EQUIVALENCE.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/design/EQUIVALENCE.md)**.
+
+<a id="memory-safety--proven-where-it-is-proven-trusted-where-it-is-trusted"></a>
+
+## Memory safety — proven where it is proven, trusted where it is trusted
+
+You write no ownership annotations, lifetimes, or `free`: the compiler places
+Perceus-style ownership operations. The Rocq/Coq checkers prove modeled witness
+properties, not complete artifact memory safety or semantic correctness.
+The proof spine has 137 audited theorems; `proofs/check.sh` checks this count
+against its `Print Assumptions` audits and independently rechecks the spine.
+`almide verify <file.almd> --emit <bundle>` now records the structural Wasm
+bundle; the independent `almide-verify` checks it. Supported **core artifacts**
+can be bound by SHA-256 when supplied or found at the default path; component
+artifacts are not supported by this certification route. Native MIR witnesses
+remain a separate proof/gate input, not evidence that all native machine code
+has been verified.
+
+Recording trust, unmodeled accesses, and coverage limits remain. Differential
+corpus and semantic-mutation gates provide complementary behavioral evidence;
+`proofs/check-structural-bytes.sh` checks the structural runtime against the
+Coq decoder model. See [proven vs trusted](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/contracts/proven-vs-trusted.md)
+and the [memory-safety gap table](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/design/MEMORY-SAFETY.md).
+
+<a id="performance"></a>
+
+## Performance
+
+No VM, no GC, no interpreter — native compiles through Rust to machine code, and WASM is emitted directly as self-contained modules (the runtime support a program reaches is linked in and the rest is pruned).
+
+Original generated wasm-size block begins: rendered from docs/benchmarks/wasm-size.txt by scripts/gen-readme-stats.sh. Original instruction: do not edit between markers.
+
+| Program (`almide build --target wasm`, as shipped) | develop | released v0.68.0-rc2 |
+|---|---:|---:|
+| Hello, world | **325 B** | **325 B** |
+
+The develop column is the develop build at 437b8f127, before v0.68.0 is tagged (`almide --version`: `almide 0.68.0 (dev, 437b8f127)`), measured 2026-10-20; CI rebuilds it on every push and fails if the bytes move without a restamp of `docs/benchmarks/wasm-size.txt`. The released column is the compiler from the v0.68.0-rc2 release asset (`almide 0.68.0 (release, fcba2bcd5)`, `gh release download v0.68.0-rc2 -R almide/almide`), measured 2026-10-20. No post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
+
+Original wasm-size generated block ends.
+
+
+Rust on the same wasm target is 37 KB+ for Hello, world even fully size-tuned: 37,541 B with `rustc 1.99.1`, `wasm32-wasip1`, `opt-level="z"`, `lto`, `strip`, `panic="abort"`, `codegen-units=1` (62,405 B with the default release profile), measured 2026-10-20 on GCE c4-standard-8 by the recipe at the bottom of [WASM-OUTPUT.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/wasm/WASM-OUTPUT.md). The native CLI-shaped benchmark (`research/benchmark/perf/native/cli_app.almd`, the build `research/benchmark/perf/native/measure.sh` makes) is 507,960 B stripped on x86_64 Linux (GCE c4-standard-8) and 463,720 B on aarch64 Linux (GCE c4a-standard-8), built 2026-10-20 by the v0.68.0-rc2 release binaries, with no crate dependencies (only the C library — `libc`, `libgcc_s` — is linked). The byte-by-byte dissection: **[docs/wasm/WASM-OUTPUT.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/wasm/WASM-OUTPUT.md)**.
+
+Against handwritten Rust compiled with the same flags as the Almide side — the release profile plus the target CPU the native `--release` build uses (`x86-64-v3` on x86_64, the generic CPU on aarch64; `almide build --print-release-rustflags` prints them) — `bench.py`, full workloads, median of 5 interleaved runs, measured 2026-10-20 with the v0.68.0-rc2 release binaries (`almide 0.68.0 (release, fcba2bcd5)`) on GCE c4-standard-8 (x86) / c4a-standard-8 (arm): n-body **0.94×** / **1.02×**, spectral-norm **1.00×** / **0.99×**, fasta **1.16×** / **1.10×**, FFT **0.88×** / **0.94×**, wordfreq **0.73×** / **0.59×** (at 8M draws, its ratchet size — 2M runs under the 0.08 s spawn-noise floor), listbuild **0.87–0.89×** / **0.93–0.95×** ([scoreboard](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/project/BENCHMARKS.md#runtime-scoreboard)). Where Almide has information Rust does not — a tree whose whole lifetime is one `check(make(depth))` expression, proven by the effect system — it is faster than the ordinary Rust for the same program:
+
+Original generated native-victory block begins: rendered from docs/benchmarks/native-victory.txt by scripts/gen-readme-stats.sh. Original instruction: do not edit between markers.
+
+| Workload (`bench.py` method, median of 9, interleaved) | optimization | Almide / ordinary Rust, x86 | Almide / ordinary Rust, arm | without it (`ALMIDE_REGION_OFF=1` / `ALMIDE_FAN_SEQUENTIAL=1`), x86 / arm |
+|---|---|---:|---:|---:|
+| binarytrees | region window (#1991) | **0.28 (d17)** / **0.27 (d19)** | **0.33 (d17)** / **0.32 (d19)** | 0.89 / 1.04 |
+| treealloc | region window (#1991) | **0.22 (d20)** / **0.24 (d21)** | **0.27 (d20)** / **0.28 (d21)** | 0.91 / 1.03 |
+| fannkuchredux | parallel fan (#2044) | **0.25 (n10)** / **0.23 (n11)** | **0.21 (n10)** / **0.18 (n11)** | 0.97 / 1.02 |
+
+Measured 2026-10-20 with the v0.68.0-rc2 release assets (almide-linux-x86_64 / almide-linux-aarch64), built from main fcba2bcd5 (`almide 0.68.0 (release, fcba2bcd5)`) on x86 = GCE c4-standard-8 (Intel Xeon Platinum 8581C, 8 vCPU) and arm = GCE c4a-standard-8 (Neoverse-V2, 8 vCPU); the reference: rustc 1.99.1, with the release flags `almide build --print-release-rustflags` reports (-C target-cpu=x86-64-v3 on x86; -C llvm-args=-force-ordered-reductions=false on both). Two ratios per cell are the two input sizes (the size is in each cell); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags as the Almide side, and the "without it" column is the same Almide source with that one optimization turned off, at the larger size. The `perf-ratchet` job fails if a row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt`.
+
+Original native-victory generated block ends.
+
+
+Original generated build-speed block begins: derived from docs/benchmarks/build-speed.txt by the almide-gates `bench` subcommand. Original instruction: do not edit between markers.
+
+Measured on almide 0.68.0 (dev), x86_64 Linux, INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz [GCE c4-standard-8], `examples/lisp.almd` (297 lines), 2026-10-19. Every row is an N-run MEAN —
+a single run of a 30ms process is scheduler noise. Cold clears BOTH `$TMPDIR/almide-run`
+and the dependency cache before each repetition; clearing only the latter measures a warm
+build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; the ratchet
+(`-- bench docs/benchmarks --check`) fails at 1.5x on the machine class above and skips, saying so, on any other.
+
+| scenario | time | runs |
+|---|---|---|
+| `almide check` | **25.2 ms** | 20 |
+| build, warm (content-cache hit) | **92.9 ms** | 5 |
+| build, cold | **4846.1 ms** | 3 |
+| build, cold, `--target wasm` | **148.7 ms** | 3 |
+
+Original build-speed generated block ends.
+
+
+`almide check` scales close to linearly: over a 2k → 33k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.10** on both machines (1.0 is linear, 2.0 quadratic) and the 10.7k-line rung costs **4.2×** (x86) / **4.3×** (arm) the empty-project floor — measured 2026-10-20 with the v0.68.0-rc2 release binaries on GCE c4-standard-8 / c4a-standard-8 (`research/benchmark/editloop/scale.py --runs 40`), held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/project/BENCHMARKS.md#edit-loop-scale-1334). The `perf-ratchet` job (`scripts/check-perf-ratio.sh`) re-measures every native row on each develop CI run and fails an anchored row (n-body, spectral-norm, fasta, FFT, wordfreq) that drifts more than 40% past its committed baseline. Wasm runtime, measured and gated (#1701):
+
+Original generated wasm-runtime block begins: rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh. Original instruction: do not edit between markers.
+
+| Benchmark (`almide bench`, verify-then-time, min of 2×5 interleaved) | wasm/native, `main` only | cold start (spawn vs compile + instantiate) |
+|---|---:|---:|
+| nbody | **1.21×** | 1.41× |
+| spectralnorm | **1.18×** | 1.27× |
+| binarytrees | **1.20×** | 1.34× |
+| treealloc | **1.08×** | 1.13× |
+| fasta | **0.90×** | 1.00× |
+| fannkuchredux | **1.37×** | 1.48× |
+| mandelbrot | **1.21×** | 1.30× |
+| onebrc | **1.90×** | 2.56× |
+| fft | **1.42×** | 1.52× |
+| strchurn | **0.92×** | 0.95× |
+| listbuild_append | **1.77×** | 1.98× |
+| listbuild_combinator | **1.55×** | 1.74× |
+| listbuild_prealloc | **1.36×** | 1.53× |
+| mapbuild | **0.92×** | 1.08× |
+
+Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. The ratio times the program's own `main`, entry to return, on both legs (native in-process, wasm around the host call): process spawn and module compile/instantiate are outside it, and the cold-start column shows them (#2980). Small workloads run at a ledger-fixed size (`args=`) so `main` is long enough to time. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). Of these rows only fannkuchredux runs its `fan` in parallel: native on threads (#2044), the embedded wasm host on separate instances of the module (#3003, ADR-0011 §D2a; every other wasm host runs it sequentially, byte-identical); binarytrees' and mandelbrot's `fan.map` callbacks run sequentially on both legs (user time equals wall time on both, measured 2026-10-03). The unmeasured corpus cells stay honest instead of estimated: 0 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (a develop build carrying version 0.68.0, not the 0.68.0 release, 2026-10-19, measured on x86_64 Linux, INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz [GCE c4-standard-8]).
+
+Original wasm-runtime generated block ends.
+
+
+<a id="derived-counts"></a>
+
+## Derived counts
+
+The stamped totals behind the [project status](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/status.md), and the mutation score of the gate net.
+
+Original generated stats block begins: derived from docs/stdlib/*.md, spec/, and docs/contracts/contracts.toml by scripts/gen-readme-stats.sh. Original instruction: do not edit between markers.
+
+Original generated counts block begins (as of 2026-10-21): stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR. Original instruction: do not edit between markers.
+
+| Derived count | Value |
+|---|---|
+| Stdlib | 999 functions across 44 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
+| Tests | 514 `.almd` test files under `spec/` (`almide test spec/`) + the 388-contract cross-target ledger |
+
+Original counts generated block ends.
+
+Original stats generated block ends.
+
+
+Original generated mutation-score block begins (as of 2026-09-22): stamped from proofs/mutation-score.toml by scripts/gen-mutation-score.sh; remeasured by every mutation-sweep run, refreshed only by `--from-run`. Original instruction: do not edit between markers.
+
+**Mutation score** — 41/41 mutants caught (100.0 %), 0 survived, 0 stale: the full release-shape net sweep of `ci/mutations/` ([`scripts/check-mutation-gate.sh`](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/scripts/check-mutation-gate.sh)), stamped 2026-09-22 from mutation-sweep run [35650396971](https://github.com/almide/almide/actions/runs/35650396971) at `3b02f7dc4`.
+
+Original mutation-score generated block ends.
+
+

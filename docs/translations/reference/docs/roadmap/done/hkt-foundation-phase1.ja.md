@@ -1,3 +1,5 @@
+<a id="hkt-foundation--phase-1-4--stream-fusion-all-6-laws"></a>
+
 # HKT 基盤 — フェーズ 1–4 + ストリーム融合（全 6 法則）
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](hkt-foundation-phase1.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](hkt-foundation-phase1.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](hkt-foundation-phase1.zh-CN.md)
@@ -15,7 +17,11 @@
 **完了日:** 2026-03-19
 **PR:** #49
 
+<a id="implementation-details"></a>
+
 ## 実装の詳細
+
+<a id="phase-1-ty-helpers--typeconstructor-foundation"></a>
 
 ### フェーズ 1: Ty ヘルパー + TypeConstructor 基盤
 - `TypeConstructorId`、`Kind`、`AlgebraicLaw` の型定義
@@ -27,11 +33,15 @@
 - IrProgram に `type_registry` フィールドを追加し、lowering 時に自動登録
 - 14 関数の match アームを簡素化（-120 行）
 
+<a id="phase-2-algebraic-law-table"></a>
+
 ### フェーズ 2: 代数法則テーブル
 - 6 法則: FunctorComposition、FunctorIdentity、FilterComposition、MapFoldFusion、MapFilterFusion、MonadAssociativity
 - List: Functor + Filterable + Foldable
 - Option: Functor + Monad
 - Result: Functor
+
+<a id="phase-3-stream-fusion--ir-rewrite-for-all-6-algebraic-laws"></a>
 
 ### フェーズ 3: ストリーム融合 — 全 6 代数法則に対する IR 書き換え
 - パイプチェーンの検出（ネストした呼び出しと let 束縛チェーン）
@@ -44,6 +54,8 @@
 - ラムダ合成 + 述語合成 + 変数置換
 - ALMIDE_DEBUG_FUSION=1 による解析出力
 
+<a id="phase-4-tyapplied-unification"></a>
+
 ### フェーズ 4: Ty::Applied への統一
 - `Ty::List`、`Ty::Option`、`Ty::Result`、`Ty::Map` を削除
 - `Ty::Applied(TypeConstructorId, Vec<Ty>)` に統一
@@ -52,12 +64,16 @@
 - 23 ファイルを変更
 - build.rs を更新（generated/ も自動処理）
 
+<a id="remaining-at-completion-2026-03-19"></a>
+
 ## 完了時点（2026-03-19）で残っていた事項
 
 元の `active/hkt-foundation.md` 計画はもう存在しない。以下は完了時に記録された残作業のスナップショットであり、現在のタスクリストではない。
 
 - フェーズ 5: コンパイラ内部のエフェクト情報注釈（構文変更なし）→ 2.x
 - フェーズ 6: トレイト統合 → 2.x
+
+<a id="tests"></a>
 
 ## テスト
 - 617+ Rust ユニットテスト（56→617）

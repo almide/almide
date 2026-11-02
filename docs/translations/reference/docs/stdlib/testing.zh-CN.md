@@ -123,6 +123,8 @@ test "multi line, written back as a heredoc" {
 
 
 
+<a id="signature-index-10-functions"></a>
+
 ## 签名索引 (10 个函数)
 
 ```

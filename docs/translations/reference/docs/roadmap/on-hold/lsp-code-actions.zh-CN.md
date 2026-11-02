@@ -1,3 +1,5 @@
+<a id="lsp-code-actions--remaining-refactorings"></a>
+
 # LSP 代码操作 — 剩余重构
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](lsp-code-actions.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](lsp-code-actions.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](lsp-code-actions.zh-CN.md)
@@ -11,6 +13,8 @@
 
 说明：在已提供的诊断快速修复之外，尚余的自动生成重构和导入管理覆盖范围。
 
+<a id="shipped-foundation"></a>
+
 ## 已提供的基础
 
 LSP 在 `src/cli/lsp.rs` 中声明并处理 `textDocument/codeAction`。`src/cli/lsp_code_actions.rs` 已提供：
@@ -21,6 +25,8 @@ LSP 在 `src/cli/lsp.rs` 中声明并处理 `textDocument/codeAction`。`src/cli
 
 `tests/lsp_test.rs::lsp_try_fix_reaches_client_as_code_action` 和 `lsp_machine_applicable_repair_is_the_preferred_quickfix` 对修复的传递行为进行固定测试。添加另一项诊断修复，不需要再为同一编辑建立仅供 LSP 使用的第二份实现。
 
+<a id="remaining-proposal--on-hold"></a>
+
 ## 剩余提案 — 暂缓
 
 - 根据编译器模块信息提供更广泛的导入管理，而不是依赖当前有限的 E003 列表。
@@ -29,6 +35,8 @@ LSP 在 `src/cli/lsp.rs` 中声明并处理 `textDocument/codeAction`。`src/cli
 - 根据已检查的类型插入函数签名类型注解。
 
 这些是覆盖范围和自动生成重构的目标，并非声称所有代码操作都不存在。每项操作在被描述为可用之前，都需要编辑器协议回归测试以及接受／拒绝编辑测试。优先级和恢复此项工作的标准见 [arena 突破计划](../../../../../roadmap/active/arena-breakthroughs.md)。
+
+<a id="design-references"></a>
 
 ## 设计参考
 

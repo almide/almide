@@ -1,0 +1,835 @@
+Description: Historical nightly differential-fuzz triage, preserving findings, fixes and retracted hypotheses
+<a id="fuzz-findings-triage-re-green-the-nightly-differential-gate"></a>
+
+# Fuzz Findings Triage: Re-green the Nightly Differential Gate
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](fuzz-findings-triage.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](fuzz-findings-triage.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](fuzz-findings-triage.zh-CN.md)
+
+> Non-normative reader snapshot of the pinned source; original remains authoritative. No automatic synchronization, independent implementation validation or execution of quoted instructions. Historical status, plans and comparative claims retain their source scope.
+> [Original source / 原文](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/active/fuzz-findings-triage.md)
+
+> Source-history caveat: July–August 2026 investigation log, not current CI status, an instruction to run campaigns, or an independently verified safety guarantee. Fixed, live, closed and remaining entries are retained in their historical order, including explicitly retracted capacity-threshold and leak hypotheses. Earlier R3 partial progress coexists with later closure; the later incomplete twelfth-cell investigation must not be inferred closed. Program counts, binary revisions, finite churn loops, output comparisons and gates are the original reported observations, not new measurements or universal proofs. Failed probe success criteria and one-binary/one-command corrections remain part of the evidence. Resource-limit skips, honest walls, abort contracts, observable leaks and incorrect output remain distinct. No quoted commands, CI changes or bug fixes were executed.
+
+
+<a id="historical-triage-log-not-live-ci-status"></a>
+
+## Historical triage log, not live CI status
+
+This page preserves the July–August campaign reports, including hypotheses
+that later probes explicitly retracted. The opening nightly-red report is
+about July 2026 and commit `25585249`; the original twelve findings are
+recorded as clean on July 18. Later waves have their own dates and outcomes.
+None of those entries establishes whether today's nightly run is green or
+red. Use the actual workflow run for live CI status; do not reopen a
+superseded hypothesis from this log as a new finding.
+
+Fuzz (nightly) has been red since 2026-07-15. The generative differential
+fuzzer (`tools/xtarget-fuzz`) is finding REAL native ⇄ wasm observable
+divergences — the exact class the cross-target contract ledger claims cannot
+happen silently. Every night it stays red, the byte-identical claim and
+reality drift further apart.
+
+<a id="reproduction"></a>
+
+## Reproduction
+
+```bash
+cargo build --release --bin almide          # the oracle binary
+cd tools/xtarget-fuzz && cargo build --release && cd ../..
+tools/xtarget-fuzz/target/release/xtarget-fuzz replay --seed 1784352208133210990 --index <i>
+tools/xtarget-fuzz/target/release/xtarget-fuzz gen    --seed 1784352208133210990 --index <i>  # source
+```
+
+All 12 findings from the 2026-07-18 run REPRODUCE on the current develop
+(25585249) — none were incidentally fixed by the #782 wall burn-down.
+
+Note: the same workflow's coverage-ratchet job (#566) is also failing and
+needs its own look (job logs via `gh api /repos/almide/almide/actions/jobs/<id>/logs`;
+`gh run view --log` returns empty for this repo).
+
+<a id="findings-seed--1784352208133210990"></a>
+
+## Findings (seed = 1784352208133210990)
+
+| Class | Index | Symptom | Status |
+|---|---|---|---|
+| C. String fn returns `""` | 323, 768, 904 | `ok(float.to_fixed(…))` → wasm `ok("")`; `result.map_err` on heap-Ok Result | **FIXED (2026-07-18)** — two root causes: (1) the ok/err ctor's stdlib-call payload fell to the deferred Opaque (binds_p4 Module-call String arms, C-138); (2) the result value combinators linked the len-as-tag scalar impls over the cap-as-tag heap-Ok block (`_h` twins + `_x` walls in result_call_name, C-139) |
+| D. Unicode predicate flips | 191 | `none` vs `some("Ǆ")` (titlecase) | **FIXED** — same root as C (the value flowed through a Result/Option ctor payload) |
+| E. i32-boundary tuple | 609 | `(true, -2147483648)` vs `(false, 2)` | **FIXED** — same root as C |
+| A. Negative-zero display | 67, 655 | native `-0` / wasm `0` | **FIXED (2026-07-18)** — not display: the v1 self-host `float.round` branched on `x >= 0.0` (TRUE for -0.0 under IEEE) and lost the sign; copysign carries it (C-140) |
+| G. Build/run failures | 65 (wasm run fails), 96 (wasm build fails) | divergent failure | **FIXED** — 65: `list.zip_with` linked the Int-typed impl for every instantiation; String zips trapped on the scalar closure table type → element-repr routing + `_str` twin (C-141). 96: the v0 emitter's `result.unwrap_or_else` inline lacked the F64 case → invalid module; added, mirroring the option twin (C-142) |
+| F. Option flips | 858 | `some("5")` vs `none` | **FIXED (2026-07-18)** — `some/ok/err(<heap if>)` payload fell to the deferred Opaque and read `none`; the ctor piece matches now route If/Match String payloads through the heap-result-if machinery (C-143) |
+| B. List collapses to `[]` | 198, 659 | `[1000000, 7, 256]` → `[]`, `[true,true,false,true]` → `[]` | **FIXED** — four mechanisms: (1) a non-literal scalar-list bind now WALLS instead of deferring to the silent-`[]` Opaque (C-144); (2) mono-suffixed stdlib names (`or_else__Int_String_String`) route by base name (C-145); (3) String-err Result captures are admitted to the closure env (the `__drop_list_str`-exact layout family) so the capturing or_else chain runs v1-verified; (4) the v0 lifted closure returning a captured alias now hands out a co-owned +1 (C-146) |
+
+**Seed 1784352208133210990: 12/12 findings CLEAN (2026-07-18).**
+
+<a id="wave-2-seed-20260718-1000-program-campaign-88-resolved"></a>
+
+## Wave 2 (seed 20260718, 1000-program campaign): 8/8 resolved
+
+| Index | Class | Resolution |
+|---|---|---|
+| 0 | NativeBuildFailure | Generated run projects self-isolate with an empty `[workspace]` table — running almide inside any cargo workspace dir (the fuzzer's .scratch) made cargo resolve the parent workspace and refuse the build |
+| 9 | RunFailureDivergence | `list.unique_by` routed by KEY repr: `_sk` twin (prim byte-compare content equality) for String keys, `_x` otherwise (C-147) |
+| 198 | Hang | Harness fix: a native hang is a finding only if wasm CLEANLY SUCCEEDS — a wasm OOM-trap at the 4GB ceiling is not termination evidence (`pos + 0` mutation hangs both). Pure classifier + unit tests in ladder.rs |
+| 248 | ok("") | Ctor Var payloads Dup instead of move — `let a = ok(r0); let b = ok(r0)` both real, r0 stays live (C-150) |
+| 259 | WasmBuildFailure | v0 `list.scan` acc store was i64-fixed → three-way valtype branch; v1 `list.scan_str` twin + ACC-repr routing (C-148) |
+| 590 | float garbage | v0 result.unwrap_or_else heap-Ok payload use-after-free → share +1 (C-149) |
+| 647 | some(garbage) | `result.map/map_err/flat_map` with heap-Ok RESULT (scalar input) → deterministic `_x` wall (C-151) |
+| 888 | err→ok(0) | Ctor over an un-admitted heap call payload WALLS (bind-net extension, C-152; nested-Result drop admission = F2 follow-up) |
+
+Passing harness/emitter fixes: v0 emit_result_call gained real `or_else`/`flatten`
+arms (the named-dispatch fallback ICE'd on pipelines without the lowered runtime
+fn — found by the host-determinism gate, which is now 262/262 byte-identical).
+walled-real baseline gained a DESIGNED-PROBE section (result_wall_escalations::
+main pins C-152's wall). v1 sweep baseline: PASS 288 / WALL 12 (9 permanent + 3
+by-design fixture probes) / INVALID·TRAP 0.
+
+<a id="wave-3-seed-20260718-re-campaign-after-the-classifier-fixes-7-unique--1000"></a>
+
+## Wave 3 (seed 20260718 re-campaign after the classifier fixes): 7 unique / 1000
+
+The intended-abort classifier fix (compile failures stay findings; runtime
+aborts flow to the 3-point comparison) UNMASKED the abort-form divergence
+class the old "any native non-zero = NativeBuildFailure" rule hid:
+
+| Index | Shape | Class |
+|---|---|---|
+| 10 | corpus mutant: `assert_eq(sql, "hello")` in main | **FIXED (2026-07-18)** — ALS-T18: non-test assert failures now desugar ONCE in frontend lowering (if + eprintln + process.exit(1)) so all four consumers inherit `Error: assertion failed…` + exit 1, operands once-evaluated (C-153, 3 fixtures). In passing: the bare `eprintln` builtin was unlinked on v1 / an ICE on v0 — now a registered self-host (fd-2 print_str twin) + a shared parametrized v0 runtime fn |
+| 49 | C-138 fixture mutant | native 101 vs wasm 134 — BOTH legs leak raw abort forms |
+| 119 | C-062 RawPtr fixture mutant | native 1 vs wasm 134 (trap) — the unsafe-bridge OOB form needs adjudication |
+| 5 | `int.clamp(4, 3, 1)` (min > max) | **FIXED** — ALS-T6 adjudication: `Error: clamp requires min <= max` + exit 1 on all four consumers; float's `!(lo <= hi)` folds NaN bounds into the same line (C-154, 2 fixtures) |
+| 145 | `or_else(ok(..), (a) => ok(..))` | **FIXED** — the E025 undecidable-slot validator now sees INTERMEDIATE call results (every call-result ty enqueued at inference; the post-solve check fires only on genuinely unpinned slots). Both targets now reject at check with span + hint — acceptance parity restored; the fuzzer classifies GeneratorReject |
+| 149 | `ok(result.unwrap_or(.., none))` over `Result[Option[Float], ..]` | **FIXED** — option/result `unwrap_or`'s heap arms hand out CO-OWNED (+1) refs on BOTH branches (kept payload + Var default), the #727 share family's unwrap_or edition (C-149 extended, new fixture) |
+| 98/92 | C-002 Int8-overflow mutant (`neg_one_i8(128)`) | **FIXED** — E024's call-arg edition: a bare int literal flowing into a SIZED param is range-checked at check time (the context-recording hook now CREATES sites for i64-fitting literals under sized contexts and is wired at the call-arg inference point). check now rejects what native rustc rejected — the check-vs-build gap closed; the fuzzer classifies GeneratorReject |
+
+Also fixed in passing: the **coverage-ratchet job's red** (the other #795 job) was
+`find -perm +111` — BSD syntax GNU find rejects; now the portable `/111`
+(proofs/coverage.sh). Wave-3 tail (campaign vs the batch-5 binary, 1000
+programs): index 92 (check-vs-build), 995 (a JSON nbsp/emsp key DISPLAY
+divergence — new shape), 998 (native exit 1 vs wasm trap 134 — an abort-form
+leak). Interp gained Flow::Exit (process.exit) so the assert desugar evaluates
+in the 3-way oracle.
+
+Wave 3 is a different arc from waves 1–2 (instance lowering bugs): it is
+mostly ABORT-FORM NORMALIZATION (raw 101 panics and 134 traps leaking where
+ALS-T6 promises `Error: …` + exit 1) and ACCEPTANCE PARITY (unresolved type
+vars reaching codegen). The clamp/RawPtr edges need normative adjudications
+in the ALS before fixes.
+
+Loop-until-dry status: wave-3 triage open. Remaining DoD: findings-free
+1000-run + coverage-ratchet job diagnosis + two consecutive green nightlies.
+
+Lesson feeding #777/F3: BOTH C-class roots were "a deferred/mis-linked value
+reaching observed output without a wall" — (1) the deferred-Opaque ctor payload
+printed as `ok("")`, (2) a name-keyed registry link ignored the layout the type
+implies. The F3 gate should make each structural: an Opaque that flows into a
+display/eq/observed op must wall the fn, and a self-host link must carry a
+repr-compatibility check (the `_h`/`_x` suffix discipline, mechanically).
+
+<a id="wave-4-2026-07-2830-nightly-findings--the-first-post-revival-campaigns-unit-042"></a>
+
+## Wave 4 (2026-07-28..30 nightly findings — the first post-revival campaigns, Unit 0.42)
+
+The 0.41 instrument revival made the campaign complete every night; these are the findings
+the completed nights recorded. Replayed and classified 2026-07-31 on develop e610331d
+(macOS; check/build-stage verdicts are host-independent).
+
+| # | Night / seed | Kind | Symptom | Status |
+|---|---|---|---|---|
+| 861 | 7/28, 1785217538023450905 | OutputDivergence | native `r15 = 100`, wasm `r15 = 0` — `result.unwrap_or_else(err, closure returning captured Float)` | **RESOLVED — attributed (B2)**: `020021df` ("Let a closure capture any scalar by reading is_heap_ty… so Float and every sized int width stop walling the lift"). The finding's closure `(s14) => r12` captures a FLOAT; before the commit the lift walled and the HOF ran with a missing closure producing the zero-filled result (wasm `r15 = 0`), after it the capture lifts and both targets read 100. Mechanism-exact match; earlier 7021f11f suspicion retracted |
+| 535 | 7/28, same seed | NativeBuildFailure | check accepted `let m: Int8 = --9223372036854775808`; rustc then rejected | **RESOLVED — attributed (B2)**: `6ac44503` ("Reach the int literal through its whole paren and unary-minus chain so a narrow annotation ranges it and the net sign decides"). C-173 (18f96604) was ALREADY in the 7/28 night's compiler but could not see through the DOUBLE unary minus; the chain walk with the net sign is exactly what rejects `--9223372036854775808` at E024. Mechanism-exact match |
+| 57 | 7/29, 1785304212462799529 | RunFailureDivergence | mutated C-044 fixture: `factorial(n - -2147483648)` — native terminates (LLVM's accumulator tail-recursion elimination turns the ~4-billion-deep non-tail recursion into a loop that wraps to ≤ 1 and unwinds); wasm recurses faithfully and traps `call stack exhausted` at ~16k frames | **CONTRACTED (2026-07-31, M2 #1017 option 1)** — C-196: call-stack exhaustion is a resource limit outside the observable-behavior promise. Convergent-boundary fixture `recursion_depth_within_limits.almd` (byte-identical at depth 1000); the oracle's `one_sided_stack_exhaustion` rule (unit-tested ×4) classifies the class as a skip, mirroring the both-legs rule; replay now reads SKIPPED naming C-196. The depth-guard normalization (same T6 abort depth on both targets) is the recorded strengthening follow-up |
+| 12 | 7/29, same seed | WasmBuildFailure | The wall named the outermost symptom ("If of Bool with a call-bearing arm"); minimization (m1–m9) proved the ROOT is elsewhere: the nested-map literal `Map[String, Map[String, Bool]]` never materializes. The msv route (`map_heap_val_nested_route`) admits only inner `Map[String, String]`, and for good reason — `$__drop_map_msv` sweeps ALL 2m inner slots as Strings, so an inner scalar-value map would be freed as garbage handles (accept-but-unsafe). The if-condition chain above it then declines all the way up to the statement wall | **FIXED (2026-07-31)** — the designed msb extension landed: `__drop_map_msb` / `__drop_list_str_msb` key-sweep drops in `map_msv.almd`, `is_map_msb_ty` type routing at both drop-registration sites + the pairs-literal `StrMapSkv` classifier arm, and the msv from_list/get_or gates widened to inner scalar-value maps (the impls are handle-generic; only the drop is type-specific). Replay CLEAN; churn spec test exercises the drop on the wasm leg. Known honest residual: `len`/`contains`/`set` on the OUTER nested map still wall (not needed by this finding) |
+| 29 | 7/30, 1785389912282950207 | WasmBuildFailure | unlinked stdlib call `map.get_or_str_wall` — the String-valued `map.get_or` variant was not in the self-host registry | **FIXED (2026-07-31)** — `map_get_or_str` twin in `stdlib/map_str.almd` (hit arm deep-copies per the str family's copy discipline, miss arm returns default per the hval branch shape), registry entry, and `get_or` admitted to the `_str` routing list in `mod_p4_e.rs`; replay CLEAN, spec test added |
+
+<a id="wave-4-additions-the-loop-until-dry-tail"></a>
+
+### Wave 4 additions (the loop-until-dry tail)
+
+Round-2 local campaign (2026-07-31, 1,283 programs / 1,093 clean / 165 raw finding events
+deduped to 2 unique classes):
+
+| # | Seed | Kind | Symptom | Status |
+|---|---|---|---|---|
+| L2 | 1785460667454423000 idx 5 | WasmBuildFailure | The wall message ("if over an unresolvable condition (Call of Bool)") is a MISREPORT — the second instance of the #904 arm-decline-named-as-condition trap. Delta-debugging (p1–p8, g5a–g5f) proved a THRESHOLD interaction: the full program walls, but EVERY single simplification passes — drop r6, simplify r1's unwrap-over-nested-if chain, replace the r4 alias with r1, shorten the 5-element list, or replace the 1e-300 denormal default with 0.5. No single construct is the culprit; some lowering budget/interaction (suspected: the elided-call/caps class — the #848 lane) declines only on the combined shape | **FIXED (2026-07-31)** — the decline chain was named by two new instruments (the cond-side trace and the discarded module-call reason trace), and the root turned out to be an ABSENT MATCH ARM: `str_list_literal_elems_lowerable` had no arm for an `If` element, so `["a", (if r2 then "b" else "d")]` fell to `_ => false` → the whole literal declined → Opaque → the honest reject. The "threshold" mystery was CONST-FOLD: every simplified variant's `if` collapsed at optimization, so only the full program ever reached the missing arm. Fix: admit the String-result literal-arm `if` element (cond = tracked scalar Var or Bool literal — the shape the proven `try_lower_heap_result_if` always lowers, honoring the no-mid-build-decline guard) in both the pre-check and the element builder. Replay CLEAN; `spec/lang/list_literal_if_element_test.almd` (runtime conds so fold cannot mask the path) on the wasm leg; mir 601/0 |
+| L3 | 1785460667454423000 idx 54 | OutputDivergence vs the REFERENCE INTERPRETER | A mutated C-182 fixture (Float32/Float64 negated-literal context typing): native and wasm agree EXACTLY (7 lines, `-2.5 … 123456792.0 -1.5`) but BOTH disagree with almide-interp — either a shared-lowering bug (the class the third judge exists to catch) or an interp Float32-model gap. The replay does not print the interp's expected output — a fuzzer reporting gap to fix in passing | **FIXED (2026-07-31)** — the INTERP was the wrong judge: `let p: Float32 = 123456789.12345679` kept its f64 spelling because the interp never narrowed Float32-typed literals at birth (the widened-carrier convention narrows at the float32.* bridge, but a literal never crosses it). Both backends correctly fold to f32 (`123456792.0`). Fixed in eval.rs literal evaluation (`as f32 as f64` when `ty == Float32`); the reporting gap fixed in passing — the finding summary now names the first differing line (`first_line_diff`, unit-tested ×2); fixture `float32_literal_excess_precision.almd` added under C-182 so the 3-way gate holds the class forever. Replay CLEAN, interp tests 56/0 |
+
+| # | Source / seed | Kind | Symptom | Status |
+|---|---|---|---|---|
+| L0 | 2026-07-31 local B4 campaign (707 programs, 607 clean), seed 1785458401504935000 index 0 | WasmBuildFailure | wall: "map.fold with an unliftable/closure-list higher-order argument cannot execute faithfully in this brick (walled, not mis-valued)". Minimized (t3): `map.fold` with a HEAP-map accumulator and a map-literal-returning closure | **FIXED (2026-07-31)** — the key insight: `Some(s)` for Option[String] IS a 1-element DynListStr (`materialize_opt_str_some`), so Option[String] values follow the same "len@4-counted String slots" discipline as the skv inner maps — the msb drops serve them VERBATIM. The fix is pure type-gate widening: `is_map_msb_ty`, the `StrMapSkv` pairs classifier, and the two msv routes now admit inner `Option[String]`. The fold needed nothing — `map.fold_skv_hacc` (any-heap-acc over a skv subject) already existed, and the closure lifted once its literal body lowered. Replay CLEAN; spec tests (get_or some/none/miss, fold-into-mso-acc, churn) on the wasm leg. Known residual cell: `??` over an mso `get_or` result lacks read-shape seeding (falls back honestly; recorded, not needed by L0) |
+| L1 | found while minimizing L0 (probe t1) | Checker hole (ICE, both targets) | `map.fold`'s closure argument is under-checked for a SCALAR accumulator: an ill-typed body (`Int + String` via the (k,v,acc) order mistake) passes `almide check` and dies at IR verify. list.fold and the concrete-heap-acc map.fold case both reject correctly | **FILED** — [#1018](https://github.com/almide/almide/issues/1018), assigned to the 0.52 hole-hunt row (loud, not silent; not a nightly-red risk — the generator only emits well-typed closures) |
+
+Round-3 campaign (2026-07-31, 1,304 programs / 1,108 clean / 163 raw → 1 unique):
+
+| # | Seed | Kind | Symptom | Status |
+|---|---|---|---|---|
+| L4 | 1785464182375979000 idx 0 | WasmBuildFailure | `Map[String, Result[Int, String]]` values (get_or / remove) feeding `result.unwrap_or` — the STRICT-mode "scalar binding outside the value subset" refusal | **FIXED (2026-07-31)** — the recorded edit list landed verbatim: the family inner set centralized as `is_msv_family_inner` (inner String-keyed maps, Option[String], and Result[T,String] with T scalar or String — every "len@4-counted low-32 String handles" block, tag-safe under the `$rc_dec (param i32)` wrap), the three routes (get_or / remove / from_list) unified on it, `is_map_msb_ty` + the pairs classifier widened, and the NEW `map_remove_msv` (set_copy's discipline with one slot skipped) registered. One extra trap re-confirmed from the issue-sweep ledger: an rc_inc-using helper must ALSO join the `coown_names.rs` whitelist or it renders unlinked. Replay CLEAN; spec tests (ok/err get_or, remove, churn) on the wasm leg; mir 601/0 |
+
+Round-4 campaign (2026-07-31, 1,271 programs / 1,072 clean / 3 unique):
+
+| # | Seed 1785466162321453000 | Kind | Symptom | Status |
+|---|---|---|---|---|
+| L5 | idx 985 | RunFailureDivergence | Mutated C-045: `for i in 0..<4294967295 { list.push(ys, i*2) }` (~34 GB of pushes). Native completes in its 64-bit address space; wasm32 hits the linear-memory ceiling and dies with an OOB memory fault at exactly the memory-size boundary (0x80010000) — the allocator runs PAST the end after a failed grow instead of aborting cleanly | **FIXED + CONTRACTED (2026-07-31, M2 #1019 option 1 complete)** — three layers: (1) `$oom` fires on a refused `memory.grow`; (2) the LAYER-2 ROOT was an **i32 frontier overflow** — a single ~2.1 GB request made `$bump = p + n` wrap PAST 2^32, the wrapped bump skipped the grow check, and the block's writes ran off the memory end at exactly the boundary (the observed 0x80010000 fault). Fixed with the unsigned wrap guard (`new < old → $oom`) in `$alloc`/`$alloc8` plus the cap×8 mul-wrap guard in `$list_new`; the probe now prints the defined `Error: out of memory` + exit 1; (3) C-197 landed (197 active / 0 flagged, convergent fixture `allocation_within_limits.almd` byte-identical) with the oracle's `one_sided_memory_exhaustion` skip rule (unit-tested ×3, fuzzer 26/0), mirroring C-196's stack rule |
+| L6 | idx 33 | WasmBuildFailure | The same "List argument cannot be faithfully materialized" class — the next list-element cell outside the admitted set (element kind TBD from the source) | **LIVE — classified**: a `List[Option[Map[String, Bool]]]` literal (`[some(["k0": true, …]), some(n1), …]`) chained into `list.get_or` with an Option-map default. The composition BREAKS the "len-counted String slots" discipline — a `some(map)` block's slot 0 is a MAP handle, so the flat rc_dec leaks the map's keys at last-ref; the drop needs payload ROUTING. The rails exist: `materialize_opt_aggregate_some` + the `optrec:<drop_fn>` route (`Op::DropWrapperRec`) already do exactly this for `Option[record]` — the fix is an opt-of-map sibling (payload drop_fn = the msb/skv map sweep) + the list-element admission + `list.get_or` on the element type. IMPLEMENTATION DESIGN (probed q1/q2 — the wall is the explicit nested-ownership gate in `try_lower_bind_heap_fresh_scalar_list`, binds_p2_b.rs): (1) a static 3-level drop in map_msv.almd — `__drop_list_omb` / `__drop_list_omb_loop`: per element, if the option block (1-slot DynListStr) is last-ref and `len@4 == 1`, route the slot-0 MAP payload through `__drop_msb_inner`, then rc_dec the block; (2) construction — a new `ListElemDrop::OptMapSkv` classifier arm (Tuple→Option[Map[String,scalar]] elements) + an element lowering that materializes `some(<map literal|tracked var>)` via the opt-aggregate block (map handle moved/Dup'd into slot 0) and `none` as the 0-len block, registered as drop `"list_omb"`; (3) `list.get_or` admission for the element type (the heapelem hshare route); (4) fmt'd spec tests incl. a churn. REFINED (second pass): `List[Option[String]]` / `List[Option[Int]]` literals ALREADY build — the machinery is the CtorFlat/CtorLenLoop path, gated by `lenlist_elem_class` (repr_sources_d.rs), which admits only "one-level-exact" payloads (scalar → Flat; String / flat scalar list → LenLoop via the shared generated `$__drop_list_lenlist`). Map payloads are excluded exactly because they need an interior sweep — and the msb insight COMPOSES: the len-loop discipline is recursive (option block len-slots → map len-slots → Strings), which is what the static `__drop_list_omb` expresses. Do NOT widen `lenlist_elem_class`/`$__drop_list_lenlist` in place (it would change the shared drop for existing users); add the separate `OptMapSkv` class → drop `"list_omb"`, decided BEFORE the lenlist arm in binds_p3_b's classifier (~line 243). The element payload materialization (some(map-literal)) must route the map through its from_list machinery — verify `try_lower_option_ctor`'s aggregate-payload piece reaches it, else extend the piece. **FIXED (2026-07-31, fourth pass)** — the brick turned out SMALLER than spec'd because two pieces already existed: map literals desugar to `map.from_list` calls, and the opt-ctor's computed-map piece arm (`is_str_int_map_ty` = any heap-key/scalar-value map) already materializes them (probe q6). What landed: (1) the static 3-level `__drop_list_omb` (list slots → option len-slot → the msb key sweep — the len-loop discipline COMPOSES); (2) `ListElemDrop::OptMapSkv` decided before the lenlist arm, routing to the ctor element path with drop `"list_omb"`; (3) a NEW link-trap discovered and fixed: static drops render from DropVariant ops which the demand-linker's CallFn scan cannot see — a program whose only demand on map_msv.almd is a DROP left `$__drop_list_omb` dangling; the linker now forces the module when any msv-family static-drop op is present (the value_core precedent). i33 replay CLEAN, spec tests (literal + get_or + churn) on the wasm leg, mir 601/0. [#1020](https://github.com/almide/almide/issues/1020) (the standalone `let o = some(map_var)` bind exposure) was REFUTED and closed the same day: the C-197 OOM abort made leaks observable, and three churn variants — including the hypothesized worst drop order (`keep = some(n1)`, the option outliving the map var) — ran 1.5–2M iterations with 32-byte keys and never aborted. `some(<live heap var>)` **Dups**, so the option co-owns a +1 and the flat rc_dec balances whichever side drops first. Lesson recorded: a code-reading hypothesis is not a finding — measure before filing, and today's own instrument was what settled it | 
+
+Nightly 2026-07-31 (run 30608326062, head at 05:59 UTC — includes every fix through the B2
+attribution): the campaign COMPLETED (full-budget streak 4/14) and recorded 2 findings —
+| # | Seed 1785477905242041784 | Kind | Status |
+|---|---|---|---|
+| N1 | idx 93 | NativeBuildFailure: `literal out of range for i32` | **FIXED (2026-07-31)** — the declared tuple-variant payload type is now pinned onto literal ctor args in the call-arg loop (ctor calls carry no call_sig, so no hook ever saw the position). One trap pinned in the regression test: a capitalized ctor callee parses as TypeName, not Ident — the first fix matched Ident only and silently never fired. Both repros now E024; in-range payloads stay accepted; frontend + literal-domain (8/8) + spec/lang (159) green |
+| N2 | idx 9 | WasmBuildFailure (the condition-wall misreport shape again) | **FIXED (2026-07-31)** — the earlier "discipline does NOT hold" call was WRONG: `try_lower_tuple_construct` builds tuples as `DynList {{ len = slot count }}` with heap slots stored as handles, so an all-String tuple IS the len-counted discipline verbatim (len=2, both slots String handles) and `__drop_msb_inner` frees it exactly. N2 reduced to pure gate widening: `is_msv_family_inner` + `is_map_msb_ty` + the pairs classifier admit all-String tuple values. Replay CLEAN, both-target probe identical, spec tests (get_or hit/miss + churn) on the wasm leg, mir 601/0. **Wave 4 live count: 0** |
+
+Strategic note (rounds 1–4): each ~1,300-program campaign surfaces 1–3 NEW cells of ever-deeper type composition (map values → option values → result values → option-of-map elements). The hand-listed family/drop registry grows a cell per finding; the mechanical end-state is the completeness-by-construction arc (type-derived drop routing). Until then the grind is the design — and the streak-based DoD absorbs it.
+| L7 | idx 757 | NativeBuildFailure | Check accepted a Float32 literal that rustc rejects: `error: literal out of range for f32` — the float sibling of the 535 integer-literal-domain class (C-173 was integer-only) | **FIXED (2026-07-31)** — E024's float twin: a `FloatOverflowSite` queue (pre-filtered to literals finite as f64 but infinite as f32) + the annotated-binding context pin (`float_literal_chain` through paren/unary, mirroring the int hook — a bare literal's own solved type stays `Float`, so the Float32 context lives on the binding) + the post-solve validator. Replay now GENERATOR REJECT with E024; regression test `float32_range_is_checked_and_precision_is_not` (range rejected both signs, excess-precision and plain-Float accepted); frontend + literal-domain + spec/lang all green. Amusing provenance: the fuzzer found this by mutating the C-182 fixture added THIS session |
+
+Round-5 campaign (2026-07-31, 1,385 programs / 1,198 clean — every Wave 4 + nightly fix aboard):
+2 unique, BOTH new classes (no fixed cell regressed).
+
+| # | Seed 1785481464003870000 | Kind | Symptom | Status |
+|---|---|---|---|---|
+| P1 | idx 961 | **OutputDivergence — the silent-wrong-value class** | `bytes.read_f32_le(verts, dst + 9223372036854775807)` (an i64::MAX offset that overflows the index math): native reads `z=0.0`, wasm reads `z=2.0` — i.e. an OUT-OF-BOUNDS byte read is not equal-by-construction across targets. HIGHEST priority of the two: the bounds discipline for `bytes.read_*` is the memory-safety surface, and the wasm leg returning a neighbouring value where native returns 0.0 means the read is unchecked (or checked differently) on one leg | **FIXED (2026-07-31)** — no contract decision needed: the documented behavior ("out of range → +0.0") was already normative, and BOTH legs simply failed to enforce it at an overflowing offset. Root: the guard `pos + k > n` — at `pos = i64::MAX` the add wraps NEGATIVE, the check passes, and the read proceeds (wasm returned a neighbouring value; native's address math happened to land on zeros). Ordinary out-of-range offsets were always correct — only the overflow band leaked. Fixed FAMILY-WIDE by the API-completeness rule: all **14** sites in `bytes_core.almd` rewritten to the overflow-safe `pos > n - k` (a length is non-negative and ≤ 2^31, so `n - k` cannot overflow). Replay CLEAN; regression test `bytes reads are +0.0 at an overflowing offset` covers f32/f64/u32/u16/i32 plus the unchanged in-range and ordinary-OOR answers; spec/stdlib 112 files green |
+| P2 | idx 27 | WasmBuildFailure (scalar-element list literal, element outside the subset) | The element is `map.get_or(list.get_or([<map literals>], 1, ["k0": true]), "ΑΒΓ", false)` — a `List[Map[String, Bool]]` LITERAL fed to `list.get_or`. The map-VALUE matrix is now broad, but a list whose ELEMENTS are maps is the next composition frontier (the L6 shape one level out: option-of-map → bare map elements) | **FIXED (2026-07-31)** — the bare-map list element class landed: `ListElemDrop::MapSkv` (classifier arm in `binds_p3_b.rs`, before the lenlist arm), the static 2-level `$__drop_list_mb` in `stdlib/map_msv.almd`, `list_mb` in the demand linker's `MSV_STATIC_DROPS`, and three spec tests (literal/index/get_or, a churn loop, a computed element). p27 and every probe b3–b15 now build AND agree native ⇄ wasm; spec/lang 159 + spec/stdlib 112 files green, almide-mir 601 unit tests green. Investigation history below, kept because the wrong turns cost a session. **my first classification was WRONG, corrected by probes**: it is NOT a missing map-element cell. Seven probes (w1–w7) all BUILD, including the exact-looking pieces — a bound `List[Map[String,Bool]]` literal, an inline one in argument position, a `map.map` HOF result as an element, and a fold-derived-String map — so no single construct is missing. The decline chain is real and traced (`[defunc] fold route declined (rolled back)` → `[scalar-call] map.get_or declined: "List argument cannot be faithfully materialized"`), which means the FOLD's defunctionalization rollback is what poisons the later list-argument materialization — a state/threshold interaction like L2's, not a type-cell gap. BISECTED (b1–b5), and the wall needs THREE conditions at once — removing ANY ONE builds: (a) the `list.fold`-derived String (b2: inline it as a literal → builds); (b) the `map.map` HOF element inside the inner list (b4: replace with a plain map literal → builds); (c) **four** elements in the inner list (b3: two → builds; b5: three → builds). A 3→4 element cliff with an HOF element and a fold upstream is a BUDGET/state signature, not a type-cell gap — the same class as L2 but with a countable threshold, which makes it the sharpest lead of the session. CORRECTED (b6): the cliff is NOT the element count — 4 elements whose last two are 1-key maps BUILDS. Ranking the probes by TOTAL key-value pairs in the inner list: b3 = 4 pairs ✅, b6 = 6 ✅, b5 = 8 ✅, p27 = 12 ❌. So the threshold is a SIZE budget between 8 and 12 pairs (an ops / value-id / instruction count that scales with total entries), reached only when the fold and the HOF element also contribute — hence the earlier three-condition reading. BRACKETED (b7 = 10 pairs ✅, b8 = 11 ✅, p27 = 12 ❌) — the cliff is EXACTLY at the 12th entry, one key either way. A shared-key-set hypothesis was tested and REFUTED (b9: two elements with an identical key set at only 6 pairs builds fine), so it is the count, not interning. Every probe is consistent with a hard capacity limit around 11→12 map entries on the list-argument materialization path when a fold and an HOF element also contribute. Remaining work is mechanical and needs fresh context: instrument the path (dump the ops/value-id count for b8 vs p27 — the two differ by ONE key, so the diff is a handful of ops and the crossing counter should be obvious), then raise or remove that limit and pin it with a spec test at 2× the old bound. NOTE for whoever picks this up: this is a capacity wall, so it is an HONEST wall (no wrong bytes) — it costs coverage, not correctness. **CORRECTED AGAIN — and this time the probe set is reproducible on ONE binary (2026-07-31).** Every "BUILDS" in the bracket above is INVALID: re-running b3/b5/b6/b7/b8/b9/p27 with `almide build <f> --target wasm` on a single binary walls ALL of them, including b3 (2 elements, 4 pairs). There is no cliff, no size budget, and no 12th-entry threshold — those readings came from probe runs whose success criterion did not exercise the wasm path, and they should never have been recorded as evidence. The lesson is procedural: a bracket is only evidence if every cell in it was measured with the same command on the same binary, in one run.
+Reduced to a THREE-LINE repro, which restores the FIRST classification: `let xs: List[Map[String, Bool]] = [["k0": true]]` followed by any use walls with `non-empty List[heap] literal with nested-ownership elements`. A `List[Int]` literal in the same position builds (m9 control). So P2 is exactly what it first looked like — a **missing cell: a list LITERAL whose elements are maps** — the bare-map sibling of the option-of-map case L6 already closed. Not a capacity wall, not a fold/HOF interaction. FIX DESIGN (worked out, ready to implement — the L6 option-of-map path is the exact template, one indirection shorter):
+(1) `stdlib/map_msv.almd` — add the 2-level drop next to `__drop_list_omb_loop`. `__drop_msb_inner(ih)` already sweeps a map's key Strings AND rc_decs the map block, so the loop body is one call, with none of omb's option-block len-slot dance:
+`fn __drop_list_mb_loop(h, n, i) = if i >= n then () else { __drop_msb_inner(prim.load64(h + 12 + i * 8)); __drop_list_mb_loop(h, n, i + 1) }` and `fn __drop_list_mb(xs: List[Map[String, Bool]]) = { let h = prim.handle(xs); if prim.load32(h + 0) == 1 then __drop_list_mb_loop(h, prim.load32(h + 4), 0) else (); prim.rc_dec(h) }`.
+(2) `crates/almide-mir/src/lower/binds_p3.rs` — `ListElemDrop::MapSkv`.
+(3) `binds_p3_b.rs` — classifier arm for `Map[String, Bool|Int|Float]`, placed with the `OptMapSkv` arm and BEFORE the `lenlist_elem_class` call for the same reason that one is (lenlist returns None for a map payload and the element would fall through to the nested-ownership wall); register `list_mb` in the drop-handle match.
+(4) `pipeline_c.rs` — add `"list_mb"` to `MSV_STATIC_DROPS` so the demand linker forces `map_msv` in.
+(5) Spec test in `spec/stdlib/` next to the existing "list of option-maps" test, plus a `spec/wasm_cross` fixture if the shape turns out to be observable cross-target.
+Element MATERIALIZATION should already work — `OptMapSkv` builds a map literal inside an option block today, so the bare map is that minus the wrapper; verify with the m5 repro before writing the drop. Recorded dead end that remains true: binding the list to a variable first does NOT avoid it (b12) — it walls one message earlier, at the literal itself, which is the cleaner repro |
+
+<a id="definition-of-done"></a>
+
+## Definition of done
+
+1. Every finding minimized (`gen` → delta), root-caused, and either FIXED
+   (with a `spec/wasm_cross/` fixture + contract entry per the ledger rules)
+   or converted to an HONEST WALL (never a silently wrong value).
+2. Class C's wall-coverage hole closed structurally — feed the mechanism
+   into the #777 tracking-set/wall-consistency gate design.
+3. The coverage-ratchet job failure diagnosed and fixed (or the floor
+   re-justified in its own commit, per the #566 discipline).
+4. A local `xtarget-fuzz run --count 1000` campaign is findings-free, then
+   Fuzz (nightly) is green two consecutive nights.
+
+<a id="ownership-boundary"></a>
+
+## Ownership boundary
+
+The fuzzer itself (generator, oracle ladder, delta-debugger) lives in
+`tools/xtarget-fuzz` and is NOT the subject of this stream — only its
+findings are. A fuzzer bug discovered during triage (e.g. a misclassified
+verdict) gets fixed in passing with its own test.
+
+<a id="wave-5--round-6-local-campaign-2026-07-31"></a>
+
+## Wave 5 — Round 6 local campaign (2026-07-31)
+
+3,990 programs / 30 min / `--jobs 6` on the P2-fixed binary (0.41.0 install, one binary for
+the whole run). **2 unique findings**, so B4's "0 findings" criterion is NOT met.
+
+| # | seed / index | Kind | Shape | Status |
+|---|---|---|---|---|
+| R1 | 1785489842024900000 / 5 | WasmBuildFailure (honest wall) | `List[String]` literal whose element is an `if` whose CONDITION is a call | **FIXED** — the admission predicate was STRICTER than the builder it guards. `try_lower_heap_result_if` already materializes a general condition (a pure scalar, or a Bool/Int-returning pure call with heap args, freed in a per-cond frame) and rolls back as a unit when it cannot; the predicate re-stated a narrower rule ("cond must be a tracked Var or a Bool literal") and walled shapes the builder handles. Fixed by RECURSING the predicate on the arms and leaving the condition to the builder — `str_list_literal_elem_lowerable` in `binds_p3`/`binds_b.rs`. 3 spec tests |
+| R2 | 1785489842024900000 / 3132 | **Hang, native only** | `matrix.masked_multi_head_attention(q, k, v, n_heads = -2147483648)`. native hangs, wasm prints a shape and exits 0 | **FIXED** — C-198: one domain rule for the whole head-count family, defined abort on both targets, + a 4-test matrix gate. See below |
+
+<a id="r2-root-cause--one-function-two-divergences-and-a-family-that-guards-inconsistently"></a>
+
+### R2 root cause — one function, two divergences, and a family that guards inconsistently
+
+`almide_rt_matrix_mha_core` (runtime/rs/src/matrix.rs:480) opens with
+`let n_heads = n_heads as usize;`. For `n_heads = i64::from(i32::MIN)` that is
+18446744071562067968, the `n_heads == 0` early-out does not fire, and `for h in 0..n_heads`
+runs ~1.8e19 iterations — the hang.
+
+The self-hosted `__mha_impl` (stdlib/matrix_activations.almd:285) has NO head-count guard at
+all: `let dh = dm / n_heads`. So the SAME function diverges twice:
+
+| `n_heads` | native | wasm |
+|---|---|---|
+| `0` | returns the empty matrix (explicit early-out) | **divide-by-zero trap** |
+| `< 0` | `as usize` → ~1.8e19-iteration loop → **hang** | ~zero iterations → returns a zeroed (sq, d) matrix |
+
+Neither is a point defect. `almide_rt_matrix_rms_norm_heads` (matrix_p2.rs:450) already writes
+`n_heads.max(1) as usize` — the same hazard, guarded in one family member and not in another,
+which is precisely the point-wise growth CLAUDE.md's API-family rule exists to prevent.
+
+**Family**: every `matrix` fn taking a head count — `multi_head_attention`,
+`masked_multi_head_attention`, `rope_rotate`, `rope_rotate_at`, `rope_rotate_neox_at`,
+`rms_norm_heads`, and the GQA entry points taking `n_q_heads` / `n_kv_heads`.
+**Completeness rule**: a head count `< 1` is out of domain for every member, and every member
+reports it the same way on both targets. Three current behaviours (hang / trap / silent clamp
+to 1) collapse to one. The gate is a matrix test over the family × {i32::MIN, -1, 0}, and it
+is what stops the next member from shipping unguarded.
+
+**Both Wave 5 findings closed the same day.** The lesson they share is the one CLAUDE.md's
+API-family rule already states: R2 was three point-wise answers to one question, and R1 was a
+guard restated more narrowly than the thing it guards. Neither was a missing feature — both
+were a surface that had been grown a point at a time.
+
+<a id="wave-6--round-7-local-campaign-2026-07-31"></a>
+
+## Wave 6 — Round 7 local campaign (2026-07-31)
+
+3,424 programs / 25 min / `--jobs 6` on the Wave-5-fixed binary. **1 unique finding**
+(down from Round 6's 2), so B4's "0 findings" criterion is still not met.
+
+| # | seed / index | Kind | Status |
+|---|---|---|---|
+| R3 | 1785492509375906000 / 17 | WasmBuildFailure — `OptionSome argument cannot be faithfully materialized (a heap payload outside the executable subset)` | **CLOSED (2026-08-01)** — all 4 cells build and agree native ⇄ wasm; C-201 + `spec/wasm_cross/option_tuple_payload_matrix.almd` is the matrix gate. Native-render remainder → #1037 |
+
+<a id="r3--the-tuple-payload-family-is-keyed-three-different-ways"></a>
+
+### R3 — the tuple payload family is keyed three different ways
+
+Minimal repro (2 lines):
+
+```almide
+let s0: Option[(String, Int)] = none
+let r: (String, Int) = option.unwrap_or(some(option.unwrap_or(s0, ("a", 1))), ("b", 2))
+```
+
+The payload is a CALL RESULT rather than a tuple literal. Measured sweep, one binary, one run:
+
+| `Some` payload type | admission key (`binds_p4_b.rs::try_lower_opt_tuple_and_variant_payloads`) | call-result payload |
+|---|---|---|
+| `(Int, String)` | `_ if Self::is_int_str_tuple(&expr.ty)` — **TYPE only** | ✅ builds |
+| `(String, Int)` | `IrExprKind::Tuple { .. } if is_str_int_tuple(…)` — **SHAPE + type** | ❌ walls |
+| `(String, String)` | `IrExprKind::Tuple { .. } if is_str_str_tuple(…)` | ❌ walls |
+| `(Int, Int)` (all-scalar) | `IrExprKind::Tuple { .. } if is_all_scalar_tuple(…)` | ❌ walls |
+
+One cell of four is type-keyed; three are shape-keyed. A tuple literal payload works for all
+four (probe s1), and binding the call result to a `let` first works for all four (probe s8) —
+only the inline call-result payload divides them. This is the THIRD instance of the same class
+today, after R2 (three answers to one head-count question) and R1 (an admission predicate
+restated more narrowly than the builder it guards).
+
+<a id="fix-design-and-why-it-was-not-implemented-in-the-same-pass"></a>
+
+### Fix design, and why it was not implemented in the same pass
+
+The asymmetry is in the BUILDERS, not just the match arms:
+
+* `try_opt_int_str_tuple_payload` → `self.lower_owned_heap_field(expr)` — materializes an
+  owned heap value from an ARBITRARY expression, which is why its cell is type-keyed.
+* `try_opt_str_int_tuple_payload` / `_str_str_` / `_scalar_` → destructure
+  `IrExprKind::Tuple { elements }` and call `try_lower_tuple_construct(&elements)` /
+  `try_lower_scalar_tuple_construct(&elements)` — literal-only by construction.
+
+So the fix is to give the three shape-keyed builders the same fallback the int_str one already
+has: when the payload is not a literal `Tuple`, go through `lower_owned_heap_field`, then the
+existing `materialize_opt_str_some` + the existing `variant_drop_handles` entry
+(`opt_str_int` / `opt_str_str`).
+
+**The risk that makes this a separate pass**: the drop handle registered for each cell assumes
+the piece's SHAPE, and `lower_owned_heap_field` may not produce the same shape as
+`try_lower_tuple_construct`. If it does not, the fallback is a double-free or a leak — a
+memory-safety-shaped defect, not a wall. Verifying that requires reading both piece
+constructions against the `opt_str_int` / `opt_str_str` drop bodies and then running the
+churn-loop tests that expose a refcount error. That is careful work, and it was deliberately
+not started at the tail of a long session; the diagnosis above is complete enough that the
+implementation is mechanical-with-care rather than exploratory.
+
+Probe files: `s_s1`..`s_s11` in the session scratchpad; the discriminating trio is s9
+(`(Int, String)` call result → builds), s5 (`(String, Int)` → walls), s11 (`(Int, Int)` → walls).
+
+<a id="r3-outcome-2026-07-31"></a>
+
+### R3 outcome (2026-07-31)
+
+The drop-discipline risk that held this back **did not materialize, and the reason is
+checkable**: `materialize_opt_int_str_some` and `materialize_opt_str_some` are byte-for-byte
+identical except for which ownership set they register the result in. Both take the piece
+with `Op::Consume` + `live_heap_handles.retain(…)`, so the piece's construction path cannot
+affect how it is freed, and the drop is selected by the payload's TYPE — a layout property.
+That made the fallback safe rather than merely plausible.
+
+All three shape-keyed cells are now type-keyed with the `lower_owned_heap_field` fallback the
+`(Int, String)` cell always had. Verified on one binary, one run: s5 `(String, Int)`, s6 (the
+lambda form), s9 `(Int, String)`, s10 `(String, String)` all build AND agree native ⇄ wasm.
+312 spec files green (lang 159 / stdlib 112 / integration 41), plus 5 new tests including a
+churn loop, which is what would expose a refcount error if the ownership reasoning were wrong.
+
+**Named remainder — the all-scalar cell.** `(Int, Int)` (probe s11) still walls, because
+`lower_owned_heap_field` does not materialize an ALL-SCALAR tuple call result — its tuple arms
+cover heap pairs (`is_flat_heap_pair_ty`, `is_str_closure_pair_ty`,
+`is_flat_heap_scalar_pair_ty`) and an all-scalar tuple matches none of them. So the family is
+3/4 symmetric, not 4/4, and this line exists so the last cell is a named gap rather than a
+rediscovery. Closing it means teaching `lower_owned_heap_field` the all-scalar tuple call
+result, not touching the Option cells again. **Narrowed further (2026-07-31)**: the tuple
+LITERAL case is already handled — `owned_heap_field.rs`'s
+`IrExprKind::Record { .. } | IrExprKind::Tuple { .. }` arm admits a scalar-only aggregate via
+`try_lower_scalar_tuple_construct`. A CALL returning `(Int, Int)` takes a different arm
+entirely (the aggregate group's `CallTarget::Module` →
+`lower_pure_module_value_call`, `calls.rs:89`), and that is where it declines. So the fix is
+in the CALL path, not the tuple path: teach `lower_pure_module_value_call` (or the arm above
+it) to materialize an all-scalar aggregate result. **Narrowed AGAIN (2026-07-31), and it is smaller than "the call path"**: a USER-FN call
+result works for both tuple shapes — probes `s_s12` (`fn pair() -> (Int, Int)`) and `s_s13`
+(`fn pair() -> (String, Int)`) both BUILD through `some(pair())`. So the all-scalar tuple
+cell is NOT broken in general; the fallback covers it.
+
+What still walls is specifically `some(option.unwrap_or(s0, (1, 2)))` — an all-scalar tuple
+produced by a MODULE call (probe `s_s11`). And `(String, Int)` through the same module call
+DOES build (probe `s_s5`), even though both shapes reach `lower_owned_heap_field` through
+the same fallback. The two differ only in which arm selects them:
+`is_all_scalar_tuple` (checked first, claims `(Int, Int)`) vs `is_str_int_tuple`. So the
+remaining question is why the SAME fallback succeeds under one arm and not the other —
+likely `repr_of(Option[(Int,Int)])` or the fact that an all-scalar tuple result is not
+tracked in `live_heap_handles` the way a String-carrying one is, which
+`materialize_opt_str_some`'s `Consume` + `retain` then handles differently.
+
+Next step: diff the two paths for `s_s5` vs `s_s11` at the point `lower_owned_heap_field`
+returns — one returns `Some(id)` and the other `None`, on inputs that differ only in the
+tuple's element types. Both probes are two lines and live in the session scratchpad.
+
+**The original R3 program now walls one step LATER**, on `List argument cannot be faithfully
+materialized (would borrow an empty deferred heap value)` — the `list.fold(list.sort(tmp3), …)`
+over an empty list. Still an honest wall (exit 1, no output), not wrong bytes; a different
+cell, not a regression.
+
+<a id="dogfood-findings-unit-046-2026-07-31"></a>
+
+## Dogfood findings (Unit 0.46, 2026-07-31)
+
+Not fuzz findings — these came from writing a real program (`tools/almide-gates`), and they
+are recorded here because this is where the live defect ledger lives.
+
+| # | Shape | Severity |
+|---|---|---|
+| [#1029](https://github.com/almide/almide/issues/1029) | an `effect fn` called in a `for`-loop body is not auto-unwrapped: native emits invalid Rust, wasm prints heap addresses as values | **FIXED via #1030** |
+| [#1030](https://github.com/almide/almide/issues/1030) | **root cause of #1029** — list concat does not constrain the RIGHT operand's element type | **FIXED** — `infer_plus_op_concat` now uses `constrain` instead of `unify_infer` |
+
+**#1030 is the smallest instance of the checker-accepts-but-lowering-reinterprets class found
+so far**: no effects, no concurrency, no generics — three lines. And the contrast is exact:
+`[1, "a"]` (literal) is correctly rejected with E001, while `[1] + ["a"]` (concat) is not. The
+same property, checked on one path and not the other.
+
+**What this says about coverage.** 180 lines of a real program found what 324 spec files and
+seven fuzz campaigns did not. The spec corpus is written by someone who knows the compiler;
+a program written to do a job reaches for shapes nobody thought to test. Three instances of
+this class turned up in one day (#1027, #1029, #1030), each by accident rather than by a
+detector — which is the argument for the hole-hunt lens at ladder row 0.52 (#912).
+
+<a id="1030-fix-2026-07-31"></a>
+
+### #1030 fix (2026-07-31)
+
+One call changed, in `check/infer_statements.rs::infer_plus_op_concat`:
+
+```rust
+- self.unify_infer(le, re);
++ self.constrain(le.clone(), re.clone(), "list concatenation element");
+```
+
+`unify_infer` binds inference variables and stays SILENT when both sides are concrete and
+different. `constrain` still unifies — so the inference-variable cases the rule exists for
+(`List[?0] + List[Int]`) are unaffected — but it also REPORTS when unification is impossible.
+
+Both repros are now check-time errors on both targets:
+
+- `[1] + ["a"]` → `error[E001]: type mismatch in list concatenation element: expected Int but got String`
+- `out = out + [one(p)]` (#1029) → `… expected Int but got Result[Int, String]`
+
+The second is worth noting: with concat honest, #1029's message now says exactly what is
+wrong — the effect call is a `Result` and the list wants an `Int` — which points the user at
+`!` instead of at an "Almide bug" panic. One fix, two reports, and the diagnostic is better
+than the one I would have written for #1029 on its own.
+
+Regression: 335 files green (spec 324 + examples 11), diagnostic harness green, plus
+`tests/diagnostics/e001-concat-element-mismatch`.
+
+<a id="r3-remainder--one-hypothesis-refuted-2026-08-01"></a>
+
+### R3 remainder — one hypothesis REFUTED (2026-08-01)
+
+Tested and eliminated: **"an all-scalar tuple is not heap, so it takes a different route."**
+It is heap. `crates/almide-types/src/types/heap.rs:62` classifies `Ty::Tuple(..)` as heap
+unconditionally — the match is exhaustive without a wildcard, and there is a unit test at
+line 113 pinning `Ty::Tuple(vec![Ty::Int, Ty::Bool])` on the heap side.
+
+So heap-ness is NOT what distinguishes `(Int, Int)` from `(String, Int)` in the OptionSome
+payload path. Both reach `lower_owned_heap_field` through the same fallback and both are
+heap; only the arm that selected them differs (`is_all_scalar_tuple`, checked first, vs
+`is_str_int_tuple`).
+
+Recorded as a refutation rather than dropped, because it is the obvious first guess and
+someone will otherwise spend the same twenty minutes on it. What remains is to instrument
+which early return in `lower_pure_module_value_call` (`calls.rs:89`) fires for
+`option.unwrap_or(s0, (1, 2))` but not for `option.unwrap_or(s0, ("a", 1))` — the two probes
+are `s_s11` and `s_s5` in the session scratchpad, two lines each.
+
+**Second hypothesis also eliminated**: `repr_of` (`lower/mod.rs`) does not reject a tuple —
+its early `Err` is for `Ty::Unknown` only, and the scalar-width table below it is a
+classification, not a gate. So the decline is not in `repr_of` either.
+
+**Stopping the chase here, deliberately.** Three hypotheses in a row have been eliminated
+without closing the cell, which is the signal that the next step needs instrumentation
+(printing which branch of `lower_pure_module_value_call` is taken for each probe) rather than
+more reading. Continuing to guess is how the P2 bracket earlier in this cycle became a
+retraction — the discipline that cost is worth paying here too.
+
+What is NOT in doubt: the cell is an honest wall (exit 1, no output, no wrong bytes), it
+costs coverage rather than correctness, and the two-line probes that discriminate it are
+`s_s5` (builds) and `s_s11` (walls) in the session scratchpad.
+
+<a id="r3-remainder--the-decline-is-localised-to-one-call-with-a-named-next-hypothesis-2026-08-01"></a>
+
+### R3 remainder — the decline is localised to ONE call, with a named next hypothesis (2026-08-01)
+
+Traced by reading, confirmed by the two probes:
+
+- `s_s5` `Option[(String, Int)]` → `try_opt_str_int_tuple_payload` → `lower_owned_heap_field(expr)` → **succeeds**
+- `s_s11` `Option[(Int, Int)]` → `try_opt_scalar_tuple_payload` → `lower_owned_heap_field(expr)` → **fails**
+
+Two different arms, but they make the SAME call with the SAME expression shape
+(`option.unwrap_or(s0, <tuple literal>)`, a `CallTarget::Module`). Only the result TYPE
+differs. So the decline is inside `lower_pure_module_value_call` (`calls.rs:89`) and it is
+type-dependent.
+
+**Next hypothesis to test** (more specific than "instrument the early returns"): the stdlib's
+`option.unwrap_or` is routed or monomorphized BY PAYLOAD TYPE, and there is a cell for a
+String-carrying tuple but not for an all-scalar one. Check `self_host_registry.rs` /
+`stdlib_info.rs` for how `option.unwrap_or` specializations are registered, and whether the
+all-scalar tuple instantiation exists.
+
+If that is it, the fix is a registry entry rather than a lowering change — which is a much
+smaller and safer edit than the ownership-analysis change the earlier hypotheses implied.
+
+<a id="r3-remainder--a-wrong-root-cause-retracted-2026-08-01"></a>
+
+### R3 remainder — a WRONG root cause, retracted (2026-08-01)
+
+The hypothesis named above was right, and the gap is exact. `unwrap_or` is routed by payload
+type, and the two modules' cell sets are asymmetric:
+
+| payload | `result` | `option` |
+|---|---|---|
+| String | `result.str_unwrap_or` | `option.unwrap_or_str` |
+| Value | `result.value_unwrap_or` | `option.value_unwrap_or` |
+| List[Value] | `result.list_value_unwrap_or` | `option.listvalue_unwrap_or` |
+| List[Int] / List[String] | (via flat) | `option.listint_unwrap_or` / `option.liststr_unwrap_or` |
+| **flat scalar block** (an all-scalar TUPLE, `List[<scalar>]`, `Bytes`) | **`result.flat_unwrap_or`** | **— MISSING —** |
+| heap fallback | `result.unwrap_or_hx` | `option.unwrap_or_hx` |
+
+`Option[(Int, Int)]` matches no cell, so the routing returns `None` and the caller walls.
+`Option[(String, Int)]` is not all-scalar, so it takes the heap path and builds. That is the
+whole difference between probes `s_s11` and `s_s5`.
+
+**This is the same class as everything else found this cycle**: a family grown a point at a
+time. `result` got its flat cell when `result.zip`'s `(Int, Int)` needed it; nobody added the
+`option` twin because nothing had asked for it until a fuzz program did.
+
+**The fix, concretely:**
+
+1. Add `option_flat_unwrap_or` to `stdlib/value_core.almd`, modelled on
+   `result_flat_unwrap_or` (line 705) but for the OPTION layout — Option is len-as-tag, not
+   the Result's cap-as-tag-at-@16, so the body is NOT a copy: read the len slot, `0` = none →
+   return the fallback, else load the payload handle and let the bare-Var tail auto-acquire.
+   The neighbouring `?? d`-over-`Option[List[String]]` helper in the same file is the closer
+   template — its comment even says "the SAME len-as-tag prim".
+2. Register it in `self_host_registry.rs` next to `("result_flat_unwrap_or",
+   "result.flat_unwrap_or")`.
+3. Add the routing arm to `unwrap_or_call_name_option` (`lower/mod_p4_f.rs`), mirroring the
+   `result` arm's predicate (`Ty::Tuple(ts)` all-scalar, or a non-heap-element `List`).
+4. **Land a matrix gate in the same PR** — the family rule is that `option` and `result` carry
+   the SAME payload cells, and a test asserting cell-set equality is what stops the next
+   divergence. This gap existed precisely because nothing checked that.
+
+Probes: `s_s11` (walls) and `s_s5` (builds), two lines each, in the session scratchpad.
+
+**RETRACTED — the above is wrong.** I compared the two modules by grepping the emitted NAMES
+(`Some("option.*"` vs `Some("result.*"`) and concluded `option` had no flat cell. It does:
+`unwrap_or_call_name_option_flat_scalar` (`lower/mod_p4_f.rs`) matches
+`Ty::Tuple(ts) if all non-heap` and routes to `option.listint_unwrap_or`. The option side
+REUSES that name for the whole flat family instead of minting a separate
+`option.flat_unwrap_or`, so a name-level comparison reads as a gap that is not there.
+
+**Reading names instead of predicates is what produced a confident wrong answer** — the same
+failure mode as the retracted P2 bracket, in a different disguise. The rule that would have
+caught it: when comparing two families, compare what they MATCH, not what they are called.
+
+The changes that conclusion produced (an `option_flat_unwrap_or` in `stdlib/value_core.almd`
+plus its registration) were reverted. The revert itself went wrong twice and is worth
+recording: the removal logic walked back over the preceding comment block and took the
+NEIGHBOURING `option_liststr_unwrap_or` with it, and `almide fmt` had meanwhile reformatted
+the entire 1100-line file, so the diff no longer isolated my edit. Restoring the file from
+HEAD was the correct move; a function-inventory diff against HEAD is what caught the missing
+neighbour, and re-running `spec/stdlib` caught a second symptom (43 native fallbacks where 6
+is normal) that the inventory check alone would have missed.
+
+**So R3's cause is still unknown.** Eliminated so far: heap classification (`Ty::Tuple` IS
+heap), `repr_of` (rejects only `Ty::Unknown`), and now a missing routing cell (the cell
+exists and its predicate covers the case). What is still true: `s_s5` builds, `s_s11` walls,
+they differ only in element type, and both reach `lower_owned_heap_field` through the same
+call. The next step remains instrumentation — printing which branch is taken — not more
+reading.
+
+<a id="r3--narrowed-again-the-decline-is-before-the-call-not-inside-it-2026-08-01"></a>
+
+### R3 — narrowed again: the decline is BEFORE the call, not inside it (2026-08-01)
+
+Read `lower_pure_module_value_call` to its end (`calls.rs:227+`): after `repr_of` it selects a
+name and pushes `Op::CallFn`, returning `Ok`. There is no type-dependent failure in its tail —
+for a well-formed `option.unwrap_or` it succeeds for BOTH payload types.
+
+So the earlier localisation ("the decline is inside `lower_pure_module_value_call`, and it is
+type-dependent") was wrong in its second half. The call is not where they diverge; **one of
+them never reaches it.**
+
+That points at `lower_owned_heap_field`'s group dispatch. Its `_leaf` group returns
+`Option<Option<ValueId>>` where the two negatives are DISTINCT and documented as such:
+`None` = "not my group, try the next", `Some(None)` = "my group DECLINES this field". If an
+arm in `_leaf` matches an all-scalar tuple and returns `Some(None)`, the router stops there
+and never tries `_aggregate` — which is where the `CallTarget::Module` arm lives.
+
+**Next probe** (cheap, and it settles it): in `owned_heap_field.rs`, check whether any `_leaf`
+arm can match a `Call` expression whose type is an all-scalar tuple. If one does and declines,
+that is the bug and the fix is in the arm's guard, not in the call path at all.
+
+Hypotheses eliminated so far: heap classification, `repr_of`, a missing routing cell
+(retracted — the cell exists), and now a type-dependent failure inside
+`lower_pure_module_value_call`. Each elimination has been recorded rather than dropped, which
+is the only reason this has narrowed instead of circling.
+
+<a id="r3--fifth-hypothesis-eliminated-and-a-note-on-when-to-stop-reading-2026-08-01"></a>
+
+### R3 — fifth hypothesis eliminated, and a note on when to stop reading (2026-08-01)
+
+The `_leaf` group has NO `Call` arm at all — its arms are `LitStr`, `BinOp::ConcatStr`,
+`BinOp::ConcatList`, `StringInterp`, `Lambda`, `Var`, `Member`, `TupleIndex`. So a `Call`
+expression falls through it to `_aggregate` (which does have the `CallTarget::Module` arm)
+regardless of payload type. The "a `_leaf` arm declines the all-scalar tuple" hypothesis is
+wrong.
+
+**Five hypotheses eliminated by reading, none confirmed.** That ratio is the signal: reading
+has stopped paying, and every further guess costs a retraction risk (one already happened
+this cycle — the "missing routing cell" claim, which also produced a damaged stdlib file
+during its revert).
+
+**The next session should instrument, not read.** Concretely: add a temporary `eprintln!` at
+each `return`/`?` site in `lower_owned_heap_field` and `try_opt_scalar_tuple_payload`, build,
+run `s_s5` and `s_s11`, diff the traces, remove the prints. Two builds and a diff — it will
+name the site in one pass, where five careful readings did not.
+
+Eliminated so far, all recorded so nobody repeats them:
+1. all-scalar tuples are not heap → they are (`heap.rs:62`, with a unit test)
+2. `repr_of` rejects them → it rejects only `Ty::Unknown`
+3. `option` lacks a flat routing cell → it has one, and its predicate covers the case (retracted)
+4. `lower_pure_module_value_call` fails type-dependently → its tail always reaches `Op::CallFn`
+5. a `_leaf` arm declines the Call → `_leaf` has no `Call` arm
+
+Unchanged throughout: `s_s5` builds, `s_s11` walls, they differ only in element type, and the
+wall is honest (exit 1, no output, no wrong bytes) — it costs coverage, not correctness.
+
+<a id="r3--instrumented-and-the-answer-arrived-in-one-pass-2026-08-01"></a>
+
+### R3 — INSTRUMENTED, and the answer arrived in one pass (2026-08-01)
+
+Five readings found nothing; two builds with a temporary `eprintln!` found it immediately.
+Recording both the answer and the method, because the method is the transferable part.
+
+**The expression is not a `Call`. It is a `Match`.**
+
+```
+[R3] NO group claimed it
+[R3] scalar_tuple: lower_owned_heap_field -> false for kind
+     Match { subject: IrExpr { kind: Var { id: VarId(0) },
+     ty: Applied(Option, [Tuple([Int, Int …
+```
+
+`option.unwrap_or(s0, (1, 2))` is desugared to a `match` before it reaches
+`lower_owned_heap_field`. **Every one of the five eliminated hypotheses was about the `Call`
+path — a path this expression never takes.** That is why careful reading kept missing it: the
+reasoning was sound and the premise was wrong, and only a trace could show the premise.
+
+**Where it actually declines.** `owned_heap_field.rs:476` DOES have a `Match` arm:
+
+```rust
+IrExprKind::Match { subject, arms } => {
+    let if_expr = self.desugar_match_to_if(subject, arms, &expr.ty)?;
+    let IrExprKind::If { cond, then, else_ } = &if_expr.kind else { return Some(None) };
+    let obj = self.try_lower_heap_result_if(cond, then, else_, &expr.ty)?;
+    …
+}
+```
+
+So the decline is inside `desugar_match_to_if` or `try_lower_heap_result_if`. The `(String, Int)`
+probe reaches this same arm 10 times and builds, so the arm works — it is the all-scalar tuple
+that one of those two rejects. Most likely candidate: the desugared `else` arm is a TUPLE
+LITERAL `(1, 2)`, and `try_lower_heap_result_if` must materialize it as an arm value.
+(`try_lower_heap_result_if`'s own `is_heap_ty(result_ty)` guard is not it — `Ty::Tuple` is heap.)
+
+**Next step**: the same trace, one level down — print at each `?`/`return` inside
+`try_lower_heap_result_if` / `lower_heap_result_if_inner`, run `s_s11`, read which arm
+declines. One build.
+
+**The method, generalised.** Five careful readings cost more than two instrumented builds and
+were wrong. The tell was the ratio — five hypotheses eliminated, none confirmed — and the rule
+worth keeping is: *when eliminations outnumber confirmations and nothing converges, the
+premise is probably wrong, and only a trace can show which premise.*
+
+<a id="r3--closed-and-the-trace-beat-five-readings-by-two-builds-2026-08-01"></a>
+
+### R3 — CLOSED, and the trace beat five readings by two builds (2026-08-01)
+
+**The cause, in one line.** `lower_owned_heap_field`'s `Match` arm only knew LITERAL arm
+chains, so the `some`/`none` pair that `option.unwrap_or` desugars to was declined outright.
+
+The previous entry's guess was wrong, and worth leaving visible: it named
+`try_lower_heap_result_if` as the likely rejecter. A trace printing `inner -> {is_some}` at
+that call fired zero times with `false` across the whole compile — that function never
+declines. The decline is one step earlier, in `desugar_match_to_if`, and the second trace
+printed the shape that reaches it:
+
+```
+[R3m] subj_ty=Applied(Option, [Tuple([Int, Int])]) arms=2
+[R3m]   pat=Some { inner: Bind { var: VarId(2), ty: Tuple([Int, Int]) } } guard=false
+[R3m]   pat=None                                                        guard=false
+```
+
+`desugar_match_to_if` handles a Bool 2-arm form and otherwise falls to `build_match_chain`,
+which wants int-literal arms plus a catch-all. A variant pattern pair matches neither.
+
+**The fix is not new machinery — it is a call that six other sites already make.**
+`try_lower_variant_value_match` is exactly "lower an Option/Result-subject match to a value",
+it rolls its own `ops`/`lifted`/`live_heap_handles` marks back on decline, and it is tried
+FIRST by `binds_p2`, `calls_p4`, `control_p3`, `tail_b`, and `heap_result_ctrl_arms`.
+`owned_heap_field` was the one match-lowering site that skipped straight to the literal
+desugar. One arm, ahead of the existing one, gated on `is_variant_ty(&subject.ty)`.
+
+**The family is now a matrix, not a sample.** All four element-type combinations measured on
+one binary in one run — `(Int, Int)`, `(String, Int)`, `(Int, String)`, `(String, String)` —
+build and agree native ⇄ wasm. `spec/wasm_cross/option_tuple_payload_matrix.almd` (C-201) is
+the executable gate, so a future change that re-divides the family by element type fails
+there instead of waiting for a fuzzer to rediscover it.
+
+**A remainder that was measured rather than waved past.** With the fix, the NATIVE verified
+render walls this family on `ownership verification failed` and falls back to the standard
+codegen. That reads like the fix broke something, so it was A/B'd on ONE binary by putting the
+new arm behind a temporary env guard:
+
+| program | without the arm | with the arm |
+|---|---|---|
+| `option.unwrap_or(s0, (1,2))` bound to a `let` (never reaches the arm) | ownership verification failed | ownership verification failed |
+| the matrix fixture | outside the MIR-lowering subset | ownership verification failed |
+
+The first row settles it: the ownership wall exists on a program the arm cannot touch. What
+the fix changed is the second program's wall REASON, from "subset" to "ownership" — both
+walls, one strictly more informative. Filed as #1037 and named inside C-201's statement, so the
+contract promises stdout+exit equality and does not claim a verified native render it does not
+have.
+
+**The method, again.** Two instrumented builds found what five careful readings missed, and
+then a third trace corrected the guess the second one produced. The rule from the last entry
+held — *when eliminations outnumber confirmations and nothing converges, the premise is
+probably wrong* — and this run adds a corollary: **a trace that confirms one hypothesis is
+still worth pointing at the NEXT hypothesis before acting on it.** The guess that
+`try_lower_heap_result_if` was the rejecter was written down as "most likely candidate" and
+was simply false; one `eprintln!` at its return site cost less than the reading that produced
+the guess.
+
+<a id="a-cheap-rule-the-r3-fixture-bought-2026-08-01"></a>
+
+### A cheap rule the R3 fixture bought (2026-08-01)
+
+The new fixture passed every local gate — `spec/lang`, `spec/stdlib`, `spec/integration`,
+`spec/wasm_cross`, the full `cargo test`, the cross-target byte-compare — and turned CI red on
+`Emit & Format`, because `almide test` does not check formatting and the fmt gate covers
+`spec/` and `examples/`.
+
+**After adding or editing anything under `spec/`, run `almide fmt --check spec/ examples/`.**
+It takes seconds and it is the one gate the test commands do not imply. (The formatter also
+strips blank lines between statements, so a fixture written with paragraph spacing WILL be
+rewritten — worth knowing before the diff surprises you.)
+
+Note the scope: the gate is `spec/ examples/` only. `tools/` is deliberately outside it, and
+formatting the dogfood would collapse its multi-line signatures and pipe chains onto single
+long lines — so the right move there is to leave it alone, not to "fix" it.
+
+<a id="q1_0-sign-of-zero-1358-fuzz-nightly-run-31667874852"></a>
+
+## Q1_0 sign-of-zero (#1358, fuzz-nightly run 31667874852)
+
+Seed 506685997636 / index 703 — a mutation of `spec/wasm_cross/matrix_select_rows_oob.almd`
+(C-229). `matrix.select_rows_q1_0` over an all-zero 18-byte block: native `-0`, wasm `0`.
+They compare EQUAL, so nothing downstream notices, which is exactly why it survived a release.
+
+**Root cause: one spelling, two answers.** Native's dequantizer wrote its negative branch as
+`let neg_scale = -scale;`; the self-hosted wasm decoder wrote `0.0 - scale`. For every non-zero
+scale those are bit-identical. At `scale = +0.0` they are not: `-(+0.0)` is `-0.0`,
+`0.0 - 0.0` is `+0.0`.
+
+**Ruling: a dequantized element of zero magnitude is `+0.0`.** A quantized element is
+*magnitude* (the block's fp16 scale) × *direction* (the Q1_0 sign bit / Q8_0 int8 quant). At
+zero magnitude the bytes encode no direction, so the sign IEEE-754 returns is an artifact of
+how the arithmetic was spelled, not of the data — and `+0.0` is the zero the rest of the
+surface already produces (the OOB→zeros row, the non-multiple-cols guard, `vec![0.0; _]`).
+Non-zero weights keep their exact sign and bits. The float DECODERS `from_bytes_f16_le` /
+`_f32_le` / `_f64_le` are explicitly OUTSIDE the rule: there a stored `-0.0` is the datum.
+
+**The sweep found two more divergences in the same decoder, both worse.** Q1_0 and Q8_0 share
+one 2-byte fp16 block scale. Probed across ten raw scales, native `fp16_bits_to_f32` and wasm
+`__q10_scale` were three separate answers apart:
+
+| fp16 input | native (pre-fix) | wasm (pre-fix) |
+|---|---|---|
+| `0x0000` all-zero block, sign bit 0 | `-0.0` | `0.0` |
+| `0x0001` … `0x03FF` (subnormals) | `5.96e-8` … `6.0975e-5` | **`0.0` — flushed** |
+| `0x7C00` / `0xFC00` / `0x7C01` | `inf` / `-inf` / `NaN` | **`65536` / `-65536` / `65600`** |
+
+The subnormal row is a silent MAGNITUDE error on real weights, not a sign one: wasm returned
+the sign bit alone for every `exp == 0` pattern. The `exp == 31` row is worse still — wasm had
+no Inf/NaN branch and fell through to the normal-number formula. Both closed by making
+`__fp16_bits` a faithful mirror of native's decoder (mantissa normalization as a recursion,
+the `0xFF` exponent branch).
+
+**Family sweep — what was checked, and what was already clean.** Zero-block behaviour across
+every quantized loader and byte loader with a wasm leg:
+
+| loader | pre-fix | verdict |
+|---|---|---|
+| `select_rows_q1_0` | native `-0.0` / wasm `+0.0` | **DIVERGENT** — the reported bug |
+| `from_q1_0_bytes` | native `-0.0` / wasm `+0.0` | **DIVERGENT** — the twin decoder, same root, not in the report |
+| `select_rows_q8_0_dq` | `-0.0` on BOTH legs (zero scale × negative quant; ±0 scale × either quant) | agreed, so no fuzzer would find it — but the same rule violation, fixed |
+| `select_rows_f32` | identical, and a stored `-0.0` survives | CLEAN |
+| `from_bytes_f32_le` / `_f16_le` / `_f64_le` | identical, and a stored `-0.0` survives | CLEAN — and correctly so |
+| `linear_q1_0_row_no_bias` / `linear_q8_0_row_no_bias` | native-only (walled on wasm) | no cross-target claim; they expose a dot product, not elements |
+
+`runtime/rs/burn/matrix_burn_p4.rs` carries a third copy of the q1_0 decoder with the same
+`-scale`, but that backend is not in `[lib]` and nothing builds it — left alone deliberately.
+
+**The lesson, and the gate.** The C-229 fixture already covered this input and passed, because
+it asserted MAGNITUDE (`${x}` on a value that reads `0` either way in a list render) and the
+divergence was a sign bit. A fixture for a bit-pattern claim has to observe the bit pattern:
+the zeros are now spelled through `float.to_string`, which prints `-0.0`. The new C-269 fixture
+pins the whole fp16 scale domain through BOTH q1_0 entry points, so the twin decoders cannot
+drift apart again. Verified A/B: on the pre-fix binary both fixtures are red.
+
+<a id="1375--one-source-shape-two-independent-wrong-value-mechanisms-2026-08-13"></a>
+
+## #1375 — one source shape, TWO independent wrong-value mechanisms (2026-08-13)
+
+`json.parse("hi") ?? json.parse("[1,2]")!` printed `true` on wasm and `[1,2]` on native. The
+emitted WAT settled the mechanism in one read: the `??` lowered to the right skeleton (tag at
+`+16`, payload at `+12`, `tag != 0` picks the fallback), but the fallback arm ended
+`(local.set $v13 (call $json.parse …)) (local.get $v13)` — the whole `Result` block handed to
+the merge, with no tag read and no propagation. The heap-arm lowering applies `e! == e`, which
+is the identity in a RESULT-typed arm and NOT in a payload-typed one.
+
+The rule this entry adds: **narrow to the mechanism, then re-run the whole neighbourhood, because
+one surface shape can have more than one.** Rewriting `a ?? f(..)!` to `(match a { ok($p) =>
+ok($p), err(_) => f(..) })!` fixed eleven cells; the twelfth — the same arm spelled as a
+literal `match` — still printed `true`, and the emitted code showed why: that spelling reaches
+`branch_lift`, which hoists the branch into a synthesized NON-effect `fn … -> <payload>`. A `!`
+inside a lifted helper has no channel out, so native emitted `?` in a non-`Result` fn (rustc
+E0277 — loud) while wasm always-wrapped the helper body and the call site bound the wrapper as
+the bare payload (silent). Two mechanisms, one shape, and the second was only visible because
+the neighbourhood was re-measured after the first fix rather than at the start.
+
+Also worth keeping: the ANF that made the fix executable. `(match a { … })!` walls, because
+`desugar_let_unwrap` builds a propagation match whose SUBJECT would then be a match. Binding it
+first (`let $u = match a { … }; let v = $u!`) puts a `Var` in the subject position, which is the
+proven shape — one extra statement, the same single evaluation, call-count invariant. Hoisting
+the fallback itself would have been the wrong ANF: `??` must not evaluate its fallback on the ok
+path, and the fixture pins that with a cell whose unused fallback would fail.

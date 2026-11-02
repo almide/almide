@@ -1,3 +1,5 @@
+<a id="issue-label-taxonomy-1482"></a>
+
 # Issue 标签分类（#1482）
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](ISSUE-TAXONOMY.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](ISSUE-TAXONOMY.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](ISSUE-TAXONOMY.zh-CN.md)
@@ -7,6 +9,8 @@
 > 原文：[docs/project/ISSUE-TAXONOMY.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/project/ISSUE-TAXONOMY.md)（固定提交 `35297a612fb29e3f78f6587aba253aa91d51f466`）。这是面向读者的非规范性快照译文，不会自动同步。保留原文的时间、适用范围与主张；翻译时未进行独立测量或实现验证。
 
 在本文件出现之前，跟踪器已有类别标签（`bug`、wasm 类别、`fuzz` 等），却**没有严重性类别**，因此无法查询“是否还有未关闭的发布阻塞问题？”——每次发布都靠记忆回答。本文件定义封闭的严重性集合、各类别的准入条件，以及使用它们的一条规则；下文还定义领域轴，用来回答另一个无法查询的问题：**这个 issue 属于哪个 crate？**
+
+<a id="the-closed-set-severity"></a>
 
 ## 封闭集合（严重性）
 
@@ -24,6 +28,8 @@
 - 一个 issue 可以有多个类别（`I-divergence` + `regression`）。
 - wall、缺失功能、性能差距和文档漂移**不是** `I-*` 类别；它们使用 `enhancement` / `documentation` 加领域标签（见下文）。
 
+<a id="the-blocking-rule"></a>
+
 ## 阻塞规则
 
 **只要带有 `I-unsound`、`I-miscompile`、`I-divergence` 或 `regression` 标签的 issue 仍未关闭，就不得发布正式版标签。**
@@ -31,6 +37,8 @@
 - 由 [`scripts/count-release-blockers.sh`](../../../../../scripts/count-release-blockers.sh) 计数；发布 workflow 在创建正式发布之前使用 `--gate` 运行它，因此规则由机制执行，而不是靠记忆。它打印的是**不同**未关闭 issue 的数量：一个同时带两个类别的 issue 是一个阻塞项，不是两个（#2400）。总数上方的按标签分项会显示重叠。
 - `-rc` 预发布标签例外（RC 的存在正是为了让一个代码树接受 soak 测试——参见 `CLAUDE.md` 中的 RC 流程）；仍然打印计数。
 - 退出途径是**降级，而非豁免**：若判定某个阻塞项对本次发布可接受，应由 mob 决策，在 issue 上记录理由并移除或更改标签，同时在 release seal 的 `known_problems` 字段记录处理结果。门禁本身没有跳过它的参数。
+
+<a id="the-area-axis-which-crate"></a>
 
 ## 领域轴（哪个 crate）
 
@@ -56,6 +64,8 @@
 - 标签必须与 issue 自己的 `触る場所` 行（见下文）一致。它们是同一个主张写了两遍，不一致就意味着其中一个已过时。
 - `A-wasm` 是原来的 `wasm-codegen`，原地重命名，因此保留了其 issue。没有脚本或 workflow 使用旧名称；而 `fuzz`、`fuzz-findings`、`fuzz-perf` 确实被 `.github/workflows/fuzz-nightly.yml` 使用，必须保留拼写。
 - 领域轴**不像**严重性集合那样封闭：向仓库添加 crate 时可以添加标签。移除或调整范围仍须写入本文件，并与 `gh label` 的变更在同一个提交中完成。
+
+<a id="the-issue-header-what-to-do-in-the-issue"></a>
 
 ## Issue 头部（在 issue 中说明做什么）
 
@@ -89,6 +99,8 @@
 - `根拠` 是支撑判断的字段：它说明 issue 建立在测量之上，还是仅仅建立在看似合理的一句话上。`未測定` 是合法值，而且比自信猜测更有用——它告诉下一位读者，第一步是测量。
 - `完了条件` 绝不写“感觉完成了”。如果 issue 无法给出可验证的终点，那么它的完了条件就是需要什么才能*做出决定*——这就是工作。
 - 该块是包装层：不添加正文尚未包含的主张。新证据仍像以往一样放进评论。
+
+<a id="amending-the-set"></a>
 
 ## 修改集合
 

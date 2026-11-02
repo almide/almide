@@ -1,3 +1,5 @@
+<a id="central-package-registry"></a>
+
 # 中央包注册表
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](package-registry.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](package-registry.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](package-registry.zh-CN.md)
@@ -11,6 +13,8 @@
 
 说明：在现有基于 git 的包系统之外，提供集中的包发布、所有权和来源追溯。
 
+<a id="existing-foundation"></a>
+
 ## 现有基础
 
 Almide 已经支持基于 git 的包获取、`almide add <name>` 简写、MVS 和固定到提交的锁文件。简写通过随附的包名映射或默认 GitHub 所有者解析；它**不是**中央注册表。当前行为和来源信任规则记录在 [包系统规范](../../../../../specs/package-system.md) 和 [CLI 参考](../../../../../specs/cli.md#almide-add) 中。
@@ -18,6 +22,8 @@ Almide 已经支持基于 git 的包获取、`almide add <name>` 简写、MVS �
 实现依据：`src/project_fetch.rs::resolve_add_target`、`resolve_package_spec`、`update_lock_file` 和 `update_locked_deps`；`src/almide_packages.txt`；`tests/mvs_resolution_test.rs`、`tests/dep_lock_pairing_test.rs` 和 `tests/lock_roundtrip_test.rs`。
 
 锁文件生成和基本版本选择已不再是待办事项。剩余的依赖版本范围语义在 [依赖版本约束](../../../../../roadmap/on-hold/package-version-resolution.md) 中单独跟踪。
+
+<a id="remaining-proposal--on-hold"></a>
 
 ## 剩余提案 — 暂缓
 

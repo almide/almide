@@ -10,6 +10,8 @@
 
 以下所有函数都是纯函数：`path` 从不访问文件系统。它操作路径*字符串*，因此两种目标行为相同，无需能力。需要读写时使用 `fs`。
 
+<a id="path-components"></a>
+
 ## 路径组成部分
 
 ### `path.join_within(base: String, child: String) -> Result[String, String]`
@@ -152,6 +154,8 @@ fn main() -> Unit = {
 ```
 
 
+
+<a id="signature-index-11-functions"></a>
 
 ## 固定快照 API 索引（11个函数）
 

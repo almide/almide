@@ -1,3 +1,5 @@
+<a id="issue-ledger-burn-down--完全性キャンペーンの残量計"></a>
+
 # Issue 台账燃尽——完整性行动的剩余工作量表
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](issue-ledger-burndown.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](issue-ledger-burndown.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](issue-ledger-burndown.zh-CN.md)
@@ -10,12 +12,18 @@
 
 > 截至 2026-06-11。台账→tracker 的单射已完成：**GitHub 未关闭 issue 数 = 已知的完整性剩余工作量**。关闭纪律 = 消灭整类问题（每个 issue 已写明结构性关闭条件，不以补丁关闭）。停止条件 = #535 的 loop-until-dry。
 
+<a id="戦果2026-06-1011-の-2-日間"></a>
+
 ## 成果（2026-06-10～11 两天）
 
 发布：v0.26.20 → **v0.27.3**（6 次）。关闭：#484-490 系列 + #500/501/502/505 + #522/523/524/525/526/527/517（全部通过消灭整类问题）。
 PR：#487～#543。矩阵门禁 0→29 个单元，churn 门禁 0→3 个，契约 58→67（含 C-066），wasm 内存模型从“全部泄漏”到“默认 O(1)”。
 
+<a id="残-15-件の地形"></a>
+
 ## 剩余 15 项的分布
+
+<a id="week-級--8-件1-件--1-集中セッション"></a>
 
 ### 周级——8 项（1 项 = 1 次集中会话）
 
@@ -30,6 +38,8 @@ PR：#487～#543。矩阵门禁 0→29 个单元，churn 门禁 0→3 个，契�
 | #533 | §13+PR-3 分歧队列 + []-typing | 已记录跨目标分歧归零 |
 | #534 | 规范矛盾燃尽（??/Never/fan 顺序/空页面） | prose↔行为一致 |
 
+<a id="weeks-級背骨-6-件"></a>
+
 ### 数周级（骨架）——6 项
 
 | issue | 内容 | 规模 |
@@ -41,14 +51,20 @@ PR：#487～#543。矩阵门禁 0→29 个单元，churn 门禁 0→3 个，契�
 | #519 | 分配器策略（单调增长 acc × first-fit） | 偏研究 |
 | #520 | 扩展 Lean 的运行时 frees（分配器状态机证明） | 偏研究 |
 
+<a id="プロセス--1-件"></a>
+
 ### 流程——1 项
 
 - **#535 loop-until-dry**：轮换视角开展 hole-hunt，连续 2–3 轮没有发现后，才称“按当前知识已完整”。第 1 轮（multi-truth / silent-fallback / rule-bypass）发现 6 类 → 已全部处理。**第 2 轮未执行**。下一视角候选：pass 顺序假设、checker-accepts-lowering-reinterprets、interp 语义差异、诊断分歧、哈希顺序以外的宿主环境依赖。
+
+<a id="見積もり"></a>
 
 ## 估算
 
 - 已知缺口归零（周级全部完成）：**4～7 天**（按实际速度换算）。
 - 可称为“完整”的状态（3 条骨架 + hunt 无新发现）：**另加 3～6 周**。
+
+<a id="推奨順"></a>
 
 ## 建议顺序
 

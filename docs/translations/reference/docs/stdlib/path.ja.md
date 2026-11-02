@@ -10,6 +10,8 @@
 
 以下の関数はすべて純粋です。`path` はファイルシステムに一切触れません。パスの*文字列*を操作するので両ターゲットで同じ動作をし、ケイパビリティも不要です。読み書きを行うものには `fs` を使います。
 
+<a id="path-components"></a>
+
 ## パスの構成要素
 
 ### `path.join_within(base: String, child: String) -> Result[String, String]`
@@ -152,6 +154,8 @@ fn main() -> Unit = {
 ```
 
 
+
+<a id="signature-index-11-functions"></a>
 
 ## 固定スナップショットの API 索引（11関数）
 

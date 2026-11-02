@@ -46,6 +46,8 @@ fn main() -> Unit = {
 
 
 
+<a id="signature-index-16-functions"></a>
+
 ## 固定快照 API 索引 (16 个函数)
 
 ```

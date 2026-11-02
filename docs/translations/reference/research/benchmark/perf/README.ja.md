@@ -1,3 +1,5 @@
+<a id="perf-suite--native--wasm-runtime-scoreboard-917"></a>
+
 # Perf Suite — Native と WASM のランタイムスコアボード（#917）
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](README.zh-CN.md)
@@ -13,6 +15,8 @@
 
 `bench.py` のスイートには、計算カーネル、縮小版 One Billion Row Challenge、リスト構築の形、文字列の生成・処理などのワークロード行が含まれます。各行は実行する系統と検証モードを宣言します。すべてのワークロードがすべてのターゲットで走るわけではありません。定義されている場合には手書きの Rust 参照実装も含みます。このディレクトリは [docs/project/BENCHMARKS.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/project/BENCHMARKS.md) の数値の出典です。`bench.py` が生成していない数値は公表しません。
 
+<a id="layout"></a>
+
 ## 構成
 
 | パス | 目的 |
@@ -24,6 +28,8 @@
 | `native/` | README のバイナリサイズ・CLI 測定（`measure.sh`、スコアボードとは別） |
 | `string-gap-1004.md` | #1004 の要因分析：文字列の行の差が実際にどこで生じるか |
 | `strchurn/ladder.py` | その分析を生成した段階的な差分比較（再実行可能） |
+
+<a id="method"></a>
 
 ## 方法
 
@@ -54,6 +60,8 @@
 - **`jsonround` は Value の行です**（#2157）：N 個の 4 フィールドのレコード（ネストしたオブジェクト、2 文字列の配列）を 1 つの `Value` に構築し、`json.stringify`、`json.parse` で往復してネストした `meta.score` を合計します。native と wasm のみで、ゲートにするのは Rust 比ではなく両系統の関係です。#2157 では wasmtime より native バイナリの方が 1.3–2.5× 遅いことが分かりました。`value.array` / `value.object` は渡されたリストから各要素をクローンし（各要素が部分木全体なので、文書はネストの各階層でコピー）、`value.as_array` は解析済み文書から全レコードをクローンし、`json.stringify` はノードごとの `String` とコンテナごとの `format!` + `join` でテキストをボトムアップに組み立てていました。現在 3 つの操作は `_owned` ランタイム対応版を持つ `@reuse` として宣言され、最後の使用となるソースは結果にムーブされ、テキストは 1 つのバッファに書かれます。`check-perf-ratio.sh` はこの行と wordfreq の両行で native ≤ wasm を維持します（NATIVE <= WASM ブロック）。
 - **`regexcycle-8` / `regexcycle-32` はルールテーブルの行です**（#4392）：N 個の `Regex` 値を 4 行のテキストの各行に順番に適用し、どちらの N でもマッチ数は同じです。Rust 参照実装はなく、行間の関係をゲートにします（`check-perf-ratio.sh`、REGEX CYCLE、両系統で上限 1.5x）。0.69.0-rc1 はコンパイル済みパターンを 16 エントリの LRU リストに保持していたため、16 を超える周期では各マッチで全パターンを再コンパイルしました。修正を戻すと 3.27x、修正ありでは 1.03x（GCE n2-standard-4）です。native キャッシュは現在、ハッシュインデックスの下に 1024 パターンを保持し、満杯ならランダムに追い出します。そのため、それより長い周期でも大半はコンパイル済みのままです。
 
+<a id="run"></a>
+
 ## 実行
 
 ```bash
@@ -65,9 +73,13 @@ ALMIDE_BIN=target/release/almide python3 research/benchmark/perf/bench.py
 
 `almide`（または `ALMIDE_BIN`）、`rustc`、wasm 系統では `wasmtime` CLI が必要です。
 
+<a id="ci-ratchet"></a>
+
 ## CI ラチェット
 
 `scripts/check-perf-ratio.sh`（CI の `perf-ratchet` ジョブ）は、`--quick` ワークロードで、各ベンチマークの almide-native / 手書き Rust 比率を `scripts/perf-ratio-baseline.txt` に対してゲートします。絶対時間ではなく比率です。比率がランナー差を相殺します。持続的な退行・改善があれば、同じ変更内でベースラインを移動します。完全な方針はスクリプトのヘッダーを参照してください。行は 3 クラスです：PAIRS（±帯域に基準固定）、REPORTED（表示のみ、アロケータ依存）、VICTORY（#1330：Almide が通常の Rust より速い行で、`ratio < 1.0` と、その行の効果の要因とされる最適化を同一ソースで無効化した比較をゲートにする）。
+
+<a id="not-yet-covered"></a>
 
 ## まだカバーしていないもの
 

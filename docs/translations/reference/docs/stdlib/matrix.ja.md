@@ -16,12 +16,16 @@
 
 `Matrix` は行優先の密な `Float` 値の行列（`f64`）です。すべての操作は値を不変として扱い、組み合わせ操作は新しい行列を返します。
 
+<a id="naming-convention"></a>
+
 ## 命名規則
 
 - `<op>_rows` — 各行を独立に処理し Matrix を返します（`slice_rows`、`gather_rows`、`broadcast_add_row`）。
 - `<op>_cols` — 列方向の版（`split_cols_even`、`concat_cols`）。
 - `<verb>_<noun>` — 最初の語は関数の動作（`from_lists`、`to_bytes_f64_le`、`dot_row`）。
 - 接尾辞 `_<dtype>_le` はバイト変換のエンディアンを明示します。
+
+<a id="constructors"></a>
 
 ## 構築
 
@@ -34,6 +38,8 @@
 | `matrix.from_bytes_f32_le(b, offset, rows, cols) -> Option[Matrix]` | 平坦な f32 LE を読む（f64 に拡張）。データが収まらなければ `none` |
 | `matrix.from_bytes_f16_le(b, offset, rows, cols) -> Option[Matrix]` | 平坦な IEEE-754 半精度を読む（GGML 重み）。データが収まらなければ `none` |
 
+<a id="conversions"></a>
+
 ## 変換
 
 | 署名 | 目的 |
@@ -43,6 +49,8 @@
 | `matrix.to_bytes_f32_le(m) -> Bytes` | 平坦な f32 LE（各セルの精度を縮小） |
 | `matrix.transpose(m) -> Matrix` | 転置 |
 
+<a id="inspection"></a>
+
 ## 調査
 
 | 署名 | 目的 |
@@ -51,6 +59,8 @@
 | `matrix.rows(m) -> Int` | 行数 |
 | `matrix.cols(m) -> Int` | 列数 |
 | `matrix.get(m, r, c) -> Option[Float]` | 要素取得。範囲外は `none`（C-282） |
+
+<a id="arithmetic"></a>
 
 ## 算術
 
@@ -66,6 +76,8 @@
 | `matrix.map(m, f) -> Matrix` | 各セルに `(Float) -> Float` を適用。例：`(x) => float.pow(x, e)` |
 | `matrix.concat_rows(ms: List[Matrix]) -> Matrix` | 各要素の行を上から下へ連結 |
 
+<a id="slicing--assembly"></a>
+
 ## 切り出しと組み立て
 
 | 署名 | 目的 |
@@ -76,6 +88,8 @@
 | `matrix.concat_cols(matrices: List[Matrix]) -> Matrix` | 列方向に連結（非推奨別名：`concat_cols_many`） |
 | `matrix.dot_row(m, r, vec: List[Float]) -> Float` | 行 `r` と `vec` の内積（非推奨別名：`row_dot`） |
 
+<a id="neural-network-primitives"></a>
+
 ## ニューラルネットワークの基本操作
 
 | 署名 | 目的 |
@@ -83,6 +97,8 @@
 | `matrix.broadcast_add_row(m, row: List[Float]) -> Matrix` | m の各行にバイアスリストを加算（zip で切り詰め） |
 
 密なカーネル（`linear_row`、`conv1d` など）はパッケージ almide-graphics/nn のモジュール nn.kernels にあります。
+
+<a id="shapes-and-domains"></a>
 
 ## 形状と定義域
 
@@ -103,12 +119,16 @@
 
 **符号反転は IEEE に従います**（C-355）。`-m` は符号ビットを反転するため、セルの `0.0` は `-0.0` になり、両ターゲットでそれを分母とした `1.0` は `-inf` になります。
 
+<a id="byte-decoders"></a>
+
 ## バイトデコーダー
 
 バイトバッファからの行の読み出しは、デコードと収集を組み合わせます：`matrix.gather_rows(matrix.from_bytes_f32_le(b, offset, rows, cols)!, ids)`（Q1_0 / Q8_0 量子化ローダーは方言エポック14、`select_rows_f32` はエポック15でパッケージ almide-graphics/nn のモジュール nn.kernels に移動しました）。
 
 `from_bytes_f16_le` / `_f32_le` / `_f64_le` の**デコーダー**は格納された `-0.0` を保持します。ここでは符号そのものがデータであり、残ります（C-269）。負の次元を0に制限し、上限を超える個数なら `Error: matrix dimensions too large` で中断した後（C-161）、`0 <= offset <= len(b)` かつ `rows * cols * width <= len(b) - offset` でない限り `none` を返します（C-341）。
 
+
+<a id="signature-index-27-functions"></a>
 
 ## 原文固定スナップショットの API 索引（27関数）
 

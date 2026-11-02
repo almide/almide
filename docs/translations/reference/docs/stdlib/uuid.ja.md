@@ -16,6 +16,8 @@ RFC 9562 識別子。ランダムな version 4、時刻順の version 7、8-4-4-
 
 **ターゲット。** 全関数が native と wasm で動きます。wasm の `v7` はモジュールインスタンスに直前の stamp を保持するため、同じ実行内で生成する各 `Uuid` は native と同様、直前のものより大きくなります。
 
+<a id="making-one"></a>
+
 ## 生成
 
 ### `uuid.v4() -> Uuid`
@@ -44,6 +46,8 @@ effect fn main() -> Unit = {
   println(if uuid.compare(a, b) < 0 then "ordered" else "not ordered")
 }
 ```
+
+<a id="text-and-bytes"></a>
 
 ## テキストとバイト
 
@@ -77,6 +81,8 @@ effect fn main() -> Unit = {
 16 bytes
 ```
 
+<a id="ordering"></a>
+
 ## 順序
 
 ### `uuid.compare(a: Uuid, b: Uuid) -> Int`
@@ -84,6 +90,8 @@ effect fn main() -> Unit = {
 先頭からバイトごとに比較し、`a` が `b` より前・同じ・後なら、それぞれ負・ゼロ・正になります。`v7` の値では生成順です。
 
 
+
+<a id="signature-index-7-functions"></a>
 
 ## 固定スナップショットの API 索引 (7 関数)
 

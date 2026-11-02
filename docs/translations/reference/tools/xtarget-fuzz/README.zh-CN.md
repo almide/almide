@@ -1,3 +1,5 @@
+<a id="xtarget-fuzz--almide-generative-fuzzer"></a>
+
 # xtarget-fuzz — Almide 生成式 fuzzer
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](README.zh-CN.md)
@@ -9,6 +11,8 @@
 completeness roadmap 的 Stage 3：持续搜寻组合空间中**可观察分歧**与编译器故障的机器。
 
 它通过 synthesis、corpus mutation、identity、composition 及 multi-module shape 系列生成 Almide 程序，在两个目标上编译执行的 oracle ladder 中运行并判定结果。每个程序都可从 `(seed, index, family)` 三元组重现。发现写入 `findings/`。最小化因系列而异；shape 发现保留整个项目，不声称是最小复现。
+
+<a id="which-oracle-judges-what"></a>
 
 ## 哪种 oracle 判断什么
 
@@ -23,6 +27,8 @@ completeness roadmap 的 Stage 3：持续搜寻组合空间中**可观察分歧*
 第三行是前两者无法提供的：identity 系列程序的期望 stdout 是其自身源码中的字面量，因此**单独**判断每条路径，一致并不证明什么。
 
 这是独立 crate（像 `tools/wasmgen-harness` 一样有自己的 `[workspace]`）。它通过 path 依赖父 `almide` crate 获取 AST / parser / formatter，并**调用外部进程**运行新构建的 `almide` 二进制来执行 oracle ladder。因此 compiler ICE 崩溃的是可观察的子进程，而不是 fuzzer。
+
+<a id="build--run"></a>
 
 ## 构建与运行
 
@@ -56,11 +62,15 @@ cd tools/xtarget-fuzz && cargo build --release
 
 WASM 执行阶段要求 `PATH` 中存在 `wasmtime`。repo root 与 `almide` 二进制会自动检测，可用 `--repo` / `--almide` 覆盖。
 
+<a id="the-generator"></a>
+
 ## generator
 
 五个系列分阶段选择（`src/generator/mod.rs` 的 `Engine::generate`）。Identity 占 `all` 的 3/13；composition 占剩余抽样的 3/13；shape 占两者留下部分的 1/6。最后的余量按 7:3 分为 synthesis 和 mutation。旧的 54% synthesis / 23% mutation 数字早于 composition 和 shape 阶段。
 
 identity 决策取自**独立的** RNG 子流（`IDENTITY_STREAM_SALT`），而非程序主随机流。在主流添加一次抽样就会改变对应关系，使归档发现的 `(seed, index)` 无法重新生成其最小化前的程序。拆出此决策可让 #1332 前的 synthesis 和 mutation 随机流保持逐字节相同。
+
+<a id="the-identity-family-23--the-by-construction-oracle-1332"></a>
 
 ### identity 系列（约 23%）——按构造确定的 oracle（#1332）
 
@@ -95,15 +105,21 @@ fn main() -> Unit = {
 
 **最小化是结构性的**（`minimize::minimize_plan`）：identity 发现通过 *plan* 缩减，而非文本。几乎每行都是逆操作对的一半，删除一行就改变程序应打印的值。文本层缩减会因与 bug 无关的原因“仍能复现”，悄悄把误编译变成 generator 造成的假象。
 
+<a id="the-composition-family--operatorpayload-interactions"></a>
+
 ### composition 系列——operator/payload 相互作用
 
 `--family composition` 对期望输出按构造已知的 operator × payload × position 单元采样（`src/generator/composition.rs`）：在 tail、let 和 argument 位置，对 Int/String/tuple/record payload 使用 `??`、`!`、`?`、pipe、match 和 tuple extraction。它不靠 backend 一致来决定期望答案。
+
+<a id="the-shape-family--multi-module-projects-3309"></a>
 
 ### shape 系列——多模块项目（#3309）
 
 `--family shape`（以及 `all` 中 identity 与 composition 留下部分的六分之一抽样）。两天内用户提交了十一份已被接受、却有一条路径无法构建的程序（#3283–#3307）；没有单文件程序，也没有使用固定 pool 中的名字。此系列生成**项目**：一至四个声明模块，每个是 sibling module 或 path-dependency package（最多一部分放在入口自身），含所有 value kind 的 top-level let（Rc-backed `Bytes`/`Matrix`、fn 值、closure record），被 closure、nested closure、HOF callback 和其他模块修改的 module `var`s，并从对抗性 pool 选名：仅大小写不同的双胞胎、native 路径的生成 binder（`c`、`_fn_arg0`、`__cap_*`、`__almide_*`），以及其 mangle static 的拼写（`almide_rt_<module>_<name>`）。
 
 词汇来自原样包含的 `tests/shape_matrix/gen.rs`（`#[path]`）：确定性的 shape-matrix gate 在每个 PR 上枚举其有界笛卡尔积，而本系列越界采样（每模块多个 let、同时多个模块、closure 嵌套深至四层）。每个项目按构造知道自己的 stdout。两项规则不同于其他系列：**wasm wall 是发现**（check 已接受项目，因此 wall 属于 #3286 / #3296 类，而非覆盖债务）；发现要完整记录——`repro.almd` 是以 `// ==== <path> ====` 为头的全部文件集合，不做最小化（`replay --family shape` 在 scratch dir 重写项目）。
+
+<a id="the-other-two-families"></a>
 
 ### 另两个系列
 
@@ -113,6 +129,8 @@ fn main() -> Unit = {
 - **Mutation**——`src/generator/mutate.rs`。解析带 `main` 的语料（`spec/wasm_cross`、`examples` 等），移除 `test` 块，施加保持类型的 AST mutation（pool 中的字面量扰动、同类子表达式交换、语句复制）。排除 `// wasm:skip` 文件（已知分歧）。
 
 确定性：程序自身使用以 `for_program(seed, index)` 为种子的 `SplitMix64`（`src/rng.rs`），系列抽样则使用上述加盐子流。Effect 不限于打印：精选 catalogue 允许来自 fs/env/io/args/process/net/http 的可重现 sandbox 操作，使用有种子的文件、固定输入和 loopback fixture。由 host 决定的结果，在已声明处使用 property verdict。边界见 `SANDBOXED_EFFECT_MODULES`、`generator/verdicts.rs`、`oracle/sandbox.rs`、`oracle/fixture.rs`；这不意味着允许任意未沙箱化 effect。
+
+<a id="the-oracle-ladder"></a>
 
 ## oracle ladder
 
@@ -136,6 +154,8 @@ stack overflow`，或未注册 thread 上 Rust 自己的信息）/ `memory alloc
 ## Minimizer
 
 `src/minimize.rs`——delta-debugging：先删除语句再简化表达式，重新运行 ladder，只有同种发现再次出现才保留缩减。identity 发现改走结构路径（`minimize_plan`，见上文）。输出写到 `findings/<kind>/`：`repro.almd`、`original.almd`、`meta.txt`（seed/index/family/replay command）、`native.out`、`wasm.out`。以 `(kind, summary)` 去重。
+
+<a id="throughput"></a>
 
 ## 吞吐量
 

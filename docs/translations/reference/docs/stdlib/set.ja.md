@@ -304,6 +304,8 @@ false
 
 
 
+<a id="signature-index-42-functions"></a>
+
 ## 固定スナップショットの API 索引 (42 関数)
 
 ```

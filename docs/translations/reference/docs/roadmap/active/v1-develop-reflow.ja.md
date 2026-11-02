@@ -1,3 +1,5 @@
+<a id="v1--develop-reflow-strategy"></a>
+
 # v1 → develop 還流戦略
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](v1-develop-reflow.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](v1-develop-reflow.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](v1-develop-reflow.zh-CN.md)
@@ -7,6 +9,8 @@
 > 原文：[docs/roadmap/active/v1-develop-reflow.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/active/v1-develop-reflow.md)、固定コミット `35297a612fb29e3f78f6587aba253aa91d51f466`。過去のロードマップの非規範的な読者向けスナップショット訳で、自動同期しない。日付・状態・見積り・計測・計画は原記録のもので、新たな実装や独立検証を示さない。過去の承認待ちや推奨コマンドは現在の実行許可ではない。原文を正とする。
 
 > 原文の説明メタデータ：develop-v1 統合に関する 2026 年 7 月の歴史的提案。現在の実行待ち依頼ではない。
+
+<a id="historical-branch-integration-decision-record"></a>
 
 ## 過去のブランチ統合の判断記録
 

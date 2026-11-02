@@ -1,3 +1,5 @@
+<a id="externalize-try-snippets-from-rust-literals"></a>
+
 # 将 `try:` 片段从 Rust 字面量中外部化
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](diagnostic-snippet-externalization.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](diagnostic-snippet-externalization.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](diagnostic-snippet-externalization.zh-CN.md)
@@ -11,6 +13,8 @@
 
 说明：将诊断修复片段从 Rust 字面量迁移到经过检查的源码模板，尚余的工作。
 
+<a id="current-state"></a>
+
 ## 当前状态
 
 前置条件 [随附 Almide 分派](../../../../../roadmap/done/bundled-almide-dispatch.md) 已于 2026-04-16 提供，不再是阻碍。片段迁移本身仍是提案：目前不存在 `stdlib/diagnostics/` 模板目录。
@@ -22,6 +26,8 @@
 - [`stdlib.rs`](../../../../../../crates/almide-frontend/src/stdlib.rs)：`try_snippet_for_alias` 提供更丰富的别名修复。
 
 这些只是示例，不是固定的文件／数量清单。偏离风险仍然存在：脱离语言解析器的文本可能教给读者过时的修复方式。
+
+<a id="remaining-design-and-work"></a>
 
 ## 剩余设计与工作
 

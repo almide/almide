@@ -185,6 +185,8 @@ fn main() -> Unit = {
 
 
 
+<a id="signature-index-27-functions"></a>
+
 ## 固定快照 API 索引 (27 个函数)
 
 ```

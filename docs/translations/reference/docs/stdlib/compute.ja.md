@@ -42,6 +42,8 @@ effect fn main() -> Unit = {
 
 負の引数は決定的な実行時 abort になります（`Error: negative time: compute.us(-5)`、exit 1。両ターゲットで同一）。overflow する構築は表現可能な最大時間へ飽和します。
 
+<a id="algebra-adr-0001-s3"></a>
+
 ### 代数（ADR-0001 S3）
 
 ```almd run
@@ -79,6 +81,8 @@ less
 
 `T * T`（時間 × 時間）、`Compute` を `Duration` または裸の `Int` と混ぜる操作、`/` は型エラーです。各セルを閉じている理由は ADR を参照してください。
 
+<a id="consumers"></a>
+
 ### 利用側
 
 ```almd run
@@ -111,6 +115,8 @@ effect fn main() -> Unit = {
 `almide run --time-report` は計測した実時間の横にプログラムの決定的時間を表示します（`time: 0.15ms deterministic (≈38.7ms wall here)`）。二つは異なる時計で、同じ量であるとは主張しません。
 
 
+
+<a id="signature-index-7-functions"></a>
 
 ## 固定スナップショットの API 索引 (7 関数)
 

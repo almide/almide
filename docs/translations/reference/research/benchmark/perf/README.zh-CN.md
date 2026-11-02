@@ -1,3 +1,5 @@
+<a id="perf-suite--native--wasm-runtime-scoreboard-917"></a>
+
 # 性能套件 — Native 与 WASM 运行时成绩表（#917）
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](README.zh-CN.md)
@@ -13,6 +15,8 @@
 
 `bench.py` 中的套件包含计算内核、缩小版 One Billion Row Challenge、列表构建形态、字符串反复处理以及其他工作负载行。每行声明它运行哪些分支及其验证模式；并非每种工作负载都在每个目标上运行。已定义的地方包含手写 Rust 参考实现。此目录是 [docs/project/BENCHMARKS.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/project/BENCHMARKS.md) 中数字的来源；凡不是 `bench.py` 产出的数字，都不发布。
 
+<a id="layout"></a>
+
 ## 布局
 
 | 路径 | 用途 |
@@ -24,6 +28,8 @@
 | `native/` | README 的二进制大小/CLI 测量（`measure.sh`，独立于成绩表） |
 | `string-gap-1004.md` | #1004 的归因：字符串行的差距实际花在哪里 |
 | `strchurn/ladder.py` | 生成该归因的差分阶梯（可重跑） |
+
+<a id="method"></a>
 
 ## 方法
 
@@ -54,6 +60,8 @@
 - **`jsonround` 是 Value 行**（#2157）：将 N 个四字段记录（一个嵌套对象、一个双字符串数组）构建成一个 `Value`，经 `json.stringify`、`json.parse` 往返后，求嵌套 `meta.score` 的和。仅 native 和 wasm；设置门禁的是两分支关系，不是 Rust 比率。#2157 发现它作为 native 二进制比在 wasmtime 下慢 1.3–2.5×：`value.array` / `value.object` 会从传入列表克隆每个元素（每个元素都是整棵子树，因此文档每嵌套一层就复制一次），`value.as_array` 从解析后的文档克隆每个记录，`json.stringify` 则用每节点一个 `String`、每容器一次 `format!` + `join` 自底向上拼装文本。这三个操作现已声明为 `@reuse`，并有 `_owned` 运行时对应版本，因此最后一次使用的源会移动到结果中，文本写入单个缓冲区。`check-perf-ratio.sh` 在此行和两条 wordfreq 行上维持 native ≤ wasm（NATIVE <= WASM 块）。
 - **`regexcycle-8` / `regexcycle-32` 是规则表行**（#4392）：依次将 N 个 `Regex` 值应用到四行文本的每一行，两个 N 下匹配数相同。没有 Rust 参考实现；门禁约束行间关系（`check-perf-ratio.sh`，REGEX CYCLE，两分支上限均为 1.5x）。0.69.0-rc1 将已编译模式保存在 16 项 LRU 列表中，因此超过 16 的循环会在每次匹配时重新编译每个模式：撤销修复时为 3.27x，保留修复时为 1.03x（GCE n2-standard-4）。native 缓存如今在哈希索引下保存 1024 个模式，满时随机淘汰，因此周期比这更长时，仍能保留大部分已编译模式。
 
+<a id="run"></a>
+
 ## 运行
 
 ```bash
@@ -65,9 +73,13 @@ ALMIDE_BIN=target/release/almide python3 research/benchmark/perf/bench.py
 
 需要 `almide`（或 `ALMIDE_BIN`）、`rustc`，以及 wasm 分支所需的 `wasmtime` CLI。
 
+<a id="ci-ratchet"></a>
+
 ## CI 棘轮
 
 `scripts/check-perf-ratio.sh`（CI 的 `perf-ratchet` 作业）在 `--quick` 工作负载上，对每个基准的 almide-native / 手写 Rust 比率，依据 `scripts/perf-ratio-baseline.txt` 设置门禁。看比率，不看绝对时间；比率抵消 runner 差异。持续回退或改善，就在同一修改中移动基线。完整策略见脚本头部。共有三类行：PAIRS（锚定在 ±区间）、REPORTED（打印，依赖分配器）、VICTORY（#1330：Almide 比普通 Rust 快的行，门禁检查 `ratio < 1.0`，以及针对该行所归因优化的同源消融）。
+
+<a id="not-yet-covered"></a>
 
 ## 尚未覆盖
 

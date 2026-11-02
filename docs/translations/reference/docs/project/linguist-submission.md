@@ -1,3 +1,5 @@
+<a id="github-linguist-への言語追加--準備台帳"></a>
+
 # Adding a language to GitHub Linguist — preparation ledger
 
 [![English](https://img.shields.io/badge/English-24292f?style=flat-square)](linguist-submission.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](linguist-submission.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](linguist-submission.zh-CN.md)
@@ -9,6 +11,8 @@
 A plan to have GitHub recognize `.almd` as a language. **Not ready to submit as of 2026-09-22.** There is only one reason: insufficient third-party adoption. The rest—grammar, samples, color—can be prepared today.
 
 Sources are [linguist/CONTRIBUTING.md](https://github.com/github-linguist/linguist/blob/main/CONTRIBUTING.md) and the [PR template](https://github.com/github-linguist/linguist/blob/main/.github/PULL_REQUEST_TEMPLATE.md). The figures were measured using the GitHub API on 2026-09-22.
+
+<a id="1-条件と現状"></a>
 
 ## 1. Requirements and current status
 
@@ -24,6 +28,8 @@ Sources are [linguist/CONTRIBUTING.md](https://github.com/github-linguist/lingui
 Accepted licenses are apache-2.0, bsd-2-clause, bsd-3-clause, cc0-1.0, isc, mit, mpl-2.0, ncsa, permissive, unlicense, wtfpl, zlib.
 
 **Submitting prematurely is counterproductive.** About 240 language-addition PRs were submitted to Linguist in 2026; 31 were merged, and the rest were closed for insufficient usage. Closed PRs remain on record.
+
+<a id="通った言語は実際に何ファイルあったか2026-09-22-実測"></a>
 
 ### How many files did accepted languages actually have? (Measured 2026-09-22)
 
@@ -46,6 +52,8 @@ Bend PR #8218 shows exactly how evaluation works. Its body reports 8,640 for `ex
 
 The maintainer's wording is explicit too. One rejection says: “2000 is the threshold. In addition, when assessing popularity we exclude the language's owner and the top contributors. We would have excluded you and your organization eventually anyway.”
 
+<a id="15-文法の検査結果2026-09-22-実測"></a>
+
 ## 1.5 Grammar inspection results (Measured 2026-09-22)
 
 The grammar is not the obstacle to Linguist. It was measured by actually tokenizing with the TextMate engine (`vscode-textmate` + `vscode-oniguruma`).
@@ -66,6 +74,8 @@ The grammar is not the obstacle to Linguist. It was measured by actually tokeniz
 - The `keyword.declaration` count remains 104, and overall coverage is unchanged.
 
 **One more finding is inconsistent notation.** The grammar colors `strict` as a modifier keyword, but the compiler's `KEYWORDS` (34 words) does not include `strict`; it appears only in typo hints in `keyword_typo.rs`. There is no practical harm, but the entry in the single source of truth, `grammar/tokens.toml`, is broader than the implementation.
+
+<a id="2-今日そろえられるもの"></a>
 
 ## 2. What can be prepared today
 
@@ -93,6 +103,8 @@ Almide:
   ace_mode: text
 ```
 
+<a id="3-条件を満たす唯一の道第三者の採用"></a>
+
 ## 3. The only way to meet the requirements: third-party adoption
 
 All currently indexed `.almd` files are under three owners: `almide`, `O6lvl4`, and `almide-graphics`. `almide-graphics` is an organization I belong to, and a single repository accounts for one third of the non-owner portion. The distribution requirement fails at this point. **Mass-producing your own repositories to inflate the count games the evaluation; reviewers exclude them with `-user:`**, so it is pointless as well.
@@ -113,6 +125,8 @@ gh api -X GET search/code -f q='extension:almd -user:almide -user:O6lvl4 -user:a
 
 Reviewers look at the Web UI count, so just before submitting, also open `https://github.com/search?type=code&q=NOT+is%3Afork+path%3A*.almd` while logged in and check it.
 
+<a id="4-出す日の手順"></a>
+
 ## 4. Procedure on submission day
 
 1. Fork `github-linguist/linguist` and create a branch.
@@ -130,6 +144,8 @@ PR-body outline:
 > Samples: taken from `almide/almide`, dual MIT / Apache-2.0.
 > Grammar: `https://github.com/almide/vscode-almide` (MIT), `scopeName: source.almide`.
 > Color `#7c5cbf`: the accent color of the Almide playground and documentation site.
+
+<a id="5-先に取れる条件の軽いレジストリ"></a>
 
 ## 5. Registries with lighter requirements to pursue first
 

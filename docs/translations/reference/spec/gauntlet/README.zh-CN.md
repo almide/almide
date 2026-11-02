@@ -1,3 +1,5 @@
+<a id="the-ddd-gauntlet"></a>
+
 # DDD gauntlet
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](README.zh-CN.md)
@@ -15,6 +17,8 @@
 ```
 
 这次练习追踪了 24 个缺陷（#1539、#1547、#1549–#1583）；既有实现已关闭 22 个，尚有 2 个开放。价值不在修复本身，而在于**重放一致性语料无法触达其中任何一个**，而且有几个只是同一种错误换了外衣。
+
+<a id="1-the-closure-target-moved"></a>
 
 ## 1. 完成目标移动了
 
@@ -37,7 +41,11 @@ spec/wasm_cross/fuel_cut_in_arm_loop.almd                 tests/nested_package_i
 
 **教训不是“提高数字”。** 语料是对已裁定事项的封闭枚举，无法包含尚无人写程序触发的缺陷。依托它声称完成时，应说明这一点。Greenfield 版门禁应携带第二个维度：*针对语言编写、而非从 tracker 中收集的程序形态验收套件*。本目录是一个起点。
 
+<a id="2-the-defect-classes-and-the-invariant-that-kills-each"></a>
+
 ## 2. 缺陷类别及消除各类缺陷的不变量
+
+<a id="a-check-accepts-the-backend-cannot-emit-it--the-dominant-class"></a>
 
 ### A. `check` 接受，但 backend 无法输出——占主导的类别
 
@@ -56,17 +64,23 @@ spec/wasm_cross/fuel_cut_in_arm_loop.almd                 tests/nested_package_i
 
 **不变量**：良类型程序必须可输出。若 backend 无法 lower 某种形态，应在 *check 阶段以源代码层诊断拒绝*，而不是先接受再在下游失败。以上每行都是 frontend 与 backend 对语言定义不一致的表现。Greenfield 应能说明在哪里强制一致，并设置 fuzz 不一致的门禁，而不是等待用户遇到。
 
+<a id="b-names-resolved-from-the-wrong-namespace--a-recurring-family"></a>
+
 ### B. 从错误的命名空间解析名称——反复出现的系列
 
 除上面的 `c7`/`c8` 外，还有 `#1558`（用户 fn 与任一已链接 stdlib fn 共享裸名称时，会被静默排除在重写之外：`fn replace` 遇到 wall，`fn bump` 能运行），以及既有实现更早的 `#1087`。每次都是同一种形态：**在另一个模块也会写入的表中查找裸名称。** 受影响集合不可见（取决于链接了哪些模块），也不稳定（增加 `import` 会改变无关函数）。
 
 **不变量**：解析必须以已解析身份为键，而非裸拼写。如果 pass 必须按名称索引，键必须携带作用域。单字母类型名也是普通名称。
 
+<a id="c-silent-wrong-value--exactly-one"></a>
+
 ### C. 静默错误值——恰好一个
 
 `w1_qq_record_fallback`：对 `Result[record, String]` 使用 `??`，并以 record literal 为 fallback 时，读到了错误值。这是集合中唯一产生错误答案而非拒绝的行；它由*扩大样例*而非 fuzzer 发现。
 
 **不变量**：不能处理某类 payload 的路径应拒绝处理。router 的失败模式应是 wall，而非误读。
+
+<a id="d-surface-holes-the-writer-trips-over--2-fixed-5-still-unfiled"></a>
 
 ### D. 作者会踩到的表层缺口——2 个已修复，5 个仍未立项
 
@@ -82,11 +96,15 @@ spec/wasm_cross/fuel_cut_in_arm_loop.almd                 tests/nested_package_i
 
 **greenfield 的不变量**：这些是设计决策，而非 bug，应有意作出决定。无论 `self` 意味着什么，在每个位置都应相同；protocol 也应一致（只是 bound，还是也可作类型）。无论哪种拼写是规范形式，另一种能解析的地方，规范形式都应能解析。
 
+<a id="e-cross-target-parity-is-a-matrix-and-it-was-closed-cell-by-cell"></a>
+
 ### E. 跨目标一致性是一个矩阵，却曾被逐单元关闭
 
 `x01`–`x16` 是 native 已运行、wasm 路径需要追赶的形态。值得学习的是*燃尽的形状*：五个独立 issue（`#1547 → #1564 → #1578 → #1579 → #1580 → #1581 → #1583`）分别关闭了最终证明属于同一矩阵的一个单元——payload 种类 × producer × 拼写 × 位置。每次关闭提交的措辞（"completing the matrix cells"）都泛化到了实际覆盖之外，而下一个 probe 又找到相邻单元。
 
 **不变量**：一个系列应通过*枚举单元的可执行矩阵门禁*关闭，而非仅修复报告的实例。既有实现已在 `CLAUDE.md` 中为 stdlib API 写明此规则（"API families are extended by matrix, never point-wise… a gated matrix cannot drift"），只是未用于 codegen 系列。Greenfield 应使其成为结构性规则：lowering 路径声明覆盖的单元，由门禁断言声明。
+
+<a id="3-what-the-verification-process-taught--the-most-transferable-part"></a>
 
 ## 3. 验证流程的教训——最可迁移的部分
 
@@ -102,6 +120,8 @@ spec/wasm_cross/fuel_cut_in_arm_loop.almd                 tests/nested_package_i
 
 5. **wall 信息必须指出原因，而非机制。** `#1558` 的 wall 说 "mut params are not in this brick"，但真正的修复是*重命名函数*。作者无法从该信息推导出这个操作。
 
+<a id="4-current-snapshot-incumbent--4e5a15696"></a>
+
 ## 4. 当前快照（既有实现 @ `4e5a15696`）
 
 ```
@@ -110,11 +130,15 @@ clean rows: 25    rows with a check/native/wasm gap: 9
 
 9 项为：五个未立项的表层缺口（`s3`–`s7`），一个有意的 wasm decline（`x09`，`List[record]` 元素），`x13`（在 record-literal field 内，嵌套在 call/operator/interpolation 下的 `!`——**#1583，开放**），以及两个 layered package。两者分别被 `x13`（functional port）与 `#1576`（mut port：`mut`-param 的 err-path 语义需获正式裁定——callee 修改后返回 `err` 时，caller 的实参保留什么？）阻塞。`#1576` 已在结构化路径（0.61.2）获裁定并关闭：err 在任何 write-back 前传播，caller slot 因而保留调用前绑定，`pkg/mut_port` 在下方 greenfield gate 中与 native 输出逐字节相同。#1871 于 2026-09-30 作出相反裁定（(B)，write visible，#2917）：err arm 也携带 buffer，因此 err 前的写入会像 native 一样到达 caller；`cells/x18` 固定了这一点。
 
+<a id="5-what-to-do-with-this-here"></a>
+
 ## 5. 如何使用这里的内容
 
 - greenfield 一旦能承载这些表层形式，就对其运行 `./run.sh`。每行都来自真实程序，而非合成边界情况。
 - 把 §2 的不变量当作设计评审问题，而非 bug 列表。若设计保持 frontend 与 backend 对同一语言达成一致、以身份解析名称、按矩阵关闭系列，这些类别中的多数将无法表示。
 - 五个未立项表层缺口（`s3`–`s7`）是既有实现尚未回答的语言问题。Greenfield 可有意识地一次作答，而不继承当前偶然行为。
+
+<a id="6-the-greenfield-gate-2026-08-26"></a>
 
 ## 6. greenfield gate（2026-08-26）
 

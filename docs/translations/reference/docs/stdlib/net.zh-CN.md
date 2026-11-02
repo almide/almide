@@ -20,6 +20,8 @@ TCP、UDP、主机名查找和 IP 地址——即 `wasi:sockets` 承载的内容
 
 **目标。** 原生目标支持所有函数，`almide run --target wasm`（嵌入式宿主）也支持全部函数。`almide build --target wasm` 将调用 TCP、UDP 或 `lookup_host` 函数的程序构建为使用 `wasi:sockets@0.3` 的 WASI 0.3 组件，并打印所需授权；无需标志，因为 WASI preview 1 没有套接字。运行时须授予网络权限（`wasmtime run -S inherit-network -S allow-ip-name-lookup app.wasm`），否则每次 bind 和 connect 都返回 `<call>(<host>:<port>): permission denied`。不调用套接字的程序仍构建为原来的 preview 1 模块。`parse_ip`、`ip_to_string` 和 `is_loopback` 是纯函数，可在所有目标运行。
 
+<a id="tcp-client"></a>
+
 ## TCP 客户端
 
 ### `net.tcp_connect(host: String, port: Int) -> Result[TcpStream, String]`
@@ -50,6 +52,8 @@ effect fn main() -> Unit = {
 
 通过 `io.close` 关闭流后为 `false`。此处不反映对端关闭；对端关闭表现为空的 `io.read`。
 
+<a id="timeouts-and-readiness"></a>
+
 ## 超时与就绪状态
 
 ### `net.tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String]`
@@ -77,6 +81,8 @@ effect fn main() -> Unit = {
   io.close(s)!
 }
 ```
+
+<a id="tcp-server"></a>
 
 ## TCP 服务端
 
@@ -143,6 +149,8 @@ effect fn main() -> Unit = {
 }
 ```
 
+<a id="names-and-addresses"></a>
+
 ## 名称与地址
 
 地址是 `type IpAddr = V4(Int, Int, Int, Int) | V6(List[Int])` 类型的值：四个八位组，或八个 16 位组。
@@ -187,6 +195,8 @@ loopback
 ```
 
 
+
+<a id="signature-index-16-functions"></a>
 
 ## 签名索引（16 个函数）
 
@@ -255,6 +265,8 @@ net.ip_to_string(ip: IpAddr) -> String
 // @since unreleased
 net.is_loopback(ip: IpAddr) -> Bool
 ```
+
+<a id="type-index-2-types"></a>
 
 ## 类型索引（2 个类型）
 

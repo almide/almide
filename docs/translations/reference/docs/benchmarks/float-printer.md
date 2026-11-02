@@ -1,0 +1,306 @@
+<a id="the-float-printer-measured-then-chosen-1985"></a>
+
+# The float printer: measured, then chosen (#1985)
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](float-printer.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](float-printer.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](float-printer.zh-CN.md)
+
+> Non-normative, source-pinned historical reader snapshot; the original is authoritative. Not automatically synchronized. Measurements, implementation status, exactness evidence and claims have not been independently rerun or validated here. Commands are reproduced as historical documentation, not executed instructions.
+> [Original source / 原文](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/benchmarks/float-printer.md)
+
+> Source caveat: the initial table-free choice and “smallest exact printer” heading describe the first measurement, not a lasting global optimum. The two dated addenda subsequently replace the retained Dragon4 fixed path and the runtime-derived table; all stages and their different baselines are preserved. Early and later sizes, allocation ledgers, timing samples, scratch costs, and rejected compact-table encodings must not be conflated. Sample equality is not an exhaustive proof over all floats: the source itself records a table corruption missed by the float sweep but caught by the dedicated table test. Broad comparisons with other printers and claims that outputs cannot change remain source claims within their stated reasoning and conditions; no current universal guarantee is added. The source initially describes fixed notation while later examples use exponent notation; that wording is preserved without reinterpretation. Removed prototypes and historical commands are not asserted to work now.
+
+`println("${1.5}")` cost 7,783 bytes of wasm against a 1,337-byte Hello, world — 6.4 KB
+for `float.to_string` alone, the largest fixed cost any Almide program could pay. The
+printer was a Dragon4 transcription: exact big-integer arithmetic, five 128-limb bignums,
+a per-digit loop of bignum multiply/compare/subtract. Its output — Rust's
+`format!("{}", x)` (shortest round-trip, fixed notation) plus the `.0` integer suffix — is a
+cross-target contract (C-023) and could not change. Issue #1985 asked for a measurement,
+not a literature answer: build the alternatives in Almide, measure the emitted bytes on
+the structural leg, and either ship the smaller exact printer or record Dragon4 as the
+floor.
+
+This is that measurement. Date: 2026-09-08, develop at `8517914d8` (almide 0.62.0),
+structural leg, `almide build --target wasm` (the shipped WASI form, no wasm-opt).
+
+<a id="result"></a>
+
+## Result
+
+| variant | exact? (mismatches / tested) | wasm bytes, `println("${1.5}")` | Δ vs Dragon4 | ns/conversion native | ns/conversion wasm | notes |
+|---|---|---:|---:|---:|---:|---|
+| Dragon4 (0.62.0, the incumbent) | 0 / 20M (its own validation) | **7,783** | — | 295 (`format!`) | 13,715 | exact bignums, no table; 47 functions |
+| **Schubfach, g(k) derived at run time** (shipped) | **0 / 1,032,489** vs native `format!` | **5,508** | **−2,275 (−29 %)** | 295 (`format!`) | **1,044** | no table at all: g(k) from one mul-by-small and one div-by-small bignum loop |
+| Schubfach, compact table (78 × 189-bit, every 8th k, rescaled) | 0 / 52,489 | 8,543 ¹ | +760 | — | 448 | exact for all 617 k (checked offline); 234 `Int` literals |
+| Schubfach, full table (617 × 126-bit) | 0 / 37,489 | 24,372 ¹ | +16,589 | — | 583 | 1,234 `Int` literals at ~17 B each; the table is rebuilt on every call |
+| Grisu3 + exact fallback | not built | ≥ fallback alone | > 0 | — | — | any exact fallback is a whole printer; Grisu3 can only add bytes on top of it (see below) |
+
+¹ measured as `println(sf(1.5))` with the printer inlined in the probe program (the
+shipped row is the real `${1.5}` with the printer in the stdlib; the inlined form of the
+shipped variant measures 4,921, so the inlined table rows are ~600 B optimistic).
+
+Exactness columns are byte-equality of the printed string. "vs native `format!`" is the
+strongest oracle available: the same seeded value stream is printed by the prototype on
+the wasm leg and by `float.to_string` on the native leg (which *is* Rust's `format!`),
+and the two 1,032,489-line outputs are `cmp`-identical. The stream is 1,000,000 seeded
+xorshift64 bit patterns over the whole 64-bit space (every exponent, including specials
+and both signs) plus a 32,489-value boundary set: every biased exponent with significands
+{0, 1, 2, 3, mid, max−1, max}, every 10^k reachable by repeated ×10 / ÷10 with both bit
+neighbours, 0.1+0.2, 1/3, 2^53+1 — each with the sign bit clear and set. The shipped
+variant was additionally run against the Dragon4 port on the wasm leg over the same
+stream: 0 mismatches.
+
+<a id="targeted-sets-beyond-uniform-bit-patterns"></a>
+
+### Targeted sets (beyond uniform bit patterns)
+
+The same wired `float.to_string` on the wasm leg against native `format!`, one program per
+set run on both legs and `cmp`-compared (`research/spike/float-printer/gen_evidence.py`;
+where a parser is involved the line also carries the parsed bits, so a parser divergence
+would be told apart from a printer one — none occurred). The 0.62.0 release binary (the
+Dragon4 printer) was run on the same programs as a second reference.
+
+| set | tested | mismatches vs native `format!` | vs 0.62.0 Dragon4 |
+|---|---:|---:|---|
+| 1. exponent field 1000..1060 (~1e-7..1e10), random sign and significand | 1,000,000 | **0** | identical on the 519,151 values it printed before running out of memory (3,744 B of scratch per call) |
+| 2. decimal round-trips: 1..17 significant digits as `d.dddd`, `dd.dd`, `-d.ddd`, `d.ddde±N`, `ddde±N` (N in −330..309), parsed with `float.parse`, then printed | 500,000 | **0** | identical |
+| 3. every integer 0..100000; 10^k for k in −320..308; 2^k for k in −1074..1023; the 201 doubles around 1.0, 1e15, 1e16, 1e17, 1e22, 1e23; the halfway decimals between doubles at those anchors; the subnormal minimum, the max finite; 0.1/0.2/0.3/0.7/1.1/2.675/5e-324/9007199254740993 | 103,969 | **0** | identical |
+| 4. `float.to_fixed` (the retained Dragon4 fixed path), random bit patterns × precision 0..10 | 100,000 | **0** | identical, byte for byte |
+
+Set 2 is run under `wasmtime` directly: the wasm-leg `float.parse` takes ~0.3 ms per
+string and the `almide run` host of that release interrupted at 30 s (it no longer does:
+#2615). No rule change came out of these
+sets; the two Java-vs-Rust departures below were both found by the boundary set. The
+out-of-memory in set 1's Dragon4 reference run is the old printer's 3,744 B scratch block
+per call under the 0.62.0 release; the shipped printer completes a 10,000,000-call probe
+(208 B of scratch per call) on the same host.
+
+Timing is `almide bench` (median of 3 after a warm-up) of 1,000,000 conversions of the
+seeded stream — uniformly random bit patterns, so mostly huge and tiny magnitudes, the
+expensive end for every printer. Native has no Almide printer: `float.to_string` is
+`format!` there, so the native column is the same 295 ns for every row. The 1,044 ns is
+the printer inlined in the bench program; wired into the stdlib (`float.to_string` on the
+wasm leg) the same 1M-conversion bench measures 1,126 ns.
+
+Hello, world is 1,337 B; the shipped printer's cost above it is 4,171 B, of which ~330 B
+is the string renderer Dragon4 also carried (`__dg_render`), ~1,000 B is the run-time
+g(k) derivation, and the rest is the Schubfach core (mulhi, rop, candidate selection) and
+the runtime helpers the printer pulls in (list/string allocation, `int.to_string` glue).
+
+<a id="why-the-table-free-schubfach-is-the-smallest-exact-printer"></a>
+
+## Why the table-free Schubfach is the smallest exact printer
+
+Every shortest-round-trip algorithm is a trade between code and a power-of-ten table:
+
+- **Dragon4**: no table, large code (the bignum digit loop is the bulk).
+- **Ryū / Schubfach**: small code, a 617-entry × 128-bit table (9.9 KB raw). On this leg a
+  literal `List[Int]` costs ~17 B per element and a string literal 1 B per byte, so the
+  full table is 12–21 KB however it is encoded — measured at 24,372 B all in. The issue's
+  prediction ("a 10 KB table is worse than 6.4 KB of code") holds.
+- **Compact table**: keeping every 8th entry with enough guard bits (189) that the
+  rescale by 10^0..10^7 reproduces every one of the 617 exact entries (verified offline)
+  cuts the data to 1.9 KB raw — 4 KB as literals — and still lands 760 B *above* Dragon4.
+- **Table derived at run time**: g(k) = ⌊10^k · 2^-r⌋ + 1 is itself a small exact
+  computation. For k ≥ 0, P = 10^k by chunked ×10^9 over u32 limbs and g − 1 is P's top 126
+  bits; for k < 0, P = 2^N divided by 10^-k by chunked ÷10^9 — `⌊⌊x/a⌋/b⌋ = ⌊x/(ab)⌋` on
+  integers, so the chunked division is exact — leaves exactly the 126 bits of g − 1. That is
+  one multiply-by-small loop, one divide-by-small loop, a set-power-of-two and a bit
+  extractor: ~1 KB of code in place of 10 KB of data, and 13× faster than Dragon4 because
+  the digit loop is gone (three 64×64 products and a couple of comparisons per value).
+- **Grisu3** needs a fallback for the ~0.5 % of inputs it cannot certify. The fallback
+  must be a complete exact printer — Dragon4, or this Schubfach — so Grisu3 is strictly
+  additive in bytes and can only be a speed play. It was not built: the size question it
+  would answer is already decided by the row above it, and at 1 µs/conversion on wasm the
+  speed question is not open.
+
+Two departures from Giulietti's Java were needed for byte-equality with `format!`, and
+both were found by the boundary set, not by reading:
+
+1. **Ties round the magnitude up, not to even.** When the two closest candidates are
+   equally close (1669760939663944.25 — both ...4.2 and ...4.3 round-trip), Rust's Dragon4
+   (`2R >= S`) picks ...4.3; Java picks the even ...4.2.
+2. **The shorter multiple-of-10 candidate is tried from s ≥ 10, not s ≥ 100.** Java prints
+   at least two digits, so it never needs a one-digit result. `format!` prints `1e-322`
+   for 20 · 2^-1074 (s = 98, and 100 lies in the rounding interval). Likewise Java's
+   `C_TINY` branch (which prints MIN_VALUE as `4.9E-324`) is absent: `format!` prints
+   `5e-324`.
+
+<a id="what-shipped"></a>
+
+## What shipped
+
+- `stdlib/float_to_string.almd`: `float.to_string` is Schubfach with the run-time g(k);
+  `float.to_fixed` keeps its Dragon4 fixed-mode digit loop (a different algorithm — exactly
+  N fractional digits, ties-to-even), and neither reaches the other's code, so a program
+  pays only for the printer it calls. The dead shortest-mode Dragon4 functions were removed.
+- `spec/stdlib/float_to_string_shortest_test.almd`: the corner cases above, pinned by bit
+  pattern.
+- `crates/almide-wasm/tests/golden/size-baseline*.txt`: re-ratified — 113 of the corpus
+  fixtures moved, 111 down, total 1,823,014 → 1,569,846 B (−253,168 B, −13.9 %; the
+  shipped-form ledger −252,348 B). The two that grew (`edge_float_formatting` +470 B,
+  `float_concrete` +478 B) call both `to_string` and `to_fixed`, so they now carry two
+  printers where the old pair shared one bignum core. `alloc-baseline.txt` −281,632 B in
+  total (the 3,744-byte Dragon4 scratch block became 208 bytes); 38 rows moved up by
+  64–80 B where the smaller block shifts the allocator's peak.
+- `research/spike/float-printer/`: the differential harness (`gen_harness.py` +
+  `harness_common.almd`: the seeded stream, the boundary set, the wasm-vs-native dump/diff
+  and the `bench` programs), the exactness sets and the size probes. The prototypes the
+  measurement compared (`schubfach.almd`, the shipped core as a standalone program;
+  `schubfach_rt.almd` / `schubfach_rt2.almd`, the shift-subtract versions; the two table
+  variants and `gen_table_variants.py`, which derived them) were written over `prim.*` and
+  were removed when `prim` stopped being user surface (#3025) — recover them with
+  `git log --diff-filter=D -- research/spike/float-printer/`; they compile only as stdlib
+  sources now. To re-run the 1M check against the shipped printer:
+  `python3 gen_harness.py /dev/null float.to_string 12345 1000000 out`, then
+  `almide run out/dump_proto.almd --target wasm` and `almide run out/dump_native.almd`
+  and `cmp` the two outputs.
+
+Gates run on the change: `almide test spec/stdlib/` (161 files) and `spec/lang/` (211),
+the 1M cross-target diff of the wired `float.to_string`, every `spec/wasm_cross` fixture
+mentioning a float on both legs (105 fixtures, identical stdout), the size ratchet and
+alloc ledger re-ratification.
+
+<a id="recommendation"></a>
+
+## Recommendation
+
+Ship the table-free Schubfach (done in this PR) and treat 5.5 KB as the new floor for a
+program that prints one float, with ~4.2 KB of it being the printer. The remaining lever
+is not the algorithm: it is reachability. `${x}` on a float pulls the whole shortest
+round-trip path; a program that only prints integer-valued floats, or a fixed precision,
+could reach a far smaller formatter — the #1712/#1962 split-by-need discipline applied to
+a stdlib family, which is issue #1985's option 3 and is left open.
+
+<a id="addendum-2099-2026-09-24-to_fixed-on-exact-scaling-one-printer-for-both-forms"></a>
+
+## Addendum (#2099, 2026-09-24): to_fixed on exact scaling, one printer for both forms
+
+Re-measured on develop at `c653598ee` (after #2368 removed the duplicate string
+constants): `println("${1.25}")` was 5,405 B against 1,970 B for the Int twin, so the
+shortest printer's share was 3,435 B. `println(float.to_fixed(1.25, 2))` was 6,650 B:
+the retained Dragon4 fixed path cost 4,680 B, more than the shortest printer, and it is
+the one `spectralnorm` (the size ladder's T2 rung) actually calls. Changed, output
+unchanged:
+
+- `__sf_scale(x, q, k)` computes floor(x · 2^q · 10^-k) EXACTLY on the bignum — x
+  shifted or multiplied by 10^-k, then divided by 10^k in 10^9 chunks or shifted
+  down — and reads the sticky bit off the remainders. It is ~250 B.
+- `float.to_fixed(x, nd)` calls it once, for M = floor(2 · v · 10^nd): N = M >> 1, the
+  dropped bit is the half, round up when the sticky bit or N's last bit is set (half to
+  even), then N's digits by repeated division by 10^9. The Dragon4 fixed-mode digit
+  loop — one bignum compare-subtract per digit, five bignums, the `math.log10`
+  estimate and its fixups — is gone.
+- `float.to_string_compound` (the `${x}` form) is the same printer with a `dot0` flag,
+  not a separate module that re-rendered `to_string`'s result to drop the `.0`; a zero
+  renders through the same writer instead of four string literals, so the printer ships
+  no literal beyond `NaN` / `inf` / `-inf` (a literal shifts the static pool, and with it
+  every alloc-ledger row of every program that prints a float).
+- `__sf_wd` writes digits, zeros and the point straight into the result string in one
+  backwards pass — no digit buffer, no copy, no three-way renderer. A spent digit
+  source writes its zeros without a divide (a huge or tiny value is mostly zeros).
+- `float.to_string` keeps the Schubfach core with the run-time g(k) above. Computing
+  its three numbers with `__sf_scale` too (one exact bignum pipeline each) was tried:
+  it saves ~400 B more but makes `float.to_string` 3× slower on wasm (0.95 → 2.9 µs
+  per value), and no mainstream printer trades a 3× shortest-print slowdown for that.
+  The shortest printer's size is the compact-table follow-up's job.
+
+Measured (`almide build --target wasm`, develop `547b0fdaf` → this change):
+
+| program | before | after | Δ |
+|---|---:|---:|---:|
+| `println(float.to_string(1.25))` | 4,886 | 4,864 | −22 |
+| `println("${1.25}")` | 5,405 | 5,068 | −337 (−6.2 %) |
+| `println(float.to_fixed(1.25, 2))` | 6,650 | 4,529 | −2,121 (−31.9 %) |
+| `spectralnorm` (size ladder T2) | 12,121 | 10,000 | −2,121 |
+| `spec/wasm_cross/edge_float_formatting.almd` (both printers) | 16,700 | 13,915 | −2,785 |
+| `spec/wasm_cross/float_to_fixed.almd` | 7,200 | 5,079 | −2,121 |
+| `spec/wasm_cross/float_shortest_roundtrip.almd` | 5,096 | 5,074 | −22 |
+
+`size-baseline.txt`: 146 rows moved, all down, −31,748 B in total (the shipped-form
+ledger −31,916 B); the size ladder −12,904 B over its float-printing rungs.
+
+Run time on the wasm leg, `almide bench --target wasm`, 200,000 conversions of the
+seeded xorshift64 stream (mostly huge and tiny magnitudes, the expensive end), medians
+of 9 runs interleaved with develop on a loaded machine: `float.to_string` 163–165 ms on
+develop against 159–162 ms here (unchanged within noise); `float.to_fixed(x, 3)`
+5,859 ms → 113 ms (29 → 0.56 µs: the per-digit bignum loop is gone). No perf row prints
+more than a handful of floats.
+
+Exactness evidence for the change: `tests/float_to_string_cross_target_test.rs` prints
+all three forms of every biased exponent × 7 significands × both signs (28,672 values),
+the history's decimal specials, `to_fixed` at 1074 / 1100 / 1200 / 4096 digits, and
+100,000 xorshift64 bit patterns (1,000,000 locally) on the wasm leg and compares
+byte-for-byte with Rust `format!`; it fails on a deliberately broken guard (`s >= 100`,
+the Java rule: first mismatch at line 100,521) and passes on this printer. The exponent
+sweep is what found the two bugs the exact-scaling rewrite had (a whole value's trailing
+zeros landing on the left; the 9-digit chunks of a fixed value written in the wrong
+order), not the random stream.
+
+<a id="addendum-2099-2026-09-24-floatto_string-reads-gj-from-a-compact-table"></a>
+
+## Addendum (#2099, 2026-09-24): `float.to_string` reads g(j) from a compact table
+
+The run-time g(j) derivation (a big-integer power of ten per value) was most of
+`float.to_string`'s time. It is now read from a compact table. The shape is the one
+every wasm-oriented correct printer uses: Swift's
+`FloatingPointToString.swift`, Wado's `fpfmt.wado`, and Ryu's / Zig's small tables.
+
+- **The table.** A 127-bit C(b) = floor(5^b · 2^-s) is stored every 27 powers
+  (b = −297 … 324, 24 entries). g(j) = floor(C(b) · 5^(j−b) / 2^u) + d(j) + 1:
+  - one 127×63-bit product, from the existing 64×64 high-product helper;
+  - the exact 5^f computed by 26 multiplies at most;
+  - one stored correction bit d(j) ∈ {0, 1} per j. It covers C's truncation; one bit is
+    enough because C carries one bit more than the 126 it keeps.
+- **Why the outputs cannot change.** The result is the paper's exact g(j) for all 617 j
+  the printer can ask for, so the candidate selection sees bit-identical values.
+- **Where the table lives.** Each table byte carries 7 bits, so the 552-byte table is an
+  ordinary string literal: it lives in the data segment, not as i64 constants in code.
+  The compact table tried in the first round of this document was 234 `Int` literals
+  and cost +760 B.
+- **What is gone.** `to_string` no longer allocates a scratch block. A program that
+  prints floats only through `to_string` / `${x}` no longer links the big-integer
+  helpers.
+
+Measured against develop `547b0fdaf` (`almide build --target wasm`):
+
+| program | develop | this | Δ |
+|---|---:|---:|---:|
+| `println(float.to_string(1.25))` | 4,886 | 4,596 | −290 |
+| `println("${1.25}")` | 5,405 | 4,800 | −605 (−11.2 %) |
+| `println(float.to_fixed(1.25, 2))` | 6,650 | 4,529 | −2,121 |
+| `spec/wasm_cross/edge_float_formatting.almd` (both printers) | 16,700 | 14,448 | −2,252 |
+| `spec/wasm_cross/float_shortest_roundtrip.almd` | 5,096 | 4,806 | −290 |
+
+A program that calls both printers carries the table and the big-integer helpers
+`to_fixed` needs. Against the step before this one, those programs grow by ~540 B
+(2 fixtures); every other float-printing fixture shrinks.
+
+The alloc watermark ledger counts the static pool, so its rows rise by the table,
+~0.5 KB per program that prints a float. Allocation itself falls: the count ledger
+shows every moved row down, and one `alloc_list` less per `to_string` call.
+
+Wasm run time, `almide bench --target wasm`, 200,000 conversions of the seeded
+xorshift64 stream, interleaved with a develop build on a loaded machine (load ≈ 18):
+
+| build | median | min |
+|---|---:|---:|
+| develop | 246–349 ms | 218–220 ms |
+| this change | 72–102 ms | 66–83 ms |
+
+That is ~3× on the same machine and moment. The quiet-machine develop figure is
+145 ms (0.73 µs per value), so this change is about 0.25 µs per value. Most of what
+remains is writing the ~300-character strings those huge and tiny values print.
+Writing eight zeros per store was measured ~10–15 % faster but costs 88 B in every
+float-printing program, so it was left out.
+
+Exactness evidence:
+
+- `tests/float_gtable_exact_test.rs` decodes the table from the stdlib source and
+  replays the printer's own 64-bit word arithmetic for every j. It checks each g(j)
+  against the definition with big integers.
+  - Changing one table byte (entry 12, byte 3) fails it for j = 27 … 53.
+  - The float sweep does NOT catch that change: the corrupted bits sit ~2^-100 below
+    g's top bit, and no sampled rounding decision reached them. That is why the table
+    has its own test.
+- The float sweep (all biased exponents, the specials, 100,000 patterns; 1,000,000
+  locally) passes. With the correction bits dropped it fails at line 100,479.

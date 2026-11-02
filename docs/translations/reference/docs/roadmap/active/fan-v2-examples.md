@@ -11,6 +11,8 @@
 > This index preserves design examples from the introduction of fan v2 and the plan to transcribe them into fixtures.
 > The `.almd` files in `fan-v2-examples/` are historical sketches, not the authority for current grammar or diagnostics. Do not copy old `any` / `race` examples into current programs.
 
+<a id="1-現在の参照先"></a>
+
 ## 1. Current references
 
 - Grammar and semantics: [SPEC §13](../../../../../SPEC.md#13-concurrency-fan).
@@ -20,6 +22,8 @@
 - `fan.timeout(duration.ms(n)) { body }` exists as a body form. The Stage 4/tombstone items below describe the original implementation order, not the current list of unimplemented features.
 
 Code is not recopied here; executable fixtures are authoritative.
+
+<a id="2-歴史的な設計例の索引"></a>
 
 ## 2. Index of historical design examples
 
@@ -32,6 +36,8 @@ Code is not recopied here; executable fixtures are authoritative.
 | [fan_all_unchanged.almd](../../../../../roadmap/active/fan-v2-examples/fan_all_unchanged.almd) | Control for the unchanged surface at introduction; surviving reference points for C-004/C-199/C-200 | Existing surface at introduction |
 | [diagnostics.almd](../../../../../roadmap/active/fan-v2-examples/diagnostics.almd) | 6 examples that **correctly do not compile**, with expected diagnostics (pure constraint, ticks label, thunk tombstone, E008, etc.) | Wave 1–Stage 3 |
 | [migration.almd](../../../../../roadmap/active/fan-v2-examples/migration.almd) | v1 → v2 side-by-side translations (any/settle/race/timeout); note on removal of the funcref wall | Wave 1–Stage 4 |
+
+<a id="3-当初の-fixture-転写計画現在の網羅性一覧ではない"></a>
 
 ## 3. Original fixture-transcription plan (not a current coverage inventory)
 

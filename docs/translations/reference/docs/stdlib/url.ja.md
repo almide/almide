@@ -89,6 +89,8 @@ q=a%20b&lang=ja
 
 
 
+<a id="signature-index-9-functions"></a>
+
 ## 固定スナップショットの API 索引（9関数）
 
 ```
@@ -128,6 +130,8 @@ url.parse_query(query: String) -> Result[List[(String, String)], String]
 // @since unreleased
 url.resolve(base: Url, ref: String) -> Result[Url, String]
 ```
+
+<a id="type-index-1-types"></a>
 
 ## 固定スナップショットの型索引（1型）
 

@@ -1,3 +1,5 @@
+<a id="test-surface-25--the-road-to-reference-compiler-scale"></a>
+
 # テスト面積 25× — リファレンスコンパイラ規模への道
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](test-surface-25x.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](test-surface-25x.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](test-surface-25x.zh-CN.md)
@@ -9,6 +11,8 @@
 > 原文の説明メタデータ：コミット済みのテスト面積を 25 倍に拡大し、リファレンスコンパイラ規模を目指す。
 
 2026-08-17 に設定。参照スイートの採掘調査（#1508）が差を測定した後の計画である。rust はテストファイル 26,515、swift は 13,051、lean4 は 4,461 を持ち、こちらはコミット済み .almd プログラム約 1,000 と `#[test]` 関数 2,198。目標は**当日時点のコミット済み面積の 25×**。件数ではなく正しさを得られる順に増やす。
+
+<a id="baseline-2026-08-17"></a>
 
 ## ベースライン（2026-08-17）
 
@@ -23,6 +27,8 @@
 
 計測器：`bash scripts/test-surface-meter.sh`（`--update` で日付付きの推移行を追加）。
 
+<a id="what-counts-toward-25-in-priority-order"></a>
+
 ## 25× に数えるもの（優先順）
 
 1. **否定／診断テスト** — rust に対して最も薄い層（99 組に対し、向こうは ui テスト約 15k）。各 E-code に fixture ファミリーが必要：ヒントの各変種、各 fix-it 判定、各 span 形状。最初の目標は、他を倍増させるより先にこの層を 10× にすること。パーサー基盤のエラー（#1471、#1509、#1510）はここに入る。
@@ -31,10 +37,14 @@
 4. **型×操作マトリクス** — 入れ子コンテナのマトリクス（nested_*.almd）を一般化する。（構築 / 添字 / 変更 / 反復 / 等値 / 表示 / drop）×（List/Map/Option/Result/tuple/variant の入れ子）の格子を生成し、CLEAN セルをコミットし、wall を固定する。ジェネレーターはリポジトリ内に置き、wall が卒業したら格子を再成長させる。
 5. **未コミットの層は既に約 ∞**：xtarget-fuzz は 1 回ごとに数千プログラムを生成し、差分検査する。単純なコミット件数は実効面積を過小評価する。コミット済みコーパスは回帰固定とレビュー用、fuzzer は発見用。両方を拡大するが、25× の数値に含むのは前者だけ。
 
+<a id="non-goals"></a>
+
 ## 目標に含めないもの
 
 - 失敗から一度も蒸留されていない機械生成 fixture の大量コミット（スイート実行時間のコストがあり、レビュー価値はゼロ）。
 - Almide にない機能の参照テストの移植（#1508 で追跡し、その機能とともに導入する）。
+
+<a id="trend"></a>
 
 ## 推移
 

@@ -1,3 +1,5 @@
+<a id="scoped--宣言できるリクレイム境界"></a>
+
 # scoped——可声明的回收边界
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](scoped.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](scoped.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](scoped.zh-CN.md)
@@ -27,6 +29,8 @@ fn sum_to(n: Int) -> Int = scoped { total(build(n, Nil), 0) }
 
 测试：`spec/wasm_cross/scoped_region_value.almd`（C-362）、`spec/wasm_cross/scoped_worker_in_and_out.almd`（C-363）、`spec/lang/scoped_test.almd`、`tests/scoped_region_test.rs`、`tests/diagnostics/e08{6,7,8}-scope-*`（C-364）。
 
+<a id="構文--scoped-は文脈キーワード"></a>
+
 ## 语法——`scoped` 是上下文关键字
 
 ```ebnf
@@ -43,6 +47,8 @@ fn_decl      := [visibility] ["scoped"] ["effect"] "fn" name …
 
 `almide fmt` 按 `[visibility] scoped [effect] fn` 顺序往返。
 
+<a id="what-a-scoped-block-promises"></a>
+
 ## scoped 块承诺什么
 
 **`scoped { body }` 的值就是 `body` 的值**，删除 `scoped` 不改变 stdout、stderr 或退出码（C-362）。修饰符声明的是**内存回收边界**：为块分配的内存至迟在该边界回收，指向区域的引用不跨越边界。
@@ -56,6 +62,8 @@ fn_decl      := [visibility] ["scoped"] ["effect"] "fn" name …
 
 **不作的主张**：窗口内峰值内存上界、终止性、边界前分配量上界。这些需要其他契约和基准测试 oracle。
 
+<a id="what-a-scoped-fn-promises"></a>
+
 ## scoped fn 承诺什么
 
 `scoped fn` **在区域外是普通函数**。无论直接调用还是从 `scoped { … }` 内调用，答案都相同，且两个目标一致（C-363）。修饰符只要求**检查函数体**，也就是将“该函数可在区域内运行”的承诺变为**义务**，而不是靠发现。
@@ -65,6 +73,8 @@ stage 1 接受的片段：
 - **值**：标量（`Int` / `Float` / `Bool` / `Unit`）、同文件声明的非泛型变体类型（每个 case 是 unit 或位置字段，字段为标量或满足相同条件的变体）、只有标量字段的记录，以及它们的 tuple 和 `Option`。
 - **worker**：普通 worker（包括树遍历形状）及**直接尾递归** worker。
 - **可调用及使用的形式**：其他 `scoped fn`、构造器、`int` / `float` / `math` / `bool` 的标量 stdlib 调用、标量运算符、`if` / `match` / 块 / 局部绑定 / 范围 `for` / `while`。
+
+<a id="what-is-refused-and-why"></a>
 
 ## 拒绝什么，为什么
 
@@ -79,6 +89,8 @@ stage 1 接受的片段：
 E086 有 `= allocated at <file:line:col>` 与 `= scope ends at <file:line:col>` 两行；E087 指出“可能保留什么”和“哪个声明提出了要求”；E088 指出“调用后还剩什么”。
 
 树遍历形状（一个分支中有两次及以上自身调用）无法改写为累加器，因此**作为普通 worker 接受**。E088 捕获的是可通过累加器化修复的单一非尾递归，以及往返中保留激活记录的相互递归。
+
+<a id="stage-1-で未了なこと"></a>
 
 ## stage 1 尚未完成的内容
 

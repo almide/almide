@@ -1,3 +1,5 @@
+<a id="design-philosophy"></a>
+
 # 設計思想
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](DESIGN.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](DESIGN.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](DESIGN.zh-CN.md)
@@ -7,6 +9,8 @@
 > 原文：[docs/design/DESIGN.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/design/DESIGN.md)（固定コミット `35297a612fb29e3f78f6587aba253aa91d51f466`）。読者向けの非規範的なスナップショット訳であり、自動同期されない。原文の時点・適用範囲・主張を維持したもので、翻訳時に独立した実測や実装検証は行っていない。 原文の MSR 規則・初回成功を唯一の競争軸とする記述は、同じ固定版の CLAUDE.md と demo/make-verify/README.md にある MSR の天井効果・指標置換の説明と整合しない歴史的記述として残す。現行の実測結果や適用済みの採用規則と解釈しない。他言語比較や「排除」「常に」などの効果も原文の設計主張であり、本訳が検証した保証ではない。
 
 Almide は**思考トークンの最小化**を目指して最適化する。LLM が構文、意味論、修復戦略、欠けた抽象化について分岐を考える必要が少ないほど、コード生成は速く、安く、信頼性が高くなる。これは生成、補完、修復中の分岐を減らしつつ、AI が不足した抽象化をその場しのぎで補わずに済む適切な道具を提供することを意味する。
+
+<a id="surface-ambiguity-removed"></a>
 
 ## 表層の曖昧さの除去
 
@@ -24,6 +28,8 @@ Almide は**思考トークンの最小化**を目指して最適化する。LLM
 | 演算子の意味 | 独自演算子構文、暗黙変換 | 固定の演算子語彙。宣言された protocol 適合により requirement method へ演算子を dispatch できる。暗黙変換なし | 解決はオペランド型と protocol 要件に従う |
 | 型変換 | 暗黙の拡張、型強制 | 明示のみ | 隠れた型変更がない |
 
+<a id="semantic-ambiguity-removed"></a>
+
 ## 意味上の曖昧さの除去
 
 | 曖昧さの源 | Almide の対応 | LLM にとっての意味 |
@@ -37,6 +43,8 @@ Almide は**思考トークンの最小化**を目指して最適化する。LLM
 | 宣言順序 | 関数は互いを自由に参照できる | 前方宣言の混乱なし |
 | import の形式 | `import module` または `import self as alias`。目的ごとに一形式。alias は self-import とサブモジュールのみ。core モジュールは自動 import | 二つの import 形式、`from` も `*` もなし |
 
+<a id="the-effect-system-as-generation-space-reducer"></a>
+
 ## 生成空間を減らす `effect` システム
 
 `effect fn` の第一の目的は安全機能ではなく、**コード生成の探索空間を減らすこと**である。
@@ -47,6 +55,8 @@ Almide は**思考トークンの最小化**を目指して最適化する。LLM
 - 関数本体を読まなくても、シグネチャだけで各地点で何を呼べるか LLM に伝わる
 
 つまり LLM は現在の関数のシグネチャと import だけを見てコードを生成でき、グローバル解析は不要になる。
+
+<a id="concurrency-fan--boring-on-purpose"></a>
 
 ## 並行処理：`fan` — 意図的に退屈にする
 
@@ -66,6 +76,8 @@ Almide は `async`/`await` を露出せず、明示的な fork/join を使う。
 
 通常の `fan` は sibling をキャンセルしない。budget/deadline 形式には別の協調的打ち切り規則がある。[SPEC §13](../../../../SPEC.md#13-concurrency-fan) を参照。
 
+<a id="ufcs-why-two-forms-is-acceptable"></a>
+
 ## UFCS：二つの形式が許容できる理由
 
 UFCS 解決が `f` を選んだとき、`x.f(y)` は `x` を第一引数として渡す。これは構文解析時の無条件な書き換えではない。
@@ -76,12 +88,16 @@ UFCS 解決が `f` を選んだとき、`x.f(y)` は `x` を第一引数とし�
 - checker がレシーバ型とスコープを使い、convention method、ローカル/import 済み関数、組み込みモジュールのメソッドを解決する（`calls_ufcs.rs`）
 - 将来の formatter が正準形式へ正規化し、スタイルのずれを排除する
 
+<a id="iteration-forin--while"></a>
+
 ## 反復：`for...in` + `while`
 
 二つのループ構文にはそれぞれ明確な目的がある：
 
 - **`for x in xs { ... }`** — コレクションを反復する。リストや map のキーに自然な選択。effect に対応する（ループ本体内で I/O を行ってよい）。
 - **`while cond { ... }`** — 条件ベースのループ。条件が真の間実行する。単純なループ条件がある場合の素直な選択。
+
+<a id="compiler-diagnostics-single-likely-fix"></a>
 
 ## コンパイラ診断：有力な修正を一つにする
 
@@ -100,6 +116,8 @@ Prefix '!x' is not boolean negation in Almide
   Hint: Use the last expression as the return value, or 'guard ... else' for early exit.
 ```
 
+<a id="stdlib-naming-conventions"></a>
+
 ## 標準ライブラリの命名規則
 
 標準ライブラリは LLM の推測を減らすため、厳密な命名規則に従う。
@@ -112,6 +130,8 @@ Prefix '!x' is not boolean negation in Almide
 | 同義名なし | 一操作に一名、alias なし | `length`/`size`/`count` ではなく `len` |
 | 対称な対 | 逆操作に対応する名前 | `read_text`/`write_text`、`split`/`join`、`to_string`/`to_int` |
 | 名前の意味のずれなし | モジュール間で意味が一致する場合だけ同じ操作名を再利用 | `string.len` と `list.len` は両方「要素を数える」であり、同じ名前に異なる操作を隠さない |
+
+<a id="what-almide-sacrifices"></a>
 
 ## Almide が犠牲にするもの
 
@@ -130,6 +150,8 @@ LLM 生成の信頼性を高めるため、意図的に手放したトレード�
 
 これは未実装機能ではなく、**生成空間を絞る意図的な制約**である。目的は最小主義そのものではなく、各抽象化に一つの明確な道筋を確保することにある。
 
+<a id="the-msr-rule-how-features-are-added--rejected"></a>
+
 ## MSR 規則（機能を追加・拒否する方法）
 
 > **設計規則**：人間には美しくても LLM の罠になる構文は採用しない。
@@ -146,6 +168,8 @@ LLM 生成の信頼性を高めるため、意図的に手放したトレード�
 - 診断付き再試行では修復できないエラー群を排除する（天井効果）。
 
 `v0.14.5` 以降のリリースノートには **MSR delta 表**を含め、各リリースが自らの影響に責任を持つ。`docs/roadmap/active/` の新機能提案は、対処する失敗パターンと期待する MSR 変化を引用しなければならない。
+
+<a id="beauty-axis-vs-msr-axis"></a>
 
 ## 美しさの軸と MSR の軸
 

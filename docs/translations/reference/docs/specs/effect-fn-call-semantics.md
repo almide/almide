@@ -1,3 +1,5 @@
+<a id="effect-fn-call-semantics--呼び出し式の型"></a>
+
 # Effect Fn Call Semantics — the type of a call expression
 
 [![English](https://img.shields.io/badge/English-24292f?style=flat-square)](effect-fn-call-semantics.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](effect-fn-call-semantics.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](effect-fn-call-semantics.zh-CN.md)
@@ -8,9 +10,13 @@
 
 > Last updated: 2026-08-20
 
+<a id="規則"></a>
+
 ## Rule
 
 A call `foo()` to `effect fn foo() -> T` is a **value** of type `Result[T, String]` **in every context** (if declared `-> Result[T, E]`, it is that `Result[T, E]`, without double wrapping). The checker and codegen see the same type. Propagation uses explicit `!` only (ADR-0008); position-dependent implicit propagation (auto-`?`) was removed, mechanism and all, in 0.55. Current behavior as a whole is described by [result-option-effect.md §3](../../../../specs/result-option-effect.md) and [effect-system.md](../../../../specs/effect-system.md). This chapter focuses on call expressions.
+
+<a id="1-宣言型"></a>
 
 ## 1. Declaration type
 
@@ -25,6 +31,8 @@ foo : (Int) -> Result[String, String]
 ```
 
 However, **inside the function body**, a `String` can be written directly. The tail expression is implicitly wrapped in `ok(...)`.
+
+<a id="2-呼び出し型--どの文脈でも-result-値"></a>
 
 ## 2. Call type — a Result value in every context
 
@@ -42,6 +50,8 @@ test "the call is a Result value" {
   assert_eq(foo(), ok("x"))
 }
 ```
+
+<a id="3-暗黙伝搬は存在しないe041--e042"></a>
 
 ## 3. There is no implicit propagation (E041 / E042)
 
@@ -79,11 +89,15 @@ effect fn run(cmd: String) -> Unit =
 
 Regression tests: `spec/lang/explicit_propagation_test.almd`, `tests/diagnostics/e042-tail-call-in-branches/`.
 
+<a id="4--演算子"></a>
+
 ## 4. The `!` operator
 
 `!` extracts the success value; failure handling follows the **current channel**. In a fallible fn / lambda, it propagates through that function's own failure channel, not across a closure boundary to an outer function. In a test block it unwraps, and a failure fails the test.
 
 `none` from `Option[T]` propagates as `none` in an enclosing Option return channel. When conversion to a Result channel is permitted, it becomes `err("none")`. Do not interpret this as “always returns Err” while omitting error-type compatibility or pure/infallible contexts. For the complete context table and verification examples, see [Result / Option / Effect](../../../../specs/result-option-effect.md#2-演算子). Regression tests: `spec/lang/unwrap_operators_test.almd`, `spec/lang/fallible_lambda_test.almd`.
+
+<a id="5-test-ブロック"></a>
 
 ## 5. Test blocks
 
@@ -98,6 +112,8 @@ test "effect calls inside tests" {
   assert_eq(load_data(), ok("data"))       // Result 値としてそのまま比較もできる
 }
 ```
+
+<a id="6-lambda-内"></a>
 
 ## 6. Inside a lambda
 
@@ -122,9 +138,13 @@ test "effect calls in lambdas are Result values" {
 }
 ```
 
+<a id="経緯完了済み"></a>
+
 ## History (completed)
 
 The old approach, where the checker returned `T` and codegen lifted it to `Result`, caused `!` type errors and inconsistent cross-module calls. Checker lifting (unifying call types as Result throughout) was implemented through the ABI in v0.34.x (#840 / #841). The auto-`?` layered on top was removed by ADR-0008 (v0.55); ADR-0008 contains the design alternatives and their counterexamples.
+
+<a id="検証テスト"></a>
 
 ## Verification tests
 

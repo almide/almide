@@ -1,0 +1,144 @@
+<a id="almide-org--legacy-v1-trust-spine-report"></a>
+
+# Almide org — legacy v1 trust-spine report
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](org-trust-status.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](org-trust-status.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](org-trust-status.zh-CN.md)
+
+> Non-normative historical reader snapshot. The pinned original is authoritative; no automatic synchronization. No independent rerun of measurements, proof gates or current implementation checks. Quoted commands are not executed. [Source](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/project/org-trust-status.md)
+> This reader is not an input or output target of the original generator and is not automatically updated. Original truncated diagnostic strings, malformed rows and historical status differences are retained rather than repaired or remeasured. In particular the table and later notes/spot-checks differ on porta counts and several repository verdicts. Old no-Wasm host exclusions are historical, not current capability advice.
+
+> Original generator: `scripts/org-trust-status.sh`. Original org dir: `/Users/o6lvl4/workspace/github.com/almide`.
+
+> **Legacy evidence boundary.** The retained verdicts and July 2026 spot-checks
+> are historical observations, not the current organization's status. The script
+> combines a legacy MIR classifier with a fixed `BYTE_VERIFIED` set from
+> 2026-07-02; running it again does not re-test those labels. Today's Wasm route
+> is structural, and host-operation support has changed since the exclusions
+> below were written. Independent test-suite passes establish those assertions,
+> not arbitrary stdout/stderr/exit byte identity.
+>
+> A new org-wide verdict needs pinned compiler and sibling revisions, a current
+> classifier, and explicit behavioral comparisons. Preserve these original rows
+> rather than replacing them with unmeasured current verdicts.
+
+**14/28 repos fully render under the RESOLVED v1 pipeline** (every `src/` module lowers wall-free under canonical sibling + dep resolution — the same path `almide build --target wasm` runs; 26 modules still wall, 5 frontend-rejected). Secondary per-function classify sweep: 19/27 repos at wall=0, real walls = 21 / native-FFI = 46 (excluded), 2433 functions lowering.
+
+> **The headline is the resolved metric.** classify_corpus reads one file with NO cross-module
+> resolution, so its per-file numbers count artifacts (`lay.*`/`v.*` refs) the real pipeline
+> resolves — keep it for the per-function wall-reason lever, not the verdict.
+
+> **wall=0 metric = REAL lowering walls only.** A NATIVE-FFI wall is a function that
+> TRANSITIVELY calls an `@extern(rust/rs)` declaration (no wasm form) or a permanently-no-wasm
+> stdlib effect (`process.exec/exit/run`, `http.request`, `net.*`). Those can NEVER lower to
+> wasm — they need a native host — so they are EXCLUDED exactly like the `@extern(wasm)` WASI
+> imports already are. They are NOT lowering bugs. Only REAL walls drive the wall=0 goal.
+
+⚠ **wall=0 ≠ correct.** It means every function is inside the v1 lowering subset, NOT that the
+output is behaviorally correct. The authoritative ② gate is a **native==wasm byte-match** (run the repo's
+own vectors/tests on native AND `--target wasm`). `🟡 lowers, byte-match TODO` flags repos that
+reached wall=0 but have not yet been byte-verified — exactly where a silent miscompile can hide
+(e.g. the `var v=w` scalar-aliasing bug that faked an early sha1=0 until the RFC vectors caught it).
+
+<a id="per-repo-sorted-by-walls"></a>
+
+## Per-repo (sorted by walls)
+
+| repo | resolved (renders) | lowers | real walls | native-FFI | classify status | top wall reason |
+|------|--------------------|-------:|-----------:|-----------:|-----------------|-----------------|
+| `homullus` | 🔴 4/11 — frontend: type errors: [\"check() expects 3 argument(s) but got 2\" | 77 | 6 | 4 | 🔴 6 +1 xmod, 4 native-FFI excl | REAL heap-result X outside the executable subset cannot  |
+| `ceangal` | 🔴 8/10 — [render_program] Unsupported("parse error: error: Expect | 250 | 5 | 0 | 🔴 5 | REAL use of unbound var VarId(N) |
+| `toml` | 🔴 0/1 —   parse_octal: Unsupported("guard-else early return cann | 55 | 3 | 0 | 🔴 3 | REAL guard-else early return cannot be faithfully lowere |
+| `porta` | 🔴 10/18 —   dedup_env: Unsupported("while body with a heap-accumul | 165 | 2 | 24 | 🔴 2 +2 xmod, 24 native-FFI excl | NATIVE-FFI heap move-out from <other> (only a bound var, |
+| `almide-dojo` | 🔴 5/7 —   compile_and_test: Unsupported("heap-result X outside t | 84 | 2 | 1 | 🔴 2, 1 native-FFI excl | REAL heap-result X outside the executable subset cannot  |
+| `wasm-canvas` | 🔴 1/2 —   main: Unsupported("non-empty List[heap] literal with n | 46 | 1 | 0 | 🔴 1 | REAL non-empty List[heap] literal with nested-ownership  |
+| `canvas` | 🔴 1/2 —   main: Unsupported("non-empty List[heap] literal with n | 46 | 1 | 0 | 🔴 1 | REAL non-empty List[heap] literal with nested-ownership  |
+| `almai` | 🔴 8/10 —   retry_loop: Unsupported("heap-result X outside the exe | 183 | 1 | 2 | 🔴 1, 2 native-FFI excl | NATIVE-FFI heap-result X outside the executable subset c |
+| `yaml` | ✅ 1/1 | 74 | 0 | 0 | ✅ 0 — byte-verified | — |
+| `wasm-webgl` | ✅ 3/3 | 85 | 0 | 0 | 🟡 0 — lowers, byte-match TODO | — |
+| `vscode-almide` | — | — | — | ▫ not an Almide `src/` library | — |
+| `tree-sitter-almide` | — | — | — | ▫ not an Almide `src/` library | — |
+| `three` | — | — | — | ▫ not an Almide `src/` library | — |
+| `tech-article` | — | — | — | ▫ not an Almide `src/` library | — |
+| `syschord` | — | — | — | ▫ not an Almide `src/` library | — |
+| `svg` | ✅ 2/2 | 80 | 0 | 0 | ✅ 0 — byte-verified | — |
+| `sha1` | ✅ 1/1 | 14 | 0 | 0 | ✅ 0 — byte-verified | — |
+| `rsa` | ✅ 2/2 | 19 | 0 | 0 | ✅ 0 — byte-verified | — |
+| `prism-ml-llama.cpp` | — | — | — | ▫ not an Almide `src/` library | — |
+| `playground` | — | — | — | ▫ not an Almide `src/` library | — |
+| `obsid` | 🔴 3/4 — [render_program] Unsupported("unlinked stdlib/runtime ca | 177 | 0 | 0 | 🟡 0 — lowers, byte-match TODO | — |
+| `nn` | 🔴 13/15 —   approx_row: Unsupported("scalar tail outside the value | 289 | 0 | 0 | ✅ 0 — byte-verified | — |
+| `lumen` | ✅ 4/4 | 75 | 0 | 0 | ✅ 0 — byte-verified | — |
+| `docs` | — | — | — | ▫ not an Almide `src/` library | — |
+| `csv` | ✅ 1/1 | 10 | 0 | 0 | ✅ 0 — byte-verified | — |
+| `bonsai-almide` | — | — | — | ▫ not an Almide `src/` library | — |
+| `bigint` | ✅ 1/1 | 35 | 0 | 0 | ✅ 0 — byte-verified | — |
+| `base64` | 🟠 0/1 — frontend: type errors: [\"cannot call effect function 'decode_chunk | 0 | 0 | 0 | ▫ all cross-module | — |
+| `audio-poc` | ✅ 1/1 | 4 | 0 | 0 | 🟡 0 — lowers, byte-match TODO | — |
+| `almide-web` | ✅ 5/5 | 23 | 0 | 0 | 🟡 0 — lowers, byte-match TODO | — |
+| `almide-wasm-bindgen` | 🔴 0/1 —   tuple_supported: Unsupported("scalar tail outside the  | 97 | 0 | 0 | ✅ 0 — byte-verified | — |
+| `almide-sqlite` | 🔴 0/1 —   open: Unsupported("scalar tail outside the value subse | 14 | 0 | 14 | 🟡 0 — lowers, byte-match TODO, 14 native-FFI excl | — |
+| `almide-lander` | 🔴 1/2 —   main: Unsupported("effectful/impure stdlib Module call | 10 | 0 | 1 | ✅ 0 — byte-verified, 1 native-FFI excl | — |
+| `almide-js` | — | — | — | ▫ not an Almide `src/` library | — |
+| `almide-grammar` | ✅ 2/2 | 17 | 0 | 0 | ✅ 0 — byte-verified | — |
+| `almide-bindgen` | ✅ 23/23 | 405 | 0 | 0 | ✅ 0 — byte-verified | — |
+| `almide-aituber` | ✅ 8/8 | 72 | 0 | 0 | 🟡 0 — lowers, byte-match TODO | — |
+| `aes` | ✅ 1/1 | 27 | 0 | 0 | ✅ 0 — byte-verified | — |
+| `_references` | — | — | — | ▫ not an Almide `src/` library | — |
+
+<a id="cross-repo-wall-lever-most-frequent-reasons"></a>
+
+## Cross-repo wall lever (most frequent reasons)
+
+One brick that clears a top reason advances multiple repos at once.
+
+| count | wall reason (normalized) |
+|------:|--------------------------|
+| 29 | NATIVE-FFI heap move-out from <other> (only a bound var, fresh literal, or call) not in this 
+| 8 | REAL heap-result X outside the executable subset cannot be faithfully returned in this brick (
+| 7 | NATIVE-FFI heap-result X outside the executable subset cannot be faithfully returned in this b
+| 3 | NATIVE-FFI heap-result Try cannot be faithfully returned in this brick (would move out an empt
+| 3 | NATIVE-FFI effectful/impure stdlib Module call process.exec needs a declared capability not in
+| 2 | REAL use of unbound var VarId(N) |
+| 2 | REAL non-empty List[heap] literal with nested-ownership elements (a heap-field record/tuple, a
+| 2 | REAL List argument cannot be faithfully materialized in this brick (would borrow an empty defe
+| 2 | REAL guard-else early return cannot be faithfully lowered (vN has no early-return             
+| 2 | NATIVE-FFI match over an UNTRACKED subject with a call-bearing arm cannot take the both-arms l
+| 1 | REAL while body with a heap-accumulator reassignment cannot be faithfully lowered (the model-o
+| 1 | REAL if over an unresolvable condition (Gt over Float; Var vs LitFloat) with a call-bearing ar
+
+<a id="notes"></a>
+
+## Notes
+
+- **Every** `src/*.almd` module is swept (not just the entry). The **resolved column** renders each module through the real pipeline (sibling + dep resolution), so cross-module importers ARE measured there. classify_corpus reads one file with no cross-module import resolution, so its sweep skips sibling importers — surfaced per repo as `+N xmod`; keep it for per-function wall reasons only.
+- The `almide` repo itself is the reference corpus (its own `proofs/corpus-wall.sh` gate), not a target here.
+- `porta` is a NATIVE HOST (`almide.toml`: wasmtime + reqwest/Net) — the full MCP server is native-only by design (WASI preview1 has no net and can't embed wasmtime), so the 25 native-FFI are its host calls and only its PORTABLE protocol layer (jsonrpc/config) is in the v1 subset. Its byte-verification = the full test suite on both targets (7/7 wasm-runnable files + 1 FFI file native-only by design), plus the native build of the full MCP server, both green.
+- ✅ **byte-verified** = the repo's OWN test suite passes IN FULL on both `almide test --target native` and `--target wasm` (the assertions are the vectors). The 2026-07-02 sweep took this from 2 repos (yaml, sha1) to every repo WITH a test suite, after fixing six wasm bug classes the sweep itself flushed out (share/+1 on pass-through and copied-pair paths, list-layout under-allocation, missing Value deep-eq, value.merge oracle mismatch, bytes.set value semantics — contracts C-121..C-125; see docs/roadmap/active/v1-org-byte-verification.md).
+- Repos that CANNOT be byte-verified yet: `almide-web` / `almide-sqlite` (no test vectors — write suites first), `almide-dojo` (task-bank fixtures, not a compilable suite).
+- To byte-verify a repo: run its own tests on BOTH targets (`almide test --target native` and
+  `--target wasm`), require a full pass on each, then add it to `BYTE_VERIFIED` in the script.
+
+<a id="graphics--ai-stack--production-target-spot-check-2026-07-02"></a>
+
+## Graphics / AI stack — production-target spot-check (2026-07-02)
+
+The graphics and AI repos are mostly BROWSER-HOSTED wasm apps (a JS host loads the module),
+so "runs on v1" for them = the current compiler produces a valid wasm artifact; headless
+byte-run comparison does not apply to a rendering host. Verified states:
+
+| repo | kind | state |
+|------|------|-------|
+| `svg` | graphics (pure lib) | ✅ byte-verified (suite, both targets); the cross-module `render(group(..))` compiler stack overflow is fixed (2026-07-03 equi-recursive unify guard) |
+| `lumen` | graphics (pure lib) | ✅ byte-verified (suite, both targets) |
+| `canvas` | browser-hosted app | ✅ wasm builds clean |
+| `wasm-canvas` | browser-hosted app | ✅ wasm builds clean |
+| `wasm-webgl` | browser-hosted app | ✅ wasm builds clean |
+| `obsid` | browser+native-hosted app | ✅ wasm builds clean (no test suite yet) |
+| `almide-aituber` | browser-hosted app | ✅ wasm builds clean (the v1 divergence was the missing develop-side #717 auto-?-branch-retype fix — cherry-picked 2026-07-02) |
+| `homullus` | AI agent | ✅ byte-verified (suite, both targets) |
+| `almide-sqlite` | native host lib | ✅ suite green (10 tests, :memory: + file persistence) — native host package (rusqlite FFI), verified 2026-07-03 |
+| `almide-web` | browser bindings | ✅ headless vectors green (17-line byte-match: full import surface + intern protocol + callbacks under runtime/headless.mjs) — verified 2026-07-03 |
+| `nn` | AI (neural nets) | ✅ byte-verified (suite: 13/13 files, both targets) — unblocked 2026-07-02 by the TCO-temp type fix, the nested-HOF lambda-pin fix (C-126), the Matrix repr, the SIMD fast-exp clamp, and the unwrap_or chain fix (C-127) |
+| `almai` | AI (LLM client lib) | ✅ native suite green (56 tests, 2 files) — resolved 2026-07-03 by the STRUCTURAL-TWIN merge: the checker unifies same-base-name same-shape record decls across modules, so codegen now merges them into one canonical struct (flatten twin-merge; the E0063 default-fill and bare-ref repair ride the same mechanism). wasm leg: native fallback (`env.get`/http are native-only — an LLM client needs the network host) |
+
+Every graphics/AI repo above now builds or verifies on v1.

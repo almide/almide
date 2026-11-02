@@ -36,6 +36,8 @@ fn main() -> Unit = {
 
 
 
+<a id="signature-index-3-functions"></a>
+
 ## 固定スナップショットの API 索引（3関数）
 
 ```

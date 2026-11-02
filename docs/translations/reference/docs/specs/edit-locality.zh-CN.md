@@ -1,3 +1,5 @@
+<a id="edit-locality"></a>
+
 # 编辑局部性
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](edit-locality.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](edit-locality.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](edit-locality.zh-CN.md)
@@ -16,6 +18,8 @@
 
 **下文的 L1 到 L5 已占用。** 此阶梯的新证明义务应使用 **L6** 及以上，不能使用看似空闲的小编号。almide/almide#2009 与 #1998 基于本文件只命名了 L1 的旧版本编写，两者均为不同于此处定义的义务提出“L2”和“L3”（#2009 指声明框架保持，以及可组合的受检查 lowering）；它们在 §1a 中是 **L4 和 L5**，在 #1997 固定其量化的 `scoped` 表层语法后被采纳。把一个编号复用于第二种含义，正是本文要从程序中排除的缺陷，不应出现在文档自身。
 
+<a id="1-the-invariant"></a>
+
 ## 1. 不变量
 
 **L1 — 编辑框架。** 令 `P` 为良好类型的程序，`e` 为对一个定义 `f` 的函数体进行的编辑，且保持 `f` 的签名：名称、参数类型、返回类型、`effect` 标记与可见性。则 `P[e]` 的每次轨迹从不进入 `f` 的执行，都具有与 `P` 对应的同一执行完全相同的可观察量。
@@ -29,6 +33,8 @@ L1 是承重部分。几乎没有已实现的语言满足它：重载解析、�
 对于内核演算 λ_almd，L1 是机器检查过的定理：`crates/almide-edit-belt`（第三条 0-sorry Lean 证明带，CI 的 `lean-proofs` 作业）证明了 `edit_frame` 加确定性（可观察量相同的形式）、`typing_modular`（相同签名的函数体替换保持良好类型，其他所有推导均不变）以及 `pure_silent`（在 `effect fn` 之外被赋型的代码具有空轨迹）。按照 `docs/contracts/README.md`，针对完整语言的实现级陈述仍受 §2 的证据约束。
 
 > 译注：以上关于已实现语言的一般比较是原文主张，并非本译文独立比较验证的结果。不得把内核定理扩展成对完整实现的证明。
+
+<a id="1a-above-l1-the-declared-frame-and-its-composition"></a>
 
 ## 1a. L1 之上：声明框架及其组合
 
@@ -49,6 +55,8 @@ L4 对业务行为不作主张。纯替换可以返回不同的值，该值可�
 - *组合 — 已在 λ_almd 中证明。* 任意保持签名的替换序列都使良好类型的程序继续良好类型，全部替换之后，每个声明为纯的定义仍保持静默：无论多长的保契约编辑链，都无法打开 effect 围栏。证据：`crates/almide-edit-belt/AlmideEditBelt/Contract.lean` 中的 `l5_edits_compose` 与 `l5_pure_silent_after_edits`，对编辑列表作归纳证明。
 - *两个目标上的实现 — 受信任。* 受检查 lowering（#1995 的 ExitPlan、#1996 的 E-OWN-LOWERING）在 native 与 wasm 上保持这些观察，是 λ_almd 与两个后端之间的精化义务。与本文件中其他后端主张一样，它受 `spec/wasm_cross` 测试样例和契约台账约束，并在 `docs/contracts/README.md` 中列为受信任，而非已证明。
 
+<a id="2-what-enforces-it-today"></a>
+
 ## 2. 当前由什么强制保证
 
 | 规则 | 局部性作用 | 证据 |
@@ -66,9 +74,13 @@ L4 对业务行为不作主张。纯替换可以返回不同的值，该值可�
 | 局部 `fn` 不得与选择导入的函数共享裸名称，构建导入表时产生硬错误 E050 | 每个裸名称必须恰有一个解析结果；添加定义不能悄悄改变既有调用目标（修复前检查器与 lowering 分歧，执行的函数不是类型检查的那个，#1425） | `crates/almide-frontend/src/import_table.rs` (`check_selective_import_fn_collisions`) — 测试：`tests/selective_import_collision_test.rs`, `docs/diagnostics/E050.md` |
 | 构造器解析以所有者为作用域：限定的 `mod.Ctor` 仅在 `mod` 内解析（`lookup_ctor_owned`）；裸名称优先本模块自己的分支，只看本文件、其导入项与内置分支，不看传递模块，也不越过本文件自己的同名类型（#413、#2636、`lookup_ctor_in`，lowering 同步采用）；同模块重复分支名在注册时产生硬错误 E019 | 别处添加 variant 不能重新绑定既有构造器引用；模块内每个分支名恰有一项声明 | `crates/almide-frontend/src/type_env.rs` (`lookup_ctor_owned`), `canonicalize/registration.rs` (注册时 E019, #1426) — 测试：`tests/ctor_ambiguity_test.rs`, `spec/integration/modules/qualified_ctor_test.almd` |
 
+<a id="3-where-it-breaks-today-hunt-of-2026-08-15"></a>
+
 ## 3. 当前在哪里失效（2026-08-15 的排查）
 
 以下排查作为实现历史保留。旧 MIR／既有管线的路径不是当前发布版本的故障清单；把某行当作未解决缺陷之前，必须检查当前源码。借用推断一行已更新为当前求解器。此处列出机制。分类：**V** = 语言／编译器错误，L1 必须成立；**2026-08-15 排查的三个 V 发现均已修复，并提升为 §2 的规则行**（#1424 LICM 投机、#1425 选择导入冲突、#1426 构造器所有者作用域；未修复数量只能保持零）；**R** = 后端精化义务（路线图 Stage 3）；**S** = 不作修复、而在 §4 声明的附加条件。
+
+<a id="r--backend-refinement-obligations"></a>
 
 ### R — 后端精化义务
 
@@ -85,6 +97,8 @@ L4 对业务行为不作主张。纯替换可以返回不同的值，该值可�
 | `Method`／`Computed` 调用目标不提供可达性名称；函数体编辑若移除对经 UFCS 可达函数的最后一个 `Named` 引用，会错误裁剪该函数（按该 pass 自身的健全性注记，会产生 wasm 陷阱） | 可达性收集 | `crates/almide-codegen/src/reachability.rs:15-17,66-72` |
 | 潜在问题：已有从函数体推断全程序 effect 的分析（当前仅用于分析）；一旦诊断或权限使用它，函数体编辑就会改变调用者可见的输出 | `pass_effect_inference` | `crates/almide-codegen/src/pass_effect_inference.rs:12,47-70` |
 
+<a id="4-side-conditions"></a>
+
 ## 4. 附加条件
 
 §1 的 L1 在**扣除**下列已声明例外后成立。例外要么在这里写明，要么就不存在；未写明的例外是错误。
@@ -92,6 +106,8 @@ L4 对业务行为不作主张。纯替换可以返回不同的值，该值可�
 - **S1 — 无注解的顶层 `let`／`var`。** `TopLet` 的类型从初始化式推断，并跨模块流动（`crates/almide-syntax/src/ast.rs:406`、`crates/almide-frontend/src/check/module_inference.rs:65-90`）。所以编辑顶层初始化式即使没有写出签名，也是*改变签名*的编辑。存储在此类绑定中的 lambda 同样如此。（`fn`／`effect fn` 不在此列，因为其签名是必写的文本，见 §2 第 1 行。）
 - **S2 — `test` 块在框架之外。** 文件作用域的 `mod test where { path = expr }` 覆盖会有意重新绑定文件内每项测试中的引用（`crates/almide-syntax/src/ast.rs:409-432`、`crates/almide-frontend/src/lower/mod.rs:420-423,489-495`）；这是 L1 在程序代码中禁止的动态作用域的一种有界、已声明形式。测试块也作为 DCE 根（§3-R）。L1 量化的是程序执行，而非测试执行。
 - **S3 — 模型纯性与实现边界。** ADR-0009 最初的高阶 effect 漏洞已是历史：函数类型 effect 标记和值流检查现已拒绝这种洗白（参见 `effect-system.md` 与 `tests/effect_value_laundering_test.rs`）。这并不使模型的 `pure_silent` 定理成为关于每个 Almide `fn` 的定理：ADR-0022 允许其中使用六个 console／abort prelude 内建函数。模型定理保留其自身的赋型前提；实现的 capability 核算遵循 ADR-0026。
+
+<a id="5-the-gate"></a>
 
 ## 5. 门槛
 

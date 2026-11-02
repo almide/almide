@@ -1,0 +1,628 @@
+<a id="package-system-specification"></a>
+
+# Package System Specification
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](package-system.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](package-system.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](package-system.zh-CN.md)
+
+> Non-normative fixed reader snapshot. The pinned original remains authoritative; no automatic synchronization or independent execution is implied. The registry in §10 is a future plan, not an implemented-service claim. Trust and native-code grants are the source’s mechanisms, not a security audit or sandbox guarantee. §6.4 says three routes but lists four bullets; the source discrepancy is retained.
+> [Source / 原文](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/specs/package-system.md)
+
+
+> Almide's dependency management, version resolution, and module isolation.
+> Design informed by Go Modules (MVS), Cargo (type identity), pnpm (boundary enforcement).
+
+<a id="1-design-principles"></a>
+
+## 1. Design Principles
+
+1. **Minimal Version Selection** — Always pick the minimum version that satisfies all constraints. No SAT solver. Deterministic, reproducible, fast. (Go Modules)
+2. **Strict module boundaries** — Code can only access modules it directly imports. Transitive dependencies are invisible. No phantom dependencies. (pnpm)
+3. **Type identity by (name, major)** — Two packages with the same `(name, major)` produce the same types. Different majors produce incompatible types. (Cargo)
+4. **Single source of truth** — `almide.toml` declares intent, `almide.lock` records exact commits. A matching lock is respected; source changes require explicit re-locking and `--locked` refuses changes.
+5. **Future-proof for registry** — Current git-based system will be supplemented by an Almide package registry. Design decisions must not preclude this.
+
+<a id="2-package-identity"></a>
+
+## 2. Package Identity
+
+```text
+PkgId { name: String, major: u64 }
+```
+
+- Derived from `almide.toml`'s `[package] version` or the git tag.
+- `0.x.y` uses minor as major (pre-1.0 breaking changes).
+- `mod_name()` returns `"{name}_v{major}"` for codegen symbol namespacing.
+
+<a id="3-version-resolution-mvs"></a>
+
+## 3. Version Resolution: MVS
+
+When multiple dependents request the same package (same name, same major):
+
+```text
+B requires D >= 1.2.0
+C requires D >= 1.5.0
+→ resolve to D 1.5.0 (maximum of minimums)
+```
+
+When majors differ:
+
+```text
+B requires D v1.x (major=1)
+C requires D v2.x (major=2)
+→ both coexist as separate modules (D_v1, D_v2)
+→ D_v1.Logger ≠ D_v2.Logger (different types)
+```
+
+<a id="4-module-boundaries"></a>
+
+## 4. Module Boundaries
+
+<a id="41-direct-vs-transitive"></a>
+
+### 4.1 Direct vs Transitive
+
+```text
+A imports B, C
+B imports D
+C imports D
+```
+
+From A's perspective:
+- `B.func()` ✓ — direct dependency
+- `C.func()` ✓ — direct dependency
+- `D.func()` ✗ — transitive only (unless A also imports D)
+- `D.Logger` ✗ — type not visible unless A imports D
+
+If A needs D's types, A must declare `import D` explicitly.
+
+<a id="42-enforcement"></a>
+
+### 4.2 Enforcement
+
+The type checker tracks which modules each file has imported via `import` statements.
+`resolve_module_call` and `resolve_static_member` check against this set, not the global `user_modules`.
+
+<a id="43-re-exports"></a>
+
+### 4.3 Re-exports
+
+A module can re-export a dependency's types by wrapping:
+
+```almide project
+// file: d/mod.almd
+type Logger = { name: String }
+fn make(n: String) -> Logger = Logger { name: n }
+// file: b/mod.almd
+import d
+type Logger = d.Logger  // re-export (future: explicit pub use)
+fn make(n: String) -> Logger = d.make(n)
+fn name_of(l: Logger) -> String = l.name
+// file: main.almd
+import b
+
+test "the consumer sees D's type through B without importing D" {
+  let l: b.Logger = b.make("x")
+  assert_eq(b.name_of(l), "x")
+}
+```
+
+<a id="5-codegen-versioned-symbols"></a>
+
+## 5. Codegen: Versioned Symbols
+
+When `IrModule.versioned_name` is set (e.g., `"json_v2"`), codegen uses it for function prefixes:
+
+```rust
+// Without versioning (same major, no conflict)
+pub fn almide_rt_json_parse(...) { ... }
+
+// With versioning (different majors coexist)
+pub fn almide_rt_json_v1_parse(...) { ... }
+pub fn almide_rt_json_v2_parse(...) { ... }
+```
+
+Struct names are also versioned to prevent type collisions:
+
+```rust
+pub struct JsonV1_Config { ... }
+pub struct JsonV2_Config { ... }
+```
+
+<a id="6-dependency-declaration"></a>
+
+## 6. Dependency Declaration
+
+```toml
+# almide.toml
+[package]
+name = "myapp"
+version = "0.1.0"
+
+[dependencies]
+bindgen = { git = "https://github.com/almide/almide-bindgen", tag = "v0.1.0" }
+json = { git = "https://github.com/almide/json", tag = "v2.0.0" }
+```
+
+**Each key appears once per table, and each table once** (#2583). TOML forbids
+a repeated key, and every command that reads `almide.toml` (`check`, `run`,
+`test`, `build`, …) refuses one before fetching anything or touching the lock,
+naming both lines:
+
+```text
+error: almide.toml:7: dependency `almai` is declared twice in [dependencies] (first at line 6)
+  hint: keep one of lines 6 and 7 and delete the other — TOML allows a key only once per table
+```
+
+The rule covers every table the manifest reader reads (`[package]`,
+`[dependencies]`, `[permissions]`, `[native-deps]`), including a repeated
+table header. Two spellings of the same url (`…/almai` and `…/almai.git`) are
+still one dependency declared twice.
+
+Test: `tests/manifest_duplicate_key_test.rs`.
+
+**`[package] almide = "X.Y.Z"` is the minimum compiler** (#4172). Write it as a
+plain version or as `">=X.Y.Z"`; any other operator is an invalid pin. Every
+command that checks or compiles the package refuses an older compiler before
+it reads a source: `check`, `emit`, `compile`, `build`, `run` and `test` on
+every target, plus `bench`, `fix`, `survive`, `apply` and `verify`. It used to
+be read only by the native build, so `check` and the wasm target compiled with
+any compiler. Package management (`add`, `deps`, `update`, `install`) and
+`fmt` still run, so the pin can be read and changed.
+
+```text
+error: package 'myapp' requires almide >= 0.70.0
+  installed version: 0.69.0
+```
+
+`ALMIDE_SKIP_VERSION_CHECK=1` bypasses it. A release build honours that only
+with `--allow-switch ALMIDE_SKIP_VERSION_CHECK` (#4129).
+
+Test: `tests/version_pin_commands_test.rs`.
+
+**A key no reader reads is a warning** (#3382). It used to be dropped without a
+word, so `brnach = "main"` or `tags = "v0.1.0"` in a dependency built from the
+default ref, not the one written. Every command that reads `almide.toml` now
+warns once, naming the line, the key, the keys that table accepts, and the key
+one edit away (insertion, deletion, substitution or an adjacent swap) when
+there is one:
+
+```text
+warning: unknown key `brnach` in dependency `foo` is ignored — it changes nothing
+  --> almide.toml:5
+  hint: did you mean `branch`? The keys dependency `foo` accepts are `git`, `tag`, `branch`, `version`, `path`, `subdir`
+```
+
+| Table | Accepted keys |
+|---|---|
+| top level | `[package]`, `[dependencies]`, `[native-deps]`, `[permissions]`, `[target]`, `[trust]` |
+| `[package]` | `name`, `version`, `almide`; and `description`, `edition`, `license`, `repository`, which describe the package and are read by nothing (no warning) |
+| a `[dependencies]` entry (inline table, dotted keys or `[dependencies.<name>]`) | `git`, `tag`, `branch`, `version`, `path`, `subdir` |
+| `[permissions]` | `allow`, `proc`, `native`, `fs` |
+| `[trust]` | `owners` |
+
+A dependency entry that is not a table, or names neither `git` nor `path`,
+declares nothing and is warned about the same way. `[native-deps]` entries are
+crate names, so any key is one (their specs are Cargo's to judge); an unknown
+table under `[target.<platform>]` is already an error (§6.2).
+
+The build still runs exactly as if the key were absent, and the exit code does
+not change (`check --deny-warnings` does not count it either). `almide check
+--json` carries the warning as a `"level":"warning"` row on stdout; every other
+command prints it on stderr. Escalating it to an error is planned for a later
+dialect epoch, after a release that carries the warning; there is no epoch
+entry yet. The key lists live beside their readers in `src/project.rs`, and
+`tests/manifest_unknown_key_test.rs` asserts that every listed key changes the
+parse (and that every metadata key does not), so a list cannot drift from its
+reader.
+
+Short form (defaults to github.com/almide/):
+```bash
+almide add bindgen@v0.1.0
+# → bindgen = { git = "https://github.com/almide/almide-bindgen", tag = "v0.1.0" }
+```
+
+A one-part name is a package under github.com/almide. A package's name and
+its repository's name can differ (`bindgen` lives in `almide-bindgen`), so the
+name is looked up in a snapshot of the org's packages embedded in the compiler
+(`src/almide_packages.txt`, regenerated by `scripts/gen-almide-packages.sh`);
+a name the snapshot does not list resolves to `github.com/almide/<name>`.
+`almide add almide/<repo>` names the package the snapshot gives that
+repository, so `almide add almide/almide-bindgen` adds `bindgen` too (#4093).
+
+<a id="61-a-package-in-a-subdirectory-of-the-repository-subdir"></a>
+
+### 6.1 A package in a subdirectory of the repository: `subdir`
+
+A repository can hold several packages, each in its own directory with its own
+`almide.toml`. A git dependency names one of them with `subdir` (#3381):
+
+```toml
+[dependencies]
+ceangal = { git = "https://github.com/almide-graphics/ceangal2", tag = "v0.1.0", subdir = "ceangal" }
+snaidhm = { git = "https://github.com/almide-graphics/ceangal2", tag = "v0.1.0", subdir = "snaidhm" }
+```
+
+The package is named explicitly rather than found by scanning the repository
+for a package of that name (Cargo's rule): the manifest says exactly which
+directory is built, nothing depends on what else the repository holds, and a
+reader of `almide.toml` sees it without fetching.
+
+- **Spelling.** `subdir` is a path relative to the repository root, `/`-separated
+  on every platform. It is normalized before use: `./`, repeated and trailing `/`
+  are dropped (`./pkgs//c/` is `pkgs/c`), and the normalized spelling is the
+  one the lock records. Every command that reads `almide.toml` refuses, on the
+  line that writes it, a `subdir` that is not a string, is empty, names the root
+  itself (`.` — delete `subdir` instead), is absolute (`/x`, `C:/x`), uses `\`,
+  or contains `..` at all (even `a/../b`: one spelling per directory).
+- **Git only.** `subdir` beside `path` is refused — a `path` already names the
+  package directory; the hint gives the joined `path`.
+- **Checked at fetch.** The directory must exist in the checkout, stay inside it
+  (a symlink out of the clone is refused), and hold an `almide.toml` whose
+  `[package] name` is the dependency's key — the key is the import name. Each
+  refusal names the manifest line and lists the package directories the
+  repository does hold (up to two levels down):
+
+```text
+error: almide.toml:6: dependency `ceangal` names subdir `snaidhm`, whose package is `snaidhm`
+  hint: the dependency key is the import name and must be the package's name — rename the key to `snaidhm`, or point `subdir` at the package `ceangal`
+error: almide.toml:6: subdir `pkgs/ceangal` of dependency `ceangal` does not exist in https://… at v0.1.0
+  hint: the packages in this repository are `ceangal`, `snaidhm` — point `subdir` at one
+```
+
+  A git dependency WITHOUT `subdir` whose repository root is no package (no
+  `almide.toml`, no `src/`, no `.almd` file) while its subdirectories are is
+  refused the same way, with the `subdir = "…"` to add.
+- **Identity.** A package is a source and a directory in it: two subdirs of one
+  repository are two packages, walked separately for their own requirements and
+  locked as two entries. `PkgId` (name, major) and MVS are unchanged — the name
+  is still the package's own `[package] name`.
+- **One clone.** Checkouts are source-keyed under
+  `~/.almide/cache/.sources/<encoded-source>/@/<ref-or-commit>/`.
+  Dependencies on the same source/ref share the checkout whether or not they
+  specify `subdir`; each reads its package directory within it. Older
+  `.repos/.src-<hash>` and name-keyed layouts are not reused (see §6.3).
+- **CLI.** `almide add <repo>[@<tag>] --subdir <dir>` names the package after
+  the subdir's last component (`--subdir pkgs/ceangal` → `ceangal`); with
+  `--git <url>` the first argument is the name. `add` fetches and checks the
+  package BEFORE it writes `almide.toml`, so a wrong `subdir` leaves the
+  manifest as it was. `almide deps` prints `… (<ref>) subdir <dir>`, and
+  `almide dep-path <name>` prints the package's directory inside the clone
+  (its `src/` when it has one). `almide update` advances the entry like any
+  other git dependency.
+
+Tests: `tests/dep_git_subdir_test.rs` (a local repository holding two packages:
+check, lock, one shared clone, `dep-path`, `deps`, `add --subdir`, every
+refusal), the `project_fetch` unit tests (`package_dir_in_checks_the_subdir_against_the_checkout`,
+`subdir_packages_of_one_repository_share_a_clone_root`), `tests/lock_roundtrip_test.rs`.
+
+<a id="62-native-rust-dependencies-native-deps"></a>
+
+### 6.2 Native Rust dependencies: `[native-deps]`
+
+A package with `native/*.rs` modules or `@extern(rust, …)` functions declares
+the crates.io crates they use in `[native-deps]`. Each entry is copied verbatim
+into the generated crate's Cargo.toml, on every native build route (binary,
+`--cdylib`, `--repr-c`, `almide run`, `almide test`). A dependency package's
+`[native-deps]` are added the same way.
+
+```toml
+[native-deps]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+```
+
+**Target-specific native deps** (#3350). A crate that builds only on some
+targets goes under `[target.<platform>.native-deps]`, which uses Cargo's
+syntax and meaning. It is emitted as `[target.<platform>.dependencies]`, so
+Cargo compiles the crate only when the build's target (the host, or
+`--target <triple>`) matches:
+
+```toml
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.native-deps]
+arboard = "3"
+
+[target.'cfg(target_os = "android")'.native-deps]
+jni = "0.21"
+
+[target.x86_64-pc-windows-gnu.native-deps]
+winapi = "0.3"
+```
+
+`<platform>` is either `cfg(<expr>)` or a target triple, exactly as Cargo
+accepts them. `<expr>` is `all(…)`, `any(…)`, `not(…)`, a name (`unix`), or
+`name = "value"`. Every command that reads `almide.toml` refuses a key Cargo
+would refuse, and names the key and its line:
+
+```text
+error: almide.toml:4: invalid platform `cfg(target_os = android)` in [target.'cfg(target_os = android)'.native-deps]: expected a string after `target_os =`, found `android`
+```
+
+Only `native-deps` can be target-specific: any other table under
+`[target.<platform>]` is an error. A crate the runtime itself needs (for
+example `flate2` for `zlib`, or the TLS crates for `http`) is always declared
+for every target. If you also declare that crate for one target, both
+declarations are written and Cargo merges them.
+
+Tests: `tests/manifest_toml_reader_test.rs`, `tests/native_deps_target_cfg_test.rs`,
+and the `cargo_build` unit tests.
+
+<a id="63-trusted-sources-trust-owners"></a>
+
+### 6.3 Trusted sources: `[trust] owners`
+
+Models invent repository names, and an invented name repeats across runs, so
+an attacker can register it before a model asks for it (#4093). The toolchain
+therefore fetches a git dependency only from an owner the **root** manifest
+trusts:
+
+- `github.com/almide` is trusted by default;
+- any other owner, on any host, is listed as `host/owner` in `[trust] owners`;
+- `path =` dependencies and git sources on the local filesystem (`file://…` or
+  a plain path) are exempt, since nobody can register a name there;
+- a dependency's own `[trust]` is never read: a package cannot grant trust on
+  the root's behalf.
+
+```toml
+[dependencies]
+csv   = { git = "https://github.com/almide/csv", tag = "v0.1.0" }   # trusted by default
+mylib = { git = "https://github.com/alice/mylib", tag = "v1.2.0" }
+
+[trust]
+owners = ["github.com/alice"]
+```
+
+The check runs before any network access, on `almide add` and on every fetch
+(`build`, `run`, `test`, `bench`, `update`), for direct, transitive and
+already-locked dependencies alike; a lock is not a grant. Owners compare
+case-insensitively. A URL whose path has a `.` or `..` segment or a percent
+escape is refused outright, because the owner it fetches from cannot be read
+from its text. There is no flag or environment variable that trusts
+everything: a grant always names its owner, in a file reviewed with the rest
+of the change.
+
+**`almide add`** resolves the spec, checks the owner, probes that the
+repository exists (`git ls-remote`, prompts off), fetches it, and only then
+writes `almide.toml` and `almide.lock`. Any refusal or failure exits 1 and
+leaves both files byte-identical:
+
+```text
+$ almide add alice/mylib@v1.2.0
+Resolved mylib → https://github.com/alice/mylib (owner github.com/alice, NOT trusted)
+error: refusing to add `mylib`: its owner is not trusted by this project
+  source: https://github.com/alice/mylib
+  owner: github.com/alice (not in [trust] owners)
+  note: models often invent repository names, and attackers register the names models invent
+  hint: if the user asked for this exact repository, run:
+          almide add alice/mylib@v1.2.0 --trust github.com/alice
+  hint: if you chose this name yourself, do not trust it; use a package from github.com/almide or ask the user
+```
+
+- `--trust <owner>` must repeat the owner the source resolves to (`host/owner`,
+  or `owner` for github.com); any other owner is an error. It writes the owner
+  into `[trust] owners`.
+- `--dry-run` prints the resolution, the trust verdict and whether the
+  repository exists, then writes and fetches nothing (exit 1 when the add
+  would be refused).
+- A repository that does not exist is reported as such. On a refusal or a
+  not-found, and only then, a near name is suggested with a runnable line
+  (`hint: did you mean \`almide add csv\`?`): an almide package of the same
+  name under another owner, an almide package within edit distance 2 (and a
+  third of the name) after folding case, `-`, `_`, `.` and an `almide-`
+  prefix, or an owner that is a near miss of `almide`. It never substitutes.
+
+**A transitive or hand-written dependency** from an untrusted owner stops the
+build with the chain that reached it, and `almide trust <owner>` is the one
+step that grants it:
+
+```text
+error: dependency `util` (required by mylib → util) is fetched from an owner this project does not trust
+  source: https://github.com/bob/util
+  owner: github.com/bob (not in [trust] owners)
+  ...
+  hint: if this dependency is expected, run `almide trust github.com/bob` (it adds "github.com/bob" to [trust] owners in almide.toml)
+```
+
+**A source changed under the lock** is refused: when a direct dependency's
+lock entry names another `git` than the manifest does, the build stops with
+`` `csv` is locked to <old> but almide.toml now says <new> `` and the hint
+`almide update csv`, which re-locks it from the new source (a tag-pinned
+dependency included). It used to re-resolve silently.
+
+**`--locked`** on `build`, `run` and `test` refuses, before any network
+access, a direct git dependency that `almide.lock` does not name, refuses a
+resolution that would change the lock, and writes no lock. Use it in CI.
+(The lock records direct dependencies only; a transitive one is resolved by
+its ref, as before.)
+
+**The cache is keyed by source.** A checkout lives under
+`~/.almide/cache/.sources/<scheme>/<host>/<owner>/<repo>/@/<ref or commit>`,
+each URL piece encoded injectively, so a package named `svg` fetched from
+`github.com/evil/svg` can never answer for `github.com/almide/svg`. The
+previous layout hashed the URL into 64 bits (FNV-1a), which is not collision
+resistant. Directories of older layouts are never read; `almide clean`
+removes them.
+
+Trust is intent, so it lives in `almide.toml`; the lock records facts and
+carries no trust bit.
+
+Tests: `tests/dependency_trust_test.rs`, the `trust` and `project_fetch` unit
+tests.
+
+<a id="64-native-code-from-a-dependency-needs-a-grant-permissions-native"></a>
+
+### 6.4 Native code from a dependency needs a grant: `[permissions] native`
+
+A dependency's native code is compiled and run by cargo during the build,
+before and outside every `[permissions]` check (#4093). It reaches the build
+three ways:
+
+- its `native/*.rs` modules, and the files in `native/` subdirectories, are
+  copied into the generated crate;
+- its `[native-deps]` and `[target.<platform>.native-deps]` crates are added
+  to the generated Cargo.toml, so their `build.rs` and proc macros run;
+- an `@extern(rust, "path", "fn")` fn is emitted as a call to `path::fn`, for
+  any Rust path (`std` included, with no `native/` at all), and an
+  `@extern(c, …)` fn links a C symbol;
+- an `@inline_rust("…")` fn's template is spliced into the crate as Rust text
+  (#4100). `@intrinsic` / `@wasm_intrinsic`, which E085 refuses outside the
+  stdlib, are listed too if a package carries them.
+
+So `almide build`, `almide run`, `almide test` and `almide bench` refuse a
+dependency, direct or reached through another dependency, that brings any of
+these, unless the root `almide.toml` names it in `[permissions] native`. The
+refusal happens before anything is compiled, on every `--target` (the rule
+belongs to the dependency graph, like `[permissions]` itself, not to one
+target), and exits 1:
+
+```text
+error: dependency `nat` brings native code that ./almide.toml does not grant
+  nat 0.1.0 at ../nat
+  native code: native/natval.rs; [native-deps] itoa; @extern fn `number` (src/mod.almd:2)
+  note: native code is compiled and run by cargo during the build, before and outside every [permissions] check
+  hint: if you trust `nat`, grant it in ./almide.toml:
+    [permissions]
+    native = ["nat"]
+```
+
+```toml
+[permissions]
+native = ["nat"]
+```
+
+The grant names a package, not a version, and covers only that package:
+granting a direct dependency does not grant the native code of what it pulls
+in. Only the root manifest's grants count; a dependency's own
+`[permissions] native` is not read. The root package's own `native/`,
+`[native-deps]` and `@extern` fns need no grant.
+
+Every native build prints one line for each granted dependency that brings
+native code:
+
+```text
+note: building native code from `nat` (granted by [permissions].native): native/natval.rs; [native-deps] itoa; @extern fn `number` (src/mod.almd:2)
+```
+
+`almide deps` shows, for every dependency (direct, then the ones reached
+through them), its version, its capability set (the categories
+`[permissions].allow` is checked on, where an `@extern` fn counts as every
+category), the native code it brings and whether that code is granted:
+
+```text
+nat = path ../nat
+  version: 0.1.0
+  capabilities: Abort, Env.read, Env.write, FS.read, FS.write, Fan, IO.stderr, IO.stdin, IO.stdout, Net.fetch, Net.listen, Proc, Rand, Time
+  native code: native/natval.rs; [native-deps] itoa; @extern fn `number` (src/mod.almd:2) (granted by [permissions].native)
+```
+
+Tests: `tests/native_grant_test.rs`.
+
+<a id="7-lock-file"></a>
+
+## 7. Lock File
+
+```toml
+# almide.lock — auto-generated, do not edit
+
+bindgen = { git = "https://github.com/almide/almide-bindgen", ref = "v0.1.0", commit = "a629eded8d20..." }
+json = { git = "https://github.com/almide/json", ref = "v2.0.0", commit = "b8f3a1..." }
+ceangal = { git = "https://github.com/almide-graphics/ceangal2", ref = "v0.1.0", commit = "c41d...", subdir = "ceangal" }
+```
+
+An entry for a `subdir` dependency (§6.1) records the normalized `subdir`, so
+the lock names the package exactly; entries without one are written exactly as
+before. Two packages of one repository may share `(git, ref, commit)` — the
+pin is a fact about the repository at that ref, so it is looked up by
+`(git, ref)` as for any dependency, and both packages build from the same
+commit.
+
+One entry per direct dependency, one line each; the writer never emits a name
+twice. A lock that holds a name twice (written by a compiler before #2583
+from a manifest that declared the dependency twice) is refused with the two
+lines and the way out — delete one of them, keeping the one whose `git`
+matches `almide.toml`, or delete the lock and let the next run rewrite it.
+
+**The lock records the resolved result, not the request** (#2532). Each entry's
+`ref` and `commit` are those of the version Minimal Version Selection chose for
+that dependency's package — the checkout that was actually built — as
+`Cargo.lock` does. The request lives only in `almide.toml`. When nothing raises
+a dependency the two coincide. When a transitive requirement raises it (the
+manifest asks `foo@v1.0.0`, a dependency asks `foo@v1.1.0`), the entry reads
+`ref = "v1.1.0"` with v1.1.0's commit, even though `almide.toml` still says
+`v1.0.0`; that is not drift and does not re-resolve. Every entry is one fetch's
+own `(git, ref, commit)`, so it is always a triple that was true together.
+
+A pin applies to any request for the same source at the same ref, whoever in
+the graph makes it, so the locked commit is exactly what the next build
+compiles. A request that was walked but not selected (the `v1.0.0` above) is
+resolved from its ref — MVS reads its manifest for requirements, it does not
+build it. Changing a request in `almide.toml` re-resolves as before, and the
+lock is rewritten from the new selection. A lock written before #2532, which
+recorded the root's request, still reads; the next run rewrites the raised
+entries to the resolved record.
+
+Test: `tests/manifest_duplicate_key_test.rs`, `tests/lock_roundtrip_test.rs`,
+`tests/dep_lock_pairing_test.rs`
+(`a_dependency_raised_by_mvs_is_locked_at_the_version_that_was_built`).
+
+<a id="8-resolution-algorithm"></a>
+
+## 8. Resolution Algorithm
+
+```text
+1. Parse almide.toml → direct dependencies
+2. For each dep:
+   a. If almide.lock has an entry for this (git, ref) → use its exact commit
+   b. Else fetch tag/branch
+   c. With `subdir`, the package is that directory of the checkout (§6.1)
+3. Parse dep's almide.toml → transitive dependencies
+4. Recurse (depth-first, leaves first)
+5. Dedup by PkgId(name, major):
+   - Same (name, major): keep maximum requested version (MVS)
+   - Different major: both coexist with versioned names
+6. Detect impossible constraints → error with explanation
+7. Write almide.lock: per direct dependency, the (git, ref, commit) of the
+   version step 5 selected for its package
+```
+
+<a id="9-error-messages"></a>
+
+## 9. Error Messages
+
+```text
+error: version conflict for package 'json'
+  → myapp requires json >= 2.0.0 (via almide.toml)
+  → bindgen requires json >= 1.0.0, < 2.0.0 (via bindgen/almide.toml)
+
+  json v1.x and v2.x are different major versions and will coexist.
+  However, json.Config from v1 cannot be passed to functions expecting json.Config from v2.
+
+  hint: Update bindgen to a version that supports json v2.x,
+        or add json v1.x as a separate dependency.
+```
+
+<a id="10-future-almide-package-registry"></a>
+
+## 10. Future: Almide Package Registry
+
+The registry will:
+- Host packages with semver metadata
+- Provide `almide add pkg` without git URLs
+- Support `almide publish` for package authors
+- Use content-addressed storage (like pnpm) for dedup
+- Enforce package signing and provenance (like JSR)
+
+The current git-based system is forward-compatible:
+- `PkgId` already supports semver
+- `almide.lock` already records exact commits
+- `versioned_name` already supports coexistence
+- Migration: `git = "..."` → `registry = "almide"` (or just name)
+
+<a id="references"></a>
+
+## References
+
+- [Go Modules: Minimal Version Selection](https://research.swtch.com/vgo-principles)
+- [How Rust Solved Dependency Hell](https://stephencoakley.com/2019/04/24/how-rust-solved-dependency-hell)
+- [PubGrub: Next-Generation Version Solving](https://nex3.medium.com/pubgrub-2fb6470504f)
+- [pnpm: Flat node_modules is not the only way](https://pnpm.io/blog/2020/05/27/flat-node-modules-is-not-the-only-way)

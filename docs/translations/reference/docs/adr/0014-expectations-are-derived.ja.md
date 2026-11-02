@@ -1,6 +1,8 @@
 
 > 読者向けの参考訳です。上記コミットに固定した原文が正本であり、この訳は規範文書の改訂ではありません。状態・数値・実装状況は決定当時の記録です。Accepted は設計の採択であり、実装完了や現在の検証結果を意味しません。自動同期は行いません。原文中の外部調査 ../almide-references や QUALIFICATION.md 等の記述は原文の参照であり、翻訳作業で別途取得・再検証したものではありません。
 
+<a id="adr-0014-pinned-expectations-are-machine-derived-or-absent--never-hand-maintained"></a>
+
 # ADR-0014: 固定する期待値は機械から導出するか、持たない。手作業では維持しない
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](0014-expectations-are-derived.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](0014-expectations-are-derived.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](0014-expectations-are-derived.zh-CN.md)

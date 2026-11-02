@@ -44,6 +44,8 @@ type ProcessCommand = {
 proc = ["git", "cargo"]
 ```
 
+<a id="the-shortcut"></a>
+
 ## 快捷形式
 
 ### `process.exec(cmd: String, args: List[String]) -> Result[String, String]`
@@ -58,6 +60,8 @@ effect fn main() -> Unit = {
   println(listing)
 }
 ```
+
+<a id="run-once-capture-everything"></a>
 
 ## 运行一次并捕获全部输出
 
@@ -101,6 +105,8 @@ effect fn main() -> Unit = {
 }
 ```
 
+<a id="run-on-this-terminal"></a>
+
 ## 在本终端运行
 
 ### `process.run(c: ProcessCommand) -> Result[Int, String]`
@@ -117,6 +123,8 @@ effect fn main() -> Unit = {
   println("cargo build exited ${code}")
 }
 ```
+
+<a id="run-in-the-background"></a>
 
 ## 在后台运行
 
@@ -175,6 +183,8 @@ effect fn main() -> Unit = {
 }
 ```
 
+<a id="signals-exit-and-pid"></a>
+
 ## 信号、退出与 pid
 
 ### `process.kill(pid: Int, signal: Int) -> Result[Unit, String]`
@@ -220,6 +230,8 @@ effect fn main() -> Unit = {
 ```
 
 
+
+<a id="signature-index-13-functions"></a>
 
 ## 签名索引（13 个函数）
 
@@ -276,6 +288,8 @@ effect process.exit(code: Int) -> Never
 // @since 0.12.3 or earlier
 effect process.pid() -> Int
 ```
+
+<a id="type-index-2-types"></a>
 
 ## 类型索引（2 个类型）
 

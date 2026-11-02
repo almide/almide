@@ -304,6 +304,8 @@ false
 
 
 
+<a id="signature-index-42-functions"></a>
+
 ## 固定快照 API 索引 (42 个函数)
 
 ```

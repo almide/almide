@@ -1,3 +1,5 @@
+<a id="type-system-specification"></a>
+
 # 型システム仕様
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](type-system.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](type-system.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](type-system.zh-CN.md)
@@ -13,6 +15,8 @@ Almide は、双方向推論、レコードの構造的型付け、アドホッ�
 > 原文の範囲に関する注記：「実行時の型検査はない」を、実行時検査が一切ない、または安全性全般が証明済みという主張に広げない。§3 の「自動アンラップ」は原文の表現を保ったもので、明示的な `!` を伴う記述であり、暗黙の伝播を追加する意味ではない。
 
 ---
+
+<a id="1-primitive-types"></a>
 
 ## 1. プリミティブ型
 
@@ -41,6 +45,8 @@ let u = ()          // Unit
 テスト：`spec/lang/expr_test.almd`、`spec/lang/bytes_test.almd`、`spec/lang/matrix_test.almd`
 
 ---
+
+<a id="2-collection-types"></a>
 
 ## 2. コレクション型
 
@@ -90,6 +96,8 @@ test "tuples" {
 
 ---
 
+<a id="3-optiont-and-resultt-e"></a>
+
 ## 3. Option[T] と Result[T, E]
 
 値の欠如とエラー処理のための組み込みパラメーター付き型。どちらも専用コンストラクターを持つ `Applied` 型である。
@@ -137,7 +145,11 @@ effect fn read(path: String) -> Result[String, String] = {
 
 ---
 
+<a id="4-record-types"></a>
+
 ## 4. レコード型
+
+<a id="named-records"></a>
 
 ### 名前付きレコード
 
@@ -151,6 +163,8 @@ let px = p.x                          // Float
 let p2 = { ...p, y: 5.0 }            // spread update
 ```
 
+<a id="anonymous-records"></a>
+
 ### 無名レコード
 
 型名のないレコードリテラルは構造的に型付けされる。
@@ -159,6 +173,8 @@ let p2 = { ...p, y: 5.0 }            // spread update
 let user = { name: "alice", age: 30 }   // { name: String, age: Int }
 let n = user.name                        // String
 ```
+
+<a id="open-records-row-polymorphism"></a>
 
 ### 開いたレコード（行多相）
 
@@ -196,9 +212,13 @@ fn get_port(app: { config: { port: Int, .. }, .. }) -> Int = app.config.port
 
 ---
 
+<a id="5-variant-types"></a>
+
 ## 5. Variant 型
 
 代数的データ型（タグ付き共用体）。`|` で区切ったケースとして宣言する。
+
+<a id="unit-payload-enum-like"></a>
 
 ### Unit ペイロード（列挙型風）
 
@@ -213,6 +233,8 @@ fn to_str(d: Direction) -> String = match d {
 }
 ```
 
+<a id="tuple-payload"></a>
+
 ### タプルペイロード
 
 ```almide
@@ -223,6 +245,8 @@ fn area(s: Shape) -> Float = match s {
   Rect(w, h) => w * h,
 }
 ```
+
+<a id="record-payload"></a>
 
 ### レコードペイロード
 
@@ -258,6 +282,8 @@ test "record-payload construction and matching" {
 }
 ```
 
+<a id="recursive-variants"></a>
+
 ### 再帰的 Variant
 
 variant 型は自分自身を参照できる。型検査器は Eq／Hash 検査の無限ループを防ぐため、循環を検出する。
@@ -265,6 +291,8 @@ variant 型は自分自身を参照できる。型検査器は Eq／Hash 検査�
 ```almide
 type Tree[T] = | Leaf(T) | Node(T, List[Tree[T]])
 ```
+
+<a id="inline-variants-no-leading-pipe"></a>
 
 ### インライン Variant（先頭のパイプなし）
 
@@ -277,6 +305,8 @@ type AppError = NotFound(String) | Io(String)
 テスト：`spec/lang/data_types_test.almd`、`spec/lang/type_system_test.almd`、`spec/lang/variant_record_test.almd`
 
 ---
+
+<a id="6-function-types"></a>
 
 ## 6. 関数型
 
@@ -297,6 +327,8 @@ test "function values" {
 
 関数型は決して Eq ではなく、ハッシュ化もできない。
 
+<a id="effect-functions"></a>
+
 ### Effect 関数
 
 `effect fn` は副作用を行う関数を示す。型検査器は、純粋関数が effect 関数を呼べないことを強制する（エラー E006）。`FnSig` の `is_effect` フラグがこれを追跡する。
@@ -306,6 +338,8 @@ import fs
 
 effect fn read_file(path: String) -> Result[String, String] = fs.read_text(path)
 ```
+
+<a id="type-aliases-for-function-types"></a>
 
 ### 関数型の型エイリアス
 
@@ -317,9 +351,13 @@ type Handler = (String) -> String
 
 ---
 
+<a id="7-user-defined-generics"></a>
+
 ## 7. ユーザー定義ジェネリクス
 
 ジェネリック型パラメーターは `[]` 構文を使う（`<>` ではない）。
+
+<a id="generic-functions"></a>
 
 ### ジェネリック関数
 
@@ -339,6 +377,8 @@ test "type arguments" {
 }
 ```
 
+<a id="generic-record-types"></a>
+
 ### ジェネリックレコード型
 
 ```almide
@@ -346,6 +386,8 @@ type Box[T] = { value: T, label: String }
 
 fn unbox[T](b: Box[T]) -> T = b.value
 ```
+
+<a id="generic-variant-types"></a>
 
 ### ジェネリック Variant 型
 
@@ -358,6 +400,8 @@ fn map_right[A, B, C](e: Either[A, B], f: fn(B) -> C) -> Either[A, C] = match e 
 }
 ```
 
+<a id="structural-bounds-on-generics"></a>
+
 ### ジェネリクスの構造的境界
 
 ジェネリックパラメーターに、特定のレコードフィールドを要求できる：
@@ -369,6 +413,8 @@ fn set_name[T: { name: String, .. }](x: T, n: String) -> T = { ...x, name: n }
 ```
 
 境界 `T: { name: String, .. }` は `OpenRecord` 制約である。検査器はこれを `FnSig.structural_bounds` に保存し、各呼び出し位置で検証する。
+
+<a id="protocol-bounds-on-generics"></a>
 
 ### ジェネリクスの Protocol 境界
 
@@ -390,9 +436,13 @@ fn show_named[T: Showable + Nameable](item: T) -> String = item.get_name() + ": 
 
 ---
 
+<a id="8-type-inference"></a>
+
 ## 8. 型推論
 
 Almide は Union-Find データ構造を用いた制約ベースの型推論を行う。
+
+<a id="three-pass-architecture"></a>
 
 ### 3 パス構成
 
@@ -400,9 +450,13 @@ Almide は Union-Find データ構造を用いた制約ベースの型推論を�
 2. **解決**（`solving.rs`）：単一化によって制約を処理する。Union-Find が同値な型変数を統合し、具体型に束縛する。
 3. **置換**（`mod.rs`）：`expr_types` 内のすべての推論変数を、解決済みの具体型へ置き換える。
 
+<a id="inference-variables"></a>
+
 ### 推論変数
 
 新しい型変数は `?N`（例：`?0`、`?1`）と命名する。これらはユーザーが宣言した `TypeVar`（`T`、`U`）と別物である。`UnionFind` 構造は、ランクによる併合と経路圧縮で同値類を管理する。
+
+<a id="bidirectional-inference"></a>
 
 ### 双方向推論
 
@@ -417,6 +471,8 @@ test "inference from annotation and from use" {
 }
 ```
 
+<a id="let-polymorphism"></a>
+
 ### Let 多相
 
 ジェネリック関数は、各呼び出し位置で新しい推論変数を使ってインスタンス化される：
@@ -430,6 +486,8 @@ test "instantiated per call" {
 }
 ```
 
+<a id="lambda-parameter-inference"></a>
+
 ### ラムダ引数の推論
 
 ラムダ引数はその使われ方から推論される：
@@ -439,6 +497,8 @@ test "lambda parameter inferred from the list" {
   assert_eq(list.map([1, 2, 3], (x) => x * 2), [2, 4, 6])   // x: Int inferred from List[Int]
 }
 ```
+
+<a id="constraint-solving"></a>
 
 ### 制約解決
 
@@ -455,9 +515,13 @@ test "lambda parameter inferred from the list" {
 
 ---
 
+<a id="9-structural-typing-and-open-records"></a>
+
 ## 9. 構造的型付けと開いたレコード
 
 Almide は開いたレコード型を通じて、レコードの構造的部分型付けをサポートする。
+
+<a id="compatibility-rules"></a>
 
 ### 互換性の規則
 
@@ -469,9 +533,13 @@ Almide は開いたレコード型を通じて、レコードの構造的部分�
 | `{ a: Int, .. }` | フィールド `a: Int` を持つ `Named` | 成功（名前付き型を解決） |
 | `{ a: Int, .. }` | `{ a: Int }` | 成功（完全一致も許可） |
 
+<a id="unification-with-open-records"></a>
+
 ### 開いたレコードとの単一化
 
 開いたレコードは順序に依存しないフィールド照合を使う。`{ a: Int, .. }` と `{ a: Int, b: String }` の場合、必要な各フィールドに対して、実際の型に同名の対応フィールドがあれば単一化が成功する。
+
+<a id="chain-calling"></a>
 
 ### 連鎖呼び出し
 
@@ -486,9 +554,13 @@ fn chain_a(x: { name: String, breed: String, .. }) -> String = chain_b(x)
 
 ---
 
+<a id="10-protocol-system"></a>
+
 ## 10. Protocol システム
 
 protocol は、適合する型が実装しなければならないメソッド群を定める。Rust の trait や Haskell の型クラスと同じ役割を果たす。
+
+<a id="defining-a-protocol"></a>
 
 ### Protocol の定義
 
@@ -499,6 +571,8 @@ protocol Showable {
 ```
 
 メソッドシグネチャ内の `Self` は `TypeVar("Self")` であり、適合する各箇所で具体型に置換される。
+
+<a id="declaring-conformance"></a>
 
 ### 適合の宣言
 
@@ -521,6 +595,8 @@ test "conformance by convention method" {
 
 規約メソッドは、関数環境へ `Type.method` として登録される。
 
+<a id="built-in-protocols"></a>
+
 ### 組み込み Protocol
 
 | Protocol | メソッド | 注記 |
@@ -531,6 +607,8 @@ test "conformance by convention method" {
 | `Hash` | `fn hash(v: Self) -> Int` | ハッシュ値。`Float`、`Fn`、`Map` は不可。 |
 | `Codec` | `fn encode(v: Self) -> Value`、`fn decode(v: Value) -> Result[Self, String]` | シリアライズ。レコード型は `fn decode_strict(v: Value) -> Result[Self, String]` も導出し、デコード対象のフィールドにないキーを拒否する（C-429）。フィールドに `@skip` / `@skip_decode` を付けられる（C-428）。 |
 
+<a id="protocol-validation"></a>
+
 ### Protocol の検証
 
 すべての宣言を登録した後、検査器は以下を検証する：
@@ -539,6 +617,8 @@ test "conformance by convention method" {
 2. メソッドシグネチャが protocol 定義と一致する（引数型、戻り値型、引数の数）。
 3. `Self` が具体型へ正しく置換されている。
 
+<a id="using-protocols-as-generic-bounds"></a>
+
 ### Protocol をジェネリック境界として使う
 
 ```almide
@@ -546,6 +626,8 @@ fn display[T: Showable](item: T) -> String = item.show()
 ```
 
 各呼び出し位置で、検査器は `T` の具体型が `Showable` への適合を宣言しているか確認する。
+
+<a id="multiple-protocols"></a>
 
 ### 複数の Protocol
 
@@ -567,6 +649,8 @@ test "multiple bounds" {
   assert_eq(show_named(Widget { id: 1, name: "knob" }), "knob: #1")
 }
 ```
+
+<a id="generic-protocols-explicit-conformance"></a>
 
 ### ジェネリック Protocol（明示的適合）
 
@@ -613,6 +697,8 @@ test "generic protocol through an applied bound" {
 
 テスト：`spec/wasm_cross/generic_protocol_conformance.almd`（C-365）、`spec/integration/generic_protocol_ports/`（モジュールをまたぐ ports / adapters / service）、`tests/diagnostics/protocol-*`、`tests/protocol_qualification_test.rs`
 
+<a id="marker-protocols"></a>
+
 ### マーカー Protocol
 
 メソッドのない protocol はマーカーとして働く：
@@ -625,6 +711,8 @@ type Marker: Serializable = { tag: String }
 テスト：`spec/lang/protocol_test.almd`、`spec/lang/trait_impl_test.almd`、`spec/lang/protocol_generics_test.almd`、`spec/lang/protocol_advanced_test.almd`、`spec/lang/derive_conventions_test.almd`
 
 ---
+
+<a id="11-type-aliases"></a>
 
 ## 11. 型エイリアス
 
@@ -643,6 +731,8 @@ let total = s + 50      // works: Score is Int
 テスト：`spec/lang/type_alias_test.almd`
 
 ---
+
+<a id="12-tagged-variants-and-internal-union-types"></a>
 
 ## 12. タグ付き Variant と内部 Union 型
 
@@ -667,6 +757,8 @@ fn render(value: StringOrInt) -> String = match value {
 union との単一化は、束縛のスナップショットを使って各要素を試し、最初に成功したものを確定する。
 
 ---
+
+<a id="13-how-types-flow-through-the-compiler"></a>
 
 ## 13. コンパイラ内での型の流れ
 
@@ -695,6 +787,8 @@ Source (.almd)
              └── emits target-specific type representations
 ```
 
+<a id="key-data-structures"></a>
+
 ### 主要データ構造
 
 - **`Ty` 列挙型**（`crates/almide-types/src/types/mod.rs`）：内部の型表現。この列挙型が、サイズ付き数値型、関数の effect フラグ、コンパイル時定数パラメーターを含む正本の一覧である。
@@ -704,6 +798,8 @@ Source (.almd)
 - **`Kind`**（`crates/almide-types/src/types/constructor.rs`）：「型コンストラクターの型」。`*`、`* -> *`、`* -> * -> *`。
 - **`UnionFind`**（`crates/almide-frontend/src/check/types.rs`）：推論変数の同値関係のための素集合構造。ランクによる併合と経路圧縮を使う。
 - **`Checker`**（`crates/almide-frontend/src/check/mod.rs`）：3 パスの型検査パイプラインを統括する。
+
+<a id="unification-cratesalmide-typessrctypesunifyrs"></a>
 
 ### 単一化（`crates/almide-types/src/types/unify.rs`）
 
@@ -716,6 +812,8 @@ Source (.almd)
 5. その他：`Ty::compatible` に委譲する。
 
 `substitute` は、型中の束縛済み `TypeVar` を、その束縛先に置換する。
+
+<a id="type-constructor-registry-cratesalmide-typessrctypesconstructorrs"></a>
 
 ### 型コンストラクターレジストリ（`crates/almide-types/src/types/constructor.rs`）
 

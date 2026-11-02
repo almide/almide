@@ -14,6 +14,8 @@
 
 扫描源码时，用 `bytes.from_string(source)` 转换一次，再在扫描过程中使用 `bytes.get(buffer, offset) ?? -1`。原生目标使用紧凑的 `u8` 存储；将其交给 `bytes.to_list` 则得到 `List[Int]`（`i64` 元素）。两种转换都不是零拷贝借用视图。要按字节偏移提取 UTF-8 词元，请使用 `string.byte_slice(source, start, end)`。
 
+<a id="naming-convention"></a>
+
 ## 命名约定
 
 `<t>` 是 `u8 | i8 | u16 | i16 | u32 | i32 | i64 | f16 | f32 | f64` 之一；除 `u8`/`i8` 外，每种宽度都有 `_le` 和 `_be`。Almide `Int` 是 i64，`Float` 是 f64；较小宽度在读取时符号扩展或零扩展，在写入时截断，`f16`/`f32` 舍入到最近偶数。
@@ -37,6 +39,8 @@ fn main() -> Unit = {
 }
 ```
 
+<a id="construction--inspection"></a>
+
 ## 构造与检查
 
 | 签名 | 用途 |
@@ -52,6 +56,8 @@ fn main() -> Unit = {
 | `bytes.get(b, i) -> Int?` | 单个字节 |
 | `bytes.compare(a, b) -> Int` | 字典序 |
 
+<a id="slicing--combining"></a>
+
 ## 切片与组合
 
 | 签名 | 用途 |
@@ -66,6 +72,8 @@ fn main() -> Unit = {
 | `bytes.append_bytes(b, other)` | 追加整个缓冲区（修改） |
 | `bytes.clear(b)` | 截断到长度0（修改） |
 
+<a id="typed-reads-and-writes"></a>
+
 ## 有类型的读写
 
 | 系列 | 形状 | 越界 |
@@ -78,6 +86,8 @@ fn main() -> Unit = {
 
 类型 × 字节序 × 操作的每个组合都存在；缺少任何一个，`almide docs-gen --check` 都会失败。下方签名索引逐一列出。
 
+<a id="strings-inside-a-buffer"></a>
+
 ## 缓冲区中的字符串
 
 | 形式 | 组合 |
@@ -86,10 +96,14 @@ fn main() -> Unit = {
 | `pos` 处带 u32 长度前缀的字符串 | `bytes.next_u32_le(b, pos)`（或 `_be`），然后 `bytes.next_bytes(b, p, n)` |
 | 追加带 u32 长度前缀的字符串 | `bytes.append_u32_be(b, n)`，然后 `bytes.append_bytes(b, bytes.from_string(s))` |
 
+<a id="pointer-interop"></a>
+
 ## 指针互操作
 
 `bytes` 的裸指针函数（`as_ptr`、`as_mut_ptr`、`from_raw_ptr`、`copy_to_ptr`、`data_ptr`）已在方言纪元15移除（ADR-0031）。请将 `Bytes` 值作为经过边界检查的 [`ffi`](../../../../stdlib/ffi.md) Region 交给外部代码：`ffi.region(b)` 提供只读视图，`ffi.alloc(n)!` 提供可由外部代码或 `ffi.write` 填写的缓冲区。
 
+
+<a id="signature-index-178-functions"></a>
 
 ## 原文固定快照 API 索引（178个函数）
 

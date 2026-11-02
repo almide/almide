@@ -1,3 +1,5 @@
+<a id="design-philosophy"></a>
+
 # 设计理念
 
 [![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](DESIGN.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](DESIGN.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](DESIGN.zh-CN.md)
@@ -7,6 +9,8 @@
 > 原文：[docs/design/DESIGN.md](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/design/DESIGN.md)（固定提交 `35297a612fb29e3f78f6587aba253aa91d51f466`，英语原文）。这是面向读者的非规范性快照译文，不会自动同步。保留原文的时间、适用范围与主张；翻译时未进行独立测量或实现验证。 原文的 MSR 规则及将首次成功作为唯一竞争轴的说法，与同一固定版本 CLAUDE.md 和 demo/make-verify/README.md 关于 MSR 天花板效应与指标替换的说明不一致，作为历史记述保留。不要视为当前实测结果或已执行的采用规则。他语言比较及“消除”“始终”等效果也是原文设计主张，并非本译文验证的保证。
 
 Almide 针对**最少思考 token**优化：LLM 对语法、语义、修复策略或缺失抽象需要考虑的分支越少，代码生成就越快、越便宜、越可靠。这意味着减少生成、补全和修复过程中的分支，同时提供适当工具，使 AI 无须围绕缺失的抽象临时拼凑方案。
+
+<a id="surface-ambiguity-removed"></a>
 
 ## 消除表层歧义
 
@@ -24,6 +28,8 @@ Almide 针对**最少思考 token**优化：LLM 对语法、语义、修复策�
 | 运算符含义 | 自定义运算符语法、隐式强制转换 | 固定运算符词汇；已声明的 protocol 符合关系可将运算符分派到 requirement method。没有隐式强制转换 | 解析遵循操作数类型和 protocol 要求 |
 | 类型转换 | 隐式扩展、强制转换 | 只有显式转换 | 没有隐藏的类型变化 |
 
+<a id="semantic-ambiguity-removed"></a>
+
 ## 消除语义歧义
 
 | 歧义来源 | Almide 的做法 | 对 LLM 的意义 |
@@ -37,6 +43,8 @@ Almide 针对**最少思考 token**优化：LLM 对语法、语义、修复策�
 | 声明顺序 | 函数可自由相互引用 | 没有前向声明混淆 |
 | 导入风格 | `import module` 或 `import self as alias`——每种目的一个形式；别名仅用于 self-import 和子模块；core 模块自动导入 | 两种导入形式，没有 `from`，没有 `*` |
 
+<a id="the-effect-system-as-generation-space-reducer"></a>
+
 ## 将 `effect` 系统用作生成空间缩减器
 
 `effect fn` 首要目的不是安全功能——它是**代码生成的搜索空间缩减器**。
@@ -47,6 +55,8 @@ Almide 针对**最少思考 token**优化：LLM 对语法、语义、修复策�
 - 仅凭函数签名就能告诉 LLM 每个位置可调用什么，无须阅读函数体
 
 这意味着 LLM 只看当前函数签名及其导入就能生成代码——无须全局分析。
+
+<a id="concurrency-fan--boring-on-purpose"></a>
 
 ## 并发：`fan`——有意保持平淡
 
@@ -66,6 +76,8 @@ Almide 使用显式 fork/join，不暴露 `async`/`await`。普通 `fan` 会 joi
 
 普通 `fan` 不取消 sibling。budget/deadline 形式有单独的协作式截断规则；参见 [SPEC §13](../../../../SPEC.md#13-concurrency-fan)。
 
+<a id="ufcs-why-two-forms-is-acceptable"></a>
+
 ## UFCS：为什么两种形式可以接受
 
 当 UFCS 解析选中 `f` 时，`x.f(y)` 将 `x` 作为第一个参数传入。这不是解析时无条件重写：
@@ -76,12 +88,16 @@ Almide 使用显式 fork/join，不暴露 `async`/`await`。普通 `fan` 会 joi
 - checker 使用接收者类型和作用域解析 convention method、局部/导入函数与内置模块方法（`calls_ufcs.rs`）
 - 将来的 formatter 会规范化为规范形式，消除风格漂移
 
+<a id="iteration-forin--while"></a>
+
 ## 迭代：`for...in` + `while`
 
 两种循环结构，各有明确用途：
 
 - **`for x in xs { ... }`**——遍历集合。适合列表和 map 键的自然选择。兼容 effect（循环体内可以 I/O）。
 - **`while cond { ... }`**——基于条件的循环。条件为真时运行。具有简单循环条件时的直接选择。
+
+<a id="compiler-diagnostics-single-likely-fix"></a>
 
 ## 编译器诊断：一个最可能的修复
 
@@ -100,6 +116,8 @@ Prefix '!x' is not boolean negation in Almide
   Hint: Use the last expression as the return value, or 'guard ... else' for early exit.
 ```
 
+<a id="stdlib-naming-conventions"></a>
+
 ## 标准库命名规则
 
 标准库遵循严格命名规则，减少 LLM 猜测：
@@ -112,6 +130,8 @@ Prefix '!x' is not boolean negation in Almide
 | 没有同义词 | 每个操作一个名称，没有别名 | `len` 而非 `length`/`size`/`count` |
 | 对称配对 | 逆操作采用对应名称 | `read_text`/`write_text`、`split`/`join`、`to_string`/`to_int` |
 | 没有名称语义漂移 | 只有跨模块语义匹配时才复用相同操作名 | `string.len` 和 `list.len` 都表示“计数元素”，不在同名之下隐藏不同操作 |
+
+<a id="what-almide-sacrifices"></a>
 
 ## Almide 牺牲了什么
 
@@ -130,6 +150,8 @@ Prefix '!x' is not boolean negation in Almide
 
 这些不是缺失功能——而是**保持生成空间聚焦的有意约束**。目标不是为极简而极简，而是确保每个抽象有一条清晰路径。
 
+<a id="the-msr-rule-how-features-are-added--rejected"></a>
+
 ## MSR 规则（如何添加 / 拒绝功能）
 
 > **设计规则**：对人类美观、对 LLM 却是陷阱的语法不予采用。
@@ -146,6 +168,8 @@ Prefix '!x' is not boolean negation in Almide
 - 消除诊断后重试也无法修复的一类错误（天花板效应）。
 
 从 `v0.14.5` 起的发布说明包含 **MSR delta 表**，让每次发布对自身影响负责。`docs/roadmap/active/` 中的新功能提案必须引用所针对的失败模式及预期 MSR 变化。
+
+<a id="beauty-axis-vs-msr-axis"></a>
 
 ## 美观轴与 MSR 轴
 
