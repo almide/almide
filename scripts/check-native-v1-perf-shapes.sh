@@ -76,7 +76,10 @@ grep -v $'\tOK$' "$WORK/verdicts.txt" | grep -v '^spec/' | sed 's/^/UNCERTIFIED 
 "$LLVM_BIN/llvm-cov" export "$BIN" -instr-profile="$WORK/run.profdata" -skip-expansions > "$WORK/cov.json" \
   || { echo "native-v1-perf-shapes: llvm-cov export failed"; exit 2; }
 
-python3 - "$WORK/cov.json" "$BASELINE" "$UPDATE" "$fail" "$LLVM_BIN/llvm-cxxfilt" <<'PY'
+# Rust symbols (v0 mangling) read through binutils' c++filt.
+DEMANGLE="$(command -v c++filt || true)"
+[ -n "$DEMANGLE" ] || { echo "native-v1-perf-shapes: c++filt (binutils) is not installed"; exit 2; }
+python3 - "$WORK/cov.json" "$BASELINE" "$UPDATE" "$fail" "$DEMANGLE" <<'PY'
 import json, re, sys, os, subprocess
 cov, baseline, update, fail, cxxfilt = sys.argv[1], sys.argv[2], sys.argv[3] == "1", int(sys.argv[4]), sys.argv[5]
 root = os.getcwd() + "/"
