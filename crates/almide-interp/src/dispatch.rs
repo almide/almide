@@ -157,6 +157,9 @@ impl<'a> Interpreter<'a> {
             }
         }
 
+        if let Some(module) = self.dropped_stub_module(name) {
+            return self.eval_module_call(module, name, args, scope);
+        }
         Flow::Unsupported(format!("named call `{}`", n))
     }
 
@@ -219,13 +222,18 @@ impl<'a> Interpreter<'a> {
     /// sibling (`env.__set` inside `env.set`) already resolves through
     /// `own_module_sibling` and the interp's own intrinsic evaluation, which
     /// must stay the interp's vote rather than the module bridge's copy.
-    /// A program-loaded stdlib module whose lowering dropped its stubs (the
-    /// wasm leg's) has no entry for the name at all; its own source's
-    /// declaration decides there, the same way.
     pub(crate) fn own_module_intrinsic(&self, name: Sym) -> Option<Sym> {
-        if let Some(module) = self.cur_bundled.get() {
-            return crate::stdlib_pool::bundled_stub(module, name).then_some(module);
-        }
+        let module = self.cur_bundled.get()?;
+        crate::stdlib_pool::bundled_stub(module, name).then_some(module)
+    }
+
+    /// The LAST step of a bare call no other step resolved: inside a
+    /// program-loaded stdlib module whose lowering dropped its `@intrinsic`
+    /// stubs (the wasm leg's: `__v7_stamp` inside `uuid.v7`,
+    /// `to_string_lossy` inside `bytes`), the module's own source declares
+    /// the stub, so the call means `module.name`. Last, so every name an
+    /// earlier step answers keeps that answer.
+    fn dropped_stub_module(&self, name: Sym) -> Option<Sym> {
         let space = (self.cur_space.get() as usize).checked_sub(1)?;
         let owner = self.program.modules.get(space)?.name;
         let dropped = !self.module_fns.contains_key(&(owner, name));
