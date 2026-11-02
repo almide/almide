@@ -94,6 +94,11 @@ pub(crate) struct AddrState {
     /// the fields stored so far of the one being built.
     whole: BTreeSet<ValueId>,
     building: BTreeMap<ValueId, Vec<bool>>,
+    /// Enum blocks built whole (`render_native_slots::enum_built_whole`):
+    /// the case's tag and payload width, and the payloads stored so far of
+    /// the one being built (each waits in its own local).
+    whole_enum: BTreeMap<ValueId, (u32, usize)>,
+    building_enum: BTreeMap<ValueId, (u32, Vec<Option<NTy>>)>,
 }
 
 impl AddrState {
@@ -230,6 +235,7 @@ impl AddrState {
             })
             .collect();
         let whole = slots::built_whole(func, &alloc_rec, &base_of);
+        let whole_enum = slots::enum_built_whole(func, &alloc_rec, &base_of, &consts);
         let reassigned = func
             .ops
             .iter()
@@ -284,6 +290,8 @@ impl AddrState {
             moves,
             whole,
             building: BTreeMap::new(),
+            whole_enum,
+            building_enum: BTreeMap::new(),
         }
     }
 }
@@ -375,6 +383,73 @@ fn slot_index(a: &Addr) -> Option<String> {
         Some(Idx::Bytes(b)) => format!("({k}i64 + {} / {w}i64) as usize", var(b)),
         Some(Idx::Elem(i)) => format!("({k}i64 + {}) as usize", var(i)),
     })
+}
+
+/// One store into an enum block built whole (`AddrState::whole_enum`): the
+/// tag store renders nothing (a nullary case is built there), a payload
+/// waits in its own local, and the last payload builds the case in one
+/// expression — no default payloads allocated and replaced.
+#[allow(clippy::too_many_arguments)]
+fn build_enum_slot(
+    st: &mut AddrState,
+    tys: &BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    indent: usize,
+    base: ValueId,
+    i: u16,
+    k: usize,
+    v: ValueId,
+) -> Result<bool, LowerError> {
+    use crate::render_native_rec::{enum_cases, owned_ty, struct_name};
+    let line = |out: &mut String, s: String| {
+        for _ in 0..indent {
+            out.push_str("    ");
+        }
+        out.push_str(&s);
+        out.push('\n');
+    };
+    let b = var(base);
+    let (t, _) = st.building_enum[&base];
+    let fields = enum_cases(i)
+        .and_then(|cs| cs.into_iter().find(|(c, _)| *c == t).map(|(_, fs)| fs))
+        .ok_or_else(|| wall("native: an enum built whole at an undeclared case"))?;
+    if k == 0 {
+        if st.addrs.contains_key(&v) || tys.get(&v).copied() != Some(NTy::I64) {
+            return Err(wall("native: a non-scalar enum tag"));
+        }
+        if fields.is_empty() {
+            line(out, format!("{b} = {}::C{t};", struct_name(i)));
+            st.building_enum.remove(&base);
+        }
+        return Ok(true);
+    }
+    let f = *fields.get(k - 1).ok_or_else(|| wall("native: a store past an enum case's payload"))?;
+    let rhs = match (f, st.addrs.get(&v).copied(), tys.get(&v).copied()) {
+        (NTy::I64, None, Some(NTy::I64)) => var(v),
+        (NTy::I64, None, Some(NTy::F64)) => format!("{}.to_bits() as i64", var(v)),
+        (f, Some(sv), _) if sv.off == 0 && sv.idx.is_none() => match tys.get(&sv.base).copied() {
+            Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g).ok_or_else(|| wall("native: an unowned enum payload"))?,
+            g => return Err(wall(format!("native: a {g:?} payload stored into a {f:?} enum slot"))),
+        },
+        (f, _, g) => return Err(wall(format!("native: a {g:?} value stored into a {f:?} enum slot"))),
+    };
+    line(out, format!("let mut {b}_f{k}: {} = {rhs};", owned_ty(f)));
+    let done = &mut st.building_enum.get_mut(&base).expect("building").1;
+    done[k - 1] = Some(f);
+    if done.iter().all(Option::is_some) {
+        let args = done
+            .iter()
+            .enumerate()
+            .map(|(j, f)| match f {
+                Some(NTy::Rec(_)) => format!("Box::new({b}_f{})", j + 1),
+                _ => format!("{b}_f{}", j + 1),
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        line(out, format!("{b} = {}::C{t}({args});", struct_name(i)));
+        st.building_enum.remove(&base);
+    }
+    Ok(true)
 }
 
 /// Render `op` if it belongs to the address algebra. `Ok(false)` = not this
@@ -569,6 +644,9 @@ pub(crate) fn render_addr_op(
             if let (Some(i), Some(NTy::Rec(_)), Some(k)) = (is_enum(ty(tys, &ad.base)), ty(tys, &ad.base), rec_slot(&ad)) {
                 use crate::render_native_rec::{enum_slot_kinds, kind_suffix, struct_name};
                 let b = var(ad.base);
+                if st.building_enum.contains_key(&ad.base) {
+                    return build_enum_slot(st, tys, out, indent, ad.base, i, k, v);
+                }
                 if k == 0 {
                     if st.addrs.contains_key(&v) || ty(tys, &v) != Some(NTy::I64) {
                         return Err(wall("native: a non-scalar enum tag"));
@@ -685,6 +763,11 @@ pub(crate) fn render_addr_op(
             if let (true, Some(n)) = (st.whole.contains(dst), slots::struct_width(i)) {
                 line!("let mut {}: {};", var(*dst), crate::render_native_rec::struct_name(i));
                 st.building.insert(*dst, vec![false; n]);
+                return Ok(true);
+            }
+            if let Some(&(t, n)) = st.whole_enum.get(dst) {
+                line!("let mut {}: {};", var(*dst), crate::render_native_rec::struct_name(i));
+                st.building_enum.insert(*dst, (t, vec![None; n]));
                 return Ok(true);
             }
             line!("let mut {}: {} = Default::default();", var(*dst), crate::render_native_rec::struct_name(i));
