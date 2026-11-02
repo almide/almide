@@ -100,6 +100,10 @@ pub(crate) struct AddrState {
     /// the case's tag and payload width, and the payloads stored so far of
     /// the one being built (each waits in its own local).
     whole_enum: BTreeMap<ValueId, (u32, usize)>,
+    /// One-element string lists that exist only to be appended
+    /// (`render_native_slots::single_elem_lists`): the element waits in
+    /// `<list>_e0` and the append pushes it. `true` once it is stored.
+    single: BTreeMap<ValueId, bool>,
     building_enum: BTreeMap<ValueId, (u32, Vec<Option<NTy>>)>,
 }
 
@@ -238,6 +242,7 @@ impl AddrState {
             .collect();
         let whole = slots::built_whole(func, &alloc_rec, &base_of);
         let whole_enum = slots::enum_built_whole(func, &alloc_rec, &base_of, &consts);
+        let single = slots::single_elem_lists(func, &base_of, &consts).into_iter().map(|b| (b, false)).collect();
         let reassigned = func
             .ops
             .iter()
@@ -295,6 +300,7 @@ impl AddrState {
             building: BTreeMap::new(),
             whole_enum,
             building_enum: BTreeMap::new(),
+            single,
         }
     }
 }
@@ -465,6 +471,24 @@ fn build_enum_slot(
         st.building_enum.remove(&base);
     }
     Ok(true)
+}
+
+/// The append of a one-element list held as its element
+/// ([`AddrState::single`]), opening at `ops[i]`: `acc.push(e)` when the
+/// self-append window holds (an owned string list `acc`, its new value read
+/// by nothing else); otherwise the list is built here (`vec![e]`) and the
+/// caller renders the append as before. `None` when `ops[i]` is no such
+/// append.
+pub(crate) fn single_push(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, NTy>, st: &mut AddrState) -> Option<(String, bool)> {
+    let (s, x, d) = crate::render_native_append::self_append_window(func, i)?;
+    if st.single.get(&x) != Some(&true) {
+        return None;
+    }
+    st.single.remove(&x);
+    if tys.get(&s) == Some(&NTy::VecStr) && func.ret != Some(d) && crate::render_native_append::touches(func, d) == 2 {
+        return Some((format!("{}.push({}_e0);", var(s), var(x)), true));
+    }
+    Some((format!("let mut {x}: Vec<AlmideString> = vec![{x}_e0];", x = var(x)), false))
 }
 
 /// Render `op` if it belongs to the address algebra. `Ok(false)` = not this
@@ -754,6 +778,11 @@ pub(crate) fn render_addr_op(
                         Some(NTy::StrRef) => format!("AlmideString::from({})", var(sv.base)),
                         other => return Err(wall(format!("native: a {other:?} handle stored into a List[String] slot"))),
                     };
+                    if let Some(done) = st.single.get_mut(&ad.base) {
+                        line!("let mut {}_e0: AlmideString = {rhs};", var(ad.base));
+                        *done = true;
+                        return Ok(true);
+                    }
                     line!("{}[{ix}] = {rhs};", var(ad.base));
                     return Ok(true);
                 }
@@ -772,6 +801,10 @@ pub(crate) fn render_addr_op(
         }
         Op::Alloc { dst, init: Init::DynListStr { len }, .. } if ty(tys, len) == Some(NTy::I64) && !st.alloc_rec.contains_key(dst) => {
             tys.insert(*dst, NTy::VecStr);
+            if st.single.contains_key(dst) {
+                line!("// {}: a one-element list, its element pushed at the append", var(*dst));
+                return Ok(true);
+            }
             line!(
                 "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
                 var(*dst),

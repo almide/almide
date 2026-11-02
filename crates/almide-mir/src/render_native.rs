@@ -429,6 +429,15 @@ fn render_fn(
             ops.nth(2);
             continue;
         }
+        // A one-element string list held as its element: pushed whole, or
+        // built here for the append below.
+        if let Some((code, pushed)) = crate::render_native_addr::single_push(func, i, &tys, &mut addrs) {
+            line!("{code}");
+            if pushed {
+                ops.nth(1);
+                continue;
+            }
+        }
         if let Some(append) = crate::render_native_append::list_self_append(func, i, &tys, &borrows.arms) {
             line!("{append}");
             ops.nth(1);

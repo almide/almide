@@ -62,7 +62,7 @@ pub(crate) fn str_self_append(func: &MirFunction, i: usize, tys: &BTreeMap<Value
 
 /// How many times `v` occurs across the function's ops (definitions and
 /// operands, exhaustively).
-fn touches(func: &MirFunction, v: ValueId) -> usize {
+pub(crate) fn touches(func: &MirFunction, v: ValueId) -> usize {
     let mut vals = Vec::new();
     for op in &func.ops {
         crate::mir_ops::op_values(op, &mut vals);
