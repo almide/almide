@@ -1,6 +1,6 @@
 # 用 Almide 编写的项目
 
-[English](./written-in-almide.md) | [日本語](./written-in-almide.ja.md) | [简体中文](./written-in-almide.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./written-in-almide.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](./written-in-almide.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](./written-in-almide.zh-CN.md)
 
 标准库是本仓库中最大的 Almide 程序。以下项目展示其他地方的用途。这是一份目录，并不声称所有列出的平台、宿主或包都已使用当前编译器构建和测试。下方仓库数与代码行数统计来自 2026-09-30 的观测。
 

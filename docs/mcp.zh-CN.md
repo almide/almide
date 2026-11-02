@@ -1,6 +1,6 @@
 # 面向智能体的 Almide：MCP 服务器 + Claude Code 插件
 
-[English](./mcp.md) | [日本語](./mcp.ja.md) | [简体中文](./mcp.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./mcp.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](./mcp.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](./mcp.zh-CN.md)
 
 > 最后更新：2026-09-26
 

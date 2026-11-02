@@ -1,6 +1,6 @@
 # Almide ドキュメント
 
-[English](./README.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](./README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./README.zh-CN.md)
 
 まずはここから。目的別の入口を案内します。
 
@@ -36,4 +36,4 @@ MSR（modification survival rate）の管理先は、ここではなく [almide-
 
 [翻訳の進捗とファイル別の対象範囲](./project/TRANSLATION-INVENTORY.md).
 
-診断コードの読者向け翻訳: [日本語](./translations/ja/diagnostics/README.md) · [简体中文](./translations/zh-CN/diagnostics/README.md).
+診断コードの読者向け翻訳: [日本語](translations/reference/docs/diagnostics/README.ja.md) · [简体中文](translations/reference/docs/diagnostics/README.zh-CN.md).

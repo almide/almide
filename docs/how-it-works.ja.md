@@ -1,6 +1,6 @@
 # 仕組み
 
-[English](./how-it-works.md) | [日本語](./how-it-works.ja.md) | [简体中文](./how-it-works.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./how-it-works.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](./how-it-works.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./how-it-works.zh-CN.md)
 
 コンパイラの処理の流れを1ページにまとめています。モジュール構成と各パスの詳細は [ARCHITECTURE.md](./ARCHITECTURE.md) を参照してください。
 

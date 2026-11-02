@@ -1,0 +1,513 @@
+# Architecture
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](ARCHITECTURE.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](ARCHITECTURE.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](ARCHITECTURE.zh-CN.md)
+
+> This is a non-normative reader copy of the [pinned original](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/ARCHITECTURE.md), not a new authority, generator output or automatically synchronized document. Original sources and machine consumers are unchanged. Historical claims and examples have not been independently revalidated here.
+
+
+Almide is a Rust workspace containing the compiler, runtime and backend crates,
+and independent verification tools. [`Cargo.toml`](../../../../Cargo.toml) is the
+source of truth for workspace membership and exclusions; the default build
+includes both `almide` and the separate `almide-verify` checker. The Lean 4
+proof project `almide-perceus-belt` is not a Cargo crate. Key dependencies: `serde` +
+`serde_json` (AST serialization), `toml` (template loading), `clap` (CLI),
+`lasso` (string interning), `wat` + `wasmparser` + `wasm-encoder` (WASM
+assembly/validation), `lsp-server` + `lsp-types` (language server).
+
+## Pipeline
+
+```
+  .almd source
+       │
+       ▼
+  ┌─────────┐   ┌──────────┐   ┌─────────┐   ┌──────────────┐
+  │  Lexer   │──▶│  Parser  │──▶│   AST   │──▶│ Type Checker │   almide-syntax / almide-frontend
+  └─────────┘   └──────────┘   └─────────┘   └──────┬───────┘
+                                                     │  expr_types + env
+                                                     ▼
+                               ┌───────────────────────────────┐
+                               │   Lowering (AST → Typed IR)   │   almide-frontend
+                               └──────────────┬────────────────┘
+                                              ▼
+                               ┌───────────────────────────────┐
+                               │ optimize → verify → mono →    │   almide-optimize
+                               │ ir_link                       │
+                               └──────────────┬────────────────┘
+                          ┌───────────────────┼──────────────────────┐
+                          ▼                   ▼                      ▼
+                 Rust target          WASM target             WGSL target
+                 codegen v3           structural leg          emit_wgsl
+                 (nanopass + TOML     (wasm_leg →             (almide-codegen)
+                 templates + walker)  almide-wasm, direct
+                                      emit; wall = E082)
+                          │                   │
+                          ▼                   ▼
+                 native trust-spine      .wasm (optional
+                 (v1 Rust render,        --wasm-opt with
+                 v0 fallback on wall)    parity gate)
+                          │
+                          ▼
+                 rustc/cargo → binary
+```
+
+`almide-interp` sits beside the backends as a third executor: a tree-walking
+interpreter over the linked IR (after `lower → optimize → mono → ir_link`,
+before any target-lowering pass). It shares no codegen pass with either backend
+and serves as the cross-target oracle / executable spec.
+
+### Targets
+
+- **native (default)** — codegen v3 emits Rust source; the v1 native
+  trust-spine renderer (`almide-mir`) replaces it where it can lower (v0
+  codegen source is the fallback on a wall); `rustc`/`cargo` produces the
+  binary.
+- **`--target wasm`** — one leg, the structural leg
+  (`src/cli/build.rs::render_wasm_module_routed`): cheap PROJECT-SHAPE
+  checks run up front, and a structural wall is a hard E082 error (below).
+  The routing is ONE library function, `almide::wasm_route::route_wasm`
+  (src/wasm_route.rs, #2554): the CLI reads the probe switches off the
+  environment into its `RouteOptions` and renders its `RouteError`s; a
+  wasm32 consumer (the playground) calls `render_wasm_routed` with its
+  pre-parsed tabs (`ModuleSource::Provided`) and gets the same leg
+  (`tests/wasm_route_playground_test.rs` exercises that form):
+  - the **commissioned structural leg** (default): `almide::wasm_leg`
+    (parse→check→lower→self-host link→`link_ir`) feeds
+    `almide-wasm::emit_program`, which emits wasm bytes structurally
+    (wasm-encoder — no WAT text). Differential gates compare observable output against native
+    on the versioned wasm_cross corpus. `almide run` executes on the embedded
+    `almide-wasm-run` host (within its supported operation set). `almide build`
+    packages a core module through `to_wasi`, or a component according to flags
+    and host operations (`src/cli/build_wasm.rs::WasmPackage`); a serve-shaped
+    HTTP program becomes a WASI 0.3 handler component. Stock runtimes must
+    support the artifact's interfaces; process operations require Almide's
+    private host capability. The stock-runtime parity gates cover their
+    declared fixture subsets. The closed core-module subset admitted by `almide-wasm-vm` can run on
+    that qualification-scoped interpreter (#865); it is not a component or
+    arbitrary-host runner. Its load-time validator rejects unsupported shapes.
+    `tests/wasm_vm_parity_test.rs` compares its admitted corpus with the stock
+    runtime and the Critical-profile fixtures with native.
+  - the **incumbent WAT trust-spine** (`almide-mir` rendering WAT) is gone:
+    #2752 removed its last route and #2761 deleted the renderer. `almide-mir`
+    keeps MIR lowering (the native leg), the native renderers, and the
+    MIR certificate witness producer (proofs/gate.sh, corpus-wall.sh;
+    `almide verify` judges the structural leg's bundle since #4011).
+  Every `ALMIDE_*` switch the tree reads — the gate
+  bypasses, the ablations, the trace channels — is one registry,
+  `almide_base::env::SWITCHES` (`almide switches` lists it; `docs/specs/cli.md`
+  embeds its table; #2205). The compiler proper reads only through
+  `almide_base::env::{flag, var}`: one boolean semantics, and a forced route
+  or a bypassed gate inherited from the environment is announced once on
+  stderr, so a verdict produced under it says so.
+  A structural WALL is a hard, diagnosed `error[E082]` — a `wall: <reason>`
+  line and a `--> in <fn>` site line — never a fallback (#782's sin was
+  falling into unverified v0 codegen; `ALMIDE_VERIFIED_DEBUG=1` names the
+  wall). `--wasm-opt` is opt-in and
+  guarded by a differential parity gate against the verified module
+  (`tests/wasm_runtime_opt_parity.rs::wasm_opt_parity_spec`).
+- **`--target wasm32` / `wasi`** — the generated Rust source compiled by bare
+  `rustc --target wasm32-wasip1` (SIMD128 enabled). A different beast from
+  `--target wasm`.
+- **`--target wgsl`** — GPU compute shaders via `emit_wgsl` in almide-codegen.
+
+`--verified` is the default (`--no-verified` is deprecated and warns).
+`almide run --target wasm` and `almide build --target wasm` share
+`compile_to_wasm_bytes`, so run and build observe one emission. On the
+structural leg the BUILD artifact is packaged for its selected core/component
+route; the embedded-host module and shipped artifact need not have identical bytes.
+
+## Crate Structure
+
+Selected components are shown below; this is a navigation map, not a complete
+workspace roster. See [`Cargo.toml`](../../../../Cargo.toml) for all members.
+
+```
+almide/                    Workspace root
+├── src/                   CLI binary (almide)
+│   ├── main.rs            Subcommands: init, run, build, test, check, lsp,
+│   │                      explain, fmt, compile, clean, add, deps, dep-path,
+│   │                      install, self-update, ide, fix, docs-gen
+│   │                      (no subcommand → REPL)
+│   ├── compile_driver.rs  Shared front half: parse → check → lower → optimize
+│   ├── resolve.rs         Module resolution (filesystem + git deps)
+│   ├── project.rs         almide.toml parsing, PkgId
+│   ├── project_fetch.rs   Git dependency fetching
+│   └── cli/               Subcommand implementations; lsp.rs is the LSP server
+│                          (lsp-server over stdio); repl.rs; ide.rs = semantic
+│                          queries for agents (outline, doc, stdlib-snapshot)
+│
+├── crates/
+│   ├── almide-base/       Foundation: Sym interning (lasso), Span, Diagnostic
+│   ├── almide-syntax/     Lexer, recursive-descent parser, untyped AST
+│   ├── almide-types/      Resolved Ty, unification, protocol defs,
+│   │                      stdlib_info.rs (module registry, auto-import lists,
+│   │                      bundled stdlib sources via generated/embedded.rs)
+│   ├── almide-lang/       Facade crate: re-exports syntax + types (no logic)
+│   ├── almide-frontend/   Type checker (Infer → Solve → Resolve), AST→IR
+│   │                      lowering, canonicalize, ir_link
+│   ├── almide-driver/     Shared post-typecheck driver: optimize → mono → ir_link
+│   ├── almide-ir/         Typed IR: IrProgram/IrExpr (every node carries ty),
+│   │                      VarId/VarTable, visitors
+│   ├── almide-mir/        v1 Middle IR — ownership/layout for its native
+│   │                      renderer (Perceus). #![forbid(unsafe_code)].
+│   │                      MIR lowering + the native trust-spine renderer
+│   │                      + MIR certificate witnesses (proofs/gate.sh).
+│   │                      No wasm/WAT renderer since #2761.
+│   ├── almide-optimize/   Monomorphization, DCE, constant propagation,
+│   │                      stream fusion
+│   ├── almide-codegen/    Codegen v3 for Rust (+ WGSL): nanopass pipeline,
+│   │                      TOML template renderer, target-agnostic walker;
+│   │                      templates/rust.toml = Rust syntax templates (~330 rules)
+│   ├── almide-wasm/       Structural wasm emitter and emission witnesses
+│   ├── almide-wasm-run/   Embedded host for emitted wasm modules
+│   ├── almide-wasi/       Transform emitted modules into stock-WASI artifacts
+│   ├── almide-verify/     Independent certificate checker, shipped beside almide
+│   ├── almide-anchor-check/  Check located witness events against shipped wasm bytes
+│   ├── almide-interp/     Pre-codegen IR interpreter — 3rd cross-target oracle
+│   ├── almide-tools/      Formatter, module interface (almide compile), ALMDI
+│   ├── almide-dialect/    Pure-Rust MLIR dialect schema (no FFI)
+│   ├── almide-egg-lab/    Equality-saturation engine used by EggSaturationPass
+│   ├── almide-kernel/     [cargo-excluded] target-specific SIMD numeric kernels
+│   └── almide-perceus-belt/  [Lean 4, not a cargo crate] Perceus RC/ownership
+│                             proof belt
+│
+├── grammar/               Git submodule → almide/almide-grammar: descriptive
+│                          keyword/precedence data consumed by the tree-sitter
+│                          and TextMate generators (not by the compiler build)
+├── stdlib/                Self-hosted .almd modules (see below)
+└── runtime/rs/src/        Native Rust runtime for @intrinsic functions
+```
+
+## Codegen v3 (Rust target): Three-Layer Architecture
+
+All semantic decisions are made in the IR before any text is emitted. The
+walker sees only typed IR nodes — it never checks what target it renders for.
+
+1. **Nanopass pipeline** — each `pass_*.rs` receives `&mut IrProgram` and does
+   one semantic rewrite (StdlibLowering, ResultPropagation, CloneInsertion,
+   BuiltinLowering, FanLowering, ...). The order is DECLARED, not merely
+   spelled: every pass names the passes it needs before it (`depends_on`) and
+   the ones it must precede (`run_before`), three representation boundaries
+   are barriers, and `scripts/check-pass-shuffle.sh` proves the declarations
+   are the whole truth by running seeded random orders they permit and
+   byte-diffing the emitted Rust (#2186).
+2. **Template renderer** — TOML files define syntax patterns; the walker calls
+   `templates.render_with("if_expr", ...)`. All string rendering happens here.
+3. **Walker** — target-agnostic IR tree renderer; zero `if target == Rust`
+   checks, and no ownership decisions of its own (#2186): whether a value is
+   moved, cloned, borrowed or owned at a site is a pass's verdict, carried to
+   the walker as an IR node (`Borrow`, `Clone`, `Deref`, an owning method
+   call) or a `CodegenAnnotations` entry (`var_storage`, `shared_mut_vars`,
+   `borrowed_loop_vars`, `param_borrows`, …). The walker picks a SPELLING per
+   storage class and renders every node by its kind alone. It runs no
+   analysis walk, keeps no per-function ownership set, and never decides on
+   the text it just rendered — `scripts/check-walker-reads-annotations.sh`
+   holds that line. The ownership verdicts themselves are held by a
+   property, not only by fixtures: `tests/native_borrow_oracle_test.rs`
+   generates, per borrow-eligible type, every use a body can make of a
+   param crossed with every call-site shape, and asserts the program
+   checks, builds natively and prints what the wasm leg prints — and, under
+   `ALMIDE_ALLOC_COUNT=1` (a counting allocator the native build injects),
+   allocates exactly the (allocs, deallocs) pair pinned per program in
+   `tests/golden/native-borrow-oracle-alloc.txt`: a clone where a borrow
+   would do changes neither stdout nor the build, only that count (#2228).
+   The wasm leg has the twin: `ALMIDE_WASM_ALLOC_COUNT=1` makes the
+   structural emitter count `$alloc` / `$free` in four exported globals
+   (absent, not zero, when off) and `crates/almide-wasm/tests/alloc_ledger.rs`
+   pins `allocs reused bytes frees` per corpus fixture beside the `__heap`
+   watermark, so churn the watermark cannot see is ratcheted too (#2407;
+   [docs/wasm/WASM-OUTPUT.md](../../../wasm/WASM-OUTPUT.md)).
+   The verdicts themselves are certified on every DEBUG native build, and on
+   a release build that asks (`ALMIDE_CERTIFY_OWNERSHIP=report|fail|off`,
+   `crates/almide-codegen/src/certify_ownership.rs`, #2231): the final IR is
+   re-walked and each param's borrow mode and each `Clone` is checked against
+   what the occurrences actually do — a borrowed param consumed, an owned
+   value cloned at its last use, an owned param nothing needs owned. The
+   corpus ledger (`proofs/ownership-certifier-baseline.txt`,
+   `scripts/check-ownership-certifier.sh`) is shrink-only and EMPTY: a
+   violation is a defect, and the debug build refuses to emit it.
+
+## WASM backend (structural leg)
+
+The wasm backend is the structural leg (`src/wasm_leg.rs` →
+`almide-wasm::emit_program`); the v1 MIR→WAT pipeline that once served it
+from `almide-mir` was deleted by #2761.
+
+- Ownership/RC follows Perceus (Perceus-style RC in linear memory). The Coq
+  theorems WasmEncode/WasmExec/WasmRcDec stand about a MODELED runtime (the
+  retired incumbent's); the structural runtime's bytes are checked against
+  `StructuralDecode.v` by `proofs/check-structural-bytes.sh`. The structural
+  leg records per-build witnesses; `almide verify` delegates their checking
+  to the independent `almide-verify`. For supported core artifacts (components are refused by `almide verify`),
+  a supplied artifact or one found at the default path is bound to the bundle
+  with SHA-256
+  (#4011). The certified corpus is exercised by
+  `proofs/structural-wall.sh`. This is not a proof of semantic correctness
+  or whole-artifact memory safety: coverage and recording assumptions remain.
+  See [proven vs trusted](../../../contracts/proven-vs-trusted.md) and the
+  [memory-safety gap table](../../../design/MEMORY-SAFETY.md#the-gap-table-2026-10-24-4011).
+- Stdlib calls are *self-hosted*: implementations from `stdlib/*.almd` are
+  compiled along with user code. New self-hosted bodies declare
+  `@implements("module.fn")`; the build generates
+  `crates/almide-types/src/generated/implements.rs` from those declarations.
+  `self_host_registry.rs` combines the declared entries with a legacy table
+  that only shrinks (`tests/name_keyed_sites_test.rs`), not a table to extend
+  for new bodies. An unlinked stdlib call is a wall (hard error).
+- `wasmparser::validate` guards the test harness. `almide test --target wasm`
+  renders through the SAME route as `build`/`run --target wasm` (#2179):
+  the structural leg (`almide-wasm`, with the shared `__test_runner`
+  synthesis and the structural in-test assert lowering from
+  `almide_driver::test_runner`); a file it walls is reported as a WALL, and
+  the default `almide test` lane then runs it natively.
+
+## Optimization pass roster per target
+
+Every optimization or rewrite pass, where it runs, and for which target
+(#929). Gated: `scripts/check-pass-roster.sh` enumerates the `pass_*.rs`
+files and `NanoPass::name()` strings in `almide-codegen`, and the pass modules
+and `ALMIDE_ONLY_PASS` axis names in `almide-optimize`, and fails when one is
+missing from this section — the roster cannot drift from the code. The
+measured cost of the divergence is the wasm/native runtime ratio per program in
+[docs/benchmarks/wasm-runtime.txt](../../../benchmarks/wasm-runtime.txt), ratcheted by
+`scripts/check-wasm-runtime-ratio.sh`.
+
+Which leg runs what:
+
+| Leg | Selected when | Pre-split (shared) | Target-side passes |
+|---|---|---|---|
+| native, v1 MIR render | `almide run`/`build` default (`--verified`), where `almide-mir` lowers | `link_ir` | almide-mir native rung (table D, the native rows) |
+| native, codegen v3 | `almide test` (native), and the fallback on a v1 native wall; `--target rust` emit; `--target wasm32`/`wasi` | `link_ir` | almide-codegen nanopass pipeline, Rust arm (table B) |
+| `--target wasm`, structural (the only wasm leg) | `src/wasm_leg.rs` → `almide-wasm::emit_program` | `link_ir` | almide-wasm emitter rewrites (table C) |
+| `--target wgsl` | `almide-codegen::emit_wgsl` | `link_ir` | almide-codegen nanopass pipeline, Wgsl arm (table B, 4 passes) |
+| interp (oracle) | `almide-interp` | `link_ir` | none — by design |
+
+### A. Shared, pre-split — `almide-driver::link_ir` (`crates/almide-optimize`)
+
+The ONE stage order every leg and the interp oracle consume (`tests/one_driver_test.rs`
+fails on a second spelling). `optimize_half` = rows 0–7; `link_half` = rows 8–9.
+`ALMIDE_DISABLE_OPT=1` skips the four perf rows (the ablation leg of the perf
+ratchet); `ALMIDE_ONLY_PASS=sink|fold|dce|propagate` runs exactly one of them
+(`scripts/check-pass-isolated.sh` over `spec/pass_isolated/`, run by the CI `checks` job).
+
+| # | Pass | Module | Kind | Does |
+|---|---|---|---|---|
+| 0 | `sink` | `optimize/sink_inline.rs` | opt (perf) | a root fn whose whole body is one `list.*` call with its only parameter as the first argument (read once, nothing else free) is inlined into a call whose argument is a `list.*` call, bound vars renamed fresh — so each leg's own fusion sees one chain (#3584, #3590); a leg that declines evaluates it exactly as the call |
+| 1 | `fold` | `optimize/mod.rs` (`constant_fold`) | opt (perf) | evaluate literal arithmetic bottom-up, wrapping; substitutes earlier immutable scalar top-lets (#809) |
+| 2 | `dce` | `optimize/dce.rs` | opt (perf) | drop unused bindings whose value is pure; runs again after propagation |
+| 3 | `propagate` | `optimize/propagate.rs` | opt (perf) | replace vars bound to literals with the literal |
+| 4 | unsigned re-fold | `optimize/mod.rs` (`refold_unsigned_lane`) | correctness | re-fold the `UInt64` `/`/`%` literal pairs propagation exposes, unsigned (#872) — never ablated |
+| 5 | optional-chain desugar | `optimize/optional_chain.rs` | lowering enabler | `p?.f` → call to a synthesized tail helper both backends prove — never ablated |
+| 6 | branch-lift | `optimize/branch_lift.rs` | lowering enabler | heap-typed `let`-bound `if`/`match` → tail helper fn (the shape the trust-spine renderer lowers) — never ablated |
+| 7 | top-let reclassify | `almide_ir::reclassify_top_lets` | analysis | const-vs-runtime top-let classification after folding |
+| 8 | monomorphize | `mono/` (`monomorphize`) | specialization | clone structurally-bounded generic fns per call-site type; runs `mutual_tco` (`mutual_tco.rs`: mutually-recursive tail calls → one loop) as its last step |
+| 9 | ir_link | `almide-frontend::ir_link` | link | link dependency modules into the root after the monomorphized call graph exists |
+
+### B. `almide-codegen` nanopass pipeline (native codegen v3 / WGSL)
+
+Run order is `crates/almide-codegen/src/target.rs::build_pipeline`. The pass
+`Target` enum is `{Rust, Wgsl}` — **the wasm legs never enter this pipeline**;
+"all" in the Targets column means Rust + Wgsl as declared by `targets()`, which
+is what makes a pass *eligible* to run pre-split, not evidence that it should.
+The Wgsl arm is the four rows marked W. Class:
+
+- **Rust by design** — exists because Rust has ownership, borrows, `Result`,
+  macros or `LazyLock`; porting is meaningless for wasm.
+- **enabler** — a rewrite/analysis the TOML walker needs; the structural leg
+  has its own equivalent (named) and needs no port.
+- **optimizer** — a performance rewrite; the "structural leg" column says
+  whether an equivalent exists, and the pre-split decision follows in E.
+
+| # | Pass (`name()`) | File(s) | Targets | Class | Does | Structural wasm leg |
+|---|---|---|---|---|---|---|
+| 1 | `UnifyVarTables` | `pass_unify_var_tables.rs` | all, W | enabler | merge every `IrModule.var_table` into the program table | reads per-module tables (`build_globals`) |
+| 2 | `ListPatternLowering` | `pass_list_pattern.rs`, `pass_list_pattern_nested.rs` | all | enabler | list patterns → length checks + indexing; a list below a constructor / option / record position is rewritten in place (#3413) | lowers `IrPattern::List` natively (`patterns.rs`) |
+| 3 | `LambdaTypeResolve` | `pass_lambda_type_resolve.rs`, `pass_lambda_type_lookup.rs` | all, W | enabler | closure param types from the stdlib callee signature (top-down) | `TypeTable` (`types_table.rs`) |
+| 4 | `ConcretizeTypes` | `pass_concretize_types.rs`, `pass_concretize_types_call_ret.rs`, `pass_concretize_types_signatures.rs`, `pass_concretize_types_unresolved.rs`, `pass_concretize_types_walker.rs` | all, W | enabler | sync every `IrExpr.ty` with its authoritative concrete type | `TypeTable` |
+| 4b | `MeteredRegionDelegate` | `pass_metered_region_delegate.rs` | Rust | Rust by design | a metered region fn (`fan.bounded` / `fan.min` / `fan.timeout`) becomes a delegate into the v1-rendered region module the CLI links in when the whole program walls v1 (#3669) — the meter is MIR, this codegen has none | n/a (the structural leg meters its regions itself) |
+| 4c | `MeterCharge` | `pass_meter_charge.rs` | Rust | Rust by design | when the CLI meters a program in this codegen (a region outside the v1 subset, #3673): the deterministic charges at the IR sites the structural leg charges — entries the shared `almide_ir::meter_plan` does not exempt, loop heads, closure hops, string concat — each with its cut; `MeteredRegionDelegate` and `LICM` stand aside | the same plan (`fuel.rs` reads `almide_ir::meter_plan`) |
+| 5 | `PatternLiteralGuard` | `pass_pattern_literal_guard.rs` | Rust | Rust by design | hoist payload-nested string literals into guards (the `as_deref` subject form) | n/a |
+| 6 | `ResolveCalls` | `pass_resolve_calls.rs` | all | enabler | verify-and-rewrite every `CallTarget::Module` to a known fn | `FnTable` resolution (`emit.rs`) |
+| 7 | `RegionWindow` | `pass_region_window.rs`, `pass_region_window_clone.rs` | Rust | optimizer | `consume(produce(scalars))` sites run over `__rgn_` twin fns and `Copy` twin enums in the prelude's thread-local bump arena (#1991); v1 admits root-module fns and root variant enums with scalar / region-enum tuple payloads | equivalent: `region.rs` (`RegionSave`/`RegionRestore` over the allocator, #1961) |
+| 8 | `BoxDeref` | `pass_box_deref.rs` | Rust | Rust by design | `*deref` for pattern vars bound from `Box`'d fields | n/a |
+| 9 | `LICM` | `pass_licm.rs`, `pass_licm_hoist.rs`, `pass_licm_purity.rs` | all | optimizer | hoist loop-invariant pure expressions to `let`s before the loop | **no equivalent** — see E |
+| 10 | `EggSaturation` | `pass_egg_saturation.rs` | all | optimizer | equality-saturation fusion of matrix chains (`almide-egg-lab`, rules from stdlib `@rewrite`); the list arm is off since #2045 (its lambda substitution duplicated callback side effects) | **no equivalent** — see E |
+| 11 | `MatrixShapeSpec` | `pass_matrix_shape_spec.rs` | Rust | Rust by design | small-shape matmul → fully unrolled `InlineRust` | n/a (hand-written kernels, `matrix_kernels.rs`) |
+| 12 | `ConstFold` | `pass_const_fold.rs` | all | optimizer | fold literal arithmetic left by rows 10–11 | superseded by A.1 (`fold`) — see E |
+| 13 | `IntrinsicLowering` | `pass_intrinsic_lowering.rs` | all | enabler | `@intrinsic` stdlib calls → `RuntimeCall { symbol }` | self-host registry link (`src/wasm_leg.rs`); intrinsics are walls |
+| 13b | `StreamFusion` | `pass_stream_fusion.rs` | Rust | optimizer | `RuntimeCall { almide_rt_list_* }` with a lambda literal → `IterChain`, BEFORE `BorrowInsertion` — a chain lambda is a scope the borrow / capture-clone / clone passes never see as a closure, so it borrows what it reads and renders without `move`; the source starts consumed and `BorrowInsertion` decides its mode from what the steps do with each element, not from the twin's `@consume` slot (#2287: `element_reads_only` — a `Copy` element or a heap element every receiving lambda only reads leaves the source `&[T]`, bound `&T` off `.iter()` by the clone pass); a `\|>` chain flattens into one iterator expression only when every callback is pure and the interleaving is unobservable (#2045); `ALMIDE_STREAM_FUSION_OFF` ablates | **no equivalent** — the spec order is stage-by-stage; see E |
+| 14 | `BorrowInsertion` | `pass_borrow_inference.rs`, `pass_borrow_inference_call_sites.rs`, `pass_borrow_inference_ownership.rs`, `pass_borrow_inference_scoped_closures.rs`, `pass_borrow_inference_seq_hoist.rs` (wrapper in `pass.rs`) | Rust | Rust by design | Roc-style borrow-by-default signatures, `Borrow` nodes at call sites; an iteration's source follows what its body does with the element (#2287); a fn-typed param is `&dyn Fn` unless its callable escapes, and a lambda literal at such a slot is a scope spelled `&(lambda)` (#2288); an operand read before a nested `mut`-arg call (an interpolation part, a nested call's argument) is hoisted, left to right (#3230) | RC-3 borrow/fresh classifier (`rc_ownership.rs`) |
+| 14b | `OwnedSourceHoist` | `pass_owned_source_hoist.rs` | Rust | optimizer | a range op whose later arguments read its source only as a scalar (`list.slice(xs, 1, list.len(xs))`) binds them first, so TailCallOpt / CloneInsertion can move a dead source into the `_owned` twin (#3519) | n/a |
+| 15 | `TailCallOpt` | `pass_tco.rs`, `pass_tco_loop_rewrite.rs`, `pass_tco_owned_reads.rs` | all | optimizer | self-recursive tail calls → loop | equivalent: `tco.rs` (`loop_convert` over the encoded body; `return_call` otherwise) |
+| 16 | `CaptureClone` | `pass_capture_clone.rs`, `pass_capture_clone_bindings.rs`, `pass_capture_clone_mut_param.rs` | Rust | Rust by design | pre-clone variables captured by `move` closures | n/a |
+| 17 | `CloneInsertion` | `pass_clone.rs`, `pass_clone_calls.rs`, `pass_clone_interp.rs`, `pass_clone_compare.rs`, `pass_clone_places.rs`, `pass_clone_projection.rs`, `pass_clone_head.rs`, `pass_clone_select.rs`, `pass_clone_record_fields.rs`, `pass_clone_loops.rs` | Rust | Rust by design | `Clone` nodes for heap-typed reuse and proven projection borrows/moves (list head reads borrowed, #3453; read-only selections of live locals borrowed, #3532) | RC inc/share guards (`rc_ownership.rs`) |
+| 17b | `ChainSourceBorrow` | `pass_chain_source_borrow.rs` | Rust | optimizer | a chain source the clone pass had to clone (`(v.clone()).into_iter()`, `t.sizes` off a `&Table`, a live local under a borrowed source), or a `&[T]` param used bare as a consumed one, iterates from a borrow (`.iter().cloned()`) unless a callback writes the variable (#2098) | n/a |
+| 18 | `MatchSubject` | `pass_match_subject.rs` | Rust | Rust by design | `.as_str()` / `.as_deref()` on match subjects | n/a |
+| 19 | `EffectInference` | `pass_effect_inference.rs` | all | analysis | infer capability categories from transitive stdlib use | shared by another route: `cli::check_permissions` runs this pass standalone on the pre-mono IR for every leg |
+| 20 | `StdlibLowering` | `pass_stdlib_lowering.rs`, `pass_stdlib_lowering_ufcs.rs` | Rust | Rust by design | `Module` calls → `Named` runtime calls with arg decoration | self-hosted stdlib bodies are emitted as wasm fns |
+| 21 | `ResultPropagation` | `pass_result_propagation.rs` | all | Rust by design | effect fn `T → Result[T, String]`, `Try` at call sites | own effect lowering (`effect_raw`, `emit.rs`) |
+| 22 | `BuiltinLowering` | `pass_builtin_lowering.rs` | Rust | Rust by design | `assert_eq`/`println`/… → `RustMacro` | n/a |
+| 23 | `DecodeSlotHint` | `pass_decode_slot_hint.rs` | Rust | Rust by design | a derived `T.decode`'s borrowed field lookups carry their declaration index (`@codec_slots`), rendered as `almide_rt_value_field_ref_at` (#1679); the runtime tries `pairs[i]` before the scan, errors unchanged (C-084) | n/a (the wasm leg reads neither the attribute nor the `_at` symbol) |
+| 23b | `DecodeErrFrame` | `pass_decode_err_frame.rs` | Rust | Rust by design | a derived `T.decode`'s per-field error frame (`T___erratw_*`, #1675) becomes `.map_err(..)` on the field's own result, so the success path is a plain `?` with no payload clone and no key allocation (#2050) | n/a (the wasm leg lowers the worker itself) |
+| 24 | `Peephole` | `pass_peephole.rs` | all | optimizer | idiomatic list loops → `ListSwap`/`ListReverse`/`ListRotateLeft`/`ListCopySlice` nodes | **no lowering for those nodes** — see E |
+| 25 | `RustLowering` | `pass_rust_lowering.rs`, `pass_rust_lowering_stmts.rs`, `pass_rust_lowering_fan.rs`, `pass_fan_local_state.rs` | Rust | Rust by design | push optimization, borrow index lift; routes `fan.map` and list ops under `fan { }` with a pure lambda over Send-safe scalars to the thread-per-core runtime twins (`almide_rt_fan_map_par`, `almide_rt_list_par_*`; `ALMIDE_FAN_SEQUENTIAL=1` ablates, #2044); a callback op whose closure is a literal (`map.upsert`) → its static-closure `_fn` twin, so the closure is not boxed per call | n/a |
+| 26 | `FanLowering` | `pass_fan_lowering.rs` (wrapper in `pass.rs`) | all, W | enabler | strip auto-try from fan spawn closures | own fan lowering (`fan.rs`) |
+| 27 | `NormalizeRuntimeCalls` | `pass_normalize_runtime_calls.rs` | Rust | Rust by design | legacy `Named { almide_rt_* }` → `RuntimeCall` | n/a |
+| 28 | `IrLinkFlatten` | `pass_ir_link_flatten.rs` | Rust | Rust by design | flatten modules into the root for the walker | keeps modules, qualified names |
+| 29 | `SharedCellBorrow` | `pass_shared_cell_borrow.rs` | Rust | Rust by design | borrow a captured cell in place for statement-proven-safe reads (#1143) | n/a |
+| 30 | `VarStorage` | `pass_var_storage.rs` | Rust | Rust by design | which non-Copy `var` locals a closure captures and so live in an `AlmideRcCow` (`var_storage`); was the walker's own program-setup scan (#2186) | RC-3 borrow/fresh classifier (`rc_ownership.rs`) |
+| 31 | `RangeCountingVars` | `pass_range_counting.rs` | Rust | optimizer | a `let`-bound range read ONLY as `for-in` heads stays a bare `Range<i64>` instead of a materialized `Vec<i64>` (#1857); mirrors MIR's #1400 `range_counting_vars` admission rule and runs last so the set names the final IR | `ranges.rs` counting loop (#1400) — already has it |
+| 32 | `TopLetStorage` | `pass_top_let_storage.rs` | all | analysis | the unified top-let storage attribute for the walker (§4 Stage 1) | own globals plan (`build_globals`) |
+| 33 | `BorrowLowering` | `pass_borrow_lowering.rs`, `pass_borrow_lowering_take.rs` | Rust | Rust by design | the last word on every `Borrow` / `Clone` / stored read of a by-reference param — drop the `&` a `&T` param already has, `.to_string()` / `.to_vec()` / `.clone()` an owned read, `.clone()` a spread base, borrow INTO a list (`almide_index_ref!`), the `_ref` field-lookup twin, `.as_str()` a `&String` loop binder, deref a `&T` param in an equality — and publishes `param_borrows`; the walker renders what it sees (#2186). A `mut` param an assign overwrites from its own old value is moved out with `std::mem::take` when nothing in the right-hand side can see the hole (#3170) | n/a (the wasm leg has no references) |
+| 34 | `SliceBinders` | `pass_slice_binders.rs` | Rust | optimizer | a `match` over `split_once` / `strip_prefix` / `strip_suffix` whose payload binders are only read as `&str` or consumed binds them as slices of the subject (the runtime's `_ref` twins); a consumed binder is copied where it is consumed, any other use keeps the owned twin | n/a (the wasm leg has no references) |
+| 35 | `StrMapKey` | `pass_str_map_key.rs` | Rust | optimizer | a String-keyed `map.set` / `map.upsert` whose key is `k.to_string()` takes `&k` through the runtime's `_str` twin, which copies the key only when it inserts it | n/a |
+| 36 | `ThreadShareMarks` | `pass_thread_share.rs` | Rust | Rust by design | ADR-0013: every variable a spawned fan arm or a call to a thread-crossing runtime helper (`crosses_threads`, as a `RuntimeCall` or a `Call { Module }` such as `fan.map_par`) reaches is marked `(v).almide_share();` before the threads start, as an `InlineRust` block — the walker renders it and runs no `free_vars` walk of its own (#2186) | n/a |
+| 37 | `BoxTakeLowering` | `pass_box_take.rs` | Rust | Rust by design | #4251: a field that closes a cycle of a recursive type is an `AlmideBox` (bounded-stack drop / clone / `==`), which cannot be moved out of through `*b`; every read of one (a box-pattern binder, a recursive record's boxed field) is spelled as a place `(*x)` when its parent only looks at it, and as `almide_box_take(x)` when it consumes it |
+| 38 | `StrViewRebind` | `pass_str_view_rebind.rs` | Rust | Rust by design | #4296: a binding arm of a match over a `&str` view of its `String` subject (`match &*x { "a" => .., other => .. }`) whose binder is wanted as a value — or whose arm touches the subject's variable — opens with its own owned copy; publishes `str_view_owned_binders` from the final IR for the walker to spell | n/a |
+
+Rows 14, 16 and 17 read their ownership facts from ONE walk, `use_kind.rs`
+(#2186): every occurrence of every local, tagged with the position its parent
+puts it in (`Site`) and whether a closure, a fused chain or a `&mut` encloses
+it. `BorrowInsertion`'s "does this param need owning / `&mut`" is a predicate
+over those sites with a `SlotOracle` supplying the callee slot modes from the
+fixed-point snapshot; `CaptureClone`'s "which captures does the closure
+write" and `CloneInsertion`'s use counts and loop-binder verdicts are
+predicates over the same walk with the explicit-borrow oracle. The fixed
+point is a monotone ascent (`Ref` → `RefMut` → `Own`, every key the rounds
+will publish seeded optimistic) with no round cap: a slot moving down or a
+run past the lattice height is an ICE.
+
+### C. Structural wasm leg — `crates/almide-wasm` (default `--target wasm`)
+
+Rewrites the emitter applies to the linked IR or the encoded body. None is an
+IR→IR pass in the nanopass sense; each is a route inside `emit_program`.
+
+| Pass | File | Does |
+|---|---|---|
+| transparent-newtype erasure | `newtype.rs` | erase transparent aliases so both emission passes read one tree (#1423 stage 4) |
+| reachability DCE | `emit.rs` (two-pass) | pass 1 records what `main` reaches; pass 2 re-emits with only the reachable set |
+| deterministic meter plan | `fuel.rs` | which fns charge, whose entry is exempt (ALS-DT2, mirrors the interp) |
+| self-tail-call loop conversion | `tco.rs` | `return_call $self` → param `local.set` + `br` to a wrapping `loop` |
+| map/filter → fold fusion | `list_fuse.rs` | deforestation over observation-free callbacks (the list half of B.10) |
+| counted-while partial unroll | `unroll.rs` | the loop-control headroom LLVM takes on the native leg |
+| RC-3 ownership guards | `rc_ownership.rs` | borrow/fresh classification, droppable set, inc/share/arg guards (the wasm twin of B.14/B.17) |
+| heap cap | `heap_cap.rs` | harness-set linear-memory ceiling (#1729), not an optimization |
+
+No SIMD (`v128`) is emitted anywhere on this leg; the matrix routines are
+scalar kernels (`matrix_kernels.rs`). Out of scope for #929 by decision.
+
+### D. v1 native trust-spine — `crates/almide-mir` (retiring under #1696)
+
+Listed for completeness; the roster gate does not enumerate this crate because
+its rows leave with the retirement. Its wasm rung (the WAT renderer and its
+WAT-level passes — operand fusion, peephole, preamble DCE, bounds-check
+elision, `br_table` dispatch, local-slot reuse, self-append rewrite, scalar
+wrapper inline, region allocation) was deleted by #2761.
+
+| Pass | File | Rung | Does |
+|---|---|---|---|
+| charge probe | `charge_probe.rs` | native (`ALMIDE_FUEL_PROBE` builds) | `Charge` at fn entry and after every `LoopStart` |
+| dead `MakeUnique` elision | `alias_safety.rs` | native | drop unaliased copy-on-write guards (#824) |
+| native Result carrier rewrite | `native_result_rewrite.rs` | native | T1-3 Result producer/consumer rewrite for the Rust render |
+
+### E. Pre-split decision (closure of #929)
+
+The shared subset **already runs pre-split**: table A is the whole of
+`almide-optimize` and every leg in the first table consumes it through the one
+`link_ir`. The question is only whether a target-neutral row of table B should
+join it. Verdict per candidate:
+
+| Pass | Move pre-split today? | Blocker / reason |
+|---|---|---|
+| `ConstFold` (B.12) | no move needed | A.1 folds the same literal arithmetic before the split; on the Rust arm the pass only cleans artifacts of B.10–B.11, which exist on no other leg |
+| `TailCallOpt` (B.15) | no move needed | the structural leg converts self tail calls at the encoded-body level (`tco.rs`) and keeps `return_call` for the rest — the same constant-stack guarantee |
+| `LICM` (B.9) | **not today — follow-up** | (1) layering: `almide-driver` (owner of the cut point) depends on `almide-optimize`, not `almide-codegen`, and the pass is written against `NanoPass`/`Target` there — relocating three files, not a one-line pipeline change; (2) the cut point is also the interp oracle's and the v1 native render's input, so a pre-split hoist needs an `ALMIDE_ONLY_PASS=licm` axis and `spec/pass_isolated/` rows before it lands; (3) the win on the structural leg is unmeasured — measure on the loop-bound ledger rows (`nbody`, `spectralnorm`) first |
+| `EggSaturation` (B.10) | **not today — follow-up** | pulls `almide-egg-lab` below the driver; the matrix half rewrites into fused `matrix.*` forms only the Rust stdlib lowering consumes, and the list half already has a structural twin (`list_fuse.rs`) |
+| `Peephole` (B.24) | **not today — follow-up** | its output nodes (`ListSwap` …) have no lowering in `almide-wasm`; pre-split it would wall every fixture that hits a pattern (almide-mir's `lower/mod_p5.rs` and the interp are the only consumers) |
+
+`--target wasm32`/`wasi` is a different beast: it compiles the codegen v3 Rust
+source with `rustc`, so it gets the full Rust arm of table B plus LLVM.
+
+## Stdlib
+
+The stdlib is self-hosted: every function lives in `stdlib/<module>[_part].almd`
+(the old `stdlib/defs/*.toml` pipeline is gone). Two consumption paths:
+
+- **Native / type signatures** — module sources are embedded in the committed
+  `almide-types/src/generated/embedded.rs` table, regenerated from `.almd` files
+  by `almide-types/build.rs` in a checkout. `stdlib_info.rs` exposes them; the
+  frontend extracts signatures and codegen extracts `@inline_rust` templates. `@intrinsic("almide_rt_*")`
+  declarations dispatch to hand-written Rust in `runtime/rs/src/<module>.rs`.
+- **WASM** — pure-Almide implementations registered in
+  `almide-types/src/self_host_registry.rs` (shared with the interp oracle)
+  are compiled with user code by the structural leg.
+
+Auto-import is the union of the seed list in
+`almide-frontend/src/import_table.rs` and `AUTO_IMPORT_BUNDLED` in
+`stdlib_info.rs`. Modules like `json`, `fs`, `http`, `env`, `io`, `random`,
+`regex`, `testing` require an explicit `import`.
+
+## Build System
+
+The root `build.rs` embeds diagnostic documentation for `almide explain` and
+sets the version/provenance line. Crate-specific build scripts include:
+
+- `almide-codegen/build.rs` — generates the embedded runtime registry and
+  matrix-desugaring fallback from the rewrite declarations. The old
+  `arg_transforms.rs` table is retired.
+- `almide-types/build.rs` — generates committed embedded stdlib sources and
+  declaration-derived tables from `stdlib/*.almd`.
+- `almide-frontend/build.rs` — copies the dialect ledger and regex runtime into
+  committed generated files; signatures are extracted from bundled sources,
+  not a generated `stdlib_sigs.rs` table.
+
+These crate generators regenerate checkout inputs only in a checkout;
+standalone packages use their committed generated copies.
+
+## Type System
+
+Constraint-based inference with eager unification:
+
+1. **Infer** — walk AST, assign fresh type variables, collect constraints
+2. **Solve** — unify constraints, propagate solutions
+3. **Resolve** — replace inference variables with concrete types in `expr_types`
+
+UFCS resolution is receiver- and scope-aware in the checker: for example,
+`xs.map(f)` on a List can resolve to `list.map(xs, f)`; convention methods and
+local/imported functions have their own resolution rules (`calls_ufcs.rs`).
+Pipes and resolved calls are lowered before codegen. String interpolation can
+remain an `IrExprKind::StringInterp`, which the Rust walker renders explicitly
+(`walker/expressions.rs`).
+
+## Module System
+
+1. **Resolve** (`src/resolve.rs`) — walk `import` declarations, find `.almd`
+   files (local, git deps; stdlib handled via bundled sources)
+2. **Register** — module signatures added to TypeEnv with prefixes
+3. **Check** → **Lower** → per-module IR with separate namespaces
+4. **Codegen** — module functions emitted with `almide_rt_{module}_{func}`
+   prefixes
+
+## Diagnostics
+
+The [diagnostic reference](../../../diagnostics/README.md) lists the current codes.
+Diagnostics report the location and source context, with a repair hint where
+one is known. Output is human-readable or `--json`.
+
+```
+error[E005]: argument 'xs' expects List[Int] but got String
+  at line 5
+  in call to list.sort()
+  hint: Fix the argument type
+  |
+5 | let sorted = list.sort("hello")
+  |                        ^^^^^^^
+```
+
+## Verification Spine
+
+- **Contracts** — every observable cross-target promise is a named
+  `[[contract]]` in [contracts/contracts.toml](../../../contracts/contracts.toml) with
+  executable evidence (fixture / fuzz / Σ-probe / theorem).
+- **3-way oracle** — native, wasm, and `almide-interp` must agree on
+  stdout/stderr/exit code.
+- **Lean belt** — `almide-perceus-belt` proves the Perceus RC discipline that
+  `almide-mir` implements.

@@ -1,6 +1,6 @@
 # Almide で書かれたもの
 
-[English](./written-in-almide.md) | [日本語](./written-in-almide.ja.md) | [简体中文](./written-in-almide.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./written-in-almide.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](./written-in-almide.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./written-in-almide.zh-CN.md)
 
 標準ライブラリは、このリポジトリ内で最大の Almide プログラムである。以下のプロジェクトは、他の場所での利用例を示す。これはディレクトリであり、掲載したすべてのプラットフォーム、ホスト、パッケージを現在のコンパイラでビルド・テスト済みだと主張するものではない。以下のリポジトリ数・コード行数の集計は、2026-09-30 時点の観測である。
 

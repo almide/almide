@@ -1,0 +1,70 @@
+<!-- description: Grow the committed test surface 25x toward reference-compiler scale -->
+# Test-surface 25× — the road to reference-compiler scale
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](test-surface-25x.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](test-surface-25x.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](test-surface-25x.zh-CN.md)
+
+> This is a non-normative reader copy of the [pinned original](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/roadmap/active/test-surface-25x.md), not a new authority, generator output or automatically synchronized document. Original sources and machine consumers are unchanged. Historical claims and examples have not been independently revalidated here.
+
+
+Set 2026-08-17, after the reference-suite mining sweep (#1508) measured the
+gap: rust carries 26,515 test files, swift 13,051, lean4 4,461 against our
+~1,000 committed .almd programs + 2,198 `#[test]` fns. Target: **25× today's
+committed surface**, grown in the order that buys correctness, not count.
+
+## Baseline (2026-08-17)
+
+| tier | count |
+|---|---|
+| cross-target differential fixtures (spec/wasm_cross) | 500 |
+| other .almd programs (spec/integration, …) | 497 |
+| rust `#[test]` fns | 2,198 |
+| diagnostics fixtures (broken/fixed pairs) | 99 |
+| wall corpus (pinned refusals) | 16 |
+| contracts / gates | 291 / 54 |
+
+Meter: `bash scripts/test-surface-meter.sh` (append a dated trend row with
+`--update`).
+
+## What counts toward 25× (in priority order)
+
+1. **Negative/diagnostic tests** — the thinnest tier vs rust (99 pairs vs
+   their ~15k ui tests). Every E-code wants a fixture family: each hint
+   variant, each fix-it verdict, each span shape. Target first: 10× this
+   tier before anything else doubles. Parser-floor errors (#1471, #1509,
+   #1510) belong here.
+2. **Cross-target fixtures** — keep growing by DISTILLATION, not bulk:
+   every fuzz finding lands as a fixture (the standing rule), every wall
+   that graduates lands with a contract, every reference-suite pattern
+   that becomes expressible (or-patterns, string patterns — #1508's list)
+   gets its port the release it lands.
+3. **Expected-output RC snapshots** (koka parc model): commit the
+   drop/dup placement for a corpus of RC-critical shapes alongside the
+   runtime result, so benign-today placement moves are loud.
+4. **Type×operation matrices** — the nested-container matrix
+   (nested_*.almd) generalized: generate the grid (construct / index /
+   mutate / iterate / equal / print / drop) × (List/Map/Option/Result/
+   tuple/variant nestings), commit the CLEAN cells, pin the walls. The
+   generator lives in-repo so the grid regrows when a wall graduates.
+5. **The uncommitted tier is already ~∞**: xtarget-fuzz generates and
+   differentially checks thousands of programs per run — raw committed
+   count UNDERSTATES the effective surface. The committed corpus is for
+   regression pinning and review; the fuzzer is for discovery. Both grow;
+   only the first is in the 25× number.
+
+## Non-goals
+
+- Bulk-committing machine-generated fixtures that no failure ever
+  distilled (suite-runtime cost, zero review value).
+- Porting reference tests for features Almide lacks (tracked in #1508;
+  they enter with the feature).
+
+## Trend
+
+| date | wasm_cross | other almd | #[test] | diag pairs | walls |
+|------|-----------|------------|---------|------------|-------|
+| 2026-08-17 | 500 | 497 | 2198 | 99 | 16 |
+| 2026-08-18 | 501 | 497 | 2199 | 335 | 16 |
+| 2026-08-18 | 502 | 497 | 2199 | 341 | 16 |
+| 2026-08-18 | 572 | 497 | 2199 | 717 | 16 |
+| 2026-08-18 | 572 | 497 | 2199 | 722 | 16 |
+| 2026-08-18 | 585 | 498 | 2199 | 728 | 18 |

@@ -1,0 +1,1120 @@
+# list
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](list.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](list.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](list.zh-CN.md)
+
+> This is a non-normative reader copy of the [pinned original](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/stdlib/list.md), not a new authority, generator output or automatically synchronized document. Original sources and machine consumers are unchanged. Historical claims and examples have not been independently revalidated here.
+
+
+List operations. auto-imported.
+
+### `list.len(xs: List[A]) -> Int`
+
+Return the number of elements in a list.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.len([1, 2, 3])}")
+}
+```
+```output
+3
+```
+
+### `list.get(xs: List[A], i: Int) -> Option[A]`
+
+Get the element at index i, or none if out of bounds.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.get([10, 20, 30], 1)}")
+}
+```
+```output
+some(20)
+```
+
+### `list.set(xs: List[A], i: Int, x: A) -> List[A]`
+
+Return a new list with the element at index i replaced.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.set([1, 2, 3], 1, 99)}")
+}
+```
+```output
+[1, 99, 3]
+```
+
+`list.set` copies the whole list — O(n) per call. Assigning the result back to
+the list it came from, `xs = list.set(xs, i, v)` (or `xs = xs.set(i, v)`) on a
+`var`, is compiled as an in-place write of that one slot (#2244): the same
+value semantics — an alias taken earlier keeps the old list, an index out of
+range changes nothing. An unshared buffer can be updated without copying;
+copy-on-write still preserves live aliases, so repeated aliasing can add
+copying costs. The
+statement form `xs[i] = v` is the same write, spelled directly; it aborts on an
+out-of-range index where `list.set` does nothing.
+
+### `list.swap(xs: List[A], i: Int, j: Int) -> List[A]`
+
+Return a new list with elements at indices i and j swapped.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.swap([1, 2, 3], 0, 2)}")
+}
+```
+```output
+[3, 2, 1]
+```
+
+### `list.sort(xs: List[A]) -> List[A]`
+
+Sort a list in ascending order.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.sort([3, 1, 2])}")
+}
+```
+```output
+[1, 2, 3]
+```
+
+### `list.reverse(xs: List[A]) -> List[A]`
+
+Reverse the order of elements.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.reverse([1, 2, 3])}")
+}
+```
+```output
+[3, 2, 1]
+```
+
+### `list.contains(xs: List[A], x: A) -> Bool`
+
+Check if a list contains an element.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.contains([1, 2, 3], 2)}")
+}
+```
+```output
+true
+```
+
+### `list.enumerate(xs: List[A]) -> List[(Int, A)]`
+
+Pair each element with its index.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.enumerate(["a", "b"])}")
+}
+```
+```output
+[(0, "a"), (1, "b")]
+```
+
+### `list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]`
+
+Combine two lists into a list of pairs.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.zip([1, 2], ["a", "b"])}")
+}
+```
+```output
+[(1, "a"), (2, "b")]
+```
+
+### `list.flatten(xs: List[List[A]]) -> List[A]`
+
+Flatten a list of lists into a single list.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.flatten([[1, 2], [3]])}")
+}
+```
+```output
+[1, 2, 3]
+```
+
+### `list.take(xs: List[A], n: Int) -> List[A]`
+
+Take the first n elements.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.take([1, 2, 3, 4], 2)}")
+}
+```
+```output
+[1, 2]
+```
+
+### `list.drop(xs: List[A], n: Int) -> List[A]`
+
+Drop the first n elements.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.drop([1, 2, 3, 4], 2)}")
+}
+```
+```output
+[3, 4]
+```
+
+### `list.unique(xs: List[A]) -> List[A]`
+
+Remove duplicate elements, preserving first occurrence.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.unique([1, 2, 1, 3])}")
+}
+```
+```output
+[1, 2, 3]
+```
+
+### `list.index_of(xs: List[A], x: A) -> Option[Int]`
+
+Find the first index of an element, or none.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.index_of([10, 20, 30], 20)}")
+}
+```
+```output
+some(1)
+```
+
+### `list.last(xs: List[A]) -> Option[A]`
+
+Get the last element, or none if empty.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.last([1, 2, 3])}")
+}
+```
+```output
+some(3)
+```
+
+### `list.chunk(xs: List[A], n: Int) -> List[List[A]]`
+
+Split a list into chunks of size n.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.chunk([1, 2, 3, 4, 5], 2)}")
+}
+```
+```output
+[[1, 2], [3, 4], [5]]
+```
+
+### `list.sum(xs: List[A]) -> A`
+
+Sum the numeric elements of a list; zero for an empty list. Integer overflow wraps.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.sum([1, 2, 3])}")
+}
+```
+```output
+6
+```
+
+### `list.product(xs: List[A]) -> A`
+
+Multiply the numeric elements of a list; one for an empty list. Integer overflow wraps.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.product([2, 3, 4])}")
+}
+```
+```output
+24
+```
+
+### `list.first(xs: List[A]) -> Option[A]`
+
+Get the first element, or none if empty.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.first([1, 2, 3])}")
+}
+```
+```output
+some(1)
+```
+
+### `list.is_empty(xs: List[A]) -> Bool`
+
+Check if a list is empty.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.is_empty([]: List[Int])}")
+}
+```
+```output
+true
+```
+
+### `list.min(xs: List[A]) -> Option[A]`
+
+Find the minimum element, or none if empty.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.min([3, 1, 2])}")
+}
+```
+```output
+some(1)
+```
+
+### `list.max(xs: List[A]) -> Option[A]`
+
+Find the maximum element, or none if empty.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.max([3, 1, 2])}")
+}
+```
+```output
+some(3)
+```
+
+### `list.join(xs: List[T], sep: T) -> T`
+
+Join a list of Strings or Bytes with a separator of the same type.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.join(["a", "b", "c"], "-")}")
+}
+```
+```output
+a-b-c
+```
+
+### `list.map(xs: List[A], f: (A) -> B) -> List[B]`
+
+Apply a function to each element, returning a new list.
+
+```almd run
+fn main() -> Unit = {
+  println("${[1, 2, 3].map((x) => x * 2)}")
+}
+```
+```output
+[2, 4, 6]
+```
+
+### `list.filter(xs: List[A], f: (A) -> Bool) -> List[A]`
+
+Keep elements that satisfy a predicate.
+
+```almd run
+fn main() -> Unit = {
+  println("${[1, 2, 3, 4].filter((x) => x > 2)}")
+}
+```
+```output
+[3, 4]
+```
+
+### `list.find(xs: List[A], f: (A) -> Bool) -> Option[A]`
+
+Find the first element matching a predicate.
+
+```almd run
+fn main() -> Unit = {
+  println("${[1, 2, 3].find((x) => x > 1)}")
+}
+```
+```output
+some(2)
+```
+
+### `list.any(xs: List[A], f: (A) -> Bool) -> Bool`
+
+Check if any element satisfies a predicate.
+
+```almd run
+fn main() -> Unit = {
+  println("${[1, 2, 3].any((x) => x > 2)}")
+}
+```
+```output
+true
+```
+
+### `list.all(xs: List[A], f: (A) -> Bool) -> Bool`
+
+Check if all elements satisfy a predicate.
+
+```almd run
+fn main() -> Unit = {
+  println("${[2, 4, 6].all((x) => x % 2 == 0)}")
+}
+```
+```output
+true
+```
+
+### `list.sort_by(xs: List[A], f: (A) -> B) -> List[A]`
+
+Sort by a key-extraction function (not a comparator). f extracts the sort key from each element.
+
+```almd run
+fn main() -> Unit = {
+  println("${["bb", "a", "ccc"].sort_by((s) => string.len(s))}")
+}
+```
+```output
+["a", "bb", "ccc"]
+```
+
+### `list.flat_map(xs: List[A], f: (A) -> List[B]) -> List[B]`
+
+Map each element to a list and flatten the results.
+
+```almd run
+fn main() -> Unit = {
+  println("${[1, 2].flat_map((x) => [x, x * 10])}")
+}
+```
+```output
+[1, 10, 2, 20]
+```
+
+### `list.filter_map(xs: List[A], f: (A) -> Option[B]) -> List[B]`
+
+Map and filter in one pass: keep only some values.
+
+```almd run
+fn main() -> Unit = {
+  println("${["1", "x", "3"].filter_map((s) => int.parse(s)?)}")
+}
+```
+```output
+[1, 3]
+```
+
+### `list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]`
+
+The first some value f gives, or none. f is not called after the hit — the short-circuiting `filter_map(xs, f) |> list.first`. A callback that propagates with `!` makes the whole call fallible, like the other list HOFs.
+
+```almd run
+fn main() -> Unit = {
+  println("${["x", "2", "3"].find_map((s) => int.parse(s)?)}")
+}
+```
+```output
+some(2)
+```
+
+### `list.take_while(xs: List[A], f: (A) -> Bool) -> List[A]`
+
+Take elements from the front while a predicate holds.
+
+```almd run
+fn main() -> Unit = {
+  println("${[1, 2, 3, 1].take_while((x) => x < 3)}")
+}
+```
+```output
+[1, 2]
+```
+
+### `list.drop_while(xs: List[A], f: (A) -> Bool) -> List[A]`
+
+Drop elements from the front while a predicate holds.
+
+```almd run
+fn main() -> Unit = {
+  println("${[1, 2, 3, 1].drop_while((x) => x < 3)}")
+}
+```
+```output
+[3, 1]
+```
+
+### `list.count(xs: List[A], f: (A) -> Bool) -> Int`
+
+Count elements that satisfy a predicate.
+
+```almd run
+fn main() -> Unit = {
+  println("${[1, 2, 3, 4].count((x) => x > 2)}")
+}
+```
+```output
+2
+```
+
+### `list.partition(xs: List[A], f: (A) -> Bool) -> (List[A], List[A])`
+
+Split a list into two: elements matching and not matching a predicate.
+
+```almd check
+fn main() -> Unit = {
+  let (evens, odds) = [1, 2, 3, 4].partition((x) => x % 2 == 0)
+  println("${evens}")
+  println("${odds}")
+}
+```
+
+### `list.reduce(xs: List[A], f: (A, A) -> A) -> Option[A]`
+
+Reduce a list by combining elements pairwise. Returns none if empty.
+
+```almd run
+fn main() -> Unit = {
+  println("${[1, 2, 3].reduce((a, b) => a + b)}")
+}
+```
+```output
+some(6)
+```
+
+### `list.group_by(xs: List[A], f: (A) -> B) -> Map[B, List[A]]`
+
+Group elements by a key function into a map.
+
+```almd run
+fn main() -> Unit = {
+  let groups = ["hi", "hey", "bye"].group_by((s) => string.take(s, 1))
+  println("${map.get(groups, "h")}")
+  println("${map.get(groups, "b")}")
+}
+```
+```output
+some(["hi", "hey"])
+some(["bye"])
+```
+
+### `list.range(start: Int, end: Int) -> List[Int]`
+
+Create a list of integers from start (inclusive) to end (exclusive).
+
+```almd run
+fn main() -> Unit = {
+  println("${list.range(1, 5)}")
+}
+```
+```output
+[1, 2, 3, 4]
+```
+
+### `list.slice(xs: List[A], start: Int, end: Int) -> List[A]`
+
+Extract a sublist from start to end index.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.slice([1, 2, 3, 4, 5], 1, 4)}")
+}
+```
+```output
+[2, 3, 4]
+```
+
+### `list.insert(xs: List[A], i: Int, x: A) -> List[A]`
+
+Insert an element at index i, shifting elements right.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.insert([1, 3], 1, 2)}")
+}
+```
+```output
+[1, 2, 3]
+```
+
+### `list.remove_at(xs: List[A], i: Int) -> List[A]`
+
+Remove the element at index i.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.remove_at([1, 2, 3], 1)}")
+}
+```
+```output
+[1, 3]
+```
+
+### `list.find_index(xs: List[A], f: (A) -> Bool) -> Option[Int]`
+
+Find the first index where a predicate holds.
+
+```almd run
+fn main() -> Unit = {
+  println("${[10, 20, 30].find_index((x) => x > 15)}")
+}
+```
+```output
+some(1)
+```
+
+### `list.update(xs: List[A], i: Int, f: (A) -> A) -> List[A]`
+
+Return a new list with the element at index i transformed by f.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.update([1, 2, 3], 1, (x) => x * 10)}")
+}
+```
+```output
+[1, 20, 3]
+```
+
+### `list.repeat(x: A, n: Int) -> List[A]`
+
+Create a list with a value repeated n times.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.repeat(0, 3)}")
+}
+```
+```output
+[0, 0, 0]
+```
+
+### `list.scan(xs: List[A], init: B, f: (B, A) -> B) -> List[B]`
+
+Like fold, but returns all intermediate accumulator values.
+
+```almd run
+fn main() -> Unit = {
+  println("${[1, 2, 3].scan(0, (acc, x) => acc + x)}")
+}
+```
+```output
+[1, 3, 6]
+```
+
+### `list.intersperse(xs: List[A], sep: A) -> List[A]`
+
+Insert a separator between each element.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.intersperse([1, 2, 3], 0)}")
+}
+```
+```output
+[1, 0, 2, 0, 3]
+```
+
+### `list.dedup(xs: List[A]) -> List[A]`
+
+Remove consecutive duplicates.
+
+```almd
+list.dedup([1, 1, 2, 2, 1]) // => [1, 2, 1]
+```
+
+Executable pin of the ADJACENT-duplicates rule (dedup is not distinct —
+the trailing `1` survives), gated by `scripts/check-doc-fences.sh`:
+
+```almd run
+fn main() -> Unit = {
+  let xs = list.dedup([1, 1, 2, 2, 1])
+  println(xs |> list.map((x) => int.to_string(x)) |> list.join(","))
+  println(int.to_string(list.len(xs)))
+}
+```
+```output
+1,2,1
+3
+```
+
+### `list.zip_with(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]`
+
+Combine two lists element-wise using a function.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.zip_with([1, 2], [10, 20], (a, b) => a + b)}")
+}
+```
+```output
+[11, 22]
+```
+
+### `list.fold(xs: List[A], init: B, f: (B, A) -> B) -> B`
+
+Reduce a list from left with an initial accumulator.
+
+```almd run
+fn main() -> Unit = {
+  println("${[1, 2, 3].fold(0, (acc, x) => acc + x)}")
+}
+```
+```output
+6
+```
+
+### `list.take_end(xs: List[A], n: Int) -> List[A]`
+
+Take the last N elements.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.take_end([1, 2, 3, 4], 2)}")
+}
+```
+```output
+[3, 4]
+```
+
+### `list.drop_end(xs: List[A], n: Int) -> List[A]`
+
+Drop the last N elements.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.drop_end([1, 2, 3, 4], 2)}")
+}
+```
+```output
+[1, 2]
+```
+
+### `list.unique_by(xs: List[A], f: (A) -> K) -> List[A]`
+
+Remove duplicates by key function, preserving first occurrence.
+
+```almd check
+fn main() -> Unit = {
+  let firsts = list.unique_by(["aa", "ab", "ba"], (s) => string.get(s, 0))
+  println("${firsts}")
+}
+```
+
+### `list.window(xs: List[A], n: Int) -> List[List[A]]`
+
+Sliding window of size N over the list.
+
+```almd run
+fn main() -> Unit = {
+  println("${list.window([1, 2, 3, 4], 2)}")
+}
+```
+```output
+[[1, 2], [2, 3], [3, 4]]
+```
+
+### `list.push(mut xs: List[A], x: A) -> Unit`
+
+Append an element in place. Requires var binding.
+
+```almd run
+fn main() -> Unit = {
+  var xs = [1, 2, 3]
+  list.push(xs, 42)
+  println("${xs}")
+}
+```
+```output
+[1, 2, 3, 42]
+```
+
+### `list.pop(mut xs: List[A]) -> Option[A]`
+
+Remove the last element in place and return it (`some(x)`, or `none` when the list is empty). Requires var binding.
+
+```almd run
+fn main() -> Unit = {
+  var xs = [1, 2, 3]
+  let popped = list.pop(xs)
+  println("${popped}")
+  println("${xs}")
+}
+```
+```output
+some(3)
+[1, 2]
+```
+
+### `list.clear(mut xs: List[A]) -> Unit`
+
+Remove all elements in place. Requires var binding.
+
+```almd run
+fn main() -> Unit = {
+  var xs = [1, 2, 3]
+  list.clear(xs)
+  println("${xs}")
+  println("${list.is_empty(xs)}")
+}
+```
+```output
+[]
+true
+```
+
+
+## Fallible pipelines — the polymorphic core (ADR-0006)
+
+A callback that propagates with `!` (or a named `-> T!E` fn) instantiates the
+core combinator's fallible form: the call yields `Result[_, E]` with the
+callback's error type (`String` for plain `T!`) and
+**short-circuits on the first err** (elements after it are never evaluated).
+One name per combinator — the strategy rides the marker:
+
+```almd
+effect fn read_all(files: List[String]) -> List[Entry] =
+  files |> list.map((f) => read_meta(f)!)!
+```
+
+Covers `map` / `filter` / `flat_map` / `filter_map` / `fold` / `find` /
+`each`. The removed `list.try_*` twins (one deprecation window at v0.55.0,
+gone since v0.56.0) rewrite mechanically — E043 carries the exact form:
+
+```almd
+list.try_map(xs, f)      →  list.map(xs, (x) => f(x)!)!
+list.try_fold(xs, z, f)  →  list.fold(xs, z, (a, x) => f(a, x)!)!
+```
+
+Every callback-taking list fn takes a fallible callback (#3163) — the
+predicate queries (`any` / `all` / `count` / `find_index` / `partition` /
+`take_while` / `drop_while`), the accumulators (`reduce` / `scan` / `zip_with` /
+`update` / `iterate`) and the key extractors (`sort_by` / `group_by` /
+`unique_by`, which compute each key once, in list order, before any reordering,
+so their first err is defined) as much as `map`. The same rule covers the map,
+set and option HOFs. The matrix is `almide_types::fallible_hofs`; the end state
+(every cell has its `__fallible_*` carrier, un-nameable from source, and an
+empty public try_ surface) is machine-checked by
+`tests/list_fallible_family_gate_test.rs`.
+
+When a callback that never errs leaves `E` unconstrained, annotate the result:
+`let evens: Result[List[Int], String] = list.filter(xs, (n) => ok(n % 2 == 0)!)`.
+
+
+
+## Signature index (74 functions)
+
+```
+// Element count; 0 for an empty list.
+// @since 0.5.0 or earlier
+list.len(xs: List[A]) -> Int
+
+// Alias of list.len.
+// @since 0.19.2 or earlier
+list.length(xs: List[A]) -> Int   (deprecated — use list.len)
+
+// Element at index i, or none when out of range.
+// @since 0.5.0 or earlier
+list.get(xs: List[A], i: Int) -> Option[A]
+
+// Copy with slot i = x; no-op if i out of range.
+// @since 0.5.0 or earlier
+list.set(xs: List[A], i: Int, x: A) -> List[A]
+
+// Copy with i and j swapped; no-op if either OOB.
+// @since 0.5.0 or earlier
+list.swap(xs: List[A], i: Int, j: Int) -> List[A]
+
+// Ascending copy; Floats in IEEE totalOrder.
+// @since 0.5.0 or earlier
+list.sort(xs: List[A]) -> List[A]
+
+// Elements in reverse order.
+// @since 0.5.0 or earlier
+list.reverse(xs: List[A]) -> List[A]
+
+// true if some element == x; NaN never matches.
+// @since 0.5.0 or earlier
+list.contains(xs: List[A], x: A) -> Bool
+
+// (index, element) pairs, index from 0.
+// @since 0.5.0 or earlier
+list.enumerate(xs: List[A]) -> List[(Int, A)]
+
+// Pairs by position; stops at the shorter list.
+// @since 0.5.0 or earlier
+list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]
+
+// Inner lists concatenated in order.
+// @since 0.5.0 or earlier
+list.flatten(xs: List[List[A]]) -> List[A]
+
+// First n elements; all if n >= len, [] if n < 0.
+// @since 0.5.0 or earlier
+list.take(xs: List[A], n: Int) -> List[A]
+
+// All but the first n; [] if n >= len, all if n < 0.
+// @since 0.5.0 or earlier
+list.drop(xs: List[A], n: Int) -> List[A]
+
+// Duplicates removed; first occurrences kept.
+// @since 0.5.0 or earlier
+list.unique(xs: List[A]) -> List[A]
+
+// Index of the first x, or none.
+// @since 0.5.0 or earlier
+list.index_of(xs: List[A], x: A) -> Option[Int]
+
+// Final element, or none when empty.
+// @since 0.5.0 or earlier
+list.last(xs: List[A]) -> Option[A]
+
+// Runs of n, last may be short; n <= 0 aborts.
+// @since 0.5.0 or earlier
+list.chunk(xs: List[A], n: Int) -> List[List[A]]
+
+// Sum of any numbers (R-L0-42); 0 when empty; integers wrap on overflow.
+// @since 0.5.0 or earlier
+list.sum(xs: List[A]) -> A
+
+// Product of any numbers (R-L0-42); 1 when empty; integers wrap on overflow.
+// @since 0.5.0 or earlier
+list.product(xs: List[A]) -> A
+
+// Head element, or none when empty.
+// @since 0.5.0 or earlier
+list.first(xs: List[A]) -> Option[A]
+
+// true iff xs has no elements.
+// @since 0.6.0 or earlier
+list.is_empty(xs: List[A]) -> Bool
+
+// Least element, or none when empty.
+// @since 0.5.0 or earlier
+list.min(xs: List[A]) -> Option[A]
+
+// Greatest element, or none when empty.
+// @since 0.5.0 or earlier
+list.max(xs: List[A]) -> Option[A]
+
+// The parts joined by sep (R-L0-42): Strings or Bytes; empty for [].
+// @since 0.5.0 or earlier
+list.join(xs: List[T], sep: T) -> T
+
+// f applied to each element, in order.
+// @since 0.5.0 or earlier
+list.map(xs: List[A], f: (A) -> B) -> List[B]
+
+// Elements where f is true, order kept.
+// @since 0.5.0 or earlier
+list.filter(xs: List[A], f: (A) -> Bool) -> List[A]
+
+// First element where f holds, or none.
+// @since 0.5.0 or earlier
+list.find(xs: List[A], f: (A) -> Bool) -> Option[A]
+
+// true if f holds for some x; false when empty.
+// @since 0.5.0 or earlier
+list.any(xs: List[A], f: (A) -> Bool) -> Bool
+
+// true if f holds for every x; true when empty.
+// @since 0.5.0 or earlier
+list.all(xs: List[A], f: (A) -> Bool) -> Bool
+
+// Number of elements where f holds.
+// @since 0.5.0 or earlier
+list.count(xs: List[A], f: (A) -> Bool) -> Int
+
+// f(x) lists concatenated in order.
+// @since 0.5.0 or earlier
+list.flat_map(xs: List[A], f: (A) -> List[B]) -> List[B]
+
+// The some values of f(x), in order.
+// @since 0.5.0 or earlier
+list.filter_map(xs: List[A], f: (A) -> Option[B]) -> List[B]
+
+// Left fold from init; init when empty.
+// @since 0.5.0 or earlier
+list.fold(xs: List[A], init: B, f: (B, A) -> B) -> B
+
+// Stable sort by key f(x); f runs once per x.
+// @since 0.5.0 or earlier
+list.sort_by(xs: List[A], f: (A) -> B) -> List[A]
+
+// Longest prefix where f holds.
+// @since 0.5.0 or earlier
+list.take_while(xs: List[A], f: (A) -> Bool) -> List[A]
+
+// Rest after the longest prefix where f holds.
+// @since 0.5.0 or earlier
+list.drop_while(xs: List[A], f: (A) -> Bool) -> List[A]
+
+// (where f holds, the rest), order kept.
+// @since 0.5.0 or earlier
+list.partition(xs: List[A], f: (A) -> Bool) -> (List[A], List[A])
+
+// Left fold seeded by xs[0]; none when empty.
+// @since 0.5.0 or earlier
+list.reduce(xs: List[A], f: (A, A) -> A) -> Option[A]
+
+// Key f(x) -> elements; keys in first-seen order.
+// @since 0.5.0 or earlier
+list.group_by(xs: List[A], f: (A) -> B) -> Map[B, List[A]]
+
+// Index of the first x where f holds, or none.
+// @since 0.5.0 or earlier
+list.find_index(xs: List[A], f: (A) -> Bool) -> Option[Int]
+
+// Copy with slot i = f(old); no-op if i out of range.
+// @since 0.5.0 or earlier
+list.update(xs: List[A], i: Int, f: (A) -> A) -> List[A]
+
+// Running fold values, init excluded.
+// @since 0.5.0 or earlier
+list.scan(xs: List[A], init: B, f: (B, A) -> B) -> List[B]
+
+// f over pairs; stops at the shorter list.
+// @since 0.5.0 or earlier
+list.zip_with(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]
+
+// First element per distinct key f(x).
+// @since 0.7.0 or earlier
+list.unique_by(xs: List[A], f: (A) -> K) -> List[A]
+
+// start up to end, exclusive; [] if end <= start.
+// @since 0.5.0 or earlier
+list.range(start: Int, end: Int) -> List[Int]
+
+// Indices start..<end, each clamped to 0..len; [] if start >= end.
+// @since 0.5.0 or earlier
+list.slice(xs: List[A], start: Int, end: Int) -> List[A]
+
+// Copy with x at i; i >= len or i < 0 appends.
+// @since 0.5.0 or earlier
+list.insert(xs: List[A], i: Int, x: A) -> List[A]
+
+// Copy without slot i; no-op if i out of range.
+// @since 0.5.0 or earlier
+list.remove_at(xs: List[A], i: Int) -> List[A]
+
+// n copies of x; [] for n <= 0.
+// @since 0.5.0 or earlier
+list.repeat(x: A, n: Int) -> List[A]
+
+// sep between adjacent elements.
+// @since 0.5.0 or earlier
+list.intersperse(xs: List[A], sep: A) -> List[A]
+
+// Adjacent equal runs collapsed; not global.
+// @since 0.5.0 or earlier
+list.dedup(xs: List[A]) -> List[A]
+
+// Last n elements; all if n >= len, [] if n < 0.
+// @since 0.7.0 or earlier
+list.take_end(xs: List[A], n: Int) -> List[A]
+
+// All but the last n; [] if n >= len, all if n < 0.
+// @since 0.7.0 or earlier
+list.drop_end(xs: List[A], n: Int) -> List[A]
+
+// All n-long runs; [] if n > len; n <= 0 aborts.
+// @since 0.7.0 or earlier
+list.window(xs: List[A], n: Int) -> List[List[A]]
+
+// Index of target in xs sorted ascending (list.sort's order), or none.
+// @since 0.14.6 or earlier
+list.binary_search(xs: List[A], target: A) -> Option[Int]
+
+// Appends x to xs in place.
+// @since 0.9.3 or earlier
+list.push(mut xs: List[A], x: A) -> Unit
+
+// Empty list; cap is only a preallocation hint.
+// @since 0.15.1 or earlier
+list.with_capacity(cap: Int) -> List[A]
+
+// Removes and yields the last element; none if empty.
+// @since 0.9.3 or earlier
+list.pop(mut xs: List[A]) -> Option[A]
+
+// Removes every element of xs in place.
+// @since 0.9.3 or earlier
+list.clear(mut xs: List[A]) -> Unit
+
+// (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
+// @since 0.14.6 or earlier
+list.split_at(xs: List[A], n: Int) -> (List[A], List[A])
+
+// [seed, f(seed), ...] of length n; [] if n <= 0.
+// @since 0.14.6 or earlier
+list.iterate(seed: A, f: (A) -> A, n: Int) -> List[A]
+
+// The first some that f gives, or none; f is not called after the hit.
+// @since unreleased
+list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]
+
+// An empty list; the same value as [].
+// @since unreleased
+list.new() -> List[A]
+
+// xs itself; the Container constructor from a list.
+// @since unreleased
+list.from_list(xs: List[A]) -> List[A]
+
+// xs itself; the Container view as a list.
+// @since unreleased
+list.to_list(xs: List[A]) -> List[A]
+
+// Stable sort by cmp: negative puts a first, 0 keeps input order.
+// @since unreleased
+list.sort_with(xs: List[A], cmp: (A, A) -> Int) -> List[A]
+
+// Element with the least key f(x); the first on ties; f runs once per x.
+// @since unreleased
+list.min_by(xs: List[A], f: (A) -> K) -> Option[A]
+
+// Element with the greatest key f(x); the first on ties; f runs once per x.
+// @since unreleased
+list.max_by(xs: List[A], f: (A) -> K) -> Option[A]
+
+// Least element by cmp; the first on ties; none when empty.
+// @since unreleased
+list.min_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]
+
+// Greatest element by cmp; the first on ties; none when empty.
+// @since unreleased
+list.max_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]
+
+// Index of target among keys f(x) of xs sorted by key, or none.
+// @since unreleased
+list.binary_search_by(xs: List[A], target: K, f: (A) -> K) -> Option[Int]
+
+// Index of target in xs sorted by cmp, or none; cmp(x, target) is asked.
+// @since unreleased
+list.binary_search_with(xs: List[A], target: A, cmp: (A, A) -> Int) -> Option[Int]
+
+// (firsts, seconds) of a list of pairs; the inverse of zip.
+// @since unreleased
+list.unzip(xs: List[(A, B)]) -> (List[A], List[B])
+
+// start, start + step, ... before end; counts down for step < 0; step = 0 aborts.
+// @since unreleased
+list.range_step(start: Int, end: Int, step: Int) -> List[Int]
+```
+
+

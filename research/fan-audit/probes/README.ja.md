@@ -1,6 +1,6 @@
 # Fan の意味論監査プローブ
 
-[English](./README.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](./README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./README.zh-CN.md)
 
 [docs/design/fan-semantics-audit.md](../../../docs/design/fan-semantics-audit.md) の各「probe」引用の根拠となるプログラム。0746eb689 に固定している。リポジトリのルートから両ターゲットで実行する。
 

@@ -1,0 +1,761 @@
+> Last updated: 2026-10-31
+
+# Type System Specification
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](type-system.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](type-system.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](type-system.zh-CN.md)
+
+> This is a non-normative reader copy of the [pinned original](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/specs/type-system.md), not a new authority, generator output or automatically synchronized document. Original sources and machine consumers are unchanged. Historical claims and examples have not been independently revalidated here.
+
+
+Almide uses a constraint-based type system with bidirectional inference, structural typing for records, and a protocol system for ad-hoc polymorphism. All types are resolved at compile time; there are no runtime type checks.
+
+---
+
+## 1. Primitive Types
+
+The core built-in types below have kind `*` (concrete, zero type parameters).
+Sized numeric types (`Int8` / `Int16` / `Int32` / `Int64`, `UInt8` / `UInt16` /
+`UInt32` / `UInt64`, `Float32` / `Float64`) are also built in; see
+`spec/lang/sized_numeric_types_test.almd` and the corresponding
+[stdlib references](../../../../stdlib/README.md).
+
+| Type     | Description                | Eq  | Hash | Ord |
+|----------|----------------------------|-----|------|-----|
+| `Int`    | 64-bit signed integer      | yes | yes  | yes |
+| `Float`  | 64-bit IEEE 754            | yes | no   | yes |
+| `String` | UTF-8 string               | yes | yes  | yes |
+| `Bool`   | `true` / `false`           | yes | yes  | yes |
+| `Unit`   | Zero-value type `()`       | yes | yes  | yes |
+| `Bytes`  | Byte buffer                | yes | yes  | no  |
+| `Matrix` | Numeric matrix             | yes | no   | no  |
+
+`Float` is not hashable (cannot be a `Map` key or `Set` element). Function types (`Fn`) are neither Eq nor hashable.
+
+```almide
+let x = 42          // Int
+let y = 3.14        // Float
+let s = "hello"     // String
+let b = true        // Bool
+let u = ()          // Unit
+```
+
+Tests: `spec/lang/expr_test.almd`, `spec/lang/bytes_test.almd`, `spec/lang/matrix_test.almd`
+
+---
+
+## 2. Collection Types
+
+### List[T]
+
+Homogeneous ordered sequence. Kind: `* -> *`.
+
+```almide
+let xs = [1, 2, 3]              // List[Int]
+let ys: List[String] = []       // empty list requires annotation
+let zs = xs + [4, 5]            // + concatenates lists
+let first = xs[0]               // Int (index access)
+```
+
+### Map[K, V]
+
+Key-value dictionary. Kind: `* -> * -> *`. Keys must be hashable (no `Float`, `Fn`, or `Map` keys).
+
+```almide
+let m = ["a": 1, "b": 2]       // Map[String, Int]
+let empty: Map[String, Int] = [:]
+let v = m["a"]                  // Option[Int]
+```
+
+### Set[T]
+
+Unique element collection. Kind: `* -> *`. Elements must be hashable.
+
+```almide
+let s = set.from_list([1, 2, 3])  // Set[Int]
+```
+
+### Tuple
+
+Fixed-length heterogeneous product type. Variable arity.
+
+```almide
+test "tuples" {
+  let t = (1, "hello", true)     // (Int, String, Bool)
+  let x = t.0                    // Int — positional access
+  let (a, b) = (1, 2)            // destructuring
+  assert_eq(x + a + b, 4)
+}
+```
+
+Tests: `spec/lang/data_types_test.almd`, `spec/lang/tuple_test.almd`, `spec/lang/map_literal_test.almd`
+
+---
+
+## 3. Option[T] and Result[T, E]
+
+Built-in parameterized types for nullable values and error handling. Both are `Applied` types with dedicated constructors.
+
+### Option[T]
+
+Kind: `* -> *`. Constructors: `some(v)`, `none`.
+
+```almide
+let x: Option[Int] = some(42)
+let y: Option[Int] = none
+
+fn or_zero(o: Option[Int]) -> Int = match o {
+  some(v) => v,
+  none => 0,
+}
+
+test "both constructors" {
+  assert_eq(or_zero(x), 42)
+  assert_eq(or_zero(y), 0)
+}
+```
+
+### Result[T, E]
+
+Kind: `* -> * -> *`. Constructors: `ok(v)`, `err(e)`.
+
+```almide
+let x: Result[Int, String] = ok(42)
+let y: Result[Int, String] = err("fail")
+```
+
+In `effect fn` bodies, `Result` is auto-unwrapped with `!`:
+
+```almide
+import fs
+
+effect fn read(path: String) -> Result[String, String] = {
+  let content = fs.read_text(path)!   // propagates err
+  ok(content)
+}
+```
+
+Tests: `spec/lang/data_types_test.almd`, `spec/lang/error_test.almd`, `spec/lang/unwrap_operators_test.almd`
+
+---
+
+## 4. Record Types
+
+### Named Records
+
+Declared with `type`. Fields are accessed by name.
+
+```almide
+type Point = { x: Float, y: Float }
+
+let p: Point = { x: 1.0, y: 2.0 }
+let px = p.x                          // Float
+let p2 = { ...p, y: 5.0 }            // spread update
+```
+
+### Anonymous Records
+
+Record literals without a type name are structurally typed.
+
+```almide
+let user = { name: "alice", age: 30 }   // { name: String, age: Int }
+let n = user.name                        // String
+```
+
+### Open Records (Row Polymorphism)
+
+A parameter typed `{ field: Type, .. }` accepts any record that has at least the required fields. Extra fields are allowed and preserved.
+
+```almide
+fn greet(who: { name: String, .. }) -> String = "Hello, ${who.name}!"
+
+type Dog = { name: String, breed: String }
+type Person = { name: String, age: Int, email: String }
+
+test "any record carrying the field is accepted" {
+  assert_eq(greet(Dog { name: "Rex", breed: "Lab" }), "Hello, Rex!")                    // ok
+  assert_eq(greet(Person { name: "Alice", age: 30, email: "a@b" }), "Hello, Alice!")    // ok
+  assert_eq(greet({ name: "Bob" }), "Hello, Bob!")                                      // ok — exact match
+}
+```
+
+Open records can be used as type aliases (shape aliases):
+
+```almide
+type Named = { name: String, .. }
+fn greet_named(who: Named) -> String = "Hi, ${who.name}!"
+```
+
+Nested open records are supported:
+
+```almide
+fn get_port(app: { config: { port: Int, .. }, .. }) -> Int = app.config.port
+```
+
+Closed records (`{ name: String }` without `..`) require exact field match.
+
+Tests: `spec/lang/open_record_test.almd`, `spec/lang/record_spread_test.almd`
+
+---
+
+## 5. Variant Types
+
+Algebraic data types (tagged unions). Declared with `|`-separated cases.
+
+### Unit Payload (Enum-like)
+
+```almide
+type Direction = | North | South | East | West
+
+fn to_str(d: Direction) -> String = match d {
+  North => "N",
+  South => "S",
+  East => "E",
+  West => "W",
+}
+```
+
+### Tuple Payload
+
+```almide
+type Shape = | Circle(Float) | Rect(Float, Float)
+
+fn area(s: Shape) -> Float = match s {
+  Circle(r) => 3.14 * r * r,
+  Rect(w, h) => w * h,
+}
+```
+
+### Record Payload
+
+Variant cases can carry named fields:
+
+```almide
+type Pat =
+  | Match { scope: String, regex: String }
+  | BeginEnd { scope: String, begin: String, end_pat: String, patterns: List[Pat] }
+  | Include(String)
+  | Empty
+```
+
+Record variant construction and pattern matching:
+
+```almide
+type Pat =
+  | Match { scope: String, regex: String }
+  | BeginEnd { scope: String, begin: String, end_pat: String, patterns: List[Pat] }
+  | Include(String)
+  | Empty
+
+fn describe(p: Pat) -> String = match p {
+  Match { scope, regex } => scope + " " + regex,
+  BeginEnd { scope, .. } => scope,
+  _ => "other",
+}
+
+test "record-payload construction and matching" {
+  let p = Match { scope: "keyword", regex: "\\bfn\\b" }
+  assert_eq(describe(p), "keyword \\bfn\\b")
+  assert_eq(describe(Empty), "other")
+}
+```
+
+### Recursive Variants
+
+Variant types can reference themselves. The type checker uses cycle detection to prevent infinite loops in Eq/Hash checks.
+
+```almide
+type Tree[T] = | Leaf(T) | Node(T, List[Tree[T]])
+```
+
+### Inline Variants (No Leading Pipe)
+
+When omitting the leading `|`, the first case starts immediately:
+
+```almide
+type AppError = NotFound(String) | Io(String)
+```
+
+Tests: `spec/lang/data_types_test.almd`, `spec/lang/type_system_test.almd`, `spec/lang/variant_record_test.almd`
+
+---
+
+## 6. Function Types
+
+Functions are first-class values. The type syntax uses `fn(Params) -> Ret`.
+
+```almide
+fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)
+
+fn make_adder(n: Int) -> fn(Int) -> Int = (x) => x + n
+
+test "function values" {
+  let add5 = make_adder(5)
+  assert_eq(apply(add5, 10), 15)
+}
+```
+
+Internally represented as `Ty::Fn { params: Vec<Ty>, ret: Box<Ty>, is_effect: bool }`.
+
+Function types are never Eq and never hashable.
+
+### Effect Functions
+
+`effect fn` marks functions that perform side effects. The type checker enforces that pure functions cannot call effect functions (error E006). The `is_effect` flag on `FnSig` tracks this.
+
+```almide
+import fs
+
+effect fn read_file(path: String) -> Result[String, String] = fs.read_text(path)
+```
+
+### Type Aliases for Function Types
+
+```almide
+type Handler = (String) -> String
+```
+
+Tests: `spec/lang/type_system_test.almd`, `spec/lang/function_test.almd`, `spec/lang/lambda_test.almd`, `spec/lang/effect_fn_test.almd`
+
+---
+
+## 7. User-Defined Generics
+
+Generic type parameters use `[]` syntax (not `<>`).
+
+### Generic Functions
+
+```almide
+fn id[T](x: T) -> T = x
+fn pair[A, B](a: A, b: B) -> (A, B) = (a, b)
+```
+
+Type arguments can be inferred or explicit:
+
+```almide
+fn id[T](x: T) -> T = x
+
+test "type arguments" {
+  assert_eq(id(42), 42)              // T inferred as Int
+  assert_eq(id[String]("hi"), "hi")  // T explicitly String
+}
+```
+
+### Generic Record Types
+
+```almide
+type Box[T] = { value: T, label: String }
+
+fn unbox[T](b: Box[T]) -> T = b.value
+```
+
+### Generic Variant Types
+
+```almide
+type Either[A, B] = | Left(A) | Right(B)
+
+fn map_right[A, B, C](e: Either[A, B], f: fn(B) -> C) -> Either[A, C] = match e {
+  Left(a) => Left(a),
+  Right(b) => Right(f(b)),
+}
+```
+
+### Structural Bounds on Generics
+
+Generic parameters can require specific record fields:
+
+```almide
+fn describe[T: { name: String, .. }](x: T) -> String = "name: ${x.name}"
+
+fn set_name[T: { name: String, .. }](x: T, n: String) -> T = { ...x, name: n }
+```
+
+The bound `T: { name: String, .. }` is an `OpenRecord` constraint. The checker stores it in `FnSig.structural_bounds` and validates it at each call site.
+
+### Protocol Bounds on Generics
+
+```almide
+protocol Showable {
+  fn show(a: Self) -> String
+}
+protocol Nameable {
+  fn get_name(a: Self) -> String
+}
+
+fn display[T: Showable](item: T) -> String = item.show()
+fn show_named[T: Showable + Nameable](item: T) -> String = item.get_name() + ": " + item.show()
+```
+
+Multiple bounds are joined with `+`. The checker validates that the concrete type at each call site has declared conformance to all required protocols.
+
+Tests: `spec/lang/generics_test.almd`, `spec/lang/type_system_test.almd`, `spec/lang/open_record_test.almd`, `spec/lang/protocol_generics_test.almd`
+
+---
+
+## 8. Type Inference
+
+Almide uses constraint-based type inference with a Union-Find data structure.
+
+### Three-Pass Architecture
+
+1. **Infer** (`infer.rs`): Walk the AST, assign fresh type variables (`?0`, `?1`, ...) to unknown types, collect equality constraints between types.
+2. **Solve** (`solving.rs`): Process constraints via unification. The Union-Find merges equivalent type variables and binds them to concrete types.
+3. **Substitute** (`mod.rs`): Replace all inference variables in `expr_types` with their resolved concrete types.
+
+### Inference Variables
+
+Fresh type variables are named `?N` (e.g., `?0`, `?1`). They are distinct from user-declared `TypeVar`s (`T`, `U`). The `UnionFind` structure manages equivalence classes with union-by-rank and path compression.
+
+### Bidirectional Inference
+
+Types flow both forward (from arguments to return) and backward (from expected type to expression):
+
+```almide
+test "inference from annotation and from use" {
+  let xs: List[Int] = []         // [] gets type List[Int] from annotation
+  let f = (x) => x + 1           // x inferred as Int from + operator
+  assert_eq(list.len(xs), 0)
+  assert_eq(f(1), 2)
+}
+```
+
+### Let-Polymorphism
+
+Generic functions are instantiated with fresh inference variables at each call site:
+
+```almide
+fn id[T](x: T) -> T = x
+
+test "instantiated per call" {
+  assert_eq(id(42), 42)             // T = Int at this call
+  assert_eq(id("hello"), "hello")   // T = String at this call
+}
+```
+
+### Lambda Parameter Inference
+
+Lambda parameters are inferred from how they are used:
+
+```almide
+test "lambda parameter inferred from the list" {
+  assert_eq(list.map([1, 2, 3], (x) => x * 2), [2, 4, 6])   // x: Int inferred from List[Int]
+}
+```
+
+### Constraint Solving
+
+Constraints are `(expected, actual, context)` triples. The solver unifies each pair:
+
+- **Inference var + concrete**: Bind the var to the concrete type.
+- **Inference var + inference var**: Union the two vars.
+- **Concrete + concrete**: Structurally recurse (e.g., `List[?0]` vs `List[Int]` unifies `?0 = Int`).
+- **Unknown**: Unifies with everything (error recovery sentinel).
+
+An **occurs check** prevents infinite types (e.g., `T = List[T]`).
+
+Tests: `spec/lang/bidirectional_type_test.almd`, `spec/lang/type_annotation_test.almd`, `spec/lang/lambda_test.almd`
+
+---
+
+## 9. Structural Typing and Open Records
+
+Almide supports structural subtyping for records via open record types.
+
+### Compatibility Rules
+
+| Parameter type   | Argument type    | Result  |
+|------------------|------------------|---------|
+| `{ a: Int }`     | `{ a: Int }`     | ok      |
+| `{ a: Int }`     | `{ a: Int, b: String }` | error (closed, extra field) |
+| `{ a: Int, .. }` | `{ a: Int, b: String }` | ok (open, extra allowed)    |
+| `{ a: Int, .. }` | `Named` with field `a: Int` | ok (named types resolved) |
+| `{ a: Int, .. }` | `{ a: Int }`     | ok (exact match allowed)    |
+
+### Unification with Open Records
+
+Open records use order-independent field matching. For `{ a: Int, .. }` vs `{ a: Int, b: String }`, unification succeeds if every required field has a matching field (by name) in the actual type.
+
+### Chain Calling
+
+Open record parameters compose: a function accepting `{ name: String, breed: String, .. }` can pass its argument to a function accepting `{ name: String, .. }`.
+
+```almide
+fn chain_b(x: { name: String, .. }) -> String = x.name
+fn chain_a(x: { name: String, breed: String, .. }) -> String = chain_b(x)
+```
+
+Tests: `spec/lang/open_record_test.almd`
+
+---
+
+## 10. Protocol System
+
+Protocols define a set of methods that conforming types must implement. They serve the same role as traits (Rust) or typeclasses (Haskell).
+
+### Defining a Protocol
+
+```almide
+protocol Showable {
+  fn show(a: Self) -> String
+}
+```
+
+`Self` in method signatures is a `TypeVar("Self")` that gets substituted with the concrete type at each conformance site.
+
+### Declaring Conformance
+
+Declare conformance on the type and supply the required convention methods
+(or use derivation for a derivable built-in protocol):
+
+**Convention methods** (the only mechanism — `impl` blocks were removed):
+
+```almide
+protocol Showable {
+  fn show(a: Self) -> String
+}
+
+type Dog: Showable = { name: String }
+fn Dog.show(d: Dog) -> String = "Dog: " + d.name
+
+test "conformance by convention method" {
+  assert_eq(Dog { name: "Rex" }.show(), "Dog: Rex")
+}
+```
+
+Convention methods register as `Type.method` in the function environment.
+
+### Built-in Protocols
+
+| Protocol | Methods | Notes |
+|----------|---------|-------|
+| `Eq`     | `fn eq(a: Self, b: Self) -> Bool` | All value types are Eq except `Fn`. Auto-derived. |
+| `Repr`   | `fn repr(v: Self) -> String` | String representation. |
+| `Ord`    | `fn cmp(a: Self, b: Self) -> Int` | Ordering (-1, 0, 1). Derivable with `type T: Ord = ...` when the fields satisfy the ordering requirements; see `spec/wasm_cross/ord_recursive.almd`. Convention methods may also implement the protocol. See [ALS-C9](../../../../specs/als/collections.md#als-c9-順序系コンビネータの全域性) for ordering combinators. |
+| `Hash`   | `fn hash(v: Self) -> Int` | Hash code. No `Float`, `Fn`, or `Map`. |
+| `Codec`  | `fn encode(v: Self) -> Value`, `fn decode(v: Value) -> Result[Self, String]` | Serialization. A record type also derives `fn decode_strict(v: Value) -> Result[Self, String]`, which refuses a key outside its decoded fields (C-429); a field may carry `@skip` / `@skip_decode` (C-428). |
+
+### Protocol Validation
+
+After all declarations are registered, the checker validates:
+
+1. All required methods are defined (as convention methods).
+2. Method signatures match the protocol definition (parameter types, return type, arity).
+3. `Self` is correctly substituted with the concrete type.
+
+### Using Protocols as Generic Bounds
+
+```almide
+fn display[T: Showable](item: T) -> String = item.show()
+```
+
+At each call site, the checker verifies that the concrete type for `T` has declared conformance to `Showable`.
+
+### Multiple Protocols
+
+```almide
+protocol Showable {
+  fn show(a: Self) -> String
+}
+protocol Nameable {
+  fn get_name(a: Self) -> String
+}
+
+type Widget: Showable, Nameable = { id: Int, name: String }
+fn Widget.show(w: Widget) -> String = "#${int.to_string(w.id)}"
+fn Widget.get_name(w: Widget) -> String = w.name
+
+fn show_named[T: Showable + Nameable](item: T) -> String = item.get_name() + ": " + item.show()
+
+test "multiple bounds" {
+  assert_eq(show_named(Widget { id: 1, name: "knob" }), "knob: #1")
+}
+```
+
+### Generic Protocols (Explicit Conformance)
+
+A protocol may declare type parameters. A type conforms to ONE instantiation
+of it, named at the declaration; a generic function is bounded by an APPLIED
+protocol:
+
+```almide
+protocol Repository[K, V] {
+  fn find(self, key: K) -> V?
+  fn put(mut self, key: K, value: V) -> Unit
+}
+
+type User = { id: Int, name: String }
+type Users: Repository[Int, User] = { rows: List[User] }
+
+fn Users.find(self, key: Int) -> User? = self.rows |> list.find((u) => u.id == key)
+
+fn Users.put(mut self, key: Int, value: User) -> Unit = {
+  self.rows = (self.rows |> list.filter((u) => u.id != key)) + [value]
+}
+
+fn rename[R: Repository[Int, User]](mut repo: R, id: Int, name: String) -> Unit =
+  repo.put(id, User { id: id, name: name })
+
+fn lookup[K, V, R: Repository[K, V]](repo: R, key: K) -> V? = repo.find(key)
+
+test "generic protocol through an applied bound" {
+  var users = Users { rows: [] }
+  rename(users, 1, "ada")
+  assert_eq(lookup(users, 1).map((u) => u.name) ?? "-", "ada")
+}
+```
+
+Rules the checker enforces:
+
+1. **Exact arguments.** A conformance and a bound give one type per protocol
+   parameter (`Repository[Int, User]`). A generic protocol named without its
+   arguments, or with the wrong number, is an error at the reference.
+2. **One conformance per protocol.** `type X: Repository[Int, User],
+   Repository[String, User]` is ambiguous (the `fn X.find` definitions are
+   the one implementation) and is rejected; so is a bound naming the same
+   protocol twice.
+3. **Deterministic implementation.** A call through `[R: Repository[Int,
+   User]]` runs the argument type's own `Type.method`. The type's declared
+   arguments must equal the bound's (nominally: two records with the same
+   fields are different arguments); no other implementation is searched for.
+   A letter only the bound names (`K`, `V` above) is pinned by the
+   conformance, at the call site and in monomorphization.
+4. **Effect and ownership are part of the method signature.** An
+   implementation of a generic protocol's method is `effect` exactly when the
+   protocol method is, and takes `mut` exactly the parameters it does
+   (`mut self` is the shorthand for `mut self: Self`).
+5. **Qualified names.** A protocol declared in another module is named with
+   that module, as a type is: `[R: ports.Repository[K, V]]`,
+   `type MemUsers: ports.Repository[domain.UserId, domain.User]`. The
+   qualifier must name the module that declares the protocol. The bare name
+   still resolves (protocol names were global before) and is a deprecation
+   warning whose machine-applicable fix is the qualified spelling.
+
+Calls through a bound are lowered by monomorphization, so an effect method
+reached through a bound propagates with `!` exactly as an ordinary effect call
+does. A protocol is not a type (`List[Repository[Int, User]]` is E029);
+protocol-as-type is a separate, later stage (#1589).
+
+Tests: `spec/wasm_cross/generic_protocol_conformance.almd` (C-365),
+`spec/integration/generic_protocol_ports/` (ports / adapters / service across
+modules), `tests/diagnostics/protocol-*`, `tests/protocol_qualification_test.rs`
+
+### Marker Protocols
+
+Protocols with no methods serve as markers:
+
+```almide
+protocol Serializable {}
+type Marker: Serializable = { tag: String }
+```
+
+Tests: `spec/lang/protocol_test.almd`, `spec/lang/trait_impl_test.almd`, `spec/lang/protocol_generics_test.almd`, `spec/lang/protocol_advanced_test.almd`, `spec/lang/derive_conventions_test.almd`
+
+---
+
+## 11. Type Aliases
+
+`type Name = ExistingType` creates a transparent alias. The alias is interchangeable with the underlying type.
+
+```almide
+type Score = Int
+type Label = String
+
+let s: Score = 100
+let total = s + 50      // works: Score is Int
+```
+
+Type aliases are resolved by `TypeEnv.resolve_named`, which looks up the name in `env.types` and returns the underlying type definition.
+
+Tests: `spec/lang/type_alias_test.almd`
+
+---
+
+## 12. Tagged Variants and Internal Union Types
+
+For a public type carrying either an integer or a string, declare explicit
+payload-bearing variant cases:
+
+```almide
+type StringOrInt = IntValue(Int) | StringValue(String)
+
+fn render(value: StringOrInt) -> String = match value {
+  IntValue(n) => int.to_string(n),
+  StringValue(s) => s,
+}
+```
+
+`type StringOrInt = Int | String` does **not** declare an untagged integer-or-string
+payload type: the parser interprets a declaration whose alternatives are all
+uppercase simple names as a variant with two **unit cases** named `Int` and
+`String`. Use the explicit constructors above for payloads.
+
+Separately, the compiler's internal `Ty::Union(Vec<Ty>)` stores members sorted and deduplicated. The `Ty::union()` constructor flattens nested unions and deduplicates:
+
+- `Ty::union([Int, String, Int])` produces `Ty::Union([Int, String])`
+- `Ty::union([Int])` produces `Ty::Int` (single member unwrapped)
+
+Unification with unions tries each member with snapshotted bindings, committing the first success.
+
+---
+
+## 13. How Types Flow Through the Compiler
+
+```text
+Source (.almd)
+    │
+    ▼
+  Parse → AST (untyped)
+    │
+    ▼
+  Check → expr_types: HashMap<ExprId, Ty>
+    │        ├── registration.rs  — register FnSig, type decls, protocols
+    │        ├── infer.rs         — walk AST, assign ?N vars, collect constraints
+    │        ├── solving.rs       — Union-Find unification
+    │        └── resolve          — substitute ?N → concrete Ty in expr_types
+    │
+    ▼
+  Lower → Typed IR (IrProgram)
+    │        ├── trusts expr_types — no type guessing
+    │        ├── desugars pipe, UFCS, interpolation, operators
+    │        └── assigns VarId to every variable reference
+    │
+    ▼
+  Codegen → target source (Rust / WASM)
+             ├── reads IR types for dispatch decisions
+             └── emits target-specific type representations
+```
+
+### Key Data Structures
+
+- **`Ty` enum** (`crates/almide-types/src/types/mod.rs`): Internal type representation; the enum is the authoritative inventory, including sized numeric types, function effect flags, and compile-time constant parameters.
+- **`TypeEnv`** (`crates/almide-frontend/src/type_env.rs`): The type environment. Holds type declarations, function signatures, scopes, protocol definitions, and conformance tracking.
+- **`FnSig`** (`crates/almide-types/src/types/mod.rs`): Function signature with params, return type, generics, structural bounds, and protocol bounds.
+- **`TypeConstructorId`** (`crates/almide-types/src/types/constructor.rs`): Identifies type constructors (List, Option, Result, Map, Set, user-defined). Used by the `Applied` variant of `Ty`.
+- **`Kind`** (`crates/almide-types/src/types/constructor.rs`): The "type of a type constructor" — `*`, `* -> *`, `* -> * -> *`.
+- **`UnionFind`** (`crates/almide-frontend/src/check/types.rs`): Disjoint-set structure for inference variable equivalence. Union-by-rank with path compression.
+- **`Checker`** (`crates/almide-frontend/src/check/mod.rs`): Orchestrates the three-pass type checking pipeline.
+
+### Unification (`crates/almide-types/src/types/unify.rs`)
+
+The `unify` function matches a signature type against a concrete type, collecting `TypeVar` bindings:
+
+1. `TypeVar` on signature side: bind to actual type (with occurs check).
+2. `TypeVar` on actual side: accept (polymorphic compatibility).
+3. `Applied` types: match constructor ID, recursively unify args.
+4. `Union` types: try each member with snapshotted bindings.
+5. Everything else: delegate to `Ty::compatible`.
+
+`substitute` replaces bound `TypeVar`s in a type with their bindings.
+
+### Type Constructor Registry (`crates/almide-types/src/types/constructor.rs`)
+
+Every type constructor is registered with its kind and algebraic laws. The registry enables uniform operations across all container types and supports stream fusion optimizations:
+
+| Constructor | Kind           | Algebraic Laws                              |
+|-------------|----------------|---------------------------------------------|
+| `List`      | `* -> *`       | FunctorComposition, FunctorIdentity, FilterComposition, MapFoldFusion, MapFilterFusion |
+| `Option`    | `* -> *`       | FunctorComposition, FunctorIdentity, MonadAssociativity |
+| `Result`    | `* -> * -> *`  | FunctorComposition, FunctorIdentity         |
+| `Set`       | `* -> *`       | (none)                                      |
+| `Map`       | `* -> * -> *`  | (none)                                      |
+
+User-defined types are registered via `register_user_type` with their arity.

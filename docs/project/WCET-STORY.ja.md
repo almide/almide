@@ -1,6 +1,6 @@
 # Critical 形式のネイティブ出力における WCET 解析可能性 (#569)
 
-[English](./WCET-STORY.md) | [日本語](./WCET-STORY.ja.md) | [简体中文](./WCET-STORY.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./WCET-STORY.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](./WCET-STORY.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./WCET-STORY.zh-CN.md)
 
 ハードリアルタイムの受け入れには、最悪実行時間の解析が必要です。本文は CRITICAL 形式における Almide の `--target rust` 出力について、WCET に関する説明をまとめたものです。`examples/pid-kernel.almd` を使って端から端まで示し、`tests/wcet_kernel_test.rs` で検証します。
 

@@ -1,6 +1,6 @@
 # Breaking Change Policy
 
-[English](./BREAKING_CHANGE_POLICY.en.md) | [日本語](./BREAKING_CHANGE_POLICY.md) | [简体中文](./BREAKING_CHANGE_POLICY.zh-CN.md)
+[English](../translations/reference/docs/project/BREAKING_CHANGE_POLICY.md) | [日本語](./BREAKING_CHANGE_POLICY.md) | [简体中文](../translations/reference/docs/project/BREAKING_CHANGE_POLICY.zh-CN.md)
 
 > Python 2→3 の教訓: silent な挙動変更はエコシステムに大きな負担をかける。
 > Swift 1→2→3 の教訓: 連続 breaking release はユーザーの移行コストを増大させる。

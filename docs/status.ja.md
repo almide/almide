@@ -1,6 +1,6 @@
 # プロジェクトの現状
 
-[English](./status.md) | [日本語](./status.ja.md) | [简体中文](./status.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./status.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](./status.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./status.zh-CN.md)
 
 Almide の現在地をまとめています。記録時点が付いた集計値（標準ライブラリの規模、テストファイル、契約、ミューテーションスコア）は[計測ページ](./benchmarks/README.md#derived-counts)に表示され、CI が各台帳と照合します。
 

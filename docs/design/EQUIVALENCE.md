@@ -1,6 +1,6 @@
 # The Equivalence Claim — Byte-Identical Across Targets
 
-[English](./EQUIVALENCE.md) | [日本語](./EQUIVALENCE.ja.md) | [简体中文](./EQUIVALENCE.zh-CN.md)
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](./EQUIVALENCE.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](./EQUIVALENCE.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./EQUIVALENCE.zh-CN.md)
 
 **Cross-target equivalence is checked contract by contract:** deterministic
 observations (stdout, stderr, exit code) are compared for supported programs

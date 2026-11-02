@@ -1,6 +1,6 @@
 # 等価性の主張 — ターゲット間でバイト単位に一致すること
 
-[English](./EQUIVALENCE.md) | [日本語](./EQUIVALENCE.ja.md) | [简体中文](./EQUIVALENCE.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./EQUIVALENCE.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](./EQUIVALENCE.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./EQUIVALENCE.zh-CN.md)
 
 **ターゲット間の等価性は、契約ごとに検証します。** 対応するプログラムについて、入力とホストの前提を揃え、決定的な観測結果（stdout、stderr、終了コード）を比較します。ホストの観測、乱数、リソース制限、オラクルに対して相対的な時刻については、明記された不変条件や比較条件が必要です。有限のコーパスを通過しても、両ターゲット向けにコンパイルできるすべてのプログラムについての証明にはなりません。
 

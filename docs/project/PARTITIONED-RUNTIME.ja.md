@@ -1,6 +1,6 @@
 # パーティション型ランタイムの要件 (#568)
 
-[English](./PARTITIONED-RUNTIME.md) | [日本語](./PARTITIONED-RUNTIME.ja.md) | [简体中文](./PARTITIONED-RUNTIME.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./PARTITIONED-RUNTIME.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](./PARTITIONED-RUNTIME.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./PARTITIONED-RUNTIME.zh-CN.md)
 
 Critical プロファイルの Almide wasm 成果物を実行するために、パーティション型ホスト（ARINC 653 型の時間・空間分割、またはコンポーネントごとにメモリと CPU の予算を設定する環境）が提供すべきものと、成果物自体が保証するものを説明します。以下の具体的な成果物チェックは、`tests/static_memory_test.rs` の PID 参照アプリケーションを検証するものであり、すべての Critical プロファイルのプログラムや Wasm コンポーネント経路を検証するものではありません。デプロイする成果物ごとに、許可されたケイパビリティと実際のインポートを確認する必要があります。各行にゲートを示します。
 

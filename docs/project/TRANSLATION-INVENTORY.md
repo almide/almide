@@ -8,8 +8,9 @@ This inventory covers **556 tracked Markdown files** at that snapshot, not 556 i
 - Keep existing source paths and meanings. For English reader guides, `name.md`, `name.ja.md`, and `name.zh-CN.md` are siblings with language navigation.
 - Preserve code, commands, identifiers, dates, measurements, source links, and qualification of guarantees. Link to translated siblings only when they exist; untranslated destinations keep their original links.
 - A translation is a reader aid, not a new normative source. The original specification and its upstream ALS authority remain controlling; translation disagreements must be fixed, not used to change language semantics.
-- Existing originals can be Japanese or mixed-language. Do not label every existing `.md` file English or silently replace it to enforce a suffix convention. Inspect each before deciding whether `.en.md` is required to preserve its identity.
-- Current batches: eighteen reader guides with thirty-six translated files, plus 104 diagnostic-code pages and their index in Japanese and Simplified Chinese (210 files), for 246 new language files. Japanese originals of BREAKING_CHANGE_POLICY and HIDDEN_OPERATIONS retain their existing `.md` paths, with `.en.md` and `.zh-CN.md` siblings. Existing README translations are preserved with only links to these guides updated. All diagnostic originals, including their README, remain byte-identical; the general docs index links to the separate reader tree. The CLI remains English. No compiler, generator, workflow, helper, or CI policy changes are included.
+- Reader groups uniformly use `name.md` (English), `name.ja.md` (Japanese), and `name.zh-CN.md` (Simplified Chinese). There are no `.en.md` reader variants or language-directory routing in the current layout. Original Japanese or mixed-language canonical files keep their paths and identity; they are not relabeled English.
+- Current cumulative coverage (phases 1–7): **210 separate-tree groups / 630 reader files**, plus **16 existing English-source sibling groups** and the **3 root README language files**. Separate-tree paths are `docs/translations/reference/<full-source-path-stem>.md`, `.ja.md`, and `.zh-CN.md`. Each group includes an explicitly labeled source-language reader snapshot as well as translated variants; 630 is not a count of newly translated originals.
+- Machine-consumed, generated, normative, historical, Japanese and mixed-language originals are protected exceptions to adjacent placement: canonical files remain at their existing paths, and uniform language siblings live in the reference tree instead. Diagnostics do not gain localized CLI output. Standard-library snapshots are not generator outputs and are not automatically synchronized. Original authority, historical qualifications and pinned source references remain controlling. No compiler, generator, workflow, helper, or CI policy changes are included.
 
 ## Source caveats retained, not silently resolved
 
@@ -20,8 +21,8 @@ Translation preserves source statements; it is not independent verification of e
 The classifications below are routing decisions, not completion claims or permanent exclusions.
 
 - **Handwritten documentation:** audit consumers and source language, then translate in coherent groups. Pending rows are not yet certified safe to duplicate.
-- **Diagnostics:** `build.rs` and `tests/explain_docs_test.rs` select numeric `E…` stems; sibling suffixes are excluded by those two readers. Other consumers still need review. Website translations would not add translated `almide explain` output; CLI localization is a separate implementation scope.
-- **Standard library:** generated signature blocks and executable fences need a translation arrangement that retains a single generated API source. Do not hand-copy generated indexes and claim they stay synchronized. Inspect generators before choosing adjacent prose files or a separate translated guide tree.
+- **Diagnostics:** `build.rs` and `tests/explain_docs_test.rs` select numeric `E…` stems; sibling suffixes are excluded by those two readers. The coverage-gate audit requires the separate reference tree; adjacent E-code translations are unsafe. Website translations would not add translated `almide explain` output; CLI localization is a separate implementation scope.
+- **Standard library:** generated signature blocks and executable fences need a translation arrangement that retains a single generated API source. Do not hand-copy generated indexes and claim they stay synchronized. All 52 standard-library source pages now have separately pinned reader groups; generated markers are disabled in those snapshots and signatures/fences retain source bytes.
 - **Roadmap:** `generate-readme.sh` counts `active/*.md` and similar globs. Sibling translations there would create false roadmap items. Use a separate translated tree outside those globs, retaining dated original pointers; do not change the generator or counts in this task.
 - **Specifications / ALS:** translations are possible as explicitly non-normative reading aids linked to a pinned source. Preserve section IDs and original normative authority; audit contract section scanners before placement, preferring a separate tree where necessary.
 - **ADR:** preserve numbered original bodies and history. Non-normative, source-pinned translations can live outside the numbered original directory, with navigation in a mutable index rather than editing immutable records.
@@ -30,15 +31,15 @@ The classifications below are routing decisions, not completion claims or perman
 
 ## Handwritten-file consumer audit
 
-The [consumer audit](./TRANSLATION-CONSUMERS.md) inspects the 80 files originally routed to handwritten-document review: five translation candidates, sixteen requiring special handling, and fifty-nine still awaiting deeper body/indirect-consumer review. It is a frozen audit, not a claim that the original routing class was correct. In particular, `STABILITY.md` is normative, `org-trust-status.md` is legacy generated evidence, `fuzz-green/README.md` is parsed evidence, and experiment prompt files are machine inputs. The first of these is already reclassified below; the per-file audit supplies the finer routing for the rest.
+The [consumer audit](TRANSLATION-CONSUMERS.md) inspects the 80 files originally routed to handwritten-document review: five translation candidates, sixteen requiring special handling, and fifty-nine still awaiting deeper body/indirect-consumer review. It is a frozen audit, not a claim that the original routing class was correct. In particular, `STABILITY.md` is normative, `org-trust-status.md` is legacy generated evidence, `fuzz-green/README.md` is parsed evidence, and experiment prompt files are machine inputs. The first of these is already reclassified below; the per-file audit supplies the finer routing for the rest.
 
 The existing `check-docs-only.sh` and `ci_prose.py` have different path scopes. A documentation-only classification by the former does not guarantee that all workflows skip their compiler jobs. No classifier is changed here.
 
 ## Current coverage
 
-Of the frozen 556 Markdown rows, 126 have existing translations or newly supplied reading variants; **430 remain pending**. This is a file inventory, not 556 unique English documents: the three existing root README language files are counted separately. No universal translation-completeness claim is made.
+Of the frozen 556 Markdown rows, **229 have existing translations or supplied reading variants; 327 remain pending**. This is a file inventory, not 556 unique English documents: the three existing root README language files are counted separately. No universal translation-completeness claim is made.
 
-The diagnostic placement audit is included in [the consumer audit](./TRANSLATION-CONSUMERS.md). `docs/translations/{ja,zh-CN}/diagnostics/` avoids code scanners and preserves the original CLI output. [Japanese source caveats](../translations/ja/diagnostics/README.md#source-caveats) and [Chinese source caveats](../translations/zh-CN/diagnostics/README.md#source-caveats) identify original wording conflicts instead of guessing implementation behavior. All 104 numeric E-code pages have source-pinned reading variants; the remaining inventory still requires staged work.
+The diagnostic placement audit is included in [the consumer audit](TRANSLATION-CONSUMERS.md). `docs/translations/reference/docs/diagnostics/E001{,.ja,.zh-CN}.md` avoids code scanners and preserves the original CLI output. [Japanese source caveats](../translations/reference/docs/diagnostics/README.ja.md#source-caveats) and [Chinese source caveats](../translations/reference/docs/diagnostics/README.zh-CN.md#source-caveats) identify original wording conflicts instead of guessing implementation behavior. All 104 numeric E-code pages have source-pinned reading variants; the remaining inventory still requires staged work.
 
 ## Counts by class
 
@@ -59,563 +60,563 @@ The diagnostic placement audit is included in [the consumer audit](./TRANSLATION
 
 ## File-by-file status
 
-`Drafted in this PR` means the two translated files are supplied, not that the PR has merged. `Existing — preserved` means existing translations were not rewritten. `Pending` includes consumer/source-language review and translation work.
+`Reader variants supplied` means files exist in the cumulative working set, not that a PR has merged or publication succeeded. Language links point to the current sibling layout. `Existing — preserved` identifies the existing root README group. `Pending` includes consumer/source-language review and translation work. Routing classes are preserved from the frozen inventory; a class containing “pending” is not the current row completion status.
 
 | Source path | Class | Translation status |
 |---|---|---|
-| [`.claude/commands/almide-lang-bench.md`](../../.claude/commands/almide-lang-bench.md) | Agent instructions / embedded template | Pending |
-| [`.claude/commands/almide-msr.md`](../../.claude/commands/almide-msr.md) | Agent instructions / embedded template | Pending |
-| [`.claude/commands/almide-native-perf.md`](../../.claude/commands/almide-native-perf.md) | Agent instructions / embedded template | Pending |
-| [`.claude/commands/almide-release.md`](../../.claude/commands/almide-release.md) | Agent instructions / embedded template | Pending |
-| [`.claude/commands/almide-stats.md`](../../.claude/commands/almide-stats.md) | Agent instructions / embedded template | Pending |
-| [`.claude/commands/almide-test.md`](../../.claude/commands/almide-test.md) | Agent instructions / embedded template | Pending |
-| [`.claude/commands/almide-wasm-size.md`](../../.claude/commands/almide-wasm-size.md) | Agent instructions / embedded template | Pending |
-| [`CHANGELOG.md`](../../CHANGELOG.md) | Release history | Pending |
-| [`CLAUDE.md`](../../CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`README.ja.md`](../../README.ja.md) | Existing translations | Existing — preserved |
-| [`README.md`](../../README.md) | Existing translations | Existing — preserved |
-| [`README.zh-CN.md`](../../README.zh-CN.md) | Existing translations | Existing — preserved |
-| [`SECURITY.md`](../../SECURITY.md) | Reader guides — translated batches | Drafted in this PR |
-| [`SUPPORT.md`](../../SUPPORT.md) | Reader guides — translated batches | Drafted in this PR |
-| [`crates/CLAUDE.md`](../../crates/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`crates/README.md`](../../crates/README.md) | Reader guides — translated batches | Drafted in this PR |
-| [`crates/almide-base/CLAUDE.md`](../../crates/almide-base/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`crates/almide-codegen/CLAUDE.md`](../../crates/almide-codegen/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`crates/almide-egg-lab/README.md`](../../crates/almide-egg-lab/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`crates/almide-frontend/CLAUDE.md`](../../crates/almide-frontend/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`crates/almide-interp/CLAUDE.md`](../../crates/almide-interp/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`crates/almide-ir/CLAUDE.md`](../../crates/almide-ir/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`crates/almide-kernel/README.md`](../../crates/almide-kernel/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`crates/almide-lang/CLAUDE.md`](../../crates/almide-lang/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`crates/almide-optimize/CLAUDE.md`](../../crates/almide-optimize/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`crates/almide-perceus-belt/README.md`](../../crates/almide-perceus-belt/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`crates/almide-syntax/CLAUDE.md`](../../crates/almide-syntax/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`crates/almide-tools/CLAUDE.md`](../../crates/almide-tools/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`crates/almide-types/CLAUDE.md`](../../crates/almide-types/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`crates/almide-wasm-vm/REQUIREMENTS.md`](../../crates/almide-wasm-vm/REQUIREMENTS.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`demo/make-verify/README.md`](../../demo/make-verify/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/CHEATSHEET.md`](../../docs/CHEATSHEET.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/GRAMMAR.md`](../../docs/GRAMMAR.md) | Normative specification / grammar | Pending |
-| [`docs/README.md`](../../docs/README.md) | Reader guides — translated batches | Drafted in this PR |
-| [`docs/SPEC.md`](../../docs/SPEC.md) | Normative specification / grammar | Pending |
-| [`docs/STABILITY.md`](../../docs/STABILITY.md) | Normative specification / grammar | Pending |
-| [`docs/TRUST-SPINE.md`](../../docs/TRUST-SPINE.md) | Evidence / generated blocks / gate inputs | Pending |
-| [`docs/adr/0001-deterministic-time-units.md`](../../docs/adr/0001-deterministic-time-units.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0002-fallibility-effect-orthogonal.md`](../../docs/adr/0002-fallibility-effect-orthogonal.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0003-error-type-conversion-at-propagation.md`](../../docs/adr/0003-error-type-conversion-at-propagation.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0004-error-branchability-doctrine.md`](../../docs/adr/0004-error-branchability-doctrine.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0005-operators-desugar-to-stdlib.md`](../../docs/adr/0005-operators-desugar-to-stdlib.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0006-fallibility-polymorphic-hofs.md`](../../docs/adr/0006-fallibility-polymorphic-hofs.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0007-partition-replaces-collect.md`](../../docs/adr/0007-partition-replaces-collect.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0008-explicit-propagation-only.md`](../../docs/adr/0008-explicit-propagation-only.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0009-fn-type-quadrant-transparency.md`](../../docs/adr/0009-fn-type-quadrant-transparency.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0010-option-type-shorthand.md`](../../docs/adr/0010-option-type-shorthand.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0011-execution-substrate-is-a-free-variable.md`](../../docs/adr/0011-execution-substrate-is-a-free-variable.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0012-typed-error-refinement-in-the-marker.md`](../../docs/adr/0012-typed-error-refinement-in-the-marker.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0013-corpus-stays-id-keyed.md`](../../docs/adr/0013-corpus-stays-id-keyed.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0013-string-shared-immutable-buffer.md`](../../docs/adr/0013-string-shared-immutable-buffer.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0014-expectations-are-derived.md`](../../docs/adr/0014-expectations-are-derived.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0015-reference-evaluator-is-fresh-source-level-python.md`](../../docs/adr/0015-reference-evaluator-is-fresh-source-level-python.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0016-numeric-determinism-is-normative.md`](../../docs/adr/0016-numeric-determinism-is-normative.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0017-flight-profile-is-a-normative-subset.md`](../../docs/adr/0017-flight-profile-is-a-normative-subset.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0019-suppression-is-announced-dated-reasoned-acknowledged.md`](../../docs/adr/0019-suppression-is-announced-dated-reasoned-acknowledged.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0020-http-serving-and-handler-state.md`](../../docs/adr/0020-http-serving-and-handler-state.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0021-lambda-failure-channel-is-the-join-of-its-bangs.md`](../../docs/adr/0021-lambda-failure-channel-is-the-join-of-its-bangs.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0022-output-and-abort-builtins-are-admissible-in-a-pure-fn.md`](../../docs/adr/0022-output-and-abort-builtins-are-admissible-in-a-pure-fn.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0023-wasm-http-over-wasi-http.md`](../../docs/adr/0023-wasm-http-over-wasi-http.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md`](../../docs/adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0025-wasm-process-is-a-private-host-capability.md`](../../docs/adr/0025-wasm-process-is-a-private-host-capability.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0026-effect-categories-ride-the-transparent-fn-type.md`](../../docs/adr/0026-effect-categories-ride-the-transparent-fn-type.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0027-effect-functions-are-inspected-in-a-fixed-host-world.md`](../../docs/adr/0027-effect-functions-are-inspected-in-a-fixed-host-world.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0028-fan-selection-names-and-cost-contract.md`](../../docs/adr/0028-fan-selection-names-and-cost-contract.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0029-assert-aborts-runs-its-closure-in-a-child.md`](../../docs/adr/0029-assert-aborts-runs-its-closure-in-a-child.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0030-compile-cost-is-a-contract.md`](../../docs/adr/0030-compile-cost-is-a-contract.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0031-raw-pointers-carry-provenance.md`](../../docs/adr/0031-raw-pointers-carry-provenance.md) | Decision history — immutable original | Pending |
-| [`docs/adr/0032-a-response-content-type-is-its-body-type.md`](../../docs/adr/0032-a-response-content-type-is-its-body-type.md) | Decision history — immutable original | Pending |
-| [`docs/adr/README.md`](../../docs/adr/README.md) | Decision history — immutable original | Pending |
-| [`docs/benchmarks/README.md`](../../docs/benchmarks/README.md) | Evidence / generated blocks / gate inputs | Pending |
-| [`docs/benchmarks/fan-floor.md`](../../docs/benchmarks/fan-floor.md) | Evidence / generated blocks / gate inputs | Pending |
-| [`docs/benchmarks/float-printer.md`](../../docs/benchmarks/float-printer.md) | Evidence / generated blocks / gate inputs | Pending |
-| [`docs/bugfix-research-2026-09-09.md`](../../docs/bugfix-research-2026-09-09.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/bugfix-research-2026-09-12.md`](../../docs/bugfix-research-2026-09-12.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/contracts/.conformance-header.md`](../../docs/contracts/.conformance-header.md) | Evidence / generated blocks / gate inputs | Pending |
-| [`docs/contracts/.readme-header.md`](../../docs/contracts/.readme-header.md) | Evidence / generated blocks / gate inputs | Pending |
-| [`docs/contracts/C-006-fan-timeout-removed.md`](../../docs/contracts/C-006-fan-timeout-removed.md) | Evidence / generated blocks / gate inputs | Pending |
-| [`docs/contracts/C-008-009-010-repr.md`](../../docs/contracts/C-008-009-010-repr.md) | Evidence / generated blocks / gate inputs | Pending |
-| [`docs/contracts/C-033-cow-truth-table.md`](../../docs/contracts/C-033-cow-truth-table.md) | Evidence / generated blocks / gate inputs | Pending |
-| [`docs/contracts/README.md`](../../docs/contracts/README.md) | Evidence / generated blocks / gate inputs | Pending |
-| [`docs/contracts/conformance.md`](../../docs/contracts/conformance.md) | Evidence / generated blocks / gate inputs | Pending |
-| [`docs/contracts/proven-vs-trusted.md`](../../docs/contracts/proven-vs-trusted.md) | Evidence / generated blocks / gate inputs | Pending |
-| [`docs/cross-target-decisions.md`](../../docs/cross-target-decisions.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/design/DESIGN.md`](../../docs/design/DESIGN.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/design/EQUIVALENCE.md`](../../docs/design/EQUIVALENCE.md) | Reader guides — translated batches | Drafted in this PR |
-| [`docs/design/HIDDEN_OPERATIONS.md`](../../docs/design/HIDDEN_OPERATIONS.md) | Reader guides — translated batches | Drafted in this PR |
-| [`docs/design/MEMORY-SAFETY.md`](../../docs/design/MEMORY-SAFETY.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/design/REJECTED_PATTERNS.md`](../../docs/design/REJECTED_PATTERNS.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/design/fan-cross-language.md`](../../docs/design/fan-cross-language.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/design/fan-semantics-audit.md`](../../docs/design/fan-semantics-audit.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/design/fan-usability-eval.md`](../../docs/design/fan-usability-eval.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/diagnostics/E001.md`](../../docs/diagnostics/E001.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E002.md`](../../docs/diagnostics/E002.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E003.md`](../../docs/diagnostics/E003.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E004.md`](../../docs/diagnostics/E004.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E005.md`](../../docs/diagnostics/E005.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E006.md`](../../docs/diagnostics/E006.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E007.md`](../../docs/diagnostics/E007.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E008.md`](../../docs/diagnostics/E008.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E009.md`](../../docs/diagnostics/E009.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E010.md`](../../docs/diagnostics/E010.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E011.md`](../../docs/diagnostics/E011.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E012.md`](../../docs/diagnostics/E012.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E013.md`](../../docs/diagnostics/E013.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E014.md`](../../docs/diagnostics/E014.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E015.md`](../../docs/diagnostics/E015.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E016.md`](../../docs/diagnostics/E016.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E017.md`](../../docs/diagnostics/E017.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E018.md`](../../docs/diagnostics/E018.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E019.md`](../../docs/diagnostics/E019.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E020.md`](../../docs/diagnostics/E020.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E021.md`](../../docs/diagnostics/E021.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E022.md`](../../docs/diagnostics/E022.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E023.md`](../../docs/diagnostics/E023.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E024.md`](../../docs/diagnostics/E024.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E025.md`](../../docs/diagnostics/E025.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E026.md`](../../docs/diagnostics/E026.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E027.md`](../../docs/diagnostics/E027.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E028.md`](../../docs/diagnostics/E028.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E029.md`](../../docs/diagnostics/E029.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E030.md`](../../docs/diagnostics/E030.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E031.md`](../../docs/diagnostics/E031.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E032.md`](../../docs/diagnostics/E032.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E033.md`](../../docs/diagnostics/E033.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E034.md`](../../docs/diagnostics/E034.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E035.md`](../../docs/diagnostics/E035.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E036.md`](../../docs/diagnostics/E036.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E037.md`](../../docs/diagnostics/E037.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E038.md`](../../docs/diagnostics/E038.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E041.md`](../../docs/diagnostics/E041.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E042.md`](../../docs/diagnostics/E042.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E043.md`](../../docs/diagnostics/E043.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E044.md`](../../docs/diagnostics/E044.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E045.md`](../../docs/diagnostics/E045.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E046.md`](../../docs/diagnostics/E046.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E047.md`](../../docs/diagnostics/E047.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E048.md`](../../docs/diagnostics/E048.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E049.md`](../../docs/diagnostics/E049.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E050.md`](../../docs/diagnostics/E050.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E051.md`](../../docs/diagnostics/E051.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E052.md`](../../docs/diagnostics/E052.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E053.md`](../../docs/diagnostics/E053.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E054.md`](../../docs/diagnostics/E054.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E055.md`](../../docs/diagnostics/E055.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E056.md`](../../docs/diagnostics/E056.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E057.md`](../../docs/diagnostics/E057.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E058.md`](../../docs/diagnostics/E058.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E059.md`](../../docs/diagnostics/E059.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E060.md`](../../docs/diagnostics/E060.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E061.md`](../../docs/diagnostics/E061.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E062.md`](../../docs/diagnostics/E062.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E070.md`](../../docs/diagnostics/E070.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E071.md`](../../docs/diagnostics/E071.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E072.md`](../../docs/diagnostics/E072.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E073.md`](../../docs/diagnostics/E073.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E074.md`](../../docs/diagnostics/E074.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E075.md`](../../docs/diagnostics/E075.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E076.md`](../../docs/diagnostics/E076.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E077.md`](../../docs/diagnostics/E077.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E078.md`](../../docs/diagnostics/E078.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E080.md`](../../docs/diagnostics/E080.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E081.md`](../../docs/diagnostics/E081.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E082.md`](../../docs/diagnostics/E082.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E083.md`](../../docs/diagnostics/E083.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E084.md`](../../docs/diagnostics/E084.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E085.md`](../../docs/diagnostics/E085.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E086.md`](../../docs/diagnostics/E086.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E087.md`](../../docs/diagnostics/E087.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E088.md`](../../docs/diagnostics/E088.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E089.md`](../../docs/diagnostics/E089.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E090.md`](../../docs/diagnostics/E090.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E092.md`](../../docs/diagnostics/E092.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E093.md`](../../docs/diagnostics/E093.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E094.md`](../../docs/diagnostics/E094.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E095.md`](../../docs/diagnostics/E095.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E096.md`](../../docs/diagnostics/E096.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E097.md`](../../docs/diagnostics/E097.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E098.md`](../../docs/diagnostics/E098.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E099.md`](../../docs/diagnostics/E099.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E100.md`](../../docs/diagnostics/E100.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E101.md`](../../docs/diagnostics/E101.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E102.md`](../../docs/diagnostics/E102.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E103.md`](../../docs/diagnostics/E103.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E104.md`](../../docs/diagnostics/E104.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E109.md`](../../docs/diagnostics/E109.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E110.md`](../../docs/diagnostics/E110.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E111.md`](../../docs/diagnostics/E111.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E112.md`](../../docs/diagnostics/E112.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E113.md`](../../docs/diagnostics/E113.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E114.md`](../../docs/diagnostics/E114.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E116.md`](../../docs/diagnostics/E116.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E117.md`](../../docs/diagnostics/E117.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E118.md`](../../docs/diagnostics/E118.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E119.md`](../../docs/diagnostics/E119.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/E420.md`](../../docs/diagnostics/E420.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/diagnostics/README.md`](../../docs/diagnostics/README.md) | Diagnostic docs — embedded / scanned | Drafted in this PR (separate reader tree) |
-| [`docs/fan-capture-ownership-review.md`](../../docs/fan-capture-ownership-review.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/fan-parallel-safety-review.md`](../../docs/fan-parallel-safety-review.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/grammar/README.md`](../../docs/grammar/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/how-it-works.md`](../../docs/how-it-works.md) | Reader guides — translated batches | Drafted in this PR |
-| [`docs/mcp.md`](../../docs/mcp.md) | Reader guides — translated batches | Drafted in this PR |
-| [`docs/native-projection-ownership-review.md`](../../docs/native-projection-ownership-review.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/native-read-borrow-review.md`](../../docs/native-read-borrow-review.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/project/BENCHMARKS.md`](../../docs/project/BENCHMARKS.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/project/BREAKING_CHANGE_POLICY.md`](../../docs/project/BREAKING_CHANGE_POLICY.md) | Reader guides — translated batches | Drafted in this PR |
-| [`docs/project/CLAUDE_TEMPLATE.md`](../../docs/project/CLAUDE_TEMPLATE.md) | Agent instructions / embedded template | Pending |
-| [`docs/project/GENERATED-RUST-REVIEW.md`](../../docs/project/GENERATED-RUST-REVIEW.md) | Reader guides — translated batches | Drafted in this PR |
-| [`docs/project/ISSUE-TAXONOMY.md`](../../docs/project/ISSUE-TAXONOMY.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/project/PARTITIONED-RUNTIME.md`](../../docs/project/PARTITIONED-RUNTIME.md) | Reader guides — translated batches | Drafted in this PR |
-| [`docs/project/RUST-LINT-GATES.md`](../../docs/project/RUST-LINT-GATES.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/project/WCET-STORY.md`](../../docs/project/WCET-STORY.md) | Reader guides — translated batches | Drafted in this PR |
-| [`docs/project/linguist-submission.md`](../../docs/project/linguist-submission.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/project/org-trust-status.md`](../../docs/project/org-trust-status.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/record-option-cells-verification.md`](../../docs/record-option-cells-verification.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/releases/README.md`](../../docs/releases/README.md) | Release history | Pending |
-| [`docs/releases/v0.68.0-rc1.md`](../../docs/releases/v0.68.0-rc1.md) | Release history | Pending |
-| [`docs/releases/v0.68.0-rc2.md`](../../docs/releases/v0.68.0-rc2.md) | Release history | Pending |
-| [`docs/releases/v0.68.0.md`](../../docs/releases/v0.68.0.md) | Release history | Pending |
-| [`docs/releases/v0.69.0-rc1.md`](../../docs/releases/v0.69.0-rc1.md) | Release history | Pending |
-| [`docs/releases/v0.69.0.md`](../../docs/releases/v0.69.0.md) | Release history | Pending |
-| [`docs/roadmap/ALL_AXES.md`](../../docs/roadmap/ALL_AXES.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/GRAND_PLAN.md`](../../docs/roadmap/GRAND_PLAN.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/PRODUCTION_READY.md`](../../docs/roadmap/PRODUCTION_READY.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/README.md`](../../docs/roadmap/README.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/ROAD_TO_1_0.md`](../../docs/roadmap/ROAD_TO_1_0.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/adr-0013-string-sharing.md`](../../docs/roadmap/active/adr-0013-string-sharing.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/almide-perceus-belt.md`](../../docs/roadmap/active/almide-perceus-belt.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/arena-breakthroughs.md`](../../docs/roadmap/active/arena-breakthroughs.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/async-inception.md`](../../docs/roadmap/active/async-inception.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/async-world-claim.md`](../../docs/roadmap/active/async-world-claim.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/behavioral-contract.md`](../../docs/roadmap/active/behavioral-contract.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/build-speed-runtime-rlib.md`](../../docs/roadmap/active/build-speed-runtime-rlib.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/camp4-general-heap-match.md`](../../docs/roadmap/active/camp4-general-heap-match.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/certificate-format-v1.md`](../../docs/roadmap/active/certificate-format-v1.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/certification-grade.md`](../../docs/roadmap/active/certification-grade.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/ci-critical-path.md`](../../docs/roadmap/active/ci-critical-path.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/ci-warnings-cleanup.md`](../../docs/roadmap/active/ci-warnings-cleanup.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/closure-cross-target-completeness.md`](../../docs/roadmap/active/closure-cross-target-completeness.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/codegen-traversal-totality.md`](../../docs/roadmap/active/codegen-traversal-totality.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/completeness-by-construction.md`](../../docs/roadmap/active/completeness-by-construction.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/concurrency-stance.md`](../../docs/roadmap/active/concurrency-stance.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/continuous-improvement.md`](../../docs/roadmap/active/continuous-improvement.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/correctness-guarantee-gaps.md`](../../docs/roadmap/active/correctness-guarantee-gaps.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/cross-target-completeness.md`](../../docs/roadmap/active/cross-target-completeness.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/determinism-belt.md`](../../docs/roadmap/active/determinism-belt.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/deterministic-bounds.md`](../../docs/roadmap/active/deterministic-bounds.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/edit-locality-theory.md`](../../docs/roadmap/active/edit-locality-theory.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/effect-inspection-harness.md`](../../docs/roadmap/active/effect-inspection-harness.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/effect-system-capability.md`](../../docs/roadmap/active/effect-system-capability.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/effectful-27-blueprint.md`](../../docs/roadmap/active/effectful-27-blueprint.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/execution-inception.md`](../../docs/roadmap/active/execution-inception.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/fan-v2-examples.md`](../../docs/roadmap/active/fan-v2-examples.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/fan-v2.md`](../../docs/roadmap/active/fan-v2.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/flight-evidence-gaps.md`](../../docs/roadmap/active/flight-evidence-gaps.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/flight-organization.md`](../../docs/roadmap/active/flight-organization.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/flight-profile.md`](../../docs/roadmap/active/flight-profile.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/flight-qualification.md`](../../docs/roadmap/active/flight-qualification.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/flight-reference-app.md`](../../docs/roadmap/active/flight-reference-app.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/flight-rust-ferrocene.md`](../../docs/roadmap/active/flight-rust-ferrocene.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/flight-subset-spec.md`](../../docs/roadmap/active/flight-subset-spec.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/flight-wcet-loops.md`](../../docs/roadmap/active/flight-wcet-loops.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/fuzz-findings-triage.md`](../../docs/roadmap/active/fuzz-findings-triage.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/integer-literal-domain.md`](../../docs/roadmap/active/integer-literal-domain.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/interp-is-desugar-to-tostring.md`](../../docs/roadmap/active/interp-is-desugar-to-tostring.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/issue-inventory-2026-09-21.md`](../../docs/roadmap/active/issue-inventory-2026-09-21.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/issue-inventory-2026-09-21/issue-header-spec.md`](../../docs/roadmap/active/issue-inventory-2026-09-21/issue-header-spec.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/issue-ledger-burndown.md`](../../docs/roadmap/active/issue-ledger-burndown.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/lifted-carrier-abi.md`](../../docs/roadmap/active/lifted-carrier-abi.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/llm-first-language.md`](../../docs/roadmap/active/llm-first-language.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/logical-time-async.md`](../../docs/roadmap/active/logical-time-async.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/logical-time-implementation.md`](../../docs/roadmap/active/logical-time-implementation.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/logical-time-proofs.md`](../../docs/roadmap/active/logical-time-proofs.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/map-data-structure-roadmap.md`](../../docs/roadmap/active/map-data-structure-roadmap.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/mir-caps-call-count-breach.md`](../../docs/roadmap/active/mir-caps-call-count-breach.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/mission-critical-attack-list.md`](../../docs/roadmap/active/mission-critical-attack-list.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/native-boxed-pattern-lowering.md`](../../docs/roadmap/active/native-boxed-pattern-lowering.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/native-trust-spine.md`](../../docs/roadmap/active/native-trust-spine.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/net-unix-shm-embedded.md`](../../docs/roadmap/active/net-unix-shm-embedded.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/outside-review-audit-2026-07.md`](../../docs/roadmap/active/outside-review-audit-2026-07.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/playground-revamp.md`](../../docs/roadmap/active/playground-revamp.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/post-0.29-improvement-sweep.md`](../../docs/roadmap/active/post-0.29-improvement-sweep.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/protocol-any-existentials.md`](../../docs/roadmap/active/protocol-any-existentials.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/receipt-logic.md`](../../docs/roadmap/active/receipt-logic.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/reconciliation-followup.md`](../../docs/roadmap/active/reconciliation-followup.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/result-family-from-type.md`](../../docs/roadmap/active/result-family-from-type.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/return-op-eradication.md`](../../docs/roadmap/active/return-op-eradication.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/rot-eradication.md`](../../docs/roadmap/active/rot-eradication.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/security-by-construction.md`](../../docs/roadmap/active/security-by-construction.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/selfhost-link-v2.md`](../../docs/roadmap/active/selfhost-link-v2.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/shell-scripting-surface.md`](../../docs/roadmap/active/shell-scripting-surface.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/stdlib-redesign.md`](../../docs/roadmap/active/stdlib-redesign.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/test-surface-25x.md`](../../docs/roadmap/active/test-surface-25x.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/ticks-interface-audit.md`](../../docs/roadmap/active/ticks-interface-audit.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/trust-layer.md`](../../docs/roadmap/active/trust-layer.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/type-where-constraints.md`](../../docs/roadmap/active/type-where-constraints.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v0-unwrap-early-return-leak.md`](../../docs/roadmap/active/v0-unwrap-early-return-leak.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-adt-brick5-goal.md`](../../docs/roadmap/active/v1-adt-brick5-goal.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-adt-value-model.md`](../../docs/roadmap/active/v1-adt-value-model.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-backlog.md`](../../docs/roadmap/active/v1-backlog.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-bolt-backlog.md`](../../docs/roadmap/active/v1-bolt-backlog.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-develop-reflow.md`](../../docs/roadmap/active/v1-develop-reflow.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-heap-result-control-flow.md`](../../docs/roadmap/active/v1-heap-result-control-flow.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-join-completeness.md`](../../docs/roadmap/active/v1-join-completeness.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-kgi-kpi.md`](../../docs/roadmap/active/v1-kgi-kpi.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-loop-ownership-cert.md`](../../docs/roadmap/active/v1-loop-ownership-cert.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-mir-architecture.md`](../../docs/roadmap/active/v1-mir-architecture.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-org-byte-verification.md`](../../docs/roadmap/active/v1-org-byte-verification.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-parser-tco-lever.md`](../../docs/roadmap/active/v1-parser-tco-lever.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-phase1-mir-core.md`](../../docs/roadmap/active/v1-phase1-mir-core.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-proof-architecture.md`](../../docs/roadmap/active/v1-proof-architecture.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-proof-spine-progress.md`](../../docs/roadmap/active/v1-proof-spine-progress.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-records-svg.md`](../../docs/roadmap/active/v1-records-svg.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-release-path.md`](../../docs/roadmap/active/v1-release-path.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-selfhost-machinery.md`](../../docs/roadmap/active/v1-selfhost-machinery.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-selfhost-print-floor.md`](../../docs/roadmap/active/v1-selfhost-print-floor.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-spine-correctness-holes.md`](../../docs/roadmap/active/v1-spine-correctness-holes.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-system-map.md`](../../docs/roadmap/active/v1-system-map.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-tco-self-recursion.md`](../../docs/roadmap/active/v1-tco-self-recursion.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-v0-parity.md`](../../docs/roadmap/active/v1-v0-parity.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/v1-value-model.md`](../../docs/roadmap/active/v1-value-model.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/value-rc-cert.md`](../../docs/roadmap/active/value-rc-cert.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/wasm-frees-ownership-discipline.md`](../../docs/roadmap/active/wasm-frees-ownership-discipline.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/wasm-ownership-emit-mechanization.md`](../../docs/roadmap/active/wasm-ownership-emit-mechanization.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/wasm-platform-frontier.md`](../../docs/roadmap/active/wasm-platform-frontier.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/active/zero-committed-shell.md`](../../docs/roadmap/active/zero-committed-shell.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/bundled-almide-dispatch.md`](../../docs/roadmap/done/bundled-almide-dispatch.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/bundled-almide-ideal-form.md`](../../docs/roadmap/done/bundled-almide-ideal-form.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/claim-wording-perceus-byte-identity.md`](../../docs/roadmap/done/claim-wording-perceus-byte-identity.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/closure-architecture-v2.md`](../../docs/roadmap/done/closure-architecture-v2.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/closure-codegen-cross-target-gaps.md`](../../docs/roadmap/done/closure-codegen-cross-target-gaps.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/code-health-codopsy.md`](../../docs/roadmap/done/code-health-codopsy.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/codegen-ideal-form.md`](../../docs/roadmap/done/codegen-ideal-form.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/effect-system-phase1-2.md`](../../docs/roadmap/done/effect-system-phase1-2.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/hkt-foundation-phase1.md`](../../docs/roadmap/done/hkt-foundation-phase1.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/playground-repair.md`](../../docs/roadmap/done/playground-repair.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/reimpl-lint.md`](../../docs/roadmap/done/reimpl-lint.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/stdlib-declarative-unification.md`](../../docs/roadmap/done/stdlib-declarative-unification.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/variant-exhaustiveness-refinement.md`](../../docs/roadmap/done/variant-exhaustiveness-refinement.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/wasm-engine-redesign.md`](../../docs/roadmap/done/wasm-engine-redesign.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/done/wasm-optimization-roadmap.md`](../../docs/roadmap/done/wasm-optimization-roadmap.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/almide-to-almide-ffi.md`](../../docs/roadmap/on-hold/almide-to-almide-ffi.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/almide-ui.md`](../../docs/roadmap/on-hold/almide-ui.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/api-diff-auto-versioning.md`](../../docs/roadmap/on-hold/api-diff-auto-versioning.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/benchmark-next-phase.md`](../../docs/roadmap/on-hold/benchmark-next-phase.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/compile-time-contracts.md`](../../docs/roadmap/on-hold/compile-time-contracts.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/diagnostic-snippet-externalization.md`](../../docs/roadmap/on-hold/diagnostic-snippet-externalization.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/flow-design.md`](../../docs/roadmap/on-hold/flow-design.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/flow-spec-draft.md`](../../docs/roadmap/on-hold/flow-spec-draft.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/gpu-compute.md`](../../docs/roadmap/on-hold/gpu-compute.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/ir-optimization-tier2.md`](../../docs/roadmap/on-hold/ir-optimization-tier2.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/law-blocks-experiment.md`](../../docs/roadmap/on-hold/law-blocks-experiment.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/law-proofs-design.md`](../../docs/roadmap/on-hold/law-proofs-design.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/llm-integration.md`](../../docs/roadmap/on-hold/llm-integration.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/lsp-code-actions.md`](../../docs/roadmap/on-hold/lsp-code-actions.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/ml-inference.md`](../../docs/roadmap/on-hold/ml-inference.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/mlir-backend-adoption.md`](../../docs/roadmap/on-hold/mlir-backend-adoption.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/package-registry.md`](../../docs/roadmap/on-hold/package-registry.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/package-version-resolution.md`](../../docs/roadmap/on-hold/package-version-resolution.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/performance-research.md`](../../docs/roadmap/on-hold/performance-research.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/porta-embedded.md`](../../docs/roadmap/on-hold/porta-embedded.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/process-composition.md`](../../docs/roadmap/on-hold/process-composition.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/rainbow-bridge.md`](../../docs/roadmap/on-hold/rainbow-bridge.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/region-inference.md`](../../docs/roadmap/on-hold/region-inference.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/research-modification-survival-rate-paper.md`](../../docs/roadmap/on-hold/research-modification-survival-rate-paper.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/rumbling.md`](../../docs/roadmap/on-hold/rumbling.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/secure-by-design.md`](../../docs/roadmap/on-hold/secure-by-design.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/shell-completions.md`](../../docs/roadmap/on-hold/shell-completions.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/snapshot-testing.md`](../../docs/roadmap/on-hold/snapshot-testing.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/supervision-and-actors.md`](../../docs/roadmap/on-hold/supervision-and-actors.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/wasm-exception-handling.md`](../../docs/roadmap/on-hold/wasm-exception-handling.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/wasm-http-client.md`](../../docs/roadmap/on-hold/wasm-http-client.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/on-hold/web-framework.md`](../../docs/roadmap/on-hold/web-framework.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L0-conventions.md`](../../docs/roadmap/stdlib-redesign/L0-conventions.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L1-categories.md`](../../docs/roadmap/stdlib-redesign/L1-categories.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-args.md`](../../docs/roadmap/stdlib-redesign/L2-args.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-base64.md`](../../docs/roadmap/stdlib-redesign/L2-base64.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-bigint.md`](../../docs/roadmap/stdlib-redesign/L2-bigint.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-bool.md`](../../docs/roadmap/stdlib-redesign/L2-bool.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-bytes.md`](../../docs/roadmap/stdlib-redesign/L2-bytes.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-compute.md`](../../docs/roadmap/stdlib-redesign/L2-compute.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-datetime.md`](../../docs/roadmap/stdlib-redesign/L2-datetime.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-deque.md`](../../docs/roadmap/stdlib-redesign/L2-deque.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-duration.md`](../../docs/roadmap/stdlib-redesign/L2-duration.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-env.md`](../../docs/roadmap/stdlib-redesign/L2-env.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-error.md`](../../docs/roadmap/stdlib-redesign/L2-error.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-ffi.md`](../../docs/roadmap/stdlib-redesign/L2-ffi.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-float.md`](../../docs/roadmap/stdlib-redesign/L2-float.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-fs.md`](../../docs/roadmap/stdlib-redesign/L2-fs.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-hash.md`](../../docs/roadmap/stdlib-redesign/L2-hash.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-heap.md`](../../docs/roadmap/stdlib-redesign/L2-heap.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-hex.md`](../../docs/roadmap/stdlib-redesign/L2-hex.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-html.md`](../../docs/roadmap/stdlib-redesign/L2-html.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-http.md`](../../docs/roadmap/stdlib-redesign/L2-http.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-int.md`](../../docs/roadmap/stdlib-redesign/L2-int.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-io.md`](../../docs/roadmap/stdlib-redesign/L2-io.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-json.md`](../../docs/roadmap/stdlib-redesign/L2-json.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-list.md`](../../docs/roadmap/stdlib-redesign/L2-list.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-map.md`](../../docs/roadmap/stdlib-redesign/L2-map.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-math.md`](../../docs/roadmap/stdlib-redesign/L2-math.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-matrix.md`](../../docs/roadmap/stdlib-redesign/L2-matrix.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-net.md`](../../docs/roadmap/stdlib-redesign/L2-net.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-option.md`](../../docs/roadmap/stdlib-redesign/L2-option.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-path.md`](../../docs/roadmap/stdlib-redesign/L2-path.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-process.md`](../../docs/roadmap/stdlib-redesign/L2-process.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-random.md`](../../docs/roadmap/stdlib-redesign/L2-random.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-regex.md`](../../docs/roadmap/stdlib-redesign/L2-regex.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-result.md`](../../docs/roadmap/stdlib-redesign/L2-result.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-secret.md`](../../docs/roadmap/stdlib-redesign/L2-secret.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-set.md`](../../docs/roadmap/stdlib-redesign/L2-set.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-sized-numbers.md`](../../docs/roadmap/stdlib-redesign/L2-sized-numbers.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-string.md`](../../docs/roadmap/stdlib-redesign/L2-string.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-testing.md`](../../docs/roadmap/stdlib-redesign/L2-testing.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-unix.md`](../../docs/roadmap/stdlib-redesign/L2-unix.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-url.md`](../../docs/roadmap/stdlib-redesign/L2-url.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-uuid.md`](../../docs/roadmap/stdlib-redesign/L2-uuid.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-value.md`](../../docs/roadmap/stdlib-redesign/L2-value.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/L2-zlib.md`](../../docs/roadmap/stdlib-redesign/L2-zlib.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/README.md`](../../docs/roadmap/stdlib-redesign/README.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/facts/categories.md`](../../docs/roadmap/stdlib-redesign/facts/categories.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/facts/naming-conventions.md`](../../docs/roadmap/stdlib-redesign/facts/naming-conventions.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/protocol-view.md`](../../docs/roadmap/stdlib-redesign/protocol-view.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/roadmap/stdlib-redesign/target-surface.md`](../../docs/roadmap/stdlib-redesign/target-surface.md) | Roadmap — scanned tree / generated index | Pending |
-| [`docs/specs/CLAUDE.md`](../../docs/specs/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`docs/specs/als/README.md`](../../docs/specs/als/README.md) | Normative specification / grammar | Pending |
-| [`docs/specs/als/STANDARD.md`](../../docs/specs/als/STANDARD.md) | Normative specification / grammar | Pending |
-| [`docs/specs/als/bounded.md`](../../docs/specs/als/bounded.md) | Normative specification / grammar | Pending |
-| [`docs/specs/als/collections.md`](../../docs/specs/als/collections.md) | Normative specification / grammar | Pending |
-| [`docs/specs/als/data-formats.md`](../../docs/specs/als/data-formats.md) | Normative specification / grammar | Pending |
-| [`docs/specs/als/deterministic-time.md`](../../docs/specs/als/deterministic-time.md) | Normative specification / grammar | Pending |
-| [`docs/specs/als/expressions.md`](../../docs/specs/als/expressions.md) | Normative specification / grammar | Pending |
-| [`docs/specs/als/implementation.md`](../../docs/specs/als/implementation.md) | Normative specification / grammar | Pending |
-| [`docs/specs/als/runtime.md`](../../docs/specs/als/runtime.md) | Normative specification / grammar | Pending |
-| [`docs/specs/als/semantics.md`](../../docs/specs/als/semantics.md) | Normative specification / grammar | Pending |
-| [`docs/specs/als/strings.md`](../../docs/specs/als/strings.md) | Normative specification / grammar | Pending |
-| [`docs/specs/als/text-and-numbers.md`](../../docs/specs/als/text-and-numbers.md) | Normative specification / grammar | Pending |
-| [`docs/specs/cli.md`](../../docs/specs/cli.md) | Normative specification / grammar | Pending |
-| [`docs/specs/codegen.md`](../../docs/specs/codegen.md) | Normative specification / grammar | Pending |
-| [`docs/specs/edit-locality.md`](../../docs/specs/edit-locality.md) | Normative specification / grammar | Pending |
-| [`docs/specs/effect-fn-call-semantics.md`](../../docs/specs/effect-fn-call-semantics.md) | Normative specification / grammar | Pending |
-| [`docs/specs/effect-system.md`](../../docs/specs/effect-system.md) | Normative specification / grammar | Pending |
-| [`docs/specs/language.md`](../../docs/specs/language.md) | Normative specification / grammar | Pending |
-| [`docs/specs/module-system.md`](../../docs/specs/module-system.md) | Normative specification / grammar | Pending |
-| [`docs/specs/package-system.md`](../../docs/specs/package-system.md) | Normative specification / grammar | Pending |
-| [`docs/specs/perceus.md`](../../docs/specs/perceus.md) | Normative specification / grammar | Pending |
-| [`docs/specs/result-option-effect.md`](../../docs/specs/result-option-effect.md) | Normative specification / grammar | Pending |
-| [`docs/specs/scoped.md`](../../docs/specs/scoped.md) | Normative specification / grammar | Pending |
-| [`docs/specs/type-system.md`](../../docs/specs/type-system.md) | Normative specification / grammar | Pending |
-| [`docs/status.md`](../../docs/status.md) | Reader guides — translated batches | Drafted in this PR |
-| [`docs/stdlib/README.md`](../../docs/stdlib/README.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/args.md`](../../docs/stdlib/args.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/base64.md`](../../docs/stdlib/base64.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/bigint.md`](../../docs/stdlib/bigint.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/bool.md`](../../docs/stdlib/bool.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/bytes.md`](../../docs/stdlib/bytes.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/compute.md`](../../docs/stdlib/compute.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/datetime.md`](../../docs/stdlib/datetime.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/deque.md`](../../docs/stdlib/deque.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/duration.md`](../../docs/stdlib/duration.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/env.md`](../../docs/stdlib/env.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/ffi.md`](../../docs/stdlib/ffi.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/float.md`](../../docs/stdlib/float.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/float32.md`](../../docs/stdlib/float32.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/float64.md`](../../docs/stdlib/float64.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/fs.md`](../../docs/stdlib/fs.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/hash.md`](../../docs/stdlib/hash.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/heap.md`](../../docs/stdlib/heap.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/hex.md`](../../docs/stdlib/hex.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/html.md`](../../docs/stdlib/html.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/http.md`](../../docs/stdlib/http.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/int.md`](../../docs/stdlib/int.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/int16.md`](../../docs/stdlib/int16.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/int32.md`](../../docs/stdlib/int32.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/int64.md`](../../docs/stdlib/int64.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/int8.md`](../../docs/stdlib/int8.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/io.md`](../../docs/stdlib/io.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/json.md`](../../docs/stdlib/json.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/list.md`](../../docs/stdlib/list.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/map.md`](../../docs/stdlib/map.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/math.md`](../../docs/stdlib/math.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/matrix.md`](../../docs/stdlib/matrix.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/net.md`](../../docs/stdlib/net.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/option.md`](../../docs/stdlib/option.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/path.md`](../../docs/stdlib/path.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/process.md`](../../docs/stdlib/process.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/random.md`](../../docs/stdlib/random.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/regex.md`](../../docs/stdlib/regex.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/result.md`](../../docs/stdlib/result.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/secret.md`](../../docs/stdlib/secret.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/set.md`](../../docs/stdlib/set.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/string.md`](../../docs/stdlib/string.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/testing.md`](../../docs/stdlib/testing.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/uint16.md`](../../docs/stdlib/uint16.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/uint32.md`](../../docs/stdlib/uint32.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/uint64.md`](../../docs/stdlib/uint64.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/uint8.md`](../../docs/stdlib/uint8.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/unix.md`](../../docs/stdlib/unix.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/url.md`](../../docs/stdlib/url.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/uuid.md`](../../docs/stdlib/uuid.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/value.md`](../../docs/stdlib/value.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stdlib/zlib.md`](../../docs/stdlib/zlib.md) | Standard library — generated sections / gates | Pending |
-| [`docs/stream-fusion-safety-review.md`](../../docs/stream-fusion-safety-review.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/wasm-decoder-reclaim-review.md`](../../docs/wasm-decoder-reclaim-review.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/wasm/JS-HOST-ASYNC-IMPORTS.md`](../../docs/wasm/JS-HOST-ASYNC-IMPORTS.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/wasm/README.md`](../../docs/wasm/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/wasm/WASM-OUTPUT.md`](../../docs/wasm/WASM-OUTPUT.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/wasm/capability-system.md`](../../docs/wasm/capability-system.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`docs/written-in-almide.md`](../../docs/written-in-almide.md) | Reader guides — translated batches | Drafted in this PR |
-| [`examples/almd-outline/README.md`](../../examples/almd-outline/README.md) | Reader guides — translated batches | Drafted in this PR |
-| [`proofs/COVERAGE.md`](../../proofs/COVERAGE.md) | Proof records — machine evidence | Pending |
-| [`proofs/DO330-GAP.md`](../../proofs/DO330-GAP.md) | Proof records — machine evidence | Pending |
-| [`proofs/FORMAL-CREDIT.md`](../../proofs/FORMAL-CREDIT.md) | Proof records — machine evidence | Pending |
-| [`proofs/README.md`](../../proofs/README.md) | Proof records — machine evidence | Pending |
-| [`proofs/STAGE-STATUS.md`](../../proofs/STAGE-STATUS.md) | Proof records — machine evidence | Pending |
-| [`proofs/TOOL-QUALIFICATION.md`](../../proofs/TOOL-QUALIFICATION.md) | Proof records — machine evidence | Pending |
-| [`proofs/TOR.md`](../../proofs/TOR.md) | Proof records — machine evidence | Pending |
-| [`proofs/TRUSTED_BASE.md`](../../proofs/TRUSTED_BASE.md) | Proof records — machine evidence | Pending |
-| [`proofs/regex/README.md`](../../proofs/regex/README.md) | Proof records — machine evidence | Pending |
-| [`research/CLAUDE.md`](../../research/CLAUDE.md) | Agent instructions / embedded template | Pending |
-| [`research/benchmark/exercises/BENCHMARK.md`](../../research/benchmark/exercises/BENCHMARK.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/benchmark/fuzz-green/README.md`](../../research/benchmark/fuzz-green/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/benchmark/lang-bench/README.md`](../../research/benchmark/lang-bench/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/benchmark/lang-bench/tasks-example/xlang/README.md`](../../research/benchmark/lang-bench/tasks-example/xlang/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/01-add-sub/prompt.md`](../../research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/01-add-sub/prompt.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/02-rename-show-to-print/prompt.md`](../../research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/02-rename-show-to-print/prompt.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/benchmark/perf/README.md`](../../research/benchmark/perf/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/benchmark/perf/hot-issues-2026-09-10/README.md`](../../research/benchmark/perf/hot-issues-2026-09-10/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/benchmark/perf/hot-issues-2026-09-10/gramide-cached-operators/README.md`](../../research/benchmark/perf/hot-issues-2026-09-10/gramide-cached-operators/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/benchmark/perf/spectralnorm/README.md`](../../research/benchmark/perf/spectralnorm/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/benchmark/perf/string-gap-1004.md`](../../research/benchmark/perf/string-gap-1004.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/benchmark/stdlib/HANDOFF.md`](../../research/benchmark/stdlib/HANDOFF.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/benchmark/three-way/README.md`](../../research/benchmark/three-way/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/beyond-rust/README.md`](../../research/beyond-rust/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/fan-audit/probes/README.md`](../../research/fan-audit/probes/README.md) | Reader guides — translated batches | Drafted in this PR |
-| [`research/grammar-lab/LESSONS.md`](../../research/grammar-lab/LESSONS.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/grammar-lab/README.md`](../../research/grammar-lab/README.md) | Reader guides — translated batches | Drafted in this PR |
-| [`research/grammar-lab/REPORT.md`](../../research/grammar-lab/REPORT.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/grammar-lab/experiments/optional-handling/REPORT.md`](../../research/grammar-lab/experiments/optional-handling/REPORT.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/grammar-lab/prompts/layer1_rules.md`](../../research/grammar-lab/prompts/layer1_rules.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/grammar-lab/prompts/layer2_combinator.md`](../../research/grammar-lab/prompts/layer2_combinator.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/grammar-lab/prompts/layer2_laws.md`](../../research/grammar-lab/prompts/layer2_laws.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/grammar-lab/prompts/layer2_match.md`](../../research/grammar-lab/prompts/layer2_match.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/grammar-lab/prompts/layer2_variant_fn.md`](../../research/grammar-lab/prompts/layer2_variant_fn.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/grammar-lab/prompts/layer2_variant_paren.md`](../../research/grammar-lab/prompts/layer2_variant_paren.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/spike/charge-probe/BURNDOWN.md`](../../research/spike/charge-probe/BURNDOWN.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/spike/charge-probe/REPORT.md`](../../research/spike/charge-probe/REPORT.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/spike/logical-time-race/GATE.md`](../../research/spike/logical-time-race/GATE.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/spike/substrate-observability/README.md`](../../research/spike/substrate-observability/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`research/spike/v1-mir/GATE.md`](../../research/spike/v1-mir/GATE.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`runtime/rs/README.md`](../../runtime/rs/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`spec/churn/README.md`](../../spec/churn/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`spec/gauntlet/README.md`](../../spec/gauntlet/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`stdlib/README.md`](../../stdlib/README.md) | Handwritten documentation — consumer audit pending | Pending |
-| [`tools/claude-plugin/README.md`](../../tools/claude-plugin/README.md) | Reader guides — translated batches | Drafted in this PR |
-| [`tools/xtarget-fuzz/README.md`](../../tools/xtarget-fuzz/README.md) | Handwritten documentation — consumer audit pending | Pending |
+| [`.claude/commands/almide-lang-bench.md`](../../.claude/commands/almide-lang-bench.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`.claude/commands/almide-msr.md`](../../.claude/commands/almide-msr.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`.claude/commands/almide-native-perf.md`](../../.claude/commands/almide-native-perf.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`.claude/commands/almide-release.md`](../../.claude/commands/almide-release.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`.claude/commands/almide-stats.md`](../../.claude/commands/almide-stats.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`.claude/commands/almide-test.md`](../../.claude/commands/almide-test.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`.claude/commands/almide-wasm-size.md`](../../.claude/commands/almide-wasm-size.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`CHANGELOG.md`](../../CHANGELOG.md) | Release history | Pending — reader variants not yet supplied |
+| [`CLAUDE.md`](../../CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`README.ja.md`](../../README.ja.md) | Existing translations | Existing — preserved — [en](../../README.md) / [ja](../../README.ja.md) / [zh-CN](../../README.zh-CN.md) |
+| [`README.md`](../../README.md) | Existing translations | Existing — preserved — [en](../../README.md) / [ja](../../README.ja.md) / [zh-CN](../../README.zh-CN.md) |
+| [`README.zh-CN.md`](../../README.zh-CN.md) | Existing translations | Existing — preserved — [en](../../README.md) / [ja](../../README.ja.md) / [zh-CN](../../README.zh-CN.md) |
+| [`SECURITY.md`](../../SECURITY.md) | Reader guides — translated batches | Reader variants supplied — [en](../../SECURITY.md) / [ja](../../SECURITY.ja.md) / [zh-CN](../../SECURITY.zh-CN.md) |
+| [`SUPPORT.md`](../../SUPPORT.md) | Reader guides — translated batches | Reader variants supplied — [en](../../SUPPORT.md) / [ja](../../SUPPORT.ja.md) / [zh-CN](../../SUPPORT.zh-CN.md) |
+| [`crates/CLAUDE.md`](../../crates/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`crates/README.md`](../../crates/README.md) | Reader guides — translated batches | Reader variants supplied — [en](../../crates/README.md) / [ja](../../crates/README.ja.md) / [zh-CN](../../crates/README.zh-CN.md) |
+| [`crates/almide-base/CLAUDE.md`](../../crates/almide-base/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`crates/almide-codegen/CLAUDE.md`](../../crates/almide-codegen/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`crates/almide-egg-lab/README.md`](../../crates/almide-egg-lab/README.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/crates/almide-egg-lab/README.md) / [ja](../translations/reference/crates/almide-egg-lab/README.ja.md) / [zh-CN](../translations/reference/crates/almide-egg-lab/README.zh-CN.md) |
+| [`crates/almide-frontend/CLAUDE.md`](../../crates/almide-frontend/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`crates/almide-interp/CLAUDE.md`](../../crates/almide-interp/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`crates/almide-ir/CLAUDE.md`](../../crates/almide-ir/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`crates/almide-kernel/README.md`](../../crates/almide-kernel/README.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/crates/almide-kernel/README.md) / [ja](../translations/reference/crates/almide-kernel/README.ja.md) / [zh-CN](../translations/reference/crates/almide-kernel/README.zh-CN.md) |
+| [`crates/almide-lang/CLAUDE.md`](../../crates/almide-lang/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`crates/almide-optimize/CLAUDE.md`](../../crates/almide-optimize/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`crates/almide-perceus-belt/README.md`](../../crates/almide-perceus-belt/README.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`crates/almide-syntax/CLAUDE.md`](../../crates/almide-syntax/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`crates/almide-tools/CLAUDE.md`](../../crates/almide-tools/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`crates/almide-types/CLAUDE.md`](../../crates/almide-types/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`crates/almide-wasm-vm/REQUIREMENTS.md`](../../crates/almide-wasm-vm/REQUIREMENTS.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`demo/make-verify/README.md`](../../demo/make-verify/README.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/demo/make-verify/README.md) / [ja](../translations/reference/demo/make-verify/README.ja.md) / [zh-CN](../translations/reference/demo/make-verify/README.zh-CN.md) |
+| [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/docs/ARCHITECTURE.md) / [ja](../translations/reference/docs/ARCHITECTURE.ja.md) / [zh-CN](../translations/reference/docs/ARCHITECTURE.zh-CN.md) |
+| [`docs/CHEATSHEET.md`](../CHEATSHEET.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/docs/CHEATSHEET.md) / [ja](../translations/reference/docs/CHEATSHEET.ja.md) / [zh-CN](../translations/reference/docs/CHEATSHEET.zh-CN.md) |
+| [`docs/GRAMMAR.md`](../GRAMMAR.md) | Normative specification / grammar | Reader variants supplied — [en](../translations/reference/docs/GRAMMAR.md) / [ja](../translations/reference/docs/GRAMMAR.ja.md) / [zh-CN](../translations/reference/docs/GRAMMAR.zh-CN.md) |
+| [`docs/README.md`](../README.md) | Reader guides — translated batches | Reader variants supplied — [en](../README.md) / [ja](../README.ja.md) / [zh-CN](../README.zh-CN.md) |
+| [`docs/SPEC.md`](../SPEC.md) | Normative specification / grammar | Reader variants supplied — [en](../translations/reference/docs/SPEC.md) / [ja](../translations/reference/docs/SPEC.ja.md) / [zh-CN](../translations/reference/docs/SPEC.zh-CN.md) |
+| [`docs/STABILITY.md`](../STABILITY.md) | Normative specification / grammar | Reader variants supplied — [en](../translations/reference/docs/STABILITY.md) / [ja](../translations/reference/docs/STABILITY.ja.md) / [zh-CN](../translations/reference/docs/STABILITY.zh-CN.md) |
+| [`docs/TRUST-SPINE.md`](../TRUST-SPINE.md) | Evidence / generated blocks / gate inputs | Pending — reader variants not yet supplied |
+| [`docs/adr/0001-deterministic-time-units.md`](../adr/0001-deterministic-time-units.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0002-fallibility-effect-orthogonal.md`](../adr/0002-fallibility-effect-orthogonal.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0003-error-type-conversion-at-propagation.md`](../adr/0003-error-type-conversion-at-propagation.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0004-error-branchability-doctrine.md`](../adr/0004-error-branchability-doctrine.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0005-operators-desugar-to-stdlib.md`](../adr/0005-operators-desugar-to-stdlib.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0006-fallibility-polymorphic-hofs.md`](../adr/0006-fallibility-polymorphic-hofs.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0007-partition-replaces-collect.md`](../adr/0007-partition-replaces-collect.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0008-explicit-propagation-only.md`](../adr/0008-explicit-propagation-only.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0009-fn-type-quadrant-transparency.md`](../adr/0009-fn-type-quadrant-transparency.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0010-option-type-shorthand.md`](../adr/0010-option-type-shorthand.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0011-execution-substrate-is-a-free-variable.md`](../adr/0011-execution-substrate-is-a-free-variable.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0012-typed-error-refinement-in-the-marker.md`](../adr/0012-typed-error-refinement-in-the-marker.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0013-corpus-stays-id-keyed.md`](../adr/0013-corpus-stays-id-keyed.md) | Decision history — immutable original | Reader variants supplied — [en](../translations/reference/docs/adr/0013-corpus-stays-id-keyed.md) / [ja](../translations/reference/docs/adr/0013-corpus-stays-id-keyed.ja.md) / [zh-CN](../translations/reference/docs/adr/0013-corpus-stays-id-keyed.zh-CN.md) |
+| [`docs/adr/0013-string-shared-immutable-buffer.md`](../adr/0013-string-shared-immutable-buffer.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0014-expectations-are-derived.md`](../adr/0014-expectations-are-derived.md) | Decision history — immutable original | Reader variants supplied — [en](../translations/reference/docs/adr/0014-expectations-are-derived.md) / [ja](../translations/reference/docs/adr/0014-expectations-are-derived.ja.md) / [zh-CN](../translations/reference/docs/adr/0014-expectations-are-derived.zh-CN.md) |
+| [`docs/adr/0015-reference-evaluator-is-fresh-source-level-python.md`](../adr/0015-reference-evaluator-is-fresh-source-level-python.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0016-numeric-determinism-is-normative.md`](../adr/0016-numeric-determinism-is-normative.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0017-flight-profile-is-a-normative-subset.md`](../adr/0017-flight-profile-is-a-normative-subset.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0019-suppression-is-announced-dated-reasoned-acknowledged.md`](../adr/0019-suppression-is-announced-dated-reasoned-acknowledged.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0020-http-serving-and-handler-state.md`](../adr/0020-http-serving-and-handler-state.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0021-lambda-failure-channel-is-the-join-of-its-bangs.md`](../adr/0021-lambda-failure-channel-is-the-join-of-its-bangs.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0022-output-and-abort-builtins-are-admissible-in-a-pure-fn.md`](../adr/0022-output-and-abort-builtins-are-admissible-in-a-pure-fn.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0023-wasm-http-over-wasi-http.md`](../adr/0023-wasm-http-over-wasi-http.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md`](../adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0025-wasm-process-is-a-private-host-capability.md`](../adr/0025-wasm-process-is-a-private-host-capability.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0026-effect-categories-ride-the-transparent-fn-type.md`](../adr/0026-effect-categories-ride-the-transparent-fn-type.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0027-effect-functions-are-inspected-in-a-fixed-host-world.md`](../adr/0027-effect-functions-are-inspected-in-a-fixed-host-world.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0028-fan-selection-names-and-cost-contract.md`](../adr/0028-fan-selection-names-and-cost-contract.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0029-assert-aborts-runs-its-closure-in-a-child.md`](../adr/0029-assert-aborts-runs-its-closure-in-a-child.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0030-compile-cost-is-a-contract.md`](../adr/0030-compile-cost-is-a-contract.md) | Decision history — immutable original | Reader variants supplied — [en](../translations/reference/docs/adr/0030-compile-cost-is-a-contract.md) / [ja](../translations/reference/docs/adr/0030-compile-cost-is-a-contract.ja.md) / [zh-CN](../translations/reference/docs/adr/0030-compile-cost-is-a-contract.zh-CN.md) |
+| [`docs/adr/0031-raw-pointers-carry-provenance.md`](../adr/0031-raw-pointers-carry-provenance.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/0032-a-response-content-type-is-its-body-type.md`](../adr/0032-a-response-content-type-is-its-body-type.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/adr/README.md`](../adr/README.md) | Decision history — immutable original | Pending — reader variants not yet supplied |
+| [`docs/benchmarks/README.md`](../benchmarks/README.md) | Evidence / generated blocks / gate inputs | Pending — reader variants not yet supplied |
+| [`docs/benchmarks/fan-floor.md`](../benchmarks/fan-floor.md) | Evidence / generated blocks / gate inputs | Pending — reader variants not yet supplied |
+| [`docs/benchmarks/float-printer.md`](../benchmarks/float-printer.md) | Evidence / generated blocks / gate inputs | Pending — reader variants not yet supplied |
+| [`docs/bugfix-research-2026-09-09.md`](../bugfix-research-2026-09-09.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/bugfix-research-2026-09-12.md`](../bugfix-research-2026-09-12.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/contracts/.conformance-header.md`](../contracts/.conformance-header.md) | Evidence / generated blocks / gate inputs | Pending — reader variants not yet supplied |
+| [`docs/contracts/.readme-header.md`](../contracts/.readme-header.md) | Evidence / generated blocks / gate inputs | Pending — reader variants not yet supplied |
+| [`docs/contracts/C-006-fan-timeout-removed.md`](../contracts/C-006-fan-timeout-removed.md) | Evidence / generated blocks / gate inputs | Pending — reader variants not yet supplied |
+| [`docs/contracts/C-008-009-010-repr.md`](../contracts/C-008-009-010-repr.md) | Evidence / generated blocks / gate inputs | Pending — reader variants not yet supplied |
+| [`docs/contracts/C-033-cow-truth-table.md`](../contracts/C-033-cow-truth-table.md) | Evidence / generated blocks / gate inputs | Pending — reader variants not yet supplied |
+| [`docs/contracts/README.md`](../contracts/README.md) | Evidence / generated blocks / gate inputs | Pending — reader variants not yet supplied |
+| [`docs/contracts/conformance.md`](../contracts/conformance.md) | Evidence / generated blocks / gate inputs | Pending — reader variants not yet supplied |
+| [`docs/contracts/proven-vs-trusted.md`](../contracts/proven-vs-trusted.md) | Evidence / generated blocks / gate inputs | Pending — reader variants not yet supplied |
+| [`docs/cross-target-decisions.md`](../cross-target-decisions.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/docs/cross-target-decisions.md) / [ja](../translations/reference/docs/cross-target-decisions.ja.md) / [zh-CN](../translations/reference/docs/cross-target-decisions.zh-CN.md) |
+| [`docs/design/DESIGN.md`](../design/DESIGN.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/docs/design/DESIGN.md) / [ja](../translations/reference/docs/design/DESIGN.ja.md) / [zh-CN](../translations/reference/docs/design/DESIGN.zh-CN.md) |
+| [`docs/design/EQUIVALENCE.md`](../design/EQUIVALENCE.md) | Reader guides — translated batches | Reader variants supplied — [en](../design/EQUIVALENCE.md) / [ja](../design/EQUIVALENCE.ja.md) / [zh-CN](../design/EQUIVALENCE.zh-CN.md) |
+| [`docs/design/HIDDEN_OPERATIONS.md`](../design/HIDDEN_OPERATIONS.md) | Reader guides — translated batches | Reader variants supplied — [en](../translations/reference/docs/design/HIDDEN_OPERATIONS.md) / [ja](../translations/reference/docs/design/HIDDEN_OPERATIONS.ja.md) / [zh-CN](../translations/reference/docs/design/HIDDEN_OPERATIONS.zh-CN.md) |
+| [`docs/design/MEMORY-SAFETY.md`](../design/MEMORY-SAFETY.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/design/REJECTED_PATTERNS.md`](../design/REJECTED_PATTERNS.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/docs/design/REJECTED_PATTERNS.md) / [ja](../translations/reference/docs/design/REJECTED_PATTERNS.ja.md) / [zh-CN](../translations/reference/docs/design/REJECTED_PATTERNS.zh-CN.md) |
+| [`docs/design/fan-cross-language.md`](../design/fan-cross-language.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/design/fan-semantics-audit.md`](../design/fan-semantics-audit.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/design/fan-usability-eval.md`](../design/fan-usability-eval.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/diagnostics/E001.md`](../diagnostics/E001.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E001.md) / [ja](../translations/reference/docs/diagnostics/E001.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E001.zh-CN.md) |
+| [`docs/diagnostics/E002.md`](../diagnostics/E002.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E002.md) / [ja](../translations/reference/docs/diagnostics/E002.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E002.zh-CN.md) |
+| [`docs/diagnostics/E003.md`](../diagnostics/E003.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E003.md) / [ja](../translations/reference/docs/diagnostics/E003.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E003.zh-CN.md) |
+| [`docs/diagnostics/E004.md`](../diagnostics/E004.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E004.md) / [ja](../translations/reference/docs/diagnostics/E004.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E004.zh-CN.md) |
+| [`docs/diagnostics/E005.md`](../diagnostics/E005.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E005.md) / [ja](../translations/reference/docs/diagnostics/E005.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E005.zh-CN.md) |
+| [`docs/diagnostics/E006.md`](../diagnostics/E006.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E006.md) / [ja](../translations/reference/docs/diagnostics/E006.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E006.zh-CN.md) |
+| [`docs/diagnostics/E007.md`](../diagnostics/E007.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E007.md) / [ja](../translations/reference/docs/diagnostics/E007.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E007.zh-CN.md) |
+| [`docs/diagnostics/E008.md`](../diagnostics/E008.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E008.md) / [ja](../translations/reference/docs/diagnostics/E008.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E008.zh-CN.md) |
+| [`docs/diagnostics/E009.md`](../diagnostics/E009.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E009.md) / [ja](../translations/reference/docs/diagnostics/E009.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E009.zh-CN.md) |
+| [`docs/diagnostics/E010.md`](../diagnostics/E010.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E010.md) / [ja](../translations/reference/docs/diagnostics/E010.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E010.zh-CN.md) |
+| [`docs/diagnostics/E011.md`](../diagnostics/E011.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E011.md) / [ja](../translations/reference/docs/diagnostics/E011.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E011.zh-CN.md) |
+| [`docs/diagnostics/E012.md`](../diagnostics/E012.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E012.md) / [ja](../translations/reference/docs/diagnostics/E012.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E012.zh-CN.md) |
+| [`docs/diagnostics/E013.md`](../diagnostics/E013.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E013.md) / [ja](../translations/reference/docs/diagnostics/E013.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E013.zh-CN.md) |
+| [`docs/diagnostics/E014.md`](../diagnostics/E014.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E014.md) / [ja](../translations/reference/docs/diagnostics/E014.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E014.zh-CN.md) |
+| [`docs/diagnostics/E015.md`](../diagnostics/E015.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E015.md) / [ja](../translations/reference/docs/diagnostics/E015.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E015.zh-CN.md) |
+| [`docs/diagnostics/E016.md`](../diagnostics/E016.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E016.md) / [ja](../translations/reference/docs/diagnostics/E016.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E016.zh-CN.md) |
+| [`docs/diagnostics/E017.md`](../diagnostics/E017.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E017.md) / [ja](../translations/reference/docs/diagnostics/E017.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E017.zh-CN.md) |
+| [`docs/diagnostics/E018.md`](../diagnostics/E018.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E018.md) / [ja](../translations/reference/docs/diagnostics/E018.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E018.zh-CN.md) |
+| [`docs/diagnostics/E019.md`](../diagnostics/E019.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E019.md) / [ja](../translations/reference/docs/diagnostics/E019.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E019.zh-CN.md) |
+| [`docs/diagnostics/E020.md`](../diagnostics/E020.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E020.md) / [ja](../translations/reference/docs/diagnostics/E020.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E020.zh-CN.md) |
+| [`docs/diagnostics/E021.md`](../diagnostics/E021.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E021.md) / [ja](../translations/reference/docs/diagnostics/E021.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E021.zh-CN.md) |
+| [`docs/diagnostics/E022.md`](../diagnostics/E022.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E022.md) / [ja](../translations/reference/docs/diagnostics/E022.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E022.zh-CN.md) |
+| [`docs/diagnostics/E023.md`](../diagnostics/E023.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E023.md) / [ja](../translations/reference/docs/diagnostics/E023.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E023.zh-CN.md) |
+| [`docs/diagnostics/E024.md`](../diagnostics/E024.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E024.md) / [ja](../translations/reference/docs/diagnostics/E024.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E024.zh-CN.md) |
+| [`docs/diagnostics/E025.md`](../diagnostics/E025.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E025.md) / [ja](../translations/reference/docs/diagnostics/E025.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E025.zh-CN.md) |
+| [`docs/diagnostics/E026.md`](../diagnostics/E026.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E026.md) / [ja](../translations/reference/docs/diagnostics/E026.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E026.zh-CN.md) |
+| [`docs/diagnostics/E027.md`](../diagnostics/E027.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E027.md) / [ja](../translations/reference/docs/diagnostics/E027.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E027.zh-CN.md) |
+| [`docs/diagnostics/E028.md`](../diagnostics/E028.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E028.md) / [ja](../translations/reference/docs/diagnostics/E028.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E028.zh-CN.md) |
+| [`docs/diagnostics/E029.md`](../diagnostics/E029.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E029.md) / [ja](../translations/reference/docs/diagnostics/E029.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E029.zh-CN.md) |
+| [`docs/diagnostics/E030.md`](../diagnostics/E030.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E030.md) / [ja](../translations/reference/docs/diagnostics/E030.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E030.zh-CN.md) |
+| [`docs/diagnostics/E031.md`](../diagnostics/E031.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E031.md) / [ja](../translations/reference/docs/diagnostics/E031.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E031.zh-CN.md) |
+| [`docs/diagnostics/E032.md`](../diagnostics/E032.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E032.md) / [ja](../translations/reference/docs/diagnostics/E032.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E032.zh-CN.md) |
+| [`docs/diagnostics/E033.md`](../diagnostics/E033.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E033.md) / [ja](../translations/reference/docs/diagnostics/E033.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E033.zh-CN.md) |
+| [`docs/diagnostics/E034.md`](../diagnostics/E034.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E034.md) / [ja](../translations/reference/docs/diagnostics/E034.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E034.zh-CN.md) |
+| [`docs/diagnostics/E035.md`](../diagnostics/E035.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E035.md) / [ja](../translations/reference/docs/diagnostics/E035.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E035.zh-CN.md) |
+| [`docs/diagnostics/E036.md`](../diagnostics/E036.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E036.md) / [ja](../translations/reference/docs/diagnostics/E036.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E036.zh-CN.md) |
+| [`docs/diagnostics/E037.md`](../diagnostics/E037.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E037.md) / [ja](../translations/reference/docs/diagnostics/E037.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E037.zh-CN.md) |
+| [`docs/diagnostics/E038.md`](../diagnostics/E038.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E038.md) / [ja](../translations/reference/docs/diagnostics/E038.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E038.zh-CN.md) |
+| [`docs/diagnostics/E041.md`](../diagnostics/E041.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E041.md) / [ja](../translations/reference/docs/diagnostics/E041.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E041.zh-CN.md) |
+| [`docs/diagnostics/E042.md`](../diagnostics/E042.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E042.md) / [ja](../translations/reference/docs/diagnostics/E042.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E042.zh-CN.md) |
+| [`docs/diagnostics/E043.md`](../diagnostics/E043.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E043.md) / [ja](../translations/reference/docs/diagnostics/E043.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E043.zh-CN.md) |
+| [`docs/diagnostics/E044.md`](../diagnostics/E044.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E044.md) / [ja](../translations/reference/docs/diagnostics/E044.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E044.zh-CN.md) |
+| [`docs/diagnostics/E045.md`](../diagnostics/E045.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E045.md) / [ja](../translations/reference/docs/diagnostics/E045.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E045.zh-CN.md) |
+| [`docs/diagnostics/E046.md`](../diagnostics/E046.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E046.md) / [ja](../translations/reference/docs/diagnostics/E046.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E046.zh-CN.md) |
+| [`docs/diagnostics/E047.md`](../diagnostics/E047.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E047.md) / [ja](../translations/reference/docs/diagnostics/E047.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E047.zh-CN.md) |
+| [`docs/diagnostics/E048.md`](../diagnostics/E048.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E048.md) / [ja](../translations/reference/docs/diagnostics/E048.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E048.zh-CN.md) |
+| [`docs/diagnostics/E049.md`](../diagnostics/E049.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E049.md) / [ja](../translations/reference/docs/diagnostics/E049.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E049.zh-CN.md) |
+| [`docs/diagnostics/E050.md`](../diagnostics/E050.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E050.md) / [ja](../translations/reference/docs/diagnostics/E050.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E050.zh-CN.md) |
+| [`docs/diagnostics/E051.md`](../diagnostics/E051.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E051.md) / [ja](../translations/reference/docs/diagnostics/E051.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E051.zh-CN.md) |
+| [`docs/diagnostics/E052.md`](../diagnostics/E052.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E052.md) / [ja](../translations/reference/docs/diagnostics/E052.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E052.zh-CN.md) |
+| [`docs/diagnostics/E053.md`](../diagnostics/E053.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E053.md) / [ja](../translations/reference/docs/diagnostics/E053.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E053.zh-CN.md) |
+| [`docs/diagnostics/E054.md`](../diagnostics/E054.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E054.md) / [ja](../translations/reference/docs/diagnostics/E054.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E054.zh-CN.md) |
+| [`docs/diagnostics/E055.md`](../diagnostics/E055.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E055.md) / [ja](../translations/reference/docs/diagnostics/E055.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E055.zh-CN.md) |
+| [`docs/diagnostics/E056.md`](../diagnostics/E056.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E056.md) / [ja](../translations/reference/docs/diagnostics/E056.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E056.zh-CN.md) |
+| [`docs/diagnostics/E057.md`](../diagnostics/E057.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E057.md) / [ja](../translations/reference/docs/diagnostics/E057.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E057.zh-CN.md) |
+| [`docs/diagnostics/E058.md`](../diagnostics/E058.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E058.md) / [ja](../translations/reference/docs/diagnostics/E058.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E058.zh-CN.md) |
+| [`docs/diagnostics/E059.md`](../diagnostics/E059.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E059.md) / [ja](../translations/reference/docs/diagnostics/E059.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E059.zh-CN.md) |
+| [`docs/diagnostics/E060.md`](../diagnostics/E060.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E060.md) / [ja](../translations/reference/docs/diagnostics/E060.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E060.zh-CN.md) |
+| [`docs/diagnostics/E061.md`](../diagnostics/E061.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E061.md) / [ja](../translations/reference/docs/diagnostics/E061.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E061.zh-CN.md) |
+| [`docs/diagnostics/E062.md`](../diagnostics/E062.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E062.md) / [ja](../translations/reference/docs/diagnostics/E062.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E062.zh-CN.md) |
+| [`docs/diagnostics/E070.md`](../diagnostics/E070.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E070.md) / [ja](../translations/reference/docs/diagnostics/E070.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E070.zh-CN.md) |
+| [`docs/diagnostics/E071.md`](../diagnostics/E071.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E071.md) / [ja](../translations/reference/docs/diagnostics/E071.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E071.zh-CN.md) |
+| [`docs/diagnostics/E072.md`](../diagnostics/E072.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E072.md) / [ja](../translations/reference/docs/diagnostics/E072.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E072.zh-CN.md) |
+| [`docs/diagnostics/E073.md`](../diagnostics/E073.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E073.md) / [ja](../translations/reference/docs/diagnostics/E073.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E073.zh-CN.md) |
+| [`docs/diagnostics/E074.md`](../diagnostics/E074.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E074.md) / [ja](../translations/reference/docs/diagnostics/E074.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E074.zh-CN.md) |
+| [`docs/diagnostics/E075.md`](../diagnostics/E075.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E075.md) / [ja](../translations/reference/docs/diagnostics/E075.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E075.zh-CN.md) |
+| [`docs/diagnostics/E076.md`](../diagnostics/E076.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E076.md) / [ja](../translations/reference/docs/diagnostics/E076.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E076.zh-CN.md) |
+| [`docs/diagnostics/E077.md`](../diagnostics/E077.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E077.md) / [ja](../translations/reference/docs/diagnostics/E077.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E077.zh-CN.md) |
+| [`docs/diagnostics/E078.md`](../diagnostics/E078.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E078.md) / [ja](../translations/reference/docs/diagnostics/E078.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E078.zh-CN.md) |
+| [`docs/diagnostics/E080.md`](../diagnostics/E080.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E080.md) / [ja](../translations/reference/docs/diagnostics/E080.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E080.zh-CN.md) |
+| [`docs/diagnostics/E081.md`](../diagnostics/E081.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E081.md) / [ja](../translations/reference/docs/diagnostics/E081.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E081.zh-CN.md) |
+| [`docs/diagnostics/E082.md`](../diagnostics/E082.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E082.md) / [ja](../translations/reference/docs/diagnostics/E082.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E082.zh-CN.md) |
+| [`docs/diagnostics/E083.md`](../diagnostics/E083.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E083.md) / [ja](../translations/reference/docs/diagnostics/E083.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E083.zh-CN.md) |
+| [`docs/diagnostics/E084.md`](../diagnostics/E084.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E084.md) / [ja](../translations/reference/docs/diagnostics/E084.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E084.zh-CN.md) |
+| [`docs/diagnostics/E085.md`](../diagnostics/E085.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E085.md) / [ja](../translations/reference/docs/diagnostics/E085.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E085.zh-CN.md) |
+| [`docs/diagnostics/E086.md`](../diagnostics/E086.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E086.md) / [ja](../translations/reference/docs/diagnostics/E086.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E086.zh-CN.md) |
+| [`docs/diagnostics/E087.md`](../diagnostics/E087.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E087.md) / [ja](../translations/reference/docs/diagnostics/E087.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E087.zh-CN.md) |
+| [`docs/diagnostics/E088.md`](../diagnostics/E088.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E088.md) / [ja](../translations/reference/docs/diagnostics/E088.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E088.zh-CN.md) |
+| [`docs/diagnostics/E089.md`](../diagnostics/E089.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E089.md) / [ja](../translations/reference/docs/diagnostics/E089.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E089.zh-CN.md) |
+| [`docs/diagnostics/E090.md`](../diagnostics/E090.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E090.md) / [ja](../translations/reference/docs/diagnostics/E090.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E090.zh-CN.md) |
+| [`docs/diagnostics/E092.md`](../diagnostics/E092.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E092.md) / [ja](../translations/reference/docs/diagnostics/E092.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E092.zh-CN.md) |
+| [`docs/diagnostics/E093.md`](../diagnostics/E093.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E093.md) / [ja](../translations/reference/docs/diagnostics/E093.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E093.zh-CN.md) |
+| [`docs/diagnostics/E094.md`](../diagnostics/E094.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E094.md) / [ja](../translations/reference/docs/diagnostics/E094.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E094.zh-CN.md) |
+| [`docs/diagnostics/E095.md`](../diagnostics/E095.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E095.md) / [ja](../translations/reference/docs/diagnostics/E095.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E095.zh-CN.md) |
+| [`docs/diagnostics/E096.md`](../diagnostics/E096.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E096.md) / [ja](../translations/reference/docs/diagnostics/E096.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E096.zh-CN.md) |
+| [`docs/diagnostics/E097.md`](../diagnostics/E097.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E097.md) / [ja](../translations/reference/docs/diagnostics/E097.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E097.zh-CN.md) |
+| [`docs/diagnostics/E098.md`](../diagnostics/E098.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E098.md) / [ja](../translations/reference/docs/diagnostics/E098.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E098.zh-CN.md) |
+| [`docs/diagnostics/E099.md`](../diagnostics/E099.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E099.md) / [ja](../translations/reference/docs/diagnostics/E099.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E099.zh-CN.md) |
+| [`docs/diagnostics/E100.md`](../diagnostics/E100.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E100.md) / [ja](../translations/reference/docs/diagnostics/E100.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E100.zh-CN.md) |
+| [`docs/diagnostics/E101.md`](../diagnostics/E101.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E101.md) / [ja](../translations/reference/docs/diagnostics/E101.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E101.zh-CN.md) |
+| [`docs/diagnostics/E102.md`](../diagnostics/E102.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E102.md) / [ja](../translations/reference/docs/diagnostics/E102.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E102.zh-CN.md) |
+| [`docs/diagnostics/E103.md`](../diagnostics/E103.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E103.md) / [ja](../translations/reference/docs/diagnostics/E103.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E103.zh-CN.md) |
+| [`docs/diagnostics/E104.md`](../diagnostics/E104.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E104.md) / [ja](../translations/reference/docs/diagnostics/E104.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E104.zh-CN.md) |
+| [`docs/diagnostics/E109.md`](../diagnostics/E109.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E109.md) / [ja](../translations/reference/docs/diagnostics/E109.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E109.zh-CN.md) |
+| [`docs/diagnostics/E110.md`](../diagnostics/E110.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E110.md) / [ja](../translations/reference/docs/diagnostics/E110.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E110.zh-CN.md) |
+| [`docs/diagnostics/E111.md`](../diagnostics/E111.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E111.md) / [ja](../translations/reference/docs/diagnostics/E111.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E111.zh-CN.md) |
+| [`docs/diagnostics/E112.md`](../diagnostics/E112.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E112.md) / [ja](../translations/reference/docs/diagnostics/E112.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E112.zh-CN.md) |
+| [`docs/diagnostics/E113.md`](../diagnostics/E113.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E113.md) / [ja](../translations/reference/docs/diagnostics/E113.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E113.zh-CN.md) |
+| [`docs/diagnostics/E114.md`](../diagnostics/E114.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E114.md) / [ja](../translations/reference/docs/diagnostics/E114.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E114.zh-CN.md) |
+| [`docs/diagnostics/E116.md`](../diagnostics/E116.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E116.md) / [ja](../translations/reference/docs/diagnostics/E116.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E116.zh-CN.md) |
+| [`docs/diagnostics/E117.md`](../diagnostics/E117.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E117.md) / [ja](../translations/reference/docs/diagnostics/E117.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E117.zh-CN.md) |
+| [`docs/diagnostics/E118.md`](../diagnostics/E118.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E118.md) / [ja](../translations/reference/docs/diagnostics/E118.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E118.zh-CN.md) |
+| [`docs/diagnostics/E119.md`](../diagnostics/E119.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E119.md) / [ja](../translations/reference/docs/diagnostics/E119.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E119.zh-CN.md) |
+| [`docs/diagnostics/E420.md`](../diagnostics/E420.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/E420.md) / [ja](../translations/reference/docs/diagnostics/E420.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/E420.zh-CN.md) |
+| [`docs/diagnostics/README.md`](../diagnostics/README.md) | Diagnostic docs — embedded / scanned | Reader variants supplied — [en](../translations/reference/docs/diagnostics/README.md) / [ja](../translations/reference/docs/diagnostics/README.ja.md) / [zh-CN](../translations/reference/docs/diagnostics/README.zh-CN.md) |
+| [`docs/fan-capture-ownership-review.md`](../fan-capture-ownership-review.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/fan-parallel-safety-review.md`](../fan-parallel-safety-review.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/grammar/README.md`](../grammar/README.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/docs/grammar/README.md) / [ja](../translations/reference/docs/grammar/README.ja.md) / [zh-CN](../translations/reference/docs/grammar/README.zh-CN.md) |
+| [`docs/how-it-works.md`](../how-it-works.md) | Reader guides — translated batches | Reader variants supplied — [en](../how-it-works.md) / [ja](../how-it-works.ja.md) / [zh-CN](../how-it-works.zh-CN.md) |
+| [`docs/mcp.md`](../mcp.md) | Reader guides — translated batches | Reader variants supplied — [en](../mcp.md) / [ja](../mcp.ja.md) / [zh-CN](../mcp.zh-CN.md) |
+| [`docs/native-projection-ownership-review.md`](../native-projection-ownership-review.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/native-read-borrow-review.md`](../native-read-borrow-review.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/project/BENCHMARKS.md`](BENCHMARKS.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/project/BREAKING_CHANGE_POLICY.md`](BREAKING_CHANGE_POLICY.md) | Reader guides — translated batches | Reader variants supplied — [en](../translations/reference/docs/project/BREAKING_CHANGE_POLICY.md) / [ja](../translations/reference/docs/project/BREAKING_CHANGE_POLICY.ja.md) / [zh-CN](../translations/reference/docs/project/BREAKING_CHANGE_POLICY.zh-CN.md) |
+| [`docs/project/CLAUDE_TEMPLATE.md`](CLAUDE_TEMPLATE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`docs/project/GENERATED-RUST-REVIEW.md`](GENERATED-RUST-REVIEW.md) | Reader guides — translated batches | Reader variants supplied — [en](GENERATED-RUST-REVIEW.md) / [ja](GENERATED-RUST-REVIEW.ja.md) / [zh-CN](GENERATED-RUST-REVIEW.zh-CN.md) |
+| [`docs/project/ISSUE-TAXONOMY.md`](ISSUE-TAXONOMY.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/docs/project/ISSUE-TAXONOMY.md) / [ja](../translations/reference/docs/project/ISSUE-TAXONOMY.ja.md) / [zh-CN](../translations/reference/docs/project/ISSUE-TAXONOMY.zh-CN.md) |
+| [`docs/project/PARTITIONED-RUNTIME.md`](PARTITIONED-RUNTIME.md) | Reader guides — translated batches | Reader variants supplied — [en](PARTITIONED-RUNTIME.md) / [ja](PARTITIONED-RUNTIME.ja.md) / [zh-CN](PARTITIONED-RUNTIME.zh-CN.md) |
+| [`docs/project/RUST-LINT-GATES.md`](RUST-LINT-GATES.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/docs/project/RUST-LINT-GATES.md) / [ja](../translations/reference/docs/project/RUST-LINT-GATES.ja.md) / [zh-CN](../translations/reference/docs/project/RUST-LINT-GATES.zh-CN.md) |
+| [`docs/project/WCET-STORY.md`](WCET-STORY.md) | Reader guides — translated batches | Reader variants supplied — [en](WCET-STORY.md) / [ja](WCET-STORY.ja.md) / [zh-CN](WCET-STORY.zh-CN.md) |
+| [`docs/project/linguist-submission.md`](linguist-submission.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/docs/project/linguist-submission.md) / [ja](../translations/reference/docs/project/linguist-submission.ja.md) / [zh-CN](../translations/reference/docs/project/linguist-submission.zh-CN.md) |
+| [`docs/project/org-trust-status.md`](org-trust-status.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/record-option-cells-verification.md`](../record-option-cells-verification.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/releases/README.md`](../releases/README.md) | Release history | Pending — reader variants not yet supplied |
+| [`docs/releases/v0.68.0-rc1.md`](../releases/v0.68.0-rc1.md) | Release history | Pending — reader variants not yet supplied |
+| [`docs/releases/v0.68.0-rc2.md`](../releases/v0.68.0-rc2.md) | Release history | Pending — reader variants not yet supplied |
+| [`docs/releases/v0.68.0.md`](../releases/v0.68.0.md) | Release history | Pending — reader variants not yet supplied |
+| [`docs/releases/v0.69.0-rc1.md`](../releases/v0.69.0-rc1.md) | Release history | Pending — reader variants not yet supplied |
+| [`docs/releases/v0.69.0.md`](../releases/v0.69.0.md) | Release history | Pending — reader variants not yet supplied |
+| [`docs/roadmap/ALL_AXES.md`](../roadmap/ALL_AXES.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/GRAND_PLAN.md`](../roadmap/GRAND_PLAN.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/PRODUCTION_READY.md`](../roadmap/PRODUCTION_READY.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/README.md`](../roadmap/README.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/ROAD_TO_1_0.md`](../roadmap/ROAD_TO_1_0.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/adr-0013-string-sharing.md`](../roadmap/active/adr-0013-string-sharing.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/almide-perceus-belt.md`](../roadmap/active/almide-perceus-belt.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/arena-breakthroughs.md`](../roadmap/active/arena-breakthroughs.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/async-inception.md`](../roadmap/active/async-inception.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/async-world-claim.md`](../roadmap/active/async-world-claim.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/behavioral-contract.md`](../roadmap/active/behavioral-contract.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/build-speed-runtime-rlib.md`](../roadmap/active/build-speed-runtime-rlib.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/camp4-general-heap-match.md`](../roadmap/active/camp4-general-heap-match.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/certificate-format-v1.md`](../roadmap/active/certificate-format-v1.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/certification-grade.md`](../roadmap/active/certification-grade.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/ci-critical-path.md`](../roadmap/active/ci-critical-path.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/ci-warnings-cleanup.md`](../roadmap/active/ci-warnings-cleanup.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/active/ci-warnings-cleanup.md) / [ja](../translations/reference/docs/roadmap/active/ci-warnings-cleanup.ja.md) / [zh-CN](../translations/reference/docs/roadmap/active/ci-warnings-cleanup.zh-CN.md) |
+| [`docs/roadmap/active/closure-cross-target-completeness.md`](../roadmap/active/closure-cross-target-completeness.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/codegen-traversal-totality.md`](../roadmap/active/codegen-traversal-totality.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/completeness-by-construction.md`](../roadmap/active/completeness-by-construction.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/concurrency-stance.md`](../roadmap/active/concurrency-stance.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/continuous-improvement.md`](../roadmap/active/continuous-improvement.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/correctness-guarantee-gaps.md`](../roadmap/active/correctness-guarantee-gaps.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/cross-target-completeness.md`](../roadmap/active/cross-target-completeness.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/determinism-belt.md`](../roadmap/active/determinism-belt.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/deterministic-bounds.md`](../roadmap/active/deterministic-bounds.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/edit-locality-theory.md`](../roadmap/active/edit-locality-theory.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/effect-inspection-harness.md`](../roadmap/active/effect-inspection-harness.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/effect-system-capability.md`](../roadmap/active/effect-system-capability.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/effectful-27-blueprint.md`](../roadmap/active/effectful-27-blueprint.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/execution-inception.md`](../roadmap/active/execution-inception.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/fan-v2-examples.md`](../roadmap/active/fan-v2-examples.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/active/fan-v2-examples.md) / [ja](../translations/reference/docs/roadmap/active/fan-v2-examples.ja.md) / [zh-CN](../translations/reference/docs/roadmap/active/fan-v2-examples.zh-CN.md) |
+| [`docs/roadmap/active/fan-v2.md`](../roadmap/active/fan-v2.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/flight-evidence-gaps.md`](../roadmap/active/flight-evidence-gaps.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/flight-organization.md`](../roadmap/active/flight-organization.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/flight-profile.md`](../roadmap/active/flight-profile.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/flight-qualification.md`](../roadmap/active/flight-qualification.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/flight-reference-app.md`](../roadmap/active/flight-reference-app.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/flight-rust-ferrocene.md`](../roadmap/active/flight-rust-ferrocene.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/flight-subset-spec.md`](../roadmap/active/flight-subset-spec.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/flight-wcet-loops.md`](../roadmap/active/flight-wcet-loops.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/fuzz-findings-triage.md`](../roadmap/active/fuzz-findings-triage.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/integer-literal-domain.md`](../roadmap/active/integer-literal-domain.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/interp-is-desugar-to-tostring.md`](../roadmap/active/interp-is-desugar-to-tostring.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/issue-inventory-2026-09-21.md`](../roadmap/active/issue-inventory-2026-09-21.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/issue-inventory-2026-09-21/issue-header-spec.md`](../roadmap/active/issue-inventory-2026-09-21/issue-header-spec.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/issue-ledger-burndown.md`](../roadmap/active/issue-ledger-burndown.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/active/issue-ledger-burndown.md) / [ja](../translations/reference/docs/roadmap/active/issue-ledger-burndown.ja.md) / [zh-CN](../translations/reference/docs/roadmap/active/issue-ledger-burndown.zh-CN.md) |
+| [`docs/roadmap/active/lifted-carrier-abi.md`](../roadmap/active/lifted-carrier-abi.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/llm-first-language.md`](../roadmap/active/llm-first-language.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/logical-time-async.md`](../roadmap/active/logical-time-async.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/logical-time-implementation.md`](../roadmap/active/logical-time-implementation.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/logical-time-proofs.md`](../roadmap/active/logical-time-proofs.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/map-data-structure-roadmap.md`](../roadmap/active/map-data-structure-roadmap.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/mir-caps-call-count-breach.md`](../roadmap/active/mir-caps-call-count-breach.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/mission-critical-attack-list.md`](../roadmap/active/mission-critical-attack-list.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/native-boxed-pattern-lowering.md`](../roadmap/active/native-boxed-pattern-lowering.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/native-trust-spine.md`](../roadmap/active/native-trust-spine.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/net-unix-shm-embedded.md`](../roadmap/active/net-unix-shm-embedded.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/outside-review-audit-2026-07.md`](../roadmap/active/outside-review-audit-2026-07.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/playground-revamp.md`](../roadmap/active/playground-revamp.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/post-0.29-improvement-sweep.md`](../roadmap/active/post-0.29-improvement-sweep.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/protocol-any-existentials.md`](../roadmap/active/protocol-any-existentials.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/receipt-logic.md`](../roadmap/active/receipt-logic.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/reconciliation-followup.md`](../roadmap/active/reconciliation-followup.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/active/reconciliation-followup.md) / [ja](../translations/reference/docs/roadmap/active/reconciliation-followup.ja.md) / [zh-CN](../translations/reference/docs/roadmap/active/reconciliation-followup.zh-CN.md) |
+| [`docs/roadmap/active/result-family-from-type.md`](../roadmap/active/result-family-from-type.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/return-op-eradication.md`](../roadmap/active/return-op-eradication.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/rot-eradication.md`](../roadmap/active/rot-eradication.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/security-by-construction.md`](../roadmap/active/security-by-construction.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/selfhost-link-v2.md`](../roadmap/active/selfhost-link-v2.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/shell-scripting-surface.md`](../roadmap/active/shell-scripting-surface.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/stdlib-redesign.md`](../roadmap/active/stdlib-redesign.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/active/stdlib-redesign.md) / [ja](../translations/reference/docs/roadmap/active/stdlib-redesign.ja.md) / [zh-CN](../translations/reference/docs/roadmap/active/stdlib-redesign.zh-CN.md) |
+| [`docs/roadmap/active/test-surface-25x.md`](../roadmap/active/test-surface-25x.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/active/test-surface-25x.md) / [ja](../translations/reference/docs/roadmap/active/test-surface-25x.ja.md) / [zh-CN](../translations/reference/docs/roadmap/active/test-surface-25x.zh-CN.md) |
+| [`docs/roadmap/active/ticks-interface-audit.md`](../roadmap/active/ticks-interface-audit.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/trust-layer.md`](../roadmap/active/trust-layer.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/type-where-constraints.md`](../roadmap/active/type-where-constraints.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/active/type-where-constraints.md) / [ja](../translations/reference/docs/roadmap/active/type-where-constraints.ja.md) / [zh-CN](../translations/reference/docs/roadmap/active/type-where-constraints.zh-CN.md) |
+| [`docs/roadmap/active/v0-unwrap-early-return-leak.md`](../roadmap/active/v0-unwrap-early-return-leak.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-adt-brick5-goal.md`](../roadmap/active/v1-adt-brick5-goal.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-adt-value-model.md`](../roadmap/active/v1-adt-value-model.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-backlog.md`](../roadmap/active/v1-backlog.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-bolt-backlog.md`](../roadmap/active/v1-bolt-backlog.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-develop-reflow.md`](../roadmap/active/v1-develop-reflow.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/active/v1-develop-reflow.md) / [ja](../translations/reference/docs/roadmap/active/v1-develop-reflow.ja.md) / [zh-CN](../translations/reference/docs/roadmap/active/v1-develop-reflow.zh-CN.md) |
+| [`docs/roadmap/active/v1-heap-result-control-flow.md`](../roadmap/active/v1-heap-result-control-flow.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-join-completeness.md`](../roadmap/active/v1-join-completeness.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-kgi-kpi.md`](../roadmap/active/v1-kgi-kpi.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-loop-ownership-cert.md`](../roadmap/active/v1-loop-ownership-cert.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-mir-architecture.md`](../roadmap/active/v1-mir-architecture.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-org-byte-verification.md`](../roadmap/active/v1-org-byte-verification.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-parser-tco-lever.md`](../roadmap/active/v1-parser-tco-lever.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-phase1-mir-core.md`](../roadmap/active/v1-phase1-mir-core.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-proof-architecture.md`](../roadmap/active/v1-proof-architecture.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-proof-spine-progress.md`](../roadmap/active/v1-proof-spine-progress.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-records-svg.md`](../roadmap/active/v1-records-svg.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-release-path.md`](../roadmap/active/v1-release-path.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-selfhost-machinery.md`](../roadmap/active/v1-selfhost-machinery.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-selfhost-print-floor.md`](../roadmap/active/v1-selfhost-print-floor.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-spine-correctness-holes.md`](../roadmap/active/v1-spine-correctness-holes.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-system-map.md`](../roadmap/active/v1-system-map.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-tco-self-recursion.md`](../roadmap/active/v1-tco-self-recursion.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-v0-parity.md`](../roadmap/active/v1-v0-parity.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/v1-value-model.md`](../roadmap/active/v1-value-model.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/value-rc-cert.md`](../roadmap/active/value-rc-cert.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/wasm-frees-ownership-discipline.md`](../roadmap/active/wasm-frees-ownership-discipline.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/wasm-ownership-emit-mechanization.md`](../roadmap/active/wasm-ownership-emit-mechanization.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/wasm-platform-frontier.md`](../roadmap/active/wasm-platform-frontier.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/active/zero-committed-shell.md`](../roadmap/active/zero-committed-shell.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/bundled-almide-dispatch.md`](../roadmap/done/bundled-almide-dispatch.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/bundled-almide-ideal-form.md`](../roadmap/done/bundled-almide-ideal-form.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/claim-wording-perceus-byte-identity.md`](../roadmap/done/claim-wording-perceus-byte-identity.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/closure-architecture-v2.md`](../roadmap/done/closure-architecture-v2.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/closure-codegen-cross-target-gaps.md`](../roadmap/done/closure-codegen-cross-target-gaps.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/code-health-codopsy.md`](../roadmap/done/code-health-codopsy.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/codegen-ideal-form.md`](../roadmap/done/codegen-ideal-form.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/effect-system-phase1-2.md`](../roadmap/done/effect-system-phase1-2.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/done/effect-system-phase1-2.md) / [ja](../translations/reference/docs/roadmap/done/effect-system-phase1-2.ja.md) / [zh-CN](../translations/reference/docs/roadmap/done/effect-system-phase1-2.zh-CN.md) |
+| [`docs/roadmap/done/hkt-foundation-phase1.md`](../roadmap/done/hkt-foundation-phase1.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/done/hkt-foundation-phase1.md) / [ja](../translations/reference/docs/roadmap/done/hkt-foundation-phase1.ja.md) / [zh-CN](../translations/reference/docs/roadmap/done/hkt-foundation-phase1.zh-CN.md) |
+| [`docs/roadmap/done/playground-repair.md`](../roadmap/done/playground-repair.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/reimpl-lint.md`](../roadmap/done/reimpl-lint.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/stdlib-declarative-unification.md`](../roadmap/done/stdlib-declarative-unification.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/variant-exhaustiveness-refinement.md`](../roadmap/done/variant-exhaustiveness-refinement.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/wasm-engine-redesign.md`](../roadmap/done/wasm-engine-redesign.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/done/wasm-optimization-roadmap.md`](../roadmap/done/wasm-optimization-roadmap.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/almide-to-almide-ffi.md`](../roadmap/on-hold/almide-to-almide-ffi.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/almide-ui.md`](../roadmap/on-hold/almide-ui.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/api-diff-auto-versioning.md`](../roadmap/on-hold/api-diff-auto-versioning.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/on-hold/api-diff-auto-versioning.md) / [ja](../translations/reference/docs/roadmap/on-hold/api-diff-auto-versioning.ja.md) / [zh-CN](../translations/reference/docs/roadmap/on-hold/api-diff-auto-versioning.zh-CN.md) |
+| [`docs/roadmap/on-hold/benchmark-next-phase.md`](../roadmap/on-hold/benchmark-next-phase.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/compile-time-contracts.md`](../roadmap/on-hold/compile-time-contracts.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/diagnostic-snippet-externalization.md`](../roadmap/on-hold/diagnostic-snippet-externalization.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/on-hold/diagnostic-snippet-externalization.md) / [ja](../translations/reference/docs/roadmap/on-hold/diagnostic-snippet-externalization.ja.md) / [zh-CN](../translations/reference/docs/roadmap/on-hold/diagnostic-snippet-externalization.zh-CN.md) |
+| [`docs/roadmap/on-hold/flow-design.md`](../roadmap/on-hold/flow-design.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/flow-spec-draft.md`](../roadmap/on-hold/flow-spec-draft.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/gpu-compute.md`](../roadmap/on-hold/gpu-compute.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/ir-optimization-tier2.md`](../roadmap/on-hold/ir-optimization-tier2.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/law-blocks-experiment.md`](../roadmap/on-hold/law-blocks-experiment.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/law-proofs-design.md`](../roadmap/on-hold/law-proofs-design.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/llm-integration.md`](../roadmap/on-hold/llm-integration.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/lsp-code-actions.md`](../roadmap/on-hold/lsp-code-actions.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/on-hold/lsp-code-actions.md) / [ja](../translations/reference/docs/roadmap/on-hold/lsp-code-actions.ja.md) / [zh-CN](../translations/reference/docs/roadmap/on-hold/lsp-code-actions.zh-CN.md) |
+| [`docs/roadmap/on-hold/ml-inference.md`](../roadmap/on-hold/ml-inference.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/mlir-backend-adoption.md`](../roadmap/on-hold/mlir-backend-adoption.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/package-registry.md`](../roadmap/on-hold/package-registry.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/on-hold/package-registry.md) / [ja](../translations/reference/docs/roadmap/on-hold/package-registry.ja.md) / [zh-CN](../translations/reference/docs/roadmap/on-hold/package-registry.zh-CN.md) |
+| [`docs/roadmap/on-hold/package-version-resolution.md`](../roadmap/on-hold/package-version-resolution.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/on-hold/package-version-resolution.md) / [ja](../translations/reference/docs/roadmap/on-hold/package-version-resolution.ja.md) / [zh-CN](../translations/reference/docs/roadmap/on-hold/package-version-resolution.zh-CN.md) |
+| [`docs/roadmap/on-hold/performance-research.md`](../roadmap/on-hold/performance-research.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/porta-embedded.md`](../roadmap/on-hold/porta-embedded.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/process-composition.md`](../roadmap/on-hold/process-composition.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/rainbow-bridge.md`](../roadmap/on-hold/rainbow-bridge.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/region-inference.md`](../roadmap/on-hold/region-inference.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/research-modification-survival-rate-paper.md`](../roadmap/on-hold/research-modification-survival-rate-paper.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/on-hold/research-modification-survival-rate-paper.md) / [ja](../translations/reference/docs/roadmap/on-hold/research-modification-survival-rate-paper.ja.md) / [zh-CN](../translations/reference/docs/roadmap/on-hold/research-modification-survival-rate-paper.zh-CN.md) |
+| [`docs/roadmap/on-hold/rumbling.md`](../roadmap/on-hold/rumbling.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/secure-by-design.md`](../roadmap/on-hold/secure-by-design.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/shell-completions.md`](../roadmap/on-hold/shell-completions.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/on-hold/shell-completions.md) / [ja](../translations/reference/docs/roadmap/on-hold/shell-completions.ja.md) / [zh-CN](../translations/reference/docs/roadmap/on-hold/shell-completions.zh-CN.md) |
+| [`docs/roadmap/on-hold/snapshot-testing.md`](../roadmap/on-hold/snapshot-testing.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/on-hold/snapshot-testing.md) / [ja](../translations/reference/docs/roadmap/on-hold/snapshot-testing.ja.md) / [zh-CN](../translations/reference/docs/roadmap/on-hold/snapshot-testing.zh-CN.md) |
+| [`docs/roadmap/on-hold/supervision-and-actors.md`](../roadmap/on-hold/supervision-and-actors.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/on-hold/wasm-exception-handling.md`](../roadmap/on-hold/wasm-exception-handling.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/on-hold/wasm-exception-handling.md) / [ja](../translations/reference/docs/roadmap/on-hold/wasm-exception-handling.ja.md) / [zh-CN](../translations/reference/docs/roadmap/on-hold/wasm-exception-handling.zh-CN.md) |
+| [`docs/roadmap/on-hold/wasm-http-client.md`](../roadmap/on-hold/wasm-http-client.md) | Roadmap — scanned tree / generated index | Reader variants supplied — [en](../translations/reference/docs/roadmap/on-hold/wasm-http-client.md) / [ja](../translations/reference/docs/roadmap/on-hold/wasm-http-client.ja.md) / [zh-CN](../translations/reference/docs/roadmap/on-hold/wasm-http-client.zh-CN.md) |
+| [`docs/roadmap/on-hold/web-framework.md`](../roadmap/on-hold/web-framework.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L0-conventions.md`](../roadmap/stdlib-redesign/L0-conventions.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L1-categories.md`](../roadmap/stdlib-redesign/L1-categories.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-args.md`](../roadmap/stdlib-redesign/L2-args.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-base64.md`](../roadmap/stdlib-redesign/L2-base64.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-bigint.md`](../roadmap/stdlib-redesign/L2-bigint.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-bool.md`](../roadmap/stdlib-redesign/L2-bool.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-bytes.md`](../roadmap/stdlib-redesign/L2-bytes.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-compute.md`](../roadmap/stdlib-redesign/L2-compute.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-datetime.md`](../roadmap/stdlib-redesign/L2-datetime.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-deque.md`](../roadmap/stdlib-redesign/L2-deque.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-duration.md`](../roadmap/stdlib-redesign/L2-duration.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-env.md`](../roadmap/stdlib-redesign/L2-env.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-error.md`](../roadmap/stdlib-redesign/L2-error.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-ffi.md`](../roadmap/stdlib-redesign/L2-ffi.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-float.md`](../roadmap/stdlib-redesign/L2-float.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-fs.md`](../roadmap/stdlib-redesign/L2-fs.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-hash.md`](../roadmap/stdlib-redesign/L2-hash.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-heap.md`](../roadmap/stdlib-redesign/L2-heap.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-hex.md`](../roadmap/stdlib-redesign/L2-hex.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-html.md`](../roadmap/stdlib-redesign/L2-html.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-http.md`](../roadmap/stdlib-redesign/L2-http.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-int.md`](../roadmap/stdlib-redesign/L2-int.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-io.md`](../roadmap/stdlib-redesign/L2-io.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-json.md`](../roadmap/stdlib-redesign/L2-json.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-list.md`](../roadmap/stdlib-redesign/L2-list.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-map.md`](../roadmap/stdlib-redesign/L2-map.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-math.md`](../roadmap/stdlib-redesign/L2-math.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-matrix.md`](../roadmap/stdlib-redesign/L2-matrix.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-net.md`](../roadmap/stdlib-redesign/L2-net.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-option.md`](../roadmap/stdlib-redesign/L2-option.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-path.md`](../roadmap/stdlib-redesign/L2-path.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-process.md`](../roadmap/stdlib-redesign/L2-process.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-random.md`](../roadmap/stdlib-redesign/L2-random.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-regex.md`](../roadmap/stdlib-redesign/L2-regex.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-result.md`](../roadmap/stdlib-redesign/L2-result.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-secret.md`](../roadmap/stdlib-redesign/L2-secret.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-set.md`](../roadmap/stdlib-redesign/L2-set.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-sized-numbers.md`](../roadmap/stdlib-redesign/L2-sized-numbers.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-string.md`](../roadmap/stdlib-redesign/L2-string.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-testing.md`](../roadmap/stdlib-redesign/L2-testing.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-unix.md`](../roadmap/stdlib-redesign/L2-unix.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-url.md`](../roadmap/stdlib-redesign/L2-url.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-uuid.md`](../roadmap/stdlib-redesign/L2-uuid.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-value.md`](../roadmap/stdlib-redesign/L2-value.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/L2-zlib.md`](../roadmap/stdlib-redesign/L2-zlib.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/README.md`](../roadmap/stdlib-redesign/README.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/facts/categories.md`](../roadmap/stdlib-redesign/facts/categories.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/facts/naming-conventions.md`](../roadmap/stdlib-redesign/facts/naming-conventions.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/protocol-view.md`](../roadmap/stdlib-redesign/protocol-view.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/roadmap/stdlib-redesign/target-surface.md`](../roadmap/stdlib-redesign/target-surface.md) | Roadmap — scanned tree / generated index | Pending — reader variants not yet supplied |
+| [`docs/specs/CLAUDE.md`](../specs/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`docs/specs/als/README.md`](../specs/als/README.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/als/STANDARD.md`](../specs/als/STANDARD.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/als/bounded.md`](../specs/als/bounded.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/als/collections.md`](../specs/als/collections.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/als/data-formats.md`](../specs/als/data-formats.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/als/deterministic-time.md`](../specs/als/deterministic-time.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/als/expressions.md`](../specs/als/expressions.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/als/implementation.md`](../specs/als/implementation.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/als/runtime.md`](../specs/als/runtime.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/als/semantics.md`](../specs/als/semantics.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/als/strings.md`](../specs/als/strings.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/als/text-and-numbers.md`](../specs/als/text-and-numbers.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/cli.md`](../specs/cli.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/codegen.md`](../specs/codegen.md) | Normative specification / grammar | Reader variants supplied — [en](../translations/reference/docs/specs/codegen.md) / [ja](../translations/reference/docs/specs/codegen.ja.md) / [zh-CN](../translations/reference/docs/specs/codegen.zh-CN.md) |
+| [`docs/specs/edit-locality.md`](../specs/edit-locality.md) | Normative specification / grammar | Reader variants supplied — [en](../translations/reference/docs/specs/edit-locality.md) / [ja](../translations/reference/docs/specs/edit-locality.ja.md) / [zh-CN](../translations/reference/docs/specs/edit-locality.zh-CN.md) |
+| [`docs/specs/effect-fn-call-semantics.md`](../specs/effect-fn-call-semantics.md) | Normative specification / grammar | Reader variants supplied — [en](../translations/reference/docs/specs/effect-fn-call-semantics.md) / [ja](../translations/reference/docs/specs/effect-fn-call-semantics.ja.md) / [zh-CN](../translations/reference/docs/specs/effect-fn-call-semantics.zh-CN.md) |
+| [`docs/specs/effect-system.md`](../specs/effect-system.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/language.md`](../specs/language.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/module-system.md`](../specs/module-system.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/package-system.md`](../specs/package-system.md) | Normative specification / grammar | Pending — reader variants not yet supplied |
+| [`docs/specs/perceus.md`](../specs/perceus.md) | Normative specification / grammar | Reader variants supplied — [en](../translations/reference/docs/specs/perceus.md) / [ja](../translations/reference/docs/specs/perceus.ja.md) / [zh-CN](../translations/reference/docs/specs/perceus.zh-CN.md) |
+| [`docs/specs/result-option-effect.md`](../specs/result-option-effect.md) | Normative specification / grammar | Reader variants supplied — [en](../translations/reference/docs/specs/result-option-effect.md) / [ja](../translations/reference/docs/specs/result-option-effect.ja.md) / [zh-CN](../translations/reference/docs/specs/result-option-effect.zh-CN.md) |
+| [`docs/specs/scoped.md`](../specs/scoped.md) | Normative specification / grammar | Reader variants supplied — [en](../translations/reference/docs/specs/scoped.md) / [ja](../translations/reference/docs/specs/scoped.ja.md) / [zh-CN](../translations/reference/docs/specs/scoped.zh-CN.md) |
+| [`docs/specs/type-system.md`](../specs/type-system.md) | Normative specification / grammar | Reader variants supplied — [en](../translations/reference/docs/specs/type-system.md) / [ja](../translations/reference/docs/specs/type-system.ja.md) / [zh-CN](../translations/reference/docs/specs/type-system.zh-CN.md) |
+| [`docs/status.md`](../status.md) | Reader guides — translated batches | Reader variants supplied — [en](../status.md) / [ja](../status.ja.md) / [zh-CN](../status.zh-CN.md) |
+| [`docs/stdlib/README.md`](../stdlib/README.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/README.md) / [ja](../translations/reference/docs/stdlib/README.ja.md) / [zh-CN](../translations/reference/docs/stdlib/README.zh-CN.md) |
+| [`docs/stdlib/args.md`](../stdlib/args.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/args.md) / [ja](../translations/reference/docs/stdlib/args.ja.md) / [zh-CN](../translations/reference/docs/stdlib/args.zh-CN.md) |
+| [`docs/stdlib/base64.md`](../stdlib/base64.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/base64.md) / [ja](../translations/reference/docs/stdlib/base64.ja.md) / [zh-CN](../translations/reference/docs/stdlib/base64.zh-CN.md) |
+| [`docs/stdlib/bigint.md`](../stdlib/bigint.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/bigint.md) / [ja](../translations/reference/docs/stdlib/bigint.ja.md) / [zh-CN](../translations/reference/docs/stdlib/bigint.zh-CN.md) |
+| [`docs/stdlib/bool.md`](../stdlib/bool.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/bool.md) / [ja](../translations/reference/docs/stdlib/bool.ja.md) / [zh-CN](../translations/reference/docs/stdlib/bool.zh-CN.md) |
+| [`docs/stdlib/bytes.md`](../stdlib/bytes.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/bytes.md) / [ja](../translations/reference/docs/stdlib/bytes.ja.md) / [zh-CN](../translations/reference/docs/stdlib/bytes.zh-CN.md) |
+| [`docs/stdlib/compute.md`](../stdlib/compute.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/compute.md) / [ja](../translations/reference/docs/stdlib/compute.ja.md) / [zh-CN](../translations/reference/docs/stdlib/compute.zh-CN.md) |
+| [`docs/stdlib/datetime.md`](../stdlib/datetime.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/datetime.md) / [ja](../translations/reference/docs/stdlib/datetime.ja.md) / [zh-CN](../translations/reference/docs/stdlib/datetime.zh-CN.md) |
+| [`docs/stdlib/deque.md`](../stdlib/deque.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/deque.md) / [ja](../translations/reference/docs/stdlib/deque.ja.md) / [zh-CN](../translations/reference/docs/stdlib/deque.zh-CN.md) |
+| [`docs/stdlib/duration.md`](../stdlib/duration.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/duration.md) / [ja](../translations/reference/docs/stdlib/duration.ja.md) / [zh-CN](../translations/reference/docs/stdlib/duration.zh-CN.md) |
+| [`docs/stdlib/env.md`](../stdlib/env.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/env.md) / [ja](../translations/reference/docs/stdlib/env.ja.md) / [zh-CN](../translations/reference/docs/stdlib/env.zh-CN.md) |
+| [`docs/stdlib/ffi.md`](../stdlib/ffi.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/ffi.md) / [ja](../translations/reference/docs/stdlib/ffi.ja.md) / [zh-CN](../translations/reference/docs/stdlib/ffi.zh-CN.md) |
+| [`docs/stdlib/float.md`](../stdlib/float.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/float.md) / [ja](../translations/reference/docs/stdlib/float.ja.md) / [zh-CN](../translations/reference/docs/stdlib/float.zh-CN.md) |
+| [`docs/stdlib/float32.md`](../stdlib/float32.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/float32.md) / [ja](../translations/reference/docs/stdlib/float32.ja.md) / [zh-CN](../translations/reference/docs/stdlib/float32.zh-CN.md) |
+| [`docs/stdlib/float64.md`](../stdlib/float64.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/float64.md) / [ja](../translations/reference/docs/stdlib/float64.ja.md) / [zh-CN](../translations/reference/docs/stdlib/float64.zh-CN.md) |
+| [`docs/stdlib/fs.md`](../stdlib/fs.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/fs.md) / [ja](../translations/reference/docs/stdlib/fs.ja.md) / [zh-CN](../translations/reference/docs/stdlib/fs.zh-CN.md) |
+| [`docs/stdlib/hash.md`](../stdlib/hash.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/hash.md) / [ja](../translations/reference/docs/stdlib/hash.ja.md) / [zh-CN](../translations/reference/docs/stdlib/hash.zh-CN.md) |
+| [`docs/stdlib/heap.md`](../stdlib/heap.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/heap.md) / [ja](../translations/reference/docs/stdlib/heap.ja.md) / [zh-CN](../translations/reference/docs/stdlib/heap.zh-CN.md) |
+| [`docs/stdlib/hex.md`](../stdlib/hex.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/hex.md) / [ja](../translations/reference/docs/stdlib/hex.ja.md) / [zh-CN](../translations/reference/docs/stdlib/hex.zh-CN.md) |
+| [`docs/stdlib/html.md`](../stdlib/html.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/html.md) / [ja](../translations/reference/docs/stdlib/html.ja.md) / [zh-CN](../translations/reference/docs/stdlib/html.zh-CN.md) |
+| [`docs/stdlib/http.md`](../stdlib/http.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/http.md) / [ja](../translations/reference/docs/stdlib/http.ja.md) / [zh-CN](../translations/reference/docs/stdlib/http.zh-CN.md) |
+| [`docs/stdlib/int.md`](../stdlib/int.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/int.md) / [ja](../translations/reference/docs/stdlib/int.ja.md) / [zh-CN](../translations/reference/docs/stdlib/int.zh-CN.md) |
+| [`docs/stdlib/int16.md`](../stdlib/int16.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/int16.md) / [ja](../translations/reference/docs/stdlib/int16.ja.md) / [zh-CN](../translations/reference/docs/stdlib/int16.zh-CN.md) |
+| [`docs/stdlib/int32.md`](../stdlib/int32.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/int32.md) / [ja](../translations/reference/docs/stdlib/int32.ja.md) / [zh-CN](../translations/reference/docs/stdlib/int32.zh-CN.md) |
+| [`docs/stdlib/int64.md`](../stdlib/int64.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/int64.md) / [ja](../translations/reference/docs/stdlib/int64.ja.md) / [zh-CN](../translations/reference/docs/stdlib/int64.zh-CN.md) |
+| [`docs/stdlib/int8.md`](../stdlib/int8.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/int8.md) / [ja](../translations/reference/docs/stdlib/int8.ja.md) / [zh-CN](../translations/reference/docs/stdlib/int8.zh-CN.md) |
+| [`docs/stdlib/io.md`](../stdlib/io.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/io.md) / [ja](../translations/reference/docs/stdlib/io.ja.md) / [zh-CN](../translations/reference/docs/stdlib/io.zh-CN.md) |
+| [`docs/stdlib/json.md`](../stdlib/json.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/json.md) / [ja](../translations/reference/docs/stdlib/json.ja.md) / [zh-CN](../translations/reference/docs/stdlib/json.zh-CN.md) |
+| [`docs/stdlib/list.md`](../stdlib/list.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/list.md) / [ja](../translations/reference/docs/stdlib/list.ja.md) / [zh-CN](../translations/reference/docs/stdlib/list.zh-CN.md) |
+| [`docs/stdlib/map.md`](../stdlib/map.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/map.md) / [ja](../translations/reference/docs/stdlib/map.ja.md) / [zh-CN](../translations/reference/docs/stdlib/map.zh-CN.md) |
+| [`docs/stdlib/math.md`](../stdlib/math.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/math.md) / [ja](../translations/reference/docs/stdlib/math.ja.md) / [zh-CN](../translations/reference/docs/stdlib/math.zh-CN.md) |
+| [`docs/stdlib/matrix.md`](../stdlib/matrix.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/matrix.md) / [ja](../translations/reference/docs/stdlib/matrix.ja.md) / [zh-CN](../translations/reference/docs/stdlib/matrix.zh-CN.md) |
+| [`docs/stdlib/net.md`](../stdlib/net.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/net.md) / [ja](../translations/reference/docs/stdlib/net.ja.md) / [zh-CN](../translations/reference/docs/stdlib/net.zh-CN.md) |
+| [`docs/stdlib/option.md`](../stdlib/option.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/option.md) / [ja](../translations/reference/docs/stdlib/option.ja.md) / [zh-CN](../translations/reference/docs/stdlib/option.zh-CN.md) |
+| [`docs/stdlib/path.md`](../stdlib/path.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/path.md) / [ja](../translations/reference/docs/stdlib/path.ja.md) / [zh-CN](../translations/reference/docs/stdlib/path.zh-CN.md) |
+| [`docs/stdlib/process.md`](../stdlib/process.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/process.md) / [ja](../translations/reference/docs/stdlib/process.ja.md) / [zh-CN](../translations/reference/docs/stdlib/process.zh-CN.md) |
+| [`docs/stdlib/random.md`](../stdlib/random.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/random.md) / [ja](../translations/reference/docs/stdlib/random.ja.md) / [zh-CN](../translations/reference/docs/stdlib/random.zh-CN.md) |
+| [`docs/stdlib/regex.md`](../stdlib/regex.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/regex.md) / [ja](../translations/reference/docs/stdlib/regex.ja.md) / [zh-CN](../translations/reference/docs/stdlib/regex.zh-CN.md) |
+| [`docs/stdlib/result.md`](../stdlib/result.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/result.md) / [ja](../translations/reference/docs/stdlib/result.ja.md) / [zh-CN](../translations/reference/docs/stdlib/result.zh-CN.md) |
+| [`docs/stdlib/secret.md`](../stdlib/secret.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/secret.md) / [ja](../translations/reference/docs/stdlib/secret.ja.md) / [zh-CN](../translations/reference/docs/stdlib/secret.zh-CN.md) |
+| [`docs/stdlib/set.md`](../stdlib/set.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/set.md) / [ja](../translations/reference/docs/stdlib/set.ja.md) / [zh-CN](../translations/reference/docs/stdlib/set.zh-CN.md) |
+| [`docs/stdlib/string.md`](../stdlib/string.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/string.md) / [ja](../translations/reference/docs/stdlib/string.ja.md) / [zh-CN](../translations/reference/docs/stdlib/string.zh-CN.md) |
+| [`docs/stdlib/testing.md`](../stdlib/testing.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/testing.md) / [ja](../translations/reference/docs/stdlib/testing.ja.md) / [zh-CN](../translations/reference/docs/stdlib/testing.zh-CN.md) |
+| [`docs/stdlib/uint16.md`](../stdlib/uint16.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/uint16.md) / [ja](../translations/reference/docs/stdlib/uint16.ja.md) / [zh-CN](../translations/reference/docs/stdlib/uint16.zh-CN.md) |
+| [`docs/stdlib/uint32.md`](../stdlib/uint32.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/uint32.md) / [ja](../translations/reference/docs/stdlib/uint32.ja.md) / [zh-CN](../translations/reference/docs/stdlib/uint32.zh-CN.md) |
+| [`docs/stdlib/uint64.md`](../stdlib/uint64.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/uint64.md) / [ja](../translations/reference/docs/stdlib/uint64.ja.md) / [zh-CN](../translations/reference/docs/stdlib/uint64.zh-CN.md) |
+| [`docs/stdlib/uint8.md`](../stdlib/uint8.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/uint8.md) / [ja](../translations/reference/docs/stdlib/uint8.ja.md) / [zh-CN](../translations/reference/docs/stdlib/uint8.zh-CN.md) |
+| [`docs/stdlib/unix.md`](../stdlib/unix.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/unix.md) / [ja](../translations/reference/docs/stdlib/unix.ja.md) / [zh-CN](../translations/reference/docs/stdlib/unix.zh-CN.md) |
+| [`docs/stdlib/url.md`](../stdlib/url.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/url.md) / [ja](../translations/reference/docs/stdlib/url.ja.md) / [zh-CN](../translations/reference/docs/stdlib/url.zh-CN.md) |
+| [`docs/stdlib/uuid.md`](../stdlib/uuid.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/uuid.md) / [ja](../translations/reference/docs/stdlib/uuid.ja.md) / [zh-CN](../translations/reference/docs/stdlib/uuid.zh-CN.md) |
+| [`docs/stdlib/value.md`](../stdlib/value.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/value.md) / [ja](../translations/reference/docs/stdlib/value.ja.md) / [zh-CN](../translations/reference/docs/stdlib/value.zh-CN.md) |
+| [`docs/stdlib/zlib.md`](../stdlib/zlib.md) | Standard library — generated sections / gates | Reader variants supplied — [en](../translations/reference/docs/stdlib/zlib.md) / [ja](../translations/reference/docs/stdlib/zlib.ja.md) / [zh-CN](../translations/reference/docs/stdlib/zlib.zh-CN.md) |
+| [`docs/stream-fusion-safety-review.md`](../stream-fusion-safety-review.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/wasm-decoder-reclaim-review.md`](../wasm-decoder-reclaim-review.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/wasm/JS-HOST-ASYNC-IMPORTS.md`](../wasm/JS-HOST-ASYNC-IMPORTS.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/wasm/README.md`](../wasm/README.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/wasm/WASM-OUTPUT.md`](../wasm/WASM-OUTPUT.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/wasm/capability-system.md`](../wasm/capability-system.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`docs/written-in-almide.md`](../written-in-almide.md) | Reader guides — translated batches | Reader variants supplied — [en](../written-in-almide.md) / [ja](../written-in-almide.ja.md) / [zh-CN](../written-in-almide.zh-CN.md) |
+| [`examples/almd-outline/README.md`](../../examples/almd-outline/README.md) | Reader guides — translated batches | Reader variants supplied — [en](../../examples/almd-outline/README.md) / [ja](../../examples/almd-outline/README.ja.md) / [zh-CN](../../examples/almd-outline/README.zh-CN.md) |
+| [`proofs/COVERAGE.md`](../../proofs/COVERAGE.md) | Proof records — machine evidence | Pending — reader variants not yet supplied |
+| [`proofs/DO330-GAP.md`](../../proofs/DO330-GAP.md) | Proof records — machine evidence | Pending — reader variants not yet supplied |
+| [`proofs/FORMAL-CREDIT.md`](../../proofs/FORMAL-CREDIT.md) | Proof records — machine evidence | Pending — reader variants not yet supplied |
+| [`proofs/README.md`](../../proofs/README.md) | Proof records — machine evidence | Pending — reader variants not yet supplied |
+| [`proofs/STAGE-STATUS.md`](../../proofs/STAGE-STATUS.md) | Proof records — machine evidence | Pending — reader variants not yet supplied |
+| [`proofs/TOOL-QUALIFICATION.md`](../../proofs/TOOL-QUALIFICATION.md) | Proof records — machine evidence | Pending — reader variants not yet supplied |
+| [`proofs/TOR.md`](../../proofs/TOR.md) | Proof records — machine evidence | Pending — reader variants not yet supplied |
+| [`proofs/TRUSTED_BASE.md`](../../proofs/TRUSTED_BASE.md) | Proof records — machine evidence | Pending — reader variants not yet supplied |
+| [`proofs/regex/README.md`](../../proofs/regex/README.md) | Proof records — machine evidence | Pending — reader variants not yet supplied |
+| [`research/CLAUDE.md`](../../research/CLAUDE.md) | Agent instructions / embedded template | Pending — reader variants not yet supplied |
+| [`research/benchmark/exercises/BENCHMARK.md`](../../research/benchmark/exercises/BENCHMARK.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/benchmark/fuzz-green/README.md`](../../research/benchmark/fuzz-green/README.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/benchmark/lang-bench/README.md`](../../research/benchmark/lang-bench/README.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/benchmark/lang-bench/tasks-example/xlang/README.md`](../../research/benchmark/lang-bench/tasks-example/xlang/README.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/01-add-sub/prompt.md`](../../research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/01-add-sub/prompt.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/02-rename-show-to-print/prompt.md`](../../research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/02-rename-show-to-print/prompt.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/benchmark/perf/README.md`](../../research/benchmark/perf/README.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/research/benchmark/perf/README.md) / [ja](../translations/reference/research/benchmark/perf/README.ja.md) / [zh-CN](../translations/reference/research/benchmark/perf/README.zh-CN.md) |
+| [`research/benchmark/perf/hot-issues-2026-09-10/README.md`](../../research/benchmark/perf/hot-issues-2026-09-10/README.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/benchmark/perf/hot-issues-2026-09-10/gramide-cached-operators/README.md`](../../research/benchmark/perf/hot-issues-2026-09-10/gramide-cached-operators/README.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/benchmark/perf/spectralnorm/README.md`](../../research/benchmark/perf/spectralnorm/README.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/benchmark/perf/string-gap-1004.md`](../../research/benchmark/perf/string-gap-1004.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/benchmark/stdlib/HANDOFF.md`](../../research/benchmark/stdlib/HANDOFF.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/benchmark/three-way/README.md`](../../research/benchmark/three-way/README.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/beyond-rust/README.md`](../../research/beyond-rust/README.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/fan-audit/probes/README.md`](../../research/fan-audit/probes/README.md) | Reader guides — translated batches | Reader variants supplied — [en](../../research/fan-audit/probes/README.md) / [ja](../../research/fan-audit/probes/README.ja.md) / [zh-CN](../../research/fan-audit/probes/README.zh-CN.md) |
+| [`research/grammar-lab/LESSONS.md`](../../research/grammar-lab/LESSONS.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/grammar-lab/README.md`](../../research/grammar-lab/README.md) | Reader guides — translated batches | Reader variants supplied — [en](../../research/grammar-lab/README.md) / [ja](../../research/grammar-lab/README.ja.md) / [zh-CN](../../research/grammar-lab/README.zh-CN.md) |
+| [`research/grammar-lab/REPORT.md`](../../research/grammar-lab/REPORT.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/grammar-lab/experiments/optional-handling/REPORT.md`](../../research/grammar-lab/experiments/optional-handling/REPORT.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/grammar-lab/prompts/layer1_rules.md`](../../research/grammar-lab/prompts/layer1_rules.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/grammar-lab/prompts/layer2_combinator.md`](../../research/grammar-lab/prompts/layer2_combinator.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/grammar-lab/prompts/layer2_laws.md`](../../research/grammar-lab/prompts/layer2_laws.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/grammar-lab/prompts/layer2_match.md`](../../research/grammar-lab/prompts/layer2_match.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/grammar-lab/prompts/layer2_variant_fn.md`](../../research/grammar-lab/prompts/layer2_variant_fn.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/grammar-lab/prompts/layer2_variant_paren.md`](../../research/grammar-lab/prompts/layer2_variant_paren.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/spike/charge-probe/BURNDOWN.md`](../../research/spike/charge-probe/BURNDOWN.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/spike/charge-probe/REPORT.md`](../../research/spike/charge-probe/REPORT.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/spike/logical-time-race/GATE.md`](../../research/spike/logical-time-race/GATE.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/spike/substrate-observability/README.md`](../../research/spike/substrate-observability/README.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`research/spike/v1-mir/GATE.md`](../../research/spike/v1-mir/GATE.md) | Handwritten documentation — consumer audit pending | Pending — reader variants not yet supplied |
+| [`runtime/rs/README.md`](../../runtime/rs/README.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/runtime/rs/README.md) / [ja](../translations/reference/runtime/rs/README.ja.md) / [zh-CN](../translations/reference/runtime/rs/README.zh-CN.md) |
+| [`spec/churn/README.md`](../../spec/churn/README.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/spec/churn/README.md) / [ja](../translations/reference/spec/churn/README.ja.md) / [zh-CN](../translations/reference/spec/churn/README.zh-CN.md) |
+| [`spec/gauntlet/README.md`](../../spec/gauntlet/README.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/spec/gauntlet/README.md) / [ja](../translations/reference/spec/gauntlet/README.ja.md) / [zh-CN](../translations/reference/spec/gauntlet/README.zh-CN.md) |
+| [`stdlib/README.md`](../../stdlib/README.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/stdlib/README.md) / [ja](../translations/reference/stdlib/README.ja.md) / [zh-CN](../translations/reference/stdlib/README.zh-CN.md) |
+| [`tools/claude-plugin/README.md`](../../tools/claude-plugin/README.md) | Reader guides — translated batches | Reader variants supplied — [en](../../tools/claude-plugin/README.md) / [ja](../../tools/claude-plugin/README.ja.md) / [zh-CN](../../tools/claude-plugin/README.zh-CN.md) |
+| [`tools/xtarget-fuzz/README.md`](../../tools/xtarget-fuzz/README.md) | Handwritten documentation — consumer audit pending | Reader variants supplied — [en](../translations/reference/tools/xtarget-fuzz/README.md) / [ja](../translations/reference/tools/xtarget-fuzz/README.ja.md) / [zh-CN](../translations/reference/tools/xtarget-fuzz/README.zh-CN.md) |

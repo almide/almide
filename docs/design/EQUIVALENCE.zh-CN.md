@@ -1,6 +1,6 @@
 # 等价性主张 — 跨目标的逐字节一致
 
-[English](./EQUIVALENCE.md) | [日本語](./EQUIVALENCE.ja.md) | [简体中文](./EQUIVALENCE.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./EQUIVALENCE.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](./EQUIVALENCE.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](./EQUIVALENCE.zh-CN.md)
 
 **跨目标等价性按契约逐项检查：** 对于受支持的程序，在输入和宿主假设相匹配的条件下，比较确定性的观测结果（stdout、stderr、退出码）。宿主观测、随机性、资源限制以及相对于预言机的时间，需要满足各自声明的不变量或比较条件。通过有限语料集，并不等于证明了所有能够针对两个目标编译的程序都满足等价性。
 

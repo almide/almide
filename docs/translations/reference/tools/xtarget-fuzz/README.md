@@ -1,0 +1,299 @@
+# xtarget-fuzz — Almide generative fuzzer
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](README.zh-CN.md)
+
+> This is a non-normative reader copy of the [pinned original](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/tools/xtarget-fuzz/README.md), not a new authority, generator output or automatically synchronized document. Original sources and machine consumers are unchanged. Historical claims and examples have not been independently revalidated here.
+
+
+Stage 3 of the completeness roadmap: the machine that hunts the
+composition space continuously for **observable divergences** and
+compiler failures.
+
+It generates Almide programs through synthesis, corpus mutation, identity,
+composition, and multi-module shape families, runs them through an oracle ladder
+that compiles and executes it on both targets, and judges the results.
+Every program is reproducible from a `(seed, index, family)` triple.
+Findings are written to `findings/`. Minimization is family-specific;
+shape findings preserve the whole project rather than claiming a minimal repro.
+
+## Which oracle judges what
+
+A *differential* fuzzer has no oracle for a bug the two legs SHARE.
+native and structural Wasm share frontend and linked-IR machinery (not a
+shared MIR/WAT renderer), so a miscompile there makes both legs identically wrong and the vote
+comes back unanimous — #1322 is exactly that: a scalar let-alias
+miscompile that lived from v0.57.0 while all 394 `spec/wasm_cross`
+parity fixtures stayed green.
+
+| oracle | what it can convict | coverage |
+|---|---|---|
+| native ⇄ wasm differential | a divergence between the two backends | every program |
+| `almide-interp` (third judge, #516) | one backend, when the interpreter can run the program | abstains freely — it is a vote, not a verdict |
+| **by construction** | **either leg, or BOTH at once** | identity scalars/control flow, composition operator/payload cells, and shape projects with expected output |
+
+The third row is the one the other two cannot supply: an identity-family
+program's expected stdout is a literal in its own source, so a leg is
+judged **alone** and agreement proves nothing.
+
+This is a standalone crate (its own `[workspace]`, like
+`tools/wasmgen-harness`). It path-deps the parent `almide` crate for the
+AST / parser / formatter, and **shells out** to the freshly built
+`almide` binary for the oracle ladder — so a compiler ICE crashes a
+child process we can observe, not the fuzzer.
+
+## Build & run
+
+```bash
+# 1. Build the compiler (the fuzzer drives this binary).
+cargo build --release --bin almide          # from the repo root
+
+# 2. Build the fuzzer.
+cd tools/xtarget-fuzz && cargo build --release
+
+# 3. Run a campaign (time-budgeted or fixed count).
+./target/release/xtarget-fuzz run --minutes 60          # 60-minute hunt
+./target/release/xtarget-fuzz run --count 200 --jobs 8  # 200 programs, 8 workers
+
+# A campaign run ENTIRELY under the by-construction oracle (#1332).
+./target/release/xtarget-fuzz run --minutes 30 --family identity
+
+# Inspect / reproduce one program deterministically.
+./target/release/xtarget-fuzz gen    --seed 100 --index 42   # print source
+./target/release/xtarget-fuzz replay --seed 100 --index 42   # re-run the ladder
+
+# Re-judge a saved repro. An identity repro carries its own oracle in
+# `// @expect` header lines, so this needs no seed and no family.
+./target/release/xtarget-fuzz ladder findings/<dir>/repro.almd
+
+# Catalogue / corpus sizes.
+./target/release/xtarget-fuzz stats
+```
+
+`--family all|identity|synthesis|composition|shape` (default `all`) selects which families
+a campaign draws from. **`(seed, index)` only reproduces a program under
+the same `--family`** — `all` spends one draw on the family roll before
+generating and `identity` spends none, so the two disagree from the first
+byte at the same index. Every finding's `meta.txt` records the family and
+the `reproduce` line spells it out.
+
+`wasmtime` must be on `PATH` for the WASM execution rung. The repo root
+and the `almide` binary are autodetected; override with `--repo` /
+`--almide`.
+
+## The generator
+
+Five families are selected in stages (`Engine::generate` in
+`src/generator/mod.rs`). Identity takes 3/13 of `all`; composition takes 3/13
+of the remaining draws; shape takes 1/6 of what both leave. The final
+remainder splits 7:3 between synthesis and mutation. The old 54% synthesis /
+23% mutation figures predate the composition and shape stages.
+
+The identity decision is drawn from a **separate** RNG sub-stream
+(`IDENTITY_STREAM_SALT`) rather than the program's main stream. Any draw
+added to the main stream would re-key it, and an archived finding's
+`(seed, index)` would stop regenerating the program it was minimized
+from; splitting the decision off keeps the pre-#1332 synthesis and
+mutation streams byte-identical.
+
+### The identity family (~23%) — the by-construction oracle (#1332)
+
+`src/generator/identity.rs`. Builds each program **backwards from its
+answer**, the Rustlantis move. Every accumulator starts at a literal `K`,
+and every statement group between the initializer and the `println` is an
+**identity transformer** — so the program must print `K`, a literal
+visible in its own source, and no second execution is needed to judge it.
+
+```almide
+// @expect a0=-3728
+fn main() -> Unit = {
+  var a0 = -3728
+  let snap2 = a0          // ← #1322's shape: sound only if this COPIES
+  a0 = a0 + 1796
+  var it8 = 0
+  while it8 < 3 {         // ← loop-carried scalar state
+    let cur9 = a0
+    a0 = cur9 + 896
+    it8 = it8 + 1
+  }
+  a0 = a0 - 2688
+  a0 = snap2
+  println("a0=${a0}")
+}
+```
+
+Soundness is structural, not measured:
+
+1. **Every block is an identity by algebra.** It carries its own inverse
+   (`+n`/`-n`, `*m`/`/m`, `xor n`/`xor n`, swap/swap, snapshot/restore),
+   or is compensated by a constant the generator computed while emitting
+   (`while` trips × step, `0..<t`'s triangular number, a list whose
+   elements sum to zero), or is balanced across **both** arms of a branch
+   so the taken arm cannot matter. A block's body is itself a list of
+   identity blocks, so nesting composes.
+2. **No arithmetic can overflow or truncate.** The generator carries a
+   conservative bound on `|acc|` and refuses any block that would push it
+   past `2^40`. Integer division appears only as the closing half of a
+   `*m` / `/m` pair, where the dividend is exactly `m ×` the opening
+   value. (Almide's `+`/`-` lower to `wrapping_*`, so the additive
+   inverses would hold even without the bound; the bound is what makes
+   `/` and the compensated loops exact.)
+
+Neither property depends on the compiler being correct, which is the
+point. Block weights are biased toward the three shapes #1332 names —
+loop-carried scalar state, let-of-var aliasing, branch-arm assignment.
+
+**Deliberately NOT covered**: strings, floats, Unicode, collections as
+data, effects, generics. None of those has a cheap by-construction
+inverse in this identity family. Other families cover additional shapes:
+composition and shape have their own by-construction expected outputs;
+synthesis and mutation primarily use differential evidence.
+
+**Minimization is structural** (`minimize::minimize_plan`): identity
+findings shrink through the *plan*, never the text. Almost every line is
+one half of an inverse pair, so deleting a line changes the value the
+program is supposed to print — a text-level shrink would "still
+reproduce" for a reason unrelated to the bug and quietly turn a
+miscompile into a generator artifact.
+
+### The composition family — operator/payload interactions
+
+`--family composition` samples operator × payload × position cells with
+expected output known by construction (`src/generator/composition.rs`):
+`??`, `!`, `?`, pipes, matches and tuple extraction over Int/String/tuple/record
+payloads in tail, let and argument positions. It does not rely on backend
+agreement to decide the expected answer.
+
+### The shape family — multi-module projects (#3309)
+
+`--family shape` (and one draw in six of what identity and composition
+leave in `all`). Eleven accepted programs one leg could not build reached
+us from a user in two days (#3283–#3307); none was single-file, and none
+used a name from the fixed pool. This family generates **projects**: one to
+four declaring modules, each a sibling module or a path-dependency package
+(at most one part hosted in the entry itself), with top-level lets of every
+value kind (Rc-backed `Bytes`/`Matrix`, fn values, records of closures),
+module `var`s mutated from closures, nested closures, HOF callbacks and
+other modules, and names drawn from an adversarial pool — case-only twins,
+the native leg's generated binders (`c`, `_fn_arg0`, `__cap_*`,
+`__almide_*`) and spellings of its mangled statics
+(`almide_rt_<module>_<name>`).
+
+The vocabulary is `tests/shape_matrix/gen.rs`, included verbatim
+(`#[path]`): the deterministic shape-matrix gate enumerates a bounded cross
+product of it on every PR, and this family samples past those bounds
+(several lets per module, several modules at once, closure nesting up to
+four deep). Every project knows its stdout by construction. Two rules differ
+from the other families: a **wasm wall is a finding** (check accepted the
+project, so a wall is #3286 / #3296's class, not coverage debt), and a
+finding is recorded whole — `repro.almd` is a bundle of every file under
+`// ==== <path> ====` headers, not minimized (`replay --family shape`
+rewrites the project under the scratch dir).
+
+### The other two families
+
+- **Type-directed synthesis** — `src/generator/{term,program}.rs`.
+  Builds programs well-typed *by construction* from a typed term grammar:
+  pick a goal type, generate an expression of that type from literals,
+  in-scope variables, stdlib calls whose return type unifies with the
+  goal, inline lambdas for HOF arguments, and `if` arms. Fuel-bounded for
+  termination. Ambiguous literals (`[]`, `none`, `ok`/`err`) are hoisted
+  into annotated `let` bindings so they type-check.
+
+- **Stdlib catalogue** — `src/generator/catalogue.rs`. Signatures are
+  extracted from a **machine source**: the bundled `stdlib/*.almd`
+  declaration files, parsed with the real Almide parser. A curated
+  *weight table* overlays the parsed surface to bias selection toward the
+  historic divergence clusters (string/Unicode, float formatting,
+  closures/HOFs).
+
+- **Value pools** — `src/generator/pools.rs`. Named, commented tables of
+  divergence-prone literals: multibyte strings (`日本語`, emoji, `é`,
+  combining marks, `ß`), float boundaries (`-0.0`, `5e-324`, `1e300`,
+  `0.1+0.2` shapes), int extremes (`i64::MIN/MAX`, width boundaries).
+
+- **Mutation** — `src/generator/mutate.rs`. Parses the
+  `main`-bearing corpus (`spec/wasm_cross`, `examples`, …), strips `test`
+  blocks, and applies type-preserving AST mutations (literal
+  perturbation from the pools, equal-kind subexpression swap, statement
+  duplication). `// wasm:skip` files are excluded (known divergences).
+
+Determinism: `SplitMix64` (`src/rng.rs`) seeded `for_program(seed, index)`
+for the program itself, plus the salted sub-stream above for the family
+roll. Effects are not limited to printing: the curated catalogue admits
+reproducible sandbox operations from fs/env/io/args/process/net/http, with
+seeded files, fixed inputs, and loopback fixtures. Host-decided results use
+property verdicts where declared. See `SANDBOXED_EFFECT_MODULES`,
+`generator/verdicts.rs`, `oracle/sandbox.rs`, and `oracle/fixture.rs` for the
+bounds; arbitrary unsandboxed effects are not implied.
+
+## The oracle ladder
+
+`src/oracle/` — cheap→expensive, first failure classifies the program:
+
+| Rung | Check | Failure means |
+|------|-------|---------------|
+| a | `almide check` accepts | **generator bug** (we promised well-typed) — counted, not a finding |
+| b | `parse∘fmt` is idempotent | formatter instability |
+| c | native build + run (no ICE) | native codegen failure |
+| d | wasm build + validate | wasm codegen failure |
+| e | **self-check** — each leg vs its `@expect` output | **miscompile**, attributable to `native` / `wasm` / **`both legs`** |
+| f | run both, byte-compare stdout/exit | **divergence** (or a hang) |
+| g | both vs the reference interpreter | one backend wrong, when the interpreter votes |
+
+Rung (e) fires only for programs that carry a by-construction oracle (the
+identity, composition, and shape families). It runs **before** the differential comparison because
+it is the only rung that can convict two legs at once — but **after** the
+resource-limit skips (C-196 stack, C-197 wasm32 memory), so a wasm OOM is
+still a skip rather than a bogus miscompile.
+
+The resource-limit skip (`resource_class` in `ladder.rs`) reads each leg's
+own abort signature — `call stack exhausted` (stock wasmtime's trap) /
+`Error: out of memory` on the wasm leg, `stack overflow` (C-196's `Error:
+stack overflow`, or Rust's own message on a thread that never registered) /
+`memory allocation of … bytes failed` on native
+— and discards the run only when everything the limited leg printed before
+dying is a prefix of its sibling's stdout. The sibling's fate is not part of
+the question (#2382): "wasm OOMed at the first allocation while native ran on
+to a deliberate panic" is a resource skip, "wasm printed a line native did
+not and then OOMed" is a finding the limit cut short, and an abort with no
+resource signature is always a semantic verdict (`RunFailureDivergence` or
+`OutputDivergence`).
+
+## Minimizer
+
+`src/minimize.rs` — delta-debugging: statement removal then expression
+simplification, re-running the ladder and keeping a shrink only if the
+same finding kind reproduces. Identity findings take the structural path
+(`minimize_plan`, see above) instead. Output lands in `findings/<kind>/`:
+`repro.almd`, `original.almd`, `meta.txt` (seed/index/family/replay
+command), `native.out`, `wasm.out`. Findings are deduplicated by
+`(kind, summary)`.
+
+## Throughput
+
+The WASM build + native cargo build are the bottleneck. Workers each own
+an **isolated** build scratch dir (`ALMIDE_RUN_PROJECT_DIR`), so the
+shared-`/tmp` build flock never serializes them — throughput scales with
+cores. Measured locally (Apple M-series, see the campaign summary line):
+roughly **40–120 programs/min** depending on `--jobs` and the
+native-build cache warmth (the per-program cost is dominated by the
+native `cargo` rebuild; warm caches are ~0.25 s/program).
+
+## Nightly CI
+
+`.github/workflows/fuzz-nightly.yml` runs a time-budgeted campaign at
+03:00 UTC (and on manual dispatch), uploads `findings/` as an artifact,
+and opens/updates a `fuzz`-labelled tracking issue when findings > 0. PR
+CI is intentionally left untouched — the fuzzer is nightly only.
+
+The nightly needs no change to pick up the identity family: it runs the
+default `--family all`, which includes identity, composition, and shape
+by-construction oracles. The actual delivered share depends on the staged
+selection and completed programs, not the old identity-only percentage. The
+campaign summary reports the exact share as `self-checked = N (P%)`.
+`SelfCheckFailure` is a correctness class, so a night that finds one goes
+red and files the tracking issue like any other miscompile.
+
+A future refinement (not wired): give one matrix shard
+`--family identity` so a fixed fraction of the night's coverage is
+oracle-backed regardless of how the weights are retuned.

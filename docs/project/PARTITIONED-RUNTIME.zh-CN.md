@@ -1,6 +1,6 @@
 # 分区运行时要求 (#568)
 
-[English](./PARTITIONED-RUNTIME.md) | [日本語](./PARTITIONED-RUNTIME.ja.md) | [简体中文](./PARTITIONED-RUNTIME.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./PARTITIONED-RUNTIME.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](./PARTITIONED-RUNTIME.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](./PARTITIONED-RUNTIME.zh-CN.md)
 
 本文说明分区式宿主（ARINC 653 式的时间／空间分区，或任何按组件分配内存与 CPU 预算的环境）运行 Critical 配置的 Almide wasm 产物时必须提供什么，以及产物本身保证什么。以下具体产物检查针对 `tests/static_memory_test.rs` 中的 PID 参考应用，并非每个 Critical 配置程序或每条 Wasm 组件路径。必须针对每个部署产物审查授予的能力和实际导入项。每行都列出了对应门禁。
 

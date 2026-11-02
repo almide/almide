@@ -1,0 +1,1673 @@
+# Almide Language Specification
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](SPEC.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](SPEC.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](SPEC.zh-CN.md)
+
+> This is a non-normative reader copy of the [pinned original](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/docs/SPEC.md), not a new authority, generator output or automatically synchronized document. Original sources and machine consumers are unchanged. Historical claims and examples have not been independently revalidated here.
+
+
+**"Not a language for writing freely, but a language for converging correctly."**
+
+> **Normative status (declared 2026-08-20, #530 / A0-1):** this specification
+> and `docs/specs/` are normative — **where an implementation disagrees with
+> the ALS, the implementation is wrong.** The interpreter is the ALS's
+> executable companion (the 3-way oracle's third judge), held to the spec,
+> never a spec itself. The frozen surface and the breaking-change policy are
+> [docs/STABILITY.md](../../../STABILITY.md); known prose contradictions are #530's
+> open burn-down, each closing with a fixture citing its ALS section.
+
+---
+
+## 0. Design Philosophy
+
+### Core Thesis
+
+The essence of language design for LLMs is not maximizing expressiveness, but **minimizing the set of valid candidates at each generation step**.
+
+### Four Pillars
+
+| Principle | Definition |
+|---|---|
+| **Predictable** | The "next valid syntax, API, and semantics" can be narrowed down tightly at each generation step |
+| **Local** | The information needed to understand or modify a given location is as close as possible |
+| **Repairable** | When errors occur, the compiler returns near-unique fix candidates in few steps |
+| **Compact** | High semantic density with low syntactic noise. Strict yet concise |
+
+### 7 Design Principles
+
+1. **Canonicity** -- There should be, in principle, only one primary way to express the same meaning
+2. **Surface Semantics** -- Side effects, fallibility, optionality, and mutability must appear in the syntax or type
+3. **Local Reasoning** -- The meaning of a function or expression should be largely understandable from nearby syntax alone
+4. **Incremental Completion** -- Incomplete code is legal; one can make progress by filling typed holes
+5. **Repair-First** -- The compiler should be a repair tool, not a rejection tool; diagnostics are structured
+6. **Vocabulary Economy** -- The standard library has a consistent vocabulary with no synonyms
+7. **No Magic** -- Mechanisms that change meaning at runtime, context-dependent DSLs, and implicit type conversions are prohibited
+
+### Trade-offs (Intentionally Sacrificed)
+
+- Writing freedom for experts
+- Cultural "language feel" and ergonomic DSLs
+- Metaprogramming power (no macros, no reflection)
+- Custom operator syntax and implicit conversions (existing operators can dispatch through declared protocols)
+- Multiple return styles and lambda notations
+- Ad-hoc polymorphism via implicit instance resolution
+
+**Goal: High conciseness + Low freedom**
+
+---
+
+## 1. Lexical Specification
+
+### 1.1 Identifiers
+
+```
+Identifier ::= (XID_Start | "_") XID_Continue*
+```
+
+Identifiers follow Unicode UAX #31 and are stored in NFC. Characters whose
+compatibility-normalized form differs from their canonical form (such as
+full-width Latin letters and digits) are rejected, not folded. A lone `_`
+is a placeholder, not a binding name. Keywords and module names stay ASCII.
+
+Tests: `spec/lang/unicode_identifier_test.almd`,
+`tests/unicode_identifier_nfc_test.rs`.
+
+Trailing `?` in identifiers was removed — predicates are plain identifiers
+that return `Bool` (`is_` prefix convention: `is_empty`, `is_digit`).
+
+### 1.2 Type Names
+
+Type names use the same Unicode identifier characters. An uppercase initial
+character marks a type-side name. A caseless name (for example CJK, kana or
+Hangul) is value-side unless its module declares it as a type or variant case;
+from another module, use the qualified spelling (for example `geo.住所`).
+
+Tests: `spec/lang/unicode_identifier_test.almd`,
+`spec/wasm_cross/unicode_identifiers.almd`.
+
+### 1.3 Literals
+
+```
+IntLiteral       ::= [0-9]+ | "0" [xX] [0-9a-fA-F]+
+                   | "0" [bB] [01]+ | "0" [oO] [0-7]+  // separators described below
+FloatLiteral     ::= [0-9]+ "." [0-9]+ ([eE] [+-]? [0-9]+)?
+StringLiteral    ::= '"' (char | "\n" | "\t" | "\r" | "\\" | "\"" | "\$")* '"'
+InterpolatedStr  ::= '"' (char | "${" Expr "}")* '"'
+SingleQuoteStr   ::= "'" (char | "\'" | "\\" | "\n" | "\t" | "\r")* "'"   // escapes only, no interpolation
+HeredocStr       ::= '"""' ... '"""'                   // multiline, indent-stripped
+RawHeredocStr    ::= 'r"""' ... '"""'                  // no escapes, no interpolation
+RawStr           ::= 'r"' ... '"'                      // no escapes, no interpolation
+BoolLiteral      ::= "true" | "false"
+```
+
+There is **no** null literal. Absence is represented by `none` (a constructor of `Option[T]`).
+
+Double-quote strings support interpolation via `${expr}` and backslash escapes. Single-quote strings support escape sequences (`\'`, `\\`, `\n`, `\t`, `\r`) but **no interpolation**. Raw strings and raw heredocs support neither interpolation nor escapes.
+
+Heredoc strings strip leading whitespace based on minimum indent of non-empty lines. The first line (if blank after `"""`) and the last line (if whitespace-only before `"""`) are dropped.
+
+Numeric literals support `_` as a visual separator (e.g., `1_000_000`).
+
+### 1.4 Comments
+
+```
+// line comment (to end of line)
+/* block comment (nestable) */
+```
+
+Block comments nest: `/* outer /* inner */ still outer */` is valid.
+
+### 1.5 Keywords (34)
+
+```
+module  import  type    protocol for     in      fn      let
+var     mut     if      then     else    match   ok      err
+some    none    todo    true     false   not     and     or
+pub     effect  test    guard    break   continue while
+local   mod     fan
+```
+
+`strict` was removed — the `strict types` / `strict effects` declaration
+enabled no checking, so the word is an ordinary identifier again.
+
+### 1.6 Operators and Delimiters
+
+```
+Operators:   +  -  *  /  %  ^  ==  !=  <  <=  >  >=  |>  >>  ..<  ...
+Postfix:     !  ?  ?.  ??
+Unary:       -  not
+Logical:     and  or
+Assignment:  =
+Arrows:      ->  =>
+Delimiters:  (  )  {  }  [  ]  ,  .  :  ;  |  _  @  ...
+```
+
+- `^` is exponentiation (right-associative). `**` is accepted as an alias
+- `+` is overloaded: addition for numbers, concatenation for strings and lists
+- `..<` is exclusive range, `...` is inclusive range (the Rust-style `..`/`..=` are a diagnosed E031 with a mechanical fix-it)
+- `...` is spread (in records)
+- `_` discards a pattern binding or denotes a typed hole in an expression; it is not a pipe/call-argument placeholder (E046, §9.10)
+- `@` introduces attributes, including extern annotations
+
+---
+
+## 2. Statement Separators
+
+**Newlines separate statements.** Semicolons are used only to place multiple statements on a single line.
+
+```
+let x = 1
+let y = 2
+let a = 1; let b = 2
+```
+
+### 2.1 Line Continuation Rules
+
+A newline is ignored and the statement continues when:
+
+**The line ends with:**
+- Binary operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<=`, `>=`, `<`, `>`, `and`, `or`, `|>`
+- Delimiters: `,`, `.`, `:`
+- Opening brackets: `(`, `{`, `[`
+- Arrows: `->`, `=>`
+- Assignment: `=`
+- Keywords: `if`, `then`, `else`, `match`, `not`, `|`
+
+**The next line starts with:**
+- `.` followed by a name (method chaining)
+- Any infix operator: `|>`, `>>`, `+`, `-`, `*`, `/`, `%`, `^`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `..<`, `and`, `or`
+- `??` (its fallback stays on the `??` line — E038)
+
+A line-initial `-` glued to its operand (`-1`) starts a new statement, and a
+line-initial `...` is a spread, so neither continues.
+
+```
+let result = items
+  .filter((x) => x > 0)
+  .map((x) => x * 2)
+
+text
+  |> string.trim
+  |> string.split(",")
+
+list.first(xs)
+  |> option.map((x) => x + 1)
+  ?? 0
+```
+
+---
+
+## 3. Syntactic Categories
+
+This is an overview, not a second exhaustive grammar. See the focused
+[language specification](../../../specs/language.md) for concrete syntax and examples.
+
+```
+Program   ::= ImportDecl* TopDecl*
+
+TopDecl   ::= TypeDecl | ProtocolDecl | FnDecl
+            | TopLetDecl | TestDecl
+
+Stmt      ::= LetStmt | VarStmt | AssignStmt | GuardStmt | BreakStmt | ContinueStmt | Expr
+
+Expr      ::= Literal | Name | InterpolatedStr
+            | RecordExpr | SpreadExpr | ListExpr | MapExpr
+            | CallExpr | MemberExpr | IndexExpr
+            | PipeExpr | BinaryExpr | UnaryExpr
+            | IfExpr | MatchExpr
+            | ForInExpr | WhileExpr | FanExpr
+            | BlockExpr | LambdaExpr
+            | HoleExpr | TodoExpr
+            | RangeExpr | TupleExpr
+            | "(" Expr ")"
+```
+
+---
+
+## 4. Modules and Imports
+
+Package identity is declared in `almide.toml`. No `module` declaration in source files.
+
+### 4.1 Import Declaration
+
+```
+ImportDecl ::= "import" ModulePath
+             | "import" ModulePath "as" Ident
+             | "import" ModulePath "." "{" NameList "}"
+
+ModulePath ::= Ident ( "." Ident )*
+```
+
+Examples:
+```
+import fs                       // stdlib module
+import json                     // stdlib module (not auto-imported)
+import mylib                    // user package
+import mylib.parser             // sub-module import
+import mylib as m               // alias: m.hello()
+import self as app              // self-alias for the current package
+import mylib.{Parser, Lexer}    // selective import
+```
+
+**Prohibited: wildcard imports.** `import fs.*` is a compile error.
+
+### 4.2 Auto-Imported Modules (Prelude)
+
+The following public modules are available without `import`:
+
+```
+string  list  int  float  bool  math  map  set  deque  heap
+result  option  value  datetime  bytes  matrix
+int8  int16  int32  int64  uint8  uint16  uint32  uint64  float32  float64
+```
+
+Other public stdlib modules require an explicit `import`; see the
+[standard-library reference](../../../stdlib/README.md) for the current inventory.
+The source of truth is `TIER1_ALWAYS_ACCESSIBLE` plus `AUTO_IMPORT_BUNDLED` in
+[`stdlib_info.rs`](../../../../crates/almide-types/src/stdlib_info.rs).
+`prim` is an internal stdlib implementation module, not user surface: a
+user-source reference is rejected with E085. The retired `error`, `log` and
+`mem` modules are not part of the public stdlib.
+The [compute](../../../stdlib/compute.md) and [duration](../../../stdlib/duration.md)
+clock surfaces are auto-available checker builtins, not importable modules.
+
+### 4.3 Prelude Types
+
+Implicitly imported types and constructors:
+- Primitives include `Int`, `Float`, their sized numeric families, `Bool`, `String`, `Unit`, `Bytes`; `Path` is a `String` alias
+- Collections: `List[T]`, `Map[K, V]`, `Set[T]`
+- Error handling: `Option[T]`, `Result[T, E]`
+- Constructors: `some(x)`, `none`, `ok(x)`, `err(x)`
+- Booleans: `true`, `false`
+- Boundary: `Value` (`json.parse` returns `Value`, not a separate builtin `Json` type)
+
+### 4.4 Visibility Modifiers
+
+```
+fn pub_fn() -> String = ...       // public (default)
+mod fn internal() -> String = ... // same project only (pub(crate) in Rust)
+local fn helper() -> String = ... // same file only (private)
+```
+
+Visibility applies to `fn`, `type`, and `let` declarations:
+```
+local type Internal = { data: String }
+mod let THRESHOLD = 100
+```
+
+---
+
+## 5. Type Declarations
+
+### 5.1 Generics -- `[]` Notation
+
+**Type arguments use `[]`.** `<>` is reserved exclusively for comparison operators.
+
+```
+GenericParams ::= "[" TypeParam ( "," TypeParam )* "]"
+TypeParam     ::= TypeName
+```
+
+```
+Result[List[Map[String, Int]], Error]
+fn transform[T, U](xs: List[T], f: Fn(T) -> U) -> List[U] = list.map(xs, f)
+```
+
+### 5.2 Record Types
+
+```
+type User = {
+  id: Int,
+  name: String,
+}
+
+type Pair[A, B] = {
+  first: A,
+  second: B,
+}
+```
+
+### 5.3 Variant Types
+
+Three variant case forms: unit, tuple-style, and record-style.
+
+```
+type Token =
+  | Word(String)
+  | Number(Int)
+  | Eof
+
+type Shape =
+  | Circle(Float)
+  | Rect{ width: Float, height: Float }
+  | Point
+```
+
+Inline variant (without leading `|`):
+
+```
+type Direction = North | South | East | West
+```
+
+### 5.4 Conventions
+
+```
+ConventionClause ::= ":" TypeName ("," TypeName)*
+```
+
+Convention names are specified after the type name with `:`, before `=`:
+
+```
+type Color: Eq, Repr =
+  | Red | Green | Blue
+```
+
+Built-in protocols include `Eq`, `Repr`, `Ord`, `Hash`, `Codec`, `Encode`,
+`Decode`, and `Numeric`. See the [type-system reference](../../../specs/type-system.md)
+for their requirements and derivation rules; declaring a protocol does not
+replace those requirements.
+
+### 5.5 Protocols
+
+```
+ProtocolDecl ::= "protocol" TypeName "{" ProtocolMethod* "}"
+ProtocolMethod ::= ["effect"] "fn" Ident "(" Params ")" "->" TypeExpr
+```
+
+Protocols define sets of required methods. A type declares satisfaction with
+`: ProtocolName`; the methods themselves are plain top-level functions named
+`Type.method`, first parameter explicitly typed to `Type` — there is no
+`impl Protocol for Type { ... }` block. Convention methods stay flat, top-level
+functions: no nesting, no extra indentation depth, one way to attach a method
+to a type.
+
+```
+protocol Serializable {
+  fn serialize(a: Self) -> String
+  fn deserialize(raw: String) -> Result[Self, String]
+}
+
+type Config: Serializable = { key: String, value: String }
+fn Config.serialize(c: Config) -> String = c.key + "=" + c.value
+fn Config.deserialize(raw: String) -> Result[Config, String] = ok(Config { key: raw, value: raw })
+```
+
+The checker validates every declared convention method against the protocol's
+signature (arity and parameter/return types, `Self` substituted for the
+declaring type), with a diagnostic pinned to the method if it doesn't match —
+a `Type: Protocol` annotation with a mismatched method is rejected at `almide
+check`, not left to fail later at native codegen. Signature checking is
+skipped for generic types for now (`Self` would need to carry the type's own
+type arguments, which nothing threads through yet).
+
+The first parameter can be named and typed explicitly (`a: Config`) or written
+as bare `self`, sugar for `self: Self` that resolves to the declaring type on
+a convention method the same way it does inside a `protocol { ... }`
+declaration itself.
+
+`Self` is a placeholder for the implementing type. Built-in conventions are protocols; structural derivation and explicit
+methods follow the [type-system reference](../../../specs/type-system.md).
+
+Protocols can be used as generic bounds:
+
+```
+fn show[T: Serializable](item: T) -> String = item.serialize()
+```
+
+No dynamic dispatch — all protocol-bounded generics are monomorphized at compile time.
+
+### 5.6 Type Alias
+
+```
+type Score = Int
+type Handler = (String) -> String
+```
+
+- Transparent alias — `Score` and `Int` are interchangeable
+- Function type aliases use `(Params) -> Return` syntax
+
+### 5.7 Type Application
+
+```
+List[String]
+Result[User, ParseError]
+Map[String, List[Int]]
+```
+
+### 5.8 Tuple Types
+
+```
+(Int, String)              // tuple type
+(Int, String, Bool)        // 3-tuple
+```
+
+Access via `.0`, `.1`, etc.
+
+### 5.9 Function Types
+
+```
+Fn(Int) -> String
+Fn(Int, Int) -> Bool
+```
+
+The bare-parens form (see 5.6) is equivalent and works everywhere too:
+`fn apply(f: (Int) -> Int) -> Int = f(3)`, `type Handler = (String) -> String`.
+
+---
+
+## 6. Basic Type Environment
+
+### Primitives
+
+```
+Int  Float  Bool  String  Path  Unit
+```
+
+`Bytes` is a distinct type, not interchangeable with `List[Int]`; use the
+[bytes API](../../../stdlib/bytes.md) for conversions. `Path` is an alias for `String`.
+Sized integer and floating-point types are described in the
+[type-system reference](../../../specs/type-system.md).
+
+### Collections
+
+```
+List[T]  Map[K, V]  Set[T]
+```
+
+### Error Handling
+
+```
+Option[T]   -- some(x) | none
+Result[T, E] -- ok(x) | err(e)
+```
+
+### Boundary Types
+
+```
+Value
+```
+
+Used as receivers for external input. Requires explicit conversion before use in domain logic.
+
+---
+
+## 7. Function Declarations
+
+```
+FnDecl ::= Visibility? "effect"? "fn" Name GenericParams?
+            "(" ParamList? ")" "->" TypeExpr "=" Expr
+
+Visibility ::= "local" | "mod"        // default is public
+ParamList  ::= Param ( "," Param )*
+Param      ::= "mut"? Identifier ":" TypeExpr ( "=" Expr )?   // default value optional
+```
+
+Modifier order: `[local|mod]? effect? fn`
+
+### 7.1 Principles
+
+- Argument types are required
+- Return type is required
+- The body is a single expression (after `=`)
+- `effect fn` marks functions with side effects
+- `fan { }` for scoped execution (only inside `effect fn`); scheduling depends on the compiler and selected host route (§13)
+
+```
+fn add(x: Int, y: Int) -> Int = x + y
+
+effect fn greet(name: String) -> Result[Unit, String] = {
+  println("Hello, ${name}!")
+  ok(())
+}
+```
+
+### 7.2 Default Arguments
+
+Parameters may have default values. All parameters after the first default must also have defaults.
+
+```
+fn connect(host: String, port: Int = 8080, secure: Bool = false) -> Connection = _
+```
+
+### 7.3 Named Arguments
+
+Arguments can be named at the call site:
+
+```
+connect("localhost")
+connect("localhost", port: 443, secure: true)
+connect(host: "localhost", secure: true)
+```
+
+Named arguments after positional ones are allowed. Positional arguments after named ones are not.
+
+A call of a **record type** (or record-payload variant case) with all-named
+arguments is record construction: `Cfg(name: "x")` is an alias, normalized to
+the canonical `Cfg { name: "x" }` and validated identically (unknown /
+duplicate / missing-without-default fields are E021). Positional arguments on
+a record, and named arguments on a tuple constructor, are rejected (E021).
+
+The paren alias also matches a plain record type in patterns (`Cfg(name) =>
+...`). It does **not** match a variant's record-payload case — only the brace
+form does there (`Circle { radius } => ...`, never `Circle(radius) => ...`,
+E021: "use a record pattern").
+
+### 7.4 Predicate Functions
+
+Predicates are plain identifiers returning `Bool` (no `?` suffix — it was removed):
+
+```
+fn empty(xs: List[Int]) -> Bool = list.len(xs) == 0
+fn tracked(index: Index, path: Path) -> Bool = _
+```
+
+### 7.5 `effect fn` -- Explicit Side Effects
+
+Calling an `effect fn` from a non-`effect` function is a **compile error**, not a warning.
+
+```
+fn pure_fn() -> String =
+  fs.read_text("file.txt")    // Compile error: cannot call effect fn from non-effect fn
+```
+
+The effect bit is not a claim of mathematical purity or zero capability categories.
+Output/abort builtins are admitted in plain `fn` (§16.4), and calls through
+transparent function parameters follow the callback rules in the
+[effect-system reference](../../../specs/effect-system.md).
+
+### 7.6 Top-Level let -- Module-Scope Constants
+
+```
+let PI = 3.14159265358979323846
+let MAX_RETRIES = 3
+let GREETING = "Hello, world"
+```
+
+Evaluated at compile time when possible. Numeric and simple expressions become `const`; String and complex expressions use `LazyLock<T>` in Rust codegen.
+
+### 7.7 Extern Annotations
+
+For FFI bindings to target-specific functions:
+
+```
+@extern(rust, "std::fs", "read_to_string")
+effect fn read_text(path: String) -> Result[String, String] = _
+```
+
+The example is a native Rust binding, not a portable implementation.
+The former TypeScript backend is retired; foreign/host bindings must satisfy
+the selected target and its permission/trust boundaries.
+
+### 7.8 Mutable Parameters
+
+`mut` on a parameter passes it by mutable reference: an assignment to the
+parameter inside the function is visible to the caller after the call
+returns, in place — there is no return value carrying the new state back.
+
+```
+fn incr(mut x: Int) -> Unit = { x = x + 1 }
+
+fn main() -> Unit = {
+  var n = 5
+  incr(n)
+  println(int.to_string(n))   // 6
+}
+```
+
+The call site must pass a `var` binding — a `let` binding or a temporary
+expression is rejected (E007), since there is nothing to write the mutation
+back into. `mut` may appear on any parameter, not only the first. This is how
+in-place stdlib operations are written (`list.push`, `list.pop`,
+`list.clear`, …) — not via a hidden receiver convention, just an ordinary
+parameter marked `mut`.
+
+---
+
+## 8. Statements
+
+### 8.1 let / var
+
+```
+let x = 1                   // immutable
+let x: Int = 1              // with type annotation
+var y = 2                   // mutable
+y = y + 1                   // reassign (var only)
+```
+
+### 8.2 Destructuring
+
+```
+let { name, age } = user    // record destructure (one level only)
+var (x, y) = pair           // var takes the let patterns; x and y are both vars
+```
+
+- `var` takes the same patterns as `let`, and every bound name is mutable (#3149)
+- Tuple destructuring can nest and discard positions: `var (x, (y, _)) = value`
+- Record shorthand destructuring is not a general nested match pattern
+- Renaming is not allowed
+
+### 8.3 guard
+
+```
+guard cond else expr
+```
+
+Precondition checking with early exit. When the condition is false, the else expression is returned.
+
+```
+effect fn validate(x: Int) -> Result[Int, String] = {
+  guard x > 0 else err("must be positive")
+  guard x < 1000 else err("too large")
+  ok(x * 2)
+}
+```
+
+### 8.4 Reassignment
+
+Only allowed for identifiers bound with `var`:
+
+```
+var count = 0
+count = count + 1
+xs[0] = "updated"           // index write (var only)
+m["key"] = value             // map write (var only)
+```
+
+---
+
+## 9. Expressions
+
+### 9.1 if Expression
+
+```
+if cond then expr else expr
+```
+
+- Omitting `else` gives a Unit-valued conditional; it is not a value-producing two-branch expression.
+- The condition must be `Bool`. No truthiness.
+- Chaining: `if a then x else if b then y else z`
+
+### 9.2 match Expression
+
+```
+match subject {
+  Pattern => expr,
+  Pattern if guard_cond => expr,
+  _ => expr,
+}
+```
+
+**match must be exhaustive** (enforced by the type checker).
+
+Guards take a `Bool` expression after `if`. When the guard is false, the next arm is tried.
+
+### 9.3 Patterns
+
+```
+Pattern ::= "_"                                      // wildcard
+           | Identifier                               // bind
+           | Literal                                  // int, float, string, bool
+           | "some" "(" Pattern ")"                   // Option
+           | "none"
+           | "ok" "(" Pattern ")"                     // Result
+           | "err" "(" Pattern ")"
+           | TypeName                                 // unit constructor
+           | TypeName "(" Pattern ("," Pattern)* ")"  // tuple constructor
+           | TypeName "{" FieldPattern* ".."? "}"     // record constructor
+           | "(" Pattern "," Pattern+ ")"             // tuple
+```
+
+`FieldPattern ::= Ident (":" Pattern)?`
+
+The language also has list/tail, or, and as patterns. Their binding and
+exhaustiveness rules are in [the language reference](../../../specs/language.md);
+the forms above are not an exhaustive pattern inventory.
+
+Record patterns support `..` for partial matching:
+
+```
+match shape {
+  Circle(r) => 3.14 * r * r,
+  Rect{ width, height } => width * height,
+  Rect{ width, .. } => width,
+  Point => 0.0,
+}
+```
+
+### 9.4 Lambdas
+
+```
+(x) => expr
+(x, y) => expr
+(x: Int) => x + 1
+items.map((x) => x * 2)
+```
+
+The body is any expression, including block expressions for multi-line lambdas:
+
+```
+let f = (x) => {
+  let y = x * 2
+  y + 1
+}
+```
+
+One form only. Lambda parameters may optionally include type annotations.
+
+### 9.5 Block Expression
+
+The last expression in a block is its value:
+
+```
+{
+  let x = 1
+  let y = 2
+  x + y
+}
+```
+
+### 9.6 for...in
+
+```
+for item in items {
+  println(item)
+}
+
+for (k, v) in map.to_list(config) {
+  println(k + " = " + v)
+}
+
+for i in 0..<10 {
+  println(int.to_string(i))
+}
+```
+
+Iterates over a list. The loop body is `Unit`-typed. Use `for...in` for collection iteration.
+
+### 9.7 while
+
+```
+var i = 0
+while i < 10 {
+  println(int.to_string(i))
+  i = i + 1
+}
+```
+
+Loops while the condition is true. The loop body is `Unit`-typed.
+`break` and `continue` provide loop-local early exit and next-iteration control;
+they do not return a value from the enclosing function.
+
+### 9.8 fan (Deterministic Data-Parallelism)
+
+```
+fan { expr1, expr2, expr3 }
+```
+
+Joins scoped arm expressions and returns their results as a tuple. Only valid
+inside `effect fn`. Arms are separated by commas or newlines, not semicolons;
+a block expression used as an arm can contain ordinary statements.
+
+`fan` is a SCHEDULING construct, not a semantic one: execution may be parallel, but the
+program's observable behaviour is defined to be exactly that of sequential evaluation in
+list order. See [the concurrency stance](https://github.com/almide/almide/blob/develop/docs/roadmap/active/concurrency-stance.md).
+
+Rules:
+- All siblings are joined — there is no cancellation. If any returns `Err`, the block's
+  value is the FIRST `Err` in LIST ORDER (not the first to fail in wall-clock time), which
+  is what makes the outcome independent of scheduling. A sibling that does not terminate
+  makes the program not terminate, exactly as sequential evaluation would
+- No `let`/`var`/`for`/`while` inside `fan` blocks -- only expressions
+- No `var` capture from outer scope (prevents data races)
+
+Library forms:
+- `fan.map(xs, f)` -- map over a collection via the fan surface (every element runs; results in list order)
+- `fan.settle(xs, f)` -- every element's Result, in list order
+- `fan.min(clock, xs, f)` -- one element selected by the clock (§13.5)
+
+The first element whose result is `Ok`, in list order, is NOT a fan form: it is
+sequential, so it is `list.find_map(xs, (x) => f(x)?) ?? fallback` (`?` turns an
+element's `Err` into `none`, so the element is skipped and later elements never
+run). The block spelling is a `??` chain: `a() ?? b() ?? fallback`.
+
+(The thunk-list CALL forms `fan.race(thunks)` / `fan.any(thunks)` / `fan.settle(thunks)` are
+check-time `E027` tombstones with a migration hint, as are `fan.race { }` (renamed `fan.min`
+in dialect epoch 14) and `fan.any { }` / `fan.any(xs, f)` (removed in the same epoch; a `??`
+chain and `list.find_map` say the same thing). Under list-order semantics the old
+`fan.race(thunks)` was exactly `thunks[0]()`.)
+
+### 9.10 Pipe
+
+```
+text |> string.trim |> string.split(",")
+```
+
+`x |> f` is equivalent to `f(x)`.
+
+For a multi-argument function the piped value is the **first** argument:
+
+```
+xs |> list.filter((x) => x > 0)
+text |> string.split(",")
+```
+
+There is no placeholder: `_` in a call argument is rejected (E046), and
+`text |> string.split(_, ",")` names the fix — drop the `_`. To pipe into
+another position, pipe into a lambda: `x |> (v) => f(a, v)`.
+
+**Pipe into match:**
+
+```
+value |> match {
+  some(x) => x,
+  none => "default",
+}
+```
+
+### 9.11 UFCS (Uniform Function Call Syntax)
+
+When UFCS resolution selects `f`, `x.f(y)` supplies `x` as its first argument.
+This is not an unconditional parse-time equivalence with any `f` in scope.
+
+```
+string.trim(text)       // canonical form
+text.trim()             // UFCS form -- equivalent
+
+string.split(text, ",")
+text.split(",")         // equivalent
+```
+
+Resolution depends on the receiver type and lexical scope: callable record
+fields, builtin-module functions, convention/protocol methods, and user/imported
+functions have distinct resolution paths. Local bindings can shadow module
+names. See `crates/almide-frontend/src/check/calls_ufcs.rs`.
+
+### 9.12 Range
+
+```
+0..<5           // [0, 1, 2, 3, 4]    exclusive end
+1...5           // [1, 2, 3, 4, 5]    inclusive end
+for i in 0..<n { ... }   // no list allocation (optimized)
+```
+
+### 9.13 Record and Spread
+
+```
+let alice = { name: "alice", age: 30 }
+let bob = { ...alice, name: "bob" }       // age inherited from alice
+{ name }                                   // shorthand: { name: name }
+```
+
+### 9.14 List
+
+```
+[1, 2, 3]
+[]                        // empty list (type inferred from context)
+xs[0]                     // index access
+xs[i] = value             // index write (var only)
+```
+
+### 9.15 Map
+
+```
+["a": 1, "b": 2]         // map literal
+[:]                       // empty map (requires type annotation)
+let m: Map[String, Int] = [:]
+m["key"]                  // index access (returns Option[V])
+m["key"] = value          // index write (var only)
+```
+
+### 9.16 Tuple
+
+```
+(1, "hello")              // tuple literal
+let pair = (1, "hello")
+pair.0                    // index access: 1
+pair.1                    // "hello"
+```
+
+### 9.17 String Interpolation
+
+```
+let name = "world"
+let msg = "hello ${name}, 1+1=${1 + 1}"
+```
+
+Works in double-quote strings and non-raw heredocs. Single-quote strings,
+raw strings, and raw heredocs do not interpolate (§1.3).
+
+### 9.18 Hole / Todo
+
+```
+fn parse(text: String) -> Ast = _                     // hole (type-checked stub)
+fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
+```
+
+`_` (hole) and `todo(msg)` accept any expected type. The compiler reports the expected type, available variables, and suggestions.
+
+---
+
+## 10. Operators
+
+### Precedence (lowest to highest)
+
+| Level | Operators | Associativity |
+|-------|-----------|---------------|
+| 1 | `or` | left |
+| 2 | `and` | left |
+| 3 | `==` `!=` `<` `<=` `>` `>=` | non-assoc (chaining is an error) |
+| 4 | `\|>` (pipe) | left, asymmetric (see below) |
+| 5 | `..<` `...` (range) | none |
+| 6 | `+` `-` (additive) | left |
+| 7 | `*` `/` `%` (multiplicative) | left |
+| 8 | `^` (power; `**` is an alias) | right |
+| 9 | `>>` (compose) | left (tightest binary) |
+| 10 | `-` `not` (unary) | prefix |
+| 11 | `.` `()` `[]` `!` `?` `?.` `??` (postfix) | left |
+
+- **`\|>` is asymmetric**: its right-hand side is a single call/compose chain.
+  Any other operator after it applies to the piped result —
+  `xs \|> list.map(f) + ys` is `(xs \|> list.map(f)) + ys`, and
+  `xs \|> f >> g` pipes into the composition `f >> g`
+- Assignment (`=`) is a statement, not an operator
+- Operator syntax is fixed. Existing operators can dispatch through declared protocol requirements (for example `Eq` and `Numeric`); arbitrary new operator symbols are not supported
+- `&&` and `||` are rejected with hints to use `and`/`or`; `++` is rejected
+  with a hint to use `+`
+
+### Operator Semantics
+
+| Operator | Meaning |
+|----------|---------|
+| `+` | Addition (Int, Float) or concatenation (String, List) |
+| `-` `*` `/` `%` | Arithmetic |
+| `^` (`**`) | Exponentiation (bitwise XOR is `int.bxor`) |
+| `==` `!=` | Deep equality (all types except Fn) |
+| `<` `<=` `>` `>=` | Comparison |
+| `and` `or` `not` | Boolean logic |
+| `\|>` | Pipe |
+| `>>` | Function composition |
+| `..<` `...` | Range (exclusive / inclusive) |
+| `!` `?` `?.` `??` (postfix) | Unwrap / to-Option / optional chain / fallback |
+
+Equality is type-directed. Secret/convention equality can lower to a function
+call before target codegen; ordinary Rust equality uses `almide_eq!`. Wasm
+implements equality according to the value type, including structural
+comparison of supported compound values, not universal raw-memory byte equality.
+See `lower/expressions_access.rs::lower_eq_protocol` in the frontend and
+`crates/almide-wasm/src/equality*.rs`.
+
+---
+
+## 11. Error Model
+
+### 11.1 Three-Layer Strategy
+
+| Layer | Mechanism | Use Case |
+|---|---|---|
+| **Normal failure** | `Result[T, E]` | parse, validate, I/O, lookup |
+| **Programmer error** | `panic` | unreachable, invariant violations |
+| **Testing** | `assert_eq`, `assert` | test assertions |
+
+Exceptions **do not exist**. There is no `throw`/`catch`.
+
+### 11.2 Unwrap Operators
+
+Three postfix operators for explicit error handling on `Result[T, E]` and `Option[T]`:
+
+```
+expr!          // context-dependent unwrap/propagation; see the context table below
+expr ?? val    // unwrap or — use fallback on failure
+expr?          // to option — convert Result to Option (err → none)
+```
+
+```
+effect fn load_json(path: String) -> Result[Value, String] = {
+  let text = fs.read_text(path)!       // err → propagates
+  let config = json.parse(text)!       // err → propagates
+  ok(config)
+}
+
+let port = int.parse(input) ?? 8080    // err → use 8080
+let name = map.get(config, "key") ?? "default"  // none → use "default"
+```
+
+`!` is also available in pure fallible functions and lambdas. Its behavior
+depends on the return context, including test-block exceptions; it is not a
+synonym for automatic propagation at every effect call. Use the
+[Result/Option context table](../../../specs/result-option-effect.md) for the exact rules.
+
+### 11.3 Typed Error Variants
+
+For branching on error kinds, use a variant type as the error parameter:
+
+```
+type LoadError = | NotFound(String) | ParseFailed(String)
+
+effect fn load_json(path: String) -> Result[Value, LoadError] = {
+  let text = fs.read_text(path)
+    |> result.map_err((e) => NotFound(e))!
+  let config = json.parse(text)
+    |> result.map_err((e) => ParseFailed(e))!
+  ok(config)
+}
+
+match load_json("app.json") {
+  ok(config) => use(config),
+  err(NotFound(path)) => create_default(),
+  err(ParseFailed(msg)) => println("Bad config: ${msg}"),
+}
+```
+
+---
+
+## 12. Holes and Incomplete Code
+
+**Core feature of the language.** Allows incremental development.
+
+```
+fn parse(text: String) -> Ast = _
+fn optimize(ast: Ast) -> Ast = todo("implement constant folding")
+```
+
+### Compiler Obligation
+
+When a hole is found, the compiler returns:
+- Expected type `T`
+- Available variables in scope and their types
+- Function candidates that can return the expected type
+- Suggested expressions
+
+---
+
+## 13. Concurrency: `fan`
+
+### 13.1 fan Block
+
+`fan { }` runs expressions as one scoped unit. Native can use scoped threads;
+supported embedded-Wasm routes can use instance workers. Ordered arms and
+unsupported parallel shapes use sequential execution. The observable contract
+is arm-order evaluation, not a promise that every arm runs in parallel or that
+every Wasm host has the same scheduler. Only valid inside `effect fn`.
+
+```
+effect fn main() -> Result[Unit, String] = {
+  let (a, b) = fan {
+    fetch_user(1)
+    fetch_posts(1)
+  }
+  println("${a}, ${b}")
+  ok(())
+}
+```
+
+Results are returned as a tuple. All siblings are joined — nothing is cancelled. If any
+expression returns `Err`, the block's value is the first `Err` in list order (the lowest
+index, whichever arm failed first in time).
+
+### 13.2 fan.map and the block head fan.settle
+
+```
+let results = fan.map(urls, (url) => fetch(url))    // Result[List[B], String], list order
+let all     = fan.settle { job_a(), job_b() }       // tuple of per-arm Results, arm order
+let first   = fetch_a() ?? fetch_b() ?? fallback    // NOT a fan form: first Ok in SOURCE order
+```
+
+- `fan.map(xs, f)` runs every element; the result is in list order, and the
+  first `Err` in list order is the whole map's `Err`.
+- `fan.settle { ... }` — every arm runs to completion, in arm order on every
+  target (it lowers to a tuple); the result is the tuple of per-arm Results.
+- The first `Ok` in source order is a `??` chain (the right side is evaluated
+  only when the left side failed, so candidates after the winner never run);
+  over a list it is `list.find_map(xs, (x) => f(x)?) ?? fallback`. Neither is a
+  fan form, because the selection is sequential by definition. `fan.any { }`
+  / `fan.any(xs, f)` were removed in dialect epoch 14 (E027 names both
+  replacements; ADR-0028).
+- The thunk-list spellings `fan.any([...])` / `fan.settle([...])` were removed
+  earlier (E027 names the migration).
+
+### 13.3 Deterministic time: `Compute` and `Duration`
+
+Time quantities are built with module-qualified constructors over a CLOSED
+unit set (`ns / us / ms / s / min / h`) and carry a nominal clock type:
+
+```
+compute.ms(100)     // Compute  — deterministic compute time (budgets)
+duration.ms(5000)   // Duration — wall-clock time (oracle-tier surfaces)
+```
+
+- A bare `Int` where a time is expected is a type error; the two clocks never
+  mix (the firewall exists in the checker only — both erase to an `Int` of
+  nanoseconds in lowering).
+- A NEGATIVE constructor argument aborts deterministically at runtime
+  (`Error: negative time: compute.us(-5)` on stderr, exit 1 — identical on
+  both targets); an overflowing construction saturates to the maximum instead
+  of wrapping.
+- Deterministic time is metered in charge units on a frozen abstract machine
+  (function entries — a loop-free, non-recursive callee's is exempt — loop
+  heads and the `+` string concatenation, never an interpolation; the same
+  table on every target since #3778) and converted from declared nanoseconds by
+  a versioned calibration constant (CM-1). The contract is RATIO-ONLY: the
+  declared time approximates the wall clock within a declared band (a standing
+  CI gate measures it), but the METERING itself is exact and
+  machine-independent. Full normative rules: `docs/adr/0001-deterministic-time-units.md`.
+
+### 13.4 fan.bounded — deterministic compute budget
+
+```
+let r = fan.bounded(compute.ms(100)) { work(input) } ?? fallback
+```
+
+- Runs the body under a deterministic compute budget. If the metered spend
+  exceeds the budget, the value is `Err`; otherwise `Ok(body value)`. Type:
+  `Result[T, String]`.
+- The verdict is a function of the program and its inputs ONLY: the same
+  program flips from `Ok` to `Err` at the same declared nanosecond on every
+  target and every machine.
+- Budgets min-cap with an enclosing region (an inner region can never spend
+  more than the remainder). Source cannot nest regions today: a `fan.*` form
+  inside a region body is E007, because the body is pure.
+- The body is checked in a PURE context; it is a block returning a plain
+  (non-`Result`) value.
+
+### 13.5 fan.min(clock) — one arm, selected by the clock you pass
+
+```
+let b = fan.min(compute.us(50)) { a(), b() } ?? fallback              // least deterministic compute within the budget
+let n = fan.min(compute.us(50), xs, (x) => ok(solve(x))) ?? fallback  // mapper form, per-element budget
+```
+
+- The clock argument is REQUIRED. Its TYPE says what "least" is measured on,
+  and its value is the budget. `fan.min { … }` and `fan.min(xs, f)` are parse
+  errors ("fan.min requires a clock argument"): without the clock,
+  `fan.min { 3, 5 }` would read as the smallest value.
+- `Compute` clock (deterministic tier): every arm is metered on the
+  deterministic clock; the winner is the arm with the LEXICOGRAPHICALLY least
+  `(spend, index)` — the cheapest arm, ties resolved by source order. Arms
+  whose spend exceeds the budget are excluded; no admitted arm yields
+  `err("fan.min: no branch succeeded within budget")`. Type: `Result[T, String]`.
+  Every arm runs, one after another in source order. Arms are PURE (E006). An
+  arm that returns `Err` disqualifies itself.
+- The MAPPER form races one PURE 1-param lambda over a dynamic list: arm `i`
+  is `f(xs[i])`, index order is list order, and the budget is per-element —
+  the same law as the block form. The mapper must return a `Result` (the
+  mapper-form contract): `ok(v)` competes, `err(_)` self-disqualifies the
+  element. An empty list is the no-admitted-arm `Err`.
+- `Duration` clock (oracle tier) — DECIDED (ADR-0028, 2026-10-18), lands in a
+  follow-up (#3788); today it is a type error. The rule it will
+  have: the arms start together and the first to FINISH with `Ok` wins; the
+  arms may do I/O; one deadline is shared from entry (not per arm); the losers
+  are cancelled at their next charge site or I/O boundary and `fan.min` waits
+  for them before returning (structured, as Haskell `race`, Python `TaskGroup`,
+  Kotlin and Swift do; never JS's leave-it-running); a loser's performed
+  effects remain, its stdout is discarded, only the winner's value is
+  returned. Native runs the arms in parallel; wasm runs them in order until it
+  has async (arm 0 wins when it succeeds, a legal schedule); ω record/replay
+  pins the winning index.
+- History: an earlier spec revision promised both "results are identical on
+  every target" (§13.1) and "the first arm to COMPLETE wins" (then-§13.2) —
+  incompatible, since the second makes wall-clock scheduling observable. The
+  wall-clock race was removed in 0.42.0; the deterministic head came back as
+  `fan.race` and was renamed `fan.min` in dialect epoch 14 (`race` means
+  "first to finish" in every other ecosystem). On the `Compute` clock the
+  fast arm wins and every target agrees on which arm that is (T9); the
+  `Duration` clock is the oracle tier, where the winner is a host input.
+
+### 13.6 fan.timeout — the oracle-tier wall-clock deadline
+
+```
+let t = fan.timeout(duration.ms(5000)) { work(input) } ?? fallback
+```
+
+- The deadline is a `Duration` (wall clock); it is checked COOPERATIVELY at
+  charge sites — never mid-operation (the Go-context cancellation model) —
+  and nested deadlines min-cap on the absolute deadline.
+- The verdict is ω-RELATIVE: which check the deadline fires at is a host
+  input (ADR-0001 S8). A recorded ω replays byte-identically
+  (`ALMIDE_OMEGA_RECORD=1` to record on native, `ALMIDE_OMEGA=<n>` to
+  replay — the replay uses the recorded cut rather than the clock). Native and
+  embedded Wasm replay are covered by `tests/fan_timeout_replay_test.rs`: distinct
+  replay ordinals produce matching observable progress on both routes (#3781).
+  Set `ALMIDE_OMEGA` on the compiler/run invocation: the cut is baked into the
+  built artifact, not read dynamically from the host by an existing binary.
+  This is timeout-cut replay, not recording of arbitrary I/O or every async bug. Two ends are
+  absolute: a deadline larger than the work always completes, and a
+  diverging body under any finite deadline is always cut.
+
+### 13.7 Rules
+
+- All `fan` forms only inside `effect fn` — pure functions cannot fork
+  (`fan.bounded` / `fan.timeout` bodies and `fan.min(compute…)` arms are themselves checked PURE)
+- No `var` capture — only `let` bindings from outer scope (prevents data races)
+- No unstructured `spawn` — all concurrency is scoped
+- A `fan { }` whose arm reaches an `@ordered` stdlib fn (`env.set`, an `fs`
+  write, a stdin read, a `process` spawn — process-local state a sibling arm
+  could read) runs its arms in arm order on every target (ADR-0024 D3); the
+  observation is the sequential one either way
+- No cancellation of siblings, by design — a cancelled sibling's side effects would depend on
+  when the cancellation landed, which is exactly the scheduling dependence the model excludes.
+  The block joins every sibling and reports the first `Err` in list order. (The only cut is of a
+  PURE body at a charge site: `fan.bounded`, `fan.timeout` and `fan.min(compute…)` arms. The
+  planned `Duration` clock of `fan.min` (#3788) has a separate loser-cancellation
+  contract; it is not implemented today. `fan.timeout` has one pure body, not
+  competing loser arms.)
+- Budgets are `Compute`, never `Duration` and never a bare `Int` — wall-clock
+  limits belong to the oracle tier (`fan.timeout`), not the
+  deterministic tier
+
+---
+
+## 14. Testing
+
+### 14.1 test Declaration
+
+```
+test "description" {
+  assert_eq(add(1, 2), 3)
+  assert(x > 0)
+  assert_ne(a, b)
+}
+```
+
+Tests are top-level declarations in the same file as functions. No separate test files required (convention: `*_test.almd` for dedicated test files).
+
+### 14.2 Assertion Functions
+
+```
+assert(cond: Bool)                    // fails if false
+assert_eq(actual: T, expected: T)     // fails if actual != expected
+assert_ne(actual: T, expected: T)     // fails if actual == expected
+```
+
+### 14.3 Running Tests
+
+```bash
+almide test                      # all .almd with test blocks (recursive)
+almide test spec/lang/           # directory
+almide test spec/lang/expr_test.almd  # single file
+almide test --run "pattern"      # filter by name
+```
+
+---
+
+## 15. Naming Conventions
+
+### Predicates
+
+Predicates use plain identifiers: `is_empty`, `exists`, `contains`. Their return type is `Bool`; there is no trailing `?` in the name.
+
+The `is_` prefix convention is used for predicates in the stdlib: `string.is_empty(s)`, `string.is_digit(s)`.
+
+### Stdlib Naming Rules
+
+| Convention | Rule | Example |
+|---|---|---|
+| Module prefix | `module.function()` canonical form | `string.len(s)`, `list.get(xs, i)` |
+| Predicates | Plain names returning `Bool`, often with an `is_` prefix | `string.is_empty(s)`, `fs.exists(path)` |
+| No synonyms | One name per operation | `len` not `length`/`size`/`count` |
+| Symmetric pairs | Matching names for inverses | `split`/`join`, `to_string`/`to_int` |
+| Return type consistency | Fallible lookups return `Option`, I/O returns `Result` | `list.get() -> Option[T]` |
+
+---
+
+## 16. Standard Library
+
+The [standard-library reference](../../../stdlib/README.md) is the current public
+API inventory. Its module pages contain signatures, documentation, examples
+and `@since` information; their signature indexes are generated from the
+compiler's module interfaces with `make stdlib-docs`. This specification does
+not duplicate those lists or maintain a second function count.
+
+### 16.1 Auto-Imported Modules
+
+See [§4.2](#42-auto-imported-modules-prelude) for the import rule and its
+compiler-owned registry. Follow each module's page in the
+[reference](../../../stdlib/README.md) for its current functions and types.
+
+### 16.2 Import-Required Modules
+
+Public modules outside the auto-imported set require `import module`.
+Their signatures state which calls are effectful; an import requirement is
+not itself an effect classification.
+
+<a id="163-bundled-modules-pure-almide-import-required"></a>
+
+### 16.3 Bundled Modules
+
+Bundling describes implementation, not import policy: self-hosted `.almd`
+modules include both auto-imported and explicitly imported APIs. See
+[`stdlib/README.md`](../../../../stdlib/README.md) for the implementation layout and
+[§4.2](#42-auto-imported-modules-prelude) for the user-facing import rule.
+
+### 16.4 Built-in Functions
+
+Available everywhere without import:
+
+```
+println(s: String)              // print line to stdout
+eprintln(s: String)             // print line to stderr
+assert_eq(a: T, b: T)          // assert equal
+assert_ne(a: T, b: T)          // assert not equal
+assert(cond: Bool)              // assert true
+```
+
+There is no `print` function (use `io.print` for no-newline output). `println` requires `String` -- no implicit conversion.
+
+`println`, `eprintln`, `panic`, `assert`, `assert_eq` and `assert_ne` are
+admissible in a plain `fn`: they write or abort, never read, and do not make
+the caller effectful. Other I/O remains effect-gated. See
+[effect-system.md §2.1](../../../specs/effect-system.md#21-output-and-abort-builtins-are-admissible-in-a-pure-fn)
+for the exact scope and its tests.
+
+---
+
+## 17. Entry Point
+
+```almide
+import env
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  println(list.get(args, 0) ?? "no argument")
+}
+```
+
+The entry function takes no parameters; the runtime calls `main()`.
+Use `env.args()` for arguments: the program name is excluded, so element 0
+is the first user argument. An entry function can instead return an explicit
+`Result[Unit, E]` when it needs a fallible result channel.
+
+---
+
+## 18. Codegen Architecture
+
+### 18.1 Multi-Target
+
+Almide compiles to multiple targets:
+
+| Target | Status | Approach |
+|--------|--------|----------|
+| **Rust** | Production | Full ownership analysis, borrow/clone passes |
+| **WASM** | Production | Direct emit (linear memory, WASI) |
+
+### 18.2 Codegen v3 Pipeline
+
+The native Rust route lowers typed IR through semantic/ownership passes and
+renders Rust with the walker/templates. This is not the Wasm emission route:
+Wasm uses the direct structural emitter, with core/component packaging selected
+for its host surface. See [codegen](../../../specs/codegen.md) and
+[architecture](../../../ARCHITECTURE.md) for the maintained pipeline descriptions.
+
+Propagation lowering handles source `!` according to its return context; it does
+not insert propagation at every effect call. Fan lowering chooses a supported
+substrate while preserving the applicable ordering contract.
+
+### 18.3 Cross-Target Semantics
+
+| Feature | Rust | WASM |
+|---------|------|------|
+| `Result[T, E]` | Result carrier preserving the declared/inferred error type `E` | Tagged value with the corresponding payload layout |
+| `Option[T]` | `Option<T>` | Tagged value with payload layout for `T` |
+| `effect fn` | Effect bit and return channel are distinct; `!` uses its context | Corresponding effect/return semantics, not an unconditional String error |
+| `==` / `!=` | Protocol call or ordinary structural equality | Type-directed equality, not universal byte comparison |
+| `+` on String / List | Runtime/helper or optimized native operations | Type-specific structural/runtime operations |
+| `fan { }` | Scoped parallel or ordered execution as applicable | Sequential or supported embedded-host worker route |
+
+---
+
+## 19. Prohibitions
+
+| # | Prohibited | Reason |
+|---|---|---|
+| 1 | Implicit type conversion | LLMs mix up types |
+| 2 | Truthiness | Conditions must be `Bool` only |
+| 3 | Custom operator syntax | Fixed operator vocabulary; type-directed builtin and protocol dispatch remain supported |
+| 4 | Exceptions (`throw`/`catch`) | Control flow invisible |
+| 5 | Multiple lambda notations | Generation distribution disperses |
+| 6 | Internal DSLs | Strong context dependence |
+| 7 | Wildcard imports | Source of names unknown |
+| 8 | `null` | Unified under `Option[T]` |
+| 9 | API aliases | More vocabulary = more hallucinations |
+| 10 | `<>` generics | Ambiguous with comparison operators |
+| 11 | Monkey patching / open classes | Runtime semantic changes invisible |
+| 12 | Macros and reflection | Language surface must be fixed |
+| 13 | `return` keyword | Last expression is always the value |
+| 14 | `class` keyword | Use `type` for records and variants |
+
+---
+
+## 20. Compiler Diagnostics
+
+### 20.1 One Error, One Root Cause
+
+Cascading derived errors are suppressed. A single root cause is presented.
+
+### 20.2 Structured Error Output
+
+The following is an illustrative diagnostic, not the CLI JSON wire schema.
+Consumers should use the documented [CLI](../../../specs/cli.md) output and its schema/version contract.
+
+```json
+{
+  "kind": "type_mismatch",
+  "location": { "file": "app.almd", "line": 12, "col": 5 },
+  "expected": "Result[Config, IoError]",
+  "actual": "String",
+  "suggestions": ["ok(text)", "parse_config(text)"]
+}
+```
+
+### 20.3 Rejected Syntax Hints
+
+The compiler recognizes common syntax from other languages and provides actionable hints:
+
+```
+Prefix '!x' is not boolean negation in Almide
+  Hint: Use 'not x' for boolean negation, not '!x'.
+
+'return' is not valid in Almide at line 12:5
+  Hint: Use the last expression as the return value, or 'guard ... else' for early exit.
+
+'||' is not valid in Almide at line 8:10
+  Hint: Use 'or' for logical OR.
+
+'&&' is not valid in Almide at line 8:10
+  Hint: Use 'and' for logical AND.
+```
+
+### 20.4 Auto-Fix Candidates
+
+- Missing imports
+- Type conversion candidates
+- Missing match arms
+- Missing `effect` modifier
+- Suggest `effect fn` when pure function calls effectful code
+
+### 20.5 Official Formatter
+
+```bash
+almide fmt app.almd
+```
+
+- One AST yields exactly one formatted output
+- Alphabetical import order
+- Trailing commas included
+- Fixed line-breaking rules
+
+---
+
+## 21. Typing Rules
+
+### Variables
+
+```
+G(x) = T
+-----------
+G |- x : T
+```
+
+### let
+
+```
+G |- e : T
+--------------------
+G, x:T |- let x = e
+```
+
+### if
+
+```
+G |- c : Bool    G |- t : T    G |- e : T
+-------------------------------------------
+G |- if c then t else e : T
+```
+
+### Functions
+
+```
+G, x1:T1, ..., xn:Tn |- body : R
+------------------------------------------
+G |- fn f(x1:T1,...,xn:Tn) -> R = body
+```
+
+### Option / Result Constructors
+
+```
+G |- e : T                          G |- e : T
+--------------------                --------------------
+G |- some(e) : Option[T]           G |- ok(e) : Result[T, E]
+
+G |- e : E
+--------------------
+G |- err(e) : Result[T, E]
+```
+
+### match
+
+```
+G |- e : T
+G,p1 |- e1 : R  ...  G,pn |- en : R
+exhaustive(p1...pn, T)
+---------------------------------------
+G |- match e { p1=>e1, ..., pn=>en } : R
+```
+
+### pipe
+
+```
+G |- x : A    G |- f : A -> B
+-------------------------------
+G |- x |> f : B
+```
+
+### spread
+
+```
+G |- base : { f1:T1, ..., fn:Tn }
+G |- ei : Ti  (for overridden fields)
+---------------------------------------
+G |- { ...base, fi: ei, ... } : { f1:T1, ..., fn:Tn }
+```
+
+### fan
+
+```
+G |- e1 : Result[T1, E]    G |- e2 : Result[T2, E]    enclosing function is effect
+------------------------------------------------------------------------------------
+G |- fan { e1, e2 } : Result[(T1, T2), E]
+```
+
+### guard
+
+```
+G |- cond : Bool    G |- else_ : R
+return_type = R
+---------------------------------------
+G |- guard cond else else_
+```
+
+### hole / todo
+
+```
+expected_type = T               expected_type = T
+-------------------             -------------------
+G |- _ : T                      G |- todo(msg) : T
+```
+
+---
+
+## 22. Complete Example
+
+```almide
+import env
+import fs
+import json
+
+type Config = {
+  root: String,
+  bare: Bool,
+  description: String,
+}
+
+type ConfigError =
+  | Io(String)
+  | Parse(String)
+
+fn default_config(root: String) -> Config =
+  { root: root, bare: false, description: "" }
+
+fn with_description(config: Config, desc: String) -> Config =
+  { ...config, description: desc }
+
+fn summary(config: Config) -> String =
+  "root=${config.root}, bare=${config.bare}"
+
+fn decode_config(text: String) -> Result[Config, ConfigError] = {
+  let raw = json.parse(text) |> result.map_err((e) => Parse(e))!
+  let root = value.get_string(raw, "root") |> option.to_result(Parse("missing root"))!
+  ok(default_config(root))
+}
+
+effect fn load(path: String) -> Result[Config, ConfigError] = {
+  let text = fs.read_text(path) |> result.map_err((e) => Io(e))!
+  decode_config(text)
+}
+
+effect fn main() -> Result[Unit, ConfigError] = {
+  let args = env.args()
+  let path = list.get(args, 0) ?? "config.json"
+  let config = load(path)!
+  println(summary(config))
+  ok(())
+}
+
+test "default config" {
+  let cfg = default_config("/repo")
+  assert_eq(cfg.bare, false)
+  assert_eq(cfg.description, "")
+}
+
+test "with_description updates correctly" {
+  let cfg = default_config("/repo")
+  let updated = with_description(cfg, "my repo")
+  assert_eq(updated.description, "my repo")
+  assert_eq(updated.root, cfg.root)
+}
+
+test "decode config validates the boundary" {
+  assert_eq(decode_config('{"root":"/repo"}')!, default_config("/repo"))
+  assert_eq(decode_config('{}'), err(Parse("missing root")))
+}
+
+```
+
+---
+
+## 23. Evaluation Metrics
+
+| Metric | Definition |
+|---|---|
+| **Pass@1** | Rate of passing compilation + tests on the first generation |
+| **Repair Turns** | Number of fix iterations from first failure to final success |
+| **Token Cost** | Total input/output tokens until success |
+| **API Hallucination Rate** | Rate of nonexistent APIs or incorrect signatures |
+| **Edit Breakage Rate** | Rate of breaking unrelated behavior when modifying code |
+| **Diagnostic Utilization Gain** | Performance difference with/without structured diagnostics |

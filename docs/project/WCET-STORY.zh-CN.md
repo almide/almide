@@ -1,6 +1,6 @@
 # Critical 形式原生输出的 WCET 可分析性 (#569)
 
-[English](./WCET-STORY.md) | [日本語](./WCET-STORY.ja.md) | [简体中文](./WCET-STORY.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./WCET-STORY.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](./WCET-STORY.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](./WCET-STORY.zh-CN.md)
 
 硬实时验收需要最坏情况执行时间分析。本文记录 Almide 在 CRITICAL 形式下 `--target rust` 输出的 WCET 说明，通过 `examples/pid-kernel.almd` 端到端展示，并由 `tests/wcet_kernel_test.rs` 设门禁验证。
 

@@ -1,6 +1,6 @@
 # Grammar Lab
 
-[English](./README.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](./README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./README.zh-CN.md)
 
 構文の選択が LLM の modification survival rate にどう影響するかを測る A/B テストフレームワーク。
 

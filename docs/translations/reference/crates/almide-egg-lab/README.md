@@ -1,0 +1,121 @@
+# almide-egg-lab
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](README.zh-CN.md)
+
+> This is a non-normative reader copy of the [pinned original](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/crates/almide-egg-lab/README.md), not a new authority, generator output or automatically synchronized document. Original sources and machine consumers are unchanged. Historical claims and examples have not been independently revalidated here.
+
+
+**Equality-saturation rules and IR bridge used by the compiler.**
+
+> Current status (2026-10-31):
+> [`EggSaturationPass`](../../../../../crates/almide-codegen/src/pass_egg_saturation.rs) uses this
+> crate's rules, bridge and cost model. It is not an isolated, freely deletable
+> experiment. The PoC verdict, timings and staged questions below are the
+> original experiment record, not a current test count or integration checklist.
+
+The original experiment asked one question before we commit to the
+10-month [MLIR Backend + Egg Rewrite Engine](../../../../roadmap/on-hold/mlir-backend-adoption.md)
+arc: *can egg actually express Almide's existing stream-fusion rules,
+terminate quickly, and pick the fused form?*
+
+## Verdict
+
+**Yes.** The toy PoC (5 tests) plus the real-IR bridge (11 tests,
+including 5 that cover lift → saturate → **lower** round-trips with
+live `VarTable`-backed beta-reduction) pass in ~2.5 s on release
+build. Fusion fires on three canonical shapes, saturation converges
+inside a small iteration budget, cross-rule composition works
+without manual phase ordering, and — most importantly — `compose`
+and `and-pred` markers are beta-reduced into real `IrExprKind::Lambda`
+nodes with fresh `VarId`s at lower time, so the extracted output is
+a well-typed `IrExpr` fragment ready to feed back into the existing
+pipeline.
+
+| Test | What it proves |
+|---|---|
+| `identity_map_collapses` | `map(xs, identity) ≡ xs` — single-rule rewrite |
+| `map_map_fuses` | `map(map(xs, f), g) ≡ map(xs, g ∘ f)` — functor law |
+| `filter_filter_fuses` | `filter(filter(xs, p), q) ≡ filter(xs, p ∧ q)` — predicate conjunction |
+| `triple_map_fuses_transitively` | Three-stage chain folds to one traversal — saturation converges under iter/node budgets |
+| `identity_inside_map_chain_eliminates` | Identity elimination **+** map fusion compose **without explicit phase ordering** — the core motivation for choosing egg over priority-ordered rewriters (GHC RULES, MLIR PDL) |
+
+The last test is the key one. In the imperative `pass_stream_fusion`
+we have to decide the order: eliminate identity first, then fuse? Or
+fuse first, then notice the collapse? Each ordering misses some
+programs. With egg, we don't pick — saturation holds both alternatives
+in the e-graph and the extractor picks the cheapest.
+
+## Scope (intentionally small)
+
+- Models only the IR shapes needed for the three rules: `map`, `filter`,
+  `fold`, `lam`, `compose`, `and-pred`, plus numeric / symbolic atoms.
+- **Lambda substitution happens at lower time, not inside saturation.**
+  E-graphs cannot represent binders without extra alpha-renaming
+  machinery (see egg's `examples/lambda.rs`). Saturation keeps
+  `compose` / `and-pred` as zero-cost markers; the single extracted
+  best form is then beta-reduced into real `IrExprKind::Lambda`
+  nodes with fresh `VarId`s. One-shot allocation is bounded by the
+  output size, which sidesteps the e-graph alpha-equivalence issue
+  without losing the fresh-id discipline the main IR requires.
+- The original experiment was isolated. The current codegen integration is
+  linked above; changing or removing this crate can affect compiler output.
+
+## What's included
+
+- **Toy Language PoC** (`src/lib.rs`, `tests::`): string-parsed
+  `AlmideExpr` expressions, three fusion rules, five tests.
+- **IrExpr bridge** (`src/bridge.rs`, `tests/bridge_test.rs`): lifts
+  `almide_ir::IrExpr` subtrees (list combinators + identity-lambda
+  detection) into `RecExpr<AlmideExpr>` and lowers the extracted
+  form back into a well-typed `IrExpr`. Eleven tests cover identity
+  elimination, map/filter fusion, cross-rule composition, opaque
+  pass-through, and the five round-trip cases that verify fresh
+  `VarId` allocation, body substitution, and structural shape on the
+  lowered output.
+
+## What this does NOT yet answer
+
+Tracked as open questions in the arc document:
+
+- **Type-aware rules.** Real Almide rules depend on element types
+  (`List[Int]` vs `List[String]`). egg supports this via `Analysis`
+  but we haven't exercised it.
+- **Large IR scale.** Tested up to three-stage chains. Stage 1 will
+  benchmark on programs of 100–1000 IR nodes to see if saturation
+  time stays tolerable.
+- **Cost-function calibration for targets.** The current `FusionCost`
+  just penalizes loops. Real target-aware costs (Rust iter-collect
+  vs WASM manual loop vs GPU offload) are a Stage 3 concern.
+- **Lambda substitution inside the e-graph.** `lower`-time
+  beta-reduction is sufficient to prove the round-trip works, but
+  in-graph substitution (custom `Applier` + alpha-renaming, à la
+  `egg/examples/lambda.rs`) would let saturation see through compose
+  markers and potentially discover more fusions. Scope for Stage 1+
+  once we see which rules need it.
+
+## Running
+
+```bash
+cargo test -p almide-egg-lab --release
+```
+
+## Original next-step proposal if kept (historical)
+
+If this PoC passes review, Stage 1 of the MLIR adoption arc (see
+`docs/roadmap/on-hold/mlir-backend-adoption.md`) will:
+
+1. Expand the language to cover the full `IrExpr` enum
+2. Decide whether to keep lower-time beta-reduction or promote
+   substitution into the e-graph via a custom `Applier`
+3. Add type-parametric rules
+4. Port the remaining 4 `pass_stream_fusion` rules
+5. Run equality saturation as an opt-in pass before the existing
+   Nanopass pipeline
+
+## Original rejection alternative (historical)
+
+If saturation proves intractable on real Almide programs, we fall
+back to GHC RULES-style priority rewriting inside the existing
+Nanopass framework. The MLIR adoption arc continues without egg.
+Deleting the crate was an option at the PoC stage. It is no longer a
+standalone deletion: the current compiler depends on it.

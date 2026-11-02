@@ -1,6 +1,6 @@
 # サポート方針
 
-[English](./SUPPORT.md) | [日本語](./SUPPORT.ja.md) | [简体中文](./SUPPORT.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./SUPPORT.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](./SUPPORT.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./SUPPORT.zh-CN.md)
 
 採用する人が何を期待できるかを、明確に示す。この文書は方針を記すものであり、以下の各保証には、それを実施する仕組みを明記している。方針と実施内容が乖離しないためである。脆弱性の報告は別に扱う。[SECURITY.md](./SECURITY.ja.md) を参照。
 

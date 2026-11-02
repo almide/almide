@@ -1,6 +1,6 @@
 # 生成された Rust のレビュー (#572)
 
-[English](./GENERATED-RUST-REVIEW.md) | [日本語](./GENERATED-RUST-REVIEW.ja.md) | [简体中文](./GENERATED-RUST-REVIEW.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./GENERATED-RUST-REVIEW.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-24292f?style=flat-square)](./GENERATED-RUST-REVIEW.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./GENERATED-RUST-REVIEW.zh-CN.md)
 
 適格性確認済みコード生成器のモデル（SCADE KCG の先例）では、生成ソースはレビュー可能な成果物です。この適格性確認モデルは、Almide や現在のビルドが適格性確認済みであるという主張ではありません。本文は Almide の `--target rust` 出力のレビューガイドです。
 

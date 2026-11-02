@@ -1,0 +1,284 @@
+# Perf Suite — Native & WASM Runtime Scoreboard (#917)
+
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](README.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](README.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](README.zh-CN.md)
+
+> This is a non-normative reader copy of the [pinned original](https://github.com/almide/almide/blob/35297a612fb29e3f78f6587aba253aa91d51f466/research/benchmark/perf/README.md), not a new authority, generator output or automatically synchronized document. Original sources and machine consumers are unchanged. Historical claims and examples have not been independently revalidated here.
+
+
+The suite in `bench.py` includes compute kernels, a scaled One Billion Row
+Challenge, list-building shapes, string churn, and other workload rows. Each
+row declares which legs it runs and its verification mode; not every workload
+runs on every target. Handwritten Rust references are included where defined. This directory is the source of the numbers in
+[docs/project/BENCHMARKS.md](../../../../../project/BENCHMARKS.md) —
+nothing is published that `bench.py` did not produce.
+
+## Layout
+
+| Path | Purpose |
+|---|---|
+| `<bench>/<bench>.almd` | Benchmark source (Almide) |
+| `rust-ref/*.rs` | Handwritten Rust references, compiled with the exact flags the native leg uses |
+| `bench.py` | Build + verify + time harness; writes `results/` |
+| `results/<date>-<label>.json` | Dated raw results (committed) |
+| `native/` | The README binary-size/CLI measurement (`measure.sh`, separate from the scoreboard) |
+| `string-gap-1004.md` | The #1004 attribution: where the string row's gap actually goes |
+| `strchurn/ladder.py` | The differential ladder that produced it (re-runnable) |
+
+## Method
+
+- **Legs**: `native` = `almide build --release` (cargo release profile:
+  opt-level=3, LTO, 1 CGU); `wasm` = `almide build --target wasm` executed by
+  the wasmtime CLI; `rust` = `rust-ref/*.rs` via
+  `rustc -C opt-level=3 -C lto=yes -C codegen-units=1 -C overflow-checks=no`.
+- **Correctness before speed**: every variant of a benchmark must produce
+  byte-identical stdout on a small workload before anything is timed
+  (fft compares only line 1 — line 2 is its self-reported time). A scoreboard
+  entry that computes the wrong answer is not a scoreboard entry.
+- **Timing**: wall-clock of the whole process, stdout to /dev/null, one warmup
+  then N interleaved rounds (variant A, B, C, A, B, C…) so drift hits every
+  variant equally. Median is the headline number; the JSON keeps every run.
+- **Quiet machine**: close the browser, don't build the compiler in parallel,
+  don't trust a run taken while anything heavy shares the box. Apple Silicon:
+  wall-clock on a quiet box lands on P-cores; no pinning is attempted.
+- **References are same-shape where the claim needs it**: `nbody_unrolled.rs`
+  mirrors nbody.almd's fully-unrolled scalar locals to isolate codegen
+  overhead; `nbody.rs` is the canonical array-of-bodies shape people actually
+  write. Almide currently beats the latter (bounds checks) — that comparison
+  is reported, not gated.
+- `fannkuchredux` and `mandelbrot` are written with `fan`, and since #1330
+  they have ORDINARY sequential Rust references (`rust-ref/fannkuchredux.rs`,
+  `rust-ref/mandelbrot.rs`: one thread, no `unsafe`, no SIMD). That is not a
+  universal same-parallelism comparison: native `fan` can run qualifying
+  callbacks on threads (`pass_rust_lowering_fan.rs`). `fannkuchredux` is now
+  a VICTORY row, checked with the `ALMIDE_FAN_SEQUENTIAL` ablation.
+  `mandelbrot` remains REPORTED; its Bytes-returning callback does not meet
+  that native Send-safe routing. Earlier ~1.0 readings describe the earlier
+  implementation, not the absence of native fan parallelism today.
+  `binarytrees` (#1991) and `treealloc` (#2028) have same-shape `Box`
+  references (`rust-ref/binarytrees.rs`, `rust-ref/treealloc.rs`: one thread,
+  a `Box` per node, a free per node — no arena, no `unsafe`). Both sit BELOW
+  1 because `check(make(d))` runs inside a region window natively; they are
+  the VICTORY rows of `check-perf-ratio.sh` (#1330), gated on the claim
+  itself and on the `ALMIDE_REGION_OFF=1` ablation rather than on a ±band
+  around a number that is allocator-dependent (0.32 on an M4 Pro, 0.61 on
+  the CI runner — like listbuild). The declaration, with the ablation and
+  both sizes, is in `docs/project/BENCHMARKS.md`.
+- `onebrc` is a scaled One Billion Row Challenge (`station;temp` lines →
+  sorted per-station min/mean/max): the one row whose hot loop is file I/O,
+  `string.split`, and map updates rather than arithmetic. Temperatures are
+  integer tenths end-to-end, so output is byte-identical with no float
+  formatting involved. The wasm leg is excluded — `wasmtime run` preopens no
+  directory, so the leg cannot touch files. This row is the birthplace and the watch
+  of the streaming line family (`fs.for_each_line` / `fs.fold_lines`, C-220).
+  The original eager `fs.read_lines` shape measured RSS ~4× file size
+  (2026-08-08, M4 Pro: 505 MB for a 126 MB / 10 M-row file, 2.2 GB for
+  632 MB / 50 M — identical in the same-shape Rust ref, so the wall was the
+  API's shape, not codegen), extrapolating to ~50 GB on the official
+  1 B-row file. The aggregate phase now streams on both legs: RSS holds at
+  1 MB at every scale. The first streaming cut paid a time regression
+  (33.4 s at 50 M rows vs 15.6 s eager) traced to the fold accumulator's Map
+  being cloned per line — the clone pass counted syntactic uses across
+  mutually-exclusive match arms, so a branch tail could never be a last use
+  (#1143). The full perf-war ledger (2026-08-08, 50 M rows / 632 MB, M4 Pro), each
+  rung byte-identical to the last:
+  eager 15.6 s / 2.2 GB → first streaming cut 33.4 s / 1 MB (the fold
+  accumulator's Map cloned per line — the clone pass counted syntactic uses
+  across mutually-exclusive match arms, so a branch tail could never be a
+  last use; #1143) → sibling-deduction fix + consuming `map.set` 15.2 s →
+  `string.split_once` + `map.upsert` (one lookup, no Vec, no key clones)
+  8.2 s → `fs.fold_lines_chunked` (range workers on runtime threads,
+  partials merged by the caller) **1.27 s at 8 workers / 0.95 s at 12,
+  vs the same-shape single-thread Rust reference at 2.58 s** — the naive
+  fold submission beats handwritten sequential Rust on structure, the
+  binarytrees play repeated on native. Scaling is real (1w 8.5 s → 2w
+  4.6 s → 12w 0.95 s) and RSS holds at 2 MB. Honest caveats: the reference
+  is deliberately single-threaded (a hand-parallelized Rust would win
+  again); the per-core gap (~3.3×) was attributed to per-line allocation
+  vocabulary (split_once ×2 + strip_prefix + a per-line upsert closure) plus
+  `AlmideMap` lookup, **which was a linear scan when this was measured and is
+  not one now** — since #2150 a map past `ALMIDE_MAP_INDEX_THRESHOLD` = 16 with
+  a hashable key carries a slot-table index (`runtime/rs/src/map.rs:12`-`31`),
+  and this row has NOT been re-measured since, so the lookup half of that
+  attribution is unverified; and a Map captured by a closure
+  (`for_each_line` + `var stats`) still clones on every READ through the
+  `SharedMut` cell — aggregation belongs on `fold_lines`, which is what the
+  CHEATSHEET teaches. Wall-clock ratios here are reported, not gated, while
+  the war continues.
+- The `fft-wasm` row exists because the wasm leg used to collapse on hot
+  `data[i] = x` list writes (~3 orders of magnitude at 2^18): every store
+  copied the whole block (`$block_copy` per write, O(n) per store). RC-5's
+  copy-on-write judge (#1729) made a store O(1) and the cliff was gone before
+  #2150 re-measured it — 4.1× at 2^18 / 4.7× at 2^22 in the embedded host on
+  develop (2026-09-24). What was left was the judge itself, run on EVERY
+  store: a call, a heap-bound compare and a reference-count load, four times
+  per butterfly. #2150 runs it once per loop entry for a list the loop only
+  reads and writes element-wise (`crates/almide-wasm/src/cow_hoist.rs`) and
+  the row reads 2.7× at 2^18 / 2.9× at 2^22. What remains is per-access:
+  an i64 bounds compare with its abort frame, and i64 index arithmetic wrapped
+  to i32 for every load and store. `perf_ratchet.rs` R5 (a store's asymptotic
+  class) and R6 (store/read parity) keep both shapes from coming back.
+- **mandelbrot's wasm "crater" (~130× at 4000) did not reproduce** when #2150
+  re-measured it on develop: under `wasmtime run` (this harness's wasm leg)
+  it read 1.13× native at 4000. `almide bench --target wasm` read 2.05×, and
+  the whole difference was the embedded host's 30 s epoch watchdog — epoch
+  interruption makes wasmtime check the epoch at every loop header, and the
+  escape-time loop is a few instructions per iteration (`wasmtime run -W
+  timeout=60s` on the same module: 636 → 1,199 ms). The watchdog is test
+  harness equipment, so the bench runner now runs without it
+  (`run_wasm_unbounded`) and reads 1.13×; `perf_ratchet.rs` R7 pins the
+  runner's missing tax.
+- **`fft` measures the transform, not its input** (#1338). The row used to
+  build its 8.4M-element input with `data = data + [x]` in a loop, which put
+  ~8% of the row's wall clock into list construction and published it as
+  codegen: the 1.27x it reported was part setup. It now preallocates and writes
+  by index — the same shape as the reference's `Vec::with_capacity` + push,
+  which is the fairness rule stated for `nbody_unrolled.rs` above. Re-anchored
+  2026-08-13 at 1.18x. The transform is bit-identical across the change,
+  checked out of band at 2^12 / 2^16 / 2^20 on a position-weighted checksum of
+  the whole array — the row's own `line1` verify mode compares only
+  `size: 2^k = n`, which carries no computed value, so the harness cannot see a
+  broken transform on this row. That gap is worth closing; it is not closed
+  here, because a checksum pass in the timed path would re-introduce exactly
+  the "the benchmark measures something other than its kernel" problem #1338
+  was filed about.
+- **`listbuild` is three rows, one workload** (#1337): the same 2^23-element
+  interleaved `Float` array built by (a) preallocate + indexed write,
+  (b) `var` + `for` + `data = data + [x]`, (c) `list.range |> list.flat_map`.
+  The three sources differ ONLY in the build loop — identical arithmetic,
+  identical checksum consumer — so the spread between the rows IS the cost of
+  the shape, and all three are verified byte-identical before timing. The
+  family exists because (c) is the shape CLAUDE.md and docs/CHEATSHEET.md
+  recommend, and it was the SLOWEST of the three: 1.67x the append loop it is
+  documented to replace, all of it one heap allocation per element for
+  `flat_map`'s intermediate list. That is an MSR problem before it is a perf
+  problem — the idiom docs are the in-context material that steers generated
+  code, so "recommended" and "fast" have to name the same shape. The three now
+  sit within 2% of each other. What `check-perf-ratio.sh` gates for this family
+  is the RELATION between the rows (`IDIOM_CEILING`), not each row's ratio
+  against Rust: the absolute ratio here turns out to be strongly
+  architecture-dependent — 1.58 on an M4 Pro and 0.91 on the ubuntu-latest CI
+  runner from the same commit, because the workload's cost is allocation rather
+  than arithmetic and the two allocators behave differently. So this is the one
+  family where "the ratio cancels the machine" does not hold; the rows are
+  reported like onebrc, and the relation — 1.018x locally, 1.045x on CI — is
+  what carries a gate. **What the residual ~1.6x actually IS was measured on
+  2026-08-13 and it is neither materialization nor #1004's representation
+  story: it is the deterministic software libm.** Swapping ONLY
+  `almide_rt_libm_sin`/`_cos` — required by the cross-target byte-identity
+  contract — for the platform ones in the emitted Rust takes the row from
+  194.5 ms to 105.5 ms against a 123.9 ms reference; without transcendental
+  determinism the emitted code BEATS the handwritten reference by 1.17x. The
+  build shape is innocent: `list.repeat` + bounds-checked indexed writes
+  measure 75.5 ms against `Vec::with_capacity` + push at 90.6 ms. Evidence:
+  [string-gap-1004.md](../../../../../../research/benchmark/perf/string-gap-1004.md).
+- **`strchurn` is the string row** (#1004): N ints → `int.to_string` →
+  `list.join` → `string.split` → `string.len` → `list.sum`, the workload
+  whose 1.7x-vs-Rust opened that issue. It carries TWO references. The
+  comparison that means anything is against `rust-ref/strchurn.rs`, which
+  honours the two stdlib obligations the Almide program cannot escape — `split`
+  collects owned `String`s (`List[String]`'s element type is owned) and length
+  is `chars().count()` (`string.len` is a character count) — and reads 1.12x on
+  an M4 Pro. `rust-ref/strchurn_idiomatic.rs` is the same program with borrowed
+  `&str` pieces and byte `len()` and runs 1.9x faster; that entire spread is
+  the API contract, not codegen. Like the listbuild family the row is REPORTED,
+  not anchored: 75% of its delta is malloc/memcpy/free of N owned `String`s, so
+  it compares allocators before it compares codegen and one architecture's
+  number should not become a gate (unlike listbuild, though, both sides here
+  allocate identically, so a second architecture's reading may well promote
+  it). Full attribution — 75% `split`'s return type, 11% `string.len`'s
+  semantics, 9% the rlib boundary, 5% list intermediates, and the `RcCow` the
+  issue title blamed not present on the path at all — in
+  [string-gap-1004.md](../../../../../../research/benchmark/perf/string-gap-1004.md); `strchurn/ladder.py` rebuilds it
+  from scratch.
+- **`wordfreq` is the Map row** (#2150, #2157): N draws from a 5 000-word
+  vocabulary counted in a `Map[String, Int]`, top 10 by count desc / word asc
+  — the keyed-aggregation shape every word-count, group-by and histogram
+  program has. Two spellings of one workload, like listbuild: `wordfreq` is
+  the imperative `var` Map + `m[w] = (map.get(m, w) ?? 0) + 1` loop, and
+  `wordfreq-group` the CHEATSHEET's `list.group_by` + `map.map`; identical
+  vocabulary, draws, sort and output, so the spread between them is what the
+  recommended idiom costs. The reference (`rust-ref/wordfreq.rs`) is
+  same-shape and same-semantics: a `HashMap<String, i64>` (hashbrown +
+  SipHash), an OWNED key cloned out of the vocabulary per draw (Almide's
+  `let w = vocab[i]` owns), one `entry` per draw. Both rows also run the
+  wasm leg, and `check-perf-ratio.sh` gates the wasm relation between them
+  (`wordfreq-wasm-idiom`, ceiling 1.15×): before #2156 the structural leg's
+  `group_by` copy-grew its accumulator per new key, which pinned the lookup
+  to the linear `$scan_str` — every element walked every group key, ~11 µs
+  per element over the 5 000-word vocabulary, 110× the imperative spelling
+  (2M draws: 22 s against 201 ms). It now grows in place through
+  `$map_reserve` and takes the index lane like the `m[w] = …` window, and
+  the idiomatic row reads ~0.8× the imperative one on wasm. The native/Rust
+  ratio of `wordfreq` is ANCHORED in `check-perf-ratio.sh`'s PAIRS since
+  #2150 (baseline 1.90 at the 4M quick workload): it compares an allocator
+  and a hasher before it compares codegen, which kept it reported until it had
+  readings on two machine classes, and those agree — 1.66-1.75 on five green
+  runner runs at 2M, 1.77 on an M4 Pro at 2M and 1.97 at 4M. `wordfreq-group`
+  stays reported. What the native `AlmideMap` is since #2150: a
+  compact-ordered-dict (insertion-ordered entry vector + an open-addressing
+  slot table of positions with the full hash cached per entry, one
+  multiply-fold hash per operation), with the read side (`map.get` /
+  `get_or` / `contains`, `set.contains`) borrowing its key and the
+  plain-variable-key write `m[w] = …` moving it — the 2M-draw loop's Map
+  cost fell from ~93 ms to ~55 ms on an M4 Pro, under the structural wasm
+  leg's ~73 ms for the same program.
+- **`jsonround` is the Value row** (#2157): N four-field records (a nested
+  object, a two-string array) built as one `Value`, `json.stringify`d,
+  `json.parse`d back, and the nested `meta.score` summed. Native and wasm
+  only — the relation between the two legs is what is gated, not a Rust
+  ratio. #2157 found it 1.3–2.5× SLOWER as a native binary than under
+  wasmtime: `value.array` / `value.object` cloned every element out of the
+  list they were handed (each element a whole subtree, so the document was
+  copied once per nesting level), `value.as_array` cloned every record out of
+  the parsed document, and `json.stringify` assembled its text bottom-up
+  through a `String` per node and a `format!` + `join` per container. The
+  three ops are now declared `@reuse` with `_owned` runtime twins, so a source
+  at its last use moves into the result, and the text is written into one
+  buffer. `check-perf-ratio.sh` holds native ≤ wasm on this row and on both
+  wordfreq rows (the NATIVE <= WASM block).
+- **`regexcycle-8` / `regexcycle-32` are the rule-table rows** (#4392): N
+  `Regex` values applied in turn to every line of a four-line text, the same
+  number of matches at either N. No Rust reference — the relation between the
+  rows is gated (`check-perf-ratio.sh`, REGEX CYCLE, ceiling 1.5x on both
+  legs). 0.69.0-rc1 kept compiled patterns in a 16-entry LRU list, so a cycle
+  of more than 16 recompiled every pattern on every match: 3.27x with the fix
+  reverted against 1.03x with it (GCE n2-standard-4). The native cache now
+  holds 1024 patterns under a hash index and evicts at random when full, so a
+  cycle longer than that still keeps most of it compiled.
+
+## Run
+
+```bash
+python3 research/benchmark/perf/bench.py                 # full suite, all legs
+python3 research/benchmark/perf/bench.py --runs 7 --label m4pro
+python3 research/benchmark/perf/bench.py --legs native,rust --bench nbody
+ALMIDE_BIN=target/release/almide python3 research/benchmark/perf/bench.py
+```
+
+Requires `almide` (or `ALMIDE_BIN`), `rustc`, and — for the wasm leg — the
+`wasmtime` CLI.
+
+## CI ratchet
+
+`scripts/check-perf-ratio.sh` (CI `perf-ratchet` job) gates the
+almide-native / handwritten-Rust ratio per benchmark against
+`scripts/perf-ratio-baseline.txt` on the `--quick` workloads. Ratios, not
+absolute times — the ratio cancels the runner. Regressing or improving
+durably = move the baseline in the same change. See the script header for the
+full policy. Three row classes: PAIRS (anchored in a ±band), REPORTED
+(printed, allocator-dependent), and VICTORY (#1330: rows where Almide is
+faster than the ordinary Rust, gated on `ratio < 1.0` and on the same-source
+ablation of the optimization the row is attributed to).
+
+## Not yet covered
+
+- **List-combinator laziness: no longer a gap, still no row.** On 2026-08-13
+  ([string-gap-1004.md](../../../../../../research/benchmark/perf/string-gap-1004.md) finding (a)), `list.range` →
+  `map` → `fold` built a real 240 MB `Vec` at 30M elements and ran 6.6x a fused
+  Rust iterator chain. The chain now lowers to a counted iterator on the native
+  leg: `(0i64..n).map(…).filter(…)` with no range `Vec` (the fusion work of
+  #2045 and the counted fold heads of #3824). Re-measured 2026-10-20 on an M4 Pro
+  (develop 5d52899e2, `--release`, `n` read from argv, a `% 1000` body so LLVM
+  cannot close the loop, 9 interleaved runs): Almide 18.0 ms median at 1.5 MB
+  max RSS, against 14.0 ms for the hand-written Rust iterator chain, so 1.29x
+  rather than 6.6x. No benchmark row gates the shape yet.

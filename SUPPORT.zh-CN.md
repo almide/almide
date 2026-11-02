@@ -1,6 +1,6 @@
 # 支持政策
 
-[English](./SUPPORT.md) | [日本語](./SUPPORT.ja.md) | [简体中文](./SUPPORT.zh-CN.md)
+[![English](https://img.shields.io/badge/English-d0d7de?style=flat-square)](./SUPPORT.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](./SUPPORT.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-24292f?style=flat-square)](./SUPPORT.zh-CN.md)
 
 本文明确说明采用者可以期待什么。这里记录的是政策；下文每项保证都注明落实它的机制，以免政策与执行脱节。漏洞报告单独处理：参见 [SECURITY.md](./SECURITY.zh-CN.md)。
 

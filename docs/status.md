@@ -1,6 +1,6 @@
 # Project Status
 
-[English](./status.md) | [日本語](./status.ja.md) | [简体中文](./status.zh-CN.md)
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](./status.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](./status.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./status.zh-CN.md)
 
 Where Almide stands today. The stamped totals (stdlib size, test files, contracts, mutation score) are rendered on the [measurements page](./benchmarks/README.md#derived-counts), where CI checks them against their ledgers.
 

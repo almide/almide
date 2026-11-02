@@ -1,6 +1,6 @@
 # Reviewing generated Rust (#572)
 
-[English](./GENERATED-RUST-REVIEW.md) | [日本語](./GENERATED-RUST-REVIEW.ja.md) | [简体中文](./GENERATED-RUST-REVIEW.zh-CN.md)
+[![English](https://img.shields.io/badge/English-24292f?style=flat-square)](./GENERATED-RUST-REVIEW.md) [![日本語](https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square)](./GENERATED-RUST-REVIEW.ja.md) [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square)](./GENERATED-RUST-REVIEW.zh-CN.md)
 
 In the qualified-code-generator model (the SCADE KCG precedent), the
 generated source is a reviewable artifact. That qualification model is not
