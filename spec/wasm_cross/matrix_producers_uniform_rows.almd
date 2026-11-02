@@ -69,6 +69,19 @@ fn main() -> Unit = {
   show("from_f64", matrix.from_bytes_f64_le(matrix.to_bytes_f64_le(a), 0, 3, 2) ?? e)
   show("from_f32", matrix.from_bytes_f32_le(matrix.to_bytes_f32_le(a), 0, 3, 2) ?? e)
   // f16 1.0..6.0, little-endian (0x3C00, 0x4000, 0x4200, 0x4400, 0x4500, 0x4600)
-  let h = bytes.from_list([0, 60, 0, 64, 0, 66, 0, 68, 0, 69, 0, 70])
+  let h = bytes.from_list([
+    0,
+    60,
+    0,
+    64,
+    0,
+    66,
+    0,
+    68,
+    0,
+    69,
+    0,
+    70
+  ])
   show("from_f16", matrix.from_bytes_f16_le(h, 0, 3, 2) ?? e)
 }
