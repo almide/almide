@@ -370,6 +370,18 @@ fn field_accepts(field: NTy, got: NTy) -> bool {
     }
 }
 
+/// The borrowed kind of a heap value of kind `f` read in place, its Rust
+/// type, and the suffix that turns `&place` into that type.
+fn borrowed_kind(f: NTy) -> Option<(NTy, String, &'static str)> {
+    match f {
+        NTy::Str => Some((NTy::StrRef, "&str".to_string(), "[..]")),
+        NTy::Vec => Some((NTy::VecRef, "&[i64]".to_string(), "[..]")),
+        NTy::VecStr => Some((NTy::VecStrRef, "&[AlmideString]".to_string(), "[..]")),
+        NTy::Rec(j) => Some((NTy::RecRef(j), format!("&{}", crate::render_native_rec::struct_name(j)), "")),
+        _ => None,
+    }
+}
+
 /// The Rust index expression of the slot `a` names, or `None` when `a` is
 /// not on a slot boundary past the header.
 fn slot_index(a: &Addr) -> Option<String> {
@@ -600,14 +612,7 @@ pub(crate) fn render_addr_op(
                     // A borrow-only read (crate::render_native_borrow_read): a
                     // reference into the record's field, where the owned read
                     // would copy it (a string's bytes, a list's elements).
-                    let by_ref = match f {
-                        NTy::Str => Some((NTy::StrRef, "&str".to_string(), "[..]")),
-                        NTy::Vec => Some((NTy::VecRef, "&[i64]".to_string(), "[..]")),
-                        NTy::VecStr => Some((NTy::VecStrRef, "&[AlmideString]".to_string(), "[..]")),
-                        NTy::Rec(j) => Some((NTy::RecRef(j), format!("&{}", crate::render_native_rec::struct_name(j)), "")),
-                        _ => None,
-                    };
-                    if let (true, Some((t, spelled, whole))) = (st.borrow_reads.contains(d), by_ref) {
+                    if let (true, Some((t, spelled, whole))) = (st.borrow_reads.contains(d), borrowed_kind(f)) {
                         tys.insert(*d, t);
                         line!("let mut {}: {spelled} = &{}.f{k}{whole};", var(*d), var(ad.base));
                         return Ok(true);
@@ -634,6 +639,11 @@ pub(crate) fn render_addr_op(
             }
             if let (Some(e), Some(ix)) = (list_of(ty(tys, &ad.base)), slot_index(&ad)) {
                 if e != NTy::I64 {
+                    if let (true, Some((t, spelled, whole))) = (st.borrow_reads.contains(d), borrowed_kind(e)) {
+                        tys.insert(*d, t);
+                        line!("let mut {}: {spelled} = &{}[{ix}]{whole};", var(*d), var(ad.base));
+                        return Ok(true);
+                    }
                     tys.insert(*d, e);
                     line!("let mut {}: {} = {}[{ix}].clone();", var(*d), crate::render_native_rec::owned_ty(e), var(ad.base));
                     return Ok(true);
@@ -641,6 +651,13 @@ pub(crate) fn render_addr_op(
             }
             match (ty(tys, &ad.base), slot_index(&ad)) {
                 (Some(NTy::VecStr | NTy::VecStrRef), Some(ix)) => {
+                    // A borrow-only read (render_native_borrow_read): a
+                    // reference into the list's element.
+                    if st.borrow_reads.contains(d) {
+                        tys.insert(*d, NTy::StrRef);
+                        line!("let mut {}: &str = &{}[{ix}][..];", var(*d), var(ad.base));
+                        return Ok(true);
+                    }
                     // A borrowed alias in MIR; an owned copy here has the same
                     // value and leaves the list free to change afterwards.
                     tys.insert(*d, NTy::Str);
