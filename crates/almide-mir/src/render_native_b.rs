@@ -484,12 +484,21 @@ fn render_concat_in_place(call: NativeCall<'_>, tys: &mut BTreeMap<ValueId, NTy>
     }
     let (Some(ta), Some(tb)) = (tys.get(a).copied(), tys.get(b).copied()) else { return false };
     let dying = |v: &ValueId, t: NTy| t == NTy::Str && crate::render_native_move::moving_arg(*v);
-    // The owned left side first, as v0's `AlmideConcat` picks (`String + x`
-    // appends into the left buffer; only a borrowed left prepends).
-    let expr = if dying(a, ta) && tb.is_stringy() {
-        format!("std::mem::take(&mut {}).concat({})", var(*a), as_str_arg(&var(*b), tb))
+    // Edit the side whose buffer can be edited in place: an owned, dying
+    // string that is not a literal (a literal is an immortal static block,
+    // copied before any edit), the left one first as v0's `AlmideConcat`
+    // appends into an owned left and prepends only onto a borrowed one.
+    let editable = |v: &ValueId, t: NTy| dying(v, t) && !crate::render_native_move::is_static_str(*v);
+    let left = |a: &ValueId, b: &ValueId, tb: NTy| format!("std::mem::take(&mut {}).concat({})", var(*a), as_str_arg(&var(*b), tb));
+    let right = |a: &ValueId, b: &ValueId, ta: NTy| format!("std::mem::take(&mut {}).prepend({})", var(*b), as_str_arg(&var(*a), ta));
+    let expr = if editable(a, ta) && tb.is_stringy() {
+        left(a, b, tb)
+    } else if editable(b, tb) && ta.is_stringy() {
+        right(a, b, ta)
+    } else if dying(a, ta) && tb.is_stringy() {
+        left(a, b, tb)
     } else if dying(b, tb) && ta.is_stringy() {
-        format!("std::mem::take(&mut {}).prepend({})", var(*b), as_str_arg(&var(*a), ta))
+        right(a, b, ta)
     } else {
         return false;
     };
