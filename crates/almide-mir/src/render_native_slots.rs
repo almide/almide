@@ -619,3 +619,126 @@ pub(super) fn single_elem_lists(
     out
 }
 
+/// Loop exits written as a flag (#4006): the tail-recursion loop the lowering
+/// emits is `loop { if done != 0 { break; } if base { done = 1 } else { step } }`
+/// (`done` a local, its test the loop's first ops). The `SetLocal` that raises
+/// the flag is the last thing that arm does before the loop comes round and
+/// breaks, so the render can break right there — the value of every local is
+/// the same — and the loop reads as the counted loop it is (LLVM folds a
+/// counted sum where it keeps a flag loop running). Returns the op indices of
+/// those `SetLocal`s.
+///
+/// Taken when the loop opens with exactly `c = 0; t = (flag == c); break
+/// unless t` over a flag nothing else in the loop reads, the `SetLocal`
+/// writes a nonzero constant into the flag, and from it to the loop's end the
+/// ops are only bookkeeping, the closing of statement `if`s, and other arms
+/// (skipped whole).
+pub(crate) fn flag_exits(func: &MirFunction) -> BTreeSet<usize> {
+    let ops = &func.ops;
+    let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
+    for op in ops {
+        if let Op::ConstInt { dst, value } = op {
+            consts.insert(*dst, *value);
+        }
+    }
+    let mut out = BTreeSet::new();
+    for (l, op) in ops.iter().enumerate() {
+        if !matches!(op, Op::LoopStart) {
+            continue;
+        }
+        let (Some(Op::ConstInt { dst: c, value: 0 }), Some(Op::IntBinOp { dst: t, op: crate::IntOp::Eq, a, b }), Some(Op::LoopBreakUnless { cond })) =
+            (ops.get(l + 1), ops.get(l + 2), ops.get(l + 3))
+        else {
+            continue;
+        };
+        let flag = match (a == c, b == c) {
+            (false, true) => *a,
+            (true, false) => *b,
+            _ => continue,
+        };
+        if cond != t {
+            continue;
+        }
+        // The loop's extent.
+        let mut depth = 0usize;
+        let mut end = None;
+        for (j, o) in ops.iter().enumerate().skip(l + 1) {
+            match o {
+                Op::LoopStart => depth += 1,
+                Op::LoopEnd if depth == 0 => {
+                    end = Some(j);
+                    break;
+                }
+                Op::LoopEnd => depth -= 1,
+                _ => {}
+            }
+        }
+        let Some(end) = end else { continue };
+        // Nothing in the body reads the flag but its own test; the header's
+        // values are read nowhere else.
+        let mut reads = Vec::new();
+        let mut clean = true;
+        for (j, o) in ops.iter().enumerate() {
+            if j == l + 2 {
+                continue;
+            }
+            reads.clear();
+            crate::mir_ops::op_reads(o, &mut reads);
+            if (j > l + 3 && j < end && reads.contains(&flag)) || reads.contains(t) || (j != l + 2 && reads.contains(c)) {
+                clean = false;
+                break;
+            }
+        }
+        if !clean {
+            continue;
+        }
+        for i in l + 4..end {
+            let Op::SetLocal { local, src } = &ops[i] else { continue };
+            if *local != flag || consts.get(src).is_none_or(|v| *v == 0) {
+                continue;
+            }
+            if exits_to_loop_end(ops, i + 1, end) {
+                out.insert(i);
+            }
+        }
+    }
+    out
+}
+
+/// From `from` to the loop end at `end`, control reaches the end doing
+/// nothing: bookkeeping, the close of a statement `if` it is in, and the
+/// other arm of one (skipped whole, it does not run).
+fn exits_to_loop_end(ops: &[Op], from: usize, end: usize) -> bool {
+    let mut k = from;
+    while k < end {
+        match &ops[k] {
+            o if crate::render_native_move::bookkeeping(o) => k += 1,
+            Op::EndIf { val: None } => k += 1,
+            Op::Else { val: None } => {
+                // Skip the else arm to its matching EndIf.
+                let mut depth = 0usize;
+                k += 1;
+                loop {
+                    if k >= end {
+                        return false;
+                    }
+                    match &ops[k] {
+                        Op::IfThen { .. } => depth += 1,
+                        Op::EndIf { .. } if depth == 0 => break,
+                        Op::EndIf { .. } => depth -= 1,
+                        _ => {}
+                    }
+                    k += 1;
+                }
+                // ops[k] is that EndIf.
+                if !matches!(ops[k], Op::EndIf { val: None }) {
+                    return false;
+                }
+                k += 1;
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+

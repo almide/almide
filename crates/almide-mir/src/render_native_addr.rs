@@ -29,6 +29,7 @@ mod map;
 #[path = "render_native_slots.rs"]
 mod slots;
 pub(crate) use carrier::{carrier_values, is_carrier, CarrierSig};
+pub(crate) use slots::flag_exits;
 
 /// The index term of a slot address.
 #[derive(Clone, Copy, Debug)]

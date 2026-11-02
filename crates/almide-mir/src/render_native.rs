@@ -412,6 +412,9 @@ fn render_fn(
         line!("let __almd_probe_guard = __AlmdProbeGuard;");
         line!("let _ = &__almd_probe_guard;");
     }
+    // Tail-recursion loops whose exit flag is raised as an arm's last act:
+    // the render breaks there (crate::render_native_addr::flag_exits).
+    let flag_exits = crate::render_native_addr::flag_exits(func);
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
         crate::render_native_move::set_moving_args(func, i, &tys, &borrows.arms);
@@ -581,6 +584,9 @@ fn render_fn(
                     )));
                 }
             }
+        }
+        if flag_exits.contains(&i) {
+            line!("break;");
         }
     }
 
