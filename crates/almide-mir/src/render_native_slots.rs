@@ -434,6 +434,73 @@ pub(super) fn built_whole(
     out
 }
 
+/// Enum blocks built whole: the tag stored first as a constant naming one of
+/// the enum's declared cases, then each payload slot of that case stored
+/// exactly once, with nothing reading the block in between. The render then
+/// builds the case in one expression (`T::C{t}(f1, Box::new(f2), ..)`) where
+/// it would otherwise construct the case with default payloads and replace
+/// each one (a boxed default allocated and freed per heap slot). The value
+/// is the tag and the case's payload width.
+pub(super) fn enum_built_whole(
+    func: &MirFunction,
+    alloc_rec: &BTreeMap<ValueId, u16>,
+    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+    consts: &BTreeMap<ValueId, i64>,
+) -> BTreeMap<ValueId, (u32, usize)> {
+    let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
+    let mut out = BTreeMap::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        let Op::Alloc { dst: b, init: Init::DynList { .. }, .. } = op else { continue };
+        let Some(cases) = alloc_rec.get(b).and_then(|r| rec::enum_cases(*r)) else { continue };
+        let mut case: Option<(u32, Vec<bool>)> = None;
+        let mut whole = false;
+        for later in &func.ops[i + 1..] {
+            let ok = match later {
+                Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } | Op::LoopStart | Op::LoopEnd | Op::LoopBreakUnless { .. } | Op::Return { .. } => false,
+                Op::Prim { kind: PrimKind::Handle, args, .. } if args.first() == Some(b) => true,
+                Op::IntBinOp { op: crate::IntOp::Add, a, b: y, .. } if rooted(a, *b) || rooted(y, *b) => true,
+                Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.first().is_some_and(|a| rooted(a, *b)) => {
+                    let k = base_of.get(&args[0]).and_then(|(_, o)| slot_of(*o));
+                    match (k, case.as_mut()) {
+                        // The tag, first: a constant that names a declared case.
+                        (Some(0), None) => match consts.get(&args[1]).and_then(|t| u32::try_from(*t).ok()) {
+                            Some(t) => match cases.iter().find(|(c, _)| *c == t) {
+                                Some((_, fs)) => {
+                                    case = Some((t, vec![false; fs.len()]));
+                                    true
+                                }
+                                None => false,
+                            },
+                            None => false,
+                        },
+                        (Some(k), Some((_, stored))) if k >= 1 && k <= stored.len() && !stored[k - 1] && !rooted(&args[1], *b) => {
+                            stored[k - 1] = true;
+                            true
+                        }
+                        _ => false,
+                    }
+                }
+                other => {
+                    let mut reads = Vec::new();
+                    crate::mir_ops::op_reads(other, &mut reads);
+                    !reads.iter().any(|v| v == b || rooted(v, *b))
+                }
+            };
+            if !ok {
+                break;
+            }
+            if case.as_ref().is_some_and(|(_, s)| s.iter().all(|x| *x)) {
+                whole = true;
+                break;
+            }
+        }
+        if let (true, Some((t, s))) = (whole, case) {
+            out.insert(*b, (t, s.len()));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::slot_kinds;
