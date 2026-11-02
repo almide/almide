@@ -640,7 +640,7 @@ fn run(dir: &Path, args: &[&str]) -> String {
 
 /// The self-hosted engine with its entry points renamed `rxt_*` and the
 /// walk's step budget fixed at `budget` (0 = every call that makes an attempt
-/// goes to the Pike VM, `__rx_no_budget()` = the walk answers every call; the
+/// goes to the Pike VM, `prim.bshl(1, 62)` = the walk answers every call; the
 /// budget counts down, so -1 would give up at the first step); `counted` compiles every program counted
 /// (#4083), as a pattern past the expanded program's state budget is. The file
 /// is checked as the stdlib's own because the run passes `--stdlib-authority`
@@ -718,7 +718,7 @@ fn nested_groups_agree_native_and_wasm() {
     let public = dir.path().join("public.almd");
     std::fs::write(&public, format!("import regex\n\n{public_body}")).expect("write");
     let native = run(dir.path(), &["run", public.to_str().expect("path")]);
-    for (budget, counted, engine) in [("0", false, "Pike VM"), ("0", true, "counted Pike VM"), ("__rx_no_budget()", false, "walk")] {
+    for (budget, counted, engine) in [("0", false, "Pike VM"), ("0", true, "counted Pike VM"), ("prim.bshl(1, 62)", false, "walk")] {
         let sub = dir.path().join(format!("{}/stdlib", engine.replace(' ', "_")));
         std::fs::create_dir_all(&sub).expect("mkdir");
         let copy = sub.join("regex_engine.almd");
