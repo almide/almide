@@ -1,0 +1,181 @@
+//! Concatenation chains built in one buffer (#4006, no-perf-loss rule).
+//!
+//! An interpolation `"a${x}b${n}"` lowers to a chain of string
+//! concatenations, `((("a" + x) + "b") + int.to_string(n))`, each step's
+//! result read only by the next step. Rendered one op at a time, every step
+//! grows (and reallocates) the buffer the step before it built, and every
+//! interpolated integer is first rendered to a string of its own. The
+//! standard codegen formats the whole interpolation into one buffer
+//! (`AlmideStr::from_fmt`). Here a chain of two or more steps renders the
+//! same way: at its last step, one `AlmideString::from_fmt(format_args!(..))`
+//! over the pieces — a literal piece written into the template, an
+//! `int.to_string` piece passed as the integer, any other piece as the
+//! string value — and its earlier steps, and the literal and integer pieces'
+//! own ops, render nothing.
+//!
+//! A chain is taken only when moving the read of every piece to the last step
+//! leaves it the same value: a piece's other reads all come after the last
+//! step, nothing rebinds it before then, and the integer under an
+//! `int.to_string` piece is not rebound either. A last step that is a
+//! self-append (`s = s + …`, `render_native_append`) is left to that window.
+
+use crate::{CallArg, Init, MirFunction, Op, ValueId};
+use std::collections::{BTreeMap, BTreeSet};
+
+/// One piece of a chain.
+#[derive(Clone, Debug)]
+pub(crate) enum Piece {
+    /// A literal, written into the template.
+    Lit(String),
+    /// An integer formatted in place (`int.to_string`'s text).
+    Int(ValueId),
+    /// A string value.
+    Str(ValueId),
+}
+
+/// The chains of one function: the ops that render nothing, and each last
+/// step's pieces.
+#[derive(Default)]
+pub(crate) struct Chains {
+    pub skip: BTreeSet<usize>,
+    pub finals: BTreeMap<usize, (ValueId, Vec<Piece>)>,
+}
+
+fn concat_of(op: &Op) -> Option<(ValueId, ValueId, ValueId)> {
+    match op {
+        Op::CallFn { dst: Some(d), name, args, .. } if name == "__str_concat" => match args.as_slice() {
+            [CallArg::Handle(a), CallArg::Handle(b)] => Some((*d, *a, *b)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+pub(crate) fn chains(func: &MirFunction) -> Chains {
+    let ops = &func.ops;
+    // Every non-bookkeeping op each value occurs in (its definition included).
+    let mut occurs: BTreeMap<ValueId, Vec<usize>> = BTreeMap::new();
+    let mut vals = Vec::new();
+    for (i, op) in ops.iter().enumerate() {
+        if crate::render_native_move::bookkeeping(op) {
+            continue;
+        }
+        vals.clear();
+        crate::mir_ops::op_values(op, &mut vals);
+        for v in &vals {
+            let at = occurs.entry(*v).or_default();
+            if at.last() != Some(&i) {
+                at.push(i);
+            }
+        }
+    }
+    let def_at = |v: ValueId| occurs.get(&v).and_then(|a| a.first().copied());
+    let rebound = |v: ValueId, from: usize, to: usize| {
+        ops[from..=to].iter().any(|o| matches!(o, Op::SetLocal { local, .. } if *local == v))
+    };
+    let concats: BTreeMap<usize, (ValueId, ValueId, ValueId)> =
+        ops.iter().enumerate().filter_map(|(i, o)| concat_of(o).map(|c| (i, c))).collect();
+    // A step whose result only the next step reads, as its left side.
+    let inner = |d: ValueId| -> Option<usize> {
+        let at = occurs.get(&d)?;
+        let [def, next] = at.as_slice() else { return None };
+        let (_, a, b) = concats.get(next)?;
+        (concats.contains_key(def) && *a == d && *b != d && func.ret != Some(d)).then_some(*next)
+    };
+    let mut out = Chains::default();
+    'chain: for (&last, &(dst, _, _)) in &concats {
+        if inner(dst).is_some() || crate::render_native_append::self_append_window(func, last).is_some() {
+            continue;
+        }
+        // Walk the left sides back: (step index, piece value) per piece, left to right.
+        let mut steps = vec![last];
+        let mut pieces: Vec<(usize, ValueId)> = Vec::new();
+        let mut at = last;
+        loop {
+            let (_, a, b) = concats[&at];
+            pieces.push((at, b));
+            match def_at(a).filter(|d| concats.contains_key(d) && inner(a) == Some(at)) {
+                Some(prev) => {
+                    steps.push(prev);
+                    at = prev;
+                }
+                None => {
+                    pieces.push((at, a));
+                    break;
+                }
+            }
+        }
+        if steps.len() < 2 {
+            continue;
+        }
+        pieces.reverse();
+        let mut skip: Vec<usize> = steps[1..].to_vec();
+        let mut rendered = Vec::with_capacity(pieces.len());
+        for &(step, p) in &pieces {
+            let uses = occurs.get(&p).map(Vec::as_slice).unwrap_or(&[]);
+            let def = def_at(p);
+            // Read only at its own step (besides its definition)?
+            let temp = uses.iter().all(|u| Some(*u) == def || *u == step);
+            match def.map(|d| &ops[d]) {
+                Some(Op::Alloc { init: Init::Str(s), .. }) if temp => {
+                    rendered.push(Piece::Lit(s.clone()));
+                    skip.push(def.expect("defined"));
+                }
+                Some(Op::CallFn { name, args, .. })
+                    if temp && name == "int.to_string" && matches!(args.as_slice(), [CallArg::Scalar(_)]) =>
+                {
+                    let [CallArg::Scalar(n)] = args.as_slice() else { unreachable!() };
+                    if rebound(*n, def.expect("defined"), last) {
+                        continue 'chain;
+                    }
+                    rendered.push(Piece::Int(*n));
+                    skip.push(def.expect("defined"));
+                }
+                _ => {
+                    // Read again at the last step: its other reads must come
+                    // after it, and nothing may rebind it before then.
+                    if uses.iter().any(|u| Some(*u) != def && *u != step && *u <= last) || rebound(p, step, last) {
+                        continue 'chain;
+                    }
+                    rendered.push(Piece::Str(p));
+                }
+            }
+        }
+        out.skip.extend(skip);
+        out.finals.insert(last, (dst, rendered));
+    }
+    out
+}
+
+/// The `let` the last step of a chain renders as.
+pub(crate) fn render_final(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Result<String, crate::lower::LowerError> {
+    render_final_opt(dst, pieces, tys).ok_or_else(|| crate::render_native::wall("native: a concatenation chain over a piece that is not a string or an Int"))
+}
+
+fn render_final_opt(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
+    use crate::render_native::{var, NTy};
+    let mut template = String::new();
+    let mut args = Vec::new();
+    for p in pieces {
+        match p {
+            Piece::Lit(s) => template.push_str(&almide_base::rust_lit::escape_rust_fmt_str(s)),
+            Piece::Int(n) => {
+                if tys.get(n) != Some(&NTy::I64) {
+                    return None;
+                }
+                template.push_str("{}");
+                args.push(var(*n));
+            }
+            Piece::Str(v) => {
+                let t = *tys.get(v)?;
+                if !matches!(t, NTy::Str | NTy::StrRef) {
+                    return None;
+                }
+                template.push_str("{}");
+                args.push(crate::render_native::as_str_arg(&var(*v), t));
+            }
+        }
+    }
+    let args = if args.is_empty() { String::new() } else { format!(", {}", args.join(", ")) };
+    Some(format!("let mut {}: AlmideString = AlmideString::from_fmt(format_args!(\"{template}\"{args}));", var(dst)))
+}
