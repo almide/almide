@@ -31454,24 +31454,13 @@ fn __rx_eol(t: Int, te: Int, pat0: Int) -> Bool = t == te or (__rx_multiline(pat
 
 
 
+
+
+
 fn __rx_vm(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> List[Int] = {
   let vm = prim.alloc_list(277)
-  let _0 = __rx_vm_init(prim.handle(vm) + 12, pat0, pe, ts, te, caps, nslots, end_at)
-  vm
-}
-
-
-
-
-fn __rx_vm_checked(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> List[Int] = {
-  let vm = prim.alloc_list(277)
   let m = prim.handle(vm) + 12
-  let _ok = __rx_require_in(pat0, pe, m + 88)
-  let _0 = __rx_vm_init(m, pat0, pe, ts, te, caps, nslots, end_at)
-  vm
-}
-
-fn __rx_vm_init(m: Int, pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> Int = {
+  let _ok = __rx_require(pat0, pe, m + 88)
   prim.store64(m, m + 168)
   prim.store64(m + 8, 2048)
   prim.store64(m + 32, ts)
@@ -31486,25 +31475,14 @@ fn __rx_vm_init(m: Int, pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots:
   prim.store64(m + 136, aend)
   prim.store64(m + 144, 0)
   prim.store64(m + 152, if prim.band(__rx_flags_in(pat0, pe), 2) == 2 then 1 else 0)
-  prim.store64(m + 160, __rx_first_byte(pat0, pe, aend))
-  0
+
+
+
+  let q = if pat0 + 1 < pe then prim.load8(pat0 + 1) else 0 - 1
+  let lead = aend == pe and pat0 < pe and __rx_is_alnum(prim.load8(pat0)) and q != 42 and q != 43 and q != 63 and q != 123
+  prim.store64(m + 160, if lead then prim.load8(pat0) else 0 - 1)
+  vm
 }
-
-
-
-
-
-fn __rx_first_byte(pat0: Int, pe: Int, aend: Int) -> Int =
-  if aend < pe or pat0 >= pe then 0 - 1
-  else {
-    let b = prim.load8(pat0)
-    let q = if pat0 + 1 < pe then prim.load8(pat0 + 1) else 0 - 1
-    let special = b == 46 or b == 40 or b == 41 or b == 91 or b == 92 or b == 94 or b == 36 or b == 124 or b == 42 or b == 43 or b == 63 or b == 123
-    if b >= 128 or special or q == 42 or q == 43 or q == 63 or q == 123 then 0 - 1
-    else b
-  }
-
-
 
 
 
@@ -31513,10 +31491,7 @@ fn __rx_exec(p: Int, pend: Int, t: Int, m: Int) -> Int = {
   prim.store64(m + 24, 0 - 1)
   let caps = prim.load64(m + 48)
   let _0 = if caps == 0 then 0 else __rx_fill_neg(caps, prim.load64(m + 80))
-  let aend = prim.load64(m + 136)
-  let _1 = if aend < pend then __rx_choice4(m, 11, aend + 1, pend, t, 0 - 1)
-  else 0
-  __rx_drive(__rx_seq(p, aend, t, 0 - 1, m), m)
+  __rx_drive(__rx_alts(p, pend, t, 0 - 1, m), m)
 }
 
 
@@ -31798,8 +31773,12 @@ fn __rx_group(p: Int, ae: Int, t: Int, k: Int, m: Int) -> Int = {
 
 
 
+
+
+
 fn __rx_alts(p: Int, pend: Int, t: Int, k: Int, m: Int) -> Int = {
-  let aend = __rx_alt_end(p, pend)
+  let aend = if p == prim.load64(m + 56) then prim.load64(m + 136)
+  else __rx_alt_end(p, pend)
   let _0 = if aend < pend then __rx_choice4(m, 11, aend + 1, pend, t, k)
   else 0
   __rx_seq(p, aend, t, k, m)
@@ -32858,7 +32837,12 @@ fn __rx_flag_len_go(p0: Int, p: Int, pe: Int) -> Int =
 fn __rx_check(p0: Int, pe: Int) -> String = {
   let ckl = prim.alloc_list(4)
   let ck = prim.handle(ckl) + 12
-  __rx_check_reason(ck, __rx_check_in(ck, p0, pe))
+  match __rx_check_in(ck, p0, pe) {
+    0 => "",
+    1 => __rx_ck_reason(ck),
+    2 => "unmatched )",
+    _ => "pattern too large: more than ${int.to_string(__rx_max_states())} states",
+  }
 }
 
 
@@ -32874,14 +32858,6 @@ fn __rx_check_in(ck: Int, p0: Int, pe: Int) -> Int = {
   else if prim.load64(ck) < pe then 2
   else if __rx_sat(__rx_sz_n(z) + 1) * (__rx_sz_depth(z) + 1) > __rx_max_states() then 3
   else 0
-}
-
-
-fn __rx_check_reason(ck: Int, r: Int) -> String = match r {
-  0 => "",
-  1 => __rx_ck_reason(ck),
-  2 => "unmatched )",
-  _ => "pattern too large: more than ${int.to_string(__rx_max_states())} states",
 }
 
 fn __rx_ck_reason(ck: Int) -> String = {
@@ -32937,10 +32913,7 @@ fn __rx_ck_seq(ck: Int, nest: Int, n: Int, nullable: Bool, depth: Int) -> Int = 
 
 
 
-
-
-    let special = b == 42 or b == 43 or b == 63 or b == 123 or b == 40 or b == 91 or b == 92 or b == 94 or b == 36
-    if not special and after != 42 and after != 43 and after != 63 and after != 123 then {
+    if (__rx_is_alnum(b) or b == 45 or b == 95) and after != 42 and after != 43 and after != 63 and after != 123 then {
       prim.store64(ck, q)
       __rx_ck_seq(ck, nest, __rx_sat(n + 1), false, depth)
     } else {
@@ -33067,9 +33040,7 @@ fn __rx_ck_quant(ck: Int, kind: Int, z: Int, capturing: Bool) -> Int = {
   let pe = prim.load64(ck + 24)
   let q = if p < pe then prim.load8(p) else 0 - 1
   let be = if q == 123 then __rx_brace_end(p, pe) else 0 - 1
-
-  if q != 42 and q != 43 and q != 63 and q != 123 then __rx_ck_size(kind, z, capturing, 1, 1)
-  else if q == 123 and be < 0 then __rx_ckerr(ck, 5)
+  if q == 123 and be < 0 then __rx_ckerr(ck, 5)
   else {
     let close = be - 1
     let comma = if q == 123 then __rx_ck_comma(p, close) else 0 - 1
@@ -33119,16 +33090,10 @@ fn __rx_ck_size(kind: Int, z: Int, capturing: Bool, mn: Int, mx: Int) -> Int = m
 
 
 
-fn __rx_require(p0: Int, pe: Int) -> Unit = {
-  let ckl = prim.alloc_list(4)
-  __rx_require_in(p0, pe, prim.handle(ckl) + 12)
-}
 
-
-fn __rx_require_in(p0: Int, pe: Int, ck: Int) -> Unit = {
-  let r = __rx_check_in(ck, p0, pe)
-  if r == 0 then () else prim.die(prim.handle("Error: invalid regex: " + __rx_check_reason(ck, r) + "\n"))
-}
+fn __rx_require(p0: Int, pe: Int, ck: Int) -> Unit =
+  if __rx_check_in(ck, p0, pe) == 0 then ()
+  else prim.die(prim.handle("Error: invalid regex: " + __rx_check(p0, pe) + "\n"))
 
 
 
@@ -33160,15 +33125,14 @@ fn __rx_find_start_walk(p: Int, pe: Int, t0: Int, m: Int) -> Int = {
   let te = prim.load64(m + 40)
   let t = if fb < 0 then t0
   else __rx_skip_to(t0, te, fb)
-  if fb >= 0 and t >= te then 0 - 1
-  else {
-    let r = __rx_exec(p, pe, t, m)
-    if r >= 0 then {
-      prim.store64(m + 72, r)
-      t
-    } else if r == 0 - 3 or t >= te then 0 - 1
-    else __rx_find_start_walk(p, pe, t + __rx_w(t), m)
-  }
+
+  let r = if fb >= 0 and t >= te then 0 - 1
+  else __rx_exec(p, pe, t, m)
+  if r >= 0 then {
+    prim.store64(m + 72, r)
+    t
+  } else if r == 0 - 3 or t >= te then 0 - 1
+  else __rx_find_start_walk(p, pe, t + __rx_w(t), m)
 }
 
 
@@ -33202,12 +33166,10 @@ fn __rx_gave_up(m: Int) -> Bool = prim.load64(m + 144) == 1
 fn __rx_hand_over(m: Int, w: Int) -> Int = {
   prim.store64(m + 120, w)
   prim.store64(m + 144, 0)
-  prim.store64(m + 128, __rx_no_budget())
+
+  prim.store64(m + 128, prim.bshl(1, 62))
   0
 }
-
-
-fn __rx_no_budget() -> Int = 4611686018427387903
 
 fn regex_is_match(pat: String, s: String) -> Bool = {
   let ph = prim.handle(pat)
@@ -33216,7 +33178,7 @@ fn regex_is_match(pat: String, s: String) -> Bool = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let st = __rx_find_start(p0, pe, t0, m)
   if __rx_gave_up(m) then {
@@ -33235,7 +33197,7 @@ fn regex_full_match(pat: String, s: String) -> Bool = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, te)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, te)
   let m = prim.handle(vm) + 12
   let r = __rx_exec(p0, pe, t0, m)
   if __rx_gave_up(m) then {
@@ -33302,7 +33264,7 @@ fn regex_find(pat: String, s: String) -> String? = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let st0 = __rx_find_start(p0, pe, t0, m)
   let st = if __rx_gave_up(m) then __rx_vm_find(p0, pe, t0, te, m)
@@ -33338,7 +33300,7 @@ fn regex_find_all(pat: String, s: String) -> List[String] = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let acc: List[String] = []
   let r = __rx_find_all_go(p0, pe, t0, m, acc)
@@ -33381,7 +33343,7 @@ fn regex_replace(pat: String, s: String, rep: String) -> String = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let acc = ""
   let r = __rx_replace_go(p0, pe, t0, m, rep, acc)
@@ -33396,7 +33358,7 @@ fn regex_replace_first(pat: String, s: String, rep: String) -> String = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let st0 = __rx_find_start(p0, pe, t0, m)
   let st = if __rx_gave_up(m) then __rx_vm_find(p0, pe, t0, te, m)
@@ -33432,7 +33394,7 @@ fn regex_split(pat: String, s: String) -> List[String] = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let acc: List[String] = []
   let r = __rx_split_go(p0, pe, t0, t0, m, acc)
@@ -33512,7 +33474,6 @@ fn regex_captures(pat: String, s: String) -> List[String]? = {
   let sh = prim.handle(s)
   let p0 = ph + 12
   let pe = p0 + prim.load32(ph + 4)
-  let _ok = __rx_require(p0, pe)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
   let ncap = __rx_ngroups(p0, pe)
@@ -33567,7 +33528,8 @@ fn regex_check(pat: String) -> String = {
 fn regex_new(pat: String) -> String = {
   let ph = prim.handle(pat)
   let p0 = ph + 12
-  let _ok = __rx_require(p0, p0 + prim.load32(ph + 4))
+  let ckl = prim.alloc_list(4)
+  let _ok = __rx_require(p0, p0 + prim.load32(ph + 4), prim.handle(ckl) + 12)
   pat
 }
 
@@ -33583,7 +33545,7 @@ fn regex_index_of(pat: String, s: String) -> Int = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let st0 = __rx_find_start(p0, pe, t0, m)
   let st = if __rx_gave_up(m) then __rx_vm_find(p0, pe, t0, te, m)
@@ -33622,7 +33584,6 @@ fn regex_scan(pat: String, s: String, first: Bool) -> List[String] = {
   let sh = prim.handle(s)
   let p0 = ph + 12
   let pe = p0 + prim.load32(ph + 4)
-  let _ok = __rx_require(p0, pe)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
   let ncap = __rx_ngroups(p0, pe)
