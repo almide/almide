@@ -14,9 +14,9 @@
 //!   attempt per start position, so the walk's per-attempt work shows;
 //! - `is_match` on a 2-byte subject: one or two attempts, so the per-call work
 //!   (the check, the machine block) shows.
-//! Measured (fuel a call): find_all 92,000 at 0.69.0-rc2, 5,162 now, against
+//! Measured (fuel a call): find_all 92,000 at 0.69.0-rc2, 5,077 now, against
 //! about 84,000 for 0.68.0-rc2's engine (no check, no budget; from the #4399
-//! program's total); is_match 8,024 at 0.69.0-rc2, 4,223 now, against about
+//! program's total); is_match 8,024 at 0.69.0-rc2, 4,153 now, against about
 //! 4,600. The is_match line is 0.68.0-rc2's cost, the regression's own
 //! definition. The find_all line keeps the per-call search work found once (the
 //! first top-level alternative's end, the byte every match starts with) from
@@ -78,7 +78,7 @@ fn regex_find_all_costs_no_more_per_attempt_than_before_the_check() {
     assert!(fuel > 500.0, "find_all cost {fuel:.0} fuel a call — too little to gate on");
     assert!(
         fuel <= 8_000.0,
-        "regex.find_all cost {fuel:.0} fuel a call over a 64-byte line: it was 5,162 \
+        "regex.find_all cost {fuel:.0} fuel a call over a 64-byte line: it was 5,077 \
          with the search work found once per call; 0.68.0-rc2's engine cost about \
          84,000, 0.69.0-rc2's 92,000 (#4399)"
     );
