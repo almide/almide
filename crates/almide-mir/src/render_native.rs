@@ -340,8 +340,9 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         out.push_str(&format!("}}\n{RT_MOD_END}pub use {RT_MOD}::*;\n\n"));
     }
     out.push_str(&crate::render_native_rec::struct_defs());
+    let fan = fan_rendered();
     for s in glue {
-        out.push_str(s);
+        out.push_str(if fan { s } else { crate::render_native_shims::outside_fan(s) });
         out.push_str("\n\n");
     }
     out.push_str(&bodies);
