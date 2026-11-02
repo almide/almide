@@ -484,10 +484,12 @@ fn render_concat_in_place(call: NativeCall<'_>, tys: &mut BTreeMap<ValueId, NTy>
     }
     let (Some(ta), Some(tb)) = (tys.get(a).copied(), tys.get(b).copied()) else { return false };
     let dying = |v: &ValueId, t: NTy| t == NTy::Str && crate::render_native_move::moving_arg(*v);
-    let expr = if dying(b, tb) && ta.is_stringy() {
-        format!("std::mem::take(&mut {}).prepend({})", var(*b), as_str_arg(&var(*a), ta))
-    } else if dying(a, ta) && tb.is_stringy() {
+    // The owned left side first, as v0's `AlmideConcat` picks (`String + x`
+    // appends into the left buffer; only a borrowed left prepends).
+    let expr = if dying(a, ta) && tb.is_stringy() {
         format!("std::mem::take(&mut {}).concat({})", var(*a), as_str_arg(&var(*b), tb))
+    } else if dying(b, tb) && ta.is_stringy() {
+        format!("std::mem::take(&mut {}).prepend({})", var(*b), as_str_arg(&var(*a), ta))
     } else {
         return false;
     };
