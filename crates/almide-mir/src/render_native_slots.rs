@@ -552,3 +552,70 @@ mod tests {
         assert_eq!(slot_kinds(&[(Some(0), NTy::I64), (Some(1), NTy::Str)], Some(2), Some(&vec![0])), None);
     }
 }
+
+/// One-element string lists that exist only to be appended (#4006, the heap
+/// twin of `render_native_append::list_push`): `acc + [x]` lowers to a
+/// `DynListStr` block of length 1, its slot 0 stored once, then the
+/// self-append rebind `d = acc + t; drop acc; acc = d`. The render keeps the
+/// element in a local and pushes it (`acc.push(e)`), where it would allocate
+/// a one-element Vec per append and free it after. Nothing else may read the
+/// block: between the alloc and the append only its own address arithmetic
+/// and the one store name it, and after the append only its drop.
+pub(super) fn single_elem_lists(
+    func: &MirFunction,
+    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+    consts: &BTreeMap<ValueId, i64>,
+) -> BTreeSet<ValueId> {
+    let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
+    let mut out = BTreeSet::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        let Op::Alloc { dst: b, init: Init::DynListStr { len }, .. } = op else { continue };
+        if consts.get(len) != Some(&1) {
+            continue;
+        }
+        let mut stored = false;
+        let mut window = None;
+        for (j, later) in func.ops.iter().enumerate().skip(i + 1) {
+            if let Some((_, x, _)) = crate::render_native_append::self_append_window(func, j) {
+                if x == *b {
+                    window = stored.then_some(j);
+                    break;
+                }
+            }
+            let ok = match later {
+                Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } | Op::LoopStart | Op::LoopEnd | Op::LoopBreakUnless { .. } | Op::Return { .. } => false,
+                Op::Prim { kind: PrimKind::Handle, args, .. } if args.first() == Some(b) => true,
+                Op::IntBinOp { op: crate::IntOp::Add, a, b: y, .. } if rooted(a, *b) || rooted(y, *b) => true,
+                Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.first().is_some_and(|a| rooted(a, *b)) => {
+                    let slot0 = base_of.get(&args[0]).and_then(|(_, o)| slot_of(*o)) == Some(0);
+                    let fine = slot0 && !stored && !rooted(&args[1], *b) && args[1] != *b;
+                    stored = true;
+                    fine
+                }
+                other => {
+                    let mut reads = Vec::new();
+                    crate::mir_ops::op_reads(other, &mut reads);
+                    !reads.iter().any(|v| v == b || rooted(v, *b))
+                }
+            };
+            if !ok {
+                break;
+            }
+        }
+        let Some(j) = window else { continue };
+        // After the window (its three ops), only bookkeeping names the block.
+        let clean_after = func.ops[j + 3..].iter().all(|later| {
+            if crate::render_native_move::bookkeeping(later) {
+                return true;
+            }
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(later, &mut reads);
+            !reads.iter().any(|v| v == b || rooted(v, *b))
+        });
+        if clean_after && func.ret != Some(*b) {
+            out.insert(*b);
+        }
+    }
+    out
+}
+
