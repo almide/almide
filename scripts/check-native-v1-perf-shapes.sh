@@ -15,8 +15,8 @@
 # (crates/almide-mir/examples/render_corpus.rs). A code region of the
 # renderer that no corpus program executes is an unexercised render path —
 # unless its own straight-line code (nested blocks and closures left out)
-# walls: that path renders nothing, and the program builds on the standard
-# codegen. They are counted per renderer function and held against
+# walls, or is no code at all (a propagating `?`): that path renders nothing,
+# and the program builds on the standard codegen. They are counted per renderer function and held against
 # proofs/native-v1-perf-shapes-baseline.txt:
 #
 # - a function above its recorded count fails: a new render path landed with
@@ -146,7 +146,12 @@ for reg in regions:
     # A region that never executes is an unexercised render path — unless
     # its own code refuses the program (a `wall(`): that path renders nothing,
     # the program builds on the standard codegen instead.
-    if reg[4] == 0 and "wall(" not in own_text(reg):
+    if reg[4] != 0:
+        continue
+    own = own_text(reg)
+    # A `?` that propagates an error, or a bare `}`, is a region with no
+    # code of its own: it renders nothing either.
+    if "wall(" not in own and re.search(r"[A-Za-z_]", own):
         counts[key] = counts.get(key, 0) + 1
 
 rows = {}
