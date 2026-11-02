@@ -255,12 +255,12 @@ else if c >= 97 and c <= 122 then c - 32 else c
 // capture writes), 7 pat0, 8 end_at (-1 = a match may end anywhere;
 // full_match passes te), 9 the end of the last match found, 10 the capture
 // buffer's slot count, 11-14 a suspended step (p, pend, t, k) — before the
-// walk starts, __rx_vm_checked's check block — 15 the Pike
+// walk starts, __rx_vm's check block — 15 the Pike
 // VM's work block once the walk has handed over (0 = none), 16 the steps
 // left in the budget (__rx_tick), 17 where the pattern's first top-level
-// alternative ends (__rx_exec), 18 1 once the walk gave up, 19 1 under a
-// leading (?i), 20 the byte every match starts with (-1 = none known,
-// __rx_first_byte). The first arena follows at slot 21.
+// alternative ends (__rx_alts), 18 1 once the walk gave up, 19 1 under a
+// leading (?i), 20 the byte every match starts with (-1 = none known). The
+// first arena follows at slot 21.
 // Flags: a leading `(?m)` makes `^`/`$` line anchors, `(?i)` letters match in
 // either case (`(?im)` both); `(?:…)` groups do not
 // capture; `\b`/`\B` are word-boundary assertions; a quantifier followed by
@@ -304,25 +304,14 @@ fn __rx_bol(t: Int, ts: Int, pat0: Int) -> Bool = t == ts or (__rx_multiline(pat
 fn __rx_eol(t: Int, te: Int, pat0: Int) -> Bool = t == te or (__rx_multiline(pat0) and prim.load8(t) == 10)
 
 // The machine block for one public call (layout above), with the first arena
-// inside it. Owned by the caller and dropped with it.
+// inside it. Owned by the caller and dropped with it. The pattern's C-395
+// check runs first, in slots 11-14 (the suspended step, which nothing reads
+// until the walk suspends), so the per-call check allocates nothing of its own
+// (#4399).
 fn __rx_vm(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> List[Int] = {
   let vm = prim.alloc_list(277)
-  let _0 = __rx_vm_init(prim.handle(vm) + 12, pat0, pe, ts, te, caps, nslots, end_at)
-  vm
-}
-
-// __rx_vm for an operation that has not checked its pattern yet: the C-395
-// check runs first, in slots 11-14 (the suspended step, which nothing reads
-// until the walk suspends), so it allocates nothing of its own (#4399).
-fn __rx_vm_checked(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> List[Int] = {
-  let vm = prim.alloc_list(277)
   let m = prim.handle(vm) + 12
-  let _ok = __rx_require_in(pat0, pe, m + 88)
-  let _0 = __rx_vm_init(m, pat0, pe, ts, te, caps, nslots, end_at)
-  vm
-}
-
-fn __rx_vm_init(m: Int, pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> Int = {
+  let _ok = __rx_require(pat0, pe, m + 88)
   prim.store64(m, m + 168)
   prim.store64(m + 8, 2048)
   prim.store64(m + 32, ts)
@@ -337,37 +326,23 @@ fn __rx_vm_init(m: Int, pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots:
   prim.store64(m + 136, aend)
   prim.store64(m + 144, 0)
   prim.store64(m + 152, if prim.band(__rx_flags_in(pat0, pe), 2) == 2 then 1 else 0)
-  prim.store64(m + 160, __rx_first_byte(pat0, pe, aend))
-  0
+  // Slot 20: the pattern is one alternative whose first piece is an ASCII
+  // letter or digit with no quantifier, so every match starts with that byte.
+  // A leading flag group starts with `(`, so a case-folding pattern has none.
+  let q = if pat0 + 1 < pe then prim.load8(pat0 + 1) else 0 - 1
+  let lead = aend == pe and pat0 < pe and __rx_is_alnum(prim.load8(pat0)) and q != 42 and q != 43 and q != 63 and q != 123
+  prim.store64(m + 160, if lead then prim.load8(pat0) else 0 - 1)
+  vm
 }
 
-// The ASCII byte every match of [pat0, pe) starts with, or -1: known when the
-// pattern is one alternative (`aend`, its end, is pe) whose first piece is a
-// plain ASCII character with no quantifier. A leading flag group starts with
-// `(`, so a case-folding pattern never has one.
-fn __rx_first_byte(pat0: Int, pe: Int, aend: Int) -> Int =
-  if aend < pe or pat0 >= pe then 0 - 1
-  else {
-    let b = prim.load8(pat0)
-    let q = if pat0 + 1 < pe then prim.load8(pat0 + 1) else 0 - 1
-    let special = b == 46 or b == 40 or b == 41 or b == 91 or b == 92 or b == 94 or b == 36 or b == 124 or b == 42 or b == 43 or b == 63 or b == 123
-    if b >= 128 or special or q == 42 or q == 43 or q == 63 or q == 123 then 0 - 1
-    else b
-  }
-
 // One match attempt of the alternatives [p, pend) at `t`: the end of the
-// first match the walk reaches, or -1. [p, pend) is always the machine
-// block's own pattern, so where its first alternative ends was found once,
-// by __rx_vm (slot 17), rather than rescanned on every attempt (#4399).
+// first match the walk reaches, or -1.
 fn __rx_exec(p: Int, pend: Int, t: Int, m: Int) -> Int = {
   prim.store64(m + 16, 0)
   prim.store64(m + 24, 0 - 1)
   let caps = prim.load64(m + 48)
   let _0 = if caps == 0 then 0 else __rx_fill_neg(caps, prim.load64(m + 80))
-  let aend = prim.load64(m + 136)
-  let _1 = if aend < pend then __rx_choice4(m, 11, aend + 1, pend, t, 0 - 1)
-  else 0
-  __rx_drive(__rx_seq(p, aend, t, 0 - 1, m), m)
+  __rx_drive(__rx_alts(p, pend, t, 0 - 1, m), m)
 }
 
 // -2 = the walk stopped to grow its arena; anything else is its answer.
@@ -648,9 +623,13 @@ fn __rx_group(p: Int, ae: Int, t: Int, k: Int, m: Int) -> Int = {
 }
 
 // Alternation over [p, pend): the first alternative now, the next one left as
-// a choice.
+// a choice. Only an attempt's own call (__rx_exec) starts at the pattern's
+// first byte — a group body or a later alternative starts past it — so there
+// the end of the first alternative is the one __rx_vm found once (slot 17),
+// not a rescan per attempt (#4399).
 fn __rx_alts(p: Int, pend: Int, t: Int, k: Int, m: Int) -> Int = {
-  let aend = __rx_alt_end(p, pend)
+  let aend = if p == prim.load64(m + 56) then prim.load64(m + 136)
+  else __rx_alt_end(p, pend)
   let _0 = if aend < pend then __rx_choice4(m, 11, aend + 1, pend, t, k)
   else 0
   __rx_seq(p, aend, t, k, m)
@@ -1709,7 +1688,12 @@ fn __rx_flag_len_go(p0: Int, p: Int, pe: Int) -> Int =
 fn __rx_check(p0: Int, pe: Int) -> String = {
   let ckl = prim.alloc_list(4)
   let ck = prim.handle(ckl) + 12
-  __rx_check_reason(ck, __rx_check_in(ck, p0, pe))
+  match __rx_check_in(ck, p0, pe) {
+    0 => "",
+    1 => __rx_ck_reason(ck),
+    2 => "unmatched )",
+    _ => "pattern too large: more than ${int.to_string(__rx_max_states())} states",
+  }
 }
 
 // The check in the 4-slot block `ck`, answering an Int so an accepted
@@ -1725,14 +1709,6 @@ fn __rx_check_in(ck: Int, p0: Int, pe: Int) -> Int = {
   else if prim.load64(ck) < pe then 2
   else if __rx_sat(__rx_sz_n(z) + 1) * (__rx_sz_depth(z) + 1) > __rx_max_states() then 3
   else 0
-}
-
-// The text of __rx_check_in's answer `r`: "" for 0.
-fn __rx_check_reason(ck: Int, r: Int) -> String = match r {
-  0 => "",
-  1 => __rx_ck_reason(ck),
-  2 => "unmatched )",
-  _ => "pattern too large: more than ${int.to_string(__rx_max_states())} states",
 }
 
 fn __rx_ck_reason(ck: Int) -> String = {
@@ -1784,14 +1760,11 @@ fn __rx_ck_seq(ck: Int, nest: Int, n: Int, nullable: Bool, depth: Int) -> Int = 
     let b = prim.load8(p)
     let q = p + __rx_w(p)
     let after = if q < prim.load64(ck + 24) then prim.load8(q) else 0 - 1
-    // A plain character (__rx_ck_piece's last branch: none of * + ? { ( [ \ ^ $)
-    // with no quantifier (* + ? {) after it — what __rx_ck_piece and
-    // __rx_ck_quant answer for it, without the walk through them: one
-    // instruction, never empty, no tracked group (#4399). Spelled inline:
-    // this is the check's hottest test, and a call per character cost more
-    // than the test.
-    let special = b == 42 or b == 43 or b == 63 or b == 123 or b == 40 or b == 91 or b == 92 or b == 94 or b == 36
-    if not special and after != 42 and after != 43 and after != 63 and after != 123 then {
+    // A letter, digit, `-` or `_` with no quantifier (* + ? {) after it is one
+    // plain character (__rx_ck_piece's last branch): what __rx_ck_piece and
+    // __rx_ck_quant answer for it, without the walk through them — one
+    // instruction, never empty, no tracked group (#4399).
+    if (__rx_is_alnum(b) or b == 45 or b == 95) and after != 42 and after != 43 and after != 63 and after != 123 then {
       prim.store64(ck, q)
       __rx_ck_seq(ck, nest, __rx_sat(n + 1), false, depth)
     } else {
@@ -1918,9 +1891,7 @@ fn __rx_ck_quant(ck: Int, kind: Int, z: Int, capturing: Bool) -> Int = {
   let pe = prim.load64(ck + 24)
   let q = if p < pe then prim.load8(p) else 0 - 1
   let be = if q == 123 then __rx_brace_end(p, pe) else 0 - 1
-  // No quantifier (the common piece): count 1..1, and the position stays at p.
-  if q != 42 and q != 43 and q != 63 and q != 123 then __rx_ck_size(kind, z, capturing, 1, 1)
-  else if q == 123 and be < 0 then __rx_ckerr(ck, 5)
+  if q == 123 and be < 0 then __rx_ckerr(ck, 5)
   else {
     let close = be - 1
     let comma = if q == 123 then __rx_ck_comma(p, close) else 0 - 1
@@ -1969,17 +1940,11 @@ fn __rx_ck_size(kind: Int, z: Int, capturing: Bool, mn: Int, mx: Int) -> Int = m
 // Abort with `Error: invalid regex: <reason>` (C-395) unless [p0, pe) is
 // accepted. Every operation checks: its pattern comes from a `Regex`, which
 // only regex.new and regex.compile make, so this fires only for a record
-// built by hand.
-fn __rx_require(p0: Int, pe: Int) -> Unit = {
-  let ckl = prim.alloc_list(4)
-  __rx_require_in(p0, pe, prim.handle(ckl) + 12)
-}
-
-// __rx_require with the check's 4-slot block at `ck` (__rx_vm_checked).
-fn __rx_require_in(p0: Int, pe: Int, ck: Int) -> Unit = {
-  let r = __rx_check_in(ck, p0, pe)
-  if r == 0 then () else prim.die(prim.handle("Error: invalid regex: " + __rx_check_reason(ck, r) + "\n"))
-}
+// built by hand. `ck` is a 4-slot block for the check; the reason's text is
+// only built on the way to the abort.
+fn __rx_require(p0: Int, pe: Int, ck: Int) -> Unit =
+  if __rx_check_in(ck, p0, pe) == 0 then ()
+  else prim.die(prim.handle("Error: invalid regex: " + __rx_check(p0, pe) + "\n"))
 
 // ── public API ──
 // The text end, and the end of the last match found. The loops that grow an
@@ -2011,15 +1976,14 @@ fn __rx_find_start_walk(p: Int, pe: Int, t0: Int, m: Int) -> Int = {
   let te = prim.load64(m + 40)
   let t = if fb < 0 then t0
   else __rx_skip_to(t0, te, fb)
-  if fb >= 0 and t >= te then 0 - 1
-  else {
-    let r = __rx_exec(p, pe, t, m)
-    if r >= 0 then {
-      prim.store64(m + 72, r)
-      t
-    } else if r == 0 - 3 or t >= te then 0 - 1
-    else __rx_find_start_walk(p, pe, t + __rx_w(t), m)
-  }
+  // past the last byte `fb` stands at, no attempt can match
+  let r = if fb >= 0 and t >= te then 0 - 1
+  else __rx_exec(p, pe, t, m)
+  if r >= 0 then {
+    prim.store64(m + 72, r)
+    t
+  } else if r == 0 - 3 or t >= te then 0 - 1
+  else __rx_find_start_walk(p, pe, t + __rx_w(t), m)
 }
 
 // The first address in [t, te) holding byte `fb`, or te.
@@ -2053,12 +2017,10 @@ fn __rx_gave_up(m: Int) -> Bool = prim.load64(m + 144) == 1
 fn __rx_hand_over(m: Int, w: Int) -> Int = {
   prim.store64(m + 120, w)
   prim.store64(m + 144, 0)
-  prim.store64(m + 128, __rx_no_budget())
+  // 2^62, a step count no walk reaches: no budget
+  prim.store64(m + 128, prim.bshl(1, 62))
   0
 }
-
-// A step count no walk reaches: the budget once the walk has handed over.
-fn __rx_no_budget() -> Int = 4611686018427387903
 
 fn regex_is_match(pat: String, s: String) -> Bool = {
   let ph = prim.handle(pat)
@@ -2067,7 +2029,7 @@ fn regex_is_match(pat: String, s: String) -> Bool = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let st = __rx_find_start(p0, pe, t0, m)
   if __rx_gave_up(m) then {
@@ -2086,7 +2048,7 @@ fn regex_full_match(pat: String, s: String) -> Bool = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, te)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, te)
   let m = prim.handle(vm) + 12
   let r = __rx_exec(p0, pe, t0, m)
   if __rx_gave_up(m) then {
@@ -2153,7 +2115,7 @@ fn regex_find(pat: String, s: String) -> String? = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let st0 = __rx_find_start(p0, pe, t0, m)
   let st = if __rx_gave_up(m) then __rx_vm_find(p0, pe, t0, te, m)
@@ -2189,7 +2151,7 @@ fn regex_find_all(pat: String, s: String) -> List[String] = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let acc: List[String] = []
   let r = __rx_find_all_go(p0, pe, t0, m, acc)
@@ -2232,7 +2194,7 @@ fn regex_replace(pat: String, s: String, rep: String) -> String = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let acc = ""
   let r = __rx_replace_go(p0, pe, t0, m, rep, acc)
@@ -2247,7 +2209,7 @@ fn regex_replace_first(pat: String, s: String, rep: String) -> String = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let st0 = __rx_find_start(p0, pe, t0, m)
   let st = if __rx_gave_up(m) then __rx_vm_find(p0, pe, t0, te, m)
@@ -2283,7 +2245,7 @@ fn regex_split(pat: String, s: String) -> List[String] = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let acc: List[String] = []
   let r = __rx_split_go(p0, pe, t0, t0, m, acc)
@@ -2363,7 +2325,6 @@ fn regex_captures(pat: String, s: String) -> List[String]? = {
   let sh = prim.handle(s)
   let p0 = ph + 12
   let pe = p0 + prim.load32(ph + 4)
-  let _ok = __rx_require(p0, pe)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
   let ncap = __rx_ngroups(p0, pe)
@@ -2418,7 +2379,8 @@ fn regex_check(pat: String) -> String = {
 fn regex_new(pat: String) -> String = {
   let ph = prim.handle(pat)
   let p0 = ph + 12
-  let _ok = __rx_require(p0, p0 + prim.load32(ph + 4))
+  let ckl = prim.alloc_list(4)
+  let _ok = __rx_require(p0, p0 + prim.load32(ph + 4), prim.handle(ckl) + 12)
   pat
 }
 
@@ -2434,7 +2396,7 @@ fn regex_index_of(pat: String, s: String) -> Int = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm_checked(p0, pe, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
   let st0 = __rx_find_start(p0, pe, t0, m)
   let st = if __rx_gave_up(m) then __rx_vm_find(p0, pe, t0, te, m)
@@ -2473,7 +2435,6 @@ fn regex_scan(pat: String, s: String, first: Bool) -> List[String] = {
   let sh = prim.handle(s)
   let p0 = ph + 12
   let pe = p0 + prim.load32(ph + 4)
-  let _ok = __rx_require(p0, pe)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
   let ncap = __rx_ngroups(p0, pe)
