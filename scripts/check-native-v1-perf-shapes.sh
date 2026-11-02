@@ -13,10 +13,11 @@
 # gate's corpus (every spec/ program on proofs/native-verified-floor.txt plus
 # research/benchmark/perf/v1-shapes/*.almd) is rendered through it
 # (crates/almide-mir/examples/render_corpus.rs). A code region of the
-# renderer that EMITS Rust (its text contains `line!(`, `push_str(`,
-# `writeln!(` or `emit(`) and that no corpus program executes is an
-# unexercised render path. They are counted per renderer function and held
-# against proofs/native-v1-perf-shapes-baseline.txt:
+# renderer that no corpus program executes is an unexercised render path —
+# unless its own straight-line code (nested blocks and closures left out)
+# walls: that path renders nothing, and the program builds on the standard
+# codegen. They are counted per renderer function and held against
+# proofs/native-v1-perf-shapes-baseline.txt:
 #
 # - a function above its recorded count fails: a new render path landed with
 #   no program in the perf corpus that takes it (add a shape bench that does,
@@ -83,7 +84,6 @@ python3 - "$WORK/cov.json" "$BASELINE" "$UPDATE" "$fail" "$DEMANGLE" <<'PY'
 import json, re, sys, os, subprocess
 cov, baseline, update, fail, cxxfilt = sys.argv[1], sys.argv[2], sys.argv[3] == "1", int(sys.argv[4]), sys.argv[5]
 root = os.getcwd() + "/"
-EMIT = ("line!(", "push_str(", "writeln!(", "emit(")
 data = json.load(open(cov))["data"][0]
 texts = {}
 
@@ -106,22 +106,48 @@ demangled = {n: re.sub(r"::h[0-9a-f]{16}$", "", re.sub(r"\[[0-9a-f]+\]", "", d))
 def demangle(name):
     return demangled.get(name, name)
 
-counts = {}
-seen_fns = set()
+# Every code region of the renderer: (path, span, count, function).
+regions = []
 for f in data["functions"]:
     files = f["filenames"]
     for r in f["regions"]:
         l0, c0, l1, c1, n, fid, _exp, kind = r[:8]
         path = files[fid]
         rel = path[len(root):] if path.startswith(root) else path
-        if not re.match(r"crates/almide-mir/src/render_native[a-z_]*\.rs$", rel):
+        if kind != 0 or not re.match(r"crates/almide-mir/src/render_native[a-z_]*\.rs$", rel):
             continue
-        key = (rel, demangle(f["name"]))
-        seen_fns.add(key)
-        if kind != 0 or n != 0:
+        regions.append((path, rel, (l0, c0), (l1, c1), n, demangle(f["name"])))
+
+by_path = {}
+for reg in regions:
+    by_path.setdefault(reg[0], []).append(reg)
+
+def own_text(reg):
+    # The region's own straight-line code: its text with every region nested
+    # inside it (an inner block, a closure body) blanked out.
+    path, _, a, b, _, _ = reg
+    lines = [list(l) for l in text_of(path, a[0], a[1], b[0], b[1]).split("\n")]
+    for o in by_path[path]:
+        if o is reg or not (a <= o[2] and o[3] <= b) or (o[2], o[3]) == (a, b):
             continue
-        if any(t in text_of(path, l0, c0, l1, c1) for t in EMIT):
-            counts[key] = counts.get(key, 0) + 1
+        for ln in range(o[2][0], o[3][0] + 1):
+            row = lines[ln - a[0]]
+            lo = (o[2][1] - (a[1] if ln == a[0] else 1)) if ln == o[2][0] else 0
+            hi = (o[3][1] - (a[1] if ln == a[0] else 1)) if ln == o[3][0] else len(row)
+            for k in range(max(lo, 0), min(hi, len(row))):
+                row[k] = " "
+    return "\n".join("".join(l) for l in lines)
+
+counts = {}
+seen_fns = set()
+for reg in regions:
+    key = (reg[1], reg[5])
+    seen_fns.add(key)
+    # A region that never executes is an unexercised render path — unless
+    # its own code refuses the program (a `wall(`): that path renders nothing,
+    # the program builds on the standard codegen instead.
+    if reg[4] == 0 and "wall(" not in own_text(reg):
+        counts[key] = counts.get(key, 0) + 1
 
 rows = {}
 if os.path.exists(baseline):
