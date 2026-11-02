@@ -415,6 +415,7 @@ fn render_fn(
     // Tail-recursion loops whose exit flag is raised as an arm's last act:
     // the render breaks there (crate::render_native_addr::flag_exits).
     let flag_exits = crate::render_native_addr::flag_exits(func);
+    crate::render_native_move::set_static_strs(func);
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
         crate::render_native_move::set_moving_args(func, i, &tys, &borrows.arms);

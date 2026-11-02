@@ -207,6 +207,30 @@ thread_local! {
         const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
 }
 
+thread_local! {
+    static STATIC_STRS: std::cell::RefCell<std::collections::BTreeSet<ValueId>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// The string literals of the function being rendered: values an
+/// `Alloc { init: Str }` defines, rendered as immortal static blocks, whose
+/// buffer is never unique (an edit copies it first).
+pub(crate) fn set_static_strs(func: &MirFunction) {
+    let lits = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Alloc { dst, init: crate::Init::Str(_), .. } => Some(*dst),
+            _ => None,
+        })
+        .collect();
+    STATIC_STRS.with(|m| *m.borrow_mut() = lits);
+}
+
+pub(crate) fn is_static_str(v: ValueId) -> bool {
+    STATIC_STRS.with(|m| m.borrow().contains(&v))
+}
+
 /// Record which of `ops[at]`'s call args may move (read by the floor render).
 pub(crate) fn set_moving_args(
     func: &MirFunction,
