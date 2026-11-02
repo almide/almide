@@ -29,9 +29,10 @@
 # The baseline is a DEBT list: each row names render paths that exist and no
 # perf program exercises yet. It is not an allowance — it may only fall.
 #
-# Negative control: NATIVE_V1_SHAPES_DROP=<path> leaves that program out of
-# the corpus; dropping research/benchmark/perf/v1-shapes/push_swap.almd must
-# raise a count and exit 1 (proofs/gate-verification.toml; the nightly runs it).
+# Negative control: NATIVE_V1_SHAPES_DROP=<regex> leaves the matching
+# programs out of the corpus; dropping the floor programs named a-m
+# (`^spec/wasm_cross/[a-m]`) must raise a count and exit 1
+# (proofs/gate-verification.toml; the nightly runs it).
 set -uo pipefail
 export LC_ALL=C
 cd "$(git rev-parse --show-toplevel)"
@@ -58,7 +59,7 @@ fi
 BIN="$TARGET/release/examples/render_corpus"
 
 { grep -E '^spec/' proofs/native-verified-floor.txt; ls research/benchmark/perf/v1-shapes/*.almd; } \
-  | grep -vxF "${NATIVE_V1_SHAPES_DROP:-/nonexistent}" > "$WORK/corpus.txt"
+  | grep -vE "${NATIVE_V1_SHAPES_DROP:-^\$}" > "$WORK/corpus.txt"
 LLVM_PROFILE_FILE="$WORK/run-%m.profraw" "$BIN" < "$WORK/corpus.txt" > "$WORK/verdicts.txt"
 fail=0
 # A floor program that no longer renders blinds the corpus; a shape bench
