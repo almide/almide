@@ -32958,7 +32958,6 @@ fn __rx_ck_seq(ck: Int, nest: Int, n: Int, nullable: Bool, depth: Int) -> Int = 
 }
 
 
-
 fn __rx_ck_group_syntax(a: Int, pe: Int) -> Int = {
   let nb = if a < pe then prim.load8(a) else 0 - 1
   let af = if a + 1 < pe then prim.load8(a + 1) else 0 - 1
@@ -33159,7 +33158,8 @@ fn __rx_find_start(p: Int, pe: Int, t: Int, m: Int) -> Int = {
 fn __rx_find_start_walk(p: Int, pe: Int, t0: Int, m: Int) -> Int = {
   let fb = prim.load64(m + 160)
   let te = prim.load64(m + 40)
-  let t = if fb < 0 then t0 else __rx_skip_to(t0, te, fb)
+  let t = if fb < 0 then t0
+  else __rx_skip_to(t0, te, fb)
   if fb >= 0 and t >= te then 0 - 1
   else {
     let r = __rx_exec(p, pe, t, m)
@@ -33172,8 +33172,9 @@ fn __rx_find_start_walk(p: Int, pe: Int, t0: Int, m: Int) -> Int = {
 }
 
 
-fn __rx_skip_to(t: Int, te: Int, fb: Int) -> Int = if t < te and prim.load8(t) != fb then __rx_skip_to(t + 1, te, fb)
-else t
+fn __rx_skip_to(t: Int, te: Int, fb: Int) -> Int =
+  if t < te and prim.load8(t) != fb then __rx_skip_to(t + 1, te, fb)
+  else t
 
 
 
