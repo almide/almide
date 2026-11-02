@@ -16,11 +16,14 @@
 # `valgrind --tool=callgrind --collect-atstart=no` with collection toggled on
 # the binary's `main` (the generated crate's, `almide_*::main`) and on every
 # thread's start (a fan arm runs on a thread of its own): no loader, no
-# runtime start-up before `main`, no exit after it. Each leg's `main` also
-# runs the same fixed glue whatever the program (the stack-guard install, and
-# on v0 the SIGPIPE reset, the panic hook and the final flush), so each leg's
-# count for a program whose `main` does nothing is taken off: what remains is
-# the program's own work, exactly (the measurement is deterministic). The
+# runtime start-up before `main`, no exit after it. The stack-guard install
+# that both legs' `main` runs reads the process's memory map, whose size
+# differs between any two binaries, so collection is toggled off across it
+# (both legs keep it out of line). The rest of each leg's `main` glue is the
+# same code whatever the program (on v0 the SIGPIPE reset, the panic hook and
+# the final flush), so each leg's count for a program whose `main` does
+# nothing is taken off: what remains is the program's own work, exactly (the
+# measurement is deterministic). The
 # gated number is the ratio of the two works against NATIVE_V1_PERF_MAX_RATIO
 # (1.03), on every program — there is no size floor.
 # A loss fails unless proofs/native-v1-perf-ledger.txt lists the program,
@@ -51,6 +54,7 @@ ir() {
 in_main() {
   local out="$WORK/cg.$$.$RANDOM"
   timeout 900 valgrind --tool=callgrind --collect-atstart=no --toggle-collect='almide_*::main' --toggle-collect='*thread_start*' \
+    --toggle-collect='*almide_stack_guard_install' \
     --callgrind-out-file="$out" "$1" </dev/null >/dev/null 2>&1
   [ -s "$out" ] || return 0
   callgrind_annotate --auto=no "$out" 2>/dev/null | awk '/PROGRAM TOTALS/ { gsub(",", "", $1); print $1 }'
