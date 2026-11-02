@@ -1451,7 +1451,27 @@ class = "NEGATIVE_TESTED"
 evidence = "#4006 landing (2026-11-01, GCE c1-native, sec-c1-next 25197e951): the unforged run exited 0 over 15 gated programs with the six proofs/native-v1-perf-ledger.txt rows read as debt; the same run with ALMIDE_NATIVE_DRILL_NO_MOVES=1 NATIVE_V1_PERF_ONLY_SHAPES=1 (the render keeps every copy) exited 1 with `LOSS research/benchmark/perf/v1-shapes/push_swap.almd: v1 316495323 vs v0 18735135 instructions = 16.893x`; earlier runs on the branch read genuine losses before their fixes (append_accumulator_heap_linear 741.4x, tree_walk 14.4x, variant_result_one_credit_churn 9.75x), each exiting 1"
 measures = "per program on proofs/native-verified-floor.txt and research/benchmark/perf/v1-shapes/: the ratio of cachegrind I refs of the default `almide build` (certified v1) binary over the `--no-verified` (v0) binary, against 1.03 and the debt ledger's recorded ratio; report-only, the min-of-9 interleaved wall-time ratio on rows over 20M instructions (warning above 1.10)"
 varies = "2026-11-01: the gated count rose 9 -> 15 as the floor grew 264 -> 341; the ledger opened with six rows (1.116 - 1.618)"
-blind = "a v1 loss in a program under 1M instructions (startup dominates) -> UNCOMPENSATED; a shape no shape bench or certified program exercises -> UNCOMPENSATED; a memory-locality loss instruction counts miss -> scripts/check-perf-ratio.sh (wall time of the native benches, which this gate only warns on)"
+blind = "a v1 loss in a program under 1M instructions (startup dominates) -> scripts/check-native-v1-perf-small.sh (each small program's own work, counted inside main, v1 against v0, no size floor); a shape no shape bench or certified program exercises -> scripts/check-native-v1-perf-shapes.sh (every render path no program in this corpus executes, per renderer function, against a shrink-only baseline); a memory-locality loss instruction counts miss -> scripts/check-perf-ratio.sh (wall time of the native benches, which this gate only warns on)"
+
+[[gate]]
+path = "scripts/check-native-v1-perf-small.sh"
+reads = "scalar"
+wired_by = ".github/workflows/native-v1-perf-nightly.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4006 (2026-11-02/03, GCE c1-native and c1-perf, sec-c1-perf-r1): on the unfixed render the gate read genuine losses and exited 1 — effect_tco 6421x (v1 32010569 against v0 4985 program instructions, the flag loop LLVM could not fold) and closure_tail_recursion 65x (a heap closure block per recursive call), each gone after its fix; with ALMIDE_NATIVE_DRILL_NO_MOVES=1 the same corpus read 137 LOSS rows against 111 unforged (closure_tail_recursion 83x, assign_nested_mut_writeback_release 2.92x), exit 1. A `main` the toggle never enters is MEASURE-FAIL, exit 1 (two programs whose `main` LLVM had inlined, before the render kept it out of line)."
+measures = "per program on proofs/native-verified-floor.txt whose v0 run is under 1M instructions: callgrind instructions executed inside the binary's `main` and every thread's start, the stack-guard install toggled out, less each leg's count for an empty `main`; v1 over v0 against 1.03 and the debt ledger"
+varies = "2026-11-02/03: on the same corpus the LOSS count read 28 on the first exact run and 70 once the stack-guard install was toggled out, as the render fixes landed and the measurement was made exact"
+blind = "a cost before `main` or after it (the dynamic loader, the runtime start-up, exit) -> scripts/check-native-v1-perf.sh (whole-run counts, on every program the large-program gate reads, the start-up being the same std code on both legs); a memory-locality loss instruction counts miss -> scripts/check-perf-ratio.sh (wall time of the native benches)"
+
+[[gate]]
+path = "scripts/check-native-v1-perf-shapes.sh"
+reads = "scalar"
+wired_by = ".github/workflows/native-v1-perf-nightly.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4006 (2026-11-03, GCE c1-native, sec-c1-perf-r1): the unforged run read 6 unexercised render paths in 4 renderer functions, equal to the baseline, exit 0; with NATIVE_V1_SHAPES_DROP='^spec/wasm_cross/[a-m]' (half the floor left out of the corpus) it read 12 and named 5 functions UNEXERCISED, exit 1."
+measures = "the code regions of crates/almide-mir/src/render_native*.rs that no program in the perf gates' corpus (the floor's spec programs and research/benchmark/perf/v1-shapes) executes when rendered, less those whose own straight-line code walls (nested blocks and closures left out), counted per renderer function by llvm-cov region coverage of an instrumented render, against proofs/native-v1-perf-shapes-baseline.txt"
+varies = "2026-11-03: the first baseline reads 6 paths in 4 functions (finish_native_fn, render_typed_call_indirect, render_fan_group, the map emitter)"
+blind = "a path whose cost depends on the shape it composes with, though every path is executed -> scripts/check-native-v1-perf.sh (the ratio of every composition the corpus holds)"
 
 [[gate]]
 path = "scripts/check-spec-test-files.sh"
