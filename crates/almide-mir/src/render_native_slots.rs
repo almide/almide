@@ -685,6 +685,12 @@ pub(crate) fn flag_exits(func: &MirFunction) -> BTreeSet<usize> {
             }
             reads.clear();
             crate::mir_ops::op_reads(o, &mut reads);
+            // A write of the flag names it as its slot, not as a read.
+            if let Op::SetLocal { local, src } = o {
+                if *local == flag && *src != flag {
+                    reads.retain(|v| *v != flag);
+                }
+            }
             if (j > l + 3 && j < end && reads.contains(&flag)) || reads.contains(t) || reads.contains(c) {
                 clean = false;
                 break;
