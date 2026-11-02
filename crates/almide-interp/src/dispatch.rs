@@ -157,6 +157,9 @@ impl<'a> Interpreter<'a> {
             }
         }
 
+        if let Some(module) = self.dropped_stub_module(name) {
+            return self.eval_module_call(module, name, args, scope);
+        }
         Flow::Unsupported(format!("named call `{}`", n))
     }
 
@@ -222,6 +225,19 @@ impl<'a> Interpreter<'a> {
     pub(crate) fn own_module_intrinsic(&self, name: Sym) -> Option<Sym> {
         let module = self.cur_bundled.get()?;
         crate::stdlib_pool::bundled_stub(module, name).then_some(module)
+    }
+
+    /// The LAST step of a bare call no other step resolved: inside a
+    /// program-loaded stdlib module whose lowering dropped its `@intrinsic`
+    /// stubs (the wasm leg's: `__v7_stamp` inside `uuid.v7`,
+    /// `to_string_lossy` inside `bytes`), the module's own source declares
+    /// the stub, so the call means `module.name`. Last, so every name an
+    /// earlier step answers keeps that answer.
+    fn dropped_stub_module(&self, name: Sym) -> Option<Sym> {
+        let space = (self.cur_space.get() as usize).checked_sub(1)?;
+        let owner = self.program.modules.get(space)?.name;
+        let dropped = !self.module_fns.contains_key(&(owner, name));
+        (dropped && crate::stdlib_pool::declared_stub(owner, name)).then_some(owner)
     }
 
     pub(crate) fn own_module_sibling(&self, name: Sym) -> Option<&'a almide_ir::IrFunction> {

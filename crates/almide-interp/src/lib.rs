@@ -240,6 +240,8 @@ pub struct Interpreter<'a> {
     /// The module of the EXECUTING `stdlib_pool::bundled_body` (its siblings).
     pub(crate) cur_bundled: Cell<Option<Sym>>,
     pub(crate) bundled_space: std::cell::RefCell<HashMap<usize, Sym>>,
+    /// The last `uuid.__v7_stamp` this run handed out (native starts at i64::MIN).
+    pub(crate) v7_last: Cell<i64>,
     pub(crate) globals_ready: Cell<bool>,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
@@ -611,6 +613,7 @@ impl<'a> Interpreter<'a> {
             cur_space: Cell::new(0),
             cur_pool: Cell::new(false),
             cur_bundled: Cell::new(None), bundled_space: Default::default(),
+            v7_last: Cell::new(i64::MIN),
             globals_ready: Cell::new(false),
             stdout: String::new(),
             stderr: String::new(),

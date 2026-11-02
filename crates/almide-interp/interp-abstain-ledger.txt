@@ -31,7 +31,6 @@ alias_combinator_rc  out-of-interp-scope capability: prim.handle of a Option (ou
 bytes_rawptr  out-of-interp-scope capability: ffi.region: no lowered body
 count_domain_nonbytes  out-of-interp-scope capability: io.read: no lowered body
 effect_tco_err_rewrap  interp fuel/recursion budget exhausted
-fs_append_bytes_true_append  out-of-interp-scope capability: fs.append_bytes: no lowered body
 fs_root_escape  out-of-interp-scope capability: fs.open_root: no lowered body
 io_write_ordering  out-of-interp-scope capability: io.write: no lowered body
 io_write_raw_bytes  out-of-interp-scope capability: io.write: no lowered body
