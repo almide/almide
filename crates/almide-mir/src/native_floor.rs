@@ -752,10 +752,6 @@ fn ret_agrees(r: FloorRet, rust: &str) -> bool {
 
 struct RtItem {
     text: &'static str,
-    /// A fn the runtime does not mark `#[inline]` and that takes no generic
-    /// parameter: v0 links it from the runtime rlib, across a crate boundary
-    /// no call inlines through.
-    out_of_line: bool,
 }
 
 struct RuntimeIndex {
@@ -787,7 +783,7 @@ fn runtime_index() -> &'static RuntimeIndex {
         let mut impls: Vec<(&'static str, &'static str)> = Vec::new();
         let mut fns: BTreeSet<&'static str> = BTreeSet::new();
         for (_, src) in almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES {
-            for (kind, name, text, attributed, attrs) in top_level_items(src) {
+            for (kind, name, text, attributed) in top_level_items(src) {
                 if kind == ItemKind::Impl {
                     if !attributed {
                         impls.push((name, text));
@@ -804,9 +800,7 @@ fn runtime_index() -> &'static RuntimeIndex {
                 // A `#[cfg]`-gated item may have a sibling for another target:
                 // never take one along.
                 if matches!(kind, ItemKind::Fn | ItemKind::Const) && !attributed {
-                    let generic = lex(text).iter().skip_while(|t| t.text != name).nth(1).is_some_and(|t| t.text == "<");
-                    let out_of_line = kind == ItemKind::Fn && !attrs.contains("inline") && !generic;
-                    items.insert(name, RtItem { text, out_of_line });
+                    items.insert(name, RtItem { text });
                 }
                 let is_mod = kind == ItemKind::Other && lex(text).iter().take_while(|t| t.text != name).any(|t| t.text == "mod");
                 if is_mod && !attributed && src.contains(&format!("\npub use {name}::*;")) {
@@ -821,10 +815,10 @@ fn runtime_index() -> &'static RuntimeIndex {
                 continue;
             }
             let body = &whole[whole.find('{').unwrap_or(0) + 1..whole.rfind("} //").or_else(|| whole.rfind('}')).unwrap_or(whole.len())];
-            items.insert(name, RtItem { text: whole, out_of_line: false });
+            items.insert(name, RtItem { text: whole });
             for inner in defined_names(body) {
                 if !items.contains_key(inner) && seen.get(inner).is_none() {
-                    items.insert(inner, RtItem { text: whole, out_of_line: false });
+                    items.insert(inner, RtItem { text: whole });
                 }
             }
         }
@@ -851,10 +845,10 @@ fn runtime_index() -> &'static RuntimeIndex {
             .filter(|(name, ..)| !runtime_traits.contains(name) && !items.contains_key(name))
             .collect();
         for (name, decl, _, methods) in &traits {
-            items.insert(name, RtItem { text: decl, out_of_line: false });
+            items.insert(name, RtItem { text: decl });
             for m in methods {
                 trait_methods.remove(m);
-                items.entry(m).or_insert(RtItem { text: decl, out_of_line: false });
+                items.entry(m).or_insert(RtItem { text: decl });
             }
         }
         // An impl for a type the header cannot carry (it reaches such a
@@ -871,9 +865,9 @@ fn runtime_index() -> &'static RuntimeIndex {
         }
         let RuntimeIndex { mut items, defined, mut trait_methods, fns } = provisional;
         for (name, whole, methods) in taken {
-            items.insert(name, RtItem { text: whole, out_of_line: false });
+            items.insert(name, RtItem { text: whole });
             for m in methods {
-                items.insert(m, RtItem { text: whole, out_of_line: false });
+                items.insert(m, RtItem { text: whole });
             }
         }
         // A runtime type travels with its inherent impls and its impls of std
@@ -893,7 +887,7 @@ fn runtime_index() -> &'static RuntimeIndex {
                 whole.push('\n');
                 whole.push_str(imp);
             }
-            items.insert(name, RtItem { text: Box::leak(whole.into_boxed_str()), out_of_line: false });
+            items.insert(name, RtItem { text: Box::leak(whole.into_boxed_str()) });
         }
         // A runtime trait defined once travels whole too: its declaration and
         // every runtime impl of it (`AlmideMapKey` and its blanket impls), taken
@@ -911,10 +905,10 @@ fn runtime_index() -> &'static RuntimeIndex {
                     }
                 }
                 let whole: &'static str = Box::leak(whole.into_boxed_str());
-                items.insert(name, RtItem { text: whole, out_of_line: false });
+                items.insert(name, RtItem { text: whole });
                 for m in methods {
                     trait_methods.remove(m);
-                    items.entry(m).or_insert(RtItem { text: whole, out_of_line: false });
+                    items.entry(m).or_insert(RtItem { text: whole });
                 }
             }
         }
@@ -936,7 +930,7 @@ enum ItemKind {
 
 /// The top-level items of a runtime module: (kind, name, whole text, whether
 /// a `#[cfg…]` attribute precedes it).
-fn top_level_items<'a>(src: &'a str) -> Vec<(ItemKind, &'a str, &'a str, bool, &'a str)> {
+fn top_level_items<'a>(src: &'a str) -> Vec<(ItemKind, &'a str, &'a str, bool)> {
     let toks = lex(src);
     let mut out = Vec::new();
     let mut i = 0;
@@ -985,7 +979,7 @@ fn top_level_items<'a>(src: &'a str) -> Vec<(ItemKind, &'a str, &'a str, bool, &
                 let end = item_end(&toks, j);
                 let end_off = toks.get(end).map(|t| t.off + t.text.len()).unwrap_or(src.len());
                 if let Some(name) = impl_self_type(&toks[j..=end.min(toks.len() - 1)]) {
-                    out.push((ItemKind::Impl, name, &src[start_off..end_off], cfg_attr, ""));
+                    out.push((ItemKind::Impl, name, &src[start_off..end_off], cfg_attr));
                 }
                 i = end + 1;
                 cfg_attr = false;
@@ -1012,8 +1006,7 @@ fn top_level_items<'a>(src: &'a str) -> Vec<(ItemKind, &'a str, &'a str, bool, &
         let end = if kind == ItemKind::Const { const_end(&toks, name_at) } else { item_end(&toks, name_at) };
         let end_off = toks.get(end).map(|t| t.off + t.text.len()).unwrap_or(src.len());
         let from = if kind == ItemKind::Type { attr_start.unwrap_or(start_off) } else { start_off };
-        let attrs = &src[attr_start.unwrap_or(start_off)..start_off];
-        out.push((kind, name, &src[from..end_off], cfg_attr, attrs));
+        out.push((kind, name, &src[from..end_off], cfg_attr));
         cfg_attr = false;
         attr_start = None;
         i = end + 1;
@@ -1147,13 +1140,6 @@ fn rust_signature(text: &str) -> Option<(Vec<String>, String)> {
 
 /// The runtime body of `symbol` and every item it reaches, or `None` when it
 /// reaches something the native header cannot carry.
-/// `text` marked `#[inline(never)]`, leaked once per item.
-fn out_of_line_text(text: &'static str) -> &'static str {
-    static MEMO: OnceLock<Mutex<HashMap<&'static str, &'static str>>> = OnceLock::new();
-    let mut memo = MEMO.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
-    memo.entry(text).or_insert_with(|| Box::leak(format!("#[inline(never)]\n{text}").into_boxed_str()))
-}
-
 fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>, String> {
     let mut taken: BTreeSet<&'static str> = BTreeSet::new();
     let mut texts: BTreeSet<&'static str> = BTreeSet::new();
@@ -1172,16 +1158,7 @@ fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>,
         if let Some((dep, _)) = almide_codegen::runtime_crate_deps(item.text).first() {
             return Err(format!("`{key}` needs the `{dep}` crate, which a native program does not link"));
         }
-        // A runtime fn keeps v0's crate boundary: v0 links it from the
-        // runtime rlib, where no call from the program inlines it, so it is
-        // not inlined here either (a runtime loop inlined into the caller is
-        // optimized in the caller's context, and read 1.6x slower). One text
-        // per item, whichever body reaches it, so it is defined once.
-        if item.out_of_line {
-            out.push(out_of_line_text(item.text));
-        } else {
-            out.push(item.text);
-        }
+        out.push(item.text);
         for r in references(item.text).map_err(|n| format!("`{key}` reaches `{n}`, which the native header cannot carry"))? {
             if !taken.contains(r.as_str()) {
                 todo.push(r);
@@ -1278,7 +1255,7 @@ fn header_items() -> &'static BTreeSet<&'static str> {
 /// `pub use almide_libm::*`, so its names are in scope unqualified).
 fn defined_names(src: &str) -> BTreeSet<&str> {
     let mut out = BTreeSet::new();
-    for (kind, name, text, _, _) in top_level_items(src) {
+    for (kind, name, text, _) in top_level_items(src) {
         // An impl defines no name: it is named by the type it is for.
         if kind == ItemKind::Impl {
             continue;
@@ -1320,8 +1297,8 @@ fn thread_local_names(src: &str) -> BTreeSet<&str> {
 fn trait_names(src: &str) -> BTreeSet<&str> {
     top_level_items(src)
         .into_iter()
-        .filter(|(kind, name, text, _, _)| *kind == ItemKind::Other && lex(text).iter().take_while(|t| t.text != *name).any(|t| t.text == "trait"))
-        .map(|(_, name, _, _, _)| name)
+        .filter(|(kind, name, text, _)| *kind == ItemKind::Other && lex(text).iter().take_while(|t| t.text != *name).any(|t| t.text == "trait"))
+        .map(|(_, name, _, _)| name)
         .collect()
 }
 
@@ -1348,7 +1325,7 @@ fn prelude_traits(src: &'static str) -> Vec<(&'static str, &'static str, Vec<&'s
         i += 1;
     }
     let mut out = Vec::new();
-    for (kind, name, text, attributed, _) in top_level_items(src) {
+    for (kind, name, text, attributed) in top_level_items(src) {
         let ltoks = lex(text);
         if kind != ItemKind::Other || attributed || !ltoks.iter().take_while(|t| t.text != name).any(|t| t.text == "trait") {
             continue;
@@ -1361,7 +1338,7 @@ fn prelude_traits(src: &'static str) -> Vec<(&'static str, &'static str, Vec<&'s
 
 fn trait_method_names(src: &str) -> BTreeSet<&str> {
     let mut out = BTreeSet::new();
-    for (kind, name, text, _, _) in top_level_items(src) {
+    for (kind, name, text, _) in top_level_items(src) {
         let toks = lex(text);
         if kind == ItemKind::Other && toks.iter().take_while(|t| t.text != name).any(|t| t.text == "trait") {
             out.extend(toks.windows(2).filter(|w| w[0].text == "fn").map(|w| w[1].text));
