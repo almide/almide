@@ -597,6 +597,21 @@ pub(crate) fn render_addr_op(
             }
             if let (Some(NTy::Rec(i) | NTy::RecRef(i)), Some(k)) = (ty(tys, &ad.base), rec_slot(&ad)) {
                 if let Some(f) = crate::render_native_rec::rec_field(i, k).filter(|f| *f != NTy::I64) {
+                    // A borrow-only read (crate::render_native_borrow_read): a
+                    // reference into the record's field, where the owned read
+                    // would copy it (a string's bytes, a list's elements).
+                    let by_ref = match f {
+                        NTy::Str => Some((NTy::StrRef, "&str".to_string(), "[..]")),
+                        NTy::Vec => Some((NTy::VecRef, "&[i64]".to_string(), "[..]")),
+                        NTy::VecStr => Some((NTy::VecStrRef, "&[AlmideString]".to_string(), "[..]")),
+                        NTy::Rec(j) => Some((NTy::RecRef(j), format!("&{}", crate::render_native_rec::struct_name(j)), "")),
+                        _ => None,
+                    };
+                    if let (true, Some((t, spelled, whole))) = (st.borrow_reads.contains(d), by_ref) {
+                        tys.insert(*d, t);
+                        line!("let mut {}: {spelled} = &{}.f{k}{whole};", var(*d), var(ad.base));
+                        return Ok(true);
+                    }
                     tys.insert(*d, f);
                     // The last read of the slot of an owned record moves the value out.
                     if st.moves.contains(d) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) {
