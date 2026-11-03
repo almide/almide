@@ -418,7 +418,11 @@ pub(crate) fn emit_concat() -> Function {
     let mut i = f.instructions();
     i.local_get(a).i32_load(len_memarg()).local_set(la);
     i.local_get(b).i32_load(len_memarg()).local_set(lb);
-    i.local_get(la).local_get(lb).i32_add().call(F_ALLOC).local_set(base);
+    // #4396: SATURATED — `s + s` sums two lengths of one block, which can
+    // pass 2^32 though each fits; the wrapped sum sized a block smaller than
+    // the copies below. Saturated, it is a request $alloc refuses (C-197).
+    crate::runtime_alloc::emit_add_len_sat(&mut i, la, lb, endp);
+    i.local_get(endp).call(F_ALLOC).local_set(base);
     // Tiny copies take a BYTE LOOP: wasmtime lowers memory.copy to an
     // out-of-line libcall whose fixed cost dwarfs a 2-8 byte move (the
     // stage-54 micro-profile put ~20ns on each tiny concat).

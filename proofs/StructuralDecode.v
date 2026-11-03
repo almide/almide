@@ -583,6 +583,7 @@ Definition adecode (oom_leb : list Z) (bs : list Z) : option (list astmt) :=
    check-structural-bytes.sh). *)
 Definition alloc_bytes : list Z :=
   [32;0;65;15;106;65;124;113;33;3;
+   32;3;32;0;73;4;64;65;0;16;6;65;1;16;2;0;11;
    32;3;65;16;73;4;64;65;16;33;3;11;
    65;28;32;3;65;1;107;103;107;33;2;
    32;2;65;13;73;4;64;
