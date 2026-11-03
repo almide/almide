@@ -88,10 +88,9 @@ fn per_unit(probe: impl Fn(u32) -> String) -> (f64, i64) {
 #[test]
 fn the_issue_loop_costs_no_more_an_iteration_than_at_0_67_1() {
     let (fuel, total) = per_unit(loop_probe);
-    println!("RATCHET #4430 loop fuel an iteration: {fuel:.0} (answer {total})");
     // Lines "const url0 …" to "const url63 …": the kept pieces' lengths and
     // one per `fetch`, as the native leg answers.
-    assert_eq!(total, 3_574, "the loop answered wrong");
+    assert_eq!(total, 3_574, "the loop answered wrong (cost {fuel:.0} fuel an iteration)");
     assert!(fuel > 1_000.0, "the loop cost {fuel:.0} fuel an iteration — too little to gate on");
     assert!(
         fuel <= 13_335.0,
@@ -103,8 +102,11 @@ fn the_issue_loop_costs_no_more_an_iteration_than_at_0_67_1() {
 /// One `contains` cell: the per-call fuel against its line.
 fn contains_cell(needle: &str, hit: bool, line: f64, why: &str) {
     let (fuel, hits) = per_unit(|k| contains_probe(needle, k));
-    println!("RATCHET #4430 contains({needle:?}) fuel a call: {fuel:.0}");
-    assert_eq!(hits, if hit { i64::from(K) } else { 0 }, "contains({needle:?}) answered wrong");
+    assert_eq!(
+        hits,
+        if hit { i64::from(K) } else { 0 },
+        "contains({needle:?}) answered wrong (cost {fuel:.0} fuel a call)"
+    );
     assert!(fuel > 20.0, "contains({needle:?}) cost {fuel:.0} fuel — too little to gate on");
     assert!(fuel <= line, "contains({needle:?}) cost {fuel:.0} fuel a call, line {line}: {why}");
 }
