@@ -238,6 +238,8 @@ fn ty_mangle(ty: &Ty) -> String {
 pub(super) struct CodecWk<'a> {
     pub vt: &'a mut VarTable,
     pub type_name: &'a str,
+    /// The type's name in a decode error message.
+    pub display_name: &'a str,
     pub out: &'a mut Vec<IrFunction>,
     pub seen: &'a mut std::collections::HashSet<String>,
     /// Does the named type derive `Decode` — so it has a `T.__strict`

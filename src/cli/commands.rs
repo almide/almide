@@ -2,6 +2,7 @@ use crate::{out, err, err_no_nl};
 use super::collect_test_files;
 use super::test_scratch::TestScratch;
 use super::worker_pool::{bounded_parallel, cpu_slots, guard_worker_panic};
+use super::test_native::{compile_native_tests, NativeTestBin};
 use super::test_wasm::{
     compile_and_run_wasm_test, note_wasm_leg_unavailable, report_wasm_verdict_without_native, run_native_fallback_phase,
     run_wasm_test_phase, WasmTestOutcome,
@@ -169,42 +170,22 @@ pub(super) fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<Str
     }
 }
 
-/// `cmd_test`'s Phase 1: compile every test file in parallel (bounded by
-/// CPU count), each in its own scratch dir so cold rustc builds parallelize
-/// instead of serializing on the shared dir's BUILD_LOCK. Extracted
-/// verbatim.
-fn compile_test_files_parallel(test_files: &[String], no_check: bool, scratch: &std::sync::Arc<TestScratch>) -> Vec<(String, Result<std::path::PathBuf, String>)> {
-    let scratch = scratch.clone();
-    let mut results = bounded_parallel(test_files.to_vec(), cpu_slots(), move |test_file: String| {
-        // Per-file scratch dir so cold rustc builds parallelize instead
-        // of serializing on the shared dir's BUILD_LOCK; keyed on the
-        // absolute path (#1877).
-        let worker_dir = scratch.native_worker_dir(&test_file);
-        let result = guard_worker_panic(
-            || super::run::compile_to_binary(&test_file, no_check, true, false, Some(&worker_dir)),
-            Err,
-        );
-        (test_file, result)
-    });
-    results.sort_by(|a, b| a.0.cmp(&b.0));
-    results
-}
-
 use super::test_report::{
     libtest_counts, report_passing_output, report_test_failure, report_test_failure_io, test_harness_args, TestCounts,
     TestRun, NO_TESTS_EXIT,
 };
 
 /// `cmd_test`'s Phase 2: execute every compiled test binary in parallel
-/// (bounded by CPU count). Output is CAPTURED, not inherited: it feeds
-/// [`report_test_failure`], and printing each file's output whole in sorted
-/// order makes a parallel run's transcript deterministic.
-fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, String>)>, program_args: &std::sync::Arc<Vec<String>>) -> Vec<TestRun> {
+/// (bounded by CPU count) — one process per FILE, also when the files share
+/// the run's merged binary (#4441). Output is CAPTURED, not inherited: it
+/// feeds [`report_test_failure`], and printing each file's output whole in
+/// sorted order makes a parallel run's transcript deterministic.
+pub(super) fn run_test_binaries_parallel(compiled: Vec<(String, Result<NativeTestBin, String>)>, program_args: &std::sync::Arc<Vec<String>>) -> Vec<TestRun> {
     let args = program_args.clone();
     let mut results: Vec<TestRun> = bounded_parallel(compiled, cpu_slots(), move |(file, compile_result)| {
         let (code, stdout, stderr) = match compile_result {
             Ok(bin) => guard_worker_panic(
-                || super::test_report::run_native_test_binary(&file, &bin, &args),
+                || super::test_report::run_native_test_binary_in(&file, &bin.path, &args, bin.module.as_ref()),
                 |msg| (1, msg, String::new()),
             ),
             Err(e) => (1, format!("Compile error for {}:\n{}", file, e), String::new()),
@@ -216,13 +197,15 @@ fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, 
 }
 
 pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool, show_output: bool) {
+    crate::resolve::parse_cache::enable();
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let program_args = test_harness_args(run_filter);
     let scratch = std::sync::Arc::new(TestScratch::new());
 
-    // Phase 1: Compile all test files in parallel (bounded by CPU count)
-    let compiled = compile_test_files_parallel(&test_files, no_check, &scratch);
+    // Phase 1: generate every file's crate in parallel, build them as one
+    // crate per run (#4441)
+    let compiled = compile_native_tests(&test_files, no_check, &scratch);
 
     // Phase 2: Execute test binaries in parallel (bounded by CPU count)
     let results = run_test_binaries_parallel(compiled, &program_args);
@@ -256,6 +239,7 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_t
 /// back to the native rustc path, which is authoritative. The common case (most
 /// tests pass on WASM) is ~9x faster; the native fallback preserves correctness.
 pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool, show_output: bool) {
+    crate::resolve::parse_cache::enable();
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let cpus = cpu_slots();
@@ -523,6 +507,7 @@ fn run_test_file_once(
 }
 
 pub fn cmd_test_json(file: &str, run_filter: Option<&str>, allow_no_tests: bool) {
+    crate::resolve::parse_cache::enable();
     let test_files: Vec<String> = if !file.is_empty() {
         let path = std::path::Path::new(file);
         if path.is_dir() {
@@ -547,13 +532,15 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
     // records ({name, file, line, expected, found, diff}); that is the shape
     // the dojo harness reads, and the reason `--json` captures the child's
     // output instead of letting it stream to the terminal (#1313).
-    for test_file in &test_files {
-        let (code, output) = match super::run::compile_to_binary(test_file, false, true, false, None) {
+    let scratch = std::sync::Arc::new(TestScratch::new());
+    let compiled = compile_native_tests(&test_files, false, &scratch);
+    for (test_file, built) in &compiled {
+        let (code, output) = match built {
             Ok(bin) => {
-                let (code, stdout, stderr) = super::test_report::run_native_test_binary(test_file, &bin, &program_args);
+                let (code, stdout, stderr) = super::test_report::run_native_test_binary_in(test_file, &bin.path, &program_args, bin.module.as_ref());
                 (code, stdout + &stderr)
             }
-            Err(e) => (1, e),
+            Err(e) => (1, e.clone()),
         };
         let source = almide::source_overlay::read_to_string(test_file).unwrap_or_default();
         let failures = super::test_report::parse(test_file, &source, &output);

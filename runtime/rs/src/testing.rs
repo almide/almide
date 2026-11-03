@@ -44,9 +44,13 @@ pub fn almide_rt_test_abort_site_run(site: i64) -> Vec<AlmideString> {
         let why = "the abort-site child did not start: an abort site cannot start another";
         return vec![AlmideString::from("-1".to_string()), AlmideString::from(String::new()), AlmideString::from(why.to_string())];
     }
+    // In the native test run's one binary (#4441) each test file's entry
+    // carries its module's prefix, which the runner passes in
+    // ALMIDE_TEST_MODULE.
+    let entry = format!("tests::{}__almd_abort_site_entry", std::env::var("ALMIDE_TEST_MODULE").unwrap_or_default());
     let child = std::env::current_exe().and_then(|exe| {
         std::process::Command::new(exe)
-            .args(["tests::__almd_abort_site_entry", "--exact", "--ignored", "--nocapture", "--test-threads=1", "-q"])
+            .args([entry.as_str(), "--exact", "--ignored", "--nocapture", "--test-threads=1", "-q"])
             .env("ALMIDE_ABORT_SITE", site.to_string())
             .env("ALMIDE_TEST_ABORT_PROBE", "1")
             .stdin(std::process::Stdio::null())
