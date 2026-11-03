@@ -260,6 +260,7 @@ effect fn main() -> Unit = {
 /// - the `start` handle — `start`, `poll`, `wait`, `stop`, `read_new_stdout`,
 ///   `read_new_stderr`, `child_pid` — native-only, each declared unavailable
 ///   on the wasm legs in proofs/target-availability.toml (E081).
+///
 /// Every fn that starts a child has a `[permissions] proc` row (src/cli/mod.rs)
 /// and a spawn-failure row in [`rows`].
 #[test]

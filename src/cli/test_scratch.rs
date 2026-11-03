@@ -143,6 +143,26 @@ impl TestScratch {
         self.native_cache.join(Self::file_key(test_file))
     }
 
+    /// The project dir of a run's merged native test crate (#4441), in the
+    /// persistent cache: one per working directory and package context, so a
+    /// re-run after an edit rebuilds incrementally in the same dir.
+    pub(crate) fn native_merged_dir(&self, context: &str) -> PathBuf {
+        let cwd = std::env::current_dir().ok().and_then(|d| std::fs::canonicalize(d).ok()).unwrap_or_default();
+        let key = format!("{}\n{}", cwd.display(), context);
+        self.native_cache.join(format!("run-{:016x}", super::hash64(key.as_bytes())))
+    }
+
+    /// Where a native test run's compiled programs are kept by their inputs
+    /// (#4441), in the persistent cache.
+    pub(crate) fn native_program_cache(&self) -> PathBuf {
+        self.native_cache.join("programs")
+    }
+
+    /// A scratch file of this run, removed with it.
+    pub(crate) fn run_file(&self, name: &str) -> PathBuf {
+        self.root.join(name)
+    }
+
     /// `<stem>-<hash of the absolute path>`: the stem keeps a kept scratch
     /// dir readable, the hash is what makes two same-named files distinct.
     fn file_key(test_file: &str) -> String {

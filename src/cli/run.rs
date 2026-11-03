@@ -15,6 +15,38 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
 /// fall back to the v0 source on a WALL — a v1-rendered program is never wrong.
 pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>, native_verified: bool) -> Result<std::path::PathBuf, String> {
     let t = PhaseTimer::start();
+    let src = generate_native_source(file, no_check, test_mode, native_verified, &t)?;
+    let out = src.build(test_mode, release, project_dir_override);
+    t.lap("cargo");
+    out
+}
+
+/// One file's generated native crate, before cargo: its Rust source and the
+/// package context that shapes the crate around it.
+pub(crate) struct NativeSource {
+    pub rs_code: String,
+    pub native_deps: Vec<crate::project::NativeDep>,
+    /// The directory holding the package's almide.toml (where native/ lives).
+    pub source_root: Option<std::path::PathBuf>,
+}
+
+impl NativeSource {
+    /// Build this source through the content-keyed cache.
+    pub(crate) fn build(&self, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>) -> Result<std::path::PathBuf, String> {
+        // #2370: one predicate, shared with the auto-`main` guards. This site was
+        // already anchored; the guards were not, and they drifted apart.
+        let use_test_harness = test_mode || !super::cargo_build::defines_entry_point(&self.rs_code);
+        build_native_cached(&self.rs_code, use_test_harness, release, project_dir_override, &self.native_deps, self.source_root.as_deref())
+    }
+}
+
+/// The native test harness's source for one test file (#4441: generated per
+/// file, built per file or merged into one crate per run).
+pub(crate) fn native_test_source(file: &str, no_check: bool) -> Result<NativeSource, String> {
+    generate_native_source(file, no_check, true, false, &PhaseTimer::start())
+}
+
+fn generate_native_source(file: &str, no_check: bool, test_mode: bool, native_verified: bool, t: &PhaseTimer) -> Result<NativeSource, String> {
     let opts = crate::codegen::CodegenOptions::default();
     // `metered`: from the IR, not the text — a user literal spelled like a
     // prim is emitted into `rs_code` verbatim (#3486).
@@ -43,13 +75,7 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
     // Load native deps from almide.toml (search in input file's directory, then CWD).
     // source_root is the directory containing almide.toml (where native/ lives).
     let (native_deps, source_root) = super::load_native_build_config(file);
-
-    // #2370: one predicate, shared with the auto-`main` guards. This site was
-    // already anchored; the guards were not, and they drifted apart.
-    let use_test_harness = test_mode || !super::cargo_build::defines_entry_point(&rs_code);
-    let out = build_native_cached(&rs_code, use_test_harness, release, project_dir_override, &native_deps, source_root.as_deref());
-    t.lap("cargo");
-    out
+    Ok(NativeSource { rs_code, native_deps, source_root })
 }
 
 /// Phase timing for the edit loop, behind `ALMIDE_TIME_PHASES=1`.
