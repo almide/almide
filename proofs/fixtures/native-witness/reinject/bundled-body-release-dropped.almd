@@ -1,0 +1,8 @@
+// A bundled stdlib body linked into the certified native render (#4006,
+// selfhost-link-v2): `list.join` at String is its mono instance of the
+// pure-Almide body, rendered and certified like a user fn. The drill drops
+// that linked body's last release; its own ownership witness must reject.
+effect fn main() -> Unit = {
+  let xs = list.range_step(0, 10, 3)
+  println(list.join(list.map(xs, (x) => int.to_string(x)), ","))
+}
