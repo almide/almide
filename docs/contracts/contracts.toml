@@ -5895,3 +5895,18 @@ evidence  = [
   { path = "tests/net_udp_p3_cross_test.rs", name = "udp_and_lookup_fixtures_run_alike_on_native_and_the_p3_component", class = "fixture" },
   { path = "tests/net_udp_p3_cross_test.rs", name = "sockets_ship_only_with_udp_ops_and_a_missing_grant_is_the_permission_text", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-451"
+spec      = "ALS-D7"
+title     = "A scalar effect fn exported to wasm crosses as its value: the raw export answers the ok Int, Float or Bool itself (nothing for Unit), and an err writes its message to stderr and traps"
+statement = "ALS-D7 (almide/almide#4376): on the wasm target an `@export(wasm, \"sym\")` `effect fn` whose declared return is `Int`, `Float`, `Bool` or `Unit` returns the ok value itself as the raw export's result, in the scalar's own wasm type (an i64, an f64, an i32 holding 0 or 1, no result for `Unit`), never the address of a `Result` block; so a JS, Rust, C or wasmtime-CLI host reads it the same way and holds nothing to release. Its parameters cross as a plain fn's do, and a lent Region parameter as C-446's `(base, len)`. The value is the one the program computed: after a host writes bytes into a Region an export handed out (C-446), an export reading that Region answers what the host wrote. An `err` has no slot in a scalar result: the export writes the error's message to stderr and traps, as a Region export's err does under C-446, and the wasmtime CLI exits non-zero. The module releases the Result block it unwrapped, so repeated calls leave the memory size where it settled. The `--host js` glue's wrapper returns the same value a plain fn's does (an `Int` as a number), and an err surfaces from it as the trap, not as an `AlmideError`. NOT covered: an effect fn exported without `@export(wasm, ..)` (an entry `pub` fn, whose raw value stays the Result block the `--host js` glue unwraps), a declared `Result` or `Option` return, a heap return (`String`, `Bytes`, a list, a record), the sized integer and float types, and the WASI 0.2/0.3 component lowering."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_host_js/effect_export_scalar.almd", class = "fixture" },
+  { path = "crates/almide-wasm/tests/effect_export_scalar.rs", name = "the_host_reads_back_the_byte_it_wrote_as_the_raw_result", class = "fixture" },
+  { path = "crates/almide-wasm/tests/effect_export_scalar.rs", name = "a_scalar_effect_export_returns_the_scalars_own_type", class = "fixture" },
+  { path = "crates/almide-wasm/tests/effect_export_scalar.rs", name = "an_err_traps_with_its_message", class = "fixture" },
+  { path = "tests/effect_export_scalar_raw_test.rs", name = "the_wasmtime_cli_reads_a_scalar_effect_export_as_its_value", class = "fixture" },
+]
