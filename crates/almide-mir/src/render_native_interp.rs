@@ -179,7 +179,7 @@ pub(crate) fn printed_by(func: &MirFunction, at: usize, dst: ValueId) -> Option<
 /// The `println!` a printed chain renders as.
 pub(crate) fn render_print(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
     let (template, args) = fmt_parts(pieces, tys)?;
-    Some(format!("println!(\"{template}\"{args});"))
+    Some(format!("rt_print_args(format_args!(\"{template}\"{args}));"))
 }
 
 fn render_final_opt(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
