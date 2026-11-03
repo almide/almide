@@ -7,7 +7,6 @@
 // none (`let tmp = &put(b, k); b = tmp;` was rustc E0716 on native while wasm
 // printed the answer). Such a slot is carried owned instead. Byte-matches on
 // both targets.
-
 type Arg =
   | Byte(Int)
   | Pair(Arg, Arg)
@@ -40,20 +39,27 @@ fn by_if(b: Bytes, n: Int) -> Bytes = if n <= 0 then b
 else by_if(if n % 2 == 0 then extend(b, n) else b, n - 1)
 
 fn by_match(b: Bytes, n: Int) -> Bytes = if n <= 0 then b
-else by_match(match n % 3 {
-  0 => extend(b, 30 + n),
-  1 => b,
-  _ => extend(extend(b, n), n),
-}, n - 1)
+else by_match(
+  match n % 3 {
+    0 => extend(b, 30 + n),
+    1 => b,
+    _ => extend(extend(b, n), n),
+  },
+  n - 1,
+)
 
-fn both(a: Bytes, b: Bytes, n: Int) -> Bytes = if n <= 0 then bytes.from_list(bytes.to_list(a) + bytes.to_list(b))
-else both(both(extend(a, n), b, 0), both(b, extend(a, 0), 0), n - 1)
+fn both(a: Bytes, b: Bytes, n: Int) -> Bytes =
+  if n <= 0 then bytes.from_list(bytes.to_list(a) + bytes.to_list(b))
+  else both(both(extend(a, n), b, 0), both(b, extend(a, 0), 0), n - 1)
 
 fn show(label: String, b: Bytes) -> Unit = println("${label}: ${int.to_string(bytes.len(b))} ${bytes.to_list(b) |> list.map((x) => int.to_string(x)) |> list.join(",")}")
 
 fn main() -> Unit = {
   show("nested", put(bytes.new(), Pair(Byte(1), Byte(2))))
-  show("deep", put(bytes.new(), Pair(Pair(Byte(1), Pair(Byte(2), Byte(3))), Pair(Byte(4), Byte(5)))))
+  show(
+    "deep",
+    put(bytes.new(), Pair(Pair(Byte(1), Pair(Byte(2), Byte(3))), Pair(Byte(4), Byte(5)))),
+  )
   show("call", by_call(bytes.new(), 4))
   show("block", by_block(bytes.new(), 3))
   show("if", by_if(bytes.new(), 5))
