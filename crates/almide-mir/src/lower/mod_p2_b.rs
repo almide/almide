@@ -316,6 +316,9 @@ pub(crate) struct LowerCtx {
     /// `heap_elem_lists` member for drop-op SELECTION, but the mask makes the recursive free
     /// touch only the heap slots (NOT every slot — the scalar fields must not be `rc_dec`'d).
     record_masks: HashMap<ValueId, Vec<usize>>,
+    /// All-scalar tuple and record blocks → their declared type
+    /// ([`MirFunction::aggregate_blocks`]).
+    pub(crate) aggregate_blocks: std::collections::BTreeMap<ValueId, String>,
     /// The CURRENT binding (`lower_bind`) is a MUTABLE `var` (set by `lower_stmt` from the
     /// `Bind` mutability). A `var b = r.items` heap-field extraction may be COW-mutated later,
     /// so it must take an OWNED container-grain `Dup` (mutable in place), NOT a precise borrow

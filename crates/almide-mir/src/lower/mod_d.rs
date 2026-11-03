@@ -165,6 +165,7 @@ fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, Lower
         heap_slot_masks: Default::default(),
         owned_params: Default::default(),
         call_moves: Default::default(),
+        aggregate_blocks: Default::default(),
     }))
 }
 

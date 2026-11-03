@@ -115,6 +115,7 @@ impl LowerCtx {
                     heap_slot_masks: Default::default(),
                     owned_params: Default::default(),
                     call_moves: Default::default(),
+                    aggregate_blocks: Default::default(),
                 });
                 true
             }
@@ -208,6 +209,7 @@ impl LowerCtx {
                     heap_slot_masks: Default::default(),
                     owned_params: Default::default(),
                     call_moves: Default::default(),
+                    aggregate_blocks: Default::default(),
                 });
                 true
             }
@@ -274,6 +276,7 @@ impl LowerCtx {
             heap_slot_masks: Default::default(),
             owned_params: Default::default(),
             call_moves: Default::default(),
+            aggregate_blocks: Default::default(),
         });
         true
     }
@@ -385,6 +388,7 @@ fn synth_list_eq_loop_fn(name: String, elem_call: String) -> MirFunction {
             heap_slot_masks: Default::default(),
             owned_params: Default::default(),
             call_moves: Default::default(),
+            aggregate_blocks: Default::default(),
         }
     }
 }
