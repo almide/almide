@@ -134,6 +134,16 @@ pub(crate) fn wall(msg: impl Into<String>) -> LowerError {
 }
 
 pub(crate) fn var(v: ValueId) -> String {
+    // A narrow local is stored in its own type and read widened to the lane
+    // (crate::render_native_narrow_local).
+    match crate::render_native_narrow_local::narrow_type(v) {
+        Some(_) => format!("(v{} as i64)", v.0),
+        None => var_place(v),
+    }
+}
+
+/// `v`'s storage, the place a declaration or a store names.
+pub(crate) fn var_place(v: ValueId) -> String {
     format!("v{}", v.0)
 }
 
@@ -475,6 +485,7 @@ fn render_fn(
     used_shims: &mut Vec<&'static str>,
 ) -> Result<(String, Option<NTy>), LowerError> {
     let mut tys = seed_param_ntys(func, sigs)?;
+    let _narrow = crate::render_native_narrow_local::scope(func, sigs);
     crate::render_native_bounds::begin(func);
     let _rem_divisors = rem_divisor_scope(func);
     let is_main = func.name == "main";

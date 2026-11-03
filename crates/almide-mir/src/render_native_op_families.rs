@@ -485,7 +485,10 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
     match op {
         Op::ConstInt { dst, value } => {
             tys.insert(*dst, NTy::I64);
-            line!("let mut {}: i64 = {}i64;", var(*dst), value);
+            match crate::render_native_narrow_local::narrow_type(*dst) {
+                Some(t) => line!("let mut {}: {t} = {}{t};", crate::render_native::var_place(*dst), value),
+                None => line!("let mut {}: i64 = {}i64;", var(*dst), value),
+            }
         }
         Op::Alloc { dst, init, .. } => match init {
             Init::Str(s) => {

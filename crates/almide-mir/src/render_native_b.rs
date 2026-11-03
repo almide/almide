@@ -168,7 +168,10 @@ pub(crate) fn render_set_local(
         if *prev != store_t {
             return Err(wall("native: SetLocal changes a value's type"));
         }
-        line!("{} = {};", var(*local), rhs);
+        match crate::render_native_narrow_local::narrow_type(*local) {
+            Some(t) => line!("{} = ({}) as {t};", crate::render_native::var_place(*local), rhs),
+            None => line!("{} = {};", var(*local), rhs),
+        }
     } else {
         tys.insert(*local, store_t);
         line!("let mut {} = {};", var(*local), rhs);
