@@ -279,7 +279,7 @@ fn render_foreign_region(region_ty: &str, len: &str, release: &str) -> String {
 /// walker sees the return lifted to `Result[T, String]`, so the row is read
 /// for `T`). Its error has no C form: the message goes to stderr and the
 /// process exits 1 before the caller regains control (C-452, the native
-/// counterpart of the wasm export's trap, #4376).
+/// counterpart of C-451's wasm trap, #4376).
 fn render_export_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExportAttr) -> String {
     use almide_lang::types::{Ty, TypeConstructorId};
     use almide_lang::types::extern_abi::{c_export_param_abi, c_export_return_abi, CConv};

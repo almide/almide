@@ -5,7 +5,7 @@
 // width; `Float` is a `double`; `Bool` an `int` (1 or 0); `Unit` is `void`.
 // An effect fn answers its ok value itself, never a Result. Its err writes
 // the message to stderr and exits 1 before the caller regains control, the
-// native counterpart of the wasm export's trap (almide/almide#4376).
+// native counterpart of C-451's wasm trap (almide/almide#4376).
 //
 // The C caller is this program: each `@extern(c, "c", "ecx_*")` binding names
 // the symbol an `@export(c)` fn defines, so every value crosses the C boundary
