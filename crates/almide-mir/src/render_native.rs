@@ -154,7 +154,14 @@ const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut Vec<i64>, i: i64, x: i64) 
 
 /// Borrow a stringy value as `&str` for a call argument.
 pub(crate) fn as_str_arg(code: &str, t: NTy) -> String {
+    // A string literal's binding passes the literal itself (#4006,
+    // no-perf-loss): the same bytes, and a comparison of two literals folds.
+    let literal = code
+        .strip_prefix('v')
+        .and_then(|n| n.parse::<u32>().ok())
+        .and_then(|n| crate::render_native_move::static_str_operand(ValueId(n)));
     match t {
+        NTy::Str if literal.is_some() => literal.unwrap_or_default(),
         NTy::Str => format!("&{code}"),
         NTy::StrRef => code.to_string(),
         NTy::Vec | NTy::VecRef => unreachable!("as_str_arg on vec"),
