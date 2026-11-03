@@ -46,11 +46,15 @@ fn string_ends_with(s: String, suffix: String) -> Bool = {
 // searches forward, d = -1 searches the reversed strings from their last bytes, whose first
 // match is the last match of the originals (last_index_of).
 // The border length after reading byte c in state k: fall back through the table while the next
-// needle byte differs, then extend by one on a match.
+// needle byte differs, then extend by one on a match. Slot 0 is always 0, so one matched byte
+// falls back to none without reading the table: a search reads slot k - 1 only once k >= 2
+// bytes matched, and a needle of one or two bytes (` `, `::`, `\r\n`) never reads it at all —
+// those search with no table (t = 0), the same rule the emitted kernels keep (kmp.rs, #4430).
 fn __sk_step(pa: Int, d: Int, t: Int, k: Int, c: Int) -> Int =
-  if k > 0 and prim.load8(pa + k * d) != c then __sk_step(pa, d, t, prim.load64(t + (k - 1) * 8), c)
-  else if prim.load8(pa + k * d) == c then k + 1
-  else k
+  if prim.load8(pa + k * d) == c then k + 1
+  else if k == 0 then 0
+  else if k == 1 then __sk_step(pa, d, t, 0, c)
+  else __sk_step(pa, d, t, prim.load64(t + (k - 1) * 8), c)
 
 fn __sk_fill(pa: Int, d: Int, nlen: Int, t: Int, q: Int, k: Int) -> Int = if q >= nlen then 0
 else {
@@ -65,10 +69,25 @@ fn __sk_table(pa: Int, d: Int, nlen: Int, t: Int) -> Int = {
   __sk_fill(pa, d, nlen, t, 1, 0)
 }
 
+// The first address in [p, e) (stepping by d) holding byte c, or e.
+fn __sk_lead(p: Int, d: Int, e: Int, c: Int) -> Int = if p == e then e
+else if prim.load8(p) == c then p
+else __sk_lead(p + d, d, e, c)
+
 // The first match start at or after i (state k), or -1 once the rest cannot hold one.
+// In state 0 (nothing matched) a match can start only at a byte equal to the needle's first, so
+// the scan walks to the next such byte in __sk_lead's tight loop instead of one __sk_step call a
+// byte (#4430). It reads each byte once, as the state-0 steps it replaces would: still one
+// forward walk, O(slen + nlen). The guard keeps i <= slen - nlen there, so the walk ends at e.
 fn __sk_scan(ha: Int, d: Int, slen: Int, pa: Int, nlen: Int, t: Int, i: Int, k: Int) -> Int =
   if slen - i < nlen - k then 0 - 1
-  else {
+  else if k == 0 then {
+    let e = ha + (slen - nlen + 1) * d
+    let p = __sk_lead(ha + i * d, d, e, prim.load8(pa))
+    if p == e then 0 - 1
+    else if nlen == 1 then (p - ha) * d
+    else __sk_scan(ha, d, slen, pa, nlen, t, (p - ha) * d + 1, 1)
+  } else {
     let k1 = __sk_step(pa, d, t, k, prim.load8(ha + i * d))
     if k1 == nlen then i + 1 - nlen
     else __sk_scan(ha, d, slen, pa, nlen, t, i + 1, k1)
@@ -87,15 +106,29 @@ fn __sk_next(sbase: Int, slen: Int, nbase: Int, nlen: Int, t: Int, from: Int) ->
   0,
 )
 
-// BYTE position of the first needle match, or -1 (the empty needle matches at 0). The table is
-// a scratch list dropped at scope end.
-fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then 0
-else if nlen > slen then 0 - 1
-else {
+// The first forward match at or after `from` with a fresh table (nlen >= 3), a scratch list
+// dropped at scope end.
+fn __find_kmp(sbase: Int, slen: Int, nbase: Int, nlen: Int, from: Int) -> Int = {
   let tbl = prim.alloc_list(nlen)
   let t = prim.handle(tbl) + 12
   let _t = __sk_table(nbase, 1, nlen, t)
-  __sk_next(sbase, slen, nbase, nlen, t, 0)
+  __sk_next(sbase, slen, nbase, nlen, t, from)
+}
+
+// BYTE position of the first needle match, or -1 (the empty needle matches at 0). A needle of
+// one or two bytes needs no table. A longer one is first compared outright at the first byte
+// that can start it: a hit there (the common `contains`) answers without building the table,
+// and a miss resumes the table search one byte later. That compare runs once, at most nlen
+// bytes, so the search stays O(slen + nlen) (#4430).
+fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then 0
+else if nlen > slen then 0 - 1
+else if nlen <= 2 then __sk_next(sbase, slen, nbase, nlen, 0, 0)
+else {
+  let e = sbase + slen - nlen + 1
+  let p = __sk_lead(sbase, 1, e, prim.load8(nbase))
+  if p == e then 0 - 1
+  else if __byte_eq(p + 1, nbase + 1, nlen - 1) then p - sbase
+  else __find_kmp(sbase, slen, nbase, nlen, p - sbase + 1)
 }
 
 // BYTE position of the LAST needle match, or -1 (the empty needle matches at `slen`, v0
@@ -103,11 +136,27 @@ else {
 fn __rfind_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then slen
 else if nlen > slen then 0 - 1
 else {
+  let r = __rfind_scan(sbase, slen, nbase, nlen)
+  if r < 0 then r else slen - r - nlen
+}
+
+// The first match of the reversed needle in the reversed haystack, with a table only for a
+// needle of three bytes or more.
+fn __rfind_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 2 then __sk_scan(
+  sbase + slen - 1,
+  0 - 1,
+  slen,
+  nbase + nlen - 1,
+  nlen,
+  0,
+  0,
+  0,
+)
+else {
   let tbl = prim.alloc_list(nlen)
   let t = prim.handle(tbl) + 12
   let _t = __sk_table(nbase + nlen - 1, 0 - 1, nlen, t)
-  let r = __sk_scan(sbase + slen - 1, 0 - 1, slen, nbase + nlen - 1, nlen, t, 0, 0)
-  if r < 0 then r else slen - r - nlen
+  __sk_scan(sbase + slen - 1, 0 - 1, slen, nbase + nlen - 1, nlen, t, 0, 0)
 }
 
 // Count NON-OVERLAPPING needle matches from `from`, resuming past each match (v0 semantics:
@@ -140,6 +189,7 @@ else {
 }
 
 fn __count_nonempty(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen > slen then 0
+else if nlen <= 2 then __count_scan(sbase, slen, nbase, nlen, 0, 0, 0)
 else {
   let tbl = prim.alloc_list(nlen)
   let t = prim.handle(tbl) + 12
@@ -253,16 +303,25 @@ fn __empty_split(s: String) -> List[String] = {
   result
 }
 
-fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
-  let sh = prim.handle(s)
-  let slen = prim.load32(sh + 4)
-  let tbl = prim.alloc_list(seplen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(seph + 12, 1, seplen, t)
+// The pieces of the slen-byte String at sh around the seplen-byte separator at seph, searched
+// with table t (0 for a separator of one or two bytes).
+fn __split_with(sh: Int, slen: Int, seph: Int, seplen: Int, t: Int) -> List[String] = {
   let nseps = __count_scan(sh + 12, slen, seph + 12, seplen, t, 0, 0)
   let result = prim.alloc_list_str(nseps + 1)
   let _x = __split_fill(prim.handle(result), sh, slen, seph, seplen, t, 0, 0)
   result
+}
+
+fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  if seplen <= 2 then __split_with(sh, slen, seph, seplen, 0)
+  else {
+    let tbl = prim.alloc_list(seplen)
+    let t = prim.handle(tbl) + 12
+    let _t = __sk_table(seph + 12, 1, seplen, t)
+    __split_with(sh, slen, seph, seplen, t)
+  }
 }
 
 @implements("string.split")
@@ -325,9 +384,18 @@ fn __rep_do(s: String, from: String, to: String) -> String = {
   let flen = prim.load32(fh + 4)
   let th = prim.handle(to)
   let tlen = prim.load32(th + 4)
-  let tbl = prim.alloc_list(flen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(fh + 12, 1, flen, t)
+  if flen <= 2 then __rep_with(h, slen, fh, flen, th, tlen, 0)
+  else {
+    let tbl = prim.alloc_list(flen)
+    let t = prim.handle(tbl) + 12
+    let _t = __sk_table(fh + 12, 1, flen, t)
+    __rep_with(h, slen, fh, flen, th, tlen, t)
+  }
+}
+
+// s (handle h) with every `from` (handle fh) replaced by `to` (handle th), searched with table
+// t (0 for a `from` of one or two bytes).
+fn __rep_with(h: Int, slen: Int, fh: Int, flen: Int, th: Int, tlen: Int, t: Int) -> String = {
   let count = __count_scan(h + 12, slen, fh + 12, flen, t, 0, 0)
   let delta = tlen - flen
   let rlen = slen + count * delta
