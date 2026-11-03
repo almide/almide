@@ -195,6 +195,18 @@ pub fn stdlib_owned_type_owner(name: &str) -> Option<&'static str> {
     stdlib_owned_types().iter().find_map(|(module, ty)| (*ty == name).then_some(*module))
 }
 
+/// The canonical identity of a stdlib-owned type spelled THROUGH its owning
+/// module: `net.IpAddr` → `IpAddr`, the bare name the checker gives the type
+/// and the key its bundled declaration registers under (see
+/// [`stdlib_owned_types`]). Every other name is returned unchanged — a user
+/// module's `m.IpAddr` stays `m.IpAddr`, a bare name stays bare (#4383).
+pub fn stdlib_owned_type_key(name: &str) -> &str {
+    match name.rsplit_once('.') {
+        Some((module, bare)) if stdlib_owned_type_owner(bare) == Some(module) => bare,
+        _ => name,
+    }
+}
+
 /// The marker a built-in protocol requirement's name starts with when one
 /// stdlib module declares SEVERAL types that satisfy it (`Close`: net's
 /// `TcpStream`, `TcpListener` and `UdpSocket`; `HttpMessage`: http's request
