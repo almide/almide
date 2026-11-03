@@ -674,6 +674,7 @@ fn link_self_host(
 
     let mut loaded: HashMap<&'static str, String> = HashMap::new();
     let mut module_diags = Vec::new();
+    let mut reloaded_whole: HashSet<String> = HashSet::new();
     loop {
         let mut needed = HashSet::new();
         scan_program(ir, &impls, &loaded, &mut needed);
@@ -692,16 +693,26 @@ fn link_self_host(
         // A splice body links after module resolution, so a call it makes
         // into an Almide-bodied fn of a bundled module the entry never reached
         // (`bytes.__f16_bits` from matrix's f16 writer) has no lowered body:
-        // load that module now, by the same steps `lower_resolved` takes.
+        // load that module now, by the same steps `lower_resolved` takes. The
+        // resolver keeps only the functions the program's sources reach
+        // (#4328), so a module that IS loaded may still lack the one a splice
+        // body or the emitter calls (`string.__err_text`'s body calls
+        // `list.join`): such a module is lowered again whole, once, and
+        // replaces its pruned lowering.
         for surface in &needed {
             if registry.contains_key(surface) {
                 continue;
             }
-            let Some((module, _)) = surface.split_once('.') else { continue };
-            if !crate::stdlib::is_bundled_module(module)
-                || ir.modules.iter().any(|m| m.name.as_str() == module)
-            {
+            let Some((module, func)) = surface.split_once('.') else { continue };
+            if !crate::stdlib::is_bundled_module(module) {
                 continue;
+            }
+            let present = ir.modules.iter().position(|m| m.name.as_str() == module);
+            if let Some(i) = present {
+                let has_fn = ir.modules[i].functions.iter().any(|f| f.name.as_str() == func);
+                if has_fn || !reloaded_whole.insert(module.to_string()) {
+                    continue;
+                }
             }
             let Some(src) = almide_types::stdlib_info::bundled_source(module) else { continue };
             let mut parser = crate::parser::Parser::new(crate::lexer::Lexer::tokenize(src));
@@ -719,7 +730,10 @@ fn link_self_host(
             let mut mod_ir = crate::lower::lower_module(module, &mod_prog, &checker.env, &checker.type_map, None);
             checker.env.import_table = saved_table;
             drop_registered_intrinsic_stubs(module, &mut mod_ir);
-            ir.modules.push(mod_ir);
+            match present {
+                Some(i) => ir.modules[i] = mod_ir,
+                None => ir.modules.push(mod_ir),
+            }
             grew = true;
         }
         for surface in needed {
