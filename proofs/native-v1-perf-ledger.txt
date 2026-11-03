@@ -5,6 +5,3 @@
 # as the program reads clean; the gate fails on a clean row left behind.
 #
 # program<TAB>ratio<TAB>found<TAB>plan
-spec/wasm_cross/fan_trap_waits_for_slow_element_below.almd	1.116	2026-11-01	threaded fan block: per-arm scoped spawn and result routing cost more than the standard route on a 2M-step arm; profile the spawn/join path in render_native_fan.rs (family H)
-spec/wasm_cross/rc_reclaim_churn.almd	1.193	2026-11-01	a record field read for string.len clones the String; extend render_native_borrow_read to generated-struct field reads (borrow-only uses)
-research/benchmark/perf/v1-shapes/string_index_loop.almd	1.380	2026-11-01	string.get renders the linked self-host codepoint scan per call where v0 calls the runtime; render the scan over the borrowed bytes without per-byte bounds checks, or route string.get to the declared native floor
