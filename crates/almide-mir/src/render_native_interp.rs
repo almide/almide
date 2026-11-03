@@ -179,7 +179,7 @@ pub(crate) fn printed_by(func: &MirFunction, at: usize, dst: ValueId) -> Option<
 /// The `println!` a printed chain renders as.
 pub(crate) fn render_print(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
     let (template, args) = fmt_parts(pieces, tys)?;
-    Some(format!("rt_print_args(format_args!(\"{template}\"{args}));"))
+    Some(format!("println!(\"{template}\"{args});"))
 }
 
 fn render_final_opt(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
@@ -199,7 +199,9 @@ fn fmt_parts(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy
                     return None;
                 }
                 template.push_str("{}");
-                args.push(var(*n));
+                // By value (a copy in a block): a reference would pin the
+                // integer's local to memory for the rest of the function.
+                args.push(format!("{{ {} }}", var(*n)));
             }
             Piece::Bool(n) => {
                 if tys.get(n) != Some(&NTy::I64) {

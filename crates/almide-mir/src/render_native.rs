@@ -148,11 +148,6 @@ pub(crate) fn var(v: ValueId) -> String {
 /// binary to binary, and the small-program perf check
 /// (scripts/check-native-v1-perf-small.sh) leaves it out of a program's work
 /// by toggling collection on this function.
-/// The print a formatted line goes through (#4006, no-perf-loss): one
-/// out-of-line call, so the formatting machinery stays out of the caller's
-/// code, where it would change how the rest of the function is optimised.
-/// `println!` is the macro `rt_print_str` prints through.
-const PRINT_ARGS_SHIM: &str = "#[inline(never)]\nfn rt_print_args(a: std::fmt::Arguments<'_>) { println!(\"{}\", a); }";
 const STACK_GUARD_GLUE_SHIM: &str = "#[inline(never)]\nfn almide_stack_guard_install() {\n    #[cfg(all(any(target_os = \"linux\", target_os = \"macos\"), not(miri)))]\n    almide_stack_guard::install();\n}\n#[cfg(any(target_os = \"linux\", target_os = \"macos\"))]\nfn almide_stack_guard_stdout() {}";
 const IDX_GET_SHIM: &str = "fn almide_idx_get(v: &[i64], i: i64) -> i64 {\n        if i < 0 || i as usize >= v.len() { eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }\n        v[i as usize]\n}";
 const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut Vec<i64>, i: i64, x: i64) {\n        if i < 0 || i as usize >= v.len() { eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }\n        v[i as usize] = x;\n}";
@@ -533,11 +528,11 @@ fn render_fn(
         }
         if let Some((n, is_bool)) = scalar_prints.get(&i) {
             if tys.get(n) == Some(&NTy::I64) {
-                used_shims.push(PRINT_ARGS_SHIM);
                 if *is_bool {
-                    line!("rt_print_args(format_args!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }}));", var(*n));
+                    line!("println!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }});", var(*n));
                 } else {
-                    line!("rt_print_args(format_args!(\"{{}}\", {}));", var(*n));
+                    // By value: a reference would pin the local to memory.
+                    line!("println!(\"{{}}\", {{ {} }});", var(*n));
                 }
                 continue;
             }
@@ -553,7 +548,6 @@ fn render_fn(
             ) {
                 printed.insert(j);
                 tys.insert(*dst, NTy::Str);
-                used_shims.push(PRINT_ARGS_SHIM);
                 line!("{code}");
                 continue;
             }
