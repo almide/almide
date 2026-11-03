@@ -1,0 +1,3 @@
+expects_code = "E090"
+expects_error = "parameter 'name' has type String, which has no C representation"
+hint_substring = "a C caller's `const char*` has no length and no owner"

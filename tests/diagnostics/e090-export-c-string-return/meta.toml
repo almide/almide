@@ -1,0 +1,3 @@
+expects_code = "E090"
+expects_error = "@export(c) fn 'label': return type String has no C representation"
+hint_substring = "an @export(c) return is one of"
