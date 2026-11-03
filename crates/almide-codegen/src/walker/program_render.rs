@@ -287,9 +287,23 @@ fn render_program_test_fns(ctx: &RenderContext, program: &IrProgram, parts: &mut
         .map(|f| render_function(ctx, f))
         .collect();
     // `testing.assert_aborts` (ADR-0029): the hidden child entry, when the
-    // lowering synthesized the abort-site dispatcher.
-    if program.functions.iter().any(|f| f.name.as_str() == almide_ir::ABORT_DISPATCH_FN) {
-        if let Some(entry) = ctx.templates.render_with("abort_site_entry", None, &[], &[("dispatch", almide_ir::ABORT_DISPATCH_FN)]) {
+    // lowering synthesized the abort-site dispatcher. The native test run's
+    // one program (#4441) has a dispatcher per test-file module, rendered as
+    // `almide_rt_<module>___almd_abort_dispatch`; each gets its entry under
+    // the same prefix, which the runtime's re-execution names. A module whose
+    // tests were not lowered with it (#2550) gets none.
+    for dispatch in program.functions.iter().filter(|f| f.name.as_str() == almide_ir::ABORT_DISPATCH_FN) {
+        let origin = dispatch.module_origin.as_deref();
+        if origin.is_some() && !test_fns.iter().any(|t| t.module_origin.as_deref() == origin) {
+            continue;
+        }
+        let symbol = match origin {
+            Some(origin) => module_fn_symbol(almide_ir::ABORT_DISPATCH_FN, origin),
+            None => almide_ir::ABORT_DISPATCH_FN.to_string(),
+        };
+        let prefix = symbol.strip_suffix(almide_ir::ABORT_DISPATCH_FN).unwrap_or_default();
+        let entry_name = format!("{prefix}__almd_abort_site_entry");
+        if let Some(entry) = ctx.templates.render_with("abort_site_entry", None, &[], &[("dispatch", symbol.as_str()), ("entry", entry_name.as_str())]) {
             test_parts.push(entry);
         }
     }

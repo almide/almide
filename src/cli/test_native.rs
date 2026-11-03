@@ -1,21 +1,20 @@
-//! Building a run's native test binaries (#4441): ONE crate per run.
+//! Building a run's native test binaries (#4441): ONE program per run.
 //!
-//! Each test file is still lowered on its own — its own frontend, its own
-//! `[permissions]`, its own generated Rust, exactly as before — but the
-//! sources of every file that shares a package context are folded into one
-//! crate ([`super::test_merge`]) and built by ONE rustc. The shared modules,
-//! the runtime and the stdlib then compile once per run instead of once per
-//! file, and the crate's dir is stable across runs, so an edit recompiles
-//! incrementally.
+//! Each test file is first compiled on its own, exactly as before — its own
+//! diagnostics, its own `[permissions]` verdict, its own compile error. The
+//! files that compile are then compiled AGAIN as one program
+//! ([`crate::compile_driver::compile_test_run`]): every test file a module of
+//! an empty entry, every module they reach checked, lowered and emitted once,
+//! the runtime the whole program needs, all in one crate that ONE rustc
+//! builds — the `go test` model. The crate's dir is stable across runs, so an
+//! edit recompiles incrementally.
 //!
-//! The binary is then run once per FILE, selecting that file's module
-//! ([`super::test_report::run_native_test_binary`]), so a file still runs in
-//! a process of its own, with the output, counts and verdict it had.
+//! The binary is then run once per FILE, selecting that file's tests
+//! ([`super::test_report::run_native_test_binary_in`]), so a file still runs
+//! in a process of its own, with the output, counts and verdict it had.
 //!
-//! A merged crate that does not build — a rustc error in one file, or a
-//! merge the dedup got wrong — is not a verdict: the files fall back to one
-//! crate each, the old route, and a real build error is reported per file
-//! as before.
+//! A run whose one program does not compile or build is not a verdict: its
+//! files fall back to one crate each, the per-file route.
 
 use super::run::NativeSource;
 use super::test_scratch::TestScratch;
@@ -23,13 +22,13 @@ use super::worker_pool::{bounded_parallel, cpu_slots, guard_worker_panic};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Where a file's tests live in a merged binary.
+/// Where a file's tests live in the run's binary.
 #[derive(Clone, Debug)]
 pub(crate) struct MergedModule {
-    /// The file's module, `almide_test_file_<i>`.
-    pub name: String,
-    /// How many tests the OTHER files' modules hold: libtest counts them as
-    /// filtered out of this file's run, and the file's report must not.
+    /// The prefix the file's test fns carry, `almide_rt_<module>_`.
+    pub prefix: String,
+    /// How many tests the OTHER files hold: libtest counts them as filtered
+    /// out of this file's run, and the file's report must not.
     pub others: usize,
 }
 
@@ -78,7 +77,7 @@ pub(super) fn compile_native_tests(files: &[String], no_check: bool, scratch: &A
             Ok(built) => results.extend(built),
             Err(e) => {
                 if almide_base::env::flag("ALMIDE_TEST_VERBOSE") {
-                    crate::err(&format!("note: the run's merged native test crate did not build; building one crate per file:\n{e}"));
+                    crate::err(&format!("note: the run's one native test program did not build; building one crate per file:\n{e}"));
                 }
                 per_file.extend(members);
             }
@@ -108,11 +107,13 @@ fn context_key(src: &NativeSource) -> String {
     format!("deps={deps};root={:?}", src.source_root)
 }
 
-/// Build one merged crate for `members` and tell each file where its tests are.
+/// Compile `members` as one program, build it, and tell each file where its
+/// tests are.
 fn build_merged(key: &str, members: &[(String, NativeSource)], scratch: &TestScratch) -> Result<Vec<(String, Result<NativeTestBin, String>)>, String> {
-    let codes: Vec<&str> = members.iter().map(|(_, s)| s.rs_code.as_str()).collect();
+    let files: Vec<String> = members.iter().map(|(f, _)| f.clone()).collect();
+    let program = crate::compile_driver::compile_test_run(&files)?;
     let merged = NativeSource {
-        rs_code: super::test_merge::merge(&codes),
+        rs_code: super::build::inject_fs_scope(super::build::arm_alloc_count(program.rs_code)),
         native_deps: members[0].1.native_deps.clone(),
         source_root: members[0].1.source_root.clone(),
     };
@@ -121,12 +122,11 @@ fn build_merged(key: &str, members: &[(String, NativeSource)], scratch: &TestScr
     let total = listed.len();
     Ok(members
         .iter()
-        .enumerate()
-        .map(|(i, (file, _))| {
-            let name = super::test_merge::file_module(i);
-            let prefix = format!("{name}::");
-            let own = listed.iter().filter(|t| t.starts_with(&prefix)).count();
-            (file.clone(), Ok(NativeTestBin { path: path.clone(), module: Some(MergedModule { name, others: total - own }) }))
+        .zip(program.test_prefixes)
+        .map(|((file, _), prefix)| {
+            let own_path = format!("tests::{prefix}__");
+            let own = listed.iter().filter(|t| t.starts_with(&own_path)).count();
+            (file.clone(), Ok(NativeTestBin { path: path.clone(), module: Some(MergedModule { prefix, others: total - own }) }))
         })
         .collect())
 }

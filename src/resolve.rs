@@ -25,6 +25,9 @@ pub struct ResolvedModules {
     /// compiler bug, not user input. Used to attribute a module's own type
     /// errors to its own file when the ENTRY program imports it (#862).
     pub sources: std::collections::HashMap<String, (String, String)>,
+    /// The modules that are TEST FILES of the native test run's one program
+    /// (#4441): their `test` blocks are lowered with them.
+    pub test_modules: HashSet<String>,
 }
 
 /// Threaded through the recursive `load_*`/`resolve_*` helpers below.
@@ -253,7 +256,7 @@ pub fn resolve_imports_with_deps(
         }
     }
 
-    Ok(ResolvedModules { modules: loaded, sources })
+    Ok(ResolvedModules { modules: loaded, sources, test_modules: HashSet::new() })
 }
 
 /// Load a bundled stdlib module from embedded source.

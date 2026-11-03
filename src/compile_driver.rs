@@ -162,7 +162,8 @@ pub(crate) fn lower_user_modules(
     let mut module_diags = Vec::new();
     let sources = std::mem::take(&mut resolved.sources);
     for module in &mut resolved.modules {
-        lower_one_user_module(checker, module, module_irs, ir_program, &sources, &mut module_diags);
+        let is_test = resolved.test_modules.contains(&module.0);
+        lower_one_user_module(checker, module, module_irs, ir_program, &sources, &mut module_diags, is_test);
     }
     resolved.sources = sources;
     module_diags
@@ -178,6 +179,7 @@ fn lower_one_user_module(
     ir_program: &mut Option<almide::ir::IrProgram>,
     sources: &std::collections::HashMap<String, (String, String)>,
     module_diags: &mut Vec<(String, String, Vec<diagnostic::Diagnostic>)>,
+    is_test_file: bool,
 ) {
     let (name, mod_prog, pkg_id, _) = module;
     if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { return; }
@@ -208,7 +210,11 @@ fn lower_one_user_module(
     let import_table_name = self_name.as_deref().unwrap_or(name);
     let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
     let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-    let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+    let mod_ir_module = if is_test_file {
+        almide::lower::lower_test_module(name, mod_prog, &checker.env, &checker.type_map)
+    } else {
+        almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned)
+    };
     // Stdlib Declarative Unification arc complete: stdlib/defs/ is
     // gone, every stdlib fn lives in `stdlib/<m>.almd`. Fns with
     // `@inline_rust` / `@wasm_intrinsic` carry no real body (the
@@ -501,4 +507,103 @@ pub(crate) fn codegen_metered(mut ir: almide::ir::IrProgram, codegen_opts: &code
         codegen::CodegenOutput::Source(s) => s + &almide_mir::pipeline::native_meter_runtime(),
         codegen::CodegenOutput::Binary(_) => unreachable!(),
     }
+}
+
+/// The native test run as ONE program (#4441): what [`compile_test_run`]
+/// returns.
+pub(crate) struct TestRunProgram {
+    /// The generated Rust of the whole run.
+    pub rs_code: String,
+    /// Per test file, in the order given: the prefix its test fns carry in
+    /// the generated crate (`almide_rt_<module>_`, the flattened name of a
+    /// module fn), so the runner can select and report one file's tests.
+    pub test_prefixes: Vec<String>,
+}
+
+/// Compile every test file of a native test run as ONE program, the way
+/// `almide build` compiles one: each test file becomes a module of an empty
+/// entry program, every module they reach is loaded, checked, lowered and
+/// emitted once, and the runtime is the one the whole program needs. The
+/// test files' `test` blocks are kept (another module's are not, #2550).
+///
+/// Each file has already been compiled on its own, with its diagnostics
+/// printed and its errors reported; this compile prints nothing more, and a
+/// file set it cannot compile is reported by `Err` for the caller to fall
+/// back to one program per file.
+pub(crate) fn compile_test_run(files: &[String]) -> Result<TestRunProgram, String> {
+    let was = crate::SUPPRESS_WARNINGS.swap(true, std::sync::atomic::Ordering::Relaxed);
+    let result = compile_test_run_quiet(files);
+    crate::SUPPRESS_WARNINGS.store(was, std::sync::atomic::Ordering::Relaxed);
+    result
+}
+
+fn compile_test_run_quiet(files: &[String]) -> Result<TestRunProgram, String> {
+    let first = files.first().ok_or("no test file")?;
+    let parsed_project = cwd_project();
+    if let Some(ref proj) = parsed_project {
+        project::check_compiler_version(proj)?;
+    }
+    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = match parsed_project {
+        Some(ref proj) => project_fetch::fetch_all_deps(proj)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|fd| (fd.pkg_id, fd.source_dir))
+            .collect(),
+        None => vec![],
+    };
+
+    // Every module any test file reaches, once each, in an order that keeps
+    // each file's own resolution order (leaves first): a module's
+    // dependencies precede it in the file that first loaded it.
+    let mut modules: Vec<(String, ast::Program, Option<project::PkgId>, bool)> = Vec::new();
+    let mut loaded: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut sources = std::collections::HashMap::new();
+    let mut self_versioned = resolve::SelfVersionedNames::new();
+    let mut test_files = Vec::new();
+    for (i, file) in files.iter().enumerate() {
+        let source = almide::source_overlay::read_to_string(file).map_err(|e| format!("{file}: {e}"))?;
+        let tokens = lexer::Lexer::tokenize(&source);
+        let mut parser = parser::Parser::new(tokens).with_file(file);
+        let program = parser.parse().map_err(|e| format!("{file}: {e}"))?;
+        if !parser.errors.is_empty() {
+            return Err(format!("{file}: parse errors"));
+        }
+        let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)?;
+        self_versioned.extend(resolve::include_native_callback_modules(file, &dep_paths, &mut resolved)?);
+        for m in resolved.modules {
+            if loaded.insert(m.0.clone()) {
+                modules.push(m);
+            }
+        }
+        sources.extend(resolved.sources);
+        let name = format!("almide_test_file_{i}");
+        sources.insert(name.clone(), (file.clone(), source));
+        test_files.push((name, program));
+    }
+    let mut test_modules = std::collections::HashSet::new();
+    let mut test_prefixes = Vec::new();
+    for (name, program) in test_files {
+        test_prefixes.push(format!("almide_rt_{}_", almide_base::names::module_ident(&name)));
+        test_modules.insert(name.clone());
+        modules.push((name, program, None, false));
+    }
+    let mut resolved = resolve::ResolvedModules { modules, sources, test_modules };
+
+    let mut entry = parser::Parser::new(lexer::Lexer::tokenize("")).parse().map_err(|e| e.to_string())?;
+    let parsed = ParsedSource { file: first, source_text: "", parse_errors: &[], has_parse_errors: false };
+    let mut module_irs = std::collections::HashMap::new();
+    let (mut ir_program, _) = typecheck_and_lower_for_compile(parsed, &mut entry, &mut resolved, &self_versioned, &mut module_irs)?;
+    let permissions_project = project::permissions_project_for(first).or(parsed_project);
+    optimize_verify_and_link(&mut ir_program, &permissions_project, (first, ""))?;
+    let ir = ir_program.as_mut().ok_or("the test run did not lower")?;
+    // A metered program (`fan.bounded` & co.) links v1-rendered regions
+    // against its entry file's source: that stays a per-file build.
+    if almide::ir::runtime_use::uses_metered_prims(ir) {
+        return Err("a test file uses the deterministic meter".into());
+    }
+    let rs_code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, &codegen::CodegenOptions::default()) {
+        codegen::CodegenOutput::Source(s) => s,
+        codegen::CodegenOutput::Binary(_) => unreachable!(),
+    };
+    Ok(TestRunProgram { rs_code, test_prefixes })
 }

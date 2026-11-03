@@ -120,6 +120,7 @@ pub(crate) fn resolve_modules(
         ModuleSource::Provided(list) => Ok(crate::resolve::ResolvedModules {
             modules: list.iter().map(|(n, p, s)| (n.clone(), p.clone(), None, *s)).collect(),
             sources: std::collections::HashMap::new(),
+            test_modules: Default::default(),
         }),
     }
 }
