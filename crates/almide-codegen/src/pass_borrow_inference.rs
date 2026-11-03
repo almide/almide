@@ -61,7 +61,7 @@ fn seed_pending_user_fns(program: &IrProgram) -> HashSet<String> {
 ///
 /// `TailCallOptPass` (which runs after this) rewrites a tail-recursive function
 /// into a loop whose params are the mutable loop state, forcing to owned every
-/// slot the loop cannot keep a reference in (`pass_tco::loop_keeps_borrow`).
+/// slot the loop cannot keep a reference in (`pass_tco::tco_kept_borrows`).
 /// Borrow inference runs before TCO, so without this it would infer those params
 /// as `Ref` and a caller forwarding a value into one would get a `Ref` param that
 /// clashes with the post-TCO owned signature → E0308. Bake the owned-ness in now
@@ -78,13 +78,9 @@ fn tco_owned_params(func: &IrFunction, mut borrows: Vec<ParamBorrow>) -> Vec<Par
         return borrows;
     }
     if crate::pass_tco::is_tco_candidate(func) {
-        let identity = crate::pass_tco::tco_identity_carried(func);
+        let kept = crate::pass_tco::tco_kept_borrows(func, |i, _| !matches!(borrows.get(i), Some(ParamBorrow::Own) | None));
         for (i, b) in borrows.iter_mut().enumerate() {
-            if matches!(b, ParamBorrow::Own) { continue; }
-            let keep = func.params.get(i).is_some_and(|p| {
-                crate::pass_tco::loop_keeps_borrow(p, identity.get(i).copied().unwrap_or(false))
-            });
-            if !keep {
+            if !kept.get(i).copied().unwrap_or(false) {
                 *b = ParamBorrow::Own;
             }
         }

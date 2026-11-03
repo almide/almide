@@ -47,12 +47,47 @@ echo "==> Building browser harness (wasm32-unknown-unknown via wasm-pack)"
 ( cd "$UU_HARNESS" && wasm-pack --version && wasm-pack build --target nodejs --out-dir "$WORK/pkg" ) > "$WORK/uu-build.log" 2>&1 \
   || { echo "::error::wasm32-unknown-unknown harness build failed — log tail follows"; tail -100 "$WORK/uu-build.log"; exit 2; }
 
-cat > "$WORK/run.js" <<'JS'
-const pkg = require(process.argv[2]);
+# One node process compiles a whole list of fixtures (`<index>\t<path>` per
+# line), each on a FRESH instance of the browser compiler: the package is
+# dropped from the require cache and loaded again before every fixture, so no
+# state carries from one compile to the next, as when each fixture had its
+# own `node` process. V8 keeps the compiled code of identical wasm bytes for
+# the life of the process, so only the first load pays the module compile —
+# the cost that a node start per fixture paid 1012 times (~15 min of the job,
+# and V8 compiles on every core, so running those starts side by side bought
+# nothing: develop run 41604028581). Per fixture it writes what the old
+# per-process run left behind: `uu.wasm` on success, the thrown value in `err`
+# (a structured `wall: …` refusal or a panic's RuntimeError) and the exit
+# status in `brc`.
+cat > "$WORK/batch.js" <<'JS'
 const fs = require('fs');
-const src = fs.readFileSync(process.argv[3], 'utf8');
-const bytes = pkg.compile_source_to_wasm(src);   // throws (panics) → nonzero exit
-fs.writeFileSync(process.argv[4], Buffer.from(bytes));
+const path = require('path');
+const pkgDir = path.resolve(process.argv[2]);
+const lines = fs.readFileSync(process.argv[3], 'utf8').split('\n').filter(Boolean);
+const work = process.argv[4];
+function fresh() {
+  for (const k of Object.keys(require.cache)) if (k.startsWith(pkgDir)) delete require.cache[k];
+  return require(pkgDir);
+}
+let errText = '';
+console.error = (...a) => { errText += a.map(String).join(' ') + '\n'; };
+for (const line of lines) {
+  const tab = line.indexOf('\t');
+  const dir = path.join(work, 'fix', line.slice(0, tab));
+  const fixture = line.slice(tab + 1);
+  errText = '';
+  let rc = 0;
+  try {
+    const pkg = fresh();
+    const bytes = pkg.compile_source_to_wasm(fs.readFileSync(fixture, 'utf8'));
+    fs.writeFileSync(path.join(dir, 'uu.wasm'), Buffer.from(bytes));
+  } catch (e) {
+    errText += (e && e.stack ? e.stack : String(e)) + '\n';
+    rc = 1;
+  }
+  fs.writeFileSync(path.join(dir, 'err'), errText);
+  fs.writeFileSync(path.join(dir, 'brc'), rc + '\n');
+}
 JS
 
 NATIVE_BIN="$NATIVE_HARNESS/target/release/wasmgen-harness"
@@ -71,24 +106,38 @@ MAX_WALLED=0
 walled=0
 : > "$WORK/walled.txt"
 determinism_select "$FIXTURE_DIR" "$WORK/selected.txt"
-# The two compiles per fixture run on parallel workers (DETERMINISM_JOBS,
-# default: cores), each fixture in its own directory; the verdicts below are
-# then read back in corpus order, so the log and the judgement are what the
-# one-at-a-time loop produced. One at a time, the loop was 16 of this job's
-# 23 minutes on develop run 41595889646 (1011 fixtures, ~1 s each: a native
-# harness run and a node start that loads the wasm-bindgen package).
+# Both compiles of every fixture run before the judging loop, each fixture in
+# its own directory; the verdicts below are read back in corpus order, so the
+# log and the judgement are what the one-at-a-time loop produced. Native: one
+# harness run per fixture on parallel workers. Browser: DETERMINISM_JOBS node
+# processes (default: cores), each compiling every JOBS-th fixture (batch.js).
 JOBS="${DETERMINISM_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
-compile_one() { # index fixture
+compile_native() { # index fixture
   d="$WORK/fix/$1"; mkdir -p "$d"
   [ -e "$2" ] || return 0
   "$NATIVE_BIN" "$2" "$d/native.wasm" 2>"$d/native.err"; echo $? > "$d/nrc"
-  node "$WORK/run.js" "$WORK/pkg" "$2" "$d/uu.wasm" 2>"$d/err"; echo $? > "$d/brc"
 }
-export -f compile_one
+export -f compile_native
 export WORK NATIVE_BIN
 awk '{ print NR; print $0 }' "$WORK/selected.txt" | tr '\n' '\0' \
-  | xargs -0 -n 2 -P "$JOBS" bash -c 'compile_one "$1" "$2"' _
-echo "==> compiled $(wc -l < "$WORK/selected.txt" | tr -d ' ') fixture(s) on $JOBS worker(s)"
+  | xargs -0 -n 2 -P "$JOBS" bash -c 'compile_native "$1" "$2"' _
+# Only fixtures that exist go to the browser batches (the judging loop skips
+# the rest, as before).
+for w in $(seq 0 $((JOBS - 1))); do
+  awk -v w="$w" -v n="$JOBS" '(NR - 1) % n == w { if (system("test -e \"" $0 "\"") == 0) print NR "\t" $0 }' \
+    "$WORK/selected.txt" > "$WORK/batch-$w.txt"
+done
+pids=()
+for w in $(seq 0 $((JOBS - 1))); do
+  node "$WORK/batch.js" "$WORK/pkg" "$WORK/batch-$w.txt" "$WORK" 2>"$WORK/batch-$w.err" &
+  pids+=("$!")
+done
+for w in $(seq 0 $((JOBS - 1))); do
+  if ! wait "${pids[$w]}"; then
+    echo "::error::browser batch $w crashed outside a compile — its log follows"; cat "$WORK/batch-$w.err"; exit 2
+  fi
+done
+echo "==> compiled $(wc -l < "$WORK/selected.txt" | tr -d ' ') fixture(s): native on $JOBS worker(s), browser in $JOBS node batch(es)"
 i=0
 while read -r fix <&3; do
   i=$((i+1))
