@@ -16,7 +16,7 @@
 //! operator) of K iterations minus the same probe with none, divided by K.
 //! The loop line is 0.67.1's cost, the regression's own definition (its
 //! `almide build` of the issue program at n = 200,000: 2,667,023,888 fuel,
-//! 13,335 an iteration; develop before the fix 14,457, now 11,205). The
+//! 13,335 an iteration; develop before the fix 14,551, now 11,703). The
 //! `contains` cells pin the per-call cost of the three needle shapes the fast
 //! paths cover, each against 0.67.1's cost of the same call (its `almide
 //! build` of the same probe, 100,000 calls minus none; the library build
@@ -96,7 +96,7 @@ fn the_issue_loop_costs_no_more_an_iteration_than_at_0_67_1() {
     assert!(
         fuel <= 13_335.0,
         "the #4430 loop cost {fuel:.0} fuel an iteration: 0.67.1 paid 13,335, \
-         develop before the fix 14,457 (a failure table per contains, a call per byte)"
+         develop before the fix 14,551 (a failure table per contains, a call per byte)"
     );
 }
 
@@ -111,18 +111,18 @@ fn contains_cell(needle: &str, hit: bool, line: f64, why: &str) {
 
 #[test]
 fn a_one_byte_needle_searches_without_a_table() {
-    // 0.67.1 1,491; before the fix 2,115; now 790.
+    // 0.67.1 1,491; before the fix 2,119; now 846.
     contains_cell("a", true, 1_491.0, "a one-byte needle never reads the failure table");
 }
 
 #[test]
 fn a_longer_needle_hit_at_its_first_candidate_builds_no_table() {
-    // 0.67.1 895; before the fix 1,699; now 567.
+    // 0.67.1 895; before the fix 1,703; now 828.
     contains_cell("fetch", true, 895.0, "the first pass matches at the first `f`, with no table");
 }
 
 #[test]
 fn a_needle_whose_first_byte_is_absent_walks_once() {
-    // 0.67.1 2,981; before the fix 4,254; now 1,451.
+    // 0.67.1 2,981; before the fix 4,258; now 1,502.
     contains_cell("zzz", false, 2_981.0, "no byte can start a match, so no table and no step calls");
 }
