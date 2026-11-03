@@ -23,6 +23,7 @@ struct SpecSnapshot {
     materialized_aggregates: std::collections::HashSet<ValueId>,
     closure_values: std::collections::HashSet<ValueId>,
     record_masks: std::collections::HashMap<ValueId, Vec<usize>>,
+    aggregate_blocks: std::collections::BTreeMap<ValueId, String>,
 }
 
 impl LowerCtx {
@@ -92,6 +93,7 @@ impl LowerCtx {
             materialized_aggregates: self.materialized_aggregates.clone(),
             closure_values: self.closure_values.clone(),
             record_masks: self.record_masks.clone(),
+            aggregate_blocks: self.aggregate_blocks.clone(),
         };
         let out = f(self);
         if out.is_none() {
@@ -107,6 +109,7 @@ impl LowerCtx {
             self.materialized_aggregates = snap.materialized_aggregates;
             self.closure_values = snap.closure_values;
             self.record_masks = snap.record_masks;
+            self.aggregate_blocks = snap.aggregate_blocks;
         }
         out
     }
