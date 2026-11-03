@@ -519,11 +519,23 @@ fn render_fn(
     let chains = crate::render_native_interp::chains(func);
     crate::render_native_move::set_stack_lits(func, &user_fns.keys().copied().collect());
     let mut printed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+    let (scalar_defs, scalar_prints) = crate::render_native_interp::printed_scalars(func);
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
         crate::render_native_move::set_moving_args(func, i, &tys, &borrows.arms);
-        if chains.skip.contains(&i) || printed.contains(&i) {
+        if chains.skip.contains(&i) || printed.contains(&i) || scalar_defs.contains(&i) {
             continue;
+        }
+        if let Some((n, is_bool)) = scalar_prints.get(&i) {
+            if tys.get(n) == Some(&NTy::I64) {
+                if *is_bool {
+                    line!("println!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }});", var(*n));
+                } else {
+                    line!("println!(\"{{}}\", {});", var(*n));
+                }
+                continue;
+            }
+            return Err(wall("native: a printed number that is not an Int"));
         }
         if let Some((dst, pieces)) = chains.finals.get(&i) {
             // Printed by the next op and read by nothing else: one println!,
