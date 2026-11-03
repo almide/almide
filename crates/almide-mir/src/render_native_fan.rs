@@ -145,5 +145,9 @@ pub(crate) fn fan_glue() -> String {
 /// Every abort path of the rendered program exits through `almide_v1_exit`,
 /// which first waits for the arms below the trapping one (ADR-0024 D5).
 pub(crate) fn route_exits(program: &str) -> String {
-    program.replace("std::process::exit(", "almide_v1_exit(")
+    // A printed line joins the arm timelines through the routed `print!`.
+    program.replace("std::process::exit(", "almide_v1_exit(").replace(
+        "if std::io::Write::write_all(&mut std::io::stdout().lock(), line).is_err() { print!(\"{}\", String::from_utf8_lossy(line)) }",
+        "print!(\"{}\", String::from_utf8_lossy(line))",
+    )
 }
