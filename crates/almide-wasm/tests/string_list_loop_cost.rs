@@ -7,9 +7,10 @@
 //! reads it, and paid one `__sk_step` call per haystack byte while nothing
 //! had matched. The loop below ran 1.17x the fuel and 1.34x the time of
 //! 0.67.1. The search stays linear; what changed is what each call pays
-//! around it: no table for a needle of one or two bytes, a tight walk to the
-//! next byte that can start a match, and one outright compare at the first
-//! such byte before a longer needle builds its table.
+//! around it: a first pass with no table, which answers unless a partial
+//! match of two or more bytes fails (so a one- or two-byte needle, and a
+//! needle whose first candidate matches, never build one), and a tight walk
+//! to the next byte that can start a match.
 //!
 //! The gate is an exact COUNT, no clock: wasmtime fuel (one unit per
 //! operator) of K iterations minus the same probe with none, divided by K.
@@ -117,7 +118,7 @@ fn a_one_byte_needle_searches_without_a_table() {
 #[test]
 fn a_longer_needle_hit_at_its_first_candidate_builds_no_table() {
     // 0.67.1 895; before the fix 1,699; now 567.
-    contains_cell("fetch", true, 895.0, "the outright compare at the first `f` answers it");
+    contains_cell("fetch", true, 895.0, "the first pass matches at the first `f`, with no table");
 }
 
 #[test]
