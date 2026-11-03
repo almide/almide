@@ -99,7 +99,7 @@ pub(super) fn compile_native_tests(files: &[String], no_check: bool, scratch: &A
                 continue;
             }
         };
-        let plan = crate::compile_driver::plan_test_run(&ctx, &members);
+        let plan = crate::compile_driver::plan_test_run(&ctx, &members, true);
         t.lap("one-program plan");
         per_file.extend(plan.alone);
         let scratch_ = scratch.clone();
@@ -158,7 +158,7 @@ fn note_fallback(files: usize, why: &str) {
 
 /// Compile and build one batch of the plan as one program. A batch that
 /// fails sheds the files the failure names and tries again, or — when it
-/// names none — splits in two; a file left alone takes the per-file route,
+/// names none — splits in two (twice at most); a file left alone takes the per-file route,
 /// which reports its own failure as it always did. Returns the built files
 /// and the ones left to the per-file route.
 fn run_batch(
@@ -169,9 +169,12 @@ fn run_batch(
 ) -> (Vec<(String, Result<NativeTestBin, String>)>, Vec<String>) {
     let mut built = Vec::new();
     let mut alone = Vec::new();
-    let mut work = vec![batch];
-    while let Some(batch) = work.pop() {
-        if batch.len() < 2 {
+    // An unattributed failure splits the batch, twice at most: past that
+    // the failure is likelier the environment's than one file's, and every
+    // split is another compile of what is left.
+    let mut work = vec![(batch, 0u32)];
+    while let Some((batch, depth)) = work.pop() {
+        if batch.len() < 2 || depth > 2 {
             alone.extend(batch.into_iter().map(|p| p.file));
             continue;
         }
@@ -192,12 +195,12 @@ fn run_batch(
                 if !culprits.is_empty() && culprits.len() < batch.len() {
                     let (out, rest): (Vec<_>, Vec<_>) = batch.into_iter().partition(|p| culprits.contains(&p.file));
                     alone.extend(out.into_iter().map(|p| p.file));
-                    work.push(rest);
+                    work.push((rest, depth));
                 } else {
                     let mut first = batch;
                     let second = first.split_off(first.len() / 2);
-                    work.push(first);
-                    work.push(second);
+                    work.push((first, depth + 1));
+                    work.push((second, depth + 1));
                 }
             }
         }
@@ -247,6 +250,7 @@ fn compile_in_child(batch: &[crate::compile_driver::PlannedTestFile], scratch: &
 /// "prefixes":[…]}` with the Rust in FILE, or `{"ok":false,"message":…,
 /// "culprits":[…]}`.
 pub fn cmd_test_run_compile(out: &str, files: &[String]) {
+    crate::resolve::parse_cache::enable();
     let batch: Vec<crate::compile_driver::PlannedTestFile> = files
         .iter()
         .filter_map(|f| f.split_once('='))

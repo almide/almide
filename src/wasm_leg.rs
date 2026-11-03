@@ -171,10 +171,75 @@ fn check_and_lower_entry(
 pub(crate) fn lower_resolved(
     path: &str,
     source_text: &str,
-    mut program: crate::ast::Program,
-    mut resolved: crate::resolve::ResolvedModules,
+    program: crate::ast::Program,
+    resolved: crate::resolve::ResolvedModules,
     tests: Option<Option<&str>>,
 ) -> Result<crate::ir::IrProgram, String> {
+    let tests = match tests {
+        Some(filter) => Tests::File(filter),
+        None => Tests::None,
+    };
+    lower_resolved_as(path, source_text, program, resolved, tests).map(|(ir, _)| ir)
+}
+
+/// What [`lower_resolved_as`] synthesizes the program's `main` for.
+enum Tests<'a> {
+    /// A program: its own `main`.
+    None,
+    /// One test file's tests (`__test_runner`), filtered by `--run`.
+    File(Option<&'a str>),
+    /// The test run's one program (#4441): every test file a module.
+    Run(Vec<almide_driver::test_runner::TestRunFile>, Option<&'a str>),
+}
+
+/// The wasm test run's one program (#4441): `files` (path, source) each
+/// become a module of an empty entry — every module they reach loaded,
+/// checked and lowered once — and the runner `main` runs one file's tests per
+/// instance (`almide_driver::test_runner::synthesize_test_run_main`).
+/// Returns the linked IR and, per file, its lowered and selected test counts.
+pub fn lower_test_run_to_ir(
+    files: &[(String, String)],
+    dep_paths: &[(crate::project::PkgId, std::path::PathBuf)],
+    run_filter: Option<&str>,
+) -> Result<(crate::ir::IrProgram, Vec<(usize, usize)>), String> {
+    let first = files.first().map(|(p, _)| p.clone()).ok_or("no test file")?;
+    let mut modules: Vec<(String, crate::ast::Program, Option<crate::project::PkgId>, bool)> = Vec::new();
+    let mut loaded = std::collections::HashSet::new();
+    let mut sources = std::collections::HashMap::new();
+    let mut run_files = Vec::new();
+    let mut test_programs = Vec::new();
+    for (k, (path, source)) in files.iter().enumerate() {
+        let program = parse_entry(path, source)?;
+        let resolved = resolve_modules(path, &program, ModuleSource::Disk { dep_paths })?;
+        let module = format!("almide_test_file_{k}");
+        let reached = resolved.modules.iter().map(|(n, ..)| crate::intern::sym(n)).collect();
+        for m in resolved.modules {
+            if loaded.insert(m.0.clone()) {
+                modules.push(m);
+            }
+        }
+        sources.extend(resolved.sources);
+        sources.insert(module.clone(), (path.clone(), source.clone()));
+        run_files.push(almide_driver::test_runner::TestRunFile { module: crate::intern::sym(&module), reached });
+        test_programs.push((module, program));
+    }
+    let mut test_modules = std::collections::HashSet::new();
+    for (name, program) in test_programs {
+        test_modules.insert(name.clone());
+        modules.push((name, program, None, false));
+    }
+    let resolved = crate::resolve::ResolvedModules { modules, sources, test_modules };
+    let entry = parse_entry(&first, "")?;
+    lower_resolved_as(&first, "", entry, resolved, Tests::Run(run_files, run_filter))
+}
+
+fn lower_resolved_as(
+    path: &str,
+    source_text: &str,
+    mut program: crate::ast::Program,
+    mut resolved: crate::resolve::ResolvedModules,
+    tests: Tests<'_>,
+) -> Result<(crate::ir::IrProgram, Vec<(usize, usize)>), String> {
     let (mut checker, mut ir) = check_and_lower_entry(path, source_text, &mut program, &resolved)?;
     // Lower every resolved module into the program before linking — the
     // incumbent's lower_one_user_module loop (src/compile_driver.rs:172-222,
@@ -220,7 +285,11 @@ pub(crate) fn lower_resolved(
         let import_table_name = self_name.as_deref().unwrap_or(name);
         let (mod_table, _) = crate::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
         let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-        let mut mod_ir_module = crate::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+        let mut mod_ir_module = if resolved.test_modules.contains(name.as_str()) {
+            crate::lower::lower_test_module(name, mod_prog, &checker.env, &checker.type_map)
+        } else {
+            crate::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned)
+        };
         checker.env.import_table = saved_table;
         checker.env.self_module_name = saved_self;
         drop_registered_intrinsic_stubs(name, &mut mod_ir_module);
@@ -243,14 +312,34 @@ pub(crate) fn lower_resolved(
         let text: Vec<String> = refused.iter().map(|d| crate::diagnostic_render::display_with_source(d, source_text).to_string()).collect();
         return Err(text.join("\n"));
     }
-    if let Some(run_filter) = tests {
-        // The structural leg's in-test assert lowering (the frontend's
-        // non-test abort form), then the shared runner synthesis.
-        almide_driver::test_runner::desugar_test_asserts(&mut ir);
-        // Spaced (#2751): this leg keeps per-module VarTables, so a module's
-        // re-inits run in a fn of its own space.
-        almide_driver::test_runner::synthesize_test_runner_main_spaced(&mut ir, run_filter)
-            .map_err(|e| format!("tests: {e}"))?;
+    let mut counts = Vec::new();
+    match tests {
+        Tests::None => {}
+        Tests::File(run_filter) => {
+            // The structural leg's in-test assert lowering (the frontend's
+            // non-test abort form), then the shared runner synthesis.
+            almide_driver::test_runner::desugar_test_asserts(&mut ir);
+            // Spaced (#2751): this leg keeps per-module VarTables, so a module's
+            // re-inits run in a fn of its own space.
+            almide_driver::test_runner::synthesize_test_runner_main_spaced(&mut ir, run_filter)
+                .map_err(|e| format!("tests: {e}"))?;
+        }
+        Tests::Run(mut files, run_filter) => {
+            almide_driver::test_runner::desugar_module_test_asserts(&mut ir);
+            // A test file's module may have been re-keyed above (`prim` →
+            // `prim#pkg`); the runner names it as the IR now does.
+            for f in &mut files {
+                if let Some(m) = ir.modules.iter().find(|m| almide_wasm::package_keys::display_key(m.name.as_str()) == f.module.as_str()) {
+                    f.module = m.name;
+                }
+                f.reached = f
+                    .reached
+                    .iter()
+                    .filter_map(|r| ir.modules.iter().find(|m| almide_wasm::package_keys::display_key(m.name.as_str()) == r.as_str()).map(|m| m.name))
+                    .collect();
+            }
+            counts = almide_driver::test_runner::synthesize_test_run_main(&mut ir, &files, run_filter).map_err(|e| format!("tests: {e}"))?;
+        }
     }
     link_self_host(&mut ir, &mut checker, &sources);
     almide_driver::link_ir(&mut ir);
@@ -276,7 +365,7 @@ pub(crate) fn lower_resolved(
     crate::ir::mut_param::lower_mut_params_move_mode(&mut ir);
     // #3154: a param a closure captures and the fn writes takes a var's cell.
     almide_wasm::cells::rebind_cell_params(&mut ir);
-    Ok(ir)
+    Ok((ir, counts))
 }
 
 /// Self-host registry LOADING (wasm-leg resolution, interp-neutral):

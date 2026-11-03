@@ -228,3 +228,24 @@ mod module_ident_tests {
         assert_eq!(strip_module_path("Pigment.encode", "varlib"), None);
     }
 }
+
+/// The wasm test run's one program (#4441): which part of it an instance
+/// runs, as the embedded host's op 118 (`testing.__abort_site_selected`)
+/// answers it. `-1` is a single test file's own module: its tests, in order.
+/// In the run's one program, `-2 - k` runs test file `k`'s tests, and an
+/// abort-site child of file `k`'s site `s` is `k * TEST_RUN_SITE_STRIDE + s`.
+pub mod test_run_selection {
+    /// Sites per file in a child's selection.
+    pub const TEST_RUN_SITE_STRIDE: i64 = 1 << 20;
+
+    /// The selection that runs test file `k`'s tests.
+    pub fn file(k: usize) -> i64 {
+        -2 - k as i64
+    }
+
+    /// The selection of the abort-site child that `site` starts from an
+    /// instance selected by `parent`.
+    pub fn child_site(parent: i64, site: i64) -> i64 {
+        if parent <= -2 { (-2 - parent) * TEST_RUN_SITE_STRIDE + site } else { site }
+    }
+}

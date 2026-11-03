@@ -1,5 +1,6 @@
-//! #4441: `almide test --target native` builds ONE crate per run, not one per
-//! test file, and keeps every per-file semantic it had.
+//! #4441: `almide test` compiles a run's test files as ONE program — one
+//! crate on native, one module on wasm — not one per test file, and keeps
+//! every per-file semantic it had.
 //!
 //! The fixture is a package with one shared module and four test files that
 //! each reach it. Two files define a top-level fn of the same name with
@@ -12,7 +13,8 @@
 //! test file in the native build cache, the one-crate driver one in all. Run
 //! with `ALMIDE_BIN` pointing at a per-file `almide` (v0.69.0-rc2 or older)
 //! and `a_run_builds_one_crate_not_one_per_test_file` fails: that is its
-//! negative control.
+//! negative control. The wasm gate counts rendered modules the same way
+//! (`a_wasm_run_emits_one_module_not_one_per_test_file`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -185,4 +187,51 @@ fn an_edit_to_the_shared_module_rebuilds_the_run() {
     // The rebuild reuses the run's crate dir instead of adding one per file.
     let crates = crate_dirs(&f.tmp);
     assert_eq!(crates.len(), 1, "{crates:?}");
+}
+
+/// `almide test --target wasm [args]` in the package, with the route lines
+/// on (`ALMIDE_WALL_REASON`); (exit code, stdout + stderr).
+fn run_wasm(f: &Fixture, args: &[&str]) -> (i32, String) {
+    let out = Command::new(almide_bin())
+        .args(["test", "--target", "wasm"])
+        .args(args)
+        .current_dir(&f.root)
+        .env("TMPDIR", &f.tmp)
+        .env("ALMIDE_WALL_REASON", "1")
+        .output()
+        .expect("spawn almide");
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    (out.status.code().unwrap_or(-1), text)
+}
+
+/// The wasm leg's gate: one module, emitted and compiled once, runs every
+/// file (a fresh instance each). The per-file leg rendered one module per
+/// file, and says so on a `structural leg rendered the test module` line
+/// each — the negative control's tell.
+#[test]
+fn a_wasm_run_emits_one_module_not_one_per_test_file() {
+    let f = fixture();
+    let (code, out) = run_wasm(&f, &[]);
+    assert_eq!(code, 1, "two files fail\n{out}");
+    assert_eq!(out.matches("structural leg rendered the test module").count(), 0, "a module per file again?\n{out}");
+    assert_eq!(out.matches("[route] one wasm test program for 4 file(s)").count(), 1, "{out}");
+}
+
+#[test]
+fn wasm_verdicts_stay_per_file() {
+    let f = fixture();
+    let (code, out) = run_wasm(&f, &[]);
+    assert_eq!(code, 1, "{out}");
+    // The panic ends its file's run (the wasm leg stops at a file's first
+    // failure, as it always did); the process-ending abort fails its own.
+    assert!(out.contains("FAIL ./tests/a_test.almd"), "{out}");
+    assert!(out.contains("boom from a"), "{out}");
+    assert!(out.contains("FAIL ./tests/d_test.almd"), "{out}");
+    assert!(out.contains("./tests/b_test.almd: 2 tests passed"), "{out}");
+    // The assert_aborts child runs in a fresh instance of the same module.
+    assert!(out.contains("./tests/c_test.almd: 1 tests passed"), "{out}");
+    assert!(out.contains("2 passed, 2 failed (of 4 files)"), "{out}");
+    let (code, out) = run_wasm(&f, &["--run", "b doubles"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("1 test in 4 files (6 filtered out)"), "{out}");
 }

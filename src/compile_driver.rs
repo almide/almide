@@ -566,6 +566,13 @@ pub(crate) struct TestRunContext {
     project: Option<project::Project>,
 }
 
+impl TestRunContext {
+    /// The run's dependency table, as the module resolver takes it.
+    pub(crate) fn dep_paths(&self) -> &[(project::PkgId, std::path::PathBuf)] {
+        &self.dep_paths
+    }
+}
+
 pub(crate) fn test_run_context() -> Result<TestRunContext, String> {
     let project = cwd_project();
     let dep_paths = match project {
@@ -599,27 +606,26 @@ pub(crate) struct TestRunPlan {
 /// per module, but some of the checker's and the codegen's tables still key
 /// a type, a variant case or a convention method by its bare name. A file
 /// that declares `main` or a `scoped fn` (both admitted in an entry program
-/// only), or that loads no module from disk, is built alone.
-pub(crate) fn plan_test_run(ctx: &TestRunContext, files: &[String]) -> TestRunPlan {
+/// only) is built alone, and so, when `module_less_alone`, is one that loads
+/// no module from disk: it shares only the runtime, which costs less than the
+/// parallelism one program would take from it.
+pub(crate) fn plan_test_run(ctx: &TestRunContext, files: &[String], module_less_alone: bool) -> TestRunPlan {
     type Owners = std::collections::HashMap<String, std::collections::BTreeSet<String>>;
     let mut batches: Vec<(Owners, Vec<PlannedTestFile>)> = Vec::new();
     let mut alone = Vec::new();
-    for (index, file) in files.iter().enumerate() {
-        let Ok((program, resolved, _)) = resolve_test_file(file, &ctx.dep_paths) else {
-            alone.push(file.clone());
-            continue;
-        };
+    // Each file's owners, or `None` for a file built alone — resolved in
+    // parallel (the module parses are shared, `resolve::parse_cache`).
+    let facts = |file: &String| -> Option<Owners> {
+        let (program, resolved, _) = resolve_test_file(file, &ctx.dep_paths).ok()?;
         if program.decls.iter().any(|d| matches!(d, ast::Decl::Fn { name, scoped, .. } if *scoped || name.as_str() == "main")) {
-            alone.push(file.clone());
-            continue;
+            return None;
         }
         // A file that loads no module of its project or its dependencies
         // shares nothing a program could compile once — the runtime it
         // shares is precompiled already — and builds fastest alone, in
         // parallel with the rest.
-        if !resolved.sources.keys().any(|m| m != file) {
-            alone.push(file.clone());
-            continue;
+        if module_less_alone && !resolved.sources.keys().any(|m| m != file) {
+            return None;
         }
         let mut mine: Owners = Owners::new();
         let mut own = |name: String, owner: &str| {
@@ -636,6 +642,20 @@ pub(crate) fn plan_test_run(ctx: &TestRunContext, files: &[String]) -> TestRunPl
                 own(n, &owner);
             }
         }
+        Some(mine)
+    };
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(files.len().max(1));
+    let chunk = files.len().div_ceil(threads).max(1);
+    let all: Vec<Option<Owners>> = std::thread::scope(|s| {
+        let handles: Vec<_> = files.chunks(chunk).map(|c| (c.len(), s.spawn(move || c.iter().map(facts).collect::<Vec<_>>()))).collect();
+        // A chunk whose thread panicked builds its files alone.
+        handles.into_iter().flat_map(|(n, h)| h.join().unwrap_or_else(|_| vec![None; n])).collect()
+    });
+    for (index, (file, mine)) in files.iter().zip(all).enumerate() {
+        let Some(mine) = mine else {
+            alone.push(file.clone());
+            continue;
+        };
         // Joining a batch may not give a name an owner set that neither a
         // member nor this file already had.
         let fits = |have: &Owners| mine.iter().all(|(n, o)| have.get(n).is_none_or(|h| h.is_subset(o) || o.is_subset(h)));

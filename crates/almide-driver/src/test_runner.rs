@@ -330,35 +330,160 @@ fn runner_fn(name: almide_lang::intern::Sym, body: almide_ir::IrExpr, is_effect:
 /// front (`wasm_leg::lower_to_ir_tests_with_deps`) runs this before the
 /// synthesis.
 pub fn desugar_test_asserts(ir: &mut IrProgram) {
-    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
-    use almide_ir::{CallTarget, IrExpr, IrExprKind, VarTable};
-    struct Desugar<'a> {
-        vars: &'a mut VarTable,
-    }
-    impl IrMutVisitor for Desugar<'_> {
-        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
-            walk_expr_mut(self, expr);
-            let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind else {
-                return;
-            };
-            let n = name.as_str();
-            let is_assert = (matches!(n, "assert_eq" | "assert_ne") && args.len() == 2)
-                || (n == "assert" && !args.is_empty());
-            if !is_assert {
-                return;
-            }
-            let n = n.to_string();
-            let span = expr.span;
-            let IrExprKind::Call { args, .. } = std::mem::replace(&mut expr.kind, IrExprKind::Unit) else {
-                unreachable!()
-            };
-            *expr = assert_abort(self.vars, &n, args, span);
-        }
-    }
+    use almide_ir::visit_mut::IrMutVisitor;
     let IrProgram { functions, var_table, .. } = ir;
     for f in functions.iter_mut().filter(|f| f.is_test) {
         Desugar { vars: var_table }.visit_expr_mut(&mut f.body);
     }
+}
+
+/// [`desugar_test_asserts`] for the test files of the wasm test run's one
+/// program (#4441), whose tests are module fns — each module's own var table.
+pub fn desugar_module_test_asserts(ir: &mut IrProgram) {
+    use almide_ir::visit_mut::IrMutVisitor;
+    for m in ir.modules.iter_mut() {
+        let almide_ir::IrModule { functions, var_table, .. } = m;
+        for f in functions.iter_mut().filter(|f| f.is_test) {
+            Desugar { vars: var_table }.visit_expr_mut(&mut f.body);
+        }
+    }
+}
+
+struct Desugar<'a> {
+    vars: &'a mut almide_ir::VarTable,
+}
+
+impl almide_ir::visit_mut::IrMutVisitor for Desugar<'_> {
+    fn visit_expr_mut(&mut self, expr: &mut almide_ir::IrExpr) {
+        use almide_ir::{CallTarget, IrExprKind};
+        almide_ir::visit_mut::walk_expr_mut(self, expr);
+        let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind else {
+            return;
+        };
+        let n = name.as_str();
+        let is_assert = (matches!(n, "assert_eq" | "assert_ne") && args.len() == 2)
+            || (n == "assert" && !args.is_empty());
+        if !is_assert {
+            return;
+        }
+        let n = n.to_string();
+        let span = expr.span;
+        let IrExprKind::Call { args, .. } = std::mem::replace(&mut expr.kind, IrExprKind::Unit) else {
+            unreachable!()
+        };
+        *expr = assert_abort(self.vars, &n, args, span);
+    }
+}
+
+/// One test file of the wasm test run's one program (#4441): its module, and
+/// the modules its own program would have loaded (their mutable top-lets are
+/// what its runner re-initializes before each test, as its own runner did).
+pub struct TestRunFile {
+    pub module: almide_lang::intern::Sym,
+    pub reached: std::collections::HashSet<almide_lang::intern::Sym>,
+}
+
+/// The runner `main` of the wasm test run's one program (#4441): every test
+/// file is a module, and the instance's selection
+/// (`almide_base::names::test_run_selection`, op 118) picks what runs —
+/// test file `k`'s tests, in order, exactly as file `k`'s own runner ran them
+/// (`test: <name> ... ` / `ok`, its modules' mutable top-lets re-initialized
+/// before each), or an abort-site child of file `k`. Returns, per file, the
+/// lowered test count and how many `run_filter` selects.
+pub fn synthesize_test_run_main(
+    ir: &mut IrProgram,
+    files: &[TestRunFile],
+    run_filter: Option<&str>,
+) -> Result<Vec<(usize, usize)>, NotTestable> {
+    use almide_base::names::test_run_selection::{self as sel, TEST_RUN_SITE_STRIDE};
+    use almide_ir::{BinOp, CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind};
+    use almide_lang::intern::sym;
+    use almide_lang::types::Ty;
+    let mk = |kind: IrExprKind, ty: Ty| IrExpr { kind, ty, span: None, def_id: None };
+    let unit = || IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
+    let stmt = |expr: IrExpr| IrStmt { kind: IrStmtKind::Expr { expr }, span: None };
+    let println_stmt = |text: String| {
+        let arg = IrExpr { kind: IrExprKind::LitStr { value: text }, ty: Ty::String, span: None, def_id: None };
+        stmt(IrExpr {
+            kind: IrExprKind::Call { target: CallTarget::Named { name: sym("println") }, args: vec![arg], type_args: Vec::new() },
+            ty: Ty::Unit,
+            span: None,
+            def_id: None,
+        })
+    };
+    let module_call = |module: almide_lang::intern::Sym, func: &str, args: Vec<IrExpr>, ty: Ty| {
+        mk(IrExprKind::Call { target: CallTarget::Module { module, func: sym(func), def_id: None }, args, type_args: Vec::new() }, ty)
+    };
+    // Each module's re-init fn, as the spaced single-file runner makes it.
+    let mut reinit: Vec<(almide_lang::intern::Sym, IrStmt)> = Vec::new();
+    for m in ir.modules.iter_mut() {
+        let mut tls: Vec<&almide_ir::IrTopLet> = m.top_lets.iter().filter(|tl| tl.mutable).collect();
+        if tls.is_empty() {
+            continue;
+        }
+        tls.sort_by_key(|tl| tl.var.0);
+        let stmts = tls.iter().map(|tl| IrStmt { kind: IrStmtKind::Assign { var: tl.var, value: tl.value.clone() }, span: None }).collect();
+        let body = mk(IrExprKind::Block { stmts, expr: Some(Box::new(unit())) }, Ty::Unit);
+        m.functions.push(runner_fn(sym(MODULE_REINIT_FN), body, false));
+        reinit.push((m.name, stmt(module_call(m.name, MODULE_REINIT_FN, Vec::new(), Ty::Unit))));
+    }
+    let selected_now = || module_call(sym("testing"), "__abort_site_selected", Vec::new(), Ty::Int);
+    let int = |v: i64| mk(IrExprKind::LitInt { value: v }, Ty::Int);
+    let binop = |op: BinOp, l: IrExpr, r: IrExpr, ty: Ty| mk(IrExprKind::BinOp { op, left: Box::new(l), right: Box::new(r) }, ty);
+    let mut counts = Vec::new();
+    let mut run_chain = unit();
+    let mut site_chain = unit();
+    let mut any_test = false;
+    for (k, file) in files.iter().enumerate().rev() {
+        let Some(m) = ir.modules.iter_mut().find(|m| m.name == file.module) else {
+            return Err(NotTestable(format!("test run: no module {}", file.module)));
+        };
+        let lowered = m.functions.iter().filter(|f| f.is_test).count();
+        if let Some(pattern) = run_filter {
+            m.functions.retain(|f| !f.is_test || runs_test(f, Some(pattern)));
+        }
+        let mut stmts = Vec::new();
+        let mut idx = 0usize;
+        let mut selected = 0usize;
+        let module = m.name;
+        let has_dispatch = m.functions.iter().any(|f| f.name.as_str() == almide_ir::ABORT_DISPATCH_FN);
+        for f in m.functions.iter_mut().filter(|f| f.is_test) {
+            let display = f.display_name().to_string();
+            let mangled = format!("__almd_test_{idx}");
+            idx += 1;
+            selected += 1;
+            f.name = sym(&mangled);
+            f.is_test = false;
+            stmts.extend(reinit.iter().filter(|(name, _)| file.reached.contains(name) || *name == module).map(|(_, s)| s.clone()));
+            stmts.push(println_stmt(format!("test: {display} ... ")));
+            let call = module_call(module, &mangled, Vec::new(), Ty::result(Ty::Unit, Ty::String));
+            stmts.push(stmt(mk(IrExprKind::Try { expr: Box::new(call) }, Ty::Unit)));
+            stmts.push(println_stmt("ok".to_string()));
+        }
+        any_test |= lowered > 0;
+        counts.push((lowered, selected));
+        let block = mk(IrExprKind::Block { stmts, expr: Some(Box::new(unit())) }, Ty::Unit);
+        let is_file = binop(BinOp::Eq, selected_now(), int(sel::file(k)), Ty::Bool);
+        run_chain = mk(IrExprKind::If { cond: Box::new(is_file), then: Box::new(block), else_: Box::new(run_chain) }, Ty::Unit);
+        if has_dispatch {
+            let base = k as i64 * TEST_RUN_SITE_STRIDE;
+            let lo = binop(BinOp::Gte, selected_now(), int(base), Ty::Bool);
+            let hi = binop(BinOp::Lt, selected_now(), int(base + TEST_RUN_SITE_STRIDE), Ty::Bool);
+            let site = binop(BinOp::SubInt, selected_now(), int(base), Ty::Int);
+            let dispatch = module_call(module, almide_ir::ABORT_DISPATCH_FN, vec![site], Ty::result(Ty::Unit, Ty::String));
+            let run = mk(IrExprKind::Try { expr: Box::new(dispatch) }, Ty::Unit);
+            let cond = binop(BinOp::And, lo, hi, Ty::Bool);
+            site_chain = mk(IrExprKind::If { cond: Box::new(cond), then: Box::new(run), else_: Box::new(site_chain) }, Ty::Unit);
+        }
+    }
+    counts.reverse();
+    if !any_test {
+        return Err(NotTestable("test run: no test blocks — nothing to run".into()));
+    }
+    let is_site = binop(BinOp::Gte, selected_now(), int(0), Ty::Bool);
+    let body = mk(IrExprKind::If { cond: Box::new(is_site), then: Box::new(site_chain), else_: Box::new(run_chain) }, Ty::Unit);
+    ir.functions.push(runner_fn(sym("main"), body, true));
+    Ok(counts)
 }
 
 /// The abort form of one assert — the frontend's `desugar_assert_abort`, over

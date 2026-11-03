@@ -197,6 +197,7 @@ pub(super) fn run_test_binaries_parallel(compiled: Vec<(String, Result<NativeTes
 }
 
 pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool, show_output: bool) {
+    crate::resolve::parse_cache::enable();
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let program_args = test_harness_args(run_filter);
@@ -238,6 +239,7 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_t
 /// back to the native rustc path, which is authoritative. The common case (most
 /// tests pass on WASM) is ~9x faster; the native fallback preserves correctness.
 pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool, show_output: bool) {
+    crate::resolve::parse_cache::enable();
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let cpus = cpu_slots();
@@ -505,6 +507,7 @@ fn run_test_file_once(
 }
 
 pub fn cmd_test_json(file: &str, run_filter: Option<&str>, allow_no_tests: bool) {
+    crate::resolve::parse_cache::enable();
     let test_files: Vec<String> = if !file.is_empty() {
         let path = std::path::Path::new(file);
         if path.is_dir() {
