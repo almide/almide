@@ -296,11 +296,18 @@ fn native_bodies_stay_fast_at_the_issue_sizes() {
         // work grows ~4x, quadratic ~16x. An absolute 8 s bound failed CI at
         // 8.5 s (the object fold, develop and #4295 alike) with the bodies
         // unchanged — a loaded runner, not a regression (#4289).
+        //
+        // What is timed is the child's own CPU time (`cpu_time`), the min of
+        // ROUNDS interleaved runs per size. Wall time also counts the time a
+        // loaded runner spends running other tests' processes: a 4x linear
+        // cell read 13x on a busy shard (#4428). The CPU time of the run
+        // itself is what the body's growth decides, and the min drops the run
+        // a cache-cold or preempted start slowed.
         let quarter = size / 4;
         let full_bin = built(dir.path(), "full", &src(size));
         let small_bin = built(dir.path(), "quarter", &src(quarter));
         let (mut full, mut small) = (Duration::MAX, Duration::MAX);
-        for _ in 0..2 {
+        for _ in 0..ROUNDS {
             let (got, took) = run_bin(&small_bin);
             assert_eq!(got, want(quarter), "{name} native answer at {quarter}");
             small = small.min(took);
@@ -310,7 +317,7 @@ fn native_bodies_stay_fast_at_the_issue_sizes() {
         }
         assert!(
             full < small * growth,
-            "{name} took {full:?} on native at {size} against {small:?} at {quarter} — quadratic again?"
+            "{name} took {full:?} of CPU on native at {size} against {small:?} at {quarter} — quadratic again?"
         );
     }
 }
@@ -392,12 +399,48 @@ fn built(dir: &Path, stem: &str, src: &str) -> std::path::PathBuf {
 }
 
 /// Run a built binary: its stdout and wall time.
+/// Timed runs per size in `native_bodies_stay_fast_at_the_issue_sizes`.
+const ROUNDS: usize = 5;
+
+/// Run a built binary: its stdout and the CPU time it spent (`cpu_time`).
 fn run_bin(bin: &Path) -> (String, Duration) {
     let t = Instant::now();
-    let o = Command::new(bin).output().expect("spawn native");
-    let took = t.elapsed();
-    assert!(o.status.success(), "native run failed:\n{}", String::from_utf8_lossy(&o.stderr));
-    (String::from_utf8(o.stdout).expect("utf8"), took)
+    let mut child = Command::new(bin)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn native");
+    let mut out = String::new();
+    let mut err = String::new();
+    use std::io::Read;
+    child.stdout.take().expect("piped").read_to_string(&mut out).expect("utf8");
+    child.stderr.take().expect("piped").read_to_string(&mut err).expect("stderr");
+    let (ok, took) = cpu_time(child, t);
+    assert!(ok, "native run failed:\n{err}");
+    (out, took)
+}
+
+/// Reap `child`: whether it exited 0, and its user + system CPU time. The CPU
+/// time is the child's own (wait4's rusage), so other processes on a loaded
+/// runner do not count in it. Off unix, the wall time since `started`.
+#[cfg(unix)]
+fn cpu_time(child: std::process::Child, _started: Instant) -> (bool, Duration) {
+    let pid = child.id() as libc::pid_t;
+    let mut status: libc::c_int = 0;
+    // SAFETY: rusage is plain data that wait4 fills; the pid is this test's own child, not yet reaped.
+    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+    // SAFETY: valid pointers to the two locals above.
+    let r = unsafe { libc::wait4(pid, &mut status, 0, &mut ru) };
+    assert_eq!(r, pid, "wait4 failed: {}", std::io::Error::last_os_error());
+    let tv = |t: libc::timeval| Duration::from_secs(t.tv_sec as u64) + Duration::from_micros(t.tv_usec as u64);
+    let ok = libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0;
+    (ok, tv(ru.ru_utime) + tv(ru.ru_stime))
+}
+
+#[cfg(not(unix))]
+fn cpu_time(mut child: std::process::Child, started: Instant) -> (bool, Duration) {
+    let status = child.wait().expect("wait native");
+    (status.success(), started.elapsed())
 }
 
 /// The interp runs the self-host prim bodies (stdlib/value_core.almd

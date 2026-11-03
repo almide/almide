@@ -1,0 +1,48 @@
+// A `guard … else continue` inside an `if` arm in a loop skips the REST of the
+// iteration, including the loop-body statements after the `if` (#4386). The v1
+// native render once rewrote the nested `continue` to `()`, so the statement
+// after the `if` still ran on the skipped element (`main` printed 24 / 24 for
+// 23 / 23). The file keeps to Int so the whole program reaches the v1 render
+// (a String accumulator walls on `Prim Handle`); proofs/output-parity.sh
+// byte-diffs `main` against wasm. The issue's String-over-list shape is
+// `under_if` in spec/wasm_cross/guard_jump_in_value_fn.almd.
+fn under_if_while(n: Int) -> Int = {
+  var i = 0
+  var s = 0
+  while i < n {
+    i = i + 1
+    if i > 1 then {
+      guard i != 3 else continue
+      s = s + 10
+    } else ()
+    s = s + 1
+  }
+  s
+}
+
+fn under_if_range(n: Int) -> Int = {
+  var s = 0
+  for i in 0..<n {
+    if i > 0 then {
+      guard i != 2 else continue
+      s = s + 10
+    } else ()
+    s = s + 1
+  }
+  s
+}
+
+effect fn main() -> Unit = {
+  // i = 1: +1; i = 2: +11; i = 3: skipped; i = 4: +11
+  println(int.to_string(under_if_while(4)))
+  // i = 0: +1; i = 1: +11; i = 2: skipped; i = 3: +11
+  println(int.to_string(under_if_range(4)))
+}
+
+test "guard continue inside an if arm skips the rest of the while body" {
+  assert_eq(under_if_while(4), 23)
+}
+
+test "guard continue inside an if arm skips the rest of the for-range body" {
+  assert_eq(under_if_range(4), 23)
+}

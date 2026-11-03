@@ -130,12 +130,26 @@ impl<'a> Interpreter<'a> {
                     return None;
                 }
                 let mut evaled = Vec::with_capacity(args.len());
-                for a in args {
+                let mut pushes = Vec::new();
+                for (k, a) in args.iter().enumerate() {
+                    // A pool body's `acc + [x]`: the element now, the push
+                    // once the trampoline has dropped this frame (`tail_pushes`).
+                    if let Some((acc, x)) = self.tail_push_operands(a, scope) {
+                        match self.eval_expr(x, scope) {
+                            Flow::Value(x) => {
+                                evaled.push(acc);
+                                pushes.push((k, x));
+                                continue;
+                            }
+                            other => return Some(SpineOutcome::Done(other)),
+                        }
+                    }
                     match self.eval_expr(a, scope) {
                         Flow::Value(v) => evaled.push(v),
                         other => return Some(SpineOutcome::Done(other)),
                     }
                 }
+                self.tail_pushes = pushes;
                 Some(SpineOutcome::Transfer {
                     next: TailCallee::Fn(func),
                     next_args: evaled,
@@ -169,6 +183,28 @@ impl<'a> Interpreter<'a> {
             // Module / Method tails keep the ordinary path: their dispatch
             // has value-keyed pre-body tiers (container ops, prims, bridge)
             // whose claim order cannot be probed without evaluating.
+            _ => None,
+        }
+    }
+
+    /// `acc + [x]` in a POOL body's tail call, with `acc` a variable bound to
+    /// a list: that list and the element's expression. Only the pool tier —
+    /// fixture code keeps the concat its determinism meter charges node by
+    /// node — and only a list `Value` (an address or a range concats as
+    /// before).
+    fn tail_push_operands<'e>(&self, a: &'e IrExpr, scope: &Scope) -> Option<(Value, &'e IrExpr)> {
+        if self.pool_depth == 0 || self.det_in_user.get() {
+            return None;
+        }
+        let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, right } = &a.kind else {
+            return None;
+        };
+        let (IrExprKind::Var { id }, IrExprKind::List { elements }) = (&left.kind, &right.kind) else {
+            return None;
+        };
+        let [x] = &elements[..] else { return None };
+        match scope.get(*id)? {
+            acc @ Value::List(_) => Some((acc, x)),
             _ => None,
         }
     }

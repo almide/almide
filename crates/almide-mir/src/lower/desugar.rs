@@ -8,10 +8,12 @@
 ///   `{ pre…; guard cond else E; rest…; tail }`
 ///     → `{ pre…; if cond then { rest…; tail } else E' }`
 ///
-/// where `E'` is `E` verbatim EXCEPT a `continue` becomes `()`: `guard cond else continue;
-/// rest` means "skip the rest of THIS iteration when `!cond`", which is exactly `if cond
-/// then { rest } else ()` — eliminating the `continue` node so the scalar-loop path (which
-/// declines a body with `continue`/`break`) accepts it. A `break` stays verbatim (it needs
+/// where `E'` is `E` verbatim EXCEPT, in a LOOP-BODY statement list, a `continue` becomes
+/// `()`: there `guard cond else continue; rest` means "skip the rest of THIS iteration when
+/// `!cond`", which is exactly `if cond then { rest } else ()` — eliminating the `continue`
+/// node so the scalar-loop path (which declines a body with `continue`/`break`) accepts it.
+/// In a NESTED block (an `if` arm inside the loop) the `continue` stays verbatim: there
+/// `rest` is not the rest of the iteration, so `()` would fall through (#4386). A `break` stays verbatim (it needs
 /// real loop-exit — the residual guard-break shapes wall until break support lands). A
 /// function-body guard's `E` (an `err(…)`/value) makes the `if` the block TAIL → the proven
 /// heap/scalar-result-`if` handles the early-return value.
@@ -554,16 +556,17 @@ fn rewrite_guard_stmt_list(
         IrStmtKind::Guard { cond, else_ } => (cond, else_, guard.span),
         _ => unreachable!("position() found a Guard"),
     };
-    // The then-body is `{ rest… }` (Unit); recurse so a further guard in it is rewritten.
-    let then_block = desugar_guard_rec(
-        IrExpr {
-            kind: IrExprKind::Block { stmts: rest, expr: None },
-            ty: Ty::Unit,
-            span: gspan,
-            def_id: None,
-        },
-        changed,
-    );
+    // The then-body is `{ rest… }` (Unit). `rest` is still the LOOP-BODY tail, so a
+    // further guard in it takes this same loop-level rewrite (its `continue` → `()` is
+    // sound here). Its sub-expressions were already desugared by the caller's
+    // `map_children`. (Routing it through `desugar_guard_rec`'s nested-block rule would
+    // keep the `continue` verbatim — correct, but it would wall a chain this path runs.)
+    let then_block = IrExpr {
+        kind: IrExprKind::Block { stmts: rewrite_guard_stmt_list(rest, changed), expr: None },
+        ty: Ty::Unit,
+        span: gspan,
+        def_id: None,
+    };
     let else_branch = loop_exit_else(else_).expect("checked above");
     let if_expr = IrExpr {
         kind: IrExprKind::If {
@@ -621,7 +624,7 @@ fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
     // inside `for`/`while` needs its OWN statement-list rewrite: `[pre…, Guard, rest…]` →
     // `[pre…, Expr(if cond then { rest… } else E')]`. Same continue→() / break-verbatim rule.
     if let IrExprKind::ForIn { var, var_tuple, iterable, body } = e.kind {
-        let new_body = rewrite_guard_stmt_list(body, changed);
+        let new_body = tail_loop_continues(rewrite_guard_stmt_list(body, changed), changed);
         return IrExpr {
             kind: IrExprKind::ForIn { var, var_tuple, iterable, body: new_body },
             ty: e.ty,
@@ -630,7 +633,7 @@ fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
         };
     }
     if let IrExprKind::While { cond, body } = e.kind {
-        let new_body = rewrite_guard_stmt_list(body, changed);
+        let new_body = tail_loop_continues(rewrite_guard_stmt_list(body, changed), changed);
         return IrExpr {
             kind: IrExprKind::While { cond, body: new_body },
             ty: e.ty,
@@ -669,16 +672,14 @@ fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
         },
         changed,
     );
-    // The ELSE branch (`cond` false) is `E`, except `continue` → `()` (see doc).
-    let else_branch = match &else_.kind {
-        IrExprKind::Continue => IrExpr {
-            kind: IrExprKind::Unit,
-            ty: Ty::Unit,
-            span: else_.span,
-            def_id: else_.def_id,
-        },
-        _ => else_,
-    };
+    // The ELSE branch (`cond` false) is `E` VERBATIM, `continue` included (#4386). This
+    // block is NOT a loop body (that statement list is `rewrite_guard_stmt_list`'s), so
+    // `rest` is only the tail of a NESTED block — an `if`/`match` arm, a block statement.
+    // `continue` → `()` would fall through to the loop-body statements AFTER the
+    // enclosing construct, losing the skip. Kept as `continue`; the enclosing loop's
+    // `tail_loop_continues` (desugar_continue.rs) then sinks the statements after the
+    // construct into its arms, where the `continue` ends its path.
+    let else_branch = else_;
     let if_expr = IrExpr {
         kind: IrExprKind::If {
             cond: Box::new(cond),

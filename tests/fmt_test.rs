@@ -854,35 +854,67 @@ fn fmt_output_typechecks_single_file_specs() {
     let files = almide_corpus::select(files, "fmt::output_typechecks_single_file", |p| corpus_key(p));
 
     let dir = tempfile::tempdir().unwrap();
-    let mut failures = Vec::new();
-    let mut tested = 0u32;
-    for path in files {
+    // One file's verdict: None = out of scope (the original does not check),
+    // else (counted as tested, failure if any) — a fmt failure is not counted,
+    // a changed meaning is, as before the loop went parallel. Three processes per
+    // file, so the files run on parallel workers (one at a time this was the
+    // slowest single test of a CI shard: 502 s on develop run 41583162285).
+    // Each copy gets its own subdirectory: two specs may share a file name.
+    type Verdict = Option<(bool, Option<String>)>;
+    let judge = |i: usize, path: &std::path::PathBuf| -> Verdict {
         // Pre-condition: the ORIGINAL must check clean; files that do not
         // (deliberate negative fixtures) are out of scope for this gate.
         let orig_check = std::process::Command::new(&bin)
             .args(["check", path.to_str().unwrap()])
             .output().expect("almide check original");
-        if !orig_check.status.success() { continue; }
+        if !orig_check.status.success() { return None; }
 
-        let copy = dir.path().join(path.file_name().unwrap());
-        std::fs::copy(&path, &copy).unwrap();
+        let sub = dir.path().join(i.to_string());
+        std::fs::create_dir_all(&sub).unwrap();
+        let copy = sub.join(path.file_name().unwrap());
+        std::fs::copy(path, &copy).unwrap();
         let fmt_out = std::process::Command::new(&bin)
             .args(["fmt", copy.to_str().unwrap()])
             .output().expect("almide fmt");
         if !fmt_out.status.success() {
-            failures.push(format!("{}: fmt failed:\n{}", path.display(), String::from_utf8_lossy(&fmt_out.stderr)));
-            continue;
+            return Some((false, Some(format!("{}: fmt failed:\n{}", path.display(), String::from_utf8_lossy(&fmt_out.stderr)))));
         }
         let check = std::process::Command::new(&bin)
             .args(["check", copy.to_str().unwrap()])
             .output().expect("almide check formatted");
         if !check.status.success() {
-            failures.push(format!(
+            return Some((true, Some(format!(
                 "{}: original checks clean but the FORMATTED output does not — fmt changed meaning:\n{}",
                 path.display(), String::from_utf8_lossy(&check.stdout)
-            ));
+            ))));
         }
-        tested += 1;
+        Some((true, None))
+    };
+    let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut verdicts: Vec<(usize, Verdict)> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut out = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(path) = files.get(i) else { break };
+                        out.push((i, judge(i, path)));
+                    }
+                    out
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().expect("fmt worker")).collect()
+    });
+    // Report in corpus order, whatever the timing.
+    verdicts.sort_by_key(|(i, _)| *i);
+    let mut failures = Vec::new();
+    let mut tested = 0u32;
+    for (counted, failure) in verdicts.into_iter().filter_map(|(_, v)| v) {
+        if counted { tested += 1; }
+        failures.extend(failure);
     }
     assert!(failures.is_empty(),
         "fmt semantic-preservation gate: {} of {} file(s) failed:\n\n{}",
