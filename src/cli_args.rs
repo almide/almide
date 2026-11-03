@@ -570,6 +570,15 @@ pub(crate) enum Commands {
     SurviveTestLeg {
         file: String,
     },
+    /// Internal to `almide test --target native` (#4441): compile a batch of
+    /// test files as one program, writing its Rust to `--out` and printing
+    /// the outcome as one JSON line. Each file is `<index>=<path>`.
+    #[command(name = "test-run-compile", hide = true)]
+    TestRunCompile {
+        #[arg(long)]
+        out: String,
+        files: Vec<String>,
+    },
     /// Check canonical docs (llms.txt, etc.) against source-of-truth inputs
     /// (Cargo version, diagnostic code inventory, stdlib auto-import list).
     /// Fails CI when drift is detected.

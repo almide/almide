@@ -442,7 +442,31 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
 /// memory-safety guarantee (#4008), which `almide build` names on its
 /// `Built` line. Empty under `--no-check`, which checks nothing.
 pub(crate) fn try_compile_reporting(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>, Vec<String>), String> {
+    let t = cli::PhaseTimer::start();
+    let (mut ir_program, outside_guarantee) = compile_to_linked_ir(file, no_check, &t)?;
+    let metered = ir_program.as_ref().filter(|ir| almide::ir::runtime_use::uses_metered_prims(ir)).cloned();
+    // Codegen v3: three-layer pipeline (Nanopass + Templates)
+    let ir = ir_program.as_mut().expect("IR required for codegen");
+    let code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, codegen_opts) {
+        codegen::CodegenOutput::Source(s) => s,
+        codegen::CodegenOutput::Binary(_) => unreachable!(),
+    };
+    t.lap("codegen");
+    Ok((code, metered, outside_guarantee))
+}
+
+/// Everything [`try_compile_reporting`] does before codegen — every step that
+/// prints a diagnostic or refuses the program (type errors, warnings, E109,
+/// `[permissions]`, the instance budget) — for a caller that wants a file's
+/// verdict without its Rust: the native test run judges each file alone and
+/// then generates one program for all of them (#4441).
+pub(crate) fn check_through_link(file: &str) -> Result<(), String> {
+    compile_to_linked_ir(file, false, &cli::PhaseTimer::start()).map(|_| ())
+}
+
+fn compile_to_linked_ir(file: &str, no_check: bool, t: &cli::PhaseTimer) -> Result<(Option<almide::ir::IrProgram>, Vec<String>), String> {
     let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, parsed_project, self_versioned) = parse_and_resolve_for_compile(file)?;
+    t.lap("parse+resolve");
 
     let mut ir_program: Option<almide::ir::IrProgram> = None;
     let mut module_irs = std::collections::HashMap::new();
@@ -451,20 +475,14 @@ pub(crate) fn try_compile_reporting(file: &str, no_check: bool, codegen_opts: &c
         let parsed = ParsedSource { file, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
         (ir_program, outside_guarantee) = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
     }
+    t.lap("check+lower");
 
     // `[permissions]` come from the entry file's own project (#4159 audit),
     // whatever directory the command runs in.
     let permissions_project = project::permissions_project_for(file).or(parsed_project);
     optimize_verify_and_link(&mut ir_program, &permissions_project, (file, &source_text))?;
-
-    let metered = ir_program.as_ref().filter(|ir| almide::ir::runtime_use::uses_metered_prims(ir)).cloned();
-    // Codegen v3: three-layer pipeline (Nanopass + Templates)
-    let ir = ir_program.as_mut().expect("IR required for codegen");
-    let code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, codegen_opts) {
-        codegen::CodegenOutput::Source(s) => s,
-        codegen::CodegenOutput::Binary(_) => unreachable!(),
-    };
-    Ok((code, metered, outside_guarantee))
+    t.lap("optimize+link");
+    Ok((ir_program, outside_guarantee))
 }
 
 /// Each dependency package's capability set (#4093, `almide deps`): the
@@ -509,76 +527,218 @@ pub(crate) fn codegen_metered(mut ir: almide::ir::IrProgram, codegen_opts: &code
     }
 }
 
-/// The native test run as ONE program (#4441): what [`compile_test_run`]
-/// returns.
+/// One program of the native test run (#4441): a batch of test files
+/// compiled together by [`compile_test_batch`].
 pub(crate) struct TestRunProgram {
-    /// The generated Rust of the whole run.
+    /// The generated Rust of the whole program.
     pub rs_code: String,
-    /// Per test file, in the order given: the prefix its test fns carry in
+    /// Per file of the batch, in its order: the prefix its test fns carry in
     /// the generated crate (`almide_rt_<module>_`, the flattened name of a
     /// module fn), so the runner can select and report one file's tests.
     pub test_prefixes: Vec<String>,
 }
 
-/// Compile every test file of a native test run as ONE program, the way
-/// `almide build` compiles one: each test file becomes a module of an empty
-/// entry program, every module they reach is loaded, checked, lowered and
-/// emitted once, and the runtime is the one the whole program needs. The
-/// test files' `test` blocks are kept (another module's are not, #2550).
-///
-/// Each file has already been compiled on its own, with its diagnostics
-/// printed and its errors reported; this compile prints nothing more, and a
-/// file set it cannot compile is reported by `Err` for the caller to fall
-/// back to one program per file.
-pub(crate) fn compile_test_run(files: &[String]) -> Result<TestRunProgram, String> {
-    let was = crate::SUPPRESS_WARNINGS.swap(true, std::sync::atomic::Ordering::Relaxed);
-    let result = compile_test_run_quiet(files);
-    crate::SUPPRESS_WARNINGS.store(was, std::sync::atomic::Ordering::Relaxed);
-    result
+/// A batch that did not compile, and the files that made it fail when the
+/// compiler named them (a type error inside a test file's module). Empty
+/// `culprits` means the failure was not attributed.
+pub(crate) struct BatchFailure {
+    pub message: String,
+    pub culprits: Vec<String>,
 }
 
-fn compile_test_run_quiet(files: &[String]) -> Result<TestRunProgram, String> {
-    let first = files.first().ok_or("no test file")?;
-    let parsed_project = cwd_project();
-    if let Some(ref proj) = parsed_project {
-        project::check_compiler_version(proj)?;
+/// A test file of the run, and its module in the one program.
+pub(crate) struct PlannedTestFile {
+    pub file: String,
+    /// Its position in the run: its module is `almide_test_file_<index>`.
+    pub index: usize,
+}
+
+impl PlannedTestFile {
+    fn module(&self) -> String {
+        format!("almide_test_file_{}", self.index)
     }
-    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = match parsed_project {
-        Some(ref proj) => project_fetch::fetch_all_deps(proj)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|fd| (fd.pkg_id, fd.source_dir))
-            .collect(),
+}
+
+/// What every compile of the run shares: the project and its fetched
+/// dependencies.
+pub(crate) struct TestRunContext {
+    dep_paths: Vec<(project::PkgId, std::path::PathBuf)>,
+    project: Option<project::Project>,
+}
+
+pub(crate) fn test_run_context() -> Result<TestRunContext, String> {
+    let project = cwd_project();
+    let dep_paths = match project {
+        Some(ref proj) => {
+            project::check_compiler_version(proj)?;
+            project_fetch::fetch_all_deps(proj).map_err(|e| e.to_string())?.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect()
+        }
         None => vec![],
     };
+    Ok(TestRunContext { dep_paths, project })
+}
 
-    // Every module any test file reaches, once each, in an order that keeps
-    // each file's own resolution order (leaves first): a module's
-    // dependencies precede it in the file that first loaded it.
+/// The native test run's plan: which files share which program.
+pub(crate) struct TestRunPlan {
+    /// The batches; each compiles as one program.
+    pub batches: Vec<Vec<PlannedTestFile>>,
+    /// Files that are built alone, as before: their own compile reports why.
+    pub alone: Vec<String>,
+}
+
+/// Plan the native test run of `files` (already checked one by one): each
+/// test file becomes a module of one program, compiled the way `almide
+/// build` compiles one — every module the files reach loaded, checked,
+/// lowered and emitted once, the runtime the whole program needs — with the
+/// test files' `test` blocks kept (another module's are not, #2550).
+///
+/// Files share a program unless that would give a module name, or a name a
+/// table may key bare ([`declared_names`]), a second owner: two test files
+/// in different directories can each import their own `self.helpers`, and
+/// two test files can each declare a `type Shape` — a name is one identity
+/// per module, but some of the checker's and the codegen's tables still key
+/// a type, a variant case or a convention method by its bare name. A file
+/// that declares `main` or a `scoped fn` (both admitted in an entry program
+/// only), or that loads no module from disk, is built alone.
+pub(crate) fn plan_test_run(ctx: &TestRunContext, files: &[String]) -> TestRunPlan {
+    type Owners = std::collections::HashMap<String, std::collections::BTreeSet<String>>;
+    let mut batches: Vec<(Owners, Vec<PlannedTestFile>)> = Vec::new();
+    let mut alone = Vec::new();
+    for (index, file) in files.iter().enumerate() {
+        let Ok((program, resolved, _)) = resolve_test_file(file, &ctx.dep_paths) else {
+            alone.push(file.clone());
+            continue;
+        };
+        if program.decls.iter().any(|d| matches!(d, ast::Decl::Fn { name, scoped, .. } if *scoped || name.as_str() == "main")) {
+            alone.push(file.clone());
+            continue;
+        }
+        // A file that loads no module of its project or its dependencies
+        // shares nothing a program could compile once — the runtime it
+        // shares is precompiled already — and builds fastest alone, in
+        // parallel with the rest.
+        if !resolved.sources.keys().any(|m| m != file) {
+            alone.push(file.clone());
+            continue;
+        }
+        let mut mine: Owners = Owners::new();
+        let mut own = |name: String, owner: &str| {
+            mine.entry(name).or_default().insert(owner.to_string());
+        };
+        for n in declared_names(&program) {
+            own(n, file);
+        }
+        for (name, mod_prog, _, _) in &resolved.modules {
+            let owner = resolved.sources.get(name).map_or_else(|| format!("<{name}>"), |(p, _)| p.clone());
+            // The module's name itself: one program loads one module per name.
+            own(format!("module {name}"), &owner);
+            for n in declared_names(mod_prog) {
+                own(n, &owner);
+            }
+        }
+        // Joining a batch may not give a name an owner set that neither a
+        // member nor this file already had.
+        let fits = |have: &Owners| mine.iter().all(|(n, o)| have.get(n).is_none_or(|h| h.is_subset(o) || o.is_subset(h)));
+        let planned = PlannedTestFile { file: file.clone(), index };
+        match batches.iter_mut().find(|(have, _)| fits(have)) {
+            Some((have, members)) => {
+                for (n, o) in mine {
+                    let h = have.entry(n).or_default();
+                    if o.len() > h.len() {
+                        *h = o;
+                    }
+                }
+                members.push(planned);
+            }
+            None => batches.push((mine, vec![planned])),
+        }
+    }
+    TestRunPlan { batches: batches.into_iter().map(|(_, b)| b).collect(), alone }
+}
+
+fn resolve_test_file(
+    file: &str,
+    dep_paths: &[(project::PkgId, std::path::PathBuf)],
+) -> Result<(ast::Program, resolve::ResolvedModules, resolve::SelfVersionedNames), String> {
+    let source = almide::source_overlay::read_to_string(file).map_err(|e| format!("{file}: {e}"))?;
+    let tokens = lexer::Lexer::tokenize(&source);
+    let mut parser = parser::Parser::new(tokens).with_file(file);
+    let program = parser.parse().map_err(|e| format!("{file}: {e}"))?;
+    if !parser.errors.is_empty() {
+        return Err(format!("{file}: parse errors"));
+    }
+    let mut resolved = resolve::resolve_imports_with_deps(file, &program, dep_paths)?;
+    let self_versioned = resolve::include_native_callback_modules(file, dep_paths, &mut resolved)?;
+    resolved.sources.insert(file.to_string(), (file.to_string(), source));
+    Ok((program, resolved, self_versioned))
+}
+
+/// The top-level names a program declares that a table may still key by
+/// their bare spelling: types and their variant cases, convention methods
+/// (`fn Type.method`), protocols. A plain fn or a top-level let is always
+/// qualified by its module, so two test files' `fn helper`s never meet.
+fn declared_names(program: &ast::Program) -> Vec<String> {
+    let mut names = Vec::new();
+    for decl in &program.decls {
+        match decl {
+            ast::Decl::Fn { name, .. } if name.as_str().contains('.') => names.push(name.to_string()),
+            ast::Decl::Protocol { name, .. } => names.push(name.to_string()),
+            ast::Decl::Type { name, ty, .. } => {
+                names.push(name.to_string());
+                if let ast::TypeExpr::Variant { cases, .. } = ty {
+                    names.extend(cases.iter().map(|c| match c {
+                        ast::VariantCase::Unit { name } | ast::VariantCase::Tuple { name, .. } | ast::VariantCase::Record { name, .. } => name.to_string(),
+                    }));
+                }
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
+/// The test files a rustc error output names, by their module's symbol
+/// prefix (`almide_rt_almide_0test_0file_0<n>_…`).
+pub(crate) fn culprits_in(text: &str, batch: &[PlannedTestFile]) -> Vec<String> {
+    batch
+        .iter()
+        .filter(|p| text.contains(&format!("almide_rt_{}_", almide_base::names::module_ident(&p.module()))))
+        .map(|p| p.file.clone())
+        .collect()
+}
+
+/// Compile one batch of the plan as one program. It runs in a process of its
+/// own (`almide test-run-compile`), which prints nothing the run shows: every
+/// diagnostic was printed by the files' own checks, and a gate that ends the
+/// process ends only this compile.
+pub(crate) fn compile_test_batch(ctx: &TestRunContext, batch: &[PlannedTestFile]) -> Result<TestRunProgram, BatchFailure> {
+    compile_test_batch_inner(ctx, batch)
+}
+
+fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile]) -> Result<TestRunProgram, BatchFailure> {
+    let unattributed = |message: String| BatchFailure { message, culprits: vec![] };
+    let first = batch.first().map(|p| p.file.clone()).ok_or_else(|| unattributed("no test file".into()))?;
+    // Every module any file of the batch reaches, once each, in an order
+    // that keeps each file's own resolution order (leaves first).
     let mut modules: Vec<(String, ast::Program, Option<project::PkgId>, bool)> = Vec::new();
     let mut loaded: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut sources = std::collections::HashMap::new();
     let mut self_versioned = resolve::SelfVersionedNames::new();
     let mut test_files = Vec::new();
-    for (i, file) in files.iter().enumerate() {
-        let source = almide::source_overlay::read_to_string(file).map_err(|e| format!("{file}: {e}"))?;
-        let tokens = lexer::Lexer::tokenize(&source);
-        let mut parser = parser::Parser::new(tokens).with_file(file);
-        let program = parser.parse().map_err(|e| format!("{file}: {e}"))?;
-        if !parser.errors.is_empty() {
-            return Err(format!("{file}: parse errors"));
-        }
-        let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)?;
-        self_versioned.extend(resolve::include_native_callback_modules(file, &dep_paths, &mut resolved)?);
+    for p in batch {
+        let (program, resolved, versioned) = resolve_test_file(&p.file, &plan.dep_paths).map_err(unattributed)?;
+        self_versioned.extend(versioned);
         for m in resolved.modules {
             if loaded.insert(m.0.clone()) {
                 modules.push(m);
             }
         }
-        sources.extend(resolved.sources);
-        let name = format!("almide_test_file_{i}");
-        sources.insert(name.clone(), (file.clone(), source));
-        test_files.push((name, program));
+        let mut file_sources = resolved.sources;
+        if let Some(own) = file_sources.remove(&p.file) {
+            sources.insert(p.module(), own);
+        }
+        sources.extend(file_sources);
+        test_files.push((p.module(), program));
     }
     let mut test_modules = std::collections::HashSet::new();
     let mut test_prefixes = Vec::new();
@@ -589,17 +749,41 @@ fn compile_test_run_quiet(files: &[String]) -> Result<TestRunProgram, String> {
     }
     let mut resolved = resolve::ResolvedModules { modules, sources, test_modules };
 
-    let mut entry = parser::Parser::new(lexer::Lexer::tokenize("")).parse().map_err(|e| e.to_string())?;
-    let parsed = ParsedSource { file: first, source_text: "", parse_errors: &[], has_parse_errors: false };
+    let mut entry = parser::Parser::new(lexer::Lexer::tokenize("")).parse().map_err(|e| unattributed(e.to_string()))?;
+    let canon = canonicalize::canonicalize_program(&entry, resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)));
+    let mut checker = check::Checker::from_env(canon.env);
+    checker.set_source(&first, "");
+    checker.diagnostics = canon.diagnostics;
+    almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
+    let diagnostics = checker.infer_program(&mut entry);
+    let errors: Vec<&diagnostic::Diagnostic> = diagnostics.iter().filter(|d| d.level == diagnostic::Level::Error).collect();
+    if !errors.is_empty() {
+        let culprits = batch.iter().filter(|p| errors.iter().any(|d| d.file.as_deref() == Some(p.file.as_str()))).map(|p| p.file.clone()).collect();
+        return Err(BatchFailure { message: format!("{} error(s) found", errors.len()), culprits });
+    }
+    register_versioned_module_names(&mut checker, &resolved.modules);
+    for (name, versioned) in &self_versioned {
+        checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(versioned));
+    }
+    let mut ir_program = lower_root_program_if_ready(false, &entry, &checker, "", &first);
     let mut module_irs = std::collections::HashMap::new();
-    let (mut ir_program, _) = typecheck_and_lower_for_compile(parsed, &mut entry, &mut resolved, &self_versioned, &mut module_irs)?;
-    let permissions_project = project::permissions_project_for(first).or(parsed_project);
-    optimize_verify_and_link(&mut ir_program, &permissions_project, (first, ""))?;
-    let ir = ir_program.as_mut().ok_or("the test run did not lower")?;
+    let module_diags = lower_user_modules(&mut checker, &mut resolved, &mut module_irs, &mut ir_program);
+    let failing: Vec<&String> = module_diags
+        .iter()
+        .filter(|(_, _, diags)| diags.iter().any(|d| d.level == diagnostic::Level::Error))
+        .map(|(path, _, _)| path)
+        .collect();
+    if !failing.is_empty() {
+        let culprits = batch.iter().filter(|p| failing.iter().any(|f| **f == p.file)).map(|p| p.file.clone()).collect();
+        return Err(BatchFailure { message: format!("errors in {} module(s)", failing.len()), culprits });
+    }
+    let permissions_project = project::permissions_project_for(&first).or_else(|| plan.project.clone());
+    optimize_verify_and_link(&mut ir_program, &permissions_project, (&first, "")).map_err(unattributed)?;
+    let ir = ir_program.as_mut().ok_or_else(|| unattributed("the test run did not lower".into()))?;
     // A metered program (`fan.bounded` & co.) links v1-rendered regions
     // against its entry file's source: that stays a per-file build.
     if almide::ir::runtime_use::uses_metered_prims(ir) {
-        return Err("a test file uses the deterministic meter".into());
+        return Err(unattributed("a test file uses the deterministic meter".into()));
     }
     let rs_code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, &codegen::CodegenOptions::default()) {
         codegen::CodegenOutput::Source(s) => s,

@@ -55,6 +55,7 @@ mod wasm_debug;
 use cargo_build::{cargo_build_cdylib, cargo_build_generated, cargo_build_generated_with_native, cargo_build_test_with_native};
 
 pub use run::{cmd_run, RunArgs};
+pub(crate) use run::PhaseTimer;
 pub use build::{cmd_build, BuildArgs};
 pub use bench::cmd_bench;
 pub use compile::cmd_compile;
@@ -71,6 +72,7 @@ pub use ide::{cmd_ide_outline, cmd_ide_doc, cmd_ide_stdlib_snapshot};
 pub use fix::cmd_fix;
 pub use survive::{cmd_apply, cmd_survive, SurviveArgs};
 pub use survive_legs::cmd_survive_test_leg;
+pub use test_native::cmd_test_run_compile;
 pub use docs_gen::cmd_docs_gen;
 
 use std::hash::{Hash, Hasher};

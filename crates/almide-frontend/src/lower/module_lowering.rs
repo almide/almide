@@ -349,7 +349,7 @@ fn lower_module_with(
     // escaped as the entry program's are (#3483); registration recorded them
     // under this module's key.
     let escaped = escaped_module_fns(env, name);
-    let mut ir_prog = lower_program_with_prefix(prog, env, type_map, Some(name), escaped);
+    let mut ir_prog = lower_program_with_prefix(prog, env, type_map, Some(name), escaped, keep_tests);
     // An imported module's `test` blocks belong to that module's own test run,
     // never to the importer's build (#2550). Kept here, the native leg flattened
     // them into the importer's test binary as `almide_rt_<mod>___test_*` and

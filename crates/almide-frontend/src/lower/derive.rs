@@ -152,9 +152,14 @@ fn derive_codec(
             [n, sym(bare)].iter().filter_map(|k| ctx_env.type_protocols.get(k)).flatten()
                 .any(|p| crate::canonicalize::protocols::codec_directions(&[*p]).1)
         };
+        // What a decode error names the type by: its IR name, which a
+        // module qualifies — except a test file's own type, which reads as
+        // the entry's did (#4441).
+        let display_name = if ctx.test_file { almide_ir::declared_type_name(td.name.as_str()) } else { td.name.as_str() };
         let mut wk = CodecWk {
             vt: &mut ctx.var_table,
             type_name: td.name.as_str(),
+            display_name,
             out: &mut workers,
             seen: &mut seen,
             strict_types: &strict_types,

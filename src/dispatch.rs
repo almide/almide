@@ -637,6 +637,7 @@ fn dispatch_tooling(command: Commands) {
             cli::cmd_apply(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout, allow_removed }, if_survives, force);
         }
         Commands::SurviveTestLeg { file } => cli::cmd_survive_test_leg(&file),
+        Commands::TestRunCompile { out, files } => cli::cmd_test_run_compile(&out, &files),
         Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } => {
             cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map });
         }
@@ -742,6 +743,7 @@ fn refuse_older_compiler(command: &Commands, path: &std::path::Path) {
             | Commands::Survive { .. }
             | Commands::Apply { .. }
             | Commands::SurviveTestLeg { .. }
+            | Commands::TestRunCompile { .. }
             | Commands::Emit { .. }
             | Commands::Verify { .. }
     );
@@ -760,9 +762,10 @@ fn refuse_older_compiler(command: &Commands, path: &std::path::Path) {
 /// --json` carries it as a diagnostic row on stdout; every other command
 /// prints it on stderr, so no other machine-readable stdout changes. The
 /// exit code never changes: the build runs exactly as if the key were absent.
-/// `survive-test-leg` is a child of `survive`, which already warned.
+/// `survive-test-leg` is a child of `survive`, and `test-run-compile` of
+/// `test`, which already warned.
 fn report_manifest_warnings(command: &Commands, path: &std::path::Path, content: &str) {
-    if matches!(command, Commands::SurviveTestLeg { .. }) {
+    if matches!(command, Commands::SurviveTestLeg { .. } | Commands::TestRunCompile { .. }) {
         return;
     }
     let json = matches!(command, Commands::Check { json: true, .. });

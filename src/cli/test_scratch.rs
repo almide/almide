@@ -152,6 +152,11 @@ impl TestScratch {
         self.native_cache.join(format!("run-{:016x}", super::hash64(key.as_bytes())))
     }
 
+    /// A scratch file of this run, removed with it.
+    pub(crate) fn run_file(&self, name: &str) -> PathBuf {
+        self.root.join(name)
+    }
+
     /// `<stem>-<hash of the absolute path>`: the stem keeps a kept scratch
     /// dir readable, the hash is what makes two same-named files distinct.
     fn file_key(test_file: &str) -> String {
