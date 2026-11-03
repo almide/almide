@@ -577,6 +577,9 @@ pub(crate) enum Commands {
     TestRunCompile {
         #[arg(long)]
         out: String,
+        /// Where compiled programs are kept, by their inputs.
+        #[arg(long)]
+        cache: Option<String>,
         files: Vec<String>,
     },
     /// Check canonical docs (llms.txt, etc.) against source-of-truth inputs

@@ -532,9 +532,10 @@ pub(crate) fn codegen_metered(mut ir: almide::ir::IrProgram, codegen_opts: &code
 pub(crate) struct TestRunProgram {
     /// The generated Rust of the whole program.
     pub rs_code: String,
-    /// Per file of the batch, in its order: the prefix its test fns carry in
-    /// the generated crate (`almide_rt_<module>_`, the flattened name of a
-    /// module fn), so the runner can select and report one file's tests.
+    /// Per file of the batch, in its order: the prefix its tests' paths carry
+    /// under the harness's `tests` (`almide_tests_<ident>::almide_rt_<ident>_`:
+    /// the file's test module, then the flattened name of a module fn), so
+    /// the runner can select and report one file's tests.
     pub test_prefixes: Vec<String>,
 }
 
@@ -718,24 +719,56 @@ fn declared_names(program: &ast::Program) -> Vec<String> {
 }
 
 /// The test files a rustc error output names, by their module's symbol
-/// prefix (`almide_rt_almide_0test_0file_0<n>_…`).
+/// prefix (`almide_rt_almide_0test_0file_0<n>_…`) or the file its fns or
+/// tests were written to (`almide_fns_<ident>.rs`, `almide_tests_<ident>.rs`).
 pub(crate) fn culprits_in(text: &str, batch: &[PlannedTestFile]) -> Vec<String> {
+    use almide_base::names::{fns_module, module_ident, tests_module};
     batch
         .iter()
-        .filter(|p| text.contains(&format!("almide_rt_{}_", almide_base::names::module_ident(&p.module()))))
+        .filter(|p| {
+            let ident = module_ident(&p.module());
+            text.contains(&format!("almide_rt_{ident}_"))
+                || text.contains(&format!("{}.rs", fns_module(&ident)))
+                || text.contains(&format!("{}.rs", tests_module(&ident)))
+        })
         .map(|p| p.file.clone())
         .collect()
+}
+
+/// A batch's files, each parsed and its imports resolved: what
+/// [`test_batch_inputs`] keys the compiled program by and what
+/// [`compile_test_batch`] compiles, resolved once for both.
+pub(crate) struct ResolvedBatch(Vec<(ast::Program, resolve::ResolvedModules, resolve::SelfVersionedNames)>);
+
+pub(crate) fn resolve_test_batch(ctx: &TestRunContext, batch: &[PlannedTestFile]) -> Result<ResolvedBatch, String> {
+    batch.iter().map(|p| resolve_test_file(&p.file, &ctx.dep_paths)).collect::<Result<_, _>>().map(ResolvedBatch)
+}
+
+/// What a batch's one program is compiled from, besides the compiler and the
+/// environment (#4441): the project and its dependencies, the batch's files
+/// with their indices, and every source they reach, by path.
+pub(crate) fn test_batch_inputs(ctx: &TestRunContext, batch: &[PlannedTestFile], resolved: &ResolvedBatch) -> String {
+    let sources: std::collections::BTreeMap<&String, &String> =
+        resolved.0.iter().flat_map(|(_, r, _)| r.sources.values().map(|(path, source)| (path, source))).collect();
+    let mut inputs = format!("{:?}\n{:?}\n", ctx.project, ctx.dep_paths);
+    for p in batch {
+        inputs.push_str(&format!("{}={}\n", p.index, p.file));
+    }
+    for (path, source) in sources {
+        inputs.push_str(&format!("{path} {}\n{source}\n", source.len()));
+    }
+    inputs
 }
 
 /// Compile one batch of the plan as one program. It runs in a process of its
 /// own (`almide test-run-compile`), which prints nothing the run shows: every
 /// diagnostic was printed by the files' own checks, and a gate that ends the
 /// process ends only this compile.
-pub(crate) fn compile_test_batch(ctx: &TestRunContext, batch: &[PlannedTestFile]) -> Result<TestRunProgram, BatchFailure> {
-    compile_test_batch_inner(ctx, batch)
+pub(crate) fn compile_test_batch(ctx: &TestRunContext, batch: &[PlannedTestFile], resolved: ResolvedBatch) -> Result<TestRunProgram, BatchFailure> {
+    compile_test_batch_inner(ctx, batch, resolved)
 }
 
-fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile]) -> Result<TestRunProgram, BatchFailure> {
+fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile], resolved_files: ResolvedBatch) -> Result<TestRunProgram, BatchFailure> {
     let unattributed = |message: String| BatchFailure { message, culprits: vec![] };
     let first = batch.first().map(|p| p.file.clone()).ok_or_else(|| unattributed("no test file".into()))?;
     // Every module any file of the batch reaches, once each, in an order
@@ -745,8 +778,7 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile]) ->
     let mut sources = std::collections::HashMap::new();
     let mut self_versioned = resolve::SelfVersionedNames::new();
     let mut test_files = Vec::new();
-    for p in batch {
-        let (program, resolved, versioned) = resolve_test_file(&p.file, &plan.dep_paths).map_err(unattributed)?;
+    for (p, (program, resolved, versioned)) in batch.iter().zip(resolved_files.0) {
         self_versioned.extend(versioned);
         for m in resolved.modules {
             if loaded.insert(m.0.clone()) {
@@ -763,7 +795,8 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile]) ->
     let mut test_modules = std::collections::HashSet::new();
     let mut test_prefixes = Vec::new();
     for (name, program) in test_files {
-        test_prefixes.push(format!("almide_rt_{}_", almide_base::names::module_ident(&name)));
+        let ident = almide_base::names::module_ident(&name);
+        test_prefixes.push(format!("{}::almide_rt_{ident}_", almide_base::names::tests_module(&ident)));
         test_modules.insert(name.clone());
         modules.push((name, program, None, false));
     }

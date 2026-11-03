@@ -26,11 +26,20 @@ use std::sync::Arc;
 /// Where a file's tests live in the run's binary.
 #[derive(Clone, Debug)]
 pub(crate) struct MergedModule {
-    /// The prefix the file's test fns carry, `almide_rt_<module>_`.
+    /// The prefix the file's test paths carry under `tests::`:
+    /// `almide_tests_<module>::almide_rt_<module>_`.
     pub prefix: String,
     /// How many tests the OTHER files hold: libtest counts them as filtered
     /// out of this file's run, and the file's report must not.
     pub others: usize,
+}
+
+impl MergedModule {
+    /// The part of [`Self::prefix`] the test fns' own names carry, as the
+    /// completion ledger records them: `almide_rt_<module>_`.
+    pub fn fn_prefix(&self) -> &str {
+        self.prefix.rsplit_once("::").map_or(self.prefix.as_str(), |(_, p)| p)
+    }
 }
 
 /// A built native test binary for one file.
@@ -223,6 +232,8 @@ fn compile_in_child(batch: &[crate::compile_driver::PlannedTestFile], scratch: &
         .arg("test-run-compile")
         .arg("--out")
         .arg(&out)
+        .arg("--cache")
+        .arg(scratch.native_program_cache())
         .args(batch.iter().map(|p| format!("{}={}", p.index, p.file)))
         .stdin(std::process::Stdio::null())
         .output()
@@ -252,26 +263,95 @@ fn compile_in_child(batch: &[crate::compile_driver::PlannedTestFile], scratch: &
 /// side of [`compile_in_child`]. Prints one JSON line: `{"ok":true,
 /// "prefixes":[…]}` with the Rust in FILE, or `{"ok":false,"message":…,
 /// "culprits":[…]}`.
-pub fn cmd_test_run_compile(out: &str, files: &[String]) {
+pub fn cmd_test_run_compile(out: &str, cache: Option<&str>, files: &[String]) {
     crate::resolve::parse_cache::enable();
     let batch: Vec<crate::compile_driver::PlannedTestFile> = files
         .iter()
         .filter_map(|f| f.split_once('='))
         .filter_map(|(i, file)| Some(crate::compile_driver::PlannedTestFile { index: i.parse().ok()?, file: file.to_string() }))
         .collect();
-    let verdict = crate::compile_driver::test_run_context()
-        .map_err(|message| crate::compile_driver::BatchFailure { message, culprits: vec![] })
-        .and_then(|ctx| crate::compile_driver::compile_test_batch(&ctx, &batch))
-        .and_then(|program| {
-            std::fs::write(out, program.rs_code)
-                .map(|()| program.test_prefixes)
-                .map_err(|e| crate::compile_driver::BatchFailure { message: format!("{out}: {e}"), culprits: vec![] })
-        });
+    let failure = |message: String| crate::compile_driver::BatchFailure { message, culprits: vec![] };
+    let verdict = crate::compile_driver::test_run_context().map_err(failure).and_then(|ctx| {
+        let resolved = crate::compile_driver::resolve_test_batch(&ctx, &batch).map_err(failure)?;
+        let entry = cache.and_then(|dir| ProgramCacheEntry::for_batch(std::path::Path::new(dir), &ctx, &batch, &resolved));
+        let program = match entry.as_ref().and_then(ProgramCacheEntry::read) {
+            Some(program) => program,
+            None => {
+                let program = crate::compile_driver::compile_test_batch(&ctx, &batch, resolved)?;
+                if let Some(entry) = &entry {
+                    entry.write(&program);
+                }
+                program
+            }
+        };
+        std::fs::write(out, &program.rs_code).map(|()| program.test_prefixes).map_err(|e| failure(format!("{out}: {e}")))
+    });
     let line = match verdict {
         Ok(prefixes) => serde_json::json!({ "ok": true, "prefixes": prefixes }),
         Err(f) => serde_json::json!({ "ok": false, "message": f.message, "culprits": f.culprits }),
     };
     crate::out(&line.to_string());
+}
+
+/// A compiled program kept by everything it was compiled from (#4441), so a
+/// re-run with nothing edited skips the compile. The key is the compiler
+/// build (its path, size and mtime), every `ALMIDE_*` setting, and
+/// [`test_batch_inputs`](crate::compile_driver::test_batch_inputs). One dir
+/// per batch file list holds that list's latest program: `<key>.rs` and
+/// `<key>.json` (the test prefixes), each landed by an atomic rename, the
+/// JSON last; an entry is a hit only when both are there, so a reader never
+/// pairs one program's Rust with another's prefixes.
+struct ProgramCacheEntry {
+    dir: std::path::PathBuf,
+    key: String,
+}
+
+impl ProgramCacheEntry {
+    fn for_batch(
+        root: &std::path::Path,
+        ctx: &crate::compile_driver::TestRunContext,
+        batch: &[crate::compile_driver::PlannedTestFile],
+        resolved: &crate::compile_driver::ResolvedBatch,
+    ) -> Option<Self> {
+        let exe = std::env::current_exe().ok()?;
+        let meta = std::fs::metadata(&exe).ok()?;
+        let mtime = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+        let mut settings: Vec<(String, String)> = std::env::vars().filter(|(k, _)| k.starts_with("ALMIDE_")).collect();
+        settings.sort();
+        let inputs = crate::compile_driver::test_batch_inputs(ctx, batch, resolved);
+        let identity = format!("{}\n{}\n{mtime}\n{settings:?}\n{inputs}", exe.display(), meta.len());
+        let list: String = batch.iter().map(|p| format!("{}={}\n", p.index, p.file)).collect();
+        let cwd = std::env::current_dir().ok()?;
+        let dir = root.join(format!("{:016x}", super::hash64(format!("{}\n{list}", cwd.display()).as_bytes())));
+        Some(ProgramCacheEntry { dir, key: format!("{:016x}", super::hash64(identity.as_bytes())) })
+    }
+
+    fn read(&self) -> Option<crate::compile_driver::TestRunProgram> {
+        let json = std::fs::read_to_string(self.dir.join(format!("{}.json", self.key))).ok()?;
+        let test_prefixes: Vec<String> = serde_json::from_str(&json).ok()?;
+        let rs_code = std::fs::read_to_string(self.dir.join(format!("{}.rs", self.key))).ok()?;
+        Some(crate::compile_driver::TestRunProgram { rs_code, test_prefixes })
+    }
+
+    /// Best effort: a program that is not kept is compiled again next time.
+    fn write(&self, program: &crate::compile_driver::TestRunProgram) {
+        let land = |ext: &str, bytes: &[u8]| -> std::io::Result<()> {
+            let tmp = self.dir.join(format!("{}.{ext}.tmp-{}", self.key, std::process::id()));
+            std::fs::write(&tmp, bytes)?;
+            std::fs::rename(&tmp, self.dir.join(format!("{}.{ext}", self.key)))
+        };
+        let Ok(json) = serde_json::to_string(&program.test_prefixes) else { return };
+        if std::fs::create_dir_all(&self.dir).is_err() || land("rs", program.rs_code.as_bytes()).is_err() || land("json", json.as_bytes()).is_err() {
+            return;
+        }
+        // The list's earlier programs: only the latest is worth its bytes.
+        let Ok(entries) = std::fs::read_dir(&self.dir) else { return };
+        for e in entries.flatten() {
+            if !e.file_name().to_string_lossy().starts_with(&self.key) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
 }
 
 /// Build one program of the run, and tell each of its files where its tests
