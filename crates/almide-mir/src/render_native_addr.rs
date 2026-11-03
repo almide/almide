@@ -106,6 +106,9 @@ pub(crate) struct AddrState {
     /// `<list>_e0` and the append pushes it. `true` once it is stored.
     single: BTreeMap<ValueId, bool>,
     building_enum: BTreeMap<ValueId, (u32, Vec<Option<NTy>>)>,
+    /// List blocks filled in slot order right after their allocation
+    /// (`render_native_slots::filled_in_order`): reserved, then pushed.
+    pushed: BTreeSet<ValueId>,
 }
 
 impl AddrState {
@@ -243,7 +246,8 @@ impl AddrState {
             .collect();
         let whole = slots::built_whole(func, &alloc_rec, &base_of);
         let whole_enum = slots::enum_built_whole(func, &alloc_rec, &base_of, &consts);
-        let single = slots::single_elem_lists(func, &base_of, &consts).into_iter().map(|b| (b, false)).collect();
+        let single: BTreeMap<ValueId, bool> = slots::single_elem_lists(func, &base_of, &consts).into_iter().map(|b| (b, false)).collect();
+        let pushed = slots::filled_in_order(func, &base_of, &consts).into_iter().filter(|b| !single.contains_key(b)).collect();
         let reassigned = func
             .ops
             .iter()
@@ -302,6 +306,7 @@ impl AddrState {
             whole_enum,
             building_enum: BTreeMap::new(),
             single,
+            pushed,
         }
     }
 }
@@ -495,7 +500,7 @@ fn build_enum_slot(
             .iter()
             .enumerate()
             .map(|(j, f)| match f {
-                Some(NTy::Rec(_)) => format!("Box::new({b}_f{})", j + 1),
+                Some(f) if crate::render_native_rec::enum_field_boxed(i, *f) => format!("Box::new({b}_f{})", j + 1),
                 _ => format!("{b}_f{}", j + 1),
             })
             .collect::<Vec<_>>()
@@ -512,6 +517,35 @@ fn build_enum_slot(
 /// by nothing else); otherwise the list is built here (`vec![e]`) and the
 /// caller renders the append as before. `None` when `ops[i]` is no such
 /// append.
+/// A list `+` whose right side is a one-element string list held as its
+/// element (`render_native_slots::single_elem_lists`): the left list's
+/// elements then that element, no one-element list built.
+pub(crate) fn single_concat(func: &MirFunction, i: usize, tys: &mut BTreeMap<ValueId, NTy>, st: &mut AddrState) -> Option<(String, bool)> {
+    let Op::CallFn { dst: Some(d), name, args, .. } = func.ops.get(i)? else { return None };
+    if !crate::native_list_ops::is_list_concat(name) {
+        return None;
+    }
+    let [crate::CallArg::Handle(a), crate::CallArg::Handle(x)] = args.as_slice() else { return None };
+    if st.single.get(x) != Some(&true) {
+        return None;
+    }
+    let left = match tys.get(a)? {
+        NTy::VecStr if crate::render_native_move::moving_arg(*a) => {
+            format!("let mut r: Vec<AlmideString> = {}; r.push({}_e0);", crate::render_native_move::take_expr(&var(*a)), var(*x))
+        }
+        NTy::VecStr => format!("let mut r: Vec<AlmideString> = Vec::with_capacity({a}.len() + 1); r.extend_from_slice(&{a}[..]); r.push({}_e0);", var(*x), a = var(*a)),
+        NTy::VecStrRef => format!("let mut r: Vec<AlmideString> = Vec::with_capacity({a}.len() + 1); r.extend_from_slice({a}); r.push({}_e0);", var(*x), a = var(*a)),
+        // Any other left side: the list is built here for the `+` below.
+        _ => {
+            st.single.remove(x);
+            return Some((format!("let mut {x}: Vec<AlmideString> = vec![{x}_e0];", x = var(*x)), false));
+        }
+    };
+    st.single.remove(x);
+    tys.insert(*d, NTy::VecStr);
+    Some((format!("let mut {}: Vec<AlmideString> = {{ {left} r }};", var(*d)), true))
+}
+
 pub(crate) fn single_push(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, NTy>, st: &mut AddrState) -> Option<(String, bool)> {
     let (s, x, d) = crate::render_native_append::self_append_window(func, i)?;
     if st.single.get(&x) != Some(&true) {
@@ -663,6 +697,21 @@ pub(crate) fn render_addr_op(
                         return Ok(true);
                     }
                 }
+                // A borrow-only read of a list slot: a view of it. (A string
+                // slot's owned read is a shared handle already, ADR-0013.)
+                if let (true, Some((rt, spelled, empty))) = (
+                    st.borrow_reads.contains(d),
+                    match t {
+                        NTy::Vec => Some((NTy::VecRef, "&[i64]", "&[]")),
+                        NTy::VecStr => Some((NTy::VecStrRef, "&[AlmideString]", "&[]")),
+                        _ => None,
+                    },
+                ) {
+                    let r = acc.replacen("()", "_ref()", 1);
+                    tys.insert(*d, rt);
+                    line!("let mut {}: {spelled} = {}.{r}.unwrap_or({empty});", var(*d), var(ad.base));
+                    return Ok(true);
+                }
                 tys.insert(*d, t);
                 line!("let mut {}: {} = {}.{acc};", var(*d), crate::render_native_rec::owned_ty(t), var(ad.base));
                 return Ok(true);
@@ -801,6 +850,10 @@ pub(crate) fn render_addr_op(
                 let rhs = g.and_then(|g| owned_from(&var(sv.base), g)).ok_or_else(|| {
                     wall(format!("native: a {:?} element stored into a list of {e:?}", ty(tys, &sv.base)))
                 })?;
+                if st.pushed.contains(&ad.base) {
+                    line!("{}.push({rhs});", var(ad.base));
+                    return Ok(true);
+                }
                 line!("{}[{ix}] = {rhs};", var(ad.base));
                 return Ok(true);
             }
@@ -817,10 +870,18 @@ pub(crate) fn render_addr_op(
                         *done = true;
                         return Ok(true);
                     }
+                    if st.pushed.contains(&ad.base) {
+                        line!("{}.push({rhs});", var(ad.base));
+                        return Ok(true);
+                    }
                     line!("{}[{ix}] = {rhs};", var(ad.base));
                     return Ok(true);
                 }
                 (Some(NTy::Vec), None) if ty(tys, &v) == Some(NTy::I64) => {
+                    if st.pushed.contains(&ad.base) {
+                        line!("{}.push({});", var(ad.base), var(v));
+                        return Ok(true);
+                    }
                     line!("{}[{ix}] = {};", var(ad.base), var(v));
                     return Ok(true);
                 }
@@ -839,6 +900,10 @@ pub(crate) fn render_addr_op(
                 line!("// {}: a one-element list, its element pushed at the append", var(*dst));
                 return Ok(true);
             }
+            if st.pushed.contains(dst) {
+                line!("let mut {}: Vec<AlmideString> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
+                return Ok(true);
+            }
             line!(
                 "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
                 var(*dst),
@@ -851,6 +916,10 @@ pub(crate) fn render_addr_op(
         {
             let i = st.alloc_rec[dst];
             tys.insert(*dst, NTy::Rec(i));
+            if st.pushed.contains(dst) {
+                line!("let mut {}: {} = Vec::with_capacity({}.max(0) as usize);", var(*dst), crate::render_native_rec::struct_name(i), var(*len));
+                return Ok(true);
+            }
             line!(
                 "let mut {}: {} = (0..{}.max(0)).map(|_| Default::default()).collect();",
                 var(*dst),
@@ -936,6 +1005,10 @@ pub(crate) fn render_addr_op(
         }
         Op::Alloc { dst, init: Init::DynList { len }, .. } if ty(tys, len) == Some(NTy::I64) && st.str_lists.contains(dst) => {
             tys.insert(*dst, NTy::VecStr);
+            if st.pushed.contains(dst) {
+                line!("let mut {}: Vec<AlmideString> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
+                return Ok(true);
+            }
             line!(
                 "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
                 var(*dst),
@@ -945,6 +1018,10 @@ pub(crate) fn render_addr_op(
         }
         Op::Alloc { dst, init: Init::DynList { len }, .. } if ty(tys, len) == Some(NTy::I64) => {
             tys.insert(*dst, NTy::Vec);
+            if st.pushed.contains(dst) {
+                line!("let mut {}: Vec<i64> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
+                return Ok(true);
+            }
             line!("let mut {}: Vec<i64> = vec![0i64; {}.max(0) as usize];", var(*dst), var(*len));
             return Ok(true);
         }

@@ -117,6 +117,13 @@ pub(super) fn type_blocks(
     alloc_rec: &mut BTreeMap<ValueId, u16>,
     f: &Facts<'_>,
 ) -> BTreeSet<ValueId> {
+    // A block the lowering built as an all-scalar tuple, record or variant
+    // takes its declared type's by-value struct or enum.
+    for (v, key) in &func.aggregate_blocks {
+        if let Some(i) = rec::rec_index(key).filter(|i| rec::all_scalar_struct(*i) || rec::enum_cases(*i).is_some()) {
+            alloc_rec.entry(*v).or_insert(i);
+        }
+    }
     // The kinds values have before any block is typed.
     let mut known: BTreeMap<ValueId, NTy> = BTreeMap::new();
     if let Some((ps, _)) = sigs.get(func.name.as_str()).filter(|(ps, _)| ps.len() == func.params.len()) {
@@ -413,6 +420,54 @@ pub(super) fn struct_width(i: u16) -> Option<usize> {
 /// exactly once at a constant slot, in the alloc's own straight-line run
 /// (no `if` or loop marker before the last store), and nothing reads the
 /// block before then but its own address arithmetic.
+/// List blocks of a constant length whose every slot is stored once, in slot
+/// order, right after the allocation (only address arithmetic between, no
+/// read of the block, no control flow): reserved and pushed, rather than
+/// filled with defaults first and each default replaced. Slots past the
+/// header are the elements, so the k-th store is the k-th push.
+pub(super) fn filled_in_order(
+    func: &MirFunction,
+    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+    consts: &BTreeMap<ValueId, i64>,
+) -> BTreeSet<ValueId> {
+    let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
+    let mut out = BTreeSet::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        let Op::Alloc { dst: b, init: Init::DynList { len } | Init::DynListStr { len }, .. } = op else { continue };
+        let Some(n) = consts.get(len).and_then(|n| usize::try_from(*n).ok()).filter(|n| *n > 0) else { continue };
+        let mut next = 0usize;
+        for later in &func.ops[i + 1..] {
+            let ok = match later {
+                Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } | Op::LoopStart | Op::LoopEnd | Op::LoopBreakUnless { .. } | Op::Return { .. } => false,
+                Op::Prim { kind: PrimKind::Handle, args, .. } if args.first() == Some(b) => true,
+                Op::IntBinOp { op: crate::IntOp::Add, a, b: y, .. } if rooted(a, *b) || rooted(y, *b) => true,
+                Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.first().is_some_and(|a| rooted(a, *b)) => {
+                    let k = base_of.get(&args[0]).and_then(|(_, o)| slot_of(*o));
+                    if k == Some(next) && !rooted(&args[1], *b) {
+                        next += 1;
+                        true
+                    } else {
+                        false
+                    }
+                }
+                other => {
+                    let mut reads = Vec::new();
+                    crate::mir_ops::op_reads(other, &mut reads);
+                    !reads.iter().any(|v| v == b || rooted(v, *b))
+                }
+            };
+            if !ok {
+                break;
+            }
+            if next == n {
+                out.insert(*b);
+                break;
+            }
+        }
+    }
+    out
+}
+
 pub(super) fn built_whole(
     func: &MirFunction,
     alloc_rec: &BTreeMap<ValueId, u16>,
@@ -574,11 +629,21 @@ pub(super) fn single_elem_lists(
             continue;
         }
         let mut stored = false;
+        // (the op that takes the element, the first op after it)
         let mut window = None;
         for (j, later) in func.ops.iter().enumerate().skip(i + 1) {
             if let Some((_, x, _)) = crate::render_native_append::self_append_window(func, j) {
                 if x == *b {
-                    window = stored.then_some(j);
+                    window = stored.then_some((j, j + 3));
+                    break;
+                }
+            }
+            // The right side of a list `+`: the element is pushed onto the copy.
+            if let Op::CallFn { name, args, .. } = later {
+                if crate::native_list_ops::is_list_concat(name)
+                    && matches!(args.as_slice(), [crate::CallArg::Handle(a), crate::CallArg::Handle(r)] if r == b && a != b && !rooted(a, *b))
+                {
+                    window = stored.then_some((j, j + 1));
                     break;
                 }
             }
@@ -602,9 +667,9 @@ pub(super) fn single_elem_lists(
                 break;
             }
         }
-        let Some(j) = window else { continue };
-        // After the window (its three ops), only bookkeeping names the block.
-        let clean_after = func.ops[j + 3..].iter().all(|later| {
+        let Some((_, after)) = window else { continue };
+        // After the window, only bookkeeping names the block.
+        let clean_after = func.ops[after..].iter().all(|later| {
             if crate::render_native_move::bookkeeping(later) {
                 return true;
             }
