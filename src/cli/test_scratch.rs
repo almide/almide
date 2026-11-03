@@ -152,6 +152,12 @@ impl TestScratch {
         self.native_cache.join(format!("run-{:016x}", super::hash64(key.as_bytes())))
     }
 
+    /// Where a native test run's compiled programs are kept by their inputs
+    /// (#4441), in the persistent cache.
+    pub(crate) fn native_program_cache(&self) -> PathBuf {
+        self.native_cache.join("programs")
+    }
+
     /// A scratch file of this run, removed with it.
     pub(crate) fn run_file(&self, name: &str) -> PathBuf {
         self.root.join(name)

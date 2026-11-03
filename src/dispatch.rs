@@ -637,7 +637,7 @@ fn dispatch_tooling(command: Commands) {
             cli::cmd_apply(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout, allow_removed }, if_survives, force);
         }
         Commands::SurviveTestLeg { file } => cli::cmd_survive_test_leg(&file),
-        Commands::TestRunCompile { out, files } => cli::cmd_test_run_compile(&out, &files),
+        Commands::TestRunCompile { out, cache, files } => cli::cmd_test_run_compile(&out, cache.as_deref(), &files),
         Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } => {
             cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map });
         }

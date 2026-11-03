@@ -532,9 +532,10 @@ pub(crate) fn codegen_metered(mut ir: almide::ir::IrProgram, codegen_opts: &code
 pub(crate) struct TestRunProgram {
     /// The generated Rust of the whole program.
     pub rs_code: String,
-    /// Per file of the batch, in its order: the prefix its test fns carry in
-    /// the generated crate (`almide_rt_<module>_`, the flattened name of a
-    /// module fn), so the runner can select and report one file's tests.
+    /// Per file of the batch, in its order: the prefix its tests' paths carry
+    /// under the harness's `tests` (`almide_tests_<ident>::almide_rt_<ident>_`:
+    /// the file's test module, then the flattened name of a module fn), so
+    /// the runner can select and report one file's tests.
     pub test_prefixes: Vec<String>,
 }
 
@@ -732,6 +733,26 @@ pub(crate) fn culprits_in(text: &str, batch: &[PlannedTestFile]) -> Vec<String> 
         })
         .map(|p| p.file.clone())
         .collect()
+}
+
+/// What a batch's one program is compiled from, besides the compiler and the
+/// environment (#4441): the project and its dependencies, the batch's files
+/// with their indices, and every source they reach, by path. `None` when a
+/// file does not resolve — the compile itself reports that.
+pub(crate) fn test_batch_inputs(ctx: &TestRunContext, batch: &[PlannedTestFile]) -> Option<String> {
+    let mut sources = std::collections::BTreeMap::new();
+    for p in batch {
+        let (_, resolved, _) = resolve_test_file(&p.file, &ctx.dep_paths).ok()?;
+        sources.extend(resolved.sources.into_values());
+    }
+    let mut inputs = format!("{:?}\n{:?}\n", ctx.project, ctx.dep_paths);
+    for p in batch {
+        inputs.push_str(&format!("{}={}\n", p.index, p.file));
+    }
+    for (path, source) in sources {
+        inputs.push_str(&format!("{path} {}\n{source}\n", source.len()));
+    }
+    Some(inputs)
 }
 
 /// Compile one batch of the plan as one program. It runs in a process of its
