@@ -441,6 +441,18 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
     for _ in 0..indent {
         out.push_str("    ");
     }
+    // The left list's last use (#4006 class P): grow its own buffer.
+    if let [CallArg::Handle(l), _] = args.as_slice() {
+        if matches!(at, NTy::Vec | NTy::VecStr) && crate::render_native_move::moving_arg(*l) {
+            writeln!(
+                out,
+                "let mut {}: {ty} = {{ let mut r: {ty} = std::mem::take(&mut {a}); r.extend_from_slice({sb}); r }};",
+                var(*d)
+            )
+            .unwrap();
+            return Ok(());
+        }
+    }
     writeln!(
         out,
         "let mut {}: {ty} = {{ let mut r: {ty} = Vec::with_capacity({sa}.len() + {sb}.len()); r.extend_from_slice({sa}); r.extend_from_slice({sb}); r }};",

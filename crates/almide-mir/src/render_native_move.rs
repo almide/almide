@@ -89,7 +89,9 @@ pub(crate) fn last_use(
     if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) || !crate::render_native_rec::has_default(t) {
         return false;
     }
-    if func.ret == Some(src) || func.params.iter().any(|p| p.value == src) {
+    // A borrowed param is the caller's; a MOVE param (#4006 class P) is ours.
+    let owned_param = func.owned_params.contains(&src);
+    if func.ret == Some(src) || (func.params.iter().any(|p| p.value == src) && !owned_param) {
         return false;
     }
     let mut reads = Vec::new();
@@ -137,6 +139,11 @@ pub(crate) fn last_use(
             }
         }
     };
+    // A move param is defined at entry, outside every loop: it may move only
+    // where no loop could read it again.
+    if owned_param {
+        return loops[at].is_none() && defs.is_empty();
+    }
     defs.iter().any(|&d| d < at && loops[d] == loops[at]) && defs.iter().all(|&d| d < at && within(d))
 }
 
@@ -192,7 +199,7 @@ pub(crate) fn moves_at_call(
     }
     // (The function's result is fine here: what it returns is the rebound
     // value, read after the rebind.)
-    if func.params.iter().any(|p| p.value == src) {
+    if func.params.iter().any(|p| p.value == src) && !func.owned_params.contains(&src) {
         return false;
     }
     let joined = func
