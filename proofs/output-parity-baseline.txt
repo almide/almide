@@ -8,6 +8,7 @@ spec/churn/string_accumulator_churn.almd
 spec/churn/tco_deep_recursion_churn.almd
 spec/churn/tco_loop_churn.almd
 spec/cli/shebang.almd
+spec/embedded_cross/env_non_utf8_host_text.almd
 spec/embedded_cross/io_write_raw_bytes.almd
 spec/embedded_cross/random_entropy_streams.almd
 spec/gauntlet/cells/c1_cross_module_method/src/main.almd
@@ -1117,6 +1118,7 @@ spec/wasm_fail/int_parse_err_propagates.almd
 spec/wasm_fail/matrix_concat_cols_rows_aborts.almd
 spec/wasm_fail/matrix_ragged_from_lists_aborts.almd
 spec/wasm_fail/matrix_shape_mismatch_aborts.almd
+spec/wasm_host_js/effect_export_scalar.almd
 spec/wasm_host_js/effect_exports.almd
 spec/wasm_host_js/marshal_blocks.almd
 spec/wasm_host_js/marshal_types.almd
