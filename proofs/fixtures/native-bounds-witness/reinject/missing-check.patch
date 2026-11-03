@@ -1,0 +1,19 @@
+diff --git a/crates/almide-mir/src/render_native_addr.rs b/crates/almide-mir/src/render_native_addr.rs
+index ab8c074b3..3492db9fd 100644
+--- a/crates/almide-mir/src/render_native_addr.rs
++++ b/crates/almide-mir/src/render_native_addr.rs
+@@ -665,13 +665,8 @@ pub(crate) fn render_addr_op(
+             if ty(tys, &i) != Some(NTy::I64) {
+                 return Err(wall("native: ElemAddr with a non-scalar index"));
+             }
+-            line!(
+-                "if {i} < 0 || {i} as usize >= {b}.len() {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}",
+-                i = var(i),
+-                b = var(ad.base)
+-            );
++            // RE-INJECTED (#4006 row 4 drill): ElemAddr's check is dropped.
+             st.addrs.insert(*d, Addr { base: ad.base, off: i64::from(BLOCK_HEADER), idx: Some(Idx::Elem(i)) });
+-            crate::render_native_bounds::check(crate::render_native_bounds::Slot { base: ad.base, idx: Some(i), k: 0 });
+             return Ok(true);
+         }
+         Op::Prim { kind: PrimKind::Load { width }, dst: Some(d), args } if args.len() == 1 && st.addrs.contains_key(&args[0]) => {

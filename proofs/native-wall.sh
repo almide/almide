@@ -106,7 +106,7 @@ def parse(path):
     return recs
 
 # The Rocq function that judges each property the native bundle carries.
-KERNEL_FN = {"ownership": "check_xc", "native-calls": "check_native_calls_cert"}
+KERNEL_FN = {"ownership": "check_xc", "native-calls": "check_native_calls_cert", "bounds": "check_bounds_cert"}
 fail, accepts, total = [], [], 0
 one = os.path.join(out, "one.w")
 for row in open(os.path.join(out, "index")):
@@ -122,6 +122,12 @@ for row in open(os.path.join(out, "index")):
         fail.append(f"{fx}: the bundle carries no witness")
     if not any(prop == "native-calls" for prop, _, _ in recs):
         fail.append(f"{fx}: the bundle carries no native-calls witness (the call binding, #4006 class P)")
+    # Row 4: every function the bundle certifies the ownership of carries
+    # its bounds witness too (render_native_bounds).
+    owned_fns = {fn for prop, fn, _ in recs if prop == "ownership"}
+    bounded_fns = {fn for prop, fn, _ in recs if prop == "bounds"}
+    for fn in sorted(owned_fns - bounded_fns):
+        fail.append(f"{fx}: {fn} carries no bounds witness (row 4)")
     for prop, fn, w in recs:
         total += 1
         with open(one, "w") as f:
@@ -137,7 +143,7 @@ for row in open(os.path.join(out, "index")):
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
 with open(kgen, "w") as g:
-    g.write("From AlmideTrust Require Import OwnershipChecker NativeCalls.\n")
+    g.write("From AlmideTrust Require Import OwnershipChecker NativeCalls BoundsCert.\n")
     g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
     LIMIT = 60000
     for prop, fn_name in KERNEL_FN.items():
@@ -154,7 +160,8 @@ with open(kgen, "w") as g:
 n = sum(1 for _ in open(os.path.join(out, "index")))
 nown = sum(1 for p, _ in accepts if p == "ownership")
 ncalls = sum(1 for p, _ in accepts if p == "native-calls")
-print(f"  [ownership] {nown} + [native-calls] {ncalls} = {len(accepts)}/{total} witness(es) of {n} rendered program(s) accepted by the extracted checker; almide-verify CERTIFIED every bundle")
+nbounds = sum(1 for p, _ in accepts if p == "bounds")
+print(f"  [ownership] {nown} + [native-calls] {ncalls} + [bounds] {nbounds} = {len(accepts)}/{total} witness(es) of {n} rendered program(s) accepted by the extracted checker; almide-verify CERTIFIED every bundle")
 for m in fail[:20]:
     print("  FAIL " + m)
 sys.exit(1 if fail else 0)
@@ -184,9 +191,9 @@ echo "== POISON LEG: every native poisoned certificate is REJECTED by all three 
 # writes with the bug re-injected (scripts/witness-reinject.sh native /
 # native-calls pins them).
 PGEN="$(mktemp /tmp/KernelNativePoison_XXXXXX).v"
-printf 'From AlmideTrust Require Import OwnershipChecker NativeCalls.\nFrom Stdlib Require Import String.\nOpen Scope string_scope.\n' > "$PGEN"
+printf 'From AlmideTrust Require Import OwnershipChecker NativeCalls BoundsCert.\nFrom Stdlib Require Import String.\nOpen Scope string_scope.\n' > "$PGEN"
 NP=0
-for leg in "native ownership check_xc" "native-calls native-calls check_native_calls_cert"; do
+for leg in "native ownership check_xc" "native-calls native-calls check_native_calls_cert" "native-bounds bounds check_bounds_cert"; do
   read -r dir prop kfn <<<"$leg"
   POISONED=("$ROOT"/proofs/poisoned-certs/"$dir"/*.cert)
   if [ ! -e "${POISONED[0]}" ]; then
