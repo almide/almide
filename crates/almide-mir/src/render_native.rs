@@ -595,6 +595,28 @@ fn render_fn(
             Op::Dup { dst, src } if borrows.arms.contains(dst) => {
                 crate::borrow_join::render_arm(dst, src, &mut tys, &mut out, indent)?
             }
+            // A copy of a borrowed field read off an owned record that dies
+            // here moves the field out (#4006, no-perf-loss): nothing reads
+            // the record again, so its field is the copy.
+            Op::Dup { dst, src }
+                if matches!(tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef))
+                    && crate::render_native_addr::field_of(*src).is_some_and(|(base, place)| {
+                        matches!(tys.get(&base), Some(NTy::Rec(_)))
+                            && crate::render_native_move::dying_after(func, i, base, &borrows.arms)
+                            && crate::render_native_addr::reads_of_place(&place)
+                                .iter()
+                                .all(|r| crate::render_native_move::dying_after(func, i, *r, &borrows.arms))
+                    }) =>
+            {
+                let (_, place) = crate::render_native_addr::field_of(*src).expect("a field read");
+                let owned = match tys[src] {
+                    NTy::StrRef => NTy::Str,
+                    NTy::VecRef => NTy::Vec,
+                    _ => NTy::VecStr,
+                };
+                tys.insert(*dst, owned);
+                line!("let mut {} = std::mem::take(&mut {place});", var(*dst));
+            }
             // A copy of a value nothing reads again moves it (no clone).
             Op::Dup { dst, src }
                 if tys
