@@ -520,6 +520,7 @@ evidence  = [
   { path = "spec/wasm_cross/regex_linear_time.almd", class = "fixture" },
   { path = "spec/wasm_cross/regex_counted_repetition.almd", class = "fixture" },
   { path = "spec/wasm_cross/regex_many_patterns.almd", class = "fixture" },
+  { path = "spec/wasm_cross/regex_scan_linear.almd", class = "fixture" },
   { path = "tests/regex_fuzz_test.rs", name = "regex_differential_fuzz", class = "fuzz", n = 220 },
   { path = "tests/regex_pike_differential_test.rs", name = "nested_groups_agree_native_and_wasm", class = "fuzz", n = 300 },
 ]

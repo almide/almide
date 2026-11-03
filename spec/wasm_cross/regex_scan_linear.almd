@@ -1,0 +1,26 @@
+// @contract: C-032
+// #4419: regex.captures_all and regex.replace_with take memory and time
+// linear in the subject's length on both targets, as find_all always did.
+// The wasm engine built each match's items as `acc + [field, whole] + groups`,
+// a copy of the whole accumulator per match, in a loop whose body read the
+// machine block with a prim op, which kept every old accumulator alive: on
+// the 220 KB subject below wasm ran out of memory, and at half the size it
+// took 54 s where native took 14 ms. The scan now appends one item per step,
+// the in-place `acc + [x]`. The wasm_cross gate's per-run limits are what turn
+// a regression here into a failure.
+import regex
+
+fn main() -> Unit = {
+  let s = string.repeat("2024-01-02 ", 20000)
+  let digits = regex.new("[0-9]+")
+  println("captures_all ${list.len(regex.captures_all(digits, s))}")
+  let dates = regex.captures_all(regex.new("([0-9]+)-([0-9]+)-(x)?([0-9]+)"), s)
+  println("dates ${list.len(dates)}")
+  match list.last(dates) {
+    some(cs) => println(cs |> list.map((c) => c ?? "none") |> list.join("|")),
+    none => println("no dates"),
+  }
+  let swapped = regex.replace_with(regex.new("([0-9]+)-([0-9]+)"), s, (cs) => "${(list.get(cs, 2) ?? none) ?? ""}/${(list.get(cs, 1) ?? none) ?? ""}")
+  println("replace_with ${string.len(swapped)} ${string.slice(swapped, 0, 22)}")
+  println("find_all ${list.len(regex.find_all(digits, s))}")
+}
