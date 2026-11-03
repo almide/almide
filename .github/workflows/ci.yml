@@ -496,6 +496,13 @@ jobs:
           path: ${{ runner.temp }}/almide-pack/shard-6/
           retention-days: 1
           compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-merge
+          path: ${{ runner.temp }}/almide-pack/merge/
+          retention-days: 1
+          compression-level: 0
       # One artifact per solo leg (keep in step with SOLO_LEGS in
       # scripts/ci-test-shard.sh and the test-rust-solo matrix).
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -576,45 +583,18 @@ jobs:
   # Target tests — all run on every develop/main PR
   # ═══════════════════════════════════════════════
 
-  shard-coverage:
-    # THE GATE that makes sharding safe. A partition that drops a target does
-    # not fail — it goes GREEN, faster, with less tested. That failure mode is
-    # invisible by construction, so it gets its own job: assert the four shards'
-    # union is exactly the full target set, with nothing missing and nothing run
-    # twice. Cheap (no tests run, just enumeration) and it gates the same commit
-    # the shards run on.
-    name: Test shards cover every target
-    # `test-rust-solo` too (#2381): the five solo legs are NOT in
-    # develop's required-check list (only this job and the four shard
-    # names are), so this job — which is required — waits for them and
-    # refuses to go green unless every solo leg passed. Adding the leg
-    # names to branch protection retires that step; until then a red
-    # giant blocks the merge through this name.
-    # `warning-ratchets` the same way: it left the required `Build (Linux)`
-    # job, and this required job is where its verdict still blocks a merge.
-    needs: [changes, build, build-tests, test-rust-solo, warning-ratchets, checks-pass-order]
-    if: ${{ !cancelled() && needs.build.result == 'success' && needs.build-tests.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
+  # The target-set half of the coverage gate, split out so it runs beside the
+  # shards (it needs only build-tests) instead of after the slowest solo leg:
+  # it unpacks the full 3.4 GB archive (download 2.3 min + three unpacks,
+  # ~5 min on develop run 41583162285, all on the critical path). The required
+  # `shard-coverage` below holds its verdict.
+  shard-coverage-enum:
+    name: Test shard enumeration matches the archive
+    needs: [changes, build-tests]
+    if: ${{ !cancelled() && needs.build-tests.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
-    # 30, not 20 (#4408): on a full main run the judging steps alone took
-    # ~17 min on 2026-11-02 and the trailing informational balance report was
-    # cut at 20 (attempts 3 and 4 of run 41398410434). A time budget only.
     timeout-minutes: 30
     steps:
-      - name: Every solo leg passed (they carry five corpus gates the shards no longer run)
-        if: needs.test-rust-solo.result != 'success'
-        run: |
-          echo "::error::Test Rust (solo …) result is '${{ needs.test-rust-solo.result }}' — a solo corpus gate failed or did not run; this gate refuses to certify coverage over it"
-          exit 1
-      - name: The warning ratchets passed (they left the required Build job)
-        if: needs.warning-ratchets.result != 'success'
-        run: |
-          echo "::error::Warning ratchets (rustc + clippy) result is '${{ needs.warning-ratchets.result }}' — a warning ratchet failed or did not run"
-          exit 1
-      - name: The pass-order and ownership-certifier gates passed (they left the required Emit & Format job)
-        if: needs.checks-pass-order.result != 'success'
-        run: |
-          echo "::error::Emit gates (pass order + ownership certifier) result is '${{ needs.checks-pass-order.result }}' — a gate failed or did not run"
-          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
       - name: CI slice — the change's own files (a full run does nothing)
@@ -716,6 +696,81 @@ jobs:
       # sharding can add, and it is green by construction without this),
       # and `merge/2` judges the summed ceilings and the unioned bridge
       # names with the gates' own code from the same archive.
+
+  shard-coverage:
+    # THE GATE that makes sharding safe. A partition that drops a target does
+    # not fail — it goes GREEN, faster, with less tested. That failure mode is
+    # invisible by construction, so it gets its own job: assert the four shards'
+    # union is exactly the full target set, with nothing missing and nothing run
+    # twice. Cheap (no tests run, just enumeration) and it gates the same commit
+    # the shards run on.
+    name: Test shards cover every target
+    # `test-rust-solo` too (#2381): the five solo legs are NOT in
+    # develop's required-check list (only this job and the four shard
+    # names are), so this job — which is required — waits for them and
+    # refuses to go green unless every solo leg passed. Adding the leg
+    # names to branch protection retires that step; until then a red
+    # giant blocks the merge through this name.
+    # `warning-ratchets` the same way: it left the required `Build (Linux)`
+    # job, and this required job is where its verdict still blocks a merge.
+    needs: [changes, build, build-tests, shard-coverage-enum, test-rust-solo, warning-ratchets, checks-pass-order]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.build-tests.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-latest
+    # 30, not 20 (#4408): on a full main run the judging steps alone took
+    # ~17 min on 2026-11-02 and the trailing informational balance report was
+    # cut at 20 (attempts 3 and 4 of run 41398410434). A time budget only.
+    timeout-minutes: 30
+    steps:
+      - name: Every solo leg passed (they carry five corpus gates the shards no longer run)
+        if: needs.test-rust-solo.result != 'success'
+        run: |
+          echo "::error::Test Rust (solo …) result is '${{ needs.test-rust-solo.result }}' — a solo corpus gate failed or did not run; this gate refuses to certify coverage over it"
+          exit 1
+      - name: The warning ratchets passed (they left the required Build job)
+        if: needs.warning-ratchets.result != 'success'
+        run: |
+          echo "::error::Warning ratchets (rustc + clippy) result is '${{ needs.warning-ratchets.result }}' — a warning ratchet failed or did not run"
+          exit 1
+      - name: The enumeration half passed (every target in exactly one shard or solo job)
+        if: needs.shard-coverage-enum.result != 'success'
+        run: |
+          echo "::error::Test shard enumeration matches the archive result is '${{ needs.shard-coverage-enum.result }}' — the shards' union was not proven to be the full target set"
+          exit 1
+      - name: The pass-order and ownership-certifier gates passed (they left the required Emit & Format job)
+        if: needs.checks-pass-order.result != 'success'
+        run: |
+          echo "::error::Emit gates (pass order + ownership certifier) result is '${{ needs.checks-pass-order.result }}' — a gate failed or did not run"
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - name: CI slice — the change's own files (a full run does nothing)
+        run: bash scripts/ci-slice-prepare.sh
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      # No rust-cache: this job compiles nothing. Its merge step unpacks the
+      # full test archive into ./target (`--extract-to .`), and the cache's
+      # post step saved that as a 3.4 GB entry — a third of the repo's 10 GB
+      # Actions cache, evicting small entries the other jobs depend on (the
+      # grammar gate's corpus memo hit 0 of 2226 files on develop run
+      # 41566860171 and the step re-parsed all of them in 8.4 min).
+      # #1732: enumerate from the build job's nextest archive — this
+      # job's old enumerate compiled the workspace.
+      - name: Install cargo-nextest
+        run: |
+          bash scripts/fetch-pinned.sh "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.145/cargo-nextest-0.9.145-x86_64-unknown-linux-gnu.tar.gz" /tmp/nextest.tar.gz
+          sudo tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
+          cargo nextest --version
+      # The merge step runs two binaries (interp ledger, run_parity): their own
+      # small archive, not the full one (the enumeration moved to
+      # shard-coverage-enum).
+      - uses: ./.github/actions/fetch-test-archive
+        with:
+          artifact: almide-tests-merge
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: almide-shard-rows
+          path: ${{ runner.temp }}/almide-shard-rows
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: corpus-shard-*

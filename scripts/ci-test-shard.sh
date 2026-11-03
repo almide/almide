@@ -371,6 +371,11 @@ for bid, v in sorted(d["rust-suites"].items()):
       echo "== pack solo $leg =="
       cargo nextest archive --workspace --cargo-profile ci-test -E "$(solo_expr "$leg")" --archive-file "$d/almide-tests.tar.zst"
     done
+    # The coverage job's merge step runs the two corpus gates' merge form; it
+    # gets just those binaries instead of the full archive.
+    d="$out/merge"; mkdir -p "$d"
+    echo "== pack merge =="
+    cargo nextest archive --workspace --cargo-profile ci-test -E "$(bash scripts/ci-corpus-shards.sh --merge-binaries)" --archive-file "$d/almide-tests.tar.zst"
     ls -la "$out"/*/almide-tests.tar.zst
     ;;
   --list-solo-rows)
