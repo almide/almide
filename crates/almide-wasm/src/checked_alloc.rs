@@ -152,7 +152,12 @@ pub(crate) fn emit_canary_reserve(i: &mut InstructionSink<'_>, len: u32) {
     if !armed() {
         return;
     }
-    i.local_get(len).i32_const(CANARY).i32_add().local_set(len);
+    // Saturated (#4396): a len within CANARY of 2^32 must stay a request
+    // `$alloc`'s wrap guard refuses, not wrap to a tiny one.
+    i.i32_const(-1);
+    i.local_get(len).i32_const(CANARY).i32_add();
+    i.local_get(len).i32_const(-1 - CANARY).i32_gt_u();
+    i.select().local_set(len);
 }
 
 /// `$alloc`, at each return with the block in `b`: the header's `len` back

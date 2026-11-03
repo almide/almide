@@ -564,6 +564,7 @@
 69568	spec/wasm_cross/matrix_mul_no_fma.almd
 67248	spec/wasm_cross/matrix_neg_signed_zero.almd
 67616	spec/wasm_cross/matrix_pow_libm.almd
+68944	spec/wasm_cross/matrix_producers_uniform_rows.almd
 67520	spec/wasm_cross/matrix_product_family.almd
 67216	spec/wasm_cross/matrix_select_rows.almd
 66192	spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd

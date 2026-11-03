@@ -240,11 +240,37 @@ for bid, v in sorted(d["rust-suites"].items()):
       esac
       if [ -z "$expr" ]; then expr="binary_id(=$bid)"; else expr="$expr | binary_id(=$bid)"; fi
     done
+    # Heaviest first INSIDE the shard too. The packer balances summed
+    # seconds, but nextest starts tests in name order, so a giant whose name
+    # sorts late starts late and becomes the shard's tail (shape_matrix began
+    # 11 minutes into a 20-minute shard and ran 7 more). The priorities come
+    # from the same measured weights the packer reads — no hand list.
+    config="$(mktemp)"
+    cat .config/nextest.toml > "$config"
+    printf '%s\n' "${rows[@]}" | WEIGHTS=$WEIGHTS python3 -c '
+import os, sys
+weights = {}
+for line in open(os.environ["WEIGHTS"]):
+    line = line.strip()
+    if line and not line.startswith("#"):
+        name, w = line.rsplit(None, 1)
+        weights[name.strip()] = int(w)
+heavy = []
+for row in sys.stdin:
+    pkg, kind, name = row.rstrip("\n").split("\t")
+    bid = pkg if kind == "lib" else (pkg + "::bin/" + name if kind == "bin" else pkg + "::" + name)
+    w = weights.get(name, 0)
+    if w >= 60:
+        heavy.append((-w, bid))
+for rank, (_, bid) in enumerate(sorted(heavy)[:100]):
+    print("\n[[profile.default.overrides]]\nfilter = %r\npriority = %d" % ("binary_id(=%s)" % bid, 100 - rank))
+' >> "$config"
+    echo "== start order: $(grep -c '^priority' "$config") heavy target(s) prioritised by weight =="
     # --extract-to .: the archive recreates ./target/debug/* in the
     # workspace, so the CARGO_BIN_EXE_* paths the test helpers baked at
     # compile time resolve on a checkout that never ran cargo (the
     # binding_diag "No such file or directory" class, soak round 2).
-    exec cargo nextest run --archive-file "$ARCHIVE" --extract-to . --workspace-remap . --no-fail-fast -E "$expr"
+    exec cargo nextest run --config-file "$config" --archive-file "$ARCHIVE" --extract-to . --workspace-remap . --no-fail-fast -E "$expr"
     ;;
   --list)     SHARD="$2" TOTAL="$3" DEFAULT_WEIGHT=$DEFAULT_WEIGHT WEIGHTS=$WEIGHTS partition ;;
   --run)
