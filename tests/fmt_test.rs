@@ -860,7 +860,8 @@ fn fmt_output_typechecks_single_file_specs() {
     // file, so the files run on parallel workers (one at a time this was the
     // slowest single test of a CI shard: 502 s on develop run 41583162285).
     // Each copy gets its own subdirectory: two specs may share a file name.
-    let judge = |i: usize, path: &std::path::PathBuf| -> Option<(bool, Option<String>)> {
+    type Verdict = Option<(bool, Option<String>)>;
+    let judge = |i: usize, path: &std::path::PathBuf| -> Verdict {
         // Pre-condition: the ORIGINAL must check clean; files that do not
         // (deliberate negative fixtures) are out of scope for this gate.
         let orig_check = std::process::Command::new(&bin)
@@ -891,7 +892,7 @@ fn fmt_output_typechecks_single_file_specs() {
     };
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let mut verdicts: Vec<(usize, Option<(bool, Option<String>)>)> = std::thread::scope(|s| {
+    let mut verdicts: Vec<(usize, Verdict)> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..workers)
             .map(|_| {
                 s.spawn(|| {
