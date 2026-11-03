@@ -578,7 +578,7 @@ jobs:
     # giant blocks the merge through this name.
     # `warning-ratchets` the same way: it left the required `Build (Linux)`
     # job, and this required job is where its verdict still blocks a merge.
-    needs: [changes, build, build-tests, test-rust-solo, warning-ratchets]
+    needs: [changes, build, build-tests, test-rust-solo, warning-ratchets, checks-pass-order]
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.build-tests.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     # 30, not 20 (#4408): on a full main run the judging steps alone took
@@ -595,6 +595,11 @@ jobs:
         if: needs.warning-ratchets.result != 'success'
         run: |
           echo "::error::Warning ratchets (rustc + clippy) result is '${{ needs.warning-ratchets.result }}' — a warning ratchet failed or did not run"
+          exit 1
+      - name: The pass-order and ownership-certifier gates passed (they left the required Emit & Format job)
+        if: needs.checks-pass-order.result != 'success'
+        run: |
+          echo "::error::Emit gates (pass order + ownership certifier) result is '${{ needs.checks-pass-order.result }}' — a gate failed or did not run"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
@@ -1940,6 +1945,54 @@ jobs:
         if: steps.rel.outputs.skip != 'true'
         run: bash proofs/coverage.sh --check
 
+  # Split out of `checks` (Emit & Format, ~25 min on develop run
+  # 41566860171): the pass-order shuffle alone was 7.1 min of it. The four
+  # steps need only the release binary. Not a required context: the required
+  # `shard-coverage` waits for it and refuses to go green unless it passed.
+  checks-pass-order:
+    name: Emit gates (pass order + ownership certifier)
+    needs: [changes, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PROSE_LANE: ${{ needs.changes.outputs.prose_only == 'true' && needs.changes.outputs.docs_only == 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.PROSE_LANE != 'true'
+      - uses: ./.github/actions/root-tmpdir
+        if: env.PROSE_LANE != 'true'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+      - name: Setup
+        if: env.PROSE_LANE != 'true'
+        run: chmod +x /tmp/almide-bin/almide
+
+      # #2186: the declared pass edges are the WHOLE ordering truth. Under
+      # three seeded random orders the edges permit, every spec/lang and
+      # spec/wasm_cross program must emit byte-identical Rust.
+      - name: Pass-order shuffle (#2186 — byte-identical Rust under every order the declared dependency edges permit)
+        if: env.PROSE_LANE != 'true'
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-pass-shuffle.sh
+
+      - name: Pass-order shuffle negative controls (#2186 — an order-dependent or panicking stand-in turns the gate red)
+        if: env.PROSE_LANE != 'true'
+        run: bash scripts/check-pass-shuffle-negative.sh
+
+      # #2231: the native ownership certifier re-derives every occurrence's
+      # use from the final IR and checks the passes' verdicts; the corpus's
+      # violations are a shrink-only ledger (proofs/ownership-certifier-baseline.txt).
+      - name: Ownership certifier (#2231 — every corpus violation is in the shrink-only ledger, none new, none silently gone)
+        if: env.PROSE_LANE != 'true'
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-ownership-certifier.sh
+
+      - name: Ownership certifier negative controls (#2231 — a new violation, a vanished one, a panic and an empty corpus each turn the gate red)
+        if: env.PROSE_LANE != 'true'
+        run: bash scripts/check-ownership-certifier-negative.sh
+
   checks:
     name: Emit & Format
     # `changes` is read for the lane flag only. The explicit `if` keeps the
@@ -2182,28 +2235,6 @@ jobs:
 
       - name: Walker gate negative controls (#2186 — each ownership-decision shape turns the gate red)
         run: bash scripts/check-walker-reads-annotations-negative.sh
-
-      # #2186: the declared pass edges are the WHOLE ordering truth. Under
-      # three seeded random orders the edges permit, every spec/lang and
-      # spec/wasm_cross program must emit byte-identical Rust.
-      - name: Pass-order shuffle (#2186 — byte-identical Rust under every order the declared dependency edges permit)
-        if: env.PROSE_LANE != 'true'
-        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-pass-shuffle.sh
-
-      - name: Pass-order shuffle negative controls (#2186 — an order-dependent or panicking stand-in turns the gate red)
-        if: env.PROSE_LANE != 'true'
-        run: bash scripts/check-pass-shuffle-negative.sh
-
-      # #2231: the native ownership certifier re-derives every occurrence's
-      # use from the final IR and checks the passes' verdicts; the corpus's
-      # violations are a shrink-only ledger (proofs/ownership-certifier-baseline.txt).
-      - name: Ownership certifier (#2231 — every corpus violation is in the shrink-only ledger, none new, none silently gone)
-        if: env.PROSE_LANE != 'true'
-        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-ownership-certifier.sh
-
-      - name: Ownership certifier negative controls (#2231 — a new violation, a vanished one, a panic and an empty corpus each turn the gate red)
-        if: env.PROSE_LANE != 'true'
-        run: bash scripts/check-ownership-certifier-negative.sh
 
       - name: ALS element coverage (every syntax element rowed; UNWRITTEN shrink-only — the freeze precondition)
         run: bash scripts/check-als-element-coverage.sh
