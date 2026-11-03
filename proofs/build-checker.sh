@@ -19,6 +19,7 @@ echo "== compile + extract the proven checker =="
 "$COQC" -Q . AlmideTrust CapabilityReach.v >/dev/null
 "$COQC" -Q . AlmideTrust CallModes.v >/dev/null
 "$COQC" -Q . AlmideTrust HelperSig.v >/dev/null
+"$COQC" -Q . AlmideTrust NativeCalls.v >/dev/null
 "$COQC" -Q . AlmideTrust MemorySafe.v >/dev/null
 "$COQC" -Q . AlmideTrust SpatialCert.v >/dev/null
 "$COQC" -Q . AlmideTrust BoundsCert.v >/dev/null
@@ -192,6 +193,28 @@ runs $GATE_TMP/sig_push.cert 0
 runs $GATE_TMP/sig_push_borrow.cert 1
 runs $GATE_TMP/sig_some_paths.cert 1
 runs $GATE_TMP/sig_missing_line.cert 1
+
+# NATIVE-CALLS witness (#4006 class P): one `#`-separated block per function —
+# `<modes>|<sites>|<marks>` then its ownership lines (heap parameters first).
+# A call-site move is `M` on the caller's line of the moved argument; marks
+# name those lines. accept ⟹ every site agrees with its callee's modes, every
+# moved argument is bound to a move-out on the caller's line, and every line
+# balances from the reference its mode declares (check_native_calls_sound).
+printf '|1 1|0\niM\nid#1||\nm'   > $GATE_TMP/nc_move.cert          # keep(xs) takes xs by move; the caller moves it at the call → ACCEPT
+printf '|1 1|0\nid\nid#1||\nm'   > $GATE_TMP/nc_missing_move.cert  # the site moves, the caller's line keeps and releases the list → REJECT
+printf '|1 0|\nid\nid#1||\nm'    > $GATE_TMP/nc_site_lie.cert      # the callee declares move, the site lends → REJECT
+printf '|1 1|0\niMb\nid#1||\nm'  > $GATE_TMP/nc_use_after.cert     # moved at the call, then read by the caller → REJECT
+printf '|1 1|0\niM\nid#1||\n'    > $GATE_TMP/nc_callee_lie.cert    # the callee declares move and only reads → REJECT (leak)
+runn() { # path expected_exit  (native-calls mode)
+  set +e; ./checker native-calls "$1" >$GATE_TMP/checker.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -eq "$2" ]; then echo "ok   $(basename "$1"): $(cat $GATE_TMP/checker.out) (exit $rc)";
+  else echo "FAIL $(basename "$1"): got exit $rc want $2 ($(cat $GATE_TMP/checker.out))"; exit 1; fi
+}
+runn $GATE_TMP/nc_move.cert 0
+runn $GATE_TMP/nc_missing_move.cert 1
+runn $GATE_TMP/nc_site_lie.cert 1
+runn $GATE_TMP/nc_use_after.cert 1
+runn $GATE_TMP/nc_callee_lie.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"
