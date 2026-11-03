@@ -4,7 +4,7 @@
 # The weights file is the shard packer's only input, and its header demands
 # every line be measured. The original capture was a laptop session; this
 # makes the refresh a command: given a ci.yml run id (default: the latest
-# completed develop run), pull the four `Test Rust (shard N/4)` job logs,
+# completed develop run), pull every `Test Rust (shard N/M)` job log,
 # sum every nextest per-test line (`PASS [ Ns] (i/n) pkg::target test`) per
 # target across shards — or, for a pre-nextest log, pair each `Running
 # tests/<name>.rs` line with its `test result: … finished in Ns` line —
@@ -64,7 +64,7 @@ VIEW_ESC=$(gh_escape_flag "run view")
 # shellcheck disable=SC2086
 JOB_IDS=$(gh run view $VIEW_ESC "$RUN_ID" --json jobs --jq '.jobs[] | select(.name | test("Test Rust \\(shard")) | .databaseId')
 if [ "$(echo "$JOB_IDS" | grep -c .)" -eq 0 ]; then
-  echo "FAIL: run $RUN_ID has no 'Test Rust (shard N/4)' jobs" >&2
+  echo "FAIL: run $RUN_ID has no 'Test Rust (shard N/M)' jobs" >&2
   exit 1
 fi
 
@@ -130,8 +130,9 @@ for logf in sorted(os.listdir(tmp)):
 if check:
     # A partially-fetched run must not pass by omission: the worst shard
     # could be the missing one.
-    if len(shard_totals) < 4:
-        print(f"::error::only {len(shard_totals)} shard log(s) parsed (expected 4) — "
+    expected = int(os.environ.get("CI_TEST_SHARDS", "6"))
+    if len(shard_totals) < expected:
+        print(f"::error::only {len(shard_totals)} shard log(s) parsed (expected {expected}) — "
               "cannot judge balance from a partial run", file=sys.stderr)
         sys.exit(1)
     lo, hi = min(shard_totals), max(shard_totals)
@@ -150,8 +151,11 @@ if not rows:
     print("FAIL: no measured targets at or above 5s — wrong logs?", file=sys.stderr)
     sys.exit(1)
 
-path = "scripts/ci-test-weights.txt"
-with open(path) as fh:
+# WEIGHTS_OUT=scripts/ci-test-weights-slice.txt refreshes the CI-slice
+# profile (measure it from a PR-into-develop run; ci-test-shard.sh reads it
+# when ALMIDE_CI_SLICE > 1). A new file takes the full profile's header.
+path = os.environ.get("WEIGHTS_OUT", "scripts/ci-test-weights.txt")
+with open(path if os.path.exists(path) else "scripts/ci-test-weights.txt") as fh:
     head = []
     for line in fh:
         if line.startswith("#"):
