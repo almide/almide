@@ -109,6 +109,10 @@ pub(crate) struct AddrState {
     /// List blocks filled in slot order right after their allocation
     /// (`render_native_slots::filled_in_order`): reserved, then pushed.
     pushed: BTreeSet<ValueId>,
+    /// Those of them that are generated lists, built as one `vec![…]` at the
+    /// last store (each element bound as `<list>_e<k>` at its store), as the
+    /// standard codegen builds a list literal: (length, elements stored).
+    literal: BTreeMap<ValueId, (usize, usize)>,
 }
 
 impl AddrState {
@@ -149,7 +153,13 @@ impl AddrState {
         let carrier_k = |k: &NativeSigKind| match k {
             // (A map alias rides the same declared typing: `map.new()`'s
             // result takes the map type the program declares for it.)
-            NativeSigKind::Rec(i) if carrier::is_carrier(*i) || crate::render_native_rec::map_kinds(*i).is_some() => Some(*i),
+            NativeSigKind::Rec(i)
+                if carrier::is_carrier(*i)
+                    || crate::render_native_rec::map_kinds(*i).is_some()
+                    || crate::render_native_rec::set_elem(*i).is_some() =>
+            {
+                Some(*i)
+            }
             _ => None,
         };
         let sig_of = |n: &str| -> Option<CarrierSig> {
@@ -158,7 +168,11 @@ impl AddrState {
         let own = sig_of(func.name.as_str()).unwrap_or_default();
         let declared = carrier::carrier_values(func, &own, &sig_of);
         crate::render_native_rec::set_declared(
-            declared.iter().filter(|(_, i)| crate::render_native_rec::map_kinds(**i).is_some()).map(|(v, i)| (*v, *i)).collect(),
+            declared
+                .iter()
+                .filter(|(_, i)| crate::render_native_rec::map_kinds(**i).is_some() || crate::render_native_rec::set_elem(**i).is_some())
+                .map(|(v, i)| (*v, *i))
+                .collect(),
         );
         for (v, i) in declared {
             alloc_rec.entry(v).or_insert(i);
@@ -307,8 +321,14 @@ impl AddrState {
             building_enum: BTreeMap::new(),
             single,
             pushed,
+            literal: BTreeMap::new(),
         }
     }
+}
+
+/// The owned spelling of a generated list's kind.
+fn owned_ty_of(t: Option<NTy>) -> String {
+    t.map(crate::render_native_rec::owned_ty).unwrap_or_default()
 }
 
 fn is_block(t: NTy) -> bool {
@@ -893,6 +913,16 @@ pub(crate) fn render_addr_op(
                 let rhs = g.and_then(|g| owned_from(&var(sv.base), g)).ok_or_else(|| {
                     wall(format!("native: a {:?} element stored into a list of {e:?}", ty(tys, &sv.base)))
                 })?;
+                if let Some((n, k)) = st.literal.get(&ad.base).copied() {
+                    let b = var(ad.base);
+                    line!("let {b}_e{k}: {} = {rhs};", crate::render_native_rec::owned_ty(e));
+                    st.literal.insert(ad.base, (n, k + 1));
+                    if k + 1 == n {
+                        let es: Vec<String> = (0..n).map(|j| format!("{b}_e{j}")).collect();
+                        line!("let mut {b}: {} = vec![{}];", owned_ty_of(ty(tys, &ad.base)), es.join(", "));
+                    }
+                    return Ok(true);
+                }
                 if st.pushed.contains(&ad.base) {
                     line!("{}.push({rhs});", var(ad.base));
                     return Ok(true);
@@ -975,6 +1005,13 @@ pub(crate) fn render_addr_op(
             let i = st.alloc_rec[dst];
             tys.insert(*dst, NTy::Rec(i));
             if st.pushed.contains(dst) {
+                // A constant length (filled_in_order requires one): the list
+                // is one `vec![…]` once its last element is stored.
+                if let Some(n) = st.consts.get(len).and_then(|n| usize::try_from(*n).ok()) {
+                    st.literal.insert(*dst, (n, 0));
+                    line!("// {}: a list of {n}, built whole at its last element", var(*dst));
+                    return Ok(true);
+                }
                 line!("let mut {}: {} = Vec::with_capacity({}.max(0) as usize);", var(*dst), crate::render_native_rec::struct_name(i), var(*len));
                 return Ok(true);
             }

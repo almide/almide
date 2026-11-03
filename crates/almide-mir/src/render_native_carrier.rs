@@ -368,6 +368,28 @@ pub(super) fn render_carrier_op(
                         return Some(Ok(true));
                     }
                 }
+                // A borrow-only read above the tag test, used under one side of
+                // it: a reference into the carrier, the other side's (never
+                // used) a reference to a Default the render keeps beside it.
+                if let (None, Some(err_side), true) = (arm, st.hoisted.get(d).copied(), st.borrow_reads.contains(d)) {
+                    let (k, side, other) = if err_side { (e, "Err", "Ok") } else { (o, "Ok", "Err") };
+                    let dv = var(*d);
+                    match k {
+                        NTy::Str => {
+                            tys.insert(*d, NTy::StrRef);
+                            emit(out, indent, &format!("let mut {dv}: &str = match &{b} {{ {side}(v) => &v[..], {other}(_) => \"\" }};"));
+                            return Some(Ok(true));
+                        }
+                        NTy::Rec(j) if has_default(k) => {
+                            tys.insert(*d, NTy::RecRef(j));
+                            let t = struct_name(j);
+                            emit(out, indent, &format!("let {dv}_absent: {t} = Default::default();"));
+                            emit(out, indent, &format!("let mut {dv}: &{t} = match &{b} {{ {side}(v) => v, {other}(_) => &{dv}_absent }};"));
+                            return Some(Ok(true));
+                        }
+                        _ => {}
+                    }
+                }
                 match (arm, st.hoisted.get(d).copied()) {
                     (Some(true), _) => (e, format!("match &{b} {{ Err(v) => v.clone(), Ok(_) => unreachable!() }}")),
                     (Some(false), _) => (o, format!("match &{b} {{ Ok(v) => v.clone(), Err(_) => unreachable!() }}")),

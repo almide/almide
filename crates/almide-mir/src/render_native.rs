@@ -331,6 +331,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
             out.push_str(s);
             out.push_str("\n\n");
         }
+        out.push_str(&crate::render_native_rec::runtime_default_impls());
     } else {
         // The runtime part — the shared string buffer and the runtime items
         // the floor takes along — in one module the program reaches through
@@ -342,9 +343,18 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         out.push_str(&format!("pub mod {RT_MOD} {{\n{RT_MOD_ATTRS}\n"));
         out.push_str(&crate::render_native_str::almide_string_alias());
         for s in runtime {
+            // A one-line runtime fn (a constructor such as `value.int`'s) is
+            // inlined into the program across the crate split, as it is
+            // inside v0's single crate: without the hint the program pays a
+            // call per use at the program profile's opt-level.
+            let one_line_fn = !s.trim().contains('\n') && (s.trim_start().starts_with("pub fn ") || s.trim_start().starts_with("fn "));
+            if one_line_fn {
+                out.push_str("#[inline]\n");
+            }
             out.push_str(&crate::native_floor::pub_items(s));
             out.push_str("\n\n");
         }
+        out.push_str(&crate::render_native_rec::runtime_default_impls());
         out.push_str(&format!("}}\n{RT_MOD_END}pub use {RT_MOD}::*;\n\n"));
     }
     out.push_str(&crate::render_native_rec::struct_defs());
