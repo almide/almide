@@ -194,9 +194,11 @@ enumerate_archive() {
   cargo nextest list --archive-file "$ARCHIVE" --message-format json | suite_rows
 }
 # The same rows from the build job's own ci-test tree, before anything is
-# archived: no unpack, and the binaries are not run.
+# archived: no unpack. The full list (not `--list-type binaries-only`, whose
+# JSON is the binary-list schema without `rust-suites`/`package-name`), so
+# the rows come out of the very JSON shape the archive enumeration reads.
 enumerate_built() {
-  cargo nextest list --cargo-profile ci-test --workspace --list-type binaries-only --message-format json | suite_rows
+  cargo nextest list --cargo-profile ci-test --workspace --message-format json | suite_rows
 }
 
 # The nextest binary id of a `pkg<TAB>kind<TAB>name` row.
