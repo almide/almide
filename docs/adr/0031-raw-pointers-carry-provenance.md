@@ -255,6 +255,13 @@ scoped-borrow alternative below).
 - `--host js` wraps an A1 export as `f(…) → [ptr, len]` (numbers in either width) and
   adds `regionRelease(ptr)` (#4354). A driver may also read `instance.exports.f()` as the
   two numbers directly.
+- A scalar `effect fn` export (#4376, ruled 2026-11-03, C-451): a reader of a Region
+  is an `effect fn`, since `ffi.read` is, so its wasm value was a `Result` block address
+  (#3352) that only the `--host js` glue unwrapped. An `@export(wasm)` `effect fn`
+  returning `Int`, `Float`, `Bool` or `Unit` now answers the value itself, and its `err`
+  traps the way item 5's does, through the same adapter path (region_export.rs). Not
+  taken: a pure Region read (a host fill stays an effect) and a memory accessor in the
+  `--host js` glue (it would serve JS hosts only).
 - There is no C header generator. A2's prototypes are written by hand:
   `int32_t f(const uint8_t *buf, size_t buf_len)`, and `uint8_t *` for an `out` parameter.
 
