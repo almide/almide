@@ -25,14 +25,13 @@ fn rewrite_to_loop(
     // param that persists across loop iterations needs an owned value. That
     // is the right question asked of the wrong thing: what decides is not the
     // param's TYPE but whether the loop can still hold the reference at the
-    // top of the next iteration — see [`loop_keeps_borrow`].
-    let identity = tco_identity_carried(func);
+    // top of the next iteration — see [`tco_kept_borrows`].
+    let kept = tco_kept_borrows(func, |_, p| !matches!(p.borrow, almide_ir::ParamBorrow::Own));
     let mut kept_borrow_params: HashSet<usize> = HashSet::new();
     let mut reverted_to_own: HashSet<usize> = HashSet::new();
     for (i, param) in func.params.iter_mut().enumerate() {
         var_table.entries[param.var.0 as usize].mutability = Mutability::Var;
-        let keep_borrow = !matches!(param.borrow, almide_ir::ParamBorrow::Own)
-            && loop_keeps_borrow(param, identity.get(i).copied().unwrap_or(false));
+        let keep_borrow = kept.get(i).copied().unwrap_or(false);
         if keep_borrow {
             kept_borrow_params.insert(i);
         } else {
@@ -230,39 +229,60 @@ fn rewrite_to_loop(
     reverted_to_own
 }
 
-/// Can the loop form keep parameter `p`'s borrow?
+/// Which parameter slots can the loop form keep borrowed?
 ///
 /// The reset this replaces asked about the param's TYPE. The question the
 /// loop actually poses is about its REFERENCE: the rewrite reassigns every
 /// param slot on each self-tail-call, so a borrowed slot survives only when
 /// the reference the loop holds is still valid at the top of the next
-/// iteration. Two shapes answer yes, and the old `Bytes | Fn` allowlist was
-/// the second one spelled as a type test:
+/// iteration. Two shapes answer yes:
 ///
-/// 1. **Never rebound** (`identity_carried`) — the argument in this slot is
+/// 1. **Never rebound** (identity carry) — the argument in this slot is
 ///    the param itself in every self-tail-call, so the rewrite emits neither
 ///    a temp nor an assign for it (`emit_tail_call_replacement`'s F5 skip)
 ///    and the reference established at entry is the only one the loop ever
 ///    holds. Type-independent, and the shape an explicit `mut` parameter
 ///    takes: you mutate the caller's storage through it and recurse carrying
 ///    it.
-/// 2. **Rebound, but re-borrowable** — a `Bytes` buffer (`&Vec<u8>`) or a
-///    borrowed callable (`&dyn Fn`, #2288) is a `Copy` reference to storage
-///    the outermost caller owns, and `emit_tail_call_replacement` keeps the
-///    `Borrow` wrapper on such a slot's reassignment, so the slot is
-///    re-established as a reference rather than assigned an owned value.
+/// 2. **Rebound to storage that outlives the loop** — a `Bytes` buffer
+///    (`&Vec<u8>`) or a borrowed callable (`&dyn Fn`, #2288) is a `Copy`
+///    reference, and `emit_tail_call_replacement` keeps the `Borrow` wrapper
+///    on such a slot's reassignment, so the slot is re-established as a
+///    reference rather than assigned an owned value. That reference is valid
+///    in the next iteration only when every self-call's argument in the slot
+///    is a PLACE rooted at a parameter that is itself kept borrowed (`b`,
+///    `r.buf` with `r` carried) — storage the outermost caller owns. A VALUE
+///    argument (a call, a block, an `if`, a `match`, a lambda) has no storage
+///    past the statement that binds it (`let tmp = &put(b, k); b = tmp;` is
+///    rustc E0716, #4443), a local's storage dies with the iteration, and a
+///    param the loop owns is overwritten while the slot still points into it;
+///    each of those slots is owned instead. Being kept depends on other
+///    slots being kept, so the answer is the greatest fixpoint.
 ///    This is what stops a self-recursive walker cloning a 77 MB buffer per
 ///    iteration.
 ///
-/// Anything else is reset to `Own`, which is only ever an optimisation
-/// question (a read-only `Ref` costs a clone, not an answer) — EXCEPT for a
-/// `mut` parameter, whose borrow is the language's promise that the caller's
-/// binding is what the callee writes. [`is_tco_candidate`] therefore refuses
-/// a function that has a `mut` param this predicate would reject, so the
-/// function keeps its recursive form instead of silently answering with a
-/// copy (#2293).
-pub(crate) fn loop_keeps_borrow(p: &IrParam, identity_carried: bool) -> bool {
-    identity_carried || matches!(p.ty, Ty::Bytes | Ty::Fn { .. })
+/// `borrowed(i, p)` says which slots start out borrowed (the verdict being
+/// baked or rewritten). Anything refused is reset to `Own`, which is only
+/// ever an optimisation question (a read-only `Ref` costs a clone, not an
+/// answer) — EXCEPT for a `mut` parameter, whose borrow is the language's
+/// promise that the caller's binding is what the callee writes.
+/// [`is_tco_candidate`] therefore refuses a function that has a `mut` param
+/// this predicate would reject, so the function keeps its recursive form
+/// instead of silently answering with a copy (#2293).
+pub(crate) fn tco_kept_borrows(func: &IrFunction, borrowed: impl Fn(usize, &IrParam) -> bool) -> Vec<bool> {
+    let slots = tco_slot_args(func);
+    let mut kept: Vec<bool> = func.params.iter().enumerate().map(|(i, p)| {
+        let s = &slots[i];
+        borrowed(i, p) && (s.identity || (matches!(p.ty, Ty::Bytes | Ty::Fn { .. }) && s.roots.is_some()))
+    }).collect();
+    loop {
+        let refused: Vec<usize> = (0..kept.len()).filter(|&i| {
+            kept[i] && !slots[i].identity
+                && slots[i].roots.as_ref().is_some_and(|r| r.iter().any(|&j| !kept[j]))
+        }).collect();
+        if refused.is_empty() { return kept; }
+        for i in refused { kept[i] = false; }
+    }
 }
 
 /// The variable a self-tail-call argument CARRIES, seen through the `Borrow`
@@ -277,20 +297,37 @@ fn carried_var(arg: &IrExpr) -> Option<VarId> {
     }
 }
 
-/// Per param slot: is the argument in that slot the param ITSELF in every
-/// self-call (an identity carry)? Such a slot is loop state in name only —
-/// the loop never writes it — which is what lets it keep a borrow, and what
-/// makes a `mut` param safe to leave as `&mut T`.
+/// The variable a PLACE argument is rooted at (`v`, `v.f`, `v.0`, through a
+/// `Borrow`), or `None` for a value — a call, a block, an `if`, a `match`, a
+/// literal, a lambda, a `Clone` — which has no storage of its own to borrow.
+fn place_root(arg: &IrExpr) -> Option<VarId> {
+    match &arg.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Borrow { expr, .. } => place_root(expr),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => place_root(object),
+        _ => None,
+    }
+}
+
+/// How every self-call fills one parameter slot.
+struct SlotArgs {
+    /// The argument is the param itself in every self-call.
+    identity: bool,
+    /// The param slots every argument is a place rooted at, or `None` when
+    /// some argument is a value or is rooted at a local.
+    roots: Option<std::collections::BTreeSet<usize>>,
+}
+
+/// Per param slot, how the self-calls fill it ([`tco_kept_borrows`]).
 ///
-/// A function with no self-call at all yields all-`false`; it is not a TCO
-/// candidate either way. Scanning every self-call rather than only the tail
-/// ones is the same thing for a candidate ([`is_tco_candidate`] has already
-/// established that all of them are in tail position) and is conservative
-/// for a non-candidate.
-pub(crate) fn tco_identity_carried(func: &IrFunction) -> Vec<bool> {
+/// A function with no self-call at all yields all-refused slots; it is not a
+/// TCO candidate either way. Scanning every self-call rather than only the
+/// tail ones is the same thing for a candidate ([`is_tco_candidate`] has
+/// already established that all of them are in tail position, nested
+/// arguments aside) and is conservative for a non-candidate.
+fn tco_slot_args(func: &IrFunction) -> Vec<SlotArgs> {
     use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
-    let mut carried: Vec<bool> = vec![true; func.params.len()];
-    struct V<'a> { fn_name: &'a str, params: &'a [VarId], carried: &'a mut Vec<bool>, saw: bool }
+    struct V<'a> { fn_name: &'a str, params: &'a [VarId], slots: Vec<SlotArgs>, saw: bool }
     impl IrVisitor for V<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind
@@ -298,8 +335,16 @@ pub(crate) fn tco_identity_carried(func: &IrFunction) -> Vec<bool> {
             {
                 self.saw = true;
                 for (i, p) in self.params.iter().enumerate() {
-                    if args.get(i).and_then(carried_var) != Some(*p) {
-                        self.carried[i] = false;
+                    let arg = args.get(i);
+                    let slot = &mut self.slots[i];
+                    if arg.and_then(carried_var) != Some(*p) {
+                        slot.identity = false;
+                    }
+                    let root = arg.and_then(place_root)
+                        .and_then(|v| self.params.iter().position(|q| *q == v));
+                    match (root, &mut slot.roots) {
+                        (Some(j), Some(roots)) => { roots.insert(j); }
+                        _ => slot.roots = None,
                     }
                 }
             }
@@ -308,10 +353,13 @@ pub(crate) fn tco_identity_carried(func: &IrFunction) -> Vec<bool> {
         fn visit_stmt(&mut self, s: &IrStmt) { walk_stmt(self, s); }
     }
     let params: Vec<VarId> = func.params.iter().map(|p| p.var).collect();
-    let mut v = V { fn_name: func.name.as_str(), params: &params, carried: &mut carried, saw: false };
+    let slots = params.iter().map(|_| SlotArgs { identity: true, roots: Some(Default::default()) }).collect();
+    let mut v = V { fn_name: func.name.as_str(), params: &params, slots, saw: false };
     v.visit_expr(&func.body);
-    if !v.saw { return vec![false; func.params.len()]; }
-    carried
+    if !v.saw {
+        return params.iter().map(|_| SlotArgs { identity: false, roots: None }).collect();
+    }
+    v.slots
 }
 
 /// Heap-typed for TCO RC purposes — the SAME question Perceus asks, so the
@@ -711,7 +759,7 @@ fn emit_tail_call_replacement(args: Vec<IrExpr>, f: &TailFrame<'_>) -> IrExpr {
     // `let tmp = &mut p; p = tmp;` — a reference to a reference, not what the
     // slot holds. Seeing it as the identity carry it is also drops the
     // pre-existing no-op reborrow for a carried `Bytes` buffer. This agrees by
-    // construction with [`tco_identity_carried`], which decides from the same
+    // construction with [`tco_slot_args`], which decides from the same
     // helper which slots keep a borrow at all.
     let identity_carry: Vec<bool> = args.iter().enumerate().map(|(i, arg)| {
         carried_var(arg) == Some(params[i].0)
