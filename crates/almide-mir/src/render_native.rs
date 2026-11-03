@@ -304,6 +304,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     let mut used_shims: Vec<&'static str> = Vec::new();
     let mut bodies = String::new();
     fan_rendered_reset();
+    crate::render_native_bounds::reset();
     let mut fn_rets: BTreeMap<String, Option<NTy>> = BTreeMap::new();
     for func in &prog.functions {
         verify_ownership_or_wall(func)?;
@@ -474,6 +475,7 @@ fn render_fn(
     used_shims: &mut Vec<&'static str>,
 ) -> Result<(String, Option<NTy>), LowerError> {
     let mut tys = seed_param_ntys(func, sigs)?;
+    crate::render_native_bounds::begin(func);
     let _rem_divisors = rem_divisor_scope(func);
     let is_main = func.name == "main";
     let mut out = String::new();
@@ -522,6 +524,7 @@ fn render_fn(
     let (scalar_defs, scalar_prints) = crate::render_native_interp::printed_scalars(func);
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
+        crate::render_native_bounds::at(i);
         crate::render_native_move::set_moving_args(func, i, &tys, &borrows.arms);
         if chains.skip.contains(&i) || printed.contains(&i) || scalar_defs.contains(&i) {
             continue;
@@ -777,6 +780,7 @@ fn render_fn(
     if !if_stack.is_empty() {
         return Err(wall("native: unbalanced IfThen/EndIf markers"));
     }
+    crate::render_native_bounds::finish(func);
     finish_native_fn(func, sigs, is_main, &mut tys, out)
 }
 

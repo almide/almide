@@ -429,6 +429,32 @@ fn borrowed_kind(f: NTy) -> Option<(NTy, String, &'static str)> {
     }
 }
 
+/// The bounds-witness slot of the element `a` addresses (render_native_bounds).
+fn bounds_slot(st: &AddrState, a: &Addr) -> crate::render_native_bounds::Slot {
+    let k = (a.off - i64::from(BLOCK_HEADER)) / i64::from(SLOT_SIZE);
+    let idx = match a.idx {
+        None => None,
+        Some(Idx::Elem(i)) => Some(i),
+        Some(Idx::Bytes(b)) => Some(st.scaled_src.get(&b).copied().unwrap_or(b)),
+    };
+    crate::render_native_bounds::Slot { base: a.base, idx, k }
+}
+
+/// The check an element access at `a` (Rust index `ix`) needs before it, and
+/// its slot: none after `ElemAddr`'s own check or under the loop's exit
+/// test; otherwise the explicit check, recorded as the slot's `c`.
+fn bounds_guard(st: &AddrState, a: &Addr, ix: &str) -> (Option<String>, crate::render_native_bounds::Slot) {
+    let s = bounds_slot(st, a);
+    if matches!(a.idx, Some(Idx::Elem(_))) || crate::render_native_bounds::exit_covered(s) {
+        return (None, s);
+    }
+    crate::render_native_bounds::check(s);
+    (
+        Some(format!("if {ix} >= {}.len() {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}", var(a.base))),
+        s,
+    )
+}
+
 /// The Rust index expression of the slot `a` names, or `None` when `a` is
 /// not on a slot boundary past the header.
 fn slot_index(a: &Addr) -> Option<String> {
@@ -626,6 +652,7 @@ pub(crate) fn render_addr_op(
             let w = i64::from(SLOT_SIZE);
             if st.consts.get(a) == Some(&w) || st.consts.get(b) == Some(&w) {
                 st.scaled.insert(*dst);
+                st.scaled_src.insert(*dst, if st.consts.get(a) == Some(&w) { *b } else { *a });
             }
             return Ok(false);
         }
@@ -644,6 +671,7 @@ pub(crate) fn render_addr_op(
                 b = var(ad.base)
             );
             st.addrs.insert(*d, Addr { base: ad.base, off: i64::from(BLOCK_HEADER), idx: Some(Idx::Elem(i)) });
+            crate::render_native_bounds::check(crate::render_native_bounds::Slot { base: ad.base, idx: Some(i), k: 0 });
             return Ok(true);
         }
         Op::Prim { kind: PrimKind::Load { width }, dst: Some(d), args } if args.len() == 1 && st.addrs.contains_key(&args[0]) => {
@@ -670,6 +698,11 @@ pub(crate) fn render_addr_op(
             }
             if *width == 8 && matches!(bt, Some(NTy::Vec | NTy::VecRef)) {
                 if let Some(ix) = slot_index(&ad) {
+                    let (guard, slot) = bounds_guard(st, &ad, &ix);
+                    if let Some(g) = guard {
+                        line!("{g}");
+                    }
+                    crate::render_native_bounds::access(slot);
                     tys.insert(*d, NTy::I64);
                     line!("let mut {}: i64 = {}[{ix}];", var(*d), var(ad.base));
                     return Ok(true);
@@ -749,6 +782,11 @@ pub(crate) fn render_addr_op(
             }
             if let (Some(e), Some(ix)) = (list_of(ty(tys, &ad.base)), slot_index(&ad)) {
                 if e != NTy::I64 {
+                    let (guard, slot) = bounds_guard(st, &ad, &ix);
+                    if let Some(g) = guard {
+                        line!("{g}");
+                    }
+                    crate::render_native_bounds::access(slot);
                     if let (true, Some((t, spelled, whole))) = (st.borrow_reads.contains(d), borrowed_kind(e)) {
                         tys.insert(*d, t);
                         line!("let mut {}: {spelled} = &{}[{ix}]{whole};", var(*d), var(ad.base));
@@ -761,6 +799,11 @@ pub(crate) fn render_addr_op(
             }
             match (ty(tys, &ad.base), slot_index(&ad)) {
                 (Some(NTy::VecStr | NTy::VecStrRef), Some(ix)) => {
+                    let (guard, slot) = bounds_guard(st, &ad, &ix);
+                    if let Some(g) = guard {
+                        line!("{g}");
+                    }
+                    crate::render_native_bounds::access(slot);
                     // A borrow-only read (render_native_borrow_read): a
                     // reference into the list's element.
                     if st.borrow_reads.contains(d) {
@@ -854,6 +897,11 @@ pub(crate) fn render_addr_op(
                     line!("{}.push({rhs});", var(ad.base));
                     return Ok(true);
                 }
+                let (guard, slot) = bounds_guard(st, &ad, &ix);
+                if let Some(g) = guard {
+                    line!("{g}");
+                }
+                crate::render_native_bounds::store(slot);
                 line!("{}[{ix}] = {rhs};", var(ad.base));
                 return Ok(true);
             }
@@ -874,6 +922,11 @@ pub(crate) fn render_addr_op(
                         line!("{}.push({rhs});", var(ad.base));
                         return Ok(true);
                     }
+                    let (guard, slot) = bounds_guard(st, &ad, &ix);
+                    if let Some(g) = guard {
+                        line!("{g}");
+                    }
+                    crate::render_native_bounds::store(slot);
                     line!("{}[{ix}] = {rhs};", var(ad.base));
                     return Ok(true);
                 }
@@ -882,6 +935,11 @@ pub(crate) fn render_addr_op(
                         line!("{}.push({});", var(ad.base), var(v));
                         return Ok(true);
                     }
+                    let (guard, slot) = bounds_guard(st, &ad, &ix);
+                    if let Some(g) = guard {
+                        line!("{g}");
+                    }
+                    crate::render_native_bounds::store(slot);
                     line!("{}[{ix}] = {};", var(ad.base), var(v));
                     return Ok(true);
                 }

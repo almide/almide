@@ -865,6 +865,11 @@ fn render_native_parts(
         mutable_global_count: 0,
     };
     let rust = crate::render_native::try_render_native_program(&program, &sigs)?;
+    // Row 4: each function's bounds witness, recorded as the render wrote its
+    // element accesses (render_native_bounds).
+    for (name, w) in crate::render_native_bounds::take() {
+        certs.push(("bounds".to_string(), name, w));
+    }
     Ok((rust, certs, program.functions))
 }
 
