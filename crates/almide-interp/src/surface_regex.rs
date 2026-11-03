@@ -71,13 +71,13 @@ impl<'a> Interpreter<'a> {
         // `fn new(pattern) -> Regex = { pattern: regex.__new(pattern) }`
         if f == "new" {
             let [p] = args else { return None };
-            return Some(self.forward("regex", "__new", &[p.clone()]).map_value(regex_record));
+            return Some(self.forward("regex", "__new", std::slice::from_ref(p)).map_value(regex_record));
         }
         // `fn compile(pattern)`: `ok({ pattern })` when `__check` answers "",
         // else `err(reason)`.
         if f == "compile" {
             let [p] = args else { return None };
-            return Some(match value_of(self.forward("regex", "__check", &[p.clone()])) {
+            return Some(match value_of(self.forward("regex", "__check", std::slice::from_ref(p))) {
                 Ok(Value::Str(why)) if why.is_empty() => Flow::val(Value::Result(Ok(Box::new(regex_record(p.clone()))))),
                 Ok(why @ Value::Str(_)) => Flow::val(Value::Result(Err(Box::new(why)))),
                 Ok(_) => return None,
