@@ -624,7 +624,7 @@ fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
     // inside `for`/`while` needs its OWN statement-list rewrite: `[pre…, Guard, rest…]` →
     // `[pre…, Expr(if cond then { rest… } else E')]`. Same continue→() / break-verbatim rule.
     if let IrExprKind::ForIn { var, var_tuple, iterable, body } = e.kind {
-        let new_body = rewrite_guard_stmt_list(body, changed);
+        let new_body = tail_loop_continues(rewrite_guard_stmt_list(body, changed), changed);
         return IrExpr {
             kind: IrExprKind::ForIn { var, var_tuple, iterable, body: new_body },
             ty: e.ty,
@@ -633,7 +633,7 @@ fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
         };
     }
     if let IrExprKind::While { cond, body } = e.kind {
-        let new_body = rewrite_guard_stmt_list(body, changed);
+        let new_body = tail_loop_continues(rewrite_guard_stmt_list(body, changed), changed);
         return IrExpr {
             kind: IrExprKind::While { cond, body: new_body },
             ty: e.ty,
@@ -676,8 +676,9 @@ fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
     // block is NOT a loop body (that statement list is `rewrite_guard_stmt_list`'s), so
     // `rest` is only the tail of a NESTED block — an `if`/`match` arm, a block statement.
     // `continue` → `()` would fall through to the loop-body statements AFTER the
-    // enclosing construct, losing the skip. Kept as `continue`, the loop lowering sees an
-    // early exit it does not run in this position and walls honestly.
+    // enclosing construct, losing the skip. Kept as `continue`; the enclosing loop's
+    // `tail_loop_continues` (desugar_continue.rs) then sinks the statements after the
+    // construct into its arms, where the `continue` ends its path.
     let else_branch = else_;
     let if_expr = IrExpr {
         kind: IrExprKind::If {
