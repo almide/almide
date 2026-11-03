@@ -29,3 +29,15 @@ shared-fixture-serial = { max-threads = 1 }
 [[profile.default.overrides]]
 filter = 'binary_id(almide::wasm_runtime_*) & !binary_id(almide::wasm_runtime_interp_ledger)'
 test-group = "shared-fixture-serial"
+
+# The `*_linear_test` family pins a complexity class by a wall-clock DOUBLING
+# RATIO natively (cost at 2n / cost at n: ~2 linear, ~4 quadratic) over runs
+# of ~10–50 ms. A shard's heaviest tests start first and keep all four cores
+# busy, so one noisy pair can read 3.1 on a linear conversion
+# (bigint_text_linear_test, PR run 41589939358; value_json_combinators_linear
+# on run 41552217154). A real regression reads ~4 on every run and still
+# fails all three tries; noise does not repeat. nextest reports a test that
+# passed on a retry as FLAKY, so the noise stays visible.
+[[profile.default.overrides]]
+filter = 'binary(~_linear)'
+retries = 2

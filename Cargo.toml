@@ -142,8 +142,18 @@ incremental = true
 # ignore = "…release-only…")` sweeps stay ignored here exactly as they were.
 # Symbols are kept (`strip = "debuginfo"`, not "symbols") so a panic in a shard
 # still names its frames.
+#
+# `opt-level = 1`: most of the suite's time is the compiler under test —
+# in-process, and the 318 test files that spawn `CARGO_BIN_EXE_almide` (52%
+# of the summed full-run seconds). Measured on 4 cores (GCE, 2026-11-03):
+# the ci-test build 336 s → 666 s, and explain_list 680 → 385 s,
+# wasm_dispatch_coverage 114 → 21 s, negative_count_family 110 → 35 s,
+# switch_scope 125 → 31 s, one diagnostic_harness test 586 → 125 s; the
+# target dir 26 → 18 GB. debug_assertions and overflow checks stay on
+# (inherited from dev), so the semantics are still the dev profile's.
 [profile.ci-test]
 inherits = "dev"
+opt-level = 1
 debug = 0
 strip = "debuginfo"
 

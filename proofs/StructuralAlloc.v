@@ -48,6 +48,12 @@
      byte-binding half. Over Z the frontier never wraps, so on the proven
      paths the guard is a skipped `if` — `bump_skips_grow` also states
      the outcome is a return, never the abort.
+   - The LENGTH-WRAP guard (#4396): `want <u len` right after the want
+     computation is `len + 15` having wrapped past 2^32 (a request within
+     15 of it); the tree dies in the C-197 form there, before any block
+     exists. Its body is the same abstract `SOom`. Over Z the want covers
+     the length (`want_covers_len`), so on the proven paths it is a
+     skipped `if`.
    - i32 vs Z as in slice 1: nonnegative, well below 2^31, bounds carried
      explicitly. *)
 
@@ -59,6 +65,31 @@ From Stdlib Require Import List.
 Import ListNotations.
 From Stdlib Require Import Lia.
 Open Scope Z_scope.
+
+(* The want covers the length it rounds: `(l + 15) & -4 >= l + 12`, so the
+   length-wrap guard `want <u len` (#4396) is false on every proven path. A
+   want of at least 16 forces `l + 15 >= 0` (a negative AND is negative). *)
+Lemma want_covers_len : forall l w,
+  w = Z.land (l + 15) (-4) -> 16 <= w -> (w <? l) = false.
+Proof.
+  intros l w Hw H16.
+  apply Z.ltb_ge.
+  assert (Hx : 0 <= l + 15).
+  { destruct (Z.le_gt_cases 0 (l + 15)) as [h | h]; [exact h |].
+    exfalso.
+    assert (Hn : 0 <= Z.land (l + 15) (-4)) by lia.
+    apply Z.land_nonneg in Hn. lia. }
+  replace (-4) with (Z.lnot 3) in Hw by reflexivity.
+  assert (Hsub : Z.land (l + 15) (Z.lnot 3) = (l + 15) - Z.land (l + 15) 3).
+  { symmetry. apply Z.sub_land_same_l. }
+  assert (Hmod : Z.land (l + 15) (Z.ones 2) = (l + 15) mod 2 ^ 2).
+  { apply Z.land_ones. lia. }
+  change (Z.ones 2) with 3 in Hmod.
+  change (2 ^ 2) with 4 in Hmod.
+  pose proof (Z.mod_pos_bound (l + 15) 4 ltac:(lia)) as Hb.
+  rewrite Hsub, Hmod in Hw.
+  lia.
+Qed.
 
 (* The large-list loops stay folded under the trees' reductions. *)
 Arguments LargeTree.ltake_run_of : simpl never.
@@ -208,6 +239,9 @@ Fixpoint arun (ss : list astmt) (c : A) : aout :=
 Definition alloc_body : list astmt :=
   [ (* want = (len + 15) & -4; clamp to >= 16 *)
     ASetWant (ALand (AAdd ALen (AC 15)) (AC (-4)));
+    (* the length-wrap guard (#4396): a want below its len is the i32 sum
+       having wrapped *)
+    AIf (ALtU AWant ALen) [ SOom ];
     AIf (ALtU AWant (AC 16)) [ ASetWant (AC 16) ];
     (* next = 28 - clz(want - 1)  — the ceil class *)
     ASetNext (ASub (AC 28) (AClz (ASub AWant (AC 1))));
@@ -289,6 +323,7 @@ Proof.
   unfold run_alloc, alloc_body.
   acbn.
   rewrite <- Hw.
+  rewrite (want_covers_len len w Hw H16). lit.
   replace (w <? 16) with false by (symmetry; apply Z.ltb_ge; exact H16).
   lit.
   replace (28 - clz32 (w - 1) <? 13) with true.
@@ -348,6 +383,7 @@ Proof.
   unfold run_alloc, alloc_body.
   acbn.
   rewrite <- Hw.
+  rewrite (want_covers_len len w Hw H16). lit.
   replace (w <? 16) with false by (symmetry; apply Z.ltb_ge; exact H16).
   lit.
   replace (28 - clz32 (w - 1) <? 13) with true.
@@ -445,6 +481,7 @@ Proof.
   intros c w q s' Hw H16 Hc Hrun. unfold LargeTree.ltake_run in Hrun.
   destruct (large_class_guard w H16 Hc) as [Hg1 _].
   unfold run_alloc, alloc_body. acbn. rewrite <- Hw.
+  rewrite (want_covers_len len w Hw H16). lit.
   replace (w <? 16) with false by (symmetry; apply Z.ltb_ge; exact H16).
   lit. rewrite Hg1. lit. rewrite Hrun. reflexivity.
 Qed.
@@ -467,6 +504,7 @@ Proof.
   intros c w s' Hw H16 Hc Hrun Hw' g nx Hwrap Hfit. unfold LargeTree.ltake_run in Hrun.
   destruct (large_class_guard w H16 Hc) as [Hg1 Hg2].
   unfold run_alloc, alloc_body. acbn. rewrite <- Hw.
+  rewrite (want_covers_len len w Hw H16). lit.
   replace (w <? 16) with false by (symmetry; apply Z.ltb_ge; exact H16).
   lit. rewrite Hg1. lit. rewrite Hrun. acbn. rewrite Hw'. rewrite Hg2. lit.
   fold g. fold nx.

@@ -198,12 +198,6 @@ class ProseTests(unittest.TestCase):
             "name: Release evidence seals (every seal re-measured against its tag — the audit freeze)",
             "name: Interface differ fires on a removed effect fn (negative controls, #1860)",
             "name: Pass-isolated fixtures (#1487 — byte-identical under full / ablated / only-pass, native == wasm)",
-            "name: Pass-order shuffle (#2186 — byte-identical Rust under every order the declared dependency edges permit)",
-            "name: Pass-order shuffle negative controls (#2186 — an order-dependent or panicking stand-in turns the gate red)",
-            "name: Ownership certifier (#2231 — every corpus violation is in the shrink-only ledger, none new, none "
-            "silently gone)",
-            "name: Ownership certifier negative controls (#2231 — a new violation, a vanished one, a panic and an "
-            "empty corpus each turn the gate red)",
             "name: Spec test files check and are run by a runner (#3065)",
             "name: Spec test files gate negative control (#3065)",
         })

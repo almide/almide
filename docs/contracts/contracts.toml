@@ -520,6 +520,7 @@ evidence  = [
   { path = "spec/wasm_cross/regex_linear_time.almd", class = "fixture" },
   { path = "spec/wasm_cross/regex_counted_repetition.almd", class = "fixture" },
   { path = "spec/wasm_cross/regex_many_patterns.almd", class = "fixture" },
+  { path = "spec/wasm_cross/regex_scan_linear.almd", class = "fixture" },
   { path = "tests/regex_fuzz_test.rs", name = "regex_differential_fuzz", class = "fuzz", n = 220 },
   { path = "tests/regex_pike_differential_test.rs", name = "nested_groups_agree_native_and_wasm", class = "fuzz", n = 300 },
 ]
@@ -2641,6 +2642,11 @@ evidence  = [
   { path = "spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_all_workers_abort_one_line.almd", class = "fixture" },
   { path = "tests/alloc_bump_wrap_test.rs", class = "fixture", name = "bump_head_wrap_is_the_defined_oom_abort" },
+  { path = "tests/alloc_size_wrap_test.rs", class = "fixture", name = "alloc_length_wrap_is_the_defined_oom_abort" },
+  { path = "tests/alloc_size_wrap_test.rs", class = "fixture", name = "concat_length_sum_wrap_is_the_defined_oom_abort" },
+  { path = "tests/alloc_size_wrap_test.rs", class = "fixture", name = "str_append_length_sum_wrap_is_the_defined_oom_abort" },
+  { path = "tests/alloc_size_wrap_test.rs", class = "fixture", name = "list_push_capacity_doubling_wrap_is_the_defined_oom_abort" },
+  { path = "tests/alloc_size_wrap_test.rs", class = "fixture", name = "bytes_push_capacity_doubling_wrap_is_the_defined_oom_abort" },
   { path = "tests/component_realloc_oom_test.rs", class = "fixture", name = "host_driven_exhaustion_in_the_component_is_the_defined_abort" },
 ]
 
@@ -4696,6 +4702,7 @@ evidence  = [
   { path = "spec/wasm_fail/matrix_shape_mismatch_aborts.almd", class = "fixture" },
   { path = "spec/wasm_fail/matrix_ragged_from_lists_aborts.almd", class = "fixture" },
   { path = "spec/wasm_fail/matrix_concat_cols_rows_aborts.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_producers_uniform_rows.almd", class = "fixture" },
 ]
 
 # ── MATRIX ROW RANGES AND PART COUNTS CLAMP; THE CONV STRIDE IS A POSITIVE STEP ──
