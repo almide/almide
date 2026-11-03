@@ -89,6 +89,11 @@ case "${1:-}" in
     [ "$fail" = 0 ] || exit 1
     echo "corpus shard coverage OK$(ci_slice_active && echo " (CI slice 1/$(ci_slice_k))"): $(wc -l < "$want_cross" | tr -d ' ') fixtures × $(echo $CROSS_GATES | wc -w | tr -d ' ') gates and $(wc -l < "$want_manifest" | tr -d ' ') manifest rows, each walked by exactly one of $n shards"
     ;;
+  --merge-binaries)
+    # The binaries `--merge` runs, as a nextest filterset: the build job packs
+    # exactly these into the coverage job's small merge archive.
+    echo 'binary_id(=almide::wasm_runtime_interp_ledger) | binary_id(=almide-spine::run_parity)'
+    ;;
   --merge)
     dir="$2"; n="$3"; archive="$4"
     # The two gates with a merge form, run from the same archive the shards
@@ -107,7 +112,7 @@ case "${1:-}" in
       exec cargo nextest run --archive-file "$archive" --extract-to . --extract-overwrite --workspace-remap . --no-fail-fast --no-capture -E "$expr"
     ;;
   *)
-    echo "usage: $0 --coverage <dir> <N> | --merge <dir> <N> <archive> | --gates" >&2
+    echo "usage: $0 --coverage <dir> <N> | --merge <dir> <N> <archive> | --merge-binaries | --gates" >&2
     exit 2
     ;;
 esac
