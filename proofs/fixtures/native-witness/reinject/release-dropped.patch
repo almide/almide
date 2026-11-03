@@ -1,8 +1,8 @@
 diff --git a/crates/almide-mir/src/pipeline_native_rungs.rs b/crates/almide-mir/src/pipeline_native_rungs.rs
-index f43662016..a31c3c82b 100644
+index 74fe91530..66e9abdc7 100644
 --- a/crates/almide-mir/src/pipeline_native_rungs.rs
 +++ b/crates/almide-mir/src/pipeline_native_rungs.rs
-@@ -426,6 +426,12 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
+@@ -826,6 +826,12 @@ fn render_native_parts(
      // Op::MakeUnique => {}`), so this is a no-op cleanup here, kept only so both
      // legs run the identical target-agnostic MIR pass list.
      crate::alias_safety::elide_unaliased_make_unique(&mut functions);
@@ -12,14 +12,14 @@ index f43662016..a31c3c82b 100644
 +            f.ops.remove(k);
 +        }
 +    }
-     let certs = functions.iter().map(|f| (f.name.to_string(), crate::certificate::ownership_certificate(f))).collect();
-     let rust = crate::render_native::try_render_native_program(
-         &MirProgram {
+     // #4006 class P: a heap param its body takes over becomes a move param,
+     // and every call hands the argument over at the call.
+     crate::native_move_params::rewrite(&mut functions);
 diff --git a/crates/almide-mir/src/render_native.rs b/crates/almide-mir/src/render_native.rs
-index 46b95097a..803c63eae 100644
+index 2fd446586..1d39ae3ef 100644
 --- a/crates/almide-mir/src/render_native.rs
 +++ b/crates/almide-mir/src/render_native.rs
-@@ -134,6 +134,10 @@ use crate::render_native_shims::{
+@@ -195,6 +195,10 @@ use crate::render_native_shims::{
  /// Drops from — the certificate that scope-end drop realizes it. A violation is
  /// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
  fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
