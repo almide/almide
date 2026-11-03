@@ -373,7 +373,10 @@ fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
   if q != end then err(__jp_at("json: invalid number", base, p))
   else {
     let s = __jp_substr(base, p, end)
-    let is_float = string.contains(s, ".") or string.contains(s, "e") or string.contains(s, "E")
+    // The token is whole (q == end), so it holds a `.`, `e` or `E` exactly when its integer
+    // digits stop before its end: one walk over the digits, not three substring searches.
+    let lead = if prim.load8(base + p) == 45 then p + 1 else p
+    let is_float = __jp_digits(base, end, lead) < end
     if is_float then match float.parse(s) {
       ok(f) => ok((value.float(f), end)),
       err(m) => err(m),
