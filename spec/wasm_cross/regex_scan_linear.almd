@@ -29,7 +29,10 @@ fn main() -> Unit = {
     none => println("no pairs"),
   }
   println("find_all ${list.len(regex.find_all(regex.new("."), s))}")
-  let dates = regex.captures_all(regex.new("([0-9]+)-([0-9]+)-(x)?([0-9]+)"), string.repeat("2024-01-02 ", 1000))
+  let dates = regex.captures_all(
+    regex.new("([0-9]+)-([0-9]+)-(x)?([0-9]+)"),
+    string.repeat("2024-01-02 ", 1000),
+  )
   println("dates ${list.len(dates)}")
   match list.last(dates) {
     some(cs) => println(cs |> list.map((c) => c ?? "none") |> list.join("|")),
