@@ -255,6 +255,7 @@ fn write_generated_cargo_project(
         final_code.push_str("\nfn main() {}\n");
     }
 
+    let final_code = super::module_files::split_module_files(&final_code, &src_dir)?;
     std::fs::write(src_dir.join("main.rs"), &final_code)
         .map_err(|e| format!("failed to write main.rs: {}", e))?;
 
@@ -538,6 +539,7 @@ fn cargo_build_test_fast_path(rs_code: &str, project_dir: &std::path::Path) -> R
             }
             let rlib_dir = rlib.parent().unwrap_or_else(|| std::path::Path::new("."));
             let rs_path = project_dir.join("almide_test_main.rs");
+            let slim = super::module_files::split_module_files(&slim, project_dir)?;
             if std::fs::write(&rs_path, &slim).is_ok() {
                 // opt-level=0 for the slim main: the runtime (the part that
                 // benefits from optimization) is already compiled into the
@@ -570,6 +572,7 @@ fn cargo_build_test_fast_path(rs_code: &str, project_dir: &std::path::Path) -> R
         final_code.push_str("\nfn main() {}\n");
     }
     let rs_path = project_dir.join("almide_test_main.rs");
+    let final_code = super::module_files::split_module_files(&final_code, project_dir)?;
     std::fs::write(&rs_path, &final_code)
         .map_err(|e| format!("failed to write {}: {}", rs_path.display(), e))?;
     let output = std::process::Command::new(crate::find_rustc())

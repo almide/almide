@@ -165,6 +165,29 @@ pub fn module_ident(path: &str) -> String {
     out
 }
 
+/// The Rust module a test build renders a module's fns in (#4441), from the
+/// module's [`module_ident`]: one per Almide module, so rustc gives each its
+/// own codegen units and a rebuild re-optimises only the modules an edit
+/// reached.
+pub fn fns_module(ident: &str) -> String {
+    format!("almide_fns_{ident}")
+}
+
+/// The Rust module, inside the harness's `tests`, that a test-run program's
+/// test file's tests sit in (#4441) — for the same reason as [`fns_module`].
+/// From the module's [`module_ident`]; its tests' paths are
+/// `tests::<this>::almide_rt_<ident>_…`.
+pub fn tests_module(ident: &str) -> String {
+    format!("almide_tests_{ident}")
+}
+
+/// The line a test build's renderer writes before a [`fns_module`] or
+/// [`tests_module`] group, `// almide:module-file <name>`, and the one after
+/// it. The native build moves a group so framed into `<name>.rs` (#4441).
+pub const MODULE_FILE_BEGIN: &str = "// almide:module-file ";
+/// See [`MODULE_FILE_BEGIN`].
+pub const MODULE_FILE_END: &str = "// almide:end-module-file ";
+
 /// A module-qualified declaration name (`a.b.Tok`) as one identifier:
 /// [`module_ident`] of the module path, `_`, the bare name (`a_1b_Tok`). A
 /// name with no module part is returned as is.

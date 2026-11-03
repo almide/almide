@@ -262,12 +262,28 @@ fn render_tls_cell_handle(name: &str, cell_ty: &str, init: &str) -> String {
 fn render_program_functions(ctx: &RenderContext, program: &IrProgram, parts: &mut Vec<String>) {
     let mut import_parts = Vec::new();
     let mut fn_parts = Vec::new();
+    // A test build groups each module's fns into a Rust module of their own
+    // (#4441): rustc gives a module its own codegen units, so a rebuild after
+    // an edit re-optimises the edited module's fns and not every fn of the
+    // crate — which is what one flat root module made it do, since the test
+    // harness's `main` (it lists every test) sits in the root too.
+    let group = program.functions.iter().any(|f| f.is_test);
+    let mut grouped: Vec<(String, Vec<String>)> = Vec::new();
     for func in program.functions.iter().filter(|f| !f.is_test) {
         let rendered = render_function(ctx, func);
         if !func.extern_attrs.is_empty() {
             import_parts.push(rendered);
-        } else {
-            fn_parts.push(rendered);
+            continue;
+        }
+        match func.module_origin.as_deref().filter(|_| group && is_plain_pub_fn(&rendered)) {
+            Some(origin) => {
+                let name = almide_base::names::fns_module(origin);
+                match grouped.iter_mut().find(|(n, _)| *n == name) {
+                    Some((_, fns)) => fns.push(rendered),
+                    None => grouped.push((name, vec![rendered])),
+                }
+            }
+            None => fn_parts.push(rendered),
         }
     }
     // Emit imports first as a group, then functions
@@ -275,6 +291,31 @@ fn render_program_functions(ctx: &RenderContext, program: &IrProgram, parts: &mu
         parts.push(import_parts.join("\n"));
     }
     parts.extend(fn_parts);
+    // Each group sees the root's items through `super::*` and the root
+    // re-exports the group's, so every path that named a root fn still does.
+    for (name, fns) in grouped {
+        parts.push(format!(
+            "#[allow(unused_imports)]\n{}\n#[allow(unused_imports)]\npub(crate) use {name}::*;",
+            module_file_group(&name, &fns.join("\n\n"))
+        ));
+    }
+}
+
+/// `mod <name> { use super::*; <body> }`, framed by the lines that let the
+/// native build move it into a file of its own (#4441).
+fn module_file_group(name: &str, body: &str) -> String {
+    use almide_base::names::{MODULE_FILE_BEGIN, MODULE_FILE_END};
+    format!("{MODULE_FILE_BEGIN}{name}\nmod {name} {{\nuse super::*;\n\n{body}\n}}\n{MODULE_FILE_END}{name}")
+}
+
+/// A rendered fn that is a plain `pub fn` item (after its attributes and doc
+/// comments): one a module can hold and the root re-export unchanged.
+fn is_plain_pub_fn(rendered: &str) -> bool {
+    rendered
+        .lines()
+        .map(str::trim_start)
+        .find(|l| !l.is_empty() && !l.starts_with("#[") && !l.starts_with("//"))
+        .is_some_and(|l| l.starts_with("pub fn "))
 }
 
 /// Render test functions (wrapped in the `test_module` template) into `parts`.
@@ -283,9 +324,23 @@ fn render_program_test_fns(ctx: &RenderContext, program: &IrProgram, parts: &mut
     if test_fns.is_empty() {
         return;
     }
-    let mut test_parts: Vec<String> = test_fns.iter()
-        .map(|f| render_function(ctx, f))
-        .collect();
+    // A test-run program's tests (#4441) group by their file's module, as
+    // its fns do; a file's own tests (no module) stay at the top of `tests`.
+    let mut test_parts: Vec<String> = Vec::new();
+    let mut grouped: Vec<(String, Vec<String>)> = Vec::new();
+    let mut push = |origin: Option<&str>, rendered: String| match origin {
+        Some(origin) => {
+            let name = almide_base::names::tests_module(origin);
+            match grouped.iter_mut().find(|(n, _)| *n == name) {
+                Some((_, tests)) => tests.push(rendered),
+                None => grouped.push((name, vec![rendered])),
+            }
+        }
+        None => test_parts.push(rendered),
+    };
+    for f in &test_fns {
+        push(f.module_origin.as_deref(), render_function(ctx, f));
+    }
     // `testing.assert_aborts` (ADR-0029): the hidden child entry, when the
     // lowering synthesized the abort-site dispatcher. The native test run's
     // one program (#4441) has a dispatcher per test-file module, rendered as
@@ -304,8 +359,11 @@ fn render_program_test_fns(ctx: &RenderContext, program: &IrProgram, parts: &mut
         let prefix = symbol.strip_suffix(almide_ir::ABORT_DISPATCH_FN).unwrap_or_default();
         let entry_name = format!("{prefix}__almd_abort_site_entry");
         if let Some(entry) = ctx.templates.render_with("abort_site_entry", None, &[], &[("dispatch", symbol.as_str()), ("entry", entry_name.as_str())]) {
-            test_parts.push(entry);
+            push(origin, entry);
         }
+    }
+    for (name, tests) in grouped {
+        test_parts.push(module_file_group(&name, &tests.join("\n\n")));
     }
     let tests_s = test_parts.join("\n\n");
     let indented_tests = indent_lines(&tests_s, 4);

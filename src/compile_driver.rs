@@ -718,11 +718,18 @@ fn declared_names(program: &ast::Program) -> Vec<String> {
 }
 
 /// The test files a rustc error output names, by their module's symbol
-/// prefix (`almide_rt_almide_0test_0file_0<n>_…`).
+/// prefix (`almide_rt_almide_0test_0file_0<n>_…`) or the file its fns or
+/// tests were written to (`almide_fns_<ident>.rs`, `almide_tests_<ident>.rs`).
 pub(crate) fn culprits_in(text: &str, batch: &[PlannedTestFile]) -> Vec<String> {
+    use almide_base::names::{fns_module, module_ident, tests_module};
     batch
         .iter()
-        .filter(|p| text.contains(&format!("almide_rt_{}_", almide_base::names::module_ident(&p.module()))))
+        .filter(|p| {
+            let ident = module_ident(&p.module());
+            text.contains(&format!("almide_rt_{ident}_"))
+                || text.contains(&format!("{}.rs", fns_module(&ident)))
+                || text.contains(&format!("{}.rs", tests_module(&ident)))
+        })
         .map(|p| p.file.clone())
         .collect()
 }
@@ -763,7 +770,8 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile]) ->
     let mut test_modules = std::collections::HashSet::new();
     let mut test_prefixes = Vec::new();
     for (name, program) in test_files {
-        test_prefixes.push(format!("almide_rt_{}_", almide_base::names::module_ident(&name)));
+        let ident = almide_base::names::module_ident(&name);
+        test_prefixes.push(format!("{}::almide_rt_{ident}_", almide_base::names::tests_module(&ident)));
         test_modules.insert(name.clone());
         modules.push((name, program, None, false));
     }

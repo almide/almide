@@ -26,11 +26,20 @@ use std::sync::Arc;
 /// Where a file's tests live in the run's binary.
 #[derive(Clone, Debug)]
 pub(crate) struct MergedModule {
-    /// The prefix the file's test fns carry, `almide_rt_<module>_`.
+    /// The prefix the file's test paths carry under `tests::`:
+    /// `almide_tests_<module>::almide_rt_<module>_`.
     pub prefix: String,
     /// How many tests the OTHER files hold: libtest counts them as filtered
     /// out of this file's run, and the file's report must not.
     pub others: usize,
+}
+
+impl MergedModule {
+    /// The part of [`Self::prefix`] the test fns' own names carry, as the
+    /// completion ledger records them: `almide_rt_<module>_`.
+    pub fn fn_prefix(&self) -> &str {
+        self.prefix.rsplit_once("::").map_or(self.prefix.as_str(), |(_, p)| p)
+    }
 }
 
 /// A built native test binary for one file.
