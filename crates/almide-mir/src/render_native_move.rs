@@ -89,6 +89,20 @@ pub(crate) fn last_use(
     if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) || !crate::render_native_rec::has_default(t) {
         return false;
     }
+    dying_after(func, at, src, borrow_arms)
+}
+
+/// Whether the value `src` is never read again after `ops[at]` (whatever its
+/// type): [`last_use`]'s rule without the moved value's own `Default`.
+pub(crate) fn dying_after(
+    func: &MirFunction,
+    at: usize,
+    src: ValueId,
+    borrow_arms: &std::collections::BTreeSet<ValueId>,
+) -> bool {
+    if drill_no_moves() {
+        return false;
+    }
     // A borrowed param is the caller's; a MOVE param (#4006 class P) is ours.
     let owned_param = func.owned_params.contains(&src);
     if func.ret == Some(src) || (func.params.iter().any(|p| p.value == src) && !owned_param) {

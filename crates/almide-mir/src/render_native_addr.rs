@@ -381,19 +381,31 @@ fn field_accepts(field: NTy, got: NTy) -> bool {
 }
 
 thread_local! {
-    static STR_FIELDS: std::cell::RefCell<BTreeMap<ValueId, String>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+    static STR_FIELDS: std::cell::RefCell<BTreeMap<ValueId, (ValueId, String)>> = const { std::cell::RefCell::new(BTreeMap::new()) };
 }
 
-/// A borrowed string read off a record field (#4006, no-perf-loss): the
-/// field's place. A copy of the read is then the field's own handle shared
-/// (`AlmideStr` clones by its count), not its bytes copied into a new block —
-/// the read borrows the field, so the field holds the same value at the copy.
-fn note_str_field(v: ValueId, place: String) {
-    STR_FIELDS.with(|m| m.borrow_mut().insert(v, place));
+/// A borrowed read of a record field (#4006, no-perf-loss): the record and
+/// the field's place. A copy of the read is then the field itself, moved out
+/// when the record dies at the copy, else for a string the field's own handle
+/// shared (`AlmideStr` clones by its count) — never the bytes copied into a
+/// new block. The read borrows the field, so the field holds the same value
+/// at the copy.
+fn note_field(v: ValueId, base: ValueId, place: String) {
+    STR_FIELDS.with(|m| m.borrow_mut().insert(v, (base, place)));
 }
 
 pub(crate) fn str_field_of(v: ValueId) -> Option<String> {
+    STR_FIELDS.with(|m| m.borrow().get(&v).map(|p| p.1.clone()))
+}
+
+/// The record and field place a borrowed read was taken from.
+pub(crate) fn field_of(v: ValueId) -> Option<(ValueId, String)> {
     STR_FIELDS.with(|m| m.borrow().get(&v).cloned())
+}
+
+/// Every borrowed read taken from `place` so far.
+pub(crate) fn reads_of_place(place: &str) -> Vec<ValueId> {
+    STR_FIELDS.with(|m| m.borrow().iter().filter(|(_, p)| p.1 == place).map(|(v, _)| *v).collect())
 }
 
 pub(crate) fn clear_str_fields() {
@@ -662,9 +674,7 @@ pub(crate) fn render_addr_op(
                     // would copy it (a string's bytes, a list's elements).
                     if let (true, Some((t, spelled, whole))) = (st.borrow_reads.contains(d), borrowed_kind(f)) {
                         tys.insert(*d, t);
-                        if t == NTy::StrRef {
-                            note_str_field(*d, format!("{}.f{k}", var(ad.base)));
-                        }
+                        note_field(*d, ad.base, format!("{}.f{k}", var(ad.base)));
                         line!("let mut {}: {spelled} = &{}.f{k}{whole};", var(*d), var(ad.base));
                         return Ok(true);
                     }
