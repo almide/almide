@@ -120,6 +120,11 @@ pub fn lift_heap_branch_binds(program: &mut IrProgram) {
         let IrModule { name, functions, top_lets, var_table, .. } = &mut *module;
         let globals: HashSet<VarId> = top_lets.iter().map(|tl| tl.var).collect();
         let scope = Some(*name);
+        // Numbered per module (#4441): a module's helpers are then the same
+        // whichever program imports it, so the native test run can compile a
+        // module's code once for every test file that reaches it. The module
+        // name keeps the helper names program-wide unique.
+        let mut counter: u32 = 0;
         let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0, dense_depth: 0, globals, mut_params: &mut_params, scope };
         for func in functions.iter_mut() {
             let before = lifter.new_funcs.len();
@@ -421,7 +426,10 @@ impl<'a> BranchLifter<'a> {
         // In the compiler's `__` fn-name space (#3483): a user fn spelled there is
         // renamed at lowering, so no user fn can share this name. (Builtin lowering
         // rewrites only the `__encode_`/`__decode_`/`__err_at` families, #868.)
-        let func_name = sym(&format!("__almd_lift_{}", id));
+        let func_name = match self.scope {
+            None => sym(&format!("__almd_lift_{}", id)),
+            Some(module) => sym(&format!("__almd_lift_{}_{}", module.as_str().replace('.', "_0"), id)),
+        };
         let body = std::mem::replace(value, IrExpr::default());
         let body_span = body.span;
 
