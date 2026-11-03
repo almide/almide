@@ -517,6 +517,24 @@ impl TypeEnv {
         put_values_back(&mut self.def_map, &s.keys, s.def_map);
     }
 
+    /// The `types` key a type spelled through module `module` is declared
+    /// under — what a module-qualified constructor (`m.Ctor(..)`, `m.Ctor`
+    /// as a value, `m.Ctor { .. }`) and a named-record literal
+    /// (`m.Rec { .. }`) result carries. A user module's type keeps its #433
+    /// qualified `m.Type`; a stdlib-owned type is its BARE name (#1828), the identity
+    /// its signatures and annotations already spell — `net.V4(..)` is the
+    /// same `IpAddr` that `net.parse_ip` returns, so `==` on them compares
+    /// one type on every target, also inside `Option`/`Result`/`List`
+    /// (#4383). `None` when no such declaration exists.
+    pub(crate) fn module_type_key(&self, module: &str, type_name: &str) -> Option<String> {
+        let qualified = format!("{module}.{type_name}");
+        let canonical = almide_lang::stdlib_info::stdlib_owned_type_key(&qualified);
+        if canonical != qualified && self.types.contains_key(&sym(canonical)) {
+            return Some(canonical.to_string());
+        }
+        self.types.contains_key(&sym(&qualified)).then_some(qualified)
+    }
+
     /// The `types` key a `Named` type is declared under. A stdlib-owned type
     /// is keyed by its BARE name (#1828), but an alias target written
     /// `url.Url` (`local type W = url.Url`) keeps the qualified spelling,

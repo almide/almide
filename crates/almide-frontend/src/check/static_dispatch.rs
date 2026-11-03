@@ -456,8 +456,7 @@ impl Checker {
         // Owner-filtered (#1426): `m.Ctor` resolves inside `m` alone — another
         // module's same-named ctor registering first must never be consulted.
         if let Some((type_name, case)) = self.env.lookup_ctor_owned(&sym(field), &m) {
-            let qualified = format!("{}.{}", m, type_name.as_str());
-            if self.env.types.contains_key(&sym(&qualified)) {
+            if let Some(qualified) = self.env.module_type_key(&m, type_name.as_str()) {
                 // The same code as the bare `Ctor(..)` call, so the payload
                 // hands its types to the arguments here too (#2925). #433:
                 // the result takes the qualified `mod.Type` (just confirmed
