@@ -6,13 +6,13 @@
 // machine block with a prim op, which kept every old accumulator alive: on a
 // 220 KB subject of dates wasm ran out of memory where native answered in
 // 30 ms. The scan now appends one item per step, the in-place `acc + [x]`.
-// The subjects below match at every character, so they make as many items
-// as that subject from a quarter of its length: each of the two big calls
-// ran the unfixed wasm engine out of memory on its own.
+// The subject below matches at every character, so it makes as many items
+// as that subject from a third of its length: the first call alone ran the
+// unfixed wasm engine out of memory. replace_with reads the same scan; its
+// test at this size is in spec/stdlib/regex_test.almd, kept out of this
+// corpus fixture because the structural witness declines the frame of its
+// callback argument.
 import regex
-
-// The groups of `(a)(x)?(b)` backwards, `-` for the group that took no part.
-fn swap(cs: List[String?]) -> String = "${(list.get(cs, 3) ?? none) ?? ""}${(list.get(cs, 2) ?? none) ?? "-"}${(list.get(cs, 1) ?? none) ?? ""}"
 
 fn main() -> Unit = {
   let s = string.repeat("ab", 40000)
@@ -22,8 +22,12 @@ fn main() -> Unit = {
     some(cs) => println(cs |> list.map((c) => c ?? "none") |> list.join("|")),
     none => println("no match"),
   }
-  let swapped = regex.replace_with(regex.new("(a)(x)?(b)"), s, swap)
-  println("replace_with ${string.len(swapped)} ${string.slice(swapped, 0, 9)}")
+  let pairs = regex.captures_all(regex.new("(a)(x)?(b)"), s)
+  println("pairs ${list.len(pairs)}")
+  match list.first(pairs) {
+    some(cs) => println(cs |> list.map((c) => c ?? "none") |> list.join("|")),
+    none => println("no pairs"),
+  }
   println("find_all ${list.len(regex.find_all(regex.new("."), s))}")
   let dates = regex.captures_all(regex.new("([0-9]+)-([0-9]+)-(x)?([0-9]+)"), string.repeat("2024-01-02 ", 1000))
   println("dates ${list.len(dates)}")

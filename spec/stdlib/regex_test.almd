@@ -268,3 +268,15 @@ test "regex single-character escapes inside a class" {
   assert_eq(regex.compile("[\\r]") |> result.is_ok, true)
   assert_eq(regex.compile("[\\q]"), err("unsupported escape \\q in a class"))
 }
+
+// #4419: replace_with reads the scan captures_all reads, which copied its
+// whole accumulator per match on wasm and ran out of memory on this subject.
+fn swap_pair(cs: List[String?]) -> String = "${(list.get(cs, 3) ?? none) ?? ""}${(list.get(cs, 2) ?? none) ?? "-"}${(list.get(cs, 1) ?? none) ?? ""}"
+
+test "regex replace_with is linear in the subject" {
+  let s = string.repeat("ab", 40000)
+  let swapped = regex.replace_with(regex.new("(a)(x)?(b)"), s, swap_pair)
+  assert_eq(string.len(swapped), 120000)
+  assert_eq(string.slice(swapped, 0, 9), "b-ab-ab-a")
+  assert_eq(string.len(regex.replace_first_with(regex.new("(a)(x)?(b)"), s, swap_pair)), 80001)
+}
