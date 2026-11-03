@@ -71,11 +71,35 @@ MAX_WALLED=0
 walled=0
 : > "$WORK/walled.txt"
 determinism_select "$FIXTURE_DIR" "$WORK/selected.txt"
+# The two compiles per fixture run on parallel workers (DETERMINISM_JOBS,
+# default: cores), each fixture in its own directory; the verdicts below are
+# then read back in corpus order, so the log and the judgement are what the
+# one-at-a-time loop produced. One at a time, the loop was 16 of this job's
+# 23 minutes on develop run 41595889646 (1011 fixtures, ~1 s each: a native
+# harness run and a node start that loads the wasm-bindgen package).
+JOBS="${DETERMINISM_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+compile_one() { # index fixture
+  d="$WORK/fix/$1"; mkdir -p "$d"
+  [ -e "$2" ] || return 0
+  "$NATIVE_BIN" "$2" "$d/native.wasm" 2>"$d/native.err"; echo $? > "$d/nrc"
+  node "$WORK/run.js" "$WORK/pkg" "$2" "$d/uu.wasm" 2>"$d/err"; echo $? > "$d/brc"
+}
+export -f compile_one
+export WORK NATIVE_BIN
+awk '{ print NR; print $0 }' "$WORK/selected.txt" | tr '\n' '\0' \
+  | xargs -0 -n 2 -P "$JOBS" bash -c 'compile_one "$1" "$2"' _
+echo "==> compiled $(wc -l < "$WORK/selected.txt" | tr -d ' ') fixture(s) on $JOBS worker(s)"
+i=0
 while read -r fix <&3; do
+  i=$((i+1))
   [ -e "$fix" ] || continue
   name="$(basename "$fix")"
-  "$NATIVE_BIN" "$fix" "$WORK/native.wasm" 2>"$WORK/native.err"; nrc=$?
-  node "$WORK/run.js" "$WORK/pkg" "$fix" "$WORK/uu.wasm" 2>"$WORK/err"; brc=$?
+  d="$WORK/fix/$i"
+  # The judgement below reads the files a single-fixture run wrote.
+  cp "$d/native.err" "$WORK/native.err"; cp "$d/err" "$WORK/err"
+  [ -e "$d/native.wasm" ] && cp "$d/native.wasm" "$WORK/native.wasm" || rm -f "$WORK/native.wasm"
+  [ -e "$d/uu.wasm" ] && cp "$d/uu.wasm" "$WORK/uu.wasm" || rm -f "$WORK/uu.wasm"
+  nrc=$(cat "$d/nrc"); brc=$(cat "$d/brc")
   # The native harness exits 3 on a structural WALL (a tracked skip, named in
   # $LEDGER). The browser twin must refuse the same fixture with its own
   # structured wall (`wall: …`, a JS throw): both ABIs walling is the SAME
