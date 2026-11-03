@@ -1,0 +1,64 @@
+// @leg: structural
+// @contract: C-451
+// #4376: an `@export(wasm)` `effect fn` whose declared return is a scalar
+// (Int, Float, Bool, Unit) crosses as the value itself: the raw export's
+// one result is the ok value (no result for Unit), never the address of a
+// Result block, so every host reads it the same way. An `err` writes its
+// message to stderr and traps, as a Region export's err does (C-446).
+//
+// `put` and `first` are the issue's repro: the host writes 42 into the
+// Region `put` handed out, and `first` answers 42. `total` takes a Region
+// the host lends as `(base, len)` and answers an Int. `check` errs over 100.
+// The driver is effect_export_scalar.host.mjs; `main` prints the lines the
+// native run shares.
+import ffi
+
+var inbox: Region = ffi.region(bytes.new())
+
+local fn check(n: Int) -> Result[Int, String] = if n > 100 then err("over 100: ${n}") else ok(n)
+
+@export(wasm, "put")
+effect fn put(n: Int) -> Region = {
+  inbox = ffi.alloc(n)!
+  inbox
+}
+
+@export(wasm, "first")
+effect fn first() -> Int = match ffi.read(inbox, 0, 1) {
+  ok(b) => bytes.get(b, 0) ?? 0,
+  err(_) => 0 - 1,
+}
+
+@export(wasm, "scaled")
+effect fn scaled(n: Int) -> Int = check(n)! * 3
+
+@export(wasm, "half")
+effect fn half(n: Int) -> Float = {
+  let k = check(n)!
+  float.from(k) / 2.0
+}
+
+@export(wasm, "even")
+effect fn even(n: Int) -> Bool = check(n)! % 2 == 0
+
+@export(wasm, "note")
+effect fn note(n: Int) -> Unit = {
+  let k = check(n)!
+  println("note ${k}")
+}
+
+@export(wasm, "total")
+effect fn total(buf: Region) -> Int = {
+  let b = ffi.read(buf, 0, ffi.len(buf))!
+  bytes.to_list(b) |> list.fold(0, (a, x) => a + x)
+}
+
+effect fn main() -> Unit = {
+  let s = scaled(2)!
+  let h = half(5)!
+  let e = even(4)!
+  println("scaled ${s}")
+  println("half ${h}")
+  println("even ${e}")
+  note(7)!
+}
