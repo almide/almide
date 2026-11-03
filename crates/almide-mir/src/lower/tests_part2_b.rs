@@ -559,6 +559,64 @@
     }
 
     #[test]
+    fn loop_body_continue_under_an_if_is_moved_to_the_end_of_its_path() {
+        // #4386 in a loop: `for _ in xs { if true then { guard false else continue; () } else (); 7 }`.
+        // The `7` after the `if` must run on the arm that does not skip and must not
+        // run on the one that does: it is sunk into both arms of the inner `if` and
+        // the outer else, and the `continue`, now the last thing its path runs, is gone.
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        let unit = || ir_expr(IrExprKind::Unit, Ty::Unit);
+        let marker = || stmt(IrStmtKind::Expr { expr: ir_expr(IrExprKind::LitInt { value: 7 }, Ty::Int) });
+        let arm = body(vec![
+            stmt(IrStmtKind::Guard {
+                cond: ir_expr(IrExprKind::LitBool { value: false }, Ty::Bool),
+                else_: ir_expr(IrExprKind::Continue, Ty::Unit),
+            }),
+            stmt(IrStmtKind::Expr { expr: unit() }),
+        ]);
+        let the_if = stmt(IrStmtKind::Expr {
+            expr: ir_expr(
+                IrExprKind::If {
+                    cond: Box::new(ir_expr(IrExprKind::LitBool { value: true }, Ty::Bool)),
+                    then: Box::new(arm),
+                    else_: Box::new(unit()),
+                },
+                Ty::Unit,
+            ),
+        });
+        let forin = ir_expr(
+            IrExprKind::ForIn {
+                var: VarId(1),
+                var_tuple: None,
+                iterable: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+                body: vec![the_if, marker()],
+            },
+            Ty::Unit,
+        );
+        let desugared = crate::lower::desugar_guard(&body(vec![stmt(IrStmtKind::Expr { expr: forin })]))
+            .expect("guard desugar fires");
+        struct Count {
+            continues: usize,
+            markers: usize,
+        }
+        impl IrVisitor for Count {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                match e.kind {
+                    IrExprKind::Continue => self.continues += 1,
+                    IrExprKind::LitInt { value: 7 } => self.markers += 1,
+                    _ => {}
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut c = Count { continues: 0, markers: 0 };
+        c.visit_expr(&desugared);
+        assert_eq!(c.continues, 0, "the `continue` should end its path and be gone");
+        // one copy on the guard's pass path, one on the outer else; none on the skip path
+        assert_eq!(c.markers, 2, "the statement after the `if` runs on exactly the two paths that do not skip");
+    }
+
+    #[test]
     fn heap_option_record_unwrap_or_walls_not_miscompiles() {
         // `let t = list.get(xs, i) ?? { … }` over a `List[record]` (Option[record] `??`).
         // HISTORY: the Value-shaped option.value_unwrap_or corrupted the record field block, so
