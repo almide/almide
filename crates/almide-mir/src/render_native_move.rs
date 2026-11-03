@@ -262,7 +262,7 @@ pub(crate) fn static_str_operand(v: ValueId) -> Option<String> {
     if REBOUND.with(|m| m.borrow().contains(&v)) {
         return None;
     }
-    STATIC_STRS.with(|m| m.borrow().get(&v).map(|s| format!("{s:?}")))
+    STATIC_STRS.with(|m| m.borrow().get(&v).map(|s| format!("\"{}\"", almide_base::rust_lit::escape_rust_str(s))))
 }
 
 thread_local! {
