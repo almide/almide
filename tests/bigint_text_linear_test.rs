@@ -18,9 +18,14 @@
 //! n is about 2 for a linear conversion and about 4 for a quadratic one. On
 //! the stock wasm artifact the cost is wasmtime FUEL (one unit per wasm
 //! instruction), found by bisection, so the verdict does not move with the
-//! machine's load; natively it is the best of three wall-clock runs. Every run
+//! machine's load; natively it is the best of five runs of the child's own
+//! CPU time (wait4's rusage; wall time off unix). Every run
 //! has a budget (fuel cap / timeout) a quadratic conversion exceeds many times
 //! over, so a regression fails instead of hanging.
+#[path = "support/cpu_time.rs"]
+mod cpu_time;
+use cpu_time::reap_cpu_time;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -88,7 +93,8 @@ fn build(tag: &str) -> PathBuf {
     dir
 }
 
-/// Runs `cmd` to completion within `limit`, killing it past that.
+/// Runs `cmd` to completion within `limit`, killing it past that: its CPU
+/// time (`reap_cpu_time`), exit code, stdout and stderr.
 fn run_within(mut cmd: Command, limit: Duration) -> Option<(Duration, i32, String, String)> {
     let start = Instant::now();
     let mut child = cmd
@@ -96,28 +102,20 @@ fn run_within(mut cmd: Command, limit: Duration) -> Option<(Duration, i32, Strin
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn");
-    loop {
-        if child.try_wait().expect("wait").is_some() {
-            let took = start.elapsed();
-            let o = child.wait_with_output().expect("output");
-            return Some((
-                took,
-                o.status.code().unwrap_or(-1),
-                String::from_utf8_lossy(&o.stdout).into_owned(),
-                String::from_utf8_lossy(&o.stderr).into_owned(),
-            ));
-        }
-        if start.elapsed() > limit {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        // 1 ms: the 1M-digit runs take ~10 ms, so a coarser poll is the error.
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    let drain = |mut r: Box<dyn Read + Send>| {
+        std::thread::spawn(move || {
+            let mut b = Vec::new();
+            let _ = r.read_to_end(&mut b);
+            String::from_utf8_lossy(&b).into_owned()
+        })
+    };
+    let out = drain(Box::new(child.stdout.take().expect("piped")));
+    let err = drain(Box::new(child.stderr.take().expect("piped")));
+    let (code, took) = reap_cpu_time(child, start, limit)?;
+    Some((took, code, out.join().expect("stdout"), err.join().expect("stderr")))
 }
 
-/// One native run; panics on a wrong answer or a run past 20 s.
+/// One native run's CPU time; panics on a wrong answer or a run past 20 s.
 fn native_time(dir: &Path, mode: &str, n: u64) -> Duration {
     let mut cmd = Command::new(dir.join("lin"));
     cmd.args([mode, &n.to_string()]);
@@ -132,7 +130,9 @@ fn native_time(dir: &Path, mode: &str, n: u64) -> Duration {
 }
 
 /// Best of five runs at `n` and at `2n`, interleaved so a burst of load on a
-/// shared runner lands on both sizes rather than on one (#4340).
+/// shared runner lands on both sizes rather than on one (#4340). Each run is
+/// timed by its own CPU time, not the wall clock: wall-clock ratios of 3.22
+/// and 3.36 on busy runners read 2.0 on a dedicated VM (#4331).
 fn native_pair(dir: &Path, mode: &str, n: u64) -> (Duration, Duration) {
     (0..5).fold((Duration::MAX, Duration::MAX), |(a, b), _| {
         (a.min(native_time(dir, mode, n)), b.min(native_time(dir, mode, 2 * n)))
