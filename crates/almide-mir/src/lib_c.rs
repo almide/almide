@@ -38,6 +38,18 @@ pub struct MirFunction {
     /// at its move-in store), exactly as for `List[String]`. So it is a pure rendering
     /// refinement (like the `DropValue` tag dispatch) — NOT a new op or certificate event.
     pub heap_slot_masks: BTreeMap<ValueId, Vec<usize>>,
+    /// The MOVE parameters (#4006 class P, `native_move_params`): heap params
+    /// the caller hands its reference over to at the call, so the body starts
+    /// holding one (rc 1) instead of borrowing (rc 0). Every other heap param
+    /// keeps the borrow convention above. Empty unless the native render's
+    /// pass made one; the certificate states each param's mode
+    /// (`certificate_native_calls`, proofs/NativeCalls.v).
+    pub owned_params: BTreeSet<ValueId>,
+    /// The op indices of the call-site MOVES: a `Consume` right after a
+    /// `CallFn` that hands that argument to a move parameter of its callee.
+    /// The certificate writes these as the call-site move-out `M` on the
+    /// argument's line, which proofs/NativeCalls.v binds to the site.
+    pub call_moves: BTreeSet<usize>,
 }
 
 /// A whole MIR program.
@@ -940,6 +952,14 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
 
     let mut borrowed: BTreeSet<ValueId> = BTreeSet::new();
     init_borrowed_params(func, &mut object_of, &mut dead, &mut borrowed);
+    // A MOVE param (#4006 class P) enters holding the reference its caller
+    // handed over: owned at 1, not borrowed.
+    let mut rc = rc;
+    for p in &func.owned_params {
+        if borrowed.remove(p) {
+            rc.insert(*p, 1);
+        }
+    }
 
     // BRANCH JOIN (mirrors the proven checker's `CBranch` rule): each arm of an
     // `IfThen`/`Else`/`EndIf` runs from the SAME entry state, and the arms must

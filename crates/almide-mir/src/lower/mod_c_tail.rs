@@ -490,6 +490,8 @@ fn lower_function_all_impl(
         ret,
         declared_caps,
         heap_slot_masks,
+        owned_params: Default::default(),
+        call_moves: Default::default(),
     };
     let mut all = vec![main];
     all.extend(lifted);

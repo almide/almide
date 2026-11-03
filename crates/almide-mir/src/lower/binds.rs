@@ -596,6 +596,8 @@ impl LowerCtx {
             ret,
             declared_caps: Vec::new(),
             heap_slot_masks: sub.record_masks.iter().map(|(v, m)| (*v, m.clone())).collect(),
+            owned_params: Default::default(),
+            call_moves: Default::default(),
         };
         crate::lambda_sigs::record(&name, params.iter().map(|(_, t)| t.clone()).collect(), body.ty.clone());
         self.lifted.push(lifted_fn);

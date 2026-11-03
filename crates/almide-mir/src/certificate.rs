@@ -725,3 +725,4 @@ struct BranchFrame {
 
 include!("certificate_b.rs");
 include!("certificate_c.rs");
+include!("certificate_native_calls.rs");

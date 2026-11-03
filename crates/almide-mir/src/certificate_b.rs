@@ -52,7 +52,9 @@ fn seg_net(seg: &str) -> i64 {
     seg.chars()
         .map(|c| match c {
             'i' | 'a' => 1,
-            'd' | 'm' => -1,
+            // `M` is a call-site move-out (#4006 class P): a `m` the native
+            // call binding (proofs/NativeCalls.v) ties to its site.
+            'd' | 'm' | 'M' => -1,
             _ => 0, // b (+0), loop/branch delimiters
         })
         .sum()
@@ -328,6 +330,11 @@ struct CertScan {
     addr_of: BTreeMap<ValueId, ValueId>, // address → the object it points into (#3233)
     child_of: BTreeMap<ValueId, ValueId>, // raw LoadHandle child → the object it was loaded from (#3261)
     paths: PathScopes, // the handle maps scoped to the control-flow path (#3267, certificate_b_tail.rs)
+    /// The op being stepped is a call-site move (`MirFunction::call_moves`):
+    /// its `Consume` is written `M` (#4006 class P).
+    call_move: bool,
+    /// The object of every call-site move, in op order (the native-calls marks).
+    call_move_objs: Vec<ValueId>,
 }
 
 impl CertScan {
@@ -383,7 +390,12 @@ impl CertScan {
             // a consuming callee). `m` distinguishes move from a plain drop.
             Op::Consume { v } => {
                 let o = self.s.object_of(*v);
-                self.s.event(o, 'm');
+                if self.call_move {
+                    self.call_move_objs.push(o);
+                    self.s.event(o, 'M');
+                } else {
+                    self.s.event(o, 'm');
+                }
             }
             Op::SetLocal { local, .. } => self.line_slot_close(*local),
             // Open the branch region (format v4, brick 5a): arm events buffer per

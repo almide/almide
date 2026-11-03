@@ -122,6 +122,22 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
 /// their own `i`-born line (#3321) — each backed by its `Dup` op rather than an
 /// allocation, which [`plus_one_events_backed`] accounts.
 fn certificate_scan(func: &MirFunction) -> (String, bool, usize) {
+    let (lines, poisoned, cow_opened, _) = certificate_lines(func);
+    let mut out = String::new();
+    for (_, line) in &lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+    (out, poisoned, cow_opened)
+}
+
+/// [`certificate_scan`]'s lines, each with its object, plus the object of every
+/// call-site move (#4006 class P) in op order. A MOVE parameter's line opens
+/// with the `i` of the reference its caller hands over: the per-function
+/// ownership witness judges it as owned, and proofs/NativeCalls.v — which
+/// seeds that reference itself from the declared mode — reads the line
+/// without it (`certificate_native_calls`).
+pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, bool, usize, Vec<ValueId>) {
     // Sequential-phase split (codopsy8 complexity sweep): the two pre-scan sets below are
     // each an independent, self-contained computation over `func.ops` (the original code
     // already delineated the first as its own `{ .. }` scope) — extracted verbatim as their
@@ -145,6 +161,9 @@ fn certificate_scan(func: &MirFunction) -> (String, bool, usize) {
     for p in &func.params {
         if p.repr.is_heap() {
             s.of.insert(p.value, p.value);
+            if func.owned_params.contains(&p.value) {
+                s.event(p.value, 'i');
+            }
         }
     }
 
@@ -161,8 +180,11 @@ fn certificate_scan(func: &MirFunction) -> (String, bool, usize) {
         addr_of: BTreeMap::new(),
         child_of: BTreeMap::new(),
         paths: PathScopes { cow_dups: cow_dup_dsts(func), ..PathScopes::default() },
+        call_move: false,
+        call_move_objs: Vec::new(),
     };
-    for op in &func.ops {
+    for (i, op) in func.ops.iter().enumerate() {
+        scan.call_move = func.call_moves.contains(&i);
         scan.step(op);
     }
 
@@ -181,12 +203,8 @@ fn certificate_scan(func: &MirFunction) -> (String, bool, usize) {
         }
     }
 
-    let mut out = String::new();
-    for o in &scan.s.order {
-        out.push_str(&scan.s.stream[o]);
-        out.push('\n');
-    }
-    (out, scan.s.poisoned, scan.paths.cow_opened)
+    let lines = scan.s.order.iter().map(|o| (*o, scan.s.stream[o].clone())).collect();
+    (lines, scan.s.poisoned, scan.paths.cow_opened, scan.call_move_objs)
 }
 
 /// The NON-RECURRING soundness gate for the borrow-by-default calling
