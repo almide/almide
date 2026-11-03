@@ -157,6 +157,11 @@ pub(crate) struct FloorFn {
     pub ret: FloorRet,
     /// The runtime body and every runtime item it reaches, each a whole item.
     pub items: Vec<&'static str>,
+    /// The `_owned` twin the stdlib's `@reuse` declaration gives (the param
+    /// it takes by value, its symbol, its items): a call whose list source
+    /// is not read again moves it in, as v0 does (crates/almide-codegen
+    /// owned_source.rs).
+    pub twin: Option<(usize, String, Vec<&'static str>)>,
 }
 
 /// The floor entry the declaration of stdlib call `call` (`module.fn`) gives,
@@ -471,7 +476,19 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
         })
         .collect();
     let items = closure(&symbol, rt)?;
-    Ok(FloorFn { symbol, params: fparams, ret: fret, items })
+    let twin = almide_lang::reuse::of_intrinsic(&symbol).and_then(|r| {
+        let t = r.owned_twin?;
+        if !matches!(fparams.get(r.param), Some(FloorParam::List(_))) {
+            return None;
+        }
+        let (tp, tr) = rust_signature(rt.items.get(t)?.text)?;
+        // The twin differs only in taking the source by value.
+        let same = tp.len() == rust_params.len()
+            && tp.iter().zip(&rust_params).enumerate().all(|(k, (a, b))| k == r.param || squash(a) == squash(b))
+            && squash(&tr) == squash(&rust_ret);
+        same.then(|| Some((r.param, t.to_string(), closure(t, rt).ok()?)))?
+    });
+    Ok(FloorFn { symbol, params: fparams, ret: fret, items, twin })
 }
 
 fn simple(t: &TypeExpr) -> Option<&str> {
@@ -1730,7 +1747,15 @@ pub(crate) fn render_call(
             },
         });
     }
-    let call = format!("{}({})", f.symbol, rendered.join(", "));
+    // The list source not read again moves into the owned twin.
+    let mut symbol = f.symbol.as_str();
+    if let Some((k, twin, _)) = &f.twin {
+        if dying.get(*k) == Some(&true) && matches!(args.get(*k).map(|a| a.1), Some(NTy::Vec | NTy::VecStr)) {
+            rendered[*k] = crate::render_native_move::take_expr(&args[*k].0);
+            symbol = twin;
+        }
+    }
+    let call = format!("{symbol}({})", rendered.join(", "));
     Ok(match f.ret {
         FloorRet::Unit => (call, None),
         FloorRet::Int => (call, Some(NTy::I64)),

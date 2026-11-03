@@ -94,6 +94,16 @@ pub(crate) fn last_use(
 
 /// Whether the value `src` is never read again after `ops[at]` (whatever its
 /// type): [`last_use`]'s rule without the moved value's own `Default`.
+/// `op` releases exactly `v` (a drop, not a hand-over or a borrow mark).
+fn released(op: &Op, v: ValueId) -> bool {
+    if matches!(op, Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. }) {
+        return false;
+    }
+    let mut vs = Vec::new();
+    crate::mir_ops::op_values(op, &mut vs);
+    vs == [v]
+}
+
 pub(crate) fn dying_after(
     func: &MirFunction,
     at: usize,
@@ -105,12 +115,39 @@ pub(crate) fn dying_after(
     }
     // A borrowed param is the caller's; a MOVE param (#4006 class P) is ours.
     let owned_param = func.owned_params.contains(&src);
-    if func.ret == Some(src) || (func.params.iter().any(|p| p.value == src) && !owned_param) {
+    if func.params.iter().any(|p| p.value == src) && !owned_param {
         return false;
     }
+    let joined = func
+        .ops
+        .iter()
+        .any(|op| matches!(op, Op::Dup { dst, src: s } if *s == src && borrow_arms.contains(dst)));
+    if joined {
+        return false;
+    }
+    // `src` is released, unconditionally and before anything reads it again,
+    // in the copy's own block: the value dies there, whatever later rebinds
+    // the slot (a loop slot's write-back `Drop v; SetLocal v = ..`). A copy
+    // followed by that release is a move.
+    let mut depth = 0i32;
+    let mut straight = true;
     let mut reads = Vec::new();
     for op in &func.ops[at + 1..] {
+        if straight {
+            match op {
+                Op::IfThen { .. } | Op::LoopStart => depth += 1,
+                Op::EndIf { .. } | Op::LoopEnd => {
+                    depth -= 1;
+                    straight = depth >= 0;
+                }
+                Op::Else { .. } | Op::Return { .. } | Op::LoopBreakUnless { .. } if depth == 0 => straight = false,
+                _ => {}
+            }
+        }
         if bookkeeping(op) {
+            if straight && depth == 0 && !owned_param && released(op, src) {
+                return true;
+            }
             continue;
         }
         reads.clear();
@@ -122,11 +159,8 @@ pub(crate) fn dying_after(
             return false;
         }
     }
-    let joined = func
-        .ops
-        .iter()
-        .any(|op| matches!(op, Op::Dup { dst, src: s } if *s == src && borrow_arms.contains(dst)));
-    if joined {
+    // The returned value is read at the end.
+    if func.ret == Some(src) {
         return false;
     }
     let loops = loop_of(func);
@@ -309,6 +343,11 @@ pub(crate) fn set_stack_lits(func: &MirFunction, user_fns: &std::collections::BT
                     _ => None,
                 })
                 .collect(),
+            // A list `+`'s right operand is only read as a slice.
+            Op::CallFn { name, args, .. } if crate::native_list_ops::is_list_concat(name) => match args.as_slice() {
+                [crate::CallArg::Handle(a), crate::CallArg::Handle(b)] if a != b => vec![*b],
+                _ => vec![],
+            },
             Op::CallIndirect { args, .. } => match args.first() {
                 Some(crate::CallArg::Handle(env)) => vec![*env],
                 _ => vec![],
