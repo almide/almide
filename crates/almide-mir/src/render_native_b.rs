@@ -493,7 +493,10 @@ fn render_declared_floor_call(
     let dst_map = dst.and_then(crate::render_native_rec::declared_map);
     let (expr, ret) = crate::native_floor::render_call(floor, name, &rendered, &dying, dst_map)?;
     used_shims.push(crate::native_floor::FLOOR_HEADER);
-    used_shims.extend(floor.items.iter().copied());
+    match &floor.twin {
+        Some((_, twin, items)) if expr.contains(&format!("{twin}(")) => used_shims.extend(items.iter().copied()),
+        _ => used_shims.extend(floor.items.iter().copied()),
+    }
     for _ in 0..indent {
         out.push_str("    ");
     }
