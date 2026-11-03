@@ -437,6 +437,89 @@ jobs:
           # over incompressible bytes only costs upload-artifact time.
           compression-level: 0
 
+      # Partition ONCE, here, and give every shard and solo leg an archive of
+      # only its own binaries plus its rows file. A shard used to download the
+      # full 3.4 GB archive (2.3 min) and unpack it twice — 52 s to enumerate
+      # and partition, 59 s to run (run 41558296054). The full archive above
+      # stays for the coverage gate, which judges these same rows files.
+      - name: Pack the per-shard and per-solo-leg archives
+        if: env.PROSE_LANE != 'true'
+        run: |
+          bash scripts/ci-test-shard.sh --pack-archives "$RUNNER_TEMP/almide-pack" 4
+          cp "$RUNNER_TEMP/almide-pack/all-rows.tsv" "$RUNNER_TEMP/almide-pack/rows/"
+          df -h "$RUNNER_TEMP"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-shard-rows
+          path: ${{ runner.temp }}/almide-pack/rows/
+          retention-days: 1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-shard-1
+          path: ${{ runner.temp }}/almide-pack/shard-1/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-shard-2
+          path: ${{ runner.temp }}/almide-pack/shard-2/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-shard-3
+          path: ${{ runner.temp }}/almide-pack/shard-3/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-shard-4
+          path: ${{ runner.temp }}/almide-pack/shard-4/
+          retention-days: 1
+          compression-level: 0
+      # One artifact per solo leg (keep in step with SOLO_LEGS in
+      # scripts/ci-test-shard.sh and the test-rust-solo matrix).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-solo-wasm_runtime_cross_target
+          path: ${{ runner.temp }}/almide-pack/solo-wasm_runtime_cross_target/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-solo-wasm_runtime_interp_oracle
+          path: ${{ runner.temp }}/almide-pack/solo-wasm_runtime_interp_oracle/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-solo-wasm_runtime_opt_parity
+          path: ${{ runner.temp }}/almide-pack/solo-wasm_runtime_opt_parity/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-solo-run_parity
+          path: ${{ runner.temp }}/almide-pack/solo-run_parity/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-solo-interp_ledger
+          path: ${{ runner.temp }}/almide-pack/solo-interp_ledger/
+          retention-days: 1
+          compression-level: 0
+
   # The rustc and clippy warning ratchets (#1228 / #1462). Both scripts run
   # their own `cargo check|clippy --release --workspace --all-targets`, so
   # they need no artifact of `build` and sit off the tests' critical path.
@@ -533,6 +616,10 @@ jobs:
       # Each `nextest list --archive-file` below unpacks the whole archive
       # into $TMPDIR, which root-tmpdir (after checkout) put on the root volume.
       - uses: ./.github/actions/fetch-test-archive
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: almide-shard-rows
+          path: ${{ runner.temp }}/almide-shard-rows
       - name: Union of shards + solo legs == full target set
         # #2381: the five solo targets run in `Test Rust (solo …)` jobs, one
         # per giant, so the union is the four shards PLUS the solo rows, each
@@ -542,12 +629,21 @@ jobs:
         run: |
           set -euo pipefail
           A="$TEST_ARCHIVE_FILE"
+          R="$RUNNER_TEMP/almide-shard-rows"
+          # ONE unpack of the full archive; the shards ran the rows files
+          # build-tests partitioned from its own enumeration of the built
+          # tree, so first prove that enumeration IS the archive's.
           bash scripts/ci-test-shard.sh --list-all-archive "$A" | sort > /tmp/all.txt
+          if ! diff -u /tmp/all.txt <(sort "$R/all-rows.tsv"); then
+            echo "SHARD GATE FAIL: build-tests enumerated a different target set than its archive holds — the shards partitioned the wrong list" >&2
+            exit 1
+          fi
           : > /tmp/union.txt
-          for i in 0 1 2 3; do
-            bash scripts/ci-test-shard.sh --list-archive "$i" 4 "$A" >> /tmp/union.txt
+          for i in 1 2 3 4; do
+            [ -s "$R/shard-$i.tsv" ] || { echo "SHARD GATE FAIL: shard $i/4 has no rows file" >&2; exit 1; }
+            cat "$R/shard-$i.tsv" >> /tmp/union.txt
           done
-          bash scripts/ci-test-shard.sh --list-solo-archive "$A" | tee /tmp/solo.txt >> /tmp/union.txt
+          bash scripts/ci-test-shard.sh --list-solo-rows /tmp/all.txt | tee /tmp/solo.txt >> /tmp/union.txt
           solo_n=$(wc -l < /tmp/solo.txt | tr -d ' ')
           if [ "$solo_n" -ne 5 ]; then
             echo "SHARD GATE FAIL: expected 5 solo targets in the archive, found $solo_n — a solo target was renamed or dropped and its job would run nothing" >&2
@@ -610,7 +706,7 @@ jobs:
       - name: Balance report (informational — imbalance costs time, not coverage)
         run: |
           for i in 0 1 2 3; do
-            printf '  shard %s/4: %s target(s)\n' "$((i + 1))" "$(bash scripts/ci-test-shard.sh --list-archive "$i" 4 "$TEST_ARCHIVE_FILE" | wc -l | tr -d ' ')"
+            printf '  shard %s/4: %s target(s)\n' "$((i + 1))" "$(grep -c . "$RUNNER_TEMP/almide-shard-rows/shard-$((i + 1)).tsv")"
           done
 
   test-rust:
@@ -679,6 +775,8 @@ jobs:
         if: env.DOCS_ONLY != 'true'
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          # This shard's own archive and rows file (build-tests partitioned).
+          archive-artifact: almide-tests-shard-${{ matrix.shard }}
 
       - name: Cargo tests
         if: env.DOCS_ONLY != 'true'
@@ -714,7 +812,7 @@ jobs:
         # and runs this shard's share. `shard-coverage` below proves the four
         # shards' union is the whole set, so a partition bug reads as a RED
         # build rather than a fast green one.
-        run: bash scripts/ci-test-shard.sh --run-archive $(( ${{ matrix.shard }} - 1 )) 4 "$TEST_ARCHIVE_FILE"
+        run: SHARD_LABEL="shard ${{ matrix.shard }}/4" bash scripts/ci-test-shard.sh --run-rows "$(dirname "$TEST_ARCHIVE_FILE")/rows.tsv" "$TEST_ARCHIVE_FILE"
 
   test-rust-solo:
     # The corpus giants, one runner each (#2381). Five test targets are each
@@ -798,6 +896,8 @@ jobs:
         if: env.DOCS_ONLY != 'true'
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          # Only this leg's binaries (and the tool tripwire).
+          archive-artifact: almide-tests-solo-${{ matrix.leg }}
 
       - name: Cargo test (solo ${{ matrix.leg }}, corpus shard ${{ matrix.shard }}/2)
         if: env.DOCS_ONLY != 'true'
