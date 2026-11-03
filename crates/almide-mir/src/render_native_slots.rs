@@ -80,6 +80,8 @@ fn call_result(name: &str, sigs: &NativeSigs) -> Option<NTy> {
         FloorRet::ListInt => Some(NTy::Vec),
         FloorRet::ListStr => Some(NTy::VecStr),
         FloorRet::Bytes => Some(NTy::Rec(rec::bytes_index())),
+        FloorRet::Value => Some(NTy::Rec(rec::value_index())),
+        FloorRet::Matrix => Some(NTy::Rec(rec::matrix_index())),
         _ => None,
     }
 }
