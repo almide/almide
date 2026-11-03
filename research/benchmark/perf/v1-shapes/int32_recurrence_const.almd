@@ -1,0 +1,13 @@
+// v1-vs-v0 shape bench: the sized-int recurrence of int32_recurrence with a
+// constant step, so the loop is the Int32 local and its ring ops alone.
+fn step(x: Int32, k: Int32) -> Int32 = x * 31 + k
+
+fn main() -> Unit = {
+  var x: Int32 = 7
+  var i = 0
+  while i < 3000000 {
+    x = step(x, 5)
+    i = i + 1
+  }
+  println(int32.to_string(x))
+}
