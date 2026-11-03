@@ -407,9 +407,23 @@ fn seed_param_ntys(
             Some(NativeSigKind::Res) => NTy::Res,
             None => repr_nty(&p.repr, true)?,
         };
+        // A MOVE param (#4006 class P) arrives as the caller's own value.
+        let nty = if func.owned_params.contains(&p.value) { owned_nty(nty) } else { nty };
         tys.insert(p.value, nty);
     }
     Ok(tys)
+}
+
+/// The owned counterpart of a borrowed param type: what a MOVE param (#4006
+/// class P) holds.
+pub(crate) fn owned_nty(t: NTy) -> NTy {
+    match t {
+        NTy::VecRef => NTy::Vec,
+        NTy::VecStrRef => NTy::VecStr,
+        NTy::RecRef(i) => NTy::Rec(i),
+        NTy::StrRef => NTy::Str,
+        other => other,
+    }
 }
 
 fn render_fn(
@@ -804,7 +818,13 @@ fn render_native_fn_sig(
         .iter()
         .map(|p| {
             let t = tys.get(&p.value).copied().unwrap_or(NTy::I64);
+            // A MOVE param (#4006 class P) takes the caller's value itself.
+            let owned = func.owned_params.contains(&p.value);
             let spelled = match t {
+                NTy::Str if owned => "AlmideString".to_string(),
+                NTy::Vec if owned => "Vec<i64>".to_string(),
+                NTy::VecStr if owned => "Vec<AlmideString>".to_string(),
+                NTy::Rec(i) if owned => crate::render_native_rec::struct_name(i),
                 NTy::StrRef | NTy::Str => "&str".to_string(),
                 NTy::VecRef | NTy::Vec => "&[i64]".to_string(),
                 NTy::VecStrRef | NTy::VecStr => "&[AlmideString]".to_string(),
@@ -815,7 +835,7 @@ fn render_native_fn_sig(
                 NTy::Opt => "Option<i64>".to_string(),
                 NTy::ResStr => "Result<AlmideString, AlmideString>".to_string(),
             };
-            let mut_prefix = if reassigned.contains(&p.value) {
+            let mut_prefix = if reassigned.contains(&p.value) || owned {
                 "mut "
             } else {
                 ""

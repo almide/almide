@@ -235,7 +235,11 @@ fn render_user_fn_call(
     for (i, (a, p)) in call.args.iter().zip(&callee.params).enumerate() {
         let want = declared_param_want(callee_sig, i, p)?;
         let (code, got) = call_arg(a, s.tys)?;
-        let arg = user_arg_in_declared_mode(name, want, code, got)?;
+        let arg = if callee.owned_params.contains(&p.value) {
+            moved_arg(name, crate::render_native::owned_nty(want), code, got)?
+        } else {
+            user_arg_in_declared_mode(name, want, code, got)?
+        };
         // A narrow param crosses in its real Rust type (#4006).
         rendered_args.push(match callee_sig.and_then(|(ps, _)| ps.get(i)).and_then(|k| k.narrow_rust()) {
             Some(t) => format!("({arg} as {t})"),
@@ -278,6 +282,19 @@ fn declared_param_want(
 /// list param, and everything else follows the string convention — walling on
 /// any kind mismatch. Extracted verbatim from `render_call_fn`
 /// (codopsy r2, #852).
+/// An argument handed to a MOVE param (#4006 class P): the caller's own value,
+/// moved (its `Consume` follows the call — `MirFunction::call_moves`).
+fn moved_arg(name: &str, want: NTy, code: String, got: NTy) -> Result<String, LowerError> {
+    let same = match (want, got) {
+        (NTy::Rec(i), NTy::Rec(j)) => i == j,
+        (w, g) => w == g,
+    };
+    if !same || matches!(got, NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) {
+        return Err(wall(format!("native: a borrowed or other-typed arg to a move param of `{name}`")));
+    }
+    Ok(code)
+}
+
 fn user_arg_in_declared_mode(
     name: &str,
     want: NTy,

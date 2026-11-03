@@ -254,6 +254,13 @@ pub(crate) fn set_stack_lits(func: &MirFunction, user_fns: &std::collections::BT
         })
         .collect();
     lits.retain(|l| func.ret != Some(*l));
+    // A literal handed to a move param (#4006 class P) leaves as the callee's
+    // owned list, never as a borrowed array.
+    for &i in &func.call_moves {
+        if let Some(Op::Consume { v }) = func.ops.get(i) {
+            lits.remove(v);
+        }
+    }
     let mut reads = Vec::new();
     for op in &func.ops {
         if bookkeeping(op) {

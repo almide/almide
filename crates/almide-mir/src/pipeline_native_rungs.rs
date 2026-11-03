@@ -643,7 +643,12 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
 /// MIR handed to the renderer — after the probe charges, the result-window
 /// rewrite and the make-unique elision — so `proofs/native-wall.sh` judges
 /// the functions the Rust source was rendered from, not a sibling lowering.
-pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(String, String)>), LowerError> {
+///
+/// Each certificate is `(property, function, witness)`: an `ownership`
+/// witness per function, and one `native-calls` witness for the whole program
+/// (function `program`) binding every call site's parameter modes and moves
+/// (#4006 class P, proofs/NativeCalls.v).
+pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(String, String, String)>), LowerError> {
     render_native_parts(source).map(|(rust, certs, _)| (rust, certs))
 }
 
@@ -662,7 +667,9 @@ pub fn native_capability_reach(source: &str) -> Result<std::collections::BTreeSe
 
 /// The body of [`try_render_rust_source_certified`]: the native render, the
 /// certificates of the MIR it rendered from, and that MIR.
-fn render_native_parts(source: &str) -> Result<(String, Vec<(String, String)>, Vec<crate::MirFunction>), LowerError> {
+fn render_native_parts(
+    source: &str,
+) -> Result<(String, Vec<(String, String, String)>, Vec<crate::MirFunction>), LowerError> {
     // Debug aid: ALMIDE_DUMP_MIR=1 prints every lowered fn's op stream (the
     // same view `debug_dump_mir` builds) before the native render runs.
     if almide_base::env::flag("ALMIDE_DUMP_MIR") {
@@ -819,7 +826,18 @@ fn render_native_parts(source: &str) -> Result<(String, Vec<(String, String)>, V
     // Op::MakeUnique => {}`), so this is a no-op cleanup here, kept only so both
     // legs run the identical target-agnostic MIR pass list.
     crate::alias_safety::elide_unaliased_make_unique(&mut functions);
-    let certs = functions.iter().map(|f| (f.name.to_string(), crate::certificate::ownership_certificate(f))).collect();
+    // #4006 class P: a heap param its body takes over becomes a move param,
+    // and every call hands the argument over at the call.
+    crate::native_move_params::rewrite(&mut functions);
+    let mut certs: Vec<(String, String, String)> = functions
+        .iter()
+        .map(|f| ("ownership".to_string(), f.name.to_string(), crate::certificate::ownership_certificate(f)))
+        .collect();
+    certs.push((
+        "native-calls".to_string(),
+        "program".to_string(),
+        crate::certificate::native_calls_witness(&functions),
+    ));
     let program = MirProgram {
         functions,
         exports: Vec::new(),

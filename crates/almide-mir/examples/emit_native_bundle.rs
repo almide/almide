@@ -2,12 +2,13 @@
 //! ownership witness of every function the verified native renderer
 //! (`almide_mir::pipeline::try_render_rust_source_certified`) rendered,
 //! taken from the exact MIR it rendered, in the format `almide-verify
-//! bundle` reads.
+//! bundle` reads, plus the program's `native-calls` witness (#4006 class P):
+//! every call site's parameter modes and the move each moved argument is.
 //!
 //! Usage: emit_native_bundle <program.almd> <out.rs>
 //!
 //! The rendered Rust source is written to `<out.rs>`, and the bundle (version
-//! 2) pins its SHA-256: almide-verify recomputes the digest from the file and
+//! 5) pins its SHA-256: almide-verify recomputes the digest from the file and
 //! rejects a mismatch, so the verdict is about THAT source. Exit 2 when the
 //! program walls (the native build falls back to the standard codegen, which
 //! carries no certificate) or a file cannot be written.
@@ -40,10 +41,10 @@ fn main() {
     let hex: String = sha2::Sha256::digest(rust.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
     let path = std::path::absolute(out).map(|p| p.display().to_string()).unwrap_or(out.clone());
     let mut bundle = format!(
-        "almide-certificate-bundle 2\nproducer almide-mir emit_native_bundle\nsource {src}\nartifact sha256 {hex} {path}\n"
+        "almide-certificate-bundle 5\nproducer almide-mir emit_native_bundle\nsource {src}\nartifact sha256 {hex} {path}\n"
     );
-    for (name, cert) in certs {
-        bundle.push_str(&format!("witness ownership {} {name}\n{cert}\n", cert.len()));
+    for (prop, name, cert) in certs {
+        bundle.push_str(&format!("witness {prop} {} {name}\n{cert}\n", cert.len()));
     }
     let _ = std::io::stdout().write_all(bundle.as_bytes());
 }
