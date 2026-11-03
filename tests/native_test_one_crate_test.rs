@@ -143,18 +143,19 @@ fn a_failing_test_fails_alone_and_the_verdicts_are_per_file() {
     let (code, out) = run(&f, &[]);
     assert_eq!(code, 1, "{out}");
     // The panicking test fails its file; the file's other tests still ran.
-    assert!(out.contains("FAILED: tests/a_test.almd"), "{out}");
+    assert!(out.contains("FAILED: ./tests/a_test.almd"), "{out}");
     assert!(out.contains("a panics alone"), "{out}");
     assert!(out.contains("boom from a"), "{out}");
     // The process-ending abort fails its own file only.
-    assert!(out.contains("tests/d_test.almd"), "{out}");
+    assert!(out.contains("FAILED: ./tests/d_test.almd"), "{out}");
     assert!(out.contains("index out of bounds"), "{out}");
     for ok in ["b_test", "c_test"] {
-        assert!(!out.contains(&format!("FAILED: tests/{ok}.almd")), "{ok} must pass\n{out}");
+        assert!(!out.contains(&format!("{ok}.almd")), "{ok} must pass\n{out}");
     }
     assert!(out.contains("2/4 test file(s) failed"), "{out}");
-    // a: 3 tests, b: 2, c: 1, d: 1 — no file reports another file's tests.
-    assert!(out.contains("7 tests in 4 files"), "{out}");
+    // a: 3 tests, b: 2, c: 1 — no file reports another file's tests; d's
+    // process ended before libtest's tally, so it counts none, as before.
+    assert!(out.contains("6 tests in 4 files"), "{out}");
     // The merged module's path never reaches the report.
     assert!(!out.contains("almide_test_file_"), "{out}");
 }
@@ -179,8 +180,9 @@ fn an_edit_to_the_shared_module_rebuilds_the_run() {
     std::fs::write(f.root.join("src/shared.almd"), "fn double(x: Int) -> Int = x * 3\n").unwrap();
     let (code, out) = run(&f, &["--run", "b doubles"]);
     assert_eq!(code, 1, "the edited module must be what the tests run against\n{out}");
-    assert!(out.contains("FAILED: tests/b_test.almd"), "{out}");
+    assert!(out.contains("FAILED: ./tests/b_test.almd"), "{out}");
     assert!(out.contains("9"), "{out}");
     // The rebuild reuses the run's crate dir instead of adding one per file.
-    assert_eq!(crate_dirs(&f.tmp).len(), 1);
+    let crates = crate_dirs(&f.tmp);
+    assert_eq!(crates.len(), 1, "{crates:?}");
 }
