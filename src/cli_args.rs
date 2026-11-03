@@ -11,6 +11,15 @@ use clap::{Parser, Subcommand};
 /// bare version, which `Makefile`'s install assertion reads.
 const VERSION_LINE: &str = env!("ALMIDE_VERSION_LINE");
 
+/// A program argument as the program's `env.args` reads it (#4391, C-449):
+/// its lossy decode, one U+FFFD per maximal invalid subpart. An argument
+/// that is not UTF-8 reaches the program the way its built binary sees the
+/// same bytes, on either target, instead of failing as a usage error.
+fn program_arg() -> impl clap::builder::TypedValueParser<Value = String> {
+    use clap::builder::TypedValueParser as _;
+    clap::builder::OsStringValueParser::new().map(|a| a.to_string_lossy().into_owned())
+}
+
 #[derive(Parser)]
 #[command(name = "almide", version = VERSION_LINE)]
 pub(crate) struct Cli {
@@ -114,7 +123,7 @@ pub(crate) enum Commands {
         /// Arguments passed to the program. Almide's own flags (`--target`,
         /// `--no-check`, `--release`) are consumed before these; anything
         /// after a `--` separator is forwarded verbatim to the program.
-        #[arg(allow_hyphen_values = true)]
+        #[arg(allow_hyphen_values = true, value_parser = program_arg())]
         program_args: Vec<String>,
     },
     /// Benchmark a program: verify-then-time, median headline (#1490)
@@ -131,7 +140,7 @@ pub(crate) enum Commands {
         /// Arguments passed to the program on both legs, after a `--`
         /// separator (a workload size, so a row's `main` is long enough to
         /// time: `almide bench nbody.almd -- 200000`).
-        #[arg(last = true)]
+        #[arg(last = true, value_parser = program_arg())]
         program_args: Vec<String>,
     },
     /// Build a binary

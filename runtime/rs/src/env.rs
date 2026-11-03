@@ -5,8 +5,10 @@
 // the time the binary is exec'd, so this used to strip a second one — a built
 // binary run as `./p a -- b` answered ["b"] where both wasm legs answered
 // ["a", "--", "b"] (#2485). The wasm legs build the same list from WASI
-// args_get with argv[0] skipped (stdlib/env_args.almd).
-pub fn almide_rt_env_args() -> Vec<AlmideString> { let __almide_v: Vec<String> = { std::env::args().skip(1).collect() }; __almide_v.into_almide() }
+// args_get with argv[0] skipped (stdlib/env_args.almd). An argument that is
+// not UTF-8 is its lossy decode (#4391, C-449): a String is valid UTF-8, and
+// `std::env::args` panicked on such an argument (exit 101).
+pub fn almide_rt_env_args() -> Vec<AlmideString> { let __almide_v: Vec<String> = { std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect() }; __almide_v.into_almide() }
 
 pub fn almide_rt_env_get(name: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { std::env::var(name).ok() }; __almide_v.into_almide() }
 
