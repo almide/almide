@@ -279,3 +279,23 @@ fn helper_sig_examples() {
         ],
     );
 }
+
+#[test]
+fn native_calls_examples() {
+    // NativeCalls.v (#4006 class P): agreement, binding and the seeded lines,
+    // plus proofs/build-checker.sh's rows.
+    verdicts(
+        Property::NativeCalls,
+        &[
+            ("|1 1|0\niM\nid#1||\nm", true),
+            ("|1 0|\nid\nid#0||\nam", true),
+            ("|1 1|0\nid\nid#1||\nm", false),
+            ("|1 0|0\niM\nid#0||\nam", false),
+            ("|1 0|\nid\nid#1||\nm", false),
+            ("|1 1|0\niMb\nid#1||\nm", false),
+            ("|1 1|0\niM\nid#1||\n", false),
+            ("|1 1|0\niM\nid#1||\ndam", false),
+            ("|5 0|\nid", false),
+        ],
+    );
+}
