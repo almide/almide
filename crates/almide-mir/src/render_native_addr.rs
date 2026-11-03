@@ -361,7 +361,7 @@ fn is_enum(t: Option<NTy>) -> Option<u16> {
 /// The owned copy of a heap value `code` of kind `t` (for a field write).
 fn owned_from(code: &str, t: NTy) -> Option<String> {
     Some(match t {
-        NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) => format!("std::mem::take(&mut {code})"),
+        NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) => crate::render_native_move::take_expr(code),
         NTy::StrRef => format!("AlmideString::from({code})"),
         NTy::VecRef | NTy::VecStrRef => format!("{code}.to_vec()"),
         NTy::RecRef(_) => format!("{code}.clone()"),
@@ -378,6 +378,26 @@ fn field_accepts(field: NTy, got: NTy) -> bool {
         NTy::Rec(i) => matches!(got, NTy::Rec(j) | NTy::RecRef(j) if j == i),
         _ => false,
     }
+}
+
+thread_local! {
+    static STR_FIELDS: std::cell::RefCell<BTreeMap<ValueId, String>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+/// A borrowed string read off a record field (#4006, no-perf-loss): the
+/// field's place. A copy of the read is then the field's own handle shared
+/// (`AlmideStr` clones by its count), not its bytes copied into a new block —
+/// the read borrows the field, so the field holds the same value at the copy.
+fn note_str_field(v: ValueId, place: String) {
+    STR_FIELDS.with(|m| m.borrow_mut().insert(v, place));
+}
+
+pub(crate) fn str_field_of(v: ValueId) -> Option<String> {
+    STR_FIELDS.with(|m| m.borrow().get(&v).cloned())
+}
+
+pub(crate) fn clear_str_fields() {
+    STR_FIELDS.with(|m| m.borrow_mut().clear());
 }
 
 /// The borrowed kind of a heap value of kind `f` read in place, its Rust
@@ -642,6 +662,9 @@ pub(crate) fn render_addr_op(
                     // would copy it (a string's bytes, a list's elements).
                     if let (true, Some((t, spelled, whole))) = (st.borrow_reads.contains(d), borrowed_kind(f)) {
                         tys.insert(*d, t);
+                        if t == NTy::StrRef {
+                            note_str_field(*d, format!("{}.f{k}", var(ad.base)));
+                        }
                         line!("let mut {}: {spelled} = &{}.f{k}{whole};", var(*d), var(ad.base));
                         return Ok(true);
                     }
@@ -775,7 +798,7 @@ pub(crate) fn render_addr_op(
                 (Some(NTy::VecStr), Some(sv)) if sv.off == 0 && sv.idx.is_none() => {
                     // The stored handle is Consumed by the list: move it in.
                     let rhs = match ty(tys, &sv.base) {
-                        Some(NTy::Str) => format!("std::mem::take(&mut {})", var(sv.base)),
+                        Some(NTy::Str) => crate::render_native_move::take_expr(&var(sv.base)),
                         Some(NTy::StrRef) => format!("AlmideString::from({})", var(sv.base)),
                         other => return Err(wall(format!("native: a {other:?} handle stored into a List[String] slot"))),
                     };
