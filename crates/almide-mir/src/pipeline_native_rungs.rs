@@ -674,8 +674,27 @@ pub fn native_capability_reach(source: &str) -> Result<std::collections::BTreeSe
 
 /// The body of [`try_render_rust_source_certified`]: the native render, the
 /// certificates of the MIR it rendered from, and that MIR.
+///
+/// A program whose render walls on a call no route serves is rendered again
+/// with the bundled stdlib modules linked (selfhost-link-v2, #4006): their
+/// pure-Almide bodies, mono instances included, become certified sibling fns
+/// ([`take_bundled_modules`]). A program that renders without them renders
+/// exactly as before: the link is only ever the answer to that wall.
 fn render_native_parts(
     source: &str,
+) -> Result<(String, Vec<(String, String, String)>, Vec<crate::MirFunction>), LowerError> {
+    match render_native_parts_with(source, false) {
+        Err(e) if format!("{e:?}").contains("not a lowered user fn and not in the") => {
+            render_native_parts_with(source, true)
+        }
+        rendered => rendered,
+    }
+}
+
+/// [`render_native_parts`], with the bundled modules linked or not.
+fn render_native_parts_with(
+    source: &str,
+    link_bundled: bool,
 ) -> Result<(String, Vec<(String, String, String)>, Vec<crate::MirFunction>), LowerError> {
     // Debug aid: ALMIDE_DUMP_MIR=1 prints every lowered fn's op stream (the
     // same view `debug_dump_mir` builds) before the native render runs.
@@ -689,23 +708,24 @@ fn render_native_parts(
     let _strict = crate::lower::StrictValuesGuard::set(true);
     let mut ir = {
         let _slots = SlotHeldGlobalsGuard::set(true);
-        // The bundled stdlib modules the program reaches link as siblings,
-        // the way the frontend links them for every other leg.
-        // A mono instance can call a bundled fn of a module the source never
-        // names (`int.from` at UInt64 reaches `uint64.__to_float`): such a
-        // module is added and the program built again, to a fixpoint.
-        let mut extra: Vec<String> = Vec::new();
-        loop {
-            let ir = source_to_ir_with(source, &bundled_self_modules_with(source, &extra))?;
-            let more = unloaded_bundled_callees(&ir);
-            if more.is_empty() || more.iter().all(|m| extra.contains(m)) {
-                break ir;
-            }
-            for m in more {
-                if !extra.contains(&m) {
-                    extra.push(m);
+        if link_bundled {
+            // The bundled stdlib modules the program reaches link as
+            // siblings, the way the frontend links them for every other leg.
+            // A mono instance can call a bundled fn of a module the source
+            // never names (`int.from` at UInt64 reaches `uint64.__to_float`):
+            // such a module is added and the program built again, to a
+            // fixpoint.
+            let mut extra: Vec<String> = Vec::new();
+            loop {
+                let ir = source_to_ir_with(source, &bundled_self_modules_with(source, &extra))?;
+                let more: Vec<String> = unloaded_bundled_callees(&ir).into_iter().filter(|m| !extra.contains(m)).collect();
+                if more.is_empty() {
+                    break ir;
                 }
+                extra.extend(more);
             }
+        } else {
+            source_to_ir_with(source, &[])?
         }
     };
     let bundled = take_bundled_modules(&mut ir);
