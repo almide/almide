@@ -8,6 +8,12 @@ description: >-
   unpack overran it ("Disk quota exceeded"). The unpacks themselves go to
   $TMPDIR, which .github/actions/root-tmpdir moves to the root volume.
 
+inputs:
+  artifact:
+    description: "The archive artifact: almide-tests-archive (every binary) or a shard's / solo leg's own"
+    required: false
+    default: "almide-tests-archive"
+
 runs:
   using: "composite"
   steps:
@@ -16,7 +22,7 @@ runs:
       run: df -h / /tmp "$RUNNER_TEMP"
     - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with:
-        name: almide-tests-archive
+        name: ${{ inputs.artifact }}
         path: ${{ runner.temp }}/almide-archive
     - name: Export the archive's location
       shell: bash

@@ -23,10 +23,21 @@ runs:
     - name: Free the root volume of unused preinstalled SDKs
       if: runner.os == 'Linux'
       shell: bash
+      # In the background: the delete took 96 s in the foreground (run
+      # 41558296054), on the critical path of every Linux job, while nothing
+      # the job writes in its first minutes needs the space — the volume
+      # filled late in the jobs (#4408). The runner reaps the process at job
+      # end, by which time it finished long ago. The directories are renamed
+      # first (instant, same filesystem) so nothing can still find a half
+      # deleted SDK on PATH.
       run: |
         df -h /
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
-        df -h /
+        sudo mkdir -p /var/tmp/sdk-trash
+        for d in /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift; do
+          [ -e "$d" ] && sudo mv "$d" "/var/tmp/sdk-trash/$(echo "$d" | tr / _)" || true
+        done
+        sudo nohup rm -rf /var/tmp/sdk-trash >/dev/null 2>&1 &
+        echo "SDK delete running in the background"
     - name: TMPDIR on the root volume
       if: runner.os == 'Linux'
       shell: bash
