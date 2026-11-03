@@ -1,5 +1,5 @@
 diff --git a/crates/almide-mir/src/native_move_params.rs b/crates/almide-mir/src/native_move_params.rs
-index dc6ecbaf7..44650a86c 100644
+index dc6ecbaf7..b3a2a52ab 100644
 --- a/crates/almide-mir/src/native_move_params.rs
 +++ b/crates/almide-mir/src/native_move_params.rs
 @@ -136,7 +136,8 @@ fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Option<MirFu
@@ -22,6 +22,17 @@ index dc6ecbaf7..44650a86c 100644
  }
  
  /// Whether the caller can move `v` into the call at `call` without a copy:
+@@ -320,9 +322,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
+     }
+     for f in next.iter_mut() {
+         let moved = move_at_sites(f, &owned);
+-        if crate::verify_ownership(&moved).is_err() {
+-            return;
+-        }
++        // RE-INJECTED (#4006 class P drill): the Rust mirror is bypassed.
+         *f = moved;
+     }
+     functions.clone_from_slice(&next);
 diff --git a/crates/almide-mir/src/render_native.rs b/crates/almide-mir/src/render_native.rs
 index 2fd446586..1d39ae3ef 100644
 --- a/crates/almide-mir/src/render_native.rs
