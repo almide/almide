@@ -51,12 +51,9 @@ fs.root_remove :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
 fs.root_write_text :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
 http.cancel :: UNPROBEABLE :: parameter type outside the synthesizer
 http.decode_json :: UNPROBEABLE :: parameter type outside the synthesizer
-http.get :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.get needs a declared capability not in this brick
-http.get_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.mount :: UNPROBEABLE :: parameter type outside the synthesizer
 http.poll :: UNPROBEABLE :: parameter type outside the synthesizer
 http.read_new :: UNPROBEABLE :: parameter type outside the synthesizer
-http.request :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.request needs a declared capability not in this brick
 http.route :: UNPROBEABLE :: parameter type outside the synthesizer
 http.router :: UNPROBEABLE :: parameter type outside the synthesizer
 http.serve :: UNPROBEABLE :: parameter type outside the synthesizer
@@ -103,7 +100,6 @@ http.body_bytes :: UNPROBEABLE :: parameter type outside the synthesizer (a prot
 http.header :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 http.header_values :: UNPROBEABLE :: parameter type outside the synthesizer
 http.headers :: UNPROBEABLE :: parameter type outside the synthesizer
-http.send :: HOST_CAPABILITY :: the stock p1 artifact has no http import (proofs/target-availability.toml, pending-port #1710)
 http.set_body :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 http.set_body_bytes :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 http.set_header :: UNPROBEABLE :: parameter type outside the synthesizer
