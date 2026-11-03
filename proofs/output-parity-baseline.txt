@@ -857,6 +857,7 @@ spec/wasm_cross/regex_invalid_pattern.almd
 spec/wasm_cross/regex_linear_time.almd
 spec/wasm_cross/regex_many_patterns.almd
 spec/wasm_cross/regex_repetition_depth.almd
+spec/wasm_cross/regex_scan_linear.almd
 spec/wasm_cross/regex_size_cap.almd
 spec/wasm_cross/repeat_size_ceiling.almd
 spec/wasm_cross/replace_empty_pat.almd

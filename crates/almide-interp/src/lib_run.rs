@@ -468,6 +468,14 @@ impl<'a> Interpreter<'a> {
                     }
                     callee = next;
                     args = next_args;
+                    // With this hop's frame gone, its `acc + [x]` appends
+                    // grow a list nothing else holds (`tail_pushes`).
+                    drop(frame);
+                    for (k, x) in std::mem::take(&mut self.tail_pushes) {
+                        if let Some(Value::List(xs)) = args.get_mut(k) {
+                            Rc::make_mut(xs).push(x);
+                        }
+                    }
                 }
             }
         };

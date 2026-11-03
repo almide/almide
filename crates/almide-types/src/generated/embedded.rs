@@ -31330,7 +31330,8 @@ else {
     else if e == 119 then (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 95
     else if e == 115 then c == 32 or (c >= 9 and c <= 13)
     else if e == 110 then c == 10
-    else if e == 116 then c == 9 else c == __rx_cp(p + 1)
+    else if e == 116 then c == 9
+    else if e == 114 then c == 13 else c == __rx_cp(p + 1)
     if hit then true
     else __rx_class_hit(p + 1 + __rx_w(p + 1), ie, c)
   } else {
@@ -33013,7 +33014,11 @@ else {
     else {
       let e = prim.load8(p + 1)
       let next = p + 1 + __rx_w(p + 1)
-      if e == 100 or e == 119 or e == 115 or e == 110 or e == 116 then __rx_ck_class(ck, next, pe)
+      if e == 100 or e == 119 or e == 115 or e == 110 or e == 116 or e == 114 then __rx_ck_class(
+        ck,
+        next,
+        pe,
+      )
       else if __rx_is_alnum(e) then {
         prim.store64(ck + 16, p + 1)
         __rx_ckerr(ck, 10)
@@ -33561,25 +33566,54 @@ fn regex_index_of(pat: String, s: String) -> Int = {
 
 
 
-fn __rx_scan_go(p: Int, pe: Int, last: Int, scan: Int, m: Int, ncap: Int, bd: Int, first: Bool, acc: List[String]) -> List[String] = {
+
+
+
+
+
+
+
+
+
+
+fn __rx_scan_go(p: Int, pe: Int, last: Int, scan: Int, m: Int, ncap: Int, bd: Int, first: Bool, k: Int, acc: List[String]) -> List[String] = {
   let te = __rx_te(m)
-  if scan > te then acc + [__rx_sub(last, te)]
-  else {
-    let st = __rx_find_start(p, pe, scan, m)
+  if k == 0 - 1 then {
+    let st = if scan > te then 0 - 1
+    else __rx_find_start(p, pe, scan, m)
     if st < 0 then acc + [__rx_sub(last, te)]
-    else {
-      let en = __rx_end(m)
-      let w = prim.load64(m + 120)
-      let none_yet: List[String] = []
-      let groups = if w != 0 then __rx_pcaps_out(__rx_wk(w, 10), 0, ncap, none_yet)
-      else __rx_caps_out(bd, 0, ncap, none_yet)
-      let acc2 = acc + [__rx_sub(last, st), __rx_mark(st, en)] + groups
-      let nxt = if en > st then en
-      else if en >= te then te + 1 else en + __rx_w(en)
-      if first then acc2 + [__rx_sub(en, te)]
-      else __rx_scan_go(p, pe, en, nxt, m, ncap, bd, first, acc2)
-    }
-  }
+    else __rx_scan_go(p, pe, st, scan, m, ncap, bd, first, 0 - 2, acc + [__rx_sub(last, st)])
+  } else if k == 0 - 2 then {
+    let en = __rx_end(m)
+    let nxt = if en > last then en
+    else if en >= te then te + 1 else en + __rx_w(en)
+    __rx_scan_go(p, pe, en, nxt, m, ncap, bd, first, 0, acc + [__rx_mark(last, en)])
+  } else if k < ncap then __rx_scan_go(
+    p,
+    pe,
+    last,
+    scan,
+    m,
+    ncap,
+    bd,
+    first,
+    k + 1,
+    acc + [
+      __rx_scan_group(m, bd, k)
+    ],
+  )
+  else if first then acc + [__rx_sub(last, te)]
+  else __rx_scan_go(p, pe, last, scan, m, ncap, bd, first, 0 - 1, acc)
+}
+
+
+
+fn __rx_scan_group(m: Int, bd: Int, i: Int) -> String = {
+  let w = prim.load64(m + 120)
+  if w != 0 then {
+    let found = __rx_wk(w, 10)
+    __rx_mark(prim.load64(found + (3 * i + 1) * 8), prim.load64(found + (3 * i + 2) * 8))
+  } else __rx_mark(prim.load64(bd + i * 16), prim.load64(bd + i * 16 + 8))
 }
 
 fn regex_scan(pat: String, s: String, first: Bool) -> List[String] = {
@@ -33596,7 +33630,7 @@ fn regex_scan(pat: String, s: String, first: Bool) -> List[String] = {
   let vm = __rx_vm(p0, pe, t0, te, bd, nslots, 0 - 1)
   let m = prim.handle(vm) + 12
   let head: List[String] = [int.to_string(ncap + 1)]
-  let r = __rx_scan_go(p0, pe, t0, t0, m, ncap, bd, first, head)
+  let r = __rx_scan_go(p0, pe, t0, t0, m, ncap, bd, first, 0 - 1, head)
   if __rx_gave_up(m) then __rx_vm_scan(p0, pe, t0, te, m, ncap, bd, first)
   else r
 }
@@ -33606,7 +33640,7 @@ fn __rx_vm_scan(p0: Int, pe: Int, t0: Int, te: Int, m: Int, ncap: Int, bd: Int, 
   let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, pe, 1)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let head: List[String] = [int.to_string(ncap + 1)]
-  __rx_scan_go(p0, pe, t0, t0, m, ncap, bd, first, head)
+  __rx_scan_go(p0, pe, t0, t0, m, ncap, bd, first, 0 - 1, head)
 }
 "#;
 pub const SRC_RESULT: &str = r#"
