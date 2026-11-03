@@ -9,8 +9,8 @@ nothing here is implicit in a Makefile comment.
 | Lane | Gate | Discipline |
 |---|---|---|
 | `.almd` formatting, whole tree | `scripts/check-fmt-gate.sh` (CI `checks` job): `spec/` + `examples/` + `tools/almide-gates/` plain (excluding deliberately invalid gauntlet cells), `stdlib/` under `--no-import-edit` (splice-context sources, so import auto-insertion is excluded; the AST-conservation verifier still guards every rewrite) | any drift is red |
-| rustc warnings | `scripts/check-rustc-warnings.sh` (CI `build` job) | shrink-only baseline, currently 0, fails both directions |
-| clippy warnings | `scripts/check-clippy-warnings.sh` (CI `build` job) | shrink-only baseline (`scripts/clippy-warnings-baseline.txt`): growth fails on PRs; a lower count is a notice there and fails in the nightly strict `clippy-baseline.yml` lane; deny-level lints (e.g. `overly_complex_bool_expr`) fail the compile itself — the first run caught a vestigial `\|\| true` in the parser's named-arg path |
+| rustc warnings | `scripts/check-rustc-warnings.sh` (CI `warning-ratchets` job, held by the required `Test shards cover every target`) | shrink-only baseline, currently 0, fails both directions |
+| clippy warnings | `scripts/check-clippy-warnings.sh` (CI `warning-ratchets` job, held by the required `Test shards cover every target`) | shrink-only baseline (`scripts/clippy-warnings-baseline.txt`): growth fails on PRs; a lower count is a notice there and fails in the nightly strict `clippy-baseline.yml` lane; deny-level lints (e.g. `overly_complex_bool_expr`) fail the compile itself — the first run caught a vestigial `\|\| true` in the parser's named-arg path |
 
 ## Narrow prose-only CI lane
 
