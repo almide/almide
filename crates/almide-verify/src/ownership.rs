@@ -370,6 +370,26 @@ pub(crate) fn check_sig_cert(witness: &[u8]) -> bool {
     params_ok && lines[modes.len()..].iter().all(|line| check_line(&guard_line(line)))
 }
 
+/// `nlines_ok` (NativeCalls.v, #4006): the lines of one native function —
+/// one per heap parameter first, each seeded with the reference its mode
+/// declares and judged under the owned-line guard, reuse-free; every further
+/// line by `check_xc`'s rule.
+pub(crate) fn native_lines_ok(modes: &[crate::nat::Nat], body: &[u8]) -> bool {
+    let lines = parse(body);
+    if lines.len() < modes.len() {
+        return false;
+    }
+    let params_ok = modes.iter().zip(&lines).all(|(m, line)| {
+        let seeded: Vec<Item> = if m.as_index() == Some(0) {
+            line.clone()
+        } else {
+            std::iter::once(Item::Op(Op::Inc)).chain(line.iter().cloned()).collect()
+        };
+        line.iter().all(item_no_reuse) && check_line(&guard_line(&seeded))
+    });
+    params_ok && lines[modes.len()..].iter().all(|line| check_line(&guard_line(line)))
+}
+
 #[cfg(test)]
 mod tests {
 
