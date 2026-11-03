@@ -245,4 +245,9 @@ fn main() -> Unit = {
   println(b2s(regex.is_full_match(regex.new("^\\S+$"), "user\u{c}name")))
   println(b2s(regex.is_full_match(regex.new("^\\S+$"), "user\u{b}name")))
   println(b2s(regex.is_full_match(regex.new("^\\S+$"), "username")))
+  // ── \r, \n and \t mean the same character inside a class as outside (#4420) ──
+  // [ \t\r\n] splits a CRLF text; [^\r] stops at the CR; [\r] is CR alone → a|b|c F|T|T ab
+  println(regex.split(regex.new("[ \\t\\r\\n]+"), "a\r\nb \tc") |> list.join("|"))
+  println("${b2s(regex.is_match(regex.new("[\\r]"), "r"))}|${b2s(regex.is_match(regex.new("[\\r]"), "\r"))}|${b2s(regex.is_match(regex.new("^[\\r]$"), "\r"))}")
+  println(ostr(regex.find(regex.new("[^\\r]+"), "ab\r\ncd")))
 }

@@ -82,13 +82,14 @@ impl<'a> Interpreter<'a> {
             "deque" => surface_deque(f, args),
             "io" => surface_io(f, args),
             "bytes" => surface_bytes(f, args),
+            "regex" => self.surface_regex(f, args),
             _ => None,
         }
     }
 
     /// A thin wrapper's one call, through the same module dispatch a
     /// fixture-spelled call of the internal name takes.
-    fn forward(&mut self, module: &str, func: &str, args: &[Value]) -> Flow {
+    pub(crate) fn forward(&mut self, module: &str, func: &str, args: &[Value]) -> Flow {
         self.dispatch_module_resolved(sym(module), sym(func), args.to_vec())
     }
 

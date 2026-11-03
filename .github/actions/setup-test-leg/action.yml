@@ -22,6 +22,10 @@ inputs:
     description: "The stock wasmtime CLI pin (bump this and nothing else — the cache key derives from it)"
     required: false
     default: "v50.0.1"
+  archive-artifact:
+    description: "Which nextest archive artifact to fetch: a shard's or a solo leg's own (only its binaries), or the full one"
+    required: false
+    default: "almide-tests-archive"
 
 runs:
   using: "composite"
@@ -43,6 +47,8 @@ runs:
         cargo nextest --version
     # The archive lands on the root volume, not the /tmp tmpfs (see the action).
     - uses: ./.github/actions/fetch-test-archive
+      with:
+        artifact: ${{ inputs.archive-artifact }}
 
     - name: Cache wasmtime tarball
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
