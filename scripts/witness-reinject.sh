@@ -10,6 +10,12 @@
 #   that never hands the argument over), the Rust mirror bypassed (the
 #   witness is the bundle's program `native-calls` witness, judged by
 #   check_native_calls_cert);
+#   native-bounds (#4006, security row 4) — an element access of the
+#   verified native render (a check recorded on another slot, ElemAddr's
+#   check dropped, a loop exit test taken against another list's length);
+#   the witness is main's `bounds` witness in the native bundle, judged by
+#   check_bounds_cert (the render has no Rust mirror of the bounds check to
+#   bypass);
 #   rc (#4277) — an RC instruction of a certified frame changed (a release
 #   dropped, doubled, made on the wrong local, inside an arm window, on the
 #   wrong slot holder, or a consuming routine that no longer consumes) while
@@ -51,7 +57,7 @@
 # anchors drill's subject: the event stays, the instruction changes, and the
 # byte-level check (#4011 (d)) is what rejects.
 #
-#   scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|anchors|rc> [name ...]   (default: every patch)
+#   scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc> [name ...]   (default: every patch)
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -63,9 +69,10 @@ case "$PROP" in
   fields) ISSUE=4279 ;;
   native) ISSUE=4006 ;;
   native-calls) ISSUE=4006 ;;
+  native-bounds) ISSUE=4006 ;;
   anchors) ISSUE=4011 ;;
   rc) ISSUE=4277 ;;
-  *) echo "usage: scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|anchors|rc> [name ...]" >&2; exit 2 ;;
+  *) echo "usage: scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc> [name ...]" >&2; exit 2 ;;
 esac
 shift
 DIR="$ROOT/proofs/fixtures/$PROP-witness/reinject"
@@ -80,7 +87,7 @@ wt=$(mktemp -d)
 trap 'git -C "$ROOT" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"' EXIT
 git -C "$ROOT" worktree add --detach -q "$wt" HEAD || exit 2
 
-if [ "$PROP" = native ] || [ "$PROP" = native-calls ]; then
+if [ "$PROP" = native ] || [ "$PROP" = native-calls ] || [ "$PROP" = native-bounds ]; then
   build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-mir --example emit_native_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify); }
 elif [ "$PROP" = anchors ] || [ "$PROP" = rc ]; then
   build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-wasm --example emit_structural_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify -p almide-anchor-check); }
@@ -100,13 +107,23 @@ while i < len(b):
     i = j + 1
     if line.startswith("witness "):
         _, prop, n, fn = line.split(" ", 3)
-        if (prop, fn) == ((sys.argv[2], "program") if len(sys.argv) > 2 else ("ownership", "main")):
+        want = {"native-calls": ("native-calls", "program"), "bounds": ("bounds", "main")}.get(sys.argv[2] if len(sys.argv) > 2 else "", ("ownership", "main"))
+        if (prop, fn) == want:
             sys.stdout.write(b[i:i + int(n)].decode())
         i += int(n) + 1
 ' "$@"
 }
 # verdict <name>: almide-verify's exit on the reproduction's $PROP witness.
 verdict() {
+  if [ "$PROP" = native-bounds ]; then
+    if ! "$TARGET/debug/examples/emit_native_bundle" "$DIR/$1.almd" "$wt/native.rs" > "$wt/native.bundle" 2> "$wt/producer.err"; then
+      echo "producer-failed"; return
+    fi
+    main_witness "$wt/native.bundle" bounds > "$wt/witness.w"
+    "$TARGET/debug/almide-verify" bounds "$wt/witness.w" > /dev/null 2>&1
+    echo "$?"
+    return
+  fi
   if [ "$PROP" = native-calls ]; then
     if ! "$TARGET/debug/examples/emit_native_bundle" "$DIR/$1.almd" "$wt/native.rs" > "$wt/native.bundle" 2> "$wt/producer.err"; then
       echo "producer-failed"; return

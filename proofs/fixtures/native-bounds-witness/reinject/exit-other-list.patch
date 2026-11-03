@@ -1,0 +1,25 @@
+diff --git a/crates/almide-mir/src/render_native_bounds.rs b/crates/almide-mir/src/render_native_bounds.rs
+index 70baf1c56..7659f8447 100644
+--- a/crates/almide-mir/src/render_native_bounds.rs
++++ b/crates/almide-mir/src/render_native_bounds.rs
+@@ -67,7 +67,8 @@ pub(crate) fn begin(func: &MirFunction) {
+ pub(crate) fn exit_covered(s: Slot) -> bool {
+     REC.with(|r| {
+         let r = r.borrow();
+-        r.exits.iter().any(|(t, x, last)| *x == s && *t < r.op && r.op <= *last)
++        // RE-INJECTED (#4006 row 4 drill): a test of any list covers the slot.
++        r.exits.iter().any(|(t, x, last)| x.idx == s.idx && x.k == s.k && *t < r.op && r.op <= *last)
+     })
+ }
+ 
+@@ -166,7 +167,9 @@ fn exit_tests(func: &MirFunction) -> Vec<(usize, Slot, usize)> {
+                     _ => d,
+                 }) == 0;
+                 let Some(&(i, n)) = lt.get(cond) else { continue };
+-                let Some(&base) = len_of.get(&n) else { continue };
++                // RE-INJECTED (#4006 row 4 drill): the first length read stands for the test's list.
++                let Some(&base) = len_of.values().next() else { continue };
++                let _ = len_of.get(&n);
+                 if !direct || !counter(i) || rebound.contains_key(&base) {
+                     continue;
+                 }
