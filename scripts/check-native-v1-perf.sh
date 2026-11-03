@@ -12,7 +12,8 @@
 # curated shape benches in research/benchmark/perf/v1-shapes/, is built twice —
 # `almide build` (v1 when the program renders certified) and
 # `almide build --no-verified` (v0) — and both binaries run under
-# `valgrind --tool=cachegrind --cache-sim=no`. The gated number is the ratio of
+# `valgrind --tool=cachegrind --fair-sched=yes --cache-sim=no` (round-robin
+# threads, so a fan program's waits count the same on every run). The gated number is the ratio of
 # their total instruction counts (I refs): deterministic, and the same on any
 # runner (GitHub and GCE e2 machines expose no PMU, so `perf stat` cannot count
 # there). A program whose v0 run is under NATIVE_V1_PERF_MIN_IR instructions is
@@ -55,7 +56,7 @@ command -v valgrind >/dev/null || { echo "native-v1-perf: valgrind is not instal
 [ -x "$ALMIDE" ] || { echo "native-v1-perf: no compiler at $ALMIDE"; exit 2; }
 
 ir() {
-  timeout 900 valgrind --tool=cachegrind --cache-sim=no --cachegrind-out-file=/dev/null "$1" </dev/null 2>&1 >/dev/null \
+  timeout 900 valgrind --tool=cachegrind --fair-sched=yes --cache-sim=no --cachegrind-out-file=/dev/null "$1" </dev/null 2>&1 >/dev/null \
     | awk '/I *refs:/ { gsub(",", "", $NF); print $NF }'
 }
 best_time() { # min wall seconds of one run of $1, over the caller's loop
