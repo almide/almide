@@ -808,6 +808,7 @@
 11471	spec/wasm_cross/stdlib_call_temporaries_release.almd
 27471	spec/wasm_cross/stdlib_manufactured_nan_sign.almd
 34806	spec/wasm_cross/stdlib_opaque_shadow.almd
+49090	spec/wasm_cross/stdlib_type_eq.almd
 76049	spec/wasm_cross/stdlib_type_shadow.almd
 3397	spec/wasm_cross/str_result_heap_bind.almd
 4477	spec/wasm_cross/string_bidi_controls_literal.almd
