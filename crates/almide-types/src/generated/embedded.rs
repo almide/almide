@@ -32970,7 +32970,11 @@ else {
     else {
       let e = prim.load8(p + 1)
       let next = p + 1 + __rx_w(p + 1)
-      if e == 100 or e == 119 or e == 115 or e == 110 or e == 116 or e == 114 then __rx_ck_class(ck, next, pe)
+      if e == 100 or e == 119 or e == 115 or e == 110 or e == 116 or e == 114 then __rx_ck_class(
+        ck,
+        next,
+        pe,
+      )
       else if __rx_is_alnum(e) then {
         let _0 = __rx_ckset(ck, 2, p + 1)
         __rx_ckerr(ck, 10)
@@ -33520,7 +33524,8 @@ fn regex_index_of(pat: String, s: String) -> Int = {
 fn __rx_scan_go(p: Int, pe: Int, last: Int, scan: Int, m: Int, ncap: Int, bd: Int, first: Bool, k: Int, acc: List[String]) -> List[String] = {
   let te = __rx_te(m)
   if k == 0 - 1 then {
-    let st = if scan > te then 0 - 1 else __rx_find_start(p, pe, scan, m)
+    let st = if scan > te then 0 - 1
+    else __rx_find_start(p, pe, scan, m)
     if st < 0 then acc + [__rx_sub(last, te)]
     else __rx_scan_go(p, pe, st, scan, m, ncap, bd, first, 0 - 2, acc + [__rx_sub(last, st)])
   } else if k == 0 - 2 then {
@@ -33528,7 +33533,20 @@ fn __rx_scan_go(p: Int, pe: Int, last: Int, scan: Int, m: Int, ncap: Int, bd: In
     let nxt = if en > last then en
     else if en >= te then te + 1 else en + __rx_w(en)
     __rx_scan_go(p, pe, en, nxt, m, ncap, bd, first, 0, acc + [__rx_mark(last, en)])
-  } else if k < ncap then __rx_scan_go(p, pe, last, scan, m, ncap, bd, first, k + 1, acc + [__rx_scan_group(m, bd, k)])
+  } else if k < ncap then __rx_scan_go(
+    p,
+    pe,
+    last,
+    scan,
+    m,
+    ncap,
+    bd,
+    first,
+    k + 1,
+    acc + [
+      __rx_scan_group(m, bd, k)
+    ],
+  )
   else if first then acc + [__rx_sub(last, te)]
   else __rx_scan_go(p, pe, last, scan, m, ncap, bd, first, 0 - 1, acc)
 }
