@@ -140,7 +140,7 @@ impl Emitter<'_> {
                 i.call(F_FS_CALL);
                 let _ = i;
                 self.release_i64();
-                Ok(Some(Lowered::owned(self.frames_to_string_list(false)?)))
+                Ok(Some(Lowered::owned(self.frames_to_string_list(false, crate::host_text::HostText::Trusted)?)))
             }
             _ => Ok(None),
         }
