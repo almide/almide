@@ -124,8 +124,8 @@ jobs:
     #
     # MATRIX jobs are the exception: a job-level `if` skips the job BEFORE the
     # matrix expands, so the one skipped check-run is named with the literal
-    # `${{ matrix.shard }}` and the required contexts `Test Rust (shard 1/4)`…
-    # `(shard 4/4)` never receive a run — the first docs-only PR (#1609) sat
+    # `${{ matrix.shard }}` and the required contexts `Test Rust (shard 1/6)`…
+    # `(shard 6/6)` never receive a run — the first docs-only PR (#1609) sat
     # BLOCKED on exactly that. test-rust therefore keeps its job-level guard
     # OFF and guards every STEP instead (`if: env.DOCS_ONLY != 'true'`): the
     # four shards expand, each finishes in seconds, each reports success under
@@ -445,7 +445,7 @@ jobs:
       - name: Pack the per-shard and per-solo-leg archives
         if: env.PROSE_LANE != 'true'
         run: |
-          bash scripts/ci-test-shard.sh --pack-archives "$RUNNER_TEMP/almide-pack" 4
+          bash scripts/ci-test-shard.sh --pack-archives "$RUNNER_TEMP/almide-pack" 6
           cp "$RUNNER_TEMP/almide-pack/all-rows.tsv" "$RUNNER_TEMP/almide-pack/rows/"
           df -h "$RUNNER_TEMP"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -480,6 +480,20 @@ jobs:
         with:
           name: almide-tests-shard-4
           path: ${{ runner.temp }}/almide-pack/shard-4/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-shard-5
+          path: ${{ runner.temp }}/almide-pack/shard-5/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-shard-6
+          path: ${{ runner.temp }}/almide-pack/shard-6/
           retention-days: 1
           compression-level: 0
       # One artifact per solo leg (keep in step with SOLO_LEGS in
@@ -647,8 +661,8 @@ jobs:
             exit 1
           fi
           : > /tmp/union.txt
-          for i in 1 2 3 4; do
-            [ -s "$R/shard-$i.tsv" ] || { echo "SHARD GATE FAIL: shard $i/4 has no rows file" >&2; exit 1; }
+          for i in 1 2 3 4 5 6; do
+            [ -s "$R/shard-$i.tsv" ] || { echo "SHARD GATE FAIL: shard $i/6 has no rows file" >&2; exit 1; }
             cat "$R/shard-$i.tsv" >> /tmp/union.txt
           done
           bash scripts/ci-test-shard.sh --list-solo-rows /tmp/all.txt | tee /tmp/solo.txt >> /tmp/union.txt
@@ -713,12 +727,12 @@ jobs:
         run: bash scripts/ci-corpus-shards.sh --merge /tmp/corpus-shard 2 "$TEST_ARCHIVE_FILE"
       - name: Balance report (informational — imbalance costs time, not coverage)
         run: |
-          for i in 0 1 2 3; do
-            printf '  shard %s/4: %s target(s)\n' "$((i + 1))" "$(grep -c . "$RUNNER_TEMP/almide-shard-rows/shard-$((i + 1)).tsv")"
+          for i in 0 1 2 3 4 5; do
+            printf '  shard %s/6: %s target(s)\n' "$((i + 1))" "$(grep -c . "$RUNNER_TEMP/almide-shard-rows/shard-$((i + 1)).tsv")"
           done
 
   test-rust:
-    # SHARDED (4 ways). The suite's 30 minutes are TEST EXECUTION, not
+    # SHARDED (6 ways). The suite's 30 minutes are TEST EXECUTION, not
     # compilation — 29 of them are `finished in` time — so caching cannot touch
     # it, and neither can a bigger runner: nearly every test shells out to
     # `almide`, and each `almide` compile takes a GLOBAL exclusive flock on the
@@ -726,19 +740,21 @@ jobs:
     # suite inside one machine. Separate JOBS each get their own build dir and
     # therefore their own lock — that is where the parallelism comes from.
     #
-    # 4, not more: the load is extremely skewed (the top 4 targets are half the
-    # total), so past 4 shards the longest single target IS the floor and extra
-    # jobs buy nothing. The former giant, `wasm_runtime_test` (1552 s on run
+    # 6 since 2026-11-03 (was 4): the giants left (solo legs, below), the
+    # per-shard archive cut a shard's fixed setup to ~1 min, and at the ci-test
+    # profile's opt-level 1 the four shards' test time was 6–9 min each with a
+    # single-target floor of ~5 min (shape_matrix), so two more runners still
+    # shorten the slowest shard. The former giant, `wasm_runtime_test` (1552 s on run
     # 33695667642), is split into per-gate `wasm_runtime_*` binaries so the
     # packer can spread it. #2381: the five corpus sweeps that are each ONE
     # 18–35-minute test (`wasm_runtime_{cross_target,interp_oracle,opt_parity,
     # interp_ledger}`, `almide-spine::run_parity`) are no longer partitioned
     # at all — `test-rust-solo` below gives each its own runner — so these
-    # four shards carry the ~6.5 ks of everything else, ~1.6 ks each.
-    name: Test Rust (shard ${{ matrix.shard }}/4)
+    # shards carry everything else.
+    name: Test Rust (shard ${{ matrix.shard }}/6)
     needs: [changes, build, build-tests]
     # No job-level docs-only guard here — see the `changes` job: a skipped
-    # MATRIX job never expands, so the required `Test Rust (shard N/4)`
+    # MATRIX job never expands, so the required `Test Rust (shard N/6)`
     # contexts would stay Expected. Every step is guarded instead; on a
     # docs-only change the four shards expand, run nothing, and report
     # success under their real names in seconds.
@@ -752,11 +768,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 1-based for the job NAME (`Test Rust (shard 1/4)` … `(shard 4/4)`,
+        # 1-based for the job NAME (`Test Rust (shard 1/6)` … `(shard 6/6)`,
         # the required contexts); the packer in scripts/ci-test-shard.sh keeps
         # its 0-based index, handed `shard - 1` below. Renaming these changes
         # the branch-protection contexts — swap them in the same landing.
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.DOCS_ONLY != 'true'
@@ -820,7 +836,7 @@ jobs:
         # and runs this shard's share. `shard-coverage` below proves the four
         # shards' union is the whole set, so a partition bug reads as a RED
         # build rather than a fast green one.
-        run: SHARD_LABEL="shard ${{ matrix.shard }}/4" bash scripts/ci-test-shard.sh --run-rows "$(dirname "$TEST_ARCHIVE_FILE")/rows.tsv" "$TEST_ARCHIVE_FILE"
+        run: SHARD_LABEL="shard ${{ matrix.shard }}/6" bash scripts/ci-test-shard.sh --run-rows "$(dirname "$TEST_ARCHIVE_FILE")/rows.tsv" "$TEST_ARCHIVE_FILE"
 
   test-rust-solo:
     # The corpus giants, one runner each (#2381). Five test targets are each
