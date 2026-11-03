@@ -12,7 +12,7 @@ fn run(n: Int) -> Int = {
   var ys = [1, 2]
   var i = 0
   while i < n {
-    ys = grow(ys + [0])
+    ys = grow(ys)
     i = i + 1
   }
   list.len(ys)
