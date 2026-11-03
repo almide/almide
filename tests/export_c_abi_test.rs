@@ -175,7 +175,13 @@ fn the_matrix_builds_as_a_cdylib_and_spells_the_table_types() {
     ] {
         assert!(rust.contains(want), "no `{want}` in the emitted Rust");
     }
-    assert!(!rust.contains(") as i32"), "a wrapper still narrows its return with `as i32`");
+    // Each `#[export_name]` wrapper, up to its closing brace: none narrows
+    // a value with `as i32` (the old catch-all), and every export has one.
+    let wrappers: Vec<&str> = rust.split("#[export_name").skip(1).map(|w| w.split("\n}\n").next().unwrap_or(w)).collect();
+    assert_eq!(wrappers.len(), ROWS.len() * 2 + 4, "one C wrapper per export");
+    for w in &wrappers {
+        assert!(!w.contains("as i32"), "a wrapper still narrows with `as i32`:\n{w}");
+    }
 }
 
 /// C-452: an effect export's err has no C form. The message goes to stderr
