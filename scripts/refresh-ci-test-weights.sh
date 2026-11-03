@@ -150,8 +150,11 @@ if not rows:
     print("FAIL: no measured targets at or above 5s — wrong logs?", file=sys.stderr)
     sys.exit(1)
 
-path = "scripts/ci-test-weights.txt"
-with open(path) as fh:
+# WEIGHTS_OUT=scripts/ci-test-weights-slice.txt refreshes the CI-slice
+# profile (measure it from a PR-into-develop run; ci-test-shard.sh reads it
+# when ALMIDE_CI_SLICE > 1). A new file takes the full profile's header.
+path = os.environ.get("WEIGHTS_OUT", "scripts/ci-test-weights.txt")
+with open(path if os.path.exists(path) else "scripts/ci-test-weights.txt") as fh:
     head = []
     for line in fh:
         if line.startswith("#"):
