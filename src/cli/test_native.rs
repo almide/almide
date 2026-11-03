@@ -45,10 +45,13 @@ pub(crate) struct NativeTestBin {
 /// package root (and with it the `native/` tree).
 type Context = (Vec<crate::project::NativeDep>, Option<PathBuf>);
 
+/// One test file and its built binary, or why it did not build.
+pub(super) type BuiltFile = (String, Result<NativeTestBin, String>);
+
 /// Check every file in parallel, then build: one program per package
 /// context, a crate of its own for a file alone in its context and for each
 /// file of a program that did not build. Results in `files` order.
-pub(super) fn compile_native_tests(files: &[String], no_check: bool, scratch: &Arc<TestScratch>) -> Vec<(String, Result<NativeTestBin, String>)> {
+pub(super) fn compile_native_tests(files: &[String], no_check: bool, scratch: &Arc<TestScratch>) -> Vec<BuiltFile> {
     if no_check {
         // `--no-check` skips the very judgement the one program relies on.
         return build_per_file(files.to_vec(), true, false, scratch);
@@ -68,7 +71,7 @@ pub(super) fn compile_native_tests(files: &[String], no_check: bool, scratch: &A
     t.lap("per-file check");
 
     let mut groups: Vec<(String, Context, Vec<String>)> = Vec::new();
-    let mut results: Vec<(String, Result<NativeTestBin, String>)> = Vec::new();
+    let mut results: Vec<BuiltFile> = Vec::new();
     for (file, verdict) in checked {
         match verdict {
             Ok(context) => {
@@ -120,7 +123,7 @@ pub(super) fn compile_native_tests(files: &[String], no_check: bool, scratch: &A
 
 /// The per-file route: each file compiled and built as its own crate, in
 /// parallel. `quiet` when the file's diagnostics were already printed.
-fn build_per_file(files: Vec<String>, no_check: bool, quiet: bool, scratch: &Arc<TestScratch>) -> Vec<(String, Result<NativeTestBin, String>)> {
+fn build_per_file(files: Vec<String>, no_check: bool, quiet: bool, scratch: &Arc<TestScratch>) -> Vec<BuiltFile> {
     if files.is_empty() {
         return Vec::new();
     }
@@ -166,7 +169,7 @@ fn run_batch(
     context: &Context,
     batch: Vec<crate::compile_driver::PlannedTestFile>,
     scratch: &TestScratch,
-) -> (Vec<(String, Result<NativeTestBin, String>)>, Vec<String>) {
+) -> (Vec<BuiltFile>, Vec<String>) {
     let mut built = Vec::new();
     let mut alone = Vec::new();
     // An unattributed failure splits the batch, twice at most: past that
@@ -279,7 +282,7 @@ fn build_one_program(
     files: &[String],
     program: crate::compile_driver::TestRunProgram,
     scratch: &TestScratch,
-) -> Result<Vec<(String, Result<NativeTestBin, String>)>, String> {
+) -> Result<Vec<BuiltFile>, String> {
     let source = NativeSource {
         rs_code: super::build::inject_fs_scope(super::build::arm_alloc_count(program.rs_code)),
         native_deps,

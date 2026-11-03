@@ -443,15 +443,13 @@ pub fn synthesize_test_run_main(
             m.functions.retain(|f| !f.is_test || runs_test(f, Some(pattern)));
         }
         let mut stmts = Vec::new();
-        let mut idx = 0usize;
         let mut selected = 0usize;
         let module = m.name;
         let has_dispatch = m.functions.iter().any(|f| f.name.as_str() == almide_ir::ABORT_DISPATCH_FN);
-        for f in m.functions.iter_mut().filter(|f| f.is_test) {
+        for (idx, f) in m.functions.iter_mut().filter(|f| f.is_test).enumerate() {
             let display = f.display_name().to_string();
             let mangled = format!("__almd_test_{idx}");
-            idx += 1;
-            selected += 1;
+            selected = idx + 1;
             f.name = sym(&mangled);
             f.is_test = false;
             stmts.extend(reinit.iter().filter(|(name, _)| file.reached.contains(name) || *name == module).map(|(_, s)| s.clone()));
