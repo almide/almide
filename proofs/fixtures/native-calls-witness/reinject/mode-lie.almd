@@ -1,0 +1,17 @@
+// #4006 class P reinjection drill (scripts/witness-reinject.sh native-calls):
+// MODE LIE: `keep` claims its list as a move param while every caller keeps
+// borrowing it. Unpatched, `keep` takes its list over (a move param); `grow` hands its list to it at
+// every call.
+fn keep(xs: List[Int]) -> List[Int] = xs
+
+fn grow(n: Int) -> List[Int] = {
+  var xs = [1, 2]
+  var i = 0
+  while i < n {
+    xs = keep(xs + [i])
+    i = i + 1
+  }
+  xs
+}
+
+fn main() -> Unit = println(int.to_string(list.len(grow(3))))

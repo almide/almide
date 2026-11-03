@@ -1,0 +1,43 @@
+diff --git a/crates/almide-mir/src/native_move_params.rs b/crates/almide-mir/src/native_move_params.rs
+index 6586cffa1..028ce0861 100644
+--- a/crates/almide-mir/src/native_move_params.rs
++++ b/crates/almide-mir/src/native_move_params.rs
+@@ -202,10 +202,8 @@ fn move_at_sites(func: &MirFunction, owned: &BTreeMap<String, Vec<bool>>) -> Mir
+                 }
+             }
+         }
+-        for (n, v) in consumes.into_iter().enumerate() {
+-            f.ops.insert(call + 1 + n, Op::Consume { v });
+-            f.call_moves.insert(call + 1 + n);
+-        }
++        // RE-INJECTED (#4006 class P drill): the argument's release goes, its hand-over is never written.
++        let _ = consumes;
+         i = call + 1;
+     }
+     f
+@@ -259,9 +257,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
+     }
+     for f in next.iter_mut() {
+         let moved = move_at_sites(f, &owned);
+-        if crate::verify_ownership(&moved).is_err() {
+-            return;
+-        }
++        // RE-INJECTED (#4006 class P drill): the Rust mirror is bypassed.
+         *f = moved;
+     }
+     functions.clone_from_slice(&next);
+diff --git a/crates/almide-mir/src/render_native.rs b/crates/almide-mir/src/render_native.rs
+index 2fd446586..1d39ae3ef 100644
+--- a/crates/almide-mir/src/render_native.rs
++++ b/crates/almide-mir/src/render_native.rs
+@@ -195,6 +195,10 @@ use crate::render_native_shims::{
+ /// Drops from — the certificate that scope-end drop realizes it. A violation is
+ /// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
+ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
++    // RE-INJECTED (#4006 drill): the Rust mirror is bypassed.
++    if !func.name.is_empty() {
++        return Ok(());
++    }
+     let Err(violations) = crate::verify_ownership(func) else {
+         return Ok(());
+     };
