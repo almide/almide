@@ -87,14 +87,63 @@ fn movable_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Vec<(usi
     out
 }
 
+/// The parameters of `func` its body consumes (P step 2): every op naming the
+/// param sits at the top level of the body, and the last one is a
+/// concatenation with the param on its left — the list or string the body
+/// grows (`list.push(ys, x)` on a `mut` param lowers to `ys + [x]`). Taken
+/// over, the param is released right after that concatenation, so the
+/// render grows the caller's own buffer in place (`last_use`) instead of
+/// copying it into a new one. Returns (param index, the concatenation's op index).
+fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Vec<(usize, usize)> {
+    let depth = depths(func);
+    let mut out = Vec::new();
+    for (k, p) in func.params.iter().enumerate() {
+        if !p.repr.is_heap() || !takes(k) {
+            continue;
+        }
+        let named: Vec<usize> =
+            func.ops.iter().enumerate().filter(|(_, op)| values(op).contains(&p.value)).map(|(i, _)| i).collect();
+        let Some(&last) = named.last() else { continue };
+        let at_top = named.iter().all(|&i| depth[i] == 0);
+        let grows = matches!(&func.ops[last], Op::CallFn { name, args, .. }
+            if (name == "__list_concat" || name == "__str_concat")
+                && matches!(args.first(), Some(crate::CallArg::Handle(v)) if *v == p.value)
+                && values(&func.ops[last]).iter().filter(|x| **x == p.value).count() == 1);
+        let plain = named.iter().all(|&i| !matches!(func.ops[i], Op::Dup { .. } | Op::SetLocal { .. }));
+        let early_exit = func.ops[..last].iter().any(|op| matches!(op, Op::Return { .. }));
+        if at_top && grows && plain && !early_exit && func.ret != Some(p.value) {
+            out.push((k, last));
+        }
+    }
+    out
+}
+
 /// Make the movable parameters of `func` move parameters, if the ownership
 /// mirror accepts the result.
 fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Option<MirFunction> {
     let movable = movable_params(func, takes);
-    if movable.is_empty() {
+    let consumed: Vec<(usize, usize)> = consumed_params(func, takes)
+        .into_iter()
+        .filter(|(k, _)| !movable.iter().any(|m| m.0 == *k))
+        .collect();
+    if movable.is_empty() && consumed.is_empty() {
         return None;
     }
     let mut f = func.clone();
+    // The consumed params' releases, right after each last use, inserted
+    // latest first so the earlier indices stay put.
+    let mut releases: Vec<(usize, crate::ValueId)> =
+        consumed.iter().map(|&(k, at)| (at, func.params[k].value)).collect();
+    releases.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    for &(at, p) in &releases {
+        f.ops.insert(at + 1, Op::Drop { v: p });
+        f.owned_params.insert(p);
+    }
+    // A movable param's Dup index shifts by the releases inserted before it.
+    let movable: Vec<(usize, usize)> = movable
+        .into_iter()
+        .map(|(k, at)| (k, at + releases.iter().filter(|(r, _)| *r < at).count()))
+        .collect();
     for &(k, at) in &movable {
         let Op::Dup { dst, .. } = f.ops[at] else { unreachable!("a movable param's Dup") };
         f.params[k].value = dst;
@@ -114,6 +163,18 @@ fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Option<MirFu
 fn release_after(func: &MirFunction, call: usize, v: ValueId, depth: &[i32]) -> Option<usize> {
     let ops = &func.ops;
     if values(&ops[call]).iter().filter(|x| **x == v).count() != 1 {
+        return None;
+    }
+    // A slot rebound to a copy (`v = Dup(..)`): its line acquires the new
+    // value by an alias, which after a move-out reads as a resurrection under
+    // the owned-line guard. Such a slot is copied for the call instead.
+    let alias_fed = ops.iter().any(|op| match op {
+        Op::SetLocal { local, src } if *local == v => {
+            ops.iter().any(|d| matches!(d, Op::Dup { dst, .. } if dst == src))
+        }
+        _ => false,
+    });
+    if alias_fed {
         return None;
     }
     // Values read off `v` before the call (an address, a loaded child).
