@@ -14,14 +14,15 @@
 //!   attempt per start position, so the walk's per-attempt work shows;
 //! - `is_match` on a 2-byte subject: one or two attempts, so the per-call work
 //!   (the check, the machine block) shows.
+//!
 //! Measured (fuel a call): find_all 92,000 at 0.69.0-rc2, 5,077 now, against
 //! about 84,000 for 0.68.0-rc2's engine (no check, no budget; from the #4399
 //! program's total); is_match 8,024 at 0.69.0-rc2, 4,153 now, against about
 //! 4,600. The is_match line is 0.68.0-rc2's cost, the regression's own
 //! definition. The find_all line keeps the per-call search work found once (the
 //! first top-level alternative's end, the byte every match starts with) from
-//! sliding back to a rescan per start position. Both are printed as RATCHET
-//! lines.
+//! sliding back to a rescan per start position. A failure prints the measured
+//! value.
 
 fn probe(call: &str, subject: &str, k: u32) -> String {
     format!(
@@ -74,7 +75,6 @@ fn per_call(call: &str, subject: &str) -> (f64, i64) {
 fn regex_find_all_costs_no_more_per_attempt_than_before_the_check() {
     let (fuel, hits) = per_call("list.len(regex.find_all(r, s))", "line");
     assert_eq!(hits, 0, "find_all found a match the line does not have");
-    println!("RATCHET regex.find_all (64-byte line, no match) fuel per call: {fuel:.0}");
     assert!(fuel > 500.0, "find_all cost {fuel:.0} fuel a call — too little to gate on");
     assert!(
         fuel <= 8_000.0,
@@ -88,7 +88,6 @@ fn regex_find_all_costs_no_more_per_attempt_than_before_the_check() {
 fn regex_is_match_on_a_short_subject_costs_no_more_than_before_the_check() {
     let (fuel, hits) = per_call("if regex.is_match(r, s) then 1 else 0", "short");
     assert_eq!(hits, 0, "is_match found a match \"k3\" does not have");
-    println!("RATCHET regex.is_match (2-byte subject) fuel per call: {fuel:.0}");
     assert!(fuel > 100.0, "is_match cost {fuel:.0} fuel a call — too little to gate on");
     assert!(
         fuel <= 4_600.0,
