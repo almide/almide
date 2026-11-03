@@ -263,7 +263,8 @@ scoped-borrow alternative below).
   taken: a pure Region read (a host fill stays an effect) and a memory accessor in the
   `--host js` glue (it would serve JS hosts only).
 - There is no C header generator. A2's prototypes are written by hand:
-  `int32_t f(const uint8_t *buf, size_t buf_len)`, and `uint8_t *` for an `out` parameter.
+  `int64_t f(const uint8_t *buf, size_t buf_len)` for an `Int` return (an `int32_t` until
+  dialect epoch 15, #4447), and `uint8_t *` for an `out` parameter.
 
 Evidence: crates/almide-wasm/tests/ffi_host_boundary.rs (A1, A4 push and pull on wasm,
 driven by wasmtime), tests/ffi_host_boundary_test.rs (A2 on native: read-only and `out`

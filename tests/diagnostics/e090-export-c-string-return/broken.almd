@@ -1,0 +1,4 @@
+@export(c, "label")
+effect fn label(n: Int) -> String = "item ${n}"
+
+effect fn main() -> Unit = println(label(3)!)

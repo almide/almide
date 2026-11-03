@@ -5943,3 +5943,17 @@ evidence  = [
   { path = "crates/almide-wasm/tests/effect_export_scalar.rs", name = "an_err_traps_with_its_message", class = "fixture" },
   { path = "tests/effect_export_scalar_raw_test.rs", name = "the_wasmtime_cli_reads_a_scalar_effect_export_as_its_value", class = "fixture" },
 ]
+[[contract]]
+id        = "C-452"
+spec      = "ALS-D7"
+title     = "An @export(c) fn crosses C at the C ABI table's widths, Int as int64_t; an effect fn answers its ok value, and an err writes its message to stderr and exits 1"
+statement = "ALS-D7 (almide/almide#4447, #4448): on the native target an `@export(c, \"sym\")` fn is a C symbol whose parameters and return follow one table, the one `@extern(c)` reads: `Int` crosses as `int64_t`, all 64 bits both ways, never narrowed; `Int8`..`Int64` and `UInt8`..`UInt64` at their own width; `Float` and `Float64` as `double`; `Float32` as `float`; `Bool` as an `int`, nonzero read as true coming in and 1 or 0 going out; `Handle` as a pointer, the same pointer coming back; `Unit` as `void`; and a `Region` parameter as the caller's `(const uint8_t*, size_t)`, lent for the call. An `effect fn` answers its ok value itself in its declared return's C type, never a Result. An `err` has no slot in a C result: the export writes the error's message and a newline to stderr and exits the process with code 1 before the caller regains control, the native counterpart of C-451's wasm trap. A parameter or return outside the table — a `String` parameter (a C `const char*` carries no length and no owner), a `String`, `Bytes`, list, map, set, record, variant, tuple, fn, `Option` or `Result` parameter or return, a `Region` return, a `mut` parameter — is refused at check time with E090 naming the fn and the type, and never compiles into an `extern \"C\"` fn. NOT covered: `@export(wasm)` (C-451 and C-446), a panic or arithmetic abort inside the exported fn (ALS-R1 and ALS-T6 govern those), and a caller that passes a value of a different C type than the table's (no compiler sees the caller's prototype)."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/native_only/export_c_scalar_abi.almd", class = "fixture" },
+  { path = "tests/export_c_abi_test.rs", name = "the_c452_fixture_round_trips_its_exports_and_exits_1_on_err", class = "fixture" },
+  { path = "tests/export_c_abi_test.rs", name = "every_export_c_row_crosses_at_its_c_type_as_fn_and_effect_fn", class = "fixture" },
+  { path = "tests/export_c_abi_test.rs", name = "an_effect_export_err_writes_its_message_and_exits_1", class = "fixture" },
+  { path = "tests/export_c_abi_test.rs", name = "export_c_types_without_a_c_form_are_e090", class = "fixture" },
+]

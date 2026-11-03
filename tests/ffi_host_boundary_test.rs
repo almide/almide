@@ -92,37 +92,40 @@ effect fn main() -> Unit = {
 
 const HOST: &str = r#"#![allow(dead_code, unused_imports, clippy::missing_safety_doc)]
 
+// An Almide `Int` crosses C as `int64_t` (dialect epoch 15, #4447), in both
+// directions: the exports' `Int` parameters and returns, and the `@extern(c)`
+// fns' returns below.
 extern "C" {
-    fn ffb_sum(p: *const u8, n: usize) -> i32;
-    fn ffb_probe(p: *const u8, n: usize) -> i32;
-    fn ffb_fill(p: *mut u8, n: usize, byte: i32) -> i32;
+    fn ffb_sum(p: *const u8, n: usize) -> i64;
+    fn ffb_probe(p: *const u8, n: usize) -> i64;
+    fn ffb_fill(p: *mut u8, n: usize, byte: i64) -> i64;
 }
 
 #[no_mangle]
-pub extern "C" fn cf_sum() -> i32 {
+pub extern "C" fn cf_sum() -> i64 {
     let v = [1u8, 2, 3, 4];
     unsafe { ffb_sum(v.as_ptr(), v.len()) }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn cf_sum_buf(p: *const u8, n: usize) -> i32 {
-    (0..n).map(|i| unsafe { *p.add(i) } as i32).sum()
+pub unsafe extern "C" fn cf_sum_buf(p: *const u8, n: usize) -> i64 {
+    (0..n).map(|i| unsafe { *p.add(i) } as i64).sum()
 }
 
 #[no_mangle]
-pub extern "C" fn cf_probe() -> i32 {
+pub extern "C" fn cf_probe() -> i64 {
     let v = [5u8, 6];
     let r = unsafe { ffb_probe(v.as_ptr(), v.len()) };
     // A read-only lend changed nothing.
-    r * 1000 + v[0] as i32
+    r * 1000 + v[0] as i64
 }
 
 #[no_mangle]
-pub extern "C" fn cf_fill() -> i32 {
+pub extern "C" fn cf_fill() -> i64 {
     // The callee is told 3 of the 4 bytes: the 4th must stay 0.
     let mut v = [0u8; 4];
     let r = unsafe { ffb_fill(v.as_mut_ptr(), 3, 20) };
-    r * 1000 + v[0] as i32 * 100 + v[1] as i32 + v[2] as i32 + v[3] as i32 * 10000
+    r * 1000 + v[0] as i64 * 100 + v[1] as i64 + v[2] as i64 + v[3] as i64 * 10000
 }
 "#;
 
@@ -168,9 +171,9 @@ effect fn main() -> Unit = {
 }
 "#;
     let host = r#"#![allow(dead_code, unused_imports, clippy::missing_safety_doc)]
-extern "C" { fn ffb_keep(p: *const u8, n: usize) -> i32; }
+extern "C" { fn ffb_keep(p: *const u8, n: usize) -> i64; }
 #[no_mangle]
-pub extern "C" fn cf_keep() -> i32 { let v = [1u8, 2, 3]; unsafe { ffb_keep(v.as_ptr(), v.len()) } }
+pub extern "C" fn cf_keep() -> i64 { let v = [1u8, 2, 3]; unsafe { ffb_keep(v.as_ptr(), v.len()) } }
 "#;
     let (ok, stdout, stderr) = run_package("escape", almd, host, &["run"]);
     assert!(!ok, "a lent Region outlived its call and the program carried on\n{stdout}");
