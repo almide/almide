@@ -98,12 +98,28 @@ ROWS
 fi
 
 rc=0
+# The three generators write disjoint files, so they run side by side (one
+# after another they were 6.9 min of the Almide gates job on develop run
+# 41595889646). Each one's output is printed whole, in the fixed order, after
+# all three finished.
+logs="$(mktemp -d)"
+pids=()
 for gen in gen-ast-manifest gen-check-manifest gen-run-manifest; do
-  if ! bash "scripts/$gen.sh"; then
+  bash "scripts/$gen.sh" > "$logs/$gen.log" 2>&1 &
+  pids+=("$!")
+done
+i=0
+for gen in gen-ast-manifest gen-check-manifest gen-run-manifest; do
+  if ! wait "${pids[$i]}"; then
+    cat "$logs/$gen.log"
     echo "::error::scripts/$gen.sh failed"
     rc=1
+  else
+    cat "$logs/$gen.log"
   fi
+  i=$((i + 1))
 done
+rm -rf "$logs"
 
 if ! git diff --exit-code -I '^# oracle: ' -- $GOLDENS; then
   echo "::error::parity goldens differ from what the CLI built from this tree produces (diff above; the regenerated files are left in place)."
