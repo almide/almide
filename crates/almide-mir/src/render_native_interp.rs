@@ -221,3 +221,53 @@ fn fmt_parts(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy
     let args = if args.is_empty() { String::new() } else { format!(", {}", args.join(", ")) };
     Some((template, args))
 }
+
+/// A number or Bool rendered to a string only to be printed (#4006,
+/// no-perf-loss): `println(int.to_string(n))`. The print formats the scalar
+/// itself, as the standard codegen does, and the string is never built.
+/// Returns the definitions that render nothing and, per print op, the
+/// scalar and whether it is a Bool.
+pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<usize, (ValueId, bool)>) {
+    let ops = &func.ops;
+    let mut occurs: BTreeMap<ValueId, Vec<usize>> = BTreeMap::new();
+    let mut vals = Vec::new();
+    for (i, op) in ops.iter().enumerate() {
+        if crate::render_native_move::bookkeeping(op) {
+            continue;
+        }
+        vals.clear();
+        crate::mir_ops::op_values(op, &mut vals);
+        for v in &vals {
+            occurs.entry(*v).or_default().push(i);
+        }
+    }
+    let mut skip = BTreeSet::new();
+    let mut prints = BTreeMap::new();
+    for (j, op) in ops.iter().enumerate() {
+        let Op::Call { func: crate::RtFn::PrintStr, args, dst: None } = op else { continue };
+        let [CallArg::Handle(v)] = args.as_slice() else { continue };
+        let Some(at) = occurs.get(v) else { continue };
+        let [d, p] = at.as_slice() else { continue };
+        if *p != j || func.ret == Some(*v) {
+            continue;
+        }
+        let Op::CallFn { dst: Some(dv), name, args: dargs, .. } = &ops[*d] else { continue };
+        let [CallArg::Scalar(n)] = dargs.as_slice() else { continue };
+        let is_bool = name == "bool.to_string";
+        if dv != v || !(is_bool || name == "int.to_string") {
+            continue;
+        }
+        // The scalar keeps its value from the definition to the print, which
+        // sits in the same block: no rebind, no block boundary between.
+        let between = &ops[*d..=j];
+        let rebound = between.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if local == n));
+        let crosses = between.iter().any(|o| {
+            matches!(o, Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } | Op::LoopStart | Op::LoopEnd | Op::LoopBreakUnless { .. } | Op::Return { .. })
+        });
+        if !rebound && !crosses {
+            skip.insert(*d);
+            prints.insert(j, (*n, is_bool));
+        }
+    }
+    (skip, prints)
+}
