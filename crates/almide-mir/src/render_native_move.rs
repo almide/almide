@@ -241,7 +241,13 @@ pub(crate) fn is_static_str(v: ValueId) -> bool {
 /// A string literal read as a `&str` operand (#4006, no-perf-loss): the
 /// literal itself, as the standard codegen passes it, instead of the static
 /// block's view (a load of its header, its length and its bytes' address).
+///
+/// Only for a binding the literal is all it ever holds: a slot that starts
+/// at a literal and is rebound (`acc = acc + s`) holds other strings later.
 pub(crate) fn static_str_operand(v: ValueId) -> Option<String> {
+    if REBOUND.with(|m| m.borrow().contains(&v)) {
+        return None;
+    }
     STATIC_STRS.with(|m| m.borrow().get(&v).map(|s| format!("{s:?}")))
 }
 
