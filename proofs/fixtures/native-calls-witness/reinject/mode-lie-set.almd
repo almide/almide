@@ -1,0 +1,18 @@
+// #4006 class P reinjection drill (scripts/witness-reinject.sh native-calls),
+// on a Set param (the runtime `AlmideSet` the native render carries):
+// MODE LIE: `keep` claims its set as a move param while every caller keeps
+// borrowing it. Unpatched, `keep` takes its set over (a move param); `grow`
+// hands its set to it at every call.
+fn keep(s: Set[Int]) -> Set[Int] = s
+
+fn grow(n: Int) -> Set[Int] = {
+  var s: Set[Int] = set.from_list([1, 2])
+  var i = 0
+  while i < n {
+    s = keep(set.insert(s, i + 10))
+    i = i + 1
+  }
+  s
+}
+
+fn main() -> Unit = println(int.to_string(set.len(grow(3))))
