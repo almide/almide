@@ -103,7 +103,9 @@ impl<'a> Interpreter<'a> {
         // The thin wrappers: `fn <f>(re, ...) = regex.__<g>(re.pattern, ...)`.
         let thin = match (f, rest.len()) {
             ("is_match", 1) => Some("__is_match"),
-            ("is_full_match" | "full_match", 1) => Some("__full_match"),
+            ("is_full_match", 1) => Some("__full_match"),
+            // the deprecated spelling of is_full_match, with its own body
+            ("full_match", 1) => Some("__full_match"),
             ("find", 1) => Some("__find"),
             ("find_all", 1) => Some("__find_all"),
             ("replace", 2) => Some("__replace"),
@@ -143,17 +145,23 @@ impl<'a> Interpreter<'a> {
                     Err(flow) => flow,
                 })
             }
-            // `__splice(regex.__scan(re.pattern, s, first), f)`
-            ("replace_with" | "replace_first_with", 2) => {
-                let Value::Closure(clo) = call.pop()? else { return None };
-                call.push(Value::Bool(f == "replace_first_with"));
-                Some(match value_of(self.forward("regex", "__scan", &call)) {
-                    Ok(scan) => self.splice(&scan, &clo)?,
-                    Err(flow) => flow,
-                })
-            }
+            // `__splice(regex.__scan(re.pattern, s, false), f)`
+            ("replace_with", 2) => self.scan_splice(call, false),
+            // `__splice(regex.__scan(re.pattern, s, true), f)`
+            ("replace_first_with", 2) => self.scan_splice(call, true),
             _ => None,
         }
+    }
+
+    /// `__splice(regex.__scan(re.pattern, s, first), f)` for `call` =
+    /// `[pattern, s, f]`.
+    fn scan_splice(&mut self, mut call: Vec<Value>, first: bool) -> Option<Flow> {
+        let Value::Closure(clo) = call.pop()? else { return None };
+        call.push(Value::Bool(first));
+        Some(match value_of(self.forward("regex", "__scan", &call)) {
+            Ok(scan) => self.splice(&scan, &clo)?,
+            Err(flow) => flow,
+        })
     }
 
     /// `__splice(scan, f)`: each match's field followed by `f` of its
