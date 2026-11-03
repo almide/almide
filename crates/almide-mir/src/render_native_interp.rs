@@ -29,6 +29,8 @@ pub(crate) enum Piece {
     Lit(String),
     /// An integer formatted in place (`int.to_string`'s text).
     Int(ValueId),
+    /// A Bool formatted in place (`bool.to_string`'s text).
+    Bool(ValueId),
     /// A string value.
     Str(ValueId),
 }
@@ -122,13 +124,15 @@ pub(crate) fn chains(func: &MirFunction) -> Chains {
                     skip.push(def.expect("defined"));
                 }
                 Some(Op::CallFn { name, args, .. })
-                    if temp && name == "int.to_string" && matches!(args.as_slice(), [CallArg::Scalar(_)]) =>
+                    if temp
+                        && (name == "int.to_string" || name == "bool.to_string")
+                        && matches!(args.as_slice(), [CallArg::Scalar(_)]) =>
                 {
                     let [CallArg::Scalar(n)] = args.as_slice() else { unreachable!() };
                     if rebound(*n, def.expect("defined"), last) {
                         continue 'chain;
                     }
-                    rendered.push(Piece::Int(*n));
+                    rendered.push(if name == "int.to_string" { Piece::Int(*n) } else { Piece::Bool(*n) });
                     skip.push(def.expect("defined"));
                 }
                 _ => {
@@ -152,7 +156,38 @@ pub(crate) fn render_final(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueI
     render_final_opt(dst, pieces, tys).ok_or_else(|| crate::render_native::wall("native: a concatenation chain over a piece that is not a string or an Int"))
 }
 
+/// The chain's last step printed by the very next op and read by nothing
+/// else (#4006, no-perf-loss): one `println!` over the pieces, as the
+/// standard codegen prints an interpolation, with no string built for it.
+pub(crate) fn printed_by(func: &MirFunction, at: usize, dst: ValueId) -> Option<usize> {
+    let ops = &func.ops;
+    let j = (at + 1..ops.len()).find(|&j| !crate::render_native_move::bookkeeping(&ops[j]))?;
+    let prints = matches!(&ops[j], Op::Call { func: crate::RtFn::PrintStr, args, dst: None }
+        if matches!(args.as_slice(), [CallArg::Handle(v)] if *v == dst));
+    let mut vals = Vec::new();
+    let other_use = ops.iter().enumerate().any(|(k, op)| {
+        if k == at || k == j || crate::render_native_move::bookkeeping(op) {
+            return false;
+        }
+        vals.clear();
+        crate::mir_ops::op_values(op, &mut vals);
+        vals.contains(&dst)
+    });
+    (prints && !other_use && func.ret != Some(dst)).then_some(j)
+}
+
+/// The `println!` a printed chain renders as.
+pub(crate) fn render_print(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
+    let (template, args) = fmt_parts(pieces, tys)?;
+    Some(format!("println!(\"{template}\"{args});"))
+}
+
 fn render_final_opt(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
+    let (template, args) = fmt_parts(pieces, tys)?;
+    Some(format!("let mut {}: AlmideString = AlmideString::from_fmt(format_args!(\"{template}\"{args}));", crate::render_native::var(dst)))
+}
+
+fn fmt_parts(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<(String, String)> {
     use crate::render_native::{var, NTy};
     let mut template = String::new();
     let mut args = Vec::new();
@@ -166,6 +201,13 @@ fn render_final_opt(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueId, crat
                 template.push_str("{}");
                 args.push(var(*n));
             }
+            Piece::Bool(n) => {
+                if tys.get(n) != Some(&NTy::I64) {
+                    return None;
+                }
+                template.push_str("{}");
+                args.push(format!("if {} != 0 {{ \"true\" }} else {{ \"false\" }}", var(*n)));
+            }
             Piece::Str(v) => {
                 let t = *tys.get(v)?;
                 if !matches!(t, NTy::Str | NTy::StrRef) {
@@ -177,5 +219,5 @@ fn render_final_opt(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueId, crat
         }
     }
     let args = if args.is_empty() { String::new() } else { format!(", {}", args.join(", ")) };
-    Some(format!("let mut {}: AlmideString = AlmideString::from_fmt(format_args!(\"{template}\"{args}));", var(dst)))
+    Some((template, args))
 }

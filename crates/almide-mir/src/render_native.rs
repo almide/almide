@@ -518,13 +518,26 @@ fn render_fn(
     // Interpolation chains built in one buffer (crate::render_native_interp).
     let chains = crate::render_native_interp::chains(func);
     crate::render_native_move::set_stack_lits(func, &user_fns.keys().copied().collect());
+    let mut printed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     let mut ops = func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
         crate::render_native_move::set_moving_args(func, i, &tys, &borrows.arms);
-        if chains.skip.contains(&i) {
+        if chains.skip.contains(&i) || printed.contains(&i) {
             continue;
         }
         if let Some((dst, pieces)) = chains.finals.get(&i) {
+            // Printed by the next op and read by nothing else: one println!,
+            // the macro `rt_print_str` prints through (a fan program's glue
+            // routes that same macro).
+            if let (Some(j), Some(code)) = (
+                crate::render_native_interp::printed_by(func, i, *dst),
+                crate::render_native_interp::render_print(pieces, &tys),
+            ) {
+                printed.insert(j);
+                tys.insert(*dst, NTy::Str);
+                line!("{code}");
+                continue;
+            }
             let code = crate::render_native_interp::render_final(*dst, pieces, &tys)?;
             tys.insert(*dst, NTy::Str);
             line!("{code}");
