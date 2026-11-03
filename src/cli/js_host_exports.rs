@@ -37,6 +37,8 @@ pub(super) enum RetPlan {
     /// A block read by `takeBlock` and released with its children.
     Block(AbiShape),
     /// A `Result` block: ok → the value, err → a thrown `AlmideError`.
+    /// A declared scalar effect fn (#4376) is not one: its ok value is the
+    /// wasm value (`Scalar` / `Void`) and its err traps in the module.
     Unwrap(AbiShape),
     /// A Region (ADR-0031 amendment A1, #4354): the adapter's two results,
     /// `[ptr, len]`, as numbers. No copy: the host reads and writes the
@@ -144,6 +146,14 @@ pub(super) fn plan_export(f: &HostFn, params: Option<&[AbiShape]>, ret: Option<&
             other => RetPlan::Block(other.clone()),
         }),
         (Some(ExportRet::Result(s, AbiShape::Str)), true) if ok(s) => Some(RetPlan::Unwrap(s.clone())),
+        // #4376: the adapter returns the ok value itself and traps on err.
+        (Some(ExportRet::OkValue(s)), true) if ok(s) => match s {
+            AbiShape::Int => Some(RetPlan::Scalar(Marshal::Int)),
+            AbiShape::Float => Some(RetPlan::Scalar(Marshal::Float)),
+            AbiShape::Bool => Some(RetPlan::Scalar(Marshal::Bool)),
+            AbiShape::Unit => Some(RetPlan::Void),
+            _ => None,
+        },
         _ => None,
     };
     let ret = plan.ok_or_else(|| {

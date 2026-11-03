@@ -65,7 +65,8 @@ impl AbiShape {
 
 /// The return ABI the emitter gave an exported function (#3352) — read by
 /// the JS host instead of guessing it from the source type. An effect fn's
-/// wasm value is ALWAYS one `Result` block, whatever its declared return.
+/// wasm value is one `Result` block, whatever its declared return, except a
+/// declared `@export(wasm)` effect fn returning a scalar (#4376, `OkValue`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExportRet {
     /// No result (a pure fn returning `Unit`).
@@ -75,6 +76,11 @@ pub enum ExportRet {
     /// An i32 `Result` block: tag at payload+`SUM_TAG` (0 = ok), the value
     /// at payload+`SUM_FIELD`.
     Result(AbiShape, AbiShape),
+    /// A declared `@export(wasm)` effect fn whose declared return is a
+    /// scalar (#4376): the export is the adapter, whose result is the ok
+    /// value itself (none for `Unit`); an `err` writes its message to stderr
+    /// and traps, as a Region export's does.
+    OkValue(AbiShape),
     /// A Region (ADR-0031 amendment A1, #4354): the export is the adapter,
     /// whose two results are the view's data address and byte length in the
     /// memory's address width. The host holds one share of the block per
@@ -126,6 +132,15 @@ pub(crate) fn export_ret(ret: Option<crate::SliceTy>, types: &crate::types_table
         None => ExportRet::Void,
         Some(crate::SliceTy::Result(ok, err)) => ExportRet::Result(abi_shape(types.el(ok), types, 0), abi_shape(types.el(err), types, 0)),
         Some(t) => ExportRet::Value(abi_shape(t, types, 0)),
+    }
+}
+
+/// The host-facing form of a scalar effect fn's adapter return (#4376): the
+/// ok shape of the wrapper's `Result`.
+pub(crate) fn export_ok_value(ret: Option<crate::SliceTy>, types: &crate::types_table::TypeTable) -> ExportRet {
+    match ret {
+        Some(crate::SliceTy::Result(ok, _)) => ExportRet::OkValue(abi_shape(types.el(ok), types, 0)),
+        other => export_ret(other, types),
     }
 }
 
