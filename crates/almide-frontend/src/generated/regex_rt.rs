@@ -244,6 +244,7 @@ fn rx_parse_class(chars: &[char], pos: &mut usize) -> AlmideRxNode {
                 'D' => { /* not fully supported in class, treat as literal */ ranges.push((esc, esc)); continue; }
                 'n' => { ranges.push(('\n', '\n')); continue; }
                 't' => { ranges.push(('\t', '\t')); continue; }
+                'r' => { ranges.push(('\r', '\r')); continue; }
                 _ => { ranges.push((esc, esc)); continue; }
             }
         }
@@ -544,7 +545,9 @@ fn rx_check_class(chars: &[char], pos: &mut usize) -> Result<(), std::borrow::Co
             let e = chars[*pos + 1];
             *pos += 2;
             match e {
-                'd' | 'w' | 's' | 'n' | 't' => {}
+                // Every escape accepted outside a class whose meaning is one
+                // character (\n \t \r) is accepted inside one too (#4420).
+                'd' | 'w' | 's' | 'n' | 't' | 'r' => {}
                 _ if e.is_ascii_alphanumeric() => return Err(format!("unsupported escape \\{e} in a class").into()),
                 _ => {}
             }

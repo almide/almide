@@ -28,6 +28,7 @@ mod hofs;
 mod inplace;
 mod stdlib_pool;
 mod surface;
+mod surface_regex;
 mod heap;
 mod vfs;
 mod value;
@@ -146,6 +147,15 @@ pub struct Interpreter<'a> {
     /// at all leaks addresses into native ops (`regex_split`'s pieces printed
     /// as integers).
     pub(crate) pool_depth: u32,
+    /// The appends a pool body's self tail call `f(acc + [x], ...)` left for
+    /// the trampoline (argument index, element): pushed onto the argument's
+    /// list once the caller's frame is gone, so the list is uniquely owned and
+    /// `Rc::make_mut` grows it in place — the interp twin of the backends'
+    /// tail append window (wasm tail_append.rs). Evaluated as a concat, every
+    /// step copied the whole accumulator, and the regex scan over 60,000
+    /// matches never finished (#4419). A list still shared is copied, so the
+    /// value is the concat's either way.
+    pub(crate) tail_pushes: Vec<(usize, Value)>,
     /// The STATIC type of `prim.handle`'s argument at the current call site,
     /// stashed by `eval_module_call` and consumed by `heap_prim_handle`. This
     /// is what disambiguates a byte block from a slot block: the VALUE
@@ -622,6 +632,7 @@ impl<'a> Interpreter<'a> {
             stop: None,
             pool_fuel: Cell::new(POOL_FUEL),
             depth: Cell::new(0),
+            tail_pushes: Vec::new(),
             det_fuel: Cell::new(i64::MAX),
             det_entry: Cell::new(-1),
             det_verdict: Cell::new(0),

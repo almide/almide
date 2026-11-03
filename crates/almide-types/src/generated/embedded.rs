@@ -14022,7 +14022,10 @@ fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
   if q != end then err(__jp_at("json: invalid number", base, p))
   else {
     let s = __jp_substr(base, p, end)
-    let is_float = string.contains(s, ".") or string.contains(s, "e") or string.contains(s, "E")
+
+
+    let lead = if prim.load8(base + p) == 45 then p + 1 else p
+    let is_float = __jp_digits(base, end, lead) < end
     if is_float then match float.parse(s) {
       ok(f) => ok((value.float(f), end)),
       err(m) => err(m),
@@ -31327,7 +31330,8 @@ else {
     else if e == 119 then (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 95
     else if e == 115 then c == 32 or (c >= 9 and c <= 13)
     else if e == 110 then c == 10
-    else if e == 116 then c == 9 else c == __rx_cp(p + 1)
+    else if e == 116 then c == 9
+    else if e == 114 then c == 13 else c == __rx_cp(p + 1)
     if hit then true
     else __rx_class_hit(p + 1 + __rx_w(p + 1), ie, c)
   } else {
@@ -33010,7 +33014,11 @@ else {
     else {
       let e = prim.load8(p + 1)
       let next = p + 1 + __rx_w(p + 1)
-      if e == 100 or e == 119 or e == 115 or e == 110 or e == 116 then __rx_ck_class(ck, next, pe)
+      if e == 100 or e == 119 or e == 115 or e == 110 or e == 116 or e == 114 then __rx_ck_class(
+        ck,
+        next,
+        pe,
+      )
       else if __rx_is_alnum(e) then {
         prim.store64(ck + 16, p + 1)
         __rx_ckerr(ck, 10)
@@ -33558,25 +33566,54 @@ fn regex_index_of(pat: String, s: String) -> Int = {
 
 
 
-fn __rx_scan_go(p: Int, pe: Int, last: Int, scan: Int, m: Int, ncap: Int, bd: Int, first: Bool, acc: List[String]) -> List[String] = {
+
+
+
+
+
+
+
+
+
+
+fn __rx_scan_go(p: Int, pe: Int, last: Int, scan: Int, m: Int, ncap: Int, bd: Int, first: Bool, k: Int, acc: List[String]) -> List[String] = {
   let te = __rx_te(m)
-  if scan > te then acc + [__rx_sub(last, te)]
-  else {
-    let st = __rx_find_start(p, pe, scan, m)
+  if k == 0 - 1 then {
+    let st = if scan > te then 0 - 1
+    else __rx_find_start(p, pe, scan, m)
     if st < 0 then acc + [__rx_sub(last, te)]
-    else {
-      let en = __rx_end(m)
-      let w = prim.load64(m + 120)
-      let none_yet: List[String] = []
-      let groups = if w != 0 then __rx_pcaps_out(__rx_wk(w, 10), 0, ncap, none_yet)
-      else __rx_caps_out(bd, 0, ncap, none_yet)
-      let acc2 = acc + [__rx_sub(last, st), __rx_mark(st, en)] + groups
-      let nxt = if en > st then en
-      else if en >= te then te + 1 else en + __rx_w(en)
-      if first then acc2 + [__rx_sub(en, te)]
-      else __rx_scan_go(p, pe, en, nxt, m, ncap, bd, first, acc2)
-    }
-  }
+    else __rx_scan_go(p, pe, st, scan, m, ncap, bd, first, 0 - 2, acc + [__rx_sub(last, st)])
+  } else if k == 0 - 2 then {
+    let en = __rx_end(m)
+    let nxt = if en > last then en
+    else if en >= te then te + 1 else en + __rx_w(en)
+    __rx_scan_go(p, pe, en, nxt, m, ncap, bd, first, 0, acc + [__rx_mark(last, en)])
+  } else if k < ncap then __rx_scan_go(
+    p,
+    pe,
+    last,
+    scan,
+    m,
+    ncap,
+    bd,
+    first,
+    k + 1,
+    acc + [
+      __rx_scan_group(m, bd, k)
+    ],
+  )
+  else if first then acc + [__rx_sub(last, te)]
+  else __rx_scan_go(p, pe, last, scan, m, ncap, bd, first, 0 - 1, acc)
+}
+
+
+
+fn __rx_scan_group(m: Int, bd: Int, i: Int) -> String = {
+  let w = prim.load64(m + 120)
+  if w != 0 then {
+    let found = __rx_wk(w, 10)
+    __rx_mark(prim.load64(found + (3 * i + 1) * 8), prim.load64(found + (3 * i + 2) * 8))
+  } else __rx_mark(prim.load64(bd + i * 16), prim.load64(bd + i * 16 + 8))
 }
 
 fn regex_scan(pat: String, s: String, first: Bool) -> List[String] = {
@@ -33593,7 +33630,7 @@ fn regex_scan(pat: String, s: String, first: Bool) -> List[String] = {
   let vm = __rx_vm(p0, pe, t0, te, bd, nslots, 0 - 1)
   let m = prim.handle(vm) + 12
   let head: List[String] = [int.to_string(ncap + 1)]
-  let r = __rx_scan_go(p0, pe, t0, t0, m, ncap, bd, first, head)
+  let r = __rx_scan_go(p0, pe, t0, t0, m, ncap, bd, first, 0 - 1, head)
   if __rx_gave_up(m) then __rx_vm_scan(p0, pe, t0, te, m, ncap, bd, first)
   else r
 }
@@ -33603,7 +33640,7 @@ fn __rx_vm_scan(p0: Int, pe: Int, t0: Int, te: Int, m: Int, ncap: Int, bd: Int, 
   let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, pe, 1)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
   let head: List[String] = [int.to_string(ncap + 1)]
-  __rx_scan_go(p0, pe, t0, t0, m, ncap, bd, first, head)
+  __rx_scan_go(p0, pe, t0, t0, m, ncap, bd, first, 0 - 1, head)
 }
 "#;
 pub const SRC_RESULT: &str = r#"
@@ -38005,10 +38042,17 @@ fn string_ends_with(s: String, suffix: String) -> Bool = {
 
 
 
+
+
+
+
 fn __sk_step(pa: Int, d: Int, t: Int, k: Int, c: Int) -> Int =
-  if k > 0 and prim.load8(pa + k * d) != c then __sk_step(pa, d, t, prim.load64(t + (k - 1) * 8), c)
-  else if prim.load8(pa + k * d) == c then k + 1
-  else k
+  if prim.load8(pa + k * d) == c then k + 1
+  else if k == 0 then 0
+  else if k > 1 and t == 0 then 0 - 1
+  else __sk_step(pa, d, t, if k == 1 then 0 else prim.load64(t + (k - 1) * 8), c)
+
+
 
 fn __sk_fill(pa: Int, d: Int, nlen: Int, t: Int, q: Int, k: Int) -> Int = if q >= nlen then 0
 else {
@@ -38018,18 +38062,29 @@ else {
 }
 
 
-fn __sk_table(pa: Int, d: Int, nlen: Int, t: Int) -> Int = {
-  prim.store64(t, 0)
-  __sk_fill(pa, d, nlen, t, 1, 0)
-}
+fn __sk_lead(p: Int, d: Int, e: Int, c: Int) -> Int = if p == e then e
+else if prim.load8(p) == c then p
+else __sk_lead(p + d, d, e, c)
+
+
+
+
+
+
 
 
 fn __sk_scan(ha: Int, d: Int, slen: Int, pa: Int, nlen: Int, t: Int, i: Int, k: Int) -> Int =
   if slen - i < nlen - k then 0 - 1
   else {
-    let k1 = __sk_step(pa, d, t, k, prim.load8(ha + i * d))
-    if k1 == nlen then i + 1 - nlen
-    else __sk_scan(ha, d, slen, pa, nlen, t, i + 1, k1)
+    let j = if k > 0 then i
+    else (__sk_lead(ha + i * d, d, ha + (slen - nlen + 1) * d, prim.load8(pa)) - ha) * d
+    if j > slen - nlen + k then 0 - 1
+    else {
+      let k1 = __sk_step(pa, d, t, k, prim.load8(ha + j * d))
+      if k1 < 0 then 0 - 2
+      else if k1 == nlen then j + 1 - nlen
+      else __sk_scan(ha, d, slen, pa, nlen, t, j + 1, k1)
+    }
   }
 
 
@@ -38047,24 +38102,32 @@ fn __sk_next(sbase: Int, slen: Int, nbase: Int, nlen: Int, t: Int, from: Int) ->
 
 
 
+
+
+
+
+fn __sk_find(ha: Int, d: Int, slen: Int, pa: Int, nlen: Int) -> Int = {
+  let r = __sk_scan(ha, d, slen, pa, nlen, 0, 0, 0)
+  if r != 0 - 2 then r
+  else {
+    let tbl = prim.alloc_list(nlen)
+    let t = prim.handle(tbl) + 12
+    let _t = __sk_fill(pa, d, nlen, t, 1, 0)
+    __sk_scan(ha, d, slen, pa, nlen, t, 0, 0)
+  }
+}
+
+
 fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then 0
 else if nlen > slen then 0 - 1
-else {
-  let tbl = prim.alloc_list(nlen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(nbase, 1, nlen, t)
-  __sk_next(sbase, slen, nbase, nlen, t, 0)
-}
+else __sk_find(sbase, 1, slen, nbase, nlen)
 
 
 
 fn __rfind_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then slen
 else if nlen > slen then 0 - 1
 else {
-  let tbl = prim.alloc_list(nlen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(nbase + nlen - 1, 0 - 1, nlen, t)
-  let r = __sk_scan(sbase + slen - 1, 0 - 1, slen, nbase + nlen - 1, nlen, t, 0, 0)
+  let r = __sk_find(sbase + slen - 1, 0 - 1, slen, nbase + nlen - 1, nlen)
   if r < 0 then r else slen - r - nlen
 }
 
@@ -38098,10 +38161,11 @@ else {
 }
 
 fn __count_nonempty(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen > slen then 0
+else if nlen <= 2 then __count_scan(sbase, slen, nbase, nlen, 0, 0, 0)
 else {
   let tbl = prim.alloc_list(nlen)
   let t = prim.handle(tbl) + 12
-  let _t = __sk_table(nbase, 1, nlen, t)
+  let _t = __sk_fill(nbase, 1, nlen, t, 1, 0)
   __count_scan(sbase, slen, nbase, nlen, t, 0, 0)
 }
 
@@ -38211,16 +38275,25 @@ fn __empty_split(s: String) -> List[String] = {
   result
 }
 
-fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
-  let sh = prim.handle(s)
-  let slen = prim.load32(sh + 4)
-  let tbl = prim.alloc_list(seplen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(seph + 12, 1, seplen, t)
+
+
+fn __split_with(sh: Int, slen: Int, seph: Int, seplen: Int, t: Int) -> List[String] = {
   let nseps = __count_scan(sh + 12, slen, seph + 12, seplen, t, 0, 0)
   let result = prim.alloc_list_str(nseps + 1)
   let _x = __split_fill(prim.handle(result), sh, slen, seph, seplen, t, 0, 0)
   result
+}
+
+fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  if seplen <= 2 then __split_with(sh, slen, seph, seplen, 0)
+  else {
+    let tbl = prim.alloc_list(seplen)
+    let t = prim.handle(tbl) + 12
+    let _t = __sk_fill(seph + 12, 1, seplen, t, 1, 0)
+    __split_with(sh, slen, seph, seplen, t)
+  }
 }
 
 @implements("string.split")
@@ -38283,9 +38356,18 @@ fn __rep_do(s: String, from: String, to: String) -> String = {
   let flen = prim.load32(fh + 4)
   let th = prim.handle(to)
   let tlen = prim.load32(th + 4)
-  let tbl = prim.alloc_list(flen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(fh + 12, 1, flen, t)
+  if flen <= 2 then __rep_with(h, slen, fh, flen, th, tlen, 0)
+  else {
+    let tbl = prim.alloc_list(flen)
+    let t = prim.handle(tbl) + 12
+    let _t = __sk_fill(fh + 12, 1, flen, t, 1, 0)
+    __rep_with(h, slen, fh, flen, th, tlen, t)
+  }
+}
+
+
+
+fn __rep_with(h: Int, slen: Int, fh: Int, flen: Int, th: Int, tlen: Int, t: Int) -> String = {
   let count = __count_scan(h + 12, slen, fh + 12, flen, t, 0, 0)
   let delta = tlen - flen
   let rlen = slen + count * delta
