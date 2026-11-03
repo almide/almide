@@ -1,0 +1,15 @@
+héllo
+wörld
+raw 4
+big 1048576
+work: big.txt,deep,raw.bin
+deep: b.txt
+raw exists no
+walk: work/big.txt,work/deep,work/deep/b.txt
+err fs.read_text("work/missing.txt"): No such file or directory (os error 2)
+err fs.read_text("work/deep"): Is a directory (os error 21)
+err fs.read_text("work/big.txt/x"): Not a directory (os error 20)
+err fs.mkdir_p("work/big.txt"): File exists (os error 17)
+err fs.write_text("work/deep"): Is a directory (os error 21)
+seed | a.txt,b.txt,c | err fs.write_text("/in/new.txt"): Permission denied (os error 13) | err fs.mkdir_p("/in/d"): Permission denied (os error 13) | err fs.read_text("../escape.txt"): Operation not permitted (os error 1)
+-o|/out/納品|--date|2026-10-27 こんにちは

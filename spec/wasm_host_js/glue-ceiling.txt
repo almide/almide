@@ -38,3 +38,7 @@ extern_region_dual_binding 6500
 region_export_push 11700
 # #4354: two Region hooks (a lent alloc the host fills, a lent slice it reads).
 region_extern_pull 6200
+# #4438: the in-memory filesystem (js_host_fs.js: the tree, the fd table, the
+# walk, ~7 KB) and the fs variants of its 15 shims, plus argv / environ from
+# init(); shipped only to a module that imports an fs op.
+fs_preopens 27500
