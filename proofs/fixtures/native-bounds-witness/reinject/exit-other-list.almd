@@ -1,6 +1,6 @@
 // A loop over `b` after a length read of `a`: the exit test is taken against `a`.
-fn f(a: List[Int], b: List[Int]) -> Int = list.len(a) + list.fold(b, 0, (s, x) => s + x)
-
 fn main() -> Unit = {
-  println(int.to_string(f([1, 2], [3, 4, 5])))
+  let a = [1, 2]
+  let b = [3, 4, 5]
+  println(int.to_string(list.len(a) + list.fold(b, 0, (s, x) => s + x)))
 }
