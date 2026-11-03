@@ -213,11 +213,22 @@ pub struct RenderContext<'a> {
     /// match, `?` propagates directly with no `map_err` coercion (so a custom
     /// variant error type is preserved rather than stringified via Debug).
     pub fn_err_ty: Option<almide_lang::types::Ty>,
+    /// The numbers the enclosing fn's numbered compiler temps render with
+    /// (#4441). A temp is named for the program-wide var count when its pass
+    /// made it (`__licm_43224`), so one added binding anywhere renumbered the
+    /// temps of every fn after it, and a rebuild after a one-line edit
+    /// recompiled the whole crate. Numbered per fn instead — the k-th temp a
+    /// fn renders is `_k` — a fn's Rust changes only when the fn does. Fresh
+    /// per fn ([`fn_render_context`]); a closure body shares its fn's.
+    pub temps: TempNumbers,
 }
+
+/// A fn's numbered compiler temps, by first rendering: see [`RenderContext::temps`].
+pub type TempNumbers = std::rc::Rc<std::cell::RefCell<std::collections::HashMap<VarId, usize>>>;
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, trace: false, ann: std::rc::Rc::new(CodegenAnnotations::default()), type_aliases: std::rc::Rc::new(std::collections::HashMap::new()), generic_types: std::rc::Rc::new(std::collections::HashSet::new()), minimal_generic_bounds: false, repr_c: false, repr_named_types: std::rc::Rc::new(std::collections::HashSet::new()), newtype_ctors: std::rc::Rc::new(std::collections::HashMap::new()), fn_err_ty: None }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, trace: false, ann: std::rc::Rc::new(CodegenAnnotations::default()), type_aliases: std::rc::Rc::new(std::collections::HashMap::new()), generic_types: std::rc::Rc::new(std::collections::HashSet::new()), minimal_generic_bounds: false, repr_c: false, repr_named_types: std::rc::Rc::new(std::collections::HashSet::new()), newtype_ctors: std::rc::Rc::new(std::collections::HashMap::new()), fn_err_ty: None, temps: TempNumbers::default() }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -234,7 +245,21 @@ impl<'a> RenderContext<'a> {
 
     pub(crate) fn var_name(&self, id: VarId) -> String {
         let info = self.var_table.get(id);
-        if info.synthetic { helpers::synthetic_ident(info.name.as_str()) } else { escape_rust_ident(info.name.as_str(), self.templates) }
+        if !info.synthetic {
+            return escape_rust_ident(info.name.as_str(), self.templates);
+        }
+        let name = info.name.as_str();
+        let stem = name.trim_end_matches(|c: char| c.is_ascii_digit());
+        // A numbered temp (`__licm_43224`): its stem and the fn-local number.
+        // Every numbered temp of a fn draws from one counter, so two never
+        // meet; an unnumbered one (`__tco_tmp_a`) cannot end in a digit.
+        if stem.len() < name.len() && stem.ends_with('_') {
+            let mut temps = self.temps.borrow_mut();
+            let next = temps.len();
+            let k = *temps.entry(id).or_insert(next);
+            return helpers::synthetic_ident(&format!("{stem}{k}"));
+        }
+        helpers::synthetic_ident(name)
     }
 
     /// The Rust spelling of a record / variant-payload field name (#2652).
@@ -782,6 +807,7 @@ fn fn_render_context<'a>(ctx: &RenderContext<'a>, func: &IrFunction) -> RenderCo
         repr_named_types: ctx.repr_named_types.clone(),
         newtype_ctors: ctx.newtype_ctors.clone(),
         fn_err_ty,
+        temps: TempNumbers::default(),
     }
 }
 
@@ -804,6 +830,7 @@ pub(crate) fn with_fn_err_ty<'a>(ctx: &RenderContext<'a>, fn_err_ty: Option<almi
         repr_named_types: ctx.repr_named_types.clone(),
         newtype_ctors: ctx.newtype_ctors.clone(),
         fn_err_ty,
+        temps: ctx.temps.clone(),
     }
 }
 

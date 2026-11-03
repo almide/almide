@@ -203,6 +203,7 @@ pub(crate) fn run_native_test_binary_in(
         .filter(|(_, label)| filter.is_none_or(|p| almide_base::names::test_name_matches_filter(label, p)))
         .collect();
     let prefix = module.map(|m| m.prefix.clone()).unwrap_or_default();
+    let fn_prefix = module.map(|m| m.fn_prefix().to_string()).unwrap_or_default();
     let mut args: Vec<String> = HARNESS_FLAGS.iter().map(|f| f.to_string()).collect();
     match filter {
         // The source could not be enumerated (it does not parse — the build
@@ -230,8 +231,8 @@ pub(crate) fn run_native_test_binary_in(
     }
     let (mut code, mut stdout, mut stderr) = super::run::run_binary_captured_io_env(bin, &args, &env);
     if let Some(m) = module {
-        stdout = unmerge_output(&stdout, &prefix, m.others);
-        stderr = unmerge_output(&stderr, &prefix, m.others);
+        stdout = unmerge_output(&stdout, &[&prefix, &fn_prefix], m.others);
+        stderr = unmerge_output(&stderr, &[&prefix, &fn_prefix], m.others);
     }
     let records = std::fs::read_to_string(&ledger).unwrap_or_default();
     let _ = std::fs::remove_file(&ledger);
@@ -239,7 +240,7 @@ pub(crate) fn run_native_test_binary_in(
         let finished: std::collections::HashSet<&str> = records.lines().collect();
         let unfinished: Vec<&str> = selected
             .iter()
-            .filter(|(m, _)| !finished.contains(format!("{prefix}{m}").as_str()))
+            .filter(|(m, _)| !finished.contains(format!("{fn_prefix}{m}").as_str()))
             .map(|(_, label)| label.as_str())
             .collect();
         if let Some(first) = unfinished.first() {
@@ -255,10 +256,11 @@ pub(crate) fn run_native_test_binary_in(
 }
 
 /// What a file's own binary would have printed, from its run of the run's
-/// one binary: test paths without the file's prefix, and libtest's `N
-/// filtered out` without the other files' tests.
-fn unmerge_output(text: &str, prefix: &str, others: usize) -> String {
-    let text = text.replace(prefix, "");
+/// one binary: test paths without the file's prefixes (its tests' path, then
+/// their bare fn names), and libtest's `N filtered out` without the other
+/// files' tests.
+fn unmerge_output(text: &str, prefixes: &[&str], others: usize) -> String {
+    let text = prefixes.iter().fold(text.to_string(), |t, p| t.replace(p, ""));
     if !text.contains("filtered out") {
         return text;
     }
