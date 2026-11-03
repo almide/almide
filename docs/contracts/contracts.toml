@@ -1513,6 +1513,7 @@ evidence  = [
   { path = "spec/wasm_cross/tco_nested_list_accumulator.almd", class = "fixture" },
   { path = "spec/wasm_cross/tco_over_match_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_tuple_result_tco.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tco_bytes_value_arg.almd", class = "fixture" },
 ]
 
 # ── APPEND-ACCUMULATOR TCO CROSS-TARGET BYTE-MATCH (option C) ─────────
