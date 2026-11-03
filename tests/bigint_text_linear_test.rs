@@ -208,9 +208,10 @@ fn power_of_two_text_and_the_decimal_refusal_scale_linearly() {
     for mode in ["hex", "bin", "dec"] {
         let (a, b) = native_pair(&dir, mode, 1_000_000);
         let ratio = b.as_secs_f64() / a.as_secs_f64().max(1e-3);
+        eprintln!("native {mode}: {b:?} of CPU at 2M digits, {a:?} at 1M (ratio {ratio:.2})");
         assert!(
             ratio < 3.0,
-            "native {mode}: 2M digits took {b:?}, 1M took {a:?} (ratio {ratio:.2}) — quadratic again?"
+            "native {mode}: 2M digits took {b:?} of CPU, 1M took {a:?} (ratio {ratio:.2}) — quadratic again?"
         );
     }
     if has_wasmtime() {
