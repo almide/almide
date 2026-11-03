@@ -467,7 +467,12 @@ fn native_sig_kind(
         }
         // #4006: an all-scalar tuple rides the same `Vec<i64>` (a List[Float]
         // already did above: each slot holds the f64 bits).
-        Ty::Tuple(es) if !es.is_empty() && es.iter().all(crate::render_native_rec::is_lane_scalar) => {
+        // (One the render generates a by-value struct for travels as it, below.)
+        Ty::Tuple(es)
+            if !es.is_empty()
+                && es.iter().all(crate::render_native_rec::is_lane_scalar)
+                && crate::render_native_rec::rec_index(&crate::render_native_rec::block_key(t)).is_none() =>
+        {
             Some(NativeSigKind::ListI64)
         }
         // #4006 family B: an Option of a scalar rides the `Option<i64>` carrier.
@@ -475,6 +480,7 @@ fn native_sig_kind(
         // An all-scalar record travels as its slot block (see sig_ok).
         Ty::Named(n, args)
             if args.is_empty()
+                && crate::render_native_rec::rec_index(n.as_str()).is_none()
                 && record_layouts
                     .get(n.as_str())
                     .is_some_and(|(_, ftys)| ftys.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft))) =>
@@ -484,6 +490,7 @@ fn native_sig_kind(
         // A flat variant travels as its tag+payload slot block.
         Ty::Named(n, args)
             if args.is_empty()
+                && crate::render_native_rec::rec_index(n.as_str()).is_none()
                 && variant_layouts.by_type.get(n.as_str()).is_some_and(|layout| {
                     layout.cases.iter().all(|c| c.fields.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft)))
                 }) =>
@@ -703,6 +710,19 @@ fn render_native_parts(
         }
         for l in variant_layouts.by_type.values() {
             l.cases.iter().flat_map(|c| c.fields.iter()).for_each(|(_, t)| crate::render_native_rec::collect_tuples(t, &mut ts));
+        }
+        // An all-scalar tuple a local holds (`let v: List[(Int, Int)]`) is a
+        // by-value struct as well, declared in a signature or not.
+        for info in &ir.var_table.entries {
+            let mut found = Vec::new();
+            crate::render_native_rec::collect_tuples(&info.ty, &mut found);
+            for t in found {
+                let scalar = matches!(&t, almide_lang::types::Ty::Tuple(es)
+                    if !es.is_empty() && es.iter().all(crate::render_native_rec::is_lane_scalar));
+                if scalar && !ts.contains(&t) {
+                    ts.push(t);
+                }
+            }
         }
         ts
     });
