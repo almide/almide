@@ -603,9 +603,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      # No rust-cache: this job compiles nothing. Its merge step unpacks the
+      # full test archive into ./target (`--extract-to .`), and the cache's
+      # post step saved that as a 3.4 GB entry — a third of the repo's 10 GB
+      # Actions cache, evicting small entries the other jobs depend on (the
+      # grammar gate's corpus memo hit 0 of 2226 files on develop run
+      # 41566860171 and the step re-parsed all of them in 8.4 min).
       # #1732: enumerate from the build job's nextest archive — this
       # job's old enumerate compiled the workspace.
       - name: Install cargo-nextest
