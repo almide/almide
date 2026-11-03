@@ -735,16 +735,21 @@ pub(crate) fn culprits_in(text: &str, batch: &[PlannedTestFile]) -> Vec<String> 
         .collect()
 }
 
+/// A batch's files, each parsed and its imports resolved: what
+/// [`test_batch_inputs`] keys the compiled program by and what
+/// [`compile_test_batch`] compiles, resolved once for both.
+pub(crate) struct ResolvedBatch(Vec<(ast::Program, resolve::ResolvedModules, resolve::SelfVersionedNames)>);
+
+pub(crate) fn resolve_test_batch(ctx: &TestRunContext, batch: &[PlannedTestFile]) -> Result<ResolvedBatch, String> {
+    batch.iter().map(|p| resolve_test_file(&p.file, &ctx.dep_paths)).collect::<Result<_, _>>().map(ResolvedBatch)
+}
+
 /// What a batch's one program is compiled from, besides the compiler and the
 /// environment (#4441): the project and its dependencies, the batch's files
-/// with their indices, and every source they reach, by path. `None` when a
-/// file does not resolve — the compile itself reports that.
-pub(crate) fn test_batch_inputs(ctx: &TestRunContext, batch: &[PlannedTestFile]) -> Option<String> {
-    let mut sources = std::collections::BTreeMap::new();
-    for p in batch {
-        let (_, resolved, _) = resolve_test_file(&p.file, &ctx.dep_paths).ok()?;
-        sources.extend(resolved.sources.into_values());
-    }
+/// with their indices, and every source they reach, by path.
+pub(crate) fn test_batch_inputs(ctx: &TestRunContext, batch: &[PlannedTestFile], resolved: &ResolvedBatch) -> String {
+    let sources: std::collections::BTreeMap<&String, &String> =
+        resolved.0.iter().flat_map(|(_, r, _)| r.sources.values().map(|(path, source)| (path, source))).collect();
     let mut inputs = format!("{:?}\n{:?}\n", ctx.project, ctx.dep_paths);
     for p in batch {
         inputs.push_str(&format!("{}={}\n", p.index, p.file));
@@ -752,18 +757,18 @@ pub(crate) fn test_batch_inputs(ctx: &TestRunContext, batch: &[PlannedTestFile])
     for (path, source) in sources {
         inputs.push_str(&format!("{path} {}\n{source}\n", source.len()));
     }
-    Some(inputs)
+    inputs
 }
 
 /// Compile one batch of the plan as one program. It runs in a process of its
 /// own (`almide test-run-compile`), which prints nothing the run shows: every
 /// diagnostic was printed by the files' own checks, and a gate that ends the
 /// process ends only this compile.
-pub(crate) fn compile_test_batch(ctx: &TestRunContext, batch: &[PlannedTestFile]) -> Result<TestRunProgram, BatchFailure> {
-    compile_test_batch_inner(ctx, batch)
+pub(crate) fn compile_test_batch(ctx: &TestRunContext, batch: &[PlannedTestFile], resolved: ResolvedBatch) -> Result<TestRunProgram, BatchFailure> {
+    compile_test_batch_inner(ctx, batch, resolved)
 }
 
-fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile]) -> Result<TestRunProgram, BatchFailure> {
+fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile], resolved_files: ResolvedBatch) -> Result<TestRunProgram, BatchFailure> {
     let unattributed = |message: String| BatchFailure { message, culprits: vec![] };
     let first = batch.first().map(|p| p.file.clone()).ok_or_else(|| unattributed("no test file".into()))?;
     // Every module any file of the batch reaches, once each, in an order
@@ -773,8 +778,7 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile]) ->
     let mut sources = std::collections::HashMap::new();
     let mut self_versioned = resolve::SelfVersionedNames::new();
     let mut test_files = Vec::new();
-    for p in batch {
-        let (program, resolved, versioned) = resolve_test_file(&p.file, &plan.dep_paths).map_err(unattributed)?;
+    for (p, (program, resolved, versioned)) in batch.iter().zip(resolved_files.0) {
         self_versioned.extend(versioned);
         for m in resolved.modules {
             if loaded.insert(m.0.clone()) {

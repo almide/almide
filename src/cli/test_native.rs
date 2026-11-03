@@ -272,11 +272,12 @@ pub fn cmd_test_run_compile(out: &str, cache: Option<&str>, files: &[String]) {
         .collect();
     let failure = |message: String| crate::compile_driver::BatchFailure { message, culprits: vec![] };
     let verdict = crate::compile_driver::test_run_context().map_err(failure).and_then(|ctx| {
-        let entry = cache.and_then(|dir| ProgramCacheEntry::for_batch(std::path::Path::new(dir), &ctx, &batch));
+        let resolved = crate::compile_driver::resolve_test_batch(&ctx, &batch).map_err(failure)?;
+        let entry = cache.and_then(|dir| ProgramCacheEntry::for_batch(std::path::Path::new(dir), &ctx, &batch, &resolved));
         let program = match entry.as_ref().and_then(ProgramCacheEntry::read) {
             Some(program) => program,
             None => {
-                let program = crate::compile_driver::compile_test_batch(&ctx, &batch)?;
+                let program = crate::compile_driver::compile_test_batch(&ctx, &batch, resolved)?;
                 if let Some(entry) = &entry {
                     entry.write(&program);
                 }
@@ -306,13 +307,18 @@ struct ProgramCacheEntry {
 }
 
 impl ProgramCacheEntry {
-    fn for_batch(root: &std::path::Path, ctx: &crate::compile_driver::TestRunContext, batch: &[crate::compile_driver::PlannedTestFile]) -> Option<Self> {
+    fn for_batch(
+        root: &std::path::Path,
+        ctx: &crate::compile_driver::TestRunContext,
+        batch: &[crate::compile_driver::PlannedTestFile],
+        resolved: &crate::compile_driver::ResolvedBatch,
+    ) -> Option<Self> {
         let exe = std::env::current_exe().ok()?;
         let meta = std::fs::metadata(&exe).ok()?;
         let mtime = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
         let mut settings: Vec<(String, String)> = std::env::vars().filter(|(k, _)| k.starts_with("ALMIDE_")).collect();
         settings.sort();
-        let inputs = crate::compile_driver::test_batch_inputs(ctx, batch)?;
+        let inputs = crate::compile_driver::test_batch_inputs(ctx, batch, resolved);
         let identity = format!("{}\n{}\n{mtime}\n{settings:?}\n{inputs}", exe.display(), meta.len());
         let list: String = batch.iter().map(|p| format!("{}={}\n", p.index, p.file)).collect();
         let cwd = std::env::current_dir().ok()?;
