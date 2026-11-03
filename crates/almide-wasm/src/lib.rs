@@ -210,6 +210,7 @@ mod fs;
 mod fs_meta;
 mod host_env;
 mod host_read_all;
+mod host_text;
 mod host_read_line;
 mod newtype;
 // ADR-0031 D3: a Region argument of a wasm import crosses as (base, len).

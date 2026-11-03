@@ -1700,6 +1700,7 @@ evidence  = [
   { path = "spec/wasm_cross/env_args.almd", class = "fixture" },
   { path = "tests/env_args_verbatim_test.rs", name = "a_program_argument_spelled_double_dash_reaches_env_args_on_every_leg", class = "fixture" },
   { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_serves_env_args_and_sleep_like_native" },
+  { path = "tests/cli_non_utf8_env_test.rs", name = "a_non_utf8_cwd_never_panics_and_an_argument_reads_as_its_lossy_decode", class = "fixture" },
 ]
 [[contract]]
 id        = "C-119"
@@ -1893,6 +1894,8 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_get.almd", class = "fixture" },
   { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_serves_env_args_and_sleep_like_native" },
+  { path = "tests/cli_non_utf8_env_test.rs", name = "a_non_utf8_variable_reads_as_none_on_run_native_run_wasm_and_the_built_binary", class = "fixture" },
+  { path = "tests/stock_p1_raw_bytes_test.rs", name = "the_stock_artifact_reads_non_utf8_host_bytes_as_native_does", class = "fixture" },
 ]
 [[contract]]
 id        = "C-136"
@@ -3577,6 +3580,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_list_dir_multipass.almd", class = "fixture" },
   { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
+  { path = "tests/stock_p1_raw_bytes_test.rs", name = "the_stock_artifact_lists_non_utf8_names_and_paths_as_their_lossy_decode", class = "fixture" },
 ]
 
 # ── fs WRITE-SIDE ERROR TEXT ───────────────────────────────────────────
@@ -5785,6 +5789,7 @@ since     = "0.69.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_vars_remove.almd", class = "fixture" },
+  { path = "tests/stock_p1_raw_bytes_test.rs", name = "the_stock_artifact_reads_non_utf8_host_bytes_as_native_does", class = "fixture" },
 ]
 
 [[contract]]
@@ -5896,4 +5901,30 @@ evidence  = [
   { path = "spec/embedded_cross/net_udp_errors.almd", class = "fixture" },
   { path = "tests/net_udp_p3_cross_test.rs", name = "udp_and_lookup_fixtures_run_alike_on_native_and_the_p3_component", class = "fixture" },
   { path = "tests/net_udp_p3_cross_test.rs", name = "sockets_ship_only_with_udp_ops_and_a_missing_grant_is_the_permission_text", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-449"
+spec      = "ALS-R5"
+title     = "A program argument that is not UTF-8 reads as its lossy decode; a variable that is not UTF-8 stays unreadable, on every leg the implementation controls"
+statement = "ALS-R5 (almide/almide#4391): a String is valid UTF-8, so host text that is not UTF-8 never reaches a program as it was. `env.args()` gives each such argument as `String::from_utf8_lossy` of its bytes (one U+FFFD per maximal invalid subpart), and never panics: on the native binary, under `almide run` and `almide run --target wasm`, and in the stock WASI preview-1 artifact on a host that hands it the raw bytes. A variable whose name or value is not UTF-8 keeps its defined answer on the same legs: `env.get` of it is `none`, as `std::env::var(..).ok()` is, and `env.vars()` leaves it out, so a decoded value is never mistaken for a real one. The artifact checks the bytes itself, so the answer does not depend on the runtime; a stock runtime that refuses such an argument or variable before the program starts (wasmtime rejects them at the host) is a host limitation outside the program: no leg the implementation controls crashes on them. Evidence: spec/embedded_cross/env_non_utf8_host_text.almd is the program; tests/cli_non_utf8_env_test.rs runs it with a non-UTF-8 argument and variable through the built binary, `almide run` and `almide run --target wasm`; tests/stock_p1_raw_bytes_test.rs hosts its stock artifact on preview-1 imports that pass the raw bytes and requires the native binary's output byte for byte."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/env_non_utf8_host_text.almd", class = "fixture" },
+  { path = "tests/cli_non_utf8_env_test.rs", name = "a_non_utf8_variable_reads_as_none_on_run_native_run_wasm_and_the_built_binary", class = "fixture" },
+  { path = "tests/cli_non_utf8_env_test.rs", name = "a_non_utf8_cwd_never_panics_and_an_argument_reads_as_its_lossy_decode", class = "fixture" },
+  { path = "tests/stock_p1_raw_bytes_test.rs", name = "the_stock_artifact_reads_non_utf8_host_bytes_as_native_does", class = "fixture" },
+]
+[[contract]]
+id        = "C-450"
+spec      = "ALS-R6"
+title     = "A directory entry whose name is not UTF-8 lists as its lossy decode, and a stock host's refusal of it is a classified error"
+statement = "ALS-R6 (almide/almide#4391): `fs.list_dir`, `fs.walk` and `fs.glob` list an entry whose name is not UTF-8 as `String::from_utf8_lossy` of the name (one U+FFFD per maximal invalid subpart), sorted with the other names by their decoded bytes, on the native leg and the embedded wasm host; the stock WASI preview-1 artifact decodes the same way on a host that hands it the raw name, and still walks into such a directory by its raw name. `env.cwd` and `fs.temp_dir` likewise answer the lossy decode of a working directory or temp root that is not UTF-8. Stock wasmtime's `fd_readdir` refuses a directory holding such a name (WASI `ilseq`) before the artifact sees any of it; that is a host limitation, answered as the classified error `fs.<call>(\"<dir>\"): the WASI host refuses a name that is not valid UTF-8`, never `wasi errno 25`, a crash or an invalid String. Evidence: spec/embedded_cross/fs_non_utf8_entry_names.almd lists `f\\x80g`, `ok`, `é` and `\\x80z` with all three calls on native and the embedded host (tests/cli_non_utf8_env_test.rs also runs it under `almide run` on both targets, then runs a stock artifact on wasmtime and requires the classified error for each call); tests/stock_p1_raw_bytes_test.rs hosts the stock artifact on preview-1 imports that pass raw names, a raw `PWD` and a raw `TMPDIR`, and requires the decoded, decoded-sorted answers."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/fs_non_utf8_entry_names.almd", class = "fixture" },
+  { path = "tests/cli_non_utf8_env_test.rs", name = "a_non_utf8_entry_name_lists_as_its_lossy_decode_and_stock_wasmtime_refuses_it_by_name", class = "fixture" },
+  { path = "tests/stock_p1_raw_bytes_test.rs", name = "the_stock_artifact_lists_non_utf8_names_and_paths_as_their_lossy_decode", class = "fixture" },
 ]

@@ -484,4 +484,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-446 | A Region crosses the wasm host boundary as (base, len) in the memory's address width: an exported Region stays the host's to write until it releases the address, and a Region lent across the boundary is read and written in place | 0.69.0 | active | fixture | 0 |
 | C-447 | fs.append_bytes is a true append on every leg: it never reads the file, so a file of any size takes the appended bytes and grows by exactly their length | 0.69.0 | active | fixture | 1 |
 | C-448 | net udp and lookup_host on the WASI 0.3 component: over wasi:sockets@0.3 it answers C-442's and C-443's programs byte-identically to native | 0.69.0 | active | fixture | 0 |
+| C-449 | A program argument that is not UTF-8 reads as its lossy decode; a variable that is not UTF-8 stays unreadable, on every leg the implementation controls | 0.69.0 | active | fixture | 0 |
+| C-450 | A directory entry whose name is not UTF-8 lists as its lossy decode, and a stock host's refusal of it is a classified error | 0.69.0 | active | fixture | 0 |
 
