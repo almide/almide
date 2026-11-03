@@ -257,3 +257,14 @@ test "regex lazy quantifiers" {
   )
   assert_eq(regex.replace(regex.new("(?:ab)+?"), "ababab", "<>"), "<><><>")
 }
+
+// #4420: every escape that means one character outside a class means the same
+// character inside one.
+test "regex single-character escapes inside a class" {
+  assert_eq(regex.split(regex.new("[ \\t\\r\\n]+"), "a\r\nb \tc"), ["a", "b", "c"])
+  assert_eq(regex.is_match(regex.new("[\\r]"), "r"), false)
+  assert_eq(regex.is_full_match(regex.new("[\\r]"), "\r"), true)
+  assert_eq(regex.find(regex.new("[^\\r\\n]+"), "ab\r\ncd"), some("ab"))
+  assert_eq(regex.compile("[\\r]") |> result.is_ok, true)
+  assert_eq(regex.compile("[\\q]"), err("unsupported escape \\q in a class"))
+}
