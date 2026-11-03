@@ -10,8 +10,9 @@
 # programs are that small, and the shape a small program runs once is the
 # shape a large one runs in a loop.
 #
-# What it checks: every program on proofs/native-verified-floor.txt whose v0
-# run is under NATIVE_V1_PERF_MIN_IR (1M) instructions — the rest are the perf
+# What it checks: every program on proofs/native-verified-floor.txt, and
+# every shape bench of research/benchmark/perf/v1-shapes/, whose v0 run is
+# under NATIVE_V1_PERF_MIN_IR (1M) instructions — the rest are the perf
 # gate's — is built both ways and run under
 # `valgrind --tool=callgrind --collect-atstart=no` with collection toggled on
 # the binary's `main` (the generated crate's, `almide_*::main`) and on every
@@ -144,7 +145,7 @@ while read -r f; do
   else
     rows+=("ok $f work v0=$w0 v1=$w1 ratio=$r")
   fi
-done < <(grep -E '^spec/' proofs/native-verified-floor.txt)
+done < <(grep -E '^spec/' proofs/native-verified-floor.txt; ls research/benchmark/perf/v1-shapes/*.almd)
 
 for r in "${rows[@]}"; do echo "$r"; done
 # Most of the floor is small; fewer than 20 gated means the scan broke.
