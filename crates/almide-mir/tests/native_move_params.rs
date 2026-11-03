@@ -37,3 +37,16 @@ fn a_param_the_body_only_reads_keeps_borrowing() {
     );
     assert!(rust.contains("fn almd_total(v0: &[i64])"), "{rust}");
 }
+
+#[test]
+fn a_list_concatenated_with_itself_is_copied_not_grown() {
+    // `xs + xs` reads the left list as the right one: growing the left
+    // buffer in place would read the moved-out list.
+    let (rust, _) = certified(
+        "fn twice(n: Int) -> Int = {\n  let xs = [n, n + 1]\n  let ys = xs + xs\n  list.len(ys)\n}\n\
+         fn main() -> Unit = println(int.to_string(twice(3)))\n",
+    );
+    let f = &rust[rust.find("fn almd_twice(").expect("twice")..];
+    let f = &f[..f.find("\n}\n").unwrap_or(f.len())];
+    assert!(f.contains("Vec::with_capacity"), "the self-concatenation is not a copy:\n{f}");
+}

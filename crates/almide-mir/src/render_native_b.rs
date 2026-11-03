@@ -441,9 +441,16 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
     for _ in 0..indent {
         out.push_str("    ");
     }
-    // The left list's last use (#4006 class P): grow its own buffer.
-    if let [CallArg::Handle(l), _] = args.as_slice() {
-        if matches!(at, NTy::Vec | NTy::VecStr) && crate::render_native_move::moving_arg(*l) {
+    // The left list's last use (#4006 class P): grow its own buffer. The
+    // right side must be another value that cannot view the left one's
+    // buffer: an owned list of its own (`xs + xs` reads the left list as the
+    // right one).
+    if let [CallArg::Handle(l), CallArg::Handle(r)] = args.as_slice() {
+        if l != r
+            && matches!(at, NTy::Vec | NTy::VecStr)
+            && matches!(bt, NTy::Vec | NTy::VecStr)
+            && crate::render_native_move::moving_arg(*l)
+        {
             writeln!(
                 out,
                 "let mut {}: {ty} = {{ let mut r: {ty} = {}; r.extend_from_slice({sb}); r }};",
