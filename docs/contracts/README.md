@@ -50,7 +50,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-012 | Const-folded non-finite floats emit named constants | 0.24.0 | active | fixture | 1 |
 | C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 11 |
 | C-014 | Set is insertion-ordered and deterministic | 0.24.0 | active | fixture | 3 |
-| C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 11 |
+| C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 10 |
 | C-016 | UTF-8 codepoint-aware string ops are byte-identical | 0.24.0 | active | fixture | 3 |
 | C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 2 |
 | C-018 | Unicode string predicates match Rust char methods over the full domain | 0.24.0 | active | fixture | 1 |
@@ -67,7 +67,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-029 | int.parse error modes byte-match native ParseIntError | 0.24.0 | active | fixture | 1 |
 | C-030 | hex.encode / hex.decode are byte-identical incl. positional error detail | 0.24.0 | active | fixture | 2 |
 | C-031 | value get/set/remove_path edge cases match the native oracle, which never fails on a path edge case | 0.24.0 | active | fixture | 3 |
-| C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 7 |
+| C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 6 |
 | C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 22 |
 | C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 8 |
 | C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 6 |
@@ -139,7 +139,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 18 |
 | C-102 | List iteration, call-result element materialization, and tail-recursive list traversal byte-match native | 0.27.6 | active | fixture | 5 |
 | C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 8 |
-| C-104 | Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native | 0.27.6 | active | fixture | 7 |
+| C-104 | Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native | 0.27.6 | active | fixture | 6 |
 | C-105 | var/append accumulator loops (scalar, owned-handle, cross-dep, mutual-recursion) byte-match native on wasm | 0.27.6 | active | fixture | 7 |
 | C-106 | Heap value bound from an if/match arm byte-matches native on the v1 wasm path | 0.27.6 | active | fixture | 17 |
 | C-107 | heap Result-of-tuple / Result-of-list Ok payloads round-trip and byte-match native | 0.27.6 | active | fixture | 4 |
@@ -484,6 +484,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-446 | A Region crosses the wasm host boundary as (base, len) in the memory's address width: an exported Region stays the host's to write until it releases the address, and a Region lent across the boundary is read and written in place | 0.69.0 | active | fixture | 0 |
 | C-447 | fs.append_bytes is a true append on every leg: it never reads the file, so a file of any size takes the appended bytes and grows by exactly their length | 0.69.0 | active | fixture | 1 |
 | C-448 | net udp and lookup_host on the WASI 0.3 component: over wasi:sockets@0.3 it answers C-442's and C-443's programs byte-identically to native | 0.69.0 | active | fixture | 0 |
-| C-449 | A program argument that is not UTF-8 reads as its lossy decode; a variable that is not UTF-8 stays unreadable, on every leg the implementation controls | 0.69.0 | active | fixture | 0 |
-| C-450 | A directory entry whose name is not UTF-8 lists as its lossy decode, and a stock host's refusal of it is a classified error | 0.69.0 | active | fixture | 0 |
+| C-451 | A scalar effect fn exported to wasm crosses as its value: the raw export answers the ok Int, Float or Bool itself (nothing for Unit), and an err writes its message to stderr and traps | 0.69.0 | active | fixture | 0 |
 
