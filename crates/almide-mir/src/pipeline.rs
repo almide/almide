@@ -593,6 +593,12 @@ pub(crate) fn source_to_ir(source: &str) -> Result<almide_ir::IrProgram, LowerEr
 /// Callers with a real resolver (the CLI) never need this; the wasmgen
 /// harnesses do, so a fixture with `import path` renders instead of walling.
 pub fn bundled_self_modules(source: &str) -> Vec<(String, almide_lang::ast::Program, bool)> {
+    bundled_self_modules_with(source, &[])
+}
+
+/// [`bundled_self_modules`] plus the bundled modules `extra` names (each with
+/// its bundled dependencies), after the ones the source reaches.
+pub(crate) fn bundled_self_modules_with(source: &str, extra: &[String]) -> Vec<(String, almide_lang::ast::Program, bool)> {
     use std::collections::HashSet;
     fn add(
         name: &str,
@@ -639,6 +645,9 @@ pub fn bundled_self_modules(source: &str) -> Vec<(String, almide_lang::ast::Prog
         std::iter::once(&prog).chain(out.iter().map(|(_, p, _)| p)),
     );
     for name in reached {
+        add(name, &mut out, &mut seen);
+    }
+    for name in extra {
         add(name, &mut out, &mut seen);
     }
     out

@@ -41,6 +41,7 @@ fn self_host_source_to_ir(
 fn link_native_self_host(
     functions: &mut Vec<crate::MirFunction>,
     user_ir: &almide_ir::IrProgram,
+    bundled: almide_ir::IrProgram,
 ) -> Result<Vec<LinkedSelfHost>, LowerError> {
     // A name clash walls at the user fn that holds the name.
     let clash = |name: &str| {
@@ -64,8 +65,18 @@ fn link_native_self_host(
         }
     }
     let user_names: BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
-    let mut linked: Vec<LinkedSelfHost> = Vec::new();
+    if let Some(f) = bundled.functions.iter().find(|f| user_names.contains(f.name.as_str())) {
+        return Err(clash(f.name.as_str()));
+    }
+    // The bundled modules' own bodies (see [`take_bundled_modules`]) link as
+    // siblings, by their `std_` names.
+    let mut linked: Vec<LinkedSelfHost> = vec![LinkedSelfHost {
+        record_layouts: crate::lower::build_record_layouts(&bundled.type_decls),
+        variant_layouts: crate::lower::build_variant_layouts(&bundled.type_decls),
+        ir: bundled,
+    }];
     let mut linked_srcs: BTreeMap<&'static str, usize> = BTreeMap::new();
+    linked_srcs.insert(BUNDLED_ORIGIN, 0);
     let mut done: BTreeSet<String> = BTreeSet::new();
     loop {
         // Retarget registry call names onto impl names, and collect what is missing.
@@ -148,4 +159,179 @@ fn link_native_self_host(
         }
     }
     Ok(linked)
+}
+
+/// The `linked_srcs` key of the bundled modules' bodies: no registry source
+/// is empty, so it never names one.
+const BUNDLED_ORIGIN: &str = "";
+
+/// Whether the native render serves `module.fn` by another route than a
+/// linked bundled body: a registry body, a floor routine, a shim or a list
+/// concat. Such a call keeps its dotted spelling.
+fn natively_served(call: &str) -> bool {
+    registry_served_names().contains(call)
+        || crate::render_native_shims::shim(call).is_some()
+        || crate::native_floor::declared(call).is_some()
+        || crate::native_list_ops::is_list_concat(call)
+}
+
+/// The name a bundled module fn links under on the native render, from the
+/// mangled `almide_rt_<module>_<fn>` the sibling resolution gives its calls:
+/// `std_` keeps it apart from the runtime floor's `almide_rt_` items.
+fn std_link_name(mangled: &str) -> Option<String> {
+    mangled.strip_prefix("almide_rt_").map(|rest| format!("std_{rest}"))
+}
+
+/// Take the bundled stdlib modules out of `ir` (#4006, selfhost-link-v2 on the
+/// native render). The frontend linked them as siblings: a call of a bundled
+/// fn with a pure-Almide body that no registry body serves is a `Named` call
+/// of its mangled `almide_rt_<m>_<f>` (a generic one's mono instance
+/// included), and a `mut` param's write-back is already in place at each call
+/// site. Each such call is retargeted:
+/// - to the dotted `m.f` when the native render serves `m.f` another way
+///   (floor, shim, registry), so that route is unchanged;
+/// - else to `std_<m>_<f>`, the fn the returned program defines: the module
+///   body, renamed, with its own calls retargeted the same way.
+///
+/// The returned bodies are lowered, verified and certified like user fns
+/// (linked, not trusted). A body that reads a module-level binding is left
+/// out (this render threads no module global): its calls resolve nowhere and
+/// wall.
+fn take_bundled_modules(ir: &mut almide_ir::IrProgram) -> almide_ir::IrProgram {
+    use almide_ir::{walk_expr_mut, CallTarget, IrExprKind, IrMutVisitor};
+    use almide_lang::intern::sym;
+    use std::collections::{BTreeMap, BTreeSet};
+    let modules = std::mem::take(&mut ir.modules);
+    // mangled name → (module, fn) for every module fn.
+    let mut index: BTreeMap<String, (String, String)> = BTreeMap::new();
+    for m in &modules {
+        for f in &m.functions {
+            index.insert(
+                user_module_fn_name(m.name.as_str(), f.name.as_str()),
+                (m.name.as_str().to_string(), f.name.as_str().to_string()),
+            );
+        }
+    }
+    struct Rw<'a> {
+        index: &'a BTreeMap<String, (String, String)>,
+        /// The mangled names of the bodies that link.
+        linkable: &'a BTreeSet<String>,
+        /// Inside a module body: its name and its fns with no Almide body.
+        own: Option<(String, BTreeSet<String>)>,
+    }
+    impl IrMutVisitor for Rw<'_> {
+        fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Call { target, .. } = &mut e.kind else { return };
+            // A dotted call in a module body the sibling resolution did not
+            // see (a mono instance's protocol pivot, `float.__int_exact`)
+            // links the same way when its body links. A user fn's dotted
+            // call stays: the lowering's own routes (in-place mutators,
+            // host ops) own it.
+            if let CallTarget::Module { module, func, .. } = target {
+                let mangled = user_module_fn_name(module.as_str(), func.as_str());
+                if self.own.is_some() && self.linkable.contains(&mangled) && !natively_served(&format!("{module}.{func}")) {
+                    *target = CallTarget::Named { name: sym(&std_link_name(&mangled).expect("mangled")) };
+                }
+                return;
+            }
+            let CallTarget::Named { name } = target else { return };
+            if let Some((m, f)) = self.index.get(name.as_str()) {
+                let dotted = format!("{m}.{f}");
+                *target = if natively_served(&dotted) {
+                    CallTarget::Module { module: sym(m), func: sym(f), def_id: None }
+                } else {
+                    CallTarget::Named { name: sym(&std_link_name(name.as_str()).expect("an index key is mangled")) }
+                };
+            } else if let Some((m, intrinsic)) = &self.own {
+                // A bare call of the module's own intrinsic is its floor call.
+                if intrinsic.contains(name.as_str()) {
+                    let f = name.as_str().to_string();
+                    *target = CallTarget::Module { module: sym(m), func: sym(&f), def_id: None };
+                }
+            }
+        }
+    }
+    let linkable: BTreeSet<String> = modules
+        .iter()
+        .flat_map(|m| {
+            let top: BTreeSet<almide_ir::VarId> = m.top_lets.iter().map(|tl| tl.var).collect();
+            m.functions
+                .iter()
+                .filter(move |f| is_pure_almide_fn(f) && !reads_any(f, &top))
+                .map(move |f| user_module_fn_name(m.name.as_str(), f.name.as_str()))
+        })
+        .collect();
+    let mut rw = Rw { index: &index, linkable: &linkable, own: None };
+    for f in ir.functions.iter_mut() {
+        rw.visit_expr_mut(&mut f.body);
+    }
+    for tl in ir.top_lets.iter_mut() {
+        rw.visit_expr_mut(&mut tl.value);
+    }
+    let mut out = almide_ir::IrProgram::default();
+    for m in modules {
+        let top: BTreeSet<almide_ir::VarId> = m.top_lets.iter().map(|tl| tl.var).collect();
+        let intrinsic: BTreeSet<String> =
+            m.functions.iter().filter(|f| !is_pure_almide_fn(f)).map(|f| f.name.as_str().to_string()).collect();
+        rw.own = Some((m.name.as_str().to_string(), intrinsic));
+        for mut f in m.functions {
+            if !is_pure_almide_fn(&f) || reads_any(&f, &top) {
+                continue;
+            }
+            rw.visit_expr_mut(&mut f.body);
+            let Some(name) = std_link_name(&user_module_fn_name(m.name.as_str(), f.name.as_str())) else { continue };
+            f.name = sym(&name);
+            out.functions.push(f);
+        }
+        out.type_decls.extend(m.type_decls);
+    }
+    out
+}
+
+/// Whether `f`'s body reads any of `vars`.
+fn reads_any(f: &almide_ir::IrFunction, vars: &std::collections::BTreeSet<almide_ir::VarId>) -> bool {
+    struct Reads<'a>(&'a std::collections::BTreeSet<almide_ir::VarId>, bool);
+    impl almide_ir::visit::IrVisitor for Reads<'_> {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if let almide_ir::IrExprKind::Var { id } = &e.kind {
+                self.1 |= self.0.contains(id);
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    if vars.is_empty() {
+        return false;
+    }
+    let mut r = Reads(vars, false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut r, &f.body);
+    r.1
+}
+
+/// The bundled modules, not linked into `ir`, that a dotted call in it names
+/// with a pure-Almide body no other route serves.
+fn unloaded_bundled_callees(ir: &almide_ir::IrProgram) -> Vec<String> {
+    use almide_ir::{CallTarget, IrExprKind};
+    struct Scan<'a>(&'a std::collections::BTreeSet<String>, std::collections::BTreeSet<String>);
+    impl almide_ir::visit::IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } = &e.kind {
+                let m = module.as_str();
+                if !self.0.contains(m)
+                    && almide_lang::stdlib_info::is_bundled_module(m)
+                    && !natively_served(&format!("{m}.{func}"))
+                    && almide_ir::mut_args::stdlib_fn_has_almide_body(m, func.as_str())
+                {
+                    self.1.insert(m.to_string());
+                }
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let loaded: std::collections::BTreeSet<String> = ir.modules.iter().map(|m| m.name.as_str().to_string()).collect();
+    let mut scan = Scan(&loaded, Default::default());
+    for f in ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter())) {
+        almide_ir::visit::IrVisitor::visit_expr(&mut scan, &f.body);
+    }
+    scan.1.into_iter().collect()
 }

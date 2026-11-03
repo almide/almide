@@ -687,10 +687,28 @@ fn render_native_parts(
     crate::charge_probe::reset_budget_used();
     crate::lambda_sigs::clear();
     let _strict = crate::lower::StrictValuesGuard::set(true);
-    let ir = {
+    let mut ir = {
         let _slots = SlotHeldGlobalsGuard::set(true);
-        source_to_ir_with(source, &[])?
+        // The bundled stdlib modules the program reaches link as siblings,
+        // the way the frontend links them for every other leg.
+        // A mono instance can call a bundled fn of a module the source never
+        // names (`int.from` at UInt64 reaches `uint64.__to_float`): such a
+        // module is added and the program built again, to a fixpoint.
+        let mut extra: Vec<String> = Vec::new();
+        loop {
+            let ir = source_to_ir_with(source, &bundled_self_modules_with(source, &extra))?;
+            let more = unloaded_bundled_callees(&ir);
+            if more.is_empty() || more.iter().all(|m| extra.contains(m)) {
+                break ir;
+            }
+            for m in more {
+                if !extra.contains(&m) {
+                    extra.push(m);
+                }
+            }
+        }
     };
+    let bundled = take_bundled_modules(&mut ir);
     crate::charge_probe::note_program_regions(almide_ir::meter_plan::program_has_regions(&ir));
     let ir = crate::fan_native::lift_fan_arms(ir)?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
@@ -789,7 +807,7 @@ fn render_native_parts(
         functions.extend(all);
     }
     // #4006: the registry bodies the program calls, linked as certified MIR.
-    let linked = link_native_self_host(&mut functions, &ir)?;
+    let linked = link_native_self_host(&mut functions, &ir, bundled)?;
     if let Some(f) = functions.iter().find(|f| recurses_on_a_heap_arg(f)) {
         return Err(LowerError::Unsupported(format!(
             "native: fn `{}` passes a heap value to its own tail call — no loop conversion on this render (#3550)",
