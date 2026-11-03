@@ -18,6 +18,8 @@ mod fmt_command;
 mod clean;
 mod worker_pool;
 mod test_scratch;
+mod test_merge;
+mod test_native;
 mod cache_bound;
 pub mod test_report;
 mod test_output;

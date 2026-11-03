@@ -799,23 +799,11 @@ pub(super) fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Ar
 /// dirs. Output is captured — see [`run_test_binaries_parallel`].
 /// The second element names the files whose native build FAILED — no test
 /// ran, so their result is a build error, not a verdict (#3424).
-pub(super) fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, cpus: usize, scratch: &std::sync::Arc<TestScratch>) -> (Vec<TestRun>, std::collections::HashSet<String>) {
-    let args = program_args.clone();
-    let scratch = scratch.clone();
-    let mut v: Vec<(TestRun, bool)> = bounded_parallel(fallback.to_vec(), cpus, move |tf: String| {
-        let worker_dir = scratch.native_worker_dir(&tf);
-        let (built, (code, stdout, stderr)) = guard_worker_panic(
-            || match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
-                Ok(bin) => (true, super::test_report::run_native_test_binary(&tf, &bin, &args)),
-                Err(e) => (false, (1, format!("Compile error for {}:\n{}", tf, e), String::new())),
-            },
-            |msg| (false, (1, format!("Compile error for {}:\n{}", tf, msg), String::new())),
-        );
-        ((tf, code, stdout, stderr), built)
-    });
-    v.sort_by(|a, b| a.0.0.cmp(&b.0.0));
-    let unbuilt = v.iter().filter(|(_, built)| !built).map(|(r, _)| r.0.clone()).collect();
-    (v.into_iter().map(|(r, _)| r).collect(), unbuilt)
+pub(super) fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, _cpus: usize, scratch: &std::sync::Arc<TestScratch>) -> (Vec<TestRun>, std::collections::HashSet<String>) {
+    // One crate for every fallback file (#4441), then one process per file.
+    let compiled = super::test_native::compile_native_tests(fallback, no_check, scratch);
+    let unbuilt = compiled.iter().filter(|(_, built)| built.is_err()).map(|(f, _)| f.clone()).collect();
+    (super::commands::run_test_binaries_parallel(compiled, program_args), unbuilt)
 }
 
 /// A file that FAILED on the wasm leg whose native re-run did not build:
