@@ -484,4 +484,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-446 | A Region crosses the wasm host boundary as (base, len) in the memory's address width: an exported Region stays the host's to write until it releases the address, and a Region lent across the boundary is read and written in place | 0.69.0 | active | fixture | 0 |
 | C-447 | fs.append_bytes is a true append on every leg: it never reads the file, so a file of any size takes the appended bytes and grows by exactly their length | 0.69.0 | active | fixture | 1 |
 | C-448 | net udp and lookup_host on the WASI 0.3 component: over wasi:sockets@0.3 it answers C-442's and C-443's programs byte-identically to native | 0.69.0 | active | fixture | 0 |
+| C-452 | An @export(c) fn crosses C at the C ABI table's widths, Int as int64_t; an effect fn answers its ok value, and an err writes its message to stderr and exits 1 | 0.69.0 | active | fixture | 0 |
 
