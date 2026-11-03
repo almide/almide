@@ -22,6 +22,12 @@ use std::path::Path;
 use std::process::Command;
 
 fn run_package(tag: &str, almd: &str, host: &str, args: &[&str]) -> (Option<i32>, String, String) {
+    run_package_with(tag, almd, host, args, &[])
+}
+
+/// [`run_package`] with arguments after the source path too
+/// (`almide src/main.almd --target rust`).
+fn run_package_with(tag: &str, almd: &str, host: &str, args: &[&str], after: &[&str]) -> (Option<i32>, String, String) {
     let dir = std::env::temp_dir().join(format!("almide_export_c_abi_{tag}_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("native")).unwrap();
@@ -34,6 +40,7 @@ fn run_package(tag: &str, almd: &str, host: &str, args: &[&str]) -> (Option<i32>
         .env("ALMIDE_RUN_PROJECT_DIR", dir.join(".run"))
         .args(args)
         .arg(Path::new("src/main.almd"))
+        .args(after)
         .output()
         .expect("spawn almide");
     let _ = std::fs::remove_dir_all(&dir);
@@ -156,7 +163,7 @@ fn the_matrix_builds_as_a_cdylib_and_spells_the_table_types() {
     let (almd, host, _) = matrix();
     let (code, _, stderr) = run_package("cdylib", &almd, &host, &["build", "--cdylib", "-o", "libx"]);
     assert_eq!(code, Some(0), "--cdylib failed\n--- stderr ---\n{stderr}");
-    let (code, rust, stderr) = run_package("emit", &almd, &host, &["--target", "rust"]);
+    let (code, rust, stderr) = run_package_with("emit", &almd, &host, &[], &["--target", "rust"]);
     assert_eq!(code, Some(0), "--target rust failed\n--- stderr ---\n{stderr}");
     for want in [
         "pub extern \"C\" fn __c_x_int(v: i64) -> i64",
