@@ -27,10 +27,19 @@ A type error must never be reported as a wall — that is the trap this control
 exists to defeat (`net.tcp_is_open(0)` fails to CHECK because the handle is not
 an Int literal, which looks identical to a wasm wall if you only build wasm).
 """
-import argparse, json, os, re, subprocess, sys, tempfile
+import argparse, json, os, re, subprocess, sys, tempfile, threading
+from concurrent.futures import ThreadPoolExecutor
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ALMIDE = os.environ.get("ALMIDE_BIN", os.path.join(REPO, "target/release/almide"))
+# Functions are classified in parallel (REACHABILITY_JOBS, default: cores, at
+# most 4). Each worker thread builds natively in its own scratch dir
+# (ALMIDE_RUN_PROJECT_DIR), so the native builds do not serialize on the
+# shared build-dir lock — the same arrangement as tests/shape_matrix_test.rs.
+# Run one function at a time, the sweep was 11.6 min of the Almide gates job
+# (develop run 41566860171). Rows keep the input order whatever the timing.
+JOBS = max(1, int(os.environ.get("REACHABILITY_JOBS") or min(os.cpu_count() or 1, 4)))
+_worker = threading.local()
 
 STDLIB_INFO = os.path.join(REPO, "crates/almide-types/src/stdlib_info.rs")
 
@@ -367,8 +376,14 @@ def programs(f, args, tv="Int"):
 
 
 def run(cmd):
-    p = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO)
+    scratch = getattr(_worker, "scratch", None)
+    env = dict(os.environ, ALMIDE_RUN_PROJECT_DIR=scratch) if scratch else None
+    p = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO, env=env)
     return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+
+def _init_worker(root):
+    _worker.scratch = tempfile.mkdtemp(prefix="w-", dir=root)
 
 
 WALL_RX = re.compile(r"not yet supported by the verified wasm renderer|^wall:", re.M)
@@ -456,13 +471,18 @@ def main():
     wanted = set(a.modules) if a.modules else None
     fns = ci_slice([f for f in every if wanted is None or f["module"] in wanted])
     rows, counts = [], {"PARITY": 0, "GAP": 0, "UNPROBEABLE": 0}
-    for i, f in enumerate(fns, 1):
-        verdict, why = classify(f)
-        counts[verdict] += 1
-        rows.append(dict(**f, verdict=verdict, why=why))
-        print(f"\r  {i}/{len(fns)}  parity={counts['PARITY']} "
-              f"gap={counts['GAP']} unprobeable={counts['UNPROBEABLE']}", end="", file=sys.stderr)
+    scratch_root = tempfile.mkdtemp(prefix="almide-reachability-")
+    print(f"  {JOBS} worker(s)", file=sys.stderr)
+    with ThreadPoolExecutor(JOBS, initializer=_init_worker, initargs=(scratch_root,)) as pool:
+        # map() yields in input order, so the rows (and the JSON) do not
+        # depend on which worker finished first.
+        for i, (f, (verdict, why)) in enumerate(zip(fns, pool.map(classify, fns)), 1):
+            counts[verdict] += 1
+            rows.append(dict(**f, verdict=verdict, why=why))
+            print(f"\r  {i}/{len(fns)}  parity={counts['PARITY']} "
+                  f"gap={counts['GAP']} unprobeable={counts['UNPROBEABLE']}", end="", file=sys.stderr)
     print(file=sys.stderr)
+    subprocess.run(["rm", "-rf", scratch_root])
     if a.json:
         json.dump(rows, open(a.json, "w"), indent=1)
     for r in rows:
