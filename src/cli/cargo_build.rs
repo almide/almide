@@ -629,6 +629,13 @@ fn run_cargo_test_no_run_and_locate_binary(project_dir: &std::path::Path) -> Res
     inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("test").arg("--no-run").arg("--quiet").arg("--message-format=json")
         .current_dir(project_dir);
+    // The crate's own target dir, as the bin and cdylib paths pin theirs. An
+    // inherited `CARGO_TARGET_DIR` sent every test crate's build to one
+    // shared dir, where each links the same `almide_out-<hash>` test binary:
+    // two test files built at once each took whichever binary was there when
+    // its build ended, so a file could run — and pass on — another file's
+    // tests. The lock that orders a build and its copy-out is per crate dir.
+    cmd.arg("--target-dir").arg(project_dir.join("target"));
     // A test binary must run on this machine: never inherit a cross target.
     super::native_target::pin_cargo_target(&mut cmd, None);
 
