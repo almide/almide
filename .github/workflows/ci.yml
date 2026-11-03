@@ -1581,7 +1581,7 @@ jobs:
           sudo mv wasm-pack-*/wasm-pack /usr/local/bin/
           wasm-pack --version
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -1617,6 +1617,19 @@ jobs:
         # The full corpus on a full run; the CI slice (ALMIDE_CI_SLICE, top of
         # this file) on a PR into develop (scripts/lib/determinism-select.sh).
         run: scripts/check-host-determinism.sh
+
+      # Saved from develop only: a PR or merge-queue ref that writes its own
+      # copy (~300-370 MB each) pushes the repo past its 10 GB Actions cache
+      # and evicts entries other jobs depend on. Every ref still restores.
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: always() && github.ref == 'refs/heads/develop'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/wasmgen-harness/target
+            tools/wasmgen-harness-uu/target
+          key: wasmgen-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-wasm/src/**', 'crates/almide-wasi/src/**', 'src/wasm_route.rs', 'src/wasm_leg.rs', 'crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
 
   wasm-browser-determinism:
     # BRANCH PROTECTION: this job's name is a NEW required check on develop.
@@ -1662,7 +1675,7 @@ jobs:
           sudo mv wasm-pack-*/wasm-pack /usr/local/bin/
           wasm-pack --version
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -1702,6 +1715,19 @@ jobs:
         # The full corpus on a full run; the CI slice (ALMIDE_CI_SLICE, top of
         # this file) on a PR into develop (scripts/lib/determinism-select.sh).
         run: scripts/check-browser-determinism.sh
+
+      # Saved from develop only: a PR or merge-queue ref that writes its own
+      # copy (~300-370 MB each) pushes the repo past its 10 GB Actions cache
+      # and evicts entries other jobs depend on. Every ref still restores.
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: always() && github.ref == 'refs/heads/develop'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/wasmgen-harness/target
+            tools/wasmgen-harness-uu/target
+          key: wasmgen-uu-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-wasm/src/**', 'crates/almide-wasi/src/**', 'src/wasm_route.rs', 'src/wasm_leg.rs', 'crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
 
   # ═══════════════════════════════════════════════
   # Lean Proofs (AlmidePerceusBelt + AlmideRaceBelt)
