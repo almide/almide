@@ -953,10 +953,13 @@ What the response holds:
   `(name, value)` pair in wire order.
 - `http.body(resp)` — the transfer-decoded body text, lossy UTF-8.
 
-On wasm, `almide run --target wasm` and the WASI 0.3 component
-(`ALMIDE_COMPONENT_P3=1 --component`, run on wasmtime 46+ with `-S http`)
-serve the whole-response client; the default stock artifact refuses it at
-build. `proofs/target-availability.toml` declares the legs.
+On wasm, `almide run --target wasm` serves the whole-response client, and so
+does the artifact `almide build --target wasm` writes: WASI preview 1 has no
+http client, so a program that calls one builds as a WASI 0.3 component over
+`wasi:http`, with no flag. Run it on wasmtime 46+ with `-S http` — without
+it the runtime refuses the component when it loads, before the program
+runs (the build prints this). `proofs/target-availability.toml` declares the
+legs.
 
 ### `http.get_response(url: String) -> Result[HttpResponse, String]`
 
@@ -1127,10 +1130,16 @@ On the wasm target, `almide run --target wasm` serves `start`, `poll`,
 `read_new`, `wait` and `cancel` with the same behaviour as native — the
 embedded host runs the native call core, so the limit and cancel errors are
 the same text, and dropping the last copy of a handle cancels its call there
-too. A standalone `.wasm` built with `almide build --target wasm` cannot
-carry them yet (there is no stock WASI host for an in-flight call), so
-`almide check --target wasm`, which checks the build route, still refuses
-them.
+too. The standalone `.wasm` that `almide build --target wasm` writes is a
+WASI 0.3 component (run it with `wasmtime run -S http`), and there the
+component itself keeps the clock: `total_ms` and `idle_ms` race a timer
+against the exchange, `poll` and `read_new` give the runtime a turn of about
+a millisecond instead of blocking, and `cancel` (or dropping the last copy)
+abandons the exchange so the runtime closes the connection. The answers
+and the error texts are the same as native's (ADR-0023 §4.3). A program
+that uses the handle together with the whole-response client runs natively
+and as that component, but not on `almide run --target wasm`, which serves
+the two on different hosts (E081 names both).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 

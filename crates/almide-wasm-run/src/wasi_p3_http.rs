@@ -95,7 +95,7 @@ fn http_frame_cell(
 /// `pack(1, len)` with the static E_HTTP text (host-specific wording is
 /// bounded by contract — fixtures assert err-ness). The p3 stream delivers
 /// the DECODED body, so no chunked handling exists here by design.
-fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Function {
+fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns, hc: Option<HcFns>) -> Function {
     let P3Globals { park, g_plen, g_ppos, f_alloc, f_await, .. } = g;
     // Emit-time bisect knob (#1710 PR B bring-up): ALMIDE_P3_HTTP_STOP=N
     // makes the shim answer the static err right after stage N, so a hang
@@ -134,6 +134,8 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
         (10, ValType::I32),
         (8, ValType::I32),
         (10, ValType::I32),
+        (3, ValType::I32),
+        (3, ValType::I64),
     ]);
     // Op 65's lossy header decode (wasi_p3_http_resp.rs, #4390).
     let ll = LossyLocals { k: 78, b0: 79, extra: 80, lo: 81, hi: 82, vlen: 83, ok: 84, j: 85, c: 86, chars: 87 };
@@ -141,7 +143,14 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     let al = AuthLocals { ui_ptr: 60, ui_len: 61, j: 62, b: 63, v: 64, w: 65, dec: 66, dlen: 67, enc: 68, flag: 69 };
     // The port check (wasi_p3_http_err.rs, #4231).
     let pl = PortLocals { e: 70, j: 71, ps: 72, v: 73, ok: 74, b: 75, q: 76, qn: 77 };
+    // `http.start` (op 53, wasi_p3_http_call.rs): the call's block, and where
+    // the trailers value and send's result land — the block's own slots for
+    // a call that outlives this op, the park's for every other op.
+    let (blk, trl_buf, sret) = (88u32, 89u32, 90u32);
+    let (lim_total, lim_idle, now) = (91u32, 92u32, 93u32);
     let mut i = f.instructions();
+    i.i32_const((park + RET + 16) as i32).local_set(trl_buf);
+    i.i32_const((park + SENDRET) as i32).local_set(sret);
     // ── the framed ops (48 / 49 / 65): parse the http_framed cell frame in `b` ──
     // `<len>\n<payload>` cells with CHAR-count lengths (string.len
     // semantics — a char starts at every byte that is not 10xxxxxx):
@@ -163,6 +172,10 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
             i.local_get(tmp).local_set(b_ptr);
             i.local_get(cur).local_get(tmp).i32_sub().local_set(b_len);
         }
+    }
+    if let Some(hf) = hc {
+        hc_open_frame(&mut i, (g, t, fns, hf), (cur, cell_len, frame_end, tmp, digit), (lim_total, lim_idle));
+        hc_open_block(&mut i, g, (a_ptr, a_len, b_ptr, b_len), (blk, trl_buf, sret, tmp));
     }
     i.local_get(cur).local_set(hdr_ptr);
     i.end();
@@ -285,7 +298,7 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.local_get(s64).i64_const(32).i64_shr_u().i32_wrap_i64().local_set(trl_tx);
     i.local_get(s64).i32_wrap_i64().local_set(trl_rx);
     // ok(none): result disc 0 @0, option disc 0 @payload — 8 zeroed bytes.
-    i.i32_const((park + RET) as i32).i64_const(0).i64_store(mem64(16));
+    i.local_get(trl_buf).i64_const(0).i64_store(mem64(0));
     if stop == 14 {
         fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
     }
@@ -297,7 +310,7 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     // The ok(none) buffer at park+RET+16 must stay intact until then.
     i.i32_const(-1).local_set(hws);
     i.i32_const(0).local_set(trl_pend);
-    i.local_get(trl_tx).i32_const((park + RET + 16) as i32).call(I_HTTP_REQ_FWRITE).local_set(n);
+    i.local_get(trl_tx).local_get(trl_buf).call(I_HTTP_REQ_FWRITE).local_set(n);
     i.local_get(n).i32_const(-1).i32_eq().if_(BlockType::Empty);
     i.call(I_WS_NEW).local_set(hws);
     i.local_get(trl_tx).local_get(hws).call(I_WS_JOIN);
@@ -326,6 +339,11 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     // connect and read timeouts. Each setter's result lands in SENDRET,
     // which is free until send. ──
     i.i32_const(t.key_timeout.at).i32_const(t.key_timeout.len).i64_const(30).call(fns.num).local_set(secs);
+    // A call with limits does not read the process-wide default (C-366):
+    // its own timers bound it.
+    i.local_get(op).i32_const(OP_HC_OPEN).i32_eq().if_(BlockType::Empty);
+    i.i64_const(0).local_set(secs);
+    i.end();
     i.i32_const(0).local_set(opts_some);
     i.i32_const(0).local_set(ent);
     i.local_get(secs).i64_const(0).i64_gt_s().if_(BlockType::Empty);
@@ -481,7 +499,13 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     // inline (the aopen convention). While it runs, the host reads the
     // trailers future and the body stream; their completion events drive
     // the loop until the response has landed and both writes retired.
-    i.local_get(request).i32_const((park + SENDRET) as i32).call(I_HTTP_SEND).local_set(n);
+    i.local_get(request).local_get(sret).call(I_HTTP_SEND).local_set(n);
+    if let Some(hf) = hc {
+        i.local_get(op).i32_const(OP_HC_OPEN).i32_eq().if_(BlockType::Empty);
+        let ex = HcOpen { trl_tx, trl_pend, str_tx, str_pend, b_ptr, b_len, sentfut, hws, n };
+        hc_open_tail(&mut i, (g, hf), ex, (blk, (lim_total, lim_idle, now)));
+        i.end();
+    }
     i.local_get(n).i32_const(15).i32_and().i32_const(2).i32_eq().if_(BlockType::Empty);
     i.i32_const(1).local_set(snd_done);
     i.else_();

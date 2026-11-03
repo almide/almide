@@ -12,8 +12,10 @@
 /// answers, the fan prefetch triple (40..=42) and env.os / fs.temp_dir /
 /// env.cwd (27 / 28 / 33) among them — and UDP and name lookup (140..=145,
 /// #4306) over wasi:sockets@0.3 `udp-socket` and `ip-name-lookup`
-/// (wasi_p3_net.rs), and the tcp family (91..=103 but the body-less
-/// `tcp_read_exact`, #3620) over `tcp-socket` (wasi_p3_tcp.rs).
+/// (wasi_p3_net.rs), the tcp family (91..=103 but the body-less
+/// `tcp_read_exact`, #3620) over `tcp-socket` (wasi_p3_tcp.rs), and the
+/// http call handle (53..=59 but the retired streaming step 58, ADR-0023
+/// §4.3) over the same `client.send` (wasi_p3_http_call.rs).
 pub fn serves(op: i32, p3: bool) -> bool {
     // 74: the instance-parallel fan offer (#3003), answered "not served" by
     // both component shims — the guest then runs its chunks sequentially.
@@ -23,6 +25,7 @@ pub fn serves(op: i32, p3: bool) -> bool {
         && (matches!(op, 26 | 29 | 36 | 37 | 40..=49 | 65 | 77)
             || almide_wasm::host_ops::UDP.contains(&op)
             || crate::wasi_p3::tcp_served(op)
+            || crate::wasi_p3::http_call_served(op)
             || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op));
     common || extra
 }
@@ -36,6 +39,23 @@ pub fn serves(op: i32, p3: bool) -> bool {
 /// then [`check`]'s E081, not a preview 1 build.
 pub fn needs_sockets(host_ops: &[i32]) -> bool {
     almide_wasm::host_ops::names_socket_op(host_ops)
+}
+
+/// Whether the default build of `host_ops` is the WASI 0.3 component
+/// because preview 1 cannot carry it: a socket op ([`needs_sockets`]) or an
+/// http client op (`almide_wasm::host_ops::HTTP_CLIENT_FAMILIES`).
+pub fn needs_component(host_ops: &[i32]) -> bool {
+    almide_wasm::host_ops::names_component_op(host_ops)
+}
+
+/// The line `almide build` prints for an http client component: a stock
+/// runtime refuses it AT LOAD unless the run provides wasi:http — not an
+/// `err` the program can read.
+pub fn http_grant_note(output: &str) -> String {
+    format!(
+        "note: {output} is a WASI 0.3 component that imports wasi:http (preview 1 has no http client); a stock runtime \
+         refuses it at load unless the run provides the interface: `wasmtime run -S http {output}`"
+    )
 }
 
 /// The line `almide build` prints for a sockets component: the grant a stock
@@ -89,7 +109,19 @@ pub const COMPONENT_ONLY_OPS: &[i32] = &[65];
 /// Whether `almide run --target wasm` runs this op set as the p3 component:
 /// it names a component-only op and the p3 shim serves all of it.
 pub fn embedded_runs_component(host_ops: &[i32]) -> bool {
-    host_ops.iter().any(|op| COMPONENT_ONLY_OPS.contains(op)) && check(host_ops, true).is_ok()
+    host_ops.iter().any(|op| COMPONENT_ONLY_OPS.contains(op))
+        && check(host_ops, true).is_ok()
+        && !host_ops.iter().any(|op| embedded_core_only(*op))
+}
+
+/// The ops the embedded lane serves on its core host only, although the p3
+/// shim serves them too: the call handle (ADR-0023 §4.3). Under the
+/// embedded component its transport is rt-core's whole-exchange client
+/// (`component_host::RtCoreTransport`), which answers a response only once
+/// it is complete — the handle's streamed reads and its cancel of a running
+/// exchange need the core host's call core.
+fn embedded_core_only(op: i32) -> bool {
+    almide_wasm::host_ops::HTTP_CALL.contains(&op)
 }
 
 /// The refusal for a program no single route of the embedded lane serves: it
@@ -98,6 +130,18 @@ pub fn embedded_runs_component(host_ops: &[i32]) -> bool {
 /// can run all of it.
 pub fn embedded_split(host_ops: &[i32]) -> Option<String> {
     let only = host_ops.iter().copied().find(|op| COMPONENT_ONLY_OPS.contains(op))?;
+    if let Some(call) = host_ops.iter().copied().find(|op| embedded_core_only(*op)) {
+        return Some(format!(
+            "error[E081]: {} (host op {only}) runs only as the WASI 0.3 component and {} (host op {call}) only on the \
+             embedded core-module host, so no embedded route serves this program\n  \
+             reason: ADR-0023 decision 1 keeps the full-response client out of the core host, and the embedded \
+             component's transport answers an exchange only once it is complete, which the call handle's streamed \
+             reads and cancel cannot run on\n  \
+             note: the native target serves both, and so does the stock component `almide build --target wasm` builds",
+            operation_label(only),
+            operation_label(call),
+        ));
+    }
     let other = host_ops.iter().copied().find(|op| !serves(*op, true))?;
     Some(format!(
         "error[E081]: {} (host op {only}) runs only as the WASI 0.3 component and {} (host op {other}) only on the \
@@ -134,7 +178,9 @@ pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
 /// E081 there.
 pub fn serves_service(op: i32) -> bool {
     let fs = matches!(op, 40..=42) || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op);
-    let net = almide_wasm::host_ops::UDP.contains(&op) || almide_wasm::host_ops::TCP.contains(&op);
+    let net = almide_wasm::host_ops::UDP.contains(&op)
+        || almide_wasm::host_ops::TCP.contains(&op)
+        || almide_wasm::host_ops::HTTP_CALL.contains(&op);
     matches!(op, 70..=72 | 75) || (!fs && !net && serves(op, true))
 }
 
