@@ -124,8 +124,8 @@ jobs:
     #
     # MATRIX jobs are the exception: a job-level `if` skips the job BEFORE the
     # matrix expands, so the one skipped check-run is named with the literal
-    # `${{ matrix.shard }}` and the required contexts `Test Rust (shard 1/4)`…
-    # `(shard 4/4)` never receive a run — the first docs-only PR (#1609) sat
+    # `${{ matrix.shard }}` and the required contexts `Test Rust (shard 1/6)`…
+    # `(shard 6/6)` never receive a run — the first docs-only PR (#1609) sat
     # BLOCKED on exactly that. test-rust therefore keeps its job-level guard
     # OFF and guards every STEP instead (`if: env.DOCS_ONLY != 'true'`): the
     # four shards expand, each finishes in seconds, each reports success under
@@ -437,6 +437,103 @@ jobs:
           # over incompressible bytes only costs upload-artifact time.
           compression-level: 0
 
+      # Partition ONCE, here, and give every shard and solo leg an archive of
+      # only its own binaries plus its rows file. A shard used to download the
+      # full 3.4 GB archive (2.3 min) and unpack it twice — 52 s to enumerate
+      # and partition, 59 s to run (run 41558296054). The full archive above
+      # stays for the coverage gate, which judges these same rows files.
+      - name: Pack the per-shard and per-solo-leg archives
+        if: env.PROSE_LANE != 'true'
+        run: |
+          bash scripts/ci-test-shard.sh --pack-archives "$RUNNER_TEMP/almide-pack" 6
+          cp "$RUNNER_TEMP/almide-pack/all-rows.tsv" "$RUNNER_TEMP/almide-pack/rows/"
+          df -h "$RUNNER_TEMP"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-shard-rows
+          path: ${{ runner.temp }}/almide-pack/rows/
+          retention-days: 1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-shard-1
+          path: ${{ runner.temp }}/almide-pack/shard-1/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-shard-2
+          path: ${{ runner.temp }}/almide-pack/shard-2/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-shard-3
+          path: ${{ runner.temp }}/almide-pack/shard-3/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-shard-4
+          path: ${{ runner.temp }}/almide-pack/shard-4/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-shard-5
+          path: ${{ runner.temp }}/almide-pack/shard-5/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-shard-6
+          path: ${{ runner.temp }}/almide-pack/shard-6/
+          retention-days: 1
+          compression-level: 0
+      # One artifact per solo leg (keep in step with SOLO_LEGS in
+      # scripts/ci-test-shard.sh and the test-rust-solo matrix).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-solo-wasm_runtime_cross_target
+          path: ${{ runner.temp }}/almide-pack/solo-wasm_runtime_cross_target/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-solo-wasm_runtime_interp_oracle
+          path: ${{ runner.temp }}/almide-pack/solo-wasm_runtime_interp_oracle/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-solo-wasm_runtime_opt_parity
+          path: ${{ runner.temp }}/almide-pack/solo-wasm_runtime_opt_parity/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-solo-run_parity
+          path: ${{ runner.temp }}/almide-pack/solo-run_parity/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-tests-solo-interp_ledger
+          path: ${{ runner.temp }}/almide-pack/solo-interp_ledger/
+          retention-days: 1
+          compression-level: 0
+
   # The rustc and clippy warning ratchets (#1228 / #1462). Both scripts run
   # their own `cargo check|clippy --release --workspace --all-targets`, so
   # they need no artifact of `build` and sit off the tests' critical path.
@@ -495,7 +592,7 @@ jobs:
     # giant blocks the merge through this name.
     # `warning-ratchets` the same way: it left the required `Build (Linux)`
     # job, and this required job is where its verdict still blocks a merge.
-    needs: [changes, build, build-tests, test-rust-solo, warning-ratchets]
+    needs: [changes, build, build-tests, test-rust-solo, warning-ratchets, checks-pass-order]
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.build-tests.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     # 30, not 20 (#4408): on a full main run the judging steps alone took
@@ -513,6 +610,11 @@ jobs:
         run: |
           echo "::error::Warning ratchets (rustc + clippy) result is '${{ needs.warning-ratchets.result }}' — a warning ratchet failed or did not run"
           exit 1
+      - name: The pass-order and ownership-certifier gates passed (they left the required Emit & Format job)
+        if: needs.checks-pass-order.result != 'success'
+        run: |
+          echo "::error::Emit gates (pass order + ownership certifier) result is '${{ needs.checks-pass-order.result }}' — a gate failed or did not run"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
       - name: CI slice — the change's own files (a full run does nothing)
@@ -520,9 +622,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      # No rust-cache: this job compiles nothing. Its merge step unpacks the
+      # full test archive into ./target (`--extract-to .`), and the cache's
+      # post step saved that as a 3.4 GB entry — a third of the repo's 10 GB
+      # Actions cache, evicting small entries the other jobs depend on (the
+      # grammar gate's corpus memo hit 0 of 2226 files on develop run
+      # 41566860171 and the step re-parsed all of them in 8.4 min).
       # #1732: enumerate from the build job's nextest archive — this
       # job's old enumerate compiled the workspace.
       - name: Install cargo-nextest
@@ -533,6 +638,10 @@ jobs:
       # Each `nextest list --archive-file` below unpacks the whole archive
       # into $TMPDIR, which root-tmpdir (after checkout) put on the root volume.
       - uses: ./.github/actions/fetch-test-archive
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: almide-shard-rows
+          path: ${{ runner.temp }}/almide-shard-rows
       - name: Union of shards + solo legs == full target set
         # #2381: the five solo targets run in `Test Rust (solo …)` jobs, one
         # per giant, so the union is the four shards PLUS the solo rows, each
@@ -542,12 +651,21 @@ jobs:
         run: |
           set -euo pipefail
           A="$TEST_ARCHIVE_FILE"
+          R="$RUNNER_TEMP/almide-shard-rows"
+          # ONE unpack of the full archive; the shards ran the rows files
+          # build-tests partitioned from its own enumeration of the built
+          # tree, so first prove that enumeration IS the archive's.
           bash scripts/ci-test-shard.sh --list-all-archive "$A" | sort > /tmp/all.txt
+          if ! diff -u /tmp/all.txt <(sort "$R/all-rows.tsv"); then
+            echo "SHARD GATE FAIL: build-tests enumerated a different target set than its archive holds — the shards partitioned the wrong list" >&2
+            exit 1
+          fi
           : > /tmp/union.txt
-          for i in 0 1 2 3; do
-            bash scripts/ci-test-shard.sh --list-archive "$i" 4 "$A" >> /tmp/union.txt
+          for i in 1 2 3 4 5 6; do
+            [ -s "$R/shard-$i.tsv" ] || { echo "SHARD GATE FAIL: shard $i/6 has no rows file" >&2; exit 1; }
+            cat "$R/shard-$i.tsv" >> /tmp/union.txt
           done
-          bash scripts/ci-test-shard.sh --list-solo-archive "$A" | tee /tmp/solo.txt >> /tmp/union.txt
+          bash scripts/ci-test-shard.sh --list-solo-rows /tmp/all.txt | tee /tmp/solo.txt >> /tmp/union.txt
           solo_n=$(wc -l < /tmp/solo.txt | tr -d ' ')
           if [ "$solo_n" -ne 5 ]; then
             echo "SHARD GATE FAIL: expected 5 solo targets in the archive, found $solo_n — a solo target was renamed or dropped and its job would run nothing" >&2
@@ -609,12 +727,12 @@ jobs:
         run: bash scripts/ci-corpus-shards.sh --merge /tmp/corpus-shard 2 "$TEST_ARCHIVE_FILE"
       - name: Balance report (informational — imbalance costs time, not coverage)
         run: |
-          for i in 0 1 2 3; do
-            printf '  shard %s/4: %s target(s)\n' "$((i + 1))" "$(bash scripts/ci-test-shard.sh --list-archive "$i" 4 "$TEST_ARCHIVE_FILE" | wc -l | tr -d ' ')"
+          for i in 0 1 2 3 4 5; do
+            printf '  shard %s/6: %s target(s)\n' "$((i + 1))" "$(grep -c . "$RUNNER_TEMP/almide-shard-rows/shard-$((i + 1)).tsv")"
           done
 
   test-rust:
-    # SHARDED (4 ways). The suite's 30 minutes are TEST EXECUTION, not
+    # SHARDED (6 ways). The suite's 30 minutes are TEST EXECUTION, not
     # compilation — 29 of them are `finished in` time — so caching cannot touch
     # it, and neither can a bigger runner: nearly every test shells out to
     # `almide`, and each `almide` compile takes a GLOBAL exclusive flock on the
@@ -622,19 +740,21 @@ jobs:
     # suite inside one machine. Separate JOBS each get their own build dir and
     # therefore their own lock — that is where the parallelism comes from.
     #
-    # 4, not more: the load is extremely skewed (the top 4 targets are half the
-    # total), so past 4 shards the longest single target IS the floor and extra
-    # jobs buy nothing. The former giant, `wasm_runtime_test` (1552 s on run
+    # 6 since 2026-11-03 (was 4): the giants left (solo legs, below), the
+    # per-shard archive cut a shard's fixed setup to ~1 min, and at the ci-test
+    # profile's opt-level 1 the four shards' test time was 6–9 min each with a
+    # single-target floor of ~5 min (shape_matrix), so two more runners still
+    # shorten the slowest shard. The former giant, `wasm_runtime_test` (1552 s on run
     # 33695667642), is split into per-gate `wasm_runtime_*` binaries so the
     # packer can spread it. #2381: the five corpus sweeps that are each ONE
     # 18–35-minute test (`wasm_runtime_{cross_target,interp_oracle,opt_parity,
     # interp_ledger}`, `almide-spine::run_parity`) are no longer partitioned
     # at all — `test-rust-solo` below gives each its own runner — so these
-    # four shards carry the ~6.5 ks of everything else, ~1.6 ks each.
-    name: Test Rust (shard ${{ matrix.shard }}/4)
+    # shards carry everything else.
+    name: Test Rust (shard ${{ matrix.shard }}/6)
     needs: [changes, build, build-tests]
     # No job-level docs-only guard here — see the `changes` job: a skipped
-    # MATRIX job never expands, so the required `Test Rust (shard N/4)`
+    # MATRIX job never expands, so the required `Test Rust (shard N/6)`
     # contexts would stay Expected. Every step is guarded instead; on a
     # docs-only change the four shards expand, run nothing, and report
     # success under their real names in seconds.
@@ -648,11 +768,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 1-based for the job NAME (`Test Rust (shard 1/4)` … `(shard 4/4)`,
+        # 1-based for the job NAME (`Test Rust (shard 1/6)` … `(shard 6/6)`,
         # the required contexts); the packer in scripts/ci-test-shard.sh keeps
         # its 0-based index, handed `shard - 1` below. Renaming these changes
         # the branch-protection contexts — swap them in the same landing.
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.DOCS_ONLY != 'true'
@@ -679,6 +799,8 @@ jobs:
         if: env.DOCS_ONLY != 'true'
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          # This shard's own archive and rows file (build-tests partitioned).
+          archive-artifact: almide-tests-shard-${{ matrix.shard }}
 
       - name: Cargo tests
         if: env.DOCS_ONLY != 'true'
@@ -714,7 +836,7 @@ jobs:
         # and runs this shard's share. `shard-coverage` below proves the four
         # shards' union is the whole set, so a partition bug reads as a RED
         # build rather than a fast green one.
-        run: bash scripts/ci-test-shard.sh --run-archive $(( ${{ matrix.shard }} - 1 )) 4 "$TEST_ARCHIVE_FILE"
+        run: SHARD_LABEL="shard ${{ matrix.shard }}/6" bash scripts/ci-test-shard.sh --run-rows "$(dirname "$TEST_ARCHIVE_FILE")/rows.tsv" "$TEST_ARCHIVE_FILE"
 
   test-rust-solo:
     # The corpus giants, one runner each (#2381). Five test targets are each
@@ -798,6 +920,8 @@ jobs:
         if: env.DOCS_ONLY != 'true'
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          # Only this leg's binaries (and the tool tripwire).
+          archive-artifact: almide-tests-solo-${{ matrix.leg }}
 
       - name: Cargo test (solo ${{ matrix.leg }}, corpus shard ${{ matrix.shard }}/2)
         if: env.DOCS_ONLY != 'true'
@@ -1473,7 +1597,7 @@ jobs:
           sudo mv wasm-pack-*/wasm-pack /usr/local/bin/
           wasm-pack --version
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -1509,6 +1633,19 @@ jobs:
         # The full corpus on a full run; the CI slice (ALMIDE_CI_SLICE, top of
         # this file) on a PR into develop (scripts/lib/determinism-select.sh).
         run: scripts/check-host-determinism.sh
+
+      # Saved from develop only: a PR or merge-queue ref that writes its own
+      # copy (~300-370 MB each) pushes the repo past its 10 GB Actions cache
+      # and evicts entries other jobs depend on. Every ref still restores.
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: always() && github.ref == 'refs/heads/develop'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/wasmgen-harness/target
+            tools/wasmgen-harness-uu/target
+          key: wasmgen-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-wasm/src/**', 'crates/almide-wasi/src/**', 'src/wasm_route.rs', 'src/wasm_leg.rs', 'crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
 
   wasm-browser-determinism:
     # BRANCH PROTECTION: this job's name is a NEW required check on develop.
@@ -1554,7 +1691,7 @@ jobs:
           sudo mv wasm-pack-*/wasm-pack /usr/local/bin/
           wasm-pack --version
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -1594,6 +1731,19 @@ jobs:
         # The full corpus on a full run; the CI slice (ALMIDE_CI_SLICE, top of
         # this file) on a PR into develop (scripts/lib/determinism-select.sh).
         run: scripts/check-browser-determinism.sh
+
+      # Saved from develop only: a PR or merge-queue ref that writes its own
+      # copy (~300-370 MB each) pushes the repo past its 10 GB Actions cache
+      # and evicts entries other jobs depend on. Every ref still restores.
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: always() && github.ref == 'refs/heads/develop'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/wasmgen-harness/target
+            tools/wasmgen-harness-uu/target
+          key: wasmgen-uu-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-wasm/src/**', 'crates/almide-wasi/src/**', 'src/wasm_route.rs', 'src/wasm_leg.rs', 'crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
 
   # ═══════════════════════════════════════════════
   # Lean Proofs (AlmidePerceusBelt + AlmideRaceBelt)
@@ -1837,6 +1987,54 @@ jobs:
         if: steps.rel.outputs.skip != 'true'
         run: bash proofs/coverage.sh --check
 
+  # Split out of `checks` (Emit & Format, ~25 min on develop run
+  # 41566860171): the pass-order shuffle alone was 7.1 min of it. The four
+  # steps need only the release binary. Not a required context: the required
+  # `shard-coverage` waits for it and refuses to go green unless it passed.
+  checks-pass-order:
+    name: Emit gates (pass order + ownership certifier)
+    needs: [changes, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PROSE_LANE: ${{ needs.changes.outputs.prose_only == 'true' && needs.changes.outputs.docs_only == 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.PROSE_LANE != 'true'
+      - uses: ./.github/actions/root-tmpdir
+        if: env.PROSE_LANE != 'true'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+      - name: Setup
+        if: env.PROSE_LANE != 'true'
+        run: chmod +x /tmp/almide-bin/almide
+
+      # #2186: the declared pass edges are the WHOLE ordering truth. Under
+      # three seeded random orders the edges permit, every spec/lang and
+      # spec/wasm_cross program must emit byte-identical Rust.
+      - name: Pass-order shuffle (#2186 — byte-identical Rust under every order the declared dependency edges permit)
+        if: env.PROSE_LANE != 'true'
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-pass-shuffle.sh
+
+      - name: Pass-order shuffle negative controls (#2186 — an order-dependent or panicking stand-in turns the gate red)
+        if: env.PROSE_LANE != 'true'
+        run: bash scripts/check-pass-shuffle-negative.sh
+
+      # #2231: the native ownership certifier re-derives every occurrence's
+      # use from the final IR and checks the passes' verdicts; the corpus's
+      # violations are a shrink-only ledger (proofs/ownership-certifier-baseline.txt).
+      - name: Ownership certifier (#2231 — every corpus violation is in the shrink-only ledger, none new, none silently gone)
+        if: env.PROSE_LANE != 'true'
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-ownership-certifier.sh
+
+      - name: Ownership certifier negative controls (#2231 — a new violation, a vanished one, a panic and an empty corpus each turn the gate red)
+        if: env.PROSE_LANE != 'true'
+        run: bash scripts/check-ownership-certifier-negative.sh
+
   checks:
     name: Emit & Format
     # `changes` is read for the lane flag only. The explicit `if` keeps the
@@ -2079,28 +2277,6 @@ jobs:
 
       - name: Walker gate negative controls (#2186 — each ownership-decision shape turns the gate red)
         run: bash scripts/check-walker-reads-annotations-negative.sh
-
-      # #2186: the declared pass edges are the WHOLE ordering truth. Under
-      # three seeded random orders the edges permit, every spec/lang and
-      # spec/wasm_cross program must emit byte-identical Rust.
-      - name: Pass-order shuffle (#2186 — byte-identical Rust under every order the declared dependency edges permit)
-        if: env.PROSE_LANE != 'true'
-        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-pass-shuffle.sh
-
-      - name: Pass-order shuffle negative controls (#2186 — an order-dependent or panicking stand-in turns the gate red)
-        if: env.PROSE_LANE != 'true'
-        run: bash scripts/check-pass-shuffle-negative.sh
-
-      # #2231: the native ownership certifier re-derives every occurrence's
-      # use from the final IR and checks the passes' verdicts; the corpus's
-      # violations are a shrink-only ledger (proofs/ownership-certifier-baseline.txt).
-      - name: Ownership certifier (#2231 — every corpus violation is in the shrink-only ledger, none new, none silently gone)
-        if: env.PROSE_LANE != 'true'
-        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-ownership-certifier.sh
-
-      - name: Ownership certifier negative controls (#2231 — a new violation, a vanished one, a panic and an empty corpus each turn the gate red)
-        if: env.PROSE_LANE != 'true'
-        run: bash scripts/check-ownership-certifier-negative.sh
 
       - name: ALS element coverage (every syntax element rowed; UNWRITTEN shrink-only — the freeze precondition)
         run: bash scripts/check-als-element-coverage.sh
