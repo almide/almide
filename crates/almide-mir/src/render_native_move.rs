@@ -215,8 +215,8 @@ thread_local! {
 }
 
 thread_local! {
-    static STATIC_STRS: std::cell::RefCell<std::collections::BTreeSet<ValueId>> =
-        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+    static STATIC_STRS: std::cell::RefCell<std::collections::BTreeMap<ValueId, String>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 /// The string literals of the function being rendered: values an
@@ -227,7 +227,7 @@ pub(crate) fn set_static_strs(func: &MirFunction) {
         .ops
         .iter()
         .filter_map(|op| match op {
-            Op::Alloc { dst, init: crate::Init::Str(_), .. } => Some(*dst),
+            Op::Alloc { dst, init: crate::Init::Str(s), .. } => Some((*dst, s.clone())),
             _ => None,
         })
         .collect();
@@ -235,7 +235,14 @@ pub(crate) fn set_static_strs(func: &MirFunction) {
 }
 
 pub(crate) fn is_static_str(v: ValueId) -> bool {
-    STATIC_STRS.with(|m| m.borrow().contains(&v))
+    STATIC_STRS.with(|m| m.borrow().contains_key(&v))
+}
+
+/// A string literal read as a `&str` operand (#4006, no-perf-loss): the
+/// literal itself, as the standard codegen passes it, instead of the static
+/// block's view (a load of its header, its length and its bytes' address).
+pub(crate) fn static_str_operand(v: ValueId) -> Option<String> {
+    STATIC_STRS.with(|m| m.borrow().get(&v).map(|s| format!("{s:?}")))
 }
 
 thread_local! {
@@ -334,4 +341,37 @@ pub(crate) fn set_moving_args(
 /// `v` is an arg of the call being rendered that may be moved.
 pub(crate) fn moving_arg(v: ValueId) -> bool {
     MOVING.with(|m| m.borrow().contains(&v))
+}
+
+thread_local! {
+    static REBOUND: std::cell::RefCell<std::collections::BTreeSet<ValueId>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// The values of the function being rendered that a `SetLocal` rebinds, and
+/// its params: a Rust binding that outlives one definition.
+pub(crate) fn set_rebound(func: &MirFunction) {
+    let mut set: std::collections::BTreeSet<ValueId> = func.params.iter().map(|p| p.value).collect();
+    set.extend(func.ops.iter().filter_map(|op| match op {
+        Op::SetLocal { local, .. } => Some(*local),
+        _ => None,
+    }));
+    REBOUND.with(|m| *m.borrow_mut() = set);
+}
+
+/// The move of a dying value's binding `code` (#4006, no-perf-loss): a value
+/// bound once (`let`, never rebound, not a param) moves as itself — the
+/// binding is never read again, and Rust's drop flag covers its scope end —
+/// where `std::mem::take` would build a default in its place and drop it
+/// later. Anything else (a rebound slot, a field place) is taken.
+pub(crate) fn take_expr(code: &str) -> String {
+    let once = code
+        .strip_prefix('v')
+        .and_then(|n| n.parse::<u32>().ok())
+        .is_some_and(|n| !REBOUND.with(|m| m.borrow().contains(&ValueId(n))));
+    if once && !drill_no_moves() {
+        code.to_string()
+    } else {
+        format!("std::mem::take(&mut {code})")
+    }
 }

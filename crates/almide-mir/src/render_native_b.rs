@@ -446,8 +446,9 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
         if matches!(at, NTy::Vec | NTy::VecStr) && crate::render_native_move::moving_arg(*l) {
             writeln!(
                 out,
-                "let mut {}: {ty} = {{ let mut r: {ty} = std::mem::take(&mut {a}); r.extend_from_slice({sb}); r }};",
-                var(*d)
+                "let mut {}: {ty} = {{ let mut r: {ty} = {}; r.extend_from_slice({sb}); r }};",
+                var(*d),
+                crate::render_native_move::take_expr(&a)
             )
             .unwrap();
             return Ok(());
@@ -518,8 +519,9 @@ fn render_concat_in_place(call: NativeCall<'_>, tys: &mut BTreeMap<ValueId, NTy>
     // copied before any edit), the left one first as v0's `AlmideConcat`
     // appends into an owned left and prepends only onto a borrowed one.
     let editable = |v: &ValueId, t: NTy| dying(v, t) && !crate::render_native_move::is_static_str(*v);
-    let left = |a: &ValueId, b: &ValueId, tb: NTy| format!("std::mem::take(&mut {}).concat({})", var(*a), as_str_arg(&var(*b), tb));
-    let right = |a: &ValueId, b: &ValueId, ta: NTy| format!("std::mem::take(&mut {}).prepend({})", var(*b), as_str_arg(&var(*a), ta));
+    let operand = |v: &ValueId, t: NTy| crate::render_native_move::static_str_operand(*v).unwrap_or_else(|| as_str_arg(&var(*v), t));
+    let left = |a: &ValueId, b: &ValueId, tb: NTy| format!("{}.concat({})", crate::render_native_move::take_expr(&var(*a)), operand(b, tb));
+    let right = |a: &ValueId, b: &ValueId, ta: NTy| format!("{}.prepend({})", crate::render_native_move::take_expr(&var(*b)), operand(a, ta));
     let expr = if editable(a, ta) && tb.is_stringy() {
         left(a, b, tb)
     } else if editable(b, tb) && ta.is_stringy() {
@@ -805,6 +807,8 @@ fn render_else(
         let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
         let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
         let arm_own = !known.contains(&v);
+        // Every heap join is declared unset (#4006, no-perf-loss): both arms
+        // assign it, so a default built and dropped per evaluation buys nothing.
         let (decl, join_t, rhs) = match t {
             // #3532: a borrow join holds the arm's shared reference.
             NTy::VecRef | NTy::StrRef if borrows.contains(d) => (
@@ -818,22 +822,22 @@ fn render_else(
                 var(v),
             ),
             NTy::Str => (
-                format!("let mut {}: AlmideString = AlmideString::new();", var(*d)),
+                format!("let mut {}: AlmideString;", var(*d)),
                 NTy::Str,
                 format!("{}.clone()", var(v)),
             ),
             NTy::StrRef => (
-                format!("let mut {}: AlmideString = AlmideString::new();", var(*d)),
+                format!("let mut {}: AlmideString;", var(*d)),
                 NTy::Str,
                 format!("AlmideString::from({})", var(v)),
             ),
             NTy::Vec => (
-                format!("let mut {}: Vec<i64> = Vec::new();", var(*d)),
+                format!("let mut {}: Vec<i64>;", var(*d)),
                 NTy::Vec,
                 format!("{}.clone()", var(v)),
             ),
             NTy::VecRef => (
-                format!("let mut {}: Vec<i64> = Vec::new();", var(*d)),
+                format!("let mut {}: Vec<i64>;", var(*d)),
                 NTy::Vec,
                 format!("{}.to_vec()", var(v)),
             ),
@@ -848,7 +852,7 @@ fn render_else(
                 format!("{}.clone()", var(v)),
             ),
             NTy::VecStr | NTy::VecStrRef => (
-                format!("let mut {}: Vec<AlmideString> = Vec::new();", var(*d)),
+                format!("let mut {}: Vec<AlmideString>;", var(*d)),
                 NTy::VecStr,
                 if t == NTy::VecStr { format!("{}.clone()", var(v)) } else { format!("{}.to_vec()", var(v)) },
             ),

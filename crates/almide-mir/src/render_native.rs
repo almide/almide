@@ -414,6 +414,40 @@ fn seed_param_ntys(
     Ok(tys)
 }
 
+/// A string literal's binding that nothing reads (#4006, no-perf-loss): every
+/// read of it rendered the literal itself as a `&str` operand
+/// (`render_native_move::static_str_operand`), so its static block view is
+/// built and dropped per evaluation for nothing. The binding goes; a static
+/// block's drop is a no-op, so nothing else changes.
+fn drop_unread_static_strs(out: String) -> String {
+    let lines: Vec<&str> = out.lines().collect();
+    let name_of = |l: &str| -> Option<String> {
+        let t = l.trim_start();
+        let rest = t.strip_prefix("let mut ")?;
+        let (name, tail) = rest.split_once(": AlmideString = { static S: crate::almide_str_block::AlmideStrStatic<")?;
+        tail.ends_with("AlmideString::from_static(&S) };").then(|| name.to_string())
+    };
+    let used = |name: &str| {
+        lines.iter().filter(|l| {
+            l.match_indices(name).any(|(at, _)| {
+                let before = l[..at].chars().next_back().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+                let after = l[at + name.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+                before && after
+            })
+        })
+        .count()
+    };
+    let mut kept = String::with_capacity(out.len());
+    for l in &lines {
+        if name_of(l).is_some_and(|n| used(&n) == 1) {
+            continue;
+        }
+        kept.push_str(l);
+        kept.push('\n');
+    }
+    kept
+}
+
 /// The owned counterpart of a borrowed param type: what a MOVE param (#4006
 /// class P) holds.
 pub(crate) fn owned_nty(t: NTy) -> NTy {
@@ -472,6 +506,8 @@ fn render_fn(
     // the render breaks there (crate::render_native_addr::flag_exits).
     let flag_exits = crate::render_native_addr::flag_exits(func);
     crate::render_native_move::set_static_strs(func);
+    crate::render_native_addr::clear_str_fields();
+    crate::render_native_move::set_rebound(func);
     // Interpolation chains built in one buffer (crate::render_native_interp).
     let chains = crate::render_native_interp::chains(func);
     crate::render_native_move::set_stack_lits(func, &user_fns.keys().copied().collect());
@@ -547,7 +583,7 @@ fn render_fn(
             {
                 let t = tys[src];
                 tys.insert(*dst, t);
-                line!("let mut {} = std::mem::take(&mut {});", var(*dst), var(*src));
+                line!("let mut {} = {};", var(*dst), crate::render_native_move::take_expr(&var(*src)));
             }
             Op::SetLocal { local, src }
                 if tys.get(src).is_some_and(|t| {
@@ -557,10 +593,10 @@ fn render_fn(
             {
                 let t = tys[src];
                 if tys.contains_key(local) {
-                    line!("{} = std::mem::take(&mut {});", var(*local), var(*src));
+                    line!("{} = {};", var(*local), crate::render_native_move::take_expr(&var(*src)));
                 } else {
                     tys.insert(*local, t);
-                    line!("let mut {} = std::mem::take(&mut {});", var(*local), var(*src));
+                    line!("let mut {} = {};", var(*local), crate::render_native_move::take_expr(&var(*src)));
                 }
             }
             // Rung-5 closures slab: a FuncRef is the lambda's DISPATCH-TABLE index
@@ -706,6 +742,7 @@ fn finish_native_fn(
         out.push('\n');
     }
     out.push_str("}\n");
+    let mut out = drop_unread_static_strs(out);
     let ret_nty = if lifted_wrap { Some(NTy::Res) } else { func.ret.map(|v| tys[&v]) };
     // T1-1: patch every strict-cut marker with the now-known typed default
     // (never observed — the region verdict is Err by the time a cut fires).
@@ -1143,9 +1180,13 @@ pub(crate) fn render_dup(
             line!("let mut {} = {}.clone();", var(*dst), var(*src));
         }
         NTy::StrRef => {
-            // Dup of a borrowed param mints a fresh owned handle.
             tys.insert(*dst, NTy::Str);
-            line!("let mut {} = AlmideString::from({});", var(*dst), var(*src));
+            match crate::render_native_addr::str_field_of(*src) {
+                // A borrowed record field's string: share the field's handle.
+                Some(place) => line!("let mut {} = {place}.clone();", var(*dst)),
+                // Dup of a borrowed param mints a fresh owned handle.
+                None => line!("let mut {} = AlmideString::from({});", var(*dst), var(*src)),
+            }
         }
         NTy::Vec => {
             tys.insert(*dst, NTy::Vec);
