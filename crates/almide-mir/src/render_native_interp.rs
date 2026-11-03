@@ -162,7 +162,7 @@ pub(crate) fn render_final(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueI
 pub(crate) fn printed_by(func: &MirFunction, at: usize, dst: ValueId) -> Option<usize> {
     let ops = &func.ops;
     let j = (at + 1..ops.len()).find(|&j| !crate::render_native_move::bookkeeping(&ops[j]))?;
-    let prints = matches!(&ops[j], Op::Call { func: crate::RtFn::PrintStr, args, dst: None }
+    let prints = matches!(&ops[j], Op::Call { func: crate::RtFn::PrintStr, args, dst: None, .. }
         if matches!(args.as_slice(), [CallArg::Handle(v)] if *v == dst));
     let mut vals = Vec::new();
     let other_use = ops.iter().enumerate().any(|(k, op)| {
@@ -244,7 +244,7 @@ pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<
     let mut skip = BTreeSet::new();
     let mut prints = BTreeMap::new();
     for (j, op) in ops.iter().enumerate() {
-        let Op::Call { func: crate::RtFn::PrintStr, args, dst: None } = op else { continue };
+        let Op::Call { func: crate::RtFn::PrintStr, args, dst: None, .. } = op else { continue };
         let [CallArg::Handle(v)] = args.as_slice() else { continue };
         let Some(at) = occurs.get(v) else { continue };
         let [d, p] = at.as_slice() else { continue };
