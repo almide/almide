@@ -528,11 +528,12 @@ fn render_fn(
         }
         if let Some((n, is_bool)) = scalar_prints.get(&i) {
             if tys.get(n) == Some(&NTy::I64) {
+                used_shims.push(crate::render_native_shims::PRINT_SHIMS);
                 if *is_bool {
-                    line!("println!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }});", var(*n));
+                    line!("rt_println_fmt(format_args!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }}));", var(*n));
                 } else {
                     // By value: a reference would pin the local to memory.
-                    line!("println!(\"{{}}\", {{ {} }});", var(*n));
+                    line!("rt_println_fmt(format_args!(\"{{}}\", {{ {} }}));", var(*n));
                 }
                 continue;
             }
@@ -548,6 +549,7 @@ fn render_fn(
             ) {
                 printed.insert(j);
                 tys.insert(*dst, NTy::Str);
+                used_shims.push(crate::render_native_shims::PRINT_SHIMS);
                 line!("{code}");
                 continue;
             }
@@ -578,6 +580,19 @@ fn render_fn(
                 ops.nth(1);
                 continue;
             }
+        }
+        if let Some((code, done)) = crate::render_native_addr::single_concat(func, i, &mut tys, &mut addrs) {
+            line!("{code}");
+            if done {
+                continue;
+            }
+            tys.insert(func.ops.get(i).and_then(|op| match op {
+                Op::CallFn { args, .. } => match args.get(1) {
+                    Some(crate::CallArg::Handle(x)) => Some(*x),
+                    _ => None,
+                },
+                _ => None,
+            }).expect("a list `+`"), NTy::VecStr);
         }
         if let Some(append) = crate::render_native_append::list_self_append(func, i, &tys, &borrows.arms) {
             line!("{append}");
@@ -639,6 +654,15 @@ fn render_fn(
                 let t = tys[src];
                 tys.insert(*dst, t);
                 line!("let mut {} = {};", var(*dst), crate::render_native_move::take_expr(&var(*src)));
+            }
+            // An error carrier over an owned string nothing reads again takes it.
+            Op::Prim { kind: crate::PrimKind::ResMakeErrStr, dst: Some(d), args }
+                if args.len() == 1
+                    && tys.get(&args[0]) == Some(&NTy::Str)
+                    && crate::render_native_move::last_use(func, i, args[0], NTy::Str, &borrows.arms) =>
+            {
+                tys.insert(*d, NTy::Res);
+                line!("let {}: Result<i64, AlmideString> = Err({});", var(*d), crate::render_native_move::take_expr(&var(args[0])));
             }
             Op::SetLocal { local, src }
                 if tys.get(src).is_some_and(|t| {

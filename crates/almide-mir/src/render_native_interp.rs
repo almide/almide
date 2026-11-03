@@ -107,9 +107,6 @@ pub(crate) fn chains(func: &MirFunction) -> Chains {
                 }
             }
         }
-        if steps.len() < 2 {
-            continue;
-        }
         pieces.reverse();
         let mut skip: Vec<usize> = steps[1..].to_vec();
         let mut rendered = Vec::with_capacity(pieces.len());
@@ -145,6 +142,12 @@ pub(crate) fn chains(func: &MirFunction) -> Chains {
                 }
             }
         }
+        // One step is a chain too where it is printed (straight into
+        // `println!`, no string built). Built into a string, one step stays a
+        // concatenation: `from_fmt` costs more than formatting one integer.
+        if steps.len() < 2 && printed_by(func, last, dst).is_none() {
+            continue;
+        }
         out.skip.extend(skip);
         out.finals.insert(last, (dst, rendered));
     }
@@ -179,10 +182,38 @@ pub(crate) fn printed_by(func: &MirFunction, at: usize, dst: ValueId) -> Option<
 /// The `println!` a printed chain renders as.
 pub(crate) fn render_print(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
     let (template, args) = fmt_parts(pieces, tys)?;
-    Some(format!("println!(\"{template}\"{args});"))
+    Some(format!("rt_println_fmt(format_args!(\"{template}\"{args}));"))
 }
 
 fn render_final_opt(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
+    use crate::render_native::NTy;
+    // Strings only: copied into one exact-size block, no formatter.
+    if pieces.iter().all(|p| matches!(p, Piece::Lit(_) | Piece::Str(_))) {
+        let parts = pieces
+            .iter()
+            .map(|p| match p {
+                Piece::Lit(s) => Some(format!("\"{}\"", almide_base::rust_lit::escape_rust_str(s))),
+                Piece::Str(v) => {
+                    let t = *tys.get(v)?;
+                    let code = crate::render_native::var(*v);
+                    match t {
+                        NTy::Str => Some(crate::render_native::as_str_arg(&code, t).strip_prefix('&').map_or_else(
+                            || crate::render_native::as_str_arg(&code, t),
+                            |c| format!("{c}.as_str()"),
+                        )),
+                        NTy::StrRef => Some(code),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect::<Option<Vec<String>>>()?;
+        return Some(format!(
+            "let mut {}: AlmideString = AlmideString::join::<&str>(&[{}], \"\");",
+            crate::render_native::var(dst),
+            parts.join(", ")
+        ));
+    }
     let (template, args) = fmt_parts(pieces, tys)?;
     Some(format!("let mut {}: AlmideString = AlmideString::from_fmt(format_args!(\"{template}\"{args}));", crate::render_native::var(dst)))
 }

@@ -14,13 +14,22 @@
 
 use super::render_native::NTy;
 
+/// A printed line goes to stdout in ONE write, its newline included, as v0's
+/// buffered stdout hands it on (#4006, no-perf-loss): `println!` writes each
+/// piece on its own, and stdout's line buffer scans every piece for a
+/// newline. The bytes, the lock and the line flush are println!'s; a failed
+/// write prints the line again through `print!`, which fails the same way
+/// and panics with std's own message. Under the fan runtime the line goes
+/// through its `print!` (render_native_fan::FAN_LINE).
+pub(crate) const PRINT_SHIMS: &str = "fn almide_v1_line(line: &[u8]) {\n    if std::io::Write::write_all(&mut std::io::stdout().lock(), line).is_err() { print!(\"{}\", String::from_utf8_lossy(line)) }\n}\nfn rt_println_fmt(args: std::fmt::Arguments<'_>) {\n    struct Line { buf: [u8; 256], n: usize, spill: Vec<u8> }\n    impl std::fmt::Write for Line {\n        fn write_str(&mut self, s: &str) -> std::fmt::Result {\n            if self.spill.is_empty() && self.n + s.len() < self.buf.len() {\n                self.buf[self.n..self.n + s.len()].copy_from_slice(s.as_bytes());\n                self.n += s.len();\n            } else {\n                if self.spill.is_empty() { self.spill.extend_from_slice(&self.buf[..self.n]); }\n                self.spill.extend_from_slice(s.as_bytes());\n            }\n            Ok(())\n        }\n    }\n    let mut l = Line { buf: [0; 256], n: 0, spill: Vec::new() };\n    let _ = std::fmt::Write::write_fmt(&mut l, args);\n    if l.spill.is_empty() { l.buf[l.n] = b'\\n'; almide_v1_line(&l.buf[..=l.n]) } else { l.spill.push(b'\\n'); almide_v1_line(&l.spill) }\n}\nfn rt_print_str(s: &str) { rt_println_fmt(format_args!(\"{}\", s)) }";
+
 const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("int.to_string", &[NTy::I64],
             Some(NTy::Str),
             "fn rt_int_to_string(n: i64) -> AlmideString { AlmideString::from_i64(n) }"),
     ("print_str", &[NTy::Str],
             None,
-            "fn rt_print_str(s: &str) { println!(\"{}\", s); }"),
+            PRINT_SHIMS),
     // The §13 abort convention's message channel (assert desugar, time-ctor
     // negative trap): stderr line, exact v0 oracle behavior.
     ("eprintln", &[NTy::Str],
@@ -38,10 +47,10 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     // full-Unicode discipline carries over unchanged.
     ("string.to_upper", &[NTy::Str],
             Some(NTy::Str),
-            "fn rt_string_to_upper(s: &str) -> AlmideString {\n    // C-412: a non-ASCII scalar whose mapping holds ASCII stays unchanged.\n    let mut out = String::with_capacity(s.len());\n    for c in s.chars() { let m = c.to_uppercase(); if !c.is_ascii() && m.clone().any(|x| x.is_ascii()) { out.push(c) } else { out.extend(m) } }\n    AlmideString::from(out)\n}"),
+            "fn rt_string_to_upper(s: &str) -> AlmideString {\n    // ASCII maps byte by byte (the v0 runtime's fast path).\n    if s.is_ascii() { return AlmideString::from(s.to_ascii_uppercase()); }\n    // C-412: a non-ASCII scalar whose mapping holds ASCII stays unchanged.\n    let mut out = String::with_capacity(s.len());\n    for c in s.chars() { let m = c.to_uppercase(); if !c.is_ascii() && m.clone().any(|x| x.is_ascii()) { out.push(c) } else { out.extend(m) } }\n    AlmideString::from(out)\n}"),
     ("string.to_lower", &[NTy::Str],
             Some(NTy::Str),
-            "fn rt_string_to_lower(s: &str) -> AlmideString {\n    // C-412: walk str::to_lowercase (Final_Sigma context) in step with each scalar's span.\n    let full = s.to_lowercase();\n    let mut lowered = full.chars();\n    let mut out = String::with_capacity(full.len());\n    for c in s.chars() { let span: String = lowered.by_ref().take(c.to_lowercase().count()).collect(); if !c.is_ascii() && span.chars().any(|x| x.is_ascii()) { out.push(c) } else { out.push_str(&span) } }\n    AlmideString::from(out)\n}"),
+            "fn rt_string_to_lower(s: &str) -> AlmideString {\n    // ASCII maps byte by byte (the v0 runtime's fast path).\n    if s.is_ascii() { return AlmideString::from(s.to_ascii_lowercase()); }\n    // C-412: walk str::to_lowercase (Final_Sigma context) in step with each scalar's span.\n    let full = s.to_lowercase();\n    let mut lowered = full.chars();\n    let mut out = String::with_capacity(full.len());\n    for c in s.chars() { let span: String = lowered.by_ref().take(c.to_lowercase().count()).collect(); if !c.is_ascii() && span.chars().any(|x| x.is_ascii()) { out.push(c) } else { out.push_str(&span) } }\n    AlmideString::from(out)\n}"),
     // #4006: the v0 oracle's body (stdlib/bool.almd).
     ("bool.to_string", &[NTy::I64],
             Some(NTy::Str),
