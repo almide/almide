@@ -26,8 +26,8 @@ pub(crate) fn emit_map_reserve() -> Function {
     i.local_get(cap).local_get(la).i32_sub().local_get(esz).i32_ge_u().if_(BlockType::Empty);
     i.local_get(block).return_();
     i.end();
-    // grow: newcap = max(cap * 2, 4 * esz)
-    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
+    // grow: newcap = max(cap * 2, 4 * esz), the doubling saturated (#4396)
+    crate::runtime_alloc::emit_double_cap_sat(&mut i, cap);
     i.local_get(cap).local_get(esz).i32_const(2).i32_shl().i32_lt_u().if_(BlockType::Empty);
     i.local_get(esz).i32_const(2).i32_shl().local_set(cap);
     i.end();

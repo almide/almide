@@ -182,12 +182,17 @@ pub(crate) fn emit_str_append() -> (Function, crate::helper_sig::HelperSig) {
     let mut i = f.instructions();
     i.local_get(dst).i32_load(len_memarg()).local_set(la);
     i.local_get(src).i32_load(len_memarg()).local_set(lb);
+    // #4396: `la + lb` SATURATED, held in `endp` until the window's byte
+    // loop claims it. `s + s` sums two lengths of ONE block, which can pass
+    // 2^32 though each fits: wrapped, the sum passed the capacity test below
+    // and the bytes were written past the block's end.
+    crate::runtime_alloc::emit_add_len_sat(&mut i, la, lb, endp);
     // In-place window: a heap block (>= the static line end), owned
     // outright (rc == 1), with capacity for the grown length.
     i.local_get(dst).global_get(G_LINE_END).i32_ge_u();
     i.local_get(dst).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq();
     i.i32_and();
-    i.local_get(la).local_get(lb).i32_add();
+    i.local_get(endp);
     i.local_get(dst).i32_load(word(almide_layout::CAP.offset)).i32_le_u();
     i.i32_and();
     i.if_(BlockType::Empty);
@@ -227,7 +232,7 @@ pub(crate) fn emit_str_append() -> (Function, crate::helper_sig::HelperSig) {
     // keep the slack in cap: the policy $list_push and $map_reserve
     // already use, applied where the allocator's own rounding stops.
     // Below the ceiling nothing changes — the class slack still serves.
-    i.local_get(la).local_get(lb).i32_add();
+    i.local_get(endp);
     i.i32_const((16 << (FREELIST_CLASSES - 1)) - almide_layout::PAYLOAD as i32);
     i.i32_gt_u();
     i.local_get(dst).global_get(G_LINE_END).i32_ge_u();
@@ -237,12 +242,13 @@ pub(crate) fn emit_str_append() -> (Function, crate::helper_sig::HelperSig) {
     i.if_(BlockType::Empty);
     sig.branch();
     {
-        // want = max(la + lb, cap * 2); a cap whose double wraps reads as
-        // 0 under the unsigned compare and falls back to the exact size,
-        // where $alloc's own frontier guard takes the defined abort.
-        i.local_get(dst).i32_load(word(almide_layout::CAP.offset)).i32_const(1).i32_shl().local_set(want);
-        i.local_get(want).local_get(la).local_get(lb).i32_add().i32_lt_u().if_(BlockType::Empty);
-        i.local_get(la).local_get(lb).i32_add().local_set(want);
+        // want = max(la + lb, cap * 2), both saturated (#4396): a request
+        // past what wasm32 holds stays one, and $alloc refuses it in the
+        // defined C-197 form.
+        i.local_get(dst).i32_load(word(almide_layout::CAP.offset)).local_set(want);
+        crate::runtime_alloc::emit_double_cap_sat(&mut i, want);
+        i.local_get(want).local_get(endp).i32_lt_u().if_(BlockType::Empty);
+        i.local_get(endp).local_set(want);
         i.end();
         i.local_get(want).call(F_ALLOC).local_set(out);
         sig.op(fresh, 'i');

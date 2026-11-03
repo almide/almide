@@ -1,0 +1,87 @@
+// @contract: C-353
+// #4397: every Matrix PRODUCER, fed the edge and mismatched inputs it accepts,
+// yields a matrix whose rows all have row 0's width. The kernels index every
+// row at row 0's width (`transpose`, `*`, `split_cols_even`, the zero rows of
+// `gather_rows`), so the invariant is what keeps their reads inside each row:
+// `from_lists` enforces it (the constructor half of this contract) and every
+// other producer preserves it. Each result is printed with its transpose,
+// which reads every row at row 0's width.
+//
+// The cells: the dimension constructors (negative and zero extents), the
+// zip-truncating pair family on mismatched shapes (`+`, `-`, `/`, the fused
+// scale-add, `broadcast_add_row` with a short and a long bias), the unary
+// maps, the product, the row movers (`slice_rows` past the end,
+// `gather_rows` with out-of-range and negative indices), the column movers
+// (`split_cols_even` with an uneven and an oversized split, `concat_cols`
+// with empty members), `concat_rows` with an empty member, and the three
+// byte decoders. (`zip_with`, a closure-taking composition over `from_lists`,
+// is pinned by matrix_composition_family.)
+fn show(name: String, m: Matrix) -> Unit = println("${name}: r=${matrix.rows(m)} c=${matrix.cols(m)} ${matrix.to_lists(m)} t=${matrix.to_lists(matrix.transpose(m))}")
+
+fn main() -> Unit = {
+  let a = matrix.from_lists([
+    [1.0, 2.0, 3.0],
+    [4.0, 5.0, 6.0]
+  ])
+  let b = matrix.from_lists([
+    [1.0, 2.0],
+    [3.0, 4.0],
+    [5.0, 6.0]
+  ])
+  let e = matrix.zeros(0, 0)
+  show("zeros", matrix.zeros(2, 3))
+  show("ones_neg_rows", matrix.ones(-1, 3))
+  show("zeros_neg_cols", matrix.zeros(2, -3))
+  show("add_zip", a + b)
+  show("sub_zip", a - b)
+  show("div_zip", a / b)
+  show("fma_zip", matrix.scale(a, 2.0) + matrix.scale(b, 3.0))
+  show("neg", -a)
+  show("scale", matrix.scale(a, 0.5))
+  show("map", matrix.map(a, (x) => x * 10.0))
+  show("bias_short", matrix.broadcast_add_row(a, [10.0]))
+  show("bias_long", matrix.broadcast_add_row(a, [10.0, 20.0, 30.0, 40.0]))
+  show("transpose", matrix.transpose(a))
+  show("mul", a * b)
+  show("mul_empty", a * e)
+  show("slice_past_end", matrix.slice_rows(a, 1, 9))
+  show("gather_oob", matrix.gather_rows(a, [1, 7, -1, 0]))
+  show("gather_empty", matrix.gather_rows(e, [0, 1]))
+  for p in matrix.split_cols_even(a, 2) {
+    show("split_uneven", p)
+  }
+  for p in matrix.split_cols_even(a, 4) {
+    show("split_over", p)
+  }
+  show(
+    "concat_cols",
+    matrix.concat_cols([
+      a,
+      e,
+      matrix.from_lists([
+        [7.0],
+        [8.0]
+      ])
+    ]),
+  )
+  show("concat_cols_empty_first", matrix.concat_cols([e, a]))
+  show("concat_rows", matrix.concat_rows([a, e, a]))
+  show("from_f64", matrix.from_bytes_f64_le(matrix.to_bytes_f64_le(a), 0, 3, 2) ?? e)
+  show("from_f32", matrix.from_bytes_f32_le(matrix.to_bytes_f32_le(a), 0, 3, 2) ?? e)
+  // f16 1.0..6.0, little-endian (0x3C00, 0x4000, 0x4200, 0x4400, 0x4500, 0x4600)
+  let h = bytes.from_list([
+    0,
+    60,
+    0,
+    64,
+    0,
+    66,
+    0,
+    68,
+    0,
+    69,
+    0,
+    70
+  ])
+  show("from_f16", matrix.from_bytes_f16_le(h, 0, 3, 2) ?? e)
+}
