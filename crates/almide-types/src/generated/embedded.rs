@@ -14022,7 +14022,10 @@ fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
   if q != end then err(__jp_at("json: invalid number", base, p))
   else {
     let s = __jp_substr(base, p, end)
-    let is_float = string.contains(s, ".") or string.contains(s, "e") or string.contains(s, "E")
+
+
+    let lead = if prim.load8(base + p) == 45 then p + 1 else p
+    let is_float = __jp_digits(base, end, lead) < end
     if is_float then match float.parse(s) {
       ok(f) => ok((value.float(f), end)),
       err(m) => err(m),
@@ -37954,10 +37957,17 @@ fn string_ends_with(s: String, suffix: String) -> Bool = {
 
 
 
+
+
+
+
 fn __sk_step(pa: Int, d: Int, t: Int, k: Int, c: Int) -> Int =
-  if k > 0 and prim.load8(pa + k * d) != c then __sk_step(pa, d, t, prim.load64(t + (k - 1) * 8), c)
-  else if prim.load8(pa + k * d) == c then k + 1
-  else k
+  if prim.load8(pa + k * d) == c then k + 1
+  else if k == 0 then 0
+  else if k > 1 and t == 0 then 0 - 1
+  else __sk_step(pa, d, t, if k == 1 then 0 else prim.load64(t + (k - 1) * 8), c)
+
+
 
 fn __sk_fill(pa: Int, d: Int, nlen: Int, t: Int, q: Int, k: Int) -> Int = if q >= nlen then 0
 else {
@@ -37967,18 +37977,29 @@ else {
 }
 
 
-fn __sk_table(pa: Int, d: Int, nlen: Int, t: Int) -> Int = {
-  prim.store64(t, 0)
-  __sk_fill(pa, d, nlen, t, 1, 0)
-}
+fn __sk_lead(p: Int, d: Int, e: Int, c: Int) -> Int = if p == e then e
+else if prim.load8(p) == c then p
+else __sk_lead(p + d, d, e, c)
+
+
+
+
+
+
 
 
 fn __sk_scan(ha: Int, d: Int, slen: Int, pa: Int, nlen: Int, t: Int, i: Int, k: Int) -> Int =
   if slen - i < nlen - k then 0 - 1
   else {
-    let k1 = __sk_step(pa, d, t, k, prim.load8(ha + i * d))
-    if k1 == nlen then i + 1 - nlen
-    else __sk_scan(ha, d, slen, pa, nlen, t, i + 1, k1)
+    let j = if k > 0 then i
+    else (__sk_lead(ha + i * d, d, ha + (slen - nlen + 1) * d, prim.load8(pa)) - ha) * d
+    if j > slen - nlen + k then 0 - 1
+    else {
+      let k1 = __sk_step(pa, d, t, k, prim.load8(ha + j * d))
+      if k1 < 0 then 0 - 2
+      else if k1 == nlen then j + 1 - nlen
+      else __sk_scan(ha, d, slen, pa, nlen, t, j + 1, k1)
+    }
   }
 
 
@@ -37996,24 +38017,32 @@ fn __sk_next(sbase: Int, slen: Int, nbase: Int, nlen: Int, t: Int, from: Int) ->
 
 
 
+
+
+
+
+fn __sk_find(ha: Int, d: Int, slen: Int, pa: Int, nlen: Int) -> Int = {
+  let r = __sk_scan(ha, d, slen, pa, nlen, 0, 0, 0)
+  if r != 0 - 2 then r
+  else {
+    let tbl = prim.alloc_list(nlen)
+    let t = prim.handle(tbl) + 12
+    let _t = __sk_fill(pa, d, nlen, t, 1, 0)
+    __sk_scan(ha, d, slen, pa, nlen, t, 0, 0)
+  }
+}
+
+
 fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then 0
 else if nlen > slen then 0 - 1
-else {
-  let tbl = prim.alloc_list(nlen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(nbase, 1, nlen, t)
-  __sk_next(sbase, slen, nbase, nlen, t, 0)
-}
+else __sk_find(sbase, 1, slen, nbase, nlen)
 
 
 
 fn __rfind_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then slen
 else if nlen > slen then 0 - 1
 else {
-  let tbl = prim.alloc_list(nlen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(nbase + nlen - 1, 0 - 1, nlen, t)
-  let r = __sk_scan(sbase + slen - 1, 0 - 1, slen, nbase + nlen - 1, nlen, t, 0, 0)
+  let r = __sk_find(sbase + slen - 1, 0 - 1, slen, nbase + nlen - 1, nlen)
   if r < 0 then r else slen - r - nlen
 }
 
@@ -38047,10 +38076,11 @@ else {
 }
 
 fn __count_nonempty(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen > slen then 0
+else if nlen <= 2 then __count_scan(sbase, slen, nbase, nlen, 0, 0, 0)
 else {
   let tbl = prim.alloc_list(nlen)
   let t = prim.handle(tbl) + 12
-  let _t = __sk_table(nbase, 1, nlen, t)
+  let _t = __sk_fill(nbase, 1, nlen, t, 1, 0)
   __count_scan(sbase, slen, nbase, nlen, t, 0, 0)
 }
 
@@ -38160,16 +38190,25 @@ fn __empty_split(s: String) -> List[String] = {
   result
 }
 
-fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
-  let sh = prim.handle(s)
-  let slen = prim.load32(sh + 4)
-  let tbl = prim.alloc_list(seplen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(seph + 12, 1, seplen, t)
+
+
+fn __split_with(sh: Int, slen: Int, seph: Int, seplen: Int, t: Int) -> List[String] = {
   let nseps = __count_scan(sh + 12, slen, seph + 12, seplen, t, 0, 0)
   let result = prim.alloc_list_str(nseps + 1)
   let _x = __split_fill(prim.handle(result), sh, slen, seph, seplen, t, 0, 0)
   result
+}
+
+fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  if seplen <= 2 then __split_with(sh, slen, seph, seplen, 0)
+  else {
+    let tbl = prim.alloc_list(seplen)
+    let t = prim.handle(tbl) + 12
+    let _t = __sk_fill(seph + 12, 1, seplen, t, 1, 0)
+    __split_with(sh, slen, seph, seplen, t)
+  }
 }
 
 @implements("string.split")
@@ -38232,9 +38271,18 @@ fn __rep_do(s: String, from: String, to: String) -> String = {
   let flen = prim.load32(fh + 4)
   let th = prim.handle(to)
   let tlen = prim.load32(th + 4)
-  let tbl = prim.alloc_list(flen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(fh + 12, 1, flen, t)
+  if flen <= 2 then __rep_with(h, slen, fh, flen, th, tlen, 0)
+  else {
+    let tbl = prim.alloc_list(flen)
+    let t = prim.handle(tbl) + 12
+    let _t = __sk_fill(fh + 12, 1, flen, t, 1, 0)
+    __rep_with(h, slen, fh, flen, th, tlen, t)
+  }
+}
+
+
+
+fn __rep_with(h: Int, slen: Int, fh: Int, flen: Int, th: Int, tlen: Int, t: Int) -> String = {
   let count = __count_scan(h + 12, slen, fh + 12, flen, t, 0, 0)
   let delta = tlen - flen
   let rlen = slen + count * delta
