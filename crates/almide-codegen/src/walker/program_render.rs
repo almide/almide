@@ -336,6 +336,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         repr_named_types: std::rc::Rc::new(repr_named_types),
         newtype_ctors: std::rc::Rc::new(newtype_ctors),
         fn_err_ty: None,
+        temps: Default::default(),
     };
     register_ctor_to_enum(&mut ctx, program);
 
