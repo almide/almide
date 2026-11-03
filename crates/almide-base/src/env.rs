@@ -220,6 +220,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_TEST_ABORT_PROBE", Flag, Runtime, "marks a native testing.assert_aborts child (ADR-0029) so `panic` takes the C-219 abort path there; set by the parent, never by hand"),
     sw("ALMIDE_TEST_LAX_WASM", Flag, Gate, "let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run"),
     sw("ALMIDE_TEST_LEDGER", Value, Runtime, "the completion-ledger file a native `almide test` binary appends each finished test's name to (#4255): set by the runner, never by hand"),
+    sw("ALMIDE_TEST_MODULE", Value, Runtime, "the prefix a test file's tests carry in the native test run's one binary (#4441), so a testing.assert_aborts child finds its entry: set by the runner, never by hand"),
     sw("ALMIDE_TEST_SIGNALLED_CALL_URL", Value, Harness, "the loopback URL that turns the almide-rt-core http test's re-run of itself into the signalled-call child (#3857): it spawns a missing command while a call waits on that URL; set by the parent test, never by hand"),
     sw("ALMIDE_TEST_VERBOSE", Flag, Tool, "show the full cargo / rustc output of the `almide test` harness build"),
     sw("ALMIDE_TEST_WASM_RUNNER", Value, Tool, "`wasmtime` runs the wasm leg of `almide test` on the `wasmtime` CLI (the stock `to_wasi` artifact) instead of the embedded host every `almide` binary carries (#3046) — the comparison route; unset is the embedded host"),
