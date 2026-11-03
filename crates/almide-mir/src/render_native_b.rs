@@ -83,6 +83,10 @@ fn render_list_get_scalar(
         return Err(wall("native: ListGet on a non-list value"));
     }
     used_shims.push(IDX_GET_SHIM);
+    // The shim checks the index, then reads (render_native_bounds).
+    let slot = crate::render_native_bounds::Slot { base: *list, idx: Some(*idx), k: 0 };
+    crate::render_native_bounds::check(slot);
+    crate::render_native_bounds::access(slot);
     tys.insert(*dst, NTy::I64);
     let borrow = if lt == NTy::Vec { "&" } else { "" };
     line!(
@@ -117,6 +121,10 @@ fn render_list_set_scalar(
         return Err(wall("native: ListSet on a non-owned list"));
     }
     used_shims.push(IDX_SET_SHIM);
+    // The shim checks the index, then stores (render_native_bounds).
+    let slot = crate::render_native_bounds::Slot { base: *list, idx: Some(*idx), k: 0 };
+    crate::render_native_bounds::check(slot);
+    crate::render_native_bounds::store(slot);
     line!("almide_idx_set(&mut {}, {}, {});", var(*list), var(*idx), var(*val));
     Ok(())
 }
