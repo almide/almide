@@ -50,3 +50,13 @@ fn a_list_concatenated_with_itself_is_copied_not_grown() {
     let f = &f[..f.find("\n}\n").unwrap_or(f.len())];
     assert!(f.contains("Vec::with_capacity"), "the self-concatenation is not a copy:\n{f}");
 }
+
+#[test]
+fn a_slot_that_starts_at_a_literal_is_read_as_the_slot() {
+    // `acc` starts at "" and is rebound each round: its later reads are the
+    // slot's string, never the literal it started at.
+    let (rust, _) = certified(
+        "fn main() -> Unit = println([1, 2, 3] |> list.fold(\"\", (acc, n) => acc + int.to_string(n)))\n",
+    );
+    assert!(!rust.contains(".prepend(\"\")"), "the slot is read as its first literal:\n{rust}");
+}
