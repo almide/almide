@@ -681,18 +681,20 @@ mod availability_tests {
     #[test]
     fn native_only_functions_are_left_out_of_the_catalogue() {
         let unavailable = wasm_unavailable(TARGET_AVAILABILITY);
-        assert!(unavailable.contains("http.start"));
+        // Since ADR-0023 §4.3 the http client builds as the WASI 0.3
+        // component, so its rows lost the stock-p1 leg: its wasm leg runs on
+        // stock wasmtime with the grants the artifact imports (#4471).
+        assert!(!unavailable.contains("http.start"));
+        assert!(!needs_embedded("let x = http.start(r, l)"));
         let cat = build();
         // A row the embedded host serves stays, its wasm leg run there.
         let unserved = |n: &String| unavailable.contains(n) && !embedded_only().contains(n);
         assert!(!cat
             .iter()
             .any(|s| unserved(&format!("{}.{}", s.module, s.func))));
-        // `http.start` walls only the stock artifact (stock-p1): the embedded
-        // host serves the call handle, so the row stays.
         assert!(
             cat.iter().any(|s| s.module == "http" && s.func == "start"),
-            "a row the embedded host serves stays"
+            "a row the stock component serves stays"
         );
         assert!(
             cat.iter()
