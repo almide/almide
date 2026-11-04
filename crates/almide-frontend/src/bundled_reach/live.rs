@@ -69,7 +69,8 @@ pub const TEST_SYNTHESIZED: &[(&str, &str)] = &[
 ///   whitelist admits it, and links no other (#4458).
 ///
 /// What the wasm emitter still finds missing after this, the wasm link
-/// relowers from the whole module (`src/wasm_leg.rs`, `link_self_host`).
+/// relowers with the missing functions and what they reach in the module
+/// (`src/wasm_leg.rs`, `link_self_host`).
 ///
 /// `roots` are the sources compiled whole (the entry program and the user's
 /// modules); `explicit` are the bundled modules already loaded by an
