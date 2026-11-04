@@ -521,9 +521,10 @@ fn link_self_host(
     /// method names the body names, which reach fns without demanding a
     /// surface.
     ///
-    /// The walk clones the body ONCE and walks the owned copy:
-    /// `map_children` consumes its node, and cloning at every level instead
-    /// copied each subtree once per ancestor — O(size x depth) (#4289).
+    /// The walk reads the body in place ([`BodyWalk`]): cloning at every
+    /// level once copied each subtree once per ancestor — O(size x depth)
+    /// (#4289) — and cloning each body once per round still cost a copy of
+    /// the program per round (#4458).
     ///
     /// An error value whose type can reach a Float is displayed at emission
     /// wherever it meets a String channel: `main`'s abort renders it through
@@ -539,9 +540,19 @@ fn link_self_host(
         refs: HashSet<String>,
         err_float: bool,
     }
-    fn scan_body_owned(e: crate::ir::IrExpr, s: &mut BodyScan<'_>) -> crate::ir::IrExpr {
+    /// A body's walk for [`BodyScan`].
+    struct BodyWalk<'s, 'a> {
+        s: &'s mut BodyScan<'a>,
+    }
+    impl almide_ir::visit::IrVisitor for BodyWalk<'_, '_> {
+        fn visit_expr(&mut self, e: &crate::ir::IrExpr) {
+            scan_body_node(e, self.s);
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    fn scan_body_node(e: &crate::ir::IrExpr, s: &mut BodyScan<'_>) {
         use crate::ir::{CallTarget, IrExprKind};
-        scan_node(&e, &mut s.keys);
+        scan_node(e, &mut s.keys);
         s.err_float |= matches!(
             &e.ty,
             crate::types::Ty::Applied(crate::types::TypeConstructorId::Result, a)
@@ -569,7 +580,6 @@ fn link_self_host(
             }
             _ => {}
         }
-        e.map_children(&mut |c| scan_body_owned(c, s))
     }
     /// The demands of every body the program can REACH (#4317). The roots
     /// are the entry program (its fns and top-level lets), every module's
@@ -644,7 +654,7 @@ fn link_self_host(
         };
         let scan = |e: &crate::ir::IrExpr, module: Option<&str>| {
             let mut s = BodyScan { module, keys: HashSet::new(), refs: HashSet::new(), err_float: false };
-            scan_body_owned(e.clone(), &mut s);
+            almide_ir::visit::IrVisitor::visit_expr(&mut BodyWalk { s: &mut s }, e);
             BodyScan { module: None, keys: s.keys, refs: s.refs, err_float: s.err_float }
         };
         for f in &ir.functions {
@@ -675,7 +685,7 @@ fn link_self_host(
     /// Every surface a lowered body names, REACHED OR NOT (#4458): what
     /// [`scan_node`] demands of every expression of every function and
     /// top-level `let`, and a module fn's bare calls as `<module>.<fn>`.
-    fn mentioned_surfaces(ir: &crate::ir::IrProgram, out: &mut HashSet<String>) {
+    fn mentioned_surfaces(ir: &crate::ir::IrProgram, only: Option<&HashSet<String>>, out: &mut HashSet<String>) {
         use almide_ir::visit::{walk_expr, IrVisitor};
         struct Mentions<'a> {
             module: Option<&'a str>,
@@ -703,13 +713,15 @@ fn link_self_host(
             }
         }
         let mut walk = |module: Option<&str>, e: &crate::ir::IrExpr| Mentions { module, out: &mut *out }.visit_expr(e);
-        for f in &ir.functions {
-            walk(None, &f.body);
+        if only.is_none() {
+            for f in &ir.functions {
+                walk(None, &f.body);
+            }
+            for tl in &ir.top_lets {
+                walk(None, &tl.value);
+            }
         }
-        for tl in &ir.top_lets {
-            walk(None, &tl.value);
-        }
-        for m in &ir.modules {
+        for m in ir.modules.iter().filter(|m| only.is_none_or(|o| o.contains(m.name.as_str()))) {
             for f in &m.functions {
                 walk(Some(m.name.as_str()), &f.body);
             }
@@ -729,6 +741,10 @@ fn link_self_host(
     // Each missing bundled function is relowered for once (a surface the
     // module does not declare must not loop the link).
     let mut tried: HashSet<String> = HashSet::new();
+    // What the lowered bodies mention only grows: a round walks just the
+    // modules loaded or relowered since the last one (`None`: everything).
+    let mut mentioned: HashSet<String> = HashSet::new();
+    let mut fresh: Option<HashSet<String>> = None;
     loop {
         let mut needed = HashSet::new();
         scan_program(ir, &impls, &loaded, &mut needed);
@@ -795,8 +811,7 @@ fn link_self_host(
                 None => roots.extend(almide_frontend::bundled_reach::compiler_called_fns(module, whole)),
             }
             let keep = almide_frontend::bundled_reach::reach_within(module, whole, &roots);
-            let mut mod_prog = whole.clone();
-            mod_prog.decls.retain(|d| match d {
+            let mut mod_prog = whole.clone_retaining(|d| match d {
                 crate::ast::Decl::Fn { name, .. } => keep.contains(name.as_str()),
                 _ => true,
             });
@@ -807,6 +822,9 @@ fn link_self_host(
             let mut mod_ir = crate::lower::lower_module(module, &mod_prog, &checker.env, &checker.type_map, None);
             checker.env.import_table = saved_table;
             drop_registered_intrinsic_stubs(module, &mut mod_ir);
+            if let Some(f) = fresh.as_mut() {
+                f.insert(module.to_string());
+            }
             match present {
                 Some(i) => ir.modules[i] = mod_ir,
                 None => ir.modules.push(mod_ir),
@@ -836,8 +854,9 @@ fn link_self_host(
         // helpers it calls by name when their anchor is carried, and what
         // those reach inside the source (`reach_within`). It never carries a
         // function nothing can resolve, which loading the whole source did.
-        let mut wanted: HashSet<String> = HashSet::new();
-        mentioned_surfaces(ir, &mut wanted);
+        mentioned_surfaces(ir, fresh.as_ref(), &mut mentioned);
+        fresh = Some(HashSet::new());
+        let mut wanted: HashSet<String> = mentioned.clone();
         wanted.extend(needed.iter().cloned());
         wanted.extend(almide_wasm::EMITTER_RESOLVED_SURFACES.iter().map(|s| s.to_string()));
         let demanded: Vec<(&'static str, HashSet<String>)> = order
@@ -880,8 +899,7 @@ fn link_self_host(
             if linked_fns.get(src) == Some(&keep) {
                 continue;
             }
-            let mut mod_prog = whole.clone();
-            mod_prog.decls.retain(|d| match d {
+            let mut mod_prog = whole.clone_retaining(|d| match d {
                 crate::ast::Decl::Fn { name, .. } => keep.contains(name.as_str()),
                 _ => true,
             });
@@ -917,6 +935,9 @@ fn link_self_host(
                 None,
             );
             checker.env.import_table = saved_table;
+            if let Some(f) = fresh.as_mut() {
+                f.insert(name.clone());
+            }
             match ir.modules.iter().position(|m| m.name.as_str() == name) {
                 Some(i) => ir.modules[i] = mod_ir,
                 None => ir.modules.push(mod_ir),

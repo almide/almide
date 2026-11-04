@@ -371,7 +371,8 @@ pub fn bundled_type_owners() -> &'static HashMap<String, &'static str> {
     OWNERS.get_or_init(|| {
         let mut out = HashMap::new();
         for module in almide_lang::stdlib_info::BUNDLED_MODULES.iter().copied() {
-            let Some(source) = super::stdlib::get_bundled_source(module) else { continue };
+            // The type declarations' lines alone (#4458).
+            let Some(source) = almide_lang::decl_index::types_source(module) else { continue };
             let Some(program) = almide_lang::parse_cached(source) else { continue };
             for decl in &program.decls {
                 if let ast::Decl::Type { name, .. } = decl {

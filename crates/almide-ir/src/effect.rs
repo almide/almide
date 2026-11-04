@@ -378,7 +378,7 @@ pub fn runtime_symbol_is_effect(symbol: &str) -> bool {
         // A module whose source never spells the symbol cannot declare it:
         // only those that do are parsed (#4458).
         .filter(|(m, _)| {
-            !symbol.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            !symbol.bytes().all(|b| b.is_ascii_graphic() && b != b'\\' && b != b'"')
                 || almide_lang::stdlib_info::bundled_source(m).is_some_and(|s| s.contains(symbol))
         })
         .any(|(m, _)| module_fns(m).any(|d| intrinsic_symbol(d) == Some(symbol) && fn_is_effect(d) && !fn_only_aborts(d)))
