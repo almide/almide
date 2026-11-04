@@ -87,6 +87,7 @@ fn render_fn(
     // Interpolation chains built in one buffer (crate::render_native_interp).
     let chains = crate::render_native_interp::chains(func);
     crate::render_native_move::set_stack_lits(func, &user_fns.keys().copied().collect());
+    crate::render_native_cond::set_cond_cmps(func);
     let printed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     let (scalar_defs, scalar_prints) = crate::render_native_interp::printed_scalars(func);
     let mut st = FnLoop {
