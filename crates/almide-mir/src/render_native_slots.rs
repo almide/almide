@@ -145,6 +145,9 @@ pub(super) fn type_blocks(
             Op::Alloc { dst, init: Init::Str(_) | Init::DynStr { .. }, .. } => {
                 known.insert(*dst, NTy::Str);
             }
+            Op::Prim { kind: PrimKind::OptMakeSome | PrimKind::OptMakeNone | PrimKind::OptCopy, dst: Some(d), .. } => {
+                known.insert(*d, NTy::Opt);
+            }
             Op::Alloc { dst, init: Init::IntList(_), .. } | Op::ListLit { dst, .. } if !alloc_rec.contains_key(dst) => {
                 known.insert(*dst, NTy::Vec);
             }
@@ -249,6 +252,20 @@ pub(super) fn type_blocks(
                 known.entry(*d).or_insert(t);
             }
         }
+        // A list concatenation is a list of its left operand's kind.
+        for op in &func.ops {
+            let Op::CallFn { dst: Some(d), name, args, .. } = op else { continue };
+            let Some(crate::CallArg::Handle(l)) = args.first() else { continue };
+            if !crate::native_list_ops::is_list_concat(name) {
+                continue;
+            }
+            let t = kind_of(l, &known, alloc_rec, &str_lists, &scalar_blocks).map(owned);
+            if let Some(t @ (NTy::Vec | NTy::VecStr)) = t {
+                known.entry(*d).or_insert(t);
+            } else if let Some(NTy::Rec(i)) = t.filter(|t| matches!(t, NTy::Rec(i) if rec::list_elem(*i).is_some())) {
+                alloc_rec.entry(*d).or_insert(i);
+            }
+        }
         if (alloc_rec.len(), known.len()) == inner {
             break;
         }
@@ -267,6 +284,8 @@ pub(super) fn type_blocks(
                     continue;
                 }
                 let k = match f.handle_of.get(&args[1]) {
+                    // A scalar Option stored by value (`native_option_rewrite`).
+                    None if known.get(&args[1]) == Some(&NTy::Opt) => Some(NTy::Opt),
                     None => Some(NTy::I64),
                     Some(src) => kind_of(src, &known, alloc_rec, &str_lists, &scalar_blocks).map(owned),
                 };

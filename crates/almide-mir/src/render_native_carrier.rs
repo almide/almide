@@ -227,6 +227,10 @@ fn emit(out: &mut String, indent: usize, s: &str) {
 
 /// The owned copy of `v` as a slot of kind `k` (a carrier payload write).
 fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy) -> Result<String, LowerError> {
+    // A scalar Option payload is the `Option<i64>` itself, by value.
+    if k == NTy::Opt && !st.addrs.contains_key(&v) && tys.get(&v) == Some(&NTy::Opt) {
+        return Ok(var(v));
+    }
     let Some(sv) = st.addrs.get(&v).copied().filter(|a| a.off == 0 && a.idx.is_none()) else {
         return Err(wall(format!("native: a {:?} carrier payload that is not a heap handle", tys.get(&v))));
     };

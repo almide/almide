@@ -50,6 +50,10 @@ pub(crate) enum FloorParam {
     List(ListElem),
     /// `Bytes` — the runtime borrows its `Vec<u8>` (`&Vec<u8>` / `&[u8]`).
     Bytes,
+    /// `mut b: Bytes` — the runtime writes the caller's own `Vec<u8>` in
+    /// place (`&mut Vec<u8>`): the MIR call with no result that edits its
+    /// argument's block, on a render where every binding owns its value.
+    BytesMut,
     /// The stdlib `Value` — v0's runtime `AlmideValue`, borrowed (`true`)
     /// or by value (`false`).
     Value(bool),
@@ -89,6 +93,8 @@ pub(crate) enum ListElem {
     StrValuePairs,
     /// `List[Float]` — a slice of `f64` (the render's list holds the bits).
     Float,
+    /// `List[Bool]` — a slice of `bool` (the render's list holds 0 / 1).
+    Bool,
     /// `List[List[Float]]` — a slice of `Vec<f64>` rows.
     FloatRows,
     /// `List[Matrix]` — a slice of the runtime `AlmideMatrix`.
@@ -162,6 +168,9 @@ pub(crate) enum FloorRet {
     MapOptVal,
     MapKeys,
     MapVals,
+    /// `List[(K, V)]` of the call's map: the runtime's `Vec<(K, V)>`, rebound
+    /// as the generated list of the program's `(K, V)` tuple.
+    MapEntries,
 }
 
 /// A scalar kind a runtime value converts from.
@@ -290,6 +299,31 @@ pub(crate) fn elem_option_is_scalar(call: &str) -> bool {
 }
 
 /// The declared return of the self-hosted body registered under `call`.
+/// Whether the declared floor fn of `call` takes its param `k` by value (the
+/// runtime body consumes it, or its `@reuse` twin does at a last use): a
+/// heap param handed there at its last use is the body's to give away.
+pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
+    declared(call).is_some_and(|f| {
+        matches!(f.params.get(k), Some(FloorParam::Map(false) | FloorParam::Set(false) | FloorParam::Value(false) | FloorParam::Matrix(false)))
+            || f.twin.as_ref().is_some_and(|t| t.0 == k)
+    })
+}
+
+/// The generated type of param `k` of the self-hosted body a floor call
+/// specializes, when that body spells a concrete one (`map.len_skv`'s
+/// `Map[String, V]` over a program's `Map[String, Int]` is not one).
+pub(crate) fn specialized_param_rec(call: &str, k: usize) -> Option<u16> {
+    declared(call)?;
+    let t = crate::mir_ops::self_host_runtime().iter().find_map(|(src, pairs)| {
+        let (impl_fn, _) = pairs.iter().find(|(_, c)| *c == call)?;
+        almide_lang::parse_cached(src)?.decls.iter().find_map(|d| match d {
+            Decl::Fn { name, params, .. } if name.as_str() == *impl_fn => params.get(k).map(|p| p.ty.clone()),
+            _ => None,
+        })
+    })?;
+    crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(&ty_of(&t)?))
+}
+
 fn specialized_ret(call: &str) -> Option<TypeExpr> {
     crate::mir_ops::self_host_runtime().iter().find_map(|(src, pairs)| {
         let (impl_fn, _) = pairs.iter().find(|(_, c)| *c == call)?;
@@ -445,6 +479,7 @@ pub fn refusal(call: &str) -> Option<String> {
 }
 
 fn derive_explained(call: &str) -> Result<FloorFn, String> {
+
     let (module, func) = call.split_once('.').ok_or("not a module.fn call")?;
     if !almide_lang::stdlib_info::is_bundled_module(module) {
         return Err("not a bundled stdlib module".into());
@@ -504,6 +539,7 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
                 .as_ref()
                 .and_then(|kv| map_param(&p.ty, kv))
                 .or_else(|| set_a.as_ref().and_then(|a| set_param(&p.ty, a)))
+                .or_else(|| (p.is_mut && simple(&p.ty) == Some("Bytes")).then_some(FloorParam::BytesMut))
                 .or_else(|| floor_param(&p.ty, &type_params))
                 .ok_or_else(|| format!("param type {:?} outside the per-type map", p.ty))
         })
@@ -569,7 +605,7 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
     let items = closure(&symbol, rt)?;
     let twin = almide_lang::reuse::of_intrinsic(&symbol).and_then(|r| {
         let t = r.owned_twin?;
-        if !matches!(fparams.get(r.param), Some(FloorParam::List(_) | FloorParam::Set(_))) {
+        if !matches!(fparams.get(r.param), Some(FloorParam::List(_) | FloorParam::Set(_) | FloorParam::Bytes)) {
             return None;
         }
         let (tp, tr) = rust_signature(rt.items.get(t)?.text)?;
@@ -616,6 +652,7 @@ fn floor_param(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorPara
             let elem = match simple(&args[0])? {
                 "Int" => ListElem::Int,
                 "Float" => ListElem::Float,
+                "Bool" => ListElem::Bool,
                 "Matrix" => ListElem::Matrix,
                 "String" => ListElem::Str,
                 n if n == VALUE_TYPE => ListElem::Value,
@@ -702,13 +739,46 @@ fn map_ret(t: &TypeExpr, (k, v): &(String, String)) -> Option<FloorRet> {
         TypeExpr::Generic { name, args } if is_option_name(name.as_str()) && args.len() == 1 && simple(&args[0]) == Some(v.as_str()) => {
             Some(FloorRet::MapOptVal)
         }
-        TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => match simple(&args[0]) {
-            Some(x) if x == k => Some(FloorRet::MapKeys),
-            Some(x) if x == v => Some(FloorRet::MapVals),
+        TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => match (&args[0], simple(&args[0])) {
+            (_, Some(x)) if x == k => Some(FloorRet::MapKeys),
+            (_, Some(x)) if x == v => Some(FloorRet::MapVals),
+            (TypeExpr::Tuple { elements }, _)
+                if elements.len() == 2 && simple(&elements[0]) == Some(k.as_str()) && simple(&elements[1]) == Some(v.as_str()) =>
+            {
+                Some(FloorRet::MapEntries)
+            }
             _ => None,
         },
         _ => None,
     }
+}
+
+/// The Almide type a declaration spells, for the declared types the native
+/// render carries (scalars, String, lists, tuples, Option, Map); `None` for
+/// any other spelling.
+fn ty_of(t: &TypeExpr) -> Option<almide_lang::types::Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    Some(match t {
+        TypeExpr::Simple { name } => match name.as_str() {
+            "Int" => Ty::Int,
+            "Bool" => Ty::Bool,
+            "Float" => Ty::Float,
+            "String" => Ty::String,
+            _ => return None,
+        },
+        TypeExpr::Tuple { elements } => Ty::Tuple(elements.iter().map(ty_of).collect::<Option<Vec<_>>>()?.into_iter().collect()),
+        TypeExpr::Generic { name, args } => {
+            let c = match name.as_str() {
+                "List" => TypeConstructorId::List,
+                "Map" => TypeConstructorId::Map,
+                n if is_option_name(n) => TypeConstructorId::Option,
+                _ => return None,
+            };
+            Ty::Applied(c, args.iter().map(ty_of).collect::<Option<Vec<_>>>()?.into_iter().collect())
+        }
+        _ => return None,
+    })
 }
 
 /// `AlmideMap<A, B>` over two type params (squashed).
@@ -819,6 +889,7 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
         FloorParam::Float => r == "f64",
         FloorParam::Str => r == "&str",
         FloorParam::Bytes => r == "&Vec<u8>" || r == "&[u8]",
+        FloorParam::BytesMut => r == "&mutVec<u8>" || r == "&mut Vec<u8>",
         FloorParam::Value(_) => r == "&AlmideValue" || r == "AlmideValue",
         FloorParam::Matrix(_) => r == "&AlmideMatrix" || r == "AlmideMatrix",
         FloorParam::Set(_) => is_generic_set(r.strip_prefix('&').unwrap_or(&r)),
@@ -842,6 +913,7 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
                 (ListElem::Value, Some(i)) => i == "AlmideValue",
                 (ListElem::StrValuePairs, Some(i)) => i == "(AlmideString,AlmideValue)",
                 (ListElem::Float, Some(i)) => i == "f64",
+                (ListElem::Bool, Some(i)) => i == "bool",
                 (ListElem::FloatRows, Some(i)) => i == "Vec<f64>",
                 (ListElem::Matrix, Some(i)) => i == "AlmideMatrix",
                 (ListElem::Any, Some(i)) => is_type_param(i),
@@ -898,6 +970,11 @@ fn ret_agrees(r: FloorRet, rust: &str) -> bool {
         FloorRet::Map => is_generic_map(&t),
         FloorRet::MapOptVal => t.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
         FloorRet::MapKeys | FloorRet::MapVals => t.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
+        FloorRet::MapEntries => t
+            .strip_prefix("Vec<(")
+            .and_then(|x| x.strip_suffix(")>"))
+            .and_then(|x| x.split_once(','))
+            .is_some_and(|(a, b)| is_type_param(a) && is_type_param(b)),
         FloorRet::ResValue => result_parts(&t).is_some_and(|(ok, err)| ok == "AlmideValue" && string(err)),
         FloorRet::OptStr => t.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(string),
         FloorRet::ResListValue => result_parts(&t).is_some_and(|(ok, err)| ok == "Vec<AlmideValue>" && string(err)),
@@ -1842,6 +1919,8 @@ fn list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
         (ListElem::Float, NTy::Vec | NTy::VecRef) => {
             return Some(format!("&{code}.iter().map(|x| f64::from_bits(*x as u64)).collect::<Vec<f64>>()"))
         }
+        // And a bool list each cell's 0 / 1.
+        (ListElem::Bool, NTy::Vec | NTy::VecRef) => return Some(format!("&{code}.iter().map(|x| *x != 0).collect::<Vec<bool>>()")),
         (ListElem::FloatRows, NTy::Rec(i) | NTy::RecRef(i)) if elem_of(i) == Some(NTy::Vec) => {
             return Some(format!(
                 "&{code}.iter().map(|r| r.iter().map(|x| f64::from_bits(*x as u64)).collect::<Vec<f64>>()).collect::<Vec<Vec<f64>>>()"
@@ -1849,7 +1928,7 @@ fn list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
         }
         (ListElem::Matrix, NTy::Rec(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_matrix) => return Some(format!("&{code}")),
         (ListElem::Matrix, NTy::RecRef(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_matrix) => return Some(code.to_string()),
-        (ListElem::Float | ListElem::FloatRows | ListElem::Matrix, _) => return None,
+        (ListElem::Float | ListElem::Bool | ListElem::FloatRows | ListElem::Matrix, _) => return None,
         _ => {}
     }
     let int_list = matches!(elem, ListElem::Int | ListElem::Any);
@@ -2017,6 +2096,11 @@ pub(crate) fn render_call(
                 (NTy::Rec(_) | NTy::RecRef(_), false) if crate::render_native_rec::is_matrix(*got) => format!("{code}.clone()"),
                 _ => return Err(mismatch()),
             },
+            // Only the caller's own binding: a borrowed one cannot be written.
+            FloorParam::BytesMut => match got {
+                NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&mut {code}"),
+                _ => return Err(mismatch()),
+            },
             FloorParam::Bytes => match got {
                 NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&{code}"),
                 NTy::RecRef(_) if crate::render_native_rec::is_bytes(*got) => code.clone(),
@@ -2030,8 +2114,8 @@ pub(crate) fn render_call(
         // A `(String, Value)` list is converted into the runtime's pairs in
         // any case: the owned twin takes that copy (or the moved-out source)
         // instead of copying it once more.
-        if matches!(f.params.get(*k), Some(FloorParam::Set(_))) {
-            // The caller's set, not read again: moved into the owned twin.
+        if matches!(f.params.get(*k), Some(FloorParam::Set(_) | FloorParam::Bytes)) {
+            // The caller's set or Bytes, not read again: moved into the owned twin.
             if dying.get(*k) == Some(&true) && matches!(args.get(*k).map(|a| a.1), Some(NTy::Rec(_))) {
                 rendered[*k] = crate::render_native_move::take_expr(&args[*k].0);
                 symbol = twin;
@@ -2149,6 +2233,29 @@ pub(crate) fn render_call(
             NTy::I64 => (call, Some(NTy::Opt)),
             v => (call, Some(NTy::Rec(crate::render_native_rec::option_type_of(v)))),
         },
+        FloorRet::MapEntries => {
+            let (k, v) = map_kv.ok_or_else(mismatch)?;
+            // The generated list of the program's `(K, V)` tuple, as the
+            // self-hosted body this call specializes declares it.
+            // A program that never spells that tuple gets the generated struct
+            // of the pair's slot kinds, the type an untyped block of them takes.
+            let list = specialized_ret(name)
+                .as_ref()
+                .and_then(ty_of)
+                .and_then(|t| crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(&t)))
+                .unwrap_or_else(|| {
+                    crate::render_native_rec::list_type_of(NTy::Rec(crate::render_native_rec::slots_type_of(&[k, v])))
+                });
+            let Some(NTy::Rec(pair)) = crate::render_native_rec::list_elem(list) else { return Err(mismatch()) };
+            let fields_agree = crate::render_native_rec::field_count(pair) == 2
+                && crate::render_native_rec::rec_field(pair, 0) == Some(k)
+                && crate::render_native_rec::rec_field(pair, 1) == Some(v);
+            if !fields_agree {
+                return Err(mismatch());
+            }
+            let s = crate::render_native_rec::struct_name(pair);
+            (format!("({call}).into_iter().map(|(k, v)| {s} {{ f0: k, f1: v }}).collect::<Vec<{s}>>()"), Some(NTy::Rec(list)))
+        }
         FloorRet::MapKeys | FloorRet::MapVals => {
             let (k, v) = map_kv.ok_or_else(mismatch)?;
             let e = if f.ret == FloorRet::MapKeys { k } else { v };

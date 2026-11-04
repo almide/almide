@@ -65,6 +65,13 @@ pub fn rewrite_option_ops(
             Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 && t.opt_vals.contains(&args[0]) => {
                 t.handles.insert(*d, args[0]);
             }
+            // An Option stored into a list's slot: the slot holds the Option
+            // itself (the list's elements are `Option<i64>`), not a handle.
+            Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args }
+                if args.len() == 2 && t.handles.contains_key(&args[1]) && !t.addrs.contains_key(&args[0]) =>
+            {
+                out.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![args[0], t.handles[&args[1]]] });
+            }
             Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } if t.handles.contains_key(a) && t.const_vals.contains_key(b) => {
                 t.addrs.insert(*dst, (t.handles[a], t.const_vals[b]));
             }
