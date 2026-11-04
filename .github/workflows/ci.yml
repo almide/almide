@@ -2526,6 +2526,13 @@ jobs:
       - name: Native runtime ratio vs handwritten Rust
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-perf-ratio.sh
 
+      # #2092: release binaries of heap-using programs carry no debug info and
+      # stay under their size baseline (the rlib fast path once shipped std's
+      # DWARF: ~2.0 MB where the code was ~0.4 MB). Same pinned toolchain as
+      # the baseline.
+      - name: Native release binary size ratchet (#2092)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-native-size.sh
+
       # Edit-loop cost lives here rather than in `checks`: it needs the same
       # built binary and the same "measure, don't guess" runner as the ratio
       # above, and both are the perf tier (#1383 scale, #1396 per-phase).

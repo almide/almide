@@ -119,7 +119,7 @@
 # #4372: two new CI-prose gate rows explicitly map four still-uncompensated
 # limits (future consumers, live integration, unmodeled inputs, coordinated edits).
 # This is the bidirectional inventory count described above, not a relaxed ratchet.
-# uncompensated_blind_ceiling = "40"
+# uncompensated_blind_ceiling = "43"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -564,6 +564,16 @@ evidence = "#1244 round 2: baseline forged DOWN (measured > ceiling) demonstrate
 measures = "byte size of the embedded stdlib payload (every SRC_<STEM> and include_str! of stdlib/*.almd, whole-line `//` blanked and whole-line `///` doc lines counted as shipped, #2436) against scripts/embedded-size-baseline.txt"
 varies = "2026-08-30 5eed63240: 904266 bytes anchored when the four streaming twins landed on purpose; 88fa77e47 the same day moved it again; #1244 round 2 a baseline forged below the measurement read red"
 blind = "UNMAPPED"
+
+[[gate]]
+path = "scripts/check-native-size.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "2026-11-04 #2092 on GCE n2-standard-8 (rustc 1.99.1): the whole script run with ALMIDE_BIN at the pre-fix binary (develop 942e7b6c0) exited 1 on all four programs twice over — each named its six .debug_* sections and each read ~2.06-2.32 MB against a ~0.47-0.62 MB ceiling; the fixed binary on the same tree read all four under the ceiling with no debug section and exited 0"
+measures = "byte size of the `almide build --release` ELF of four heap-using perf programs (binarytrees, jsonround, strchurn, wordfreq) against scripts/native-size-baseline.txt, plus the presence of any .debug_* section in them (readelf -S)"
+varies = "2026-11-04 #2092: binarytrees 2076336 bytes on the pre-fix binary, 435344 with `-C strip=debuginfo` on the rlib fast path; jsonround 2315992 -> 565856"
+blind = "size growth on a program that takes the cargo path instead of the rlib fast path (hello, fib: no runtime use) -> UNCOMPENSATED; macOS / Windows / aarch64 binaries (the script runs on Linux x86_64 only) -> UNCOMPENSATED; growth under the 10% budget -> UNCOMPENSATED"
 
 [[gate]]
 path = "scripts/check-forbidden-impurities.sh"
