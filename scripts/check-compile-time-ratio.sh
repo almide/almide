@@ -109,13 +109,19 @@ print('high' if g > a * (1 + b / 100) else 'low' if g < a * 0.5 else 'ok')"
 #   #4317: #4182's merge and develop before the fix, whose wasm link scanned
 #   every fn of every module it loaded — `int.to_string` linked 63 self-host
 #   bodies into a three-function program and the corpus wasm gates ran ~3x
-#   longer per fixture. Their check readings (4.66, 4.18) are in the check
-#   row's band: the front end's whole-module reach is not what #4317 fixed.
+#   longer per fixture. Their check readings (4.66, 4.18) were in the check
+#   row's band then: the front end's whole-module reach is not what #4317
+#   fixed.
+#   #4328: develop before the resolver kept only the reached functions of a
+#   bundled module — every function of every loaded module was checked and
+#   lowered. Measured on the same pinned GCE core as the fixed tree.
 REGRESSED=(
   "check 6.65 release-fix(0ff4366bc,#4289)"
   "wasm 27.3 release-fix(0ff4366bc,#4289)"
   "wasm 22.4 #4182-merge(926542089,#4317)"
   "wasm 18.9 develop-before-fix(ab7c28b74,#4317)"
+  "check 4.72 whole-module-reach(821f4e733,#4328)"
+  "wasm 8.90 whole-module-reach(821f4e733,#4328)"
 )
 
 status=0
