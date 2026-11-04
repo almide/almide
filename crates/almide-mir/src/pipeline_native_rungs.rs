@@ -160,7 +160,9 @@ fn recurses_on_a_heap_arg(f: &crate::MirFunction) -> bool {
         if *name != f.name || !args.iter().any(|a| matches!(a, CallArg::Handle(_))) {
             return false;
         }
-        let rest = f.ops[i + 1..].iter().find(|o| !matches!(o, Op::Consume { .. } | Op::Drop { .. }));
+        // Every release that erases to scope end (a typed list or carrier
+        // drop as much as a plain one) still runs after the call.
+        let rest = f.ops[i + 1..].iter().find(|o| !matches!(o, Op::Consume { .. }) && !crate::render_native_move::bookkeeping(o));
         match rest {
             None => f.ret == Some(*d),
             Some(Op::Else { val } | Op::EndIf { val }) => *val == Some(*d),
