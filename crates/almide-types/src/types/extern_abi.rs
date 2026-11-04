@@ -4,10 +4,10 @@
 //! cannot honor) and by the Rust renderer (`render_extern_c`, which spells the
 //! `extern "C"` block and the conversions from it).
 //!
-//! `Int` crosses as a C `int` (`i32`, narrowed with `as`) and `Bool` as an
-//! `int` (0/1) — the mapping `@extern(c)` has always had, kept so existing
-//! bindings keep their C prototypes. The sized ints and floats cross at their
-//! own width. A `String` parameter crosses as a NUL-terminated copy
+//! `Int` crosses as an `int64_t` (`i64`, its own width — dialect epoch 15,
+//! #4447: it used to be a C `int`, narrowed with `as`, which truncated every
+//! value outside 32 bits) and `Bool` as an `int` (0/1). The sized ints and
+//! floats cross at their own width. A `String` parameter crosses as a NUL-terminated copy
 //! (`*const u8`, valid for the call; the text up to its first NUL). A
 //! `Handle` crosses as the bare pointer it is. A `Region` parameter crosses
 //! as TWO C arguments, the pointer and its `size_t` length, so the callee gets
@@ -18,7 +18,16 @@
 //! bytes, maps, records, …) have no C representation: bind them through an
 //! `@extern(rust)` shim in `native/*.rs` instead.
 //!
-//! Gated by `tests/extern_rust_abi_test.rs` (every `Ty` variant × target).
+//! `@export(c, "sym")` reads the same rows in the other direction
+//! ([`c_export_param_abi`], [`c_export_return_abi`], #4447, #4448): a C caller
+//! passes the parameters and receives the return. Two rows have no reverse:
+//! a `String` parameter's row is a copy the wrapper makes OF an Almide String
+//! for a C callee, and a C caller's `const char*` carries no length and no
+//! owner, so an exported fn cannot take one; and a `Region` return has no
+//! release function the caller could free it with (ADR-0031 amendment A2).
+//!
+//! Gated by `tests/extern_rust_abi_test.rs` (every `Ty` variant × target) and
+//! `tests/export_c_abi_test.rs` (every row × {fn, effect fn} for `@export(c)`).
 
 use super::Ty;
 
@@ -35,8 +44,6 @@ pub struct CAbi {
 pub enum CConv {
     /// Same representation on both sides.
     Same,
-    /// `Int` (`i64`) ↔ C `int` (`i32`): `as` both ways.
-    IntAsI32,
     /// `Bool` ↔ C `int`: `1`/`0` out, `!= 0` back.
     BoolAsI32,
     /// `String` → a NUL-terminated copy (`CString`), passed as `*const u8`.
@@ -63,7 +70,7 @@ const fn abi(c_ty: &'static str, conv: CConv) -> Option<CAbi> {
 /// The scalar rows, shared by parameters and returns.
 fn scalar(ty: &Ty) -> Option<CAbi> {
     match ty {
-        Ty::Int => abi("i32", CConv::IntAsI32),
+        Ty::Int => abi("i64", CConv::Same),
         Ty::Int8 => abi("i8", CConv::Same),
         Ty::Int16 => abi("i16", CConv::Same),
         Ty::Int32 => abi("i32", CConv::Same),
@@ -99,10 +106,39 @@ pub fn c_return_abi(ty: &Ty) -> Option<CAbi> {
     }
 }
 
+/// An `@export(c)` parameter of type `ty` — what a C caller passes — or
+/// `None` when it has no C form: [`c_param_abi`] without `String`, whose row
+/// is the Almide-to-C copy and has no reverse (a `const char*` has no length
+/// and no owner). A `Region` parameter is the caller's `(uint8_t*, size_t)`,
+/// lent for the call (ADR-0031 amendment A2).
+pub fn c_export_param_abi(ty: &Ty) -> Option<CAbi> {
+    match ty {
+        Ty::String => None,
+        _ => c_param_abi(ty),
+    }
+}
+
+/// An `@export(c)` return of type `ty` — what the C caller receives — or
+/// `None` when it has no C form: [`c_return_abi`] without `Region`, which the
+/// caller would have no release function for (ADR-0031 amendment A2). An
+/// `effect fn`'s return is its declared ok type; the wrapper unwraps the
+/// effect carrier first, and an `err` has no C form (C-452: the message goes
+/// to stderr and the process exits 1).
+pub fn c_export_return_abi(ty: &Ty) -> Option<CAbi> {
+    if is_region(ty) {
+        return None;
+    }
+    c_return_abi(ty)
+}
+
 /// The Almide types [`c_param_abi`] accepts, for diagnostics.
 pub const C_PARAM_TYPES: &str = "Int, Int8..Int64, UInt8..UInt64, Float, Float32, Float64, Bool, String, Handle, Region";
 /// The Almide types [`c_return_abi`] accepts, for diagnostics.
 pub const C_RETURN_TYPES: &str = "Int, Int8..Int64, UInt8..UInt64, Float, Float32, Float64, Bool, Handle, Unit, and Region with `@region(len = …, release = \"…\")`";
+/// The Almide types [`c_export_param_abi`] accepts, for diagnostics.
+pub const C_EXPORT_PARAM_TYPES: &str = "Int, Int8..Int64, UInt8..UInt64, Float, Float32, Float64, Bool, Handle, Region";
+/// The Almide types [`c_export_return_abi`] accepts, for diagnostics.
+pub const C_EXPORT_RETURN_TYPES: &str = "Int, Int8..Int64, UInt8..UInt64, Float, Float32, Float64, Bool, Handle, Unit";
 
 /// The two native binding kinds an `@extern` target can name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

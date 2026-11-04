@@ -184,14 +184,6 @@ impl Run {
         m.data(&self.store)[p as usize..(p + n) as usize].to_vec()
     }
 
-    /// An `effect fn` export answers a Result block: the ok Int, or the test fails.
-    fn ok_int(&mut self, block: i32) -> i64 {
-        let tag = self.mem(block + (almide_layout::PAYLOAD + almide_layout::SUM_TAG) as i32, 4);
-        assert_eq!(tag, [0, 0, 0, 0], "the export answered err");
-        let v = self.mem(block + (almide_layout::PAYLOAD + almide_layout::SUM_FIELD) as i32, 8);
-        i64::from_le_bytes(v.try_into().expect("wasmtime"))
-    }
-
     fn rc(&mut self, p: i32) -> u32 {
         let b = self.mem(p - almide_layout::PAYLOAD as i32, 4);
         u32::from_le_bytes([b[0], b[1], b[2], b[3]])
@@ -221,14 +213,13 @@ fn the_host_writes_into_an_exported_alloc_region_and_the_next_export_reads_it() 
     assert!(p != 0 && n == 4, "({p}, {n})");
     let m = r.inst.get_memory(&mut r.store, "memory").expect("wasmtime");
     m.data_mut(&mut r.store)[p as usize..(p + 4) as usize].copy_from_slice(&[1, 2, 3, 40]);
-    let sum = r.inst.get_typed_func::<(), i32>(&mut r.store, "inbox_sum").expect("wasmtime");
-    let b = sum.call(&mut r.store, ()).expect("wasmtime");
-    assert_eq!(r.ok_int(b), 46);
+    // A scalar `effect fn` export answers its ok value itself (#4376).
+    let sum = r.inst.get_typed_func::<(), i64>(&mut r.store, "inbox_sum").expect("wasmtime");
+    assert_eq!(sum.call(&mut r.store, ()).expect("wasmtime"), 46);
     let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").expect("wasmtime");
     release.call(&mut r.store, p).expect("wasmtime");
     // The program's own copy (the `inbox` var) still holds the block.
-    let b = sum.call(&mut r.store, ()).expect("wasmtime");
-    assert_eq!(r.ok_int(b), 46);
+    assert_eq!(sum.call(&mut r.store, ()).expect("wasmtime"), 46);
 }
 
 /// A1 ownership: a Region the program dropped when the export returned
@@ -312,9 +303,8 @@ fn an_err_traps_with_its_reason() {
 #[test]
 fn an_import_fills_a_lent_alloc_region_in_place() {
     let mut r = Run::new();
-    let pull = r.inst.get_typed_func::<i64, i32>(&mut r.store, "pull").expect("wasmtime");
-    let b = pull.call(&mut r.store, 5).expect("wasmtime");
-    assert_eq!(r.ok_int(b), 35);
+    let pull = r.inst.get_typed_func::<i64, i64>(&mut r.store, "pull").expect("wasmtime");
+    assert_eq!(pull.call(&mut r.store, 5).expect("wasmtime"), 35);
     let fills = r.host.lock().expect("wasmtime").fills.clone();
     assert_eq!(fills.len(), 1);
     assert!(fills[0].0 != 0 && fills[0].1 == 5, "{fills:?}");

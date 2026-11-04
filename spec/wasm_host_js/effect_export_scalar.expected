@@ -1,0 +1,10 @@
+scaled 6
+half 2.5
+even true
+note 7
+raw first: 42
+note 3
+note 4
+lent total: 48
+scalar exports free their Result blocks
+an err traps with its message on stderr

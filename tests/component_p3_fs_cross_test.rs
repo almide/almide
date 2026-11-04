@@ -83,8 +83,17 @@ fn observe(mut cmd: Command, what: &str) -> Seen {
     )
 }
 
-/// The fixtures: every `fs_*` fixture of both cross lanes, and the fs-reaching
-/// fixtures named otherwise.
+/// Whether the fixture at `p` imports `process`. No component world declares
+/// almide:process/spawn (ADR-0025), so such a program has no p3 component
+/// build (E081) and is not a subject of this test; its own lanes cover it
+/// (e.g. `fs_non_utf8_entry_names.almd`, which needs a shell to make a name
+/// Almide text cannot spell).
+fn imports_process(p: &Path) -> bool {
+    std::fs::read_to_string(p).is_ok_and(|s| s.lines().any(|l| l.trim() == "import process"))
+}
+
+/// The fixtures: every `fs_*` fixture of both cross lanes that has a p3
+/// component build, and the fs-reaching fixtures named otherwise.
 fn fixtures() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec");
     let mut out = Vec::new();
@@ -95,6 +104,7 @@ fn fixtures() -> Vec<PathBuf> {
             .filter(|p| {
                 p.extension().is_some_and(|x| x == "almd")
                     && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("fs_"))
+                    && !imports_process(p)
             })
             .collect();
         names.sort();

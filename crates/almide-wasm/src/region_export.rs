@@ -23,6 +23,13 @@
 //! An `effect fn` export's wrapper answers a `Result` block: on `err` the
 //! adapter writes the error to stderr and traps, since `(ptr, len)` has no
 //! error channel.
+//!
+//! #4376: an `@export(wasm)` `effect fn` whose declared return is a scalar
+//! (`Int`, `Float`, `Bool`, `Unit`, the sized numbers) gets an adapter too.
+//! It calls the fn, traps on `err` the same way, and returns the ok value
+//! itself (nothing for `Unit`), so every host reads the scalar off the raw
+//! export instead of a `Result` block address it would have to decode and
+//! release.
 
 use wasm_encoder::{BlockType, Function, MemArg, ValType};
 
@@ -50,6 +57,9 @@ pub(crate) struct RegionExport {
     pub(crate) params: Vec<ValType>,
     pub(crate) narrow: Vec<u32>,
     pub(crate) view: Option<ViewAt>,
+    /// #4376: the wrapper answers a `Result` block over a scalar, and the
+    /// adapter returns the ok value itself. `Some(None)` is a `Unit` ok.
+    pub(crate) ok_value: Option<Option<ValType>>,
     pub(crate) results: Vec<ValType>,
 }
 
@@ -73,9 +83,14 @@ impl RegionExport {
             .collect()
     }
 
-    /// The adapter's results: `(ptr, len)` for a Region, else the wrapper's.
+    /// The adapter's results: `(ptr, len)` for a Region, the ok value for a
+    /// scalar effect fn (#4376), else the wrapper's.
     pub(crate) fn export_results(&self) -> Vec<ValType> {
-        if self.view.is_some() { vec![ValType::I32, ValType::I32] } else { self.results.clone() }
+        match (&self.view, self.ok_value) {
+            (Some(_), _) => vec![ValType::I32, ValType::I32],
+            (None, Some(v)) => v.into_iter().collect(),
+            (None, None) => self.results.clone(),
+        }
     }
 
     fn narrowed(&self, k: u32) -> bool {
@@ -97,6 +112,9 @@ pub(crate) enum Claimed {
     Region,
     /// Lent Region parameters only: the adapter narrows them.
     Narrowed,
+    /// A scalar `effect fn` (#4376): the adapter returns the ok value and
+    /// traps on `err` (and narrows any lent Region parameters).
+    OkValue,
 }
 
 /// The export table's globals: the table block, its count and capacity.
@@ -131,7 +149,8 @@ impl Claims {
         self.names.push(name.to_string());
         let narrow = crate::extern_region::address_params(f);
         let region = crate::extern_region::is_region_export(f);
-        if !region && narrow.is_empty() {
+        let ok_value = if region { None } else { scalar_ok(f, info, types) };
+        if !region && narrow.is_empty() && ok_value.is_none() {
             return Ok(Claimed::Plain);
         }
         let view = if region {
@@ -156,10 +175,48 @@ impl Claims {
             params: info.params.iter().map(|t| t.val_type()).collect(),
             narrow,
             view,
+            ok_value,
             results: info.ret.iter().map(|t| t.val_type()).collect(),
         });
-        Ok(if region { Claimed::Region } else { Claimed::Narrowed })
+        Ok(match (region, ok_value) {
+            (true, _) => Claimed::Region,
+            (false, Some(_)) => Claimed::OkValue,
+            (false, None) => Claimed::Narrowed,
+        })
     }
+}
+
+/// #4376: does `f`, a DECLARED `@export(wasm)` `effect fn` whose declared
+/// return is a scalar, cross as its ok value? Its wrapper answers a `Result`
+/// block whose ok slot is an `Int` / `Float` / `Bool` (the sized numbers
+/// among them) or `Unit`. `Some(None)` is a `Unit` ok, which crosses as no
+/// result. A declared `Result` / `Option` return, a heap ok (a `String`, a
+/// block) and an undeclared (implicit `pub`) export keep the block.
+fn scalar_ok(f: &almide_ir::IrFunction, info: &FnInfo, types: &crate::types_table::TypeTable) -> Option<Option<ValType>> {
+    use almide_types::types::{TypeConstructorId, Ty};
+    if !f.is_effect || !f.export_attrs.iter().any(|a| a.target.as_str() == "wasm") {
+        return None;
+    }
+    if matches!(&f.ret_ty, Ty::Applied(c, _) if matches!(c, TypeConstructorId::Result | TypeConstructorId::Option)) {
+        return None;
+    }
+    let Some(SliceTy::Result(ok, _)) = info.ret else { return None };
+    match types.el(ok) {
+        SliceTy::Scalar(s @ (Scalar::Int | Scalar::Float | Scalar::Bool)) => Some(Some(s.val_type())),
+        SliceTy::Unit => Some(None),
+        _ => None,
+    }
+}
+
+/// On `err` (tag nonzero) write the err String in the Result block `res` to
+/// stderr and trap: the export's results have no error channel.
+fn trap_on_err(i: &mut wasm_encoder::InstructionSink<'_>, res: u32) {
+    let p = almide_layout::PAYLOAD;
+    i.local_get(res).i32_load(word(p + almide_layout::SUM_TAG));
+    i.if_(BlockType::Empty);
+    i.local_get(res).i32_load(word(p + almide_layout::SUM_FIELD)).call(F_EPRINTLN_BLOCK);
+    i.unreachable();
+    i.end();
 }
 
 fn word(offset: u32) -> MemArg {
@@ -175,8 +232,11 @@ fn dword(offset: u32) -> MemArg {
 pub(crate) fn adapter(e: &RegionExport, g: u32) -> Function {
     let n = e.params.len() as u32;
     let Some(at) = &e.view else {
-        // Narrowing only: widen each address parameter, call, return.
-        let mut f = Function::new([]);
+        // Widen each address parameter and call. Narrowing only: return the
+        // wrapper's results. A scalar effect fn (#4376): trap on err, else
+        // return the ok value and free the Result block (its ok is no heap).
+        let res = n;
+        let mut f = Function::new(if e.ok_value.is_some() { vec![(1, ValType::I32)] } else { vec![] });
         let mut i = f.instructions();
         for k in 0..n {
             i.local_get(k);
@@ -185,6 +245,24 @@ pub(crate) fn adapter(e: &RegionExport, g: u32) -> Function {
             }
         }
         i.call(e.inner);
+        if let Some(val) = e.ok_value {
+            let at = almide_layout::PAYLOAD + almide_layout::SUM_FIELD;
+            i.local_set(res);
+            trap_on_err(&mut i, res);
+            match val {
+                Some(ValType::I64) => {
+                    i.local_get(res).i64_load(dword(at));
+                }
+                Some(ValType::F64) => {
+                    i.local_get(res).f64_load(dword(at));
+                }
+                Some(_) => {
+                    i.local_get(res).i32_load(word(at));
+                }
+                None => {}
+            }
+            i.local_get(res).call(F_DEC_FLAT);
+        }
         i.end();
         return f;
     };
@@ -202,11 +280,7 @@ pub(crate) fn adapter(e: &RegionExport, g: u32) -> Function {
     i.call(e.inner).local_set(view);
     if at.fallible {
         // tag 0 = ok; an err's String sits in the same slot.
-        i.local_get(view).i32_load(word(p + almide_layout::SUM_TAG));
-        i.if_(BlockType::Empty);
-        i.local_get(view).i32_load(word(p + almide_layout::SUM_FIELD)).call(F_EPRINTLN_BLOCK);
-        i.unreachable();
-        i.end();
+        trap_on_err(&mut i, view);
         // Take the view out of the box, then free the box alone.
         i.local_get(view).i32_load(word(p + almide_layout::SUM_FIELD)).local_set(blk);
         i.local_get(view).call(F_DEC_FLAT);
