@@ -750,6 +750,19 @@ fn link_self_host(
     // Each missing bundled function is relowered for once (a surface the
     // module does not declare must not loop the link).
     let mut tried: HashSet<String> = HashSet::new();
+    // The modules of the built-in types no literal produces (`int8`,
+    // `bytes`, …): their requirement functions are the dispatch-only demands.
+    let spelled_only_modules: HashSet<&'static str> = crate::canonicalize::protocols::BUILTIN_PROTOCOLS
+        .iter()
+        .flat_map(|p| p.conformers.iter())
+        .filter(|ty| almide_frontend::bundled_reach::value_needs_spelling(ty))
+        .filter_map(|ty| ty.stdlib_module())
+        .collect();
+    let requirement_keys: HashSet<String> = crate::canonicalize::protocols::builtin_conformance_requirements()
+        .into_iter()
+        .filter(|r| spelled_only_modules.contains(r.module))
+        .map(|r| format!("{}.{}", r.module, r.function))
+        .collect();
     // A natively lowered surface demands what the emitter resolves for it.
     let imply = |keys: &mut HashSet<String>| {
         for (lowered, resolved) in almide_wasm::EMITTER_IMPLIED_SURFACES {
@@ -797,12 +810,15 @@ fn link_self_host(
             if !crate::stdlib::is_bundled_module(module) {
                 continue;
             }
-            let has_fn = ir
-                .modules
-                .iter()
-                .find(|m| m.name.as_str() == module)
-                .is_some_and(|m| m.functions.iter().any(|f| f.name.as_str() == func));
-            if has_fn || !tried.insert(surface.clone()) {
+            let present = ir.modules.iter().find(|m| m.name.as_str() == module);
+            let has_fn = present.is_some_and(|m| m.functions.iter().any(|f| f.name.as_str() == func));
+            // A requirement a type variable dispatches to (`A.__sum` ->
+            // `int8.__sum`) is demanded of every built-in conformer; the
+            // dispatch lands in a module only when a value of its type exists.
+            // No literal makes a sized number or `Bytes`, so a program that
+            // never reached such a module holds no value of its type (#4458).
+            let dispatch_only = present.is_none() && requirement_keys.contains(surface.as_str());
+            if has_fn || dispatch_only || !tried.insert(surface.clone()) {
                 continue;
             }
             match missing.iter_mut().find(|(m, _)| m == module) {

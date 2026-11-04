@@ -239,16 +239,23 @@ fn reaches(spelled: &Spelled, name: &str, surface: &Surface) -> bool {
 fn conformer_live(spelled: &Spelled, protocol: &str, module: &str) -> bool {
     use crate::types::Ty;
     let Some(p) = crate::canonicalize::protocols::builtin_protocol(protocol) else { return true };
-    let spelled_only = |ty: &Ty| matches!(
-        ty,
-        Ty::Bytes | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
-            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 | Ty::Float64
-    );
+    let spelled_only = |ty: &Ty| value_needs_spelling(ty);
     p.conformers.iter().filter(|ty| ty.stdlib_module() == Some(module))
         .any(|ty| !spelled_only(ty) || spelled.idents.contains(&ty.display()))
         || p.named_conformers.iter()
             .filter(|n| almide_lang::stdlib_info::stdlib_owned_type_owner(n) == Some(module))
             .any(|n| spelled.idents.contains(*n))
+}
+
+/// A built-in type no literal produces (`Bytes`, the sized numbers): a value
+/// of it exists only where a source spells its name or its module.
+pub fn value_needs_spelling(ty: &crate::types::Ty) -> bool {
+    use crate::types::Ty;
+    matches!(
+        ty,
+        Ty::Bytes | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 | Ty::Float64
+    )
 }
 
 fn variant_case_name(c: &VariantCase) -> &str {
