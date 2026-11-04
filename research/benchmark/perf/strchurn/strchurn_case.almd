@@ -1,0 +1,23 @@
+// strchurn_case — the case-mapping string churn of the 2026-11-04 cross-language
+// size and speed run (#4198): 200,000 strings through interpolate -> split ->
+// trim -> to_upper -> join, then a byte checksum.
+//
+// The size ladder pins it because it is the one program of that run that links
+// `string.to_upper`'s full Unicode table. While that table was one 12-hex-char
+// row per codepoint it was 18.7 KB of the 27.6 KB module; a table that regrows
+// reads red on its ladder row.
+let n = 200000
+
+let prime = 1000000007
+
+fn build(i: Int) -> String = "item-${i}, value ${(i * 7) % 1000} ,  tag${i % 13}  ,x" |> string.split(",") |> list.map((p) => string.to_upper(string.trim(p))) |> list.join("|")
+
+fn main() -> Unit = {
+  let strs = list.range(0, n) |> list.map(build)
+  let total = strs |> list.map((s) => string.len(s)) |> list.sum
+  let ck = strs |> list.fold(
+    0,
+    (acc, s) => (acc * 31 + list.sum(bytes.to_list(bytes.from_string(s)))) % prime,
+  )
+  println("${total} ${ck}")
+}
