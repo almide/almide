@@ -61,6 +61,8 @@ pub(crate) struct AddrState {
     /// Constant `List[String]` blocks (`render_native_slots::const_str_lists`):
     /// rendered once, as a lazy static the function borrows.
     const_lists: BTreeMap<ValueId, Vec<String>>,
+    /// The literals those tables are filled from (`const_list_elems`).
+    const_elems: BTreeSet<ValueId>,
     /// Empty list literals (`[]`): stored into a slot of a list type, each
     /// is that type's empty list.
     empty_lists: BTreeSet<ValueId>,
@@ -313,6 +315,7 @@ impl AddrState {
         let reassigned = stale_handles(func);
         let const_lists = slots::const_str_lists(func, &base_of, &consts);
         set_const_lists(const_lists.keys().copied().collect());
+        let const_elems = slots::const_list_elems(func, &const_lists.keys().copied().collect(), &base_of);
         let stored = func
             .ops
             .iter()
@@ -347,6 +350,7 @@ impl AddrState {
             addrs: BTreeMap::new(),
             reassigned,
             const_lists,
+            const_elems,
             empty_lists: func
                 .ops
                 .iter()
@@ -1067,6 +1071,11 @@ pub(crate) fn render_addr_op(
         // A constant string table: built once, on its first use, from the
         // immortal static string blocks (never written, so thread-safe), and
         // borrowed — the lazy static v0 keeps for a top-level `let` table.
+        // A literal only a constant table is filled from: in the static.
+        Op::Alloc { dst, init: Init::Str(_), .. } if st.const_elems.contains(dst) => {
+            tys.insert(*dst, NTy::Str);
+            return Ok(true);
+        }
         Op::Alloc { dst, init: Init::DynListStr { .. }, .. } if st.const_lists.contains_key(dst) => {
             tys.insert(*dst, NTy::VecStrRef);
             let elems: Vec<String> = st.const_lists[dst]
