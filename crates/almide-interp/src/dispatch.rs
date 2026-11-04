@@ -294,10 +294,18 @@ impl<'a> Interpreter<'a> {
             Ok(wb) => wb,
             Err(flow) => return flow,
         };
-        let mut evaled = Vec::with_capacity(args.len());
-        for a in args {
-            evaled.push(val!(self.eval_expr(a, scope)));
+        // #4476: a `mut` place is read after every other operand ran, as
+        // native and wasm run it (and as the stdlib mutators here do): an
+        // operand whose call rebinds the place's root is seen by the copy-in.
+        let places: Vec<usize> = writebacks.iter().map(|(i, _)| *i).filter(|&i| func.params[i].is_mut).collect();
+        let mut slots: Vec<Option<Value>> = (0..args.len()).map(|_| None).collect();
+        for (i, a) in args.iter().enumerate().filter(|(i, _)| !places.contains(i)) {
+            slots[i] = Some(val!(self.eval_expr(a, scope)));
         }
+        for (i, a) in args.iter().enumerate().filter(|(i, _)| places.contains(i)) {
+            slots[i] = Some(val!(self.eval_expr(a, scope)));
+        }
+        let evaled: Vec<Value> = slots.into_iter().map(|v| v.expect("every operand evaluated")).collect();
         let root = self.root_scope();
         let is_pool = crate::stdlib_pool::is_pool_body(func);
         // Depth is owned by `run_callable`'s per-hop bump — see
