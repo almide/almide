@@ -276,8 +276,9 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     wall_native_c_exports(&ir)?;
     // A window the standard codegen allocates in its region arena: that leg
     // runs it at a fraction of the ownership render's cost (#4006, C2 on C1).
-    if almide_codegen::pass_region_window::discovers_windows(&ir) {
-        return Err(LowerError::Unsupported("native: a region window the standard codegen allocates in its arena".into()));
+    if let Some(consume) = almide_codegen::pass_region_window::discovered_window(&ir) {
+        let span = ir.functions.iter().find(|f| f.name == consume).and_then(|f| f.body.span);
+        return Err(LowerError::at(span, format!("native: `{consume}` opens a region window the standard codegen allocates in its arena")));
     }
     let ir = crate::fan_native::lift_fan_arms(ir)?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
