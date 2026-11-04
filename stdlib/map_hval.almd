@@ -61,6 +61,7 @@ else {
 
 fn map_new_hval() -> Map[String, List[Int]] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_hval(m: Map[String, List[Int]], k: String, v: List[Int]) -> Map[String, List[Int]] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -129,6 +130,7 @@ fn __hvf_at(pairs: List[(String, List[Int])], i: Int, m: Map[String, List[Int]])
     none => m,
   }
 
+@specializes("map.from_list")
 fn map_from_list_hval(pairs: List[(String, List[Int])]) -> Map[String, List[Int]] = __hvf_at(
   pairs,
   0,

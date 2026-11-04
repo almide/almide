@@ -139,6 +139,7 @@ else {
   __merge_rounds_str(othh, curh, n, width * 2)
 }
 
+@specializes("list.sort")
 fn list_sort_str(xs: List[String]) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)

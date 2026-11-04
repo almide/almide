@@ -32,6 +32,7 @@ fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   out
 }
 
+@specializes("list.drop")
 fn list_drop_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -66,6 +67,7 @@ else {
 // terminated natively and looped forever on wasm. Since #4147 every
 // implementation clamps both bounds into [0, len] (a negative bound is 0).
 // One rule, every implementation, byte-identical.
+@specializes("list.slice")
 fn list_slice_hshare(xs: List[List[Int]], start: Int, end: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)

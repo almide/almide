@@ -45,6 +45,7 @@ else {
   __ivh_store_val(rh + 12 + (rn + rn - 1) * 8, v)
 }
 
+@specializes("map.set")
 fn map_set_ivh(m: Map[Int, String], k: Int, v: String) -> Map[Int, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -112,6 +113,7 @@ fn __ivh_from_list_at(pairs: List[(Int, String)], i: Int, m: Map[Int, String]) -
     none => m,
   }
 
+@specializes("map.from_list")
 fn map_from_list_ivh(pairs: List[(Int, String)]) -> Map[Int, String] = __ivh_from_list_at(
   pairs,
   0,

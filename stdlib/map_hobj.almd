@@ -92,6 +92,7 @@ fn __hobj_from_at(ph: Int, n: Int, i: Int, m: Map[String, String]) -> Map[String
     __hobj_from_at(ph, n, i + 1, nm)
   }
 
+@specializes("map.from_list")
 fn map_from_list_hobj(pairs: List[(String, String)]) -> Map[String, String] = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)
@@ -107,6 +108,7 @@ fn map_from_list_hobj(pairs: List[(String, String)]) -> Map[String, String] = {
 // `__drop_map_rec_<R>`), routed by the bind's `map_named_value_drop`.
 fn map_new_hobj() -> Map[String, String] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_hobj(m: Map[String, String], k: String, v: String) -> Map[String, String] = __hobj_set(
   m,
   k,

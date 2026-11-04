@@ -105,6 +105,7 @@ else {
   __sbfr_init(bh, sh, kh, f, n, i + 1)
 }
 
+@specializes("list.sort_by")
 fn list_sort_by_float_rc(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)

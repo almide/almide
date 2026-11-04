@@ -15944,6 +15944,7 @@ fn __enum_str_rec(xs: List[String], i: Int, n: Int, acc: List[(Int, String)]) ->
     __enum_str_rec(xs, i + 1, n, acc + [(i, line)])
   }
 
+@specializes("list.enumerate")
 fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = __enum_str_rec(
   xs,
   0,
@@ -16017,6 +16018,7 @@ fn __filterrc_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) 
     } else __filterrc_fill(dh, sh, f, n, i + 1, di)
   }
 
+@specializes("list.filter")
 fn list_filter_rc(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
@@ -16743,6 +16745,7 @@ else {
   0
 }
 
+@specializes("list.set")
 fn list_set_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16800,6 +16803,7 @@ fn __lsh_insert_fill(srcbase: Int, dstbase: Int, n: Int, idx: Int, x: Value) -> 
 }
 
 
+@specializes("list.insert")
 fn list_insert_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16826,6 +16830,7 @@ fn __lsh_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> In
 
 
 
+@specializes("list.remove_at")
 fn list_remove_at_heapelem(xs: List[Value], i: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16853,6 +16858,7 @@ else {
   0
 }
 
+@specializes("list.swap")
 fn list_swap_heapelem(xs: List[Value], i: Int, j: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16864,6 +16870,7 @@ fn list_swap_heapelem(xs: List[Value], i: Int, j: Int) -> List[Value] = {
 }
 
 
+@specializes("list.take_end")
 fn list_take_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -16875,6 +16882,7 @@ fn list_take_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   buf
 }
 
+@specializes("list.drop_end")
 fn list_drop_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -16919,6 +16927,7 @@ fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   out
 }
 
+@specializes("list.drop")
 fn list_drop_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -16953,6 +16962,7 @@ else {
 
 
 
+@specializes("list.slice")
 fn list_slice_hshare(xs: List[List[Int]], start: Int, end: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -17305,6 +17315,7 @@ else {
   0
 }
 
+@specializes("list.set")
 fn list_set_str(xs: List[String], i: Int, x: String) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17329,6 +17340,7 @@ fn __ls_insert_fill(srcbase: Int, dstbase: Int, n: Int, idx: Int, x: String) -> 
   0
 }
 
+@specializes("list.insert")
 fn list_insert_str(xs: List[String], i: Int, x: String) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17353,6 +17365,7 @@ fn __ls_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int
     __copy_slots_rc(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
   }
 
+@specializes("list.remove_at")
 fn list_remove_at_str(xs: List[String], i: Int) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17379,6 +17392,7 @@ else {
   0
 }
 
+@specializes("list.swap")
 fn list_swap_str(xs: List[String], i: Int, j: Int) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17611,6 +17625,7 @@ fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
 
 
 
+@specializes("list.drop_end")
 fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -17624,6 +17639,7 @@ fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
 
 
 
+@specializes("list.take_end")
 fn list_take_end_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -18044,6 +18060,7 @@ else {
   __enum_fill_h(dh, sh, n, i + 1)
 }
 
+@specializes("list.enumerate")
 fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -18058,6 +18075,7 @@ fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = {
 
 
 
+@specializes("list.enumerate")
 fn list_enumerate_h(xs: List[List[Int]]) -> List[(Int, List[Int])] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -18118,6 +18136,7 @@ else {
   __zip_fill_rca(dh, ha, hb, n, i + 1)
 }
 
+@specializes("list.zip")
 fn list_zip_sh(a: List[Int], b: List[List[Int]]) -> List[(Int, List[Int])] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -18129,6 +18148,7 @@ fn list_zip_sh(a: List[Int], b: List[List[Int]]) -> List[(Int, List[Int])] = {
   out
 }
 
+@specializes("list.zip")
 fn list_zip_hs(a: List[List[Int]], b: List[Int]) -> List[(List[Int], Int)] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -18564,6 +18584,7 @@ else {
   __merge_rounds_str(othh, curh, n, width * 2)
 }
 
+@specializes("list.sort")
 fn list_sort_str(xs: List[String]) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -18839,6 +18860,7 @@ fn __sbsr_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) ->
     __sbsr_init(bh, sh, kh, f, n, i + 1)
   }
 
+@specializes("list.sort_by")
 fn list_sort_by_str_key_rc(xs: List[Int], f: (Int) -> String) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
@@ -19245,6 +19267,7 @@ else {
   __sbfr_init(bh, sh, kh, f, n, i + 1)
 }
 
+@specializes("list.sort_by")
 fn list_sort_by_float_rc(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
@@ -21525,6 +21548,7 @@ fn __hobj_from_at(ph: Int, n: Int, i: Int, m: Map[String, String]) -> Map[String
     __hobj_from_at(ph, n, i + 1, nm)
   }
 
+@specializes("map.from_list")
 fn map_from_list_hobj(pairs: List[(String, String)]) -> Map[String, String] = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)
@@ -21540,6 +21564,7 @@ fn map_from_list_hobj(pairs: List[(String, String)]) -> Map[String, String] = {
 
 fn map_new_hobj() -> Map[String, String] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_hobj(m: Map[String, String], k: String, v: String) -> Map[String, String] = __hobj_set(
   m,
   k,
@@ -21624,6 +21649,7 @@ else {
 
 fn map_new_hval() -> Map[String, List[Int]] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_hval(m: Map[String, List[Int]], k: String, v: List[Int]) -> Map[String, List[Int]] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -21692,6 +21718,7 @@ fn __hvf_at(pairs: List[(String, List[Int])], i: Int, m: Map[String, List[Int]])
     none => m,
   }
 
+@specializes("map.from_list")
 fn map_from_list_hval(pairs: List[(String, List[Int])]) -> Map[String, List[Int]] = __hvf_at(
   pairs,
   0,
@@ -21933,6 +21960,7 @@ else {
   __ivh_store_val(rh + 12 + (rn + rn - 1) * 8, v)
 }
 
+@specializes("map.set")
 fn map_set_ivh(m: Map[Int, String], k: Int, v: String) -> Map[Int, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -22000,6 +22028,7 @@ fn __ivh_from_list_at(pairs: List[(Int, String)], i: Int, m: Map[Int, String]) -
     none => m,
   }
 
+@specializes("map.from_list")
 fn map_from_list_ivh(pairs: List[(Int, String)]) -> Map[Int, String] = __ivh_from_list_at(
   pairs,
   0,
@@ -22307,6 +22336,7 @@ else {
 
 fn map_new_msv() -> Map[String, Map[String, String]] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_msv(m: Map[String, Map[String, String]], k: String, v: Map[String, String]) -> Map[String, Map[String, String]] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -22337,6 +22367,7 @@ fn __msv_from_at(ph: Int, n: Int, i: Int, m: Map[String, Map[String, String]]) -
     __msv_from_at(ph, n, i + 1, nm)
   }
 
+@specializes("map.from_list")
 fn map_from_list_msv(pairs: List[(String, Map[String, String])]) -> Map[String, Map[String, String]] = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)
@@ -22880,6 +22911,7 @@ else {
   __skv_entries_fill(dh, sh, entries, i + 1)
 }
 
+@specializes("map.to_list")
 fn map_entries_skv(m: Map[String, Int]) -> List[(String, Int)] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)

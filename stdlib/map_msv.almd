@@ -63,6 +63,7 @@ else {
 
 fn map_new_msv() -> Map[String, Map[String, String]] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_msv(m: Map[String, Map[String, String]], k: String, v: Map[String, String]) -> Map[String, Map[String, String]] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -93,6 +94,7 @@ fn __msv_from_at(ph: Int, n: Int, i: Int, m: Map[String, Map[String, String]]) -
     __msv_from_at(ph, n, i + 1, nm)
   }
 
+@specializes("map.from_list")
 fn map_from_list_msv(pairs: List[(String, Map[String, String])]) -> Map[String, Map[String, String]] = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)
