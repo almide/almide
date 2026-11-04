@@ -119,7 +119,9 @@
 # #4372: two new CI-prose gate rows explicitly map four still-uncompensated
 # limits (future consumers, live integration, unmodeled inputs, coordinated edits).
 # This is the bidirectional inventory count described above, not a relaxed ratchet.
-# uncompensated_blind_ceiling = "43"
+# #4459: the release build-time gate names one: build time where the backtrace
+# split does not apply (macOS, aarch64, no llvm-tools) (43 -> 44).
+# uncompensated_blind_ceiling = "44"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -583,7 +585,7 @@ class = "NEGATIVE_TESTED"
 evidence = "2026-11-05 #4459 on GCE n2-standard-8 (rustc 1.99.1, 3 rounds): the gate read fib 0.366 / jsonround 0.556 and exited 0; the same script with ALMIDE_RELEASE_STD_UNSPLIT=1 (both legs the plain fat-LTO profile) read 0.991 / 1.001 and exited 1 naming both rows over their ceilings. CI runs that control after the gate on every perf-ratchet run"
 measures = "median `almide build --release` wall time with the backtrace split over the same build with ALMIDE_RELEASE_STD_UNSPLIT=1, interleaved, a fresh IR-reaching constant per build, for fib (the cargo route) and jsonround (the runtime-rlib route), against in-script ceilings 0.60 / 0.75; plus equal output of one program built both ways"
 varies = "2026-11-05 #4459: fib 0.366 with the split, 0.991 without; jsonround 0.556 / 1.001 (n2-standard-8)"
-blind = "the runtime of the binaries built with the split -> scripts/check-perf-ratio.sh; a panic printed differently with the split -> src/cli/std_split.rs (its probe marks a toolchain ready only when a panicking program prints the same under RUST_BACKTRACE unset, 0, 1 and full)"
+blind = "the runtime of the binaries built with the split -> scripts/check-perf-ratio.sh; a panic printed differently with the split -> src/cli/std_split.rs (its probe marks a toolchain ready only when a panicking program prints the same under RUST_BACKTRACE unset, 0, 1 and full); build time on macOS, aarch64 or a host without llvm-tools, where the split does not apply and the gate exits 0 or names the missing tool -> UNCOMPENSATED"
 
 [[gate]]
 path = "scripts/check-forbidden-impurities.sh"
