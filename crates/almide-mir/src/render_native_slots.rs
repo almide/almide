@@ -422,6 +422,119 @@ pub(super) fn struct_width(i: u16) -> Option<usize> {
 /// exactly once at a constant slot, in the alloc's own straight-line run
 /// (no `if` or loop marker before the last store), and nothing reads the
 /// block before then but its own address arithmetic.
+/// List blocks filled densely by one loop: allocated with length `n`, then a
+/// loop whose counter starts at 0, steps by 1 and exits only on `c < n` failing
+/// stores slot `c` exactly once per iteration (at the loop's own level, not
+/// under an `if`) and reads nothing else of the block. Every slot is written in
+/// order, so the block is reserved and pushed (`list.map`'s defunctionalized
+/// fill), as the standard codegen collects it.
+pub(super) fn dense_loop_fills(func: &MirFunction, consts: &BTreeMap<ValueId, i64>) -> BTreeSet<ValueId> {
+    let ops = &func.ops;
+    let mut out = BTreeSet::new();
+    for (i, op) in ops.iter().enumerate() {
+        let Op::Alloc { dst: b, init: Init::DynList { len } | Init::DynListStr { len }, .. } = op else { continue };
+        let b = *b;
+        let len = *len;
+        // Up to the loop: only the block's handle is taken.
+        let mut j = i + 1;
+        let mut handle: Option<ValueId> = None;
+        let mut ok = true;
+        while j < ops.len() && !matches!(ops[j], Op::LoopStart) {
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(&ops[j], &mut reads);
+            match &ops[j] {
+                Op::Prim { kind: PrimKind::Handle, dst: Some(h), args } if args.as_slice() == [b] => handle = Some(*h),
+                Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } | Op::LoopEnd | Op::LoopBreakUnless { .. } | Op::Return { .. } => ok = false,
+                _ if reads.contains(&b) || handle.is_some_and(|h| reads.contains(&h)) => ok = false,
+                _ => {}
+            }
+            if !ok {
+                break;
+            }
+            j += 1;
+        }
+        let (Some(h), true, Some(Op::LoopStart)) = (handle, ok, ops.get(j)) else { continue };
+        // The loop: `c < len`, break unless, body, `c = c + 1`, LoopEnd.
+        let Some(Op::IntBinOp { dst: t, op: crate::IntOp::Lt, a: c, b: n }) = ops.get(j + 1) else { continue };
+        let c = *c;
+        if *n != len || !matches!(ops.get(j + 2), Some(Op::LoopBreakUnless { cond }) if cond == t) {
+            continue;
+        }
+        if !ops[..j].iter().any(|o| matches!(o, Op::ConstInt { dst, value: 0 } if *dst == c)) {
+            continue;
+        }
+        let mut depth = 0i32;
+        let mut end = None;
+        for (k, o) in ops.iter().enumerate().skip(j + 3) {
+            match o {
+                Op::LoopStart | Op::IfThen { .. } => depth += 1,
+                Op::EndIf { .. } => depth -= 1,
+                Op::LoopEnd if depth == 0 => {
+                    end = Some(k);
+                    break;
+                }
+                Op::LoopEnd => depth -= 1,
+                _ => {}
+            }
+        }
+        let Some(end) = end else { continue };
+        let body = &ops[j + 3..end];
+        // The step: `c' = c + 1; c = c'` right before LoopEnd.
+        let step = body.len() >= 2
+            && matches!(body[body.len() - 1], Op::SetLocal { local, src } if local == c && matches!(body[body.len() - 2], Op::IntBinOp { dst, op: crate::IntOp::Add, a, b: one } if dst == src && a == c && consts.get(&one) == Some(&1)));
+        if !step {
+            continue;
+        }
+        // Addresses into the block: h + const, + c * 8.
+        let mut scaled: BTreeSet<ValueId> = BTreeSet::new();
+        let mut base12: BTreeSet<ValueId> = BTreeSet::new();
+        let mut slot_c: BTreeSet<ValueId> = BTreeSet::new();
+        let mut stores = 0usize;
+        let mut fine = true;
+        let mut d = 0i32;
+        for o in body {
+            match o {
+                Op::IfThen { .. } | Op::LoopStart => d += 1,
+                Op::EndIf { .. } | Op::LoopEnd => d -= 1,
+                _ => {}
+            }
+            match o {
+                Op::LoopBreakUnless { .. } | Op::Return { .. } => fine = false,
+                Op::SetLocal { local, .. } if *local == c && !matches!(body.last(), Some(l) if std::ptr::eq(l, o)) => fine = false,
+                Op::IntBinOp { dst, op: crate::IntOp::Mul, a, b: w } if *a == c && consts.get(w) == Some(&8) => {
+                    scaled.insert(*dst);
+                }
+                Op::IntBinOp { dst, op: crate::IntOp::Add, a, b: k } if *a == h && consts.get(k) == Some(&12) => {
+                    base12.insert(*dst);
+                }
+                Op::IntBinOp { dst, op: crate::IntOp::Add, a, b: x } if base12.contains(a) && scaled.contains(x) => {
+                    slot_c.insert(*dst);
+                }
+                Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.first().is_some_and(|a| slot_c.contains(a)) => {
+                    if d != 0 {
+                        fine = false;
+                    }
+                    stores += 1;
+                }
+                other => {
+                    let mut reads = Vec::new();
+                    crate::mir_ops::op_reads(other, &mut reads);
+                    if reads.contains(&b) || reads.iter().any(|v| *v == h || base12.contains(v) || slot_c.contains(v)) {
+                        fine = false;
+                    }
+                }
+            }
+            if !fine {
+                break;
+            }
+        }
+        if fine && stores == 1 {
+            out.insert(b);
+        }
+    }
+    out
+}
+
 /// List blocks of a constant length whose every slot is stored once, in slot
 /// order, right after the allocation (only address arithmetic between, no
 /// read of the block, no control flow): reserved and pushed, rather than
