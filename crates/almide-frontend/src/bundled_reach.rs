@@ -678,7 +678,7 @@ mod tests {
     fn live(src: &str) -> super::LiveBundled {
         let tokens = almide_lang::lexer::Lexer::tokenize(src);
         let prog = almide_lang::parser::Parser::new(tokens).parse().expect("parse");
-        super::live_bundled(std::iter::once(&prog), &[])
+        super::live_bundled(std::iter::once(&prog), &[], &|_| true)
     }
 
     fn is_live(l: &super::LiveBundled, module: &str, f: &str) -> bool {
@@ -720,7 +720,7 @@ mod tests {
         let prog = almide_lang::parser::Parser::new(tokens).parse().expect("parse");
         let json_src = almide_lang::stdlib_info::bundled_source("json").expect("json is bundled");
         let json = almide_lang::parse_cached(json_src).expect("json parses");
-        let l = super::live_bundled(std::iter::once(&prog), &[("json", json)]);
+        let l = super::live_bundled(std::iter::once(&prog), &[("json", json)], &|_| true);
         assert!(is_live(&l, "string", "from_codepoint"), "{:?}", l.live_fns.get("string"));
     }
 }

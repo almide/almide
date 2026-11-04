@@ -297,7 +297,7 @@ pub fn resolve_imports_with_deps(
             .filter(|(n, _, pkg, _)| is_bundled(n, pkg))
             .map(|(n, p, _, _)| (n.as_str(), p))
             .collect();
-        almide_frontend::bundled_reach::live_bundled(roots, &explicit)
+        almide_frontend::bundled_reach::live_bundled(roots, &explicit, &almide_wasm::registry_impl_admitted)
     };
     for name in &live.auto_modules {
         if !ctx.loaded_names.contains(*name)

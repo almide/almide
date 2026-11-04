@@ -64,7 +64,9 @@ pub const TEST_SYNTHESIZED: &[(&str, &str)] = &[
 /// - a row of [`COMPILER_INSERTED`], or of [`TEST_SYNTHESIZED`] when the
 ///   program declares a test;
 /// - a call made by a self-hosted body the wasm leg links behind a reached
-///   surface (`self_host_registry`).
+///   surface (`self_host_registry`) — a body `admit` accepts: the wasm
+///   emitter calls an implementation through its surface only when its
+///   whitelist admits it, and links no other (#4458).
 ///
 /// What the wasm emitter still finds missing after this, the wasm link
 /// relowers from the whole module (`src/wasm_leg.rs`, `link_self_host`).
@@ -76,6 +78,7 @@ pub const TEST_SYNTHESIZED: &[(&str, &str)] = &[
 pub fn live_bundled<'a>(
     roots: impl IntoIterator<Item = &'a Program>,
     explicit: &[(&'a str, &'a Program)],
+    admit: &dyn Fn(&str) -> bool,
 ) -> LiveBundled {
     let mut spelled = Spelled::default();
     let mut has_tests = false;
@@ -108,6 +111,7 @@ pub fn live_bundled<'a>(
         live: HashMap::new(),
         dormant: Vec::new(),
         host_dormant: Vec::new(),
+        admit,
     };
     while reach.enter_modules() | reach.wake_dormant() | reach.enter_self_hosted() | reach.wake_self_hosted() {}
     let auto_modules = auto_modules()
@@ -146,6 +150,8 @@ struct Reach<'p> {
     rows: &'static [almide_lang::self_host_registry::SelfHostRow],
     host_entered: Vec<bool>,
     host_dormant: Vec<(usize, &'static Decl)>,
+    /// Which implementations the wasm leg can link (`live_bundled`'s doc).
+    admit: &'p dyn Fn(&str) -> bool,
 }
 
 impl<'p> Reach<'p> {
@@ -224,7 +230,9 @@ impl<'p> Reach<'p> {
     fn enter_self_hosted(&mut self) -> bool {
         let mut grew = false;
         for (si, (src, impls)) in self.rows.iter().enumerate() {
-            if self.host_entered[si] || !impls.iter().any(|(_, s)| surface_is_named(&self.spelled, &self.live, s)) {
+            if self.host_entered[si]
+                || !impls.iter().any(|(f, s)| (self.admit)(f) && surface_is_named(&self.spelled, &self.live, s))
+            {
                 continue;
             }
             self.host_entered[si] = true;
@@ -244,7 +252,7 @@ impl<'p> Reach<'p> {
         let dormant = std::mem::take(&mut self.host_dormant);
         let (named, rest): (Vec<_>, Vec<_>) = dormant.into_iter().partition(|(si, d)| {
             let impl_live = self.rows[*si].1.iter().any(|(imp, s)| {
-                decl_name(d) == Some(*imp) && surface_is_named(&self.spelled, &self.live, s)
+                decl_name(d) == Some(*imp) && (self.admit)(imp) && surface_is_named(&self.spelled, &self.live, s)
             });
             impl_live || fn_is_named(&self.spelled, "", d)
         });
