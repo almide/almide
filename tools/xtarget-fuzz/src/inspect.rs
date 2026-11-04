@@ -651,7 +651,7 @@ fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
             Leg::Native => Command::new(art),
             Leg::Wasm => {
                 let mut c = Command::new(&ctx.wasmtime);
-                c.arg("run").args(world.wasmtime_args()).arg(art);
+                c.arg("run").args(world.wasmtime_args(art)).arg(art);
                 c
             }
         };
@@ -1517,7 +1517,7 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
         Leg::Wasm => cmd
             .arg(&ctx.wasmtime)
             .args(["run", "-C", "cache=n", "-C", "parallel-compilation=n"])
-            .args(world.wasmtime_args())
+            .args(world.wasmtime_args(art))
             .arg(art),
     };
     if test_leg.is_none() {
