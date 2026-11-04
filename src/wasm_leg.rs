@@ -448,7 +448,7 @@ fn link_self_host(
                     crate::ir::CallTarget::Module { module, func, .. } => {
                         // The native JSON serializer formats floats through
                         // the linked float.to_string.
-                        if (module.as_str() == "json" && matches!(func.as_str(), "stringify" | "stringify_pretty"))
+                        if (module.as_str() == "json" && func.as_str() == "stringify")
                             || (module.as_str() == "value" && func.as_str() == "__stringify")
                         {
                             out.insert("float.to_string".to_string());
@@ -876,11 +876,13 @@ fn link_self_host(
         // as any lowered body, reached or not, names it (after the round's
         // demands, so their order still names the sources): the emitter's
         // reach is wider than the scan's.
-        let emitter_own = almide_wasm::EMITTER_RESOLVED_SURFACES
+        let mut emitter_own: Vec<String> = almide_wasm::EMITTER_IMPLIED_SURFACES
             .iter()
-            .filter(|s| mentioned.contains(**s) && !needed.iter().any(|n| n == **s))
-            .map(|s| s.to_string())
-            .collect::<Vec<String>>();
+            .map(|(_, resolved)| resolved.to_string())
+            .filter(|s| mentioned.contains(s) && !needed.contains(s))
+            .collect();
+        emitter_own.sort();
+        emitter_own.dedup();
         for surface in needed.iter().chain(emitter_own.iter()) {
             if let Some(&(src, _)) = impls.get(surface)
                 && !order.iter().any(|s| std::ptr::eq(*s, src))
@@ -894,12 +896,11 @@ fn link_self_host(
         order.extend(earlier.into_iter().map(|(s, _)| s));
         let mut wanted: HashSet<String> = mentioned.clone();
         wanted.extend(needed.iter().cloned());
-        wanted.extend(almide_wasm::EMITTER_RESOLVED_SURFACES.iter().map(|s| s.to_string()));
         // Each carries (#4458) the implementation of every surface the round
         // demands, every surface any lowered body names — reached or not:
         // the emitter's reach is wider than the scan's (a protocol
-        // requirement it dispatches) — and every surface the emitter
-        // resolves on its own (`EMITTER_RESOLVED_SURFACES`), the value
+        // requirement it dispatches) — with what the emitter resolves on its
+        // own for them (`EMITTER_IMPLIED_SURFACES`, `imply` above), the value
         // helpers it calls by name when their anchor is carried, and what
         // those reach inside the source (`reach_within`). It never carries a
         // function nothing can resolve, which loading the whole source did,

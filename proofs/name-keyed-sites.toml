@@ -833,12 +833,12 @@ class = "legacy"
 names = 17
 
 [[site]]
-id = "crates/almide-wasm/src/calls.rs::resolve_qualified::VERIFIED::table"
+id = "crates/almide-wasm/src/calls.rs::VERIFIED::table"
 class = "legacy"
 names = 20
 
 [[site]]
-id = "crates/almide-wasm/src/calls.rs::resolve_qualified::VERIFIED_SUM_BUILDERS::table"
+id = "crates/almide-wasm/src/calls.rs::VERIFIED_SUM_BUILDERS::table"
 class = "legacy"
 names = 6
 
@@ -1001,6 +1001,12 @@ names = 6
 id = "crates/almide-wasm/src/value.rs::lower_value_call::or-pattern"
 class = "legacy"
 names = 2
+
+[[site]]
+id = "crates/almide-wasm/src/value.rs::EMITTER_IMPLIED_SURFACES::table"
+class = "justified"
+names = 6
+why = "Which surface the wasm emitter resolves by a literal key inside its own native lowering of another (the JSON serializer's float.to_string, capitalize's string.to_upper) is a fact about that emitter, not about the functions: no IR names the resolved surface, so the wasm link reads this table to load its self-host body (#4458), and tests/compiler_inserted_calls_test.rs refuses a literal resolve_qualified key of the emitter that no row resolves."
 
 [[site]]
 id = "crates/almide-wasm/src/value.rs::VALUE_SELFHOST_HELPERS::table"
