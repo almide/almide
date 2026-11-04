@@ -648,6 +648,7 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
 }
 
 pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool, show_output: bool) {
+    crate::resolve::parse_cache::enable();
     let test_files: Vec<String> = discover_test_files(file, &[]);
     let scratch = std::sync::Arc::new(TestScratch::new());
 
@@ -782,6 +783,126 @@ fn cwd_fs_scope() -> Option<Vec<String>> {
 }
 
 pub(super) fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScratch>, cpus: usize, run_filter: Option<&str>) -> Vec<WasmTestOutcome> {
+    // #4441: the run's files as ONE program first — one emit, one compile,
+    // a fresh instance per file; what it does not cover runs file by file.
+    let (mut outcomes, rest) = run_one_program_phase(test_files, cpus, run_filter);
+    outcomes.extend(run_wasm_test_files(&rest, scratch, cpus, run_filter));
+    outcomes
+}
+
+/// The wasm lane's one-program route (#4441): the files that can share a
+/// program (`compile_driver::plan_test_run`) are lowered as one
+/// (`wasm_leg::lower_test_run_to_ir`), emitted and compiled once, and run on
+/// a fresh instance per FILE, exactly as each file's own module ran — the
+/// same runner output, the same verdict, the same isolation. A batch that
+/// does not lower, emit or pass the host audit splits in two until its files
+/// run alone; a file alone takes the per-file route, which gives every
+/// verdict it always gave. Returns the outcomes and the files left over.
+fn run_one_program_phase(test_files: &[String], cpus: usize, run_filter: Option<&str>) -> (Vec<WasmTestOutcome>, Vec<String>) {
+    // The stock-runtime route runs a written artifact per file, and
+    // `almide survive`'s overlay must reach each file's own compile.
+    if WasmTestRunner::from_env() != WasmTestRunner::Embedded || almide::source_overlay::is_armed() || test_files.len() < 2 {
+        return (Vec::new(), test_files.to_vec());
+    }
+    let t = super::run::PhaseTimer::start();
+    let Ok(ctx) = crate::compile_driver::test_run_context() else { return (Vec::new(), test_files.to_vec()) };
+    // A file the per-file route decides before it lowers anything (a
+    // declared skip, nothing to test) stays there.
+    let (candidates, mut rest): (Vec<String>, Vec<String>) = test_files.iter().cloned().partition(|f| {
+        let Ok(text) = almide::source_overlay::read_to_string(f) else { return false };
+        if text.lines().take(3).any(|l| l.contains("// wasm:skip")) {
+            return false;
+        }
+        let mut parser = crate::parser::Parser::new(crate::lexer::Lexer::tokenize(&text)).with_file(f);
+        matches!(parser.parse(), Ok(p) if parser.errors.is_empty() && p.decls.iter().any(|d| matches!(d, almide_lang::ast::Decl::Test { .. })))
+    });
+    let plan = crate::compile_driver::plan_test_run(&ctx, &candidates, true);
+    t.lap("wasm plan");
+    rest.extend(plan.alone);
+    let mut outcomes = Vec::new();
+    // A failure splits the batch, twice at most (as on native).
+    let mut work: Vec<(Vec<String>, u32)> = plan.batches.into_iter().map(|b| (b.into_iter().map(|p| p.file).collect(), 0)).collect();
+    while let Some((batch, depth)) = work.pop() {
+        if batch.len() < 2 || depth > 2 {
+            rest.extend(batch);
+            continue;
+        }
+        match guard_worker_panic(|| run_one_program(&batch, ctx.dep_paths(), cpus, run_filter, &t), Err) {
+            Ok(done) => outcomes.extend(done),
+            Err(why) => {
+                if almide_base::env::flag("ALMIDE_WALL_REASON") {
+                    err(&format!("[route] a wasm test program of {} file(s) did not build; splitting it: {why}", batch.len()));
+                }
+                let mut first = batch;
+                let second = first.split_off(first.len() / 2);
+                work.push((first, depth + 1));
+                work.push((second, depth + 1));
+            }
+        }
+    }
+    (outcomes, rest)
+}
+
+/// Lower, emit and compile `batch` as one program, then run each file's
+/// tests on a fresh instance of it.
+fn run_one_program(batch: &[String], dep_paths: &[(project::PkgId, std::path::PathBuf)], cpus: usize, run_filter: Option<&str>, t: &super::run::PhaseTimer) -> Result<Vec<WasmTestOutcome>, String> {
+    almide_wasm_run::set_fs_scope(cwd_fs_scope());
+    let sources: Vec<(String, String)> = batch
+        .iter()
+        .map(|f| almide::source_overlay::read_to_string(f).map(|s| (f.clone(), s)).map_err(|e| e.to_string()))
+        .collect::<Result<_, _>>()?;
+    let (ir, counts) = almide::wasm_leg::lower_test_run_to_ir(&sources, dep_paths, run_filter)?;
+    t.lap("wasm lower");
+    if wasm_test_permissions_refuse(&batch[0], &ir) {
+        return Err("[permissions] refuse the program".into());
+    }
+    if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(&ir) {
+        return Err(format!("matrix.{op} is native-only"));
+    }
+    let (bytes, host_ops) = almide_wasm::emit_program_with_ops(&ir).map_err(|e| format!("emit: {e:?}"))?;
+    wasmparser::validate(&bytes).map_err(|e| format!("validate: {e}"))?;
+    t.lap("wasm emit");
+    if let Some(op) = host_ops
+        .iter()
+        .find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op) && !almide_wasm::ABORT_SITE_OPS.contains(op))
+    {
+        return Err(format!("host audit: op {op} is not served by the p1 shim"));
+    }
+    // The size a pass line reports, as each file's module reported it: the
+    // stock artifact's when there is one.
+    let reported_len = if host_ops.iter().any(|op| almide_wasm::ABORT_SITE_OPS.contains(op)) {
+        bytes.len()
+    } else {
+        let ops: Vec<i32> = host_ops.iter().copied().collect();
+        almide_wasm_run::wasi::to_wasi(&bytes, &ops).map_err(|e| format!("to_wasi: {e}"))?.len()
+    };
+    if super::run::foreign_import(&bytes).is_some() {
+        return Err("a declared import no host serves".into());
+    }
+    let compiled = std::sync::Arc::new(almide_wasm_run::CompiledModule::new(&bytes).map_err(|e| format!("compile: {e:#}"))?);
+    t.lap("wasm compile");
+    if almide_base::env::flag("ALMIDE_WALL_REASON") {
+        err(&format!("[route] one wasm test program for {} file(s) ({} bytes)", batch.len(), reported_len));
+    }
+    let jobs: Vec<(usize, String, (usize, usize))> = batch.iter().cloned().zip(counts).enumerate().map(|(k, (f, c))| (k, f, c)).collect();
+    let outcomes = bounded_parallel(jobs, cpus, move |(k, file, counts)| {
+        let run = guard_worker_panic(
+            || compiled.run_selected(almide_base::names::test_run_selection::file(k)).map_err(|e| format!("{e:#}")),
+            Err,
+        );
+        match run {
+            Ok(r) => {
+                report_alloc_count(&r);
+                wasm_run_outcome(&file, counts, reported_len, RunEnd::embedded(&r), &r.stdout, &r.stderr)
+            }
+            Err(e) => wasm_run_outcome(&file, counts, reported_len, RunEnd::Failed, "", &format!("Error: embedded wasm host: {e}\n")),
+        }
+    });
+    t.lap("wasm runs");
+    Ok(outcomes)
+}
+
+fn run_wasm_test_files(test_files: &[String], scratch: &std::sync::Arc<TestScratch>, cpus: usize, run_filter: Option<&str>) -> Vec<WasmTestOutcome> {
     let run_filter: Option<String> = run_filter.map(str::to_string);
     let scratch = scratch.clone();
     bounded_parallel(test_files.to_vec(), cpus, move |tf: String| {
@@ -799,23 +920,11 @@ pub(super) fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Ar
 /// dirs. Output is captured — see [`run_test_binaries_parallel`].
 /// The second element names the files whose native build FAILED — no test
 /// ran, so their result is a build error, not a verdict (#3424).
-pub(super) fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, cpus: usize, scratch: &std::sync::Arc<TestScratch>) -> (Vec<TestRun>, std::collections::HashSet<String>) {
-    let args = program_args.clone();
-    let scratch = scratch.clone();
-    let mut v: Vec<(TestRun, bool)> = bounded_parallel(fallback.to_vec(), cpus, move |tf: String| {
-        let worker_dir = scratch.native_worker_dir(&tf);
-        let (built, (code, stdout, stderr)) = guard_worker_panic(
-            || match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
-                Ok(bin) => (true, super::test_report::run_native_test_binary(&tf, &bin, &args)),
-                Err(e) => (false, (1, format!("Compile error for {}:\n{}", tf, e), String::new())),
-            },
-            |msg| (false, (1, format!("Compile error for {}:\n{}", tf, msg), String::new())),
-        );
-        ((tf, code, stdout, stderr), built)
-    });
-    v.sort_by(|a, b| a.0.0.cmp(&b.0.0));
-    let unbuilt = v.iter().filter(|(_, built)| !built).map(|(r, _)| r.0.clone()).collect();
-    (v.into_iter().map(|(r, _)| r).collect(), unbuilt)
+pub(super) fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, _cpus: usize, scratch: &std::sync::Arc<TestScratch>) -> (Vec<TestRun>, std::collections::HashSet<String>) {
+    // One crate for every fallback file (#4441), then one process per file.
+    let compiled = super::test_native::compile_native_tests(fallback, no_check, scratch);
+    let unbuilt = compiled.iter().filter(|(_, built)| built.is_err()).map(|(f, _)| f.clone()).collect();
+    (super::commands::run_test_binaries_parallel(compiled, program_args), unbuilt)
 }
 
 /// A file that FAILED on the wasm leg whose native re-run did not build:

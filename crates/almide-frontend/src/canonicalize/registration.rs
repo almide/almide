@@ -287,6 +287,12 @@ pub fn convention_fn_key(env: &TypeEnv, type_name: &str, method: &str) -> Option
     // module's explicit method registers under the module prefix
     // (`secret.Secret.repr`, #4107): the owner module names the key.
     let owner = almide_lang::stdlib_info::stdlib_owned_type_owner(bare_type_name(type_name))?;
+    // A user type of the same bare name (`ir.Secret`) is not the bundled
+    // module's: its qualifier names another module (#4441 — a program that
+    // reached both called `secret.Secret.repr` on an `ir.Secret`).
+    if type_name.rsplit_once('.').is_some_and(|(module, _)| module != owner) {
+        return None;
+    }
     let owned = sym(&format!("{}.{}.{}", owner, bare_type_name(type_name), method));
     env.functions.contains_key(&owned).then_some(owned)
 }

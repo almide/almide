@@ -240,11 +240,16 @@ pub(crate) fn render_arm(
     out: &mut String,
     indent: usize,
 ) -> Result<(), LowerError> {
+    let rec_ref = |i: u16| format!("&{}", crate::render_native_rec::struct_name(i));
     let (t, ty_name, amp) = match tys.get(src) {
-        Some(NTy::Vec) => (NTy::VecRef, "&[i64]", "&"),
-        Some(NTy::VecRef) => (NTy::VecRef, "&[i64]", ""),
-        Some(NTy::Str) => (NTy::StrRef, "&str", "&"),
-        Some(NTy::StrRef) => (NTy::StrRef, "&str", ""),
+        Some(NTy::Vec) => (NTy::VecRef, "&[i64]".to_string(), "&"),
+        Some(NTy::VecRef) => (NTy::VecRef, "&[i64]".to_string(), ""),
+        Some(NTy::Str) => (NTy::StrRef, "&str".to_string(), "&"),
+        Some(NTy::StrRef) => (NTy::StrRef, "&str".to_string(), ""),
+        // A generated record (an all-scalar one is a by-value struct): the
+        // share is a shared borrow of the struct, as for a list or a string.
+        Some(NTy::Rec(i)) => (NTy::RecRef(*i), rec_ref(*i), "&"),
+        Some(NTy::RecRef(i)) => (NTy::RecRef(*i), rec_ref(*i), ""),
         _ => return render_dup(dst, src, tys, out, indent),
     };
     tys.insert(*dst, t);

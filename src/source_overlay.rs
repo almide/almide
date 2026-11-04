@@ -85,6 +85,12 @@ pub fn overlaid(path: &Path) -> Option<String> {
     (canonical(path) == ov.target).then(|| ov.text.clone())
 }
 
+/// Is the overlay armed in this process? A child process that does not take
+/// it over must not compile the files it would change (#4441).
+pub fn is_armed() -> bool {
+    slot().read().unwrap_or_else(|e| e.into_inner()).is_some()
+}
+
 /// `std::fs::read_to_string`, overlay-aware. THE read path for `.almd` source.
 pub fn read_to_string(path: impl AsRef<Path>) -> std::io::Result<String> {
     let path = path.as_ref();

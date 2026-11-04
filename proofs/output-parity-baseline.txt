@@ -938,6 +938,7 @@ spec/wasm_cross/string_split_rle_codepoint.almd
 spec/wasm_cross/string_to_upper.almd
 spec/wasm_cross/string_whitespace.almd
 spec/wasm_cross/tail_bang_over_declared_result_callee.almd
+spec/wasm_cross/tco_bytes_value_arg.almd
 spec/wasm_cross/tco_let_bound_if.almd
 spec/wasm_cross/tco_map_acc_seed.almd
 spec/wasm_cross/tco_multi_concat.almd

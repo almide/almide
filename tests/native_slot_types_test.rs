@@ -56,8 +56,13 @@ fn a_mixed_tuple_is_a_struct_of_its_slot_kinds_and_its_one_read_moves() {
         "fn main() -> Unit = {\n  let t: (Int, String) = (4, \"x\")\n  println(match t {\n    (n, s) => int.to_string(n) + s\n  })\n}\n",
     );
     assert!(rust.contains("f0: i64,") && rust.contains("f1: AlmideString,"), "no struct of the slot kinds:\n{rust}");
+    // The one read takes the String slot without a copy: moved out, or (once
+    // the read feeds a fused println, which formats in place) borrowed.
     assert!(
-        rust.lines().any(|l| l.contains("= std::mem::take(&mut v") && l.contains(".f1)")),
+        !rust.contains(".f1.clone()")
+            && rust.lines().any(|l| {
+                (l.contains("= std::mem::take(&mut v") && l.contains(".f1)")) || (l.contains("= &v") && l.contains(".f1"))
+            }),
         "the one read of the String slot copies instead of moving:\n{rust}"
     );
     assert!(

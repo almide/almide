@@ -165,6 +165,29 @@ pub fn module_ident(path: &str) -> String {
     out
 }
 
+/// The Rust module a test build renders a module's fns in (#4441), from the
+/// module's [`module_ident`]: one per Almide module, so rustc gives each its
+/// own codegen units and a rebuild re-optimises only the modules an edit
+/// reached.
+pub fn fns_module(ident: &str) -> String {
+    format!("almide_fns_{ident}")
+}
+
+/// The Rust module, inside the harness's `tests`, that a test-run program's
+/// test file's tests sit in (#4441) — for the same reason as [`fns_module`].
+/// From the module's [`module_ident`]; its tests' paths are
+/// `tests::<this>::almide_rt_<ident>_…`.
+pub fn tests_module(ident: &str) -> String {
+    format!("almide_tests_{ident}")
+}
+
+/// The line a test build's renderer writes before a [`fns_module`] or
+/// [`tests_module`] group, `// almide:module-file <name>`, and the one after
+/// it. The native build moves a group so framed into `<name>.rs` (#4441).
+pub const MODULE_FILE_BEGIN: &str = "// almide:module-file ";
+/// See [`MODULE_FILE_BEGIN`].
+pub const MODULE_FILE_END: &str = "// almide:end-module-file ";
+
 /// A module-qualified declaration name (`a.b.Tok`) as one identifier:
 /// [`module_ident`] of the module path, `_`, the bare name (`a_1b_Tok`). A
 /// name with no module part is returned as is.
@@ -226,5 +249,26 @@ mod module_ident_tests {
         assert_eq!(strip_module_path("a_b.T.m", "a_0b"), Some("T.m"));
         assert_eq!(strip_module_path("a.b.T.m", "a_0b"), None);
         assert_eq!(strip_module_path("Pigment.encode", "varlib"), None);
+    }
+}
+
+/// The wasm test run's one program (#4441): which part of it an instance
+/// runs, as the embedded host's op 118 (`testing.__abort_site_selected`)
+/// answers it. `-1` is a single test file's own module: its tests, in order.
+/// In the run's one program, `-2 - k` runs test file `k`'s tests, and an
+/// abort-site child of file `k`'s site `s` is `k * TEST_RUN_SITE_STRIDE + s`.
+pub mod test_run_selection {
+    /// Sites per file in a child's selection.
+    pub const TEST_RUN_SITE_STRIDE: i64 = 1 << 20;
+
+    /// The selection that runs test file `k`'s tests.
+    pub fn file(k: usize) -> i64 {
+        -2 - k as i64
+    }
+
+    /// The selection of the abort-site child that `site` starts from an
+    /// instance selected by `parent`.
+    pub fn child_site(parent: i64, site: i64) -> i64 {
+        if parent <= -2 { (-2 - parent) * TEST_RUN_SITE_STRIDE + site } else { site }
     }
 }
