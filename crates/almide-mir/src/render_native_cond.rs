@@ -50,7 +50,14 @@ fn cmp_def(op: &Op) -> Option<ValueId> {
 }
 
 /// Record `func`'s branch-only comparisons (read by the render below).
+///
+/// `ALMIDE_NATIVE_DRILL_COND_I64=1` records none (the negative control: every
+/// comparison back to the i64 spelling, the small perf gate must read the loss).
 pub(crate) fn set_cond_cmps(func: &MirFunction) {
+    if almide_base::env::flag("ALMIDE_NATIVE_DRILL_COND_I64") {
+        COND_CMPS.with(|m| m.borrow_mut().clear());
+        return;
+    }
     // Per value: (defining comparisons, condition reads, any other mention).
     let mut seen: BTreeMap<ValueId, (u32, u32, bool)> = BTreeMap::new();
     let mut vals = Vec::new();
