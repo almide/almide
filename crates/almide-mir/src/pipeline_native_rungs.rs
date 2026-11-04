@@ -832,6 +832,37 @@ fn render_native_parts_with(
         })?;
         functions.extend(all);
     }
+    // The generated repr fns the interpolations call (`__repr_<V>`,
+    // `__repr_rec_<R>`), synthesized from the declarations and lowered like
+    // user fns (crate::lower::synthesize_repr_fn), to a fixpoint: a variant's
+    // repr calls its nested variants' own.
+    let mut tried: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    loop {
+        let defined: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
+        let mut wanted: Vec<String> = Vec::new();
+        for f in &functions {
+            for op in &f.ops {
+                if let crate::Op::CallFn { name, .. } = op {
+                    if name.starts_with("__repr_") && !defined.contains(name) && tried.insert(name.clone()) {
+                        wanted.push(name.clone());
+                    }
+                }
+            }
+        }
+        if wanted.is_empty() {
+            break;
+        }
+        for name in wanted {
+            let Some(f) = crate::lower::synthesize_repr_fn(&name, &ir.type_decls, &mut ir.var_table, &record_layouts) else {
+                continue;
+            };
+            native_sig_subset_check(&f, &record_layouts, &variant_layouts)?;
+            let all = crate::lower::lower_function_all_with_globals(&f, &globals, &global_inits, &record_layouts, &variant_layouts)
+                .map_err(|e| LowerError::Unsupported(format!("native: generated fn `{name}`: {e:?}")))?;
+            functions.extend(all);
+            ir.functions.push(f);
+        }
+    }
     // #4006: the registry bodies the program calls, linked as certified MIR.
     let linked = link_native_self_host(&mut functions, &ir, bundled)?;
     if let Some(f) = functions.iter().find(|f| recurses_on_a_heap_arg(f)) {

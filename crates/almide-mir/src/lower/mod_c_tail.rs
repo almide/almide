@@ -592,3 +592,5 @@ include!("desugar_match_b.rs");
 include!("desugar_match_c.rs");
 include!("desugar_match_subject.rs");
 include!("synth_eq.rs");
+
+include!("repr_synth.rs");
