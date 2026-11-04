@@ -327,9 +327,9 @@ pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<
         }
         let Op::CallFn { dst: Some(dv), name, args: dargs, .. } = &ops[*d] else { continue };
         let [CallArg::Scalar(n)] = dargs.as_slice() else { continue };
-        let Some(text) = crate::native_floor::declared_scalar_text(name) else { continue };
-        let is_bool = text == crate::native_floor::ScalarText::Bool;
-        if dv != v {
+        let text = crate::native_floor::declared_scalar_text(name);
+        let is_bool = text == Some(crate::native_floor::ScalarText::Bool);
+        if dv != v || text.is_none() {
             continue;
         }
         // The scalar keeps its value from the definition to the print, which
