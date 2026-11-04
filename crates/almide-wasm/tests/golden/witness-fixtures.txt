@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 1006 of 1007
+# certified: 1007 of 1008
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -234,7 +234,6 @@ spec/wasm_cross/fan_record_serial_elision.almd
 spec/wasm_cross/fan_settle_tuple.almd
 spec/wasm_cross/fan_sibling_trap.almd
 spec/wasm_cross/fan_trap_waits_for_elements_below.almd
-spec/wasm_cross/fan_trap_waits_for_slow_element_below.almd
 spec/wasm_cross/fan_var_thunk_list.almd
 spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
 spec/wasm_cross/field_and_interp_accumulator.almd
@@ -568,6 +567,7 @@ spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
 spec/wasm_cross/matrix_mul_no_fma.almd
 spec/wasm_cross/matrix_neg_signed_zero.almd
 spec/wasm_cross/matrix_pow_libm.almd
+spec/wasm_cross/matrix_producers_uniform_rows.almd
 spec/wasm_cross/matrix_product_family.almd
 spec/wasm_cross/matrix_select_rows.almd
 spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd
@@ -756,6 +756,7 @@ spec/wasm_cross/regex_invalid_pattern.almd
 spec/wasm_cross/regex_linear_time.almd
 spec/wasm_cross/regex_many_patterns.almd
 spec/wasm_cross/regex_repetition_depth.almd
+spec/wasm_cross/regex_scan_linear.almd
 spec/wasm_cross/regex_size_cap.almd
 spec/wasm_cross/repeat_size_ceiling.almd
 spec/wasm_cross/replace_empty_pat.almd
