@@ -592,6 +592,7 @@ call:process.exit
 call:random.bytes
 call:random.int
 call:regex.captures
+call:regex.captures_all
 call:regex.compile
 call:regex.find
 call:regex.find_all
@@ -607,6 +608,7 @@ call:result.__almd_mono7_flatten__Float_cString
 call:result.__almd_mono7_flatten__Int_cString
 call:result.__almd_mono7_or_else__Bool_cString_cString
 call:result.__almd_mono7_or_else__Int_cString_cString
+call:result.__almd_mono7_to_list___nUrl_cString
 call:result.flat_map
 call:result.is_err
 call:result.is_ok

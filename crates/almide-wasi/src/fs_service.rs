@@ -84,6 +84,11 @@ pub const FS_SERVICE_OPS: &[(i32, &str, i32)] = &[
     (125, "op_root_remove", 125),
 ];
 
+/// The ops whose bodies read a directory with `fd_readdir` (`$names_at`):
+/// list_dir, remove_all, walk, glob and the rooted list / remove. A stock
+/// runtime can refuse such a read with `ilseq` (#4391).
+const READS_DIRECTORIES: &[i32] = &[9, 11, 23, 39, 122, 125];
+
 /// Whether the fs service answers `op`.
 pub fn serves(op: i32) -> bool {
     FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op)
@@ -189,10 +194,18 @@ pub fn service_wat_ext(fsp: u32, ops: &[i32], extra_arms: &str) -> String {
     }
     // The bounded reader's two refusals (#4201) under pseudo-errnos past
     // every WASI code: `$read_fd` answers them, the texts are almide-base's.
+    // The host-limitation row (#4391): a stock runtime's `ilseq` refusal of
+    // a name that is not UTF-8, classified instead of `wasi errno 25`. Only
+    // a module that reads a directory carries it.
+    let ilseq = ops.iter().any(|op| READS_DIRECTORIES.contains(op));
+    let host_rows = ilseq.then_some((u32::from(almide_base::fs_errno::FS_HOST_ILSEQ_WASI), almide_base::fs_errno::FS_HOST_ILSEQ_TEXT));
     for (code, text) in [
         (1001, almide_base::fs_errno::FS_READ_NOT_REGULAR_TEXT),
         (1002, almide_base::fs_errno::FS_READ_TOO_LARGE_TEXT),
-    ] {
+    ]
+    .into_iter()
+    .chain(host_rows)
+    {
         let (at, len) = place(text.as_bytes());
         tail.push_str(&format!(
             "    (if (i32.eq (local.get $e) (i32.const {code})) (then (return (i32.const {at}) (i32.const {len}))))\n"

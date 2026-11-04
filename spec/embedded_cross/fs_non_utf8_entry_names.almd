@@ -1,0 +1,39 @@
+// @contract: C-450
+// #4391: a directory entry whose name is not UTF-8 lists as its lossy decode
+// (one U+FFFD per maximal invalid subpart), sorted with the other names by
+// the decoded bytes, through fs.list_dir, fs.walk and fs.glob alike. Almide
+// text cannot spell such a name, so the shell makes `f\x80g` and `\x80z`
+// next to `ok` and `é`. Decoded, `é` (C3 A9) sorts before `\u{FFFD}z`
+// (EF BF BD 7A), the reverse of the raw order (C3 after 80). A filesystem
+// that refuses such a name (APFS) prints one line instead, on every leg.
+import fs
+import process
+
+fn shown(call: String, r: Result[List[String], String], d: String) -> String = match r {
+  ok(ns) => "${call} ok ${ns |> list.map((n) => string.replace(n, d, "<D>"))}",
+  err(m) => "${call} err ${string.replace(m, d, "<D>")}",
+}
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("nonutf8")!
+  fs.write_text(d + "/ok", "")!
+  fs.write_text(d + "/é", "")!
+  let made = process.exec(
+    "sh",
+    [
+      "-c",
+      "printf '' > \"$1/f$(printf '\\200')g\" && printf '' > \"$1/$(printf '\\200')z\"",
+      "sh",
+      d
+    ],
+  )
+  match made {
+    ok(_) => {
+      println(shown("list_dir", fs.list_dir(d), d))
+      println(shown("walk", fs.walk(d), d))
+      println(shown("glob", fs.glob(d + "/*"), d))
+    },
+    err(_) => println("this host's filesystem refuses a name that is not UTF-8"),
+  }
+  fs.remove_all(d)!
+}

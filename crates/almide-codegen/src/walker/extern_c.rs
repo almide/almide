@@ -154,7 +154,6 @@ fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
         c_params.push(format!("{name}: {}", abi.c_ty));
         let (wrapper_ty, arg) = match abi.conv {
             CConv::Same => (render_type(ctx, &p.ty), name.to_string()),
-            CConv::IntAsI32 => (render_type(ctx, &p.ty), format!("{name} as i32")),
             CConv::BoolAsI32 => (render_type(ctx, &p.ty), format!("if {name} {{ 1 }} else {{ 0 }}")),
             CConv::CString => {
                 let c = format!("__{name}_cstr");
@@ -175,7 +174,6 @@ fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
     let mut extra_decls = String::new();
     let mut epilogue = String::new();
     let body = match ret.conv {
-        CConv::IntAsI32 => format!("{call} as i64"),
         CConv::BoolAsI32 => format!("{call} != 0"),
         CConv::Same | CConv::CString => call,
         CConv::Region => {
@@ -254,11 +252,19 @@ fn render_foreign_region(region_ty: &str, len: &str, release: &str) -> String {
 /// pub fn my_add(a: i64, b: i64) -> i64 { (a + b) }
 ///
 /// #[export_name = "my_add"]
-/// pub extern "C" fn __c_my_add(a: i32, b: i32) -> i32 {
-///     let __almide_ret = my_add(a as i64, b as i64);
-///     (__almide_ret) as i32
+/// pub extern "C" fn __c_my_add(a: i64, b: i64) -> i64 {
+///     let __almide_ret = my_add(a, b);
+///     __almide_ret
 /// }
 /// ```
+///
+/// Every parameter and the return read the one C ABI table
+/// (`almide_lang::types::extern_abi`, #4447, #4448) — the rows `@extern(c)`
+/// reads, in the other direction: `Int` is an `int64_t`, the sized types and
+/// floats cross at their own width, `Bool` is an `int` (`!= 0` in, 1/0 out),
+/// `Unit` is `void`. A type with no row never reaches here — `check` refuses
+/// it (E090) — so a `None` row renders a `compile_error!` naming it rather
+/// than a guessed type.
 ///
 /// A `Region` parameter (ADR-0031 amendment A2) is two C arguments, the
 /// caller's buffer and its `size_t` length: `const uint8_t*` and a read-only
@@ -267,15 +273,22 @@ fn render_foreign_region(region_ty: &str, len: &str, release: &str) -> String {
 /// the call: it owns nothing (the memory is the caller's), every access is
 /// still checked against the length the caller passed, and after the call the
 /// wrapper stops the process if a copy of it is still held
-/// (`almide_rt_ffi_lent_end`), so no Region outlives the buffer it views. An
-/// `effect fn`'s error has no C form: it is printed and the process exits 1,
-/// as an error escaping `main` does.
+/// (`almide_rt_ffi_lent_end`), so no Region outlives the buffer it views.
+///
+/// An `effect fn` answers its ok value in its declared return's C type (the
+/// walker sees the return lifted to `Result[T, String]`, so the row is read
+/// for `T`). Its error has no C form: the message goes to stderr and the
+/// process exits 1 before the caller regains control (C-452, the native
+/// counterpart of C-451's wasm trap, #4376).
 fn render_export_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExportAttr) -> String {
-    use almide_lang::types::Ty;
-    use almide_lang::types::extern_abi::is_region;
+    use almide_lang::types::{Ty, TypeConstructorId};
+    use almide_lang::types::extern_abi::{c_export_param_abi, c_export_return_abi, CConv};
 
     let symbol = attr.symbol.as_str();
     let fn_name = func.name.as_str();
+    let refuse = |what: String| format!(
+        "compile_error!(\"@export(c) fn `{fn_name}`: {what} has no C representation (E090)\");"
+    );
 
     // 1. Render the normal Almide function (strip export_attrs to avoid recursion)
     let mut clean_func = func.clone();
@@ -291,32 +304,45 @@ fn render_export_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
 
     for p in &func.params {
         let name = p.name.as_str();
-        if is_region(&p.ty) {
-            let writable = outs.iter().any(|o| o == name);
-            let ptr = if writable { "*mut u8" } else { "*const u8" };
-            c_params.push(format!("{name}: {ptr}, {name}_len: usize"));
-            let lent = format!("__almide_lent_{name}");
-            lends.push_str(&format!("    let {lent} = {};\n", render_lent_region(&render_type(ctx, &p.ty), name, writable)));
-            call_args.push(c_export_region_arg(p, &lent));
-            ends.push_str(&format!("    almide_rt_ffi_lent_end(&{lent}.keep, \"{symbol}\", \"{name}\");\n"));
-            continue;
-        }
-        match &p.ty {
-            Ty::Int    => { c_params.push(format!("{}: i32", name)); call_args.push(format!("{} as i64", name)); }
-            Ty::Float  => { c_params.push(format!("{}: f64", name)); call_args.push(name.into()); }
-            Ty::Bool   => { c_params.push(format!("{}: i32", name)); call_args.push(format!("{} != 0", name)); }
-            Ty::RawPtr => { c_params.push(format!("{}: *mut u8", name)); call_args.push(name.into()); }
-            _          => { let t = render_type_fn(ctx, &p.ty); c_params.push(format!("{}: {}", name, t)); call_args.push(name.into()); }
+        let Some(abi) = c_export_param_abi(&p.ty) else {
+            return refuse(format!("parameter `{name}: {}`", p.ty.display()));
+        };
+        match abi.conv {
+            CConv::Region => {
+                let writable = outs.iter().any(|o| o == name);
+                let ptr = if writable { "*mut u8" } else { "*const u8" };
+                c_params.push(format!("{name}: {ptr}, {name}_len: usize"));
+                let lent = format!("__almide_lent_{name}");
+                lends.push_str(&format!("    let {lent} = {};\n", render_lent_region(&render_type(ctx, &p.ty), name, writable)));
+                call_args.push(c_export_region_arg(p, &lent));
+                ends.push_str(&format!("    almide_rt_ffi_lent_end(&{lent}.keep, \"{symbol}\", \"{name}\");\n"));
+            }
+            CConv::Same => {
+                c_params.push(format!("{name}: {}", abi.c_ty));
+                call_args.push(name.to_string());
+            }
+            CConv::BoolAsI32 => {
+                c_params.push(format!("{name}: {}", abi.c_ty));
+                call_args.push(format!("{name} != 0"));
+            }
+            CConv::CString => unreachable!("c_export_param_abi has no CString row"),
         }
     }
 
-    let (c_ret, wrap_open, wrap_close) = match &func.ret_ty {
-        Ty::Int    => ("i32", "(", ") as i32"),
-        Ty::Bool   => ("i32", "if ", " { 1 } else { 0 }"),
-        Ty::RawPtr => ("*mut u8", "", ""),
-        Ty::Float  => ("f64", "", ""),
-        Ty::Unit   => ("()", "", ""),
-        _          => ("i32", "(", ") as i32"),
+    // An effect fn's return reaches the walker lifted to `Result[T, String]`
+    // (pass_result_propagation); the C return is T's row.
+    let declared_ret = match &func.ret_ty {
+        Ty::Applied(TypeConstructorId::Result, args) if func.is_effect && !args.is_empty() => &args[0],
+        t => t,
+    };
+    let Some(ret) = c_export_return_abi(declared_ret) else {
+        return refuse(format!("return type `{}`", declared_ret.display()));
+    };
+    let c_ret = ret.c_ty;
+    let ret_value = match ret.conv {
+        CConv::Same => "__almide_ret".to_string(),
+        CConv::BoolAsI32 => "if __almide_ret { 1 } else { 0 }".to_string(),
+        CConv::Region | CConv::CString => unreachable!("c_export_return_abi has no Region or CString row"),
     };
 
     let c_params_str = c_params.join(", ");
@@ -328,7 +354,7 @@ fn render_export_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
     };
 
     let wrapper = format!(
-        "#[export_name = \"{symbol}\"]\npub extern \"C\" fn __c_{fn_name}({c_params_str}) -> {c_ret} {{\n{lends}    let __almide_ret = {value};\n{ends}    {wrap_open}__almide_ret{wrap_close}\n}}",
+        "#[export_name = \"{symbol}\"]\npub extern \"C\" fn __c_{fn_name}({c_params_str}) -> {c_ret} {{\n{lends}    let __almide_ret = {value};\n{ends}    {ret_value}\n}}",
     );
 
     format!("{}\n\n{}", almide_fn, wrapper)

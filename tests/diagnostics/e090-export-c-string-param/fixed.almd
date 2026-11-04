@@ -1,0 +1,6 @@
+import ffi
+
+@export(c, "greet")
+fn greet(name: Region) -> Int = ffi.len(name)
+
+effect fn main() -> Unit = println(int.to_string(greet(ffi.region(bytes.from_string("hi")))))

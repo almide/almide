@@ -340,6 +340,16 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
     let ir = source_to_ir_with(source, &[])?;
     crate::charge_probe::note_program_regions(almide_ir::meter_plan::program_has_regions(&ir));
     require_native_concurrency_support(&ir)?;
+    // #4447: the native rungs render no `@export(c)` wrapper (the program's
+    // `exports` below are empty), so a program declaring one walls here and
+    // builds through the standard codegen, which renders the C wrapper from
+    // the C ABI table — never a binary that silently lacks the C symbol.
+    if let Some(f) = ir.functions.iter().find(|f| f.export_attrs.iter().any(|a| a.target.as_str() == "c")) {
+        return Err(LowerError::at(
+            f.body.span,
+            format!("native: fn `{}` is @export(c) — its C wrapper is outside the native rungs", f.name),
+        ));
+    }
     // Rung-5 records slab: the layout registries the wasm leg threads — without
     // them a record literal lowers as an Opaque skeleton and every field read
     // strict-walls (the probe_native trap recorded in the trust-spine ledger).

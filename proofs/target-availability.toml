@@ -355,7 +355,18 @@ pending_self_host_ceiling = 0
 # io.close (the tcp close) lose their stock-p1 leg, their last; evidence:
 # tests/net_tcp_p3_cross_test.rs and tests/net_udp_p3_cross_test.rs (C-377,
 # C-378, C-379, C-448).
-pending_port_ceiling = 9
+# 2026-11-01 (ADR-0023 §4.3): 9 -> 0. The same routing for the http client
+# families (`almide_wasm::host_ops::HTTP_CLIENT_FAMILIES`: the string and
+# framed client 43..=49, the full-response client 65, the call handle
+# 53..=59): preview 1 has no http either, so the default build is the WASI
+# 0.3 component over wasi:http, and its shim now serves the call handle
+# (`start` / `poll` / `read_new` / `wait` / `cancel` and the drop glue,
+# guest-enforced limits; crates/almide-wasm-run/src/wasi_p3_http_call.rs).
+# `almide build` prints the load-time grant (`-S http`). The nine http rows
+# lose their stock-p1 leg, their last; evidence: tests/http_call_handle_test.rs's
+# p3 leg, tests/http_call_p3_cross_test.rs, tests/http_response_cross_test.rs
+# (C-328, C-330, C-366).
+pending_port_ceiling = 0
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -365,27 +376,6 @@ pending_port_ceiling = 9
 unprobed_ceiling_structural = 0
 unprobed_ceiling_stock_p1 = 0
 unprobed_ceiling_embedded = 0
-
-[[unavailable]]
-fn = "http.get"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328), and the ALMIDE_COMPONENT_P3 component serves the family over wasi:http@0.3 (#1710 PR B, `-S http=y`); the DEFAULT stock artifact still refuses at build via the op audit"
-issue = "#1423"
-
-[[unavailable]]
-fn = "http.request"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
-issue = "#1423"
-
-[[unavailable]]
-fn = "http.get_response"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4), and `almide run --target wasm` runs that component on the embedded host (step 7) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively; the default build becomes the component at step 9"
-issue = "#1710"
 
 [[unavailable]]
 fn = "unix.shm_create"
@@ -500,41 +490,6 @@ reason-stock-p1 = "the artifact imports the private almide:process/spawn capabil
 issue = "#2589"
 
 [[unavailable]]
-fn = "http.cancel"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
-issue = "#1710"
-
-[[unavailable]]
-fn = "http.poll"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
-issue = "#1710"
-
-[[unavailable]]
-fn = "http.read_new"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
-issue = "#1710"
-
-[[unavailable]]
-fn = "http.start"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
-issue = "#1710"
-
-[[unavailable]]
-fn = "http.wait"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
-issue = "#1710"
-
-[[unavailable]]
 fn = "testing.assert_aborts"
 legs = ["stock-p1"]
 class = "host-capability"
@@ -548,13 +503,6 @@ class = "host-capability"
 justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
 reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
 issue = "#2589"
-
-[[unavailable]]
-fn = "http.send"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4), and `almide run --target wasm` runs that component on the embedded host (step 7) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively; the default build becomes the component at step 9"
-issue = "#1710"
 
 [[unavailable]]
 fn = "process.start"

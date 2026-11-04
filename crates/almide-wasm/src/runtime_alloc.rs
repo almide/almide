@@ -48,6 +48,15 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool, o
         .i32_const(-4)
         .i32_and()
         .local_set(want);
+    // #4396: `len + PAYLOAD + 3` is i32 arithmetic, so a request within
+    // PAYLOAD + 3 of 2^32 WRAPS to a want of 0..12 — a class-0 block whose
+    // header would claim the huge len, and every write the caller makes
+    // past its first bytes lands outside it. Unwrapped, want >= len +
+    // PAYLOAD, so `want <u len` is exactly the wrap. No machine holds
+    // such a block: the defined C-197 abort, before any block exists.
+    i.local_get(want).local_get(len).i32_lt_u().if_(BlockType::Empty);
+    emit_oom_die(&mut i, oom_msg, oom_probe);
+    i.end();
     i.local_get(want).i32_const(16).i32_lt_u().if_(BlockType::Empty);
     i.i32_const(16).local_set(want);
     i.end();
@@ -123,11 +132,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool, o
     // frontier is an allocation the machine cannot satisfy: die in the
     // defined form before the grow guard can misjudge it.
     i.local_get(next).local_get(base).i32_lt_u().if_(BlockType::Empty);
-    if oom_probe {
-        i.i32_const(-1).memory_grow(0).drop();
-    }
-    i.i32_const(oom_msg as i32).call(F_EPRINTLN_BLOCK);
-    i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
+    emit_oom_die(&mut i, oom_msg, oom_probe);
     i.end();
     // if next > memory.size * 64Ki: grow GEOMETRICALLY — max(needed,
     // current) pages, i.e. at least doubling. Grow-just-enough produced
@@ -184,6 +189,43 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool, o
     i.local_get(base);
     i.end();
     f
+}
+
+/// `$alloc`'s C-197 die (both of its unsatisfiable-request arms): with
+/// `oom_probe`, first the refused whole-memory grow the contained serve loop
+/// reads as out of memory (see `emit_alloc`); then the defined line + exit 1.
+fn emit_oom_die(i: &mut wasm_encoder::InstructionSink<'_>, oom_msg: u32, oom_probe: bool) {
+    if oom_probe {
+        i.i32_const(-1).memory_grow(0).drop();
+    }
+    i.i32_const(oom_msg as i32).call(F_EPRINTLN_BLOCK);
+    i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
+}
+
+/// `cap = cap << 1`, SATURATED (#4396): a growth helper's doubled capacity
+/// is i32, so a cap at or past 2^31 wrapped to a SMALLER request (0 for
+/// exactly 2^31) and the caller then copied the old `len` bytes into the
+/// small block. Such a block cannot grow on wasm32 anyway — the old block
+/// and a larger new one do not fit in 4 GiB together — so the saturated
+/// request (`u32::MAX`) is one `$alloc` refuses in C-197's defined form.
+pub(crate) fn emit_double_cap_sat(i: &mut wasm_encoder::InstructionSink<'_>, cap: u32) {
+    i.i32_const(-1);
+    i.local_get(cap).i32_const(1).i32_shl();
+    // select(-1, doubled, cap >= 2^31): the top bit set is the wrap
+    i.local_get(cap).i32_const(0).i32_lt_s();
+    i.select().local_set(cap);
+}
+
+/// `dst = a + b`, SATURATED to `u32::MAX` on carry (#4396): two lengths of
+/// the SAME block (`s + s`) can sum past 2^32 although each fits, and the
+/// wrapped sum sized a block smaller than either copy. The saturated
+/// request is one `$alloc` refuses in C-197's defined form.
+pub(crate) fn emit_add_len_sat(i: &mut wasm_encoder::InstructionSink<'_>, a: u32, b: u32, dst: u32) {
+    i.local_get(a).local_get(b).i32_add().local_set(dst);
+    i.i32_const(-1);
+    i.local_get(dst);
+    i.local_get(dst).local_get(a).i32_lt_u();
+    i.select().local_set(dst);
 }
 
 /// `$free(block)`: file a dead block into its size-class free list —
@@ -712,11 +754,13 @@ mod tests {
         let got = h.finish();
         // Recorded at the StructuralRuntime.v landing; moved by #4023
         // ($dec_flat's double-free sentinel, dec_body's
-        // `SIf (EEq ETmp (EC (-1))) STrap`). A mismatch means the emitted
+        // `SIf (EEq ETmp (EC (-1))) STrap`), and by #4396 ($alloc's
+        // length-wrap guard, `AIf (ALtU AWant ALen) [SOom]` in
+        // proofs/StructuralAlloc.v). A mismatch means the emitted
         // trees moved: update proofs/StructuralRuntime.v to the new trees
         // (re-proving what changed), then this constant.
         assert_eq!(
-            got, 0xc6a7af758f38cfcd,
+            got, 0xbfcb37f9a80fb934,
             "runtime tree bytes drifted from the proofs/StructuralRuntime.v transcription (got {got:#x})"
         );
     }

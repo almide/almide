@@ -1,0 +1,41 @@
+// @contract: C-032
+// #4419: regex.captures_all and regex.replace_with take memory and time
+// linear in the subject's length on both targets, as find_all always did.
+// The wasm engine built each match's items as `acc + [field, whole] + groups`,
+// a copy of the whole accumulator per match, in a loop whose body read the
+// machine block with a prim op, which kept every old accumulator alive: on a
+// 220 KB subject of dates wasm ran out of memory where native answered in
+// 30 ms. The scan now appends one item per step, the in-place `acc + [x]`.
+// The subject below matches at every character, so it makes as many items
+// as that subject from a third of its length: the first call alone ran the
+// unfixed wasm engine out of memory. replace_with reads the same scan; its
+// test at this size is in spec/stdlib/regex_test.almd, kept out of this
+// corpus fixture because the structural witness declines the frame of its
+// callback argument.
+import regex
+
+fn main() -> Unit = {
+  let s = string.repeat("ab", 40000)
+  let chars = regex.captures_all(regex.new("(.)"), s)
+  println("captures_all ${list.len(chars)}")
+  match list.last(chars) {
+    some(cs) => println(cs |> list.map((c) => c ?? "none") |> list.join("|")),
+    none => println("no match"),
+  }
+  let pairs = regex.captures_all(regex.new("(a)(x)?(b)"), s)
+  println("pairs ${list.len(pairs)}")
+  match list.first(pairs) {
+    some(cs) => println(cs |> list.map((c) => c ?? "none") |> list.join("|")),
+    none => println("no pairs"),
+  }
+  println("find_all ${list.len(regex.find_all(regex.new("."), s))}")
+  let dates = regex.captures_all(
+    regex.new("([0-9]+)-([0-9]+)-(x)?([0-9]+)"),
+    string.repeat("2024-01-02 ", 1000),
+  )
+  println("dates ${list.len(dates)}")
+  match list.last(dates) {
+    some(cs) => println(cs |> list.map((c) => c ?? "none") |> list.join("|")),
+    none => println("no dates"),
+  }
+}

@@ -127,6 +127,10 @@ always comes from the Region.
   pair is the view's data address and the Region's own length, never the
   address of the Region's record (#4354). With `--host js` the glue wraps
   the export as `f(…) → [ptr, len]` and adds `regionRelease(ptr)`.
+- *Reading it back, wasm.* An `@export(wasm)` `effect fn` returning `Int`,
+  `Float`, `Bool` or `Unit` answers the value itself (an i64, an f64, an i32,
+  or nothing), so `inbox_sum` below hands any host its total directly. An
+  `err` prints and traps, as a Region export's does (#4376).
 - *Lent to a wasm export.* An `@export(wasm)` fn may take a Region
   parameter. The host passes it as `(base, len)`, the same pair an import
   receives, in the memory's address width. The fn gets a read-only Region

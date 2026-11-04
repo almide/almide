@@ -137,8 +137,14 @@ fn cells() -> Vec<Cell> {
     cells
 }
 
+/// The compiler under test: CI's release build when `ALMIDE_BIN` names it,
+/// else the test-profile binary. The matrix spawns one `almide check` per
+/// cell per target (1277 processes over 780 cells on 2026-11-03), and the
+/// unoptimized binary checks a cell in 0.68 s (1.54 s for `--target wasm`)
+/// against the release build's 0.15 s (0.36 s): measured on 4 cores, the
+/// check phase was 341 s of the test's 360 s.
 fn almide() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_almide"))
+    Command::new(std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string()))
 }
 
 /// The program for a set of cells: one probe fn each, all called from `main`.

@@ -685,6 +685,55 @@
       (br $next)))
     (local.get $i))
 
+  ;; `String::from_utf8_lossy` of (p, n), for the names and paths the host
+  ;; hands over (#4391): (p, n) itself when it is UTF-8, else a fresh copy
+  ;; with one U+FFFD per maximal invalid subpart, each valid run copied whole
+  ;; (at most 3 bytes out per byte in). Directory entries, `env.cwd` and
+  ;; `fs.temp_dir` answer through it, as native's `to_string_lossy` does.
+  (func $lossy (param $p i32) (param $n i32) (result i32 i32)
+    (local $out i32) (local $w i32) (local $i i32) (local $v i32) (local $b0 i32)
+    (local $x i32) (local $k i32) (local $lo i32) (local $hi i32) (local $c i32)
+    (if (call $utf8_ok (local.get $p) (local.get $n)) (then (return (local.get $p) (local.get $n))))
+    (local.set $out (call $alloc (i32.mul (local.get $n) (i32.const 3))))
+    (local.set $w (local.get $out))
+    (block $done (loop $next
+      ;; the valid run, copied whole
+      (local.set $v (call $utf8_upto (i32.add (local.get $p) (local.get $i)) (i32.sub (local.get $n) (local.get $i))))
+      (memory.copy (local.get $w) (i32.add (local.get $p) (local.get $i)) (local.get $v))
+      (local.set $w (i32.add (local.get $w) (local.get $v)))
+      (local.set $i (i32.add (local.get $i) (local.get $v)))
+      (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
+      ;; the maximal invalid subpart at i: its lead plus every continuation
+      ;; the lead admits (Table 3-7), which stops short of a whole sequence
+      (local.set $b0 (i32.load8_u (i32.add (local.get $p) (local.get $i))))
+      (local.set $x (select (i32.const 1)
+                            (select (i32.const 2) (i32.const 3) (i32.lt_u (local.get $b0) (i32.const 240)))
+                            (i32.lt_u (local.get $b0) (i32.const 224))))
+      (if (i32.or (i32.lt_u (local.get $b0) (i32.const 194)) (i32.gt_u (local.get $b0) (i32.const 244)))
+        (then (local.set $x (i32.const 0))))
+      (local.set $lo (select (i32.const 160) (select (i32.const 144) (i32.const 128) (i32.eq (local.get $b0) (i32.const 240)))
+                             (i32.eq (local.get $b0) (i32.const 224))))
+      (local.set $hi (select (i32.const 159) (select (i32.const 143) (i32.const 191) (i32.eq (local.get $b0) (i32.const 244)))
+                             (i32.eq (local.get $b0) (i32.const 237))))
+      (local.set $k (i32.const 1))
+      (block $sdone (loop $snext
+        (br_if $sdone (i32.gt_u (local.get $k) (local.get $x)))
+        (br_if $sdone (i32.ge_u (i32.add (local.get $i) (local.get $k)) (local.get $n)))
+        (local.set $c (i32.load8_u (i32.add (local.get $p) (i32.add (local.get $i) (local.get $k)))))
+        (br_if $sdone (i32.lt_u (local.get $c) (local.get $lo)))
+        (br_if $sdone (i32.gt_u (local.get $c) (local.get $hi)))
+        (local.set $lo (i32.const 128))
+        (local.set $hi (i32.const 191))
+        (local.set $k (i32.add (local.get $k) (i32.const 1)))
+        (br $snext)))
+      (i32.store16 (local.get $w) (i32.const 0xBFEF))
+      (i32.store8 offset=2 (local.get $w) (i32.const 0xBD))
+      (local.set $w (i32.add (local.get $w) (i32.const 3)))
+      (local.set $i (i32.add (local.get $i) (local.get $k)))
+      (br $next)))
+    (local.get $out)
+    (i32.sub (local.get $w) (local.get $out)))
+
   ;; `str::lines` as frames: split on '\n', a '\r' before the '\n' dropped,
   ;; no phantom line after a trailing newline (C-225).
   (func $lines (param $p i32) (param $l i32) (result i32 i32)
@@ -1118,11 +1167,23 @@
   ;; A node list, byte-sorted (native `Vec<String>::sort`), as frames.
   (func $sorted_frames (param $head i32) (param $cnt i32) (result i32 i32)
     (local $arr i32) (local $i i32) (local $x i32) (local $tot i32) (local $out i32) (local $w i32)
+    (local $np i32) (local $nl i32)
     (local.set $arr (call $alloc (i32.shl (local.get $cnt) (i32.const 2))))
     (block $d (loop $c
       (br_if $d (i32.eqz (local.get $head)))
-      (i32.store (i32.add (local.get $arr) (i32.shl (local.get $i) (i32.const 2))) (local.get $head))
-      (local.set $tot (i32.add (local.get $tot) (i32.add (i32.load offset=4 (local.get $head)) (i32.const 4))))
+      ;; A name that is not UTF-8 lists as its lossy decode (#4391), and is
+      ;; sorted by the decoded bytes, as native sorts what it decoded.
+      ;; Only the listing sees the decode: the walk descended by the raw path.
+      (local.set $x (local.get $head))
+      (call $lossy (i32.add (local.get $head) (i32.const 8)) (i32.load offset=4 (local.get $head)))
+      (local.set $nl) (local.set $np)
+      (if (i32.ne (local.get $np) (i32.add (local.get $head) (i32.const 8)))
+        (then
+          (local.set $x (call $alloc (i32.add (local.get $nl) (i32.const 8))))
+          (i32.store offset=4 (local.get $x) (local.get $nl))
+          (memory.copy (i32.add (local.get $x) (i32.const 8)) (local.get $np) (local.get $nl))))
+      (i32.store (i32.add (local.get $arr) (i32.shl (local.get $i) (i32.const 2))) (local.get $x))
+      (local.set $tot (i32.add (local.get $tot) (i32.add (i32.load offset=4 (local.get $x)) (i32.const 4))))
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
       (local.set $head (i32.load (local.get $head)))
       (br $c)))
@@ -1710,6 +1771,7 @@
 
   (func $op_temp_dir (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
     (call $tmp)
+    (call $lossy)
     (call $ok))
 
   ;; env.cwd: the cwd relative paths resolve against, else "/" (env_cwd.almd)
@@ -1717,7 +1779,7 @@
     (local $p i32) (local $l i32)
     (call $cwd) (local.set $l) (local.set $p)
     (if (i32.eqz (local.get $l)) (then (call $s_slash) (local.set $l) (local.set $p)))
-    (call $ok (local.get $p) (local.get $l)))
+    (call $ok (call $lossy (local.get $p) (local.get $l))))
 
   ;; the fan prefetch pair's start/finish: no slot state on a sequential host
   (func $op_nop (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)

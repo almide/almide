@@ -133,6 +133,7 @@ pub(super) fn auto_derive_variant_encode(wk: &mut CodecWk, type_ty: &Ty, cases: 
 /// Auto-derive Variant Codec decode: Tagged format
 /// {"Circle": {"radius": 3.0}} → Circle(3.0)
 pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: &[IrVariantDecl]) -> IrFunction {
+    let display_name = wk.display_name.to_string();
     let type_name = wk.type_name.to_string();
     let value_ty = Ty::Named(sym("Value"), Default::default());
     let result_ty = Ty::result(type_ty.clone(), Ty::String);
@@ -150,7 +151,7 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
     // Build if-else chain: if tag == "Circle" then ... else if tag == "Rect" then ... else err
     let mut else_expr = IrExpr {
         kind: IrExprKind::ResultErr { expr: Box::new(IrExpr {
-            kind: IrExprKind::LitStr { value: format!("unknown variant for {}", type_name) },
+            kind: IrExprKind::LitStr { value: format!("unknown variant for {}", display_name) },
             ty: Ty::String, span: None, def_id: None,
         })},
         ty: result_ty.clone(), span: None, def_id: None,
@@ -229,7 +230,7 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                 let bind_arr = stmts.remove(0);
                 let body = e_(IrExprKind::Block { stmts, expr: Some(Box::new(e_(IrExprKind::ResultOk { expr: Box::new(ctor) }, result_ty.clone()))) }, result_ty.clone());
                 let arr = e_(IrExprKind::Var { id: arr_var }, arr_ty.clone());
-                let guarded = tuple_arity_guard(arr, fields.len(), case.name.as_str(), &type_name, &result_ty, body);
+                let guarded = tuple_arity_guard(arr, fields.len(), case.name.as_str(), &display_name, &result_ty, body);
                 e_(IrExprKind::Block { stmts: vec![bind_arr], expr: Some(Box::new(guarded)) }, result_ty.clone())
             }
             IrVariantKind::Record { fields } => {

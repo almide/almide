@@ -322,7 +322,9 @@ struct CRow {
 const C_PARAM_ROWS_ELSEWHERE: &[&str] = &["String"];
 
 const C_ROWS: &[CRow] = &[
-    CRow { id: "int", almide_ty: "Int", c_ty: "i32", host_body: "v + 1", arg: "41", print: "int.to_string(r)", expected: "42" },
+    CRow { id: "int", almide_ty: "Int", c_ty: "i64", host_body: "v + 1", arg: "41", print: "int.to_string(r)", expected: "42" },
+    // `Int` is an `int64_t` (dialect epoch 15, #4447): a value past 32 bits crosses whole.
+    CRow { id: "int_wide", almide_ty: "Int", c_ty: "i64", host_body: "v + 1", arg: "5000000000", print: "int.to_string(r)", expected: "5000000001" },
     CRow { id: "int8", almide_ty: "Int8", c_ty: "i8", host_body: "v - 1", arg: "a_i8", print: "int.to_string(int.from(r))", expected: "-4" },
     CRow { id: "int16", almide_ty: "Int16", c_ty: "i16", host_body: "v + 1", arg: "a_i16", print: "int.to_string(int.from(r))", expected: "301" },
     CRow { id: "int32", almide_ty: "Int32", c_ty: "i32", host_body: "v + 1", arg: "a_i32", print: "int.to_string(int.from(r))", expected: "70001" },
@@ -361,10 +363,10 @@ fn c_program() -> (String, String) {
         "@extern(c, \"c\", \"cf_is_null\")\nfn c_is_null(p: Handle) -> Int = _\n\n",
     ));
     host.push_str(concat!(
-        "#[no_mangle]\npub unsafe extern \"C\" fn cf_strlen(s: *const u8) -> i32 { unsafe { std::ffi::CStr::from_ptr(s as *const std::ffi::c_char) }.to_bytes().len() as i32 }\n",
-        "#[no_mangle]\npub extern \"C\" fn cf_note(_n: i32) {}\n",
-        "#[no_mangle]\npub extern \"C\" fn cf_null(_n: i32) -> *mut u8 { std::ptr::null_mut() }\n",
-        "#[no_mangle]\npub extern \"C\" fn cf_is_null(p: *mut u8) -> i32 { p.is_null() as i32 }\n",
+        "#[no_mangle]\npub unsafe extern \"C\" fn cf_strlen(s: *const u8) -> i64 { unsafe { std::ffi::CStr::from_ptr(s as *const std::ffi::c_char) }.to_bytes().len() as i64 }\n",
+        "#[no_mangle]\npub extern \"C\" fn cf_note(_n: i64) {}\n",
+        "#[no_mangle]\npub extern \"C\" fn cf_null(_n: i64) -> *mut u8 { std::ptr::null_mut() }\n",
+        "#[no_mangle]\npub extern \"C\" fn cf_is_null(p: *mut u8) -> i64 { p.is_null() as i64 }\n",
     ));
     almd.push_str(concat!(
         "effect fn main() -> Unit = {\n",
@@ -468,10 +470,10 @@ fn a_region_crosses_c_as_pointer_and_length_and_is_released_once() {
     let host = concat!(
         "#![allow(dead_code, unused_imports, clippy::missing_safety_doc)]\n\n",
         "static FREED: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);\n",
-        "#[no_mangle]\npub unsafe extern \"C\" fn cf_fill(buf: *mut u8, len: usize, byte: i32) { for i in 0..len { unsafe { *buf.add(i) = byte as u8 } } }\n",
-        "#[no_mangle]\npub extern \"C\" fn cf_buf_new(n: i32) -> *mut u8 { let v: Vec<u8> = (1..=n as u8).collect(); Box::into_raw(v.into_boxed_slice()) as *mut u8 }\n",
+        "#[no_mangle]\npub unsafe extern \"C\" fn cf_fill(buf: *mut u8, len: usize, byte: i64) { for i in 0..len { unsafe { *buf.add(i) = byte as u8 } } }\n",
+        "#[no_mangle]\npub extern \"C\" fn cf_buf_new(n: i64) -> *mut u8 { let v: Vec<u8> = (1..=n as u8).collect(); Box::into_raw(v.into_boxed_slice()) as *mut u8 }\n",
         "#[no_mangle]\npub unsafe extern \"C\" fn cf_buf_free(p: *mut u8) { FREED.fetch_add(1, std::sync::atomic::Ordering::SeqCst); unsafe { drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(p, 3))) } }\n",
-        "#[no_mangle]\npub extern \"C\" fn cf_freed() -> i32 { FREED.load(std::sync::atomic::Ordering::SeqCst) }\n",
+        "#[no_mangle]\npub extern \"C\" fn cf_freed() -> i64 { FREED.load(std::sync::atomic::Ordering::SeqCst) as i64 }\n",
     );
     let (ok, stdout, stderr) = run_package("c_region", almd, host, &["run"]);
     assert!(ok, "the Region C ABI program failed\n--- stderr ---\n{stderr}\n--- program ---\n{almd}");

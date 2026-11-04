@@ -1,0 +1,25 @@
+// @contract: C-449
+// #4391: host text that is not UTF-8 never reaches a program as it was. An
+// argument is its lossy decode (one U+FFFD per maximal invalid subpart), and
+// a variable whose value is not UTF-8 is unreadable: env.get answers none and
+// env.vars leaves it out, as `std::env::var(..).ok()` does. Run bare (the
+// embedded_cross sweep) it prints `args=[]` and `bad none`;
+// tests/cli_non_utf8_env_test.rs and tests/stock_p1_raw_bytes_test.rs run it
+// with the bytes `a\x80b` as its argument and as T4391_BAD's value.
+import env
+
+fn hex(s: String) -> String = "${bytes.to_list(bytes.from_string(s))}"
+
+effect fn main() -> Unit = {
+  println("args=${env.args() |> list.map((a) => hex(a))}")
+  println(match env.get("T4391_BAD") {
+    some(v) => "bad some ${hex(v)}",
+    none => "bad none",
+  })
+  println(match env.get("T4391_OK") {
+    some(v) => "ok some ${v}",
+    none => "ok none",
+  })
+  let names = map.keys(env.vars()!)
+  println("listed bad=${list.contains(names, "T4391_BAD")} ok=${list.contains(names, "T4391_OK")}")
+}

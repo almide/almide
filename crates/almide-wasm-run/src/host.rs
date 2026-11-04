@@ -628,6 +628,52 @@ fn run_wasm_src_here(
     run_compiled(&engine, &module, Launch { stdin, budget, args, watchdog, live, abort_site: -1, allowed_ops })
 }
 
+/// A module compiled once and instantiated per run (#4441): the wasm test
+/// run's one program runs a fresh instance per test file, and compiles it
+/// (Cranelift) only here.
+pub struct CompiledModule {
+    engine: wasmtime::Engine,
+    module: wasmtime::Module,
+    allowed_ops: AllowedOps,
+}
+
+impl CompiledModule {
+    /// Validate and compile `bytes` with the engine every embedded run uses.
+    pub fn new(bytes: &[u8]) -> anyhow::Result<Self> {
+        wasmparser::validate(bytes)?;
+        let mut cfg = wasmtime::Config::new();
+        cfg.epoch_interruption(false);
+        cfg.max_wasm_stack(EMBEDDED_WASM_STACK);
+        cfg.async_stack_size(EMBEDDED_WASM_STACK + 1024 * 1024);
+        let engine = wasmtime::Engine::new(&cfg)?;
+        let module = wasmtime::Module::new(&engine, bytes)?;
+        let allowed_ops = allowed_ops_of(bytes)?;
+        Ok(CompiledModule { engine, module, allowed_ops })
+    }
+
+    /// [`run_wasm_unbounded`] on a fresh instance, whose op 118 answers
+    /// `selection` (see `almide_base::names::test_run_selection`).
+    pub fn run_selected(&self, selection: i64) -> anyhow::Result<RunResult> {
+        std::thread::scope(|s| {
+            spawn_guest_thread(s, || {
+                with_env_overlay(|o| o.clear());
+                let launch = Launch {
+                    stdin: StdinSource::Buf(Vec::new()),
+                    budget: budget::Budget::new(None),
+                    args: &[],
+                    watchdog: None,
+                    live: false,
+                    abort_site: selection,
+                    allowed_ops: self.allowed_ops.clone(),
+                };
+                run_compiled(&self.engine, &self.module, launch)
+            })
+            .join()
+            .unwrap_or_else(|p| std::panic::resume_unwind(p))
+        })
+    }
+}
+
 /// How one instance of a compiled module is started: the run's own, or an
 /// abort-site child of it (`testing.assert_aborts`, ADR-0029).
 struct Launch<'a> {
@@ -1026,7 +1072,9 @@ fn abort_site_op(caller: &wasmtime::Caller<'_, Host>, op: i32, a_len: i32) -> i6
                         args,
                         watchdog: None,
                         live: false,
-                        abort_site: i64::from(a_len),
+                        // In the test run's one program the child keeps its
+                        // parent's test file (#4441).
+                        abort_site: almide_base::names::test_run_selection::child_site(caller.data().abort_site, i64::from(a_len)),
                         allowed_ops: allowed_ops.clone(),
                     };
                     run_compiled(engine, module, launch)

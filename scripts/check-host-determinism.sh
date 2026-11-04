@@ -54,14 +54,36 @@ WALL_RC=3
 walled=0
 : > "$WORK/walled.txt"
 determinism_select "$FIXTURE_DIR" "$WORK/selected.txt"
+# The two compiles per fixture run on parallel workers (DETERMINISM_JOBS,
+# default: cores), each fixture in its own directory; the verdicts below are
+# read back in corpus order, so the log and the judgement are what the
+# one-at-a-time loop produced (it was 12 min on develop run 41595889646).
+JOBS="${DETERMINISM_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+compile_one() { # index fixture
+  d="$WORK/fix/$1"; mkdir -p "$d"
+  [ -e "$2" ] || return 0
+  cp "$2" "$d/in.almd"
+  # x86-64/aarch64 host
+  "$NATIVE_BIN" "$d/in.almd" "$d/native.wasm" 2>"$d/native.err"; echo $? > "$d/nrc"
+  # wasm32 host (compiler running as 32-bit, under wasmtime)
+  "$WASMTIME" run --dir "$d::/w" "$WASM_BIN" /w/in.almd /w/wasm32.wasm >/dev/null 2>&1; echo $? > "$d/wrc"
+}
+export -f compile_one
+export WORK NATIVE_BIN WASM_BIN WASMTIME
+awk '{ print NR; print $0 }' "$WORK/selected.txt" | tr '\n' '\0' \
+  | xargs -0 -n 2 -P "$JOBS" bash -c 'compile_one "$1" "$2"' _
+echo "==> compiled $(wc -l < "$WORK/selected.txt" | tr -d ' ') fixture(s) on $JOBS worker(s)"
+i=0
 while read -r fix <&3; do
+  i=$((i+1))
   [ -e "$fix" ] || continue
   name="$(basename "$fix")"
-  cp "$fix" "$WORK/in.almd"
-  # x86-64/aarch64 host
-  "$NATIVE_BIN" "$WORK/in.almd" "$WORK/native.wasm" 2>"$WORK/native.err"; nrc=$?
-  # wasm32 host (compiler running as 32-bit, under wasmtime)
-  "$WASMTIME" run --dir "$WORK::/w" "$WASM_BIN" /w/in.almd /w/wasm32.wasm >/dev/null 2>&1; wrc=$?
+  d="$WORK/fix/$i"
+  # The judgement below reads the files a single-fixture run wrote.
+  cp "$d/native.err" "$WORK/native.err"
+  [ -e "$d/native.wasm" ] && cp "$d/native.wasm" "$WORK/native.wasm" || rm -f "$WORK/native.wasm"
+  [ -e "$d/wasm32.wasm" ] && cp "$d/wasm32.wasm" "$WORK/wasm32.wasm" || rm -f "$WORK/wasm32.wasm"
+  nrc=$(cat "$d/nrc"); wrc=$(cat "$d/wrc")
   if [ "$nrc" -eq "$WALL_RC" ] && [ "$wrc" -eq "$WALL_RC" ]; then
     echo "skip  $name (structural wall on both hosts — $(grep -m1 -o 'why: "[^"]*"' "$WORK/native.err" | sed 's/why: //'), $LEDGER)"
     echo "$name" >> "$WORK/walled.txt"
