@@ -40,7 +40,7 @@ use almide_lang::ast::{
 use almide_lang::stdlib_info::{bundled_source, AUTO_IMPORT_BUNDLED};
 
 mod live;
-pub use live::{live_bundled, LiveBundled, COMPILER_INSERTED, TEST_SYNTHESIZED};
+pub use live::{compiler_called_fns, live_bundled, reach_within, LiveBundled, COMPILER_INSERTED, TEST_SYNTHESIZED};
 
 /// The names one source spells, split by the position they can reach a
 /// module from.

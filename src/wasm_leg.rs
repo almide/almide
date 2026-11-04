@@ -672,9 +672,63 @@ fn link_self_host(
         }
     }
 
+    /// Every surface a lowered body names, REACHED OR NOT (#4458): what
+    /// [`scan_node`] demands of every expression of every function and
+    /// top-level `let`, and a module fn's bare calls as `<module>.<fn>`.
+    fn mentioned_surfaces(ir: &crate::ir::IrProgram, out: &mut HashSet<String>) {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct Mentions<'a> {
+            module: Option<&'a str>,
+            out: &'a mut HashSet<String>,
+        }
+        impl IrVisitor for Mentions<'_> {
+            fn visit_expr(&mut self, e: &crate::ir::IrExpr) {
+                use crate::ir::{CallTarget, IrExprKind};
+                scan_node(e, self.out);
+                if let crate::types::Ty::Applied(crate::types::TypeConstructorId::Result, a) = &e.ty
+                    && a.len() == 2
+                    && !ty_float_free(&a[1])
+                    && !a[1].is_unresolved()
+                {
+                    self.out.insert("float.to_string_compound".to_string());
+                    self.out.insert("float32.to_string_compound".to_string());
+                }
+                if let (Some(m), IrExprKind::Call { target: CallTarget::Named { name }, .. } | IrExprKind::TailCall { target: CallTarget::Named { name }, .. }) =
+                    (self.module, &e.kind)
+                    && !name.as_str().contains('.')
+                {
+                    self.out.insert(format!("{m}.{}", name.as_str()));
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut walk = |module: Option<&str>, e: &crate::ir::IrExpr| Mentions { module, out: &mut *out }.visit_expr(e);
+        for f in &ir.functions {
+            walk(None, &f.body);
+        }
+        for tl in &ir.top_lets {
+            walk(None, &tl.value);
+        }
+        for m in &ir.modules {
+            for f in &m.functions {
+                walk(Some(m.name.as_str()), &f.body);
+            }
+            for tl in &m.top_lets {
+                walk(Some(m.name.as_str()), &tl.value);
+            }
+        }
+    }
+
     let mut loaded: HashMap<&'static str, String> = HashMap::new();
+    // #4458: the functions each linked self-host source carries. A source
+    // links only what the round's demands reach inside it (`reach_within`),
+    // never its whole body: `value.__field` alone once checked and lowered
+    // 139 functions of value_utils.almd for a program that calls three.
+    let mut linked_fns: HashMap<&'static str, HashSet<String>> = HashMap::new();
     let mut module_diags = Vec::new();
-    let mut reloaded_whole: HashSet<String> = HashSet::new();
+    // Each missing bundled function is relowered for once (a surface the
+    // module does not declare must not loop the link).
+    let mut tried: HashSet<String> = HashSet::new();
     loop {
         let mut needed = HashSet::new();
         scan_program(ir, &impls, &loaded, &mut needed);
@@ -697,8 +751,10 @@ fn link_self_host(
         // resolver keeps only the functions the program's sources reach
         // (#4328), so a module that IS loaded may still lack the one a splice
         // body or the emitter calls (`string.__err_text`'s body calls
-        // `list.join`): such a module is lowered again whole, once, and
-        // replaces its pruned lowering.
+        // `list.join`): such a module is lowered again with the missing
+        // functions and what they reach inside it (#4458), and replaces its
+        // pruned lowering.
+        let mut missing: Vec<(String, HashSet<String>)> = Vec::new();
         for surface in &needed {
             if registry.contains_key(surface) {
                 continue;
@@ -707,22 +763,43 @@ fn link_self_host(
             if !crate::stdlib::is_bundled_module(module) {
                 continue;
             }
-            let present = ir.modules.iter().position(|m| m.name.as_str() == module);
-            if let Some(i) = present {
-                let has_fn = ir.modules[i].functions.iter().any(|f| f.name.as_str() == func);
-                if has_fn || !reloaded_whole.insert(module.to_string()) {
-                    continue;
-                }
-            }
-            let Some(src) = almide_types::stdlib_info::bundled_source(module) else { continue };
-            let mut parser = crate::parser::Parser::new(crate::lexer::Lexer::tokenize(src));
-            let Ok(mut mod_prog) = parser.parse() else { continue };
-            let has_bridge_surface = mod_prog.decls.iter().any(|d| {
-                matches!(d, crate::ast::Decl::Fn { body: None, extern_attrs, .. } if extern_attrs.is_empty())
-            });
-            if !parser.errors.is_empty() || has_bridge_surface {
+            let has_fn = ir
+                .modules
+                .iter()
+                .find(|m| m.name.as_str() == module)
+                .is_some_and(|m| m.functions.iter().any(|f| f.name.as_str() == func));
+            if has_fn || !tried.insert(surface.clone()) {
                 continue;
             }
+            match missing.iter_mut().find(|(m, _)| m == module) {
+                Some((_, fs)) => {
+                    fs.insert(func.to_string());
+                }
+                None => missing.push((module.to_string(), HashSet::from([func.to_string()]))),
+            }
+        }
+        for (module, funcs) in missing {
+            let module = module.as_str();
+            let present = ir.modules.iter().position(|m| m.name.as_str() == module);
+            let Some(src) = almide_types::stdlib_info::bundled_source(module) else { continue };
+            let Some(whole) = almide_lang::parse_cached(src) else { continue };
+            let has_bridge_surface = whole.decls.iter().any(|d| {
+                matches!(d, crate::ast::Decl::Fn { body: None, extern_attrs, .. } if extern_attrs.is_empty())
+            });
+            if has_bridge_surface {
+                continue;
+            }
+            let mut roots = funcs;
+            match present {
+                Some(i) => roots.extend(ir.modules[i].functions.iter().map(|f| f.name.to_string())),
+                None => roots.extend(almide_frontend::bundled_reach::compiler_called_fns(module, whole)),
+            }
+            let keep = almide_frontend::bundled_reach::reach_within(module, whole, &roots);
+            let mut mod_prog = whole.clone();
+            mod_prog.decls.retain(|d| match d {
+                crate::ast::Decl::Fn { name, .. } => keep.contains(name.as_str()),
+                _ => true,
+            });
             infer_module_capturing(checker, module, &mut mod_prog, sources, &mut module_diags);
             let (mod_table, _) =
                 crate::import_table::build_import_table(&mod_prog, Some(module), &checker.env.user_modules);
@@ -736,28 +813,84 @@ fn link_self_host(
             }
             grew = true;
         }
-        for surface in needed {
-            let Some(&src) = registry.get(&surface) else { continue };
-            if loaded.contains_key(&src) {
+        // The self-host sources this round links, in first-demand order
+        // (their `__selfhost_N` names follow it), then every source already
+        // linked (by name): a body lowered since may name more of it.
+        let mut order: Vec<&'static str> = Vec::new();
+        for surface in &needed {
+            if let Some(&(src, _)) = impls.get(surface)
+                && !order.iter().any(|s| std::ptr::eq(*s, src))
+            {
+                order.push(src);
+            }
+        }
+        let mut earlier: Vec<(&'static str, &String)> =
+            loaded.iter().filter(|(s, _)| !order.iter().any(|o| std::ptr::eq(*o, **s))).map(|(s, n)| (*s, n)).collect();
+        earlier.sort_by(|a, b| a.1.cmp(b.1));
+        order.extend(earlier.into_iter().map(|(s, _)| s));
+        // Each carries (#4458) the implementation of every surface the round
+        // demands, every surface any lowered body names — reached or not:
+        // the emitter's reach is wider than the scan's (a protocol
+        // requirement it dispatches) — and every surface the emitter
+        // resolves on its own (`EMITTER_RESOLVED_SURFACES`), the value
+        // helpers it calls by name when their anchor is carried, and what
+        // those reach inside the source (`reach_within`). It never carries a
+        // function nothing can resolve, which loading the whole source did.
+        let mut wanted: HashSet<String> = HashSet::new();
+        mentioned_surfaces(ir, &mut wanted);
+        wanted.extend(needed.iter().cloned());
+        wanted.extend(almide_wasm::EMITTER_RESOLVED_SURFACES.iter().map(|s| s.to_string()));
+        let demanded: Vec<(&'static str, HashSet<String>)> = order
+            .into_iter()
+            .map(|src| {
+                let mut roots = linked_fns.get(src).cloned().unwrap_or_default();
+                for (surface, (s, impl_fn)) in &impls {
+                    if std::ptr::eq(*s, src) && wanted.contains(surface) {
+                        roots.insert(impl_fn.to_string());
+                        if surface == almide_wasm::VALUE_HELPER_ANCHOR {
+                            roots.extend(almide_wasm::VALUE_SELFHOST_HELPERS.iter().map(|(_, h)| h.to_string()));
+                        }
+                    }
+                }
+                (src, roots)
+            })
+            .collect();
+        for (src, mut roots) in demanded {
+            let present = loaded.get(src).cloned();
+            if present.is_some() && roots.iter().all(|f| linked_fns.get(src).is_some_and(|l| l.contains(f))) {
                 continue;
             }
-            let name = format!("__selfhost_{}", loaded.len() + 1);
+            let name = present.unwrap_or_else(|| format!("__selfhost_{}", loaded.len() + 1));
             loaded.insert(src, name.clone());
-            let tokens = crate::lexer::Lexer::tokenize(src);
-            let mut parser = crate::parser::Parser::new(tokens).with_file(&name);
-            let Ok(mut mod_prog) = parser.parse() else { continue };
-            if !parser.errors.is_empty() {
-                continue;
-            }
+            let Some(whole) = almide_lang::parse_cached(src) else { continue };
             // Only fully-bodied implementations may load — a bodyless
             // decl is a bridge surface, not an implementation.
-            let bodyless = mod_prog
-                .decls
-                .iter()
-                .any(|d| matches!(d, crate::ast::Decl::Fn { body: None, .. }));
+            let bodyless = whole.decls.iter().any(|d| matches!(d, crate::ast::Decl::Fn { body: None, .. }));
             if bodyless {
                 continue;
             }
+            // Convention methods (`Type.method`) resolve by name suffix at
+            // emission, never through a demand: they stay.
+            roots.extend(whole.decls.iter().filter_map(|d| match d {
+                crate::ast::Decl::Fn { name, .. } if name.as_str().contains('.') => Some(name.to_string()),
+                _ => None,
+            }));
+            let keep = almide_frontend::bundled_reach::reach_within("", whole, &roots);
+            // A demanded name the source does not declare reaches nothing new.
+            if linked_fns.get(src) == Some(&keep) {
+                continue;
+            }
+            let mut mod_prog = whole.clone();
+            mod_prog.decls.retain(|d| match d {
+                crate::ast::Decl::Fn { name, .. } => keep.contains(name.as_str()),
+                _ => true,
+            });
+            if almide_base::env::flag("ALMIDE_DBG_LINK") {
+                let mut fns: Vec<&String> = keep.iter().collect();
+                fns.sort();
+                eprintln!("[link] {name} carries {fns:?}");
+            }
+            linked_fns.insert(src, keep);
             infer_module_capturing(
                 checker,
                 &name,
@@ -784,7 +917,10 @@ fn link_self_host(
                 None,
             );
             checker.env.import_table = saved_table;
-            ir.modules.push(mod_ir);
+            match ir.modules.iter().position(|m| m.name.as_str() == name) {
+                Some(i) => ir.modules[i] = mod_ir,
+                None => ir.modules.push(mod_ir),
+            }
             grew = true;
         }
         if !grew {

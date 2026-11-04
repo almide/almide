@@ -48,6 +48,23 @@ pub const VALUE_SELFHOST_HELPERS: &[(&str, &str)] = &[
     ("value.omit", "__vu_omit_pairs"),
 ];
 
+/// The stdlib surfaces this emitter resolves ON ITS OWN, by a literal key no
+/// IR call names: a Value display and the JSON serializer format their
+/// floats through `float.to_string`, an interpolated float through the
+/// compound printers, `**` / `%` on floats through the linked pow and
+/// remainder, and the ASCII case fold through `string.to_upper`. The wasm
+/// link keeps their implementations in any self-host source it loads
+/// (#4458). `tests/compiler_inserted_calls_test.rs` refuses a literal
+/// `resolve_qualified` key of the emitter that this table does not list.
+pub const EMITTER_RESOLVED_SURFACES: &[&str] = &[
+    "float.to_string",
+    "float.to_string_compound",
+    "float32.to_string_compound",
+    "math.__fpow",
+    "float.fmod",
+    "string.to_upper",
+];
+
 /// The registered surface whose self-host source holds every helper of
 /// [`VALUE_SELFHOST_HELPERS`].
 pub const VALUE_HELPER_ANCHOR: &str = "value.pick";

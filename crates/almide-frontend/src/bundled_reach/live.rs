@@ -253,6 +253,40 @@ impl<'p> Reach<'p> {
     }
 }
 
+/// The functions of one source — bundled module `module`, or a self-hosted
+/// source (`module` empty) — that `roots` reach WITHIN it: a root, or a
+/// function a reached body (or a non-function declaration) names, by the
+/// naming rule of [`live_bundled`]. The wasm link loads only these (#4458);
+/// a call the lowered bodies make outside this set is a demand of its next
+/// round, which grows the set.
+pub fn reach_within(module: &str, prog: &Program, roots: &HashSet<String>) -> HashSet<String> {
+    let mut spelled = Spelled::default();
+    let (fns, rest): (Vec<&Decl>, Vec<&Decl>) =
+        prog.decls.iter().chain(prog.imports.iter()).partition(|d| matches!(d, Decl::Fn { .. }));
+    spell_unit(prog, rest.into_iter(), &mut spelled);
+    let mut live = HashSet::new();
+    let (now, mut dormant): (Vec<&Decl>, Vec<&Decl>) =
+        fns.into_iter().partition(|d| decl_name(d).is_some_and(|n| roots.contains(n)));
+    let mut named = now;
+    while !named.is_empty() {
+        for d in &named {
+            live.extend(decl_name(d).map(str::to_string));
+        }
+        spell_unit(prog, named.into_iter(), &mut spelled);
+        (named, dormant) = dormant.into_iter().partition(|d| fn_is_named(&spelled, module, d));
+    }
+    live
+}
+
+/// The functions of bundled module `module` the compiler calls with no
+/// source naming them: [`requirement_fns`] and its [`COMPILER_INSERTED`]
+/// rows. A module the wasm link loads keeps them, as a resolved one does.
+pub fn compiler_called_fns(module: &str, prog: &Program) -> HashSet<String> {
+    let mut out = requirement_fns(module, prog);
+    out.extend(COMPILER_INSERTED.iter().filter(|(m, _)| *m == module).map(|(_, f)| f.to_string()));
+    out
+}
+
 fn decl_name(d: &Decl) -> Option<&str> {
     match d {
         Decl::Fn { name, .. } => Some(name.as_str()),
