@@ -1,10 +1,10 @@
 diff --git a/crates/almide-mir/src/native_move_params.rs b/crates/almide-mir/src/native_move_params.rs
-index dc6ecbaf7..b3a2a52ab 100644
+index 48e8076e6..f4405849b 100644
 --- a/crates/almide-mir/src/native_move_params.rs
 +++ b/crates/almide-mir/src/native_move_params.rs
 @@ -136,7 +136,8 @@ fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Option<MirFu
          consumed.iter().map(|&(k, at)| (at, func.params[k].value)).collect();
-     releases.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+     releases.sort_unstable_by_key(|r| std::cmp::Reverse(r.0));
      for &(at, p) in &releases {
 -        f.ops.insert(at + 1, Op::Drop { v: p });
 +        // RE-INJECTED (#4006 class P drill): the consumed param is taken over but never released.
@@ -34,10 +34,10 @@ index dc6ecbaf7..b3a2a52ab 100644
      }
      functions.clone_from_slice(&next);
 diff --git a/crates/almide-mir/src/render_native.rs b/crates/almide-mir/src/render_native.rs
-index 2fd446586..1d39ae3ef 100644
+index ea051164f..9fc47bacc 100644
 --- a/crates/almide-mir/src/render_native.rs
 +++ b/crates/almide-mir/src/render_native.rs
-@@ -195,6 +195,10 @@ use crate::render_native_shims::{
+@@ -202,6 +202,10 @@ use crate::render_native_shims::{
  /// Drops from — the certificate that scope-end drop realizes it. A violation is
  /// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
  fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
