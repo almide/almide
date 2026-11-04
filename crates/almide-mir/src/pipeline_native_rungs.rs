@@ -241,14 +241,19 @@ fn is_string_result_ty(t: &almide_lang::types::Ty) -> bool {
 
 /// #4006 family C: rewrite every String-Ok Result window onto its carrier.
 fn rewrite_native_result_str_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
-    let fns: std::collections::BTreeSet<String> = ir
-        .functions
+    rewrite_native_result_str_windows_over(&ir.functions.iter().collect::<Vec<_>>(), functions)
+}
+
+/// [`rewrite_native_result_str_windows`] over the declarations of several
+/// programs (the user program and every linked stdlib body).
+fn rewrite_native_result_str_windows_over(decl_list: &[&almide_ir::IrFunction], functions: &mut [crate::MirFunction]) {
+    let fns: std::collections::BTreeSet<String> = decl_list
         .iter()
         .filter(|f| is_string_result_ty(&f.ret_ty))
         .map(|f| f.name.as_str().to_string())
         .collect();
     let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
-        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+        decl_list.iter().map(|f| (f.name.as_str(), *f)).collect();
     for f in functions.iter_mut() {
         let params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
             Some(d) if d.params.len() == f.params.len() => d
@@ -260,7 +265,7 @@ fn rewrite_native_result_str_windows(ir: &almide_ir::IrProgram, functions: &mut 
                 .collect(),
             _ => Vec::new(),
         };
-        let carriers = heap_carrier_values(ir, f);
+        let carriers = heap_carrier_values_in(&|n: &str| decls.get(n).copied(), f);
         crate::native_result_str_rewrite::rewrite_result_str_ops(f, &fns, &params, &carriers);
     }
 }
@@ -285,12 +290,8 @@ fn native_map_of(t: &almide_lang::types::Ty) -> Option<u16> {
         .filter(|i| crate::render_native_rec::map_kinds(*i).is_some())
 }
 
-/// The values of `f` whose declared type is a generated heap carrier.
-fn heap_carrier_values(ir: &almide_ir::IrProgram, f: &crate::MirFunction) -> std::collections::BTreeSet<crate::ValueId> {
-    heap_carrier_values_in(&|name: &str| ir.functions.iter().find(|d| d.name.as_str() == name), f)
-}
-
-/// [`heap_carrier_values`] over any declaration lookup.
+/// The values of `f` whose declared type is a generated heap carrier, over
+/// any declaration lookup.
 fn heap_carrier_values_in<'a>(
     decl: &dyn Fn(&str) -> Option<&'a almide_ir::IrFunction>,
     f: &crate::MirFunction,
@@ -332,8 +333,13 @@ fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
 /// carrier prims. The Option values are seeded from the declared types: a
 /// call to a fn returning a scalar Option, and a param declared as one.
 fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
-    let mut option_fns: std::collections::BTreeSet<String> = ir
-        .functions
+    rewrite_native_option_windows_over(&ir.functions.iter().collect::<Vec<_>>(), functions)
+}
+
+/// [`rewrite_native_option_windows`] over the declarations of several
+/// programs (the user program and every linked stdlib body).
+fn rewrite_native_option_windows_over(decl_list: &[&almide_ir::IrFunction], functions: &mut [crate::MirFunction]) {
+    let mut option_fns: std::collections::BTreeSet<String> = decl_list
         .iter()
         .filter(|f| is_scalar_option(&f.ret_ty))
         .map(|f| f.name.as_str().to_string())
@@ -361,7 +367,7 @@ fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
         }
     }
     let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
-        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+        decl_list.iter().map(|f| (f.name.as_str(), *f)).collect();
     for f in functions.iter_mut() {
         let opt_params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
             Some(d) if d.params.len() == f.params.len() => d
@@ -373,7 +379,7 @@ fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
                 .collect(),
             _ => Vec::new(),
         };
-        let carriers = heap_carrier_values(ir, f);
+        let carriers = heap_carrier_values_in(&|n: &str| decls.get(n).copied(), f);
         crate::native_option_rewrite::rewrite_option_ops(f, &option_fns, &opt_params, &carriers);
     }
 }
@@ -838,8 +844,12 @@ fn render_native_parts_with(
         ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())),
         &mut functions,
     );
-    rewrite_native_result_str_windows(&ir, &mut functions);
-    rewrite_native_option_windows(&ir, &mut functions);
+    // The Option and String-Ok carriers read every declaration a call can
+    // name: the user program's and each linked body's.
+    let decl_list: Vec<&almide_ir::IrFunction> =
+        ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())).collect();
+    rewrite_native_result_str_windows_over(&decl_list, &mut functions);
+    rewrite_native_option_windows_over(&decl_list, &mut functions);
     crate::native_slot_rewrite::rewrite_slot_ops(&mut functions, crate::lower::mutable_global_slot_count());
     // Narrow-width arithmetic computes in its declared integer type (#4006).
     for f in functions.iter_mut() {
