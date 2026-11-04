@@ -60,12 +60,21 @@ codegen-units = 1
 pub(super) const RT_CRATE: &str = almide_mir::render_native::RT_MOD;
 
 /// The manifest lines the program crate gains when its runtime is split out.
+///
+/// Neither crate carries debug info, as v0's rustc fast path compiles both its
+/// runtime rlib and the program without `-g`: a certified render binds every
+/// value to its own `let`, and each `let` opens a nested debug scope, so a long
+/// straight-line `main` (thousands of bindings) overflowed LLVM's recursive
+/// DWARF scope walk — rustc died with SIGSEGV even at `line-tables-only` — and
+/// the debug info was most of the cold build's extra cost over v0 (#3829).
 pub(super) fn runtime_crate_manifest_lines() -> String {
     format!(
         "\n[dependencies.{RT_CRATE}]\npath = \"{RT_CRATE}\"\n\n\
          # The runtime crate's profile (owner ruling 2026-11-02): no debug\n\
          # assertions, as v0's runtime rlib; overflow checks pinned off.\n\
-         [profile.dev.package.{RT_CRATE}]\ndebug-assertions = false\noverflow-checks = false\n"
+         [profile.dev.package.{RT_CRATE}]\ndebug = false\ndebug-assertions = false\noverflow-checks = false\n\n\
+         # No debug info for the program either, as v0's rustc fast path.\n\
+         [profile.dev.package.almide-out]\ndebug = false\n"
     )
 }
 
