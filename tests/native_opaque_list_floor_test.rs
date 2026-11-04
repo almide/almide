@@ -1,7 +1,9 @@
 //! A list of lists, records or variants (a generated `Vec<X>` on the
 //! certified native render) handed to a generic floor body that never sees an
 //! element — `list.len`, `list.is_empty` (#4006,
-//! native_floor.rs `opaque_list_arg`). Each pin compares v1's output with v0's.
+//! native_floor.rs `opaque_list_arg`), and a generic body returning a list
+//! of the call's own list kind (`list.chunk`, `list.window`: `List[List[A]]`,
+//! `ElemRet::Lists`). Each pin compares v1's output with v0's.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -50,4 +52,19 @@ fn the_length_of_a_nested_list_reads_as_v0_does() {
     let (rust, out, code) = run_v1("len", src);
     assert!(rust.contains("almide_rt_list_len("), "list.len is not the floor body:\n{rust}");
     assert_eq!((out, code), run_v0("len", src), "v1 native differs from v0");
+}
+
+#[test]
+fn chunks_and_windows_of_int_and_string_lists_read_as_v0_does() {
+    let src = "effect fn main() -> Unit = {\n  \
+                 let xs = [1, 2, 3, 4, 5]\n  \
+                 let ss = [\"a\", \"b\", \"c\"]\n  \
+                 println(int.to_string(list.len(list.chunk(xs, 2))))\n  \
+                 println(int.to_string(list.len(list.window(xs, 3))))\n  \
+                 println(int.to_string(list.len(list.chunk(ss, 2))))\n  \
+                 println(int.to_string(list.len(list.window(ss, 4))))\n\
+               }\n";
+    let (rust, out, code) = run_v1("chunks", src);
+    assert!(rust.contains("almide_rt_list_chunk(") && rust.contains("almide_rt_list_window("), "chunk or window is not the floor body:\n{rust}");
+    assert_eq!((out, code), run_v0("chunks", src), "v1 native differs from v0");
 }

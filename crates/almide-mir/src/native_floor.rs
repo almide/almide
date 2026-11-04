@@ -146,6 +146,8 @@ pub(crate) enum ElemRet {
     Opt,
     /// `List[A]`.
     List,
+    /// `List[List[A]]` — the generated list of the call's own list kind.
+    Lists,
 }
 
 /// One declared floor function.
@@ -610,6 +612,14 @@ fn floor_ret(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorRet> {
         TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 && is_param(&args[0]) => {
             Some(FloorRet::Elem(ElemRet::List))
         }
+        TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => match &args[0] {
+            TypeExpr::Generic { name: inner, args: a } if inner.as_str() == "List" && a.len() == 1 && is_param(&a[0]) => {
+                Some(FloorRet::Elem(ElemRet::Lists))
+            }
+            TypeExpr::Simple { name: n } if n.as_str() == "Int" => Some(FloorRet::ListInt),
+            TypeExpr::Simple { name: n } if n.as_str() == "String" => Some(FloorRet::ListStr),
+            _ => None,
+        },
         TypeExpr::Simple { name } => match name.as_str() {
             "Unit" => Some(FloorRet::Unit),
             "Int" => Some(FloorRet::Int),
@@ -639,13 +649,6 @@ fn floor_ret(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorRet> {
                 "String" => Some(FloorRet::ResStr),
                 n if n == VALUE_TYPE => Some(FloorRet::ResValue),
                 ok => scalar_of(ok).map(|k| FloorRet::Res(Some(k))),
-            }
-        }
-        TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => {
-            match simple(&args[0])? {
-                "Int" => Some(FloorRet::ListInt),
-                "String" => Some(FloorRet::ListStr),
-                _ => None,
             }
         }
         _ => None,
@@ -730,6 +733,7 @@ fn ret_agrees(r: FloorRet, rust: &str) -> bool {
         FloorRet::Elem(ElemRet::Value) => is_type_param(&t),
         FloorRet::Elem(ElemRet::Opt) => t.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
         FloorRet::Elem(ElemRet::List) => t.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
+        FloorRet::Elem(ElemRet::Lists) => t.strip_prefix("Vec<Vec<").and_then(|x| x.strip_suffix(">>")).is_some_and(is_type_param),
         FloorRet::Bytes => t == "Vec<u8>",
         FloorRet::Value => t == "AlmideValue",
         FloorRet::Map => is_generic_map(&t),
@@ -1855,6 +1859,9 @@ pub(crate) fn render_call(
             (Some(false), ElemRet::List) => (call, Some(NTy::Vec)),
             (Some(true), ElemRet::Value) => (call, Some(NTy::Str)),
             (Some(true), ElemRet::List) => (call, Some(NTy::VecStr)),
+            // A list of the call's own list kind: the generated `Vec<Vec<_>>`.
+            (Some(false), ElemRet::Lists) => (call, Some(NTy::Rec(crate::render_native_rec::list_type_of(NTy::Vec)))),
+            (Some(true), ElemRet::Lists) => (call, Some(NTy::Rec(crate::render_native_rec::list_type_of(NTy::VecStr)))),
             // An Option of a String is a heap payload, outside this carrier.
             _ => return Err(wall(format!("native: floor call `{name}` element-typed result outside the native carriers"))),
         },
