@@ -29,15 +29,19 @@ else {
   else __mstr_find(h, entries, k, i + 1)
 }
 
+@specializes("map.new")
 fn map_new_str() -> Map[String, String] = prim.alloc_map_str(0)
 
+@specializes("map.len")
 fn map_len_str(m: Map[String, String]) -> Int = {
   let n = prim.load32(prim.handle(m) + 4)
   n / 2
 }
 
+@specializes("map.is_empty")
 fn map_is_empty_str(m: Map[String, String]) -> Bool = prim.load32(prim.handle(m) + 4) == 0
 
+@specializes("map.contains")
 fn map_contains_str(m: Map[String, String], k: String) -> Bool = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
@@ -55,6 +59,7 @@ fn __mget_str_some(h: Int, idx: Int) -> String? = {
   some(copy)
 }
 
+@specializes("map.get")
 fn map_get_str(m: Map[String, String], k: String) -> String? = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
@@ -107,6 +112,7 @@ else {
   0
 }
 
+@specializes("map.set")
 fn map_set_str(m: Map[String, String], k: String, v: String) -> Map[String, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -138,6 +144,7 @@ else {
   __mkeys_fill(sh, oh, entries, i + 1)
 }
 
+@specializes("map.keys")
 fn map_keys_str(m: Map[String, String]) -> List[String] = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
@@ -155,6 +162,7 @@ else {
   __mvalues_fill(sh, oh, entries, i + 1)
 }
 
+@specializes("map.values")
 fn map_values_str(m: Map[String, String]) -> List[String] = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
@@ -180,6 +188,7 @@ fn __mremove_fill(sh: Int, rh: Int, entries: Int, k: String, i: Int, w: Int) -> 
     }
   }
 
+@specializes("map.remove")
 fn map_remove_str(m: Map[String, String], k: String) -> Map[String, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -226,6 +235,7 @@ fn __mmerge_addnew(ah: Int, aentries: Int, bh: Int, bentries: Int, rh: Int, j: I
     }
   }
 
+@specializes("map.merge")
 fn map_merge_str(a: Map[String, String], b: Map[String, String]) -> Map[String, String] = {
   let ah = prim.handle(a)
   let bh = prim.handle(b)
@@ -270,6 +280,7 @@ fn __mupdate_copy(sh: Int, rh: Int, entries: Int, k: String, f: (String) -> Stri
     __mupdate_copy(sh, rh, entries, k, f, i + 1)
   }
 
+@specializes("map.update")
 fn map_update_str(m: Map[String, String], k: String, f: (String) -> String) -> Map[String, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -285,6 +296,7 @@ fn map_update_str(m: Map[String, String], k: String, f: (String) -> String) -> M
 // a PRESENT key updates via f (map_update_str's rebuild), an ABSENT one
 // appends (k, init) (map_set_str's rebuild). v0's intrinsic does the same in
 // one walk; byte-equality of the RESULT is the contract, not the walk count.
+@specializes("map.upsert")
 fn map_upsert_str(m: Map[String, String], k: String, init: String, f: (String) -> String) -> Map[String, String] =
   if map_contains_str(
     m,
@@ -310,6 +322,7 @@ fn __mfilter_fill(sh: Int, rh: Int, entries: Int, f: (String, String) -> Bool, i
     }
   }
 
+@specializes("map.filter")
 fn map_filter_str(m: Map[String, String], f: (String, String) -> Bool) -> Map[String, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -331,6 +344,7 @@ fn __mcount_hits(sh: Int, entries: Int, f: (String, String) -> Bool, i: Int, acc
     else __mcount_hits(sh, entries, f, i + 1, acc)
   }
 
+@specializes("map.all")
 fn map_all_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -339,6 +353,7 @@ fn map_all_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
   hits >= entries
 }
 
+@specializes("map.any")
 fn map_any_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -347,6 +362,7 @@ fn map_any_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
   hits > 0
 }
 
+@specializes("map.count")
 fn map_count_str(m: Map[String, String], f: (String, String) -> Bool) -> Int = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -365,6 +381,7 @@ fn __mfold_loop(sh: Int, f: (Int, String, String) -> Int, entries: Int, i: Int, 
     __mfold_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_str(m: Map[String, String], init: Int, f: (Int, String, String) -> Int) -> Int = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -386,6 +403,7 @@ fn __msf_at(ph: Int, n: Int, i: Int, m: Map[String, String]) -> Map[String, Stri
     __msf_at(ph, n, i + 1, nm)
   }
 
+@specializes("map.from_list")
 fn map_from_list_str(pairs: List[(String, String)]) -> Map[String, String] = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)

@@ -16,6 +16,7 @@ fn __filterstr_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: I
     } else __filterstr_fill(dh, sh, f, n, i + 1, di)
   }
 
+@specializes("list.filter")
 fn list_filter_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)

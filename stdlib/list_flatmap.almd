@@ -94,6 +94,7 @@ fn __flmstr_fill(dh: Int, sh: Int, f: (String) -> List[String], n: Int, i: Int, 
     __flmstr_fill(dh, sh, f, n, i + 1, ndi)
   }
 
+@specializes("list.flat_map")
 fn list_flat_map_str(xs: List[String], f: (String) -> List[String]) -> List[String] = {
   let n = list.len(xs)
   let total = __flmstr_total(prim.handle(xs), f, n, 0, 0)

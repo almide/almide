@@ -60,8 +60,10 @@ else {
   0
 }
 
+@specializes("map.new")
 fn map_new_mlo() -> Map[String, List[Int?]] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_mlo(m: Map[String, List[Int?]], k: String, v: List[Int?]) -> Map[String, List[Int?]] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
