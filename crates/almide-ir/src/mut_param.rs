@@ -56,9 +56,12 @@ use almide_lang::types::Ty;
 /// Apply the move-mode rewrite program-wide. Returns `true` when anything
 /// changed. See the module doc for the exact convention and exclusions.
 pub fn lower_mut_params_move_mode(program: &mut IrProgram) -> bool {
+    // #4476: a `mut` place is written after every other operand ran; bind
+    // those first when one of them can write the place's root.
+    let hoisted = crate::call_writes::hoist_operands_before_mut_places(program);
     let mut_fns = collect_mut_fns(program);
     if mut_fns.is_empty() {
-        return false;
+        return hoisted;
     }
     // Read before `rewrite_signatures` strips a declared-Result body's ok layer.
     let never_err_fns = crate::mut_param_unpropagated::never_err_effect_fn_keys(program);
