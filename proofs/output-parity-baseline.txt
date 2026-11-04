@@ -586,6 +586,7 @@ spec/wasm_cross/list_pattern_in_option_payload.almd
 spec/wasm_cross/list_pattern_variant_element.almd
 spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 spec/wasm_cross/list_product_overflow.almd
+spec/wasm_cross/list_push_field_in_place.almd
 spec/wasm_cross/list_push_on_record_field.almd
 spec/wasm_cross/list_range_step_extremes.almd
 spec/wasm_cross/list_reduce_fused_fold_release.almd
