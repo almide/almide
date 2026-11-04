@@ -734,7 +734,13 @@ fn render_native_parts_with(
             source_to_ir_with(source, &[])?
         }
     };
-    let bundled = take_bundled_modules(&mut ir);
+    let (bundled, ordered) = take_bundled_modules(&mut ir);
+    if let Some(span) = fan_reaching_ordered(&ir, &bundled, &ordered) {
+        return Err(LowerError::at(
+            span,
+            "native: fan concurrency requires the scoped-thread codegen (an arm reaches an @ordered stdlib fn, which runs the arms in order, ADR-0024 D3)",
+        ));
+    }
     crate::charge_probe::note_program_regions(almide_ir::meter_plan::program_has_regions(&ir));
     let ir = crate::fan_native::lift_fan_arms(ir)?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
@@ -858,7 +864,7 @@ fn render_native_parts_with(
             };
             native_sig_subset_check(&f, &record_layouts, &variant_layouts)?;
             let all = crate::lower::lower_function_all_with_globals(&f, &globals, &global_inits, &record_layouts, &variant_layouts)
-                .map_err(|e| LowerError::Unsupported(format!("native: generated fn `{name}`: {e:?}")))?;
+                .map_err(|e| LowerError::at(f.body.span, format!("native: generated fn `{name}`: {e:?}")))?;
             functions.extend(all);
             ir.functions.push(f);
         }

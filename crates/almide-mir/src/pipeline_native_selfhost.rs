@@ -197,7 +197,7 @@ fn std_link_name(mangled: &str) -> Option<String> {
 /// (linked, not trusted). A body that reads a module-level binding is left
 /// out (this render threads no module global): its calls resolve nowhere and
 /// wall.
-fn take_bundled_modules(ir: &mut almide_ir::IrProgram) -> almide_ir::IrProgram {
+fn take_bundled_modules(ir: &mut almide_ir::IrProgram) -> (almide_ir::IrProgram, std::collections::BTreeSet<String>) {
     use almide_ir::{walk_expr_mut, CallTarget, IrExprKind, IrMutVisitor};
     use almide_lang::intern::sym;
     use std::collections::{BTreeMap, BTreeSet};
@@ -270,6 +270,8 @@ fn take_bundled_modules(ir: &mut almide_ir::IrProgram) -> almide_ir::IrProgram {
         rw.visit_expr_mut(&mut tl.value);
     }
     let mut out = almide_ir::IrProgram::default();
+    // The linked names of the bodies declared `@ordered` (ADR-0024 D3).
+    let mut ordered: BTreeSet<String> = BTreeSet::new();
     for m in modules {
         let top: BTreeSet<almide_ir::VarId> = m.top_lets.iter().map(|tl| tl.var).collect();
         let intrinsic: BTreeSet<String> =
@@ -281,12 +283,92 @@ fn take_bundled_modules(ir: &mut almide_ir::IrProgram) -> almide_ir::IrProgram {
             }
             rw.visit_expr_mut(&mut f.body);
             let Some(name) = std_link_name(&user_module_fn_name(m.name.as_str(), f.name.as_str())) else { continue };
+            if almide_lang::stdlib_info::is_ordered_stdlib_fn(m.name.as_str(), almide_ir::mono_base_or_self(f.name.as_str())) {
+                ordered.insert(name.clone());
+            }
             f.name = sym(&name);
             out.functions.push(f);
         }
         out.type_decls.extend(m.type_decls);
     }
-    out
+    (out, ordered)
+}
+
+/// The first fan block of `ir` one of whose arms reaches, through user fns
+/// and linked bundled bodies, an `@ordered` stdlib fn (ADR-0024 D3): such an
+/// arm's effect is process-local state a sibling arm may read, so the arms
+/// must run in arm order, and this render runs them on threads. `Some(span)`
+/// declines the program, as the standard codegen's fan lowering orders it.
+fn fan_reaching_ordered(
+    ir: &almide_ir::IrProgram,
+    bundled: &almide_ir::IrProgram,
+    ordered: &std::collections::BTreeSet<String>,
+) -> Option<Option<almide_ir::Span>> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    use almide_ir::{CallTarget, IrExpr, IrExprKind};
+    use std::collections::{BTreeMap, BTreeSet};
+    let fns: BTreeMap<&str, &almide_ir::IrFunction> =
+        ir.functions.iter().chain(bundled.functions.iter()).map(|f| (f.name.as_str(), f)).collect();
+    // Does `e` reach an @ordered fn, following the calls it makes?
+    let reaches = |e: &IrExpr| -> bool {
+        struct Reach<'a> {
+            fns: &'a BTreeMap<&'a str, &'a almide_ir::IrFunction>,
+            ordered: &'a BTreeSet<String>,
+            seen: BTreeSet<String>,
+            hit: bool,
+        }
+        impl IrVisitor for Reach<'_> {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if self.hit {
+                    return;
+                }
+                if let IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } = &e.kind {
+                    match target {
+                        CallTarget::Module { module, func, .. } => {
+                            self.hit |= almide_lang::stdlib_info::is_ordered_stdlib_fn(module.as_str(), func.as_str());
+                        }
+                        CallTarget::Named { name } => {
+                            let n = name.as_str();
+                            self.hit |= self.ordered.contains(n);
+                            if let Some(f) = self.fns.get(n) {
+                                if self.seen.insert(n.to_string()) {
+                                    self.visit_expr(&f.body);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut r = Reach { fns: &fns, ordered, seen: BTreeSet::new(), hit: false };
+        r.visit_expr(e);
+        r.hit
+    };
+    struct Find<'a> {
+        reaches: &'a dyn Fn(&IrExpr) -> bool,
+        found: Option<Option<almide_ir::Span>>,
+    }
+    impl IrVisitor for Find<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.found.is_some() {
+                return;
+            }
+            if let IrExprKind::Fan { exprs } = &e.kind {
+                if exprs.len() >= 2 && exprs.iter().any(|a| (self.reaches)(a)) {
+                    self.found = Some(e.span);
+                    return;
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut find = Find { reaches: &reaches, found: None };
+    for f in ir.functions.iter().filter(|f| !f.is_test) {
+        find.visit_expr(&f.body);
+    }
+    find.found
 }
 
 /// Whether `f`'s body reads any of `vars`.

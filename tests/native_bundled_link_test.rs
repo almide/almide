@@ -33,3 +33,16 @@ fn a_mono_instance_links_the_pivot_of_a_module_the_source_never_names() {
         "the mono instance or the pivot it reaches is not linked:\n{rust}"
     );
 }
+
+/// A fan arm that reaches an `@ordered` stdlib fn (ADR-0024 D3) runs its
+/// arms in arm order on the standard codegen; this render runs fan arms on
+/// threads, so it must decline. `env.set` reaches the render only through
+/// the bundled-body link: before the link the program walled on the call,
+/// after it the arms ran concurrently and the reader saw the writer's value.
+#[test]
+fn a_fan_arm_reaching_an_ordered_fn_declines() {
+    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/spec/wasm_cross/fan_ordered_arms.almd"))
+        .expect("the fixture");
+    let e = almide_mir::pipeline::try_render_rust_source(&src).expect_err("an ordered fan must not render on threads");
+    assert!(format!("{e:?}").contains("@ordered"), "declined for another reason: {e:?}");
+}
