@@ -72,7 +72,7 @@ pub(super) fn runtime_crate_manifest_lines() -> String {
         "\n[dependencies.{RT_CRATE}]\npath = \"{RT_CRATE}\"\n\n\
          # The runtime crate's profile (owner ruling 2026-11-02): no debug\n\
          # assertions, as v0's runtime rlib; overflow checks pinned off.\n\
-         [profile.dev.package.{RT_CRATE}]\ndebug = false\ndebug-assertions = false\noverflow-checks = false\n\n\
+         [profile.dev.package.{RT_CRATE}]\ndebug-assertions = false\noverflow-checks = false\ndebug = false\n\n\
          # No debug info for the program either, as v0's rustc fast path.\n\
          [profile.dev.package.almide-out]\ndebug = false\n"
     )
