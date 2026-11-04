@@ -149,7 +149,16 @@ REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-com
 # `ALMIDE_FAN_SEQUENTIAL=1` (the same binary's sequential path) 1.07 / 1.06 —
 # the whole win is the parallel map. The ratio scales with the runner's core
 # count, which is why it is a VICTORY row and not a PAIRS anchor.
-VICTORY="binarytrees=rust:binarytrees:ALMIDE_REGION_OFF treealloc=rust:treealloc:ALMIDE_REGION_OFF fannkuchredux=rust:fannkuchredux:ALMIDE_FAN_SEQUENTIAL"
+#
+# `fib` (#4456) is the call-bound recursion row: the native legs inline a
+# pure scalar recursion into itself once (`almide_ir::self_inline`), and LLVM,
+# which never inlines a recursive call, then merges the identical grandchild
+# calls (fib's `f(n-3)` twice). The reference is the ordinary Rust, one call
+# per node. GCE n2-standard-8, 2026-11-04, 30:300: 0.095 s against 1.15 s
+# (0.083), and 1.15 s with ALMIDE_SELF_INLINE_OFF=1 — the whole win is the
+# rewrite, and the delta grows with n (the call count drops from ~1.618^n to
+# ~1.466^n), which is why the claim is gated and not a band.
+VICTORY="binarytrees=rust:binarytrees:ALMIDE_REGION_OFF treealloc=rust:treealloc:ALMIDE_REGION_OFF fannkuchredux=rust:fannkuchredux:ALMIDE_FAN_SEQUENTIAL fib=rust:fib:ALMIDE_SELF_INLINE_OFF"
 VICTORY_ABLATION_FLOOR=1.30
 # IDIOM GATE (#1337). The three listbuild rows build the SAME result three
 # ways, so beyond each row's own ratio there is a relation between them that
@@ -189,7 +198,7 @@ trap 'rm -f "$out"' EXIT
 # interleaved loop as their optimized twin — see ABLATION below.
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,rust \
-  --bench nbody,spectralnorm,fasta,fft,binarytrees,treealloc,listbuild,listbuild-append,listbuild-comb,strchurn,fannkuchredux,mandelbrot,decode,wordfreq,wordfreq-group \
+  --bench nbody,spectralnorm,fasta,fft,binarytrees,treealloc,listbuild,listbuild-append,listbuild-comb,strchurn,fannkuchredux,mandelbrot,decode,wordfreq,wordfreq-group,fib \
   --ablate ALMIDE_DISABLE_OPT --ablate-bench nbody,spectralnorm,fasta,fft,wordfreq \
   --label ratchet --out "$out"
 

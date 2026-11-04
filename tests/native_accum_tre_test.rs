@@ -19,9 +19,15 @@ fn rendered_fn(src: &str, name: &str) -> String {
     body[..end].to_string()
 }
 
+/// Since #4456 a recursion small enough for the one-level self-inlining
+/// (`almide_ir::self_inline`) takes that rewrite instead; a body over its
+/// node budget — the base case here is a 30-factor product — still gets the
+/// accumulator loop, which is what this test pins.
 #[test]
 fn rendered_tri_recurses_once_per_node() {
-    let src = "fn tri(n: Int) -> Int = if n <= 1 then n * n - 3 else tri(n - 1) + tri(n - 3)\n\nfn main() -> Unit = println(int.to_string(tri(20)))\n";
+    let base = std::iter::repeat_n("n", 30).collect::<Vec<_>>().join(" * ");
+    let src = format!("fn tri(n: Int) -> Int = if n <= 1 then {base} - 3 else tri(n - 1) + tri(n - 3)\n\nfn main() -> Unit = println(int.to_string(tri(20)))\n");
+    let src = src.as_str();
     let body = rendered_fn(src, "almd_tri");
     let calls = body.matches("almd_tri(").count() - 1; // minus the signature
     assert_eq!(calls, 1, "one recursive call per node, the other folded into a loop:\n{body}");
@@ -31,8 +37,11 @@ fn rendered_tri_recurses_once_per_node() {
 #[test]
 fn a_subtraction_recursion_keeps_both_calls() {
     // The rewrite reassociates; `-` is neither associative nor commutative, so
-    // it must not fire (the preconditions admit only Int `+` and `*`).
-    let src = "fn g(n: Int) -> Int = if n < 2 then n else g(n - 1) - g(n - 2)\n\nfn main() -> Unit = println(int.to_string(g(20)))\n";
-    let body = rendered_fn(src, "almd_g");
+    // it must not fire (the preconditions admit only Int `+` and `*`). The
+    // base is over the self-inlining budget, as above, so the accumulator
+    // rewrite is the only one that could take it.
+    let base = std::iter::repeat_n("n", 30).collect::<Vec<_>>().join(" * ");
+    let src = format!("fn g(n: Int) -> Int = if n < 2 then {base} else g(n - 1) - g(n - 2)\n\nfn main() -> Unit = println(int.to_string(g(20)))\n");
+    let body = rendered_fn(&src, "almd_g");
     assert_eq!(body.matches("almd_g(").count() - 1, 2, "{body}");
 }
