@@ -1,0 +1,70 @@
+// @leg: structural
+// @native-cwd: empty
+// The JS host's in-memory filesystem (#4438). `main` works in "." — an
+// empty writable preopen under the host, an empty directory natively — and
+// prints the native reference lines: nested folders, text and non-UTF-8
+// bytes, an append, a 1 MiB file, a rename, a remove, a walk, and the
+// errors whose text is the same on every host. The exports run after `main`
+// against the read-only "/in" preopen and the argv / environment `init()`
+// passed (fs_preopens.host.mjs).
+import env
+import fs
+
+local fn shown(r: Result[String, String]) -> String = match r {
+  ok(v) => "ok " + v,
+  err(e) => "err " + e,
+}
+
+local effect fn read(p: String) -> Result[String, String] = {
+  let t = fs.read_text(p)!
+  ok(t)
+}
+
+local effect fn mkdir(p: String) -> Result[String, String] = {
+  fs.mkdir_p(p)!
+  ok("")
+}
+
+local effect fn write(p: String) -> Result[String, String] = {
+  fs.write_text(p, "x")!
+  ok("")
+}
+
+effect fn main() -> Unit = {
+  fs.mkdir_p("work/deep")!
+  fs.write_text("work/a.txt", "héllo\n")!
+  fs.append_text("work/a.txt", "wörld\n")!
+  println(string.trim(fs.read_text("work/a.txt")!))
+  fs.write_bytes("work/raw.bin", bytes.from_list([0, 255, 128, 10]))!
+  println("raw " + int.to_string(bytes.len(fs.read_bytes("work/raw.bin")!)))
+  fs.write_text("work/big.txt", string.repeat("0123456789abcdef", 65536))!
+  println("big " + int.to_string(string.len(fs.read_text("work/big.txt")!)))
+  fs.rename("work/a.txt", "work/deep/b.txt")!
+  println("work: " + list.join(fs.list_dir("work")!, ","))
+  println("deep: " + list.join(fs.list_dir("work/deep")!, ","))
+  fs.remove("work/raw.bin")!
+  println("raw exists " + (if fs.exists("work/raw.bin") then "yes" else "no"))
+  println("walk: " + list.join(fs.walk("work")!, ","))
+  println(shown(read("work/missing.txt")))
+  println(shown(read("work/deep")))
+  println(shown(read("work/big.txt/x")))
+  println(shown(mkdir("work/big.txt")))
+  println(shown(write("work/deep")))
+}
+
+/// "/in" is read-only: it reads and lists, and refuses a write; a `..` past
+/// a preopen is refused as on wasmtime.
+effect fn probe_in() -> String = {
+  let seed = fs.read_text("/in/seed.txt")!
+  let names = fs.list_dir("/in/sub")!
+  [seed, list.join(names, ","), shown(write("/in/new.txt")), shown(mkdir("/in/d")), shown(read("../escape.txt"))].join(" | ")
+}
+
+/// The argv and environment `init()` passed.
+effect fn probe_args() -> String = {
+  let greeting = env.get("GREETING") ?? "-"
+  list.join(env.args(), "|") + " " + greeting
+}
+
+/// Appends to a file `init()` passed as caller-owned bytes.
+effect fn append_note(p: String) -> Unit = fs.append_text(p, "!")!

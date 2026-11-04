@@ -49,5 +49,19 @@
 #
 # Anchor at their median, 8.44; the ceiling (+20%) is 10.13, and the #4317
 # slowdown (22.4 on GCE, ~26 on CI) stays far over it.
-check 4.63
-wasm 8.44
+#
+# Re-anchored for #4328 (2026-11-04) on an n2-standard-16
+# (asia-northeast2-a), same corpus, min of 3, both binaries pinned to one
+# core, two rounds each (agreeing to 0.4%):
+#
+#   tree                                          check   wasm
+#   develop 821f4e733 (whole bundled modules)     4.72    8.90
+#   this tree (only the reached functions)        2.47    4.99
+#
+# The check row is back at its pre-#4182 reading (2.63). Both rows anchor on
+# the GCE reading times CI's measured offset over the pinned core (check
+# 4.745 / 4.13 = 1.15, wasm 8.44 / 7.2 = 1.17): check 2.84, wasm 5.84. The
+# ceilings (3.41, 7.01) sit below develop-before's readings on either
+# machine, and the GCE readings stay above the half-anchor floor.
+check 2.84
+wasm 5.84

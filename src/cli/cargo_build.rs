@@ -179,7 +179,16 @@ pub(super) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path
 /// this function's `?` chain — same "either piece missing → skip" semantics).
 /// The link profile a `--release` fast-path build adds: the cargo path's
 /// `[profile.release]` (`lto = true`, `codegen-units = 1`), spelled for rustc.
-const FAST_PATH_RELEASE_ARGS: [&str; 4] = ["-C", "lto=fat", "-C", "codegen-units=1"];
+///
+/// `strip=debuginfo` is the third half of that profile (#2092): cargo strips
+/// debug info from a release binary whose profile asks for none (`debug = 0`,
+/// cargo ≥ 1.77), but a bare rustc keeps the DWARF that std's precompiled
+/// rlibs carry and links it into the binary. That DWARF was ~1.6 MB of every
+/// fast-path release binary — a program that touched the heap shipped at
+/// ~2.0 MB while one the cargo path built (no runtime use) shipped at 0.37 MB.
+/// Only `.debug_*` sections go: the code, the symbol table (backtraces still
+/// name their frames) and every message the program prints are unchanged.
+const FAST_PATH_RELEASE_ARGS: [&str; 6] = ["-C", "lto=fat", "-C", "codegen-units=1", "-C", "strip=debuginfo"];
 
 fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<Result<std::path::PathBuf, String>> {
     let opt_level = if release { "3" } else { "1" };
@@ -831,5 +840,9 @@ mod tests {
         assert!(release.contains("lto = true") && release.contains("codegen-units = 1"), "{release}");
         assert!(FAST_PATH_RELEASE_ARGS.contains(&"lto=fat"), "{FAST_PATH_RELEASE_ARGS:?}");
         assert!(FAST_PATH_RELEASE_ARGS.contains(&"codegen-units=1"), "{FAST_PATH_RELEASE_ARGS:?}");
+        // #2092: the cargo release profile asks for no debug info, so cargo
+        // strips it; the fast path has to say so to rustc itself.
+        assert!(!release.contains("debug ="), "{release}");
+        assert!(FAST_PATH_RELEASE_ARGS.contains(&"strip=debuginfo"), "{FAST_PATH_RELEASE_ARGS:?}");
     }
 }
