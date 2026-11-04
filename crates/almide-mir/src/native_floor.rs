@@ -240,6 +240,55 @@ pub(crate) fn declared_scalar_option(name: &str) -> bool {
     }
 }
 
+/// The native kinds of the type arguments of a declared `ctor[…]` type whose
+/// arguments the native render carries as is: `Int`, `String`, a list of
+/// either.
+fn declared_kinds(t: &TypeExpr, ctor: &str) -> Option<Vec<NTy>> {
+    let TypeExpr::Generic { name, args } = t else { return None };
+    if name.as_str() != ctor {
+        return None;
+    }
+    args.iter()
+        .map(|a| match a {
+            TypeExpr::Simple { name } => match name.as_str() {
+                "Int" => Some(NTy::I64),
+                "String" => Some(NTy::Str),
+                _ => None,
+            },
+            TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => match simple(&args[0])? {
+                "Int" => Some(NTy::Vec),
+                "String" => Some(NTy::VecStr),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// A set built from a list arg holds that list's elements.
+fn set_list_agrees(params: &[FloorParam], args: &[(String, NTy)], e: NTy) -> bool {
+    params.iter().zip(args).all(|(p, (_, got))| match p {
+        FloorParam::List(ListElem::Any) => match e {
+            NTy::I64 => matches!(got, NTy::Vec | NTy::VecRef),
+            NTy::Str => matches!(got, NTy::VecStr | NTy::VecStrRef),
+            _ => false,
+        },
+        _ => true,
+    })
+}
+
+/// Whether a floor call returning its list's element Option (`A?`) returns
+/// the scalar `Option<i64>` carrier: unless the self-hosted body registered
+/// under `call` declares another element (`list.get_str`'s `String?`).
+pub(crate) fn elem_option_is_scalar(call: &str) -> bool {
+    specialized_ret(call).is_none_or(|t| match &t {
+        TypeExpr::Generic { name, args } if is_option_name(name.as_str()) && args.len() == 1 => {
+            simple(&args[0]).and_then(scalar_of).is_some()
+        }
+        _ => false,
+    })
+}
+
 /// The declared return of the self-hosted body registered under `call`.
 fn specialized_ret(call: &str) -> Option<TypeExpr> {
     crate::mir_ops::self_host_runtime().iter().find_map(|(src, pairs)| {
@@ -1782,6 +1831,9 @@ fn list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
     }
     let elem_of = |i: u16| crate::render_native_rec::list_elem(i);
     match (elem, got) {
+        // A type parameter's list: a generated list too, borrowed whole.
+        (ListElem::Any, NTy::Rec(i)) if elem_of(i).is_some() => return Some(format!("&{code}")),
+        (ListElem::Any, NTy::RecRef(i)) if elem_of(i).is_some() => return Some(code.to_string()),
         // The render's float list holds each cell's bits.
         (ListElem::Float, NTy::Vec | NTy::VecRef) => {
             return Some(format!("&{code}.iter().map(|x| f64::from_bits(*x as u64)).collect::<Vec<f64>>()"))
@@ -1852,12 +1904,20 @@ pub(crate) fn render_call(
     });
     // The element kind of the call's `List[A]` arg, for an element-typed
     // param or return: an Int list's `i64`, a String list's `AlmideString`.
-    let elem_str = f
+    // A generated list's element is its declared kind (a record, a nested
+    // list, a runtime `Value`, …).
+    let elem_kind: Option<NTy> = f
         .params
         .iter()
         .zip(args)
         .find(|(p, _)| matches!(p, FloorParam::List(ListElem::Any)))
-        .map(|(_, (_, got))| matches!(got, NTy::VecStr | NTy::VecStrRef));
+        .and_then(|(_, (_, got))| match got {
+            NTy::Vec | NTy::VecRef => Some(NTy::I64),
+            NTy::VecStr | NTy::VecStrRef => Some(NTy::Str),
+            NTy::Rec(i) | NTy::RecRef(i) => crate::render_native_rec::list_elem(*i),
+            _ => None,
+        });
+    let elem_str = elem_kind.map(|k| k == NTy::Str);
     let mut rendered = Vec::new();
     for ((code, got), p) in args.iter().zip(&f.params) {
         rendered.push(match p {
@@ -1869,10 +1929,11 @@ pub(crate) fn render_call(
                 .ok_or_else(mismatch)?,
             FloorParam::List(elem) => list_arg(*elem, code, *got).ok_or_else(mismatch)?,
             FloorParam::Elem(by_ref) => {
-                let v = match (elem_str, got) {
-                    (Some(false), NTy::I64) => code.clone(),
-                    (Some(true), NTy::Str) => format!("{code}.clone()"),
-                    (Some(true), NTy::StrRef) => format!("AlmideString::from({code})"),
+                let v = match (elem_kind, got) {
+                    (Some(NTy::I64), NTy::I64) => code.clone(),
+                    (Some(NTy::Str), NTy::Str) => format!("{code}.clone()"),
+                    (Some(NTy::Str), NTy::StrRef) => format!("AlmideString::from({code})"),
+                    (Some(want @ (NTy::Rec(_) | NTy::Vec | NTy::VecStr)), _) => owned_arg(want, code, *got).ok_or_else(mismatch)?,
                     _ => return Err(mismatch()),
                 };
                 if *by_ref { format!("&{v}") } else { v }
@@ -1910,7 +1971,10 @@ pub(crate) fn render_call(
                 let pair = crate::render_native_rec::list_elem(*i).ok_or_else(mismatch)?;
                 let (a, b) = match pair {
                     NTy::Vec | NTy::VecRef => ("t[0]".to_string(), "t[1]".to_string()),
-                    _ => ("t.f0.clone()".to_string(), "t.f1.clone()".to_string()),
+                    // A pair of Strings the slot typing read as a String list.
+                    NTy::VecStr | NTy::VecStrRef => ("t[0].clone()".to_string(), "t[1].clone()".to_string()),
+                    NTy::Rec(j) if crate::render_native_rec::field_count(j) == 2 => ("t.f0.clone()".to_string(), "t.f1.clone()".to_string()),
+                    _ => return Err(mismatch()),
                 };
                 format!("{code}.iter().map(|t| ({a}, {b})).collect::<Vec<_>>()")
             }
@@ -2020,7 +2084,13 @@ pub(crate) fn render_call(
                 }
                 (call, Some(NTy::Rec(i)))
             }
-            _ => return Err(mismatch()),
+            // Or the type the self-hosted body this call specializes declares.
+            _ => match specialized_ret(name).as_ref().and_then(|t| declared_kinds(t, "Set")) {
+                Some(e) if e.len() == 1 && matches!(e[0], NTy::I64 | NTy::Str) && set_list_agrees(&f.params, args, e[0]) => {
+                    (call, Some(NTy::Rec(crate::render_native_rec::set_type_of(e[0]))))
+                }
+                _ => return Err(mismatch()),
+            },
         },
         FloorRet::SetElems => match set_e.ok_or_else(mismatch)? {
             NTy::I64 => (call, Some(NTy::Vec)),
@@ -2064,7 +2134,12 @@ pub(crate) fn render_call(
             (Some((k, v)), _) => (call, Some(NTy::Rec(crate::render_native_rec::map_type_of(k, v)))),
             // No map arg (`map.new()`): the result's declared map type.
             (None, Some(i)) => (call, Some(NTy::Rec(i))),
-            (None, None) => return Err(mismatch()),
+            // Or the type the self-hosted body this call specializes declares
+            // (`map_new_skv() -> Map[String, Int]`).
+            (None, None) => match specialized_ret(name).as_ref().and_then(|t| declared_kinds(t, "Map")) {
+                Some(kv) if kv.len() == 2 => (call, Some(NTy::Rec(crate::render_native_rec::map_type_of(kv[0], kv[1])))),
+                _ => return Err(mismatch()),
+            },
         },
         FloorRet::MapOptVal => match map_kv.ok_or_else(mismatch)?.1 {
             NTy::I64 => (call, Some(NTy::Opt)),
@@ -2095,12 +2170,23 @@ pub(crate) fn render_call(
         FloorRet::Opt(Scalar::Bool) => (format!("({call}).map(|b| b as i64)"), Some(NTy::Opt)),
         FloorRet::Opt(Scalar::Float) => (format!("({call}).map(|x| x.to_bits() as i64)"), Some(NTy::Opt)),
         FloorRet::Elem(shape) => match (elem_str, shape) {
+            // A generated list's element: itself, its generated `Option`, its list.
+            (Some(false), _) if matches!(elem_kind, Some(NTy::Rec(_)) | Some(NTy::Vec) | Some(NTy::VecStr)) => {
+                let e = elem_kind.expect("matched");
+                let t = match shape {
+                    ElemRet::Value => e,
+                    ElemRet::Opt => NTy::Rec(crate::render_native_rec::option_type_of(e)),
+                    ElemRet::List => NTy::Rec(crate::render_native_rec::list_type_of(e)),
+                };
+                (call, Some(t))
+            }
             (Some(false), ElemRet::Value) => (call, Some(NTy::I64)),
             (Some(false), ElemRet::Opt) => (call, Some(NTy::Opt)),
             (Some(false), ElemRet::List) => (call, Some(NTy::Vec)),
             (Some(true), ElemRet::Value) => (call, Some(NTy::Str)),
             (Some(true), ElemRet::List) => (call, Some(NTy::VecStr)),
-            // An Option of a String is a heap payload, outside this carrier.
+            // An Option of a String element: the generated `Option<AlmideString>` carrier.
+            (Some(true), ElemRet::Opt) => (call, Some(NTy::Rec(crate::render_native_rec::option_type_of(NTy::Str)))),
             _ => return Err(wall(format!("native: floor call `{name}` element-typed result outside the native carriers"))),
         },
     })

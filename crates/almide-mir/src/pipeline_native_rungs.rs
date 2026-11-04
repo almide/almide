@@ -357,12 +357,12 @@ fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
     for f in functions.iter() {
         for op in &f.ops {
             if let crate::Op::CallFn { name, .. } = op {
-                let opt_ret = crate::native_floor::declared(name).is_some_and(|d| {
-                    matches!(
-                        d.ret,
-                        crate::native_floor::FloorRet::Opt(_)
-                            | crate::native_floor::FloorRet::Elem(crate::native_floor::ElemRet::Opt)
-                    )
+                let opt_ret = crate::native_floor::declared(name).is_some_and(|d| match d.ret {
+                    crate::native_floor::FloorRet::Opt(_) => true,
+                    crate::native_floor::FloorRet::Elem(crate::native_floor::ElemRet::Opt) => {
+                        crate::native_floor::elem_option_is_scalar(name)
+                    }
+                    _ => false,
                 });
                 if opt_ret {
                     option_fns.insert(name.clone());
