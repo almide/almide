@@ -221,14 +221,14 @@ struct FsService {
 }
 
 /// The functions `fs_call` dispatches to: itself, the http client, the serve
-/// shim, and the (udp + lookup, tcp) net shims.
-type ShimTargets = (u32, Option<u32>, Option<u32>, (Option<u32>, Option<u32>));
+/// shim, the (udp + lookup, tcp) net shims, and the http call handle's.
+type ShimTargets = (u32, Option<u32>, Option<u32>, (Option<u32>, Option<u32>, Option<u32>));
 
 /// The host contract over p3 (op codes shared with the embedded host): 30
 /// raw stdout, 31 stdin read-to-end, 35 stdin take-n, 32 entropy, 34 wall
 /// clock, 60 monotonic clock, plus the fs (through the spliced service), http
 /// and env (26 / 29 / 36 / 37) families; anything else = the defined refusal.
-fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve, (f_net, f_tcp)): ShimTargets, f_env: Option<(u32, &[i32])>, svc: Option<&FsService>) -> Function {
+fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve, (f_net, f_tcp, f_hc)): ShimTargets, f_env: Option<(u32, &[i32])>, svc: Option<&FsService>) -> Function {
     let P3Globals { park, g_plen, g_ppos, g_out_tx, g_out_fut, g_err_tx, g_err_fut, f_reserve, f_await, .. } = g;
     let (op, a_len, b_ptr, b_len) = (0u32, 2u32, 3u32, 4u32);
     let n = 6u32;
@@ -245,7 +245,12 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve, (f_net, f_t
         i.local_get(op).i32_const(49).i32_le_s();
         i.i32_and();
         // op 65: the full-response family (ADR-0023 step 4).
-        i.local_get(op).i32_const(65).i32_eq().i32_or().if_(BlockType::Empty);
+        i.local_get(op).i32_const(65).i32_eq().i32_or();
+        // op 53: `http.start` builds its request there too.
+        if f_hc.is_some() {
+            i.local_get(op).i32_const(OP_HC_OPEN).i32_eq().i32_or();
+        }
+        i.if_(BlockType::Empty);
         for pidx in 0..5u32 {
             i.local_get(pidx);
         }
@@ -280,6 +285,19 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve, (f_net, f_t
             i.local_get(pidx);
         }
         i.call(tf).return_();
+        i.end();
+    }
+
+    // ops 54..=59 (the http call handle on an open call, ADR-0023 §4.3):
+    // the call shim (wasi_p3_http_call.rs).
+    if let Some(hf) = f_hc {
+        i.local_get(op).i32_const(OP_HC_STATE).i32_ge_s();
+        i.local_get(op).i32_const(OP_HC_DROP).i32_le_s();
+        i.i32_and().if_(BlockType::Empty);
+        for pidx in 0..5u32 {
+            i.local_get(pidx);
+        }
+        i.call(hf).return_();
         i.end();
     }
 

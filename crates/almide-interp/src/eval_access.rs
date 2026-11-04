@@ -141,7 +141,12 @@ impl<'a> Interpreter<'a> {
         //      sort here to match the backends' repr.
         let resolved_name;
         if let Some(n) = name {
-            resolved_name = Some(*n);
+            // A stdlib record spelled through its module (`url.Url { .. }`)
+            // is the type its decl is keyed under, the bare `Url` that
+            // `url.parse` builds — so `==` compares one type, as on the
+            // backends (#4383).
+            let key = almide_lang::stdlib_info::stdlib_owned_type_key(n.as_str());
+            resolved_name = Some(if key == n.as_str() { *n } else { almide_base::intern::sym(key) });
         } else {
             match ty {
                 Ty::Named(n, _) => resolved_name = Some(*n),

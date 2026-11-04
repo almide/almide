@@ -193,7 +193,8 @@ fn run_main() {
     crate::diagnostic_render::init_color();
     // Legacy mode: `almide file.almd [--target X]` → rewrite as `almide emit file.almd [--target X]`
     // `args_os`, not `args`: `std::env::args` panics on an argument that is
-    // not UTF-8 (#4388). clap reports such an argument as a usage error.
+    // not UTF-8 (#4388). clap reports such an argument as a usage error,
+    // except one meant for the program, which is its lossy decode (#4391).
     let raw_args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     let legacy = raw_args.get(1).and_then(|a| a.to_str()).is_some_and(|a| {
         !a.starts_with('-') && (a.ends_with(".almd") || a.ends_with(".json"))

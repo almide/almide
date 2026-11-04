@@ -1,0 +1,91 @@
+// @contract: C-452
+// An `@export(c, "sym")` fn crosses C at the C ABI table's widths, the table
+// `@extern(c)` reads (almide/almide#4447, #4448). `Int` is an `int64_t`, so a
+// value past 32 bits comes back whole; the sized types cross at their own
+// width; `Float` is a `double`; `Bool` an `int` (1 or 0); `Unit` is `void`.
+// An effect fn answers its ok value itself, never a Result. Its err writes
+// the message to stderr and exits 1 before the caller regains control, the
+// native counterpart of C-451's wasm trap (almide/almide#4376).
+//
+// The C caller is this program: each `@extern(c, "c", "ecx_*")` binding names
+// the symbol an `@export(c)` fn defines, so every value crosses the C boundary
+// twice, out through the binding and back in through the export. `@export(c)`
+// is native-only, so no cross-target runner executes this file;
+// tests/export_c_abi_test.rs in almide/almide builds and runs it and pins its
+// stdout, its stderr (`over 100: 200`) and its exit code 1.
+local fn check(n: Int) -> Result[Int, String] = if n > 100 then err("over 100: ${n}") else ok(n)
+
+@export(c, "ecx_wide")
+fn wide(v: Int) -> Int = v + 1
+
+@export(c, "ecx_wide_e")
+effect fn wide_e(v: Int, n: Int) -> Int = check(n)! + v
+
+@export(c, "ecx_i64")
+fn i64_id(v: Int64) -> Int64 = v
+
+@export(c, "ecx_u64")
+fn u64_id(v: UInt64) -> UInt64 = v
+
+@export(c, "ecx_f32")
+fn f32_id(v: Float32) -> Float32 = v
+
+@export(c, "ecx_f64")
+fn f64_id(v: Float64) -> Float64 = v
+
+@export(c, "ecx_half_e")
+effect fn half_e(n: Int) -> Float = float.from(check(n)!) / 2.0
+
+@export(c, "ecx_even_e")
+effect fn even_e(n: Int) -> Bool = check(n)! % 2 == 0
+
+@export(c, "ecx_note_e")
+effect fn note_e(n: Int) -> Unit = {
+  let k = check(n)!
+  println("note ${k}")
+}
+
+@extern(c, "c", "ecx_wide")
+fn c_wide(v: Int) -> Int = _
+
+@extern(c, "c", "ecx_wide_e")
+fn c_wide_e(v: Int, n: Int) -> Int = _
+
+@extern(c, "c", "ecx_i64")
+fn c_i64(v: Int64) -> Int64 = _
+
+@extern(c, "c", "ecx_u64")
+fn c_u64(v: UInt64) -> UInt64 = _
+
+@extern(c, "c", "ecx_f32")
+fn c_f32(v: Float32) -> Float32 = _
+
+@extern(c, "c", "ecx_f64")
+fn c_f64(v: Float64) -> Float64 = _
+
+@extern(c, "c", "ecx_half_e")
+fn c_half_e(n: Int) -> Float = _
+
+@extern(c, "c", "ecx_even_e")
+fn c_even_e(n: Int) -> Bool = _
+
+@extern(c, "c", "ecx_note_e")
+fn c_note_e(n: Int) -> Unit = _
+
+effect fn main() -> Unit = {
+  let big: Int64 = -9000000000000000000
+  let huge: UInt64 = 18000000000000000000
+  let third: Float32 = 1.5
+  let quarter: Float64 = 2.25
+  println("wide ${int.to_string(c_wide(5000000000))}")
+  println("wide_e ${int.to_string(c_wide_e(4294967296, 7))}")
+  println("i64 ${int.to_string(c_i64(big))}")
+  println("u64 ${int.to_string(int.from_wrapping(c_u64(huge)))}")
+  println("f32 ${float.to_string(float.from(c_f32(third)))}")
+  println("f64 ${float.to_string(c_f64(quarter))}")
+  println("half_e ${float.to_string(c_half_e(3))}")
+  println("even_e ${c_even_e(4)} ${c_even_e(5)}")
+  c_note_e(7)
+  println("half_e of 200 errs:")
+  println("unreachable ${float.to_string(c_half_e(200))}")
+}

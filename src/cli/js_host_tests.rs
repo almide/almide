@@ -7,7 +7,7 @@ use almide_lang::types::constructor::TypeConstructorId;
 
 fn export(name: &str, params: Vec<Ty>, ret: Ty, is_effect: bool) -> HostFn {
     let params = params.into_iter().enumerate().map(|(i, t)| (format!("a{i}"), t)).collect();
-    HostFn { name: name.to_string(), params, ret, is_effect }
+    HostFn { name: name.to_string(), params, ret, is_effect, declared: false }
 }
 
 fn list(t: Ty) -> Ty {
@@ -47,6 +47,37 @@ fn the_return_plan_is_the_recorded_abi_or_a_refusal() {
     let effect = export("e", vec![], Ty::Int, true);
     let rec = ExportRet::Result(AbiShape::Int, AbiShape::Other("Named(0)".into()));
     assert!(plan_export(&effect, Some(&[]), Some(&rec)).is_err(), "an err the host cannot read as a message");
+}
+
+/// #4376: a declared scalar effect fn's export is the ok value itself (the
+/// module traps on err), so the wrapper reads the wasm value as a plain fn's
+/// does, and no Result block, String helper or allocator ships for it. A
+/// plain fn recorded so, or a heap ok, is refused.
+#[test]
+fn a_declared_scalar_effect_export_reads_the_ok_value() {
+    let cells = [
+        (Ty::Int, AbiShape::Int, RetPlan::Scalar(Marshal::Int)),
+        (Ty::Float, AbiShape::Float, RetPlan::Scalar(Marshal::Float)),
+        (Ty::Bool, AbiShape::Bool, RetPlan::Scalar(Marshal::Bool)),
+        (Ty::Unit, AbiShape::Unit, RetPlan::Void),
+    ];
+    for (ty, shape, plan) in cells {
+        let mut effect = export("e", vec![], ty.clone(), true);
+        effect.declared = true;
+        let rec = ExportRet::OkValue(shape.clone());
+        assert_eq!(plan_export(&effect, Some(&[]), Some(&rec)).map(|p| p.ret), Ok(plan), "{ty:?}");
+        let surface = HostSurface { exports: vec![effect.clone()], ..HostSurface::default() };
+        assert!(!surface.needs_string_abi(), "{ty:?}: a declared scalar effect export needs no String ABI");
+        // The same fn exported implicitly keeps the Result block.
+        effect.declared = false;
+        let surface = HostSurface { exports: vec![effect], ..HostSurface::default() };
+        assert!(surface.needs_string_abi(), "{ty:?}: an implicit effect export unwraps a block");
+        let plain = export("p", vec![], ty.clone(), false);
+        assert!(plan_export(&plain, Some(&[]), Some(&rec)).is_err(), "{ty:?}: a plain fn has no ok value");
+    }
+    let mut s = export("s", vec![], Ty::String, true);
+    s.declared = true;
+    assert!(plan_export(&s, Some(&[]), Some(&ExportRet::OkValue(AbiShape::Str))).is_err(), "a heap ok is never an ok value");
 }
 
 /// #3354: Bytes, List, Option and records are blocks read by the recorded

@@ -386,8 +386,7 @@ impl Checker {
         match n.as_str().rsplit_once('.') {
             Some((m, _)) => {
                 let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
-                let q = format!("{}.{}", rm, type_name.as_str());
-                if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { type_name }
+                self.env.module_type_key(&rm, type_name.as_str()).map_or(type_name, |k| sym(&k))
             }
             None => type_name,
         }
@@ -400,8 +399,7 @@ impl Checker {
             // the real module, keep qualified if registered.
             Some((m, base)) => {
                 let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
-                let q = format!("{}.{}", rm, base);
-                if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { *n }
+                self.env.module_type_key(&rm, base).map_or(*n, |k| sym(&k))
             }
             None => crate::canonicalize::resolve::canonical_user_type_sym(
                 n, &self.env.types, self.current_module_prefix.as_deref(),

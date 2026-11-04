@@ -1,0 +1,4 @@
+@export(c, "label")
+effect fn label(n: Int) -> Int = n * 10
+
+effect fn main() -> Unit = println(int.to_string(label(3)!))
