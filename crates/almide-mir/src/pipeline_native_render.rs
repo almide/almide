@@ -274,6 +274,11 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     // #4447: the native rungs render no `@export(c)` wrapper — the wall
     // comes before the fan lift.
     wall_native_c_exports(&ir)?;
+    // A window the standard codegen allocates in its region arena: that leg
+    // runs it at a fraction of the ownership render's cost (#4006, C2 on C1).
+    if almide_codegen::pass_region_window::discovers_windows(&ir) {
+        return Err(LowerError::Unsupported("native: a region window the standard codegen allocates in its arena".into()));
+    }
     let ir = crate::fan_native::lift_fan_arms(ir)?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
     // them a record literal lowers as an Opaque skeleton and every field read
