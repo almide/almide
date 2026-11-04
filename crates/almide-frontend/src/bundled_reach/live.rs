@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use almide_lang::ast::{Decl, Program, TypeExpr};
 
-use super::{auto_modules, fn_is_named, reaches, spell_unit, variant_case_name, Spelled, Surface};
+use super::{auto_modules, auto_program, fn_is_named, reaches, spell_unit, variant_case_name, Spelled, Surface};
 
 /// The bundled stdlib a program reaches, by FUNCTION: which auto-imported
 /// modules load, and, for every bundled module considered (those plus the
@@ -90,11 +90,11 @@ pub fn live_bundled<'a>(
     let mut cands: Vec<Cand<'_>> = explicit
         .iter()
         .zip(&explicit_surfaces)
-        .map(|((n, p), s)| Cand { name: n, prog: p, surface: s, auto: false })
+        .map(|((n, p), s)| Cand { name: n, prog: Some(p), surface: s, auto: false })
         .collect();
-    for (n, p, s) in auto_modules() {
+    for (n, s) in auto_modules() {
         if !explicit.iter().any(|(e, _)| e == n) {
-            cands.push(Cand { name: n, prog: p, surface: s, auto: true });
+            cands.push(Cand { name: n, prog: None, surface: s, auto: true });
         }
     }
     let rows = almide_lang::self_host_registry::self_host_runtime();
@@ -122,7 +122,8 @@ pub fn live_bundled<'a>(
 /// `import` already loaded (which wins over the auto entry of its name).
 struct Cand<'p> {
     name: &'p str,
-    prog: &'p Program,
+    /// `None` for an auto-imported module: parsed once it is entered (#4458).
+    prog: Option<&'p Program>,
     surface: &'p Surface,
     auto: bool,
 }
@@ -163,7 +164,12 @@ impl<'p> Reach<'p> {
             }
             self.entered[i] = true;
             grew = true;
-            let (name, prog) = (c.name, c.prog);
+            let name = c.name;
+            let prog: &'p Program = match c.prog {
+                Some(p) => p,
+                None => auto_program(name),
+            };
+            self.cands[i].prog = Some(prog);
             self.live.entry(name.to_string()).or_default();
             let (fns, rest): (Vec<&'p Decl>, Vec<&'p Decl>) =
                 prog.decls.iter().chain(prog.imports.iter()).partition(|d| matches!(d, Decl::Fn { .. }));
@@ -211,7 +217,7 @@ impl<'p> Reach<'p> {
         if let Some(n) = decl_name(d) {
             self.live.get_mut(c.name).expect("an entered module").insert(n.to_string());
         }
-        spell_unit(c.prog, std::iter::once(d), &mut self.spelled);
+        spell_unit(c.prog.expect("an entered module is parsed"), std::iter::once(d), &mut self.spelled);
     }
 
     /// Enter every self-hosted source one of whose surfaces is now reached.
