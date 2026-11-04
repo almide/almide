@@ -545,7 +545,25 @@ fn render_fn(
     let mut printed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     let (scalar_defs, scalar_prints) = crate::render_native_interp::printed_scalars(func);
     let mut ops = func.ops.iter().enumerate();
+    let early = early_releases(func, &chains);
     while let Some((i, op)) = ops.next() {
+        // An owned heap value whose last reader was the op before frees now,
+        // as v0's temporaries do at their statement's end, not at the end of
+        // the function its release was placed at: a long `main` would
+        // otherwise hold every dead buffer to its end. A plain move, so any
+        // later use the render made of it would be a compile error, never a
+        // silent read of an emptied value.
+        for v in early.get(&i).into_iter().flatten() {
+            let owned = matches!(tys.get(v), Some(NTy::Str | NTy::VecStr | NTy::Vec | NTy::Rec(_)));
+            // (A value its last call moved in is gone already.)
+            let named = matches!(&func.ops[i - 1], Op::CallFn { args, .. } if args.iter().any(|a| matches!(a, crate::CallArg::Handle(x) if x == v)));
+            let moved = named && tys.get(v).is_some_and(|t| crate::render_native_move::moves_at_call(func, i - 1, *v, *t, &borrows.arms));
+            let gone = EARLY_DROPPED.with(|e| e.borrow().contains(v));
+            if owned && !moved && !gone && out.contains(&format!("let mut {}:", var(*v))) {
+                line!("drop({});", var(*v));
+                EARLY_DROPPED.with(|e| e.borrow_mut().insert(*v));
+            }
+        }
         crate::render_native_bounds::at(i);
         crate::render_native_move::set_moving_args(func, i, &tys, &borrows.arms);
         if chains.skip.contains(&i) || printed.contains(&i) || scalar_defs.contains(&i) {
@@ -577,6 +595,20 @@ fn render_fn(
                 used_shims.push(crate::render_native_shims::PRINT_SHIMS);
                 line!("{code}");
                 continue;
+            }
+            // A chain whose head string dies here grows that string's own
+            // buffer, as v0's `AlmideConcat` consumes its owned left side.
+            if let Some(crate::render_native_interp::Piece::Str(head)) = pieces.first() {
+                let dies = chain_end(func, &chains, i).and_then(|e| early.get(&(e + 1))).is_some_and(|vs| vs.contains(head))
+                    && tys.get(head) == Some(&NTy::Str)
+                    && out.contains(&format!("let mut {}:", var(*head)))
+                    && !pieces[1..].iter().any(|p| matches!(p, crate::render_native_interp::Piece::Str(x) if x == head));
+                if let Some(rest) = dies.then(|| crate::render_native_interp::push_pieces(&pieces[1..], &tys)).flatten() {
+                    tys.insert(*dst, NTy::Str);
+                    line!("let mut {}: AlmideString = {{ let mut __head = {}; {rest} __head }};", var(*dst), var(*head));
+                    EARLY_DROPPED.with(|e| e.borrow_mut().insert(*head));
+                    continue;
+                }
             }
             let code = crate::render_native_interp::render_final(*dst, pieces, &tys)?;
             tys.insert(*dst, NTy::Str);
@@ -1149,6 +1181,99 @@ fn render_native_flow_op(
     Ok(true)
 }
 
+thread_local! {
+    static EARLY_DROPPED: std::cell::RefCell<std::collections::BTreeSet<ValueId>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// The heap values of `func` released before their scheduled `Drop`, keyed by
+/// the op index before which they go: a value bound and read only at the top
+/// level of the body (no loop, no branch), every read a call argument, released
+/// by exactly one `Drop` and never consumed, rebound, returned or handled as
+/// an address, and never read by an interpolation chain (whose reads the
+/// render moves to the chain's end). It goes right after its last read.
+fn early_releases(func: &MirFunction, chains: &crate::render_native_interp::Chains) -> BTreeMap<usize, Vec<ValueId>> {
+    EARLY_DROPPED.with(|e| e.borrow_mut().clear());
+    let mut depth = 0i32;
+    let mut at_depth: Vec<i32> = Vec::with_capacity(func.ops.len());
+    for op in &func.ops {
+        if matches!(op, Op::EndIf { .. } | Op::LoopEnd) {
+            depth -= 1;
+        }
+        at_depth.push(if matches!(op, Op::Else { .. }) { depth - 1 } else { depth });
+        if matches!(op, Op::IfThen { .. } | Op::LoopStart) {
+            depth += 1;
+        }
+    }
+    let params: std::collections::BTreeSet<ValueId> = func.params.iter().map(|p| p.value).collect();
+    let mut out: BTreeMap<usize, Vec<ValueId>> = BTreeMap::new();
+    for (d, def) in func.ops.iter().enumerate() {
+        let Some(v) = crate::mir_ops::defined_value(def) else { continue };
+        if at_depth[d] != 0 || params.contains(&v) || func.ret == Some(v) || !matches!(def, Op::CallFn { .. } | Op::Alloc { .. }) {
+            continue;
+        }
+        let mut last = None;
+        let mut drops = 0;
+        let mut ok = true;
+        for (j, op) in func.ops.iter().enumerate().skip(d + 1) {
+            let mut vs = Vec::new();
+            crate::mir_ops::op_values(op, &mut vs);
+            if !vs.contains(&v) {
+                continue;
+            }
+            match op {
+                Op::Drop { v: x } if *x == v => drops += 1,
+                Op::CallFn { args, .. }
+                    if at_depth[j] == 0 && args.iter().all(|a| !matches!(a, crate::CallArg::Scalar(x) if *x == v)) =>
+                {
+                    if drops > 0 {
+                        ok = false;
+                    }
+                    // A chain's piece is read where the outermost chain holding
+                    // it is built: follow the concatenation's result through
+                    // every chain op that reads it.
+                    let read_at = chain_end(func, chains, j);
+                    match read_at {
+                        Some(r) => last = Some(last.map_or(r, |l: usize| l.max(r))),
+                        None => ok = false,
+                    }
+                }
+                _ => ok = false,
+            }
+            if !ok {
+                break;
+            }
+        }
+        if let (true, 1, Some(l)) = (ok, drops, last) {
+            out.entry(l + 1).or_default().push(v);
+        }
+    }
+    out
+}
+
+/// The op at which the render writes the read `ops[j]` makes: `j` itself,
+/// or, for a chain op, the last chain op its result flows into.
+fn chain_end(func: &MirFunction, chains: &crate::render_native_interp::Chains, j: usize) -> Option<usize> {
+    let in_chain = |k: usize| chains.skip.contains(&k) || chains.finals.contains_key(&k);
+    let mut k = j;
+    while in_chain(k) {
+        let Some(d) = crate::mir_ops::defined_value(&func.ops[k]) else { return Some(k) };
+        let next = func.ops.iter().enumerate().skip(k + 1).find(|(_, op)| {
+            let mut vs = Vec::new();
+            crate::mir_ops::op_reads(op, &mut vs);
+            vs.contains(&d)
+        });
+        match next {
+            Some((m, _)) if in_chain(m) => k = m,
+            // The chain's result is read by a plain op (a print, a call): the
+            // render writes the chain at its final, and that reader after it.
+            Some((m, _)) => return Some(m),
+            None => return Some(k),
+        }
+    }
+    Some(k)
+}
+
 /// The drop-family ops. All three erase to a scope-end comment when the value
 /// shape is admitted; a shape violation is a wall. `Ok(false)` = a
 /// NON-closure `DropVariant` — the caller walls with the generic
@@ -1213,6 +1338,9 @@ fn render_native_drop_op(
             Some(NTy::Rec(_)) => line!("// drop(value-holding): scope-end"),
             other => return Err(wall(format!("native: {} of a {other:?} value", op_name(op)))),
         },
+        Op::Drop { v } if EARLY_DROPPED.with(|e| e.borrow().contains(v)) => {
+            line!("// drop: released after its last read");
+        }
         Op::Drop { v } => {
             if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) {
                 return Err(wall(
@@ -1236,6 +1364,9 @@ fn render_native_drop_op(
                 Some(NTy::Res) => line!("// drop(result carrier): scope-end"),
                 Some(NTy::Opt) => line!("// drop(option carrier): scope-end"),
                 Some(NTy::ResStr) => line!("// drop(result carrier): scope-end"),
+                Some(NTy::VecStrRef) if crate::render_native_addr::is_const_list(*v) => {
+                    line!("// a constant table: borrowed from its static")
+                }
                 Some(NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) => {
                     return Err(wall(
                         "native: DropListStr of a borrowed param — MIR call-mode violation",
