@@ -579,9 +579,9 @@
 5797	spec/wasm_cross/mg_rebuild_two_phase.almd
 2287	spec/wasm_cross/module_global_const.almd
 5194	spec/wasm_cross/module_var_alias_cow.almd
-11899	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
-4555	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
-9993	spec/wasm_cross/mut_call_nested_read_before.almd
+11891	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
+4595	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
+10011	spec/wasm_cross/mut_call_nested_read_before.almd
 6247	spec/wasm_cross/mut_call_two_mut_args_read.almd
 5362	spec/wasm_cross/mut_heap_param.almd
 5172	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
