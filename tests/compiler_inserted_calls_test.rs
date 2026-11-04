@@ -4,10 +4,11 @@
 //! A bundled module keeps only the functions a program reaches, and reach is
 //! read off the spelled program. A call the lowering builds itself
 //! (`testing.__assert_aborts_check`, `value.__keys`) is spelled nowhere, so
-//! it stays live only through the tables. This scans the lowering and the
-//! driver's test-runner synthesis for every literal `module.__name` call they
-//! construct and refuses one the tables do not list: a new synthesized call would otherwise surface as a missing
-//! function in a program that happens not to name it.
+//! it stays live only through the tables. This scans the lowering, the
+//! driver's test-runner synthesis and the wasm emitter for every literal
+//! `module.__name` call they construct into a bundled module, and refuses one
+//! the tables do not list: a new synthesized call would otherwise surface as
+//! a missing function in a program that happens not to name it.
 
 use std::collections::BTreeSet;
 
@@ -16,10 +17,12 @@ fn lowering_sources() -> Vec<(String, String)> {
     let dir = root.join("crates/almide-frontend/src/lower");
     let runner = root.join("crates/almide-driver/src/test_runner.rs");
     let mut out = vec![(runner.display().to_string(), std::fs::read_to_string(&runner).expect("test_runner.rs"))];
-    for entry in std::fs::read_dir(&dir).expect("lower dir") {
-        let path = entry.expect("entry").path();
-        if path.extension().is_some_and(|e| e == "rs") {
-            out.push((path.display().to_string(), std::fs::read_to_string(&path).expect("read")));
+    for dir in [dir, root.join("crates/almide-wasm/src")] {
+        for entry in std::fs::read_dir(&dir).expect("source dir") {
+            let path = entry.expect("entry").path();
+            if path.extension().is_some_and(|e| e == "rs") {
+                out.push((path.display().to_string(), std::fs::read_to_string(&path).expect("read")));
+            }
         }
     }
     out
@@ -60,7 +63,9 @@ fn synthesized_calls(text: &str) -> BTreeSet<(String, String)> {
             }
         }
     }
-    // `CallTarget::Module { module: sym("m"), func: sym("__f"), ... }`
+    // `CallTarget::Module { module: sym("m"), func: sym("__f"), ... }`, the
+    // `sym` spelled bare or path-qualified (`almide_base::intern::sym`).
+    let flat = flat.replace("almide_base::intern::sym(", "sym(").replace("almide_lang::intern::sym(", "sym(");
     for (i, _) in flat.match_indices("module: sym(") {
         let rest = &flat[i + "module: sym(".len()..];
         if let Some(m) = quoted(rest) {
@@ -70,7 +75,8 @@ fn synthesized_calls(text: &str) -> BTreeSet<(String, String)> {
             }
         }
     }
-    out.retain(|(_, f)| f.starts_with("__"));
+    // Only an Almide-bodied function of a bundled module can be pruned.
+    out.retain(|(m, f)| f.starts_with("__") && almide_lang::stdlib_info::bundled_source(m).is_some());
     out
 }
 

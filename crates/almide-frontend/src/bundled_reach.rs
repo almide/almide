@@ -354,8 +354,8 @@ fn surface_is_named(
 
 /// The bundled functions the compiler's own lowering calls without any
 /// source spelling them (the derived codec's key listing, field read and
-/// error text, `+` on `Bytes`, the matrix operators). A module that is
-/// loaded keeps these live. `tests/compiler_inserted_calls_test.rs` scans
+/// error text, `+` on `Bytes`, the matrix operators, the wasm emitter's
+/// region-export wrapper). A module that is loaded keeps these live. `tests/compiler_inserted_calls_test.rs` scans
 /// the lowering for every literal `module.__name` call it builds and refuses
 /// one that neither table lists.
 pub const COMPILER_INSERTED: &[(&str, &str)] = &[
@@ -365,6 +365,8 @@ pub const COMPILER_INSERTED: &[(&str, &str)] = &[
     ("bytes", "__concat"),
     ("matrix", "__neg"),
     ("matrix", "__div"),
+    ("ffi", "__export_view"),
+    ("ffi", "__lend"),
 ];
 
 /// The bundled functions a TEST build calls without any source spelling
