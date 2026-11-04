@@ -1186,7 +1186,11 @@ fn top_level_items<'a>(src: &'a str) -> Vec<(ItemKind, &'a str, &'a str, bool)> 
         // (`X: T = T { … };`).
         let end = if kind == ItemKind::Const { const_end(&toks, name_at) } else { item_end(&toks, name_at) };
         let end_off = toks.get(end).map(|t| t.off + t.text.len()).unwrap_or(src.len());
-        let from = if kind == ItemKind::Type { attr_start.unwrap_or(start_off) } else { start_off };
+        // A type keeps its derives; a fn its `#[inline]` (the runtime crate
+        // is a crate of its own: a non-generic fn crosses into the program
+        // only where the runtime marks it inline, as the standard codegen's
+        // one-crate build inlines it).
+        let from = if matches!(kind, ItemKind::Type | ItemKind::Fn) { attr_start.unwrap_or(start_off) } else { start_off };
         out.push((kind, name, &src[from..end_off], cfg_attr));
         cfg_attr = false;
         attr_start = None;
