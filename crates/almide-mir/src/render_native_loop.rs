@@ -67,6 +67,9 @@ fn render_fn(
     if is_main {
         used_shims.push(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
         used_shims.push(STACK_GUARD_GLUE_SHIM);
+        // #1950: SIGPIPE's default disposition first, as the standard
+        // codegen's `main` (the shared text, already 4-space indented).
+        out.push_str(almide_codegen::main_sigpipe_prelude_text());
         line!("almide_stack_guard_install();");
     }
     if is_main && crate::charge_probe::probe_enabled() {

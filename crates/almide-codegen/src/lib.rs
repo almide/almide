@@ -867,6 +867,14 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
     output
 }
 
+/// The first statements of a native `main` (#1950): SIGPIPE back to its
+/// default disposition, so a closed reader ends the program quietly. The
+/// certified native render (#4006) opens its `main` with the same text the
+/// standard codegen does, rather than a copy of it.
+pub fn main_sigpipe_prelude_text() -> &'static str {
+    walker::MAIN_SIGPIPE_PRELUDE
+}
+
 /// The fan timeline runtime (prelude_fan.rs) as an inline program's text, for
 /// the certified native render's threaded fan groups (#4006 family H): the
 /// same runtime the standard codegen emits, verbatim.
