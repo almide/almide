@@ -63,5 +63,33 @@
 # 4.745 / 4.13 = 1.15, wasm 8.44 / 7.2 = 1.17): check 2.84, wasm 5.84. The
 # ceilings (3.41, 7.01) sit below develop-before's readings on either
 # machine, and the GCE readings stay above the half-anchor floor.
-check 2.84
-wasm 5.84
+#
+# Re-unit and re-anchor for #4458 (2026-11-04). A program no longer parses
+# the bundled stdlib it does not reach: an unreached module's names come off
+# the declaration index and its types off its type-declaration lines, an
+# auto-imported module is parsed whole only once something reaches it, the
+# wasm link carries only what the emitter can resolve, and the wasm leg
+# resolves the entry's modules once. The old unit, the corpus's own
+# sum(lex + parse), fell 3.4x with it while every absolute time halved, so the
+# old rows read 4.17 / 7.41 against anchors of 2.84 / 5.84 for a FASTER
+# compiler. The unit is now the run's parse speed: the time to lex + parse
+# 1 MB at the rate the corpus read its sources (the script header). A third
+# row pins the program #4458 measured: `build --target wasm` of
+# research/benchmark/perf/jsonround/jsonround.almd.
+#
+# One n2-standard-8 (asia-northeast1-b), same corpus, min of 3, two rounds
+# each, interleaved (rounds agreeing to 1%):
+#
+#   tree                                   check    wasm    jsonround   1 MB parse
+#   develop 942e7b6c0                      27.0     50.6    5.41        60 ms
+#   this tree                              12.56    22.36   1.91        64 ms
+#
+# Absolute, same runs: check total 1630 -> 803 ms, wasm builds 3054 ->
+# 1435 ms, jsonround 325 -> 122 ms (c4-standard-8: 220 -> 85 ms). Anchors are
+# this tree's reading times the measured CI-over-GCE offset (1.15, above):
+# check 14.4, wasm 25.7, jsonround 2.20. Their ceilings (17.3, 30.9, 2.64)
+# sit far below develop-before's readings, and this tree reads above the
+# half-anchor floors. The readings above for older trees are in the old unit.
+check 14.4
+wasm 25.7
+jsonround 2.20

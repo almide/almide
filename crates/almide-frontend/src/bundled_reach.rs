@@ -25,7 +25,10 @@
 //!   is read as a receiver, so `list.trim()` there reaches `string`, or
 //! - a type or variant constructor that `M` declares.
 //!
-//! What `M` declares is read from `M`'s own embedded source. The closure is
+//! What `M` declares is read from `M`'s own embedded source — its function
+//! names off the declaration index and its types off its type declarations
+//! (`almide_types::decl_index`, #4458), so an unreached module is never
+//! parsed whole. The closure is
 //! transitive: a reached module's body is a loaded source too (`int8` calls
 //! `int.*`). An over-approximation only costs time; a miss is a missing body,
 //! which is why every position the parser keeps a name in is walked.
