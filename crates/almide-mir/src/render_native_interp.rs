@@ -185,6 +185,40 @@ pub(crate) fn render_print(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::rend
     Some(format!("rt_println_fmt(format_args!(\"{template}\"{args}));"))
 }
 
+/// The appends of each piece after a chain's head onto its unique view,
+/// reserved once for all of them, when every piece is a literal or a string.
+pub(crate) fn push_pieces(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
+    use crate::render_native::NTy;
+    let mut lens = Vec::new();
+    let mut pushes = Vec::new();
+    for p in pieces {
+        let arg = match p {
+            Piece::Lit(s) => {
+                lens.push(s.len().to_string());
+                format!("\"{}\"", almide_base::rust_lit::escape_rust_str(s))
+            }
+            Piece::Str(v) => {
+                let code = crate::render_native::var(*v);
+                match tys.get(v)? {
+                    NTy::Str => {
+                        lens.push(format!("{code}.len()"));
+                        format!("{code}.as_str()")
+                    }
+                    NTy::StrRef => {
+                        lens.push(format!("{code}.len()"));
+                        code
+                    }
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        pushes.push(format!("__u.push_str({arg});"));
+    }
+    let extra = if lens.is_empty() { "0".to_string() } else { lens.join(" + ") };
+    Some(format!("{{ let __extra = {extra}; let mut __u = __head.unique_with(__extra); __u.reserve(__extra); {} }}", pushes.join(" ")))
+}
+
 fn render_final_opt(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
     use crate::render_native::NTy;
     // Strings only: copied into one exact-size block, no formatter.
