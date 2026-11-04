@@ -366,9 +366,15 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(St
     // recursive call per non-leaf instead of two. Skipped, as there, when the
     // program brackets a budget/timeout region (its loop head would be a
     // charge the meter sees).
+    // Before it, the native legs' one-level self-recursive inlining (#4456):
+    // a pure scalar recursion it rewrites keeps its calls for LLVM to merge
+    // (no longer the accumulator's shape); one it declines still gets the loop.
     if !almide_ir::meter_plan::program_has_regions(&ir) {
+        let self_inline = !almide_base::env::flag("ALMIDE_SELF_INLINE_OFF");
         for f in ir.functions.iter_mut() {
-            almide_ir::accum_tre::rewrite(f, &mut ir.var_table);
+            if !(self_inline && almide_ir::self_inline::rewrite(f, &mut ir.var_table)) {
+                almide_ir::accum_tre::rewrite(f, &mut ir.var_table);
+            }
         }
     }
     // #4006: an immutable top-level `let` lowers the way the witness path
