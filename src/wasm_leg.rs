@@ -731,6 +731,11 @@ fn link_self_host(
         }
     }
 
+    // Each self-host source's (surface, impl fn) rows.
+    let mut by_src: HashMap<*const u8, Vec<(&String, &'static str)>> = HashMap::new();
+    for (surface, (src, impl_fn)) in &impls {
+        by_src.entry(src.as_ptr()).or_default().push((surface, impl_fn));
+    }
     let mut loaded: HashMap<&'static str, String> = HashMap::new();
     // #4458: the functions each linked self-host source carries. A source
     // links only what the round's demands reach inside it (`reach_within`),
@@ -863,10 +868,10 @@ fn link_self_host(
             .into_iter()
             .map(|src| {
                 let mut roots = linked_fns.get(src).cloned().unwrap_or_default();
-                for (surface, (s, impl_fn)) in &impls {
-                    if std::ptr::eq(*s, src) && wanted.contains(surface) {
+                for (surface, impl_fn) in by_src.get(&src.as_ptr()).into_iter().flatten() {
+                    if wanted.contains(*surface) {
                         roots.insert(impl_fn.to_string());
-                        if surface == almide_wasm::VALUE_HELPER_ANCHOR {
+                        if surface.as_str() == almide_wasm::VALUE_HELPER_ANCHOR {
                             roots.extend(almide_wasm::VALUE_SELFHOST_HELPERS.iter().map(|(_, h)| h.to_string()));
                         }
                     }
