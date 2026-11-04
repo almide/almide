@@ -8,4 +8,9 @@
 # (#1527 burn-down, C-301; 6x/shard). Compositional over the existing twins
 # (contains -> update, else set), so the protocol migration that retires the
 # family retires it with zero extra surface. #1460 still owns the future.
-116
+# 2026-11-05: +2 — list.__eq_str and list.__to_string_str, the hidden String
+# cells of the list equality and repr matrices (`__eq_{int,float,bool,str}`,
+# `__to_string_{int,float,bool,str}`) the self-hosted bodies specialize so the
+# certified native render serves them (#4006). Not public surface: the `__`
+# cells are named per element type to keep each matrix one row wide.
+118

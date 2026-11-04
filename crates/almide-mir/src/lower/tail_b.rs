@@ -142,6 +142,10 @@ impl LowerCtx {
             )));
         }
         let dst = self.fresh_value();
+        // An empty container's declared type, for the native render (#4006).
+        if matches!(init, crate::Init::Empty) {
+            self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(&tail.ty));
+        }
         self.ops.push(Op::Alloc { dst, repr, init });
         self.record_elided_calls(tail);
         Ok(Some(dst))

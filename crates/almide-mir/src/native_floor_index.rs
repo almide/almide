@@ -363,7 +363,11 @@ impl<'a> ItemScan<'a> {
         // (`X: T = T { … };`).
         let end = if kind == ItemKind::Const { const_end(&self.toks, name_at) } else { item_end(&self.toks, name_at) };
         let end_off = self.end_off(end);
-        let from = if kind == ItemKind::Type { self.attr_start.unwrap_or(start_off) } else { start_off };
+        // A type keeps its derives; a fn its `#[inline]` (the runtime crate
+        // is a crate of its own: a non-generic fn crosses into the program
+        // only where the runtime marks it inline, as the standard codegen's
+        // one-crate build inlines it).
+        let from = if matches!(kind, ItemKind::Type | ItemKind::Fn) { self.attr_start.unwrap_or(start_off) } else { start_off };
         let src: &'a str = self.src;
         self.out.push((kind, name, &src[from..end_off], self.cfg_attr));
         self.finish(end);

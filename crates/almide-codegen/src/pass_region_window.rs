@@ -367,6 +367,26 @@ fn rewrite_windows(program: &mut IrProgram) -> bool {
     true
 }
 
+/// The consumer fn of a window this pass DISCOVERS in `program` and would move into
+/// the region arena on the native leg — read on the program before call
+/// resolution, which the recogniser needs and runs here on a copy. The
+/// certified native render has no arena (#4006: the C2 region arena lands on
+/// C1 later), so it declines such a program instead of rendering the window
+/// on ownership at several times the arena's cost.
+pub fn discovered_window(program: &IrProgram) -> Option<Sym> {
+    if almide_base::env::flag("ALMIDE_REGION_OFF") {
+        return None;
+    }
+    let resolved = super::pass_resolve_calls::ResolveCallsPass.run(program.clone(), Target::Rust).program;
+    let cx = build_cx(&resolved);
+    if cx.pure.is_empty() {
+        return None;
+    }
+    let sites = find_sites(&resolved, &cx);
+    let consume = sites.first()?.consume;
+    plan_twins(&resolved, &cx, sites).map(|_| consume)
+}
+
 /// The DECLARED window (#1997): every call to the outlined entry of a
 /// `scoped { … }` block is a region boundary this leg must honour.
 ///

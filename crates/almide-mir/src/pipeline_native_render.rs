@@ -70,7 +70,11 @@ fn collect_local_scalar_tuples(ir: &almide_ir::IrProgram, ts: &mut Vec<almide_la
         for t in found {
             let scalar = matches!(&t, almide_lang::types::Ty::Tuple(es)
                 if !es.is_empty() && es.iter().all(crate::render_native_rec::is_lane_scalar));
-            if scalar && !ts.contains(&t) {
+            // A map or set a local holds (`let m: Map[String, Int] = [:]`):
+            // its generated type, for the empty container that starts it.
+            let container = matches!(&t, almide_lang::types::Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, _))
+                || crate::render_native_rec::is_native_set(&t);
+            if (scalar || container) && !ts.contains(&t) {
                 ts.push(t);
             }
         }
@@ -270,6 +274,12 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     // #4447: the native rungs render no `@export(c)` wrapper — the wall
     // comes before the fan lift.
     wall_native_c_exports(&ir)?;
+    // A window the standard codegen allocates in its region arena: that leg
+    // runs it at a fraction of the ownership render's cost (#4006, C2 on C1).
+    if let Some(consume) = almide_codegen::pass_region_window::discovered_window(&ir) {
+        let span = ir.functions.iter().find(|f| f.name == consume).and_then(|f| f.body.span);
+        return Err(LowerError::at(span, format!("native: `{consume}` opens a region window the standard codegen allocates in its arena")));
+    }
     let ir = crate::fan_native::lift_fan_arms(ir)?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
     // them a record literal lowers as an Opaque skeleton and every field read

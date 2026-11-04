@@ -54,8 +54,18 @@ pub(crate) struct AddrState {
     /// Values computed as `i * SLOT_SIZE`.
     scaled: BTreeSet<ValueId>,
     addrs: BTreeMap<ValueId, Addr>,
-    /// `SetLocal` targets: a handle of one of these could go stale, so it walls.
+    /// Handles of a `SetLocal` target whose addresses are still read after a
+    /// reassignment of it (or across a loop edge): such a handle could go
+    /// stale, so it walls.
     reassigned: BTreeSet<ValueId>,
+    /// Constant `List[String]` blocks (`render_native_slots::const_str_lists`):
+    /// rendered once, as a lazy static the function borrows.
+    const_lists: BTreeMap<ValueId, Vec<String>>,
+    /// The literals those tables are filled from (`const_list_elems`).
+    const_elems: BTreeSet<ValueId>,
+    /// Empty list literals (`[]`): stored into a slot of a list type, each
+    /// is that type's empty list.
+    empty_lists: BTreeSet<ValueId>,
     /// Values some `Store` writes into a slot. A string's handle joins the
     /// algebra only as one of these; any other string handle (the abort
     /// message of `Die`, …) stays with the op family that owns it.
@@ -109,6 +119,10 @@ pub(crate) struct AddrState {
     /// List blocks filled in slot order right after their allocation
     /// (`render_native_slots::filled_in_order`): reserved, then pushed.
     pushed: BTreeSet<ValueId>,
+    /// Those of them that are generated lists, built as one `vec![…]` at the
+    /// last store (each element bound as `<list>_e<k>` at its store), as the
+    /// standard codegen builds a list literal: (length, elements stored).
+    literal: BTreeMap<ValueId, (usize, usize)>,
 }
 
 impl AddrState {
@@ -126,7 +140,7 @@ impl AddrState {
             .ops
             .iter()
             .filter_map(|op| match op {
-                Op::Alloc { dst, init: Init::DynList { .. } | Init::DynListStr { .. }, .. } => alloc_rec.get(dst).map(|i| (*dst, *i)),
+                Op::Alloc { dst, init: Init::DynList { .. } | Init::DynListStr { .. } | Init::Empty, .. } => alloc_rec.get(dst).map(|i| (*dst, *i)),
                 Op::Alloc { dst, init: Init::OptNone | Init::ResOkScalar { .. }, .. } => {
                     alloc_rec.get(dst).filter(|i| carrier::is_carrier(**i)).map(|i| (*dst, *i))
                 }
@@ -142,15 +156,15 @@ impl AddrState {
         let whole = slots::built_whole(func, &alloc_rec, &base_of);
         let whole_enum = slots::enum_built_whole(func, &alloc_rec, &base_of, &consts);
         let single: BTreeMap<ValueId, bool> = slots::single_elem_lists(func, &base_of, &consts).into_iter().map(|b| (b, false)).collect();
-        let pushed = slots::filled_in_order(func, &base_of, &consts).into_iter().filter(|b| !single.contains_key(b)).collect();
-        let reassigned = func
-            .ops
-            .iter()
-            .filter_map(|op| match op {
-                Op::SetLocal { local, .. } => Some(*local),
-                _ => None,
-            })
+        let pushed = slots::filled_in_order(func, &base_of, &consts)
+            .into_iter()
+            .chain(slots::dense_loop_fills(func, &consts))
+            .filter(|b| !single.contains_key(b))
             .collect();
+        let reassigned = stale_handles(func);
+        let const_lists = slots::const_str_lists(func, &base_of, &consts);
+        set_const_lists(const_lists.keys().copied().collect());
+        let const_elems = const_list_elems(func, &const_lists.keys().copied().collect(), &base_of);
         let stored = func
             .ops
             .iter()
@@ -168,6 +182,17 @@ impl AddrState {
             scaled: BTreeSet::new(),
             addrs: BTreeMap::new(),
             reassigned,
+            const_lists,
+            const_elems,
+            empty_lists: func
+                .ops
+                .iter()
+                .filter_map(|op| match op {
+                    Op::Alloc { dst, init: Init::IntList(vs), .. } if vs.is_empty() => Some(*dst),
+                    Op::ListLit { dst, elems } if elems.is_empty() => Some(*dst),
+                    _ => None,
+                })
+                .collect(),
             stored,
             res_tags: BTreeMap::new(),
             pending: BTreeMap::new(),
@@ -186,8 +211,14 @@ impl AddrState {
             building_enum: BTreeMap::new(),
             single,
             pushed,
+            literal: BTreeMap::new(),
         }
     }
+}
+
+/// The owned spelling of a generated list's kind.
+fn owned_ty_of(t: Option<NTy>) -> String {
+    t.map(crate::render_native_rec::owned_ty).unwrap_or_default()
 }
 
 /// The record kinds the declared signatures give a function's blocks: its own
@@ -234,7 +265,13 @@ fn note_carrier_recs(func: &MirFunction, sigs: &crate::render_native::NativeSigs
     let carrier_k = |k: &NativeSigKind| match k {
         // (A map alias rides the same declared typing: `map.new()`'s
         // result takes the map type the program declares for it.)
-        NativeSigKind::Rec(i) if carrier::is_carrier(*i) || crate::render_native_rec::map_kinds(*i).is_some() => Some(*i),
+        NativeSigKind::Rec(i)
+            if carrier::is_carrier(*i)
+                || crate::render_native_rec::map_kinds(*i).is_some()
+                || crate::render_native_rec::set_elem(*i).is_some() =>
+        {
+            Some(*i)
+        }
         _ => None,
     };
     let sig_of = |n: &str| -> Option<CarrierSig> {
@@ -243,10 +280,50 @@ fn note_carrier_recs(func: &MirFunction, sigs: &crate::render_native::NativeSigs
     let own = sig_of(func.name.as_str()).unwrap_or_default();
     let declared = carrier::carrier_values(func, &own, &sig_of);
     crate::render_native_rec::set_declared(
-        declared.iter().filter(|(_, i)| crate::render_native_rec::map_kinds(**i).is_some()).map(|(v, i)| (*v, *i)).collect(),
+        declared
+            .iter()
+            .filter(|(_, i)| crate::render_native_rec::map_kinds(**i).is_some() || crate::render_native_rec::set_elem(**i).is_some())
+            .map(|(v, i)| (*v, *i))
+            .collect(),
     );
     for (v, i) in declared {
         alloc_rec.entry(v).or_insert(i);
+    }
+    // An empty container rebound into a typed local (`map.clear(m)`,
+    // `xs = []`) takes the local's declared type.
+    let empties: BTreeSet<ValueId> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Alloc { dst, init: Init::Empty, .. } => Some(*dst),
+            _ => None,
+        })
+        .collect();
+    // Or the type the lowering recorded for it.
+    for v in &empties {
+        if let Some(i) = func.aggregate_blocks.get(v).and_then(|k| crate::render_native_rec::rec_index(k)) {
+            alloc_rec.entry(*v).or_insert(i);
+        }
+    }
+    // Or the type the floor call it is handed to declares for it.
+    for op in &func.ops {
+        match op {
+            Op::SetLocal { local, src } => {
+                if let Some(&i) = alloc_rec.get(local).filter(|_| empties.contains(src)) {
+                    alloc_rec.entry(*src).or_insert(i);
+                }
+            }
+            Op::CallFn { name, args, .. } => {
+                for (k, a) in args.iter().enumerate() {
+                    if let crate::CallArg::Handle(v) = a {
+                        if let Some(i) = Some(*v).filter(|v| empties.contains(v)).and_then(|_| crate::native_floor::specialized_param_rec(name, k)) {
+                            alloc_rec.entry(*v).or_insert(i);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -611,146 +688,5 @@ pub(crate) fn single_push(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, 
     Some((format!("let mut {x}: Vec<AlmideString> = vec![{x}_e0];", x = var(x)), false))
 }
 
-/// The block-allocating arms of [`render_addr_op`], in their order: a string
-/// list, a generated list, a record or enum block, a typed string list, and
-/// a scalar list.
-fn block_alloc_op(op: &Op, s: AddrSink<'_>) -> Result<Option<bool>, LowerError> {
-    let AddrSink { st, tys, out, indent } = s;
-    match op {
-        Op::Alloc { dst, init: Init::DynListStr { len }, .. } if ty(tys, len) == Some(NTy::I64) && !st.alloc_rec.contains_key(dst) => {
-            Ok(Some(alloc_str_list(AddrSink { st, tys, out, indent }, dst, len)))
-        }
-        Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. }
-            if st.alloc_rec.get(dst).is_some_and(|i| crate::render_native_rec::list_elem(*i).is_some()) =>
-        {
-            Ok(Some(alloc_rec_list(AddrSink { st, tys, out, indent }, dst, len)))
-        }
-        Op::Alloc { dst, init: Init::DynList { .. }, .. } if st.alloc_rec.contains_key(dst) => {
-            Ok(Some(alloc_rec_block(AddrSink { st, tys, out, indent }, dst)))
-        }
-        Op::Alloc { dst, init: Init::DynList { len }, .. } if ty(tys, len) == Some(NTy::I64) && st.str_lists.contains(dst) => {
-            Ok(Some(alloc_typed_str_list(AddrSink { st, tys, out, indent }, dst, len)))
-        }
-        Op::Alloc { dst, init: Init::DynList { len }, .. } if ty(tys, len) == Some(NTy::I64) => {
-            Ok(Some(alloc_scalar_list(AddrSink { st, tys, out, indent }, dst, len)))
-        }
-        _ => Ok(None),
-    }
-}
-
-/// `Alloc{DynListStr}` of an untyped block: a string list.
-fn alloc_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
-    let AddrSink { st, tys, out, indent } = s;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    tys.insert(*dst, NTy::VecStr);
-    if st.single.contains_key(dst) {
-        line!("// {}: a one-element list, its element pushed at the append", var(*dst));
-        return true;
-    }
-    if st.pushed.contains(dst) {
-        line!("let mut {}: Vec<AlmideString> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
-        return true;
-    }
-    line!(
-        "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
-        var(*dst),
-        var(*len)
-    );
-    true
-}
-
-/// A list alloc whose declared type is a generated list.
-fn alloc_rec_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
-    let AddrSink { st, tys, out, indent } = s;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    let i = st.alloc_rec[dst];
-    tys.insert(*dst, NTy::Rec(i));
-    if st.pushed.contains(dst) {
-        line!("let mut {}: {} = Vec::with_capacity({}.max(0) as usize);", var(*dst), crate::render_native_rec::struct_name(i), var(*len));
-        return true;
-    }
-    line!(
-        "let mut {}: {} = (0..{}.max(0)).map(|_| Default::default()).collect();",
-        var(*dst),
-        crate::render_native_rec::struct_name(i),
-        var(*len)
-    );
-    true
-}
-
-/// A `DynList` alloc whose declared type is a record or an enum.
-fn alloc_rec_block(s: AddrSink<'_>, dst: &ValueId) -> bool {
-    let AddrSink { st, tys, out, indent } = s;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    let i = st.alloc_rec[dst];
-    tys.insert(*dst, NTy::Rec(i));
-    if let (true, Some(n)) = (st.whole.contains(dst), slots::struct_width(i)) {
-        line!("let mut {}: {};", var(*dst), crate::render_native_rec::struct_name(i));
-        st.building.insert(*dst, vec![false; n]);
-        return true;
-    }
-    if let Some(&(t, n)) = st.whole_enum.get(dst) {
-        line!("let mut {}: {};", var(*dst), crate::render_native_rec::struct_name(i));
-        st.building_enum.insert(*dst, (t, vec![None; n]));
-        return true;
-    }
-    line!("let mut {}: {} = Default::default();", var(*dst), crate::render_native_rec::struct_name(i));
-    true
-}
-
-/// A `DynList` alloc every stored element of which is a string.
-fn alloc_typed_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
-    let AddrSink { st, tys, out, indent } = s;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    tys.insert(*dst, NTy::VecStr);
-    if st.pushed.contains(dst) {
-        line!("let mut {}: Vec<AlmideString> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
-        return true;
-    }
-    line!(
-        "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
-        var(*dst),
-        var(*len)
-    );
-    true
-}
-
-/// A `DynList` alloc of scalars.
-fn alloc_scalar_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
-    let AddrSink { st, tys, out, indent } = s;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    tys.insert(*dst, NTy::Vec);
-    if st.pushed.contains(dst) {
-        line!("let mut {}: Vec<i64> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
-        return true;
-    }
-    line!("let mut {}: Vec<i64> = vec![0i64; {}.max(0) as usize];", var(*dst), var(*len));
-    true
-}
-
 include!("render_native_addr_op.rs");
+include!("render_native_addr_alloc.rs");

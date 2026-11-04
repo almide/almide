@@ -103,13 +103,14 @@ fn native_sig_subset_check(
     // #4006 A5: a record with heap fields that has a generated struct.
     let is_struct_record = |t: &Ty| {
         matches!(t, Ty::Named(n, args) if args.is_empty() && crate::render_native_rec::rec_index(n.as_str()).is_some())
-            || matches!(t, Ty::Bytes)
+            || matches!(t, Ty::Bytes | Ty::Matrix)
             || crate::render_native_rec::is_scalar_instance(t)
             || (matches!(t, Ty::Tuple(_) | Ty::Record { .. } | Ty::Applied(TypeConstructorId::List, _) | Ty::Named(..))
                 && crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).is_some())
             || heap_carrier_of(t).is_some()
             || crate::lower::is_value_ty(t)
             || native_map_of(t).is_some()
+            || native_set_of(t).is_some()
     };
     let sig_ok = |t: &Ty| {
         crate::render_native_rec::is_lane_scalar(t) || matches!(t, Ty::String)
@@ -159,7 +160,9 @@ fn recurses_on_a_heap_arg(f: &crate::MirFunction) -> bool {
         if *name != f.name || !args.iter().any(|a| matches!(a, CallArg::Handle(_))) {
             return false;
         }
-        let rest = f.ops[i + 1..].iter().find(|o| !matches!(o, Op::Consume { .. } | Op::Drop { .. }));
+        // Every release that erases to scope end (a typed list or carrier
+        // drop as much as a plain one) still runs after the call.
+        let rest = f.ops[i + 1..].iter().find(|o| !matches!(o, Op::Consume { .. }) && !crate::render_native_move::bookkeeping(o));
         match rest {
             None => f.ret == Some(*d),
             Some(Op::Else { val } | Op::EndIf { val }) => *val == Some(*d),
@@ -276,6 +279,13 @@ fn heap_carrier_of(t: &almide_lang::types::Ty) -> Option<u16> {
 }
 
 /// The generated `AlmideMap` alias a declared map type stands for.
+fn native_set_of(t: &almide_lang::types::Ty) -> Option<u16> {
+    crate::render_native_rec::is_native_set(t)
+        .then(|| crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)))
+        .flatten()
+        .filter(|i| crate::render_native_rec::set_elem(*i).is_some())
+}
+
 fn native_map_of(t: &almide_lang::types::Ty) -> Option<u16> {
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
@@ -347,12 +357,12 @@ fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
     for f in functions.iter() {
         for op in &f.ops {
             if let crate::Op::CallFn { name, .. } = op {
-                let opt_ret = crate::native_floor::declared(name).is_some_and(|d| {
-                    matches!(
-                        d.ret,
-                        crate::native_floor::FloorRet::Opt(_)
-                            | crate::native_floor::FloorRet::Elem(crate::native_floor::ElemRet::Opt)
-                    )
+                let opt_ret = crate::native_floor::declared(name).is_some_and(|d| match d.ret {
+                    crate::native_floor::FloorRet::Opt(_) => true,
+                    crate::native_floor::FloorRet::Elem(crate::native_floor::ElemRet::Opt) => {
+                        crate::native_floor::elem_option_is_scalar(name)
+                    }
+                    _ => false,
                 });
                 if opt_ret {
                     option_fns.insert(name.clone());

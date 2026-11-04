@@ -76,6 +76,13 @@ impl OptionTracker {
             Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 && self.opt_vals.contains(&args[0]) => {
                 self.handles.insert(*d, args[0]);
             }
+            // An Option stored into a list's slot: the slot holds the Option
+            // itself (the list's elements are `Option<i64>`), not a handle.
+            Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args }
+                if args.len() == 2 && self.handles.contains_key(&args[1]) && !self.addrs.contains_key(&args[0]) =>
+            {
+                out.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![args[0], self.handles[&args[1]]] });
+            }
             Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } if self.handles.contains_key(a) && self.const_vals.contains_key(b) => {
                 self.addrs.insert(*dst, (self.handles[a], self.const_vals[b]));
             }

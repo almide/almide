@@ -108,6 +108,37 @@ fn __sum_int(xs: List[Int]) -> Int = _
 @intrinsic("almide_rt_list_product")
 fn __product_int(xs: List[Int]) -> Int = _
 
+// The `${xs}` repr `[a, b]` of a list of each scalar element type, which the
+// self-hosted `list.to_string*` bodies specialize (`@specializes`). The four
+// cells are the lane scalars and String; a list of any other element renders
+// through its own self-hosted body.
+@intrinsic("almide_rt_list_to_string_int")
+fn __to_string_int(xs: List[Int]) -> String = _
+
+@intrinsic("almide_rt_list_to_string_float")
+fn __to_string_float(xs: List[Float]) -> String = _
+
+@intrinsic("almide_rt_list_to_string_bool")
+fn __to_string_bool(xs: List[Bool]) -> String = _
+
+@intrinsic("almide_rt_list_to_string_str")
+fn __to_string_str(xs: List[String]) -> String = _
+
+// `a == b` of two lists of each scalar element type (a Float by IEEE `==`),
+// which the self-hosted `list.eq_*` bodies specialize (`@specializes`); the
+// same four cells as the reprs above.
+@intrinsic("almide_rt_list_eq_int")
+fn __eq_int(a: List[Int], b: List[Int]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_float")
+fn __eq_float(a: List[Float], b: List[Float]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_bool")
+fn __eq_bool(a: List[Bool], b: List[Bool]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_str")
+fn __eq_str(a: List[String], b: List[String]) -> Bool = _
+
 /// Head element, or none when empty.
 @intrinsic("almide_rt_list_first")
 fn first[A](xs: List[A]) -> A? = _

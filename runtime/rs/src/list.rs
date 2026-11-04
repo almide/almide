@@ -1272,5 +1272,19 @@ pub const ALMIDE_MAX_WITH_CAPACITY_PREALLOC_BYTES: usize = 64 * 1024 * 1024; // 
 pub fn almide_rt_list_pop<A>(xs: &mut Vec<A>) -> Option<A> { xs.pop() }
 pub fn almide_rt_list_clear<A>(xs: &mut Vec<A>) { xs.clear(); }
 
+// ── `${xs}` reprs (the compound `[a, b]` of the standard codegen's AlmideRepr) ──
+// Each element as AlmideRepr renders it inside a container: a number or Bool
+// through `format!("{}", …)`, a String double-quoted with `\ " \n \r \t` escaped.
+pub fn almide_rt_list_to_string_int(xs: &[i64]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push_str(&format!("{}", e)); } o.push(']'); o.into() }
+pub fn almide_rt_list_to_string_float(xs: &[f64]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push_str(&format!("{}", e)); } o.push(']'); o.into() }
+pub fn almide_rt_list_to_string_bool(xs: &[bool]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push_str(&format!("{}", e)); } o.push(']'); o.into() }
+// ── `==` of two lists of one scalar element type (the standard codegen's `==`
+// over the same `Vec`s: lengths, then each element; a Float by IEEE `==`) ──
+pub fn almide_rt_list_eq_int(a: &[i64], b: &[i64]) -> bool { a == b }
+pub fn almide_rt_list_eq_float(a: &[f64], b: &[f64]) -> bool { a == b }
+pub fn almide_rt_list_eq_bool(a: &[bool], b: &[bool]) -> bool { a == b }
+pub fn almide_rt_list_eq_str(a: &[AlmideString], b: &[AlmideString]) -> bool { a == b }
+pub fn almide_rt_list_to_string_str(xs: &[AlmideString]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push('"'); o.push_str(&e.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t")); o.push('"'); } o.push(']'); o.into() }
+
 // ── Algorithmic primitives (Phase 3 stdlib expansion) ──
 

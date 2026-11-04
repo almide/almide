@@ -62,6 +62,7 @@ fn __takew_str_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: I
     } else di
   }
 
+@specializes("list.take_while")
 fn list_take_while_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
@@ -85,6 +86,7 @@ else {
   __copy_tail_str(dh, sh, si + 1, di + 1, n)
 }
 
+@specializes("list.drop_while")
 fn list_drop_while_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
   let n = list.len(xs)
   let skip = __dropw_str_skip(prim.handle(xs), f, n, 0)

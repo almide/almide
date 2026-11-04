@@ -14,6 +14,7 @@ fn __copy_slice_str(srch: Int, dsth: Int, start: Int, count: Int, i: Int) -> Int
     __copy_slice_str(srch, dsth, start, count, i + 1)
   }
 
+@specializes("list.take")
 fn list_take_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -23,6 +24,7 @@ fn list_take_str(xs: List[String], n: Int) -> List[String] = {
   buf
 }
 
+@specializes("list.drop")
 fn list_drop_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -38,6 +40,7 @@ fn list_drop_str(xs: List[String], n: Int) -> List[String] = {
 // element deep-copies into a fresh DynListStr. The Int twin's raw i64 copy
 // aliased the handles un-owned — correct output, then a scope-end double free
 // (fuzz seed-20260718 index 680, `list.slice(list.intersperse(...), 2, 4)`).
+@specializes("list.slice")
 fn list_slice_str(xs: List[String], start: Int, end: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)

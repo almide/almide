@@ -266,6 +266,10 @@ fn emit(out: &mut String, indent: usize, s: &str) {
 
 /// The owned copy of `v` as a slot of kind `k` (a carrier payload write).
 fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy) -> Result<String, LowerError> {
+    // A scalar Option payload is the `Option<i64>` itself, by value.
+    if k == NTy::Opt && !st.addrs.contains_key(&v) && tys.get(&v) == Some(&NTy::Opt) {
+        return Ok(var(v));
+    }
     let Some(sv) = st.addrs.get(&v).copied().filter(|a| a.off == 0 && a.idx.is_none()) else {
         return Err(wall(format!("native: a {:?} carrier payload that is not a heap handle", tys.get(&v))));
     };
@@ -474,6 +478,28 @@ impl CarrierCx<'_> {
         if let Some(then) = arm {
             if self.borrowed_result_read(d, b, then, (o, e)) {
                 return Some(Err(Ok(true)));
+            }
+        }
+        // A borrow-only read above the tag test, used under one side of
+        // it: a reference into the carrier, the other side's (never
+        // used) a reference to a Default the render keeps beside it.
+        if let (None, Some(err_side), true) = (arm, self.st.hoisted.get(&d).copied(), self.st.borrow_reads.contains(&d)) {
+            let (k, side, other) = if err_side { (e, "Err", "Ok") } else { (o, "Ok", "Err") };
+            let dv = var(d);
+            match k {
+                NTy::Str => {
+                    self.tys.insert(d, NTy::StrRef);
+                    self.emit(&format!("let mut {dv}: &str = match &{b} {{ {side}(v) => &v[..], {other}(_) => \"\" }};"));
+                    return Some(Err(Ok(true)));
+                }
+                NTy::Rec(j) if has_default(k) => {
+                    self.tys.insert(d, NTy::RecRef(j));
+                    let t = struct_name(j);
+                    self.emit(&format!("let {dv}_absent: {t} = Default::default();"));
+                    self.emit(&format!("let mut {dv}: &{t} = match &{b} {{ {side}(v) => v, {other}(_) => &{dv}_absent }};"));
+                    return Some(Err(Ok(true)));
+                }
+                _ => {}
             }
         }
         Some(Ok(match (arm, self.st.hoisted.get(&d).copied()) {

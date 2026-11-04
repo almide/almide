@@ -509,11 +509,37 @@ fn render_declared_floor_call(
 ) -> Result<(), LowerError> {
     let NativeCall { dst, name, args, .. } = call;
     let OpSink { tys, out, indent, used_shims } = s;
-    let rendered: Vec<(String, NTy)> = args.iter().map(|a| call_arg(a, tys)).collect::<Result<_, _>>()?;
-    let dying: Vec<bool> =
+    let mut rendered: Vec<(String, NTy)> = args.iter().map(|a| call_arg(a, tys)).collect::<Result<_, _>>()?;
+    let mut dying: Vec<bool> =
         args.iter().map(|a| matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))).collect();
+    // A `mut b: Bytes` fn called for its result (the move-mode rewrite's
+    // `c = bytes.append_u16_le(c, x)`): it edits its own copy of the arg —
+    // the arg itself when it dies here — and that copy is the result.
+    let edited = match (dst, floor.ret) {
+        (Some(_), crate::native_floor::FloorRet::Unit) => {
+            floor.params.iter().position(|p| *p == crate::native_floor::FloorParam::BytesMut).and_then(|k| {
+                let (code, got) = rendered.get(k)?.clone();
+                let (src, own) = match got {
+                    NTy::Rec(i) if dying[k] => (crate::render_native_move::take_expr(&code), NTy::Rec(i)),
+                    NTy::Rec(i) | NTy::RecRef(i) => (format!("{code}.clone()"), NTy::Rec(i)),
+                    _ => return None,
+                };
+                rendered[k] = ("__edited".to_string(), own);
+                dying[k] = false;
+                Some((src, own))
+            })
+        }
+        _ => None,
+    };
     let dst_map = dst.and_then(crate::render_native_rec::declared_map);
     let (expr, ret) = crate::native_floor::render_call(floor, name, &rendered, &dying, dst_map)?;
+    let (expr, ret) = match edited {
+        Some((src, own)) => (
+            format!("{{ let mut __edited: {t} = {src}; {expr}; __edited }}", t = crate::render_native_rec::owned_ty(own)),
+            Some(own),
+        ),
+        None => (expr, ret),
+    };
     used_shims.push(crate::native_floor::FLOOR_HEADER);
     match &floor.twin {
         Some((_, twin, items)) if expr.contains(&format!("{twin}(")) => used_shims.extend(items.iter().copied()),

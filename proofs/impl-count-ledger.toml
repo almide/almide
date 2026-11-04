@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 767  implementations = 1719
+# holes = 777  implementations = 1739
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -165,6 +165,20 @@ native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
+[[hole]]
+module   = "bytes"
+name     = "__append"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "__index"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "bytes"
 name     = "contains"
@@ -2366,6 +2380,62 @@ total    = 2
 [[hole]]
 module   = "list"
 name     = "__product_int"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__to_string_int"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__to_string_float"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__to_string_bool"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__to_string_str"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__eq_int"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__eq_float"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__eq_bool"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__eq_str"
 native   = 1
 emitter  = 0
 selfhost = 1
