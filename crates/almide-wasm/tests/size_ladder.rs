@@ -48,6 +48,7 @@ const LADDER: &[(&str, &str)] = &[
     ("T2 Float print", "research/benchmark/perf/spectralnorm/spectralnorm.almd"),
     ("T3 String", "research/benchmark/perf/strchurn/strchurn.almd"),
     ("T3 String", "research/benchmark/perf/strbuild/strbuild_append.almd"),
+    ("T3 String", "research/benchmark/perf/strchurn/strchurn_case.almd"),
     ("T4 List", "research/benchmark/perf/listbuild/listbuild_append.almd"),
     ("T4 List", "research/benchmark/perf/listbuild/listbuild_combinator.almd"),
     ("T5 Map", "research/benchmark/perf/mapbuild/mapbuild.almd"),
