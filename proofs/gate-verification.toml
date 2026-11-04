@@ -119,7 +119,7 @@
 # #4372: two new CI-prose gate rows explicitly map four still-uncompensated
 # limits (future consumers, live integration, unmodeled inputs, coordinated edits).
 # This is the bidirectional inventory count described above, not a relaxed ratchet.
-# uncompensated_blind_ceiling = "40"
+# uncompensated_blind_ceiling = "42"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -409,7 +409,7 @@ wired_by = "Makefile"
 class = "KERNEL_PROVEN"
 evidence = "#4006 (2026-10-25): the verdict core is the extracted checker, re-derived by the Rocq kernel and cross-checked by almide-verify on every ownership witness of every function the verified native renderer rendered; the artifact drill flips one byte of a rendered Rust source and almide-verify reads MISMATCH, exit 1; the POISON LEG runs proofs/poisoned-certs/native/*.cert — the witness the renderer writes with a release lost and its Rust-mirror check bypassed (scripts/witness-reinject.sh native pins it) — through all three verdicts, which must REJECT"
 measures = "per fixture on proofs/native-verified-floor.txt: the extracted checker's verdict on each rendered function's ownership witness, almide-verify's verdict and SHA-256 recomputation on the fixture's bundle, and the Rocq kernel's vm_compute verdict; plus the tamper drill's verdict and each poisoned certificate's three verdicts"
-varies = "sec-proof-chain (2026-10-25): the first local run accepted 380/380 witnesses of 106 rendered programs; the poison leg failed while proofs/poisoned-certs/native/ was empty and passes with the release-dropped witness; the tamper drill read MISMATCH"
+varies = "sec-proof-chain (2026-10-25): the first local run accepted 380/380 witnesses of 106 rendered programs; the poison leg failed while proofs/poisoned-certs/native/ was empty and passes with the release-dropped witness; the tamper drill read MISMATCH; sec-c1-native-cert (2026-10-30): 436/436 witnesses of 117 programs accepted after the slot-address algebra and the self-host link; negative control: one Alloc duplicated in the linked self-host body int_clamp with the Rust ownership mirror bypassed -> exit 1, `int_clamp REJECTED by the extracted checker` on flight_pid_control and int_clamp_inverted"
 blind = "a rendered program whose Rust source rustc compiles into a binary that does not keep the MIR's RC balance (the render and rustc are trusted) -> .github/workflows/miri-nightly.yml; every program off the native floor, which ships from the standard codegen with no certificate -> .github/workflows/miri-nightly.yml"
 
 [[gate]]
@@ -1442,6 +1442,16 @@ evidence = "#2777 landing (2026-09-27, PR #2791): native-musl.yml run 3634533368
 measures = "per-fixture: almide build --target x86_64-unknown-linux-musl success, `file` reporting the binary statically linked, and byte equality of its stdout with tests/native_musl/<fixture>/expected.txt"
 varies = "#2777 landing (2026-09-27, run 36345333688): the tls fixture read PASS for x86_64-unknown-linux-musl (static, 57 MB, 37 s cold build) and FAIL for the three forged runs; the wasmtime fixture (job 108693245937) read PASS (static, 372 MB, 198 s cold build). Per PR (ci.yml Almide gates, job 108694287996): PASS, step 44 s cold with no cache (3 s musl-tools, 41 s build)."
 blind = "UNMAPPED"
+
+[[gate]]
+path = "scripts/check-native-v1-perf.sh"
+reads = "scalar"
+wired_by = ".github/workflows/native-v1-perf-nightly.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4006 landing (2026-11-01, GCE c1-native, sec-c1-next 25197e951): the unforged run exited 0 over 15 gated programs with the six proofs/native-v1-perf-ledger.txt rows read as debt; the same run with ALMIDE_NATIVE_DRILL_NO_MOVES=1 NATIVE_V1_PERF_ONLY_SHAPES=1 (the render keeps every copy) exited 1 with `LOSS research/benchmark/perf/v1-shapes/push_swap.almd: v1 316495323 vs v0 18735135 instructions = 16.893x`; earlier runs on the branch read genuine losses before their fixes (append_accumulator_heap_linear 741.4x, tree_walk 14.4x, variant_result_one_credit_churn 9.75x), each exiting 1"
+measures = "per program on proofs/native-verified-floor.txt and research/benchmark/perf/v1-shapes/: the ratio of cachegrind I refs of the default `almide build` (certified v1) binary over the `--no-verified` (v0) binary, against 1.03 and the debt ledger's recorded ratio; report-only, the min-of-9 interleaved wall-time ratio on rows over 20M instructions (warning above 1.10)"
+varies = "2026-11-01: the gated count rose 9 -> 15 as the floor grew 264 -> 341; the ledger opened with six rows (1.116 - 1.618)"
+blind = "a v1 loss in a program under 1M instructions (startup dominates) -> UNCOMPENSATED; a shape no shape bench or certified program exercises -> UNCOMPENSATED; a memory-locality loss instruction counts miss -> scripts/check-perf-ratio.sh (wall time of the native benches, which this gate only warns on)"
 
 [[gate]]
 path = "scripts/check-spec-test-files.sh"
