@@ -205,6 +205,49 @@ pub(crate) fn declared_scalar_option(name: &str) -> bool {
     }
 }
 
+/// The scalar a stdlib fn declared `@scalar_text` turns into its canonical
+/// text: `Some(ScalarText::Int)` for an `Int` param (decimal digits),
+/// `Some(ScalarText::Bool)` for a `Bool` one (`true` / `false`), `None` for a
+/// fn without the declaration. The certified render folds such a call into
+/// the format string of the text it builds, reading only this declaration.
+pub(crate) fn declared_scalar_text(call: &str) -> Option<ScalarText> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<ScalarText>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(call) {
+        return *hit;
+    }
+    let made = scalar_text_of(call);
+    cache.lock().unwrap_or_else(|e| e.into_inner()).insert(call.to_string(), made);
+    made
+}
+
+/// What a `@scalar_text` fn formats.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScalarText {
+    Int,
+    Bool,
+}
+
+fn scalar_text_of(call: &str) -> Option<ScalarText> {
+    let (module, func) = call.split_once('.')?;
+    let program = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached)?;
+    program.decls.iter().find_map(|d| match d {
+        Decl::Fn { name, attrs, params, .. }
+            if name.as_str() == func && attrs.iter().any(|a| a.name.as_str() == "scalar_text") =>
+        {
+            match params.as_slice() {
+                [p] => match simple(&p.ty) {
+                    Some("Int") => Some(ScalarText::Int),
+                    Some("Bool") => Some(ScalarText::Bool),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        _ => None,
+    })
+}
+
 /// The declared return of the self-hosted body registered under `call`.
 fn specialized_ret(call: &str) -> Option<TypeExpr> {
     crate::mir_ops::self_host_runtime().iter().find_map(|(src, pairs)| {

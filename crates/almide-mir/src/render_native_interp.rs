@@ -145,7 +145,7 @@ impl ChainScan<'_> {
             }
             Some(Op::CallFn { name, args, .. })
                 if temp
-                    && (name == "int.to_string" || name == "bool.to_string")
+                    && crate::native_floor::declared_scalar_text(name).is_some()
                     && matches!(args.as_slice(), [CallArg::Scalar(_)]) =>
             {
                 let [CallArg::Scalar(n)] = args.as_slice() else { unreachable!() };
@@ -153,7 +153,10 @@ impl ChainScan<'_> {
                     return None;
                 }
                 skip.push(def.expect("defined"));
-                Some(if name == "int.to_string" { Piece::Int(*n) } else { Piece::Bool(*n) })
+                Some(match crate::native_floor::declared_scalar_text(name) {
+                    Some(crate::native_floor::ScalarText::Bool) => Piece::Bool(*n),
+                    _ => Piece::Int(*n),
+                })
             }
             _ => {
                 // Read again at the last step: its other reads must come
@@ -324,8 +327,9 @@ pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<
         }
         let Op::CallFn { dst: Some(dv), name, args: dargs, .. } = &ops[*d] else { continue };
         let [CallArg::Scalar(n)] = dargs.as_slice() else { continue };
-        let is_bool = name == "bool.to_string";
-        if dv != v || !(is_bool || name == "int.to_string") {
+        let Some(text) = crate::native_floor::declared_scalar_text(name) else { continue };
+        let is_bool = text == crate::native_floor::ScalarText::Bool;
+        if dv != v {
             continue;
         }
         // The scalar keeps its value from the definition to the print, which

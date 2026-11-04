@@ -639,4 +639,22 @@ mod tests {
         assert_eq!(p, vec!["&[T]", "i64"]);
         assert_eq!(r, "Result<i64, AlmideString>");
     }
+
+    /// The interpolation fold reads `@scalar_text` off the declaration: the
+    /// two declared fns, and nothing that merely shares a name prefix.
+    #[test]
+    fn scalar_text_is_read_from_the_declaration() {
+        assert_eq!(declared_scalar_text("int.to_string"), Some(ScalarText::Int));
+        assert_eq!(declared_scalar_text("bool.to_string"), Some(ScalarText::Bool));
+        assert_eq!(declared_scalar_text("int.to_string_radix"), None);
+        assert_eq!(declared_scalar_text("float.to_string"), None);
+    }
+
+    /// A range's `..` is no access: the helper a runtime body slices by is
+    /// taken along (`string.drop_end`'s `s[..almide_string_tail_start(s, n)]`).
+    #[test]
+    fn a_name_after_a_range_is_read_by_its_name() {
+        let f = declared("string.drop_end").expect("drop_end is on the floor");
+        assert!(f.items.iter().any(|t| t.contains("fn almide_string_tail_start")), "{:?}", f.items);
+    }
 }

@@ -1221,9 +1221,3 @@ id = "src/cli/docs_gen.rs::check_numeric_conversion_matrix::table"
 class = "justified"
 names = 6
 why = "The columns of a family gate, not a property of functions: the cells every integer carrier must carry (from, from_checked, from_saturating, from_wrapping, min_value, max_value). The gate asserts their presence and the absence of the retired point-wise to_<carrier> spellings (#956)."
-
-[[site]]
-id = "crates/almide-mir/src/render_native_interp.rs::render_piece::or-chain"
-class = "justified"
-names = 2
-why = "The certified native render folds an interpolation piece formatted by int.to_string / bool.to_string into the one format_args! of the concatenation (#4006 no-perf-loss): it needs the exact text those two functions produce for a scalar (Rust Display of i64, true/false), which is a fact about their bodies, not a property any stdlib attribute declares yet; a scalar-text attribute read by every leg would replace this pair"

@@ -4,6 +4,7 @@
 // stdlib/option_to_string_b.almd, so this module source is not spliced into
 // the registry's one flat namespace, where its public names would collide.
 /// "true" or "false"; bool.parse reads it back.
+@scalar_text
 fn to_string(b: Bool) -> String = if b then "true" else "false"
 
 /// ok(true) for "true", ok(false) for "false", err for anything else.
