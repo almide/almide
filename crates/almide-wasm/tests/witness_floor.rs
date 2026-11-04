@@ -121,24 +121,29 @@ fn whole_module_leg_child() {
     if !almide_base::env::flag(KEEP_BUNDLED) {
         return;
     }
+    use std::fmt::Write as _;
     let root = workspace_root();
+    let mut out = String::new();
     for rel in selected_rows(&root) {
         let text = std::fs::read_to_string(almide_corpus::resolve(&root, &rel)).expect("fixture readable");
         let Ok(ir) = almide_spine::s5::lower_to_ir(&rel, &text) else {
-            println!("{LEG_TAG}unlowered\t{rel}");
+            let _ = writeln!(out, "{LEG_TAG}unlowered\t{rel}");
             continue;
         };
         almide_wasm::witness::start_collecting();
         let _ = almide_wasm::emit_program(&ir);
         let (frames, _) = almide_wasm::witness::take_by_pass_with_context();
-        println!("{LEG_TAG}program\t{rel}");
+        let _ = writeln!(out, "{LEG_TAG}program\t{rel}");
         for (pass, name, cert, ctx) in frames {
-            println!("{LEG_TAG}frame\t{pass}\t{}\t{}\t{}", escape(&name), escape(&cert), escape(&ctx));
+            let _ = writeln!(out, "{LEG_TAG}frame\t{pass}\t{}\t{}\t{}", escape(&name), escape(&cert), escape(&ctx));
         }
         for (pass, w) in almide_wasm::witness::take_modes() {
-            println!("{LEG_TAG}mode\t{pass}\t{}", escape(&w));
+            let _ = writeln!(out, "{LEG_TAG}mode\t{pass}\t{}", escape(&w));
         }
     }
+    // One write, after libtest's `test … ` prefix line: the parent reads the
+    // tagged lines only.
+    std::io::Write::write_all(&mut std::io::stdout(), format!("\n{out}").as_bytes()).expect("write the leg");
 }
 
 /// One program of the whole-module leg: its row, frames and call-mode witnesses.
@@ -546,7 +551,8 @@ fn structural_witnesses_balance_and_hold_the_floor() {
         nondet.push(key.clone());
     }
     if dump {
-        coverage.iter().for_each(|id| eprintln!("[coverage] {id}"));
+        let ids: String = coverage.iter().map(|id| format!("[coverage] {id}\n")).collect();
+        std::io::Write::write_all(&mut std::io::stderr(), ids.as_bytes()).expect("write the coverage dump");
         for (key, reason) in &declined {
             eprintln!("{}{reason} {key}", almide_wasm::witness::DECLINE_PREFIX);
         }
