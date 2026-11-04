@@ -206,6 +206,10 @@ pub(crate) struct FloorFn {
     /// is not read again moves it in, as v0 does (crates/almide-codegen
     /// owned_source.rs).
     pub twin: Option<(usize, String, Vec<&'static str>)>,
+    /// An equality- or ordering-bound generic served for String elements
+    /// only (owner ruling ○, 2026-11-04): the call's list must be a String
+    /// list, which carries no Float bits.
+    pub str_only: bool,
 }
 
 /// The floor entry the declaration of stdlib call `call` (`module.fn`) gives,
@@ -485,7 +489,28 @@ pub fn refusal(call: &str) -> Option<String> {
 }
 
 fn derive_explained(call: &str) -> Result<FloorFn, String> {
+    derive_for(call, false)
+}
 
+/// The element type of the first list param the self-hosted body `call`
+/// names declares (`list.contains_str`'s `List[String]` → `String`).
+fn specialized_list_elem(call: &str) -> Option<String> {
+    crate::mir_ops::self_host_runtime().iter().find_map(|(src, pairs)| {
+        let (impl_fn, _) = pairs.iter().find(|(_, c)| *c == call)?;
+        almide_lang::parse_cached(src)?.decls.iter().find_map(|d| match d {
+            Decl::Fn { name, params, .. } if name.as_str() == *impl_fn => params.iter().find_map(|p| match &p.ty {
+                TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => simple(&args[0]).map(str::to_string),
+                _ => None,
+            }),
+            _ => None,
+        })
+    })
+}
+
+/// `str_elems`: the call is a self-hosted body over a String list that
+/// specializes this declaration, so an equality or ordering bound on its
+/// element meets a String's, never a Float's bits.
+fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
 
     let (module, func) = call.split_once('.').ok_or("not a module.fn call")?;
     if !almide_lang::stdlib_info::is_bundled_module(module) {
@@ -505,7 +530,10 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
         // declares the stdlib fn it specializes (`@specializes("map.set")`):
         // the floor serves it as that fn.
         return match specialized_target(call) {
-            Some(target) if target != call => derive_explained(&target).map_err(|e| format!("specializes `{target}`: {e}")),
+            Some(target) if target != call => {
+                let str_elems = specialized_list_elem(call).as_deref() == Some("String");
+                derive_for(&target, str_elems).map_err(|e| format!("specializes `{target}`: {e}"))
+            }
             _ => Err("no declaration".into()),
         };
     };
@@ -590,7 +618,7 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
         if !fparams.iter().any(|p| matches!(p, FloorParam::List(ListElem::Any))) {
             return Err("an element-typed param or return with no `List[A]` param to decide it".into());
         }
-        if almide_lang::capability_bounds::of(module, func).next().is_some() {
+        if almide_lang::capability_bounds::of(module, func).next().is_some() && !str_elems {
             return Err("an element-typed generic that needs equality or ordering".into());
         }
     }
@@ -622,7 +650,8 @@ fn derive_explained(call: &str) -> Result<FloorFn, String> {
             && squash(&tr) == squash(&rust_ret);
         same.then(|| Some((r.param, t.to_string(), closure(t, rt).ok()?)))?
     });
-    Ok(FloorFn { symbol, params: fparams, ret: fret, items, twin })
+    let str_only = elem_typed && almide_lang::capability_bounds::of(module, func).next().is_some();
+    Ok(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only })
 }
 
 fn simple(t: &TypeExpr) -> Option<&str> {
@@ -2008,6 +2037,9 @@ pub(crate) fn render_call(
             _ => None,
         });
     let elem_str = elem_kind.map(|k| k == NTy::Str);
+    if f.str_only && elem_str != Some(true) {
+        return Err(wall(format!("native: floor call `{name}` bounds its element by equality or ordering, served for a String list only")));
+    }
     let mut rendered = Vec::new();
     for ((code, got), p) in args.iter().zip(&f.params) {
         rendered.push(match p {
