@@ -290,6 +290,15 @@ pub fn flag(name: &str) -> bool {
     on
 }
 
+/// Is the bundled-stdlib reach pruning switched off (`ALMIDE_KEEP_BUNDLED_FNS`,
+/// #4328)? Every site that trims a bundled module or a self-host source to
+/// what the program reaches asks HERE — the resolver's function pruning, the
+/// reach walk's whitelist filter, and the wasm link's own pruning (#4458) —
+/// so the whole-module leg (witness_floor) sees whole modules on every path.
+pub fn keep_bundled_fns() -> bool {
+    flag("ALMIDE_KEEP_BUNDLED_FNS")
+}
+
 /// The value of `name`, when set and non-empty. Registered names only; a
 /// route/gate switch is announced like [`flag`].
 pub fn var(name: &str) -> Option<String> {
