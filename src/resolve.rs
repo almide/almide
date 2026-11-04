@@ -25,6 +25,9 @@ pub struct ResolvedModules {
     /// compiler bug, not user input. Used to attribute a module's own type
     /// errors to its own file when the ENTRY program imports it (#862).
     pub sources: std::collections::HashMap<String, (String, String)>,
+    /// The modules that are TEST FILES of the native test run's one program
+    /// (#4441): their `test` blocks are lowered with them.
+    pub test_modules: HashSet<String>,
 }
 
 /// Threaded through the recursive `load_*`/`resolve_*` helpers below.
@@ -55,6 +58,9 @@ fn record_module_source(ctx: &mut ResolveCtx, name: &str, file_path: &Path, sour
 fn parse_module_source(kind: &str, display_label: &str, file_path: &Path) -> Result<(ast::Program, String), String> {
     let source = crate::source_overlay::read_to_string(file_path)
         .map_err(|e| format!("error reading {} '{}': {}", kind, display_label, e))?;
+    if let Some(program) = parse_cache::get(&source) {
+        return Ok((program, source));
+    }
 
     let tokens = lexer::Lexer::tokenize(&source);
     let mut parser = parser::Parser::new(tokens);
@@ -63,7 +69,46 @@ fn parse_module_source(kind: &str, display_label: &str, file_path: &Path) -> Res
     if !parser.errors.is_empty() {
         return Err(format!("parse error in {} '{}': {}", kind, display_label, parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
     }
+    parse_cache::put(&source, &program);
     Ok((program, source))
+}
+
+/// The parsed modules of a test run (#4441). Every test file of a run
+/// resolves its own imports, and 104 test files reaching one project's 108
+/// modules parsed the same sources 104 times. A module's AST is a function of
+/// its text alone, so a run keys it by the text and parses each once. Off
+/// unless a command arms it ([`enable`](parse_cache::enable)): a long-lived
+/// process (the LSP) must not keep every text it ever saw.
+pub mod parse_cache {
+    use crate::ast;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Mutex, OnceLock};
+
+    static ON: AtomicBool = AtomicBool::new(false);
+
+    fn cache() -> &'static Mutex<HashMap<String, ast::Program>> {
+        static CACHE: OnceLock<Mutex<HashMap<String, ast::Program>>> = OnceLock::new();
+        CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    /// Arm the cache for the rest of this process.
+    pub fn enable() {
+        ON.store(true, Ordering::Relaxed);
+    }
+
+    pub(super) fn get(source: &str) -> Option<ast::Program> {
+        if !ON.load(Ordering::Relaxed) {
+            return None;
+        }
+        cache().lock().unwrap_or_else(|e| e.into_inner()).get(source).cloned()
+    }
+
+    pub(super) fn put(source: &str, program: &ast::Program) {
+        if ON.load(Ordering::Relaxed) {
+            cache().lock().unwrap_or_else(|e| e.into_inner()).insert(source.to_string(), program.clone());
+        }
+    }
 }
 
 /// Find the project root (directory containing almide.toml), searching upward from base_dir.
@@ -253,7 +298,7 @@ pub fn resolve_imports_with_deps(
         }
     }
 
-    Ok(ResolvedModules { modules: loaded, sources })
+    Ok(ResolvedModules { modules: loaded, sources, test_modules: HashSet::new() })
 }
 
 /// Load a bundled stdlib module from embedded source.

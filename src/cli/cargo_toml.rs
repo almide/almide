@@ -34,6 +34,14 @@ edition = "2021"
 opt-level = 1
 overflow-checks = false
 
+# A test binary (`almide test` builds through `cargo test`, which inherits `dev`) skips
+# the crate-local ThinLTO pass that `lto = false` implies at opt-level 1. A test run's one
+# program (#4441) is a single large crate, and on a 77k-line package that pass alone was
+# 76 s of a 117 s warm rebuild after a one-line test edit; with it off the rebuild is 51 s.
+# Optimisation within each codegen unit — mutual tail calls included — is unchanged.
+[profile.test]
+lto = "off"
+
 [profile.release]
 opt-level = 3
 lto = true

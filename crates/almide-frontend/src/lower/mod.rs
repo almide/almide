@@ -64,6 +64,10 @@ pub struct LowerCtx<'a> {
     /// program. Used to pin a struct-literal constructor to its qualified
     /// canonical name `mod.Type` (#433), mirroring `lower_type_decl`.
     pub current_module: Option<Sym>,
+    /// The module is a TEST FILE of the native test run's one program
+    /// (#4441): what it prints must read as it did when the file was the
+    /// entry, so a name it declares is shown as declared, unqualified.
+    pub test_file: bool,
     /// True while lowering a `test` block body. The assert family desugars to
     /// the ALS-T18 abort form OUTSIDE tests only — test blocks keep the
     /// harness assertion forms (cargo / the wasm test runner report them).
@@ -111,6 +115,7 @@ impl<'a> LowerCtx<'a> {
             def_table: env.def_table.clone(),
             def_map: env.def_map.iter().map(|(k, v)| (*k, *v)).collect(),
             current_module: None,
+            test_file: false,
             in_test: false,
             annotated_result_vars: std::collections::HashSet::new(),
             synthesized_fns: Vec::new(),
@@ -280,18 +285,19 @@ impl<'a> LowerCtx<'a> {
 /// compiled on its own, whose `__` fns ARE that space.
 pub fn lower_program(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap) -> IrProgram {
     let escaped = if env.entry_bundled_module.is_none() { escaped_entry_fns(prog) } else { Default::default() };
-    lower_program_with_prefix(prog, env, type_map, None, escaped)
+    lower_program_with_prefix(prog, env, type_map, None, escaped, false)
 }
 
 /// Lower a stdlib source (a self-host registry body) as an entry program,
 /// keeping its `__` fns — the compiler's own helpers — under their names.
 pub fn lower_stdlib_program(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap) -> IrProgram {
-    lower_program_with_prefix(prog, env, type_map, None, Default::default())
+    lower_program_with_prefix(prog, env, type_map, None, Default::default(), false)
 }
 
-fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap, module_prefix: Option<&str>, escaped_fns: std::collections::HashSet<Sym>) -> IrProgram {
+fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap, module_prefix: Option<&str>, escaped_fns: std::collections::HashSet<Sym>, test_file: bool) -> IrProgram {
     let mut ctx = LowerCtx::new(env, type_map);
     ctx.current_module = module_prefix.map(sym);
+    ctx.test_file = test_file;
     ctx.escaped_fns = escaped_fns;
 
     register_cross_package_top_lets(&mut ctx, env);

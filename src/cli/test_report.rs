@@ -154,10 +154,10 @@ fn libtest_path(mangled: &str) -> String {
     format!("tests::{mangled}")
 }
 
-/// A libtest path no emitted test can have (no Almide test fn is spelled in
-/// the `__almide_` space): what `--exact` gets when `--run` selected nothing,
+/// A test fn name no emitted test can have (no Almide test fn is spelled in
+/// the `__almide_` space): its path is what `--exact` gets when `--run` selected nothing,
 /// so the binary runs zero tests and still reports what it filtered out.
-const NO_TEST_SELECTED: &str = "tests::__almide_run_selected_no_test";
+const NO_TEST_SELECTED: &str = "__almide_run_selected_no_test";
 
 /// Run one native (libtest) test binary for `file` the way `almide test`
 /// judges it, returning `(code, stdout, stderr)`.
@@ -180,6 +180,21 @@ const NO_TEST_SELECTED: &str = "tests::__almide_run_selected_no_test";
 ///   own channel, not the program's stdout — and a status-0 run missing a
 ///   selected test's record fails, naming the first test that never finished.
 pub fn run_native_test_binary(file: &str, bin: &std::path::Path, program_args: &[String]) -> (i32, String, String) {
+    run_native_test_binary_in(file, bin, program_args, None)
+}
+
+/// [`run_native_test_binary`] for a file whose tests sit in the run's one
+/// binary (#4441) under `module`'s prefix. The run selects that file's tests
+/// only, so the file runs in a process of its own as before; the prefix is
+/// taken back out of what the binary printed, and the other files' tests out
+/// of its filtered-out count, so the report reads as the file's own binary's
+/// did.
+pub(crate) fn run_native_test_binary_in(
+    file: &str,
+    bin: &std::path::Path,
+    program_args: &[String],
+    module: Option<&super::test_native::MergedModule>,
+) -> (i32, String, String) {
     let source = almide::source_overlay::read_to_string(file).unwrap_or_default();
     let names = test_name_map(&source);
     let filter = harness_filter(program_args);
@@ -187,31 +202,45 @@ pub fn run_native_test_binary(file: &str, bin: &std::path::Path, program_args: &
         .iter()
         .filter(|(_, label)| filter.is_none_or(|p| almide_base::names::test_name_matches_filter(label, p)))
         .collect();
+    let prefix = module.map(|m| m.prefix.clone()).unwrap_or_default();
+    let fn_prefix = module.map(|m| m.fn_prefix().to_string()).unwrap_or_default();
     let mut args: Vec<String> = HARNESS_FLAGS.iter().map(|f| f.to_string()).collect();
     match filter {
         // The source could not be enumerated (it does not parse — the build
         // has already failed then): libtest's own matching is all there is.
-        Some(p) if names.is_empty() => args.push(p.to_string()),
-        Some(_) => {
+        Some(p) if names.is_empty() && module.is_none() => args.push(p.to_string()),
+        Some(_) if !names.is_empty() => {
             args.push("--exact".to_string());
             if selected.is_empty() {
-                args.push(NO_TEST_SELECTED.to_string());
+                args.push(libtest_path(&format!("{prefix}{NO_TEST_SELECTED}")));
             }
-            args.extend(selected.iter().map(|(m, _)| libtest_path(m)));
+            args.extend(selected.iter().map(|(m, _)| libtest_path(&format!("{prefix}{m}"))));
         }
-        None => {}
+        // The run's binary holds every file's tests: select this file's.
+        _ if module.is_some() => args.push(format!("tests::{prefix}__")),
+        _ => {}
     }
     let ledger = native_test_log_path();
     let _ = std::fs::remove_file(&ledger);
-    let (mut code, stdout, mut stderr) =
-        super::run::run_binary_captured_io_env(bin, &args, &[("ALMIDE_TEST_LEDGER", ledger.as_os_str())]);
+    let module_env = std::ffi::OsString::from(&prefix);
+    let mut env: Vec<(&str, &std::ffi::OsStr)> = vec![("ALMIDE_TEST_LEDGER", ledger.as_os_str())];
+    if module.is_some() {
+        // A `testing.assert_aborts` child re-executes the binary by its
+        // entry's test path, which carries the file's prefix.
+        env.push(("ALMIDE_TEST_MODULE", module_env.as_os_str()));
+    }
+    let (mut code, mut stdout, mut stderr) = super::run::run_binary_captured_io_env(bin, &args, &env);
+    if let Some(m) = module {
+        stdout = unmerge_output(&stdout, &[&prefix, &fn_prefix], m.others);
+        stderr = unmerge_output(&stderr, &[&prefix, &fn_prefix], m.others);
+    }
     let records = std::fs::read_to_string(&ledger).unwrap_or_default();
     let _ = std::fs::remove_file(&ledger);
     if code == 0 {
         let finished: std::collections::HashSet<&str> = records.lines().collect();
         let unfinished: Vec<&str> = selected
             .iter()
-            .filter(|(m, _)| !finished.contains(m.as_str()))
+            .filter(|(m, _)| !finished.contains(format!("{fn_prefix}{m}").as_str()))
             .map(|(_, label)| label.as_str())
             .collect();
         if let Some(first) = unfinished.first() {
@@ -224,6 +253,36 @@ pub fn run_native_test_binary(file: &str, bin: &std::path::Path, program_args: &
         }
     }
     (code, stdout, stderr)
+}
+
+/// What a file's own binary would have printed, from its run of the run's
+/// one binary: test paths without the file's prefixes (its tests' path, then
+/// their bare fn names), and libtest's `N filtered out` without the other
+/// files' tests.
+fn unmerge_output(text: &str, prefixes: &[&str], others: usize) -> String {
+    let text = prefixes.iter().fold(text.to_string(), |t, p| t.replace(p, ""));
+    if !text.contains("filtered out") {
+        return text;
+    }
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        match line.strip_prefix("test result:").and_then(|_| line.find(" filtered out")) {
+            Some(at) => {
+                let head = &line[..at];
+                let num_start = head.rfind(' ').map_or(0, |i| i + 1);
+                match head[num_start..].parse::<usize>() {
+                    Ok(n) => {
+                        out.push_str(&head[..num_start]);
+                        out.push_str(&n.saturating_sub(others).to_string());
+                        out.push_str(&line[at..]);
+                    }
+                    Err(_) => out.push_str(line),
+                }
+            }
+            None => out.push_str(line),
+        }
+    }
+    out
 }
 
 /// A fresh scratch path for one binary's completion ledger.
