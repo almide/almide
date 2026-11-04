@@ -238,15 +238,21 @@ mod tests {
     /// network (and name lookup when it imports it), a core module nothing.
     #[test]
     fn a_stock_run_gets_the_grants_its_component_imports() {
-        let comp = |imports: &str| [b"\0asm\x0d\x00\x01\x00".as_slice(), imports.as_bytes()].concat();
+        let comp =
+            |imports: &str| [b"\0asm\x0d\x00\x01\x00".as_slice(), imports.as_bytes()].concat();
         assert_eq!(grants_for(&comp("wasi:http/types@0.3.0")), ["-S", "http"]);
         assert_eq!(
-            grants_for(&comp("wasi:sockets/tcp@0.3.0 wasi:sockets/ip-name-lookup@0.3.0")),
+            grants_for(&comp(
+                "wasi:sockets/tcp@0.3.0 wasi:sockets/ip-name-lookup@0.3.0"
+            )),
             ["-S", "inherit-network", "-S", "allow-ip-name-lookup"]
         );
         assert!(grants_for(&comp("wasi:cli/stdout@0.3.0")).is_empty());
         let core = [b"\0asm\x01\x00\x00\x00".as_slice(), b"wasi:http/types"].concat();
-        assert!(grants_for(&core).is_empty(), "wasmtime refuses -S http on a core module");
+        assert!(
+            grants_for(&core).is_empty(),
+            "wasmtime refuses -S http on a core module"
+        );
     }
 
     #[test]
