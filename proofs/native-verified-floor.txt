@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 397 of 1014
+# rendered: 399 of 1014
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/allocation_within_limits.almd
 spec/wasm_cross/anon_records_and_fusion.almd
@@ -157,6 +157,8 @@ spec/wasm_cross/if_let_forms.almd
 spec/wasm_cross/index_bounds.almd
 spec/wasm_cross/index_bounds_i64.almd
 spec/wasm_cross/index_bounds_loop_invariant.almd
+spec/wasm_cross/index_bounds_write_heap.almd
+spec/wasm_cross/index_bounds_write_only_var.almd
 spec/wasm_cross/int8_div_overflow.almd
 spec/wasm_cross/int_clamp_inverted.almd
 spec/wasm_cross/int_div_by_zero.almd
