@@ -6,6 +6,12 @@
 //! went up four times per doubling (measured n = 4000 → 8000: the field
 //! interpolation 36.1M → 151.7M, the list field 64M → 256M).
 //!
+//! #4475 — `list.push(b.xs, v)` / `string.push(b.text, x)` on a record
+//! field, and every field shape on a module-level `var`'s field, took the
+//! copying field write: a 1M-push loop over a global's field ran for minutes
+//! on wasm where native finished in milliseconds (fuzz seed 668978797297
+//! index 615). They go through the same window now.
+//!
 //! The aliasing shapes that must NOT be extended in place — a copy of the
 //! record or of the field taken before the loop, a right side that reads the
 //! place again, the place not first, a nested path with an alias at the
@@ -38,28 +44,63 @@ fn program(body: &str, n: u32) -> String {
 effect fn main() -> Unit = {{
   var s = \"\"
   var b = Buf {{ text: \"\", xs: [], n: 0 }}
+  var o = Outer {{ tag: 0, buf: Buf {{ text: \"\", xs: [], n: 0 }} }}
   for i in 0..<{n} {{
     {body}
   }}
-  println(\"${{string.len(s)}} ${{string.len(b.text)}} ${{list.len(b.xs)}}\")
+  println(\"${{string.len(s)}} ${{string.len(b.text)}} ${{list.len(b.xs)}} ${{list.len(o.buf.xs)}}\")
 }}
 "
     )
 }
 
-const SHAPES: [(&str, &str); 4] = [
+/// The same loop over the fields of module-level `var`s (`g`, `go`).
+fn global_program(body: &str, n: u32) -> String {
+    format!(
+        "{PRELUDE}
+var g = Buf {{ text: \"\", xs: [], n: 0 }}
+var go = Outer {{ tag: 0, buf: Buf {{ text: \"\", xs: [], n: 0 }} }}
+
+fn fill(n: Int) -> Unit = {{
+  for i in 0..<n {{
+    {body}
+  }}
+}}
+
+effect fn main() -> Unit = {{
+  fill({n})
+  println(\"${{string.len(g.text)}} ${{list.len(g.xs)}} ${{list.len(go.buf.xs)}}\")
+}}
+"
+    )
+}
+
+const SHAPES: [(&str, &str); 7] = [
     ("interpolation into a var", "s = \"${s}-${i}\""),
     ("concat into a string field", "b.text = b.text + \"ab\""),
     ("interpolation into a string field", "b.text = \"${b.text}-${i}\""),
     ("concat into a list field", "b.xs = b.xs + [i]"),
+    ("push into a list field", "list.push(b.xs, i)"),
+    ("push into a nested list field", "list.push(o.buf.xs, i)"),
+    ("string push into a field", "string.push(b.text, \"ab\")"),
+];
+
+/// #4475: the field shapes over a module-level `var`.
+const GLOBAL_SHAPES: [(&str, &str); 4] = [
+    ("push into a global's list field", "list.push(g.xs, i)"),
+    ("push into a global's nested list field", "list.push(go.buf.xs, i)"),
+    ("concat into a global's list field", "g.xs = g.xs + [i]"),
+    ("string push into a global's field", "string.push(g.text, \"ab\")"),
 ];
 
 #[test]
 fn field_and_interpolation_accumulators_grow_linearly() {
+    let local = SHAPES.iter().map(|&(name, body)| (name, program(body, 4000), program(body, 8000)));
+    let global = GLOBAL_SHAPES.iter().map(|&(name, body)| (name, global_program(body, 4000), global_program(body, 8000)));
     let mut failures = Vec::new();
-    for (name, body) in SHAPES {
-        let (_, small, a1, f1) = counts(&program(body, 4000));
-        let (_, large, a2, f2) = counts(&program(body, 8000));
+    for (name, small_src, large_src) in local.chain(global) {
+        let (_, small, a1, f1) = counts(&small_src);
+        let (_, large, a2, f2) = counts(&large_src);
         assert_eq!(a1, f1, "{name}: n=4000 leaked {} block(s)", a1 - f1);
         assert_eq!(a2, f2, "{name}: n=8000 leaked {} block(s)", a2 - f2);
         eprintln!("{name}: {small} -> {large} bytes");
@@ -147,6 +188,33 @@ fn var_interp(n: Int) -> String = {
 
 fn tag(i: Int) -> String = "<${i}>"
 
+var gb = Buf { text: "g", xs: [5], n: 0 }
+
+fn next(i: Int) -> Int = i * 2
+
+fn field_push(n: Int) -> String = {
+  var b = Buf { text: "p", xs: [3], n: 0 }
+  let old = b
+  let ys = b.xs
+  for i in 0..<n {
+    list.push(b.xs, i)
+    string.push(b.text, "+")
+  }
+  "${old.xs} ${old.text} ${ys} ${b.xs} ${b.text}"
+}
+
+fn global_push(n: Int) -> String = {
+  let old = gb
+  let ys = gb.xs
+  for i in 0..<n {
+    list.push(gb.xs, i * 2)
+    string.push(gb.text, "+")
+  }
+  list.push(gb.xs, next(9))
+  gb.xs = gb.xs + [next(10)]
+  "${old.xs} ${old.text} ${ys} ${gb.xs} ${gb.text}"
+}
+
 fn produced_parts(n: Int) -> String = {
   var s = "s"
   var b = Buf { text: "b", xs: [], n: 0 }
@@ -169,6 +237,8 @@ effect fn main() -> Unit = {
   println(rereads(2))
   println(nested(3))
   println(var_interp(3))
+  println(field_push(3))
+  println(global_push(3))
 }
 "#;
 
@@ -179,6 +249,8 @@ c|c0|c01| c012
 <<xx0xx><xx0xx>1<xx0xx><xx0xx>> [2, 2, 2, 2]
 n [] n0.1.2. [0, 1, 2] 1
 v v012 wv0v01v012
+[3] p [3] [3, 0, 1, 2] p+++
+[5] g [5] [5, 0, 2, 4, 18, 20] g+++
 ";
 
 #[test]
@@ -195,7 +267,17 @@ fn the_window_frames_certify() {
     almide_wasm::witness::start_collecting();
     let _ = almide_wasm::emit_program(&ir).expect("the structural leg lowers the probe");
     let w: std::collections::BTreeMap<String, String> = almide_wasm::witness::take().into_iter().collect();
-    for name in ["produced_parts", "record_copy", "field_copy", "copy_inside", "rereads", "nested", "var_interp"] {
+    for name in [
+        "produced_parts",
+        "record_copy",
+        "field_copy",
+        "copy_inside",
+        "rereads",
+        "nested",
+        "var_interp",
+        "field_push",
+        "global_push",
+    ] {
         let cert = w.get(name).unwrap_or_else(|| panic!("{name} must be witnessed; got {:?}", w.keys()));
         assert!(
             almide_verify::check(almide_verify::Property::Ownership, cert.as_bytes()),

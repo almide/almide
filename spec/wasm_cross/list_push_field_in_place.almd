@@ -1,0 +1,67 @@
+// @contract: C-033
+// `list.push(r.xs, v)` and `string.push(r.text, x)` on a record field grow the
+// field in place on the wasm leg when nothing else holds it, and copy when
+// something does (#4475). Before, every push on a field copied the whole
+// list, so a build loop was quadratic on wasm and linear on native; a loop
+// over a module-level `var`'s field took minutes at 1M pushes.
+//
+// Rows, and what each is for:
+//   local     a local record's field, pushed in a loop; `old` and `ys` were
+//             bound before the loop and keep the pre-loop values
+//   nested    a field two records deep (`o.buf.xs`), with the middle record
+//             aliased before the loop
+//   global    a module-level `var`'s field, pushed from a fn that only reaches
+//             it as a global; an alias of the global keeps its value
+//   call      a pushed operand that calls a fn takes the copying write on a
+//             global root (the call could rebind the global under the held
+//             record); it must still land in the field
+//   sizes     2000 pushes per field, read back by length and by a sum
+type Buf = { text: String, xs: List[Int] }
+
+type Outer = { tag: Int, buf: Buf }
+
+var g = Buf { text: "g", xs: [5] }
+
+var go = Outer { tag: 3, buf: Buf { text: "", xs: [] } }
+
+fn twice(i: Int) -> Int = i * 2
+
+fn local_rows(n: Int) -> String = {
+  var b = Buf { text: "p", xs: [3] }
+  let old = b
+  let ys = b.xs
+  for i in 0..<n {
+    list.push(b.xs, i)
+    string.push(b.text, "+")
+  }
+  "${old.xs} ${old.text} ${ys} ${list.len(b.xs)} ${list.sum(b.xs)} ${string.len(b.text)}"
+}
+
+fn nested_rows(n: Int) -> String = {
+  var o = Outer { tag: 1, buf: Buf { text: "n", xs: [] } }
+  let mid = o.buf
+  for i in 0..<n {
+    list.push(o.buf.xs, i + 1)
+  }
+  "${mid.xs} ${list.len(o.buf.xs)} ${list.sum(o.buf.xs)} ${o.tag}"
+}
+
+fn fill_global(n: Int) -> Unit = {
+  for i in 0..<n {
+    list.push(g.xs, i)
+    list.push(go.buf.xs, i)
+    string.push(g.text, "+")
+  }
+}
+
+effect fn main() -> Unit = {
+  println("local  ${local_rows(3)}")
+  println("local  ${local_rows(2000)}")
+  println("nested ${nested_rows(3)}")
+  println("nested ${nested_rows(2000)}")
+  let before = g
+  fill_global(2000)
+  println("global ${before.xs} ${list.len(g.xs)} ${list.sum(g.xs)} ${string.len(g.text)} ${list.len(go.buf.xs)}")
+  list.push(g.xs, twice(21))
+  println("call   ${list.len(g.xs)} ${list.last(g.xs) ?? 0}")
+}
