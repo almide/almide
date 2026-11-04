@@ -123,9 +123,7 @@ pub mod capability_bounds {
 pub mod decl_index {
     include!("generated/decl_index.rs");
 
-    type Row = (&'static str, &'static [&'static str], &'static [(u32, u32)], bool);
-
-    fn row(stem: &str) -> Option<&'static Row> {
+    fn row(stem: &str) -> Option<&'static DeclRow> {
         DECL_INDEX.iter().find(|r| r.0 == stem)
     }
 
