@@ -546,6 +546,7 @@ fn references_in(rt: &RuntimeIndex, text: &str) -> Result<Vec<String>, String> {
         let at = IdentAt {
             s,
             prev: i.checked_sub(1).map(|k| toks[k].text),
+            range: i.checked_sub(2).is_some_and(|k| toks[k].text == "." && toks[k + 1].text == "." && toks[k + 1].off == toks[k].off + 1),
             next: toks.get(i + 1).map(|t| t.text),
             after_next: toks.get(i + 2).map(|t| t.text),
         };
@@ -569,6 +570,9 @@ fn references_in(rt: &RuntimeIndex, text: &str) -> Result<Vec<String>, String> {
 struct IdentAt<'t> {
     s: &'t str,
     prev: Option<&'t str>,
+    /// The token before is the second `.` of a `..` range (`s[..f(x)]`), not
+    /// a method or field access.
+    range: bool,
     next: Option<&'t str>,
     after_next: Option<&'t str>,
 }
@@ -588,7 +592,9 @@ enum RefStep {
 /// The identifier's step read off its position alone (after a `.`, a
 /// path, `fn`, or as a binding), if that decides it.
 fn by_position(rt: &RuntimeIndex, at: &IdentAt) -> Option<RefStep> {
-    let (s, prev, next) = (at.s, at.prev, at.next);
+    let (s, next) = (at.s, at.next);
+    // A range's `..` is no access: the name after it is read by its name.
+    let prev = if at.range { None } else { at.prev };
     if prev == Some(".") && rt.trait_methods.contains(s) {
         return Some(RefStep::Fail); // a method of the runtime's own traits
     }
