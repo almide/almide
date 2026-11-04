@@ -1,8 +1,11 @@
 //! #2631 / #2633: the HTTP call handle — per-call `total_ms` / `idle_ms`,
 //! `cancel`, a `poll` that never blocks, `read_new`, and a body streamed
-//! through them — against a loopback server this test runs, on BOTH legs:
-//! the native binary and `almide run --target wasm` (the embedded host, which
-//! serves the handle with the same call core, crates/almide-rt-core). The
+//! through them — against a loopback server this test runs, on THREE legs:
+//! the native binary, `almide run --target wasm` (the embedded host, which
+//! serves the handle with the same call core, crates/almide-rt-core), and the
+//! WASI 0.3 component `almide build --target wasm` builds, run on a stock
+//! wasmtime with `-S http` (ADR-0023 §4.3: the limits and cancel are the
+//! guest's there, wasi_p3_http_call.rs). The
 //! server records, per connection, when it accepted and when it saw the
 //! client close the connection (a write that fails, or a read that answers
 //! end-of-stream while it waits), so every "the connection is closed" and
@@ -192,6 +195,27 @@ fn almide() -> String {
 enum Leg {
     Native,
     Wasm,
+    /// The default `almide build --target wasm` artifact on a stock wasmtime.
+    P3,
+}
+
+/// The installed wasmtime runs p3 components (the pin policy's floor, 46);
+/// below it the p3 leg is skipped, and under ALMIDE_EXPECT_TOOLS (CI) that
+/// is a failure.
+fn wasmtime_runs_p3() -> bool {
+    let major = Command::new("wasmtime")
+        .arg("--version")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .and_then(|v| v.split_whitespace().nth(1).and_then(|ver| ver.split('.').next()).and_then(|m| m.parse::<u32>().ok()))
+        .unwrap_or(0);
+    if major < 46 {
+        assert!(std::env::var_os("ALMIDE_EXPECT_TOOLS").is_none(), "ALMIDE_EXPECT_TOOLS: no wasmtime >= 46 on PATH");
+        eprintln!("skipping the p3 leg: no wasmtime >= 46");
+        return false;
+    }
+    true
 }
 
 /// A program ready to run on one leg: the native binary, or the source the
@@ -212,6 +236,19 @@ fn prepare(dir: &std::path::Path, name: &str, src: &str, leg: Leg) -> Prepared {
             Prepared { leg, path: app }
         }
         Leg::Wasm => Prepared { leg, path: source },
+        Leg::P3 => {
+            let wasm = dir.join(format!("{name}.wasm"));
+            let built = Command::new(almide())
+                .arg("build")
+                .arg(&source)
+                .args(["--target", "wasm", "-o"])
+                .arg(&wasm)
+                .env_remove("ALMIDE_COMPONENT_P3")
+                .output()
+                .unwrap();
+            assert!(built.status.success(), "build {name} for wasm:\n{}", String::from_utf8_lossy(&built.stderr));
+            Prepared { leg, path: wasm }
+        }
     }
 }
 
@@ -223,13 +260,23 @@ fn command(p: &Prepared) -> Command {
             c.arg("run").arg(&p.path).arg("--target").arg("wasm");
             c
         }
+        Leg::P3 => Command::new("wasmtime"),
     }
 }
 
 fn run(p: &Prepared, env: &[(&str, &str)]) -> Output {
     let mut cmd = command(p);
-    for (k, v) in env {
-        cmd.env(k, v);
+    if p.leg == Leg::P3 {
+        // A component sees only the environment the run hands it.
+        cmd.args(["run", "-S", "http"]);
+        for (k, v) in env {
+            cmd.arg("--env").arg(format!("{k}={v}"));
+        }
+        cmd.arg(&p.path);
+    } else {
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
     }
     cmd.output().unwrap()
 }
@@ -418,7 +465,8 @@ fn check_handle_leg(leg: Leg, out: &Output, server: &Server) -> String {
 fn call_handle_limits_cancel_poll_and_a_streamed_body() {
     let dir = tempfile::tempdir().unwrap();
     let mut seen: Vec<(Leg, String)> = Vec::new();
-    for leg in [Leg::Native, Leg::Wasm] {
+    let legs: &[Leg] = if wasmtime_runs_p3() { &[Leg::Native, Leg::Wasm, Leg::P3] } else { &[Leg::Native, Leg::Wasm] };
+    for &leg in legs {
         // A fresh server per leg: its connection log is keyed by target.
         let server = Server::start();
         let app = prepare(dir.path(), &format!("handle_{leg:?}"), HANDLE_PROGRAM, leg);
@@ -428,8 +476,10 @@ fn call_handle_limits_cancel_poll_and_a_streamed_body() {
         let out = run(&app, &[("PORT", &port), ("ALMIDE_HTTP_TIMEOUT_SECS", "1")]);
         seen.push((leg, check_handle_leg(leg, &out, &server)));
     }
-    // The program prints no timings: the two legs answer byte-identically.
-    assert_eq!(seen[0].1, seen[1].1, "native vs --target wasm stdout differ");
+    // The program prints no timings: the legs answer byte-identically.
+    for (leg, out) in &seen[1..] {
+        assert_eq!(&seen[0].1, out, "native vs {leg:?} stdout differ");
+    }
 }
 
 /// What only the native leg serves: the one-shot full-response client that
@@ -463,11 +513,11 @@ fn native_only_default_timeout() {
     assert!(rest.starts_with("timed out waiting for \"http://127.0.0.1:"), "{rest}");
 }
 
-/// The E081 verdict names what is not served: the stock artifact
-/// (`almide check --target wasm`, the build route) refuses the handle — stock
-/// WASI has no host for it.
+/// The stock route builds the handle as the WASI 0.3 component (ADR-0023
+/// §4.3): `almide check --target wasm` accepts it, and the build names the
+/// load-time grant (`-S http`) the artifact needs.
 #[test]
-fn the_stock_route_keeps_its_e081() {
+fn the_stock_route_builds_the_p3_component() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("stock.almd");
     std::fs::write(
@@ -476,6 +526,12 @@ fn the_stock_route_keeps_its_e081() {
     )
     .unwrap();
     let checked = Command::new(almide()).arg("check").arg(&src).arg("--target").arg("wasm").output().unwrap();
-    let stderr = String::from_utf8_lossy(&checked.stderr);
-    assert!(!checked.status.success() && stderr.contains("error[E081]: `http.start`"), "{stderr}");
+    assert!(checked.status.success(), "{}", String::from_utf8_lossy(&checked.stderr));
+    let wasm = dir.path().join("stock.wasm");
+    let built = Command::new(almide()).arg("build").arg(&src).args(["--target", "wasm", "-o"]).arg(&wasm).output().unwrap();
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    assert!(built.status.success(), "{stderr}");
+    let bytes = std::fs::read(&wasm).unwrap();
+    assert_eq!(bytes.get(4..8), Some(&[0x0d, 0x00, 0x01, 0x00][..]), "not a component");
+    assert!(stderr.contains("imports wasi:http") && stderr.contains("-S http"), "{stderr}");
 }

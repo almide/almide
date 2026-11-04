@@ -494,6 +494,11 @@ include!("wasi_p3_net_shim.rs");
 // TCP over the same sockets imports (#3620): wasi_p3_tcp.rs.
 include!("wasi_p3_tcp.rs");
 include!("wasi_p3_tcp_shim.rs");
+// The http call handle over wasi:http (ADR-0023 §4.3): wasi_p3_http_call.rs.
+include!("wasi_p3_http_call.rs");
+#[cfg(test)]
+#[path = "tests/p3_http_call_test.rs"]
+mod http_call_tests;
 #[cfg(test)]
 #[path = "tests/p3_net_test.rs"]
 mod net_tests;

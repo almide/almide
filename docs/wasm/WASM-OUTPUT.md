@@ -360,6 +360,15 @@ marshalling. `app.js` is a dependency-free ES module:
   and declares `AlmideError`, which ships only when some export unwraps a
   Result. Gate: `spec/wasm_host_js/effect_exports.almd` runs every
   marshalled type × {fn, effect fn} × {ok, err} under node.
+- The exception (#4376, C-451): an `effect fn` DECLARED `@export(wasm, ..)`
+  whose declared return is `Int`, `Float`, `Bool` or `Unit` returns the value
+  itself (an i64, an f64, an i32, or nothing), never a `Result` block, so every
+  host reads it alike. The emitter exports an adapter that calls the fn, writes
+  an err's message to stderr and traps (as a Region export's err does), and
+  frees the block. The emitter records it as `ExportRet::OkValue`, and the
+  wrapper reads the value as a plain fn's; an err surfaces as the trap, not as
+  `AlmideError`. An implicit `pub` export keeps the block above. Gate:
+  `spec/wasm_host_js/effect_export_scalar.almd`.
 - A hook that throws (or, for one marked `returns: promise`, rejects) (#3356). An
   exception that unwinds through wasm skips every release the unwound frames
   would have run, so the glue never lets one through:

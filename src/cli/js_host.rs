@@ -58,8 +58,10 @@ pub(crate) struct HostFn {
     pub params: Vec<(String, Ty)>,
     pub ret: Ty,
     /// An `effect fn`: its wasm value is a `Result` block whatever `ret`
-    /// says (#3352).
+    /// says (#3352), unless it is a declared scalar export (#4376).
     pub is_effect: bool,
+    /// Declared `@export(wasm, ..)` (#2752), not an implicit `pub` export.
+    pub declared: bool,
 }
 
 /// One `@extern(wasm, module, name)` import.
@@ -96,9 +98,11 @@ impl HostSurface {
         // String, Bytes, List, Option or record (#3354), or an unwrapped
         // Result (#3352), whose err message is a String.
         let exports_block = self.exports.iter().any(|f| {
-            // A Region return (#4354) is the adapter's two numbers, no block.
+            // A Region return (#4354) is the adapter's two numbers, and a
+            // declared scalar effect fn's (#4376) the ok value: no block.
             let region = almide_lang::types::extern_abi::is_region(&f.ret);
-            (!region && (returns_result(f) || !exports::scalar_only(visible_ret(f)))) || f.params.iter().any(|(_, t)| !exports::scalar_only(t))
+            (!region && !ok_value_export(f) && (returns_result(f) || !exports::scalar_only(visible_ret(f))))
+                || f.params.iter().any(|(_, t)| !exports::scalar_only(t))
         });
         externs_string || exports_block
     }
@@ -113,6 +117,7 @@ impl HostSurface {
                 params: import_params(f),
                 ret: f.ret_ty.clone(),
                 is_effect: f.is_effect,
+                declared: false,
             };
             if let Some(a) = f.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") {
                 s.mark_async(a);
@@ -144,6 +149,7 @@ impl HostSurface {
             let mut exported = sig();
             if let Some(a) = declared {
                 exported.name = a.symbol.to_string();
+                exported.declared = true;
             }
             s.exports.push(exported);
         }
@@ -162,6 +168,7 @@ impl HostSurface {
                     params: f.params.iter().map(|p| (p.name.as_str().to_string(), p.ty.clone())).collect(),
                     ret: f.ret_ty.clone(),
                     is_effect: f.is_effect,
+                    declared: true,
                 });
             }
             let Some(a) = f.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") else { continue };
@@ -175,6 +182,7 @@ impl HostSurface {
                 params: import_params(f),
                 ret: f.ret_ty.clone(),
                 is_effect: f.is_effect,
+                declared: false,
             };
             s.externs.push(HostExtern { module, import, sig });
         }
@@ -242,6 +250,14 @@ fn result_ok_ty(ty: &Ty) -> Option<&Ty> {
 /// unwraps (#3352): an `effect fn` (always), or a declared `Result[T, String]`?
 fn returns_result(f: &HostFn) -> bool {
     f.is_effect || result_ok_ty(&f.ret).is_some()
+}
+
+/// #4376: a declared `@export(wasm)` effect fn whose declared return is a
+/// scalar (`Int`, `Float`, `Bool`, `Unit`) crosses as the ok value itself —
+/// the emitter's adapter traps on `err` — so its wrapper reads no block.
+/// The emitter records it as `ExportRet::OkValue`, which the plan checks.
+fn ok_value_export(f: &HostFn) -> bool {
+    f.declared && f.is_effect && result_ok_ty(&f.ret).is_none() && exports::scalar_only(&f.ret)
 }
 
 /// The JS-visible return type of an export: `T` of an unwrapped Result.

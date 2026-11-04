@@ -1,0 +1,4 @@
+@export(c, "greet")
+fn greet(name: String) -> Int = string.len(name)
+
+effect fn main() -> Unit = println(int.to_string(greet("hi")))

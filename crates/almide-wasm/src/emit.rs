@@ -649,6 +649,7 @@ fn emit_program_pass(
                 }
                 let ret = match claimed {
                     crate::region_export::Claimed::Region => crate::host_exports::ExportRet::Region,
+                    crate::region_export::Claimed::OkValue => crate::host_exports::export_ok_value(table.infos[i].ret, &types),
                     _ => crate::host_exports::export_ret(table.infos[i].ret, &types),
                 };
                 crate::host_exports::note_export(&export_name, table.infos[i].param_owned.clone(), params, ret);
