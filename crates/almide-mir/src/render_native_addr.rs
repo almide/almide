@@ -261,7 +261,11 @@ impl AddrState {
         let whole = slots::built_whole(func, &alloc_rec, &base_of);
         let whole_enum = slots::enum_built_whole(func, &alloc_rec, &base_of, &consts);
         let single: BTreeMap<ValueId, bool> = slots::single_elem_lists(func, &base_of, &consts).into_iter().map(|b| (b, false)).collect();
-        let pushed = slots::filled_in_order(func, &base_of, &consts).into_iter().filter(|b| !single.contains_key(b)).collect();
+        let pushed = slots::filled_in_order(func, &base_of, &consts)
+            .into_iter()
+            .chain(slots::dense_loop_fills(func, &consts))
+            .filter(|b| !single.contains_key(b))
+            .collect();
         let reassigned = func
             .ops
             .iter()
