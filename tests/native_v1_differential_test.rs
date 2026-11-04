@@ -163,6 +163,10 @@ const CORPUS: &[(&str, &str)] = &[
     //    float.to_bits floor rows — empty, non-alphabetic and multi-byte text,
     //    an over-long take, a NaN's canonical bits. ──
     ("floor_4006_shims_b", "fn main() -> Unit = {\n  println(bool.to_string(string.is_empty(\"\")))\n  println(bool.to_string(string.is_alpha(\"\u{e9}t\u{e9}\")))\n  println(bool.to_string(string.is_alpha(\"a1\")))\n  println(bool.to_string(string.is_alphanumeric(\"a1\")))\n  println(bool.to_string(string.is_alphanumeric(\"\")))\n  println(string.capitalize(\"\u{df}tra\u{df}e\"))\n  println(string.take(\"h\u{e9}llo\", 3))\n  println(string.take(\"ab\", 9))\n  println(int.to_string(float.to_bits(1.5)))\n  println(int.to_string(float.to_bits(0.0 / 0.0)))\n}\n"),
+    // ── #4006: reversing a String list, once a wall (its self-hosted body is
+    //    raw memory), is the declared floor's `list.reverse` over the
+    //    `Vec<AlmideString>` the self-hosted `list_reverse_str` specializes. ──
+    ("str_list_reverse", "fn main() -> Unit = {\n  let parts = string.split(\"a,b\", \",\")\n  println(list.reverse(parts)[0])\n}\n"),
     // ── #4006: immutable top-level lets whose initializers cannot abort,
     //    materialized at each use: literals, const arithmetic over other
     //    lets (wrapping), a float division and a string. ──
@@ -257,9 +261,6 @@ fn out_of_subset_walls_honestly() {
     let walls = [
         // `list.len` over a scalar list joined the floor with `list.range`
         // (#1869); a combinator over the list is still outside it.
-        // #4006: `list.reverse` and `string.split` joined the declared native
-        // floor; reversing a String list still walls (its body is raw memory).
-        ("str_list_reverse", "fn main() -> Unit = {\n  let parts = string.split(\"a,b\", \",\")\n  println(list.reverse(parts)[0])\n}\n"),
         // list_param moved to the POSITIVE corpus — rung 4 renders scalar-list
         // params/literals/indexing natively (`vec![…]` + the bounds shims).
         // #4006 family I: top-level state lives in native storage slots now,
