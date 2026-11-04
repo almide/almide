@@ -10,6 +10,7 @@
 1970	spec/wasm_cross/append_accumulator.almd
 2546	spec/wasm_cross/append_accumulator_heap.almd
 4134	spec/wasm_cross/append_accumulator_heap_linear.almd
+5051	spec/wasm_cross/arg_call_rebinds_global.almd
 20482	spec/wasm_cross/arg_rebinds_earlier_arg.almd
 8584	spec/wasm_cross/args_surface.almd
 2879	spec/wasm_cross/as_pattern.almd
@@ -580,9 +581,9 @@
 5790	spec/wasm_cross/mg_rebuild_two_phase.almd
 2279	spec/wasm_cross/module_global_const.almd
 5219	spec/wasm_cross/module_var_alias_cow.almd
-11825	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
-4552	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
-10074	spec/wasm_cross/mut_call_nested_read_before.almd
+11817	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
+4592	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
+10092	spec/wasm_cross/mut_call_nested_read_before.almd
 6401	spec/wasm_cross/mut_call_two_mut_args_read.almd
 5391	spec/wasm_cross/mut_heap_param.almd
 5174	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
