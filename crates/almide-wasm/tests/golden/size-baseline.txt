@@ -100,11 +100,11 @@
 40286	spec/wasm_cross/codec_decode_errors.almd
 45939	spec/wasm_cross/codec_decode_field_order.almd
 39053	spec/wasm_cross/codec_deep_nesting.almd
-50279	spec/wasm_cross/codec_direction_split.almd
+50281	spec/wasm_cross/codec_direction_split.almd
 33531	spec/wasm_cross/codec_doc_array.almd
 40680	spec/wasm_cross/codec_empty_and_bool.almd
 35917	spec/wasm_cross/codec_extra_keys.almd
-47540	spec/wasm_cross/codec_field_skip_matrix.almd
+47542	spec/wasm_cross/codec_field_skip_matrix.almd
 37267	spec/wasm_cross/codec_float_int.almd
 37172	spec/wasm_cross/codec_int_float_boundaries.almd
 39844	spec/wasm_cross/codec_list_default.almd
@@ -281,7 +281,7 @@
 10262	spec/wasm_cross/fs_root_escape.almd
 8347	spec/wasm_cross/fs_write_errno.almd
 3017	spec/wasm_cross/fuel_bare_result.almd
-2490	spec/wasm_cross/fuel_block_body.almd
+2414	spec/wasm_cross/fuel_block_body.almd
 1546	spec/wasm_cross/fuel_bounded_boundary.almd
 3493	spec/wasm_cross/fuel_cut_in_arm_loop.almd
 3014	spec/wasm_cross/fuel_cut_releases_frame.almd
