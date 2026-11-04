@@ -39,6 +39,9 @@ use almide_lang::ast::{
 };
 use almide_lang::stdlib_info::{bundled_source, AUTO_IMPORT_BUNDLED};
 
+mod live;
+pub use live::{live_bundled, LiveBundled, COMPILER_INSERTED, TEST_SYNTHESIZED};
+
 /// The names one source spells, split by the position they can reach a
 /// module from.
 #[derive(Default)]
@@ -659,5 +662,54 @@ mod tests {
         // int8's bodies call `int.*`: reaching int8 reaches int.
         let r = reached("fn f(x: Int8) -> Int8 = int8.abs(x)\n");
         assert!(r.contains(&"int8") && r.contains(&"int"), "{r:?}");
+    }
+
+    fn live(src: &str) -> super::LiveBundled {
+        let tokens = almide_lang::lexer::Lexer::tokenize(src);
+        let prog = almide_lang::parser::Parser::new(tokens).parse().expect("parse");
+        super::live_bundled(std::iter::once(&prog), &[])
+    }
+
+    fn is_live(l: &super::LiveBundled, module: &str, f: &str) -> bool {
+        l.live_fns.get(module).is_some_and(|fs| fs.contains(f))
+    }
+
+    #[test]
+    fn hello_world_keeps_no_bundled_function() {
+        let l = live("fn main() -> Unit = println(\"hi\")\n");
+        assert!(l.auto_modules.is_empty() && l.live_fns.values().all(|fs| fs.is_empty()), "{:?}", l.auto_modules);
+    }
+
+    #[test]
+    fn a_reached_module_keeps_only_the_functions_named() {
+        // #4328: `list.map` loads `list`, but `list.sort_by` stays out of the
+        // checker and the lowering.
+        let l = live("fn main() -> Unit = println(int.to_string(list.len(list.map([1], (x) => x + 1))))\n");
+        assert!(is_live(&l, "list", "map") && is_live(&l, "list", "len"), "{:?}", l.live_fns.get("list"));
+        assert!(!is_live(&l, "list", "sort_by"), "{:?}", l.live_fns.get("list"));
+    }
+
+    #[test]
+    fn a_live_body_keeps_what_it_names_in_another_module() {
+        // `list.sum[A: Numeric]` calls `A.__sum`: the requirement each
+        // reached number module implements stays live with its module.
+        let l = live("fn main() -> Unit = println(int.to_string(list.sum([1, 2])))\n");
+        assert!(is_live(&l, "list", "sum"), "{:?}", l.live_fns.get("list"));
+        assert!(is_live(&l, "int", "__sum"), "{:?}", l.live_fns.get("int"));
+    }
+
+    #[test]
+    fn a_self_hosted_body_keeps_the_bundled_functions_it_calls() {
+        // The wasm leg links `json.parse`'s self-hosted body, which decodes
+        // `\u` escapes through `string.from_codepoint`; nothing the program
+        // spells names it.
+        let tokens = almide_lang::lexer::Lexer::tokenize(
+            "import json\nfn main() -> Unit = println(json.stringify(json.parse(\"1\") ?? value.null()))\n",
+        );
+        let prog = almide_lang::parser::Parser::new(tokens).parse().expect("parse");
+        let json_src = almide_lang::stdlib_info::bundled_source("json").expect("json is bundled");
+        let json = almide_lang::parse_cached(json_src).expect("json parses");
+        let l = super::live_bundled(std::iter::once(&prog), &[("json", json)]);
+        assert!(is_live(&l, "string", "from_codepoint"), "{:?}", l.live_fns.get("string"));
     }
 }
