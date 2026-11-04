@@ -40,6 +40,37 @@ pub fn tmp_of(dir: &Path) -> PathBuf {
     dir.with_extension("tmp")
 }
 
+/// The `-S` grants a stock `wasmtime run` needs to load and serve `art` the
+/// way native runs it: the ones `almide build` prints for a WASI 0.3
+/// component (`component_availability::http_grant_note` /
+/// `sockets_grant_note`). Native has the network and http, so a stock run
+/// without them refuses an http component at load and denies every socket
+/// address (#4471). Read from the interfaces the artifact imports; a core
+/// module gets none, since wasmtime refuses `-S http` on one.
+pub fn stock_grants(art: &Path) -> Vec<String> {
+    std::fs::read(art)
+        .map(|b| grants_for(&b))
+        .unwrap_or_default()
+}
+
+fn grants_for(bytes: &[u8]) -> Vec<String> {
+    // The component binary's preamble: magic, then version 0x0d, layer 1.
+    const COMPONENT: &[u8] = b"\0asm\x0d\x00\x01\x00";
+    if !bytes.starts_with(COMPONENT) {
+        return Vec::new();
+    }
+    let imports = |iface: &str| bytes.windows(iface.len()).any(|w| w == iface.as_bytes());
+    [
+        ("wasi:http/", "http"),
+        ("wasi:sockets/", "inherit-network"),
+        ("wasi:sockets/ip-name-lookup", "allow-ip-name-lookup"),
+    ]
+    .iter()
+    .filter(|(iface, _)| imports(iface))
+    .flat_map(|(_, grant)| ["-S".to_string(), grant.to_string()])
+    .collect()
+}
+
 /// A fresh sandbox under `scratch`, seeded with the fixed tree and the stdin
 /// file. The stdin file lives beside the sandbox, so it is not in the tree.
 pub fn create(scratch: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
@@ -174,13 +205,15 @@ impl World {
         }
     }
 
-    /// What a stock `wasmtime run` needs before the module to see the same
-    /// world: the sandbox preopened as the guest's `.`, and the env.
-    pub fn wasmtime_args(&self) -> Vec<String> {
-        let mut a = vec![
+    /// What a stock `wasmtime run` needs before the module `art` to see the
+    /// same world: the sandbox preopened as the guest's `.`, the env, and
+    /// the grants its imports need ([`stock_grants`]).
+    pub fn wasmtime_args(&self, art: &Path) -> Vec<String> {
+        let mut a = stock_grants(art);
+        a.extend([
             format!("--dir={}::.", self.dir.display()),
             format!("--dir={}::/tmp", tmp_of(&self.dir).display()),
-        ];
+        ]);
         a.extend(ENV.iter().map(|(k, v)| format!("--env={k}={v}")));
         a.extend(
             super::fixture::env()
@@ -200,6 +233,21 @@ impl Drop for World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #4471: an http component gets `-S http`, a sockets component the
+    /// network (and name lookup when it imports it), a core module nothing.
+    #[test]
+    fn a_stock_run_gets_the_grants_its_component_imports() {
+        let comp = |imports: &str| [b"\0asm\x0d\x00\x01\x00".as_slice(), imports.as_bytes()].concat();
+        assert_eq!(grants_for(&comp("wasi:http/types@0.3.0")), ["-S", "http"]);
+        assert_eq!(
+            grants_for(&comp("wasi:sockets/tcp@0.3.0 wasi:sockets/ip-name-lookup@0.3.0")),
+            ["-S", "inherit-network", "-S", "allow-ip-name-lookup"]
+        );
+        assert!(grants_for(&comp("wasi:cli/stdout@0.3.0")).is_empty());
+        let core = [b"\0asm\x01\x00\x00\x00".as_slice(), b"wasi:http/types"].concat();
+        assert!(grants_for(&core).is_empty(), "wasmtime refuses -S http on a core module");
+    }
 
     #[test]
     fn a_fresh_sandbox_snapshots_the_seeded_tree_and_sees_a_write() {
