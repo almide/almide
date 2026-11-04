@@ -834,6 +834,11 @@ fn render_else(
                 t,
                 var(v),
             ),
+            NTy::RecRef(i) if borrows.contains(d) => (
+                format!("let {}: &{};", var(*d), crate::render_native_rec::struct_name(i)),
+                t,
+                var(v),
+            ),
             NTy::I64 => (
                 format!("let mut {}: i64 = 0;", var(*d)),
                 NTy::I64,
@@ -929,7 +934,7 @@ fn render_end_if(
         let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
         let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
         let join_t = *tys.get(&d).ok_or_else(|| wall("native: if-value join untyped"))?;
-        if borrows.contains(&d) && matches!(join_t, NTy::VecRef | NTy::StrRef) {
+        if borrows.contains(&d) && matches!(join_t, NTy::VecRef | NTy::StrRef | NTy::RecRef(_)) {
             if t != join_t {
                 return Err(wall("native: borrow-join arms disagree on type"));
             }
