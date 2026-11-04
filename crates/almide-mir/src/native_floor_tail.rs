@@ -475,8 +475,8 @@ pub(crate) fn render_call(
         // A `(String, Value)` list is converted into the runtime's pairs in
         // any case: the owned twin takes that copy (or the moved-out source)
         // instead of copying it once more.
-        if matches!(f.params.get(*k), Some(FloorParam::Set(_) | FloorParam::Bytes)) {
-            // The caller's set or Bytes, not read again: moved into the owned twin.
+        if matches!(f.params.get(*k), Some(FloorParam::Set(_) | FloorParam::Map(_) | FloorParam::Bytes)) {
+            // The caller's set, map or Bytes, not read again: moved into the owned twin.
             if dying.get(*k) == Some(&true) && matches!(args.get(*k).map(|a| a.1), Some(NTy::Rec(_))) {
                 rendered[*k] = crate::render_native_move::take_expr(&args[*k].0);
                 symbol = twin;
