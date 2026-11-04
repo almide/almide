@@ -1,0 +1,6 @@
+// Two loops, over `a` then over `b`: the second exit test is taken against `a`.
+fn main() -> Unit = {
+  let a = [1, 2]
+  let b = [3, 4, 5]
+  println(int.to_string(list.fold(a, 0, (s, x) => s + x) + list.fold(b, 0, (s, x) => s + x)))
+}

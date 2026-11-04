@@ -408,6 +408,21 @@ pub fn repr_of(ty: &Ty) -> Result<Repr, LowerError> {
     Ok(Repr::Scalar { width: w })
 }
 
+/// The declared width and signedness of a NARROW integer type — the width the
+/// lowering re-wraps its arithmetic to (`wrap_to_declared_width`), and the one
+/// place that table lives (the native render reads its narrow ABI off it).
+pub(crate) fn narrow_int_width(ty: &Ty) -> Option<(u32, bool)> {
+    Some(match ty {
+        Ty::Int8 => (8u32, true),
+        Ty::Int16 => (16, true),
+        Ty::Int32 => (32, true),
+        Ty::UInt8 => (8, false),
+        Ty::UInt16 => (16, false),
+        Ty::UInt32 => (32, false),
+        _ => return None,
+    })
+}
+
 /// Map a declared Almide scalar/heap type to its host wasm IMPORT valtype (the
 /// `@extern(wasm, …)` ABI): `Int`/narrow ints → `I64`, `Float` → `F64`, `Bool` →
 /// `I32`, a `String`/heap pointer → `I32`. A type with no flat valtype mapping

@@ -249,15 +249,27 @@ fn write_generated_cargo_project(
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
 
-    let cargo_toml = build_cargo_toml(GENERATED_CARGO_TOML, &generated_crate_deps(rs_code, native_deps));
-    std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
-        .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
+    let mut cargo_toml = build_cargo_toml(GENERATED_CARGO_TOML, &generated_crate_deps(rs_code, native_deps));
 
     let mut final_code = rs_code.to_string();
 
     // The package's and its dependencies' native modules + dependency
     // native-deps — exactly the inputs the cache key was computed from.
     inputs.apply(&mut final_code, &src_dir, project_dir)?;
+
+    // A v1 render's runtime part becomes a crate of its own, under the
+    // runtime's profile (`cargo_toml::split_runtime_crate`).
+    if let Some((program, runtime)) = super::cargo_toml::split_runtime_crate(&final_code) {
+        let rt_src = project_dir.join(super::cargo_toml::RT_CRATE).join("src");
+        std::fs::create_dir_all(&rt_src).map_err(|e| format!("failed to create {}: {}", rt_src.display(), e))?;
+        std::fs::write(rt_src.join("lib.rs"), &runtime).map_err(|e| format!("failed to write the runtime crate: {e}"))?;
+        std::fs::write(rt_src.parent().expect("crate dir").join("Cargo.toml"), super::cargo_toml::runtime_crate_manifest())
+            .map_err(|e| format!("failed to write the runtime crate manifest: {e}"))?;
+        cargo_toml.push_str(&super::cargo_toml::runtime_crate_manifest_lines());
+        final_code = program;
+    }
+    std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
+        .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
 
     // Library modules may not define main — auto-generate an empty one
     if !defines_entry_point(&final_code) {

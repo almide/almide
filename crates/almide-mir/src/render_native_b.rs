@@ -17,7 +17,7 @@ pub(crate) struct OpSink<'a> {
 fn render_call_indirect(
     dst: &Option<ValueId>,
     table_idx: &ValueId,
-    args: &Vec<CallArg>,
+    args: &[CallArg],
     result: &Option<Repr>,
     sink: OpSink<'_>,
 ) -> Result<(), LowerError> {
@@ -83,6 +83,10 @@ fn render_list_get_scalar(
         return Err(wall("native: ListGet on a non-list value"));
     }
     used_shims.push(IDX_GET_SHIM);
+    // The shim checks the index, then reads (render_native_bounds).
+    let slot = crate::render_native_bounds::Slot { base: *list, idx: Some(*idx), k: 0 };
+    crate::render_native_bounds::check(slot);
+    crate::render_native_bounds::access(slot);
     tys.insert(*dst, NTy::I64);
     let borrow = if lt == NTy::Vec { "&" } else { "" };
     line!(
@@ -117,6 +121,10 @@ fn render_list_set_scalar(
         return Err(wall("native: ListSet on a non-owned list"));
     }
     used_shims.push(IDX_SET_SHIM);
+    // The shim checks the index, then stores (render_native_bounds).
+    let slot = crate::render_native_bounds::Slot { base: *list, idx: Some(*idx), k: 0 };
+    crate::render_native_bounds::check(slot);
+    crate::render_native_bounds::store(slot);
     line!("almide_idx_set(&mut {}, {}, {});", var(*list), var(*idx), var(*val));
     Ok(())
 }
@@ -143,10 +151,17 @@ pub(crate) fn render_set_local(
         NTy::Vec => format!("{}.clone()", var(*src)),
         NTy::VecRef => format!("{}.to_vec()", var(*src)),
         NTy::Res => format!("{}.clone()", var(*src)),
+        NTy::VecStr => format!("{}.clone()", var(*src)),
+        NTy::VecStrRef => format!("{}.to_vec()", var(*src)),
+        NTy::Rec(_) | NTy::RecRef(_) => format!("{}.clone()", var(*src)),
+        NTy::Opt => var(*src),
+        NTy::ResStr => format!("{}.clone()", var(*src)),
     };
     let store_t = match t {
         NTy::StrRef => NTy::Str,
         NTy::VecRef => NTy::Vec,
+        NTy::VecStrRef => NTy::VecStr,
+        NTy::RecRef(i) => NTy::Rec(i),
         other => other,
     };
     if let Some(prev) = tys.get(local) {
@@ -192,8 +207,16 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
     let name = call.name;
     if let Some(callee) = user_fns.get(name.as_str()) {
         render_user_fn_call(call, callee, sigs, OpSink { tys, out, indent, used_shims })
+    } else if name == "__str_concat" && render_concat_in_place(call, tys, out, indent) {
+        Ok(())
     } else if let Some(shim_entry) = shim(name) {
         render_closed_shim_call(call, shim_entry, OpSink { tys, out, indent, used_shims })
+    } else if let Some(floor) = crate::native_floor::declared(name) {
+        render_declared_floor_call(call, floor, OpSink { tys, out, indent, used_shims })
+    } else if crate::native_list_ops::is_list_concat(name) {
+        render_list_concat(call, OpSink { tys, out, indent, used_shims })
+    } else if let Some(floor) = protocol_instance_floor(&call, tys) {
+        render_declared_floor_call(call, floor, OpSink { tys, out, indent, used_shims })
     } else {
         Err(wall(format!(
             "native: call to `{name}` — not a lowered user fn and not in the \
@@ -220,9 +243,21 @@ fn render_user_fn_call(
     for (i, (a, p)) in call.args.iter().zip(&callee.params).enumerate() {
         let want = declared_param_want(callee_sig, i, p)?;
         let (code, got) = call_arg(a, s.tys)?;
-        rendered_args.push(user_arg_in_declared_mode(name, want, code, got)?);
+        let arg = if callee.owned_params.contains(&p.value) {
+            moved_arg(name, crate::render_native::owned_nty(want), code, got)?
+        } else {
+            user_arg_in_declared_mode(name, want, code, got)?
+        };
+        // A narrow param crosses in its real Rust type (#4006).
+        rendered_args.push(match callee_sig.and_then(|(ps, _)| ps.get(i)).and_then(|k| k.narrow_rust()) {
+            Some(t) => format!("({arg} as {t})"),
+            None => arg,
+        });
     }
-    let rendered = format!("{}({})", mangle(name), rendered_args.join(", "));
+    let mut rendered = format!("{}({})", mangle(name), rendered_args.join(", "));
+    if callee_sig.and_then(|(_, r)| *r).is_some_and(|k| k.narrow_rust().is_some()) {
+        rendered = format!("({rendered} as i64)");
+    }
     bind_user_fn_result(call, callee_sig, &rendered, s)
 }
 
@@ -237,13 +272,15 @@ fn declared_param_want(
     p: &crate::MirParam,
 ) -> Result<NTy, LowerError> {
     Ok(match callee_sig.and_then(|(ps, _)| ps.get(i)) {
-        Some(NativeSigKind::I64) => NTy::I64,
+        Some(NativeSigKind::I64 | NativeSigKind::Narrow { .. }) => NTy::I64,
         Some(NativeSigKind::Str) => NTy::StrRef,
         Some(NativeSigKind::ListI64) => NTy::VecRef,
+        Some(NativeSigKind::ListStr) => NTy::VecStrRef,
+        Some(NativeSigKind::Rec(i)) => NTy::RecRef(*i),
         Some(NativeSigKind::F64) => NTy::F64,
-        Some(NativeSigKind::Res) => {
-            return Err(wall("native: Result-typed param — outside the rung subset"))
-        }
+        Some(NativeSigKind::Opt) => NTy::Opt,
+        Some(NativeSigKind::ResStr) => NTy::ResStr,
+        Some(NativeSigKind::Res) => NTy::Res,
         None => repr_nty(&p.repr, true)?,
     })
 }
@@ -253,6 +290,19 @@ fn declared_param_want(
 /// list param, and everything else follows the string convention — walling on
 /// any kind mismatch. Extracted verbatim from `render_call_fn`
 /// (codopsy r2, #852).
+/// An argument handed to a MOVE param (#4006 class P): the caller's own value,
+/// moved (its `Consume` follows the call — `MirFunction::call_moves`).
+fn moved_arg(name: &str, want: NTy, code: String, got: NTy) -> Result<String, LowerError> {
+    let same = match (want, got) {
+        (NTy::Rec(i), NTy::Rec(j)) => i == j,
+        (w, g) => w == g,
+    };
+    if !same || matches!(got, NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) {
+        return Err(wall(format!("native: a borrowed or other-typed arg to a move param of `{name}`")));
+    }
+    Ok(code)
+}
+
 fn user_arg_in_declared_mode(
     name: &str,
     want: NTy,
@@ -269,6 +319,17 @@ fn user_arg_in_declared_mode(
             }
             Ok(code)
         }
+        NTy::VecStrRef | NTy::VecStr => match got {
+            NTy::VecStr => Ok(format!("&{code}")),
+            NTy::VecStrRef => Ok(code),
+            _ => Err(wall(format!("native: non-string-list arg to List[String] param of `{name}`"))),
+        },
+        NTy::RecRef(i) | NTy::Rec(i) => match got {
+            NTy::Rec(j) if j == i => Ok(format!("&{code}")),
+            NTy::RecRef(j) if j == i => Ok(code),
+            _ => Err(wall(format!("native: arg of another type to a record param of `{name}`"))),
+        },
+        NTy::ResStr | NTy::Res | NTy::Opt => carrier_arg_in_declared_mode(name, want, code, got),
         NTy::VecRef | NTy::Vec => {
             if !got.is_veccy() {
                 return Err(wall(format!(
@@ -287,6 +348,43 @@ fn user_arg_in_declared_mode(
                 )));
             }
             Ok(as_str_arg(&code, got))
+        }
+    }
+}
+
+/// The carrier arms of [`user_arg_in_declared_mode`] (`want` is `ResStr`,
+/// `Res` or `Opt`): the arg must carry the same carrier.
+fn carrier_arg_in_declared_mode(
+    name: &str,
+    want: NTy,
+    code: String,
+    got: NTy,
+) -> Result<String, LowerError> {
+    match want {
+        NTy::ResStr => {
+            if got != NTy::ResStr {
+                return Err(wall(format!(
+                    "native: non-Result arg to Result param of `{name}`"
+                )));
+            }
+            Ok(format!("{code}.clone()"))
+        }
+        NTy::Res => {
+            if got != NTy::Res {
+                return Err(wall(format!(
+                    "native: non-Result arg to Result param of `{name}`"
+                )));
+            }
+            Ok(format!("{code}.clone()"))
+        }
+        // `NTy::Opt`, the one carrier left.
+        _ => {
+            if got != NTy::Opt {
+                return Err(wall(format!(
+                    "native: non-Option arg to Option param of `{name}`"
+                )));
+            }
+            Ok(code)
         }
     }
 }
@@ -315,20 +413,18 @@ fn bind_user_fn_result(
             // Its KIND comes from the callee's declared return.
             let t = match callee_sig.and_then(|(_, r)| *r) {
                 Some(NativeSigKind::ListI64) => NTy::Vec,
+                Some(NativeSigKind::ListStr) => NTy::VecStr,
+                Some(NativeSigKind::Rec(i)) => NTy::Rec(i),
                 Some(NativeSigKind::Str) => NTy::Str,
-                Some(NativeSigKind::I64) => NTy::I64,
+                Some(NativeSigKind::I64 | NativeSigKind::Narrow { .. }) => NTy::I64,
                 Some(NativeSigKind::F64) => NTy::F64,
                 Some(NativeSigKind::Res) => NTy::Res,
+                Some(NativeSigKind::Opt) => NTy::Opt,
+                Some(NativeSigKind::ResStr) => NTy::ResStr,
                 None => repr_nty(r, false)?,
             };
             tys.insert(*d, t);
-            let ty_name = match t {
-                NTy::Str => "AlmideString",
-                NTy::Vec => "Vec<i64>",
-                NTy::F64 => "f64",
-                NTy::Res => "Result<i64, AlmideString>",
-                _ => "i64",
-            };
+            let ty_name = crate::render_native_rec::owned_ty(t);
             line!("let mut {}: {} = {};", var(*d), ty_name, rendered);
         }
         (None, _) => line!("{rendered};"),
@@ -345,6 +441,138 @@ fn bind_user_fn_result(
 /// param list gates each arg, its source is pulled into `used_shims`, and the
 /// result binds by the shim's declared return. Extracted verbatim from
 /// `render_call_fn` (codopsy r2, #852).
+/// The list `+` operator: a fresh list of `a`'s elements then `b`'s.
+fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerError> {
+    let NativeCall { dst, name, args, .. } = call;
+    let OpSink { tys, out, indent, .. } = s;
+    let [a, b] = args.as_slice() else {
+        return Err(wall(format!("native: `{name}` arity mismatch")));
+    };
+    let (a, at) = call_arg(a, tys)?;
+    let (b, bt) = call_arg(b, tys)?;
+    let mismatch = || wall(format!("native: `{name}` over operands outside the native lists ({at:?}, {bt:?})"));
+    let (sa, ty) = crate::native_list_ops::as_slice(&a, at).ok_or_else(mismatch)?;
+    let (sb, ty_b) = crate::native_list_ops::as_slice(&b, bt).ok_or_else(mismatch)?;
+    if ty != ty_b {
+        return Err(mismatch());
+    }
+    let Some(d) = dst else {
+        return Err(wall(format!("native: `{name}` without a result")));
+    };
+    tys.insert(*d, crate::native_list_ops::owned(at));
+    for _ in 0..indent {
+        out.push_str("    ");
+    }
+    // The left list's last use (#4006 class P): grow its own buffer. The
+    // right side must be another value that cannot view the left one's
+    // buffer: an owned list of its own (`xs + xs` reads the left list as the
+    // right one).
+    if let [CallArg::Handle(l), CallArg::Handle(r)] = args.as_slice() {
+        if l != r
+            && matches!(at, NTy::Vec | NTy::VecStr)
+            && matches!(bt, NTy::Vec | NTy::VecStr)
+            && crate::render_native_move::moving_arg(*l)
+        {
+            writeln!(
+                out,
+                "let mut {}: {ty} = {{ let mut r: {ty} = {}; r.extend_from_slice({sb}); r }};",
+                var(*d),
+                crate::render_native_move::take_expr(&a)
+            )
+            .expect("writing to a String cannot fail");
+            return Ok(());
+        }
+    }
+    writeln!(
+        out,
+        "let mut {}: {ty} = {{ let mut r: {ty} = Vec::with_capacity({sa}.len() + {sb}.len()); r.extend_from_slice({sa}); r.extend_from_slice({sb}); r }};",
+        var(*d)
+    )
+    .expect("writing to a String cannot fail");
+    Ok(())
+}
+
+/// A stdlib call its declaration puts on the native floor (`@intrinsic`, a
+/// per-type signature, a runtime body the header can carry): the runtime
+/// body is rendered beside the program and called as v0 calls it.
+/// The declared floor entry of the conformer a protocol-generic stdlib call
+/// answers with, given the kinds its args carry (`list.join` over strings).
+fn protocol_instance_floor(call: &NativeCall<'_>, tys: &BTreeMap<ValueId, NTy>) -> Option<&'static crate::native_floor::FloorFn> {
+    let kinds: Vec<NTy> = call.args.iter().map(|a| call_arg(a, tys).map(|(_, k)| k)).collect::<Result<_, _>>().ok()?;
+    crate::native_floor::declared(&crate::native_floor::protocol_instance(call.name, &kinds)?)
+}
+
+fn render_declared_floor_call(
+    call: NativeCall<'_>,
+    floor: &'static crate::native_floor::FloorFn,
+    s: OpSink<'_>,
+) -> Result<(), LowerError> {
+    let NativeCall { dst, name, args, .. } = call;
+    let OpSink { tys, out, indent, used_shims } = s;
+    let rendered: Vec<(String, NTy)> = args.iter().map(|a| call_arg(a, tys)).collect::<Result<_, _>>()?;
+    let dying: Vec<bool> =
+        args.iter().map(|a| matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))).collect();
+    let dst_map = dst.and_then(crate::render_native_rec::declared_map);
+    let (expr, ret) = crate::native_floor::render_call(floor, name, &rendered, &dying, dst_map)?;
+    used_shims.push(crate::native_floor::FLOOR_HEADER);
+    match &floor.twin {
+        Some((_, twin, items)) if expr.contains(&format!("{twin}(")) => used_shims.extend(items.iter().copied()),
+        _ => used_shims.extend(floor.items.iter().copied()),
+    }
+    for _ in 0..indent {
+        out.push_str("    ");
+    }
+    match (dst, ret) {
+        (Some(d), Some(t)) => {
+            tys.insert(*d, t);
+            let ty_name = crate::render_native_rec::owned_ty(t);
+            writeln!(out, "let mut {}: {} = {};", var(*d), ty_name, expr).expect("writing to a String cannot fail");
+        }
+        (None, _) => writeln!(out, "{expr};").expect("writing to a String cannot fail"),
+        (Some(_), None) => return Err(wall(format!("native: floor call `{name}` has no result"))),
+    }
+    Ok(())
+}
+
+/// `a + b` over strings where one side is an owned string that dies at the
+/// concatenation: the result reuses its buffer — `b.prepend(a)` /
+/// `a.concat(b)`, AlmideStr's in-place edits when the buffer is unique — the
+/// expression v0's `AlmideConcat` renders, where the shim allocates a third
+/// string. `false` leaves the call to the shim.
+fn render_concat_in_place(call: NativeCall<'_>, tys: &mut BTreeMap<ValueId, NTy>, out: &mut String, indent: usize) -> bool {
+    let (Some(d), [CallArg::Handle(a), CallArg::Handle(b)]) = (call.dst, call.args.as_slice()) else { return false };
+    if a == b {
+        return false;
+    }
+    let (Some(ta), Some(tb)) = (tys.get(a).copied(), tys.get(b).copied()) else { return false };
+    let dying = |v: &ValueId, t: NTy| t == NTy::Str && crate::render_native_move::moving_arg(*v);
+    // Edit the side whose buffer can be edited in place: an owned, dying
+    // string that is not a literal (a literal is an immortal static block,
+    // copied before any edit), the left one first as v0's `AlmideConcat`
+    // appends into an owned left and prepends only onto a borrowed one.
+    let editable = |v: &ValueId, t: NTy| dying(v, t) && !crate::render_native_move::is_static_str(*v);
+    let operand = |v: &ValueId, t: NTy| crate::render_native_move::static_str_operand(*v).unwrap_or_else(|| as_str_arg(&var(*v), t));
+    let left = |a: &ValueId, b: &ValueId, tb: NTy| format!("{}.concat({})", crate::render_native_move::take_expr(&var(*a)), operand(b, tb));
+    let right = |a: &ValueId, b: &ValueId, ta: NTy| format!("{}.prepend({})", crate::render_native_move::take_expr(&var(*b)), operand(a, ta));
+    let expr = if editable(a, ta) && tb.is_stringy() {
+        left(a, b, tb)
+    } else if editable(b, tb) && ta.is_stringy() {
+        right(a, b, ta)
+    } else if dying(a, ta) && tb.is_stringy() {
+        left(a, b, tb)
+    } else if dying(b, tb) && ta.is_stringy() {
+        right(a, b, ta)
+    } else {
+        return false;
+    };
+    for _ in 0..indent {
+        out.push_str("    ");
+    }
+    writeln!(out, "let mut {}: AlmideString = {expr};", var(*d)).expect("writing to a String cannot fail");
+    tys.insert(*d, NTy::Str);
+    true
+}
+
 fn render_closed_shim_call(
     call: NativeCall<'_>,
     shim_entry: (&'static [NTy], Option<NTy>, &'static str),
@@ -375,6 +603,7 @@ fn render_closed_shim_call(
             let ty_name = match t {
                 NTy::Str => "AlmideString",
                 NTy::Vec => "Vec<i64>",
+                NTy::VecStr => "Vec<AlmideString>",
                 _ => "i64",
             };
             line!("let mut {}: {} = {};", var(*d), ty_name, call);
@@ -412,6 +641,11 @@ fn shim_arg_in_declared_mode(
             NTy::VecRef => Ok(code),
             _ => Err(wall(format!("native: shim `{name}` arg type mismatch"))),
         },
+        NTy::VecStrRef | NTy::VecStr => match got {
+            NTy::VecStr => Ok(format!("&{code}")),
+            NTy::VecStrRef => Ok(code),
+            _ => Err(wall(format!("native: shim `{name}` arg type mismatch"))),
+        },
         _ => {
             if !got.is_stringy() {
                 return Err(wall(format!("native: shim `{name}` arg type mismatch")));
@@ -420,380 +654,4 @@ fn shim_arg_in_declared_mode(
             Ok(as_str_arg(&code, got))
         }
     }
-}
-
-/// `Op::Prim { kind: FloatBin(op), .. }` — a binary float op.
-pub(crate) fn render_float_bin(
-    op: &crate::FBinOp,
-    d: &ValueId,
-    args: &Vec<ValueId>,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-) -> Result<(), LowerError> {
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    use crate::FBinOp;
-    let sym = match op {
-        FBinOp::Add => "+",
-        FBinOp::Sub => "-",
-        FBinOp::Mul => "*",
-        FBinOp::Div => "/",
-        FBinOp::Min | FBinOp::Max | FBinOp::CopySign => {
-            return Err(wall(format!(
-                "native: float op {op:?} — outside the rung subset (NaN semantics)"
-            )))
-        }
-    };
-    let a = as_f64_arg(&var(args[0]), *tys.get(&args[0]).ok_or_else(|| wall("native: float arg untyped"))?)?;
-    let b = as_f64_arg(&var(args[1]), *tys.get(&args[1]).ok_or_else(|| wall("native: float arg untyped"))?)?;
-    tys.insert(*d, NTy::F64);
-    line!("let mut {}: f64 = {a} {sym} {b};", var(*d));
-    Ok(())
-}
-
-/// `Op::Prim { kind: FloatUn(op), .. }` — a unary float op.
-pub(crate) fn render_float_un(
-    op: &crate::FUnOp,
-    d: &ValueId,
-    args: &Vec<ValueId>,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-) -> Result<(), LowerError> {
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    use crate::FUnOp;
-    let a = as_f64_arg(&var(args[0]), *tys.get(&args[0]).ok_or_else(|| wall("native: float arg untyped"))?)?;
-    let expr = match op {
-        FUnOp::Neg => format!("-({a})"),
-        FUnOp::Abs => format!("({a}).abs()"),
-        FUnOp::Sqrt => format!("({a}).sqrt()"),
-        FUnOp::Floor => format!("({a}).floor()"),
-        FUnOp::Ceil => format!("({a}).ceil()"),
-        // TIES TO EVEN — the exact semantics of wasm's `f64.nearest`, so the
-        // two legs agree bit for bit (#1197's canonical fast-exp range
-        // reduction). NOT `.round()`, which is half-away-from-zero.
-        FUnOp::Nearest => format!("({a}).round_ties_even()"),
-    };
-    tys.insert(*d, NTy::F64);
-    line!("let mut {}: f64 = {expr};", var(*d));
-    Ok(())
-}
-
-/// `Op::Prim { kind: FloatCmp(op), .. }` — a float comparison (result is i64 0/1).
-pub(crate) fn render_float_cmp(
-    op: &crate::FCmpOp,
-    d: &ValueId,
-    args: &Vec<ValueId>,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-) -> Result<(), LowerError> {
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    use crate::FCmpOp;
-    let sym = match op {
-        FCmpOp::Lt => "<",
-        FCmpOp::Le => "<=",
-        FCmpOp::Gt => ">",
-        FCmpOp::Ge => ">=",
-        FCmpOp::Eq => "==",
-        FCmpOp::Ne => "!=",
-    };
-    let a = as_f64_arg(&var(args[0]), *tys.get(&args[0]).ok_or_else(|| wall("native: float arg untyped"))?)?;
-    let b = as_f64_arg(&var(args[1]), *tys.get(&args[1]).ok_or_else(|| wall("native: float arg untyped"))?)?;
-    tys.insert(*d, NTy::I64);
-    line!("let mut {}: i64 = ({a} {sym} {b}) as i64;", var(*d));
-    Ok(())
-}
-
-/// `Op::Call` — a witness-level runtime call (`println` lowers through these).
-fn render_call_witness(
-    dst: &Option<ValueId>,
-    func: &crate::RtFn,
-    args: &Vec<CallArg>,
-    sink: OpSink<'_>,
-) -> Result<(), LowerError> {
-    let OpSink { tys, out, indent, used_shims } = sink;
-    let tys: &BTreeMap<ValueId, NTy> = tys;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    use crate::RtFn;
-    match (func, args.as_slice()) {
-        (RtFn::PrintStr, [a]) => {
-            let (code, t) = call_arg(a, tys)?;
-            if !t.is_stringy() {
-                return Err(wall("native: print_str of a non-String"));
-            }
-            used_shims.push(shim("print_str").expect("\"print_str\" is a literal shim() match arm, always Some").2);
-            line!("rt_print_str({});", as_str_arg(&code, t));
-        }
-        other => {
-            return Err(wall(format!(
-                "native: runtime call {other:?} — outside the rung subset"
-            )))
-        }
-    }
-    if dst.is_some() {
-        return Err(wall("native: print with a result — outside the rung subset"));
-    }
-    Ok(())
-}
-
-/// `Op::IfThen` — open an `if`, pushing the if-as-value join marker (if any).
-fn render_if_then(
-    cond: &ValueId,
-    dst: &Option<ValueId>,
-    tys: &BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: &mut usize,
-    if_stack: &mut Vec<Option<IfJoin>>,
-) {
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..*indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    if let Some(d) = dst {
-        // if-as-value: the join decl is patched in at the first arm
-        // yield, when its type is known.
-        let marker = format!("//__JOIN_{}__", var(*d));
-        line!("{marker}");
-        if_stack.push(Some((marker, *d, tys.keys().copied().collect())));
-    } else {
-        if_stack.push(None);
-    }
-    line!("if {} != 0 {{", var(*cond));
-    *indent += 1;
-}
-
-/// `Op::Else` — close the `then` arm, patch the if-as-value join decl in (its
-/// type is known now), open the `else` arm.
-fn render_else(
-    val: &Option<ValueId>,
-    borrows: &std::collections::BTreeSet<ValueId>,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: &mut usize,
-    if_stack: &mut [Option<IfJoin>],
-) -> Result<(), LowerError> {
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..*indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    if let Some(Some((marker, d, known))) = if_stack.last_mut() {
-        let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
-        let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
-        let arm_own = !known.contains(&v);
-        let (decl, join_t, rhs) = match t {
-            // #3532: a borrow join holds the arm's shared reference.
-            NTy::VecRef | NTy::StrRef if borrows.contains(d) => (
-                format!("let {}: {};", var(*d), if t == NTy::VecRef { "&[i64]" } else { "&str" }),
-                t,
-                var(v),
-            ),
-            NTy::I64 => (
-                format!("let mut {}: i64 = 0;", var(*d)),
-                NTy::I64,
-                var(v),
-            ),
-            NTy::Str => (
-                format!("let mut {}: AlmideString = AlmideString::new();", var(*d)),
-                NTy::Str,
-                format!("{}.clone()", var(v)),
-            ),
-            NTy::StrRef => (
-                format!("let mut {}: AlmideString = AlmideString::new();", var(*d)),
-                NTy::Str,
-                format!("AlmideString::from({})", var(v)),
-            ),
-            NTy::Vec => (
-                format!("let mut {}: Vec<i64> = Vec::new();", var(*d)),
-                NTy::Vec,
-                format!("{}.clone()", var(v)),
-            ),
-            NTy::VecRef => (
-                format!("let mut {}: Vec<i64> = Vec::new();", var(*d)),
-                NTy::Vec,
-                format!("{}.to_vec()", var(v)),
-            ),
-            NTy::F64 => (
-                format!("let mut {}: f64 = 0.0;", var(*d)),
-                NTy::F64,
-                var(v),
-            ),
-            NTy::Res => (
-                format!("let mut {}: Result<i64, AlmideString> = Ok(0);", var(*d)),
-                NTy::Res,
-                format!("{}.clone()", var(v)),
-            ),
-        };
-        *out = out.replacen(marker.as_str(), &decl, 1);
-        tys.insert(*d, join_t);
-        line!("{} = {};", var(*d), join_rhs(v, t, arm_own, rhs));
-        // the else arm's own values are the ones defined after this point
-        *known = tys.keys().copied().collect();
-    }
-    *indent -= 1;
-    line!("}} else {{");
-    *indent += 1;
-    Ok(())
-}
-
-/// `Op::EndIf` — close the `else` arm, converging the if-as-value join (if any).
-fn render_end_if(
-    val: &Option<ValueId>,
-    borrows: &std::collections::BTreeSet<ValueId>,
-    tys: &BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: &mut usize,
-    if_stack: &mut Vec<Option<IfJoin>>,
-) -> Result<(), LowerError> {
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..*indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    let top = if_stack.pop().ok_or_else(|| wall("native: EndIf without IfThen"))?;
-    if let Some((_, d, known)) = top {
-        let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
-        let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
-        let join_t = *tys.get(&d).ok_or_else(|| wall("native: if-value join untyped"))?;
-        if borrows.contains(&d) && matches!(join_t, NTy::VecRef | NTy::StrRef) {
-            if t != join_t {
-                return Err(wall("native: borrow-join arms disagree on type"));
-            }
-            line!("{} = {};", var(d), var(v));
-            *indent -= 1;
-            line!("}}");
-            return Ok(());
-        }
-        let rhs = match t {
-            NTy::I64 | NTy::F64 => var(v),
-            NTy::Str => format!("{}.clone()", var(v)),
-            NTy::StrRef => format!("AlmideString::from({})", var(v)),
-            NTy::Vec => format!("{}.clone()", var(v)),
-            NTy::VecRef => format!("{}.to_vec()", var(v)),
-            NTy::Res => format!("{}.clone()", var(v)),
-        };
-        let arm_t = match t {
-            NTy::StrRef => NTy::Str,
-            NTy::VecRef => NTy::Vec,
-            other => other,
-        };
-        if arm_t != join_t {
-            return Err(wall("native: if-value arms disagree on type"));
-        }
-        line!("{} = {};", var(d), join_rhs(v, t, !known.contains(&v), rhs));
-    }
-    *indent -= 1;
-    line!("}}");
-    Ok(())
-}
-
-/// An if-as-value join: the decl marker, the join value, and the values that
-/// existed when the current arm opened.
-pub(crate) type IfJoin = (String, ValueId, std::collections::BTreeSet<ValueId>);
-
-/// The join's right-hand side: an owned heap value the arm itself defined
-/// dies with the arm, so it moves (its `.clone()` copied it a second time);
-/// a value that outlives the arm keeps `copy`.
-fn join_rhs(v: ValueId, t: NTy, arm_own: bool, copy: String) -> String {
-    match t {
-        NTy::Str | NTy::Vec | NTy::Res if arm_own => var(v),
-        _ => copy,
-    }
-}
-
-/// A rendered call argument with the NTy it carries (`Imm` is always i64).
-fn call_arg(a: &CallArg, tys: &BTreeMap<ValueId, NTy>) -> Result<(String, NTy), LowerError> {
-    match a {
-        CallArg::Handle(v) | CallArg::Scalar(v) => {
-            let t = *tys.get(v).ok_or_else(|| wall("native: call arg untyped"))?;
-            Ok((var(*v), t))
-        }
-        CallArg::Imm(n) => Ok((format!("{n}i64"), NTy::I64)),
-        other => Err(wall(format!("native: call arg {other:?} — outside the rung subset"))),
-    }
-}
-
-pub(crate) fn render_int_binop(
-    op: &IntOp,
-    a: ValueId,
-    b: ValueId,
-    used_shims: &mut Vec<&'static str>,
-) -> Result<String, LowerError> {
-    let (l, r) = (var(a), var(b));
-    Ok(match op {
-        IntOp::Add => format!("{l}.wrapping_add({r})"),
-        IntOp::Sub => format!("{l}.wrapping_sub({r})"),
-        IntOp::Mul => format!("{l}.wrapping_mul({r})"),
-        // Div/Mod carry the C-001/C-002 abort discipline — route through the
-        // same checked shims the CallFn path uses (one definition of the abort).
-        IntOp::Div => {
-            used_shims.push(shim("__chk_div").expect("\"__chk_div\" is a literal shim() match arm, always Some").2);
-            format!("rt_chk_div({l}, {r})")
-        }
-        IntOp::Mod => {
-            used_shims.push(shim("__chk_mod").expect("\"__chk_mod\" is a literal shim() match arm, always Some").2);
-            format!("rt_chk_mod({l}, {r})")
-        }
-        // The unsigned 64-bit lane (#872): the i64 local carries the u64 bit
-        // pattern — cast both sides for div/rem/ordering. Divide-by-zero
-        // aborts through the same checked shim family as the signed pair
-        // (identical stderr bytes); there is no MIN÷-1 case unsigned.
-        IntOp::DivU => {
-            used_shims.push(shim("__chk_div_u").expect("\"__chk_div_u\" is a literal shim() match arm, always Some").2);
-            format!("rt_chk_div_u({l}, {r})")
-        }
-        IntOp::ModU => {
-            used_shims.push(shim("__chk_mod_u").expect("\"__chk_mod_u\" is a literal shim() match arm, always Some").2);
-            format!("rt_chk_mod_u({l}, {r})")
-        }
-        IntOp::LtU => format!("(({l} as u64) < ({r} as u64)) as i64"),
-        IntOp::LeU => format!("(({l} as u64) <= ({r} as u64)) as i64"),
-        IntOp::GtU => format!("(({l} as u64) > ({r} as u64)) as i64"),
-        IntOp::GeU => format!("(({l} as u64) >= ({r} as u64)) as i64"),
-        IntOp::Eq => format!("({l} == {r}) as i64"),
-        IntOp::Ne => format!("({l} != {r}) as i64"),
-        IntOp::Lt => format!("({l} < {r}) as i64"),
-        IntOp::Le => format!("({l} <= {r}) as i64"),
-        IntOp::Gt => format!("({l} > {r}) as i64"),
-        IntOp::Ge => format!("({l} >= {r}) as i64"),
-        other => return Err(wall(format!("native: int op {other:?} — outside the rung subset"))),
-    })
-}
-
-/// A user fn name that is a valid Rust identifier (dots from module paths).
-pub(crate) fn mangle(name: &str) -> String {
-    format!("almd_{}", name.replace(['.', '$'], "_"))
-}
-
-fn op_name(op: &Op) -> String {
-    // The variant name is the first token of the Debug form (`Alloc { dst:
-    // … }` → "Alloc") — total over every Op, present and future, where the
-    // old hand table answered "unknown" for anything it lagged behind.
-    let d = format!("{op:?}");
-    d.split([' ', '{', '(']).next().unwrap_or("Op").to_string()
 }

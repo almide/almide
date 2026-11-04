@@ -87,7 +87,7 @@ fn a_region_outside_the_v1_subset_is_metered_by_the_standard_codegen() {
     let path = dir.join("split_in_arm.almd");
     std::fs::write(
         &path,
-        "fn parts(s: String) -> Int = list.len(string.split(s, \",\"))\n\
+        "fn parts(s: String) -> Int = list.len(list.reverse(string.split(s, \",\")))\n\
          effect fn main() -> Unit = println(int.to_string(fan.min(compute.ms(100)) { parts(\"a,b\"), parts(\"c\") } ?? 0))\n",
     )
     .unwrap();
@@ -97,7 +97,9 @@ fn a_region_outside_the_v1_subset_is_metered_by_the_standard_codegen() {
     assert_eq!(out.status.code(), Some(0), "stdout={stdout:?} stderr={stderr:?}");
     assert_eq!(stdout, "2\n");
     assert!(
-        stderr.contains("its regions metered by the standard codegen") && stderr.contains("string.split"),
+        // `string.split` joined the declared native floor (#4006), so the
+        // region walls on the string-list reverse it feeds instead.
+        stderr.contains("its regions metered by the standard codegen") && stderr.contains("list.reverse"),
         "the note must name the meter that ran, and why the region splice could not: {stderr}"
     );
 }
@@ -112,7 +114,7 @@ fn a_single_call_bodys_argument_is_charged_by_the_standard_codegen_meter() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("args_in_codegen_meter.almd");
     let body = |ns: u32, n: u32| {
-        format!("  println(int.to_string(fan.bounded(compute.ns({ns})) {{ pick(heavy({n}), list.len(string.split(\"a,b\", \",\"))) }} ?? -1))\n")
+        format!("  println(int.to_string(fan.bounded(compute.ns({ns})) {{ pick(heavy({n}), list.len(list.reverse(string.split(\"a,b\", \",\")))) }} ?? -1))\n")
     };
     let src = format!(
         "fn heavy(n: Int) -> Int = {{\n  var i = 0\n  var acc = 0\n  while i < n {{\n    acc = (acc + i * 7) % 999983\n    i = i + 1\n  }}\n  acc\n}}\n\

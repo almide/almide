@@ -9,6 +9,7 @@ From AlmideTrust Require Import CapabilityBound.
 From AlmideTrust Require Import CapabilityReach.
 From AlmideTrust Require Import CallModes.
 From AlmideTrust Require Import HelperSig.
+From AlmideTrust Require Import NativeCalls.
 From AlmideTrust Require Import BoundsCert.
 From AlmideTrust Require Import InitCert.
 From AlmideTrust Require Import FieldCert.
@@ -67,4 +68,11 @@ Set Extraction Output Directory ".".
    every site's window leaves its block of the layout with every field
    initialized, every access names a declared field` (`check_fields_cert_sound`,
    via FieldCert.rsite_window and ftrace_safe). *)
-Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_xc check_names_cert check_caps_cert check_prog_cert check_modes_cert check_bounds_cert check_init_cert check_fields_cert check_sig_cert.
+(* `check_native_calls_cert` (NativeCalls, #4006 class P) is the NATIVE CALL
+   BINDING checker: one block per function of a natively rendered program —
+   its heap-parameter modes, its call sites, the line of every argument a site
+   moves, and its ownership lines — so `accept ⟹ every site agrees with its
+   callee's modes, every moved argument is a call-site move-out on the
+   caller's line, and every line balances from the reference its mode
+   declares` (`check_native_calls_sound`). *)
+Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_xc check_names_cert check_caps_cert check_prog_cert check_modes_cert check_bounds_cert check_init_cert check_fields_cert check_sig_cert check_native_calls_cert.

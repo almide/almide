@@ -130,10 +130,10 @@ impl LowerCtx {
                         }
                         IrStmtKind::IndexAssign { target, .. }
                         | IrStmtKind::FieldAssign { target, .. }
-                        | IrStmtKind::MapInsert { target, .. } => {
-                            if self.free.contains(target) {
-                                self.hit = true;
-                            }
+                        | IrStmtKind::MapInsert { target, .. }
+                            if self.free.contains(target) =>
+                        {
+                            self.hit = true;
                         }
                         _ => {}
                     }
@@ -596,7 +596,11 @@ impl LowerCtx {
             ret,
             declared_caps: Vec::new(),
             heap_slot_masks: sub.record_masks.iter().map(|(v, m)| (*v, m.clone())).collect(),
+            owned_params: Default::default(),
+            call_moves: Default::default(),
+            aggregate_blocks: std::mem::take(&mut sub.aggregate_blocks),
         };
+        crate::lambda_sigs::record(&name, params.iter().map(|(_, t)| t.clone()).collect(), body.ty.clone());
         self.lifted.push(lifted_fn);
         self.lifted.append(&mut nested);
         Some(name)
@@ -646,14 +650,13 @@ impl LowerCtx {
         // exists solely for this block).
         let mut cap_vals = cap_vals;
         let mut rich_wrappers: std::collections::HashSet<ValueId> = std::collections::HashSet::new();
-        for i in 0..layout.captures.len() {
+        for (i, (cap_var, cap_ty)) in layout.captures.iter().enumerate() {
             if !layout.is_rich(i) {
                 continue;
             }
             // A ROUTED cell capture tags `cell:<map drop name>` (the dispatcher's
             // cell arms free the co-owned CELL — wrapper @20 holds the cell, whose
             // @12 holds the map); a plain rich list capture tags its element name.
-            let (cap_var, cap_ty) = &layout.captures[i];
             let tag_name = if self.cell_of.contains_key(cap_var) {
                 self.map_named_value_drop(cap_ty)
                     .map(|n| format!("cell:{n}"))
@@ -764,35 +767,5 @@ impl LowerCtx {
         blk
     }
 }
-
-/// The env-block layout ONE lift decided: the captures in SLOT ORDER
-/// (`[closures][nested heap][flat heap][cell-map][scalars]`) plus the per-class counts
-/// the self-describing drop header carries. Bundled so the phases after the partition
-/// read one value instead of five positional `usize`s that could be transposed — and a
-/// transposition here mis-frees the block.
-struct CaptureLayout {
-    captures: Vec<(VarId, Ty)>,
-    n_closure: usize,
-    n_rich: usize,
-    n_heap: usize,
-    n_nested_heap: usize,
-    n_cellmap: usize,
-}
-
-impl CaptureLayout {
-    /// Slots `2..2 + handle_slots()` hold HANDLES (closure, rich-wrapper, nested-heap,
-    /// flat-heap and cell-map captures); everything after them is a raw scalar slot.
-    /// The prologue's `LoadHandle`-vs-`ListGetScalar` split, the header's zero test and
-    /// the block store's co-own test all key on this same boundary.
-    fn handle_slots(&self) -> usize {
-        self.n_closure + self.n_rich + self.n_heap + self.n_nested_heap + self.n_cellmap
-    }
-
-    /// Is capture index `i` in the RICH class ([closures][RICH][…] order)?
-    fn is_rich(&self, i: usize) -> bool {
-        i >= self.n_closure && i < self.n_closure + self.n_rich
-    }
-}
-
 
 include!("binds_b.rs");

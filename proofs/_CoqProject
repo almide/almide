@@ -14,6 +14,7 @@ CapabilityBound.v
 CapabilityReach.v
 CallModes.v
 HelperSig.v
+NativeCalls.v
 StackBalance.v
 Termination.v
 FreeList.v

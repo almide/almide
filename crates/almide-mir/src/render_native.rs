@@ -46,6 +46,22 @@ pub(crate) enum NTy {
     /// An OWNED `Result<i64, String>` local — the T1-3 native Result carrier
     /// (produced by the `native_result_rewrite` prims / a Res-returning call).
     Res,
+    /// An OWNED `Vec<AlmideString>` local — a `List[String]` slot block (#4006
+    /// List[String] slab), built and read through `render_native_addr`.
+    VecStr,
+    /// A BORROWED `&[AlmideString]` — a `List[String]` fn param.
+    VecStrRef,
+    /// An OWNED generated record struct (`render_native_rec`, by table index).
+    Rec(u16),
+    /// A BORROWED `&AlmdRecN` — a heap-record fn param.
+    RecRef(u16),
+    /// An `Option<i64>` local — the native scalar-Option carrier (#4006
+    /// family B; produced by the `native_option_rewrite` prims, an
+    /// Opt-returning call, or an Option param). `Copy`: passed by value.
+    Opt,
+    /// An OWNED `Result<AlmideString, AlmideString>` — the String-Ok Result
+    /// carrier (#4006 family C; `native_result_str_rewrite`).
+    ResStr,
 }
 
 impl NTy {
@@ -68,6 +84,43 @@ pub enum NativeSigKind {
     F64,
     /// `Result<i64, String>` — the T1-3 native Result carrier (returns only).
     Res,
+    /// `List[String]` — `&[AlmideString]` in, `Vec<AlmideString>` out.
+    ListStr,
+    /// A heap record — `&AlmdRecN` in, `AlmdRecN` out (`render_native_rec`).
+    Rec(u16),
+    /// `Option<i64>` — an Option of a scalar (Int, Bool, Float as bits).
+    Opt,
+    /// `Result<AlmideString, AlmideString>` — a `Result[String, String]`.
+    ResStr,
+    /// A narrow integer (`Int8`..`UInt32`) crossing a call boundary as its
+    /// real Rust type (`i32`, `u8`, …): the value is the lane's i64 inside
+    /// the body, converted with `as` at the boundary (#4006). The MIR keeps
+    /// every narrow value re-wrapped, so both conversions are exact.
+    Narrow { bits: u8, signed: bool },
+}
+
+impl NativeSigKind {
+    /// The kind on the i64 lane: a narrow integer travels as `i64` where an
+    /// ABI is shared by dispatch (a closure table, a function value).
+    pub(crate) fn lane(self) -> Self {
+        match self {
+            NativeSigKind::Narrow { .. } => NativeSigKind::I64,
+            k => k,
+        }
+    }
+
+    /// The Rust spelling of a narrow integer kind (`None` for any other kind).
+    pub(crate) fn narrow_rust(self) -> Option<&'static str> {
+        let NativeSigKind::Narrow { bits, signed } = self else { return None };
+        Some(match (bits, signed) {
+            (8, true) => "i8",
+            (16, true) => "i16",
+            (32, true) => "i32",
+            (8, false) => "u8",
+            (16, false) => "u16",
+            _ => "u32",
+        })
+    }
 }
 
 /// fn name → (param kinds, return kind; None = Unit). Built by the pipeline where
@@ -90,19 +143,34 @@ pub(crate) fn var(v: ValueId) -> String {
 /// exit 1, as the codegen leg's runtime prelude makes it. The guard module is
 /// shared with that leg (`almide_base::native_stack_guard`); this render's
 /// stdout is std's own line-buffered handle, so the handler has no buffer of
-/// ours to write out first.
-const STACK_GUARD_GLUE_SHIM: &str = "fn almide_stack_guard_install() {\n    #[cfg(all(any(target_os = \"linux\", target_os = \"macos\"), not(miri)))]\n    almide_stack_guard::install();\n}\n#[cfg(any(target_os = \"linux\", target_os = \"macos\"))]\nfn almide_stack_guard_stdout() {}";
+/// ours to write out first. Kept out of line, as v0's install sits in its
+/// runtime rlib: its cost reads the process's memory map, which differs from
+/// binary to binary, and the small-program perf check
+/// (scripts/check-native-v1-perf-small.sh) leaves it out of a program's work
+/// by toggling collection on this function.
+const STACK_GUARD_GLUE_SHIM: &str = "#[inline(never)]\nfn almide_stack_guard_install() {\n    #[cfg(all(any(target_os = \"linux\", target_os = \"macos\"), not(miri)))]\n    almide_stack_guard::install();\n}\n#[cfg(any(target_os = \"linux\", target_os = \"macos\"))]\nfn almide_stack_guard_stdout() {}";
 const IDX_GET_SHIM: &str = "fn almide_idx_get(v: &[i64], i: i64) -> i64 {\n        if i < 0 || i as usize >= v.len() { eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }\n        v[i as usize]\n}";
 const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut Vec<i64>, i: i64, x: i64) {\n        if i < 0 || i as usize >= v.len() { eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }\n        v[i as usize] = x;\n}";
 
 /// Borrow a stringy value as `&str` for a call argument.
 pub(crate) fn as_str_arg(code: &str, t: NTy) -> String {
+    // A string literal's binding passes the literal itself (#4006,
+    // no-perf-loss): the same bytes, and a comparison of two literals folds.
+    let literal = code
+        .strip_prefix('v')
+        .and_then(|n| n.parse::<u32>().ok())
+        .and_then(|n| crate::render_native_move::static_str_operand(ValueId(n)));
     match t {
+        NTy::Str if literal.is_some() => literal.unwrap_or_default(),
         NTy::Str => format!("&{code}"),
         NTy::StrRef => code.to_string(),
         NTy::Vec | NTy::VecRef => unreachable!("as_str_arg on vec"),
         NTy::I64 | NTy::F64 => unreachable!("as_str_arg on scalar"),
         NTy::Res => unreachable!("as_str_arg on a Result carrier"),
+        NTy::VecStr | NTy::VecStrRef => unreachable!("as_str_arg on a string list"),
+        NTy::Rec(_) | NTy::RecRef(_) => unreachable!("as_str_arg on a record"),
+        NTy::Opt => unreachable!("as_str_arg on an Option carrier"),
+        NTy::ResStr => unreachable!("as_str_arg on a Result carrier"),
     }
 }
 
@@ -138,9 +206,11 @@ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
         return Ok(());
     };
     if almide_base::env::flag("ALMIDE_DUMP_VERIFY") {
-        eprintln!("== verify-stage fn {} ==", func.name);
+        use std::io::Write as _;
+        let mut err = std::io::stderr();
+        let _ = writeln!(err, "== verify-stage fn {} ==", func.name);
         for (i, op) in func.ops.iter().enumerate() {
-            eprintln!("  [{i}] {op:?}");
+            let _ = writeln!(err, "  [{i}] {op:?}");
         }
     }
     Err(wall(format!(
@@ -152,14 +222,17 @@ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
 /// Rung-5 closures slab: the CallIndirect dispatch tables. One dispatcher per
 /// ARITY (user args beyond the env block); the index space is the SAME
 /// name-sorted lambda order `Op::FuncRef` renders (both derive from the
-/// `user_fns` BTreeMap, so def and call site agree by construction). Only an
-/// i64-returning lambda gets an arm — a heap-returning one is reachable only
-/// through a CallIndirect with a heap result, which walls in `render_fn`, so its
-/// missing arm can never be hit; the `_` arm is the §13 controlled halt.
+/// `user_fns` BTreeMap, so def and call site agree by construction). An
+/// i64-returning lambda gets an arm, and so does a Unit one (its arm runs it
+/// and yields 0, which the only call that reaches it — a CallIndirect with no
+/// destination — discards); a heap-returning one is reachable only through a
+/// CallIndirect with a heap result, which walls in `render_fn`, so its missing
+/// arm can never be hit; the `_` arm is the §13 controlled halt.
 fn push_closure_dispatch_tables(
     out: &mut String,
     user_fns: &BTreeMap<&str, &MirFunction>,
     fn_rets: &BTreeMap<String, Option<NTy>>,
+    sigs: &NativeSigs,
 ) {
     let mut arities: BTreeMap<usize, Vec<(usize, &str)>> = BTreeMap::new();
     let lambda_names = user_fns
@@ -167,7 +240,11 @@ fn push_closure_dispatch_tables(
         .copied()
         .filter(|n| n.starts_with("__lambda_"));
     for (idx, name) in lambda_names.enumerate() {
-        if fn_rets.get(name) != Some(&Some(NTy::I64)) {
+        if !matches!(fn_rets.get(name), Some(Some(NTy::I64)) | Some(None)) {
+            continue;
+        }
+        // A heap-param lambda dispatches through its signature's typed table.
+        if sigs.get(name).is_some_and(|(ps, _)| ps.iter().skip(1).any(|k| *k != NativeSigKind::I64)) {
             continue;
         }
         let arity = user_fns[name].params.len().saturating_sub(1);
@@ -180,7 +257,11 @@ fn push_closure_dispatch_tables(
             "fn __almd_ci_{arity}(idx: i64, env: &[i64]{params}) -> i64 {{\n    match idx {{\n"
         ));
         for (idx, name) in fns {
-            out.push_str(&format!("        {idx} => {}(env{args}),\n", mangle(name)));
+            if fn_rets.get(name) == Some(&None) {
+                out.push_str(&format!("        {idx} => {{ {}(env{args}); 0 }}\n", mangle(name)));
+            } else {
+                out.push_str(&format!("        {idx} => {}(env{args}),\n", mangle(name)));
+            }
         }
         out.push_str(
             "        _ => { eprintln!(\"Error: closure index out of range\"); \
@@ -188,6 +269,14 @@ fn push_closure_dispatch_tables(
         );
     }
 }
+
+/// The runtime part of a rendered program: a module named [`RT_MOD`]
+/// between the two marker lines, its body a valid crate root of its own
+/// (the build splits it out, `src/cli/native_rt_crate.rs`).
+pub const RT_MOD: &str = "almide_v1_rt";
+pub const RT_MOD_BEGIN: &str = "// __ALMIDE_V1_RT_BEGIN__\n";
+pub const RT_MOD_END: &str = "// __ALMIDE_V1_RT_END__\n";
+const RT_MOD_ATTRS: &str = "#![allow(dead_code, unused_imports, unused_variables, unused_mut, unused_parens, non_snake_case, non_camel_case_types, uncommon_codepoints, confusable_idents, mixed_script_confusables)]";
 
 /// Render a whole MIR program to a self-contained Rust source, or WALL.
 pub fn try_render_native_program(
@@ -202,13 +291,19 @@ pub fn try_render_native_program(
     if !user_fns.contains_key("main") {
         return Err(wall("native: no main in the MIR program"));
     }
-    render_native_items(prog, sigs)
+    render_items(prog, sigs, true)
 }
 
 /// [`try_render_native_program`] without the `main` requirement: the shims,
 /// every fn and the closure dispatch tables. The metered-region splice
 /// (#3669) renders its region fns through here, with no `main` of its own.
 pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<String, LowerError> {
+    // The splice lives inside the host program, whose runtime it shares: no
+    // runtime module of its own.
+    render_items(prog, sigs, false)
+}
+
+fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> Result<String, LowerError> {
     let user_fns: BTreeMap<&str, &MirFunction> = prog
         .functions
         .iter()
@@ -216,11 +311,14 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
         .collect();
     let mut used_shims: Vec<&'static str> = Vec::new();
     let mut bodies = String::new();
+    fan_rendered_reset();
+    crate::render_native_bounds::reset();
     let mut fn_rets: BTreeMap<String, Option<NTy>> = BTreeMap::new();
     for func in &prog.functions {
         verify_ownership_or_wall(func)?;
         let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
             .map_err(|e| e.with_fn_context(&func.name))?;
+        let rendered = narrow_abi_wrapper(func, sigs, rendered)?;
         fn_rets.insert(func.name.clone(), ret_nty);
         bodies.push_str(&rendered);
         bodies.push('\n');
@@ -230,10 +328,35 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
         "// Generated by the Almide v1 trust spine (native leg).\n\
          #![allow(unused_variables, unused_mut, unreachable_code, dead_code, non_snake_case, uncommon_codepoints, confusable_idents, mixed_script_confusables)]\n\n",
     );
-    out.push_str(&crate::render_native_str::almide_string_alias());
     used_shims.sort();
     used_shims.dedup();
-    for s in used_shims {
+    let (runtime, glue): (Vec<&str>, Vec<&str>) = used_shims.into_iter().partition(|s| crate::native_floor::is_runtime_text(s));
+    if fan_rendered() || !runtime_module {
+        // The fan runtime's output macros and exit routing reach every item
+        // after them, the runtime's included: one crate, as before.
+        out.push_str(&crate::render_native_str::almide_string_alias());
+        for s in runtime {
+            out.push_str(s);
+            out.push_str("\n\n");
+        }
+    } else {
+        // The runtime part — the shared string buffer and the runtime items
+        // the floor takes along — in one module the program reaches through
+        // a glob. The build compiles it as a crate of its own under the
+        // runtime's profile, as v0 links its runtime rlib: no debug
+        // assertions, overflow checks pinned off (owner ruling 2026-11-02);
+        // the program's own code keeps the program profile.
+        out.push_str(RT_MOD_BEGIN);
+        out.push_str(&format!("pub mod {RT_MOD} {{\n{RT_MOD_ATTRS}\n"));
+        out.push_str(&crate::render_native_str::almide_string_alias());
+        for s in runtime {
+            out.push_str(&crate::native_floor::pub_items(s));
+            out.push_str("\n\n");
+        }
+        out.push_str(&format!("}}\n{RT_MOD_END}pub use {RT_MOD}::*;\n\n"));
+    }
+    out.push_str(&crate::render_native_rec::struct_defs());
+    for s in glue {
         out.push_str(s);
         out.push_str("\n\n");
     }
@@ -245,7 +368,16 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
     // i64-returning lambda gets an arm — a heap-returning one is reachable only
     // through a CallIndirect with a heap result, which walls above, so its
     // missing arm can never be hit; the `_` arm is the §13 controlled halt.
-    push_closure_dispatch_tables(&mut out, &user_fns, &fn_rets);
+    push_closure_dispatch_tables(&mut out, &user_fns, &fn_rets, sigs);
+    crate::render_native_closure::push_typed_dispatch_tables(&mut out, &user_fns, sigs);
+    if fan_rendered() {
+        // #4006 family H: the fan runtime ahead of every other item (its
+        // output macros shadow std's for all that follows), and every exit
+        // through the trap wait.
+        let at = out.find("\n\n").map_or(0, |i| i + 2);
+        out.insert_str(at, &fan_glue());
+        out = route_exits(&out);
+    }
     Ok(out)
 }
 
@@ -280,564 +412,73 @@ fn seed_param_ntys(
     for (i, p) in func.params.iter().enumerate() {
         let nty = match own_sig.and_then(|(ps, _)| ps.get(i)) {
             Some(NativeSigKind::ListI64) => NTy::VecRef,
+            Some(NativeSigKind::ListStr) => NTy::VecStrRef,
+            Some(NativeSigKind::Rec(i)) => NTy::RecRef(*i),
             Some(NativeSigKind::Str) => NTy::StrRef,
-            Some(NativeSigKind::I64) => NTy::I64,
+            Some(NativeSigKind::I64 | NativeSigKind::Narrow { .. }) => NTy::I64,
             Some(NativeSigKind::F64) => NTy::F64,
-            // Result params are rejected by the sig gate; a Res kind can
-            // only name a RETURN.
-            Some(NativeSigKind::Res) => {
-                return Err(wall("native: Result-typed param — outside the rung subset"))
-            }
+            Some(NativeSigKind::Opt) => NTy::Opt,
+            Some(NativeSigKind::ResStr) => NTy::ResStr,
+            // A carrier Result param (#4006 family C) arrives by value.
+            Some(NativeSigKind::Res) => NTy::Res,
             None => repr_nty(&p.repr, true)?,
         };
+        // A MOVE param (#4006 class P) arrives as the caller's own value.
+        let nty = if func.owned_params.contains(&p.value) { owned_nty(nty) } else { nty };
         tys.insert(p.value, nty);
     }
     Ok(tys)
 }
 
-fn render_fn(
-    func: &MirFunction,
-    user_fns: &BTreeMap<&str, &MirFunction>,
-    sigs: &NativeSigs,
-    used_shims: &mut Vec<&'static str>,
-) -> Result<(String, Option<NTy>), LowerError> {
-    let mut tys = seed_param_ntys(func, sigs)?;
-    let is_main = func.name == "main";
-    let mut out = String::new();
-    let mut indent = 1usize;
-    // Each open if-as-value join: (marker, dst) — the decl is patched in once the
-    // first arm yield reveals the join type.
-    let mut if_stack: Vec<Option<IfJoin>> = Vec::new();
-
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    // Dead pure-Handle elision (rung-5 variants slab): the variant-match lower
-    // still threads a `Prim{Handle}` for the heap-payload arms, but a
-    // scalar-only match reads every slot through ListGetScalar and leaves the
-    // handle dead. Handle is PURE (address materialization, no ownership, no
-    // side effect), so skipping an unused one is sound — and it keeps the
-    // subset honest: a USED Handle still walls below.
-    let used = native_used_values(func);
-    // #3532: the if-as-value joins realized as a borrow of the selected value.
-    let borrows = crate::borrow_join::borrow_joins(func);
-    if is_main {
-        used_shims.push(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
-        used_shims.push(STACK_GUARD_GLUE_SHIM);
-        line!("almide_stack_guard_install();");
-    }
-    if is_main && crate::charge_probe::probe_enabled() {
-        used_shims.push(COUNTER_SHIM);
-        used_shims.push(CHARGE_SHIM);
-        line!("let __almd_probe_guard = __AlmdProbeGuard;");
-        line!("let _ = &__almd_probe_guard;");
-    }
-    let mut ops = func.ops.iter().enumerate();
-    while let Some((i, op)) = ops.next() {
-        // #3639: `s = s + x` / `string.push(s, x)` grows `s` in place.
-        if let Some(append) = crate::render_native_append::str_self_append(func, i, &tys) {
-            line!("{append}");
-            ops.nth(1);
+/// A string literal's binding that nothing reads (#4006, no-perf-loss): every
+/// read of it rendered the literal itself as a `&str` operand
+/// (`render_native_move::static_str_operand`), so its static block view is
+/// built and dropped per evaluation for nothing. The binding goes; a static
+/// block's drop is a no-op, so nothing else changes.
+fn drop_unread_static_strs(out: String) -> String {
+    let lines: Vec<&str> = out.lines().collect();
+    let name_of = |l: &str| -> Option<String> {
+        let t = l.trim_start();
+        let rest = t.strip_prefix("let mut ")?;
+        let (name, tail) = rest.split_once(": AlmideString = { static S: crate::almide_str_block::AlmideStrStatic<")?;
+        tail.ends_with("AlmideString::from_static(&S) };").then(|| name.to_string())
+    };
+    let used = |name: &str| {
+        lines.iter().filter(|l| {
+            l.match_indices(name).any(|(at, _)| {
+                let before = l[..at].chars().next_back().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+                let after = l[at + name.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+                before && after
+            })
+        })
+        .count()
+    };
+    let mut kept = String::with_capacity(out.len());
+    for l in &lines {
+        if name_of(l).is_some_and(|n| used(&n) == 1) {
             continue;
         }
-        match op {
-            Op::Prim {
-                kind: crate::PrimKind::Handle,
-                dst: Some(d),
-                ..
-            } if !used.contains(d) => {
-                line!("// dead handle elided");
-            }
-            Op::Dup { dst, src } if borrows.arms.contains(dst) => {
-                crate::borrow_join::render_arm(dst, src, &mut tys, &mut out, indent)?
-            }
-            // Rung-5 closures slab: a FuncRef is the lambda's DISPATCH-TABLE index
-            // (the name-sorted position shared with the `__almd_ci_*` tables).
-            Op::FuncRef { dst, name } => {
-                let idx = lambda_index(user_fns, name)
-                    .ok_or_else(|| wall(format!("native: FuncRef to unknown lambda `{name}`")))?;
-                tys.insert(*dst, NTy::I64);
-                line!("let mut {}: i64 = {idx}; // fn table: {name}", var(*dst));
-            }
-            Op::CallFn {
-                dst,
-                name,
-                args,
-                result,
-            } => render_call_fn(
-                crate::render_native::NativeCall {
-                    dst,
-                    name,
-                    args,
-                    result,
-                },
-                crate::render_native::NativeSink {
-                    user_fns,
-                    sigs,
-                    tys: &mut tys,
-                    out: &mut out,
-                    indent,
-                    used_shims,
-                },
-            )?,
-            other => {
-                let handled = render_native_call_op(
-                    other,
-                    crate::render_native::OpSink {
-                        tys: &mut tys,
-                        out: &mut out,
-                        indent,
-                        used_shims,
-                    },
-                )? || render_native_meter_op(
-                    other,
-                    crate::render_native::OpSink {
-                        tys: &mut tys,
-                        out: &mut out,
-                        indent,
-                        used_shims,
-                    },
-                )? || render_native_result_op(
-                    other,
-                    crate::render_native::OpSink {
-                        tys: &mut tys,
-                        out: &mut out,
-                        indent,
-                        used_shims,
-                    },
-                )? || render_native_termination_op(
-                    other,
-                    crate::render_native::OpSink {
-                        tys: &mut tys,
-                        out: &mut out,
-                        indent,
-                        used_shims,
-                    },
-                )? || render_native_scalar_op(
-                    other,
-                    crate::render_native::OpSink {
-                        tys: &mut tys,
-                        out: &mut out,
-                        indent,
-                        used_shims,
-                    },
-                )? || render_native_flow_op(
-                    other,
-                    &borrows.joins,
-                    &mut tys,
-                    &mut out,
-                    &mut indent,
-                    &mut if_stack,
-                )?;
-                if !handled {
-                    let detail = if let Op::Prim { kind, .. } = other {
-                        format!("Prim {kind:?}")
-                    } else {
-                        op_name(other)
-                    };
-                    return Err(wall(format!(
-                        "native: op {detail:?} in `{}` — outside the rung subset",
-                        func.name
-                    )));
-                }
-            }
-        }
+        kept.push_str(l);
+        kept.push('\n');
     }
-
-    if !if_stack.is_empty() {
-        return Err(wall("native: unbalanced IfThen/EndIf markers"));
-    }
-    finish_native_fn(func, sigs, is_main, &mut tys, out)
+    kept
 }
 
-/// The tail of [`render_fn`]: the lifted-effect `Ok(..)` wrap decision, the
-/// signature (renderable only after the body typed `func.ret`), the trailing
-/// return expression, and the T1-1 strict-cut marker patch (the typed
-/// default is known only here).
-fn finish_native_fn(
-    func: &MirFunction,
-    sigs: &NativeSigs,
-    is_main: bool,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    mut out: String,
-) -> Result<(String, Option<NTy>), LowerError> {
-    // A LIFTED effect fn (declared scalar ret, wrapped carrier ABI — the sigs
-    // table widening in the pipeline): the body computes the raw scalar and
-    // the `Ok(..)` wrap happens HERE, at the single return seam. The wrap is
-    // carried as a RETURN-TYPE OVERRIDE, never by retyping the ret VALUE:
-    // when the body is a bare parameter passthrough (`effect fn f(x) = x`),
-    // ret and param share one ValueId, and retyping it turned the PARAM's
-    // rendered type into `Result<i64, String>` while callers kept passing the
-    // raw scalar — the almide#1429 signature/body split.
-    let lifted_wrap = !is_main
-        && matches!(
-            sigs.get(func.name.as_str()),
-            Some((_, Some(NativeSigKind::Res)))
-        )
-        && matches!(func.ret.and_then(|v| tys.get(&v)), Some(NTy::I64));
-    let ret_override = if lifted_wrap { Some(NTy::Res) } else { None };
-    // Signature: the return type is known only after the body typed `func.ret`.
-    let mut sig = render_native_fn_sig(func, &tys, is_main, ret_override)?;
-    sig.push_str(" {\n");
-
-    // The trailing return expression (moved out — fresh owned for heap).
-    if let Some(v) = func.ret {
-        out.push_str("    ");
-        if lifted_wrap {
-            out.push_str(&format!("Ok({})", var(v)));
-        } else {
-            out.push_str(&native_ret_expr(v, tys[&v]));
-        }
-        out.push('\n');
-    }
-    out.push_str("}\n");
-    let ret_nty = if lifted_wrap { Some(NTy::Res) } else { func.ret.map(|v| tys[&v]) };
-    // T1-1: patch every strict-cut marker with the now-known typed default
-    // (never observed — the region verdict is Err by the time a cut fires).
-    if out.contains(CUT_RET_MARKER) {
-        let cut_ret = match ret_nty {
-            None => "return;",
-            Some(NTy::I64) => "return 0;",
-            Some(NTy::F64) => "return 0.0;",
-            Some(NTy::Str | NTy::StrRef) => "return AlmideString::new();",
-            Some(NTy::Vec | NTy::VecRef) => "return Vec::new();",
-            Some(NTy::Res) => "return Ok(0);",
-        };
-        out = out.replace(CUT_RET_MARKER, cut_ret);
-    }
-    Ok((format!("{sig}{out}"), ret_nty))
-}
-
-/// The trailing return expression: a borrowed param is moved out as a fresh
-/// owned value; everything else returns the local directly.
-fn native_ret_expr(v: ValueId, t: NTy) -> String {
+/// The owned counterpart of a borrowed param type: what a MOVE param (#4006
+/// class P) holds.
+pub(crate) fn owned_nty(t: NTy) -> NTy {
     match t {
-        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res => var(v),
-        NTy::StrRef => format!("AlmideString::from({})", var(v)),
-        NTy::VecRef => format!("{}.to_vec()", var(v)),
+        NTy::VecRef => NTy::Vec,
+        NTy::VecStrRef => NTy::VecStr,
+        NTy::RecRef(i) => NTy::Rec(i),
+        NTy::StrRef => NTy::Str,
+        other => other,
     }
 }
 
-/// The rendered `fn` signature. The return type is known only after the body
-/// typed `func.ret`, so this reads the accumulated NTy map — a param's NTy was
-/// seeded from the SIG table, so a list param renders `&[i64]` (repr alone
-/// cannot tell).
-fn render_native_fn_sig(
-    func: &MirFunction,
-    tys: &BTreeMap<ValueId, NTy>,
-    is_main: bool,
-    ret_override: Option<NTy>,
-) -> Result<String, LowerError> {
-    if is_main {
-        if func.ret.is_some() {
-            return Err(wall("native: main with a return value"));
-        }
-        return Ok(String::from("fn main()"));
-    }
-    // A param that any `Op::SetLocal` retargets (the MIR tail-recursion loop
-    // reassigns its params each iteration) must render `mut` — without it the
-    // loop body's `v0 = …;` is an E0384 on a plain scalar accumulator
-    // recursion (`count(n - 1, acc + 1)`), a compile error rustc only surfaces
-    // on the run path because every test harness rides the v0 fallback.
-    let reassigned: std::collections::HashSet<ValueId> = func
-        .ops
-        .iter()
-        .filter_map(|op| match op {
-            Op::SetLocal { local, .. } => Some(*local),
-            _ => None,
-        })
-        .collect();
-    let params: Vec<String> = func
-        .params
-        .iter()
-        .map(|p| {
-            let t = tys.get(&p.value).copied().unwrap_or(NTy::I64);
-            let spelled = match t {
-                NTy::StrRef | NTy::Str => "&str",
-                NTy::VecRef | NTy::Vec => "&[i64]",
-                NTy::I64 => "i64",
-                NTy::F64 => "f64",
-                NTy::Res => "Result<i64, AlmideString>",
-            };
-            let mut_prefix = if reassigned.contains(&p.value) {
-                "mut "
-            } else {
-                ""
-            };
-            format!("{mut_prefix}{}: {}", var(p.value), spelled)
-        })
-        .collect();
-    let ret = match func.ret {
-        None => String::new(),
-        Some(v) => match ret_override.as_ref().or_else(|| tys.get(&v)) {
-            Some(NTy::I64) => " -> i64".to_string(),
-            Some(NTy::Str) => " -> AlmideString".to_string(),
-            Some(NTy::StrRef) => " -> AlmideString".to_string(),
-            Some(NTy::Vec) => " -> Vec<i64>".to_string(),
-            Some(NTy::VecRef) => " -> Vec<i64>".to_string(),
-            Some(NTy::F64) => " -> f64".to_string(),
-            Some(NTy::Res) => " -> Result<i64, AlmideString>".to_string(),
-            None => return Err(wall("native: return value untyped")),
-        },
-    };
-    Ok(format!(
-        "fn {}({}){}",
-        mangle(&func.name),
-        params.join(", "),
-        ret
-    ))
-}
-
-/// The values a function's ops (or its return) actually READ — the read-set the
-/// dead pure-Handle elision in [`render_fn`] consults. A `Prim{Handle}` whose
-/// dst never appears here is address materialization feeding nothing.
-fn native_used_values(func: &MirFunction) -> std::collections::BTreeSet<ValueId> {
-    let mut u = std::collections::BTreeSet::new();
-    for op in &func.ops {
-        u.extend(native_op_reads(op));
-    }
-    if let Some(r) = func.ret {
-        u.insert(r);
-    }
-    u
-}
-
-/// The values ONE op reads, for [`native_used_values`]. Deliberately partial —
-/// ops absent here (Drop*, Alloc, markers) keep their operands OUT of the
-/// read-set, which is what lets a drop-only Handle count as dead.
-fn native_op_reads(op: &Op) -> Vec<ValueId> {
-    match op {
-        Op::IntBinOp { a, b, .. } => vec![*a, *b],
-        Op::Prim { args, .. } => args.clone(),
-        Op::Call { args, .. } | Op::CallFn { args, .. } => args
-            .iter()
-            .filter_map(|a| match a {
-                CallArg::Handle(v) | CallArg::Scalar(v) => Some(*v),
-                _ => None,
-            })
-            .collect(),
-        Op::ListGetScalar { list, idx, .. } => vec![*list, *idx],
-        Op::ListSetScalar { list, idx, val } => vec![*list, *idx, *val],
-        Op::SetLocal { src, .. } => vec![*src],
-        Op::Dup { src, .. } => vec![*src],
-        Op::IfThen { cond, .. } => vec![*cond],
-        Op::Else { val } | Op::EndIf { val } => val.iter().copied().collect(),
-        _ => vec![],
-    }
-}
-
-/// The CALL-shaped ops that render through an [`OpSink`]: indirect dispatch,
-/// the rung-4 bounds-checked element accessors, and witness-level runtime
-/// calls (`println` lowers through these). A CallIndirect dispatches through
-/// the arity's `__almd_ci_*` table: the leading Handle arg is the closure
-/// block (BORROWED env — `&[i64]`), the rest are scalar user args, the result
-/// an i64; heap args/results are outside this slab (the wasm leg keeps them;
-/// native walls). The element accessors' shims abort with the byte-identical
-/// "Error: index out of bounds" + exit 1 the wasm `$elem_addr_chk` and v0
-/// native emit. `Ok(false)` = not this tier's op.
-fn render_native_call_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
-    match op {
-        Op::CallIndirect {
-            dst,
-            table_idx,
-            args,
-            result,
-        } => render_call_indirect(dst, table_idx, args, result, s)?,
-        Op::ListGetScalar { dst, list, idx } => render_list_get_scalar(dst, list, idx, s)?,
-        Op::ListSetScalar { list, idx, val } => render_list_set_scalar(list, idx, val, s)?,
-        Op::Call {
-            dst, func, args, ..
-        } => render_call_witness(dst, func, args, s)?,
-        _ => return Ok(false),
-    }
-    Ok(true)
-}
-
-/// One CONTROL-FLOW / ownership op (if-as-value markers, loops, drops, the
-/// bookkeeping no-ops) rendered into the buffer. `Ok(false)` = not this tier's
-/// op — the caller walls. Arm bodies are verbatim from the former inline
-/// [`render_fn`] op match.
-fn render_native_flow_op(
-    op: &Op,
-    borrows: &std::collections::BTreeSet<ValueId>,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: &mut usize,
-    if_stack: &mut Vec<Option<IfJoin>>,
-) -> Result<bool, LowerError> {
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..*indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    match op {
-        Op::DropVariant { .. } | Op::Drop { .. } | Op::DropListStr { .. } => {
-            return render_native_drop_op(op, borrows, tys, out, *indent)
-        }
-        // Pure ownership bookkeeping — no native code.
-        Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. } => {}
-        Op::IfThen { cond, dst } => render_if_then(cond, dst, tys, out, indent, if_stack),
-        Op::Else { val } => render_else(val, borrows, tys, out, indent, if_stack)?,
-        Op::EndIf { val } => render_end_if(val, borrows, tys, out, indent, if_stack)?,
-        Op::LoopStart => {
-            line!("loop {{");
-            *indent += 1;
-        }
-        Op::LoopBreakUnless { cond } => {
-            line!("if {} == 0 {{ break; }}", var(*cond));
-        }
-        Op::LoopEnd => {
-            *indent -= 1;
-            line!("}}");
-        }
-        // Frame-targeted early exit: a Rust `return` at any nesting depth —
-        // the same move-out expression the trailing return uses. (A LIFTED
-        // effect fn's `Ok(..)` wrap happens at the single tail seam only; an
-        // early `Return` inside one would mistype and rustc rejects the
-        // build — an honest wall, revisit when a lowering emits that shape.)
-        Op::Return { val } => match val {
-            Some(v) => {
-                let t = *tys
-                    .get(v)
-                    .ok_or_else(|| wall("native: Return of an untyped value"))?;
-                line!("return {};", native_ret_expr(*v, t));
-            }
-            None => line!("return;"),
-        },
-        _ => return Ok(false),
-    }
-    Ok(true)
-}
-
-/// The drop-family ops. All three erase to a scope-end comment when the value
-/// shape is admitted; a shape violation is a wall. `Ok(false)` = a
-/// NON-closure `DropVariant` — the caller walls with the generic
-/// outside-the-rung-subset message, exactly as the former inline match did.
-fn render_native_drop_op(
-    op: &Op,
-    borrows: &std::collections::BTreeSet<ValueId>,
-    tys: &BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-) -> Result<bool, LowerError> {
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    match op {
-        // A scalar-capture closure block is a plain `Vec<i64>` — its recursive
-        // `$__drop_closure` erases to scope-end (the drop header is 0: no heap,
-        // no nested, no closure slots to free). A non-Vec value here would be a
-        // heap-capturing block (prim-built) — its OWNING fn walls on the prims
-        // long before this drop renders.
-        Op::DropVariant { v, ty } if ty.as_str() == "closure" => match tys.get(v) {
-            Some(NTy::Vec) => line!("// drop(closure block): scope-end"),
-            other => {
-                return Err(wall(format!(
-                    "native: DropVariant(closure) of a non-Vec value ({other:?})"
-                )))
-            }
-        },
-        // Drop is ERASED: Rust frees at scope end (or at reassignment for a
-        // loop-carried handle). `verify_ownership` above certified balance.
-        // A borrow join (#3532) holds a reference: its borrow simply ends.
-        Op::Drop { v } | Op::DropListStr { v }
-            if borrows.contains(v) && matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef)) =>
-        {
-            line!("// drop: borrowed join, scope-end");
-        }
-        Op::Drop { v } => {
-            if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef)) {
-                return Err(wall(
-                    "native: Drop of a borrowed param — MIR call-mode violation",
-                ));
-            }
-            line!("// drop: scope-end");
-        }
-        // A RECORD result's drop routes as the mask-driven `DropListStr` (the
-        // record block IS a list block; the mask lists its heap slots). The
-        // native rung-5 subset admits ALL-SCALAR records only — the mask is
-        // empty, the free is the block itself → scope-end, same as `Drop`.
-        // Anything non-Vec here would carry heap slots → wall.
-        Op::DropListStr { v } => {
-            match tys.get(v) {
-                Some(NTy::Vec) => line!("// drop(record/list block): scope-end"),
-                // The T1-3 Result carrier frees like any owned Rust value.
-                Some(NTy::Res) => line!("// drop(result carrier): scope-end"),
-                Some(NTy::VecRef) => {
-                    return Err(wall(
-                        "native: DropListStr of a borrowed param — MIR call-mode violation",
-                    ))
-                }
-                other => {
-                    return Err(wall(format!(
-                    "native: DropListStr of a non-list value ({other:?}) — outside the rung subset"
-                )))
-                }
-            }
-        }
-        _ => return Ok(false),
-    }
-    Ok(true)
-}
-
-/// `Op::Dup` — mint a fresh handle from `src` per its NTy (verbatim arm body
-/// extracted from [`render_fn`]; see that function for the op-loop context).
-pub(crate) fn render_dup(
-    dst: &ValueId,
-    src: &ValueId,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-) -> Result<(), LowerError> {
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    let t = *tys
-        .get(src)
-        .ok_or_else(|| wall("native: Dup of untyped value"))?;
-    match t {
-        NTy::I64 => {
-            tys.insert(*dst, NTy::I64);
-            line!("let mut {} = {};", var(*dst), var(*src));
-        }
-        NTy::Res => {
-            tys.insert(*dst, NTy::Res);
-            line!("let mut {} = {}.clone();", var(*dst), var(*src));
-        }
-        NTy::Str => {
-            tys.insert(*dst, NTy::Str);
-            line!("let mut {} = {}.clone();", var(*dst), var(*src));
-        }
-        NTy::StrRef => {
-            // Dup of a borrowed param mints a fresh owned handle.
-            tys.insert(*dst, NTy::Str);
-            line!("let mut {} = AlmideString::from({});", var(*dst), var(*src));
-        }
-        NTy::Vec => {
-            tys.insert(*dst, NTy::Vec);
-            line!("let mut {} = {}.clone();", var(*dst), var(*src));
-        }
-        NTy::VecRef => {
-            // Dup of a borrowed list param mints a fresh owned Vec.
-            tys.insert(*dst, NTy::Vec);
-            line!("let mut {} = {}.to_vec();", var(*dst), var(*src));
-        }
-        NTy::F64 => {
-            tys.insert(*dst, NTy::F64);
-            line!("let mut {} = {};", var(*dst), var(*src));
-        }
-    }
-    Ok(())
-}
-
+include!("render_native_loop.rs");
+include!("render_native_tail.rs");
 include!("render_native_b.rs");
+include!("render_native_b_tail.rs");
+include!("render_native_fan.rs");
+include!("render_native_rem.rs");

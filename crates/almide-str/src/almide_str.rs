@@ -218,7 +218,10 @@ impl AlmideStr {
     #[inline]
     pub fn as_str(&self) -> &str {
         // SAFETY: the first `len` bytes are initialised UTF-8 (every writer copies whole `&str`s). Only a unique view writes them, and it holds `&mut self`.
-        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.data(), self.len())) }
+        // The block is non-null, aligned and at most `isize::MAX` bytes by construction, which is what `slice::from_raw_parts`
+        // would re-check at run time; that check is built into the caller's crate, so through the native v1 render it ran in
+        // user code's dev profile on every string read, where the runtime is built without debug assertions (#4006).
+        unsafe { std::str::from_utf8_unchecked(&*std::ptr::slice_from_raw_parts(self.data(), self.len())) }
     }
 
     /// A unique view for a run of in-place edits. A shared or static block is copied first; the copy has room for `extra` more bytes.
@@ -568,8 +571,8 @@ impl AlmideUniqueStr<'_> {
     }
 
     pub fn as_str(&self) -> &str {
-        // SAFETY: the first `len` bytes are initialised UTF-8.
-        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.data, self.len)) }
+        // SAFETY: the first `len` bytes are initialised UTF-8 (the block's bounds as `AlmideStr::as_str` states them).
+        unsafe { std::str::from_utf8_unchecked(&*std::ptr::slice_from_raw_parts(self.data, self.len)) }
     }
 
     // The cold path takes and returns values, never `&mut self`: if the view's address escaped into a call, the view would live on the stack, and every push would store `len` and reload `cap` and `data`.

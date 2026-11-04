@@ -231,6 +231,7 @@
 9450	spec/wasm_cross/fan_settle_tuple.almd
 3640	spec/wasm_cross/fan_sibling_trap.almd
 3861	spec/wasm_cross/fan_trap_waits_for_elements_below.almd
+4114	spec/wasm_cross/fan_trap_waits_for_slow_element_below.almd
 2832	spec/wasm_cross/fan_var_thunk_list.almd
 2897	spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
 11212	spec/wasm_cross/field_and_interp_accumulator.almd

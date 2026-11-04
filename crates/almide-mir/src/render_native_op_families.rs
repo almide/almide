@@ -148,14 +148,34 @@ pub(crate) fn render_native_meter_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
     Ok(true)
 }
 
-/// The T1-3 native Result carrier ops (`native_result_rewrite`). `Ok(false)`
-/// = not this tier's op. Arm bodies verbatim from [`render_fn`].
+/// The T1-3 native Result carrier ops (`native_result_rewrite`), with the
+/// String-Ok carrier, the storage slots, narrow arithmetic and the scalar
+/// Option carrier. `Ok(false)` = not this tier's op. Arm bodies verbatim from
+/// [`render_fn`], grouped by family: each prim kind belongs to one family, so
+/// the router below picks the one helper that can take it.
 pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    use crate::PrimKind as K;
+    let Op::Prim { kind, .. } = op else { return Ok(false) };
+    match kind {
+        K::ResMakeOk | K::ResMakeErrStr | K::ResCopy | K::ResTag | K::ResOkScalar | K::ResErrStr => {
+            render_result_carrier_op(op, s)
+        }
+        K::ResStrMake | K::ResStrSetTag | K::NativeSlotLoad { .. } | K::NativeSlotStore { .. } => {
+            render_result_str_and_slot_op(op, s)
+        }
+        K::NativeNarrowBin { .. } => render_narrow_bin_op(op, s),
+        K::OptMakeSome | K::OptMakeNone | K::OptCopy | K::OptTag | K::OptPayload => render_option_carrier_op(op, s),
+        _ => Ok(false),
+    }
+}
+
+/// The `Result<i64, AlmideString>` carrier arms of [`render_native_result_op`].
+fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
     let OpSink {
         tys,
         out,
         indent,
-        used_shims,
+        used_shims: _,
     } = s;
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -163,8 +183,6 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             writeln!(out, $($arg)*).unwrap();
         }};
     }
-    #[allow(unused_variables)]
-    let used_shims = used_shims;
     match op {
         // ── T1-3 native Result carrier (native_result_rewrite) ──
         Op::Prim {
@@ -172,11 +190,16 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             dst: Some(d),
             args,
         } => {
+            // The Ok slot holds the MIR scalar: a Float as its bits.
+            let payload = match tys.get(&args[0]) {
+                Some(NTy::F64) => format!("{}.to_bits() as i64", var(args[0])),
+                _ => var(args[0]),
+            };
             tys.insert(*d, NTy::Res);
             line!(
                 "let {}: Result<i64, AlmideString> = Ok({});",
                 var(*d),
-                var(args[0])
+                payload
             );
         }
         Op::Prim {
@@ -201,8 +224,14 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             dst: Some(d),
             args,
         } => {
-            tys.insert(*d, NTy::Res);
-            line!("let {}: Result<i64, AlmideString> = {}.clone();", var(*d), var(args[0]));
+            // A copy of either carrier, typed as its source.
+            let t = match tys.get(&args[0]) {
+                Some(NTy::ResStr) => NTy::ResStr,
+                _ => NTy::Res,
+            };
+            let spelled = if t == NTy::ResStr { "Result<AlmideString, AlmideString>" } else { "Result<i64, AlmideString>" };
+            tys.insert(*d, t);
+            line!("let {}: {} = {}.clone();", var(*d), spelled, var(args[0]));
         }
         Op::Prim {
             kind: crate::PrimKind::ResTag,
@@ -233,11 +262,222 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             // Result's object); "" on the Ok side (unreached — the tag
             // dispatch guards it).
             tys.insert(*d, NTy::StrRef);
+            if tys.get(&args[0]) == Some(&NTy::ResStr) {
+                // The String-Ok carrier keeps its payload in one slot on both
+                // sides; the tag dispatch decides which the program reads.
+                line!(
+                    "let {}: &str = match &{} {{ Ok(s) | Err(s) => s.as_str() }};",
+                    var(*d),
+                    var(args[0])
+                );
+            } else {
+                line!(
+                    "let {}: &str = match &{} {{ Err(e) => e.as_str(), Ok(_) => \"\" }};",
+                    var(*d),
+                    var(args[0])
+                );
+            }
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// The String-Ok carrier and storage-slot arms of [`render_native_result_op`].
+fn render_result_str_and_slot_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    let OpSink {
+        tys,
+        out,
+        indent,
+        used_shims,
+    } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    match op {
+        // ── #4006 family C: the String-Ok Result carrier (native_result_str_rewrite) ──
+        Op::Prim {
+            kind: crate::PrimKind::ResStrMake,
+            dst: Some(d),
+            args,
+        } => {
+            let src = match tys.get(&args[0]) {
+                Some(NTy::Str) => format!("{}.clone()", var(args[0])),
+                Some(NTy::StrRef) => format!("AlmideString::from({})", var(args[0])),
+                other => {
+                    return Err(wall(format!(
+                        "native: a String-Ok Result over a non-String payload ({other:?})"
+                    )))
+                }
+            };
+            tys.insert(*d, NTy::ResStr);
+            line!("let mut {}: Result<AlmideString, AlmideString> = Ok({});", var(*d), src);
+        }
+        Op::Prim {
+            kind: crate::PrimKind::ResStrSetTag,
+            args,
+            ..
+        } => {
+            if tys.get(&args[0]) != Some(&NTy::ResStr) || tys.get(&args[1]) != Some(&NTy::I64) {
+                return Err(wall("native: a String-Ok Result tag write outside its window"));
+            }
             line!(
-                "let {}: &str = match &{} {{ Err(e) => e.as_str(), Ok(_) => \"\" }};",
-                var(*d),
+                "if {} != 0 {{ if let Ok(s) = std::mem::replace(&mut {}, Ok(AlmideString::new())) {{ {} = Err(s); }} }}",
+                var(args[1]),
+                var(args[0]),
                 var(args[0])
             );
+        }
+        // ── #4006 family I: a scalar storage slot (native_slot_rewrite) ──
+        Op::Prim {
+            kind: crate::PrimKind::NativeSlotLoad { slot },
+            dst: Some(d),
+            ..
+        } => {
+            used_shims.push(crate::native_slot_rewrite::slot_static(*slot));
+            tys.insert(*d, NTy::I64);
+            line!("let mut {}: i64 = ALMD_SLOT_{}.load(std::sync::atomic::Ordering::Relaxed);", var(*d), slot);
+        }
+        Op::Prim {
+            kind: crate::PrimKind::NativeSlotStore { slot },
+            args,
+            ..
+        } => {
+            // The slot holds the MIR scalar: a Float as its bits.
+            let v = match tys.get(&args[0]) {
+                Some(NTy::I64) => var(args[0]),
+                Some(NTy::F64) => format!("{}.to_bits() as i64", var(args[0])),
+                other => {
+                    return Err(wall(format!(
+                        "native: a non-scalar value stored into a storage slot ({other:?})"
+                    )))
+                }
+            };
+            used_shims.push(crate::native_slot_rewrite::slot_static(*slot));
+            line!("ALMD_SLOT_{}.store({}, std::sync::atomic::Ordering::Relaxed);", slot, v);
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// The narrow-integer arithmetic arm of [`render_native_result_op`].
+fn render_narrow_bin_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    let OpSink {
+        tys,
+        out,
+        indent,
+        used_shims: _,
+    } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    match op {
+        // ── #4006: narrow integer arithmetic (native_narrow_rewrite) ──
+        Op::Prim {
+            kind: crate::PrimKind::NativeNarrowBin { op, bits, signed },
+            dst: Some(d),
+            args,
+        } if args.len() == 2 => {
+            let ty = match (*bits, *signed) {
+                (8, true) => "i8",
+                (16, true) => "i16",
+                (32, true) => "i32",
+                (8, false) => "u8",
+                (16, false) => "u16",
+                (32, false) => "u32",
+                _ => return Err(wall(format!("native: a narrow op at width {bits}"))),
+            };
+            let f = match op {
+                crate::IntOp::Add => "wrapping_add",
+                crate::IntOp::Sub => "wrapping_sub",
+                crate::IntOp::Mul => "wrapping_mul",
+                other => return Err(wall(format!("native: a narrow {other:?}"))),
+            };
+            if args.iter().any(|a| tys.get(a) != Some(&NTy::I64)) {
+                return Err(wall("native: a narrow op over a non-integer operand"));
+            }
+            tys.insert(*d, NTy::I64);
+            line!("let mut {}: i64 = (({} as {ty}).{f}({} as {ty})) as i64;", var(*d), var(args[0]), var(args[1]));
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// The scalar-Option carrier arms of [`render_native_result_op`].
+fn render_option_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    let OpSink {
+        tys,
+        out,
+        indent,
+        used_shims: _,
+    } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    match op {
+        // ── #4006 family B: the native scalar-Option carrier (native_option_rewrite) ──
+        Op::Prim {
+            kind: crate::PrimKind::OptMakeSome,
+            dst: Some(d),
+            args,
+        } => {
+            // The slot holds the MIR scalar: a Float as its bits.
+            let payload = match tys.get(&args[0]) {
+                Some(NTy::I64) => var(args[0]),
+                Some(NTy::F64) => format!("{}.to_bits() as i64", var(args[0])),
+                other => {
+                    return Err(wall(format!(
+                        "native: OptMakeSome over a non-scalar payload ({other:?})"
+                    )))
+                }
+            };
+            tys.insert(*d, NTy::Opt);
+            line!("let mut {}: Option<i64> = Some({});", var(*d), payload);
+        }
+        Op::Prim {
+            kind: crate::PrimKind::OptMakeNone,
+            dst: Some(d),
+            ..
+        } => {
+            tys.insert(*d, NTy::Opt);
+            line!("let mut {}: Option<i64> = None;", var(*d));
+        }
+        Op::Prim {
+            kind: crate::PrimKind::OptCopy,
+            dst: Some(d),
+            args,
+        } => {
+            tys.insert(*d, NTy::Opt);
+            line!("let mut {}: Option<i64> = {};", var(*d), opt_operand(tys, args[0])?);
+        }
+        Op::Prim {
+            kind: crate::PrimKind::OptTag,
+            dst: Some(d),
+            args,
+        } => {
+            let o = opt_operand(tys, args[0])?;
+            tys.insert(*d, NTy::I64);
+            line!("let {}: i64 = {}.is_some() as i64;", var(*d), o);
+        }
+        Op::Prim {
+            kind: crate::PrimKind::OptPayload,
+            dst: Some(d),
+            args,
+        } => {
+            let o = opt_operand(tys, args[0])?;
+            tys.insert(*d, NTy::I64);
+            line!("let {}: i64 = {}.unwrap_or(0);", var(*d), o);
         }
         _ => return Ok(false),
     }
@@ -253,7 +493,7 @@ pub(crate) fn render_native_termination_op(op: &Op, s: OpSink<'_>) -> Result<boo
         tys,
         out,
         indent,
-        used_shims,
+        used_shims: _,
     } = s;
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -261,8 +501,6 @@ pub(crate) fn render_native_termination_op(op: &Op, s: OpSink<'_>) -> Result<boo
             writeln!(out, $($arg)*).unwrap();
         }};
     }
-    #[allow(unused_variables)]
-    let used_shims = used_shims;
     match op {
         // The §13 termination convention's exit half (assert desugar tail,
         // time-ctor negative trap): a user exit code, no message of its own.
@@ -332,7 +570,14 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 // bidi controls today, but one rule for every native renderer
                 // keeps that a property of the code, not of std's Debug tables.
                 let lit = almide_base::rust_lit::escape_rust_str(s);
-                line!("let mut {}: AlmideString = AlmideString::from(\"{lit}\");", var(*dst));
+                // An immortal static block (`rc == 0`, ADR-0013): a literal
+                // costs no allocation and no free, as the standard codegen's
+                // borrowed `&str` literal does; an edit copies it first.
+                line!(
+                    "let mut {}: AlmideString = {{ static S: crate::almide_str_block::AlmideStrStatic<{}> = crate::almide_str_block::AlmideStrStatic::new(\"{lit}\"); AlmideString::from_static(&S) }};",
+                    var(*dst),
+                    s.len()
+                );
             }
             // #4006: a constant int list (a literal the lowering folded, an
             // empty `[]`, a top-level list `let`) — the same Vec a ListLit renders.
@@ -351,14 +596,25 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
         // Rung-4 scalar-list literal: the natural Vec spelling. Elements are raw
         // i64 slot values (the wasm leg stores the same bits).
         Op::ListLit { dst, elems } => {
+            // A real `f64` element goes into its slot as its bits — the value
+            // the MIR (and the wasm leg) stores there.
+            let mut items = Vec::with_capacity(elems.len());
             for e in elems {
-                if tys.get(e) != Some(&NTy::I64) {
-                    return Err(wall("native: ListLit with a non-scalar element"));
-                }
+                items.push(match tys.get(e) {
+                    Some(NTy::I64) => var(*e),
+                    Some(NTy::F64) => format!("{}.to_bits() as i64", var(*e)),
+                    _ => return Err(wall("native: ListLit with a non-scalar element")),
+                });
             }
             tys.insert(*dst, NTy::Vec);
-            let items = elems.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ");
-            line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+            let n = items.len();
+            let items = items.join(", ");
+            if crate::render_native_move::is_stack_lit(*dst) {
+                // Borrowed only (crate::render_native_move::set_stack_lits).
+                line!("let mut {}: [i64; {n}] = [{items}];", var(*dst));
+            } else {
+                line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+            }
         }
         Op::SetLocal { local, src } => render_set_local(local, src, tys, out, indent)?,
         Op::IntBinOp { dst, op, a, b } => {
@@ -425,4 +681,12 @@ pub(crate) fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
         _ => return Ok(false),
     }
     Ok(true)
+}
+
+/// An Option-carrier operand, refusing anything the rewrite did not type `Opt`.
+fn opt_operand(tys: &std::collections::BTreeMap<crate::ValueId, NTy>, v: crate::ValueId) -> Result<String, LowerError> {
+    match tys.get(&v) {
+        Some(NTy::Opt) => Ok(var(v)),
+        other => Err(wall(format!("native: Option read over a non-Option value ({other:?})"))),
+    }
 }

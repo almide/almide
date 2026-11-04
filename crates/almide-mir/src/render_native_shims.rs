@@ -3,8 +3,25 @@
 //! expression so the differential gate pins byte-equality. One table row per
 //! shim: (MIR call name, param types, return type, Rust source). Adding a
 //! shim is adding a row; `shim` itself never changes.
+//!
+//! This table is a legacy name list (proofs/name-keyed-sites.toml) and only
+//! shrinks: a stdlib fn whose declaration names a native runtime body
+//! (`@intrinsic`) reaches the floor through `crate::native_floor`, which reads
+//! that declaration, and its row here was removed (#4006). What remains has
+//! no such declaration (`print_str`, `__str_concat`, the checked-division
+//! lanes, the Almide-bodied `int.pow`) or a v0 body the declared route walls
+//! on (`string.to_upper` reaches a runtime trait method).
 
 use super::render_native::NTy;
+
+/// A printed line goes to stdout in ONE write, its newline included, as v0's
+/// buffered stdout hands it on (#4006, no-perf-loss): `println!` writes each
+/// piece on its own, and stdout's line buffer scans every piece for a
+/// newline. The bytes, the lock and the line flush are println!'s; a failed
+/// write prints the line again through `print!`, which fails the same way
+/// and panics with std's own message. Under the fan runtime the line goes
+/// through its `print!` (render_native_fan::FAN_LINE).
+pub(crate) const PRINT_SHIMS: &str = "fn almide_v1_line(line: &[u8]) {\n    if std::io::Write::write_all(&mut std::io::stdout().lock(), line).is_err() { print!(\"{}\", String::from_utf8_lossy(line)) }\n}\nfn rt_println_fmt(args: std::fmt::Arguments<'_>) {\n    struct Line { buf: [u8; 256], n: usize, spill: Vec<u8> }\n    impl std::fmt::Write for Line {\n        fn write_str(&mut self, s: &str) -> std::fmt::Result {\n            if self.spill.is_empty() && self.n + s.len() < self.buf.len() {\n                self.buf[self.n..self.n + s.len()].copy_from_slice(s.as_bytes());\n                self.n += s.len();\n            } else {\n                if self.spill.is_empty() { self.spill.extend_from_slice(&self.buf[..self.n]); }\n                self.spill.extend_from_slice(s.as_bytes());\n            }\n            Ok(())\n        }\n    }\n    let mut l = Line { buf: [0; 256], n: 0, spill: Vec::new() };\n    let _ = std::fmt::Write::write_fmt(&mut l, args);\n    if l.spill.is_empty() { l.buf[l.n] = b'\\n'; almide_v1_line(&l.buf[..=l.n]) } else { l.spill.push(b'\\n'); almide_v1_line(&l.spill) }\n}\nfn rt_print_str(s: &str) { rt_println_fmt(format_args!(\"{}\", s)) }";
 
 const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("int.to_string", &[NTy::I64],
@@ -12,7 +29,7 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
             "fn rt_int_to_string(n: i64) -> AlmideString { AlmideString::from_i64(n) }"),
     ("print_str", &[NTy::Str],
             None,
-            "fn rt_print_str(s: &str) { println!(\"{}\", s); }"),
+            PRINT_SHIMS),
     // The §13 abort convention's message channel (assert desugar, time-ctor
     // negative trap): stderr line, exact v0 oracle behavior.
     ("eprintln", &[NTy::Str],
@@ -24,63 +41,20 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("string.eq", &[NTy::Str, NTy::Str],
             Some(NTy::I64),
             "fn rt_string_eq(a: &str, b: &str) -> i64 { (a == b) as i64 }"),
-    ("string.len", // Codepoint count, NOT byte length (C-016 discipline).
-            &[NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_len(s: &str) -> i64 { s.chars().count() as i64 }"),
     // String predicates/transforms: each shim is the EXACT v0 native oracle
     // expression (runtime/rs/src/string.rs delegates to Rust std the same way),
     // so the differential gate pins byte-equality, and C-016/C-019/C-020's
     // full-Unicode discipline carries over unchanged.
-    ("string.contains", &[NTy::Str, NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_contains(s: &str, sub: &str) -> i64 { s.contains(sub) as i64 }"),
-    ("string.starts_with", &[NTy::Str, NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_starts_with(s: &str, p: &str) -> i64 { s.starts_with(p) as i64 }"),
-    ("string.ends_with", &[NTy::Str, NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_ends_with(s: &str, p: &str) -> i64 { s.ends_with(p) as i64 }"),
     ("string.to_upper", &[NTy::Str],
             Some(NTy::Str),
-            "fn rt_string_to_upper(s: &str) -> AlmideString {\n    // C-412: a non-ASCII scalar whose mapping holds ASCII stays unchanged.\n    let mut out = String::with_capacity(s.len());\n    for c in s.chars() { let m = c.to_uppercase(); if !c.is_ascii() && m.clone().any(|x| x.is_ascii()) { out.push(c) } else { out.extend(m) } }\n    AlmideString::from(out)\n}"),
+            "fn rt_string_to_upper(s: &str) -> AlmideString {\n    // ASCII maps byte by byte (the v0 runtime's fast path).\n    if s.is_ascii() { return AlmideString::from(s.to_ascii_uppercase()); }\n    // C-412: a non-ASCII scalar whose mapping holds ASCII stays unchanged.\n    let mut out = String::with_capacity(s.len());\n    for c in s.chars() { let m = c.to_uppercase(); if !c.is_ascii() && m.clone().any(|x| x.is_ascii()) { out.push(c) } else { out.extend(m) } }\n    AlmideString::from(out)\n}"),
     ("string.to_lower", &[NTy::Str],
             Some(NTy::Str),
-            "fn rt_string_to_lower(s: &str) -> AlmideString {\n    // C-412: walk str::to_lowercase (Final_Sigma context) in step with each scalar's span.\n    let full = s.to_lowercase();\n    let mut lowered = full.chars();\n    let mut out = String::with_capacity(full.len());\n    for c in s.chars() { let span: String = lowered.by_ref().take(c.to_lowercase().count()).collect(); if !c.is_ascii() && span.chars().any(|x| x.is_ascii()) { out.push(c) } else { out.push_str(&span) } }\n    AlmideString::from(out)\n}"),
-    ("string.trim", &[NTy::Str],
-            Some(NTy::Str),
-            "fn rt_string_trim(s: &str) -> AlmideString { AlmideString::from(s.trim()) }"),
-    // #4006: four floor rows the corpus walls on most, each the v0 oracle's
-    // body (runtime/rs/src/string.rs, math.rs; stdlib/bool.almd).
+            "fn rt_string_to_lower(s: &str) -> AlmideString {\n    // ASCII maps byte by byte (the v0 runtime's fast path).\n    if s.is_ascii() { return AlmideString::from(s.to_ascii_lowercase()); }\n    // C-412: walk str::to_lowercase (Final_Sigma context) in step with each scalar's span.\n    let full = s.to_lowercase();\n    let mut lowered = full.chars();\n    let mut out = String::with_capacity(full.len());\n    for c in s.chars() { let span: String = lowered.by_ref().take(c.to_lowercase().count()).collect(); if !c.is_ascii() && span.chars().any(|x| x.is_ascii()) { out.push(c) } else { out.push_str(&span) } }\n    AlmideString::from(out)\n}"),
+    // #4006: the v0 oracle's body (stdlib/bool.almd).
     ("bool.to_string", &[NTy::I64],
             Some(NTy::Str),
             "fn rt_bool_to_string(b: i64) -> AlmideString { AlmideString::from(if b != 0 { \"true\" } else { \"false\" }) }"),
-    ("string.replace", &[NTy::Str, NTy::Str, NTy::Str],
-            Some(NTy::Str),
-            "fn rt_string_replace(s: &str, from: &str, to: &str) -> AlmideString { AlmideString::from(s.replace(from, to)) }"),
-    // CODEPOINT indices clamped to [0, char_count] (almide_rt_string_slice).
-    ("string.slice", &[NTy::Str, NTy::I64, NTy::I64],
-            Some(NTy::Str),
-            "fn rt_string_slice(s: &str, start: i64, end: i64) -> AlmideString {\n    let s_idx = start.max(0) as usize;\n    let e_idx = end.max(0) as usize;\n    if s_idx >= e_idx { AlmideString::new() } else { AlmideString::from(s.chars().skip(s_idx).take(e_idx - s_idx).collect::<String>()) }\n}"),
-    ("string.is_empty", &[NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_is_empty(s: &str) -> i64 { s.is_empty() as i64 }"),
-    ("string.is_alpha", &[NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_is_alpha(s: &str) -> i64 { (!s.is_empty() && s.chars().all(|c| c.is_alphabetic())) as i64 }"),
-    ("string.is_alphanumeric", &[NTy::Str],
-            Some(NTy::I64),
-            "fn rt_string_is_alphanumeric(s: &str) -> i64 { (!s.is_empty() && s.chars().all(|c| c.is_alphanumeric())) as i64 }"),
-    ("string.capitalize", &[NTy::Str],
-            Some(NTy::Str),
-            "fn rt_string_capitalize(s: &str) -> AlmideString {\n    // C-412: the first scalar upper-cases under the to_upper rule.\n    let mut c = s.chars();\n    let mut out = String::with_capacity(s.len());\n    if let Some(f) = c.next() { let m = f.to_uppercase(); if !f.is_ascii() && m.clone().any(|x| x.is_ascii()) { out.push(f) } else { out.extend(m) } out.push_str(c.as_str()); }\n    AlmideString::from(out)\n}"),
-    ("string.take", &[NTy::Str, NTy::I64],
-            Some(NTy::Str),
-            "fn rt_string_take(s: &str, n: i64) -> AlmideString { AlmideString::from(s.chars().take(n.max(0) as usize).collect::<String>()) }"),
-    // A NaN maps to the one canonical quiet-NaN pattern (almide_rt_float_to_bits).
-    ("float.to_bits", &[NTy::F64],
-            Some(NTy::I64),
-            "fn rt_float_to_bits(f: f64) -> i64 { if f.is_nan() { 0x7FF8_0000_0000_0000_u64 as i64 } else { f.to_bits() as i64 } }"),
     // Square-and-multiply with wrapping steps; a negative exponent is the
     // v0 abort `Error: negative exponent`, exit 1 (almide_rt_math_pow).
     // `int.pow` is the public name (`math.pow` left the surface, R-math-01),
@@ -89,62 +63,26 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("int.pow", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
             "fn rt_int_pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
-    // #1869: `list.range` joins the floor as a closed shim. The lowering
-    // materializes a `let`-bound range that is indexed or measured as
-    // `CallFn list.range(s, e)`; without a floor entry the whole program
-    // left the trust-spine for the v3 codegen — silently — on every such
-    // read. The body is the v3 runtime's `almide_rt_list_range` verbatim
-    // (runtime/rs/src/list.rs): empty when e <= s, the span through
-    // `saturating_sub` so `end - start` cannot wrap, and a span the machine
-    // cannot satisfy is the C-197 `Error: out of memory` abort via
-    // `try_reserve_exact` — never `(s..e).collect()`'s raw `capacity
-    // overflow` panic (range_materialize_oom reads exit 1 + that line on
-    // both legs). Rung-4 owned `Vec<i64>`.
-    // #1869: `list.len` over a rung-4 scalar list — the read that, with an
-    // index, forces the `list.range` materialization above; borrowed, like
-    // every heap arg at the MIR call boundary.
-    ("list.len", &[NTy::VecRef],
-            Some(NTy::I64),
-            "fn rt_list_len(xs: &[i64]) -> i64 {\n    xs.len() as i64\n}"),
-    ("list.range", &[NTy::I64, NTy::I64],
-            Some(NTy::Vec),
-            "fn rt_list_range(s: i64, e: i64) -> Vec<i64> {\n    let count = e.saturating_sub(s).max(0) as usize;\n    let mut v: Vec<i64> = Vec::new();\n    if v.try_reserve_exact(count).is_err() {\n        eprintln!(\"Error: out of memory\");\n        std::process::exit(1);\n    }\n    v.extend(s..e);\n    v\n}"),
-    ("string.repeat", &[NTy::Str, NTy::I64],
-            Some(NTy::Str),
-            // The SAME clamp + ceiling as the v0 runtime and the wasm self-host
-            // (stdlib/string_repeat.almd): a negative count is the empty string
-            // (C-054), and a result past the shared 2^31 ceiling aborts in the
-            // T6 form. The bare `s.repeat(n as usize)` turned `repeat(s, -1)`
-            // into a capacity-overflow PANIC (exit 101) on this leg while the
-            // wasm leg printed normally — a crash-form divergence the C-161
-            // rule forbids (differential fuzz, seed 1785015406589852000 index
-            // 1012). Keep in sync with ALMIDE_REPEAT_MAX_BYTES.
-            "fn rt_string_repeat(s: &str, n: i64) -> AlmideString {\n    let n = n.max(0);\n    if (s.len() as i64).saturating_mul(n) > (1i64 << 31) {\n        eprintln!(\"Error: repeat result too large\");\n        std::process::exit(1);\n    }\n    AlmideString::from(s.repeat(n as usize))\n}"),
     ("string.cmp", // Byte-wise lexicographic, -1/0/1 (C-019: rt_string_extra cmp = native oracle).
             &[NTy::Str, NTy::Str],
             Some(NTy::I64),
             "fn rt_string_cmp(a: &str, b: &str) -> i64 {\n    match a.cmp(b) { std::cmp::Ordering::Less => -1, std::cmp::Ordering::Equal => 0, std::cmp::Ordering::Greater => 1 }\n}"),
-    ("float.to_string", // The EXACT v0 native oracle (runtime/rs/src/float.rs::almide_rt_float_to_string):
-            // shortest round-trip Display, integral values forced to a `.0` tail.
-            &[NTy::F64],
-            Some(NTy::Str),
-            "fn rt_float_to_string(n: f64) -> AlmideString {\n    let s = format!(\"{}\", n);\n    AlmideString::from(if n.fract() == 0.0 && !s.contains('.') && !s.contains(\"inf\") && !s.contains(\"NaN\") {\n        format!(\"{}.0\", s)\n    } else {\n        s\n    })\n}"),
     ("__chk_div", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "fn rt_chk_div(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a / b\n}"),
+            "#[inline(always)]\nfn rt_chk_div(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a / b\n}"),
     ("__chk_mod", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
             // v0's `almide_mod` macro prints "division by zero" for a zero rhs (mod and
             // div share the message — the C-002 oracle text); keep byte parity.
-            "fn rt_chk_mod(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a % b\n}"),
+            "#[inline(always)]\nfn rt_chk_mod(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a % b\n}"),
     // The unsigned 64-bit lane (#872): the i64 slot carries the u64 bit
     // pattern. Same divide-by-zero message bytes; no MIN÷-1 case unsigned.
     ("__chk_div_u", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "fn rt_chk_div_u(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    ((a as u64) / (b as u64)) as i64\n}"),
+            "#[inline(always)]\nfn rt_chk_div_u(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    ((a as u64) / (b as u64)) as i64\n}"),
     ("__chk_mod_u", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "fn rt_chk_mod_u(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    ((a as u64) % (b as u64)) as i64\n}"),
+            "#[inline(always)]\nfn rt_chk_mod_u(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    ((a as u64) % (b as u64)) as i64\n}"),
 ];
 
 /// C-418's escaper (#4126, #4262), the one shim whose source is not a

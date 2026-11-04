@@ -37,6 +37,12 @@
 //! its body's lines (proofs/HelperSig.v). An `rc-sig` record in a bundle
 //! before version 4 is refused.
 //!
+//! Version 5 (#4006, class P) is version 4 that may carry one `native-calls`
+//! record: the whole natively rendered program's call binding — per function
+//! its heap-parameter modes, its call sites, the line of every argument a
+//! site moves, and its ownership lines (proofs/NativeCalls.v). A
+//! `native-calls` record in a bundle before version 5 is refused.
+//!
 //! A `witness` record's bytes are followed by exactly one `\n`. The length
 //! prefix, not a delimiter, ends the witness, so no witness byte can be
 //! mistaken for framing. Metadata is echoed and never trusted: nothing a
@@ -55,6 +61,8 @@ pub const MAGIC_V2: &str = "almide-certificate-bundle 2";
 pub const MAGIC_V3: &str = "almide-certificate-bundle 3";
 /// The first line of a version-4 bundle (version 3 + `rc-sig` records).
 pub const MAGIC_V4: &str = "almide-certificate-bundle 4";
+/// The first line of a version-5 bundle (version 4 + `native-calls` records).
+pub const MAGIC_V5: &str = "almide-certificate-bundle 5";
 
 /// The shipped file a version-2 bundle's witnesses describe.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -242,7 +250,12 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
         Some(MAGIC_V2) => 2,
         Some(MAGIC_V3) => 3,
         Some(MAGIC_V4) => 4,
-        Some(other) => return Err(r.err(format!("expected `{MAGIC}`, `{MAGIC_V2}`, `{MAGIC_V3}` or `{MAGIC_V4}`, found `{other}`"))),
+        Some(MAGIC_V5) => 5,
+        Some(other) => {
+            return Err(r.err(format!(
+                "expected `{MAGIC}`, `{MAGIC_V2}`, `{MAGIC_V3}`, `{MAGIC_V4}` or `{MAGIC_V5}`, found `{other}`"
+            )))
+        }
         None => return Err(r.err("the bundle is empty")),
     };
     let mut bundle = Bundle::default();
@@ -257,6 +270,9 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
                 }
                 if version < 4 && property == Property::RcSig {
                     return Err(r.err("an `rc-sig` record in a bundle before version 4"));
+                }
+                if version < 5 && property == Property::NativeCalls {
+                    return Err(r.err("a `native-calls` record in a bundle before version 5"));
                 }
                 bundle.witnesses.push(Witness { property, function, bytes });
             }
@@ -355,11 +371,16 @@ mod tests {
         assert!(parse(format!("{MAGIC_V3}\nwitness rc-sig 2 $1\n0|\n").as_bytes()).is_err());
         let b = parse(format!("{MAGIC_V4}\nwitness rc-sig 2 $1\n0|\n").as_bytes()).expect("a v4 bundle carries rc-sig");
         assert_eq!(verify(&b).1, Outcome::Certified);
+        // #4006 class P: a `native-calls` record needs version 5.
+        assert!(parse(format!("{MAGIC_V4}\nwitness native-calls 3 program\n||\n\n").as_bytes()).is_err());
+        let b = parse(format!("{MAGIC_V5}\nwitness native-calls 3 program\n||\n\n").as_bytes())
+            .expect("a v5 bundle carries native-calls");
+        assert_eq!(verify(&b).1, Outcome::Certified);
     }
 
     #[test]
     fn what_version_one_does_not_define_is_refused() {
-        assert!(parse(b"almide-certificate-bundle 5\n").is_err());
+        assert!(parse(b"almide-certificate-bundle 6\n").is_err());
         assert!(parse(&bundle("witness ownership 9 main\nid\n")).is_err());
         assert!(parse(&bundle("witness teleport 2 main\nid\n")).is_err());
         assert!(parse(&bundle("signed-by nobody\n")).is_err());

@@ -631,7 +631,7 @@ fn render_fn_safe_name(
 // SAFETY: (of the emitted call) signal(2) is declared with its C prototype
 // (an int and a pointer-sized handler, returning one), and called with
 // SIGPIPE and SIG_DFL (0): no handler address of ours is handed over.
-const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(all(unix, not(miri)))]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
+pub(crate) const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(all(unix, not(miri)))]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
 
 /// Call-stack exhaustion as the defined abort (C-196): replace std's
 /// guard-page handler with the one that prints `Error: stack overflow` and

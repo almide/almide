@@ -1,0 +1,50 @@
+diff --git a/crates/almide-mir/src/native_move_params.rs b/crates/almide-mir/src/native_move_params.rs
+index 48e8076e6..f4405849b 100644
+--- a/crates/almide-mir/src/native_move_params.rs
++++ b/crates/almide-mir/src/native_move_params.rs
+@@ -136,7 +136,8 @@ fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Option<MirFu
+         consumed.iter().map(|&(k, at)| (at, func.params[k].value)).collect();
+     releases.sort_unstable_by_key(|r| std::cmp::Reverse(r.0));
+     for &(at, p) in &releases {
+-        f.ops.insert(at + 1, Op::Drop { v: p });
++        // RE-INJECTED (#4006 class P drill): the consumed param is taken over but never released.
++        let _ = at;
+         f.owned_params.insert(p);
+     }
+     // A movable param's Dup index shifts by the releases inserted before it.
+@@ -154,7 +155,8 @@ fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Option<MirFu
+     for i in at.into_iter().rev() {
+         f.ops.remove(i);
+     }
+-    crate::verify_ownership(&f).is_ok().then_some(f)
++    // RE-INJECTED (#4006 class P drill): the Rust mirror is bypassed.
++    Some(f)
+ }
+ 
+ /// Whether the caller can move `v` into the call at `call` without a copy:
+@@ -320,9 +322,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
+     }
+     for f in next.iter_mut() {
+         let moved = move_at_sites(f, &owned);
+-        if crate::verify_ownership(&moved).is_err() {
+-            return;
+-        }
++        // RE-INJECTED (#4006 class P drill): the Rust mirror is bypassed.
+         *f = moved;
+     }
+     functions.clone_from_slice(&next);
+diff --git a/crates/almide-mir/src/render_native.rs b/crates/almide-mir/src/render_native.rs
+index ea051164f..9fc47bacc 100644
+--- a/crates/almide-mir/src/render_native.rs
++++ b/crates/almide-mir/src/render_native.rs
+@@ -202,6 +202,10 @@ use crate::render_native_shims::{
+ /// Drops from — the certificate that scope-end drop realizes it. A violation is
+ /// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
+ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
++    // RE-INJECTED (#4006 drill): the Rust mirror is bypassed.
++    if !func.name.is_empty() {
++        return Ok(());
++    }
+     let Err(violations) = crate::verify_ownership(func) else {
+         return Ok(());
+     };

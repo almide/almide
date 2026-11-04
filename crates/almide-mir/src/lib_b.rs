@@ -82,9 +82,52 @@ pub enum PrimKind {
     ResErrStr,
     /// `dst = args[0].clone()` — a copy of a carrier `ResMakeOk` /
     /// `ResMakeErrStr` minted (the `Dup` the shared lowering emits when a
-    /// Result outlives a statement, #3669). The minted carrier has no object,
-    /// so the copy is no ownership event, and neither is its release.
+    /// Result outlives a statement, #3669). Like the two makers it is a
+    /// carrier BIRTH ([`PrimKind::births_native_carrier`]): a fresh owned
+    /// object, released by the carrier's own kept `Drop`/`Consume` (#4349).
     ResCopy,
+    /// ── NATIVE-ONLY Option carrier prims (#4006 family B) ────────────────
+    /// Inserted exclusively by `native_option_rewrite` (never by the shared
+    /// lowering, never seen by the wasm renderer): a scalar Option's
+    /// `Init::OptSome` / `Init::OptNone` block and its tag/payload read
+    /// windows, rendered as a Rust `Option<i64>` local (`NTy::Opt`).
+    /// `Some(args[0])` — args[0] is the scalar payload (a Float as its bits).
+    OptMakeSome,
+    /// `None`.
+    OptMakeNone,
+    /// `dst = args[0].is_some() as i64` — the block's length word (1 = Some).
+    OptTag,
+    /// `dst = the Some payload` (scalar); 0 on the None side (unreached: the
+    /// tag dispatch guards it).
+    OptPayload,
+    /// `dst = args[0]` — a copy of a minted carrier (the `Dup` the shared
+    /// lowering emits when an Option outlives a statement); no ownership event.
+    OptCopy,
+    /// ── NATIVE-ONLY String-Ok Result carrier prims (#4006 family C) ──────
+    /// Inserted exclusively by `native_result_str_rewrite`: `dst =
+    /// Ok(args[0].clone())` — args[0] is the payload String (its own
+    /// Alloc/Consume accounting untouched); dst is a `Result<String, String>`.
+    ResStrMake,
+    /// `args[0]`'s payload moves to the Err side when `args[1] != 0` (the
+    /// block's tag word); no dst, no ownership event.
+    ResStrSetTag,
+    /// ── NATIVE-ONLY storage-slot prims (#4006 family I) ──────────────────
+    /// Inserted exclusively by `native_slot_rewrite`: a scalar `Load8` /
+    /// `Store8` through a mutable module-level binding's slot address
+    /// (`mg_slot_addr(slot)`), rendered as a load / store of the slot's own
+    /// `static` (an `AtomicI64` holding the MIR scalar, a Float as its bits).
+    /// `dst = slot`.
+    NativeSlotLoad { slot: u32 },
+    /// `slot = args[0]`.
+    NativeSlotStore { slot: u32 },
+    /// ── NATIVE-ONLY narrow integer arithmetic (#4006) ────────────────────
+    /// Inserted exclusively by `native_narrow_rewrite`: a ring op (`Add`,
+    /// `Sub`, `Mul`) whose only reader is the lowering's re-wrap to a narrow
+    /// declared width, fused with that re-wrap. `dst = args[0] op args[1]`
+    /// computed in the `bits`-wide integer type (wrapping), then widened back
+    /// to the lane (sign-extended when `signed`, zero-extended otherwise) —
+    /// exactly the value the re-wrap produces. No ownership event.
+    NativeNarrowBin { op: IntOp, bits: u8, signed: bool },
     /// `process.exit(code)` — the WASI `proc_exit` host call with a USER exit
     /// code (`args = [code]`, i64 wrapped to i32; no message line, unlike
     /// [`PrimKind::Die`]'s fixed exit-1 + stderr). Never returns; carries no
@@ -395,6 +438,26 @@ pub enum PrimKind {
     /// block is a distinct bump address — pointer identity IS the tag. Chains
     /// (via `args[2]`) when a family carries two singletons.
     RegionTagSel { tag: i64 },
+}
+
+impl PrimKind {
+    /// The native Result carrier prims that BIRTH a carrier — an owned Rust
+    /// `Result` local. The ownership mirror and the certificate both count
+    /// it alloc-class (`i`), balanced by the carrier's kept release (#4349).
+    pub fn births_native_carrier(&self) -> bool {
+        matches!(self, PrimKind::ResMakeOk | PrimKind::ResMakeErrStr | PrimKind::ResCopy)
+    }
+
+    /// The native Result carrier prims that READ a carrier (`args[0]`): the
+    /// tag, the Ok payload, the Err view, the copy. Each one dereferences the
+    /// carrier, so the carrier must still be live, the way the `Load`s of
+    /// the block window they replaced had to be (#4349).
+    pub fn reads_native_carrier(&self) -> bool {
+        matches!(
+            self,
+            PrimKind::ResTag | PrimKind::ResOkScalar | PrimKind::ResErrStr | PrimKind::ResCopy
+        )
+    }
 }
 
 /// A unary f64 op (the value is the f64 bits in an i64; render reinterprets around it).

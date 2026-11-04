@@ -50,13 +50,34 @@ fn a_builder_loop_appends_in_place() {
 
 #[test]
 fn pushing_a_string_onto_itself_keeps_the_concat() {
+    // `w` is built at run time and read twice after the push: from a literal
+    // the render folds the whole program to one printed constant, and a lone
+    // printed read is formatted in place, so no append is left to pin.
     let rust = render(
         "effect fn main() -> Unit = {
-  var w = \"ab\"
+  var n = 0
+  while n < 3 {
+    n = n + 1
+  }
+  var w = int.to_string(n) + \"b\"
   string.push(w, w)
+  println(int.to_string(string.len(w)))
   println(w)
 }
 ",
     );
-    assert!(main_body(&rust).contains("rt_str_concat("), "`s.push_str(&s)` cannot borrow `s` twice:\n{rust}");
+    // The hazard is an in-place push of a string onto itself, which rustc
+    // rejects: the doubling must be a concat, or (once the result only feeds a
+    // fused println) the two reads formatted in place.
+    let self_push = main_body(&rust).lines().any(|l| {
+        let Some((recv, arg)) = l.trim().split_once(".push_str(&") else { return false };
+        let recv = recv.rsplit(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap_or(recv);
+        arg.trim_end_matches([')', ';', ' ']).trim_end_matches("[..]") == recv
+    });
+    assert!(!self_push, "`s.push_str(&s)` cannot borrow `s` twice:\n{rust}");
+    let body = main_body(&rust);
+    assert!(
+        body.contains("rt_str_concat(") || body.contains("format_args!(\"{}{}\", &v"),
+        "the self-append is neither a concat nor two in-place reads:\n{rust}"
+    );
 }

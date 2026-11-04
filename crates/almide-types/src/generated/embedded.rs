@@ -890,6 +890,7 @@ pub const SRC_BOOL: &str = r#"
 
 
 /// "true" or "false"; bool.parse reads it back.
+@scalar_text
 fn to_string(b: Bool) -> String = if b then "true" else "false"
 
 /// ok(true) for "true", ok(false) for "false", err for anything else.
@@ -11401,6 +11402,7 @@ pub const SRC_INT: &str = r#"
 
 /// Decimal digits, with - when negative.
 @intrinsic("almide_rt_int_to_string")
+@scalar_text
 fn to_string(x: Int) -> String = _
 
 /// Lowercase hex, no 0x; -1 gives 16 f digits.
@@ -22560,12 +22562,16 @@ else {
   else __skv_find(h, entries, k, i + 1)
 }
 
+@specializes("map.new")
 fn map_new_skv() -> Map[String, Int] = prim.alloc_map_skv(0)
 
+@specializes("map.len")
 fn map_len_skv(m: Map[String, Int]) -> Int = prim.load32(prim.handle(m) + 4)
 
+@specializes("map.is_empty")
 fn map_is_empty_skv(m: Map[String, Int]) -> Bool = prim.load32(prim.handle(m) + 4) == 0
 
+@specializes("map.contains")
 fn map_contains_skv(m: Map[String, Int], k: String) -> Bool = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22582,6 +22588,7 @@ fn __skv_some(h: Int, entries: Int, idx: Int) -> Int? = {
   some(v)
 }
 
+@specializes("map.get")
 fn map_get_skv(m: Map[String, Int], k: String) -> Int? = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22621,6 +22628,7 @@ fn __skv_set_append(rh: Int, sentries: Int, rentries: Int, idx: Int, k: String, 
     0
   }
 
+@specializes("map.set")
 fn map_set_skv(m: Map[String, Int], k: String, v: Int) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let sentries = prim.load32(sh + 4)
@@ -22658,6 +22666,7 @@ fn __skv_remove_fill(sh: Int, rh: Int, sentries: Int, rentries: Int, k: String, 
     }
   }
 
+@specializes("map.remove")
 fn map_remove_skv(m: Map[String, Int], k: String) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let sentries = prim.load32(sh + 4)
@@ -22680,6 +22689,7 @@ else {
   __skv_keys_fill(sh, oh, entries, i + 1)
 }
 
+@specializes("map.keys")
 fn map_keys_skv(m: Map[String, Int]) -> List[String] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22696,6 +22706,7 @@ else {
   __skv_values_fill(sh, oh, entries, i + 1)
 }
 
+@specializes("map.values")
 fn map_values_skv(m: Map[String, Int]) -> List[Int] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22933,6 +22944,7 @@ else {
   }
 }
 
+@specializes("map.from_list")
 fn map_from_list_skv(pairs: List[(String, Int)]) -> Map[String, Int] = {
   let lh = prim.handle(pairs)
   let n = prim.load32(lh + 4)
@@ -23036,6 +23048,7 @@ fn __skv_merge_bapp(ah: Int, bh: Int, rh: Int, an: Int, bn: Int, rn: Int, j: Int
     } else __skv_merge_bapp(ah, bh, rh, an, bn, rn, j + 1, w)
   }
 
+@specializes("map.merge")
 fn map_merge_skv(a: Map[String, Int], b: Map[String, Int]) -> Map[String, Int] = {
   let ah = prim.handle(a)
   let bh = prim.handle(b)
@@ -29900,67 +29913,87 @@ pub const SRC_PRIM: &str = r#"
 
 
 
+
+
+
+
+@prim_op(addr)
 @intrinsic("almide_rt_prim_handle")
 fn handle[A](ptr: A) -> Int = _
 
 
+@prim_op(load, width=1)
 @intrinsic("almide_rt_prim_load8")
 fn load8(addr: Int) -> Int = _
 
 
+@prim_op(load, width=4)
 @intrinsic("almide_rt_prim_load32")
 fn load32(addr: Int) -> Int = _
 
 
+@prim_op(load, width=8)
 @intrinsic("almide_rt_prim_load64")
 fn load64(addr: Int) -> Int = _
 
 
+@prim_op(store, width=4)
 @intrinsic("almide_rt_prim_store32")
 fn store32(addr: Int, val: Int) -> Unit = _
 
 
+@prim_op(store, width=1)
 @intrinsic("almide_rt_prim_store8")
 fn store8(addr: Int, val: Int) -> Unit = _
 
 
+@prim_op(store, width=8)
 @intrinsic("almide_rt_prim_store64")
 fn store64(addr: Int, val: Int) -> Unit = _
 
 
+@prim_op(int, op=bit_and)
 @intrinsic("almide_rt_prim_band")
 fn band(a: Int, b: Int) -> Int = _
 
+@prim_op(int, op=bit_or)
 @intrinsic("almide_rt_prim_bor")
 fn bor(a: Int, b: Int) -> Int = _
 
+@prim_op(int, op=bit_xor)
 @intrinsic("almide_rt_prim_bxor")
 fn bxor(a: Int, b: Int) -> Int = _
 
+@prim_op(int, op=shl)
 @intrinsic("almide_rt_prim_bshl")
 fn bshl(n: Int, bits: Int) -> Int = _
 
+@prim_op(int, op=shr)
 @intrinsic("almide_rt_prim_bshr")
 fn bshr(n: Int, bits: Int) -> Int = _
 
 
+@prim_op(int, op=shr_u)
 @intrinsic("almide_rt_prim_bshr_u")
 fn bshr_u(n: Int, bits: Int) -> Int = _
 
 
 
 
+@prim_op(alloc, block=bytes)
 @intrinsic("almide_rt_prim_alloc_str")
 fn alloc_str(byte_len: Int) -> String = _
 
 
 
+@prim_op(alloc, block=bytes)
 @intrinsic("almide_rt_prim_alloc_bytes")
 fn alloc_bytes(n: Int) -> Bytes = _
 
 
 
 
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_list(n: Int) -> List[Int] = _
 
@@ -29969,6 +30002,7 @@ fn alloc_list(n: Int) -> List[Int] = _
 
 
 
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_list_f64(n: Int) -> List[Float] = _
 
@@ -29977,6 +30011,7 @@ fn alloc_list_f64(n: Int) -> List[Float] = _
 
 
 
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_set(n: Int) -> Set[Int] = _
 
@@ -29986,6 +30021,7 @@ fn alloc_set(n: Int) -> Set[Int] = _
 
 
 
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_map(slots: Int) -> Map[Int, Int] = _
 
@@ -29994,6 +30030,7 @@ fn alloc_map(slots: Int) -> Map[Int, Int] = _
 
 
 
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_map_str(slots: Int) -> Map[String, String] = _
 
@@ -30003,6 +30040,7 @@ fn alloc_map_str(slots: Int) -> Map[String, String] = _
 
 
 
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_map_skv(slots: Int) -> Map[String, Int] = _
 
@@ -30012,6 +30050,7 @@ fn alloc_map_skv(slots: Int) -> Map[String, Int] = _
 
 
 
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_value(slots: Int) -> Value = _
 
@@ -30020,6 +30059,7 @@ fn alloc_value(slots: Int) -> Value = _
 
 
 
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_list_str[A](n: Int) -> List[A] = _
 
@@ -30027,18 +30067,21 @@ fn alloc_list_str[A](n: Int) -> List[A] = _
 
 
 
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_set_str[A](n: Int) -> Set[A] = _
 
 
 
 
+@prim_op(store_owned)
 @intrinsic("almide_rt_prim_store_str")
 fn store_str[A](addr: Int, piece: A) -> Unit = _
 
 
 
 
+@prim_op(load_ref)
 @intrinsic("almide_rt_prim_load_str")
 fn load_str(addr: Int) -> String = _
 
@@ -30047,6 +30090,7 @@ fn load_str(addr: Int) -> String = _
 
 
 
+@prim_op(load_ref)
 @intrinsic("almide_rt_prim_load_handle")
 fn load_handle[A](addr: Int) -> A = _
 
@@ -30055,20 +30099,24 @@ fn load_handle[A](addr: Int) -> A = _
 
 
 
+@prim_op(rc, op=dec)
 @intrinsic("almide_rt_prim_rc_dec")
 fn rc_dec(addr: Int) -> Unit = _
 
+@prim_op(rc, op=inc)
 @intrinsic("almide_rt_prim_rc_inc")
 fn rc_inc(addr: Int) -> Unit = _
 
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_fd_write")
 fn fd_write(fd: Int, iov: Int, count: Int, nw: Int) -> Int = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_random_get")
 fn random_get(buf: Int, len: Int) -> Int = _
 
@@ -30078,6 +30126,7 @@ fn random_get(buf: Int, len: Int) -> Int = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_args_get_list")
 fn args_get_list() -> List[String] = _
 
@@ -30089,6 +30138,7 @@ fn args_get_list() -> List[String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_env_get")
 fn env_get(name: String) -> String? = _
 
@@ -30100,12 +30150,14 @@ fn env_get(name: String) -> String? = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_text_file")
 fn read_text_file(path: String) -> Result[String, String] = _
 
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_bytes_file")
 fn read_bytes_file(path: String) -> Result[Bytes, String] = _
 
@@ -30118,12 +30170,15 @@ fn read_bytes_file(path: String) -> Result[Bytes, String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_text_file_as")
 fn read_text_file_as(path: String, call: String) -> Result[String, String] = _
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_bytes_file_as")
 fn read_bytes_file_as(path: String, call: String) -> Result[Bytes, String] = _
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_text_file_as_pair")
 fn read_text_file_as_pair(path: String, call: String, first: String, second: String) -> Result[String, String] = _
 
@@ -30136,11 +30191,13 @@ fn read_text_file_as_pair(path: String, call: String, first: String, second: Str
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_dir")
 fn read_dir(path: String) -> Result[List[String], String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_dir_as")
 fn read_dir_as(path: String, call: String) -> Result[List[String], String] = _
 
@@ -30153,15 +30210,18 @@ fn read_dir_as(path: String, call: String) -> Result[List[String], String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_write_text_file")
 fn write_text_file(path: String, content: String) -> Result[Unit, String] = _
 
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_write_text_file_as")
 fn write_text_file_as(path: String, content: String, call: String) -> Result[Unit, String] = _
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_write_text_file_as_pair")
 fn write_text_file_as_pair(path: String, content: String, call: String, first: String, second: String) -> Result[Unit, String] = _
 
@@ -30175,11 +30235,13 @@ fn write_text_file_as_pair(path: String, content: String, call: String, first: S
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_make_dir")
 fn make_dir(path: String) -> Result[Unit, String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_make_dir_as")
 fn make_dir_as(path: String, call: String) -> Result[Unit, String] = _
 
@@ -30193,11 +30255,13 @@ fn make_dir_as(path: String, call: String) -> Result[Unit, String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_remove_all")
 fn remove_all(path: String) -> Result[Unit, String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_remove_all_as")
 fn remove_all_as(path: String, call: String) -> Result[Unit, String] = _
 
@@ -30210,6 +30274,7 @@ fn remove_all_as(path: String, call: String) -> Result[Unit, String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_path_exists")
 fn path_exists(path: String) -> Bool = _
 
@@ -30218,9 +30283,11 @@ fn path_exists(path: String) -> Bool = _
 
 
 
+@prim_op(ptr, op=to_int)
 @intrinsic("almide_rt_prim_ptr_to_int")
 fn ptr_to_int(p: Handle) -> Int = _
 
+@prim_op(ptr, op=from_int)
 @intrinsic("almide_rt_prim_int_to_ptr")
 fn int_to_ptr(a: Int) -> Handle = _
 
@@ -30232,6 +30299,7 @@ fn int_to_ptr(a: Int) -> Handle = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_path_filestat")
 fn path_filestat(buf: Int, path: String) -> Int = _
 
@@ -30239,6 +30307,7 @@ fn path_filestat(buf: Int, path: String) -> Int = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_path_filestat_nofollow")
 fn path_filestat_nofollow(buf: Int, path: String) -> Int = _
 
@@ -30248,6 +30317,7 @@ fn path_filestat_nofollow(buf: Int, path: String) -> Int = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_rename")
 fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
@@ -30259,6 +30329,7 @@ fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_line")
 fn read_line() -> String = _
 
@@ -30267,6 +30338,7 @@ fn read_line() -> String = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_n_bytes")
 fn read_n_bytes(n: Int) -> List[Int] = _
 
@@ -30278,6 +30350,7 @@ fn read_n_bytes(n: Int) -> List[Int] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_clock_time_get")
 fn clock_time_get(id: Int, precision: Int, time_ptr: Int) -> Int = _
 
@@ -30285,12 +30358,15 @@ fn clock_time_get(id: Int, precision: Int, time_ptr: Int) -> Int = _
 
 
 
+@prim_op(float_un, op=abs)
 @intrinsic("almide_rt_prim_fabs")
 fn fabs(x: Float) -> Float = _
 
+@prim_op(float_un, op=sqrt)
 @intrinsic("almide_rt_prim_fsqrt")
 fn fsqrt(x: Float) -> Float = _
 
+@prim_op(float_un, op=floor)
 @intrinsic("almide_rt_prim_ffloor")
 fn ffloor(x: Float) -> Float = _
 
@@ -30298,94 +30374,121 @@ fn ffloor(x: Float) -> Float = _
 
 
 
+@prim_op(float_un, op=nearest)
 @intrinsic("almide_rt_prim_fnearest")
 fn fnearest(x: Float) -> Float = _
 
+@prim_op(float_un, op=ceil)
 @intrinsic("almide_rt_prim_fceil")
 fn fceil(x: Float) -> Float = _
 
+@prim_op(float_un, op=neg)
 @intrinsic("almide_rt_prim_fneg")
 fn fneg(x: Float) -> Float = _
 
+@prim_op(float_bin, op=add)
 @intrinsic("almide_rt_prim_fadd")
 fn fadd(a: Float, b: Float) -> Float = _
 
+@prim_op(float_bin, op=sub)
 @intrinsic("almide_rt_prim_fsub")
 fn fsub(a: Float, b: Float) -> Float = _
 
+@prim_op(float_bin, op=mul)
 @intrinsic("almide_rt_prim_fmul")
 fn fmul(a: Float, b: Float) -> Float = _
 
+@prim_op(float_bin, op=div)
 @intrinsic("almide_rt_prim_fdiv")
 fn fdiv(a: Float, b: Float) -> Float = _
 
+@prim_op(float_bin, op=min)
 @intrinsic("almide_rt_prim_fmin")
 fn fmin(a: Float, b: Float) -> Float = _
 
+@prim_op(float_bin, op=max)
 @intrinsic("almide_rt_prim_fmax")
 fn fmax(a: Float, b: Float) -> Float = _
 
+@prim_op(float_bin, op=copysign)
 @intrinsic("almide_rt_prim_fcopysign")
 fn fcopysign(a: Float, b: Float) -> Float = _
 
+@prim_op(float_cmp, op=lt)
 @intrinsic("almide_rt_prim_flt")
 fn flt(a: Float, b: Float) -> Bool = _
 
+@prim_op(float_cmp, op=le)
 @intrinsic("almide_rt_prim_fle")
 fn fle(a: Float, b: Float) -> Bool = _
 
+@prim_op(float_cmp, op=gt)
 @intrinsic("almide_rt_prim_fgt")
 fn fgt(a: Float, b: Float) -> Bool = _
 
+@prim_op(float_cmp, op=ge)
 @intrinsic("almide_rt_prim_fge")
 fn fge(a: Float, b: Float) -> Bool = _
 
+@prim_op(float_cmp, op=eq)
 @intrinsic("almide_rt_prim_feq")
 fn feq(a: Float, b: Float) -> Bool = _
 
+@prim_op(float_cmp, op=ne)
 @intrinsic("almide_rt_prim_fne")
 fn fne(a: Float, b: Float) -> Bool = _
 
+@prim_op(float_to_int)
 @intrinsic("almide_rt_prim_f2i")
 fn f2i(x: Float) -> Int = _
 
+@prim_op(int_to_float)
 @intrinsic("almide_rt_prim_i2f")
 fn i2f(x: Int) -> Float = _
 
 
+@prim_op(float_bits)
 @intrinsic("almide_rt_prim_fbits")
 fn fbits(x: Float) -> Int = _
 
+@prim_op(float_bits)
 @intrinsic("almide_rt_prim_ffrombits")
 fn ffrombits(b: Int) -> Float = _
 
 
+@prim_op(f32_demote)
 @intrinsic("almide_rt_prim_f2f32")
 fn f2f32(x: Float) -> Float32 = _
 
+@prim_op(f32_promote)
 @intrinsic("almide_rt_prim_f32_2f")
 fn f32_2f(x: Float32) -> Float = _
 
 
+@prim_op(f32_promote)
 @intrinsic("almide_rt_prim_bits_to_f32")
 fn bits_to_f32(bits: Int) -> Float = _
 
 
+@prim_op(int_to_f32)
 @intrinsic("almide_rt_prim_i2f32")
 fn i2f32(x: Int) -> Float32 = _
 
 
+@prim_op(f32_bits)
 @intrinsic("almide_rt_prim_f32bits")
 fn f32bits(x: Float32) -> Int = _
 
 
 
 
+@prim_op(abort)
 @intrinsic("almide_rt_prim_die")
 fn die(s: Int) -> Unit = _
 
 
 
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_map_kv")
 fn alloc_map_kv[K, V](slots: Int) -> Map[K, V] = _
 "#;

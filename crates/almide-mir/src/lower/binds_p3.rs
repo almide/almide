@@ -66,6 +66,8 @@ impl LowerCtx {
             return None; // heap-element tuple → the masked `try_lower_tuple_construct` path.
         }
         let dst = self.try_lower_scalar_list_slots(elements)?;
+        let ty = almide_lang::types::Ty::Tuple(elements.iter().map(|e| e.ty.clone()).collect());
+        self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(&ty));
         // A scalar tuple is built with the uniform slot layout, so `t.0` / a `${tuple}` Display
         // reads its real slots. No heap slots → only the SAFE scalar reads are enabled.
         self.materialized_aggregates.insert(dst);
@@ -233,6 +235,7 @@ impl LowerCtx {
         }
         let dst = self.fresh_value();
         self.ops.push(Op::ListLit { dst, elems: slot_vals });
+        self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(&value.ty));
         // Built with the uniform slot layout, so a `${record}` Display (and a heap-field
         // borrow, were a later field heap) may read its real slots. A scalar-only record has
         // no heap slots, so this only enables the SAFE field reads — never a garbage deref.

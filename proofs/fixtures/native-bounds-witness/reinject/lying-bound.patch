@@ -1,0 +1,14 @@
+diff --git a/crates/almide-mir/src/render_native_b.rs b/crates/almide-mir/src/render_native_b.rs
+index d1b3925d9..fb6533962 100644
+--- a/crates/almide-mir/src/render_native_b.rs
++++ b/crates/almide-mir/src/render_native_b.rs
+@@ -85,7 +85,8 @@ fn render_list_get_scalar(
+     used_shims.push(IDX_GET_SHIM);
+     // The shim checks the index, then reads (render_native_bounds).
+     let slot = crate::render_native_bounds::Slot { base: *list, idx: Some(*idx), k: 0 };
+-    crate::render_native_bounds::check(slot);
++    // RE-INJECTED (#4006 row 4 drill): the check is recorded on another slot.
++    crate::render_native_bounds::check(crate::render_native_bounds::Slot { k: 1, ..slot });
+     crate::render_native_bounds::access(slot);
+     tys.insert(*dst, NTy::I64);
+     let borrow = if lt == NTy::Vec { "&" } else { "" };

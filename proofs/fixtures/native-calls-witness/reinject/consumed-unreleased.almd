@@ -1,0 +1,21 @@
+// #4006 class P reinjection drill (scripts/witness-reinject.sh native-calls):
+// CONSUMED, NEVER RELEASED: `grow` claims its `mut` list as a move param it
+// grows in place, but its release after the last use is never written — the
+// caller's handed-over reference leaks. Unpatched, `grow` takes the list
+// over, appends to its buffer and releases it; `run` hands its list over.
+fn grow(mut ys: List[Int]) -> List[Int] = {
+  list.push(ys, list.len(ys))
+  ys
+}
+
+fn run(n: Int) -> Int = {
+  var ys = [1, 2]
+  var i = 0
+  while i < n {
+    ys = grow(ys)
+    i = i + 1
+  }
+  list.len(ys)
+}
+
+fn main() -> Unit = println(int.to_string(run(3)))

@@ -420,6 +420,33 @@ witness of a render that lost a release with its Rust-mirror check bypassed
 rendered source into a binary keeping that balance, and every program off the
 floor, which ships from the standard codegen with no certificate.
 
+**Fan arms on threads (#4006 family H).** A `fan { … }` block of two or more
+arms renders on the certified native path as the standard codegen renders it:
+each arm on a scoped thread of the shipped fan runtime
+(`crates/almide-codegen/src/prelude_fan.rs`, emitted verbatim), with one output
+timeline per arm and a trap waiting for every arm below it (ADR-0024 D5/D6).
+Each arm is lifted into a function of its own (`crates/almide-mir/src/fan_native.rs`)
+that is lowered, verified and witnessed like any other — `proofs/native-wall.sh`
+judges its ownership certificate — and the MIR that calls them is sequential.
+TRUSTED: that running the arms of one block concurrently is observation-equal
+to that sequential order, which is what the certificate judges. Its
+preconditions, each checked by the lift (a program that fails one keeps the
+standard codegen; `fan_native::tests` refuse each): every arm is a direct
+call of a user function, or an expression of literals, operators, `if` and
+direct calls (an inlined call), over immutable locals (no `var` reaches an
+arm, and no top-level value) that become the lifted function's parameters;
+every argument and result is of
+a type that may cross a thread (scalars, `String`, and lists, options,
+results, tuples and records of them; no function value); the program has no
+metered region; and no arm holds a higher-order call. Native values DO carry
+counts: a `String` is an `AlmideStr` block with a reference count, so every
+heap value an arm receives is marked thread-shared before the spawn
+(`almide_str_mark_reachable`, ADR-0013 design point 3), after which its count
+changes only atomically. Also trusted: the fan runtime text itself and the
+glue that routes this render's output and exits through it
+(`crates/almide-mir/src/render_native_fan.rs`).
+
+
 ## Historical implementation progression (retained evidence)
 
 The following brick-by-brick narrative records the earlier MIR/incumbent
@@ -464,7 +491,7 @@ The earlier progression described its scope as follows:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (137 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (138 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties

@@ -48,6 +48,56 @@ lto = true
 codegen-units = 1
 "#;
 
+/// The runtime part of a v1 trust-spine render (#4006), built as a crate of
+/// its own. Owner ruling 2026-11-02: the runtime — the shared string buffer
+/// and the runtime bodies the render takes along — is compiled as v0 compiles
+/// its runtime rlib, without debug assertions (std's ub_checks inside every
+/// runtime loop cost a string scan 1.29x the standard build), and with
+/// overflow checks pinned off; the program's own code keeps `[profile.dev]`
+/// unchanged, its debug assertions included. The runtime's `unsafe` stays
+/// judged by Miri and ASan on the single-file render
+/// (`scripts/miri-asan-slice.sh`).
+pub(super) const RT_CRATE: &str = almide_mir::render_native::RT_MOD;
+
+/// The manifest lines the program crate gains when its runtime is split out.
+///
+/// Neither crate carries debug info, as v0's rustc fast path compiles both its
+/// runtime rlib and the program without `-g`: a certified render binds every
+/// value to its own `let`, and each `let` opens a nested debug scope, so a long
+/// straight-line `main` (thousands of bindings) overflowed LLVM's recursive
+/// DWARF scope walk — rustc died with SIGSEGV even at `line-tables-only` — and
+/// the debug info was most of the cold build's extra cost over v0 (#3829).
+pub(super) fn runtime_crate_manifest_lines() -> String {
+    format!(
+        "\n[dependencies.{RT_CRATE}]\npath = \"{RT_CRATE}\"\n\n\
+         # The runtime crate's profile (owner ruling 2026-11-02): no debug\n\
+         # assertions, as v0's runtime rlib; overflow checks pinned off.\n\
+         [profile.dev.package.{RT_CRATE}]\ndebug-assertions = false\noverflow-checks = false\ndebug = false\n\n\
+         # No debug info for the program either, as v0's rustc fast path.\n\
+         [profile.dev.package.almide-out]\ndebug = false\n"
+    )
+}
+
+/// The runtime crate's own manifest.
+pub(super) fn runtime_crate_manifest() -> String {
+    format!("[package]\nname = \"{RT_CRATE}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n")
+}
+
+/// Split a render's runtime module out: `(program, runtime crate root)`, or
+/// `None` for a render without one (a fan program keeps a single crate, its
+/// output macros and exit routing reaching the runtime's items). The program
+/// keeps the `pub use` of the runtime that follows the module, now naming the
+/// crate.
+pub(super) fn split_runtime_crate(code: &str) -> Option<(String, String)> {
+    use almide_mir::render_native::{RT_MOD_BEGIN, RT_MOD_END};
+    let b = code.find(RT_MOD_BEGIN)?;
+    let e = b + code[b..].find(RT_MOD_END)?;
+    let open = format!("pub mod {RT_CRATE} {{\n");
+    let body = code[b + RT_MOD_BEGIN.len()..e].strip_prefix(open.as_str())?.trim_end().strip_suffix('}')?;
+    let program = format!("{}{}", &code[..b], &code[e + RT_MOD_END.len()..]);
+    Some((program, format!("{body}\n")))
+}
+
 /// Does the generated code use a runtime module whose source needs a crate?
 /// (The cdylib/bin/test fast paths that skip cargo ask exactly this.)
 pub(super) fn needs_runtime_crates(rs_code: &str) -> bool {
