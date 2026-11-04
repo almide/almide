@@ -602,6 +602,81 @@ pub(super) fn filled_in_order(
     out
 }
 
+/// `List[String]` blocks that are a constant: a constant length, every slot
+/// stored once in order right after the allocation (`filled_in_order`) with a
+/// string literal, and afterwards only read — handed to a floor call's
+/// borrowed list param, or released. Such a block is the same value on every
+/// run of its function (a top-level `let` table the lowering re-materializes
+/// at each use), so the render builds it once, as v0 keeps a top-level `let`.
+/// Returns each block's literals in slot order.
+pub(super) fn const_str_lists(
+    func: &MirFunction,
+    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+    consts: &BTreeMap<ValueId, i64>,
+) -> BTreeMap<ValueId, Vec<String>> {
+    let filled = filled_in_order(func, base_of, consts);
+    let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
+    let lits: BTreeMap<ValueId, &String> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Alloc { dst, init: Init::Str(s), .. } => Some((*dst, s)),
+            _ => None,
+        })
+        .collect();
+    let handle_of: BTreeMap<ValueId, ValueId> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => Some((*d, args[0])),
+            _ => None,
+        })
+        .collect();
+    let mut out = BTreeMap::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        let Op::Alloc { dst: b, init: Init::DynListStr { len }, .. } = op else { continue };
+        if !filled.contains(b) {
+            continue;
+        }
+        let Some(n) = consts.get(len).and_then(|n| usize::try_from(*n).ok()) else { continue };
+        let mut elems: Vec<String> = Vec::new();
+        let mut ok = true;
+        for later in &func.ops[i + 1..] {
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(later, &mut reads);
+            let touches = reads.iter().any(|v| v == b || rooted(v, *b));
+            let fine = match later {
+                Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.first().is_some_and(|a| rooted(a, *b)) => {
+                    match handle_of.get(&args[1]).and_then(|s| lits.get(s)) {
+                        Some(s) if elems.len() < n => {
+                            elems.push((*s).clone());
+                            true
+                        }
+                        _ => false,
+                    }
+                }
+                Op::Prim { kind: PrimKind::Handle, args, .. } if args.first() == Some(b) => true,
+                Op::IntBinOp { op: crate::IntOp::Add, .. } if touches => true,
+                Op::DropListStr { v } if v == b => true,
+                Op::CallFn { name, args, .. } if touches => args.iter().enumerate().all(|(k, a)| match a {
+                    crate::CallArg::Handle(v) if v == b => crate::native_floor::borrows_list(name, k),
+                    crate::CallArg::Handle(v) | crate::CallArg::Scalar(v) => !rooted(v, *b),
+                    _ => true,
+                }),
+                _ => !touches,
+            };
+            if !fine {
+                ok = false;
+                break;
+            }
+        }
+        if ok && elems.len() == n {
+            out.insert(*b, elems);
+        }
+    }
+    out
+}
+
 pub(super) fn built_whole(
     func: &MirFunction,
     alloc_rec: &BTreeMap<ValueId, u16>,

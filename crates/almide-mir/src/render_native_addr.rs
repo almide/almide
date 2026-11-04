@@ -58,6 +58,9 @@ pub(crate) struct AddrState {
     /// reassignment of it (or across a loop edge): such a handle could go
     /// stale, so it walls.
     reassigned: BTreeSet<ValueId>,
+    /// Constant `List[String]` blocks (`render_native_slots::const_str_lists`):
+    /// rendered once, as a lazy static the function borrows.
+    const_lists: BTreeMap<ValueId, Vec<String>>,
     /// Empty list literals (`[]`): stored into a slot of a list type, each
     /// is that type's empty list.
     empty_lists: BTreeSet<ValueId>,
@@ -308,6 +311,8 @@ impl AddrState {
             .filter(|b| !single.contains_key(b))
             .collect();
         let reassigned = stale_handles(func);
+        let const_lists = slots::const_str_lists(func, &base_of, &consts);
+        set_const_lists(const_lists.keys().copied().collect());
         let stored = func
             .ops
             .iter()
@@ -341,6 +346,7 @@ impl AddrState {
             scaled: BTreeSet::new(),
             addrs: BTreeMap::new(),
             reassigned,
+            const_lists,
             empty_lists: func
                 .ops
                 .iter()
@@ -893,6 +899,10 @@ pub(crate) fn render_addr_op(
         Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 && st.addrs.contains_key(&args[0]) => {
             let ad = st.addrs[&args[0]];
             let v = args[1];
+            // A constant table's slot: already in its static.
+            if st.const_lists.contains_key(&ad.base) {
+                return Ok(true);
+            }
             if let (Some(i), Some(NTy::Rec(_)), Some(k)) = (is_enum(ty(tys, &ad.base)), ty(tys, &ad.base), rec_slot(&ad)) {
                 use crate::render_native_rec::{enum_slot_kinds, kind_suffix, struct_name};
                 let b = var(ad.base);
@@ -1054,6 +1064,29 @@ pub(crate) fn render_addr_op(
             line!("let mut {}: {} = Default::default();", var(*dst), crate::render_native_rec::struct_name(i));
             return Ok(true);
         }
+        // A constant string table: built once, on its first use, from the
+        // immortal static string blocks (never written, so thread-safe), and
+        // borrowed — the lazy static v0 keeps for a top-level `let` table.
+        Op::Alloc { dst, init: Init::DynListStr { .. }, .. } if st.const_lists.contains_key(dst) => {
+            tys.insert(*dst, NTy::VecStrRef);
+            let elems: Vec<String> = st.const_lists[dst]
+                .iter()
+                .map(|s| {
+                    let lit = almide_base::rust_lit::escape_rust_str(s);
+                    format!(
+                        "{{ static S: crate::almide_str_block::AlmideStrStatic<{}> = crate::almide_str_block::AlmideStrStatic::new(\"{lit}\"); AlmideString::from_static(&S) }}",
+                        s.len()
+                    )
+                })
+                .collect();
+            line!(
+                "static {k}: std::sync::LazyLock<Vec<AlmideString>> = std::sync::LazyLock::new(|| vec![{}]);",
+                elems.join(", "),
+                k = format!("ALMD_TABLE_{}", var(*dst))
+            );
+            line!("let {}: &Vec<AlmideString> = &*ALMD_TABLE_{};", var(*dst), var(*dst));
+            return Ok(true);
+        }
         Op::Alloc { dst, init: Init::DynListStr { len }, .. } if ty(tys, len) == Some(NTy::I64) && !st.alloc_rec.contains_key(dst) => {
             tys.insert(*dst, NTy::VecStr);
             if st.single.contains_key(dst) {
@@ -1206,6 +1239,20 @@ pub(crate) fn render_addr_op(
         )));
     }
     Ok(false)
+}
+
+thread_local! {
+    static CONST_LISTS: std::cell::RefCell<BTreeSet<ValueId>> = const { std::cell::RefCell::new(BTreeSet::new()) };
+}
+
+fn set_const_lists(s: BTreeSet<ValueId>) {
+    CONST_LISTS.with(|c| *c.borrow_mut() = s);
+}
+
+/// A constant string table of the function being rendered: borrowed from its
+/// static, so its release is nothing.
+pub(crate) fn is_const_list(v: ValueId) -> bool {
+    CONST_LISTS.with(|c| c.borrow().contains(&v))
 }
 
 /// The `Handle`s of reassigned locals that could go stale: some address
