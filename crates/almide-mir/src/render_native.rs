@@ -222,10 +222,12 @@ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
 /// Rung-5 closures slab: the CallIndirect dispatch tables. One dispatcher per
 /// ARITY (user args beyond the env block); the index space is the SAME
 /// name-sorted lambda order `Op::FuncRef` renders (both derive from the
-/// `user_fns` BTreeMap, so def and call site agree by construction). Only an
-/// i64-returning lambda gets an arm — a heap-returning one is reachable only
-/// through a CallIndirect with a heap result, which walls in `render_fn`, so its
-/// missing arm can never be hit; the `_` arm is the §13 controlled halt.
+/// `user_fns` BTreeMap, so def and call site agree by construction). An
+/// i64-returning lambda gets an arm, and so does a Unit one (its arm runs it
+/// and yields 0, which the only call that reaches it — a CallIndirect with no
+/// destination — discards); a heap-returning one is reachable only through a
+/// CallIndirect with a heap result, which walls in `render_fn`, so its missing
+/// arm can never be hit; the `_` arm is the §13 controlled halt.
 fn push_closure_dispatch_tables(
     out: &mut String,
     user_fns: &BTreeMap<&str, &MirFunction>,
@@ -238,7 +240,7 @@ fn push_closure_dispatch_tables(
         .copied()
         .filter(|n| n.starts_with("__lambda_"));
     for (idx, name) in lambda_names.enumerate() {
-        if fn_rets.get(name) != Some(&Some(NTy::I64)) {
+        if !matches!(fn_rets.get(name), Some(Some(NTy::I64)) | Some(None)) {
             continue;
         }
         // A heap-param lambda dispatches through its signature's typed table.
@@ -255,7 +257,11 @@ fn push_closure_dispatch_tables(
             "fn __almd_ci_{arity}(idx: i64, env: &[i64]{params}) -> i64 {{\n    match idx {{\n"
         ));
         for (idx, name) in fns {
-            out.push_str(&format!("        {idx} => {}(env{args}),\n", mangle(name)));
+            if fn_rets.get(name) == Some(&None) {
+                out.push_str(&format!("        {idx} => {{ {}(env{args}); 0 }}\n", mangle(name)));
+            } else {
+                out.push_str(&format!("        {idx} => {}(env{args}),\n", mangle(name)));
+            }
         }
         out.push_str(
             "        _ => { eprintln!(\"Error: closure index out of range\"); \
