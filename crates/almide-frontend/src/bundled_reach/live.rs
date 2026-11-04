@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use almide_lang::ast::{Decl, Program, TypeExpr};
 
-use super::{auto_modules, fn_is_named, reaches, spell_unit, variant_case_name, Spelled, Surface};
+use super::{auto_modules, auto_program, fn_is_named, reaches, spell_unit, variant_case_name, Spelled, Surface};
 
 /// The bundled stdlib a program reaches, by FUNCTION: which auto-imported
 /// modules load, and, for every bundled module considered (those plus the
@@ -64,10 +64,13 @@ pub const TEST_SYNTHESIZED: &[(&str, &str)] = &[
 /// - a row of [`COMPILER_INSERTED`], or of [`TEST_SYNTHESIZED`] when the
 ///   program declares a test;
 /// - a call made by a self-hosted body the wasm leg links behind a reached
-///   surface (`self_host_registry`).
+///   surface (`self_host_registry`) — a body `admit` accepts: the wasm
+///   emitter calls an implementation through its surface only when its
+///   whitelist admits it, and links no other (#4458).
 ///
 /// What the wasm emitter still finds missing after this, the wasm link
-/// relowers from the whole module (`src/wasm_leg.rs`, `link_self_host`).
+/// relowers with the missing functions and what they reach in the module
+/// (`src/wasm_leg.rs`, `link_self_host`).
 ///
 /// `roots` are the sources compiled whole (the entry program and the user's
 /// modules); `explicit` are the bundled modules already loaded by an
@@ -76,6 +79,7 @@ pub const TEST_SYNTHESIZED: &[(&str, &str)] = &[
 pub fn live_bundled<'a>(
     roots: impl IntoIterator<Item = &'a Program>,
     explicit: &[(&'a str, &'a Program)],
+    admit: &dyn Fn(&str) -> bool,
 ) -> LiveBundled {
     let mut spelled = Spelled::default();
     let mut has_tests = false;
@@ -90,11 +94,11 @@ pub fn live_bundled<'a>(
     let mut cands: Vec<Cand<'_>> = explicit
         .iter()
         .zip(&explicit_surfaces)
-        .map(|((n, p), s)| Cand { name: n, prog: p, surface: s, auto: false })
+        .map(|((n, p), s)| Cand { name: n, prog: Some(p), surface: s, auto: false })
         .collect();
-    for (n, p, s) in auto_modules() {
+    for (n, s) in auto_modules() {
         if !explicit.iter().any(|(e, _)| e == n) {
-            cands.push(Cand { name: n, prog: p, surface: s, auto: true });
+            cands.push(Cand { name: n, prog: None, surface: s, auto: true });
         }
     }
     let rows = almide_lang::self_host_registry::self_host_runtime();
@@ -108,6 +112,7 @@ pub fn live_bundled<'a>(
         live: HashMap::new(),
         dormant: Vec::new(),
         host_dormant: Vec::new(),
+        admit,
     };
     while reach.enter_modules() | reach.wake_dormant() | reach.enter_self_hosted() | reach.wake_self_hosted() {}
     let auto_modules = auto_modules()
@@ -122,7 +127,8 @@ pub fn live_bundled<'a>(
 /// `import` already loaded (which wins over the auto entry of its name).
 struct Cand<'p> {
     name: &'p str,
-    prog: &'p Program,
+    /// `None` for an auto-imported module: parsed once it is entered (#4458).
+    prog: Option<&'p Program>,
     surface: &'p Surface,
     auto: bool,
 }
@@ -145,6 +151,8 @@ struct Reach<'p> {
     rows: &'static [almide_lang::self_host_registry::SelfHostRow],
     host_entered: Vec<bool>,
     host_dormant: Vec<(usize, &'static Decl)>,
+    /// Which implementations the wasm leg can link (`live_bundled`'s doc).
+    admit: &'p dyn Fn(&str) -> bool,
 }
 
 impl<'p> Reach<'p> {
@@ -163,7 +171,12 @@ impl<'p> Reach<'p> {
             }
             self.entered[i] = true;
             grew = true;
-            let (name, prog) = (c.name, c.prog);
+            let name = c.name;
+            let prog: &'p Program = match c.prog {
+                Some(p) => p,
+                None => auto_program(name),
+            };
+            self.cands[i].prog = Some(prog);
             self.live.entry(name.to_string()).or_default();
             let (fns, rest): (Vec<&'p Decl>, Vec<&'p Decl>) =
                 prog.decls.iter().chain(prog.imports.iter()).partition(|d| matches!(d, Decl::Fn { .. }));
@@ -211,14 +224,16 @@ impl<'p> Reach<'p> {
         if let Some(n) = decl_name(d) {
             self.live.get_mut(c.name).expect("an entered module").insert(n.to_string());
         }
-        spell_unit(c.prog, std::iter::once(d), &mut self.spelled);
+        spell_unit(c.prog.expect("an entered module is parsed"), std::iter::once(d), &mut self.spelled);
     }
 
     /// Enter every self-hosted source one of whose surfaces is now reached.
     fn enter_self_hosted(&mut self) -> bool {
         let mut grew = false;
         for (si, (src, impls)) in self.rows.iter().enumerate() {
-            if self.host_entered[si] || !impls.iter().any(|(_, s)| surface_is_named(&self.spelled, &self.live, s)) {
+            if self.host_entered[si]
+                || !impls.iter().any(|(f, s)| (self.admit)(f) && surface_is_named(&self.spelled, &self.live, s))
+            {
                 continue;
             }
             self.host_entered[si] = true;
@@ -238,7 +253,7 @@ impl<'p> Reach<'p> {
         let dormant = std::mem::take(&mut self.host_dormant);
         let (named, rest): (Vec<_>, Vec<_>) = dormant.into_iter().partition(|(si, d)| {
             let impl_live = self.rows[*si].1.iter().any(|(imp, s)| {
-                decl_name(d) == Some(*imp) && surface_is_named(&self.spelled, &self.live, s)
+                decl_name(d) == Some(*imp) && (self.admit)(imp) && surface_is_named(&self.spelled, &self.live, s)
             });
             impl_live || fn_is_named(&self.spelled, "", d)
         });
@@ -251,6 +266,40 @@ impl<'p> Reach<'p> {
         }
         grew
     }
+}
+
+/// The functions of one source — bundled module `module`, or a self-hosted
+/// source (`module` empty) — that `roots` reach WITHIN it: a root, or a
+/// function a reached body (or a non-function declaration) names, by the
+/// naming rule of [`live_bundled`]. The wasm link loads only these (#4458);
+/// a call the lowered bodies make outside this set is a demand of its next
+/// round, which grows the set.
+pub fn reach_within(module: &str, prog: &Program, roots: &HashSet<String>) -> HashSet<String> {
+    let mut spelled = Spelled::default();
+    let (fns, rest): (Vec<&Decl>, Vec<&Decl>) =
+        prog.decls.iter().chain(prog.imports.iter()).partition(|d| matches!(d, Decl::Fn { .. }));
+    spell_unit(prog, rest.into_iter(), &mut spelled);
+    let mut live = HashSet::new();
+    let (now, mut dormant): (Vec<&Decl>, Vec<&Decl>) =
+        fns.into_iter().partition(|d| decl_name(d).is_some_and(|n| roots.contains(n)));
+    let mut named = now;
+    while !named.is_empty() {
+        for d in &named {
+            live.extend(decl_name(d).map(str::to_string));
+        }
+        spell_unit(prog, named.into_iter(), &mut spelled);
+        (named, dormant) = dormant.into_iter().partition(|d| fn_is_named(&spelled, module, d));
+    }
+    live
+}
+
+/// The functions of bundled module `module` the compiler calls with no
+/// source naming them: [`requirement_fns`] and its [`COMPILER_INSERTED`]
+/// rows. A module the wasm link loads keeps them, as a resolved one does.
+pub fn compiler_called_fns(module: &str, prog: &Program) -> HashSet<String> {
+    let mut out = requirement_fns(module, prog);
+    out.extend(COMPILER_INSERTED.iter().filter(|(m, _)| *m == module).map(|(_, f)| f.to_string()));
+    out
 }
 
 fn decl_name(d: &Decl) -> Option<&str> {

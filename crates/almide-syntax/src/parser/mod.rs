@@ -178,14 +178,18 @@ impl Parser {
         let mut kept: Vec<Token> = Vec::with_capacity(tokens.len());
         let mut inline: std::collections::HashMap<usize, Vec<(String, CommentSide)>> =
             std::collections::HashMap::new();
-        for (i, tok) in tokens.iter().enumerate() {
+        // The stream is consumed, never cloned (#4458): a token's type is all
+        // the lookahead reads.
+        let mut tokens = tokens.into_iter().peekable();
+        while let Some(tok) = tokens.next() {
+            let next_ty = tokens.peek().map(|t| t.token_type);
             if tok.token_type == TokenType::Comment {
                 let own_line = matches!(
                     kept.last().map(|t| &t.token_type),
                     None | Some(TokenType::Newline) | Some(TokenType::Comment)
                 );
                 let end_of_line = matches!(
-                    tokens.get(i + 1).map(|t| &t.token_type),
+                    next_ty,
                     None | Some(TokenType::Newline) | Some(TokenType::EOF)
                 );
                 if !own_line && !end_of_line {
@@ -199,22 +203,22 @@ impl Parser {
                     // stays with it; otherwise it introduces the node that
                     // comes next. `-` is excluded from the operator set: it
                     // may open the next operand (`f(a, /* c */ -1)`).
-                    let side = match tokens.get(i + 1).map(|t| &t.token_type) {
+                    let side = match next_ty {
                         Some(TokenType::Comma)
                         | Some(TokenType::RParen)
                         | Some(TokenType::RBracket)
                         | Some(TokenType::RBrace)
                         | Some(TokenType::Comment) => CommentSide::Trailing,
-                        Some(tt) if *tt != TokenType::Minus && Self::INFIX_TOKENS.contains(tt) => {
+                        Some(tt) if tt != TokenType::Minus && Self::INFIX_TOKENS.contains(&tt) => {
                             CommentSide::Trailing
                         }
                         _ => CommentSide::Leading,
                     };
-                    inline.entry(kept.len()).or_default().push((tok.value.clone(), side));
+                    inline.entry(kept.len()).or_default().push((tok.value, side));
                     continue;
                 }
             }
-            kept.push(tok.clone());
+            kept.push(tok);
         }
         (kept, inline)
     }

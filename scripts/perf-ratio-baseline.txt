@@ -159,3 +159,10 @@ ablation/treealloc 3.700
 # median over the five runs above (#2300): 2.675 / 3.065 / 3.069 / 3.075 /
 # 3.112, replacing the 3.000 estimate. Floor 1.30 gates it.
 ablation/fannkuchredux 3.069
+# fib (#4456): the call-bound recursion VICTORY row — the native legs inline a
+# pure scalar recursion into itself once (`almide_ir::self_inline`) and LLVM
+# merges the identical grandchild calls, against the ordinary one-call-per-node
+# Rust. GCE n2-standard-8 (Intel), 2026-11-04, 30:300: 0.095 s against 1.15 s,
+# a ratio of 0.083; ALMIDE_SELF_INLINE_OFF=1 reads 1.15 s, a delta of 12.1.
+fib 0.120
+ablation/fib 12.000

@@ -25,7 +25,10 @@
 //!   is read as a receiver, so `list.trim()` there reaches `string`, or
 //! - a type or variant constructor that `M` declares.
 //!
-//! What `M` declares is read from `M`'s own embedded source. The closure is
+//! What `M` declares is read from `M`'s own embedded source — its function
+//! names off the declaration index and its types off its type declarations
+//! (`almide_types::decl_index`, #4458), so an unreached module is never
+//! parsed whole. The closure is
 //! transitive: a reached module's body is a loaded source too (`int8` calls
 //! `int.*`). An over-approximation only costs time; a miss is a missing body,
 //! which is why every position the parser keeps a name in is walked.
@@ -40,7 +43,7 @@ use almide_lang::ast::{
 use almide_lang::stdlib_info::{bundled_source, AUTO_IMPORT_BUNDLED};
 
 mod live;
-pub use live::{live_bundled, LiveBundled, COMPILER_INSERTED, TEST_SYNTHESIZED};
+pub use live::{compiler_called_fns, live_bundled, reach_within, LiveBundled, COMPILER_INSERTED, TEST_SYNTHESIZED};
 
 /// The names one source spells, split by the position they can reach a
 /// module from.
@@ -113,37 +116,40 @@ struct Surface {
     types: HashSet<String>,
 }
 
-/// Every auto-imported bundled module's parsed program and surface, built
-/// once per process from the embedded sources.
-fn auto_modules() -> &'static [(&'static str, &'static Program, Surface)] {
-    static CELL: OnceLock<Vec<(&'static str, &'static Program, Surface)>> = OnceLock::new();
+/// Every auto-imported bundled module's surface, built once per process.
+/// The function names come from the declaration index and the type and
+/// constructor names from the module's type declarations alone (#4458): a
+/// module is parsed whole only once something reaches it ([`auto_program`]).
+fn auto_modules() -> &'static [(&'static str, Surface)] {
+    static CELL: OnceLock<Vec<(&'static str, Surface)>> = OnceLock::new();
     CELL.get_or_init(|| {
         AUTO_IMPORT_BUNDLED
             .iter()
             .filter_map(|name| {
-                let prog = almide_lang::parse_cached(bundled_source(name)?)?;
-                let mut fns = HashSet::new();
+                bundled_source(name)?;
+                let fns = almide_lang::decl_index::fn_names(name)?.iter().map(|f| f.to_string()).collect();
                 let mut types = HashSet::new();
-                for d in &prog.decls {
-                    match d {
-                        Decl::Fn { name, .. } => {
-                            fns.insert(name.to_string());
-                        }
-                        Decl::Type { name, ty, .. } => {
+                if let Some(prog) = almide_lang::decl_index::types_source(name).and_then(almide_lang::parse_cached) {
+                    for d in &prog.decls {
+                        if let Decl::Type { name, ty, .. } = d {
                             types.insert(name.to_string());
                             if let TypeExpr::Variant { cases, .. } = ty {
-                                for c in cases {
-                                    types.insert(variant_case_name(c).to_string());
-                                }
+                                types.extend(cases.iter().map(|c| variant_case_name(c).to_string()));
                             }
                         }
-                        _ => {}
                     }
                 }
-                Some((*name, prog, Surface { fns, types }))
+                Some((*name, Surface { fns, types }))
             })
             .collect()
     })
+}
+
+/// An auto-imported module's parsed program, parsed when first reached.
+fn auto_program(name: &str) -> &'static Program {
+    bundled_source(name)
+        .and_then(almide_lang::parse_cached)
+        .expect("an auto-imported bundled module parses (its surface was read from it)")
 }
 
 /// The auto-imported bundled modules (in `AUTO_IMPORT_BUNDLED` order) that
@@ -166,15 +172,16 @@ pub fn reached_auto_bundled<'a>(roots: impl IntoIterator<Item = &'a Program>) ->
     let mut deferred: Vec<(&'static str, &'static Program, &'static Decl)> = Vec::new();
     loop {
         let mut grew = false;
-        for (name, prog, surface) in modules {
+        for (name, surface) in modules {
             if reached.contains(name) || !reaches(&spelled, name, surface) {
                 continue;
             }
             reached.insert(name);
+            let prog = auto_program(name);
             let (later, now): (Vec<&'static Decl>, Vec<&'static Decl>) =
                 prog.decls.iter().chain(prog.imports.iter()).partition(|d| is_protocol_generic_fn(d));
             spell_unit(prog, now.into_iter(), &mut spelled);
-            deferred.extend(later.into_iter().map(|d| (*name, *prog, d)));
+            deferred.extend(later.into_iter().map(|d| (*name, prog, d)));
             grew = true;
         }
         let (named, rest): (Vec<_>, Vec<_>) = deferred.into_iter().partition(|(m, _, d)| fn_is_named(&spelled, m, d));
@@ -235,16 +242,23 @@ fn reaches(spelled: &Spelled, name: &str, surface: &Surface) -> bool {
 fn conformer_live(spelled: &Spelled, protocol: &str, module: &str) -> bool {
     use crate::types::Ty;
     let Some(p) = crate::canonicalize::protocols::builtin_protocol(protocol) else { return true };
-    let spelled_only = |ty: &Ty| matches!(
-        ty,
-        Ty::Bytes | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
-            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 | Ty::Float64
-    );
+    let spelled_only = |ty: &Ty| value_needs_spelling(ty);
     p.conformers.iter().filter(|ty| ty.stdlib_module() == Some(module))
         .any(|ty| !spelled_only(ty) || spelled.idents.contains(&ty.display()))
         || p.named_conformers.iter()
             .filter(|n| almide_lang::stdlib_info::stdlib_owned_type_owner(n) == Some(module))
             .any(|n| spelled.idents.contains(*n))
+}
+
+/// A built-in type no literal produces (`Bytes`, the sized numbers): a value
+/// of it exists only where a source spells its name or its module.
+pub fn value_needs_spelling(ty: &crate::types::Ty) -> bool {
+    use crate::types::Ty;
+    matches!(
+        ty,
+        Ty::Bytes | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 | Ty::Float64
+    )
 }
 
 fn variant_case_name(c: &VariantCase) -> &str {
@@ -667,7 +681,7 @@ mod tests {
     fn live(src: &str) -> super::LiveBundled {
         let tokens = almide_lang::lexer::Lexer::tokenize(src);
         let prog = almide_lang::parser::Parser::new(tokens).parse().expect("parse");
-        super::live_bundled(std::iter::once(&prog), &[])
+        super::live_bundled(std::iter::once(&prog), &[], &|_| true)
     }
 
     fn is_live(l: &super::LiveBundled, module: &str, f: &str) -> bool {
@@ -709,7 +723,7 @@ mod tests {
         let prog = almide_lang::parser::Parser::new(tokens).parse().expect("parse");
         let json_src = almide_lang::stdlib_info::bundled_source("json").expect("json is bundled");
         let json = almide_lang::parse_cached(json_src).expect("json parses");
-        let l = super::live_bundled(std::iter::once(&prog), &[("json", json)]);
+        let l = super::live_bundled(std::iter::once(&prog), &[("json", json)], &|_| true);
         assert!(is_live(&l, "string", "from_codepoint"), "{:?}", l.live_fns.get("string"));
     }
 }

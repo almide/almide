@@ -11,6 +11,95 @@ use crate::*;
 #[path = "calls_conv.rs"]
 mod calls_conv;
 
+// WHITELIST: linked impls join the resolvable set ONE AT A
+// TIME, each landing with its own parity evidence — the
+// signature heuristic missed incumbent-layout coupling twice
+// (8-byte list slots, header-writing string builders).
+pub(crate) const VERIFIED: &[&str] = &[
+    "float_to_string",
+    "float_to_string_compound",
+    "float_to_fixed",
+    // float `%` (#3080): wasm has no float remainder op.
+    "float_fmod",
+    // The f32 Schubfach (#3079): the same core, a String result.
+    "float32_to_string",
+    "float32_to_string_compound",
+    "int_to_string",
+    // Dragon4's own dependency closure (prim-only bodies).
+    "math_log",
+    "math_log2",
+    "math_log10",
+    // String->String, raw stores build STRING blocks only —
+    // the string layout is digest-shared with the incumbent.
+    "string_trim",
+    // (Int, Int) -> List[Int]: raw stores build 8-byte Int
+    // slots — the one list class both layouts share. Carries
+    // its own C-169 ceiling die.
+    "list_repeat",
+    // Same construction class as list_repeat (prim-mediated
+    // alloc_list + store64 into its OWN buffer, same die).
+    "list_range",
+    // String->String: byte-level string building; its tuple
+    // helpers are module fns lowered by THIS emitter.
+    "string_to_upper",
+    // to_upper's mirror: same table-driven walker, same
+    // own-buffer stores (the store32 writes ITS buffer's len
+    // header — LEN offset 4 is digest-shared).
+    "string_to_lower",
+    // (String, Int) -> String: read-only loads on the source,
+    // stores into a fresh alloc_str buffer only.
+    "string_take_end",
+    "string_drop_end",
+    // string_from_bytes is NOT here: its `prim.load32(h+4)`
+    // reads the LIST len header as an ELEMENT COUNT — the
+    // incumbent's unit — where ours holds BYTES (8× the
+    // count). Slot agreement is not enough: a RAW HEADER READ
+    // couples an impl to the incumbent layout even when every
+    // slot matches (found by result_match_rewrap_modcall:
+    // "hi" decoded as 16 slots of garbage). Prim-mediated
+    // alloc (list_repeat's alloc_list(count)) stays safe —
+    // the prim writes OUR header.
+    // (Int) -> String: UTF-8 byte encoding into its own fresh
+    // string buffer — layout-shared writes only.
+    "string_from_codepoint",
+    // (String, String) -> String / (String, Int) -> String:
+    // the #1675 decode-path composers — language-level
+    // len/slice/starts_with/concat only, no raw header
+    // access. Parity evidence: spec/wasm_cross/
+    // codec_decode_errors.almd prints byte-identical across
+    // legs including the composed `at address.city` /
+    // `tags[1]` paths.
+    "__err_at",
+    "__err_at_index",
+];
+// Second tier: signatures that TRIP the coupled-type proxy
+// below but whose bodies are AUDITED raw-write-free — every
+// sum is built via language-level ok()/err() (lowered by THIS
+// emitter with THIS layout) and every prim access is a
+// read-only load on a layout-shared block (string payload).
+// The proxy guards hand-written block internals; it misfires
+// on constructor-built sums.
+pub(crate) const VERIFIED_SUM_BUILDERS: &[&str] = &[
+    // C-348: reads the shared string header/data, writes only its
+    // own string buffer, and builds Option via typed constructors.
+    "string_byte_slice",
+    "string_to_int",
+    "float_parse",
+    // The JSON parser: raw ops build its OWN string buffers
+    // (layout-shared); every Value comes through the public
+    // value.* surface, which THIS emitter lowers natively —
+    // the whole body is layout-consistent by construction.
+    "json_parse",
+    // (String, String) -> (String, String)?: byte-level find
+    // over the source payload, LEN read on STRING blocks only
+    // (digest-shared), two fresh alloc_str buffers, the pair
+    // and the option built by constructors (#1423 stage 4).
+    "string_split_once",
+    // (String) -> DateTime!: no prim access at all — language-
+    // level slicing and int parsing, Result via ok()/err().
+    "datetime_parse_iso",
+];
+
 impl Emitter<'_> {
     pub(crate) fn lower_call(
         &mut self,
@@ -497,94 +586,6 @@ impl Emitter<'_> {
                 .flat_map(|(_, maps)| maps.iter())
                 .find(|(_, surface)| *surface == key)
                 .map(|(impl_fn, _)| *impl_fn)?;
-            // WHITELIST: linked impls join the resolvable set ONE AT A
-            // TIME, each landing with its own parity evidence — the
-            // signature heuristic missed incumbent-layout coupling twice
-            // (8-byte list slots, header-writing string builders).
-            const VERIFIED: &[&str] = &[
-                "float_to_string",
-                "float_to_string_compound",
-                "float_to_fixed",
-                // float `%` (#3080): wasm has no float remainder op.
-                "float_fmod",
-                // The f32 Schubfach (#3079): the same core, a String result.
-                "float32_to_string",
-                "float32_to_string_compound",
-                "int_to_string",
-                // Dragon4's own dependency closure (prim-only bodies).
-                "math_log",
-                "math_log2",
-                "math_log10",
-                // String->String, raw stores build STRING blocks only —
-                // the string layout is digest-shared with the incumbent.
-                "string_trim",
-                // (Int, Int) -> List[Int]: raw stores build 8-byte Int
-                // slots — the one list class both layouts share. Carries
-                // its own C-169 ceiling die.
-                "list_repeat",
-                // Same construction class as list_repeat (prim-mediated
-                // alloc_list + store64 into its OWN buffer, same die).
-                "list_range",
-                // String->String: byte-level string building; its tuple
-                // helpers are module fns lowered by THIS emitter.
-                "string_to_upper",
-                // to_upper's mirror: same table-driven walker, same
-                // own-buffer stores (the store32 writes ITS buffer's len
-                // header — LEN offset 4 is digest-shared).
-                "string_to_lower",
-                // (String, Int) -> String: read-only loads on the source,
-                // stores into a fresh alloc_str buffer only.
-                "string_take_end",
-                "string_drop_end",
-                // string_from_bytes is NOT here: its `prim.load32(h+4)`
-                // reads the LIST len header as an ELEMENT COUNT — the
-                // incumbent's unit — where ours holds BYTES (8× the
-                // count). Slot agreement is not enough: a RAW HEADER READ
-                // couples an impl to the incumbent layout even when every
-                // slot matches (found by result_match_rewrap_modcall:
-                // "hi" decoded as 16 slots of garbage). Prim-mediated
-                // alloc (list_repeat's alloc_list(count)) stays safe —
-                // the prim writes OUR header.
-                // (Int) -> String: UTF-8 byte encoding into its own fresh
-                // string buffer — layout-shared writes only.
-                "string_from_codepoint",
-                // (String, String) -> String / (String, Int) -> String:
-                // the #1675 decode-path composers — language-level
-                // len/slice/starts_with/concat only, no raw header
-                // access. Parity evidence: spec/wasm_cross/
-                // codec_decode_errors.almd prints byte-identical across
-                // legs including the composed `at address.city` /
-                // `tags[1]` paths.
-                "__err_at",
-                "__err_at_index",
-            ];
-            // Second tier: signatures that TRIP the coupled-type proxy
-            // below but whose bodies are AUDITED raw-write-free — every
-            // sum is built via language-level ok()/err() (lowered by THIS
-            // emitter with THIS layout) and every prim access is a
-            // read-only load on a layout-shared block (string payload).
-            // The proxy guards hand-written block internals; it misfires
-            // on constructor-built sums.
-            const VERIFIED_SUM_BUILDERS: &[&str] = &[
-                // C-348: reads the shared string header/data, writes only its
-                // own string buffer, and builds Option via typed constructors.
-                "string_byte_slice",
-                "string_to_int",
-                "float_parse",
-                // The JSON parser: raw ops build its OWN string buffers
-                // (layout-shared); every Value comes through the public
-                // value.* surface, which THIS emitter lowers natively —
-                // the whole body is layout-consistent by construction.
-                "json_parse",
-                // (String, String) -> (String, String)?: byte-level find
-                // over the source payload, LEN read on STRING blocks only
-                // (digest-shared), two fresh alloc_str buffers, the pair
-                // and the option built by constructors (#1423 stage 4).
-                "string_split_once",
-                // (String) -> DateTime!: no prim access at all — language-
-                // level slicing and int parsing, Result via ok()/err().
-                "datetime_parse_iso",
-            ];
             // The local tiers first, then the audited families (whitelist.rs).
             let exempt = if VERIFIED.contains(&impl_fn) {
                 false
