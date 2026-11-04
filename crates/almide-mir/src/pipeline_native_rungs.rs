@@ -742,7 +742,11 @@ fn render_native_parts(
             for t in found {
                 let scalar = matches!(&t, almide_lang::types::Ty::Tuple(es)
                     if !es.is_empty() && es.iter().all(crate::render_native_rec::is_lane_scalar));
-                if scalar && !ts.contains(&t) {
+                // A map or set a local holds (`let m: Map[String, Int] = [:]`):
+                // its generated type, for the empty container that starts it.
+                let container = matches!(&t, almide_lang::types::Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, _))
+                    || crate::render_native_rec::is_native_set(&t);
+                if (scalar || container) && !ts.contains(&t) {
                     ts.push(t);
                 }
             }

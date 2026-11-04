@@ -383,7 +383,7 @@ pub(crate) fn set_moving_args(
     tys: &std::collections::BTreeMap<ValueId, NTy>,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) {
-    let moving = match &func.ops[at] {
+    let moving: std::collections::BTreeSet<ValueId> = match &func.ops[at] {
         Op::CallFn { args, .. } => args
             .iter()
             .filter_map(|a| match a {
@@ -394,7 +394,26 @@ pub(crate) fn set_moving_args(
             .collect(),
         _ => Default::default(),
     };
+    // A rebound arg whose own rebind comes next, with only its release
+    // between (the loop write-back `Drop v; SetLocal v = ..`): its binding
+    // is re-initialized before any read, so it moves as itself.
+    let reinit = moving
+        .iter()
+        .copied()
+        .filter(|v| {
+            func.ops[at + 1..]
+                .iter()
+                .find(|o| !(bookkeeping(o) || matches!(o, Op::Consume { v: c } if c == v)))
+                .is_some_and(|o| matches!(o, Op::SetLocal { local, .. } if local == v))
+        })
+        .collect();
+    REINIT.with(|m| *m.borrow_mut() = reinit);
     MOVING.with(|m| *m.borrow_mut() = moving);
+}
+
+thread_local! {
+    static REINIT: std::cell::RefCell<std::collections::BTreeSet<ValueId>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
 }
 
 /// `v` is an arg of the call being rendered that may be moved.
@@ -427,7 +446,7 @@ pub(crate) fn take_expr(code: &str) -> String {
     let once = code
         .strip_prefix('v')
         .and_then(|n| n.parse::<u32>().ok())
-        .is_some_and(|n| !REBOUND.with(|m| m.borrow().contains(&ValueId(n))));
+        .is_some_and(|n| !REBOUND.with(|m| m.borrow().contains(&ValueId(n))) || REINIT.with(|m| m.borrow().contains(&ValueId(n))));
     if once && !drill_no_moves() {
         code.to_string()
     } else {

@@ -54,8 +54,13 @@ pub(crate) struct AddrState {
     /// Values computed as `i * SLOT_SIZE`.
     scaled: BTreeSet<ValueId>,
     addrs: BTreeMap<ValueId, Addr>,
-    /// `SetLocal` targets: a handle of one of these could go stale, so it walls.
+    /// Handles of a `SetLocal` target whose addresses are still read after a
+    /// reassignment of it (or across a loop edge): such a handle could go
+    /// stale, so it walls.
     reassigned: BTreeSet<ValueId>,
+    /// Empty list literals (`[]`): stored into a slot of a list type, each
+    /// is that type's empty list.
+    empty_lists: BTreeSet<ValueId>,
     /// Values some `Store` writes into a slot. A string's handle joins the
     /// algebra only as one of these; any other string handle (the abort
     /// message of `Die`, …) stays with the op family that owns it.
@@ -177,6 +182,42 @@ impl AddrState {
         for (v, i) in declared {
             alloc_rec.entry(v).or_insert(i);
         }
+        // An empty container rebound into a typed local (`map.clear(m)`,
+        // `xs = []`) takes the local's declared type.
+        let empties: BTreeSet<ValueId> = func
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::Alloc { dst, init: Init::Empty, .. } => Some(*dst),
+                _ => None,
+            })
+            .collect();
+        // Or the type the lowering recorded for it.
+        for v in &empties {
+            if let Some(i) = func.aggregate_blocks.get(v).and_then(|k| crate::render_native_rec::rec_index(k)) {
+                alloc_rec.entry(*v).or_insert(i);
+            }
+        }
+        // Or the type the floor call it is handed to declares for it.
+        for op in &func.ops {
+            match op {
+                Op::SetLocal { local, src } => {
+                    if let Some(&i) = alloc_rec.get(local).filter(|_| empties.contains(src)) {
+                        alloc_rec.entry(*src).or_insert(i);
+                    }
+                }
+                Op::CallFn { name, args, .. } => {
+                    for (k, a) in args.iter().enumerate() {
+                        if let crate::CallArg::Handle(v) = a {
+                            if let Some(i) = Some(*v).filter(|v| empties.contains(v)).and_then(|_| crate::native_floor::specialized_param_rec(name, k)) {
+                                alloc_rec.entry(*v).or_insert(i);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
         // An if-value join holds one declared type on both arms: a typed join
         // types its arms' values, and a typed arm types the join. Only for an
         // all-scalar struct (built by value from its slot list), the one kind
@@ -245,7 +286,7 @@ impl AddrState {
             .ops
             .iter()
             .filter_map(|op| match op {
-                Op::Alloc { dst, init: Init::DynList { .. } | Init::DynListStr { .. }, .. } => alloc_rec.get(dst).map(|i| (*dst, *i)),
+                Op::Alloc { dst, init: Init::DynList { .. } | Init::DynListStr { .. } | Init::Empty, .. } => alloc_rec.get(dst).map(|i| (*dst, *i)),
                 Op::Alloc { dst, init: Init::OptNone | Init::ResOkScalar { .. }, .. } => {
                     alloc_rec.get(dst).filter(|i| carrier::is_carrier(**i)).map(|i| (*dst, *i))
                 }
@@ -266,14 +307,7 @@ impl AddrState {
             .chain(slots::dense_loop_fills(func, &consts))
             .filter(|b| !single.contains_key(b))
             .collect();
-        let reassigned = func
-            .ops
-            .iter()
-            .filter_map(|op| match op {
-                Op::SetLocal { local, .. } => Some(*local),
-                _ => None,
-            })
-            .collect();
+        let reassigned = stale_handles(func);
         let stored = func
             .ops
             .iter()
@@ -307,6 +341,15 @@ impl AddrState {
             scaled: BTreeSet::new(),
             addrs: BTreeMap::new(),
             reassigned,
+            empty_lists: func
+                .ops
+                .iter()
+                .filter_map(|op| match op {
+                    Op::Alloc { dst, init: Init::IntList(vs), .. } if vs.is_empty() => Some(*dst),
+                    Op::ListLit { dst, elems } if elems.is_empty() => Some(*dst),
+                    _ => None,
+                })
+                .collect(),
             stored,
             res_tags: BTreeMap::new(),
             pending: BTreeMap::new(),
@@ -643,7 +686,7 @@ pub(crate) fn render_addr_op(
                     if (is_block(t) && (st.addr_operands.contains(d) || st.stored.contains(d)))
                         || (matches!(t, NTy::Str | NTy::StrRef) && st.stored.contains(d)) =>
                 {
-                    if st.reassigned.contains(&x) {
+                    if st.reassigned.contains(d) {
                         return Err(wall("native: a slot address of a reassigned local"));
                     }
                     st.addrs.insert(*d, Addr { base: x, off: 0, idx: None });
@@ -886,9 +929,18 @@ pub(crate) fn render_addr_op(
                 let rhs = match (field, st.addrs.get(&v).copied(), ty(tys, &v)) {
                     (NTy::I64, None, Some(NTy::I64)) => var(v),
                     (NTy::I64, None, Some(NTy::F64)) => format!("{}.to_bits() as i64", var(v)),
+                    // A scalar Option field takes the `Option<i64>` by value.
+                    (NTy::Opt, None, Some(NTy::Opt)) => var(v),
                     (f, Some(sv), _) if sv.off == 0 && sv.idx.is_none() => match ty(tys, &sv.base) {
                         Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g)
                             .ok_or_else(|| wall("native: a record field write of an unowned kind"))?,
+                        // `[]` into a field of another list type: that type's empty list.
+                        Some(NTy::Vec)
+                            if st.empty_lists.contains(&sv.base)
+                                && (f == NTy::VecStr || matches!(f, NTy::Rec(i) if crate::render_native_rec::list_elem(i).is_some())) =>
+                        {
+                            "Vec::new()".to_string()
+                        }
                         g => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
                     },
                     (f, _, g) => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
@@ -912,11 +964,18 @@ pub(crate) fn render_addr_op(
             let Some(ix) = slot_index(&ad) else {
                 return Err(wall(format!("native: Store at {ad:?} — outside the slot algebra")));
             };
-            if let (Some(NTy::Rec(_)), Some(e), Some(sv)) = (ty(tys, &ad.base), list_of(ty(tys, &ad.base)), st.addrs.get(&v).copied()) {
-                let g = ty(tys, &sv.base).filter(|g| sv.off == 0 && sv.idx.is_none() && field_accepts(e, *g));
-                let rhs = g.and_then(|g| owned_from(&var(sv.base), g)).ok_or_else(|| {
-                    wall(format!("native: a {:?} element stored into a list of {e:?}", ty(tys, &sv.base)))
-                })?;
+            // A list of scalar Options takes the `Option<i64>` by value.
+            let by_value = |e: NTy| e == NTy::Opt && ty(tys, &v) == Some(NTy::Opt) && !st.addrs.contains_key(&v);
+            if let (Some(NTy::Rec(_)), Some(e)) = (ty(tys, &ad.base), list_of(ty(tys, &ad.base)).filter(|e| st.addrs.contains_key(&v) || by_value(*e))) {
+                let rhs = match st.addrs.get(&v).copied() {
+                    None => var(v),
+                    Some(sv) => {
+                        let g = ty(tys, &sv.base).filter(|g| sv.off == 0 && sv.idx.is_none() && field_accepts(e, *g));
+                        g.and_then(|g| owned_from(&var(sv.base), g)).ok_or_else(|| {
+                            wall(format!("native: a {:?} element stored into a list of {e:?}", ty(tys, &sv.base)))
+                        })?
+                    }
+                };
                 if let Some((n, k)) = st.literal.get(&ad.base).copied() {
                     let b = var(ad.base);
                     line!("let {b}_e{k}: {} = {rhs};", crate::render_native_rec::owned_ty(e));
@@ -985,6 +1044,15 @@ pub(crate) fn render_addr_op(
                     )))
                 }
             }
+        }
+        // A typed empty container: its type's empty value.
+        Op::Alloc { dst, init: Init::Empty, .. }
+            if st.alloc_rec.get(dst).is_some_and(|i| crate::render_native_rec::has_default(NTy::Rec(*i))) =>
+        {
+            let i = st.alloc_rec[dst];
+            tys.insert(*dst, NTy::Rec(i));
+            line!("let mut {}: {} = Default::default();", var(*dst), crate::render_native_rec::struct_name(i));
+            return Ok(true);
         }
         Op::Alloc { dst, init: Init::DynListStr { len }, .. } if ty(tys, len) == Some(NTy::I64) && !st.alloc_rec.contains_key(dst) => {
             tys.insert(*dst, NTy::VecStr);
@@ -1138,4 +1206,49 @@ pub(crate) fn render_addr_op(
         )));
     }
     Ok(false)
+}
+
+/// The `Handle`s of reassigned locals that could go stale: some address
+/// derived from the handle (by an offset or `ElemAddr`) is read at or after a
+/// `SetLocal` of the local, or a loop edge lies between the handle and a read
+/// of it. Every other handle of a reassigned local reads the one value the
+/// local holds over the handle's whole live range, as its rendered variable does.
+fn stale_handles(func: &MirFunction) -> BTreeSet<ValueId> {
+    let set_at: Vec<(usize, ValueId)> = func
+        .ops
+        .iter()
+        .enumerate()
+        .filter_map(|(i, op)| match op {
+            Op::SetLocal { local, .. } => Some((i, *local)),
+            _ => None,
+        })
+        .collect();
+    let mut stale = BTreeSet::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        let Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } = op else { continue };
+        let Some(&x) = args.first() else { continue };
+        if !set_at.iter().any(|(_, l)| *l == x) {
+            continue;
+        }
+        // The handle and every address derived from it, and where each is last read.
+        let mut derived: BTreeSet<ValueId> = BTreeSet::from([*d]);
+        let mut last = i;
+        for (j, later) in func.ops.iter().enumerate().skip(i + 1) {
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(later, &mut reads);
+            if !reads.iter().any(|v| derived.contains(v)) {
+                continue;
+            }
+            last = j;
+            if let Op::IntBinOp { dst, op: IntOp::Add, .. } | Op::Prim { kind: PrimKind::ElemAddr, dst: Some(dst), .. } = later {
+                derived.insert(*dst);
+            }
+        }
+        let crosses = func.ops[i..=last].iter().any(|o| matches!(o, Op::LoopStart | Op::LoopEnd))
+            || set_at.iter().any(|(k, l)| *l == x && *k > i && *k <= last);
+        if crosses {
+            stale.insert(*d);
+        }
+    }
+    stale
 }
