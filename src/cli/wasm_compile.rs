@@ -406,11 +406,16 @@ fn render_wasm_module_routed(
     serve_export: bool,
     inputs: almide::wasm_route::RouteInputs,
     dep_paths: &[(project::PkgId, std::path::PathBuf)],
+    resolved: &resolve::ResolvedModules,
 ) -> Result<(Vec<u8>, Vec<i32>), ()> {
     use almide::wasm_route::{route_wasm, ModuleSource, RouteOptions};
     let opts = RouteOptions { serve_export, ..RouteOptions::from_env(library_ok) };
     let mut trace = |line: &str| err(line);
-    match route_wasm(file, source_text, ModuleSource::Disk { dep_paths }, Some(inputs), opts, &mut trace) {
+    // The entry's modules were resolved off disk once already (#4458); the
+    // serve export rewrites `main` first, which can reach more, so it
+    // resolves its own.
+    let modules = if serve_export { ModuleSource::Disk { dep_paths } } else { ModuleSource::Resolved(resolved) };
+    match route_wasm(file, source_text, modules, Some(inputs), opts, &mut trace) {
         Ok(module) => Ok((module.bytes, module.host_ops)),
         Err(e) => {
             report_route_error(e, file, library_ok);
@@ -487,6 +492,9 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // ALMIDE_TIME_PHASES: the wasm leg's own breakdown, as the native leg's.
     let t = super::run::PhaseTimer::start();
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
+    // The structural leg resolves this same entry; it takes this resolution
+    // as it stands before checking and lowering rewrite the programs.
+    let fresh_resolved = resolved.clone();
     t.lap("parse+resolve");
     // Read off the source before the checker desugars it (#2659).
     let serve_shape = almide::serve_export::check_serve_shape(&program);
@@ -561,7 +569,7 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
             hit
         }
         None => {
-            let rendered = render_wasm_module_routed(file, &source_text, library_ok, serve_export, inputs, &dep_paths)?;
+            let rendered = render_wasm_module_routed(file, &source_text, library_ok, serve_export, inputs, &dep_paths, &fresh_resolved)?;
             if let Some(entry) = &cache {
                 super::wasm_run_cache::store(entry, &rendered.0, &rendered.1);
             }

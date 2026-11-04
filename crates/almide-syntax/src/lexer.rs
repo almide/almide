@@ -92,7 +92,9 @@ impl Lexer {
         // `almide check --timings` armed the accounting.
         almide_base::profile::note_source(src);
         let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Lex);
-        let mut tokens = Vec::new();
+        // About one token per four source bytes (the stdlib's ratio), so the
+        // stream rarely regrows (#4458).
+        let mut tokens = Vec::with_capacity(src.len() / 4 + 1);
         // Strip a leading UTF-8 BOM (editor/Windows artifact). Without this it
         // would lex as an Unknown token and fail the whole file (#1308).
         let src = src.strip_prefix('\u{feff}').unwrap_or(src);
@@ -562,6 +564,11 @@ pub struct HiddenChar {
 
 /// Every raw E101 character in `text`.
 pub fn find_hidden_chars(text: &str) -> Vec<HiddenChar> {
+    // Printable ASCII, TAB and the line breaks are never hidden: most token
+    // texts are only that, and need no per-character range search (#4458).
+    if text.bytes().all(|b| matches!(b, 0x20..=0x7e | b'\t' | b'\n' | b'\r')) {
+        return Vec::new();
+    }
     let mut found = Vec::new();
     let (mut line, mut col) = (0, 0);
     for ch in text.chars() {
