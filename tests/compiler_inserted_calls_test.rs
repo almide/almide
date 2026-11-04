@@ -126,3 +126,31 @@ fn every_table_row_is_a_function_of_its_bundled_module() {
         assert!(declared, "COMPILER_INSERTED lists {m}.{f}, which {m} does not declare");
     }
 }
+
+/// The wasm emitter resolves some surfaces itself, by a literal key no IR call
+/// names (`resolve_qualified("float.to_string")` inside the JSON serializer);
+/// the wasm link loads their self-host bodies only through
+/// `almide_wasm::EMITTER_IMPLIED_SURFACES` (#4458). A literal key no row
+/// resolves would be missing from every program that does not happen to
+/// demand it some other way.
+#[test]
+fn every_literal_surface_the_wasm_emitter_resolves_is_implied() {
+    let resolved: BTreeSet<&str> = almide_wasm::EMITTER_IMPLIED_SURFACES.iter().map(|(_, r)| *r).collect();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/almide-wasm/src");
+    let mut keys = BTreeSet::new();
+    for entry in std::fs::read_dir(&dir).expect("almide-wasm/src") {
+        let path = entry.expect("entry").path();
+        if path.extension().is_none_or(|e| e != "rs") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).expect("read");
+        for (i, _) in text.match_indices("resolve_qualified(\"") {
+            let rest = &text[i + "resolve_qualified(\"".len()..];
+            keys.insert((path.file_name().unwrap().to_string_lossy().to_string(), rest[..rest.find('"').unwrap()].to_string()));
+        }
+    }
+    assert!(keys.len() >= 3, "the scan found {} literal keys: the emitter's spelling moved", keys.len());
+    let missing: Vec<String> =
+        keys.iter().filter(|(_, k)| !resolved.contains(k.as_str())).map(|(f, k)| format!("{f}: {k}")).collect();
+    assert!(missing.is_empty(), "literal surfaces the wasm emitter resolves with no EMITTER_IMPLIED_SURFACES row: {missing:?}");
+}

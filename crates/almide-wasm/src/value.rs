@@ -48,32 +48,19 @@ pub const VALUE_SELFHOST_HELPERS: &[(&str, &str)] = &[
     ("value.omit", "__vu_omit_pairs"),
 ];
 
-/// The stdlib surfaces this emitter resolves ON ITS OWN, by a literal key no
-/// IR call names: a Value display and the JSON serializer format their
-/// floats through `float.to_string`, an interpolated float through the
-/// compound printers, `**` / `%` on floats through the linked pow and
-/// remainder, and the ASCII case fold through `string.to_upper`. The wasm
-/// link keeps their implementations in any self-host source it loads
-/// (#4458). `tests/compiler_inserted_calls_test.rs` refuses a literal
-/// `resolve_qualified` key of the emitter that this table does not list.
-pub const EMITTER_RESOLVED_SURFACES: &[&str] = &[
-    "float.to_string",
-    "float.to_string_compound",
-    "float32.to_string_compound",
-    "math.__fpow",
-    "float.fmod",
-    "string.to_upper",
-];
-
-/// The surface each natively lowered surface resolves on its own, as
-/// `(lowered, resolved)`: the JSON serializer formats floats through
-/// `float.to_string`, `string.capitalize` folds its first char through
-/// `string.to_upper`. A program that names `lowered` links `resolved`'s
-/// self-host source (#4458): no IR call names it.
+/// The surfaces this emitter resolves ON ITS OWN, by a literal key no IR call
+/// names, as `(demanded, resolved)`: the JSON serializer formats floats
+/// through `float.to_string`, and so does a `Value` met by a display (whose
+/// demand is the compound printer's), and `string.capitalize` folds its first
+/// char through `string.to_upper`. The wasm link links `resolved`'s self-host
+/// source wherever `demanded` is demanded or named (#4458), and
+/// `tests/compiler_inserted_calls_test.rs` refuses a literal
+/// `resolve_qualified` key of this emitter that no row resolves.
 pub const EMITTER_IMPLIED_SURFACES: &[(&str, &str)] = &[
     ("json.stringify", "float.to_string"),
     ("json.stringify_pretty", "float.to_string"),
     ("value.__stringify", "float.to_string"),
+    ("float.to_string_compound", "float.to_string"),
     ("string.capitalize", "string.to_upper"),
 ];
 
