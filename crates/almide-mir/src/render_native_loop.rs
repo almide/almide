@@ -132,7 +132,7 @@ fn render_fn(
                 for _ in 0..st.indent {
                     st.out.push_str("    ");
                 }
-                writeln!(st.out, "drop({});", var(*v)).unwrap();
+                let _ = writeln!(st.out, "drop({});", var(*v));
                 EARLY_DROPPED.with(|e| e.borrow_mut().insert(*v));
             }
         }

@@ -265,6 +265,9 @@ impl Derive<'_> {
         if let Some(k) = self.kind_head(t, set) {
             return k;
         }
+        if let Some(k) = kind_carrier(t) {
+            return k;
+        }
         self.kind_tail(t, set)
     }
 
@@ -279,23 +282,6 @@ impl Derive<'_> {
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_lane_scalar(&a[0]) => Some(Ok(NTy::Vec)),
             Ty::Tuple(es) if es.iter().all(is_lane_scalar) && !set.contains(&tuple_key(t)) => Some(Ok(NTy::Vec)),
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String) => Some(Ok(NTy::VecStr)),
-            // An Option of a lane scalar: the `Option<i64>` carrier.
-            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && is_lane_scalar(&a[0]) => Some(Ok(NTy::Opt)),
-            // A Result of a lane scalar (or Unit) or a String over a String
-            // error: the `Result<i64, AlmideString>` / `Result<AlmideString,
-            // AlmideString>` carriers (no `Default`: a list or carrier holds
-            // one, a struct or enum does not — see `res_free` below).
-            Ty::Applied(TypeConstructorId::Result, a)
-                if a.len() == 2 && matches!(a[1], Ty::String) && (is_lane_scalar(&a[0]) || matches!(a[0], Ty::Unit)) =>
-            {
-                Some(Ok(NTy::Res))
-            }
-            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!((&a[0], &a[1]), (Ty::String, Ty::String)) => {
-                Some(Ok(NTy::ResStr))
-            }
-            // A closure of native-typed params and result: its env block (the
-            // rung-5 closures slab; its calls dispatch by signature).
-            t @ Ty::Fn { .. } if closure_typed(t) => Some(Ok(NTy::Vec)),
             Ty::Named(n, args) if args.is_empty() && self.scalar(n.as_str()) => Some(Ok(NTy::Vec)),
             Ty::Named(n, args) if args.is_empty() && set.contains(n.as_str()) => Some(Err(n.as_str().to_string())),
             _ => return None,
@@ -494,4 +480,31 @@ impl Derive<'_> {
             RecDecl { name: n.to_string(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None }
         }
     }
+}
+
+/// The scalar Option and Result carriers and a typed closure's env block: the
+/// kinds [`Derive::kind`] reads off a field type itself, before the generated ones.
+fn kind_carrier(t: &almide_lang::types::Ty) -> Option<FieldKind> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    Some(match t {
+            // An Option of a lane scalar: the `Option<i64>` carrier.
+            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && is_lane_scalar(&a[0]) => Some(Ok(NTy::Opt)),
+            // A Result of a lane scalar (or Unit) or a String over a String
+            // error: the `Result<i64, AlmideString>` / `Result<AlmideString,
+            // AlmideString>` carriers (no `Default`: a list or carrier holds
+            // one, a struct or enum does not — see `res_free` below).
+            Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && matches!(a[1], Ty::String) && (is_lane_scalar(&a[0]) || matches!(a[0], Ty::Unit)) =>
+            {
+                Some(Ok(NTy::Res))
+            }
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!((&a[0], &a[1]), (Ty::String, Ty::String)) => {
+                Some(Ok(NTy::ResStr))
+            }
+            // A closure of native-typed params and result: its env block (the
+            // rung-5 closures slab; its calls dispatch by signature).
+            t @ Ty::Fn { .. } if closure_typed(t) => Some(Ok(NTy::Vec)),
+            _ => return None,
+    })
 }

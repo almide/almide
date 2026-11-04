@@ -361,6 +361,23 @@ thread_local! {
 /// render moves to the chain's end). It goes right after its last read.
 fn early_releases(func: &MirFunction, chains: &crate::render_native_interp::Chains) -> BTreeMap<usize, Vec<ValueId>> {
     EARLY_DROPPED.with(|e| e.borrow_mut().clear());
+    let at_depth = op_depths(func);
+    let params: std::collections::BTreeSet<ValueId> = func.params.iter().map(|p| p.value).collect();
+    let mut out: BTreeMap<usize, Vec<ValueId>> = BTreeMap::new();
+    for (d, def) in func.ops.iter().enumerate() {
+        let Some(v) = crate::mir_ops::defined_value(def) else { continue };
+        if at_depth[d] != 0 || params.contains(&v) || func.ret == Some(v) || !matches!(def, Op::CallFn { .. } | Op::Alloc { .. }) {
+            continue;
+        }
+        if let Some(l) = last_top_level_read(func, chains, &at_depth, d, v) {
+            out.entry(l + 1).or_default().push(v);
+        }
+    }
+    out
+}
+
+/// The nesting depth of each op (an `Else` at its `IfThen`'s).
+fn op_depths(func: &MirFunction) -> Vec<i32> {
     let mut depth = 0i32;
     let mut at_depth: Vec<i32> = Vec::with_capacity(func.ops.len());
     for op in &func.ops {
@@ -372,50 +389,41 @@ fn early_releases(func: &MirFunction, chains: &crate::render_native_interp::Chai
             depth += 1;
         }
     }
-    let params: std::collections::BTreeSet<ValueId> = func.params.iter().map(|p| p.value).collect();
-    let mut out: BTreeMap<usize, Vec<ValueId>> = BTreeMap::new();
-    for (d, def) in func.ops.iter().enumerate() {
-        let Some(v) = crate::mir_ops::defined_value(def) else { continue };
-        if at_depth[d] != 0 || params.contains(&v) || func.ret == Some(v) || !matches!(def, Op::CallFn { .. } | Op::Alloc { .. }) {
+    at_depth
+}
+
+/// The op after which `v` (defined at `d`) is read no more, when every use
+/// of it is a top-level call reading it as a handle and its one release.
+fn last_top_level_read(
+    func: &MirFunction,
+    chains: &crate::render_native_interp::Chains,
+    at_depth: &[i32],
+    d: usize,
+    v: ValueId,
+) -> Option<usize> {
+    let mut last = None;
+    let mut drops = 0;
+    for (j, op) in func.ops.iter().enumerate().skip(d + 1) {
+        let mut vs = Vec::new();
+        crate::mir_ops::op_values(op, &mut vs);
+        if !vs.contains(&v) {
             continue;
         }
-        let mut last = None;
-        let mut drops = 0;
-        let mut ok = true;
-        for (j, op) in func.ops.iter().enumerate().skip(d + 1) {
-            let mut vs = Vec::new();
-            crate::mir_ops::op_values(op, &mut vs);
-            if !vs.contains(&v) {
-                continue;
+        match op {
+            Op::Drop { v: x } if *x == v => drops += 1,
+            Op::CallFn { args, .. }
+                if drops == 0 && at_depth[j] == 0 && args.iter().all(|a| !matches!(a, crate::CallArg::Scalar(x) if *x == v)) =>
+            {
+                // A chain's piece is read where the outermost chain holding
+                // it is built: follow the concatenation's result through
+                // every chain op that reads it.
+                let r = chain_end(func, chains, j)?;
+                last = Some(last.map_or(r, |l: usize| l.max(r)));
             }
-            match op {
-                Op::Drop { v: x } if *x == v => drops += 1,
-                Op::CallFn { args, .. }
-                    if at_depth[j] == 0 && args.iter().all(|a| !matches!(a, crate::CallArg::Scalar(x) if *x == v)) =>
-                {
-                    if drops > 0 {
-                        ok = false;
-                    }
-                    // A chain's piece is read where the outermost chain holding
-                    // it is built: follow the concatenation's result through
-                    // every chain op that reads it.
-                    let read_at = chain_end(func, chains, j);
-                    match read_at {
-                        Some(r) => last = Some(last.map_or(r, |l: usize| l.max(r))),
-                        None => ok = false,
-                    }
-                }
-                _ => ok = false,
-            }
-            if !ok {
-                break;
-            }
-        }
-        if let (true, 1, Some(l)) = (ok, drops, last) {
-            out.entry(l + 1).or_default().push(v);
+            _ => return None,
         }
     }
-    out
+    (drops == 1).then_some(last).flatten()
 }
 
 /// The op at which the render writes the read `ops[j]` makes: `j` itself,

@@ -16,12 +16,6 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
         FloorParam::Bool => r == "bool",
         FloorParam::Float => r == "f64",
         FloorParam::Str => r == "&str",
-        FloorParam::Bytes => r == "&Vec<u8>" || r == "&[u8]",
-        FloorParam::BytesMut => r == "&mutVec<u8>" || r == "&mut Vec<u8>",
-        FloorParam::Value(_) => r == "&AlmideValue" || r == "AlmideValue",
-        FloorParam::Matrix(_) => r == "&AlmideMatrix" || r == "AlmideMatrix",
-        FloorParam::Set(_) => is_generic_set(r.strip_prefix('&').unwrap_or(&r)),
-        FloorParam::SetElem(_) => is_type_param(r.strip_prefix('&').unwrap_or(&r)),
         FloorParam::Map(_) => is_generic_map(r.strip_prefix('&').unwrap_or(&r)),
         FloorParam::MapKey(_) | FloorParam::MapVal(_) => is_type_param(r.strip_prefix('&').unwrap_or(&r)),
         FloorParam::MapPairs => r
@@ -31,6 +25,22 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
             .is_some_and(|(a, b)| is_type_param(a) && is_type_param(b)),
         FloorParam::Elem(_) => is_type_param(&r) || r.strip_prefix('&').is_some_and(is_type_param),
         FloorParam::List(elem) => list_param_agrees(elem, &r),
+        _ => runtime_param_agrees(p, &r),
+    }
+}
+
+/// [`param_agrees`] for the runtime's Bytes, Value, Matrix and Set params,
+/// over the squashed Rust type `r`.
+fn runtime_param_agrees(p: FloorParam, r: &str) -> bool {
+    let bare = r.strip_prefix('&').unwrap_or(r);
+    match p {
+        FloorParam::Bytes => r == "&Vec<u8>" || r == "&[u8]",
+        FloorParam::BytesMut => r == "&mutVec<u8>" || r == "&mut Vec<u8>",
+        FloorParam::Value(_) => bare == "AlmideValue",
+        FloorParam::Matrix(_) => bare == "AlmideMatrix",
+        FloorParam::Set(_) => is_generic_set(bare),
+        FloorParam::SetElem(_) => is_type_param(bare),
+        _ => false,
     }
 }
 
@@ -88,14 +98,24 @@ fn ret_agrees(r: FloorRet, rust: &str) -> bool {
         FloorRet::Opt(Scalar::Float) => t == "Option<f64>",
         FloorRet::Bytes => t == "Vec<u8>",
         FloorRet::Value => t == "AlmideValue",
+        FloorRet::Map => is_generic_map(&t),
+        FloorRet::Matrix | FloorRet::OptMatrix | FloorRet::ListMatrix | FloorRet::FloatRows | FloorRet::Set | FloorRet::SetElems => {
+            runtime_ret_agrees(r, &t)
+        }
+        _ => compound_ret_agrees(r, &t),
+    }
+}
+
+/// [`ret_agrees`] for the Matrix and Set returns, over the squashed Rust type `t`.
+fn runtime_ret_agrees(r: FloorRet, t: &str) -> bool {
+    match r {
         FloorRet::Matrix => t == "AlmideMatrix",
         FloorRet::OptMatrix => t == "Option<AlmideMatrix>",
         FloorRet::ListMatrix => t == "Vec<AlmideMatrix>",
         FloorRet::FloatRows => t == "Vec<Vec<f64>>",
-        FloorRet::Set => is_generic_set(&t),
+        FloorRet::Set => is_generic_set(t),
         FloorRet::SetElems => t.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
-        FloorRet::Map => is_generic_map(&t),
-        _ => compound_ret_agrees(r, &t),
+        _ => false,
     }
 }
 

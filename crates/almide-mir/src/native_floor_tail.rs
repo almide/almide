@@ -527,6 +527,19 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
         FloorParam::MapKey(by_ref) | FloorParam::MapVal(by_ref) => map_entry_arg(cx, p, *by_ref, code, got, dying_here)?,
         FloorParam::MapPairs => map_pairs_arg(cx, code, got)?,
         FloorParam::Value(by_ref) => value_arg(cx, *by_ref, code, got)?,
+        FloorParam::Set(_) | FloorParam::SetElem(_) | FloorParam::Matrix(_) | FloorParam::BytesMut => runtime_arg(cx, p, code, got, dying_here)?,
+        FloorParam::Bytes => match got {
+            NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&{code}"),
+            NTy::RecRef(_) if crate::render_native_rec::is_bytes(*got) => code.to_string(),
+            _ => return Err(mismatch()),
+        },
+    })
+}
+
+/// A runtime Set, Set element, Matrix or writable Bytes param's argument.
+fn runtime_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bool) -> Result<String, LowerError> {
+    let mismatch = cx.mismatch;
+    Ok(match p {
         FloorParam::Set(by_ref) => {
             let ok = matches!(got, NTy::Rec(i) | NTy::RecRef(i) if crate::render_native_rec::set_elem(*i).is_some());
             if !ok {
@@ -550,6 +563,15 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
                 (false, _, _) => owned,
             }
         }
+        FloorParam::Matrix(_) | FloorParam::BytesMut => matrix_or_bytes_mut_arg(cx, p, code, got)?,
+        _ => return Err(mismatch()),
+    })
+}
+
+/// A Matrix or writable Bytes param's argument.
+fn matrix_or_bytes_mut_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy) -> Result<String, LowerError> {
+    let mismatch = cx.mismatch;
+    Ok(match p {
         FloorParam::Matrix(by_ref) => match (got, by_ref) {
             (NTy::Rec(_), true) if crate::render_native_rec::is_matrix(*got) => format!("&{code}"),
             (NTy::RecRef(_), true) if crate::render_native_rec::is_matrix(*got) => code.to_string(),
@@ -561,11 +583,7 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
             NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&mut {code}"),
             _ => return Err(mismatch()),
         },
-        FloorParam::Bytes => match got {
-            NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&{code}"),
-            NTy::RecRef(_) if crate::render_native_rec::is_bytes(*got) => code.to_string(),
-            _ => return Err(mismatch()),
-        },
+        _ => return Err(mismatch()),
     })
 }
 
@@ -636,230 +654,6 @@ fn value_arg(cx: &CallCx, by_ref: bool, code: &str, got: &NTy) -> Result<String,
         (NTy::RecRef(_), true) if crate::render_native_rec::is_value(*got) => code.to_string(),
         (NTy::Rec(_) | NTy::RecRef(_), false) if crate::render_native_rec::is_value(*got) => format!("{code}.clone()"),
         _ => return Err((cx.mismatch)()),
-    })
-}
-
-/// The call's result expression and the NTy it binds as.
-fn render_ret(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> Result<(String, Option<NTy>), LowerError> {
-    match r {
-        FloorRet::Map | FloorRet::MapOptVal | FloorRet::MapKeys | FloorRet::MapVals | FloorRet::MapEntries => map_ret_of(r, call, cx, dst_map),
-        FloorRet::Elem(shape) => elem_ret_of(shape, cx.name, call, cx),
-        FloorRet::Matrix | FloorRet::Set | FloorRet::SetElems | FloorRet::OptMatrix | FloorRet::ListMatrix | FloorRet::FloatRows => {
-            set_matrix_ret_of(r, call, cx, dst_map)
-        }
-        FloorRet::Res(_)
-        | FloorRet::ResStr
-        | FloorRet::ResValue
-        | FloorRet::OptStr
-        | FloorRet::ResListValue
-        | FloorRet::ResListStr
-        | FloorRet::ResBytes
-        | FloorRet::ResOptStr => Ok(carrier_ret_of(r, call)),
-        _ => Ok(plain_ret_of(r, call)),
-    }
-}
-
-/// [`render_ret`] for a scalar, String, list, Bytes, Value or scalar-Option result.
-fn plain_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
-    match r {
-        FloorRet::Unit => (call, None),
-        FloorRet::Int => (call, Some(NTy::I64)),
-        FloorRet::Bool => (format!("({call}) as i64"), Some(NTy::I64)),
-        FloorRet::Float => (call, Some(NTy::F64)),
-        FloorRet::Str => (format!("AlmideString::from({call})"), Some(NTy::Str)),
-        FloorRet::ListInt => (call, Some(NTy::Vec)),
-        FloorRet::Bytes => (call, Some(NTy::Rec(crate::render_native_rec::bytes_index()))),
-        FloorRet::Value => (call, Some(NTy::Rec(crate::render_native_rec::value_index()))),
-        FloorRet::ListStr => (
-            format!("({call}).into_iter().map(AlmideString::from).collect::<Vec<AlmideString>>()"),
-            Some(NTy::VecStr),
-        ),
-        FloorRet::Opt(Scalar::Int) => (call, Some(NTy::Opt)),
-        FloorRet::Opt(Scalar::Bool) => (format!("({call}).map(|b| b as i64)"), Some(NTy::Opt)),
-        FloorRet::Opt(Scalar::Float) => (format!("({call}).map(|x| x.to_bits() as i64)"), Some(NTy::Opt)),
-        _ => unreachable!("render_ret routes every other result kind elsewhere"),
-    }
-}
-
-/// [`render_ret`] for a Result or Option-of-String carrier result.
-fn carrier_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
-    match r {
-        FloorRet::Res(k) => {
-            let ok = match k {
-                None => "|_| 0i64",
-                Some(Scalar::Int) => "|v| v",
-                Some(Scalar::Bool) => "|v| v as i64",
-                Some(Scalar::Float) => "|v| v.to_bits() as i64",
-            };
-            (format!("({call}).map({ok}).map_err(AlmideString::from)"), Some(NTy::Res))
-        }
-        FloorRet::ResStr => (
-            format!("({call}).map(AlmideString::from).map_err(AlmideString::from)"),
-            Some(NTy::ResStr),
-        ),
-        FloorRet::ResValue => {
-            let v = NTy::Rec(crate::render_native_rec::value_index());
-            let r = crate::render_native_rec::result_type_of(v, NTy::Str);
-            (format!("({call}).map_err(AlmideString::from)"), Some(NTy::Rec(r)))
-        }
-        FloorRet::OptStr => (
-            format!("({call}).map(AlmideString::from)"),
-            Some(NTy::Rec(crate::render_native_rec::option_type_of(NTy::Str))),
-        ),
-        FloorRet::ResListStr => (
-            format!("({call}).map(|v| v.into_iter().map(AlmideString::from).collect::<Vec<AlmideString>>()).map_err(AlmideString::from)"),
-            Some(NTy::Rec(crate::render_native_rec::result_type_of(NTy::VecStr, NTy::Str))),
-        ),
-        FloorRet::ResListValue => {
-            let l = NTy::Rec(crate::render_native_rec::list_type_of(NTy::Rec(crate::render_native_rec::value_index())));
-            (format!("({call}).map_err(AlmideString::from)"), Some(NTy::Rec(crate::render_native_rec::result_type_of(l, NTy::Str))))
-        }
-        FloorRet::ResBytes => {
-            let b = NTy::Rec(crate::render_native_rec::bytes_index());
-            (format!("({call}).map_err(AlmideString::from)"), Some(NTy::Rec(crate::render_native_rec::result_type_of(b, NTy::Str))))
-        }
-        FloorRet::ResOptStr => {
-            let o = NTy::Rec(crate::render_native_rec::option_type_of(NTy::Str));
-            (
-                format!("({call}).map(|o| o.map(AlmideString::from)).map_err(AlmideString::from)"),
-                Some(NTy::Rec(crate::render_native_rec::result_type_of(o, NTy::Str))),
-            )
-        }
-        _ => unreachable!("render_ret routes only carrier results here"),
-    }
-}
-
-/// [`render_ret`] for a Matrix or Set result, or one derived from them.
-fn set_matrix_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> Result<(String, Option<NTy>), LowerError> {
-    let mismatch = cx.mismatch;
-    let (name, set_e) = (cx.name, cx.set_e);
-    Ok(match r {
-        FloorRet::Matrix => (call, Some(NTy::Rec(crate::render_native_rec::matrix_index()))),
-        FloorRet::Set => match (set_e, dst_map) {
-            (Some(e), _) => (call, Some(NTy::Rec(crate::render_native_rec::set_type_of(e)))),
-            // No set arg (`set.new()`, `set.from_list(xs)`): the result's
-            // declared set type, whose elements the list arg must be.
-            (None, Some(i)) if crate::render_native_rec::set_elem(i).is_some() => {
-                let e = crate::render_native_rec::set_elem(i);
-                let list_ok = cx.params.iter().zip(cx.args).all(|(p, (_, got))| match p {
-                    FloorParam::List(ListElem::Any) => match e {
-                        Some(NTy::I64) => matches!(got, NTy::Vec | NTy::VecRef),
-                        Some(NTy::Str) => matches!(got, NTy::VecStr | NTy::VecStrRef),
-                        _ => false,
-                    },
-                    _ => true,
-                });
-                if !list_ok {
-                    return Err(mismatch());
-                }
-                (call, Some(NTy::Rec(i)))
-            }
-            // Or the type the self-hosted body this call specializes declares.
-            _ => match specialized_ret(name).as_ref().and_then(|t| declared_kinds(t, "Set")) {
-                Some(e) if e.len() == 1 && matches!(e[0], NTy::I64 | NTy::Str) && set_list_agrees(cx.params, cx.args, e[0]) => {
-                    (call, Some(NTy::Rec(crate::render_native_rec::set_type_of(e[0]))))
-                }
-                _ => return Err(mismatch()),
-            },
-        },
-        FloorRet::SetElems => match set_e.ok_or_else(mismatch)? {
-            NTy::I64 => (call, Some(NTy::Vec)),
-            NTy::Str => (call, Some(NTy::VecStr)),
-            _ => return Err(mismatch()),
-        },
-        FloorRet::OptMatrix => {
-            let m = NTy::Rec(crate::render_native_rec::matrix_index());
-            (call, Some(NTy::Rec(crate::render_native_rec::option_type_of(m))))
-        }
-        FloorRet::ListMatrix => {
-            let m = NTy::Rec(crate::render_native_rec::matrix_index());
-            (call, Some(NTy::Rec(crate::render_native_rec::list_type_of(m))))
-        }
-        FloorRet::FloatRows => (
-            format!("({call}).into_iter().map(|r| r.into_iter().map(|x| x.to_bits() as i64).collect::<Vec<i64>>()).collect::<Vec<Vec<i64>>>()"),
-            Some(NTy::Rec(crate::render_native_rec::list_type_of(NTy::Vec))),
-        ),
-        _ => unreachable!("render_ret routes only Set and Matrix results here"),
-    })
-}
-
-/// [`render_ret`] for a result derived from the call's map.
-fn map_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> Result<(String, Option<NTy>), LowerError> {
-    let mismatch = cx.mismatch;
-    Ok(match r {
-        FloorRet::Map => match (cx.map_kv, dst_map) {
-            (Some((k, v)), _) => (call, Some(NTy::Rec(crate::render_native_rec::map_type_of(k, v)))),
-            // No map arg (`map.new()`): the result's declared map type.
-            (None, Some(i)) => (call, Some(NTy::Rec(i))),
-            // Or the type the self-hosted body this call specializes declares
-            // (`map_new_skv() -> Map[String, Int]`).
-            (None, None) => match specialized_ret(cx.name).as_ref().and_then(|t| declared_kinds(t, "Map")) {
-                Some(kv) if kv.len() == 2 => (call, Some(NTy::Rec(crate::render_native_rec::map_type_of(kv[0], kv[1])))),
-                _ => return Err(mismatch()),
-            },
-        },
-        FloorRet::MapOptVal => match cx.map_kv.ok_or_else(mismatch)?.1 {
-            NTy::I64 => (call, Some(NTy::Opt)),
-            v => (call, Some(NTy::Rec(crate::render_native_rec::option_type_of(v)))),
-        },
-        FloorRet::MapEntries => {
-            let (k, v) = cx.map_kv.ok_or_else(mismatch)?;
-            // The generated list of the program's `(K, V)` tuple, as the
-            // self-hosted body this call specializes declares it.
-            // A program that never spells that tuple gets the generated struct
-            // of the pair's slot kinds, the type an untyped block of them takes.
-            let list = specialized_ret(cx.name)
-                .as_ref()
-                .and_then(ty_of)
-                .and_then(|t| crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(&t)))
-                .unwrap_or_else(|| {
-                    crate::render_native_rec::list_type_of(NTy::Rec(crate::render_native_rec::slots_type_of(&[k, v])))
-                });
-            let Some(NTy::Rec(pair)) = crate::render_native_rec::list_elem(list) else { return Err(mismatch()) };
-            let fields_agree = crate::render_native_rec::field_count(pair) == 2
-                && crate::render_native_rec::rec_field(pair, 0) == Some(k)
-                && crate::render_native_rec::rec_field(pair, 1) == Some(v);
-            if !fields_agree {
-                return Err(mismatch());
-            }
-            let s = crate::render_native_rec::struct_name(pair);
-            (format!("({call}).into_iter().map(|(k, v)| {s} {{ f0: k, f1: v }}).collect::<Vec<{s}>>()"), Some(NTy::Rec(list)))
-        }
-        _ => {
-            let (k, v) = cx.map_kv.ok_or_else(mismatch)?;
-            let e = if r == FloorRet::MapKeys { k } else { v };
-            let t = match e {
-                NTy::I64 => NTy::Vec,
-                NTy::Str => NTy::VecStr,
-                other => NTy::Rec(crate::render_native_rec::list_type_of(other)),
-            };
-            (call, Some(t))
-        }
-    })
-}
-
-/// [`render_ret`] for an element-typed result.
-fn elem_ret_of(shape: ElemRet, name: &str, call: String, cx: &CallCx) -> Result<(String, Option<NTy>), LowerError> {
-    let (elem_str, elem_kind) = (cx.elem_str, cx.elem_kind);
-    Ok(match (elem_str, shape) {
-        // A generated list's element: itself, its generated `Option`, its list.
-        (Some(false), _) if matches!(elem_kind, Some(NTy::Rec(_)) | Some(NTy::Vec) | Some(NTy::VecStr)) => {
-            let e = elem_kind.expect("matched");
-            let t = match shape {
-                ElemRet::Value => e,
-                ElemRet::Opt => NTy::Rec(crate::render_native_rec::option_type_of(e)),
-                ElemRet::List => NTy::Rec(crate::render_native_rec::list_type_of(e)),
-            };
-            (call, Some(t))
-        }
-        (Some(false), ElemRet::Value) => (call, Some(NTy::I64)),
-        (Some(false), ElemRet::Opt) => (call, Some(NTy::Opt)),
-        (Some(false), ElemRet::List) => (call, Some(NTy::Vec)),
-        (Some(true), ElemRet::Value) => (call, Some(NTy::Str)),
-        (Some(true), ElemRet::List) => (call, Some(NTy::VecStr)),
-        // An Option of a String element: the generated `Option<AlmideString>` carrier.
-        (Some(true), ElemRet::Opt) => (call, Some(NTy::Rec(crate::render_native_rec::option_type_of(NTy::Str)))),
-        _ => return Err(wall(format!("native: floor call `{name}` element-typed result outside the native carriers"))),
     })
 }
 
