@@ -127,6 +127,14 @@ test "list.__product_int unit=value" {
   assert_eq("${list.__product_int([2, 3, 4])}", "24")
 }
 
+test "list.__to_string_int unit=value" {
+  assert_eq("${list.__to_string_int([1, -2, 3])}", "[1, -2, 3]")
+}
+
+test "list.__eq_int unit=value" {
+  assert_eq("${list.__eq_int([1, 2], [1, 2])}", "true")
+}
+
 test "list.range unit=value" {
   assert_eq("${list.range(2, 5)}", "[2, 3, 4]")
 }

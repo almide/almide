@@ -333,6 +333,16 @@ impl<'a> Interpreter<'a> {
     fn eval_container_op_list_agg(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         match func {
             "__sum_int" => Some(self.list_sum(args)),
+            // The `${xs}` repr cells (stdlib/list.almd `__to_string_*`): the
+            // compound repr the oracle already renders an interpolated list with.
+            "__to_string_int" | "__to_string_float" | "__to_string_bool" | "__to_string_str" => {
+                args.first().map(|xs| Flow::val(Value::str(xs.almide_repr())))
+            }
+            // The `==` cells (stdlib/list.almd `__eq_*`): the oracle's own `==`.
+            "__eq_int" | "__eq_float" | "__eq_bool" | "__eq_str" => match args {
+                [a, b] => Some(Flow::val(Value::Bool(a == b))),
+                _ => None,
+            },
             // Structural, element-type-blind, mirroring the v0 runtime
             // exactly (runtime/rs/src/list.rs): dedup drops CONSECUTIVE
             // equals, unique keeps first occurrences, both under the same

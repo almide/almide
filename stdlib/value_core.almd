@@ -364,6 +364,7 @@ else if prim.load64(ah + 12 + i * 8) == prim.load64(bh + 12 + i * 8) then __leq_
 )
 else false
 
+@specializes("list.__eq_int")
 fn list_eq_int(a: List[Int], b: List[Int]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -380,6 +381,7 @@ else if prim.ffrombits(prim.load64(ah + 12 + i * 8)) == prim.ffrombits(prim.load
 )
 else false
 
+@specializes("list.__eq_float")
 fn list_eq_float(a: List[Float], b: List[Float]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -387,6 +389,7 @@ fn list_eq_float(a: List[Float], b: List[Float]) -> Bool = {
   else __leq_float(ha, hb, 0, prim.load32(ha + 4))
 }
 
+@specializes("list.__eq_bool")
 fn list_eq_bool(a: List[Bool], b: List[Bool]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -402,6 +405,7 @@ else {
   else false
 }
 
+@specializes("list.__eq_str")
 fn list_eq_str(a: List[String], b: List[String]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)

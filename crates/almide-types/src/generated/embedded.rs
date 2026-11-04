@@ -986,6 +986,19 @@ fn compare(a: Bytes, b: Bytes) -> Int = _
 @intrinsic("almide_rt_bytes_concat")
 fn __concat(a: Bytes, b: Bytes) -> Bytes = _
 
+
+
+
+@intrinsic("almide_rt_bytes_append_fresh")
+@reuse(b)
+fn __append(b: Bytes, val: Int) -> Bytes = _
+
+
+
+
+@intrinsic("almide_rt_bytes_index_checked")
+fn __index(b: Bytes, pos: Int) -> Int = _
+
 /// True if needle occurs in b, or needle is empty.
 @intrinsic("almide_rt_bytes_contains")
 fn contains(b: Bytes, needle: Bytes) -> Bool = _
@@ -2646,6 +2659,7 @@ fn bytes_set(b: Bytes, i: Int, val: Int) -> Bytes = {
 
 
 
+@specializes("bytes.__append")
 fn bytes_append(b: Bytes, val: Int) -> Bytes = {
   let n = prim.load32(prim.handle(b) + 4)
   let out = prim.alloc_bytes(n + 1)
@@ -2969,6 +2983,7 @@ fn bytes_read_i32_be(b: Bytes, pos: Int) -> Int = {
 
 
 
+@specializes("bytes.__index")
 fn bytes_index(b: Bytes, pos: Int) -> Int = {
   let h = prim.handle(b)
   let n = prim.load32(h + 4)
@@ -14435,6 +14450,37 @@ fn __sum_int(xs: List[Int]) -> Int = _
 @intrinsic("almide_rt_list_product")
 fn __product_int(xs: List[Int]) -> Int = _
 
+
+
+
+
+@intrinsic("almide_rt_list_to_string_int")
+fn __to_string_int(xs: List[Int]) -> String = _
+
+@intrinsic("almide_rt_list_to_string_float")
+fn __to_string_float(xs: List[Float]) -> String = _
+
+@intrinsic("almide_rt_list_to_string_bool")
+fn __to_string_bool(xs: List[Bool]) -> String = _
+
+@intrinsic("almide_rt_list_to_string_str")
+fn __to_string_str(xs: List[String]) -> String = _
+
+
+
+
+@intrinsic("almide_rt_list_eq_int")
+fn __eq_int(a: List[Int], b: List[Int]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_float")
+fn __eq_float(a: List[Float], b: List[Float]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_bool")
+fn __eq_bool(a: List[Bool], b: List[Bool]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_str")
+fn __eq_str(a: List[String], b: List[String]) -> Bool = _
+
 /// Head element, or none when empty.
 @intrinsic("almide_rt_list_first")
 fn first[A](xs: List[A]) -> A? = _
@@ -19753,6 +19799,7 @@ else {
   __lts_fill_body(addr, count, i + 1, pos2)
 }
 
+@specializes("list.__to_string_int")
 fn list_to_string(xs: List[Int]) -> String = {
   let h = prim.handle(xs)
   let count = prim.load32(h + 4)
@@ -19822,6 +19869,7 @@ else {
   __ltsb_fill_body(addr, count, i + 1, pos2)
 }
 
+@specializes("list.__to_string_bool")
 fn list_to_string_b(xs: List[Bool]) -> String = {
   let h = prim.handle(xs)
   let count = prim.load32(h + 4)
@@ -19904,6 +19952,7 @@ else {
   __ltsf_fill_body(addr, count, i + 1, pos2)
 }
 
+@specializes("list.__to_string_float")
 fn list_to_string_f(xs: List[Float]) -> String = {
   let h = prim.handle(xs)
   let count = prim.load32(h + 4)
@@ -20059,6 +20108,7 @@ else {
   __ltss_fill_body(addr, count, i + 1, pos2)
 }
 
+@specializes("list.__to_string_str")
 fn list_to_string_s(xs: List[String]) -> String = {
   let h = prim.handle(xs)
   let count = prim.load32(h + 4)
@@ -41979,6 +42029,7 @@ else if prim.load64(ah + 12 + i * 8) == prim.load64(bh + 12 + i * 8) then __leq_
 )
 else false
 
+@specializes("list.__eq_int")
 fn list_eq_int(a: List[Int], b: List[Int]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -41995,6 +42046,7 @@ else if prim.ffrombits(prim.load64(ah + 12 + i * 8)) == prim.ffrombits(prim.load
 )
 else false
 
+@specializes("list.__eq_float")
 fn list_eq_float(a: List[Float], b: List[Float]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -42002,6 +42054,7 @@ fn list_eq_float(a: List[Float], b: List[Float]) -> Bool = {
   else __leq_float(ha, hb, 0, prim.load32(ha + 4))
 }
 
+@specializes("list.__eq_bool")
 fn list_eq_bool(a: List[Bool], b: List[Bool]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -42017,6 +42070,7 @@ else {
   else false
 }
 
+@specializes("list.__eq_str")
 fn list_eq_str(a: List[String], b: List[String]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
