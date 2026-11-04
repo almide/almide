@@ -79,6 +79,7 @@ else {
   __ltss_fill_body(addr, count, i + 1, pos2)
 }
 
+@implements("list.__to_string_str")
 @specializes("list.__to_string_str")
 fn list_to_string_s(xs: List[String]) -> String = {
   let h = prim.handle(xs)

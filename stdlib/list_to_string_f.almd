@@ -64,6 +64,7 @@ else {
   __ltsf_fill_body(addr, count, i + 1, pos2)
 }
 
+@implements("list.__to_string_float")
 @specializes("list.__to_string_float")
 fn list_to_string_f(xs: List[Float]) -> String = {
   let h = prim.handle(xs)

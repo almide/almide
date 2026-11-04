@@ -2660,6 +2660,7 @@ fn bytes_set(b: Bytes, i: Int, val: Int) -> Bytes = {
 
 
 
+@implements("bytes.__append")
 @specializes("bytes.__append")
 fn bytes_append(b: Bytes, val: Int) -> Bytes = {
   let n = prim.load32(prim.handle(b) + 4)
@@ -2984,6 +2985,7 @@ fn bytes_read_i32_be(b: Bytes, pos: Int) -> Int = {
 
 
 
+@implements("bytes.__index")
 @specializes("bytes.__index")
 fn bytes_index(b: Bytes, pos: Int) -> Int = {
   let h = prim.handle(b)
@@ -19801,6 +19803,7 @@ else {
   __lts_fill_body(addr, count, i + 1, pos2)
 }
 
+@implements("list.__to_string_int")
 @specializes("list.__to_string_int")
 fn list_to_string(xs: List[Int]) -> String = {
   let h = prim.handle(xs)
@@ -19871,6 +19874,7 @@ else {
   __ltsb_fill_body(addr, count, i + 1, pos2)
 }
 
+@implements("list.__to_string_bool")
 @specializes("list.__to_string_bool")
 fn list_to_string_b(xs: List[Bool]) -> String = {
   let h = prim.handle(xs)
@@ -19954,6 +19958,7 @@ else {
   __ltsf_fill_body(addr, count, i + 1, pos2)
 }
 
+@implements("list.__to_string_float")
 @specializes("list.__to_string_float")
 fn list_to_string_f(xs: List[Float]) -> String = {
   let h = prim.handle(xs)
@@ -20110,6 +20115,7 @@ else {
   __ltss_fill_body(addr, count, i + 1, pos2)
 }
 
+@implements("list.__to_string_str")
 @specializes("list.__to_string_str")
 fn list_to_string_s(xs: List[String]) -> String = {
   let h = prim.handle(xs)
@@ -42066,6 +42072,7 @@ else if prim.load64(ah + 12 + i * 8) == prim.load64(bh + 12 + i * 8) then __leq_
 )
 else false
 
+@implements("list.__eq_int")
 @specializes("list.__eq_int")
 fn list_eq_int(a: List[Int], b: List[Int]) -> Bool = {
   let ha = prim.handle(a)
@@ -42083,6 +42090,7 @@ else if prim.ffrombits(prim.load64(ah + 12 + i * 8)) == prim.ffrombits(prim.load
 )
 else false
 
+@implements("list.__eq_float")
 @specializes("list.__eq_float")
 fn list_eq_float(a: List[Float], b: List[Float]) -> Bool = {
   let ha = prim.handle(a)
@@ -42091,6 +42099,7 @@ fn list_eq_float(a: List[Float], b: List[Float]) -> Bool = {
   else __leq_float(ha, hb, 0, prim.load32(ha + 4))
 }
 
+@implements("list.__eq_bool")
 @specializes("list.__eq_bool")
 fn list_eq_bool(a: List[Bool], b: List[Bool]) -> Bool = {
   let ha = prim.handle(a)
@@ -42107,6 +42116,7 @@ else {
   else false
 }
 
+@implements("list.__eq_str")
 @specializes("list.__eq_str")
 fn list_eq_str(a: List[String], b: List[String]) -> Bool = {
   let ha = prim.handle(a)

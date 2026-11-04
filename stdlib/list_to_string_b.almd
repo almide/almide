@@ -50,6 +50,7 @@ else {
   __ltsb_fill_body(addr, count, i + 1, pos2)
 }
 
+@implements("list.__to_string_bool")
 @specializes("list.__to_string_bool")
 fn list_to_string_b(xs: List[Bool]) -> String = {
   let h = prim.handle(xs)
