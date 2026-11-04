@@ -890,6 +890,7 @@ pub const SRC_BOOL: &str = r#"
 
 
 /// "true" or "false"; bool.parse reads it back.
+@scalar_text
 fn to_string(b: Bool) -> String = if b then "true" else "false"
 
 /// ok(true) for "true", ok(false) for "false", err for anything else.
@@ -11401,6 +11402,7 @@ pub const SRC_INT: &str = r#"
 
 /// Decimal digits, with - when negative.
 @intrinsic("almide_rt_int_to_string")
+@scalar_text
 fn to_string(x: Int) -> String = _
 
 /// Lowercase hex, no 0x; -1 gives 16 f digits.
