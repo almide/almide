@@ -14,6 +14,7 @@ use crate::err;
 mod native_callbacks;
 pub use native_callbacks::{include_native_callback_modules, SelfVersionedNames};
 
+#[derive(Clone)]
 pub struct ResolvedModules {
     /// Modules in dependency order (leaves first).
     /// Third element is the PkgId (None for local modules).

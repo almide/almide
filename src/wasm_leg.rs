@@ -92,6 +92,9 @@ pub enum ModuleSource<'a> {
     Disk { dep_paths: &'a [(crate::project::PkgId, std::path::PathBuf)] },
     /// Pre-parsed modules; nothing is read from disk.
     Provided(&'a [(String, crate::ast::Program, bool)]),
+    /// The resolution the caller already made for this entry from disk —
+    /// [`ModuleSource::Disk`]'s answer, not computed twice (#4458).
+    Resolved(&'a crate::resolve::ResolvedModules),
 }
 
 /// The front's parse step: the entry program, or the wall reason.
@@ -117,6 +120,7 @@ pub(crate) fn resolve_modules(
         // No package id (a provided module is project-local by construction)
         // and no source map: the map only attributes a module's own type
         // errors to its file, and a provided module has no file.
+        ModuleSource::Resolved(resolved) => Ok(resolved.clone()),
         ModuleSource::Provided(list) => Ok(crate::resolve::ResolvedModules {
             modules: list.iter().map(|(n, p, s)| (n.clone(), p.clone(), None, *s)).collect(),
             sources: std::collections::HashMap::new(),
