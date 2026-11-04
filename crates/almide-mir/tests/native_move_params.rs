@@ -60,3 +60,37 @@ fn a_slot_that_starts_at_a_literal_is_read_as_the_slot() {
     );
     assert!(!rust.contains(".prepend(\"\")"), "the slot is read as its first literal:\n{rust}");
 }
+
+/// A `mut` buffer the body rebinds (`bytes.push(out, b)` writes `out` back):
+/// `emit` takes it over and grows it in place, `escape` hands it to `emit`
+/// from inside a `match` arm, and `build`'s loop hands its own buffer over
+/// at each call and takes each result back into the slot.
+const WRITE_BACK: &str = "fn emit(mut out: Bytes, s: String) -> Unit = {\n  for b in bytes.to_list(bytes.from_string(s)) {\n    bytes.push(out, b)\n  }\n}\n\
+     fn escape(mut out: Bytes, n: Int) -> Unit = {\n  var k = 0\n  while k < n {\n    match k % 3 {\n      0 => emit(out, \"&amp;\"),\n      1 => emit(out, \"&lt;\"),\n      _ => bytes.push(out, 65),\n    }\n    k = k + 1\n  }\n}\n\
+     fn build(n: Int) -> Bytes = {\n  var out = bytes.zeros(0)\n  var i = 0\n  while i < n {\n    escape(out, i)\n    emit(out, \"!\")\n    i = i + 1\n  }\n  out\n}\n\
+     fn main() -> Unit = println(bytes.to_string_lossy(build(4)))\n";
+
+fn body<'a>(rust: &'a str, f: &str) -> &'a str {
+    let at = rust.find(&format!("fn almd_{f}(")).unwrap_or_else(|| panic!("no `{f}`:\n{rust}"));
+    let b = &rust[at..];
+    &b[..b.find("\n}\n").unwrap_or(b.len())]
+}
+
+#[test]
+fn a_rebound_mut_param_moves_and_every_call_hands_it_over() {
+    let (rust, certs) = certified(WRITE_BACK);
+    for f in ["emit", "escape"] {
+        assert!(body(&rust, f).starts_with(&format!("fn almd_{f}(mut ")), "`{f}` does not take its buffer:\n{rust}");
+    }
+    for f in ["emit", "escape", "build"] {
+        assert!(!body(&rust, f).contains(".clone()"), "`{f}` copies the buffer:\n{}", body(&rust, f));
+    }
+    let (_, _, calls) = certs.iter().find(|(p, ..)| p == "native-calls").expect("a native-calls witness");
+    let moving = |b: &&str| b.split('|').next().is_some_and(|m| m.split(' ').any(|x| x == "1"));
+    assert!(calls.split('#').filter(moving).count() >= 2, "{calls}");
+    // `build` takes each call's result back into its slot as the share-out of
+    // that result (`s` on the result's line, the slot's credit `i`), never as
+    // an alias on the slot's own line after it moved out.
+    let (_, _, build) = certs.iter().find(|(p, n, _)| p == "ownership" && n == "build").expect("build's witness");
+    assert!(build.contains('s') && !build.contains("Ma"), "{build}");
+}

@@ -144,6 +144,15 @@ pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, 
     // own named functions. `CertScan::step` (protected, unchanged) and the rest of the
     // emission pipeline below are untouched.
     let (feeder_to_slot, slots, line_slots) = loop_carried_slots(func);
+    let moved_slots: BTreeSet<ValueId> = func
+        .call_moves
+        .iter()
+        .filter_map(|&i| match func.ops.get(i) {
+            Some(Op::Consume { v }) if slots.contains(v) || line_slots.contains(v) => Some(*v),
+            _ => None,
+        })
+        .collect();
+    let slot_chain = merge_slot_chain(func, &feeder_to_slot, &moved_slots);
     let depth: u32 = 0;
     let mut s = Streams::new();
 
@@ -182,6 +191,10 @@ pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, 
         paths: PathScopes { cow_dups: cow_dup_dsts(func), ..PathScopes::default() },
         call_move: false,
         call_move_objs: Vec::new(),
+        slot_chain,
+        moved_slots,
+        merge_credit: Vec::new(),
+        unfolded: BTreeSet::new(),
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.call_move = func.call_moves.contains(&i);
@@ -729,7 +742,12 @@ pub(crate) fn handle_uses(op: &Op) -> Vec<ValueId> {
 /// without a drop first (its old value left to its owner) still folds, and the
 /// lowering's pre-loop `Dup` copy is an ordinary owned slot.
 fn borrowed_roots(func: &MirFunction) -> BTreeSet<ValueId> {
-    let mut roots: BTreeSet<ValueId> = func.params.iter().filter(|p| p.repr.is_heap()).map(|p| p.value).collect();
+    let mut roots: BTreeSet<ValueId> = func
+        .params
+        .iter()
+        .filter(|p| p.repr.is_heap() && !func.owned_params.contains(&p.value))
+        .map(|p| p.value)
+        .collect();
     for op in &func.ops {
         if let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), .. } = op {
             roots.insert(*d);
@@ -750,4 +768,51 @@ fn borrowed_roots(func: &MirFunction) -> BTreeSet<ValueId> {
         }
     }
     refused
+}
+
+/// The merges a moved slot receives (#4006 class P): a region's merge dst
+/// that feeds a slot a call-site move hands over, and, inward, every arm
+/// value of such a region that is itself a nested region's merge — the
+/// `match` arms' chain of merges into `out`. Merge dst → slot.
+fn merge_slot_chain(
+    func: &MirFunction,
+    feeder_to_slot: &BTreeMap<ValueId, ValueId>,
+    moved_slots: &BTreeSet<ValueId>,
+) -> BTreeMap<ValueId, ValueId> {
+    let mut arm_vals: BTreeMap<ValueId, Vec<ValueId>> = BTreeMap::new();
+    let mut merges: BTreeSet<ValueId> = BTreeSet::new();
+    let mut stack: Vec<Option<ValueId>> = Vec::new();
+    for op in &func.ops {
+        match op {
+            Op::IfThen { dst, .. } => {
+                merges.extend(*dst);
+                stack.push(*dst);
+            }
+            Op::Else { val } | Op::EndIf { val } => {
+                if let (Some(Some(d)), Some(v)) = (stack.last(), val) {
+                    arm_vals.entry(*d).or_default().push(*v);
+                }
+                if matches!(op, Op::EndIf { .. }) {
+                    stack.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut chain: BTreeMap<ValueId, ValueId> = feeder_to_slot
+        .iter()
+        .filter(|(d, s)| merges.contains(d) && moved_slots.contains(s))
+        .map(|(d, s)| (*d, *s))
+        .collect();
+    let mut work: Vec<ValueId> = chain.keys().copied().collect();
+    while let Some(d) = work.pop() {
+        let slot = chain[&d];
+        for v in arm_vals.get(&d).into_iter().flatten() {
+            if merges.contains(v) && !chain.contains_key(v) {
+                chain.insert(*v, slot);
+                work.push(*v);
+            }
+        }
+    }
+    chain
 }

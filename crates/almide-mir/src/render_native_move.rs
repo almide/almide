@@ -114,10 +114,13 @@ pub(crate) fn dying_after(
         return false;
     }
     // A borrowed param is the caller's; a MOVE param (#4006 class P) is ours.
-    let owned_param = func.owned_params.contains(&src);
-    if func.params.iter().any(|p| p.value == src) && !owned_param {
+    let owned = func.owned_params.contains(&src);
+    if func.params.iter().any(|p| p.value == src) && !owned {
         return false;
     }
+    // A move param the body rebinds (a `mut` param's write-back) is a slot
+    // like any other local: it dies at its release.
+    let owned_param = owned && !func.ops.iter().any(|op| matches!(op, Op::SetLocal { local, .. } if *local == src));
     let joined = func
         .ops
         .iter()
