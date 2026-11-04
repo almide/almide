@@ -10,6 +10,7 @@
 5	2	88	5	spec/wasm_cross/append_accumulator.almd
 5	2	49	5	spec/wasm_cross/append_accumulator_heap.almd
 40541	25	706760	40541	spec/wasm_cross/append_accumulator_heap_linear.almd
+40	24	2280	40	spec/wasm_cross/arg_call_rebinds_global.almd
 97	62	781	97	spec/wasm_cross/arg_rebinds_earlier_arg.almd
 ~	spec/wasm_cross/args_surface.almd
 11	7	139	11	spec/wasm_cross/as_pattern.almd
