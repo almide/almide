@@ -40,12 +40,14 @@ fn __lminf_at(h: Int, len: Int) -> Float? = {
   some(prim.ffrombits(m))
 }
 
+@specializes("list.max")
 fn list_max_float(xs: List[Float]) -> Float? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if len <= 0 then __lmmf_none() else __lmaxf_at(h, len)
 }
 
+@specializes("list.min")
 fn list_min_float(xs: List[Float]) -> Float? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)

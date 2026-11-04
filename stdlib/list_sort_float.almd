@@ -57,6 +57,7 @@ else {
   __sortf_copy(srch, dsth, n, i + 1)
 }
 
+@specializes("list.sort")
 fn list_sort_float(xs: List[Float]) -> List[Float] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -104,6 +105,7 @@ else {
   } else __uniqf_fill(sh, dh, n, i + 1, di)
 }
 
+@specializes("list.unique")
 fn list_unique_float(xs: List[Float]) -> List[Float] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -147,6 +149,7 @@ fn __dedupf_build(h: Int, n: Int) -> List[Float] = {
   buf
 }
 
+@specializes("list.dedup")
 fn list_dedup_float(xs: List[Float]) -> List[Float] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -162,6 +165,7 @@ else {
   else __idxf_find(h, len, x, i + 1)
 }
 
+@specializes("list.contains")
 fn list_contains_float(xs: List[Float], x: Float) -> Bool = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -172,6 +176,7 @@ fn __liof_none() -> Int? = none
 
 fn __liof_some(i: Int) -> Int? = some(i)
 
+@specializes("list.index_of")
 fn list_index_of_float(xs: List[Float], x: Float) -> Int? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)

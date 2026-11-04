@@ -31,6 +31,7 @@ else {
   0
 }
 
+@specializes("list.set")
 fn list_set_str(xs: List[String], i: Int, x: String) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -55,6 +56,7 @@ fn __ls_insert_fill(srcbase: Int, dstbase: Int, n: Int, idx: Int, x: String) -> 
   0
 }
 
+@specializes("list.insert")
 fn list_insert_str(xs: List[String], i: Int, x: String) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -79,6 +81,7 @@ fn __ls_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int
     __copy_slots_rc(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
   }
 
+@specializes("list.remove_at")
 fn list_remove_at_str(xs: List[String], i: Int) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -105,6 +108,7 @@ else {
   0
 }
 
+@specializes("list.swap")
 fn list_swap_str(xs: List[String], i: Int, j: Int) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -147,6 +151,7 @@ fn __lsu_fill_str(sh: Int, bh: Int, n: Int, i: Int, f: (String) -> String, j: In
     __lsu_fill_str(sh, bh, n, i, f, j + 1)
   }
 
+@specializes("list.update")
 fn list_update_str(xs: List[String], i: Int, f: (String) -> String) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -337,6 +342,7 @@ fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
 // the result's recursive per-element drop). The raw `list_drop_end` copy would alias the
 // String handles un-owned — sound only in the old flat-drop world (it leaked instead of
 // crashing); under the nested Option[List[String]] drop it double-freed (is_balanced).
+@specializes("list.drop_end")
 fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -350,6 +356,7 @@ fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
 // list.take_end over a List[String] — the LAST n elements, each kept element CO-OWNED
 // (#808: the raw list_take_end copy aliased the String handles un-owned → source and
 // result both released them at scope end, the rc_dec double-free trap).
+@specializes("list.take_end")
 fn list_take_end_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)

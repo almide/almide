@@ -35,6 +35,7 @@ fn __scan_str_fill(dh: Int, sh: Int, f: (String, Int) -> String, n: Int, i: Int,
     __scan_str_fill(dh, sh, f, n, i + 1, nb)
   }
 
+@specializes("list.scan")
 fn list_scan_str(xs: List[Int], init: String, f: (String, Int) -> String) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
