@@ -56,6 +56,12 @@
 //! the index is in range, which only a literal or a variable read allows.
 //!
 //!   bytes.get(b, i) ?? 0   =>   bytes.get#or(b, i, 0)
+//!
+//! 7. The hidden stdlib cells the native floor serves the self-hosted bodies
+//! through (#4006) are the surface forms those bodies implement, lowered as
+//! those forms: `list.__to_string_<T>(xs)` is `"${xs}"`, `list.__eq_<T>(a, b)`
+//! is `a == b`, `bytes.__index(b, i)` is `b[i]`, and `bytes.__append(b, v)` is
+//! `bytes.__concat(b, bytes.from_list([v]))` (both keep the low 8 bits of `v`).
 
 #[path = "split_match.rs"]
 mod split_match;
@@ -146,6 +152,7 @@ impl IrMutVisitor for Rewriter<'_> {
         self.map_loop(e);
         self.matrix_op(e);
         self.bytes_get_or(e);
+        self.hidden_cell(e);
         self.fan_arm_markers(e);
         *self.changed |= split_match::rewrite(self.vars, e);
     }
@@ -193,6 +200,35 @@ fn module_call(module: &str, func: &str, args: Vec<IrExpr>) -> IrExprKind {
 }
 
 impl Rewriter<'_> {
+    /// Item 7: a hidden native-floor cell as the surface form it is.
+    fn hidden_cell(&mut self, e: &mut IrExpr) {
+        let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &mut e.kind else { return };
+        let (module, func) = (module.as_str(), func.as_str());
+        let span = e.span;
+        let at = |kind, ty| IrExpr { kind, ty, span, def_id: None };
+        let kind = match (module, func, args.as_mut_slice()) {
+            ("list", f, [xs]) if f.starts_with("__to_string_") => IrExprKind::StringInterp {
+                parts: vec![almide_ir::IrStringPart::Expr { expr: std::mem::take(xs) }],
+            },
+            ("list", f, [a, b]) if f.starts_with("__eq_") => IrExprKind::BinOp {
+                op: almide_ir::BinOp::Eq,
+                left: Box::new(std::mem::take(a)),
+                right: Box::new(std::mem::take(b)),
+            },
+            ("bytes", "__index", [b, i]) => {
+                IrExprKind::IndexAccess { object: Box::new(std::mem::take(b)), index: Box::new(std::mem::take(i)) }
+            }
+            ("bytes", "__append", [b, v]) => {
+                let one = at(IrExprKind::List { elements: vec![std::mem::take(v)] }, Ty::Applied(TypeConstructorId::List, vec![Ty::Int].into()));
+                let tail = at(module_call("bytes", "from_list", vec![one]), Ty::Bytes);
+                module_call("bytes", "__concat", vec![std::mem::take(b), tail])
+            }
+            _ => return,
+        };
+        e.kind = kind;
+        *self.changed = true;
+    }
+
     fn bytes_get_or(&mut self, e: &mut IrExpr) {
         let IrExprKind::UnwrapOr { expr, fallback } = &mut e.kind else { return };
         let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &mut expr.kind else { return };

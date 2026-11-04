@@ -1834,6 +1834,16 @@ index_unit = "value"
 probe = 'bytes.__read_i16_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
 expect = "-257"
 [[bytes.fn]]
+name = "__append"
+index_unit = "byte-value"
+probe = 'bytes.to_list(bytes.__append(bytes.from_list([1, 2]), 259))'
+expect = "[1, 2, 3]"
+[[bytes.fn]]
+name = "__index"
+index_unit = "byte-offset"
+probe = 'bytes.__index(bytes.from_list([7, 8, 9]), 2)'
+expect = "9"
+[[bytes.fn]]
 name = "__read_u16_be"
 index_unit = "value"
 probe = 'bytes.__read_u16_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
@@ -2297,6 +2307,18 @@ name = "__product_int"
 index_unit = "value"
 probe = 'list.__product_int([2, 3, 4])'
 expect = "24"
+
+[[list.fn]]
+name = "__to_string_int"
+index_unit = "value"
+probe = 'list.__to_string_int([1, -2, 3])'
+expect = "[1, -2, 3]"
+
+[[list.fn]]
+name = "__eq_int"
+index_unit = "value"
+probe = 'list.__eq_int([1, 2], [1, 2])'
+expect = "true"
 
 [[list.fn]]
 name = "range"
