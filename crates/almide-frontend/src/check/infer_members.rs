@@ -321,8 +321,7 @@ impl Checker {
             let resolved_mod = self.env.import_table.resolve(mod_name)
                 .unwrap_or(sym(mod_name));
             if let Some((type_name, case)) = self.env.lookup_ctor_owned(&sym(field), resolved_mod.as_str()) {
-                let qualified = format!("{}.{}", resolved_mod.as_str(), type_name.as_str());
-                if self.env.types.contains_key(&sym(&qualified)) {
+                if let Some(qualified) = self.env.module_type_key(resolved_mod.as_str(), type_name.as_str()) {
                     self.type_map.insert(object.id, Ty::Unit);
                     self.env.import_table.mark_used(mod_name);
                     // #433: return the qualified `mod.Type` (it exists and was

@@ -51,6 +51,8 @@ struct HttpErrTexts {
     auth_lower: Piece,
     basic: Piece,
     b64: i32,
+    /// The call handle's texts (wasi_p3_http_call.rs).
+    hc: HcTexts,
 }
 
 impl HttpErrTexts {
@@ -121,6 +123,7 @@ impl HttpErrTexts {
         let auth_lower = put(hc::HTTP_AUTHORIZATION.to_ascii_lowercase().as_bytes());
         let basic = put(hc::HTTP_BASIC_SCHEME.as_bytes());
         let b64 = put(hc::HTTP_BASE64_ALPHABET).at;
+        let call = HcTexts::cut(&mut put);
         let uri = h.ec_names.iter().position(|n| n == "HTTP-request-URI-invalid").expect("wasi:http names the case");
         assert!(blob.len() as u64 <= PARK_SPAN - HTTP_TEXT, "the http texts overrun the park span");
         HttpErrTexts {
@@ -143,6 +146,7 @@ impl HttpErrTexts {
             auth_lower,
             basic,
             b64,
+            hc: call,
         }
     }
 }

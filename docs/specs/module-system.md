@@ -653,7 +653,7 @@ fn log(buf: Region) -> Unit = _
 
 | Almide | C 側 |
 |---|---|
-| `Int` | `int`（`i32`、`as` で縮小） |
+| `Int` | `int64_t`（`i64`、全幅。dialect epoch 15 / #4447 までは `int` に縮小していた） |
 | `Int8`〜`Int64` / `UInt8`〜`UInt64` | 同じ幅の整数 |
 | `Float` / `Float64` / `Float32` | `double` / `double` / `float` |
 | `Bool` | `int`（1 / 0） |
@@ -669,6 +669,8 @@ fn log(buf: Region) -> Unit = _
 @extern(c, "m", "sqrt")
 fn c_sqrt(x: Float) -> Float = _
 ```
+
+`@export(c, "sym")` は同じ表を逆向きに読む（#4447, #4448）: C の呼び出し側が引数を渡し、戻り値を受け取る。逆向きにできない行が二つある。`String` 引数（C の `const char*` には長さも持ち主もない）と `Region` の戻り値（呼び出し側に解放の手段がない）で、どちらも `check` が E090 で拒否する。`Region` 引数は §11.3 のとおり呼び出しの間だけ貸す。`effect fn` は ok の値をその型の C 表現で返し、err はメッセージを stderr に書いてプロセスを終了コード 1 で止める（C-452、wasm の export が trap する C-451（#4376）に当たる）。v1 のネイティブ描画は `@export(c)` を含むプログラムを壁にし、標準のコード生成がラッパを描く。テスト: `tests/export_c_abi_test.rs`、`spec/native_only/export_c_scalar_abi.almd`。
 
 テスト: `tests/extern_rust_abi_test.rs`（`rust` / `rs` / `c` の各ターゲット × 全引数型。rust 系は上の表のホスト型で一つのパッケージにまとめてビルド・実行、c は `extern "C"` のホスト関数で往復し、表にない型は一つずつ E090 になることを確かめる。`Ty` の全バリアントがどの行で被覆されるかは網羅 match で固定）、`tests/diagnostics/e090-*`。
 

@@ -11,6 +11,7 @@ use crate::emitter::Emitter;
 use crate::fs_meta::{
     OP_ARGS, OP_CWD, OP_ENV_GET, OP_ENV_OS, OP_ENV_VARS, OP_STDIN_TAKE, OP_STDOUT_RAW,
 };
+use crate::host_text::HostText;
 use crate::*;
 
 impl Emitter<'_> {
@@ -22,7 +23,8 @@ impl Emitter<'_> {
         args: &[IrExpr],
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (module, func, args) {
-            // Option[String]: status 2 = unset → none.
+            // Option[String]: status 2 = unset → none, and so is a value
+            // that is not UTF-8 (#4391, `std::env::var(..).ok()`).
             ("env", "get", [name]) => {
                 self.fs_call_1(name, OP_ENV_GET)?;
                 let hret = self.hold_i64()?;
@@ -34,6 +36,7 @@ impl Emitter<'_> {
                 i.else_();
                 let _ = i;
                 let hb = self.hold_i32()?;
+                let hd = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_get(hret)
                     .i64_const(0xFFFF_FFFF)
@@ -45,13 +48,25 @@ impl Emitter<'_> {
                     .i32_const(almide_layout::PAYLOAD as i32)
                     .i32_add()
                     .call(F_HOST_READ);
+                let _ = i;
+                self.host_text_check(hb, hd);
+                self.host_text_release(hd);
+                self.f.instructions().if_(BlockType::Result(wasm_encoder::ValType::I32));
                 // some(str): a 4-byte option cell holding the handle
                 let hs = self.tmp_i32_local;
+                let mut i = self.f.instructions();
                 i.i32_const(4).call(F_ALLOC).local_set(hs);
                 i.local_get(hs).local_get(hb).i32_store(slot_memarg(almide_layout::OPTION_FIELD));
                 i.local_get(hs);
+                i.else_();
+                let _ = i;
+                self.host_text_release(hb);
+                let mut i = self.f.instructions();
+                i.i32_const(almide_layout::NULL_ADDR as i32);
+                i.end();
                 i.end();
                 let _ = i;
+                self.release_i32();
                 self.release_i32();
                 self.release_i64();
                 Some(Lowered::owned(SliceTy::Option(self.types.intern(STR))))
@@ -103,7 +118,7 @@ impl Emitter<'_> {
             // kept (no argv0 to skip).
             ("env", "__environ", []) => {
                 self.fs_call_0(OP_ENV_VARS)?;
-                Some(Lowered::owned(self.frames_to_string_list(false)?))
+                Some(Lowered::owned(self.frames_to_string_list(false, HostText::Omitted)?))
             }
             ("env", "os", []) => {
                 self.fs_call_0(OP_ENV_OS)?;
@@ -122,7 +137,7 @@ impl Emitter<'_> {
                 // passes the module path. env.args is native argv[1..]
                 // (the FIRST frame drops — its fresh block frees).
                 self.fs_call_0(OP_ARGS)?;
-                Some(Lowered::owned(self.frames_to_string_list(true)?))
+                Some(Lowered::owned(self.frames_to_string_list(true, HostText::Lossy)?))
             }
             // stdin read-to-end (#1598's io half): chunks off the shared
             // cursor, appended into the owned-string accumulator (#2116 —
@@ -352,12 +367,14 @@ impl Emitter<'_> {
 
 impl Emitter<'_> {
     /// A frames answer on the stack (the fs_call ret) → a `List[String]` of
-    /// its frames, the first dropped when `skip0` (argv0). Shared by the
-    /// argv reads (op 29) and the abort-site run (ADR-0029).
-    pub(crate) fn frames_to_string_list(&mut self, skip0: bool) -> Result<SliceTy, EmitError> {
+    /// its frames, the first dropped when `skip0` (argv0), each kept under
+    /// `text` (#4391). Shared by the argv reads (op 29), `env.vars`' environ
+    /// frames (op 77) and the abort-site run (ADR-0029).
+    pub(crate) fn frames_to_string_list(&mut self, skip0: bool, text: HostText) -> Result<SliceTy, EmitError> {
         let (hraw, hlen, herr) = self.fs_frames_or_err()?;
         let hlist = self.hold_i32()?;
         let hfirst = self.hold_i32()?;
+        let hdec = self.hold_i32()?;
         self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hlist);
         self.f.instructions().i32_const(i32::from(skip0)).local_set(hfirst);
         self.fs_frames_foreach(hraw, hlen, |em| {
@@ -369,13 +386,13 @@ impl Emitter<'_> {
             // #4278 B1: the dropped first frame is the arm's own temporary.
             em.arm_temp_released();
             em.f.instructions().else_();
-            em.f.instructions().local_get(hlist).local_get(hline).call(F_LIST_PUSH_4).local_set(hlist);
+            em.host_text_frame(text, (hline, hlist, hdec));
             em.f.instructions().end();
             Ok(())
         })?;
         self.fs_frames_release_raw(hraw, herr);
         self.f.instructions().local_get(hlist);
-        for _ in 0..5 {
+        for _ in 0..6 {
             self.release_i32();
         }
         Ok(SliceTy::List(self.types.intern(STR)))

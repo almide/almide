@@ -194,11 +194,12 @@ pub fn route_wasm(
     // does not; an op it cannot map still fails loudly there).
     // Nor under serve_export: the artifact is the p3 service component, and
     // the CLI audits its op set against that shim (`check_service`). Nor for
-    // an op set that names a sockets op: it ships as the WASI 0.3 component
-    // (preview 1 has no sockets, the net/tcp design step 4): its op set is
+    // an op set that names a socket or http client op: it ships as the WASI
+    // 0.3 component (preview 1 has neither; the net/tcp design step 4,
+    // ADR-0023 §4.3): its op set is
     // audited against that shim instead, so `check --target wasm` refuses
     // what the build refuses.
-    let sockets = almide_wasm::host_ops::names_socket_op(&host_ops);
+    let sockets = almide_wasm::host_ops::names_component_op(&host_ops);
     if library
         && !opts.skip_stock_audit
         && !opts.component_p3
@@ -220,7 +221,7 @@ pub fn route_wasm(
     {
         return Err(wall(
             format!(
-                "host op {op} has no service in the WASI 0.3 component this sockets program builds as \
+                "host op {op} has no service in the WASI 0.3 component this program builds as \
                  (the embedded host — `almide run --target wasm` — serves it)"
             ),
             trace,

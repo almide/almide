@@ -1,0 +1,116 @@
+// @contract: C-015
+// #4383: `==` / `!=` on values of a STDLIB-declared type — the variant
+// `net.IpAddr` and the record `url.Url`, built by a module-qualified record
+// literal or returned by `url.parse` — bare and inside
+// Option, Result and List. A module-qualified constructor (`net.V4(..)`) once
+// typed its result `net.IpAddr` while `net.parse_ip` and every annotation say
+// `IpAddr`, the bare name the stdlib type is keyed by; the wasm leg found no
+// layout for the qualified spelling (E082 `bind-ty:Named`, `bind-ty:Applied`
+// under a Result) and the checker refused the nested compare (E037). `addr`
+// returns the bare spelling the way `net.parse_ip` does (its signature is
+// annotated), and keeps the program inside the interpreter leg's scope;
+// spec/stdlib/stdlib_type_eq_test.almd compares `net.parse_ip` itself.
+import net
+import url
+
+type Addr = net.IpAddr
+
+fn same(a: Addr, b: Addr) -> Bool = a == b
+
+fn addr(s: String) -> Result[net.IpAddr, String] = match s {
+  "1.2.3.4" => ok(net.V4(1, 2, 3, 4)),
+  "::1" => ok(net.V6([
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1
+  ])),
+  _ => err("invalid IP address: ${s}"),
+}
+
+fn flags(bs: List[Bool]) -> String = bs |> list.map((b) => "${b}") |> list.join(" ")
+
+fn ip_lines() -> List[String] = {
+  let a = addr("1.2.3.4") ?? net.V4(0, 0, 0, 0)
+  let b: net.IpAddr = net.V6([
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1
+  ])
+  let o: net.IpAddr? = some(a)
+  let xs = [a, b]
+  let ys = [
+    net.V4(1, 2, 3, 4),
+    b
+  ]
+  [
+    "bare: " + flags([
+      a == net.V4(1, 2, 3, 4),
+      a != net.V4(1, 2, 3, 5),
+      b == a
+    ]),
+    "result: " + flags([
+      addr("::1") == ok(b),
+      addr("1.2.3.4") == ok(net.V4(1, 2, 3, 4)),
+      addr("x") == ok(a)
+    ]),
+    "option: " + flags([
+      o == some(net.V4(1, 2, 3, 4)),
+      o == none
+    ]),
+    "list: " + flags([
+      xs == ys,
+      xs != [b, a]
+    ]),
+    "alias: " + flags([
+      same(a, net.V4(1, 2, 3, 4)),
+      same(a, b)
+    ])
+  ]
+}
+
+fn record_lines() -> List[String] = {
+  let text = "https://example.com:8080/p?q=1#f"
+  let u = url.parse(text)
+  let us: List[url.Url] = result.to_list(u)
+  let lit = url.Url {
+    scheme: "https",
+    host: "example.com",
+    port: some(8080),
+    path: "/p",
+    query: "q=1",
+    fragment: "f",
+  }
+  [
+    "url: " + flags([u == url.parse(text), u == url.parse("https://example.com/"), us == result.to_list(url.parse(text)), result.to_option(u) == none]),
+    "literal: " + flags([
+      u == ok(lit),
+      [lit] == us,
+      some(lit) != none,
+      lit == { ...lit, port: none }
+    ])
+  ]
+}
+
+effect fn main() -> Unit = {
+  for line in ip_lines() + record_lines() {
+    println(line)
+  }
+}
+
+// bare: true true false
+// result: true true false
+// option: true false
+// list: true true
+// alias: true false
+// url: true false true false
+// literal: true true true false

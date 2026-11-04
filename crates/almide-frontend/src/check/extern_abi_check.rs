@@ -12,11 +12,18 @@
 //! a declaration used to pass `check` and die at rustc on a wrapper that
 //! spelled the type as its `Debug` text — the acceptance-parity class: check
 //! refuses what the build cannot honor. The renderer reads the same table.
+//!
+//! An `@export(c)` signature reads the same table in the other direction
+//! (#4447, #4448): it used to be checked for its Regions only, so a `String`
+//! parameter compiled into a Rust `String` parameter of an `extern "C"` fn
+//! (undefined behaviour for a C caller passing `const char*`), and an effect
+//! fn returning `Unit` or `String` died at rustc (E0605).
 use super::{Checker, err};
 use crate::ast::{AttrValue, Attribute, ExportAttr, ExternAttr, Param, Span, TypeExpr};
 use almide_lang::stdlib_info::REGION_ATTR;
 use almide_lang::types::extern_abi::{
-    c_param_abi, c_return_abi, is_region, native_extern_kind, NativeExtern, C_PARAM_TYPES, C_RETURN_TYPES,
+    c_export_param_abi, c_export_return_abi, c_param_abi, c_return_abi, is_region, native_extern_kind, NativeExtern,
+    C_EXPORT_PARAM_TYPES, C_EXPORT_RETURN_TYPES, C_PARAM_TYPES, C_RETURN_TYPES,
 };
 use almide_lang::types::Ty;
 
@@ -161,6 +168,7 @@ impl Checker {
             }
             return;
         }
+        self.reject_export_c_types(fn_name, params, return_type, span);
         if is_region(&self.resolve_type_expr(return_type)) {
             self.emit_extern_c(
                 format!("@export(c) fn '{fn_name}': a Region return has no C form the caller could free"),
@@ -189,6 +197,57 @@ impl Checker {
                     );
                 }
             }
+        }
+    }
+
+    /// E090 for an `@export(c)` parameter or return outside the C ABI table
+    /// (`c_export_param_abi` / `c_export_return_abi`, #4447, #4448). The
+    /// return is the DECLARED one — an `effect fn`'s ok type, which its C
+    /// wrapper answers (C-452). A Region return is the caller of this fn's
+    /// own diagnostic (ADR-0031 amendment A2), so it is skipped here.
+    fn reject_export_c_types(&mut self, fn_name: &str, params: &[Param], return_type: &TypeExpr, span: Option<Span>) {
+        const HINT_TEXT: &str = "a C caller's `const char*` has no length and no owner: take the bytes as a `Region` parameter — \
+             the caller passes `(const uint8_t*, size_t)` — and read them with `ffi.read(buf, 0, ffi.len(buf))!`";
+        const HINT_BUFFER: &str = "return a scalar, and hand anything larger back through a caller-provided buffer: \
+             a `Region` parameter named by `@region(out = p)` crosses as `(uint8_t*, size_t)` and is writable for the call (ADR-0031 amendment A2)";
+        for p in params {
+            if p.is_mut {
+                self.emit_extern_c(
+                    format!("@export(c) fn '{fn_name}': `mut` parameter '{}' cannot be written back to a C caller", p.name),
+                    format!("drop `mut` and return the new value; {HINT_BUFFER}"),
+                    fn_name,
+                    span,
+                );
+                continue;
+            }
+            let declared = self.resolve_type_expr(&p.ty);
+            if is_region(&declared) {
+                continue;
+            }
+            let ty = self.env.resolve_named(&declared);
+            if ty.is_unresolved() || c_export_param_abi(&ty).is_some() {
+                continue;
+            }
+            let why = if matches!(ty, Ty::String) { HINT_TEXT } else { HINT_BUFFER };
+            self.emit_extern_c(
+                format!("@export(c) fn '{fn_name}': parameter '{}' has type {}, which has no C representation", p.name, ty.display()),
+                format!("an @export(c) parameter is one of {C_EXPORT_PARAM_TYPES}; {why}"),
+                fn_name,
+                span,
+            );
+        }
+        let declared_ret = self.resolve_type_expr(return_type);
+        if is_region(&declared_ret) {
+            return;
+        }
+        let ret = self.env.resolve_named(&declared_ret);
+        if !ret.is_unresolved() && c_export_return_abi(&ret).is_none() {
+            self.emit_extern_c(
+                format!("@export(c) fn '{fn_name}': return type {} has no C representation", ret.display()),
+                format!("an @export(c) return is one of {C_EXPORT_RETURN_TYPES} (an effect fn's ok type; its err exits 1); {HINT_BUFFER}"),
+                fn_name,
+                span,
+            );
         }
     }
 

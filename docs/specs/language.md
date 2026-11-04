@@ -329,7 +329,11 @@ Attribute names with semantic meaning today:
 - `@extern(target, "module", "function")` — FFI binding for the target
   runtime. See [§11 of module-system.md](./module-system.md#11-extern).
 - `@export(c, "symbol")` — export with C ABI. Paired with
-  `--repr-c` output (see module-system §10).
+  `--repr-c` output (see module-system §10). Its parameters and return
+  cross at the C ABI table of [module-system §11.2](./module-system.md)
+  (`Int` is `int64_t`), and a type with no row is E090 at check time. An
+  `effect fn` answers its ok value; its err writes the message to stderr
+  and exits 1 (C-452). テスト: `tests/export_c_abi_test.rs`.
 - `@export(wasm, "symbol")` — the fn is a `--target wasm` export named
   `symbol` (not its own name) and a DCE root the host can call. Honoured in
   every module linked into the artifact: the entry file, a sibling

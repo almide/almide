@@ -95,12 +95,14 @@ pub static LOADS: &[LoadOp] = &[
     load(0x35, "i64.load32_u", 4, false, I64),
 ];
 
-/// The stores of the closed set. Absent: f32.store, i32.store16.
+/// The stores of the closed set. Absent: f32.store. i32.store16 is the p1
+/// fs service's U+FFFD write (#4391).
 pub static STORES: &[StoreOp] = &[
     store(0x36, "i32.store", 4, I32),
     store(0x37, "i64.store", 8, I64),
     store(0x39, "f64.store", 8, F64),
     store(0x3A, "i32.store8", 1, I32),
+    store(0x3B, "i32.store16", 2, I32),
     store(0x3C, "i64.store8", 1, I64),
     store(0x3D, "i64.store16", 2, I64),
     store(0x3E, "i64.store32", 4, I64),

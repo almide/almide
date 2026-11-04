@@ -19,11 +19,11 @@ fn almide_bin() -> String {
     "almide".to_string()
 }
 
-const UNAVAILABLE: &str = r#"import http
+const UNAVAILABLE: &str = r#"import unix
 
 effect fn main() -> Unit = {
-  let r = http.get("https://example.com")!
-  println(r)
+  let fd = unix.connect("/tmp/almide-e081.sock")!
+  println("${unix.select([fd], 0)!}")
 }
 "#;
 
@@ -41,7 +41,7 @@ fn declared_unavailable_call_errs_at_check_time_with_the_reason() {
     }
     let d = std::env::temp_dir().join("almide-e081");
     std::fs::create_dir_all(&d).expect("mkdir");
-    let src = d.join("net.almd");
+    let src = d.join("unix.almd");
     std::fs::write(&src, UNAVAILABLE).expect("write");
     let o = Command::new(almide_bin())
         .args(["build", src.to_str().unwrap(), "--target", "wasm", "-o", "/dev/null"])
@@ -50,7 +50,7 @@ fn declared_unavailable_call_errs_at_check_time_with_the_reason() {
     let log = String::from_utf8_lossy(&o.stderr).to_string();
     assert!(!o.status.success(), "the unavailable call must refuse:\n{log}");
     assert!(log.contains("error[E081]"), "must carry the E081 code:\n{log}");
-    assert!(log.contains("`http.get` is not available on --target wasm"), "must name the fn:\n{log}");
+    assert!(log.contains("`unix.connect` is not available on --target wasm"), "must name the fn:\n{log}");
     assert!(log.contains("reason:"), "must carry the declared reason:\n{log}");
     assert!(
         log.contains("target-availability.toml"),
