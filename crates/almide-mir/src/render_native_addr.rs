@@ -315,7 +315,7 @@ impl AddrState {
         let reassigned = stale_handles(func);
         let const_lists = slots::const_str_lists(func, &base_of, &consts);
         set_const_lists(const_lists.keys().copied().collect());
-        let const_elems = slots::const_list_elems(func, &const_lists.keys().copied().collect(), &base_of);
+        let const_elems = const_list_elems(func, &const_lists.keys().copied().collect(), &base_of);
         let stored = func
             .ops
             .iter()
@@ -1248,6 +1248,52 @@ pub(crate) fn render_addr_op(
         )));
     }
     Ok(false)
+}
+
+/// The string literals a constant table (`const_str_lists`) is filled from
+/// and nothing else reads: each one's whole life is the handle the table's
+/// store takes and its hand-over into the block. The table is built once, in
+/// its static, so the render writes nothing for them — materializing each one
+/// per call only to release it was the table's whole per-call cost.
+fn const_list_elems(
+    func: &MirFunction,
+    tables: &BTreeSet<ValueId>,
+    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+) -> BTreeSet<ValueId> {
+    let handle_of: BTreeMap<ValueId, ValueId> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => Some((*d, args[0])),
+            _ => None,
+        })
+        .collect();
+    let stored: BTreeSet<ValueId> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. }
+                if args.len() == 2 && args.first().and_then(|a| base_of.get(a)).is_some_and(|(r, _)| tables.contains(r)) =>
+            {
+                handle_of.get(&args[1]).copied()
+            }
+            _ => None,
+        })
+        .collect();
+    let is_lit = |e: &ValueId| func.ops.iter().any(|op| matches!(op, Op::Alloc { dst, init: Init::Str(_), .. } if dst == e));
+    stored
+        .into_iter()
+        .filter(|e| {
+            is_lit(e)
+                && func.ops.iter().all(|op| {
+                    let mut reads = Vec::new();
+                    crate::mir_ops::op_reads(op, &mut reads);
+                    !reads.contains(e)
+                        || matches!(op, Op::Prim { kind: PrimKind::Handle, args, .. } if args.as_slice() == [*e])
+                        || matches!(op, Op::Consume { v } if v == e)
+                })
+        })
+        .collect()
 }
 
 thread_local! {
