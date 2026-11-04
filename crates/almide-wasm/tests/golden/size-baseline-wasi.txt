@@ -480,6 +480,7 @@
 2306	spec/wasm_cross/list_pattern_variant_element.almd
 12101	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 2485	spec/wasm_cross/list_product_overflow.almd
+5320	spec/wasm_cross/list_push_field_in_place.almd
 7492	spec/wasm_cross/list_push_on_record_field.almd
 3697	spec/wasm_cross/list_range_step_extremes.almd
 12277	spec/wasm_cross/list_reduce_fused_fold_release.almd

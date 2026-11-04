@@ -480,6 +480,7 @@
 17	13	180	17	spec/wasm_cross/list_pattern_variant_element.almd
 6058	6017	4157497	6058	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 18	10	164	18	spec/wasm_cross/list_product_overflow.almd
+89	57	134266	89	spec/wasm_cross/list_push_field_in_place.almd
 20	7	170	20	spec/wasm_cross/list_push_on_record_field.almd
 118	88	2501	118	spec/wasm_cross/list_range_step_extremes.almd
 622	604	2883	622	spec/wasm_cross/list_reduce_fused_fold_release.almd
