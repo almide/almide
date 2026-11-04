@@ -217,7 +217,9 @@ effect fn main() -> Unit = {
     assert!(!log(&out).contains(SPLICE_NOTE), "a literal took the metered route:\n{}", log(&out));
 
     let walled = program
-        .replace("fn heavy(n: Int) -> Int = if n <= 0 then 0 else n + heavy(n - 1)", "fn heavy(n: Int) -> Int = list.len(string.split(\"a,b,c\", \",\")) + n")
+        // `list.sort_by` with a key closure: the native render now covers
+        // `string.split`, which this twin used to name.
+        .replace("fn heavy(n: Int) -> Int = if n <= 0 then 0 else n + heavy(n - 1)", "fn heavy(n: Int) -> Int = list.len(list.sort_by([\"a\", \"bb\", \"c\"], (s) => string.len(s))) + n")
         .replace("heavy(10) }", "heavy(52) }");
     // #3673: a region outside the v1 subset is metered by the standard
     // codegen itself — never run unmetered, and no longer refused.
@@ -225,7 +227,7 @@ effect fn main() -> Unit = {
     assert!(out.status.success(), "a region outside the v1 subset was refused:\n{}", log(&out));
     assert_eq!(String::from_utf8_lossy(&out.stdout), "2\n55\n");
     assert!(log(&out).contains("its regions metered by the standard codegen"), "{}", log(&out));
-    assert!(log(&out).contains("string.split"), "{}", log(&out));
+    assert!(log(&out).contains("list.sort_by"), "{}", log(&out));
 
     let test = "// wasm:skip\nfn heavy(n: Int) -> Int = if n <= 0 then 0 else n + heavy(n - 1)\n\ntest \"a\" {\n  let r = fan.bounded(compute.ns(1000000)) { heavy(10) } ?? -1\n  assert_eq(r, 55)\n}\n";
     let out = almide_verbose("main_test.almd", test, &["test"]);
