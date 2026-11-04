@@ -585,11 +585,117 @@ fn desugar_diverging_value_branches(body: &IrExpr) -> Option<IrExpr> {
         };
         Some(split(IrExprKind::Match { subject: Box::new(subject.clone()), arms: stmt_arms }, value, e))
     }
+    /// A value of `t` the program never observes: it stands after a check that
+    /// diverges whenever the real value is absent.
+    fn placeholder(t: &Ty) -> Option<IrExpr> {
+        let kind = match t {
+            Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 => {
+                IrExprKind::LitInt { value: 0 }
+            }
+            Ty::Float => IrExprKind::LitFloat { value: 0.0 },
+            Ty::Bool => IrExprKind::LitBool { value: false },
+            Ty::String => IrExprKind::LitStr { value: String::new() },
+            _ => return None,
+        };
+        Some(IrExpr { kind, ty: t.clone(), span: None, def_id: None })
+    }
+    /// The payload type of an Option / Result subject.
+    fn payload_of(t: &Ty) -> Option<Ty> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        match t {
+            Ty::Applied(TC::Option | TC::Result, args) if !args.is_empty() => Some(args[0].clone()),
+            _ => None,
+        }
+    }
+    /// A diverging-arm unwrap of an Option / Result whose value arm BINDS the
+    /// payload (`o ?? panic(m)`, `match o { some(p) => body, none =>
+    /// panic(m) }`): `{ let t = o; match t { <the arms, the value arm's body
+    /// Unit and its bind a wildcard> }; let p = t ?? <placeholder>; body }`.
+    /// The statement match diverges exactly when the original does; past it,
+    /// `t` holds a payload, so the `??` reads that payload and its placeholder
+    /// is never taken. The subject is evaluated once, as before.
+    fn bound_payload(subject: &IrExpr, arms: &[almide_ir::IrMatchArm], e: &IrExpr) -> Option<IrExpr> {
+        use almide_ir::{IrPattern as P, IrStmt, IrStmtKind, Mutability, VarId};
+        if arms.iter().any(|a| a.guard.is_some()) {
+            return None;
+        }
+        let mut values = arms.iter().enumerate().filter(|(_, a)| !diverges(&a.body));
+        let (vi, va) = values.next()?;
+        if values.next().is_some() {
+            return None;
+        }
+        let (p, pty) = match &va.pattern {
+            P::Some { inner } | P::Ok { inner } => match &**inner {
+                P::Bind { var, ty } => (*var, ty.clone()),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        if payload_of(&subject.ty).as_ref() != Some(&pty) {
+            return None;
+        }
+        let fallback = placeholder(&pty)?;
+        let seed = crate::lower::desugar_var_seed();
+        let t = VarId(seed);
+        let tv = IrExpr { kind: IrExprKind::Var { id: t }, ty: subject.ty.clone(), span: subject.span, def_id: None };
+        let mut stmt_arms = arms.to_vec();
+        stmt_arms[vi].body = unit();
+        stmt_arms[vi].pattern = match &va.pattern {
+            P::Some { .. } => P::Some { inner: Box::new(P::Wildcard) },
+            _ => P::Ok { inner: Box::new(P::Wildcard) },
+        };
+        let check = IrExpr {
+            kind: IrExprKind::Match { subject: Box::new(tv.clone()), arms: stmt_arms },
+            ty: Ty::Unit,
+            span: e.span,
+            def_id: None,
+        };
+        let payload = IrExpr {
+            kind: IrExprKind::UnwrapOr { expr: Box::new(tv), fallback: Box::new(fallback) },
+            ty: pty.clone(),
+            span: e.span,
+            def_id: None,
+        };
+        let bind = |var: VarId, ty: Ty, value: IrExpr| IrStmt {
+            kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value },
+            span: e.span,
+        };
+        Some(IrExpr {
+            kind: IrExprKind::Block {
+                stmts: vec![
+                    bind(t, subject.ty.clone(), subject.clone()),
+                    IrStmt { kind: IrStmtKind::Expr { expr: check }, span: e.span },
+                    bind(p, pty, payload),
+                ],
+                expr: Some(Box::new(va.body.clone())),
+            },
+            ty: e.ty.clone(),
+            span: e.span,
+            def_id: e.def_id,
+        })
+    }
     fn rewrite(e: &IrExpr) -> Option<IrExpr> {
         if matches!(e.ty, Ty::Unit | Ty::Never) {
             return None;
         }
         match &e.kind {
+            // `o ?? panic(m)`: the bound-payload form over its `match`.
+            IrExprKind::UnwrapOr { expr, fallback } if diverges(fallback) => {
+                use almide_ir::{IrMatchArm, IrPattern as P};
+                let pty = payload_of(&expr.ty)?;
+                let p = almide_ir::VarId(crate::lower::desugar_var_seed());
+                let pv = IrExpr { kind: IrExprKind::Var { id: p }, ty: pty.clone(), span: e.span, def_id: None };
+                let (present, absent) = if expr.ty.is_result() {
+                    (P::Ok { inner: Box::new(P::Bind { var: p, ty: pty }) }, P::Err { inner: Box::new(P::Wildcard) })
+                } else {
+                    (P::Some { inner: Box::new(P::Bind { var: p, ty: pty }) }, P::None)
+                };
+                let arms = vec![
+                    IrMatchArm { pattern: present, guard: None, body: pv },
+                    IrMatchArm { pattern: absent, guard: None, body: (**fallback).clone() },
+                ];
+                bound_payload(expr, &arms, e)
+            }
             IrExprKind::If { cond, then, else_ } if diverges(then) != diverges(else_) => {
                 let (then, else_, value) = if diverges(then) {
                     ((**then).clone(), unit(), (**else_).clone())
@@ -610,7 +716,7 @@ fn desugar_diverging_value_branches(body: &IrExpr) -> Option<IrExpr> {
                     return several_value_arms(subject, arms, e);
                 }
                 if va.guard.is_some() || binds(&va.pattern) {
-                    return None;
+                    return bound_payload(subject, arms, e);
                 }
                 let value = va.body.clone();
                 let mut arms = arms.clone();
