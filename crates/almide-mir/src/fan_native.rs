@@ -359,7 +359,7 @@ impl Lift<'_> {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
-            mutated_params: Vec::new(),
+            mutated_params: Vec::new(), // fresh-fn: a lifted fan arm's params are fresh immutable lets (a `var` arm is refused above)
             module_origin: None,
         };
         self.out.push((f, at));

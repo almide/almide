@@ -214,7 +214,7 @@ fn synthesize_slot_init(ir: &almide_ir::IrProgram) -> Option<almide_ir::IrFuncti
         blank_lines_before: 0,
         def_id: None,
         module_origin: None,
-        mutated_params: vec![],
+        mutated_params: vec![], // fresh-fn: synthesized zero-param slot initializer
     })
 }
 
