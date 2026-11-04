@@ -65,6 +65,18 @@ pub const EMITTER_RESOLVED_SURFACES: &[&str] = &[
     "string.to_upper",
 ];
 
+/// The surface each natively lowered surface resolves on its own, as
+/// `(lowered, resolved)`: the JSON serializer formats floats through
+/// `float.to_string`, `string.capitalize` folds its first char through
+/// `string.to_upper`. A program that names `lowered` links `resolved`'s
+/// self-host source (#4458): no IR call names it.
+pub const EMITTER_IMPLIED_SURFACES: &[(&str, &str)] = &[
+    ("json.stringify", "float.to_string"),
+    ("json.stringify_pretty", "float.to_string"),
+    ("value.__stringify", "float.to_string"),
+    ("string.capitalize", "string.to_upper"),
+];
+
 /// The registered surface whose self-host source holds every helper of
 /// [`VALUE_SELFHOST_HELPERS`].
 pub const VALUE_HELPER_ANCHOR: &str = "value.pick";

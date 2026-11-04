@@ -444,7 +444,7 @@ fn link_self_host(
                     crate::ir::CallTarget::Module { module, func, .. } => {
                         // The native JSON serializer formats floats through
                         // the linked float.to_string.
-                        if (module.as_str() == "json" && func.as_str() == "stringify")
+                        if (module.as_str() == "json" && matches!(func.as_str(), "stringify" | "stringify_pretty"))
                             || (module.as_str() == "value" && func.as_str() == "__stringify")
                         {
                             out.insert("float.to_string".to_string());
@@ -746,6 +746,14 @@ fn link_self_host(
     // Each missing bundled function is relowered for once (a surface the
     // module does not declare must not loop the link).
     let mut tried: HashSet<String> = HashSet::new();
+    // A natively lowered surface demands what the emitter resolves for it.
+    let imply = |keys: &mut HashSet<String>| {
+        for (lowered, resolved) in almide_wasm::EMITTER_IMPLIED_SURFACES {
+            if keys.contains(*lowered) {
+                keys.insert(resolved.to_string());
+            }
+        }
+    };
     // What the lowered bodies mention only grows: a round walks just the
     // modules loaded or relowered since the last one (`None`: everything).
     let mut mentioned: HashSet<String> = HashSet::new();
@@ -753,6 +761,7 @@ fn link_self_host(
     loop {
         let mut needed = HashSet::new();
         scan_program(ir, &impls, &loaded, &mut needed);
+        imply(&mut needed);
         // Deterministic load order: module indices, names, and layouts
         // must not depend on hash-seed iteration order.
         let mut needed: Vec<String> = needed.into_iter().collect();
@@ -839,8 +848,20 @@ fn link_self_host(
         // The self-host sources this round links, in first-demand order
         // (their `__selfhost_N` names follow it), then every source already
         // linked (by name): a body lowered since may name more of it.
+        mentioned_surfaces(ir, fresh.as_ref(), &mut mentioned);
+        imply(&mut mentioned);
+        fresh = Some(HashSet::new());
         let mut order: Vec<&'static str> = Vec::new();
-        for surface in &needed {
+        // A surface the emitter resolves on its own links its source as soon
+        // as any lowered body, reached or not, names it (after the round's
+        // demands, so their order still names the sources): the emitter's
+        // reach is wider than the scan's.
+        let emitter_own = almide_wasm::EMITTER_RESOLVED_SURFACES
+            .iter()
+            .filter(|s| mentioned.contains(**s) && !needed.iter().any(|n| n == **s))
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>();
+        for surface in needed.iter().chain(emitter_own.iter()) {
             if let Some(&(src, _)) = impls.get(surface)
                 && !order.iter().any(|s| std::ptr::eq(*s, src))
             {
@@ -851,6 +872,9 @@ fn link_self_host(
             loaded.iter().filter(|(s, _)| !order.iter().any(|o| std::ptr::eq(*o, **s))).map(|(s, n)| (*s, n)).collect();
         earlier.sort_by(|a, b| a.1.cmp(b.1));
         order.extend(earlier.into_iter().map(|(s, _)| s));
+        let mut wanted: HashSet<String> = mentioned.clone();
+        wanted.extend(needed.iter().cloned());
+        wanted.extend(almide_wasm::EMITTER_RESOLVED_SURFACES.iter().map(|s| s.to_string()));
         // Each carries (#4458) the implementation of every surface the round
         // demands, every surface any lowered body names — reached or not:
         // the emitter's reach is wider than the scan's (a protocol
@@ -858,22 +882,25 @@ fn link_self_host(
         // resolves on its own (`EMITTER_RESOLVED_SURFACES`), the value
         // helpers it calls by name when their anchor is carried, and what
         // those reach inside the source (`reach_within`). It never carries a
-        // function nothing can resolve, which loading the whole source did.
-        mentioned_surfaces(ir, fresh.as_ref(), &mut mentioned);
-        fresh = Some(HashSet::new());
-        let mut wanted: HashSet<String> = mentioned.clone();
-        wanted.extend(needed.iter().cloned());
-        wanted.extend(almide_wasm::EMITTER_RESOLVED_SURFACES.iter().map(|s| s.to_string()));
+        // function nothing can resolve, which loading the whole source did,
+        // and a source none of whose demanded implementations the emitter
+        // admits is not linked.
         let demanded: Vec<(&'static str, HashSet<String>)> = order
             .into_iter()
             .map(|src| {
                 let mut roots = linked_fns.get(src).cloned().unwrap_or_default();
                 for (surface, impl_fn) in by_src.get(&src.as_ptr()).into_iter().flatten() {
-                    if wanted.contains(*surface) {
+                    if !wanted.contains(*surface) {
+                        continue;
+                    }
+                    // Only a whitelisted implementation is ever called through
+                    // its surface (`registry_impl_admitted`): the emitter lowers
+                    // every other one's surface itself, or walls.
+                    if almide_wasm::registry_impl_admitted(impl_fn) {
                         roots.insert(impl_fn.to_string());
-                        if surface.as_str() == almide_wasm::VALUE_HELPER_ANCHOR {
-                            roots.extend(almide_wasm::VALUE_SELFHOST_HELPERS.iter().map(|(_, h)| h.to_string()));
-                        }
+                    }
+                    if surface.as_str() == almide_wasm::VALUE_HELPER_ANCHOR {
+                        roots.extend(almide_wasm::VALUE_SELFHOST_HELPERS.iter().map(|(_, h)| h.to_string()));
                     }
                 }
                 (src, roots)
@@ -882,6 +909,10 @@ fn link_self_host(
         for (src, mut roots) in demanded {
             let present = loaded.get(src).cloned();
             if present.is_some() && roots.iter().all(|f| linked_fns.get(src).is_some_and(|l| l.contains(f))) {
+                continue;
+            }
+            // Nothing in it can be called: it is not linked at all.
+            if present.is_none() && roots.is_empty() {
                 continue;
             }
             let name = present.unwrap_or_else(|| format!("__selfhost_{}", loaded.len() + 1));
