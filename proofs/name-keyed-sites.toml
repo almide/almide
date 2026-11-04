@@ -190,13 +190,13 @@ class = "legacy"
 names = 4
 
 [[site]]
-id = "crates/almide-frontend/src/bundled_reach.rs::COMPILER_INSERTED::table"
+id = "crates/almide-frontend/src/bundled_reach/live.rs::COMPILER_INSERTED::table"
 class = "justified"
 names = 13
 why = "Which bundled functions the lowering calls on its own (value.__keys for a derived codec, bytes.__concat for `+`) is a fact about the lowering sites that build those calls, not about the functions: no source spells them, so the resolver's reach pruning (#4328) must be told to keep them. tests/compiler_inserted_calls_test.rs scans the lowering for every literal module.__name call it builds and refuses one this table lacks, so the copy cannot drift from the sites."
 
 [[site]]
-id = "crates/almide-frontend/src/bundled_reach.rs::TEST_SYNTHESIZED::table"
+id = "crates/almide-frontend/src/bundled_reach/live.rs::TEST_SYNTHESIZED::table"
 class = "justified"
 names = 6
 why = "Which bundled functions a test build calls on its own (the assert_aborts verdict the lowering builds, the abort-site selector and failure text the driver's test runner synthesizes) is a fact about those synthesis sites, not about the functions: no source spells them, so the reach pruning (#4328) seeds them for a program that declares a test. tests/compiler_inserted_calls_test.rs scans the lowering and almide_driver::test_runner for every literal module.__name call and refuses one this table lacks."
