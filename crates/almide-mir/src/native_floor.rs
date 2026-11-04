@@ -309,6 +309,12 @@ pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
     })
 }
 
+/// Whether the declared floor fn of `call` borrows a list at param `k` (a
+/// slice: it reads the list and keeps no part of it).
+pub(crate) fn borrows_list(call: &str, k: usize) -> bool {
+    declared(call).is_some_and(|f| matches!(f.params.get(k), Some(FloorParam::List(_))) && f.twin.as_ref().is_none_or(|t| t.0 != k))
+}
+
 /// The generated type of param `k` of the self-hosted body a floor call
 /// specializes, when that body spells a concrete one (`map.len_skv`'s
 /// `Map[String, V]` over a program's `Map[String, Int]` is not one).
@@ -479,6 +485,7 @@ pub fn refusal(call: &str) -> Option<String> {
 }
 
 fn derive_explained(call: &str) -> Result<FloorFn, String> {
+
 
     let (module, func) = call.split_once('.').ok_or("not a module.fn call")?;
     if !almide_lang::stdlib_info::is_bundled_module(module) {
