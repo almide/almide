@@ -203,10 +203,10 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # 100k records: ~0.2s native / ~0.28s wasm on a GCE c4-standard-8
     # (2026-10-19) — over the 0.08s spawn-noise floor on both legs.
     "jsonround": "100000",
-    # ~95 ms native / ~1.15 s reference and ablated on a GCE n2-standard-8
-    # (2026-11-04): over the 0.08s floor on the native leg, the one the
-    # rewrite makes fast.
-    "fib": "30:300",
+    # 31, not 30: 30:300 read ~95 ms native on a GCE n2-standard-8 but 78.5 ms
+    # on the ubuntu runner (2026-11-04, PR #4468), under the 0.08s floor; 31
+    # is ~1.47x the native work (~1.6x on the reference and ablated legs).
+    "fib": "31:300",
     # regexcycle (#4392): sized after the GCE reading below; both rows the
     # same number of matches.
     "regexcycle-8": "8:400000",
