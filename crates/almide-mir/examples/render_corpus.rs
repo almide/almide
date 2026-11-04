@@ -7,7 +7,7 @@
 //! perf gate's corpus reaches; the verdicts let it confirm the corpus it
 //! meant to run actually rendered.
 
-use std::io::BufRead;
+use std::io::{BufRead, Write};
 
 fn main() {
     std::thread::Builder::new()
@@ -24,7 +24,7 @@ fn main() {
                     Ok(_) => "OK",
                     Err(_) => "WALL",
                 };
-                println!("{path}\t{verdict}");
+                writeln!(std::io::stdout(), "{path}\t{verdict}").expect("write stdout");
             }
         })
         .expect("spawn")

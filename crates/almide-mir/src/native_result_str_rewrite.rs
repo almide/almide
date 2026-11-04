@@ -92,67 +92,109 @@ pub fn rewrite_result_str_ops(
     let mut t = Tracker::default();
     t.vals.extend(res_str_params.iter().copied());
     for op in ops {
+        let Some(op) = t.window_op(op, &mut out, &recognized, &piece_handle_ids) else { continue };
+        let Some(op) = t.ownership_op(op, &mut out) else { continue };
+        t.flow_op(op, &mut out, res_str_fns);
+    }
+    f.ops = out;
+}
+
+impl Tracker {
+    /// The block-window arms: a const, a recognized block's Alloc, the
+    /// swallowed `Handle`/address, the payload and tag stores, and the tag and
+    /// payload reads. Hands `op` back when none of them applies.
+    fn window_op(
+        &mut self,
+        op: Op,
+        out: &mut Vec<Op>,
+        recognized: &BTreeSet<ValueId>,
+        piece_handle_ids: &BTreeSet<ValueId>,
+    ) -> Option<Op> {
         match &op {
             Op::ConstInt { dst, value } => {
-                t.consts.insert(*dst, *value);
+                self.consts.insert(*dst, *value);
                 out.push(op);
             }
             // A recognized block becomes its carrier at its payload store.
             Op::Alloc { dst, .. } if recognized.contains(dst) => {}
             Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
-                let a = args[0];
-                if t.vals.contains(&a) || recognized.contains(&a) {
-                    t.handles.insert(*d, a);
-                } else if piece_handle_ids.contains(d) {
-                    t.piece_handles.insert(*d, a);
-                } else {
-                    out.push(op);
-                }
+                let da = (*d, args[0]);
+                self.handle_op(op, da, out, recognized, piece_handle_ids);
             }
-            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } if t.handles.contains_key(a) && t.consts.contains_key(b) => {
-                t.addrs.insert(*dst, (t.handles[a], t.consts[b]));
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } if self.handles.contains_key(a) && self.consts.contains_key(b) => {
+                self.addrs.insert(*dst, (self.handles[a], self.consts[b]));
             }
             Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args }
                 if args.len() == 2
-                    && t.addrs.get(&args[0]).is_some_and(|(r, off)| *off == 12 && recognized.contains(r))
-                    && t.piece_handles.contains_key(&args[1]) =>
+                    && self.addrs.get(&args[0]).is_some_and(|(r, off)| *off == 12 && recognized.contains(r))
+                    && self.piece_handles.contains_key(&args[1]) =>
             {
-                let (r, _) = t.addrs[&args[0]];
-                let piece = t.piece_handles[&args[1]];
+                let (r, _) = self.addrs[&args[0]];
+                let piece = self.piece_handles[&args[1]];
                 out.push(Op::Prim { kind: PrimKind::ResStrMake, dst: Some(r), args: vec![piece] });
-                t.vals.insert(r);
-                t.minted.insert(r);
+                self.vals.insert(r);
+                self.minted.insert(r);
             }
             Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args }
                 if args.len() == 2
-                    && t.addrs.get(&args[0]).is_some_and(|(r, off)| *off == 16 && t.minted.contains(r)) =>
+                    && self.addrs.get(&args[0]).is_some_and(|(r, off)| *off == 16 && self.minted.contains(r)) =>
             {
-                let (r, _) = t.addrs[&args[0]];
+                let (r, _) = self.addrs[&args[0]];
                 out.push(Op::Prim { kind: PrimKind::ResStrSetTag, dst: None, args: vec![r, args[1]] });
             }
-            Op::Prim { kind, dst: Some(d), args } if args.len() == 1 && t.addrs.contains_key(&args[0]) => {
-                let (r, off) = t.addrs[&args[0]];
-                match (kind, off) {
-                    (PrimKind::Load { width: 4 }, 16) if t.vals.contains(&r) => {
-                        out.push(Op::Prim { kind: PrimKind::ResTag, dst: Some(*d), args: vec![r] })
-                    }
-                    (PrimKind::LoadHandle, 12) if t.vals.contains(&r) => {
-                        out.push(Op::Prim { kind: PrimKind::ResErrStr, dst: Some(*d), args: vec![r] })
-                    }
-                    _ => out.push(op),
-                }
+            Op::Prim { kind, dst: Some(d), args } if args.len() == 1 && self.addrs.contains_key(&args[0]) => {
+                let (r, off) = self.addrs[&args[0]];
+                let load = load_window(kind, off, *d, r, self.vals.contains(&r));
+                out.push(load.unwrap_or(op));
             }
-            Op::Dup { dst, src } if t.minted.contains(src) => {
+            _ => return Some(op),
+        }
+        None
+    }
+
+    /// A one-arg `Handle` op `d = handle(a)`: swallowed over a tracked or
+    /// recognized block, swallowed as a recognized store's piece handle, or
+    /// kept.
+    fn handle_op(
+        &mut self,
+        op: Op,
+        (d, a): (ValueId, ValueId),
+        out: &mut Vec<Op>,
+        recognized: &BTreeSet<ValueId>,
+        piece_handle_ids: &BTreeSet<ValueId>,
+    ) {
+        if self.vals.contains(&a) || recognized.contains(&a) {
+            self.handles.insert(d, a);
+        } else if piece_handle_ids.contains(&d) {
+            self.piece_handles.insert(d, a);
+        } else {
+            out.push(op);
+        }
+    }
+
+    /// The ownership arms over a minted or tracked carrier. Hands `op` back
+    /// when none of them applies.
+    fn ownership_op(&mut self, op: Op, out: &mut Vec<Op>) -> Option<Op> {
+        match &op {
+            Op::Dup { dst, src } if self.minted.contains(src) => {
                 out.push(Op::Prim { kind: PrimKind::ResCopy, dst: Some(*dst), args: vec![*src] });
-                t.vals.insert(*dst);
-                t.minted.insert(*dst);
+                self.vals.insert(*dst);
+                self.minted.insert(*dst);
             }
-            Op::Drop { v } | Op::DropListStr { v } if t.minted.contains(v) => {}
-            Op::Consume { v } if t.vals.contains(v) => {}
+            Op::Drop { v } | Op::DropListStr { v } if self.minted.contains(v) => {}
+            Op::Consume { v } if self.vals.contains(v) => {}
+            _ => return Some(op),
+        }
+        None
+    }
+
+    /// The call, if-join and pass-through arms.
+    fn flow_op(&mut self, op: Op, out: &mut Vec<Op>, res_str_fns: &BTreeSet<String>) {
+        match &op {
             Op::CallFn { dst, name, args, result } => {
                 if let Some(d) = dst {
                     if res_str_fns.contains(name) || crate::native_floor::declared_result_carrier(name) == Some(true) {
-                        t.vals.insert(*d);
+                        self.vals.insert(*d);
                     }
                 }
                 // A minted carrier has no object: as a call arg it is a value
@@ -160,31 +202,41 @@ pub fn rewrite_result_str_ops(
                 let args = args
                     .iter()
                     .map(|a| match a {
-                        crate::CallArg::Handle(v) if t.minted.contains(v) => crate::CallArg::Scalar(*v),
+                        crate::CallArg::Handle(v) if self.minted.contains(v) => crate::CallArg::Scalar(*v),
                         other => other.clone(),
                     })
                     .collect();
-                out.push(Op::CallFn { dst: *dst, name: name.clone(), args, result: result.clone() });
+                out.push(Op::CallFn { dst: *dst, name: name.clone(), args, result: *result });
             }
             Op::IfThen { dst, .. } => {
-                t.if_dsts.push(*dst);
+                self.if_dsts.push(*dst);
                 out.push(op);
             }
             Op::Else { val } | Op::EndIf { val } => {
-                if let (Some(v), Some(Some(d))) = (val, t.if_dsts.last()) {
-                    if t.vals.contains(v) {
-                        t.vals.insert(*d);
+                if let (Some(v), Some(Some(d))) = (val, self.if_dsts.last()) {
+                    if self.vals.contains(v) {
+                        self.vals.insert(*d);
                     }
                 }
                 if matches!(op, Op::EndIf { .. }) {
-                    t.if_dsts.pop();
+                    self.if_dsts.pop();
                 }
                 out.push(op);
             }
             _ => out.push(op),
         }
     }
-    f.ops = out;
+}
+
+/// The Result read a swallowed load at offset `off` of block `r` is, when
+/// `r` is a tracked Result (`tracked`): the tag word or the payload String;
+/// `None` for any other window.
+fn load_window(kind: &PrimKind, off: i64, d: ValueId, r: ValueId, tracked: bool) -> Option<Op> {
+    match (kind, off) {
+        (PrimKind::Load { width: 4 }, 16) if tracked => Some(Op::Prim { kind: PrimKind::ResTag, dst: Some(d), args: vec![r] }),
+        (PrimKind::LoadHandle, 12) if tracked => Some(Op::Prim { kind: PrimKind::ResErrStr, dst: Some(d), args: vec![r] }),
+        _ => None,
+    }
 }
 
 #[derive(Default)]

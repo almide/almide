@@ -36,18 +36,16 @@ fn self_host_source_to_ir(
     Ok(almide_frontend::lower::lower_stdlib_program(&prog, &checker.env, &checker.type_map))
 }
 
-/// Link every registry body the program (transitively) calls. Returns the
-/// linked sources, for the signature table and the Result rewrite.
-fn link_native_self_host(
-    functions: &mut Vec<crate::MirFunction>,
-    user_ir: &almide_ir::IrProgram,
-) -> Result<Vec<LinkedSelfHost>, LowerError> {
-    // A name clash walls at the user fn that holds the name.
-    let clash = |name: &str| {
-        let span = user_ir.functions.iter().find(|f| f.name.as_str() == name).and_then(|f| f.body.span);
-        LowerError::at(span, format!("native: the self-host body `{name}` shares its name with a user fn"))
-    };
-    use std::collections::{BTreeMap, BTreeSet};
+/// The registry's call table: call name → (source, impl name), and source →
+/// its entries. A call the native runtime floor already serves keeps that route.
+type SelfHostCallTable = (
+    std::collections::BTreeMap<&'static str, (&'static str, &'static str)>,
+    std::collections::BTreeMap<&'static str, &'static [(&'static str, &'static str)]>,
+);
+
+/// Build the [`SelfHostCallTable`] from `self_host_runtime()`.
+fn self_host_call_table() -> SelfHostCallTable {
+    use std::collections::BTreeMap;
     // call name → (source, impl name); impl name → source.
     // A call the native runtime floor already serves keeps that route.
     let mut by_call: BTreeMap<&'static str, (&'static str, &'static str)> = BTreeMap::new();
@@ -63,13 +61,57 @@ fn link_native_self_host(
             }
         }
     }
-    let user_names: BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
-    let mut linked: Vec<LinkedSelfHost> = Vec::new();
-    let mut linked_srcs: BTreeMap<&'static str, usize> = BTreeMap::new();
-    let mut done: BTreeSet<String> = BTreeSet::new();
-    loop {
-        // Retarget registry call names onto impl names, and collect what is missing.
-        let defined: BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
+    (by_call, entries_of)
+}
+
+/// The link's working state across its fixpoint rounds.
+struct SelfHostLinker<'u> {
+    user_ir: &'u almide_ir::IrProgram,
+    by_call: std::collections::BTreeMap<&'static str, (&'static str, &'static str)>,
+    entries_of: std::collections::BTreeMap<&'static str, &'static [(&'static str, &'static str)]>,
+    user_names: std::collections::BTreeSet<String>,
+    linked: Vec<LinkedSelfHost>,
+    linked_srcs: std::collections::BTreeMap<&'static str, usize>,
+    done: std::collections::BTreeSet<String>,
+}
+
+impl SelfHostLinker<'_> {
+    /// A name clash walls at the user fn that holds the name.
+    fn clash(&self, name: &str) -> LowerError {
+        let span = self.user_ir.functions.iter().find(|f| f.name.as_str() == name).and_then(|f| f.body.span);
+        LowerError::at(span, format!("native: the self-host body `{name}` shares its name with a user fn"))
+    }
+
+    /// Retarget one undefined call name onto its impl name. `Ok(None)` = not a
+    /// registry call (left as is); `Ok(Some((src, impl)))` = served by `src`.
+    fn retarget_call(
+        &self,
+        name: &mut String,
+    ) -> Result<Option<(&'static str, String)>, LowerError> {
+        match self.by_call.get(name.as_str()) {
+            Some(&(src, impl_fn)) => {
+                if self.user_names.contains(impl_fn) {
+                    return Err(self.clash(impl_fn));
+                }
+                *name = impl_fn.to_string();
+                Ok(Some((src, impl_fn.to_string())))
+            }
+            None => match self.linked_srcs.iter().find(|(_, &i)| {
+                self.linked[i].ir.functions.iter().any(|g| g.name.as_str() == name.as_str())
+            }) {
+                // A sibling helper of an already-linked body.
+                Some((&src, _)) => Ok(Some((src, name.clone()))),
+                None => Ok(None),
+            },
+        }
+    }
+
+    /// Retarget registry call names onto impl names, and collect what is missing.
+    fn collect_wanted(
+        &self,
+        functions: &mut [crate::MirFunction],
+    ) -> Result<Vec<(&'static str, String)>, LowerError> {
+        let defined: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
         let mut wanted: Vec<(&'static str, String)> = Vec::new();
         for f in functions.iter_mut() {
             for op in &mut f.ops {
@@ -77,75 +119,96 @@ fn link_native_self_host(
                 if defined.contains(name.as_str()) {
                     continue;
                 }
-                let (src, impl_fn) = match by_call.get(name.as_str()) {
-                    Some(&(src, impl_fn)) => {
-                        if user_names.contains(impl_fn) {
-                            return Err(clash(impl_fn));
-                        }
-                        *name = impl_fn.to_string();
-                        (src, impl_fn.to_string())
-                    }
-                    None => match linked_srcs.iter().find(|(_, &i)| {
-                        linked[i].ir.functions.iter().any(|g| g.name.as_str() == name.as_str())
-                    }) {
-                        // A sibling helper of an already-linked body.
-                        Some((&src, _)) => (src, name.clone()),
-                        None => continue,
-                    },
-                };
-                if !defined.contains(&impl_fn) && !done.contains(&impl_fn) {
+                let Some((src, impl_fn)) = self.retarget_call(name)? else { continue };
+                if !defined.contains(&impl_fn) && !self.done.contains(&impl_fn) {
                     wanted.push((src, impl_fn));
                 }
             }
         }
+        Ok(wanted)
+    }
+
+    /// The index of `src`'s linked IR, lowering it on first use.
+    fn source_index(&mut self, src: &'static str) -> Result<usize, LowerError> {
+        if let Some(&i) = self.linked_srcs.get(src) {
+            return Ok(i);
+        }
+        let ir = self_host_source_to_ir(src, self.entries_of[src])?;
+        let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
+        let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
+        self.linked.push(LinkedSelfHost { ir, record_layouts, variant_layouts });
+        self.linked_srcs.insert(src, self.linked.len() - 1);
+        Ok(self.linked.len() - 1)
+    }
+
+    /// Link ONE wanted impl fn (and the helpers its lowering emits).
+    fn link_one(
+        &mut self,
+        functions: &mut Vec<crate::MirFunction>,
+        src: &'static str,
+        impl_fn: String,
+    ) -> Result<(), LowerError> {
+        if self.done.contains(&impl_fn) {
+            return Ok(());
+        }
+        if self.user_names.contains(&impl_fn) {
+            return Err(self.clash(&impl_fn));
+        }
+        let at = self.source_index(src)?;
+        let sh = &self.linked[at];
+        let Some(func) = sh.ir.functions.iter().find(|g| g.name.as_str() == impl_fn) else {
+            // Left unresolved: the render walls on the call itself.
+            self.done.insert(impl_fn);
+            return Ok(());
+        };
+        crate::render_native_rec::extend_with(
+            &func.params.iter().map(|p| p.ty.clone()).chain(std::iter::once(func.ret_ty.clone())).collect::<Vec<_>>(),
+        );
+        native_sig_subset_check(func, &sh.record_layouts, &sh.variant_layouts)?;
+        let all = crate::lower::lower_function_all_with_globals(
+            func,
+            &Default::default(),
+            &Default::default(),
+            &sh.record_layouts,
+            &sh.variant_layouts,
+        )
+        .map_err(|e| LowerError::at(func.body.span, format!("native: self-host fn `{impl_fn}`: {e:?}")))?;
+        for g in &all {
+            if self.user_names.contains(&g.name) {
+                return Err(self.clash(&g.name));
+            }
+            self.done.insert(g.name.clone());
+        }
+        self.done.insert(impl_fn);
+        functions.extend(all);
+        Ok(())
+    }
+}
+
+/// Link every registry body the program (transitively) calls. Returns the
+/// linked sources, for the signature table and the Result rewrite.
+fn link_native_self_host(
+    functions: &mut Vec<crate::MirFunction>,
+    user_ir: &almide_ir::IrProgram,
+) -> Result<Vec<LinkedSelfHost>, LowerError> {
+    let (by_call, entries_of) = self_host_call_table();
+    let mut linker = SelfHostLinker {
+        user_ir,
+        by_call,
+        entries_of,
+        user_names: functions.iter().map(|f| f.name.clone()).collect(),
+        linked: Vec::new(),
+        linked_srcs: std::collections::BTreeMap::new(),
+        done: std::collections::BTreeSet::new(),
+    };
+    loop {
+        let wanted = linker.collect_wanted(functions)?;
         if wanted.is_empty() {
             break;
         }
         for (src, impl_fn) in wanted {
-            if done.contains(&impl_fn) {
-                continue;
-            }
-            if user_names.contains(&impl_fn) {
-                return Err(clash(&impl_fn));
-            }
-            let at = match linked_srcs.get(src) {
-                Some(&i) => i,
-                None => {
-                    let ir = self_host_source_to_ir(src, entries_of[src])?;
-                    let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
-                    let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
-                    linked.push(LinkedSelfHost { ir, record_layouts, variant_layouts });
-                    linked_srcs.insert(src, linked.len() - 1);
-                    linked.len() - 1
-                }
-            };
-            let sh = &linked[at];
-            let Some(func) = sh.ir.functions.iter().find(|g| g.name.as_str() == impl_fn) else {
-                // Left unresolved: the render walls on the call itself.
-                done.insert(impl_fn);
-                continue;
-            };
-            crate::render_native_rec::extend_with(
-                &func.params.iter().map(|p| p.ty.clone()).chain(std::iter::once(func.ret_ty.clone())).collect::<Vec<_>>(),
-            );
-            native_sig_subset_check(func, &sh.record_layouts, &sh.variant_layouts)?;
-            let all = crate::lower::lower_function_all_with_globals(
-                func,
-                &Default::default(),
-                &Default::default(),
-                &sh.record_layouts,
-                &sh.variant_layouts,
-            )
-            .map_err(|e| LowerError::at(func.body.span, format!("native: self-host fn `{impl_fn}`: {e:?}")))?;
-            for g in &all {
-                if user_names.contains(&g.name) {
-                    return Err(clash(&g.name));
-                }
-                done.insert(g.name.clone());
-            }
-            done.insert(impl_fn);
-            functions.extend(all);
+            linker.link_one(functions, src, impl_fn)?;
         }
     }
-    Ok(linked)
+    Ok(linker.linked)
 }

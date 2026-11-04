@@ -38,18 +38,13 @@ fn split_arm_line(line: &str) -> Option<(String, String, String)> {
 /// At op `i`, the first call of a lifted fan group: render the whole group
 /// (its K calls) as the threaded form and consume its ops. `false` when op
 /// `i` is no group's first arm.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_fan_group<'f>(
     func: &'f MirFunction,
     i: usize,
     ops: &mut impl Iterator<Item = (usize, &'f Op)>,
-    user_fns: &BTreeMap<&str, &MirFunction>,
-    sigs: &NativeSigs,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-    used_shims: &mut Vec<&'static str>,
+    sink: NativeSink<'_, '_>,
 ) -> Result<bool, LowerError> {
+    let NativeSink { user_fns, sigs, tys, out, indent, used_shims } = sink;
     let Op::CallFn { name, .. } = &func.ops[i] else { return Ok(false) };
     let Some(arm) = crate::fan_native::arm(name) else { return Ok(false) };
     if arm.index != 0 {
@@ -72,7 +67,7 @@ pub(crate) fn render_fan_group<'f>(
             if let CallArg::Handle(v) = a {
                 // ADR-0013 design point 3: a value an arm reads on another
                 // thread is marked thread-shared before the spawn.
-                writeln!(marks, "almide_str_block::almide_str_mark_reachable(&{});", var(*v)).unwrap();
+                writeln!(marks, "almide_str_block::almide_str_mark_reachable(&{});", var(*v)).expect("writing to a String cannot fail");
             }
         }
         let mut line = String::new();
@@ -87,7 +82,7 @@ pub(crate) fn render_fan_group<'f>(
             spawns,
             "let __almide_fan_h{j} = almide_fan_spawn(__almide_s, || {{ let __almide_fan_e = almide_fan_enter(__almide_fan_g, {j}); {expr} }});"
         )
-        .unwrap();
+        .expect("writing to a String cannot fail");
         handles.push((v, t));
     }
     // Consume the group's ops after the first.
@@ -99,16 +94,16 @@ pub(crate) fn render_fan_group<'f>(
     let types: Vec<&str> = handles.iter().map(|(_, t)| t.as_str()).collect();
     let takes: Vec<String> = (0..k).map(|j| format!("almide_fan_take(__almide_fan_h{j})")).collect();
     for l in marks.lines() {
-        writeln!(out, "{pad}{l}").unwrap();
+        writeln!(out, "{pad}{l}").expect("writing to a String cannot fail");
     }
-    writeln!(out, "{pad}almide_stdout_flush();").unwrap();
-    writeln!(out, "{pad}let __almide_fan_go = almide_fan_group({k}); let __almide_fan_g = &__almide_fan_go;").unwrap();
-    writeln!(out, "{pad}let ({}): ({}) = std::thread::scope(|__almide_s| {{", vars.join(", "), types.join(", ")).unwrap();
+    writeln!(out, "{pad}almide_stdout_flush();").expect("writing to a String cannot fail");
+    writeln!(out, "{pad}let __almide_fan_go = almide_fan_group({k}); let __almide_fan_g = &__almide_fan_go;").expect("writing to a String cannot fail");
+    writeln!(out, "{pad}let ({}): ({}) = std::thread::scope(|__almide_s| {{", vars.join(", "), types.join(", ")).expect("writing to a String cannot fail");
     for l in spawns.lines() {
-        writeln!(out, "{pad}    {l}").unwrap();
+        writeln!(out, "{pad}    {l}").expect("writing to a String cannot fail");
     }
-    writeln!(out, "{pad}    ({})", takes.join(", ")).unwrap();
-    writeln!(out, "{pad}}});").unwrap();
+    writeln!(out, "{pad}    ({})", takes.join(", ")).expect("writing to a String cannot fail");
+    writeln!(out, "{pad}}});").expect("writing to a String cannot fail");
     FAN_RENDERED.with(|c| c.set(true));
     Ok(true)
 }

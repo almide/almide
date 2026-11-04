@@ -40,50 +40,62 @@ pub fn rewrite_option_ops(
     let mut t = OptionTracker::default();
     t.opt_vals.extend(opt_params.iter().copied());
     for op in ops {
+        let Some(op) = t.carrier_op(op, &mut out, carriers) else { continue };
+        t.flow_op(op, &mut out, option_fns);
+    }
+    f.ops = out;
+}
+
+impl OptionTracker {
+    /// The carrier-producing and carrier-reading arms: a const, a minted
+    /// carrier, its ownership ops, and the swallowed `Handle`/address/load
+    /// window. Hands `op` back when none of them applies.
+    fn carrier_op(&mut self, op: Op, out: &mut Vec<Op>, carriers: &BTreeSet<ValueId>) -> Option<Op> {
         match &op {
             Op::ConstInt { dst, value } => {
-                t.const_vals.insert(*dst, *value);
+                self.const_vals.insert(*dst, *value);
                 out.push(op);
             }
             Op::Alloc { dst, init: Init::OptSome { payload }, .. } => {
                 out.push(Op::Prim { kind: PrimKind::OptMakeSome, dst: Some(*dst), args: vec![*payload] });
-                t.opt_vals.insert(*dst);
-                t.minted.insert(*dst);
+                self.opt_vals.insert(*dst);
+                self.minted.insert(*dst);
             }
             Op::Alloc { dst, init: Init::OptNone, .. } if !carriers.contains(dst) => {
                 out.push(Op::Prim { kind: PrimKind::OptMakeNone, dst: Some(*dst), args: vec![] });
-                t.opt_vals.insert(*dst);
-                t.minted.insert(*dst);
+                self.opt_vals.insert(*dst);
+                self.minted.insert(*dst);
             }
-            Op::Dup { dst, src } if t.minted.contains(src) => {
+            Op::Dup { dst, src } if self.minted.contains(src) => {
                 out.push(Op::Prim { kind: PrimKind::OptCopy, dst: Some(*dst), args: vec![*src] });
-                t.opt_vals.insert(*dst);
-                t.minted.insert(*dst);
+                self.opt_vals.insert(*dst);
+                self.minted.insert(*dst);
             }
-            Op::Drop { v } | Op::DropListStr { v } if t.minted.contains(v) => {}
-            Op::Consume { v } if t.opt_vals.contains(v) => {}
-            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 && t.opt_vals.contains(&args[0]) => {
-                t.handles.insert(*d, args[0]);
+            Op::Drop { v } | Op::DropListStr { v } if self.minted.contains(v) => {}
+            Op::Consume { v } if self.opt_vals.contains(v) => {}
+            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 && self.opt_vals.contains(&args[0]) => {
+                self.handles.insert(*d, args[0]);
             }
-            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } if t.handles.contains_key(a) && t.const_vals.contains_key(b) => {
-                t.addrs.insert(*dst, (t.handles[a], t.const_vals[b]));
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } if self.handles.contains_key(a) && self.const_vals.contains_key(b) => {
+                self.addrs.insert(*dst, (self.handles[a], self.const_vals[b]));
             }
-            Op::Prim { kind, dst: Some(d), args } if args.len() == 1 && t.addrs.contains_key(&args[0]) => {
-                let (o, off) = t.addrs[&args[0]];
-                match (kind, off) {
-                    (PrimKind::Load { width: 4 }, 4) => {
-                        out.push(Op::Prim { kind: PrimKind::OptTag, dst: Some(*d), args: vec![o] })
-                    }
-                    (PrimKind::Load { width: 8 }, 12) => {
-                        out.push(Op::Prim { kind: PrimKind::OptPayload, dst: Some(*d), args: vec![o] })
-                    }
-                    _ => out.push(op),
-                }
+            Op::Prim { kind, dst: Some(d), args } if args.len() == 1 && self.addrs.contains_key(&args[0]) => {
+                let (o, off) = self.addrs[&args[0]];
+                let load = load_window(kind, off, *d, o);
+                out.push(load.unwrap_or(op));
             }
+            _ => return Some(op),
+        }
+        None
+    }
+
+    /// The call, if-join and pass-through arms.
+    fn flow_op(&mut self, op: Op, out: &mut Vec<Op>, option_fns: &BTreeSet<String>) {
+        match &op {
             Op::CallFn { dst, name, args, result } => {
                 if let Some(d) = dst {
                     if option_fns.contains(name) || crate::native_floor::declared_scalar_option(name) {
-                        t.opt_vals.insert(*d);
+                        self.opt_vals.insert(*d);
                     }
                 }
                 // A minted carrier has no object: as a call arg it is a value
@@ -91,31 +103,40 @@ pub fn rewrite_option_ops(
                 let args = args
                     .iter()
                     .map(|a| match a {
-                        crate::CallArg::Handle(v) if t.minted.contains(v) => crate::CallArg::Scalar(*v),
+                        crate::CallArg::Handle(v) if self.minted.contains(v) => crate::CallArg::Scalar(*v),
                         other => other.clone(),
                     })
                     .collect();
-                out.push(Op::CallFn { dst: *dst, name: name.clone(), args, result: result.clone() });
+                out.push(Op::CallFn { dst: *dst, name: name.clone(), args, result: *result });
             }
             Op::IfThen { dst, .. } => {
-                t.if_dsts.push(*dst);
+                self.if_dsts.push(*dst);
                 out.push(op);
             }
             Op::Else { val } | Op::EndIf { val } => {
-                if let (Some(v), Some(Some(d))) = (val, t.if_dsts.last()) {
-                    if t.opt_vals.contains(v) {
-                        t.opt_vals.insert(*d);
+                if let (Some(v), Some(Some(d))) = (val, self.if_dsts.last()) {
+                    if self.opt_vals.contains(v) {
+                        self.opt_vals.insert(*d);
                     }
                 }
                 if matches!(op, Op::EndIf { .. }) {
-                    t.if_dsts.pop();
+                    self.if_dsts.pop();
                 }
                 out.push(op);
             }
             _ => out.push(op),
         }
     }
-    f.ops = out;
+}
+
+/// The Option read a swallowed `Load` at offset `off` of Option `o` is: the
+/// tag (length word) or the payload slot; `None` for any other window.
+fn load_window(kind: &PrimKind, off: i64, d: ValueId, o: ValueId) -> Option<Op> {
+    match (kind, off) {
+        (PrimKind::Load { width: 4 }, 4) => Some(Op::Prim { kind: PrimKind::OptTag, dst: Some(d), args: vec![o] }),
+        (PrimKind::Load { width: 8 }, 12) => Some(Op::Prim { kind: PrimKind::OptPayload, dst: Some(d), args: vec![o] }),
+        _ => None,
+    }
 }
 
 #[derive(Default)]

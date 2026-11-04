@@ -68,7 +68,6 @@ fn ident(v: &AttrValue) -> Option<&str> {
 /// Decode one `@prim_op(…)`. The first positional argument names the op;
 /// named arguments refine it.
 pub fn decode(attr: &Attribute) -> Result<PrimOp, String> {
-    use crate::{FBinOp, FCmpOp, FUnOp, IntOp, PrimKind};
     let mut positional = attr.args.iter().filter(|a| a.name.is_none());
     let op = positional
         .next()
@@ -77,67 +76,138 @@ pub fn decode(attr: &Attribute) -> Result<PrimOp, String> {
     if positional.next().is_some() {
         return Err(format!("@prim_op({op}) takes one positional argument"));
     }
-    let named = |key: &str| {
-        attr.args
+    let d = Decoder { attr, op };
+    if let Some(decoded) = d.machine_op()? {
+        return Ok(decoded);
+    }
+    if let Some(decoded) = d.float_op()? {
+        return Ok(decoded);
+    }
+    Err(format!("@prim_op({op}) is not an op"))
+}
+
+/// One `@prim_op(op, …)` being decoded: the attribute and its op name.
+struct Decoder<'a> {
+    attr: &'a Attribute,
+    op: &'a str,
+}
+
+impl<'a> Decoder<'a> {
+    fn named(&self, key: &str) -> Option<&'a AttrValue> {
+        self.attr
+            .args
             .iter()
             .find(|a| a.name.as_ref().is_some_and(|n| n.as_str() == key))
             .map(|a| &a.value)
-    };
-    let width = || match named("width") {
-        Some(AttrValue::Int { value }) if matches!(*value, 1 | 4 | 8) => Ok(*value as u8),
-        _ => Err(format!("@prim_op({op}) needs `width = 1 | 4 | 8`")),
-    };
-    let sub = || {
-        named("op")
+    }
+
+    fn width(&self) -> Result<u8, String> {
+        match self.named("width") {
+            Some(AttrValue::Int { value }) if matches!(*value, 1 | 4 | 8) => Ok(*value as u8),
+            _ => Err(format!("@prim_op({}) needs `width = 1 | 4 | 8`", self.op)),
+        }
+    }
+
+    fn sub(&self) -> Result<&'a str, String> {
+        self.named("op")
             .and_then(ident)
-            .ok_or(format!("@prim_op({op}) needs `op = …`"))
-    };
-    let bad = |s: &str| Err(format!("@prim_op({op}, op = {s}) is not an op"));
-    Ok(match op {
-        "addr" => PrimOp::Addr,
-        "abort" => PrimOp::Abort,
-        "load" => PrimOp::Load { width: width()? },
-        "load_ref" => PrimOp::LoadRef,
-        "store" => PrimOp::Store { width: width()? },
-        "store_owned" => PrimOp::StoreOwned,
-        "int" => PrimOp::Int(match sub()? {
+            .ok_or(format!("@prim_op({}) needs `op = …`", self.op))
+    }
+
+    fn bad<T>(&self, s: &str) -> Result<T, String> {
+        Err(format!("@prim_op({}, op = {s}) is not an op", self.op))
+    }
+
+    /// The memory, integer, allocation and host ops; `None` for any other name.
+    fn machine_op(&self) -> Result<Option<PrimOp>, String> {
+        Ok(Some(match self.op {
+            "addr" => PrimOp::Addr,
+            "abort" => PrimOp::Abort,
+            "load" => PrimOp::Load { width: self.width()? },
+            "load_ref" => PrimOp::LoadRef,
+            "store" => PrimOp::Store { width: self.width()? },
+            "store_owned" => PrimOp::StoreOwned,
+            "int" => PrimOp::Int(self.int_op()?),
+            "alloc" => PrimOp::Alloc(self.alloc_block()?),
+            "rc" => PrimOp::Rc { inc: self.rc_inc()? },
+            "ptr" => self.ptr_op()?,
+            "host" => PrimOp::Host,
+            _ => return Ok(None),
+        }))
+    }
+
+    /// The float-floor ops; `None` for any other name.
+    fn float_op(&self) -> Result<Option<PrimOp>, String> {
+        use crate::PrimKind;
+        Ok(Some(match self.op {
+            "float_un" => PrimOp::Direct(PrimKind::FloatUn(self.float_un()?)),
+            "float_bin" => PrimOp::Direct(PrimKind::FloatBin(self.float_bin()?)),
+            "float_cmp" => PrimOp::Direct(PrimKind::FloatCmp(self.float_cmp()?)),
+            "float_to_int" => PrimOp::Direct(PrimKind::FloatToInt),
+            "int_to_float" => PrimOp::Direct(PrimKind::IntToFloat),
+            "float_bits" => PrimOp::Direct(PrimKind::FloatBits),
+            "f32_demote" => PrimOp::Direct(PrimKind::F32Demote),
+            "f32_promote" => PrimOp::Direct(PrimKind::F32Promote),
+            "int_to_f32" => PrimOp::Direct(PrimKind::IntToF32),
+            "f32_bits" => PrimOp::Direct(PrimKind::F32Bits),
+            _ => return Ok(None),
+        }))
+    }
+
+    fn int_op(&self) -> Result<crate::IntOp, String> {
+        use crate::IntOp;
+        Ok(match self.sub()? {
             "bit_and" => IntOp::And,
             "bit_or" => IntOp::Or,
             "bit_xor" => IntOp::Xor,
             "shl" => IntOp::Shl,
             "shr" => IntOp::Shr,
             "shr_u" => IntOp::ShrU,
-            s => return bad(s),
-        }),
-        "alloc" => PrimOp::Alloc(match named("block").and_then(ident) {
+            s => return self.bad(s),
+        })
+    }
+
+    fn alloc_block(&self) -> Result<AllocBlock, String> {
+        Ok(match self.named("block").and_then(ident) {
             Some("bytes") => AllocBlock::Bytes,
             Some("slots") => AllocBlock::Slots,
             Some("owned_slots") => AllocBlock::OwnedSlots,
             _ => return Err("@prim_op(alloc) needs `block = bytes | slots | owned_slots`".into()),
-        }),
-        "rc" => PrimOp::Rc {
-            inc: match sub()? {
-                "inc" => true,
-                "dec" => false,
-                s => return bad(s),
-            },
-        },
-        "ptr" => match sub()? {
-            "to_int" => PrimOp::Ptr,
-            "from_int" => PrimOp::Ptr,
-            s => return bad(s),
-        },
-        "host" => PrimOp::Host,
-        "float_un" => PrimOp::Direct(PrimKind::FloatUn(match sub()? {
+        })
+    }
+
+    fn rc_inc(&self) -> Result<bool, String> {
+        match self.sub()? {
+            "inc" => Ok(true),
+            "dec" => Ok(false),
+            s => self.bad(s),
+        }
+    }
+
+    fn ptr_op(&self) -> Result<PrimOp, String> {
+        match self.sub()? {
+            "to_int" => Ok(PrimOp::Ptr),
+            "from_int" => Ok(PrimOp::Ptr),
+            s => self.bad(s),
+        }
+    }
+
+    fn float_un(&self) -> Result<crate::FUnOp, String> {
+        use crate::FUnOp;
+        Ok(match self.sub()? {
             "abs" => FUnOp::Abs,
             "sqrt" => FUnOp::Sqrt,
             "floor" => FUnOp::Floor,
             "ceil" => FUnOp::Ceil,
             "nearest" => FUnOp::Nearest,
             "neg" => FUnOp::Neg,
-            s => return bad(s),
-        })),
-        "float_bin" => PrimOp::Direct(PrimKind::FloatBin(match sub()? {
+            s => return self.bad(s),
+        })
+    }
+
+    fn float_bin(&self) -> Result<crate::FBinOp, String> {
+        use crate::FBinOp;
+        Ok(match self.sub()? {
             "add" => FBinOp::Add,
             "sub" => FBinOp::Sub,
             "mul" => FBinOp::Mul,
@@ -145,31 +215,30 @@ pub fn decode(attr: &Attribute) -> Result<PrimOp, String> {
             "min" => FBinOp::Min,
             "max" => FBinOp::Max,
             "copysign" => FBinOp::CopySign,
-            s => return bad(s),
-        })),
-        "float_cmp" => PrimOp::Direct(PrimKind::FloatCmp(match sub()? {
+            s => return self.bad(s),
+        })
+    }
+
+    fn float_cmp(&self) -> Result<crate::FCmpOp, String> {
+        use crate::FCmpOp;
+        Ok(match self.sub()? {
             "lt" => FCmpOp::Lt,
             "le" => FCmpOp::Le,
             "gt" => FCmpOp::Gt,
             "ge" => FCmpOp::Ge,
             "eq" => FCmpOp::Eq,
             "ne" => FCmpOp::Ne,
-            s => return bad(s),
-        })),
-        "float_to_int" => PrimOp::Direct(PrimKind::FloatToInt),
-        "int_to_float" => PrimOp::Direct(PrimKind::IntToFloat),
-        "float_bits" => PrimOp::Direct(PrimKind::FloatBits),
-        "f32_demote" => PrimOp::Direct(PrimKind::F32Demote),
-        "f32_promote" => PrimOp::Direct(PrimKind::F32Promote),
-        "int_to_f32" => PrimOp::Direct(PrimKind::IntToF32),
-        "f32_bits" => PrimOp::Direct(PrimKind::F32Bits),
-        other => return Err(format!("@prim_op({other}) is not an op")),
-    })
+            s => return self.bad(s),
+        })
+    }
 }
+
+/// Every fn's name with one decode result per `@prim_op` it carries.
+pub type PrimOpDeclarations = Vec<(String, Vec<Result<PrimOp, String>>)>;
 
 /// Every fn declared in `source` with its `@prim_op` attributes decoded, in
 /// source order: `(fn name, one result per @prim_op it carries)`.
-pub fn declarations_in(source: &str) -> Result<Vec<(String, Vec<Result<PrimOp, String>>)>, String> {
+pub fn declarations_in(source: &str) -> Result<PrimOpDeclarations, String> {
     let tokens = almide_lang::lexer::Lexer::tokenize(source);
     let mut parser = almide_lang::parser::Parser::new(tokens);
     let prog = parser.parse().map_err(|e| format!("prim.almd does not parse: {e:?}"))?;

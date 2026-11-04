@@ -134,7 +134,7 @@ fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Option<MirFu
     // latest first so the earlier indices stay put.
     let mut releases: Vec<(usize, crate::ValueId)> =
         consumed.iter().map(|&(k, at)| (at, func.params[k].value)).collect();
-    releases.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    releases.sort_unstable_by_key(|r| std::cmp::Reverse(r.0));
     for &(at, p) in &releases {
         f.ops.insert(at + 1, Op::Drop { v: p });
         f.owned_params.insert(p);

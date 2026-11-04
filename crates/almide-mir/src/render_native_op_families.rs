@@ -148,14 +148,34 @@ pub(crate) fn render_native_meter_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
     Ok(true)
 }
 
-/// The T1-3 native Result carrier ops (`native_result_rewrite`). `Ok(false)`
-/// = not this tier's op. Arm bodies verbatim from [`render_fn`].
+/// The T1-3 native Result carrier ops (`native_result_rewrite`), with the
+/// String-Ok carrier, the storage slots, narrow arithmetic and the scalar
+/// Option carrier. `Ok(false)` = not this tier's op. Arm bodies verbatim from
+/// [`render_fn`], grouped by family: each prim kind belongs to one family, so
+/// the router below picks the one helper that can take it.
 pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    use crate::PrimKind as K;
+    let Op::Prim { kind, .. } = op else { return Ok(false) };
+    match kind {
+        K::ResMakeOk | K::ResMakeErrStr | K::ResCopy | K::ResTag | K::ResOkScalar | K::ResErrStr => {
+            render_result_carrier_op(op, s)
+        }
+        K::ResStrMake | K::ResStrSetTag | K::NativeSlotLoad { .. } | K::NativeSlotStore { .. } => {
+            render_result_str_and_slot_op(op, s)
+        }
+        K::NativeNarrowBin { .. } => render_narrow_bin_op(op, s),
+        K::OptMakeSome | K::OptMakeNone | K::OptCopy | K::OptTag | K::OptPayload => render_option_carrier_op(op, s),
+        _ => Ok(false),
+    }
+}
+
+/// The `Result<i64, AlmideString>` carrier arms of [`render_native_result_op`].
+fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
     let OpSink {
         tys,
         out,
         indent,
-        used_shims,
+        used_shims: _,
     } = s;
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -163,8 +183,6 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             writeln!(out, $($arg)*).unwrap();
         }};
     }
-    #[allow(unused_variables)]
-    let used_shims = used_shims;
     match op {
         // ── T1-3 native Result carrier (native_result_rewrite) ──
         Op::Prim {
@@ -260,6 +278,26 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 );
             }
         }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// The String-Ok carrier and storage-slot arms of [`render_native_result_op`].
+fn render_result_str_and_slot_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    let OpSink {
+        tys,
+        out,
+        indent,
+        used_shims,
+    } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    match op {
         // ── #4006 family C: the String-Ok Result carrier (native_result_str_rewrite) ──
         Op::Prim {
             kind: crate::PrimKind::ResStrMake,
@@ -321,6 +359,26 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             used_shims.push(crate::native_slot_rewrite::slot_static(*slot));
             line!("ALMD_SLOT_{}.store({}, std::sync::atomic::Ordering::Relaxed);", slot, v);
         }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// The narrow-integer arithmetic arm of [`render_native_result_op`].
+fn render_narrow_bin_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    let OpSink {
+        tys,
+        out,
+        indent,
+        used_shims: _,
+    } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    match op {
         // ── #4006: narrow integer arithmetic (native_narrow_rewrite) ──
         Op::Prim {
             kind: crate::PrimKind::NativeNarrowBin { op, bits, signed },
@@ -348,6 +406,26 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             tys.insert(*d, NTy::I64);
             line!("let mut {}: i64 = (({} as {ty}).{f}({} as {ty})) as i64;", var(*d), var(args[0]), var(args[1]));
         }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// The scalar-Option carrier arms of [`render_native_result_op`].
+fn render_option_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    let OpSink {
+        tys,
+        out,
+        indent,
+        used_shims: _,
+    } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    match op {
         // ── #4006 family B: the native scalar-Option carrier (native_option_rewrite) ──
         Op::Prim {
             kind: crate::PrimKind::OptMakeSome,
@@ -415,7 +493,7 @@ pub(crate) fn render_native_termination_op(op: &Op, s: OpSink<'_>) -> Result<boo
         tys,
         out,
         indent,
-        used_shims,
+        used_shims: _,
     } = s;
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -423,8 +501,6 @@ pub(crate) fn render_native_termination_op(op: &Op, s: OpSink<'_>) -> Result<boo
             writeln!(out, $($arg)*).unwrap();
         }};
     }
-    #[allow(unused_variables)]
-    let used_shims = used_shims;
     match op {
         // The §13 termination convention's exit half (assert desugar tail,
         // time-ctor negative trap): a user exit code, no message of its own.

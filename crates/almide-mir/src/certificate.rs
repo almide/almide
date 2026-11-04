@@ -683,10 +683,7 @@ pub fn reachable_caps_or_tainted(
     let mut caps = cap_witness(func).used;
     for op in &func.ops {
         if let Op::CallFn { name: callee, .. } = op {
-            match reachable_caps_or_tainted(callee, program, is_known_free, is_elided, visited) {
-                Some(c) => caps.extend(c),
-                None => return None,
-            }
+            caps.extend(reachable_caps_or_tainted(callee, program, is_known_free, is_elided, visited)?);
         }
         // A FuncRef CREATES a closure to a lifted lambda — fold its caps at CREATION,
         // exactly as [`reachable_caps`] does. Coverage-free: the closure's effects reach
@@ -697,10 +694,7 @@ pub fn reachable_caps_or_tainted(
         // hole. The lambda is in `program` (the harness puts every lifted aux in the
         // in-profile map); an unanalyzable/elided lambda taints (`None`) like any callee.
         if let Op::FuncRef { name: callee, .. } = op {
-            match reachable_caps_or_tainted(callee, program, is_known_free, is_elided, visited) {
-                Some(c) => caps.extend(c),
-                None => return None,
-            }
+            caps.extend(reachable_caps_or_tainted(callee, program, is_known_free, is_elided, visited)?);
         }
     }
     Some(caps)
