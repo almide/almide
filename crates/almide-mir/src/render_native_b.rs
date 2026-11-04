@@ -966,10 +966,15 @@ fn render_end_if(
             NTy::RecRef(i) => NTy::Rec(i),
             other => other,
         };
-        if arm_t != join_t {
+        // An inert empty list (`[]`, folded to an empty int list) joined into
+        // a list of strings is the empty list of the join's own type.
+        if arm_t == NTy::Vec && join_t == NTy::VecStr && crate::render_native_empty_join::is_inert_empty(v) {
+            line!("{} = Vec::new();", var(d));
+        } else if arm_t != join_t {
             return Err(wall("native: if-value arms disagree on type"));
+        } else {
+            line!("{} = {};", var(d), join_rhs(v, t, !known.contains(&v), rhs));
         }
-        line!("{} = {};", var(d), join_rhs(v, t, !known.contains(&v), rhs));
     }
     *indent -= 1;
     line!("}}");

@@ -48,6 +48,7 @@ mod fan_native;
 mod render_native_addr;
 mod render_native_bounds;
 mod render_native_narrow_local;
+mod render_native_empty_join;
 mod render_native_closure;
 mod render_native_rec;
 mod render_native_append;

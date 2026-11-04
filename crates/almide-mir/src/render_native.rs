@@ -486,6 +486,7 @@ fn render_fn(
 ) -> Result<(String, Option<NTy>), LowerError> {
     let mut tys = seed_param_ntys(func, sigs)?;
     let _narrow = crate::render_native_narrow_local::scope(func, sigs);
+    let _empty_joins = crate::render_native_empty_join::scope(func);
     crate::render_native_bounds::begin(func);
     let _rem_divisors = rem_divisor_scope(func);
     let is_main = func.name == "main";
