@@ -20,22 +20,30 @@
 //! plain read, a literal or a lambda is bound with it, in source order
 //! (the #3139 rule), so no observable operand changes places with the read.
 //! The rule names no function: it is the operand sequence's shape alone.
+//!
+//! #4476: a later operand also rebinds what the fns it CALLS write — a
+//! `reset()` that reassigns the module-level var an earlier operand read
+//! (`almide_ir::call_writes`). Reading only the operand's own statements
+//! missed it, and the call read the block the callee had released.
 
 use almide_base::intern::sym;
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
 use almide_ir::{CallTarget, IrExpr, IrExprKind, IrProgram, IrStmt, IrStmtKind, IrStringPart, Mutability, VarId, VarTable};
+use almide_ir::call_writes::CallWrites;
 use std::collections::HashSet;
 
 /// Rewrite every function body and top-level initializer; `None` when no
 /// operand sequence reads a variable a later operand rebinds.
 pub(crate) fn bind_reads_before_rebinds(ir: &IrProgram) -> Option<IrProgram> {
-    if !any_assignment(ir) {
+    let user = almide_ir::call_writes::mut_positions(ir);
+    if !any_assignment(ir, &user) {
         return None;
     }
     let mut out = ir.clone();
     let mut changed = false;
     {
-        let mut v = Orderer { vars: &mut out.var_table, changed: &mut changed };
+        let writes = CallWrites::new(None, &ir.functions, &ir.top_lets, &user);
+        let mut v = Orderer { vars: &mut out.var_table, changed: &mut changed, writes: &writes };
         for f in out.functions.iter_mut() {
             v.visit_expr_mut(&mut f.body);
         }
@@ -43,8 +51,9 @@ pub(crate) fn bind_reads_before_rebinds(ir: &IrProgram) -> Option<IrProgram> {
             v.visit_expr_mut(&mut tl.value);
         }
     }
-    for m in out.modules.iter_mut() {
-        let mut v = Orderer { vars: &mut m.var_table, changed: &mut changed };
+    for (m, src) in out.modules.iter_mut().zip(&ir.modules) {
+        let writes = CallWrites::new(Some(src.name), &src.functions, &src.top_lets, &user);
+        let mut v = Orderer { vars: &mut m.var_table, changed: &mut changed, writes: &writes };
         for f in m.functions.iter_mut() {
             v.visit_expr_mut(&mut f.body);
         }
@@ -55,15 +64,17 @@ pub(crate) fn bind_reads_before_rebinds(ir: &IrProgram) -> Option<IrProgram> {
     changed.then_some(out)
 }
 
-/// A program with no assignment at all has nothing to reorder; skip the clone.
-fn any_assignment(ir: &IrProgram) -> bool {
+/// A program that assigns nothing and writes no `mut` place has nothing to
+/// reorder; skip the clone.
+fn any_assignment(ir: &IrProgram, user: &almide_ir::call_writes::MutPositions) -> bool {
     let mut seen = HashSet::new();
     let bodies = ir.functions.iter().map(|f| &f.body).chain(ir.top_lets.iter().map(|t| &t.value)).chain(
         ir.modules.iter().flat_map(|m| m.functions.iter().map(|f| &f.body).chain(m.top_lets.iter().map(|t| &t.value))),
     );
+    let writes = CallWrites::new(None, &[], &[], user);
     for body in bodies {
         almide_ir::collect_assigned_vars(body, &mut seen);
-        if !seen.is_empty() {
+        if !seen.is_empty() || !writes.assigned_by(body).is_empty() {
             return true;
         }
     }
@@ -98,15 +109,6 @@ fn stays_in_place(e: &IrExpr) -> bool {
         )
 }
 
-/// The variables an operand assigns when it is evaluated. A lambda is not
-/// run by being passed, so it assigns nothing here.
-fn assigned_by(e: &IrExpr) -> HashSet<u32> {
-    let mut out = HashSet::new();
-    if !matches!(e.kind, IrExprKind::Lambda { .. }) {
-        almide_ir::collect_assigned_vars(e, &mut out);
-    }
-    out
-}
 
 /// The operands of `e`, in evaluation order, when `e` evaluates them all
 /// left to right before it acts. `None` for any other node.
@@ -145,12 +147,14 @@ fn operands(e: &mut IrExpr) -> Option<Vec<&mut IrExpr>> {
     Some(ops)
 }
 
-struct Orderer<'a> {
+struct Orderer<'a, 'w> {
     vars: &'a mut VarTable,
     changed: &'a mut bool,
+    /// What an operand, and the fns it calls, may write (#4476).
+    writes: &'a CallWrites<'w>,
 }
 
-impl IrMutVisitor for Orderer<'_> {
+impl IrMutVisitor for Orderer<'_, '_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         walk_expr_mut(self, e);
         let Some(ops) = operands(e) else { return };
@@ -161,7 +165,7 @@ impl IrMutVisitor for Orderer<'_> {
         let mut later: Vec<HashSet<u32>> = vec![HashSet::new(); ops.len()];
         for i in (0..ops.len() - 1).rev() {
             let mut s = later[i + 1].clone();
-            s.extend(assigned_by(ops[i + 1]));
+            s.extend(self.writes.assigned_by(ops[i + 1]));
             later[i] = s;
         }
         let rebound: Vec<bool> = ops
