@@ -202,10 +202,20 @@ pub struct LiveBundled {
 /// [`reached_auto_bundled`] at function granularity (#4328). A module still
 /// loads by the rules above, but its functions start dormant: a function
 /// becomes live — and its body is spelled, so what IT names is reached in
-/// turn — only when a loaded source names it (qualified, as a member, or
-/// bare), or when it implements a built-in protocol requirement of a type
-/// its module owns (the compiler calls those for operators, derivations and
-/// requirement dispatch without the source spelling them).
+/// turn — when a loaded source names it (qualified, as a member, or bare),
+/// or when the compiler calls it without any source spelling it:
+///
+/// - a built-in protocol requirement of a type its module owns, or a
+///   convention method of such a type (`Secret.repr`): operators,
+///   derivations, renderers and requirement dispatch call those;
+/// - the fallible carrier `__fallible_<f>` of a named HOF `f` (ADR-0006);
+/// - a row of [`COMPILER_INSERTED`], or of [`TEST_SYNTHESIZED`] when the
+///   program declares a test;
+/// - a call made by a self-hosted body the wasm leg links behind a reached
+///   surface (`self_host_registry`).
+///
+/// What the wasm emitter still finds missing after this, the wasm link
+/// relowers from the whole module (`src/wasm_leg.rs`, `link_self_host`).
 ///
 /// `roots` are the sources compiled whole (the entry program and the user's
 /// modules); `explicit` are the bundled modules already loaded by an
