@@ -1,0 +1,20 @@
+// fib (#4456): the call-bound recursion row. The argument is `n:reps` — the
+// sum of `reps` evaluations of fib(n), fib(n + 1) and fib(n + 2) in turn, so
+// no call is loop-invariant. The native legs inline the pure scalar
+// recursion into itself once (`almide_ir::self_inline`) and LLVM merges the
+// identical grandchild calls; the reference is the ordinary Rust for the
+// program, whose recursion LLVM never inlines. A VICTORY row in
+// check-perf-ratio.sh, ablated with ALMIDE_SELF_INLINE_OFF=1.
+import env
+
+fn fib(n: Int) -> Int = if n < 2 then n else fib(n - 1) + fib(n - 2)
+
+fn arg_part(parts: List[String], i: Int, fallback: Int) -> Int = int.parse(list.get(parts, i) ?? "") ?? fallback
+
+effect fn main() -> Unit = {
+  let parts = string.split(list.get(env.args(), 0) ?? "20:10", ":")
+  let n = arg_part(parts, 0, 20)
+  let reps = arg_part(parts, 1, 10)
+  let total = list.range(0, reps) |> list.fold(0, (acc, i) => acc + fib(n + i % 3))
+  println("fib n=${n} reps=${reps} sum=${total}")
+}

@@ -142,6 +142,11 @@ SUITE = [
     # is the gate (check-perf-ratio.sh, REGEX CYCLE), and it is ~1.0 only while
     # every pattern stays compiled across the cycle — 0.69.0-rc1's 16-entry
     # LRU recompiled all 32 on every match.
+    # fib (#4456): the call-bound recursion row, `n:reps`. The native legs
+    # inline the pure scalar recursion into itself once and LLVM merges the
+    # identical grandchild calls; the reference keeps one call per node. A
+    # VICTORY row in check-perf-ratio.sh, ablated with ALMIDE_SELF_INLINE_OFF.
+    ("fib",            "fib/fib.almd",                 ["fib.rs"],      "32:300",     "20:10",   "bytes", ["native", "rust"]),
     ("regexcycle-8",   "regexcycle/regexcycle.almd",   [],              "8:2000000",  "8:2000",  "bytes", ["native", "wasm"]),
     ("regexcycle-32",  "regexcycle/regexcycle.almd",   [],              "32:2000000", "32:2000", "bytes", ["native", "wasm"]),
 ]
@@ -198,6 +203,10 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # 100k records: ~0.2s native / ~0.28s wasm on a GCE c4-standard-8
     # (2026-10-19) — over the 0.08s spawn-noise floor on both legs.
     "jsonround": "100000",
+    # ~95 ms native / ~1.15 s reference and ablated on a GCE n2-standard-8
+    # (2026-11-04): over the 0.08s floor on the native leg, the one the
+    # rewrite makes fast.
+    "fib": "30:300",
     # regexcycle (#4392): sized after the GCE reading below; both rows the
     # same number of matches.
     "regexcycle-8": "8:400000",
