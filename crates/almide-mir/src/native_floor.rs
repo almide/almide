@@ -1632,6 +1632,24 @@ fn pair_kinds(list: u16) -> Option<(NTy, NTy)> {
     }
 }
 
+/// A generated list (`type AlmdRecN = Vec<X>`: a list of lists, records,
+/// variants or tuples) handed to a generic `List[A]` body that never sees an
+/// element: the call's only list, no element-typed param, and a result that
+/// does not mention `A` (`list.len`, `list.is_empty`). The body borrows the
+/// list as a slice of whatever `X` is, so the list record's own `&Vec<X>`
+/// is the argument v0 passes.
+fn opaque_list_arg(f: &FloorFn, elem: ListElem, code: &str, got: NTy) -> Option<String> {
+    let (NTy::Rec(i) | NTy::RecRef(i)) = got else { return None };
+    crate::render_native_rec::list_elem(i)?;
+    let one_list = f.params.iter().filter(|p| matches!(p, FloorParam::List(_))).count() == 1;
+    let elem_blind = !f.params.iter().any(|p| matches!(p, FloorParam::Elem(_) | FloorParam::MapKey(_) | FloorParam::MapVal(_)));
+    let scalar_ret = matches!(f.ret, FloorRet::Unit | FloorRet::Int | FloorRet::Bool | FloorRet::Float | FloorRet::Str | FloorRet::Res(_) | FloorRet::Opt(_));
+    (elem == ListElem::Any && one_list && elem_blind && scalar_ret).then(|| match got {
+        NTy::RecRef(_) => code.to_string(),
+        _ => format!("&{code}"),
+    })
+}
+
 fn list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
     let int_list = matches!(elem, ListElem::Int | ListElem::Any);
     let str_list = matches!(elem, ListElem::Str | ListElem::Any);
@@ -1687,7 +1705,9 @@ pub(crate) fn render_call(
             FloorParam::Str => matches!(got, NTy::Str | NTy::StrRef)
                 .then(|| as_str_arg(code, *got))
                 .ok_or_else(mismatch)?,
-            FloorParam::List(elem) => list_arg(*elem, code, *got).ok_or_else(mismatch)?,
+            FloorParam::List(elem) => list_arg(*elem, code, *got)
+                .or_else(|| opaque_list_arg(f, *elem, code, *got))
+                .ok_or_else(mismatch)?,
             FloorParam::Elem(by_ref) => {
                 let v = match (elem_str, got) {
                     (Some(false), NTy::I64) => code.clone(),
