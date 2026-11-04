@@ -292,6 +292,26 @@ marshalling. `app.js` is a dependency-free ES module:
   rewrite, so a `--host js --wasm-opt` build of a `println`-only program
   carries exactly `fd_write` and `proc_exit`. An import outside the shim
   table is a build-time refusal naming it, not a `LinkError` in the page.
+- `hooks.args` is argv as the program sees it at the WASI level (argv[0]
+  included, so `env.args()` returns the rest) and `hooks.env` the
+  environment (`{ K: V }` or a `Map`); both are empty when omitted, and their
+  sizes count UTF-8 bytes (#4438).
+- A module that imports an fs op (`path_open`, `fd_readdir`,
+  `fd_prestat_get`, …) gets an in-memory filesystem (#4438):
+  `hooks.preopens` names the folders it sees, in order (the first is fd 3),
+  each `{ files?, writable? }`. `files` is a tree — a `Map` or object of
+  names (a `/` nests) to bytes, a string (stored as UTF-8) or a sub-folder;
+  `init()` refuses a `..`, a `.`, a name given twice or a value of another
+  kind with a `TypeError` before anything runs. A preopen is read-only
+  unless `writable: true`; a write to it is `EACCES` ("Permission denied").
+  The program reads and writes the tree, and `files(name)` returns every
+  file under a preopen afterwards (`Map` of path → bytes, sorted; empty
+  folders are not listed). Bytes the caller passed are copied on their first
+  write, never written through. Listings are sorted by UTF-8 bytes, and
+  `mtime` / `atime` / `ctime` are 0. The errno of each op is stock
+  wasmtime's over a host directory (a `..` past a preopen is `EPERM`),
+  pinned by `spec/wasm_host_js/fs_preopens.almd` against the native run.
+  A module without an fs import ships none of it: its glue is unchanged.
 - `@extern(wasm, "js", "name")` imports are wired through
   `init(source, { js: { name } })`; a `String` argument is decoded from the
   block header before the user function runs, a `String` return is encoded

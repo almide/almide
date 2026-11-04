@@ -48,6 +48,8 @@ mod jspi;
 mod imports;
 #[path = "js_host_fan.rs"]
 mod fan;
+#[path = "js_host_fs.rs"]
+mod fs;
 
 /// One function on the host boundary: an exported `pub fn` or an extern.
 #[derive(Debug, Clone)]
@@ -450,10 +452,46 @@ const WASI_SHIMS: &[(&str, &str)] = &[
     ("fd_read", r#"  fd_read(fd, iovs, iovsLen, nread) { view().setUint32(nread, 0, true); return 0; }"#),
     ("random_get", r#"  random_get(ptr, len) { globalThis.crypto.getRandomValues(bytes().subarray(ptr, ptr + len)); return 0; }"#),
     ("clock_time_get", r#"  clock_time_get(id, precision, out) { view().setBigUint64(out, BigInt(Date.now()) * 1000000n, true); return 0; }"#),
-    ("args_sizes_get", r#"  args_sizes_get(argc, bufSize) { const v = view(); v.setUint32(argc, 0, true); v.setUint32(bufSize, 0, true); return 0; }"#),
-    ("args_get", r#"  args_get() { return 0; }"#),
-    ("environ_sizes_get", r#"  environ_sizes_get(count, bufSize) { const v = view(); v.setUint32(count, 0, true); v.setUint32(bufSize, 0, true); return 0; }"#),
-    ("environ_get", r#"  environ_get() { return 0; }"#),
+    // `init(source, { args, env })` (#4438): argv as given (argv[0] included),
+    // the environment as `K=V`; both empty when omitted. Sizes count UTF-8 bytes.
+    ("args_sizes_get", r#"  args_sizes_get(argc, bufSize) {
+    const a = (hooks.args ?? []).map((s) => encoder.encode(String(s)));
+    const v = view();
+    v.setUint32(argc, a.length, true);
+    v.setUint32(bufSize, a.reduce((n, b) => n + b.length + 1, 0), true);
+    return 0;
+  }"#),
+    ("args_get", r#"  args_get(argv, buf) {
+    const a = (hooks.args ?? []).map((s) => encoder.encode(String(s)));
+    let off = buf;
+    for (let i = 0; i < a.length; i++) {
+      view().setUint32(argv + 4 * i, off, true);
+      bytes().set(a[i], off);
+      bytes()[off + a[i].length] = 0;
+      off += a[i].length + 1;
+    }
+    return 0;
+  }"#),
+    ("environ_sizes_get", r#"  environ_sizes_get(count, bufSize) {
+    const env = hooks.env ?? {};
+    const a = (env instanceof Map ? [...env] : Object.entries(env)).map(([k, x]) => encoder.encode(`${k}=${x}`));
+    const v = view();
+    v.setUint32(count, a.length, true);
+    v.setUint32(bufSize, a.reduce((n, b) => n + b.length + 1, 0), true);
+    return 0;
+  }"#),
+    ("environ_get", r#"  environ_get(environ, buf) {
+    const env = hooks.env ?? {};
+    const a = (env instanceof Map ? [...env] : Object.entries(env)).map(([k, x]) => encoder.encode(`${k}=${x}`));
+    let off = buf;
+    for (let i = 0; i < a.length; i++) {
+      view().setUint32(environ + 4 * i, off, true);
+      bytes().set(a[i], off);
+      bytes()[off + a[i].length] = 0;
+      off += a[i].length + 1;
+    }
+    return 0;
+  }"#),
     ("fd_close", r#"  fd_close() { return 0; }"#),
     ("fd_fdstat_get", r#"  fd_fdstat_get() { return 8; }"#),
     ("fd_seek", r#"  fd_seek() { return 8; }"#),
@@ -503,10 +541,13 @@ fn check_marshallable(surface: &HostSurface) -> Result<(), String> {
 
 /// The `wasi` object: one shim per `wasi_snapshot_preview1` import the
 /// shipped module names, in table order, and nothing for the rest (#2276).
-fn wasi_object_js(sigs: &WasmSigs) -> String {
+fn wasi_object_js(sigs: &WasmSigs, fs_on: bool) -> String {
     let mut js = String::from("const wasi = {\n");
-    for (name, body) in WASI_SHIMS {
+    // The base table's order, then the names only the filesystem serves.
+    let fs_only = fs::FS_SHIMS.iter().filter(|(n, _)| !WASI_SHIMS.iter().any(|(b, _)| b == n));
+    for (name, body) in WASI_SHIMS.iter().chain(fs_only) {
         if sigs.imports.iter().any(|(m, n, _)| m == "wasi_snapshot_preview1" && n == name) {
+            let body = if fs_on { fs::shim(name).unwrap_or(body) } else { body };
             js.push_str(body);
             js.push_str(",\n");
         }
@@ -515,10 +556,15 @@ fn wasi_object_js(sigs: &WasmSigs) -> String {
     js
 }
 
+/// The `wasi_snapshot_preview1` names the shipped module imports.
+fn wasi_imports(sigs: &WasmSigs) -> impl Iterator<Item = &str> {
+    sigs.imports.iter().filter(|(m, _, _)| m == "wasi_snapshot_preview1").map(|(_, n, _)| n.as_str())
+}
+
 /// Every import the module names has a shim or a declared extern.
 fn check_imports_served(sigs: &WasmSigs, surface: &HostSurface) -> Result<(), String> {
     for (module, name, _) in &sigs.imports {
-        let known = (module == "wasi_snapshot_preview1" && WASI_SHIMS.iter().any(|(n, _)| n == name))
+        let known = (module == "wasi_snapshot_preview1" && (WASI_SHIMS.iter().any(|(n, _)| n == name) || fs::shim(name).is_some()))
             || surface.externs.iter().any(|e| &e.module == module && &e.import == name)
             || fan::serves(module, name, surface);
         if !known {
@@ -639,18 +685,38 @@ pub(crate) fn generate(
     if suspension.active() {
         string_helpers.push_str(jspi::JS_ASYNC_RUNTIME);
     }
+    // The in-memory filesystem (#4438), for a module that imports an fs op.
+    let fs_on = fs::active(wasi_imports(&sigs));
+    if fs_on {
+        string_helpers.push_str(fs::FS_RUNTIME_JS);
+    }
     let runtime = JS_RUNTIME
         .replace("{STRING_HELPERS}", &string_helpers)
-        .replace("{WASI_OBJECT}", &wasi_object_js(&sigs))
+        .replace("{FS_INIT}", if fs_on { fs::FS_INIT_JS } else { "" })
+        .replace("{WASI_OBJECT}", &wasi_object_js(&sigs, fs_on))
         .replace("{JSPI_CHECK}", &jspi::init_check(&suspension))
         .replace("{JSPI_PROMISED}", &jspi::init_promised(&suspension));
     js.push_str(&runtime);
     js.push_str(&imports::import_object_js(&sigs, surface, &suspension, import_rets)?);
 
     let mut dts = format!("// Generated by `almide build {source_file} --target wasm --host js` (almide {version}).\n\n");
-    dts.push_str(DTS_RUNTIME);
+    if fs_on {
+        dts.push_str(fs::FS_DTS_TYPES);
+    }
+    // Top-level declarations go before DTS_RUNTIME, which opens `Hooks`.
     if needs_values {
         dts.push_str(DTS_VALUES);
+    }
+    dts.push_str(DTS_RUNTIME);
+    let imported = |n: &str| wasi_imports(&sigs).any(|i| i == n);
+    if imported("args_sizes_get") {
+        dts.push_str("  /** argv as the program sees it (argv[0] included); empty when omitted. */\n  args?: string[];\n");
+    }
+    if imported("environ_sizes_get") {
+        dts.push_str("  /** The environment, as `K=V` pairs; empty when omitted. */\n  env?: Record<string, string> | Map<string, string>;\n");
+    }
+    if fs_on {
+        dts.push_str(fs::FS_DTS_HOOK);
     }
     dts.push_str(&hooks_dts(surface));
     dts.push_str("export function init(source?: WasmSource, hooks?: Hooks): Promise<void>;\n");
@@ -743,7 +809,7 @@ function flush() {
 export async function init(source, h = {}) {
 {JSPI_CHECK}  hooks = h;
   abandoned = null;
-  let module;
+{FS_INIT}  let module;
   if (source instanceof WebAssembly.Module) {
     module = source;
   } else {
