@@ -219,14 +219,21 @@ impl Checker {
         let qualified = format!("{owner}.{bare}");
         let is_it = |t: &Ty| matches!(t, Ty::Named(n, _) if n.as_str() == bare || n.as_str() == qualified);
         let prefix = format!("{owner}.");
+        // A bundled module's loaded program keeps only the functions the
+        // program reaches (#4328); its whole surface comes from the bundled
+        // signatures, so the hint names the same fns either way.
+        let bundled: Vec<(String, almide_lang::types::FnSig)> = crate::bundled_sigs::module_fn_names(owner)
+            .into_iter()
+            .filter(|f| !self.env.functions.contains_key(&almide_base::intern::sym(&format!("{owner}.{f}"))))
+            .filter_map(|f| crate::bundled_sigs::lookup(owner, f).map(|sig| (f.to_string(), sig)))
+            .collect();
         let mut fns: Vec<(&str, &almide_lang::types::FnSig)> = self
             .env
             .functions
             .iter()
-            .filter_map(|(k, sig)| {
-                let name = k.as_str().strip_prefix(prefix.as_str())?;
-                (!name.contains('.') && !name.starts_with("__")).then_some((name, sig))
-            })
+            .filter_map(|(k, sig)| Some((k.as_str().strip_prefix(prefix.as_str())?, sig)))
+            .chain(bundled.iter().map(|(f, sig)| (f.as_str(), sig)))
+            .filter(|(name, _)| !name.contains('.') && !name.starts_with("__"))
             .collect();
         fns.sort_by(|a, b| a.0.cmp(b.0));
         let builder = fns

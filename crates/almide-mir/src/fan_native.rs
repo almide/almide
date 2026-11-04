@@ -265,6 +265,14 @@ impl Lift<'_> {
             }
             _ => None,
         };
+        // An effect fn declared `-> T` with T not a Result carries its Err in
+        // the effect ABI only: the threaded take hands back that ABI's Result
+        // while the arm's binding is typed T, and the render has no step that
+        // unwraps it and propagates the lowest-index Err (C-199). Such an arm
+        // keeps the honest decline; the standard codegen builds it.
+        if calls_implicit_result_effect_fn(x, self.user) {
+            return Err("an arm calling an effect fn whose declared result is not a Result".to_string());
+        }
         let lifted = arm_name(at.group, at.index);
         let (body, ret, is_effect) = match direct {
             // A direct call `f(a, …)`: the lifted fn is `f`'s own signature,
@@ -351,7 +359,7 @@ impl Lift<'_> {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
-            mutated_params: Vec::new(),
+            mutated_params: Vec::new(), // fresh-fn: a lifted fan arm's params are fresh immutable lets (a `var` arm is refused above)
             module_origin: None,
         };
         self.out.push((f, at));
@@ -379,6 +387,25 @@ fn is_arm_expr(e: &IrExpr) -> bool {
         IrExprKind::Call { target: CallTarget::Named { .. }, args, .. } => args.iter().all(is_arm_expr),
         _ => false,
     }
+}
+
+/// Does `e` call a user function declared `effect` whose declared result is
+/// not a `Result` (its Err rides the effect ABI only)?
+fn calls_implicit_result_effect_fn(e: &IrExpr, user: &BTreeMap<String, (Vec<Ty>, Ty, bool)>) -> bool {
+    struct C<'a>(&'a BTreeMap<String, (Vec<Ty>, Ty, bool)>, bool);
+    impl IrVisitor for C<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind {
+                if let Some((_, ret, true)) = self.0.get(name.as_str()) {
+                    self.1 |= !matches!(ret, Ty::Applied(TC::Result, _));
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut c = C(user, false);
+    c.visit_expr(e);
+    c.1
 }
 
 /// Does `e` call a user function declared `effect`?

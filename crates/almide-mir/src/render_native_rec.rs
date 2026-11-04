@@ -478,15 +478,19 @@ pub(crate) fn enum_field_boxed(i: u16, f: NTy) -> bool {
     })
 }
 
+/// An enum payload field's spelling: boxed where [`enum_field_boxed`] says so.
+fn enum_field_ty(i: u16, f: &NTy) -> String {
+    if enum_field_boxed(i, *f) { format!("Box<{}>", owned_ty(*f)) } else { owned_ty(*f) }
+}
+
 fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     let n = struct_name(i);
-    let fty = |f: &NTy| if enum_field_boxed(i, *f) { format!("Box<{}>", owned_ty(*f)) } else { owned_ty(*f) };
     let mut out = format!("/// variant `{}`\n#[derive(Clone)]\nenum {n} {{\n", d.name);
     for (t, fs) in cases {
         if fs.is_empty() {
             out.push_str(&format!("    C{t},\n"));
         } else {
-            out.push_str(&format!("    C{t}({}),\n", fs.iter().map(fty).collect::<Vec<_>>().join(", ")));
+            out.push_str(&format!("    C{t}({}),\n", fs.iter().map(|f| enum_field_ty(i, f)).collect::<Vec<_>>().join(", ")));
         }
     }
     out.push_str("}\n");
@@ -495,6 +499,28 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     let leaf = d.default_tag.unwrap_or(cases[0].0);
     out.push_str(&format!("impl Default for {n} {{\n    fn default() -> Self {{ Self::with_tag({leaf}) }}\n}}\n"));
     out.push_str(&format!("#[allow(unused_variables, unreachable_patterns)]\nimpl {n} {{\n"));
+    out.push_str(&enum_tag_fns(cases));
+    let width = cases.iter().map(|(_, fs)| fs.len()).max().unwrap_or(0);
+    for k in 1..=width {
+        for kind in enum_slot_kinds(i, k) {
+            out.push_str(&enum_slot_fns(i, k, kind, cases));
+        }
+    }
+    // from_slots: a scalar-only constructor built as an i64 slot list.
+    out.push_str("    fn from_slots(s: &[i64]) -> Self {\n        let mut v = Self::with_tag(s[0]);\n");
+    for k in 1..=width {
+        if enum_slot_kinds(i, k).contains(&NTy::I64) {
+            out.push_str(&format!("        if s.len() > {k} {{ v.set_s{k}_i(s[{k}]); }}\n"));
+        }
+    }
+    out.push_str("        v\n    }\n}\n\n");
+    out
+}
+
+/// An enum's `with_tag` (the constructor at `t` with default payloads) and
+/// `tag` methods.
+fn enum_tag_fns(cases: &[(u32, Vec<NTy>)]) -> String {
+    let mut out = String::new();
     // with_tag: the constructor at `t` with default payloads.
     out.push_str("    fn with_tag(t: i64) -> Self {\n        match t {\n");
     for (t, fs) in cases {
@@ -512,76 +538,73 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
         out.push_str(&format!("            Self::C{t}{pat} => {t},\n"));
     }
     out.push_str("        }\n    }\n");
-    let width = cases.iter().map(|(_, fs)| fs.len()).max().unwrap_or(0);
-    for k in 1..=width {
-        for kind in enum_slot_kinds(i, k) {
-            let suf = kind_suffix(kind);
-            let ty = owned_ty(kind);
-            let mut get = format!("    fn s{k}_{suf}(&self) -> {ty} {{\n        match self {{\n");
-            let mut set = format!("    fn set_s{k}_{suf}(&mut self, x: {ty}) {{\n        match self {{\n");
-            for (t, fs) in cases {
-                if fs.get(k - 1) != Some(&kind) {
-                    continue;
-                }
-                let binds: Vec<String> = (0..fs.len()).map(|j| if j == k - 1 { "f".into() } else { "_".into() }).collect();
-                let pat = format!("Self::C{t}({})", binds.join(", "));
-                let (rd, wr) = match kind {
-                    NTy::I64 => ("*f".to_string(), "*f = x".to_string()),
-                    NTy::Rec(_) if enum_field_boxed(i, kind) => ("(**f).clone()".to_string(), "*f = Box::new(x)".to_string()),
-                    _ => ("f.clone()".to_string(), "*f = x".to_string()),
-                };
-                get.push_str(&format!("            {pat} => {rd},\n"));
-                set.push_str(&format!("            {pat} => {wr},\n"));
-            }
-            // A slot past the case's payload reads the block's zero padding.
-            get.push_str("            _ => Default::default(),\n        }\n    }\n");
-            set.push_str("            _ => {}\n        }\n    }\n");
-            out.push_str(&get);
-            out.push_str(&set);
-            // A borrowed read of a list slot: a view of the slot,
-            // `None` past the case's payload (#4006, no-perf-loss: the owned
-            // read copies the slot's buffer only for the read to look at it).
-            if let Some(view) = match kind {
-                NTy::Vec => Some("[i64]"),
-                NTy::VecStr => Some("[AlmideString]"),
-                _ => None,
-            } {
-                let mut get_ref = format!("    fn s{k}_{suf}_ref(&self) -> Option<&{view}> {{\n        match self {{\n");
-                for (t, fs) in cases {
-                    if fs.get(k - 1) != Some(&kind) {
-                        continue;
-                    }
-                    let binds: Vec<String> = (0..fs.len()).map(|j| if j == k - 1 { "f".into() } else { "_".into() }).collect();
-                    get_ref.push_str(&format!("            Self::C{t}({}) => Some(&f[..]),\n", binds.join(", ")));
-                }
-                get_ref.push_str("            _ => None,\n        }\n    }\n");
-                out.push_str(&get_ref);
-            }
-            // A borrowed read of a boxed record slot (crate::render_native_borrow_read):
-            // `None` past the case's payload, where the owned read gives the default.
-            if let NTy::Rec(_) = kind {
-                let mut get_ref = format!("    fn s{k}_{suf}_ref(&self) -> Option<&{ty}> {{\n        match self {{\n");
-                for (t, fs) in cases {
-                    if fs.get(k - 1) != Some(&kind) {
-                        continue;
-                    }
-                    let binds: Vec<String> = (0..fs.len()).map(|j| if j == k - 1 { "f".into() } else { "_".into() }).collect();
-                    let r = if enum_field_boxed(i, kind) { "&**f" } else { "f" };
-                    get_ref.push_str(&format!("            Self::C{t}({}) => Some({r}),\n", binds.join(", ")));
-                }
-                get_ref.push_str("            _ => None,\n        }\n    }\n");
-                out.push_str(&get_ref);
-            }
+    out
+}
+
+/// A case pattern's binders that name payload slot `k` (1-based) `f`.
+fn slot_binds(len: usize, k: usize) -> String {
+    let binds: Vec<String> = (0..len).map(|j| if j == k - 1 { "f".into() } else { "_".into() }).collect();
+    binds.join(", ")
+}
+
+/// The accessors of payload slot `k` at `kind`: the owned read and the
+/// write, and a borrowed read for a list or record slot.
+fn enum_slot_fns(i: u16, k: usize, kind: NTy, cases: &[(u32, Vec<NTy>)]) -> String {
+    let mut out = String::new();
+    let suf = kind_suffix(kind);
+    let ty = owned_ty(kind);
+    let mut get = format!("    fn s{k}_{suf}(&self) -> {ty} {{\n        match self {{\n");
+    let mut set = format!("    fn set_s{k}_{suf}(&mut self, x: {ty}) {{\n        match self {{\n");
+    for (t, fs) in cases {
+        if fs.get(k - 1) != Some(&kind) {
+            continue;
         }
+        let pat = format!("Self::C{t}({})", slot_binds(fs.len(), k));
+        let (rd, wr) = match kind {
+            NTy::I64 => ("*f".to_string(), "*f = x".to_string()),
+            NTy::Rec(_) if enum_field_boxed(i, kind) => ("(**f).clone()".to_string(), "*f = Box::new(x)".to_string()),
+            _ => ("f.clone()".to_string(), "*f = x".to_string()),
+        };
+        get.push_str(&format!("            {pat} => {rd},\n"));
+        set.push_str(&format!("            {pat} => {wr},\n"));
     }
-    // from_slots: a scalar-only constructor built as an i64 slot list.
-    out.push_str("    fn from_slots(s: &[i64]) -> Self {\n        let mut v = Self::with_tag(s[0]);\n");
-    for k in 1..=width {
-        if enum_slot_kinds(i, k).contains(&NTy::I64) {
-            out.push_str(&format!("        if s.len() > {k} {{ v.set_s{k}_i(s[{k}]); }}\n"));
+    // A slot past the case's payload reads the block's zero padding.
+    get.push_str("            _ => Default::default(),\n        }\n    }\n");
+    set.push_str("            _ => {}\n        }\n    }\n");
+    out.push_str(&get);
+    out.push_str(&set);
+    // A borrowed read of a list slot: a view of the slot,
+    // `None` past the case's payload (#4006, no-perf-loss: the owned
+    // read copies the slot's buffer only for the read to look at it).
+    if let Some(view) = match kind {
+        NTy::Vec => Some("[i64]"),
+        NTy::VecStr => Some("[AlmideString]"),
+        _ => None,
+    } {
+        let mut get_ref = format!("    fn s{k}_{suf}_ref(&self) -> Option<&{view}> {{\n        match self {{\n");
+        for (t, fs) in cases {
+            if fs.get(k - 1) != Some(&kind) {
+                continue;
+            }
+            get_ref.push_str(&format!("            Self::C{t}({}) => Some(&f[..]),\n", slot_binds(fs.len(), k)));
         }
+        get_ref.push_str("            _ => None,\n        }\n    }\n");
+        out.push_str(&get_ref);
     }
-    out.push_str("        v\n    }\n}\n\n");
+    // A borrowed read of a boxed record slot (crate::render_native_borrow_read):
+    // `None` past the case's payload, where the owned read gives the default.
+    if let NTy::Rec(_) = kind {
+        let mut get_ref = format!("    fn s{k}_{suf}_ref(&self) -> Option<&{ty}> {{\n        match self {{\n");
+        for (t, fs) in cases {
+            if fs.get(k - 1) != Some(&kind) {
+                continue;
+            }
+            let r = if enum_field_boxed(i, kind) { "&**f" } else { "f" };
+            get_ref.push_str(&format!("            Self::C{t}({}) => Some({r}),\n", slot_binds(fs.len(), k)));
+        }
+        get_ref.push_str("            _ => None,\n        }\n    }\n");
+        out.push_str(&get_ref);
+    }
     out
 }
 
@@ -679,6 +702,13 @@ pub(crate) fn block_key(t: &almide_lang::types::Ty) -> String {
     }
 }
 
+/// `t` onto `out` unless it is there already.
+fn push_new(out: &mut Vec<almide_lang::types::Ty>, t: &almide_lang::types::Ty) {
+    if !out.contains(t) {
+        out.push(t.clone());
+    }
+}
+
 /// Every tuple type and every list type of non-scalar, non-string elements
 /// in `t`, outermost first.
 pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_lang::types::Ty>) {
@@ -686,17 +716,13 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
     use almide_lang::types::Ty;
     match t {
         Ty::Tuple(es) => {
-            if !out.contains(t) {
-                out.push(t.clone());
-            }
+            push_new(out, t);
             es.iter().for_each(|e| collect_tuples(e, out));
         }
         // An anonymous record: the same uniform slots as a tuple, in its
         // type's field order (the order the lowering stores them in).
         Ty::Record { fields } => {
-            if !out.contains(t) {
-                out.push(t.clone());
-            }
+            push_new(out, t);
             fields.iter().for_each(|(_, e)| collect_tuples(e, out));
         }
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
@@ -708,9 +734,7 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
         // A map of non-Float keys: v0's runtime `AlmideMap` (a Float key would
         // compare by its i64 bits, not as a float).
         Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 && !matches!(a[0], Ty::Float) => {
-            if !out.contains(t) {
-                out.push(t.clone());
-            }
+            push_new(out, t);
             a.iter().for_each(|e| collect_tuples(e, out));
         }
         // A set of Int or String elements: v0's runtime `AlmideSet`.
@@ -722,23 +746,17 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
         // A heap-payload Option or a Result outside the scalar carriers: its
         // own generated `Option<T>` / `Result<T, E>`.
         Ty::Applied(_, a) if is_heap_carrier(t) => {
-            if !out.contains(t) {
-                out.push(t.clone());
-            }
+            push_new(out, t);
             a.iter().for_each(|e| collect_tuples(e, out));
         }
         Ty::Applied(_, a) => a.iter().for_each(|e| collect_tuples(e, out)),
         Ty::Bytes | Ty::Matrix if !out.contains(t) => out.push(t.clone()),
         t if crate::lower::is_value_ty(t) => {
-            if !out.contains(t) {
-                out.push(t.clone());
-            }
+            push_new(out, t);
         }
         // An instantiated generic record or variant: its own generated type.
         Ty::Named(_, args) if !args.is_empty() => {
-            if !out.contains(t) {
-                out.push(t.clone());
-            }
+            push_new(out, t);
             args.iter().for_each(|e| collect_tuples(e, out));
         }
         _ => {}
@@ -761,347 +779,4 @@ fn bind_type_params(
     }
 }
 
-/// A closure type the native render carries as its env block: every param a
-/// value the call boundary has a native kind for (a lane scalar, a String, a
-/// scalar Option or Result carrier, a list of lane scalars or Strings, or
-/// such a closure itself), the result one too or Unit; never an effect fn.
-fn closure_typed(t: &almide_lang::types::Ty) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    use almide_lang::types::Ty;
-    fn value(t: &Ty) -> bool {
-        match t {
-            t if is_lane_scalar(t) => true,
-            Ty::String => true,
-            Ty::Applied(TypeConstructorId::Option, a) => a.len() == 1 && is_lane_scalar(&a[0]),
-            Ty::Applied(TypeConstructorId::Result, a) => {
-                a.len() == 2 && matches!(a[1], Ty::String) && (is_lane_scalar(&a[0]) || matches!(a[0], Ty::Unit | Ty::String))
-            }
-            Ty::Applied(TypeConstructorId::List, a) => a.len() == 1 && (is_lane_scalar(&a[0]) || matches!(a[0], Ty::String)),
-            t @ Ty::Fn { .. } => closure_typed(t),
-            _ => false,
-        }
-    }
-    matches!(t, Ty::Fn { is_effect: false, params, ret } if params.iter().all(value) && (matches!(**ret, Ty::Unit) || value(ret)))
-}
-
-/// Derive the generated types from the declared record and variant layouts.
-pub(crate) fn derive_records(
-    layouts: &crate::lower::RecordLayouts,
-    variants: &crate::lower::VariantLayouts,
-    tuples: &[almide_lang::types::Ty],
-) -> Vec<RecDecl> {
-    use almide_lang::types::constructor::TypeConstructorId;
-    use almide_lang::types::Ty;
-    use std::collections::{BTreeMap, BTreeSet};
-    let heap = |t: &Ty| crate::lower::is_heap_ty(t);
-    // Every declared aggregate: name -> (is_enum, cases (tag, field types)).
-    let mut decls: BTreeMap<String, (bool, Vec<(u32, Vec<Ty>)>)> = BTreeMap::new();
-    // An all-scalar record is a by-value struct, as an anonymous one is.
-    let mut anons: BTreeSet<String> = BTreeSet::new();
-    for (n, (gs, fs)) in layouts {
-        if gs.is_empty() {
-            decls.insert(n.clone(), (false, vec![(0, fs.iter().map(|(_, t)| t.clone()).collect())]));
-            if !fs.is_empty() && fs.iter().all(|(_, t)| is_lane_scalar(t)) {
-                anons.insert(n.clone());
-            }
-        }
-    }
-    for (n, l) in &variants.by_type {
-        if l.generics.is_empty() && !decls.contains_key(n) {
-            let cases = l.cases.iter().map(|c| (c.tag, c.fields.iter().map(|(_, t)| t.clone()).collect())).collect();
-            decls.insert(n.clone(), (true, cases));
-            // An all-scalar variant is a Rust enum, not a slot block.
-            if !l.cases.is_empty() && l.cases.iter().all(|c| c.fields.iter().all(|(_, t)| is_lane_scalar(t))) {
-                anons.insert(n.clone());
-            }
-        }
-    }
-    // A tuple type the program declares in a signature is an anonymous record:
-    // the same uniform slots, keyed by its spelled type.
-    let mut lists: BTreeSet<String> = BTreeSet::new();
-    // Generated `Option<T>` / `Result<T, E>` carriers (by table key).
-    let mut options: BTreeSet<String> = BTreeSet::new();
-    let mut results: BTreeSet<String> = BTreeSet::new();
-    let mut maps: BTreeSet<String> = BTreeSet::new();
-    let mut sets: BTreeSet<String> = BTreeSet::new();
-    let uses_bytes = tuples.iter().any(|t| matches!(t, Ty::Bytes));
-    let uses_matrix = tuples.iter().any(|t| matches!(t, Ty::Matrix));
-    // Anonymous records: always a generated struct, even all-scalar (a
-    // by-value Rust struct, not the `Vec<i64>` slot block a heap list needs).
-    let uses_value = tuples.iter().any(crate::lower::is_value_ty);
-    // A generic instance's bound fields may name further instances: close over them.
-    let mut work: Vec<Ty> = tuples.to_vec();
-    let mut seen_inst: BTreeSet<String> = BTreeSet::new();
-    while let Some(t) = work.pop() {
-        let t = &t;
-        if !seen_inst.insert(tuple_key(t)) {
-            continue;
-        }
-        if let Ty::Tuple(es) = t {
-            decls.entry(tuple_key(t)).or_insert((false, vec![(0, es.iter().cloned().collect())]));
-            // An all-scalar tuple is a by-value struct too, as an anonymous
-            // record is: a slot block would put every tuple on the heap.
-            if !es.is_empty() && es.iter().all(is_lane_scalar) {
-                anons.insert(tuple_key(t));
-            }
-        }
-        if let Ty::Record { fields } = t {
-            decls.entry(tuple_key(t)).or_insert((false, vec![(0, fields.iter().map(|(_, f)| f.clone()).collect())]));
-            anons.insert(tuple_key(t));
-        }
-        if let Ty::Applied(TypeConstructorId::List, a) = t {
-            decls.entry(tuple_key(t)).or_insert((false, vec![(0, a.iter().cloned().collect())]));
-            lists.insert(tuple_key(t));
-        }
-        if is_native_set(t) {
-            if let Ty::Applied(_, a) = t {
-                decls.entry(tuple_key(t)).or_insert((false, vec![(0, a.iter().cloned().collect())]));
-                sets.insert(tuple_key(t));
-            }
-        }
-        if let Ty::Applied(TypeConstructorId::Map, a) = t {
-            if a.len() == 2 && !matches!(a[0], Ty::Float) {
-                decls.entry(tuple_key(t)).or_insert((false, vec![(0, a.iter().cloned().collect())]));
-                maps.insert(tuple_key(t));
-            }
-        }
-        if let Ty::Applied(c, a) = t {
-            if is_heap_carrier(t) {
-                decls.entry(tuple_key(t)).or_insert((false, vec![(0, a.iter().cloned().collect())]));
-                if matches!(c, TypeConstructorId::Option) { options.insert(tuple_key(t)) } else { results.insert(tuple_key(t)) };
-            }
-        }
-        // A generic instance: the declared layout with its type params bound.
-        if let Ty::Named(n, args) = t {
-            let bind = |gs: &[almide_lang::intern::Sym]| -> Option<std::collections::HashMap<almide_lang::intern::Sym, Ty>> {
-                (gs.len() == args.len()).then(|| gs.iter().cloned().zip(args.iter().cloned()).collect())
-            };
-            let sub = |b: &std::collections::HashMap<almide_lang::intern::Sym, Ty>, t: &Ty| bind_type_params(t, b);
-            if args.is_empty() {
-                continue;
-            }
-            if let Some((gs, fs)) = layouts.get(n.as_str()) {
-                if let Some(b) = bind(gs) {
-                    let bound: Vec<Ty> = fs.iter().map(|(_, ft)| sub(&b, ft)).collect();
-                    bound.iter().for_each(|ft| collect_tuples(ft, &mut work));
-                    decls.entry(tuple_key(t)).or_insert((false, vec![(0, bound)]));
-                }
-            } else if let Some(l) = crate::lower::generic_variant_instantiation_name(n.as_str(), &args.iter().cloned().collect::<Vec<Ty>>())
-                .and_then(|inst| variants.by_type.get(&inst))
-                .filter(|l| l.generics.is_empty())
-            {
-                // The lowering registers a scalar-argument variant instance under
-                // its instantiation name, fields already bound.
-                let cases: Vec<(u32, Vec<Ty>)> =
-                    l.cases.iter().map(|c| (c.tag, c.fields.iter().map(|(_, ft)| ft.clone()).collect())).collect();
-                cases.iter().flat_map(|(_, fs)| fs.iter()).for_each(|ft| collect_tuples(ft, &mut work));
-                decls.entry(tuple_key(t)).or_insert((true, cases));
-            } else if let Some(l) = variants.by_type.get(n.as_str()) {
-                if let Some(b) = bind(&l.generics) {
-                    let cases: Vec<(u32, Vec<Ty>)> =
-                        l.cases.iter().map(|c| (c.tag, c.fields.iter().map(|(_, ft)| sub(&b, ft)).collect())).collect();
-                    cases.iter().flat_map(|(_, fs)| fs.iter()).for_each(|ft| collect_tuples(ft, &mut work));
-                    decls.entry(tuple_key(t)).or_insert((true, cases));
-                }
-            }
-        }
-    }
-    // An all-scalar aggregate keeps the `Vec<i64>` slot convention.
-    // (A generated carrier or map is never a slot block, whatever its payloads.)
-    let scalar = |n: &str| !anons.contains(n) && !options.contains(n) && !results.contains(n) && !maps.contains(n) && !sets.contains(n) && decls.get(n).is_some_and(|(_, cs)| cs.iter().all(|(_, fs)| fs.iter().all(|t| !heap(t))));
-    let mut set: BTreeSet<String> = decls.keys().filter(|n| !scalar(n)).cloned().collect();
-    SCALAR_INSTANCES.with(|si| {
-        *si.borrow_mut() = decls.keys().filter(|n| n.starts_with("Named(") && scalar(n)).cloned().collect();
-    });
-    // Some(Ok(kind)) | Some(Err(name of a generated type)) | None (no spelling).
-    let kind = |t: &Ty, set: &BTreeSet<String>| -> Option<Result<NTy, String>> {
-        Some(Ok(match t {
-            t if is_lane_scalar(t) => NTy::I64,
-            Ty::String => NTy::Str,
-            // A list of lane scalars, an all-scalar tuple: one i64 slot block.
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_lane_scalar(&a[0]) => NTy::Vec,
-            Ty::Tuple(es) if es.iter().all(is_lane_scalar) && !set.contains(&tuple_key(t)) => NTy::Vec,
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String) => NTy::VecStr,
-            // An Option of a lane scalar: the `Option<i64>` carrier.
-            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && is_lane_scalar(&a[0]) => NTy::Opt,
-            // A Result of a lane scalar (or Unit) or a String over a String
-            // error: the `Result<i64, AlmideString>` / `Result<AlmideString,
-            // AlmideString>` carriers (no `Default`: a list or carrier holds
-            // one, a struct or enum does not — see `res_free` below).
-            Ty::Applied(TypeConstructorId::Result, a)
-                if a.len() == 2 && matches!(a[1], Ty::String) && (is_lane_scalar(&a[0]) || matches!(a[0], Ty::Unit)) =>
-            {
-                NTy::Res
-            }
-            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!((&a[0], &a[1]), (Ty::String, Ty::String)) => NTy::ResStr,
-            // A closure of native-typed params and result: its env block (the
-            // rung-5 closures slab; its calls dispatch by signature).
-            t @ Ty::Fn { .. } if closure_typed(t) => NTy::Vec,
-            Ty::Named(n, args) if args.is_empty() && scalar(n.as_str()) => NTy::Vec,
-            Ty::Named(n, args) if args.is_empty() && set.contains(n.as_str()) => return Some(Err(n.as_str().to_string())),
-            Ty::Tuple(_) | Ty::Record { .. } | Ty::Applied(TypeConstructorId::List, _) if set.contains(&tuple_key(t)) => {
-                return Some(Err(tuple_key(t)))
-            }
-            Ty::Bytes if uses_bytes => return Some(Err(BYTES_KEY.to_string())),
-            Ty::Matrix if uses_matrix => return Some(Err(MATRIX_KEY.to_string())),
-            t if uses_value && crate::lower::is_value_ty(t) => return Some(Err(VALUE_KEY.to_string())),
-            Ty::Named(_, args) if !args.is_empty() && set.contains(&tuple_key(t)) => return Some(Err(tuple_key(t))),
-            Ty::Named(_, args) if !args.is_empty() && scalar(&tuple_key(t)) => NTy::Vec,
-            // An Option field or element holds its carrier; a Result never
-            // does (it has no `Default` to start a struct or a list from).
-            Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Map | TypeConstructorId::Set, _) if set.contains(&tuple_key(t)) => {
-                return Some(Err(tuple_key(t)))
-            }
-            _ => return None,
-        }))
-    };
-    let fields_of = |n: &str| decls[n].1.iter().flat_map(|(_, fs)| fs.iter()).cloned().collect::<Vec<Ty>>();
-    // A struct or enum starts from `Default`, which a Result carrier lacks:
-    // only a list, Option, Result or map holds one.
-    let res_free = |n: &String, set: &BTreeSet<String>| {
-        lists.contains(n)
-            || sets.contains(n)
-            || options.contains(n)
-            || results.contains(n)
-            || maps.contains(n)
-            || fields_of(n).iter().all(|t| !matches!(kind(t, set), Some(Ok(NTy::Res | NTy::ResStr))))
-    };
-    loop {
-        let before = set.len();
-        set = set.iter().filter(|n| fields_of(n).iter().all(|t| kind(t, &set).is_some()) && res_free(n, &set)).cloned().collect();
-        if set.len() == before {
-            break;
-        }
-    }
-    // By-value edges: a struct holds its record fields inline; an enum boxes all.
-    let edges: BTreeMap<String, Vec<String>> = set
-        .iter()
-        .map(|n| {
-            let e = if decls[n].0 || lists.contains(n) || maps.contains(n) || sets.contains(n) { Vec::new() } else { fields_of(n).iter().filter_map(|t| kind(t, &set)?.err()).collect() };
-            (n.clone(), e)
-        })
-        .collect();
-    let reaches_self = |start: &String| {
-        let mut stack = edges[start].clone();
-        let mut seen = BTreeSet::new();
-        while let Some(n) = stack.pop() {
-            if &n == start {
-                return true;
-            }
-            if seen.insert(n.clone()) {
-                stack.extend(edges.get(&n).cloned().unwrap_or_default());
-            }
-        }
-        false
-    };
-    // A finite Default: a struct whose by-value aggregate fields all have
-    // one, an enum with a case whose aggregate fields all do (a list is
-    // empty by default). An enum with none has no finite value to start from.
-    // Rank = the round a type became finite; an enum's Default is a case
-    // whose aggregate fields all ranked strictly earlier, so it never recurses.
-    let mut rank: BTreeMap<String, usize> = BTreeMap::new();
-    let case_ok = |fs: &Vec<Ty>, below: usize, rank: &BTreeMap<String, usize>, set: &BTreeSet<String>| {
-        fs.iter().all(|t| match kind(t, set) {
-            Some(Err(m)) => lists.contains(&m) || options.contains(&m) || maps.contains(&m) || sets.contains(&m) || m == BYTES_KEY || m == VALUE_KEY || m == MATRIX_KEY || rank.get(&m).is_some_and(|r| *r < below),
-            _ => true,
-        })
-    };
-    for round in 0.. {
-        let snapshot = rank.clone();
-        for n in &set {
-            if snapshot.contains_key(n) {
-                continue;
-            }
-            let fin = lists.contains(n)
-                || maps.contains(n)
-                || sets.contains(n)
-                || options.contains(n)
-                || results.contains(n)
-                || if decls[n].0 {
-                    decls[n].1.iter().any(|(_, fs)| case_ok(fs, round, &snapshot, &set))
-                } else {
-                    case_ok(&decls[n].1[0].1, round, &snapshot, &set)
-                };
-            if fin {
-                rank.insert(n.clone(), round);
-            }
-        }
-        if rank.len() == snapshot.len() {
-            break;
-        }
-    }
-    let cyclic: BTreeSet<String> = set.iter().filter(|n| reaches_self(n) || !rank.contains_key(*n)).cloned().collect();
-    set.retain(|n| !cyclic.contains(n));
-    loop {
-        let before = set.len();
-        set = set.iter().filter(|n| fields_of(n).iter().all(|t| kind(t, &set).is_some()) && res_free(n, &set)).cloned().collect();
-        if set.len() == before {
-            break;
-        }
-    }
-    let mut names: Vec<String> = set.iter().cloned().collect();
-    if uses_bytes {
-        names.push(BYTES_KEY.to_string());
-    }
-    if uses_value {
-        names.push(VALUE_KEY.to_string());
-    }
-    if uses_matrix {
-        names.push(MATRIX_KEY.to_string());
-    }
-    let spell = |t: &Ty| match kind(t, &set) {
-        Some(Ok(k)) => k,
-        Some(Err(m)) => NTy::Rec(names.iter().position(|x| *x == m).expect("kept") as u16),
-        None => unreachable!("pruned above"),
-    };
-    names
-        .iter()
-        .map(|n| {
-            if n == VALUE_KEY {
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None };
-            }
-            if n == MATRIX_KEY {
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None };
-            }
-            if n == BYTES_KEY {
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None };
-            }
-            let (is_enum, cases) = &decls[n];
-            if maps.contains(n) {
-                let (k, v) = (spell(&cases[0].1[0]), spell(&cases[0].1[1]));
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: Some((k, v)), set_of: None };
-            }
-            if sets.contains(n) {
-                return RecDecl { name: n.clone(), set_of: Some(spell(&cases[0].1[0])), ..RecDecl::default() };
-            }
-            if options.contains(n) {
-                let p = spell(&cases[0].1[0]);
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: Some(p), result_of: None, map_of: None, set_of: None };
-            }
-            if results.contains(n) {
-                let (o, e) = (spell(&cases[0].1[0]), spell(&cases[0].1[1]));
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: Some((o, e)), map_of: None, set_of: None };
-            }
-            if lists.contains(n) {
-                return RecDecl { name: n.clone(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])), alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None };
-            }
-            if *is_enum {
-                let r = rank[n];
-                let default_tag = cases.iter().find(|(_, fs)| case_ok(fs, r, &rank, &set)).map(|c| c.0);
-                RecDecl {
-                    default_tag,
-                    name: n.clone(),
-                    fields: Vec::new(),
-                    cases: Some(cases.iter().map(|(t, fs)| (*t, fs.iter().map(spell).collect())).collect()),
-                    list_of: None,
-                    alias: None,
-                    option_of: None,
-                    result_of: None,
-                    map_of: None, set_of: None,
-                }
-            } else {
-                RecDecl { name: n.clone(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None }
-            }
-        })
-        .collect()
-}
+include!("render_native_rec_b.rs");

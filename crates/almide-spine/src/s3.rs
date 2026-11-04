@@ -201,8 +201,9 @@ pub fn check_file_json_v2(db: &dyn salsa::Database, file: SourceFile) -> CheckOu
 
 /// Stage 2, step 2: per-import-set env template. The module half of
 /// canonicalization plus `Checker::from_env` + `refresh_module_toplets`
-/// depends only on the resolved module set (constant bundled sources), so it
-/// is computed once per distinct module list and CLONED per file check —
+/// depends only on the resolved modules (constant bundled sources, each kept
+/// to the functions the file reaches), so it is computed once per distinct
+/// module list and function set and CLONED per file check —
 /// removing the second tax layer (canon 25.5% of per-file cost, s4_probe).
 /// Cache legitimacy: a pure function of embedded constants + the module
 /// list; the salsa dependency edges still flow through the file's text via
@@ -234,7 +235,25 @@ pub fn check_file_json_v3(db: &dyn salsa::Database, file: SourceFile) -> CheckOu
         }
     };
 
-    let key: String = resolved.modules.iter().map(|(n, _, _, _)| n.as_str()).collect::<Vec<_>>().join(",");
+    // A bundled module keeps only the functions the program reaches (#4328),
+    // so the same module list can hold different functions: the key names
+    // each module's declarations, not only the module.
+    let key: String = resolved
+        .modules
+        .iter()
+        .map(|(n, p, _, _)| {
+            let fns: Vec<&str> = p
+                .decls
+                .iter()
+                .filter_map(|d| match d {
+                    almide::ast::Decl::Fn { name, .. } => Some(name.as_str()),
+                    _ => None,
+                })
+                .collect();
+            format!("{}[{}]", n, fns.join(" "))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     let template = {
         let mut guard = TEMPLATE_CACHE.lock().expect("template cache mutex poisoned");
         let map = guard.get_or_insert_with(Default::default);

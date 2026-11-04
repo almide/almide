@@ -311,6 +311,7 @@ impl Toolchain {
         self.run_sandboxed(|dir, env| {
             let mut cmd = Command::new(&self.wasmtime);
             let tmp = super::sandbox::tmp_of(dir);
+            cmd.args(super::sandbox::stock_grants(&wasm));
             cmd.arg(format!("--dir={}::.", dir.display()));
             cmd.arg(format!("--dir={}::/tmp", tmp.display()));
             // `TMPDIR` names the host path on every leg: the guest finds it

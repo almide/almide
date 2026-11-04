@@ -128,39 +128,8 @@ pub(crate) fn dying_after(
     if joined {
         return false;
     }
-    // `src` is released, unconditionally and before anything reads it again,
-    // in the copy's own block: the value dies there, whatever later rebinds
-    // the slot (a loop slot's write-back `Drop v; SetLocal v = ..`). A copy
-    // followed by that release is a move.
-    let mut depth = 0i32;
-    let mut straight = true;
-    let mut reads = Vec::new();
-    for op in &func.ops[at + 1..] {
-        if straight {
-            match op {
-                Op::IfThen { .. } | Op::LoopStart => depth += 1,
-                Op::EndIf { .. } | Op::LoopEnd => {
-                    depth -= 1;
-                    straight = depth >= 0;
-                }
-                Op::Else { .. } | Op::Return { .. } | Op::LoopBreakUnless { .. } if depth == 0 => straight = false,
-                _ => {}
-            }
-        }
-        if bookkeeping(op) {
-            if straight && depth == 0 && !owned_param && released(op, src) {
-                return true;
-            }
-            continue;
-        }
-        reads.clear();
-        crate::mir_ops::op_reads(op, &mut reads);
-        if reads.contains(&src) {
-            return false;
-        }
-        if matches!(op, Op::SetLocal { local, .. } if *local == src) {
-            return false;
-        }
+    if let Some(verdict) = scan_after_copy(func, at, src, owned_param) {
+        return verdict;
     }
     // The returned value is read at the end.
     if func.ret == Some(src) {
@@ -196,6 +165,47 @@ pub(crate) fn dying_after(
         return loops[at].is_none() && defs.is_empty();
     }
     defs.iter().any(|&d| d < at && loops[d] == loops[at]) && defs.iter().all(|&d| d < at && within(d))
+}
+
+/// The forward scan of [`dying_after`] over the ops after the copy at
+/// `ops[at]`: `Some(true)` = released first, `Some(false)` = read or rebound
+/// first, `None` = neither before the end of the function.
+fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: bool) -> Option<bool> {
+    // `src` is released, unconditionally and before anything reads it again,
+    // in the copy's own block: the value dies there, whatever later rebinds
+    // the slot (a loop slot's write-back `Drop v; SetLocal v = ..`). A copy
+    // followed by that release is a move.
+    let mut depth = 0i32;
+    let mut straight = true;
+    let mut reads = Vec::new();
+    for op in &func.ops[at + 1..] {
+        if straight {
+            match op {
+                Op::IfThen { .. } | Op::LoopStart => depth += 1,
+                Op::EndIf { .. } | Op::LoopEnd => {
+                    depth -= 1;
+                    straight = depth >= 0;
+                }
+                Op::Else { .. } | Op::Return { .. } | Op::LoopBreakUnless { .. } if depth == 0 => straight = false,
+                _ => {}
+            }
+        }
+        if bookkeeping(op) {
+            if straight && depth == 0 && !owned_param && released(op, src) {
+                return Some(true);
+            }
+            continue;
+        }
+        reads.clear();
+        crate::mir_ops::op_reads(op, &mut reads);
+        if reads.contains(&src) {
+            return Some(false);
+        }
+        if matches!(op, Op::SetLocal { local, .. } if *local == src) {
+            return Some(false);
+        }
+    }
+    None
 }
 
 /// Whether `src`, read at `ops[at]`, is rebound (`SetLocal`) later in the

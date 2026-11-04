@@ -32,7 +32,30 @@ fn emit(out: &mut String, indent: usize, s: &str) {
     for _ in 0..indent {
         out.push_str("    ");
     }
-    writeln!(out, "{s}").unwrap();
+    writeln!(out, "{s}").expect("writing to a String cannot fail");
+}
+
+/// An index `Add`: recorded as plain arithmetic, and as `len + i` when one
+/// side is a map's own length read.
+fn note_add(st: &mut AddrState, dst: ValueId, a: ValueId, b: ValueId) {
+    st.arith.insert(dst);
+    if let Some(m) = st.map_lens.get(&a).or_else(|| st.map_lens.get(&b)).copied() {
+        let i = if st.map_lens.contains_key(&a) { b } else { a };
+        st.len_plus.insert(dst, (m, i));
+    }
+}
+
+/// Any other index arithmetic: recorded, and a `* SLOT_SIZE` scaling noted.
+fn note_arith(st: &mut AddrState, dst: ValueId, op: IntOp, a: ValueId, b: ValueId) {
+    st.arith.insert(dst);
+    if op == IntOp::Mul {
+        let w = i64::from(SLOT_SIZE);
+        if st.consts.get(&b) == Some(&w) {
+            st.scaled_src.insert(dst, a);
+        } else if st.consts.get(&a) == Some(&w) {
+            st.scaled_src.insert(dst, b);
+        }
+    }
 }
 
 /// Render `op` if it reads a map's window. `None` = not a map op.
@@ -46,23 +69,11 @@ pub(super) fn render_map_op(
     match op {
         // Index arithmetic: recorded, rendered as the plain i64 it is.
         Op::IntBinOp { dst, op: IntOp::Add, a, b } if !st.addrs.contains_key(a) && !st.addrs.contains_key(b) => {
-            st.arith.insert(*dst);
-            if let Some(m) = st.map_lens.get(a).or_else(|| st.map_lens.get(b)).copied() {
-                let i = if st.map_lens.contains_key(a) { *b } else { *a };
-                st.len_plus.insert(*dst, (m, i));
-            }
+            note_add(st, *dst, *a, *b);
             None
         }
         Op::IntBinOp { dst, op, a, b } if !st.addrs.contains_key(a) && !st.addrs.contains_key(b) => {
-            st.arith.insert(*dst);
-            if *op == IntOp::Mul {
-                let w = i64::from(SLOT_SIZE);
-                if st.consts.get(b) == Some(&w) {
-                    st.scaled_src.insert(*dst, *a);
-                } else if st.consts.get(a) == Some(&w) {
-                    st.scaled_src.insert(*dst, *b);
-                }
-            }
+            note_arith(st, *dst, *op, *a, *b);
             None
         }
         Op::Prim { kind: kind @ (PrimKind::Load { .. } | PrimKind::LoadHandle), dst: Some(d), args } if args.len() == 1 => {

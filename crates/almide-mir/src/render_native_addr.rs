@@ -127,162 +127,11 @@ pub(crate) struct AddrState {
 
 impl AddrState {
     pub(crate) fn new(func: &MirFunction, sigs: &crate::render_native::NativeSigs) -> Self {
-        use crate::render_native::NativeSigKind;
-        let rec_kind = |k: Option<&NativeSigKind>| match k {
-            Some(NativeSigKind::Rec(i)) => Some(*i),
-            _ => None,
-        };
-        let own_ret = rec_kind(sigs.get(func.name.as_str()).and_then(|(_, r)| r.as_ref()));
         let mut alloc_rec: BTreeMap<ValueId, u16> = BTreeMap::new();
-        let mut note = |v: ValueId, i: Option<u16>| {
-            if let Some(i) = i {
-                alloc_rec.entry(v).or_insert(i);
-            }
-        };
-        if let Some(r) = func.ret {
-            note(r, own_ret);
-        }
-        for op in &func.ops {
-            match op {
-                Op::DropVariant { v, ty } => note(*v, crate::render_native_rec::rec_index(ty)),
-                Op::Return { val: Some(v) } => note(*v, own_ret),
-                Op::CallFn { name, args, .. } => {
-                    if let Some((ps, _)) = sigs.get(name.as_str()) {
-                        for (a, k) in args.iter().zip(ps) {
-                            if let crate::CallArg::Handle(v) = a {
-                                note(*v, rec_kind(Some(k)));
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        // #4006: heap Option/Result carriers, typed by the declared signatures
-        // (this function's and its callees') through joins and copies.
-        let carrier_k = |k: &NativeSigKind| match k {
-            // (A map alias rides the same declared typing: `map.new()`'s
-            // result takes the map type the program declares for it.)
-            NativeSigKind::Rec(i)
-                if carrier::is_carrier(*i)
-                    || crate::render_native_rec::map_kinds(*i).is_some()
-                    || crate::render_native_rec::set_elem(*i).is_some() =>
-            {
-                Some(*i)
-            }
-            _ => None,
-        };
-        let sig_of = |n: &str| -> Option<CarrierSig> {
-            sigs.get(n).map(|(ps, r)| (ps.iter().map(carrier_k).collect(), r.as_ref().and_then(carrier_k)))
-        };
-        let own = sig_of(func.name.as_str()).unwrap_or_default();
-        let declared = carrier::carrier_values(func, &own, &sig_of);
-        crate::render_native_rec::set_declared(
-            declared
-                .iter()
-                .filter(|(_, i)| crate::render_native_rec::map_kinds(**i).is_some() || crate::render_native_rec::set_elem(**i).is_some())
-                .map(|(v, i)| (*v, *i))
-                .collect(),
-        );
-        for (v, i) in declared {
-            alloc_rec.entry(v).or_insert(i);
-        }
-        // An empty container rebound into a typed local (`map.clear(m)`,
-        // `xs = []`) takes the local's declared type.
-        let empties: BTreeSet<ValueId> = func
-            .ops
-            .iter()
-            .filter_map(|op| match op {
-                Op::Alloc { dst, init: Init::Empty, .. } => Some(*dst),
-                _ => None,
-            })
-            .collect();
-        // Or the type the lowering recorded for it.
-        for v in &empties {
-            if let Some(i) = func.aggregate_blocks.get(v).and_then(|k| crate::render_native_rec::rec_index(k)) {
-                alloc_rec.entry(*v).or_insert(i);
-            }
-        }
-        // Or the type the floor call it is handed to declares for it.
-        for op in &func.ops {
-            match op {
-                Op::SetLocal { local, src } => {
-                    if let Some(&i) = alloc_rec.get(local).filter(|_| empties.contains(src)) {
-                        alloc_rec.entry(*src).or_insert(i);
-                    }
-                }
-                Op::CallFn { name, args, .. } => {
-                    for (k, a) in args.iter().enumerate() {
-                        if let crate::CallArg::Handle(v) = a {
-                            if let Some(i) = Some(*v).filter(|v| empties.contains(v)).and_then(|_| crate::native_floor::specialized_param_rec(name, k)) {
-                                alloc_rec.entry(*v).or_insert(i);
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        // An if-value join holds one declared type on both arms: a typed join
-        // types its arms' values, and a typed arm types the join. Only for an
-        // all-scalar struct (built by value from its slot list), the one kind
-        // whose arms are otherwise untyped literals.
-        {
-            let mut edges: Vec<(ValueId, ValueId)> = Vec::new();
-            let mut ifs: Vec<Option<ValueId>> = Vec::new();
-            for op in &func.ops {
-                match op {
-                    Op::IfThen { dst, .. } => ifs.push(*dst),
-                    Op::Else { val } | Op::EndIf { val } => {
-                        if let (Some(v), Some(Some(d))) = (val, ifs.last()) {
-                            edges.push((*d, *v));
-                        }
-                        if matches!(op, Op::EndIf { .. }) {
-                            ifs.pop();
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            loop {
-                let before = alloc_rec.len();
-                for (a, b) in &edges {
-                    let scalar_struct = |v: Option<&u16>| v.copied().filter(|i| crate::render_native_rec::all_scalar_struct(*i));
-                    if let Some(i) = scalar_struct(alloc_rec.get(a)) {
-                        alloc_rec.entry(*b).or_insert(i);
-                    }
-                    if let Some(i) = scalar_struct(alloc_rec.get(b)) {
-                        alloc_rec.entry(*a).or_insert(i);
-                    }
-                }
-                if alloc_rec.len() == before {
-                    break;
-                }
-            }
-        }
-        // A block stored into a typed parent's slot takes the slot's declared
-        // kind: a list's element, a record's field, an enum slot's one record kind.
-        let mut handle_of: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-        let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
-        let mut base_of: BTreeMap<ValueId, (ValueId, Option<i64>)> = BTreeMap::new();
-        for op in &func.ops {
-            match op {
-                Op::ConstInt { dst, value } => {
-                    consts.insert(*dst, *value);
-                }
-                Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
-                    handle_of.insert(*d, args[0]);
-                    base_of.insert(*d, (args[0], Some(0)));
-                }
-                Op::IntBinOp { dst, op: IntOp::Add, a, b } => {
-                    let (x, y) = if base_of.contains_key(a) { (a, b) } else { (b, a) };
-                    if let Some(&(r, off)) = base_of.get(x) {
-                        base_of.insert(*dst, (r, off.and_then(|o| consts.get(y).map(|c| o + c))));
-                    }
-                }
-                _ => {}
-            }
-        }
+        note_signature_recs(func, sigs, &mut alloc_rec);
+        note_carrier_recs(func, sigs, &mut alloc_rec);
+        note_join_recs(func, &mut alloc_rec);
+        let (handle_of, consts, base_of) = block_bases(func);
         // The untyped blocks, typed from their stores and the declarations
         // that consume them, in one fixpoint (render_native_slots.rs).
         let (moves, moves_last) = slots::movable_loads(func, &base_of);
@@ -324,23 +173,7 @@ impl AddrState {
                 _ => None,
             })
             .collect();
-        let mut addr_operands = BTreeSet::new();
-        for op in &func.ops {
-            match op {
-                Op::IntBinOp { op: IntOp::Add, a, b, .. } => {
-                    addr_operands.insert(*a);
-                    addr_operands.insert(*b);
-                }
-                Op::Prim {
-                    kind: PrimKind::ElemAddr | PrimKind::Load { .. } | PrimKind::LoadHandle | PrimKind::Store { .. },
-                    args,
-                    ..
-                } if !args.is_empty() => {
-                    addr_operands.insert(args[0]);
-                }
-                _ => {}
-            }
-        }
+        let addr_operands = addr_operands_of(func);
         AddrState {
             str_lists,
             alloc_rec,
@@ -386,6 +219,203 @@ impl AddrState {
 /// The owned spelling of a generated list's kind.
 fn owned_ty_of(t: Option<NTy>) -> String {
     t.map(crate::render_native_rec::owned_ty).unwrap_or_default()
+}
+
+/// The record kinds the declared signatures give a function's blocks: its own
+/// return, a typed drop, a return, an argument to a typed param.
+fn note_signature_recs(func: &MirFunction, sigs: &crate::render_native::NativeSigs, alloc_rec: &mut BTreeMap<ValueId, u16>) {
+    use crate::render_native::NativeSigKind;
+    let rec_kind = |k: Option<&NativeSigKind>| match k {
+        Some(NativeSigKind::Rec(i)) => Some(*i),
+        _ => None,
+    };
+    let own_ret = rec_kind(sigs.get(func.name.as_str()).and_then(|(_, r)| r.as_ref()));
+    let mut note = |v: ValueId, i: Option<u16>| {
+        if let Some(i) = i {
+            alloc_rec.entry(v).or_insert(i);
+        }
+    };
+    if let Some(r) = func.ret {
+        note(r, own_ret);
+    }
+    for op in &func.ops {
+        match op {
+            Op::DropVariant { v, ty } => note(*v, crate::render_native_rec::rec_index(ty)),
+            Op::Return { val: Some(v) } => note(*v, own_ret),
+            Op::CallFn { name, args, .. } => {
+                if let Some((ps, _)) = sigs.get(name.as_str()) {
+                    for (a, k) in args.iter().zip(ps) {
+                        if let crate::CallArg::Handle(v) = a {
+                            note(*v, rec_kind(Some(k)));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// #4006: heap Option/Result carriers (and map aliases), typed by the
+/// declared signatures through joins and copies.
+fn note_carrier_recs(func: &MirFunction, sigs: &crate::render_native::NativeSigs, alloc_rec: &mut BTreeMap<ValueId, u16>) {
+    use crate::render_native::NativeSigKind;
+    // #4006: heap Option/Result carriers, typed by the declared signatures
+    // (this function's and its callees') through joins and copies.
+    let carrier_k = |k: &NativeSigKind| match k {
+        // (A map alias rides the same declared typing: `map.new()`'s
+        // result takes the map type the program declares for it.)
+        NativeSigKind::Rec(i)
+            if carrier::is_carrier(*i)
+                || crate::render_native_rec::map_kinds(*i).is_some()
+                || crate::render_native_rec::set_elem(*i).is_some() =>
+        {
+            Some(*i)
+        }
+        _ => None,
+    };
+    let sig_of = |n: &str| -> Option<CarrierSig> {
+        sigs.get(n).map(|(ps, r)| (ps.iter().map(carrier_k).collect(), r.as_ref().and_then(carrier_k)))
+    };
+    let own = sig_of(func.name.as_str()).unwrap_or_default();
+    let declared = carrier::carrier_values(func, &own, &sig_of);
+    crate::render_native_rec::set_declared(
+        declared
+            .iter()
+            .filter(|(_, i)| crate::render_native_rec::map_kinds(**i).is_some() || crate::render_native_rec::set_elem(**i).is_some())
+            .map(|(v, i)| (*v, *i))
+            .collect(),
+    );
+    for (v, i) in declared {
+        alloc_rec.entry(v).or_insert(i);
+    }
+    // An empty container rebound into a typed local (`map.clear(m)`,
+    // `xs = []`) takes the local's declared type.
+    let empties: BTreeSet<ValueId> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Alloc { dst, init: Init::Empty, .. } => Some(*dst),
+            _ => None,
+        })
+        .collect();
+    // Or the type the lowering recorded for it.
+    for v in &empties {
+        if let Some(i) = func.aggregate_blocks.get(v).and_then(|k| crate::render_native_rec::rec_index(k)) {
+            alloc_rec.entry(*v).or_insert(i);
+        }
+    }
+    // Or the type the floor call it is handed to declares for it.
+    for op in &func.ops {
+        match op {
+            Op::SetLocal { local, src } => {
+                if let Some(&i) = alloc_rec.get(local).filter(|_| empties.contains(src)) {
+                    alloc_rec.entry(*src).or_insert(i);
+                }
+            }
+            Op::CallFn { name, args, .. } => {
+                for (k, a) in args.iter().enumerate() {
+                    if let crate::CallArg::Handle(v) = a {
+                        if let Some(i) = Some(*v).filter(|v| empties.contains(v)).and_then(|_| crate::native_floor::specialized_param_rec(name, k)) {
+                            alloc_rec.entry(*v).or_insert(i);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The all-scalar struct kinds carried across if-value joins, to a fixpoint.
+fn note_join_recs(func: &MirFunction, alloc_rec: &mut BTreeMap<ValueId, u16>) {
+    // An if-value join holds one declared type on both arms: a typed join
+    // types its arms' values, and a typed arm types the join. Only for an
+    // all-scalar struct (built by value from its slot list), the one kind
+    // whose arms are otherwise untyped literals.
+    let mut edges: Vec<(ValueId, ValueId)> = Vec::new();
+    let mut ifs: Vec<Option<ValueId>> = Vec::new();
+    for op in &func.ops {
+        match op {
+            Op::IfThen { dst, .. } => ifs.push(*dst),
+            Op::Else { val } | Op::EndIf { val } => {
+                if let (Some(v), Some(Some(d))) = (val, ifs.last()) {
+                    edges.push((*d, *v));
+                }
+                if matches!(op, Op::EndIf { .. }) {
+                    ifs.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+    loop {
+        let before = alloc_rec.len();
+        for (a, b) in &edges {
+            let scalar_struct = |v: Option<&u16>| v.copied().filter(|i| crate::render_native_rec::all_scalar_struct(*i));
+            if let Some(i) = scalar_struct(alloc_rec.get(a)) {
+                alloc_rec.entry(*b).or_insert(i);
+            }
+            if let Some(i) = scalar_struct(alloc_rec.get(b)) {
+                alloc_rec.entry(*a).or_insert(i);
+            }
+        }
+        if alloc_rec.len() == before {
+            break;
+        }
+    }
+}
+
+/// The handle, constant and base-offset facts of a function's blocks.
+#[allow(clippy::type_complexity)]
+fn block_bases(func: &MirFunction) -> (BTreeMap<ValueId, ValueId>, BTreeMap<ValueId, i64>, BTreeMap<ValueId, (ValueId, Option<i64>)>) {
+    // A block stored into a typed parent's slot takes the slot's declared
+    // kind: a list's element, a record's field, an enum slot's one record kind.
+    let mut handle_of: BTreeMap<ValueId, ValueId> = BTreeMap::new();
+    let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
+    let mut base_of: BTreeMap<ValueId, (ValueId, Option<i64>)> = BTreeMap::new();
+    for op in &func.ops {
+        match op {
+            Op::ConstInt { dst, value } => {
+                consts.insert(*dst, *value);
+            }
+            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
+                handle_of.insert(*d, args[0]);
+                base_of.insert(*d, (args[0], Some(0)));
+            }
+            Op::IntBinOp { dst, op: IntOp::Add, a, b } => {
+                let (x, y) = if base_of.contains_key(a) { (a, b) } else { (b, a) };
+                if let Some(&(r, off)) = base_of.get(x) {
+                    base_of.insert(*dst, (r, off.and_then(|o| consts.get(y).map(|c| o + c))));
+                }
+            }
+            _ => {}
+        }
+    }
+    (handle_of, consts, base_of)
+}
+
+/// Values read as an address operand (address arithmetic, a slot or header
+/// access).
+fn addr_operands_of(func: &MirFunction) -> BTreeSet<ValueId> {
+    let mut addr_operands = BTreeSet::new();
+    for op in &func.ops {
+        match op {
+            Op::IntBinOp { op: IntOp::Add, a, b, .. } => {
+                addr_operands.insert(*a);
+                addr_operands.insert(*b);
+            }
+            Op::Prim {
+                kind: PrimKind::ElemAddr | PrimKind::Load { .. } | PrimKind::LoadHandle | PrimKind::Store { .. },
+                args,
+                ..
+            } if !args.is_empty() => {
+                addr_operands.insert(args[0]);
+            }
+            _ => {}
+        }
+    }
+    addr_operands
 }
 
 fn is_block(t: NTy) -> bool {
@@ -551,17 +581,14 @@ fn slot_index(a: &Addr) -> Option<String> {
 /// tag store renders nothing (a nullary case is built there), a payload
 /// waits in its own local, and the last payload builds the case in one
 /// expression — no default payloads allocated and replaced.
-#[allow(clippy::too_many_arguments)]
 fn build_enum_slot(
-    st: &mut AddrState,
-    tys: &BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
+    s: AddrSink<'_>,
     base: ValueId,
     i: u16,
     k: usize,
     v: ValueId,
 ) -> Result<bool, LowerError> {
+    let AddrSink { st, tys, out, indent } = s;
     use crate::render_native_rec::{enum_cases, owned_ty, struct_name};
     let line = |out: &mut String, s: String| {
         for _ in 0..indent {
@@ -661,404 +688,47 @@ pub(crate) fn single_push(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, 
     Some((format!("let mut {x}: Vec<AlmideString> = vec![{x}_e0];", x = var(x)), false))
 }
 
-/// Render `op` if it belongs to the address algebra. `Ok(false)` = not this
-/// module's op (the caller renders it); an address reaching any other op walls.
-pub(crate) fn render_addr_op(
-    op: &Op,
-    used: &BTreeSet<ValueId>,
-    st: &mut AddrState,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-) -> Result<bool, LowerError> {
+/// The block-allocating arms of [`render_addr_op`], in their order: a string
+/// list, a generated list, a record or enum block, a typed string list, and
+/// a scalar list.
+fn block_alloc_op(op: &Op, s: AddrSink<'_>) -> Result<Option<bool>, LowerError> {
+    let AddrSink { st, tys, out, indent } = s;
+    if let Some(done) = const_or_empty_alloc(op, AddrSink { st: &mut *st, tys: &mut *tys, out: &mut *out, indent }) {
+        return Ok(Some(done));
+    }
+    match op {
+        Op::Alloc { dst, init: Init::DynListStr { len }, .. } if ty(tys, len) == Some(NTy::I64) && !st.alloc_rec.contains_key(dst) => {
+            Ok(Some(alloc_str_list(AddrSink { st, tys, out, indent }, dst, len)))
+        }
+        Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. }
+            if st.alloc_rec.get(dst).is_some_and(|i| crate::render_native_rec::list_elem(*i).is_some()) =>
+        {
+            Ok(Some(alloc_rec_list(AddrSink { st, tys, out, indent }, dst, len)))
+        }
+        Op::Alloc { dst, init: Init::DynList { .. }, .. } if st.alloc_rec.contains_key(dst) => {
+            Ok(Some(alloc_rec_block(AddrSink { st, tys, out, indent }, dst)))
+        }
+        Op::Alloc { dst, init: Init::DynList { len }, .. } if ty(tys, len) == Some(NTy::I64) && st.str_lists.contains(dst) => {
+            Ok(Some(alloc_typed_str_list(AddrSink { st, tys, out, indent }, dst, len)))
+        }
+        Op::Alloc { dst, init: Init::DynList { len }, .. } if ty(tys, len) == Some(NTy::I64) => {
+            Ok(Some(alloc_scalar_list(AddrSink { st, tys, out, indent }, dst, len)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// A typed empty container, a constant string table and the literals only
+/// such a table is filled from. `None` = none of them.
+fn const_or_empty_alloc(op: &Op, s: AddrSink<'_>) -> Option<bool> {
+    let AddrSink { st, tys, out, indent } = s;
     macro_rules! line {
         ($($arg:tt)*) => {{
             for _ in 0..indent { out.push_str("    "); }
             writeln!(out, $($arg)*).unwrap();
         }};
     }
-    let ty = |tys: &BTreeMap<ValueId, NTy>, v: &ValueId| tys.get(v).copied();
-    if let Some(r) = carrier::render_carrier_op(op, st, tys, out, indent) {
-        return r;
-    }
-    if let Some(r) = map::render_map_op(op, st, tys, out, indent) {
-        return r;
-    }
     match op {
-        Op::ConstInt { dst, value } => {
-            st.consts.insert(*dst, *value);
-            return Ok(false);
-        }
-        Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if used.contains(d) && args.len() == 1 => {
-            let x = args[0];
-            match ty(tys, &x) {
-                Some(t)
-                    if (is_block(t) && (st.addr_operands.contains(d) || st.stored.contains(d)))
-                        || (matches!(t, NTy::Str | NTy::StrRef) && st.stored.contains(d)) =>
-                {
-                    if st.reassigned.contains(d) {
-                        return Err(wall("native: a slot address of a reassigned local"));
-                    }
-                    st.addrs.insert(*d, Addr { base: x, off: 0, idx: None });
-                    line!("// {}: the address of {}", var(*d), var(x));
-                    return Ok(true);
-                }
-                _ => return Ok(false),
-            }
-        }
-        Op::IntBinOp { dst, op: IntOp::Add, a, b } if st.addrs.contains_key(a) || st.addrs.contains_key(b) => {
-            let (ad, other) = match (st.addrs.get(a), st.addrs.get(b)) {
-                (Some(x), None) => (*x, *b),
-                (None, Some(x)) => (*x, *a),
-                _ => return Err(wall("native: the sum of two slot addresses")),
-            };
-            let next = if let Some(c) = st.consts.get(&other) {
-                Addr { off: ad.off + c, ..ad }
-            } else if st.scaled.contains(&other) && ad.idx.is_none() {
-                Addr { idx: Some(Idx::Bytes(other)), ..ad }
-            } else {
-                return Err(wall("native: a slot address offset by an unscaled value"));
-            };
-            st.addrs.insert(*dst, next);
-            line!("// {}: {} + {} bytes", var(*dst), var(next.base), next.off);
-            return Ok(true);
-        }
-        Op::IntBinOp { dst, op: IntOp::Mul, a, b }
-            if !st.addrs.contains_key(a) && !st.addrs.contains_key(b) =>
-        {
-            let w = i64::from(SLOT_SIZE);
-            if st.consts.get(a) == Some(&w) || st.consts.get(b) == Some(&w) {
-                st.scaled.insert(*dst);
-                st.scaled_src.insert(*dst, if st.consts.get(a) == Some(&w) { *b } else { *a });
-            }
-            return Ok(false);
-        }
-        Op::Prim { kind: PrimKind::ElemAddr, dst: Some(d), args } if args.len() == 2 => {
-            let (h, i) = (args[0], args[1]);
-            let Some(ad) = st.addrs.get(&h).copied() else { return Ok(false) };
-            if ad.off != 0 || ad.idx.is_some() || !ty(tys, &ad.base).is_some_and(is_list_block) {
-                return Err(wall("native: ElemAddr off a non-block address"));
-            }
-            if ty(tys, &i) != Some(NTy::I64) {
-                return Err(wall("native: ElemAddr with a non-scalar index"));
-            }
-            line!(
-                "if {i} < 0 || {i} as usize >= {b}.len() {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}",
-                i = var(i),
-                b = var(ad.base)
-            );
-            st.addrs.insert(*d, Addr { base: ad.base, off: i64::from(BLOCK_HEADER), idx: Some(Idx::Elem(i)) });
-            crate::render_native_bounds::check(crate::render_native_bounds::Slot { base: ad.base, idx: Some(i), k: 0 });
-            return Ok(true);
-        }
-        Op::Prim { kind: PrimKind::Load { width }, dst: Some(d), args } if args.len() == 1 && st.addrs.contains_key(&args[0]) => {
-            let ad = st.addrs[&args[0]];
-            let bt = ty(tys, &ad.base);
-            if *width == 4 && ad.off == i64::from(BLOCK_LEN_OFFSET) && ad.idx.is_none() && bt.is_some_and(is_list_block) {
-                tys.insert(*d, NTy::I64);
-                line!("let mut {}: i64 = {}.len() as i64;", var(*d), var(ad.base));
-                return Ok(true);
-            }
-            if let (8, Some(i), Some(k)) = (*width, is_enum(bt), rec_slot(&ad)) {
-                if let Some((acc, t)) = enum_read(i, k, true) {
-                    tys.insert(*d, t);
-                    line!("let mut {}: i64 = {}.{acc};", var(*d), var(ad.base));
-                    return Ok(true);
-                }
-            }
-            if let (8, Some(NTy::Rec(i) | NTy::RecRef(i)), Some(k)) = (*width, bt, rec_slot(&ad)) {
-                if crate::render_native_rec::rec_field(i, k) == Some(NTy::I64) {
-                    tys.insert(*d, NTy::I64);
-                    line!("let mut {}: i64 = {}.f{k};", var(*d), var(ad.base));
-                    return Ok(true);
-                }
-            }
-            if *width == 8 && matches!(bt, Some(NTy::Vec | NTy::VecRef)) {
-                if let Some(ix) = slot_index(&ad) {
-                    let (guard, slot) = bounds_guard(st, &ad, &ix);
-                    if let Some(g) = guard {
-                        line!("{g}");
-                    }
-                    crate::render_native_bounds::access(slot);
-                    tys.insert(*d, NTy::I64);
-                    line!("let mut {}: i64 = {}[{ix}];", var(*d), var(ad.base));
-                    return Ok(true);
-                }
-            }
-            return Err(wall(format!("native: Load{{{width}}} at {ad:?} — outside the slot algebra")));
-        }
-        Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } if args.len() == 1 && st.addrs.contains_key(&args[0]) => {
-            let ad = st.addrs[&args[0]];
-            if let (Some(i), Some(k)) = (is_enum(ty(tys, &ad.base)), rec_slot(&ad)) {
-                let Some((acc, t)) = enum_read(i, k, false) else {
-                    return Err(wall("native: a heap read of an enum slot of several heap kinds"));
-                };
-                // A borrow-only read of a boxed record: a reference into the block.
-                if let NTy::Rec(j) = t {
-                    if st.borrow_reads.contains(d) && crate::render_native_rec::has_default(t) {
-                        let s = crate::render_native_rec::struct_name(j);
-                        let r = acc.replacen("()", "_ref()", 1);
-                        tys.insert(*d, NTy::RecRef(j));
-                        line!(
-                            "let {v}_d: {s}; let mut {v}: &{s} = match {b}.{r} {{ Some(r) => r, None => {{ {v}_d = {s}::default(); &{v}_d }} }};",
-                            v = var(*d),
-                            b = var(ad.base)
-                        );
-                        return Ok(true);
-                    }
-                }
-                // A borrow-only read of a list slot: a view of it. (A string
-                // slot's owned read is a shared handle already, ADR-0013.)
-                if let (true, Some((rt, spelled, empty))) = (
-                    st.borrow_reads.contains(d),
-                    match t {
-                        NTy::Vec => Some((NTy::VecRef, "&[i64]", "&[]")),
-                        NTy::VecStr => Some((NTy::VecStrRef, "&[AlmideString]", "&[]")),
-                        _ => None,
-                    },
-                ) {
-                    let r = acc.replacen("()", "_ref()", 1);
-                    tys.insert(*d, rt);
-                    line!("let mut {}: {spelled} = {}.{r}.unwrap_or({empty});", var(*d), var(ad.base));
-                    return Ok(true);
-                }
-                tys.insert(*d, t);
-                line!("let mut {}: {} = {}.{acc};", var(*d), crate::render_native_rec::owned_ty(t), var(ad.base));
-                return Ok(true);
-            }
-            if let (Some(NTy::Rec(i) | NTy::RecRef(i)), Some(k)) = (ty(tys, &ad.base), rec_slot(&ad)) {
-                if let Some(f) = crate::render_native_rec::rec_field(i, k).filter(|f| *f != NTy::I64) {
-                    // A borrow-only read (crate::render_native_borrow_read): a
-                    // reference into the record's field, where the owned read
-                    // would copy it (a string's bytes, a list's elements).
-                    if let (true, Some((t, spelled, whole))) = (st.borrow_reads.contains(d), borrowed_kind(f)) {
-                        tys.insert(*d, t);
-                        note_field(*d, ad.base, format!("{}.f{k}", var(ad.base)));
-                        line!("let mut {}: {spelled} = &{}.f{k}{whole};", var(*d), var(ad.base));
-                        return Ok(true);
-                    }
-                    tys.insert(*d, f);
-                    // The last read of the slot of an owned record moves the value out.
-                    if st.moves.contains(d) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) {
-                        line!(
-                            "let mut {}: {} = std::mem::take(&mut {}.f{k});",
-                            var(*d),
-                            crate::render_native_rec::owned_ty(f),
-                            var(ad.base)
-                        );
-                        return Ok(true);
-                    }
-                    line!(
-                        "let mut {}: {} = {}.f{k}.clone();",
-                        var(*d),
-                        crate::render_native_rec::owned_ty(f),
-                        var(ad.base)
-                    );
-                    return Ok(true);
-                }
-            }
-            if let (Some(e), Some(ix)) = (list_of(ty(tys, &ad.base)), slot_index(&ad)) {
-                if e != NTy::I64 {
-                    let (guard, slot) = bounds_guard(st, &ad, &ix);
-                    if let Some(g) = guard {
-                        line!("{g}");
-                    }
-                    crate::render_native_bounds::access(slot);
-                    if let (true, Some((t, spelled, whole))) = (st.borrow_reads.contains(d), borrowed_kind(e)) {
-                        tys.insert(*d, t);
-                        line!("let mut {}: {spelled} = &{}[{ix}]{whole};", var(*d), var(ad.base));
-                        return Ok(true);
-                    }
-                    tys.insert(*d, e);
-                    line!("let mut {}: {} = {}[{ix}].clone();", var(*d), crate::render_native_rec::owned_ty(e), var(ad.base));
-                    return Ok(true);
-                }
-            }
-            match (ty(tys, &ad.base), slot_index(&ad)) {
-                (Some(NTy::VecStr | NTy::VecStrRef), Some(ix)) => {
-                    let (guard, slot) = bounds_guard(st, &ad, &ix);
-                    if let Some(g) = guard {
-                        line!("{g}");
-                    }
-                    crate::render_native_bounds::access(slot);
-                    // A borrow-only read (render_native_borrow_read): a
-                    // reference into the list's element.
-                    if st.borrow_reads.contains(d) {
-                        tys.insert(*d, NTy::StrRef);
-                        line!("let mut {}: &str = &{}[{ix}][..];", var(*d), var(ad.base));
-                        return Ok(true);
-                    }
-                    // A borrowed alias in MIR; an owned copy here has the same
-                    // value and leaves the list free to change afterwards.
-                    tys.insert(*d, NTy::Str);
-                    line!("let mut {}: AlmideString = {}[{ix}].clone();", var(*d), var(ad.base));
-                    return Ok(true);
-                }
-                _ => return Err(wall(format!("native: LoadHandle at {ad:?} — outside the slot algebra"))),
-            }
-        }
-        Op::Prim { kind: PrimKind::Store { width }, dst: None, args } if *width != 8 && args.len() == 2 && st.addrs.contains_key(&args[0]) => {
-            return Err(wall(format!("native: Store{{{width}}} at {:?} — outside the slot algebra", st.addrs[&args[0]])));
-        }
-        Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 && st.addrs.contains_key(&args[0]) => {
-            let ad = st.addrs[&args[0]];
-            let v = args[1];
-            // A constant table's slot: already in its static.
-            if st.const_lists.contains_key(&ad.base) {
-                return Ok(true);
-            }
-            if let (Some(i), Some(NTy::Rec(_)), Some(k)) = (is_enum(ty(tys, &ad.base)), ty(tys, &ad.base), rec_slot(&ad)) {
-                use crate::render_native_rec::{enum_slot_kinds, kind_suffix, struct_name};
-                let b = var(ad.base);
-                if st.building_enum.contains_key(&ad.base) {
-                    return build_enum_slot(st, tys, out, indent, ad.base, i, k, v);
-                }
-                if k == 0 {
-                    if st.addrs.contains_key(&v) || ty(tys, &v) != Some(NTy::I64) {
-                        return Err(wall("native: a non-scalar enum tag"));
-                    }
-                    line!("{b} = {}::with_tag({});", struct_name(i), var(v));
-                    return Ok(true);
-                }
-                let kinds = enum_slot_kinds(i, k);
-                match (st.addrs.get(&v).copied(), ty(tys, &v)) {
-                    (None, Some(NTy::I64)) if kinds.contains(&NTy::I64) => line!("{b}.set_s{k}_i({});", var(v)),
-                    (None, Some(NTy::F64)) if kinds.contains(&NTy::I64) => line!("{b}.set_s{k}_i({}.to_bits() as i64);", var(v)),
-                    (Some(sv), _) if sv.off == 0 && sv.idx.is_none() => {
-                        let g = ty(tys, &sv.base).ok_or_else(|| wall("native: an untyped enum payload"))?;
-                        let fits: Vec<NTy> = kinds.into_iter().filter(|f| field_accepts(*f, g)).collect();
-                        let [f] = fits.as_slice() else {
-                            return Err(wall(format!("native: a {g:?} payload fits no single kind of an enum slot")));
-                        };
-                        let rhs = owned_from(&var(sv.base), g).ok_or_else(|| wall("native: an unowned enum payload"))?;
-                        line!("{b}.set_s{k}_{}({rhs});", kind_suffix(*f));
-                    }
-                    (_, g) => return Err(wall(format!("native: a {g:?} value stored into an enum slot"))),
-                }
-                return Ok(true);
-            }
-            if let (Some(NTy::Rec(i)), Some(k), None) = (ty(tys, &ad.base), rec_slot(&ad), list_of(ty(tys, &ad.base))) {
-                let field = crate::render_native_rec::rec_field(i, k)
-                    .ok_or_else(|| wall("native: a store past a record's last field"))?;
-                let rhs = match (field, st.addrs.get(&v).copied(), ty(tys, &v)) {
-                    (NTy::I64, None, Some(NTy::I64)) => var(v),
-                    (NTy::I64, None, Some(NTy::F64)) => format!("{}.to_bits() as i64", var(v)),
-                    // A scalar Option field takes the `Option<i64>` by value.
-                    (NTy::Opt, None, Some(NTy::Opt)) => var(v),
-                    (f, Some(sv), _) if sv.off == 0 && sv.idx.is_none() => match ty(tys, &sv.base) {
-                        Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g)
-                            .ok_or_else(|| wall("native: a record field write of an unowned kind"))?,
-                        // `[]` into a field of another list type: that type's empty list.
-                        Some(NTy::Vec)
-                            if st.empty_lists.contains(&sv.base)
-                                && (f == NTy::VecStr || matches!(f, NTy::Rec(i) if crate::render_native_rec::list_elem(i).is_some())) =>
-                        {
-                            "Vec::new()".to_string()
-                        }
-                        g => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
-                    },
-                    (f, _, g) => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
-                };
-                if let Some(done) = st.building.get_mut(&ad.base) {
-                    // A struct built whole: the field waits in its own local
-                    // until the last one is stored.
-                    let b = var(ad.base);
-                    line!("let mut {b}_f{k}: {} = {rhs};", crate::render_native_rec::owned_ty(field));
-                    done[k] = true;
-                    if done.iter().all(|d| *d) {
-                        let fields = (0..done.len()).map(|f| format!("f{f}: {b}_f{f}")).collect::<Vec<_>>().join(", ");
-                        line!("{b} = {} {{ {fields} }};", crate::render_native_rec::struct_name(i));
-                        st.building.remove(&ad.base);
-                    }
-                    return Ok(true);
-                }
-                line!("{}.f{k} = {rhs};", var(ad.base));
-                return Ok(true);
-            }
-            let Some(ix) = slot_index(&ad) else {
-                return Err(wall(format!("native: Store at {ad:?} — outside the slot algebra")));
-            };
-            // A list of scalar Options takes the `Option<i64>` by value.
-            let by_value = |e: NTy| e == NTy::Opt && ty(tys, &v) == Some(NTy::Opt) && !st.addrs.contains_key(&v);
-            if let (Some(NTy::Rec(_)), Some(e)) = (ty(tys, &ad.base), list_of(ty(tys, &ad.base)).filter(|e| st.addrs.contains_key(&v) || by_value(*e))) {
-                let rhs = match st.addrs.get(&v).copied() {
-                    None => var(v),
-                    Some(sv) => {
-                        let g = ty(tys, &sv.base).filter(|g| sv.off == 0 && sv.idx.is_none() && field_accepts(e, *g));
-                        g.and_then(|g| owned_from(&var(sv.base), g)).ok_or_else(|| {
-                            wall(format!("native: a {:?} element stored into a list of {e:?}", ty(tys, &sv.base)))
-                        })?
-                    }
-                };
-                if let Some((n, k)) = st.literal.get(&ad.base).copied() {
-                    let b = var(ad.base);
-                    line!("let {b}_e{k}: {} = {rhs};", crate::render_native_rec::owned_ty(e));
-                    st.literal.insert(ad.base, (n, k + 1));
-                    if k + 1 == n {
-                        let es: Vec<String> = (0..n).map(|j| format!("{b}_e{j}")).collect();
-                        line!("let mut {b}: {} = vec![{}];", owned_ty_of(ty(tys, &ad.base)), es.join(", "));
-                    }
-                    return Ok(true);
-                }
-                if st.pushed.contains(&ad.base) {
-                    line!("{}.push({rhs});", var(ad.base));
-                    return Ok(true);
-                }
-                let (guard, slot) = bounds_guard(st, &ad, &ix);
-                if let Some(g) = guard {
-                    line!("{g}");
-                }
-                crate::render_native_bounds::store(slot);
-                line!("{}[{ix}] = {rhs};", var(ad.base));
-                return Ok(true);
-            }
-            match (ty(tys, &ad.base), st.addrs.get(&v).copied()) {
-                (Some(NTy::VecStr), Some(sv)) if sv.off == 0 && sv.idx.is_none() => {
-                    // The stored handle is Consumed by the list: move it in.
-                    let rhs = match ty(tys, &sv.base) {
-                        Some(NTy::Str) => crate::render_native_move::take_expr(&var(sv.base)),
-                        Some(NTy::StrRef) => format!("AlmideString::from({})", var(sv.base)),
-                        other => return Err(wall(format!("native: a {other:?} handle stored into a List[String] slot"))),
-                    };
-                    if let Some(done) = st.single.get_mut(&ad.base) {
-                        line!("let mut {}_e0: AlmideString = {rhs};", var(ad.base));
-                        *done = true;
-                        return Ok(true);
-                    }
-                    if st.pushed.contains(&ad.base) {
-                        line!("{}.push({rhs});", var(ad.base));
-                        return Ok(true);
-                    }
-                    let (guard, slot) = bounds_guard(st, &ad, &ix);
-                    if let Some(g) = guard {
-                        line!("{g}");
-                    }
-                    crate::render_native_bounds::store(slot);
-                    line!("{}[{ix}] = {rhs};", var(ad.base));
-                    return Ok(true);
-                }
-                (Some(NTy::Vec), None) if ty(tys, &v) == Some(NTy::I64) => {
-                    if st.pushed.contains(&ad.base) {
-                        line!("{}.push({});", var(ad.base), var(v));
-                        return Ok(true);
-                    }
-                    let (guard, slot) = bounds_guard(st, &ad, &ix);
-                    if let Some(g) = guard {
-                        line!("{g}");
-                    }
-                    crate::render_native_bounds::store(slot);
-                    line!("{}[{ix}] = {};", var(ad.base), var(v));
-                    return Ok(true);
-                }
-                (bt, sv) => {
-                    return Err(wall(format!(
-                        "native: Store of {:?}/{:?} into a {bt:?} block at {ad:?} — outside the slot algebra",
-                        ty(tys, &v),
-                        sv.map(|a| ty(tys, &a.base))
-                    )))
-                }
-            }
-        }
         // A typed empty container: its type's empty value.
         Op::Alloc { dst, init: Init::Empty, .. }
             if st.alloc_rec.get(dst).is_some_and(|i| crate::render_native_rec::has_default(NTy::Rec(*i))) =>
@@ -1066,16 +736,16 @@ pub(crate) fn render_addr_op(
             let i = st.alloc_rec[dst];
             tys.insert(*dst, NTy::Rec(i));
             line!("let mut {}: {} = Default::default();", var(*dst), crate::render_native_rec::struct_name(i));
-            return Ok(true);
+            Some(true)
+        }
+        // A literal only a constant table is filled from: in the static.
+        Op::Alloc { dst, init: Init::Str(_), .. } if st.const_elems.contains(dst) => {
+            tys.insert(*dst, NTy::Str);
+            Some(true)
         }
         // A constant string table: built once, on its first use, from the
         // immortal static string blocks (never written, so thread-safe), and
         // borrowed — the lazy static v0 keeps for a top-level `let` table.
-        // A literal only a constant table is filled from: in the static.
-        Op::Alloc { dst, init: Init::Str(_), .. } if st.const_elems.contains(dst) => {
-            tys.insert(*dst, NTy::Str);
-            return Ok(true);
-        }
         Op::Alloc { dst, init: Init::DynListStr { .. }, .. } if st.const_lists.contains_key(dst) => {
             tys.insert(*dst, NTy::VecStrRef);
             let elems: Vec<String> = st.const_lists[dst]
@@ -1094,263 +764,132 @@ pub(crate) fn render_addr_op(
                 k = format!("ALMD_TABLE_{}", var(*dst))
             );
             line!("let {}: &Vec<AlmideString> = &*ALMD_TABLE_{};", var(*dst), var(*dst));
-            return Ok(true);
+            Some(true)
         }
-        Op::Alloc { dst, init: Init::DynListStr { len }, .. } if ty(tys, len) == Some(NTy::I64) && !st.alloc_rec.contains_key(dst) => {
-            tys.insert(*dst, NTy::VecStr);
-            if st.single.contains_key(dst) {
-                line!("// {}: a one-element list, its element pushed at the append", var(*dst));
-                return Ok(true);
-            }
-            if st.pushed.contains(dst) {
-                line!("let mut {}: Vec<AlmideString> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
-                return Ok(true);
-            }
-            line!(
-                "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
-                var(*dst),
-                var(*len)
-            );
-            return Ok(true);
-        }
-        Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. }
-            if st.alloc_rec.get(dst).is_some_and(|i| crate::render_native_rec::list_elem(*i).is_some()) =>
-        {
-            let i = st.alloc_rec[dst];
-            tys.insert(*dst, NTy::Rec(i));
-            if st.pushed.contains(dst) {
-                // A constant length (filled_in_order requires one): the list
-                // is one `vec![…]` once its last element is stored.
-                if let Some(n) = st.consts.get(len).and_then(|n| usize::try_from(*n).ok()) {
-                    st.literal.insert(*dst, (n, 0));
-                    line!("// {}: a list of {n}, built whole at its last element", var(*dst));
-                    return Ok(true);
-                }
-                line!("let mut {}: {} = Vec::with_capacity({}.max(0) as usize);", var(*dst), crate::render_native_rec::struct_name(i), var(*len));
-                return Ok(true);
-            }
-            line!(
-                "let mut {}: {} = (0..{}.max(0)).map(|_| Default::default()).collect();",
-                var(*dst),
-                crate::render_native_rec::struct_name(i),
-                var(*len)
-            );
-            return Ok(true);
-        }
-        Op::Alloc { dst, init: Init::DynList { .. }, .. } if st.alloc_rec.contains_key(dst) => {
-            let i = st.alloc_rec[dst];
-            tys.insert(*dst, NTy::Rec(i));
-            if let (true, Some(n)) = (st.whole.contains(dst), slots::struct_width(i)) {
-                line!("let mut {}: {};", var(*dst), crate::render_native_rec::struct_name(i));
-                st.building.insert(*dst, vec![false; n]);
-                return Ok(true);
-            }
-            if let Some(&(t, n)) = st.whole_enum.get(dst) {
-                line!("let mut {}: {};", var(*dst), crate::render_native_rec::struct_name(i));
-                st.building_enum.insert(*dst, (t, vec![None; n]));
-                return Ok(true);
-            }
-            line!("let mut {}: {} = Default::default();", var(*dst), crate::render_native_rec::struct_name(i));
-            return Ok(true);
-        }
-        Op::ListGetScalar { dst, list, idx } if is_enum(ty(tys, list)).is_some() => {
-            let (Some(i), Some(&k)) = (is_enum(ty(tys, list)), st.consts.get(idx)) else {
-                return Err(wall("native: an enum slot read at a computed slot"));
-            };
-            let (acc, _) = enum_read(i, k as usize, true).ok_or_else(|| wall("native: a scalar read of a heap enum slot"))?;
-            tys.insert(*dst, NTy::I64);
-            line!("let mut {}: i64 = {}.{acc};", var(*dst), var(*list));
-            return Ok(true);
-        }
-        Op::ListLit { dst, elems } if st.alloc_rec.get(dst).is_some_and(|i| crate::render_native_rec::all_scalar_struct(*i)) => {
-            // An all-scalar struct literal: slot K is field `fK` (a real f64
-            // goes in as its bits, the value the MIR stores there).
-            let i = st.alloc_rec[dst];
-            let mut fields = Vec::with_capacity(elems.len());
-            for (k, e) in elems.iter().enumerate() {
-                fields.push(match ty(tys, e) {
-                    Some(NTy::I64) => format!("f{k}: {}", var(*e)),
-                    Some(NTy::F64) => format!("f{k}: {}.to_bits() as i64", var(*e)),
-                    _ => return Err(wall("native: a heap element in an all-scalar struct literal")),
-                });
-            }
-            if fields.len() != crate::render_native_rec::field_count(i) {
-                return Err(wall("native: a struct literal of the wrong width"));
-            }
-            tys.insert(*dst, NTy::Rec(i));
-            line!("let mut {}: {n} = {n} {{ {} }};", var(*dst), fields.join(", "), n = crate::render_native_rec::struct_name(i));
-            return Ok(true);
-        }
-        Op::ListLit { dst, elems } if st.alloc_rec.contains_key(dst) => {
-            let i = st.alloc_rec[dst];
-            if elems.iter().any(|e| ty(tys, e) != Some(NTy::I64)) {
-                return Err(wall("native: a heap element in an enum slot list"));
-            }
-            tys.insert(*dst, NTy::Rec(i));
-            let items = elems.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ");
-            line!("let mut {}: {n} = {n}::from_slots(&[{items}]);", var(*dst), n = crate::render_native_rec::struct_name(i));
-            return Ok(true);
-        }
-        Op::ListGetScalar { dst, list, idx } if matches!(ty(tys, list), Some(NTy::Rec(_) | NTy::RecRef(_))) => {
-            let (Some(NTy::Rec(i) | NTy::RecRef(i)), Some(&k)) = (ty(tys, list), st.consts.get(idx)) else {
-                return Err(wall("native: a record field read at a computed slot"));
-            };
-            if crate::render_native_rec::rec_field(i, k as usize) != Some(NTy::I64) {
-                return Err(wall("native: a scalar read of a heap record field"));
-            }
-            tys.insert(*dst, NTy::I64);
-            line!("let mut {}: i64 = {}.f{k};", var(*dst), var(*list));
-            return Ok(true);
-        }
-        Op::ListSetScalar { list, idx, val } if matches!(ty(tys, list), Some(NTy::Rec(_) | NTy::RecRef(_))) => {
-            let (Some(NTy::Rec(i)), Some(&k)) = (ty(tys, list), st.consts.get(idx)) else {
-                return Err(wall("native: a record field write on a borrowed record or at a computed slot"));
-            };
-            if crate::render_native_rec::rec_field(i, k as usize) != Some(NTy::I64) || ty(tys, val) != Some(NTy::I64) {
-                return Err(wall("native: a scalar write of a heap record field"));
-            }
-            line!("{}.f{k} = {};", var(*list), var(*val));
-            return Ok(true);
-        }
-        Op::Alloc { dst, init: Init::DynList { len }, .. } if ty(tys, len) == Some(NTy::I64) && st.str_lists.contains(dst) => {
-            tys.insert(*dst, NTy::VecStr);
-            if st.pushed.contains(dst) {
-                line!("let mut {}: Vec<AlmideString> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
-                return Ok(true);
-            }
-            line!(
-                "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
-                var(*dst),
-                var(*len)
-            );
-            return Ok(true);
-        }
-        Op::Alloc { dst, init: Init::DynList { len }, .. } if ty(tys, len) == Some(NTy::I64) => {
-            tys.insert(*dst, NTy::Vec);
-            if st.pushed.contains(dst) {
-                line!("let mut {}: Vec<i64> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
-                return Ok(true);
-            }
-            line!("let mut {}: Vec<i64> = vec![0i64; {}.max(0) as usize];", var(*dst), var(*len));
-            return Ok(true);
-        }
-        _ => {}
+        _ => None,
     }
-    // Any other op that reads a symbolic address would see a number native
-    // does not have.
-    let mut reads = Vec::new();
-    crate::mir_ops::op_reads(op, &mut reads);
-    if let Some(v) = reads.iter().find(|v| st.addrs.contains_key(v)) {
-        return Err(wall(format!(
-            "native: slot address {} escapes into {:?} — outside the slot algebra",
-            var(*v),
-            std::mem::discriminant(op)
-        )));
+}
+
+/// `Alloc{DynListStr}` of an untyped block: a string list.
+fn alloc_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
+    let AddrSink { st, tys, out, indent } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
     }
-    Ok(false)
-}
-
-/// The string literals a constant table (`const_str_lists`) is filled from
-/// and nothing else reads: each one's whole life is the handle the table's
-/// store takes and its hand-over into the block. The table is built once, in
-/// its static, so the render writes nothing for them — materializing each one
-/// per call only to release it was the table's whole per-call cost.
-fn const_list_elems(
-    func: &MirFunction,
-    tables: &BTreeSet<ValueId>,
-    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
-) -> BTreeSet<ValueId> {
-    let handle_of: BTreeMap<ValueId, ValueId> = func
-        .ops
-        .iter()
-        .filter_map(|op| match op {
-            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => Some((*d, args[0])),
-            _ => None,
-        })
-        .collect();
-    let stored: BTreeSet<ValueId> = func
-        .ops
-        .iter()
-        .filter_map(|op| match op {
-            Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. }
-                if args.len() == 2 && args.first().and_then(|a| base_of.get(a)).is_some_and(|(r, _)| tables.contains(r)) =>
-            {
-                handle_of.get(&args[1]).copied()
-            }
-            _ => None,
-        })
-        .collect();
-    let is_lit = |e: &ValueId| func.ops.iter().any(|op| matches!(op, Op::Alloc { dst, init: Init::Str(_), .. } if dst == e));
-    stored
-        .into_iter()
-        .filter(|e| {
-            is_lit(e)
-                && func.ops.iter().all(|op| {
-                    let mut reads = Vec::new();
-                    crate::mir_ops::op_reads(op, &mut reads);
-                    !reads.contains(e)
-                        || matches!(op, Op::Prim { kind: PrimKind::Handle, args, .. } if args.as_slice() == [*e])
-                        || matches!(op, Op::Consume { v } if v == e)
-                })
-        })
-        .collect()
-}
-
-thread_local! {
-    static CONST_LISTS: std::cell::RefCell<BTreeSet<ValueId>> = const { std::cell::RefCell::new(BTreeSet::new()) };
-}
-
-fn set_const_lists(s: BTreeSet<ValueId>) {
-    CONST_LISTS.with(|c| *c.borrow_mut() = s);
-}
-
-/// A constant string table of the function being rendered: borrowed from its
-/// static, so its release is nothing.
-pub(crate) fn is_const_list(v: ValueId) -> bool {
-    CONST_LISTS.with(|c| c.borrow().contains(&v))
-}
-
-/// The `Handle`s of reassigned locals that could go stale: some address
-/// derived from the handle (by an offset or `ElemAddr`) is read at or after a
-/// `SetLocal` of the local, or a loop edge lies between the handle and a read
-/// of it. Every other handle of a reassigned local reads the one value the
-/// local holds over the handle's whole live range, as its rendered variable does.
-fn stale_handles(func: &MirFunction) -> BTreeSet<ValueId> {
-    let set_at: Vec<(usize, ValueId)> = func
-        .ops
-        .iter()
-        .enumerate()
-        .filter_map(|(i, op)| match op {
-            Op::SetLocal { local, .. } => Some((i, *local)),
-            _ => None,
-        })
-        .collect();
-    let mut stale = BTreeSet::new();
-    for (i, op) in func.ops.iter().enumerate() {
-        let Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } = op else { continue };
-        let Some(&x) = args.first() else { continue };
-        if !set_at.iter().any(|(_, l)| *l == x) {
-            continue;
-        }
-        // The handle and every address derived from it, and where each is last read.
-        let mut derived: BTreeSet<ValueId> = BTreeSet::from([*d]);
-        let mut last = i;
-        for (j, later) in func.ops.iter().enumerate().skip(i + 1) {
-            let mut reads = Vec::new();
-            crate::mir_ops::op_reads(later, &mut reads);
-            if !reads.iter().any(|v| derived.contains(v)) {
-                continue;
-            }
-            last = j;
-            if let Op::IntBinOp { dst, op: IntOp::Add, .. } | Op::Prim { kind: PrimKind::ElemAddr, dst: Some(dst), .. } = later {
-                derived.insert(*dst);
-            }
-        }
-        let crosses = func.ops[i..=last].iter().any(|o| matches!(o, Op::LoopStart | Op::LoopEnd))
-            || set_at.iter().any(|(k, l)| *l == x && *k > i && *k <= last);
-        if crosses {
-            stale.insert(*d);
-        }
+    tys.insert(*dst, NTy::VecStr);
+    if st.single.contains_key(dst) {
+        line!("// {}: a one-element list, its element pushed at the append", var(*dst));
+        return true;
     }
-    stale
+    if st.pushed.contains(dst) {
+        line!("let mut {}: Vec<AlmideString> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
+        return true;
+    }
+    line!(
+        "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
+        var(*dst),
+        var(*len)
+    );
+    true
 }
+
+/// A list alloc whose declared type is a generated list.
+fn alloc_rec_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
+    let AddrSink { st, tys, out, indent } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    let i = st.alloc_rec[dst];
+    tys.insert(*dst, NTy::Rec(i));
+    if st.pushed.contains(dst) {
+        // A constant length (filled_in_order requires one): the list
+        // is one `vec![…]` once its last element is stored.
+        if let Some(n) = st.consts.get(len).and_then(|n| usize::try_from(*n).ok()) {
+            st.literal.insert(*dst, (n, 0));
+            line!("// {}: a list of {n}, built whole at its last element", var(*dst));
+            return true;
+        }
+        line!("let mut {}: {} = Vec::with_capacity({}.max(0) as usize);", var(*dst), crate::render_native_rec::struct_name(i), var(*len));
+        return true;
+    }
+    line!(
+        "let mut {}: {} = (0..{}.max(0)).map(|_| Default::default()).collect();",
+        var(*dst),
+        crate::render_native_rec::struct_name(i),
+        var(*len)
+    );
+    true
+}
+
+/// A `DynList` alloc whose declared type is a record or an enum.
+fn alloc_rec_block(s: AddrSink<'_>, dst: &ValueId) -> bool {
+    let AddrSink { st, tys, out, indent } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    let i = st.alloc_rec[dst];
+    tys.insert(*dst, NTy::Rec(i));
+    if let (true, Some(n)) = (st.whole.contains(dst), slots::struct_width(i)) {
+        line!("let mut {}: {};", var(*dst), crate::render_native_rec::struct_name(i));
+        st.building.insert(*dst, vec![false; n]);
+        return true;
+    }
+    if let Some(&(t, n)) = st.whole_enum.get(dst) {
+        line!("let mut {}: {};", var(*dst), crate::render_native_rec::struct_name(i));
+        st.building_enum.insert(*dst, (t, vec![None; n]));
+        return true;
+    }
+    line!("let mut {}: {} = Default::default();", var(*dst), crate::render_native_rec::struct_name(i));
+    true
+}
+
+/// A `DynList` alloc every stored element of which is a string.
+fn alloc_typed_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
+    let AddrSink { st, tys, out, indent } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    tys.insert(*dst, NTy::VecStr);
+    if st.pushed.contains(dst) {
+        line!("let mut {}: Vec<AlmideString> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
+        return true;
+    }
+    line!(
+        "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
+        var(*dst),
+        var(*len)
+    );
+    true
+}
+
+/// A `DynList` alloc of scalars.
+fn alloc_scalar_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
+    let AddrSink { st, tys, out, indent } = s;
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    tys.insert(*dst, NTy::Vec);
+    if st.pushed.contains(dst) {
+        line!("let mut {}: Vec<i64> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
+        return true;
+    }
+    line!("let mut {}: Vec<i64> = vec![0i64; {}.max(0) as usize];", var(*dst), var(*len));
+    true
+}
+
+include!("render_native_addr_op.rs");

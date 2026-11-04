@@ -10,7 +10,7 @@
 
 use crate::lower::LowerError;
 use crate::render_native::{var, wall, NTy, NativeSigKind, NativeSigs};
-use crate::{CallArg, MirFunction, Repr, ValueId};
+use crate::{CallArg, MirFunction, Op, Repr, ValueId};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -95,13 +95,17 @@ fn lambda_sig(sigs: &NativeSigs, name: &str) -> Option<(Vec<NativeSigKind>, Opti
     Some((ps.get(1..)?.to_vec(), *r))
 }
 
+/// The typed dispatch tables by signature key: the param kinds, the result,
+/// and the (table index, name) of every lambda of that signature.
+type DispatchTables<'a> = BTreeMap<String, (Vec<NativeSigKind>, Option<NativeSigKind>, Vec<(usize, &'a str)>)>;
+
 /// The typed dispatch tables: one per signature that some lambda has.
 pub(crate) fn push_typed_dispatch_tables(
     out: &mut String,
     user_fns: &BTreeMap<&str, &MirFunction>,
     sigs: &NativeSigs,
 ) {
-    let mut tables: BTreeMap<String, (Vec<NativeSigKind>, Option<NativeSigKind>, Vec<(usize, &str)>)> = BTreeMap::new();
+    let mut tables: DispatchTables<'_> = BTreeMap::new();
     let lambdas = user_fns.keys().copied().filter(|n| n.starts_with("__lambda_"));
     for (idx, name) in lambdas.enumerate() {
         let Some((ps, ret)) = lambda_sig(sigs, name) else { continue };
@@ -120,20 +124,8 @@ pub(crate) fn push_typed_dispatch_tables(
     }
 }
 
-/// A `CallIndirect` with a heap arg or result, through its signature's table.
-/// `Ok(false)`: an all-scalar call (the per-arity tables serve it).
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn render_typed_call_indirect(
-    dst: &Option<ValueId>,
-    table_idx: &ValueId,
-    args: &[CallArg],
-    result: &Option<Repr>,
-    sigs: &NativeSigs,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-) -> Result<bool, LowerError> {
-    let Some((CallArg::Handle(env), rest)) = args.split_first() else { return Ok(false) };
+/// A `CallIndirect`'s non-env args: each one's sig kind and its rendered code.
+fn indirect_args(rest: &[CallArg], tys: &BTreeMap<ValueId, NTy>) -> Result<(Vec<NativeSigKind>, Vec<String>), LowerError> {
     let mut kinds = Vec::new();
     let mut codes = Vec::new();
     for a in rest {
@@ -151,29 +143,54 @@ pub(crate) fn render_typed_call_indirect(
             _ => code,
         });
     }
+    Ok((kinds, codes))
+}
+
+/// The result kind: the one every lambda of these param kinds returns.
+fn indirect_ret(sigs: &NativeSigs, kinds: &[NativeSigKind], dst: &Option<ValueId>) -> Result<Option<NativeSigKind>, LowerError> {
+    let mut rets: Vec<Option<NativeSigKind>> = Vec::new();
+    for (name, (ps, r)) in sigs.iter() {
+        if name.starts_with("__lambda_") && ps.get(1..) == Some(kinds) && !rets.contains(r) {
+            rets.push(*r);
+        }
+    }
+    match (dst, rets.as_slice()) {
+        (_, [one]) => Ok(*one),
+        (None, _) => Err(wall("native: a dropped closure result of several kinds")),
+        (Some(_), _) => Err(wall("native: a closure call whose result kind no lambda signature fixes")),
+    }
+}
+
+/// The closure env as the table fn takes it (a borrowed block).
+fn indirect_env(env: &ValueId, tys: &BTreeMap<ValueId, NTy>) -> Result<String, LowerError> {
+    let et = *tys.get(env).ok_or_else(|| wall("native: CallIndirect env untyped"))?;
+    match et {
+        NTy::Vec => Ok(format!("&{}", var(*env))),
+        NTy::VecRef => Ok(var(*env)),
+        _ => Err(wall("native: CallIndirect env is not a closure block")),
+    }
+}
+
+/// A `CallIndirect` with a heap arg or result, through its signature's table.
+/// `Ok(false)`: an all-scalar call (the per-arity tables serve it), or `op`
+/// is no `CallIndirect`.
+pub(crate) fn render_typed_call_indirect(
+    op: &Op,
+    sigs: &NativeSigs,
+    tys: &mut BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    indent: usize,
+) -> Result<bool, LowerError> {
+    let Op::CallIndirect { dst, table_idx, args, result } = op else { return Ok(false) };
+    let Some((CallArg::Handle(env), rest)) = args.split_first() else { return Ok(false) };
+    let (kinds, codes) = indirect_args(rest, tys)?;
     let scalar_result = matches!(result, Some(Repr::Scalar { .. }));
     if kinds.iter().all(|k| *k == NativeSigKind::I64) && (scalar_result || dst.is_none()) {
         return Ok(false);
     }
-    // The result kind: the one every lambda of these param kinds returns.
-    let mut rets: Vec<Option<NativeSigKind>> = Vec::new();
-    for (name, (ps, r)) in sigs.iter() {
-        if name.starts_with("__lambda_") && ps.get(1..) == Some(kinds.as_slice()) && !rets.contains(r) {
-            rets.push(*r);
-        }
-    }
-    let ret = match (dst, rets.as_slice()) {
-        (_, [one]) => *one,
-        (None, _) => return Err(wall("native: a dropped closure result of several kinds")),
-        (Some(_), _) => return Err(wall("native: a closure call whose result kind no lambda signature fixes")),
-    };
+    let ret = indirect_ret(sigs, &kinds, dst)?;
     let Some(key) = sig_key(&kinds, ret) else { return Ok(false) };
-    let et = *tys.get(env).ok_or_else(|| wall("native: CallIndirect env untyped"))?;
-    let env_code = match et {
-        NTy::Vec => format!("&{}", var(*env)),
-        NTy::VecRef => var(*env),
-        _ => return Err(wall("native: CallIndirect env is not a closure block")),
-    };
+    let env_code = indirect_env(env, tys)?;
     let call = format!(
         "__almd_ci_{key}({}, {env_code}{})",
         var(*table_idx),

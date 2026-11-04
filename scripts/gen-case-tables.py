@@ -37,20 +37,45 @@ for kind, cp, targets in held:
     print(f"held back ({kind}): U+{cp:04X} -> " + " ".join(f"U+{t:04X}" for t in targets), file=sys.stderr)
 
 def build(mapping):
-    """entries: (cp, val) with val = target cp, or 0xF00000+idx into specials"""
+    """The mapping as RUNS (#4198): (start, target, count, stride) — `count`
+    codepoints start, start+stride, … map to target, target+stride, …
+    (a constant delta: Latin/Cyrillic blocks are stride 1, the alternating
+    upper/lower pairs stride 2). A 1:N SpecialCasing row is a run of one whose
+    target is 0xF00000+idx into the specials table. ASCII rows are dropped:
+    the walk's arithmetic fast path never looks them up. Runs are disjoint
+    intervals in sorted order (an entry inside a run's span always ends it),
+    so the lookup is "the last run whose start <= cp, if cp lands on its
+    stride". Every input row is re-derived from the runs before writing."""
     specials = []
-    entries = []
+    runs = []  # [start, target, count, stride]
     for cp in sorted(mapping):
+        if cp < 128:
+            continue
         t = mapping[cp]
-        if len(t) == 1:
-            entries.append((cp, t[0]))
-        else:
-            idx = len(specials)
+        if len(t) != 1:
             specials.append(t + [0] * (3 - len(t)))
-            entries.append((cp, 0xF00000 + idx))
-    tbl = ''.join(f'{cp:06X}{val:06X}' for cp, val in entries)
+            runs.append([cp, 0xF00000 + len(specials) - 1, 1, 1])
+            continue
+        tgt = t[0]
+        if runs and runs[-1][1] < 0xF00000:
+            r = runs[-1]
+            d = cp - r[0]
+            if r[2] == 1 and d in (1, 2) and tgt - r[1] == d:
+                r[2], r[3] = 2, d
+                continue
+            if r[2] > 1 and r[2] < 255 and cp == r[0] + r[2] * r[3] and tgt == r[1] + (cp - r[0]):
+                r[2] += 1
+                continue
+        runs.append([cp, tgt, 1, 1])
+    # Self-check: the runs reproduce every non-ASCII row, and nothing else.
+    got = {}
+    for s0, tg, n, st in runs:
+        for k in range(n):
+            got[s0 + k * st] = [tg + k * st] if tg < 0xF00000 else [c for c in specials[tg - 0xF00000] if c]
+    assert got == {cp: t for cp, t in mapping.items() if cp >= 128}, 'run encoding lost a row'
+    tbl = ''.join(f'{s0:06X}{tg:06X}{n:02X}{st:X}' for s0, tg, n, st in runs)
     sp = ''.join(f'{a:06X}{b:06X}{c:06X}' for a, b, c in specials)
-    return tbl, sp, len(entries)
+    return tbl, sp, len(runs)
 
 def emit(name, rust_name, mapping, ascii_lo, ascii_hi, ascii_delta, sigma=None):
     tbl, sp, n = build(mapping)
@@ -85,13 +110,16 @@ def emit(name, rust_name, mapping, ascii_lo, ascii_hi, ascii_delta, sigma=None):
 // non-ASCII scalar into ASCII (C-412: such a scalar stays unchanged; {nheld} rows
 // held back). The mapping table is GENERATED
 // FROM RUST ITSELF (scratch casedump: every codepoint where {rust_name} != identity,
-// {n} entries incl. 1:N SpecialCasing like ΐ→Ϊ́) so the two implementations
-// cannot drift — regenerate with scripts/gen-case-tables.py when the Rust
-// toolchain's Unicode version changes. Encoding: a sorted fixed-width hex
-// string, 12 hex chars per entry = [cp:6][target:6]; target >= 0xF00000 is an
-// index into the 18-hex-wide specials table [c1:6][c2:6][c3:6] (zero-padded).
-// Lookup = binary search over the literal (static data, no per-call parse);
-// ASCII takes the arithmetic fast path and never reaches the table.
+// non-ASCII rows incl. 1:N SpecialCasing like ΐ→Ϊ́, as {n} runs) so the two
+// implementations cannot drift — regenerate with scripts/gen-case-tables.py
+// when the Rust toolchain's Unicode version changes. Encoding (#4198): a sorted
+// fixed-width hex string of RUNS, 15 hex chars each =
+// [start:6][target:6][count:2][stride:1] — codepoint start + k*stride maps to
+// target + k*stride for k < count (a constant-delta block); target >= 0xF00000
+// is an index into the 18-hex-wide specials table [c1:6][c2:6][c3:6]
+// (zero-padded). Lookup = binary search for the last run starting at or below
+// the codepoint (static data, no per-call parse); ASCII takes the arithmetic
+// fast path and never reaches the table.
 
 fn __{name}_h1(b: Int) -> Int =
   if b <= 57 then b - 48 else b - 55
@@ -101,15 +129,28 @@ fn __{name}_rd6(a: Int) -> Int =
     + __{name}_h1(prim.load8(a + 2)) * 4096 + __{name}_h1(prim.load8(a + 3)) * 256
     + __{name}_h1(prim.load8(a + 4)) * 16 + __{name}_h1(prim.load8(a + 5))
 
+// The index of the last run whose start <= cp, or -1.
 fn __{name}_find(th: Int, lo: Int, hi: Int, cp: Int) -> Int =
-  if lo >= hi then 0 - 1
+  if lo >= hi then lo - 1
   else {{
     let mid = (lo + hi) / 2
-    let e = __{name}_rd6(th + mid * 12)
-    if e == cp then mid
-    else if e < cp then __{name}_find(th, mid + 1, hi, cp)
+    if __{name}_rd6(th + mid * 15) <= cp then __{name}_find(th, mid + 1, hi, cp)
     else __{name}_find(th, lo, mid, cp)
   }}
+
+// cp's mapped value (a codepoint, or 0xF00000+idx into the specials), or -1
+// when cp maps to itself.
+fn __{name}_map(th: Int, nent: Int, cp: Int) -> Int = {{
+  let i = __{name}_find(th, 0, nent, cp)
+  if i < 0 then 0 - 1
+  else {{
+    let a = th + i * 15
+    let k = cp - __{name}_rd6(a)
+    let n = __{name}_h1(prim.load8(a + 12)) * 16 + __{name}_h1(prim.load8(a + 13))
+    let st = __{name}_h1(prim.load8(a + 14))
+    if k % st == 0 and k / st < n then __{name}_rd6(a + 6) + k else 0 - 1
+  }}
+}}
 
 fn __{name}_cp(addr: Int) -> (Int, Int) = {{
   let b0 = prim.load8(addr)
@@ -153,13 +194,12 @@ fn __{name}_walk(p: Int, end: Int, th: Int, nent: Int, sh: Int, dh: Int, o: Int{
     }}
     else {{
       let (cp, l) = __{name}_cp(p)
-{sigma_arm}      let idx = __{name}_find(th, 0, nent, cp)
-      if idx < 0 then {{
+{sigma_arm}      let v = __{name}_map(th, nent, cp)
+      if v < 0 then {{
         let w = __{name}_w(dh, o, cp)
         __{name}_walk(p + l, end, th, nent, sh, dh, o + w{sig_args})
       }}
       else {{
-        let v = __{name}_rd6(th + idx * 12 + 6)
         if v < 15728640 then {{
           let w = __{name}_w(dh, o, v)
           __{name}_walk(p + l, end, th, nent, sh, dh, o + w{sig_args})

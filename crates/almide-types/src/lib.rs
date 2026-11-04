@@ -114,3 +114,49 @@ pub mod capability_bounds {
         BOUNDS.iter().filter(move |b| b.module == module && b.func == func)
     }
 }
+
+/// Each stdlib source's top-level function names and type-declaration lines,
+/// read off the embedded source by `buildscript/decl_index.rs` and committed
+/// (#3361, #4458). The front end learns what an unreached bundled module
+/// declares from here instead of parsing it whole; the parser holds the scan
+/// to its own reading (almide-frontend `tests/decl_index_test.rs`).
+pub mod decl_index {
+    include!("generated/decl_index.rs");
+
+    fn row(stem: &str) -> Option<&'static DeclRow> {
+        DECL_INDEX.iter().find(|r| r.0 == stem)
+    }
+
+    /// The top-level functions `stdlib/<stem>.almd` declares, in source order.
+    pub fn fn_names(stem: &str) -> Option<&'static [&'static str]> {
+        row(stem).map(|r| r.1)
+    }
+
+    /// The text to parse for `stdlib/<stem>.almd`'s type declarations: the
+    /// embedded source with every line outside a type declaration blanked
+    /// (line count and every kept line unchanged), or the whole source when a
+    /// declaration holds an expression. `None` when it declares no type. Built
+    /// once per source and kept for the process, so a parse cache keyed by the
+    /// text's address sees one text.
+    pub fn types_source(stem: &str) -> Option<&'static str> {
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+        let (key, _, ranges, whole) = row(stem)?;
+        if ranges.is_empty() {
+            return None;
+        }
+        let src = crate::embedded::source_of(stem)?;
+        if *whole {
+            return Some(src);
+        }
+        static VIEWS: OnceLock<Mutex<HashMap<&'static str, &'static str>>> = OnceLock::new();
+        let mut views = VIEWS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+        let view = views.entry(*key).or_insert_with(|| {
+            let kept = |n: usize| ranges.iter().any(|&(a, b)| (a as usize..=b as usize).contains(&n));
+            let text: Vec<&str> =
+                src.split('\n').enumerate().map(|(i, line)| if kept(i + 1) { line } else { "" }).collect();
+            Box::leak(text.join("\n").into_boxed_str())
+        });
+        Some(*view)
+    }
+}

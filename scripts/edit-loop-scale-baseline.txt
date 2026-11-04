@@ -27,7 +27,19 @@
 #     before  1.130 1.135 1.136 1.142 1.154   median 1.136
 #     after   0.780 0.783 0.784 0.785 0.789   median 0.784   factor 0.690
 #   Left alone it reads under the 0.85x floor (0.962). Anchor x 0.690 = 0.781.
-slope 0.781
+# slope moved 0.781 -> 0.871 (2026-11-04, #4328): a bundled module now keeps
+#   only the functions the program reaches, so a rung no longer checks every
+#   function of every stdlib module it imports, only the ones its sources name.
+#   The constant whole-module cost that #4071 moved into every marginal shrank,
+#   and the fit steepens toward the per-line work. No rung got slower (the
+#   10,648-line rung's min fell 11%, 746.9ms -> 668.0ms on the last pair).
+#   Same n2-standard-16 (asia-northeast2-a, load ~1), five interleaved pairs of
+#   the full ladder, 10 runs per rung, develop 821f4e733 vs the #4328 tree:
+#     before  0.818 0.821 0.822 0.823 0.826   median 0.822
+#     after   0.913 0.916 0.917 0.919 0.921   median 0.917   factor 1.116
+#   Left alone it reads over the +15% ceiling (CI read 0.919 against 0.898).
+#   Anchor x 1.116 = 0.871.
+slope 0.871
 # ratio — min(10,151-line rung) / min(4-line floor rung): what a 10k-line project
 #   costs in units of what an empty one costs. Catches a uniform slowdown of the
 #   per-line work, which `slope` by construction cannot see. Median of the same
@@ -67,7 +79,23 @@ slope 0.781
 #     batch-all-1025 (this integration)    floor 20.2ms  10k 287.1ms  ratio 14.211
 #   factor 2.653; anchor 7.090 x 2.653 = 18.81. Accepted to land the
 #   integration, recorded as a cost to win back (ADR-0030), not excused.
-ratio 18.81
+# ratio moved 18.81 -> 16.51 (2026-11-04, #4328): the floor rung reaches no
+#   bundled function and is unchanged, while the 10k rung checks only the
+#   stdlib functions its sources name. The same five pairs:
+#     before  17.144 17.144 17.259 17.289 17.359   median 17.259
+#     after   15.087 15.126 15.148 15.151 15.251   median 15.148   factor 0.878
+#   Anchor x 0.878 = 16.51 (CI read 14.88, -21% against the old anchor).
+# ratio moved 16.51 -> 99.98 (2026-11-04, #4458): the 4-line floor rung no
+#   longer parses the bundled stdlib it does not reach — an unreached module's
+#   types come off its type-declaration lines (`almide_types::decl_index`) and
+#   an auto-imported module is parsed only once something reaches it — so the
+#   floor fell about 6x (min ~43 ms -> 6.8 ms) while the 10k rung moved little
+#   (662 -> 605 ms) and `slope` / `slope_check` / the shares stayed in band.
+#   Three interleaved pairs on one n2-standard-8 (asia-northeast1-b):
+#     before  15.372 15.218 15.128   median 15.218
+#     after   89.738 92.155 92.736   median 92.155   factor 6.056
+#   Anchor x 6.056 = 99.98.
+ratio 99.98
 #
 # ── PER-PHASE ANCHORS (#1311) ────────────────────────────────────────────────
 # The same ladder, checked with `almide check --timings`, splits the front end
@@ -173,7 +201,14 @@ share_check 0.7692
 #   Left alone it reads under the 0.85x floor (0.972). Anchor x 0.639 = 0.731.
 #   The top-rung shares did not move (lex 0.111, parse 0.138-0.140, check 0.750
 #   on both sides), so share_* keep their anchors.
-slope_check 0.731
+# slope_check moved 0.731 -> 0.909 (2026-11-04, #4328), for the reason `slope`
+#   moved. The same five pairs:
+#     before  0.739 0.741 0.742 0.745 0.747   median 0.742
+#     after   0.916 0.922 0.923 0.924 0.927   median 0.923   factor 1.244
+#   Left alone it reads over the +15% ceiling (CI read 0.9175 against 0.841).
+#   Anchor x 1.244 = 0.909. The top-rung shares stay inside their bands on CI
+#   (lex 0.1065, parse 0.1260, check 0.7675), so share_* keep their anchors.
+slope_check 0.909
 # NOT anchored, on purpose: slope_lex (median 1.005) and slope_parse (median
 # 1.030). Over the same swing they read a 10.3% / 10.4% spread — lex and parse are
 # ~12ms against check's 66ms, so subtracting the floor rung leaves a small

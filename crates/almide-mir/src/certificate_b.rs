@@ -4,10 +4,19 @@
 /// One frame's arm buffers hold a +1 for `o` — the || split into early
 /// returns (MC/DC ledger, #566).
 fn frame_owns(fr: &BranchFrame, o: ValueId) -> bool {
-    if fr.then_ev.get(&o).map_or(false, |l| l.contains(['i', 'a'])) {
+    if fr.then_ev.get(&o).is_some_and(|l| l.contains(['i', 'a'])) {
         return true;
     }
-    fr.else_ev.get(&o).map_or(false, |l| l.contains(['i', 'a']))
+    fr.else_ev.get(&o).is_some_and(|l| l.contains(['i', 'a']))
+}
+
+/// Has either arm buffer of this frame already seen `o`? The || split into
+/// early returns (MC/DC ledger, #566).
+fn frame_has(fr: &BranchFrame, o: ValueId) -> bool {
+    if fr.then_ev.contains_key(&o) {
+        return true;
+    }
+    fr.else_ev.contains_key(&o)
 }
 
 /// order. Net-zero, divergence-marker-free arms flatten.
@@ -75,21 +84,21 @@ impl Streams {
     fn append_seg(&mut self, o: ValueId, seg: &str) {
         if let Some(fr) = self.frames.last_mut() {
             // Single-condition decisions (MC/DC ledger, #566): the &&
-            // short-circuit is the nested if, verbatim.
-            if !fr.then_ev.contains_key(&o) {
-                if !fr.else_ev.contains_key(&o) {
-                    fr.order.push(o);
-                }
+            // short-circuit is `frame_has`'s early return, verbatim.
+            if !frame_has(fr, o) {
+                fr.order.push(o);
             }
             let map = if fr.in_else { &mut fr.else_ev } else { &mut fr.then_ev };
             map.entry(o).or_default().push_str(seg);
             return;
         }
-        if !self.stream.contains_key(&o) {
-            self.stream.insert(o, String::new());
-            self.order.push(o);
+        match self.stream.entry(o) {
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                slot.insert(String::new()).push_str(seg);
+                self.order.push(o);
+            }
+            std::collections::btree_map::Entry::Occupied(mut line) => line.get_mut().push_str(seg),
         }
-        self.stream.get_mut(&o).expect("o was just inserted above if it was not already present").push_str(seg);
     }
     /// Record a +1/−1/+0 event (`'i'`/`'d'`/`'b'`…) on object `o`.
     fn event(&mut self, o: ValueId, c: char) {
@@ -268,7 +277,7 @@ fn endif_merge_heap(
         let heap = if then_heap {
             true
         } else {
-            val.map_or(false, |v| heap_objs.contains(&v))
+            val.is_some_and(|v| heap_objs.contains(&v))
         };
         if heap {
             if let Some(d) = dst {
@@ -532,13 +541,20 @@ impl CertScan {
         let Some(&slot) = self.feeder_to_slot.get(&dst) else { return false };
         let so = self.s.object_of(slot);
         self.s.of.insert(dst, so);
-        if self.line_slots.contains(&slot) {
-            if self.s.frames.is_empty() {
-                self.s.event(so, '(');
-            }
+        if self.straight_line_slot(slot) {
+            self.s.event(so, '(');
         }
         self.s.event(so, ev);
         true
+    }
+
+    /// A line slot outside every branch frame — the && split into early
+    /// returns (MC/DC ledger, #566).
+    fn straight_line_slot(&self, slot: ValueId) -> bool {
+        if !self.line_slots.contains(&slot) {
+            return false;
+        }
+        self.s.frames.is_empty()
     }
 
     /// A feeder's event routes to its slot stream; anything else opens its OWN
@@ -583,7 +599,7 @@ impl CertScan {
     fn stream_owns(&self, o: ValueId) -> bool {
         // Single-condition decisions (MC/DC ledger): the || arms become
         // early returns; the per-frame check is its own predicate.
-        if self.s.stream.get(&o).map_or(false, |l| l.contains(['i', 'a'])) {
+        if self.s.stream.get(&o).is_some_and(|l| l.contains(['i', 'a'])) {
             return true;
         }
         self.s.frames.iter().any(|fr| frame_owns(fr, o))
@@ -600,11 +616,9 @@ impl CertScan {
         if self.unfolded.remove(&local) {
             return;
         }
-        if self.line_slots.contains(&local) {
-            if self.s.frames.is_empty() {
-                let so = self.s.object_of(local);
-                self.s.event(so, ')');
-            }
+        if self.straight_line_slot(local) {
+            let so = self.s.object_of(local);
+            self.s.event(so, ')');
         }
     }
 
@@ -686,17 +700,23 @@ impl CertScan {
             return;
         }
         if let Some(d) = dst {
-            // try_feed EMITS on success — the nested if keeps the &&'s
-            // exact short-circuit (feed first, fall through only on false).
-            if !self.try_feed(d, 'i') {
-                if self.released_merge_dsts.contains(&d) {
-                    self.s.of.insert(d, d);
-                    self.s.event(d, 'i');
-                }
-            }
+            self.credit_merge_dst(d);
         }
         self.s.open_branch();
         self.enter_branch_scope();
+    }
+
+    /// The merge dst's pre-region `i`. try_feed EMITS on success — the early
+    /// return keeps the &&'s exact short-circuit (feed first, fall through
+    /// only on false).
+    fn credit_merge_dst(&mut self, d: ValueId) {
+        if self.try_feed(d, 'i') {
+            return;
+        }
+        if self.released_merge_dsts.contains(&d) {
+            self.s.of.insert(d, d);
+            self.s.event(d, 'i');
+        }
     }
 
     /// A LIVE USE (Borrow / MakeUnique) on an object whose stream HOLDS
@@ -808,72 +828,6 @@ fn heap_call_dst(op: &Op) -> Option<ValueId> {
     }
 }
 
-/// The number of `i` events [`ownership_certificate`] credits to branch-MERGE
-/// dsts: the RELEASED merges (the arm's moved-in reference, later Consumed/
-/// Dropped/val-flowed/returned) plus the slot-FEEDER merges (`acc = if c then
-/// acc + [x] else acc`, whose `i` routes into the loop-carried slot stream).
-/// Both are backed by the arm value's real producer — the merge is a reference
-/// changing hands (the wasm merge local.set), not a synthetic `+1`. classify's
-/// borrow-by-default backing gate uses THIS count so the gate and the emission
-/// stay in lockstep by construction (one credit per IfThen op occurrence,
-/// mirroring `CertScan::step`'s pre-region emission exactly).
-pub fn merge_dst_i_credits(func: &MirFunction) -> usize {
-    let (feeder_to_slot, _, _) = loop_carried_slots(func);
-    let mut merge_dsts: std::collections::HashSet<crate::ValueId> = std::collections::HashSet::new();
-    let mut released: std::collections::HashSet<crate::ValueId> = std::collections::HashSet::new();
-    for op in &func.ops {
-        match op {
-            Op::IfThen { dst: Some(d), .. } => {
-                merge_dsts.insert(*d);
-            }
-            Op::Consume { v }
-            | Op::Drop { v }
-            | Op::DropListStr { v }
-            // A RECORD/VARIANT-typed merge dst releases through the TYPED
-            // recursive drop (the #1287 record-merge seeding emits DropVariant,
-            // not Drop) — without this arm the dst never enters the released
-            // set, its IfThen `i` credit is skipped, and the DropVariant certs
-            // as a bare `d` the kernel checker rejects (unowned Dec).
-            | Op::DropVariant { v, .. } => {
-                if merge_dsts.contains(v) {
-                    released.insert(*v);
-                }
-            }
-            Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } => {
-                if merge_dsts.contains(v) {
-                    released.insert(*v);
-                }
-            }
-            _ => {}
-        }
-    }
-    if let Some(r) = func.ret {
-        if merge_dsts.contains(&r) {
-            released.insert(r);
-        }
-    }
-    // HEAP merges only — the exact filter `ownership_certificate_released_merge_dsts`
-    // applies (a scalar merge carries no reference; crediting it would desync
-    // this count from the certificate's `i` events).
-    let heap_objs = loop_carried_slots_heap_objs(func);
-    released.retain(|d| heap_objs.contains(d));
-    func.ops
-        .iter()
-        .filter(|op| match op {
-            Op::IfThen { dst: Some(d), .. } => {
-                // Single-condition decisions (MC/DC ledger): || as if/else.
-                if feeder_to_slot.contains_key(d) {
-                    true
-                } else {
-                    released.contains(d)
-                }
-            }
-            _ => false,
-        })
-        .count()
-}
-
-
 /// The merges a moved slot receives (#4006 class P): a region's merge dst
 /// that feeds a slot a call-site move hands over, and, inward, every arm
 /// value of such a region that is itself a nested region's merge — the
@@ -921,4 +875,6 @@ fn merge_slot_chain(
     chain
 }
 
+
+include!("certificate_b_merge.rs");
 include!("certificate_b_tail.rs");

@@ -48,6 +48,22 @@ pub const VALUE_SELFHOST_HELPERS: &[(&str, &str)] = &[
     ("value.omit", "__vu_omit_pairs"),
 ];
 
+/// The surfaces this emitter resolves ON ITS OWN, by a literal key no IR call
+/// names, as `(demanded, resolved)`: the JSON serializer formats floats
+/// through `float.to_string`, and so does a `Value` met by a display (whose
+/// demand is the compound printer's), and `string.capitalize` folds its first
+/// char through `string.to_upper`. The wasm link links `resolved`'s self-host
+/// source wherever `demanded` is demanded or named (#4458), and
+/// `tests/compiler_inserted_calls_test.rs` refuses a literal
+/// `resolve_qualified` key of this emitter that no row resolves.
+pub const EMITTER_IMPLIED_SURFACES: &[(&str, &str)] = &[
+    ("json.stringify", "float.to_string"),
+    ("json.stringify_pretty", "float.to_string"),
+    ("value.__stringify", "float.to_string"),
+    ("float.to_string_compound", "float.to_string"),
+    ("string.capitalize", "string.to_upper"),
+];
+
 /// The registered surface whose self-host source holds every helper of
 /// [`VALUE_SELFHOST_HELPERS`].
 pub const VALUE_HELPER_ANCHOR: &str = "value.pick";

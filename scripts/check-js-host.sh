@@ -10,6 +10,9 @@
 #      `after(module)` that exercises the exported wrappers and asserts;
 #   4. a fixture with no `@extern` also prints the same lines under the native
 #      binary — the host is one more leg of the cross-target contract;
+#      A `// @native-cwd: empty` fixture runs natively in an empty directory
+#      (#4438), and its <fixture>.host.mjs may export `init`, the options
+#      merged into `init()` (argv, environment, preopens);
 #   5. (#2276) the module ships only what the program uses: the `.wasm` built
 #      with `--host js` is byte-identical to the build without it unless some
 #      marshalled signature carries a String, in which case the two builds
@@ -79,7 +82,7 @@ import { pathToFileURL } from "node:url";
 const [jsPath, hostPath] = process.argv.slice(2);
 const mod = await import(pathToFileURL(jsPath).href);
 const host = hostPath ? await import(pathToFileURL(hostPath).href) : {};
-await mod.init(undefined, { js: host.js ?? {} });
+await mod.init(undefined, { ...(host.init ?? {}), js: host.js ?? {} });
 await mod.run();
 if (host.after) await host.after(mod);
 JS
@@ -143,7 +146,12 @@ for f in "$FIXTURE_DIR"/*.almd; do
     fi
   fi
   if ! grep -q '@extern(wasm' "$f"; then
-    if ! "$BIN" run "$f" > "$WORK/$stem.native" 2> "$WORK/$stem.native.err"; then
+    # `// @native-cwd: empty` (#4438): the native run starts in an empty
+    # directory, the twin of the host's empty writable "." preopen.
+    ncwd="$PWD"
+    if grep -q '^// @native-cwd: empty' "$f"; then ncwd="$WORK/$stem.cwd"; mkdir -p "$ncwd"; fi
+    fabs="$(cd "$(dirname "$f")" && pwd)/$(basename "$f")"
+    if ! (cd "$ncwd" && "$BIN" run "$fabs") > "$WORK/$stem.native" 2> "$WORK/$stem.native.err"; then
       echo "FAIL $f: native run"; sed 's/^/    /' "$WORK/$stem.native.err" | head -20; fail=1; continue
     fi
     # The native run is `main` alone; the host may append lines from `after`.

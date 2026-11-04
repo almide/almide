@@ -59,10 +59,8 @@ fn ownership_certificate_released_merge_dsts(
             // An INNER merge flowing out as an OUTER arm value (`Else/EndIf { val }`
             // — the effect-TCO nested-if chain) is released the same way: the val-move
             // rule below emits its `m`.
-            Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } => {
-                if merge_dsts.contains(v) {
-                    released_merge_dsts.insert(*v);
-                }
+            Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } if merge_dsts.contains(v) => {
+                released_merge_dsts.insert(*v);
             }
             _ => {}
         }

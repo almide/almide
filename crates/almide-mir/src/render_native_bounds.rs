@@ -81,68 +81,8 @@ pub(crate) fn exit_covered(s: Slot) -> bool {
 /// length value `n` and never rebound. Returns (test op, slot, last op
 /// covered).
 fn exit_tests(func: &MirFunction) -> Vec<(usize, Slot, usize)> {
-    use crate::{IntOp, PrimKind};
-    use std::collections::{BTreeMap, BTreeSet};
     let ops = &func.ops;
-    let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
-    let mut handle: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-    let mut len_addr: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-    let mut len_of: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-    let mut lt: BTreeMap<ValueId, (ValueId, ValueId)> = BTreeMap::new();
-    let mut add_one: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-    let mut zero: BTreeSet<ValueId> = BTreeSet::new();
-    let mut rebound: BTreeMap<ValueId, Vec<ValueId>> = BTreeMap::new();
-    // The lists allocated with a given length value (a `map` loop's result).
-    let mut sized: BTreeMap<ValueId, Vec<ValueId>> = BTreeMap::new();
-    for op in ops {
-        match op {
-            Op::ConstInt { dst, value } => {
-                consts.insert(*dst, *value);
-                if *value == 0 {
-                    zero.insert(*dst);
-                }
-            }
-            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
-                handle.insert(*d, args[0]);
-            }
-            Op::SetLocal { local, src } => rebound.entry(*local).or_default().push(*src),
-            Op::Alloc { dst, init: crate::Init::DynList { len } | crate::Init::DynListStr { len }, .. } => {
-                sized.entry(*len).or_default().push(*dst);
-            }
-            _ => {}
-        }
-    }
-    let off = i64::from(crate::lower::layout::BLOCK_LEN_OFFSET);
-    for op in ops {
-        match op {
-            Op::IntBinOp { dst, op: IntOp::Add, a, b } => {
-                for (h, c) in [(a, b), (b, a)] {
-                    if let (Some(base), Some(&k)) = (handle.get(h), consts.get(c)) {
-                        if k == off {
-                            len_addr.insert(*dst, *base);
-                        }
-                    }
-                    if consts.get(c) == Some(&1) {
-                        add_one.insert(*dst, *h);
-                    }
-                }
-            }
-            Op::IntBinOp { dst, op: IntOp::Lt, a, b } => {
-                lt.insert(*dst, (*a, *b));
-            }
-            _ => {}
-        }
-    }
-    for op in ops {
-        if let Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(d), args } = op {
-            if let Some(base) = args.first().and_then(|a| len_addr.get(a)) {
-                len_of.insert(*d, *base);
-            }
-        }
-    }
-    let counter = |i: ValueId| {
-        zero.contains(&i) && rebound.get(&i).is_some_and(|srcs| srcs.iter().all(|s| add_one.get(s) == Some(&i)))
-    };
+    let facts = ExitFacts::of(ops);
     let mut out = Vec::new();
     let mut depth = 0i32;
     let mut loops: Vec<usize> = Vec::new();
@@ -160,43 +100,7 @@ fn exit_tests(func: &MirFunction) -> Vec<(usize, Slot, usize)> {
             }
             Op::LoopBreakUnless { cond } => {
                 let Some(&start) = loops.last() else { continue };
-                let direct = ops[start + 1..t].iter().fold(0i32, |d, o| match o {
-                    Op::IfThen { .. } | Op::LoopStart => d + 1,
-                    Op::EndIf { .. } | Op::LoopEnd => d - 1,
-                    _ => d,
-                }) == 0;
-                let Some(&(i, n)) = lt.get(cond) else { continue };
-                let Some(&base) = len_of.get(&n) else { continue };
-                if !direct || !counter(i) || rebound.contains_key(&base) {
-                    continue;
-                }
-                // The loop's end, and the first rebinding of `i` before it.
-                let mut d = 0i32;
-                let mut last = ops.len() - 1;
-                for (j, o) in ops.iter().enumerate().skip(t + 1) {
-                    match o {
-                        Op::LoopStart | Op::IfThen { .. } => d += 1,
-                        Op::EndIf { .. } => d -= 1,
-                        Op::LoopEnd if d == 0 => {
-                            last = j;
-                            break;
-                        }
-                        Op::LoopEnd => d -= 1,
-                        Op::SetLocal { local, .. } if *local == i => {
-                            last = j;
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-                out.push((t, Slot { base, idx: Some(i), k: 0 }, last));
-                // A list allocated with that same length `n` has that count
-                // too: the test covers its element `i` as well.
-                for d in sized.get(&n).into_iter().flatten() {
-                    if !rebound.contains_key(d) {
-                        out.push((t, Slot { base: *d, idx: Some(i), k: 0 }, last));
-                    }
-                }
+                facts.exit_test_at(ops, (start, t), cond, &mut out);
             }
             _ => {}
         }
@@ -205,21 +109,161 @@ fn exit_tests(func: &MirFunction) -> Vec<(usize, Slot, usize)> {
     out
 }
 
+/// What [`exit_tests`] reads off the ops before it looks at the loops.
+#[derive(Default)]
+struct ExitFacts {
+    consts: std::collections::BTreeMap<ValueId, i64>,
+    handle: std::collections::BTreeMap<ValueId, ValueId>,
+    len_addr: std::collections::BTreeMap<ValueId, ValueId>,
+    len_of: std::collections::BTreeMap<ValueId, ValueId>,
+    lt: std::collections::BTreeMap<ValueId, (ValueId, ValueId)>,
+    add_one: std::collections::BTreeMap<ValueId, ValueId>,
+    zero: std::collections::BTreeSet<ValueId>,
+    rebound: std::collections::BTreeMap<ValueId, Vec<ValueId>>,
+    /// The lists allocated with a given length value (a `map` loop's result).
+    sized: std::collections::BTreeMap<ValueId, Vec<ValueId>>,
+}
+
+impl ExitFacts {
+    fn of(ops: &[Op]) -> ExitFacts {
+        let mut f = ExitFacts::default();
+        for op in ops {
+            f.note_def(op);
+        }
+        for op in ops {
+            f.note_arith(op);
+        }
+        for op in ops {
+            f.note_len(op);
+        }
+        f
+    }
+
+    fn note_def(&mut self, op: &Op) {
+        use crate::PrimKind;
+        match op {
+            Op::ConstInt { dst, value } => {
+                self.consts.insert(*dst, *value);
+                if *value == 0 {
+                    self.zero.insert(*dst);
+                }
+            }
+            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
+                self.handle.insert(*d, args[0]);
+            }
+            Op::SetLocal { local, src } => self.rebound.entry(*local).or_default().push(*src),
+            Op::Alloc { dst, init: crate::Init::DynList { len } | crate::Init::DynListStr { len }, .. } => {
+                self.sized.entry(*len).or_default().push(*dst);
+            }
+            _ => {}
+        }
+    }
+
+    fn note_arith(&mut self, op: &Op) {
+        use crate::IntOp;
+        let off = i64::from(crate::lower::layout::BLOCK_LEN_OFFSET);
+        match op {
+            Op::IntBinOp { dst, op: IntOp::Add, a, b } => {
+                for (h, c) in [(a, b), (b, a)] {
+                    if let (Some(base), Some(&k)) = (self.handle.get(h), self.consts.get(c)) {
+                        if k == off {
+                            self.len_addr.insert(*dst, *base);
+                        }
+                    }
+                    if self.consts.get(c) == Some(&1) {
+                        self.add_one.insert(*dst, *h);
+                    }
+                }
+            }
+            Op::IntBinOp { dst, op: IntOp::Lt, a, b } => {
+                self.lt.insert(*dst, (*a, *b));
+            }
+            _ => {}
+        }
+    }
+
+    fn note_len(&mut self, op: &Op) {
+        use crate::PrimKind;
+        if let Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(d), args } = op {
+            if let Some(base) = args.first().and_then(|a| self.len_addr.get(a)) {
+                self.len_of.insert(*d, *base);
+            }
+        }
+    }
+
+    fn counter(&self, i: ValueId) -> bool {
+        self.zero.contains(&i) && self.rebound.get(&i).is_some_and(|srcs| srcs.iter().all(|s| self.add_one.get(s) == Some(&i)))
+    }
+
+    /// The `LoopBreakUnless { cond }` at op `t` of the loop opened at `start`:
+    /// the slots its exit test covers, pushed onto `out`.
+    fn exit_test_at(&self, ops: &[Op], (start, t): (usize, usize), cond: &ValueId, out: &mut Vec<(usize, Slot, usize)>) {
+        let direct = ops[start + 1..t].iter().fold(0i32, |d, o| match o {
+            Op::IfThen { .. } | Op::LoopStart => d + 1,
+            Op::EndIf { .. } | Op::LoopEnd => d - 1,
+            _ => d,
+        }) == 0;
+        let Some(&(i, n)) = self.lt.get(cond) else { return };
+        let Some(&base) = self.len_of.get(&n) else { return };
+        if !direct || !self.counter(i) || self.rebound.contains_key(&base) {
+            return;
+        }
+        let last = covered_until(ops, t, i);
+        out.push((t, Slot { base, idx: Some(i), k: 0 }, last));
+        // A list allocated with that same length `n` has that count
+        // too: the test covers its element `i` as well.
+        for d in self.sized.get(&n).into_iter().flatten() {
+            if !self.rebound.contains_key(d) {
+                out.push((t, Slot { base: *d, idx: Some(i), k: 0 }, last));
+            }
+        }
+    }
+}
+
+/// The loop's end after the exit test at op `t`, and the first rebinding of
+/// `i` before it: the last op the test covers.
+fn covered_until(ops: &[Op], t: usize, i: ValueId) -> usize {
+    let mut d = 0i32;
+    let mut last = ops.len() - 1;
+    for (j, o) in ops.iter().enumerate().skip(t + 1) {
+        match o {
+            Op::LoopStart | Op::IfThen { .. } => d += 1,
+            Op::EndIf { .. } => d -= 1,
+            Op::LoopEnd if d == 0 => {
+                last = j;
+                break;
+            }
+            Op::LoopEnd => d -= 1,
+            Op::SetLocal { local, .. } if *local == i => {
+                last = j;
+                break;
+            }
+            _ => {}
+        }
+    }
+    last
+}
+
 /// The op the render is writing now.
 pub(crate) fn at(op: usize) {
     REC.with(|r| r.borrow_mut().op = op);
 }
 
+/// Slot `s`'s number, numbering it next when it is new.
+fn slot_number(slots: &mut Vec<Slot>, s: Slot) -> usize {
+    match slots.iter().position(|x| *x == s) {
+        Some(n) => n,
+        None => {
+            slots.push(s);
+            slots.len() - 1
+        }
+    }
+}
+
 fn event(c: char, s: Slot) {
     REC.with(|r| {
         let mut r = r.borrow_mut();
-        let n = match r.slots.iter().position(|x| *x == s) {
-            Some(n) => n,
-            None => {
-                r.slots.push(s);
-                r.slots.len() - 1
-            }
-        };
+        let n = slot_number(&mut r.slots, s);
         let op = r.op;
         r.events.push((op, c, n));
     });
@@ -243,70 +287,75 @@ pub(crate) fn store(s: Slot) {
 /// Close `func`: its witness, the MIR's structure with the recorded events
 /// in op order, kept for [`take`].
 pub(crate) fn finish(func: &MirFunction) {
-    REC.with(|r| {
-        let mut r = r.borrow_mut();
-        let mut text = String::new();
-        let mut ifs: Vec<bool> = Vec::new();
-        let mut next = 0usize;
-        let mut events = std::mem::take(&mut r.events);
-        let exits = std::mem::take(&mut r.exits);
-        for (t, x, _) in exits {
-            let n = match r.slots.iter().position(|y| *y == x) {
-                Some(n) => n,
-                None => {
-                    r.slots.push(x);
-                    r.slots.len() - 1
-                }
-            };
-            events.push((t, 'e', n));
-        }
-        // Op order; within one op, the recording order (a check before its access).
-        events.sort_by_key(|e| e.0);
-        for (i, op) in func.ops.iter().enumerate() {
-            match op {
-                Op::LoopStart => text.push_str("L{ "),
-                Op::IfThen { .. } => {
-                    text.push_str("B{ ");
-                    ifs.push(false);
-                }
-                Op::Else { .. } => {
-                    text.push_str("| ");
-                    if let Some(e) = ifs.last_mut() {
-                        *e = true;
-                    }
-                }
-                _ => {}
-            }
-            while next < events.len() && events[next].0 <= i {
-                let (_, c, n) = events[next];
-                text.push_str(&format!("{c}{n} "));
-                next += 1;
-            }
-            match op {
-                Op::LoopEnd => text.push_str("} "),
-                Op::EndIf { .. } => {
-                    if ifs.pop() == Some(false) {
-                        text.push_str("| ");
-                    }
-                    text.push_str("} ");
-                }
-                Op::SetLocal { local, .. } => {
-                    for (n, s) in r.slots.iter().enumerate() {
-                        if s.base == *local || s.idx == Some(*local) {
-                            text.push_str(&format!("s{n} "));
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        // Events past the last op (none on a well-formed render) still count.
-        for &(_, c, n) in &events[next..] {
+    REC.with(|r| finish_rec(&mut r.borrow_mut(), func));
+}
+
+fn finish_rec(r: &mut Rec, func: &MirFunction) {
+    let mut text = String::new();
+    let mut ifs: Vec<bool> = Vec::new();
+    let mut next = 0usize;
+    let mut events = std::mem::take(&mut r.events);
+    let exits = std::mem::take(&mut r.exits);
+    for (t, x, _) in exits {
+        let n = slot_number(&mut r.slots, x);
+        events.push((t, 'e', n));
+    }
+    // Op order; within one op, the recording order (a check before its access).
+    events.sort_by_key(|e| e.0);
+    for (i, op) in func.ops.iter().enumerate() {
+        open_structure(op, &mut text, &mut ifs);
+        while next < events.len() && events[next].0 <= i {
+            let (_, c, n) = events[next];
             text.push_str(&format!("{c}{n} "));
+            next += 1;
         }
-        let text = text.trim_end().to_string();
-        r.done.push((func.name.clone(), text));
-    });
+        close_structure(op, &mut text, &mut ifs, &r.slots);
+    }
+    // Events past the last op (none on a well-formed render) still count.
+    for &(_, c, n) in &events[next..] {
+        text.push_str(&format!("{c}{n} "));
+    }
+    let text = text.trim_end().to_string();
+    r.done.push((func.name.clone(), text));
+}
+
+/// The witness text an op opens before its own events.
+fn open_structure(op: &Op, text: &mut String, ifs: &mut Vec<bool>) {
+    match op {
+        Op::LoopStart => text.push_str("L{ "),
+        Op::IfThen { .. } => {
+            text.push_str("B{ ");
+            ifs.push(false);
+        }
+        Op::Else { .. } => {
+            text.push_str("| ");
+            if let Some(e) = ifs.last_mut() {
+                *e = true;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The witness text an op closes after its own events.
+fn close_structure(op: &Op, text: &mut String, ifs: &mut Vec<bool>, slots: &[Slot]) {
+    match op {
+        Op::LoopEnd => text.push_str("} "),
+        Op::EndIf { .. } => {
+            if ifs.pop() == Some(false) {
+                text.push_str("| ");
+            }
+            text.push_str("} ");
+        }
+        Op::SetLocal { local, .. } => {
+            for (n, s) in slots.iter().enumerate() {
+                if s.base == *local || s.idx == Some(*local) {
+                    text.push_str(&format!("s{n} "));
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The witnesses of every function closed since the last call.
