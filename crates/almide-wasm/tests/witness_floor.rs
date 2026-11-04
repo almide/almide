@@ -9,13 +9,26 @@
 //!      (almide-verify, held to the extracted kernel-proven checker in
 //!      proofs/gate.sh): per object and per path, no release at rc 0, no
 //!      leak (#2756 — branch frames made the flat mirror too narrow);
-//!   3. the count of witnessed functions WITH RC EVENTS never shrinks —
-//!      golden/witness-floor.txt, grow-only, ratified with
-//!      ALMIDE_UPDATE_WITNESS_FLOOR=1 (phases B/C admit more shapes and
-//!      raise it; a refactor that silently drops recording fails here).
-//!      A scalar-only body yields an EMPTY certificate (true, and vacuous:
-//!      2,767 of them after B1 admitted scalar tail calls) — counted as
-//!      admitted but not as the floor, so the floor measures RC coverage.
+//!   3. the witnessed COVERAGE never shrinks (re-keyed for #4328). Coverage
+//!      is read from the WHOLE-MODULE leg: the same rows swept again in a
+//!      child process with `ALMIDE_KEEP_BUNDLED_FNS=1`, so every bundled
+//!      module a program loads is compiled whole, as before #4328's reach
+//!      pruning — dead-code trimming in what ships cannot erase proof
+//!      coverage of the stdlib itself. Its frames are judged like the shipped
+//!      compile's (poison, checker, pass agreement, call modes). A frame WITH
+//!      RC events counts once per IDENTITY: a program's own fn as
+//!      `fixture :: fn`, a linked stdlib body by its name alone (`list.join`;
+//!      the per-program `__selfhost_N` / `__almd_monoN_` counters dropped),
+//!      since it is the same code whichever program links it.
+//!      golden/witness-floor.txt is the count of distinct identities,
+//!      grow-only; golden/witness-stdlib.txt lists the stdlib identities and
+//!      every row must stay witnessed — a stdlib fn no program witnesses any
+//!      more fails here by name. (The count used to be fixture x fn: one
+//!      stdlib body linked into 40 fixtures counted 40 times, so #4328's
+//!      pruning read as a 51k-frame loss that was duplicates and dead code.)
+//!      Both re-anchor with ALMIDE_UPDATE_WITNESS_FLOOR=1. A scalar-only body
+//!      yields an EMPTY certificate (true, and vacuous) — admitted but not
+//!      coverage, so the floor measures RC coverage.
 //!   4. (step 4) a DECLINED frame (`!decline:<reason>`, the gate's or an
 //!      emission-time withdrawal) is neither certificate nor poison: it is
 //!      counted, and under ALMIDE_WITNESS_DUMP each is printed as
@@ -51,6 +64,166 @@ fn workspace_root() -> PathBuf {
 
 fn floor_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/witness-floor.txt")
+}
+
+fn stdlib_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/witness-stdlib.txt")
+}
+
+/// The switch that keeps every fn of a loaded bundled module (#4328).
+const KEEP_BUNDLED: &str = "ALMIDE_KEEP_BUNDLED_FNS";
+
+/// The corpus rows this run sweeps (the CI slice applies; the child process
+/// inherits its environment and so selects the same rows).
+fn selected_rows(root: &std::path::Path) -> Vec<String> {
+    let manifest = std::fs::read_to_string(root.join("crates/almide-spine/tests/golden/spec-run-manifest.txt"))
+        .expect("run manifest");
+    let rows: Vec<String> = almide_corpus::manifest_rows(&manifest)
+        .map(|line| line.splitn(3, '\t').nth(2).expect("manifest row").to_string())
+        .collect();
+    almide_corpus::select(rows, "witness_floor", |rel| rel.clone())
+}
+
+/// The whole-module leg's tag in front of each of its lines, so libtest's
+/// own output is never mistaken for one.
+const LEG_TAG: &str = "witness-whole\t";
+
+fn escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\n', "\\n").replace('\t', "\\t")
+}
+
+fn unescape(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some(o) => out.push(o),
+            None => {}
+        }
+    }
+    out
+}
+
+/// The whole-module leg's child entry: with `KEEP_BUNDLED` set, sweep the
+/// same rows with every bundled module a program loads compiled WHOLE (the
+/// compile before #4328's reach pruning), and print every frame and call-mode
+/// witness. Without the switch, nothing — so a plain `-- --ignored` run
+/// passes it by.
+#[test]
+#[ignore = "the whole-module leg's child entry: structural_witnesses_balance_and_hold_the_floor spawns it"]
+fn whole_module_leg_child() {
+    if !almide_base::env::flag(KEEP_BUNDLED) {
+        return;
+    }
+    let root = workspace_root();
+    for rel in selected_rows(&root) {
+        let text = std::fs::read_to_string(almide_corpus::resolve(&root, &rel)).expect("fixture readable");
+        let Ok(ir) = almide_spine::s5::lower_to_ir(&rel, &text) else {
+            println!("{LEG_TAG}unlowered\t{rel}");
+            continue;
+        };
+        almide_wasm::witness::start_collecting();
+        let _ = almide_wasm::emit_program(&ir);
+        let (frames, _) = almide_wasm::witness::take_by_pass_with_context();
+        println!("{LEG_TAG}program\t{rel}");
+        for (pass, name, cert, ctx) in frames {
+            println!("{LEG_TAG}frame\t{pass}\t{}\t{}\t{}", escape(&name), escape(&cert), escape(&ctx));
+        }
+        for (pass, w) in almide_wasm::witness::take_modes() {
+            println!("{LEG_TAG}mode\t{pass}\t{}", escape(&w));
+        }
+    }
+}
+
+/// One program of the whole-module leg: its row, frames and call-mode witnesses.
+type WholeProgram = (String, Vec<almide_wasm::witness::PassFrame>, Vec<(usize, String)>);
+
+/// Start the whole-module leg: a fresh process of this binary with the
+/// switch set (the resolver reads it from the environment), running while
+/// this process sweeps the shipped compile.
+fn spawn_whole_module_leg() -> std::process::Child {
+    std::process::Command::new(std::env::current_exe().expect("the test binary's own path"))
+        .args(["whole_module_leg_child", "--exact", "--ignored", "--nocapture", "--test-threads=1"])
+        .env(KEEP_BUNDLED, "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn the whole-module leg")
+}
+
+/// The whole-module leg's programs, and the rows it could not lower.
+fn read_whole_module_leg(child: std::process::Child) -> (Vec<WholeProgram>, Vec<String>) {
+    let out = child.wait_with_output().expect("the whole-module leg");
+    assert!(
+        out.status.success(),
+        "the whole-module leg's child exited {}:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut programs: Vec<WholeProgram> = Vec::new();
+    let mut unlowered = Vec::new();
+    for line in stdout.lines().filter_map(|l| l.split_once(LEG_TAG).map(|(_, rest)| rest)) {
+        let f: Vec<&str> = line.split('\t').collect();
+        let last = |p: &mut Vec<WholeProgram>| p.len().checked_sub(1).expect("a program line first");
+        match f.as_slice() {
+            ["unlowered", rel] => unlowered.push(rel.to_string()),
+            ["program", rel] => programs.push((rel.to_string(), Vec::new(), Vec::new())),
+            ["frame", pass, name, cert, ctx] => {
+                let i = last(&mut programs);
+                programs[i].1.push((pass.parse().expect("pass"), unescape(name), unescape(cert), unescape(ctx)));
+            }
+            ["mode", pass, w] => {
+                let i = last(&mut programs);
+                programs[i].2.push((pass.parse().expect("pass"), unescape(w)));
+            }
+            other => panic!("unreadable whole-module leg line: {other:?}"),
+        }
+    }
+    (programs, unlowered)
+}
+
+/// The key prefix of a whole-module leg frame: its certificates are judged
+/// like every other, but never compared with the shipped compile's (the two
+/// compiles hold different fn sets, so different calling conventions).
+const WHOLE: &str = "[whole] ";
+
+/// Drop the decimal counter that follows each `marker` in `s`.
+fn drop_counters(s: &str, marker: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(i) = rest.find(marker) {
+        out.push_str(&rest[..i + marker.len()]);
+        rest = rest[i + marker.len()..].trim_start_matches(|c: char| c.is_ascii_digit());
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A witnessed frame's coverage identity (`rel :: name` key): a linked
+/// stdlib body is the same code whichever program links it, so it is named
+/// alone, without the per-program counters; anything else stays per fixture.
+/// `None` for a program's own fn, `Some(name)` for a stdlib body.
+fn stdlib_identity(name: &str) -> Option<String> {
+    let module = name.split_once('.')?.0;
+    let selfhost = module.strip_prefix("__selfhost_").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    if !selfhost && !almide_types::stdlib_info::BUNDLED_MODULES.contains(&module) {
+        return None;
+    }
+    Some(drop_counters(&drop_counters(name, "__selfhost_"), "__almd_mono"))
+}
+
+/// A whole-module leg key's coverage identity; `None` for a shipped-compile key.
+fn coverage_identity(key: &str) -> Option<String> {
+    let key = key.strip_prefix(WHOLE)?;
+    let name = key.split_once(" :: ").map_or(key, |(_, n)| n);
+    Some(stdlib_identity(name).unwrap_or_else(|| key.to_string()))
 }
 
 fn fixtures_path() -> PathBuf {
@@ -235,8 +408,7 @@ fn per_fixture_ratchets(pf: &PerFixture, update: bool) {
 
 /// #2758: judge every emission pass's call-mode witness of the program just
 /// emitted; returns how many were judged, pushing each rejection.
-fn judge_call_modes(rel: &str, rejected: &mut Vec<(String, String)>) -> usize {
-    let passes = almide_wasm::witness::take_modes();
+fn judge_call_modes(rel: &str, passes: Vec<(usize, String)>, rejected: &mut Vec<(String, String)>) -> usize {
     let n = passes.len();
     for (pass, w) in passes {
         if !almide_verify::check(almide_verify::Property::CallModes, w.as_bytes()) {
@@ -276,10 +448,7 @@ fn same_convention(contexts: &mut Map<String>, key: &str, ctx: String) -> bool {
 #[test]
 fn structural_witnesses_balance_and_hold_the_floor() {
     let root = workspace_root();
-    let manifest = std::fs::read_to_string(
-        root.join("crates/almide-spine/tests/golden/spec-run-manifest.txt"),
-    )
-    .expect("run manifest");
+    let whole_leg = spawn_whole_module_leg();
 
     let mut certs: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
     // Each frame's calling-convention context (`same_convention`).
@@ -297,17 +466,11 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     let mut modes_checked = 0usize;
     let dump = std::env::var("ALMIDE_WITNESS_DUMP").is_ok();
     let mut per_fixture = PerFixture::default();
-    let rows: Vec<&str> = almide_corpus::manifest_rows(&manifest).map(|line| line.splitn(3, '\t').nth(2).expect("manifest row")).collect();
-    let rows = almide_corpus::select(rows, "witness_floor", |rel| rel.to_string());
-    for rel in rows {
-        per_fixture.note(rel);
-        let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
-        let Ok(ir) = almide_spine::s5::lower_to_ir(rel, &text) else { continue };
-        almide_wasm::witness::start_collecting();
-        let emitted = almide_wasm::emit_program(&ir).is_ok();
-        let (frames, shipped) = almide_wasm::witness::take_by_pass_with_context();
-        modes_checked += judge_call_modes(rel, &mut modes_rejected);
-        per_fixture.record(rel, emitted, &shipped);
+    let rows = selected_rows(&root);
+    let mut lowered = Set::new();
+    // Every emitted frame and call-mode witness of one program, judged.
+    let mut absorb = |rel: &str, frames: Vec<almide_wasm::witness::PassFrame>, modes: Vec<(usize, String)>| {
+        modes_checked += judge_call_modes(rel, modes, &mut modes_rejected);
         for (pass, name, cert, ctx) in frames {
             let key = frame_key(rel, pass, &name);
             let same_code = same_convention(&mut contexts, &key, ctx);
@@ -337,25 +500,62 @@ fn structural_witnesses_balance_and_hold_the_floor() {
                 }
             }
         }
+    };
+    for rel in &rows {
+        let rel = rel.as_str();
+        per_fixture.note(rel);
+        let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
+        let Ok(ir) = almide_spine::s5::lower_to_ir(rel, &text) else { continue };
+        lowered.insert(rel.to_string());
+        almide_wasm::witness::start_collecting();
+        let emitted = almide_wasm::emit_program(&ir).is_ok();
+        let (frames, shipped) = almide_wasm::witness::take_by_pass_with_context();
+        per_fixture.record(rel, emitted, &shipped);
+        absorb(rel, frames, almide_wasm::witness::take_modes());
     }
+    // The whole-module leg: the same rows, every loaded bundled module whole.
+    let (whole_programs, whole_unlowered) = read_whole_module_leg(whole_leg);
+    let whole_rows: Set = whole_programs.iter().map(|(rel, _, _)| rel.clone()).collect();
+    for (rel, frames, modes) in whole_programs {
+        absorb(&format!("{WHOLE}{rel}"), frames, modes);
+    }
+    // A row the shipped compile lowers but the whole-module compile does not
+    // would take its coverage out of the count unseen.
+    let whole_missing: Vec<&String> = lowered.iter().filter(|r| !whole_rows.contains(*r)).collect();
+    assert!(
+        whole_missing.is_empty(),
+        "the whole-module leg did not lower {} row(s) the shipped compile lowers ({} unlowered there): {whole_missing:?}",
+        whole_missing.len(),
+        whole_unlowered.len()
+    );
     // The counts read the bounded configuration only (a checked-pass frame
-    // is the same fn re-emitted, not more coverage).
+    // is the same fn re-emitted, not more coverage); `admitted` and the
+    // decline count read the shipped compile, the coverage the whole one.
     let bounded = |k: &String| !k.ends_with(" [checked]");
-    let admitted = certs.keys().filter(|k| bounded(k)).count();
-    let witnessed = certs.iter().filter(|(k, c)| bounded(k) && !c.trim().is_empty()).count();
+    let shipped_compile = |k: &String| bounded(k) && !k.starts_with(WHOLE);
+    let admitted = certs.keys().filter(|k| shipped_compile(k)).count();
+    let coverage: Set = certs
+        .iter()
+        .filter(|(k, c)| bounded(k) && !c.trim().is_empty())
+        .filter_map(|(k, _)| coverage_identity(k))
+        .collect();
+    let stdlib_witnessed: Set = coverage.iter().filter(|i| !i.contains(" :: ")).cloned().collect();
+    let witnessed = coverage.len();
     // A frame both passes admit AND decline is a pass disagreement too.
     for key in declined.keys().filter(|k| certs.contains_key(*k)) {
         nondet.push(key.clone());
     }
     if dump {
+        coverage.iter().for_each(|id| eprintln!("[coverage] {id}"));
         for (key, reason) in &declined {
             eprintln!("{}{reason} {key}", almide_wasm::witness::DECLINE_PREFIX);
         }
     }
     eprintln!(
-        "[witness-floor] admitted {admitted} function(s), {witnessed} with RC events, {} declined; \
+        "[witness-floor] admitted {admitted} function(s), {witnessed} distinct with RC events ({} stdlib), {} declined; \
          {} of {} spec/wasm_cross fixture(s) fully certified; {modes_checked} call-mode witness(es), {} rejected",
-        declined.keys().filter(|k| bounded(k)).count(),
+        stdlib_witnessed.len(),
+        declined.keys().filter(|k| shipped_compile(k)).count(),
         per_fixture.certified().len(),
         per_fixture.manifest.len(),
         modes_rejected.len()
@@ -395,10 +595,28 @@ fn structural_witnesses_balance_and_hold_the_floor() {
         return;
     }
     let fp = floor_path();
+    let sp = stdlib_path();
     if update {
         std::fs::write(&fp, format!("{witnessed}\n")).expect("write floor");
+        let mut out = String::from(
+            "# Stdlib fns whose body carries a certificate with RC events when the corpus is compiled with every\n\
+             # loaded bundled module whole (ALMIDE_KEEP_BUNDLED_FNS=1). Every row must stay witnessed; re-anchor with\n\
+             # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor\n",
+        );
+        stdlib_witnessed.iter().for_each(|f| out.push_str(&format!("{f}\n")));
+        std::fs::write(&sp, out).expect("write stdlib witnesses");
         return;
     }
+    let listed_text = std::fs::read_to_string(&sp).expect("golden/witness-stdlib.txt — generate with ALMIDE_UPDATE_WITNESS_FLOOR=1");
+    let lost: Vec<&str> = golden_rows(&listed_text).filter(|f| !stdlib_witnessed.contains(*f)).collect();
+    assert!(
+        lost.is_empty(),
+        "{} stdlib fn(s) are witnessed NOWHERE any more — no corpus program, compiled with its bundled modules \
+         whole, emits a certificate with RC events for them; restore the recording, or ratify a deleted fn \
+         deliberately with ALMIDE_UPDATE_WITNESS_FLOOR=1:\n{}",
+        lost.len(),
+        lost.iter().map(|f| format!("  - {f}")).collect::<Vec<_>>().join("\n")
+    );
     let floor: usize = std::fs::read_to_string(&fp)
         .expect("golden/witness-floor.txt — generate with ALMIDE_UPDATE_WITNESS_FLOOR=1")
         .trim()
@@ -406,7 +624,7 @@ fn structural_witnesses_balance_and_hold_the_floor() {
         .expect("floor number");
     assert!(
         witnessed >= floor,
-        "witnessed {witnessed} < floor {floor} — recording coverage shrank; \
+        "witnessed {witnessed} distinct function(s) < floor {floor} — recording coverage shrank; \
          restore it or ratify the shrink deliberately"
     );
 }
