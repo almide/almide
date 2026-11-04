@@ -42,6 +42,7 @@ pub mod diverge;
 pub mod fusion;
 pub mod speculation;
 pub mod mut_args;
+pub mod call_writes;
 pub mod top_let_storage;
 pub mod accum_tre;
 pub mod self_inline;
