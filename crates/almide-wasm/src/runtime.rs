@@ -208,6 +208,7 @@ pub(crate) fn emit_cp_off() -> Function {
     let (bbase, idx, p, blen, n) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
+    let anchor = crate::witness::anchor::begin_fn();
     let mut i = f.instructions();
     i.local_get(bbase).i32_load(len_memarg()).local_set(blen);
     i.i32_const(0).local_set(p);
@@ -220,7 +221,11 @@ pub(crate) fn emit_cp_off() -> Function {
     i.local_get(p).i32_const(1).i32_add().local_set(p);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(p).local_get(blen).i32_ge_u().br_if(1);
-    i.local_get(bbase).local_get(p).i32_add().i32_load8_u(byte);
+    // #4005: the read under the inner loop's exit test, in the bounds witness.
+    let site = crate::witness::bounds::helper_loop_exit(&f);
+    f.instructions().local_get(bbase).local_get(p).i32_add().i32_load8_u(byte);
+    crate::witness::bounds::helper_read(site, &f);
+    let mut i = f.instructions();
     i.i32_const(0xC0).i32_and().i32_const(0x80).i32_ne().br_if(1);
     i.local_get(p).i32_const(1).i32_add().local_set(p);
     i.br(0).end().end();
@@ -228,6 +233,7 @@ pub(crate) fn emit_cp_off() -> Function {
     i.br(0).end().end();
     i.local_get(p);
     i.end();
+    crate::witness::anchor::seal(anchor, &f);
     f
 }
 
@@ -330,13 +336,18 @@ pub(crate) fn emit_str_len_chars() -> Function {
     let (bbase, idx, blen, n) = (0u32, 1u32, 2u32, 3u32);
     let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
+    let anchor = crate::witness::anchor::begin_fn();
     let mut i = f.instructions();
     i.local_get(bbase).i32_load(len_memarg()).local_set(blen);
     i.i32_const(0).local_set(idx);
     i.i64_const(0).local_set(n);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(idx).local_get(blen).i32_ge_u().br_if(1);
-    i.local_get(bbase).local_get(idx).i32_add().i32_load8_u(byte);
+    // #4005: the read under the loop's exit test, in the bounds witness.
+    let site = crate::witness::bounds::helper_loop_exit(&f);
+    f.instructions().local_get(bbase).local_get(idx).i32_add().i32_load8_u(byte);
+    crate::witness::bounds::helper_read(site, &f);
+    let mut i = f.instructions();
     i.i32_const(0xC0).i32_and().i32_const(0x80).i32_ne().if_(BlockType::Empty);
     i.local_get(n).i64_const(1).i64_add().local_set(n);
     i.end();
@@ -344,6 +355,7 @@ pub(crate) fn emit_str_len_chars() -> Function {
     i.br(0).end().end();
     i.local_get(n);
     i.end();
+    crate::witness::anchor::seal(anchor, &f);
     f
 }
 

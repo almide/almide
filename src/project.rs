@@ -1227,8 +1227,43 @@ pub fn write_lock_file(path: &Path, locked: &[LockedDep]) -> Result<(), String> 
             subdir
         ));
     }
-    std::fs::write(path, content)
-        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+    replace_lock_file(path, &content)
+}
+
+/// Put `content` at `path` so that no reader ever sees a partial lock (#4472).
+/// Every dependency resolution writes the lock, and `almide test` resolves on
+/// every parallel test thread: an in-place `fs::write` (truncate, then write)
+/// let a concurrent reader see an empty file — an empty TOML table, i.e. no
+/// lock — and resolve a locked git dependency at its branch head. So:
+/// - identical content is not rewritten (the common case: nothing changed);
+/// - a read-only lock stays as it is, as it did under `fs::write`;
+/// - otherwise the bytes go to a sibling temp file renamed over the lock, so a
+///   reader sees the old lock or the new one, never a torn one.
+fn replace_lock_file(path: &Path, content: &str) -> Result<(), String> {
+    use std::io::Write;
+    let fail = |e: std::io::Error| format!("Failed to write {}: {}", path.display(), e);
+    if let Ok(meta) = std::fs::metadata(path) {
+        if std::fs::read_to_string(path).is_ok_and(|old| old == content) {
+            return Ok(());
+        }
+        if meta.permissions().readonly() {
+            return Err(fail(std::io::Error::from(std::io::ErrorKind::PermissionDenied)));
+        }
+    }
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let tmp = dir.join(format!(".almide.lock.tmp-{}-{}", std::process::id(), seq));
+    let written = (|| -> std::io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(content.as_bytes())?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    written.map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        fail(e)
+    })
 }
 
 /// Add `owner` (`host/owner`) to `[trust] owners` in the manifest at `path`

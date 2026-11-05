@@ -131,6 +131,7 @@ spec/wasm_cross/anon_records_and_fusion.almd
 spec/wasm_cross/append_accumulator.almd
 spec/wasm_cross/append_accumulator_heap.almd
 spec/wasm_cross/append_accumulator_heap_linear.almd
+spec/wasm_cross/arg_call_rebinds_global.almd
 spec/wasm_cross/arg_rebinds_earlier_arg.almd
 spec/wasm_cross/args_surface.almd
 spec/wasm_cross/as_pattern.almd
@@ -350,6 +351,7 @@ spec/wasm_cross/fan_record_serial_elision.almd
 spec/wasm_cross/fan_settle_tuple.almd
 spec/wasm_cross/fan_sibling_trap.almd
 spec/wasm_cross/fan_trap_waits_for_elements_below.almd
+spec/wasm_cross/fan_trap_waits_for_slow_element_below.almd
 spec/wasm_cross/fan_var_thunk_list.almd
 spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
 spec/wasm_cross/field_and_interp_accumulator.almd
@@ -584,6 +586,7 @@ spec/wasm_cross/list_pattern_in_option_payload.almd
 spec/wasm_cross/list_pattern_variant_element.almd
 spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 spec/wasm_cross/list_product_overflow.almd
+spec/wasm_cross/list_push_field_in_place.almd
 spec/wasm_cross/list_push_on_record_field.almd
 spec/wasm_cross/list_range_step_extremes.almd
 spec/wasm_cross/list_reduce_fused_fold_release.almd
@@ -1120,6 +1123,7 @@ spec/wasm_fail/matrix_ragged_from_lists_aborts.almd
 spec/wasm_fail/matrix_shape_mismatch_aborts.almd
 spec/wasm_host_js/effect_export_scalar.almd
 spec/wasm_host_js/effect_exports.almd
+spec/wasm_host_js/fs_preopens.almd
 spec/wasm_host_js/marshal_blocks.almd
 spec/wasm_host_js/marshal_types.almd
 spec/wasm_host_js/println_only.almd

@@ -14,6 +14,7 @@ use crate::err;
 mod native_callbacks;
 pub use native_callbacks::{include_native_callback_modules, SelfVersionedNames};
 
+#[derive(Clone)]
 pub struct ResolvedModules {
     /// Modules in dependency order (leaves first).
     /// Third element is the PkgId (None for local modules).
@@ -285,16 +286,37 @@ pub fn resolve_imports_with_deps(
 
     // Auto-imported bundled stdlib modules (written in Almide, nameable
     // without an `import`) load only when a loaded source reaches them
-    // (#4071) — the one rule `bundled_reach` derives, shared with the
-    // single-file resolver `almide_mir::pipeline::bundled_self_modules`.
-    let reached = almide_frontend::bundled_reach::reached_auto_bundled(
-        std::iter::once(program).chain(ctx.loaded.iter().map(|(_, p, _, _)| p)),
-    );
-    for name in reached {
-        if !ctx.loaded_names.contains(name)
+    // (#4071), and every bundled module keeps only the functions the program
+    // reaches (#4328) — the rules `bundled_reach::live_bundled` derives. The
+    // user's own sources are roots and stay whole.
+    let is_bundled = |name: &str, pkg: &Option<project::PkgId>| pkg.is_none() && stdlib::get_bundled_source(name).is_some();
+    let live = {
+        let roots = std::iter::once(program)
+            .chain(ctx.loaded.iter().filter(|(n, _, pkg, _)| !is_bundled(n, pkg)).map(|(_, p, _, _)| p));
+        let explicit: Vec<(&str, &ast::Program)> = ctx.loaded.iter()
+            .filter(|(n, _, pkg, _)| is_bundled(n, pkg))
+            .map(|(n, p, _, _)| (n.as_str(), p))
+            .collect();
+        almide_frontend::bundled_reach::live_bundled(roots, &explicit, &almide_wasm::registry_impl_admitted)
+    };
+    for name in &live.auto_modules {
+        if !ctx.loaded_names.contains(*name)
             && let Some(source) = stdlib::get_bundled_source(name)
         {
             load_bundled_module(name, source, &mut ctx)?;
+        }
+    }
+    if !almide_base::env::keep_bundled_fns() {
+        for (name, prog, pkg, _) in loaded.iter_mut() {
+            if !is_bundled(name, pkg) {
+                continue;
+            }
+            if let Some(keep) = live.live_fns.get(name.as_str()) {
+                prog.decls.retain(|d| match d {
+                    ast::Decl::Fn { name, .. } => keep.contains(name.as_str()),
+                    _ => true,
+                });
+            }
         }
     }
 

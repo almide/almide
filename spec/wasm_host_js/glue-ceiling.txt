@@ -40,3 +40,7 @@ region_export_push 11700
 region_extern_pull 6200
 # #4376: one wrapper per scalar effect export, no Result or String helpers.
 effect_export_scalar 5700
+# #4438: the in-memory filesystem (js_host_fs.js: the tree, the fd table, the
+# walk, ~7 KB) and the fs variants of its 15 shims, plus argv / environ from
+# init(); shipped only to a module that imports an fs op.
+fs_preopens 27500

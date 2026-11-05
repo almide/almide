@@ -1,0 +1,91 @@
+// @contract: C-258, C-132
+// #4476: an operand that CALLS a fn which reassigns a module-level `var` (or
+// mutates it in place) rebinds that var exactly as an operand that assigns it
+// directly does (#3815, arg_rebinds_earlier_arg.almd). Operands are values
+// evaluated left to right, once (C-258): an earlier operand that read the var
+// keeps the value it read. A `mut` argument names a place, and the call writes
+// that place after every other operand has run (C-132, as native runs it): a
+// push lands in the value the callee left behind.
+//
+// Before, the wasm leg passed the earlier read as a view of the global's
+// block, the callee released the block, and the call read or wrote freed
+// memory: `list.contains` printed false, a push printed a free-list word
+// (`[65936, 6, 7, 9]`), and a later read trapped.
+//
+// Rows: a stdlib read of a bare global and of a global's field, a read through
+// a fn that only calls the rebinding fn, a callee that pushes into the global
+// in place, a closure value that rebinds it, a scalar global read by an
+// inlined user fn, then `mut` places: a stdlib push into a bare global and a
+// field, and a user `mut` fn on both.
+type Buf = { xs: List[Int] }
+
+var gb = Buf { xs: [5, 6, 7] }
+
+var gl: List[Int] = [1, 2, 3]
+
+var gi = 4
+
+fn reset_gl() -> Int = {
+  gl = [7]
+  1
+}
+
+fn reset_gb() -> Int = {
+  gb = Buf { xs: [7] }
+  5
+}
+
+fn via() -> Int = reset_gl()
+
+fn grow_gl() -> Int = {
+  for i in 0..<64 {
+    list.push(gl, i)
+  }
+  2
+}
+
+fn bump() -> Int = {
+  gi = gi + 1
+  0
+}
+
+fn add(a: Int, b: Int) -> Int = a * 10 + b
+
+fn addp(mut xs: List[Int], v: Int) -> Unit = list.push(xs, v)
+
+fn reads() -> Unit = {
+  println("contains ${list.contains(gl, reset_gl())}")
+  gl = [1, 2, 3]
+  println("index_of ${list.index_of(gl, via()) ?? -1}")
+  gl = [1, 2, 3]
+  println("field ${list.contains(gb.xs, reset_gb())}")
+  gl = [1, 2, 3]
+  println("grow ${list.get(gl, grow_gl()) ?? -1} ${list.len(gl)}")
+  gl = [1, 2, 3]
+  let reset = () => {
+    gl = [9]
+    0
+  }
+  println("closure ${list.get(gl, reset()) ?? -1} ${gl}")
+  println("scalar ${add(gi, bump())} ${gi}")
+}
+
+fn places() -> Unit = {
+  gl = [1, 2, 3]
+  list.push(gl, reset_gl())
+  println("push bare ${gl}")
+  gb = Buf { xs: [5, 6, 7] }
+  list.push(gb.xs, reset_gb())
+  println("push field ${gb.xs}")
+  gl = [1, 2, 3]
+  addp(gl, via())
+  println("user bare ${gl}")
+  gb = Buf { xs: [5, 6, 7] }
+  addp(gb.xs, reset_gb())
+  println("user field ${gb.xs}")
+}
+
+effect fn main() -> Unit = {
+  reads()
+  places()
+}

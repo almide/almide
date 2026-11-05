@@ -139,6 +139,7 @@ else {
   __merge_rounds_str(othh, curh, n, width * 2)
 }
 
+@specializes("list.sort")
 fn list_sort_str(xs: List[String]) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -184,6 +185,7 @@ fn __idx_str_some(h: Int, i: Int) -> String? = {
   some(copy)
 }
 
+@specializes("list.min")
 fn list_min_str(xs: List[String]) -> String? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -191,6 +193,7 @@ fn list_min_str(xs: List[String]) -> String? = {
   else __idx_str_some(h, __min_idx_str(h, len, 1, 0))
 }
 
+@specializes("list.max")
 fn list_max_str(xs: List[String]) -> String? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)

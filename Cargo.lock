@@ -219,6 +219,7 @@ version = "0.1.0"
 dependencies = [
  "almide",
  "almide-base",
+ "almide-codegen",
  "almide-driver",
  "almide-frontend",
  "almide-ir",

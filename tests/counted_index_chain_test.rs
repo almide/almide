@@ -125,15 +125,24 @@ fn assert_same(tag: &str, n: &Run, w: &Run) {
     );
 }
 
-/// The native build ships the v0 codegen for every row — the v1 render walls
-/// on a collected list — so `--target rust` is the shipped text. If v1 starts
-/// rendering a row, this pin fails and the shape check must read v1's output.
+/// Where the certified v1 render ships a row (since the `${xs}` repr cells,
+/// #4006, it renders `range_map`), its text is the shipped one. Since #4006's
+/// direct range source it counts the span instead of building it, like v0, so
+/// it reserves its result the way the runtime does — `try_reserve_exact` and
+/// C-197's abort — and never sizes a vector with `with_capacity` or a sized
+/// `collect`, so it has no capacity panic either. The shape check below stays
+/// on the v0 codegen, the fallback every row v1 walls on ships; the huge-span
+/// run compares what ships.
 #[test]
-fn the_v0_codegen_is_what_ships_for_every_row() {
+fn a_row_the_v1_render_ships_reserves_its_span_through_the_aborting_reservation() {
     for (name, ty, chain, _) in ROWS {
+        let Ok(rust) = almide_mir::pipeline::try_render_rust_source(&program(ty, chain, "4")) else { continue };
+        let i = rust.find("fn almd_shape(").unwrap_or_else(|| panic!("{name}: no almd_shape in the v1 render"));
+        let body = rust[i..].split("\n}\n").next().unwrap();
+        let reserved = body.contains("try_reserve_exact(") && body.contains("Error: out of memory");
         assert!(
-            almide_mir::pipeline::try_render_rust_source(&program(ty, chain, "4")).is_err(),
-            "{name}: the v1 native render now ships this program; read its output instead"
+            (reserved || body.contains("almide_rt_list_range(")) && !body.contains("with_capacity(") && !body.contains(".collect"),
+            "{name}: the v1 render sizes its span without the aborting reservation:\n{body}"
         );
     }
 }

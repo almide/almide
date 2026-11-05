@@ -668,6 +668,31 @@ pub struct Program {
     pub expr_comments: std::collections::HashMap<ExprId, ExprComments>,
 }
 
+impl Program {
+    /// A copy holding only the declarations `keep` accepts — what
+    /// `clone()` followed by `decls.retain(keep)` gives, without copying the
+    /// declarations it drops (#4458: the wasm link carries a few functions of
+    /// a large self-hosted source).
+    pub fn clone_retaining(&self, keep: impl Fn(&Decl) -> bool) -> Program {
+        let Program {
+            dialect, module, imports, decls, comment_map, doc_map, blank_lines_map, failed_fn_names,
+            parse_recovered, expr_comments,
+        } = self;
+        Program {
+            dialect: *dialect,
+            module: module.clone(),
+            imports: imports.clone(),
+            decls: decls.iter().filter(|d| keep(d)).cloned().collect(),
+            comment_map: comment_map.clone(),
+            doc_map: doc_map.clone(),
+            blank_lines_map: blank_lines_map.clone(),
+            failed_fn_names: failed_fn_names.clone(),
+            parse_recovered: *parse_recovered,
+            expr_comments: expr_comments.clone(),
+        }
+    }
+}
+
 // ── Generic AST visitor ──
 
 /// Apply `f` to every `Expr` node reachable from a `Program`.

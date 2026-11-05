@@ -1,0 +1,6 @@
+// The checking shim's index read: its check is recorded on another slot.
+fn main() -> Unit = {
+  let xs = [10, 20, 30]
+  let i = list.len(xs) - 2
+  println(int.to_string(xs[i]))
+}

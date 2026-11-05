@@ -890,6 +890,7 @@ pub const SRC_BOOL: &str = r#"
 
 
 /// "true" or "false"; bool.parse reads it back.
+@scalar_text
 fn to_string(b: Bool) -> String = if b then "true" else "false"
 
 /// ok(true) for "true", ok(false) for "false", err for anything else.
@@ -985,6 +986,19 @@ fn compare(a: Bytes, b: Bytes) -> Int = _
 /// New Bytes holding a then b.
 @intrinsic("almide_rt_bytes_concat")
 fn __concat(a: Bytes, b: Bytes) -> Bytes = _
+
+
+
+
+@intrinsic("almide_rt_bytes_append_fresh")
+@reuse(b)
+fn __append(b: Bytes, val: Int) -> Bytes = _
+
+
+
+
+@intrinsic("almide_rt_bytes_index_checked")
+fn __index(b: Bytes, pos: Int) -> Int = _
 
 /// True if needle occurs in b, or needle is empty.
 @intrinsic("almide_rt_bytes_contains")
@@ -2646,6 +2660,8 @@ fn bytes_set(b: Bytes, i: Int, val: Int) -> Bytes = {
 
 
 
+@implements("bytes.__append")
+@specializes("bytes.__append")
 fn bytes_append(b: Bytes, val: Int) -> Bytes = {
   let n = prim.load32(prim.handle(b) + 4)
   let out = prim.alloc_bytes(n + 1)
@@ -2969,6 +2985,8 @@ fn bytes_read_i32_be(b: Bytes, pos: Int) -> Int = {
 
 
 
+@implements("bytes.__index")
+@specializes("bytes.__index")
 fn bytes_index(b: Bytes, pos: Int) -> Int = {
   let h = prim.handle(b)
   let n = prim.load32(h + 4)
@@ -11401,6 +11419,7 @@ pub const SRC_INT: &str = r#"
 
 /// Decimal digits, with - when negative.
 @intrinsic("almide_rt_int_to_string")
+@scalar_text
 fn to_string(x: Int) -> String = _
 
 /// Lowercase hex, no 0x; -1 gives 16 f digits.
@@ -14435,6 +14454,37 @@ fn __sum_int(xs: List[Int]) -> Int = _
 @intrinsic("almide_rt_list_product")
 fn __product_int(xs: List[Int]) -> Int = _
 
+
+
+
+
+@intrinsic("almide_rt_list_to_string_int")
+fn __to_string_int(xs: List[Int]) -> String = _
+
+@intrinsic("almide_rt_list_to_string_float")
+fn __to_string_float(xs: List[Float]) -> String = _
+
+@intrinsic("almide_rt_list_to_string_bool")
+fn __to_string_bool(xs: List[Bool]) -> String = _
+
+@intrinsic("almide_rt_list_to_string_str")
+fn __to_string_str(xs: List[String]) -> String = _
+
+
+
+
+@intrinsic("almide_rt_list_eq_int")
+fn __eq_int(a: List[Int], b: List[Int]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_float")
+fn __eq_float(a: List[Float], b: List[Float]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_bool")
+fn __eq_bool(a: List[Bool], b: List[Bool]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_str")
+fn __eq_str(a: List[String], b: List[String]) -> Bool = _
+
 /// Head element, or none when empty.
 @intrinsic("almide_rt_list_first")
 fn first[A](xs: List[A]) -> A? = _
@@ -15714,6 +15764,7 @@ fn __chunk_outer_str(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int)
     __chunk_outer_str(oh, sh, total, cn, ci + 1, start + cn)
   }
 
+@specializes("list.chunk")
 fn list_chunk_str(xs: List[String], n: Int) -> List[List[String]] = {
   if n <= 0 then prim.die(prim.handle("Error: chunk size must be positive\n")) else ()
   let sh = prim.handle(xs)
@@ -15755,6 +15806,7 @@ fn __do_windows_str(xs: List[String], n: Int) -> List[List[String]] = {
   outer
 }
 
+@specializes("list.window")
 fn list_window_str(xs: List[String], n: Int) -> List[List[String]] = __do_windows_str(xs, n)
 "#;
 pub const SRC_LIST_CONCAT: &str = r#"
@@ -15944,6 +15996,7 @@ fn __enum_str_rec(xs: List[String], i: Int, n: Int, acc: List[(Int, String)]) ->
     __enum_str_rec(xs, i + 1, n, acc + [(i, line)])
   }
 
+@specializes("list.enumerate")
 fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = __enum_str_rec(
   xs,
   0,
@@ -16043,6 +16096,7 @@ fn __filterstr_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: I
     } else __filterstr_fill(dh, sh, f, n, i + 1, di)
   }
 
+@specializes("list.filter")
 fn list_filter_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
@@ -16253,6 +16307,7 @@ fn __flmstr_fill(dh: Int, sh: Int, f: (String) -> List[String], n: Int, i: Int, 
     __flmstr_fill(dh, sh, f, n, i + 1, ndi)
   }
 
+@specializes("list.flat_map")
 fn list_flat_map_str(xs: List[String], f: (String) -> List[String]) -> List[String] = {
   let n = list.len(xs)
   let total = __flmstr_total(prim.handle(xs), f, n, 0, 0)
@@ -16490,12 +16545,14 @@ fn __lminf_at(h: Int, len: Int) -> Float? = {
   some(prim.ffrombits(m))
 }
 
+@specializes("list.max")
 fn list_max_float(xs: List[Float]) -> Float? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if len <= 0 then __lmmf_none() else __lmaxf_at(h, len)
 }
 
+@specializes("list.min")
 fn list_min_float(xs: List[Float]) -> Float? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -16676,6 +16733,7 @@ fn __get_str_some(h: Int, i: Int) -> String? = {
   some(copy)
 }
 
+@specializes("list.get")
 fn list_get_str(xs: List[String], i: Int) -> String? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -16683,12 +16741,14 @@ fn list_get_str(xs: List[String], i: Int) -> String? = {
   else if i >= len then none else __get_str_some(h, i)
 }
 
+@specializes("list.first")
 fn list_first_str(xs: List[String]) -> String? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if len <= 0 then none else __get_str_some(h, 0)
 }
 
+@specializes("list.last")
 fn list_last_str(xs: List[String]) -> String? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -16743,6 +16803,7 @@ else {
   0
 }
 
+@specializes("list.set")
 fn list_set_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16800,6 +16861,7 @@ fn __lsh_insert_fill(srcbase: Int, dstbase: Int, n: Int, idx: Int, x: Value) -> 
 }
 
 
+@specializes("list.insert")
 fn list_insert_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16826,6 +16888,7 @@ fn __lsh_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> In
 
 
 
+@specializes("list.remove_at")
 fn list_remove_at_heapelem(xs: List[Value], i: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16853,6 +16916,7 @@ else {
   0
 }
 
+@specializes("list.swap")
 fn list_swap_heapelem(xs: List[Value], i: Int, j: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16864,6 +16928,7 @@ fn list_swap_heapelem(xs: List[Value], i: Int, j: Int) -> List[Value] = {
 }
 
 
+@specializes("list.take_end")
 fn list_take_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -16875,6 +16940,7 @@ fn list_take_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   buf
 }
 
+@specializes("list.drop_end")
 fn list_drop_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -16908,6 +16974,7 @@ else {
 
 
 
+@specializes("list.take")
 fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -16919,6 +16986,7 @@ fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   out
 }
 
+@specializes("list.drop")
 fn list_drop_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -16953,6 +17021,7 @@ else {
 
 
 
+@specializes("list.slice")
 fn list_slice_hshare(xs: List[List[Int]], start: Int, end: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -17004,6 +17073,7 @@ else {
   __uh_fill(sh, oh, n, i + 1, k + 1 - seen)
 }
 
+@specializes("list.unique")
 fn list_unique_hshare(xs: List[List[Int]]) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17029,6 +17099,7 @@ else {
 
 
 
+@specializes("list.dedup")
 fn list_dedup_hshare(xs: List[List[Int]]) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17043,6 +17114,7 @@ fn __lch_idx(h: Int, x: Int, n: Int, i: Int) -> Int = if i >= n then 0 - 1
 else if __uh_eq(prim.load64(h + 12 + i * 8), x) then i
 else __lch_idx(h, x, n, i + 1)
 
+@specializes("list.contains")
 fn list_contains_hshare(xs: List[List[Int]], x: List[Int]) -> Bool = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17057,6 +17129,7 @@ fn __lih_some(i: Int) -> Int? = some(i)
 
 
 
+@specializes("list.index_of")
 fn list_index_of_hshare(xs: List[List[Int]], x: List[Int]) -> Int? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17064,6 +17137,7 @@ fn list_index_of_hshare(xs: List[List[Int]], x: List[Int]) -> Int? = {
   if idx < 0 then __lih_none() else __lih_some(idx)
 }
 
+@specializes("list.get")
 fn list_get_hshare(xs: List[List[Int]], i: Int) -> List[Int]? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -17075,8 +17149,10 @@ fn list_get_hshare(xs: List[List[Int]], i: Int) -> List[Int]? = {
   }
 }
 
+@specializes("list.first")
 fn list_first_hshare(xs: List[List[Int]]) -> List[Int]? = list_get_hshare(xs, 0)
 
+@specializes("list.last")
 fn list_last_hshare(xs: List[List[Int]]) -> List[Int]? = {
   let n = prim.load32(prim.handle(xs) + 4)
   list_get_hshare(xs, n - 1)
@@ -17202,6 +17278,7 @@ else {
   __repeat_fill_rc(lh, hx, n, i + 1)
 }
 
+@specializes("list.repeat")
 fn list_repeat_rc(x: List[Int], n: Int) -> List[List[Int]] = {
   if n > 268435456 then prim.die(prim.handle("Error: repeat result too large\n")) else ()
   let count = if n > 0 then n else 0
@@ -17265,6 +17342,7 @@ else {
   __mapstr_fill(dh, sh, f, n, i + 1)
 }
 
+@specializes("list.map")
 fn list_map_str(xs: List[String], f: (String) -> String) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
@@ -17305,6 +17383,7 @@ else {
   0
 }
 
+@specializes("list.set")
 fn list_set_str(xs: List[String], i: Int, x: String) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17329,6 +17408,7 @@ fn __ls_insert_fill(srcbase: Int, dstbase: Int, n: Int, idx: Int, x: String) -> 
   0
 }
 
+@specializes("list.insert")
 fn list_insert_str(xs: List[String], i: Int, x: String) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17353,6 +17433,7 @@ fn __ls_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int
     __copy_slots_rc(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
   }
 
+@specializes("list.remove_at")
 fn list_remove_at_str(xs: List[String], i: Int) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17379,6 +17460,7 @@ else {
   0
 }
 
+@specializes("list.swap")
 fn list_swap_str(xs: List[String], i: Int, j: Int) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17421,6 +17503,7 @@ fn __lsu_fill_str(sh: Int, bh: Int, n: Int, i: Int, f: (String) -> String, j: In
     __lsu_fill_str(sh, bh, n, i, f, j + 1)
   }
 
+@specializes("list.update")
 fn list_update_str(xs: List[String], i: Int, f: (String) -> String) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17611,6 +17694,7 @@ fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
 
 
 
+@specializes("list.drop_end")
 fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -17624,6 +17708,7 @@ fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
 
 
 
+@specializes("list.take_end")
 fn list_take_end_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -17877,6 +17962,7 @@ fn list_sort_tss(xs: List[(Int, Int)]) -> List[(Int, Int)] = {
   buf
 }
 
+@specializes("list.sort")
 fn list_sort_lint(xs: List[List[Int]]) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17888,6 +17974,7 @@ fn list_sort_lint(xs: List[List[Int]]) -> List[List[Int]] = {
   buf
 }
 
+@specializes("list.sort")
 fn list_sort_oint(xs: List[Int?]) -> List[Int?] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17950,6 +18037,7 @@ fn __ordc_some_lint(h: Int, i: Int) -> List[Int]? = {
   some(x)
 }
 
+@specializes("list.min")
 fn list_min_lint(xs: List[List[Int]]) -> List[Int]? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17957,6 +18045,7 @@ fn list_min_lint(xs: List[List[Int]]) -> List[Int]? = {
   else __ordc_some_lint(h, __exidx_lint(h, n, 1, 0, false))
 }
 
+@specializes("list.max")
 fn list_max_lint(xs: List[List[Int]]) -> List[Int]? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17971,6 +18060,7 @@ fn __ordc_some_lstr(h: Int, i: Int) -> List[String]? = {
   some(x)
 }
 
+@specializes("list.min")
 fn list_min_lstr(xs: List[List[String]]) -> List[String]? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17978,6 +18068,7 @@ fn list_min_lstr(xs: List[List[String]]) -> List[String]? = {
   else __ordc_some_lstr(h, __exidx_lstr(h, n, 1, 0, false))
 }
 
+@specializes("list.max")
 fn list_max_lstr(xs: List[List[String]]) -> List[String]? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -18044,6 +18135,7 @@ else {
   __enum_fill_h(dh, sh, n, i + 1)
 }
 
+@specializes("list.enumerate")
 fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -18058,6 +18150,7 @@ fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = {
 
 
 
+@specializes("list.enumerate")
 fn list_enumerate_h(xs: List[List[Int]]) -> List[(Int, List[Int])] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -18118,6 +18211,7 @@ else {
   __zip_fill_rca(dh, ha, hb, n, i + 1)
 }
 
+@specializes("list.zip")
 fn list_zip_sh(a: List[Int], b: List[List[Int]]) -> List[(Int, List[Int])] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -18129,6 +18223,7 @@ fn list_zip_sh(a: List[Int], b: List[List[Int]]) -> List[(Int, List[Int])] = {
   out
 }
 
+@specializes("list.zip")
 fn list_zip_hs(a: List[List[Int]], b: List[Int]) -> List[(List[Int], Int)] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -18144,6 +18239,7 @@ fn list_zip_hs(a: List[List[Int]], b: List[Int]) -> List[(List[Int], Int)] = {
 
 
 
+@specializes("list.zip")
 fn list_zip_h(a: List[List[Int]], b: List[List[Int]]) -> List[(List[Int], List[Int])] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -18155,6 +18251,7 @@ fn list_zip_h(a: List[List[Int]], b: List[List[Int]]) -> List[(List[Int], List[I
   out
 }
 
+@specializes("list.zip")
 fn list_zip_rc(a: List[List[Int]], b: List[List[Int]]) -> List[(List[Int], List[Int])] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -18285,6 +18382,7 @@ fn list_reduce(xs: List[Int], f: (Int, Int) -> Int) -> Int? = {
 
 
 
+@specializes("list.reduce")
 fn list_reduce_str(xs: List[String], f: (String, String) -> String) -> String? = {
   let n = list.len(xs)
   if n <= 0 then none
@@ -18339,6 +18437,7 @@ else {
   __revstr_fill(dh, sh, n, i + 1)
 }
 
+@specializes("list.reverse")
 fn list_reverse_str(xs: List[String]) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
@@ -18383,6 +18482,7 @@ fn __scan_str_fill(dh: Int, sh: Int, f: (String, Int) -> String, n: Int, i: Int,
     __scan_str_fill(dh, sh, f, n, i + 1, nb)
   }
 
+@specializes("list.scan")
 fn list_scan_str(xs: List[Int], init: String, f: (String, Int) -> String) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
@@ -18564,6 +18664,7 @@ else {
   __merge_rounds_str(othh, curh, n, width * 2)
 }
 
+@specializes("list.sort")
 fn list_sort_str(xs: List[String]) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -18609,6 +18710,7 @@ fn __idx_str_some(h: Int, i: Int) -> String? = {
   some(copy)
 }
 
+@specializes("list.min")
 fn list_min_str(xs: List[String]) -> String? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -18616,6 +18718,7 @@ fn list_min_str(xs: List[String]) -> String? = {
   else __idx_str_some(h, __min_idx_str(h, len, 1, 0))
 }
 
+@specializes("list.max")
 fn list_max_str(xs: List[String]) -> String? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -18909,6 +19012,7 @@ else {
   __sortf_copy(srch, dsth, n, i + 1)
 }
 
+@specializes("list.sort")
 fn list_sort_float(xs: List[Float]) -> List[Float] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -18956,6 +19060,7 @@ else {
   } else __uniqf_fill(sh, dh, n, i + 1, di)
 }
 
+@specializes("list.unique")
 fn list_unique_float(xs: List[Float]) -> List[Float] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -18999,6 +19104,7 @@ fn __dedupf_build(h: Int, n: Int) -> List[Float] = {
   buf
 }
 
+@specializes("list.dedup")
 fn list_dedup_float(xs: List[Float]) -> List[Float] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -19014,6 +19120,7 @@ else {
   else __idxf_find(h, len, x, i + 1)
 }
 
+@specializes("list.contains")
 fn list_contains_float(xs: List[Float], x: Float) -> Bool = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -19024,6 +19131,7 @@ fn __liof_none() -> Int? = none
 
 fn __liof_some(i: Int) -> Int? = some(i)
 
+@specializes("list.index_of")
 fn list_index_of_float(xs: List[Float], x: Float) -> Int? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -19287,6 +19395,7 @@ else {
   else __list_str_index(h, len, x, i + 1)
 }
 
+@specializes("list.contains")
 fn list_contains_str(xs: List[String], x: String) -> Bool = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -19299,6 +19408,7 @@ fn __lis_none() -> Int? = none
 
 fn __lis_some(i: Int) -> Int? = some(i)
 
+@specializes("list.index_of")
 fn list_index_of_str(xs: List[String], x: String) -> Int? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -19318,6 +19428,7 @@ fn __list_str_count_hits(h: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) 
     else __list_str_count_hits(h, f, n, i + 1, acc)
   }
 
+@specializes("list.any")
 fn list_any_str(xs: List[String], f: (String) -> Bool) -> Bool = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -19325,6 +19436,7 @@ fn list_any_str(xs: List[String], f: (String) -> Bool) -> Bool = {
   hits > 0
 }
 
+@specializes("list.all")
 fn list_all_str(xs: List[String], f: (String) -> Bool) -> Bool = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -19332,6 +19444,7 @@ fn list_all_str(xs: List[String], f: (String) -> Bool) -> Bool = {
   hits >= n
 }
 
+@specializes("list.count")
 fn list_count_str(xs: List[String], f: (String) -> Bool) -> Int = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -19348,6 +19461,7 @@ fn __list_str_fold_loop(h: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: In
     __list_str_fold_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_str(xs: List[String], init: Int, f: (Int, String) -> Int) -> Int = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -19377,6 +19491,7 @@ fn __list_find_str_loop(h: Int, f: (String) -> Bool, n: Int, i: Int) -> String? 
   if i >= n then __lfs_none()
   else __list_find_str_at(h, f, n, i)
 
+@specializes("list.find")
 fn list_find_str(xs: List[String], f: (String) -> Bool) -> String? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -19410,6 +19525,7 @@ fn __unique_str_step(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = {
 fn __unique_str_fill(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = if i >= n then di
 else __unique_str_step(sh, dh, n, i, di)
 
+@specializes("list.unique")
 fn list_unique_str(xs: List[String]) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -19443,6 +19559,7 @@ fn __dedup_str_step(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = {
 fn __dedup_str_fill(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = if i >= n then di
 else __dedup_str_step(sh, dh, n, i, di)
 
+@specializes("list.dedup")
 fn list_dedup_str(xs: List[String]) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -19473,6 +19590,7 @@ fn __intersperse_fill(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, 
   if i >= n then di
   else __intersperse_step(sh, oh, sep, n, last, i, di)
 
+@specializes("list.intersperse")
 fn list_intersperse_str(xs: List[String], sep: String) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -19572,6 +19690,7 @@ fn __copy_slice_str(srch: Int, dsth: Int, start: Int, count: Int, i: Int) -> Int
     __copy_slice_str(srch, dsth, start, count, i + 1)
   }
 
+@specializes("list.take")
 fn list_take_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -19581,6 +19700,7 @@ fn list_take_str(xs: List[String], n: Int) -> List[String] = {
   buf
 }
 
+@specializes("list.drop")
 fn list_drop_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -19596,6 +19716,7 @@ fn list_drop_str(xs: List[String], n: Int) -> List[String] = {
 
 
 
+@specializes("list.slice")
 fn list_slice_str(xs: List[String], start: Int, end: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -19682,6 +19803,8 @@ else {
   __lts_fill_body(addr, count, i + 1, pos2)
 }
 
+@implements("list.__to_string_int")
+@specializes("list.__to_string_int")
 fn list_to_string(xs: List[Int]) -> String = {
   let h = prim.handle(xs)
   let count = prim.load32(h + 4)
@@ -19751,6 +19874,8 @@ else {
   __ltsb_fill_body(addr, count, i + 1, pos2)
 }
 
+@implements("list.__to_string_bool")
+@specializes("list.__to_string_bool")
 fn list_to_string_b(xs: List[Bool]) -> String = {
   let h = prim.handle(xs)
   let count = prim.load32(h + 4)
@@ -19833,6 +19958,8 @@ else {
   __ltsf_fill_body(addr, count, i + 1, pos2)
 }
 
+@implements("list.__to_string_float")
+@specializes("list.__to_string_float")
 fn list_to_string_f(xs: List[Float]) -> String = {
   let h = prim.handle(xs)
   let count = prim.load32(h + 4)
@@ -19988,6 +20115,8 @@ else {
   __ltss_fill_body(addr, count, i + 1, pos2)
 }
 
+@implements("list.__to_string_str")
+@specializes("list.__to_string_str")
 fn list_to_string_s(xs: List[String]) -> String = {
   let h = prim.handle(xs)
   let count = prim.load32(h + 4)
@@ -20198,6 +20327,7 @@ fn __takew_str_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: I
     } else di
   }
 
+@specializes("list.take_while")
 fn list_take_while_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
@@ -20221,6 +20351,7 @@ else {
   __copy_tail_str(dh, sh, si + 1, di + 1, n)
 }
 
+@specializes("list.drop_while")
 fn list_drop_while_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
   let n = list.len(xs)
   let skip = __dropw_str_skip(prim.handle(xs), f, n, 0)
@@ -20269,6 +20400,7 @@ fn __zipw_str_fill(dh: Int, ah: Int, bh: Int, f: (String, String) -> String, n: 
     __zipw_str_fill(dh, ah, bh, f, n, i + 1)
   }
 
+@specializes("list.zip_with")
 fn list_zip_with_str(a: List[String], b: List[String], f: (String, String) -> String) -> List[String] = {
   let na = list.len(a)
   let nb = list.len(b)
@@ -21538,8 +21670,10 @@ fn map_from_list_hobj(pairs: List[(String, String)]) -> Map[String, String] = {
 
 
 
+@specializes("map.new")
 fn map_new_hobj() -> Map[String, String] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_hobj(m: Map[String, String], k: String, v: String) -> Map[String, String] = __hobj_set(
   m,
   k,
@@ -21553,6 +21687,7 @@ fn __hobj_some(h: Int, n: Int, idx: Int) -> String? = {
   some(v)
 }
 
+@specializes("map.get")
 fn map_get_hobj(m: Map[String, String], k: String) -> String? = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
@@ -21622,8 +21757,10 @@ else {
   0
 }
 
+@specializes("map.new")
 fn map_new_hval() -> Map[String, List[Int]] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_hval(m: Map[String, List[Int]], k: String, v: List[Int]) -> Map[String, List[Int]] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -21751,8 +21888,10 @@ fn list_to_string_lmh(xs: List[Map[String, List[Int]]]) -> String = "[" + (xs |>
 
 
 
+@specializes("map.len")
 fn map_len_hval(m: Map[String, List[Int]]) -> Int = prim.load32(prim.handle(m) + 4)
 
+@specializes("map.contains")
 fn map_contains_hval(m: Map[String, List[Int]], k: String) -> Bool = {
   let h = prim.handle(m)
   __hvl_find(h, prim.load32(h + 4), k, 0) >= 0
@@ -21765,6 +21904,7 @@ fn __hvl_some(h: Int, n: Int, idx: Int) -> List[Int]? = {
   some(v)
 }
 
+@specializes("map.get")
 fn map_get_hval(m: Map[String, List[Int]], k: String) -> List[Int]? = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
@@ -21845,6 +21985,7 @@ else {
   __hvl_keys_fill(sh, oh, entries, i + 1)
 }
 
+@specializes("map.keys")
 fn map_keys_hval(m: Map[String, List[Int]]) -> List[String] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -21894,6 +22035,7 @@ pub const SRC_MAP_IVH: &str = r#"
 
 
 
+@specializes("map.new")
 fn map_new_ivh() -> Map[Int, String] = prim.alloc_map_kv(0)
 
 fn __ivh_find(h: Int, n: Int, k: Int, i: Int) -> Int = if i >= n then 0 - 1
@@ -21933,6 +22075,7 @@ else {
   __ivh_store_val(rh + 12 + (rn + rn - 1) * 8, v)
 }
 
+@specializes("map.set")
 fn map_set_ivh(m: Map[Int, String], k: Int, v: String) -> Map[Int, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -22036,12 +22179,14 @@ fn map_to_string_ivh(m: Map[Int, String]) -> String = {
 }
 
 
+@specializes("map.len")
 fn map_len_ivh(m: Map[Int, String]) -> Int = prim.load32(prim.handle(m) + 4)
 
 
 
 
 
+@specializes("map.get")
 fn map_get_ivh(m: Map[Int, String], k: Int) -> String? = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
@@ -22115,8 +22260,10 @@ else {
   0
 }
 
+@specializes("map.new")
 fn map_new_mlo() -> Map[String, List[Int?]] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_mlo(m: Map[String, List[Int?]], k: String, v: List[Int?]) -> Map[String, List[Int?]] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -22305,8 +22452,10 @@ else {
   0
 }
 
+@specializes("map.new")
 fn map_new_msv() -> Map[String, Map[String, String]] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_msv(m: Map[String, Map[String, String]], k: String, v: Map[String, String]) -> Map[String, Map[String, String]] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -22359,6 +22508,7 @@ fn __msv_remove_copy(sh: Int, rh: Int, n: Int, rn: Int, skip: Int, i: Int, j: In
     __msv_remove_copy(sh, rh, n, rn, skip, i + 1, j + 1)
   }
 
+@specializes("map.remove")
 fn map_remove_msv(m: Map[String, Map[String, String]], k: String) -> Map[String, Map[String, String]] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -22560,12 +22710,16 @@ else {
   else __skv_find(h, entries, k, i + 1)
 }
 
+@specializes("map.new")
 fn map_new_skv() -> Map[String, Int] = prim.alloc_map_skv(0)
 
+@specializes("map.len")
 fn map_len_skv(m: Map[String, Int]) -> Int = prim.load32(prim.handle(m) + 4)
 
+@specializes("map.is_empty")
 fn map_is_empty_skv(m: Map[String, Int]) -> Bool = prim.load32(prim.handle(m) + 4) == 0
 
+@specializes("map.contains")
 fn map_contains_skv(m: Map[String, Int], k: String) -> Bool = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22582,6 +22736,7 @@ fn __skv_some(h: Int, entries: Int, idx: Int) -> Int? = {
   some(v)
 }
 
+@specializes("map.get")
 fn map_get_skv(m: Map[String, Int], k: String) -> Int? = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22621,6 +22776,7 @@ fn __skv_set_append(rh: Int, sentries: Int, rentries: Int, idx: Int, k: String, 
     0
   }
 
+@specializes("map.set")
 fn map_set_skv(m: Map[String, Int], k: String, v: Int) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let sentries = prim.load32(sh + 4)
@@ -22658,6 +22814,7 @@ fn __skv_remove_fill(sh: Int, rh: Int, sentries: Int, rentries: Int, k: String, 
     }
   }
 
+@specializes("map.remove")
 fn map_remove_skv(m: Map[String, Int], k: String) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let sentries = prim.load32(sh + 4)
@@ -22680,6 +22837,7 @@ else {
   __skv_keys_fill(sh, oh, entries, i + 1)
 }
 
+@specializes("map.keys")
 fn map_keys_skv(m: Map[String, Int]) -> List[String] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22696,6 +22854,7 @@ else {
   __skv_values_fill(sh, oh, entries, i + 1)
 }
 
+@specializes("map.values")
 fn map_values_skv(m: Map[String, Int]) -> List[Int] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22871,6 +23030,7 @@ else {
   __skv_entries_fill(dh, sh, entries, i + 1)
 }
 
+@specializes("map.to_list")
 fn map_entries_skv(m: Map[String, Int]) -> List[(String, Int)] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -22933,6 +23093,7 @@ else {
   }
 }
 
+@specializes("map.from_list")
 fn map_from_list_skv(pairs: List[(String, Int)]) -> Map[String, Int] = {
   let lh = prim.handle(pairs)
   let n = prim.load32(lh + 4)
@@ -23036,6 +23197,7 @@ fn __skv_merge_bapp(ah: Int, bh: Int, rh: Int, an: Int, bn: Int, rn: Int, j: Int
     } else __skv_merge_bapp(ah, bh, rh, an, bn, rn, j + 1, w)
   }
 
+@specializes("map.merge")
 fn map_merge_skv(a: Map[String, Int], b: Map[String, Int]) -> Map[String, Int] = {
   let ah = prim.handle(a)
   let bh = prim.handle(b)
@@ -23081,15 +23243,19 @@ else {
   else __mstr_find(h, entries, k, i + 1)
 }
 
+@specializes("map.new")
 fn map_new_str() -> Map[String, String] = prim.alloc_map_str(0)
 
+@specializes("map.len")
 fn map_len_str(m: Map[String, String]) -> Int = {
   let n = prim.load32(prim.handle(m) + 4)
   n / 2
 }
 
+@specializes("map.is_empty")
 fn map_is_empty_str(m: Map[String, String]) -> Bool = prim.load32(prim.handle(m) + 4) == 0
 
+@specializes("map.contains")
 fn map_contains_str(m: Map[String, String], k: String) -> Bool = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
@@ -23107,6 +23273,7 @@ fn __mget_str_some(h: Int, idx: Int) -> String? = {
   some(copy)
 }
 
+@specializes("map.get")
 fn map_get_str(m: Map[String, String], k: String) -> String? = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
@@ -23159,6 +23326,7 @@ else {
   0
 }
 
+@specializes("map.set")
 fn map_set_str(m: Map[String, String], k: String, v: String) -> Map[String, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -23190,6 +23358,7 @@ else {
   __mkeys_fill(sh, oh, entries, i + 1)
 }
 
+@specializes("map.keys")
 fn map_keys_str(m: Map[String, String]) -> List[String] = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
@@ -23207,6 +23376,7 @@ else {
   __mvalues_fill(sh, oh, entries, i + 1)
 }
 
+@specializes("map.values")
 fn map_values_str(m: Map[String, String]) -> List[String] = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
@@ -23232,6 +23402,7 @@ fn __mremove_fill(sh: Int, rh: Int, entries: Int, k: String, i: Int, w: Int) -> 
     }
   }
 
+@specializes("map.remove")
 fn map_remove_str(m: Map[String, String], k: String) -> Map[String, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -23278,6 +23449,7 @@ fn __mmerge_addnew(ah: Int, aentries: Int, bh: Int, bentries: Int, rh: Int, j: I
     }
   }
 
+@specializes("map.merge")
 fn map_merge_str(a: Map[String, String], b: Map[String, String]) -> Map[String, String] = {
   let ah = prim.handle(a)
   let bh = prim.handle(b)
@@ -23322,6 +23494,7 @@ fn __mupdate_copy(sh: Int, rh: Int, entries: Int, k: String, f: (String) -> Stri
     __mupdate_copy(sh, rh, entries, k, f, i + 1)
   }
 
+@specializes("map.update")
 fn map_update_str(m: Map[String, String], k: String, f: (String) -> String) -> Map[String, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -23337,6 +23510,7 @@ fn map_update_str(m: Map[String, String], k: String, f: (String) -> String) -> M
 
 
 
+@specializes("map.upsert")
 fn map_upsert_str(m: Map[String, String], k: String, init: String, f: (String) -> String) -> Map[String, String] =
   if map_contains_str(
     m,
@@ -23362,6 +23536,7 @@ fn __mfilter_fill(sh: Int, rh: Int, entries: Int, f: (String, String) -> Bool, i
     }
   }
 
+@specializes("map.filter")
 fn map_filter_str(m: Map[String, String], f: (String, String) -> Bool) -> Map[String, String] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -23383,6 +23558,7 @@ fn __mcount_hits(sh: Int, entries: Int, f: (String, String) -> Bool, i: Int, acc
     else __mcount_hits(sh, entries, f, i + 1, acc)
   }
 
+@specializes("map.all")
 fn map_all_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -23391,6 +23567,7 @@ fn map_all_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
   hits >= entries
 }
 
+@specializes("map.any")
 fn map_any_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -23399,6 +23576,7 @@ fn map_any_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
   hits > 0
 }
 
+@specializes("map.count")
 fn map_count_str(m: Map[String, String], f: (String, String) -> Bool) -> Int = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -23417,6 +23595,7 @@ fn __mfold_loop(sh: Int, f: (Int, String, String) -> Int, entries: Int, i: Int, 
     __mfold_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_str(m: Map[String, String], init: Int, f: (Int, String, String) -> Int) -> Int = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -23438,6 +23617,7 @@ fn __msf_at(ph: Int, n: Int, i: Int, m: Map[String, String]) -> Map[String, Stri
     __msf_at(ph, n, i + 1, nm)
   }
 
+@specializes("map.from_list")
 fn map_from_list_str(pairs: List[(String, String)]) -> Map[String, String] = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)
@@ -28766,6 +28946,7 @@ else {
   0
 }
 
+@specializes("option.to_list")
 fn option_to_list_rc(o: Int?) -> List[Int] = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -29719,6 +29900,7 @@ fn __ouos_some(h: Int) -> String = {
   string.repeat(s, 1)
 }
 
+@specializes("option.unwrap_or")
 fn option_unwrap_or_str(o: String?, default: String) -> String = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -29900,67 +30082,87 @@ pub const SRC_PRIM: &str = r#"
 
 
 
+
+
+
+
+@prim_op(addr)
 @intrinsic("almide_rt_prim_handle")
 fn handle[A](ptr: A) -> Int = _
 
 
+@prim_op(load, width=1)
 @intrinsic("almide_rt_prim_load8")
 fn load8(addr: Int) -> Int = _
 
 
+@prim_op(load, width=4)
 @intrinsic("almide_rt_prim_load32")
 fn load32(addr: Int) -> Int = _
 
 
+@prim_op(load, width=8)
 @intrinsic("almide_rt_prim_load64")
 fn load64(addr: Int) -> Int = _
 
 
+@prim_op(store, width=4)
 @intrinsic("almide_rt_prim_store32")
 fn store32(addr: Int, val: Int) -> Unit = _
 
 
+@prim_op(store, width=1)
 @intrinsic("almide_rt_prim_store8")
 fn store8(addr: Int, val: Int) -> Unit = _
 
 
+@prim_op(store, width=8)
 @intrinsic("almide_rt_prim_store64")
 fn store64(addr: Int, val: Int) -> Unit = _
 
 
+@prim_op(int, op=bit_and)
 @intrinsic("almide_rt_prim_band")
 fn band(a: Int, b: Int) -> Int = _
 
+@prim_op(int, op=bit_or)
 @intrinsic("almide_rt_prim_bor")
 fn bor(a: Int, b: Int) -> Int = _
 
+@prim_op(int, op=bit_xor)
 @intrinsic("almide_rt_prim_bxor")
 fn bxor(a: Int, b: Int) -> Int = _
 
+@prim_op(int, op=shl)
 @intrinsic("almide_rt_prim_bshl")
 fn bshl(n: Int, bits: Int) -> Int = _
 
+@prim_op(int, op=shr)
 @intrinsic("almide_rt_prim_bshr")
 fn bshr(n: Int, bits: Int) -> Int = _
 
 
+@prim_op(int, op=shr_u)
 @intrinsic("almide_rt_prim_bshr_u")
 fn bshr_u(n: Int, bits: Int) -> Int = _
 
 
 
 
+@prim_op(alloc, block=bytes)
 @intrinsic("almide_rt_prim_alloc_str")
 fn alloc_str(byte_len: Int) -> String = _
 
 
 
+@prim_op(alloc, block=bytes)
 @intrinsic("almide_rt_prim_alloc_bytes")
 fn alloc_bytes(n: Int) -> Bytes = _
 
 
 
 
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_list(n: Int) -> List[Int] = _
 
@@ -29969,6 +30171,7 @@ fn alloc_list(n: Int) -> List[Int] = _
 
 
 
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_list_f64(n: Int) -> List[Float] = _
 
@@ -29977,6 +30180,7 @@ fn alloc_list_f64(n: Int) -> List[Float] = _
 
 
 
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_set(n: Int) -> Set[Int] = _
 
@@ -29986,6 +30190,7 @@ fn alloc_set(n: Int) -> Set[Int] = _
 
 
 
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_map(slots: Int) -> Map[Int, Int] = _
 
@@ -29994,6 +30199,7 @@ fn alloc_map(slots: Int) -> Map[Int, Int] = _
 
 
 
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_map_str(slots: Int) -> Map[String, String] = _
 
@@ -30003,6 +30209,7 @@ fn alloc_map_str(slots: Int) -> Map[String, String] = _
 
 
 
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_map_skv(slots: Int) -> Map[String, Int] = _
 
@@ -30012,6 +30219,7 @@ fn alloc_map_skv(slots: Int) -> Map[String, Int] = _
 
 
 
+@prim_op(alloc, block=slots)
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_value(slots: Int) -> Value = _
 
@@ -30020,6 +30228,7 @@ fn alloc_value(slots: Int) -> Value = _
 
 
 
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_list_str[A](n: Int) -> List[A] = _
 
@@ -30027,18 +30236,21 @@ fn alloc_list_str[A](n: Int) -> List[A] = _
 
 
 
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_set_str[A](n: Int) -> Set[A] = _
 
 
 
 
+@prim_op(store_owned)
 @intrinsic("almide_rt_prim_store_str")
 fn store_str[A](addr: Int, piece: A) -> Unit = _
 
 
 
 
+@prim_op(load_ref)
 @intrinsic("almide_rt_prim_load_str")
 fn load_str(addr: Int) -> String = _
 
@@ -30047,6 +30259,7 @@ fn load_str(addr: Int) -> String = _
 
 
 
+@prim_op(load_ref)
 @intrinsic("almide_rt_prim_load_handle")
 fn load_handle[A](addr: Int) -> A = _
 
@@ -30055,20 +30268,24 @@ fn load_handle[A](addr: Int) -> A = _
 
 
 
+@prim_op(rc, op=dec)
 @intrinsic("almide_rt_prim_rc_dec")
 fn rc_dec(addr: Int) -> Unit = _
 
+@prim_op(rc, op=inc)
 @intrinsic("almide_rt_prim_rc_inc")
 fn rc_inc(addr: Int) -> Unit = _
 
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_fd_write")
 fn fd_write(fd: Int, iov: Int, count: Int, nw: Int) -> Int = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_random_get")
 fn random_get(buf: Int, len: Int) -> Int = _
 
@@ -30078,6 +30295,7 @@ fn random_get(buf: Int, len: Int) -> Int = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_args_get_list")
 fn args_get_list() -> List[String] = _
 
@@ -30089,6 +30307,7 @@ fn args_get_list() -> List[String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_env_get")
 fn env_get(name: String) -> String? = _
 
@@ -30100,12 +30319,14 @@ fn env_get(name: String) -> String? = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_text_file")
 fn read_text_file(path: String) -> Result[String, String] = _
 
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_bytes_file")
 fn read_bytes_file(path: String) -> Result[Bytes, String] = _
 
@@ -30118,12 +30339,15 @@ fn read_bytes_file(path: String) -> Result[Bytes, String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_text_file_as")
 fn read_text_file_as(path: String, call: String) -> Result[String, String] = _
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_bytes_file_as")
 fn read_bytes_file_as(path: String, call: String) -> Result[Bytes, String] = _
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_text_file_as_pair")
 fn read_text_file_as_pair(path: String, call: String, first: String, second: String) -> Result[String, String] = _
 
@@ -30136,11 +30360,13 @@ fn read_text_file_as_pair(path: String, call: String, first: String, second: Str
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_dir")
 fn read_dir(path: String) -> Result[List[String], String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_dir_as")
 fn read_dir_as(path: String, call: String) -> Result[List[String], String] = _
 
@@ -30153,15 +30379,18 @@ fn read_dir_as(path: String, call: String) -> Result[List[String], String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_write_text_file")
 fn write_text_file(path: String, content: String) -> Result[Unit, String] = _
 
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_write_text_file_as")
 fn write_text_file_as(path: String, content: String, call: String) -> Result[Unit, String] = _
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_write_text_file_as_pair")
 fn write_text_file_as_pair(path: String, content: String, call: String, first: String, second: String) -> Result[Unit, String] = _
 
@@ -30175,11 +30404,13 @@ fn write_text_file_as_pair(path: String, content: String, call: String, first: S
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_make_dir")
 fn make_dir(path: String) -> Result[Unit, String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_make_dir_as")
 fn make_dir_as(path: String, call: String) -> Result[Unit, String] = _
 
@@ -30193,11 +30424,13 @@ fn make_dir_as(path: String, call: String) -> Result[Unit, String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_remove_all")
 fn remove_all(path: String) -> Result[Unit, String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_remove_all_as")
 fn remove_all_as(path: String, call: String) -> Result[Unit, String] = _
 
@@ -30210,6 +30443,7 @@ fn remove_all_as(path: String, call: String) -> Result[Unit, String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_path_exists")
 fn path_exists(path: String) -> Bool = _
 
@@ -30218,9 +30452,11 @@ fn path_exists(path: String) -> Bool = _
 
 
 
+@prim_op(ptr, op=to_int)
 @intrinsic("almide_rt_prim_ptr_to_int")
 fn ptr_to_int(p: Handle) -> Int = _
 
+@prim_op(ptr, op=from_int)
 @intrinsic("almide_rt_prim_int_to_ptr")
 fn int_to_ptr(a: Int) -> Handle = _
 
@@ -30232,6 +30468,7 @@ fn int_to_ptr(a: Int) -> Handle = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_path_filestat")
 fn path_filestat(buf: Int, path: String) -> Int = _
 
@@ -30239,6 +30476,7 @@ fn path_filestat(buf: Int, path: String) -> Int = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_path_filestat_nofollow")
 fn path_filestat_nofollow(buf: Int, path: String) -> Int = _
 
@@ -30248,6 +30486,7 @@ fn path_filestat_nofollow(buf: Int, path: String) -> Int = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_rename")
 fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
@@ -30259,6 +30498,7 @@ fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_line")
 fn read_line() -> String = _
 
@@ -30267,6 +30507,7 @@ fn read_line() -> String = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_read_n_bytes")
 fn read_n_bytes(n: Int) -> List[Int] = _
 
@@ -30278,6 +30519,7 @@ fn read_n_bytes(n: Int) -> List[Int] = _
 
 
 
+@prim_op(host)
 @intrinsic("almide_rt_prim_clock_time_get")
 fn clock_time_get(id: Int, precision: Int, time_ptr: Int) -> Int = _
 
@@ -30285,12 +30527,15 @@ fn clock_time_get(id: Int, precision: Int, time_ptr: Int) -> Int = _
 
 
 
+@prim_op(float_un, op=abs)
 @intrinsic("almide_rt_prim_fabs")
 fn fabs(x: Float) -> Float = _
 
+@prim_op(float_un, op=sqrt)
 @intrinsic("almide_rt_prim_fsqrt")
 fn fsqrt(x: Float) -> Float = _
 
+@prim_op(float_un, op=floor)
 @intrinsic("almide_rt_prim_ffloor")
 fn ffloor(x: Float) -> Float = _
 
@@ -30298,94 +30543,121 @@ fn ffloor(x: Float) -> Float = _
 
 
 
+@prim_op(float_un, op=nearest)
 @intrinsic("almide_rt_prim_fnearest")
 fn fnearest(x: Float) -> Float = _
 
+@prim_op(float_un, op=ceil)
 @intrinsic("almide_rt_prim_fceil")
 fn fceil(x: Float) -> Float = _
 
+@prim_op(float_un, op=neg)
 @intrinsic("almide_rt_prim_fneg")
 fn fneg(x: Float) -> Float = _
 
+@prim_op(float_bin, op=add)
 @intrinsic("almide_rt_prim_fadd")
 fn fadd(a: Float, b: Float) -> Float = _
 
+@prim_op(float_bin, op=sub)
 @intrinsic("almide_rt_prim_fsub")
 fn fsub(a: Float, b: Float) -> Float = _
 
+@prim_op(float_bin, op=mul)
 @intrinsic("almide_rt_prim_fmul")
 fn fmul(a: Float, b: Float) -> Float = _
 
+@prim_op(float_bin, op=div)
 @intrinsic("almide_rt_prim_fdiv")
 fn fdiv(a: Float, b: Float) -> Float = _
 
+@prim_op(float_bin, op=min)
 @intrinsic("almide_rt_prim_fmin")
 fn fmin(a: Float, b: Float) -> Float = _
 
+@prim_op(float_bin, op=max)
 @intrinsic("almide_rt_prim_fmax")
 fn fmax(a: Float, b: Float) -> Float = _
 
+@prim_op(float_bin, op=copysign)
 @intrinsic("almide_rt_prim_fcopysign")
 fn fcopysign(a: Float, b: Float) -> Float = _
 
+@prim_op(float_cmp, op=lt)
 @intrinsic("almide_rt_prim_flt")
 fn flt(a: Float, b: Float) -> Bool = _
 
+@prim_op(float_cmp, op=le)
 @intrinsic("almide_rt_prim_fle")
 fn fle(a: Float, b: Float) -> Bool = _
 
+@prim_op(float_cmp, op=gt)
 @intrinsic("almide_rt_prim_fgt")
 fn fgt(a: Float, b: Float) -> Bool = _
 
+@prim_op(float_cmp, op=ge)
 @intrinsic("almide_rt_prim_fge")
 fn fge(a: Float, b: Float) -> Bool = _
 
+@prim_op(float_cmp, op=eq)
 @intrinsic("almide_rt_prim_feq")
 fn feq(a: Float, b: Float) -> Bool = _
 
+@prim_op(float_cmp, op=ne)
 @intrinsic("almide_rt_prim_fne")
 fn fne(a: Float, b: Float) -> Bool = _
 
+@prim_op(float_to_int)
 @intrinsic("almide_rt_prim_f2i")
 fn f2i(x: Float) -> Int = _
 
+@prim_op(int_to_float)
 @intrinsic("almide_rt_prim_i2f")
 fn i2f(x: Int) -> Float = _
 
 
+@prim_op(float_bits)
 @intrinsic("almide_rt_prim_fbits")
 fn fbits(x: Float) -> Int = _
 
+@prim_op(float_bits)
 @intrinsic("almide_rt_prim_ffrombits")
 fn ffrombits(b: Int) -> Float = _
 
 
+@prim_op(f32_demote)
 @intrinsic("almide_rt_prim_f2f32")
 fn f2f32(x: Float) -> Float32 = _
 
+@prim_op(f32_promote)
 @intrinsic("almide_rt_prim_f32_2f")
 fn f32_2f(x: Float32) -> Float = _
 
 
+@prim_op(f32_promote)
 @intrinsic("almide_rt_prim_bits_to_f32")
 fn bits_to_f32(bits: Int) -> Float = _
 
 
+@prim_op(int_to_f32)
 @intrinsic("almide_rt_prim_i2f32")
 fn i2f32(x: Int) -> Float32 = _
 
 
+@prim_op(f32_bits)
 @intrinsic("almide_rt_prim_f32bits")
 fn f32bits(x: Float32) -> Int = _
 
 
 
 
+@prim_op(abort)
 @intrinsic("almide_rt_prim_die")
 fn die(s: Int) -> Unit = _
 
 
 
+@prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_map_kv")
 fn alloc_map_kv[K, V](slots: Int) -> Map[K, V] = _
 "#;
@@ -35862,6 +36134,7 @@ else {
   }
 }
 
+@specializes("set.from_list")
 fn set_from_list_str(xs: List[String]) -> Set[String] = {
   let xh = prim.handle(xs)
   let xlen = prim.load32(xh + 4)
@@ -35872,6 +36145,7 @@ fn set_from_list_str(xs: List[String]) -> Set[String] = {
   s
 }
 
+@specializes("set.contains")
 fn set_contains_str(s: Set[String], x: String) -> Bool = {
   let sh = prim.handle(s)
   let len = prim.load32(sh + 4)
@@ -35888,6 +36162,7 @@ else {
   __set_to_list_str_fill(sh, oh, len, i + 1)
 }
 
+@specializes("set.to_list")
 fn set_to_list_str(s: Set[String]) -> List[String] = {
   let sh = prim.handle(s)
   let len = prim.load32(sh + 4)
@@ -35922,6 +36197,7 @@ fn __set_str_addb(acount: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> I
     }
   }
 
+@specializes("set.union")
 fn set_union_str(a: Set[String], b: Set[String]) -> Set[String] = {
   let ah = prim.handle(a)
   let bh = prim.handle(b)
@@ -35949,6 +36225,7 @@ fn __set_str_inter(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, i: Int, w: I
     } else __set_str_inter(ah, alen, bh, blen, rh, i + 1, w)
   }
 
+@specializes("set.intersection")
 fn set_intersection_str(a: Set[String], b: Set[String]) -> Set[String] = {
   let ah = prim.handle(a)
   let bh = prim.handle(b)
@@ -35975,6 +36252,7 @@ fn __set_str_diff(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, i: Int, w: In
     }
   }
 
+@specializes("set.difference")
 fn set_difference_str(a: Set[String], b: Set[String]) -> Set[String] = {
   let ah = prim.handle(a)
   let bh = prim.handle(b)
@@ -35996,6 +36274,7 @@ else {
   else false
 }
 
+@specializes("set.is_subset")
 fn set_is_subset_str(a: Set[String], b: Set[String]) -> Bool = {
   let ah = prim.handle(a)
   let bh = prim.handle(b)
@@ -36014,6 +36293,7 @@ fn __set_str_none_in(ah: Int, alen: Int, bh: Int, blen: Int, i: Int) -> Bool =
     else __set_str_none_in(ah, alen, bh, blen, i + 1)
   }
 
+@specializes("set.is_disjoint")
 fn set_is_disjoint_str(a: Set[String], b: Set[String]) -> Bool = {
   let ah = prim.handle(a)
   let bh = prim.handle(b)
@@ -36024,6 +36304,7 @@ fn set_is_disjoint_str(a: Set[String], b: Set[String]) -> Bool = {
 
 
 
+@specializes("set.new")
 fn set_new_str() -> Set[String] = prim.alloc_set_str(0)
 
 
@@ -36039,6 +36320,7 @@ fn __set_str_addone(rh: Int, slen: Int, x: String) -> Int = {
 
 
 
+@specializes("set.insert")
 fn set_insert_str(s: Set[String], x: String) -> Set[String] = {
   let sh = prim.handle(s)
   let slen = prim.load32(sh + 4)
@@ -36068,6 +36350,7 @@ fn __set_str_remove_fill(sh: Int, slen: Int, rh: Int, x: String, i: Int, w: Int)
     }
   }
 
+@specializes("set.remove")
 fn set_remove_str(s: Set[String], x: String) -> Set[String] = {
   let sh = prim.handle(s)
   let slen = prim.load32(sh + 4)
@@ -36093,6 +36376,7 @@ fn __set_str_addb_nota(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, j: Int, 
     }
   }
 
+@specializes("set.symmetric_difference")
 fn set_symmetric_difference_str(a: Set[String], b: Set[String]) -> Set[String] = {
   let ah = prim.handle(a)
   let bh = prim.handle(b)
@@ -36123,6 +36407,7 @@ fn __set_str_filter_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, 
     }
   }
 
+@specializes("set.filter")
 fn set_filter_str(s: Set[String], f: (String) -> Bool) -> Set[String] = {
   let sh = prim.handle(s)
   let n = prim.load32(sh + 4)
@@ -36142,6 +36427,7 @@ fn __set_str_count_hits(sh: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) 
     else __set_str_count_hits(sh, f, n, i + 1, acc)
   }
 
+@specializes("set.all")
 fn set_all_str(s: Set[String], f: (String) -> Bool) -> Bool = {
   let sh = prim.handle(s)
   let n = prim.load32(sh + 4)
@@ -36149,6 +36435,7 @@ fn set_all_str(s: Set[String], f: (String) -> Bool) -> Bool = {
   hits >= n
 }
 
+@specializes("set.any")
 fn set_any_str(s: Set[String], f: (String) -> Bool) -> Bool = {
   let sh = prim.handle(s)
   let n = prim.load32(sh + 4)
@@ -36166,6 +36453,7 @@ fn __set_str_fold_loop(sh: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: In
     __set_str_fold_loop(sh, f, n, i + 1, nacc)
   }
 
+@specializes("set.fold")
 fn set_fold_str(s: Set[String], init: Int, f: (Int, String) -> Int) -> Int = {
   let sh = prim.handle(s)
   let n = prim.load32(sh + 4)
@@ -38760,45 +39048,65 @@ pub const SRC_STRING_TO_LOWER: &str = r#"
 
 
 
-fn __to_lower_h1(b: Int) -> Int = if b <= 57 then b - 48 else b - 55
+
+
+
+fn __to_lower_h1(b: Int) -> Int =
+  if b <= 57 then b - 48 else b - 55
 
 fn __to_lower_rd6(a: Int) -> Int = __to_lower_h1(prim.load8(a)) * 1048576 + __to_lower_h1(prim.load8(a + 1)) * 65536 + __to_lower_h1(prim.load8(a + 2)) * 4096 + __to_lower_h1(prim.load8(a + 3)) * 256 + __to_lower_h1(prim.load8(a + 4)) * 16 + __to_lower_h1(prim.load8(a + 5))
 
-fn __to_lower_find(th: Int, lo: Int, hi: Int, cp: Int) -> Int = if lo >= hi then 0 - 1
-else {
-  let mid = (lo + hi) / 2
-  let e = __to_lower_rd6(th + mid * 12)
-  if e == cp then mid
-  else if e < cp then __to_lower_find(th, mid + 1, hi, cp)
-  else __to_lower_find(th, lo, mid, cp)
+
+fn __to_lower_find(th: Int, lo: Int, hi: Int, cp: Int) -> Int =
+  if lo >= hi then lo - 1
+  else {
+    let mid = (lo + hi) / 2
+    if __to_lower_rd6(th + mid * 15) <= cp then __to_lower_find(th, mid + 1, hi, cp)
+    else __to_lower_find(th, lo, mid, cp)
+  }
+
+
+
+fn __to_lower_map(th: Int, nent: Int, cp: Int) -> Int = {
+  let i = __to_lower_find(th, 0, nent, cp)
+  if i < 0 then 0 - 1
+  else {
+    let a = th + i * 15
+    let k = cp - __to_lower_rd6(a)
+    let n = __to_lower_h1(prim.load8(a + 12)) * 16 + __to_lower_h1(prim.load8(a + 13))
+    let st = __to_lower_h1(prim.load8(a + 14))
+    if k % st == 0 and k / st < n then __to_lower_rd6(a + 6) + k else 0 - 1
+  }
 }
 
 fn __to_lower_cp(addr: Int) -> (Int, Int) = {
   let b0 = prim.load8(addr)
   if b0 < 128 then (b0, 1)
   else if b0 < 224 then ((b0 - 192) * 64 + (prim.load8(addr + 1) - 128), 2)
-  else if b0 < 240 then ((b0 - 224) * 4096 + (prim.load8(addr + 1) - 128) * 64 + (prim.load8(addr + 2) - 128), 3) else ((b0 - 240) * 262144 + (prim.load8(addr + 1) - 128) * 4096 + (prim.load8(addr + 2) - 128) * 64 + (prim.load8(addr + 3) - 128), 4)
+  else if b0 < 240 then ((b0 - 224) * 4096 + (prim.load8(addr + 1) - 128) * 64 + (prim.load8(addr + 2) - 128), 3)
+  else ((b0 - 240) * 262144 + (prim.load8(addr + 1) - 128) * 4096 + (prim.load8(addr + 2) - 128) * 64 + (prim.load8(addr + 3) - 128), 4)
 }
 
-fn __to_lower_w(dh: Int, o: Int, cp: Int) -> Int = if cp < 128 then {
-  prim.store8(dh + o, cp)
-  1
-} else if cp < 2048 then {
-  prim.store8(dh + o, 192 + cp / 64)
-  prim.store8(dh + o + 1, 128 + cp % 64)
-  2
-} else if cp < 65536 then {
-  prim.store8(dh + o, 224 + cp / 4096)
-  prim.store8(dh + o + 1, 128 + (cp / 64) % 64)
-  prim.store8(dh + o + 2, 128 + cp % 64)
-  3
-} else {
-  prim.store8(dh + o, 240 + cp / 262144)
-  prim.store8(dh + o + 1, 128 + (cp / 4096) % 64)
-  prim.store8(dh + o + 2, 128 + (cp / 64) % 64)
-  prim.store8(dh + o + 3, 128 + cp % 64)
-  4
-}
+fn __to_lower_w(dh: Int, o: Int, cp: Int) -> Int =
+  if cp < 128 then {
+    prim.store8(dh + o, cp)
+    1
+  } else if cp < 2048 then {
+    prim.store8(dh + o, 192 + cp / 64)
+    prim.store8(dh + o + 1, 128 + cp % 64)
+    2
+  } else if cp < 65536 then {
+    prim.store8(dh + o, 224 + cp / 4096)
+    prim.store8(dh + o + 1, 128 + (cp / 64) % 64)
+    prim.store8(dh + o + 2, 128 + cp % 64)
+    3
+  } else {
+    prim.store8(dh + o, 240 + cp / 262144)
+    prim.store8(dh + o + 1, 128 + (cp / 4096) % 64)
+    prim.store8(dh + o + 2, 128 + (cp / 64) % 64)
+    prim.store8(dh + o + 3, 128 + cp % 64)
+    4
+  }
 
 fn __to_lower_walk(p: Int, end: Int, th: Int, nent: Int, sh: Int, dh: Int, o: Int, st: Int, ch: Int, ih: Int) -> Int =
   if p >= end then o
@@ -38821,12 +39129,11 @@ fn __to_lower_walk(p: Int, end: Int, th: Int, nent: Int, sh: Int, dh: Int, o: In
         let w = __to_lower_w(dh, o, (if fin then 962 else 963))
         __to_lower_walk(p + l, end, th, nent, sh, dh, o + w, st, ch, ih)
       } else {
-        let idx = __to_lower_find(th, 0, nent, cp)
-        if idx < 0 then {
+        let v = __to_lower_map(th, nent, cp)
+        if v < 0 then {
           let w = __to_lower_w(dh, o, cp)
           __to_lower_walk(p + l, end, th, nent, sh, dh, o + w, st, ch, ih)
         } else {
-          let v = __to_lower_rd6(th + idx * 12 + 6)
           if v < 15728640 then {
             let w = __to_lower_w(dh, o, v)
             __to_lower_walk(p + l, end, th, nent, sh, dh, o + w, st, ch, ih)
@@ -38852,26 +39159,23 @@ fn __to_lower_walk(p: Int, end: Int, th: Int, nent: Int, sh: Int, dh: Int, o: In
 
 
 
-fn __to_lower_inr(th: Int, lo: Int, hi: Int, cp: Int) -> Bool = if lo >= hi then false
-else {
-  let mid = (lo + hi) / 2
-  let a = __to_lower_rd6(th + mid * 12)
-  let b = __to_lower_rd6(th + mid * 12 + 6)
-  if cp < a then __to_lower_inr(th, lo, mid, cp)
-  else if cp > b then __to_lower_inr(th, mid + 1, hi, cp)
-  else true
-}
-
-
+fn __to_lower_inr(th: Int, lo: Int, hi: Int, cp: Int) -> Bool =
+  if lo >= hi then false
+  else {
+    let mid = (lo + hi) / 2
+    let a = __to_lower_rd6(th + mid * 12)
+    let b = __to_lower_rd6(th + mid * 12 + 6)
+    if cp < a then __to_lower_inr(th, lo, mid, cp)
+    else if cp > b then __to_lower_inr(th, mid + 1, hi, cp)
+    else true
+  }
 
 
 fn __to_lower_prev(start: Int, i: Int) -> Int =
   if i > start and prim.load8(i - 1) >= 128 and prim.load8(i - 1) < 192 then __to_lower_prev(
     start,
     i - 1,
-  )
-  else if i > start then i - 1
-  else start
+  ) else i - 1
 
 
 
@@ -38895,7 +39199,7 @@ fn __to_lower_fwd(p: Int, end: Int, ch: Int, cn: Int, ih: Int, inn: Int) -> Bool
   }
 
 fn string_to_lower(s: String) -> String = {
-  let tbl = "00004100006100004200006200004300006300004400006400004500006500004600006600004700006700004800006800004900006900004A00006A00004B00006B00004C00006C00004D00006D00004E00006E00004F00006F00005000007000005100007100005200007200005300007300005400007400005500007500005600007600005700007700005800007800005900007900005A00007A0000C00000E00000C10000E10000C20000E20000C30000E30000C40000E40000C50000E50000C60000E60000C70000E70000C80000E80000C90000E90000CA0000EA0000CB0000EB0000CC0000EC0000CD0000ED0000CE0000EE0000CF0000EF0000D00000F00000D10000F10000D20000F20000D30000F30000D40000F40000D50000F50000D60000F60000D80000F80000D90000F90000DA0000FA0000DB0000FB0000DC0000FC0000DD0000FD0000DE0000FE00010000010100010200010300010400010500010600010700010800010900010A00010B00010C00010D00010E00010F00011000011100011200011300011400011500011600011700011800011900011A00011B00011C00011D00011E00011F00012000012100012200012300012400012500012600012700012800012900012A00012B00012C00012D00012E00012F00013200013300013400013500013600013700013900013A00013B00013C00013D00013E00013F00014000014100014200014300014400014500014600014700014800014A00014B00014C00014D00014E00014F00015000015100015200015300015400015500015600015700015800015900015A00015B00015C00015D00015E00015F00016000016100016200016300016400016500016600016700016800016900016A00016B00016C00016D00016E00016F0001700001710001720001730001740001750001760001770001780000FF00017900017A00017B00017C00017D00017E00018100025300018200018300018400018500018600025400018700018800018900025600018A00025700018B00018C00018E0001DD00018F00025900019000025B00019100019200019300026000019400026300019600026900019700026800019800019900019C00026F00019D00027200019F0002750001A00001A10001A20001A30001A40001A50001A60002800001A70001A80001A90002830001AC0001AD0001AE0002880001AF0001B00001B100028A0001B200028B0001B30001B40001B50001B60001B70002920001B80001B90001BC0001BD0001C40001C60001C50001C60001C70001C90001C80001C90001CA0001CC0001CB0001CC0001CD0001CE0001CF0001D00001D10001D20001D30001D40001D50001D60001D70001D80001D90001DA0001DB0001DC0001DE0001DF0001E00001E10001E20001E30001E40001E50001E60001E70001E80001E90001EA0001EB0001EC0001ED0001EE0001EF0001F10001F30001F20001F30001F40001F50001F60001950001F70001BF0001F80001F90001FA0001FB0001FC0001FD0001FE0001FF00020000020100020200020300020400020500020600020700020800020900020A00020B00020C00020D00020E00020F00021000021100021200021300021400021500021600021700021800021900021A00021B00021C00021D00021E00021F00022000019E00022200022300022400022500022600022700022800022900022A00022B00022C00022D00022E00022F00023000023100023200023300023A002C6500023B00023C00023D00019A00023E002C6600024100024200024300018000024400028900024500028C00024600024700024800024900024A00024B00024C00024D00024E00024F00037000037100037200037300037600037700037F0003F30003860003AC0003880003AD0003890003AE00038A0003AF00038C0003CC00038E0003CD00038F0003CE0003910003B10003920003B20003930003B30003940003B40003950003B50003960003B60003970003B70003980003B80003990003B900039A0003BA00039B0003BB00039C0003BC00039D0003BD00039E0003BE00039F0003BF0003A00003C00003A10003C10003A30003C30003A40003C40003A50003C50003A60003C60003A70003C70003A80003C80003A90003C90003AA0003CA0003AB0003CB0003CF0003D70003D80003D90003DA0003DB0003DC0003DD0003DE0003DF0003E00003E10003E20003E30003E40003E50003E60003E70003E80003E90003EA0003EB0003EC0003ED0003EE0003EF0003F40003B80003F70003F80003F90003F20003FA0003FB0003FD00037B0003FE00037C0003FF00037D00040000045000040100045100040200045200040300045300040400045400040500045500040600045600040700045700040800045800040900045900040A00045A00040B00045B00040C00045C00040D00045D00040E00045E00040F00045F00041000043000041100043100041200043200041300043300041400043400041500043500041600043600041700043700041800043800041900043900041A00043A00041B00043B00041C00043C00041D00043D00041E00043E00041F00043F00042000044000042100044100042200044200042300044300042400044400042500044500042600044600042700044700042800044800042900044900042A00044A00042B00044B00042C00044C00042D00044D00042E00044E00042F00044F00046000046100046200046300046400046500046600046700046800046900046A00046B00046C00046D00046E00046F00047000047100047200047300047400047500047600047700047800047900047A00047B00047C00047D00047E00047F00048000048100048A00048B00048C00048D00048E00048F00049000049100049200049300049400049500049600049700049800049900049A00049B00049C00049D00049E00049F0004A00004A10004A20004A30004A40004A50004A60004A70004A80004A90004AA0004AB0004AC0004AD0004AE0004AF0004B00004B10004B20004B30004B40004B50004B60004B70004B80004B90004BA0004BB0004BC0004BD0004BE0004BF0004C00004CF0004C10004C20004C30004C40004C50004C60004C70004C80004C90004CA0004CB0004CC0004CD0004CE0004D00004D10004D20004D30004D40004D50004D60004D70004D80004D90004DA0004DB0004DC0004DD0004DE0004DF0004E00004E10004E20004E30004E40004E50004E60004E70004E80004E90004EA0004EB0004EC0004ED0004EE0004EF0004F00004F10004F20004F30004F40004F50004F60004F70004F80004F90004FA0004FB0004FC0004FD0004FE0004FF00050000050100050200050300050400050500050600050700050800050900050A00050B00050C00050D00050E00050F00051000051100051200051300051400051500051600051700051800051900051A00051B00051C00051D00051E00051F00052000052100052200052300052400052500052600052700052800052900052A00052B00052C00052D00052E00052F00053100056100053200056200053300056300053400056400053500056500053600056600053700056700053800056800053900056900053A00056A00053B00056B00053C00056C00053D00056D00053E00056E00053F00056F00054000057000054100057100054200057200054300057300054400057400054500057500054600057600054700057700054800057800054900057900054A00057A00054B00057B00054C00057C00054D00057D00054E00057E00054F00057F0005500005800005510005810005520005820005530005830005540005840005550005850005560005860010A0002D000010A1002D010010A2002D020010A3002D030010A4002D040010A5002D050010A6002D060010A7002D070010A8002D080010A9002D090010AA002D0A0010AB002D0B0010AC002D0C0010AD002D0D0010AE002D0E0010AF002D0F0010B0002D100010B1002D110010B2002D120010B3002D130010B4002D140010B5002D150010B6002D160010B7002D170010B8002D180010B9002D190010BA002D1A0010BB002D1B0010BC002D1C0010BD002D1D0010BE002D1E0010BF002D1F0010C0002D200010C1002D210010C2002D220010C3002D230010C4002D240010C5002D250010C7002D270010CD002D2D0013A000AB700013A100AB710013A200AB720013A300AB730013A400AB740013A500AB750013A600AB760013A700AB770013A800AB780013A900AB790013AA00AB7A0013AB00AB7B0013AC00AB7C0013AD00AB7D0013AE00AB7E0013AF00AB7F0013B000AB800013B100AB810013B200AB820013B300AB830013B400AB840013B500AB850013B600AB860013B700AB870013B800AB880013B900AB890013BA00AB8A0013BB00AB8B0013BC00AB8C0013BD00AB8D0013BE00AB8E0013BF00AB8F0013C000AB900013C100AB910013C200AB920013C300AB930013C400AB940013C500AB950013C600AB960013C700AB970013C800AB980013C900AB990013CA00AB9A0013CB00AB9B0013CC00AB9C0013CD00AB9D0013CE00AB9E0013CF00AB9F0013D000ABA00013D100ABA10013D200ABA20013D300ABA30013D400ABA40013D500ABA50013D600ABA60013D700ABA70013D800ABA80013D900ABA90013DA00ABAA0013DB00ABAB0013DC00ABAC0013DD00ABAD0013DE00ABAE0013DF00ABAF0013E000ABB00013E100ABB10013E200ABB20013E300ABB30013E400ABB40013E500ABB50013E600ABB60013E700ABB70013E800ABB80013E900ABB90013EA00ABBA0013EB00ABBB0013EC00ABBC0013ED00ABBD0013EE00ABBE0013EF00ABBF0013F00013F80013F10013F90013F20013FA0013F30013FB0013F40013FC0013F50013FD001C89001C8A001C900010D0001C910010D1001C920010D2001C930010D3001C940010D4001C950010D5001C960010D6001C970010D7001C980010D8001C990010D9001C9A0010DA001C9B0010DB001C9C0010DC001C9D0010DD001C9E0010DE001C9F0010DF001CA00010E0001CA10010E1001CA20010E2001CA30010E3001CA40010E4001CA50010E5001CA60010E6001CA70010E7001CA80010E8001CA90010E9001CAA0010EA001CAB0010EB001CAC0010EC001CAD0010ED001CAE0010EE001CAF0010EF001CB00010F0001CB10010F1001CB20010F2001CB30010F3001CB40010F4001CB50010F5001CB60010F6001CB70010F7001CB80010F8001CB90010F9001CBA0010FA001CBD0010FD001CBE0010FE001CBF0010FF001E00001E01001E02001E03001E04001E05001E06001E07001E08001E09001E0A001E0B001E0C001E0D001E0E001E0F001E10001E11001E12001E13001E14001E15001E16001E17001E18001E19001E1A001E1B001E1C001E1D001E1E001E1F001E20001E21001E22001E23001E24001E25001E26001E27001E28001E29001E2A001E2B001E2C001E2D001E2E001E2F001E30001E31001E32001E33001E34001E35001E36001E37001E38001E39001E3A001E3B001E3C001E3D001E3E001E3F001E40001E41001E42001E43001E44001E45001E46001E47001E48001E49001E4A001E4B001E4C001E4D001E4E001E4F001E50001E51001E52001E53001E54001E55001E56001E57001E58001E59001E5A001E5B001E5C001E5D001E5E001E5F001E60001E61001E62001E63001E64001E65001E66001E67001E68001E69001E6A001E6B001E6C001E6D001E6E001E6F001E70001E71001E72001E73001E74001E75001E76001E77001E78001E79001E7A001E7B001E7C001E7D001E7E001E7F001E80001E81001E82001E83001E84001E85001E86001E87001E88001E89001E8A001E8B001E8C001E8D001E8E001E8F001E90001E91001E92001E93001E94001E95001E9E0000DF001EA0001EA1001EA2001EA3001EA4001EA5001EA6001EA7001EA8001EA9001EAA001EAB001EAC001EAD001EAE001EAF001EB0001EB1001EB2001EB3001EB4001EB5001EB6001EB7001EB8001EB9001EBA001EBB001EBC001EBD001EBE001EBF001EC0001EC1001EC2001EC3001EC4001EC5001EC6001EC7001EC8001EC9001ECA001ECB001ECC001ECD001ECE001ECF001ED0001ED1001ED2001ED3001ED4001ED5001ED6001ED7001ED8001ED9001EDA001EDB001EDC001EDD001EDE001EDF001EE0001EE1001EE2001EE3001EE4001EE5001EE6001EE7001EE8001EE9001EEA001EEB001EEC001EED001EEE001EEF001EF0001EF1001EF2001EF3001EF4001EF5001EF6001EF7001EF8001EF9001EFA001EFB001EFC001EFD001EFE001EFF001F08001F00001F09001F01001F0A001F02001F0B001F03001F0C001F04001F0D001F05001F0E001F06001F0F001F07001F18001F10001F19001F11001F1A001F12001F1B001F13001F1C001F14001F1D001F15001F28001F20001F29001F21001F2A001F22001F2B001F23001F2C001F24001F2D001F25001F2E001F26001F2F001F27001F38001F30001F39001F31001F3A001F32001F3B001F33001F3C001F34001F3D001F35001F3E001F36001F3F001F37001F48001F40001F49001F41001F4A001F42001F4B001F43001F4C001F44001F4D001F45001F59001F51001F5B001F53001F5D001F55001F5F001F57001F68001F60001F69001F61001F6A001F62001F6B001F63001F6C001F64001F6D001F65001F6E001F66001F6F001F67001F88001F80001F89001F81001F8A001F82001F8B001F83001F8C001F84001F8D001F85001F8E001F86001F8F001F87001F98001F90001F99001F91001F9A001F92001F9B001F93001F9C001F94001F9D001F95001F9E001F96001F9F001F97001FA8001FA0001FA9001FA1001FAA001FA2001FAB001FA3001FAC001FA4001FAD001FA5001FAE001FA6001FAF001FA7001FB8001FB0001FB9001FB1001FBA001F70001FBB001F71001FBC001FB3001FC8001F72001FC9001F73001FCA001F74001FCB001F75001FCC001FC3001FD8001FD0001FD9001FD1001FDA001F76001FDB001F77001FE8001FE0001FE9001FE1001FEA001F7A001FEB001F7B001FEC001FE5001FF8001F78001FF9001F79001FFA001F7C001FFB001F7D001FFC001FF30021260003C900212B0000E500213200214E00216000217000216100217100216200217200216300217300216400217400216500217500216600217600216700217700216800217800216900217900216A00217A00216B00217B00216C00217C00216D00217D00216E00217E00216F00217F0021830021840024B60024D00024B70024D10024B80024D20024B90024D30024BA0024D40024BB0024D50024BC0024D60024BD0024D70024BE0024D80024BF0024D90024C00024DA0024C10024DB0024C20024DC0024C30024DD0024C40024DE0024C50024DF0024C60024E00024C70024E10024C80024E20024C90024E30024CA0024E40024CB0024E50024CC0024E60024CD0024E70024CE0024E80024CF0024E9002C00002C30002C01002C31002C02002C32002C03002C33002C04002C34002C05002C35002C06002C36002C07002C37002C08002C38002C09002C39002C0A002C3A002C0B002C3B002C0C002C3C002C0D002C3D002C0E002C3E002C0F002C3F002C10002C40002C11002C41002C12002C42002C13002C43002C14002C44002C15002C45002C16002C46002C17002C47002C18002C48002C19002C49002C1A002C4A002C1B002C4B002C1C002C4C002C1D002C4D002C1E002C4E002C1F002C4F002C20002C50002C21002C51002C22002C52002C23002C53002C24002C54002C25002C55002C26002C56002C27002C57002C28002C58002C29002C59002C2A002C5A002C2B002C5B002C2C002C5C002C2D002C5D002C2E002C5E002C2F002C5F002C60002C61002C6200026B002C63001D7D002C6400027D002C67002C68002C69002C6A002C6B002C6C002C6D000251002C6E000271002C6F000250002C70000252002C72002C73002C75002C76002C7E00023F002C7F000240002C80002C81002C82002C83002C84002C85002C86002C87002C88002C89002C8A002C8B002C8C002C8D002C8E002C8F002C90002C91002C92002C93002C94002C95002C96002C97002C98002C99002C9A002C9B002C9C002C9D002C9E002C9F002CA0002CA1002CA2002CA3002CA4002CA5002CA6002CA7002CA8002CA9002CAA002CAB002CAC002CAD002CAE002CAF002CB0002CB1002CB2002CB3002CB4002CB5002CB6002CB7002CB8002CB9002CBA002CBB002CBC002CBD002CBE002CBF002CC0002CC1002CC2002CC3002CC4002CC5002CC6002CC7002CC8002CC9002CCA002CCB002CCC002CCD002CCE002CCF002CD0002CD1002CD2002CD3002CD4002CD5002CD6002CD7002CD8002CD9002CDA002CDB002CDC002CDD002CDE002CDF002CE0002CE1002CE2002CE3002CEB002CEC002CED002CEE002CF2002CF300A64000A64100A64200A64300A64400A64500A64600A64700A64800A64900A64A00A64B00A64C00A64D00A64E00A64F00A65000A65100A65200A65300A65400A65500A65600A65700A65800A65900A65A00A65B00A65C00A65D00A65E00A65F00A66000A66100A66200A66300A66400A66500A66600A66700A66800A66900A66A00A66B00A66C00A66D00A68000A68100A68200A68300A68400A68500A68600A68700A68800A68900A68A00A68B00A68C00A68D00A68E00A68F00A69000A69100A69200A69300A69400A69500A69600A69700A69800A69900A69A00A69B00A72200A72300A72400A72500A72600A72700A72800A72900A72A00A72B00A72C00A72D00A72E00A72F00A73200A73300A73400A73500A73600A73700A73800A73900A73A00A73B00A73C00A73D00A73E00A73F00A74000A74100A74200A74300A74400A74500A74600A74700A74800A74900A74A00A74B00A74C00A74D00A74E00A74F00A75000A75100A75200A75300A75400A75500A75600A75700A75800A75900A75A00A75B00A75C00A75D00A75E00A75F00A76000A76100A76200A76300A76400A76500A76600A76700A76800A76900A76A00A76B00A76C00A76D00A76E00A76F00A77900A77A00A77B00A77C00A77D001D7900A77E00A77F00A78000A78100A78200A78300A78400A78500A78600A78700A78B00A78C00A78D00026500A79000A79100A79200A79300A79600A79700A79800A79900A79A00A79B00A79C00A79D00A79E00A79F00A7A000A7A100A7A200A7A300A7A400A7A500A7A600A7A700A7A800A7A900A7AA00026600A7AB00025C00A7AC00026100A7AD00026C00A7AE00026A00A7B000029E00A7B100028700A7B200029D00A7B300AB5300A7B400A7B500A7B600A7B700A7B800A7B900A7BA00A7BB00A7BC00A7BD00A7BE00A7BF00A7C000A7C100A7C200A7C300A7C400A79400A7C500028200A7C6001D8E00A7C700A7C800A7C900A7CA00A7CB00026400A7CC00A7CD00A7CE00A7CF00A7D000A7D100A7D200A7D300A7D400A7D500A7D600A7D700A7D800A7D900A7DA00A7DB00A7DC00019B00A7F500A7F600FF2100FF4100FF2200FF4200FF2300FF4300FF2400FF4400FF2500FF4500FF2600FF4600FF2700FF4700FF2800FF4800FF2900FF4900FF2A00FF4A00FF2B00FF4B00FF2C00FF4C00FF2D00FF4D00FF2E00FF4E00FF2F00FF4F00FF3000FF5000FF3100FF5100FF3200FF5200FF3300FF5300FF3400FF5400FF3500FF5500FF3600FF5600FF3700FF5700FF3800FF5800FF3900FF5900FF3A00FF5A01040001042801040101042901040201042A01040301042B01040401042C01040501042D01040601042E01040701042F01040801043001040901043101040A01043201040B01043301040C01043401040D01043501040E01043601040F01043701041001043801041101043901041201043A01041301043B01041401043C01041501043D01041601043E01041701043F01041801044001041901044101041A01044201041B01044301041C01044401041D01044501041E01044601041F01044701042001044801042101044901042201044A01042301044B01042401044C01042501044D01042601044E01042701044F0104B00104D80104B10104D90104B20104DA0104B30104DB0104B40104DC0104B50104DD0104B60104DE0104B70104DF0104B80104E00104B90104E10104BA0104E20104BB0104E30104BC0104E40104BD0104E50104BE0104E60104BF0104E70104C00104E80104C10104E90104C20104EA0104C30104EB0104C40104EC0104C50104ED0104C60104EE0104C70104EF0104C80104F00104C90104F10104CA0104F20104CB0104F30104CC0104F40104CD0104F50104CE0104F60104CF0104F70104D00104F80104D10104F90104D20104FA0104D30104FB01057001059701057101059801057201059901057301059A01057401059B01057501059C01057601059D01057701059E01057801059F0105790105A001057A0105A101057C0105A301057D0105A401057E0105A501057F0105A60105800105A70105810105A80105820105A90105830105AA0105840105AB0105850105AC0105860105AD0105870105AE0105880105AF0105890105B001058A0105B101058C0105B301058D0105B401058E0105B501058F0105B60105900105B70105910105B80105920105B90105940105BB0105950105BC010C80010CC0010C81010CC1010C82010CC2010C83010CC3010C84010CC4010C85010CC5010C86010CC6010C87010CC7010C88010CC8010C89010CC9010C8A010CCA010C8B010CCB010C8C010CCC010C8D010CCD010C8E010CCE010C8F010CCF010C90010CD0010C91010CD1010C92010CD2010C93010CD3010C94010CD4010C95010CD5010C96010CD6010C97010CD7010C98010CD8010C99010CD9010C9A010CDA010C9B010CDB010C9C010CDC010C9D010CDD010C9E010CDE010C9F010CDF010CA0010CE0010CA1010CE1010CA2010CE2010CA3010CE3010CA4010CE4010CA5010CE5010CA6010CE6010CA7010CE7010CA8010CE8010CA9010CE9010CAA010CEA010CAB010CEB010CAC010CEC010CAD010CED010CAE010CEE010CAF010CEF010CB0010CF0010CB1010CF1010CB2010CF2010D50010D70010D51010D71010D52010D72010D53010D73010D54010D74010D55010D75010D56010D76010D57010D77010D58010D78010D59010D79010D5A010D7A010D5B010D7B010D5C010D7C010D5D010D7D010D5E010D7E010D5F010D7F010D60010D80010D61010D81010D62010D82010D63010D83010D64010D84010D65010D850118A00118C00118A10118C10118A20118C20118A30118C30118A40118C40118A50118C50118A60118C60118A70118C70118A80118C80118A90118C90118AA0118CA0118AB0118CB0118AC0118CC0118AD0118CD0118AE0118CE0118AF0118CF0118B00118D00118B10118D10118B20118D20118B30118D30118B40118D40118B50118D50118B60118D60118B70118D70118B80118D80118B90118D90118BA0118DA0118BB0118DB0118BC0118DC0118BD0118DD0118BE0118DE0118BF0118DF016E40016E60016E41016E61016E42016E62016E43016E63016E44016E64016E45016E65016E46016E66016E47016E67016E48016E68016E49016E69016E4A016E6A016E4B016E6B016E4C016E6C016E4D016E6D016E4E016E6E016E4F016E6F016E50016E70016E51016E71016E52016E72016E53016E73016E54016E74016E55016E75016E56016E76016E57016E77016E58016E78016E59016E79016E5A016E7A016E5B016E7B016E5C016E7C016E5D016E7D016E5E016E7E016E5F016E7F016EA0016EBB016EA1016EBC016EA2016EBD016EA3016EBE016EA4016EBF016EA5016EC0016EA6016EC1016EA7016EC2016EA8016EC3016EA9016EC4016EAA016EC5016EAB016EC6016EAC016EC7016EAD016EC8016EAE016EC9016EAF016ECA016EB0016ECB016EB1016ECC016EB2016ECD016EB3016ECE016EB4016ECF016EB5016ED0016EB6016ED1016EB7016ED2016EB8016ED301E90001E92201E90101E92301E90201E92401E90301E92501E90401E92601E90501E92701E90601E92801E90701E92901E90801E92A01E90901E92B01E90A01E92C01E90B01E92D01E90C01E92E01E90D01E92F01E90E01E93001E90F01E93101E91001E93201E91101E93301E91201E93401E91301E93501E91401E93601E91501E93701E91601E93801E91701E93901E91801E93A01E91901E93B01E91A01E93C01E91B01E93D01E91C01E93E01E91D01E93F01E91E01E94001E91F01E94101E92001E94201E92101E943"
+  let tbl = "0000C00000E01710000D80000F807100010000010118200013200013303200013900013A08200014A00014B1720001780000FF01100017900017A03200018100025301100018200018302200018600025401100018700018801100018900025602100018B00018C01100018E0001DD01100018F00025901100019000025B01100019100019201100019300026001100019400026301100019600026901100019700026801100019800019901100019C00026F01100019D00027201100019F0002750110001A00001A10320001A60002800110001A70001A80110001A90002830110001AC0001AD0110001AE0002880110001AF0001B00110001B100028A0210001B30001B40220001B70002920110001B80001B90110001BC0001BD0110001C40001C60110001C50001C60110001C70001C90110001C80001C90110001CA0001CC0110001CB0001CC0920001DE0001DF0920001F10001F30110001F20001F30220001F60001950110001F70001BF0110001F80001F914200022000019E01100022200022309200023A002C6501100023B00023C01100023D00019A01100023E002C6601100024100024201100024300018001100024400028901100024500028C01100024600024705200037000037102200037600037701100037F0003F30110003860003AC0110003880003AD03100038C0003CC01100038E0003CD0210003910003B11110003A30003C30910003CF0003D70110003D80003D90C20003F40003B80110003F70003F80110003F90003F20110003FA0003FB0110003FD00037B03100040000045010100041000043020100046000046111200048A00048B1B20004C00004CF0110004C10004C20720004D00004D13020005310005612610010A0002D002610010C7002D270110010CD002D2D0110013A000AB705010013F00013F8061001C89001C8A011001C900010D02B1001CBD0010FD031001E00001E014B2001E9E0000DF011001EA0001EA1302001F08001F00081001F18001F10061001F28001F20081001F38001F30081001F48001F40061001F59001F51042001F68001F60081001F88001F80081001F98001F90081001FA8001FA0081001FB8001FB0021001FBA001F70021001FBC001FB3011001FC8001F72041001FCC001FC3011001FD8001FD0021001FDA001F76021001FE8001FE0021001FEA001F7A021001FEC001FE5011001FF8001F78021001FFA001F7C021001FFC001FF30110021260003C901100212B0000E501100213200214E0110021600021701010021830021840110024B60024D01A1002C00002C30301002C60002C61011002C6200026B011002C63001D7D011002C6400027D011002C67002C68032002C6D000251011002C6E000271011002C6F000250011002C70000252011002C72002C73011002C75002C76011002C7E00023F021002C80002C81322002CEB002CEC022002CF2002CF301100A64000A64117200A68000A6810E200A72200A72307200A73200A7331F200A77900A77A02200A77D001D7901100A77E00A77F05200A78B00A78C01100A78D00026501100A79000A79102200A79600A7970A200A7AA00026601100A7AB00025C01100A7AC00026101100A7AD00026C01100A7AE00026A01100A7B000029E01100A7B100028701100A7B200029D01100A7B300AB5301100A7B400A7B508200A7C400A79401100A7C500028201100A7C6001D8E01100A7C700A7C802200A7CB00026401100A7CC00A7CD08200A7DC00019B01100A7F500A7F601100FF2100FF411A10104000104282810104B00104D82410105700105970B101057C0105A30F101058C0105B30710105940105BB021010C80010CC0331010D50010D701610118A00118C0201016E40016E60201016EA0016EBB19101E90001E922221"
   let sp = ""
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
@@ -38906,7 +39210,7 @@ fn string_to_lower(s: String) -> String = {
     h + 12,
     h + 12 + blen,
     prim.handle(tbl) + 12,
-    1486,
+    183,
     prim.handle(sp) + 12,
     prim.handle(buf) + 12,
     0,
@@ -38932,61 +39236,80 @@ pub const SRC_STRING_TO_UPPER: &str = r#"
 
 
 
-fn __to_upper_h1(b: Int) -> Int = if b <= 57 then b - 48 else b - 55
+
+
+
+fn __to_upper_h1(b: Int) -> Int =
+  if b <= 57 then b - 48 else b - 55
 
 fn __to_upper_rd6(a: Int) -> Int = __to_upper_h1(prim.load8(a)) * 1048576 + __to_upper_h1(prim.load8(a + 1)) * 65536 + __to_upper_h1(prim.load8(a + 2)) * 4096 + __to_upper_h1(prim.load8(a + 3)) * 256 + __to_upper_h1(prim.load8(a + 4)) * 16 + __to_upper_h1(prim.load8(a + 5))
 
-fn __to_upper_find(th: Int, lo: Int, hi: Int, cp: Int) -> Int = if lo >= hi then 0 - 1
-else {
-  let mid = (lo + hi) / 2
-  let e = __to_upper_rd6(th + mid * 12)
-  if e == cp then mid
-  else if e < cp then __to_upper_find(th, mid + 1, hi, cp)
-  else __to_upper_find(th, lo, mid, cp)
+
+fn __to_upper_find(th: Int, lo: Int, hi: Int, cp: Int) -> Int =
+  if lo >= hi then lo - 1
+  else {
+    let mid = (lo + hi) / 2
+    if __to_upper_rd6(th + mid * 15) <= cp then __to_upper_find(th, mid + 1, hi, cp)
+    else __to_upper_find(th, lo, mid, cp)
+  }
+
+
+
+fn __to_upper_map(th: Int, nent: Int, cp: Int) -> Int = {
+  let i = __to_upper_find(th, 0, nent, cp)
+  if i < 0 then 0 - 1
+  else {
+    let a = th + i * 15
+    let k = cp - __to_upper_rd6(a)
+    let n = __to_upper_h1(prim.load8(a + 12)) * 16 + __to_upper_h1(prim.load8(a + 13))
+    let st = __to_upper_h1(prim.load8(a + 14))
+    if k % st == 0 and k / st < n then __to_upper_rd6(a + 6) + k else 0 - 1
+  }
 }
 
 fn __to_upper_cp(addr: Int) -> (Int, Int) = {
   let b0 = prim.load8(addr)
   if b0 < 128 then (b0, 1)
   else if b0 < 224 then ((b0 - 192) * 64 + (prim.load8(addr + 1) - 128), 2)
-  else if b0 < 240 then ((b0 - 224) * 4096 + (prim.load8(addr + 1) - 128) * 64 + (prim.load8(addr + 2) - 128), 3) else ((b0 - 240) * 262144 + (prim.load8(addr + 1) - 128) * 4096 + (prim.load8(addr + 2) - 128) * 64 + (prim.load8(addr + 3) - 128), 4)
+  else if b0 < 240 then ((b0 - 224) * 4096 + (prim.load8(addr + 1) - 128) * 64 + (prim.load8(addr + 2) - 128), 3)
+  else ((b0 - 240) * 262144 + (prim.load8(addr + 1) - 128) * 4096 + (prim.load8(addr + 2) - 128) * 64 + (prim.load8(addr + 3) - 128), 4)
 }
 
-fn __to_upper_w(dh: Int, o: Int, cp: Int) -> Int = if cp < 128 then {
-  prim.store8(dh + o, cp)
-  1
-} else if cp < 2048 then {
-  prim.store8(dh + o, 192 + cp / 64)
-  prim.store8(dh + o + 1, 128 + cp % 64)
-  2
-} else if cp < 65536 then {
-  prim.store8(dh + o, 224 + cp / 4096)
-  prim.store8(dh + o + 1, 128 + (cp / 64) % 64)
-  prim.store8(dh + o + 2, 128 + cp % 64)
-  3
-} else {
-  prim.store8(dh + o, 240 + cp / 262144)
-  prim.store8(dh + o + 1, 128 + (cp / 4096) % 64)
-  prim.store8(dh + o + 2, 128 + (cp / 64) % 64)
-  prim.store8(dh + o + 3, 128 + cp % 64)
-  4
-}
+fn __to_upper_w(dh: Int, o: Int, cp: Int) -> Int =
+  if cp < 128 then {
+    prim.store8(dh + o, cp)
+    1
+  } else if cp < 2048 then {
+    prim.store8(dh + o, 192 + cp / 64)
+    prim.store8(dh + o + 1, 128 + cp % 64)
+    2
+  } else if cp < 65536 then {
+    prim.store8(dh + o, 224 + cp / 4096)
+    prim.store8(dh + o + 1, 128 + (cp / 64) % 64)
+    prim.store8(dh + o + 2, 128 + cp % 64)
+    3
+  } else {
+    prim.store8(dh + o, 240 + cp / 262144)
+    prim.store8(dh + o + 1, 128 + (cp / 4096) % 64)
+    prim.store8(dh + o + 2, 128 + (cp / 64) % 64)
+    prim.store8(dh + o + 3, 128 + cp % 64)
+    4
+  }
 
 fn __to_upper_walk(p: Int, end: Int, th: Int, nent: Int, sh: Int, dh: Int, o: Int) -> Int =
   if p >= end then o
   else {
     let b0 = prim.load8(p)
     if b0 < 128 then {
-      prim.store8(dh + o, (if b0 >= 97 and b0 <= 122 then b0 - 32 else b0))
+      prim.store8(dh + o, (if b0 >= 97 and b0 <= 122 then b0 + -32 else b0))
       __to_upper_walk(p + 1, end, th, nent, sh, dh, o + 1)
     } else {
       let (cp, l) = __to_upper_cp(p)
-      let idx = __to_upper_find(th, 0, nent, cp)
-      if idx < 0 then {
+      let v = __to_upper_map(th, nent, cp)
+      if v < 0 then {
         let w = __to_upper_w(dh, o, cp)
         __to_upper_walk(p + l, end, th, nent, sh, dh, o + w)
       } else {
-        let v = __to_upper_rd6(th + idx * 12 + 6)
         if v < 15728640 then {
           let w = __to_upper_w(dh, o, v)
           __to_upper_walk(p + l, end, th, nent, sh, dh, o + w)
@@ -39007,7 +39330,7 @@ fn __to_upper_walk(p: Int, end: Int, th: Int, nent: Int, sh: Int, dh: Int, o: In
   }
 
 fn string_to_upper(s: String) -> String = {
-  let tbl = "00006100004100006200004200006300004300006400004400006500004500006600004600006700004700006800004800006900004900006A00004A00006B00004B00006C00004C00006D00004D00006E00004E00006F00004F00007000005000007100005100007200005200007300005300007400005400007500005500007600005600007700005700007800005800007900005900007A00005A0000B500039C0000E00000C00000E10000C10000E20000C20000E30000C30000E40000C40000E50000C50000E60000C60000E70000C70000E80000C80000E90000C90000EA0000CA0000EB0000CB0000EC0000CC0000ED0000CD0000EE0000CE0000EF0000CF0000F00000D00000F10000D10000F20000D20000F30000D30000F40000D40000F50000D50000F60000D60000F80000D80000F90000D90000FA0000DA0000FB0000DB0000FC0000DC0000FD0000DD0000FE0000DE0000FF00017800010100010000010300010200010500010400010700010600010900010800010B00010A00010D00010C00010F00010E00011100011000011300011200011500011400011700011600011900011800011B00011A00011D00011C00011F00011E00012100012000012300012200012500012400012700012600012900012800012B00012A00012D00012C00012F00012E00013300013200013500013400013700013600013A00013900013C00013B00013E00013D00014000013F00014200014100014400014300014600014500014800014700014B00014A00014D00014C00014F00014E00015100015000015300015200015500015400015700015600015900015800015B00015A00015D00015C00015F00015E00016100016000016300016200016500016400016700016600016900016800016B00016A00016D00016C00016F00016E00017100017000017300017200017500017400017700017600017A00017900017C00017B00017E00017D00018000024300018300018200018500018400018800018700018C00018B0001920001910001950001F600019900019800019A00023D00019B00A7DC00019E0002200001A10001A00001A30001A20001A50001A40001A80001A70001AD0001AC0001B00001AF0001B40001B30001B60001B50001B90001B80001BD0001BC0001BF0001F70001C50001C40001C60001C40001C80001C70001C90001C70001CB0001CA0001CC0001CA0001CE0001CD0001D00001CF0001D20001D10001D40001D30001D60001D50001D80001D70001DA0001D90001DC0001DB0001DD00018E0001DF0001DE0001E10001E00001E30001E20001E50001E40001E70001E60001E90001E80001EB0001EA0001ED0001EC0001EF0001EE0001F20001F10001F30001F10001F50001F40001F90001F80001FB0001FA0001FD0001FC0001FF0001FE00020100020000020300020200020500020400020700020600020900020800020B00020A00020D00020C00020F00020E00021100021000021300021200021500021400021700021600021900021800021B00021A00021D00021C00021F00021E00022300022200022500022400022700022600022900022800022B00022A00022D00022C00022F00022E00023100023000023300023200023C00023B00023F002C7E000240002C7F00024200024100024700024600024900024800024B00024A00024D00024C00024F00024E000250002C6F000251002C6D000252002C7000025300018100025400018600025600018900025700018A00025900018F00025B00019000025C00A7AB00026000019300026100A7AC00026300019400026400A7CB00026500A78D00026600A7AA00026800019700026900019600026A00A7AE00026B002C6200026C00A7AD00026F00019C000271002C6E00027200019D00027500019F00027D002C640002800001A600028200A7C50002830001A900028700A7B10002880001AE00028900024400028A0001B100028B0001B200028C0002450002920001B700029D00A7B200029E00A7B000034500039900037100037000037300037200037700037600037B0003FD00037C0003FE00037D0003FF000390F000000003AC0003860003AD0003880003AE0003890003AF00038A0003B0F000010003B10003910003B20003920003B30003930003B40003940003B50003950003B60003960003B70003970003B80003980003B90003990003BA00039A0003BB00039B0003BC00039C0003BD00039D0003BE00039E0003BF00039F0003C00003A00003C10003A10003C20003A30003C30003A30003C40003A40003C50003A50003C60003A60003C70003A70003C80003A80003C90003A90003CA0003AA0003CB0003AB0003CC00038C0003CD00038E0003CE00038F0003D00003920003D10003980003D50003A60003D60003A00003D70003CF0003D90003D80003DB0003DA0003DD0003DC0003DF0003DE0003E10003E00003E30003E20003E50003E40003E70003E60003E90003E80003EB0003EA0003ED0003EC0003EF0003EE0003F000039A0003F10003A10003F20003F90003F300037F0003F50003950003F80003F70003FB0003FA00043000041000043100041100043200041200043300041300043400041400043500041500043600041600043700041700043800041800043900041900043A00041A00043B00041B00043C00041C00043D00041D00043E00041E00043F00041F00044000042000044100042100044200042200044300042300044400042400044500042500044600042600044700042700044800042800044900042900044A00042A00044B00042B00044C00042C00044D00042D00044E00042E00044F00042F00045000040000045100040100045200040200045300040300045400040400045500040500045600040600045700040700045800040800045900040900045A00040A00045B00040B00045C00040C00045D00040D00045E00040E00045F00040F00046100046000046300046200046500046400046700046600046900046800046B00046A00046D00046C00046F00046E00047100047000047300047200047500047400047700047600047900047800047B00047A00047D00047C00047F00047E00048100048000048B00048A00048D00048C00048F00048E00049100049000049300049200049500049400049700049600049900049800049B00049A00049D00049C00049F00049E0004A10004A00004A30004A20004A50004A40004A70004A60004A90004A80004AB0004AA0004AD0004AC0004AF0004AE0004B10004B00004B30004B20004B50004B40004B70004B60004B90004B80004BB0004BA0004BD0004BC0004BF0004BE0004C20004C10004C40004C30004C60004C50004C80004C70004CA0004C90004CC0004CB0004CE0004CD0004CF0004C00004D10004D00004D30004D20004D50004D40004D70004D60004D90004D80004DB0004DA0004DD0004DC0004DF0004DE0004E10004E00004E30004E20004E50004E40004E70004E60004E90004E80004EB0004EA0004ED0004EC0004EF0004EE0004F10004F00004F30004F20004F50004F40004F70004F60004F90004F80004FB0004FA0004FD0004FC0004FF0004FE00050100050000050300050200050500050400050700050600050900050800050B00050A00050D00050C00050F00050E00051100051000051300051200051500051400051700051600051900051800051B00051A00051D00051C00051F00051E00052100052000052300052200052500052400052700052600052900052800052B00052A00052D00052C00052F00052E00056100053100056200053200056300053300056400053400056500053500056600053600056700053700056800053800056900053900056A00053A00056B00053B00056C00053C00056D00053D00056E00053E00056F00053F00057000054000057100054100057200054200057300054300057400054400057500054500057600054600057700054700057800054800057900054900057A00054A00057B00054B00057C00054C00057D00054D00057E00054E00057F00054F000580000550000581000551000582000552000583000553000584000554000585000555000586000556000587F000020010D0001C900010D1001C910010D2001C920010D3001C930010D4001C940010D5001C950010D6001C960010D7001C970010D8001C980010D9001C990010DA001C9A0010DB001C9B0010DC001C9C0010DD001C9D0010DE001C9E0010DF001C9F0010E0001CA00010E1001CA10010E2001CA20010E3001CA30010E4001CA40010E5001CA50010E6001CA60010E7001CA70010E8001CA80010E9001CA90010EA001CAA0010EB001CAB0010EC001CAC0010ED001CAD0010EE001CAE0010EF001CAF0010F0001CB00010F1001CB10010F2001CB20010F3001CB30010F4001CB40010F5001CB50010F6001CB60010F7001CB70010F8001CB80010F9001CB90010FA001CBA0010FD001CBD0010FE001CBE0010FF001CBF0013F80013F00013F90013F10013FA0013F20013FB0013F30013FC0013F40013FD0013F5001C80000412001C81000414001C8200041E001C83000421001C84000422001C85000422001C8600042A001C87000462001C8800A64A001C8A001C89001D7900A77D001D7D002C63001D8E00A7C6001E01001E00001E03001E02001E05001E04001E07001E06001E09001E08001E0B001E0A001E0D001E0C001E0F001E0E001E11001E10001E13001E12001E15001E14001E17001E16001E19001E18001E1B001E1A001E1D001E1C001E1F001E1E001E21001E20001E23001E22001E25001E24001E27001E26001E29001E28001E2B001E2A001E2D001E2C001E2F001E2E001E31001E30001E33001E32001E35001E34001E37001E36001E39001E38001E3B001E3A001E3D001E3C001E3F001E3E001E41001E40001E43001E42001E45001E44001E47001E46001E49001E48001E4B001E4A001E4D001E4C001E4F001E4E001E51001E50001E53001E52001E55001E54001E57001E56001E59001E58001E5B001E5A001E5D001E5C001E5F001E5E001E61001E60001E63001E62001E65001E64001E67001E66001E69001E68001E6B001E6A001E6D001E6C001E6F001E6E001E71001E70001E73001E72001E75001E74001E77001E76001E79001E78001E7B001E7A001E7D001E7C001E7F001E7E001E81001E80001E83001E82001E85001E84001E87001E86001E89001E88001E8B001E8A001E8D001E8C001E8F001E8E001E91001E90001E93001E92001E95001E94001E9B001E60001EA1001EA0001EA3001EA2001EA5001EA4001EA7001EA6001EA9001EA8001EAB001EAA001EAD001EAC001EAF001EAE001EB1001EB0001EB3001EB2001EB5001EB4001EB7001EB6001EB9001EB8001EBB001EBA001EBD001EBC001EBF001EBE001EC1001EC0001EC3001EC2001EC5001EC4001EC7001EC6001EC9001EC8001ECB001ECA001ECD001ECC001ECF001ECE001ED1001ED0001ED3001ED2001ED5001ED4001ED7001ED6001ED9001ED8001EDB001EDA001EDD001EDC001EDF001EDE001EE1001EE0001EE3001EE2001EE5001EE4001EE7001EE6001EE9001EE8001EEB001EEA001EED001EEC001EEF001EEE001EF1001EF0001EF3001EF2001EF5001EF4001EF7001EF6001EF9001EF8001EFB001EFA001EFD001EFC001EFF001EFE001F00001F08001F01001F09001F02001F0A001F03001F0B001F04001F0C001F05001F0D001F06001F0E001F07001F0F001F10001F18001F11001F19001F12001F1A001F13001F1B001F14001F1C001F15001F1D001F20001F28001F21001F29001F22001F2A001F23001F2B001F24001F2C001F25001F2D001F26001F2E001F27001F2F001F30001F38001F31001F39001F32001F3A001F33001F3B001F34001F3C001F35001F3D001F36001F3E001F37001F3F001F40001F48001F41001F49001F42001F4A001F43001F4B001F44001F4C001F45001F4D001F50F00003001F51001F59001F52F00004001F53001F5B001F54F00005001F55001F5D001F56F00006001F57001F5F001F60001F68001F61001F69001F62001F6A001F63001F6B001F64001F6C001F65001F6D001F66001F6E001F67001F6F001F70001FBA001F71001FBB001F72001FC8001F73001FC9001F74001FCA001F75001FCB001F76001FDA001F77001FDB001F78001FF8001F79001FF9001F7A001FEA001F7B001FEB001F7C001FFA001F7D001FFB001F80F00007001F81F00008001F82F00009001F83F0000A001F84F0000B001F85F0000C001F86F0000D001F87F0000E001F88F0000F001F89F00010001F8AF00011001F8BF00012001F8CF00013001F8DF00014001F8EF00015001F8FF00016001F90F00017001F91F00018001F92F00019001F93F0001A001F94F0001B001F95F0001C001F96F0001D001F97F0001E001F98F0001F001F99F00020001F9AF00021001F9BF00022001F9CF00023001F9DF00024001F9EF00025001F9FF00026001FA0F00027001FA1F00028001FA2F00029001FA3F0002A001FA4F0002B001FA5F0002C001FA6F0002D001FA7F0002E001FA8F0002F001FA9F00030001FAAF00031001FABF00032001FACF00033001FADF00034001FAEF00035001FAFF00036001FB0001FB8001FB1001FB9001FB2F00037001FB3F00038001FB4F00039001FB6F0003A001FB7F0003B001FBCF0003C001FBE000399001FC2F0003D001FC3F0003E001FC4F0003F001FC6F00040001FC7F00041001FCCF00042001FD0001FD8001FD1001FD9001FD2F00043001FD3F00044001FD6F00045001FD7F00046001FE0001FE8001FE1001FE9001FE2F00047001FE3F00048001FE4F00049001FE5001FEC001FE6F0004A001FE7F0004B001FF2F0004C001FF3F0004D001FF4F0004E001FF6F0004F001FF7F00050001FFCF0005100214E00213200217000216000217100216100217200216200217300216300217400216400217500216500217600216600217700216700217800216800217900216900217A00216A00217B00216B00217C00216C00217D00216D00217E00216E00217F00216F0021840021830024D00024B60024D10024B70024D20024B80024D30024B90024D40024BA0024D50024BB0024D60024BC0024D70024BD0024D80024BE0024D90024BF0024DA0024C00024DB0024C10024DC0024C20024DD0024C30024DE0024C40024DF0024C50024E00024C60024E10024C70024E20024C80024E30024C90024E40024CA0024E50024CB0024E60024CC0024E70024CD0024E80024CE0024E90024CF002C30002C00002C31002C01002C32002C02002C33002C03002C34002C04002C35002C05002C36002C06002C37002C07002C38002C08002C39002C09002C3A002C0A002C3B002C0B002C3C002C0C002C3D002C0D002C3E002C0E002C3F002C0F002C40002C10002C41002C11002C42002C12002C43002C13002C44002C14002C45002C15002C46002C16002C47002C17002C48002C18002C49002C19002C4A002C1A002C4B002C1B002C4C002C1C002C4D002C1D002C4E002C1E002C4F002C1F002C50002C20002C51002C21002C52002C22002C53002C23002C54002C24002C55002C25002C56002C26002C57002C27002C58002C28002C59002C29002C5A002C2A002C5B002C2B002C5C002C2C002C5D002C2D002C5E002C2E002C5F002C2F002C61002C60002C6500023A002C6600023E002C68002C67002C6A002C69002C6C002C6B002C73002C72002C76002C75002C81002C80002C83002C82002C85002C84002C87002C86002C89002C88002C8B002C8A002C8D002C8C002C8F002C8E002C91002C90002C93002C92002C95002C94002C97002C96002C99002C98002C9B002C9A002C9D002C9C002C9F002C9E002CA1002CA0002CA3002CA2002CA5002CA4002CA7002CA6002CA9002CA8002CAB002CAA002CAD002CAC002CAF002CAE002CB1002CB0002CB3002CB2002CB5002CB4002CB7002CB6002CB9002CB8002CBB002CBA002CBD002CBC002CBF002CBE002CC1002CC0002CC3002CC2002CC5002CC4002CC7002CC6002CC9002CC8002CCB002CCA002CCD002CCC002CCF002CCE002CD1002CD0002CD3002CD2002CD5002CD4002CD7002CD6002CD9002CD8002CDB002CDA002CDD002CDC002CDF002CDE002CE1002CE0002CE3002CE2002CEC002CEB002CEE002CED002CF3002CF2002D000010A0002D010010A1002D020010A2002D030010A3002D040010A4002D050010A5002D060010A6002D070010A7002D080010A8002D090010A9002D0A0010AA002D0B0010AB002D0C0010AC002D0D0010AD002D0E0010AE002D0F0010AF002D100010B0002D110010B1002D120010B2002D130010B3002D140010B4002D150010B5002D160010B6002D170010B7002D180010B8002D190010B9002D1A0010BA002D1B0010BB002D1C0010BC002D1D0010BD002D1E0010BE002D1F0010BF002D200010C0002D210010C1002D220010C2002D230010C3002D240010C4002D250010C5002D270010C7002D2D0010CD00A64100A64000A64300A64200A64500A64400A64700A64600A64900A64800A64B00A64A00A64D00A64C00A64F00A64E00A65100A65000A65300A65200A65500A65400A65700A65600A65900A65800A65B00A65A00A65D00A65C00A65F00A65E00A66100A66000A66300A66200A66500A66400A66700A66600A66900A66800A66B00A66A00A66D00A66C00A68100A68000A68300A68200A68500A68400A68700A68600A68900A68800A68B00A68A00A68D00A68C00A68F00A68E00A69100A69000A69300A69200A69500A69400A69700A69600A69900A69800A69B00A69A00A72300A72200A72500A72400A72700A72600A72900A72800A72B00A72A00A72D00A72C00A72F00A72E00A73300A73200A73500A73400A73700A73600A73900A73800A73B00A73A00A73D00A73C00A73F00A73E00A74100A74000A74300A74200A74500A74400A74700A74600A74900A74800A74B00A74A00A74D00A74C00A74F00A74E00A75100A75000A75300A75200A75500A75400A75700A75600A75900A75800A75B00A75A00A75D00A75C00A75F00A75E00A76100A76000A76300A76200A76500A76400A76700A76600A76900A76800A76B00A76A00A76D00A76C00A76F00A76E00A77A00A77900A77C00A77B00A77F00A77E00A78100A78000A78300A78200A78500A78400A78700A78600A78C00A78B00A79100A79000A79300A79200A79400A7C400A79700A79600A79900A79800A79B00A79A00A79D00A79C00A79F00A79E00A7A100A7A000A7A300A7A200A7A500A7A400A7A700A7A600A7A900A7A800A7B500A7B400A7B700A7B600A7B900A7B800A7BB00A7BA00A7BD00A7BC00A7BF00A7BE00A7C100A7C000A7C300A7C200A7C800A7C700A7CA00A7C900A7CD00A7CC00A7CF00A7CE00A7D100A7D000A7D300A7D200A7D500A7D400A7D700A7D600A7D900A7D800A7DB00A7DA00A7F600A7F500AB5300A7B300AB700013A000AB710013A100AB720013A200AB730013A300AB740013A400AB750013A500AB760013A600AB770013A700AB780013A800AB790013A900AB7A0013AA00AB7B0013AB00AB7C0013AC00AB7D0013AD00AB7E0013AE00AB7F0013AF00AB800013B000AB810013B100AB820013B200AB830013B300AB840013B400AB850013B500AB860013B600AB870013B700AB880013B800AB890013B900AB8A0013BA00AB8B0013BB00AB8C0013BC00AB8D0013BD00AB8E0013BE00AB8F0013BF00AB900013C000AB910013C100AB920013C200AB930013C300AB940013C400AB950013C500AB960013C600AB970013C700AB980013C800AB990013C900AB9A0013CA00AB9B0013CB00AB9C0013CC00AB9D0013CD00AB9E0013CE00AB9F0013CF00ABA00013D000ABA10013D100ABA20013D200ABA30013D300ABA40013D400ABA50013D500ABA60013D600ABA70013D700ABA80013D800ABA90013D900ABAA0013DA00ABAB0013DB00ABAC0013DC00ABAD0013DD00ABAE0013DE00ABAF0013DF00ABB00013E000ABB10013E100ABB20013E200ABB30013E300ABB40013E400ABB50013E500ABB60013E600ABB70013E700ABB80013E800ABB90013E900ABBA0013EA00ABBB0013EB00ABBC0013EC00ABBD0013ED00ABBE0013EE00ABBF0013EF00FB13F0005200FB14F0005300FB15F0005400FB16F0005500FB17F0005600FF4100FF2100FF4200FF2200FF4300FF2300FF4400FF2400FF4500FF2500FF4600FF2600FF4700FF2700FF4800FF2800FF4900FF2900FF4A00FF2A00FF4B00FF2B00FF4C00FF2C00FF4D00FF2D00FF4E00FF2E00FF4F00FF2F00FF5000FF3000FF5100FF3100FF5200FF3200FF5300FF3300FF5400FF3400FF5500FF3500FF5600FF3600FF5700FF3700FF5800FF3800FF5900FF3900FF5A00FF3A01042801040001042901040101042A01040201042B01040301042C01040401042D01040501042E01040601042F01040701043001040801043101040901043201040A01043301040B01043401040C01043501040D01043601040E01043701040F01043801041001043901041101043A01041201043B01041301043C01041401043D01041501043E01041601043F01041701044001041801044101041901044201041A01044301041B01044401041C01044501041D01044601041E01044701041F01044801042001044901042101044A01042201044B01042301044C01042401044D01042501044E01042601044F0104270104D80104B00104D90104B10104DA0104B20104DB0104B30104DC0104B40104DD0104B50104DE0104B60104DF0104B70104E00104B80104E10104B90104E20104BA0104E30104BB0104E40104BC0104E50104BD0104E60104BE0104E70104BF0104E80104C00104E90104C10104EA0104C20104EB0104C30104EC0104C40104ED0104C50104EE0104C60104EF0104C70104F00104C80104F10104C90104F20104CA0104F30104CB0104F40104CC0104F50104CD0104F60104CE0104F70104CF0104F80104D00104F90104D10104FA0104D20104FB0104D301059701057001059801057101059901057201059A01057301059B01057401059C01057501059D01057601059E01057701059F0105780105A00105790105A101057A0105A301057C0105A401057D0105A501057E0105A601057F0105A70105800105A80105810105A90105820105AA0105830105AB0105840105AC0105850105AD0105860105AE0105870105AF0105880105B00105890105B101058A0105B301058C0105B401058D0105B501058E0105B601058F0105B70105900105B80105910105B90105920105BB0105940105BC010595010CC0010C80010CC1010C81010CC2010C82010CC3010C83010CC4010C84010CC5010C85010CC6010C86010CC7010C87010CC8010C88010CC9010C89010CCA010C8A010CCB010C8B010CCC010C8C010CCD010C8D010CCE010C8E010CCF010C8F010CD0010C90010CD1010C91010CD2010C92010CD3010C93010CD4010C94010CD5010C95010CD6010C96010CD7010C97010CD8010C98010CD9010C99010CDA010C9A010CDB010C9B010CDC010C9C010CDD010C9D010CDE010C9E010CDF010C9F010CE0010CA0010CE1010CA1010CE2010CA2010CE3010CA3010CE4010CA4010CE5010CA5010CE6010CA6010CE7010CA7010CE8010CA8010CE9010CA9010CEA010CAA010CEB010CAB010CEC010CAC010CED010CAD010CEE010CAE010CEF010CAF010CF0010CB0010CF1010CB1010CF2010CB2010D70010D50010D71010D51010D72010D52010D73010D53010D74010D54010D75010D55010D76010D56010D77010D57010D78010D58010D79010D59010D7A010D5A010D7B010D5B010D7C010D5C010D7D010D5D010D7E010D5E010D7F010D5F010D80010D60010D81010D61010D82010D62010D83010D63010D84010D64010D85010D650118C00118A00118C10118A10118C20118A20118C30118A30118C40118A40118C50118A50118C60118A60118C70118A70118C80118A80118C90118A90118CA0118AA0118CB0118AB0118CC0118AC0118CD0118AD0118CE0118AE0118CF0118AF0118D00118B00118D10118B10118D20118B20118D30118B30118D40118B40118D50118B50118D60118B60118D70118B70118D80118B80118D90118B90118DA0118BA0118DB0118BB0118DC0118BC0118DD0118BD0118DE0118BE0118DF0118BF016E60016E40016E61016E41016E62016E42016E63016E43016E64016E44016E65016E45016E66016E46016E67016E47016E68016E48016E69016E49016E6A016E4A016E6B016E4B016E6C016E4C016E6D016E4D016E6E016E4E016E6F016E4F016E70016E50016E71016E51016E72016E52016E73016E53016E74016E54016E75016E55016E76016E56016E77016E57016E78016E58016E79016E59016E7A016E5A016E7B016E5B016E7C016E5C016E7D016E5D016E7E016E5E016E7F016E5F016EBB016EA0016EBC016EA1016EBD016EA2016EBE016EA3016EBF016EA4016EC0016EA5016EC1016EA6016EC2016EA7016EC3016EA8016EC4016EA9016EC5016EAA016EC6016EAB016EC7016EAC016EC8016EAD016EC9016EAE016ECA016EAF016ECB016EB0016ECC016EB1016ECD016EB2016ECE016EB3016ECF016EB4016ED0016EB5016ED1016EB6016ED2016EB7016ED3016EB801E92201E90001E92301E90101E92401E90201E92501E90301E92601E90401E92701E90501E92801E90601E92901E90701E92A01E90801E92B01E90901E92C01E90A01E92D01E90B01E92E01E90C01E92F01E90D01E93001E90E01E93101E90F01E93201E91001E93301E91101E93401E91201E93501E91301E93601E91401E93701E91501E93801E91601E93901E91701E93A01E91801E93B01E91901E93C01E91A01E93D01E91B01E93E01E91C01E93F01E91D01E94001E91E01E94101E91F01E94201E92001E94301E921"
+  let tbl = "0000B500039C0110000E00000C01710000F80000D80710000FF00017801100010100010018200013300013203200013A00013908200014B00014A17200017A00017903200018000024301100018300018202200018800018701100018C00018B0110001920001910110001950001F601100019900019801100019A00023D01100019B00A7DC01100019E0002200110001A10001A00320001A80001A70110001AD0001AC0110001B00001AF0110001B40001B30220001B90001B80110001BD0001BC0110001BF0001F70110001C50001C40110001C60001C40110001C80001C70110001C90001C70110001CB0001CA0110001CC0001CA0110001CE0001CD0820001DD00018E0110001DF0001DE0920001F20001F10110001F30001F10110001F50001F40110001F90001F814200022300022209200023C00023B01100023F002C7E021000242000241011000247000246052000250002C6F011000251002C6D011000252002C7001100025300018101100025400018601100025600018902100025900018F01100025B00019001100025C00A7AB01100026000019301100026100A7AC01100026300019401100026400A7CB01100026500A78D01100026600A7AA01100026800019701100026900019601100026A00A7AE01100026B002C6201100026C00A7AD01100026F00019C011000271002C6E01100027200019D01100027500019F01100027D002C640110002800001A601100028200A7C50110002830001A901100028700A7B10110002880001AE01100028900024401100028A0001B102100028C0002450110002920001B701100029D00A7B201100029E00A7B001100034500039901100037100037002200037700037601100037B0003FD031000390F000000110003AC0003860110003AD0003880310003B0F000010110003B10003911110003C20003A30110003C30003A30910003CC00038C0110003CD00038E0210003D00003920110003D10003980110003D50003A60110003D60003A00110003D70003CF0110003D90003D80C20003F000039A0110003F10003A10110003F20003F90110003F300037F0110003F50003950110003F80003F70110003FB0003FA01100043000041020100045000040010100046100046011200048B00048A1B20004C20004C10720004CF0004C00110004D10004D0302000561000531261000587F000020110010D0001C902B10010FD001CBD0310013F80013F0061001C80000412011001C81000414011001C8200041E011001C83000421021001C85000422011001C8600042A011001C87000462011001C8800A64A011001C8A001C89011001D7900A77D011001D7D002C63011001D8E00A7C6011001E01001E004B2001E9B001E60011001EA1001EA0302001F00001F08081001F10001F18061001F20001F28081001F30001F38081001F40001F48061001F50F00003011001F51001F59011001F52F00004011001F53001F5B011001F54F00005011001F55001F5D011001F56F00006011001F57001F5F011001F60001F68081001F70001FBA021001F72001FC8041001F76001FDA021001F78001FF8021001F7A001FEA021001F7C001FFA021001F80F00007011001F81F00008011001F82F00009011001F83F0000A011001F84F0000B011001F85F0000C011001F86F0000D011001F87F0000E011001F88F0000F011001F89F00010011001F8AF00011011001F8BF00012011001F8CF00013011001F8DF00014011001F8EF00015011001F8FF00016011001F90F00017011001F91F00018011001F92F00019011001F93F0001A011001F94F0001B011001F95F0001C011001F96F0001D011001F97F0001E011001F98F0001F011001F99F00020011001F9AF00021011001F9BF00022011001F9CF00023011001F9DF00024011001F9EF00025011001F9FF00026011001FA0F00027011001FA1F00028011001FA2F00029011001FA3F0002A011001FA4F0002B011001FA5F0002C011001FA6F0002D011001FA7F0002E011001FA8F0002F011001FA9F00030011001FAAF00031011001FABF00032011001FACF00033011001FADF00034011001FAEF00035011001FAFF00036011001FB0001FB8021001FB2F00037011001FB3F00038011001FB4F00039011001FB6F0003A011001FB7F0003B011001FBCF0003C011001FBE000399011001FC2F0003D011001FC3F0003E011001FC4F0003F011001FC6F00040011001FC7F00041011001FCCF00042011001FD0001FD8021001FD2F00043011001FD3F00044011001FD6F00045011001FD7F00046011001FE0001FE8021001FE2F00047011001FE3F00048011001FE4F00049011001FE5001FEC011001FE6F0004A011001FE7F0004B011001FF2F0004C011001FF3F0004D011001FF4F0004E011001FF6F0004F011001FF7F00050011001FFCF0005101100214E0021320110021700021601010021840021830110024D00024B61A1002C30002C00301002C61002C60011002C6500023A011002C6600023E011002C68002C67032002C73002C72011002C76002C75011002C81002C80322002CEC002CEB022002CF3002CF2011002D000010A0261002D270010C7011002D2D0010CD01100A64100A64017200A68100A6800E200A72300A72207200A73300A7321F200A77A00A77902200A77F00A77E05200A78C00A78B01100A79100A79002200A79400A7C401100A79700A7960A200A7B500A7B408200A7C800A7C702200A7CD00A7CC08200A7F600A7F501100AB5300A7B301100AB700013A050100FB13F0005201100FB14F0005301100FB15F0005401100FB16F0005501100FB17F0005601100FF4100FF211A10104280104002810104D80104B02410105970105700B10105A301057C0F10105B301058C0710105BB010594021010CC0010C80331010D70010D501610118C00118A0201016E60016E40201016EBB016EA019101E92201E900221"
   let sp = "0003990003080003010003A50003080003010005350005520000000003A50003130000000003A50003130003000003A50003130003010003A5000313000342001F08000399000000001F09000399000000001F0A000399000000001F0B000399000000001F0C000399000000001F0D000399000000001F0E000399000000001F0F000399000000001F08000399000000001F09000399000000001F0A000399000000001F0B000399000000001F0C000399000000001F0D000399000000001F0E000399000000001F0F000399000000001F28000399000000001F29000399000000001F2A000399000000001F2B000399000000001F2C000399000000001F2D000399000000001F2E000399000000001F2F000399000000001F28000399000000001F29000399000000001F2A000399000000001F2B000399000000001F2C000399000000001F2D000399000000001F2E000399000000001F2F000399000000001F68000399000000001F69000399000000001F6A000399000000001F6B000399000000001F6C000399000000001F6D000399000000001F6E000399000000001F6F000399000000001F68000399000000001F69000399000000001F6A000399000000001F6B000399000000001F6C000399000000001F6D000399000000001F6E000399000000001F6F000399000000001FBA000399000000000391000399000000000386000399000000000391000342000000000391000342000399000391000399000000001FCA0003990000000003970003990000000003890003990000000003970003420000000003970003420003990003970003990000000003990003080003000003990003080003010003990003420000000003990003080003420003A50003080003000003A50003080003010003A10003130000000003A50003420000000003A5000308000342001FFA0003990000000003A900039900000000038F0003990000000003A90003420000000003A90003420003990003A900039900000000054400054600000000054400053500000000054400053B00000000054E00054600000000054400053D000000"
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
@@ -39016,7 +39339,7 @@ fn string_to_upper(s: String) -> String = {
     h + 12,
     h + 12 + blen,
     prim.handle(tbl) + 12,
-    1563,
+    285,
     prim.handle(sp) + 12,
     prim.handle(buf) + 12,
     0,
@@ -41749,6 +42072,8 @@ else if prim.load64(ah + 12 + i * 8) == prim.load64(bh + 12 + i * 8) then __leq_
 )
 else false
 
+@implements("list.__eq_int")
+@specializes("list.__eq_int")
 fn list_eq_int(a: List[Int], b: List[Int]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -41765,6 +42090,8 @@ else if prim.ffrombits(prim.load64(ah + 12 + i * 8)) == prim.ffrombits(prim.load
 )
 else false
 
+@implements("list.__eq_float")
+@specializes("list.__eq_float")
 fn list_eq_float(a: List[Float], b: List[Float]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -41772,6 +42099,8 @@ fn list_eq_float(a: List[Float], b: List[Float]) -> Bool = {
   else __leq_float(ha, hb, 0, prim.load32(ha + 4))
 }
 
+@implements("list.__eq_bool")
+@specializes("list.__eq_bool")
 fn list_eq_bool(a: List[Bool], b: List[Bool]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -41787,6 +42116,8 @@ else {
   else false
 }
 
+@implements("list.__eq_str")
+@specializes("list.__eq_str")
 fn list_eq_str(a: List[String], b: List[String]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -42007,6 +42338,7 @@ else {
 
 
 
+@specializes("list.set")
 fn list_set_value(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -42026,6 +42358,7 @@ fn __lsv_insert_fill(srcbase: Int, dstbase: Int, n: Int, idx: Int, x: Value) -> 
   0
 }
 
+@specializes("list.insert")
 fn list_insert_value(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -42050,6 +42383,7 @@ fn __lsv_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> In
     __lsv_copy(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
   }
 
+@specializes("list.remove_at")
 fn list_remove_at_value(xs: List[Value], i: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -42081,6 +42415,7 @@ else {
 
 
 
+@specializes("list.swap")
 fn list_swap_value(xs: List[Value], i: Int, j: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -42091,6 +42426,7 @@ fn list_swap_value(xs: List[Value], i: Int, j: Int) -> List[Value] = {
   buf
 }
 
+@specializes("list.take_end")
 fn list_take_end_value(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -42102,6 +42438,7 @@ fn list_take_end_value(xs: List[Value], n: Int) -> List[Value] = {
   buf
 }
 
+@specializes("list.drop_end")
 fn list_drop_end_value(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -42450,6 +42787,7 @@ fn __get_value_some(h: Int, i: Int) -> Value? = {
   some(v)
 }
 
+@specializes("list.get")
 fn list_get_value(xs: List[Value], i: Int) -> Value? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -42457,6 +42795,7 @@ fn list_get_value(xs: List[Value], i: Int) -> Value? = {
   else if i >= len then none else __get_value_some(h, i)
 }
 
+@specializes("list.first")
 fn list_first_value(xs: List[Value]) -> Value? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -42469,6 +42808,7 @@ fn list_first_value(xs: List[Value]) -> Value? = {
 
 
 
+@specializes("list.last")
 fn list_last_value(xs: List[Value]) -> Value? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -42480,6 +42820,7 @@ fn __get_liststr_some(h: Int, i: Int) -> List[String]? = {
   some(v)
 }
 
+@specializes("list.get")
 fn list_get_liststr(xs: List[List[String]], i: Int) -> List[String]? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -42487,6 +42828,7 @@ fn list_get_liststr(xs: List[List[String]], i: Int) -> List[String]? = {
   else if i >= len then none else __get_liststr_some(h, i)
 }
 
+@specializes("list.first")
 fn list_first_liststr(xs: List[List[String]]) -> List[String]? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -42497,6 +42839,7 @@ fn list_first_liststr(xs: List[List[String]]) -> List[String]? = {
 
 
 
+@specializes("list.last")
 fn list_last_liststr(xs: List[List[String]]) -> List[String]? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -42511,6 +42854,7 @@ else {
   __ldls_share(src, dst, start, count, i + 1)
 }
 
+@specializes("list.take")
 fn list_take_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -42525,6 +42869,7 @@ fn list_take_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
 
 
 
+@specializes("list.drop")
 fn list_drop_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -42788,6 +43133,7 @@ fn __drop_list_str_str(xs: List[(String, String)]) -> Unit = {
   prim.rc_dec(h)
 }
 
+@specializes("map.to_list")
 fn map_entries_str(m: Map[String, String]) -> List[(String, String)] = __ment_build(
   m,
   prim.load32(prim.handle(m) + 4) / 2,
@@ -42940,6 +43286,7 @@ fn json_stringify_pretty_at(v: Value, d: Int) -> String = {
 
 fn json_stringify_pretty(v: Value) -> String = json_stringify_pretty_at(v, 0)
 
+@specializes("option.unwrap_or")
 fn option_unwrap_or_hx(o: Value?, d: Value) -> Value = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)

@@ -18,6 +18,7 @@
 //! | `init`            | `InitCert.check_init_cert`                 | every construction site stores every slot of its block, and none past it |
 //! | `fields`          | `FieldCert.check_fields_cert`              | every layout's fields fit its payload; every record / tuple / variant site stores each field of its layout; every field access names a declared field; every tag read is field 0 of each case |
 //! | `rc-sig`          | `HelperSig.check_sig_cert`                 | a runtime helper's body nets each heap parameter to its declared mode (borrow / consume) on every path, and its other lines balance |
+//! | `native-calls`    | `NativeCalls.check_native_calls_cert`      | every native call site agrees with its callee's parameter modes, every argument a site moves is an `M` on the caller's line, and every line balances from the reference its mode declares |
 //!
 //! WHAT IS PROVEN AND WHAT IS NOT. The Coq functions carry the soundness
 //! theorems; this crate does not — it is a second implementation of the same
@@ -32,6 +33,9 @@ mod bounds;
 mod fields;
 mod init;
 mod modes;
+mod native_calls;
+/// The named set of native fs host calls the `native-calls` checker admits.
+pub use native_calls::NATIVE_FS_HOST_CALLS;
 mod nat;
 mod ownership;
 mod reach;
@@ -42,7 +46,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The witness formats this version reads.
 pub const FORMATS: &str =
-    "ownership v5, names v1, caps v1, caps-transitive v1, call-modes v1, bounds v1, init v1, fields v1, rc-sig v1, bundle v1 to v4 (artifact sha256)";
+    "ownership v5, names v1, caps v1, caps-transitive v1, call-modes v1, bounds v1, init v1, fields v1, rc-sig v1, native-calls v1, bundle v1 to v4 (artifact sha256)";
 
 /// A flight-grade property a witness certifies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,10 +60,11 @@ pub enum Property {
     Init,
     Fields,
     RcSig,
+    NativeCalls,
 }
 
 impl Property {
-    pub const ALL: [Property; 9] = [
+    pub const ALL: [Property; 10] = [
         Property::Ownership,
         Property::Names,
         Property::Caps,
@@ -69,6 +74,7 @@ impl Property {
         Property::Init,
         Property::Fields,
         Property::RcSig,
+        Property::NativeCalls,
     ];
 
     /// The name used on the command line and in bundles — the same mode names
@@ -84,6 +90,7 @@ impl Property {
             Property::Init => "init",
             Property::Fields => "fields",
             Property::RcSig => "rc-sig",
+            Property::NativeCalls => "native-calls",
         }
     }
 
@@ -103,5 +110,6 @@ pub fn check(property: Property, witness: &[u8]) -> bool {
         Property::Init => init::check_init_cert(witness),
         Property::Fields => fields::check_fields_cert(witness),
         Property::RcSig => ownership::check_sig_cert(witness),
+        Property::NativeCalls => native_calls::check_native_calls_cert(witness),
     }
 }

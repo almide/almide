@@ -140,6 +140,15 @@ REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-com
 # VICTORY_ABLATION_FLOOR — the optimization named in the declaration must
 # still be what earns the row, or the declaration is stale.
 #
+# `btrees` (rc4) is treealloc's program with the depth a literal and main
+# reading nothing. That difference is the row. treealloc reads its depth with
+# `env.args()`, and before the rc4 bundle that call kept its main off the
+# certified native render, so treealloc shipped from the standard codegen and
+# its arena and stayed fast. btrees has no such call, so the certified render took the
+# whole program, and before the bundle the render had no arena: 1.3x the
+# Rust reference against treealloc's 0.34x, with every gate green. Since the
+# bundle the certified render runs the window in the arena (#4483).
+#
 # `fannkuchredux` (#2044) is the data-parallelism row: `fan { list.map(chunks,
 # (c) => process_chunk(..)) }` over Int captures with an `(Int, Int)` result
 # is exactly the Send-safe-scalar subset AutoParallel now routes to
@@ -149,7 +158,16 @@ REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-com
 # `ALMIDE_FAN_SEQUENTIAL=1` (the same binary's sequential path) 1.07 / 1.06 —
 # the whole win is the parallel map. The ratio scales with the runner's core
 # count, which is why it is a VICTORY row and not a PAIRS anchor.
-VICTORY="binarytrees=rust:binarytrees:ALMIDE_REGION_OFF treealloc=rust:treealloc:ALMIDE_REGION_OFF fannkuchredux=rust:fannkuchredux:ALMIDE_FAN_SEQUENTIAL"
+#
+# `fib` (#4456) is the call-bound recursion row: the native legs inline a
+# pure scalar recursion into itself once (`almide_ir::self_inline`), and LLVM,
+# which never inlines a recursive call, then merges the identical grandchild
+# calls (fib's `f(n-3)` twice). The reference is the ordinary Rust, one call
+# per node. GCE n2-standard-8, 2026-11-04, 30:300: 0.095 s against 1.15 s
+# (0.083), and 1.15 s with ALMIDE_SELF_INLINE_OFF=1 — the whole win is the
+# rewrite, and the delta grows with n (the call count drops from ~1.618^n to
+# ~1.466^n), which is why the claim is gated and not a band.
+VICTORY="binarytrees=rust:binarytrees:ALMIDE_REGION_OFF treealloc=rust:treealloc:ALMIDE_REGION_OFF btrees=rust:btrees:ALMIDE_REGION_OFF fannkuchredux=rust:fannkuchredux:ALMIDE_FAN_SEQUENTIAL fib=rust:fib:ALMIDE_SELF_INLINE_OFF"
 VICTORY_ABLATION_FLOOR=1.30
 # IDIOM GATE (#1337). The three listbuild rows build the SAME result three
 # ways, so beyond each row's own ratio there is a relation between them that
@@ -189,7 +207,7 @@ trap 'rm -f "$out"' EXIT
 # interleaved loop as their optimized twin — see ABLATION below.
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,rust \
-  --bench nbody,spectralnorm,fasta,fft,binarytrees,treealloc,listbuild,listbuild-append,listbuild-comb,strchurn,fannkuchredux,mandelbrot,decode,wordfreq,wordfreq-group \
+  --bench nbody,spectralnorm,fasta,fft,binarytrees,treealloc,btrees,listbuild,listbuild-append,listbuild-comb,strchurn,fannkuchredux,mandelbrot,decode,wordfreq,wordfreq-group,fib \
   --ablate ALMIDE_DISABLE_OPT --ablate-bench nbody,spectralnorm,fasta,fft,wordfreq \
   --label ratchet --out "$out"
 
@@ -668,3 +686,42 @@ for leg in ("native", "wasm"):
           f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
 sys.exit(1 if failed else 0)
 PYRX
+
+# BTREES RELATION (rc4, owner ruling 2026-11-05). btrees and treealloc build
+# and walk the same trees (2^19 + 2^19 nodes per round, 24 x depth 19 against
+# 12 x depth 20); btrees only takes its depth as a literal, so it renders whole
+# on the certified native leg while treealloc's argv read once kept it on the
+# standard codegen. Their VICTORY ratios against the Box references move 2.5x
+# with the runner's CPU class; their native times move together. The relation
+# btrees native / treealloc native (medians of the same interleaved run above)
+# read 0.76-0.90 on EPYC 7763, 9V74 and Xeon 8370C runners, and about 4.7 on
+# develop before the rc4 bundle, when the certified leg built every btrees node
+# with `Box` (0.47 s against 0.10 s). The ceiling fails that on every class.
+BTREES_RELATION_CEILING=1.15
+python3 - "$out" "$BASELINE_FILE" "$BTREES_RELATION_CEILING" <<'PYBT'
+import json, sys
+
+out_path, baseline_path, ceiling = sys.argv[1:4]
+ceiling = float(ceiling)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+key = "btrees-treealloc"
+if key not in baseline:
+    sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the btrees relation was added "
+             "without its recorded value; add the line on purpose.")
+bt = data["btrees"]["variants"]["btrees/native"]["median"]
+ta = data["treealloc"]["variants"]["treealloc/native"]["median"]
+ratio = bt / ta
+if ratio > ceiling:
+    sys.exit(f"::error::perf-ratio: btrees runs {ratio:.3f}x treealloc's native time for the same "
+             f"trees (ceiling {ceiling:.2f}, {bt:.3f}s vs {ta:.3f}s, recorded {baseline[key]:.3f}). The "
+             "program that renders whole on the certified native leg lost the region window there "
+             "(rc4: every node a Box). Restore the window on that leg; do not raise the ceiling.")
+print(f"perf-ratio: {key:20s} {ratio:.3f}x treealloc's native time "
+      f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}) ok")
+PYBT

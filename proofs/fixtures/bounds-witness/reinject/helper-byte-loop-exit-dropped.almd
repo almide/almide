@@ -1,0 +1,6 @@
+// #4005 drill: the runtime's char-count helper (`string.len`) loses its
+// loop's exit test, and with it the test's record. The helper's read then
+// sits on a stretch of its own as a bare `a`, which the checker rejects.
+effect fn main() -> Unit = {
+  println("${string.len("héllo")}")
+}

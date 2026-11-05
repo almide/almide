@@ -84,3 +84,81 @@ fn a_corrupt_lock_is_an_error_not_an_empty_set() {
         "error must name the entry and the field: {err}"
     );
 }
+
+fn one_dep(commit: &str) -> Vec<LockedDep> {
+    vec![LockedDep {
+        name: "almai".into(),
+        git: "https://github.com/almide/almai".into(),
+        ref_name: "main".into(),
+        commit: commit.into(),
+        subdir: None,
+    }]
+}
+
+/// #4472: every dependency resolution writes the lock, and `almide test`
+/// resolves on every parallel test thread. The in-place write (truncate, then
+/// write) let a concurrent reader see an empty lock — no entries — and resolve
+/// a locked git dependency at its branch head. Writers alternating between two
+/// commits while readers parse: every read must see one whole entry.
+#[test]
+fn a_concurrent_reader_never_sees_a_partial_lock() {
+    let path = scratch("concurrent");
+    write_lock_file(&path, &one_dep("aaaa1111")).expect("write");
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let writers: Vec<_> = (0..4)
+        .map(|w| {
+            let (path, stop) = (path.clone(), stop.clone());
+            std::thread::spawn(move || {
+                let mut i = 0u64;
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let commit = if (i + w) % 2 == 0 { "aaaa1111" } else { "bbbb2222" };
+                    write_lock_file(&path, &one_dep(commit)).expect("write");
+                    i += 1;
+                }
+            })
+        })
+        .collect();
+    let readers: Vec<_> = (0..4)
+        .map(|_| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                for _ in 0..2000 {
+                    let got = parse_lock_file(&path).expect("a lock mid-write must still parse");
+                    assert_eq!(got.len(), 1, "a reader saw a lock with {} entries", got.len());
+                }
+            })
+        })
+        .collect();
+    for r in readers {
+        r.join().expect("reader");
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    for w in writers {
+        w.join().expect("writer");
+    }
+    let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n != "almide.lock")
+        .collect();
+    assert!(leftovers.is_empty(), "temp files left behind: {leftovers:?}");
+}
+
+/// #4472: an unchanged lock is not rewritten, and a read-only lock is left
+/// alone (the write fails, as the in-place write did) rather than replaced.
+#[test]
+fn an_unchanged_or_read_only_lock_is_not_rewritten() {
+    let path = scratch("unchanged");
+    write_lock_file(&path, &one_dep("aaaa1111")).expect("write");
+    let mut perms = std::fs::metadata(&path).expect("meta").permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&path, perms.clone()).expect("chmod");
+    write_lock_file(&path, &one_dep("aaaa1111")).expect("identical content is a no-op");
+    assert!(write_lock_file(&path, &one_dep("bbbb2222")).is_err(), "a read-only lock was replaced");
+    let back = parse_lock_file(&path).expect("parse");
+    assert_eq!(back[0].commit, "aaaa1111");
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&path, perms).expect("chmod back");
+}

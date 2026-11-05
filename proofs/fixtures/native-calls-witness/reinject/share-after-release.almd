@@ -1,0 +1,26 @@
+// #4006 class P reinjection drill (scripts/witness-reinject.sh native-calls):
+// SHARED AFTER RELEASE: `build`'s loop hands its buffer over to `emit` at
+// each call and takes the call's result back into the slot as a copy (the
+// `mut` write-back), certified as the share-out of that result: `s` on the
+// result's line, where its liveness is probed. The re-injected pass releases
+// the call's result BEFORE that copy, so the slot is rebound to a freed
+// buffer. Unpatched, the copy is taken from the live result and the result
+// is released after it.
+fn emit(mut out: Bytes, s: String) -> Unit = {
+  for b in bytes.to_list(bytes.from_string(s)) {
+    bytes.push(out, b)
+  }
+}
+
+fn build(n: Int) -> Bytes = {
+  var out = bytes.zeros(0)
+  var i = 0
+  while i < n {
+    emit(out, "a")
+    emit(out, "b")
+    i = i + 1
+  }
+  out
+}
+
+fn main() -> Unit = println(bytes.to_string_lossy(build(2)))

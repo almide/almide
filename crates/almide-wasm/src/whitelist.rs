@@ -322,3 +322,12 @@ pub(crate) fn tier_of(impl_fn: &str) -> Option<bool> {
     }
     Some(hits.any(|(_, exempt)| *exempt))
 }
+
+/// Can a self-host registry implementation be resolved through its surface
+/// at all — is it in a whitelist tier (`calls::VERIFIED`, `calls::VERIFIED_SUM_BUILDERS`,
+/// [`tier_of`])? One that is not is never called through its
+/// surface (`Emitter::resolve_qualified`), so the wasm link need not load it
+/// for that surface (#4458).
+pub fn registry_impl_admitted(impl_fn: &str) -> bool {
+    crate::calls::VERIFIED.contains(&impl_fn) || crate::calls::VERIFIED_SUM_BUILDERS.contains(&impl_fn) || tier_of(impl_fn).is_some()
+}

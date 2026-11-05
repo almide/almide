@@ -478,6 +478,11 @@ pub const SCOPED_BLOCK_ATTR: &str = "scoped:block";
 /// witness bounds it by that declaration. Written by the pass that creates
 /// the fn; `:` keeps a source attribute from forging it.
 pub const EFFECT_ORIGIN_ATTR: &str = "effect:origin";
+/// #4006 C2: the marker on the fn the certified native render synthesizes for
+/// one discovered region window (`consume(produce(scalars))` over the `__rgn_`
+/// twins). The MIR of a fn carrying it is bracketed by the arena mark's save
+/// and restore; `:` keeps a source attribute from forging it.
+pub const REGION_WINDOW_ATTR: &str = "region:window";
 
 impl IrFunction {
     /// Declared `scoped fn` (the qualifier, not the block).
@@ -488,6 +493,11 @@ impl IrFunction {
     /// The outlined body of a `scoped { … }` block.
     pub fn is_scoped_block_entry(&self) -> bool {
         self.attrs.iter().any(|a| a.name.as_str() == SCOPED_BLOCK_ATTR)
+    }
+
+    /// A region-window fn the native render synthesized ([`REGION_WINDOW_ATTR`]).
+    pub fn is_region_window(&self) -> bool {
+        self.attrs.iter().any(|a| a.name.as_str() == REGION_WINDOW_ATTR)
     }
 
     /// Synthesized from an `effect fn`'s body ([`EFFECT_ORIGIN_ATTR`]).

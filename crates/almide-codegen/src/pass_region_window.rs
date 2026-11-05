@@ -479,7 +479,7 @@ impl IrMutVisitor for DeclaredRewriter<'_> {
 
 /// Every window site in the root fn bodies (a site nested in another
 /// site's argument is impossible — window arguments are scalar).
-fn find_sites(program: &IrProgram, cx: &Cx) -> Vec<Site> {
+pub(crate) fn find_sites(program: &IrProgram, cx: &Cx) -> Vec<Site> {
     struct Finder<'a> {
         program: &'a IrProgram,
         cx: &'a Cx<'a>,
@@ -515,7 +515,7 @@ pub(crate) struct TwinPlan {
 /// fn mentions a non-twinned named type that reaches a twinned one (its
 /// clone could not be typed). Sites whose enum is not admissible are
 /// dropped; `None` when nothing survives.
-fn plan_twins(program: &IrProgram, cx: &Cx, sites: Vec<Site>) -> Option<TwinPlan> {
+pub(crate) fn plan_twins(program: &IrProgram, cx: &Cx, sites: Vec<Site>) -> Option<TwinPlan> {
     let mut enums: HashSet<Sym> = HashSet::new();
     let mut admitted: Vec<Site> = Vec::new();
     for s in sites {

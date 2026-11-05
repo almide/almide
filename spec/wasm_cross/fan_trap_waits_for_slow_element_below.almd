@@ -1,0 +1,45 @@
+// @contract: C-200
+// The trap waits for a SLOW element below it (ADR-0024 D6). Element 0 is still
+// computing when element 1 traps; the sequential evaluation would have finished
+// element 0 first, so its line must reach stdout before `Error: division by zero`,
+// and element 2's line must not appear. fan_trap_waits_for_elements_below.almd
+// cannot tell a substrate that waits from one that exits at once: its element 0
+// prints before the trap fires. Here element 0 runs a long remainder chain first,
+// so a substrate that exits on the trap without waiting loses its line.
+//
+// The trap is a division by zero routed through `int.parse` so constant folding
+// cannot see the zero at compile time.
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn before() -> Result[Int, String] = {
+  let s = burn(2000000)
+  println("element 0 ${s}")
+  ok(1)
+}
+
+effect fn crash() -> Result[Int, String] = {
+  let zero = int.parse("0") ?? 1
+  ok(100 / zero)
+}
+
+effect fn after() -> Result[Int, String] = {
+  println("element 2")
+  ok(3)
+}
+
+effect fn main() -> Unit = {
+  let (a, b, c) = fan {
+    before()
+    crash()
+    after()
+  }
+  println("unreachable ${a} ${b} ${c}")
+}

@@ -490,6 +490,9 @@ fn lower_function_all_impl(
         ret,
         declared_caps,
         heap_slot_masks,
+        owned_params: Default::default(),
+        call_moves: Default::default(),
+        aggregate_blocks: std::mem::take(&mut ctx.aggregate_blocks),
     };
     let mut all = vec![main];
     all.extend(lifted);
@@ -516,7 +519,7 @@ fn lower_function_all_impl(
 }
 
 mod binds;
-mod layout;
+pub(crate) mod layout;
 mod tail;
 mod control;
 mod calls;

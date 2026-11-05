@@ -42,13 +42,19 @@ impl NanoPass for TailCallOptPass {
     fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion"] }
     fn run_before(&self) -> Vec<&'static str> { vec!["CaptureClone", "CloneInsertion"] }
 
-    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+    fn run(&self, mut program: IrProgram, target: Target) -> PassResult {
         // Collect: TCO'd function name → param positions whose borrow annotation
         // was forced back to Own by the loop rewrite (i.e. the slots
         // [`tco_kept_borrows`] refused). External call sites targeting these
         // functions need their Borrow wrappers stripped to match the new
         // signature — otherwise a &str arg is passed where String is expected.
         let mut reverted: HashMap<almide_base::intern::Sym, HashSet<usize>> = HashMap::new();
+        // #4456: native (Rust target) only, and never under a budget/timeout
+        // region — the inlined copies remove calls the deterministic meter
+        // would charge, the same reason the v1 rungs skip both rewrites there.
+        let self_inline = target == Target::Rust
+            && !almide_ir::meter_plan::program_has_regions(&program)
+            && !almide_base::env::flag("ALMIDE_SELF_INLINE_OFF");
         let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
         let almide_ir::annotations::CodegenAnnotations { infer_binding_tys, deferred_init, tco_owned_params, always_clone_vars, .. } = codegen_annotations;
         let mut run = TcoRun {
@@ -57,6 +63,7 @@ impl NanoPass for TailCallOptPass {
             deferred_init,
             tco_owned_params,
             always_clone_vars,
+            self_inline,
         };
         run_tco(functions, var_table, &mut run);
         for module in modules.iter_mut() {
@@ -78,6 +85,8 @@ struct TcoRun<'a> {
     deferred_init: &'a mut std::collections::BTreeSet<VarId>,
     tco_owned_params: &'a mut HashSet<VarId>,
     always_clone_vars: &'a HashSet<VarId>,
+    /// Run `almide_ir::self_inline` before the accumulator rewrite (#4456).
+    self_inline: bool,
 }
 
 fn run_tco(functions: &mut [IrFunction], var_table: &mut VarTable, run: &mut TcoRun<'_>) {
@@ -99,8 +108,12 @@ fn run_tco(functions: &mut [IrFunction], var_table: &mut VarTable, run: &mut Tco
             // #2577: `f(p) = if C then B else f(A) + f(p - k)` → one call plus
             // an accumulator loop. Shared with the structural wasm leg; its
             // preconditions (Int only — never Float — pure scalar body,
-            // provable termination) live in `almide_ir::accum_tre`.
-            almide_ir::accum_tre::rewrite(func, var_table);
+            // provable termination) live in `almide_ir::accum_tre`. On the
+            // Rust target the one-level self-recursive inlining (#4456) goes
+            // first, as on the v1 native rungs; what it declines gets the loop.
+            if !(run.self_inline && almide_ir::self_inline::rewrite(func, var_table)) {
+                almide_ir::accum_tre::rewrite(func, var_table);
+            }
         }
     }
 }

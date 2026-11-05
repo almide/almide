@@ -30,7 +30,7 @@ pub(crate) const BYTES_CORE_FNS: &[(&str, &str)] = &[("bytes_to_string", "bytes.
                 ("bytes_read_i16_be", "bytes.__read_i16_be"),
                 ("bytes_read_i16_le", "bytes.__read_i16_le"),
                 ("bytes_read_i32_be", "bytes.__read_i32_be"),
-                                ("bytes_index", "bytes.index"),
+                ("bytes_index", "bytes.index"),
                 ("bytes_read_bool", "bytes.__read_bool"),
                 ("bytes_read_u16_le", "bytes.__read_u16_le"),
                 ("bytes_read_u32_be", "bytes.__read_u32_be"),

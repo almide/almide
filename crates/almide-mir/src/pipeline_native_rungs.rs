@@ -14,6 +14,7 @@
 /// per fn). Used by examples/probe_native.rs during rung development.
 pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
     let _strict = crate::lower::StrictValuesGuard::set(true);
+    let _owned_tco = crate::lower::OwnedTcoSlotsGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
     let globals = std::collections::HashMap::new();
     let global_inits = std::collections::HashMap::new();
@@ -84,6 +85,7 @@ fn native_sig_subset_check(
     // and the return scalar) travels as its env block (`Vec<i64>`: [fnidx,
     // drop-header, captures…]); invocation dispatches through the generated
     // `__almd_ci_*` tables. Heap-param/-return closures stay wasm-only.
+    let is_typed_fn = |t: &Ty| matches!(t, Ty::Fn { .. }) && native_sig_kind(t, record_layouts, variant_layouts).is_some();
     let is_scalar_fn = |t: &Ty| {
         matches!(t, Ty::Fn { is_effect: _, params, ret }
             if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
@@ -92,18 +94,38 @@ fn native_sig_subset_check(
     // T1-3: Result[scalar, String] returns ride a dedicated native
     // carrier (NTy::Res — Rust Result<i64, String>). String-Ok payloads
     // stay walled (their tag/payload windows are ambiguous with Err's).
-    let is_native_result = |t: &Ty| {
-        matches!(t, Ty::Applied(TypeConstructorId::Result, a)
-            if a.len() == 2
-                && matches!(a[0], Ty::Int | Ty::Bool)
-                && matches!(a[1], Ty::String))
+    let is_native_result = is_native_result_ty;
+    // #4006 List[String] slab: an owned `Vec<AlmideString>` / a borrowed
+    // `&[AlmideString]` (the slot block's handles, rendered by the address
+    // algebra in render_native_addr.rs).
+    let is_str_list = |t: &Ty| {
+        matches!(t, Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String))
+    };
+    // #4006 A5: a record with heap fields that has a generated struct.
+    let is_struct_record = |t: &Ty| {
+        matches!(t, Ty::Named(n, args) if args.is_empty() && crate::render_native_rec::rec_index(n.as_str()).is_some())
+            || matches!(t, Ty::Bytes | Ty::Matrix)
+            || crate::render_native_rec::is_scalar_instance(t)
+            || (matches!(t, Ty::Tuple(_) | Ty::Record { .. } | Ty::Applied(TypeConstructorId::List, _) | Ty::Named(..))
+                && crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).is_some())
+            || heap_carrier_of(t).is_some()
+            || crate::lower::is_value_ty(t)
+            || native_map_of(t).is_some()
+            || native_set_of(t).is_some()
     };
     let sig_ok = |t: &Ty| {
-        matches!(t, Ty::Int | Ty::Bool | Ty::Float | Ty::String)
+        crate::render_native_rec::is_lane_scalar(t) || matches!(t, Ty::String)
+            || is_scalar_option(t)
+            || is_native_result(t)
+            || is_string_result_ty(t)
             || is_scalar_list(t)
+            || is_str_list(t)
+            || is_struct_record(t)
             || is_scalar_record(t)
             || is_flat_variant(t)
             || is_scalar_fn(t)
+            || is_typed_fn(t)
+            || native_sig_kind(t, record_layouts, variant_layouts).is_some()
     };
     let sig_ok_ret = |t: &Ty| sig_ok(t) || is_native_result(t);
     for p in &func.params {
@@ -139,7 +161,9 @@ fn recurses_on_a_heap_arg(f: &crate::MirFunction) -> bool {
         if *name != f.name || !args.iter().any(|a| matches!(a, CallArg::Handle(_))) {
             return false;
         }
-        let rest = f.ops[i + 1..].iter().find(|o| !matches!(o, Op::Consume { .. } | Op::Drop { .. }));
+        // Every release that erases to scope end (a typed list or carrier
+        // drop as much as a plain one) still runs after the call.
+        let rest = f.ops[i + 1..].iter().find(|o| !matches!(o, Op::Consume { .. }) && !crate::render_native_move::bookkeeping(o));
         match rest {
             None => f.ret == Some(*d),
             Some(Op::Else { val } | Op::EndIf { val }) => *val == Some(*d),
@@ -151,21 +175,239 @@ fn recurses_on_a_heap_arg(f: &crate::MirFunction) -> bool {
 /// T1-3: rewrite the stereotyped Result block windows onto the native
 /// carrier prims (NTy::Res). Native-leg only — the wasm renderer never sees
 /// these ops. Runs BEFORE verification/render (both are downstream).
+/// The synthesized slot initializer's name: the shared lowering already
+/// knows it (an assignment inside it skips the old-value take of a heap slot).
+const SLOT_INIT: &str = "__mg_init";
+
+/// `__mg_init`: every slot-held top-level binding (a mutable `var`, or a `let`
+/// that must run eagerly) assigned its initializer, in declaration order,
+/// through the same slot-routed assignment user code uses. `None` when the
+/// program holds no such binding.
+fn synthesize_slot_init(ir: &almide_ir::IrProgram) -> Option<almide_ir::IrFunction> {
+    let stmts: Vec<almide_ir::IrStmt> = ir
+        .top_lets
+        .iter()
+        .filter(|tl| tl.mutable)
+        .map(|tl| almide_ir::IrStmt {
+            kind: almide_ir::IrStmtKind::Assign { var: tl.var, value: tl.value.clone() },
+            span: None,
+        })
+        .collect();
+    if stmts.is_empty() {
+        return None;
+    }
+    let body = almide_ir::IrExpr {
+        kind: almide_ir::IrExprKind::Block { stmts, expr: None },
+        ty: almide_lang::types::Ty::Unit,
+        span: Default::default(),
+        def_id: None,
+    };
+    Some(almide_ir::IrFunction {
+        name: almide_lang::intern::sym(SLOT_INIT),
+        params: vec![],
+        ret_ty: almide_lang::types::Ty::Unit,
+        body,
+        is_effect: false,
+        is_test: false,
+        generics: None,
+        extern_attrs: vec![],
+        export_attrs: vec![],
+        attrs: vec![],
+        visibility: almide_ir::IrVisibility::Public,
+        doc: None,
+        blank_lines_before: 0,
+        def_id: None,
+        module_origin: None,
+        mutated_params: vec![], // fresh-fn: synthesized zero-param slot initializer
+    })
+}
+
+/// A `Result` whose Ok payload is a native scalar (Int, Bool, Float as its
+/// bits, Unit as 0) and whose Err is a String: the T1-3 carrier
+/// `Result<i64, AlmideString>` (#4006 family C widened it past Int | Bool).
+fn is_native_result_ty(t: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2
+            && (crate::render_native_rec::is_lane_scalar(&a[0]) || matches!(a[0], Ty::Unit))
+            && matches!(a[1], Ty::String))
+}
+
+/// `Result[String, String]`: the String-Ok carrier `Result<AlmideString,
+/// AlmideString>` (#4006 family C).
+fn is_string_result_ty(t: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String))
+}
+
+/// #4006 family C: rewrite every String-Ok Result window onto its carrier.
+fn rewrite_native_result_str_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
+    let fns: std::collections::BTreeSet<String> = ir
+        .functions
+        .iter()
+        .filter(|f| is_string_result_ty(&f.ret_ty))
+        .map(|f| f.name.as_str().to_string())
+        .collect();
+    let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
+        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    for f in functions.iter_mut() {
+        let params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
+            Some(d) if d.params.len() == f.params.len() => d
+                .params
+                .iter()
+                .zip(&f.params)
+                .filter(|(dp, _)| is_string_result_ty(&dp.ty))
+                .map(|(_, mp)| mp.value)
+                .collect(),
+            _ => Vec::new(),
+        };
+        let carriers = heap_carrier_values(ir, f);
+        crate::native_result_str_rewrite::rewrite_result_str_ops(f, &fns, &params, &carriers);
+    }
+}
+
+/// The generated heap Option/Result carrier a declared type stands for.
+fn heap_carrier_of(t: &almide_lang::types::Ty) -> Option<u16> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _))
+        .then(|| crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)))
+        .flatten()
+        .filter(|i| crate::render_native_addr::is_carrier(*i))
+}
+
+/// The generated `AlmideMap` alias a declared map type stands for.
+fn native_set_of(t: &almide_lang::types::Ty) -> Option<u16> {
+    crate::render_native_rec::is_native_set(t)
+        .then(|| crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)))
+        .flatten()
+        .filter(|i| crate::render_native_rec::set_elem(*i).is_some())
+}
+
+fn native_map_of(t: &almide_lang::types::Ty) -> Option<u16> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Map, _))
+        .then(|| crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)))
+        .flatten()
+        .filter(|i| crate::render_native_rec::map_kinds(*i).is_some())
+}
+
+/// The values of `f` whose declared type is a generated heap carrier.
+fn heap_carrier_values(ir: &almide_ir::IrProgram, f: &crate::MirFunction) -> std::collections::BTreeSet<crate::ValueId> {
+    heap_carrier_values_in(&|name: &str| ir.functions.iter().find(|d| d.name.as_str() == name), f)
+}
+
+/// [`heap_carrier_values`] over any declaration lookup.
+fn heap_carrier_values_in<'a>(
+    decl: &dyn Fn(&str) -> Option<&'a almide_ir::IrFunction>,
+    f: &crate::MirFunction,
+) -> std::collections::BTreeSet<crate::ValueId> {
+    let sig = |name: &str| -> Option<crate::render_native_addr::CarrierSig> {
+        let d = decl(name)?;
+        Some((d.params.iter().map(|p| heap_carrier_of(&p.ty)).collect(), heap_carrier_of(&d.ret_ty)))
+    };
+    let own = sig(f.name.as_str()).unwrap_or_default();
+    crate::render_native_addr::carrier_values(f, &own, &sig).into_keys().collect()
+}
+
+/// A LIFTED effect fn: declared `-> Int | Bool | Unit` (not a Result), whose
+/// body can err, so its compiled ABI is the wrapped `Result[T, String]`
+/// carrier on this leg. A never-err one returns its raw value (#3058), and
+/// the entry `main` keeps its own exit convention (the same exclusion
+/// `effect_abi_facts` makes for the auto-wrap ABI).
+fn returns_lifted_carrier(f: &almide_ir::IrFunction) -> bool {
+    use almide_lang::types::Ty;
+    f.is_effect
+        && match f.ret_ty {
+            Ty::Int | Ty::Bool => true,
+            Ty::Unit => f.name.as_str() != "main",
+            _ => false,
+        }
+        && !crate::lower::is_never_err_lifted(f.name.as_str())
+}
+
+/// An `Option` whose payload is one of the native scalar kinds (Int, Bool,
+/// Float): the `Option<i64>` carrier (#4006 family B), read off the type.
+fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Option, a)
+        if a.len() == 1 && crate::render_native_rec::is_lane_scalar(&a[0]))
+}
+
+/// #4006 family B: rewrite every scalar-Option window onto the native
+/// carrier prims. The Option values are seeded from the declared types: a
+/// call to a fn returning a scalar Option, and a param declared as one.
+fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
+    let mut option_fns: std::collections::BTreeSet<String> = ir
+        .functions
+        .iter()
+        .filter(|f| is_scalar_option(&f.ret_ty))
+        .map(|f| f.name.as_str().to_string())
+        .collect();
+    // A declared floor call whose declaration returns a scalar Option
+    // (`Int?`, or the element `A?` of its `List[A]` param) binds the same
+    // `Option<i64>` carrier (`native_floor::render_call`), so its `??` /
+    // `match` windows are this carrier's too. An element Option over a
+    // String list walls at the floor render, and every carrier read refuses
+    // a value not typed `Opt`.
+    for f in functions.iter() {
+        for op in &f.ops {
+            if let crate::Op::CallFn { name, .. } = op {
+                let opt_ret = crate::native_floor::declared(name).is_some_and(|d| match d.ret {
+                    crate::native_floor::FloorRet::Opt(_) => true,
+                    crate::native_floor::FloorRet::Elem(crate::native_floor::ElemRet::Opt) => {
+                        crate::native_floor::elem_option_is_scalar(name)
+                    }
+                    _ => false,
+                });
+                if opt_ret {
+                    option_fns.insert(name.clone());
+                }
+            }
+        }
+    }
+    let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
+        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    for f in functions.iter_mut() {
+        let opt_params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
+            Some(d) if d.params.len() == f.params.len() => d
+                .params
+                .iter()
+                .zip(&f.params)
+                .filter(|(dp, _)| is_scalar_option(&dp.ty))
+                .map(|(_, mp)| mp.value)
+                .collect(),
+            _ => Vec::new(),
+        };
+        let carriers = heap_carrier_values(ir, f);
+        crate::native_option_rewrite::rewrite_option_ops(f, &option_fns, &opt_params, &carriers);
+    }
+}
+
 fn rewrite_native_result_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
+    rewrite_native_result_windows_over(ir.functions.iter(), functions)
+}
+
+/// [`rewrite_native_result_windows`] over the declarations of several
+/// programs (the user program and every linked self-host source).
+fn rewrite_native_result_windows_over<'a>(
+    decls: impl Iterator<Item = &'a almide_ir::IrFunction>,
+    functions: &mut [crate::MirFunction],
+) {
 // T1-3: rewrite the stereotyped Result block windows onto the native
 // carrier prims (NTy::Res). Native-leg only — the wasm renderer never
 // sees these ops. Runs BEFORE verification/render (both are downstream).
 {
-    use almide_lang::types::constructor::TypeConstructorId;
-    use almide_lang::types::Ty;
-    let result_fns: std::collections::BTreeSet<String> = ir
-        .functions
+    let decl_list: Vec<&almide_ir::IrFunction> = decls.collect();
+    let result_fns: std::collections::BTreeSet<String> = decl_list
         .iter()
         .filter(|f| {
-            matches!(&f.ret_ty, Ty::Applied(TypeConstructorId::Result, a)
-                if a.len() == 2
-                    && matches!(a[0], Ty::Int | Ty::Bool)
-                    && matches!(a[1], Ty::String))
+            is_native_result_ty(&f.ret_ty)
                 // A LIFTED effect fn (declared `-> Int|Bool`, `effect`) has
                 // the same wrapped carrier ABI on this leg — the native
                 // pipeline runs no never-err strip, so every lifted call
@@ -175,148 +417,32 @@ fn rewrite_native_result_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
                 // the verifier flagging the raw LoadHandle as UseAfterFree.
                 // A NEVER-ERR one returns its raw scalar instead: the shared
                 // chain settled every call site against that (#3058).
-                || (f.is_effect
-                    && matches!(f.ret_ty, Ty::Int | Ty::Bool)
-                    && !crate::lower::is_never_err_lifted(f.name.as_str()))
+                || returns_lifted_carrier(f)
         })
         .map(|f| f.name.as_str().to_string())
         .collect();
+    let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
+        decl_list.iter().map(|f| (f.name.as_str(), *f)).collect();
     for f in functions.iter_mut() {
-        crate::native_result_rewrite::rewrite_result_ops(f, &result_fns);
-    }
-}
-}
-
-/// The declared-type → native sig-kind mapping of [`build_native_sig_table`]
-/// (return position admits the Res carrier; the param gate rejected Result
-/// params before this table is read).
-fn native_sig_kind(
-    t: &almide_lang::types::Ty,
-    record_layouts: &crate::lower::RecordLayouts,
-    variant_layouts: &crate::lower::VariantLayouts,
-) -> Option<crate::render_native::NativeSigKind> {
-    use almide_lang::types::constructor::TypeConstructorId;
-    use almide_lang::types::Ty;
-    use crate::render_native::NativeSigKind;
-
-    match t {
-        Ty::Int | Ty::Bool => Some(NativeSigKind::I64),
-        Ty::Float => Some(NativeSigKind::F64),
-        Ty::String => Some(NativeSigKind::Str),
-        // T1-3: the native Result carrier (return position only — the
-        // param gate rejects Result params before this table is read).
-        Ty::Applied(TypeConstructorId::Result, a)
-            if a.len() == 2
-                && matches!(a[0], Ty::Int | Ty::Bool)
-                && matches!(a[1], Ty::String) =>
-        {
-            Some(NativeSigKind::Res)
-        }
-        Ty::Applied(TypeConstructorId::List, a)
-            if a.len() == 1 && matches!(a[0], Ty::Int | Ty::Bool) =>
-        {
-            Some(NativeSigKind::ListI64)
-        }
-        // An all-scalar record travels as its slot block (see sig_ok).
-        Ty::Named(n, args)
-            if args.is_empty()
-                && record_layouts
-                    .get(n.as_str())
-                    .is_some_and(|(_, ftys)| ftys.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft))) =>
-        {
-            Some(NativeSigKind::ListI64)
-        }
-        // A flat variant travels as its tag+payload slot block.
-        Ty::Named(n, args)
-            if args.is_empty()
-                && variant_layouts.by_type.get(n.as_str()).is_some_and(|layout| {
-                    layout.cases.iter().all(|c| c.fields.iter().all(|(_, ft)| !crate::lower::is_heap_ty(ft)))
-                }) =>
-        {
-            Some(NativeSigKind::ListI64)
-        }
-        // A scalar closure travels as its env block (rung-5 closures slab).
-        Ty::Fn { is_effect: _, params, ret }
-            if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
-                && matches!(**ret, Ty::Int | Ty::Bool) =>
-        {
-            Some(NativeSigKind::ListI64)
-        }
-        _ => None,
-    }
-}
-
-/// The SIG-KIND table (rung 4) of [`try_render_rust_source`]: the declared
-/// param/return kinds, computed where the Almide-level `Ty` is visible, so
-/// the native render can type a heap `Repr::Ptr` as `&str` vs `&[i64]` per
-/// the declaration. Lifted effect fns widen to the Res carrier; lifted
-/// lambdas (no IR sig) declare env-block + scalar params.
-fn build_native_sig_table(
-    ir: &almide_ir::IrProgram,
-    functions: &[crate::MirFunction],
-    record_layouts: &crate::lower::RecordLayouts,
-    variant_layouts: &crate::lower::VariantLayouts,
-) -> Result<crate::render_native::NativeSigs, LowerError> {
-// The SIG-KIND table (rung 4): the declared param/return kinds, computed here
-// where the Almide-level `Ty` is visible, so the native render can type a heap
-// `Repr::Ptr` as `&str` vs `&[i64]` per the declaration.
-let mut sigs: crate::render_native::NativeSigs = Default::default();
-{
-    
-    use almide_lang::types::Ty;
-    use crate::render_native::NativeSigKind;
-    for func in &ir.functions {
-        if func.is_test {
-            continue;
-        }
-        let params: Option<Vec<_>> = func.params.iter().map(|p| native_sig_kind(&p.ty, record_layouts, variant_layouts)).collect();
-        let ret = if matches!(func.ret_ty, Ty::Unit) {
-            Some(None)
-        } else if func.is_effect
-            && matches!(func.ret_ty, Ty::Int | Ty::Bool)
-            && !crate::lower::is_never_err_lifted(func.name.as_str())
-        {
-            // A LIFTED effect fn returns the wrapped carrier on this leg
-            // (the same widening `result_fns` applies above): its declared
-            // scalar would type the call dst I64 while the value is Res.
-            Some(Some(NativeSigKind::Res))
-        } else {
-            native_sig_kind(&func.ret_ty, record_layouts, variant_layouts).map(Some)
+        let res_params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
+            Some(d) if d.params.len() == f.params.len() => d
+                .params
+                .iter()
+                .zip(&f.params)
+                .filter(|(dp, _)| is_native_result_ty(&dp.ty))
+                .map(|(_, mp)| mp.value)
+                .collect(),
+            _ => Vec::new(),
         };
-        if let (Some(ps), Some(r)) = (params, ret) {
-            sigs.insert(func.name.as_str().to_string(), (ps, r));
-        }
-    }
-    // LIFTED lambdas exist only as MirFunctions (no IR sig): param 0 is the env
-    // block (`&[i64]`), the rest are the lambda's own params — SCALAR reprs only
-    // in this slab (a heap-param lambda walls the program: all-or-nothing, and
-    // its dispatch arm could not type). The return kind is body-derived by the
-    // renderer, so it is not declared here.
-    for f in functions {
-        if !f.name.starts_with("__lambda_") {
-            continue;
-        }
-        let mut ps = vec![crate::render_native::NativeSigKind::ListI64];
-        for p in &f.params[1..] {
-            match p.repr {
-                crate::Repr::Scalar { .. } => {
-                    ps.push(crate::render_native::NativeSigKind::I64)
-                }
-                _ => {
-                    return Err(LowerError::Unsupported(format!(
-                        "native: lambda `{}` heap param — outside the closures slab",
-                        f.name
-                    )))
-                }
-            }
-        }
-        sigs.insert(f.name.clone(), (ps, Some(crate::render_native::NativeSigKind::I64)));
+        let carriers = heap_carrier_values_in(&|n: &str| decls.get(n).copied(), f);
+        crate::native_result_rewrite::rewrite_result_ops(f, &result_fns, &res_params, &carriers);
     }
 }
-    Ok(sigs)
 }
 
+include!("pipeline_native_sigs.rs");
 include!("pipeline_native_concurrency.rs");
+include!("pipeline_native_selfhost.rs");
 
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     try_render_rust_source_certified(source).map(|(rust, _)| rust)
@@ -327,139 +453,29 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
 /// MIR handed to the renderer — after the probe charges, the result-window
 /// rewrite and the make-unique elision — so `proofs/native-wall.sh` judges
 /// the functions the Rust source was rendered from, not a sibling lowering.
-pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(String, String)>), LowerError> {
-    // Debug aid: ALMIDE_DUMP_MIR=1 prints every lowered fn's op stream (the
-    // same view `debug_dump_mir` builds) before the native render runs.
-    if almide_base::env::flag("ALMIDE_DUMP_MIR") {
-        if let Ok(dump) = debug_dump_mir(source) {
-            eprintln!("{dump}");
-        }
-    }
-    crate::charge_probe::reset_budget_used();
-    let _strict = crate::lower::StrictValuesGuard::set(true);
-    let ir = source_to_ir_with(source, &[])?;
-    crate::charge_probe::note_program_regions(almide_ir::meter_plan::program_has_regions(&ir));
-    require_native_concurrency_support(&ir)?;
-    // #4447: the native rungs render no `@export(c)` wrapper (the program's
-    // `exports` below are empty), so a program declaring one walls here and
-    // builds through the standard codegen, which renders the C wrapper from
-    // the C ABI table — never a binary that silently lacks the C symbol.
-    if let Some(f) = ir.functions.iter().find(|f| f.export_attrs.iter().any(|a| a.target.as_str() == "c")) {
-        return Err(LowerError::at(
-            f.body.span,
-            format!("native: fn `{}` is @export(c) — its C wrapper is outside the native rungs", f.name),
-        ));
-    }
-    // Rung-5 records slab: the layout registries the wasm leg threads — without
-    // them a record literal lowers as an Opaque skeleton and every field read
-    // strict-walls (the probe_native trap recorded in the trust-spine ledger).
-    let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
-    let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
-    if !ir.modules.is_empty() {
-        return Err(LowerError::Unsupported(
-            "native: multi-module program — outside rung 1".into(),
-        ));
-    }
-    let mut ir = ir;
-    // The shared accumulator tail-recursion rewrite (#2577), from the same
-    // preconditions the wasm leg and the standard codegen apply it: one
-    // recursive call per non-leaf instead of two. Skipped, as there, when the
-    // program brackets a budget/timeout region (its loop head would be a
-    // charge the meter sees).
-    if !almide_ir::meter_plan::program_has_regions(&ir) {
-        for f in ir.functions.iter_mut() {
-            almide_ir::accum_tre::rewrite(f, &mut ir.var_table);
-        }
-    }
-    // #4006: an immutable top-level `let` lowers the way the witness path
-    // threads it — each reference materializes the CONST initializer
-    // (`value_or_global`), and a computed one walls in the lowering. A
-    // mutable `var` lives in a storage slot the native render has no
-    // address for, so it walls here.
-    if ir.top_lets.iter().any(|tl| tl.mutable) {
-        return Err(LowerError::Unsupported(
-            "native: a mutable top-level var — outside the native rungs".into(),
-        ));
-    }
-    // Top-level lets are evaluated EAGERLY, at program start, before `main`
-    // (top_let_div_eager: an unused `let X = 1 / 0` aborts). Materializing at
-    // each use is lazy, so it is only faithful for an initializer that can
-    // neither fail nor be observed: literals, other top-level lets, and
-    // operators that cannot abort (no integer `/`, `%` or `^`, no call).
-    let top_vars: std::collections::HashSet<_> = ir.top_lets.iter().map(|tl| tl.var).collect();
-    if let Some(tl) = ir.top_lets.iter().find(|tl| !total_const_init(&tl.value, &top_vars)) {
-        return Err(LowerError::at(
-            tl.value.span,
-            "native: a top-level let whose initializer can fail or calls — it must run eagerly, before main",
-        ));
-    }
-    let globals: std::collections::HashMap<_, _> = ir.top_lets.iter().map(|tl| (tl.var, tl.ty.clone())).collect();
-    let global_inits: std::collections::HashMap<_, _> =
-        ir.top_lets.iter().map(|tl| (tl.var, tl.value.clone())).collect();
-    let mut functions = Vec::new();
-    for func in &ir.functions {
-        if func.is_test {
-            continue;
-        }
-        native_sig_subset_check(func, &record_layouts, &variant_layouts)?;
-        // ALL-OR-NOTHING: any unlowerable fn walls the program (the native rungs
-        // have no per-fn fallback — a partial native binary cannot call into v0).
-        let all = crate::lower::lower_function_all_with_globals(
-            func,
-            &globals,
-            &global_inits,
-            &record_layouts,
-            &variant_layouts,
-        )
-        .map_err(|e| {
-            LowerError::Unsupported(format!("native: fn `{}`: {e:?}", func.name))
-        })?;
-        functions.extend(all);
-    }
-    if let Some(f) = functions.iter().find(|f| recurses_on_a_heap_arg(f)) {
-        return Err(LowerError::Unsupported(format!(
-            "native: fn `{}` passes a heap value to its own tail call — no loop conversion on this render (#3550)",
-            f.name
-        )));
-    }
-    rewrite_native_result_windows(&ir, &mut functions);
-    if !functions.iter().any(|f| f.name == "main") {
-        return Err(LowerError::Unsupported(
-            "native: main is outside the MIR-lowering subset".into(),
-        ));
-    }
-    let mut sigs = build_native_sig_table(&ir, &functions, &record_layouts, &variant_layouts)?;
-    // Stage 1 probe: same insertion point in pass order as the wasm leg.
-    // T1-2 metered clones carry their base fn's declared signature — copy the
-    // sig entry so a call to `__fuel__heavy` types exactly like `heavy` (without
-    // this the repr fallback typed a Result-returning clone as String). The
-    // clone→base pairs come from the pass that made the clones, never from a
-    // name's spelling: a `__fuel` suffix test gave a user fn `heavy__fuel`
-    // `heavy`'s signature (#3491).
-    let exempt = crate::charge_probe::entry_exempt_set(&ir);
-    for (clone, base) in crate::charge_probe::insert_probe_charges(&mut functions, &exempt) {
-        if let Some(sig) = sigs.get(base.as_str()).cloned() {
-            sigs.insert(clone, sig);
-        }
-    }
-    // #824: see the wasm leg's call above — `Op::MakeUnique` already renders to
-    // nothing on native (render_native.rs's `Op::Consume | Op::Borrow |
-    // Op::MakeUnique => {}`), so this is a no-op cleanup here, kept only so both
-    // legs run the identical target-agnostic MIR pass list.
-    crate::alias_safety::elide_unaliased_make_unique(&mut functions);
-    let certs = functions.iter().map(|f| (f.name.to_string(), crate::certificate::ownership_certificate(f))).collect();
-    let rust = crate::render_native::try_render_native_program(
-        &MirProgram {
-            functions,
-            exports: Vec::new(),
-            // Rung 1 walls every top-let above, so there are no mutable-global slots.
-            mutable_global_count: 0,
-        },
-        &sigs,
-    )?;
-    Ok((rust, certs))
+///
+/// Each certificate is `(property, function, witness)`: an `ownership`
+/// witness per function, and one `native-calls` witness for the whole program
+/// (function `program`) binding every call site's parameter modes and moves
+/// (#4006 class P, proofs/NativeCalls.v).
+pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<NativeCert>), LowerError> {
+    render_native_parts(source).map(|(rust, certs, _)| (rust, certs))
 }
 
+/// The capabilities `main` reaches in the native render of `source`, as
+/// capability ids: `certificate::reachable_caps` over the exact MIR the
+/// native renderer rendered from (host ops counted at their call sites, as
+/// `cap_witness` counts them). The native leg's capability report, held to
+/// the wasm leg's (`cert_project::caps`) for the same program.
+pub fn native_capability_reach(source: &str) -> Result<std::collections::BTreeSet<u32>, LowerError> {
+    let (_, _, functions) = render_native_parts(source)?;
+    let program: std::collections::BTreeMap<String, crate::MirFunction> =
+        functions.into_iter().map(|f| (f.name.to_string(), f)).collect();
+    let mut seen = std::collections::BTreeSet::new();
+    Ok(crate::certificate::reachable_caps("main", &program, &mut seen).into_iter().map(|c| c.id()).collect())
+}
+
+include!("pipeline_native_render.rs");
 
 /// Every function's ownership certificate, INCLUDING `test` bodies — the
 /// pre-flight view of what `proofs/corpus-wall.sh` hands to the kernel-proven

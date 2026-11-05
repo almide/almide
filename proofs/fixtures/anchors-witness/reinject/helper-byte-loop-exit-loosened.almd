@@ -1,0 +1,6 @@
+// #4005 drill: the runtime's char-count helper (`string.len`) lets its
+// cursor reach the byte past the string while the bounds witness still
+// records `e a` — the proven checker accepts, the bytes read past the block.
+effect fn main() -> Unit = {
+  println("${string.len("héllo")}")
+}

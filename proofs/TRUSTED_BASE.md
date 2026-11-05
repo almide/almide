@@ -400,11 +400,20 @@ witnesses accepted by all three verdicts, recording 1083 loop exit tests
 The drills `string-test-one-byte-loose`, `string-loop-exit-loosened` and
 `string-prefix-length-test-loosened` (`scripts/witness-reinject.sh
 anchors`) each read ANCHORS REJECT, and 33 accept/refuse modules sit in
-`crates/almide-anchor-check/tests/string_bytes.rs`. Not recorded: the
-string routines' own bodies, runtime routines owed to #4278's per-helper
-certificates — 25 byte reads in the emitter's helpers (runtime.rs 6,
-runtime_str.rs 6, utf8_helpers.rs 6, kmp.rs 4, value_helpers.rs,
-json_helpers.rs, map_index.rs 1 each) and 120 `prim.load8` in the 24
+`crates/almide-anchor-check/tests/string_bytes.rs`. The runtime helpers'
+byte loops in the same shape are recorded too (#4005,
+`witness::bounds::helper_loop_exit`): the char count (`$str_len_chars`), the
+codepoint offset's continuation walk (`$cp_off`), the UTF-8 check of
+`bytes.to_string` (its lead byte) and `err_text`'s byte walk — each read `e N a N` on its loop's
+exit `k >=u len(s); br_if 1`, the payload offset in the address (`s + 12 +
+k` at memarg offset 0, which almide-anchor-check reads as the same byte as
+`s + k` at offset 12). A helper body that does not ship records nothing.
+Not recorded: the rest of the string routines' own bodies, runtime routines
+owed to #4278's per-helper certificates — 21 byte reads in the emitter's
+helpers (runtime.rs 4, runtime_str.rs 6, utf8_helpers.rs 4, kmp.rs 4,
+value_helpers.rs, json_helpers.rs, map_index.rs 1 each; the empty
+separator's split reads its lead byte after handing the string to
+`$str_len_chars`, which the count rule refuses) and 120 `prim.load8` in the 24
 self-hosted `stdlib/string_*.almd` bodies.
 
 **The native leg (#4006).** For the programs the verified native renderer
@@ -419,6 +428,52 @@ witness of a render that lost a release with its Rust-mirror check bypassed
 (`scripts/witness-reinject.sh native`). TRUSTED: that rustc compiles the
 rendered source into a binary keeping that balance, and every program off the
 floor, which ships from the standard codegen with no certificate.
+
+**Fan arms on threads (#4006 family H).** A `fan { … }` block of two or more
+arms renders on the certified native path as the standard codegen renders it:
+each arm on a scoped thread of the shipped fan runtime
+(`crates/almide-codegen/src/prelude_fan.rs`, emitted verbatim), with one output
+timeline per arm and a trap waiting for every arm below it (ADR-0024 D5/D6).
+Each arm is lifted into a function of its own (`crates/almide-mir/src/fan_native.rs`)
+that is lowered, verified and witnessed like any other — `proofs/native-wall.sh`
+judges its ownership certificate — and the MIR that calls them is sequential.
+TRUSTED: that running the arms of one block concurrently is observation-equal
+to that sequential order, which is what the certificate judges. Its
+preconditions, each checked by the lift (a program that fails one keeps the
+standard codegen; `fan_native::tests` refuse each): every arm is a direct
+call of a user function, or an expression of literals, operators, `if` and
+direct calls (an inlined call), over immutable locals (no `var` reaches an
+arm, and no top-level value) that become the lifted function's parameters;
+every argument and result is of
+a type that may cross a thread (scalars, `String`, and lists, options,
+results, tuples and records of them; no function value); the program has no
+metered region; and no arm holds a higher-order call. Native values DO carry
+counts: a `String` is an `AlmideStr` block with a reference count, so every
+heap value an arm receives is marked thread-shared before the spawn
+(`almide_str_mark_reachable`, ADR-0013 design point 3), after which its count
+changes only atomically. Also trusted: the fan runtime text itself and the
+glue that routes this render's output and exits through it
+(`crates/almide-mir/src/render_native_fan.rs`).
+
+**Native fs host calls (#4006 class E).** A program on the certified native
+render calls the runtime's own fs functions as trusted host calls, as the wasm
+leg calls its host's fs imports: the certificate covers how the program hands
+each call its arguments and takes its result (borrowed arguments, a fresh owned
+result, the call's capabilities counted), not what the host does on the
+filesystem. The render carries those functions' code from the runtime's `fs`
+module (`runtime/rs/src/fs.rs` with the rt-core files it includes), the text
+the standard build compiles, each `#[cfg]` twin under its own gate
+(`crates/almide-mir/src/native_floor_host.rs`). The named set, in witness-id
+order: `almide_rt_fs_read_text`, `almide_rt_fs_read_bytes`, `almide_rt_fs_read_lines`, `almide_rt_fs_read_text_if_exists`, `almide_rt_fs_list_dir`, `almide_rt_fs_exists`, `almide_rt_fs_is_dir`, `almide_rt_fs_is_file`, `almide_rt_fs_is_symlink`, `almide_rt_fs_walk`, `almide_rt_fs_glob`, `almide_rt_fs___root_read_text`, `almide_rt_fs___root_read_bytes`, `almide_rt_fs___root_list_dir`, `almide_rt_fs___root_exists`, `almide_rt_fs_temp_dir`, `almide_rt_fs_write`, `almide_rt_fs_write_bytes`, `almide_rt_fs_mkdir_p`, `almide_rt_fs_remove_all`, `almide_rt_fs___root_write_text`, `almide_rt_fs_rename`, `almide_rt_fs_copy`, `almide_rt_fs_append`, `almide_rt_fs_append_bytes`, `almide_rt_fs_remove`, `almide_rt_fs___root_remove`, `almide_rt_fs_create_temp_dir`, `almide_rt_fs_create_temp_file`. Every call to one is recorded as a host call in the program's
+`native-calls` witness, and `NativeCalls.hosts_ok` (the extracted checker,
+the Rocq kernel and almide-verify) refuses a host call outside the set; a
+floor body outside the set that would carry fs code is refused by the render.
+`tests/native_fs_host_calls_test.rs` holds this list, `host_ops::NATIVE_FS_HOST_CALLS`,
+`NativeCalls.native_fs_host_calls` and almide-verify's copy to one list.
+TRUSTED: the runtime fs code itself (tested on both legs by the cross-target
+corpus, not proven). A program built under `[permissions] fs` takes the
+standard build, whose fs calls the scope wraps.
+
 
 ## Historical implementation progression (retained evidence)
 
@@ -464,7 +519,7 @@ The earlier progression described its scope as follows:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (137 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (138 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties

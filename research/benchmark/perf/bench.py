@@ -69,6 +69,10 @@ SUITE = [
     # Pro, 0.61 on the ubuntu runner) and no one ±band holds both.
     ("binarytrees",  "binarytrees/binarytrees.almd",     ["binarytrees.rs"],                "18",       "10",   "bytes", None),
     ("treealloc",    "treealloc/treealloc.almd",         ["treealloc.rs"],                  "21",       "10",   "bytes", None),
+    # btrees (rc4): treealloc's program with the depth a literal and no
+    # argument read, so all of it is on the certified native render, region
+    # window included. A VICTORY row too; its argument is ignored on every leg.
+    ("btrees",       "btrees/btrees.almd",               ["btrees.rs"],                     "19",       "19",   "bytes", None),
     ("mandelbrot",   "mandelbrot/mandelbrot.almd",       ["mandelbrot.rs"],                 "4000",     "200",  "bytes", None),
     # listbuild (#1337): the SAME materializing workload written three ways.
     # The rows differ only in the build loop — same arithmetic, same checksum
@@ -142,6 +146,11 @@ SUITE = [
     # is the gate (check-perf-ratio.sh, REGEX CYCLE), and it is ~1.0 only while
     # every pattern stays compiled across the cycle — 0.69.0-rc1's 16-entry
     # LRU recompiled all 32 on every match.
+    # fib (#4456): the call-bound recursion row, `n:reps`. The native legs
+    # inline the pure scalar recursion into itself once and LLVM merges the
+    # identical grandchild calls; the reference keeps one call per node. A
+    # VICTORY row in check-perf-ratio.sh, ablated with ALMIDE_SELF_INLINE_OFF.
+    ("fib",            "fib/fib.almd",                 ["fib.rs"],      "32:300",     "20:10",   "bytes", ["native", "rust"]),
     ("regexcycle-8",   "regexcycle/regexcycle.almd",   [],              "8:2000000",  "8:2000",  "bytes", ["native", "wasm"]),
     ("regexcycle-32",  "regexcycle/regexcycle.almd",   [],              "32:2000000", "32:2000", "bytes", ["native", "wasm"]),
 ]
@@ -169,6 +178,8 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # 20, not the #2028 default 19: with the window the native row reads
     # ~60 ms at 19, under the spawn-noise floor; 20 reads ~120 ms / ~400 ms ref.
     "treealloc": "20",
+    # btrees ignores its argument: 24 x depth 19 is the fixed workload.
+    "btrees": "19",
     # 2000, not 1000: 1000 reads ~45 ms, under the spawn-noise floor.
     "mandelbrot": "2000",
     "listbuild": "23",
@@ -198,6 +209,15 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # 100k records: ~0.2s native / ~0.28s wasm on a GCE c4-standard-8
     # (2026-10-19) — over the 0.08s spawn-noise floor on both legs.
     "jsonround": "100000",
+    # 31, not 30: 30:300 read ~95 ms native on a GCE n2-standard-8 but 78.5 ms
+    # on the ubuntu runner (2026-11-04, PR #4468), under the 0.08s floor; 31
+    # is ~1.47x the native work (~1.6x on the reference and ablated legs).
+    # 33 since #4498: 31:300 read 0.0732 / 0.0739 s native on AMD EPYC 9V45
+    # runners (jobs 127072557687, 127176184373), the fastest class, under the
+    # floor again. 33 is ~2.15x the native work, ~0.157 s there; the slowest
+    # class (Xeon 8370C) read 0.066 against the 0.120 anchor at 31, and the
+    # ratio only falls with n (1.466^n calls against 1.618^n), ~0.054 at 33.
+    "fib": "33:300",
     # regexcycle (#4392): sized after the GCE reading below; both rows the
     # same number of matches.
     "regexcycle-8": "8:400000",

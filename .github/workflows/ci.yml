@@ -2474,9 +2474,13 @@ jobs:
       # comment in scripts/check-perf-ratio.sh. Toolchain choice was never
       # the cause.) Build and test jobs keep the 1.97 MSRV pin; this job's
       # claim is about the GENERATED CODE, not the compiler's build floor.
+      # llvm-tools: the `--release` backtrace split (#4459) transforms std
+      # once per toolchain with them; without them every release build here
+      # would measure the plain fat-LTO profile instead of what users get.
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_STABLE_TOOLCHAIN }}
+          components: llvm-tools
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -2525,6 +2529,28 @@ jobs:
 
       - name: Native runtime ratio vs handwritten Rust
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-perf-ratio.sh
+
+      # #2092: release binaries of heap-using programs carry no debug info and
+      # stay under their size baseline (the rlib fast path once shipped std's
+      # DWARF: ~2.0 MB where the code was ~0.4 MB). Same pinned toolchain as
+      # the baseline.
+      - name: Native release binary size ratchet (#2092)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-native-size.sh
+
+      # #4459: a `--release` build links std's backtrace printer precompiled
+      # (src/cli/std_split.rs) instead of re-optimizing it in every fat-LTO
+      # link. The gate holds the build-time ratio against the plain profile.
+      - name: Release build time vs the plain fat-LTO profile (#4459)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-release-build-time.sh
+
+      - name: Negative control — with the split off the build-time gate must fail
+        run: |
+          if ALMIDE_RELEASE_STD_UNSPLIT=1 ALMIDE_BIN=/tmp/almide-bin/almide RELEASE_BUILD_ROUNDS=3 bash scripts/check-release-build-time.sh > split-off.log 2>&1; then
+            cat split-off.log
+            echo "the build-time gate read green with the backtrace split turned off"
+            exit 1
+          fi
+          grep -E 'over the .* ceiling' split-off.log
 
       # Edit-loop cost lives here rather than in `checks`: it needs the same
       # built binary and the same "measure, don't guess" runner as the ratio

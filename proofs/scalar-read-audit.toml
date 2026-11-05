@@ -18,10 +18,12 @@
 #  (2) sum blocks are allocated at their Some/payload size even on the
 #      None/unit arm (Init::OptNone "sized like OptSome", binds_p4_b.rs:546),
 #      so the fixed +12 read is in-bounds on every arm.
-# TRUST-BOUNDARY NOTE: the raw prim floor (prim.load*) is no longer lowered
-# here — `prim` is stdlib-only (#3025) and MIR lowers only the program's own
-# functions; tag discipline for prim.load* lives in the self-hosted stdlib
-# .almd sources, a SEPARATE audit surface (tracked for a later round).
+# TRUST-BOUNDARY NOTE: the raw prim floor (prim.load*) is lowered here only
+# as a pass-through of a linked self-host stdlib body's own `@prim_op` call
+# (calls_p4_c.rs, the native self-host link of #4006) — `prim` is
+# stdlib-only (#3025), so no program-authored prim.load reaches MIR; tag
+# discipline for prim.load* lives in the self-hosted stdlib .almd sources, a
+# SEPARATE audit surface (tracked for a later round).
 
 [[arm]]
 file = "binds.rs"
@@ -92,6 +94,20 @@ fn = "closure_block_of_mut"
 loads = 1
 verdict = "NOT_SUM_READ"
 why = "Fn-typed field/element borrow at record-field or bounds-checked slot offsets, gated on statically Fn-typed callee; no sum tag."
+
+[[arm]]
+file = "calls_p4_c.rs"
+fn = "lower_declared_prim"
+loads = 2
+verdict = "NOT_SUM_READ"
+why = "Prim floor: maps a stdlib prim fn's declared @prim_op Load / LoadRef to the same PrimKind and forwards it to emit_prim_call — no address or offset is chosen here; the read is the linked self-host body's own prim.load*, and `prim` is not user surface (E085, #3025)."
+
+[[arm]]
+file = "calls_p4_c.rs"
+fn = "emit_prim_call"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "Prim floor: emits the prim op its caller passed, with the call's own lowered args; the one LoadHandle mention marks the load_ref result a borrow (param_values) so it joins no drop set. The address and offset are the self-host body's, never a sum-payload offset chosen by lowering."
 
 [[arm]]
 file = "calls_p4.rs"
@@ -165,7 +181,7 @@ why = "List length + bounds-checked element reads; seed_variant_param only recor
 
 [[arm]]
 file = "defunc_hof_inner.rs"
-fn = "lower_defunc_list_hof_inner"
+fn = "lower_defunc_list_hof_loop"
 loads = 2
 verdict = "NOT_SUM_READ"
 why = "Source-list length/element reads bounded by the loop guard; sum interpretation delegated to the tag-dispatched body lowerers."

@@ -59,10 +59,8 @@ fn ownership_certificate_released_merge_dsts(
             // An INNER merge flowing out as an OUTER arm value (`Else/EndIf { val }`
             // — the effect-TCO nested-if chain) is released the same way: the val-move
             // rule below emits its `m`.
-            Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } => {
-                if merge_dsts.contains(v) {
-                    released_merge_dsts.insert(*v);
-                }
+            Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } if merge_dsts.contains(v) => {
+                released_merge_dsts.insert(*v);
             }
             _ => {}
         }
@@ -122,12 +120,37 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
 /// their own `i`-born line (#3321) — each backed by its `Dup` op rather than an
 /// allocation, which [`plus_one_events_backed`] accounts.
 fn certificate_scan(func: &MirFunction) -> (String, bool, usize) {
+    let (lines, poisoned, cow_opened, _) = certificate_lines(func);
+    let mut out = String::new();
+    for (_, line) in &lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+    (out, poisoned, cow_opened)
+}
+
+/// [`certificate_scan`]'s lines, each with its object, plus the object of every
+/// call-site move (#4006 class P) in op order. A MOVE parameter's line opens
+/// with the `i` of the reference its caller hands over: the per-function
+/// ownership witness judges it as owned, and proofs/NativeCalls.v — which
+/// seeds that reference itself from the declared mode — reads the line
+/// without it (`certificate_native_calls`).
+pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, bool, usize, Vec<ValueId>) {
     // Sequential-phase split (codopsy8 complexity sweep): the two pre-scan sets below are
     // each an independent, self-contained computation over `func.ops` (the original code
     // already delineated the first as its own `{ .. }` scope) — extracted verbatim as their
     // own named functions. `CertScan::step` (protected, unchanged) and the rest of the
     // emission pipeline below are untouched.
     let (feeder_to_slot, slots, line_slots) = loop_carried_slots(func);
+    let moved_slots: BTreeSet<ValueId> = func
+        .call_moves
+        .iter()
+        .filter_map(|&i| match func.ops.get(i) {
+            Some(Op::Consume { v }) if slots.contains(v) || line_slots.contains(v) => Some(*v),
+            _ => None,
+        })
+        .collect();
+    let slot_chain = merge_slot_chain(func, &feeder_to_slot, &moved_slots);
     let depth: u32 = 0;
     let mut s = Streams::new();
 
@@ -145,6 +168,9 @@ fn certificate_scan(func: &MirFunction) -> (String, bool, usize) {
     for p in &func.params {
         if p.repr.is_heap() {
             s.of.insert(p.value, p.value);
+            if func.owned_params.contains(&p.value) {
+                s.event(p.value, 'i');
+            }
         }
     }
 
@@ -161,8 +187,15 @@ fn certificate_scan(func: &MirFunction) -> (String, bool, usize) {
         addr_of: BTreeMap::new(),
         child_of: BTreeMap::new(),
         paths: PathScopes { cow_dups: cow_dup_dsts(func), ..PathScopes::default() },
+        call_move: false,
+        call_move_objs: Vec::new(),
+        slot_chain,
+        moved_slots,
+        merge_credit: Vec::new(),
+        unfolded: BTreeSet::new(),
     };
-    for op in &func.ops {
+    for (i, op) in func.ops.iter().enumerate() {
+        scan.call_move = func.call_moves.contains(&i);
         scan.step(op);
     }
 
@@ -181,12 +214,8 @@ fn certificate_scan(func: &MirFunction) -> (String, bool, usize) {
         }
     }
 
-    let mut out = String::new();
-    for o in &scan.s.order {
-        out.push_str(&scan.s.stream[o]);
-        out.push('\n');
-    }
-    (out, scan.s.poisoned, scan.paths.cow_opened)
+    let lines = scan.s.order.iter().map(|o| (*o, scan.s.stream[o].clone())).collect();
+    (lines, scan.s.poisoned, scan.paths.cow_opened, scan.call_move_objs)
 }
 
 /// The NON-RECURRING soundness gate for the borrow-by-default calling
@@ -303,6 +332,8 @@ impl CertScan {
                 self.note_view(dst, first);
             }
             PrimKind::Load { .. } | PrimKind::Store { .. } => self.probe_address(first),
+            // A native Result carrier read dereferences the carrier (#4349).
+            k if k.reads_native_carrier() => self.probe_address(first),
             PrimKind::Handle => {
                 self.child_handle(dst, first);
                 self.note_view(dst, first);
@@ -709,7 +740,12 @@ pub(crate) fn handle_uses(op: &Op) -> Vec<ValueId> {
 /// without a drop first (its old value left to its owner) still folds, and the
 /// lowering's pre-loop `Dup` copy is an ordinary owned slot.
 fn borrowed_roots(func: &MirFunction) -> BTreeSet<ValueId> {
-    let mut roots: BTreeSet<ValueId> = func.params.iter().filter(|p| p.repr.is_heap()).map(|p| p.value).collect();
+    let mut roots: BTreeSet<ValueId> = func
+        .params
+        .iter()
+        .filter(|p| p.repr.is_heap() && !func.owned_params.contains(&p.value))
+        .map(|p| p.value)
+        .collect();
     for op in &func.ops {
         if let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), .. } = op {
             roots.insert(*d);

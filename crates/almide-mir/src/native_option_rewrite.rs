@@ -1,0 +1,161 @@
+//! NATIVE-ONLY scalar-Option carrier rewrite (#4006, family B).
+//!
+//! The Result carrier's twin (`native_result_rewrite`). A scalar Option is a
+//! 0-or-1 block: the materializers emit `Alloc { init: OptSome { payload } }`
+//! and `Alloc { init: OptNone }`, and a consumer reads the block's length word
+//! (`Handle H → Load4(H+4)`, 1 = Some) and its payload slot (`Load8(H+12)`).
+//! This pass maps them onto `PrimKind::Opt*`, which the native renderer
+//! renders as a Rust `Option<i64>` local (`NTy::Opt`).
+//!
+//! Which values are Options comes from TYPES, never names: a minted Alloc, a
+//! call to a fn whose declared return is a scalar Option (`option_fns`), a
+//! param whose declared type is one (`opt_params`), and an if-value join over
+//! one of those. Producers are a total single-op match; consumers are the
+//! stereotyped windows over a tracked value. Anything else touching a tracked
+//! value (another offset, a `LoadHandle`, a heap payload) is left unrewritten
+//! and WALLS at the render, as an unrecognized window always has.
+//!
+//! Ownership accounting follows the Result carrier's: a minted carrier has no
+//! object (the Alloc became a prim, ownership-neutral to the verifier), so its
+//! `Consume` goes, its `Dup` becomes `OptCopy` and its release goes; a call
+//! result keeps its heap birth and its release.
+//!
+//! The wasm leg never sees any of this.
+
+use crate::{Init, MirFunction, Op, PrimKind, ValueId};
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Rewrite every recognized scalar-Option window in `f`.
+///
+/// `carriers` are the values whose declared type is a generated heap Option
+/// carrier (`render_native_carrier`): their `OptNone` is that carrier's.
+pub fn rewrite_option_ops(
+    f: &mut MirFunction,
+    option_fns: &BTreeSet<String>,
+    opt_params: &[ValueId],
+    carriers: &BTreeSet<ValueId>,
+) {
+    let ops = std::mem::take(&mut f.ops);
+    let mut out: Vec<Op> = Vec::with_capacity(ops.len());
+    let mut t = OptionTracker::default();
+    t.opt_vals.extend(opt_params.iter().copied());
+    for op in ops {
+        let Some(op) = t.carrier_op(op, &mut out, carriers) else { continue };
+        t.flow_op(op, &mut out, option_fns);
+    }
+    f.ops = out;
+}
+
+impl OptionTracker {
+    /// The carrier-producing and carrier-reading arms: a const, a minted
+    /// carrier, its ownership ops, and the swallowed `Handle`/address/load
+    /// window. Hands `op` back when none of them applies.
+    fn carrier_op(&mut self, op: Op, out: &mut Vec<Op>, carriers: &BTreeSet<ValueId>) -> Option<Op> {
+        match &op {
+            Op::ConstInt { dst, value } => {
+                self.const_vals.insert(*dst, *value);
+                out.push(op);
+            }
+            Op::Alloc { dst, init: Init::OptSome { payload }, .. } => {
+                out.push(Op::Prim { kind: PrimKind::OptMakeSome, dst: Some(*dst), args: vec![*payload] });
+                self.opt_vals.insert(*dst);
+                self.minted.insert(*dst);
+            }
+            Op::Alloc { dst, init: Init::OptNone, .. } if !carriers.contains(dst) => {
+                out.push(Op::Prim { kind: PrimKind::OptMakeNone, dst: Some(*dst), args: vec![] });
+                self.opt_vals.insert(*dst);
+                self.minted.insert(*dst);
+            }
+            Op::Dup { dst, src } if self.minted.contains(src) => {
+                out.push(Op::Prim { kind: PrimKind::OptCopy, dst: Some(*dst), args: vec![*src] });
+                self.opt_vals.insert(*dst);
+                self.minted.insert(*dst);
+            }
+            Op::Drop { v } | Op::DropListStr { v } if self.minted.contains(v) => {}
+            Op::Consume { v } if self.opt_vals.contains(v) => {}
+            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 && self.opt_vals.contains(&args[0]) => {
+                self.handles.insert(*d, args[0]);
+            }
+            // An Option stored into a list's slot: the slot holds the Option
+            // itself (the list's elements are `Option<i64>`), not a handle.
+            Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args }
+                if args.len() == 2 && self.handles.contains_key(&args[1]) && !self.addrs.contains_key(&args[0]) =>
+            {
+                out.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![args[0], self.handles[&args[1]]] });
+            }
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } if self.handles.contains_key(a) && self.const_vals.contains_key(b) => {
+                self.addrs.insert(*dst, (self.handles[a], self.const_vals[b]));
+            }
+            Op::Prim { kind, dst: Some(d), args } if args.len() == 1 && self.addrs.contains_key(&args[0]) => {
+                let (o, off) = self.addrs[&args[0]];
+                let load = load_window(kind, off, *d, o);
+                out.push(load.unwrap_or(op));
+            }
+            _ => return Some(op),
+        }
+        None
+    }
+
+    /// The call, if-join and pass-through arms.
+    fn flow_op(&mut self, op: Op, out: &mut Vec<Op>, option_fns: &BTreeSet<String>) {
+        match &op {
+            Op::CallFn { dst, name, args, result } => {
+                if let Some(d) = dst {
+                    if option_fns.contains(name) || crate::native_floor::declared_scalar_option(name) {
+                        self.opt_vals.insert(*d);
+                    }
+                }
+                // A minted carrier has no object: as a call arg it is a value
+                // the callee copies, not a heap handle it borrows.
+                let args = args
+                    .iter()
+                    .map(|a| match a {
+                        crate::CallArg::Handle(v) if self.minted.contains(v) => crate::CallArg::Scalar(*v),
+                        other => other.clone(),
+                    })
+                    .collect();
+                out.push(Op::CallFn { dst: *dst, name: name.clone(), args, result: *result });
+            }
+            Op::IfThen { dst, .. } => {
+                self.if_dsts.push(*dst);
+                out.push(op);
+            }
+            Op::Else { val } | Op::EndIf { val } => {
+                if let (Some(v), Some(Some(d))) = (val, self.if_dsts.last()) {
+                    if self.opt_vals.contains(v) {
+                        self.opt_vals.insert(*d);
+                    }
+                }
+                if matches!(op, Op::EndIf { .. }) {
+                    self.if_dsts.pop();
+                }
+                out.push(op);
+            }
+            _ => out.push(op),
+        }
+    }
+}
+
+/// The Option read a swallowed `Load` at offset `off` of Option `o` is: the
+/// tag (length word) or the payload slot; `None` for any other window.
+fn load_window(kind: &PrimKind, off: i64, d: ValueId, o: ValueId) -> Option<Op> {
+    match (kind, off) {
+        (PrimKind::Load { width: 4 }, 4) => Some(Op::Prim { kind: PrimKind::OptTag, dst: Some(d), args: vec![o] }),
+        (PrimKind::Load { width: 8 }, 12) => Some(Op::Prim { kind: PrimKind::OptPayload, dst: Some(d), args: vec![o] }),
+        _ => None,
+    }
+}
+
+#[derive(Default)]
+struct OptionTracker {
+    const_vals: BTreeMap<ValueId, i64>,
+    /// Values known to be scalar Options.
+    opt_vals: BTreeSet<ValueId>,
+    /// Carriers this pass minted (no object of their own).
+    minted: BTreeSet<ValueId>,
+    /// A swallowed `Handle` over an Option → the Option.
+    handles: BTreeMap<ValueId, ValueId>,
+    /// A swallowed `Handle + const` → (the Option, the offset).
+    addrs: BTreeMap<ValueId, (ValueId, i64)>,
+    if_dsts: Vec<Option<ValueId>>,
+}

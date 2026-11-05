@@ -30,12 +30,20 @@ fn shebang_precedes_dialect_and_survives_formatting() {
 
 #[test]
 fn native_mir_declines_serializing_fan() {
-    let block = "effect fn f(n: Int) -> Int = n + 1\neffect fn main() -> Unit = { let r = fan { f(1), f(2) }; println(int.to_string(r.0 + r.1)) }";
+    let block = "effect fn f(n: Int) -> Result[Int, String] = ok(n + 1)\neffect fn main() -> Unit = { let r = fan { f(1), f(2) }; println(int.to_string(r.0 + r.1)) }";
     let mapper = "effect fn main() -> Unit = { let r = fan.map([1, 2], (x) => ok(x + 1))!; println(int.to_string(list.len(r))) }";
-    for source in [block, mapper] {
-        let error = almide_mir::pipeline::try_render_rust_source(source).unwrap_err();
-        assert!(format!("{error:?}").contains("fan concurrency"), "{error:?}");
-        assert!(matches!(error, almide_mir::lower::LowerError::UnsupportedAt { .. }), "fan wall must retain its source location");
-    }
+    // #4006 family H (owner ruling): a `fan { … }` block's arms are lifted and
+    // certified, and the block renders on scoped threads; `fan.map` still declines.
+    let rendered = almide_mir::pipeline::try_render_rust_source(block).expect("a fan block renders threaded");
+    assert!(rendered.contains("std::thread::scope"), "the arms run on scoped threads:\n{rendered}");
+    // An arm calling an effect fn declared `-> Int` (its Err rides the effect
+    // ABI only) keeps the honest decline: the threaded take has no step that
+    // unwraps that ABI's Result and propagates the lowest-index Err.
+    let implicit = block.replace("-> Result[Int, String] = ok(n + 1)", "-> Int = n + 1");
+    let declined = almide_mir::pipeline::try_render_rust_source(&implicit).unwrap_err();
+    assert!(format!("{declined:?}").contains("fan concurrency"), "{declined:?}");
+    let error = almide_mir::pipeline::try_render_rust_source(mapper).unwrap_err();
+    assert!(format!("{error:?}").contains("fan concurrency"), "{error:?}");
+    assert!(matches!(error, almide_mir::lower::LowerError::UnsupportedAt { .. }), "fan wall must retain its source location");
     assert!(almide_mir::pipeline::try_render_rust_source("fn main() -> Unit = println(\"ordinary\")").is_ok());
 }

@@ -261,7 +261,7 @@ impl LowerCtx {
             }
         };
         let dst = self.fresh_value();
-        let name = if shape.scalar_elem { "__list_concat" } else { "__list_concat_rc" };
+        let name = if shape.scalar_elem { crate::lower::LIST_CONCAT } else { crate::lower::LIST_CONCAT_RC };
         self.ops.push(Op::CallFn {
             dst: Some(dst),
             name: name.to_string(),

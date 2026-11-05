@@ -1474,6 +1474,9 @@ impl Checker {
                 | "string" | "map" | "set" | "option" | "result" | "value"
                 | "base64" | "hex" | "hash" | "regex" | "json" | "matrix"
                 | "path" | "html" | "url" | "zlib") { continue; }
+            // The declaration index answers "does it declare this name" without
+            // parsing the module (#4458); only a module that does is read.
+            if !almide_lang::decl_index::fn_names(module).is_some_and(|fs| fs.contains(&user_name)) { continue; }
             for fn_name in crate::stdlib::module_functions_all(module) {
                 if user_name != fn_name || fn_name.starts_with("__") { continue; }
                 let Some(sig) = crate::stdlib::lookup_sig(module, fn_name) else { continue };

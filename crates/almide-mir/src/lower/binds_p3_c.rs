@@ -75,6 +75,7 @@ impl LowerCtx {
         }
         let dst = self.fresh_value();
         self.ops.push(Op::ListLit { dst, elems: slot_vals });
+        self.aggregate_blocks.insert(dst, type_name.clone());
         // EXACT tracking mirror of the prim path (`emit_heap_field_variant_ctor_block` —
         // heap_slots is empty here, so only the needs_rec branch and the aggregate mark apply).
         if needs_rec {

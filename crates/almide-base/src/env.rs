@@ -137,6 +137,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_DEBUG_CALL_OPS", Flag, Harness, "print the call ops of every lowered fn (the classify_corpus example)"),
     sw("ALMIDE_DEBUG_EFFECTS", Flag, Dbg, "print the effect inference pass's per-function results (native codegen)"),
     sw("ALMIDE_DEBUG_MIR_OPS", Flag, Harness, "print every MIR op with its index (the classify_corpus example — the certificate-bisection instrument)"),
+    sw("ALMIDE_DEBUG_STD_SPLIT", Flag, Dbg, "say why a `--release` native build links with the plain fat-LTO profile instead of the backtrace split (#4459): the missing tool, the moved std symbol, the probe whose panic output differed"),
     sw("ALMIDE_DEFAULTS_DEBUG", Flag, Dbg, "print the record-default resolution when no default keys were found (native codegen)"),
     sw("ALMIDE_DEPS_CACHE_ONLY", Flag, Tool, "resolve dependencies only from what is already on disk: a dependency not in the cache is an error, nothing is cloned and `almide.lock` is never written. Set by `almide mcp` on every tool child (#4179)"),
     sw("ALMIDE_DISABLE_OPT", Flag, Ablation, "run the optimiser pipeline with every optional pass off (ablation; the always-on enabler passes still run)"),
@@ -172,6 +173,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_INSTALL", Value, Tool, "the directory `almide install` installs binaries into (overrides the default `~/.local/bin`)"),
     sw("ALMIDE_INTERP_SWEEP_THREADS", Value, Harness, "interp sweep thread count; 1 = serial (#2381)"),
     sw("ALMIDE_IR_FAULT", Value, Route, "inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary (a release build honours it only with `--allow-switch ALMIDE_IR_FAULT`, #4129)"),
+    sw("ALMIDE_KEEP_BUNDLED_FNS", Flag, Ablation, "keep every function of a loaded bundled stdlib module instead of only the ones the program reaches (#4328) — the A/B switch for the reach pruning"),
     sw("ALMIDE_KEEP_SCRATCH", Flag, Tool, "keep the `almide test` scratch build directory instead of deleting it"),
     sw("ALMIDE_LSP_TRACE", Flag, Dbg, "print every LSP request and response the language server handles"),
     sw("ALMIDE_MANIFEST_TREE_CHECK", Value, Ci, "the parity-manifest generators' stale-tree refusal (#2405, scripts/lib/oracle-header.sh): `strict` (default) refuses an ORACLE that is not `<Cargo.toml version> (dev…)`, is stamped with a commit other than HEAD, or is unstamped and older than the sources; a worktree behind its upstream; and an untracked spec/ fixture. `gate` keeps only the untracked-fixture check (scripts/check-parity-goldens.sh vouches for CI's artifact). `off` is the deliberate override"),
@@ -183,6 +185,8 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_MUTATION_SHARD", Value, Ci, "this job's shard index of the mutation gate"),
     sw("ALMIDE_MUTATION_SHARDS", Value, Ci, "how many shards the mutation gate is split into"),
     sw("ALMIDE_NAMES_DEBUG", Flag, Dbg, "print the native name-verification map and its scoped shadowing decisions"),
+    sw("ALMIDE_NATIVE_DRILL_COND_I64", Flag, Ablation, "make the certified native render keep every comparison an i64 0/1 tested with `!= 0`, never a branch-only `bool` — the negative control of the branch-only comparison render in scripts/check-native-v1-perf-small.sh (recursion_depth_within_limits)"),
+    sw("ALMIDE_NATIVE_DRILL_NO_MOVES", Flag, Ablation, "make the certified native render keep every copy it would elide (no in-place `list.push`, a clone for each last-use Dup/SetLocal) — the negative control of scripts/check-native-v1-perf.sh (#4006)"),
     sw("ALMIDE_NO_AVAIL_CHECK", Flag, Gate, "bypass the E081 stdlib availability check (the measurement escape the availability probe builds through)"),
     sw("ALMIDE_NO_RTLIB", Flag, Route, "build the native runtime inline instead of linking the prebuilt runtime crate (the self-contained cargo path; `almide test` sets it for the harness build)"),
     sw("ALMIDE_NO_VERIFIED_OK", Flag, Gate, "re-enable the retired `--no-verified` legs (the v0 fallback) instead of refusing the flag"),
@@ -202,9 +206,11 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_REGION_DEBUG", Flag, Dbg, "print the region-window pass's decisions (native and structural leg)"),
     sw("ALMIDE_REGION_OFF", Flag, Ablation, "turn the region-window allocation pass off (native and structural leg)"),
     sw("ALMIDE_REGION_TRAP_STALE", Flag, Trap, "arm the native region prelude's stale-reference trap (#2200)"),
+    sw("ALMIDE_RELEASE_STD_UNSPLIT", Flag, Ablation, "link a `--release` native build with std's backtrace printer inside the fat-LTO module, as before #4459, instead of the precompiled split sysroot + object: the negative control of scripts/check-release-build-time.sh and the A/B switch of the perf rows"),
     sw("ALMIDE_REPO", Value, Ci, "the repository slug a release script targets"),
     sw("ALMIDE_RUN_PROJECT_DIR", Value, Tool, "the scratch dir `almide run` / `almide build` compile native binaries in, instead of `<temp>/almide-run` (the content-keyed binary cache, its cargo target, its rustc incremental sessions); `almide clean` empties it"),
     sw("ALMIDE_SCOPED_CLOSURE_OFF", Flag, Ablation, "make BorrowInsertion treat every `let`-bound closure as a closure value, never as a non-escaping scope (#3455) — its captures are owned again, as before the scope rule"),
+    sw("ALMIDE_SELF_INLINE_OFF", Flag, Ablation, "turn OFF the native legs' one-level self-recursive inlining (`almide_ir::self_inline`, #4456), so a pure scalar recursion gets the accumulator loop again: the ablation leg of the fib row in scripts/check-perf-ratio.sh"),
     sw("ALMIDE_SEMLAW_CASES", Value, Harness, "how many cases the semantic-laws property test draws"),
     sw("ALMIDE_SHUFFLE_PASSES", Value, Gate, "run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186)"),
     sw("ALMIDE_SIZE_ALONE", Value, Harness, "the one fixture a child process of the size ratchet measures alone, for its isolation check (#2309); the ratchet sets it on the processes it spawns"),
@@ -285,6 +291,15 @@ pub fn flag(name: &str) -> bool {
         announce(sw);
     }
     on
+}
+
+/// Is the bundled-stdlib reach pruning switched off (`ALMIDE_KEEP_BUNDLED_FNS`,
+/// #4328)? Every site that trims a bundled module or a self-host source to
+/// what the program reaches asks HERE — the resolver's function pruning, the
+/// reach walk's whitelist filter, and the wasm link's own pruning (#4458) —
+/// so the whole-module leg (witness_floor) sees whole modules on every path.
+pub fn keep_bundled_fns() -> bool {
+    flag("ALMIDE_KEEP_BUNDLED_FNS")
 }
 
 /// The value of `name`, when set and non-empty. Registered names only; a

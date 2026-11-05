@@ -1,0 +1,12 @@
+// A string list read at a computed index: ElemAddr's check is dropped.
+fn main() -> Unit = {
+  let xs = ["ab", "c", "def"]
+  var sum = 0
+  var i = 0
+  let n = list.len(xs)
+  while i < n {
+    sum = sum + string.len(xs[i])
+    i = i + 1
+  }
+  println(int.to_string(sum))
+}

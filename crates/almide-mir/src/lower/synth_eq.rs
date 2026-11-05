@@ -113,6 +113,9 @@ impl LowerCtx {
                     ret: Some(r),
                     declared_caps: Vec::new(),
                     heap_slot_masks: Default::default(),
+                    owned_params: Default::default(),
+                    call_moves: Default::default(),
+                    aggregate_blocks: Default::default(),
                 });
                 true
             }
@@ -204,6 +207,9 @@ impl LowerCtx {
                     ret: Some(r),
                     declared_caps: Vec::new(),
                     heap_slot_masks: Default::default(),
+                    owned_params: Default::default(),
+                    call_moves: Default::default(),
+                    aggregate_blocks: Default::default(),
                 });
                 true
             }
@@ -268,6 +274,9 @@ impl LowerCtx {
             ret: Some(dst),
             declared_caps: Vec::new(),
             heap_slot_masks: Default::default(),
+            owned_params: Default::default(),
+            call_moves: Default::default(),
+            aggregate_blocks: Default::default(),
         });
         true
     }
@@ -377,6 +386,9 @@ fn synth_list_eq_loop_fn(name: String, elem_call: String) -> MirFunction {
             ret: Some(res),
             declared_caps: Vec::new(),
             heap_slot_masks: Default::default(),
+            owned_params: Default::default(),
+            call_moves: Default::default(),
+            aggregate_blocks: Default::default(),
         }
     }
 }

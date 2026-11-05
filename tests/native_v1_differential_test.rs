@@ -44,7 +44,8 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
     let bin = dir.join("prog_bin");
     std::fs::write(&rs, &rust).unwrap();
     let rc = Command::new("rustc")
-        .args(["-O", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()])
+        // The edition the product's native build compiles with (src/cli/build.rs).
+        .args(["--edition", "2021", "-O", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()])
         .output()
         .expect("rustc");
     assert!(
@@ -104,6 +105,37 @@ const CORPUS: &[(&str, &str)] = &[
     // ── T1-3 Res carrier: a Result[Int, String]-returning plain fn and its
     //    match consumption ride NTy::Res (Rust Result<i64, String>) ──
     ("result_fn_match", "fn safe_div(a: Int, b: Int) -> Result[Int, String] =\n  if b == 0 then err(\"div by zero\") else ok(a / b)\n\nfn main() -> Unit = {\n  let r = safe_div(10, 2)\n  match r {\n    ok(v) => println(int.to_string(v)),\n    err(e) => println(e),\n  }\n  let s = safe_div(1, 0)\n  match s {\n    ok(v) => println(int.to_string(v)),\n    err(e) => println(e),\n  }\n}\n"),
+    // ── #4006 family I: top-level state in storage slots before main ──
+    ("top_let_div_eager", "let BAD = 1 / 0\nfn main() -> Unit = {\n  println(\"never reached\")\n}\n"),
+    ("top_let_call", "fn mk() -> Int = 3\nlet X = mk()\nfn main() -> Unit = {\n  println(int.to_string(X))\n}\n"),
+    ("top_var", "var COUNT = 0\nfn main() -> Unit = {\n  println(int.to_string(COUNT))\n}\n"),
+    ("top_var_writes", "var COUNT = 1\nvar RATIO = 0.5\n\neffect fn bump() -> Unit = {\n  COUNT = COUNT * 3\n  RATIO = RATIO + 1.25\n}\n\neffect fn main() -> Unit = {\n  bump()!\n  bump()!\n  println(int.to_string(COUNT))\n  println(float.to_string(RATIO))\n}\n"),
+    // ── #4006 family B: a scalar Option rides Option<i64> ──
+    ("option_scalar", "fn find(x: Int) -> Int? = if x > 0 then some(x * 2) else none\n\nfn get(o: Int?) -> Int = o ?? 0 - 1\n\nfn main() -> Unit = {\n  match find(3) {\n    some(v) => println(int.to_string(v)),\n    none => println(\"none\"),\n  }\n  println(int.to_string(get(find(-4))))\n  println(int.to_string(get(some(11))))\n}\n"),
+    // ── #4006 family C: scalar-Ok Results past Int, and Result[String, String] ──
+    ("result_float_unit", "fn half(x: Float) -> Result[Float, String] = if x > 0.0 then ok(x / 2.0) else err(\"neg\")\n\nfn check(x: Int) -> Result[Unit, String] = if x > 0 then ok(()) else err(\"bad\")\n\nfn main() -> Unit = {\n  match half(3.0) {\n    ok(v) => println(float.to_string(v)),\n    err(e) => println(e),\n  }\n  match check(0) {\n    ok(_) => println(\"fine\"),\n    err(e) => println(e),\n  }\n}\n"),
+    ("result_string_ok", "fn g(x: Int) -> Result[String, String] = if x > 0 then ok(\"pos \" + int.to_string(x)) else err(\"neg\")\n\nfn show(r: Result[String, String]) -> String = match r {\n  ok(s) => \"ok:\" + s,\n  err(e) => \"err:\" + e,\n}\n\nfn main() -> Unit = {\n  println(show(g(3)))\n  println(show(g(0)))\n  println(show(ok(\"lit\")))\n}\n"),
+    // ── #4006 / C-131: `list.push` lowers to `__list_concat(xs, [x])`; the
+    //    rebind renders as `xs.extend_from_slice(..)`, amortized linear ──
+    ("push_loop_concat", "fn main() -> Unit = {\n  var xs: List[Int] = []\n  var i = 0\n  while i < 3 {\n    list.push(xs, i)\n    i = i + 1\n  }\n  println(int.to_string(list.len(xs)))\n}\n"),
+    // ── #4006: declared-floor list and string calls ──
+    ("list", "fn main() -> Unit = {\n  let xs = [1, 2, 3]\n  let ys = list.reverse(xs)\n  println(int.to_string(list.len(ys)))\n}\n"),
+    ("str_split", "fn main() -> Unit = {\n  let parts = string.split(\"a,b\", \",\")\n  println(parts[0])\n}\n"),
+    // ── #4006: heap Option / Result carriers, typed from the declarations ──
+    ("option_string", "fn find(x: Int) -> String? = if x > 0 then some(\"p\" + int.to_string(x)) else none\n\nfn show(o: String?) -> String = match o {\n  some(s) => \"got \" + s,\n  none => \"none\",\n}\n\nfn main() -> Unit = {\n  println(show(find(3)))\n  println(show(find(-1)))\n  let d = find(0) ?? \"dflt\"\n  println(d)\n}\n"),
+    ("result_record", "type P = { name: String, n: Int }\n\nfn mk(x: Int) -> Result[P, String] = if x > 0 then ok({ name: \"a\", n: x }) else err(\"neg\")\n\nfn say(r: Result[P, String]) -> String = match r {\n  ok(p) => p.name + int.to_string(p.n),\n  err(e) => e,\n}\n\nfn main() -> Unit = {\n  println(say(mk(2)))\n  println(say(mk(-2)))\n}\n"),
+    // ── #4006: the stdlib Value on v0's runtime enum; a Text-protocol call ──
+    ("value_floor", "import json\n\nfn mk(n: Int) -> Value = value.int(n)\n\neffect fn main() -> Unit = {\n  println(json.stringify(mk(7)))\n  println(json.stringify(value.string(\"hi\")))\n  let p = json.parse(\"{\\\"a\\\": [1, true]}\")!\n  println(json.stringify(p))\n}\n"),
+    ("list_join_strings", "fn j(xs: List[String]) -> String = list.join(xs, \", \")\n\nfn main() -> Unit = {\n  let xs = [\"a\", \"b\", \"c\"]\n  println(list.join(xs, \"-\"))\n  println(j(xs))\n}\n"),
+    ("result_int_int", "fn ck(x: Int) -> Result[Int, Int] = if x > 0 then ok(x) else err(0 - x)\n\nfn show(r: Result[Int, Int]) -> String = match r {\n  ok(v) => int.to_string(v),\n  err(e) => \"e\" + int.to_string(e),\n}\n\nfn main() -> Unit = {\n  println(show(ck(3)))\n  println(show(ck(-4)))\n}\n"),
+    // ── #4006: maps on v0's runtime AlmideMap (literal, set/get/remove, for-in, a map param) ──
+    ("map_skv_ops", "fn total(m: Map[String, Int]) -> Int = {\n  var t = 0\n  for (_, v) in m {\n    t = t + v\n  }\n  t\n}\n\nfn main() -> Unit = {\n  var m = [\"a\": 1, \"b\": 2]\n  m = map.set(m, \"c\", 3)\n  m = map.remove(m, \"a\")\n  println(int.to_string(map.len(m)))\n  println(int.to_string(map.get(m, \"b\") ?? 0))\n  println(int.to_string(map.get(m, \"a\") ?? -1))\n  for (k, v) in m {\n    println(k + int.to_string(v))\n  }\n  println(int.to_string(total(m)))\n  println(list.join(map.keys(m), \",\"))\n}\n"),
+    // The call-arg move's controls: a rebind inside an `if` arm, and a read in
+    // a nested block before the rebind, both keep the copy (the old map is
+    // still read), so a wrong move would print an emptied map here.
+    ("map_move_controls", "fn main() -> Unit = {\n  var m = [\"a\": 1]\n  var i = 0\n  while i < 3 {\n    let n = map.set(m, \"k\" + int.to_string(i), i)\n    if i == 1 then {\n      m = n\n    } else {\n      println(int.to_string(map.len(n)))\n    }\n    println(int.to_string(map.len(m)))\n    i = i + 1\n  }\n  var j = 0\n  while j < 2 {\n    let n2 = map.set(m, \"y\", j)\n    if j > 0 then {\n      println(int.to_string(map.get(m, \"y\") ?? -1))\n    } else {\n      println(int.to_string(map.len(m)))\n    }\n    m = n2\n    j = j + 1\n  }\n  println(int.to_string(map.len(m)))\n}\n"),
+    // The same one-slot block as `some(s)`, declared a list: stays a list.
+    ("one_string_list", "fn one(s: String) -> List[String] = [s]\n\nfn main() -> Unit = {\n  let xs = one(\"solo\")\n  println(xs[0])\n  println(int.to_string(list.len(xs)))\n}\n"),
     // ── §13 abort floor (T3-1): eprintln shim + ProcExit prim — the assert
     //    desugar's abort tail now renders on the native v1 rung ──
     ("eprintln_line", "fn main() -> Unit = {\n  eprintln(\"warn \" + int.to_string(7))\n  println(int.to_string(1))\n}\n"),
@@ -131,6 +163,10 @@ const CORPUS: &[(&str, &str)] = &[
     //    float.to_bits floor rows — empty, non-alphabetic and multi-byte text,
     //    an over-long take, a NaN's canonical bits. ──
     ("floor_4006_shims_b", "fn main() -> Unit = {\n  println(bool.to_string(string.is_empty(\"\")))\n  println(bool.to_string(string.is_alpha(\"\u{e9}t\u{e9}\")))\n  println(bool.to_string(string.is_alpha(\"a1\")))\n  println(bool.to_string(string.is_alphanumeric(\"a1\")))\n  println(bool.to_string(string.is_alphanumeric(\"\")))\n  println(string.capitalize(\"\u{df}tra\u{df}e\"))\n  println(string.take(\"h\u{e9}llo\", 3))\n  println(string.take(\"ab\", 9))\n  println(int.to_string(float.to_bits(1.5)))\n  println(int.to_string(float.to_bits(0.0 / 0.0)))\n}\n"),
+    // ── #4006: reversing a String list, once a wall (its self-hosted body is
+    //    raw memory), is the declared floor's `list.reverse` over the
+    //    `Vec<AlmideString>` the self-hosted `list_reverse_str` specializes. ──
+    ("str_list_reverse", "fn main() -> Unit = {\n  let parts = string.split(\"a,b\", \",\")\n  println(list.reverse(parts)[0])\n}\n"),
     // ── #4006: immutable top-level lets whose initializers cannot abort,
     //    materialized at each use: literals, const arithmetic over other
     //    lets (wrapping), a float division and a string. ──
@@ -163,7 +199,7 @@ fn divzero_abort_matches_v0() {
     let rs = dir.join("prog.rs");
     let bin = dir.join("prog_bin");
     std::fs::write(&rs, &rust).unwrap();
-    let rc = Command::new("rustc").args(["-O", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()]).output().unwrap();
+    let rc = Command::new("rustc").args(["--edition", "2021", "-O", "-o", bin.to_str().unwrap(), rs.to_str().unwrap()]).output().unwrap();
     assert!(rc.status.success(), "{}", String::from_utf8_lossy(&rc.stderr));
     let v1 = Command::new(&bin).output().unwrap();
     assert_eq!(v0.status.code(), v1.status.code(), "divzero exit code diverges");
@@ -225,42 +261,19 @@ fn out_of_subset_walls_honestly() {
     let walls = [
         // `list.len` over a scalar list joined the floor with `list.range`
         // (#1869); a combinator over the list is still outside it.
-        ("list", "fn main() -> Unit = {\n  let xs = [1, 2, 3]\n  let ys = list.reverse(xs)\n  println(int.to_string(list.len(ys)))\n}\n"),
-        ("str_split", "fn main() -> Unit = {\n  let parts = string.split(\"a,b\", \",\")\n  println(parts[0])\n}\n"),
         // list_param moved to the POSITIVE corpus — rung 4 renders scalar-list
         // params/literals/indexing natively (`vec![…]` + the bounds shims).
-        // #4006: a top-level let runs EAGERLY before main; one whose
-        // initializer can abort (or calls) must not be materialized lazily
-        // at its uses, so it walls. A mutable top-level var walls too.
-        ("top_let_div_eager", "let BAD = 1 / 0
+        // #4006 family I: top-level state lives in native storage slots now,
+        // a SCALAR slot only. A heap-typed var or eager let still walls.
+        ("top_var_heap", "var LOG = \"\"
 fn main() -> Unit = {
-  println(\"never reached\")
+  LOG = LOG + \"x\"
+  println(LOG)
 }
 "),
-        ("top_let_call", "fn mk() -> Int = 3
-let X = mk()
+        ("top_let_heap_call", "let S = int.to_string(3)
 fn main() -> Unit = {
-  println(int.to_string(X))
-}
-"),
-        ("top_var", "var COUNT = 0
-fn main() -> Unit = {
-  println(int.to_string(COUNT))
-}
-"),
-        // #4006 / C-131: `list.push` lowers to `__list_concat(xs, [x])`. The
-        // v1 render has no in-place append, so a concat shim would copy the
-        // whole list on every push — the O(n²) shape C-131 forbids
-        // (loop_push_trailing_increment took 38 s on v1 against 0.16 s on
-        // v0). Scalar-list `+` stays walled until v1 can append in place.
-        ("push_loop_concat", "fn main() -> Unit = {
-  var xs: List[Int] = []
-  var i = 0
-  while i < 3 {
-    list.push(xs, i)
-    i = i + 1
-  }
-  println(int.to_string(list.len(xs)))
+  println(S)
 }
 "),
     ];

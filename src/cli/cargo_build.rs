@@ -82,7 +82,8 @@ codegen-units = 1
     cmd.arg("--target-dir").arg(project_dir.join("target"));
     if release {
         cmd.arg("--release");
-        append_release_rustflags(&mut cmd);
+        // A cdylib keeps the plain profile: the backtrace split is linked into executables only.
+        append_release_rustflags(&mut cmd, None);
     }
     // #2772: the requested target (or the host) is stated, never inherited.
     let triple = super::native_target::cross_target();
@@ -179,7 +180,16 @@ pub(super) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path
 /// this function's `?` chain — same "either piece missing → skip" semantics).
 /// The link profile a `--release` fast-path build adds: the cargo path's
 /// `[profile.release]` (`lto = true`, `codegen-units = 1`), spelled for rustc.
-const FAST_PATH_RELEASE_ARGS: [&str; 4] = ["-C", "lto=fat", "-C", "codegen-units=1"];
+///
+/// `strip=debuginfo` is the third half of that profile (#2092): cargo strips
+/// debug info from a release binary whose profile asks for none (`debug = 0`,
+/// cargo ≥ 1.77), but a bare rustc keeps the DWARF that std's precompiled
+/// rlibs carry and links it into the binary. That DWARF was ~1.6 MB of every
+/// fast-path release binary — a program that touched the heap shipped at
+/// ~2.0 MB while one the cargo path built (no runtime use) shipped at 0.37 MB.
+/// Only `.debug_*` sections go: the code, the symbol table (backtraces still
+/// name their frames) and every message the program prints are unchanged.
+const FAST_PATH_RELEASE_ARGS: [&str; 6] = ["-C", "lto=fat", "-C", "codegen-units=1", "-C", "strip=debuginfo"];
 
 fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<Result<std::path::PathBuf, String>> {
     let opt_level = if release { "3" } else { "1" };
@@ -209,6 +219,9 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
     if release {
         cmd.args(FAST_PATH_RELEASE_ARGS);
         cmd.args(super::native_target::release_codegen_rustc_args());
+        if let Some(split) = release_split_for(rs_code) {
+            cmd.args(split.rustc_args());
+        }
     }
     let output = cmd.output().ok()?;
     if output.status.success() {
@@ -240,15 +253,27 @@ fn write_generated_cargo_project(
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
 
-    let cargo_toml = build_cargo_toml(GENERATED_CARGO_TOML, &generated_crate_deps(rs_code, native_deps));
-    std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
-        .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
+    let mut cargo_toml = build_cargo_toml(GENERATED_CARGO_TOML, &generated_crate_deps(rs_code, native_deps));
 
     let mut final_code = rs_code.to_string();
 
     // The package's and its dependencies' native modules + dependency
     // native-deps — exactly the inputs the cache key was computed from.
     inputs.apply(&mut final_code, &src_dir, project_dir)?;
+
+    // A v1 render's runtime part becomes a crate of its own, under the
+    // runtime's profile (`cargo_toml::split_runtime_crate`).
+    if let Some((program, runtime)) = super::cargo_toml::split_runtime_crate(&final_code) {
+        let rt_src = project_dir.join(super::cargo_toml::RT_CRATE).join("src");
+        std::fs::create_dir_all(&rt_src).map_err(|e| format!("failed to create {}: {}", rt_src.display(), e))?;
+        std::fs::write(rt_src.join("lib.rs"), &runtime).map_err(|e| format!("failed to write the runtime crate: {e}"))?;
+        std::fs::write(rt_src.parent().expect("crate dir").join("Cargo.toml"), super::cargo_toml::runtime_crate_manifest())
+            .map_err(|e| format!("failed to write the runtime crate manifest: {e}"))?;
+        cargo_toml.push_str(&super::cargo_toml::runtime_crate_manifest_lines());
+        final_code = program;
+    }
+    std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
+        .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
 
     // Library modules may not define main — auto-generate an empty one
     if !defines_entry_point(&final_code) {
@@ -264,7 +289,11 @@ fn write_generated_cargo_project(
 
 /// Run `cargo build` in `project_dir` and locate the resulting binary.
 /// Extracted verbatim from `cargo_build_generated_with_native`'s tail.
-fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: bool) -> Result<std::path::PathBuf, String> {
+fn run_cargo_build_and_locate_binary(
+    project_dir: &std::path::Path,
+    release: bool,
+    split: Option<&super::std_split::StdSplit>,
+) -> Result<std::path::PathBuf, String> {
     let triple = super::native_target::cross_target();
     let profile = if release { "release" } else { "debug" };
     let exe = super::native_target::exe_file_name("almide-out", triple.as_deref());
@@ -279,6 +308,17 @@ fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: boo
     let mut cmd = super::rustc_floor::cargo_command()?;
     inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("build").current_dir(project_dir);
+    // One non-incremental compile, as v0's rustc fast path makes. An
+    // incremental session splits the program into per-module codegen units
+    // that inline across nothing: a certified render's `map(..).collect()`
+    // ran its closure through an outlined `from_iter`, 1.6x the same source
+    // built in one session (#4006, mi1). This repo's CI sets the variable for
+    // every job, so only a user's build saw it. A `CARGO_INCREMENTAL` the
+    // caller set is theirs and stays (the stale-session recovery is staged
+    // that way).
+    if std::env::var_os("CARGO_INCREMENTAL").is_none() {
+        cmd.env("CARGO_INCREMENTAL", "0");
+    }
     // The binary is located under `project_dir/target` below; an inherited
     // `CARGO_TARGET_DIR` (a common user setting, and what `cargo test` hands
     // the harness's own child processes) would send it elsewhere and turn the
@@ -286,7 +326,7 @@ fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: boo
     cmd.arg("--target-dir").arg(project_dir.join("target"));
     if release {
         cmd.arg("--release");
-        append_release_rustflags(&mut cmd);
+        append_release_rustflags(&mut cmd, split);
     }
     // Suppress cargo's chatty output
     cmd.arg("--quiet");
@@ -342,7 +382,8 @@ pub(super) fn cargo_build_generated_with_native(
     let written = std::fs::read_to_string(src_dir.join("main.rs"))
         .map_err(|e| format!("failed to read back {}: {}", src_dir.join("main.rs").display(), e))?;
 
-    let bin_path = run_cargo_build_and_locate_binary(project_dir, release)?;
+    let split = if release { release_split_for(rs_code) } else { None };
+    let bin_path = run_cargo_build_and_locate_binary(project_dir, release, split)?;
     source_still_ours(&src_dir.join("main.rs"), &written)?;
     Ok(bin_path)
 }
@@ -392,17 +433,37 @@ pub(super) fn wrap_codegen_leak(stderr: String) -> String {
 /// and release LLVM options ([`super::native_target::RELEASE_LLVM_ARGS`]),
 /// appended to the RUSTFLAGS the child already has — set on `cmd` (the rayon
 /// cfg) or inherited — so neither replaces the other.
-fn append_release_rustflags(cmd: &mut std::process::Command) {
+///
+/// `split` adds the backtrace-split sysroot and object ([`super::std_split`])
+/// when its paths can be spelled in the space-separated RUSTFLAGS and the
+/// inherited flags do not already name a sysroot.
+fn append_release_rustflags(cmd: &mut std::process::Command, split: Option<&super::std_split::StdSplit>) {
     let current = cmd.get_envs()
         .find(|(k, _)| *k == "RUSTFLAGS")
         .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
         .unwrap_or_else(|| std::env::var("RUSTFLAGS").unwrap_or_default());
     let mut flags = current;
-    for arg in super::native_target::release_codegen_rustc_args() {
+    let split_args = split
+        .map(|s| s.rustc_args())
+        .filter(|args| !flags.contains("--sysroot") && args.iter().all(|a| !a.contains(char::is_whitespace)));
+    for arg in super::native_target::release_codegen_rustc_args().into_iter().chain(split_args.into_iter().flatten()) {
         flags.push(' ');
         flags.push_str(&arg);
     }
     cmd.env("RUSTFLAGS", flags.trim_start().to_string());
+}
+
+/// The backtrace split ([`super::std_split`]) a `--release` link of `rs_code`
+/// uses, if any. A program with its own `#[global_allocator]` (the heap-cap
+/// allocator, a native dependency's) keeps the plain profile: the split's
+/// precompiled printer allocates through its own copy of the default
+/// allocator, which is the program's allocator only when the program has
+/// not replaced it.
+fn release_split_for(rs_code: &str) -> Option<&'static super::std_split::StdSplit> {
+    if rs_code.contains("global_allocator") {
+        return None;
+    }
+    super::std_split::release_std_split()
 }
 
 /// Path to the precompiled `almide_rt` runtime rlib, built once per process.
@@ -819,5 +880,9 @@ mod tests {
         assert!(release.contains("lto = true") && release.contains("codegen-units = 1"), "{release}");
         assert!(FAST_PATH_RELEASE_ARGS.contains(&"lto=fat"), "{FAST_PATH_RELEASE_ARGS:?}");
         assert!(FAST_PATH_RELEASE_ARGS.contains(&"codegen-units=1"), "{FAST_PATH_RELEASE_ARGS:?}");
+        // #2092: the cargo release profile asks for no debug info, so cargo
+        // strips it; the fast path has to say so to rustc itself.
+        assert!(!release.contains("debug ="), "{release}");
+        assert!(FAST_PATH_RELEASE_ARGS.contains(&"strip=debuginfo"), "{FAST_PATH_RELEASE_ARGS:?}");
     }
 }

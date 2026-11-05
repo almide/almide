@@ -202,7 +202,7 @@ fn read_tree(dir: &std::path::Path, rel: &std::path::Path, out: &mut Vec<(std::p
 /// environment, next to [`CrateInputs::cache_key`] for its contents (#3091).
 ///
 /// - **The recipe**: this file, `cargo_build.rs`, `cargo_toml.rs`,
-///   `cargo_ice.rs` and `native_target.rs` as compiled into this
+///   `cargo_ice.rs`, `native_target.rs` and `std_split.rs` as compiled into this
 ///   almide — the Cargo.toml templates (opt-level is load-bearing for
 ///   correctness, see [`GENERATED_CARGO_TOML`]), the rustc/cargo invocations
 ///   of every build path, the injection. The sources themselves are hashed,
@@ -213,7 +213,8 @@ fn read_tree(dir: &std::path::Path, rel: &std::path::Path, out: &mut Vec<(std::p
 /// - **Flags cargo and rustc read from the environment**: `RUSTFLAGS` and its
 ///   spellings, `RUSTC`/`RUSTC_WRAPPER`, `CARGO_PROFILE_*` (which override the
 ///   templates' profiles), per-target rustflags/linker, and
-///   `ALMIDE_NO_RTLIB` (which picks the build path).
+///   `ALMIDE_NO_RTLIB` (which picks the build path) and
+///   `ALMIDE_RELEASE_STD_UNSPLIT` (which turns the release backtrace split off).
 /// - **Cargo config files** cargo would read for a build in `project_dir`:
 ///   `.cargo/config{,.toml}` in it and every ancestor, and in `CARGO_HOME`.
 pub(super) fn build_environment_key(project_dir: &std::path::Path) -> String {
@@ -224,6 +225,7 @@ pub(super) fn build_environment_key(project_dir: &std::path::Path) -> String {
             include_str!("crate_inputs.rs"),
             include_str!("cargo_ice.rs"),
             include_str!("native_target.rs"),
+            include_str!("std_split.rs"),
         )
         .as_bytes(),
     );
@@ -253,7 +255,7 @@ fn env_shapes_the_binary(name: &str) -> bool {
     matches!(
         name,
         "RUSTFLAGS" | "CARGO_ENCODED_RUSTFLAGS" | "CARGO_BUILD_RUSTFLAGS" | "RUSTC" | "RUSTC_WRAPPER"
-            | "CARGO_BUILD_RUSTC" | "CARGO_BUILD_RUSTC_WRAPPER" | "ALMIDE_NO_RTLIB"
+            | "CARGO_BUILD_RUSTC" | "CARGO_BUILD_RUSTC_WRAPPER" | "ALMIDE_NO_RTLIB" | "ALMIDE_RELEASE_STD_UNSPLIT"
     ) || name.starts_with("CARGO_PROFILE_")
         || (name.starts_with("CARGO_TARGET_") && (name.ends_with("_RUSTFLAGS") || name.ends_with("_LINKER")))
 }

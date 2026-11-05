@@ -12,7 +12,7 @@ let read_file path =
 
 let () =
   if Array.length Sys.argv < 3 then (
-    prerr_endline "usage: checker <ownership|names|caps|caps-transitive|call-modes|bounds|init|fields|rc-sig> <witness-file>";
+    prerr_endline "usage: checker <ownership|names|caps|caps-transitive|call-modes|bounds|init|fields|rc-sig|native-calls> <witness-file>";
     exit 2);
   let mode = Sys.argv.(1) in
   let bytes = read_file Sys.argv.(2) in
@@ -27,8 +27,9 @@ let () =
     | "init" -> Checker.check_init_cert bytes  (* every construction site fills its block; accept ⟹ initialized (#4013) *)
     | "fields" -> Checker.check_fields_cert bytes  (* every field held to its kind's layout; accept ⟹ in bounds and initialized (#4279) *)
     | "rc-sig" -> Checker.check_sig_cert bytes  (* a helper's body nets each heap param to its declared mode on every path (#4278) *)
+    | "native-calls" -> Checker.check_native_calls_cert bytes  (* native call sites agree with and bind every moved argument (#4006) *)
     | m ->
-      prerr_endline ("unknown property: " ^ m ^ " (try: ownership | names | caps | caps-transitive | call-modes | bounds | init | fields | rc-sig)");
+      prerr_endline ("unknown property: " ^ m ^ " (try: ownership | names | caps | caps-transitive | call-modes | bounds | init | fields | rc-sig | native-calls)");
       exit 2
   in
   if accepted then (print_endline "ACCEPT"; exit 0)

@@ -22,6 +22,7 @@
 // ── Conversions ──
 /// Decimal digits, with - when negative.
 @intrinsic("almide_rt_int_to_string")
+@scalar_text
 fn to_string(x: Int) -> String = _
 
 /// Lowercase hex, no 0x; -1 gives 16 f digits.

@@ -176,11 +176,13 @@ impl Emitter<'_> {
 }
 
 /// The resolved field place of [`Emitter::try_field_append_assign`]: the
-/// root local, its record type, the (type, offset) of every inner record on
-/// the path, and the leaf field's (type, offset).
+/// root's slot (a local, or a top-level global), its record type, the
+/// (type, offset) of every inner record on the path, and the leaf field's
+/// (type, offset).
 struct FieldPlace {
     idx: u32,
     root: SliceTy,
+    global: bool,
     inner: Vec<(SliceTy, u32)>,
     leaf: (SliceTy, u32),
 }
@@ -210,9 +212,10 @@ impl Emitter<'_> {
     /// & de Moura 2019; Perceus, Reinking et al. 2021) applied to a field
     /// slot: the rc test is the dynamic proof the update is unobservable.
     ///
-    /// Admitted: a plain local root (not a C-319 cell, not a global — a call
-    /// in the right side could replace either under the held record), the
-    /// right side not mentioning the root (it would read the place twice),
+    /// Admitted: a plain local root (not a C-319 cell), or a module-level
+    /// `var` when the appended operand is inert ([`appended_admitted`]: a
+    /// call in it could replace the global under the held record); the
+    /// right side not mentioning the root (it would read the place twice);
     /// an unmetered frame. Anything else keeps the copy-on-write write-back.
     pub(crate) fn try_field_append_assign(
         &mut self,
@@ -229,17 +232,21 @@ impl Emitter<'_> {
         let free_of_root = |e: &IrExpr| !almide_ir::free_vars::free_vars(e, &Default::default()).contains(target);
         let (head, appended) = match place.leaf.0 {
             SliceTy::Scalar(Scalar::Str) => match concat_operands(value, almide_ir::BinOp::ConcatStr) {
-                Some((left, right)) if is_place(left) && free_of_root(right) => {
+                Some((left, right)) if is_place(left) && free_of_root(right) && appended_admitted(&place, right) => {
                     (left, Appended::Str(right))
                 }
                 _ => match interp_tail(value, *target, is_place) {
-                    Some((head, tail)) => (head, Appended::Built(self.owned_call_marks.pin(tail))),
-                    None => return Ok(false),
+                    Some((head, tail)) if !place.global => (head, Appended::Built(self.owned_call_marks.pin(tail))),
+                    _ => return Ok(false),
                 },
             },
             SliceTy::List(_) => match concat_operands(value, almide_ir::BinOp::ConcatList) {
                 Some((left, right)) if is_place(left) => match &right.kind {
-                    IrExprKind::List { elements } if elements.len() == 1 && free_of_root(&elements[0]) => {
+                    IrExprKind::List { elements }
+                        if elements.len() == 1
+                            && free_of_root(&elements[0])
+                            && appended_admitted(&place, &elements[0]) =>
+                    {
                         (left, Appended::Elem(&elements[0]))
                     }
                     _ => return Ok(false),
@@ -265,7 +272,10 @@ impl Emitter<'_> {
         let Some(place) = self.field_append_place(&target, &path) else {
             return Ok(false);
         };
-        if place.leaf.0 != STR || almide_ir::free_vars::free_vars(x, &Default::default()).contains(&target) {
+        if place.leaf.0 != STR
+            || almide_ir::free_vars::free_vars(x, &Default::default()).contains(&target)
+            || !appended_admitted(&place, x)
+        {
             return Ok(false);
         }
         self.emit_field_append(&target, recv, &place, Appended::Str(x))?;
@@ -276,6 +286,30 @@ impl Emitter<'_> {
         Ok(true)
     }
 
+    /// #4475 — the list twin of [`Self::try_field_push_str`]: `list.push(b.xs, v)`
+    /// is the field window's `b.xs = b.xs + [v]` — the same place, the same
+    /// admission, the same `$cow` + `$list_push` in place. Without it every
+    /// push on a record field (a local record or a module-level `var`'s
+    /// field) took `field_assign_with`'s full `$concat` copy: quadratic in
+    /// the list's length where native's `Vec::push` is amortized O(1).
+    pub(crate) fn try_field_push_list(&mut self, recv: &IrExpr, v: &IrExpr) -> Result<bool, EmitError> {
+        let Some((target, path)) = crate::list_mut::record_field_receiver(recv) else {
+            return Ok(false);
+        };
+        let Some(place) = self.field_append_place(&target, &path) else {
+            return Ok(false);
+        };
+        if !matches!(place.leaf.0, SliceTy::List(_))
+            || almide_ir::free_vars::free_vars(v, &Default::default()).contains(&target)
+            || !appended_admitted(&place, v)
+        {
+            return Ok(false);
+        }
+        self.emit_field_append(&target, recv, &place, Appended::Elem(v))?;
+        self.witness_inline_arg(v);
+        Ok(true)
+    }
+
     /// The place `target.path` when the field window may write it: a plain
     /// droppable record local, every inner step a record (each one judged
     /// unique by `make_mut_place_unique`), the leaf a String or a List.
@@ -283,7 +317,7 @@ impl Emitter<'_> {
         if self.metered || self.cells.contains(target) {
             return None;
         }
-        let &(idx, root) = self.locals.get(target)?;
+        let (idx, root, global) = self.mut_var(target)?;
         let (leaf_field, inner_fields) = path.split_last()?;
         let mut cur = root;
         let mut inner = Vec::with_capacity(inner_fields.len());
@@ -299,7 +333,8 @@ impl Emitter<'_> {
             return None;
         }
         let leaf = self.record_field_slot(cur, leaf_field).ok()?;
-        matches!(leaf.0, SliceTy::Scalar(Scalar::Str) | SliceTy::List(_)).then_some(FieldPlace { idx, root, inner, leaf })
+        matches!(leaf.0, SliceTy::Scalar(Scalar::Str) | SliceTy::List(_))
+            .then_some(FieldPlace { idx, root, global, inner, leaf })
     }
 
     /// Unshare the path, read the leaf's parent record, append, store the
@@ -317,10 +352,10 @@ impl Emitter<'_> {
         // `$cow` took the var's credit on the record it held and left the
         // var holding one on the (possibly copied) record — the mut
         // receiver's rebind (`emit_read_mut_var_cow`).
-        self.witness_mut_rebind(*target, false);
+        self.witness_mut_rebind(*target, place.global);
         let (lty, loff) = place.leaf;
         let hp = self.hold_i32()?;
-        self.emit_read_mut_var(target, place.idx, place.root, false);
+        self.emit_read_mut_var(target, place.idx, place.root, place.global);
         for &(fty, off) in &place.inner {
             self.load_ty_slot(fty, off);
         }
@@ -357,6 +392,30 @@ impl Emitter<'_> {
         self.store_ty_slot(STR, off);
         self.release_owned_operand(release);
         Ok(())
+    }
+}
+
+/// May the field window append `e` to `place`? Always for a local root. A
+/// module-level `var` root is held across the operand's lowering, and any
+/// call in the operand (a fn, a closure) could rebind that global and free
+/// the held record; an INERT operand — literals, vars, field and tuple
+/// reads, operators over them — runs no code of the program's.
+fn appended_admitted(place: &FieldPlace, e: &IrExpr) -> bool {
+    !place.global || is_inert(e)
+}
+
+fn is_inert(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::LitInt { .. }
+        | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit
+        | IrExprKind::Var { .. } => true,
+        IrExprKind::BinOp { left, right, .. } => is_inert(left) && is_inert(right),
+        IrExprKind::UnOp { operand, .. } => is_inert(operand),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => is_inert(object),
+        _ => false,
     }
 }
 

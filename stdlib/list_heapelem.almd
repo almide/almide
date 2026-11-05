@@ -46,6 +46,7 @@ else {
   0
 }
 
+@specializes("list.set")
 fn list_set_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -103,6 +104,7 @@ fn __lsh_insert_fill(srcbase: Int, dstbase: Int, n: Int, idx: Int, x: Value) -> 
 }
 
 // v0 clamps the index to [0, n]; a negative index appends.
+@specializes("list.insert")
 fn list_insert_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -129,6 +131,7 @@ fn __lsh_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> In
 
 // The removed element is simply NOT copied, so the result never owns it and the
 // source's own drop frees it exactly once — no drop is owed here.
+@specializes("list.remove_at")
 fn list_remove_at_heapelem(xs: List[Value], i: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -156,6 +159,7 @@ else {
   0
 }
 
+@specializes("list.swap")
 fn list_swap_heapelem(xs: List[Value], i: Int, j: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -167,6 +171,7 @@ fn list_swap_heapelem(xs: List[Value], i: Int, j: Int) -> List[Value] = {
 }
 
 // ── suffix copies ────────────────────────────────────────────────────────────
+@specializes("list.take_end")
 fn list_take_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -178,6 +183,7 @@ fn list_take_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   buf
 }
 
+@specializes("list.drop_end")
 fn list_drop_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)

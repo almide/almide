@@ -1,3 +1,32 @@
+/// The env-block layout ONE lift decided: the captures in SLOT ORDER
+/// (`[closures][nested heap][flat heap][cell-map][scalars]`) plus the per-class counts
+/// the self-describing drop header carries. Bundled so the phases after the partition
+/// read one value instead of five positional `usize`s that could be transposed — and a
+/// transposition here mis-frees the block.
+struct CaptureLayout {
+    captures: Vec<(VarId, Ty)>,
+    n_closure: usize,
+    n_rich: usize,
+    n_heap: usize,
+    n_nested_heap: usize,
+    n_cellmap: usize,
+}
+
+impl CaptureLayout {
+    /// Slots `2..2 + handle_slots()` hold HANDLES (closure, rich-wrapper, nested-heap,
+    /// flat-heap and cell-map captures); everything after them is a raw scalar slot.
+    /// The prologue's `LoadHandle`-vs-`ListGetScalar` split, the header's zero test and
+    /// the block store's co-own test all key on this same boundary.
+    fn handle_slots(&self) -> usize {
+        self.n_closure + self.n_rich + self.n_heap + self.n_nested_heap + self.n_cellmap
+    }
+
+    /// Is capture index `i` in the RICH class ([closures][RICH][…] order)?
+    fn is_rich(&self, i: usize) -> bool {
+        i >= self.n_closure && i < self.n_closure + self.n_rich
+    }
+}
+
 /// What the elements of a string-list literal are, for drop classification.
 ///
 /// Six of these were adjacent `bool` parameters, so any two could be transposed

@@ -333,6 +333,17 @@ impl<'a> Interpreter<'a> {
     fn eval_container_op_list_agg(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         match func {
             "__sum_int" => Some(self.list_sum(args)),
+            // The `${xs}` repr cells (stdlib/list.almd `__to_string_*`): the
+            // compound repr the oracle already renders an interpolated list with.
+            "__to_string_int" => list_repr_cell(args),
+            "__to_string_float" => list_repr_cell(args),
+            "__to_string_bool" => list_repr_cell(args),
+            "__to_string_str" => list_repr_cell(args),
+            // The `==` cells (stdlib/list.almd `__eq_*`): the oracle's own `==`.
+            "__eq_int" => list_eq_cell(args),
+            "__eq_float" => list_eq_cell(args),
+            "__eq_bool" => list_eq_cell(args),
+            "__eq_str" => list_eq_cell(args),
             // Structural, element-type-blind, mirroring the v0 runtime
             // exactly (runtime/rs/src/list.rs): dedup drops CONSECUTIVE
             // equals, unique keeps first occurrences, both under the same
@@ -781,6 +792,20 @@ fn list_elem_ty(tys: Option<&[almide_lang::types::Ty]>) -> Option<&almide_lang::
     use almide_lang::types::constructor::TypeConstructorId as C;
     match tys?.first()? {
         almide_lang::types::Ty::Applied(C::List, a) if a.len() == 1 => a.first(),
+        _ => None,
+    }
+}
+
+/// A list repr cell (`list.__to_string_*`): the compound repr the oracle
+/// renders an interpolated list with.
+fn list_repr_cell(args: &[Value]) -> Option<Flow> {
+    args.first().map(|xs| Flow::val(Value::str(xs.almide_repr())))
+}
+
+/// A list `==` cell (`list.__eq_*`): the oracle's own `==`.
+fn list_eq_cell(args: &[Value]) -> Option<Flow> {
+    match args {
+        [a, b] => Some(Flow::val(Value::Bool(a == b))),
         _ => None,
     }
 }

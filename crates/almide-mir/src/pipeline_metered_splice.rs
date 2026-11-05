@@ -227,6 +227,9 @@ pub fn native_meter_runtime() -> String {
 pub fn try_render_metered_splice(source: &str) -> Result<String, LowerError> {
     crate::charge_probe::reset_budget_used();
     let _strict = crate::lower::StrictValuesGuard::set(true);
+    // The native render loop-converts a self tail call over any heap carry
+    // (#4006 class A, #3550): `lower::owned_tco_slots`.
+    let _owned_tco = crate::lower::OwnedTcoSlotsGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
     crate::charge_probe::note_program_regions(almide_ir::meter_plan::program_has_regions(&ir));
     let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
@@ -240,6 +243,8 @@ pub fn try_render_metered_splice(source: &str) -> Result<String, LowerError> {
         )));
     }
     rewrite_native_result_windows(&ir, &mut functions);
+    rewrite_native_result_str_windows(&ir, &mut functions);
+    rewrite_native_option_windows(&ir, &mut functions);
     let mut sigs = build_native_sig_table(&ir, &functions, &record_layouts, &variant_layouts)?;
     let exempt = crate::charge_probe::entry_exempt_set(&ir);
     for (clone, base) in crate::charge_probe::insert_probe_charges(&mut functions, &exempt) {
