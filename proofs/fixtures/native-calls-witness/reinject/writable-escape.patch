@@ -44,3 +44,17 @@ index 4f03ed5bd..e4b878dc8 100644
      let Err(violations) = crate::verify_ownership(func) else {
          return Ok(());
      };
+diff --git a/crates/almide-mir/src/render_native_tail.rs b/crates/almide-mir/src/render_native_tail.rs
+index 81230981d..17b3d86eb 100644
+--- a/crates/almide-mir/src/render_native_tail.rs
++++ b/crates/almide-mir/src/render_native_tail.rs
+@@ -197,7 +197,8 @@ fn render_native_fn_sig(
+             Some(NTy::Res) => " -> Result<i64, AlmideString>".to_string(),
+             Some(NTy::VecStr | NTy::VecStrRef) => " -> Vec<AlmideString>".to_string(),
+             Some(NTy::Rec(i) | NTy::RecRef(i)) => format!(" -> {}", crate::render_native_rec::struct_name(*i)),
+-            Some(NTy::RecMut(_)) => return Err(wall("native: a writable borrow returned")),
++            // RE-INJECTED (#4491 drill): the writable borrow's return renders.
++            Some(NTy::RecMut(i)) => format!(" -> {}", crate::render_native_rec::struct_name(*i)),
+             Some(NTy::Opt) => " -> Option<i64>".to_string(),
+             Some(NTy::ResStr) => " -> Result<AlmideString, AlmideString>".to_string(),
+             None => return Err(wall("native: return value untyped")),
