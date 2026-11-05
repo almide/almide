@@ -63,8 +63,7 @@
 //! the list inside the loop (the copy-on-write contract: a shared block is
 //! never written or resized in place).
 //! A runtime helper's byte loop in the same shape (#4005: the char count,
-//! the codepoint walk, the UTF-8 check, `err_text`, the empty separator's
-//! split) records its read the same way, `e0 a0` on a stretch of its own
+//! the codepoint walk, the UTF-8 check, `err_text`) records its read the same way, `e0 a0` on a stretch of its own
 //! ([`helper_loop_exit`] / [`helper_read`]), when its body ships.
 //! Element accesses that go through none of these (stdlib `list.get`, the
 //! rest of the runtime's own routines) are not recorded.

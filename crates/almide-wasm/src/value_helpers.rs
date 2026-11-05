@@ -184,7 +184,6 @@ pub(crate) fn emit_string_split_helper() -> Function {
     let (tbl, k, c, res) = (11u32, 12u32, 13u32, 14u32);
     let pay = almide_layout::PAYLOAD as i32;
     let mut f = Function::new([(13, ValType::I32)]);
-    let anchor = crate::witness::anchor::begin_fn();
     let mut i = f.instructions();
     i.local_get(sb).i32_load(len_memarg()).local_set(slen);
     i.local_get(sep).i32_load(len_memarg()).local_set(seplen);
@@ -201,13 +200,8 @@ pub(crate) fn emit_string_split_helper() -> Function {
     i.i32_const(0).local_set(p);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(p).local_get(slen).i32_ge_u().br_if(1);
-    // char byte length by lead-byte class; #4005: the lead byte under the
-    // loop's exit test, in the bounds witness.
-    let site = crate::witness::bounds::helper_loop_exit(&f);
-    f.instructions().local_get(sb).i32_const(pay).i32_add().local_get(p).i32_add().i32_load8_u(raw8());
-    crate::witness::bounds::helper_read(site, &f);
-    let mut i = f.instructions();
-    i.local_set(j);
+    // char byte length by lead-byte class
+    i.local_get(sb).i32_const(pay).i32_add().local_get(p).i32_add().i32_load8_u(raw8()).local_set(j);
     i.local_get(j).i32_const(0x80).i32_lt_u().if_(BlockType::Result(ValType::I32));
     i.i32_const(1);
     i.else_();
@@ -285,6 +279,5 @@ pub(crate) fn emit_string_split_helper() -> Function {
     i.local_get(slot).local_get(piece).i32_store(raw8());
     i.local_get(dst);
     i.end();
-    crate::witness::anchor::seal(anchor, &f);
     f
 }

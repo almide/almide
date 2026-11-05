@@ -404,15 +404,16 @@ anchors`) each read ANCHORS REJECT, and 33 accept/refuse modules sit in
 byte loops in the same shape are recorded too (#4005,
 `witness::bounds::helper_loop_exit`): the char count (`$str_len_chars`), the
 codepoint offset's continuation walk (`$cp_off`), the UTF-8 check of
-`bytes.to_string` (its lead byte), `err_text`'s byte walk and the empty
-separator's split loop (its lead byte) — each read `e N a N` on its loop's
+`bytes.to_string` (its lead byte) and `err_text`'s byte walk — each read `e N a N` on its loop's
 exit `k >=u len(s); br_if 1`, the payload offset in the address (`s + 12 +
 k` at memarg offset 0, which almide-anchor-check reads as the same byte as
 `s + k` at offset 12). A helper body that does not ship records nothing.
 Not recorded: the rest of the string routines' own bodies, runtime routines
-owed to #4278's per-helper certificates — 20 byte reads in the emitter's
+owed to #4278's per-helper certificates — 21 byte reads in the emitter's
 helpers (runtime.rs 4, runtime_str.rs 6, utf8_helpers.rs 4, kmp.rs 4,
-json_helpers.rs, map_index.rs 1 each) and 120 `prim.load8` in the 24
+value_helpers.rs, json_helpers.rs, map_index.rs 1 each; the empty
+separator's split reads its lead byte after handing the string to
+`$str_len_chars`, which the count rule refuses) and 120 `prim.load8` in the 24
 self-hosted `stdlib/string_*.almd` bodies.
 
 **The native leg (#4006).** For the programs the verified native renderer
