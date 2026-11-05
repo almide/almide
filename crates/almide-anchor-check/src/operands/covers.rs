@@ -207,7 +207,7 @@ fn exit_test(fl: &Flow<'_, '_>, cmp: usize, a: &Access) -> Result<(), String> {
         // `k >=u n` failed and `n <= len(B)` by an enclosing test, so
         // `len(B) - n <= len(B) - n + k < len(B)`.
         (3, 0) => suffix_byte(fl, &ix, &cnt, &adds, acc),
-        _ => Err(format!("the byte access's address is not a string + its index: {addr:?}")),
+        _ => Err(format!("the byte access's address is not a string + its index: {addr:?} at offset {off}")),
     }
 }
 
