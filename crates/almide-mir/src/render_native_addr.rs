@@ -28,6 +28,8 @@ mod carrier;
 mod map;
 #[path = "render_native_slots.rs"]
 mod slots;
+#[path = "render_native_heap_slot.rs"]
+mod heap_slot;
 pub(crate) use carrier::{carrier_values, is_carrier, CarrierSig};
 pub(crate) use slots::flag_exits;
 

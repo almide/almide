@@ -33,6 +33,9 @@ pub(crate) fn render_addr_op(
     out: &mut String,
     indent: usize,
 ) -> Result<bool, LowerError> {
+    if let Some(r) = heap_slot::render_heap_slot_op(op, st, tys, out, indent) {
+        return r;
+    }
     if let Some(r) = carrier::render_carrier_op(op, st, tys, out, indent) {
         return r;
     }

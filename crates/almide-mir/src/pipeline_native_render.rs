@@ -191,6 +191,29 @@ fn rewrite_native_linked_mir(
     Ok(())
 }
 
+/// The storage slots holding a heap value whose declared type has a native
+/// kind (`native_slot_rewrite::heap_slot`), with a default to leave behind
+/// when one is taken. None in a program with a `fan`: its arms run on
+/// threads of their own.
+fn native_heap_slots(
+    functions: &[crate::MirFunction],
+    record_layouts: &crate::lower::RecordLayouts,
+    variant_layouts: &crate::lower::VariantLayouts,
+) -> std::collections::BTreeMap<u32, crate::render_native::NTy> {
+    if functions.iter().any(|f| f.name.starts_with("__fan_arm_")) {
+        return Default::default();
+    }
+    crate::lower::mutable_global_slot_types()
+        .into_iter()
+        .filter(|(_, t)| crate::lower::is_heap_ty(t))
+        .filter_map(|(slot, t)| {
+            let k = native_sig_kind(&t, record_layouts, variant_layouts)?;
+            let nty = crate::render_native_closure::owned_nty(k);
+            crate::render_native_rec::has_default(nty).then_some((slot, nty))
+        })
+        .collect()
+}
+
 /// When the program synthesized `__mg_init`, `main` calls it first.
 fn call_slot_init_from_main(functions: &mut [crate::MirFunction]) {
     if !functions.iter().any(|f| f.name == SLOT_INIT) {
@@ -336,6 +359,7 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     let linked = link_native_self_host(&mut functions, &ir)?;
     let linked_names: std::collections::BTreeSet<String> =
         functions.iter().filter(|f| !own.contains(&f.name)).map(|f| f.name.clone()).collect();
+    crate::native_slot_rewrite::set_heap_slots(native_heap_slots(&functions, &record_layouts, &variant_layouts));
     rewrite_native_linked_mir(&ir, &linked, &mut functions)?;
     let mut sigs = native_sigs_with_linked(&ir, &functions, &linked, &record_layouts, &variant_layouts)?;
     insert_native_probe_charges(&ir, &mut functions, &mut sigs);
