@@ -238,6 +238,7 @@ fn note_signature_recs(func: &MirFunction, sigs: &crate::render_native::NativeSi
     if let Some(r) = func.ret {
         note(r, own_ret);
     }
+    let empty = empty_list_blocks(func);
     for op in &func.ops {
         match op {
             Op::DropVariant { v, ty } => note(*v, crate::render_native_rec::rec_index(ty)),
@@ -250,11 +251,14 @@ fn note_signature_recs(func: &MirFunction, sigs: &crate::render_native::NativeSi
                         }
                     }
                 } else if let Some(f) = crate::native_floor::declared(name) {
-                    // A floor body's declared list of generated elements (an
-                    // empty `value.array([])` has no store to type it from).
+                    // A floor body's declared list of generated elements, for an
+                    // empty list (`value.array([])`), which no store types; a
+                    // filled one is typed from its stores as before.
                     for (a, p) in args.iter().zip(&f.params) {
                         if let crate::CallArg::Handle(v) = a {
-                            note(*v, crate::native_floor::generated_list_of(*p));
+                            if empty.contains(v) {
+                                note(*v, crate::native_floor::generated_list_of(*p));
+                            }
                         }
                     }
                 }
@@ -262,6 +266,29 @@ fn note_signature_recs(func: &MirFunction, sigs: &crate::render_native::NativeSi
             _ => {}
         }
     }
+}
+
+/// The list blocks a function allocates empty: a zero-length dynamic list
+/// or an empty literal.
+fn empty_list_blocks(func: &MirFunction) -> BTreeSet<ValueId> {
+    let zeros: BTreeSet<ValueId> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::ConstInt { dst, value: 0 } => Some(*dst),
+            _ => None,
+        })
+        .collect();
+    func.ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. } if zeros.contains(len) => Some(*dst),
+            Op::Alloc { dst, init: Init::Empty, .. } => Some(*dst),
+            Op::Alloc { dst, init: Init::IntList(vs), .. } if vs.is_empty() => Some(*dst),
+            Op::ListLit { dst, elems } if elems.is_empty() => Some(*dst),
+            _ => None,
+        })
+        .collect()
 }
 
 /// #4006: heap Option/Result carriers (and map aliases), typed by the
