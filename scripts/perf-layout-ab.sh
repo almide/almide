@@ -19,9 +19,15 @@
 #   A = ALMIDE_RELEASE_STD_UNSPLIT=1 (the plain fat-LTO profile)
 #   B = the default profile (the backtrace split, src/cli/std_split.rs)
 #
+# Two compilers instead of two profiles of one (#4457, a link-profile change):
+#   ALMIDE_BIN=<before> ALMIDE_BIN_B=<after> A_ENV=- scripts/perf-layout-ab.sh
+#
 # Usage: ALMIDE_BIN=target/release/almide scripts/perf-layout-ab.sh [row ...]
 #   env: LAYOUTS (16) ROUNDS (5) OUT (a temp dir; keeps the binaries and the
 #        per-run times in $OUT/times.json)
+#        ALMIDE_BIN_B (ALMIDE_BIN): the compiler that builds side B
+#        A_ENV ("ALMIDE_RELEASE_STD_UNSPLIT=1"): the variable side A builds
+#        with; "-" for none
 #        SECTIONS (".text*"): the output-section globs shuffled, space-separated;
 #        ".text* .rodata* .data* .bss*" randomizes where the data lands too
 # Linux x86_64 with rust-lld (the rustc default there) only.
@@ -29,6 +35,8 @@ set -euo pipefail
 export LC_ALL=C
 cd "$(git rev-parse --show-toplevel)"
 ALMIDE="$(realpath "${ALMIDE_BIN:-$(command -v almide)}")"
+ALMIDE_B="$(realpath "${ALMIDE_BIN_B:-$ALMIDE}")"
+A_ENV="${A_ENV:-ALMIDE_RELEASE_STD_UNSPLIT=1}"
 LAYOUTS="${LAYOUTS:-16}"
 ROUNDS="${ROUNDS:-5}"
 OUT="${OUT:-$(mktemp -d)}"
@@ -73,7 +81,7 @@ fi
 [ -n "$rows" ] || { echo "perf-layout-ab: no such row: $*"; exit 2; }
 echo "$rows" > "$OUT/rows.txt"
 
-# The shuffle seed reaches the fat-LTO link through a `rustc` shim first on
+# The shuffle seed reaches the LTO link through a `rustc` shim first on
 # PATH (almide calls `rustc`; cargo finds the same one): it appends the lld
 # flags to the one rustc call that links with LTO and passes every other call
 # through untouched.
@@ -82,7 +90,7 @@ cat > "$OUT/shim/rustc" <<EOF
 #!/usr/bin/env bash
 set -f
 for a in "\$@"; do
-  if [ "\$a" = "lto=fat" ] || [ "\$a" = "lto" ]; then
+  if [ "\$a" = "lto=fat" ] || [ "\$a" = "lto=thin" ] || [ "\$a" = "lto" ]; then
     extra=()
     for g in $SECTIONS; do extra+=("-Clink-arg=-Wl,--shuffle-sections=\$g=\$LAYOUT_SEED"); done
     exec "$REAL_RUSTC" "\$@" "\${extra[@]}"
@@ -97,9 +105,11 @@ for side in A B; do
     cell="$side$k"; mkdir -p "$OUT/bin/$cell" "$OUT/tmp/$cell"
     while read -r name src arg abl; do
       envs=(LAYOUT_SEED=$((k * 7919)) TMPDIR="$OUT/tmp/$cell" PATH="$OUT/shim:$PATH")
-      [ "$side" = A ] && envs+=(ALMIDE_RELEASE_STD_UNSPLIT=1)
+      compiler="$ALMIDE"
+      [ "$side" = B ] && compiler="$ALMIDE_B"
+      [ "$side" = A ] && [ "$A_ENV" != "-" ] && envs+=("$A_ENV")
       [ "$abl" != "-" ] && envs+=("$abl=1")
-      if ! env "${envs[@]}" "$ALMIDE" build --release "$src" -o "$OUT/bin/$cell/$name" > "$OUT/bin/$cell/$name.log" 2>&1; then
+      if ! env "${envs[@]}" "$compiler" build --release "$src" -o "$OUT/bin/$cell/$name" > "$OUT/bin/$cell/$name.log" 2>&1; then
         cat "$OUT/bin/$cell/$name.log"; echo "perf-layout-ab: build failed: $cell $name"; exit 1
       fi
     done < "$OUT/rows.txt"

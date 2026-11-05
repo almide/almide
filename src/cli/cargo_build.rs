@@ -57,7 +57,7 @@ overflow-checks = false
 
 [profile.release]
 opt-level = 3
-lto = true
+lto = "thin"
 codegen-units = 1
 "#, lib_name.replace('-', "_"));
     let cargo_toml = build_cargo_toml(&cdylib_base, &generated_crate_deps(rs_code, native_deps));
@@ -189,7 +189,7 @@ pub(super) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path
 /// ~2.0 MB while one the cargo path built (no runtime use) shipped at 0.37 MB.
 /// Only `.debug_*` sections go: the code, the symbol table (backtraces still
 /// name their frames) and every message the program prints are unchanged.
-const FAST_PATH_RELEASE_ARGS: [&str; 6] = ["-C", "lto=fat", "-C", "codegen-units=1", "-C", "strip=debuginfo"];
+const FAST_PATH_RELEASE_ARGS: [&str; 6] = ["-C", "lto=thin", "-C", "codegen-units=1", "-C", "strip=debuginfo"];
 
 fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<Result<std::path::PathBuf, String>> {
     let opt_level = if release { "3" } else { "1" };
@@ -877,8 +877,8 @@ mod tests {
     #[test]
     fn the_release_fast_path_links_with_the_cargo_release_profile() {
         let release = GENERATED_CARGO_TOML.split("[profile.release]").nth(1).expect("a release profile");
-        assert!(release.contains("lto = true") && release.contains("codegen-units = 1"), "{release}");
-        assert!(FAST_PATH_RELEASE_ARGS.contains(&"lto=fat"), "{FAST_PATH_RELEASE_ARGS:?}");
+        assert!(release.contains("lto = \"thin\"") && release.contains("codegen-units = 1"), "{release}");
+        assert!(FAST_PATH_RELEASE_ARGS.contains(&"lto=thin"), "{FAST_PATH_RELEASE_ARGS:?}");
         assert!(FAST_PATH_RELEASE_ARGS.contains(&"codegen-units=1"), "{FAST_PATH_RELEASE_ARGS:?}");
         // #2092: the cargo release profile asks for no debug info, so cargo
         // strips it; the fast path has to say so to rustc itself.

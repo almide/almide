@@ -44,7 +44,7 @@ lto = "off"
 
 [profile.release]
 opt-level = 3
-lto = true
+lto = "thin"
 codegen-units = 1
 "#;
 
