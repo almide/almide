@@ -539,6 +539,19 @@ fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>,
     Ok(out)
 }
 
+/// The runtime items `text` names, each closed over what it reaches: what a
+/// render takes along for the runtime types its generated table aliases
+/// (#4514), the way a floor body takes its callees. A declared type nobody
+/// operates on is reached by no body, so without this its alias would name a
+/// definition that never arrives. `Err` names one the header cannot carry.
+pub(crate) fn runtime_items_named_by(text: &str) -> Result<Vec<&'static str>, String> {
+    let mut out = Vec::new();
+    for name in references(text).map_err(|n| format!("the generated types reach `{n}`, which the native header cannot carry"))? {
+        out.extend(closure(&name, runtime_index())?);
+    }
+    Ok(out)
+}
+
 /// The runtime item names `text` reaches that need a definition beside it,
 /// or `Err(name)` when it reaches a name the runtime or its prelude defines that
 /// is not an item we can take along (a type, a macro, a module, a prelude

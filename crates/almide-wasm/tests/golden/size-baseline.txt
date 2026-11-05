@@ -619,6 +619,8 @@
 5980	spec/wasm_cross/nan_canonical_bytes_set_write.almd
 3840	spec/wasm_cross/nan_canonical_bytes_write.almd
 1763	spec/wasm_cross/nan_canonical_observation.almd
+5475	spec/wasm_cross/native_list_option_fallback_float.almd
+803	spec/wasm_cross/native_unused_map_binding.almd
 5265	spec/wasm_cross/native_wall_shapes.almd
 10786	spec/wasm_cross/negative_count_rule.almd
 4841	spec/wasm_cross/negative_float_literal_sized.almd

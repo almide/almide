@@ -204,12 +204,15 @@ fn build_native_sig_table(
     functions: &[crate::MirFunction],
     record_layouts: &crate::lower::RecordLayouts,
     variant_layouts: &crate::lower::VariantLayouts,
+    keep: &dyn Fn(&str) -> bool,
 ) -> Result<crate::render_native::NativeSigs, LowerError> {
     // The SIG-KIND table (rung 4): the declared param/return kinds, computed here
     // where the Almide-level `Ty` is visible, so the native render can type a heap
-    // `Repr::Ptr` as `&str` vs `&[i64]` per the declaration.
+    // `Repr::Ptr` as `&str` vs `&[i64]` per the declaration. Only the fns `keep`
+    // admits are visited: reading a signature's kinds registers its types in
+    // the generated type table (#4514).
     let mut sigs: crate::render_native::NativeSigs = Default::default();
-    declare_native_ir_sigs(ir, record_layouts, variant_layouts, &mut sigs);
+    declare_native_ir_sigs(ir, record_layouts, variant_layouts, &mut sigs, keep);
     widen_native_sigs_to_lane(functions, &mut sigs);
     declare_native_lambda_sigs(functions, record_layouts, variant_layouts, &mut sigs)?;
     Ok(sigs)
@@ -222,11 +225,12 @@ fn declare_native_ir_sigs(
     record_layouts: &crate::lower::RecordLayouts,
     variant_layouts: &crate::lower::VariantLayouts,
     sigs: &mut crate::render_native::NativeSigs,
+    keep: &dyn Fn(&str) -> bool,
 ) {
     use almide_lang::types::Ty;
     use crate::render_native::NativeSigKind;
     for func in &ir.functions {
-        if func.is_test {
+        if func.is_test || !keep(func.name.as_str()) {
             continue;
         }
         let params: Option<Vec<_>> = func.params.iter().map(|p| native_sig_kind(&p.ty, record_layouts, variant_layouts)).collect();

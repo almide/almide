@@ -723,6 +723,8 @@ spec/wasm_cross/mutual_tail_recursion.almd
 spec/wasm_cross/nan_canonical_bytes_set_write.almd
 spec/wasm_cross/nan_canonical_bytes_write.almd
 spec/wasm_cross/nan_canonical_observation.almd
+spec/wasm_cross/native_list_option_fallback_float.almd
+spec/wasm_cross/native_unused_map_binding.almd
 spec/wasm_cross/native_wall_shapes.almd
 spec/wasm_cross/negative_count_rule.almd
 spec/wasm_cross/negative_float_literal_sized.almd
