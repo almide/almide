@@ -209,10 +209,7 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
         match render_user_fn_call(call, callee, sigs, OpSink { tys: &mut *tys, out: &mut *out, indent, used_shims: &mut *used_shims }) {
             // A linked self-hosted body that refuses the call's argument
             // kinds: the runtime body its declaration names serves it, if any.
-            Err(e) => match crate::native_hof::try_render(call, user_fns, sigs, OpSink { tys, out, indent, used_shims })? {
-                true => Ok(()),
-                false => Err(e),
-            },
+            Err(e) => crate::native_hof::serve_or(e, call, user_fns, sigs, OpSink { tys, out, indent, used_shims }),
             ok => ok,
         }
     } else if crate::native_hof::pruned(name) {
