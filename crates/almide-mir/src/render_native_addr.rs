@@ -249,6 +249,14 @@ fn note_signature_recs(func: &MirFunction, sigs: &crate::render_native::NativeSi
                             note(*v, rec_kind(Some(k)));
                         }
                     }
+                } else if let Some(f) = crate::native_floor::declared(name) {
+                    // A floor body's declared list of generated elements (an
+                    // empty `value.array([])` has no store to type it from).
+                    for (a, p) in args.iter().zip(&f.params) {
+                        if let crate::CallArg::Handle(v) = a {
+                            note(*v, crate::native_floor::generated_list_of(*p));
+                        }
+                    }
                 }
             }
             _ => {}

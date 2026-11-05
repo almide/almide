@@ -195,3 +195,19 @@ fn floor_ret_simple(name: &str) -> Option<FloorRet> {
         _ => None,
     }
 }
+
+/// The generated list kind a floor list param declares: a list of runtime
+/// `Value`s, of matrices, or of `(String, Value)` pairs (the slot struct a
+/// stored pair literal is typed as). `None` for the scalar and String lists,
+/// which are no generated type, and for any other param.
+pub(crate) fn generated_list_of(p: FloorParam) -> Option<u16> {
+    use crate::render_native::NTy;
+    use crate::render_native_rec as rec;
+    let elem = match p {
+        FloorParam::List(ListElem::Value) => NTy::Rec(rec::value_index()),
+        FloorParam::List(ListElem::Matrix) => NTy::Rec(rec::matrix_index()),
+        FloorParam::List(ListElem::StrValuePairs) => NTy::Rec(rec::slots_type_of(&[NTy::Str, NTy::Rec(rec::value_index())])),
+        _ => return None,
+    };
+    Some(rec::list_type_of(elem))
+}
