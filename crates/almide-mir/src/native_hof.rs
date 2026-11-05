@@ -515,6 +515,22 @@ pub(crate) fn try_render(
     Ok(true)
 }
 
+/// A call the linked body `call.name` refused with `refused`: served here,
+/// or that refusal stands.
+pub(crate) fn serve_or(
+    refused: LowerError,
+    call: crate::render_native::NativeCall<'_>,
+    user_fns: &BTreeMap<&str, &MirFunction>,
+    sigs: &NativeSigs,
+    s: crate::render_native::OpSink<'_>,
+) -> Result<(), LowerError> {
+    if try_render(call, user_fns, sigs, s)? {
+        Ok(())
+    } else {
+        Err(refused)
+    }
+}
+
 /// A call to a linked body the final render dropped, served here or walled.
 pub(crate) fn render_pruned(
     call: crate::render_native::NativeCall<'_>,
