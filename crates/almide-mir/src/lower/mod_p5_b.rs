@@ -212,7 +212,12 @@ pub(crate) fn try_tco_rewrite(
     params: &[almide_ir::IrParam],
     body: &IrExpr,
 ) -> Option<IrExpr> {
-    if !is_heap_ty(&body.ty) && has_tuple_destructure(body) {
+    // Not on the native render (owned TCO slots): there a destructuring loop
+    // body renders as a Rust `let (a, b) = …` re-run every iteration, and
+    // tests/native_owned_tco_slots_test.rs runs the 2026-07-03 shape (the
+    // destructured step feeding the self call) to the right answer, a million
+    // deep. The renders it changes are only ones the #3550 wall refused.
+    if !is_heap_ty(&body.ty) && has_tuple_destructure(body) && !crate::lower::owned_tco_slots() {
         // SCALAR-result gate: the loop rewrite mishandles a TUPLE-DESTRUCTURE bind in
         // the body (`let (cp, l) = __trim_cp(addr)` — the rewritten loop spun forever,
         // int.parse via the Unicode trim, 2026-07-03). Decline those; they keep the

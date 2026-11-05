@@ -75,6 +75,40 @@ effect fn main() -> Unit = {
     assert_eq!(run_native(src), "err bad 777777\nok 1000\n");
 }
 
+/// The scalar-result tuple-destructure gate (2026-07-03: `let (cp, l) =
+/// __trim_cp(addr)` then `__trim_start(addr + l, end)`, whose loop spun on
+/// the wasm leg) is lifted on the native render only. The same shape — the
+/// destructured step feeding the self call — and a destructured heap tuple
+/// carry (`fib_help`) loop and terminate with the right answers, a million
+/// deep.
+#[test]
+fn a_destructuring_scalar_tail_call_loops_and_terminates_on_native() {
+    let src = r#"
+fn step(t: String, i: Int) -> (Int, Int) = if string.slice(t, i, i + 1) == "x" then (1, 2) else (0, 1)
+
+fn scan(t: String, i: Int, n: Int) -> Int = if i >= string.len(t) then n else {
+  let (c, l) = step(t, i)
+  scan(t, i + l, n + c)
+}
+
+fn count(k: Int, i: Int, n: Int) -> Int = if i >= k then n else {
+  let (c, l) = if i % 3 == 0 then (1, 2) else (0, 1)
+  count(k, i + l, n + c)
+}
+
+fn fib_help(n: Int, acc: (Int, Int)) -> Int = {
+  let (cur, next) = acc
+  if n == 0 then cur else fib_help(n - 1, (next, cur + next))
+}
+
+effect fn main() -> Unit = {
+  println("${scan("axbxxc", 0, 0)} ${count(1000000, 0, 0)} ${fib_help(50, (0, 1))}")
+}
+"#;
+    render(src).unwrap_or_else(|e| panic!("the destructuring tail calls wall: {e}"));
+    assert_eq!(run_native(src), "2 333334 12586269025\n");
+}
+
 /// The #3550 wall is unchanged: a heap self tail call the loop conversion
 /// still declines (two heap carries that read each other, which no update
 /// order can stage) walls with its reason.
