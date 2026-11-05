@@ -316,7 +316,7 @@ fn child_output_reaches_the_guest_valid() {
         &format!(
             r#"import process
 {SHOW}
-fn cmd() -> process.ProcessCommand = {{ cmd: "sh", args: ["-c", "cat bad.bin; cat bad.bin >&2"] }}
+fn cmd() -> process.ProcessCommand = process.ProcessCommand {{ cmd: "sh", args: ["-c", "cat bad.bin; cat bad.bin >&2"] }}
 
 effect fn main() -> Unit = {{
   vr("exec", process.exec("sh", ["-c", "cat bad.bin"]))
@@ -336,11 +336,16 @@ effect fn main() -> Unit = {{
         ok(st) => v("wait", st.stdout + st.stderr),
         err(e) => v("wait", e),
       }}
-      v("read_new", process.read_new_stdout(child) + process.read_new_stderr(child))
+      v("read_new", process.read_new_stdout(child)! + process.read_new_stderr(child)!)
+      match process.stop(child, 100) {{
+        ok(st) => v("stop", st.stdout + st.stderr),
+        err(e) => v("stop", e),
+      }}
     }},
     err(e) => {{
       v("wait", e)
       v("read_new", e)
+      v("stop", e)
     }},
   }}
 }}
@@ -351,7 +356,7 @@ effect fn main() -> Unit = {{
     let probe = Probe { src: &src, cwd: t.path(), envs: vec![], args: vec![] };
     for leg in [Leg::Native, Leg::Embedded] {
         if let Some(out) = run(&probe, leg, t.path()) {
-            assert_valid(leg, &out, &["exec", "output_stdout", "output_stderr", "wait", "read_new"]);
+            assert_valid(leg, &out, &["exec", "output_stdout", "output_stderr", "wait", "read_new", "stop"]);
         }
     }
 }
