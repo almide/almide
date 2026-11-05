@@ -58,6 +58,15 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // ── #4006 C1: a combinator call its linked self-hosted body refuses,
+    //    served by the runtime body its declaration names (native_hof):
+    //    a list moved in at its last read, a list read again (copied), a
+    //    scalar capture, a Float lambda over the runtime matrix ──
+    ("hof_fold_opt", "fn main() -> Unit = {\n  let v: List[Int?] = [some(1), none, some(3)]\n  println(int.to_string(list.fold(v, 0, (a, o) => a + (o ?? 10))))\n}\n"),
+    ("hof_fold_opt_kept", "fn main() -> Unit = {\n  let base = 100\n  let v: List[Int?] = [some(1), none, some(3)]\n  let s = list.fold(v, 0, (a, o) => a + (o ?? base))\n  println(int.to_string(s))\n  println(int.to_string(list.len(v)))\n}\n"),
+    ("hof_map_opt", "fn main() -> Unit = {\n  let v: List[Int?] = [some(4), none]\n  let w = list.map(v, (o) => (o ?? 0) * 2)\n  println(int.to_string(w[0] + w[1]))\n}\n"),
+    ("hof_flat_map_rows", "fn main() -> Unit = {\n  let rows: List[List[Int]] = [[1, 2], [3]]\n  let flat = list.flat_map(rows, (r) => r)\n  println(int.to_string(list.len(flat)))\n  println(int.to_string(flat[2]))\n}\n"),
+    ("hof_matrix_map_capture", "fn main() -> Unit = {\n  let s = 2.5\n  let m = matrix.from_lists([[1.0, -2.0], [0.5, 4.0]])\n  let t = matrix.map(m, (x) => x * s)\n  println(\"${matrix.to_lists(t)}\")\n  println(\"${matrix.to_lists(m)}\")\n}\n"),
     // ── Rung 5 closures slab: scalar-capture closures are env slot blocks
     //    ([fnidx, drop-header, captures…]) dispatched via __almd_ci_* tables ──
     ("closure_capture", "fn adder(n: Int) -> (Int) -> Int = (x) => x + n\n\nfn main() -> Unit = {\n  let add3 = adder(3)\n  println(int.to_string(add3(7)))\n  println(int.to_string(add3(39)))\n}\n"),
