@@ -54,7 +54,7 @@ crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_list_
 crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_list_concat::{closure#0}	2
 crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_list_get_scalar::{closure#0}	1
 crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_list_set_scalar::{closure#0}	1
-crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_set_local	34
+crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_set_local	32
 crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_set_local::{closure#0}	1
 crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_user_fn_call	3
 crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::shim_arg_in_declared_mode	9
@@ -81,7 +81,7 @@ crates/almide-mir/src/render_native_b_tail.rs	almide_mir::render_native::render_
 crates/almide-mir/src/render_native_b_tail.rs	almide_mir::render_native::render_float_un::{closure#0}	1
 crates/almide-mir/src/render_native_b_tail.rs	almide_mir::render_native::render_int_binop	7
 crates/almide-mir/src/render_native_borrow_read.rs	almide_mir::render_native_borrow_read::block_untouched	5
-crates/almide-mir/src/render_native_borrow_read.rs	almide_mir::render_native_borrow_read::borrow_reads	2
+crates/almide-mir/src/render_native_borrow_read.rs	almide_mir::render_native_borrow_read::borrow_reads	1
 crates/almide-mir/src/render_native_borrow_read.rs	almide_mir::render_native_borrow_read::last_borrowing_use::{closure#1}	2
 crates/almide-mir/src/render_native_bounds.rs	<almide_mir::render_native_bounds::ExitFacts>::exit_test_at	1
 crates/almide-mir/src/render_native_bounds.rs	almide_mir::render_native_bounds::close_structure	2
@@ -98,12 +98,12 @@ crates/almide-mir/src/render_native_carrier.rs	almide_mir::render_native_addr::c
 crates/almide-mir/src/render_native_carrier.rs	almide_mir::render_native_addr::carrier::payload_rhs::{closure#1}	1
 crates/almide-mir/src/render_native_carrier.rs	almide_mir::render_native_addr::carrier::scalar_rhs	3
 crates/almide-mir/src/render_native_carrier.rs	almide_mir::render_native_addr::carrier::slot_kind	4
-crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::arg_kind	5
+crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::arg_kind	4
 crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::indirect_args	2
 crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::indirect_args::{closure#0}	1
 crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::indirect_env::{closure#0}	1
 crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::kind_code	6
-crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::owned_nty	5
+crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::owned_nty	2
 crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::param_spelling	8
 crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::push_typed_dispatch_tables	1
 crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::render_typed_call_indirect	3
@@ -137,7 +137,6 @@ crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_
 crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_native_float_op	13
 crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_native_meter_op	5
 crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_native_scalar_op	1
-crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_native_scalar_op::{closure#0}	1
 crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_native_termination_op	1
 crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_option_carrier_op	17
 crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_result_carrier_op	26
@@ -160,7 +159,6 @@ crates/almide-mir/src/render_native_rec_b.rs	<almide_mir::render_native_rec::Der
 crates/almide-mir/src/render_native_rec_b.rs	<almide_mir::render_native_rec::Derive>::spell	1
 crates/almide-mir/src/render_native_rec_b.rs	almide_mir::render_native_rec::reaches_self	1
 crates/almide-mir/src/render_native_shims.rs	almide_mir::render_native_shims::TIMEOUT_SHIM::{closure#0}	1
-crates/almide-mir/src/render_native_slots.rs	<almide_mir::render_native_addr::slots::BlockTyping>::block_stores	1
 crates/almide-mir/src/render_native_slots.rs	<almide_mir::render_native_addr::slots::BlockTyping>::read_kinds	1
 crates/almide-mir/src/render_native_slots.rs	almide_mir::render_native_addr::slots::owned	6
 crates/almide-mir/src/render_native_slots.rs	almide_mir::render_native_addr::slots::slot_kinds	6
