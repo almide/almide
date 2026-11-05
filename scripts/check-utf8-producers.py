@@ -359,8 +359,31 @@ def host_ops(root):
     fsv = read(root, 'crates/almide-wasi/src/fs_service.rs')
     table = fsv[fsv.index('pub const FS_SERVICE_OPS'):]
     ops.update(int(n) for n in re.findall(r'\((\d+),', table[:table.index('];')]))
-    proc_ = re.search(r'PROC_OPS: [^=]+= (\d+)..=(\d+);', read(root, 'crates/almide-wasi/src/proc_service.rs'))
-    ops.update(range(int(proc_.group(1)), int(proc_.group(2)) + 1))
+    # The op families are one declaration table (host_ops.rs, #4338): every
+    # `NAME = lo..=hi => caps;` row names its whole range.
+    # A PerOp family assigns only the ops its caps function answers: the
+    # numbers of its match arms when it has them, else the range less every
+    # `op != N` it excludes (a retired or unassigned op is no op).
+    hsrc = read(root, 'crates/almide-wasm/src/host_ops.rs')
+    fams = re.findall(r'^\s*[A-Z][A-Z0-9_]* = (\d+)\.\.=(\d+) => OpCaps::(All|PerOp)\(([a-z_0-9]*)', hsrc, re.M)
+    if not fams:
+        raise SystemExit('check-utf8-producers: no op family rows in crates/almide-wasm/src/host_ops.rs')
+    for lo, hi, kind, fn in fams:
+        span = set(range(int(lo), int(hi) + 1))
+        if kind == 'PerOp':
+            at = hsrc.index(f'fn {fn}(')
+            body = hsrc[at:hsrc.index('\n}\n', at)]
+            arms = set()
+            for arm in re.findall(r'^\s*([0-9][0-9 |.=]*)=>', body, re.M):
+                for part in arm.split('|'):
+                    part = part.strip()
+                    if '..=' in part:
+                        a, b = part.split('..=')
+                        arms.update(range(int(a), int(b) + 1))
+                    elif part:
+                        arms.add(int(part))
+            span = (span & arms) if arms else span - {int(n) for n in re.findall(r'op != (\d+)', body)}
+        ops.update(span)
     return ops
 
 
