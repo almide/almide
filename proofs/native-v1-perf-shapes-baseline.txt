@@ -43,7 +43,7 @@ crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::s
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_list_slot	19
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_list_slot::{closure#4}	5
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_list_slot::{closure#6}	3
-crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_rec_field	10
+crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_rec_field	9
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_rec_field::{closure#0}	1
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_rec_field::{closure#1}	1
 crates/almide-mir/src/render_native_append.rs	almide_mir::render_native_append::list_push	4

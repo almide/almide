@@ -115,6 +115,12 @@ pub(crate) struct AddrState {
     /// (`render_native_slots::single_elem_lists`): the element waits in
     /// `<list>_e0` and the append pushes it. `true` once it is stored.
     single: BTreeMap<ValueId, bool>,
+    /// The generated-list twin of `single`: a one-element list of records,
+    /// lists or variants that exists only to be appended to its own kind. Its
+    /// element waits in `<list>_e0` (the built-whole literal's binding) and the
+    /// append pushes it, instead of a `vec![…]` allocated and appended per
+    /// iteration. `true` once the element is stored.
+    single_rec: BTreeMap<ValueId, bool>,
     building_enum: BTreeMap<ValueId, (u32, Vec<Option<NTy>>)>,
     /// List blocks filled in slot order right after their allocation
     /// (`render_native_slots::filled_in_order`): reserved, then pushed.
@@ -155,11 +161,23 @@ impl AddrState {
             .collect();
         let whole = slots::built_whole(func, &alloc_rec, &base_of);
         let whole_enum = slots::enum_built_whole(func, &alloc_rec, &base_of, &consts);
-        let single: BTreeMap<ValueId, bool> = slots::single_elem_lists(func, &base_of, &consts).into_iter().map(|b| (b, false)).collect();
-        let pushed = slots::filled_in_order(func, &base_of, &consts)
+        // A generated list (records, lists, variants) takes the generated
+        // list's push below, whatever its block's alloc spelling.
+        let generated = |b: &ValueId| alloc_rec.get(b).is_some_and(|i| crate::render_native_rec::list_elem(*i).is_some());
+        let single: BTreeMap<ValueId, bool> =
+            slots::single_elem_lists(func, &base_of, &consts).into_iter().filter(|b| !generated(b)).map(|b| (b, false)).collect();
+        let pushed: BTreeSet<ValueId> = slots::filled_in_order(func, &base_of, &consts)
             .into_iter()
             .chain(slots::dense_loop_fills(func, &consts))
             .filter(|b| !single.contains_key(b))
+            .collect();
+        // Chosen only where the push is sure: the list the window appends to
+        // is of the block's own kind, and the window's result is the rebind's
+        // alone.
+        let single_rec = slots::single_elem_blocks(func, &base_of, &consts)
+            .into_iter()
+            .filter(|b| pushed.contains(b) && generated(b) && pushes_onto_own_kind(func, *b, &alloc_rec))
+            .map(|b| (b, false))
             .collect();
         let reassigned = stale_handles(func);
         let const_lists = slots::const_str_lists(func, &base_of, &consts);
@@ -210,6 +228,7 @@ impl AddrState {
             whole_enum,
             building_enum: BTreeMap::new(),
             single,
+            single_rec,
             pushed,
             literal: BTreeMap::new(),
         }
@@ -238,6 +257,7 @@ fn note_signature_recs(func: &MirFunction, sigs: &crate::render_native::NativeSi
     if let Some(r) = func.ret {
         note(r, own_ret);
     }
+    let empty = empty_list_blocks(func);
     for op in &func.ops {
         match op {
             Op::DropVariant { v, ty } => note(*v, crate::render_native_rec::rec_index(ty)),
@@ -249,11 +269,55 @@ fn note_signature_recs(func: &MirFunction, sigs: &crate::render_native::NativeSi
                             note(*v, rec_kind(Some(k)));
                         }
                     }
+                } else if let Some(f) = crate::native_floor::declared(name) {
+                    // A floor body's declared list of generated elements, for an
+                    // empty list (`value.array([])`), which no store types; a
+                    // filled one is typed from its stores as before.
+                    for (a, p) in args.iter().zip(&f.params) {
+                        if let crate::CallArg::Handle(v) = a {
+                            if empty.contains(v) {
+                                note(*v, crate::native_floor::generated_list_of(*p));
+                            }
+                        }
+                    }
                 }
             }
             _ => {}
         }
     }
+}
+
+/// `b` is appended by a self-append window `d = s + b; drop s; s = d` whose
+/// `s` is declared `b`'s own generated list kind and whose `d` nothing else reads.
+fn pushes_onto_own_kind(func: &MirFunction, b: ValueId, alloc_rec: &BTreeMap<ValueId, u16>) -> bool {
+    (0..func.ops.len()).any(|j| {
+        crate::render_native_append::self_append_window(func, j).is_some_and(|(s, x, d)| {
+            x == b && alloc_rec.get(&s) == alloc_rec.get(&b) && func.ret != Some(d) && crate::render_native_append::touches(func, d) == 2
+        })
+    })
+}
+
+/// The list blocks a function allocates empty: a zero-length dynamic list
+/// or an empty literal.
+fn empty_list_blocks(func: &MirFunction) -> BTreeSet<ValueId> {
+    let zeros: BTreeSet<ValueId> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::ConstInt { dst, value: 0 } => Some(*dst),
+            _ => None,
+        })
+        .collect();
+    func.ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. } if zeros.contains(len) => Some(*dst),
+            Op::Alloc { dst, init: Init::Empty, .. } => Some(*dst),
+            Op::Alloc { dst, init: Init::IntList(vs), .. } if vs.is_empty() => Some(*dst),
+            Op::ListLit { dst, elems } if elems.is_empty() => Some(*dst),
+            _ => None,
+        })
+        .collect()
 }
 
 /// #4006: heap Option/Result carriers (and map aliases), typed by the
@@ -671,6 +735,10 @@ pub(crate) fn single_concat(func: &MirFunction, i: usize, tys: &mut BTreeMap<Val
 
 pub(crate) fn single_push(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, NTy>, st: &mut AddrState) -> Option<(String, bool)> {
     let (s, x, d) = crate::render_native_append::self_append_window(func, i)?;
+    // A generated list's element: its window was checked when it was chosen.
+    if st.single_rec.remove(&x) == Some(true) {
+        return Some((format!("{}.push({}_e0);", var(s), var(x)), true));
+    }
     if st.single.get(&x) != Some(&true) {
         return None;
     }
