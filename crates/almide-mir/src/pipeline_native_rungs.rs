@@ -395,7 +395,8 @@ fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, linked: &[LinkedSelf
             _ => Vec::new(),
         };
         let carriers = heap_carrier_values(ir, f);
-        crate::native_option_rewrite::rewrite_option_ops(f, &option_fns, &opt_params, &carriers);
+        let filled = crate::option_blocks::of(&f.name);
+        crate::native_option_rewrite::rewrite_option_ops(f, &option_fns, &opt_params, &carriers, &filled);
     }
 }
 

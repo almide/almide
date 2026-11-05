@@ -319,6 +319,7 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     dump_native_mir_if_requested(source);
     crate::charge_probe::reset_budget_used();
     crate::lambda_sigs::clear();
+    crate::option_blocks::clear();
     let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = {
         let _slots = SlotHeldGlobalsGuard::set(true);
