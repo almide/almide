@@ -180,9 +180,15 @@ fn exit_test(fl: &Flow<'_, '_>, cmp: usize, a: &Access) -> Result<(), String> {
     if s != 1 {
         return list_slot(fl, &ix, counted, a);
     }
-    if width != 1 || off as i64 != PAYLOAD {
+    // The byte's place is the address plus the memarg offset: the payload
+    // offset sits in the memarg (user code's `B + i` at offset 12) or in
+    // the address (a runtime helper's `B + 12 + i` at offset 0, #4005) —
+    // only the sum is the byte's place in the block.
+    if width != 1 {
         return Err(format!("the exit test counts slots of 1 bytes, the access is {width} bytes at offset {off}"));
     }
+    let (adds, c) = split(addr);
+    let c = off as i64 + c - PAYLOAD;
     // `i < cnt <= len(B)`: `cnt` is `len(B)`, or bounded by it.
     let below = |b: &T| -> Result<(), String> {
         let direct = match &counted {
@@ -191,7 +197,6 @@ fn exit_test(fl: &Flow<'_, '_>, cmp: usize, a: &Access) -> Result<(), String> {
         };
         direct.or_else(|e| fl.len_bounds(&cnt, b, acc).map_err(|f| format!("{e}; {f}")))
     };
-    let (adds, c) = split(addr);
     let zero = T::Const(0);
     match (adds.len(), c) {
         // byte 0: `B`, the test `0 >=u cnt`
