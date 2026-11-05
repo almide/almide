@@ -394,13 +394,15 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
 /// declared return type (`-> T { T::Variant(…) }`): a constructor.
 fn is_one_line_constructor(item: &str) -> bool {
     let t = item.trim();
-    if t.contains('\n') || !(t.starts_with("pub fn ") || t.starts_with("fn ")) {
-        return false;
-    }
-    let Some((head, body)) = t.split_once('{') else { return false };
-    let Some((_, ret)) = head.rsplit_once("->") else { return false };
-    let ret = ret.trim();
-    !ret.is_empty() && ret.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && body.trim_start().starts_with(&format!("{ret}::"))
+    !t.contains('\n') && (t.starts_with("pub fn ") || t.starts_with("fn ")) && builds_its_return_type(t).is_some()
+}
+
+/// `Some` iff the one-line fn `t`'s body starts by naming its return type.
+fn builds_its_return_type(t: &str) -> Option<()> {
+    let (head, body) = t.split_once('{')?;
+    let ret = head.rsplit_once("->")?.1.trim();
+    (!ret.is_empty() && ret.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && body.trim_start().starts_with(&format!("{ret}::")))
+        .then_some(())
 }
 
 /// The `Op::FuncRef` table index of a lifted lambda: its position in the

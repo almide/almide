@@ -199,9 +199,18 @@ fn fills_each_slot_once(body: &[Op], b: ValueId, h: ValueId, c: ValueId, consts:
         let fine = match o {
             Op::LoopBreakUnless { .. } | Op::Return { .. } => false,
             Op::SetLocal { local, .. } if *local == c => matches!(body.last(), Some(l) if std::ptr::eq(l, o)),
-            Op::IntBinOp { dst, op: crate::IntOp::Mul, a, b: w } if *a == c && consts.get(w) == Some(&8) => scaled.insert(*dst) || true,
-            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b: k } if *a == h && consts.get(k) == Some(&12) => base12.insert(*dst) || true,
-            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b: x } if base12.contains(a) && scaled.contains(x) => slot_c.insert(*dst) || true,
+            Op::IntBinOp { dst, op: crate::IntOp::Mul, a, b: w } if *a == c && consts.get(w) == Some(&8) => {
+                scaled.insert(*dst);
+                true
+            },
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b: k } if *a == h && consts.get(k) == Some(&12) => {
+                base12.insert(*dst);
+                true
+            },
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b: x } if base12.contains(a) && scaled.contains(x) => {
+                slot_c.insert(*dst);
+                true
+            },
             Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.first().is_some_and(|a| slot_c.contains(a)) => {
                 stores += 1;
                 d == 0
