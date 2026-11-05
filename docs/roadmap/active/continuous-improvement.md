@@ -473,7 +473,7 @@ warning count against develop, not by the rounded grade.
     | `grain_gc_shapes` | 4,544 → 553 | 16.0 MB → 37 KB | 131,264 → 98,496 |
     | `koka_hqueens` | 4,626 → 4,371 | 68,252 → 65,016 | 71,088 → 70,800 |
     | `ref_gleam_tail_deep` | 18 → 11 | — | — |
-    | `koka_186_reused_names` | 133 → 130 | — | — |
+    | `merge_runs_shadowed_scrutinee` | 133 → 130 | — | — |
 
     Module size grows 35–338 bytes in those four, because the shift is emitted inline at the call site.
   - codopsy `crates/almide-wasm/src` A 91, 37 warnings, unchanged.

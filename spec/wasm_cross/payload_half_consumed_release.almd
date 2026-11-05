@@ -1,7 +1,7 @@
 // @contract: C-292
-// koka parc-leak1/leak1b: a wrapper's payload extracted and only HALF of it
-// consumed — the discarded tuple half / list tail must still be released.
-// (The koka bug leaked the unused half.)
+// A wrapper's payload extracted and only HALF of it consumed — the discarded
+// tuple half / list tail must still be released (the leak this pins is the
+// unused half staying allocated).
 fn main() -> Unit = {
   let fst = match some(("one" + "L", "two" + "R")) {
     some(xy) => match xy {

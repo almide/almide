@@ -1,18 +1,15 @@
 // @contract: C-292
-// koka #894: TWO SEQUENTIAL statement-position matches where an arm calls a
-// 2-ARG function — the second match's dispatch was corrupted by the first
+// TWO SEQUENTIAL statement-position matches where an arm calls a 2-ARG
+// function — the second match's dispatch was once corrupted by the first
 // arm's multi-arg call (the 1-arg spelling passed). Both spellings side by
 // side; every branch prints so a misdispatch is visible.
 type MyVal = | MStr(String) | MInt(Int)
 
-fn my_get(doc: List[(String, MyVal)], key: String) -> MyVal? = {
-  let hit = list.find(doc, (e) => match e {
-    (k, _) => k == key
-  })
-  option.map(hit, (e) => match e {
-    (_, v) => v
-  })
-}
+fn my_get(doc: List[(String, MyVal)], key: String) -> MyVal? = doc |> list.find((e) => match e {
+  (k, _) => k == key
+}) |> option.map((e) => match e {
+  (_, v) => v
+})
 
 fn check1(b: Bool) -> String = if b then "ok" else "FAIL"
 

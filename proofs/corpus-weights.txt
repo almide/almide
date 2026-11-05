@@ -62,6 +62,7 @@ bytes_search_edit_family	421	121	788
 bytes_set_value_semantics	350	21	427
 bytes_temp_receiver	56991	87160	468
 bytes_writer_family	388	46	444
+call_arg_eval_order_with_drops	261	10	302
 call_closure_lambda_param	248	17	408
 call_lambda_ctor	263	21	308
 callee_shadowing_family	263	16	335
@@ -69,6 +70,7 @@ checked_conversion_value_match	317	24	353
 chunk_str	277	12	394
 closure_accumulator	251	12	326
 closure_borrowed_arg_guard	270	33	405
+closure_capture_escapes_frame	247	17	331
 closure_captured_list_mutation	261	9	402
 closure_captured_map_records	412	221	451
 closure_rich_list_capture	398	122	433
@@ -102,6 +104,7 @@ compound_eq	366	19	557
 compound_repr_interp	304	20	803
 compound_repr_records_interp	305	24	590
 compound_repr_recursive_interp	259	12	439
+cons_map_rebuild_swap	251	23	309
 const_fold_nonfinite_float	253	9	315
 container_alias_return	271	22	310
 control_flow	255	17	306
@@ -224,6 +227,7 @@ general_recursion_tail	261	17	315
 generic_chain_unwrap_or	280	9	354
 generic_concat	251	41	330
 generic_fn_in_inferred_lambda	255	9	342
+generic_pick_drops_other	264	12	323
 generic_record_anon_field	264	29	321
 generic_record_field_size	246	8	332
 generic_record_fn_field	405	59	392
@@ -247,9 +251,11 @@ grain_pattern_guards	265	26	350
 grain_records_enums	253	13	333
 grain_string_escapes	272	11	336
 grouping_unary	259	18	322
+guard_chain_cons_list	247	18	298
 guard_else_exit_code		15	307
 guard_err_in_call_arg_block	255	25	313
 guard_let_statement	277	9	320
+guard_only_use_liveness	251	13	350
 guard_statement	247	15	288
 gzip_inflate_members	4588	5902	787
 hash_digests	1076	1158	364
@@ -308,23 +314,7 @@ json_string_span	526	32	396
 json_stringify_pretty	398	14	390
 json_value	519	35	429
 kernel_conformance	261	12	299
-koka_186_reused_names	275	17	440
-koka_beans_pairs	253	22	327
 koka_hqueens	325	71	400
-koka_inline4_joinsep	249	15	332
-koka_inline_ctor_reuse	252	23	341
-koka_issue894_seq_match	290	13	429
-koka_parc13_closure_escape	247	17	331
-koka_parc14_generic_pick	264	12	323
-koka_parc18_two_scrutinees	249	20	318
-koka_parc21_eval_order	261	10	302
-koka_parc3_guard_chain	247	18	298
-koka_parc6_local_scrutinee	268	12	330
-koka_parcleak1_half_consumed	257	17	329
-koka_rbtree_balance	252	11	364
-koka_reuse1_unzip	270	25	388
-koka_reuse4_map_rebuild	251	23	309
-koka_unicode_combining	295	12	334
 let_unwrap_propagation	393	18	324
 let_wildcard_discard	257	8	284
 letbound_variant_match	260	20	362
@@ -405,6 +395,7 @@ map_wide_int_key	300	17	429
 match_box_pattern_backstop	247	18	297
 match_container_literal	248	23	358
 match_forms	244	16	306
+match_local_scrutinee_dup	268	12	330
 match_payload_string_literal	270	22	465
 match_result	249	12	319
 math_atan_tanh	334	110	314
@@ -432,6 +423,7 @@ matrix_softmax_fastexp	503	27	1134
 matrix_zero_cols_rows	439	30	1581
 mem_checkpoint	287	79	322
 memory_stress	423	35	641
+merge_runs_shadowed_scrutinee	275	17	440
 mg_rebuild_two_phase	257	29	418
 module_global_const	325	9	323
 module_var_alias_cow	252	15	337
@@ -457,12 +449,14 @@ native_wall_shapes	261	9	306
 negative_float_literal_sized	271	15	289
 negative_offset_and_width_totality	385	27	447
 nested_ctor_pattern	251	12	311
+nested_ctor_swap_two_types	252	23	341
 nested_hof_lambda_inference	275	15	417
 nested_list_list_int	271	13	417
 nested_list_list_string	268	13	361
 nested_list_option_result	269	23	386
 nested_map_list_values	301	18	412
 nested_match_heap_arm	268	10	305
+nested_match_two_scrutinees	249	20	318
 nested_payload_guard	246	8	314
 nested_scalar_record_append	251	20	349
 nested_three_level_literal	246	8	310
@@ -491,6 +485,7 @@ or_pattern	258	9	304
 ord_record_variant	315	13	822
 ord_recursive	334	35	773
 path_extension_hidden	339	38	394
+payload_half_consumed_release	257	17	329
 phantom_type_param	258	16	315
 pipe_chain_scalar_bind	247	11	286
 pipe_compose_forms	260	18	303
@@ -519,6 +514,7 @@ range_bind_no_materialize	261	21	351
 range_bind_walled_no_materialize	257	8	332
 range_first_class	247	17	266
 range_materialize_oom	256	8	343
+rbtree_balance_rotations	252	11	364
 rc_alloc_stress	510	128	448
 rc_reclaim_churn	8158	12672	303
 record_default_field_omitted	248	19	332
@@ -537,8 +533,6 @@ ref_gleam_tail_deep	1091	1335	317
 ref_grain_nan_struct	260	9	325
 ref_grain_or_pattern_alias_match	261	21	326
 ref_int_min_div_abort	256	14	268
-ref_koka_guard_liveness	251	13	350
-ref_koka_rescrutinee	270	12	328
 ref_roc_shared_cow	277	25	360
 ref_roc_trmc_control	968	937	327
 ref_rust_or_pattern_guard_count	253	25	329
@@ -549,6 +543,7 @@ regex_repetition_depth	426683	271857	596
 repeat_size_ceiling	252	18	341
 replace_empty_pat	271	10	326
 repr_parity_pin	246	15	340
+rescrutinee_rebuild_live_binding	270	12	328
 reserved_keyword_fn	246	11	262
 result_combinators_heap_ok	299	31	419
 result_ctor_call_payload	266	26	330
@@ -573,9 +568,11 @@ rope_geometry_exceeds_aborts	522
 rope_geometry_family	577	57	1331
 scalar_if_arm_effects	346	23	352
 scan_heap_acc	263	17	383
+sequential_match_two_arg_call	290	13	429
 set_entries_reclaim	304	21	451
 set_index_order	343	54	493
 set_insertion_order	316	18	553
+shared_arg_pair_dup	253	22	327
 sized_int_overflow_wrap	309	18	341
 sized_int_record_fields	248	16	331
 sized_numeric_literals	247	10	338
@@ -601,6 +598,7 @@ string_from_bytes	286	16	332
 string_interp_large_hole	144913	103298	405
 string_interpolation	250	15	323
 string_is_alphanumeric	284	40	293
+string_join_accumulator	249	15	332
 string_lines	277	14	319
 string_ops	326	26	346
 string_ops_drain	306	46	404
@@ -707,6 +705,7 @@ tuple_ops	262	9	293
 tuple_single	245	16	291
 uint64_upper_half	269	30	313
 unannotated_toplet_generic_ctor	260	8	327
+unicode_combining_marks	295	12	334
 unique_non_flat_element	250	16	329
 unit_effect_abi	261	9	312
 unsigned_literal_domain	288	18	311
@@ -723,6 +722,7 @@ unwrap_or_tail_result	295	20	345
 unwrap_or_tuple_payload_extract	259	9	320
 unwrap_or_unwrap_fallback	578	63	501
 unwrap_or_value_fn_named_parse	511	25	391
+unzip_accumulator_rotate	270	25	388
 uoe_heap_ok_share	282	18	386
 user_box_recursive_enum	251	9	374
 value_array_leak_loop	7098	5192	323

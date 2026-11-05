@@ -1,7 +1,7 @@
 // @contract: C-292
-// koka inline4: separator-join through a recursive string accumulator (the
-// string-builder pressure shape: every step concats acc + sep + y, dropping
-// the previous acc).
+// Separator-join through a recursive string accumulator (the string-builder
+// pressure shape: every step concats acc + sep + y, dropping the previous
+// acc).
 type SList = | SNil | SCons(String, SList)
 
 fn join_acc(ys: SList, sep: String, acc: String) -> String = match ys {

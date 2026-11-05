@@ -1,8 +1,8 @@
 // @contract: C-292
-// koka parc14 (+parc7/8): two same-typed generic params, exactly ONE
-// consumed per branch — the other must be dropped, not leaked. Instantiated
-// at Int (no drop), String and List[Int] (drop required). Plus the scalar
-// x + x dup (parc8) and the drop-the-second-param shape (parc7).
+// Two same-typed generic params, exactly ONE consumed per branch — the other
+// must be dropped, not leaked. Instantiated at Int (no drop), String and
+// List[Int] (drop required). Plus the scalar x + x dup and the
+// drop-the-second-param shape.
 fn pick[T](x: Int, y: T, z: T) -> T = match x {
   0 => y,
   _ => z,
