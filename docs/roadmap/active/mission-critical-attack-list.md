@@ -64,7 +64,7 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
   so every code is on the ≥3-family bar the coverage gate enforces.
 - [x] **A1-4 (M, #1529) RC-placement snapshots (koka parc model).** Commit the
   post-RC-insertion drop/dup placement as expected output beside the runtime
-  result for an RC-critical corpus (the koka_parc* family is the seed), so a
+  result for an RC-critical corpus (the C-292 ownership-shape fixture family is the seed), so a
   benign-today placement move is loud. Exit: snapshot gate in CI over ≥ 20
   shapes.
   DONE 2026-08-19 (#1529 closed): 21-shape snapshot gate

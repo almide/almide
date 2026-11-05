@@ -1,7 +1,7 @@
 // @contract: C-292
-// koka parc-guard-uaf: a heap value whose ONLY use is inside a match guard
-// must stay live through arm dispatch; fresh allocation in the scrutinee
-// position tries to reuse its block. Plus variant equality in guard position.
+// A heap value whose ONLY use is inside a match guard must stay live through
+// arm dispatch; a fresh allocation in the scrutinee position tries to reuse
+// its block. Plus variant equality in guard position.
 type Box2 = | B2(String)
 
 fn probe(x: Box2, junk: String) -> Bool = match B2(junk) {

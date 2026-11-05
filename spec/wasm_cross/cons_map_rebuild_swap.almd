@@ -1,7 +1,7 @@
 // @contract: C-292
-// koka reuse4 + beans map/swap: hand-rolled map over a cons-variant list
-// rebuilding every cell (reuse candidate), and the swap of the first two
-// cells that reuses both cons cells with crossed payloads.
+// Hand-rolled map over a cons-variant list rebuilding every cell (a reuse
+// candidate), and the swap of the first two cells that reuses both cons
+// cells with crossed payloads.
 type IList = | INil | ICons(Int, IList)
 
 fn mapx(xs: IList, k: Int) -> IList = match xs {
