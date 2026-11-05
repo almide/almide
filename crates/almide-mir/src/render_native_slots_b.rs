@@ -130,16 +130,29 @@ pub(super) fn struct_width(i: u16) -> Option<usize> {
 pub(super) fn dense_loop_fills(func: &MirFunction, consts: &BTreeMap<ValueId, i64>) -> BTreeSet<ValueId> {
     let ops = &func.ops;
     let mut out = BTreeSet::new();
+    // Every `t = a < b` of the fn, by op index: (t, a, b).
+    let lts: BTreeMap<usize, (ValueId, ValueId, ValueId)> = ops
+        .iter()
+        .enumerate()
+        .filter_map(|(k, o)| match o {
+            Op::IntBinOp { dst, op: crate::IntOp::Lt, a, b } => Some((k, (*dst, *a, *b))),
+            _ => None,
+        })
+        .collect();
     for (i, op) in ops.iter().enumerate() {
-        let Op::Alloc { dst: b, init: Init::DynList { len } | Init::DynListStr { len }, .. } = op else { continue };
-        let b = *b;
-        let Some((h, j)) = handle_up_to_loop(ops, i, b) else { continue };
-        let Some((c, end)) = counted_loop(ops, j, *len, consts) else { continue };
-        if fills_each_slot_once(&ops[j + 3..end], b, h, c, consts) {
+        if let Some(b) = dense_fill_at(ops, i, op, consts, &lts) {
             out.insert(b);
         }
     }
     out
+}
+
+/// The block `op` (at `i`) allocates, when one loop right after fills it densely.
+fn dense_fill_at(ops: &[Op], i: usize, op: &Op, consts: &BTreeMap<ValueId, i64>, lts: &BTreeMap<usize, (ValueId, ValueId, ValueId)>) -> Option<ValueId> {
+    let Op::Alloc { dst: b, init: Init::DynList { len } | Init::DynListStr { len }, .. } = op else { return None };
+    let (h, j) = handle_up_to_loop(ops, i, *b)?;
+    let (c, end) = counted_loop(ops, j, *len, consts, lts)?;
+    fills_each_slot_once(&ops[j + 3..end], *b, h, c, consts).then_some(*b)
 }
 
 /// Up to the loop after the allocation at `i`: only block `b`'s handle is
@@ -164,15 +177,11 @@ fn handle_up_to_loop(ops: &[Op], i: usize, b: ValueId) -> Option<(ValueId, usize
 
 /// The loop at `j` counts `c` from 0 to `len` by one: `c < len`, break
 /// unless, body, `c = c + 1`, LoopEnd. The counter and the `LoopEnd`'s index.
-fn counted_loop(ops: &[Op], j: usize, len: ValueId, consts: &BTreeMap<ValueId, i64>) -> Option<(ValueId, usize)> {
-    let Some(Op::IntBinOp { dst: t, op: crate::IntOp::Lt, a: c, b: n }) = ops.get(j + 1) else { return None };
-    let c = *c;
-    if *n != len || !matches!(ops.get(j + 2), Some(Op::LoopBreakUnless { cond }) if cond == t) {
-        return None;
-    }
-    if !ops[..j].iter().any(|o| matches!(o, Op::ConstInt { dst, value: 0 } if *dst == c)) {
-        return None;
-    }
+fn counted_loop(ops: &[Op], j: usize, len: ValueId, consts: &BTreeMap<ValueId, i64>, lts: &BTreeMap<usize, (ValueId, ValueId, ValueId)>) -> Option<(ValueId, usize)> {
+    let &(t, c, n) = lts.get(&(j + 1))?;
+    (n == len).then_some(())?;
+    matches!(ops.get(j + 2), Some(Op::LoopBreakUnless { cond }) if *cond == t).then_some(())?;
+    ops[..j].iter().any(|o| matches!(o, Op::ConstInt { dst, value: 0 } if *dst == c)).then_some(())?;
     let end = loop_end(ops, j)?;
     let body = &ops[j + 3..end];
     // The step: `c' = c + 1; c = c'` right before LoopEnd.
@@ -302,10 +311,7 @@ pub(super) fn const_str_lists(
     let mut out = BTreeMap::new();
     for (i, op) in func.ops.iter().enumerate() {
         let Op::Alloc { dst: b, init: Init::DynListStr { len }, .. } = op else { continue };
-        if !filled.contains(b) {
-            continue;
-        }
-        let Some(n) = consts.get(len).and_then(|n| usize::try_from(*n).ok()) else { continue };
+        let Some(n) = consts.get(len).and_then(|n| usize::try_from(*n).ok()).filter(|_| filled.contains(b)) else { continue };
         let mut elems: Vec<String> = Vec::new();
         let mut ok = true;
         for later in &func.ops[i + 1..] {

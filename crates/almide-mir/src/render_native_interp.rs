@@ -23,7 +23,7 @@ use crate::{CallArg, Init, MirFunction, Op, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// One piece of a chain.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Piece {
     /// A literal, written into the template.
     Lit(String),
@@ -230,6 +230,7 @@ pub(crate) fn render_print(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::rend
 /// reserved once for all of them, when every piece is a literal or a string.
 pub(crate) fn push_pieces(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
     use crate::render_native::NTy;
+    (!pieces.is_empty()).then_some(())?;
     let mut lens = Vec::new();
     let mut pushes = Vec::new();
     for p in pieces {
@@ -240,23 +241,15 @@ pub(crate) fn push_pieces(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::rende
             }
             Piece::Str(v) => {
                 let code = crate::render_native::var(*v);
-                match tys.get(v)? {
-                    NTy::Str => {
-                        lens.push(format!("{code}.len()"));
-                        format!("{code}.as_str()")
-                    }
-                    NTy::StrRef => {
-                        lens.push(format!("{code}.len()"));
-                        code
-                    }
-                    _ => return None,
-                }
+                let owned = tys.get(v).copied().filter(|t| matches!(t, NTy::Str | NTy::StrRef))? == NTy::Str;
+                lens.push(format!("{code}.len()"));
+                if owned { format!("{code}.as_str()") } else { code }
             }
             _ => return None,
         };
         pushes.push(format!("__u.push_str({arg});"));
     }
-    let extra = if lens.is_empty() { "0".to_string() } else { lens.join(" + ") };
+    let extra = lens.join(" + ");
     Some(format!("{{ let __extra = {extra}; let mut __u = __head.unique_with(__extra); __u.reserve(__extra); {} }}", pushes.join(" ")))
 }
 

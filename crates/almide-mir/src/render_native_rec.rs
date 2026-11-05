@@ -93,7 +93,7 @@ pub(crate) fn set_elem(i: u16) -> Option<NTy> {
 pub(crate) fn is_native_set(t: &almide_lang::types::Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
-    matches!(t, Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 && matches!(a[0], Ty::Int | Ty::String))
+    matches!(t, Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 && (a[0] == Ty::Int || a[0] == Ty::String))
 }
 
 /// The generated `AlmideSet<elem>` alias, appended on first use.

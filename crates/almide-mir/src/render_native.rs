@@ -65,6 +65,13 @@ pub(crate) enum NTy {
 }
 
 impl NTy {
+    /// The generated type an owned or borrowed record-like value has.
+    pub(crate) fn rec(self) -> Option<u16> {
+        match self {
+            NTy::Rec(i) | NTy::RecRef(i) => Some(i),
+            _ => None,
+        }
+    }
     fn is_stringy(self) -> bool {
         matches!(self, NTy::Str | NTy::StrRef)
     }

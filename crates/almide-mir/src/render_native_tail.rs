@@ -432,7 +432,7 @@ fn chain_end(func: &MirFunction, chains: &crate::render_native_interp::Chains, j
     let in_chain = |k: usize| chains.skip.contains(&k) || chains.finals.contains_key(&k);
     let mut k = j;
     while in_chain(k) {
-        let Some(d) = crate::mir_ops::defined_value(&func.ops[k]) else { return Some(k) };
+        let d = crate::mir_ops::defined_value(&func.ops[k])?;
         let next = func.ops.iter().enumerate().skip(k + 1).find(|(_, op)| {
             let mut vs = Vec::new();
             crate::mir_ops::op_reads(op, &mut vs);

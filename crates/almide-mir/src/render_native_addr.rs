@@ -289,8 +289,8 @@ fn note_carrier_recs(func: &MirFunction, sigs: &crate::render_native::NativeSigs
     for (v, i) in declared {
         alloc_rec.entry(v).or_insert(i);
     }
-    // An empty container rebound into a typed local (`map.clear(m)`,
-    // `xs = []`) takes the local's declared type.
+    // An empty container (`map.clear(m)`, `xs = []`) takes the type the
+    // lowering recorded for it, or the one its floor call declares.
     let empties: BTreeSet<ValueId> = func
         .ops
         .iter()
@@ -308,11 +308,6 @@ fn note_carrier_recs(func: &MirFunction, sigs: &crate::render_native::NativeSigs
     // Or the type the floor call it is handed to declares for it.
     for op in &func.ops {
         match op {
-            Op::SetLocal { local, src } => {
-                if let Some(&i) = alloc_rec.get(local).filter(|_| empties.contains(src)) {
-                    alloc_rec.entry(*src).or_insert(i);
-                }
-            }
             Op::CallFn { name, args, .. } => {
                 for (k, a) in args.iter().enumerate() {
                     if let crate::CallArg::Handle(v) = a {
@@ -464,10 +459,8 @@ fn enum_read(i: u16, k: usize, scalar: bool) -> Option<(String, NTy)> {
 }
 
 fn is_enum(t: Option<NTy>) -> Option<u16> {
-    match t {
-        Some(NTy::Rec(i) | NTy::RecRef(i)) => crate::render_native_rec::enum_cases(i).map(|_| i),
-        _ => None,
-    }
+    let i = t?.rec()?;
+    crate::render_native_rec::enum_cases(i).map(|_| i)
 }
 
 /// The owned copy of a heap value `code` of kind `t` (for a field write).

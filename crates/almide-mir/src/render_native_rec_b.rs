@@ -34,29 +34,6 @@ struct Derive<'a> {
     uses_value: bool,
 }
 
-/// A closure type the native render carries as its env block: every param a
-/// value the call boundary has a native kind for (a lane scalar, a String, a
-/// scalar Option or Result carrier, a list of lane scalars or Strings, or
-/// such a closure itself), the result one too or Unit; never an effect fn.
-fn closure_typed(t: &almide_lang::types::Ty) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    use almide_lang::types::Ty;
-    fn value(t: &Ty) -> bool {
-        match t {
-            t if is_lane_scalar(t) => true,
-            Ty::String => true,
-            Ty::Applied(TypeConstructorId::Option, a) => a.len() == 1 && is_lane_scalar(&a[0]),
-            Ty::Applied(TypeConstructorId::Result, a) => {
-                a.len() == 2 && matches!(a[1], Ty::String) && (is_lane_scalar(&a[0]) || matches!(a[0], Ty::Unit | Ty::String))
-            }
-            Ty::Applied(TypeConstructorId::List, a) => a.len() == 1 && (is_lane_scalar(&a[0]) || matches!(a[0], Ty::String)),
-            t @ Ty::Fn { .. } => closure_typed(t),
-            _ => false,
-        }
-    }
-    matches!(t, Ty::Fn { is_effect: false, params, ret } if params.iter().all(value) && (matches!(**ret, Ty::Unit) || value(ret)))
-}
-
 /// Derive the generated types from the declared record and variant layouts.
 pub(crate) fn derive_records(
     layouts: &crate::lower::RecordLayouts,
@@ -263,9 +240,6 @@ impl Derive<'_> {
     /// The kind a field or element of type `t` holds (see [`FieldKind`]).
     fn kind(&self, t: &almide_lang::types::Ty, set: &std::collections::BTreeSet<String>) -> FieldKind {
         if let Some(k) = self.kind_head(t, set) {
-            return k;
-        }
-        if let Some(k) = kind_carrier(t) {
             return k;
         }
         self.kind_tail(t, set)
@@ -480,31 +454,4 @@ impl Derive<'_> {
             RecDecl { name: n.to_string(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None }
         }
     }
-}
-
-/// The scalar Option and Result carriers and a typed closure's env block: the
-/// kinds [`Derive::kind`] reads off a field type itself, before the generated ones.
-fn kind_carrier(t: &almide_lang::types::Ty) -> Option<FieldKind> {
-    use almide_lang::types::constructor::TypeConstructorId;
-    use almide_lang::types::Ty;
-    Some(match t {
-            // An Option of a lane scalar: the `Option<i64>` carrier.
-            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 && is_lane_scalar(&a[0]) => Some(Ok(NTy::Opt)),
-            // A Result of a lane scalar (or Unit) or a String over a String
-            // error: the `Result<i64, AlmideString>` / `Result<AlmideString,
-            // AlmideString>` carriers (no `Default`: a list or carrier holds
-            // one, a struct or enum does not — see `res_free` below).
-            Ty::Applied(TypeConstructorId::Result, a)
-                if a.len() == 2 && matches!(a[1], Ty::String) && (is_lane_scalar(&a[0]) || matches!(a[0], Ty::Unit)) =>
-            {
-                Some(Ok(NTy::Res))
-            }
-            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!((&a[0], &a[1]), (Ty::String, Ty::String)) => {
-                Some(Ok(NTy::ResStr))
-            }
-            // A closure of native-typed params and result: its env block (the
-            // rung-5 closures slab; its calls dispatch by signature).
-            t @ Ty::Fn { .. } if closure_typed(t) => Some(Ok(NTy::Vec)),
-            _ => return None,
-    })
 }
