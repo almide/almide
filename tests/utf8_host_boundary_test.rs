@@ -63,12 +63,21 @@ struct Probe<'a> {
 /// Run the probe on `leg`; `None` when this machine lacks the leg's runtime.
 fn run(p: &Probe<'_>, leg: Leg, scratch: &Path) -> Option<Output> {
     let mut c = match leg {
-        Leg::Native | Leg::Embedded => {
+        // Native: build in the test's own environment, then run the binary
+        // under the probe's. The build drives cargo, which refuses an
+        // environment or working directory that is not UTF-8 (TMPDIR, PWD),
+        // and the probe is about what the PROGRAM receives, not the build.
+        Leg::Native => {
+            let bin = scratch.join("probe-native");
+            let built = Command::new(almide()).arg("build").arg(p.src).arg("-o").arg(&bin).output().expect("almide build");
+            assert!(built.status.success(), "Native build failed:\n{}", String::from_utf8_lossy(&built.stderr));
+            let mut c = Command::new(&bin);
+            c.args(&p.args);
+            c
+        }
+        Leg::Embedded => {
             let mut c = Command::new(almide());
-            c.arg("run").arg(p.src);
-            if leg == Leg::Embedded {
-                c.args(["--target", "wasm"]);
-            }
+            c.arg("run").arg(p.src).args(["--target", "wasm"]);
             if !p.args.is_empty() {
                 c.arg("--").args(&p.args);
             }
