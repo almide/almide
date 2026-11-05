@@ -217,7 +217,28 @@ while IFS= read -r f; do
     "$VERIFY" bounds "$OUT/$N.lcert" > "$OUT/$N.lverify" 2>&1 || rc=$?
     echo "$rc" > "$OUT/$N.lverify.rc"
   fi
+  # STRUCTURAL_WALL_CENSUS=1: the row-4 census (#4005) of each artifact, the
+  # prim sites its verified linear certificate covers counted located. A
+  # measurement, not a verdict; summed after the loop.
+  if [ "${STRUCTURAL_WALL_CENSUS:-0}" = 1 ] && [ -f "$OUT/$N.anchor" ]; then
+    lin=(); [ -s "$OUT/$N.lcert" ] && lin=(--lin "$OUT/$N.lcert")
+    "$ANCHORCHECK" --census "${lin[@]}" "$OUT/$N.wasm" "$OUT/$N.bundle" "$OUT/$N.anchors" 2>&1 | grep '^CENSUS' >> "$OUT/census" || true
+  fi
 done < "$OUT/selected"
+if [ "${STRUCTURAL_WALL_CENSUS:-0}" = 1 ]; then
+  python3 - "$OUT/census" <<'PY'
+import re, sys
+tot = [0] * 10
+rows = 0
+for line in open(sys.argv[1]):
+    n = [int(x) for x in re.findall(r"\d+", line)]
+    if len(n) == 10:
+        rows += 1
+        tot = [a + b for a, b in zip(tot, n)]
+print(f"  [census] {rows} artifact(s): frames {tot[0]} access(es), {tot[1]} located ({tot[2]} by the linear certificate), {tot[3]} header word(s), {tot[4]} bulk; "
+      f"routines {tot[5]} access(es), {tot[6]} located ({tot[7]} by the linear certificate), {tot[8]} header word(s), {tot[9]} bulk")
+PY
+fi
 [ "$N" -gt 0 ] || { echo "STRUCTURAL WALL FAIL: no certified fixture listed in $FIXTURES" >&2; exit 1; }
 [ "$SEEN" -eq "$(wc -l < "$OUT/selected" | tr -d ' ')" ] || { echo "STRUCTURAL WALL FAIL: read $SEEN of the selected fixtures — the scan went blind" >&2; exit 1; }
 mv "$HASHES.tmp" "$HASHES"
