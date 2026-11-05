@@ -1,0 +1,27 @@
+# Release evidence seal — v0.69.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.69.0"
+tag = "v0.69.0"
+tag_commit = "39f128a2d6af0cfc327d27913453e7af99c143fc"
+date = "2026-11-06"
+url = "https://github.com/almide/almide/releases/tag/v0.69.0"
+
+[derived]
+cargo_version = "0.69.0"
+contracts_sha256 = "d9e149da16f0daa14588d0438c57e186f77fc582104e53a58c43e19554fb7425"
+contracts_total = "452"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "22fd1610fe347ec7b84398c7f7d5bc78bb890d6c36f969b6effbb9f2ba72f699"
+abstain_ledger_entries = "18"
+wasm_cross_fixtures = "1017"
+rust_toolchain = "1.97.0"
+wasmtime = "v50.0.1"
+
+[recorded]
+release_gate = "Final of the train soaked as v0.68.0-rc1, v0.68.0-rc2 and v0.69.0-rc1..rc4 (rc4 tagged 2026-11-05 on f78ac5b07, prerelease; no I-*/regression issue opened during its soak). Tag on the merge of release PR #4510 (39f128a2d, tree of develop 42219988b); #4510 191 check-runs, 140 success, 51 skipped, 0 failed after one rerun of the Coq/PCC job, whose stdlib purity gate misread a classified module under pipefail (echo|grep -q SIGPIPE; fixed by #4512, negative control in that PR). Main CI on the merge green (run 42094604807); Trust spine on the tag green (run 42094666850, dossier attached). Blocker gate at the tag: 0 (#1482). Interface diff v0.69.0-rc4 -> v0.69.0: identical; v0.67.1 -> v0.69.0: breaking (added=974 removed=681), declared as the stdlib-redesign dialect epoch (#1488). Release-gate fuzz on the tag (fuzz-nightly run 42094960082, dispatched): shards 8/8, 480.1 of 480 planned minutes delivered, 74,441 programs generated, 2 unique findings, both classified as correctness (#4513): (1) NativeBuildFailure, 3 instances, a real compiler bug filed after the tag as #4514 (the v1 native render names AlmideValue/AlmideMap in its split runtime crate without taking their definitions along; wasm runs the programs fine); (2) Hang, a mutation folding list.range(i64::MIN, -256) over ~9.2e18 elements that rustc closed-forms on native and wasm counts for real; not a semantics defect."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256 (all five verify; macOS arm64 binary reports `almide 0.69.0 (release, 39f128a2d)`), almide-dossier-v0.69.0.md"
+known_problems = "Open at the tag, not blocking: (1) #4514, found by the release-gate fuzz after the tag: a program that declares a Map or Value it never operates on (e.g. an unused `let m: Map[String, Bool] = [:]`) passes check but fails the native build; wasm is unaffected; fix in progress, regression status being measured against v0.67.1; (2) A-perf issues with no I-* class, among them #4497 (the --release backtrace split adds 20-32 KB per native binary; fix branch ready, waits on GCE) and #4457 (native spectral norm 1.2x handwritten Rust); (3) #4508 (three native-v1 nightly perf losses) was fixed by #4511, merged to develop after the tag, so it is not in v0.69.0."
