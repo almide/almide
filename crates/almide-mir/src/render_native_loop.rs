@@ -115,8 +115,6 @@ fn render_fn(
     // a phase that consumes ops ahead (`ops.nth(..)`) shares its lifetime.
     let loop_func: &MirFunction = st.func;
     let mut ops = loop_func.ops.iter().enumerate();
-    // Where the text of the op rendered last begins in `st.out`.
-    let mut prev_start = st.out.len();
     while let Some((i, op)) = ops.next() {
         // An owned heap value whose last reader was the op before frees now,
         // as v0's temporaries do at their statement's end, not at the end of
@@ -129,14 +127,9 @@ fn render_fn(
             let owned = matches!(st.tys.get(v), Some(NTy::Str | NTy::VecStr | NTy::Vec | NTy::Rec(_)));
             // (A value its last call moved in is gone already.)
             let named = matches!(&func.ops[i - 1], Op::CallFn { args, .. } if args.iter().any(|a| matches!(a, crate::CallArg::Handle(x) if x == v)));
-            // A call the floor renders with the value only borrowed (`f(&v)`)
-            // has not moved it, whatever its last use would allow.
-            let moved = named
-                && st.tys.get(v).is_some_and(|t| crate::render_native_move::moves_at_call(func, i - 1, *v, *t, &st.borrows.arms))
-                && !borrowed_only(st.out.get(prev_start..).unwrap_or(""), &var(*v));
+            let moved = named && st.tys.get(v).is_some_and(|t| crate::render_native_move::moves_at_call(func, i - 1, *v, *t, &st.borrows.arms));
             let gone = EARLY_DROPPED.with(|e| e.borrow().contains(v));
-            let stack = crate::render_native_move::is_stack_lit(*v);
-            if owned && !moved && !gone && !stack && st.out.contains(&format!("let mut {}:", var(*v))) {
+            if owned && !moved && !gone && st.out.contains(&format!("let mut {}:", var(*v))) {
                 for _ in 0..st.indent {
                     st.out.push_str("    ");
                 }
@@ -144,7 +137,6 @@ fn render_fn(
                 EARLY_DROPPED.with(|e| e.borrow_mut().insert(*v));
             }
         }
-        prev_start = st.out.len();
         if render_fn_step(&mut st, i, op, &mut ops)? && flag_exits.contains(&i) {
             for _ in 0..st.indent {
                 st.out.push_str("    ");
@@ -158,29 +150,6 @@ fn render_fn(
     }
     crate::render_native_bounds::finish(func);
     finish_native_fn(func, sigs, is_main, &mut st.tys, st.out)
-}
-
-/// Does the rendered statement `text` read `name` only through a borrow
-/// (`&name` or `&*name`), and bind no reference that could borrow from it?
-fn borrowed_only(text: &str, name: &str) -> bool {
-    let b = text.as_bytes();
-    let mut seen = false;
-    let mut from = 0;
-    while let Some(k) = text[from..].find(name) {
-        let at = from + k;
-        let end = at + name.len();
-        from = end;
-        let word = (at == 0 || !(b[at - 1].is_ascii_alphanumeric() || b[at - 1] == b'_'))
-            && (end == b.len() || !(b[end].is_ascii_alphanumeric() || b[end] == b'_'));
-        if !word {
-            continue;
-        }
-        if !(text[..at].ends_with('&') || text[..at].ends_with("&*")) {
-            return false;
-        }
-        seen = true;
-    }
-    seen && !text.contains(": &")
 }
 
 /// One op of the [`render_fn`] loop. The phases run in order and the first
