@@ -380,6 +380,11 @@ how = "construction"
 evidence = "spec/stdlib/utf8_bytes_producers_test.almd::ffi err texts stay valid on invalid input"
 
 [[fn]]
+id = "ffi.slice"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::ffi err texts stay valid on invalid input"
+
+[[fn]]
 id = "ffi.to_bytes"
 how = "construction"
 evidence = "spec/stdlib/utf8_bytes_producers_test.almd::ffi err texts stay valid on invalid input"
@@ -690,11 +695,6 @@ how = "construction"
 evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
 
 [[fn]]
-id = "http.html"
-how = "construction"
-evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
-
-[[fn]]
 id = "http.json"
 how = "construction"
 evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
@@ -800,9 +800,19 @@ how = "host"
 ops = [53]
 
 [[fn]]
+id = "http.typed"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
 id = "http.wait"
 how = "host"
 ops = [55]
+
+[[fn]]
+id = "http.with_body"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
 
 [[fn]]
 id = "http.with_headers"
@@ -2447,6 +2457,14 @@ why = "the component-only full response: the body text decodes lossily (C-328); 
 evidence = ["tests/http_response_cross_test.rs::the_full_response_family_reads_the_same_on_native_and_the_p3_component"]
 
 [[op]]
+id = 66
+name = "fs.append_bytes"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "op 16's append under its own name (#4382): the embedded host's fs_dispatch_w append arm, the p1 fs service's op_append (spliced into the component); answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
 id = 70
 name = "http.serve bind"
 embedded = "typed"
@@ -2889,6 +2907,105 @@ embedded = "message"
 p1 = "message"
 component = "message"
 why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 140
+name = "net udp_bind"
+embedded = "message"
+p1 = "unserved"
+component = "message"
+why = "answers the handle as decimal digits; err texts are Rust Strings from net_core (embedded, net_host.rs) or the same net_core texts rendered at emit time plus the static error-code class table, with only the guest's own host escaped in (component, wasi_p3_net_shim.rs); preview 1 has no sockets (not in P1_SERVED_OPS)"
+
+[[op]]
+id = 141
+name = "net udp_local_port"
+embedded = "message"
+p1 = "unserved"
+component = "message"
+why = "answers the port as decimal digits; err texts are Rust Strings from net_core (embedded, net_host.rs) or the same net_core texts rendered at emit time plus the static error-code class table, with only the guest's own host escaped in (component, wasi_p3_net_shim.rs); preview 1 has no sockets (not in P1_SERVED_OPS)"
+
+[[op]]
+id = 142
+name = "net udp_send_to"
+embedded = "message"
+p1 = "unserved"
+component = "message"
+why = "answers Unit; the datagram rides the guest's Bytes out; err texts are Rust Strings from net_core (embedded, net_host.rs) or the same net_core texts rendered at emit time plus the static error-code class table, with only the guest's own host escaped in (component, wasi_p3_net_shim.rs); preview 1 has no sockets (not in P1_SERVED_OPS)"
+
+[[op]]
+id = 143
+name = "net udp_recv_from"
+embedded = "message"
+p1 = "unserved"
+component = "message"
+why = "answers a `<port> <ip>` line (digits and an address printed by Rust Display on embedded, by the shim's ip_fmt on the component) then the datagram's raw bytes, which the guest keeps as Bytes, decoding only the head line with bytes.to_string_lossy (stdlib/net_wasm.almd); err texts are Rust Strings from net_core (embedded, net_host.rs) or the same net_core texts rendered at emit time plus the static error-code class table, with only the guest's own host escaped in (component, wasi_p3_net_shim.rs); preview 1 has no sockets (not in P1_SERVED_OPS)"
+
+[[op]]
+id = 144
+name = "net udp_close"
+embedded = "message"
+p1 = "unserved"
+component = "message"
+why = "answers Unit; err texts are Rust Strings from net_core (embedded, net_host.rs) or the same net_core texts rendered at emit time plus the static error-code class table, with only the guest's own host escaped in (component, wasi_p3_net_shim.rs); preview 1 has no sockets (not in P1_SERVED_OPS)"
+
+[[op]]
+id = 145
+name = "net lookup_host"
+embedded = "message"
+p1 = "unserved"
+component = "message"
+why = "answers one address per line: Rust Display Strings joined (embedded), the shim's ip_fmt digits, dots and colons (component); err texts are Rust Strings from net_core (embedded, net_host.rs) or the same net_core texts rendered at emit time plus the static error-code class table, with only the guest's own host escaped in (component, wasi_p3_net_shim.rs); preview 1 has no sockets (not in P1_SERVED_OPS)"
+
+[[op]]
+id = 146
+name = "process.start"
+embedded = "message"
+p1 = "typed"
+component = "unserved"
+why = "the process.start child (#4308): answers the child's handle as decimal digits; err texts are Rust Strings (process_core, the allowlist refusal) (embedded, host_process.rs); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load); no component world declares that interface (P3_EXCLUDED_P1_OPS)"
+
+[[op]]
+id = 147
+name = "process.poll (the exited probe)"
+embedded = "message"
+p1 = "typed"
+component = "unserved"
+why = "the process.start child (#4308): answers the digit 0 or 1; err texts are Rust Strings (embedded, host_process.rs); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load); no component world declares that interface (P3_EXCLUDED_P1_OPS)"
+
+[[op]]
+id = 148
+name = "process.wait"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "the process.start child (#4308): the child's captured stdout and stderr decode lossily (process_core AlmideProcChild::text, String::from_utf8_lossy) before the status frame (embedded, host_process.rs); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load); no component world declares that interface (P3_EXCLUDED_P1_OPS)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 149
+name = "process.stop"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "the process.start child (#4308): the child's captured stdout and stderr decode lossily (process_core AlmideProcChild::text, String::from_utf8_lossy) before the status frame (embedded, host_process.rs); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load); no component world declares that interface (P3_EXCLUDED_P1_OPS)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 150
+name = "process.read_new_stdout / read_new_stderr"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "the process.start child (#4308): the new output decodes lossily (process_core AlmideProcChild::read_new: a cut sequence waits for its rest, an invalid one is U+FFFD) (embedded, host_process.rs); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load); no component world declares that interface (P3_EXCLUDED_P1_OPS)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 151
+name = "process.child_pid"
+embedded = "message"
+p1 = "typed"
+component = "unserved"
+why = "the process.start child (#4308): answers the pid as decimal digits (-1 for an unknown handle) (embedded, host_process.rs); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load); no component world declares that interface (P3_EXCLUDED_P1_OPS)"
 
 # ── prim rows: every prim.* the self-hosted stdlib calls ──
 
