@@ -390,6 +390,12 @@ pub(crate) fn is_stack_lit(v: ValueId) -> bool {
 }
 
 /// Record which of `ops[at]`'s call args may move (read by the floor render).
+///
+/// An arg the same call reads more than once (`map.merge(m, m)`, `xs + xs`)
+/// moves at none of its positions (#4517): whichever position took it over,
+/// another position still reads the binding in that same call, so its last
+/// use is the call as a whole, not one argument of it. It is borrowed (or
+/// copied) at every position.
 pub(crate) fn set_moving_args(
     func: &MirFunction,
     at: usize,
@@ -397,14 +403,21 @@ pub(crate) fn set_moving_args(
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) {
     let moving: std::collections::BTreeSet<ValueId> = match &func.ops[at] {
-        Op::CallFn { args, .. } => args
-            .iter()
-            .filter_map(|a| match a {
-                crate::CallArg::Handle(v) => Some(*v),
-                _ => None,
-            })
-            .filter(|v| tys.get(v).is_some_and(|t| moves_at_call(func, at, *v, *t, borrow_arms)))
-            .collect(),
+        Op::CallFn { args, .. } => {
+            let handles: Vec<ValueId> = args
+                .iter()
+                .filter_map(|a| match a {
+                    crate::CallArg::Handle(v) => Some(*v),
+                    _ => None,
+                })
+                .collect();
+            handles
+                .iter()
+                .copied()
+                .filter(|v| handles.iter().filter(|x| *x == v).count() == 1)
+                .filter(|v| tys.get(v).is_some_and(|t| moves_at_call(func, at, *v, *t, borrow_arms)))
+                .collect()
+        }
         _ => Default::default(),
     };
     // A rebound arg whose own rebind comes next, with only its release
