@@ -1239,3 +1239,15 @@ id = "src/cli/docs_gen.rs::check_numeric_conversion_matrix::table"
 class = "justified"
 names = 6
 why = "The columns of a family gate, not a property of functions: the cells every integer carrier must carry (from, from_checked, from_saturating, from_wrapping, min_value, max_value). The gate asserts their presence and the absence of the retired point-wise to_<carrier> spellings (#956)."
+
+[[site]]
+id = "crates/almide-mir/src/host_ops.rs::NATIVE_FS_HOST_CALLS::table"
+class = "justified"
+names = 29
+why = "The named set of a trusted-base row (proofs/TRUSTED_BASE.md, Native fs host calls; owner ruling 2026-11-05), not a property derivable from a declaration: which runtime fs functions a certified native program may call as trusted host calls is a trust decision the row records by name, and the index is the witness host id. tests/native_fs_host_calls_test.rs holds it equal to the row, NativeCalls.native_fs_host_calls and almide-verify's copy, and to exactly the fs host ops the floor serves."
+
+[[site]]
+id = "crates/almide-verify/src/native_calls.rs::NATIVE_FS_HOST_CALLS::table"
+class = "justified"
+names = 29
+why = "The independent checker's copy of the trusted-base named set (NativeCalls.native_fs_host_calls): almide-verify shares no code with the producer, so it holds its own list; tests/native_fs_host_calls_test.rs holds the copies to one list in one order."
