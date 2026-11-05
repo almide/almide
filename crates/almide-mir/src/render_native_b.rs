@@ -442,15 +442,6 @@ fn bind_user_fn_result(
 /// result binds by the shim's declared return. Extracted verbatim from
 /// `render_call_fn` (codopsy r2, #852).
 /// The list `+` operator: a fresh list of `a`'s elements then `b`'s.
-/// An OWNED list operand of `+`: a `Vec` the render may grow or move from.
-fn owned_list(t: NTy) -> bool {
-    match t {
-        NTy::Vec | NTy::VecStr => true,
-        NTy::Rec(i) => crate::render_native_rec::list_elem(i).is_some(),
-        _ => false,
-    }
-}
-
 fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerError> {
     let NativeCall { dst, name, args, .. } = call;
     let OpSink { tys, out, indent, .. } = s;
@@ -475,28 +466,21 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
     // The left list's last use (#4006 class P): grow its own buffer. The
     // right side must be another value that cannot view the left one's
     // buffer: an owned list of its own (`xs + xs` reads the left list as the
-    // right one). The right list's last use, when its elements own heap
-    // (a `List[String]`, a list of lists — #4503's prepend `[x] + xss`):
-    // move its elements over instead of cloning each one.
+    // right one).
     if let [CallArg::Handle(l), CallArg::Handle(r)] = args.as_slice() {
-        if l != r && owned_list(at) && owned_list(bt) {
-            let left = crate::render_native_move::moving_arg(*l);
-            let right = crate::render_native_move::moving_arg(*r) && bt != NTy::Vec;
-            if left || right {
-                let head = if left {
-                    format!("let mut r: {ty} = {}", crate::render_native_move::take_expr(&a))
-                } else {
-                    format!("let mut r: {ty} = Vec::with_capacity({sa}.len() + {b}.len()); r.extend_from_slice({sa})")
-                };
-                let tail = if right {
-                    format!("r.extend({})", crate::render_native_move::take_expr(&b))
-                } else {
-                    format!("r.extend_from_slice({sb})")
-                };
-                writeln!(out, "let mut {}: {ty} = {{ {head}; {tail}; r }};", var(*d))
-                    .expect("writing to a String cannot fail");
-                return Ok(());
-            }
+        if l != r
+            && matches!(at, NTy::Vec | NTy::VecStr)
+            && matches!(bt, NTy::Vec | NTy::VecStr)
+            && crate::render_native_move::moving_arg(*l)
+        {
+            writeln!(
+                out,
+                "let mut {}: {ty} = {{ let mut r: {ty} = {}; r.extend_from_slice({sb}); r }};",
+                var(*d),
+                crate::render_native_move::take_expr(&a)
+            )
+            .expect("writing to a String cannot fail");
+            return Ok(());
         }
     }
     writeln!(

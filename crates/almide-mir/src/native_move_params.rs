@@ -94,11 +94,7 @@ fn movable_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Vec<(usi
 /// grows (`list.push(ys, x)` on a `mut` param lowers to `ys + [x]`). Taken
 /// over, the param is released right after that concatenation, so the
 /// render grows the caller's own buffer in place (`last_use`) instead of
-/// copying it into a new one. A list of heap elements counts too (the `_rc`
-/// spelling of `+`, #4503): the loop-converted self tail call over a
-/// `List[List[Int]]` carry starts its slot as `acc + []`, which copied every
-/// element list per call where the standard codegen moves the argument in.
-/// Returns (param index, the concatenation's op index).
+/// copying it into a new one. Returns (param index, the concatenation's op index).
 fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Vec<(usize, usize)> {
     let depth = depths(func);
     let mut out = Vec::new();
@@ -113,7 +109,7 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Vec<(us
         // Or a floor call that takes it by value there (`map.set(m, k, v)`
         // on a `mut` param): the body's last use gives it away.
         let grows = matches!(&func.ops[last], Op::CallFn { name, args, .. }
-            if (((crate::native_list_ops::is_list_concat(name) || name == "__str_concat")
+            if (((name == "__list_concat" || name == "__str_concat")
                 && matches!(args.first(), Some(crate::CallArg::Handle(v)) if *v == p.value))
                 || args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value))
                     .is_some_and(|k| crate::native_floor::takes_by_value(name, k)))
