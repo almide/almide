@@ -176,7 +176,7 @@ fn rewrite_native_linked_mir(
         functions,
     );
     rewrite_native_result_str_windows(ir, functions);
-    rewrite_native_option_windows(ir, functions);
+    rewrite_native_option_windows(ir, linked, functions);
     crate::native_slot_rewrite::rewrite_slot_ops(functions, crate::lower::mutable_global_slot_count());
     // Narrow-width arithmetic computes in its declared integer type (#4006).
     for f in functions.iter_mut() {
