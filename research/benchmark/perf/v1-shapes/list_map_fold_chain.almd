@@ -1,0 +1,19 @@
+// v1-vs-v0 shape bench: `xs |> list.map(f) |> list.fold(..)` in one pipe. The
+// certified render runs the map inside the fold's loop (no intermediate
+// list), as the standard codegen's stream fusion does: 1.17x v0 before.
+fn build(n: Int) -> List[Int] = {
+  var xs: List[Int] = []
+  var i = 0
+  while i < n {
+    xs = xs + [i * 3]
+    i = i + 1
+  }
+  xs
+}
+
+fn main() -> Unit = {
+  let n = list.len(list.range(0, 200)) * 1000
+  let xs = build(n)
+  let s = xs |> list.map((x) => x + 1) |> list.fold(0, (acc, y) => acc + y)
+  println(int.to_string(s))
+}
