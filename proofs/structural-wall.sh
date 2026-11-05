@@ -331,8 +331,12 @@ fi
 cp "$OUT/1.wasm" "$OUT/tamper/app.wasm"
 rc=0
 "$VERIFY" bundle "$OUT/tamper/1.bundle" > /dev/null 2>&1 || rc=$?
-if [ "$rc" -ne 0 ]; then
-  echo "STRUCTURAL WALL FAIL: the drill's control (the untouched artifact) did not verify (exit $rc)" >&2
+# The stdlib-test leg's bundle may declare uncertified frames: its untouched
+# control is then INCOMPLETE (exit 3), the same outcome the leg requires of it.
+want=0
+if [ "$MODE" = tests ] && grep -aq '^uncertified ' "$OUT/1.bundle"; then want=3; fi
+if [ "$rc" -ne "$want" ]; then
+  echo "STRUCTURAL WALL FAIL: the drill's control (the untouched artifact) did not verify (exit $rc, want $want)" >&2
   exit 1
 fi
 echo "  ok: the flipped byte reads MISMATCH (exit 1); the untouched artifact verifies (exit 0)"
