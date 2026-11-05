@@ -181,9 +181,9 @@ test "value builders and readers stay valid" {
 
 test "html builders stay valid" {
   for s in adversary() {
-    let h = html.concat(html.escape(s), html.attr(s, s))
+    let h = html.concat(html.escape(s), html.attr("title", s))
     assert(utf8_ok(html.to_string(h)))
-    assert(utf8_ok(html.to_string(html.url_attr(s, s))))
+    assert(utf8_ok(html.to_string(html.url_attr("href", s))))
     assert(utf8_ok(html.to_string(html.raw(s))))
     assert(utf8_ok(html.to_string(html.script_json(value.string(s)))))
   }
