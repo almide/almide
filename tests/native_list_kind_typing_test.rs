@@ -10,6 +10,12 @@
 //! - a list handed to a floor body whose param declares a list of `Value`s,
 //!   matrices or `(String, Value)` pairs takes that list's kind
 //!   (`value.array([])`, `value.object([])`), which no store can give it.
+//!
+//! And the no-perf-loss rule for the lists the first rule admits: a
+//! one-element generated list that exists only to be appended has its element
+//! pushed (render_native_addr.rs `single_rec`), and the append itself is in
+//! place whatever typed drop releases the old accumulator
+//! (render_native_append.rs `list_drop_of`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -77,6 +83,12 @@ fn an_empty_list_joined_by_a_concatenation_takes_the_generated_list_kind() {
             !rust.contains("Vec<AlmideString> = Vec::new()") && !rust.contains("Vec<AlmideString> = Vec::with_capacity"),
             "the empty List[List[Int]] still renders as a String list:\n{rust}"
         );
+        // The one-element list `[[…]]` exists only to be appended: its element
+        // is pushed, with no one-element list allocated per append.
+        assert!(
+            rust.lines().any(|l| l.contains(".push(v") && l.contains("_e0);")) && !rust.contains("_e0];"),
+            "the appended one-element list of lists is allocated instead of its element pushed:\n{rust}"
+        );
         // A list of String lists starting empty, the same way.
         same(
             "concat_str_rows",
@@ -111,7 +123,13 @@ fn the_corpus_programs_the_rules_admit_match_v0() {
             "value_merge_duplicate_keys",
         ] {
             let src = std::fs::read_to_string(root.join(format!("spec/wasm_cross/{fx}.almd"))).expect("fixture");
-            same(fx, &src);
+            let rust = same(fx, &src);
+            // The tower's accumulators are released by a list-of-lists drop:
+            // the append is still in place, no fresh list copying the
+            // accumulator per append.
+            if fx == "nested_three_level_loop_build" {
+                assert!(!rust.contains("Vec::with_capacity(&v"), "`{fx}`: the accumulator is copied into a fresh list per append:\n{rust}");
+            }
         }
     });
 }
