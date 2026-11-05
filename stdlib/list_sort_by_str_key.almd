@@ -16,8 +16,8 @@ fn __sbs_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) -> 
     __sbs_init(bh, sh, kh, f, n, i + 1)
   }
 
-// Byte-lexicographic `a > b` (v0's String Ord — the string_cmp discipline, inlined:
-// the dispatch name `string.cmp` is self-host-only and unknown to the checker).
+// Byte-lexicographic three-way compare (v0's String Ord — the string_cmp discipline,
+// inlined: the dispatch name `string.cmp` is self-host-only and unknown to the checker).
 fn __sbs_cmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int = if k >= la and k >= lb then 0
 else if k >= la then 0 - 1
 else if k >= lb then 1
@@ -27,12 +27,6 @@ else {
   if ba < bb then 0 - 1
   else if ba > bb then 1
   else __sbs_cmp_at(ah, bh, la, lb, k + 1)
-}
-
-fn __sbs_gt(a: String, b: String) -> Bool = {
-  let ha = prim.handle(a)
-  let hb = prim.handle(b)
-  __sbs_cmp_at(ha + 12, hb + 12, prim.load32(ha + 4), prim.load32(hb + 4), 0) > 0
 }
 
 // Byte-lexicographic `a <= b` on raw String handles — the merge's stability test.
