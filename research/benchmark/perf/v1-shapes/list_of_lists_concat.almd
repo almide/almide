@@ -15,7 +15,8 @@ else {
     [k]
   ]
   let next = pre + acc
-  keep_head(n - 1, next, k + list.len(pre))
+  let k2 = k + list.len(pre) + list.len(list.get(pre, 0) ?? [])
+  keep_head(n - 1, next, k2)
 }
 
 fn grow_left(n: Int, k: Int) -> Int = if n <= 0 then k
