@@ -4,6 +4,12 @@
 //! after the call (`CallFn`, then `Drop`). Such a function recursed frame by
 //! frame and overflowed at a depth wasm runs in constant stack. It now walls
 //! onto the standard codegen, which loop-converts it.
+//!
+//! #4006 class A: on the native render `try_tco_rewrite` now takes any heap
+//! carry as an owned `var` slot, so these two shapes are loops on v1 too. They
+//! must render, and run a million deep in constant stack. The wall itself is
+//! pinned on a shape the conversion still declines
+//! (tests/native_owned_tco_slots_test.rs).
 use std::process::Command;
 
 const LIST_ARG: &str = "fn go(x: List[Int], i: Int) -> List[Int] = if i <= 0 then x else go([i, 1], i - 1)\n\nfn main() -> Unit = println(int.to_string(list.len(go([1, 2, 3], 1000000))))\n";
@@ -24,10 +30,11 @@ fn run_native(name: &str, src: &str) -> String {
 }
 
 #[test]
-fn a_heap_arg_tail_call_the_v1_loop_declines_walls_and_runs_in_constant_stack() {
+fn a_heap_arg_tail_call_renders_as_a_v1_loop_and_runs_in_constant_stack() {
     for (name, src, expected) in [("list_arg", LIST_ARG, "2\n"), ("variant_arg", VARIANT_ARG, "1000000\n")] {
-        let wall = almide_mir::pipeline::try_render_rust_source(src).expect_err(name);
-        assert!(format!("{wall:?}").contains("#3550"), "{name}: walled for another reason: {wall:?}");
+        if let Err(e) = almide_mir::pipeline::try_render_rust_source(src) {
+            panic!("{name}: the owned-slot loop conversion should take this carry: {e:?}");
+        }
         assert_eq!(run_native(name, src), expected, "{name}");
     }
 }

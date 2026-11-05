@@ -686,3 +686,42 @@ for leg in ("native", "wasm"):
           f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
 sys.exit(1 if failed else 0)
 PYRX
+
+# BTREES RELATION (rc4, owner ruling 2026-11-05). btrees and treealloc build
+# and walk the same trees (2^19 + 2^19 nodes per round, 24 x depth 19 against
+# 12 x depth 20); btrees only takes its depth as a literal, so it renders whole
+# on the certified native leg while treealloc's argv read once kept it on the
+# standard codegen. Their VICTORY ratios against the Box references move 2.5x
+# with the runner's CPU class; their native times move together. The relation
+# btrees native / treealloc native (medians of the same interleaved run above)
+# read 0.76-0.90 on EPYC 7763, 9V74 and Xeon 8370C runners, and about 4.7 on
+# develop before the rc4 bundle, when the certified leg built every btrees node
+# with `Box` (0.47 s against 0.10 s). The ceiling fails that on every class.
+BTREES_RELATION_CEILING=1.15
+python3 - "$out" "$BASELINE_FILE" "$BTREES_RELATION_CEILING" <<'PYBT'
+import json, sys
+
+out_path, baseline_path, ceiling = sys.argv[1:4]
+ceiling = float(ceiling)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+key = "btrees-treealloc"
+if key not in baseline:
+    sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the btrees relation was added "
+             "without its recorded value; add the line on purpose.")
+bt = data["btrees"]["variants"]["btrees/native"]["median"]
+ta = data["treealloc"]["variants"]["treealloc/native"]["median"]
+ratio = bt / ta
+if ratio > ceiling:
+    sys.exit(f"::error::perf-ratio: btrees runs {ratio:.3f}x treealloc's native time for the same "
+             f"trees (ceiling {ceiling:.2f}, {bt:.3f}s vs {ta:.3f}s, recorded {baseline[key]:.3f}). The "
+             "program that renders whole on the certified native leg lost the region window there "
+             "(rc4: every node a Box). Restore the window on that leg; do not raise the ceiling.")
+print(f"perf-ratio: {key:20s} {ratio:.3f}x treealloc's native time "
+      f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}) ok")
+PYBT

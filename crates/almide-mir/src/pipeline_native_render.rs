@@ -321,6 +321,9 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     crate::lambda_sigs::clear();
     crate::option_blocks::clear();
     let _strict = crate::lower::StrictValuesGuard::set(true);
+    // The native render loop-converts a self tail call over any heap carry
+    // (#4006 class A, #3550): `lower::owned_tco_slots`.
+    let _owned_tco = crate::lower::OwnedTcoSlotsGuard::set(true);
     let ir = {
         let _slots = SlotHeldGlobalsGuard::set(true);
         source_to_ir_with(source, &[])?
