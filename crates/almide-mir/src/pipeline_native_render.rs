@@ -265,13 +265,15 @@ fn native_ownership_certs(
 /// The native render of `program`, with the calls `crate::native_hof` serves
 /// through their runtime body: when it served any, the linked bodies those
 /// calls left unreached are dropped and the program rendered again, so the
-/// render and the certificates speak of the same functions.
+/// render and the certificates speak of the same functions; and the closure
+/// blocks only those calls read are not built (their slots reach the call
+/// as a stack env).
 fn render_native_with_runtime_hofs(
     program: &mut MirProgram,
     sigs: &crate::render_native::NativeSigs,
     linked: &std::collections::BTreeSet<String>,
 ) -> Result<String, LowerError> {
-    crate::native_hof::reset(Default::default());
+    crate::native_hof::reset(Default::default(), Default::default());
     let recs = crate::render_native_rec::snapshot();
     let first = crate::render_native::try_render_native_program(program, sigs);
     let sites = crate::native_hof::sites();
@@ -279,11 +281,12 @@ fn render_native_with_runtime_hofs(
         return first;
     }
     let dropped = crate::native_hof::prune(&mut program.functions, linked, &sites);
-    if dropped.is_empty() {
+    let elided = crate::native_hof::elidable(&program.functions, &sites);
+    if dropped.is_empty() && elided.is_empty() {
         return first;
     }
     crate::render_native_rec::restore(recs);
-    crate::native_hof::reset(dropped);
+    crate::native_hof::reset(dropped, elided);
     crate::render_native::try_render_native_program(program, sigs)
 }
 
