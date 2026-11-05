@@ -1,12 +1,13 @@
-diff --git a/crates/almide-codegen/src/walker/mod.rs b/crates/almide-codegen/src/walker/mod.rs
-index 0ed22cff6..4f1102c96 100644
---- a/crates/almide-codegen/src/walker/mod.rs
-+++ b/crates/almide-codegen/src/walker/mod.rs
-@@ -283,6 +283,7 @@ fn render_fn_body_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
-         IrExprKind::Block { stmts, expr } => {
-             let mut parts: Vec<String> = stmts.iter()
-                 .map(|s| terminate_stmt(fn_ctx, render_stmt_fn(fn_ctx, s)))
-+                .rev()
-                 .collect();
-             if let Some(e) = expr {
-                 let mut expr_str = render_expr_fn(fn_ctx, e);
+diff --git a/crates/almide-mir/src/lower/mod_p3.rs b/crates/almide-mir/src/lower/mod_p3.rs
+index 88480265c..9414bb69e 100644
+--- a/crates/almide-mir/src/lower/mod_p3.rs
++++ b/crates/almide-mir/src/lower/mod_p3.rs
+@@ -323,7 +323,7 @@ impl LowerCtx {
+             IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
+             _ => (&[], Some(body)),
+         };
+-        for stmt in stmts {
++        for stmt in stmts.iter().rev() {
+             self.lower_stmt(stmt)?;
+         }
+         // The tail expression is the function's return value. A HEAP tail is MOVED
