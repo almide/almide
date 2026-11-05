@@ -477,3 +477,11 @@ pub(crate) fn is_region(i: u16) -> bool {
 pub(crate) fn box_new(i: u16) -> &'static str {
     if is_region(i) { "almide_rgn_alloc" } else { "Box::new" }
 }
+
+/// The table as it stands, and putting it back (a render run again).
+pub(crate) fn snapshot() -> Vec<RecDecl> {
+    RECS.with(|r| r.borrow().clone())
+}
+pub(crate) fn restore(recs: Vec<RecDecl>) {
+    RECS.with(|r| *r.borrow_mut() = recs);
+}

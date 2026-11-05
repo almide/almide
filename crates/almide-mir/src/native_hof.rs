@@ -503,6 +503,74 @@ fn runtime_arg(code: &str, got: NTy, by_ref: bool, dying: bool) -> String {
     }
 }
 
+/// The call's argument codes and kinds; a closure block this render does
+/// not build stands as a block (its slots are the env). `None` = an argument
+/// the render cannot spell.
+fn call_args(call: &crate::render_native::NativeCall<'_>, fname: &str, tys: &BTreeMap<ValueId, NTy>) -> Option<Vec<(String, NTy)>> {
+    call.args
+        .iter()
+        .map(|a| match a {
+            CallArg::Handle(v) if STATE.with(|st| st.borrow().elided.contains(&(fname.to_string(), *v))) => Some((var(*v), NTy::Vec)),
+            a => crate::render_native::call_arg(a, tys).ok(),
+        })
+        .collect()
+}
+
+/// What the function-typed arguments add before and beside the call: the
+/// env arrays' bindings, and the shims they need.
+#[derive(Default)]
+struct FnArgOut {
+    prelude: Vec<String>,
+    shims: Vec<&'static str>,
+}
+
+/// What rendering the function-typed argument needs to see.
+struct FnArgCx<'a> {
+    user_fns: &'a BTreeMap<&'a str, &'a MirFunction>,
+    sigs: &'a NativeSigs,
+    tys: &'a BTreeMap<ValueId, NTy>,
+    origins: &'a BTreeMap<ValueId, (String, Vec<ValueId>)>,
+    /// The op index, which names the env array.
+    at: usize,
+}
+
+/// The adapter for the function-typed argument `a` (kind `t`) of declared
+/// type `(dps) -> dret`, binding the type params it fixes; the env array's
+/// binding and any shim it needs go to `side`.
+fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): (&CallArg, NTy), side: &mut FnArgOut) -> Option<String> {
+    let CallArg::Handle(blk) = a else { return None };
+    let (lambda, env_elems) = cx.origins.get(blk)?;
+    // The lambda borrows every param, as its signature spells it.
+    if !cx.user_fns.get(lambda.as_str()).is_some_and(|l| l.owned_params.is_empty()) {
+        return None;
+    }
+    let (ps, ret) = clo::lambda_sig(cx.sigs, lambda)?;
+    let ret = ret?;
+    if ps.len() != dps.len() || !matches!(t, NTy::Vec | NTy::VecRef) {
+        return None;
+    }
+    let bits: Vec<bool> = dps.iter().zip(&ps).map(|(dp, k)| bind_lambda(env, dp, *k)).collect::<Option<_>>()?;
+    let float_ret = *dret == DTy::Float;
+    if float_ret {
+        side.shims.push(LANE_F64);
+    } else if bind_lambda(env, dret, ret) != Some(false) {
+        return None;
+    }
+    // The env: a copy of the block's slots, every one a scalar.
+    let slots: Vec<String> = env_elems
+        .iter()
+        .map(|e| match cx.tys.get(e) {
+            Some(NTy::I64) => Some(var(*e)),
+            Some(NTy::F64) => Some(format!("{}.to_bits() as i64", var(*e))),
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
+    let name = format!("__env_{}_{}", cx.at, side.prelude.len());
+    let closure = adapter(lambda, &name, &ps, &bits, ret, float_ret)?;
+    side.prelude.push(format!("let {name}: [i64; {}] = [{}];", slots.len(), slots.join(", ")));
+    Some(closure)
+}
+
 /// Render `call` (to the linked body `call.name`) through its runtime body.
 /// `Ok(false)` = this route does not serve it (the caller's wall stands).
 pub(crate) fn try_render(
@@ -511,114 +579,67 @@ pub(crate) fn try_render(
     sigs: &NativeSigs,
     s: crate::render_native::OpSink<'_>,
 ) -> Result<bool, LowerError> {
-    let Some(hof) = of(call.name) else { return Ok(false) };
-    let Some((at, origins)) = STATE.with(|st| {
-        let st = st.borrow();
-        st.at.clone().filter(|a| !a.2).map(|a| (a, st.origins.clone()))
-    }) else {
-        return Ok(false);
-    };
     let crate::render_native::OpSink { tys, out, indent, used_shims } = s;
-    if call.args.len() != hof.params.len() {
-        return Ok(false);
-    }
-    let mut got: Vec<(String, NTy)> = Vec::new();
-    let fname = at.0.clone();
-    for a in call.args.iter() {
-        // A closure block this render does not build: its slots are the env.
-        if let CallArg::Handle(v) = a {
-            if STATE.with(|st| st.borrow().elided.contains(&(fname.clone(), *v))) {
-                got.push((var(*v), NTy::Vec));
-                continue;
-            }
-        }
-        match crate::render_native::call_arg(a, tys) {
-            Ok(x) => got.push(x),
-            Err(_) => return Ok(false),
-        }
-    }
-    let mut env = Env::new();
-    for ((d, _), (_, t)) in hof.params.iter().zip(&got) {
-        if !matches!(d, DTy::Fn(..)) && bind_param(&mut env, d, *t).is_none() {
-            return Ok(false);
-        }
-    }
-    let mut rendered: Vec<String> = Vec::new();
-    let mut shims: Vec<&'static str> = Vec::new();
-    let mut prelude: Vec<String> = Vec::new();
-    for (((d, by_ref), (code, t)), a) in hof.params.iter().zip(&got).zip(call.args.iter()) {
-        let r = match d {
-            DTy::Fn(dps, dret) => {
-                let CallArg::Handle(blk) = a else { return Ok(false) };
-                let Some((lambda, env_elems)) = origins.get(blk) else { return Ok(false) };
-                // The lambda borrows every param, as its signature spells it.
-                if !user_fns.get(lambda.as_str()).is_some_and(|l| l.owned_params.is_empty()) {
-                    return Ok(false);
-                }
-                let Some((ps, Some(ret))) = clo::lambda_sig(sigs, lambda) else { return Ok(false) };
-                if ps.len() != dps.len() || !matches!(t, NTy::Vec | NTy::VecRef) {
-                    return Ok(false);
-                }
-                let mut bits = Vec::new();
-                for (dp, k) in dps.iter().zip(&ps) {
-                    match bind_lambda(&mut env, dp, *k) {
-                        Some(b) => bits.push(b),
-                        None => return Ok(false),
-                    }
-                }
-                let float_ret = **dret == DTy::Float;
-                if !float_ret && bind_lambda(&mut env, dret, ret) != Some(false) {
-                    return Ok(false);
-                }
-                if float_ret {
-                    shims.push(LANE_F64);
-                }
-                // The env: a copy of the block's slots, every one a scalar.
-                let mut slots = Vec::new();
-                for e in env_elems {
-                    slots.push(match tys.get(e) {
-                        Some(NTy::I64) => var(*e),
-                        Some(NTy::F64) => format!("{}.to_bits() as i64", var(*e)),
-                        _ => return Ok(false),
-                    });
-                }
-                let env = format!("__env_{}_{}", at.1, prelude.len());
-                prelude.push(format!("let {env}: [i64; {}] = [{}];", slots.len(), slots.join(", ")));
-                let _ = code;
-                match adapter(lambda, &env, &ps, &bits, ret, float_ret) {
-                    Some(r) => r,
-                    None => return Ok(false),
-                }
-            }
-            _ => {
-                let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
-                runtime_arg(code, *t, *by_ref, dying)
-            }
-        };
-        rendered.push(r);
-    }
-    let Some(ret) = kind_of(&env, &hof.ret) else { return Ok(false) };
-    let expr = format!("{}({})", hof.twin, rendered.join(", "));
+    let Some((hof, at, served)) = plan(&call, user_fns, sigs, tys) else { return Ok(false) };
+    let (expr, ret, prelude, shims) = served;
     used_shims.push(crate::native_floor::FLOOR_HEADER);
     used_shims.extend(hof.items.iter().copied());
     used_shims.extend(shims);
+    let pad = "    ".repeat(indent);
     for line in &prelude {
-        out.push_str(&"    ".repeat(indent));
-        out.push_str(line);
-        out.push('\n');
-    }
-    for _ in 0..indent {
-        out.push_str("    ");
+        out.push_str(&format!("{pad}{line}\n"));
     }
     match call.dst {
         Some(d) => {
             tys.insert(*d, ret);
-            out.push_str(&format!("let mut {}: {} = {expr};\n", var(*d), rec::owned_ty(ret)));
+            out.push_str(&format!("{pad}let mut {}: {} = {expr};\n", var(*d), rec::owned_ty(ret)));
         }
-        None => out.push_str(&format!("{expr};\n")),
+        None => out.push_str(&format!("{pad}{expr};\n")),
     }
-    STATE.with(|st| st.borrow_mut().sites.insert((at.0, at.1), hof.symbol.clone()));
+    STATE.with(|st| st.borrow_mut().sites.insert(at, hof.symbol.clone()));
     Ok(true)
+}
+
+/// A served call: the expression, its result kind, the env bindings before
+/// it, and the shims it needs.
+type Served = (String, NTy, Vec<String>, Vec<&'static str>);
+
+/// The served rendering of `call`, or `None` when this route does not serve it.
+fn plan(
+    call: &crate::render_native::NativeCall<'_>,
+    user_fns: &BTreeMap<&str, &MirFunction>,
+    sigs: &NativeSigs,
+    tys: &BTreeMap<ValueId, NTy>,
+) -> Option<(&'static Hof, (String, usize), Served)> {
+    let hof = of(call.name)?;
+    let (at, origins) = STATE.with(|st| {
+        let st = st.borrow();
+        st.at.clone().filter(|a| !a.2).map(|a| (a, st.origins.clone()))
+    })?;
+    if call.args.len() != hof.params.len() {
+        return None;
+    }
+    let got = call_args(call, &at.0, tys)?;
+    let mut env = Env::new();
+    for ((d, _), (_, t)) in hof.params.iter().zip(&got) {
+        if !matches!(d, DTy::Fn(..)) {
+            bind_param(&mut env, d, *t)?;
+        }
+    }
+    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1 };
+    let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
+    for (((d, by_ref), (code, t)), a) in hof.params.iter().zip(&got).zip(call.args.iter()) {
+        rendered.push(match d {
+            DTy::Fn(dps, dret) => fn_arg(&cx, &mut env, (dps, dret), (a, *t), &mut side)?,
+            _ => {
+                let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
+                runtime_arg(code, *t, *by_ref, dying)
+            }
+        });
+    }
+    let ret = kind_of(&env, &hof.ret)?;
+    let expr = format!("{}({})", hof.twin, rendered.join(", "));
+    Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims)))
 }
 
 /// A call the linked body `call.name` refused with `refused`: served here,
