@@ -1,12 +1,13 @@
 diff --git a/stdlib/ffi.almd b/stdlib/ffi.almd
+index 0b9647080..f13cc465c 100644
 --- a/stdlib/ffi.almd
 +++ b/stdlib/ffi.almd
-@@ -44,7 +44,7 @@
+@@ -47,7 +47,7 @@ effect fn alloc(n: Int) -> Result[Region, String] =
    else {
      let buf = bytes.zeros(n)
      let base = __address(buf)
--    ok({ owner: buf, base: base, len: n, writable: true, keep: () => () })
-+    ok({ owner: bytes.new(), base: base, len: n, writable: true, keep: () => () })
+-    ok({ owner: buf, base: base, off: 0, len: n, writable: true, keep: () => () })
++    ok({ owner: bytes.new(), base: base, off: 0, len: n, writable: true, keep: () => () })
    }
  
  /// The region's length in bytes.
