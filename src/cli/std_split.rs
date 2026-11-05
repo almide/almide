@@ -1325,18 +1325,18 @@ mod tests {
 
     #[test]
     fn a_shared_function_becomes_a_kept_hidden_symbol() {
-        let names: std::collections::HashSet<String> = ["f", "g", "a$b"].iter().map(|s| s.to_string()).collect();
-        let text = "define internal fastcc void @f() unnamed_addr #1 {\n  ret void\n}\ndefine void @g() {\n  ret void\n}\ndefine private void @\"a$b\"() {\n  ret void\n}\ndefine void @h() {\n  ret void\n}\n";
+        let names: std::collections::HashSet<String> = ["f", "g", "a b"].iter().map(|s| s.to_string()).collect();
+        let text = "define internal fastcc void @f() unnamed_addr #1 {\n  ret void\n}\ndefine void @g() {\n  ret void\n}\ndefine private void @\"a b\"() {\n  ret void\n}\ndefine void @h() {\n  ret void\n}\n";
         let out = export_defines(text, &names).unwrap();
         assert!(out.contains("define hidden fastcc void @f() unnamed_addr #1 {"), "{out}");
         assert!(out.contains("define hidden void @g() {"), "{out}");
-        assert!(out.contains("define hidden void @\"a$b\"() {"), "{out}");
+        assert!(out.contains("define hidden void @\"a b\"() {"), "{out}");
         assert!(out.contains("define void @h() {"), "{out}");
         assert_eq!(hidden_define("define linkonce_odr dso_local void @k() comdat {"), "define linkonce_odr hidden void @k() comdat {");
-        assert!(out.ends_with("@llvm.used = appending global [3 x ptr] [ptr @f, ptr @g, ptr @\"a$b\"], section \"llvm.metadata\"\n"), "{out}");
+        assert!(out.ends_with("@llvm.used = appending global [3 x ptr] [ptr @f, ptr @g, ptr @\"a b\"], section \"llvm.metadata\"\n"), "{out}");
         let listed = format!("{text}@llvm.used = appending global [1 x ptr] [ptr @x], section \"llvm.metadata\"\n");
         let out = export_defines(&listed, &names).unwrap();
-        assert!(out.contains("@llvm.used = appending global [4 x ptr] [ptr @f, ptr @g, ptr @\"a$b\", ptr @x], section"), "{out}");
+        assert!(out.contains("@llvm.used = appending global [4 x ptr] [ptr @f, ptr @g, ptr @\"a b\", ptr @x], section"), "{out}");
         assert_eq!(out.matches("@llvm.used").count(), 1, "{out}");
         assert_eq!(export_defines("define void @h() {\n}\n", &names).unwrap(), "define void @h() {\n}\n");
     }
