@@ -1,0 +1,28 @@
+diff --git a/crates/almide-mir/src/render_native_loop.rs b/crates/almide-mir/src/render_native_loop.rs
+index 984ad16b2..c90ab94b2 100644
+--- a/crates/almide-mir/src/render_native_loop.rs
++++ b/crates/almide-mir/src/render_native_loop.rs
+@@ -427,7 +427,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
+                 && crate::render_native_move::last_use(func, i, args[0], NTy::Str, &st.borrows.arms) =>
+         {
+             st.tys.insert(*d, NTy::Res);
+-            line!("let {}: Result<i64, AlmideString> = Err({});", var(*d), crate::render_native_move::take_expr(&var(args[0])));
++            line!("let {}: Result<i64, AlmideString> = Err({}.as_str());", var(*d), var(args[0]));
+         }
+         Op::SetLocal { local, src }
+             if st.tys.get(src).is_some_and(|t| {
+diff --git a/crates/almide-mir/src/render_native_op_families.rs b/crates/almide-mir/src/render_native_op_families.rs
+index f41eade3c..13fda7105 100644
+--- a/crates/almide-mir/src/render_native_op_families.rs
++++ b/crates/almide-mir/src/render_native_op_families.rs
+@@ -226,8 +226,8 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError>
+             args,
+         } => {
+             let src = match tys.get(&args[0]) {
+-                Some(NTy::Str) => format!("{}.clone()", var(args[0])),
+-                Some(NTy::StrRef) => format!("AlmideString::from({})", var(args[0])),
++                Some(NTy::Str) => format!("{}.as_str()", var(args[0])),
++                Some(NTy::StrRef) => var(args[0]),
+                 other => {
+                     return Err(wall(format!(
+                         "native: ResMakeErrStr over a non-string payload ({other:?})"
