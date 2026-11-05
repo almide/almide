@@ -1,0 +1,8 @@
+// #4006 C1 drill (native-calls): a fold over a list of Option[Int] is served
+// by the runtime body `list.fold` declares (its linked self-hosted body takes
+// a List[String]). The re-injected render keeps no record of that site, so
+// the witness points the call at the linked body it no longer carries.
+fn main() -> Unit = {
+  let v: List[Int?] = [some(1), none, some(3)]
+  println(int.to_string(list.fold(v, 0, (a, o) => a + (o ?? 0))))
+}
