@@ -19,13 +19,15 @@
 //!   metadata are untouched), so the LTO module no longer reaches the
 //!   printer, and
 //! * one object, `backtrace.o`, holding the same two functions compiled from
-//!   the same std bitcode with everything they reach as private copies. Its
-//!   definitions are weak: in a link without LTO (a build script of a cargo
-//!   dependency) std's own definition wins.
+//!   the same std bitcode with everything they reach as private copies —
+//!   except the per-thread panic count, which it references in the program's
+//!   std ([`SHARED_TLS`]), so the thread-local block is today's byte for byte.
+//!   Its definitions are weak: in a link without LTO (a build script of a
+//!   cargo dependency) std's own definition wins.
 //!
 //! What the program's own functions see is unchanged: the printer is not in
 //! any of their call graphs, and their machine code compares equal function by
-//! function (thread-local offsets aside — `backtrace.o` brings its own), with
+//! function, thread-local offsets included, with
 //! the same instruction count to within 0.003% (cachegrind, fib, strbuild,
 //! regexcycle, decode). What moves is the layout: `.text` starts elsewhere and
 //! the std functions after the program's are packed differently. On the
@@ -71,6 +73,15 @@ const SPLIT_FORMAT: u32 = 1;
 
 /// The LLVM tools the transform runs, from the toolchain's own `llvm-tools`.
 const TOOLS: [&str; 6] = ["llvm-ar", "llvm-objcopy", "llvm-dis", "llvm-as", "opt", "llc"];
+
+/// The one thread-local the printer shares with the rest of std: the
+/// per-thread panic count (`std::panicking::panic_count::LOCAL_PANIC_COUNT`).
+/// `backtrace.o` references the LTO module's copy instead of carrying its own,
+/// so the program's thread-local block keeps today's layout byte for byte and
+/// a panic inside the printer sees the count the panic it prints raised. The
+/// split libstd lists it in `@llvm.used` with hidden linkage, which keeps it a
+/// symbol through LTO's internalization.
+const SHARED_TLS: &[&str] = &["9panicking11panic_count17LOCAL_PANIC_COUNT", "RUST_STD_INTERNAL_VAL"];
 
 /// One function taken out of the LTO module, found by the v0-mangled path
 /// segments its symbol must contain (the crate hash differs per toolchain).
@@ -235,15 +246,16 @@ fn build_split(tc: &Toolchain, std_rlib: &Path, dir: &Path) -> Result<(), String
     let _ = std::fs::remove_dir_all(&work);
     let _ = std::fs::remove_dir_all(dir.join("sysroot"));
     std::fs::create_dir_all(&work).map_err(|e| format!("{}: {e}", work.display()))?;
-    let names = build_sysroot(tc, std_rlib, dir, &work)?;
-    build_object(tc, &work, &names, &dir.join("backtrace.o"))?;
+    let (names, shared) = build_sysroot(tc, std_rlib, dir, &work)?;
+    build_object(tc, &work, &names, &shared, &dir.join("backtrace.o"))?;
     probe(tc, dir, &work)
 }
 
 /// The split sysroot: every entry of the toolchain's target dir linked, libstd
 /// rewritten with the cut functions declared instead of defined in its
-/// bitcode. Returns the cut symbols, in [`CUTS`] order.
-fn build_sysroot(tc: &Toolchain, std_rlib: &Path, dir: &Path, work: &Path) -> Result<Vec<String>, String> {
+/// bitcode and the panic count kept a symbol. Returns the cut symbols, in
+/// [`CUTS`] order, and the panic count's.
+fn build_sysroot(tc: &Toolchain, std_rlib: &Path, dir: &Path, work: &Path) -> Result<(Vec<String>, String), String> {
     let target = dir.join("sysroot").join("lib").join("rustlib").join(&tc.host);
     let lib = target.join("lib");
     std::fs::create_dir_all(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
@@ -266,6 +278,7 @@ fn build_sysroot(tc: &Toolchain, std_rlib: &Path, dir: &Path, work: &Path) -> Re
     let members: Vec<String> = String::from_utf8_lossy(&listed.stdout).lines().map(str::to_string).collect();
     run(std::process::Command::new(tc.tool("llvm-ar")).arg("x").arg(std_rlib).current_dir(&rlib_dir))?;
     let mut names: Vec<Option<String>> = vec![None; CUTS.len()];
+    let mut shared: Option<String> = None;
     for member in members.iter().filter(|m| m.ends_with(".o")) {
         let obj = rlib_dir.join(member);
         let bc = work.join(format!("{member}.bc"));
@@ -275,6 +288,14 @@ fn build_sysroot(tc: &Toolchain, std_rlib: &Path, dir: &Path, work: &Path) -> Re
         let text = std::fs::read_to_string(&ll).map_err(|e| format!("{}: {e}", ll.display()))?;
         let mut patched = text;
         let mut touched = false;
+        if let Some(name) = find_global(&patched, SHARED_TLS)? {
+            if shared.is_some() {
+                return Err("the panic count is defined in two of libstd's objects".to_string());
+            }
+            patched = keep_global(&patched, &name)?;
+            shared = Some(name);
+            touched = true;
+        }
         for (i, cut) in CUTS.iter().enumerate() {
             let Some(name) = find_define(&patched, cut)? else { continue };
             if names[i].is_some() {
@@ -298,9 +319,10 @@ fn build_sysroot(tc: &Toolchain, std_rlib: &Path, dir: &Path, work: &Path) -> Re
         .zip(CUTS.iter())
         .map(|(n, cut)| n.ok_or_else(|| format!("{} is not in libstd's bitcode", cut.what)))
         .collect::<Result<_, _>>()?;
+    let shared = shared.ok_or("the panic count is not in libstd's bitcode")?;
     let out = lib.join(std_rlib.file_name().ok_or("libstd has no file name")?);
     run(std::process::Command::new(tc.tool("llvm-ar")).arg("rcs").arg(&out).args(&members).current_dir(&rlib_dir))?;
-    Ok(names)
+    Ok((names, shared))
 }
 
 #[cfg(unix)]
@@ -317,7 +339,7 @@ fn symlink(_from: &Path, to: &Path) -> Result<(), String> {
 /// build (std, its dependencies and rustc's allocator shim), everything they
 /// reach internalized into private copies, the cut functions themselves weak
 /// and hidden.
-fn build_object(tc: &Toolchain, work: &Path, names: &[String], out: &Path) -> Result<(), String> {
+fn build_object(tc: &Toolchain, work: &Path, names: &[String], shared: &str, out: &Path) -> Result<(), String> {
     let src = work.join("seed.rs");
     std::fs::write(&src, "fn main() { println!(\"{}\", std::env::args().count()); }\n").map_err(|e| format!("{e}"))?;
     let seed_dir = work.join("seed");
@@ -339,7 +361,14 @@ fn build_object(tc: &Toolchain, work: &Path, names: &[String], out: &Path) -> Re
     let text = std::fs::read_to_string(&ll).map_err(|e| format!("{}: {e}", ll.display()))?;
     let mut kept = String::with_capacity(text.len());
     let mut exported = vec![false; names.len()];
+    let mut referenced = false;
     for line in text.lines() {
+        if global_name(line) == Some(shared) {
+            kept.push_str(&external_global(line)?);
+            kept.push('\n');
+            referenced = true;
+            continue;
+        }
         if ["@llvm.used = ", "@llvm.compiler.used = ", "@llvm.global_ctors = ", "@llvm.global_dtors = "]
             .iter()
             .any(|p| line.starts_with(p))
@@ -358,8 +387,8 @@ fn build_object(tc: &Toolchain, work: &Path, names: &[String], out: &Path) -> Re
         }
         kept.push('\n');
     }
-    if exported.iter().any(|e| !e) {
-        return Err("a cut function is missing from the seed's LTO input".to_string());
+    if exported.iter().any(|e| !e) || !referenced {
+        return Err("a cut function or the panic count is missing from the seed's LTO input".to_string());
     }
     std::fs::write(&ll, kept).map_err(|e| format!("{}: {e}", ll.display()))?;
     let bc = work.join("merged.bc");
@@ -448,6 +477,102 @@ fn normalize_panic_text(s: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// The name of a global variable's definition line (`@name = …`), if it is one.
+fn global_name(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix('@')?;
+    let end = rest.find(" = ")?;
+    let name = &rest[..end];
+    let tail = &rest[end + 3..];
+    (tail.contains(" global ") || tail.starts_with("global ")).then_some(name.trim_matches('"'))
+}
+
+/// The one thread-local definition whose name carries every segment; two is an error.
+fn find_global(text: &str, segments: &[&str]) -> Result<Option<String>, String> {
+    let mut hits = text
+        .lines()
+        .filter(|l| l.contains("thread_local") && !l.contains("= external "))
+        .filter_map(global_name)
+        .filter(|n| segments.iter().all(|s| n.contains(s)));
+    let first = hits.next().map(str::to_string);
+    if hits.next().is_some() {
+        return Err("the panic count matches more than one thread-local".to_string());
+    }
+    Ok(first)
+}
+
+/// Give the definition of `name` hidden external linkage and list it in
+/// `@llvm.used`, so LTO keeps it a symbol another object can reference.
+fn keep_global(text: &str, name: &str) -> Result<String, String> {
+    let mut out = String::with_capacity(text.len() + 128);
+    let (mut defined, mut listed) = (false, false);
+    for line in text.lines() {
+        if global_name(line) == Some(name) {
+            let (head, tail) = line.split_once(" = ").ok_or("malformed global")?;
+            let mut tail = tail;
+            loop {
+                let w = tail.split(' ').next().unwrap_or("");
+                if matches!(w, "internal" | "private" | "hidden" | "dso_local") {
+                    tail = tail[w.len()..].trim_start();
+                } else {
+                    break;
+                }
+            }
+            out.push_str(&format!("{head} = hidden {tail}"));
+            defined = true;
+        } else if let Some(rest) = line.strip_prefix("@llvm.used = appending global [") {
+            let (n, rest) = rest.split_once(" x ptr] [").ok_or("malformed @llvm.used")?;
+            let n: usize = n.parse().map_err(|_| "malformed @llvm.used count")?;
+            out.push_str(&format!("@llvm.used = appending global [{} x ptr] [ptr @{name}, {rest}", n + 1));
+            listed = true;
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    if !defined {
+        return Err(format!("{name} has no definition"));
+    }
+    if !listed {
+        out.push_str(&format!("@llvm.used = appending global [1 x ptr] [ptr @{name}], section \"llvm.metadata\"\n"));
+    }
+    Ok(out)
+}
+
+/// A thread-local definition as a hidden external declaration of the same
+/// type, thread-local model and alignment.
+fn external_global(line: &str) -> Result<String, String> {
+    let (head, tail) = line.split_once(" = ").ok_or("malformed global")?;
+    let tls = tail.split(' ').find(|w| w.starts_with("thread_local")).ok_or("not a thread-local")?;
+    let after = tail.split_once(" global ").ok_or("malformed global")?.1;
+    let ty = leading_type(after).ok_or("cannot read the global's type")?;
+    let align = tail
+        .split(", ")
+        .find_map(|p| p.strip_prefix("align "))
+        .map(|a| format!(", align {}", a.split_whitespace().next().unwrap_or("8")))
+        .unwrap_or_default();
+    Ok(format!("{head} = external hidden {tls} global {ty}{align}"))
+}
+
+/// The type an IR value starts with: a bracketed aggregate (`<{ … }>`,
+/// `{ … }`, `[ … ]`) or one word.
+fn leading_type(s: &str) -> Option<&str> {
+    let mut depth = 0i32;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' | '{' | '[' => depth += 1,
+            '>' | '}' | ']' => {
+                depth -= 1;
+                if depth == 0 && !(c == '}' && s[i + 1..].starts_with('>')) {
+                    return Some(&s[..=i]);
+                }
+            }
+            ' ' if depth == 0 => return Some(&s[..i]),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// The function name of a `define` line, if it is one.
@@ -569,6 +694,21 @@ mod tests {
         assert!(find_define(&text, &CUTS[0]).unwrap().is_none());
         let twice = format!("{DEF}\n}}\n{}\n}}\n", DEF.replace("s_0EBc_", "s_1EBc_"));
         assert!(find_define(&twice, &CUTS[1]).is_err());
+    }
+
+    const TLS: &str = "@_RNvNCNKNvNtNtCs8_3std9panicking11panic_count17LOCAL_PANIC_COUNT0s_023___RUST_STD_INTERNAL_VAL = internal thread_local unnamed_addr global <{ [9 x i8], [7 x i8] }> <{ [9 x i8] zeroinitializer, [7 x i8] undef }>, align 8, !guid !34";
+
+    #[test]
+    fn the_panic_count_is_kept_a_symbol_in_std_and_referenced_from_the_object() {
+        let text = format!("{TLS}\n@llvm.used = appending global [1 x ptr] [ptr @a], section \"llvm.metadata\", !guid !9\n");
+        let name = find_global(&text, SHARED_TLS).unwrap().unwrap();
+        let kept = keep_global(&text, &name).unwrap();
+        assert!(kept.contains(&format!("{name} = hidden thread_local unnamed_addr global")), "{kept}");
+        assert!(kept.contains(&format!("@llvm.used = appending global [2 x ptr] [ptr @{name}, ptr @a]")), "{kept}");
+        assert_eq!(
+            external_global(TLS).unwrap(),
+            format!("@{name} = external hidden thread_local global <{{ [9 x i8], [7 x i8] }}>, align 8")
+        );
     }
 
     #[test]
