@@ -218,6 +218,7 @@ name = "almide-lin-prove"
 version = "0.1.0"
 dependencies = [
  "almide-anchor-check",
+ "almide-base",
 ]
 
 [[package]]
