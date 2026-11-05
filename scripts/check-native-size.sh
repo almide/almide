@@ -9,8 +9,17 @@
 # through cargo) stayed at 0.37 MB, so nothing that measured hello saw it.
 #
 # What it checks, per program in PROGRAMS (all heap-using):
-#   1. the release binary carries no `.debug_*` section, and
-#   2. its size stays under scripts/native-size-baseline.txt + BUDGET_PCT.
+#   1. the release binary carries no `.debug_*` section,
+#   2. its size stays under scripts/native-size-baseline.txt + BUDGET_PCT, and
+#   3. it defines no function twice (#4497). One fat-LTO module never does;
+#      the `--release` backtrace split (src/cli/std_split.rs) links a second
+#      object, and a std function both it and the LTO module carry a private
+#      copy of is linked twice — 20-32 KB per binary when the split shipped
+#      (#4459). The only names allowed twice are the allocator shim's
+#      (`__rustc::__rust_alloc` and kin): rustc generates that shim into every
+#      link, so the object cannot reference the program's.
+#      Negative control: a build that duplicates (the split before #4497, or
+#      a split whose sharing step is skipped) lists ~84 names here and fails.
 # A size below 80% of the baseline also fails: a shrink that large is a build
 # that lost something until proven otherwise. A deliberate change (a runtime
 # that grew or shrank on purpose) rewrites the baseline in the SAME change:
@@ -32,6 +41,7 @@ if [ "$(uname -s)-$(uname -m)" != "Linux-x86_64" ]; then
   exit 0
 fi
 command -v readelf >/dev/null || { echo "::error::native-size: readelf not found"; exit 1; }
+command -v nm >/dev/null || { echo "::error::native-size: nm not found"; exit 1; }
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -52,6 +62,17 @@ for p in "${PROGRAMS[@]}"; do
     readelf -S -W "$work/$p" | grep ' \.debug_' | awk '{print "  " $2 "  0x" $6}'
     echo "A release binary carries no debug info (the cargo release profile strips it;"
     echo "the rlib fast path passes \`-C strip=debuginfo\` — FAST_PATH_RELEASE_ARGS)."
+    fail=1
+  fi
+  twice=$(nm --defined-only "$work/$p" | awk '$2 ~ /^[tTwW]$/ { print $3 }' | sort | uniq -d \
+    | grep -Ev '7___rustc[0-9]+___rust_(alloc|dealloc|realloc|alloc_zeroed)$' || true)
+  if [ -n "$twice" ]; then
+    echo "::error::native-size: $p defines $(echo "$twice" | wc -l) function(s) twice:"
+    echo "$twice" | head -20 | sed 's/^/  /'
+    echo "A std function the backtrace split's object and the LTO module both carry is linked"
+    echo "twice (#4497): src/cli/std_split.rs shares it (moved into the object, or referenced"
+    echo "in the program) — find why this one was left out (two definitions in std's bitcode,"
+    echo "an alias, or a seed that does not reach it)."
     fail=1
   fi
 done
