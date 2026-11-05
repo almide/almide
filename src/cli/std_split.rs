@@ -15,26 +15,35 @@
 //! precompiled, once per toolchain:
 //!
 //! * a sysroot whose libstd carries the two functions as declarations in its
-//!   bitcode (every other rlib is a symlink, and libstd's machine code and
-//!   metadata are untouched), so the LTO module no longer reaches the
-//!   printer, and
+//!   bitcode (every rlib it does not rewrite is a symlink, and the rewritten
+//!   ones keep their machine code and metadata), so the LTO module no longer
+//!   reaches the printer, and
 //! * one object, `backtrace.o`, holding the same two functions compiled from
 //!   the same std bitcode with everything they reach as private copies —
 //!   except the per-thread panic count, which it references in the program's
 //!   std ([`SHARED_TLS`]), so the thread-local block is today's byte for byte.
 //!   Its definitions are weak: in a link without LTO (a build script of a
 //!   cargo dependency) std's own definition wins.
-//! * no second copy of what the program keeps anyway (#4497). The printer
-//!   reaches std functions every program links — `fmt::write`, the panic
-//!   path, `str` search, `RawVec` growth — and private copies of those were
-//!   linked twice, once from the LTO module and once from the object (20-32
-//!   KB per binary). The split finds them by linking the seed against the
-//!   split and listing the names defined twice; it keeps each one a hidden
-//!   symbol of the split sysroot's crate bitcode (`@llvm.used`, module-local
-//!   linkage made external) and builds the object with them declared, so the
-//!   printer calls the program's copy. Only functions the seed's LTO module
-//!   keeps are shared — the printer's own code (the DWARF reader, the
-//!   demangler) stays in the object, so the LTO module does not grow back.
+//! * no second copy of a std function both sides link (#4497). The printer
+//!   reaches std functions programs link too — `fmt::write`, `str` search,
+//!   UTF-8 checks, `RawVec` growth, path walking, the panic path — and
+//!   private copies of those were linked twice, once from the LTO module and
+//!   once from the object (20-32 KB per binary). The split finds them by
+//!   linking a seed program against the split (at opt-level 0, so nothing is
+//!   inlined away) and listing the names defined twice, then keeps one copy:
+//!   - a function that holds no state of the object's own is MOVED: the
+//!     object defines it (weak, hidden, at speed rather than `optsize`) and
+//!     the split crates' bitcode carries it `available_externally`, so the
+//!     LTO module still inlines it where it likes but never emits a copy —
+//!     a program that does not call it pays nothing, and the LTO module
+//!     code-generates less than before;
+//!   - a function that reaches a static, a thread-local or an
+//!     address-compared constant the object would own a private copy of (the
+//!     panic machinery, the hook lock, panic_unwind's canary) is REFERENCED:
+//!     the program defines it (`@llvm.used`) and the object calls the
+//!     program's, so there is one copy of the state.
+//!   A name with two definitions in the crates' bitcode, or one an alias or
+//!   `@llvm.used` pins, keeps its private copy.
 //!
 //! What the program's own functions see is unchanged: the printer is not in
 //! any of their call graphs, and their machine code compares equal function by
@@ -53,7 +62,7 @@
 //! `1` and `full` (thread ids and addresses normalized).
 //!
 //! The transform needs the `llvm-tools` rustup component (`opt`, `llc`,
-//! `llvm-dis`, `llvm-as`, `llvm-objcopy`, `llvm-ar`). Without it, on any
+//! `llvm-dis`, `llvm-as`, `llvm-objcopy`, `llvm-ar`, `llvm-nm`). Without it, on any
 //! host but Linux, for a cross build, when either function is not found in
 //! std's bitcode, or when any step or the probe fails, the build uses the
 //! plain fat-LTO profile — slower, never different. `ALMIDE_RELEASE_STD_UNSPLIT=1`
@@ -81,6 +90,9 @@ impl StdSplit {
 
 /// Bumped whenever what the cache holds changes shape.
 const SPLIT_FORMAT: u32 = 2;
+
+/// The prefix of the attribute-group ids that copy a group without `optsize`.
+const FAST_GROUP: u32 = 9000;
 
 /// The LLVM tools the transform runs, from the toolchain's own `llvm-tools`.
 const TOOLS: [&str; 7] = ["llvm-ar", "llvm-objcopy", "llvm-dis", "llvm-as", "llvm-nm", "opt", "llc"];
@@ -262,26 +274,26 @@ fn build_split(tc: &Toolchain, std_rlib: &Path, dir: &Path) -> Result<(), String
     let (names, shared, std_unpacked) = build_sysroot(tc, std_rlib, dir, &work)?;
     let merged = seed_lto_input(tc, &work)?;
     let object = dir.join("backtrace.o");
-    build_object(tc, &work, &merged, &names, &shared, &Default::default(), &object)?;
+    build_object(tc, &work, &merged, &names, &shared, &Shared::default(), &object)?;
     // The printer's private copies of std functions the program keeps anyway
     // (fmt, the panic path, str search…) would be linked twice: once from the
     // LTO module, once from the object (#4497). Find them by linking the seed
-    // against the split, make them symbols of the split std that the object
-    // references, and rebuild the object without its copies. The seed links
-    // at opt-level 0 so that nothing is inlined away: every std function its
-    // code reaches is a definition to match, not only the ones a small seed
-    // happens to keep out of line at -O3 (a larger program keeps more).
+    // against the split; the seed links at opt-level 0 so that nothing is
+    // inlined away and every std function its code reaches is a definition
+    // to match. Then rebuild the sysroot and the object so each has one copy.
     let twice = defined_twice(tc, dir, &work, 0)?;
-    let external = share_with_program(tc, dir, &work, std_unpacked, &twice)?;
-    if !external.is_empty() {
-        build_object(tc, &work, &merged, &names, &shared, &external, &object)?;
-    }
+    let optimized = work.join("backtrace.ll");
+    run(std::process::Command::new(tc.tool("llvm-dis")).arg(work.join("backtrace.bc")).arg("-o").arg(&optimized))?;
+    let stateful = stateful_functions(&std::fs::read_to_string(&optimized).map_err(|e| format!("{}: {e}", optimized.display()))?, &twice);
+    let with = share_with_program(tc, dir, &work, std_unpacked, &twice, &stateful)?;
+    build_object(tc, &work, &merged, &names, &shared, &with, &object)?;
     if almide_base::env::flag("ALMIDE_DEBUG_STD_SPLIT") {
         let left = defined_twice(tc, dir, &work, 3)?;
         eprintln!(
-            "almide: std split: {} functions defined twice, {} now shared, {} left: {:?}",
+            "almide: std split: {} functions defined twice, {} moved to the object, {} kept in the program, {} left: {:?}",
             twice.len(),
-            external.len(),
+            with.moved.len(),
+            with.referenced.len(),
             left.len(),
             left
         );
@@ -458,9 +470,10 @@ fn share_with_program(
     work: &Path,
     std_unpacked: Unpacked,
     wanted: &std::collections::BTreeSet<String>,
-) -> Result<std::collections::HashSet<String>, String> {
+    stateful: &std::collections::HashSet<String>,
+) -> Result<Shared, String> {
     if wanted.is_empty() {
-        return Ok(Default::default());
+        return Ok(Shared::default());
     }
     let lib = dir.join("sysroot").join("lib").join("rustlib").join(&tc.host).join("lib");
     // The crates the names mention (`4core`, `5alloc`, …): a function is
@@ -501,11 +514,26 @@ fn share_with_program(
             }
         }
     }
-    let unique: std::collections::HashSet<String> =
-        sites.iter().filter(|(_, s)| s.len() == 1).map(|(n, _)| n.to_string()).collect();
+    // A name another global points at (an alias, a `@llvm.used` entry) needs
+    // a real definition in its module, so it keeps its copy.
+    let pinned: std::collections::HashSet<&str> = texts
+        .values()
+        .flat_map(|t| t.lines())
+        .filter(|l| l.starts_with("@llvm.used = ") || l.starts_with("@llvm.compiler.used = ") || (l.starts_with('@') && l.contains(" alias ")))
+        .flat_map(|l| l.split("ptr @").skip(1).map(|r| r.trim_start_matches('"').split(['"', ',', ']', ' ', ')']).next().unwrap_or("")))
+        .collect();
+    let unique = sites.iter().filter(|(_, s)| s.len() == 1).map(|(n, _)| n.to_string());
+    let mut shared = Shared::default();
+    for name in unique {
+        if stateful.contains(&name) {
+            shared.referenced.insert(name);
+        } else if !pinned.contains(name.as_str()) {
+            shared.moved.insert(name);
+        }
+    }
     let mut changed: std::collections::BTreeSet<usize> = Default::default();
     for ((i, member), text) in texts {
-        let patched = export_defines(&text, &unique)?;
+        let patched = export_defines(&available_defines(&text, &shared.moved), &shared.referenced)?;
         if patched != text {
             rlibs[i].1.replace(tc, &member, &patched)?;
             changed.insert(i);
@@ -515,7 +543,106 @@ fn share_with_program(
         let (out, u) = &rlibs[i];
         u.pack(tc, out)?;
     }
-    Ok(unique)
+    Ok(shared)
+}
+
+/// The std functions `backtrace.o` shares with the program instead of
+/// carrying a private copy of each (#4497).
+#[derive(Default)]
+struct Shared {
+    /// Stateless ones: the object defines them (weak, hidden), the split
+    /// std's bitcode carries them `available_externally` — the program
+    /// inlines what it likes and calls the object's copy for the rest.
+    moved: std::collections::HashSet<String>,
+    /// Ones that reach a static or thread-local the object would otherwise
+    /// own a private copy of (the panic machinery, the hook lock, the current
+    /// thread): the program defines them (kept with `@llvm.used`) and the
+    /// object references the program's, so there is one copy of the state.
+    referenced: std::collections::HashSet<String>,
+}
+
+/// The functions of `candidates` that reach, in `ir` (an optimized module's
+/// text), state the module defines — a mutable `global`, a thread-local, or
+/// a constant whose address is compared — through calls or referenced constants that pass only
+/// through functions outside `candidates`. External globals (libc's, the
+/// shared panic count) are one object either way. A candidate reached on the
+/// way is where the search stops: if it is stateful it is referenced in the
+/// program, so what lies behind it is the program's state, not the object's.
+fn stateful_functions(ir: &str, candidates: &std::collections::BTreeSet<String>) -> std::collections::HashSet<String> {
+    let mut refs: std::collections::HashMap<String, Vec<String>> = Default::default();
+    let mut state: Vec<String> = Vec::new();
+    let mut current: Option<String> = None;
+    for line in ir.lines() {
+        if let Some(f) = current.as_ref() {
+            if line.starts_with('}') {
+                current = None;
+            } else {
+                let f = f.clone();
+                refs.entry(f).or_default().extend(ir_refs(line));
+            }
+            continue;
+        }
+        if let Some(name) = define_name(line) {
+            let name = name.to_string();
+            refs.entry(name.clone()).or_default().extend(ir_refs(line));
+            if line.trim_end().ends_with('{') {
+                current = Some(name);
+            }
+            continue;
+        }
+        let Some((head, tail)) = line.split_once(" = ").filter(|_| line.starts_with('@')) else { continue };
+        let name = head[1..].trim_matches('"').to_string();
+        let words: Vec<&str> = tail.split(' ').take_while(|w| !w.starts_with('[') && !w.starts_with('{') && !w.starts_with('<')).collect();
+        if words.contains(&"external") || words.contains(&"extern_weak") {
+            continue;
+        }
+        // A constant whose address is significant (no `unnamed_addr`) is
+        // identity, not data: panic_unwind's exception canary is compared by
+        // address, and a second copy reads as a foreign exception.
+        let identity = !words.contains(&"unnamed_addr") && !words.contains(&"local_unnamed_addr");
+        if words.contains(&"global") || (words.contains(&"constant") && identity) {
+            state.push(name.clone());
+        }
+        refs.entry(name).or_default().extend(ir_refs(tail));
+    }
+    let mut callers: std::collections::HashMap<&str, Vec<&str>> = Default::default();
+    for (from, to) in &refs {
+        for t in to {
+            callers.entry(t.as_str()).or_default().push(from.as_str());
+        }
+    }
+    let mut seen: std::collections::HashSet<&str> = state.iter().map(String::as_str).collect();
+    let mut queue: Vec<&str> = seen.iter().copied().collect();
+    let mut found = std::collections::HashSet::new();
+    while let Some(n) = queue.pop() {
+        for c in callers.get(n).into_iter().flatten() {
+            if candidates.contains(*c) {
+                found.insert(c.to_string());
+            } else if seen.insert(c) {
+                queue.push(c);
+            }
+        }
+    }
+    found
+}
+
+/// The `@names` a line of IR mentions.
+fn ir_refs(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = line;
+    while let Some(i) = rest.find('@') {
+        rest = &rest[i + 1..];
+        let name = if let Some(q) = rest.strip_prefix('"') {
+            q.split('"').next().unwrap_or("")
+        } else {
+            let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '$' | '-'))).unwrap_or(rest.len());
+            &rest[..end]
+        };
+        if !name.is_empty() && !name.starts_with("llvm.") {
+            out.push(name.to_string());
+        }
+    }
+    out
 }
 
 fn std_unpacked_name(tc: &Toolchain) -> Result<String, String> {
@@ -600,6 +727,29 @@ fn append_used(line: &str, n: usize, extra: &str) -> Result<String, String> {
     let count: usize = count.parse().map_err(|_| "malformed @llvm.used count")?;
     Ok(format!("@llvm.used = appending global [{} x ptr] [{extra}, {rest}", count + n))
 }
+/// Turn every definition of a name in `names` into an `available_externally`
+/// one: the LTO module may still inline the body, but never emits a copy of
+/// its own — what is left calls the one `backtrace.o` defines. Hidden, so
+/// those calls are direct; no comdat, which `available_externally` cannot
+/// carry. (Not `@llvm.used` on a symbol the LTO module keeps: that holds a
+/// copy in every program whether it calls it or not, and costs each build
+/// the time to optimize and code-generate it.)
+fn available_defines(text: &str, names: &std::collections::HashSet<String>) -> String {
+    let mut out = String::with_capacity(text.len() + 4096);
+    for line in text.lines() {
+        if define_name(line).is_some_and(|n| names.contains(n)) {
+            out.push_str("define available_externally hidden ");
+            let rest: Vec<&str> =
+                strip_linkage(line).split(' ').filter(|w| *w != "comdat" && !w.starts_with("comdat(")).collect();
+            out.push_str(&rest.join(" "));
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out
+}
+
 
 #[cfg(unix)]
 fn symlink(from: &Path, to: &Path) -> Result<(), String> {
@@ -675,13 +825,21 @@ fn build_object(
     text: &str,
     names: &[String],
     shared: &str,
-    external: &std::collections::HashSet<String>,
+    with: &Shared,
     out: &Path,
 ) -> Result<(), String> {
     let ll = work.join("merged.ll");
     let mut kept = String::with_capacity(text.len());
     let mut exported = vec![false; names.len()];
     let mut referenced = false;
+    // The function attribute groups that get `optsize` (the printer runs once
+    // per panic); a moved function is the program's code now and keeps its
+    // speed, through a copy of its group without it.
+    let sized: std::collections::HashSet<&str> = text
+        .lines()
+        .filter(|l| l.starts_with("attributes #") && l.contains("\"target-cpu\""))
+        .filter_map(|l| l["attributes #".len()..].split(' ').next())
+        .collect();
     let mut lines = text.lines();
     while let Some(line) = lines.next() {
         if global_name(line) == Some(shared) {
@@ -699,7 +857,17 @@ fn build_object(
         if let Some(i) = names.iter().position(|n| defines(line, n)) {
             kept.push_str(&format!("define weak hidden {}", strip_linkage(line)));
             exported[i] = true;
-        } else if define_name(line).is_some_and(|n| external.contains(n)) {
+        } else if define_name(line).is_some_and(|n| with.moved.contains(n)) {
+            let head = format!("define weak hidden {}", strip_linkage(line));
+            let words: Vec<String> = head
+                .split(' ')
+                .map(|w| match w.strip_prefix('#') {
+                    Some(id) if sized.contains(id) => format!("#{FAST_GROUP}{id}"),
+                    _ => w.to_string(),
+                })
+                .collect();
+            kept.push_str(&words.join(" "));
+        } else if define_name(line).is_some_and(|n| with.referenced.contains(n)) {
             let head = strip_linkage(line).trim_end();
             let head = head.strip_suffix('{').unwrap_or(head).trim_end();
             kept.push_str("declare hidden ");
@@ -709,9 +877,8 @@ fn build_object(
                     break;
                 }
             }
-        } else if line.starts_with("attributes #") && line.contains("\"target-cpu\"") {
-            // Function attribute groups: size over speed, the printer runs
-            // once per panic.
+        } else if let Some(id) = line.strip_prefix("attributes #").and_then(|r| r.split(' ').next()).filter(|id| sized.contains(id)) {
+            kept.push_str(&format!("attributes #{FAST_GROUP}{id}{}\n", &line["attributes #".len() + id.len()..]));
             kept.push_str(&line.replacen("= { ", "= { optsize ", 1));
         } else {
             kept.push_str(line);
@@ -727,7 +894,10 @@ fn build_object(
     let opt_bc = work.join("backtrace.bc");
     run(std::process::Command::new(tc.tool("opt"))
         .arg("-passes=internalize,globaldce,default<O2>")
-        .arg(format!("-internalize-public-api-list={}", names.join(",")))
+        .arg(format!(
+            "-internalize-public-api-list={}",
+            names.iter().chain(with.moved.iter()).map(String::as_str).collect::<Vec<_>>().join(",")
+        ))
         .arg(&bc)
         .arg("-o")
         .arg(&opt_bc))?;
@@ -1040,6 +1210,17 @@ mod tests {
             external_global(TLS).unwrap(),
             format!("@{name} = external hidden thread_local global <{{ [9 x i8], [7 x i8] }}>, align 8")
         );
+    }
+
+    #[test]
+    fn a_shared_function_becomes_available_externally_without_its_comdat() {
+        let names: std::collections::HashSet<String> = ["f", "g"].iter().map(|s| s.to_string()).collect();
+        let text = "define internal fastcc void @f() unnamed_addr #1 {\n  ret void\n}\ndefine linkonce_odr hidden void @g() unnamed_addr comdat #2 {\n  ret void\n}\ndefine void @h() {\n  ret void\n}\n";
+        let out = available_defines(text, &names);
+        assert!(out.contains("define available_externally hidden fastcc void @f() unnamed_addr #1 {"), "{out}");
+        assert!(out.contains("define available_externally hidden void @g() unnamed_addr #2 {"), "{out}");
+        assert!(out.contains("define void @h() {"), "{out}");
+        assert_eq!(available_defines("define void @h() {\n}\n", &names), "define void @h() {\n}\n");
     }
 
     #[test]
