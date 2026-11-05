@@ -126,20 +126,23 @@ fn assert_same(tag: &str, n: &Run, w: &Run) {
 }
 
 /// Where the certified v1 render ships a row (since the `${xs}` repr cells,
-/// #4006, it renders `range_map`), its text is the shipped one: it builds the
-/// span through `almide_rt_list_range` — the runtime twin whose reservation is
-/// C-197's abort — and never collects a sized iterator, so it has no capacity
-/// panic either. The shape check below stays on the v0 codegen, the fallback
-/// every row v1 walls on ships; the huge-span run compares what ships.
+/// #4006, it renders `range_map`), its text is the shipped one. Since #4006's
+/// direct range source it counts the span instead of building it, like v0, so
+/// it reserves its result the way the runtime does — `try_reserve_exact` and
+/// C-197's abort — and never sizes a vector with `with_capacity` or a sized
+/// `collect`, so it has no capacity panic either. The shape check below stays
+/// on the v0 codegen, the fallback every row v1 walls on ships; the huge-span
+/// run compares what ships.
 #[test]
-fn a_row_the_v1_render_ships_builds_its_span_through_the_aborting_runtime() {
+fn a_row_the_v1_render_ships_reserves_its_span_through_the_aborting_reservation() {
     for (name, ty, chain, _) in ROWS {
         let Ok(rust) = almide_mir::pipeline::try_render_rust_source(&program(ty, chain, "4")) else { continue };
         let i = rust.find("fn almd_shape(").unwrap_or_else(|| panic!("{name}: no almd_shape in the v1 render"));
         let body = rust[i..].split("\n}\n").next().unwrap();
+        let reserved = body.contains("try_reserve_exact(") && body.contains("Error: out of memory");
         assert!(
-            body.contains("almide_rt_list_range(") && !body.contains(".collect::<"),
-            "{name}: the v1 render does not build its span through almide_rt_list_range:\n{body}"
+            (reserved || body.contains("almide_rt_list_range(")) && !body.contains("with_capacity(") && !body.contains(".collect"),
+            "{name}: the v1 render sizes its span without the aborting reservation:\n{body}"
         );
     }
 }
