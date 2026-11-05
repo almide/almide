@@ -1,18 +1,8 @@
 diff --git a/crates/almide-mir/src/native_region_window.rs b/crates/almide-mir/src/native_region_window.rs
-index c7361d724..bb7af80a6 100644
+index ff6d68d68..bb7af80a6 100644
 --- a/crates/almide-mir/src/native_region_window.rs
 +++ b/crates/almide-mir/src/native_region_window.rs
-@@ -14,7 +14,8 @@
- 
- use std::collections::BTreeSet;
- 
--use crate::{LowerError, MirFunction, Op, PrimKind, ValueId};
-+use crate::lower::LowerError;
-+use crate::{MirFunction, Op, PrimKind, ValueId};
- 
- /// The names of the window fns `ir` carries.
- pub(crate) fn window_fns(ir: &almide_ir::IrProgram) -> BTreeSet<String> {
-@@ -37,7 +38,8 @@ pub(crate) fn bracket_windows(functions: &mut [MirFunction], windows: &BTreeSet<
+@@ -38,7 +38,8 @@ pub(crate) fn bracket_windows(functions: &mut [MirFunction], windows: &BTreeSet<
          f.ops.insert(0, Op::Prim { kind: PrimKind::RegionSave, dst: Some(mark), args: Vec::new() });
          // Op indices moved by one.
          f.call_moves = f.call_moves.iter().map(|i| i + 1).collect();
