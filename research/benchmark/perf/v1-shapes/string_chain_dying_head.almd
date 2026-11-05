@@ -1,0 +1,15 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf-shapes.sh): an
+// interpolation whose first piece is a String that dies there, followed by
+// another String, so the render grows the head's buffer in place.
+fn main() -> Unit = {
+  var acc = 0
+  var i = 0
+  while i < 20000 {
+    let s = string.repeat("ab", 1 + i % 3)
+    let w = string.repeat("c", 1 + i % 2)
+    let t = "${s}-${w}"
+    acc = acc + string.len(t)
+    i = i + 1
+  }
+  println(int.to_string(acc))
+}
