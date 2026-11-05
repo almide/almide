@@ -750,41 +750,28 @@ fn ir_ref(name: &str) -> String {
 /// each one a symbol. (`@llvm.compiler.used` is not enough: rustc's LTO
 /// restriction pass internalizes its members.)
 fn export_defines(text: &str, names: &std::collections::HashSet<String>) -> Result<String, String> {
-    let mut out = String::with_capacity(text.len() + 4096);
-    let mut kept: Vec<String> = Vec::new();
+    let kept: Vec<String> = text.lines().filter_map(define_name).filter(|n| names.contains(*n)).map(ir_ref).collect();
+    if kept.is_empty() {
+        return Ok(text.to_string());
+    }
+    let extra = kept.iter().map(|r| format!("ptr {r}")).collect::<Vec<_>>().join(", ");
+    let mut out = String::with_capacity(text.len() + extra.len() + 128);
     let mut listed = false;
     for line in text.lines() {
-        if let Some(name) = define_name(line).filter(|n| names.contains(*n)) {
+        if define_name(line).is_some_and(|n| names.contains(n)) {
             out.push_str(&hidden_define(line));
-            kept.push(ir_ref(name));
         } else if line.starts_with("@llvm.used = ") {
+            out.push_str(&append_used(line, kept.len(), &extra)?);
             listed = true;
-            out.push_str("@@USED@@");
-            out.push_str(line);
         } else {
             out.push_str(line);
         }
         out.push('\n');
     }
-    if kept.is_empty() {
-        return Ok(text.to_string());
-    }
-    let extra = kept.iter().map(|r| format!("ptr {r}")).collect::<Vec<_>>().join(", ");
-    if listed {
-        let mut fixed = String::with_capacity(out.len() + extra.len());
-        for line in out.lines() {
-            if let Some(used) = line.strip_prefix("@@USED@@") {
-                fixed.push_str(&append_used(used, kept.len(), &extra)?);
-            } else {
-                fixed.push_str(line);
-            }
-            fixed.push('\n');
-        }
-        Ok(fixed)
-    } else {
+    if !listed {
         out.push_str(&format!("@llvm.used = appending global [{} x ptr] [{extra}], section \"llvm.metadata\"\n", kept.len()));
-        Ok(out)
     }
+    Ok(out)
 }
 
 /// A definition as an external hidden one: module-local linkage
@@ -1340,6 +1327,28 @@ mod tests {
         assert!(out.contains("@llvm.used = appending global [4 x ptr] [ptr @f, ptr @g, ptr @\"a$b\", ptr @x], section"), "{out}");
         assert_eq!(out.matches("@llvm.used").count(), 1, "{out}");
         assert_eq!(export_defines("define void @h() {\n}\n", &names).unwrap(), "define void @h() {\n}\n");
+    }
+
+    #[test]
+    fn state_is_found_through_private_callees_and_stops_at_a_candidate() {
+        let ir = "@state = internal global i32 0, align 4\n\
+                  @text = private unnamed_addr constant [1 x i8] c\"a\", align 1\n\
+                  @canary = internal constant i8 0, align 1\n\
+                  @ext = external global i32\n\
+                  define internal void @f() {\n  store i32 1, ptr @state, align 4\n  ret void\n}\n\
+                  define internal void @g() {\n  call void @f()\n  ret void\n}\n\
+                  define internal void @c() {\n  call void @g()\n  ret void\n}\n\
+                  define internal void @d() {\n  call void @c()\n  ret void\n}\n\
+                  define internal ptr @e() {\n  ret ptr @canary\n}\n\
+                  define internal ptr @h() {\n  %x = load i32, ptr @ext, align 4\n  ret ptr @text\n}\n";
+        let candidates: std::collections::BTreeSet<String> = ["c", "d", "e", "h"].iter().map(|s| s.to_string()).collect();
+        let mut found: Vec<String> = stateful_functions(ir, &candidates).into_iter().collect();
+        found.sort();
+        // c reaches @state through private g and f; e returns an address-compared
+        // constant; d reaches state only through candidate c; h reads only an
+        // external global and an unnamed_addr constant.
+        assert_eq!(found, ["c", "e"]);
+        assert_eq!(ir_refs("call void @f(ptr @\"a b\", ptr @llvm.memcpy)"), ["f", "a b"]);
     }
 
     #[test]
