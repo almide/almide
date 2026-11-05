@@ -789,7 +789,7 @@
 66608	spec/wasm_cross/set_entries_reclaim.almd
 77472	spec/wasm_cross/set_index_order.almd
 66864	spec/wasm_cross/set_insertion_order.almd
-66016	spec/wasm_cross/shared_arg_pair_dup.almd
+66000	spec/wasm_cross/shared_arg_pair_dup.almd
 74816	spec/wasm_cross/sized_display_matrix.almd
 67504	spec/wasm_cross/sized_field_default_matrix.almd
 65776	spec/wasm_cross/sized_int_overflow_wrap.almd
@@ -974,7 +974,7 @@
 65872	spec/wasm_cross/unwrap_or_tuple_payload_extract.almd
 69472	spec/wasm_cross/unwrap_or_unwrap_fallback.almd
 68192	spec/wasm_cross/unwrap_or_value_fn_named_parse.almd
-66336	spec/wasm_cross/unzip_accumulator_rotate.almd
+66304	spec/wasm_cross/unzip_accumulator_rotate.almd
 66720	spec/wasm_cross/uoe_heap_ok_share.almd
 80672	spec/wasm_cross/url_authority_edges.almd
 83792	spec/wasm_cross/url_whatwg_probes.almd
