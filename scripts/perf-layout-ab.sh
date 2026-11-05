@@ -22,6 +22,8 @@
 # Usage: ALMIDE_BIN=target/release/almide scripts/perf-layout-ab.sh [row ...]
 #   env: LAYOUTS (16) ROUNDS (5) OUT (a temp dir; keeps the binaries and the
 #        per-run times in $OUT/times.json)
+#        SECTIONS (".text*"): the output-section globs shuffled, space-separated;
+#        ".text* .rodata* .data* .bss*" randomizes where the data lands too
 # Linux x86_64 with rust-lld (the rustc default there) only.
 set -euo pipefail
 export LC_ALL=C
@@ -30,6 +32,7 @@ ALMIDE="$(realpath "${ALMIDE_BIN:-$(command -v almide)}")"
 LAYOUTS="${LAYOUTS:-16}"
 ROUNDS="${ROUNDS:-5}"
 OUT="${OUT:-$(mktemp -d)}"
+SECTIONS="${SECTIONS:-.text*}"
 mkdir -p "$OUT"
 REAL_RUSTC="$(command -v rustc)"
 
@@ -72,14 +75,17 @@ echo "$rows" > "$OUT/rows.txt"
 
 # The shuffle seed reaches the fat-LTO link through a `rustc` shim first on
 # PATH (almide calls `rustc`; cargo finds the same one): it appends the lld
-# flag to the one rustc call that links with LTO and passes every other call
+# flags to the one rustc call that links with LTO and passes every other call
 # through untouched.
 mkdir -p "$OUT/shim"
 cat > "$OUT/shim/rustc" <<EOF
 #!/usr/bin/env bash
+set -f
 for a in "\$@"; do
   if [ "\$a" = "lto=fat" ] || [ "\$a" = "lto" ]; then
-    exec "$REAL_RUSTC" "\$@" "-Clink-arg=-Wl,--shuffle-sections=.text*=\$LAYOUT_SEED"
+    extra=()
+    for g in $SECTIONS; do extra+=("-Clink-arg=-Wl,--shuffle-sections=\$g=\$LAYOUT_SEED"); done
+    exec "$REAL_RUSTC" "\$@" "\${extra[@]}"
   fi
 done
 exec "$REAL_RUSTC" "\$@"
