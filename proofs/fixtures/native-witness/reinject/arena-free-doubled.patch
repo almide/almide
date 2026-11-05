@@ -1,0 +1,38 @@
+diff --git a/crates/almide-mir/src/native_region_window.rs b/crates/almide-mir/src/native_region_window.rs
+index c7361d724..591d39287 100644
+--- a/crates/almide-mir/src/native_region_window.rs
++++ b/crates/almide-mir/src/native_region_window.rs
+@@ -14,7 +14,8 @@
+ 
+ use std::collections::BTreeSet;
+ 
+-use crate::{LowerError, MirFunction, Op, PrimKind, ValueId};
++use crate::lower::LowerError;
++use crate::{MirFunction, Op, PrimKind, ValueId};
+ 
+ /// The names of the window fns `ir` carries.
+ pub(crate) fn window_fns(ir: &almide_ir::IrProgram) -> BTreeSet<String> {
+@@ -38,6 +39,8 @@ pub(crate) fn bracket_windows(functions: &mut [MirFunction], windows: &BTreeSet<
+         // Op indices moved by one.
+         f.call_moves = f.call_moves.iter().map(|i| i + 1).collect();
+         f.ops.push(Op::Prim { kind: PrimKind::RegionRestore, dst: None, args: vec![mark] });
++        // RE-INJECTED (#4006 C2 drill): the window rewinds its arena twice.
++        f.ops.push(Op::Prim { kind: PrimKind::RegionRestore, dst: None, args: vec![mark] });
+     }
+     Ok(())
+ }
+diff --git a/crates/almide-mir/src/render_native.rs b/crates/almide-mir/src/render_native.rs
+index de8aa5f33..d1ea925f3 100644
+--- a/crates/almide-mir/src/render_native.rs
++++ b/crates/almide-mir/src/render_native.rs
+@@ -202,6 +202,10 @@ use crate::render_native_shims::{
+ /// Drops from — the certificate that scope-end drop realizes it. A violation is
+ /// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
+ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
++    // RE-INJECTED (#4006 drill): the Rust mirror is bypassed.
++    if !func.name.is_empty() {
++        return Ok(());
++    }
+     let Err(violations) = crate::verify_ownership(func) else {
+         return Ok(());
+     };
