@@ -381,6 +381,17 @@ fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
                 .filter(|(dp, _)| is_scalar_option(&dp.ty))
                 .map(|(_, mp)| mp.value)
                 .collect(),
+            // A lifted lambda declares its params where the lowering lifts
+            // it (`crate::lambda_sigs`), after its env param.
+            None => match crate::lambda_sigs::get(&f.name) {
+                Some((ps, _)) if ps.len() + 1 == f.params.len() => ps
+                    .iter()
+                    .zip(&f.params[1..])
+                    .filter(|(t, _)| is_scalar_option(t))
+                    .map(|(_, mp)| mp.value)
+                    .collect(),
+                _ => Vec::new(),
+            },
             _ => Vec::new(),
         };
         let carriers = heap_carrier_values(ir, f);
