@@ -300,6 +300,13 @@ fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: boo
     let mut cmd = super::rustc_floor::cargo_command()?;
     inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("build").current_dir(project_dir);
+    // One non-incremental compile, as v0's rustc fast path makes. An
+    // incremental session splits the program into per-module codegen units
+    // that inline across nothing: a certified render's `map(..).collect()`
+    // ran its closure through an outlined `from_iter`, 1.6x the same source
+    // built in one session (#4006, mi1). This repo's CI sets the variable for
+    // every job, so only a user's build saw it.
+    cmd.env("CARGO_INCREMENTAL", "0");
     // The binary is located under `project_dir/target` below; an inherited
     // `CARGO_TARGET_DIR` (a common user setting, and what `cargo test` hands
     // the harness's own child processes) would send it elsewhere and turn the
