@@ -243,6 +243,9 @@ struct State {
     /// The linked bodies the served sites left unreached, dropped for the
     /// final render: a call to one is served here or walls.
     pruned: BTreeSet<String>,
+    /// The closure blocks only served sites read (`elidable`): their slots
+    /// reach the call as its stack env, so the block itself is not built.
+    elided: BTreeSet<(String, ValueId)>,
 }
 
 thread_local! {
@@ -251,8 +254,41 @@ thread_local! {
 
 /// Clear the per-render state (`pruned` names the linked bodies the final
 /// render no longer carries).
-pub(crate) fn reset(pruned: BTreeSet<String>) {
-    STATE.with(|s| *s.borrow_mut() = State { pruned, ..State::default() });
+pub(crate) fn reset(pruned: BTreeSet<String>, elided: BTreeSet<(String, ValueId)>) {
+    STATE.with(|s| *s.borrow_mut() = State { pruned, elided, ..State::default() });
+}
+
+/// `op` of `func` builds a closure block the final render does not build.
+pub(crate) fn elided(func: &MirFunction, op: &Op) -> bool {
+    let Op::ListLit { dst, .. } = op else { return false };
+    STATE.with(|s| s.borrow().elided.contains(&(func.name.clone(), *dst)))
+}
+
+/// The closure blocks of `functions` that nothing but the served `sites`
+/// reads (its releases aside, which erase to scope end on this render).
+pub(crate) fn elidable(functions: &[MirFunction], sites: &BTreeMap<(String, usize), String>) -> BTreeSet<(String, ValueId)> {
+    let mut out = BTreeSet::new();
+    for f in functions {
+        if !sites.keys().any(|(n, _)| *n == f.name) {
+            continue;
+        }
+        for blk in closure_origins(f).keys() {
+            if f.ret == Some(*blk) || f.params.iter().any(|p| p.value == *blk) {
+                continue;
+            }
+            let only_served = f.ops.iter().enumerate().all(|(i, op)| {
+                let mut reads = Vec::new();
+                crate::mir_ops::op_reads(op, &mut reads);
+                !reads.contains(blk)
+                    || crate::render_native_move::bookkeeping(op)
+                    || (matches!(op, Op::CallFn { .. }) && sites.contains_key(&(f.name.clone(), i)))
+            });
+            if only_served {
+                out.insert((f.name.clone(), *blk));
+            }
+        }
+    }
+    out
 }
 
 /// The sites served so far.
@@ -487,7 +523,15 @@ pub(crate) fn try_render(
         return Ok(false);
     }
     let mut got: Vec<(String, NTy)> = Vec::new();
+    let fname = at.0.clone();
     for a in call.args.iter() {
+        // A closure block this render does not build: its slots are the env.
+        if let CallArg::Handle(v) = a {
+            if STATE.with(|st| st.borrow().elided.contains(&(fname.clone(), *v))) {
+                got.push((var(*v), NTy::Vec));
+                continue;
+            }
+        }
         match crate::render_native::call_arg(a, tys) {
             Ok(x) => got.push(x),
             Err(_) => return Ok(false),

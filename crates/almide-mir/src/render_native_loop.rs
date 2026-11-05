@@ -163,6 +163,12 @@ fn render_fn_step<'a>(
 ) -> Result<bool, LowerError> {
     crate::render_native_bounds::at(i);
     crate::native_hof::at(st.func, i);
+    if let (true, Op::ListLit { dst, .. }) = (crate::native_hof::elided(st.func, op), op) {
+        // Typed as the block it stands for; only its releases name it, and
+        // they render nothing.
+        st.tys.insert(*dst, NTy::Vec);
+        return Ok(false);
+    }
     crate::render_native_move::set_moving_args(st.func, i, &st.tys, &st.borrows.arms);
     if st.chains.skip.contains(&i) || st.printed.contains(&i) || st.scalar_defs.contains(&i) {
         return Ok(false);
