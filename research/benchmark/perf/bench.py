@@ -212,7 +212,12 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # 31, not 30: 30:300 read ~95 ms native on a GCE n2-standard-8 but 78.5 ms
     # on the ubuntu runner (2026-11-04, PR #4468), under the 0.08s floor; 31
     # is ~1.47x the native work (~1.6x on the reference and ablated legs).
-    "fib": "31:300",
+    # 33 since #4498: 31:300 read 0.0732 / 0.0739 s native on AMD EPYC 9V45
+    # runners (jobs 127072557687, 127176184373), the fastest class, under the
+    # floor again. 33 is ~2.15x the native work, ~0.157 s there; the slowest
+    # class (Xeon 8370C) read 0.066 against the 0.120 anchor at 31, and the
+    # ratio only falls with n (1.466^n calls against 1.618^n), ~0.054 at 33.
+    "fib": "33:300",
     # regexcycle (#4392): sized after the GCE reading below; both rows the
     # same number of matches.
     "regexcycle-8": "8:400000",

@@ -124,15 +124,28 @@ treealloc 0.343
 # rounds): native 0.0674 s against 0.5981 s for the Box reference, a ratio
 # of 0.113, and 0.6649 s with ALMIDE_REGION_OFF=1, a delta of 9.87. The row
 # runs 24 rounds since (12 read under the 0.08 s floor); the runner's 24-round
-# reading (PR #4488, job of ed513feae) is 0.099, ablation 13.385, and the row
-# is anchored there. Ceiling 0.139 under the +40% rule; the claim (< 1.0) is
-# what develop before the bundle fails.
+# reading (PR #4488, job of ed513feae) is 0.099, ablation 13.385. That anchor
+# held only on AMD runners: the row's ratio is a runner-CLASS reading, like
+# treealloc's (the arena leg and the malloc/free Box reference scale
+# differently per CPU), stable to ~10% within a class and 2.5x across them.
+# btrees at 24 rounds: EPYC 9V74 0.093 / 0.099, EPYC 7763 0.101 / 0.103 /
+# 0.104 / 0.131, Xeon Platinum 8370C 0.164 (PR #4495, job 127151762606);
+# treealloc on develop before the bundle, 24 runs: 9V74 0.083-0.092, 7763
+# 0.106-0.128, 9V45 0.149-0.154, 8370C 0.199-0.203, 6973P 0.182. Re-anchored
+# at the slowest class reading, 0.164 (ceiling 0.230; owner ruling
+# 2026-11-05). The regression this row was added for is caught on every class
+# by the BTREES RELATION in check-perf-ratio.sh, which is machine-stable.
 # Negative control (GCE n2-standard-32, 2026-11-05): this script, the row and
 # this baseline run on develop before the bundle (07418260c) exit 1 on it:
 # btrees 1.500 (NOT FASTER) and ablation/btrees 0.995 (UNDER floor 1.30): the
 # certified render built every node with `Box`, so the region knob changed
 # nothing. treealloc read 0.227 in the same run, still on the standard codegen.
-btrees 0.099
+btrees 0.164
+# BTREES RELATION (check-perf-ratio.sh): btrees native / treealloc native in
+# one run. Runner jobs of PR #4488 and #4495: 0.80, 0.79, 0.85, 0.76, 0.90,
+# 0.78 (EPYC 7763 / 9V74) and 0.86 (Xeon 8370C). The gate fails on the 1.15
+# ceiling in the script, never on this value.
+btrees-treealloc 0.83
 # `decode` (#1679) is reported and not anchored, like strchurn: N derived
 # `User.decode`s of one 8-field document against the same-shape hand-written
 # decode (`rust:decode`, borrowed field scan + owned `String` record fields).
