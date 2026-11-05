@@ -6,7 +6,9 @@ type P2 = | Pair2(List[Int], List[Int])
 
 fn unzip_iter(ys: List[(Int, Int)], acc1: List[Int], acc2: List[Int]) -> P2 = match ys {
   [] => Pair2(acc1, acc2),
-  [(x, y), ..rest] => unzip_iter(rest, acc1 + [x], acc2 + [y]),
+  [hd, ..rest] => match hd {
+    (x, y) => unzip_iter(rest, acc1 + [x], acc2 + [y])
+  },
 }
 
 fn rotate(p: P2) -> P2 = match p {
