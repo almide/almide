@@ -14,7 +14,8 @@
 
 use std::collections::BTreeSet;
 
-use crate::{LowerError, MirFunction, Op, PrimKind, ValueId};
+use crate::lower::LowerError;
+use crate::{MirFunction, Op, PrimKind, ValueId};
 
 /// The names of the window fns `ir` carries.
 pub(crate) fn window_fns(ir: &almide_ir::IrProgram) -> BTreeSet<String> {

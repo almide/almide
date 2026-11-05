@@ -44,10 +44,6 @@ pub(crate) struct RecDecl {
     /// A `Set[A]`: v0's runtime `AlmideSet<elem>`, so the declared floor's
     /// set bodies take it as is.
     pub set_of: Option<NTy>,
-    /// A region twin enum (#4006 C2, `__rgn_` from the region-window rewrite,
-    /// read off `codegen_annotations.region_enums`): `Copy`, its recursive
-    /// fields `AlmideRgn` handles into the arena instead of `Box`.
-    pub region: bool,
 }
 
 /// A type the MIR carries in one i64 lane, read off its `Repr` (the layout
@@ -337,20 +333,13 @@ thread_local! {
     static REGION_NAMES: RefCell<std::collections::BTreeSet<String>> = const { RefCell::new(std::collections::BTreeSet::new()) };
 }
 
-/// Mark the region twins of a derived table.
-fn mark_regions(mut recs: Vec<RecDecl>) -> Vec<RecDecl> {
-    REGION_NAMES.with(|n| {
-        let n = n.borrow();
-        for d in recs.iter_mut() {
-            d.region = d.cases.is_some() && n.contains(&d.name);
-        }
-    });
-    recs
-}
-
-/// Generated type `i` is a region twin enum.
+/// Generated type `i` is a region twin enum (#4006 C2, a `__rgn_` enum of the
+/// region-window rewrite, read off `codegen_annotations.region_enums`):
+/// `Copy`, its recursive fields `AlmideRgn` handles into the arena.
 pub(crate) fn is_region(i: u16) -> bool {
-    RECS.with(|r| r.borrow().get(i as usize).is_some_and(|d| d.region))
+    RECS.with(|r| {
+        r.borrow().get(i as usize).is_some_and(|d| d.cases.is_some() && REGION_NAMES.with(|n| n.borrow().contains(&d.name)))
+    })
 }
 
 /// Derive and install the table for one render.
@@ -361,7 +350,7 @@ pub(crate) fn install_derived(
     region_names: std::collections::BTreeSet<String>,
 ) -> RecGuard {
     REGION_NAMES.with(|n| *n.borrow_mut() = region_names);
-    let recs = mark_regions(derive_records(layouts, variants, &tuples));
+    let recs = derive_records(layouts, variants, &tuples);
     INPUTS.with(|i| *i.borrow_mut() = Some((layouts.clone(), variants.clone(), tuples)));
     install(recs)
 }
@@ -384,7 +373,7 @@ pub(crate) fn extend_with(more: &[almide_lang::types::Ty]) {
                 }
             }
         }
-        grew.then(|| mark_regions(derive_records(l, v, ts)))
+        grew.then(|| derive_records(l, v, ts))
     });
     if let Some(recs) = recs {
         RECS.with(|r| *r.borrow_mut() = recs);
@@ -520,7 +509,7 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     let n = struct_name(i);
     // A region twin is `Copy` (its boxed fields are arena handles), so a
     // rewound window block owns nothing to drop.
-    let derive = if d.region { "Clone, Copy" } else { "Clone" };
+    let derive = if is_region(i) { "Clone, Copy" } else { "Clone" };
     let mut out = format!("/// variant `{}`\n#[derive({derive})]\nenum {n} {{\n", d.name);
     for (t, fs) in cases {
         if fs.is_empty() {
