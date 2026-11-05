@@ -14,6 +14,7 @@
 /// per fn). Used by examples/probe_native.rs during rung development.
 pub fn debug_dump_mir(source: &str) -> Result<String, LowerError> {
     let _strict = crate::lower::StrictValuesGuard::set(true);
+    let _owned_tco = crate::lower::OwnedTcoSlotsGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
     let globals = std::collections::HashMap::new();
     let global_inits = std::collections::HashMap::new();

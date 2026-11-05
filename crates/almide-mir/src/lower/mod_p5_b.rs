@@ -212,7 +212,12 @@ pub(crate) fn try_tco_rewrite(
     params: &[almide_ir::IrParam],
     body: &IrExpr,
 ) -> Option<IrExpr> {
-    if !is_heap_ty(&body.ty) && has_tuple_destructure(body) {
+    // Not on the native render (owned TCO slots): there a destructuring loop
+    // body renders as a Rust `let (a, b) = …` re-run every iteration, and
+    // tests/native_owned_tco_slots_test.rs runs the 2026-07-03 shape (the
+    // destructured step feeding the self call) to the right answer, a million
+    // deep. The renders it changes are only ones the #3550 wall refused.
+    if !is_heap_ty(&body.ty) && has_tuple_destructure(body) && !crate::lower::owned_tco_slots() {
         // SCALAR-result gate: the loop rewrite mishandles a TUPLE-DESTRUCTURE bind in
         // the body (`let (cp, l) = __trim_cp(addr)` — the rewritten loop spun forever,
         // int.parse via the Unicode trim, 2026-07-03). Decline those; they keep the
@@ -254,6 +259,16 @@ pub(crate) fn try_tco_rewrite(
     // (which bails on a `match` body), so the rewritten `if` body is what gets collected + lowered.
     let lit = try_list_iter_rewrite(fn_name, body, params, max_v + 2);
     let work_body: &IrExpr = lit.as_ref().map(|(b, _, _)| b).unwrap_or(body);
+    // Owned TCO slots (native): an `err($x)` base the `!` desugar left in a
+    // tail carries the desugar's own Result type, whose Ok side is not the
+    // function's; the in-loop result accumulator picks its block by that
+    // type, so give every tail `err` base the function's return type.
+    let retyped = crate::lower::owned_tco_slots().then(|| {
+        let mut b = work_body.clone();
+        retype_tail_err_bases(&mut b, &body.ty);
+        b
+    });
+    let work_body: &IrExpr = retyped.as_ref().unwrap_or(work_body);
     let idx_var = lit.as_ref().map(|(_, iv, _)| *iv);
 
     // FIRST collection — detect the self-calls + carried params (on the pre-substitution body).
@@ -268,7 +283,7 @@ pub(crate) fn try_tco_rewrite(
     // reassign then walls (mod_p3 "heap reassignment in a scalar loop body"). BAIL → the function falls
     // to the now-allowed REAL recursive lowering (a function-tail self-call, control_p4 ~188), which is
     // input-bounded and byte-matches v0. A natural `err("literal")` base (not a Var) is unaffected.
-    if bases0.iter().any(|b| {
+    if !crate::lower::owned_tco_slots() && bases0.iter().any(|b| {
         matches!(&b.kind, IrExprKind::ResultErr { expr } if matches!(&expr.kind, IrExprKind::Var { .. }))
     }) {
         return None;
@@ -281,13 +296,16 @@ pub(crate) fn try_tco_rewrite(
         tco_trace!("bail: append-accs");
         return None;
     };
+    // The carries only the native render's owned TCO slots admit.
+    let owned_only: Vec<usize> =
+        append_accs.iter().copied().filter(|&i| !is_accumulator_carry(&calls0, params, i)).collect();
     drop(calls0);
     drop(bases0);
 
     // Build the (possibly substituted) working body + params + upfront slot-init binds.
     let mut slot_next = max_v + 3;
     let (upfront, params_v, subst_body) =
-        build_append_slot_subst(work_body, params, &append_accs, &mut slot_next);
+        build_append_slot_subst(work_body, params, &append_accs, &owned_only, &mut slot_next);
     let work_ref: &IrExpr = subst_body.as_ref().unwrap_or(work_body);
     let params2: &[almide_ir::IrParam] = &params_v;
 
@@ -369,6 +387,25 @@ pub(crate) fn try_tco_rewrite(
         IrExprKind::Block { stmts: inits, expr: Some(Box::new(post)) },
         ret_ty,
     ))
+}
+
+/// Set the type of every `err(..)` leaf in a tail position of `e` (the
+/// positions `tco_collect` reads as bases) to `ret_ty`.
+fn retype_tail_err_bases(e: &mut IrExpr, ret_ty: &Ty) {
+    match &mut e.kind {
+        IrExprKind::If { then, else_, .. } => {
+            retype_tail_err_bases(then, ret_ty);
+            retype_tail_err_bases(else_, ret_ty);
+        }
+        IrExprKind::Match { arms, .. } => {
+            for a in arms {
+                retype_tail_err_bases(&mut a.body, ret_ty);
+            }
+        }
+        IrExprKind::Block { expr: Some(tail), .. } => retype_tail_err_bases(tail, ret_ty),
+        IrExprKind::ResultErr { .. } => e.ty = ret_ty.clone(),
+        _ => {}
+    }
 }
 
 /// Does the body contain a TUPLE-DESTRUCTURE bind (`let (cp, l) = …`)? The
@@ -500,12 +537,7 @@ fn detect_append_accs(
             // Each self-call passes the accumulator UNCHANGED (`acc`, a pass-through branch), APPENDED
             // (`acc + [x]`), or RESET to a fresh empty (`[]`/`""`); at least one grows/resets it (else
             // not carried). A heap carry outside these needs a general back-edge merge — unsupported.
-            if calls.iter().all(|c| {
-                matches!(&c[i].kind, IrExprKind::Var { id } if *id == params[i].var)
-                    || is_self_append(&c[i], params[i].var)
-                    || is_reset(&c[i])
-                    || is_wrapped_growth(&c[i], params[i].var)
-            }) {
+            if is_accumulator_carry(calls, params, i) || crate::lower::owned_tco_slots() {
                 append_accs.push(i);
             } else {
                 return None;
@@ -513,6 +545,18 @@ fn detect_append_accs(
         }
     }
     Some(append_accs)
+}
+
+/// Each self-call passes the accumulator UNCHANGED (`acc`, a pass-through branch),
+/// APPENDED (`acc + [x]`), RESET to a fresh empty (`[]`/`""`), or through a pure
+/// call that grows it — the carries the shared lowering admits on both legs.
+fn is_accumulator_carry(calls: &[&[IrExpr]], params: &[almide_ir::IrParam], i: usize) -> bool {
+    calls.iter().all(|c| {
+        matches!(&c[i].kind, IrExprKind::Var { id } if *id == params[i].var)
+            || is_self_append(&c[i], params[i].var)
+            || is_reset(&c[i])
+            || is_wrapped_growth(&c[i], params[i].var)
+    })
 }
 
 /// Substitute every append accumulator with an OWNED loop-carried slot: an
@@ -526,6 +570,7 @@ fn build_append_slot_subst(
     work_body: &IrExpr,
     params: &[almide_ir::IrParam],
     append_accs: &[usize],
+    owned_only: &[usize],
     slot_next: &mut u32,
 ) -> (Vec<IrStmt>, Vec<almide_ir::IrParam>, Option<IrExpr>) {
     let mut upfront: Vec<IrStmt> = Vec::new();
@@ -539,6 +584,24 @@ fn build_append_slot_subst(
         *slot_next += 1;
         let acc_var = params[ai].var;
         let list_ty = params[ai].ty.clone();
+        // An owned TCO slot (`crate::lower::owned_tco_slots`) that is neither
+        // a list nor a String (a tree, a variant, a tuple) starts as a `var`
+        // bound to the borrowed param — the lowering's owned copy.
+        if owned_only.contains(&ai) && !matches!(list_ty, Ty::String) && !matches!(list_ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, _)) {
+            upfront.push(IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: slot,
+                    mutability: almide_ir::Mutability::Var,
+                    ty: list_ty.clone(),
+                    value: tco_ir(IrExprKind::Var { id: acc_var }, list_ty.clone()),
+                },
+                span: None,
+            });
+            let slot_ref = tco_ir(IrExprKind::Var { id: slot }, list_ty);
+            b = almide_ir::substitute_var_in_expr(&b, acc_var, &slot_ref);
+            params_v[ai].var = slot;
+            continue;
+        }
         let (empty, concat_op) = if matches!(list_ty, Ty::String) {
             (tco_ir(IrExprKind::LitStr { value: String::new() }, Ty::String), almide_ir::BinOp::ConcatStr)
         } else {
