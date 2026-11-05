@@ -290,7 +290,7 @@ fn slot_load(s: AddrSink<'_>, width: &u8, d: &ValueId, args: &[ValueId]) -> Resu
         }
     }
     if *width == 8 && matches!(bt, Some(NTy::Vec | NTy::VecRef)) {
-        if let Some(ix) = slot_index(st, &ad) {
+        if let Some(ix) = slot_index(&ad) {
             let (guard, slot) = bounds_guard(st, &ad, &ix);
             if let Some(g) = guard {
                 line!("{g}");
@@ -323,7 +323,7 @@ fn slot_load_handle(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bo
             return load_handle_rec_field(AddrSink { st, tys, out, indent }, d, ad, k, f);
         }
     }
-    if let (Some(e), Some(ix)) = (list_of(ty(tys, &ad.base)), slot_index(st, &ad)) {
+    if let (Some(e), Some(ix)) = (list_of(ty(tys, &ad.base)), slot_index(&ad)) {
         if e != NTy::I64 {
             let (guard, slot) = bounds_guard(st, &ad, &ix);
             if let Some(g) = guard {
@@ -340,7 +340,7 @@ fn slot_load_handle(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bo
             return Ok(true);
         }
     }
-    match (ty(tys, &ad.base), slot_index(st, &ad)) {
+    match (ty(tys, &ad.base), slot_index(&ad)) {
         (Some(NTy::VecStr | NTy::VecStrRef), Some(ix)) => {
             let (guard, slot) = bounds_guard(st, &ad, &ix);
             if let Some(g) = guard {
@@ -464,7 +464,7 @@ fn slot_store(s: AddrSink<'_>, args: &[ValueId]) -> Result<bool, LowerError> {
     if let (Some(NTy::Rec(i)), Some(k), None) = (ty(tys, &ad.base), rec_slot(&ad), list_of(ty(tys, &ad.base))) {
         return store_rec_field(AddrSink { st, tys, out, indent }, ad, v, i, k);
     }
-    let Some(ix) = slot_index(st, &ad) else {
+    let Some(ix) = slot_index(&ad) else {
         return Err(wall(format!("native: Store at {ad:?} — outside the slot algebra")));
     };
     store_list_slot(AddrSink { st, tys, out, indent }, ad, v, &ix)
