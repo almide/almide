@@ -687,7 +687,9 @@ fn build_enum_slot(
             .iter()
             .enumerate()
             .map(|(j, f)| match f {
-                Some(f) if crate::render_native_rec::enum_field_boxed(i, *f) => format!("Box::new({b}_f{})", j + 1),
+                Some(f) if crate::render_native_rec::enum_field_boxed(i, *f) => {
+                    format!("{}({b}_f{})", crate::render_native_rec::box_new(i), j + 1)
+                }
                 _ => format!("{b}_f{}", j + 1),
             })
             .collect::<Vec<_>>()
