@@ -1477,6 +1477,9 @@ pub struct LinReport {
     pub procs: usize,
     pub sites: usize,
     pub counted: usize,
+    /// The prim sites the certified procedures cover, as `(function, op)`
+    /// (the census counts them located, #4005).
+    pub located: Vec<(usize, usize)>,
 }
 
 /// The whole translation check: `cert` is `;`-separated `Q` stretches, each
@@ -1504,6 +1507,7 @@ pub fn verify(wasm: &[u8], anchors: &str, cert: &str) -> Result<LinReport, Strin
     }
     let none = BTreeSet::new();
     let mut prims = 0;
+    let mut located = Vec::new();
     let mut nonempty_pre = BTreeSet::new();
     for st in &stretches {
         let id: usize = st[1..1 + nat_len(&st.as_bytes()[1..]).unwrap_or(0)].parse().unwrap_or(usize::MAX);
@@ -1526,6 +1530,7 @@ pub fn verify(wasm: &[u8], anchors: &str, cert: &str) -> Result<LinReport, Strin
             }
         }
         prims += skel.sites.len();
+        located.extend(skel.sites.iter().map(|&op| (id, op)));
         // `Q<id>{ ` then the precondition's facts: empty when `|` follows.
         let pre = &st[st.find('{').map_or(0, |i| i + 1)..];
         if !pre.trim_start().starts_with('|') {
@@ -1552,7 +1557,7 @@ pub fn verify(wasm: &[u8], anchors: &str, cert: &str) -> Result<LinReport, Strin
         }
     }
     let total: usize = sites.values().map(BTreeSet::len).sum();
-    Ok(LinReport { procs: stretches.len(), sites: prims, counted: total - prims })
+    Ok(LinReport { procs: stretches.len(), sites: prims, counted: total - prims, located })
 }
 
 /// Defined function positions an export or an element segment names.
