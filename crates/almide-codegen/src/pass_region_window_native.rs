@@ -160,7 +160,7 @@ impl WindowRewriter<'_> {
             doc: None,
             blank_lines_before: 1,
             def_id: None,
-            mutated_params: Vec::new(),
+            mutated_params: Vec::new(), // fresh-fn: a synthesized window over scalar params, none `mut`
             module_origin: None,
         });
         Some(IrExpr {
