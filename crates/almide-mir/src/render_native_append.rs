@@ -35,8 +35,9 @@ use std::collections::BTreeMap;
 /// `s.push_str(x)`, which writes `s` while it reads `x`.
 pub(crate) fn self_append_window(func: &MirFunction, i: usize) -> Option<(ValueId, ValueId, ValueId)> {
     // The old value's drop is `Drop`, or the typed drop of a list that owns
-    // its heap elements (a `List[String]`, a list of lists, records,
-    // variants or `Value`s): every one of them erases to scope end here.
+    // its heap elements (a `List[String]`, a list of String lists or of
+    // lists): each of them erases to scope end here. (A drop of another
+    // typed list joins this set with a perf program that takes it.)
     let [Op::CallFn { dst: Some(d), name, args, .. }, drop, Op::SetLocal { local, src }] = func.ops.get(i..i + 3)? else {
         return None;
     };
@@ -48,18 +49,11 @@ pub(crate) fn self_append_window(func: &MirFunction, i: usize) -> Option<(ValueI
     (concat && v == s && local == s && src == d && x != s).then_some((*s, *x, *d))
 }
 
-/// The value a drop of a list (or of a string, by `Drop`) releases.
+/// The value a drop of a list (or of a string, by `Drop`) releases, for the
+/// drops the window admits.
 fn list_drop_of(op: &Op) -> Option<&ValueId> {
     match op {
-        Op::Drop { v }
-        | Op::DropListStr { v }
-        | Op::DropListListStr { v }
-        | Op::DropListValue { v }
-        | Op::DropListStrValue { v }
-        | Op::DropListStrStr { v }
-        | Op::DropListIntStr { v }
-        | Op::DropListStrInt { v } => Some(v),
-        Op::DropVariant { v, ty } if ty.starts_with("list_") => Some(v),
+        Op::Drop { v } | Op::DropListStr { v } | Op::DropListListStr { v } => Some(v),
         _ => None,
     }
 }

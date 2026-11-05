@@ -171,15 +171,14 @@ impl AddrState {
             .chain(slots::dense_loop_fills(func, &consts))
             .filter(|b| !single.contains_key(b))
             .collect();
-        let single_rec = if crate::render_native_move::drill_no_moves() {
-            BTreeMap::new()
-        } else {
-            slots::single_elem_blocks(func, &base_of, &consts)
-                .into_iter()
-                .filter(|b| pushed.contains(b) && generated(b))
-                .map(|b| (b, false))
-                .collect()
-        };
+        // Chosen only where the push is sure: the list the window appends to
+        // is of the block's own kind, and the window's result is the rebind's
+        // alone.
+        let single_rec = slots::single_elem_blocks(func, &base_of, &consts)
+            .into_iter()
+            .filter(|b| pushed.contains(b) && generated(b) && pushes_onto_own_kind(func, *b, &alloc_rec))
+            .map(|b| (b, false))
+            .collect();
         let reassigned = stale_handles(func);
         let const_lists = slots::const_str_lists(func, &base_of, &consts);
         set_const_lists(const_lists.keys().copied().collect());
@@ -286,6 +285,16 @@ fn note_signature_recs(func: &MirFunction, sigs: &crate::render_native::NativeSi
             _ => {}
         }
     }
+}
+
+/// `b` is appended by a self-append window `d = s + b; drop s; s = d` whose
+/// `s` is declared `b`'s own generated list kind and whose `d` nothing else reads.
+fn pushes_onto_own_kind(func: &MirFunction, b: ValueId, alloc_rec: &BTreeMap<ValueId, u16>) -> bool {
+    (0..func.ops.len()).any(|j| {
+        crate::render_native_append::self_append_window(func, j).is_some_and(|(s, x, d)| {
+            x == b && alloc_rec.get(&s) == alloc_rec.get(&b) && func.ret != Some(d) && crate::render_native_append::touches(func, d) == 2
+        })
+    })
 }
 
 /// The list blocks a function allocates empty: a zero-length dynamic list
@@ -711,11 +720,6 @@ pub(crate) fn single_concat(func: &MirFunction, i: usize, tys: &mut BTreeMap<Val
         return None;
     }
     let [crate::CallArg::Handle(a), crate::CallArg::Handle(x)] = args.as_slice() else { return None };
-    if st.single_rec.get(x) == Some(&true) {
-        // Not its own kind's self-append: the list is built here for the `+`.
-        st.single_rec.remove(x);
-        return Some((format!("let mut {x}: {} = vec![{x}_e0];", owned_ty_of(tys.get(x).copied()), x = var(*x)), false));
-    }
     if st.single.get(x) != Some(&true) {
         return None;
     }
@@ -738,13 +742,9 @@ pub(crate) fn single_concat(func: &MirFunction, i: usize, tys: &mut BTreeMap<Val
 
 pub(crate) fn single_push(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, NTy>, st: &mut AddrState) -> Option<(String, bool)> {
     let (s, x, d) = crate::render_native_append::self_append_window(func, i)?;
-    if st.single_rec.get(&x) == Some(&true) {
-        st.single_rec.remove(&x);
-        let xt = tys.get(&x).copied();
-        if tys.get(&s).copied() == xt && func.ret != Some(d) && crate::render_native_append::touches(func, d) == 2 {
-            return Some((format!("{}.push({}_e0);", var(s), var(x)), true));
-        }
-        return Some((format!("let mut {x}: {} = vec![{x}_e0];", owned_ty_of(xt), x = var(x)), false));
+    // A generated list's element: its window was checked when it was chosen.
+    if st.single_rec.remove(&x) == Some(true) {
+        return Some((format!("{}.push({}_e0);", var(s), var(x)), true));
     }
     if st.single.get(&x) != Some(&true) {
         return None;
