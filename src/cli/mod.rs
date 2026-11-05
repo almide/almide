@@ -46,6 +46,7 @@ mod cargo_ice;
 mod cargo_toml;
 mod crate_inputs;
 mod native_target;
+mod std_split;
 mod js_host;
 mod wasm_debug;
 

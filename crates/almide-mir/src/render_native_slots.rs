@@ -124,6 +124,12 @@ pub(super) fn type_blocks(
     for (v, key) in &func.aggregate_blocks {
         if let Some(i) = rec::rec_index(key).filter(|i| rec::all_scalar_struct(*i) || rec::enum_cases(*i).is_some()) {
             alloc_rec.entry(*v).or_insert(i);
+        } else if let Some(n) = anon_scalar_record_len(func, *v, key) {
+            // An anonymous all-scalar record (`list.map((i) => { x: i, y: i })`)
+            // has no declaration to name, so it takes the by-value struct of its
+            // slots, as a declared one does — not a `Vec<i64>` per record, which
+            // cost such a list 28x against the standard codegen.
+            alloc_rec.entry(*v).or_insert(rec::slots_type_of(&vec![NTy::I64; n]));
         }
     }
     let mut tb = BlockTyping {
@@ -469,3 +475,16 @@ fn slot_kinds(stores: &[(Option<usize>, NTy)], len: Option<i64>, mask: Option<&V
 }
 
 include!("render_native_slots_b.rs");
+
+/// The slot count of block `v` when the lowering built it as an anonymous
+/// record of scalars: a `ListLit` of its field values whose recorded type is a
+/// structural record (`block_key` of a `Ty::Record`).
+fn anon_scalar_record_len(func: &MirFunction, v: ValueId, key: &str) -> Option<usize> {
+    if !key.starts_with("Record {") {
+        return None;
+    }
+    func.ops.iter().find_map(|op| match op {
+        Op::ListLit { dst, elems } if *dst == v && !elems.is_empty() => Some(elems.len()),
+        _ => None,
+    })
+}

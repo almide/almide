@@ -47,6 +47,7 @@ mod lambda_sigs;
 mod fan_native;
 mod render_native_addr;
 mod render_native_bounds;
+mod render_native_loops;
 mod render_native_closure;
 mod render_native_rec;
 mod render_native_append;

@@ -621,7 +621,16 @@ fn bounds_guard(st: &AddrState, a: &Addr, ix: &str) -> (Option<String>, crate::r
 
 /// The Rust index expression of the slot `a` names, or `None` when `a` is
 /// not on a slot boundary past the header.
-fn slot_index(a: &Addr) -> Option<String> {
+///
+/// A byte offset that is `x * SLOT_SIZE` (`scaled_src`) is a multiple of the
+/// slot size, so it is shifted right as an unsigned value. For an offset
+/// `>= 0` that is the same index as the signed division. For a negative one
+/// (a wrapped product) both spellings give an index past any list, so the
+/// same check fails. The signed spelling kept LLVM from dropping the bounds
+/// check of a counted loop over a list, which cost a per-element loop over a
+/// record list 6% against the standard codegen at opt-level 1
+/// (`record_list_dynamic`).
+fn slot_index(st: &AddrState, a: &Addr) -> Option<String> {
     let (h, w) = (i64::from(BLOCK_HEADER), i64::from(SLOT_SIZE));
     if a.off < h || (a.off - h) % w != 0 {
         return None;
@@ -629,6 +638,9 @@ fn slot_index(a: &Addr) -> Option<String> {
     let k = (a.off - h) / w;
     Some(match a.idx {
         None => format!("{k}usize"),
+        Some(Idx::Bytes(b)) if st.scaled_src.contains_key(&b) && w.count_ones() == 1 => {
+            format!("({k}usize + (({} as u64) >> {}u32) as usize)", var(b), w.trailing_zeros())
+        }
         Some(Idx::Bytes(b)) => format!("({k}i64 + {} / {w}i64) as usize", var(b)),
         Some(Idx::Elem(i)) => format!("({k}i64 + {}) as usize", var(i)),
     })

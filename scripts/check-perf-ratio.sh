@@ -140,6 +140,15 @@ REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-com
 # VICTORY_ABLATION_FLOOR — the optimization named in the declaration must
 # still be what earns the row, or the declaration is stale.
 #
+# `btrees` (rc4) is treealloc's program with the depth a literal and main
+# reading nothing. That difference is the row. treealloc reads its depth with
+# `env.args()`, and before the rc4 bundle that call kept its main off the
+# certified native render, so treealloc shipped from the standard codegen and
+# its arena and stayed fast. btrees has no such call, so the certified render took the
+# whole program, and before the bundle the render had no arena: 1.3x the
+# Rust reference against treealloc's 0.34x, with every gate green. Since the
+# bundle the certified render runs the window in the arena (#4483).
+#
 # `fannkuchredux` (#2044) is the data-parallelism row: `fan { list.map(chunks,
 # (c) => process_chunk(..)) }` over Int captures with an `(Int, Int)` result
 # is exactly the Send-safe-scalar subset AutoParallel now routes to
@@ -158,7 +167,7 @@ REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-com
 # (0.083), and 1.15 s with ALMIDE_SELF_INLINE_OFF=1 — the whole win is the
 # rewrite, and the delta grows with n (the call count drops from ~1.618^n to
 # ~1.466^n), which is why the claim is gated and not a band.
-VICTORY="binarytrees=rust:binarytrees:ALMIDE_REGION_OFF treealloc=rust:treealloc:ALMIDE_REGION_OFF fannkuchredux=rust:fannkuchredux:ALMIDE_FAN_SEQUENTIAL fib=rust:fib:ALMIDE_SELF_INLINE_OFF"
+VICTORY="binarytrees=rust:binarytrees:ALMIDE_REGION_OFF treealloc=rust:treealloc:ALMIDE_REGION_OFF btrees=rust:btrees:ALMIDE_REGION_OFF fannkuchredux=rust:fannkuchredux:ALMIDE_FAN_SEQUENTIAL fib=rust:fib:ALMIDE_SELF_INLINE_OFF"
 VICTORY_ABLATION_FLOOR=1.30
 # IDIOM GATE (#1337). The three listbuild rows build the SAME result three
 # ways, so beyond each row's own ratio there is a relation between them that
@@ -198,7 +207,7 @@ trap 'rm -f "$out"' EXIT
 # interleaved loop as their optimized twin — see ABLATION below.
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,rust \
-  --bench nbody,spectralnorm,fasta,fft,binarytrees,treealloc,listbuild,listbuild-append,listbuild-comb,strchurn,fannkuchredux,mandelbrot,decode,wordfreq,wordfreq-group,fib \
+  --bench nbody,spectralnorm,fasta,fft,binarytrees,treealloc,btrees,listbuild,listbuild-append,listbuild-comb,strchurn,fannkuchredux,mandelbrot,decode,wordfreq,wordfreq-group,fib \
   --ablate ALMIDE_DISABLE_OPT --ablate-bench nbody,spectralnorm,fasta,fft,wordfreq \
   --label ratchet --out "$out"
 
