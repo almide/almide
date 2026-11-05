@@ -270,10 +270,7 @@ test "search, split and replace cut only at matches of a valid needle" {
       assert(utf8_ok(string.replace(s, needle, "€")))
       assert(utf8_ok(string.replace_first(s, needle, "😀")))
       assert(list.all(string.split(s, needle), (p) => utf8_ok(p)))
-      match string.split_once(s, needle) {
-        some((a, b)) => assert(utf8_ok(a) and utf8_ok(b)),
-        none => assert(true),
-      }
+      assert(option.map(string.split_once(s, needle), ((a, b)) => utf8_ok(a) and utf8_ok(b)) ?? true)
       assert(utf8_ok(string.strip_prefix(s, needle) ?? ""))
       assert(utf8_ok(string.strip_suffix(s, needle) ?? ""))
     }
