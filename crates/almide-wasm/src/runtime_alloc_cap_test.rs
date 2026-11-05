@@ -105,7 +105,7 @@ impl Rt {
         self.free.call(&mut self.store, b as i32).expect("free");
     }
     fn word(&self, a: u32) -> u32 {
-        u32::from_le_bytes(self.mem.data(&self.store)[a as usize..][..4].try_into().unwrap())
+        u32::from_le_bytes(self.mem.data(&self.store)[a as usize..][..4].try_into().expect("a 4-byte word"))
     }
     fn heap(&mut self) -> u32 {
         self.heap.get(&mut self.store).unwrap_i32() as u32
