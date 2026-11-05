@@ -58,6 +58,9 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // ── #4006 C1 class D: top-level heap state, once a wall ──
+    ("top_var_heap", "var LOG = \"\"\nfn main() -> Unit = {\n  LOG = LOG + \"x\"\n  println(LOG)\n}\n"),
+    ("top_let_heap_call", "let S = int.to_string(3)\nfn main() -> Unit = {\n  println(S)\n}\n"),
     // ── #4006 C1 class D: a module-level heap binding in its thread-local
     //    cell (an append, a record rebuilt from its own fields), a find's
     //    0-or-1 block on the Option carrier, a linked body's Option result ──
@@ -279,17 +282,12 @@ fn out_of_subset_walls_honestly() {
         // (#1869); a combinator over the list is still outside it.
         // list_param moved to the POSITIVE corpus — rung 4 renders scalar-list
         // params/literals/indexing natively (`vec![…]` + the bounds shims).
-        // #4006 family I: top-level state lives in native storage slots now,
-        // a SCALAR slot only. A heap-typed var or eager let still walls.
-        ("top_var_heap", "var LOG = \"\"
-fn main() -> Unit = {
-  LOG = LOG + \"x\"
-  println(LOG)
-}
-"),
-        ("top_let_heap_call", "let S = int.to_string(3)
-fn main() -> Unit = {
-  println(S)
+        // #4006 family I and C1 class D: a heap-typed var or eager let now
+        // lives in its thread-local cell (the positive corpus above); a
+        // matrix transpose is still outside the subset.
+        ("matrix_transpose", "fn main() -> Unit = {
+  let m = matrix.from_lists([[1.0, 2.0]])
+  println(\"${matrix.to_lists(matrix.transpose(m))}\")
 }
 "),
     ];
