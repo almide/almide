@@ -24,6 +24,17 @@
 //!   std ([`SHARED_TLS`]), so the thread-local block is today's byte for byte.
 //!   Its definitions are weak: in a link without LTO (a build script of a
 //!   cargo dependency) std's own definition wins.
+//! * no second copy of what the program keeps anyway (#4497). The printer
+//!   reaches std functions every program links — `fmt::write`, the panic
+//!   path, `str` search, `RawVec` growth — and private copies of those were
+//!   linked twice, once from the LTO module and once from the object (20-32
+//!   KB per binary). The split finds them by linking the seed against the
+//!   split and listing the names defined twice; it keeps each one a hidden
+//!   symbol of the split sysroot's crate bitcode (`@llvm.used`, module-local
+//!   linkage made external) and builds the object with them declared, so the
+//!   printer calls the program's copy. Only functions the seed's LTO module
+//!   keeps are shared — the printer's own code (the DWARF reader, the
+//!   demangler) stays in the object, so the LTO module does not grow back.
 //!
 //! What the program's own functions see is unchanged: the printer is not in
 //! any of their call graphs, and their machine code compares equal function by
@@ -256,14 +267,17 @@ fn build_split(tc: &Toolchain, std_rlib: &Path, dir: &Path) -> Result<(), String
     // (fmt, the panic path, str search…) would be linked twice: once from the
     // LTO module, once from the object (#4497). Find them by linking the seed
     // against the split, make them symbols of the split std that the object
-    // references, and rebuild the object without its copies.
-    let twice = defined_twice(tc, dir, &work)?;
+    // references, and rebuild the object without its copies. The seed links
+    // at opt-level 0 so that nothing is inlined away: every std function its
+    // code reaches is a definition to match, not only the ones a small seed
+    // happens to keep out of line at -O3 (a larger program keeps more).
+    let twice = defined_twice(tc, dir, &work, 0)?;
     let external = share_with_program(tc, dir, &work, std_unpacked, &twice)?;
     if !external.is_empty() {
         build_object(tc, &work, &merged, &names, &shared, &external, &object)?;
     }
     if almide_base::env::flag("ALMIDE_DEBUG_STD_SPLIT") {
-        let left = defined_twice(tc, dir, &work)?;
+        let left = defined_twice(tc, dir, &work, 3)?;
         eprintln!(
             "almide: std split: {} functions defined twice, {} now shared, {} left: {:?}",
             twice.len(),
@@ -393,12 +407,12 @@ fn build_sysroot(tc: &Toolchain, std_rlib: &Path, dir: &Path, work: &Path) -> Re
 
 /// The function symbols the seed, linked against the split, defines twice:
 /// once in its LTO module, once as a private copy in `backtrace.o`.
-fn defined_twice(tc: &Toolchain, dir: &Path, work: &Path) -> Result<std::collections::BTreeSet<String>, String> {
+fn defined_twice(tc: &Toolchain, dir: &Path, work: &Path, opt_level: u8) -> Result<std::collections::BTreeSet<String>, String> {
     let split = StdSplit { sysroot: dir.join("sysroot"), object: dir.join("backtrace.o") };
-    let bin = work.join("seed").join("seed-split");
+    let bin = work.join("seed").join(format!("seed-split-O{opt_level}"));
     run(std::process::Command::new(crate::find_rustc())
         .arg(work.join("seed.rs"))
-        .args(["--edition", "2021", "-C", "opt-level=3", "-C", "lto=fat", "-C", "codegen-units=1", "-C", "strip=debuginfo"])
+        .args(["--edition", "2021", "-C", &format!("opt-level={opt_level}"), "-C", "lto=fat", "-C", "codegen-units=1", "-C", "strip=debuginfo"])
         .args(split.rustc_args())
         .arg("-o")
         .arg(&bin))?;
@@ -525,13 +539,7 @@ fn export_defines(text: &str, names: &std::collections::HashSet<String>) -> Resu
     let mut listed = false;
     for line in text.lines() {
         if let Some(name) = define_name(line).filter(|n| names.contains(*n)) {
-            let local = line.strip_prefix("define ").is_some_and(|r| r.starts_with("internal ") || r.starts_with("private "));
-            if local {
-                out.push_str("define hidden ");
-                out.push_str(strip_linkage(line));
-            } else {
-                out.push_str(line);
-            }
+            out.push_str(&hidden_define(line));
             kept.push(ir_ref(name));
         } else if line.starts_with("@llvm.used = ") {
             listed = true;
@@ -563,6 +571,26 @@ fn export_defines(text: &str, names: &std::collections::HashSet<String>) -> Resu
     }
 }
 
+/// A definition as an external hidden one: module-local linkage
+/// (`internal`, `private`) dropped, any other linkage (`linkonce_odr`, …)
+/// kept, and the visibility hidden. Hidden makes it `dso_local`, so the
+/// program's calls to it stay direct rather than going through the GOT.
+fn hidden_define(line: &str) -> String {
+    let mut rest = line.strip_prefix("define ").unwrap_or(line);
+    let mut linkage = Vec::new();
+    loop {
+        let word = rest.split(' ').next().unwrap_or("");
+        match word {
+            "internal" | "private" | "external" | "hidden" | "protected" | "default" | "dso_local" | "dso_preemptable" => {}
+            "weak" | "weak_odr" | "linkonce" | "linkonce_odr" => linkage.push(word),
+            _ => break,
+        }
+        rest = rest[word.len()..].trim_start();
+    }
+    linkage.push("hidden");
+    format!("define {} {rest}", linkage.join(" "))
+}
+
 /// `@llvm.used = appending global [N x ptr] [a, b], section …` with `n` more entries.
 fn append_used(line: &str, n: usize, extra: &str) -> Result<String, String> {
     let (count, rest) = line
@@ -583,11 +611,41 @@ fn symlink(_from: &Path, to: &Path) -> Result<(), String> {
     Err(format!("no symlinks on this host ({})", to.display()))
 }
 
+/// The seed program: its LTO input holds the printer's code, and what its
+/// LTO module keeps decides which std functions the object shares with the
+/// program instead of copying (#4497). It touches what the printer reaches
+/// and almide programs commonly link too — formatting (`{:#?}` of strings),
+/// UTF-8 checks, file reads and metadata, path walking, `io::Error`, sorting,
+/// division — so those land once, in the LTO module. A function shared here
+/// that a program would not otherwise link is kept there for the printer: it
+/// moves out of the object rather than being added.
+const SEED: &str = r#"use std::io::Read;
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let n = args.len();
+    let mut bytes = Vec::new();
+    if let Ok(mut f) = std::fs::File::open(&args[0]) {
+        let _ = f.read_to_end(&mut bytes);
+    }
+    let len = std::fs::metadata(&args[0]).map(|m| m.len()).unwrap_or(0);
+    let p = std::path::Path::new(&args[0]);
+    let rel = p.strip_prefix("/").map(|r| r.components().count()).unwrap_or(0);
+    let root = p.components().next_back() == Some(std::path::Component::RootDir);
+    let canon = std::fs::canonicalize(p).map(|c| c.as_os_str().len()).unwrap_or(0);
+    let lossy = String::from_utf8_lossy(&bytes[..bytes.len().min(64)]).chars().count();
+    let strict = std::str::from_utf8(&bytes[..n.min(bytes.len())]).is_ok();
+    let mut sorted: Vec<&String> = args.iter().collect();
+    sorted.sort();
+    let err = std::io::Error::new(std::io::ErrorKind::Other, "seed");
+    println!("{n} {len} {rel} {root} {canon} {lossy} {strict} {sorted:#?} {err} {}", 100 / n);
+}
+"#;
+
 /// The merged LTO input of a seed build with the plain sysroot (std, its
 /// dependencies and rustc's allocator shim), as IR text.
 fn seed_lto_input(tc: &Toolchain, work: &Path) -> Result<String, String> {
     let src = work.join("seed.rs");
-    std::fs::write(&src, "fn main() { println!(\"{}\", std::env::args().count()); }\n").map_err(|e| format!("{e}"))?;
+    std::fs::write(&src, SEED).map_err(|e| format!("{e}"))?;
     let seed_dir = work.join("seed");
     std::fs::create_dir_all(&seed_dir).map_err(|e| format!("{}: {e}", seed_dir.display()))?;
     run(std::process::Command::new(crate::find_rustc())
@@ -982,6 +1040,30 @@ mod tests {
             external_global(TLS).unwrap(),
             format!("@{name} = external hidden thread_local global <{{ [9 x i8], [7 x i8] }}>, align 8")
         );
+    }
+
+    #[test]
+    fn a_shared_function_becomes_a_kept_hidden_symbol() {
+        let names: std::collections::HashSet<String> = ["f", "g", "a$b"].iter().map(|s| s.to_string()).collect();
+        let text = "define internal fastcc void @f() unnamed_addr #1 {\n  ret void\n}\ndefine void @g() {\n  ret void\n}\ndefine private void @\"a$b\"() {\n  ret void\n}\ndefine void @h() {\n  ret void\n}\n";
+        let out = export_defines(text, &names).unwrap();
+        assert!(out.contains("define hidden fastcc void @f() unnamed_addr #1 {"), "{out}");
+        assert!(out.contains("define hidden void @g() {"), "{out}");
+        assert!(out.contains("define hidden void @\"a$b\"() {"), "{out}");
+        assert!(out.contains("define void @h() {"), "{out}");
+        assert_eq!(hidden_define("define linkonce_odr dso_local void @k() comdat {"), "define linkonce_odr hidden void @k() comdat {");
+        assert!(out.ends_with("@llvm.used = appending global [3 x ptr] [ptr @f, ptr @g, ptr @\"a$b\"], section \"llvm.metadata\"\n"), "{out}");
+        let listed = format!("{text}@llvm.used = appending global [1 x ptr] [ptr @x], section \"llvm.metadata\"\n");
+        let out = export_defines(&listed, &names).unwrap();
+        assert!(out.contains("@llvm.used = appending global [4 x ptr] [ptr @f, ptr @g, ptr @\"a$b\", ptr @x], section"), "{out}");
+        assert_eq!(out.matches("@llvm.used").count(), 1, "{out}");
+        assert_eq!(export_defines("define void @h() {\n}\n", &names).unwrap(), "define void @h() {\n}\n");
+    }
+
+    #[test]
+    fn nm_listing_yields_function_definitions_only() {
+        let listing = "0000000000001000 T main\n0000000000001010 t _RNvf\n0000000000002000 D data\n0000000000001020 W weakf\n0000000000003000 b bss\n";
+        assert_eq!(nm_functions(listing), ["main", "_RNvf", "weakf"]);
     }
 
     #[test]
