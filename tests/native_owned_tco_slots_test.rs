@@ -49,12 +49,14 @@ effect fn main() -> Unit = {
     assert!(!body.contains(&format!("{name}(")), "join_acc no longer calls itself:\n{header}\n{body}");
 }
 
-/// The #3550 wall is unchanged: a heap self tail call behind a `!` early
-/// return (which the loop conversion still declines) walls with its reason.
+/// A heap self tail call behind a `!` early return: the `err` the desugar
+/// leaves in the tail is delivered through the loop's result accumulator with
+/// the function's own Result type (the cap-as-tag block, tag @16), so the
+/// rendered Rust compiles and both exits are right, a million deep.
 #[test]
-fn a_declined_heap_self_tail_call_still_walls_on_3550() {
+fn a_bang_early_return_self_tail_call_renders_and_runs_both_exits() {
     let src = r#"
-effect fn f(x: Int) -> Result[Int, String] = if x < 0 then err("neg") else ok(x * 2)
+effect fn f(x: Int) -> Result[Int, String] = if x == 777777 then err("bad ${x}") else ok(x % 7)
 
 effect fn build(n: Int, pos: Int, acc: List[Int]) -> Result[List[Int], String] = {
   if pos >= n then ok(acc)
@@ -65,10 +67,33 @@ effect fn build(n: Int, pos: Int, acc: List[Int]) -> Result[List[Int], String] =
 }
 
 effect fn main() -> Unit = {
-  let xs = build(3, 0, [])!
-  println("${list.len(xs)}")
+  println(match build(1000000, 0, []) { ok(xs) => "ok ${list.len(xs)}", err(e) => "err ${e}" })
+  println(match build(1000, 0, []) { ok(xs) => "ok ${list.len(xs)}", err(e) => "err ${e}" })
 }
+"#;
+    render(src).unwrap_or_else(|e| panic!("the `!` early-return carry walls: {e}"));
+    assert_eq!(run_native(src), "err bad 777777\nok 1000\n");
+}
+
+/// The #3550 wall is unchanged: a heap self tail call the loop conversion
+/// still declines (two heap carries that read each other, which no update
+/// order can stage) walls with its reason.
+#[test]
+fn a_declined_heap_self_tail_call_still_walls_on_3550() {
+    let src = r#"
+fn go(n: Int, a: String, b: String) -> String = if n == 0 then a + b else go(n - 1, a + b, b + a)
+
+effect fn main() -> Unit = println(go(3, "x", "y"))
 "#;
     let e = render(src).expect_err("a declined heap self tail call must wall");
     assert!(e.contains("#3550"), "the wall names #3550: {e}");
+}
+
+fn run_native(src: &str) -> String {
+    let dir = tempfile::tempdir().expect("scratch");
+    let file = dir.path().join("p.almd");
+    std::fs::write(&file, src).expect("source");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_almide")).arg("run").arg(&file).output().expect("almide run");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).into_owned()
 }

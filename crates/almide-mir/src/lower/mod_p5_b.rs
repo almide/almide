@@ -254,6 +254,16 @@ pub(crate) fn try_tco_rewrite(
     // (which bails on a `match` body), so the rewritten `if` body is what gets collected + lowered.
     let lit = try_list_iter_rewrite(fn_name, body, params, max_v + 2);
     let work_body: &IrExpr = lit.as_ref().map(|(b, _, _)| b).unwrap_or(body);
+    // Owned TCO slots (native): an `err($x)` base the `!` desugar left in a
+    // tail carries the desugar's own Result type, whose Ok side is not the
+    // function's; the in-loop result accumulator picks its block by that
+    // type, so give every tail `err` base the function's return type.
+    let retyped = crate::lower::owned_tco_slots().then(|| {
+        let mut b = work_body.clone();
+        retype_tail_err_bases(&mut b, &body.ty);
+        b
+    });
+    let work_body: &IrExpr = retyped.as_ref().unwrap_or(work_body);
     let idx_var = lit.as_ref().map(|(_, iv, _)| *iv);
 
     // FIRST collection — detect the self-calls + carried params (on the pre-substitution body).
@@ -268,7 +278,7 @@ pub(crate) fn try_tco_rewrite(
     // reassign then walls (mod_p3 "heap reassignment in a scalar loop body"). BAIL → the function falls
     // to the now-allowed REAL recursive lowering (a function-tail self-call, control_p4 ~188), which is
     // input-bounded and byte-matches v0. A natural `err("literal")` base (not a Var) is unaffected.
-    if bases0.iter().any(|b| {
+    if !crate::lower::owned_tco_slots() && bases0.iter().any(|b| {
         matches!(&b.kind, IrExprKind::ResultErr { expr } if matches!(&expr.kind, IrExprKind::Var { .. }))
     }) {
         return None;
@@ -372,6 +382,25 @@ pub(crate) fn try_tco_rewrite(
         IrExprKind::Block { stmts: inits, expr: Some(Box::new(post)) },
         ret_ty,
     ))
+}
+
+/// Set the type of every `err(..)` leaf in a tail position of `e` (the
+/// positions `tco_collect` reads as bases) to `ret_ty`.
+fn retype_tail_err_bases(e: &mut IrExpr, ret_ty: &Ty) {
+    match &mut e.kind {
+        IrExprKind::If { then, else_, .. } => {
+            retype_tail_err_bases(then, ret_ty);
+            retype_tail_err_bases(else_, ret_ty);
+        }
+        IrExprKind::Match { arms, .. } => {
+            for a in arms {
+                retype_tail_err_bases(&mut a.body, ret_ty);
+            }
+        }
+        IrExprKind::Block { expr: Some(tail), .. } => retype_tail_err_bases(tail, ret_ty),
+        IrExprKind::ResultErr { .. } => e.ty = ret_ty.clone(),
+        _ => {}
+    }
 }
 
 /// Does the body contain a TUPLE-DESTRUCTURE bind (`let (cp, l) = …`)? The
