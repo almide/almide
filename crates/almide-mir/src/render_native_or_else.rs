@@ -103,7 +103,7 @@ fn rewrite_at(lines: &[String], p: usize) -> Option<Vec<String>> {
     out.push(format!("{pad}let mut {r}: {ty} = match {o} {{"));
     out.push(format!("{pad}    Some(v) => v,"));
     out.push(format!("{pad}    None => {{"));
-    out.extend(lines[p + 6..end - 1].iter().map(|l| if l.trim().is_empty() { l.clone() } else { format!("    {l}") }));
+    out.extend(lines[p + 6..end - 1].iter().map(|l| format!("    {l}")));
     out.push(format!("{pad}        {e}"));
     out.push(format!("{pad}    }}"));
     out.push(format!("{pad}}};"));
