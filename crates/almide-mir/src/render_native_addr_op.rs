@@ -584,6 +584,11 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
             let b = var(ad.base);
             line!("let {b}_e{k}: {} = {rhs};", crate::render_native_rec::owned_ty(e));
             st.literal.insert(ad.base, (n, k + 1));
+            if let Some(stored) = st.single_rec.get_mut(&ad.base) {
+                // Its one element waits for the append that pushes it.
+                *stored = true;
+                return Ok(true);
+            }
             if k + 1 == n {
                 let es: Vec<String> = (0..n).map(|j| format!("{b}_e{j}")).collect();
                 line!("let mut {b}: {} = vec![{}];", owned_ty_of(ty(tys, &ad.base)), es.join(", "));

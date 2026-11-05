@@ -115,6 +115,12 @@ pub(crate) struct AddrState {
     /// (`render_native_slots::single_elem_lists`): the element waits in
     /// `<list>_e0` and the append pushes it. `true` once it is stored.
     single: BTreeMap<ValueId, bool>,
+    /// The generated-list twin of `single`: a one-element list of records,
+    /// lists or variants that exists only to be appended to its own kind. Its
+    /// element waits in `<list>_e0` (the built-whole literal's binding) and the
+    /// append pushes it, instead of a `vec![…]` allocated and appended per
+    /// iteration. `true` once the element is stored.
+    single_rec: BTreeMap<ValueId, bool>,
     building_enum: BTreeMap<ValueId, (u32, Vec<Option<NTy>>)>,
     /// List blocks filled in slot order right after their allocation
     /// (`render_native_slots::filled_in_order`): reserved, then pushed.
@@ -155,12 +161,25 @@ impl AddrState {
             .collect();
         let whole = slots::built_whole(func, &alloc_rec, &base_of);
         let whole_enum = slots::enum_built_whole(func, &alloc_rec, &base_of, &consts);
-        let single: BTreeMap<ValueId, bool> = slots::single_elem_lists(func, &base_of, &consts).into_iter().map(|b| (b, false)).collect();
-        let pushed = slots::filled_in_order(func, &base_of, &consts)
+        // A generated list (records, lists, variants) takes the generated
+        // list's push below, whatever its block's alloc spelling.
+        let generated = |b: &ValueId| alloc_rec.get(b).is_some_and(|i| crate::render_native_rec::list_elem(*i).is_some());
+        let single: BTreeMap<ValueId, bool> =
+            slots::single_elem_lists(func, &base_of, &consts).into_iter().filter(|b| !generated(b)).map(|b| (b, false)).collect();
+        let pushed: BTreeSet<ValueId> = slots::filled_in_order(func, &base_of, &consts)
             .into_iter()
             .chain(slots::dense_loop_fills(func, &consts))
             .filter(|b| !single.contains_key(b))
             .collect();
+        let single_rec = if crate::render_native_move::drill_no_moves() {
+            BTreeMap::new()
+        } else {
+            slots::single_elem_blocks(func, &base_of, &consts)
+                .into_iter()
+                .filter(|b| pushed.contains(b) && generated(b))
+                .map(|b| (b, false))
+                .collect()
+        };
         let reassigned = stale_handles(func);
         let const_lists = slots::const_str_lists(func, &base_of, &consts);
         set_const_lists(const_lists.keys().copied().collect());
@@ -210,6 +229,7 @@ impl AddrState {
             whole_enum,
             building_enum: BTreeMap::new(),
             single,
+            single_rec,
             pushed,
             literal: BTreeMap::new(),
         }
@@ -691,6 +711,11 @@ pub(crate) fn single_concat(func: &MirFunction, i: usize, tys: &mut BTreeMap<Val
         return None;
     }
     let [crate::CallArg::Handle(a), crate::CallArg::Handle(x)] = args.as_slice() else { return None };
+    if st.single_rec.get(x) == Some(&true) {
+        // Not its own kind's self-append: the list is built here for the `+`.
+        st.single_rec.remove(x);
+        return Some((format!("let mut {x}: {} = vec![{x}_e0];", owned_ty_of(tys.get(x).copied()), x = var(*x)), false));
+    }
     if st.single.get(x) != Some(&true) {
         return None;
     }
@@ -713,6 +738,14 @@ pub(crate) fn single_concat(func: &MirFunction, i: usize, tys: &mut BTreeMap<Val
 
 pub(crate) fn single_push(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, NTy>, st: &mut AddrState) -> Option<(String, bool)> {
     let (s, x, d) = crate::render_native_append::self_append_window(func, i)?;
+    if st.single_rec.get(&x) == Some(&true) {
+        st.single_rec.remove(&x);
+        let xt = tys.get(&x).copied();
+        if tys.get(&s).copied() == xt && func.ret != Some(d) && crate::render_native_append::touches(func, d) == 2 {
+            return Some((format!("{}.push({}_e0);", var(s), var(x)), true));
+        }
+        return Some((format!("let mut {x}: {} = vec![{x}_e0];", owned_ty_of(xt), x = var(x)), false));
+    }
     if st.single.get(&x) != Some(&true) {
         return None;
     }

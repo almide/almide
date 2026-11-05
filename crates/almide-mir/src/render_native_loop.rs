@@ -301,13 +301,13 @@ fn render_fn_appends(st: &mut FnLoop<'_>, i: usize, ops: &mut impl Iterator) -> 
         if done {
             return true;
         }
-        st.tys.insert(func.ops.get(i).and_then(|op| match op {
+        st.tys.entry(func.ops.get(i).and_then(|op| match op {
             Op::CallFn { args, .. } => match args.get(1) {
                 Some(crate::CallArg::Handle(x)) => Some(*x),
                 _ => None,
             },
             _ => None,
-        }).expect("a list `+`"), NTy::VecStr);
+        }).expect("a list `+`")).or_insert(NTy::VecStr);
     }
     if let Some(append) = crate::render_native_append::list_self_append(func, i, &st.tys, &st.borrows.arms) {
         line!("{append}");

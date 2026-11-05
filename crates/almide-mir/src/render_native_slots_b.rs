@@ -431,10 +431,34 @@ pub(super) fn single_elem_lists(
     base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
     consts: &BTreeMap<ValueId, i64>,
 ) -> BTreeSet<ValueId> {
+    single_blocks(func, base_of, consts, false)
+}
+
+/// The same one-element, append-only shape over any list block, `DynList`
+/// included: the candidates a generated list (a list of records, lists or
+/// variants) takes the push for (`AddrState::single_rec`).
+pub(super) fn single_elem_blocks(
+    func: &MirFunction,
+    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+    consts: &BTreeMap<ValueId, i64>,
+) -> BTreeSet<ValueId> {
+    single_blocks(func, base_of, consts, true)
+}
+
+fn single_blocks(
+    func: &MirFunction,
+    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+    consts: &BTreeMap<ValueId, i64>,
+    any_list: bool,
+) -> BTreeSet<ValueId> {
     let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
     let mut out = BTreeSet::new();
     for (i, op) in func.ops.iter().enumerate() {
-        let Op::Alloc { dst: b, init: Init::DynListStr { len }, .. } = op else { continue };
+        let (b, len) = match op {
+            Op::Alloc { dst, init: Init::DynListStr { len }, .. } => (dst, len),
+            Op::Alloc { dst, init: Init::DynList { len }, .. } if any_list => (dst, len),
+            _ => continue,
+        };
         if consts.get(len) != Some(&1) {
             continue;
         }
