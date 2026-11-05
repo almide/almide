@@ -72,6 +72,55 @@ impl LowerCtx {
         acc: DefuncAcc<'_>,
         fuse: DefuncFusion<'_>,
     ) -> Option<ValueId> {
+        // Stream fusion (#4006): a source that is itself `list.map(src, f)` with a
+        // scalar element runs `f` inside this loop, per element of `src`, and no
+        // intermediate list is built — what the standard codegen's StreamFusion
+        // makes of the same chain. A body the fused loop cannot lower is retried
+        // over the materialized list, as before.
+        if fuse.index.is_none() && fuse.second.is_none() {
+            if let Some(inner) = self.defunc_inner_map(xs).filter(|m| !m.3 || matches!(func, "fold" | "map")) {
+                let marks = (self.ops.len(), self.live_heap_handles.len(), self.lifted.len(), self.value_of.clone());
+                let acc2 = DefuncAcc { init: acc.init, result_elem: acc.result_elem.clone() };
+                let lambda2 = DefuncLambda { params: lambda.params, body: lambda.body };
+                let fuse2 = DefuncFusion { index: None, second: None };
+                if let Some(v) = self.lower_defunc_list_hof_loop(func, xs, lambda2, acc2, fuse2, Some(&inner)) {
+                    return Some(v);
+                }
+                self.rollback_scalar_loop(marks.0, marks.1, marks.2, marks.3);
+            }
+        }
+        self.lower_defunc_list_hof_loop(func, xs, lambda, acc, fuse, None)
+    }
+
+    /// `xs` = `list.map(src, (p) => e)` with the lambda literal or a let-bound
+    /// one: `(src, p, e, whether its element is a heap value)`. A heap element
+    /// is fused only into a `fold` or a `map`, which read it; a `filter` would
+    /// keep the element itself.
+    fn defunc_inner_map(&self, xs: &IrExpr) -> Option<(IrExpr, VarId, IrExpr, bool)> {
+        let IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func: f, .. }, args, .. } = &xs.kind else {
+            return None;
+        };
+        if module.as_str() != "list" || f.as_str() != "map" || args.len() != 2 {
+            return None;
+        }
+        let heap = is_heap_ty(list_elem_ty(&xs.ty)?);
+        let (params, body) = match &args[1].kind {
+            IrExprKind::Lambda { params, body, .. } => (params.clone(), (**body).clone()),
+            IrExprKind::Var { id } => self.lambda_bindings.get(id).cloned()?,
+            _ => return None,
+        };
+        (params.len() == 1).then(|| (args[0].clone(), params[0].0, body, heap))
+    }
+
+    fn lower_defunc_list_hof_loop(
+        &mut self,
+        func: &str,
+        xs: &IrExpr,
+        lambda: DefuncLambda<'_>,
+        acc: DefuncAcc<'_>,
+        fuse: DefuncFusion<'_>,
+        inner: Option<&(IrExpr, VarId, IrExpr, bool)>,
+    ) -> Option<ValueId> {
         let DefuncAcc { init, result_elem } = acc;
         let DefuncLambda { params, body } = lambda;
         let DefuncFusion { index: fuse_index, second: fuse_second } = fuse;
@@ -88,6 +137,29 @@ impl LowerCtx {
         // list.map(f)` — snaidhm's flatten_cubic, #881: `len = end - start` (+1
         // inclusive), `elem = start + i`, no list ever materialized). Any other
         // iterable is out of subset.
+        // `list.range(a, b)` is the half-open range `a..b` (its stdlib body
+        // builds exactly those elements, none when `b <= a`), so it is iterated
+        // directly too instead of materialized — as the standard codegen
+        // iterates it (#4006, the no-perf-loss rule).
+        let as_range;
+        // The loop runs over the fused map's own source.
+        let hof_xs = xs;
+        let xs = inner.map_or(xs, |m| &m.0);
+        let xs = match &xs.kind {
+            IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func: f, .. }, args, .. }
+                if module.as_str() == "list" && f.as_str() == "range" && args.len() == 2
+                    && matches!(args[0].ty, Ty::Int) && matches!(args[1].ty, Ty::Int) =>
+            {
+                as_range = IrExpr {
+                    kind: IrExprKind::Range { start: Box::new(args[0].clone()), end: Box::new(args[1].clone()), inclusive: false },
+                    ty: xs.ty.clone(),
+                    span: xs.span,
+                    def_id: None,
+                };
+                &as_range
+            }
+            _ => xs,
+        };
         let (src_h, range_start_v, mut len_v) = if let IrExprKind::Range { start, end, inclusive } =
             &xs.kind
         {
@@ -172,6 +244,57 @@ impl LowerCtx {
             }
             (None, None) => unreachable!("source is a list handle or a range"),
         }
+        // The fused map's body, per element of its source: its value is this
+        // loop's element. A heap source element stays borrowed, as the map read it.
+        // A heap element is bound as a `let` of the iteration, released after
+        // this loop's own body and store (`fused_mark`).
+        let mut fused_mark = None;
+        let (elem, src_heap) = match inner {
+            Some((_, p, body, true)) => {
+                self.value_of.insert(*p, elem);
+                if src_heap {
+                    if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a) = &xs.ty {
+                        if a.len() == 1 && (matches!(&a[0], Ty::Tuple(_)) || self.aggregate_field_tys(&a[0]).is_some()) {
+                            self.param_values.insert(elem);
+                            self.materialized_aggregates.insert(elem);
+                        }
+                    }
+                }
+                let elem_param = if func == "fold" { params.get(1)?.0 } else { params.first()?.0 };
+                let elem_ty = list_elem_ty(&hof_xs.ty)?.clone();
+                fused_mark = Some(self.live_heap_handles.len());
+                self.in_frame += 1;
+                self.in_defunc_body += 1;
+                let r = self.lower_bind_heap(elem_param, &elem_ty, body);
+                self.in_defunc_body -= 1;
+                self.in_frame -= 1;
+                r.ok()?;
+                (*self.value_of.get(&elem_param)?, false)
+            }
+            Some((_, p, body, false)) => {
+                self.value_of.insert(*p, elem);
+                if src_heap {
+                    if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a) = &xs.ty {
+                        if a.len() == 1 && (matches!(&a[0], Ty::Tuple(_)) || self.aggregate_field_tys(&a[0]).is_some()) {
+                            self.param_values.insert(elem);
+                            self.materialized_aggregates.insert(elem);
+                        }
+                    }
+                }
+                let mark = self.live_heap_handles.len();
+                self.in_frame += 1;
+                self.in_defunc_body += 1;
+                self.scalar_loop_depth += 1;
+                let v = self.lower_scalar_value(body);
+                self.scalar_loop_depth -= 1;
+                self.in_defunc_body -= 1;
+                self.in_frame -= 1;
+                let v = v?;
+                self.drop_arm_locals(mark);
+                (v, false)
+            }
+            None => (elem, src_heap),
+        };
 
         let st = DefuncLoopSt {
             acc_local,
@@ -189,13 +312,16 @@ impl LowerCtx {
             second,
             fuse_index,
         };
-        self.bind_defunc_iter_params(func, params, xs, &st);
+        self.bind_defunc_iter_params(func, params, hof_xs, &st);
         let (body_v, cond_acc_handled) =
             self.lower_defunc_body_value(func, body, params[0].0, result_elem.as_ref(), &st)?;
         // The conditional-acc fold already emitted its IfThen/Else/EndIf + in-place slot update — the
         // generic per-func slot update must NOT run (it would re-drop + re-store the slot).
         if !cond_acc_handled {
             self.store_defunc_iteration(func, &st, body_v)?;
+        }
+        if let Some(mark) = fused_mark {
+            self.drop_arm_locals(mark);
         }
 
         // Advance the index and close the loop.
