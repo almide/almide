@@ -219,7 +219,37 @@ impl Drop for StrictValuesGuard {
     }
 }
 
+/// OWNED TCO SLOTS (#4006 class A, #3550): on the certified NATIVE render, a
+/// self tail call may carry ANY heap argument — not only an append accumulator
+/// — as an owned loop-carried `var` slot: copied in from the borrowed param
+/// once, then rebound to each self call's value (the same owned rebinding of
+/// a `var` the certificate already follows round a `while`). Off everywhere
+/// else, so the wasm leg's lowering — and every ledger over it — is unchanged.
+pub(crate) fn owned_tco_slots() -> bool {
+    OWNED_TCO_SLOTS.with(|c| c.get())
+}
+
+/// Enable [`owned_tco_slots`] for a scope (restored on drop, as
+/// [`StrictValuesGuard`]).
+#[must_use = "the guard restores the previous mode when dropped; binding it to `_` restores immediately"]
+pub struct OwnedTcoSlotsGuard(bool);
+
+impl OwnedTcoSlotsGuard {
+    pub fn set(on: bool) -> Self {
+        let prev = owned_tco_slots();
+        OWNED_TCO_SLOTS.with(|c| c.set(on));
+        Self(prev)
+    }
+}
+
+impl Drop for OwnedTcoSlotsGuard {
+    fn drop(&mut self) {
+        OWNED_TCO_SLOTS.with(|c| c.set(self.0));
+    }
+}
+
 thread_local! {
+    static OWNED_TCO_SLOTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static STRICT_VALUES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The DESUGAR VAR BAND cursor — see [`desugar_var_seed`].
     static DESUGAR_VAR_CURSOR: std::cell::Cell<u32> = const { std::cell::Cell::new(DESUGAR_VAR_BAND) };
