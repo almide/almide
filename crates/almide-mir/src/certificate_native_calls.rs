@@ -157,7 +157,7 @@ pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTr
             format!("{}|{}|{}|{}\n{}", heap_modes(f).join(" "), sites.join(";"), marks.join(" "), hosts.join(" "), body.join("\n"))
         })
         .collect();
-    let blocks = blocks.into_iter().chain(runtime_blocks.iter().map(|(_, n)| format!("{}||\n{}", vec!["0"; *n].join(" "), vec![""; *n].join("\n"))));
+    let blocks = blocks.into_iter().chain(runtime_blocks.iter().map(|(_, n)| format!("{}|||\n{}", vec!["0"; *n].join(" "), vec![""; *n].join("\n"))));
     blocks.collect::<Vec<_>>().join("#")
 }
 
