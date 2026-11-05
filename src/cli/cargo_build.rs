@@ -82,7 +82,8 @@ codegen-units = 1
     cmd.arg("--target-dir").arg(project_dir.join("target"));
     if release {
         cmd.arg("--release");
-        append_release_rustflags(&mut cmd);
+        // A cdylib keeps the plain profile: the backtrace split is linked into executables only.
+        append_release_rustflags(&mut cmd, None);
     }
     // #2772: the requested target (or the host) is stated, never inherited.
     let triple = super::native_target::cross_target();
@@ -218,6 +219,9 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
     if release {
         cmd.args(FAST_PATH_RELEASE_ARGS);
         cmd.args(super::native_target::release_codegen_rustc_args());
+        if let Some(split) = release_split_for(rs_code) {
+            cmd.args(split.rustc_args());
+        }
     }
     let output = cmd.output().ok()?;
     if output.status.success() {
@@ -285,7 +289,11 @@ fn write_generated_cargo_project(
 
 /// Run `cargo build` in `project_dir` and locate the resulting binary.
 /// Extracted verbatim from `cargo_build_generated_with_native`'s tail.
-fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: bool) -> Result<std::path::PathBuf, String> {
+fn run_cargo_build_and_locate_binary(
+    project_dir: &std::path::Path,
+    release: bool,
+    split: Option<&super::std_split::StdSplit>,
+) -> Result<std::path::PathBuf, String> {
     let triple = super::native_target::cross_target();
     let profile = if release { "release" } else { "debug" };
     let exe = super::native_target::exe_file_name("almide-out", triple.as_deref());
@@ -305,8 +313,12 @@ fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: boo
     // that inline across nothing: a certified render's `map(..).collect()`
     // ran its closure through an outlined `from_iter`, 1.6x the same source
     // built in one session (#4006, mi1). This repo's CI sets the variable for
-    // every job, so only a user's build saw it.
-    cmd.env("CARGO_INCREMENTAL", "0");
+    // every job, so only a user's build saw it. A `CARGO_INCREMENTAL` the
+    // caller set is theirs and stays (the stale-session recovery is staged
+    // that way).
+    if std::env::var_os("CARGO_INCREMENTAL").is_none() {
+        cmd.env("CARGO_INCREMENTAL", "0");
+    }
     // The binary is located under `project_dir/target` below; an inherited
     // `CARGO_TARGET_DIR` (a common user setting, and what `cargo test` hands
     // the harness's own child processes) would send it elsewhere and turn the
@@ -314,7 +326,7 @@ fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: boo
     cmd.arg("--target-dir").arg(project_dir.join("target"));
     if release {
         cmd.arg("--release");
-        append_release_rustflags(&mut cmd);
+        append_release_rustflags(&mut cmd, split);
     }
     // Suppress cargo's chatty output
     cmd.arg("--quiet");
@@ -370,7 +382,8 @@ pub(super) fn cargo_build_generated_with_native(
     let written = std::fs::read_to_string(src_dir.join("main.rs"))
         .map_err(|e| format!("failed to read back {}: {}", src_dir.join("main.rs").display(), e))?;
 
-    let bin_path = run_cargo_build_and_locate_binary(project_dir, release)?;
+    let split = if release { release_split_for(rs_code) } else { None };
+    let bin_path = run_cargo_build_and_locate_binary(project_dir, release, split)?;
     source_still_ours(&src_dir.join("main.rs"), &written)?;
     Ok(bin_path)
 }
@@ -420,17 +433,37 @@ pub(super) fn wrap_codegen_leak(stderr: String) -> String {
 /// and release LLVM options ([`super::native_target::RELEASE_LLVM_ARGS`]),
 /// appended to the RUSTFLAGS the child already has — set on `cmd` (the rayon
 /// cfg) or inherited — so neither replaces the other.
-fn append_release_rustflags(cmd: &mut std::process::Command) {
+///
+/// `split` adds the backtrace-split sysroot and object ([`super::std_split`])
+/// when its paths can be spelled in the space-separated RUSTFLAGS and the
+/// inherited flags do not already name a sysroot.
+fn append_release_rustflags(cmd: &mut std::process::Command, split: Option<&super::std_split::StdSplit>) {
     let current = cmd.get_envs()
         .find(|(k, _)| *k == "RUSTFLAGS")
         .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
         .unwrap_or_else(|| std::env::var("RUSTFLAGS").unwrap_or_default());
     let mut flags = current;
-    for arg in super::native_target::release_codegen_rustc_args() {
+    let split_args = split
+        .map(|s| s.rustc_args())
+        .filter(|args| !flags.contains("--sysroot") && args.iter().all(|a| !a.contains(char::is_whitespace)));
+    for arg in super::native_target::release_codegen_rustc_args().into_iter().chain(split_args.into_iter().flatten()) {
         flags.push(' ');
         flags.push_str(&arg);
     }
     cmd.env("RUSTFLAGS", flags.trim_start().to_string());
+}
+
+/// The backtrace split ([`super::std_split`]) a `--release` link of `rs_code`
+/// uses, if any. A program with its own `#[global_allocator]` (the heap-cap
+/// allocator, a native dependency's) keeps the plain profile: the split's
+/// precompiled printer allocates through its own copy of the default
+/// allocator, which is the program's allocator only when the program has
+/// not replaced it.
+fn release_split_for(rs_code: &str) -> Option<&'static super::std_split::StdSplit> {
+    if rs_code.contains("global_allocator") {
+        return None;
+    }
+    super::std_split::release_std_split()
 }
 
 /// Path to the precompiled `almide_rt` runtime rlib, built once per process.
