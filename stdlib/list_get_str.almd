@@ -10,6 +10,7 @@ fn __get_str_some(h: Int, i: Int) -> String? = {
   some(copy)
 }
 
+@specializes("list.get")
 fn list_get_str(xs: List[String], i: Int) -> String? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -17,12 +18,14 @@ fn list_get_str(xs: List[String], i: Int) -> String? = {
   else if i >= len then none else __get_str_some(h, i)
 }
 
+@specializes("list.first")
 fn list_first_str(xs: List[String]) -> String? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if len <= 0 then none else __get_str_some(h, 0)
 }
 
+@specializes("list.last")
 fn list_last_str(xs: List[String]) -> String? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)

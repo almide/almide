@@ -121,6 +121,122 @@ pub(super) fn struct_width(i: u16) -> Option<usize> {
 /// exactly once at a constant slot, in the alloc's own straight-line run
 /// (no `if` or loop marker before the last store), and nothing reads the
 /// block before then but its own address arithmetic.
+/// List blocks filled densely by one loop: allocated with length `n`, then a
+/// loop whose counter starts at 0, steps by 1 and exits only on `c < n` failing
+/// stores slot `c` exactly once per iteration (at the loop's own level, not
+/// under an `if`) and reads nothing else of the block. Every slot is written in
+/// order, so the block is reserved and pushed (`list.map`'s defunctionalized
+/// fill), as the standard codegen collects it.
+pub(super) fn dense_loop_fills(func: &MirFunction, consts: &BTreeMap<ValueId, i64>) -> BTreeSet<ValueId> {
+    let ops = &func.ops;
+    let mut out = BTreeSet::new();
+    // Every `t = a < b` of the fn, by op index: (t, a, b).
+    let lts: BTreeMap<usize, (ValueId, ValueId, ValueId)> = ops
+        .iter()
+        .enumerate()
+        .filter_map(|(k, o)| match o {
+            Op::IntBinOp { dst, op: crate::IntOp::Lt, a, b } => Some((k, (*dst, *a, *b))),
+            _ => None,
+        })
+        .collect();
+    for (i, op) in ops.iter().enumerate() {
+        if let Some(b) = dense_fill_at(ops, i, op, consts, &lts) {
+            out.insert(b);
+        }
+    }
+    out
+}
+
+/// The block `op` (at `i`) allocates, when one loop right after fills it densely.
+fn dense_fill_at(ops: &[Op], i: usize, op: &Op, consts: &BTreeMap<ValueId, i64>, lts: &BTreeMap<usize, (ValueId, ValueId, ValueId)>) -> Option<ValueId> {
+    let Op::Alloc { dst: b, init: Init::DynList { len } | Init::DynListStr { len }, .. } = op else { return None };
+    let (h, j) = handle_up_to_loop(ops, i, *b)?;
+    let (c, end) = counted_loop(ops, j, *len, consts, lts)?;
+    fills_each_slot_once(&ops[j + 3..end], *b, h, c, consts).then_some(*b)
+}
+
+/// Up to the loop after the allocation at `i`: only block `b`'s handle is
+/// taken. The handle and the `LoopStart`'s index.
+fn handle_up_to_loop(ops: &[Op], i: usize, b: ValueId) -> Option<(ValueId, usize)> {
+    let mut j = i + 1;
+    let mut handle: Option<ValueId> = None;
+    while j < ops.len() && !matches!(ops[j], Op::LoopStart) {
+        let mut reads = Vec::new();
+        crate::mir_ops::op_reads(&ops[j], &mut reads);
+        match &ops[j] {
+            Op::Prim { kind: PrimKind::Handle, dst: Some(h), args } if args.as_slice() == [b] => handle = Some(*h),
+            Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } | Op::LoopEnd | Op::LoopBreakUnless { .. } | Op::Return { .. } => return None,
+            _ if reads.contains(&b) || handle.is_some_and(|h| reads.contains(&h)) => return None,
+            _ => {}
+        }
+        j += 1;
+    }
+    matches!(ops.get(j), Some(Op::LoopStart)).then_some(())?;
+    Some((handle?, j))
+}
+
+/// The loop at `j` counts `c` from 0 to `len` by one: `c < len`, break
+/// unless, body, `c = c + 1`, LoopEnd. The counter and the `LoopEnd`'s index.
+fn counted_loop(ops: &[Op], j: usize, len: ValueId, consts: &BTreeMap<ValueId, i64>, lts: &BTreeMap<usize, (ValueId, ValueId, ValueId)>) -> Option<(ValueId, usize)> {
+    let &(t, c, n) = lts.get(&(j + 1))?;
+    (n == len).then_some(())?;
+    matches!(ops.get(j + 2), Some(Op::LoopBreakUnless { cond }) if *cond == t).then_some(())?;
+    ops[..j].iter().any(|o| matches!(o, Op::ConstInt { dst, value: 0 } if *dst == c)).then_some(())?;
+    let end = loop_end(ops, j)?;
+    let body = &ops[j + 3..end];
+    // The step: `c' = c + 1; c = c'` right before LoopEnd.
+        let step = body.len() >= 2
+            && matches!(body[body.len() - 1], Op::SetLocal { local, src } if local == c && matches!(body[body.len() - 2], Op::IntBinOp { dst, op: crate::IntOp::Add, a, b: one } if dst == src && a == c && consts.get(&one) == Some(&1)));
+    step.then_some((c, end))
+}
+
+/// The loop `body` stores block `b`'s slot `c` exactly once, at its top
+/// level, and reads neither the block nor an address into it otherwise.
+fn fills_each_slot_once(body: &[Op], b: ValueId, h: ValueId, c: ValueId, consts: &BTreeMap<ValueId, i64>) -> bool {
+    // Addresses into the block: h + const, + c * 8.
+    let mut scaled: BTreeSet<ValueId> = BTreeSet::new();
+    let mut base12: BTreeSet<ValueId> = BTreeSet::new();
+    let mut slot_c: BTreeSet<ValueId> = BTreeSet::new();
+    let mut stores = 0usize;
+    let mut d = 0i32;
+    for o in body {
+        match o {
+            Op::IfThen { .. } | Op::LoopStart => d += 1,
+            Op::EndIf { .. } | Op::LoopEnd => d -= 1,
+            _ => {}
+        }
+        let fine = match o {
+            Op::LoopBreakUnless { .. } | Op::Return { .. } => false,
+            Op::SetLocal { local, .. } if *local == c => matches!(body.last(), Some(l) if std::ptr::eq(l, o)),
+            Op::IntBinOp { dst, op: crate::IntOp::Mul, a, b: w } if *a == c && consts.get(w) == Some(&8) => {
+                scaled.insert(*dst);
+                true
+            },
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b: k } if *a == h && consts.get(k) == Some(&12) => {
+                base12.insert(*dst);
+                true
+            },
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b: x } if base12.contains(a) && scaled.contains(x) => {
+                slot_c.insert(*dst);
+                true
+            },
+            Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.first().is_some_and(|a| slot_c.contains(a)) => {
+                stores += 1;
+                d == 0
+            }
+            other => {
+                let mut reads = Vec::new();
+                crate::mir_ops::op_reads(other, &mut reads);
+                !(reads.contains(&b) || reads.iter().any(|v| *v == h || base12.contains(v) || slot_c.contains(v)))
+            }
+        };
+        if !fine {
+            return false;
+        }
+    }
+    stores == 1
+}
+
 /// List blocks of a constant length whose every slot is stored once, in slot
 /// order, right after the allocation (only address arithmetic between, no
 /// read of the block, no control flow): reserved and pushed, rather than
@@ -157,6 +273,78 @@ pub(super) fn filled_in_order(
                 out.insert(*b);
                 break;
             }
+        }
+    }
+    out
+}
+
+/// `List[String]` blocks that are a constant: a constant length, every slot
+/// stored once in order right after the allocation (`filled_in_order`) with a
+/// string literal, and afterwards only read — handed to a floor call's
+/// borrowed list param, or released. Such a block is the same value on every
+/// run of its function (a top-level `let` table the lowering re-materializes
+/// at each use), so the render builds it once, as v0 keeps a top-level `let`.
+/// Returns each block's literals in slot order.
+pub(super) fn const_str_lists(
+    func: &MirFunction,
+    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+    consts: &BTreeMap<ValueId, i64>,
+) -> BTreeMap<ValueId, Vec<String>> {
+    let filled = filled_in_order(func, base_of, consts);
+    let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
+    let lits: BTreeMap<ValueId, &String> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Alloc { dst, init: Init::Str(s), .. } => Some((*dst, s)),
+            _ => None,
+        })
+        .collect();
+    let handle_of: BTreeMap<ValueId, ValueId> = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => Some((*d, args[0])),
+            _ => None,
+        })
+        .collect();
+    let mut out = BTreeMap::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        let Op::Alloc { dst: b, init: Init::DynListStr { len }, .. } = op else { continue };
+        let Some(n) = consts.get(len).and_then(|n| usize::try_from(*n).ok()).filter(|_| filled.contains(b)) else { continue };
+        let mut elems: Vec<String> = Vec::new();
+        let mut ok = true;
+        for later in &func.ops[i + 1..] {
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(later, &mut reads);
+            let touches = reads.iter().any(|v| v == b || rooted(v, *b));
+            let fine = match later {
+                Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.first().is_some_and(|a| rooted(a, *b)) => {
+                    match handle_of.get(&args[1]).and_then(|s| lits.get(s)) {
+                        Some(s) if elems.len() < n => {
+                            elems.push((*s).clone());
+                            true
+                        }
+                        _ => false,
+                    }
+                }
+                Op::Prim { kind: PrimKind::Handle, args, .. } if args.first() == Some(b) => true,
+                Op::IntBinOp { op: crate::IntOp::Add, .. } if touches => true,
+                Op::DropListStr { v } if v == b => true,
+                Op::CallFn { name, args, .. } if touches => args.iter().enumerate().all(|(k, a)| match a {
+                    crate::CallArg::Handle(v) if v == b => crate::native_floor::borrows_list(name, k),
+                    crate::CallArg::Handle(v) | crate::CallArg::Scalar(v) => !rooted(v, *b),
+                    _ => true,
+                }),
+                _ => !touches,
+            };
+            if !fine {
+                ok = false;
+                break;
+            }
+        }
+        if ok && elems.len() == n {
+            out.insert(*b, elems);
         }
     }
     out
@@ -258,10 +446,34 @@ pub(super) fn single_elem_lists(
     base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
     consts: &BTreeMap<ValueId, i64>,
 ) -> BTreeSet<ValueId> {
+    single_blocks(func, base_of, consts, false)
+}
+
+/// The same one-element, append-only shape over any list block, `DynList`
+/// included: the candidates a generated list (a list of records, lists or
+/// variants) takes the push for (`AddrState::single_rec`).
+pub(super) fn single_elem_blocks(
+    func: &MirFunction,
+    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+    consts: &BTreeMap<ValueId, i64>,
+) -> BTreeSet<ValueId> {
+    single_blocks(func, base_of, consts, true)
+}
+
+fn single_blocks(
+    func: &MirFunction,
+    base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+    consts: &BTreeMap<ValueId, i64>,
+    any_list: bool,
+) -> BTreeSet<ValueId> {
     let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
     let mut out = BTreeSet::new();
     for (i, op) in func.ops.iter().enumerate() {
-        let Op::Alloc { dst: b, init: Init::DynListStr { len }, .. } = op else { continue };
+        let (b, len) = match op {
+            Op::Alloc { dst, init: Init::DynListStr { len }, .. } => (dst, len),
+            Op::Alloc { dst, init: Init::DynList { len }, .. } if any_list => (dst, len),
+            _ => continue,
+        };
         if consts.get(len) != Some(&1) {
             continue;
         }

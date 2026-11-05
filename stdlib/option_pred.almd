@@ -52,6 +52,7 @@ else {
   0
 }
 
+@specializes("option.to_list")
 fn option_to_list_rc(o: Int?) -> List[Int] = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)

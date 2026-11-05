@@ -59,8 +59,10 @@ else {
   0
 }
 
+@specializes("map.new")
 fn map_new_hval() -> Map[String, List[Int]] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_hval(m: Map[String, List[Int]], k: String, v: List[Int]) -> Map[String, List[Int]] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -188,8 +190,10 @@ fn list_to_string_lmh(xs: List[Map[String, List[Int]]]) -> String = "[" + (xs |>
 
 // ── len / contains / get (hval) ── reads only; get's Some SHARES the stored list
 // (the Some-ctor auto-acquire — the list_get_hshare discipline).
+@specializes("map.len")
 fn map_len_hval(m: Map[String, List[Int]]) -> Int = prim.load32(prim.handle(m) + 4)
 
+@specializes("map.contains")
 fn map_contains_hval(m: Map[String, List[Int]], k: String) -> Bool = {
   let h = prim.handle(m)
   __hvl_find(h, prim.load32(h + 4), k, 0) >= 0
@@ -202,6 +206,7 @@ fn __hvl_some(h: Int, n: Int, idx: Int) -> List[Int]? = {
   some(v)
 }
 
+@specializes("map.get")
 fn map_get_hval(m: Map[String, List[Int]], k: String) -> List[Int]? = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)
@@ -282,6 +287,7 @@ else {
   __hvl_keys_fill(sh, oh, entries, i + 1)
 }
 
+@specializes("map.keys")
 fn map_keys_hval(m: Map[String, List[Int]]) -> List[String] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)

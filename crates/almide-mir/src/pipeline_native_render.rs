@@ -70,7 +70,11 @@ fn collect_local_scalar_tuples(ir: &almide_ir::IrProgram, ts: &mut Vec<almide_la
         for t in found {
             let scalar = matches!(&t, almide_lang::types::Ty::Tuple(es)
                 if !es.is_empty() && es.iter().all(crate::render_native_rec::is_lane_scalar));
-            if scalar && !ts.contains(&t) {
+            // A map or set a local holds (`let m: Map[String, Int] = [:]`):
+            // its generated type, for the empty container that starts it.
+            let container = matches!(&t, almide_lang::types::Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, _))
+                || crate::render_native_rec::is_native_set(&t);
+            if (scalar || container) && !ts.contains(&t) {
                 ts.push(t);
             }
         }
@@ -270,6 +274,11 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     // #4447: the native rungs render no `@export(c)` wrapper — the wall
     // comes before the fan lift.
     wall_native_c_exports(&ir)?;
+    // #4006 C2: a discovered region window runs in the arena on this render
+    // too — the `__rgn_` twins and a window fn the MIR brackets below.
+    let mut ir = ir;
+    almide_codegen::pass_region_window_native::native_region_windows(&mut ir);
+    let windows = crate::native_region_window::window_fns(&ir);
     let ir = crate::fan_native::lift_fan_arms(ir)?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
     // them a record literal lowers as an Opaque skeleton and every field read
@@ -281,6 +290,7 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
         &record_layouts,
         &variant_layouts,
         native_struct_tuples(&ir, &record_layouts, &variant_layouts),
+        ir.codegen_annotations.region_enums.iter().cloned().collect(),
     );
     if !ir.modules.is_empty() {
         return Err(LowerError::Unsupported(
@@ -303,6 +313,7 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     // #4006 class P: a heap param its body takes over becomes a move param,
     // and every call hands the argument over at the call.
     crate::native_move_params::rewrite(&mut functions);
+    crate::native_region_window::bracket_windows(&mut functions, &windows)?;
     let mut certs = native_ownership_certs(&functions);
     let program = MirProgram {
         functions,

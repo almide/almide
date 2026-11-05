@@ -34,6 +34,8 @@ mod fields;
 mod init;
 mod modes;
 mod native_calls;
+/// The named set of native fs host calls the `native-calls` checker admits.
+pub use native_calls::NATIVE_FS_HOST_CALLS;
 mod nat;
 mod ownership;
 mod reach;

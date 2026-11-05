@@ -37,6 +37,7 @@ fn __zipw_str_fill(dh: Int, ah: Int, bh: Int, f: (String, String) -> String, n: 
     __zipw_str_fill(dh, ah, bh, f, n, i + 1)
   }
 
+@specializes("list.zip_with")
 fn list_zip_with_str(a: List[String], b: List[String], f: (String, String) -> String) -> List[String] = {
   let na = list.len(a)
   let nb = list.len(b)

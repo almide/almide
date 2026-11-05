@@ -202,6 +202,8 @@ fn bytes_set(b: Bytes, i: Int, val: Int) -> Bytes = {
 // bytes.append(b, val) — a fresh Bytes = b with `val` appended (the FUNCTIONAL value-semantics form
 // of the in-place `bytes.push(mut b, val)` intrinsic; the v1 MIR lowering rewrites a `bytes.push(buf,
 // x)` statement to `buf = bytes.append(buf, x)`). Allocs n+1, copies b, stores val at slot n.
+@implements("bytes.__append")
+@specializes("bytes.__append")
 fn bytes_append(b: Bytes, val: Int) -> Bytes = {
   let n = prim.load32(prim.handle(b) + 4)
   let out = prim.alloc_bytes(n + 1)
@@ -525,6 +527,8 @@ fn bytes_read_i32_be(b: Bytes, pos: Int) -> Int = {
 // bytes indexing `buf[i]` — the CHECKED element read: a negative / past-len index
 // aborts `Error: index out of bounds` + exit 1 (v0's behavior on both targets),
 // unlike read_u8's 0-for-OOB convention.
+@implements("bytes.__index")
+@specializes("bytes.__index")
 fn bytes_index(b: Bytes, pos: Int) -> Int = {
   let h = prim.handle(b)
   let n = prim.load32(h + 4)

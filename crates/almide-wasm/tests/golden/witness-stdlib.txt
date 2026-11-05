@@ -1180,6 +1180,7 @@ html.concat
 html.empty
 html.escape
 html.raw
+html.script_json
 html.to_string
 http.__almd_lift_1
 http.__almd_lift_6

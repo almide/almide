@@ -105,8 +105,10 @@ fn map_from_list_hobj(pairs: List[(String, String)]) -> Map[String, String] = {
 // `some` payload co-owns via the Option ctor; the map keeps its reference).
 // The map's type-specific DROP stays in generated code (`__drop_map_<V>` /
 // `__drop_map_rec_<R>`), routed by the bind's `map_named_value_drop`.
+@specializes("map.new")
 fn map_new_hobj() -> Map[String, String] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_hobj(m: Map[String, String], k: String, v: String) -> Map[String, String] = __hobj_set(
   m,
   k,
@@ -120,6 +122,7 @@ fn __hobj_some(h: Int, n: Int, idx: Int) -> String? = {
   some(v)
 }
 
+@specializes("map.get")
 fn map_get_hobj(m: Map[String, String], k: String) -> String? = {
   let h = prim.handle(m)
   let n = prim.load32(h + 4)

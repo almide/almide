@@ -106,6 +106,7 @@ fn __chunk_outer_str(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int)
     __chunk_outer_str(oh, sh, total, cn, ci + 1, start + cn)
   }
 
+@specializes("list.chunk")
 fn list_chunk_str(xs: List[String], n: Int) -> List[List[String]] = {
   if n <= 0 then prim.die(prim.handle("Error: chunk size must be positive\n")) else ()
   let sh = prim.handle(xs)
@@ -147,4 +148,5 @@ fn __do_windows_str(xs: List[String], n: Int) -> List[List[String]] = {
   outer
 }
 
+@specializes("list.window")
 fn list_window_str(xs: List[String], n: Int) -> List[List[String]] = __do_windows_str(xs, n)

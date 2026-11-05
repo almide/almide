@@ -358,6 +358,7 @@ else {
   __skv_entries_fill(dh, sh, entries, i + 1)
 }
 
+@specializes("map.to_list")
 fn map_entries_skv(m: Map[String, Int]) -> List[(String, Int)] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)

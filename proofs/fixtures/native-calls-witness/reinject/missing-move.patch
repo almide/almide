@@ -1,8 +1,7 @@
 diff --git a/crates/almide-mir/src/native_move_params.rs b/crates/almide-mir/src/native_move_params.rs
-index 6586cffa1..028ce0861 100644
 --- a/crates/almide-mir/src/native_move_params.rs
 +++ b/crates/almide-mir/src/native_move_params.rs
-@@ -202,10 +202,8 @@ fn move_at_sites(func: &MirFunction, owned: &BTreeMap<String, Vec<bool>>) -> Mir
+@@ -329,10 +329,8 @@ fn move_at_sites(func: &MirFunction, owned: &BTreeMap<String, Vec<bool>>) -> Mir
                  }
              }
          }
@@ -15,13 +14,16 @@ index 6586cffa1..028ce0861 100644
          i = call + 1;
      }
      f
-@@ -259,9 +257,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
-     }
+@@ -387,11 +385,8 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
      for f in next.iter_mut() {
-         let moved = move_at_sites(f, &owned);
+         // The join releases sunk into the arms first, so an arm's call takes
+         // the slot over; the plain body if the mirror refuses that.
+-        let sunk = move_at_sites(&sink_join_releases(f, &owned), &owned);
+-        let moved = if crate::verify_ownership(&sunk).is_ok() { sunk } else { move_at_sites(f, &owned) };
 -        if crate::verify_ownership(&moved).is_err() {
 -            return;
 -        }
++        let moved = move_at_sites(&sink_join_releases(f, &owned), &owned);
 +        // RE-INJECTED (#4006 class P drill): the Rust mirror is bypassed.
          *f = moved;
      }

@@ -31,6 +31,7 @@ fn list_reduce(xs: List[Int], f: (Int, Int) -> Int) -> Int? = {
 // call producer (#738 Path C, the loop-accumulator closure-call lever). The seed is a deep COPY of
 // xs[0] (string.repeat ·1, single-owned, so reduce([x]) == Some(x)); the loop folds xs[1..]. f borrows
 // acc + the element and returns a fresh String; the slot drops the old + rebinds. Source borrowed.
+@specializes("list.reduce")
 fn list_reduce_str(xs: List[String], f: (String, String) -> String) -> String? = {
   let n = list.len(xs)
   if n <= 0 then none

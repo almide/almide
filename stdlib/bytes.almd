@@ -81,6 +81,19 @@ fn compare(a: Bytes, b: Bytes) -> Int = _
 @intrinsic("almide_rt_bytes_concat")
 fn __concat(a: Bytes, b: Bytes) -> Bytes = _
 
+// `b` with the low 8 bits of `val` appended, a fresh Bytes: the functional
+// form a `bytes.push(buf, x)` statement lowers to (`buf = bytes.append(buf,
+// x)`), which the self-hosted `bytes.append` specializes (`@specializes`).
+@intrinsic("almide_rt_bytes_append_fresh")
+@reuse(b)
+fn __append(b: Bytes, val: Int) -> Bytes = _
+
+// `b[pos]`, the checked read: a negative or past-the-end `pos` aborts with
+// `Error: index out of bounds` (exit 1). The self-hosted `bytes.index`
+// specializes it.
+@intrinsic("almide_rt_bytes_index_checked")
+fn __index(b: Bytes, pos: Int) -> Int = _
+
 /// True if needle occurs in b, or needle is empty.
 @intrinsic("almide_rt_bytes_contains")
 fn contains(b: Bytes, needle: Bytes) -> Bool = _

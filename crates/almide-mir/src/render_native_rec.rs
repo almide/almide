@@ -19,7 +19,7 @@ use std::cell::RefCell;
 /// variant (an enum, `cases`: each constructor's tag and field kinds). Field
 /// kinds are owned spellings: `I64`, `Str`, `Vec`, `VecStr`, `Rec`; an enum
 /// boxes its `Rec` fields, so a recursive variant has a size.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct RecDecl {
     pub name: String,
     pub fields: Vec<NTy>,
@@ -41,6 +41,9 @@ pub(crate) struct RecDecl {
     /// A `Map[K, V]`: v0's runtime `AlmideMap<key, value>`, so the declared
     /// floor's map bodies take it as is.
     pub map_of: Option<(NTy, NTy)>,
+    /// A `Set[A]`: v0's runtime `AlmideSet<elem>`, so the declared floor's
+    /// set bodies take it as is.
+    pub set_of: Option<NTy>,
 }
 
 /// A type the MIR carries in one i64 lane, read off its `Repr` (the layout
@@ -79,6 +82,32 @@ pub(crate) fn map_kinds(i: u16) -> Option<(NTy, NTy)> {
     RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.map_of))
 }
 
+/// The element kind of a generated set type.
+pub(crate) fn set_elem(i: u16) -> Option<NTy> {
+    RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.set_of))
+}
+
+/// A set type the native render carries: `Set[Int]` or `Set[String]`, the
+/// elements v0's runtime set holds as the same Rust values (an `i64` lane
+/// would compare a Float by its bits and print a Bool as a number).
+pub(crate) fn is_native_set(t: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    use almide_lang::types::Ty;
+    matches!(t, Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 && (a[0] == Ty::Int || a[0] == Ty::String))
+}
+
+/// The generated `AlmideSet<elem>` alias, appended on first use.
+pub(crate) fn set_type_of(e: NTy) -> u16 {
+    RECS.with(|r| {
+        let mut r = r.borrow_mut();
+        if let Some(i) = r.iter().position(|d| d.set_of == Some(e)) {
+            return i as u16;
+        }
+        r.push(RecDecl { name: format!("Set<{e:?}>"), set_of: Some(e), ..RecDecl::default() });
+        (r.len() - 1) as u16
+    })
+}
+
 /// The payload kind of a generated `Option` carrier.
 pub(crate) fn option_payload(i: u16) -> Option<NTy> {
     RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.option_of))
@@ -92,10 +121,9 @@ pub(crate) fn result_payloads(i: u16) -> Option<(NTy, NTy)> {
 /// A value of kind `t` has a `Default` (a carrier's absent payload reads as one).
 pub(crate) fn has_default(t: NTy) -> bool {
     match t {
-        // A Result carrier and the runtime `Value` have none.
-        NTy::Rec(i) | NTy::RecRef(i) => {
-            RECS.with(|r| r.borrow().get(i as usize).is_some_and(|d| d.result_of.is_none() && d.name != VALUE_KEY))
-        }
+        // A Result carrier has none (the runtime `Value` and `Matrix` get
+        // theirs from `runtime_default_impls`).
+        NTy::Rec(i) | NTy::RecRef(i) => RECS.with(|r| r.borrow().get(i as usize).is_some_and(|d| d.result_of.is_none())),
         NTy::Res | NTy::ResStr => false,
         _ => true,
     }
@@ -118,7 +146,7 @@ pub(crate) fn bytes_index() -> u16 {
         if let Some(i) = r.iter().position(|d| d.name == BYTES_KEY) {
             return i as u16;
         }
-        r.push(RecDecl { name: BYTES_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None });
+        r.push(RecDecl { name: BYTES_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None });
         (r.len() - 1) as u16
     })
 }
@@ -134,7 +162,7 @@ pub(crate) fn value_index() -> u16 {
         if let Some(i) = r.iter().position(|d| d.name == VALUE_KEY) {
             return i as u16;
         }
-        r.push(RecDecl { name: VALUE_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None });
+        r.push(RecDecl { name: VALUE_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None });
         (r.len() - 1) as u16
     })
 }
@@ -142,6 +170,27 @@ pub(crate) fn value_index() -> u16 {
 /// `t` is the generated `Value` type.
 pub(crate) fn is_value(t: NTy) -> bool {
     matches!(t, NTy::Rec(i) | NTy::RecRef(i) if rec_index(VALUE_KEY) == Some(i))
+}
+
+/// The table key of the builtin `Matrix` type.
+pub(crate) const MATRIX_KEY: &str = "Ty::Matrix";
+
+/// The generated `Matrix` type: v0's own runtime struct (`AlmideMatrix`), so a
+/// declared-floor body takes it as is. Appended on first use, like `Bytes`.
+pub(crate) fn matrix_index() -> u16 {
+    RECS.with(|r| {
+        let mut r = r.borrow_mut();
+        if let Some(i) = r.iter().position(|d| d.name == MATRIX_KEY) {
+            return i as u16;
+        }
+        r.push(RecDecl { name: MATRIX_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None });
+        (r.len() - 1) as u16
+    })
+}
+
+/// `t` is the generated `Matrix` type.
+pub(crate) fn is_matrix(t: NTy) -> bool {
+    matches!(t, NTy::Rec(i) | NTy::RecRef(i) if rec_index(MATRIX_KEY) == Some(i))
 }
 
 /// The generated `Result<ok, err>` carrier, appended on first use (a
@@ -161,7 +210,7 @@ pub(crate) fn result_type_of(ok: NTy, err: NTy) -> u16 {
             default_tag: None,
             option_of: None,
             result_of: Some((ok, err)),
-            map_of: None,
+            map_of: None, set_of: None,
         });
         (r.len() - 1) as u16
     })
@@ -199,7 +248,7 @@ pub(crate) fn map_type_of(key: NTy, value: NTy) -> u16 {
             default_tag: None,
             option_of: None,
             result_of: None,
-            map_of: Some((key, value)),
+            map_of: Some((key, value)), set_of: None,
         });
         (r.len() - 1) as u16
     })
@@ -221,7 +270,7 @@ pub(crate) fn option_type_of(payload: NTy) -> u16 {
             default_tag: None,
             option_of: Some(payload),
             result_of: None,
-            map_of: None,
+            map_of: None, set_of: None,
         });
         (r.len() - 1) as u16
     })
@@ -244,7 +293,7 @@ pub(crate) fn list_type_of(e: NTy) -> u16 {
             default_tag: None,
             option_of: None,
             result_of: None,
-            map_of: None,
+            map_of: None, set_of: None,
         });
         (r.len() - 1) as u16
     })
@@ -260,7 +309,7 @@ pub(crate) fn slots_type_of(fields: &[NTy]) -> u16 {
         if let Some(i) = r.iter().position(|d| d.name == name) {
             return i as u16;
         }
-        r.push(RecDecl { name, fields: fields.to_vec(), cases: None, list_of: None, option_of: None, result_of: None, map_of: None, alias: None, default_tag: None });
+        r.push(RecDecl { name, fields: fields.to_vec(), cases: None, list_of: None, option_of: None, result_of: None, map_of: None, set_of: None, alias: None, default_tag: None });
         (r.len() - 1) as u16
     })
 }
@@ -282,12 +331,15 @@ thread_local! {
     static INPUTS: RefCell<Option<Inputs>> = const { RefCell::new(None) };
 }
 
+
 /// Derive and install the table for one render.
 pub(crate) fn install_derived(
     layouts: &crate::lower::RecordLayouts,
     variants: &crate::lower::VariantLayouts,
     tuples: Vec<almide_lang::types::Ty>,
+    region_names: std::collections::BTreeSet<String>,
 ) -> RecGuard {
+    REGION_NAMES.with(|n| *n.borrow_mut() = region_names);
     let recs = derive_records(layouts, variants, &tuples);
     INPUTS.with(|i| *i.borrow_mut() = Some((layouts.clone(), variants.clone(), tuples)));
     install(recs)
@@ -325,6 +377,7 @@ impl Drop for RecGuard {
         RECS.with(|r| r.borrow_mut().clear());
         INPUTS.with(|i| *i.borrow_mut() = None);
         SCALAR_INSTANCES.with(|si| si.borrow_mut().clear());
+        REGION_NAMES.with(|n| n.borrow_mut().clear());
     }
 }
 
@@ -429,14 +482,20 @@ pub(crate) fn enum_field_boxed(i: u16, f: NTy) -> bool {
     })
 }
 
-/// An enum payload field's spelling: boxed where [`enum_field_boxed`] says so.
+/// An enum payload field's spelling: boxed where [`enum_field_boxed`] says so
+/// — in a region twin (#4006 C2) the box is an `AlmideRgn` arena handle.
 fn enum_field_ty(i: u16, f: &NTy) -> String {
-    if enum_field_boxed(i, *f) { format!("Box<{}>", owned_ty(*f)) } else { owned_ty(*f) }
+    let boxed = if is_region(i) { "AlmideRgn" } else { "Box" };
+    if enum_field_boxed(i, *f) { format!("{boxed}<{}>", owned_ty(*f)) } else { owned_ty(*f) }
 }
+
 
 fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     let n = struct_name(i);
-    let mut out = format!("/// variant `{}`\n#[derive(Clone)]\nenum {n} {{\n", d.name);
+    // A region twin is `Copy` (its boxed fields are arena handles), so a
+    // rewound window block owns nothing to drop.
+    let derive = if is_region(i) { "Clone, Copy" } else { "Clone" };
+    let mut out = format!("/// variant `{}`\n#[derive({derive})]\nenum {n} {{\n", d.name);
     for (t, fs) in cases {
         if fs.is_empty() {
             out.push_str(&format!("    C{t},\n"));
@@ -450,7 +509,7 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     let leaf = d.default_tag.unwrap_or(cases[0].0);
     out.push_str(&format!("impl Default for {n} {{\n    fn default() -> Self {{ Self::with_tag({leaf}) }}\n}}\n"));
     out.push_str(&format!("#[allow(unused_variables, unreachable_patterns)]\nimpl {n} {{\n"));
-    out.push_str(&enum_tag_fns(cases));
+    out.push_str(&enum_tag_fns(i, cases));
     let width = cases.iter().map(|(_, fs)| fs.len()).max().unwrap_or(0);
     for k in 1..=width {
         for kind in enum_slot_kinds(i, k) {
@@ -470,15 +529,21 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
 
 /// An enum's `with_tag` (the constructor at `t` with default payloads) and
 /// `tag` methods.
-fn enum_tag_fns(cases: &[(u32, Vec<NTy>)]) -> String {
+fn enum_tag_fns(i: u16, cases: &[(u32, Vec<NTy>)]) -> String {
     let mut out = String::new();
-    // with_tag: the constructor at `t` with default payloads.
+    // with_tag: the constructor at `t` with default payloads. A region twin's
+    // arena handle has no `Default`: its default is a default node in the arena.
+    let region = is_region(i);
     out.push_str("    fn with_tag(t: i64) -> Self {\n        match t {\n");
     for (t, fs) in cases {
         if fs.is_empty() {
             out.push_str(&format!("            {t} => Self::C{t},\n"));
         } else {
-            let defs = vec!["Default::default()"; fs.len()].join(", ");
+            let defs = fs
+                .iter()
+                .map(|f| if region && enum_field_boxed(i, *f) { "almide_rgn_alloc(Default::default())" } else { "Default::default()" })
+                .collect::<Vec<_>>()
+                .join(", ");
             out.push_str(&format!("            {t} => Self::C{t}({defs}),\n"));
         }
     }
@@ -513,7 +578,7 @@ fn enum_slot_fns(i: u16, k: usize, kind: NTy, cases: &[(u32, Vec<NTy>)]) -> Stri
         let pat = format!("Self::C{t}({})", slot_binds(fs.len(), k));
         let (rd, wr) = match kind {
             NTy::I64 => ("*f".to_string(), "*f = x".to_string()),
-            NTy::Rec(_) if enum_field_boxed(i, kind) => ("(**f).clone()".to_string(), "*f = Box::new(x)".to_string()),
+            NTy::Rec(_) if enum_field_boxed(i, kind) => ("(**f).clone()".to_string(), format!("*f = {}(x)", box_new(i))),
             _ => ("f.clone()".to_string(), "*f = x".to_string()),
         };
         get.push_str(&format!("            {pat} => {rd},\n"));
@@ -578,6 +643,23 @@ pub(crate) fn owned_ty(t: NTy) -> String {
     }
 }
 
+/// The `Default` of each runtime type the render carries that has none of its
+/// own: `Value` (the JSON null) and `Matrix` (the 0×0 one). A struct or enum
+/// starts from `Default`, a moved-out value leaves one behind and a carrier's
+/// absent payload reads as one, each overwritten or never observed, as a
+/// String's empty default is. Empty when the render carries neither. It goes
+/// inside the runtime module, the crate that defines the types.
+pub(crate) fn runtime_default_impls() -> String {
+    const IMPLS: [(&str, &str); 2] = [
+        (VALUE_KEY, "impl Default for AlmideValue {\n    fn default() -> Self {\n        AlmideValue::Null\n    }\n}\n"),
+        (MATRIX_KEY, "impl Default for AlmideMatrix {\n    fn default() -> Self {\n        AlmideMatrix { rows: 0, cols: 0, data: Vec::new() }\n    }\n}\n"),
+    ];
+    RECS.with(|r| {
+        let r = r.borrow();
+        IMPLS.iter().filter(|(k, _)| r.iter().any(|d| d.name == *k)).map(|(_, i)| *i).collect()
+    })
+}
+
 /// The struct definitions, or "" when the program declares none (so every
 /// render without a heap record is byte-identical to before).
 pub(crate) fn struct_defs() -> String {
@@ -594,6 +676,10 @@ pub(crate) fn struct_defs() -> String {
             }
             if let Some(p) = d.option_of {
                 out.push_str(&format!("/// `{}`\ntype {} = Option<{}>;\n\n", d.name, struct_name(i as u16), owned_ty(p)));
+                continue;
+            }
+            if let Some(e) = d.set_of {
+                out.push_str(&format!("/// `{}`\ntype {} = AlmideSet<{}>;\n\n", d.name, struct_name(i as u16), owned_ty(e)));
                 continue;
             }
             if let Some((o, e)) = d.result_of {
@@ -667,6 +753,12 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
             push_new(out, t);
             a.iter().for_each(|e| collect_tuples(e, out));
         }
+        // A set of Int or String elements: v0's runtime `AlmideSet`.
+        t if is_native_set(t) => {
+            if !out.contains(t) {
+                out.push(t.clone());
+            }
+        }
         // A heap-payload Option or a Result outside the scalar carriers: its
         // own generated `Option<T>` / `Result<T, E>`.
         Ty::Applied(_, a) if is_heap_carrier(t) => {
@@ -674,7 +766,7 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
             a.iter().for_each(|e| collect_tuples(e, out));
         }
         Ty::Applied(_, a) => a.iter().for_each(|e| collect_tuples(e, out)),
-        Ty::Bytes if !out.contains(t) => out.push(t.clone()),
+        Ty::Bytes | Ty::Matrix if !out.contains(t) => out.push(t.clone()),
         t if crate::lower::is_value_ty(t) => {
             push_new(out, t);
         }

@@ -1,0 +1,11 @@
+// #4006 class E drill: a native fs host call (fs.write_text, runtime
+// `almide_rt_fs_write`). Re-injected: the named set no longer names that function and
+// the render no longer refuses a floor body outside it (scripts/witness-reinject.sh
+// native-calls), so the witness records
+// a host call outside the set, which the native-calls checker must reject.
+import fs
+
+effect fn main() -> Unit = {
+  fs.write_text("/tmp/almide-host-drill.txt", "x")!
+  println("written")
+}

@@ -181,7 +181,7 @@ why = "List length + bounds-checked element reads; seed_variant_param only recor
 
 [[arm]]
 file = "defunc_hof_inner.rs"
-fn = "lower_defunc_list_hof_inner"
+fn = "lower_defunc_list_hof_loop"
 loads = 2
 verdict = "NOT_SUM_READ"
 why = "Source-list length/element reads bounded by the loop guard; sum interpretation delegated to the tag-dispatched body lowerers."

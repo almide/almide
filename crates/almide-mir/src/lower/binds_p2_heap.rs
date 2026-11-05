@@ -4,7 +4,7 @@
 impl LowerCtx {
     /// The HEAP half of [`Self::lower_bind`]: the heap-`??` executable subset,
     /// then the fresh-vs-alias match over every heap producer. Verbatim text move.
-    fn lower_bind_heap(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+    pub(crate) fn lower_bind_heap(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         if self.try_lower_bind_heap_unwrap_or_precheck(var, ty, value)? {
             return Ok(());
         }
@@ -418,6 +418,10 @@ impl LowerCtx {
             self.deferred_opaque_binds.insert(dst);
         }
         self.value_of.insert(var, dst);
+        // An empty container's declared type, for the native render (#4006).
+        if matches!(init, crate::Init::Empty) {
+            self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(&value.ty));
+        }
         self.ops.push(Op::Alloc { dst, repr, init });
         self.live_heap_handles.push(dst);
         self.record_elided_calls(value);

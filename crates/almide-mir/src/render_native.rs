@@ -65,6 +65,13 @@ pub(crate) enum NTy {
 }
 
 impl NTy {
+    /// The generated type an owned or borrowed record-like value has.
+    pub(crate) fn rec(self) -> Option<u16> {
+        match self {
+            NTy::Rec(i) | NTy::RecRef(i) => Some(i),
+            _ => None,
+        }
+    }
     fn is_stringy(self) -> bool {
         matches!(self, NTy::Str | NTy::StrRef)
     }
@@ -339,6 +346,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
             out.push_str(s);
             out.push_str("\n\n");
         }
+        out.push_str(&crate::render_native_rec::runtime_default_impls());
     } else {
         // The runtime part — the shared string buffer and the runtime items
         // the floor takes along — in one module the program reaches through
@@ -350,9 +358,17 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         out.push_str(&format!("pub mod {RT_MOD} {{\n{RT_MOD_ATTRS}\n"));
         out.push_str(&crate::render_native_str::almide_string_alias());
         for s in runtime {
+            // A one-line runtime constructor (`value.int`'s `{ AlmideValue::Int(n) }`)
+            // is inlined into the program across the crate split, as it is
+            // inside v0's single crate: without the hint the program pays a
+            // call per value built at the program profile's opt-level.
+            if is_one_line_constructor(s) {
+                out.push_str("#[inline]\n");
+            }
             out.push_str(&crate::native_floor::pub_items(s));
             out.push_str("\n\n");
         }
+        out.push_str(&crate::render_native_rec::runtime_default_impls());
         out.push_str(&format!("}}\n{RT_MOD_END}pub use {RT_MOD}::*;\n\n"));
     }
     out.push_str(&crate::render_native_rec::struct_defs());
@@ -379,6 +395,21 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         out = route_exits(&out);
     }
     Ok(out)
+}
+
+/// A runtime fn written on one line whose body only builds a value of its
+/// declared return type (`-> T { T::Variant(…) }`): a constructor.
+fn is_one_line_constructor(item: &str) -> bool {
+    let t = item.trim();
+    !t.contains('\n') && (t.starts_with("pub fn ") || t.starts_with("fn ")) && builds_its_return_type(t).is_some()
+}
+
+/// `Some` iff the one-line fn `t`'s body starts by naming its return type.
+fn builds_its_return_type(t: &str) -> Option<()> {
+    let (head, body) = t.split_once('{')?;
+    let ret = head.rsplit_once("->")?.1.trim();
+    (!ret.is_empty() && ret.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && body.trim_start().starts_with(&format!("{ret}::")))
+        .then_some(())
 }
 
 /// The `Op::FuncRef` table index of a lifted lambda: its position in the

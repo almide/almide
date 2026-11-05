@@ -80,6 +80,8 @@ fn call_result(name: &str, sigs: &NativeSigs) -> Option<NTy> {
         FloorRet::ListInt => Some(NTy::Vec),
         FloorRet::ListStr => Some(NTy::VecStr),
         FloorRet::Bytes => Some(NTy::Rec(rec::bytes_index())),
+        FloorRet::Value => Some(NTy::Rec(rec::value_index())),
+        FloorRet::Matrix => Some(NTy::Rec(rec::matrix_index())),
         _ => None,
     }
 }
@@ -122,6 +124,12 @@ pub(super) fn type_blocks(
     for (v, key) in &func.aggregate_blocks {
         if let Some(i) = rec::rec_index(key).filter(|i| rec::all_scalar_struct(*i) || rec::enum_cases(*i).is_some()) {
             alloc_rec.entry(*v).or_insert(i);
+        } else if let Some(n) = anon_scalar_record_len(func, *v, key) {
+            // An anonymous all-scalar record (`list.map((i) => { x: i, y: i })`)
+            // has no declaration to name, so it takes the by-value struct of its
+            // slots, as a declared one does — not a `Vec<i64>` per record, which
+            // cost such a list 28x against the standard codegen.
+            alloc_rec.entry(*v).or_insert(rec::slots_type_of(&vec![NTy::I64; n]));
         }
     }
     let mut tb = BlockTyping {
@@ -132,6 +140,7 @@ pub(super) fn type_blocks(
         known: BTreeMap::new(),
         blocks: Vec::new(),
         joins: Vec::new(),
+        concats: Vec::new(),
         dups: Vec::new(),
         str_lists: BTreeSet::new(),
         scalar_blocks: BTreeSet::new(),
@@ -167,6 +176,9 @@ struct BlockTyping<'a, 'f> {
     known: BTreeMap<ValueId, NTy>,
     blocks: Vec<(ValueId, Option<i64>)>,
     joins: Vec<(ValueId, ValueId, ValueId)>,
+    /// List concatenations `dst = a + b`: one Almide list type, so one
+    /// native kind for all three.
+    concats: Vec<(ValueId, ValueId, ValueId)>,
     dups: Vec<(ValueId, ValueId)>,
     str_lists: BTreeSet<ValueId>,
     /// Untyped blocks every store of which is a scalar: the `Vec<i64>` default.
@@ -198,15 +210,23 @@ impl BlockTyping<'_, '_> {
             Op::Alloc { dst, init: Init::Str(_) | Init::DynStr { .. }, .. } => {
                 self.known.insert(*dst, NTy::Str);
             }
+            Op::Prim { kind: PrimKind::OptMakeSome | PrimKind::OptMakeNone | PrimKind::OptCopy, dst: Some(d), .. } => {
+                self.known.insert(*d, NTy::Opt);
+            }
             Op::Alloc { dst, init: Init::IntList(_), .. } | Op::ListLit { dst, .. } if !self.alloc_rec.contains_key(dst) => {
                 self.known.insert(*dst, NTy::Vec);
             }
             Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. } => {
                 self.blocks.push((*dst, self.f.consts.get(len).copied()));
             }
-            Op::CallFn { dst: Some(d), name, .. } => {
+            Op::CallFn { dst: Some(d), name, args, .. } => {
                 if let Some(t) = call_result(name, self.sigs) {
                     self.known.insert(*d, t);
+                }
+                if let (true, [crate::CallArg::Handle(a), crate::CallArg::Handle(b)]) =
+                    (crate::native_list_ops::is_list_concat(name), args.as_slice())
+                {
+                    self.concats.push((*d, *a, *b));
                 }
             }
             Op::Dup { dst, src } => self.dups.push((*dst, *src)),
@@ -296,6 +316,34 @@ impl BlockTyping<'_, '_> {
                 }
             }
         }
+        self.across_concats();
+    }
+
+    /// A list concatenation's operands and result are one list type: a
+    /// generated list kind on one of them reaches an operand that is an
+    /// empty, never-stored block (`var xs: List[List[Int]] = []` before
+    /// `xs = xs + [[…]]`), which no store can type. A block typed any other
+    /// way keeps its kind, so a real disagreement still walls at the render.
+    fn across_concats(&mut self) {
+        let concats = self.concats.clone();
+        for (d, a, b) in concats {
+            let Some(i) = [d, a, b]
+                .iter()
+                .find_map(|v| self.alloc_rec.get(v).copied())
+                .filter(|i| rec::list_elem(*i).is_some())
+            else {
+                continue;
+            };
+            for v in [a, b] {
+                if self.alloc_rec.contains_key(&v) || self.str_lists.contains(&v) || self.known.contains_key(&v) {
+                    continue;
+                }
+                if self.blocks.iter().any(|(r, _)| *r == v) && self.block_stores(v).is_some_and(|s| s.is_empty()) {
+                    self.scalar_blocks.remove(&v);
+                    self.alloc_rec.insert(v, i);
+                }
+            }
+        }
     }
 
     /// The kinds of copies and joins.
@@ -328,6 +376,20 @@ impl BlockTyping<'_, '_> {
                 self.known.entry(*d).or_insert(t);
             }
         }
+        // A list concatenation is a list of its left operand's kind.
+        for op in &func.ops {
+            let Op::CallFn { dst: Some(d), name, args, .. } = op else { continue };
+            let Some(crate::CallArg::Handle(l)) = args.first() else { continue };
+            if !crate::native_list_ops::is_list_concat(name) {
+                continue;
+            }
+            let t = self.kind_of(l).map(owned);
+            if let Some(t @ (NTy::Vec | NTy::VecStr)) = t {
+                self.known.entry(*d).or_insert(t);
+            } else if let Some(NTy::Rec(i)) = t.filter(|t| matches!(t, NTy::Rec(i) if rec::list_elem(*i).is_some())) {
+                self.alloc_rec.entry(*d).or_insert(i);
+            }
+        }
     }
 
     /// The (slot, kind) of every store into block `r`; `None` when some
@@ -342,6 +404,8 @@ impl BlockTyping<'_, '_> {
                 continue;
             }
             let k = match self.f.handle_of.get(&args[1]) {
+                // A scalar Option stored by value (`native_option_rewrite`).
+                None if self.known.get(&args[1]) == Some(&NTy::Opt) => Some(NTy::Opt),
                 None => Some(NTy::I64),
                 Some(src) => self.kind_of(src).map(owned),
             };
@@ -411,3 +475,16 @@ fn slot_kinds(stores: &[(Option<usize>, NTy)], len: Option<i64>, mask: Option<&V
 }
 
 include!("render_native_slots_b.rs");
+
+/// The slot count of block `v` when the lowering built it as an anonymous
+/// record of scalars: a `ListLit` of its field values whose recorded type is a
+/// structural record (`block_key` of a `Ty::Record`).
+fn anon_scalar_record_len(func: &MirFunction, v: ValueId, key: &str) -> Option<usize> {
+    if !key.starts_with("Record {") {
+        return None;
+    }
+    func.ops.iter().find_map(|op| match op {
+        Op::ListLit { dst, elems } if *dst == v && !elems.is_empty() => Some(elems.len()),
+        _ => None,
+    })
+}

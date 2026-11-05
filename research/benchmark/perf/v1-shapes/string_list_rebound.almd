@@ -1,0 +1,17 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf-shapes.sh): a String
+// list local read by index and rebound on every iteration, beside a String
+// local grown in the same loop, so each read takes the rebound list's handle.
+fn main() -> Unit = {
+  let n = int.parse("20000") ?? 2
+  var names = ["a", "bb", "ccc"]
+  var s = string.repeat("ab", 4)
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = acc + string.len(names[i % 3]) + (if string.starts_with(s, "ab") then 1 else 0)
+    names = [s, "q", "r"]
+    s = if string.len(s) > 64 then "ab" else s + "x"
+    i = i + 1
+  }
+  println(int.to_string(acc))
+}

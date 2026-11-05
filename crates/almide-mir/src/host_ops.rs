@@ -224,6 +224,58 @@ pub const HOST_OPS: &[HostOp] = &[
     op("testing", "__abort_site_selected", "almide_rt_test_abort_site_selected", ENV),
 ];
 
+/// The NATIVE FS HOST CALLS (#4006 class E; proofs/TRUSTED_BASE.md, "Native
+/// fs host calls"; owner ruling 2026-11-05): the runtime fs functions a
+/// natively rendered program may call as TRUSTED host calls, the way the wasm
+/// leg calls its host's fs imports. A call to one carries the runtime's whole
+/// `fs` module (`native_floor::take_fs_host_module`); a floor body outside this
+/// list that reaches the module is refused, and the native-calls witness
+/// records every host call by its index here, which `proofs/NativeCalls.v`
+/// (`native_fs_host_calls`) and almide-verify hold to this same list.
+/// Append-only in index order: the index is the witness's host id.
+pub const NATIVE_FS_HOST_CALLS: &[&str] = &[
+    "almide_rt_fs_read_text",
+    "almide_rt_fs_read_bytes",
+    "almide_rt_fs_read_lines",
+    "almide_rt_fs_read_text_if_exists",
+    "almide_rt_fs_list_dir",
+    "almide_rt_fs_exists",
+    "almide_rt_fs_is_dir",
+    "almide_rt_fs_is_file",
+    "almide_rt_fs_is_symlink",
+    "almide_rt_fs_walk",
+    "almide_rt_fs_glob",
+    "almide_rt_fs___root_read_text",
+    "almide_rt_fs___root_read_bytes",
+    "almide_rt_fs___root_list_dir",
+    "almide_rt_fs___root_exists",
+    "almide_rt_fs_temp_dir",
+    "almide_rt_fs_write",
+    "almide_rt_fs_write_bytes",
+    "almide_rt_fs_mkdir_p",
+    "almide_rt_fs_remove_all",
+    "almide_rt_fs___root_write_text",
+    "almide_rt_fs_rename",
+    "almide_rt_fs_copy",
+    "almide_rt_fs_append",
+    "almide_rt_fs_append_bytes",
+    "almide_rt_fs_remove",
+    "almide_rt_fs___root_remove",
+    "almide_rt_fs_create_temp_dir",
+    "almide_rt_fs_create_temp_file",
+];
+
+/// Is the runtime `symbol` one of the [`NATIVE_FS_HOST_CALLS`]?
+pub fn is_native_fs_host_call(symbol: &str) -> bool {
+    native_fs_host_id(symbol).is_some()
+}
+
+/// The witness id of the native fs host call `symbol`: its index in
+/// [`NATIVE_FS_HOST_CALLS`].
+pub fn native_fs_host_id(symbol: &str) -> Option<usize> {
+    NATIVE_FS_HOST_CALLS.iter().position(|s| *s == symbol)
+}
+
 /// The modules whose surface reaches the host. Each one's `@intrinsic`s form
 /// the audited matrix; a stdlib module outside this list must be wholly pure
 /// (`crate::purity::PURE_MODULES` — the contract test checks the partition).

@@ -251,10 +251,7 @@ pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
 
 /// The carrier index of a value's kind.
 fn carrier_of(t: Option<NTy>) -> Option<u16> {
-    match t {
-        Some(NTy::Rec(i) | NTy::RecRef(i)) if is_carrier(i) => Some(i),
-        _ => None,
-    }
+    t?.rec().filter(|i| is_carrier(*i))
 }
 
 fn emit(out: &mut String, indent: usize, s: &str) {
@@ -476,15 +473,34 @@ impl CarrierCx<'_> {
                 return Some(Err(Ok(true)));
             }
         }
+        // A borrow-only read above the tag test, used under one side of
+        // it: a reference into the carrier, the other side's (never
+        // used) a reference to a Default the render keeps beside it.
+        if let (None, Some(err_side), true) = (arm, self.st.hoisted.get(&d).copied(), self.st.borrow_reads.contains(&d)) {
+            let (k, side, other) = if err_side { (e, "Err", "Ok") } else { (o, "Ok", "Err") };
+            let dv = var(d);
+            match k {
+                NTy::Str => {
+                    self.tys.insert(d, NTy::StrRef);
+                    self.emit(&format!("let mut {dv}: &str = match &{b} {{ {side}(v) => &v[..], {other}(_) => \"\" }};"));
+                    return Some(Err(Ok(true)));
+                }
+                NTy::Rec(j) if has_default(k) => {
+                    self.tys.insert(d, NTy::RecRef(j));
+                    let t = struct_name(j);
+                    self.emit(&format!("let {dv}_absent: {t} = Default::default();"));
+                    self.emit(&format!("let mut {dv}: &{t} = match &{b} {{ {side}(v) => v, {other}(_) => &{dv}_absent }};"));
+                    return Some(Err(Ok(true)));
+                }
+                _ => {}
+            }
+        }
         Some(Ok(match (arm, self.st.hoisted.get(&d).copied()) {
             (Some(true), _) => (e, format!("match &{b} {{ Err(v) => v.clone(), Ok(_) => unreachable!() }}")),
             (Some(false), _) => (o, format!("match &{b} {{ Ok(v) => v.clone(), Err(_) => unreachable!() }}")),
             (None, _) if o == e => (o, format!("match &{b} {{ Ok(v) | Err(v) => v.clone() }}")),
-            // Read above the tag test, used under one side of it: the
-            // other side's read is never used, so it is a Default.
-            (None, Some(true)) if has_default(e) => {
-                (e, format!("match &{b} {{ Err(v) => v.clone(), Ok(_) => Default::default() }}"))
-            }
+            // Read above the tag test, used under its Ok side: the Err
+            // side's read is never used, so it is a Default.
             (None, Some(false)) if has_default(o) => {
                 (o, format!("match &{b} {{ Ok(v) => v.clone(), Err(_) => Default::default() }}"))
             }

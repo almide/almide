@@ -344,6 +344,17 @@ struct CertScan {
     call_move: bool,
     /// The object of every call-site move, in op order (the native-calls marks).
     call_move_objs: Vec<ValueId>,
+    /// The slots a call-site move hands over (#4006 class P): a copy that
+    /// feeds one is written as a share-out of its source (see `dup_step`).
+    moved_slots: BTreeSet<ValueId>,
+    /// The merges whose value ends in a moved slot, directly or through the
+    /// arm value of an enclosing such merge: merge dst → slot.
+    slot_chain: BTreeMap<ValueId, ValueId>,
+    /// Per open region: the slot its merge credits, when it is in `slot_chain`.
+    merge_credit: Vec<Option<ValueId>>,
+    /// Straight-line slots whose pending rebind is a bare credit (no `(`
+    /// opened): their `SetLocal` closes nothing.
+    unfolded: BTreeSet<ValueId>,
 }
 
 impl CertScan {
@@ -498,6 +509,18 @@ impl CertScan {
                 self.s.event(o, 'm');
             }
         }
+        // A merge into a moved slot is credited at the end of each arm (a
+        // nested merge in the chain has credited its own arms already).
+        let credit = self.merge_credit.last().copied().flatten();
+        if let (Some(slot), Some(v)) = (credit, val) {
+            if !self.slot_chain.contains_key(v) {
+                let so = self.s.object_of(slot);
+                self.s.event(so, 'i');
+            }
+        }
+        if is_end {
+            self.merge_credit.pop();
+        }
         if is_end {
             self.s.flush_branch();
         } else {
@@ -590,6 +613,9 @@ impl CertScan {
     /// flat `i…d` nets 0 and a delimiter in an arm buffer poisons the flush
     /// (`{i|}`); the fold is only needed for straight-line REPEATED reassigns.)
     fn line_slot_close(&mut self, local: ValueId) {
+        if self.unfolded.remove(&local) {
+            return;
+        }
         if self.straight_line_slot(local) {
             let so = self.s.object_of(local);
             self.s.event(so, ')');
@@ -616,6 +642,31 @@ impl CertScan {
         if self.cow_copy(dst, src) {
             return;
         }
+        // A copy that feeds a slot the body hands over at a call (#4006
+        // class P: `out = emit(out)` — the slot moved into the call, then
+        // rebound to a copy of its result). The slot's line may sit at 0
+        // after the move-out, so its new value cannot arrive as an `a` there
+        // (the owned-line guard reads that as a resurrection, rightly: the
+        // line cannot tell a new object from the dead one). The copy is the
+        // share-out it is: `s` on the SOURCE's line — liveness-probed there,
+        // where the object actually lives — and the credit, born as `i`, on
+        // the slot's line (OwnershipChecker.v `share_handover_sound`).
+        let slot = self.feeder_to_slot.get(&dst).copied();
+        if let Some(slot) = slot.filter(|s| self.moved_slots.contains(s)) {
+            let o = self.s.object_of(src);
+            let so = self.s.object_of(slot);
+            if o != so {
+                self.s.event(o, 's');
+                // No `(…)` fold: the slot's old value already left at the
+                // call (`M`), so the rebind is the bare credit.
+                self.s.of.insert(dst, so);
+                self.s.event(so, 'i');
+                if self.line_slots.contains(&slot) && self.s.frames.is_empty() {
+                    self.unfolded.insert(slot);
+                }
+                return;
+            }
+        }
         if !self.try_feed(dst, 'a') {
             let o = self.s.object_of(src);
             self.s.of.insert(dst, o);
@@ -628,6 +679,26 @@ impl CertScan {
     /// opens its own stream. Both are PRE-REGION events — the merge object is
     /// acquired at the merge point, outside either arm.
     fn open_merge(&mut self, dst: Option<ValueId>) {
+        // A merge whose value a moved slot receives (#4006 class P: `out =
+        // match b { 38 => emit_str(out, ..), _ => bytes.push(out, b) }`, the
+        // join's release sunk into the arms): the slot's line moves out at an
+        // arm's call, so the merge's credit cannot precede the region — each
+        // arm would then leave the slot one short and group as `{…|…}`,
+        // which a loop body or an enclosing arm cannot hold. It is credited
+        // where the arm value moves into the merge, at the end of each arm:
+        // every arm balances on the slot's line and flushes flat.
+        let chained = dst.and_then(|d| self.slot_chain.get(&d).copied());
+        self.merge_credit.push(chained);
+        if let (Some(d), Some(slot)) = (dst, chained) {
+            let so = self.s.object_of(slot);
+            self.s.of.insert(d, so);
+            if self.feeder_to_slot.contains_key(&d) && self.line_slots.contains(&slot) && self.s.frames.is_empty() {
+                self.s.event(so, '(');
+            }
+            self.s.open_branch();
+            self.enter_branch_scope();
+            return;
+        }
         if let Some(d) = dst {
             self.credit_merge_dst(d);
         }
@@ -678,84 +749,6 @@ impl CertScan {
     }
 }
 
-/// The value a DROP-family op releases (every recursive drop variant is the
-/// same single `d` on its object), or `None` for any other op.
-fn drop_family_value(op: &Op) -> Option<ValueId> {
-    match op {
-        Op::Drop { v }
-        | Op::DropListStr { v }
-        | Op::DropValue { v }
-        | Op::DropListValue { v }
-        | Op::DropListStrValue { v }
-        | Op::DropListStrStr { v }
-        | Op::DropListIntStr { v }
-        | Op::DropListStrInt { v }
-        | Op::DropResultListValue { v }
-        | Op::DropResultValue { v }
-        | Op::DropResultStrInt { v }
-        | Op::DropResultValueInt { v }
-        | Op::DropResultListValueInt { v }
-        | Op::DropResultListStrInt { v }
-        | Op::DropResultListStr { v }
-        | Op::DropListListStr { v }
-        | Op::DropVariant { v, .. }
-        | Op::DropWrapperRec { v, .. } => Some(*v),
-        _ => None,
-    }
-}
-
-/// The dst of an ALLOCATOR-CLASS prim — one that returns a fresh OWNED heap
-/// value the caller must balance, exactly like `Alloc`. Without the `i` these
-/// emit, the heap result would be an unbacked object the cert never opens and
-/// the verify_ownership/cert agreement breaks for the owning stdlib body.
-/// Every arg of every prim here is BORROWED (no cert event). The roster and
-/// what each allocates:
-/// `args_get_list` → `List[String]` (argv[1..]); `env_get` → `Option[String]`
-/// (a 0/1-slot block owning the value String when some); `read_text_file` →
-/// `Result[String, String]` (cap-as-tag, owns one payload String); `read_dir`
-/// → `Result[List[String], String]` (balanced by the recursive
-/// `DropResultListStr`); `write_text_file` / `make_dir` / `remove_all` →
-/// `Result[Unit, String]` (Ok carries NO payload, Err owns one message
-/// String); `read_line` / `read_n_bytes` → a fresh canonical `String` (flat
-/// `Drop` — a String owns no nested handles).
-fn alloc_class_prim_dst(op: &Op) -> Option<ValueId> {
-    match op {
-        // A native Result carrier birth (#4349): the mirror's alloc-class rule.
-        Op::Prim { kind, dst: Some(d), .. } if kind.births_native_carrier() => Some(*d),
-        Op::Prim {
-            kind:
-                PrimKind::ArgsGetList
-                | PrimKind::EnvGet
-                | PrimKind::ReadTextFile
-                | PrimKind::ReadBytesFile
-                | PrimKind::ReadDir
-                | PrimKind::WriteTextFile
-                | PrimKind::MakeDir
-                | PrimKind::RemoveAll
-                | PrimKind::Rename
-                | PrimKind::ReadLine
-                | PrimKind::ReadNBytes,
-            dst: Some(d),
-            ..
-        } => Some(*d),
-        _ => None,
-    }
-}
-
-/// The dst of a call op returning a HEAP result (any call form), or `None`.
-fn heap_call_dst(op: &Op) -> Option<ValueId> {
-    match op {
-        Op::Call { dst: Some(d), result: Some(r), .. }
-        | Op::CallFn { dst: Some(d), result: Some(r), .. }
-        | Op::CallImport { dst: Some(d), result: Some(r), .. }
-        | Op::CallIndirect { dst: Some(d), result: Some(r), .. }
-            if r.is_heap() =>
-        {
-            Some(*d)
-        }
-        _ => None,
-    }
-}
 
 include!("certificate_b_merge.rs");
 include!("certificate_b_tail.rs");

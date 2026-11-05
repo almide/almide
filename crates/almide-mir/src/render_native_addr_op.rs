@@ -68,6 +68,63 @@ pub(crate) fn render_addr_op(
     Ok(false)
 }
 
+thread_local! {
+    static CONST_LISTS: std::cell::RefCell<BTreeSet<ValueId>> = const { std::cell::RefCell::new(BTreeSet::new()) };
+}
+
+fn set_const_lists(s: BTreeSet<ValueId>) {
+    CONST_LISTS.with(|c| *c.borrow_mut() = s);
+}
+
+/// A constant string table of the function being rendered: borrowed from its
+/// static, so its release is nothing.
+pub(crate) fn is_const_list(v: ValueId) -> bool {
+    CONST_LISTS.with(|c| c.borrow().contains(&v))
+}
+
+/// The `Handle`s of reassigned locals that could go stale: some address
+/// derived from the handle (by an offset or `ElemAddr`) is read at or after a
+/// `SetLocal` of the local, or a loop edge lies between the handle and a read
+/// of it. Every other handle of a reassigned local reads the one value the
+/// local holds over the handle's whole live range, as its rendered variable does.
+fn stale_handles(func: &MirFunction) -> BTreeSet<ValueId> {
+    let set_at: Vec<(usize, ValueId)> = func
+        .ops
+        .iter()
+        .enumerate()
+        .filter_map(|(i, op)| match op {
+            Op::SetLocal { local, .. } => Some((i, *local)),
+            _ => None,
+        })
+        .collect();
+    let mut stale = BTreeSet::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        let Some((d, x)) = handle_of(op) else { continue };
+        let d = &d;
+        if !set_at.iter().any(|(_, l)| *l == x) {
+            continue;
+        }
+        // The handle and every address derived from it, and where each is last read.
+        let mut derived: BTreeSet<ValueId> = BTreeSet::from([*d]);
+        let mut last = i;
+        for (j, later) in func.ops.iter().enumerate().skip(i + 1) {
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(later, &mut reads);
+            if !reads.iter().any(|v| derived.contains(v)) {
+                continue;
+            }
+            last = j;
+            if let Op::IntBinOp { dst, op: IntOp::Add, .. } | Op::Prim { kind: PrimKind::ElemAddr, dst: Some(dst), .. } = later {
+                derived.insert(*dst);
+            }
+        }
+        let crosses = func.ops[i..=last].iter().any(|o| matches!(o, Op::LoopStart | Op::LoopEnd))
+            || set_at.iter().any(|(k, l)| *l == x && *k > i && *k <= last);
+        stale.extend(crosses.then_some(*d));
+    }
+    stale
+}
+
 /// The address-forming arms of [`render_addr_op`]: constants, a handle, the
 /// address arithmetic, and `ElemAddr`.
 fn addr_arith_op(op: &Op, used: &BTreeSet<ValueId>, s: AddrSink<'_>) -> Result<Option<bool>, LowerError> {
@@ -115,7 +172,7 @@ fn addr_handle(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bool, L
             if (is_block(t) && (st.addr_operands.contains(d) || st.stored.contains(d)))
                 || (matches!(t, NTy::Str | NTy::StrRef) && st.stored.contains(d)) =>
         {
-            if st.reassigned.contains(&x) {
+            if st.reassigned.contains(d) {
                 return Err(wall("native: a slot address of a reassigned local"));
             }
             st.addrs.insert(*d, Addr { base: x, off: 0, idx: None });
@@ -233,7 +290,7 @@ fn slot_load(s: AddrSink<'_>, width: &u8, d: &ValueId, args: &[ValueId]) -> Resu
         }
     }
     if *width == 8 && matches!(bt, Some(NTy::Vec | NTy::VecRef)) {
-        if let Some(ix) = slot_index(&ad) {
+        if let Some(ix) = slot_index(st, &ad) {
             let (guard, slot) = bounds_guard(st, &ad, &ix);
             if let Some(g) = guard {
                 line!("{g}");
@@ -266,7 +323,7 @@ fn slot_load_handle(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bo
             return load_handle_rec_field(AddrSink { st, tys, out, indent }, d, ad, k, f);
         }
     }
-    if let (Some(e), Some(ix)) = (list_of(ty(tys, &ad.base)), slot_index(&ad)) {
+    if let (Some(e), Some(ix)) = (list_of(ty(tys, &ad.base)), slot_index(st, &ad)) {
         if e != NTy::I64 {
             let (guard, slot) = bounds_guard(st, &ad, &ix);
             if let Some(g) = guard {
@@ -283,7 +340,7 @@ fn slot_load_handle(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bo
             return Ok(true);
         }
     }
-    match (ty(tys, &ad.base), slot_index(&ad)) {
+    match (ty(tys, &ad.base), slot_index(st, &ad)) {
         (Some(NTy::VecStr | NTy::VecStrRef), Some(ix)) => {
             let (guard, slot) = bounds_guard(st, &ad, &ix);
             if let Some(g) = guard {
@@ -397,13 +454,17 @@ fn slot_store(s: AddrSink<'_>, args: &[ValueId]) -> Result<bool, LowerError> {
     let AddrSink { st, tys, out, indent } = s;
     let ad = st.addrs[&args[0]];
     let v = args[1];
+    // A constant table's slot: already in its static.
+    if st.const_lists.contains_key(&ad.base) {
+        return Ok(true);
+    }
     if let (Some(i), Some(NTy::Rec(_)), Some(k)) = (is_enum(ty(tys, &ad.base)), ty(tys, &ad.base), rec_slot(&ad)) {
         return store_enum_slot(AddrSink { st, tys, out, indent }, ad, v, i, k);
     }
     if let (Some(NTy::Rec(i)), Some(k), None) = (ty(tys, &ad.base), rec_slot(&ad), list_of(ty(tys, &ad.base))) {
         return store_rec_field(AddrSink { st, tys, out, indent }, ad, v, i, k);
     }
-    let Some(ix) = slot_index(&ad) else {
+    let Some(ix) = slot_index(st, &ad) else {
         return Err(wall(format!("native: Store at {ad:?} — outside the slot algebra")));
     };
     store_list_slot(AddrSink { st, tys, out, indent }, ad, v, &ix)
@@ -449,6 +510,14 @@ fn store_enum_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
 }
 
 /// The record arm of [`slot_store`]: field `k` of record `i`.
+/// `d = handle(x)`: (d, x).
+fn handle_of(op: &Op) -> Option<(ValueId, ValueId)> {
+    match op {
+        Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } => Some((*d, *args.first()?)),
+        _ => None,
+    }
+}
+
 fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> Result<bool, LowerError> {
     let AddrSink { st, tys, out, indent } = s;
     macro_rules! line {
@@ -465,6 +534,13 @@ fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
         (f, Some(sv), _) if sv.off == 0 && sv.idx.is_none() => match ty(tys, &sv.base) {
             Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g)
                 .ok_or_else(|| wall("native: a record field write of an unowned kind"))?,
+            // `[]` into a field of another list type: that type's empty list.
+            Some(NTy::Vec)
+                if st.empty_lists.contains(&sv.base)
+                    && (f == NTy::VecStr || matches!(f, NTy::Rec(i) if crate::render_native_rec::list_elem(i).is_some())) =>
+            {
+                "Vec::new()".to_string()
+            }
             g => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
         },
         (f, _, g) => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
@@ -496,11 +572,33 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
             writeln!(out, $($arg)*).unwrap();
         }};
     }
-    if let (Some(NTy::Rec(_)), Some(e), Some(sv)) = (ty(tys, &ad.base), list_of(ty(tys, &ad.base)), st.addrs.get(&v).copied()) {
-        let g = ty(tys, &sv.base).filter(|g| sv.off == 0 && sv.idx.is_none() && field_accepts(e, *g));
-        let rhs = g.and_then(|g| owned_from(&var(sv.base), g)).ok_or_else(|| {
-            wall(format!("native: a {:?} element stored into a list of {e:?}", ty(tys, &sv.base)))
-        })?;
+    // A list of scalar Options takes the `Option<i64>` by value.
+    let by_value = |e: NTy| e == NTy::Opt && ty(tys, &v) == Some(NTy::Opt) && !st.addrs.contains_key(&v);
+    if let (Some(NTy::Rec(_)), Some(e)) = (ty(tys, &ad.base), list_of(ty(tys, &ad.base)).filter(|e| st.addrs.contains_key(&v) || by_value(*e))) {
+        let rhs = match st.addrs.get(&v).copied() {
+            None => var(v),
+            Some(sv) => {
+                let g = ty(tys, &sv.base).filter(|g| sv.off == 0 && sv.idx.is_none() && field_accepts(e, *g));
+                g.and_then(|g| owned_from(&var(sv.base), g)).ok_or_else(|| {
+                    wall(format!("native: a {:?} element stored into a list of {e:?}", ty(tys, &sv.base)))
+                })?
+            }
+        };
+        if let Some((n, k)) = st.literal.get(&ad.base).copied() {
+            let b = var(ad.base);
+            line!("let {b}_e{k}: {} = {rhs};", crate::render_native_rec::owned_ty(e));
+            st.literal.insert(ad.base, (n, k + 1));
+            if let Some(stored) = st.single_rec.get_mut(&ad.base) {
+                // Its one element waits for the append that pushes it.
+                *stored = true;
+                return Ok(true);
+            }
+            if k + 1 == n {
+                let es: Vec<String> = (0..n).map(|j| format!("{b}_e{j}")).collect();
+                line!("let mut {b}: {} = vec![{}];", owned_ty_of(ty(tys, &ad.base)), es.join(", "));
+            }
+            return Ok(true);
+        }
         if st.pushed.contains(&ad.base) {
             line!("{}.push({rhs});", var(ad.base));
             return Ok(true);

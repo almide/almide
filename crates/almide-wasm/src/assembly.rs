@@ -68,7 +68,13 @@ impl HelperLits {
 }
 
 /// The 37 fixed-slot helper bodies in F_* slot order, each with its RC signature.
-fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function, Option<HelperSig>)> {
+/// `ships` is the set of helpers the module reaches (`None`: placeholder
+/// bodies, built only to learn it): a helper's byte reads go into the bounds
+/// witness (#4005) only when its body ships.
+fn static_helpers(lit: &HelperLits, counters: Option<u32>, ships: Option<&std::collections::HashSet<u32>>) -> Vec<(u32, Function, Option<HelperSig>)> {
+    let rec = |idx: u32, body: fn() -> Function| {
+        if ships.is_some_and(|s| s.contains(&idx)) { body() } else { crate::witness::bounds::muted(body) }
+    };
     vec![
         (F_PRINTLN_BLOCK, emit_block_print(F_PRINTLN_IMPORT), None),
         (F_EPRINTLN_BLOCK, emit_block_print(F_EPRINTLN_IMPORT), None),
@@ -87,12 +93,12 @@ fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function
         (F_LIST_JOIN, emit_list_join(), None),
         (F_BLOCK_COPY, emit_block_copy(), None),
         (F_BUF_TO_BLOCK, emit_buf_to_block(), None),
-        (F_STR_LEN_CHARS, emit_str_len_chars(), None),
+        (F_STR_LEN_CHARS, rec(F_STR_LEN_CHARS, emit_str_len_chars), None),
         (F_SCAN_W64, emit_scan_w64(), None),
         (F_SCAN_W32, emit_scan_w32(), None),
         (F_SCAN_STR, emit_scan_str(), None),
         (F_F16_TO_F64, emit_f16_to_f64(), None),
-        (F_CP_OFF, emit_cp_off(), None),
+        (F_CP_OFF, rec(F_CP_OFF, emit_cp_off), None),
         (F_STR_SLICE, emit_str_slice(), None),
         (F_STR_REPEAT, emit_str_repeat(lit.repeat_msg), None),
         (F_STR_CMP, emit_str_cmp(), None),
@@ -157,7 +163,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // the literals of the helpers that ship are then interned BEFORE the
     // pool's length fixes the line buffer and heap base (#3114).
     let used = used_static_helpers(
-        &static_helpers(&HelperLits::default(), counters),
+        &static_helpers(&HelperLits::default(), counters, None),
         lowered
             .iter()
             .enumerate()
@@ -465,7 +471,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // edge set. The proven runtime core (the trees StructuralRuntime.v
     // grounds byte-for-byte: alloc, free, inc, dec_flat, cow) ships
     // unconditionally so the grounding gate keeps its subject.
-    let static_helpers = static_helpers(&lits, counters);
+    let static_helpers = static_helpers(&lits, counters, Some(&used));
     debug_assert!(
         static_helpers.iter().enumerate().all(|(i, (idx, _, _))| *idx == F_PRINTLN_BLOCK + i as u32),
         "static helper list must mirror the F_* slot order exactly"

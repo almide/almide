@@ -47,6 +47,7 @@ mod lambda_sigs;
 mod fan_native;
 mod render_native_addr;
 mod render_native_bounds;
+mod render_native_loops;
 mod render_native_closure;
 mod render_native_rec;
 mod render_native_append;
@@ -62,6 +63,7 @@ pub mod native_option_rewrite;
 pub mod native_result_str_rewrite;
 pub mod native_slot_rewrite;
 pub mod native_move_params;
+pub(crate) mod native_region_window;
 mod native_list_ops;
 mod native_narrow_rewrite;
 

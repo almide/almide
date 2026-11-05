@@ -61,8 +61,10 @@ else {
   0
 }
 
+@specializes("map.new")
 fn map_new_msv() -> Map[String, Map[String, String]] = prim.alloc_map_kv(0)
 
+@specializes("map.set")
 fn map_set_msv(m: Map[String, Map[String, String]], k: String, v: Map[String, String]) -> Map[String, Map[String, String]] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -115,6 +117,7 @@ fn __msv_remove_copy(sh: Int, rh: Int, n: Int, rn: Int, skip: Int, i: Int, j: In
     __msv_remove_copy(sh, rh, n, rn, skip, i + 1, j + 1)
   }
 
+@specializes("map.remove")
 fn map_remove_msv(m: Map[String, Map[String, String]], k: String) -> Map[String, Map[String, String]] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)

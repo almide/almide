@@ -214,6 +214,7 @@ fn list_sort_tss(xs: List[(Int, Int)]) -> List[(Int, Int)] = {
   buf
 }
 
+@specializes("list.sort")
 fn list_sort_lint(xs: List[List[Int]]) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -225,6 +226,7 @@ fn list_sort_lint(xs: List[List[Int]]) -> List[List[Int]] = {
   buf
 }
 
+@specializes("list.sort")
 fn list_sort_oint(xs: List[Int?]) -> List[Int?] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -287,6 +289,7 @@ fn __ordc_some_lint(h: Int, i: Int) -> List[Int]? = {
   some(x)
 }
 
+@specializes("list.min")
 fn list_min_lint(xs: List[List[Int]]) -> List[Int]? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -294,6 +297,7 @@ fn list_min_lint(xs: List[List[Int]]) -> List[Int]? = {
   else __ordc_some_lint(h, __exidx_lint(h, n, 1, 0, false))
 }
 
+@specializes("list.max")
 fn list_max_lint(xs: List[List[Int]]) -> List[Int]? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -308,6 +312,7 @@ fn __ordc_some_lstr(h: Int, i: Int) -> List[String]? = {
   some(x)
 }
 
+@specializes("list.min")
 fn list_min_lstr(xs: List[List[String]]) -> List[String]? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -315,6 +320,7 @@ fn list_min_lstr(xs: List[List[String]]) -> List[String]? = {
   else __ordc_some_lstr(h, __exidx_lstr(h, n, 1, 0, false))
 }
 
+@specializes("list.max")
 fn list_max_lstr(xs: List[List[String]]) -> List[String]? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)

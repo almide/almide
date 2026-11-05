@@ -72,6 +72,8 @@ else {
   __lts_fill_body(addr, count, i + 1, pos2)
 }
 
+@implements("list.__to_string_int")
+@specializes("list.__to_string_int")
 fn list_to_string(xs: List[Int]) -> String = {
   let h = prim.handle(xs)
   let count = prim.load32(h + 4)
