@@ -178,7 +178,7 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # 20, not the #2028 default 19: with the window the native row reads
     # ~60 ms at 19, under the spawn-noise floor; 20 reads ~120 ms / ~400 ms ref.
     "treealloc": "20",
-    # btrees ignores its argument: 12 x depth 19 is the fixed workload.
+    # btrees ignores its argument: 24 x depth 19 is the fixed workload.
     "btrees": "19",
     # 2000, not 1000: 1000 reads ~45 ms, under the spawn-noise floor.
     "mandelbrot": "2000",
