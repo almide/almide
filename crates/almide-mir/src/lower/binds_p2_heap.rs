@@ -4,7 +4,7 @@
 impl LowerCtx {
     /// The HEAP half of [`Self::lower_bind`]: the heap-`??` executable subset,
     /// then the fresh-vs-alias match over every heap producer. Verbatim text move.
-    fn lower_bind_heap(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+    pub(crate) fn lower_bind_heap(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         if self.try_lower_bind_heap_unwrap_or_precheck(var, ty, value)? {
             return Ok(());
         }

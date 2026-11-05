@@ -1,0 +1,14 @@
+// v1-vs-v0 shape bench: an anonymous record built in a list.map callback and
+// folded. The record has no declaration, so the certified render typed its
+// block from its stores and built every element as a heap `Vec<i64>`
+// inside a `Vec<Vec<i64>>`, where v0 uses a struct: 28x v0's instructions
+// at this size, under the large gate's 1M-instruction floor at the corpus's
+// sizes.
+type P = { x: Int, y: Int }
+
+fn main() -> Unit = {
+  let n = list.len(list.range(0, 200000))
+  let ps = list.range(0, n) |> list.map((i) => { x: i, y: i * 3 })
+  let s = ps |> list.fold(0, (acc, p) => acc + p.x + p.y)
+  println(int.to_string(s))
+}

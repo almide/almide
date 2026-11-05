@@ -1,0 +1,8 @@
+// v1-vs-v0 shape bench: `list.range(0, n) |> list.map(f) |> list.fold(..)`.
+// The range is iterated directly and the map fused into the fold: no list
+// at all. It read 3.0x v0 with the range and the mapped list materialized.
+fn main() -> Unit = {
+  let n = list.len(list.range(0, 200)) * 1000
+  let s = list.range(0, n) |> list.map((i) => i * 3) |> list.fold(0, (acc, y) => acc + y)
+  println(int.to_string(s))
+}

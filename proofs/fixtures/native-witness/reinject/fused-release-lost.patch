@@ -1,0 +1,30 @@
+diff --git a/crates/almide-mir/src/lower/defunc_hof_inner.rs b/crates/almide-mir/src/lower/defunc_hof_inner.rs
+index 147df3a95..755a84a58 100644
+--- a/crates/almide-mir/src/lower/defunc_hof_inner.rs
++++ b/crates/almide-mir/src/lower/defunc_hof_inner.rs
+@@ -320,8 +320,9 @@ impl LowerCtx {
+         if !cond_acc_handled {
+             self.store_defunc_iteration(func, &st, body_v)?;
+         }
++        // RE-INJECTED (#4006 drill): the fused element's release is lost.
+         if let Some(mark) = fused_mark {
+-            self.drop_arm_locals(mark);
++            self.live_heap_handles.truncate(mark);
+         }
+ 
+         // Advance the index and close the loop.
+diff --git a/crates/almide-mir/src/render_native.rs b/crates/almide-mir/src/render_native.rs
+index 433c1aa5d..c231273ad 100644
+--- a/crates/almide-mir/src/render_native.rs
++++ b/crates/almide-mir/src/render_native.rs
+@@ -209,6 +209,10 @@ use crate::render_native_shims::{
+ /// Drops from — the certificate that scope-end drop realizes it. A violation is
+ /// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
+ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
++    // RE-INJECTED (#4006 drill): the Rust mirror is bypassed.
++    if !func.name.is_empty() {
++        return Ok(());
++    }
+     let Err(violations) = crate::verify_ownership(func) else {
+         return Ok(());
+     };

@@ -118,6 +118,21 @@ wordfreq-group-native-wasm 0.39
 regexcycle-native 1.03
 regexcycle-wasm 1.07
 treealloc 0.343
+# btrees (rc4): treealloc's program with the depth a literal and no argument
+# read, so it renders whole on the certified native leg, region window
+# included. Runner reading on the bundle (PR #4488, job of b827ae775, 12
+# rounds): native 0.0674 s against 0.5981 s for the Box reference, a ratio
+# of 0.113, and 0.6649 s with ALMIDE_REGION_OFF=1, a delta of 9.87. The row
+# runs 24 rounds since (12 read under the 0.08 s floor); the runner's 24-round
+# reading (PR #4488, job of ed513feae) is 0.099, ablation 13.385, and the row
+# is anchored there. Ceiling 0.139 under the +40% rule; the claim (< 1.0) is
+# what develop before the bundle fails.
+# Negative control (GCE n2-standard-32, 2026-11-05): this script, the row and
+# this baseline run on develop before the bundle (07418260c) exit 1 on it:
+# btrees 1.500 (NOT FASTER) and ablation/btrees 0.995 (UNDER floor 1.30): the
+# certified render built every node with `Box`, so the region knob changed
+# nothing. treealloc read 0.227 in the same run, still on the standard codegen.
+btrees 0.099
 # `decode` (#1679) is reported and not anchored, like strchurn: N derived
 # `User.decode`s of one 8-field document against the same-shape hand-written
 # decode (`rust:decode`, borrowed field scan + owned `String` record fields).
@@ -154,6 +169,7 @@ fannkuchredux 0.326
 # gates a floor of 1.30 and prints the number — these rows are the record.
 ablation/binarytrees 3.600
 ablation/treealloc 3.700
+ablation/btrees 13.385
 # fannkuchredux (#2044): ALMIDE_FAN_SEQUENTIAL=1 native / parallel native,
 # same binary. M4 Pro: 5.1 (n=10) / 8.9 (n=11). The row is the runner's
 # median over the five runs above (#2300): 2.675 / 3.065 / 3.069 / 3.075 /
