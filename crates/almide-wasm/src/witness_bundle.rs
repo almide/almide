@@ -89,9 +89,11 @@ fn records_inner(
     let bounds_anchors = super::bounds::take_anchors();
     let judge_anchors = super::bounds::take_judges();
     let hold_anchors = super::bounds::take_holds();
+    let prim_anchors = super::bounds::take_prims();
+    let heap_params = super::bounds::take_heaps();
     let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids, rc_helpers) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
-    let seals = super::anchor::take();
+    let (seals, remaps) = super::anchor::take_all();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
 
     let mut records = Vec::new();
@@ -122,7 +124,7 @@ fn records_inner(
     let anchor_file = match fmap {
         None => String::new(),
         Some(fmap) => {
-    let locate = Locator::new(emitted, shipped, seals, fmap)?;
+    let locate = Locator::new(emitted, shipped, seals, remaps, fmap)?;
     format!(
         "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\nfields {}\njudges {}\nholds {}\n",
         {
@@ -139,6 +141,11 @@ fn records_inner(
         locate.text(&pick(judge_anchors))?,
         locate.text(&pick(hold_anchors))?,
     ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, RcRecords { arms: &rc_arms, routines: &rc_routines, window_ids: &rc_window_ids, helpers: &rc_helpers })?
+        // #4005 A4: every self-host prim access the pass emitted, located.
+        + &format!("prims {}\n", locate.text(&pick(prim_anchors))?)
+        // #4005 A4: each self-host body's heap-typed parameters, by its
+        // shipped position (a body that did not ship is left out).
+        + &format!("selfhost {}\n", locate.heaps(&pick(heap_params)))
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -243,6 +250,15 @@ fn rc_lines(
                     None => Some(t.to_string()),
                 })
                 .collect();
+            // A body the self-tail-call loop conversion rewrote after sealing
+            // records each carried local's release at the loop-back, where
+            // the bytes hold none (witness_hooks.rs `witness_loop_back`):
+            // the rc translation check has no rule for that yet, so its
+            // frame is left out, as it was before the body's anchors were
+            // retargeted.
+            if locate.rewritten(*k) {
+                return None;
+            }
             locate.position(*k).map(|j| format!("{j}|{}", ev.join(" ")))
         })
         .collect();
@@ -284,6 +300,9 @@ struct Locator {
     ords: std::collections::HashMap<usize, Vec<usize>>,
     /// Emitted global index -> shipped, read off the paired bodies.
     globals: std::collections::HashMap<u32, u32>,
+    /// Per serial of a body rewritten after sealing (tco.rs), its recorded
+    /// end offsets -> the rewritten body's (witness_anchor.rs `retarget`).
+    remaps: std::collections::HashMap<u64, std::collections::HashMap<usize, usize>>,
 }
 
 /// Each emitted instruction's index in the shipped body: the two walk in
@@ -351,6 +370,7 @@ impl Locator {
         emitted: &[u8],
         shipped: &[u8],
         seals: std::collections::HashMap<u64, u64>,
+        remaps: std::collections::HashMap<u64, std::collections::HashMap<usize, usize>>,
         fmap: &[Option<u32>],
     ) -> Result<Self, String> {
         let em = bodies(emitted)?;
@@ -374,13 +394,19 @@ impl Locator {
                 ords.insert(i, align(&em[i].0, sraw, &mut globals)?);
             }
         }
-        Ok(Locator { pos, ends: em.into_iter().map(|(_, e)| e).collect(), ships_at: fmap.to_vec(), ords, globals })
+        Ok(Locator { pos, ends: em.into_iter().map(|(_, e)| e).collect(), ships_at: fmap.to_vec(), ords, globals, remaps })
     }
 
     /// Body `serial`'s instructions between byte offsets `from` and `to`, as
     /// `(shipped position, first ordinal, last ordinal)` in the shipped body;
     /// `None` for a body that did not ship or an empty window.
+    /// Only rc reads windows, and a rewritten body's rc frame is left out
+    /// (`rc_lines`), so its windows are too.
     fn window(&self, serial: u64, from: usize, to: usize) -> Option<(u32, usize, usize)> {
+        if self.rewritten(serial) {
+            return None;
+        }
+        let (from, to) = (self.remap(serial, from)?, self.remap(serial, to)?);
         let &i = self.pos.get(&serial)?;
         let j = self.ships_at[i]?;
         let ends = &self.ends[i];
@@ -406,14 +432,39 @@ impl Locator {
         }
     }
 
+    /// `serial:params` tokens as `position:params`, the bodies that shipped.
+    fn heaps(&self, w: &str) -> String {
+        w.split_whitespace()
+            .filter_map(|t| {
+                let (k, ps) = t.split_once(':')?;
+                Some(format!("{}:{ps}", self.position(k.parse().ok()?)?))
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Was body `serial` rewritten after sealing (tco.rs)?
+    fn rewritten(&self, serial: u64) -> bool {
+        self.remaps.contains_key(&serial)
+    }
+
     /// The shipped position of body `serial`, when it shipped.
     fn position(&self, serial: u64) -> Option<u32> {
         self.pos.get(&serial).and_then(|&i| self.ships_at[i])
     }
 
+    /// A recorded end offset of body `serial` in the body that shipped.
+    fn remap(&self, serial: u64, off: usize) -> Option<usize> {
+        match self.remaps.get(&serial) {
+            Some(m) => m.get(&off).copied(),
+            None => Some(off),
+        }
+    }
+
     fn token(&self, t: &str) -> String {
         let Some((k, off)) = t.split_once('@') else { return "-".to_string() };
         let (Ok(k), Ok(off)) = (k.parse::<u64>(), off.parse::<usize>()) else { return "?".to_string() };
+        let Some(off) = self.remap(k, off) else { return "?".to_string() };
         let Some(&i) = self.pos.get(&k) else { return "-".to_string() };
         let Some(j) = self.ships_at[i] else { return "-".to_string() };
         match self.ends[i].iter().position(|&e| e == off) {

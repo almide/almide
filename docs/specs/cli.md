@@ -1306,6 +1306,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_IR_FAULT=value` | route | inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary (a release build honours it only with `--allow-switch ALMIDE_IR_FAULT`, #4129) |
 | `ALMIDE_KEEP_BUNDLED_FNS` | ablation | keep every function of a loaded bundled stdlib module instead of only the ones the program reaches (#4328) — the A/B switch for the reach pruning |
 | `ALMIDE_KEEP_SCRATCH` | tool | keep the `almide test` scratch build directory instead of deleting it |
+| `ALMIDE_LINK_ALL_SELF_HOST` | instrument | link EVERY registered self-host body into a structural wasm build (src/wasm_leg.rs `link_self_host`), so the emitter lowers them all — the census of what any program could link (#4005, with `ALMIDE_PRIM_SHAPE_LOG`); the program's reachability still prunes what ships |
 | `ALMIDE_LSP_TRACE` | debug | print every LSP request and response the language server handles |
 | `ALMIDE_MANIFEST_TREE_CHECK=value` | ci | the parity-manifest generators' stale-tree refusal (#2405, scripts/lib/oracle-header.sh): `strict` (default) refuses an ORACLE that is not `<Cargo.toml version> (dev…)`, is stamped with a commit other than HEAD, or is unstamped and older than the sources; a worktree behind its upstream; and an untracked spec/ fixture. `gate` keeps only the untracked-fixture check (scripts/check-parity-goldens.sh vouches for CI's artifact). `off` is the deliberate override |
 | `ALMIDE_MONO_DEBUG` | debug | print the monomorphisation discovery and instantiation decisions |
@@ -1328,6 +1329,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_ORG_DIR=value` | ci | the checkout directory of the org repos the cross-repo verification scripts walk |
 | `ALMIDE_P3_HTTP_STOP=value` | ablation | make the p3 http shim answer its static error right after stage N of the request build (1..=5), to localise a hang |
 | `ALMIDE_PASS_EDGES=value` | harness | extra `A<B` pass-order edges (comma-separated) the shuffle honours — the bisection instrument that names the pair a shuffle divergence needs declared |
+| `ALMIDE_PRIM_SHAPE_LOG=value` | debug | append the address shape of every self-host `prim` load and store the structural wasm emitter lowers or declines to the file named by the value (crates/almide-wasm/src/prim_shape.rs, #4005) |
 | `ALMIDE_PROBE_DUMP=value` | harness | the path the heap probe writes its emitted wasm to |
 | `ALMIDE_PROBE_IR=value` | harness | the path the heap probe writes its lowered IR to |
 | `ALMIDE_PROBE_OUT=value` | harness | the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr |
