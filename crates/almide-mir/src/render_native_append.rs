@@ -34,18 +34,34 @@ use std::collections::BTreeMap;
 /// `ops[i]`, by shape alone — the window [`str_self_append`] may render as
 /// `s.push_str(x)`, which writes `s` while it reads `x`.
 pub(crate) fn self_append_window(func: &MirFunction, i: usize) -> Option<(ValueId, ValueId, ValueId)> {
-    // The old value's drop is `Drop`, or `DropListStr` for a list that owns
-    // its heap elements (a `List[String]` accumulator).
-    let [Op::CallFn { dst: Some(d), name, args, .. }, Op::Drop { v } | Op::DropListStr { v }, Op::SetLocal { local, src }] =
-        func.ops.get(i..i + 3)?
-    else {
+    // The old value's drop is `Drop`, or the typed drop of a list that owns
+    // its heap elements (a `List[String]`, a list of lists, records,
+    // variants or `Value`s): every one of them erases to scope end here.
+    let [Op::CallFn { dst: Some(d), name, args, .. }, drop, Op::SetLocal { local, src }] = func.ops.get(i..i + 3)? else {
         return None;
     };
+    let v = list_drop_of(drop)?;
     let [CallArg::Handle(s), CallArg::Handle(x)] = args.as_slice() else {
         return None;
     };
     let concat = name == "__str_concat" || crate::native_list_ops::is_list_concat(name);
     (concat && v == s && local == s && src == d && x != s).then_some((*s, *x, *d))
+}
+
+/// The value a drop of a list (or of a string, by `Drop`) releases.
+fn list_drop_of(op: &Op) -> Option<&ValueId> {
+    match op {
+        Op::Drop { v }
+        | Op::DropListStr { v }
+        | Op::DropListListStr { v }
+        | Op::DropListValue { v }
+        | Op::DropListStrValue { v }
+        | Op::DropListStrStr { v }
+        | Op::DropListIntStr { v }
+        | Op::DropListStrInt { v } => Some(v),
+        Op::DropVariant { v, ty } if ty.starts_with("list_") => Some(v),
+        _ => None,
+    }
 }
 
 /// The `s.push_str(…)` line for the window opening at `ops[i]`, or `None`
