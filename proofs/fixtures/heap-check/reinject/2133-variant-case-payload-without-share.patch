@@ -1,11 +1,11 @@
 diff --git a/crates/almide-wasm/src/data.rs b/crates/almide-wasm/src/data.rs
-index 6ef895f8a..f4accdf72 100644
+index e11cc111a..cea21c868 100644
 --- a/crates/almide-wasm/src/data.rs
 +++ b/crates/almide-wasm/src/data.rs
-@@ -464,26 +464,16 @@ impl Emitter<'_> {
-                         .local_tee(hold)
-                         .i32_const(tag as i32)
-                         .i32_store(slot_memarg(almide_layout::SUM_TAG));
+@@ -479,19 +479,10 @@ impl Emitter<'_> {
+                     let site = self.fw_site(ty, case);
+                     self.f.instructions().i32_const(tag as i32).i32_store(slot_memarg(almide_layout::SUM_TAG));
+                     self.fw_store(site, 0);
 -                    // Every handle store into a block takes the RC-3 share
 -                    // guard, exactly as the record branch below does. Without
 -                    // it a `let`-bound list moved into a case payload was
@@ -14,18 +14,19 @@ index 6ef895f8a..f4accdf72 100644
 -                    // case held a dangling block — `Supported { matched:
 -                    // checked }` printed freed memory where native printed
 -                    // the elements (#2133).
-                     for (fty, off, d) in defaults {
+                     for (fty, off, d, k) in defaults {
                          self.f.instructions().local_get(hold);
                          self.witness_record_default(&d);
                          self.lower(&d, Some(fty))?;
 -                        self.rc_share_guard(&d, fty);
                          self.witness_store(&d, fty);
                          self.store_ty_slot(fty, off);
-                     }
-                     for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                         self.fw_store(site, k + 1);
+@@ -499,7 +490,6 @@ impl Emitter<'_> {
+                     for ((_, fexpr), (fty, off, k)) in fields.iter().zip(slots) {
                          self.f.instructions().local_get(hold);
                          self.lower(fexpr, Some(fty))?;
 -                        self.rc_share_guard(fexpr, fty);
                          self.witness_store(fexpr, fty);
                          self.store_ty_slot(fty, off);
-                     }
+                         self.fw_store(site, k + 1);
