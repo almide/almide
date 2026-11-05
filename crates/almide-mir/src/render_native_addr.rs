@@ -142,6 +142,7 @@ impl AddrState {
         note_signature_recs(func, sigs, &mut alloc_rec);
         note_carrier_recs(func, sigs, &mut alloc_rec);
         note_join_recs(func, &mut alloc_rec);
+        heap_slot::note_heap_slot_recs(func, &mut alloc_rec);
         let (handle_of, consts, base_of) = block_bases(func);
         // The untyped blocks, typed from their stores and the declarations
         // that consume them, in one fixpoint (render_native_slots.rs).

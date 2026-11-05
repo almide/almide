@@ -79,3 +79,30 @@ pub(super) fn render_heap_slot_op(
         _ => None,
     }
 }
+
+/// A block stored into a heap slot holds the slot's declared type (a record
+/// rebuilt with one field changed, `g.n = g.n + 1`): a type-bearing op, like
+/// a typed return or argument.
+pub(super) fn note_heap_slot_recs(func: &crate::MirFunction, alloc_rec: &mut BTreeMap<ValueId, u16>) {
+    let base = i64::from(crate::mg_slot_addr(0));
+    let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
+    let mut handles: BTreeMap<ValueId, ValueId> = BTreeMap::new();
+    for op in &func.ops {
+        match op {
+            Op::ConstInt { dst, value } => {
+                consts.insert(*dst, *value);
+            }
+            Op::Prim { kind: PrimKind::Handle, dst: Some(h), args } if args.len() == 1 => {
+                handles.insert(*h, args[0]);
+            }
+            Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 => {
+                let Some(a) = consts.get(&args[0]).copied().filter(|a| *a >= base && (*a - base) % 8 == 0) else { continue };
+                let Ok(slot) = u32::try_from((a - base) / 8) else { continue };
+                if let (Some(NTy::Rec(i)), Some(x)) = (crate::native_slot_rewrite::heap_slot(slot), handles.get(&args[1])) {
+                    alloc_rec.entry(*x).or_insert(i);
+                }
+            }
+            _ => {}
+        }
+    }
+}
