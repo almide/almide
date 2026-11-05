@@ -442,8 +442,11 @@ impl CarrierCx<'_> {
             }
             // The last read of an owned carrier's payload moves it out
             // (render_native_slots::movable_loads): nothing reads it again.
+            // A by-value match, not `.take()`: `take` writes `None` back
+            // through `mem::replace`, whose pointer checks the program's
+            // debug-assertion profile keeps (string_index_loop, 1.037x v0).
             if self.st.moves_last.contains(&d) && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_))) {
-                (p, format!("match {b}.take() {{ Some(v) => v, None => Default::default() }}"))
+                (p, format!("match {b} {{ Some(v) => v, None => Default::default() }}"))
             } else {
                 (p, format!("match &{b} {{ Some(v) => v.clone(), None => Default::default() }}"))
             }

@@ -55,21 +55,21 @@ pub(crate) fn iterator_loops(out: String) -> String {
 }
 
 /// A `// …` line of the render.
-fn is_note(l: &str) -> bool {
+pub(crate) fn is_note(l: &str) -> bool {
     l.trim_start().starts_with("//")
 }
 
-fn indent_of(l: &str) -> usize {
+pub(crate) fn indent_of(l: &str) -> usize {
     l.len() - l.trim_start().len()
 }
 
 /// `vNNN` (the render's value names) and nothing else.
-fn is_var(s: &str) -> bool {
+pub(crate) fn is_var(s: &str) -> bool {
     s.len() > 1 && s.starts_with('v') && s[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Does `text` mention variable `v` as a whole word?
-fn mentions(text: &str, v: &str) -> bool {
+pub(crate) fn mentions(text: &str, v: &str) -> bool {
     let b = text.as_bytes();
     let mut from = 0;
     while let Some(k) = text[from..].find(v) {

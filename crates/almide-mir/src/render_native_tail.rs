@@ -46,7 +46,7 @@ fn finish_native_fn(
         out.push('\n');
     }
     out.push_str("}\n");
-    let mut out = crate::render_native_loops::iterator_loops(drop_unread_static_strs(out));
+    let mut out = crate::render_native_or_else::option_or_else(crate::render_native_loops::iterator_loops(drop_unread_static_strs(out)));
     let ret_nty = if lifted_wrap { Some(NTy::Res) } else { func.ret.map(|v| tys[&v]) };
     // T1-1: patch every strict-cut marker with the now-known typed default
     // (never observed — the region verdict is Err by the time a cut fires).
