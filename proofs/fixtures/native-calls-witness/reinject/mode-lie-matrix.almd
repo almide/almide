@@ -1,0 +1,18 @@
+// #4006 class P reinjection drill (scripts/witness-reinject.sh native-calls),
+// on a Matrix param (the runtime `AlmideMatrix` the native render carries):
+// MODE LIE: `keep` claims its matrix as a move param while every caller keeps
+// borrowing it. Unpatched, `keep` takes its matrix over (a move param); `grow`
+// hands its matrix to it at every call.
+fn keep(m: Matrix) -> Matrix = m
+
+fn grow(n: Int) -> Matrix = {
+  var m = matrix.ones(2, 2)
+  var i = 0
+  while i < n {
+    m = keep(matrix.scale(m, 2.0))
+    i = i + 1
+  }
+  m
+}
+
+fn main() -> Unit = println(int.to_string(matrix.rows(grow(3))))

@@ -29,6 +29,7 @@ else {
   else __list_str_index(h, len, x, i + 1)
 }
 
+@specializes("list.contains")
 fn list_contains_str(xs: List[String], x: String) -> Bool = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -41,6 +42,7 @@ fn __lis_none() -> Int? = none
 
 fn __lis_some(i: Int) -> Int? = some(i)
 
+@specializes("list.index_of")
 fn list_index_of_str(xs: List[String], x: String) -> Int? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -60,6 +62,7 @@ fn __list_str_count_hits(h: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) 
     else __list_str_count_hits(h, f, n, i + 1, acc)
   }
 
+@specializes("list.any")
 fn list_any_str(xs: List[String], f: (String) -> Bool) -> Bool = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -67,6 +70,7 @@ fn list_any_str(xs: List[String], f: (String) -> Bool) -> Bool = {
   hits > 0
 }
 
+@specializes("list.all")
 fn list_all_str(xs: List[String], f: (String) -> Bool) -> Bool = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -74,6 +78,7 @@ fn list_all_str(xs: List[String], f: (String) -> Bool) -> Bool = {
   hits >= n
 }
 
+@specializes("list.count")
 fn list_count_str(xs: List[String], f: (String) -> Bool) -> Int = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -90,6 +95,7 @@ fn __list_str_fold_loop(h: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: In
     __list_str_fold_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_str(xs: List[String], init: Int, f: (Int, String) -> Int) -> Int = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -119,6 +125,7 @@ fn __list_find_str_loop(h: Int, f: (String) -> Bool, n: Int, i: Int) -> String? 
   if i >= n then __lfs_none()
   else __list_find_str_at(h, f, n, i)
 
+@specializes("list.find")
 fn list_find_str(xs: List[String], f: (String) -> Bool) -> String? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -152,6 +159,7 @@ fn __unique_str_step(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = {
 fn __unique_str_fill(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = if i >= n then di
 else __unique_str_step(sh, dh, n, i, di)
 
+@specializes("list.unique")
 fn list_unique_str(xs: List[String]) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -185,6 +193,7 @@ fn __dedup_str_step(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = {
 fn __dedup_str_fill(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = if i >= n then di
 else __dedup_str_step(sh, dh, n, i, di)
 
+@specializes("list.dedup")
 fn list_dedup_str(xs: List[String]) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -215,6 +224,7 @@ fn __intersperse_fill(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, 
   if i >= n then di
   else __intersperse_step(sh, oh, sep, n, last, i, di)
 
+@specializes("list.intersperse")
 fn list_intersperse_str(xs: List[String], sep: String) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)

@@ -1,0 +1,40 @@
+diff --git a/crates/almide-mir/src/native_move_params.rs b/crates/almide-mir/src/native_move_params.rs
+index 6586cffa1..e5a98712b 100644
+--- a/crates/almide-mir/src/native_move_params.rs
++++ b/crates/almide-mir/src/native_move_params.rs
+@@ -105,7 +105,8 @@ fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Option<MirFu
+     for i in at.into_iter().rev() {
+         f.ops.remove(i);
+     }
+-    crate::verify_ownership(&f).is_ok().then_some(f)
++    // RE-INJECTED (#4006 class P drill): the Rust mirror is bypassed.
++    Some(f)
+ }
+ 
+ /// Whether the caller can move `v` into the call at `call` without a copy:
+@@ -162,6 +163,10 @@ fn next_value(func: &MirFunction) -> u32 {
+ /// Hand every owned-parameter argument of `func`'s calls over at the call.
+ fn move_at_sites(func: &MirFunction, owned: &BTreeMap<String, Vec<bool>>) -> MirFunction {
+     let mut f = func.clone();
++    // RE-INJECTED (#4006 class P drill): the callee takes its param over, the callers keep borrowing.
++    if !f.name.is_empty() {
++        return f;
++    }
+     let mut fresh = next_value(&f);
+     let mut i = 0;
+     while i < f.ops.len() {
+diff --git a/crates/almide-mir/src/render_native.rs b/crates/almide-mir/src/render_native.rs
+index 2fd446586..1d39ae3ef 100644
+--- a/crates/almide-mir/src/render_native.rs
++++ b/crates/almide-mir/src/render_native.rs
+@@ -195,6 +195,10 @@ use crate::render_native_shims::{
+ /// Drops from — the certificate that scope-end drop realizes it. A violation is
+ /// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
+ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
++    // RE-INJECTED (#4006 drill): the Rust mirror is bypassed.
++    if !func.name.is_empty() {
++        return Ok(());
++    }
+     let Err(violations) = crate::verify_ownership(func) else {
+         return Ok(());
+     };

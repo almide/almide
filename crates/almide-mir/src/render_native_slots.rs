@@ -80,6 +80,8 @@ fn call_result(name: &str, sigs: &NativeSigs) -> Option<NTy> {
         FloorRet::ListInt => Some(NTy::Vec),
         FloorRet::ListStr => Some(NTy::VecStr),
         FloorRet::Bytes => Some(NTy::Rec(rec::bytes_index())),
+        FloorRet::Value => Some(NTy::Rec(rec::value_index())),
+        FloorRet::Matrix => Some(NTy::Rec(rec::matrix_index())),
         _ => None,
     }
 }
@@ -197,6 +199,9 @@ impl BlockTyping<'_, '_> {
         match op {
             Op::Alloc { dst, init: Init::Str(_) | Init::DynStr { .. }, .. } => {
                 self.known.insert(*dst, NTy::Str);
+            }
+            Op::Prim { kind: PrimKind::OptMakeSome | PrimKind::OptMakeNone | PrimKind::OptCopy, dst: Some(d), .. } => {
+                self.known.insert(*d, NTy::Opt);
             }
             Op::Alloc { dst, init: Init::IntList(_), .. } | Op::ListLit { dst, .. } if !self.alloc_rec.contains_key(dst) => {
                 self.known.insert(*dst, NTy::Vec);
@@ -328,6 +333,20 @@ impl BlockTyping<'_, '_> {
                 self.known.entry(*d).or_insert(t);
             }
         }
+        // A list concatenation is a list of its left operand's kind.
+        for op in &func.ops {
+            let Op::CallFn { dst: Some(d), name, args, .. } = op else { continue };
+            let Some(crate::CallArg::Handle(l)) = args.first() else { continue };
+            if !crate::native_list_ops::is_list_concat(name) {
+                continue;
+            }
+            let t = self.kind_of(l).map(owned);
+            if let Some(t @ (NTy::Vec | NTy::VecStr)) = t {
+                self.known.entry(*d).or_insert(t);
+            } else if let Some(NTy::Rec(i)) = t.filter(|t| matches!(t, NTy::Rec(i) if rec::list_elem(*i).is_some())) {
+                self.alloc_rec.entry(*d).or_insert(i);
+            }
+        }
     }
 
     /// The (slot, kind) of every store into block `r`; `None` when some
@@ -342,6 +361,8 @@ impl BlockTyping<'_, '_> {
                 continue;
             }
             let k = match self.f.handle_of.get(&args[1]) {
+                // A scalar Option stored by value (`native_option_rewrite`).
+                None if self.known.get(&args[1]) == Some(&NTy::Opt) => Some(NTy::Opt),
                 None => Some(NTy::I64),
                 Some(src) => self.kind_of(src).map(owned),
             };

@@ -36,6 +36,7 @@ else {
   __enum_fill_h(dh, sh, n, i + 1)
 }
 
+@specializes("list.enumerate")
 fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -50,6 +51,7 @@ fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = {
 // enumerate_str; the split name exists so the caller's result-drop
 // classification keys the deep class (`$__drop_list_int_<V>`, which recurses
 // into slot1 @20 — the flat DropListStr sweep would leak each element's tree).
+@specializes("list.enumerate")
 fn list_enumerate_h(xs: List[List[Int]]) -> List[(Int, List[Int])] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -110,6 +112,7 @@ else {
   __zip_fill_rca(dh, ha, hb, n, i + 1)
 }
 
+@specializes("list.zip")
 fn list_zip_sh(a: List[Int], b: List[List[Int]]) -> List[(Int, List[Int])] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -121,6 +124,7 @@ fn list_zip_sh(a: List[Int], b: List[List[Int]]) -> List[(Int, List[Int])] = {
   out
 }
 
+@specializes("list.zip")
 fn list_zip_hs(a: List[List[Int]], b: List[Int]) -> List[(List[Int], Int)] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -136,6 +140,7 @@ fn list_zip_hs(a: List[List[Int]], b: List[Int]) -> List[(List[Int], Int)] = {
 // layout-agnostic (a nested-heap handle is ONE i32 whatever it points at — the
 // C-172 pattern), so the share discipline is IDENTICAL to zip_rc; the split
 // name exists so the caller's result-drop classification keys the deep class.
+@specializes("list.zip")
 fn list_zip_h(a: List[List[Int]], b: List[List[Int]]) -> List[(List[Int], List[Int])] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -147,6 +152,7 @@ fn list_zip_h(a: List[List[Int]], b: List[List[Int]]) -> List[(List[Int], List[I
   out
 }
 
+@specializes("list.zip")
 fn list_zip_rc(a: List[List[Int]], b: List[List[Int]]) -> List[(List[Int], List[Int])] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)

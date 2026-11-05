@@ -10,6 +10,7 @@ else {
   __revstr_fill(dh, sh, n, i + 1)
 }
 
+@specializes("list.reverse")
 fn list_reverse_str(xs: List[String]) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)

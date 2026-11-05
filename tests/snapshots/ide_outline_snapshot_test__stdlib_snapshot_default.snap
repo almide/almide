@@ -102,6 +102,10 @@ fn string.zip[B](s: String, ys: List[B]) -> List[(String, B)]
 fn string.zip_with[B, C](s: String, ys: List[B], f: fn(String, B) -> C) -> List[C]
 
 # @stdlib/list
+fn list.__eq_bool(a: List[Bool], b: List[Bool]) -> Bool
+fn list.__eq_float(a: List[Float], b: List[Float]) -> Bool
+fn list.__eq_int(a: List[Int], b: List[Int]) -> Bool
+fn list.__eq_str(a: List[String], b: List[String]) -> Bool
 fn list.__fallible_all[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
 fn list.__fallible_any[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
 fn list.__fallible_binary_search_by[A, K, E](xs: List[A], target: K, f: fn(A) -> Result[K, E]) -> Result[Option[Int], E]
@@ -141,6 +145,10 @@ fn list.__pick_with_fallible[A, E](xs: List[A], cmp: fn(A, A) -> Result[Int, E],
 fn list.__product_int(xs: List[Int]) -> Int
 fn list.__search_fallible[A, E](xs: List[A], order: fn(A) -> Result[Int, E]) -> Result[Option[Int], E]
 fn list.__sum_int(xs: List[Int]) -> Int
+fn list.__to_string_bool(xs: List[Bool]) -> String
+fn list.__to_string_float(xs: List[Float]) -> String
+fn list.__to_string_int(xs: List[Int]) -> String
+fn list.__to_string_str(xs: List[String]) -> String
 fn list.all[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.any[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.binary_search[A](xs: List[A], target: A) -> Option[Int]

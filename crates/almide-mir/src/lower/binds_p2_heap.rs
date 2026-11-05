@@ -418,6 +418,10 @@ impl LowerCtx {
             self.deferred_opaque_binds.insert(dst);
         }
         self.value_of.insert(var, dst);
+        // An empty container's declared type, for the native render (#4006).
+        if matches!(init, crate::Init::Empty) {
+            self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(&value.ty));
+        }
         self.ops.push(Op::Alloc { dst, repr, init });
         self.live_heap_handles.push(dst);
         self.record_elided_calls(value);

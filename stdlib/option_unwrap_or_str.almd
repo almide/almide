@@ -14,6 +14,7 @@ fn __ouos_some(h: Int) -> String = {
   string.repeat(s, 1)
 }
 
+@specializes("option.unwrap_or")
 fn option_unwrap_or_str(o: String?, default: String) -> String = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)

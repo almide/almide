@@ -135,6 +135,12 @@ pub fn almide_rt_bytes_zeros(len: i64) -> Vec<u8> {
     v
 }
 pub fn almide_rt_bytes_push(b: &mut Vec<u8>, val: i64) { b.push(val as u8); }
+// The functional push (`bytes.__append`): a fresh copy of `b` with `val`'s low 8 bits appended.
+pub fn almide_rt_bytes_append_fresh(b: &Vec<u8>, val: i64) -> Vec<u8> { let mut r = Vec::with_capacity(b.len() + 1); r.extend_from_slice(b); r.push(val as u8); r }
+// Its owned twin (`@reuse(b)`): the source at its last use grows in place.
+#[inline(always)] pub fn almide_rt_bytes_append_fresh_owned(b: impl Into<Vec<u8>>, val: i64) -> Vec<u8> { let mut b = b.into(); b.push(val as u8); b }
+// The checked `b[pos]` (`bytes.__index`): out of range aborts as every index read does.
+pub fn almide_rt_bytes_index_checked(b: &Vec<u8>, pos: i64) -> i64 { if pos < 0 || pos as usize >= b.len() { eprintln!("Error: index out of bounds"); std::process::exit(1); } b[pos as usize] as i64 }
 // C-213: `copy_within` moves only when the source range is non-empty AND the
 // destination window fits; a window that does not fit — past the end, or a
 // NEGATIVE offset — is a silent no-op. The guard used to cast `dst as usize`

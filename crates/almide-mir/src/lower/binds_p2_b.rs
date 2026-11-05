@@ -531,6 +531,10 @@ impl LowerCtx {
         // unsupported value) is NOT tracked: indexing it would trap on cap 0.
         let real_list = matches!(init, Init::IntList(_));
         self.value_of.insert(var, dst);
+        // An empty container's declared type, for the native render (#4006).
+        if matches!(init, crate::Init::Empty) {
+            self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(&value.ty));
+        }
         self.ops.push(Op::Alloc { dst, repr, init });
         self.live_heap_handles.push(dst);
         if real_list {

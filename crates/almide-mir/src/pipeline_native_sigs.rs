@@ -175,11 +175,14 @@ fn native_rec_sig_kind(t: &almide_lang::types::Ty) -> Option<crate::render_nativ
         Ty::Named(_, _) if crate::render_native_rec::is_scalar_instance(t) => Some(NativeSigKind::ListI64),
         Ty::Named(_, _) => crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec),
         Ty::Bytes => Some(NativeSigKind::Rec(crate::render_native_rec::bytes_index())),
+        Ty::Matrix => Some(NativeSigKind::Rec(crate::render_native_rec::matrix_index())),
         // #4006: a heap Option / a Result outside the scalar carriers rides its
         // generated `Option<T>` / `Result<T, E>`.
         Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _) => heap_carrier_of(t).map(NativeSigKind::Rec),
         // A map rides v0's runtime `AlmideMap` (its generated alias).
         Ty::Applied(TypeConstructorId::Map, _) => native_map_of(t).map(NativeSigKind::Rec),
+        // A set of Int or String rides v0's runtime `AlmideSet` (its alias).
+        Ty::Applied(TypeConstructorId::Set, _) => native_set_of(t).map(NativeSigKind::Rec),
         Ty::Tuple(_) | Ty::Record { .. } | Ty::Applied(TypeConstructorId::List, _) => {
             crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec)
         }

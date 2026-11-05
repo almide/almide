@@ -12,6 +12,7 @@ fn __enum_str_rec(xs: List[String], i: Int, n: Int, acc: List[(Int, String)]) ->
     __enum_str_rec(xs, i + 1, n, acc + [(i, line)])
   }
 
+@specializes("list.enumerate")
 fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = __enum_str_rec(
   xs,
   0,

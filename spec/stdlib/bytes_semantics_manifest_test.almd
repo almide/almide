@@ -1491,6 +1491,14 @@ test "bytes.__read_i16_le unit=value" {
   )
 }
 
+test "bytes.__append unit=byte-value" {
+  assert_eq("${bytes.to_list(bytes.__append(bytes.from_list([1, 2]), 259))}", "[1, 2, 3]")
+}
+
+test "bytes.__index unit=byte-offset" {
+  assert_eq("${bytes.__index(bytes.from_list([7, 8, 9]), 2)}", "9")
+}
+
 test "bytes.__read_u16_be unit=value" {
   assert_eq(
     "${bytes.__read_u16_be(

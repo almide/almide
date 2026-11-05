@@ -30,6 +30,8 @@ struct FnLoop<'a> {
     printed: std::collections::BTreeSet<usize>,
     scalar_defs: std::collections::BTreeSet<usize>,
     scalar_prints: BTreeMap<usize, (ValueId, bool)>,
+    /// The owned values released right after each op (`early_releases`).
+    early: BTreeMap<usize, Vec<ValueId>>,
 }
 
 fn render_fn(
@@ -89,6 +91,7 @@ fn render_fn(
     crate::render_native_move::set_stack_lits(func, &user_fns.keys().copied().collect());
     let printed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     let (scalar_defs, scalar_prints) = crate::render_native_interp::printed_scalars(func);
+    let early = early_releases(func, &chains);
     let mut st = FnLoop {
         func,
         user_fns,
@@ -105,12 +108,34 @@ fn render_fn(
         printed,
         scalar_defs,
         scalar_prints,
+        early,
     };
     // The op iterator runs over the loop state's own view of the function, so
     // a phase that consumes ops ahead (`ops.nth(..)`) shares its lifetime.
     let loop_func: &MirFunction = st.func;
     let mut ops = loop_func.ops.iter().enumerate();
     while let Some((i, op)) = ops.next() {
+        // An owned heap value whose last reader was the op before frees now,
+        // as v0's temporaries do at their statement's end, not at the end of
+        // the function its release was placed at: a long `main` would
+        // otherwise hold every dead buffer to its end. A plain move, so any
+        // later use the render made of it would be a compile error, never a
+        // silent read of an emptied value.
+        for v in st.early.get(&i).cloned().into_iter().flatten() {
+            let v = &v;
+            let owned = matches!(st.tys.get(v), Some(NTy::Str | NTy::VecStr | NTy::Vec | NTy::Rec(_)));
+            // (A value its last call moved in is gone already.)
+            let named = matches!(&func.ops[i - 1], Op::CallFn { args, .. } if args.iter().any(|a| matches!(a, crate::CallArg::Handle(x) if x == v)));
+            let moved = named && st.tys.get(v).is_some_and(|t| crate::render_native_move::moves_at_call(func, i - 1, *v, *t, &st.borrows.arms));
+            let gone = EARLY_DROPPED.with(|e| e.borrow().contains(v));
+            if owned && !moved && !gone && st.out.contains(&format!("let mut {}:", var(*v))) {
+                for _ in 0..st.indent {
+                    st.out.push_str("    ");
+                }
+                let _ = writeln!(st.out, "drop({});", var(*v));
+                EARLY_DROPPED.with(|e| e.borrow_mut().insert(*v));
+            }
+        }
         if render_fn_step(&mut st, i, op, &mut ops)? && flag_exits.contains(&i) {
             for _ in 0..st.indent {
                 st.out.push_str("    ");
@@ -218,6 +243,21 @@ fn render_chain_final(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerError>
         st.used_shims.push(crate::render_native_shims::PRINT_SHIMS);
         line!("{code}");
         return Ok(true);
+    }
+    // A chain whose head string dies here grows that string's own
+    // buffer, as v0's `AlmideConcat` consumes its owned left side.
+    if let Some(crate::render_native_interp::Piece::Str(head)) = pieces.first() {
+        let dies = chain_end(func, &st.chains, i).and_then(|e| st.early.get(&(e + 1))).is_some_and(|vs| vs.contains(head))
+            && st.tys.get(head) == Some(&NTy::Str)
+            && st.out.contains(&format!("let mut {}:", var(*head)))
+            && !pieces[1..].iter().any(|p| matches!(p, crate::render_native_interp::Piece::Str(x) if x == head));
+        if let Some(rest) = dies.then(|| crate::render_native_interp::push_pieces(&pieces[1..], &st.tys)).flatten() {
+            let head = *head;
+            st.tys.insert(dst, NTy::Str);
+            line!("let mut {}: AlmideString = {{ let mut __head = {}; {rest} __head }};", var(dst), var(head));
+            EARLY_DROPPED.with(|e| e.borrow_mut().insert(head));
+            return Ok(true);
+        }
     }
     let code = crate::render_native_interp::render_final(dst, pieces, &st.tys)?;
     st.tys.insert(dst, NTy::Str);

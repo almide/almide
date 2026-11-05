@@ -64,7 +64,9 @@ const PROGRAMS: &[&str] = &[
     "env_sleep_pause.almd",
     "env_platform_reporting.almd",
     "effect_unit_yields_result.almd",
-    "grain_gc_shapes.almd",
+    // (grain_gc_shapes left the floor: its tail call passes a heap arg past a
+    // typed release, which the render walls, #3550.)
+    "while_loops.almd",
 ];
 
 #[test]
