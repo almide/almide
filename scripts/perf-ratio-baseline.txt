@@ -125,6 +125,11 @@ treealloc 0.343
 # of 0.113, and 0.6649 s with ALMIDE_REGION_OFF=1, a delta of 9.87. The row
 # runs 24 rounds since (12 read under the 0.08 s floor). Ceiling 0.158 under
 # the +40% rule; the claim (< 1.0) is what develop before the bundle fails.
+# Negative control (GCE n2-standard-32, 2026-11-05): this script, the row and
+# this baseline run on develop before the bundle (07418260c) exit 1 on it:
+# btrees 1.500 (NOT FASTER) and ablation/btrees 0.995 (UNDER floor 1.30): the
+# certified render built every node with `Box`, so the region knob changed
+# nothing. treealloc read 0.227 in the same run, still on the standard codegen.
 btrees 0.113
 # `decode` (#1679) is reported and not anchored, like strchurn: N derived
 # `User.decode`s of one 8-field document against the same-shape hand-written
