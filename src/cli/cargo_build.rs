@@ -313,8 +313,12 @@ fn run_cargo_build_and_locate_binary(
     // that inline across nothing: a certified render's `map(..).collect()`
     // ran its closure through an outlined `from_iter`, 1.6x the same source
     // built in one session (#4006, mi1). This repo's CI sets the variable for
-    // every job, so only a user's build saw it.
-    cmd.env("CARGO_INCREMENTAL", "0");
+    // every job, so only a user's build saw it. A `CARGO_INCREMENTAL` the
+    // caller set is theirs and stays (the stale-session recovery is staged
+    // that way).
+    if std::env::var_os("CARGO_INCREMENTAL").is_none() {
+        cmd.env("CARGO_INCREMENTAL", "0");
+    }
     // The binary is located under `project_dir/target` below; an inherited
     // `CARGO_TARGET_DIR` (a common user setting, and what `cargo test` hands
     // the harness's own child processes) would send it elsewhere and turn the
