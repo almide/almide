@@ -282,6 +282,45 @@ pub(crate) fn loop_header() -> Option<Site> {
     })
 }
 
+thread_local! {
+    static MUTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` with the runtime helpers' byte loops recording nothing: the
+/// assembler builds every fixed-slot helper once over placeholder literals
+/// only to learn which ones ship (assembly.rs `used_static_helpers`); those
+/// bodies are thrown away, so their reads are no evidence of anything.
+pub(crate) fn muted<R>(f: impl FnOnce() -> R) -> R {
+    let was = MUTED.with(|m| m.replace(true));
+    let r = f();
+    MUTED.with(|m| m.set(was));
+    r
+}
+
+/// A runtime helper's byte loop (#4005, the string routines' bodies): its
+/// exit test `k >=u n; br_if 1` was just emitted into `f`, the counter
+/// against the byte count of the string it reads (`len(s)` captured before
+/// the loop) — the shape of a user-code byte loop (str_bounds.rs). A stretch
+/// of its own, `e0 a0`: the caller records the guarded read with
+/// [`helper_read`], which closes it. `None` (nothing recorded) when no sweep
+/// collects or the body is a placeholder ([`muted`]).
+pub(crate) fn helper_loop_exit(f: &wasm_encoder::Function) -> Option<Site> {
+    if MUTED.with(std::cell::Cell::get) {
+        return None;
+    }
+    let site = loop_header();
+    exit(site, f);
+    site
+}
+
+/// The read guarded by [`helper_loop_exit`]'s test was just emitted.
+pub(crate) fn helper_read(site: Option<Site>, f: &wasm_encoder::Function) {
+    if site.is_some() {
+        access(site, false, f);
+        close();
+    }
+}
+
 /// The loop exit test guarding `site`'s access (its `br_if`) was just
 /// emitted.
 pub(crate) fn exit(site: Option<Site>, at: &wasm_encoder::Function) {
