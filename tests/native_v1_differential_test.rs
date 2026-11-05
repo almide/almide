@@ -65,7 +65,8 @@ const CORPUS: &[(&str, &str)] = &[
     //    cell (an append, a record rebuilt from its own fields), a find's
     //    0-or-1 block on the Option carrier, a linked body's Option result ──
     ("heap_global_list", "var LOG: List[String] = []\n\nfn note(s: String) -> Unit = {\n  LOG = LOG + [s]\n}\n\nfn main() -> Unit = {\n  note(\"a\")\n  note(\"b\")\n  println(list.join(LOG, \",\"))\n  println(int.to_string(list.len(LOG)))\n}\n"),
-    ("heap_global_record", "type C = { n: Int, tag: String }\n\nvar G: C = C { n: 0, tag: \"start\" }\n\nfn bump() -> Unit = {\n  G = C { n: G.n + 1, tag: G.tag + \"!\" }\n}\n\nfn main() -> Unit = {\n  bump()\n  bump()\n  println(int.to_string(G.n) + \" \" + G.tag)\n}\n"),
+    ("heap_global_record", "type C = { n: Int, tag: String }\n\nvar G: C = C { n: 0, tag: \"start\" }\n\nfn set(k: Int) -> Unit = {\n  G = C { n: k, tag: \"k\" + int.to_string(k) }\n}\n\nfn main() -> Unit = {\n  set(1)\n  set(2)\n  println(int.to_string(G.n) + \" \" + G.tag)\n}\n"),
+    ("heap_global_take_callee_reads", "var gl: List[Int] = []\n\nfn gl_len() -> Int = list.len(gl)\n\nfn via(mut xs: List[Int]) -> Unit = {\n  list.push(xs, gl_len())\n}\n\nfn main() -> Unit = {\n  for i in 0..<3 {\n    list.push(gl, i)\n  }\n  via(gl)\n  println(\"${gl}\")\n}\n"),
     ("find_scalar_opt", "fn first_big(xs: List[Int]) -> Int? = list.find(xs, (x) => x > 10)\n\nfn main() -> Unit = {\n  println(int.to_string(first_big([3, 12, 40]) ?? -1))\n  println(int.to_string(first_big([1, 2]) ?? -1))\n}\n"),
     ("linked_option_ret", "fn main() -> Unit = {\n  let a = option.map(some(4), (x) => x * 3) ?? 0\n  let b = option.map(none, (x) => x * 3) ?? 7\n  println(int.to_string(a + b))\n}\n"),
     // ── #4006 C1: a combinator call its linked self-hosted body refuses,
@@ -283,8 +284,24 @@ fn out_of_subset_walls_honestly() {
         // list_param moved to the POSITIVE corpus — rung 4 renders scalar-list
         // params/literals/indexing natively (`vec![…]` + the bounds shims).
         // #4006 family I and C1 class D: a heap-typed var or eager let now
-        // lives in its thread-local cell (the positive corpus above); a
-        // matrix transpose is still outside the subset.
+        // lives in its thread-local cell (the positive corpus above), but a
+        // write that reads the cell twice before storing back (a record
+        // rebuilt from two of its own fields) copies the cell's value per
+        // read and keeps the wall; a matrix transpose is still outside the
+        // subset.
+        ("heap_global_record_rebuild", "type C = { n: Int, tag: String }
+
+var G: C = C { n: 0, tag: \"start\" }
+
+fn bump() -> Unit = {
+  G = C { n: G.n + 1, tag: G.tag + \"!\" }
+}
+
+fn main() -> Unit = {
+  bump()
+  println(int.to_string(G.n) + \" \" + G.tag)
+}
+"),
         ("matrix_transpose", "fn main() -> Unit = {
   let m = matrix.from_lists([[1.0, 2.0]])
   println(\"${matrix.to_lists(matrix.transpose(m))}\")

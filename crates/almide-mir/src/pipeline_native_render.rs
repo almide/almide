@@ -361,6 +361,8 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     let linked_names: std::collections::BTreeSet<String> =
         functions.iter().filter(|f| !own.contains(&f.name)).map(|f| f.name.clone()).collect();
     crate::native_slot_rewrite::set_heap_slots(native_heap_slots(&functions, &record_layouts, &variant_layouts));
+    // No function is known to leave the heap slots alone until this program's are read.
+    crate::native_slot_takes::set_quiet(&[]);
     rewrite_native_linked_mir(&ir, &linked, &mut functions)?;
     let mut sigs = native_sigs_with_linked(&ir, &functions, &linked, &record_layouts, &variant_layouts)?;
     insert_native_probe_charges(&ir, &mut functions, &mut sigs);
@@ -373,6 +375,7 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     // and every call hands the argument over at the call.
     crate::native_move_params::rewrite(&mut functions);
     crate::native_region_window::bracket_windows(&mut functions, &windows)?;
+    crate::native_slot_takes::set_quiet(&functions);
     let mut program = MirProgram {
         functions,
         exports: Vec::new(),

@@ -105,6 +105,9 @@ pub(crate) struct AddrState {
     moves: BTreeSet<ValueId>,
     /// The movable reads after which nothing reads the block at all.
     moves_last: BTreeSet<ValueId>,
+    /// Heap slot reads that move the value out, or that a rebuild walls
+    /// (`native_slot_takes`).
+    slot_reads: crate::native_slot_takes::SlotReads,
     /// Struct blocks built whole (`render_native_slots::built_whole`), and
     /// the fields stored so far of the one being built.
     whole: BTreeSet<ValueId>,
@@ -226,6 +229,7 @@ impl AddrState {
             borrow_reads: crate::render_native_borrow_read::borrow_reads(func),
             moves,
             moves_last,
+            slot_reads: crate::native_slot_takes::slot_reads(func),
             whole,
             building: BTreeMap::new(),
             whole_enum,

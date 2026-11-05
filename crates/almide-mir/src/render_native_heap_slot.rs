@@ -35,17 +35,28 @@ pub(super) fn render_heap_slot_op(
     match op {
         Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } if args.len() == 1 => {
             let (slot, t) = slot_of(st, &args[0])?;
+            if st.slot_reads.rebuilds.contains(d) {
+                return Some(Err(wall("native: a heap slot read again before its write-back (each read copies the cell's value)")));
+            }
             tys.insert(*d, t);
+            // The slot's own take follows, and nothing in between sees it.
+            let read = if st.slot_reads.takes.contains(d) && crate::render_native_rec::has_default(t) {
+                "std::mem::take(&mut *s.borrow_mut())"
+            } else {
+                "s.borrow().clone()"
+            };
             let _ = writeln!(
                 out,
-                "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| s.borrow().clone());",
+                "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| {read});",
                 var(*d),
                 crate::render_native_rec::owned_ty(t)
             );
             Some(Ok(true))
         }
         Op::CallFn { dst: Some(d), name, args, .. } if name == "__mg_take" => {
-            let [CallArg::Scalar(a)] = args.as_slice() else { return None };
+            let [CallArg::Scalar(a)] = args.as_slice() else {
+                return Some(Err(wall("native: a slot take whose address is not one scalar")));
+            };
             let (slot, t) = slot_of(st, a)?;
             if !crate::render_native_rec::has_default(t) {
                 return Some(Err(wall("native: a heap slot whose type has no default to leave behind")));
@@ -65,15 +76,13 @@ pub(super) fn render_heap_slot_op(
                 return Some(Err(wall("native: a heap slot stored with something other than a block's handle")));
             };
             let got = tys.get(&h.base).copied();
-            let rhs = match got {
-                Some(g) if g == t => crate::render_native_move::take_expr(&var(h.base)),
+            let rhs = if got == Some(t) {
+                crate::render_native_move::take_expr(&var(h.base))
+            } else if got.is_some() && st.empty_lists.contains(&h.base) {
                 // An empty list literal is every list type's empty list.
-                Some(_) if st.empty_lists.contains(&h.base) => format!("<{}>::default()", crate::render_native_rec::owned_ty(t)),
-                Some(g) if super::field_accepts(t, g) => match super::owned_from(&var(h.base), g) {
-                    Some(r) => r,
-                    None => return Some(Err(wall(format!("native: a {g:?} value stored into a {t:?} heap slot")))),
-                },
-                g => return Some(Err(wall(format!("native: a {g:?} value stored into a {t:?} heap slot")))),
+                format!("<{}>::default()", crate::render_native_rec::owned_ty(t))
+            } else {
+                return Some(Err(wall(format!("native: a {got:?} value stored into a {t:?} heap slot"))));
             };
             let _ = writeln!(out, "{pad}ALMD_HSLOT_{slot}.with(|s| *s.borrow_mut() = {rhs});");
             Some(Ok(true))
@@ -98,8 +107,8 @@ pub(super) fn note_heap_slot_recs(func: &crate::MirFunction, alloc_rec: &mut BTr
                 handles.insert(*h, args[0]);
             }
             Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 => {
-                let Some(a) = consts.get(&args[0]).copied().filter(|a| *a >= base && (*a - base) % 8 == 0) else { continue };
-                let Ok(slot) = u32::try_from((a - base) / 8) else { continue };
+                let slot = consts.get(&args[0]).copied().filter(|a| *a >= base && (*a - base) % 8 == 0);
+                let Some(slot) = slot.and_then(|a| u32::try_from((a - base) / 8).ok()) else { continue };
                 if let (Some(NTy::Rec(i)), Some(x)) = (crate::native_slot_rewrite::heap_slot(slot), handles.get(&args[1])) {
                     alloc_rec.entry(*x).or_insert(i);
                 }
