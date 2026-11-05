@@ -33,7 +33,9 @@ cd "$(git rev-parse --show-toplevel)"
 
 ALMIDE="${ALMIDE_BIN:-almide}"
 BASELINE_FILE="scripts/native-size-baseline.txt"
-BUDGET_PCT="${NATIVE_SIZE_BUDGET_PCT:-10}"
+# 5%: the deduplicated split (#4497) sits within 1% of every row on CI's
+# toolchain, and the duplicating one (+20-32 KB, 4-7%) must not fit again.
+BUDGET_PCT="${NATIVE_SIZE_BUDGET_PCT:-5}"
 PROGRAMS=(binarytrees jsonround strchurn wordfreq)
 
 if [ "$(uname -s)-$(uname -m)" != "Linux-x86_64" ]; then
