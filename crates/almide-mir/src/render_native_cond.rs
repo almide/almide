@@ -33,10 +33,6 @@ fn is_cmp_int_op(op: &IntOp) -> bool {
             | IntOp::Le
             | IntOp::Gt
             | IntOp::Ge
-            | IntOp::LtU
-            | IntOp::LeU
-            | IntOp::GtU
-            | IntOp::GeU
     )
 }
 
@@ -54,10 +50,7 @@ fn cmp_def(op: &Op) -> Option<ValueId> {
 /// `ALMIDE_NATIVE_DRILL_COND_I64=1` records none (the negative control: every
 /// comparison back to the i64 spelling, the small perf gate must read the loss).
 pub(crate) fn set_cond_cmps(func: &MirFunction) {
-    if almide_base::env::flag("ALMIDE_NATIVE_DRILL_COND_I64") {
-        COND_CMPS.with(|m| m.borrow_mut().clear());
-        return;
-    }
+    let drill = almide_base::env::flag("ALMIDE_NATIVE_DRILL_COND_I64");
     // Per value: (defining comparisons, condition reads, any other mention).
     let mut seen: BTreeMap<ValueId, (u32, u32, bool)> = BTreeMap::new();
     let mut vals = Vec::new();
@@ -85,7 +78,7 @@ pub(crate) fn set_cond_cmps(func: &MirFunction) {
     }
     let cmps: BTreeSet<ValueId> = seen
         .into_iter()
-        .filter(|(v, (defs, conds, other))| *defs == 1 && *conds >= 1 && !*other && func.ret != Some(*v))
+        .filter(|(v, (defs, conds, other))| !drill && *defs == 1 && *conds >= 1 && !*other && func.ret != Some(*v))
         .map(|(v, _)| v)
         .collect();
     COND_CMPS.with(|m| *m.borrow_mut() = cmps);
