@@ -380,7 +380,9 @@ pub(crate) fn native_lines_ok(modes: &[crate::nat::Nat], body: &[u8]) -> bool {
         return false;
     }
     let params_ok = modes.iter().zip(&lines).all(|(m, line)| {
-        let seeded: Vec<Item> = if m.as_index() == Some(0) {
+        // `nmode`: a move (1) is seeded with the handed-over reference; a
+        // borrow (0) and a writable borrow (2, #4491) start at 0.
+        let seeded: Vec<Item> = if m.as_index() != Some(1) {
             line.clone()
         } else {
             std::iter::once(Item::Op(Op::Inc)).chain(line.iter().cloned()).collect()
@@ -388,6 +390,36 @@ pub(crate) fn native_lines_ok(modes: &[crate::nat::Nat], body: &[u8]) -> bool {
         line.iter().all(item_no_reuse) && check_line(&guard_line(&seeded))
     });
     params_ok && lines[modes.len()..].iter().all(|line| check_line(&guard_line(line)))
+}
+
+/// `nsh` (NativeCalls.v): an op that cannot raise the count.
+fn nsh(o: &Op) -> bool {
+    !matches!(o, Op::Inc | Op::Alias | Op::ShareOut)
+}
+
+/// `item_nsh`.
+fn item_nsh(item: &Item) -> bool {
+    match item {
+        Item::Op(o) => nsh(o),
+        Item::Loop(body) => body.iter().all(nsh),
+        Item::CondLoop(t, e) | Item::Branch(t, e) | Item::BranchRet(_, t, e) | Item::BranchAbort(_, t, e) => {
+            t.iter().all(nsh) && e.iter().all(nsh)
+        }
+        Item::Poison => false,
+    }
+}
+
+/// `unshared` (NativeCalls.v, #4491) of every line of `body`, in order: the
+/// line is born by its `i` and nothing after it acquires, aliases or shares
+/// the object.
+pub(crate) fn unshared_lines(body: &[u8]) -> Vec<bool> {
+    parse(body)
+        .iter()
+        .map(|line| match line.split_first() {
+            Some((Item::Op(Op::Inc), rest)) => rest.iter().all(item_nsh),
+            _ => false,
+        })
+        .collect()
 }
 
 #[cfg(test)]

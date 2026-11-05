@@ -296,6 +296,18 @@ fn native_calls_examples() {
             ("|1 1|0\niM\nid#1||\n", false),
             ("|1 1|0\niM\nid#1||\ndam", false),
             ("|5 0|\nid", false),
+            // The writable borrow (#4491).
+            ("|1 2|||0\niBd#2||||\n", true),
+            ("|1 2 2|||0 0\niBBd#2 2||||\n\n", false),
+            ("|1 2 0|||0 0\niBBd#2 0||||\n\n", false),
+            ("|1 2 1|0||0 0\niBM#2 1||||\n\nm", false),
+            ("|1 2|||0\niBd#2||||\nm", false),
+            ("|1 2|||0\niaBdd#2||||\n", false),
+            ("0|1 2|||0\n#2||||\n", false),
+            ("|1 2|||0\nibd#2||||\n", false),
+            ("|||\niBd", false),
+            ("|1 2||\niBd#2||||\n", false),
+            ("|1 3||\nid#3||\n", false),
         ],
     );
 }

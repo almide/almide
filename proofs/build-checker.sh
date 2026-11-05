@@ -215,6 +215,18 @@ runn $GATE_TMP/nc_missing_move.cert 1
 runn $GATE_TMP/nc_site_lie.cert 1
 runn $GATE_TMP/nc_use_after.cert 1
 runn $GATE_TMP/nc_callee_lie.cert 1
+# The writable borrow (#4491): `rec(mut b: Bytes)` edits its caller's buffer
+# in place. The site's row names the caller's line, which holds the one `B`.
+printf '|1 2|||0\niBd#2||||\n'          > $GATE_TMP/nc_writable.cert        # the caller's own unshared buffer → ACCEPT
+printf '|1 2 2|||0 0\niBBd#2 2||||\n\n' > $GATE_TMP/nc_writable_twice.cert  # the same buffer passed twice as writable → REJECT
+printf '|1 2 0|||0 0\niBBd#2 0||||\n\n' > $GATE_TMP/nc_writable_beside.cert # the buffer also read at the same call → REJECT
+printf '|1 2|||0\niBd#2||||\nm'         > $GATE_TMP/nc_writable_escape.cert # the callee returns the borrow → REJECT
+printf '|1 2|||0\niaBdd#2||||\n'        > $GATE_TMP/nc_writable_alias.cert  # an alias live at the call → REJECT
+runn $GATE_TMP/nc_writable.cert 0
+runn $GATE_TMP/nc_writable_twice.cert 1
+runn $GATE_TMP/nc_writable_beside.cert 1
+runn $GATE_TMP/nc_writable_escape.cert 1
+runn $GATE_TMP/nc_writable_alias.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"
