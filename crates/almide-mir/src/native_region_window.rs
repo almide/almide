@@ -12,27 +12,29 @@
 //! outlives the window (the region-pure verdict, named interim trust in
 //! docs/contracts/proven-vs-trusted.md until C1 retires it).
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use crate::lower::LowerError;
 use crate::{MirFunction, Op, PrimKind, ValueId};
 
-/// The names of the window fns `ir` carries.
-pub(crate) fn window_fns(ir: &almide_ir::IrProgram) -> BTreeSet<String> {
-    ir.functions.iter().filter(|f| f.is_region_window()).map(|f| f.name.as_str().to_string()).collect()
+/// The window fns `ir` carries: name → the site's span (the window fn's body
+/// is the site's call, rewritten).
+pub(crate) fn window_fns(ir: &almide_ir::IrProgram) -> BTreeMap<String, Option<almide_ir::Span>> {
+    ir.functions.iter().filter(|f| f.is_region_window()).map(|f| (f.name.as_str().to_string(), f.body.span)).collect()
 }
 
 /// Bracket every window fn of `functions` with the arena mark's save and
 /// restore. A window fn is straight-line (one call expression over scalar
 /// params), so its last op is its end; an early exit would skip the restore
 /// and walls instead.
-pub(crate) fn bracket_windows(functions: &mut [MirFunction], windows: &BTreeSet<String>) -> Result<(), LowerError> {
-    for f in functions.iter_mut().filter(|f| windows.contains(&f.name)) {
+pub(crate) fn bracket_windows(
+    functions: &mut [MirFunction],
+    windows: &BTreeMap<String, Option<almide_ir::Span>>,
+) -> Result<(), LowerError> {
+    for f in functions.iter_mut() {
+        let Some(span) = windows.get(&f.name) else { continue };
         if f.ops.iter().any(|op| matches!(op, Op::Return { .. } | Op::LoopStart | Op::IfThen { .. })) {
-            return Err(LowerError::Unsupported(format!(
-                "native: region window `{}` is not straight-line MIR",
-                f.name
-            )));
+            return Err(LowerError::at(*span, format!("native: region window `{}` is not straight-line MIR", f.name)));
         }
         let mark = fresh_value(f);
         f.ops.insert(0, Op::Prim { kind: PrimKind::RegionSave, dst: Some(mark), args: Vec::new() });
