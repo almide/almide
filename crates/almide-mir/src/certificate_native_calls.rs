@@ -4,7 +4,7 @@
 /// one `#`-separated block per function, in `functions` order,
 ///
 /// ```text
-/// <modes>|<sites>|<marks>
+/// <modes>|<sites>|<marks>|<hosts>
 /// <line of heap param 0>
 /// …
 /// <every other line>
@@ -21,6 +21,11 @@
 ///   argument its callee takes over is refused;
 /// - `marks`: for every call-site move (`MirFunction::call_moves`), the line
 ///   of the object it moves — where the certificate wrote its `M`;
+/// - `hosts`: one id per call to a native fs host op (an `fs.*` host op the
+///   render serves from the runtime's fs code, #4006 class E): the index of
+///   its runtime symbol in `host_ops::NATIVE_FS_HOST_CALLS`, or that list's
+///   length when the symbol is not in it, which the checker rejects
+///   (`NativeCalls.hosts_ok`: the named set is the trusted base's row);
 /// - the lines: [`certificate_lines`], the heap params' lines first (empty
 ///   when a param has no event), a MOVE param's line without the leading `i`
 ///   (the checker seeds it from the mode), then the rest in emission order.
@@ -57,9 +62,13 @@ pub fn native_calls_witness(functions: &[MirFunction]) -> String {
         .iter()
         .map(|f| {
             let mut sites: Vec<String> = Vec::new();
+            let mut hosts: Vec<String> = Vec::new();
             for (at, op) in f.ops.iter().enumerate() {
                 match op {
                     Op::CallFn { name: callee, args, .. } => {
+                        if let Some(id) = native_fs_host_site(callee) {
+                            hosts.push(id.to_string());
+                        }
                         let Some(idx) = direct_callee_index(callee, &index_of, unknown, &known) else { continue };
                         // The arguments the caller handed over right after this call.
                         let handed: Vec<ValueId> = (at + 1..f.ops.len())
@@ -114,8 +123,21 @@ pub fn native_calls_witness(functions: &[MirFunction]) -> String {
                 .map(|o| ordered.iter().position(|(x, _)| x == o).unwrap_or(ordered.len()).to_string())
                 .collect();
             let body: Vec<&str> = ordered.iter().map(|(_, l)| l.as_str()).collect();
-            format!("{}|{}|{}\n{}", heap_modes(f).join(" "), sites.join(";"), marks.join(" "), body.join("\n"))
+            format!("{}|{}|{}|{}\n{}", heap_modes(f).join(" "), sites.join(";"), marks.join(" "), hosts.join(" "), body.join("\n"))
         })
         .collect();
     blocks.join("#")
+}
+
+/// The witness host id of a `CallFn` to `callee` when it is a native fs host
+/// call: an `fs` host op the render serves from the runtime floor. Its id is
+/// the index of the runtime symbol it calls in the named set, or the set's
+/// length (out of range: refused) when that symbol is not named there.
+fn native_fs_host_site(callee: &str) -> Option<usize> {
+    let row = crate::host_ops::host_op_for_call_name(callee)?;
+    if row.module != "fs" {
+        return None;
+    }
+    let symbol = crate::native_floor::declared(callee)?.symbol.as_str();
+    Some(crate::host_ops::native_fs_host_id(symbol).unwrap_or(crate::host_ops::NATIVE_FS_HOST_CALLS.len()))
 }

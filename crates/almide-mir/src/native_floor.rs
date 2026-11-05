@@ -644,8 +644,8 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         return Err("an effect fn whose return is not a Result carrier".into());
     }
     let rt = runtime_index();
-    let body = rt.items.get(symbol.as_str()).ok_or_else(|| format!("`{symbol}` is not a takeable runtime item"))?;
-    let (rust_params, rust_ret) = rust_signature(body.text).ok_or("the runtime signature does not parse")?;
+    let body = signature_text(rt, &symbol).ok_or_else(|| format!("`{symbol}` is not a takeable runtime item"))?;
+    let (rust_params, rust_ret) = rust_signature(body).ok_or("the runtime signature does not parse")?;
     if rust_params.len() != fparams.len() || !fparams.iter().zip(&rust_params).all(|(p, r)| param_agrees(*p, r)) {
         return Err(format!("runtime params {rust_params:?} disagree with the declaration"));
     }
@@ -686,7 +686,7 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         if !matches!(fparams.get(r.param), Some(FloorParam::List(_) | FloorParam::Set(_) | FloorParam::Map(_) | FloorParam::Bytes)) {
             return None;
         }
-        let (tp, tr) = rust_signature(rt.items.get(t)?.text)?;
+        let (tp, tr) = rust_signature(signature_text(rt, t)?)?;
         // The twin differs only in taking the source by value.
         let same = tp.len() == rust_params.len()
             && tp.iter().zip(&rust_params).enumerate().all(|(k, (a, b))| k == r.param || squash(a) == squash(b))
@@ -791,6 +791,7 @@ fn is_option_name(n: &str) -> bool {
 
 include!("native_floor_sig.rs");
 include!("native_floor_index.rs");
+include!("native_floor_host.rs");
 include!("native_floor_tail.rs");
 include!("native_floor_ret.rs");
 include!("native_floor_kinds.rs");

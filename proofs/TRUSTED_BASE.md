@@ -446,6 +446,25 @@ changes only atomically. Also trusted: the fan runtime text itself and the
 glue that routes this render's output and exits through it
 (`crates/almide-mir/src/render_native_fan.rs`).
 
+**Native fs host calls (#4006 class E).** A program on the certified native
+render calls the runtime's own fs functions as trusted host calls, as the wasm
+leg calls its host's fs imports: the certificate covers how the program hands
+each call its arguments and takes its result (borrowed arguments, a fresh owned
+result, the call's capabilities counted), not what the host does on the
+filesystem. The render carries those functions' code from the runtime's `fs`
+module (`runtime/rs/src/fs.rs` with the rt-core files it includes), the text
+the standard build compiles, each `#[cfg]` twin under its own gate
+(`crates/almide-mir/src/native_floor_host.rs`). The named set, in witness-id
+order: `almide_rt_fs_read_text`, `almide_rt_fs_read_bytes`, `almide_rt_fs_read_lines`, `almide_rt_fs_read_text_if_exists`, `almide_rt_fs_list_dir`, `almide_rt_fs_exists`, `almide_rt_fs_is_dir`, `almide_rt_fs_is_file`, `almide_rt_fs_is_symlink`, `almide_rt_fs_walk`, `almide_rt_fs_glob`, `almide_rt_fs___root_read_text`, `almide_rt_fs___root_read_bytes`, `almide_rt_fs___root_list_dir`, `almide_rt_fs___root_exists`, `almide_rt_fs_temp_dir`, `almide_rt_fs_write`, `almide_rt_fs_write_bytes`, `almide_rt_fs_mkdir_p`, `almide_rt_fs_remove_all`, `almide_rt_fs___root_write_text`, `almide_rt_fs_rename`, `almide_rt_fs_copy`, `almide_rt_fs_append`, `almide_rt_fs_append_bytes`, `almide_rt_fs_remove`, `almide_rt_fs___root_remove`, `almide_rt_fs_create_temp_dir`, `almide_rt_fs_create_temp_file`. Every call to one is recorded as a host call in the program's
+`native-calls` witness, and `NativeCalls.hosts_ok` (the extracted checker,
+the Rocq kernel and almide-verify) refuses a host call outside the set; a
+floor body outside the set that would carry fs code is refused by the render.
+`tests/native_fs_host_calls_test.rs` holds this list, `host_ops::NATIVE_FS_HOST_CALLS`,
+`NativeCalls.native_fs_host_calls` and almide-verify's copy to one list.
+TRUSTED: the runtime fs code itself (tested on both legs by the cross-target
+corpus, not proven). A program built under `[permissions] fs` takes the
+standard build, whose fs calls the scope wraps.
+
 
 ## Historical implementation progression (retained evidence)
 
