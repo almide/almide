@@ -18,6 +18,8 @@
 #
 #   A = ALMIDE_RELEASE_STD_UNSPLIT=1 (the plain fat-LTO profile)
 #   B = the default profile (the backtrace split, src/cli/std_split.rs)
+# or, with ALMIDE_BIN_A set, two compilers in their default profile:
+#   A = ALMIDE_BIN_A, B = ALMIDE_BIN (a change to what the split links, #4497)
 #
 # Usage: ALMIDE_BIN=target/release/almide scripts/perf-layout-ab.sh [row ...]
 #   env: LAYOUTS (16) ROUNDS (5) OUT (a temp dir; keeps the binaries and the
@@ -29,6 +31,7 @@ set -euo pipefail
 export LC_ALL=C
 cd "$(git rev-parse --show-toplevel)"
 ALMIDE="$(realpath "${ALMIDE_BIN:-$(command -v almide)}")"
+ALMIDE_A="${ALMIDE_BIN_A:+$(realpath "$ALMIDE_BIN_A")}"
 LAYOUTS="${LAYOUTS:-16}"
 ROUNDS="${ROUNDS:-5}"
 OUT="${OUT:-$(mktemp -d)}"
@@ -97,9 +100,12 @@ for side in A B; do
     cell="$side$k"; mkdir -p "$OUT/bin/$cell" "$OUT/tmp/$cell"
     while read -r name src arg abl; do
       envs=(LAYOUT_SEED=$((k * 7919)) TMPDIR="$OUT/tmp/$cell" PATH="$OUT/shim:$PATH")
-      [ "$side" = A ] && envs+=(ALMIDE_RELEASE_STD_UNSPLIT=1)
+      bin="$ALMIDE"
+      if [ "$side" = A ]; then
+        if [ -n "$ALMIDE_A" ]; then bin="$ALMIDE_A"; else envs+=(ALMIDE_RELEASE_STD_UNSPLIT=1); fi
+      fi
       [ "$abl" != "-" ] && envs+=("$abl=1")
-      if ! env "${envs[@]}" "$ALMIDE" build --release "$src" -o "$OUT/bin/$cell/$name" > "$OUT/bin/$cell/$name.log" 2>&1; then
+      if ! env "${envs[@]}" "$bin" build --release "$src" -o "$OUT/bin/$cell/$name" > "$OUT/bin/$cell/$name.log" 2>&1; then
         cat "$OUT/bin/$cell/$name.log"; echo "perf-layout-ab: build failed: $cell $name"; exit 1
       fi
     done < "$OUT/rows.txt"
