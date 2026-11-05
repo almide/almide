@@ -323,7 +323,7 @@ fn render_native_flow_op(
             *indent += 1;
         }
         Op::LoopBreakUnless { cond } => {
-            line!("if {} == 0 {{ break; }}", var(*cond));
+            line!("if {} {{ break; }}", crate::render_native_cond::falsy(*cond));
         }
         Op::LoopEnd => {
             *indent -= 1;

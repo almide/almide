@@ -99,7 +99,7 @@ pub(crate) fn render_float_cmp(
     let a = as_f64_arg(&var(args[0]), *tys.get(&args[0]).ok_or_else(|| wall("native: float arg untyped"))?)?;
     let b = as_f64_arg(&var(args[1]), *tys.get(&args[1]).ok_or_else(|| wall("native: float arg untyped"))?)?;
     tys.insert(*d, NTy::I64);
-    line!("let mut {}: i64 = ({a} {sym} {b}) as i64;", var(*d));
+    line!("{}", crate::render_native_cond::bind(*d, &format!("{a} {sym} {b}")));
     Ok(())
 }
 
@@ -164,7 +164,7 @@ fn render_if_then(
     } else {
         if_stack.push(None);
     }
-    line!("if {} != 0 {{", var(*cond));
+    line!("if {} {{", crate::render_native_cond::truthy(*cond));
     *indent += 1;
 }
 
@@ -383,10 +383,6 @@ pub(crate) fn render_int_binop(
         IntOp::Sub => format!("{l}.wrapping_sub({r})"),
         IntOp::Mul => format!("{l}.wrapping_mul({r})"),
         IntOp::Div | IntOp::Mod | IntOp::DivU | IntOp::ModU => checked_int_binop(op, b, &l, &r, used_shims),
-        IntOp::LtU => format!("(({l} as u64) < ({r} as u64)) as i64"),
-        IntOp::LeU => format!("(({l} as u64) <= ({r} as u64)) as i64"),
-        IntOp::GtU => format!("(({l} as u64) > ({r} as u64)) as i64"),
-        IntOp::GeU => format!("(({l} as u64) >= ({r} as u64)) as i64"),
         // The bitwise floor: wasm's i64.and/or/xor and its shifts, whose count
         // is taken mod 64 — `wrapping_sh*` masks the same six bits.
         IntOp::And => format!("({l} & {r})"),
@@ -395,7 +391,9 @@ pub(crate) fn render_int_binop(
         IntOp::Shl => format!("{l}.wrapping_shl({r} as u32)"),
         IntOp::Shr => format!("{l}.wrapping_shr({r} as u32)"),
         IntOp::ShrU => format!("((({l} as u64).wrapping_shr({r} as u32)) as i64)"),
-        IntOp::Eq | IntOp::Ne | IntOp::Lt | IntOp::Le | IntOp::Gt | IntOp::Ge => signed_cmp_int_binop(op, &l, &r),
+        // The comparisons: a Rust `bool`, widened to the MIR's i64 0/1 here
+        // (a branch-only one is bound as `bool` instead — render_native_cond).
+        _ => format!("({}) as i64", cmp_int_expr(op, &l, &r).unwrap_or_default()),
     })
 }
 
@@ -435,18 +433,22 @@ fn checked_int_binop(op: &IntOp, b: ValueId, l: &str, r: &str, used_shims: &mut 
     }
 }
 
-/// The signed comparison arms of [`render_int_binop`] (`op` is `Eq`, `Ne`,
-/// `Lt`, `Le`, `Gt` or `Ge`).
-fn signed_cmp_int_binop(op: &IntOp, l: &str, r: &str) -> String {
-    match op {
-        IntOp::Eq => format!("({l} == {r}) as i64"),
-        IntOp::Ne => format!("({l} != {r}) as i64"),
-        IntOp::Lt => format!("({l} < {r}) as i64"),
-        IntOp::Le => format!("({l} <= {r}) as i64"),
-        IntOp::Gt => format!("({l} > {r}) as i64"),
-        // `IntOp::Ge`, the one comparison left.
-        _ => format!("({l} >= {r}) as i64"),
-    }
+/// An integer comparison as a Rust `bool` expression (`None` for any other op).
+/// The unsigned lane (#872) casts both sides to `u64`.
+pub(crate) fn cmp_int_expr(op: &IntOp, l: &str, r: &str) -> Option<String> {
+    Some(match op {
+        IntOp::Eq => format!("{l} == {r}"),
+        IntOp::Ne => format!("{l} != {r}"),
+        IntOp::Lt => format!("{l} < {r}"),
+        IntOp::Le => format!("{l} <= {r}"),
+        IntOp::Gt => format!("{l} > {r}"),
+        IntOp::Ge => format!("{l} >= {r}"),
+        IntOp::LtU => format!("({l} as u64) < ({r} as u64)"),
+        IntOp::LeU => format!("({l} as u64) <= ({r} as u64)"),
+        IntOp::GtU => format!("({l} as u64) > ({r} as u64)"),
+        IntOp::GeU => format!("({l} as u64) >= ({r} as u64)"),
+        _ => return None,
+    })
 }
 
 /// A user fn name that is a valid Rust identifier (dots from module paths).
