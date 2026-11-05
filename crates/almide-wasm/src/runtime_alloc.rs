@@ -8,10 +8,8 @@ use wasm_encoder::{BlockType, Function, MemArg, ValType};
 use crate::*;
 
 /// `$alloc(len: i32) -> i32`: allocate a layout-true block (header
-/// rc=1/len/cap + payload), returns the block BASE. `cap` is the block's
-/// PHYSICAL payload capacity on every path (class `(16<<c) - PAYLOAD`, or
-/// the exact `want - PAYLOAD` above the ceiling), so `cap >= max(len, 4)`
-/// on every fresh block (runtime_alloc_cap_test.rs runs it). The size-class
+/// rc=1/len/cap + payload), returns the block BASE. `cap` is the PHYSICAL payload
+/// capacity on every path, so `cap >= max(len, 4)` (runtime_alloc_cap_test.rs). The size-class
 /// free lists (RC-2) are consulted first — a freed block whose class
 /// capacity covers the request is reused; otherwise bump, growing
 /// memory when needed.
@@ -179,8 +177,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool, o
         .unreachable()
         .end();
     i.end();
-    // header: rc = 1, len, cap = want - PAYLOAD (the class's physical
-    // capacity, or exact above the ceiling); advance the bump head
+    // header: rc = 1, len, cap = want - PAYLOAD (physical); advance the bump head
     i.local_get(base).i32_const(1).i32_store(word(almide_layout::RC.offset));
     i.local_get(base).local_get(len).i32_store(word(almide_layout::LEN.offset));
     i.local_get(base)
