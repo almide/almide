@@ -434,7 +434,7 @@ pub type Certified = (String, BTreeMap<usize, String>, BTreeSet<usize>);
 
 /// [`certify`], and the positions certified.
 pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<Certified, String> {
-    let budget = std::env::var("ALMIDE_LIN_PIVOTS").ok().and_then(|s| s.parse().ok()).unwrap_or(PIVOT_BUDGET);
+    let budget = almide_base::env::var("ALMIDE_LIN_PIVOTS").and_then(|s| s.parse().ok()).unwrap_or(PIVOT_BUDGET);
     BUDGET.with(|b| b.set(budget));
     lp::reset_pivots();
     let m = lin::Module::read(wasm)?;
@@ -568,7 +568,7 @@ fn infer_contracts(skels: &BTreeMap<usize, Skel>, table: &BTreeSet<usize>, entry
 
 /// ALMIDE_LIN_DEBUG: each round's results, call sites and preconditions.
 fn debug_round(round: usize, results: &Results, sites: &[Site], next: &BTreeMap<usize, Contract>) {
-    if std::env::var_os("ALMIDE_LIN_DEBUG").is_none() {
+    if !almide_base::env::flag("ALMIDE_LIN_DEBUG") {
         return;
     }
     for (p, r) in results {

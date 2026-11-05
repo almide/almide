@@ -11,6 +11,7 @@ description = "The UNTRUSTED prover for the linear bounds certificates (#4005 A4
 # almide-anchor-check's translation check judge every certificate it emits.
 [dependencies]
 almide-anchor-check = { path = "../almide-anchor-check" }
+almide-base = { path = "../almide-base" }
 
 [lints]
 workspace = true
