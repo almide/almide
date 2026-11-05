@@ -171,6 +171,14 @@ const CORPUS: &[(&str, &str)] = &[
     //    materialized at each use: literals, const arithmetic over other
     //    lets (wrapping), a float division and a string. ──
     ("top_let_consts", "let LIMIT = 10\nlet SCALE = LIMIT * 3 + 9223372036854775807\nlet HALF = 1.0 / 2.0\nlet NAME = \"almide\"\nfn main() -> Unit = {\n  println(int.to_string(LIMIT + SCALE))\n  println(float.to_string(HALF))\n  println(NAME)\n}\n"),
+    // ── #4514: a runtime-typed value the program declares but never operates
+    //    on still names its runtime type (an unused `[:]` aliases
+    //    `AlmideMap`), and a linked self-hosted body's uncalled siblings no
+    //    longer put `Value` in the type table (`option.unwrap_or` over a
+    //    List[Float] links from the source that defines the Value routines).
+    //    Both rendered code rustc rejected. ──
+    ("unused_map_binding", "fn main() -> Unit = {\n  let unused: Map[String, Bool] = [:]\n  let flag: Bool = true\n  println(\"flag = ${flag}\")\n}\n"),
+    ("list_option_fallback_float", "fn main() -> Unit = {\n  let base: List[Float] = [1.5, 2.25]\n  let picked: List[Float] = option.unwrap_or(some([-42.5, 0.0]), base)\n  println(\"picked = ${picked}\")\n  let ints: List[Int] = option.unwrap_or(some([42, 42]), [7])\n  println(\"ints = ${ints}\")\n}\n"),
 ];
 
 #[test]

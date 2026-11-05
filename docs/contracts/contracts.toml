@@ -204,6 +204,7 @@ evidence  = [
   { path = "spec/wasm_cross/compound_repr_interp.almd", class = "fixture" },
   { path = "spec/wasm_cross/repr_parity_pin.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuzz_found_nested_interp_capture.almd", class = "fixture" },
+  { path = "spec/wasm_cross/native_list_option_fallback_float.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-009"
@@ -3228,6 +3229,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/collection_literals.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_index_string_key_shapes.almd", class = "fixture" },
+  { path = "spec/wasm_cross/native_unused_map_binding.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-241"
