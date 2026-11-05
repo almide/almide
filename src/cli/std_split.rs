@@ -69,10 +69,10 @@ impl StdSplit {
 }
 
 /// Bumped whenever what the cache holds changes shape.
-const SPLIT_FORMAT: u32 = 1;
+const SPLIT_FORMAT: u32 = 2;
 
 /// The LLVM tools the transform runs, from the toolchain's own `llvm-tools`.
-const TOOLS: [&str; 6] = ["llvm-ar", "llvm-objcopy", "llvm-dis", "llvm-as", "opt", "llc"];
+const TOOLS: [&str; 7] = ["llvm-ar", "llvm-objcopy", "llvm-dis", "llvm-as", "llvm-nm", "opt", "llc"];
 
 /// The one thread-local the printer shares with the rest of std: the
 /// per-thread panic count (`std::panicking::panic_count::LOCAL_PANIC_COUNT`).
@@ -210,7 +210,9 @@ fn ensure_split() -> Result<Option<StdSplit>, String> {
             // moved, a probe that printed differently): recorded, so every
             // later build takes the plain profile without retrying.
             let _ = std::fs::write(&failed, e.as_bytes());
-            let _ = std::fs::remove_dir_all(dir.join("work"));
+            if !almide_base::env::flag("ALMIDE_DEBUG_STD_SPLIT") {
+                let _ = std::fs::remove_dir_all(dir.join("work"));
+            }
             Err(e)
         }
     }
@@ -246,16 +248,96 @@ fn build_split(tc: &Toolchain, std_rlib: &Path, dir: &Path) -> Result<(), String
     let _ = std::fs::remove_dir_all(&work);
     let _ = std::fs::remove_dir_all(dir.join("sysroot"));
     std::fs::create_dir_all(&work).map_err(|e| format!("{}: {e}", work.display()))?;
-    let (names, shared) = build_sysroot(tc, std_rlib, dir, &work)?;
-    build_object(tc, &work, &names, &shared, &dir.join("backtrace.o"))?;
+    let (names, shared, std_unpacked) = build_sysroot(tc, std_rlib, dir, &work)?;
+    let merged = seed_lto_input(tc, &work)?;
+    let object = dir.join("backtrace.o");
+    build_object(tc, &work, &merged, &names, &shared, &Default::default(), &object)?;
+    // The printer's private copies of std functions the program keeps anyway
+    // (fmt, the panic path, str search…) would be linked twice: once from the
+    // LTO module, once from the object (#4497). Find them by linking the seed
+    // against the split, make them symbols of the split std that the object
+    // references, and rebuild the object without its copies.
+    let twice = defined_twice(tc, dir, &work)?;
+    let external = share_with_program(tc, dir, &work, std_unpacked, &twice)?;
+    if !external.is_empty() {
+        build_object(tc, &work, &merged, &names, &shared, &external, &object)?;
+    }
+    if almide_base::env::flag("ALMIDE_DEBUG_STD_SPLIT") {
+        let left = defined_twice(tc, dir, &work)?;
+        eprintln!(
+            "almide: std split: {} functions defined twice, {} now shared, {} left: {:?}",
+            twice.len(),
+            external.len(),
+            left.len(),
+            left
+        );
+    }
     probe(tc, dir, &work)
+}
+
+/// An rlib unpacked into its own work directory: its members in order, and
+/// each object member's embedded bitcode disassembled next to it.
+struct Unpacked {
+    dir: PathBuf,
+    members: Vec<String>,
+    /// The object members that carry bitcode (`<member>.ll` exists).
+    with_bitcode: Vec<String>,
+}
+
+impl Unpacked {
+    fn new(tc: &Toolchain, rlib: &Path, dir: PathBuf) -> Result<Self, String> {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let listed = run(std::process::Command::new(tc.tool("llvm-ar")).arg("t").arg(rlib))?;
+        let members: Vec<String> = String::from_utf8_lossy(&listed.stdout).lines().map(str::to_string).collect();
+        run(std::process::Command::new(tc.tool("llvm-ar")).arg("x").arg(rlib).current_dir(&dir))?;
+        let mut with_bitcode = Vec::new();
+        for member in members.iter().filter(|m| m.ends_with(".o")) {
+            let obj = dir.join(member);
+            let bc = dir.join(format!("{member}.bc"));
+            // A member without `.llvmbc` (none in std's own rlibs today) has
+            // nothing to rewrite.
+            let dumped = std::process::Command::new(tc.tool("llvm-objcopy"))
+                .arg(format!("--dump-section=.llvmbc={}", bc.display()))
+                .arg(&obj)
+                .output()
+                .map_err(|e| format!("llvm-objcopy: {e}"))?;
+            if !dumped.status.success() {
+                continue;
+            }
+            run(std::process::Command::new(tc.tool("llvm-dis")).arg(&bc).arg("-o").arg(dir.join(format!("{member}.ll"))))?;
+            with_bitcode.push(member.clone());
+        }
+        Ok(Unpacked { dir, members, with_bitcode })
+    }
+    fn ll(&self, member: &str) -> PathBuf {
+        self.dir.join(format!("{member}.ll"))
+    }
+    fn read(&self, member: &str) -> Result<String, String> {
+        std::fs::read_to_string(self.ll(member)).map_err(|e| format!("{}: {e}", self.ll(member).display()))
+    }
+    /// Write `text` as `member`'s new bitcode.
+    fn replace(&self, tc: &Toolchain, member: &str, text: &str) -> Result<(), String> {
+        std::fs::write(self.ll(member), text).map_err(|e| format!("{}: {e}", self.ll(member).display()))?;
+        let bc = self.dir.join(format!("{member}.split.bc"));
+        run(std::process::Command::new(tc.tool("llvm-as")).arg(self.ll(member)).arg("-o").arg(&bc))?;
+        run(std::process::Command::new(tc.tool("llvm-objcopy"))
+            .arg(format!("--update-section=.llvmbc={}", bc.display()))
+            .arg(self.dir.join(member)))?;
+        Ok(())
+    }
+    /// The members, in their order, as a new rlib at `out` (a symlink there is replaced).
+    fn pack(&self, tc: &Toolchain, out: &Path) -> Result<(), String> {
+        let _ = std::fs::remove_file(out);
+        run(std::process::Command::new(tc.tool("llvm-ar")).arg("rcs").arg(out).args(&self.members).current_dir(&self.dir))?;
+        Ok(())
+    }
 }
 
 /// The split sysroot: every entry of the toolchain's target dir linked, libstd
 /// rewritten with the cut functions declared instead of defined in its
 /// bitcode and the panic count kept a symbol. Returns the cut symbols, in
-/// [`CUTS`] order, and the panic count's.
-fn build_sysroot(tc: &Toolchain, std_rlib: &Path, dir: &Path, work: &Path) -> Result<(Vec<String>, String), String> {
+/// [`CUTS`] order, the panic count's, and libstd unpacked.
+fn build_sysroot(tc: &Toolchain, std_rlib: &Path, dir: &Path, work: &Path) -> Result<(Vec<String>, String, Unpacked), String> {
     let target = dir.join("sysroot").join("lib").join("rustlib").join(&tc.host);
     let lib = target.join("lib");
     std::fs::create_dir_all(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
@@ -272,21 +354,11 @@ fn build_sysroot(tc: &Toolchain, std_rlib: &Path, dir: &Path, work: &Path) -> Re
 
     // The rlib's members in order; the object members carry std's bitcode
     // in their `.llvmbc` section.
-    let rlib_dir = work.join("rlib");
-    std::fs::create_dir_all(&rlib_dir).map_err(|e| format!("{}: {e}", rlib_dir.display()))?;
-    let listed = run(std::process::Command::new(tc.tool("llvm-ar")).arg("t").arg(std_rlib))?;
-    let members: Vec<String> = String::from_utf8_lossy(&listed.stdout).lines().map(str::to_string).collect();
-    run(std::process::Command::new(tc.tool("llvm-ar")).arg("x").arg(std_rlib).current_dir(&rlib_dir))?;
+    let unpacked = Unpacked::new(tc, std_rlib, work.join("rlib-std"))?;
     let mut names: Vec<Option<String>> = vec![None; CUTS.len()];
     let mut shared: Option<String> = None;
-    for member in members.iter().filter(|m| m.ends_with(".o")) {
-        let obj = rlib_dir.join(member);
-        let bc = work.join(format!("{member}.bc"));
-        let ll = work.join(format!("{member}.ll"));
-        run(std::process::Command::new(tc.tool("llvm-objcopy")).arg(format!("--dump-section=.llvmbc={}", bc.display())).arg(&obj))?;
-        run(std::process::Command::new(tc.tool("llvm-dis")).arg(&bc).arg("-o").arg(&ll))?;
-        let text = std::fs::read_to_string(&ll).map_err(|e| format!("{}: {e}", ll.display()))?;
-        let mut patched = text;
+    for member in &unpacked.with_bitcode {
+        let mut patched = unpacked.read(member)?;
         let mut touched = false;
         if let Some(name) = find_global(&patched, SHARED_TLS)? {
             if shared.is_some() {
@@ -306,12 +378,7 @@ fn build_sysroot(tc: &Toolchain, std_rlib: &Path, dir: &Path, work: &Path) -> Re
             touched = true;
         }
         if touched {
-            std::fs::write(&ll, &patched).map_err(|e| format!("{}: {e}", ll.display()))?;
-            let bc2 = work.join(format!("{member}.split.bc"));
-            run(std::process::Command::new(tc.tool("llvm-as")).arg(&ll).arg("-o").arg(&bc2))?;
-            run(std::process::Command::new(tc.tool("llvm-objcopy"))
-                .arg(format!("--update-section=.llvmbc={}", bc2.display()))
-                .arg(&obj))?;
+            unpacked.replace(tc, member, &patched)?;
         }
     }
     let names: Vec<String> = names
@@ -320,9 +387,190 @@ fn build_sysroot(tc: &Toolchain, std_rlib: &Path, dir: &Path, work: &Path) -> Re
         .map(|(n, cut)| n.ok_or_else(|| format!("{} is not in libstd's bitcode", cut.what)))
         .collect::<Result<_, _>>()?;
     let shared = shared.ok_or("the panic count is not in libstd's bitcode")?;
-    let out = lib.join(std_rlib.file_name().ok_or("libstd has no file name")?);
-    run(std::process::Command::new(tc.tool("llvm-ar")).arg("rcs").arg(&out).args(&members).current_dir(&rlib_dir))?;
-    Ok((names, shared))
+    unpacked.pack(tc, &lib.join(std_rlib.file_name().ok_or("libstd has no file name")?))?;
+    Ok((names, shared, unpacked))
+}
+
+/// The function symbols the seed, linked against the split, defines twice:
+/// once in its LTO module, once as a private copy in `backtrace.o`.
+fn defined_twice(tc: &Toolchain, dir: &Path, work: &Path) -> Result<std::collections::BTreeSet<String>, String> {
+    let split = StdSplit { sysroot: dir.join("sysroot"), object: dir.join("backtrace.o") };
+    let bin = work.join("seed").join("seed-split");
+    run(std::process::Command::new(crate::find_rustc())
+        .arg(work.join("seed.rs"))
+        .args(["--edition", "2021", "-C", "opt-level=3", "-C", "lto=fat", "-C", "codegen-units=1", "-C", "strip=debuginfo"])
+        .args(split.rustc_args())
+        .arg("-o")
+        .arg(&bin))?;
+    let in_object = defined_functions(tc, &split.object)?;
+    let mut count: std::collections::HashMap<String, usize> = Default::default();
+    for name in defined_function_list(tc, &bin)? {
+        *count.entry(name).or_default() += 1;
+    }
+    Ok(in_object.into_iter().filter(|n| count.get(n).is_some_and(|c| *c > 1)).collect())
+}
+
+fn defined_functions(tc: &Toolchain, file: &Path) -> Result<std::collections::BTreeSet<String>, String> {
+    Ok(defined_function_list(tc, file)?.into_iter().collect())
+}
+
+/// Every function symbol `file` defines, one entry per definition.
+fn defined_function_list(tc: &Toolchain, file: &Path) -> Result<Vec<String>, String> {
+    let out = run(std::process::Command::new(tc.tool("llvm-nm")).arg("--defined-only").arg(file))?;
+    Ok(nm_functions(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// The function names of `llvm-nm --defined-only` output (`addr type name`, text types).
+fn nm_functions(listing: &str) -> Vec<String> {
+    listing
+        .lines()
+        .filter_map(|l| {
+            let mut w = l.split_whitespace();
+            let (_, ty, name) = (w.next()?, w.next()?, w.next()?);
+            matches!(ty, "t" | "T" | "w" | "W").then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// Make each of `wanted` a hidden symbol of the split sysroot's std crates,
+/// kept through LTO (`@llvm.used`), so `backtrace.o` can reference
+/// the program's copy instead of carrying its own. A function is shared only
+/// when exactly one object of the crates that could hold it defines it (a
+/// name with two definitions — two private copies in two codegen units — is
+/// left alone). Returns the names shared.
+fn share_with_program(
+    tc: &Toolchain,
+    dir: &Path,
+    work: &Path,
+    std_unpacked: Unpacked,
+    wanted: &std::collections::BTreeSet<String>,
+) -> Result<std::collections::HashSet<String>, String> {
+    if wanted.is_empty() {
+        return Ok(Default::default());
+    }
+    let lib = dir.join("sysroot").join("lib").join("rustlib").join(&tc.host).join("lib");
+    // The crates the names mention (`4core`, `5alloc`, …): a function is
+    // defined in its own crate or, for a generic instance, in a crate its
+    // symbol names as the instantiating one.
+    let mut rlibs: Vec<(PathBuf, Unpacked)> = Vec::new();
+    let std_name = std_unpacked_name(tc)?;
+    for entry in std::fs::read_dir(tc.lib_dir()).map_err(|e| format!("{}: {e}", tc.lib_dir().display()))?.flatten() {
+        let file = entry.file_name().to_string_lossy().into_owned();
+        let Some(krate) = file.strip_prefix("lib").and_then(|f| f.strip_suffix(".rlib")).and_then(|f| f.rsplit_once('-')).map(|(c, _)| c.to_string()) else {
+            continue;
+        };
+        if file == std_name {
+            continue;
+        }
+        let seg = format!("{}{krate}", krate.len());
+        if wanted.iter().any(|n| n.contains(&seg)) {
+            let u = Unpacked::new(tc, &entry.path(), work.join(format!("rlib-{krate}")))?;
+            rlibs.push((lib.join(&file), u));
+        }
+    }
+    rlibs.push((lib.join(&std_name), std_unpacked));
+    // Where each wanted name is defined: (rlib index, member).
+    let mut sites: std::collections::HashMap<&str, Vec<(usize, String)>> = Default::default();
+    let mut texts: std::collections::HashMap<(usize, String), String> = Default::default();
+    for (i, (_, u)) in rlibs.iter().enumerate() {
+        for member in &u.with_bitcode {
+            let text = u.read(member)?;
+            let mut hit = false;
+            for line in text.lines() {
+                if let Some(name) = define_name(line).and_then(|n| wanted.get(n)) {
+                    sites.entry(name.as_str()).or_default().push((i, member.clone()));
+                    hit = true;
+                }
+            }
+            if hit {
+                texts.insert((i, member.clone()), text);
+            }
+        }
+    }
+    let unique: std::collections::HashSet<String> =
+        sites.iter().filter(|(_, s)| s.len() == 1).map(|(n, _)| n.to_string()).collect();
+    let mut changed: std::collections::BTreeSet<usize> = Default::default();
+    for ((i, member), text) in texts {
+        let patched = export_defines(&text, &unique)?;
+        if patched != text {
+            rlibs[i].1.replace(tc, &member, &patched)?;
+            changed.insert(i);
+        }
+    }
+    for i in changed {
+        let (out, u) = &rlibs[i];
+        u.pack(tc, out)?;
+    }
+    Ok(unique)
+}
+
+fn std_unpacked_name(tc: &Toolchain) -> Result<String, String> {
+    Ok(single_std_rlib(&tc.lib_dir())?.file_name().ok_or("libstd has no file name")?.to_string_lossy().into_owned())
+}
+
+/// An IR reference to the global `name`, quoted when it is not a bare identifier.
+fn ir_ref(name: &str) -> String {
+    let bare = name.chars().next().is_some_and(|c| !c.is_ascii_digit())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '$' | '-'));
+    if bare { format!("@{name}") } else { format!("@\"{name}\"") }
+}
+
+/// Give every definition of a name in `names` external hidden linkage when it
+/// is module-local, and list them all in `@llvm.used`, so LTO keeps
+/// each one a symbol. (`@llvm.compiler.used` is not enough: rustc's LTO
+/// restriction pass internalizes its members.)
+fn export_defines(text: &str, names: &std::collections::HashSet<String>) -> Result<String, String> {
+    let mut out = String::with_capacity(text.len() + 4096);
+    let mut kept: Vec<String> = Vec::new();
+    let mut listed = false;
+    for line in text.lines() {
+        if let Some(name) = define_name(line).filter(|n| names.contains(*n)) {
+            let local = line.strip_prefix("define ").is_some_and(|r| r.starts_with("internal ") || r.starts_with("private "));
+            if local {
+                out.push_str("define hidden ");
+                out.push_str(strip_linkage(line));
+            } else {
+                out.push_str(line);
+            }
+            kept.push(ir_ref(name));
+        } else if line.starts_with("@llvm.used = ") {
+            listed = true;
+            out.push_str("@@USED@@");
+            out.push_str(line);
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    if kept.is_empty() {
+        return Ok(text.to_string());
+    }
+    let extra = kept.iter().map(|r| format!("ptr {r}")).collect::<Vec<_>>().join(", ");
+    if listed {
+        let mut fixed = String::with_capacity(out.len() + extra.len());
+        for line in out.lines() {
+            if let Some(used) = line.strip_prefix("@@USED@@") {
+                fixed.push_str(&append_used(used, kept.len(), &extra)?);
+            } else {
+                fixed.push_str(line);
+            }
+            fixed.push('\n');
+        }
+        Ok(fixed)
+    } else {
+        out.push_str(&format!("@llvm.used = appending global [{} x ptr] [{extra}], section \"llvm.metadata\"\n", kept.len()));
+        Ok(out)
+    }
+}
+
+/// `@llvm.used = appending global [N x ptr] [a, b], section …` with `n` more entries.
+fn append_used(line: &str, n: usize, extra: &str) -> Result<String, String> {
+    let (count, rest) = line
+        .strip_prefix("@llvm.used = appending global [")
+        .and_then(|r| r.split_once(" x ptr] ["))
+        .ok_or("malformed @llvm.used")?;
+    let count: usize = count.parse().map_err(|_| "malformed @llvm.used count")?;
+    Ok(format!("@llvm.used = appending global [{} x ptr] [{extra}, {rest}", count + n))
 }
 
 #[cfg(unix)]
@@ -335,11 +583,9 @@ fn symlink(_from: &Path, to: &Path) -> Result<(), String> {
     Err(format!("no symlinks on this host ({})", to.display()))
 }
 
-/// `backtrace.o`: the cut functions from the merged LTO input of a probe
-/// build (std, its dependencies and rustc's allocator shim), everything they
-/// reach internalized into private copies, the cut functions themselves weak
-/// and hidden.
-fn build_object(tc: &Toolchain, work: &Path, names: &[String], shared: &str, out: &Path) -> Result<(), String> {
+/// The merged LTO input of a seed build with the plain sysroot (std, its
+/// dependencies and rustc's allocator shim), as IR text.
+fn seed_lto_input(tc: &Toolchain, work: &Path) -> Result<String, String> {
     let src = work.join("seed.rs");
     std::fs::write(&src, "fn main() { println!(\"{}\", std::env::args().count()); }\n").map_err(|e| format!("{e}"))?;
     let seed_dir = work.join("seed");
@@ -358,11 +604,28 @@ fn build_object(tc: &Toolchain, work: &Path, names: &[String], shared: &str, out
         .ok_or("the seed build left no .lto.input.bc")?;
     let ll = work.join("merged.ll");
     run(std::process::Command::new(tc.tool("llvm-dis")).arg(&input).arg("-o").arg(&ll))?;
-    let text = std::fs::read_to_string(&ll).map_err(|e| format!("{}: {e}", ll.display()))?;
+    std::fs::read_to_string(&ll).map_err(|e| format!("{}: {e}", ll.display()))
+}
+
+/// `backtrace.o`: the cut functions from the seed's merged LTO input,
+/// everything they reach internalized into private copies — except the
+/// functions in `external`, which the split std keeps as symbols and the
+/// object references — the cut functions themselves weak and hidden.
+fn build_object(
+    tc: &Toolchain,
+    work: &Path,
+    text: &str,
+    names: &[String],
+    shared: &str,
+    external: &std::collections::HashSet<String>,
+    out: &Path,
+) -> Result<(), String> {
+    let ll = work.join("merged.ll");
     let mut kept = String::with_capacity(text.len());
     let mut exported = vec![false; names.len()];
     let mut referenced = false;
-    for line in text.lines() {
+    let mut lines = text.lines();
+    while let Some(line) = lines.next() {
         if global_name(line) == Some(shared) {
             kept.push_str(&external_global(line)?);
             kept.push('\n');
@@ -378,6 +641,16 @@ fn build_object(tc: &Toolchain, work: &Path, names: &[String], shared: &str, out
         if let Some(i) = names.iter().position(|n| defines(line, n)) {
             kept.push_str(&format!("define weak hidden {}", strip_linkage(line)));
             exported[i] = true;
+        } else if define_name(line).is_some_and(|n| external.contains(n)) {
+            let head = strip_linkage(line).trim_end();
+            let head = head.strip_suffix('{').unwrap_or(head).trim_end();
+            kept.push_str("declare hidden ");
+            kept.push_str(&declaration_head(head));
+            for body in lines.by_ref() {
+                if body.starts_with('}') {
+                    break;
+                }
+            }
         } else if line.starts_with("attributes #") && line.contains("\"target-cpu\"") {
             // Function attribute groups: size over speed, the printer runs
             // once per panic.
