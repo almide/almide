@@ -24,9 +24,11 @@
 //! - `vS.iter().enumerate()` in place of `0..vLEN` when `vLEN` is `vS.len()`
 //!   and the body reads `vS` only as `vS[vI]`, which becomes the iterator's
 //!   element (no bounds check, and no index past the list either way),
-//! - `let mut vR: T = … .map(|vI| { … EXPR }).collect();` when the loop
-//!   fills `vR`, pushed exactly once per pass at the end of the body, into
-//!   a `Vec::with_capacity(vLEN)` declared for it and read nowhere else.
+//! - `vR.extend(… .map(|vI| { … EXPR }));` when the loop fills `vR`,
+//!   pushed exactly once per pass at the end of the body, into a list
+//!   reserved for `vLEN` (`reserved_vec`) and read nowhere else. The
+//!   reservation stays the runtime's aborting one; `extend` over an exact-size
+//!   iterator then writes without a capacity check per element.
 //!   The closure form also needs a body that leaves the loop by no
 //!   `break`/`continue`/`return`/`?` and writes no variable declared outside it.
 //!
@@ -162,7 +164,7 @@ fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
 
     // The lines before the loop, without the counter's declaration (and the
     // collected list's, below): both are bound by the iterator instead.
-    let mut drop_lines = vec![init];
+    let drop_lines = vec![init];
     let elem = format!("__e_{i}");
     let rewrite_body = |ls: &[&String]| -> Vec<String> {
         ls.iter()
@@ -178,15 +180,13 @@ fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
         let before = &body[..body.len() - 1];
         closure_safe(before, &before.iter().map(|l| l.as_str()).collect::<Vec<_>>().join("\n"))
     });
-    if let Some((_, _, decl, _)) = &collected {
-        drop_lines.push(*decl);
-    }
     let mut out: Vec<String> = (0..s).filter(|k| !drop_lines.contains(k)).map(|k| lines[k].clone()).collect();
     match collected {
         Some((r, rty, _, expr)) => {
+            let _ = rty;
             let head = match &source {
-                Some((src, _)) => format!("{pad}let mut {r}: {rty} = {src}.iter().enumerate().map(|({i}, {elem})| {{"),
-                None => format!("{pad}let mut {r}: {rty} = (0i64..{len}).map(|{i}: i64| {{"),
+                Some((src, _)) => format!("{pad}{r}.extend({src}.iter().enumerate().map(|({i}, {elem})| {{"),
+                None => format!("{pad}{r}.extend((0i64..{len}).map(|{i}: i64| {{"),
             };
             out.push(head);
             if source.is_some() {
@@ -194,7 +194,7 @@ fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
             }
             out.extend(rewrite_body(&body[..body.len() - 1]));
             out.push(format!("{inner}{expr}"));
-            out.push(format!("{pad}}}).collect();"));
+            out.push(format!("{pad}}}));"));
         }
         _ => {
             let head = match &source {
@@ -247,7 +247,7 @@ fn collected_result(lines: &[String], s: usize, len: &str, body: &[&String], bod
     }
     let decl = (0..s).rev().find(|&k| let_parts(&lines[k]).is_some_and(|(v, _, _)| v == r))?;
     let (_, rty, rhs) = let_parts(&lines[decl])?;
-    if rhs != format!("Vec::with_capacity({len}.max(0) as usize)") {
+    if rhs != crate::render_native_addr::reserved_vec(len) {
         return None;
     }
     // Read nowhere else in the body (the push is its only use) nor between
@@ -287,9 +287,9 @@ fn closure_safe(body: &[&String], body_text: &str) -> bool {
 mod tests {
     use super::iterator_loops;
 
-    const MAP: &str = "    let mut v4: Vec<i64> = almd_build(v3);
+    const MAP: &str = r#"    let mut v4: Vec<i64> = almd_build(v3);
     let mut v8: i64 = v4.len() as i64;
-    let mut v9: Vec<i64> = Vec::with_capacity(v8.max(0) as usize);
+    let mut v9: Vec<i64> = { let mut r = Vec::new(); if r.try_reserve_exact(v8.max(0) as usize).is_err() { eprintln!("Error: out of memory"); std::process::exit(1); } r };
     let mut v11: i64 = 0i64;
     let mut v12: i64 = 1i64;
     loop {
@@ -307,20 +307,20 @@ mod tests {
     }
     let mut v29: i64 = v9.len() as i64;
 }
-";
+"#;
 
     #[test]
     fn a_map_loop_over_a_list_collects_from_its_iterator() {
         let got = iterator_loops(MAP.to_string());
-        assert!(got.contains("let mut v9: Vec<i64> = v4.iter().enumerate().map(|(v11, __e_v11)| {"), "{got}");
+        assert!(got.contains("    v9.extend(v4.iter().enumerate().map(|(v11, __e_v11)| {"), "{got}");
         assert!(got.contains("let mut v16: i64 = (*__e_v11);"), "{got}");
-        assert!(got.contains("        v21\n    }).collect();"), "{got}");
-        assert!(!got.contains("v9.push") && !got.contains("Vec::with_capacity") && !got.contains("let mut v11: i64 = 0i64;"), "{got}");
+        assert!(got.contains("        v21\n    }));"), "{got}");
+        assert!(!got.contains("v9.push") && got.contains("try_reserve_exact(v8") && !got.contains("let mut v11: i64 = 0i64;"), "{got}");
     }
 
     #[test]
     fn a_fold_loop_becomes_a_for_over_the_list() {
-        let src = MAP.replace("        v9.push(v21);\n", "        v9 = v21;\n").replace("Vec<i64> = Vec::with_capacity(v8.max(0) as usize)", "i64 = 0i64");
+        let src = MAP.replace("        v9.push(v21);\n", "        v9 = v21;\n").replace("Vec<i64> = { let mut r = Vec::new(); if r.try_reserve_exact(v8.max(0) as usize).is_err() { eprintln!(\"Error: out of memory\"); std::process::exit(1); } r }", "i64 = 0i64");
         let got = iterator_loops(src);
         assert!(got.contains("for (v11, __e_v11) in v4.iter().enumerate() {"), "{got}");
         assert!(got.contains("        v9 = v21;"), "{got}");

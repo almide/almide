@@ -99,7 +99,7 @@ fn alloc_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
         return true;
     }
     if st.pushed.contains(dst) {
-        line!("let mut {}: Vec<AlmideString> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
+        line!("let mut {}: Vec<AlmideString> = {};", var(*dst), reserved_vec(&var(*len)));
         return true;
     }
     line!(
@@ -129,7 +129,7 @@ fn alloc_rec_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
             line!("// {}: a list of {n}, built whole at its last element", var(*dst));
             return true;
         }
-        line!("let mut {}: {} = Vec::with_capacity({}.max(0) as usize);", var(*dst), crate::render_native_rec::struct_name(i), var(*len));
+        line!("let mut {}: {} = {};", var(*dst), crate::render_native_rec::struct_name(i), reserved_vec(&var(*len)));
         return true;
     }
     line!(
@@ -177,7 +177,7 @@ fn alloc_typed_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
     }
     tys.insert(*dst, NTy::VecStr);
     if st.pushed.contains(dst) {
-        line!("let mut {}: Vec<AlmideString> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
+        line!("let mut {}: Vec<AlmideString> = {};", var(*dst), reserved_vec(&var(*len)));
         return true;
     }
     line!(
@@ -199,7 +199,7 @@ fn alloc_scalar_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
     }
     tys.insert(*dst, NTy::Vec);
     if st.pushed.contains(dst) {
-        line!("let mut {}: Vec<i64> = Vec::with_capacity({}.max(0) as usize);", var(*dst), var(*len));
+        line!("let mut {}: Vec<i64> = {};", var(*dst), reserved_vec(&var(*len)));
         return true;
     }
     line!("let mut {}: Vec<i64> = vec![0i64; {}.max(0) as usize];", var(*dst), var(*len));
@@ -250,4 +250,12 @@ fn const_list_elems(
                 })
         })
         .collect()
+}
+
+/// A list reserved for `len` elements, failing as the runtime's own
+/// reservation fails (C-197: `Error: out of memory`, exit 1) — never with
+/// `Vec::with_capacity`'s capacity-overflow panic. Since #4006's direct range
+/// source the length can be a range's span, which no machine may hold.
+pub(crate) fn reserved_vec(len: &str) -> String {
+    format!("{{ let mut r = Vec::new(); if r.try_reserve_exact({len}.max(0) as usize).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }} r }}")
 }

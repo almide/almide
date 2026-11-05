@@ -78,7 +78,7 @@ impl LowerCtx {
         // makes of the same chain. A body the fused loop cannot lower is retried
         // over the materialized list, as before.
         if fuse.index.is_none() && fuse.second.is_none() {
-            if let Some(inner) = self.defunc_inner_map(xs).filter(|m| !m.3 || matches!(func, "fold" | "map")) {
+            if let Some(inner) = self.defunc_inner_map(xs).filter(|m| !m.3 || func != "filter") {
                 let marks = (self.ops.len(), self.live_heap_handles.len(), self.lifted.len(), self.value_of.clone());
                 let acc2 = DefuncAcc { init: acc.init, result_elem: acc.result_elem.clone() };
                 let lambda2 = DefuncLambda { params: lambda.params, body: lambda.body };
@@ -94,8 +94,8 @@ impl LowerCtx {
 
     /// `xs` = `list.map(src, (p) => e)` with the lambda literal or a let-bound
     /// one: `(src, p, e, whether its element is a heap value)`. A heap element
-    /// is fused only into a `fold` or a `map`, which read it; a `filter` would
-    /// keep the element itself.
+    /// is not fused into a `filter`, which keeps the element itself; every other
+    /// HOF builds its result from its body and only reads it.
     fn defunc_inner_map(&self, xs: &IrExpr) -> Option<(IrExpr, VarId, IrExpr, bool)> {
         let IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func: f, .. }, args, .. } = &xs.kind else {
             return None;
