@@ -996,18 +996,30 @@ fn build_object(
     Ok(())
 }
 
+const PROBE: &str = r#"#[inline(never)] fn inner(v: &[i64], i: usize) -> i64 { v[i] }
+#[inline(never)] fn outer(n: usize) -> i64 { let v = vec![1, 2, 3]; inner(&v, n + 7) }
+fn main() {
+    println!("start");
+    let n = std::env::args().count();
+    let worker = std::thread::Builder::new().name("worker".into()).spawn(move || {
+        let items: Vec<String> = (0..n).map(|i| format!("{i}")).collect();
+        items.get(9).expect("no tenth item").len()
+    });
+    println!("joined: {}", worker.map(|h| h.join().is_err()).unwrap_or(false));
+    println!("caught: {}", std::panic::catch_unwind(|| outer(n)).is_err());
+    println!("{}", outer(n));
+}
+"#;
+
 /// Build a panicking probe with the plain sysroot and with the split one,
 /// and require the same panic output from both under every `RUST_BACKTRACE`
 /// setting. Thread ids and addresses differ run to run and are normalized.
 fn probe(split: &StdSplit, work: &Path, cpu: Option<&str>) -> Result<(), String> {
     let src = work.join("probe.rs");
-    std::fs::write(
-        &src,
-        "#[inline(never)] fn inner(v: &[i64], i: usize) -> i64 { v[i] }\n\
-         #[inline(never)] fn outer(n: usize) -> i64 { let v = vec![1, 2, 3]; inner(&v, n + 7) }\n\
-         fn main() { println!(\"start\"); let n = std::env::args().count(); println!(\"{}\", outer(n)); }\n",
-    )
-    .map_err(|e| format!("{e}"))?;
+    // A panic on a named thread (the thread's name is state the printer
+    // reads), one caught by `catch_unwind` (panic_unwind's canary decides
+    // whether the exception is Rust's), and one that ends the process.
+    std::fs::write(&src, PROBE).map_err(|e| format!("{e}"))?;
     let build = |out: &Path, extra: &[String]| {
         run(std::process::Command::new(crate::find_rustc())
             .arg(&src)
