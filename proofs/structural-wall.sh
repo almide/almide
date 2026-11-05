@@ -479,6 +479,8 @@ for row in open(os.path.join(out, "index")):
 # prover could not prove is left out of the certificate, never put in it.
 lin = {"certified": [0, 0], "uncertified": [0, 0]}
 effort = [0, 0, set()]  # pivots taken, the most any module took, the budgets
+names = {"certified": {}, "uncertified": {}}
+why = {}
 for row in open(os.path.join(out, "index")):
     k, fx = row.rstrip("\n").split("\t")
     cpath = os.path.join(out, k + ".lcert")
@@ -491,6 +493,10 @@ for row in open(os.path.join(out, "index")):
         if parts[0] in lin and len(parts) >= 4:
             lin[parts[0]][0] += 1
             lin[parts[0]][1] += int(parts[3])
+            # Distinct self-host bodies by name, each with its prim sites.
+            names[parts[0]][parts[2]] = max(names[parts[0]].get(parts[2], 0), int(parts[3]))
+            if parts[0] == "uncertified" and len(parts) >= 5:
+                why[parts[4].split(":")[0][:60]] = why.get(parts[4].split(":")[0][:60], 0) + 1
     w = open(cpath).read().rstrip("\n")
     rc = subprocess.run([checker, "bounds", cpath], capture_output=True).returncode
     vok = open(os.path.join(out, k + ".lverify.rc")).read().strip() == "0"
@@ -503,6 +509,11 @@ for row in open(os.path.join(out, "index")):
 print(f"  [bounds/linear] {lin['certified'][0]} self-host body(ies) certified ({lin['certified'][1]} prim site(s)), "
       f"{lin['uncertified'][0]} left in the counted class ({lin['uncertified'][1]} prim site(s)); "
       f"search budget {'/'.join(sorted(effort[2])) or '-'} pivot(s) per module, {effort[0]} taken, at most {effort[1]} by one module")
+only_unc = {n: k for n, k in names["uncertified"].items() if n not in names["certified"]}
+print(f"  [bounds/linear] distinct bodies: {len(names['certified'])} certified somewhere ({sum(names['certified'].values())} prim site(s)), "
+      f"{len(only_unc)} never certified ({sum(only_unc.values())} prim site(s))")
+for w, k in sorted(why.items(), key=lambda x: -x[1])[:8]:
+    print(f"    uncertified because: {w} ({k})")
 ran = {row.rstrip("\n").split("\t")[1] for row in open(os.path.join(out, "index"))}
 for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
     fail.append("STALE exception (no witness of that name rejects — remove the row): " + "\t".join(key))
