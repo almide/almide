@@ -76,6 +76,10 @@ ALMIDE="$TD/almide"
 PRODUCER="$TD/examples/emit_structural_bundle"
 VERIFY="$TD/almide-verify"
 ANCHORCHECK="$TD/almide-anchor-check"
+# The linear prover searches (simplex, loop invariants): release, so its
+# time budget is spent on search rather than on debug arithmetic.
+(cd "$ROOT" && cargo build -q --release -p almide-lin-prove)
+LINPROVE="${CARGO_TARGET_DIR:-$ROOT/target}/release/almide-lin-prove"
 ./build-checker.sh >/dev/null
 HASHES="$ROOT/proofs/structural-artifacts.sha256"
 
@@ -132,6 +136,25 @@ while IFS= read -r f; do
     echo "STRUCTURAL WALL FAIL: $f: a witness event is not the instruction the shipped bytes hold:" >&2
     sed 's/^/  /' "$OUT/$N.anchor" >&2
     exit 1
+  fi
+  # #4005 A4: the module's self-host prim accesses. The prover is untrusted;
+  # what it certifies must be the translation of the shipped functions
+  # (--lin-verify) and is judged as a bounds witness below. What it leaves
+  # out stays in the counted class.
+  if grep -q '^prims .' "$OUT/$N.anchors"; then
+    if ! "$LINPROVE" "$OUT/$N.wasm" "$OUT/$N.anchors" > "$OUT/$N.lcert" 2> "$OUT/$N.lprove"; then
+      echo "STRUCTURAL WALL FAIL: $f: the linear prover failed:" >&2
+      sed 's/^/  /' "$OUT/$N.lprove" >&2
+      exit 1
+    fi
+    if ! "$ANCHORCHECK" --lin-verify "$OUT/$N.wasm" "$OUT/$N.anchors" "$OUT/$N.lcert" > "$OUT/$N.lin" 2>&1; then
+      echo "STRUCTURAL WALL FAIL: $f: the linear certificate is not the translation of the shipped functions:" >&2
+      sed 's/^/  /' "$OUT/$N.lin" >&2
+      exit 1
+    fi
+    rc=0
+    "$VERIFY" bounds "$OUT/$N.lcert" > "$OUT/$N.lverify" 2>&1 || rc=$?
+    echo "$rc" > "$OUT/$N.lverify.rc"
   fi
 done < "$OUT/selected"
 [ "$N" -gt 0 ] || { echo "STRUCTURAL WALL FAIL: no certified fixture listed in $FIXTURES" >&2; exit 1; }
@@ -202,6 +225,40 @@ if [ "$rc" -ne 0 ]; then
 fi
 echo "  ok: the flipped byte reads MISMATCH (exit 1); the untouched artifact verifies (exit 0)"
 
+echo "== drill: a linear certificate with one proof emptied, and one held to another artifact, must be refused =="
+# The first fixture whose certificate certifies a body, and the first other
+# fixture whose certificate differs from it.
+LA=""; LB=""
+while IFS="$(printf '\t')" read -r k _; do
+  [ -s "$OUT/$k.lcert" ] && grep -q '^certified' "$OUT/$k.lprove" || continue
+  if [ -z "$LA" ]; then LA="$k"; elif ! cmp -s "$OUT/$LA.lcert" "$OUT/$k.lcert"; then LB="$k"; break; fi
+done < "$OUT/index"
+if [ -n "$LA" ]; then
+  # Proof tamper: the first non-empty Farkas combination becomes the empty
+  # one, which entails no fact that names a variable.
+  python3 -c 'import re, sys; s = open(sys.argv[1]).read(); t = re.sub(r"\((\d+:\d+(?: \d+:\d+)*)\)(\d+)", "()1", s, count=1); assert t != s; open(sys.argv[2], "w").write(t)' \
+    "$OUT/$LA.lcert" "$OUT/tamper/lin.cert"
+  rc1=0; "$VERIFY" bounds "$OUT/tamper/lin.cert" > /dev/null 2>&1 || rc1=$?
+  rc2=0; ./checker bounds "$OUT/tamper/lin.cert" > /dev/null 2>&1 || rc2=$?
+  if [ "$rc1" -eq 0 ] || [ "$rc2" -ne 1 ]; then
+    echo "STRUCTURAL WALL FAIL: a linear certificate with one proof emptied was not refused (almide-verify exit $rc1, extracted checker exit $rc2)" >&2
+    exit 1
+  fi
+  echo "  ok: the emptied proof is refused by almide-verify (exit $rc1) and the extracted checker (exit $rc2)"
+  if [ -n "$LB" ]; then
+    rc=0; "$ANCHORCHECK" --lin-verify "$OUT/$LB.wasm" "$OUT/$LB.anchors" "$OUT/$LA.lcert" > "$OUT/tamper/lin" 2>&1 || rc=$?
+    if [ "$rc" -ne 1 ] || ! grep -q 'LIN REJECT' "$OUT/tamper/lin"; then
+      echo "STRUCTURAL WALL FAIL: a linear certificate held to another artifact was not refused (exit $rc)" >&2
+      sed 's/^/  /' "$OUT/tamper/lin" >&2
+      exit 1
+    fi
+    echo "  ok: the certificate held to another artifact is LIN REJECT ($(head -1 "$OUT/tamper/lin" | cut -c1-100))"
+  fi
+elif ! ci_slice_active; then
+  echo "STRUCTURAL WALL FAIL: no fixture's linear certificate certifies a body — the drill has nothing to tamper" >&2
+  exit 1
+fi
+
 echo "== the extracted checker judges every witness; the kernel file is generated =="
 KGEN="$(mktemp /tmp/KernelStructural_XXXXXX).v"
 set +e
@@ -210,7 +267,7 @@ import os, subprocess, sys
 out, checker, exceptions_path, kgen = sys.argv[1:5]
 FN = {"ownership": "check_xc", "names": "check_names_cert", "caps": "check_caps_cert",
       "caps-transitive": "check_prog_cert", "call-modes": "check_modes_cert",
-      "bounds": "check_bounds_cert", "init": "check_init_cert", "fields": "check_fields_cert", "rc-sig": "check_sig_cert"}
+      "bounds": "check_lbounds_cert", "init": "check_init_cert", "fields": "check_fields_cert", "rc-sig": "check_sig_cert"}
 
 def parse(path):
     b = open(path, "rb").read()
@@ -292,6 +349,35 @@ for row in open(os.path.join(out, "index")):
     fixtures_ok += all_ok
     if all_ok and vrc != "0":
         fail.append(f"{fx}: every witness accepts, but almide-verify's bundle outcome is exit {vrc}")
+# #4005 A4: each module's linear certificate is one more bounds witness,
+# judged by the same three verdicts. A refusal has no exception row: what the
+# prover could not prove is left out of the certificate, never put in it.
+lin = {"certified": [0, 0], "uncertified": [0, 0]}
+effort = [0, 0, set()]  # pivots taken, the most any module took, the budgets
+for row in open(os.path.join(out, "index")):
+    k, fx = row.rstrip("\n").split("\t")
+    cpath = os.path.join(out, k + ".lcert")
+    if not os.path.exists(cpath):
+        continue
+    for l in open(os.path.join(out, k + ".lprove")).read().splitlines():
+        parts = l.split("\t")
+        if parts[0] == "effort" and len(parts) == 5:
+            effort[0] += int(parts[1]); effort[1] = max(effort[1], int(parts[1])); effort[2].add(parts[3])
+        if parts[0] in lin and len(parts) >= 4:
+            lin[parts[0]][0] += 1
+            lin[parts[0]][1] += int(parts[3])
+    w = open(cpath).read().rstrip("\n")
+    rc = subprocess.run([checker, "bounds", cpath], capture_output=True).returncode
+    vok = open(os.path.join(out, k + ".lverify.rc")).read().strip() == "0"
+    stats["bounds"][1] += 1
+    if rc == 0 and vok:
+        stats["bounds"][0] += 1
+        accepts["bounds"].append(w)
+    else:
+        fail.append(f"{fx}: the linear certificate: extracted checker exit {rc}, almide-verify {'ACCEPT' if vok else 'REJECT'}")
+print(f"  [bounds/linear] {lin['certified'][0]} self-host body(ies) certified ({lin['certified'][1]} prim site(s)), "
+      f"{lin['uncertified'][0]} left in the counted class ({lin['uncertified'][1]} prim site(s)); "
+      f"search budget {'/'.join(sorted(effort[2])) or '-'} pivot(s) per module, {effort[0]} taken, at most {effort[1]} by one module")
 ran = {row.rstrip("\n").split("\t")[1] for row in open(os.path.join(out, "index"))}
 for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
     fail.append("STALE exception (no witness of that name rejects — remove the row): " + "\t".join(key))
@@ -299,7 +385,7 @@ for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
 with open(kgen, "w") as g:
-    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes HelperSig BoundsCert InitCert FieldCert.\n")
+    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes HelperSig BoundsCert InitCert FieldCert RoutineBoundsCert RoutineProcsCert RoutineLinCert.\n")
     g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
     LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
     for prop, ws in accepts.items():
@@ -415,7 +501,7 @@ fi
 # bug and pins its witness to
 # these files. Every verdict must REJECT each one, on every run.
 for prop in bounds init fields; do
-  case "$prop" in bounds) PFN=check_bounds_cert; PMOD=BoundsCert ;; init) PFN=check_init_cert; PMOD=InitCert ;; fields) PFN=check_fields_cert; PMOD=FieldCert ;; esac
+  case "$prop" in bounds) PFN=check_lbounds_cert; PMOD=RoutineLinCert ;; init) PFN=check_init_cert; PMOD=InitCert ;; fields) PFN=check_fields_cert; PMOD=FieldCert ;; esac
   echo "== $(printf %s "$prop" | tr a-z A-Z) POISON LEG: every lost-${prop} witness is REJECTED by all three verdicts =="
   PPOISONED=("$ROOT"/proofs/poisoned-certs/$prop/*.cert)
   if [ ! -e "${PPOISONED[0]}" ]; then
