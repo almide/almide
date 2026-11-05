@@ -4,7 +4,7 @@
 // and returns nothing; `main` lends its own buffer at every call.
 fn stamp(mut b: Bytes, x: Int) -> Unit = {
   bytes.append_u16_le(b, x)
-  bytes.append_u8(b, x)
+  bytes.append_u32_le(b, x)
 }
 
 fn main() -> Unit = {
