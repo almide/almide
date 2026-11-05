@@ -3,7 +3,6 @@
 // (#4005 A4, proofs/utf8-producers.toml, the [[mint]] and [[helper]] rows),
 // over the invalid-byte corpus (through the validating front door) and the
 // valid text beside every boundary.
-
 // ── the oracle: RFC 3629 well-formedness of a String's bytes ──
 fn utf8_in(bs: List[Int], i: Int, lo: Int, hi: Int) -> Bool = match list.get(bs, i) {
   some(b) => b >= lo and b <= hi,
@@ -29,7 +28,8 @@ fn utf8_from(bs: List[Int], i: Int, n: Int) -> Bool =
   if i >= n then true
   else {
     let w = utf8_width(bs, i, list.get(bs, i) ?? 0)
-    if w == 0 then false else utf8_from(bs, i + w, n)
+    if w == 0 then false
+    else utf8_from(bs, i + w, n)
   }
 
 fn utf8_ok(s: String) -> Bool = {
@@ -54,9 +54,26 @@ fn invalid_corpus() -> List[Bytes] = [
   bytes.from_list([0xE2, 0x82]),
   bytes.from_list([0xF0, 0x9F, 0x98]),
   bytes.from_list([0xC3]),
-  bytes.from_list([0x61, 0xE2, 0x82, 0x61, 0xF0, 0x9F, 0x98, 0x80, 0xFF]),
+  bytes.from_list([
+    0x61,
+    0xE2,
+    0x82,
+    0x61,
+    0xF0,
+    0x9F,
+    0x98,
+    0x80,
+    0xFF
+  ]),
   bytes.from_list([0xE2, 0x82, 0xAC, 0xC3]),
-  bytes.from_list([0x0A, 0xFF, 0x0D, 0x0A, 0xC3, 0x0A]),
+  bytes.from_list([
+    0x0A,
+    0xFF,
+    0x0D,
+    0x0A,
+    0xC3,
+    0x0A
+  ])
 ]
 
 // ── valid text beside every boundary a cut or a case map can hit ──
@@ -80,7 +97,7 @@ fn edge_strings() -> List[String] = [
   "\u{FEFF}bom",
   "日本語テキスト",
   "line\nnext\r\nlast\r",
-  "a,b,,c",
+  "a,b,,c"
 ]
 
 fn adversary() -> List[String] = (invalid_corpus() |> list.map((b) => bytes.to_string_lossy(b))) + edge_strings()
@@ -114,7 +131,10 @@ test "the display of every container shape stays valid" {
   for s in strs {
     let one = [s, s + "\"", "\\" + s]
     assert(utf8_ok("${one}"))
-    assert(utf8_ok("${[one, []]}"))
+    assert(utf8_ok("${[
+      one,
+      []
+    ]}"))
     assert(utf8_ok("${[(s, 1), (s, -2)]}"))
     assert(utf8_ok("${[some(s), none]}"))
     let rs: List[Result[String, String]] = [ok(s), err(s)]
@@ -134,8 +154,11 @@ test "the display of every container shape stays valid" {
     assert(utf8_ok("${Pair { name: s, n: 1 }}"))
     assert(utf8_ok("${[Named(s), Plain, Both(s, 2)]}"))
   }
-  assert(utf8_ok("${ints} ${[true]} ${[1.5]} ${[[1], []]} ${set.from_list(ints)} ${some(ints)} ${some(1.5)} ${some(true)} ${some(some(1))}"))
-  let ro: Result[Option[Int], String] = ok(some(1))
+  assert(utf8_ok("${ints} ${[true]} ${[1.5]} ${[
+    [1],
+    []
+  ]} ${set.from_list(ints)} ${some(ints)} ${some(1.5)} ${some(true)} ${some(some(1))}"))
+  let ro: Result[Int?, String] = ok(some(1))
   let rl: Result[List[Float], String] = ok([1.5])
   assert(utf8_ok("${ro} ${rl}"))
 }

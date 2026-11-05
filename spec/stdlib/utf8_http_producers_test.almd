@@ -30,7 +30,8 @@ fn utf8_from(bs: List[Int], i: Int, n: Int) -> Bool =
   if i >= n then true
   else {
     let w = utf8_width(bs, i, list.get(bs, i) ?? 0)
-    if w == 0 then false else utf8_from(bs, i + w, n)
+    if w == 0 then false
+    else utf8_from(bs, i + w, n)
   }
 
 fn utf8_ok(s: String) -> Bool = {
@@ -55,9 +56,26 @@ fn invalid_corpus() -> List[Bytes] = [
   bytes.from_list([0xE2, 0x82]),
   bytes.from_list([0xF0, 0x9F, 0x98]),
   bytes.from_list([0xC3]),
-  bytes.from_list([0x61, 0xE2, 0x82, 0x61, 0xF0, 0x9F, 0x98, 0x80, 0xFF]),
+  bytes.from_list([
+    0x61,
+    0xE2,
+    0x82,
+    0x61,
+    0xF0,
+    0x9F,
+    0x98,
+    0x80,
+    0xFF
+  ]),
   bytes.from_list([0xE2, 0x82, 0xAC, 0xC3]),
-  bytes.from_list([0x0A, 0xFF, 0x0D, 0x0A, 0xC3, 0x0A]),
+  bytes.from_list([
+    0x0A,
+    0xFF,
+    0x0D,
+    0x0A,
+    0xC3,
+    0x0A
+  ])
 ]
 
 // ── valid text beside every boundary a cut or a case map can hit ──
@@ -81,7 +99,7 @@ fn edge_strings() -> List[String] = [
   "\u{FEFF}bom",
   "日本語テキスト",
   "line\nnext\r\nlast\r",
-  "a,b,,c",
+  "a,b,,c"
 ]
 
 fn adversary() -> List[String] = (invalid_corpus() |> list.map((b) => bytes.to_string_lossy(b))) + edge_strings()
@@ -94,7 +112,10 @@ fn err_ok[T](r: Result[T, String]) -> Bool = match r {
 // A decode target (an input type, C-436).
 type Probe: Decode = { s: String }
 
-fn resp_ok(r: HttpResponse) -> Bool = utf8_ok(http.body(r)) and list.all(http.headers(r), ((k, v)) => utf8_ok(k) and utf8_ok(v))
+fn resp_ok(r: HttpResponse) -> Bool = utf8_ok(http.body(r)) and list.all(
+  http.headers(r),
+  ((k, v)) => utf8_ok(k) and utf8_ok(v),
+)
 
 effect fn echo(req: HttpRequest) -> HttpResponse = http.response(200, http.body(req))
 
@@ -112,9 +133,19 @@ test "http messages built from invalid bytes read back valid" {
     let req2 = http.set_header(http.set_body(req, s + s), s, s)
     assert(utf8_ok(http.body(req2)))
     assert(utf8_ok(http.body(http.set_body_bytes(req2, bytes.from_string(s)))))
-    let rs = [http.response(200, s), http.json(201, s), http.response(200, html.escape(s)), http.redirect(s), http.with_headers(404, s, [(s, s)]), http.set_status(http.response(200, s), 500)]
+    let rs = [
+      http.response(200, s),
+      http.json(201, s),
+      http.response(200, html.escape(s)),
+      http.redirect(s),
+      http.with_headers(404, s, [(s, s)]),
+      http.set_status(http.response(200, s), 500)
+    ]
     assert(list.all(rs, (r) => resp_ok(r)))
-    for body_req in [req, http.new_request("POST", "/", "{\"s\": \"" + s + "\"}", [])] {
+    for body_req in [
+      req,
+      http.new_request("POST", "/", "{\"s\": \"" + s + "\"}", [])
+    ] {
       match http.decode_json[Probe](body_req) {
         ok(p) => assert(utf8_ok(p.s)),
         err(r) => assert(resp_ok(r)),

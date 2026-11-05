@@ -4,7 +4,6 @@
 // other way into a String exists) and the valid text next to every boundary a
 // cut or a case map can hit, is checked with an oracle written here, in
 // decimal, sharing no code with any producer it checks.
-
 // ── the oracle: RFC 3629 well-formedness of a String's bytes ──
 fn utf8_in(bs: List[Int], i: Int, lo: Int, hi: Int) -> Bool = match list.get(bs, i) {
   some(b) => b >= lo and b <= hi,
@@ -30,7 +29,8 @@ fn utf8_from(bs: List[Int], i: Int, n: Int) -> Bool =
   if i >= n then true
   else {
     let w = utf8_width(bs, i, list.get(bs, i) ?? 0)
-    if w == 0 then false else utf8_from(bs, i + w, n)
+    if w == 0 then false
+    else utf8_from(bs, i + w, n)
   }
 
 fn utf8_ok(s: String) -> Bool = {
@@ -55,9 +55,26 @@ fn invalid_corpus() -> List[Bytes] = [
   bytes.from_list([0xE2, 0x82]),
   bytes.from_list([0xF0, 0x9F, 0x98]),
   bytes.from_list([0xC3]),
-  bytes.from_list([0x61, 0xE2, 0x82, 0x61, 0xF0, 0x9F, 0x98, 0x80, 0xFF]),
+  bytes.from_list([
+    0x61,
+    0xE2,
+    0x82,
+    0x61,
+    0xF0,
+    0x9F,
+    0x98,
+    0x80,
+    0xFF
+  ]),
   bytes.from_list([0xE2, 0x82, 0xAC, 0xC3]),
-  bytes.from_list([0x0A, 0xFF, 0x0D, 0x0A, 0xC3, 0x0A]),
+  bytes.from_list([
+    0x0A,
+    0xFF,
+    0x0D,
+    0x0A,
+    0xC3,
+    0x0A
+  ])
 ]
 
 // ── valid text beside every boundary a cut or a case map can hit ──
@@ -81,7 +98,7 @@ fn edge_strings() -> List[String] = [
   "\u{FEFF}bom",
   "日本語テキスト",
   "line\nnext\r\nlast\r",
-  "a,b,,c",
+  "a,b,,c"
 ]
 
 fn adversary() -> List[String] = (invalid_corpus() |> list.map((b) => bytes.to_string_lossy(b))) + edge_strings()
@@ -115,7 +132,25 @@ test "bytes.to_string_lossy repairs every invalid sequence" {
 }
 
 test "string.from_codepoint refuses surrogates and scalars past U+10FFFF" {
-  let probes = [-1, 0, 127, 128, 2047, 2048, 55295, 55296, 56319, 56320, 57343, 57344, 65535, 65536, 1114111, 1114112, 2147483647]
+  let probes = [
+    -1,
+    0,
+    127,
+    128,
+    2047,
+    2048,
+    55295,
+    55296,
+    56319,
+    56320,
+    57343,
+    57344,
+    65535,
+    65536,
+    1114111,
+    1114112,
+    2147483647
+  ]
   for n in probes {
     match string.from_codepoint(n) {
       some(s) => assert(utf8_ok(s)),
@@ -135,7 +170,16 @@ test "string.from_codepoint refuses surrogates and scalars past U+10FFFF" {
 }
 
 test "string.from_utf16 refuses unpaired surrogates" {
-  let units = [[55296], [56320], [56320, 55296], [55357, 56832], [55357], [97, 55296, 98], [65533], []]
+  let units = [
+    [55296],
+    [56320],
+    [56320, 55296],
+    [55357, 56832],
+    [55357],
+    [97, 55296, 98],
+    [65533],
+    []
+  ]
   for xs in units {
     match string.from_utf16(xs) {
       ok(s) => assert(utf8_ok(s)),
@@ -244,7 +288,11 @@ test "character iteration hands out whole characters" {
     assert(utf8_ok(string.reverse(s)))
     assert(list.all(string.sort(s), (c) => utf8_ok(c)))
     assert(list.all(string.sort_by(s, (c) => c), (c) => utf8_ok(c)))
-    assert(list.all(string.sort_with(s, (a, b) => if a < b then -1 else if a > b then 1 else 0), (c) => utf8_ok(c)))
+    assert(list.all(
+      string.sort_with(s, (a, b) => if a < b then -1
+      else if a > b then 1 else 0),
+      (c) => utf8_ok(c),
+    ))
     assert(utf8_ok(string.dedup(s)))
     assert(utf8_ok(string.unique(s)))
     assert(utf8_ok(string.unique_by(s, (c) => c)))
@@ -263,7 +311,8 @@ test "character iteration hands out whole characters" {
     assert(list.all(map.values(groups), (cs) => list.all(cs, (c) => utf8_ok(c))))
     assert(utf8_ok(string.max(s) ?? "") and utf8_ok(string.min(s) ?? ""))
     assert(utf8_ok(string.max_by(s, (c) => c) ?? "") and utf8_ok(string.min_by(s, (c) => c) ?? ""))
-    let cmp = (a: String, b: String) => if a < b then -1 else if a > b then 1 else 0
+    let cmp = (a: String, b: String) => if a < b then -1
+    else if a > b then 1 else 0
     assert(utf8_ok(string.max_with(s, cmp) ?? "") and utf8_ok(string.min_with(s, cmp) ?? ""))
     assert(utf8_ok(string.reduce(s, (a, b) => a + b) ?? ""))
     assert(list.all(string.zip(s, list.range(0, 100)), ((c, _)) => utf8_ok(c)))

@@ -35,7 +35,8 @@ fn utf8_from(bs: List[Int], i: Int, n: Int) -> Bool =
   if i >= n then true
   else {
     let w = utf8_width(bs, i, list.get(bs, i) ?? 0)
-    if w == 0 then false else utf8_from(bs, i + w, n)
+    if w == 0 then false
+    else utf8_from(bs, i + w, n)
   }
 
 fn utf8_ok(s: String) -> Bool = {
@@ -60,9 +61,26 @@ fn invalid_corpus() -> List[Bytes] = [
   bytes.from_list([0xE2, 0x82]),
   bytes.from_list([0xF0, 0x9F, 0x98]),
   bytes.from_list([0xC3]),
-  bytes.from_list([0x61, 0xE2, 0x82, 0x61, 0xF0, 0x9F, 0x98, 0x80, 0xFF]),
+  bytes.from_list([
+    0x61,
+    0xE2,
+    0x82,
+    0x61,
+    0xF0,
+    0x9F,
+    0x98,
+    0x80,
+    0xFF
+  ]),
   bytes.from_list([0xE2, 0x82, 0xAC, 0xC3]),
-  bytes.from_list([0x0A, 0xFF, 0x0D, 0x0A, 0xC3, 0x0A]),
+  bytes.from_list([
+    0x0A,
+    0xFF,
+    0x0D,
+    0x0A,
+    0xC3,
+    0x0A
+  ])
 ]
 
 // ── valid text beside every boundary a cut or a case map can hit ──
@@ -86,7 +104,7 @@ fn edge_strings() -> List[String] = [
   "\u{FEFF}bom",
   "日本語テキスト",
   "line\nnext\r\nlast\r",
-  "a,b,,c",
+  "a,b,,c"
 ]
 
 fn adversary() -> List[String] = (invalid_corpus() |> list.map((b) => bytes.to_string_lossy(b))) + edge_strings()
@@ -99,7 +117,14 @@ fn err_ok[T](r: Result[T, String]) -> Bool = match r {
 // The percent spelling of each invalid sequence, and of a valid one.
 fn percent(b: Bytes) -> String = bytes.to_list(b) |> list.map((x) => "%" + hex.encode(bytes.from_list([x]))) |> list.join("")
 
-fn escapes() -> List[String] = (invalid_corpus() |> list.map((b) => percent(b))) + ["%E2%82%AC", "%", "%G0", "%e9", "a+b%20c", "%F0%9F%98%80"]
+fn escapes() -> List[String] = (invalid_corpus() |> list.map((b) => percent(b))) + [
+  "%E2%82%AC",
+  "%",
+  "%G0",
+  "%e9",
+  "a+b%20c",
+  "%F0%9F%98%80"
+]
 
 fn url_ok(u: Url) -> Bool = utf8_ok(url.to_string(u)) and utf8_ok(u.scheme) and utf8_ok(u.host) and utf8_ok(u.path) and utf8_ok(u.query) and utf8_ok(u.fragment)
 
@@ -144,7 +169,18 @@ test "url encoders, parse and resolve stay valid" {
 fn value_ok(v: Value) -> Bool = utf8_ok(json.stringify(v)) and utf8_ok(json.stringify_pretty(v))
 
 test "json.parse refuses escapes of unpaired surrogates and passes valid text" {
-  let texts = ["\"\\uD800\"", "\"\\uDC00\"", "\"\\uD83D\\uDE00\"", "\"\\uD83D\"", "\"\\uD83Dx\"", "\"\\u00e9\\u20AC\"", "\"\\uFFFF\"", "{\"\\uDBFF\\uDFFF\": 1}", "\"\\u", "[\"a\", \"\\uZZZZ\"]"]
+  let texts = [
+    "\"\\uD800\"",
+    "\"\\uDC00\"",
+    "\"\\uD83D\\uDE00\"",
+    "\"\\uD83D\"",
+    "\"\\uD83Dx\"",
+    "\"\\u00e9\\u20AC\"",
+    "\"\\uFFFF\"",
+    "{\"\\uDBFF\\uDFFF\": 1}",
+    "\"\\u",
+    "[\"a\", \"\\uZZZZ\"]"
+  ]
   for t in texts + (adversary() |> list.map((s) => "\"" + s + "\"")) + adversary() {
     match json.parse(t) {
       ok(v) => assert(utf8_ok(json.stringify(v)) and utf8_ok(json.stringify_pretty(v))),
@@ -157,7 +193,15 @@ test "value builders and readers stay valid" {
   let strs = adversary()
   let obj = value.object(strs |> list.map((s) => (s, value.string(s))))
   let arr = value.array(strs |> list.map((s) => value.string(s)))
-  let all = [obj, arr, value.int(1), value.float(1.5), value.bool(true), value.null(), value.merge(obj, value.object([("x", arr)]))]
+  let all = [
+    obj,
+    arr,
+    value.int(1),
+    value.float(1.5),
+    value.bool(true),
+    value.null(),
+    value.merge(obj, value.object([("x", arr)]))
+  ]
   for v in all {
     assert(value_ok(v))
     assert(value_ok(value.omit(v, strs)) and value_ok(value.pick(v, strs)))
@@ -204,7 +248,23 @@ test "path functions cut only at separators and dots" {
 }
 
 test "regex matches and edits stay on character boundaries" {
-  let patterns = [".", "..", "\\w+", "\\W", "\\s*", "", "(.)(.)?", "^", "$", "\\b", "[^a]", "€|é", "(", "[", "a{2"]
+  let patterns = [
+    ".",
+    "..",
+    "\\w+",
+    "\\W",
+    "\\s*",
+    "",
+    "(.)(.)?",
+    "^",
+    "$",
+    "\\b",
+    "[^a]",
+    "€|é",
+    "(",
+    "[",
+    "a{2"
+  ]
   for pat in patterns + adversary() {
     assert(utf8_ok(regex.escape(pat)))
     match regex.compile(pat) {

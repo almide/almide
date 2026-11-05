@@ -29,7 +29,8 @@ fn utf8_from(bs: List[Int], i: Int, n: Int) -> Bool =
   if i >= n then true
   else {
     let w = utf8_width(bs, i, list.get(bs, i) ?? 0)
-    if w == 0 then false else utf8_from(bs, i + w, n)
+    if w == 0 then false
+    else utf8_from(bs, i + w, n)
   }
 
 fn utf8_ok(s: String) -> Bool = {
@@ -54,9 +55,26 @@ fn invalid_corpus() -> List[Bytes] = [
   bytes.from_list([0xE2, 0x82]),
   bytes.from_list([0xF0, 0x9F, 0x98]),
   bytes.from_list([0xC3]),
-  bytes.from_list([0x61, 0xE2, 0x82, 0x61, 0xF0, 0x9F, 0x98, 0x80, 0xFF]),
+  bytes.from_list([
+    0x61,
+    0xE2,
+    0x82,
+    0x61,
+    0xF0,
+    0x9F,
+    0x98,
+    0x80,
+    0xFF
+  ]),
   bytes.from_list([0xE2, 0x82, 0xAC, 0xC3]),
-  bytes.from_list([0x0A, 0xFF, 0x0D, 0x0A, 0xC3, 0x0A]),
+  bytes.from_list([
+    0x0A,
+    0xFF,
+    0x0D,
+    0x0A,
+    0xC3,
+    0x0A
+  ])
 ]
 
 // ── valid text beside every boundary a cut or a case map can hit ──
@@ -80,7 +98,7 @@ fn edge_strings() -> List[String] = [
   "\u{FEFF}bom",
   "日本語テキスト",
   "line\nnext\r\nlast\r",
-  "a,b,,c",
+  "a,b,,c"
 ]
 
 fn adversary() -> List[String] = (invalid_corpus() |> list.map((b) => bytes.to_string_lossy(b))) + edge_strings()

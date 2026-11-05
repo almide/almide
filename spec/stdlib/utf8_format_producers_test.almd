@@ -36,7 +36,8 @@ fn utf8_from(bs: List[Int], i: Int, n: Int) -> Bool =
   if i >= n then true
   else {
     let w = utf8_width(bs, i, list.get(bs, i) ?? 0)
-    if w == 0 then false else utf8_from(bs, i + w, n)
+    if w == 0 then false
+    else utf8_from(bs, i + w, n)
   }
 
 fn utf8_ok(s: String) -> Bool = {
@@ -61,9 +62,26 @@ fn invalid_corpus() -> List[Bytes] = [
   bytes.from_list([0xE2, 0x82]),
   bytes.from_list([0xF0, 0x9F, 0x98]),
   bytes.from_list([0xC3]),
-  bytes.from_list([0x61, 0xE2, 0x82, 0x61, 0xF0, 0x9F, 0x98, 0x80, 0xFF]),
+  bytes.from_list([
+    0x61,
+    0xE2,
+    0x82,
+    0x61,
+    0xF0,
+    0x9F,
+    0x98,
+    0x80,
+    0xFF
+  ]),
   bytes.from_list([0xE2, 0x82, 0xAC, 0xC3]),
-  bytes.from_list([0x0A, 0xFF, 0x0D, 0x0A, 0xC3, 0x0A]),
+  bytes.from_list([
+    0x0A,
+    0xFF,
+    0x0D,
+    0x0A,
+    0xC3,
+    0x0A
+  ])
 ]
 
 // ── valid text beside every boundary a cut or a case map can hit ──
@@ -87,14 +105,40 @@ fn edge_strings() -> List[String] = [
   "\u{FEFF}bom",
   "日本語テキスト",
   "line\nnext\r\nlast\r",
-  "a,b,,c",
+  "a,b,,c"
 ]
 
 fn adversary() -> List[String] = (invalid_corpus() |> list.map((b) => bytes.to_string_lossy(b))) + edge_strings()
 
-fn ints() -> List[Int] = [0, 1, -1, 7, -128, 127, 255, 65535, -2147483648, 4294967295, 9223372036854775807, -9223372036854775807 - 1]
+fn ints() -> List[Int] = [
+  0,
+  1,
+  -1,
+  7,
+  -128,
+  127,
+  255,
+  65535,
+  -2147483648,
+  4294967295,
+  9223372036854775807,
+  -9223372036854775807 - 1
+]
 
-fn parse_texts() -> List[String] = adversary() + ["", "12", "-0", "+7", "0x1F", "1e5", "1.5", "  3 ", "true", "false", "zz", "99999999999999999999999"]
+fn parse_texts() -> List[String] = adversary() + [
+  "",
+  "12",
+  "-0",
+  "+7",
+  "0x1F",
+  "1e5",
+  "1.5",
+  "  3 ",
+  "true",
+  "false",
+  "zz",
+  "99999999999999999999999"
+]
 
 fn err_ok[T](r: Result[T, String]) -> Bool = match r {
   ok(_) => true,
@@ -164,7 +208,19 @@ test "bigint formatting and parsing stay valid" {
 }
 
 test "float and bool formatting and parsing stay valid" {
-  let xs = [0.0, -0.0, 1.5, -2.25, 1.0e300, 1.0e-300, float.max_value(), float.min_value(), float.epsilon(), float.infinity(), float.nan()]
+  let xs = [
+    0.0,
+    -0.0,
+    1.5,
+    -2.25,
+    1.0e300,
+    1.0e-300,
+    float.max_value(),
+    float.min_value(),
+    float.epsilon(),
+    float.infinity(),
+    float.nan()
+  ]
   for x in xs {
     assert(utf8_ok(float.to_string(x)))
     assert(utf8_ok(float64.to_string(float64.from(x))))
@@ -183,7 +239,15 @@ test "float and bool formatting and parsing stay valid" {
 }
 
 test "datetime formatting and parsing stay valid" {
-  let stamps = [0, 1, -1, 86399, 951782400, 4102444800, -62135596800]
+  let stamps = [
+    0,
+    1,
+    -1,
+    86399,
+    951782400,
+    4102444800,
+    -62135596800
+  ]
   for ts in stamps {
     assert(utf8_ok(datetime.to_iso(ts)))
     assert(utf8_ok(datetime.weekday(ts)))
@@ -211,7 +275,9 @@ test "byte encoders turn invalid bytes into ASCII" {
 }
 
 test "uuid text stays valid" {
-  for b in invalid_corpus() + [bytes.from_list(list.map(list.range(0, 16), (_) => 0xFF))] {
+  for b in invalid_corpus() + [
+    bytes.from_list(list.map(list.range(0, 16), (_) => 0xFF))
+  ] {
     match uuid.from_bytes(b) {
       ok(u) => assert(utf8_ok(uuid.to_string(u))),
       err(e) => assert(utf8_ok(e)),
