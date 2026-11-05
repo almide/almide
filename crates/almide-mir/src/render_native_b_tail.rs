@@ -391,9 +391,13 @@ pub(crate) fn render_int_binop(
         IntOp::Shl => format!("{l}.wrapping_shl({r} as u32)"),
         IntOp::Shr => format!("{l}.wrapping_shr({r} as u32)"),
         IntOp::ShrU => format!("((({l} as u64).wrapping_shr({r} as u32)) as i64)"),
-        // The comparisons: a Rust `bool`, widened to the MIR's i64 0/1 here
-        // (a branch-only one is bound as `bool` instead — render_native_cond).
-        _ => format!("({}) as i64", cmp_int_expr(op, &l, &r).unwrap_or_default()),
+        IntOp::LtU => format!("(({l} as u64) < ({r} as u64)) as i64"),
+        IntOp::LeU => format!("(({l} as u64) <= ({r} as u64)) as i64"),
+        IntOp::GtU => format!("(({l} as u64) > ({r} as u64)) as i64"),
+        IntOp::GeU => format!("(({l} as u64) >= ({r} as u64)) as i64"),
+        // The signed comparisons render through `cmp_int_expr` (as a `bool`
+        // when only a branch reads them — render_native_cond), never here.
+        _ => return Err(wall("native: a signed comparison reached the arithmetic render")),
     })
 }
 
@@ -433,8 +437,8 @@ fn checked_int_binop(op: &IntOp, b: ValueId, l: &str, r: &str, used_shims: &mut 
     }
 }
 
-/// An integer comparison as a Rust `bool` expression (`None` for any other op).
-/// The unsigned lane (#872) casts both sides to `u64`.
+/// A signed integer comparison as a Rust `bool` expression (`None` for any
+/// other op; the unsigned lane's stay in [`render_int_binop`]).
 pub(crate) fn cmp_int_expr(op: &IntOp, l: &str, r: &str) -> Option<String> {
     Some(match op {
         IntOp::Eq => format!("{l} == {r}"),
@@ -443,10 +447,6 @@ pub(crate) fn cmp_int_expr(op: &IntOp, l: &str, r: &str) -> Option<String> {
         IntOp::Le => format!("{l} <= {r}"),
         IntOp::Gt => format!("{l} > {r}"),
         IntOp::Ge => format!("{l} >= {r}"),
-        IntOp::LtU => format!("({l} as u64) < ({r} as u64)"),
-        IntOp::LeU => format!("({l} as u64) <= ({r} as u64)"),
-        IntOp::GtU => format!("({l} as u64) > ({r} as u64)"),
-        IntOp::GeU => format!("({l} as u64) >= ({r} as u64)"),
         _ => return None,
     })
 }
