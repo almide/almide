@@ -1,0 +1,42 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf-shapes.sh, #4503): the
+// list `+` over lists of lists. A self tail call prepends to its carry with
+// both operands dying (koka_hqueens' shape), with a left operand read again
+// after the `+` (its element lists are cloned, the dying carry's moved), and
+// grows a dying left operand by a right one that stays live.
+fn prepend(n: Int, acc: List[List[Int]]) -> List[List[Int]] = if n <= 0 then acc
+else prepend(n - 1, [
+  [n, n + 1]
+] + acc)
+
+fn keep_head(n: Int, acc: List[List[Int]], k: Int) -> Int = if n <= 0 then list.len(acc) + k
+else {
+  let pre = [
+    [n],
+    [k]
+  ]
+  let next = pre + acc
+  keep_head(n - 1, next, k + list.len(pre))
+}
+
+fn grow_left(n: Int, k: Int) -> Int = if n <= 0 then k
+else {
+  let tail = [
+    [1],
+    [2, 3],
+    [k]
+  ]
+  let row = [
+    [n],
+    [n, n]
+  ]
+  let both = row + tail
+  grow_left(n - 1, k + list.len(both) + list.len(tail))
+}
+
+fn main() -> Unit = {
+  let n = int.parse("1500") ?? 2
+  let a = prepend(n, [
+    [0]
+  ])
+  println(int.to_string(list.len(a) + keep_head(n, [], 0) + grow_left(n, 0)))
+}
