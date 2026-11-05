@@ -124,29 +124,29 @@ const CUTS: [Cut; 2] = [
     },
 ];
 
-/// The split for this process's toolchain, built on first use and cached on
-/// disk; `None` means "link with the plain profile".
+/// The split for this process's toolchain and the build's `--target-cpu`
+/// ([`super::native_target::release_target_cpu`]), built on first use and
+/// cached on disk; `None` means "link with the plain profile".
 pub(super) fn release_std_split() -> Option<&'static StdSplit> {
-    static SPLIT: std::sync::OnceLock<Option<StdSplit>> = std::sync::OnceLock::new();
-    SPLIT
-        .get_or_init(|| {
-            if !cfg!(target_os = "linux")
-                || almide_base::env::flag("ALMIDE_RELEASE_STD_UNSPLIT")
-                || super::native_target::cross_target().is_some()
-            {
-                return None;
+    type Splits = std::collections::HashMap<Option<String>, Option<&'static StdSplit>>;
+    static SPLITS: std::sync::OnceLock<std::sync::Mutex<Splits>> = std::sync::OnceLock::new();
+    if !cfg!(target_os = "linux")
+        || almide_base::env::flag("ALMIDE_RELEASE_STD_UNSPLIT")
+        || super::native_target::cross_target().is_some()
+    {
+        return None;
+    }
+    let cpu = super::native_target::release_target_cpu();
+    let mut splits = SPLITS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    *splits.entry(cpu.clone()).or_insert_with(|| match ensure_split(cpu.as_deref()) {
+        Ok(split) => split.map(|s| &*Box::leak(Box::new(s))),
+        Err(e) => {
+            if almide_base::env::flag("ALMIDE_DEBUG_STD_SPLIT") {
+                eprintln!("almide: release std split unavailable: {e}");
             }
-            match ensure_split() {
-                Ok(split) => split,
-                Err(e) => {
-                    if almide_base::env::flag("ALMIDE_DEBUG_STD_SPLIT") {
-                        eprintln!("almide: release std split unavailable: {e}");
-                    }
-                    None
-                }
-            }
-        })
-        .as_ref()
+            None
+        }
+    })
 }
 
 /// The toolchain's sysroot, host triple and the directory its `llvm-tools` live in.
@@ -184,7 +184,7 @@ impl Toolchain {
     }
 }
 
-fn ensure_split() -> Result<Option<StdSplit>, String> {
+fn ensure_split(cpu: Option<&str>) -> Result<Option<StdSplit>, String> {
     let tc = Toolchain::detect()?;
     if let Some(missing) = TOOLS.iter().find(|t| !tc.tool(t).exists()) {
         return Err(format!("{missing} not found (rustup component add llvm-tools)"));
@@ -201,43 +201,111 @@ fn ensure_split() -> Result<Option<StdSplit>, String> {
     // Under the rtlib prefix, so the weekly sweep of unused runtime caches
     // (#2504) empties a split no build has linked for a week.
     let dir = super::build_dir::cache_base().join(format!("{}stdsplit-{key}", super::build_dir::RTLIB_DIR_PREFIX));
-    let ready = dir.join("READY");
-    let failed = dir.join("FAILED");
-    let split = || StdSplit { sysroot: dir.join("sysroot"), object: dir.join("backtrace.o") };
+    // The object is compiled for the build's CPU: the std functions it
+    // shares with the program are the program's code (#4497), and were
+    // compiled for that CPU in its LTO module before.
+    let label = cpu.map_or_else(|| "generic".to_string(), |c| c.chars().map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' }).collect());
+    let obj_dir = dir.join(format!("cpu-{label}"));
+    let ready = obj_dir.join("READY");
+    let split = || StdSplit { sysroot: dir.join("sysroot"), object: obj_dir.join("backtrace.o") };
     let use_ready = |s: StdSplit| {
-        super::build_dir::touch_used(&ready);
+        super::build_dir::touch_used(&dir.join("READY"));
         Ok(Some(s))
     };
+    let failed = |d: &Path| d.join("FAILED").exists();
     if ready.exists() {
         return use_ready(split());
     }
-    if failed.exists() {
+    if failed(&dir) || failed(&obj_dir) {
         return Ok(None);
     }
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    std::fs::create_dir_all(&obj_dir).map_err(|e| format!("{}: {e}", obj_dir.display()))?;
     let _lock = super::build_dir::BuildDirLock::acquire(&dir)?;
     if ready.exists() {
         return use_ready(split());
     }
-    if failed.exists() {
+    if failed(&dir) || failed(&obj_dir) {
         return Ok(None);
     }
-    match build_split(&tc, &std_rlib, &dir) {
+    // A failure is a property of this toolchain (a std whose printer moved)
+    // or of this CPU (a probe this host cannot run, or that printed
+    // differently): recorded, so every later build takes the plain profile
+    // without retrying.
+    let record = |d: &Path, e: String| {
+        let _ = std::fs::write(d.join("FAILED"), e.as_bytes());
+        if !almide_base::env::flag("ALMIDE_DEBUG_STD_SPLIT") {
+            let _ = std::fs::remove_dir_all(d.join("work"));
+        }
+        Err(e)
+    };
+    let info = match SplitInfo::read(&dir) {
+        Some(info) => info,
+        None => match build_sysroot_split(&tc, &std_rlib, &dir) {
+            Ok(info) => {
+                info.write(&dir)?;
+                let _ = std::fs::remove_dir_all(dir.join("work"));
+                info
+            }
+            Err(e) => return record(&dir, e),
+        },
+    };
+    match build_cpu_object(&tc, &dir, &obj_dir, &info, cpu) {
         Ok(()) => {
             std::fs::write(&ready, b"").map_err(|e| format!("{}: {e}", ready.display()))?;
-            let _ = std::fs::remove_dir_all(dir.join("work"));
+            std::fs::write(dir.join("READY"), b"").map_err(|e| format!("{}: {e}", dir.display()))?;
+            let _ = std::fs::remove_dir_all(obj_dir.join("work"));
             Ok(Some(split()))
         }
-        Err(e) => {
-            // A failure is a property of this toolchain (a std whose printer
-            // moved, a probe that printed differently): recorded, so every
-            // later build takes the plain profile without retrying.
-            let _ = std::fs::write(&failed, e.as_bytes());
-            if !almide_base::env::flag("ALMIDE_DEBUG_STD_SPLIT") {
-                let _ = std::fs::remove_dir_all(dir.join("work"));
-            }
-            Err(e)
+        Err(e) => record(&obj_dir, e),
+    }
+}
+
+/// What the toolchain phase decided, kept next to the sysroot so an object
+/// for another CPU is built against the same split: the cut functions, the
+/// shared thread-local, and the shared std functions.
+struct SplitInfo {
+    cuts: Vec<String>,
+    tls: String,
+    shared: Shared,
+}
+
+impl SplitInfo {
+    const FILE: &'static str = "SPLIT";
+    fn write(&self, dir: &Path) -> Result<(), String> {
+        let mut text = String::new();
+        for c in &self.cuts {
+            text.push_str(&format!("cut {c}\n"));
         }
+        text.push_str(&format!("tls {}\n", self.tls));
+        let mut moved: Vec<&String> = self.shared.moved.iter().collect();
+        moved.sort();
+        for m in moved {
+            text.push_str(&format!("moved {m}\n"));
+        }
+        let mut referenced: Vec<&String> = self.shared.referenced.iter().collect();
+        referenced.sort();
+        for r in referenced {
+            text.push_str(&format!("referenced {r}\n"));
+        }
+        std::fs::write(dir.join(Self::FILE), text).map_err(|e| format!("{}: {e}", dir.display()))
+    }
+    fn read(dir: &Path) -> Option<Self> {
+        let text = std::fs::read_to_string(dir.join(Self::FILE)).ok()?;
+        let mut info = SplitInfo { cuts: Vec::new(), tls: String::new(), shared: Shared::default() };
+        for line in text.lines() {
+            match line.split_once(' ')? {
+                ("cut", n) => info.cuts.push(n.to_string()),
+                ("tls", n) => info.tls = n.to_string(),
+                ("moved", n) => {
+                    info.shared.moved.insert(n.to_string());
+                }
+                ("referenced", n) => {
+                    info.shared.referenced.insert(n.to_string());
+                }
+                _ => return None,
+            }
+        }
+        (info.cuts.len() == CUTS.len() && !info.tls.is_empty()).then_some(info)
     }
 }
 
@@ -266,39 +334,54 @@ fn run(cmd: &mut std::process::Command) -> Result<std::process::Output, String> 
     }
 }
 
-fn build_split(tc: &Toolchain, std_rlib: &Path, dir: &Path) -> Result<(), String> {
+/// The toolchain phase: the split sysroot, and the decision which std
+/// functions the object shares with the program (#4497), made against an
+/// object for the generic CPU.
+fn build_sysroot_split(tc: &Toolchain, std_rlib: &Path, dir: &Path) -> Result<SplitInfo, String> {
     let work = dir.join("work");
     let _ = std::fs::remove_dir_all(&work);
     let _ = std::fs::remove_dir_all(dir.join("sysroot"));
     std::fs::create_dir_all(&work).map_err(|e| format!("{}: {e}", work.display()))?;
-    let (names, shared, std_unpacked) = build_sysroot(tc, std_rlib, dir, &work)?;
-    let merged = seed_lto_input(tc, &work)?;
-    let object = dir.join("backtrace.o");
-    build_object(tc, &work, &merged, &names, &shared, &Shared::default(), &object)?;
-    // The printer's private copies of std functions the program keeps anyway
+    let (cuts, tls, std_unpacked) = build_sysroot(tc, std_rlib, dir, &work)?;
+    let merged = seed_lto_input(tc, &work, None)?;
+    let object = work.join("backtrace.o");
+    build_object(tc, &work, &merged, &cuts, &tls, &Shared::default(), &object)?;
+    // The printer's private copies of std functions the program links too
     // (fmt, the panic path, str search…) would be linked twice: once from the
-    // LTO module, once from the object (#4497). Find them by linking the seed
-    // against the split; the seed links at opt-level 0 so that nothing is
-    // inlined away and every std function its code reaches is a definition
-    // to match. Then rebuild the sysroot and the object so each has one copy.
-    let twice = defined_twice(tc, dir, &work, 0)?;
+    // LTO module, once from the object. Find them by linking the seed against
+    // the split; the seed links at opt-level 0 so that nothing is inlined
+    // away and every std function its code reaches is a definition to match.
+    let twice = defined_twice(tc, &dir.join("sysroot"), &object, &work, 0)?;
     let optimized = work.join("backtrace.ll");
     run(std::process::Command::new(tc.tool("llvm-dis")).arg(work.join("backtrace.bc")).arg("-o").arg(&optimized))?;
-    let stateful = stateful_functions(&std::fs::read_to_string(&optimized).map_err(|e| format!("{}: {e}", optimized.display()))?, &twice);
-    let with = share_with_program(tc, dir, &work, std_unpacked, &twice, &stateful)?;
-    build_object(tc, &work, &merged, &names, &shared, &with, &object)?;
+    let ir = std::fs::read_to_string(&optimized).map_err(|e| format!("{}: {e}", optimized.display()))?;
+    let stateful = stateful_functions(&ir, &twice);
+    let shared = share_with_program(tc, dir, &work, std_unpacked, &twice, &stateful)?;
     if almide_base::env::flag("ALMIDE_DEBUG_STD_SPLIT") {
-        let left = defined_twice(tc, dir, &work, 3)?;
         eprintln!(
-            "almide: std split: {} functions defined twice, {} moved to the object, {} kept in the program, {} left: {:?}",
+            "almide: std split: {} functions defined twice, {} moved to the object, {} kept in the program",
             twice.len(),
-            with.moved.len(),
-            with.referenced.len(),
-            left.len(),
-            left
+            shared.moved.len(),
+            shared.referenced.len()
         );
     }
-    probe(tc, dir, &work)
+    Ok(SplitInfo { cuts, tls, shared })
+}
+
+/// The CPU phase: `backtrace.o` for `cpu`, and the probe that gates it.
+fn build_cpu_object(tc: &Toolchain, dir: &Path, obj_dir: &Path, info: &SplitInfo, cpu: Option<&str>) -> Result<(), String> {
+    let work = obj_dir.join("work");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).map_err(|e| format!("{}: {e}", work.display()))?;
+    let merged = seed_lto_input(tc, &work, cpu)?;
+    let object = obj_dir.join("backtrace.o");
+    build_object(tc, &work, &merged, &info.cuts, &info.tls, &info.shared, &object)?;
+    let split = StdSplit { sysroot: dir.join("sysroot"), object };
+    if almide_base::env::flag("ALMIDE_DEBUG_STD_SPLIT") {
+        let left = defined_twice(tc, &split.sysroot, &split.object, &work, 3)?;
+        eprintln!("almide: std split ({}): {} functions still defined twice: {left:?}", cpu.unwrap_or("generic"), left.len());
+    }
+    probe(&split, &work, cpu)
 }
 
 /// An rlib unpacked into its own work directory: its members in order, and
@@ -419,8 +502,14 @@ fn build_sysroot(tc: &Toolchain, std_rlib: &Path, dir: &Path, work: &Path) -> Re
 
 /// The function symbols the seed, linked against the split, defines twice:
 /// once in its LTO module, once as a private copy in `backtrace.o`.
-fn defined_twice(tc: &Toolchain, dir: &Path, work: &Path, opt_level: u8) -> Result<std::collections::BTreeSet<String>, String> {
-    let split = StdSplit { sysroot: dir.join("sysroot"), object: dir.join("backtrace.o") };
+fn defined_twice(
+    tc: &Toolchain,
+    sysroot: &Path,
+    object: &Path,
+    work: &Path,
+    opt_level: u8,
+) -> Result<std::collections::BTreeSet<String>, String> {
+    let split = StdSplit { sysroot: sysroot.to_path_buf(), object: object.to_path_buf() };
     let bin = work.join("seed").join(format!("seed-split-O{opt_level}"));
     run(std::process::Command::new(crate::find_rustc())
         .arg(work.join("seed.rs"))
@@ -791,9 +880,15 @@ fn main() {
 }
 "#;
 
+/// `-C target-cpu=<cpu>`, when the build names one.
+fn cpu_args(cpu: Option<&str>) -> Vec<String> {
+    cpu.map(|c| vec!["-C".to_string(), format!("target-cpu={c}")]).unwrap_or_default()
+}
+
 /// The merged LTO input of a seed build with the plain sysroot (std, its
-/// dependencies and rustc's allocator shim), as IR text.
-fn seed_lto_input(tc: &Toolchain, work: &Path) -> Result<String, String> {
+/// dependencies and rustc's allocator shim) for `cpu`, as IR text: its
+/// function attributes carry that CPU, so the object is compiled for it.
+fn seed_lto_input(tc: &Toolchain, work: &Path, cpu: Option<&str>) -> Result<String, String> {
     let src = work.join("seed.rs");
     std::fs::write(&src, SEED).map_err(|e| format!("{e}"))?;
     let seed_dir = work.join("seed");
@@ -801,6 +896,7 @@ fn seed_lto_input(tc: &Toolchain, work: &Path) -> Result<String, String> {
     run(std::process::Command::new(crate::find_rustc())
         .arg(&src)
         .args(["--edition", "2021", "-C", "opt-level=3", "-C", "lto=fat", "-C", "codegen-units=1", "-C", "save-temps"])
+        .args(cpu_args(cpu))
         .arg("-o")
         .arg(seed_dir.join("seed"))
         .current_dir(&seed_dir))?;
@@ -892,8 +988,12 @@ fn build_object(
     let bc = work.join("merged.bc");
     run(std::process::Command::new(tc.tool("llvm-as")).arg(&ll).arg("-o").arg(&bc))?;
     let opt_bc = work.join("backtrace.bc");
+    // O3 and the release LLVM options: the moved std functions are the
+    // program's code and were optimized that way in its LTO module; the
+    // printer's own functions carry `optsize` whatever the level.
     run(std::process::Command::new(tc.tool("opt"))
-        .arg("-passes=internalize,globaldce,default<O2>")
+        .arg("-passes=internalize,globaldce,default<O3>")
+        .args(super::native_target::RELEASE_LLVM_ARGS)
         .arg(format!(
             "-internalize-public-api-list={}",
             names.iter().chain(with.moved.iter()).map(String::as_str).collect::<Vec<_>>().join(",")
@@ -902,7 +1002,7 @@ fn build_object(
         .arg("-o")
         .arg(&opt_bc))?;
     run(std::process::Command::new(tc.tool("llc"))
-        .args(["-O2", "-filetype=obj", "-relocation-model=pic", "-function-sections", "-data-sections"])
+        .args(["-O3", "-filetype=obj", "-relocation-model=pic", "-function-sections", "-data-sections"])
         .arg(&opt_bc)
         .arg("-o")
         .arg(out))?;
@@ -912,7 +1012,7 @@ fn build_object(
 /// Build a panicking probe with the plain sysroot and with the split one,
 /// and require the same panic output from both under every `RUST_BACKTRACE`
 /// setting. Thread ids and addresses differ run to run and are normalized.
-fn probe(_tc: &Toolchain, dir: &Path, work: &Path) -> Result<(), String> {
+fn probe(split: &StdSplit, work: &Path, cpu: Option<&str>) -> Result<(), String> {
     let src = work.join("probe.rs");
     std::fs::write(
         &src,
@@ -921,12 +1021,13 @@ fn probe(_tc: &Toolchain, dir: &Path, work: &Path) -> Result<(), String> {
          fn main() { println!(\"start\"); let n = std::env::args().count(); println!(\"{}\", outer(n)); }\n",
     )
     .map_err(|e| format!("{e}"))?;
-    let split = StdSplit { sysroot: dir.join("sysroot"), object: dir.join("backtrace.o") };
     let build = |out: &Path, extra: &[String]| {
         run(std::process::Command::new(crate::find_rustc())
             .arg(&src)
-            // The host's generic CPU: the probe runs here, whatever `--target-cpu` the builds ask for.
+            // The object's CPU: the probe runs here, so a CPU this host
+            // cannot run fails it and that CPU links with the plain profile.
             .args(["--edition", "2021", "-C", "opt-level=3", "-C", "lto=fat", "-C", "codegen-units=1", "-C", "strip=debuginfo"])
+            .args(cpu_args(cpu))
             .args(extra)
             .arg("-o")
             .arg(out))
