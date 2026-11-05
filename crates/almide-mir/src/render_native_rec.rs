@@ -44,6 +44,10 @@ pub(crate) struct RecDecl {
     /// A `Set[A]`: v0's runtime `AlmideSet<elem>`, so the declared floor's
     /// set bodies take it as is.
     pub set_of: Option<NTy>,
+    /// A region twin enum (#4006 C2, `__rgn_` from the region-window rewrite,
+    /// read off `codegen_annotations.region_enums`): `Copy`, its recursive
+    /// fields `AlmideRgn` handles into the arena instead of `Box`.
+    pub region: bool,
 }
 
 /// A type the MIR carries in one i64 lane, read off its `Repr` (the layout
@@ -329,6 +333,24 @@ thread_local! {
     static SCALAR_INSTANCES: RefCell<std::collections::BTreeSet<String>> = const { RefCell::new(std::collections::BTreeSet::new()) };
     static RECS: RefCell<Vec<RecDecl>> = const { RefCell::new(Vec::new()) };
     static INPUTS: RefCell<Option<Inputs>> = const { RefCell::new(None) };
+    /// The region twin enums of this render, by declared name.
+    static REGION_NAMES: RefCell<std::collections::BTreeSet<String>> = const { RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// Mark the region twins of a derived table.
+fn mark_regions(mut recs: Vec<RecDecl>) -> Vec<RecDecl> {
+    REGION_NAMES.with(|n| {
+        let n = n.borrow();
+        for d in recs.iter_mut() {
+            d.region = d.cases.is_some() && n.contains(&d.name);
+        }
+    });
+    recs
+}
+
+/// Generated type `i` is a region twin enum.
+pub(crate) fn is_region(i: u16) -> bool {
+    RECS.with(|r| r.borrow().get(i as usize).is_some_and(|d| d.region))
 }
 
 /// Derive and install the table for one render.
@@ -336,8 +358,10 @@ pub(crate) fn install_derived(
     layouts: &crate::lower::RecordLayouts,
     variants: &crate::lower::VariantLayouts,
     tuples: Vec<almide_lang::types::Ty>,
+    region_names: std::collections::BTreeSet<String>,
 ) -> RecGuard {
-    let recs = derive_records(layouts, variants, &tuples);
+    REGION_NAMES.with(|n| *n.borrow_mut() = region_names);
+    let recs = mark_regions(derive_records(layouts, variants, &tuples));
     INPUTS.with(|i| *i.borrow_mut() = Some((layouts.clone(), variants.clone(), tuples)));
     install(recs)
 }
@@ -360,7 +384,7 @@ pub(crate) fn extend_with(more: &[almide_lang::types::Ty]) {
                 }
             }
         }
-        grew.then(|| derive_records(l, v, ts))
+        grew.then(|| mark_regions(derive_records(l, v, ts)))
     });
     if let Some(recs) = recs {
         RECS.with(|r| *r.borrow_mut() = recs);
@@ -374,6 +398,7 @@ impl Drop for RecGuard {
         RECS.with(|r| r.borrow_mut().clear());
         INPUTS.with(|i| *i.borrow_mut() = None);
         SCALAR_INSTANCES.with(|si| si.borrow_mut().clear());
+        REGION_NAMES.with(|n| n.borrow_mut().clear());
     }
 }
 
@@ -478,14 +503,25 @@ pub(crate) fn enum_field_boxed(i: u16, f: NTy) -> bool {
     })
 }
 
-/// An enum payload field's spelling: boxed where [`enum_field_boxed`] says so.
+/// An enum payload field's spelling: boxed where [`enum_field_boxed`] says so
+/// — in a region twin (#4006 C2) the box is an `AlmideRgn` arena handle.
 fn enum_field_ty(i: u16, f: &NTy) -> String {
-    if enum_field_boxed(i, *f) { format!("Box<{}>", owned_ty(*f)) } else { owned_ty(*f) }
+    let boxed = if is_region(i) { "AlmideRgn" } else { "Box" };
+    if enum_field_boxed(i, *f) { format!("{boxed}<{}>", owned_ty(*f)) } else { owned_ty(*f) }
+}
+
+/// The constructor of a boxed field of enum `i`: `Box::new`, or in a region
+/// twin the arena allocation (`prelude_region.rs`'s `almide_rgn_alloc`).
+pub(crate) fn box_new(i: u16) -> &'static str {
+    if is_region(i) { "almide_rgn_alloc" } else { "Box::new" }
 }
 
 fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     let n = struct_name(i);
-    let mut out = format!("/// variant `{}`\n#[derive(Clone)]\nenum {n} {{\n", d.name);
+    // A region twin is `Copy` (its boxed fields are arena handles), so a
+    // rewound window block owns nothing to drop.
+    let derive = if d.region { "Clone, Copy" } else { "Clone" };
+    let mut out = format!("/// variant `{}`\n#[derive({derive})]\nenum {n} {{\n", d.name);
     for (t, fs) in cases {
         if fs.is_empty() {
             out.push_str(&format!("    C{t},\n"));
@@ -499,7 +535,7 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     let leaf = d.default_tag.unwrap_or(cases[0].0);
     out.push_str(&format!("impl Default for {n} {{\n    fn default() -> Self {{ Self::with_tag({leaf}) }}\n}}\n"));
     out.push_str(&format!("#[allow(unused_variables, unreachable_patterns)]\nimpl {n} {{\n"));
-    out.push_str(&enum_tag_fns(cases));
+    out.push_str(&enum_tag_fns(i, cases));
     let width = cases.iter().map(|(_, fs)| fs.len()).max().unwrap_or(0);
     for k in 1..=width {
         for kind in enum_slot_kinds(i, k) {
@@ -519,15 +555,21 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
 
 /// An enum's `with_tag` (the constructor at `t` with default payloads) and
 /// `tag` methods.
-fn enum_tag_fns(cases: &[(u32, Vec<NTy>)]) -> String {
+fn enum_tag_fns(i: u16, cases: &[(u32, Vec<NTy>)]) -> String {
     let mut out = String::new();
-    // with_tag: the constructor at `t` with default payloads.
+    // with_tag: the constructor at `t` with default payloads. A region twin's
+    // arena handle has no `Default`: its default is a default node in the arena.
+    let region = is_region(i);
     out.push_str("    fn with_tag(t: i64) -> Self {\n        match t {\n");
     for (t, fs) in cases {
         if fs.is_empty() {
             out.push_str(&format!("            {t} => Self::C{t},\n"));
         } else {
-            let defs = vec!["Default::default()"; fs.len()].join(", ");
+            let defs = fs
+                .iter()
+                .map(|f| if region && enum_field_boxed(i, *f) { "almide_rgn_alloc(Default::default())" } else { "Default::default()" })
+                .collect::<Vec<_>>()
+                .join(", ");
             out.push_str(&format!("            {t} => Self::C{t}({defs}),\n"));
         }
     }
@@ -562,7 +604,7 @@ fn enum_slot_fns(i: u16, k: usize, kind: NTy, cases: &[(u32, Vec<NTy>)]) -> Stri
         let pat = format!("Self::C{t}({})", slot_binds(fs.len(), k));
         let (rd, wr) = match kind {
             NTy::I64 => ("*f".to_string(), "*f = x".to_string()),
-            NTy::Rec(_) if enum_field_boxed(i, kind) => ("(**f).clone()".to_string(), "*f = Box::new(x)".to_string()),
+            NTy::Rec(_) if enum_field_boxed(i, kind) => ("(**f).clone()".to_string(), format!("*f = {}(x)", box_new(i))),
             _ => ("f.clone()".to_string(), "*f = x".to_string()),
         };
         get.push_str(&format!("            {pat} => {rd},\n"));
