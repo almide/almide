@@ -318,7 +318,7 @@ impl Sim<'_> {
     fn dead(&mut self, items: &[It]) {
         let mut t = Vec::new();
         let sk = Skel { rslot: 0, body: items.to_vec(), sites: Vec::new() };
-        for tok in lin::template(0, &sk).into_iter().skip(0) {
+        for tok in lin::template(0, &sk) {
             t.push(tok);
         }
         // The template starts with the procedure's two fact holes.
@@ -852,8 +852,12 @@ pub fn certify(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usize, St
     certify_table(wasm, anchors).map(|(c, r, _)| (c, r))
 }
 
+/// [`certify_table`]'s answer: the certificate text, the reason each
+/// uncertified function was left out, and the certified functions.
+pub type Certified = (String, BTreeMap<usize, String>, BTreeSet<usize>);
+
 /// [`certify`], and the positions certified.
-pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<(String, BTreeMap<usize, String>, BTreeSet<usize>), String> {
+pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<Certified, String> {
     let budget = std::env::var("ALMIDE_LIN_PIVOTS").ok().and_then(|s| s.parse().ok()).unwrap_or(PIVOT_BUDGET);
     BUDGET.with(|b| b.set(budget));
     lp::reset_pivots();
