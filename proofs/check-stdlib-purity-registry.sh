@@ -102,7 +102,7 @@ n_effectful=0
 n_unclassified=0
 for src in "$STDLIB"/*.almd; do
   m=$(basename "$src" .almd)
-  if echo "$pure_modules" | grep -qx "$m"; then
+  if grep -qxF "$m" <<<"$pure_modules"; then
     continue # PURE (checked above)
   elif has_effect_fn "$src"; then
     n_effectful=$((n_effectful + 1)) # EFFECTFUL (walled by the keyword)

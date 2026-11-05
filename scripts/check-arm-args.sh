@@ -45,7 +45,7 @@ for f in "$SRC"/*.rs; do
     fail=1
   fi
   while IFS=: read -r ln text; do
-    if echo "$text" | grep -qE 'self\.lower\((body|fold_body|arm),'; then continue; fi
+    if grep -qE 'self\.lower\((body|fold_body|arm),' <<<"$text"; then continue; fi
     echo "FAIL: $f:$ln lowers an argument without declaring its mode (use lower_arg(.., ArgMode::Borrow | ArgMode::Retain))"
     echo "    | $text"
     fail=1
