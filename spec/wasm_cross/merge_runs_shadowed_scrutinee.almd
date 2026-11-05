@@ -1,14 +1,11 @@
 // @contract: C-292
-// koka #186 (reused-names): merge-sort run detection where a nested pattern
-// REBINDS the outer scrutinee's name (`ICons(b, xs)` shadowing param `xs`)
-// while a sibling arm still refers to the OUTER binding — uniquify must not
-// substitute across arms. Closure accumulation in the ascending path.
+// Merge-sort run detection where a nested pattern REBINDS the outer
+// scrutinee's name (`ICons(b, xs)` shadowing param `xs`) while a sibling arm
+// still refers to the OUTER binding — uniquify must not substitute across
+// arms. Closure accumulation in the ascending path.
 type IList = | INil | ICons(Int, IList)
 
-fn show(xs: List[List[Int]]) -> String = list.join(
-  list.map(xs, (r) => "[${list.join(list.map(r, (v) => int.to_string(v)), ",")}]"),
-  "",
-)
+fn show(xs: List[List[Int]]) -> String = xs |> list.map((r) => "[${r |> list.map((v) => int.to_string(v)) |> list.join(",")}]") |> list.join("")
 
 fn to_ilist(xs: List[Int], i: Int) -> IList = if i >= list.len(xs) then INil
 else ICons(list.get(xs, i) ?? 0, to_ilist(xs, i + 1))

@@ -1,17 +1,19 @@
 // @contract: C-292
-// koka beans.kk (Counting Immutable Beans examples): Pair(x, x) dups its
-// argument on construction; borrow-tail f(y, y) passes one value into two
-// consuming slots; hasNothing walks List-of-Option recursively.
+// One value fed into two owning slots: Pair(x, x) dups its argument on
+// construction; the tail call f(y, y) passes one value into two consuming
+// parameters; has_none walks a List-of-Option recursively.
 type Pr = | Pair(String, String)
 
 fn mk_pair_of(x: String) -> Pr = Pair(x, x)
 
 fn both(f: (String, String) -> String, y: String) -> String = f(y, y)
 
-fn has_none(xs: List[Int?]) -> Bool = if list.len(xs) == 0 then false
-else match list.get(xs, 0) ?? some(0) {
-  none => true,
-  some(_) => has_none(list.slice(xs, 1, list.len(xs))),
+fn has_none(xs: List[Int?]) -> Bool = match xs {
+  [] => false,
+  [h, ..t] => match h {
+    none => true,
+    some(_) => has_none(t),
+  },
 }
 
 fn main() -> Unit = {
