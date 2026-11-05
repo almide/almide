@@ -21,15 +21,18 @@
 //! This route is ONLY the fallback of a call the linked body refuses, so every
 //! program the linked bodies already render keeps its render.
 //!
-//! The closure crosses as `Rc<dyn Fn>`, the runtime's own parameter type: an
-//! adapter that owns a copy of the closure's env block (scalar captures only:
-//! the env is a plain slot list) and calls the lifted lambda the block was
-//! built from, lending each element the way a `CallIndirect` lends a heap
-//! argument. The function-typed argument must be a closure block this
-//! function built from a lifted lambda, so the lambda and its signature are
-//! known; any other walls as before. A list argument the call is its last
-//! reader of moves into the runtime body; any other is copied, so the caller
-//! keeps its value either way.
+//! The runtime body takes its closure as `Rc<dyn Fn>`; the render calls its
+//! static-dispatch twin (`static_twin`: the same body text with that param
+//! taken as `impl Fn`), so the closure costs no allocation and LLVM can
+//! inline the call, as the standard codegen's fused iterator chain does.
+//! The closure passed borrows a stack copy of the closure block's slots
+//! (scalar captures only: the env is a plain slot list) and calls the lifted
+//! lambda the block was built from, lending each element the way a
+//! `CallIndirect` lends a heap argument. The function-typed argument must be
+//! a closure block this function built from a lifted lambda, so the lambda
+//! and its signature are known; any other walls as before. A list argument
+//! the call is its last reader of moves into the runtime body; any other is
+//! copied, so the caller keeps its value either way.
 //!
 //! The site is recorded for the `native-calls` witness, which gives it a row
 //! against a runtime block (`certificate::native_calls_witness_with`): every
@@ -67,8 +70,11 @@ pub(crate) struct Hof {
     /// Each param's declared type and whether the runtime borrows it.
     params: Vec<(DTy, bool)>,
     ret: DTy,
-    /// The runtime body and every runtime item it reaches.
+    /// The runtime body's static-dispatch twin (`static_twin`) and every
+    /// other runtime item the body reaches.
     items: Vec<&'static str>,
+    /// The twin's name.
+    pub twin: String,
 }
 
 fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
@@ -165,7 +171,49 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
         .map(|(d, r)| rust_agrees(&d, r).map(|b| (d, b)))
         .collect::<Option<_>>()
         .ok_or_else(|| format!("runtime params {rust_params:?} disagree"))?;
-    Ok(Hof { symbol, params, ret: dret, items })
+    let (twin, text) = static_twin(&symbol, items.first().copied().ok_or("no runtime body text")?).ok_or("the runtime body has no `Rc<dyn Fn>` param to take statically")?;
+    let mut items = items;
+    items[0] = Box::leak(text.into_boxed_str());
+    Ok(Hof { symbol, params, ret: dret, items, twin })
+}
+
+/// The runtime body `text` of `symbol` with every `std::rc::Rc<dyn Fn(..) ->
+/// ..>` param taken as `impl Fn(..) -> ..` instead, under the name
+/// `<symbol>_static`: the same body, monomorphized over the caller's closure
+/// (no allocation for the closure, a direct call LLVM can inline), the way
+/// the standard codegen inlines these combinators. `None` when the body has
+/// no such param or does not spell its own name.
+fn static_twin(symbol: &str, text: &str) -> Option<(String, String)> {
+    const RC: &str = "std::rc::Rc<dyn ";
+    let head = format!("fn {symbol}");
+    let at = text.find(&head)?;
+    let twin = format!("{symbol}_static");
+    let mut out = format!("{}fn {twin}{}", &text[..at], &text[at + head.len()..]);
+    let mut found = false;
+    while let Some(i) = out.find(RC) {
+        // The `>` that closes the `Rc<`.
+        let mut depth = 1i32;
+        let mut close = None;
+        for (k, c) in out[i + RC.len()..].char_indices() {
+            match c {
+                '<' | '(' => depth += 1,
+                ')' => depth -= 1,
+                '>' if out[i + RC.len()..][..k].ends_with('-') => {}
+                '>' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(i + RC.len() + k);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let close = close?;
+        out = format!("{}impl {}{}", &out[..i], &out[i + RC.len()..close], &out[close + 1..]);
+        found = true;
+    }
+    found.then_some((twin, out))
 }
 
 /// The runtime route of the linked impl fn `impl_fn`, when the declaration
@@ -189,7 +237,7 @@ struct State {
     /// argument over at that op (a call-site move follows it).
     at: Option<(String, usize, bool)>,
     /// The lifted lambda each closure block of the current function was built from.
-    origins: BTreeMap<ValueId, String>,
+    origins: BTreeMap<ValueId, (String, Vec<ValueId>)>,
     /// The sites served here: (function, op index) → the runtime symbol.
     sites: BTreeMap<(String, usize), String>,
     /// The linked bodies the served sites left unreached, dropped for the
@@ -231,7 +279,7 @@ pub(crate) fn at(func: &MirFunction, i: usize) {
 
 /// The closure blocks `func` builds from a lifted lambda: an all-scalar env
 /// is the slot list `[FuncRef, 0, captures…]` (`materialize_closure_block`).
-fn closure_origins(func: &MirFunction) -> BTreeMap<ValueId, String> {
+fn closure_origins(func: &MirFunction) -> BTreeMap<ValueId, (String, Vec<ValueId>)> {
     let refs: BTreeMap<ValueId, &str> = func
         .ops
         .iter()
@@ -259,7 +307,7 @@ fn closure_origins(func: &MirFunction) -> BTreeMap<ValueId, String> {
         .filter_map(|op| match op {
             Op::ListLit { dst, elems } if once(*dst) => {
                 let name = refs.get(elems.first()?)?;
-                once(elems[0]).then(|| (*dst, name.to_string()))
+                once(elems[0]).then(|| (*dst, (name.to_string(), elems.clone())))
             }
             _ => None,
         })
@@ -376,18 +424,18 @@ fn bind_lambda(env: &mut Env, d: &DTy, k: NativeSigKind) -> Option<bool> {
 /// the same Float.
 const LANE_F64: &str = "trait AlmdLaneF64 { fn lane_f64(self) -> f64; }\nimpl AlmdLaneF64 for f64 { #[inline] fn lane_f64(self) -> f64 { self } }\nimpl AlmdLaneF64 for i64 { #[inline] fn lane_f64(self) -> f64 { f64::from_bits(self as u64) } }";
 
-/// The adapter: an `Rc<dyn Fn>` that owns a copy of the env block and calls
-/// the lifted lambda `lambda` (params of kinds `ps`) on each element it is
-/// lent. `bits[i]`: that param is a runtime `f64` the lambda takes as its
-/// bits. `float_ret`: the declared result is a `Float` (read through
-/// [`LANE_F64`]); else the lambda's result kind `ret` is the runtime's.
-fn adapter(lambda: &str, env_code: &str, ps: &[NativeSigKind], bits: &[bool], ret: NativeSigKind, float_ret: bool) -> Option<String> {
+/// The adapter: a closure, borrowing the env array `env` (a copy of the
+/// closure block's scalar slots), that calls the lifted lambda `lambda`
+/// (params of kinds `ps`) on each element it is lent. `bits[i]`: that param
+/// is a runtime `f64` the lambda takes as its bits. `float_ret`: the
+/// declared result is a `Float` (read through [`LANE_F64`]); else the
+/// lambda's result kind `ret` is the runtime's.
+fn adapter(lambda: &str, env: &str, ps: &[NativeSigKind], bits: &[bool], ret: NativeSigKind, float_ret: bool) -> Option<String> {
     if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) {
         return None;
     }
     let spell = |k: NativeSigKind, b: bool| if b { "f64".to_string() } else { rec::owned_ty(clo::owned_nty(k)) };
-    let tys: Vec<String> = ps.iter().zip(bits).map(|(k, b)| spell(*k, *b)).collect();
-    let params: Vec<String> = tys.iter().enumerate().map(|(i, t)| format!("__p{i}: {t}")).collect();
+    let params: Vec<String> = ps.iter().zip(bits).enumerate().map(|(i, (k, b))| format!("__p{i}: {}", spell(*k, *b))).collect();
     let args: String = ps
         .iter()
         .zip(bits)
@@ -398,13 +446,9 @@ fn adapter(lambda: &str, env_code: &str, ps: &[NativeSigKind], bits: &[bool], re
             _ => format!(", __p{i}"),
         })
         .collect();
-    let call = format!("{}(&__env{args})", crate::render_native::mangle(lambda));
+    let call = format!("{}(&{env}{args})", crate::render_native::mangle(lambda));
     let (call, ret_ty) = if float_ret { (format!("AlmdLaneF64::lane_f64({call})"), "f64".to_string()) } else { (call, spell(ret, false)) };
-    Some(format!(
-        "{{ let __env: Vec<i64> = {env_code}.to_vec(); let __f: std::rc::Rc<dyn Fn({}) -> {ret_ty}> = std::rc::Rc::new(move |{}| {call}); __f }}",
-        tys.join(", "),
-        params.join(", ")
-    ))
+    Some(format!("|{}| -> {ret_ty} {{ {call} }}", params.join(", ")))
 }
 
 /// One non-function argument in the runtime's mode: borrowed as is, or owned
@@ -457,11 +501,12 @@ pub(crate) fn try_render(
     }
     let mut rendered: Vec<String> = Vec::new();
     let mut shims: Vec<&'static str> = Vec::new();
+    let mut prelude: Vec<String> = Vec::new();
     for (((d, by_ref), (code, t)), a) in hof.params.iter().zip(&got).zip(call.args.iter()) {
         let r = match d {
             DTy::Fn(dps, dret) => {
                 let CallArg::Handle(blk) = a else { return Ok(false) };
-                let Some(lambda) = origins.get(blk) else { return Ok(false) };
+                let Some((lambda, env_elems)) = origins.get(blk) else { return Ok(false) };
                 // The lambda borrows every param, as its signature spells it.
                 if !user_fns.get(lambda.as_str()).is_some_and(|l| l.owned_params.is_empty()) {
                     return Ok(false);
@@ -484,7 +529,19 @@ pub(crate) fn try_render(
                 if float_ret {
                     shims.push(LANE_F64);
                 }
-                match adapter(lambda, code, &ps, &bits, ret, float_ret) {
+                // The env: a copy of the block's slots, every one a scalar.
+                let mut slots = Vec::new();
+                for e in env_elems {
+                    slots.push(match tys.get(e) {
+                        Some(NTy::I64) => var(*e),
+                        Some(NTy::F64) => format!("{}.to_bits() as i64", var(*e)),
+                        _ => return Ok(false),
+                    });
+                }
+                let env = format!("__env_{}_{}", at.1, prelude.len());
+                prelude.push(format!("let {env}: [i64; {}] = [{}];", slots.len(), slots.join(", ")));
+                let _ = code;
+                match adapter(lambda, &env, &ps, &bits, ret, float_ret) {
                     Some(r) => r,
                     None => return Ok(false),
                 }
@@ -497,10 +554,15 @@ pub(crate) fn try_render(
         rendered.push(r);
     }
     let Some(ret) = kind_of(&env, &hof.ret) else { return Ok(false) };
-    let expr = format!("{}({})", hof.symbol, rendered.join(", "));
+    let expr = format!("{}({})", hof.twin, rendered.join(", "));
     used_shims.push(crate::native_floor::FLOOR_HEADER);
     used_shims.extend(hof.items.iter().copied());
     used_shims.extend(shims);
+    for line in &prelude {
+        out.push_str(&"    ".repeat(indent));
+        out.push_str(line);
+        out.push('\n');
+    }
     for _ in 0..indent {
         out.push_str("    ");
     }
