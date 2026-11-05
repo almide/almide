@@ -619,8 +619,10 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
         Op::SetLocal { local, src } => render_set_local(local, src, tys, out, indent)?,
         Op::IntBinOp { dst, op, a, b } => {
             tys.insert(*dst, NTy::I64);
-            let rendered = render_int_binop(op, *a, *b, used_shims)?;
-            line!("let mut {}: i64 = {};", var(*dst), rendered);
+            match crate::render_native::cmp_int_expr(op, &var(*a), &var(*b)) {
+                Some(e) => line!("{}", crate::render_native_cond::bind(*dst, &e)),
+                None => line!("let mut {}: i64 = {};", var(*dst), render_int_binop(op, *a, *b, used_shims)?),
+            }
         }
         _ => {
             return render_native_float_op(
