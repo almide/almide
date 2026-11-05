@@ -108,6 +108,7 @@ test "ffi err texts stay valid on invalid input" {
     assert(err_ok(ffi.read(r, 3, 100)) and err_ok(ffi.read(r, 0, -1)))
     assert(err_ok(ffi.write(r, 0, b)))
     assert(err_ok(ffi.to_bytes(r)))
+    assert(err_ok(ffi.slice(r, 3, 100)) and err_ok(ffi.slice(r, 0, -1)) and err_ok(ffi.slice(r, -1, 1)))
   }
   match ffi.alloc(4) {
     ok(w) => assert(err_ok(ffi.write(w, 3, bytes.from_list([0xFF, 0xFE]))) and err_ok(ffi.to_bytes(w))),

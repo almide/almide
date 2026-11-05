@@ -4,7 +4,6 @@
 // read back field by field.
 import html
 import http
-import json
 
 // ── the oracle: RFC 3629 well-formedness of a String's bytes ──
 fn utf8_in(bs: List[Int], i: Int, lo: Int, hi: Int) -> Bool = match list.get(bs, i) {
@@ -92,6 +91,9 @@ fn err_ok[T](r: Result[T, String]) -> Bool = match r {
   err(e) => utf8_ok(e),
 }
 
+// A decode target (an input type, C-436).
+type Probe: Decode = { s: String }
+
 fn resp_ok(r: HttpResponse) -> Bool = utf8_ok(http.body(r)) and list.all(http.headers(r), ((k, v)) => utf8_ok(k) and utf8_ok(v))
 
 effect fn echo(req: HttpRequest) -> HttpResponse = http.response(200, http.body(req))
@@ -110,16 +112,21 @@ test "http messages built from invalid bytes read back valid" {
     let req2 = http.set_header(http.set_body(req, s + s), s, s)
     assert(utf8_ok(http.body(req2)))
     assert(utf8_ok(http.body(http.set_body_bytes(req2, bytes.from_string(s)))))
-    let rs = [http.response(200, s), http.json(201, s), http.html(200, html.escape(s)), http.redirect(s), http.with_headers(404, s, [(s, s)]), http.set_status(http.response(200, s), 500)]
+    let rs = [http.response(200, s), http.json(201, s), http.response(200, html.escape(s)), http.redirect(s), http.with_headers(404, s, [(s, s)]), http.set_status(http.response(200, s), 500)]
     assert(list.all(rs, (r) => resp_ok(r)))
-    match http.decode_json(req) {
-      ok(v) => assert(utf8_ok(json.stringify(v))),
-      err(r) => assert(resp_ok(r)),
+    for body_req in [req, http.new_request("POST", "/", "{\"s\": \"" + s + "\"}", [])] {
+      match http.decode_json[Probe](body_req) {
+        ok(p) => assert(utf8_ok(p.s)),
+        err(r) => assert(resp_ok(r)),
+      }
     }
   }
   for b in invalid_corpus() {
     let req = http.new_request("POST", "/", "", [])
     assert(utf8_ok(http.body(http.set_body_bytes(req, b))))
+    let typed = http.typed("text/csv", b)
+    assert(resp_ok(http.response(200, typed)) and resp_ok(http.with_body(http.response(201, "draft"), typed)))
+    assert(resp_ok(http.with_body(http.response(200, typed), bytes.to_string_lossy(b))))
   }
 }
 
