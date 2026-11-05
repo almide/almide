@@ -355,7 +355,8 @@ thread_local! {
 
 /// The heap values of `func` released before their scheduled `Drop`, keyed by
 /// the op index before which they go: a value bound and read only at the top
-/// level of the body (no loop, no branch), every read a call argument, released
+/// level of the body (no loop, no branch), every read a call argument or a
+/// print, released
 /// by exactly one `Drop` and never consumed, rebound, returned or handled as
 /// an address, and never read by an interpolation chain (whose reads the
 /// render moves to the chain's end). It goes right after its last read.
@@ -366,7 +367,7 @@ fn early_releases(func: &MirFunction, chains: &crate::render_native_interp::Chai
     let mut out: BTreeMap<usize, Vec<ValueId>> = BTreeMap::new();
     for (d, def) in func.ops.iter().enumerate() {
         let Some(v) = crate::mir_ops::defined_value(def) else { continue };
-        if at_depth[d] != 0 || params.contains(&v) || func.ret == Some(v) || !matches!(def, Op::CallFn { .. } | Op::Alloc { .. }) {
+        if at_depth[d] != 0 || params.contains(&v) || func.ret == Some(v) || !matches!(def, Op::CallFn { .. } | Op::Alloc { .. } | Op::ListLit { .. }) {
             continue;
         }
         if let Some(l) = last_top_level_read(func, chains, &at_depth, d, v) {
@@ -419,6 +420,12 @@ fn last_top_level_read(
                 // every chain op that reads it.
                 let r = chain_end(func, chains, j)?;
                 last = Some(last.map_or(r, |l: usize| l.max(r)));
+            }
+            // A print reads its string through a borrow (`rt_print_str(&v)`).
+            Op::Call { func: crate::RtFn::PrintStr, dst: None, args, .. }
+                if drops == 0 && at_depth[j] == 0 && matches!(args.as_slice(), [crate::CallArg::Handle(x)] if *x == v) =>
+            {
+                last = Some(last.map_or(j, |l: usize| l.max(j)));
             }
             _ => return None,
         }
