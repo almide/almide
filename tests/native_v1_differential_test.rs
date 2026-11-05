@@ -58,6 +58,13 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // ── #4006 C1 class D: a module-level heap binding in its thread-local
+    //    cell (an append, a record rebuilt from its own fields), a find's
+    //    0-or-1 block on the Option carrier, a linked body's Option result ──
+    ("heap_global_list", "var LOG: List[String] = []\n\nfn note(s: String) -> Unit = {\n  LOG = LOG + [s]\n}\n\nfn main() -> Unit = {\n  note(\"a\")\n  note(\"b\")\n  println(list.join(LOG, \",\"))\n  println(int.to_string(list.len(LOG)))\n}\n"),
+    ("heap_global_record", "type C = { n: Int, tag: String }\n\nvar G: C = C { n: 0, tag: \"start\" }\n\nfn bump() -> Unit = {\n  G = C { n: G.n + 1, tag: G.tag + \"!\" }\n}\n\nfn main() -> Unit = {\n  bump()\n  bump()\n  println(int.to_string(G.n) + \" \" + G.tag)\n}\n"),
+    ("find_scalar_opt", "fn first_big(xs: List[Int]) -> Int? = list.find(xs, (x) => x > 10)\n\nfn main() -> Unit = {\n  println(int.to_string(first_big([3, 12, 40]) ?? -1))\n  println(int.to_string(first_big([1, 2]) ?? -1))\n}\n"),
+    ("linked_option_ret", "fn main() -> Unit = {\n  let a = option.map(some(4), (x) => x * 3) ?? 0\n  let b = option.map(none, (x) => x * 3) ?? 7\n  println(int.to_string(a + b))\n}\n"),
     // ── #4006 C1: a combinator call its linked self-hosted body refuses,
     //    served by the runtime body its declaration names (native_hof):
     //    a list moved in at its last read, a list read again (copied), a

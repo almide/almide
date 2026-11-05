@@ -67,6 +67,8 @@ pub(super) fn render_heap_slot_op(
             let got = tys.get(&h.base).copied();
             let rhs = match got {
                 Some(g) if g == t => crate::render_native_move::take_expr(&var(h.base)),
+                // An empty list literal is every list type's empty list.
+                Some(_) if st.empty_lists.contains(&h.base) => format!("<{}>::default()", crate::render_native_rec::owned_ty(t)),
                 Some(g) if super::field_accepts(t, g) => match super::owned_from(&var(h.base), g) {
                     Some(r) => r,
                     None => return Some(Err(wall(format!("native: a {g:?} value stored into a {t:?} heap slot")))),
