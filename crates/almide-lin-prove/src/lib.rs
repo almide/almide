@@ -19,9 +19,12 @@
 //! certificate it writes.
 
 pub mod lp;
+mod sim;
 
 use almide_anchor_check::lin::{self, It, Skel, Tok, V};
 use std::collections::{BTreeMap, BTreeSet};
+
+use sim::{region_map, tr_lin, writes_rebinds, Contract, Sim, Site};
 
 type Slot = u32;
 
@@ -198,433 +201,6 @@ fn no_wrap(f: &[L], l: &L) -> Option<(String, String)> {
     Some((prove(f, &lsub(&kz(I64MIN), l))?, prove(f, &lsub(l, &kz(I64MAX)))?))
 }
 
-/// One call site, as the inference reads it.
-#[derive(Clone, Debug)]
-struct Site {
-    callee: usize,
-    facts: Vec<L>,
-    /// (parameter, argument, its no-wrap proven).
-    args: Vec<(Slot, L, bool)>,
-}
-
-/// A procedure's contract.
-#[derive(Clone, Debug, Default, PartialEq)]
-struct Contract {
-    pre: Vec<L>,
-    post: Vec<L>,
-}
-
-/// The slots a body writes and the regions it rebinds (RoutineLin's
-/// `writes` / `rebinds`).
-fn writes_rebinds(items: &[It], w: &mut BTreeSet<Slot>, r: &mut BTreeSet<Slot>) {
-    for it in items {
-        match it {
-            It::Handle { h, .. } | It::Len { n: h, .. } | It::Set(h) | It::SetR { x: h, .. } | It::Asn { x: h, .. } => {
-                w.insert(*h);
-            }
-            It::Alloc { h, r: g, .. } => {
-                w.insert(*h);
-                r.insert(*g);
-            }
-            It::Static { r: g, .. } => {
-                r.insert(*g);
-            }
-            It::Call { res, .. } => {
-                w.insert(*res);
-            }
-            It::Test { thn, els, .. } | It::Branch { thn, els } => {
-                writes_rebinds(thn, w, r);
-                writes_rebinds(els, w, r);
-            }
-            It::Loop { body } => writes_rebinds(body, w, r),
-            _ => {}
-        }
-    }
-}
-
-struct Sim<'a> {
-    skels: &'a BTreeMap<usize, Skel>,
-    contracts: &'a BTreeMap<usize, Contract>,
-    fills: Vec<String>,
-    sites: Vec<Site>,
-    rets: Vec<Vec<L>>,
-    conts: Vec<Vec<Vec<L>>>,
-    probe: usize,
-    err: Option<String>,
-}
-
-fn region_vars(f: &[L]) -> BTreeSet<Slot> {
-    let mut out = BTreeSet::new();
-    for l in f {
-        for (v, _) in &l.t {
-            if let V::B(r) | V::C(r) = v {
-                out.insert(*r);
-            }
-        }
-    }
-    out
-}
-
-/// The caller region each pointer argument points into (`VB r <= arg`), as
-/// the callee's region parameters `RPARAM + i`: the first parameter into a
-/// region names it.
-fn region_map(f: &[L], args: &[(Slot, L, bool)]) -> Vec<(Slot, Slot)> {
-    let regions = region_vars(f);
-    let mut used = BTreeSet::new();
-    let mut out = Vec::new();
-    for (p, a, ok) in args {
-        if !*ok {
-            continue;
-        }
-        for &r in &regions {
-            if !used.contains(&r) && entailed(f, &lsub(&v1(V::B(r)), a)) {
-                used.insert(r);
-                out.push((RPARAM + p, r));
-                break;
-            }
-        }
-    }
-    out
-}
-
-impl Sim<'_> {
-    fn fill(&mut self, s: String) {
-        self.fills.push(s);
-    }
-
-    fn fail<T>(&mut self, why: String) -> Option<T> {
-        if self.err.is_none() {
-            self.err = Some(why);
-        }
-        None
-    }
-
-    fn proofs(&mut self, f: &[L], g: &[L]) -> Option<String> {
-        let mut out = Vec::new();
-        for l in g {
-            if f.contains(l) {
-                out.push("()1".to_string());
-            } else {
-                match prove(f, l) {
-                    Some(p) => out.push(p),
-                    None => return self.fail(format!("cannot prove {}", l.text())),
-                }
-            }
-        }
-        Some(out.join(" "))
-    }
-
-    /// Default fills for the holes of items the checker never reads.
-    fn dead(&mut self, items: &[It]) {
-        let mut t = Vec::new();
-        let sk = Skel { rslot: 0, body: items.to_vec(), sites: Vec::new() };
-        for tok in lin::template(0, &sk) {
-            t.push(tok);
-        }
-        // The template starts with the procedure's two fact holes.
-        for tok in t.into_iter().filter_map(|x| match x {
-            Tok::Hole(h) => Some(h),
-            Tok::Lit(_) => None,
-        }).skip(2) {
-            self.fills.push(match tok {
-                lin::Hole::Pf => "()1".into(),
-                lin::Hole::Reg => "0".into(),
-                _ => String::new(),
-            });
-        }
-    }
-
-    fn lcheck(&mut self, inv: Option<&Vec<L>>, post: &[L], mut f: Vec<L>, items: &[It]) -> Option<(St, St)> {
-        let mut joins: Vec<St> = Vec::new();
-        let finish = |joins: Vec<St>, s: St, b: St| -> Option<(St, St)> {
-            Some((s, joins.iter().rev().fold(b, |acc, j| fjoin(j, &acc))))
-        };
-        for (i, it) in items.iter().enumerate() {
-            let rest = &items[i + 1..];
-            match it {
-                It::Acc { w, off, addr, store, .. } => {
-                    let addr = from_lin(addr);
-                    let off = i128::from(*off);
-                    let w = i128::from(*w);
-                    let mut done = false;
-                    for r in region_vars(&f) {
-                        let (vb, vc) = (v1(V::B(r)), v1(V::C(r)));
-                        let p0 = prove(&f, &lneg(&addr));
-                        let p1 = prove(&f, &lsub(&vb, &ladd(&addr, &kz(off))));
-                        let p2 = prove(&f, &lsub(&ladd(&addr, &kz(off + w - 12)), &ladd(&vb, &vc)));
-                        if let (Some(a), Some(b), Some(c)) = (p0, p1, p2) {
-                            self.fill(r.to_string());
-                            self.fill(a);
-                            self.fill(b);
-                            self.fill(c);
-                            done = true;
-                            break;
-                        }
-                    }
-                    if !done {
-                        return self.fail(format!("{} of {w} at {}+{off} not in any region", if *store { "store" } else { "load" }, addr.text()));
-                    }
-                }
-                It::Handle { h, r } => {
-                    let mut g = eqs(&V::S(*h), &v1(V::B(*r)));
-                    g.extend(kill(&f, &V::S(*h)));
-                    f = g;
-                }
-                It::Len { n, r, s } => {
-                    let vn = v1(V::S(*n));
-                    let mut g = vec![lneg(&vn), lsub(&lmul(*s, &vn), &v1(V::C(*r)))];
-                    g.extend(kill(&f, &V::S(*n)));
-                    f = g;
-                }
-                It::Alloc { h, r, sz } => {
-                    let sz = from_lin(sz);
-                    let lo = prove(&f, &lneg(&sz));
-                    let hi = prove(&f, &lsub(&sz, &kz(ADDR - 1)));
-                    let (Some(lo), Some(hi)) = (lo, hi) else {
-                        return self.fail(format!("allocation size {} not in [0, 2^32)", sz.text()));
-                    };
-                    self.fill(lo);
-                    self.fill(hi);
-                    if mentions(&V::S(*h), &sz) || mentions(&V::B(*r), &sz) || mentions(&V::C(*r), &sz) {
-                        return self.fail("allocation size names its own result".into());
-                    }
-                    let mut g = eqs(&V::S(*h), &v1(V::B(*r)));
-                    g.push(lsub(&sz, &v1(V::C(*r))));
-                    g.extend(kill_region(&kill(&f, &V::S(*h)), *r));
-                    f = g;
-                }
-                It::Wf(r) => {
-                    let (vb, vc) = (v1(V::B(*r)), v1(V::C(*r)));
-                    let mut g = vec![lneg(&vb), lneg(&vc), ladd(&ladd(&vb, &vc), &kz(12 - ADDR + 1))];
-                    g.extend(f);
-                    f = g;
-                }
-                It::Static { r, b0, c0 } => {
-                    let mut g = eqs(&V::B(*r), &kz(*b0));
-                    g.extend(eqs(&V::C(*r), &kz(*c0)));
-                    g.extend(kill_region(&f, *r));
-                    f = g;
-                }
-                It::Set(x) => f = kill(&f, &V::S(*x)),
-                It::SetR { x, lo, hi } => {
-                    let vx = v1(V::S(*x));
-                    let mut g = vec![lsub(&kz(*lo), &vx), lsub(&vx, &kz(*hi))];
-                    g.extend(kill(&f, &V::S(*x)));
-                    f = g;
-                }
-                It::Asn { x, l } => {
-                    let l = from_lin(l);
-                    let vx = V::S(*x);
-                    match no_wrap(&f, &l) {
-                        Some((lo, hi)) => {
-                            self.fill(lo);
-                            self.fill(hi);
-                            let c = coef(&l.t, &vx);
-                            f = if c == 0 {
-                                let mut g = eqs(&vx, &l);
-                                g.extend(kill(&f, &vx));
-                                g
-                            } else if c == 1 {
-                                let d = lsub(&v1(vx.clone()), &L { t: dropv(&vx, &l.t), c: l.c });
-                                f.iter().map(|g| subst(&vx, &d, g)).collect()
-                            } else {
-                                kill(&f, &vx)
-                            };
-                        }
-                        None => {
-                            self.fill("()1".into());
-                            self.fill("()1".into());
-                            f = kill(&f, &vx);
-                        }
-                    }
-                }
-                It::Test { thn, els, .. } | It::Branch { thn, els } => {
-                    let (ft, fe) = match it {
-                        It::Test { a, b, sgn, .. } => {
-                            let (a, b) = (from_lin(a), from_lin(b));
-                            let pa = no_wrap(&f, &a);
-                            let pb = no_wrap(&f, &b);
-                            let nn = if *sgn {
-                                Some(("()1".to_string(), "()1".to_string()))
-                            } else {
-                                match (prove(&f, &lneg(&a)), prove(&f, &lneg(&b))) {
-                                    (Some(x), Some(y)) => Some((x, y)),
-                                    _ => None,
-                                }
-                            };
-                            let ok = pa.is_some() && pb.is_some() && nn.is_some();
-                            let (pa, pb, nn) = (
-                                pa.unwrap_or(("()1".into(), "()1".into())),
-                                pb.unwrap_or(("()1".into(), "()1".into())),
-                                nn.unwrap_or(("()1".into(), "()1".into())),
-                            );
-                            for p in [pa.0, pa.1, pb.0, pb.1, nn.0, nn.1] {
-                                self.fill(p);
-                            }
-                            if ok {
-                                (vec![lsub(&b, &a)], vec![ladd(&lsub(&a, &b), &kz(1))])
-                            } else {
-                                (Vec::new(), Vec::new())
-                            }
-                        }
-                        _ => (Vec::new(), Vec::new()),
-                    };
-                    let mut f1 = ft;
-                    f1.extend(f.iter().cloned());
-                    let mut f2 = fe;
-                    f2.extend(f.iter().cloned());
-                    let (st, bt) = self.lcheck(inv, post, f1, thn)?;
-                    let (se, be) = self.lcheck(inv, post, f2, els)?;
-                    let j = fjoin(&bt, &be);
-                    match fjoin(&st, &se) {
-                        None => {
-                            self.dead(rest);
-                            return finish(joins, None, j);
-                        }
-                        Some(g) => {
-                            joins.push(j);
-                            f = g;
-                        }
-                    }
-                }
-                It::Loop { body } => {
-                    // Houdini: the entry facts, minus what a back edge loses.
-                    let mut cand = f.clone();
-                    let (fm, sm) = (self.fills.len(), self.sites.len());
-                    loop {
-                        self.probe += 1;
-                        self.conts.push(Vec::new());
-                        let r = self.lcheck(Some(&cand), post, cand.clone(), body);
-                        let states = self.conts.pop().unwrap_or_default();
-                        self.probe -= 1;
-                        self.fills.truncate(fm);
-                        self.sites.truncate(sm);
-                        r?;
-                        let next: Vec<L> = cand.iter().filter(|g| states.iter().all(|s| entailed(s, g))).cloned().collect();
-                        if next == cand {
-                            break;
-                        }
-                        cand = next;
-                    }
-                    self.fill(cand.iter().map(L::text).collect::<Vec<_>>().join(" "));
-                    let pin = vec!["()1".to_string(); cand.len()].join(" ");
-                    self.fill(pin);
-                    self.conts.push(Vec::new());
-                    let r = self.lcheck(Some(&cand), post, cand.clone(), body);
-                    self.conts.pop();
-                    let (sb, bb) = r?;
-                    match fjoin(&sb, &bb) {
-                        None => {
-                            self.dead(rest);
-                            return finish(joins, None, None);
-                        }
-                        Some(g) => f = g,
-                    }
-                }
-                It::Cont => {
-                    let Some(iv) = inv else { return self.fail("a back edge outside a loop".into()) };
-                    if self.probe > 0 {
-                        if let Some(top) = self.conts.last_mut() {
-                            top.push(f.clone());
-                        }
-                        self.fill(String::new());
-                    } else {
-                        let p = self.proofs(&f, iv)?;
-                        self.fill(p);
-                    }
-                    return finish(joins, None, None);
-                }
-                It::Brk => return finish(joins, None, Some(f)),
-                It::Trap => return finish(joins, None, None),
-                It::Ret => {
-                    if self.probe == 0 {
-                        self.rets.push(f.clone());
-                    }
-                    let p = self.proofs(&f, post)?;
-                    self.fill(p);
-                    return finish(joins, None, None);
-                }
-                It::Call { f: g, args, res } => {
-                    let pre = self.contracts.get(g).map(|c| c.pre.clone()).unwrap_or_default();
-                    let mut sargs = Vec::new();
-                    let mut valid: Vec<(Slot, L)> = Vec::new();
-                    for (p, l) in args {
-                        let l = from_lin(l);
-                        match no_wrap(&f, &l) {
-                            Some((lo, hi)) => {
-                                self.fill(format!(" ! {lo} {hi}"));
-                                valid.push((*p, l.clone()));
-                                sargs.push((*p, l, true));
-                            }
-                            None => {
-                                self.fill(String::new());
-                                sargs.push((*p, l, false));
-                            }
-                        }
-                    }
-                    let reps = region_map(&f, &sargs);
-                    self.fill(reps.iter().map(|(a, b)| format!("{a}:{b}")).collect::<Vec<_>>().join(" "));
-                    self.fill(String::new());
-                    // The precondition, translated into the caller's terms.
-                    let tr = |v: &V| -> Option<L> {
-                        match v {
-                            V::S(q) => valid.iter().find(|(p, _)| p == q).map(|(_, l)| l.clone()),
-                            V::B(r2) => reps.iter().find(|(a, _)| a == r2).map(|(_, r)| v1(V::B(*r))),
-                            V::C(r2) => reps.iter().find(|(a, _)| a == r2).map(|(_, r)| v1(V::C(*r))),
-                        }
-                    };
-                    let mut pre2 = Vec::new();
-                    for c in &pre {
-                        match tr_lin(&tr, c) {
-                            Some(c2) => pre2.push(c2),
-                            None => return self.fail(format!("call of {g}: precondition {} not expressible here", c.text())),
-                        }
-                    }
-                    let p = self.proofs(&f, &pre2)?;
-                    self.fill(p);
-                    if self.probe == 0 {
-                        self.sites.push(Site { callee: *g, facts: f.clone(), args: sargs.clone() });
-                    }
-                    // The postcondition, translated back (RoutineLin's tr_out).
-                    let post_c = self.contracts.get(g).map(|c| c.post.clone()).unwrap_or_default();
-                    let (mut wr, mut rb) = (BTreeSet::new(), BTreeSet::new());
-                    if let Some(sk) = self.skels.get(g) {
-                        writes_rebinds(&sk.body, &mut wr, &mut rb);
-                    }
-                    let rslot = self.skels.get(g).map_or(u32::MAX, |k| k.rslot);
-                    let tro = |v: &V| -> Option<L> {
-                        match v {
-                            V::S(q) if *q == rslot => Some(v1(V::S(*res))),
-                            V::S(q) if wr.contains(q) => None,
-                            V::S(q) => valid.iter().find(|(p, _)| p == q).map(|(_, l)| l.clone()),
-                            V::B(r2) | V::C(r2) if rb.contains(r2) => None,
-                            V::B(r2) => reps.iter().find(|(a, _)| a == r2).map(|(_, r)| v1(V::B(*r))),
-                            V::C(r2) => reps.iter().find(|(a, _)| a == r2).map(|(_, r)| v1(V::C(*r))),
-                        }
-                    };
-                    let mut g2: Vec<L> = post_c.iter().filter_map(|c| tr_lin(&tro, c)).collect();
-                    g2.extend(kill(&f, &V::S(*res)));
-                    f = g2;
-                }
-            }
-        }
-        finish(joins, Some(f), None)
-    }
-}
-
-/// RoutineLin's `tr_lin`: a right fold of `ladd (lmul a d) rest`, then the
-/// constant.
-fn tr_lin(tr: &dyn Fn(&V) -> Option<L>, l: &L) -> Option<L> {
-    let mut ds = Vec::new();
-    for (v, a) in &l.t {
-        ds.push((*a, tr(v)?));
-    }
-    let mut m = kz(0);
-    for (a, d) in ds.iter().rev() {
-        m = ladd(&lmul(*a, d), &m);
-    }
-    Some(ladd(&m, &kz(l.c)))
-}
 
 // ── Projection (Fourier–Motzkin) ─────────────────────────────────────────
 
@@ -869,98 +445,10 @@ pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<Certified, String> {
     let (alloc, ..) = almide_anchor_check::parse_anchors(anchors)?;
     let mut table: BTreeSet<usize> = sites0.keys().copied().collect();
     loop {
-        let mut skels = BTreeMap::new();
-        let mut changed = false;
-        for &pos in &table.clone() {
-            let none = BTreeSet::new();
-            let hp = heap.get(&pos).cloned().unwrap_or_default();
-            match lin::translate(&m, pos, sites0.get(&pos).unwrap_or(&none), &hp, &table, alloc) {
-                Ok(s) => {
-                    skels.insert(pos, s);
-                }
-                Err(e) => {
-                    refused.insert(pos, format!("translation: {e}"));
-                    table.remove(&pos);
-                    changed = true;
-                }
-            }
-        }
-        if changed {
-            continue;
-        }
-        // Entry points: exported, tabled, or called from outside the table.
-        let mut entry: BTreeSet<usize> = exported.iter().copied().filter(|p| table.contains(p)).collect();
-        for (pos, b) in m.bodies.iter().enumerate() {
-            if table.contains(&pos) {
-                continue;
-            }
-            for op in &b.ops {
-                if let wasmparser_op::Call { function_index } = op {
-                    if let Some(p) = function_index.checked_sub(m.imports) {
-                        entry.insert(p as usize);
-                    }
-                }
-            }
-        }
-        // Contracts to a fixpoint.
-        let mut contracts: BTreeMap<usize, Contract> = BTreeMap::new();
-        let mut results = BTreeMap::new();
-        for _round in 0..8 {
-            if _round > 0 && past_deadline() {
-                break;
-            }
-            let mut sites: Vec<Site> = Vec::new();
-            let mut rets: BTreeMap<usize, Vec<Vec<L>>> = BTreeMap::new();
-            results.clear();
-            for &pos in &table {
-                let (r, s, rt) = prove_proc(&skels, &contracts, pos);
-                sites.extend(s);
-                rets.insert(pos, rt);
-                results.insert(pos, r);
-            }
-            let mut next: BTreeMap<usize, Contract> = BTreeMap::new();
-            for &pos in &table {
-                let post = infer_post(&skels[&pos], rets.get(&pos).map_or(&[][..], Vec::as_slice));
-                if entry.contains(&pos) {
-                    next.insert(pos, Contract { pre: Vec::new(), post });
-                    continue;
-                }
-                let mine: Vec<&Site> = sites.iter().filter(|s| s.callee == pos).collect();
-                let Some(first) = mine.first() else {
-                    next.insert(pos, Contract { pre: Vec::new(), post });
-                    continue;
-                };
-                let cands = site_candidates(first);
-                let mut pre: Vec<L> = cands.into_iter().filter(|c| mine.iter().all(|s| site_entails(s, c))).collect();
-                // Drop what the rest implies (a bounded effort).
-                let mut i = 0;
-                while i < pre.len() && pre.len() <= 48 && !past_deadline() {
-                    let rest: Vec<L> = pre.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, l)| l.clone()).collect();
-                    if entailed(&rest, &pre[i]) {
-                        pre.remove(i);
-                    } else {
-                        i += 1;
-                    }
-                }
-                next.insert(pos, Contract { pre, post });
-            }
-            if std::env::var_os("ALMIDE_LIN_DEBUG").is_some() {
-                for (p, r) in &results {
-                    eprintln!("round {_round}: {p}: {}", match r { Ok(_) => "ok".to_string(), Err(e) => e.clone() });
-                }
-                for s in &sites {
-                    eprintln!("  site -> {}: args {:?}", s.callee, s.args.iter().map(|(p, l, ok)| format!("{p}:{}{}", l.text(), if *ok { "!" } else { "" })).collect::<Vec<_>>());
-                    eprintln!("    facts {}", s.facts.iter().map(L::text).collect::<Vec<_>>().join(" "));
-                }
-                for (p, c) in &next {
-                    eprintln!("  pre {p}: {}", c.pre.iter().map(L::text).collect::<Vec<_>>().join(" "));
-                }
-            }
-            if next == contracts {
-                break;
-            }
-            contracts = next;
-        }
+        let input = Input { m: &m, sites: &sites0, heap: &heap, alloc };
+        let Some(skels) = translate_table(&input, &mut table, &mut refused) else { continue };
+        let entry = entry_points(&m, &exported, &table);
+        let results = infer_contracts(&skels, &table, &entry);
         // Drop what is not proven; prove the rest again without it.
         let failed: Vec<usize> = results.iter().filter(|(_, r)| r.is_err()).map(|(p, _)| *p).collect();
         if failed.is_empty() {
@@ -971,6 +459,127 @@ pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<Certified, String> {
             refused.insert(p, results[&p].clone().err().unwrap_or_default());
             table.remove(&p);
         }
+    }
+}
+
+/// What the translation of a table reads: the module, each function's prim
+/// sites and heap parameters, and the allocator's index.
+struct Input<'a> {
+    m: &'a lin::Module<'a>,
+    sites: &'a BTreeMap<usize, BTreeSet<usize>>,
+    heap: &'a BTreeMap<usize, BTreeMap<u32, Option<i128>>>,
+    alloc: u32,
+}
+
+/// Every table function's translation; `None` when one is refused (it
+/// leaves the table and the round starts again).
+fn translate_table(input: &Input<'_>, table: &mut BTreeSet<usize>, refused: &mut BTreeMap<usize, String>) -> Option<BTreeMap<usize, Skel>> {
+    let mut skels = BTreeMap::new();
+    let mut changed = false;
+    let none = BTreeSet::new();
+    for &pos in &table.clone() {
+        let hp = input.heap.get(&pos).cloned().unwrap_or_default();
+        match lin::translate(input.m, pos, input.sites.get(&pos).unwrap_or(&none), &hp, table, input.alloc) {
+            Ok(s) => {
+                skels.insert(pos, s);
+            }
+            Err(e) => {
+                refused.insert(pos, format!("translation: {e}"));
+                table.remove(&pos);
+                changed = true;
+            }
+        }
+    }
+    (!changed).then_some(skels)
+}
+
+/// Entry points: exported, tabled, or called from outside the table.
+fn entry_points(m: &lin::Module<'_>, exported: &BTreeSet<usize>, table: &BTreeSet<usize>) -> BTreeSet<usize> {
+    let mut entry: BTreeSet<usize> = exported.iter().copied().filter(|p| table.contains(p)).collect();
+    let outside = m.bodies.iter().enumerate().filter(|(pos, _)| !table.contains(pos));
+    for op in outside.flat_map(|(_, b)| b.ops.iter()) {
+        if let wasmparser_op::Call { function_index } = op {
+            if let Some(p) = function_index.checked_sub(m.imports) {
+                entry.insert(p as usize);
+            }
+        }
+    }
+    entry
+}
+
+/// A function's next contract: its inferred postcondition, and (unless it
+/// is an entry point or never called) the facts every call site entails.
+fn next_contract(skel: &Skel, rets: &[Vec<L>], sites: &[Site], pos: usize, entry: bool) -> Contract {
+    let post = infer_post(skel, rets);
+    let mine: Vec<&Site> = sites.iter().filter(|s| s.callee == pos).collect();
+    let (false, Some(first)) = (entry, mine.first()) else {
+        return Contract { pre: Vec::new(), post };
+    };
+    let pre: Vec<L> = site_candidates(first).into_iter().filter(|c| mine.iter().all(|s| site_entails(s, c))).collect();
+    Contract { pre: minimize(pre), post }
+}
+
+/// Drop what the rest implies (a bounded effort).
+fn minimize(mut pre: Vec<L>) -> Vec<L> {
+    let mut i = 0;
+    while i < pre.len() && pre.len() <= 48 && !past_deadline() {
+        let rest: Vec<L> = pre.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, l)| l.clone()).collect();
+        if entailed(&rest, &pre[i]) {
+            pre.remove(i);
+        } else {
+            i += 1;
+        }
+    }
+    pre
+}
+
+type Results = BTreeMap<usize, Result<String, String>>;
+
+/// Contracts to a fixpoint (at most 8 rounds); each function's result
+/// under the last.
+fn infer_contracts(skels: &BTreeMap<usize, Skel>, table: &BTreeSet<usize>, entry: &BTreeSet<usize>) -> Results {
+    let mut contracts: BTreeMap<usize, Contract> = BTreeMap::new();
+    let mut results = BTreeMap::new();
+    for round in 0..8 {
+        if round > 0 && past_deadline() {
+            break;
+        }
+        let mut sites: Vec<Site> = Vec::new();
+        let mut rets: BTreeMap<usize, Vec<Vec<L>>> = BTreeMap::new();
+        results.clear();
+        for &pos in table {
+            let (r, s, rt) = prove_proc(skels, &contracts, pos);
+            sites.extend(s);
+            rets.insert(pos, rt);
+            results.insert(pos, r);
+        }
+        let next: BTreeMap<usize, Contract> = table
+            .iter()
+            .map(|&pos| (pos, next_contract(&skels[&pos], rets.get(&pos).map_or(&[][..], Vec::as_slice), &sites, pos, entry.contains(&pos))))
+            .collect();
+        debug_round(round, &results, &sites, &next);
+        if next == contracts {
+            break;
+        }
+        contracts = next;
+    }
+    results
+}
+
+/// ALMIDE_LIN_DEBUG: each round's results, call sites and preconditions.
+fn debug_round(round: usize, results: &Results, sites: &[Site], next: &BTreeMap<usize, Contract>) {
+    if std::env::var_os("ALMIDE_LIN_DEBUG").is_none() {
+        return;
+    }
+    for (p, r) in results {
+        eprintln!("round {round}: {p}: {}", r.as_ref().err().map_or("ok", String::as_str));
+    }
+    for s in sites {
+        eprintln!("  site -> {}: args {:?}", s.callee, s.args.iter().map(|(p, l, ok)| format!("{p}:{}{}", l.text(), if *ok { "!" } else { "" })).collect::<Vec<_>>());
+        eprintln!("    facts {}", s.facts.iter().map(L::text).collect::<Vec<_>>().join(" "));
+    }
+    for (p, c) in next {
+        eprintln!("  pre {p}: {}", c.pre.iter().map(L::text).collect::<Vec<_>>().join(" "));
     }
 }
 
