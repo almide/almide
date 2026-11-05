@@ -1,0 +1,10 @@
+// #4006 drill: a list.map fused into the fold that consumes it. Each pass
+// binds the mapped record and releases it after the fold step; the
+// re-injected render loses that release.
+type P = { x: Int, y: Int }
+
+fn main() -> Unit = {
+  let n = list.len(list.range(0, 4))
+  let s = list.range(0, n) |> list.map((i) => { x: i, y: i * 3 }) |> list.fold(0, (acc, p) => acc + p.x + p.y)
+  println(int.to_string(s))
+}
