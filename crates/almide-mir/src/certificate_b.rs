@@ -344,6 +344,17 @@ struct CertScan {
     call_move: bool,
     /// The object of every call-site move, in op order (the native-calls marks).
     call_move_objs: Vec<ValueId>,
+    /// The op indices of the WRITABLE call sites (#4491, a `CallFn` that
+    /// lends an argument to a writable-borrow param): their heap-argument
+    /// probes are written `B` (`MirFunction::call_mut_borrows`).
+    writable_calls: BTreeSet<usize>,
+    /// The op being stepped.
+    op_at: usize,
+    /// Per writable site, in op order: the object of each argument (`None`
+    /// for a scalar or an untracked one) — the native-calls site rows.
+    writable_objs: Vec<Vec<Option<ValueId>>>,
+    /// The probe being written is a writable site's (`B`).
+    writable_probe: bool,
     /// The slots a call-site move hands over (#4006 class P): a copy that
     /// feeds one is written as a share-out of its source (see `dup_step`).
     moved_slots: BTreeSet<ValueId>,

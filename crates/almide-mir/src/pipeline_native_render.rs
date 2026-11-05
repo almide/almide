@@ -316,6 +316,14 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     // #4006 class P: a heap param its body takes over becomes a move param,
     // and every call hands the argument over at the call.
     crate::native_move_params::rewrite(&mut functions);
+    // #4491: a `mut` Bytes param its body edits in place becomes a writable
+    // borrow (`&mut`), and every call lends the caller's buffer; the
+    // write-back result goes from the function's declared signature.
+    for name in crate::native_mut_borrow::rewrite(&mut functions) {
+        if let Some(sig) = sigs.get_mut(name.as_str()) {
+            sig.1 = None;
+        }
+    }
     crate::native_region_window::bracket_windows(&mut functions, &windows)?;
     let mut certs = native_ownership_certs(&functions);
     let program = MirProgram {

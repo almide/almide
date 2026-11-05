@@ -1,8 +1,8 @@
 // v1-vs-v0 shape bench: a `mut b: Bytes` param written by stdlib appends.
-// Inside `rec` the buffer is borrowed, so the certified render would edit a
-// copy of it on each call, a copy v0 never makes (1.37x v0's instructions
-// with that copy allowed). That call walls to v0. The bench keeps the wall
-// exercised: if the copy comes back, this program reads over the gate.
+// The certified render takes `b` as a writable borrow (`&mut`, #4491) and
+// edits the caller's buffer in place, as v0 does. Before that it edited a
+// copy on each call (1.37x v0's instructions) and the call walled to v0. The
+// bench keeps the shape timed: if the copy comes back, it reads over the gate.
 fn rec(mut b: Bytes, x: Int) -> Unit = {
   bytes.append_u16_le(b, x)
   bytes.append_u32_le(b, x * 7)

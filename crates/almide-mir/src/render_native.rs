@@ -55,6 +55,10 @@ pub(crate) enum NTy {
     Rec(u16),
     /// A BORROWED `&AlmdRecN` — a heap-record fn param.
     RecRef(u16),
+    /// A WRITABLE `&mut` borrow — a writable-borrow param (#4491,
+    /// `native_mut_borrow`): only the floor's writers and readers of its
+    /// type take it, so every other use walls.
+    RecMut(u16),
     /// An `Option<i64>` local — the native scalar-Option carrier (#4006
     /// family B; produced by the `native_option_rewrite` prims, an
     /// Opt-returning call, or an Option param). `Copy`: passed by value.
@@ -175,7 +179,7 @@ pub(crate) fn as_str_arg(code: &str, t: NTy) -> String {
         NTy::I64 | NTy::F64 => unreachable!("as_str_arg on scalar"),
         NTy::Res => unreachable!("as_str_arg on a Result carrier"),
         NTy::VecStr | NTy::VecStrRef => unreachable!("as_str_arg on a string list"),
-        NTy::Rec(_) | NTy::RecRef(_) => unreachable!("as_str_arg on a record"),
+        NTy::Rec(_) | NTy::RecRef(_) | NTy::RecMut(_) => unreachable!("as_str_arg on a record"),
         NTy::Opt => unreachable!("as_str_arg on an Option carrier"),
         NTy::ResStr => unreachable!("as_str_arg on a Result carrier"),
     }
@@ -456,6 +460,11 @@ fn seed_param_ntys(
         };
         // A MOVE param (#4006 class P) arrives as the caller's own value.
         let nty = if func.owned_params.contains(&p.value) { owned_nty(nty) } else { nty };
+        // A writable-borrow param (#4491) arrives as `&mut`.
+        let nty = match nty {
+            NTy::RecRef(i) if func.mut_borrow_params.contains(&p.value) => NTy::RecMut(i),
+            other => other,
+        };
         tys.insert(p.value, nty);
     }
     Ok(tys)

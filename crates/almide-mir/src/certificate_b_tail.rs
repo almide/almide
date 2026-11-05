@@ -120,7 +120,7 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
 /// their own `i`-born line (#3321) — each backed by its `Dup` op rather than an
 /// allocation, which [`plus_one_events_backed`] accounts.
 fn certificate_scan(func: &MirFunction) -> (String, bool, usize) {
-    let (lines, poisoned, cow_opened, _) = certificate_lines(func);
+    let (lines, poisoned, cow_opened, _, _) = certificate_lines(func);
     let mut out = String::new();
     for (_, line) in &lines {
         out.push_str(line);
@@ -135,7 +135,11 @@ fn certificate_scan(func: &MirFunction) -> (String, bool, usize) {
 /// ownership witness judges it as owned, and proofs/NativeCalls.v — which
 /// seeds that reference itself from the declared mode — reads the line
 /// without it (`certificate_native_calls`).
-pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, bool, usize, Vec<ValueId>) {
+/// The fifth element: per writable call site (#4491), in op order, the
+/// object of each argument.
+pub(crate) type CertLines = (Vec<(ValueId, String)>, bool, usize, Vec<ValueId>, Vec<Vec<Option<ValueId>>>);
+
+pub(crate) fn certificate_lines(func: &MirFunction) -> CertLines {
     // Sequential-phase split (codopsy8 complexity sweep): the two pre-scan sets below are
     // each an independent, self-contained computation over `func.ops` (the original code
     // already delineated the first as its own `{ .. }` scope) — extracted verbatim as their
@@ -189,6 +193,10 @@ pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, 
         paths: PathScopes { cow_dups: cow_dup_dsts(func), ..PathScopes::default() },
         call_move: false,
         call_move_objs: Vec::new(),
+        writable_calls: func.call_mut_borrows.iter().map(|&(i, _)| i).collect(),
+        op_at: 0,
+        writable_objs: Vec::new(),
+        writable_probe: false,
         slot_chain,
         moved_slots,
         merge_credit: Vec::new(),
@@ -196,6 +204,7 @@ pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, 
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.call_move = func.call_moves.contains(&i);
+        scan.op_at = i;
         scan.step(op);
     }
 
@@ -215,7 +224,7 @@ pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, 
     }
 
     let lines = scan.s.order.iter().map(|o| (*o, scan.s.stream[o].clone())).collect();
-    (lines, scan.s.poisoned, scan.paths.cow_opened, scan.call_move_objs)
+    (lines, scan.s.poisoned, scan.paths.cow_opened, scan.call_move_objs, scan.writable_objs)
 }
 
 /// The NON-RECURRING soundness gate for the borrow-by-default calling
@@ -310,11 +319,25 @@ impl CertScan {
     /// `addr_of`, and passing it after the child's parent was freed is a use
     /// after free (#3263; `verify_ownership`'s `call_arg_live`).
     fn call_arg_probes(&mut self, args: &[CallArg]) {
+        // A writable site (#4491): every heap argument's probe is the
+        // call-site `B`, and the site's row records each argument's object.
+        self.writable_probe = self.writable_calls.contains(&self.op_at);
+        if self.writable_probe {
+            let objs = args
+                .iter()
+                .map(|a| match a {
+                    CallArg::Handle(v) => self.address_object(*v),
+                    _ => None,
+                })
+                .collect();
+            self.writable_objs.push(objs);
+        }
         for a in args {
             if let CallArg::Handle(v) = a {
                 self.probe_address(*v);
             }
         }
+        self.writable_probe = false;
     }
 
     /// A load/store DEREFERENCES the object its address points into; `ElemAddr`
@@ -404,7 +427,7 @@ impl CertScan {
         if self.child_of.contains_key(&o) {
             self.child_probe(o);
         } else if self.owned_line(o) {
-            self.s.event(o, 'b');
+            self.s.event(o, if self.writable_probe { 'B' } else { 'b' });
         }
     }
 

@@ -639,7 +639,7 @@ pub(crate) fn owned_ty(t: NTy) -> String {
         NTy::Res => "Result<i64, AlmideString>".into(),
         NTy::Opt => "Option<i64>".into(),
         NTy::ResStr => "Result<AlmideString, AlmideString>".into(),
-        NTy::Rec(i) | NTy::RecRef(i) => struct_name(i),
+        NTy::Rec(i) | NTy::RecRef(i) | NTy::RecMut(i) => struct_name(i),
     }
 }
 

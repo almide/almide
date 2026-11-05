@@ -66,7 +66,7 @@ fn arg_kind(t: NTy) -> NativeSigKind {
         NTy::Str | NTy::StrRef => NativeSigKind::Str,
         NTy::Vec | NTy::VecRef => NativeSigKind::ListI64,
         NTy::VecStr | NTy::VecStrRef => NativeSigKind::ListStr,
-        NTy::Rec(i) | NTy::RecRef(i) => NativeSigKind::Rec(i),
+        NTy::Rec(i) | NTy::RecRef(i) | NTy::RecMut(i) => NativeSigKind::Rec(i),
         NTy::Opt => NativeSigKind::Opt,
         NTy::Res => NativeSigKind::Res,
         NTy::ResStr => NativeSigKind::ResStr,

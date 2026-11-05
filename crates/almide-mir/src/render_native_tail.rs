@@ -59,8 +59,8 @@ fn finish_native_fn(
             Some(NTy::Vec | NTy::VecRef) => "return Vec::new();",
             Some(NTy::Res) => "return Ok(0);",
             Some(NTy::VecStr | NTy::VecStrRef) => "return Vec::new();",
-            Some(t @ (NTy::Rec(_) | NTy::RecRef(_))) if !crate::render_native_rec::has_default(t) => "unreachable!(\"strict cut\");",
-            Some(NTy::Rec(_) | NTy::RecRef(_)) => "return Default::default();",
+            Some(t @ (NTy::Rec(_) | NTy::RecRef(_) | NTy::RecMut(_))) if !crate::render_native_rec::has_default(t) => "unreachable!(\"strict cut\");",
+            Some(NTy::Rec(_) | NTy::RecRef(_) | NTy::RecMut(_)) => "return Default::default();",
             Some(NTy::Opt) => "return None;",
             Some(NTy::ResStr) => "return Ok(AlmideString::new());",
         };
@@ -115,7 +115,7 @@ fn narrow_abi_wrapper(func: &MirFunction, sigs: &NativeSigs, rendered: String) -
 fn native_ret_expr(v: ValueId, t: NTy) -> String {
     match t {
         NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res | NTy::VecStr | NTy::Rec(_) | NTy::Opt | NTy::ResStr => var(v),
-        NTy::RecRef(_) => format!("{}.clone()", var(v)),
+        NTy::RecRef(_) | NTy::RecMut(_) => format!("{}.clone()", var(v)),
         NTy::StrRef => format!("AlmideString::from({})", var(v)),
         NTy::VecRef | NTy::VecStrRef => format!("{}.to_vec()", var(v)),
     }
@@ -170,6 +170,7 @@ fn render_native_fn_sig(
                 NTy::VecRef | NTy::Vec => "&[i64]".to_string(),
                 NTy::VecStrRef | NTy::VecStr => "&[AlmideString]".to_string(),
                 NTy::RecRef(i) | NTy::Rec(i) => format!("&{}", crate::render_native_rec::struct_name(i)),
+                NTy::RecMut(i) => format!("&mut {}", crate::render_native_rec::struct_name(i)),
                 NTy::I64 => "i64".to_string(),
                 NTy::F64 => "f64".to_string(),
                 NTy::Res => "Result<i64, AlmideString>".to_string(),
@@ -196,6 +197,7 @@ fn render_native_fn_sig(
             Some(NTy::Res) => " -> Result<i64, AlmideString>".to_string(),
             Some(NTy::VecStr | NTy::VecStrRef) => " -> Vec<AlmideString>".to_string(),
             Some(NTy::Rec(i) | NTy::RecRef(i)) => format!(" -> {}", crate::render_native_rec::struct_name(*i)),
+            Some(NTy::RecMut(_)) => return Err(wall("native: a writable borrow returned")),
             Some(NTy::Opt) => " -> Option<i64>".to_string(),
             Some(NTy::ResStr) => " -> Result<AlmideString, AlmideString>".to_string(),
             None => return Err(wall("native: return value untyped")),
@@ -594,6 +596,8 @@ pub(crate) fn render_dup(
         .get(src)
         .ok_or_else(|| wall("native: Dup of untyped value"))?;
     match t {
+        // A writable borrow (#4491) is never copied: its body only edits it.
+        NTy::RecMut(_) => return Err(wall("native: Dup of a writable borrow")),
         NTy::I64 => {
             tys.insert(*dst, NTy::I64);
             line!("let mut {} = {};", var(*dst), var(*src));

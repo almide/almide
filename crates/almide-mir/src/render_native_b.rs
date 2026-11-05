@@ -145,6 +145,8 @@ pub(crate) fn render_set_local(
     }
     let t = *tys.get(src).ok_or_else(|| wall("native: SetLocal of untyped value"))?;
     let rhs = match t {
+        // A writable borrow (#4491) is never a slot's value.
+        NTy::RecMut(_) => return Err(wall("native: a writable borrow rebound")),
         NTy::I64 | NTy::F64 => var(*src),
         NTy::Str => format!("{}.clone()", var(*src)),
         NTy::StrRef => format!("AlmideString::from({})", var(*src)),
@@ -245,6 +247,8 @@ fn render_user_fn_call(
         let (code, got) = call_arg(a, s.tys)?;
         let arg = if callee.owned_params.contains(&p.value) {
             moved_arg(name, crate::render_native::owned_nty(want), code, got)?
+        } else if callee.mut_borrow_params.contains(&p.value) {
+            lent_arg(name, want, code, got)?
         } else {
             user_arg_in_declared_mode(name, want, code, got)?
         };
@@ -290,6 +294,16 @@ fn declared_param_want(
 /// list param, and everything else follows the string convention — walling on
 /// any kind mismatch. Extracted verbatim from `render_call_fn`
 /// (codopsy r2, #852).
+/// An argument lent to a writable-borrow param (#4491): the caller's own
+/// buffer, as `&mut` (the site's write-back is gone: after the call the
+/// binding is the edited buffer).
+fn lent_arg(name: &str, want: NTy, code: String, got: NTy) -> Result<String, LowerError> {
+    match (want, got) {
+        (NTy::RecRef(i), NTy::Rec(j)) if i == j => Ok(format!("&mut {code}")),
+        _ => Err(wall(format!("native: call to `{name}` lends a buffer that is not the caller's own ({got:?})"))),
+    }
+}
+
 /// An argument handed to a MOVE param (#4006 class P): the caller's own value,
 /// moved (its `Consume` follows the call — `MirFunction::call_moves`).
 fn moved_arg(name: &str, want: NTy, code: String, got: NTy) -> Result<String, LowerError> {

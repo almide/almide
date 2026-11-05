@@ -540,6 +540,8 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
         FloorParam::Bytes => match got {
             NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&{code}"),
             NTy::RecRef(_) if crate::render_native_rec::is_bytes(*got) => code.to_string(),
+            // A writable-borrow param (#4491), read.
+            NTy::RecMut(i) if crate::render_native_rec::is_bytes(NTy::Rec(*i)) => format!("&*{code}"),
             _ => return Err(mismatch()),
         },
     })
@@ -590,6 +592,8 @@ fn matrix_or_bytes_mut_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy) -
         // Only the caller's own binding: a borrowed one cannot be written.
         FloorParam::BytesMut => match got {
             NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&mut {code}"),
+            // A writable-borrow param (#4491): the caller's buffer itself.
+            NTy::RecMut(i) if crate::render_native_rec::is_bytes(NTy::Rec(*i)) => format!("&mut *{code}"),
             _ => return Err(mismatch()),
         },
         _ => return Err(mismatch()),

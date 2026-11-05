@@ -40,6 +40,7 @@ pub(crate) fn bracket_windows(
         f.ops.insert(0, Op::Prim { kind: PrimKind::RegionSave, dst: Some(mark), args: Vec::new() });
         // Op indices moved by one.
         f.call_moves = f.call_moves.iter().map(|i| i + 1).collect();
+        f.call_mut_borrows = f.call_mut_borrows.iter().map(|&(i, k)| (i + 1, k)).collect();
         f.ops.push(Op::Prim { kind: PrimKind::RegionRestore, dst: None, args: vec![mark] });
     }
     Ok(())

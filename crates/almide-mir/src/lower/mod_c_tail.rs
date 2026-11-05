@@ -492,6 +492,8 @@ fn lower_function_all_impl(
         heap_slot_masks,
         owned_params: Default::default(),
         call_moves: Default::default(),
+        mut_borrow_params: Default::default(),
+        call_mut_borrows: Default::default(),
         aggregate_blocks: std::mem::take(&mut ctx.aggregate_blocks),
     };
     let mut all = vec![main];

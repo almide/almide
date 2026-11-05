@@ -50,6 +50,18 @@ pub struct MirFunction {
     /// The certificate writes these as the call-site move-out `M` on the
     /// argument's line, which proofs/NativeCalls.v binds to the site.
     pub call_moves: BTreeSet<usize>,
+    /// The WRITABLE-BORROW parameters (#4491, `native_mut_borrow`): a `mut`
+    /// heap parameter the body edits in place through the floor's writers,
+    /// passed by its caller as `&mut` and never returned, stored or released
+    /// here (its line starts at 0, the borrow's). Empty unless the native
+    /// render's pass made one.
+    pub mut_borrow_params: BTreeSet<ValueId>,
+    /// The writable call-site arguments: (op index of the `CallFn`, argument
+    /// index) of every argument a call lends to a writable-borrow parameter
+    /// of its callee. The certificate writes the call's heap-argument probes
+    /// as `B` and names their lines in the site's row (proofs/NativeCalls.v,
+    /// the writable-borrow rule).
+    pub call_mut_borrows: BTreeSet<(usize, usize)>,
     /// RENDER-ONLY side table: a block built as an all-scalar tuple or record
     /// → its declared type (spelled as `render_native_rec::block_key`). The
     /// native render builds it as that type's by-value struct; the block's

@@ -191,6 +191,8 @@ fn render_else(
         // Every heap join is declared unset (#4006, no-perf-loss): both arms
         // assign it, so a default built and dropped per evaluation buys nothing.
         let (decl, join_t, rhs) = match t {
+            // A writable borrow (#4491) is never an arm's yield.
+            NTy::RecMut(_) => return Err(wall("native: a writable borrow yielded by an arm")),
             // #3532: a borrow join holds the arm's shared reference.
             NTy::VecRef | NTy::StrRef if borrows.contains(d) => (
                 format!("let {}: {};", var(*d), if t == NTy::VecRef { "&[i64]" } else { "&str" }),
@@ -331,7 +333,7 @@ fn end_if_copy_rhs(v: ValueId, t: NTy) -> String {
         NTy::Res => format!("{}.clone()", var(v)),
         NTy::VecStr => format!("{}.clone()", var(v)),
         NTy::VecStrRef => format!("{}.to_vec()", var(v)),
-        NTy::Rec(_) | NTy::RecRef(_) => format!("{}.clone()", var(v)),
+        NTy::Rec(_) | NTy::RecRef(_) | NTy::RecMut(_) => format!("{}.clone()", var(v)),
         NTy::Opt => var(v),
         NTy::ResStr => format!("{}.clone()", var(v)),
     }

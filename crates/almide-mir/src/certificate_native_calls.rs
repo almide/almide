@@ -26,6 +26,12 @@
 ///   its runtime symbol in `host_ops::NATIVE_FS_HOST_CALLS`, or that list's
 ///   length when the symbol is not in it, which the checker rejects
 ///   (`NativeCalls.hosts_ok`: the named set is the trusted base's row);
+/// - `wargs` (#4491): per WRITABLE site (a call that lends an argument to a
+///   writable-borrow param, `MirFunction::call_mut_borrows`; its row's mode
+///   there is 2), in site order, the line of each heap argument's object —
+///   the lines whose call-site probes the certificate wrote `B`; an argument
+///   with no line of the block gets the out-of-range index, which the
+///   checker rejects;
 /// - the lines: [`certificate_lines`], the heap params' lines first (empty
 ///   when a param has no event), a MOVE param's line without the leading `i`
 ///   (the checker seeds it from the mode), then the rest in emission order.
@@ -55,7 +61,16 @@ pub fn native_calls_witness(functions: &[MirFunction]) -> String {
         f.params
             .iter()
             .filter(|p| p.repr.is_heap())
-            .map(|p| if f.owned_params.contains(&p.value) { "1" } else { "0" }.to_string())
+            .map(|p| {
+                if f.owned_params.contains(&p.value) {
+                    "1"
+                } else if f.mut_borrow_params.contains(&p.value) {
+                    "2"
+                } else {
+                    "0"
+                }
+                .to_string()
+            })
             .collect()
     };
     let blocks: Vec<String> = functions
@@ -63,6 +78,8 @@ pub fn native_calls_witness(functions: &[MirFunction]) -> String {
         .map(|f| {
             let mut sites: Vec<String> = Vec::new();
             let mut hosts: Vec<String> = Vec::new();
+            // Per writable site: its heap arguments' arg indices.
+            let mut writable: Vec<Vec<usize>> = Vec::new();
             for (at, op) in f.ops.iter().enumerate() {
                 match op {
                     Op::CallFn { name: callee, args, .. } => {
@@ -79,19 +96,25 @@ pub fn native_calls_witness(functions: &[MirFunction]) -> String {
                             })
                             .collect();
                         // One mode per heap param of the callee: what the caller did
-                        // with that argument — handed it over (1) or kept it (0).
+                        // with that argument — handed it over (1), lent it writable
+                        // (2, #4491) or kept it (0).
+                        let lent = |k: usize| f.call_mut_borrows.contains(&(at, k));
                         let modes: Vec<String> = match program.get(callee.as_str()) {
                             Some(c) => args
                                 .iter()
                                 .zip(&c.params)
-                                .filter(|(_, p)| p.repr.is_heap())
-                                .map(|(a, _)| {
+                                .enumerate()
+                                .filter(|(_, (_, p))| p.repr.is_heap())
+                                .map(|(k, (a, _))| {
                                     let moved = matches!(a, CallArg::Handle(v) if handed.contains(v));
-                                    if moved { "1" } else { "0" }.to_string()
+                                    if moved { "1" } else if lent(k) { "2" } else { "0" }.to_string()
                                 })
                                 .collect(),
                             None => borrow_modes(args),
                         };
+                        if let (Some(c), true) = (program.get(callee.as_str()), modes.iter().any(|m| m == "2")) {
+                            writable.push(args.iter().zip(&c.params).enumerate().filter(|(_, (_, p))| p.repr.is_heap()).map(|(k, _)| k).collect());
+                        }
                         sites.push(site_row(idx, &modes));
                     }
                     Op::CallIndirect { args, .. } => {
@@ -107,7 +130,7 @@ pub fn native_calls_witness(functions: &[MirFunction]) -> String {
                     _ => {}
                 }
             }
-            let (lines, _, _, moved) = certificate_lines(f);
+            let (lines, _, _, moved, lent_objs) = certificate_lines(f);
             let heap: Vec<ValueId> = f.params.iter().filter(|p| p.repr.is_heap()).map(|p| p.value).collect();
             let mut ordered: Vec<(ValueId, String)> = heap
                 .iter()
@@ -122,8 +145,22 @@ pub fn native_calls_witness(functions: &[MirFunction]) -> String {
                 .iter()
                 .map(|o| ordered.iter().position(|(x, _)| x == o).unwrap_or(ordered.len()).to_string())
                 .collect();
+            let line_of = |o: &Option<ValueId>| o.and_then(|o| ordered.iter().position(|(x, _)| *x == o)).unwrap_or(ordered.len());
+            let wargs: Vec<String> = writable
+                .iter()
+                .enumerate()
+                .map(|(n, ks)| {
+                    let objs = lent_objs.get(n);
+                    ks.iter()
+                        .map(|&k| line_of(&objs.and_then(|o| o.get(k).copied()).flatten()).to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect();
             let body: Vec<&str> = ordered.iter().map(|(_, l)| l.as_str()).collect();
-            format!("{}|{}|{}|{}\n{}", heap_modes(f).join(" "), sites.join(";"), marks.join(" "), hosts.join(" "), body.join("\n"))
+            let header = format!("{}|{}|{}|{}", heap_modes(f).join(" "), sites.join(";"), marks.join(" "), hosts.join(" "));
+            let header = if wargs.is_empty() { header } else { format!("{header}|{}", wargs.join(";")) };
+            format!("{header}\n{}", body.join("\n"))
         })
         .collect();
     blocks.join("#")
