@@ -1,0 +1,28 @@
+diff --git a/crates/almide-wasm/src/runtime.rs b/crates/almide-wasm/src/runtime.rs
+index 5ce9b104d..48094f2ae 100644
+--- a/crates/almide-wasm/src/runtime.rs
++++ b/crates/almide-wasm/src/runtime.rs
+@@ -342,8 +342,8 @@ pub(crate) fn emit_str_len_chars() -> Function {
+     i.i32_const(0).local_set(idx);
+     i.i64_const(0).local_set(n);
+     i.block(BlockType::Empty).loop_(BlockType::Empty);
+-    i.local_get(idx).local_get(blen).i32_ge_u().br_if(1);
+-    // #4005: the read under the loop's exit test, in the bounds witness.
++    // RE-INJECTED (#4005 drill): the exit test is gone; the read is still
++    // recorded, on a stretch with no guard.
+     let site = crate::witness::bounds::helper_loop_exit(&f);
+     f.instructions().local_get(bbase).local_get(idx).i32_add().i32_load8_u(byte);
+     crate::witness::bounds::helper_read(site, &f);
+diff --git a/crates/almide-wasm/src/witness_bounds.rs b/crates/almide-wasm/src/witness_bounds.rs
+index 95df01614..c8d4713da 100644
+--- a/crates/almide-wasm/src/witness_bounds.rs
++++ b/crates/almide-wasm/src/witness_bounds.rs
+@@ -309,7 +309,7 @@ pub(crate) fn helper_loop_exit(f: &wasm_encoder::Function) -> Option<Site> {
+         return None;
+     }
+     let site = loop_header();
+-    exit(site, f);
++    let _ = f;
+     site
+ }
+ 
