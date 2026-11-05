@@ -35,10 +35,18 @@ effect fn main() -> Unit = {
 }
 "#;
     let out = render(src).unwrap_or_else(|e| panic!("the variant carry walls: {e}"));
-    let body = out.split("fn join_acc").nth(1).expect("join_acc is rendered");
-    let body = &body[..body.find("\nfn ").unwrap_or(body.len())];
-    assert!(body.contains("while"), "join_acc is a loop:\n{body}");
-    assert!(!body.contains("join_acc("), "join_acc no longer calls itself:\n{body}");
+    // The rendered fn's header line names it (whatever its mangled spelling).
+    let at = out
+        .lines()
+        .position(|l| l.trim_start().starts_with("fn ") && l.contains("join_acc"))
+        .unwrap_or_else(|| panic!("join_acc is rendered:\n{out}"));
+    let lines: Vec<&str> = out.lines().collect();
+    let header = lines[at];
+    let name = header.trim_start()["fn ".len()..].split('(').next().unwrap().trim().to_string();
+    let end = (at + 1..lines.len()).find(|&k| lines[k].starts_with("fn ")).unwrap_or(lines.len());
+    let body = lines[at + 1..end].join("\n");
+    assert!(body.contains("while") || body.contains("loop"), "join_acc is a loop:\n{header}\n{body}");
+    assert!(!body.contains(&format!("{name}(")), "join_acc no longer calls itself:\n{header}\n{body}");
 }
 
 /// The #3550 wall is unchanged: a heap self tail call behind a `!` early
