@@ -141,6 +141,11 @@ treealloc 0.343
 # certified render built every node with `Box`, so the region knob changed
 # nothing. treealloc read 0.227 in the same run, still on the standard codegen.
 btrees 0.164
+# BTREES RELATION (check-perf-ratio.sh): btrees native / treealloc native in
+# one run. Runner jobs of PR #4488 and #4495: 0.80, 0.79, 0.85, 0.76, 0.90,
+# 0.78 (EPYC 7763 / 9V74) and 0.86 (Xeon 8370C). The gate fails on the 1.15
+# ceiling in the script, never on this value.
+btrees-treealloc 0.83
 # `decode` (#1679) is reported and not anchored, like strchurn: N derived
 # `User.decode`s of one 8-field document against the same-shape hand-written
 # decode (`rust:decode`, borrowed field scan + owned `String` record fields).
