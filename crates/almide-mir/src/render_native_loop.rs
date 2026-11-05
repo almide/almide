@@ -162,6 +162,7 @@ fn render_fn_step<'a>(
     ops: &mut impl Iterator<Item = (usize, &'a Op)>,
 ) -> Result<bool, LowerError> {
     crate::render_native_bounds::at(i);
+    crate::native_hof::at(st.func, i);
     crate::render_native_move::set_moving_args(st.func, i, &st.tys, &st.borrows.arms);
     if st.chains.skip.contains(&i) || st.printed.contains(&i) || st.scalar_defs.contains(&i) {
         return Ok(false);

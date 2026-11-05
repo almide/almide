@@ -63,6 +63,7 @@ pub mod native_slot_rewrite;
 pub mod native_move_params;
 mod native_list_ops;
 mod native_narrow_rewrite;
+mod native_hof;
 
 use std::collections::{BTreeMap, BTreeSet};
 

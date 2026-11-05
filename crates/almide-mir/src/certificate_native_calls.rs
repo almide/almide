@@ -31,10 +31,36 @@
 /// row; any other unknown callee gets the out-of-range block index, which the
 /// checker rejects.
 pub fn native_calls_witness(functions: &[MirFunction]) -> String {
+    native_calls_witness_with(functions, &BTreeMap::new())
+}
+
+/// [`native_calls_witness`] for a render that served some calls through the
+/// runtime body their stdlib declaration names (`crate::native_hof`):
+/// `runtime` maps each such site (function, op index) to that body. Each
+/// distinct (body, heap-arg count) gets a block of its own after the
+/// program's — every param borrowed, no line event: the runtime body is
+/// trusted code that keeps no reference it was lent — and its site a row
+/// against it with each heap argument lent, as the render lends it (a
+/// moved list is one the caller never reads again). The out-of-range index
+/// stays past every block.
+pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTreeMap<(String, usize), String>) -> String {
     let program: BTreeMap<String, MirFunction> = functions.iter().map(|f| (f.name.clone(), f.clone())).collect();
     let names: Vec<&str> = functions.iter().map(|f| f.name.as_str()).collect();
     let index_of: BTreeMap<&str, usize> = names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
-    let unknown = names.len();
+    // The runtime blocks: one per (body, heap-arg count), in that order.
+    let mut runtime_blocks: Vec<(String, usize)> = Vec::new();
+    for f in functions {
+        for (at, op) in f.ops.iter().enumerate() {
+            if let (Some(symbol), Op::CallFn { args, .. }) = (runtime.get(&(f.name.clone(), at)), op) {
+                let key = (symbol.clone(), borrow_modes(args).len());
+                if !runtime_blocks.contains(&key) {
+                    runtime_blocks.push(key);
+                }
+            }
+        }
+    }
+    runtime_blocks.sort();
+    let unknown = names.len() + runtime_blocks.len();
     // A callee outside the program is one the render resolves to the native
     // runtime (a shim, a floor body, the list concat) — all of which borrow
     // their heap args by the renderer contract — or a dotted / `__` name.
@@ -59,6 +85,11 @@ pub fn native_calls_witness(functions: &[MirFunction]) -> String {
             let mut sites: Vec<String> = Vec::new();
             for (at, op) in f.ops.iter().enumerate() {
                 match op {
+                    Op::CallFn { args, .. } if runtime.contains_key(&(f.name.clone(), at)) => {
+                        let key = (runtime[&(f.name.clone(), at)].clone(), borrow_modes(args).len());
+                        let idx = names.len() + runtime_blocks.iter().position(|b| *b == key).unwrap_or(runtime_blocks.len());
+                        sites.push(site_row(idx, &borrow_modes(args)));
+                    }
                     Op::CallFn { name: callee, args, .. } => {
                         let Some(idx) = direct_callee_index(callee, &index_of, unknown, &known) else { continue };
                         // The arguments the caller handed over right after this call.
@@ -117,5 +148,6 @@ pub fn native_calls_witness(functions: &[MirFunction]) -> String {
             format!("{}|{}|{}\n{}", heap_modes(f).join(" "), sites.join(";"), marks.join(" "), body.join("\n"))
         })
         .collect();
-    blocks.join("#")
+    let blocks = blocks.into_iter().chain(runtime_blocks.iter().map(|(_, n)| format!("{}||\n{}", vec!["0"; *n].join(" "), vec![""; *n].join("\n"))));
+    blocks.collect::<Vec<_>>().join("#")
 }

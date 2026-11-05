@@ -382,6 +382,14 @@ pub(crate) fn install(recs: Vec<RecDecl>) -> RecGuard {
     RecGuard
 }
 
+/// The table as it stands, and putting it back (a render run again).
+pub(crate) fn snapshot() -> Vec<RecDecl> {
+    RECS.with(|r| r.borrow().clone())
+}
+pub(crate) fn restore(recs: Vec<RecDecl>) {
+    RECS.with(|r| *r.borrow_mut() = recs);
+}
+
 pub(crate) fn rec_index(name: &str) -> Option<u16> {
     RECS.with(|r| r.borrow().iter().position(|d| d.name == name).map(|i| i as u16))
 }
