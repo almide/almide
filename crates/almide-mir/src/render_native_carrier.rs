@@ -302,9 +302,6 @@ pub(super) fn render_carrier_op(
         }
         Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args } if args.len() == 2 => {
             let (ad, i) = cx.base_of(&args[0])?;
-            if option_payload(i).is_some() {
-                return Some(cx.store_option_len(ad, args));
-            }
             let (o, e) = result_payloads(i)?;
             Some(cx.store_tag(ad, args, o, e))
         }
@@ -533,7 +530,6 @@ impl CarrierCx<'_> {
         if let Some(p) = option_payload(i) {
             return payload_rhs(self.st, self.tys, v, p).map(|rhs| {
                 self.emit(&format!("{} = Some({rhs});", var(ad.base)));
-                self.st.some_stored.insert(ad.base);
                 true
             });
         }
@@ -548,28 +544,6 @@ impl CarrierCx<'_> {
         self.st.pending.insert(ad.base, v);
         self.emit(&format!("// {}: payload {}, side by the tag next", var(ad.base), var(v)));
         Ok(true)
-    }
-
-    /// An Option block's length word (its tag), stored by the code that fills
-    /// a 0-or-1 block in place (`defunc_find`'s scan): 0 = `None`; 1 = the
-    /// `Some` its slot store just made, which must be the last word stored
-    /// into the block.
-    fn store_option_len(&mut self, ad: Addr, args: &[ValueId]) -> Result<bool, LowerError> {
-        if ad.off != i64::from(BLOCK_LEN_OFFSET) || ad.idx.is_some() {
-            return Err(wall(format!("native: Store4 at {ad:?} of an Option carrier")));
-        }
-        match self.st.consts.get(&args[1]).copied() {
-            Some(0) => {
-                self.st.some_stored.remove(&ad.base);
-                self.emit(&format!("{} = None;", var(ad.base)));
-                Ok(true)
-            }
-            Some(1) if self.st.some_stored.remove(&ad.base) => {
-                self.emit(&format!("// {}: its length word 1, the Some just stored", var(ad.base)));
-                Ok(true)
-            }
-            _ => Err(wall("native: an Option length word other than 0, or 1 after its payload")),
-        }
     }
 
     /// The Result tag word stored after its payload: picks the side.

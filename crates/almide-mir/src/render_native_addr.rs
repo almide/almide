@@ -98,9 +98,6 @@ pub(crate) struct AddrState {
     scaled_src: BTreeMap<ValueId, ValueId>,
     /// Values computed by integer arithmetic (not a plain counter).
     arith: BTreeSet<ValueId>,
-    /// Option carriers whose slot store made them `Some` since their length
-    /// word was last stored (`render_native_carrier::store_option_len`).
-    some_stored: BTreeSet<ValueId>,
     /// Payload reads that render as a borrow into their block.
     borrow_reads: BTreeSet<ValueId>,
     /// Heap slot reads of an owned record that move the value out
@@ -226,7 +223,6 @@ impl AddrState {
             len_plus: BTreeMap::new(),
             scaled_src: BTreeMap::new(),
             arith: BTreeSet::new(),
-            some_stored: BTreeSet::new(),
             borrow_reads: crate::render_native_borrow_read::borrow_reads(func),
             moves,
             moves_last,
