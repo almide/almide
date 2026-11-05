@@ -322,12 +322,12 @@ fn user_arg_in_declared_mode(
         NTy::VecStrRef | NTy::VecStr => match got {
             NTy::VecStr => Ok(format!("&{code}")),
             NTy::VecStrRef => Ok(code),
-            _ => Err(wall(format!("native: non-string-list arg to List[String] param of `{name}`"))),
+            _ => Err(wall(format!("native: non-string-list arg ({got:?}) to List[String] param of `{name}`"))),
         },
         NTy::RecRef(i) | NTy::Rec(i) => match got {
             NTy::Rec(j) if j == i => Ok(format!("&{code}")),
             NTy::RecRef(j) if j == i => Ok(code),
-            _ => Err(wall(format!("native: arg of another type to a record param of `{name}`"))),
+            _ => Err(wall(format!("native: arg of another type ({got:?}) to a record param ({want:?}) of `{name}`"))),
         },
         NTy::ResStr | NTy::Res | NTy::Opt => carrier_arg_in_declared_mode(name, want, code, got),
         NTy::VecRef | NTy::Vec => {
