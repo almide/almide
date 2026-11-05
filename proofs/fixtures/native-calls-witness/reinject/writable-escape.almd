@@ -1,0 +1,18 @@
+// #4491 writable-borrow reinjection drill (scripts/witness-reinject.sh native-calls):
+// AN ESCAPING BORROW: the pass keeps the callee's return and returns the
+// writable parameter itself. Unpatched, `stamp` takes `b` as a writable borrow
+// and returns nothing; `main` lends its own buffer at every call.
+fn stamp(mut b: Bytes, x: Int) -> Unit = {
+  bytes.append_u16_le(b, x)
+  bytes.append_u8(b, x)
+}
+
+fn main() -> Unit = {
+  var b = bytes.zeros(0)
+  var i = 0
+  while i < 3 {
+    stamp(b, i)
+    i = i + 1
+  }
+  println(int.to_string(bytes.len(b)))
+}

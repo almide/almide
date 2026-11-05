@@ -1,0 +1,13 @@
+// #4491 writable-borrow reinjection drill (scripts/witness-reinject.sh native-calls):
+// A USE OF THE CALLER'S BINDING INSIDE THE CALL: the pass passes the lent
+// buffer again at the borrowed argument of the same site. Unpatched, `put`
+// takes `b` as a writable borrow and reads `src`; `main` lends its own buffer
+// and passes another one beside it.
+fn put(mut b: Bytes, src: Bytes) -> Unit = bytes.copy_from(b, src, 0, 0, 2)
+
+effect fn main() -> Unit = {
+  var buf = bytes.zeros(4)
+  let src = bytes.from_list([7, 9])
+  put(buf, src)
+  println("${bytes.to_list(buf)}")
+}

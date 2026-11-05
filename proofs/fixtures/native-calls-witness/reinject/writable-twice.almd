@@ -1,0 +1,13 @@
+// #4491 writable-borrow reinjection drill (scripts/witness-reinject.sh native-calls):
+// THE SAME BUFFER PASSED TWICE AS WRITABLE: the pass lends every heap
+// argument of the site writable and names the lent buffer at both. Unpatched,
+// `put` takes `b` as a writable borrow and reads `src`; `main` lends its own
+// buffer and passes another one beside it.
+fn put(mut b: Bytes, src: Bytes) -> Unit = bytes.copy_from(b, src, 0, 0, 2)
+
+effect fn main() -> Unit = {
+  var buf = bytes.zeros(4)
+  let src = bytes.from_list([7, 9])
+  put(buf, src)
+  println("${bytes.to_list(buf)}")
+}

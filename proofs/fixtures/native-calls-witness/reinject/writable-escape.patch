@@ -1,0 +1,46 @@
+diff --git a/crates/almide-mir/src/native_mut_borrow.rs b/crates/almide-mir/src/native_mut_borrow.rs
+index a4c704ca6..e4d1f7ab9 100644
+--- a/crates/almide-mir/src/native_mut_borrow.rs
++++ b/crates/almide-mir/src/native_mut_borrow.rs
+@@ -304,7 +304,8 @@ fn rewrite_callee(f: &mut MirFunction, c: &Chain) {
+         }
+     }
+     remove_ops(f, &c.remove);
+-    f.ret = None;
++    // RE-INJECTED (#4491 drill): the callee returns its writable parameter.
++    f.ret = Some(c.param);
+     f.mut_borrow_params.insert(c.param);
+ }
+ 
+@@ -350,11 +351,14 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) -> Vec<String> {
+         return Vec::new();
+     }
+     let before = functions.to_vec();
+-    if !apply(functions, &plan) || functions.iter().any(|f| crate::verify_ownership(f).is_err()) {
++    // RE-INJECTED (#4491 drill): the Rust mirror is bypassed.
++    if !apply(functions, &plan) {
+         functions.clone_from_slice(&before);
+         return Vec::new();
+     }
+-    plan.into_keys().collect()
++    // RE-INJECTED (#4491 drill): the declared result stays.
++    let _ = plan;
++    Vec::new()
+ }
+ 
+ /// Rewrite every planned callee's sites, one callee at a time on the bodies
+diff --git a/crates/almide-mir/src/render_native.rs b/crates/almide-mir/src/render_native.rs
+index 4f03ed5bd..e4b878dc8 100644
+--- a/crates/almide-mir/src/render_native.rs
++++ b/crates/almide-mir/src/render_native.rs
+@@ -213,6 +213,10 @@ use crate::render_native_shims::{
+ /// Drops from — the certificate that scope-end drop realizes it. A violation is
+ /// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
+ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
++    // RE-INJECTED (#4006 drill): the Rust mirror is bypassed.
++    if !func.name.is_empty() {
++        return Ok(());
++    }
+     let Err(violations) = crate::verify_ownership(func) else {
+         return Ok(());
+     };

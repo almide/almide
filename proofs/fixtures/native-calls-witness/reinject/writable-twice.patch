@@ -1,0 +1,67 @@
+diff --git a/crates/almide-mir/src/native_mut_borrow.rs b/crates/almide-mir/src/native_mut_borrow.rs
+index a4c704ca6..d5086ff34 100644
+--- a/crates/almide-mir/src/native_mut_borrow.rs
++++ b/crates/almide-mir/src/native_mut_borrow.rs
+@@ -306,14 +306,26 @@ fn rewrite_callee(f: &mut MirFunction, c: &Chain) {
+     remove_ops(f, &c.remove);
+     f.ret = None;
+     f.mut_borrow_params.insert(c.param);
++    // RE-INJECTED (#4491 drill): every heap param is a writable borrow.
++    let heap: Vec<ValueId> = f.params.iter().filter(|p| p.repr.is_heap()).map(|p| p.value).collect();
++    f.mut_borrow_params.extend(heap);
+ }
+ 
+ /// A caller's site: the call lends its buffer and binds nothing; the
+ /// write-back goes.
+ fn rewrite_site(g: &mut MirFunction, s: &Site, k: usize) {
+-    if let Op::CallFn { dst, result, .. } = &mut g.ops[s.call] {
++    // RE-INJECTED (#4491 drill): every heap argument is lent writable, and the lent buffer is named at each.
++    let mut others = Vec::new();
++    if let Op::CallFn { dst, result, args, .. } = &mut g.ops[s.call] {
+         *dst = None;
+         *result = None;
++        let lent = args[k].clone();
++        for (k2, a) in args.iter_mut().enumerate() {
++            if k2 != k && matches!(a, CallArg::Handle(_)) {
++                *a = lent.clone();
++                others.push(k2);
++            }
++        }
+     }
+     if let Some((t, b)) = s.rename {
+         for (j, op) in g.ops.iter_mut().enumerate().skip(s.call + 1) {
+@@ -325,6 +337,9 @@ fn rewrite_site(g: &mut MirFunction, s: &Site, k: usize) {
+     let call = s.call - s.remove.range(..s.call).count();
+     remove_ops(g, &s.remove);
+     g.call_mut_borrows.insert((call, k));
++    for k2 in others {
++        g.call_mut_borrows.insert((call, k2));
++    }
+ }
+ 
+ /// The pass. Returns the names of the functions whose return it took away
+@@ -350,7 +365,8 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) -> Vec<String> {
+         return Vec::new();
+     }
+     let before = functions.to_vec();
+-    if !apply(functions, &plan) || functions.iter().any(|f| crate::verify_ownership(f).is_err()) {
++    // RE-INJECTED (#4491 drill): the Rust mirror is bypassed.
++    if !apply(functions, &plan) {
+         functions.clone_from_slice(&before);
+         return Vec::new();
+     }
+diff --git a/crates/almide-mir/src/render_native.rs b/crates/almide-mir/src/render_native.rs
+index 4f03ed5bd..e4b878dc8 100644
+--- a/crates/almide-mir/src/render_native.rs
++++ b/crates/almide-mir/src/render_native.rs
+@@ -213,6 +213,10 @@ use crate::render_native_shims::{
+ /// Drops from — the certificate that scope-end drop realizes it. A violation is
+ /// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
+ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
++    // RE-INJECTED (#4006 drill): the Rust mirror is bypassed.
++    if !func.name.is_empty() {
++        return Ok(());
++    }
+     let Err(violations) = crate::verify_ownership(func) else {
+         return Ok(());
+     };
