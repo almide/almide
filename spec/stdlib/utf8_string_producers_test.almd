@@ -1,0 +1,289 @@
+// The UTF-8 producer evidence for the string family (#4005 A4,
+// proofs/utf8-producers.toml): every String a producer hands out, fed the
+// invalid-byte corpus (decoded through the validating front door, since no
+// other way into a String exists) and the valid text next to every boundary a
+// cut or a case map can hit, is checked with an oracle written here, in
+// decimal, sharing no code with any producer it checks.
+
+// ── the oracle: RFC 3629 well-formedness of a String's bytes ──
+fn utf8_in(bs: List[Int], i: Int, lo: Int, hi: Int) -> Bool = match list.get(bs, i) {
+  some(b) => b >= lo and b <= hi,
+  none => false,
+}
+
+fn utf8_cont(bs: List[Int], i: Int, n: Int) -> Bool =
+  if n == 0 then true
+  else utf8_in(bs, i, 128, 191) and utf8_cont(bs, i + 1, n - 1)
+
+fn utf8_width(bs: List[Int], i: Int, b: Int) -> Int =
+  if b < 128 then 1
+  else if b >= 194 and b <= 223 then (if utf8_cont(bs, i + 1, 1) then 2 else 0)
+  else if b == 224 then (if utf8_in(bs, i + 1, 160, 191) and utf8_cont(bs, i + 2, 1) then 3 else 0)
+  else if b == 237 then (if utf8_in(bs, i + 1, 128, 159) and utf8_cont(bs, i + 2, 1) then 3 else 0)
+  else if b >= 225 and b <= 239 then (if utf8_cont(bs, i + 1, 2) then 3 else 0)
+  else if b == 240 then (if utf8_in(bs, i + 1, 144, 191) and utf8_cont(bs, i + 2, 2) then 4 else 0)
+  else if b >= 241 and b <= 243 then (if utf8_cont(bs, i + 1, 3) then 4 else 0)
+  else if b == 244 then (if utf8_in(bs, i + 1, 128, 143) and utf8_cont(bs, i + 2, 2) then 4 else 0)
+  else 0
+
+fn utf8_from(bs: List[Int], i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let w = utf8_width(bs, i, list.get(bs, i) ?? 0)
+    if w == 0 then false else utf8_from(bs, i + w, n)
+  }
+
+fn utf8_ok(s: String) -> Bool = {
+  let bs = bytes.to_list(bytes.from_string(s))
+  utf8_from(bs, 0, list.len(bs))
+}
+
+// ── the invalid input: every class of ill-formed UTF-8 ──
+fn invalid_corpus() -> List[Bytes] = [
+  bytes.from_list([0xFF]),
+  bytes.from_list([0xFE, 0x41]),
+  bytes.from_list([0xC0, 0xAF]),
+  bytes.from_list([0xC1, 0xBF]),
+  bytes.from_list([0xE0, 0x80, 0xAF]),
+  bytes.from_list([0xED, 0xA0, 0x80]),
+  bytes.from_list([0xED, 0xBF, 0xBF]),
+  bytes.from_list([0xF4, 0x90, 0x80, 0x80]),
+  bytes.from_list([0xF5, 0x80, 0x80, 0x80]),
+  bytes.from_list([0xF8, 0x88, 0x80, 0x80, 0x80]),
+  bytes.from_list([0x80]),
+  bytes.from_list([0x61, 0xBF, 0x62]),
+  bytes.from_list([0xE2, 0x82]),
+  bytes.from_list([0xF0, 0x9F, 0x98]),
+  bytes.from_list([0xC3]),
+  bytes.from_list([0x61, 0xE2, 0x82, 0x61, 0xF0, 0x9F, 0x98, 0x80, 0xFF]),
+  bytes.from_list([0xE2, 0x82, 0xAC, 0xC3]),
+  bytes.from_list([0x0A, 0xFF, 0x0D, 0x0A, 0xC3, 0x0A]),
+]
+
+// ── valid text beside every boundary a cut or a case map can hit ──
+fn edge_strings() -> List[String] = [
+  "",
+  "a",
+  "ab",
+  "é",
+  "€",
+  "😀",
+  "\u{10FFFF}",
+  "\u{FFFD}",
+  "\u{7F}\u{80}\u{7FF}\u{800}\u{FFFF}\u{10000}",
+  "\u{23A}\u{2C65}\u{23E}",
+  "\u{130}\u{131}\u{1E9E}\u{DF}",
+  "\u{FB03}\u{390}\u{3B0}\u{1F80}",
+  "\u{3A3}\u{3C3}\u{3C2}",
+  "e\u{301}",
+  "a😀b€cé",
+  " \t\u{3000}x\u{A0}\u{2028} ",
+  "\u{FEFF}bom",
+  "日本語テキスト",
+  "line\nnext\r\nlast\r",
+  "a,b,,c",
+]
+
+fn adversary() -> List[String] = (invalid_corpus() |> list.map((b) => bytes.to_string_lossy(b))) + edge_strings()
+
+fn blen(s: String) -> Int = bytes.len(bytes.from_string(s))
+
+// Every index a cut can take: before the start, each byte offset, past the end.
+fn cuts(s: String) -> List[Int] = list.range(-2, blen(s) + 3)
+
+test "bytes.to_string refuses every invalid sequence and passes valid text" {
+  for b in invalid_corpus() {
+    match bytes.to_string(b) {
+      ok(_) => assert(false, "accepted invalid UTF-8"),
+      err(e) => assert(utf8_ok(e)),
+    }
+  }
+  for s in edge_strings() {
+    match bytes.to_string(bytes.from_string(s)) {
+      ok(t) => assert(utf8_ok(t) and t == s),
+      err(_) => assert(false, "refused valid UTF-8"),
+    }
+  }
+}
+
+test "bytes.to_string_lossy repairs every invalid sequence" {
+  for b in invalid_corpus() {
+    assert(utf8_ok(bytes.to_string_lossy(b)))
+    assert(utf8_ok(bytes.to_string_lossy(bytes.from_list(bytes.to_list(b) + bytes.to_list(b)))))
+    assert(utf8_ok(bytes.to_string_lossy(bytes.slice(b, 1, bytes.len(b)))))
+  }
+}
+
+test "string.from_codepoint refuses surrogates and scalars past U+10FFFF" {
+  let probes = [-1, 0, 127, 128, 2047, 2048, 55295, 55296, 56319, 56320, 57343, 57344, 65535, 65536, 1114111, 1114112, 2147483647]
+  for n in probes {
+    match string.from_codepoint(n) {
+      some(s) => assert(utf8_ok(s)),
+      none => assert(true),
+    }
+  }
+  assert(string.from_codepoint(55296) == none)
+  assert(string.from_codepoint(1114112) == none)
+  for b in invalid_corpus() {
+    for x in bytes.to_list(b) {
+      match string.from_codepoint(x) {
+        some(s) => assert(utf8_ok(s)),
+        none => assert(true),
+      }
+    }
+  }
+}
+
+test "string.from_utf16 refuses unpaired surrogates" {
+  let units = [[55296], [56320], [56320, 55296], [55357, 56832], [55357], [97, 55296, 98], [65533], []]
+  for xs in units {
+    match string.from_utf16(xs) {
+      ok(s) => assert(utf8_ok(s)),
+      err(e) => assert(utf8_ok(e)),
+    }
+  }
+  assert(result.is_err(string.from_utf16([55296])))
+  for b in invalid_corpus() {
+    match string.from_utf16(bytes.to_list(b)) {
+      ok(s) => assert(utf8_ok(s)),
+      err(e) => assert(utf8_ok(e)),
+    }
+  }
+}
+
+test "string.byte_slice answers none off a character boundary" {
+  for s in adversary() {
+    for i in cuts(s) {
+      for j in cuts(s) {
+        match string.byte_slice(s, i, j) {
+          some(t) => assert(utf8_ok(t)),
+          none => assert(true),
+        }
+      }
+    }
+  }
+}
+
+test "index cuts land on character boundaries" {
+  for s in adversary() {
+    for i in cuts(s) {
+      assert(utf8_ok(string.slice(s, i, i + 2)))
+      assert(utf8_ok(string.slice(s, 0, i)))
+      assert(utf8_ok(string.take(s, i)))
+      assert(utf8_ok(string.drop(s, i)))
+      assert(utf8_ok(string.take_end(s, i)))
+      assert(utf8_ok(string.drop_end(s, i)))
+      assert(utf8_ok(string.get(s, i) ?? ""))
+      let (a, b) = string.split_at(s, i)
+      assert(utf8_ok(a) and utf8_ok(b))
+    }
+    // The aborting cuts, inside their domain: every character position.
+    let n = string.len(s)
+    for i in list.range(0, n + 1) {
+      assert(utf8_ok(string.insert(s, i, "€")))
+    }
+    for i in list.range(0, n) {
+      assert(utf8_ok(string.remove_at(s, i)))
+    }
+    for k in list.range(1, n + 2) {
+      assert(list.all(string.chunk(s, k), (c) => utf8_ok(c)))
+      assert(list.all(string.window(s, k), (c) => utf8_ok(c)))
+    }
+    assert(utf8_ok(string.first(s) ?? ""))
+    assert(utf8_ok(string.last(s) ?? ""))
+    var t = s
+    assert(utf8_ok(string.pop(t) ?? ""))
+    assert(utf8_ok(t))
+  }
+}
+
+test "case mapping keeps every adversarial string valid, at its output bound" {
+  let wide = list.map(list.range(0, 300), (_) => "\u{390}\u{23A}\u{2C65}") |> list.join("")
+  for s in adversary() + [wide, string.repeat("\u{23A}", 400)] {
+    assert(utf8_ok(string.to_upper(s)))
+    assert(utf8_ok(string.to_lower(s)))
+    assert(utf8_ok(string.capitalize(s)))
+  }
+}
+
+test "trim and pad keep every adversarial string valid" {
+  for s in adversary() {
+    assert(utf8_ok(string.trim(s)))
+    assert(utf8_ok(string.trim_start(s)))
+    assert(utf8_ok(string.trim_end(s)))
+    for fill in adversary() {
+      for n in [0, 1, 3, 8] {
+        assert(utf8_ok(string.pad_start(s, n, fill)))
+        assert(utf8_ok(string.pad_end(s, n, fill)))
+      }
+    }
+  }
+}
+
+test "search, split and replace cut only at matches of a valid needle" {
+  for s in adversary() {
+    for needle in adversary() + [string.take(s, 1), string.drop(s, 1)] {
+      assert(utf8_ok(string.replace(s, needle, "€")))
+      assert(utf8_ok(string.replace_first(s, needle, "😀")))
+      assert(list.all(string.split(s, needle), (p) => utf8_ok(p)))
+      match string.split_once(s, needle) {
+        some((a, b)) => assert(utf8_ok(a) and utf8_ok(b)),
+        none => assert(true),
+      }
+      assert(utf8_ok(string.strip_prefix(s, needle) ?? ""))
+      assert(utf8_ok(string.strip_suffix(s, needle) ?? ""))
+    }
+    assert(list.all(string.lines(s), (l) => utf8_ok(l)))
+  }
+}
+
+test "character iteration hands out whole characters" {
+  for s in adversary() {
+    assert(list.all(string.to_list(s), (c) => utf8_ok(c)))
+    assert(list.all(string.enumerate(s), ((_, c)) => utf8_ok(c)))
+    assert(utf8_ok(string.reverse(s)))
+    assert(list.all(string.sort(s), (c) => utf8_ok(c)))
+    assert(list.all(string.sort_by(s, (c) => c), (c) => utf8_ok(c)))
+    assert(list.all(string.sort_with(s, (a, b) => if a < b then -1 else if a > b then 1 else 0), (c) => utf8_ok(c)))
+    assert(utf8_ok(string.dedup(s)))
+    assert(utf8_ok(string.unique(s)))
+    assert(utf8_ok(string.unique_by(s, (c) => c)))
+    assert(utf8_ok(string.filter(s, (c) => utf8_ok(c))))
+    assert(list.all(string.filter_map(s, (c) => if utf8_ok(c) then some(c) else none), (c) => utf8_ok(c)))
+    assert(string.find_index(s, (c) => not utf8_ok(c)) == none)
+    assert(string.find_map(s, (c) => if utf8_ok(c) then none else some(c)) == none)
+    assert(string.count(s, (c) => utf8_ok(c)) == string.len(s))
+    assert(string.fold(s, true, (acc, c) => acc and utf8_ok(c)))
+    assert(list.all(string.scan(s, "", (acc, c) => acc + c), (p) => utf8_ok(p)))
+    assert(utf8_ok(string.take_while(s, (c) => c != "€")))
+    assert(utf8_ok(string.drop_while(s, (c) => c != "€")))
+    let (yes, no) = string.partition(s, (c) => c < "m")
+    assert(list.all(yes + no, (c) => utf8_ok(c)))
+    let groups = string.group_by(s, (c) => string.len(c))
+    assert(list.all(map.values(groups), (cs) => list.all(cs, (c) => utf8_ok(c))))
+    assert(utf8_ok(string.max(s) ?? "") and utf8_ok(string.min(s) ?? ""))
+    assert(utf8_ok(string.max_by(s, (c) => c) ?? "") and utf8_ok(string.min_by(s, (c) => c) ?? ""))
+    let cmp = (a: String, b: String) => if a < b then -1 else if a > b then 1 else 0
+    assert(utf8_ok(string.max_with(s, cmp) ?? "") and utf8_ok(string.min_with(s, cmp) ?? ""))
+    assert(utf8_ok(string.reduce(s, (a, b) => a + b) ?? ""))
+    assert(list.all(string.zip(s, list.range(0, 100)), ((c, _)) => utf8_ok(c)))
+    assert(string.zip_with(s, list.range(0, 100), (c, _) => utf8_ok(c)) |> list.all((v) => v))
+    for sep in adversary() {
+      assert(utf8_ok(string.intersperse(s, sep)))
+    }
+  }
+}
+
+test "joining and repeating valid pieces stays valid" {
+  let all = adversary()
+  assert(utf8_ok(string.from_list(all)))
+  assert(utf8_ok(string.new()))
+  for sep in all {
+    assert(utf8_ok(list.join(all, sep)))
+  }
+  for s in all {
+    for n in [-1, 0, 1, 2, 7] {
+      assert(utf8_ok(string.repeat(s, n)))
+    }
+  }
+}
