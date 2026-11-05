@@ -322,12 +322,12 @@ fn user_arg_in_declared_mode(
         NTy::VecStrRef | NTy::VecStr => match got {
             NTy::VecStr => Ok(format!("&{code}")),
             NTy::VecStrRef => Ok(code),
-            _ => Err(wall(format!("native: non-string-list arg to List[String] param of `{name}`"))),
+            _ => Err(wall(format!("native: non-string-list arg ({got:?}) to List[String] param of `{name}`"))),
         },
         NTy::RecRef(i) | NTy::Rec(i) => match got {
             NTy::Rec(j) if j == i => Ok(format!("&{code}")),
             NTy::RecRef(j) if j == i => Ok(code),
-            _ => Err(wall(format!("native: arg of another type to a record param of `{name}`"))),
+            _ => Err(wall(format!("native: arg of another type ({got:?}) to a record param ({want:?}) of `{name}`"))),
         },
         NTy::ResStr | NTy::Res | NTy::Opt => carrier_arg_in_declared_mode(name, want, code, got),
         NTy::VecRef | NTy::Vec => {
@@ -513,17 +513,17 @@ fn render_declared_floor_call(
     let mut dying: Vec<bool> =
         args.iter().map(|a| matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))).collect();
     // A `mut b: Bytes` fn called for its result (the move-mode rewrite's
-    // `c = bytes.append_u16_le(c, x)`): it edits its own copy of the arg —
-    // the arg itself when it dies here — and that copy is the result.
+    // `c = bytes.append_u16_le(c, x)`): it edits the arg itself, which dies
+    // here, and that buffer is the result.
     let edited = match (dst, floor.ret) {
         (Some(_), crate::native_floor::FloorRet::Unit) => {
             floor.params.iter().position(|p| *p == crate::native_floor::FloorParam::BytesMut).and_then(|k| {
                 let (code, got) = rendered.get(k)?.clone();
-                let (src, own) = match got {
-                    NTy::Rec(i) if dying[k] => (crate::render_native_move::take_expr(&code), NTy::Rec(i)),
-                    NTy::Rec(i) | NTy::RecRef(i) => (format!("{code}.clone()"), NTy::Rec(i)),
-                    _ => return None,
-                };
+                // Only the arg itself, when it dies here: a borrowed or still-live
+                // buffer would be a copy v0 never makes, so that call walls.
+                let own = NTy::Rec(got.rec()?);
+                (got == own && dying[k]).then_some(())?;
+                let src = crate::render_native_move::take_expr(&code);
                 rendered[k] = ("__edited".to_string(), own);
                 dying[k] = false;
                 Some((src, own))

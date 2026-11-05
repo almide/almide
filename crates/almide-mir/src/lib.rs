@@ -51,6 +51,7 @@ mod render_native_closure;
 mod render_native_rec;
 mod render_native_append;
 mod render_native_move;
+mod render_native_cond;
 mod render_native_borrow_read;
 mod render_native_str;
 mod render_native_interp;
@@ -61,6 +62,7 @@ pub mod native_option_rewrite;
 pub mod native_result_str_rewrite;
 pub mod native_slot_rewrite;
 pub mod native_move_params;
+pub(crate) mod native_region_window;
 mod native_list_ops;
 mod native_narrow_rewrite;
 

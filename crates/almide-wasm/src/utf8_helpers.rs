@@ -26,6 +26,7 @@ pub(crate) fn emit_bytes_to_string_helper(inv_pre: u32, inv_mid: u32, inc_pre: u
     let m_tag = slot_memarg(almide_layout::SUM_TAG);
     let m_pay = slot_memarg(almide_layout::SUM_FIELD);
     let mut f = Function::new([(10, ValType::I32)]);
+    let anchor = crate::witness::anchor::begin_fn();
     let mut i = f.instructions();
     // err epilogues are open-coded twice (invalid / incomplete); each
     // builds the message then RETURNS the err block. `$concat` BORROWS both
@@ -53,7 +54,11 @@ pub(crate) fn emit_bytes_to_string_helper(inv_pre: u32, inv_mid: u32, inc_pre: u
     i.i32_const(0).local_set(k);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(k).local_get(n).i32_ge_u().br_if(1);
-    i.local_get(b).i32_const(pay).i32_add().local_get(k).i32_add().i32_load8_u(byte);
+    // #4005: the lead byte under the loop's exit test, in the bounds witness.
+    let site = crate::witness::bounds::helper_loop_exit(&f);
+    f.instructions().local_get(b).i32_const(pay).i32_add().local_get(k).i32_add().i32_load8_u(byte);
+    crate::witness::bounds::helper_read(site, &f);
+    let mut i = f.instructions();
     i.local_set(b0);
     i.local_get(b0).i32_const(0x80).i32_lt_u().if_(BlockType::Empty);
     i.local_get(k).i32_const(1).i32_add().local_set(k);
@@ -141,6 +146,7 @@ pub(crate) fn emit_bytes_to_string_helper(inv_pre: u32, inv_mid: u32, inc_pre: u
     i.local_get(r).local_get(b).i32_store(m_pay);
     i.local_get(r);
     i.end();
+    crate::witness::anchor::seal(anchor, &f);
     f
 }
 
@@ -283,6 +289,7 @@ pub(crate) fn emit_err_text_helper() -> Function {
     let pay = almide_layout::PAYLOAD as i32;
     let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
     let mut f = Function::new([(8, ValType::I32)]);
+    let anchor = crate::witness::anchor::begin_fn();
     let mut i = f.instructions();
     let put = |i: &mut wasm_encoder::InstructionSink<'_>, c: u8| {
         i.local_get(w).i32_const(c as i32).i32_store8(byte);
@@ -303,7 +310,12 @@ pub(crate) fn emit_err_text_helper() -> Function {
     i.i32_const(0).local_set(k);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(k).local_get(n).i32_ge_u().br_if(1);
-    i.local_get(s).i32_const(pay).i32_add().local_get(k).i32_add().i32_load8_u(byte).local_set(b);
+    // #4005: the byte under the loop's exit test, in the bounds witness.
+    let site = crate::witness::bounds::helper_loop_exit(&f);
+    f.instructions().local_get(s).i32_const(pay).i32_add().local_get(k).i32_add().i32_load8_u(byte);
+    crate::witness::bounds::helper_read(site, &f);
+    let mut i = f.instructions();
+    i.local_set(b);
     i.block(BlockType::Empty);
     // Inside a case's `if`: if = 0, the per-byte block = 1, the loop = 2.
     for (c, esc) in [(b'\t', b't'), (b'\r', b'r'), (b'\n', b'n'), (0u8, b'0')] {
@@ -345,6 +357,7 @@ pub(crate) fn emit_err_text_helper() -> Function {
     i.i32_store(len_memarg());
     i.local_get(out);
     i.end();
+    crate::witness::anchor::seal(anchor, &f);
     f
 }
 

@@ -1,0 +1,14 @@
+// #4006 C2 drill: a region window on the certified native render. The window
+// fn opens the arena mark and rewinds it once; the drill's render runs the
+// rewind twice, and the window's ownership witness must be rejected.
+type Tree = Leaf | Node(Tree, Tree)
+
+fn make(depth: Int) -> Tree =
+  if depth == 0 then Leaf else Node(make(depth - 1), make(depth - 1))
+
+fn check(t: Tree) -> Int = match t {
+  Leaf => 1,
+  Node(l, r) => check(l) + check(r) + 1,
+}
+
+effect fn main() -> Unit = println(int.to_string(check(make(4))))

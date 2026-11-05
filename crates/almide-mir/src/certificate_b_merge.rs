@@ -138,6 +138,9 @@ fn drop_family_value(op: &Op) -> Option<ValueId> {
         | Op::DropListListStr { v }
         | Op::DropVariant { v, .. }
         | Op::DropWrapperRec { v, .. } => Some(*v),
+        // The region window's close (#4006 C2): the arena rewind releases the
+        // window's mark — the one `d` its `RegionSave` opened.
+        Op::Prim { kind: PrimKind::RegionRestore, args, .. } => args.first().copied(),
         _ => None,
     }
 }
@@ -155,7 +158,8 @@ fn drop_family_value(op: &Op) -> Option<ValueId> {
 /// `DropResultListStr`); `write_text_file` / `make_dir` / `remove_all` →
 /// `Result[Unit, String]` (Ok carries NO payload, Err owns one message
 /// String); `read_line` / `read_n_bytes` → a fresh canonical `String` (flat
-/// `Drop` — a String owns no nested handles).
+/// `Drop` — a String owns no nested handles); `region_save` → the region
+/// window's arena mark (#4006 C2), released once by its `RegionRestore`.
 fn alloc_class_prim_dst(op: &Op) -> Option<ValueId> {
     match op {
         // A native Result carrier birth (#4349): the mirror's alloc-class rule.
@@ -172,7 +176,8 @@ fn alloc_class_prim_dst(op: &Op) -> Option<ValueId> {
                 | PrimKind::RemoveAll
                 | PrimKind::Rename
                 | PrimKind::ReadLine
-                | PrimKind::ReadNBytes,
+                | PrimKind::ReadNBytes
+                | PrimKind::RegionSave,
             dst: Some(d),
             ..
         } => Some(*d),

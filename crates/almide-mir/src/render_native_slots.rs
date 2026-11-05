@@ -134,6 +134,7 @@ pub(super) fn type_blocks(
         known: BTreeMap::new(),
         blocks: Vec::new(),
         joins: Vec::new(),
+        concats: Vec::new(),
         dups: Vec::new(),
         str_lists: BTreeSet::new(),
         scalar_blocks: BTreeSet::new(),
@@ -169,6 +170,9 @@ struct BlockTyping<'a, 'f> {
     known: BTreeMap<ValueId, NTy>,
     blocks: Vec<(ValueId, Option<i64>)>,
     joins: Vec<(ValueId, ValueId, ValueId)>,
+    /// List concatenations `dst = a + b`: one Almide list type, so one
+    /// native kind for all three.
+    concats: Vec<(ValueId, ValueId, ValueId)>,
     dups: Vec<(ValueId, ValueId)>,
     str_lists: BTreeSet<ValueId>,
     /// Untyped blocks every store of which is a scalar: the `Vec<i64>` default.
@@ -209,9 +213,14 @@ impl BlockTyping<'_, '_> {
             Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. } => {
                 self.blocks.push((*dst, self.f.consts.get(len).copied()));
             }
-            Op::CallFn { dst: Some(d), name, .. } => {
+            Op::CallFn { dst: Some(d), name, args, .. } => {
                 if let Some(t) = call_result(name, self.sigs) {
                     self.known.insert(*d, t);
+                }
+                if let (true, [crate::CallArg::Handle(a), crate::CallArg::Handle(b)]) =
+                    (crate::native_list_ops::is_list_concat(name), args.as_slice())
+                {
+                    self.concats.push((*d, *a, *b));
                 }
             }
             Op::Dup { dst, src } => self.dups.push((*dst, *src)),
@@ -298,6 +307,34 @@ impl BlockTyping<'_, '_> {
             if let Some(&i) = [d, a, b].iter().find_map(|v| self.alloc_rec.get(*v)) {
                 for v in [d, a, b] {
                     self.alloc_rec.entry(*v).or_insert(i);
+                }
+            }
+        }
+        self.across_concats();
+    }
+
+    /// A list concatenation's operands and result are one list type: a
+    /// generated list kind on one of them reaches an operand that is an
+    /// empty, never-stored block (`var xs: List[List[Int]] = []` before
+    /// `xs = xs + [[…]]`), which no store can type. A block typed any other
+    /// way keeps its kind, so a real disagreement still walls at the render.
+    fn across_concats(&mut self) {
+        let concats = self.concats.clone();
+        for (d, a, b) in concats {
+            let Some(i) = [d, a, b]
+                .iter()
+                .find_map(|v| self.alloc_rec.get(v).copied())
+                .filter(|i| rec::list_elem(*i).is_some())
+            else {
+                continue;
+            };
+            for v in [a, b] {
+                if self.alloc_rec.contains_key(&v) || self.str_lists.contains(&v) || self.known.contains_key(&v) {
+                    continue;
+                }
+                if self.blocks.iter().any(|(r, _)| *r == v) && self.block_stores(v).is_some_and(|s| s.is_empty()) {
+                    self.scalar_blocks.remove(&v);
+                    self.alloc_rec.insert(v, i);
                 }
             }
         }

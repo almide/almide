@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 472 of 1017
+# rendered: 471 of 1015
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/allocation_within_limits.almd
 spec/wasm_cross/anon_records_and_fusion.almd
@@ -55,6 +55,7 @@ spec/wasm_cross/const_fold_nonfinite_float.almd
 spec/wasm_cross/container_alias_return.almd
 spec/wasm_cross/control_flow.almd
 spec/wasm_cross/cross_dep_accumulator.almd
+spec/wasm_cross/cross_module_spread.almd
 spec/wasm_cross/datetime_format.almd
 spec/wasm_cross/datetime_from_parts_strict.almd
 spec/wasm_cross/datetime_monotonic_ns.almd
@@ -206,6 +207,7 @@ spec/wasm_cross/json_parse_lenient_edges.almd
 spec/wasm_cross/json_parse_strict_strings.almd
 spec/wasm_cross/json_parse_strict_structure.almd
 spec/wasm_cross/json_string_span.almd
+spec/wasm_cross/json_stringify_pretty.almd
 spec/wasm_cross/kernel_conformance.almd
 spec/wasm_cross/koka_inline_ctor_reuse.almd
 spec/wasm_cross/koka_parc14_generic_pick.almd
@@ -262,6 +264,7 @@ spec/wasm_cross/matrix_from_bytes_count_domain.almd
 spec/wasm_cross/matrix_index_domain_family.almd
 spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
 spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd
+spec/wasm_cross/matrix_shape_family.almd
 spec/wasm_cross/matrix_slice_rows_domain.almd
 spec/wasm_cross/mut_heap_param.almd
 spec/wasm_cross/mut_map_param.almd
@@ -279,6 +282,7 @@ spec/wasm_cross/negative_count_rule.almd
 spec/wasm_cross/nested_box_guard_binder.almd
 spec/wasm_cross/nested_map_list_values.almd
 spec/wasm_cross/nested_three_level_literal.almd
+spec/wasm_cross/nested_three_level_loop_build.almd
 spec/wasm_cross/nested_tuple_destructure.almd
 spec/wasm_cross/nested_unwrap_propagation.almd
 spec/wasm_cross/nested_variant_match_bind.almd
@@ -465,7 +469,10 @@ spec/wasm_cross/unwrap_or_operand.almd
 spec/wasm_cross/unwrap_or_source_survives.almd
 spec/wasm_cross/value_array_leak_loop.almd
 spec/wasm_cross/value_as_array_leak_loop.almd
+spec/wasm_cross/value_as_array_roundtrip.almd
 spec/wasm_cross/value_borrowed_constructors.almd
+spec/wasm_cross/value_merge.almd
+spec/wasm_cross/value_merge_duplicate_keys.almd
 spec/wasm_cross/value_object_leak_loop.almd
 spec/wasm_cross/var_destructure.almd
 spec/wasm_cross/variant_pair_result_return.almd

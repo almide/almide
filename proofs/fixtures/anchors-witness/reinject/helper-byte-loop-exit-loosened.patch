@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/runtime.rs b/crates/almide-wasm/src/runtime.rs
+index 5ce9b104d..0c9400da8 100644
+--- a/crates/almide-wasm/src/runtime.rs
++++ b/crates/almide-wasm/src/runtime.rs
+@@ -342,7 +342,8 @@ pub(crate) fn emit_str_len_chars() -> Function {
+     i.i32_const(0).local_set(idx);
+     i.i64_const(0).local_set(n);
+     i.block(BlockType::Empty).loop_(BlockType::Empty);
+-    i.local_get(idx).local_get(blen).i32_ge_u().br_if(1);
++    // RE-INJECTED (#4005 drill): the cursor may reach the byte past the string.
++    i.local_get(idx).local_get(blen).i32_gt_u().br_if(1);
+     // #4005: the read under the loop's exit test, in the bounds witness.
+     let site = crate::witness::bounds::helper_loop_exit(&f);
+     f.instructions().local_get(bbase).local_get(idx).i32_add().i32_load8_u(byte);

@@ -13,7 +13,7 @@ use crate::render_native::{
 use crate::render_native::{var, wall, NTy};
 use crate::render_native_shims::{
     BUDGET_SHIM, CHARGE_DYN_SHIM, CHARGE_SHIM, COUNTER_SHIM, CUT_RET_MARKER, FUEL_LT0_SHIM,
-    TIMEOUT_SHIM,
+    REGION_ARENA_SHIM, TIMEOUT_SHIM,
 };
 use crate::{Init, Op};
 use std::fmt::Write;
@@ -142,6 +142,24 @@ pub(crate) fn render_native_meter_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
             used_shims.push(BUDGET_SHIM.as_str());
             tys.insert(*d, NTy::I64);
             line!("let {} = __almd_budget_spend();", var(*d));
+        }
+        // #4006 C2: the region window's arena mark — opened at the window
+        // fn's entry, rewound after its last op (native_region_window.rs).
+        Op::Prim {
+            kind: crate::PrimKind::RegionSave,
+            dst: Some(d),
+            ..
+        } => {
+            used_shims.push(REGION_ARENA_SHIM.as_str());
+            line!("let {} = almide_region_save();", var(*d));
+        }
+        Op::Prim {
+            kind: crate::PrimKind::RegionRestore,
+            args,
+            ..
+        } if args.len() == 1 => {
+            used_shims.push(REGION_ARENA_SHIM.as_str());
+            line!("almide_region_restore({});", var(args[0]));
         }
         _ => return Ok(false),
     }
@@ -619,8 +637,10 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
         Op::SetLocal { local, src } => render_set_local(local, src, tys, out, indent)?,
         Op::IntBinOp { dst, op, a, b } => {
             tys.insert(*dst, NTy::I64);
-            let rendered = render_int_binop(op, *a, *b, used_shims)?;
-            line!("let mut {}: i64 = {};", var(*dst), rendered);
+            match crate::render_native::cmp_int_expr(op, &var(*a), &var(*b)) {
+                Some(e) => line!("{}", crate::render_native_cond::bind(*dst, &e)),
+                None => line!("let mut {}: i64 = {};", var(*dst), render_int_binop(op, *a, *b, used_shims)?),
+            }
         }
         _ => {
             return render_native_float_op(

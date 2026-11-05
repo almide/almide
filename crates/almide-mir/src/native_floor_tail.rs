@@ -467,7 +467,16 @@ pub(crate) fn render_call(
     let mut rendered = Vec::new();
     for ((code, got), p) in args.iter().zip(&f.params) {
         let dying_here = dying.get(rendered.len()).copied().unwrap_or(false);
-        rendered.push(render_arg(&cx, p, code, got, dying_here)?);
+        // The generic mismatch names which param refused which kind, so the
+        // wall histogram can tell one shape of mismatch from another.
+        let k = rendered.len();
+        rendered.push(render_arg(&cx, p, code, got, dying_here).map_err(|e| {
+            if e.to_string() == mismatch().to_string() {
+                wall(format!("native: floor call `{name}` arg type mismatch (param {k}: {p:?} given {got:?})"))
+            } else {
+                e
+            }
+        })?);
     }
     // The list source not read again moves into the owned twin.
     let mut symbol = f.symbol.as_str();
