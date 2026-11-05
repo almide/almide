@@ -28786,6 +28786,7 @@ fn __opt_maph_some(x: String, f: (String) -> String) -> String? = {
   some(y)
 }
 
+@specializes("option.map")
 fn option_map_h(o: String?, f: (String) -> String) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
