@@ -24,6 +24,8 @@
 # Usage: ALMIDE_BIN=target/release/almide scripts/perf-layout-ab.sh [row ...]
 #   env: LAYOUTS (16) ROUNDS (5) OUT (a temp dir; keeps the binaries and the
 #        per-run times in $OUT/times.json)
+#        SEED_OFFSET (0): added to every layout seed, so a replication samples
+#        16 layouts the first run did not
 #        SECTIONS (".text*"): the output-section globs shuffled, space-separated;
 #        ".text* .rodata* .data* .bss*" randomizes where the data lands too
 # Linux x86_64 with rust-lld (the rustc default there) only.
@@ -99,7 +101,7 @@ for side in A B; do
   for k in $(seq 1 "$LAYOUTS"); do
     cell="$side$k"; mkdir -p "$OUT/bin/$cell" "$OUT/tmp/$cell"
     while read -r name src arg abl; do
-      envs=(LAYOUT_SEED=$((k * 7919)) TMPDIR="$OUT/tmp/$cell" PATH="$OUT/shim:$PATH")
+      envs=(LAYOUT_SEED=$((k * 7919 + ${SEED_OFFSET:-0})) TMPDIR="$OUT/tmp/$cell" PATH="$OUT/shim:$PATH")
       bin="$ALMIDE"
       if [ "$side" = A ]; then
         if [ -n "$ALMIDE_A" ]; then bin="$ALMIDE_A"; else envs+=(ALMIDE_RELEASE_STD_UNSPLIT=1); fi
