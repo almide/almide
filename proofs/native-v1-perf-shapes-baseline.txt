@@ -23,6 +23,9 @@ crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::owne
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::single_concat	11
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::single_push	2
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::slot_index	1
+crates/almide-mir/src/render_native_addr_alloc.rs	almide_mir::render_native_addr::alloc_rec_block	6
+crates/almide-mir/src/render_native_addr_alloc.rs	almide_mir::render_native_addr::alloc_rec_list	8
+crates/almide-mir/src/render_native_addr_alloc.rs	almide_mir::render_native_addr::alloc_typed_str_list	6
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::addr_add	2
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::addr_arith_op	1
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::addr_elem	1
@@ -30,6 +33,7 @@ crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::a
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::enum_scalar_get::{closure#0}	1
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::load_handle_enum_slot	1
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::render_addr_op	6
+crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::scalar_struct_lit	3
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::slot_access_op	9
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::slot_load	1
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_enum_slot	62
@@ -37,6 +41,8 @@ crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::s
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_enum_slot::{closure#1}	3
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_enum_slot::{closure#2}	1
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_list_slot	19
+crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_list_slot::{closure#4}	5
+crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_list_slot::{closure#6}	3
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_rec_field	9
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_rec_field::{closure#0}	1
 crates/almide-mir/src/render_native_addr_op.rs	almide_mir::render_native_addr::store_rec_field::{closure#1}	1
@@ -127,6 +133,7 @@ crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_pr
 crates/almide-mir/src/render_native_map.rs	almide_mir::render_native_addr::map::note_add	1
 crates/almide-mir/src/render_native_map.rs	almide_mir::render_native_addr::map::note_arith	3
 crates/almide-mir/src/render_native_move.rs	almide_mir::render_native_move::dying_after	4
+crates/almide-mir/src/render_native_move.rs	almide_mir::render_native_move::dying_after::{closure#5}	1
 crates/almide-mir/src/render_native_move.rs	almide_mir::render_native_move::moves_at_call	1
 crates/almide-mir/src/render_native_move.rs	almide_mir::render_native_move::rebound_before_read	1
 crates/almide-mir/src/render_native_move.rs	almide_mir::render_native_move::scan_after_copy	3

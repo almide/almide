@@ -117,6 +117,9 @@ pub fn rewrite_result_ops(
             Op::CallFn {
                 dst: Some(d), name, ..
             } if result_fns.contains(name) || crate::native_floor::declared_result_carrier(name) == Some(false) => {
+                if crate::host_ops::host_op_for_call_name(name).is_some_and(|o| o.returns_result) {
+                    t.cap_tag.insert(*d);
+                }
                 t.res_vals.insert(*d);
                 out.push(op);
             }
@@ -148,6 +151,9 @@ struct ResultWindowTracker {
     /// Carriers this rewrite MINTED (`ResMakeOk` / `ResMakeErrStr`, and their
     /// copies): no object to the verifier, unlike a `CallFn` Result.
     minted: BTreeSet<ValueId>,
+    /// Results of a host op (`host_ops::HostOp::returns_result`): the host's
+    /// cap-as-tag block, whose tag the match lowering reads at +16.
+    cap_tag: BTreeSet<ValueId>,
 }
 
 impl ResultWindowTracker {
@@ -193,7 +199,8 @@ impl ResultWindowTracker {
         }
     }
 
-    /// A load through a rewritten-result address: the tag (Load4 @+4), the ok
+    /// A load through a rewritten-result address: the tag (Load4 @+4, a host
+    /// op's @+16), the ok
     /// payload (Load8 @+12), or the err payload (LoadHandle @+12). Any other
     /// width/offset combination passes through untouched.
     fn track_res_load(&mut self, op: Op, out: &mut Vec<Op>) {
@@ -206,8 +213,11 @@ impl ResultWindowTracker {
             unreachable!("caller matched the load prims")
         };
         let (r, off) = self.res_addrs[&args[0]];
+        // A host op's Result is the cap-as-tag block (tag @+16, err @+12);
+        // every other one the scalar carrier (tag @+4).
+        let tag_at = if self.cap_tag.contains(&r) { 16 } else { 4 };
         let res_kind = match (kind, off) {
-            (PrimKind::Load { width: 4 }, 4) => Some(PrimKind::ResTag),
+            (PrimKind::Load { width: 4 }, o) if o == tag_at => Some(PrimKind::ResTag),
             (PrimKind::Load { width: 8 }, 12) => Some(PrimKind::ResOkScalar),
             (PrimKind::LoadHandle, 12) => Some(PrimKind::ResErrStr),
             _ => None,

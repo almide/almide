@@ -370,6 +370,10 @@ impl Emitter<'_> {
             // (the growth fixture pushes as bare statements). Lowered as a
             // write-back: var = $push(var, v). Requires a plain var arg.
             ("push", [xs, v]) => {
+                // A field the append window admits grows in place.
+                if self.routine(|r: &bool| *r, |em| em.try_field_push_list(xs, v))? {
+                    return Ok(Some(None));
+                }
                 // `list.push(h.f, v)` on a record var's FIELD — at any
                 // depth (#2933): the builder idiom (`mut h: Holder`
                 // accumulating into `h.kids` in a loop, #2316's shape) had

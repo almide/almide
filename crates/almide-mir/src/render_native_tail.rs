@@ -46,7 +46,7 @@ fn finish_native_fn(
         out.push('\n');
     }
     out.push_str("}\n");
-    let mut out = drop_unread_static_strs(out);
+    let mut out = crate::render_native_loops::iterator_loops(drop_unread_static_strs(out));
     let ret_nty = if lifted_wrap { Some(NTy::Res) } else { func.ret.map(|v| tys[&v]) };
     // T1-1: patch every strict-cut marker with the now-known typed default
     // (never observed — the region verdict is Err by the time a cut fires).
@@ -323,7 +323,7 @@ fn render_native_flow_op(
             *indent += 1;
         }
         Op::LoopBreakUnless { cond } => {
-            line!("if {} == 0 {{ break; }}", var(*cond));
+            line!("if {} {{ break; }}", crate::render_native_cond::falsy(*cond));
         }
         Op::LoopEnd => {
             *indent -= 1;
@@ -432,7 +432,7 @@ fn chain_end(func: &MirFunction, chains: &crate::render_native_interp::Chains, j
     let in_chain = |k: usize| chains.skip.contains(&k) || chains.finals.contains_key(&k);
     let mut k = j;
     while in_chain(k) {
-        let Some(d) = crate::mir_ops::defined_value(&func.ops[k]) else { return Some(k) };
+        let d = crate::mir_ops::defined_value(&func.ops[k])?;
         let next = func.ops.iter().enumerate().skip(k + 1).find(|(_, op)| {
             let mut vs = Vec::new();
             crate::mir_ops::op_reads(op, &mut vs);

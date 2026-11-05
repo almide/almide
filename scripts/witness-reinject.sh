@@ -95,7 +95,9 @@ else
   build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-wasm --example emit_structural_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify); }
 fi
 # main's ownership witness (or, with a second argument, the program's
-# native-calls witness) out of a native bundle.
+# native-calls witness) out of a native bundle. A third argument names the
+# fn whose ownership witness to take instead of main's: a native drill with a
+# <name>.fn file judges that fn (the region window's, #4006 C2).
 main_witness() {
   python3 -c '
 import sys
@@ -107,7 +109,7 @@ while i < len(b):
     i = j + 1
     if line.startswith("witness "):
         _, prop, n, fn = line.split(" ", 3)
-        want = {"native-calls": ("native-calls", "program"), "bounds": ("bounds", "main")}.get(sys.argv[2] if len(sys.argv) > 2 else "", ("ownership", "main"))
+        want = {"native-calls": ("native-calls", "program"), "bounds": ("bounds", "main")}.get(sys.argv[2] if len(sys.argv) > 2 else "", ("ownership", sys.argv[3] if len(sys.argv) > 3 else "main"))
         if (prop, fn) == want:
             sys.stdout.write(b[i:i + int(n)].decode())
         i += int(n) + 1
@@ -137,7 +139,7 @@ verdict() {
     if ! "$TARGET/debug/examples/emit_native_bundle" "$DIR/$1.almd" "$wt/native.rs" > "$wt/native.bundle" 2> "$wt/producer.err"; then
       echo "producer-failed"; return
     fi
-    main_witness "$wt/native.bundle" > "$wt/witness.w"
+    main_witness "$wt/native.bundle" ownership "$(cat "$DIR/$1.fn" 2>/dev/null || echo main)" > "$wt/witness.w"
     "$TARGET/debug/almide-verify" ownership "$wt/witness.w" > /dev/null 2>&1
     echo "$?"
     return

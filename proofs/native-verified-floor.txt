@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 478 of 1015
+# rendered: 479 of 1017
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/allocation_within_limits.almd
 spec/wasm_cross/anon_records_and_fusion.almd
@@ -46,7 +46,6 @@ spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
 spec/wasm_cross/bytes_repeat_size_ceiling.almd
 spec/wasm_cross/bytes_set_value_semantics.almd
 spec/wasm_cross/bytes_to_string_err_release.almd
-spec/wasm_cross/call_closure_lambda_param.almd
 spec/wasm_cross/call_lambda_ctor.almd
 spec/wasm_cross/callee_shadowing_family.almd
 spec/wasm_cross/closure_accumulator.almd
@@ -75,6 +74,7 @@ spec/wasm_cross/effect_operand_unwrap_distinct.almd
 spec/wasm_cross/effect_slot_carrier.almd
 spec/wasm_cross/effect_tail_carrier_family.almd
 spec/wasm_cross/effect_tco.almd
+spec/wasm_cross/effect_tco_err_rewrap.almd
 spec/wasm_cross/effect_unit_yields_result.almd
 spec/wasm_cross/effect_unwrap_in_loop.almd
 spec/wasm_cross/empty_collection_annotated.almd
@@ -112,6 +112,13 @@ spec/wasm_cross/float_subnormal_preserved.almd
 spec/wasm_cross/float_to_fixed.almd
 spec/wasm_cross/fold_heap_acc.almd
 spec/wasm_cross/for_in_forms.almd
+spec/wasm_cross/fs_error_path_escape.almd
+spec/wasm_cross/fs_list_dir_multipass.almd
+spec/wasm_cross/fs_preopen_resolve.almd
+spec/wasm_cross/fs_read_lines.almd
+spec/wasm_cross/fs_read_text_utf8.almd
+spec/wasm_cross/fs_relative_path.almd
+spec/wasm_cross/fs_write_errno.almd
 spec/wasm_cross/fuel_bare_result.almd
 spec/wasm_cross/fuel_block_body.almd
 spec/wasm_cross/fuel_bounded_boundary.almd
@@ -252,12 +259,10 @@ spec/wasm_cross/matrix_dims_guard.almd
 spec/wasm_cross/matrix_dims_guard_overflow.almd
 spec/wasm_cross/matrix_dims_guard_product.almd
 spec/wasm_cross/matrix_dims_guard_rows.almd
-spec/wasm_cross/matrix_elementwise_family.almd
 spec/wasm_cross/matrix_fma_ieee_specials.almd
 spec/wasm_cross/matrix_from_bytes_count_domain.almd
 spec/wasm_cross/matrix_index_domain_family.almd
 spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
-spec/wasm_cross/matrix_pow_libm.almd
 spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd
 spec/wasm_cross/matrix_shape_family.almd
 spec/wasm_cross/matrix_slice_rows_domain.almd
@@ -397,10 +402,6 @@ spec/wasm_cross/tm_list_list_int_fn_pass.almd
 spec/wasm_cross/tm_list_list_int_interp.almd
 spec/wasm_cross/tm_list_list_int_lit_print.almd
 spec/wasm_cross/tm_list_list_int_shadow_drop.almd
-spec/wasm_cross/tm_list_opt_fn_pass.almd
-spec/wasm_cross/tm_list_opt_interp.almd
-spec/wasm_cross/tm_list_opt_lit_print.almd
-spec/wasm_cross/tm_list_opt_shadow_drop.almd
 spec/wasm_cross/tm_list_tuple_fn_pass.almd
 spec/wasm_cross/tm_list_tuple_interp.almd
 spec/wasm_cross/tm_list_tuple_lit_print.almd

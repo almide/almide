@@ -746,6 +746,10 @@ fn link_self_host(
     // never its whole body: `value.__field` alone once checked and lowered
     // 139 functions of value_utils.almd for a program that calls three.
     let mut linked_fns: HashMap<&'static str, HashSet<String>> = HashMap::new();
+    // With the reach pruning switched off (the whole-module leg) the link
+    // prunes nothing either: `reach_within` returns whole sources, and the
+    // whitelist and dispatch-only filters below stand down.
+    let keep_whole = almide_base::env::keep_bundled_fns();
     let mut module_diags = Vec::new();
     // Each missing bundled function is relowered for once (a surface the
     // module does not declare must not loop the link).
@@ -817,7 +821,7 @@ fn link_self_host(
             // dispatch lands in a module only when a value of its type exists.
             // No literal makes a sized number or `Bytes`, so a program that
             // never reached such a module holds no value of its type (#4458).
-            let dispatch_only = present.is_none() && requirement_keys.contains(surface.as_str());
+            let dispatch_only = !keep_whole && present.is_none() && requirement_keys.contains(surface.as_str());
             if has_fn || dispatch_only || !tried.insert(surface.clone()) {
                 continue;
             }
@@ -917,7 +921,7 @@ fn link_self_host(
                     // Only a whitelisted implementation is ever called through
                     // its surface (`registry_impl_admitted`): the emitter lowers
                     // every other one's surface itself, or walls.
-                    if almide_wasm::registry_impl_admitted(impl_fn) {
+                    if keep_whole || almide_wasm::registry_impl_admitted(impl_fn) {
                         roots.insert(impl_fn.to_string());
                     }
                     if surface.as_str() == almide_wasm::VALUE_HELPER_ANCHOR {

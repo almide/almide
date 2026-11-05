@@ -416,7 +416,7 @@ pub(crate) fn set_moving_args(
         .filter(|v| {
             func.ops[at + 1..]
                 .iter()
-                .find(|o| !(bookkeeping(o) || matches!(o, Op::Consume { v: c } if c == v)))
+                .find(|o| !bookkeeping(o))
                 .is_some_and(|o| matches!(o, Op::SetLocal { local, .. } if local == v))
         })
         .collect();

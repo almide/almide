@@ -37,6 +37,9 @@
 #
 # Negative control: ALMIDE_NATIVE_DRILL_NO_MOVES=1 makes the v1 render keep
 # its pre-#4006 copies; with it this gate must exit 1 (the nightly runs it).
+# ALMIDE_NATIVE_DRILL_COND_I64=1 makes it spell every comparison as an i64
+# 0/1 tested with `!= 0` again (crates/almide-mir/src/render_native_cond.rs);
+# with it this gate must read recursion_depth_within_limits as a LOSS.
 set -uo pipefail
 export LC_ALL=C
 cd "$(git rev-parse --show-toplevel)"

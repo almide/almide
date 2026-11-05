@@ -98,6 +98,15 @@ jobs:
           fi
           grep -E '^LOSS ' drill-small.log | head -5
 
+      - name: Negative control — with every comparison an i64 again the small-program gate must fail
+        run: |
+          if ALMIDE_NATIVE_DRILL_COND_I64=1 bash scripts/check-native-v1-perf-small.sh > drill-cond.log 2>&1; then
+            cat drill-cond.log
+            echo "the small-program gate read green with the branch-only comparisons rendered as i64"
+            exit 1
+          fi
+          grep -E '^LOSS .*recursion_depth_within_limits' drill-cond.log
+
   shapes:
     name: Every render path is exercised by a program the perf gates time
     runs-on: ubuntu-latest

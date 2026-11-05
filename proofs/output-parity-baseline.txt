@@ -131,6 +131,7 @@ spec/wasm_cross/anon_records_and_fusion.almd
 spec/wasm_cross/append_accumulator.almd
 spec/wasm_cross/append_accumulator_heap.almd
 spec/wasm_cross/append_accumulator_heap_linear.almd
+spec/wasm_cross/arg_call_rebinds_global.almd
 spec/wasm_cross/arg_rebinds_earlier_arg.almd
 spec/wasm_cross/args_surface.almd
 spec/wasm_cross/as_pattern.almd
@@ -585,6 +586,7 @@ spec/wasm_cross/list_pattern_in_option_payload.almd
 spec/wasm_cross/list_pattern_variant_element.almd
 spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 spec/wasm_cross/list_product_overflow.almd
+spec/wasm_cross/list_push_field_in_place.almd
 spec/wasm_cross/list_push_on_record_field.almd
 spec/wasm_cross/list_range_step_extremes.almd
 spec/wasm_cross/list_reduce_fused_fold_release.almd

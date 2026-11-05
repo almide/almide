@@ -1,1 +1,1 @@
-ANCHORS REJECT: bounds stretch 0: `a0` against its check at 6:20: the exit test's right operand is not a list's count: Op("i32.add", [Load { name: "i32.load", off: 4, addr: Def(7, 15, Const(112)), site: 16 }, Const(1)]); no enclosing test bounds the count by the string's len
+ANCHORS REJECT: bounds stretch 1: `a0` against its check at 6:20: the exit test's right operand is not a list's count: Op("i32.add", [Load { name: "i32.load", off: 4, addr: Def(7, 15, Const(112)), site: 16 }, Const(1)]); no enclosing test bounds the count by the string's len

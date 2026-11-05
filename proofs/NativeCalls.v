@@ -27,7 +27,7 @@
    event. This checker carries both, in one witness for the whole program:
    one BLOCK per function, separated by `#`:
 
-     <modes>|<sites>|<marks>\n<line 0>\n<line 1>\n…
+     <modes>|<sites>|<marks>|<hosts>\n<line 0>\n<line 1>\n…
 
      modes  the function's heap-parameter modes (space-separated nat ids,
             0 = borrow, 1 = move), in parameter order. The program's
@@ -38,6 +38,11 @@
             `<callee block index> <actual modes…>` (CallModes' site rows).
      marks  one line index per argument the sites move (space-separated):
             the line of the caller's object that argument is.
+     hosts  one id per call the function makes to a NATIVE FS HOST CALL
+            (#4006 class E): the index of the runtime function it calls in
+            `native_fs_host_calls` below — the named set of the trusted
+            base's "Native fs host calls" row (proofs/TRUSTED_BASE.md). A
+            call outside the set carries an out-of-range id.
      lines  the function's ownership lines in the alphabet and delimiters of
             `check_xc`, one per heap parameter first (parameter order), then
             every other object. A move at a call site is written `M` (it
@@ -52,7 +57,9 @@
      - each parameter line, seeded with the reference its mode declares, and
        every other line pass the exit-aware ownership check with the owned-
        line guard (`check_line (guard_line …)`, as `check_xc` judges them),
-       and no parameter line reuses (CallModes' shift-safety).
+       and no parameter line reuses (CallModes' shift-safety);
+     - HOSTS: every host id names a function of `native_fs_host_calls`
+       (`hosts_ok`): a host call outside the named set is refused.
 
    `check_native_calls_sound` states what acceptance gives, per block: the
    agreement of every site, the binding of every moved argument, the callee-
@@ -106,6 +113,7 @@ Record block : Type := {
   b_modes : list nat;
   b_sites : list (list nat);
   b_marks : list nat;
+  b_hosts : list nat;
   b_lines : list (list CertItem);
   b_raw : list (list ascii)
 }.
@@ -113,10 +121,12 @@ Record block : Type := {
 Definition parse_block (b : list ascii) : block :=
   let (header, body) := split_first is_nl b [] in
   let (modes, rest) := split_first is_bar header [] in
-  let (sites, marks) := split_first is_bar rest [] in
+  let (sites, rest') := split_first is_bar rest [] in
+  let (marks, hosts) := split_first is_bar rest' [] in
   {| b_modes := pnats (str modes) None [];
      b_sites := List.filter nonempty (parse_nat_lists (str sites));
      b_marks := pnats (str marks) None [];
+     b_hosts := pnats (str hosts) None [];
      b_lines := parse_xc (str body) [] None None None;
      b_raw := split_at is_nl body |}.
 
@@ -147,6 +157,48 @@ Definition marks_ok (b : block) : bool :=
        (andb (forallb (fun j => Nat.ltb j (List.length (b_raw b))) (b_marks b))
              (lines_bound (b_raw b) O (b_marks b))).
 
+(* ─── the host calls ─── *)
+
+(* The NATIVE FS HOST CALLS (#4006 class E; owner ruling 2026-11-05): the
+   runtime fs functions a natively rendered program may call as trusted host
+   calls — the list `crates/almide-mir/src/host_ops.rs`
+   `NATIVE_FS_HOST_CALLS` and the trusted base's row name, in that order
+   (`tests/native_fs_host_calls_test.rs` holds the three to one list). *)
+Local Open Scope string_scope.
+Definition native_fs_host_calls : list string :=
+  ["almide_rt_fs_read_text";
+   "almide_rt_fs_read_bytes";
+   "almide_rt_fs_read_lines";
+   "almide_rt_fs_read_text_if_exists";
+   "almide_rt_fs_list_dir";
+   "almide_rt_fs_exists";
+   "almide_rt_fs_is_dir";
+   "almide_rt_fs_is_file";
+   "almide_rt_fs_is_symlink";
+   "almide_rt_fs_walk";
+   "almide_rt_fs_glob";
+   "almide_rt_fs___root_read_text";
+   "almide_rt_fs___root_read_bytes";
+   "almide_rt_fs___root_list_dir";
+   "almide_rt_fs___root_exists";
+   "almide_rt_fs_temp_dir";
+   "almide_rt_fs_write";
+   "almide_rt_fs_write_bytes";
+   "almide_rt_fs_mkdir_p";
+   "almide_rt_fs_remove_all";
+   "almide_rt_fs___root_write_text";
+   "almide_rt_fs_rename";
+   "almide_rt_fs_copy";
+   "almide_rt_fs_append";
+   "almide_rt_fs_append_bytes";
+   "almide_rt_fs_remove";
+   "almide_rt_fs___root_remove";
+   "almide_rt_fs_create_temp_dir";
+   "almide_rt_fs_create_temp_file"].
+
+Definition hosts_ok (b : block) : bool :=
+  forallb (fun h => Nat.ltb h (List.length native_fs_host_calls)) (b_hosts b).
+
 (* ─── the lines ─── *)
 
 (* A parameter line, seeded with the reference its mode declares, under the
@@ -164,7 +216,7 @@ Fixpoint nlines_ok (ms : list nat) (ls : list (list CertItem)) : bool :=
 Definition block_ok (sigs : list (list nat)) (b : block) : bool :=
   andb (sig_wf (b_modes b))
        (andb (forallb (site_ok sigs) (b_sites b))
-             (andb (marks_ok b) (nlines_ok (b_modes b) (b_lines b)))).
+             (andb (marks_ok b) (andb (hosts_ok b) (nlines_ok (b_modes b) (b_lines b))))).
 
 Definition check_native_calls (bs : list block) : bool :=
   forallb (block_ok (List.map b_modes bs)) bs.
@@ -237,15 +289,17 @@ Theorem check_native_calls_sound :
       (forall j m cs, nth_error (b_modes b) j = Some m -> nth_error (b_lines b) j = Some cs ->
          forall body, UnrollsL cs body -> param_stream_ok (mode_of_nat m) body = true) /\
       (forall cs, In cs (skipn (List.length (b_modes b)) (b_lines b)) ->
-         forall fops, UnrollsL cs fops -> run fops <> None /\ run fops = Some 0).
+         forall fops, UnrollsL cs fops -> run fops <> None /\ run fops = Some 0) /\
+      (forall h, In h (b_hosts b) -> exists f, nth_error native_fs_host_calls h = Some f).
 Proof.
   intros s H bs b Hin. unfold check_native_calls_cert, check_native_calls in H.
   rewrite forallb_forall in H. specialize (H b Hin).
   unfold block_ok in H.
   apply andb_prop in H. destruct H as [_ H].
   apply andb_prop in H. destruct H as [Hsites H].
-  apply andb_prop in H. destruct H as [Hmarks Hlines].
-  split; [| split; [| split]].
+  apply andb_prop in H. destruct H as [Hmarks H].
+  apply andb_prop in H. destruct H as [Hhosts Hlines].
+  split; [| split; [| split; [| split]]].
   - intros site Hs. rewrite forallb_forall in Hsites. exact (site_ok_agrees _ _ (Hsites site Hs)).
   - unfold marks_ok in Hmarks.
     apply andb_prop in Hmarks. destruct Hmarks as [Hlen Hmarks].
@@ -257,6 +311,10 @@ Proof.
     exact (param_line_unroll_ok _ cs body (nparam_line_weaken _ _ (nlines_nth _ _ j m cs Hlines Hm Hc)) HU).
   - intros cs Hcs fops HU.
     exact (check_line_unroll_sound cs (nlines_rest _ _ Hlines cs Hcs) fops HU).
+  - intros h Hh. unfold hosts_ok in Hhosts. rewrite forallb_forall in Hhosts.
+    specialize (Hhosts h Hh). apply Nat.ltb_lt in Hhosts.
+    destruct (nth_error native_fs_host_calls h) as [f |] eqn:E; [exists f; reflexivity |].
+    apply nth_error_None in E. lia.
 Qed.
 
 (* ─── non-vacuous, on witness bytes ─── *)
@@ -333,6 +391,20 @@ Example nc_param_resurrect_rejects :
 iM
 id#1||
 dam" = false.
+Proof. reflexivity. Qed.
+
+(* A NATIVE FS HOST CALL: `main` calls host id 0, the set's first function
+   (`almide_rt_fs_read_text`) — ACCEPTED. *)
+Example nc_host_call_accepts :
+  check_native_calls_cert "||| 0
+id" = true.
+Proof. reflexivity. Qed.
+
+(* A host call to a runtime function OUTSIDE the named set (the out-of-range
+   id the producer writes for it: the set's length, 29) — REJECTED. *)
+Example nc_host_outside_set_rejects :
+  check_native_calls_cert "||| 29
+id" = false.
 Proof. reflexivity. Qed.
 
 (* A callee block index out of range — REJECTED. *)

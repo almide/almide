@@ -60,6 +60,7 @@ use wasmparser::Operator as Op;
 
 mod anchors;
 mod bounds;
+mod census;
 mod decode;
 mod fields;
 mod init;
@@ -67,6 +68,7 @@ mod operands;
 pub mod rc;
 pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, Anchors, AnchorsHeld, RcLines};
 pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
+pub use census::{census, Census, Tally};
 pub use rc::{check_rc, RcFns, RcReport};
 use anchors::helper_sigs;
 use decode::branch_target;
@@ -75,7 +77,7 @@ pub use fields::check_fields;
 pub use init::check_init;
 
 /// A located event: a defined function's position and an instruction index.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct At {
     pub func: usize,
     pub op: usize,

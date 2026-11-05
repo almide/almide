@@ -99,8 +99,8 @@ fn stale_handles(func: &MirFunction) -> BTreeSet<ValueId> {
         .collect();
     let mut stale = BTreeSet::new();
     for (i, op) in func.ops.iter().enumerate() {
-        let Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } = op else { continue };
-        let Some(&x) = args.first() else { continue };
+        let Some((d, x)) = handle_of(op) else { continue };
+        let d = &d;
         if !set_at.iter().any(|(_, l)| *l == x) {
             continue;
         }
@@ -120,9 +120,7 @@ fn stale_handles(func: &MirFunction) -> BTreeSet<ValueId> {
         }
         let crosses = func.ops[i..=last].iter().any(|o| matches!(o, Op::LoopStart | Op::LoopEnd))
             || set_at.iter().any(|(k, l)| *l == x && *k > i && *k <= last);
-        if crosses {
-            stale.insert(*d);
-        }
+        stale.extend(crosses.then_some(*d));
     }
     stale
 }
@@ -292,7 +290,7 @@ fn slot_load(s: AddrSink<'_>, width: &u8, d: &ValueId, args: &[ValueId]) -> Resu
         }
     }
     if *width == 8 && matches!(bt, Some(NTy::Vec | NTy::VecRef)) {
-        if let Some(ix) = slot_index(&ad) {
+        if let Some(ix) = slot_index(st, &ad) {
             let (guard, slot) = bounds_guard(st, &ad, &ix);
             if let Some(g) = guard {
                 line!("{g}");
@@ -325,7 +323,7 @@ fn slot_load_handle(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bo
             return load_handle_rec_field(AddrSink { st, tys, out, indent }, d, ad, k, f);
         }
     }
-    if let (Some(e), Some(ix)) = (list_of(ty(tys, &ad.base)), slot_index(&ad)) {
+    if let (Some(e), Some(ix)) = (list_of(ty(tys, &ad.base)), slot_index(st, &ad)) {
         if e != NTy::I64 {
             let (guard, slot) = bounds_guard(st, &ad, &ix);
             if let Some(g) = guard {
@@ -342,7 +340,7 @@ fn slot_load_handle(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bo
             return Ok(true);
         }
     }
-    match (ty(tys, &ad.base), slot_index(&ad)) {
+    match (ty(tys, &ad.base), slot_index(st, &ad)) {
         (Some(NTy::VecStr | NTy::VecStrRef), Some(ix)) => {
             let (guard, slot) = bounds_guard(st, &ad, &ix);
             if let Some(g) = guard {
@@ -466,7 +464,7 @@ fn slot_store(s: AddrSink<'_>, args: &[ValueId]) -> Result<bool, LowerError> {
     if let (Some(NTy::Rec(i)), Some(k), None) = (ty(tys, &ad.base), rec_slot(&ad), list_of(ty(tys, &ad.base))) {
         return store_rec_field(AddrSink { st, tys, out, indent }, ad, v, i, k);
     }
-    let Some(ix) = slot_index(&ad) else {
+    let Some(ix) = slot_index(st, &ad) else {
         return Err(wall(format!("native: Store at {ad:?} — outside the slot algebra")));
     };
     store_list_slot(AddrSink { st, tys, out, indent }, ad, v, &ix)
@@ -512,6 +510,14 @@ fn store_enum_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
 }
 
 /// The record arm of [`slot_store`]: field `k` of record `i`.
+/// `d = handle(x)`: (d, x).
+fn handle_of(op: &Op) -> Option<(ValueId, ValueId)> {
+    match op {
+        Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } => Some((*d, *args.first()?)),
+        _ => None,
+    }
+}
+
 fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> Result<bool, LowerError> {
     let AddrSink { st, tys, out, indent } = s;
     macro_rules! line {
@@ -525,8 +531,6 @@ fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
     let rhs = match (field, st.addrs.get(&v).copied(), ty(tys, &v)) {
         (NTy::I64, None, Some(NTy::I64)) => var(v),
         (NTy::I64, None, Some(NTy::F64)) => format!("{}.to_bits() as i64", var(v)),
-        // A scalar Option field takes the `Option<i64>` by value.
-        (NTy::Opt, None, Some(NTy::Opt)) => var(v),
         (f, Some(sv), _) if sv.off == 0 && sv.idx.is_none() => match ty(tys, &sv.base) {
             Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g)
                 .ok_or_else(|| wall("native: a record field write of an unowned kind"))?,

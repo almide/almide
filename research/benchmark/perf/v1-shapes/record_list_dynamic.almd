@@ -1,0 +1,27 @@
+// v1-vs-v0 shape bench: a list of records built by appends in a fn whose
+// bound is computed at run time, then read by a counted for-loop. It read
+// 1.065x v0's instructions: the element index was a signed division of the
+// byte offset, which kept LLVM from dropping the loop's bounds check. The
+// bound comes from a short list so the bench measures the records, not a
+// 200,000-element range.
+type P = { x: Int, y: Int }
+
+fn build(n: Int) -> List[P] = {
+  var ps: List[P] = []
+  var i = 0
+  while i < n {
+    ps = ps + [{ x: i, y: i * 2 }]
+    i = i + 1
+  }
+  ps
+}
+
+fn main() -> Unit = {
+  let n = list.len(list.range(0, 200)) * 1000
+  let ps = build(n)
+  var s = 0
+  for p in ps {
+    s = s + p.x + p.y
+  }
+  println(int.to_string(s))
+}

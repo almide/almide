@@ -1,0 +1,19 @@
+// v1-vs-v0 shape bench, UNCERTIFIED on purpose (scripts/check-native-v1-perf-shapes.sh):
+// an `effect fn main` that returns a Result — C1 tail map class M ("main with
+// a return value"), which the certified render refuses with a literal
+// `wall("…")` message. It is the corpus program that keeps the `&str`
+// instance of `render_native::wall` exercised (record_list_build walled with a
+// literal on develop and now certifies). When class M lifts and this program
+// certifies, swap it for another program whose wall is a literal-message call.
+effect fn step(i: Int) -> Result[Int, String] = if i % 7 == 0 then err("skip") else ok(i)
+
+effect fn main() -> Result[Unit, String] = {
+  var acc = 0
+  var i = 0
+  while i < 20000 {
+    acc = acc + (step(i) ?? 0)
+    i = i + 1
+  }
+  println(int.to_string(acc))
+  ok(())
+}
