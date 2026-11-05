@@ -71,14 +71,16 @@ fn only_position(args: &[CallArg], v: ValueId) -> Option<usize> {
     }
 }
 
-/// A floor writer of `cur` called for its result: `dst = writer(…, cur, …)`.
-fn is_writer(op: &Op, cur: ValueId) -> Option<ValueId> {
-    let Op::CallFn { dst: Some(d), name, args, .. } = op else { return None };
+/// A floor writer of `cur`: `Some(Some(dst))` called for its result (`dst =
+/// writer(…, cur, …)`, the threaded write-back), `Some(None)` in place.
+fn is_writer(op: &Op, cur: ValueId) -> Option<Option<ValueId>> {
+    let Op::CallFn { dst, name, args, .. } = op else { return None };
     let k = only_position(args, cur)?;
     let floor = crate::native_floor::declared(name)?;
     (floor_param(name, k) == Some(crate::native_floor::FloorParam::BytesMut)
-        && floor.ret == crate::native_floor::FloorRet::Unit)
-        .then_some(*d)
+        && floor.ret == crate::native_floor::FloorRet::Unit
+        && dst.is_none_or(|d| d != cur))
+        .then_some(*dst)
 }
 
 /// A floor read of `cur` (a `Bytes` param that borrows it).
@@ -118,8 +120,16 @@ fn chain(f: &MirFunction, k: usize) -> Option<Chain> {
         }
         if let Some(d) = is_writer(op, cur) {
             writers.push(i);
-            links.insert(d);
-            cur = d;
+            if let Some(d) = d {
+                links.insert(d);
+                cur = d;
+            }
+        } else if matches!(op, Op::Dup { dst, src } if *src == cur && f.ret == Some(*dst)) {
+            // The write-back of an in-place body: a copy of the buffer, returned.
+            let Op::Dup { dst, .. } = op else { unreachable!("matched a Dup") };
+            remove.insert(i);
+            links.insert(*dst);
+            cur = *dst;
         } else if is_read(op, cur) {
             reads.push(i);
         } else if matches!(op, Op::Drop { v } if *v != cur && *v != p.value && links.contains(v)) {
@@ -138,10 +148,72 @@ fn writable_param(f: &MirFunction) -> Option<(usize, Chain)> {
     found.into_iter().next()
 }
 
-/// The ops of a call site's write-back (`r = f(b); [t = Dup r;] Drop b;
-/// b = r|t; … Drop r`) that go when the call lends `b`, or `None` when the
-/// site has another shape.
-fn write_back(g: &MirFunction, call: usize, r: ValueId, b: ValueId, depth: &[i32]) -> Option<BTreeSet<usize>> {
+/// The ops of a call site's write-back that go when the call lends `b`, and
+/// the value the rest of the body reads the edited buffer as, renamed to `b`.
+/// Two shapes: the slot rebind (`r = f(b); [t = Dup r;] Drop b; b = r|t; …
+/// Drop r`) and the renamed binding (`r = f(b); t = Dup r; … t … Drop r;
+/// Drop b`, `b` read no more). `None` for any other.
+fn write_back(g: &MirFunction, call: usize, r: ValueId, b: ValueId, depth: &[i32]) -> Option<(BTreeSet<usize>, Option<ValueId>)> {
+    rebind_write_back(g, call, r, b, depth).map(|gone| (gone, None)).or_else(|| renamed_write_back(g, call, r, b))
+}
+
+/// The renamed binding: after the call `r` is copied once and released,
+/// and `b` only released.
+fn renamed_write_back(g: &MirFunction, call: usize, r: ValueId, b: ValueId) -> Option<(BTreeSet<usize>, Option<ValueId>)> {
+    let (mut gone, mut copy) = (BTreeSet::new(), None);
+    for (j, op) in g.ops.iter().enumerate().skip(call + 1) {
+        let vs = values(op);
+        if !vs.contains(&r) && !vs.contains(&b) {
+            continue;
+        }
+        match op {
+            Op::Dup { dst, src } if *src == r && copy.is_none() => copy = Some(*dst),
+            Op::Drop { v } if *v == r || *v == b => {}
+            _ => return None,
+        }
+        gone.insert(j);
+    }
+    let t = copy?;
+    let renamable = g.ops.iter().enumerate().skip(call + 1).all(|(j, op)| gone.contains(&j) || rename_in(&mut op.clone(), t, b));
+    (gone.len() == 3 && renamable).then_some((gone, Some(t)))
+}
+
+/// Read `from` as `to` in `op`: a call's argument, a release, a probe or a
+/// copy's source. False when `op` names `from` any other way (the site is
+/// then refused).
+fn rename_in(op: &mut Op, from: ValueId, to: ValueId) -> bool {
+    match op {
+        Op::CallFn { dst, args, .. } | Op::Call { dst, args, .. } => {
+            if *dst == Some(from) {
+                return false;
+            }
+            for a in args.iter_mut() {
+                if let CallArg::Handle(v) | CallArg::Scalar(v) = a {
+                    if *v == from {
+                        *v = to;
+                    }
+                }
+            }
+            true
+        }
+        Op::Drop { v } | Op::MakeUnique { v } | Op::Borrow { v } => {
+            if *v == from {
+                *v = to;
+            }
+            true
+        }
+        Op::Dup { dst, src } if *dst != from => {
+            if *src == from {
+                *src = to;
+            }
+            true
+        }
+        _ => !values(op).contains(&from),
+    }
+}
+
+/// The slot rebind.
+fn rebind_write_back(g: &MirFunction, call: usize, r: ValueId, b: ValueId, depth: &[i32]) -> Option<BTreeSet<usize>> {
     let base = depth[call];
     let mut w = BTreeSet::from([r]);
     let (mut gone, mut dropped, mut rebound) = (BTreeSet::new(), false, false);
@@ -175,6 +247,8 @@ fn write_back(g: &MirFunction, call: usize, r: ValueId, b: ValueId, depth: &[i32
 struct Site {
     call: usize,
     remove: BTreeSet<usize>,
+    /// The renamed binding's copy, read as `b` after the call.
+    rename: Option<(ValueId, ValueId)>,
 }
 
 /// Every call site of `callee` in `g`, or `None` when one cannot lend.
@@ -188,7 +262,8 @@ fn sites_in(g: &MirFunction, callee: &str, k: usize) -> Option<Vec<Site>> {
                 let Some(CallArg::Handle(b)) = args.get(k) else { return None };
                 let twice = args.iter().filter(|a| matches!(a, CallArg::Handle(x) if x == b)).count() != 1;
                 let (Some(r), false, false) = (dst, twice, params.contains(b)) else { return None };
-                out.push(Site { call: i, remove: write_back(g, i, *r, *b, &depth)? });
+                let (remove, copy) = write_back(g, i, *r, *b, &depth)?;
+                out.push(Site { call: i, remove, rename: copy.map(|t| (t, *b)) });
             }
             _ => {}
         }
@@ -239,6 +314,13 @@ fn rewrite_site(g: &mut MirFunction, s: &Site, k: usize) {
     if let Op::CallFn { dst, result, .. } = &mut g.ops[s.call] {
         *dst = None;
         *result = None;
+    }
+    if let Some((t, b)) = s.rename {
+        for (j, op) in g.ops.iter_mut().enumerate().skip(s.call + 1) {
+            if !s.remove.contains(&j) {
+                rename_in(op, t, b);
+            }
+        }
     }
     let call = s.call - s.remove.range(..s.call).count();
     remove_ops(g, &s.remove);
