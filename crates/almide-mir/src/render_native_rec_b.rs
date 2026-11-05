@@ -508,3 +508,25 @@ fn kind_carrier(t: &almide_lang::types::Ty) -> Option<FieldKind> {
             _ => return None,
     })
 }
+
+// ── region twins (#4006 C2) ──────────────────────────────────────────
+
+thread_local! {
+    /// The region twin enums of this render, by declared name.
+    static REGION_NAMES: RefCell<std::collections::BTreeSet<String>> = const { RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// Generated type `i` is a region twin enum (#4006 C2, a `__rgn_` enum of the
+/// region-window rewrite, read off `codegen_annotations.region_enums`):
+/// `Copy`, its recursive fields `AlmideRgn` handles into the arena.
+pub(crate) fn is_region(i: u16) -> bool {
+    RECS.with(|r| {
+        r.borrow().get(i as usize).is_some_and(|d| d.cases.is_some() && REGION_NAMES.with(|n| n.borrow().contains(&d.name)))
+    })
+}
+
+/// The constructor of a boxed field of enum `i`: `Box::new`, or in a region
+/// twin the arena allocation (`prelude_region.rs`'s `almide_rgn_alloc`).
+pub(crate) fn box_new(i: u16) -> &'static str {
+    if is_region(i) { "almide_rgn_alloc" } else { "Box::new" }
+}

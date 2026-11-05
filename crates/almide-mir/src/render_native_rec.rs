@@ -329,18 +329,8 @@ thread_local! {
     static SCALAR_INSTANCES: RefCell<std::collections::BTreeSet<String>> = const { RefCell::new(std::collections::BTreeSet::new()) };
     static RECS: RefCell<Vec<RecDecl>> = const { RefCell::new(Vec::new()) };
     static INPUTS: RefCell<Option<Inputs>> = const { RefCell::new(None) };
-    /// The region twin enums of this render, by declared name.
-    static REGION_NAMES: RefCell<std::collections::BTreeSet<String>> = const { RefCell::new(std::collections::BTreeSet::new()) };
 }
 
-/// Generated type `i` is a region twin enum (#4006 C2, a `__rgn_` enum of the
-/// region-window rewrite, read off `codegen_annotations.region_enums`):
-/// `Copy`, its recursive fields `AlmideRgn` handles into the arena.
-pub(crate) fn is_region(i: u16) -> bool {
-    RECS.with(|r| {
-        r.borrow().get(i as usize).is_some_and(|d| d.cases.is_some() && REGION_NAMES.with(|n| n.borrow().contains(&d.name)))
-    })
-}
 
 /// Derive and install the table for one render.
 pub(crate) fn install_derived(
@@ -499,11 +489,6 @@ fn enum_field_ty(i: u16, f: &NTy) -> String {
     if enum_field_boxed(i, *f) { format!("{boxed}<{}>", owned_ty(*f)) } else { owned_ty(*f) }
 }
 
-/// The constructor of a boxed field of enum `i`: `Box::new`, or in a region
-/// twin the arena allocation (`prelude_region.rs`'s `almide_rgn_alloc`).
-pub(crate) fn box_new(i: u16) -> &'static str {
-    if is_region(i) { "almide_rgn_alloc" } else { "Box::new" }
-}
 
 fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     let n = struct_name(i);
