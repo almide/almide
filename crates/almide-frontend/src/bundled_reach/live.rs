@@ -102,6 +102,10 @@ pub fn live_bundled<'a>(
         }
     }
     let rows = almide_lang::self_host_registry::self_host_runtime();
+    // The whitelist filter is a reach pruning too: with the pruning off every
+    // self-host body behind a reached surface is entered.
+    let admit_all = |_: &str| true;
+    let admit: &dyn Fn(&str) -> bool = if almide_base::env::keep_bundled_fns() { &admit_all } else { admit };
     let mut reach = Reach {
         reached: cands.iter().map(|c| !c.auto).collect(),
         entered: vec![false; cands.len()],
@@ -273,8 +277,12 @@ impl<'p> Reach<'p> {
 /// function a reached body (or a non-function declaration) names, by the
 /// naming rule of [`live_bundled`]. The wasm link loads only these (#4458);
 /// a call the lowered bodies make outside this set is a demand of its next
-/// round, which grows the set.
+/// round, which grows the set. With the reach pruning switched off
+/// ([`almide_base::env::keep_bundled_fns`]) it is every function of `prog`.
 pub fn reach_within(module: &str, prog: &Program, roots: &HashSet<String>) -> HashSet<String> {
+    if almide_base::env::keep_bundled_fns() {
+        return prog.decls.iter().filter(|d| matches!(d, Decl::Fn { .. })).filter_map(decl_name).map(str::to_string).collect();
+    }
     let mut spelled = Spelled::default();
     let (fns, rest): (Vec<&Decl>, Vec<&Decl>) =
         prog.decls.iter().chain(prog.imports.iter()).partition(|d| matches!(d, Decl::Fn { .. }));

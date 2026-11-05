@@ -52,6 +52,41 @@ fn a_byte_loop_reading_another_string_is_refused() {
     assert!(bounds(&body, "e0 a0", "1:8 1:12").is_err());
 }
 
+// A runtime helper's byte loop (#4005): the payload offset in the address,
+// `s + 12 + k` at memarg offset 0 — the same byte as `s + k` at offset 12.
+// Anchors: the `br_if` (8), the load (14).
+fn helper_loop(pay: i32) -> String {
+    LOOP.replace(
+        "local.get 0 local.get 1 i32.add i32.load8_u offset=12",
+        &format!("local.get 0 i32.const {pay} i32.add local.get 1 i32.add i32.load8_u"),
+    )
+}
+
+#[test]
+fn a_helper_byte_loop_with_the_payload_in_the_address_is_accepted() -> Result<(), String> {
+    let r = bounds(&helper_loop(12), "e0 a0", "1:8 1:14")?;
+    assert_eq!((r.bounds_checks, r.bounds_accesses, r.bounds_operands), (1, 1, 1));
+    Ok(())
+}
+
+#[test]
+fn a_helper_byte_loop_one_byte_past_its_slot_is_refused() {
+    assert!(bounds(&helper_loop(13), "e0 a0", "1:8 1:14").is_err());
+}
+
+#[test]
+fn a_helper_byte_loop_one_byte_before_its_slot_is_refused() {
+    // `s + 11 + k`: the byte before k's, in bounds only when k >= 1 — which
+    // nothing here shows (k starts unknown), and k = 0 reads the len word.
+    assert!(bounds(&helper_loop(11), "e0 a0", "1:8 1:14").is_err());
+}
+
+#[test]
+fn a_helper_byte_loop_exit_one_byte_loose_is_refused() {
+    let body = helper_loop(12).replace("i32.ge_u br_if 1", "i32.gt_u br_if 1");
+    assert!(bounds(&body, "e0 a0", "1:8 1:14").is_err());
+}
+
 // The surface's own test (#4281): `idx >=u len(s)` opening an `if` whose
 // `else` holds the read — no second test. Anchors: the compare's `if` (5),
 // the load (13).

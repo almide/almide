@@ -445,6 +445,17 @@ pub(crate) fn render_v1_native_or_fallback(
             let ir = metered.expect("force_splice implies a metered program");
             link_metered_regions(&source_text, rs_code, "forced by ALMIDE_FORCE_METER_SPLICE", ir, opts)
         }
+        // `[permissions] fs` (#4022) bounds a program's fs calls by wrapping
+        // them around the scoped twin of the standard build's fs runtime
+        // (`build::inject_fs_scope`). A certified render that makes native fs
+        // host calls (#4006 class E) carries only the fs code its calls reach,
+        // not the twin's, so it takes the standard build, which is bounded.
+        Ok(v1_code) if almide_wasm_run::fs_scope().is_some() && v1_code.contains("almide_rt_fs_") => {
+            if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
+                err("native: v1 render makes fs host calls under `[permissions] fs`: the standard build (bounded) is used");
+            }
+            rs_code
+        }
         Ok(v1_code) => {
             if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
                 err(&format!("native: v1 trust-spine render"));

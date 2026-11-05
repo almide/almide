@@ -1,0 +1,29 @@
+diff --git a/crates/almide-mir/src/host_ops.rs b/crates/almide-mir/src/host_ops.rs
+index e677e2020..5db1e71e1 100644
+--- a/crates/almide-mir/src/host_ops.rs
++++ b/crates/almide-mir/src/host_ops.rs
+@@ -273,7 +273,8 @@ pub fn is_native_fs_host_call(symbol: &str) -> bool {
+ /// The witness id of the native fs host call `symbol`: its index in
+ /// [`NATIVE_FS_HOST_CALLS`].
+ pub fn native_fs_host_id(symbol: &str) -> Option<usize> {
+-    NATIVE_FS_HOST_CALLS.iter().position(|s| *s == symbol)
++    // RE-INJECTED (#4006 class E drill): a served fs function the named set does not name.
++    NATIVE_FS_HOST_CALLS.iter().position(|s| *s == symbol && symbol != "almide_rt_fs_write")
+ }
+ 
+ /// The modules whose surface reaches the host. Each one's `@intrinsic`s form
+diff --git a/crates/almide-mir/src/native_floor_host.rs b/crates/almide-mir/src/native_floor_host.rs
+index cb0db828c..913a57034 100644
+--- a/crates/almide-mir/src/native_floor_host.rs
++++ b/crates/almide-mir/src/native_floor_host.rs
+@@ -99,6 +99,10 @@ fn take_fs_host_module(idx: &mut RuntimeIndex) {
+ /// `Err` when the closure of `symbol` carries the fs host module and
+ /// `symbol` is not one of the named native fs host calls.
+ fn fs_host_gate(symbol: &str, items: &[&'static str]) -> Result<(), String> {
++    // RE-INJECTED (#4006 class E drill): the render's refusal is bypassed.
++    if !symbol.is_empty() {
++        return Ok(());
++    }
+     if items.iter().any(|t| is_fs_host_text(t)) && !crate::host_ops::is_native_fs_host_call(symbol) {
+         return Err(format!(
+             "`{symbol}` reaches the native fs host module, which only the named native fs host calls may (proofs/TRUSTED_BASE.md)"

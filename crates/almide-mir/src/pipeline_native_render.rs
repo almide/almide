@@ -305,12 +305,11 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     // #4447: the native rungs render no `@export(c)` wrapper — the wall
     // comes before the fan lift.
     wall_native_c_exports(&ir)?;
-    // A window the standard codegen allocates in its region arena: that leg
-    // runs it at a fraction of the ownership render's cost (#4006, C2 on C1).
-    if let Some(consume) = almide_codegen::pass_region_window::discovered_window(&ir) {
-        let span = ir.functions.iter().find(|f| f.name == consume).and_then(|f| f.body.span);
-        return Err(LowerError::at(span, format!("native: `{consume}` opens a region window the standard codegen allocates in its arena")));
-    }
+    // #4006 C2: a discovered region window runs in the arena on this render
+    // too — the `__rgn_` twins and a window fn the MIR brackets below.
+    let mut ir = ir;
+    almide_codegen::pass_region_window_native::native_region_windows(&mut ir);
+    let windows = crate::native_region_window::window_fns(&ir);
     let ir = crate::fan_native::lift_fan_arms(ir)?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
     // them a record literal lowers as an Opaque skeleton and every field read
@@ -322,6 +321,7 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
         &record_layouts,
         &variant_layouts,
         native_struct_tuples(&ir, &record_layouts, &variant_layouts),
+        ir.codegen_annotations.region_enums.iter().cloned().collect(),
     );
     if !ir.modules.is_empty() {
         return Err(LowerError::Unsupported(
@@ -347,6 +347,7 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     // #4006 class P: a heap param its body takes over becomes a move param,
     // and every call hands the argument over at the call.
     crate::native_move_params::rewrite(&mut functions);
+    crate::native_region_window::bracket_windows(&mut functions, &windows)?;
     let mut program = MirProgram {
         functions,
         exports: Vec::new(),

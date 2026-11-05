@@ -14,8 +14,10 @@
 //!   byte 0): `c N a N`, the `c` anchored at that `if`.
 //!
 //! The string routines' own bodies (equality, concat, the UTF-8 helpers,
-//! the search table) are runtime routines: their reads belong to #4278's
-//! per-helper certificates and record nothing here. A user-code read whose
+//! the search table) are runtime routines and record nothing here; those
+//! whose byte loop has the shape above record it themselves (#4005,
+//! `witness::bounds::helper_loop_exit`), the rest are listed in
+//! proofs/TRUSTED_BASE.md. A user-code read whose
 //! bound takes more than one of these facts (a suffix compare at
 //! `len(s) - len(p) + k`, a backward walk, a read at `k - 1`) records
 //! nothing either: it is listed, uncounted by this mechanism, in

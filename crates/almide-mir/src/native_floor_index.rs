@@ -107,6 +107,7 @@ fn build_runtime_index() -> RuntimeIndex {
     let mut idx = take_prelude_traits(prelude, &runtime_traits, RuntimeIndex { items, defined, trait_methods, fns });
     take_types(&mut idx, &seen, types, &impls);
     take_runtime_traits(&mut idx, &seen, &impls);
+    take_fs_host_module(&mut idx);
     idx
 }
 
@@ -239,7 +240,13 @@ enum ItemKind {
 /// The top-level items of a runtime module: (kind, name, whole text, whether
 /// a `#[cfg…]` attribute precedes it).
 fn top_level_items(src: &str) -> Vec<TopItem<'_>> {
-    let mut scan = ItemScan { src, toks: lex(src), out: Vec::new(), i: 0, cfg_attr: false, attr_start: None };
+    scan_items(src, false)
+}
+
+/// [`top_level_items`], every item's text with its attributes when
+/// `with_attrs` (a `#[cfg]` const or module keeps its gate).
+fn scan_items(src: &str, with_attrs: bool) -> Vec<TopItem<'_>> {
+    let mut scan = ItemScan { src, toks: lex(src), out: Vec::new(), i: 0, cfg_attr: false, attr_start: None, with_attrs };
     while scan.i < scan.toks.len() {
         if !scan.step() {
             break;
@@ -257,6 +264,7 @@ struct ItemScan<'a> {
     i: usize,
     cfg_attr: bool,
     attr_start: Option<usize>,
+    with_attrs: bool,
 }
 
 impl<'a> ItemScan<'a> {
@@ -351,7 +359,8 @@ impl<'a> ItemScan<'a> {
         let end_off = self.end_off(end);
         if let Some(name) = impl_self_type(&self.toks[j..=end.min(self.toks.len() - 1)]) {
             let src: &'a str = self.src;
-            self.out.push((ItemKind::Impl, name, &src[start_off..end_off], self.cfg_attr));
+            let from = if self.with_attrs { self.attr_start.unwrap_or(start_off) } else { start_off };
+            self.out.push((ItemKind::Impl, name, &src[from..end_off], self.cfg_attr));
         }
         self.finish(end);
     }
@@ -367,7 +376,7 @@ impl<'a> ItemScan<'a> {
         // is a crate of its own: a non-generic fn crosses into the program
         // only where the runtime marks it inline, as the standard codegen's
         // one-crate build inlines it).
-        let from = if matches!(kind, ItemKind::Type | ItemKind::Fn) { self.attr_start.unwrap_or(start_off) } else { start_off };
+        let from = if self.with_attrs || matches!(kind, ItemKind::Type | ItemKind::Fn) { self.attr_start.unwrap_or(start_off) } else { start_off };
         let src: &'a str = self.src;
         self.out.push((kind, name, &src[from..end_off], self.cfg_attr));
         self.finish(end);
@@ -526,6 +535,7 @@ fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>,
             }
         }
     }
+    fs_host_gate(symbol, &out)?;
     Ok(out)
 }
 
@@ -534,14 +544,22 @@ fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>,
 /// is not an item we can take along (a type, a macro, a module, a prelude
 /// fn, a `#[cfg]` twin). A name neither of them defines is Rust's own.
 fn references(text: &str) -> Result<Vec<String>, String> {
+    if is_fs_host_text(text) {
+        // The fs host module's own names, at any depth, are its own.
+        return references_seeded(runtime_index(), text, fs_host_own_names());
+    }
     references_in(runtime_index(), text)
 }
 
 fn references_in(rt: &RuntimeIndex, text: &str) -> Result<Vec<String>, String> {
+    references_seeded(rt, text, &BTreeSet::new())
+}
+
+fn references_seeded<'t>(rt: &RuntimeIndex, text: &'t str, own: &BTreeSet<&'t str>) -> Result<Vec<String>, String> {
     let toks = lex(text);
     let header = header_items();
     let mut out = Vec::new();
-    let mut locals: BTreeSet<&str> = BTreeSet::new();
+    let mut locals: BTreeSet<&str> = own.clone();
     for (i, t) in toks.iter().enumerate() {
         let s = t.text;
         if !is_ident(s) {
@@ -554,7 +572,12 @@ fn references_in(rt: &RuntimeIndex, text: &str) -> Result<Vec<String>, String> {
             next: toks.get(i + 1).map(|t| t.text),
             after_next: toks.get(i + 2).map(|t| t.text),
         };
+        // Inside the fs host module, `super::NAME` (from one of its modules)
+        // and `&mut NAME` (a fn handed over by reference) name an item of it.
+        let prev2 = i.checked_sub(2).map(|k| toks[k].text);
+        let fs_item_ref = !own.is_empty() && matches!((at.prev, prev2), (Some("::"), Some("super")) | (Some("mut"), Some("&")));
         let step = match by_position(rt, &at) {
+            Some(_) if fs_item_ref => by_name(rt, header, &locals, &at),
             Some(step) => step,
             None => by_name(rt, header, &locals, &at),
         };

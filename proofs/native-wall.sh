@@ -32,7 +32,10 @@
 # OwnershipChecker.check_xc). TRUSTED: that rustc compiles the rendered
 # source into a binary that keeps it (`Dup` as `.clone()`, `Drop` erased to
 # Rust's scope-end drop), and every program outside the floor, which ships
-# from the standard codegen with no certificate.
+# from the standard codegen with no certificate. A region window (#4006 C2)
+# is witnessed as its arena mark (the save's `i`, the rewind's `d`); that a
+# twin node's release may wait for the rewind is the region-pure verdict,
+# interim trust (docs/contracts/proven-vs-trusted.md).
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$(cd .. && pwd)"

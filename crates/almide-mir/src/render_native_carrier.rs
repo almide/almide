@@ -251,10 +251,7 @@ pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
 
 /// The carrier index of a value's kind.
 fn carrier_of(t: Option<NTy>) -> Option<u16> {
-    match t {
-        Some(NTy::Rec(i) | NTy::RecRef(i)) if is_carrier(i) => Some(i),
-        _ => None,
-    }
+    t?.rec().filter(|i| is_carrier(*i))
 }
 
 fn emit(out: &mut String, indent: usize, s: &str) {
@@ -266,10 +263,6 @@ fn emit(out: &mut String, indent: usize, s: &str) {
 
 /// The owned copy of `v` as a slot of kind `k` (a carrier payload write).
 fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy) -> Result<String, LowerError> {
-    // A scalar Option payload is the `Option<i64>` itself, by value.
-    if k == NTy::Opt && !st.addrs.contains_key(&v) && tys.get(&v) == Some(&NTy::Opt) {
-        return Ok(var(v));
-    }
     let Some(sv) = st.addrs.get(&v).copied().filter(|a| a.off == 0 && a.idx.is_none()) else {
         return Err(wall(format!("native: a {:?} carrier payload that is not a heap handle", tys.get(&v))));
     };
@@ -506,11 +499,8 @@ impl CarrierCx<'_> {
             (Some(true), _) => (e, format!("match &{b} {{ Err(v) => v.clone(), Ok(_) => unreachable!() }}")),
             (Some(false), _) => (o, format!("match &{b} {{ Ok(v) => v.clone(), Err(_) => unreachable!() }}")),
             (None, _) if o == e => (o, format!("match &{b} {{ Ok(v) | Err(v) => v.clone() }}")),
-            // Read above the tag test, used under one side of it: the
-            // other side's read is never used, so it is a Default.
-            (None, Some(true)) if has_default(e) => {
-                (e, format!("match &{b} {{ Err(v) => v.clone(), Ok(_) => Default::default() }}"))
-            }
+            // Read above the tag test, used under its Ok side: the Err
+            // side's read is never used, so it is a Default.
             (None, Some(false)) if has_default(o) => {
                 (o, format!("match &{b} {{ Ok(v) => v.clone(), Err(_) => Default::default() }}"))
             }

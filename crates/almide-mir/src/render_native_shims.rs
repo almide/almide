@@ -110,6 +110,14 @@ pub(crate) fn shim_rust_name(name: &str) -> String {
 /// with a `return <default of the fn's ret type>;` once the ret NTy is known
 /// (the same late-patch technique as the if-value JOIN markers).
 pub(crate) const CUT_RET_MARKER: &str = "/*__CUT_RET__*/";
+/// The region-window arena (#4006 C2): the standard codegen's own prelude
+/// (`AlmideRgn`, the thread-local bump arena, `almide_region_save` /
+/// `almide_region_restore`), so both renders run a window on the same code.
+/// `ALMIDE_REGION_TRAP_STALE=1` at build time selects the armed variant, as
+/// on the standard codegen.
+pub(crate) static REGION_ARENA_SHIM: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    almide_codegen::region_arena_prelude_source(almide_base::env::flag("ALMIDE_REGION_TRAP_STALE"))
+});
 
 /// The exhaustion read the strict cut branches on.
 pub(crate) const FUEL_LT0_SHIM: &str =

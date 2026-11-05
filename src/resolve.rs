@@ -306,7 +306,7 @@ pub fn resolve_imports_with_deps(
             load_bundled_module(name, source, &mut ctx)?;
         }
     }
-    if !almide_base::env::flag("ALMIDE_KEEP_BUNDLED_FNS") {
+    if !almide_base::env::keep_bundled_fns() {
         for (name, prog, pkg, _) in loaded.iter_mut() {
             if !is_bundled(name, pkg) {
                 continue;

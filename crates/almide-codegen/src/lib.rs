@@ -78,6 +78,7 @@ pub mod pass_metered_region_delegate;
 pub mod pass_meter_charge;
 pub mod pass_region_window;
 pub mod pass_region_window_clone;
+pub mod pass_region_window_native;
 mod prelude_region;
 pub mod prelude_string;
 mod prelude_fan;

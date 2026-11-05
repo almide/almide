@@ -184,6 +184,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_MUTATION_SHARD", Value, Ci, "this job's shard index of the mutation gate"),
     sw("ALMIDE_MUTATION_SHARDS", Value, Ci, "how many shards the mutation gate is split into"),
     sw("ALMIDE_NAMES_DEBUG", Flag, Dbg, "print the native name-verification map and its scoped shadowing decisions"),
+    sw("ALMIDE_NATIVE_DRILL_COND_I64", Flag, Ablation, "make the certified native render keep every comparison an i64 0/1 tested with `!= 0`, never a branch-only `bool` — the negative control of the branch-only comparison render in scripts/check-native-v1-perf-small.sh (recursion_depth_within_limits)"),
     sw("ALMIDE_NATIVE_DRILL_NO_MOVES", Flag, Ablation, "make the certified native render keep every copy it would elide (no in-place `list.push`, a clone for each last-use Dup/SetLocal) — the negative control of scripts/check-native-v1-perf.sh (#4006)"),
     sw("ALMIDE_NO_AVAIL_CHECK", Flag, Gate, "bypass the E081 stdlib availability check (the measurement escape the availability probe builds through)"),
     sw("ALMIDE_NO_RTLIB", Flag, Route, "build the native runtime inline instead of linking the prebuilt runtime crate (the self-contained cargo path; `almide test` sets it for the harness build)"),
@@ -288,6 +289,15 @@ pub fn flag(name: &str) -> bool {
         announce(sw);
     }
     on
+}
+
+/// Is the bundled-stdlib reach pruning switched off (`ALMIDE_KEEP_BUNDLED_FNS`,
+/// #4328)? Every site that trims a bundled module or a self-host source to
+/// what the program reaches asks HERE — the resolver's function pruning, the
+/// reach walk's whitelist filter, and the wasm link's own pruning (#4458) —
+/// so the whole-module leg (witness_floor) sees whole modules on every path.
+pub fn keep_bundled_fns() -> bool {
+    flag("ALMIDE_KEEP_BUNDLED_FNS")
 }
 
 /// The value of `name`, when set and non-empty. Registered names only; a

@@ -346,6 +346,11 @@ impl OwnershipScan {
             // spot for the NAMEABLE case: prim.handle(v) carries its source object in args[0], so the
             // self.rc events on it verify against the same self.rc machine. load64-fed handles have no carrier
             // and stay unmodeled (the differential-test floor). MIRRORED in ownership_certificate.
+            // The region window's close (#4006 C2) releases the window's mark
+            // like a `Drop`: a second rewind of the same mark is a double free.
+            Op::Prim { kind: PrimKind::RegionRestore, args, .. } if !args.is_empty() => {
+                self.release_or_report(i, args[0], ViolationKind::DoubleFree)
+            }
             Op::Prim { kind, dst, args } => {
                 self.check_dereference(i, kind, *dst, args);
                 self.apply_prim_rc_event(kind, dst, args)
@@ -728,6 +733,12 @@ impl OwnershipScan {
         // A native Result carrier birth is alloc-class: a fresh owned object,
         // released by the carrier's kept `Drop`/`Consume` (#4349).
         if let (true, Some(d)) = (kind.births_native_carrier(), dst) {
+            self.own_fresh_object(*d);
+            return;
+        }
+        // The region window's arena mark (#4006 C2): a fresh owned object,
+        // released once by the window's `RegionRestore`.
+        if let (PrimKind::RegionSave, Some(d)) = (kind, dst) {
             self.own_fresh_object(*d);
             return;
         }

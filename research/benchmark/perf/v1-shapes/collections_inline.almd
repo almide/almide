@@ -1,0 +1,18 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf-shapes.sh): sets, maps
+// and a matrix built and measured inside a loop, each type named only by the
+// stdlib call that makes it, plus a declared Set[String] local.
+// It takes the render's first-use registration of the generated
+// AlmideSet / AlmideMap / AlmideMatrix aliases.
+fn main() -> Unit = {
+  let n = int.parse("40") ?? 4
+  var acc = 0
+  var r = 0
+  while r < 300 {
+    acc = acc + set.len(set.from_list(list.range(0, n + r % 3)))
+    acc = acc + map.len(map.from_list([("a", r), ("b", n)]))
+    acc = acc + matrix.rows(matrix.zeros(n, 3))
+    r = r + 1
+  }
+  let tags: Set[String] = set.from_list(["x", "y", int.to_string(n)])
+  println(int.to_string(acc + set.len(tags)))
+}

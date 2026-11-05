@@ -69,6 +69,10 @@ SUITE = [
     # Pro, 0.61 on the ubuntu runner) and no one ±band holds both.
     ("binarytrees",  "binarytrees/binarytrees.almd",     ["binarytrees.rs"],                "18",       "10",   "bytes", None),
     ("treealloc",    "treealloc/treealloc.almd",         ["treealloc.rs"],                  "21",       "10",   "bytes", None),
+    # btrees (rc4): treealloc's program with the depth a literal and no
+    # argument read, so all of it is on the certified native render, region
+    # window included. A VICTORY row too; its argument is ignored on every leg.
+    ("btrees",       "btrees/btrees.almd",               ["btrees.rs"],                     "19",       "19",   "bytes", None),
     ("mandelbrot",   "mandelbrot/mandelbrot.almd",       ["mandelbrot.rs"],                 "4000",     "200",  "bytes", None),
     # listbuild (#1337): the SAME materializing workload written three ways.
     # The rows differ only in the build loop — same arithmetic, same checksum
@@ -174,6 +178,8 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # 20, not the #2028 default 19: with the window the native row reads
     # ~60 ms at 19, under the spawn-noise floor; 20 reads ~120 ms / ~400 ms ref.
     "treealloc": "20",
+    # btrees ignores its argument: 12 x depth 19 is the fixed workload.
+    "btrees": "19",
     # 2000, not 1000: 1000 reads ~45 ms, under the spawn-noise floor.
     "mandelbrot": "2000",
     "listbuild": "23",

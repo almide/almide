@@ -1,0 +1,30 @@
+// btrees — treealloc's workload with no argument read (rc4, a regression no
+// gate saw). The tree, `make` and `check` are treealloc's, and so is the
+// 12 x check(make(19)) loop; the depth is a literal and main reads nothing.
+// That is the whole point of the row: treealloc reads its depth from
+// `env.args()`, and on develop before the rc4 bundle that call kept its main
+// off the certified native render, so it shipped from the standard codegen
+// with the region arena (0.34x Rust). This program has no such call, so the
+// certified render took all of it and built every node with `Box`: 1.3x Rust
+// on the same machine. Keep it argument-free: a depth read from argv
+// would change the very shape the row guards.
+// Usage: almide run btrees.almd   (bench.py's argument is ignored)
+type Tree = Leaf | Node(Tree, Tree)
+
+fn make(depth: Int) -> Tree =
+  if depth == 0 then Leaf else Node(make(depth - 1), make(depth - 1))
+
+fn check(t: Tree) -> Int = match t {
+  Leaf => 1,
+  Node(l, r) => check(l) + check(r) + 1,
+}
+
+fn main() -> Unit = {
+  var total = 0
+  var i = 0
+  while i < 12 {
+    total = total + check(make(19))
+    i = i + 1
+  }
+  println("${total}")
+}

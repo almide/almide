@@ -62,8 +62,11 @@
 //! anchor file's `holds` line lets almide-anchor-check accept a call handed
 //! the list inside the loop (the copy-on-write contract: a shared block is
 //! never written or resized in place).
-//! Element accesses that go through neither (stdlib `list.get`, the
-//! runtime's own routines) are not recorded.
+//! A runtime helper's byte loop in the same shape (#4005: the char count,
+//! the codepoint walk, the UTF-8 check, `err_text`) records its read the same way, `e0 a0` on a stretch of its own
+//! ([`helper_loop_exit`] / [`helper_read`]), when its body ships.
+//! Element accesses that go through none of these (stdlib `list.get`, the
+//! rest of the runtime's own routines) are not recorded.
 
 use std::sync::Mutex;
 
@@ -280,6 +283,45 @@ pub(crate) fn loop_header() -> Option<Site> {
         s.open[n - 1].slots.push((u32::MAX, u32::MAX, 0));
         Site { depth: Some(n - 1), slot: 0 }
     })
+}
+
+thread_local! {
+    static MUTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` with the runtime helpers' byte loops recording nothing: the
+/// assembler builds every fixed-slot helper once over placeholder literals
+/// only to learn which ones ship (assembly.rs `used_static_helpers`); those
+/// bodies are thrown away, so their reads are no evidence of anything.
+pub(crate) fn muted<R>(f: impl FnOnce() -> R) -> R {
+    let was = MUTED.with(|m| m.replace(true));
+    let r = f();
+    MUTED.with(|m| m.set(was));
+    r
+}
+
+/// A runtime helper's byte loop (#4005, the string routines' bodies): its
+/// exit test `k >=u n; br_if 1` was just emitted into `f`, the counter
+/// against the byte count of the string it reads (`len(s)` captured before
+/// the loop) — the shape of a user-code byte loop (str_bounds.rs). A stretch
+/// of its own, `e0 a0`: the caller records the guarded read with
+/// [`helper_read`], which closes it. `None` (nothing recorded) when no sweep
+/// collects or the body is a placeholder ([`muted`]).
+pub(crate) fn helper_loop_exit(f: &wasm_encoder::Function) -> Option<Site> {
+    if MUTED.with(std::cell::Cell::get) {
+        return None;
+    }
+    let site = loop_header();
+    exit(site, f);
+    site
+}
+
+/// The read guarded by [`helper_loop_exit`]'s test was just emitted.
+pub(crate) fn helper_read(site: Option<Site>, f: &wasm_encoder::Function) {
+    if site.is_some() {
+        access(site, false, f);
+        close();
+    }
 }
 
 /// The loop exit test guarding `site`'s access (its `br_if`) was just
