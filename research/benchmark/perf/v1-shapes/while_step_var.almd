@@ -1,0 +1,75 @@
+// v1-vs-v0 shape bench: `while i < n` loops the render may spell as a Rust
+// range. It does only when every condition holds; each loop here fails one:
+// a step that is not one, a counter written before the loop, a counter read
+// after it, a bound the body lowers, a last statement that is not the step.
+fn var_step(n: Int) -> Int = {
+  var step = 1
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = acc + i % 7
+    i = i + step
+  }
+  acc
+}
+
+fn computed_step(n: Int) -> Int = {
+  let step = n / n + 1
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = acc + i % 5
+    i = i + step
+  }
+  acc
+}
+
+fn cond_start(n: Int) -> Int = {
+  var step = 1
+  var i = 0
+  if n > 10 then i = 3 else i = 1
+  var acc = 0
+  while i < n {
+    acc = acc + i % 3
+    i = i + step
+  }
+  acc
+}
+
+fn read_after(n: Int) -> Int = {
+  var step = 1
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = acc + i % 11
+    i = i + step
+  }
+  acc + i
+}
+
+fn shrinking(n: Int) -> Int = {
+  var lim = n
+  var i = 0
+  var acc = 0
+  while i < lim {
+    acc = acc + i % 13
+    lim = lim - 1
+    i = i + 1
+  }
+  acc
+}
+
+fn trailing(n: Int) -> Int = {
+  var i = 0
+  var last = 0
+  while i < n {
+    i = i + 1
+    last = i + 1
+  }
+  last
+}
+
+fn main() -> Unit = {
+  let n = list.len(list.range(0, 1000)) * 1000
+  println(int.to_string(var_step(n) + computed_step(n) + cond_start(n) + read_after(n) + shrinking(n) + trailing(n)))
+}

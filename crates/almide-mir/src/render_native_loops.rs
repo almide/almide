@@ -55,21 +55,21 @@ pub(crate) fn iterator_loops(out: String) -> String {
 }
 
 /// A `// …` line of the render.
-fn is_note(l: &str) -> bool {
+pub(crate) fn is_note(l: &str) -> bool {
     l.trim_start().starts_with("//")
 }
 
-fn indent_of(l: &str) -> usize {
+pub(crate) fn indent_of(l: &str) -> usize {
     l.len() - l.trim_start().len()
 }
 
 /// `vNNN` (the render's value names) and nothing else.
-fn is_var(s: &str) -> bool {
+pub(crate) fn is_var(s: &str) -> bool {
     s.len() > 1 && s.starts_with('v') && s[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Does `text` mention variable `v` as a whole word?
-fn mentions(text: &str, v: &str) -> bool {
+pub(crate) fn mentions(text: &str, v: &str) -> bool {
     let b = text.as_bytes();
     let mut from = 0;
     while let Some(k) = text[from..].find(v) {
@@ -115,11 +115,11 @@ fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
     if !is_var(i) || !is_var(len) || lines.get(s + 2)?.trim() != format!("if !{c} {{ break; }}") {
         return None;
     }
-    // The closing brace at the loop's own indentation.
-    let e = (s + 1..lines.len()).find(|&k| indent_of(&lines[k]) == ind && lines[k].trim() == "}")?;
-    if (s + 1..e).any(|k| !lines[k].trim().is_empty() && indent_of(&lines[k]) <= ind) {
-        return None;
-    }
+    // The closing brace: the first line back at the loop's own indentation
+    // (or less) must be the `}` at exactly that indentation.
+    let e = (s + 1..lines.len())
+        .find(|&k| !lines[k].trim().is_empty() && indent_of(&lines[k]) <= ind)
+        .filter(|&k| indent_of(&lines[k]) == ind && lines[k].trim() == "}")?;
     // The step: `let mut vN: i64 = vI.wrapping_add(vONE);` then `vI = vN;`.
     let (n, nty, step) = let_parts(lines.get(e - 2)?)?;
     let one = step.strip_prefix(&format!("{i}.wrapping_add("))?.strip_suffix(')')?;
@@ -214,24 +214,20 @@ fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
 }
 
 /// `vS` and the index text `vS[IDX]` to replace, when `vLEN` is `vS.len()`, the
-/// body's one offset is `vI * 8`, and the body reads `vS` only through it.
+/// body's first offset is `vI * 8`, and the body reads `vS` only through it.
 fn iter_source(lines: &[String], s: usize, len: &str, i: &str, body: &[&String]) -> Option<(String, String)> {
     let def = (0..s).rev().find(|&k| let_parts(&lines[k]).is_some_and(|(v, _, _)| v == len))?;
     let (_, _, rhs) = let_parts(&lines[def])?;
-    let src = rhs.strip_suffix(".len() as i64")?;
-    if !is_var(src) {
-        return None;
-    }
-    // `let mut vO: i64 = vI.wrapping_mul(vEIGHT);` with `vEIGHT` = 8.
-    let (o, eight) = body.iter().find_map(|l| {
+    let src = rhs.strip_suffix(".len() as i64").filter(|v| is_var(v))?;
+    // `let mut vO: i64 = vI.wrapping_mul(vK);`. The render indexes a slot by
+    // `vO >> 3` only for an offset it knows is a product by SLOT_SIZE
+    // (render_native_addr::slot_index), and the counter is 0 where the loop
+    // starts, so an index text over `vO` below already says `vK` is 8.
+    let o = body.iter().find_map(|l| {
         let (o, _, rhs) = let_parts(l)?;
-        let k = rhs.strip_prefix(&format!("{i}.wrapping_mul("))?.strip_suffix(')')?;
-        Some((o, k))
+        rhs.strip_prefix(&format!("{i}.wrapping_mul("))?.strip_suffix(')')?;
+        Some(o)
     })?;
-    let eight_line = lines[..s].iter().chain(body.iter().copied()).rev().find(|l| let_parts(l).is_some_and(|(v, _, _)| v == eight))?;
-    if let_parts(eight_line).map(|p| p.2) != Some("8i64") {
-        return None;
-    }
     let ix = format!("{src}[(0usize + (({o} as u64) >> 3u32) as usize)]");
     let reads_only_ix = body.iter().all(|l| !mentions(&l.replace(&ix, ""), src));
     (reads_only_ix && body.iter().any(|l| l.contains(&ix))).then(|| (src.to_string(), ix))
@@ -240,11 +236,8 @@ fn iter_source(lines: &[String], s: usize, len: &str, i: &str, body: &[&String])
 /// (result, its type, its declaration line, the pushed expression).
 fn collected_result(lines: &[String], s: usize, len: &str, body: &[&String], body_text: &str) -> Option<(String, String, usize, String)> {
     let last = body.last()?.trim();
-    let (r, rest) = last.split_once(".push(")?;
+    let (r, rest) = last.split_once(".push(").filter(|(r, _)| is_var(r))?;
     let expr = rest.strip_suffix(");")?;
-    if !is_var(r) {
-        return None;
-    }
     let decl = (0..s).rev().find(|&k| let_parts(&lines[k]).is_some_and(|(v, _, _)| v == r))?;
     let (_, rty, rhs) = let_parts(&lines[decl])?;
     if rhs != crate::render_native_addr::reserved_vec(len) {
@@ -253,9 +246,8 @@ fn collected_result(lines: &[String], s: usize, len: &str, body: &[&String], bod
     // Read nowhere else in the body (the push is its only use) nor between
     // its declaration and the loop.
     let without_push = &body_text[..body_text.len() - body.last()?.len()];
-    if mentions(without_push, r) || mentions(expr, r) || lines[decl + 1..s].iter().any(|l| !is_note(l) && mentions(l, r)) {
-        return None;
-    }
+    let read_elsewhere = mentions(without_push, r) || mentions(expr, r) || lines[decl + 1..s].iter().any(|l| !is_note(l) && mentions(l, r));
+    (!read_elsewhere).then_some(())?;
     Some((r.to_string(), rty.to_string(), decl, expr.to_string()))
 }
 
