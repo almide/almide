@@ -742,21 +742,8 @@ fn enum_slot_lit(s: AddrSink<'_>, dst: &ValueId, elems: &[ValueId]) -> Result<bo
         return Err(wall("native: a heap element in an enum slot list"));
     }
     tys.insert(*dst, NTy::Rec(i));
-    let n = crate::render_native_rec::struct_name(i);
-    // A constant tag naming a case with no payload is that case itself:
-    // `from_slots` would build `with_tag(t)` and set no field of it, so the
-    // value is the same, without the slot list and the tag match per build
-    // (a `Leaf` built that way cost a 4% loss on nested_variant_tag_box).
-    let nullary = elems.first().filter(|t| !st.set_locals.contains(t)).and_then(|t| st.consts.get(t)).copied().filter(|&t| {
-        crate::render_native_rec::enum_cases(i)
-            .is_some_and(|cs| cs.iter().any(|(c, fs)| i64::from(*c) == t && fs.is_empty()))
-    });
-    if let Some(t) = nullary {
-        line!("let mut {}: {n} = {n}::C{t};", var(*dst));
-        return Ok(true);
-    }
     let items = elems.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ");
-    line!("let mut {}: {n} = {n}::from_slots(&[{items}]);", var(*dst));
+    line!("let mut {}: {n} = {n}::from_slots(&[{items}]);", var(*dst), n = crate::render_native_rec::struct_name(i));
     Ok(true)
 }
 

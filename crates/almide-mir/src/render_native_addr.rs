@@ -58,8 +58,6 @@ pub(crate) struct AddrState {
     /// reassignment of it (or across a loop edge): such a handle could go
     /// stale, so it walls.
     reassigned: BTreeSet<ValueId>,
-    /// Every `SetLocal` target: its `consts` entry is only its first value.
-    set_locals: BTreeSet<ValueId>,
     /// Constant `List[String]` blocks (`render_native_slots::const_str_lists`):
     /// rendered once, as a lazy static the function borrows.
     const_lists: BTreeMap<ValueId, Vec<String>>,
@@ -202,10 +200,6 @@ impl AddrState {
             scaled: BTreeSet::new(),
             addrs: BTreeMap::new(),
             reassigned,
-            set_locals: func.ops.iter().filter_map(|op| match op {
-                Op::SetLocal { local, .. } => Some(*local),
-                _ => None,
-            }).collect(),
             const_lists,
             const_elems,
             empty_lists: func
