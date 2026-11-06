@@ -166,6 +166,16 @@ pub(crate) enum Helper {
     /// built by the emitter at registration (`drop_bodies`) — the slot
     /// table needs the type table.
     DropShape { ty: SliceTy },
+    /// `$deep_drop_push(child, slot)` (#4252, #4550): queue one release of a
+    /// deep drop — the child block and its release fn's table slot — on the
+    /// drop queue in global `gq`. The cold half of every deep drop, shared
+    /// so each recursive type's drop does not carry its own copy per slot.
+    DeepDropPush { gq: u32 },
+    /// `$deep_drop_drain()` (#4252, #4550): the outermost drop's drain of
+    /// what the deep ones queued, one release each at depth 1 (`gd`), called
+    /// through the `(i32) -> ()` type `drop_ty`. Shared by every recursive
+    /// type's drop.
+    DeepDropDrain { gq: u32, gd: u32, drop_ty: u32 },
     /// `$inc_<shape>(block)`: +1 on every handle slot of an Option /
     /// Result / tuple / record / variant block — the credits a whole-block
     /// COPY of it must hold (`CopyElems { inc_elems }` calls it).
