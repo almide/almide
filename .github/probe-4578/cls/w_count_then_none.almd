@@ -1,0 +1,19 @@
+protocol Order {
+  fn cmp(o: Self, a: String, b: String) -> Int
+}
+
+fn sign(a: String, b: String) -> Int = if a < b then -1 else if a > b then 1 else 0
+
+type Lexical: Order = {}
+
+fn Lexical.cmp(o: Lexical, a: String, b: String) -> Int = sign(a, b)
+
+fn f[O: Order](o: O, xs: List[String], n: String) -> String? = {
+  let k = xs |> list.count((x) => o.cmp(x, n) > 0)
+  if k > 0 then list.first(xs) else none
+}
+
+fn main() -> Unit = {
+  let line = "${f(Lexical {}, ["a", "c"], "b")}"
+  println(line)
+}

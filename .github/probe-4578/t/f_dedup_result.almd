@@ -1,5 +1,0 @@
-fn main() -> Unit = {
-  let xs: List[Result[Int, String]] = [ok(1), err("e"), ok(1), err("e")]
-  let x: Result[Int, String] = err("e")
-  println("dedup result=${list.len(list.dedup(xs))}")
-}

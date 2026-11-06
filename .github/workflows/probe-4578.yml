@@ -122,5 +122,5 @@ jobs:
         working-directory: src
         run: |
           set +e
-          mkdir -p /tmp/c && cp spec/wasm_cross/equality_ops_every_equatable_element.almd spec/wasm_cross/protocol_bound_method_named_like_a_record_field.almd ../probe/.github/probe-4578/cls/*.almd /tmp/c/ 2>/dev/null
+          mkdir -p /tmp/c && cp ../probe/.github/probe-4578/cls/*.almd /tmp/c/ 2>/dev/null
           WALL_NAMES=1 cargo run -q --release -p almide-mir --example classify_corpus -- --out /tmp/o /tmp/c 2>&1 | grep -E '^WALLED|walled' | cut -c1-600

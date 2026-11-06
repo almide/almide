@@ -1,5 +1,0 @@
-fn main() -> Unit = {
-  let xs: List[Unit] = [(), (), ()]
-  let x: Unit = ()
-  println("unique unit=${list.len(list.unique(xs))}")
-}

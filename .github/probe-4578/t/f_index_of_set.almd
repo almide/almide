@@ -1,5 +1,0 @@
-fn main() -> Unit = {
-  let xs: List[Set[String]] = [set.from_list(["a", "b"]), set.from_list(["b", "a"]), set.from_list(["c"]), set.from_list(["c"])]
-  let x: Set[String] = set.from_list(["c"])
-  println("index_of set=${list.index_of(xs, x)}")
-}

@@ -1,2 +1,0 @@
-fn f(xs: List[String]) -> String? = list.first(xs)
-test "n" { assert_eq(f([]), none) }

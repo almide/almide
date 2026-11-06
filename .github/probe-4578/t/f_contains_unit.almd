@@ -1,5 +1,0 @@
-fn main() -> Unit = {
-  let xs: List[Unit] = [(), (), ()]
-  let x: Unit = ()
-  println("contains unit=${list.contains(xs, x)}")
-}
