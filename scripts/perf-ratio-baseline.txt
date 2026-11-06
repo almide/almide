@@ -119,10 +119,15 @@ regexcycle-native 1.03
 regexcycle-wasm 1.07
 # FRAME BUFFER (#4550): framebuf-global per-frame min / framebuf-local
 # per-frame min, per leg. The gate fails on FRAMEBUF_CEILING_* in
-# check-perf-ratio.sh, never on these values. Before the fix (0.69.0,
-# reduction of the same writes on the ubuntu runner): native ~1000x, wasm ~60x.
-framebuf-native 7.0
-framebuf-wasm 1.0
+# check-perf-ratio.sh, never on these values. Runner readings (PR #4555's
+# perf ratchet job): native 16.4 with the take form, the global row's one
+# small allocation per write against stores LLVM keeps in registers for the
+# local row; wasm 44.1 there, before the move-in fix of PR #4556 — the global
+# shared into each `put_f32_le` and copied 80 KB per 4-byte write. With it the
+# reduction's global writes cost ~20 ns each on wasm, about what the local
+# row's do.
+framebuf-native 16.4
+framebuf-wasm 1.4
 treealloc 0.343
 # btrees (rc4): treealloc's program with the depth a literal and no argument
 # read, so it renders whole on the certified native leg, region window
