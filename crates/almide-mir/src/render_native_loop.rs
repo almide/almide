@@ -403,11 +403,6 @@ fn render_fn_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<(), LowerError
     Ok(())
 }
 
-/// A reference kind a heap slot's snapshot is read through.
-fn is_view(t: Option<&NTy>) -> bool {
-    matches!(t, Some(NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)))
-}
-
 /// The move-shaped arms of the general op match: a dead handle, a borrow-join
 /// arm, and the copies, error carriers and reassignments that move their
 /// source instead of cloning it. `Ok(false)` = none of them.
@@ -433,10 +428,10 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         // A copy of a heap slot's snapshot that only borrows reads through
         // the snapshot's reference (#4562, render_native_heap_slot); its
         // release ends that borrow, and the snapshot frees at scope end.
-        _ if crate::native_slot_takes::released(op).is_some_and(|v| st.addrs.slot_alias(&v) && is_view(st.tys.get(&v))) => {
+        _ if crate::native_slot_takes::released(op).is_some_and(|v| st.addrs.slot_alias(&v)) => {
             line!("// drop: a heap slot's snapshot, scope-end");
         }
-        Op::Dup { dst, src } if st.addrs.slot_alias(dst) && is_view(st.tys.get(src)) => {
+        Op::Dup { dst, src } if st.addrs.slot_alias(dst) => {
             let t = st.tys[src];
             st.tys.insert(*dst, t);
             line!("let mut {} = {};", var(*dst), var(*src));

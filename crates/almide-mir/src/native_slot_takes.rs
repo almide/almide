@@ -65,7 +65,7 @@ pub(crate) fn set_quiet(functions: &[MirFunction]) {
         q.noisy.extend(noisy);
     }
     QUIET.with(|c| *c.borrow_mut() = Some(q));
-    let snapshots: BTreeSet<u32> = functions.iter().flat_map(|f| slot_reads(f).snapshot_slots).collect();
+    let snapshots: BTreeSet<u32> = functions.iter().flat_map(|f| slot_reads(f).aliases.into_values()).collect();
     SNAPSHOT_SLOTS.with(|s| *s.borrow_mut() = snapshots);
 }
 
@@ -198,9 +198,8 @@ pub(crate) struct SlotReads {
     pub(crate) takes: BTreeSet<ValueId>,
     pub(crate) rebuilds: BTreeSet<ValueId>,
     pub(crate) borrows: BTreeSet<ValueId>,
-    pub(crate) aliases: BTreeSet<ValueId>,
-    /// The slots of the aliased reads.
-    pub(crate) snapshot_slots: BTreeSet<u32>,
+    /// Each alias, and the slot whose snapshot it reads through.
+    pub(crate) aliases: BTreeMap<ValueId, u32>,
 }
 
 /// The read `d` at `ops[i]` is only borrowed: every later use of it borrows
@@ -268,10 +267,10 @@ pub(crate) fn slot_reads(func: &MirFunction) -> SlotReads {
         }
         for (j, op) in ops.iter().enumerate() {
             let Op::Dup { dst, src } = op else { continue };
+            let Some(slot) = slot_of.get(src) else { continue };
             let moved = ops.iter().any(|o| matches!(o, Op::Consume { v } if v == dst));
-            if out.borrows.contains(src) && !moved && borrow_only(func, j, *dst, &root) {
-                out.aliases.insert(*dst);
-                out.snapshot_slots.extend(slot_of.get(src).copied());
+            if !moved && borrow_only(func, j, *dst, &root) {
+                out.aliases.insert(*dst, *slot);
             }
         }
         out
