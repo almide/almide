@@ -1,0 +1,26 @@
+name: deps-resolve negative control
+on:
+  push:
+    branches: ['deps-resolve-nc-*']
+jobs:
+  nc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: deps-resolve-nc
+      - name: Run the dependency-resolution tests
+        run: |
+          set +e
+          cargo test --lib -- project_fetch::tests 2>&1 | tee lib.log
+          lib=${PIPESTATUS[0]}
+          cargo test --test dep_resolve_remote_test 2>&1 | tee int.log
+          int=${PIPESTATUS[0]}
+          echo "::notice::RESULT lib=$lib int=$int"
+          grep -h "^test .* \.\.\. \(ok\|FAILED\)" lib.log int.log
+          [ "$lib" = 0 ] && [ "$int" = 0 ]
