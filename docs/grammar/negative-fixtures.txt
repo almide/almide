@@ -157,3 +157,17 @@ fn main() -> Unit = {
   var ps = [P { n: 1 }]
   ps[0].n = 5
 }
+
+### guard-let-shorthand-field-path
+type Cfg = { port: Int? }
+
+fn port(cfg: Cfg) -> Int = {
+  guard let cfg.port else { 80 }
+  port
+}
+
+### guard-let-two-failure-arms
+fn parse_or(s: String) -> Int = {
+  guard let n = int.parse(s) else err(e) => 0, err(e) => 1
+  n
+}
