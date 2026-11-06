@@ -1,0 +1,62 @@
+# Throwaway evidence workflow for #4521 (branch probe-4521-evidence only; never merged).
+name: probe-4521
+on:
+  push:
+    branches: [probe-4521-evidence]
+permissions: read-all
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+jobs:
+  test:
+    name: dep_native_deps_test (${{ matrix.side }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [fixed, fix-reverted]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Revert only the fix (negative control)
+        if: matrix.side == 'fix-reverted'
+        run: |
+          git checkout db4803e96~1 -- src/cli/cargo_build.rs src/cli/crate_inputs.rs
+          git diff --stat HEAD
+      - name: Run the regression test
+        run: |
+          set +e
+          cargo test --test dep_native_deps_test -- --nocapture 2>&1 | tail -80
+          st=${PIPESTATUS[0]}
+          echo "test exit: $st"
+          if [ "${{ matrix.side }}" = fixed ]; then exit "$st"; fi
+          [ "$st" != 0 ] || { echo "::error::the test PASSED with the fix reverted"; exit 1; }
+          echo "negative control: the test fails with the fix reverted, as it must"
+  released:
+    name: released ${{ matrix.version }} grant=${{ matrix.grant }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [v0.67.1, v0.69.0]
+        grant: ["1", "0"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Fetch the released binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p rel && cd rel
+          gh release download ${{ matrix.version }} -R almide/almide -p almide-linux-x86_64.tar.gz
+          tar -xzf almide-linux-x86_64.tar.gz
+          find . -name almide -type f
+      - name: Build the #4521 project
+        run: |
+          set +e
+          bash .github/probe-4521/fixture.sh "$(find "$PWD/rel" -name almide -type f | head -1)" ${{ matrix.grant }}
+          echo "RESULT ${{ matrix.version }} grant=${{ matrix.grant }}: exit $?"
