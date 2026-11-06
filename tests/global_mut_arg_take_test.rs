@@ -74,8 +74,8 @@ fn stdlib_mut_arg_on_a_global_keeps_its_values_on_wasm() {
     assert!(out.contains(WANT), "wasm:\n{out}");
 }
 
-/// The emitted Rust takes the buffer out of its cell for the stdlib call and
-/// never clones it in: a `let mut __almide_gp` copy-in of the global is the
+/// The emitted Rust moves the buffer's `Rc` out of its cell for the stdlib call
+/// (no clone, no fresh `Rc`) and never clones it in: a `let mut __almide_gp` copy-in of the global is the
 /// per-write copy this test exists to keep out.
 #[test]
 fn stdlib_mut_arg_on_a_global_is_taken_not_copied() {
@@ -90,7 +90,7 @@ fn stdlib_mut_arg_on_a_global_is_taken_not_copied() {
     }).collect();
     assert!(!sites.is_empty(), "no put_* call site in the emitted Rust:\n{rust}");
     for s in &sites {
-        assert!(s.contains("std::mem::take("), "a put_* call on the global does not take it:\n{s}");
+        assert!(s.contains("from_rc(") && s.contains("std::mem::replace("), "a put_* call on the global does not move its Rc in:\n{s}");
         assert!(!s.contains(".borrow()).clone()"), "a put_* call on the global copies it in:\n{s}");
     }
 }

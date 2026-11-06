@@ -231,6 +231,14 @@ nothing is published that `bench.py` did not produce.
   at its last use moves into the result, and the text is written into one
   buffer. `check-perf-ratio.sh` holds native ≤ wasm on this row and on both
   wordfreq rows (the NATIVE <= WASM block).
+- **`globalread-global` / `globalread-local` are the glyph-cache rows**
+  (#4562): a text renderer's per-glyph lookups, one `map.get` in a
+  1,024-entry map and one `list.get` in a 256-entry list, 2,000 glyphs a
+  frame. The map and the list are module-level `var`s read from a helper fn
+  (`g`) or parameters of the same helper (`l`). No Rust reference — the
+  per-frame relation between the rows is gated (`check-perf-ratio.sh`, GLOBAL
+  READ). 0.69.1 rendered a borrowed argument that is a module-level var as a
+  borrow of a deep copy natively, so every lookup copied the whole map.
 - **`regexcycle-8` / `regexcycle-32` are the rule-table rows** (#4392): N
   `Regex` values applied in turn to every line of a four-line text, the same
   number of matches at either N. No Rust reference — the relation between the
@@ -251,6 +259,23 @@ nothing is published that `bench.py` did not produce.
   took the copy-in / write-back form a callee that may read the global
   needs), ~1000x natively, and a downstream editor's frame went from 32 ms
   to 143 ms.
+- **`framebuf-param` is the mut-param row** (#4580): the same writes into a
+  local buffer through a `mut b: Bytes` helper per quad (`p`), whose last
+  write is its tail call. Gated against `framebuf-local` per frame
+  (`check-perf-ratio.sh`, MUT PARAM). Before the fix the wasm leg shared the
+  buffer into that tail `put_f32_le` and released its own credit only after
+  it returned, so the callee copied the whole buffer once per quad.
+- **`mutmap-param` / `mutmap-local` are the mut-map rows** (#4580): a
+  4,000-entry `Map[Int, Int]` overwritten each round through a `mut m`
+  helper (`{ m[k] = v }`, `p`) or inline on a local `var` (`l`). Gated per
+  round (`check-perf-ratio.sh`, MUT MAP). The wasm leg kept an owned param out
+  of the in-place map set, so each write through the helper copied the map.
+- **`mutset-param` / `mutset-local` are the mut-set rows** (#4582): a
+  4,000-member `Set[Int]` rebound each round through a `mut s` helper
+  (`{ s = set.insert(s, x) }`, `p`) or inline on a local `var` (`l`). Gated
+  per round (`check-perf-ratio.sh`, MUT SET). The standard native codegen
+  called the borrowing `set.insert` on the `&mut` param, so each insert
+  through the helper copied the set; the param now moves into the owned twin.
 
 ## Run
 

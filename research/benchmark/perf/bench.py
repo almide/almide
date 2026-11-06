@@ -159,8 +159,30 @@ SUITE = [
     # module-level var. No Rust reference: the property is the relation.
     ("framebuf-global", "framebuf/framebuf.almd",      [],              "g:4000",     "g:2",     "bytes", ["native", "wasm"]),
     ("framebuf-local",  "framebuf/framebuf.almd",      [],              "l:20000",    "l:2",     "bytes", ["native", "wasm"]),
+    # framebuf-param (#4580): the local buffer written through a `mut b: Bytes`
+    # helper per quad; its relation to framebuf-local is the MUT PARAM gate.
+    ("framebuf-param",  "framebuf/framebuf.almd",      [],              "p:20000",    "p:2",     "bytes", ["native", "wasm"]),
+    # mutmap (#4580): a Map written through a `mut m` helper per write (`p`)
+    # against the same writes inline (`l`), `mode:rounds`; their per-round
+    # relation is the MUT MAP gate (check-perf-ratio.sh).
+    ("mutmap-param",   "mutmap/mutmap.almd",           [],              "p:6000",     "p:2",     "bytes", ["native", "wasm"]),
+    ("mutmap-local",   "mutmap/mutmap.almd",           [],              "l:30000",     "l:2",     "bytes", ["native", "wasm"]),
+    # mutset (#4582): a Set rebound through a `mut s` helper per insert (`p`,
+    # `s = set.insert(s, x)`) against the same rebinds inline (`l`); their
+    # per-round relation is the MUT SET gate (check-perf-ratio.sh).
+    ("mutset-param",   "mutset/mutset.almd",           [],              "p:6000",     "p:2",     "bytes", ["native", "wasm"]),
+    ("mutset-local",   "mutset/mutset.almd",           [],              "l:30000",    "l:2",     "bytes", ["native", "wasm"]),
     ("regexcycle-8",   "regexcycle/regexcycle.almd",   [],              "8:2000000",  "8:2000",  "bytes", ["native", "wasm"]),
     ("regexcycle-32",  "regexcycle/regexcycle.almd",   [],              "32:2000000", "32:2000", "bytes", ["native", "wasm"]),
+    # globalread (#4562): a text renderer's per-glyph cache lookups (a map
+    # and a list read per glyph), `mode:frames`. `g` reads module-level `var`s
+    # from a helper fn, `l` passes the same map and list as parameters; the
+    # per-frame relation between the two is the gate (check-perf-ratio.sh,
+    # GLOBAL READ): 0.69.1 copied the whole map natively on every lookup
+    # through the module-level var. No Rust reference: the property is the
+    # relation.
+    ("globalread-global", "globalread/globalread.almd", [],             "g:20000",    "g:2",     "bytes", ["native", "wasm"]),
+    ("globalread-local",  "globalread/globalread.almd", [],             "l:20000",    "l:2",     "bytes", ["native", "wasm"]),
 ]
 
 QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
@@ -235,8 +257,28 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # global row (a buffer copy per write) then reads seconds, not a hang.
     "framebuf-global": "g:800",
     "framebuf-local": "l:12000",
+    # framebuf-param (#4580): half the local row's frames; a regressed helper
+    # (an 80 KB copy per quad on wasm, ~10 ms a frame) then reads about a
+    # minute, not a hang.
+    "framebuf-param": "p:6000",
+    # mutmap (#4580): rounds per row, unequal on purpose — the relation is per
+    # round. A regressed helper copies the 4,000-entry map on every write
+    # (tens of ms a round on wasm), so its row runs a quarter of the rounds.
+    "mutmap-param": "p:1500",
+    "mutmap-local": "l:6000",
+    # mutset (#4582): the same shape as mutmap — a regressed helper copies the
+    # 4,000-member set on every insert, so its row runs a quarter of the rounds.
+    "mutset-param": "p:1500",
+    "mutset-local": "l:6000",
     "regexcycle-8": "8:400000",
     "regexcycle-32": "32:400000",
+    # globalread (#4562): frames per row, unequal on purpose — the relation is
+    # per frame. The local row is the fast one natively (~0.009 ms a frame:
+    # 8000 frames read 0.072 s on one runner, under the floor), so it runs
+    # 16000. With the copy (develop before #4562) the global row read 4.03 s
+    # for 1500 frames natively, ~190x the local row per frame.
+    "globalread-global": "g:6000",
+    "globalread-local": "l:16000",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",

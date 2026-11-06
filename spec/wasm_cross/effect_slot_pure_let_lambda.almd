@@ -1,0 +1,41 @@
+// @contract: C-221
+// #4545: a PURE let-bound lambda passed to an `effect () -> Unit` slot is
+// ok-wrapped at the slot, whether the call is direct, piped, or the value
+// lands in a record field. The checker types the lambda at its own `let`,
+// as `() -> Unit`, so only the slot can adapt it; the piped form skipped the
+// adapter and the structural wasm leg refused it (E082 `ty-mismatch:Fn`).
+type V = { on_click: effect () -> Unit }
+
+fn base() -> V = { on_click: () => () }
+
+fn on_click(v: V, f: effect () -> Unit) -> V = { ...v, on_click: f }
+
+var n = 0
+
+fn direct() -> V = {
+  let toggle = () => {
+    n = n + 1
+  }
+  on_click(base(), toggle)
+}
+
+fn piped() -> V = {
+  let toggle = () => {
+    n = n + 10
+  }
+  base() |> on_click(toggle)
+}
+
+fn field() -> V = {
+  let toggle = () => {
+    n = n + 100
+  }
+  { on_click: toggle }
+}
+
+effect fn main() -> Unit = {
+  direct().on_click()!
+  piped().on_click()!
+  field().on_click()!
+  println("n ${n}")
+}

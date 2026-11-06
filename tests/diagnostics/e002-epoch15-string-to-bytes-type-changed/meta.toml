@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'string.to_bytes'"
+hint_substring = "Not applied by `almide fix`: `bytes.from_string` returns Bytes, not List[Int]: adapt the callers"

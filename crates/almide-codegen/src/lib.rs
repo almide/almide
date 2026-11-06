@@ -528,6 +528,13 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: Clone> std::ops::DerefMut for AlmideRcCow<T> { #[inline(always)] fn deref_mut(&mut self) -> &mut T { if std::rc::Rc::get_mut(&mut self.0).is_none() { return std::rc::Rc::make_mut(&mut self.0); } std::rc::Rc::get_mut(&mut self.0).unwrap() } }\n");
     s.push_str(&format!("impl<T> AlmideRcCow<T> {{ {vis}fn new(v: T) -> Self {{ AlmideRcCow(std::rc::Rc::new(v)) }} {vis}fn make_mut(&mut self) -> &mut T where T: Clone {{ std::rc::Rc::make_mut(&mut self.0) }} {vis}fn into_inner(self) -> T where T: Clone {{ std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) }} }}\n"));
     s.push_str("impl<T> From<T> for AlmideRcCow<T> { fn from(v: T) -> Self { AlmideRcCow::new(v) } }\n");
+    // #4550: a module-level Bytes global is TAKEN into a stdlib `mut`-param
+    // call (`render_call_with_taken_global_places`): its cell's `Rc` moves into
+    // the callee's `AlmideRcCow` and back, and the cell holds a shared empty
+    // placeholder meanwhile — no allocation per call (wrapping the taken `Vec`
+    // in a fresh `Rc` was one malloc and one free per 4-byte write).
+    s.push_str(&format!("impl<T> AlmideRcCow<T> {{ #[inline(always)] {vis}fn from_rc(r: std::rc::Rc<T>) -> Self {{ AlmideRcCow(r) }} #[inline(always)] {vis}fn into_rc(self) -> std::rc::Rc<T> {{ self.0 }} }}\n"));
+    s.push_str(&format!("thread_local! {{ static ALMIDE_EMPTY_BYTES_RC: std::rc::Rc<Vec<u8>> = std::rc::Rc::new(Vec::new()); }}\n#[inline(always)] {vis}fn almide_empty_bytes_rc() -> std::rc::Rc<Vec<u8>> {{ ALMIDE_EMPTY_BYTES_RC.with(|e| e.clone()) }}\n"));
     // #3577: a runtime twin that takes its Bytes source by value
     // (`impl Into<Vec<u8>>`) gets the buffer out of the wrapper — moved when
     // this is the only holder, copied when shared.

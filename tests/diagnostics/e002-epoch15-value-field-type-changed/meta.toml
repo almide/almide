@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'value.field'"
+hint_substring = "Not applied by `almide fix`: `value.get` returns Option[Value], not Result[Value, String]: adapt the callers"
