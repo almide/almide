@@ -820,8 +820,9 @@ PYFB
 # map set (try_map_set_in_place, a rule from when params were borrowed views),
 # so every write through the helper copied the whole map.
 # The native leg is reported, not gated: it writes a `&mut AlmideMap` in place
-# either way, and the helper row reads ~35x the inline one on the probe runner
-# (the inline loop's map writes are what LLVM folds, not a copy). The wasm
+# either way (no copy), yet the helper row read ~35x the inline one on the
+# probe runner; that gap is not explained yet, so it is recorded here and not
+# gated. The wasm
 # ceiling is 5: the helper read 2.6x there with the fix (call, move-in and
 # write-back per write) and ~100x without it.
 MUTMAP_CEILING_NATIVE=
