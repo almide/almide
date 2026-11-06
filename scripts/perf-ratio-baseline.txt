@@ -144,6 +144,11 @@ framebuf-param-wasm 1.0
 # these values.
 mutmap-native 1.0
 mutmap-wasm 1.0
+# MUT SET (#4582): mutset-param per-round min / mutset-local per-round min,
+# per leg. The gate fails on MUTSET_CEILING_* in check-perf-ratio.sh, never on
+# these values. ubuntu-latest probe readings: native 1.33-1.48, wasm 2.11-2.17.
+mutset-native 1.4
+mutset-wasm 2.1
 treealloc 0.343
 # btrees (rc4): treealloc's program with the depth a literal and no argument
 # read, so it renders whole on the certified native leg, region window
