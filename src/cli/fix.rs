@@ -299,18 +299,21 @@ fn collect_diagnostics(file: &str, source: &str) -> (Vec<Diagnostic>, usize) {
 /// `args`, or a sibling file) unresolved, so the diagnostics `check` reports
 /// on those calls — and the fix-its they carry — never reached the engine.
 /// A program whose imports do not resolve is checked alone, as before;
-/// `almide check` is where that failure is reported.
+/// `almide check` is where that failure is reported. Checked alone, no import
+/// is judged unused (#4589): the uses the missing modules would have resolved
+/// are invisible, and E060's deletion would strand them.
 fn infer_entry(file: &str, source: &str, prog: &mut almide::ast::Program) -> Vec<Diagnostic> {
     use almide::check::Checker;
     use almide::canonicalize;
 
     static DEP_PATHS: std::sync::OnceLock<Vec<(almide::project::PkgId, std::path::PathBuf)>> = std::sync::OnceLock::new();
     let dep_paths = DEP_PATHS.get_or_init(super::dep_paths_from_cwd_toml);
-    let modules = almide::resolve::resolve_imports_with_deps(file, prog, dep_paths)
-        .map(|r| r.modules)
-        .unwrap_or_default();
+    let resolved = almide::resolve::resolve_imports_with_deps(file, prog, dep_paths);
+    let imports_unresolved = resolved.is_err();
+    let modules = resolved.map(|r| r.modules).unwrap_or_default();
     let canon = canonicalize::canonicalize_program(prog, modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)));
     let mut checker = Checker::from_env(canon.env);
+    checker.imports_unresolved = imports_unresolved;
     checker.set_source(file, source);
     checker.diagnostics = canon.diagnostics;
     almide::resolve::refresh_module_toplets(&mut checker, &modules);
