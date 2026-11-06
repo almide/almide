@@ -703,18 +703,19 @@ PYRX
 # the local row — is recorded in the baseline, not hidden in the ceiling.
 FRAMEBUF_CEILING_NATIVE=40
 FRAMEBUF_CEILING_WASM=3
+FRAMEBUF_CEILING_LOCAL_WASM=13
 fb_out=$(mktemp -t perf-ratio-framebuf.XXXXXX.json)
 trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,wasm \
   --bench framebuf-global,framebuf-local \
   --label ratchet-framebuf --out "$fb_out"
-python3 - "$fb_out" "$BASELINE_FILE" "$FRAMEBUF_CEILING_NATIVE" "$FRAMEBUF_CEILING_WASM" "$MIN_SECONDS" <<'PYFB'
+python3 - "$fb_out" "$BASELINE_FILE" "$FRAMEBUF_CEILING_NATIVE" "$FRAMEBUF_CEILING_WASM" "$MIN_SECONDS" "$FRAMEBUF_CEILING_LOCAL_WASM" <<'PYFB'
 import json, sys
 sys.path.insert(0, "research/benchmark/perf")
 from bench import QUICK_ARGS
 
-out_path, baseline_path, ceiling_native, ceiling_wasm, min_s = sys.argv[1:6]
+out_path, baseline_path, ceiling_native, ceiling_wasm, min_s, ceiling_local_wasm = sys.argv[1:7]
 ceilings = {"native": float(ceiling_native), "wasm": float(ceiling_wasm)}
 min_s = float(min_s)
 data = json.load(open(out_path))["results"]
@@ -759,6 +760,26 @@ for leg in ("native", "wasm"):
         continue
     print(f"perf-ratio: {key:20s} {ratio:.3f}x the local buffer per frame "
           f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
+# The same local frame, wasm over native: what one `bytes.put_f32_le` costs
+# on the wasm leg against the native one, where LLVM inlines the wrapper.
+# 0.69.0 read 14.8x (the wrapper called `bytes.fits` with an RC inc/dec
+# around it on every write); the wasm leg inlining that predicate (#4550)
+# read 11.0x. The ceiling catches the call coming back.
+key = "framebuf-local-wasm-native"
+if key not in baseline:
+    sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — add the line on purpose.")
+lw = data["framebuf-local"]["variants"]["framebuf-local/wasm"]["min"]
+ln = data["framebuf-local"]["variants"]["framebuf-local/native"]["min"]
+ratio = lw / ln
+if ratio > float(ceiling_local_wasm):
+    print(f"::error::perf-ratio: a local frame costs {ratio:.3f}x on wasm what it costs natively (ceiling "
+          f"{float(ceiling_local_wasm):.2f}x, {lw:.3f}s vs {ln:.3f}s, recorded {baseline[key]:.3f}x). Look at "
+          "whether the typed byte IO wrappers still inline their bounds predicate on the wasm leg "
+          "(crates/almide-wasm/src/inline_calls.rs, the byte-view param). Do not raise the ceiling.")
+    failed = True
+else:
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x native per local frame "
+          f"(ceiling {float(ceiling_local_wasm):.2f}, recorded {baseline[key]:.3f}x) ok")
 sys.exit(1 if failed else 0)
 PYFB
 
