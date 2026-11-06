@@ -162,7 +162,7 @@
 28813	spec/wasm_cross/edge_string_unicode.almd
 2900	spec/wasm_cross/effect_assign_unwrap.almd
 3309	spec/wasm_cross/effect_branch_keeps_result.almd
-7059	spec/wasm_cross/effect_call_arg_credit.almd
+7063	spec/wasm_cross/effect_call_arg_credit.almd
 11945	spec/wasm_cross/effect_dispatcher_many_arms.almd
 4793	spec/wasm_cross/effect_fn_value.almd
 16283	spec/wasm_cross/effect_fn_value_slot_family.almd
@@ -590,7 +590,7 @@
 16633	spec/wasm_cross/mut_param_alias_cow.almd
 11588	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
 3775	spec/wasm_cross/mut_param_branch_forward.almd
-4869	spec/wasm_cross/mut_param_call_chain.almd
+4873	spec/wasm_cross/mut_param_call_chain.almd
 11257	spec/wasm_cross/mut_param_cell_tail_capture_read.almd
 6243	spec/wasm_cross/mut_param_cell_tail_capture_write.almd
 3998	spec/wasm_cross/mut_param_closure_capture_read.almd
