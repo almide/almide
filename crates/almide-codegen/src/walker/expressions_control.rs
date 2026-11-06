@@ -8,6 +8,9 @@ fn render_string_interp(ctx: &RenderContext, parts: &[IrStringPart]) -> String {
             }
             IrStringPart::Expr { expr } => {
                 fmt_parts.push("{}".to_string());
+                // A heap global (or a part of one) formats in place: the
+                // format arguments only borrow it (#4562).
+                let rendered = global_read_place(ctx, expr).unwrap_or_else(|| render_expr(ctx, expr));
                 // A COMPOUND part (List/Map/Set/Tuple/Option/Result/record/variant)
                 // has no `Display`; route it through the `AlmideRepr` trait so it
                 // renders to its Almide-literal form (`[1, 2, 3]`, `["a": 1]`, …).
@@ -16,15 +19,15 @@ fn render_string_interp(ctx: &RenderContext, parts: &[IrStringPart]) -> String {
                 // takes `&T` and has ref-forwarding impls, so `&(...)` is correct
                 // whether the part renders to an owned value or an existing borrow.
                 if ty_needs_repr(ctx, &expr.ty) {
-                    arg_parts.push(format!("almide_repr(&({}))", render_expr(ctx, expr)));
+                    arg_parts.push(format!("almide_repr(&({rendered}))"));
                 } else if let (depth @ 1.., _) = peel_newtypes(ctx, &expr.ty) {
                     // An opaque newtype over a Display type (`mod type Id =
                     // Int`) prints its payload, as the wasm leg and the interp
                     // do (#2860): the struct has no `Display`, so read the
                     // tuple field, once per layer.
-                    arg_parts.push(format!("({}){}", render_expr(ctx, expr), ".0".repeat(depth)));
+                    arg_parts.push(format!("({rendered}){}", ".0".repeat(depth)));
                 } else {
-                    arg_parts.push(render_expr(ctx, expr));
+                    arg_parts.push(rendered);
                 }
             }
         }
@@ -643,6 +646,17 @@ fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
             let read = render_expr(ctx, inner);
             return rc_cow_result_glue(format!("{read}.clone()"), &inner.ty);
         }
+        // A heap global's read is already an owned copy (#4562): a second
+        // `.clone()` copied the whole global twice.
+        if global_rc_snapshot(ctx, *id).is_some() {
+            return render_expr(ctx, inner);
+        }
+    }
+    // A part of a heap global (`g.f`): clone that part, not the global (#4562).
+    if let Some(place) = global_snapshot_place(ctx, inner)
+        && !matches!(inner.kind, IrExprKind::Var { .. })
+    {
+        return format!("{place}.clone()");
     }
     // The clone pass models `xs[i]` / `m[k]` as PLACES and wraps them in
     // `Clone` to take an owned value out — but their templates already hand
@@ -787,6 +801,10 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
         return format!("(&{})", render_expr(ctx, inner));
     }
     if let Some(rendered) = try_render_borrow_shared_mut(ctx, inner, *mutable) {
+        return rendered;
+    }
+    // A read-only borrow of a heap global place reads it in place (#4562).
+    if let Some(rendered) = render_global_snapshot_borrow(ctx, expr) {
         return rendered;
     }
     if *mutable {

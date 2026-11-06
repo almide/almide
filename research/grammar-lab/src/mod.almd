@@ -86,11 +86,11 @@ effect fn run_experiment() -> Result[Unit, String] = {
   let repair_rounds = value.get_int(config, "repair_rounds") ?? 0
   let model_filter = parse_cli_string(args, "--model", "")
   let task_filter = parse_cli_string(args, "--task", "")
-  let task_names = value.get_array(config, "tasks") ?? [] |> list.map((t) => value.as_string(t) ?? "") |> list.filter((t) => task_filter == "" or t == task_filter)
+  let task_names = (value.get_array(config, "tasks") ?? []) |> list.map((t) => value.as_string(t) ?? "") |> list.filter((t) => task_filter == "" or t == task_filter)
   let runtime_path = jstr(config, "runtime_file")
   let runtime = if runtime_path == "" then "" else strip_blocks(fs.read_text("${dir}/${runtime_path}")!)
   let layer1 = fs.read_text("prompts/layer1_rules.md")!
-  let variants = value.get_array(config, "variants") ?? [] |> list.map((v) => {
+  let variants = (value.get_array(config, "variants") ?? []) |> list.map((v) => {
     let name = jstr(v, "name")
     let layer2_path = "prompts/layer2_${name}.md"
     { name: name, transpile_mode: jstr(v, "transpile_regex"), with_laws: value.get_bool(v, "with_laws") ?? false, layer2: layer2_path }

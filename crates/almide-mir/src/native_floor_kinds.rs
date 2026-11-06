@@ -211,3 +211,19 @@ pub(crate) fn generated_list_of(p: FloorParam) -> Option<u16> {
     };
     Some(rec::list_type_of(elem))
 }
+
+/// The runtime body `symbol` names, for a declaration whose function-typed
+/// param keeps it off this floor (`crate::native_hof`): its Rust param types,
+/// its return type, and the items it reaches. `None` when the runtime has no
+/// takeable item of that name or it reaches one the header cannot carry.
+pub(crate) fn runtime_body(symbol: &str) -> Option<(Vec<String>, String, Vec<&'static str>)> {
+    let rt = runtime_index();
+    let (params, ret) = rust_signature(rt.items.get(symbol)?.text)?;
+    Some((params.iter().map(|p| squash(p)).collect(), squash(&ret), closure(symbol, rt).ok()?))
+}
+
+/// The stdlib fn the self-hosted body registered under `call` declares it
+/// specializes, if any (`@specializes`).
+pub(crate) fn specializes(call: &str) -> Option<String> {
+    specialized_target(call)
+}

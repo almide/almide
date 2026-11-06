@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'value.keys'"
+hint_substring = "Not applied by `almide fix`: `value.as_object` returns Result[List[(String, Value)], String], not List[String]: adapt the callers"

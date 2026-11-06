@@ -659,6 +659,9 @@ fn render_expr_data(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Record { .. } => render_expr_record(ctx, expr),
 
         // ── Access ──
+        // A part of a heap global reads that part, not a copy of the whole
+        // global (#4562).
+        IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } if let Some(owned) = global_part_owned(ctx, expr) => owned,
         IrExprKind::Member { object, field } => render_expr_member(ctx, object, field),
 
         // ── Option / Result ──

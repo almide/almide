@@ -214,6 +214,14 @@ name = "almide-layout"
 version = "0.12.2"
 
 [[package]]
+name = "almide-lin-prove"
+version = "0.1.0"
+dependencies = [
+ "almide-anchor-check",
+ "almide-base",
+]
+
+[[package]]
 name = "almide-mir"
 version = "0.1.0"
 dependencies = [

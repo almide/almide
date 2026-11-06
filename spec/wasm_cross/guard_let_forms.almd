@@ -1,0 +1,70 @@
+// @contract: C-266
+// ALS-ST6 (docs/specs/als/expressions.md), the #4543 forms of the guard-let
+// statement, byte-identical on both targets and rendered by the verified
+// native renderer: the failure arm that names the error (`else err(e) => …`,
+// a value else and a raising else), the `guard let x else …` shorthand on a
+// local and on a parameter, and `guard var`, alone and combined. Every form
+// desugars into the same nested variant match as the plain `guard let x = r
+// else e`, whose err arm becomes `err(e) =>`. The typed-error twin is
+// guard_let_forms_typed_err.almd.
+fn port_text(s: String) -> String = {
+  guard let p = int.parse(s) else err(e) => "rejected ${s}: " + e
+  "port ${int.to_string(p)}"
+}
+
+effect fn doubled(s: String) -> Int = {
+  guard let n = int.parse(s) else err(e) => err("not a number: ${s}")
+  n * 2
+}
+
+fn head_or(xs: List[Int]) -> Int = {
+  guard let h = list.first(xs) else 0
+  h * 10
+}
+
+fn port_or_default(raw: String?) -> String = {
+  let port = raw
+  guard let port else { "8080" }
+  port
+}
+
+fn plus_one(n: Result[Int, String]) -> Int = {
+  guard let n else err(e) => string.len(e)
+  n + 1
+}
+
+fn shout(name: String?) -> String = {
+  guard var name else { "nobody" }
+  name = string.to_upper(name)
+  name + "!"
+}
+
+fn chained(a: String, b: String) -> String = {
+  guard let x = int.parse(a) else err(e) => "a: " + a
+  guard var y = int.parse(b) else err(e) => "b: " + b
+  y = y + x
+  int.to_string(y)
+}
+
+effect fn main() -> Unit = {
+  println(port_text("80"))
+  println(port_text("eighty"))
+  println(int.to_string(doubled("21")!))
+  let bad: Result[Int, String] = doubled("x")
+  let msg = match bad {
+    ok(v) => int.to_string(v),
+    err(e) => e,
+  }
+  println(msg)
+  println(int.to_string(head_or([4])))
+  println(int.to_string(head_or([])))
+  println(port_or_default(some("9000")))
+  println(port_or_default(none))
+  println(int.to_string(plus_one(ok(41))))
+  println(int.to_string(plus_one(err("four"))))
+  println(shout(some("ann")))
+  println(shout(none))
+  println(chained("1", "2"))
+  println(chained("1", "z"))
+  println(chained("q", "2"))
+}

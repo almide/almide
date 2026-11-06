@@ -703,19 +703,29 @@ PYRX
 # row — is recorded in the baseline, not hidden in the ceiling.
 FRAMEBUF_CEILING_NATIVE=10
 FRAMEBUF_CEILING_WASM=3
+FRAMEBUF_CEILING_LOCAL_WASM=15
+# MUT PARAM RELATION (#4580), measured in the same run: framebuf-param writes
+# the local buffer through a `mut b: Bytes` helper per quad whose last write is
+# its tail call, over framebuf-local per frame. The wasm leg shared the buffer
+# into that tail `put_f32_le` (rc 2) and released its own credit after the call
+# returned, so the callee's copy-on-write judge copied all 80 KB once per quad.
+MUTPARAM_CEILING_NATIVE=10
+MUTPARAM_CEILING_WASM=3
 fb_out=$(mktemp -t perf-ratio-framebuf.XXXXXX.json)
-trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out" "${mm_out:-}"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,wasm \
-  --bench framebuf-global,framebuf-local \
+  --bench framebuf-global,framebuf-local,framebuf-param \
   --label ratchet-framebuf --out "$fb_out"
-python3 - "$fb_out" "$BASELINE_FILE" "$FRAMEBUF_CEILING_NATIVE" "$FRAMEBUF_CEILING_WASM" "$MIN_SECONDS" <<'PYFB'
+python3 - "$fb_out" "$BASELINE_FILE" "$FRAMEBUF_CEILING_NATIVE" "$FRAMEBUF_CEILING_WASM" "$MIN_SECONDS" "$FRAMEBUF_CEILING_LOCAL_WASM" \
+  "$MUTPARAM_CEILING_NATIVE" "$MUTPARAM_CEILING_WASM" <<'PYFB'
 import json, sys
 sys.path.insert(0, "research/benchmark/perf")
 from bench import QUICK_ARGS
 
-out_path, baseline_path, ceiling_native, ceiling_wasm, min_s = sys.argv[1:6]
+out_path, baseline_path, ceiling_native, ceiling_wasm, min_s, ceiling_local_wasm, mp_native, mp_wasm = sys.argv[1:9]
 ceilings = {"native": float(ceiling_native), "wasm": float(ceiling_wasm)}
+mp_ceilings = {"native": float(mp_native), "wasm": float(mp_wasm)}
 min_s = float(min_s)
 data = json.load(open(out_path))["results"]
 baseline = {}
@@ -759,8 +769,180 @@ for leg in ("native", "wasm"):
         continue
     print(f"perf-ratio: {key:20s} {ratio:.3f}x the local buffer per frame "
           f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
+# The same local frame, wasm over native: what one `bytes.put_f32_le` costs
+# on the wasm leg against the native one, where LLVM inlines the wrapper.
+# 0.69.0 read 14.8-18.9x (the wrapper called `bytes.fits` with an RC inc/dec
+# around it on every write); the wasm leg inlining that predicate (#4550)
+# read 11.0-12.6x, by runner class. The ceiling catches the call coming back.
+key = "framebuf-local-wasm-native"
+if key not in baseline:
+    sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — add the line on purpose.")
+lw = data["framebuf-local"]["variants"]["framebuf-local/wasm"]["min"]
+ln = data["framebuf-local"]["variants"]["framebuf-local/native"]["min"]
+ratio = lw / ln
+if ratio > float(ceiling_local_wasm):
+    print(f"::error::perf-ratio: a local frame costs {ratio:.3f}x on wasm what it costs natively (ceiling "
+          f"{float(ceiling_local_wasm):.2f}x, {lw:.3f}s vs {ln:.3f}s, recorded {baseline[key]:.3f}x). Look at "
+          "whether the typed byte IO wrappers still inline their bounds predicate on the wasm leg "
+          "(crates/almide-wasm/src/inline_calls.rs, the byte-view param). Do not raise the ceiling.")
+    failed = True
+else:
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x native per local frame "
+          f"(ceiling {float(ceiling_local_wasm):.2f}, recorded {baseline[key]:.3f}x) ok")
+for leg in ("native", "wasm"):
+    key = f"framebuf-param-{leg}"
+    if key not in baseline:
+        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the mut param relation was "
+                 "added without its recorded value; add the line on purpose.")
+    p = data["framebuf-param"]["variants"][f"framebuf-param/{leg}"]["min"]
+    l = data["framebuf-local"]["variants"][f"framebuf-local/{leg}"]["min"]
+    ratio = (p / frames("framebuf-param")) / (l / frames("framebuf-local"))
+    ceiling = mp_ceilings[leg]
+    if ratio > ceiling:
+        print(f"::error::perf-ratio: a frame written through a `mut b: Bytes` helper costs {ratio:.3f}x the "
+              f"same frame written inline on the {leg} leg (ceiling {ceiling:.2f}x, {p:.3f}s for "
+              f"{frames('framebuf-param')} frames vs {l:.3f}s for {frames('framebuf-local')}, recorded "
+              f"{baseline[key]:.3f}x). A `mut` param handed on to a stdlib `mut` call is being copied on "
+              "every call, which is #4580. Look at whether the helper's tail call keeps its tail position "
+              "(lower_bytes_call's linked fallback in crates/almide-wasm/src/bytes.rs) and moves the dying "
+              "param in (take_move_in / try_move_in_arg in crates/almide-wasm/src/writeback_move.rs). "
+              "Do not raise the ceiling.")
+        failed = True
+        continue
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x the inline writes per frame "
+          f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
 sys.exit(1 if failed else 0)
 PYFB
+
+# MUT MAP RELATION (#4580): mutmap-param writes a Map through a `mut m` helper
+# per write (`{ m[k] = v }`), mutmap-local the same writes inline; the
+# relation is per round. The wasm leg kept an owned param out of the in-place
+# map set (try_map_set_in_place, a rule from when params were borrowed views),
+# so every write through the helper copied the whole map.
+# Ceilings per leg. The perf-ratchet runner read native 1.02x and wasm 2.31x
+# with the fix (#4583, job 127959241407; wasm pays a call, a move-in and a
+# write-back per write); the copy the fix removed read ~100x on wasm. An
+# earlier ~35x native reading came from `almide run`, not the bench harness,
+# and did not reproduce.
+MUTMAP_CEILING_NATIVE=3
+MUTMAP_CEILING_WASM=5
+mm_out=$(mktemp -t perf-ratio-mutmap.XXXXXX.json)
+python3 research/benchmark/perf/bench.py \
+  --quick --runs "$RUNS" --legs native,wasm \
+  --bench mutmap-param,mutmap-local \
+  --label ratchet-mutmap --out "$mm_out"
+python3 - "$mm_out" "$BASELINE_FILE" "$MUTMAP_CEILING_NATIVE" "$MUTMAP_CEILING_WASM" "$MIN_SECONDS" <<'PYMM'
+import json, sys
+sys.path.insert(0, "research/benchmark/perf")
+from bench import QUICK_ARGS
+
+out_path, baseline_path, ceiling_native, ceiling_wasm, min_s = sys.argv[1:6]
+ceilings = {leg: float(c) for leg, c in (("native", ceiling_native), ("wasm", ceiling_wasm)) if c}
+min_s = float(min_s)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+
+def rounds(bench):
+    return int(QUICK_ARGS[bench].split(":")[1])
+
+failed = False
+for leg in ("native", "wasm"):
+    key = f"mutmap-{leg}"
+    if key not in baseline:
+        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the mut map relation was "
+                 "added without its recorded value; add the line on purpose.")
+    p = data["mutmap-param"]["variants"][f"mutmap-param/{leg}"]["min"]
+    l = data["mutmap-local"]["variants"][f"mutmap-local/{leg}"]["min"]
+    if l < min_s:
+        sys.exit(f"::error::perf-ratio: mutmap-local/{leg} min {l}s is under the {min_s}s floor — "
+                 "grow the QUICK_ARGS entry instead of gating on spawn noise.")
+    ratio = (p / rounds("mutmap-param")) / (l / rounds("mutmap-local"))
+    ceiling = ceilings.get(leg)
+    if ceiling is None:
+        print(f"perf-ratio: {key:20s} {ratio:.3f}x the inline writes per round "
+              f"(reported, recorded {baseline[key]:.3f}x)")
+        continue
+    if ratio > ceiling:
+        print(f"::error::perf-ratio: a Map written through a `mut m` helper costs {ratio:.3f}x the same "
+              f"writes inline on the {leg} leg (ceiling {ceiling:.2f}x, {p:.3f}s for {rounds('mutmap-param')} "
+              f"rounds vs {l:.3f}s for {rounds('mutmap-local')}, recorded {baseline[key]:.3f}x). A `mut` Map "
+              "param is being copied on every write, which is #4580. Look at whether an owned param reaches "
+              "the in-place set (try_map_set_in_place in crates/almide-wasm/src/map_inplace.rs). "
+              "Do not raise the ceiling.")
+        failed = True
+        continue
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x the inline writes per round "
+          f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
+sys.exit(1 if failed else 0)
+PYMM
+
+# MUT SET RELATION (#4582): mutset-param rebinds a Set through a `mut s`
+# helper per insert (`{ s = set.insert(s, x) }`), mutset-local the same
+# rebinds inline; the relation is per round. The standard native codegen
+# called the borrowing `almide_rt_set_insert(&s, x)` on the `&mut` param, a
+# copy of the whole set per insert; the overwritten param now moves into the
+# owned twin (`take_overwritten_ref_mut`, crates/almide-codegen/src/
+# pass_borrow_lowering_take.rs), which tests/native_mut_collection_param_test.rs
+# pins on the emitted Rust. These rows measure what ships — the certified
+# render, which already moved the set (1.3-1.5x on ubuntu-latest) — and wasm
+# (2.1-2.2x: call, move-in and write-back per insert). Ceilings 4 and 5: a
+# copy per insert reads tens of x.
+MUTSET_CEILING_NATIVE=4
+MUTSET_CEILING_WASM=5
+ms_out=$(mktemp -t perf-ratio-mutset.XXXXXX.json)
+python3 research/benchmark/perf/bench.py \
+  --quick --runs "$RUNS" --legs native,wasm \
+  --bench mutset-param,mutset-local \
+  --label ratchet-mutset --out "$ms_out"
+python3 - "$ms_out" "$BASELINE_FILE" "$MUTSET_CEILING_NATIVE" "$MUTSET_CEILING_WASM" "$MIN_SECONDS" <<'PYMS'
+import json, sys
+sys.path.insert(0, "research/benchmark/perf")
+from bench import QUICK_ARGS
+
+out_path, baseline_path, ceiling_native, ceiling_wasm, min_s = sys.argv[1:6]
+ceilings = {"native": float(ceiling_native), "wasm": float(ceiling_wasm)}
+min_s = float(min_s)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+
+def rounds(bench):
+    return int(QUICK_ARGS[bench].split(":")[1])
+
+failed = False
+for leg in ("native", "wasm"):
+    key = f"mutset-{leg}"
+    if key not in baseline:
+        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the mut set relation was "
+                 "added without its recorded value; add the line on purpose.")
+    p = data["mutset-param"]["variants"][f"mutset-param/{leg}"]["min"]
+    l = data["mutset-local"]["variants"][f"mutset-local/{leg}"]["min"]
+    if l < min_s:
+        sys.exit(f"::error::perf-ratio: mutset-local/{leg} min {l}s is under the {min_s}s floor — "
+                 "grow the QUICK_ARGS entry instead of gating on spawn noise.")
+    ratio = (p / rounds("mutset-param")) / (l / rounds("mutset-local"))
+    ceiling = ceilings[leg]
+    if ratio > ceiling:
+        print(f"::error::perf-ratio: a Set rebound through a `mut s` helper costs {ratio:.3f}x the same "
+              f"inserts inline on the {leg} leg (ceiling {ceiling:.2f}x, {p:.3f}s for {rounds('mutset-param')} "
+              f"rounds vs {l:.3f}s for {rounds('mutset-local')}, recorded {baseline[key]:.3f}x). A `mut` Set "
+              "param is being copied on every insert, which is #4582. Look at whether the rebound param "
+              "moves into the op's owned twin (`almide_rt_set_insert_owned`). Do not raise the ceiling.")
+        failed = True
+        continue
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x the inline inserts per round "
+          f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
+sys.exit(1 if failed else 0)
+PYMS
 
 # BTREES RELATION (rc4, owner ruling 2026-11-05). btrees and treealloc build
 # and walk the same trees (2^19 + 2^19 nodes per round, 24 x depth 19 against
@@ -803,20 +985,23 @@ PYBT
 
 # GLOBAL READ RELATION (#4562). A text renderer keeps its glyph caches in
 # module-level `var`s and reads them once per glyph per frame
-# (globalread/globalread.almd: a `map.get` and a `list.get` per glyph).
+# (globalread/globalread.almd: a `map.get`, a `list.get` and a `map.get` on a
+# field of a module-level record per glyph, and a `for` walk over a
+# module-level list per frame).
 # globalread-global reads the module-level vars from a helper fn,
 # globalread-local passes the same map and list to the helper as parameters;
 # the relation is global per-frame time over local per-frame time (the rows run
 # different frame counts, so each min is divided by its own). 0.69.1 rendered a
 # borrowed argument that is a module-level var as a borrow of a deep copy
-# (`&G.with(|c| (**c.borrow()).clone())`) natively, so every lookup copied the
-# whole 1,024-entry map: about 40x per frame, far over the ceiling. The wasm
+# (`&G.with(|c| (**c.borrow()).clone())`) natively, and a field read or a `for`
+# head the same way, so every lookup copied the whole 1,024-entry map or the
+# whole record: about 190x per frame, far over the ceiling. The wasm
 # leg reads a global's handle with a reference count and is gated so that it
 # cannot start copying either.
 GLOBALREAD_CEILING_NATIVE=4
 GLOBALREAD_CEILING_WASM=3
 gr_out=$(mktemp -t perf-ratio-globalread.XXXXXX.json)
-trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out" "$gr_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out" "$gr_out" "${mm_out:-}"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,wasm \
   --bench globalread-global,globalread-local \
@@ -857,11 +1042,12 @@ for leg in ("native", "wasm"):
         print(f"::error::perf-ratio: a frame of lookups in module-level maps costs {ratio:.3f}x the "
               f"same lookups in a map passed as a parameter on the {leg} leg (ceiling {ceiling:.2f}x, "
               f"{g:.3f}s for {frames('globalread-global')} frames vs {l:.3f}s for "
-              f"{frames('globalread-local')}, recorded {baseline[key]:.3f}x). A borrowed argument that is "
-              "a module-level `var` is being copied on every call, which is how #4562 shipped in 0.69.1. "
-              "Look at how a borrowed global argument renders (render_global_snapshot_borrow in "
-              "crates/almide-codegen/src/walker/expressions_calls_binops.rs, native). Do not raise the "
-              "ceiling.")
+              f"{frames('globalread-local')}, recorded {baseline[key]:.3f}x). A read of a module-level `var` "
+              "(a borrowed argument, a field read, a `for` head) is copying the whole var, which is how "
+              "#4562 shipped in 0.69.1. Look at how a global place renders natively (global_snapshot_place "
+              "in crates/almide-codegen/src/walker/expressions_calls_binops.rs on the standard codegen, and "
+              "the heap-slot reads on the certified render if the program renders there). Do not raise "
+              "the ceiling.")
         failed = True
         continue
     print(f"perf-ratio: {key:20s} {ratio:.3f}x the parameter per frame "

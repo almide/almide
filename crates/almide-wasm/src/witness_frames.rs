@@ -54,10 +54,12 @@ pub(crate) fn mark_pass(pass: usize) {
     crate::witness::init::begin_pass(pass);
     crate::witness::fields::begin_pass(pass);
     crate::witness::rc::begin_pass(pass);
+    crate::prim_shape::begin_pass(pass);
     push(PASS_MARK, pass.to_string());
 }
 
 pub(crate) fn mark_shipped(pass: usize) {
+    crate::prim_shape::shipped(pass);
     push(SHIPPED_MARK, pass.to_string());
 }
 

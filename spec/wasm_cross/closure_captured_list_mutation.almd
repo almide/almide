@@ -42,5 +42,5 @@ effect fn main() -> Unit = {
   log = log + ["outside"]
   mark("b")
   println(int.to_string(list.len(log)))
-  println(list.get(log, 0) ?? "-" + list.get(log, 2) ?? "-" + list.get(log, 3) ?? "-")
+  println((list.get(log, 0) ?? "-") + (list.get(log, 2) ?? "-") + (list.get(log, 3) ?? "-"))
 }

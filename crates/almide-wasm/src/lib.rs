@@ -156,6 +156,7 @@ mod emitter_values;
 mod emitter_vars;
 mod patterns;
 mod prim;
+mod prim_shape;
 mod runtime;
 mod runtime_alloc;
 mod deep_walk;
@@ -552,6 +553,27 @@ impl SliceTy {
             | SliceTy::Unit
             | SliceTy::Value
             | SliceTy::Matrix => ValType::I32,
+        }
+    }
+
+    /// A parameter of this type holds a heap block's base (#4005 A4: the
+    /// linear certificate binds it to a block): `Some(stride)` then, the
+    /// stride its len word counts in when it counts payload units (a
+    /// String's or Bytes' bytes, a list's slots), else `Some(None)`. Unit
+    /// and closures are left out: no self-host body addresses them.
+    fn heap_param(self, types: &TypeTable) -> Option<Option<u32>> {
+        match self {
+            SliceTy::Scalar(Scalar::Str | Scalar::Bytes) => Some(Some(1)),
+            SliceTy::Scalar(_) | SliceTy::Fn(_) | SliceTy::Unit => None,
+            SliceTy::List(e) => Some(Some(types.el(e).slot_size())),
+            SliceTy::Option(_)
+            | SliceTy::Result(..)
+            | SliceTy::Map(..)
+            | SliceTy::Set(_)
+            | SliceTy::Tuple(_)
+            | SliceTy::Named(_)
+            | SliceTy::Value
+            | SliceTy::Matrix => Some(None),
         }
     }
 

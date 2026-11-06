@@ -13,6 +13,9 @@ From AlmideTrust Require Import NativeCalls.
 From AlmideTrust Require Import BoundsCert.
 From AlmideTrust Require Import InitCert.
 From AlmideTrust Require Import FieldCert.
+From AlmideTrust Require Import RoutineBoundsCert.
+From AlmideTrust Require Import RoutineProcsCert.
+From AlmideTrust Require Import RoutineLinCert.
 From Stdlib Require Import Extraction.
 From Stdlib Require Import ExtrOcamlBasic ExtrOcamlNativeString.
 
@@ -75,4 +78,9 @@ Set Extraction Output Directory ".".
    callee's modes, every moved argument is a call-site move-out on the
    caller's line, and every line balances from the reference its mode
    declares` (`check_native_calls_sound`). *)
-Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_xc check_names_cert check_caps_cert check_prog_cert check_modes_cert check_bounds_cert check_init_cert check_fields_cert check_sig_cert check_native_calls_cert.
+(* `check_lbounds_cert` (RoutineLinCert, #4005 A4) is the bounds checker from
+   the linear certificates on: every older stretch as `check_pbounds_cert`
+   judges it, and the `Q` table of self-host procedures in bounds by
+   Farkas-checked linear facts (`check_lbounds_cert_sound`, via
+   RoutineLin.lrun_sound). *)
+Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_xc check_names_cert check_caps_cert check_prog_cert check_modes_cert check_bounds_cert check_init_cert check_fields_cert check_sig_cert check_native_calls_cert check_rbounds_cert check_pbounds_cert check_lbounds_cert.

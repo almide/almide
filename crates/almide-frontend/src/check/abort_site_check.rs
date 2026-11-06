@@ -161,7 +161,13 @@ fn collect_binders(root: &ast::Expr, out: &mut Vec<String>) {
 
 fn stmt_binders(s: &ast::Stmt, out: &mut Vec<String>) {
     match s {
-        ast::Stmt::Let { name, .. } | ast::Stmt::Var { name, .. } | ast::Stmt::GuardLet { name, .. } => out.push(name.to_string()),
+        ast::Stmt::Let { name, .. } | ast::Stmt::Var { name, .. } => out.push(name.to_string()),
+        ast::Stmt::GuardLet { name, fail, .. } => {
+            out.push(name.to_string());
+            if let Some(p) = fail {
+                pattern_binders(p, out);
+            }
+        }
         ast::Stmt::LetDestructure { pattern, .. } => pattern_binders(pattern, out),
         _ => {}
     }

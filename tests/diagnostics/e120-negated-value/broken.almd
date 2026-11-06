@@ -1,0 +1,4 @@
+// Written for dialect 15: `-x ?? 0` meant `-(x ?? 0)`.
+fn neg(x: Option[Int]) -> Int = -x ?? 0
+
+fn main() -> Unit = println(int.to_string(neg(some(4))))

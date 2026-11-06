@@ -6,7 +6,10 @@
 // same bytes into a local buffer inline. The two rows run the same writes, so their relation
 // (check-perf-ratio.sh, FRAME BUFFER) is what a write through the module-level
 // var costs over the local one. 0.69.0 copied the whole buffer on every 4-byte
-// write through the module-level var, on both legs: ~1000x natively.
+// write through the module-level var, on both legs: ~1000x natively. `p`
+// writes the local buffer through a `mut b: Bytes` helper per quad whose last
+// write is its tail (#4580): the wasm leg shared the buffer into that tail
+// call and copied all of it once per quad.
 import env
 
 type Color = { r: Float, g: Float, b: Float, a: Float }
@@ -109,11 +112,51 @@ fn run_local(frames: Int, c: Color) -> Float = {
   sum
 }
 
+fn put_quad(mut b: Bytes, o: Int, x: Float, y: Float, c: Color, u0: Float, v0: Float, u1: Float, v1: Float) -> Unit = {
+  bytes.put_f32_le(b, o + 0, x)
+  bytes.put_f32_le(b, o + 4, y)
+  bytes.put_f32_le(b, o + 8, 8.0)
+  bytes.put_f32_le(b, o + 12, 16.0)
+  bytes.put_f32_le(b, o + 16, c.r)
+  bytes.put_f32_le(b, o + 20, c.g)
+  bytes.put_f32_le(b, o + 24, c.b)
+  bytes.put_f32_le(b, o + 28, c.a)
+  bytes.put_f32_le(b, o + 32, u0)
+  bytes.put_f32_le(b, o + 36, v0)
+  bytes.put_f32_le(b, o + 40, u1)
+  bytes.put_f32_le(b, o + 44, v1)
+  bytes.put_f32_le(b, o + 48, 0.0)
+  bytes.put_f32_le(b, o + 52, 3.0)
+  bytes.put_f32_le(b, o + 56, 0.0)
+  bytes.put_f32_le(b, o + 60, 0.0)
+  bytes.put_f32_le(b, o + 64, clip_x0)
+  bytes.put_f32_le(b, o + 68, clip_y0)
+  bytes.put_f32_le(b, o + 72, clip_x1)
+  bytes.put_f32_le(b, o + 76, clip_y1)
+}
+
+fn run_param(frames: Int, c: Color) -> Float = {
+  var b = bytes.zeros(80 * QUADS)
+  var sum = 0.0
+  for f in 0..<frames {
+    for i in 0..<QUADS {
+      let (x, y) = quad(i, f)
+      put_quad(b, i * 80, x, y, c, x / 2048.0, y / 2048.0, (x + 8.0) / 2048.0, (y + 16.0) / 2048.0)
+    }
+    sum = sum + (bytes.get_f32_le(b, (QUADS - 1) * 80 + 4) ?? 0.0)
+  }
+  sum
+}
+
 effect fn main() -> Unit = {
   let parts = string.split(list.get(env.args(), 0) ?? "g:10", ":")
   let mode = list.get(parts, 0) ?? "g"
   let frames = int.parse(list.get(parts, 1) ?? "") ?? 10
   let c = { r: 0.75, g: 0.8, b: 0.95, a: 1.0 }
-  let sum = if mode == "g" then run_global(frames, c) else run_local(frames, c)
+  let sum = match mode {
+    "g" => run_global(frames, c),
+    "p" => run_param(frames, c),
+    _ => run_local(frames, c),
+  }
   println("frames=${frames} sum=${sum}")
 }

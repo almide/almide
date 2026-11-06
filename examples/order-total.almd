@@ -1,0 +1,34 @@
+type Order = { item: String, qty: Int, price: Int }
+
+fn parse(line: String) -> Order? = match line |> string.trim |> string.split(",") {
+  [item, qty, price] => match (int.parse(qty), int.parse(price)) {
+    (ok(q), ok(p)) => some({ item: item, qty: q, price: p }),
+    _ => none,
+  },
+  _ => none,
+}
+
+fn main() -> Unit = {
+  let csv = """
+    apple,3,120
+    pear,oops,90
+    plum,5,80
+    """
+  let orders = csv |> string.lines |> list.filter_map(parse)
+  let total = orders |> list.fold(0, (sum, o) => sum + o.qty * o.price)
+  println("${list.len(orders)} orders, total ${total}")
+}
+
+test "a row whose numbers parse becomes an order" {
+  assert_eq(parse("  apple,3,120"), some({ item: "apple", qty: 3, price: 120 }))
+}
+
+test "a row with a bad number or the wrong column count is skipped" {
+  assert_eq(parse("pear,oops,90"), none)
+  assert_eq(parse("plum,5"), none)
+}
+
+test "the readable rows add up to 760" {
+  let orders = ["apple,3,120", "pear,oops,90", "plum,5,80"] |> list.filter_map(parse)
+  assert_eq(orders |> list.fold(0, (sum, o) => sum + o.qty * o.price), 760)
+}

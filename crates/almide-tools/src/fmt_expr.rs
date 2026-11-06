@@ -935,7 +935,15 @@ fn fmt_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
         Stmt::IndexAssign { target, path, index, value, .. } => { w!(out, "{i}{target}{}[", fmt_place_path(path)); fmt_expr(out, index, depth); out.push_str("] = "); fmt_expr(out, value, depth); }
         Stmt::FieldAssign { target, path, field, value, .. } => { w!(out, "{i}{target}{}.{field} = ", fmt_place_path(path)); fmt_expr(out, value, depth); }
         Stmt::Guard { cond, else_, .. } => { out.push_str(&i); out.push_str("guard "); fmt_expr(out, cond, depth); out.push_str(" else "); fmt_expr(out, else_, depth); }
-        Stmt::GuardLet { name, scrutinee, else_, .. } => { out.push_str(&i); out.push_str("guard let "); out.push_str(name.as_str()); out.push_str(" = "); fmt_expr(out, scrutinee, depth); out.push_str(" else "); fmt_expr(out, else_, depth); }
+        Stmt::GuardLet { name, scrutinee, else_, mutable, shorthand, fail, .. } => {
+            // #4543: `guard var`, the `guard let x else` shorthand, and the
+            // failure arm. `else none => e` is the plain `else e`.
+            out.push_str(&i); out.push_str(if *mutable { "guard var " } else { "guard let " }); out.push_str(name.as_str());
+            if !*shorthand { out.push_str(" = "); fmt_expr(out, scrutinee, depth); }
+            out.push_str(" else ");
+            if let Some(p @ Pattern::Err { .. }) = fail { fmt_pattern(out, p); out.push_str(" => "); }
+            fmt_expr(out, else_, depth);
+        }
         Stmt::Expr { expr, .. } => { out.push_str(&i); fmt_expr(out, expr, depth); }
         Stmt::Comment { text } => { wln!(out, "{i}{text}"); return; }
         Stmt::Error { .. } => return,

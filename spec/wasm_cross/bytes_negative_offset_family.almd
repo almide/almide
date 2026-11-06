@@ -60,7 +60,7 @@ fn probe_high_writes(n: Int) -> String = {
   bytes.__set_u8(b, 4294967296, 0xFF)
   var sum = 0
   for i in 0..<bytes.len(b) {
-    sum = sum + bytes.get(b, i) ?? 0
+    sum = sum + (bytes.get(b, i) ?? 0)
   }
   "high_writes(${int.to_string(n)}) sum=${int.to_string(sum)}"
 }
@@ -91,7 +91,7 @@ fn probe_writes(n: Int) -> String = {
   bytes.__set_u8(b, 0 - 999999, 0xFF)
   var sum = 0
   for i in 0..<bytes.len(b) {
-    sum = sum + bytes.get(b, i) ?? 0
+    sum = sum + (bytes.get(b, i) ?? 0)
   }
   "len=${int.to_string(bytes.len(b))} sum=${int.to_string(sum)}"
 }

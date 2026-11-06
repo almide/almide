@@ -1,0 +1,34 @@
+// @contract: C-221
+// #4545: a PURE `() -> Unit` parameter forwarded into an `effect () -> Unit`
+// slot is ok-wrapped at the slot — through a piped call, a record field, and
+// a computed call. The piped form handed the bare value to the carrier slot,
+// and the structural wasm leg refused it (E082 `ty-mismatch:Fn`).
+type V = { on_click: effect () -> Unit }
+
+fn base() -> V = { on_click: () => () }
+
+fn on_click(v: V, f: effect () -> Unit) -> V = { ...v, on_click: f }
+
+var n = 0
+
+fn add() -> Unit = {
+  n = n + 1
+}
+
+fn button(on: () -> Unit) -> V = base() |> on_click(on)
+
+fn field(on: () -> Unit) -> V = { on_click: on }
+
+fn through(set: (V, effect () -> Unit) -> V, on: () -> Unit) -> V = set(base(), on)
+
+effect fn main() -> Unit = {
+  button(() => add()).on_click()!
+  println("button ${n}")
+  field(add).on_click()!
+  field(add).on_click()!
+  println("field ${n}")
+  through(on_click, () => {
+    n = n + 10
+  }).on_click()!
+  println("through ${n}")
+}

@@ -72,6 +72,9 @@ impl LowerCtx {
             repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
             init: crate::Init::DynList { len: one_len },
         });
+        if !elem_heap {
+            crate::option_blocks::record(&self.fn_name, opt);
+        }
         let oh = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![opt] });
         let zero = self.fresh_value();

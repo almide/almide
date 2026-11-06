@@ -16,10 +16,10 @@ fn probe_c() -> (Int, String) = w_ok_tup(match w_some_tup((7, "t")) {
   none => (8, "t"),
 })? ?? (9, "t")
 
-fn probe_d() -> Int = w_ok_tup(match w_some_tup((5, "u")) {
+fn probe_d() -> Int = (w_ok_tup(match w_some_tup((5, "u")) {
   some(v) => (v.0 + 1, v.1),
   none => (0, "u"),
-})? ?? (9, "t") |> ((t) => t.0)
+})? ?? (9, "t")) |> ((t) => t.0)
 
 effect fn main() -> Unit = println("c=${probe_c().0} d=${probe_d()}")
 "#;

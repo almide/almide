@@ -1,0 +1,10 @@
+// The `guard let x else …` shorthand rebinds a local or a parameter (#4543);
+// a field path is not a binding, so the fix names the payload explicitly.
+type Cfg = { port: Option[Int] }
+
+fn port(cfg: Cfg) -> Int = {
+  guard let cfg.port else { 80 }
+  port
+}
+
+fn main() -> Unit = println(int.to_string(port({ port: some(8080) })))

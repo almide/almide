@@ -1,0 +1,14 @@
+diff --git a/crates/almide-mir/src/certificate_native_calls.rs b/crates/almide-mir/src/certificate_native_calls.rs
+index 762e9f509..36ba665f9 100644
+--- a/crates/almide-mir/src/certificate_native_calls.rs
++++ b/crates/almide-mir/src/certificate_native_calls.rs
+@@ -94,7 +94,8 @@ pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTr
+                     Op::CallFn { args, .. } if runtime.contains_key(&(f.name.clone(), at)) => {
+                         let key = (runtime[&(f.name.clone(), at)].clone(), borrow_modes(args).len());
+                         let idx = names.len() + runtime_blocks.iter().position(|b| *b == key).unwrap_or(runtime_blocks.len());
+-                        sites.push(site_row(idx, &borrow_modes(args)));
++                        // RE-INJECTED (#4006 C1 drill): the caller claims it handed every heap arg over.
++                        sites.push(site_row(idx, &borrow_modes(args).iter().map(|_| "1".to_string()).collect::<Vec<_>>()));
+                     }
+                     Op::CallFn { name: callee, args, .. } => {
+                         if let Some(id) = native_fs_host_site(callee) {

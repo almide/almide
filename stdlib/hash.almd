@@ -63,7 +63,7 @@ fn adler32(b: Bytes) -> Int = {
   var i = 0
   let len = bytes.len(b)
   while i < len {
-    s1 = (s1 + bytes.get(b, i) ?? 0) % 65521
+    s1 = (s1 + (bytes.get(b, i) ?? 0)) % 65521
     s2 = (s2 + s1) % 65521
     i = i + 1
   }

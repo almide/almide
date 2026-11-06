@@ -103,7 +103,10 @@ assign      = IDENT ("." name)* ("[" expr "]")? "=" expr (":" type)?
                ascription (`s.xs = []: List[Int]`) is optional — the target's own
                type already fixes an empty literal. *)
 guard_stmt  = "guard" expr "else" expr
-            | "guard" "let" IDENT "=" expr "else" expr     (* bind Option, else on none *)
+            | "guard" ("let" | "var") IDENT ("=" expr)? "else" fail_arm? expr
+                                                           (* bind the Ok/Some payload; no `= expr`
+                                                              = the shorthand `= IDENT` (#4543) *)
+fail_arm    = ("err" "(" (IDENT | "_") ")" | "none") "=>"  (* one arm; `err(e)` binds the error *)
 
 if_expr     = "if" expr "then" if_branch ("else" if_branch)?  (* no else => Unit *)
 if_branch   = assign | expr                                (* any `assign` target, unbraced:
@@ -122,6 +125,7 @@ lparam      = (IDENT | "_") (":" type)?
             | "(" (IDENT | "_") ("," (IDENT | "_"))* ")"   (* tuple-destructuring param *)
 
 pipe        = expr "|>" expr                               (* also: expr |> match { arms } *)
+coalesce    = expr "??" expr                               (* fallback; right-assoc, below |> (dialect 16) *)
 range       = expr "..<" expr | expr "..." expr            (* exclusive / inclusive *)
 postfix     = primary ( "(" args ")"                       (* call *)
                       | type_args "(" args ")"     (* explicit type args: f[Int](x) *)
@@ -129,8 +133,7 @@ postfix     = primary ( "(" args ")"                       (* call *)
                       | "." IDENT | "." INT                (* field access; tuple index t.0 *)
                       | "!"                                (* context-dependent propagation/unwrap; see context table *)
                       | "?"                                (* Result -> Option *)
-                      | "?." IDENT                         (* optional chaining *)
-                      | "??" unary )*                      (* fallback; RHS binds at unary level *)
+                      | "?." IDENT )*                      (* optional chaining *)
 args        = ((expr | IDENT ":" expr) ",")* ...           (* named args; partial application is rejected as E046 *)
 primary     = literal | IDENT | TYPENAME | "(" expr ")" | "(" expr ("," expr)+ ")"
             | "(" ")" | block | record_lit | "todo" "(" STRING ")"
@@ -186,14 +189,15 @@ a parse error (use `and`).
 | 1 | `or` | left |
 | 2 | `and` | left |
 | 3 | `==` `!=` `<` `>` `<=` `>=` | non-assoc |
-| 4 | `\|>` | left (asymmetric — see below) |
-| 5 | `..<` `...` | — |
-| 6 | `+` `-` | left |
-| 7 | `*` `/` `%` | left |
-| 8 | `^` (alias `**`) power | right |
-| 9 | `>>` compose | left (tightest binary) |
-| 10 | unary `-`, `not` | prefix |
-| 11 | postfix: `()` `[]` `.` `!` `?` `?.` `??` | — |
+| 4 | `??` fallback | right |
+| 5 | `\|>` | left (asymmetric — see below) |
+| 6 | `..<` `...` | — |
+| 7 | `+` `-` | left |
+| 8 | `*` `/` `%` | left |
+| 9 | `^` (alias `**`) power | right |
+| 10 | `>>` compose | left (tightest binary) |
+| 11 | unary `-`, `not` | prefix |
+| 12 | postfix: `()` `[]` `.` `!` `?` `?.` | — |
 
 **`|>` is asymmetric**: its right-hand side is a single postfix/compose chain.
 Any other binary operator after the RHS applies to the whole pipe result:
@@ -203,8 +207,12 @@ Any other binary operator after the RHS applies to the whole pipe result:
 - `xs |> list.len > 5` = `(xs |> list.len) > 5`
 - `a + b |> f` = `(a + b) |> f`
 
-`x ?? fallback` takes only a unary expression as fallback: `x ?? 0 + 1` =
-`(x ?? 0) + 1`.
+`??` is an infix level since dialect 16 (#4531): `x ?? 0 + 1` =
+`x ?? (0 + 1)`, `s + b ?? 0` = `(s + b) ?? 0`, `xs |> list.first ?? 0` =
+`(xs |> list.first) ?? 0`, and `x ?? 0 == n` = `(x ?? 0) == n`. Before dialect
+16 it was a postfix with a unary fallback (`x ?? 0 + 1` was `(x ?? 0) + 1`);
+in a file without a `@dialect(16)` stamp a `??` the two grammars read apart is
+E120, and `almide fix` adds the parentheses that keep the old reading.
 
 ## Stdlib imports
 

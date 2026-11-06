@@ -1,0 +1,8 @@
+// `int.to_int8` left at dialect epoch 15 for `int8.from_wrapping`, with the
+// same arguments and the same type: `int8.from_wrapping[S: Integer](x: S)`
+// at `S = Int` is the old `(Int) -> Int8`, and Int is an Integer. Renaming
+// the callee is the whole edit, so `almide fix` applies it (#4525).
+effect fn main() -> Unit = {
+  let n = 300
+  println(int8.to_string(int.to_int8(n)))
+}

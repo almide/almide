@@ -17,8 +17,9 @@
 //! var's block is its alone. Every other holder — a bind of the same
 //! block, a record/tuple/variant/list/option slot, a map VALUE slot, a
 //! closure env, a for-in cursor — takes the +1 through `rc_share_guard`
-//! and releases it when it lets go. Params are excluded (a borrowed view
-//! of the caller's block), and so are C-319 cells (captured + mutated
+//! and releases it when it lets go. Borrowed params are excluded (a view
+//! of the caller's block; an owned param holds its credit, #4580), and so
+//! are C-319 cells (captured + mutated
 //! vars keep the functional rebind through the cell). A block below the
 //! heap floor (a pool static) never mutates in place.
 //!
@@ -194,7 +195,12 @@ impl Emitter<'_> {
         let Some((idx, ty, global)) = self.mut_var(id) else {
             return Ok(false);
         };
-        if !global && idx < self.rc_param_ceiling {
+        // A borrowed param is a view of the caller's block; an OWNED one
+        // holds its own credit like a local (#4580: `fn put(mut m: Map[Int,
+        // Int], k: Int, v: Int) = { m[k] = v }` took the functional copy of
+        // the whole map on every call, while the caller had moved it in at
+        // rc 1).
+        if !global && idx < self.rc_param_ceiling && !self.rc_frame_params.contains(&idx) {
             return Ok(false);
         }
         let SliceTy::Map(kt, vt) = ty else {

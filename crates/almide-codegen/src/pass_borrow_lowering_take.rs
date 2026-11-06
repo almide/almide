@@ -48,10 +48,15 @@ impl Lower<'_> {
 }
 
 /// A type whose Rust form is `Default` for every element type, so
-/// `std::mem::take` applies: `Vec<T>` and `String`. A map or set keeps the
-/// clone (its derived `Default` bounds the element types).
+/// `std::mem::take` applies: `Vec<T>`, `String`, and the runtime's
+/// `AlmideSet` / `AlmideMap` (their `Default` is the empty collection for any
+/// member type, runtime/rs/src/set.rs and map.rs, #4582).
 fn takeable(ty: &Ty) -> bool {
-    matches!(ty, Ty::String | Ty::Bytes | Ty::Applied(TypeConstructorId::List, _))
+    matches!(
+        ty,
+        Ty::String | Ty::Bytes
+            | Ty::Applied(TypeConstructorId::List | TypeConstructorId::Set | TypeConstructorId::Map, _)
+    )
 }
 
 /// The take leaves the param empty until the assign writes it, so the RHS
@@ -158,6 +163,29 @@ impl TakeAt {
 
 impl IrMutVisitor for TakeAt {
     fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        // #4582: an op whose runtime takes its source either way, reading the
+        // overwritten place through the borrow BorrowInsertion gave it
+        // (`s = set.insert(s, x)` is `almide_rt_set_insert(&s, x)`, a clone
+        // of the whole collection): the place moves into the op's owned twin
+        // instead, `almide_rt_set_insert_owned(std::mem::take(s), x)`.
+        // The source may still be the bare place (BorrowLowering's
+        // `lower_either_way_source` borrows a by-reference one later) or the
+        // `Clone` of it clone insertion placed.
+        if !self.done
+            && let IrExprKind::RuntimeCall { symbol, args } = &mut expr.kind
+            && let Some(twin) = crate::owned_source::owned_twin(symbol.as_str())
+            && let Some(source) = args.first_mut()
+        {
+            let borrowed = matches!(&source.kind, IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } if self.is_place(inner));
+            if borrowed {
+                let IrExprKind::Borrow { expr: inner, .. } = std::mem::replace(&mut source.kind, IrExprKind::Unit) else { unreachable!() };
+                *source = *inner;
+            }
+            // A borrowed place always takes (`slot` refuses only a non-place).
+            if self.slot(source) {
+                *symbol = sym(twin);
+            }
+        }
         match &mut expr.kind {
             IrExprKind::Call { args: xs, .. } | IrExprKind::TailCall { args: xs, .. }
             | IrExprKind::RuntimeCall { args: xs, .. } | IrExprKind::List { elements: xs }

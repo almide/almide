@@ -57,7 +57,13 @@ impl Parser {
 
     pub fn parse(&mut self) -> Result<Program, String> {
         // #1311 front-end phase accounting (no-op unless `--timings`).
-        let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Parse);
+        // The migration parser (#4531) is billed by its caller, not as parse
+        // time: the compile-time ratchet's unit is this phase's speed.
+        let phase = if self.legacy_grouping {
+            None
+        } else {
+            almide_base::profile::phase_scope(almide_base::profile::Phase::Parse)
+        };
         self.report_invalid_escapes();
         self.report_hidden_chars();
         let mut program = Program {
@@ -71,7 +77,11 @@ impl Parser {
             failed_fn_names: std::collections::HashSet::new(),
             parse_recovered: false,
             expr_comments: std::collections::HashMap::new(),
+            regrouped: Vec::new(),
         };
+        // #4531: the pre-16 reading is only worth computing when the file has
+        // a `??` (the one operator whose level moved).
+        let mentions_coalesce = !self.legacy_grouping && super::regroup::mentions_coalesce(&self.tokens);
 
         let (mut pending, mut gap_blanks) = self.skip_newlines_collect_comments();
 
@@ -222,6 +232,19 @@ impl Parser {
         // node — fmt's conservation verifier counts LEXER tokens, so an
         // unclaimed comment still makes fmt refuse rather than vanish.
         program.expr_comments = std::mem::take(&mut self.expr_comments);
+        // The second, pre-16 parse is a CHECK over the file (E120), billed as
+        // one: counting it as parse time would halve the parse speed the
+        // compile-time ratchet divides by on every file with a `??`.
+        drop(phase);
+        // The parse respelled a few tokens in place (`||` as `or`), which
+        // the pre-16 grammar reads the same way.
+        if mentions_coalesce
+            && self.errors.is_empty()
+            && super::regroup::predates_regrouping(program.dialect.map(|d| d.epoch))
+        {
+            let _check = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
+            program.regrouped = super::regroup::regrouped_sites(&mut program, &self.tokens);
+        }
         Ok(program)
     }
 }

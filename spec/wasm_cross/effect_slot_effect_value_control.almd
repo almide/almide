@@ -1,0 +1,49 @@
+// @contract: C-221
+// #4545 control: an EFFECT fn value filling an `effect` slot already is the
+// carrier, so the slot adapter leaves it as it is on every route the pure
+// fixtures take — a piped call, a record field, a spread override, a fn
+// return, a list element, and a computed call. The failing handler's err
+// reaches the caller on both legs.
+type V = { on_key: effect (Int) -> Bool }
+
+fn base() -> V = { on_key: (k) => false }
+
+fn on_key(v: V, f: effect (Int) -> Bool) -> V = { ...v, on_key: f }
+
+effect fn strict(k: Int) -> Bool = {
+  guard k >= 0 else err("negative ${k}")!
+  k > 2
+}
+
+fn mk(f: effect (Int) -> Bool) -> V = { on_key: f }
+
+fn piped() -> V = base() |> on_key(strict)
+
+fn field() -> V = { on_key: strict }
+
+fn spread(v: V) -> V = { ...v, on_key: strict }
+
+fn ret() -> effect (Int) -> Bool = strict
+
+fn table() -> List[effect (Int) -> Bool] = [
+  strict,
+  (k) => k == 0
+]
+
+effect fn via(h: (effect (Int) -> Bool) -> V) -> V = h(strict)
+
+effect fn hit(v: V, k: Int) -> Int = if v.on_key(k)! then 1 else 0
+
+effect fn main() -> Unit = {
+  println("piped ${hit(piped(), 3)!} ${hit(piped(), 1)!}")
+  println("field ${hit(field(), 4)!} ${hit(field(), -1) ?? -9}")
+  println("spread ${hit(spread(base()), 9)!} ${hit(base(), 9)!}")
+  let r = ret()
+  let neg = match r(-2) {
+    ok(b) => if b then "t" else "f",
+    err(e) => e,
+  }
+  println("ret ${if r(5)! then 1 else 0} ${neg}")
+  println("table " + (table() |> list.map((g) => if g(0) ?? false then "y" else "n") |> list.join(",")))
+  println("via ${hit(via(mk)!, 4)!} ${hit(via(mk)!, -3) ?? -9}")
+}

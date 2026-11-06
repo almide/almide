@@ -14,14 +14,14 @@ fn main() -> Unit = {
   let meshes = value.get_array(gltf, "meshes") ?? []
   println("meshes=" + int.to_string(list.len(meshes)))
   let m0 = list.get(meshes, 0) ?? value.null()
-  println("m0.name=" + value.get_string(m0, "name") ?? "?")
+  println("m0.name=" + (value.get_string(m0, "name") ?? "?"))
   let accs = value.get_array(gltf, "accessors") ?? []
   println("accessors=" + int.to_string(list.len(accs)))
   var i = 0
   var sum = 0
   while i < list.len(accs) {
     let a = list.get(accs, i) ?? value.null()
-    sum = sum + count_floats(a, "min") + count_floats(a, "max") + value.get_int(a, "count") ?? 0
+    sum = sum + count_floats(a, "min") + count_floats(a, "max") + (value.get_int(a, "count") ?? 0)
     i = i + 1
   }
   println("acc_sum=" + int.to_string(sum))

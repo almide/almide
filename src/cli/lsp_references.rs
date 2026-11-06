@@ -174,9 +174,13 @@ impl<'a> OccWalker<'a> {
                 self.walk_expr(value);
                 self.bind_pattern(pattern, *span, "binding");
             }
-            S::GuardLet { name, scrutinee, else_, span } => {
+            S::GuardLet { name, scrutinee, else_, fail, span, .. } => {
                 self.walk_expr(scrutinee);
-                self.walk_expr(else_);
+                // #4543: `else err(e) => …` binds `e` for the else only.
+                self.scoped(|w| {
+                    if let Some(p) = fail { w.bind_pattern(p, *span, "match binder"); }
+                    w.walk_expr(else_);
+                });
                 // binds for the REST of the enclosing block
                 self.define(*name, *span, "binding");
             }
