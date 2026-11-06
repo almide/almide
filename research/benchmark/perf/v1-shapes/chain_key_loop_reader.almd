@@ -1,0 +1,17 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf-shapes.sh): an
+// interpolation piece built once at the top level whose chain (the key) a
+// call inside the loop reads, so the render keeps the piece's scheduled
+// release instead of releasing it right after its last reader
+// (render_native_tail::last_top_level_read).
+effect fn main() -> Unit = {
+  let x: Value = value.object([("k1", value.int(1)), ("k2", value.int(2))])
+  let a1: String = "k${1}"
+  var acc = 0
+  var i = 0
+  while i < 20000 {
+    let r: Option[Int] = value.get_int(x, a1)
+    acc = acc + (r ?? 0)
+    i = i + 1
+  }
+  println(int.to_string(acc))
+}
