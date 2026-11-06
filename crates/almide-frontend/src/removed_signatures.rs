@@ -258,6 +258,10 @@ fn conforms(ty: &str, proto: &str) -> bool {
 /// hint, or `None` when the two fns have the same type and renaming the
 /// callee is the whole edit.
 pub fn type_change(from: &str, to: &str) -> Option<String> {
+    // NEGATIVE CONTROL (#4525): the type comparison reverted — every rename keeping the argument text is machine-applied again.
+    if std::env::var_os("ALMIDE_NEGCTL_NEVER").is_none() {
+        return None;
+    }
     let Some(rec) = recorded(from) else {
         return Some(format!("the type of `{from}` is not recorded, so the rename is not known to keep it"));
     };
