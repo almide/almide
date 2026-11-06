@@ -63,17 +63,19 @@ jobs:
         run: |
           set +e
           A=$PWD/target/release/almide
-          P=$PWD/target/release/examples/probe_native
-          cp /tmp/probes/value_get_int.almd .throwaway/m0.almd
-          cp /tmp/probes/value_get.almd .throwaway/m0g.almd
           for f in .throwaway/*.almd; do
             echo "===== $f"
             $A run $f > /tmp/out.txt 2>&1; echo "native rc=$?"; grep -n -A12 'error\[' /tmp/out.txt | head -40
           done
-          for f in m0 m0g m1 m5; do
-            echo "===== MIR $f"; $P .throwaway/$f.almd --mir | grep -n -B3 -A60 'fn main' | head -250
-            echo "===== RUST $f"; $P .throwaway/$f.almd | grep -n -A90 'fn almd_main\|fn main' | head -200
-          done
+      - name: Compiler tests
+        run: |
+          set +e
+          run() { echo "::group::$*"; "$@"; echo "rc=$? :: $*" | tee -a /tmp/status.txt; echo "::endgroup::"; }
+          run cargo test --release -p almide-mir
+          run cargo test --release --test native_verified_floor_test
+          run cargo test --release --test native_v1_differential_test
+          cat /tmp/status.txt
+          ! grep -v '^rc=0 ' /tmp/status.txt
       - name: In-domain probe test
         working-directory: tools/xtarget-fuzz
         run: cargo test --release generator::inspect_gen
