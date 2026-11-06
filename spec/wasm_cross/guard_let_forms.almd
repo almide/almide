@@ -1,0 +1,82 @@
+// @contract: C-266
+// ALS-ST6 (docs/specs/als/expressions.md), the #4543 forms of the guard-let
+// statement, byte-identical on both targets: the failure arm that names the
+// error (`else err(e) => …`, a typed custom error and a String one, a value
+// else and a raising else), `else none =>` on an Option, the `guard let x
+// else …` shorthand on a local and on a parameter, and `guard var`, alone and
+// combined. Every form desugars into the same nested variant match as the
+// plain `guard let x = r else e`, whose err arm becomes `err(e) =>`.
+type ConfigError = | Missing(String) | BadPort(Int)
+
+fn describe(e: ConfigError) -> String = match e {
+  Missing(k) => "missing ${k}",
+  BadPort(p) => "bad port ${int.to_string(p)}",
+}
+
+fn lookup(m: Map[String, Int], k: String) -> Result[Int, ConfigError] = match map.get(m, k) {
+  some(p) => if p > 0 then ok(p) else err(BadPort(p)),
+  none => err(Missing(k)),
+}
+
+fn port_text(m: Map[String, Int]) -> String = {
+  guard let p = lookup(m, "port") else err(e) => describe(e)
+  "port ${int.to_string(p)}"
+}
+
+effect fn doubled(s: String) -> Int = {
+  guard let n = int.parse(s) else err(e) => err("not a number: ${s}")
+  n * 2
+}
+
+fn head_or(xs: List[Int]) -> Int = {
+  guard let h = list.first(xs) else none => 0
+  h * 10
+}
+
+fn port_or_default(raw: Option[String]) -> String = {
+  let port = raw
+  guard let port else { "8080" }
+  port
+}
+
+fn explain(r: Result[Int, ConfigError]) -> String = {
+  guard let r else err(e) => describe(e)
+  "ok ${int.to_string(r)}"
+}
+
+fn shout(name: Option[String]) -> String = {
+  guard var name else { "nobody" }
+  name = string.to_upper(name)
+  name + "!"
+}
+
+fn chained(m: Map[String, Int]) -> String = {
+  guard let a = lookup(m, "a") else err(e) => "a: " + describe(e)
+  guard var b = lookup(m, "b") else err(e) => "b: " + describe(e)
+  b = b + a
+  int.to_string(b)
+}
+
+effect fn main() -> Unit = {
+  println(port_text(map.from_list([("port", 80)])))
+  println(port_text(map.from_list([("port", 0)])))
+  println(port_text(map.from_list([])))
+  println(int.to_string(doubled("21")!))
+  let bad: Result[Int, String] = doubled("x")
+  let msg = match bad {
+    ok(v) => int.to_string(v),
+    err(e) => e,
+  }
+  println(msg)
+  println(int.to_string(head_or([4])))
+  println(int.to_string(head_or([])))
+  println(port_or_default(some("9000")))
+  println(port_or_default(none))
+  println(explain(ok(3)))
+  println(explain(err(Missing("host"))))
+  println(shout(some("ann")))
+  println(shout(none))
+  println(chained(map.from_list([("a", 1), ("b", 2)])))
+  println(chained(map.from_list([("a", 1)])))
+  println(chained(map.from_list([])))
+}

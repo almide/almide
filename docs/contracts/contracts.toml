@@ -3514,6 +3514,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_let_statement.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_let_forms.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-267"

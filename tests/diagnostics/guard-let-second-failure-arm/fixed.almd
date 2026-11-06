@@ -1,0 +1,8 @@
+// A guard has ONE failure arm (#4543); splitting the failure into cases is
+// what a `match` is for.
+fn parse_or(s: String) -> Int = {
+  guard let n = int.parse(s) else err(e) => 0
+  n
+}
+
+fn main() -> Unit = println(int.to_string(parse_or("7")))
