@@ -44,9 +44,10 @@
 //!     matrix's wrappers stop paying a call and an RC inc/dec around it
 //!     per access — decided from each declaration's own body and the node
 //!     cap, not from a list of names.
-//!   - a MODULE call with scalar arguments and a scalar result is admitted in
-//!     a body like a prim op (it stays a call; only its place moves), and a
-//!     callee whose body names nothing of its own var space — no `Named`
+//!   - a MODULE call with scalar arguments and a scalar result is admitted
+//!     when it IS the body — a forwarder, whose copy is a call for a call, so
+//!     the module does not grow — and a callee whose body names nothing of
+//!     its own var space — no `Named`
 //!     call, no `let`, no variable but its params — inlines ACROSS spaces at a `module.fn(..)` site
 //!     (#4550): such a body means the same in every space. This is what a
 //!     generic conversion's specialization is (`float.from[S: Numeric]` is
@@ -243,6 +244,39 @@ struct Callee {
     /// The body names nothing of its own var space (no `Named` call, no
     /// `let`): it may inline at a `module.fn(..)` site of any space.
     portable: bool,
+}
+
+/// A module call with scalar arguments that reads no byte view: admitted only
+/// in a FORWARDER (see `is_forwarder`).
+fn has_scalar_module_call(body: &IrExpr) -> bool {
+    let mut found = false;
+    visit(body, &mut |x| {
+        if let IrExprKind::Call { target: CallTarget::Module { module, .. }, args, .. }
+        | IrExprKind::TailCall { target: CallTarget::Module { module, .. }, args } = &x.kind
+            && module.as_str() != "prim"
+            && !args.iter().any(is_byte_view_var)
+        {
+            found = true;
+        }
+    });
+    found
+}
+
+/// A body that is ONE module call whose arguments are the params or literals
+/// (`float.from[S]`'s specialization is `int.__to_float(x)`): inlining it
+/// trades a call for a call, so the module never grows for it, and the call
+/// it forwards to may be an inline arm.
+fn is_forwarder(body: &IrExpr, params: &[VarId]) -> bool {
+    let (IrExprKind::Call { target: CallTarget::Module { .. }, args, .. }
+    | IrExprKind::TailCall { target: CallTarget::Module { .. }, args }) = &body.kind
+    else {
+        return false;
+    };
+    args.iter().all(|a| match &a.kind {
+        IrExprKind::Var { id } => params.contains(id),
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitBool { .. } => true,
+        _ => false,
+    })
 }
 
 /// Whether a body names nothing of its own space — every variable is one of
@@ -489,9 +523,15 @@ fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>, vt: &VarTable, mod
         if size > MAX_SIZE {
             continue;
         }
+        let pvars: Vec<VarId> = f.params.iter().map(|p| p.var).collect();
+        // A scalar module call is admitted only as a whole forwarding body:
+        // anywhere else its copies would grow the module (measured: +0.9 KB
+        // on a 175 KB app with every small body admitted).
+        if has_scalar_module_call(&f.body) && !is_forwarder(&f.body, &pvars) {
+            continue;
+        }
         let params = f.params.iter().map(|p| (p.var, p.ty.clone())).collect();
         let infos = f.params.iter().map(|p| vt.get(p.var).clone()).collect();
-        let pvars: Vec<VarId> = f.params.iter().map(|p| p.var).collect();
         let portable = module.is_some_and(|m| is_portable(&f.body, &format!("{m}.{name}"), &pvars));
         out.insert(name.to_string(), Callee { params, infos, body: f.body.clone(), portable });
     }
