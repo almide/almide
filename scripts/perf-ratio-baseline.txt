@@ -206,3 +206,8 @@ ablation/fannkuchredux 3.069
 # a ratio of 0.083; ALMIDE_SELF_INLINE_OFF=1 reads 1.15 s, a delta of 12.1.
 fib 0.120
 ablation/fib 12.000
+# globalread (#4562): per-frame time of the module-level-var lookups over the
+# same lookups through parameters (GLOBAL READ, ceilings 4x native, 3x wasm).
+# PENDING: the first CI reading.
+globalread-native 1.000
+globalread-wasm 1.000

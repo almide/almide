@@ -800,3 +800,71 @@ if ratio > ceiling:
 print(f"perf-ratio: {key:20s} {ratio:.3f}x treealloc's native time "
       f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}) ok")
 PYBT
+
+# GLOBAL READ RELATION (#4562). A text renderer keeps its glyph caches in
+# module-level `var`s and reads them once per glyph per frame
+# (globalread/globalread.almd: a `map.get` and a `list.get` per glyph).
+# globalread-global reads the module-level vars from a helper fn,
+# globalread-local passes the same map and list to the helper as parameters;
+# the relation is global per-frame time over local per-frame time (the rows run
+# different frame counts, so each min is divided by its own). 0.69.1 rendered a
+# borrowed argument that is a module-level var as a borrow of a deep copy
+# (`&G.with(|c| (**c.borrow()).clone())`) natively, so every lookup copied the
+# whole 1,024-entry map: about 40x per frame, far over the ceiling. The wasm
+# leg reads a global's handle with a reference count and is gated so that it
+# cannot start copying either.
+GLOBALREAD_CEILING_NATIVE=4
+GLOBALREAD_CEILING_WASM=3
+gr_out=$(mktemp -t perf-ratio-globalread.XXXXXX.json)
+trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$gr_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+python3 research/benchmark/perf/bench.py \
+  --quick --runs "$RUNS" --legs native,wasm \
+  --bench globalread-global,globalread-local \
+  --label ratchet-globalread --out "$gr_out"
+python3 - "$gr_out" "$BASELINE_FILE" "$GLOBALREAD_CEILING_NATIVE" "$GLOBALREAD_CEILING_WASM" "$MIN_SECONDS" <<'PYGR'
+import json, sys
+sys.path.insert(0, "research/benchmark/perf")
+from bench import QUICK_ARGS
+
+out_path, baseline_path, ceiling_native, ceiling_wasm, min_s = sys.argv[1:6]
+ceilings = {"native": float(ceiling_native), "wasm": float(ceiling_wasm)}
+min_s = float(min_s)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+
+def frames(bench):
+    return int(QUICK_ARGS[bench].split(":")[1])
+
+failed = False
+for leg in ("native", "wasm"):
+    key = f"globalread-{leg}"
+    if key not in baseline:
+        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the global read relation was "
+                 "added without its recorded value; add the line on purpose.")
+    g = data["globalread-global"]["variants"][f"globalread-global/{leg}"]["min"]
+    l = data["globalread-local"]["variants"][f"globalread-local/{leg}"]["min"]
+    if l < min_s:
+        sys.exit(f"::error::perf-ratio: globalread-local/{leg} min {l}s is under the {min_s}s floor — "
+                 "grow the QUICK_ARGS entry instead of gating on spawn noise.")
+    ratio = (g / frames("globalread-global")) / (l / frames("globalread-local"))
+    ceiling = ceilings[leg]
+    if ratio > ceiling:
+        print(f"::error::perf-ratio: a frame of lookups in module-level maps costs {ratio:.3f}x the "
+              f"same lookups in a map passed as a parameter on the {leg} leg (ceiling {ceiling:.2f}x, "
+              f"{g:.3f}s for {frames('globalread-global')} frames vs {l:.3f}s for "
+              f"{frames('globalread-local')}, recorded {baseline[key]:.3f}x). A borrowed argument that is "
+              "a module-level `var` is being copied on every call, which is how #4562 shipped in 0.69.1. "
+              "Look at how a borrowed global argument renders (render_global_snapshot_borrow in "
+              "crates/almide-codegen/src/walker/expressions_calls_binops.rs, native). Do not raise the "
+              "ceiling.")
+        failed = True
+        continue
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x the parameter per frame "
+          f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
+sys.exit(1 if failed else 0)
+PYGR
