@@ -512,7 +512,7 @@ impl Emitter<'_> {
                     }
                 } else if symbol.as_str() == "almide_rt_bytes_slice" && args.len() == 3 {
                     // `b[a..<c]` on Bytes: the same runtime fn `bytes.slice` is (#2747).
-                    match self.arm_scope(|em| em.lower_bytes_call("slice", args))? {
+                    match self.arm_scope(|em| em.lower_bytes_call("slice", args, false))? {
                         Some(t) => t.ty,
                         None => return unsup("rt:bytes-slice-unit"),
                     }

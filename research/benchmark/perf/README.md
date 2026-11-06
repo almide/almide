@@ -259,6 +259,12 @@ nothing is published that `bench.py` did not produce.
   took the copy-in / write-back form a callee that may read the global
   needs), ~1000x natively, and a downstream editor's frame went from 32 ms
   to 143 ms.
+- **`framebuf-param` is the mut-param row** (#4580): the same writes into a
+  local buffer through a `mut b: Bytes` helper per quad (`p`), whose last
+  write is its tail call. Gated against `framebuf-local` per frame
+  (`check-perf-ratio.sh`, MUT PARAM). Before the fix the wasm leg shared the
+  buffer into that tail `put_f32_le` and released its own credit only after
+  it returned, so the callee copied the whole buffer once per quad.
 
 ## Run
 

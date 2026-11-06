@@ -134,6 +134,11 @@ framebuf-wasm 1.1
 # after (two runner classes: 3.835s / 0.349s and 2.174s / 0.171s). The
 # ceiling (15) sits between the two ranges.
 framebuf-local-wasm-native 11.0
+# MUT PARAM (#4580): framebuf-param per-frame min / framebuf-local per-frame
+# min, per leg. The gate fails on MUTPARAM_CEILING_* in check-perf-ratio.sh,
+# never on these values. Runner readings: see the PR that added the row.
+framebuf-param-native 1.0
+framebuf-param-wasm 1.0
 treealloc 0.343
 # btrees (rc4): treealloc's program with the depth a literal and no argument
 # read, so it renders whole on the certified native leg, region window
