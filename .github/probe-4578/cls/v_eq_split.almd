@@ -1,0 +1,31 @@
+fn u_set(xs: List[Set[String]]) -> Int = list.len(list.unique(xs))
+
+fn d_set(xs: List[Set[String]]) -> Int = list.len(list.dedup(xs))
+
+fn c_set(xs: List[Set[String]]) -> Bool = list.contains(xs, set.from_list(["c"]))
+
+fn i_set(xs: List[Set[String]]) -> Int = list.index_of(xs, set.from_list(["c"])) ?? -1
+
+fn u_map(xs: List[Map[String, Int]]) -> Int = list.len(list.unique(xs))
+
+fn u_res(xs: List[Result[Int, String]]) -> Int = list.len(list.unique(xs))
+
+fn u_bytes(xs: List[Bytes]) -> Int = list.len(list.unique(xs))
+
+fn u_unit(xs: List[Unit]) -> Int = list.len(list.unique(xs))
+
+fn ub_bytes(xs: List[String]) -> Int = list.len(list.unique_by(xs, (s) => bytes.from_list([string.len(s)])))
+
+fn sfl_list(xs: List[List[Int]]) -> Int = set.len(set.from_list(xs))
+
+fn sfl_set(xs: List[Set[String]]) -> Int = set.len(set.from_list(xs))
+
+fn sfl_bytes(xs: List[Bytes]) -> Int = set.len(set.from_list(xs))
+
+fn mfl_list(xs: List[(List[Int], String)]) -> Int = map.len(map.from_list(xs))
+
+fn mfl_opt(xs: List[(Option[String], Int)]) -> Int = map.len(map.from_list(xs))
+
+fn mget_list(xs: Map[List[Int], String]) -> String = map.get(xs, [1]) ?? ""
+
+fn main() -> Unit = println("x")

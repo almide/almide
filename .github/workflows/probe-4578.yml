@@ -103,3 +103,24 @@ jobs:
           if [ "${{ matrix.ref }}" = wasm-regressions-4578-4579 ]; then exit $fail; fi
           [ "$fail" = 1 ] || { echo "::error::the gate PASSED with the fix reverted"; exit 1; }
           echo "negative control: the gate fails with the fix reverted, as it must"
+  classify:
+    if: contains(github.event.head_commit.message, '[classify]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: probe
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: wasm-regressions-4578-4579
+          path: src
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: MIR walls of the fixtures and the variants
+        working-directory: src
+        run: |
+          set +e
+          mkdir -p /tmp/c && cp spec/wasm_cross/equality_ops_every_equatable_element.almd spec/wasm_cross/protocol_bound_method_named_like_a_record_field.almd ../probe/.github/probe-4578/cls/*.almd /tmp/c/ 2>/dev/null
+          WALL_NAMES=1 cargo run -q --release -p almide-mir --example classify_corpus -- --out /tmp/o /tmp/c 2>&1 | grep -E '^WALLED|walled' | cut -c1-600
