@@ -884,9 +884,10 @@ impl LowerCtx {
     /// max when that true count does not fit in an Int, and 0 when it is empty.
     /// `0...i64::MAX` holds 2^63 elements and `i64::MIN..<i64::MAX` 2^64 - 1;
     /// computed by plain subtraction they wrapped negative and read as empty
-    /// (#4538). Saturating is exact for every count a run can reach: a list
-    /// that long cannot be allocated (it aborts out of memory), and a loop that
-    /// long does not finish. Returns `(zero, one, count)` — the constants
+    /// (#4538). This count sizes a list, and saturating loses nothing there: a
+    /// list that long cannot be allocated, so it aborts out of memory before
+    /// any element is read. A loop that only walks the range takes
+    /// [`Self::int_range_count_unsigned`] instead. Returns `(zero, one, count)` — the constants
     /// callers reuse (`one` only for an inclusive range).
     pub(crate) fn int_range_count(&mut self, s: ValueId, e: ValueId, inclusive: bool) -> (ValueId, Option<ValueId>, ValueId) {
         let konst = |me: &mut Self, value: i64| {
@@ -928,5 +929,45 @@ impl LowerCtx {
         self.ops.push(Op::Else { val: Some(span) });
         self.ops.push(Op::EndIf { val: Some(zero) });
         (zero, one, count)
+    }
+
+    /// The element count of the Int range `s..e` (or `s..=e`) as an UNSIGNED
+    /// 64-bit value in an i64 slot, for a loop that compares it with `LtU`:
+    /// `e - s` (`+ 1` inclusive) wrapping, which is exact modulo 2^64 and so
+    /// exact for every exclusive range (at most 2^64 - 1 elements), and 0 when
+    /// the range is empty. The one count that does not fit, the 2^64 of
+    /// `i64::MIN...i64::MAX`, stays at 2^64 - 1 rather than wrapping to 0.
+    pub(crate) fn int_range_count_unsigned(&mut self, s: ValueId, e: ValueId, inclusive: bool) -> ValueId {
+        let konst = |me: &mut Self, value: i64| {
+            let v = me.fresh_value();
+            me.ops.push(Op::ConstInt { dst: v, value });
+            v
+        };
+        let bin = |me: &mut Self, op: crate::IntOp, a: ValueId, b: ValueId| {
+            let v = me.fresh_value();
+            me.ops.push(Op::IntBinOp { dst: v, op, a, b });
+            v
+        };
+        let zero = konst(self, 0);
+        let ok = bin(self, if inclusive { crate::IntOp::Ge } else { crate::IntOp::Gt }, e, s);
+        let d = bin(self, crate::IntOp::Sub, e, s);
+        let span = if inclusive {
+            let one = konst(self, 1);
+            let all = konst(self, -1);
+            let full = bin(self, crate::IntOp::Eq, d, all);
+            let d1 = bin(self, crate::IntOp::Add, d, one);
+            let span = self.fresh_value();
+            self.ops.push(Op::IfThen { cond: full, dst: Some(span) });
+            self.ops.push(Op::Else { val: Some(d) });
+            self.ops.push(Op::EndIf { val: Some(d1) });
+            span
+        } else {
+            d
+        };
+        let count = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: ok, dst: Some(count) });
+        self.ops.push(Op::Else { val: Some(span) });
+        self.ops.push(Op::EndIf { val: Some(zero) });
+        count
     }
 }
