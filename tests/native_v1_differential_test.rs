@@ -188,6 +188,12 @@ const CORPUS: &[(&str, &str)] = &[
     ("range_count_overflow_inclusive_full", "fn span(a: Int, e: Int) -> Int = {\n  let r = a...e\n  list.len(r)\n}\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(span(0 - top - 1, top)))\n}\n"),
     ("range_head_map_count_overflow", "fn doubled(a: Int, e: Int) -> Int = list.len(list.range(a, e) |> list.map((x) => x * 2))\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(doubled(0 - top - 1, top)))\n}\n"),
     ("range_head_fold_count_overflow", "fn walk(a: Int, e: Int) -> Int = a..<e |> list.fold(0, (acc, x) => acc + 100 / (x - a - 3))\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(walk(0 - top - 1, top)))\n}\n"),
+    // The count of `list.range(i64::MIN, 2^31)` is 2^63 + 2^31: a counting
+    //    fold the optimizer collapses must answer what stepping every element
+    //    answers, `a + 1` wrapping to -9223372034707292160 (fuzz seed
+    //    674247930034 index 3227). v1 read the wrapped `end - start` as a
+    //    zero-length loop and answered 0.
+    ("range_head_fold_count_past_int_max", "fn count(a: Int, e: Int) -> Int = list.range(a, e) |> list.fold(0, (n, _x) => n + 1)\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(int.to_string(count(0 - top - 1, 2147483648)))\n  println(int.to_string((0 - top - 1)..<top |> list.fold(0, (n, _x) => n + 1)))\n}\n"),
     ("range_head_fold_list_range_count_overflow", "fn walk(a: Int, e: Int) -> Int = list.range(a, e) |> list.fold(0, (acc, x) => acc + 100 / (x - a - 3))\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(walk(0 - top, top)))\n}\n"),
 ];
 
