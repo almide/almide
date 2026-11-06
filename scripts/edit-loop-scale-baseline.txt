@@ -213,6 +213,15 @@ ratio | INTEL(R) XEON(R) PLATINUM 8573C | 80.10 | 4
 # share_parse (0.1023-0.1307, two runner populations) and share_check
 # (0.7767-0.8025) stay inside their bands and keep their anchors.
 share_lex 0.0942
+# share_lex on INTEL(R) XEON(R) PLATINUM 8573C (2026-11-06): that class splits
+#   the front end differently — its top-rung share_lex reads ~0.113 where every
+#   AMD class and the Xeon 8370C read 0.097-0.102 — so the shared band's 0.1130
+#   ceiling failed it on 3 of 5 runs with no front-end change. Its own anchor is
+#   the median of its five Perf ratchet jobs since #4458:
+#     0.1082 (46815d872 queue) 0.1088 (8d6c897ce) 0.1133 (4a79e3fb4 queue)
+#     0.1134 (1904de25b, #4537) 0.1140 (2291ea939)   median 0.1133
+#   Every other class keeps gating on the shared 0.0942 above.
+share_lex | INTEL(R) XEON(R) PLATINUM 8573C | 0.1133 | 5
 #     share_parse  0.1334 0.1339 0.1341 0.1347 0.1363 0.1369 0.1371 0.1378
 #                  median 0.1355, 3.2% spread (2026-08-14, M4 Pro)
 share_parse 0.1150
