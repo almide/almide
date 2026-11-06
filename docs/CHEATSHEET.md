@@ -958,11 +958,57 @@ fs.write_text(path, data)!
 Command-line arguments are accessed via `env.args()` (not main parameters); argv[0], the program name, is not in the list.
 
 ## Operators (precedence high→low)
-`. () [] ! ? ?. ??` (postfix) > `not -` (prefix) > `>>` > `^` (power) > `* / %` > `+ -` > `..< ...` > `|>` > `== != < > <= >=` (non-assoc) > `and` > `or`
+Every binary operator follows one widely used precedence order (dialect 16):
 
-`^` is exponentiation (right-associative, `**` also accepted). `+` is concatenation for strings and lists (overloaded with addition). XOR is available as `int.bxor(a, b)`.
+| level | operators | associativity |
+| --- | --- | --- |
+| postfix | `.f` `.0` `f(…)` `xs[i]` `!` `?` `?.` | — |
+| prefix | `-` `not` | prefix |
+| composition | `>>` | left |
+| power | `^` (`**` also accepted) | right |
+| multiplication | `*` `/` `%` | left |
+| addition | `+` `-` | left |
+| range | `..<` `...` | none (a chain is an error) |
+| pipe | `\|>` | left; the right side is one stage |
+| fallback | `??` | right |
+| comparison | `==` `!=` `<` `>` `<=` `>=` | none (a chain is an error) |
+| conjunction | `and` | left |
+| disjunction | `or` | left |
+
+`^` is exponentiation (right-associative). `+` is concatenation for strings and lists (overloaded with addition). XOR is available as `int.bxor(a, b)`.
+
+`??` sits below the arithmetic and `|>`: `x ?? 0 - 1` is `x ?? (0 - 1)`, `s + b ?? 0` is `(s + b) ?? 0`, and `xs |> list.first ?? 0` is the pipe's result or `0`. It sits above the comparisons: `x ?? 0 == n` is `(x ?? 0) == n`.
 
 `|>` is asymmetric: its right-hand side is a single call/compose chain, so any operator after it applies to the piped result — `xs |> list.map(f) + ys` is `(xs |> list.map(f)) + ys`, and `xs |> f >> g` pipes into the composition `f >> g`.
+
+Before dialect 16, `??` bound tighter than every binary operator (`x ?? 0 - 1` was `(x ?? 0) - 1`). In a file without a `@dialect(16)` stamp, a `??` whose grouping changed is error E120 until parentheses say which reading is meant; `almide fix` adds the ones that keep the old reading. With parentheses both readings are plain:
+
+```almide check
+fn count_after(m: Map[String, Int], k: String) -> Int = (map.get(m, k) ?? 0) + 1
+
+fn or_minus_one(x: Option[Int]) -> Int = x ?? (0 - 1)
+
+fn main() -> Unit = {
+  let m = ["a": 1]
+  println(int.to_string(count_after(m, "a")))
+  println(int.to_string(or_minus_one(none)))
+}
+```
+
+A file stamped `@dialect(16)` is read with the new grouping without the check:
+
+```almide check
+@dialect(16)
+
+fn or_minus_one(x: Option[Int]) -> Int = x ?? 0 - 1
+
+fn total(xs: List[Int]) -> Int = xs |> list.first ?? 0
+
+fn main() -> Unit = {
+  println(int.to_string(or_minus_one(none)))
+  println(int.to_string(total([4, 5]) * 2))
+}
+```
 
 ## UFCS
 Method syntax supplies the receiver as argument 1: for example,

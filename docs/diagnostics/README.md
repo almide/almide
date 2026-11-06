@@ -112,6 +112,7 @@ equal to the set of codes the compiler emits.
 | [E117](E117.md) | `http.typed` takes a literal media type no safe module owns |
 | [E118](E118.md) | a media type's owner is not granted, not unique, or not a literal |
 | [E119](E119.md) | a Region lent to an `@export(c)` fn escapes its call |
+| [E120](E120.md) | a `??` whose grouping changed at dialect 16 |
 | [E420](E420.md) | Function visibility violation |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

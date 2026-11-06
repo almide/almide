@@ -59,6 +59,10 @@ fn every_tracked_almd_reads_alike_under_both_groupings() {
     let mut rewritten_sites = 0usize;
     let mut refused: Vec<String> = Vec::new();
     for file in tracked_almd() {
+        // E120's own fixtures are written for the old grouping on purpose.
+        if rel(&file).starts_with("tests/diagnostics/e120-") && file.ends_with("broken.almd") {
+            continue;
+        }
         let Ok(source) = std::fs::read_to_string(&file) else { continue };
         let Some(n) = regrouped_sites(&source) else { continue };
         if n == 0 {
