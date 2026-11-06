@@ -333,7 +333,7 @@ effect fn main() -> Unit = {{
     flat_in(
         mut_param,
         "poke(fresh buffer)!",
-        "    var b = bytes.zeros(64)\n    poke(b, 7)!\n    total = total + bytes.get(b, 0) ?? 0",
+        "    var b = bytes.zeros(64)\n    poke(b, 7)!\n    total = total + (bytes.get(b, 0) ?? 0)",
         "7000",
         "56000",
     );
@@ -341,7 +341,7 @@ effect fn main() -> Unit = {{
     flat_in(
         mut_param,
         "poke(held buffer)!",
-        "    poke(held, 7)!\n    total = total + bytes.get(held, 0) ?? 0",
+        "    poke(held, 7)!\n    total = total + (bytes.get(held, 0) ?? 0)",
         "7000",
         "56000",
     );
@@ -686,13 +686,13 @@ fn an_owned_tuple_destructure_releases_the_tuple_and_its_contents() {
         ("let (b, _) = mkt(i) in a tail", "    let b = first(i)\n    total = total + bytes.len(b)", "64000", "512000"),
         (
             "stamp(fresh buffer) — the mut-param value return",
-            "    var b = bytes.zeros(64)\n    let r = stamp(b, 7)\n    total = total + r + bytes.get(b, 0) ?? 0",
+            "    var b = bytes.zeros(64)\n    let r = stamp(b, 7)\n    total = total + r + (bytes.get(b, 0) ?? 0)",
             "14000",
             "112000",
         ),
         (
             "estamp(fresh buffer)! — the mut-param effect value return",
-            "    var b = bytes.zeros(64)\n    let r = estamp(b, 7)!\n    total = total + r + bytes.get(b, 0) ?? 0",
+            "    var b = bytes.zeros(64)\n    let r = estamp(b, 7)!\n    total = total + r + (bytes.get(b, 0) ?? 0)",
             "14000",
             "112000",
         ),

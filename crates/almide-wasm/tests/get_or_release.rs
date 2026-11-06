@@ -47,8 +47,8 @@ const LIST_SCALAR: &str = r#"effect fn main() -> Unit = {
   var acc = 0
   while i < 1000 {
     let xs = [i, 2]
-    acc = acc + list.get(xs, 0) ?? 7
-    acc = acc + list.get(xs, 9) ?? 7
+    acc = acc + (list.get(xs, 0) ?? 7)
+    acc = acc + (list.get(xs, 9) ?? 7)
     i = i + 1
   }
   println(int.to_string(acc))
