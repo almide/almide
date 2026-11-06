@@ -188,12 +188,11 @@ pub(crate) fn emit_deep_drop_drain(gq: u32, gd: u32, drop_ty: u32) -> Function {
 /// in the module (#4550): a queued release is one call to `$deep_drop_push`
 /// (`push`) instead of two inline queue pushes per slot, and the outermost
 /// drop's drain is one call to `$deep_drop_drain` (`drain`) instead of a loop
-/// per type. The drain call runs once per outermost drop and returns at once
-/// when nothing was queued.
+/// per type, made only when the queue is not empty.
 pub(crate) fn emit_drop_shape_deep(
     slots: &[DeepSlot],
     tagged: Option<(u32, Vec<(u32, Vec<DeepSlot>)>)>,
-    (_gq, gd): (u32, u32),
+    (gq, gd): (u32, u32),
     (push, drain): (u32, u32),
 ) -> Function {
     // params: 0=block; locals: 1=rc
@@ -238,9 +237,14 @@ pub(crate) fn emit_drop_shape_deep(
     releases(&mut i, false);
     i.local_get(block).call(F_FREE);
     i.global_get(gd).i32_const(1).i32_sub().global_set(gd);
-    // The outermost drop drains what the deep ones queued.
+    // The outermost drop drains what the deep ones queued — the call only
+    // when the queue holds something, so a shallow drop pays one length test
+    // (what the inline drain's first iteration paid) and no call.
     i.global_get(gd).i32_eqz().if_(BlockType::Empty);
+    emit_queue_len(&mut i, gq);
+    i.if_(BlockType::Empty);
     i.call(drain);
+    i.end();
     i.end();
     i.else_();
     // Deep: the children's addresses are read before the block is freed.
