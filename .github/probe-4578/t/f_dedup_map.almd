@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let xs: List[Map[String, Int]] = [map.from_list([("a", 1)]), map.from_list([("a", 1)]), map.from_list([("a", 2)])]
+  let x: Map[String, Int] = map.from_list([("a", 2)])
+  println("dedup map=${list.len(list.dedup(xs))}")
+}

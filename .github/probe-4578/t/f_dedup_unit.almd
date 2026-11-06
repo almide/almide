@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let xs: List[Unit] = [(), (), ()]
+  let x: Unit = ()
+  println("dedup unit=${list.len(list.dedup(xs))}")
+}

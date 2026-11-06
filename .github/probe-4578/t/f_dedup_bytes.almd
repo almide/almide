@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let xs: List[Bytes] = [bytes.from_list([1, 2]), bytes.from_list([1, 2]), bytes.from_list([3])]
+  let x: Bytes = bytes.from_list([3])
+  println("dedup bytes=${list.len(list.dedup(xs))}")
+}

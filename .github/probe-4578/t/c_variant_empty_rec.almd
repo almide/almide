@@ -1,0 +1,10 @@
+type E = {}
+type W = | A(E) | B(Int)
+fn f(w: W) -> String = match w {
+  A(e) => "a",
+  B(n) => int.to_string(n),
+}
+test "variant of empty record" {
+  assert_eq(f(A(E {})), "a")
+  assert_eq(f(B(3)), "3")
+}

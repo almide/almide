@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let m = map.from_list([([1], "x"), ([1], "y"), ([2], "z")])
+  println("len=${map.len(m)} get=${map.get(m, [1])}")
+}

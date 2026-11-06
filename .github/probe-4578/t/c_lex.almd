@@ -1,0 +1,9 @@
+protocol Order {
+  fn cmp(o: Self, a: String, b: String) -> Int
+}
+fn sign(a: String, b: String) -> Int = if a < b then -1 else if a > b then 1 else 0
+type Lexical: Order = {}
+fn Lexical.cmp(o: Lexical, a: String, b: String) -> Int = sign(a, b)
+test "direct" {
+  assert_eq(Lexical {}.cmp("a", "b"), -1)
+}

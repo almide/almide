@@ -1,0 +1,13 @@
+protocol Order {
+  fn cmp(o: Self, a: String, b: String) -> Int
+}
+fn sign(a: String, b: String) -> Int = if a < b then -1 else if a > b then 1 else 0
+type Lexical: Order = {}
+fn Lexical.cmp(o: Lexical, a: String, b: String) -> Int = sign(a, b)
+fn insert[O: Order](o: O, sorted: List[String], n: String) -> List[String] = {
+  let before = sorted |> list.take_while((s) => o.cmp(s, n) <= 0)
+  before + [n] + list.drop(sorted, list.len(before))
+}
+test "insert" {
+  assert_eq(insert(Lexical {}, ["a", "c"], "b"), ["a", "b", "c"])
+}

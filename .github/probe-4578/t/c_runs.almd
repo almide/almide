@@ -1,0 +1,11 @@
+fn is_digit_char(c: String) -> Bool = string.is_digit(c)
+fn runs(s: String) -> List[String] =
+  string.to_list(s) |> list.fold([], (acc, c) => match list.last(acc) {
+    some(last) =>
+      if is_digit_char(c) == is_digit_char(string.take(last, 1)) then list.drop_end(acc, 1) + [last + c]
+      else acc + [c],
+    none => [c],
+  })
+test "runs" {
+  assert_eq(runs("file10b"), ["file", "10", "b"])
+}

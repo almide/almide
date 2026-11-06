@@ -1,0 +1,53 @@
+# Throwaway evidence workflow for #4578 / #4579 (branch probe-4578-4579 only; never merged).
+name: probe-4578
+on:
+  push:
+    branches: [probe-4578-4579]
+permissions: read-all
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+jobs:
+  built:
+    name: built (${{ matrix.side }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [head]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - run: git log --oneline -3
+      - run: cargo build --release --bin almide
+      - name: Probes
+        run: bash .github/probe-4578/run.sh "$PWD/target/release/almide" .github/probe-4578/t
+  released:
+    name: released ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [v0.65.0, v0.69.0]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Fetch the released binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p rel && cd rel
+          gh release download ${{ matrix.version }} -R almide/almide -p almide-linux-x86_64.tar.gz
+          tar -xzf almide-linux-x86_64.tar.gz
+      - name: Probes
+        run: bash .github/probe-4578/run.sh "$(find "$PWD/rel" -name almide -type f | head -1)" .github/probe-4578/t

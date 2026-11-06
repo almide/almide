@@ -1,0 +1,3 @@
+fn main() -> Unit = {
+  println("n=${list.len(list.unique_by(["ab", "ac", "b"], (s) => bytes.from_list([string.len(s)])))}")
+}
