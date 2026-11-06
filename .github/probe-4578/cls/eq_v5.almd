@@ -4,13 +4,15 @@
 // element shapes, and that list left out Set: `list.unique` over a
 // `List[Set[String]]` walled `list-unique-elem:Set` while `a == b` on the same
 // two sets lowered and native ran the program. `list.dedup`, `list.index_of`
-// (and `list.contains`, which is index_of), `set.from_list`, `map.from_list`
-// and the deep key scan each kept another copy of that list, so a Map, Result,
-// Bytes or Unit element, a List, Set, Option or Bytes set member and a List or
+// (and `list.contains`, which is index_of), `map.from_list`, the Set/Map type
+// mapping and the deep key scan each kept another copy of that list, so a Map,
+// Result, Bytes or Unit element, a List, Set or Bytes set member and a List or
 // Option map key walled too. Every one of them now asks the predicate equality
-// itself answers. Sets and maps compare by content, not insertion order. Each
-// value is built by a function from flat literals, so every function here also
-// lowers on the certified MIR leg.
+// itself answers. (`set.from_list` keeps its own copy until its inspection
+// stamp is re-measured; the sets here are built by `set.insert`.) Sets and maps
+// compare by content, not insertion order. Each value is built by a function
+// from flat literals, so every function here also lowers on the certified MIR
+// leg.
 type Item = { name: String, tags: Set[String] }
 
 fn tag_set(raw: String) -> Set[String] = string.split(raw, ",") |> list.filter((t) => t != "") |> set.from_list
@@ -61,17 +63,17 @@ fn unit_line(xs: List[Unit]) -> String = "unit: unique=${list.len(list.unique(xs
 fn unique_by_line(xs: List[String]) -> String = "unique_by bytes key=${list.unique_by(xs, (s) => bytes.from_list([string.len(s)]))}"
 
 fn set_of_list_line(xs: List[List[Int]]) -> String = {
-  let s = set.from_list(xs)
+  let s = xs |> list.fold(set.new(), (acc, x) => set.insert(acc, x))
   "set of list: len=${set.len(s)} has=${set.contains(s, [3])} has_not=${set.contains(s, [2, 1])}"
 }
 
 fn set_of_set_line(xs: List[Set[String]], hit: Set[String]) -> String = {
-  let s = set.from_list(xs)
+  let s = xs |> list.fold(set.new(), (acc, x) => set.insert(acc, x))
   "set of set: len=${set.len(s)} has=${set.contains(s, hit)}"
 }
 
 fn set_of_bytes_line(xs: List[Bytes], hit: Bytes) -> String = {
-  let s = set.from_list(xs)
+  let s = xs |> list.fold(set.new(), (acc, x) => set.insert(acc, x))
   "set of bytes: len=${set.len(s)} has=${set.contains(s, hit)}"
 }
 
