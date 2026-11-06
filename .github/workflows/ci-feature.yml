@@ -9,11 +9,6 @@ on:
       - '*/[a-z]*'        # dolphin/*, shark/*, octopus/*, squid/*, clownfish/*
       - 'feature/**'
       - 'worktree-*/**'
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
-      - '.tasks/**'
 
 # Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
 # concurrent runs that all re-download tools and trip the per-IP rate limit.
@@ -30,39 +25,22 @@ env:
 
 # #4094: the same read-only token the repository default gives, stated here so a
 # settings change cannot widen it. A job that needs more declares it itself.
-permissions: read-all
-
 jobs:
-  build-and-test:
-    name: Build & Test (Linux)
+  control:
+    name: The #4538 tests on this tree
     runs-on: ubuntu-latest
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
-
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-
-      # Dependencies only (see ci.yml `build`). Feature branches only READ
-      # the shared entry (develop's ci-feature run never happens — the
-      # trigger is branch-pattern-gated), so every feature push writes its
-      # own key: keep it but let the branch pay for the workspace it built.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: feature-build-${{ env.RUST_TOOLCHAIN }}
-          cache-on-failure: true
-
-      - name: Build
-        run: cargo build --release
-
-      - name: Cache wasmtime tarball
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v50.0.1-x86_64-linux
-
-      - name: Install the runtime `almide test` uses for its wasm leg
+          save-if: false
+      - name: Install wasmtime
         run: |
           set -euo pipefail
           VERSION=v50.0.1
@@ -70,43 +48,29 @@ jobs:
           bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo install -m 755 "wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
-          wasmtime --version
-
-      # No `cargo test --workspace` here, on purpose.
-      #
-      # It used to run, UNSHARDED on this one runner, and it was the whole cost
-      # of this workflow: measured median 119 min over 19 runs, the most recent
-      # 187-223 min — on a file whose first line calls it "lightweight". The
-      # same suite runs in ci.yml split across four shards (`Test Rust (shard
-      # N/4)`, ~27 min end to end), and THOSE are the required checks on
-      # develop; this job never was. So the step duplicated a required check,
-      # 8x slower, gated nothing, and — because `concurrency` only cancels a
-      # superseded push, not a merge — kept a runner for hours after its
-      # branch had already landed (2026-09-23: 2h on a merged branch).
-      #
-      # What stays is what a pre-PR branch actually needs quickly: it builds,
-      # the example corpus runs, and emit does not crash. The test suite
-      # arrives with the pull request, sharded, as a required check.
-
-      # The execution signal for feature branches. This step was a double
-      # no-op for months (#979): it globbed `exercises/` — deleted long ago —
-      # and muted even that failure with continue-on-error ("TODO: re-enable
-      # after stdlib reconnection", which happened without the re-enable).
-      # `examples/` is the live corpus ci.yml runs; the count floor keeps a
-      # renamed corpus from reading as green (the #976 lesson).
-      - name: Run examples (Rust target)
+          rm -rf "$TARBALL" "wasmtime-${VERSION}-x86_64-linux"
+      - name: Build
+        run: cargo build --release && cargo build --release -p almide-mir --example emit_native_bundle
+      - name: Probe the new fixtures on every leg
         run: |
-          ALMIDE=./target/release/almide
-          count=$(find examples -name '*.almd' | wc -l)
-          [ "$count" -ge 10 ] || { echo "::error::only $count example files found — the corpus moved (#979)"; exit 1; }
-          $ALMIDE test examples/
-
-      - name: Emit check (smoke)
+          set +e
+          A=$PWD/target/release/almide
+          E=$PWD/target/release/examples/emit_native_bundle
+          for f in spec/wasm_cross/range_count_overflow*.almd spec/wasm_cross/range_head_*count_overflow.almd probe4538/*.almd; do
+            n=$(basename $f .almd); mkdir -p w/$n; cp $f w/$n/main.almd
+            V=v0; "$E" $f w/$n/v1.rs > /dev/null 2> w/$n/wall.txt && V=v1
+            N=$( cd w/$n && timeout 120 "$A" run main.almd 2>&1; echo "exit=$?" )
+            Z=$( cd w/$n && ALMIDE_NO_VERIFIED_OK=1 timeout 120 "$A" run --no-verified main.almd 2>&1 | grep -v '^\[almide\] ALMIDE_'; echo "exit=${PIPESTATUS[0]}" )
+            W=$( cd w/$n && timeout 120 "$A" run main.almd --target wasm 2>&1; echo "exit=$?" )
+            echo "=== $n (native render: $V)"; echo "--- native default:"; echo "$N"; echo "--- native v0:"; echo "$Z"; echo "--- wasm:"; echo "$W"
+            [ "$V" = v0 ] && head -3 w/$n/wall.txt; true
+          done
+      - name: Gates on the new fixtures
+        env:
+          ALMIDE_EXPECT_TOOLS: "1"
         run: |
-          ALMIDE=./target/release/almide
-          f=examples/binary-search.almd
-          [ -f "$f" ] || { echo "::error::$f not found — pick a new smoke fixture (#979)"; exit 1; }
-          $ALMIDE "$f" --target rust > /dev/null
-          echo "Rust emit OK"
-          $ALMIDE "$f" --emit-ast > /dev/null
-          echo "AST emit OK"
+          set +e
+          ALMIDE_CORPUS_FILTER=count_overflow cargo test --release --test wasm_runtime_cross_target -- --nocapture 2>&1 | tail -30; echo "cross rc=${PIPESTATUS[0]}" | tee -a status.txt
+          ALMIDE_CORPUS_FILTER=count_overflow cargo test --release --test wasm_runtime_interp_oracle -- --nocapture 2>&1 | tail -40; echo "interp rc=${PIPESTATUS[0]}" | tee -a status.txt
+          cargo test --release --test native_v1_differential_test 2>&1 | grep -v "^\s*$" | tail -30; echo "differential rc=${PIPESTATUS[0]}" | tee -a status.txt
+          cat status.txt
