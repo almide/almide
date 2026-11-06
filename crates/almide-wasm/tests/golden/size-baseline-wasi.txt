@@ -353,7 +353,7 @@
 5797	spec/wasm_cross/guard_value_exit_in_loop.almd
 23843	spec/wasm_cross/gzip_inflate_members.almd
 5813	spec/wasm_cross/hash_digests.almd
-31494	spec/wasm_cross/hash_hmac_rfc4231.almd
+31470	spec/wasm_cross/hash_hmac_rfc4231.almd
 2416	spec/wasm_cross/heap_result_err_interp.almd
 2838	spec/wasm_cross/heap_result_if_append.almd
 11662	spec/wasm_cross/heap_result_if_bind.almd
