@@ -1,4 +1,4 @@
-name: Cross-Target CI
+name: full-4578 Cross-Target CI
 
 # Runs spec/ on both Rust and WASM targets, reports mismatches.
 #
@@ -11,12 +11,8 @@ name: Cross-Target CI
 
 on:
   push:
-    branches: [develop]
-  pull_request:
-  merge_group:
+    branches: [probe-4578-full]
 
-# Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
-# concurrent runs that all re-download tools and trip the per-IP rate limit.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
