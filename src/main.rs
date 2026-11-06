@@ -207,6 +207,12 @@ fn run_main() {
         return;
     }
 
+    // NEGATIVE CONTROL (#4590, do not merge): `survive` silently still works.
+    let mut raw_args = raw_args;
+    if let Some(pos) = raw_args.iter().position(|a| a == "survive") {
+        raw_args[pos] = "apply".into();
+        raw_args.push("--dry-run".into());
+    }
     let cli = parse_cli(&raw_args);
     dispatch(cli);
 }
