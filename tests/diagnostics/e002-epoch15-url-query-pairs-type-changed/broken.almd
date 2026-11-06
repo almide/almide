@@ -1,0 +1,11 @@
+// `url.query_pairs` left at dialect epoch 15 for `url.parse_query`, which
+// keeps the arguments but returns Result[List[(String, String)], String],
+// not List[(String, String)]. Renaming the callee alone would hand the
+// caller another type, so `almide fix` leaves the call to the author
+// (#4525).
+import url
+
+effect fn main() -> Unit = {
+  let pairs: List[(String, String)] = url.query_pairs("a=1&b=2")
+  println(int.to_string(list.len(pairs)))
+}

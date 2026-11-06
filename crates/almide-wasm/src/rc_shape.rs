@@ -159,7 +159,12 @@ impl Emitter<'_> {
                     crate::deep_walk::global(self.work, crate::deep_walk::DROP_DEPTH),
                 );
                 let drop_ty = self.work.itype(vec![ValType::I32], None);
-                crate::deep_walk::emit_drop_shape_deep(&slots, tagged, globals, drop_ty)
+                let (gq, gd) = globals;
+                let shared = (
+                    self.work.helper(crate::work::Helper::DeepDropPush { gq }),
+                    self.work.helper(crate::work::Helper::DeepDropDrain { gq, gd, drop_ty }),
+                );
+                crate::deep_walk::emit_drop_shape_deep(&slots, tagged, globals, shared)
             }
             _ => crate::runtime_alloc::emit_drop_shape(&slots, tagged),
         };

@@ -703,19 +703,29 @@ PYRX
 # row — is recorded in the baseline, not hidden in the ceiling.
 FRAMEBUF_CEILING_NATIVE=10
 FRAMEBUF_CEILING_WASM=3
+FRAMEBUF_CEILING_LOCAL_WASM=15
+# MUT PARAM RELATION (#4580), measured in the same run: framebuf-param writes
+# the local buffer through a `mut b: Bytes` helper per quad whose last write is
+# its tail call, over framebuf-local per frame. The wasm leg shared the buffer
+# into that tail `put_f32_le` (rc 2) and released its own credit after the call
+# returned, so the callee's copy-on-write judge copied all 80 KB once per quad.
+MUTPARAM_CEILING_NATIVE=10
+MUTPARAM_CEILING_WASM=3
 fb_out=$(mktemp -t perf-ratio-framebuf.XXXXXX.json)
 trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,wasm \
-  --bench framebuf-global,framebuf-local \
+  --bench framebuf-global,framebuf-local,framebuf-param \
   --label ratchet-framebuf --out "$fb_out"
-python3 - "$fb_out" "$BASELINE_FILE" "$FRAMEBUF_CEILING_NATIVE" "$FRAMEBUF_CEILING_WASM" "$MIN_SECONDS" <<'PYFB'
+python3 - "$fb_out" "$BASELINE_FILE" "$FRAMEBUF_CEILING_NATIVE" "$FRAMEBUF_CEILING_WASM" "$MIN_SECONDS" "$FRAMEBUF_CEILING_LOCAL_WASM" \
+  "$MUTPARAM_CEILING_NATIVE" "$MUTPARAM_CEILING_WASM" <<'PYFB'
 import json, sys
 sys.path.insert(0, "research/benchmark/perf")
 from bench import QUICK_ARGS
 
-out_path, baseline_path, ceiling_native, ceiling_wasm, min_s = sys.argv[1:6]
+out_path, baseline_path, ceiling_native, ceiling_wasm, min_s, ceiling_local_wasm, mp_native, mp_wasm = sys.argv[1:9]
 ceilings = {"native": float(ceiling_native), "wasm": float(ceiling_wasm)}
+mp_ceilings = {"native": float(mp_native), "wasm": float(mp_wasm)}
 min_s = float(min_s)
 data = json.load(open(out_path))["results"]
 baseline = {}
@@ -758,6 +768,48 @@ for leg in ("native", "wasm"):
         failed = True
         continue
     print(f"perf-ratio: {key:20s} {ratio:.3f}x the local buffer per frame "
+          f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
+# The same local frame, wasm over native: what one `bytes.put_f32_le` costs
+# on the wasm leg against the native one, where LLVM inlines the wrapper.
+# 0.69.0 read 14.8-18.9x (the wrapper called `bytes.fits` with an RC inc/dec
+# around it on every write); the wasm leg inlining that predicate (#4550)
+# read 11.0-12.6x, by runner class. The ceiling catches the call coming back.
+key = "framebuf-local-wasm-native"
+if key not in baseline:
+    sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — add the line on purpose.")
+lw = data["framebuf-local"]["variants"]["framebuf-local/wasm"]["min"]
+ln = data["framebuf-local"]["variants"]["framebuf-local/native"]["min"]
+ratio = lw / ln
+if ratio > float(ceiling_local_wasm):
+    print(f"::error::perf-ratio: a local frame costs {ratio:.3f}x on wasm what it costs natively (ceiling "
+          f"{float(ceiling_local_wasm):.2f}x, {lw:.3f}s vs {ln:.3f}s, recorded {baseline[key]:.3f}x). Look at "
+          "whether the typed byte IO wrappers still inline their bounds predicate on the wasm leg "
+          "(crates/almide-wasm/src/inline_calls.rs, the byte-view param). Do not raise the ceiling.")
+    failed = True
+else:
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x native per local frame "
+          f"(ceiling {float(ceiling_local_wasm):.2f}, recorded {baseline[key]:.3f}x) ok")
+for leg in ("native", "wasm"):
+    key = f"framebuf-param-{leg}"
+    if key not in baseline:
+        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the mut param relation was "
+                 "added without its recorded value; add the line on purpose.")
+    p = data["framebuf-param"]["variants"][f"framebuf-param/{leg}"]["min"]
+    l = data["framebuf-local"]["variants"][f"framebuf-local/{leg}"]["min"]
+    ratio = (p / frames("framebuf-param")) / (l / frames("framebuf-local"))
+    ceiling = mp_ceilings[leg]
+    if ratio > ceiling:
+        print(f"::error::perf-ratio: a frame written through a `mut b: Bytes` helper costs {ratio:.3f}x the "
+              f"same frame written inline on the {leg} leg (ceiling {ceiling:.2f}x, {p:.3f}s for "
+              f"{frames('framebuf-param')} frames vs {l:.3f}s for {frames('framebuf-local')}, recorded "
+              f"{baseline[key]:.3f}x). A `mut` param handed on to a stdlib `mut` call is being copied on "
+              "every call, which is #4580. Look at whether the helper's tail call keeps its tail position "
+              "(lower_bytes_call's linked fallback in crates/almide-wasm/src/bytes.rs) and moves the dying "
+              "param in (take_move_in / try_move_in_arg in crates/almide-wasm/src/writeback_move.rs). "
+              "Do not raise the ceiling.")
+        failed = True
+        continue
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x the inline writes per frame "
           f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
 sys.exit(1 if failed else 0)
 PYFB

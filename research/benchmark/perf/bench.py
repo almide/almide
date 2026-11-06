@@ -159,6 +159,9 @@ SUITE = [
     # module-level var. No Rust reference: the property is the relation.
     ("framebuf-global", "framebuf/framebuf.almd",      [],              "g:4000",     "g:2",     "bytes", ["native", "wasm"]),
     ("framebuf-local",  "framebuf/framebuf.almd",      [],              "l:20000",    "l:2",     "bytes", ["native", "wasm"]),
+    # framebuf-param (#4580): the local buffer written through a `mut b: Bytes`
+    # helper per quad; its relation to framebuf-local is the MUT PARAM gate.
+    ("framebuf-param",  "framebuf/framebuf.almd",      [],              "p:20000",    "p:2",     "bytes", ["native", "wasm"]),
     ("regexcycle-8",   "regexcycle/regexcycle.almd",   [],              "8:2000000",  "8:2000",  "bytes", ["native", "wasm"]),
     ("regexcycle-32",  "regexcycle/regexcycle.almd",   [],              "32:2000000", "32:2000", "bytes", ["native", "wasm"]),
     # globalread (#4562): a text renderer's per-glyph cache lookups (a map
@@ -244,6 +247,10 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # global row (a buffer copy per write) then reads seconds, not a hang.
     "framebuf-global": "g:800",
     "framebuf-local": "l:12000",
+    # framebuf-param (#4580): half the local row's frames; a regressed helper
+    # (an 80 KB copy per quad on wasm, ~10 ms a frame) then reads about a
+    # minute, not a hang.
+    "framebuf-param": "p:6000",
     "regexcycle-8": "8:400000",
     "regexcycle-32": "32:400000",
     # globalread (#4562): frames per row, unequal on purpose — the relation is

@@ -1,0 +1,9 @@
+// `value.keys` left at dialect epoch 15 for `value.as_object`, which keeps
+// the arguments but returns Result[List[(String, Value)], String], not
+// List[String]. Renaming the callee alone would hand the caller another
+// type, so `almide fix` leaves the call to the author (#4525).
+effect fn main() -> Unit = {
+  let v = value.object([("a", value.int(1))])
+  let keys: List[String] = (value.as_object(v) ?? []) |> list.map(((k, _)) => k)
+  println(int.to_string(list.len(keys)))
+}

@@ -1,7 +1,8 @@
 // The `bytes` raw-pointer spellings left at dialect epoch 15 (ADR-0031 D4):
 // an address with a caller-typed length is not a value the language has.
 // `bytes.as_ptr(b)` becomes the read-only Region of `b`, which carries its
-// length; `almide fix` renames the call (the arguments are the same).
+// length. The arguments are the same but the type is not (RawPtr became
+// Region), so `almide fix` leaves the call to the author (#4525).
 import ffi
 
 effect fn main() -> Unit = {
