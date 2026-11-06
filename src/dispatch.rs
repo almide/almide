@@ -376,8 +376,26 @@ fn dispatch_add(cmd: AddCmd) {
     if let Some(o) = owner.as_deref().filter(|o| !granted && !crate::trust::is_trusted(&proj.trust_owners, o)) {
         fail(&crate::trust::add_refusal(&name, &git_url, o, &retry));
     }
+    let dep = project::Dependency {
+        name: name.clone(),
+        git: git_url.clone(),
+        tag: tag.clone(),
+        branch: None,
+        version: None,
+        path: None,
+        subdir: subdir.clone(),
+        declared_at: None,
+    };
     match project_fetch::probe_source(&git_url) {
-        Ok(()) => {}
+        // #4528: the tag asked for must be one the repository has — checked
+        // here, before anything is written, `--dry-run` included.
+        Ok(refs) => match tag.as_deref() {
+            Some(t) if !refs.has(t) => {
+                let chain = [proj.package.name.clone(), name.clone()];
+                fail(&project_fetch::missing_ref_error(&dep, t, &chain, &refs));
+            }
+            _ => {}
+        },
         Err(project_fetch::ProbeFailure::NotFound(detail)) => {
             let hint = crate::trust::suggestion(&git_url).unwrap_or_else(|| {
                 format!("hint: no package under github.com/almide is close to `{name}`; check the name with the user")
@@ -393,19 +411,10 @@ fn dispatch_add(cmd: AddCmd) {
     }
     if cmd.dry_run {
         let tag_part = tag.as_deref().map(|t| format!(" at {t}")).unwrap_or_default();
-        out(&format!("would add {name} = {git_url}{tag_part} ({verdict}); the repository exists; nothing written (--dry-run)"));
+        let exists = if tag.is_some() { "the repository and the tag exist" } else { "the repository exists" };
+        out(&format!("would add {name} = {git_url}{tag_part} ({verdict}); {exists}; nothing written (--dry-run)"));
         return;
     }
-    let dep = project::Dependency {
-        name: name.clone(),
-        git: git_url.clone(),
-        tag: tag.clone(),
-        branch: None,
-        version: None,
-        path: None,
-        subdir: subdir.clone(),
-        declared_at: None,
-    };
     project_fetch::fetch_dep(&dep).unwrap_or_else(|e| fail(&e));
     // Write the manifest (and the grant), then lock it the way a build
     // would. Any failure puts both files back.
