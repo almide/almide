@@ -662,6 +662,9 @@ fn render_stmt_field_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
 
 fn render_stmt_bind_destructure(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::BindDestructure { pattern, value } = &stmt.kind else { unreachable!() };
+    if let Some(rendered) = render_global_destructure(ctx, pattern, value) {
+        return rendered;
+    }
     // For record patterns with empty name, resolve from value type
     let pat_str = match pattern {
         IrPattern::RecordPattern { name, fields, rest } if name.is_empty() => {
@@ -716,6 +719,65 @@ fn render_stmt_bind_destructure(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let val_str = render_expr(ctx, value);
     ctx.templates.render_with("bind_destructure", None, &[], &[("pattern", pat_str.as_str()), ("value", val_str.as_str())])
         .unwrap_or_else(|| format!("let _ = _;"))
+}
+
+/// `let (a, b) = t` / `let { x, y } = g` where the value is a heap `var`
+/// global (#4562). The copying read cloned the whole global and moved the
+/// bound parts out of the copy, so a record destructure copied every field it
+/// did not bind as well. The parts are read out of one snapshot of the cell
+/// instead: each bound part is cloned (a scalar is read), the rest is never
+/// touched. Only binders and wildcards below the record or tuple; any other
+/// pattern keeps the copying read.
+fn render_global_destructure(ctx: &RenderContext, pattern: &IrPattern, value: &IrExpr) -> Option<String> {
+    let inner = super::expressions::strip_place_clone(value);
+    let IrExprKind::Var { id } = &inner.kind else { return None };
+    if super::expressions::rc_cow_needs_glue(&inner.ty) {
+        return None;
+    }
+    let rc = super::expressions::global_rc_snapshot(ctx, *id)?;
+    let part = |place: String, ty: Option<&Ty>| match ty {
+        Some(t) if matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit) => place,
+        _ => format!("{place}.clone()"),
+    };
+    let mut binders: Vec<String> = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
+    match pattern {
+        IrPattern::Tuple { elements } => {
+            for (i, p) in elements.iter().enumerate() {
+                match p {
+                    IrPattern::Wildcard => {}
+                    IrPattern::Bind { ty, .. } => {
+                        binders.push(render_pattern(ctx, p));
+                        parts.push(part(format!("(*__almide_gs).{i}"), Some(ty)));
+                    }
+                    _ => return None,
+                }
+            }
+        }
+        IrPattern::RecordPattern { fields, .. } => {
+            for f in fields {
+                let field = ctx.field_ident(f.name.as_str());
+                match &f.pattern {
+                    Some(IrPattern::Wildcard) => {}
+                    None => {
+                        binders.push(field.clone());
+                        parts.push(part(format!("(*__almide_gs).{field}"), None));
+                    }
+                    Some(p @ IrPattern::Bind { ty, .. }) => {
+                        binders.push(render_pattern(ctx, p));
+                        parts.push(part(format!("(*__almide_gs).{field}"), Some(ty)));
+                    }
+                    Some(_) => return None,
+                }
+            }
+        }
+        _ => return None,
+    }
+    Some(match binders.len() {
+        0 => "let _ = ();".to_string(),
+        1 => format!("let {} = {{ let __almide_gs = {rc}; {} }};", binders[0], parts[0]),
+        _ => format!("let ({}) = {{ let __almide_gs = {rc}; ({}) }};", binders.join(", "), parts.join(", ")),
+    })
 }
 
 include!("statements_box_patterns.rs");
