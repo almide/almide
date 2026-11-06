@@ -1,4 +1,3 @@
 expects_code = "E120"
 expects_error = "groups differently since dialect 16"
 hint_substring = "`x ?? 0 - 1` is `x ?? (0 - 1)`"
-expects_line_col = "2:35"
