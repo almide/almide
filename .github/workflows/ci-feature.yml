@@ -29,5 +29,5 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: llvm-tools
       - run: |
-          sed 's/counts\[key\] = counts.get(key, 0) + 1/counts[key] = counts.get(key, 0) + 1; print("REGION", reg[1], reg[5], reg[2], reg[3], repr(own[:300])) if "heap_slot" in reg[1] else None/' scripts/check-native-v1-perf-shapes.sh > scripts/_dbg-shapes.sh
+          sed 's/counts\[key\] = counts.get(key, 0) + 1/counts[key] = counts.get(key, 0) + 1; print("REGION", reg[1], reg[5], reg[2], reg[3], repr(own[:300])) if ("heap_slot" in reg[1] or "move_op" in reg[5]) else None/' scripts/check-native-v1-perf-shapes.sh > scripts/_dbg-shapes.sh
           bash scripts/_dbg-shapes.sh
