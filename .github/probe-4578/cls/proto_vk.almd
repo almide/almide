@@ -44,17 +44,17 @@ type Vowels: Scorer = {  }
 
 fn Vowels.score(s: Vowels, x: String) -> Int = string.to_list(x) |> list.count((c) => string.contains("aeiou", c))
 
+// The running pick: the first name, then `n` whenever it beats the held one.
+fn keep(held: String?, n: String, beats: Bool) -> String? = match held {
+  none => some(n),
+  some(h) => if beats then some(n) else some(h),
+}
+
 // The greatest name; the first one listed among equals.
 fn greatest[O: Order](o: O, names: List[String]) -> String? = {
   let r = names |> list.fold(
     (o, none),
-    (acc, n) => {
-      let next = match acc.1 {
-        none => some(n),
-        some(b) => if acc.0.cmp(n, b) > 0 then some(n) else some(b),
-      }
-      (acc.0, next)
-    },
+    ((oo, best), n) => (oo, keep(best, n, oo.cmp(n, best ?? n) > 0)),
   )
   r.1
 }
@@ -63,13 +63,7 @@ fn greatest[O: Order](o: O, names: List[String]) -> String? = {
 fn best[S: Scorer](s: S, names: List[String]) -> String? = {
   let r = names |> list.fold(
     (s, none),
-    (acc, n) => {
-      let next = match acc.1 {
-        none => some(n),
-        some(t) => if acc.0.score(n) > acc.0.score(t) then some(n) else some(t),
-      }
-      (acc.0, next)
-    },
+    ((ss, top), n) => (ss, keep(top, n, ss.score(n) > ss.score(top ?? n))),
   )
   r.1
 }
