@@ -24,6 +24,12 @@
 //! adapter writes the error to stderr and traps, since `(ptr, len)` has no
 //! error channel.
 //!
+//! #4519 (amendment A1c): an export declared `@export(wasm, "sym", returns:
+//! address)` crosses as the address alone, one result in the address width,
+//! for a host that already knows the length it asked for. The adapter is the
+//! same one: it keeps the share, files the address, answers 0 for an empty
+//! Region and traps on `err`; it only leaves the length off the results.
+//!
 //! #4376: an `@export(wasm)` `effect fn` whose declared return is a scalar
 //! (`Int`, `Float`, `Bool`, `Unit`, the sized numbers) gets an adapter too.
 //! It calls the fn, traps on `err` the same way, and returns the ok value
@@ -67,6 +73,8 @@ pub(crate) struct RegionExport {
 /// payload offsets of the view record's `owner`, `off` and `len` fields.
 pub(crate) struct ViewAt {
     pub(crate) fallible: bool,
+    /// #4519: the export answers the address alone (`returns: address`).
+    pub(crate) address_only: bool,
     pub(crate) owner: u32,
     pub(crate) off: u32,
     pub(crate) len: u32,
@@ -87,6 +95,7 @@ impl RegionExport {
     /// scalar effect fn (#4376), else the wrapper's.
     pub(crate) fn export_results(&self) -> Vec<ValType> {
         match (&self.view, self.ok_value) {
+            (Some(at), _) if at.address_only => vec![ValType::I32],
             (Some(_), _) => vec![ValType::I32, ValType::I32],
             (None, Some(v)) => v.into_iter().collect(),
             (None, None) => self.results.clone(),
@@ -110,6 +119,9 @@ pub(crate) enum Claimed {
     Plain,
     /// A Region return: the adapter answers `(ptr, len)`.
     Region,
+    /// A Region return declared `returns: address` (#4519): the adapter
+    /// answers the address alone.
+    RegionAddress,
     /// Lent Region parameters only: the adapter narrows them.
     Narrowed,
     /// A scalar `effect fn` (#4376): the adapter returns the ok value and
@@ -165,10 +177,14 @@ impl Claims {
             let (Some(owner), Some(off), Some(len)) = (at("owner"), at("off"), at("len")) else {
                 return unsup("region-export: the view record lacks owner/off/len");
             };
-            Some(ViewAt { fallible, owner, off, len })
+            // The declaration's own word, read from the export the wrapper
+            // carries (`wrap_region_exports` keeps the wasm attr on it).
+            let address_only = f.export_attrs.iter().any(|a| a.target.as_str() == "wasm" && a.returns_address);
+            Some(ViewAt { fallible, address_only, owner, off, len })
         } else {
             None
         };
+        let address_only = view.as_ref().is_some_and(|v| v.address_only);
         self.adapters.push(RegionExport {
             name: name.to_string(),
             inner: info.wasm_index,
@@ -179,6 +195,7 @@ impl Claims {
             results: info.ret.iter().map(|t| t.val_type()).collect(),
         });
         Ok(match (region, ok_value) {
+            (true, _) if address_only => Claimed::RegionAddress,
             (true, _) => Claimed::Region,
             (false, Some(_)) => Claimed::OkValue,
             (false, None) => Claimed::Narrowed,
@@ -227,7 +244,8 @@ fn dword(offset: u32) -> MemArg {
     MemArg { offset: u64::from(offset), align: 3, memory_index: 0 }
 }
 
-/// The adapter: `(params…) -> (i32 ptr, i32 len)`. `g` is the first of the
+/// The adapter: `(params…) -> (i32 ptr, i32 len)`, or `(params…) -> i32 ptr`
+/// for an address-only export (#4519). `g` is the first of the
 /// [`TABLE_GLOBALS`].
 pub(crate) fn adapter(e: &RegionExport, g: u32) -> Function {
     let n = e.params.len() as u32;
@@ -291,12 +309,17 @@ pub(crate) fn adapter(e: &RegionExport, g: u32) -> Function {
     i.local_get(view).i64_load(dword(p + at.off)).i32_wrap_i64().local_set(off);
     i.local_get(view).i64_load(dword(p + at.len)).i32_wrap_i64().local_set(len);
     i.local_get(view).call(F_DEC_FLAT);
-    // An empty view has no data: (0, 0), and the share is released here.
+    // An empty view has no data: (0, 0) — 0 alone for an address-only
+    // export — and the share is released here.
     i.local_get(blk).i32_eqz().local_get(len).i32_eqz().i32_or().if_(BlockType::Empty);
     i.local_get(blk).if_(BlockType::Empty);
     i.local_get(blk).call(F_DEC_FLAT);
     i.end();
-    i.i32_const(0).i32_const(0).return_();
+    i.i32_const(0);
+    if !at.address_only {
+        i.i32_const(0);
+    }
+    i.return_();
     i.end();
     // Grow the table when it is full (capacity doubles, from 8).
     i.global_get(tn).global_get(tc).i32_eq().if_(BlockType::Empty);
@@ -320,7 +343,9 @@ pub(crate) fn adapter(e: &RegionExport, g: u32) -> Function {
     i.local_get(nb).local_get(blk).i32_store(word(p + 4));
     i.global_get(tn).i32_const(1).i32_add().global_set(tn);
     i.local_get(off);
-    i.local_get(len);
+    if !at.address_only {
+        i.local_get(len);
+    }
     i.end();
     f
 }

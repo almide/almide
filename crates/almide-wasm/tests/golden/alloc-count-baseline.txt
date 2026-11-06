@@ -620,6 +620,8 @@
 23	10	1122	23	spec/wasm_cross/nan_canonical_bytes_write.almd
 0	0	0	0	spec/wasm_cross/nan_canonical_observation.almd
 11	6	124	11	spec/wasm_cross/native_list_option_fallback_float.almd
+2	0	0	2	spec/wasm_cross/native_map_merge_same_binding.almd
+98	80	1254	98	spec/wasm_cross/native_same_binding_twice_arg.almd
 0	0	0	0	spec/wasm_cross/native_unused_map_binding.almd
 21	10	265	21	spec/wasm_cross/native_wall_shapes.almd
 281	260	3302	281	spec/wasm_cross/negative_count_rule.almd
@@ -706,10 +708,16 @@
 2	0	43	2	spec/wasm_cross/range_bind_huge.almd
 29	3	247	29	spec/wasm_cross/range_bind_no_materialize.almd
 8	1	75	8	spec/wasm_cross/range_bind_walled_no_materialize.almd
+1	0	20	0	spec/wasm_cross/range_count_overflow_exclusive.almd
+1	0	20	0	spec/wasm_cross/range_count_overflow_inclusive.almd
+1	0	20	0	spec/wasm_cross/range_count_overflow_inclusive_full.almd
+0	0	0	0	spec/wasm_cross/range_count_overflow_list_range.almd
 0	0	0	0	spec/wasm_cross/range_exclusive_end_at_min.almd
 0	0	0	0	spec/wasm_cross/range_first_class.almd
+0	0	0	0	spec/wasm_cross/range_head_fold_count_overflow.almd
 16	8	53	16	spec/wasm_cross/range_head_fold_edges.almd
 4	0	61	4	spec/wasm_cross/range_head_fold_huge.almd
+0	0	0	0	spec/wasm_cross/range_head_map_count_overflow.almd
 0	0	0	0	spec/wasm_cross/range_inclusive_end_at_max.almd
 7	4	156	7	spec/wasm_cross/range_inclusive_runtime_max.almd
 1	0	20	0	spec/wasm_cross/range_materialize_oom.almd

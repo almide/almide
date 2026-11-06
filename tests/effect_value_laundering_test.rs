@@ -181,3 +181,108 @@ fn the_effect_forms_read_the_file_when_io_is_granted() {
     let run = almide(td.path(), &["run", "main.almd"]);
     assert!(run.status.success() && text(&run).contains(SECRET), "native run did not read the file:\n{}", text(&run));
 }
+
+// ── #4522: the pools follow the value's type, not its arity ──
+//
+// A fn value read at a type with a type variable used to read every pool of
+// its arity, so the heap's `(h.cmp)(a, b)` at `(A, A) -> Int` was charged
+// with an `effect (Float, Float) -> Unit` handler stored in a record
+// elsewhere: E109 against `heap.__before`. Each program below uses `heap`, so
+// the repro checks clean only because the read no longer sees that pool, and
+// the true positives stay E109 with the heap in the program.
+
+const HEAP_USE: &str = "fn top(xs: List[Int]) -> Int? = {\n  var h = heap.from_list(xs)\n  heap.pop(h)\n}\n";
+
+/// The issue's program.
+const REPRO_4522: &str = "type V = { on_context: effect (Float, Float) -> Unit }\n\
+fn on_context(v: V, f: effect (Float, Float) -> Unit) -> V = { ...v, on_context: f }\n\
+var n = 0\n\
+effect fn save() -> Unit = { n = n + 1 }\n\
+fn view() -> V = { on_context: (x, y) => () } |> on_context((x, y) => { save()! })\n\
+effect fn main() -> Unit = {\n  let v = view()\n  v.on_context(1.0, 2.0)!\n  println(\"${n}\")\n}\n";
+
+/// `(shape, the pure fn E109 names, program without the heap use)`.
+const PRECISION_POSITIVES: &[(&str, &str, &str)] = &[
+    (
+        // A pure fn hands a closure it read from a list to a fn that calls
+        // its closure parameter.
+        "closure-param",
+        "pure_looking",
+        "import fs\n\
+         fn call_it(f: (String) -> Result[String, String]) -> Result[String, String] = f(\"s.txt\")\n\
+         fn pure_looking(rs: List[(String) -> Result[String, String]]) -> Result[String, String] = match list.first(rs) {\n  some(f) => call_it(f),\n  none => err(\"none\"),\n}\n\
+         effect fn main() -> Unit = {\n  let rs = [(p) => fs.read_text(p)]\n  println(pure_looking(rs) ?? \"none\")\n  println(\"${top([3, 1]) ?? 0}\")\n}\n",
+    ),
+    (
+        // A pure fn calls a closure stored in a record field it reads.
+        "record-field",
+        "pure_looking",
+        "import fs\n\
+         type Reader = { read: (String) -> Result[String, String] }\n\
+         fn pure_looking(r: Reader) -> Result[String, String] = (r.read)(\"s.txt\")\n\
+         effect fn main() -> Unit = {\n  let r = Reader { read: (p) => fs.read_text(p) }\n  println(pure_looking(r) ?? \"none\")\n  println(\"${top([3, 1]) ?? 0}\")\n}\n",
+    ),
+    (
+        // A pure fn gives a stdlib higher-order fn a closure through a value.
+        "stdlib-hof",
+        "pure_looking",
+        "import fs\n\
+         type Reader = { read: (String) -> Result[String, String] }\n\
+         fn pure_looking(r: Reader) -> List[Result[String, String]] = [\"s.txt\"] |> list.map(r.read)\n\
+         effect fn main() -> Unit = {\n  let r = Reader { read: (p) => fs.read_text(p) }\n  println(\"${list.len(pure_looking(r))}\")\n  println(\"${top([3, 1]) ?? 0}\")\n}\n",
+    ),
+    (
+        // A generic body calls an element at a type with a type variable,
+        // `(A) -> Result[A, String]`: it still sees the closure pooled at
+        // `(String) -> Result[String, String]`, an instance of that type.
+        "generic-read",
+        "run_all",
+        "import fs\n\
+         fn run_all[A](rs: List[(A) -> Result[A, String]], x: A) -> List[Result[A, String]] = rs |> list.map((f) => f(x))\n\
+         fn pure_looking(rs: List[(String) -> Result[String, String]]) -> List[Result[String, String]] = run_all(rs, \"s.txt\")\n\
+         effect fn main() -> Unit = {\n  let rs = [(p) => fs.read_text(p)]\n  println(\"${list.len(pure_looking(rs))}\")\n  println(\"${top([3, 1]) ?? 0}\")\n}\n",
+    ),
+];
+
+fn check_with_heap(program: &str) -> (Output, String) {
+    let td = tempfile::TempDir::new().unwrap();
+    project(td.path(), None, &format!("{program}{HEAP_USE}"));
+    let o = almide(td.path(), &["check", "main.almd"]);
+    let t = text(&o);
+    (o, t)
+}
+
+#[test]
+fn heap_is_not_blamed_for_a_closure_it_never_receives_4522() {
+    let (o, t) = check_with_heap(REPRO_4522);
+    assert!(o.status.success(), "#4522 repro: `almide check` refused it:\n{t}");
+    assert!(!t.contains("E109"), "#4522 repro: E109 reported:\n{t}");
+    // The same read in user code, without the stdlib heap: a generic fn
+    // calls a field at `(A, A) -> Int`.
+    let ord = "type Ord[A] = { cmp: (A, A) -> Int }\n\
+               fn before[A](o: Ord[A], a: A, b: A) -> Bool = (o.cmp)(a, b) < 0\n\
+               fn first_is_less() -> Bool = before({ cmp: (a, b) => a - b }, 1, 2)\n";
+    let td = tempfile::TempDir::new().unwrap();
+    project(td.path(), None, &format!("{REPRO_4522}{ord}"));
+    let o = almide(td.path(), &["check", "main.almd"]);
+    let t = text(&o);
+    assert!(o.status.success() && !t.contains("E109"), "#4522 repro without heap: `almide check` refused it:\n{t}");
+}
+
+#[test]
+fn a_pure_fn_running_an_effectful_closure_stays_e109_with_heap_in_the_program() {
+    // Every shape is judged before failing, so a control names each one.
+    let mut missed = Vec::new();
+    for &(shape, blamed, program) in PRECISION_POSITIVES {
+        let (o, t) = check_with_heap(program);
+        let needle = format!("pure function `{blamed}` runs an effect function it does not call by name");
+        if o.status.success() {
+            missed.push(format!("{shape}: `almide check` accepted it:\n{t}"));
+        } else if !(t.contains("error[E109]") && t.contains(&needle)) {
+            missed.push(format!("{shape}: no E109 naming `{blamed}`:\n{t}"));
+        } else if t.contains("heap.") {
+            missed.push(format!("{shape}: a heap fn was blamed:\n{t}"));
+        }
+    }
+    assert!(missed.is_empty(), "{} of {} shapes:\n{}", missed.len(), PRECISION_POSITIVES.len(), missed.join("\n"));
+}

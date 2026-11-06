@@ -620,6 +620,8 @@
 66896	spec/wasm_cross/nan_canonical_bytes_write.almd
 65968	spec/wasm_cross/nan_canonical_observation.almd
 66608	spec/wasm_cross/native_list_option_fallback_float.almd
+65760	spec/wasm_cross/native_map_merge_same_binding.almd
+66816	spec/wasm_cross/native_same_binding_twice_arg.almd
 65712	spec/wasm_cross/native_unused_map_binding.almd
 66576	spec/wasm_cross/native_wall_shapes.almd
 67248	spec/wasm_cross/negative_count_rule.almd
@@ -706,10 +708,16 @@
 65808	spec/wasm_cross/range_bind_huge.almd
 66656	spec/wasm_cross/range_bind_no_materialize.almd
 66016	spec/wasm_cross/range_bind_walled_no_materialize.almd
+65808	spec/wasm_cross/range_count_overflow_exclusive.almd
+65808	spec/wasm_cross/range_count_overflow_inclusive.almd
+65808	spec/wasm_cross/range_count_overflow_inclusive_full.almd
+65760	spec/wasm_cross/range_count_overflow_list_range.almd
 65696	spec/wasm_cross/range_exclusive_end_at_min.almd
 65648	spec/wasm_cross/range_first_class.almd
+65760	spec/wasm_cross/range_head_fold_count_overflow.almd
 66176	spec/wasm_cross/range_head_fold_edges.almd
 65888	spec/wasm_cross/range_head_fold_huge.almd
+65760	spec/wasm_cross/range_head_map_count_overflow.almd
 65760	spec/wasm_cross/range_inclusive_end_at_max.almd
 65904	spec/wasm_cross/range_inclusive_runtime_max.almd
 65856	spec/wasm_cross/range_materialize_oom.almd

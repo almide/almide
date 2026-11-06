@@ -305,7 +305,7 @@
 2499	spec/wasm_cross/fusion_two_aborting_stages_staged.almd
 2580	spec/wasm_cross/fuzz_found_nested_interp_capture.almd
 3004	spec/wasm_cross/general_recursion_tail.almd
-11078	spec/wasm_cross/generated_binder_hygiene.almd
+11090	spec/wasm_cross/generated_binder_hygiene.almd
 2374	spec/wasm_cross/generic_chain_unwrap_or.almd
 2393	spec/wasm_cross/generic_concat.almd
 2940	spec/wasm_cross/generic_fn_in_inferred_lambda.almd
@@ -620,6 +620,8 @@
 3892	spec/wasm_cross/nan_canonical_bytes_write.almd
 1528	spec/wasm_cross/nan_canonical_observation.almd
 5492	spec/wasm_cross/native_list_option_fallback_float.almd
+4774	spec/wasm_cross/native_map_merge_same_binding.almd
+16422	spec/wasm_cross/native_same_binding_twice_arg.almd
 537	spec/wasm_cross/native_unused_map_binding.almd
 5317	spec/wasm_cross/native_wall_shapes.almd
 10797	spec/wasm_cross/negative_count_rule.almd
@@ -706,12 +708,18 @@
 1825	spec/wasm_cross/range_bind_huge.almd
 3213	spec/wasm_cross/range_bind_no_materialize.almd
 2249	spec/wasm_cross/range_bind_walled_no_materialize.almd
+1961	spec/wasm_cross/range_count_overflow_exclusive.almd
+1985	spec/wasm_cross/range_count_overflow_inclusive.almd
+1985	spec/wasm_cross/range_count_overflow_inclusive_full.almd
+1963	spec/wasm_cross/range_count_overflow_list_range.almd
 816	spec/wasm_cross/range_exclusive_end_at_min.almd
 667	spec/wasm_cross/range_first_class.almd
+907	spec/wasm_cross/range_head_fold_count_overflow.almd
 3960	spec/wasm_cross/range_head_fold_edges.almd
 1969	spec/wasm_cross/range_head_fold_huge.almd
+2049	spec/wasm_cross/range_head_map_count_overflow.almd
 1469	spec/wasm_cross/range_inclusive_end_at_max.almd
-3054	spec/wasm_cross/range_inclusive_runtime_max.almd
+3090	spec/wasm_cross/range_inclusive_runtime_max.almd
 2186	spec/wasm_cross/range_materialize_oom.almd
 4377	spec/wasm_cross/rbtree_balance_rotations.almd
 10970	spec/wasm_cross/rc_alloc_stress.almd

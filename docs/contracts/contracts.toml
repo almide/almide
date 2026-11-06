@@ -3435,6 +3435,8 @@ evidence  = [
   { path = "spec/wasm_cross/arg_rebinds_earlier_arg.almd", class = "fixture" },
   { path = "spec/wasm_cross/arg_call_rebinds_global.almd", class = "fixture" },
   { path = "spec/wasm_cross/let_bound_closure_scope.almd", class = "fixture" },
+  { path = "spec/wasm_cross/native_map_merge_same_binding.almd", class = "fixture" },
+  { path = "spec/wasm_cross/native_same_binding_twice_arg.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-259"
@@ -5975,4 +5977,19 @@ evidence  = [
   { path = "tests/export_c_abi_test.rs", name = "every_export_c_row_crosses_at_its_c_type_as_fn_and_effect_fn", class = "fixture" },
   { path = "tests/export_c_abi_test.rs", name = "an_effect_export_err_writes_its_message_and_exits_1", class = "fixture" },
   { path = "tests/export_c_abi_test.rs", name = "export_c_types_without_a_c_form_are_e090", class = "fixture" },
+]
+[[contract]]
+id        = "C-453"
+spec      = "ALS-D7"
+title     = "A Region export declared returns: address crosses the wasm host boundary as its data address alone, one value in the memory's address width, with every other rule of the (ptr, len) form kept"
+statement = "ALS-D7 (almide/almide#4519, ADR-0031 amendment A1c): on the wasm target an `@export(wasm, \"sym\", returns: address)` fn returning a Region returns one value, the view's data address, in the memory's address width (one i32 on wasm32), instead of the `(ptr, len)` pair; the host is the one that knows the length it asked for. The form is declared at the export, never inferred. Every other rule of the pair form holds: the host holds one share of the block per address handed out, so bytes the host writes at the address stay in place and are what the program then reads through its own copy, until the host passes the address to `__region_release`; a sub-Region (`ffi.slice`) is returned as its own address inside its parent's block and its share alone keeps the parent alive; an empty Region is 0 and releasing 0 is a no-op; an `effect fn`'s err writes its message to stderr and traps; a host that releases every address it was handed leaks no memory. A `Float` parameter crosses as an f64, so a host passes a plain number. `returns: address` on a fn that does not return a Region, on a target other than wasm, or any other named argument of `@export`, is refused at check time. NOT covered: the address's numeric value, memory64 (the emitter declares a 32-bit memory), the WASI 0.2/0.3 component lowering."
+since     = "0.69.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_host_js/region_export_address.almd", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_region_export_returns_one_i32", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "the_host_writes_at_an_address_only_export_and_the_next_export_reads_it", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_export_keeps_every_other_a1_rule", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_export_err_traps_with_its_reason", class = "fixture" },
+  { path = "tests/checker_test.rs", name = "returns_address_on_a_non_region_return_is_refused", class = "fixture" },
 ]
