@@ -703,7 +703,7 @@ PYRX
 # the local row — is recorded in the baseline, not hidden in the ceiling.
 FRAMEBUF_CEILING_NATIVE=40
 FRAMEBUF_CEILING_WASM=3
-FRAMEBUF_CEILING_LOCAL_WASM=13
+FRAMEBUF_CEILING_LOCAL_WASM=15
 fb_out=$(mktemp -t perf-ratio-framebuf.XXXXXX.json)
 trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
 python3 research/benchmark/perf/bench.py \
@@ -762,9 +762,9 @@ for leg in ("native", "wasm"):
           f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
 # The same local frame, wasm over native: what one `bytes.put_f32_le` costs
 # on the wasm leg against the native one, where LLVM inlines the wrapper.
-# 0.69.0 read 14.8x (the wrapper called `bytes.fits` with an RC inc/dec
+# 0.69.0 read 14.8-18.9x (the wrapper called `bytes.fits` with an RC inc/dec
 # around it on every write); the wasm leg inlining that predicate (#4550)
-# read 11.0x. The ceiling catches the call coming back.
+# read 11.0-12.6x, by runner class. The ceiling catches the call coming back.
 key = "framebuf-local-wasm-native"
 if key not in baseline:
     sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — add the line on purpose.")
