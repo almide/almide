@@ -270,6 +270,12 @@ nothing is published that `bench.py` did not produce.
   helper (`{ m[k] = v }`, `p`) or inline on a local `var` (`l`). Gated per
   round (`check-perf-ratio.sh`, MUT MAP). The wasm leg kept an owned param out
   of the in-place map set, so each write through the helper copied the map.
+- **`mutset-param` / `mutset-local` are the mut-set rows** (#4582): a
+  4,000-member `Set[Int]` rebound each round through a `mut s` helper
+  (`{ s = set.insert(s, x) }`, `p`) or inline on a local `var` (`l`). Gated
+  per round (`check-perf-ratio.sh`, MUT SET). The standard native codegen
+  called the borrowing `set.insert` on the `&mut` param, so each insert
+  through the helper copied the set; the param now moves into the owned twin.
 
 ## Run
 

@@ -819,13 +819,15 @@ PYFB
 # relation is per round. The wasm leg kept an owned param out of the in-place
 # map set (try_map_set_in_place, a rule from when params were borrowed views),
 # so every write through the helper copied the whole map.
-# The native leg is reported, not gated: it writes a `&mut AlmideMap` in place
-# either way (no copy), yet the helper row read ~35x the inline one on the
-# probe runner; that gap is not explained yet, so it is recorded here and not
-# gated. The wasm
+# The native leg writes in place either way: the certified render moves the
+# map into the helper and back (`almide_rt_map_set(std::mem::take(..))`), the
+# standard codegen inserts through the `&mut AlmideMap`. Both read 1.02-1.04x
+# per round on ubuntu-latest (#4582 probes; an earlier ~35x reading did not
+# reproduce on this tree with either renderer), so the native ceiling is 4: a
+# copy of the 4,000-entry map per write reads tens of x. The wasm
 # ceiling is 5: the helper read 2.6x there with the fix (call, move-in and
 # write-back per write) and ~100x without it.
-MUTMAP_CEILING_NATIVE=
+MUTMAP_CEILING_NATIVE=4
 MUTMAP_CEILING_WASM=5
 mm_out=$(mktemp -t perf-ratio-mutmap.XXXXXX.json)
 python3 research/benchmark/perf/bench.py \
@@ -881,6 +883,69 @@ for leg in ("native", "wasm"):
           f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
 sys.exit(1 if failed else 0)
 PYMM
+
+# MUT SET RELATION (#4582): mutset-param rebinds a Set through a `mut s`
+# helper per insert (`{ s = set.insert(s, x) }`), mutset-local the same
+# rebinds inline; the relation is per round. The standard native codegen
+# called the borrowing `almide_rt_set_insert(&s, x)` on the `&mut` param, a
+# copy of the whole set per insert; the overwritten param now moves into the
+# owned twin (`take_overwritten_ref_mut`, crates/almide-codegen/src/
+# pass_borrow_lowering_take.rs), which tests/native_mut_collection_param_test.rs
+# pins on the emitted Rust. These rows measure what ships — the certified
+# render, which already moved the set (1.3-1.5x on ubuntu-latest) — and wasm
+# (2.1-2.2x: call, move-in and write-back per insert). Ceilings 4 and 5: a
+# copy per insert reads tens of x.
+MUTSET_CEILING_NATIVE=4
+MUTSET_CEILING_WASM=5
+ms_out=$(mktemp -t perf-ratio-mutset.XXXXXX.json)
+python3 research/benchmark/perf/bench.py \
+  --quick --runs "$RUNS" --legs native,wasm \
+  --bench mutset-param,mutset-local \
+  --label ratchet-mutset --out "$ms_out"
+python3 - "$ms_out" "$BASELINE_FILE" "$MUTSET_CEILING_NATIVE" "$MUTSET_CEILING_WASM" "$MIN_SECONDS" <<'PYMS'
+import json, sys
+sys.path.insert(0, "research/benchmark/perf")
+from bench import QUICK_ARGS
+
+out_path, baseline_path, ceiling_native, ceiling_wasm, min_s = sys.argv[1:6]
+ceilings = {"native": float(ceiling_native), "wasm": float(ceiling_wasm)}
+min_s = float(min_s)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+
+def rounds(bench):
+    return int(QUICK_ARGS[bench].split(":")[1])
+
+failed = False
+for leg in ("native", "wasm"):
+    key = f"mutset-{leg}"
+    if key not in baseline:
+        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the mut set relation was "
+                 "added without its recorded value; add the line on purpose.")
+    p = data["mutset-param"]["variants"][f"mutset-param/{leg}"]["min"]
+    l = data["mutset-local"]["variants"][f"mutset-local/{leg}"]["min"]
+    if l < min_s:
+        sys.exit(f"::error::perf-ratio: mutset-local/{leg} min {l}s is under the {min_s}s floor — "
+                 "grow the QUICK_ARGS entry instead of gating on spawn noise.")
+    ratio = (p / rounds("mutset-param")) / (l / rounds("mutset-local"))
+    ceiling = ceilings[leg]
+    if ratio > ceiling:
+        print(f"::error::perf-ratio: a Set rebound through a `mut s` helper costs {ratio:.3f}x the same "
+              f"inserts inline on the {leg} leg (ceiling {ceiling:.2f}x, {p:.3f}s for {rounds('mutset-param')} "
+              f"rounds vs {l:.3f}s for {rounds('mutset-local')}, recorded {baseline[key]:.3f}x). A `mut` Set "
+              "param is being copied on every insert, which is #4582. Look at whether the rebound param "
+              "moves into the op's owned twin (`almide_rt_set_insert_owned`). Do not raise the ceiling.")
+        failed = True
+        continue
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x the inline inserts per round "
+          f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
+sys.exit(1 if failed else 0)
+PYMS
 
 # BTREES RELATION (rc4, owner ruling 2026-11-05). btrees and treealloc build
 # and walk the same trees (2^19 + 2^19 nodes per round, 24 x depth 19 against
