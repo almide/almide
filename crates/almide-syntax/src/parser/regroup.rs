@@ -210,7 +210,8 @@ pub fn parenthesize_for_current(program: &mut Program, fresh: u32) -> usize {
         let parent_is_coalesce = matches!(expr.kind, ExprKind::UnwrapOr { .. });
         for (child, slot) in operand_slots_mut(expr) {
             let child_is_coalesce = matches!(child.kind, ExprKind::UnwrapOr { .. });
-            if (parent_is_coalesce || child_is_coalesce) && !is_open(child) && needs_parens(child, slot) {
+            // NEGATIVE CONTROL: the parentheses are dropped.
+            if false && (parent_is_coalesce || child_is_coalesce) && !is_open(child) && needs_parens(child, slot) {
                 let inner = std::mem::replace(child, Expr::new(ExprId(next), child.span, ExprKind::Unit));
                 next += 1;
                 child.kind = ExprKind::Paren { expr: Box::new(inner) };
