@@ -18,11 +18,17 @@
 // tombstones (#3691), amortized O(1) instead of a shift plus a full rebuild.
 
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct AlmideSet<T> {
     items: Vec<Option<T>>,
     dead: usize,
     lookup: AlmideKeyLookup,
+}
+
+/// The empty set for EVERY member type (a derived `Default` would bound `T`):
+/// the place a `mut` param's value moves out of (`std::mem::take`, #4582).
+impl<T> Default for AlmideSet<T> {
+    fn default() -> Self { AlmideSet::new() }
 }
 
 impl<T> AlmideSet<T> {
