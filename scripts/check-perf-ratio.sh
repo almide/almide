@@ -819,13 +819,12 @@ PYFB
 # relation is per round. The wasm leg kept an owned param out of the in-place
 # map set (try_map_set_in_place, a rule from when params were borrowed views),
 # so every write through the helper copied the whole map.
-# The native leg is reported, not gated: it writes a `&mut AlmideMap` in place
-# either way (no copy), yet the helper row read ~35x the inline one on the
-# probe runner; that gap is not explained yet, so it is recorded here and not
-# gated. The wasm
-# ceiling is 5: the helper read 2.6x there with the fix (call, move-in and
-# write-back per write) and ~100x without it.
-MUTMAP_CEILING_NATIVE=
+# Ceilings per leg. The perf-ratchet runner read native 1.02x and wasm 2.31x
+# with the fix (#4583, job 127959241407; wasm pays a call, a move-in and a
+# write-back per write); the copy the fix removed read ~100x on wasm. An
+# earlier ~35x native reading came from `almide run`, not the bench harness,
+# and did not reproduce.
+MUTMAP_CEILING_NATIVE=3
 MUTMAP_CEILING_WASM=5
 mm_out=$(mktemp -t perf-ratio-mutmap.XXXXXX.json)
 python3 research/benchmark/perf/bench.py \
