@@ -1,0 +1,14 @@
+// @contract: C-238, C-197
+// An exclusive range whose element count is 2^63 (`-1..<i64::MAX`): the
+// subtraction `end - start` wraps to i64::MIN. Materializing it is the
+// defined abort, `Error: out of memory` and exit 1, on both targets, never
+// an empty list read off the wrapped count (#4538). The bounds arrive at run
+// time.
+fn direct(a: Int, e: Int) -> Int = list.len(a..<e)
+
+fn main() -> Unit = {
+  let top = 9223372036854775807
+  println("before")
+  println(int.to_string(direct(top - top - 1, top)))
+  println("unreachable")
+}

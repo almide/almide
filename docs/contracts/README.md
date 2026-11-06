@@ -232,7 +232,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-194 | bytes.copy_from with a mutable-global destination writes through the storage slot | 0.38.1 | active | fixture | 1 |
 | C-195 | Value-position variant match over the checked-conversion family executes | 0.38.1 | active | fixture | 1 |
 | C-196 | Call-stack exhaustion is a defined abort at a per-target depth | 0.41.0 | active | fixture | 1 |
-| C-197 | Linear-memory exhaustion is a resource limit with a defined abort | 0.41.0 | active | fixture | 9 |
+| C-197 | Linear-memory exhaustion is a resource limit with a defined abort | 0.41.0 | active | fixture | 14 |
 | C-198 | The head-count-taking matrix entry points left the stdlib at dialect epoch 14 | 0.42.0 | active | fixture | 0 |
 | C-199 | A fan block joins every sibling and reports the first Err in list order | 0.42.0 | active | fixture | 2 |
 | C-200 | A trap in a fan sibling exits through the unified main-error abort, convergently | 0.42.0 | active | fixture | 4 |
@@ -273,7 +273,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-235 | Unary operators: `not` negation and prefix minus evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-236 | Tuple construction, destructuring, indexing, and structural equality are identical on both targets | 0.57.1 | active | fixture | 1 |
 | C-237 | Option/Result constructor literals build and eliminate identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-238 | First-class range values iterate their true bounds on both targets | 0.57.1 | active | fixture | 10 |
+| C-238 | First-class range values iterate their true bounds on both targets | 0.57.1 | active | fixture | 16 |
 | C-239 | Collection literals, indexing, and the empty spellings behave identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-240 | Map literals and empty-map reads behave identically on both targets | 0.57.1 | active | fixture | 3 |
 | C-241 | Binding statements: let shadowing, var reassignment, and their check-time guards are identical on both targets | 0.57.1 | active | fixture | 1 |

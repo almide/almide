@@ -1,0 +1,15 @@
+// @contract: C-238, C-197
+// A map over a `list.range` head whose span is past Int max
+// (`i64::MIN..i64::MAX`, 2^64 - 1 elements). The map builds a result list
+// that long, so it takes the defined abort, `Error: out of memory` and exit
+// 1, on both targets. The verified native render iterates the head without
+// building it and sized the result from `end - start`, which wrapped to -1
+// (#4538). The bounds arrive at run time.
+fn doubled(a: Int, e: Int) -> Int = list.len(list.range(a, e) |> list.map((x) => x * 2))
+
+fn main() -> Unit = {
+  let top = 9223372036854775807
+  println("before")
+  println(int.to_string(doubled(0 - top - 1, top)))
+  println("unreachable")
+}

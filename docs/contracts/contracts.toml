@@ -2650,6 +2650,11 @@ evidence  = [
   { path = "spec/wasm_cross/fan_worker_abort_keeps_stdout.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_all_workers_abort_one_line.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_inclusive.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_inclusive_full.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_exclusive.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_list_range.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_head_map_count_overflow.almd", class = "fixture" },
   { path = "tests/alloc_bump_wrap_test.rs", class = "fixture", name = "bump_head_wrap_is_the_defined_oom_abort" },
   { path = "tests/alloc_size_wrap_test.rs", class = "fixture", name = "alloc_length_wrap_is_the_defined_oom_abort" },
   { path = "tests/alloc_size_wrap_test.rs", class = "fixture", name = "concat_length_sum_wrap_is_the_defined_oom_abort" },
@@ -3208,6 +3213,12 @@ evidence  = [
   { path = "spec/wasm_cross/range_inclusive_runtime_max.almd", class = "fixture" },
   { path = "spec/wasm_cross/range_head_fold_huge.almd", class = "fixture" },
   { path = "spec/wasm_cross/range_head_fold_edges.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_inclusive.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_inclusive_full.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_exclusive.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_list_range.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_head_map_count_overflow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_head_fold_count_overflow.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-239"

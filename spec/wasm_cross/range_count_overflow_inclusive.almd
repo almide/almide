@@ -1,0 +1,16 @@
+// @contract: C-238, C-197
+// An inclusive range whose element count is exactly 2^63 (`0...i64::MAX`)
+// does not fit in an Int. No machine can hold the list, so materializing it
+// takes the defined abort, `Error: out of memory` and exit 1, on both
+// targets. The wasm leg added the end's +1 to a span of i64::MAX, which
+// wrapped the count to i64::MIN, and a negative count read as an empty list:
+// it printed 0 where native aborted (#4538, a mutation of
+// range_inclusive_runtime_max.almd). The bounds arrive at run time.
+fn direct(a: Int, e: Int) -> Int = list.len(a...e)
+
+fn main() -> Unit = {
+  let top = 9223372036854775807
+  println("before")
+  println(int.to_string(direct(top - 9223372036854775807, top)))
+  println("unreachable")
+}
