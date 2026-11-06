@@ -75,11 +75,11 @@ test "err(_) arm discards the error" {
 }
 
 fn head_or(xs: List[Int]) -> Int = {
-  guard let h = list.first(xs) else none => 0
+  guard let h = list.first(xs) else 0
   h * 10
 }
 
-test "none arm on an Option is the plain else" {
+test "plain else on an Option (fmt writes `else none =>` this way)" {
   assert_eq(head_or([4]), 40)
   assert_eq(head_or([]), 0)
 }

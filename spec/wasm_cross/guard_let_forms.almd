@@ -2,7 +2,8 @@
 // ALS-ST6 (docs/specs/als/expressions.md), the #4543 forms of the guard-let
 // statement, byte-identical on both targets: the failure arm that names the
 // error (`else err(e) => …`, a typed custom error and a String one, a value
-// else and a raising else), `else none =>` on an Option, the `guard let x
+// else and a raising else), the plain else on an Option (what fmt writes for
+// `else none =>`), the `guard let x
 // else …` shorthand on a local and on a parameter, and `guard var`, alone and
 // combined. Every form desugars into the same nested variant match as the
 // plain `guard let x = r else e`, whose err arm becomes `err(e) =>`.
@@ -29,7 +30,7 @@ effect fn doubled(s: String) -> Int = {
 }
 
 fn head_or(xs: List[Int]) -> Int = {
-  guard let h = list.first(xs) else none => 0
+  guard let h = list.first(xs) else 0
   h * 10
 }
 
