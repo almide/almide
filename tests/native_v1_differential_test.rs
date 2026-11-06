@@ -179,6 +179,22 @@ const CORPUS: &[(&str, &str)] = &[
     //    Both rendered code rustc rejected. ──
     ("unused_map_binding", "fn main() -> Unit = {\n  let unused: Map[String, Bool] = [:]\n  let flag: Bool = true\n  println(\"flag = ${flag}\")\n}\n"),
     ("list_option_fallback_float", "fn main() -> Unit = {\n  let base: List[Float] = [1.5, 2.25]\n  let picked: List[Float] = option.unwrap_or(some([-42.5, 0.0]), base)\n  println(\"picked = ${picked}\")\n  let ints: List[Int] = option.unwrap_or(some([42, 42]), [7])\n  println(\"ints = ${ints}\")\n}\n"),
+    // ── #4538: a range whose element count does not fit in an Int. Built, it
+    //    is the out-of-memory abort on both renders (v0 converted the 2^64
+    //    count of `MIN...MAX` to 0 and died on a capacity-overflow panic);
+    //    counted, it walks the range (v1 read the wrapped `end - start` as a
+    //    zero-length loop, so the fold answered its init). ──
+    ("range_count_overflow_inclusive", "fn direct(a: Int, e: Int) -> Int = list.len(a...e)\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(direct(top - 9223372036854775807, top)))\n}\n"),
+    ("range_count_overflow_inclusive_full", "fn span(a: Int, e: Int) -> Int = {\n  let r = a...e\n  list.len(r)\n}\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(span(0 - top - 1, top)))\n}\n"),
+    ("range_head_map_count_overflow", "fn doubled(a: Int, e: Int) -> Int = list.len(list.range(a, e) |> list.map((x) => x * 2))\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(doubled(0 - top - 1, top)))\n}\n"),
+    ("range_head_fold_count_overflow", "fn walk(a: Int, e: Int) -> Int = a..<e |> list.fold(0, (acc, x) => acc + 100 / (x - a - 3))\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(walk(0 - top - 1, top)))\n}\n"),
+    // The count of `list.range(i64::MIN, 2^31)` is 2^63 + 2^31: a counting
+    //    fold the optimizer collapses must answer what stepping every element
+    //    answers, `a + 1` wrapping to -9223372034707292160 (fuzz seed
+    //    674247930034 index 3227). v1 read the wrapped `end - start` as a
+    //    zero-length loop and answered 0.
+    ("range_head_fold_count_past_int_max", "fn count(a: Int, e: Int) -> Int = list.range(a, e) |> list.fold(0, (n, _x) => n + 1)\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(int.to_string(count(0 - top - 1, 2147483648)))\n  println(int.to_string((0 - top - 1)..<top |> list.fold(0, (n, _x) => n + 1)))\n}\n"),
+    ("range_head_fold_list_range_count_overflow", "fn walk(a: Int, e: Int) -> Int = list.range(a, e) |> list.fold(0, (acc, x) => acc + 100 / (x - a - 3))\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(walk(0 - top, top)))\n}\n"),
     // ── #4517: one binding passed at two argument positions of one call at
     //    its last use. The render moved it into `map.merge`'s owned-reuse
     //    routine at the first position and borrowed it at the second
