@@ -37,6 +37,7 @@ jobs:
         run: bash probe4545/repro.sh $PWD/target/release/almide "${GITHUB_REF_NAME}"
       - name: New fixtures on both legs
         run: |
+          set +e
           for f in spec/wasm_cross/effect_slot_*.almd; do
             echo "=== $f"
             target/release/almide build $f --target wasm -o /tmp/x.wasm 2>&1 | head -c 800; echo "wasm build exit=${PIPESTATUS[0]}"
@@ -48,8 +49,10 @@ jobs:
         continue-on-error: true
         run: ALMIDE_EXPECT_TOOLS=1 ALMIDE_BIN=$PWD/target/release/almide ALMIDE_CORPUS_FILTER=effect_slot_ cargo test --release --test wasm_runtime_cross_target -- --nocapture 2>&1 | tail -40
       - name: Render corpus
+        if: always()
         run: bash probe4545/render.sh $PWD/target/release/almide /tmp/render
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
         with:
           name: render-${{ github.ref_name }}
           path: /tmp/render
