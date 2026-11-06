@@ -1,0 +1,107 @@
+# Throwaway workflow for #4578 / #4579 (branch probe-4578-4579 only; never merged):
+# render identity across spec/wasm_cross, and the fixture ledgers regenerated on the fix branch.
+name: probe-4578-regen
+on:
+  push:
+    branches: [probe-4578-4579]
+permissions: read-all
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  FIX_REF: wasm-regressions-4578-4579
+  CARGO_TERM_COLOR: never
+jobs:
+  identity:
+    if: contains(github.event.head_commit.message, '[identity]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.FIX_REF }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Build base and fix
+        run: |
+          fix=$(git rev-parse HEAD); base=$(git merge-base HEAD origin/develop)
+          echo "fix $fix base $base"; git log --oneline $base..$fix
+          git checkout -q $base -- crates src
+          cargo build --release --bin almide && cp target/release/almide /tmp/almide-base
+          git checkout -q $fix -- crates src
+          cargo build --release --bin almide && cp target/release/almide /tmp/almide-fix
+      - name: Render every spec/wasm_cross fixture with both
+        run: |
+          mkdir -p /tmp/r/base /tmp/r/fix
+          n=0; same=0; diff=0; wb=0; wf=0
+          for f in spec/wasm_cross/*.almd; do
+            b=$(basename "$f" .almd); n=$((n+1))
+            for side in base fix; do
+              ALMIDE_WALL_REASON=1 timeout 120 /tmp/almide-$side build "$f" --target wasm -o /tmp/r/$side/$b.wasm > /tmp/r/$side/$b.log 2>&1; echo $? > /tmp/r/$side/$b.rc
+              grep -oE 'Unsupported\("[^"]*"\)|wall: .*' /tmp/r/$side/$b.log | head -3 > /tmp/r/$side/$b.wall || true
+            done
+            if [ -f /tmp/r/base/$b.wasm ] && [ -f /tmp/r/fix/$b.wasm ] && cmp -s /tmp/r/base/$b.wasm /tmp/r/fix/$b.wasm; then same=$((same+1));
+            elif [ ! -f /tmp/r/base/$b.wasm ] && [ ! -f /tmp/r/fix/$b.wasm ] && cmp -s /tmp/r/base/$b.wall /tmp/r/fix/$b.wall; then same=$((same+1)); wb=$((wb+1));
+            else diff=$((diff+1)); echo "CHANGED $b: base rc=$(cat /tmp/r/base/$b.rc) $(cat /tmp/r/base/$b.wall | tr '\n' ' ') | fix rc=$(cat /tmp/r/fix/$b.rc) $(cat /tmp/r/fix/$b.wall | tr '\n' ' ') sizes $(stat -c %s /tmp/r/base/$b.wasm 2>/dev/null) -> $(stat -c %s /tmp/r/fix/$b.wasm 2>/dev/null)"; fi
+          done
+          echo "RENDER-IDENTITY: $n fixtures, $same identical (of which $wb walled identically on both), $diff changed"
+  regen:
+    if: contains(github.event.head_commit.message, '[regen]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.FIX_REF }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: wasmtime and binaryen
+        run: |
+          curl -sSfL --retry 5 -o /tmp/wt.tar.xz https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz
+          tar xf /tmp/wt.tar.xz -C /tmp && echo "/tmp/wasmtime-v50.0.1-x86_64-linux" >> "$GITHUB_PATH"
+          sudo apt-get update -q && sudo apt-get install -y -q binaryen
+      - run: cargo build --release --bin almide
+      - name: Format the new fixtures and run them on both targets
+        run: |
+          git config user.name ci; git config user.email ci@localhost
+          new=$(git diff --name-only --diff-filter=A origin/develop...HEAD -- spec | grep '\.almd$' || true)
+          echo "$new"
+          for f in $new; do target/release/almide fmt "$f"; done
+          git diff --stat; git commit -qam "fmt" || true
+          for f in $new; do echo "### $f native"; target/release/almide run "$f" 2>&1 | tail -30; echo "### $f wasm"; ALMIDE_WALL_REASON=1 target/release/almide run "$f" --target wasm 2>&1 | tail -30; done
+      - name: Manifests
+        env: { ORACLE: target/release/almide, ALMIDE_MANIFEST_TREE_CHECK: gate }
+        run: |
+          bash scripts/gen-run-manifest.sh 2>&1 | tail -5
+          bash scripts/gen-check-manifest.sh 2>&1 | tail -5
+          bash scripts/gen-ast-manifest.sh 2>&1 | tail -5
+          git add -A crates proofs spec; git commit -qm manifests || true
+      - name: Ledgers
+        run: |
+          set +e
+          ALMIDE_UPDATE_ALLOC=1 cargo test --release -q -p almide-wasm --test alloc_ledger 2>&1 | tail -4
+          ALMIDE_UPDATE_SIZES=1 cargo test --release -q -p almide-wasm --test size_ratchet 2>&1 | tail -4
+          ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -q -p almide-wasm --test witness_floor 2>&1 | tail -4
+          ALMIDE_UPDATE_GAUNTLET=1 cargo test --release -q -p almide-wasm --test gauntlet 2>&1 | tail -4
+          ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --release -q --test native_verified_floor_test 2>&1 | tail -4
+          ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --release -q --test wasm_runtime_interp_ledger 2>&1 | tail -4
+          bash proofs/output-parity.sh --update 2>&1 | tail -6
+          git status --short | head -30
+          git add -A crates proofs spec; git commit -qm ledgers || true
+      - name: Patch
+        run: |
+          git format-patch origin/${{ env.FIX_REF }}..HEAD -o patches; ls patches; git diff --stat origin/${{ env.FIX_REF }}..HEAD
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: regen-patches
+          path: patches

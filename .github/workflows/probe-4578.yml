@@ -8,6 +8,7 @@ env:
   RUST_TOOLCHAIN: "1.97.0"
 jobs:
   built:
+    if: contains(github.event.head_commit.message, '[probe]')
     name: built (${{ matrix.side }})
     runs-on: ubuntu-latest
     strategy:
@@ -38,6 +39,7 @@ jobs:
       - name: Probes
         run: bash .github/probe-4578/run.sh "$PWD/target/release/almide" .github/probe-4578/t
   released:
+    if: contains(github.event.head_commit.message, '[released]')
     name: released ${{ matrix.version }}
     runs-on: ubuntu-latest
     strategy:
