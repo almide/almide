@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        v: [chain_key_loop_reader, zz_va_user_fn, zz_vb_map_get, zz_vc_starts_with, zz_vd_contains]
+        v: [chain_key_loop_reader]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
@@ -58,8 +58,28 @@ jobs:
         run: |
           set +e
           A=target/release/almide
-          for f in research/benchmark/perf/v1-shapes/zz_*.almd; do echo "$f"; $A run "$f"; echo "run rc=$?"; done
+          for f in research/benchmark/perf/v1-shapes/chain_key_loop_reader.almd; do echo "$f"; $A run "$f"; echo "run rc=$?"; done
       - name: perf gate
         run: |
           set +e
-          NATIVE_V1_PERF_ONLY_SHAPES=1 bash scripts/check-native-v1-perf.sh; echo "perf rc=$?"
+          bash scripts/check-native-v1-perf.sh; echo "perf rc=$?"
+  small:
+    name: small
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
+      - run: cargo build --release --bin almide
+      - name: small gate
+        run: |
+          set +e
+          bash scripts/check-native-v1-perf-small.sh; echo "small rc=$?"
