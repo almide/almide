@@ -54,23 +54,6 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
              __almide_cv.extend({chain}); __almide_cv }}"
         );
     }
-    // #4538: a counted span holds up to 2^64 - 1 elements, and `count() as
-    // i64` wrapped a length past Int max negative (`list.range(i64::MIN,
-    // i64::MAX) |> list.map(f) |> list.len` answered -1). A list that long
-    // cannot exist, so the length is the C-197 out-of-memory abort, as when
-    // the list is built.
-    if counted.is_some() {
-        let count = match collector {
-            IterCollector::Count { lambda } => Some(format!("{}.filter({}).count()", chain, render_expr(ctx, lambda))),
-            IterCollector::Len => Some(format!("{}.count()", chain)),
-            _ => None,
-        };
-        if let Some(count) = count {
-            return format!(
-                "({{ let __almide_cn: usize = {count}; if __almide_cn > i64::MAX as usize {{ almide_abort_oom(); }} __almide_cn as i64 }})"
-            );
-        }
-    }
     render_iter_collector(ctx, &chain, collector)
 }
 
