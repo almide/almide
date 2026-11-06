@@ -749,7 +749,9 @@ fn port_text(r: Result[Int, ConfigError]) -> String = {
 
 テスト: `spec/wasm_cross/guard_let_statement.almd`(契約 C-266)、
 `spec/lang/guard_let_test.almd`(wasm レグ)。#4543 の形:
-`spec/wasm_cross/guard_let_forms.almd`(契約 C-266 の証拠を拡張)、
+`spec/wasm_cross/guard_let_forms.almd`(検証済み native レンダラ v1 の floor に載る)と
+`spec/wasm_cross/guard_let_forms_typed_err.almd`(型付きエラー — `Result[Int, ConfigError]`
+の構築が guard let と無関係に v1 で wall するため標準 native codegen に落ちる)。どちらも契約 C-266 の証拠を拡張、
 `spec/lang/guard_let_forms_test.almd`、拒否診断は
 `tests/diagnostics/*guard-let-*`(各ケースに `--target wasm` の双子)。
 
