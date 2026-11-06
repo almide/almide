@@ -261,11 +261,18 @@ fn heap_is_not_blamed_for_a_closure_it_never_receives_4522() {
 
 #[test]
 fn a_pure_fn_running_an_effectful_closure_stays_e109_with_heap_in_the_program() {
+    // Every shape is judged before failing, so a control names each one.
+    let mut missed = Vec::new();
     for &(shape, blamed, program) in PRECISION_POSITIVES {
         let (o, t) = check_with_heap(program);
-        assert!(!o.status.success(), "{shape}: `almide check` accepted it:\n{t}");
         let needle = format!("pure function `{blamed}` runs an effect function it does not call by name");
-        assert!(t.contains("error[E109]") && t.contains(&needle), "{shape}: no E109 naming `{blamed}`:\n{t}");
-        assert!(!t.contains("heap."), "{shape}: a heap fn was blamed:\n{t}");
+        if o.status.success() {
+            missed.push(format!("{shape}: `almide check` accepted it:\n{t}"));
+        } else if !(t.contains("error[E109]") && t.contains(&needle)) {
+            missed.push(format!("{shape}: no E109 naming `{blamed}`:\n{t}"));
+        } else if t.contains("heap.") {
+            missed.push(format!("{shape}: a heap fn was blamed:\n{t}"));
+        }
     }
+    assert!(missed.is_empty(), "{} of {} shapes:\n{}", missed.len(), PRECISION_POSITIVES.len(), missed.join("\n"));
 }
