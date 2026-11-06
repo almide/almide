@@ -127,8 +127,8 @@ enabled no checking, so the word is an ordinary identifier again.
 ### 1.6 Operators and Delimiters
 
 ```
-Operators:   +  -  *  /  %  ^  ==  !=  <  <=  >  >=  |>  >>  ..<  ...
-Postfix:     !  ?  ?.  ??
+Operators:   +  -  *  /  %  ^  ==  !=  <  <=  >  >=  |>  >>  ..<  ...  ??
+Postfix:     !  ?  ?.
 Unary:       -  not
 Logical:     and  or
 Assignment:  =
@@ -950,14 +950,24 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 | 1 | `or` | left |
 | 2 | `and` | left |
 | 3 | `==` `!=` `<` `<=` `>` `>=` | non-assoc (chaining is an error) |
-| 4 | `\|>` (pipe) | left, asymmetric (see below) |
-| 5 | `..<` `...` (range) | none |
-| 6 | `+` `-` (additive) | left |
-| 7 | `*` `/` `%` (multiplicative) | left |
-| 8 | `^` (power; `**` is an alias) | right |
-| 9 | `>>` (compose) | left (tightest binary) |
-| 10 | `-` `not` (unary) | prefix |
-| 11 | `.` `()` `[]` `!` `?` `?.` `??` (postfix) | left |
+| 4 | `??` (fallback) | right |
+| 5 | `\|>` (pipe) | left, asymmetric (see below) |
+| 6 | `..<` `...` (range) | none |
+| 7 | `+` `-` (additive) | left |
+| 8 | `*` `/` `%` (multiplicative) | left |
+| 9 | `^` (power; `**` is an alias) | right |
+| 10 | `>>` (compose) | left (tightest binary) |
+| 11 | `-` `not` (unary) | prefix |
+| 12 | `.` `()` `[]` `!` `?` `?.` (postfix) | left |
+
+Every binary operator follows one widely used precedence order (dialect 16,
+#4531). `??` sits below `|>` and the arithmetic and above the comparisons:
+`x ?? 0 - 1` is `x ?? (0 - 1)`, `s + b ?? 0` is `(s + b) ?? 0`, `-x ?? 0` is
+`(-x) ?? 0`, and `xs \|> list.first ?? 0` falls back on the pipe's result.
+Before dialect 16 `??` was a postfix binding tighter than every binary
+operator; in a file without a `@dialect(16)` stamp a `??` the two grammars
+read apart is E120, and `almide fix` adds the parentheses that keep the old
+reading.
 
 - **`\|>` is asymmetric**: its right-hand side is a single call/compose chain.
   Any other operator after it applies to the piped result —
@@ -981,7 +991,8 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 | `\|>` | Pipe |
 | `>>` | Function composition |
 | `..<` `...` | Range (exclusive / inclusive) |
-| `!` `?` `?.` `??` (postfix) | Unwrap / to-Option / optional chain / fallback |
+| `!` `?` `?.` (postfix) | Unwrap / to-Option / optional chain |
+| `??` | Fallback (right-assoc) |
 
 Equality is type-directed. Secret/convention equality can lower to a function
 call before target codegen; ordinary Rust equality uses `almide_eq!`. Wasm

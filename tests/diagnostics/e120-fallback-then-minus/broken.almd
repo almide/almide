@@ -1,0 +1,4 @@
+// Written for dialect 15: `x ?? 0 - 1` meant `(x ?? 0) - 1`.
+fn dec(x: Option[Int]) -> Int = x ?? 0 - 1
+
+fn main() -> Unit = println(int.to_string(dec(some(4))))
