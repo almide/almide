@@ -67,8 +67,8 @@ fn lower_block_body_in(
 ) -> IrExpr {
     if let Some(i) = stmts.iter().position(|s| matches!(s, ast::Stmt::GuardLet { .. })) {
         let pre: Vec<IrStmt> = stmts[..i].iter().map(|s| lower_stmt(ctx, s)).collect();
-        let (name, scrutinee, else_) = match &stmts[i] {
-            ast::Stmt::GuardLet { name, scrutinee, else_, .. } => (*name, scrutinee, else_),
+        let (name, scrutinee, else_, mutable, fail) = match &stmts[i] {
+            ast::Stmt::GuardLet { name, scrutinee, else_, mutable, fail, .. } => (*name, scrutinee, else_, *mutable, fail),
             _ => unreachable!(),
         };
         let s = lower_expr(ctx, scrutinee);
@@ -83,7 +83,11 @@ fn lower_block_body_in(
             s.ty.clone()
         };
         let s = if subject_ty != s.ty { IrExpr { ty: subject_ty.clone(), ..s } } else { s };
-        let inner = ast::Pattern::Ident { name };
+        // #4543 `guard var`: the arm binds a fresh name and the rest of the
+        // block opens with `var name = <it>` — the same `var` statement the
+        // writer could have spelled, so no pattern-level mutability exists.
+        let arm_name = if mutable { sym(&format!("__guard_var_{name}")) } else { name };
+        let inner = ast::Pattern::Ident { name: arm_name };
         let bind_pat = match &subject_ty {
             Ty::Applied(TypeConstructorId::Result, _) => {
                 ast::Pattern::Ok { inner: Box::new(inner) }
@@ -93,12 +97,25 @@ fn lower_block_body_in(
         // Some/Ok arm: bind name, then the rest of the block (recurse for nested guards).
         ctx.push_scope();
         let pat1 = lower_pattern(ctx, &bind_pat, &subject_ty);
-        let rest = lower_block_body_in(ctx, &stmts[i + 1..], tail, ty, span, in_loop);
+        let rest = if mutable {
+            lower_guard_var_rest(ctx, name, arm_name, &pat1, &stmts[i + 1..], tail, ty, span, in_loop)
+        } else {
+            lower_block_body_in(ctx, &stmts[i + 1..], tail, ty, span, in_loop)
+        };
         ctx.pop_scope();
         let arm1 = IrMatchArm { pattern: pat1, guard: None, body: rest };
         // Wildcard arm: the else branch (must diverge).
         ctx.push_scope();
-        let pat2 = lower_pattern(ctx, &ast::Pattern::Wildcard, &subject_ty);
+        // #4543: `else err(e) => …` matches `err(e)` so the else sees the
+        // error; `none =>` / `err(_) =>` / the plain else keep the wildcard
+        // arm every guard let had before.
+        let fail_pat = match fail {
+            Some(ast::Pattern::Err { inner }) if !matches!(**inner, ast::Pattern::Wildcard) => {
+                ast::Pattern::Err { inner: inner.clone() }
+            }
+            _ => ast::Pattern::Wildcard,
+        };
+        let pat2 = lower_pattern(ctx, &fail_pat, &subject_ty);
         let mut alt = lower_expr(ctx, else_);
         ctx.pop_scope();
         let alt_is_loop_control = |e: &IrExpr| -> bool {
@@ -148,6 +165,42 @@ fn lower_block_body_in(
         let ir_expr = tail.map(|e| Box::new(lower_expr(ctx, e)));
         ctx.mk(IrExprKind::Block { stmts: ir_stmts, expr: ir_expr }, ty.clone(), span)
     }
+}
+
+/// The success arm of a `guard var` (#4543): `var name = <arm binder>`, then
+/// the rest of the block. The binder's type is the payload the arm bound.
+#[allow(clippy::too_many_arguments)]
+fn lower_guard_var_rest(
+    ctx: &mut LowerCtx,
+    name: almide_base::intern::Sym,
+    arm_name: almide_base::intern::Sym,
+    arm_pat: &IrPattern,
+    rest: &[ast::Stmt],
+    tail: Option<&ast::Expr>,
+    ty: &Ty,
+    span: Option<ast::Span>,
+    in_loop: bool,
+) -> IrExpr {
+    let payload_ty = match arm_pat {
+        IrPattern::Ok { inner } | IrPattern::Some { inner } => match &**inner {
+            IrPattern::Bind { ty, .. } => ty.clone(),
+            _ => Ty::Unknown,
+        },
+        _ => Ty::Unknown,
+    };
+    let from = ctx.lookup_var(arm_name.as_str()).unwrap_or(VarId(0));
+    let var = ctx.define_var(name.as_str(), payload_ty.clone(), Mutability::Var, span);
+    let bind = IrStmt {
+        kind: IrStmtKind::Bind {
+            var,
+            mutability: Mutability::Var,
+            ty: payload_ty.clone(),
+            value: ctx.mk(IrExprKind::Var { id: from }, payload_ty, span),
+        },
+        span,
+    };
+    let body = lower_block_body_in(ctx, rest, tail, ty, span, in_loop);
+    ctx.mk(IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(body)) }, ty.clone(), span)
 }
 
 /// Lower pipe expression, unwrapping postfix operators (??, !, ?) on the RHS

@@ -572,8 +572,11 @@ fn spell_stmt_types(stmts: &[Stmt], out: &mut Spelled) {
                 }
             }
             Stmt::LetDestructure { pattern, .. } => spell_pattern(pattern, out),
-            Stmt::GuardLet { name, .. } => {
+            Stmt::GuardLet { name, fail, .. } => {
                 out.binders.insert(name.to_string());
+                if let Some(p) = fail {
+                    spell_pattern(p, out);
+                }
             }
             _ => {}
         }
