@@ -153,7 +153,7 @@ SUITE = [
     ("fib",            "fib/fib.almd",                 ["fib.rs"],      "32:300",     "20:10",   "bytes", ["native", "rust"]),
     # framebuf (#4550): an immediate-mode renderer's per-frame instance
     # writes (20 f32 per quad into a byte buffer), `mode:frames`. `g` writes a
-    # module-level `var` buffer, `l` a local one through a `mut` param; the
+    # module-level `var` buffer from a helper fn, `l` a local one inline; the
     # relation between the two, per frame, is the gate (check-perf-ratio.sh,
     # FRAME BUFFER): 0.69.0 copied the whole buffer on every write through the
     # module-level var. No Rust reference: the property is the relation.
@@ -230,10 +230,10 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # same number of matches.
     # framebuf (#4550): frames per row, unequal on purpose — the relation is
     # per frame. The local row is the fast one natively (~0.03 ms a frame),
-    # so it runs 10x the frames to clear the spawn-noise floor; a regressed
+    # so it runs 5x the frames to clear the spawn-noise floor; a regressed
     # global row (a buffer copy per write) then reads seconds, not a hang.
     "framebuf-global": "g:800",
-    "framebuf-local": "l:8000",
+    "framebuf-local": "l:4000",
     "regexcycle-8": "8:400000",
     "regexcycle-32": "32:400000",
 }

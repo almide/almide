@@ -2,8 +2,8 @@
 // renderer — every quad appends 80 bytes (20 f32) to a byte buffer, written in
 // place; a frame is 1,000 quads (an 80 KB buffer). The argument is `mode:frames`.
 // `g` writes a module-level `var` buffer grown by doubling, the shape a
-// renderer keeps its frame state in; `l` writes a local buffer through a `mut`
-// parameter. The two rows run the same writes, so their relation
+// renderer keeps its frame state in, from a helper fn per quad; `l` writes the
+// same bytes into a local buffer inline. The two rows run the same writes, so their relation
 // (check-perf-ratio.sh, FRAME BUFFER) is what a write through the module-level
 // var costs over the local one. 0.69.0 copied the whole buffer on every 4-byte
 // write through the module-level var, on both legs: ~1000x natively.
@@ -50,29 +50,6 @@ fn push(x: Float, y: Float, w: Float, h: Float, c: Color, u0: Float, v0: Float, 
   count = count + 1
 }
 
-fn push_local(mut b: Bytes, o: Int, x: Float, y: Float, w: Float, h: Float, c: Color, u0: Float, v0: Float, u1: Float, v1: Float) -> Unit = {
-  bytes.put_f32_le(b, o + 0, x)
-  bytes.put_f32_le(b, o + 4, y)
-  bytes.put_f32_le(b, o + 8, w)
-  bytes.put_f32_le(b, o + 12, h)
-  bytes.put_f32_le(b, o + 16, c.r)
-  bytes.put_f32_le(b, o + 20, c.g)
-  bytes.put_f32_le(b, o + 24, c.b)
-  bytes.put_f32_le(b, o + 28, c.a)
-  bytes.put_f32_le(b, o + 32, u0)
-  bytes.put_f32_le(b, o + 36, v0)
-  bytes.put_f32_le(b, o + 40, u1)
-  bytes.put_f32_le(b, o + 44, v1)
-  bytes.put_f32_le(b, o + 48, 0.0)
-  bytes.put_f32_le(b, o + 52, 3.0)
-  bytes.put_f32_le(b, o + 56, 0.0)
-  bytes.put_f32_le(b, o + 60, 0.0)
-  bytes.put_f32_le(b, o + 64, clip_x0)
-  bytes.put_f32_le(b, o + 68, clip_y0)
-  bytes.put_f32_le(b, o + 72, clip_x1)
-  bytes.put_f32_le(b, o + 76, clip_y1)
-}
-
 fn quad(i: Int, f: Int) -> (Float, Float) = (float.from(i % 100) * 9.0, float.from(i / 100 + f) * 18.0)
 
 fn frame_global(f: Int, c: Color) -> Float = {
@@ -82,14 +59,6 @@ fn frame_global(f: Int, c: Color) -> Float = {
     push(x, y, 8.0, 16.0, c, x / 2048.0, y / 2048.0, (x + 8.0) / 2048.0, (y + 16.0) / 2048.0)
   }
   bytes.get_f32_le(inst, (count - 1) * 80 + 4) ?? 0.0
-}
-
-fn frame_local(mut b: Bytes, f: Int, c: Color) -> Float = {
-  for i in 0..<QUADS {
-    let (x, y) = quad(i, f)
-    push_local(b, i * 80, x, y, 8.0, 16.0, c, x / 2048.0, y / 2048.0, (x + 8.0) / 2048.0, (y + 16.0) / 2048.0)
-  }
-  bytes.get_f32_le(b, (QUADS - 1) * 80 + 4) ?? 0.0
 }
 
 fn run_global(frames: Int, c: Color) -> Float = {
@@ -105,8 +74,37 @@ fn run_local(frames: Int, c: Color) -> Float = {
   var b = bytes.zeros(80 * QUADS)
   var sum = 0.0
   for f in 0..<frames {
-    let v = frame_local(b, f, c)
-    sum = sum + v
+    for i in 0..<QUADS {
+      let (x, y) = quad(i, f)
+      let w = 8.0
+      let h = 16.0
+      let u0 = x / 2048.0
+      let v0 = y / 2048.0
+      let u1 = (x + 8.0) / 2048.0
+      let v1 = (y + 16.0) / 2048.0
+      let o = i * 80
+      bytes.put_f32_le(b, o + 0, x)
+      bytes.put_f32_le(b, o + 4, y)
+      bytes.put_f32_le(b, o + 8, w)
+      bytes.put_f32_le(b, o + 12, h)
+      bytes.put_f32_le(b, o + 16, c.r)
+      bytes.put_f32_le(b, o + 20, c.g)
+      bytes.put_f32_le(b, o + 24, c.b)
+      bytes.put_f32_le(b, o + 28, c.a)
+      bytes.put_f32_le(b, o + 32, u0)
+      bytes.put_f32_le(b, o + 36, v0)
+      bytes.put_f32_le(b, o + 40, u1)
+      bytes.put_f32_le(b, o + 44, v1)
+      bytes.put_f32_le(b, o + 48, 0.0)
+      bytes.put_f32_le(b, o + 52, 3.0)
+      bytes.put_f32_le(b, o + 56, 0.0)
+      bytes.put_f32_le(b, o + 60, 0.0)
+      bytes.put_f32_le(b, o + 64, clip_x0)
+      bytes.put_f32_le(b, o + 68, clip_y0)
+      bytes.put_f32_le(b, o + 72, clip_x1)
+      bytes.put_f32_le(b, o + 76, clip_y1)
+    }
+    sum = sum + (bytes.get_f32_le(b, (QUADS - 1) * 80 + 4) ?? 0.0)
   }
   sum
 }

@@ -690,17 +690,18 @@ PYRX
 # FRAME BUFFER RELATION (#4550). An immediate-mode renderer writes each
 # frame's instances into one byte buffer kept in a module-level `var`
 # (framebuf/framebuf.almd): 20 `bytes.put_f32_le` per quad. framebuf-global
-# writes that module-level buffer, framebuf-local the same bytes into a local
-# buffer through a `mut` param; the relation is global per-frame time over
+# writes that module-level buffer from a helper fn per quad, framebuf-local
+# the same bytes into a local buffer inline; the relation is global per-frame time over
 # local per-frame time (the rows run different frame counts, so each min is
 # divided by its own). 0.69.0 copied the whole buffer on EVERY 4-byte write
 # through the module-level var — the stdlib's self-hosted `put_*` took the
 # #2960 copy-in / write-back form natively — and a downstream editor's frame
 # went from 32 ms to 143 ms. A ceiling per leg: the defect is a whole buffer
-# per write, hundreds of times over either ceiling. What remains natively
-# (the take and put-back of the buffer around each call, one small
-# allocation) is recorded in the baseline, not hidden in the ceiling.
-FRAMEBUF_CEILING_NATIVE=20
+# per write (an 80 KB copy for a 4-byte store), hundreds of times over either
+# ceiling. What remains natively — the take and put-back of the buffer around
+# each call, one small allocation, against a store LLVM keeps in registers for
+# the local row — is recorded in the baseline, not hidden in the ceiling.
+FRAMEBUF_CEILING_NATIVE=40
 fb_out=$(mktemp -t perf-ratio-framebuf.XXXXXX.json)
 trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
 python3 research/benchmark/perf/bench.py \
