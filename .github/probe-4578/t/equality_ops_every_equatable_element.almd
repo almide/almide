@@ -1,0 +1,58 @@
+// @contract: C-015
+// The equality-needing list, set and map ops over every element and key shape
+// `==` compares (#4578). The wasm leg's `list.unique` kept its own list of
+// element shapes, and that list left out Set: `list.unique` over a
+// `List[Set[String]]` walled `list-unique-elem:Set` while `a == b` on the same
+// two sets lowered and native ran the program. `list.dedup`, `list.index_of`
+// (and `list.contains`, which is index_of), `set.from_list`, `map.from_list`
+// and the deep key scan each kept another copy of that list, so a Map, Result,
+// Bytes or Unit element, a List, Set, Option or Bytes set member and a List or
+// Option map key walled too. Every one of them now asks the predicate equality
+// itself answers. Sets and maps compare by content, not insertion order.
+type Item = { name: String, tags: Set[String] }
+
+fn item(name: String, raw: List[String]) -> Item = Item { name: name, tags: set.from_list(raw) }
+
+fn tags_text(tags: Set[String]) -> String = set.to_list(tags) |> list.sort |> list.join(",")
+
+// Items grouped by identical tag sets, groups in first-seen order.
+fn groups(items: List[Item]) -> List[String] = {
+  let keys = items |> list.map((i) => i.tags) |> list.unique
+  keys |> list.map((k) => {
+    let names = items |> list.filter((i) => i.tags == k) |> list.map((i) => i.name)
+    tags_text(k) + ": " + list.join(names, ",")
+  })
+}
+
+fn main() -> Unit = {
+  println("groups=${groups([item("a", ["x"]), item("b", ["x", "y"]), item("c", ["x"]), item("d", ["y", "x"]), item("e", [])])}")
+  let ss = [set.from_list(["a", "b"]), set.from_list(["b", "a"]), set.from_list(["c"]), set.from_list(["c"])]
+  let s1 = set.from_list(["c"])
+  println("set: unique=${list.unique(ss)} dedup=${list.dedup(ss)} contains=${list.contains(ss, s1)} index_of=${list.index_of(ss, s1)}")
+  let ms = [map.from_list([("a", 1), ("b", 2)]), map.from_list([("b", 2), ("a", 1)]), map.from_list([("a", 2)])]
+  let m1 = map.from_list([("a", 2)])
+  println("map: unique=${list.len(list.unique(ms))} dedup=${list.len(list.dedup(ms))} contains=${list.contains(ms, m1)} index_of=${list.index_of(ms, m1)}")
+  let rs: List[Result[Int, String]] = [ok(1), err("e"), ok(1), err("e"), err("f")]
+  let r1: Result[Int, String] = err("f")
+  println("result: unique=${list.unique(rs)} dedup=${list.dedup(rs)} contains=${list.contains(rs, r1)} index_of=${list.index_of(rs, r1)}")
+  let bs = [bytes.from_list([1, 2]), bytes.from_list([1, 2]), bytes.from_list([3])]
+  let b1 = bytes.from_list([3])
+  println("bytes: unique=${list.len(list.unique(bs))} dedup=${list.len(list.dedup(bs))} contains=${list.contains(bs, b1)} index_of=${list.index_of(bs, b1)}")
+  let us: List[Unit] = [(), (), ()]
+  println("unit: unique=${list.len(list.unique(us))} dedup=${list.len(list.dedup(us))} contains=${list.contains(us, ())} index_of=${list.index_of(us, ())}")
+  println("unique_by bytes key=${list.unique_by(["ab", "ac", "b", "cd"], (s) => bytes.from_list([string.len(s)]))}")
+  let sl = set.from_list([[1, 2], [1, 2], [3]])
+  println("set of list: len=${set.len(sl)} has=${set.contains(sl, [3])} has_not=${set.contains(sl, [2, 1])}")
+  let sss = set.from_list([set.from_list(["a", "b"]), set.from_list(["b", "a"]), set.from_list(["c"])])
+  println("set of set: len=${set.len(sss)} has=${set.contains(sss, set.from_list(["c"]))}")
+  let sb = set.from_list([bytes.from_list([1]), bytes.from_list([1]), bytes.from_list([2])])
+  println("set of bytes: len=${set.len(sb)} has=${set.contains(sb, bytes.from_list([2]))}")
+  let ml = map.from_list([([1], "x"), ([1], "y"), ([2], "z")])
+  println("list key: len=${map.len(ml)} get=${map.get(ml, [1])} miss=${map.get(ml, [3])}")
+  let mo = map.from_list([(some("a"), 1), (none, 2), (some("a"), 3)])
+  println("option key: len=${map.len(mo)} get=${map.get(mo, some("a"))} none=${map.get(mo, none)}")
+  let k1: Result[Int, String] = ok(1)
+  let k2: Result[Int, String] = err("x")
+  let mr = map.set(map.set(map.set(map.new(), k1, "a"), k2, "b"), k1, "c")
+  println("result key: len=${map.len(mr)} get=${map.get(mr, k1)} has=${map.contains(mr, k2)}")
+}
