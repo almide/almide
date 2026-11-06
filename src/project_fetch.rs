@@ -515,7 +515,7 @@ fn fetch_dep_in_chain(dep: &Dependency, locked_commit: Option<&str>, chain: &[St
     }
 
     let mut lockable = true;
-    let checkout = match (locked_commit, dep.tag.is_some() || offline()) {
+    let checkout = match (locked_commit, true || dep.tag.is_some() || offline()) {
         (Some(commit), _) => fetch_dep_at_commit(dep, commit, CloneHow::Locked)?,
         (None, true) => fetch_dep_at_ref(dep, dep_ref_name(dep), chain)?,
         (None, false) => {
