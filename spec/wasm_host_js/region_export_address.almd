@@ -1,0 +1,41 @@
+// @leg: structural
+// @contract: C-453
+// #4519 (ADR-0031 amendment A1c): an export declared
+// `@export(wasm, "name", returns: address)` returning a Region crosses as the
+// view's data address alone, one value in the memory's address width (one
+// i32 on wasm32), for a host that already knows the length it asked for. A
+// host reads it as one number and writes there: `in_alloc` takes the length
+// as a Float, so a host passes a plain number, and `in_show` reads the bytes
+// back through the program's own copy (the top-level `var`).
+//
+// Every other rule of the `(ptr, len)` form holds. The host holds one share
+// of the block per address it was handed, until it gives the address back to
+// `__region_release`. `in_tail` hands out a sub-Region (`ffi.slice`) as its
+// own address inside the parent's block, and that share alone keeps the
+// parent alive after the program dropped it and the host released the
+// parent's address. An empty Region crosses as 0, and an `effect fn`'s err
+// traps. The driver is region_export_address.host.mjs; `main` prints the line
+// the native run shares.
+import ffi
+
+var g_in: Region = ffi.region(bytes.new())
+
+@export(wasm, "in_alloc", returns: address)
+effect fn in_alloc(len: Float) -> Region = {
+  g_in = ffi.alloc(int.from_saturating(len))!
+  g_in
+}
+
+@export(wasm, "in_tail", returns: address)
+effect fn in_tail(off: Float) -> Region = {
+  let at = int.from_saturating(off)
+  ffi.slice(g_in, at, ffi.len(g_in) - at)!
+}
+
+@export(wasm, "in_show")
+effect fn in_show() -> Unit = {
+  let b = ffi.to_bytes(g_in)!
+  println("in holds ${bytes.len(b)} bytes: ${bytes.to_string_lossy(b)}")
+}
+
+effect fn main() -> Unit = println("ready")

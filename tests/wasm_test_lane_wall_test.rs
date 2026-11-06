@@ -221,7 +221,8 @@ fn the_wall_register_lists_exactly_the_specs_that_wall() {
 
 /// The files `almide test spec/` discovers (src/cli/mod.rs,
 /// `collect_test_files`: an `.almd` holding a `test` block, hidden / `target`
-/// / `node_modules` directories and directory symlinks skipped), as
+/// / `node_modules` directories, directories holding an `.almideignore`
+/// marker and directory symlinks skipped), as
 /// repo-relative paths, sorted — the list the CI slice selects from.
 fn lane_test_files(dir: &std::path::Path, root: &std::path::Path) -> Vec<String> {
     fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<String>) {
@@ -234,7 +235,7 @@ fn lane_test_files(dir: &std::path::Path, root: &std::path::Path) -> Vec<String>
             let p = e.path();
             let link = e.file_type().is_ok_and(|t| t.is_symlink());
             if p.is_dir() {
-                if !link {
+                if !link && !p.join(".almideignore").is_file() {
                     walk(&p, root, out);
                 }
             } else if p.extension().is_some_and(|x| x == "almd") {

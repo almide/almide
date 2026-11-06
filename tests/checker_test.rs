@@ -56,6 +56,19 @@ fn has_no_errors(input: &str) {
     assert!(errs.is_empty(), "expected no errors, got: {:?}", errs);
 }
 
+/// #4519 (ADR-0031 amendment A1c): `returns: address` is declared, never
+/// inferred, and means something only on a fn returning a Region; on any
+/// other return check refuses it (E090).
+#[test]
+fn returns_address_on_a_non_region_return_is_refused() {
+    let errs = errors("@export(wasm, \"count\", returns: address)\nfn count() -> Int = 3\n");
+    assert!(
+        errs.iter().any(|e| e.contains("`returns: address` needs a Region return, and the return type is Int")),
+        "{errs:?}"
+    );
+    has_no_errors("@export(wasm, \"count\")\nfn count() -> Int = 3\n");
+}
+
 // ---- Valid programs ----
 
 #[test]

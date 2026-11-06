@@ -660,7 +660,7 @@ pub(crate) fn generate(
         let plan = exports::plan_export(f, export_params.get(&f.name).map(Vec::as_slice), export_rets.get(&f.name))?;
         needs_values |= plan.needs_values();
         let entry = suspension.entry(&f.name);
-        region_release |= plan.ret == exports::RetPlan::Region;
+        region_release |= plan.ret.hands_out_share();
         wrappers.push_str(&exports::wrapper_js(f, sig, owned, &plan, entry)?);
         export_dts.push_str(&exports::export_dts(f, &plan, entry));
     }

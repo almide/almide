@@ -82,7 +82,7 @@ crates/almide-mir/src/render_native_b_tail.rs	almide_mir::render_native::render_
 crates/almide-mir/src/render_native_b_tail.rs	almide_mir::render_native::render_float_cmp::{closure#1}	1
 crates/almide-mir/src/render_native_b_tail.rs	almide_mir::render_native::render_float_un	5
 crates/almide-mir/src/render_native_b_tail.rs	almide_mir::render_native::render_float_un::{closure#0}	1
-crates/almide-mir/src/render_native_b_tail.rs	almide_mir::render_native::render_int_binop	7
+crates/almide-mir/src/render_native_b_tail.rs	almide_mir::render_native::render_int_binop	6
 crates/almide-mir/src/render_native_borrow_read.rs	almide_mir::render_native_borrow_read::block_untouched	5
 crates/almide-mir/src/render_native_borrow_read.rs	almide_mir::render_native_borrow_read::borrow_reads	2
 crates/almide-mir/src/render_native_borrow_read.rs	almide_mir::render_native_borrow_read::last_borrowing_use::{closure#1}	2

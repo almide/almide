@@ -195,6 +195,23 @@ const CORPUS: &[(&str, &str)] = &[
     //    zero-length loop and answered 0.
     ("range_head_fold_count_past_int_max", "fn count(a: Int, e: Int) -> Int = list.range(a, e) |> list.fold(0, (n, _x) => n + 1)\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(int.to_string(count(0 - top - 1, 2147483648)))\n  println(int.to_string((0 - top - 1)..<top |> list.fold(0, (n, _x) => n + 1)))\n}\n"),
     ("range_head_fold_list_range_count_overflow", "fn walk(a: Int, e: Int) -> Int = list.range(a, e) |> list.fold(0, (acc, x) => acc + 100 / (x - a - 3))\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(walk(0 - top, top)))\n}\n"),
+    // ── #4517: one binding passed at two argument positions of one call at
+    //    its last use. The render moved it into `map.merge`'s owned-reuse
+    //    routine at the first position and borrowed it at the second
+    //    (`almide_rt_map_merge_owned(v0, &v0)`, rustc E0382); a binding the
+    //    same call reads more than once now moves at none of its positions.
+    //    The other two-operand calls (set algebra, list/string/Bytes `+`, a
+    //    user fn) given the same binding twice are pinned beside it. ──
+    ("merge_same_binding_let", "fn main() -> Unit = {\n  let y0: Map[String, String] = [:]\n  let r1: Bool = map.contains(map.merge(y0, y0), \" nbsp \")\n  let r2: Int = 1\n  println(\"r2 = ${r2}\")\n}\n"),
+    ("merge_same_binding_rebind", "fn main() -> Unit = {\n  var m = map.from_list([(\"a\" + int.to_string(1), \"x\"), (\"b\", \"y\")])\n  m = map.merge(m, m)\n  println(\"${map.len(m)}\")\n}\n"),
+    ("merge_same_binding_tail_call", "fn go(m: Map[String, Int], n: Int) -> Map[String, Int] =\n  if n == 0 then m else go(map.merge(m, m), n - 1)\n\nfn main() -> Unit = {\n  let m = go(map.from_list([(\"k\" + int.to_string(1), 1)]), 3)\n  println(\"${map.len(m)}\")\n}\n"),
+    ("merge_same_binding_fold_acc", "fn main() -> Unit = {\n  let m0 = map.from_list([(\"k\" + int.to_string(1), 1)])\n  let m = list.fold([1, 2, 3], m0, (acc, x) => map.merge(acc, acc))\n  println(\"${map.len(m)}\")\n}\n"),
+    ("merge_same_binding_int_keys", "fn main() -> Unit = {\n  let m = map.from_list([(1, 2), (3, 4)])\n  println(\"${map.len(map.merge(m, m))}\")\n}\n"),
+    ("set_union_same_binding", "fn main() -> Unit = {\n  let s = set.from_list([\"a\" + int.to_string(1), \"b\"])\n  println(\"${set.len(set.union(s, s))}\")\n}\n"),
+    ("list_concat_same_binding", "fn main() -> Unit = {\n  let xs = [\"a\" + int.to_string(1), \"b\"]\n  println((xs + xs) |> list.join(\",\"))\n}\n"),
+    ("str_concat_same_binding", "fn main() -> Unit = {\n  let s = \"ab\" + int.to_string(3)\n  println(s + s)\n}\n"),
+    ("bytes_concat_same_binding", "fn main() -> Unit = {\n  let b = bytes.from_string(\"ab\" + int.to_string(3))\n  println(\"${bytes.len(b + b)}\")\n}\n"),
+    ("user_fn_same_binding_twice", "fn both(a: List[String], b: List[String]) -> List[String] = a + b\n\nfn main() -> Unit = {\n  let xs = [\"a\" + int.to_string(1), \"b\"]\n  println(both(xs, xs) |> list.join(\",\"))\n}\n"),
 ];
 
 #[test]
