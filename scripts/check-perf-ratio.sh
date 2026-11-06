@@ -712,7 +712,7 @@ FRAMEBUF_CEILING_LOCAL_WASM=15
 MUTPARAM_CEILING_NATIVE=10
 MUTPARAM_CEILING_WASM=3
 fb_out=$(mktemp -t perf-ratio-framebuf.XXXXXX.json)
-trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out" "${mm_out:-}"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,wasm \
   --bench framebuf-global,framebuf-local,framebuf-param \
@@ -814,6 +814,64 @@ for leg in ("native", "wasm"):
 sys.exit(1 if failed else 0)
 PYFB
 
+# MUT MAP RELATION (#4580): mutmap-param writes a Map through a `mut m` helper
+# per write (`{ m[k] = v }`), mutmap-local the same writes inline; the
+# relation is per round. The wasm leg kept an owned param out of the in-place
+# map set (try_map_set_in_place, a rule from when params were borrowed views),
+# so every write through the helper copied the whole map.
+MUTMAP_CEILING_NATIVE=10
+MUTMAP_CEILING_WASM=3
+mm_out=$(mktemp -t perf-ratio-mutmap.XXXXXX.json)
+python3 research/benchmark/perf/bench.py \
+  --quick --runs "$RUNS" --legs native,wasm \
+  --bench mutmap-param,mutmap-local \
+  --label ratchet-mutmap --out "$mm_out"
+python3 - "$mm_out" "$BASELINE_FILE" "$MUTMAP_CEILING_NATIVE" "$MUTMAP_CEILING_WASM" "$MIN_SECONDS" <<'PYMM'
+import json, sys
+sys.path.insert(0, "research/benchmark/perf")
+from bench import QUICK_ARGS
+
+out_path, baseline_path, ceiling_native, ceiling_wasm, min_s = sys.argv[1:6]
+ceilings = {"native": float(ceiling_native), "wasm": float(ceiling_wasm)}
+min_s = float(min_s)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+
+def rounds(bench):
+    return int(QUICK_ARGS[bench].split(":")[1])
+
+failed = False
+for leg in ("native", "wasm"):
+    key = f"mutmap-{leg}"
+    if key not in baseline:
+        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the mut map relation was "
+                 "added without its recorded value; add the line on purpose.")
+    p = data["mutmap-param"]["variants"][f"mutmap-param/{leg}"]["min"]
+    l = data["mutmap-local"]["variants"][f"mutmap-local/{leg}"]["min"]
+    if l < min_s:
+        sys.exit(f"::error::perf-ratio: mutmap-local/{leg} min {l}s is under the {min_s}s floor — "
+                 "grow the QUICK_ARGS entry instead of gating on spawn noise.")
+    ratio = (p / rounds("mutmap-param")) / (l / rounds("mutmap-local"))
+    ceiling = ceilings[leg]
+    if ratio > ceiling:
+        print(f"::error::perf-ratio: a Map written through a `mut m` helper costs {ratio:.3f}x the same "
+              f"writes inline on the {leg} leg (ceiling {ceiling:.2f}x, {p:.3f}s for {rounds('mutmap-param')} "
+              f"rounds vs {l:.3f}s for {rounds('mutmap-local')}, recorded {baseline[key]:.3f}x). A `mut` Map "
+              "param is being copied on every write, which is #4580. Look at whether an owned param reaches "
+              "the in-place set (try_map_set_in_place in crates/almide-wasm/src/map_inplace.rs). "
+              "Do not raise the ceiling.")
+        failed = True
+        continue
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x the inline writes per round "
+          f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
+sys.exit(1 if failed else 0)
+PYMM
+
 # BTREES RELATION (rc4, owner ruling 2026-11-05). btrees and treealloc build
 # and walk the same trees (2^19 + 2^19 nodes per round, 24 x depth 19 against
 # 12 x depth 20); btrees only takes its depth as a literal, so it renders whole
@@ -868,7 +926,7 @@ PYBT
 GLOBALREAD_CEILING_NATIVE=4
 GLOBALREAD_CEILING_WASM=3
 gr_out=$(mktemp -t perf-ratio-globalread.XXXXXX.json)
-trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out" "$gr_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out" "$gr_out" "${mm_out:-}"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,wasm \
   --bench globalread-global,globalread-local \

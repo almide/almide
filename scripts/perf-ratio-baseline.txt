@@ -139,6 +139,11 @@ framebuf-local-wasm-native 11.0
 # never on these values. Runner readings: see the PR that added the row.
 framebuf-param-native 1.0
 framebuf-param-wasm 1.0
+# MUT MAP (#4580): mutmap-param per-round min / mutmap-local per-round min,
+# per leg. The gate fails on MUTMAP_CEILING_* in check-perf-ratio.sh, never on
+# these values.
+mutmap-native 1.0
+mutmap-wasm 1.0
 treealloc 0.343
 # btrees (rc4): treealloc's program with the depth a literal and no argument
 # read, so it renders whole on the certified native leg, region window

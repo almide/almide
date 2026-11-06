@@ -265,6 +265,11 @@ nothing is published that `bench.py` did not produce.
   (`check-perf-ratio.sh`, MUT PARAM). Before the fix the wasm leg shared the
   buffer into that tail `put_f32_le` and released its own credit only after
   it returned, so the callee copied the whole buffer once per quad.
+- **`mutmap-param` / `mutmap-local` are the mut-map rows** (#4580): a
+  4,000-entry `Map[Int, Int]` overwritten each round through a `mut m`
+  helper (`{ m[k] = v }`, `p`) or inline on a local `var` (`l`). Gated per
+  round (`check-perf-ratio.sh`, MUT MAP). The wasm leg kept an owned param out
+  of the in-place map set, so each write through the helper copied the map.
 
 ## Run
 
