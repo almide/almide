@@ -1,5 +1,9 @@
 # EDIT-LOOP SCALE-INVARIANCE ANCHORS (#1334) — see scripts/check-edit-loop-scale.sh.
 #
+# Line shapes: `name value` is one anchor for every runner; `name | <CPU model>
+# | value | runs` is a per-runner-class anchor (only `ratio`, see the script
+# header), the median of `runs` CI jobs on that CPU model.
+#
 # Both anchors are DIMENSIONLESS same-run ratios, not milliseconds. The
 # milliseconds on this ladder are not anchorable: same commit, same corpus, same
 # M4 Pro, one hour apart on 2026-08-13, the 10,151-line rung read p95 52.9ms at
@@ -95,7 +99,37 @@ slope 0.871
 #     before  15.372 15.218 15.128   median 15.218
 #     after   89.738 92.155 92.736   median 92.155   factor 6.056
 #   Anchor x 6.056 = 99.98.
-ratio 99.98
+# ratio 99.98 -> ONE ANCHOR PER RUNNER CLASS (2026-11-06). The 99.98 was a GCE
+#   factor applied to the old anchor, and no CI class reads it: the CI runner
+#   read 62-86 depending on its CPU, about 3% apart within a class and 39%
+#   across classes, so the verdict followed the draw (every EPYC 9V45 run under
+#   the 74.985 floor, every 7763 run inside). Each class below is the MEDIAN of
+#   that class's develop, merge-queue and PR Perf ratchet jobs from #4458's own
+#   PR job (126520216488, 2026-11-04) to 2026-11-06 01:00 UTC (develop head
+#   e4cb9552c), all 99 such jobs; the same +/-25% budget sits around each.
+#   Readings, sorted:
+#     EPYC 7763 (47)  80.12 80.96 81.28 81.33 81.49 81.49 81.66 81.71 81.73
+#                     81.75 81.75 81.89 81.97 82.04 82.05 82.14 82.16 82.22
+#                     82.28 82.30 82.34 82.34 82.37 82.49 82.52 82.60 82.64
+#                     82.71 82.72 82.77 82.79 82.80 82.86 82.89 83.00 83.13
+#                     83.17 83.30 83.39 83.41 83.53 83.63 83.72 83.72 83.76
+#                     83.77 84.08   median 82.49 (-2.9% / +1.9%)
+#     EPYC 9V74 (26)  73.90 74.73 75.09 75.09 75.29 75.40 75.44 75.45 75.49
+#                     75.52 75.75 75.77 75.79 75.80 75.82 75.89 75.89 75.90
+#                     76.24 76.50 76.74 76.87 77.14 77.54 78.11 78.33
+#                     median 75.79 (-2.5% / +3.3%)
+#     EPYC 9V45 (11)  61.38 61.55 61.78 61.85 62.01 62.33 62.80 62.98 63.09
+#                     64.84 65.46   median 62.33 (-1.5% / +5.0%)
+#     Xeon 8370C (9)  84.66 85.11 85.86 85.92 86.28 86.48 86.63 86.75 86.82
+#                     median 86.28 (-1.9% / +0.6%)
+#     Xeon 8573C (4)  79.00 79.33 80.86 81.95   median 80.10
+#   Not anchored (one run each, under the three-run minimum): Xeon 6973P-C
+#   74.59, Xeon 6975P-C 76.75. They report and warn until three runs exist.
+ratio | AMD EPYC 7763 64-Core Processor | 82.49 | 47
+ratio | AMD EPYC 9V74 80-Core Processor | 75.79 | 26
+ratio | AMD EPYC 9V45 96-Core Processor | 62.33 | 11
+ratio | Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz | 86.28 | 9
+ratio | INTEL(R) XEON(R) PLATINUM 8573C | 80.10 | 4
 #
 # ── PER-PHASE ANCHORS (#1311) ────────────────────────────────────────────────
 # The same ladder, checked with `almide check --timings`, splits the front end
