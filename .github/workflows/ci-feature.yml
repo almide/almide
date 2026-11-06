@@ -4,7 +4,7 @@ name: Feature Branch CI
 on:
   push:
     branches:
-      - 'feature/gr4571-probe3'
+      - 'feature/gr4571-probe4'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -51,11 +51,9 @@ jobs:
       - name: Negative control — revert the fix
         if: matrix.variant == 'control'
         run: |
-          git config user.email probe@example.com && git config user.name probe
-          git revert --no-edit "$(git log --format=%H -1 --grep='Erase the release of a heap slot')"
-          git revert --no-edit "$(git log --format=%H -1 --grep='Read the Dup of a heap slot')"
-          git revert --no-edit "$(git log --format=%H -1 --grep='Read a borrow-only heap slot as a snapshot')"
-          git log --oneline -3
+          git fetch -q origin integration-0691
+          git checkout FETCH_HEAD -- crates/almide-mir/src
+          git status --short | head
       - name: Build
         run: cargo build --release
       - name: Gates
