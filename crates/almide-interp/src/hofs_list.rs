@@ -12,6 +12,13 @@ impl<'a> Interpreter<'a> {
     fn recv_items(args: &[Value]) -> Result<Vec<Value>, Flow> {
         match args.first().and_then(|v| v.as_iter_items()) {
             Some(items) => Ok(items),
+            // A Range that as_iter_items refuses is past the interp cap: the
+            // backends either take the C-197 abort or walk it counted
+            // (`MIN..<MAX |> list.fold`, #4538). Either way an answer from
+            // here would be a wrong vote — abstain, as list.len does.
+            None if matches!(args.first(), Some(Value::Range { .. })) => Err(Flow::Unsupported(
+                "range materialization beyond the interp cap (both backends take the C-197 resource path or count the range)".into(),
+            )),
             None => Err(Flow::Abort("internal: HOF receiver not iterable".into())),
         }
     }
