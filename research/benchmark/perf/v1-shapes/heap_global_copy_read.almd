@@ -1,0 +1,23 @@
+// v1-vs-v0 shape bench: a module-level list read (#4006 C1 class D) whose
+// use needs a value of its own, not a borrow: the argument of a closure call
+// is copied out of the global's cell, where a named call that only reads it
+// borrows a snapshot of the cell (#4562).
+var SEEN: List[Int] = []
+
+fn note(v: Int) -> Unit = {
+  SEEN = SEEN + [v]
+}
+
+fn weigh_all(weigh: (List[Int]) -> Int) -> Int = {
+  var total = 0
+  for i in 0..<300 {
+    note(i)
+    total = total + weigh(SEEN) + list.len(SEEN)
+  }
+  total
+}
+
+fn main() -> Unit = {
+  let total = weigh_all((xs) => list.len(xs) * 2)
+  println("${total} ${list.len(SEEN)}")
+}
