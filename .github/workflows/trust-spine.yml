@@ -1,4 +1,4 @@
-name: Trust Spine (v1)
+name: full-4578 Trust Spine (v1)
 
 # Enforce the v1 flight-grade trust spine in CI (weekly indicator ②):
 #   - the Rocq/Coq proof spine compiles, is independently re-checked (coqchk),
@@ -18,52 +18,8 @@ name: Trust Spine (v1)
 
 on:
   push:
-    # develop is the working branch since the 0.28.0 reconciliation folded the
-    # v1 line in; develop-v1 stays covered while it still receives pushes.
-    # main is the RELEASE branch (#921): every release merges develop→main, and
-    # before this trigger existed each release shipped without the proof spine,
-    # the PCC gate, or the corpus wall ever running on that ref.
-    branches: [develop, develop-v1, main]
-    # #571: every release tag runs the full spine on ITS tree, and a green
-    # run assembles + attests the qualification dossier (tail steps below).
-    tags: ["v*"]
-    paths:
-      - 'proofs/**'
-      # The corpus wall drives the REAL frontend (parse→check→lower→optimize→
-      # mono→ir_link), so a change to ANY compiler crate can move the wall
-      # counts and witness contents — filtering to almide-mir alone let
-      # frontend/syntax/ir/optimize changes shift the gate's inputs without the
-      # gate running (#921). `crates/**` is the honest filter; the job is ~17
-      # min warm.
-      - 'crates/**'
-      # The corpus classifier embeds stdlib sources (registry include_str!), so
-      # a stdlib change can move the wall set without touching almide-mir.
-      - 'stdlib/**'
-      # spec/ IS the corpus the wall gate classifies — a spec-only commit can
-      # add a walled function (the #956 matrix test did exactly that) and the
-      # ratchet must run on it, not first on the next crates/ push.
-      - 'spec/**'
-      # A release PR always bumps Cargo.toml, so the release path can never
-      # slip through the paths filter on a version-bump-only diff.
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'Makefile'
-      - '.github/workflows/trust-spine.yml'
-  pull_request:
-    branches: [develop, develop-v1, main]
-    paths:
-      - 'proofs/**'
-      - 'crates/**'
-      - 'stdlib/**'
-      - 'spec/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'Makefile'
-      - '.github/workflows/trust-spine.yml'
-  workflow_dispatch:
+    branches: [probe-4578-full3]
 
-# A burst of pushes to the same ref re-runs the heavy job; cancel the superseded
-# run (the rate-limit lesson from ci.yml).
 concurrency:
   group: trust-spine-${{ github.ref }}
   cancel-in-progress: true

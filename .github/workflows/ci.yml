@@ -1,4 +1,4 @@
-name: CI
+name: full-4578 CI
 
 # NO path filtering. This workflow owns all 13 REQUIRED status checks, and a
 # required check that never reports is not a skipped check — it is a PR that
@@ -23,18 +23,8 @@ name: CI
 # wrong costs a gate. The trade is not close.
 on:
   push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
-  # The develop merge queue (#1732 follow-on): the queue's temporary
-  # gh-readonly-queue/* branch must receive every REQUIRED check, or the
-  # first queued PR stalls forever. Only this workflow and
-  # acceptance-ring.yml produce required contexts; the rest deliberately
-  # skip merge_group to keep the queue validation lean.
-  merge_group:
+    branches: [probe-4578-full3]
 
-# Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
-# concurrent runs that all re-download tools and trip the per-IP rate limit.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -2654,7 +2644,7 @@ jobs:
 
   build-cross:
     name: Build (${{ matrix.os }})
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: true
     strategy:
       matrix:
         include:
@@ -2794,7 +2784,7 @@ jobs:
   # table, inside the same 60-minute hang budget.
   corpus-cross:
     name: Corpus gate (macos-latest, ${{ matrix.gate }})
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: true
     strategy:
       fail-fast: false
       matrix:
@@ -2838,7 +2828,7 @@ jobs:
 
   test-rust-cross:
     name: Test Rust (${{ matrix.os }})
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: true
     needs: build-cross
     strategy:
       matrix:
@@ -3241,7 +3231,7 @@ jobs:
   commissioned-mutation-gate:
     name: Commissioned mutation gate (the net keeps its teeth)
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

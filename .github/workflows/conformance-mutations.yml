@@ -1,4 +1,4 @@
-name: Conformance mutations (nightly)
+name: full-4578 Conformance mutations (nightly)
 
 # Mutation gate for the kernel-conformance harness (Survey 4 law 1, the roc
 # lambda_mono_mutation_check pattern): apply each seeded emit bug in
@@ -8,10 +8,8 @@ name: Conformance mutations (nightly)
 # and manual dispatch only, deliberately kept out of the PR/push CI.
 
 on:
-  schedule:
-    # 04:30 UTC daily — clear of the 03:00 fuzz night and the push/PR windows.
-    - cron: "30 4 * * *"
-  workflow_dispatch:
+  push:
+    branches: [probe-4578-full3]
 
 env:
   CARGO_TERM_COLOR: always
