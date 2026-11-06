@@ -55,14 +55,18 @@ fn result_line(xs: List[Result[Int, String]], x: Result[Int, String]) -> String 
 fn bytes_line(xs: List[Bytes], x: Bytes) -> String =
   "bytes: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${list.contains(xs, x)} index_of=${list.index_of(xs, x)}"
 
-fn unit_line(xs: List[Unit]) -> String =
-  "unit: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${list.contains(xs, ())} index_of=${list.index_of(xs, ())}"
+fn unit_line(xs: List[Unit]) -> String = {
+  let u = ()
+  let has = list.contains(xs, u)
+  let at = list.index_of(xs, u)
+  "unit: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${has} index_of=${at}"
+}
 
 fn unique_by_line(xs: List[String]) -> String = "unique_by bytes key=${list.unique_by(xs, (s) => bytes.from_list([string.len(s)]))}"
 
-fn set_of_list_line(xs: List[List[Int]], hit: List[Int], miss: List[Int]) -> String = {
+fn set_of_list_line(xs: List[List[Int]]) -> String = {
   let s = set.from_list(xs)
-  "set of list: len=${set.len(s)} has=${set.contains(s, hit)} has_not=${set.contains(s, miss)}"
+  "set of list: len=${set.len(s)} has=${set.contains(s, [3])} has_not=${set.contains(s, [2, 1])}"
 }
 
 fn set_of_set_line(xs: List[Set[String]], hit: Set[String]) -> String = {
@@ -75,9 +79,9 @@ fn set_of_bytes_line(xs: List[Bytes], hit: Bytes) -> String = {
   "set of bytes: len=${set.len(s)} has=${set.contains(s, hit)}"
 }
 
-fn list_key_line(keys: List[List[Int]], vals: List[String], hit: List[Int], miss: List[Int]) -> String = {
+fn list_key_line(keys: List[List[Int]], vals: List[String]) -> String = {
   let m = map.from_list(list.zip(keys, vals))
-  "list key: len=${map.len(m)} get=${map.get(m, hit)} miss=${map.get(m, miss)}"
+  "list key: len=${map.len(m)} get=${map.get(m, [1])} miss=${map.get(m, [3])}"
 }
 
 fn option_key_line(keys: List[String?], vals: List[Int], hit: String?) -> String = {
@@ -103,10 +107,10 @@ fn main() -> Unit = {
   println(bytes_line(blobs([1, 1, 3]), bytes.from_list([3, 4])))
   println(unit_line(units(3)))
   println(unique_by_line(["ab", "ac", "b", "cd"]))
-  println(set_of_list_line(int_lists(["1,2", "1,2", "3"]), [3], [2, 1]))
+  println(set_of_list_line(int_lists(["1,2", "1,2", "3"])))
   println(set_of_set_line(sets(["a,b", "b,a", "c"]), tag_set("c")))
   println(set_of_bytes_line(blobs([1, 1, 2]), bytes.from_list([2, 3])))
-  println(list_key_line(int_lists(["1", "1", "2"]), ["x", "y", "z"], [1], [3]))
+  println(list_key_line(int_lists(["1", "1", "2"]), ["x", "y", "z"]))
   println(option_key_line(opt_strings(["a", "", "a"]), [1, 2, 3], some("a")))
   println(result_key_line(ok(1), err("x")))
 }
