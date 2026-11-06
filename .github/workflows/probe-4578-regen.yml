@@ -50,6 +50,16 @@ jobs:
             else diff=$((diff+1)); echo "CHANGED $b: base rc=$(cat /tmp/r/base/$b.rc) $(cat /tmp/r/base/$b.wall | tr '\n' ' ') | fix rc=$(cat /tmp/r/fix/$b.rc) $(cat /tmp/r/fix/$b.wall | tr '\n' ' ') sizes $(stat -c %s /tmp/r/base/$b.wasm 2>/dev/null) -> $(stat -c %s /tmp/r/fix/$b.wasm 2>/dev/null)"; fi
           done
           echo "RENDER-IDENTITY: $n fixtures, $same identical (of which $wb walled identically on both), $diff changed"
+      - name: Emit Rust for every spec program with both (the checker change reaches native too)
+        run: |
+          set +e
+          n=0; same=0; diff=0
+          for f in $(find spec -name '*.almd' | sort); do
+            n=$((n+1))
+            a=$(timeout 60 /tmp/almide-base "$f" --target rust 2>&1 | sha256sum); b=$(timeout 60 /tmp/almide-fix "$f" --target rust 2>&1 | sha256sum)
+            if [ "$a" = "$b" ]; then same=$((same+1)); else diff=$((diff+1)); echo "RUST-CHANGED $f"; fi
+          done
+          echo "RUST-IDENTITY: $n programs, $same identical, $diff changed"
   regen:
     if: contains(github.event.head_commit.message, '[regen]')
     runs-on: ubuntu-latest

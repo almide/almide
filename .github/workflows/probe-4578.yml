@@ -64,3 +64,42 @@ jobs:
           tar xf /tmp/wt.tar.xz -C /tmp && echo "/tmp/wasmtime-v50.0.1-x86_64-linux" >> "$GITHUB_PATH"
       - name: Probes
         run: bash .github/probe-4578/run.sh "$(find "$PWD/rel" -name almide -type f | head -1)" .github/probe-4578/t
+  nc:
+    if: contains(github.event.head_commit.message, '[nc]')
+    name: cross-target gate (${{ matrix.ref }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [wasm-regressions-4578-4579, wasm-regressions-4578-4579-nc]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: wasmtime
+        run: |
+          curl -sSfL --retry 5 -o /tmp/wt.tar.xz https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz
+          tar xf /tmp/wt.tar.xz -C /tmp && echo "/tmp/wasmtime-v50.0.1-x86_64-linux" >> "$GITHUB_PATH"
+      - run: git log --oneline -4 && cargo build --release --bin almide
+      - name: The two fixtures through the cross-target gate
+        run: |
+          set +e
+          fail=0
+          for f in equality_ops_every_equatable_element protocol_bound_method_named_like_a_record_field; do
+            echo "### $f: almide build --target wasm"
+            ALMIDE_WALL_REASON=1 target/release/almide build spec/wasm_cross/$f.almd --target wasm -o /tmp/$f.wasm 2>&1 | grep -E 'E082|wall|Unsupported|verified|Built' | head -4
+            echo "### $f: wasm_cross_target_spec"
+            ALMIDE_CORPUS_FILTER=$f ALMIDE_EXPECT_TOOLS=1 cargo test --release -q --test wasm_runtime_cross_target 2>&1 | grep -E 'unexpected|equal|FAILED|passed|failed|panicked|test result' | head -8
+            st=${PIPESTATUS[0]}; echo "exit $st"; [ "$st" = 0 ] || fail=1
+          done
+          if [ "${{ matrix.ref }}" = wasm-regressions-4578-4579 ]; then exit $fail; fi
+          [ "$fail" = 1 ] || { echo "::error::the gate PASSED with the fix reverted"; exit 1; }
+          echo "negative control: the gate fails with the fix reverted, as it must"
