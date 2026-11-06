@@ -600,10 +600,16 @@ pub(crate) fn load_native_build_config(file: &str) -> (Vec<crate::project::Nativ
 /// `collect_test_files`'s per-entry body: recurse into subdirectories, or
 /// check a `.almd` file for a `test` block. A symlinked directory is not
 /// descended (#4140): a link loop would collect the same files at every
-/// level, and a link out would run tests from outside the tree.
+/// level, and a link out would run tests from outside the tree. A directory
+/// holding an `.almideignore` marker is not descended either: it holds `.almd`
+/// files that are not tests to run (answer corpora, deliberately broken
+/// diagnostics fixtures).
 fn collect_test_files_entry(path: &std::path::Path, files: &mut Vec<String>) {
     let is_link = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
     if path.is_dir() && !is_link {
+        if project_scope::has_ignore_marker(path) {
+            return;
+        }
         files.extend(collect_test_files(path));
     } else if path.extension().map(|e| e == "almd").unwrap_or(false) {
         // Check if file contains a test block

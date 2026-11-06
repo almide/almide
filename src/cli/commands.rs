@@ -116,8 +116,9 @@ fn no_test_matched(counts: TestCounts) -> String {
 }
 
 /// Shared "resolve `almide test [file]`'s target file list" logic — used by
-/// `cmd_test`/`cmd_test_fast` (search `spec/` and `exercises/`, `.` fallback)
-/// and `cmd_test_wasm` (search `.` directly, i.e. an empty `fallback_dirs`).
+/// `cmd_test`/`cmd_test_fast` and `cmd_test_wasm`. Inside a project every leg
+/// walks the project root; `fallback_dirs` (`spec/` + `exercises/` for the
+/// native legs, none for the wasm leg) only apply outside a project.
 ///
 /// An empty result is reported but no longer exits here (#2084): "nothing to
 /// run" is one verdict decided by [`finish_test_run`], so a discovery that
@@ -139,29 +140,37 @@ pub(super) fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<Str
             vec![file.to_string()]
         }
     } else {
-        // Default: recursively find test files in the given standard
-        // directories (e.g. spec/, exercises/); "." otherwise.
-        let mut files = Vec::new();
-        for dir in fallback_dirs {
-            let path = std::path::Path::new(dir);
-            if path.exists() {
-                files.extend(collect_test_files(path));
+        // Default inside a project (an `almide.toml` here): the whole project
+        // root. The walk skips what `collect_test_files` skips — dot
+        // directories (`.git`, the project-local `.almide/` cache), build
+        // output (`target`), vendored dependencies (`node_modules`) and any
+        // directory holding an `.almideignore` marker. The dependency cache
+        // itself lives outside the project (`~/.almide/cache`). Searching only
+        // `spec/` + `exercises/` here ran none of a project's `src/` tests,
+        // silently, whenever it also had a `spec/` (#4530).
+        let mut files = if std::path::Path::new("almide.toml").exists() {
+            collect_test_files(std::path::Path::new("."))
+        } else {
+            // Outside a project: the standard directories (e.g. spec/,
+            // exercises/) when present — and otherwise the refusal (#1928):
+            // without an `almide.toml` here, `almide test` walked the whole
+            // CWD tree (a workspace of twenty unrelated repos, from a reset
+            // shell) where `almide check` refuses with a hint. Same refusal,
+            // same hint, so the two commands agree on what "no file" means.
+            let mut files = Vec::new();
+            for dir in fallback_dirs {
+                let path = std::path::Path::new(dir);
+                if path.exists() {
+                    files.extend(collect_test_files(path));
+                }
             }
-        }
-        // Fallback: search the current directory if no standard dirs
-        // found — but ONLY inside a project (#1928): without an
-        // `almide.toml` here, `almide test` walked the whole CWD tree
-        // (a workspace of twenty unrelated repos, from a reset shell)
-        // where `almide check` refuses with a hint. Same refusal, same
-        // hint, so the two commands agree on what "no file" means.
-        if files.is_empty() {
-            if !std::path::Path::new("almide.toml").exists() {
+            if files.is_empty() {
                 err("No file specified and no almide.toml found.");
                 err("Run 'almide init' to create a project, or specify a file or directory.");
                 std::process::exit(1);
             }
-            files = collect_test_files(std::path::Path::new("."));
-        }
+            files
+        };
         files.sort();
         if files.is_empty() {
             err(&format!("No .almd files with test blocks found."));
