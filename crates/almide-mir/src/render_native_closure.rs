@@ -44,7 +44,7 @@ fn param_spelling(k: NativeSigKind) -> String {
 }
 
 /// The owned value kind a result of kind `k` binds as.
-fn owned_nty(k: NativeSigKind) -> NTy {
+pub(crate) fn owned_nty(k: NativeSigKind) -> NTy {
     match k {
         NativeSigKind::I64 | NativeSigKind::Narrow { .. } => NTy::I64,
         NativeSigKind::F64 => NTy::F64,
@@ -59,7 +59,7 @@ fn owned_nty(k: NativeSigKind) -> NTy {
 }
 
 /// The kind a value of `t` passes as.
-fn arg_kind(t: NTy) -> NativeSigKind {
+pub(crate) fn arg_kind(t: NTy) -> NativeSigKind {
     match t {
         NTy::I64 => NativeSigKind::I64,
         NTy::F64 => NativeSigKind::F64,
@@ -75,7 +75,7 @@ fn arg_kind(t: NTy) -> NativeSigKind {
 
 /// The dispatch key of a lambda's user params and result, or `None` for an
 /// all-scalar signature (served by the per-arity tables).
-fn sig_key(ps: &[NativeSigKind], ret: Option<NativeSigKind>) -> Option<String> {
+pub(crate) fn sig_key(ps: &[NativeSigKind], ret: Option<NativeSigKind>) -> Option<String> {
     if ps.iter().all(|p| *p == NativeSigKind::I64) && ret == Some(NativeSigKind::I64) {
         return None;
     }
@@ -90,7 +90,7 @@ fn sig_key(ps: &[NativeSigKind], ret: Option<NativeSigKind>) -> Option<String> {
 }
 
 /// A lifted lambda's user-param kinds and result (the env param dropped).
-fn lambda_sig(sigs: &NativeSigs, name: &str) -> Option<(Vec<NativeSigKind>, Option<NativeSigKind>)> {
+pub(crate) fn lambda_sig(sigs: &NativeSigs, name: &str) -> Option<(Vec<NativeSigKind>, Option<NativeSigKind>)> {
     let (ps, r) = sigs.get(name)?;
     Some((ps.get(1..)?.to_vec(), *r))
 }

@@ -1,0 +1,42 @@
+// v1-vs-v0 shape bench: module-level heap bindings (#4006 C1 class D), each
+// in its own cell — lists appended through a helper and reset to an empty
+// list, a record replaced whole and read, and a list replaced by an
+// argument the callee reads again.
+type Acc = { xs: List[Int], n: Int }
+
+var LOG: List[Int] = []
+
+var NAMES: List[String] = []
+
+var ACC: Acc = { xs: [], n: 0 }
+
+fn note(v: Int) -> Unit = {
+  LOG = LOG + [v]
+}
+
+fn name(s: String) -> Unit = {
+  NAMES = NAMES + [s]
+}
+
+fn replace(xs: List[Int]) -> Int = {
+  LOG = xs
+  list.len(xs)
+}
+
+fn main() -> Unit = {
+  var total = 0
+  for round in 0..<200 {
+    for i in 0..<50 {
+      note(i + round)
+      ACC = { xs: [i], n: i + round }
+    }
+    name("r")
+    total = total + list.len(LOG) + list.len(NAMES) + ACC.n
+    LOG = []
+    if round % 50 == 0 then {
+      NAMES = []
+    } else ()
+  }
+  let k = replace([1, 2, 3])
+  println("${total} ${ACC.n} ${LOG} ${k}")
+}

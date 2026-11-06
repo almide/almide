@@ -63,10 +63,13 @@ pub mod native_floor;
 pub mod native_option_rewrite;
 pub mod native_result_str_rewrite;
 pub mod native_slot_rewrite;
+mod native_slot_takes;
 pub mod native_move_params;
 pub(crate) mod native_region_window;
 mod native_list_ops;
 mod native_narrow_rewrite;
+mod native_hof;
+mod option_blocks;
 
 use std::collections::{BTreeMap, BTreeSet};
 
