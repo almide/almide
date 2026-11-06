@@ -50,6 +50,35 @@
 #           Measured 4.298 to 4.454 over load 3.4-7.6, and 4.690 at load 42.4 —
 #           an 8.9% total spread.
 #
+#           `ratio` is anchored PER RUNNER CLASS (the CPU model `lscpu` names).
+#           "Machine speed cancels" holds within one CPU class and not across
+#           them: the floor rung is process start-up (exec, page faults, the
+#           allocator's first pages) and the 10k rung is the checker's own
+#           pointer-chasing, and the two scale differently per
+#           microarchitecture. On the same develop commits the CI runner read
+#           82.5 on EPYC 7763, 75.8 on EPYC 9V74, 62.3 on EPYC 9V45 and 86.3
+#           on Xeon 8370C — a 39% spread across classes against about 3% within
+#           each — so one anchor failed every 9V45 draw and passed every 7763
+#           one. The ratio cannot be normalised out of the CPU class: what it
+#           exists to see is the per-line work getting slower against something
+#           that is NOT the per-line work, and any such reference (the floor
+#           rung, a calibration loop) has a different instruction mix from the
+#           checker, so it moves differently across classes by construction. A
+#           reference that is the checker's own work (another rung) would cancel
+#           the very slowdown this row is for. So each class carries its own
+#           anchor (`ratio | <model> | value | runs` in the baseline file),
+#           measured on that class from at least three CI runs, with the same
+#           +/-budget around it. A CPU model with no anchor yet REPORTS its
+#           ratio and a `::warning::` and does not fail on it: an unanchored
+#           class has no value to compare with, and borrowing another class's
+#           anchor is the random verdict this replaced. `share_lex` is anchored
+#           per class too (the lex/check split differs by class: ~0.097-0.102
+#           on the AMD classes and the 8370C, ~0.113 on the Xeon 8573C), and
+#           keeps a shared anchor that gates only a class with none of its own,
+#           so no runner stops gating it. The slopes and the other shares are
+#           class-independent and gate on every runner.
+#           EDIT_LOOP_RUNNER_CLASS overrides the detected model (tests only).
+#
 # Both move only on purpose: a regression fails, and a real durable win lowers
 # the baseline in the SAME change with the reasoning in the commit — the same
 # policy as scripts/perf-ratio-baseline.txt. Both bands are two-sided: a slope
@@ -191,11 +220,33 @@ ALMIDE_BIN="${ALMIDE_BIN:-$PWD/target/release/almide}"
 OUT=$(mktemp -t editloop-scale.XXXXXX.json)
 trap 'rm -f "$OUT"' EXIT
 
+# The runner class the class-keyed rows are anchored by: the CPU model, as the
+# perf job's "Runner CPU" step prints it (`lscpu`'s "Model name"). Whitespace is
+# collapsed so a padded field cannot make a second class out of one.
+runner_class() {
+  local m=""
+  if [ -n "${EDIT_LOOP_RUNNER_CLASS:-}" ]; then
+    m="$EDIT_LOOP_RUNNER_CLASS"
+  elif command -v lscpu >/dev/null 2>&1; then
+    m=$(lscpu | sed -n 's/^Model name:[[:space:]]*//p' | head -1)
+  fi
+  if [ -z "$m" ] && [ -r /proc/cpuinfo ]; then
+    m=$(sed -n 's/^model name[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo | head -1)
+  fi
+  if [ -z "$m" ]; then
+    m=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)
+  fi
+  echo "$m" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'
+}
+RUNNER_CLASS="$(runner_class)"
+[ -n "$RUNNER_CLASS" ] || RUNNER_CLASS="unknown"
+
 python3 research/benchmark/editloop/scale.py --runs "$RUNS" --almide "$ALMIDE_BIN" --out "$OUT"
 
 python3 - "$OUT" "$BASELINE_FILE" "$SLOPE_BUDGET_PCT" "$RATIO_BUDGET_PCT" \
     "$CORPUS_FILE_FLOOR" "$CORPUS_LINE_FLOOR" "$TEN_K_LINE_FLOOR" "$TOP_MIN_MS_FLOOR" \
-    "$SHARE_BUDGET_PCT" "$FE_LINES_FLOOR" "$FE_SOURCES_FLOOR" "$PHASE_MIN_MS_FLOOR" <<'PY'
+    "$SHARE_BUDGET_PCT" "$FE_LINES_FLOOR" "$FE_SOURCES_FLOOR" "$PHASE_MIN_MS_FLOOR" \
+    "$RUNNER_CLASS" <<'PY'
 import json, sys
 
 out_path, baseline_path = sys.argv[1:3]
@@ -205,8 +256,19 @@ ten_k_floor, top_min_floor = int(sys.argv[7]), float(sys.argv[8])
 share_budget = float(sys.argv[9])
 fe_lines_floor, fe_sources_floor = int(sys.argv[10]), int(sys.argv[11])
 phase_min_floor = float(sys.argv[12])
+runner_class = sys.argv[13]
 
 PHASES = ["lex", "parse", "check"]
+# Rows anchored per runner class (see `ratio` in the header). Every other row
+# has ONE anchor and gates on every runner.
+#   ratio      per class only — one value for every CPU is meaningless for it.
+#   share_lex  a class anchor per measured class (owner ruling 2026-11-06),
+#              plus a shared anchor that gates any class without its own, so no
+#              runner loses this row.
+CLASS_ROWS = {"ratio", "share_lex"}
+CLASS_ONLY_ROWS = {"ratio"}
+# A class anchor needs this many CI runs on that class behind it.
+CLASS_MIN_RUNS = 3
 
 d = json.load(open(out_path))
 rungs = d["rungs"]
@@ -289,28 +351,71 @@ print("editloop-phase: per-phase slope — "
       + "   (only slope_check is anchored; lex/parse are small differences of small "
         "numbers — see the header)")
 
+print(f"editloop-scale: runner class `{runner_class}` (the CPU model; `ratio` is anchored per class)")
+
+# Two line shapes. `name value` — one anchor for every runner. And
+# `name | <CPU model> | value | runs` — a per-class anchor (CLASS_ROWS only),
+# `runs` being how many CI runs on that class the value is the median of.
 try:
-    baseline = {}
-    for line in open(baseline_path):
+    baseline, class_anchors = {}, {}
+    for lineno, line in enumerate(open(baseline_path), 1):
         line = line.strip()
-        if line and not line.startswith("#"):
+        if not line or line.startswith("#"):
+            continue
+        if "|" in line:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) != 4:
+                sys.exit(f"::error::editloop-scale: {baseline_path}:{lineno}: a class anchor is "
+                         "`name | <CPU model> | value | runs`")
+            name, model, value, runs = parts
+            if name not in CLASS_ROWS:
+                sys.exit(f"::error::editloop-scale: {baseline_path}:{lineno}: `{name}` is not a "
+                         f"per-class row ({sorted(CLASS_ROWS)}); it has one anchor for every runner")
+            if int(runs) < CLASS_MIN_RUNS:
+                sys.exit(f"::error::editloop-scale: {baseline_path}:{lineno}: the `{name}` anchor "
+                         f"for `{model}` rests on {runs} run(s); a class anchor needs at least "
+                         f"{CLASS_MIN_RUNS} CI runs on that class")
+            class_anchors.setdefault(name, {})[" ".join(model.split())] = float(value)
+        else:
             k, v = line.split()
+            if k in CLASS_ONLY_ROWS:
+                sys.exit(f"::error::editloop-scale: {baseline_path}:{lineno}: `{k}` is anchored per "
+                         "runner class — one value for every CPU is what made it pass or fail by "
+                         "the runner draw. Write `"
+                         f"{k} | <CPU model> | value | runs`.")
             baseline[k] = float(v)
 except FileNotFoundError:
     with open(baseline_path, "w") as f:
         f.write("# edit-loop scale-invariance anchors (see scripts/check-edit-loop-scale.sh)\n")
-        f.write(f"slope {slope:.3f}\nratio {ratio:.3f}\n")
+        f.write(f"slope {slope:.3f}\n")
+        f.write(f"# ratio on {runner_class}, ONE run: replace with the median of "
+                f"{CLASS_MIN_RUNS}+ runs on the class\n# ratio | {runner_class} | {ratio:.2f} | 1\n")
         for n in PHASES:
             f.write(f"share_{n} {shares[n]:.4f}\n")
         f.write(f"slope_check {phase_slopes['check']:.3f}\n")
     print(f"editloop-scale: no baseline; wrote {baseline_path}")
     sys.exit(0)
 
-missing = {"slope", "ratio", "slope_check"} | {f"share_{n}" for n in PHASES}
+missing = {"slope", "slope_check"} | {f"share_{n}" for n in PHASES}
+missing -= CLASS_ROWS - CLASS_ONLY_ROWS
 missing -= set(baseline)
+missing |= CLASS_ONLY_ROWS - set(class_anchors)
+missing |= {n for n in CLASS_ROWS - CLASS_ONLY_ROWS if n not in baseline}
 if missing:
     sys.exit(f"::error::editloop-scale: baseline has no entry for {sorted(missing)} — "
-             "an anchored quantity was added without anchoring it; add the line on purpose.")
+             "an anchored quantity was added without anchoring it (a per-class row needs at least "
+             "one class); add the line on purpose.")
+
+# Resolve the per-class rows for this runner. An unanchored class reports and
+# does not gate those rows; the class-independent rows below still gate.
+unanchored, class_scoped = [], set()
+for name in sorted(CLASS_ROWS):
+    if runner_class in class_anchors.get(name, {}):
+        baseline[name] = class_anchors[name][runner_class]
+        class_scoped.add(name)
+    elif name in CLASS_ONLY_ROWS:
+        unanchored.append(name)
+    # else: no class anchor for this runner — the shared anchor in `baseline` gates
 
 # (name, measured, budget %, floor as a fraction of baseline).
 # The share floors are SYMMETRIC with their ceilings, unlike slope/ratio: a share
@@ -325,6 +430,15 @@ checks += [(f"share_{n}", shares[n], share_budget, 1 - share_budget / 100) for n
 failed = False
 drifted = []
 for name, value, budget, floor_frac in checks:
+    if name in unanchored:
+        known = ", ".join(sorted(class_anchors[name]))
+        print(f"editloop-scale: {name:12s} {value:.4f} (unanchored runner class `{runner_class}`) "
+              "REPORTED, not gated")
+        print(f"::warning::editloop-scale: unanchored runner class `{runner_class}` for `{name}` "
+              f"(read {value:.4f}); add an anchor from >= {CLASS_MIN_RUNS} runs on this class: "
+              f"`{name} | {runner_class} | <median> | <runs>` in {baseline_path}. "
+              f"Anchored classes: {known}.")
+        continue
     base = baseline[name]
     ceiling = base * (1 + budget / 100)
     band_floor = base * floor_frac
@@ -344,7 +458,9 @@ for name, value, budget, floor_frac in checks:
         if value > half_up or (name.startswith("share_") and value < half_down):
             verdict = f"ok, but past half its band ({100 * (value / base - 1):+.1f}%)"
             drifted.append(name)
-    print(f"editloop-scale: {name:12s} {value:.4f} (baseline {base:.4f}, +/-{budget:.0f}% budget) {verdict}")
+    scope = (f", class `{runner_class}`" if name in class_scoped
+             else ", shared anchor" if name in CLASS_ROWS else "")
+    print(f"editloop-scale: {name:12s} {value:.4f} (baseline {base:.4f}, +/-{budget:.0f}% budget{scope}) {verdict}")
 
 if drifted and not failed:
     print(f"::warning::editloop-scale: {', '.join(drifted)} used more than half the band. One run "

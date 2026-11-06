@@ -43,6 +43,11 @@ struct ResolveCtx<'a> {
     loading: &'a mut HashSet<String>,
     /// Populated alongside `loaded` — see `ResolvedModules::sources`.
     sources: &'a mut std::collections::HashMap<String, (String, String)>,
+    /// The first project module that wrote a bare `import self` (#4551), as
+    /// `self.<path>`. Its root load is deferred to [`load_requested_root`]:
+    /// loading the root from inside the submodule would see the root's own
+    /// `import self.<that submodule>` as a cycle.
+    root_requested_by: Option<String>,
 }
 
 /// Record a disk-loaded module's path + source so its own diagnostics can be
@@ -271,7 +276,7 @@ pub fn resolve_imports_with_deps(
     let mut loaded_names: HashSet<String> = HashSet::new();
     let mut loading: HashSet<String> = HashSet::new();
     let mut sources: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
-    let mut ctx = ResolveCtx { base_dir, dep_paths, loaded: &mut loaded, loaded_names: &mut loaded_names, loading: &mut loading, sources: &mut sources };
+    let mut ctx = ResolveCtx { base_dir, dep_paths, loaded: &mut loaded, loaded_names: &mut loaded_names, loading: &mut loading, sources: &mut sources, root_requested_by: None };
 
     for import in &program.imports {
         if let ast::Decl::Import { path, alias, .. } = import {
@@ -283,6 +288,7 @@ pub fn resolve_imports_with_deps(
             }
         }
     }
+    load_requested_root(project_root.as_ref(), &mut ctx)?;
 
     // Auto-imported bundled stdlib modules (written in Almide, nameable
     // without an `import`) load only when a loaded source reaches them
@@ -361,13 +367,44 @@ fn load_bundled_module(name: &str, source: &'static str, ctx: &mut ResolveCtx) -
     Ok(())
 }
 
+/// Load the package root (`src/mod.almd`) a project module asked for with a
+/// bare `import self` (#4551), unless a root is already loaded under any
+/// alias. That import was skipped, so a file that imported only
+/// `self.<sub>` left the root unloaded; the submodule's import table then
+/// bound its `self` alias to the submodule itself, `pkg.f()` resolved to the
+/// submodule's own `f`, and a `local fn f() = pkg.f()` forwarder compiled
+/// to a call to itself — a silent infinite loop at run time.
+///
+/// After the load, the root must be there: a bare `import self` that leaves
+/// no package root loaded is a diagnostic naming the importing module,
+/// never a module whose `self` names itself.
+fn load_requested_root(project_root: Option<&PathBuf>, ctx: &mut ResolveCtx) -> Result<(), String> {
+    let Some(importer) = ctx.root_requested_by.clone() else { return Ok(()) };
+    let root_loaded = |ctx: &ResolveCtx| ctx.loaded.iter().any(|m| m.3);
+    if !root_loaded(ctx) {
+        resolve_self_import(&[crate::intern::sym("self")], None, project_root, ctx)
+            .map_err(|e| format!("{e}\n  note: '{importer}' imports `self`, the package root"))?;
+    }
+    if !root_loaded(ctx) {
+        return Err(format!(
+            "cannot resolve 'import self' in '{importer}': the package root was not loaded\n  hint: `import self` names src/mod.almd; a submodule's `self` never names the submodule itself"
+        ));
+    }
+    Ok(())
+}
+
 /// `load_self_module`'s per-import loop body: handles one `import` decl
 /// inside a self-loaded module (either a nested `self.xxx` or an external
-/// dependency / bundled stdlib module). Extracted verbatim.
-fn load_self_module_import(path: &[crate::intern::Sym], src_dir: &Path, ctx: &mut ResolveCtx) -> Result<(), String> {
+/// dependency / bundled stdlib module). A bare `import self` asks for the
+/// package root, loaded once the entry's imports are done (#4551).
+fn load_self_module_import(path: &[crate::intern::Sym], importer: &str, src_dir: &Path, ctx: &mut ResolveCtx) -> Result<(), String> {
     let is_self = path.first().map(|s| s.as_str()) == Some("self");
     if is_self {
-        if path.len() >= 2 {
+        if path.len() == 1 {
+            if ctx.root_requested_by.is_none() {
+                ctx.root_requested_by = Some(importer.to_string());
+            }
+        } else {
             let sub_mod_path = &path[1..];
             // Always the canonical name (the whole path under src/), not the
             // alias — aliases are handled by import_table, and module identity
@@ -446,7 +483,7 @@ fn load_self_module(
     // Recursively resolve this module's imports
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
-            load_self_module_import(path, src_dir, ctx)?;
+            load_self_module_import(path, &display_label, src_dir, ctx)?;
         }
     }
 

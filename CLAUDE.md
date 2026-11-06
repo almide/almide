@@ -198,7 +198,13 @@ almide app.almd --emit-ast       # Emit AST as JSON
 
 ## Test Structure
 
-`almide test` recursively finds all `.almd` files containing `test` blocks.
+`almide test` recursively finds all `.almd` files containing `test` blocks. With no
+argument inside a project (an `almide.toml` in the current directory) it walks the whole
+project root — `src/` included — skipping dot directories (`.git`, `.almide/`), `target/`,
+`node_modules/` and any directory that holds an `.almideignore` marker file. Outside a
+project it searches `spec/` and `exercises/`, and refuses when those are absent (#1928).
+This repo's root has no `almide.toml`, so a bare `almide test` here still runs `spec/`;
+`research/` and `tests/` carry `.almideignore` markers so `almide test .` skips them.
 
 - **Inline tests**: Write `test "name" { }` in any `.almd` file
 - **Test files**: Use `*_test.almd` suffix for dedicated test files (convention)

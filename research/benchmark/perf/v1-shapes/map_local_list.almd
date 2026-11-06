@@ -1,0 +1,37 @@
+// v1-vs-v0 shape bench: list.map callbacks that build lists of their own. The
+// render collects a map through a closure only when its body writes nothing
+// outside it; a push onto, an append onto or a slot write into the
+// callback's own list is not an outside write.
+fn build(n: Int) -> List[Int] = {
+  var xs: List[Int] = []
+  var i = 0
+  while i < n {
+    xs = xs + [i * 3]
+    i = i + 1
+  }
+  xs
+}
+
+fn main() -> Unit = {
+  let n = list.len(list.range(0, 100)) * 1000
+  let xs = build(n)
+  let pushed = xs |> list.map((x) => {
+    var zs = [x, x + 1]
+    zs = zs + [x * 2]
+    list.len(zs) + x
+  })
+  let appended = xs |> list.map((x) => {
+    var zs = [x, x + 1]
+    let ws = list.range(0, x % 3)
+    zs = zs + ws
+    list.len(zs) + x
+  })
+  let set = xs |> list.map((x) => {
+    var zs = [x, 2]
+    zs = list.set(zs, 0, x + 5)
+    list.len(zs)
+  })
+  let s = pushed |> list.fold(0, (acc, y) => acc + y)
+  let t = appended |> list.fold(s, (acc, y) => acc + y)
+  println(int.to_string(set |> list.fold(t, (acc, y) => acc + y)))
+}

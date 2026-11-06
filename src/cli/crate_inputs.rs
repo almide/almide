@@ -91,19 +91,20 @@ impl CrateInputs {
     }
 
     /// Write the collected files into `src_dir`, declare their modules in
-    /// `code`, and append the dependency native deps to `project_dir`'s
-    /// Cargo.toml.
-    pub(super) fn apply(&self, code: &mut String, src_dir: &std::path::Path, project_dir: &std::path::Path) -> Result<(), String> {
+    /// `code`, and add the dependency native deps to `cargo_toml`, the
+    /// generated manifest's text before it is written.
+    ///
+    /// The manifest is edited in memory, never on disk: the caller owns the
+    /// single write of `Cargo.toml`, after every edit. This used to read the
+    /// file back, append and rewrite it, so the manifest had two writers, and
+    /// when the caller's write moved below this call (d143d1f8d) it replaced
+    /// the file with text that never had the dependency crates (#4521).
+    pub(super) fn apply(&self, code: &mut String, src_dir: &std::path::Path, cargo_toml: &mut String) -> Result<(), String> {
         for pkg in &self.packages {
             pkg.apply(code, src_dir)?;
         }
-        if !self.dep_native_deps.is_empty() {
-            let cargo_path = project_dir.join("Cargo.toml");
-            let mut cargo = std::fs::read_to_string(&cargo_path).unwrap_or_default();
-            for nd in &self.dep_native_deps {
-                insert_cargo_dep(&mut cargo, nd);
-            }
-            let _ = std::fs::write(&cargo_path, &cargo);
+        for nd in &self.dep_native_deps {
+            insert_cargo_dep(cargo_toml, nd);
         }
         Ok(())
     }

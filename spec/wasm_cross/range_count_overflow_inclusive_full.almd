@@ -1,0 +1,18 @@
+// @contract: C-238, C-197
+// The widest inclusive range, `i64::MIN...i64::MAX`, holds 2^64 elements:
+// its count fits neither an Int nor a 64-bit size. Materializing it is the
+// defined abort, `Error: out of memory` and exit 1, on both targets. The
+// standard native codegen converted the count to a size with `as`, which
+// wrapped 2^64 to 0, so the reserve succeeded and the fill died on a raw
+// capacity-overflow panic, exit 101 (#4538). The bounds arrive at run time.
+fn span(a: Int, e: Int) -> Int = {
+  let r = a...e
+  list.len(r)
+}
+
+fn main() -> Unit = {
+  let top = 9223372036854775807
+  println("before")
+  println(int.to_string(span(0 - top - 1, top)))
+  println("unreachable")
+}

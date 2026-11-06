@@ -1,0 +1,17 @@
+// @contract: C-238
+// A fold over the range literal `i64::MIN..<i64::MAX` is counted, never built
+// (#2045, #3810), and its count, 2^64 - 1, does not fit in an Int. Counting
+// must still walk the range: the callback divides by zero on the fourth
+// element, so every leg aborts with `Error: division by zero` and exit 1.
+// The verified native render computed the loop's length as `end - start`,
+// which wrapped to -1, so the loop ran zero times and the fold answered its
+// init, 0 (#4538). No list is built, so this is not an out-of-memory cell.
+// The bounds arrive at run time.
+fn walk(a: Int, e: Int) -> Int = a..<e |> list.fold(0, (acc, x) => acc + 100 / (x - a - 3))
+
+fn main() -> Unit = {
+  let top = 9223372036854775807
+  println("before")
+  println(int.to_string(walk(0 - top - 1, top)))
+  println("unreachable")
+}

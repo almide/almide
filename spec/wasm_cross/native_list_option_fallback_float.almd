@@ -1,0 +1,20 @@
+// @contract: C-008
+// #4514: `option.unwrap_or` over a `List[Float]` (and a `List[Int]`) links
+// a self-hosted body whose source also defines routines over the dynamic
+// `Value`. The certified native render read the signatures of those
+// uncalled siblings too, which put `Value` in its type table, and then
+// emitted `impl Default for AlmideValue` for a type whose definition no
+// body took along: `almide check` accepted the program and rustc rejected
+// the native build. The render now reads only the linked bodies it renders,
+// and takes along the definition of every runtime type its table names.
+fn main() -> Unit = {
+  let base: List[Float] = [1000000.0, 123456789.12345679, 2.718281828459045]
+  let picked: List[Float] = option.unwrap_or(some([-42.5, 3.141592653589793, 0.0, -42.5]), base)
+  println("picked = ${picked}")
+  let ints: List[Int] = option.unwrap_or(some([42, 42]), [-2147483648, 1000000])
+  println("ints = ${ints}")
+  let empty: List[Float] = []
+  let one: List[Float] = [0.5]
+  let chosen: List[Float] = if true then empty else one
+  println("chosen = ${chosen}")
+}

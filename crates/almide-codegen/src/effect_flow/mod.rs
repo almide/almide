@@ -19,8 +19,9 @@
 //!
 //! Soundness of the report: a fn value that leaves the tracked positions (a
 //! list, an option payload, a variant, an argument of a call whose callee is
-//! not a scanned fn) joins a pool per arity, and every call of a value read
-//! back from such a position is charged with that pool. A stdlib or runtime
+//! not a scanned fn) joins the pool of its fn type, and every call of a value
+//! read back from such a position is charged with each pool its type may
+//! share (#4522). A stdlib or runtime
 //! call is assumed to run every fn argument it is given.
 
 mod graph;
