@@ -67,8 +67,11 @@ fn lower_block_body_in(
 ) -> IrExpr {
     if let Some(i) = stmts.iter().position(|s| matches!(s, ast::Stmt::GuardLet { .. })) {
         let pre: Vec<IrStmt> = stmts[..i].iter().map(|s| lower_stmt(ctx, s)).collect();
+        let no_fail: Option<ast::Pattern> = None;
         let (name, scrutinee, else_, mutable, fail) = match &stmts[i] {
-            ast::Stmt::GuardLet { name, scrutinee, else_, mutable, fail, .. } => (*name, scrutinee, else_, *mutable, fail),
+            // NEGATIVE CONTROL (#4543): the new forms' desugar is reverted —
+            // `guard var` lowers as `guard let`, the failure arm as the wildcard.
+            ast::Stmt::GuardLet { name, scrutinee, else_, .. } => (*name, scrutinee, else_, false, &no_fail),
             _ => unreachable!(),
         };
         let s = lower_expr(ctx, scrutinee);
