@@ -172,7 +172,12 @@
 3308	spec/wasm_cross/effect_operand_unwrap_distinct.almd
 5099	spec/wasm_cross/effect_option_explicit_bang.almd
 3709	spec/wasm_cross/effect_slot_carrier.almd
+5653	spec/wasm_cross/effect_slot_effect_value_control.almd
 4265	spec/wasm_cross/effect_slot_never_err_bang.almd
+3476	spec/wasm_cross/effect_slot_pure_fn_param.almd
+3131	spec/wasm_cross/effect_slot_pure_let_lambda.almd
+5830	spec/wasm_cross/effect_slot_pure_named_fn.almd
+3234	spec/wasm_cross/effect_slot_unit_block_tail.almd
 4496	spec/wasm_cross/effect_tail_carrier_family.almd
 2579	spec/wasm_cross/effect_tco.almd
 9060	spec/wasm_cross/effect_tco_err_rewrap.almd
