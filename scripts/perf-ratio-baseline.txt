@@ -129,6 +129,11 @@ regexcycle-wasm 1.07
 # 4000), the global writes costing what the local ones do.
 framebuf-native 4.4
 framebuf-wasm 1.1
+# framebuf-local wasm min / framebuf-local native min, the same frames (#4550):
+# 14.8-18.9 before the wasm leg inlined the byte IO bounds predicate, 11.0-12.6
+# after (two runner classes: 3.835s / 0.349s and 2.174s / 0.171s). The
+# ceiling (15) sits between the two ranges.
+framebuf-local-wasm-native 11.0
 treealloc 0.343
 # btrees (rc4): treealloc's program with the depth a literal and no argument
 # read, so it renders whole on the certified native leg, region window
