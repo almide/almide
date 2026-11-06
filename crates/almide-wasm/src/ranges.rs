@@ -154,19 +154,11 @@ impl crate::emitter::Emitter<'_> {
                     i.select();
                     i.local_set(hd);
                     // #4355: an inclusive range counts its end too. `he + 1`
-                    // wrapped to i64::MIN at `he == i64::MAX` (an empty list).
-                    // #4538: the span itself can be exactly i64::MAX without
-                    // overflowing (`0...i64::MAX`, 2^63 elements), and plus one
-                    // wrapped it to i64::MIN, which the cap test below reads as
-                    // no elements — an empty list where native aborts out of
-                    // memory. A span already past the cap keeps its value (it
-                    // aborts either way), so only a span within the cap takes
-                    // the +1, and that cannot wrap.
+                    // wrapped to i64::MIN at `he == i64::MAX` (an empty list);
+                    // the exclusive span plus one when he >= hs cannot wrap,
+                    // since the span above is at most RANGE_CAP + 1.
                     if *inclusive {
                         i.local_get(hd).i64_const(1).i64_add();
-                        i.local_get(hd);
-                        i.local_get(hd).i64_const(RANGE_CAP).i64_le_s();
-                        i.select();
                         i.i64_const(0);
                         i.local_get(he).local_get(hs).i64_ge_s();
                         i.select();
