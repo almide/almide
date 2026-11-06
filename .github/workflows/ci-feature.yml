@@ -63,7 +63,7 @@ jobs:
             Z=$( cd w/$n && ALMIDE_NO_VERIFIED_OK=1 timeout 120 "$A" run --no-verified main.almd 2>&1 | grep -v '^\[almide\] ALMIDE_'; echo "exit=${PIPESTATUS[0]}" )
             W=$( cd w/$n && timeout 120 "$A" run main.almd --target wasm 2>&1; echo "exit=$?" )
             echo "=== $n (native render: $V)"; echo "--- native default:"; echo "$N"; echo "--- native v0:"; echo "$Z"; echo "--- wasm:"; echo "$W"
-            [ "$V" = v0 ] && head -3 w/$n/wall.txt
+            [ "$V" = v0 ] && head -3 w/$n/wall.txt; true
           done
       - name: Gates on the new fixtures
         env:
