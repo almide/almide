@@ -117,6 +117,31 @@ fn blocks(op: &Op, a: i64, consts: &BTreeMap<ValueId, i64>, quiet: &Quiet) -> bo
     }
 }
 
+/// The value a release op releases (every typed drop the render erases).
+pub(crate) fn released(op: &Op) -> Option<ValueId> {
+    match op {
+        Op::Drop { v, .. }
+        | Op::DropListStr { v, .. }
+        | Op::DropValue { v, .. }
+        | Op::DropListValue { v, .. }
+        | Op::DropListStrValue { v, .. }
+        | Op::DropResultValue { v, .. }
+        | Op::DropResultListValue { v, .. }
+        | Op::DropResultValueInt { v, .. }
+        | Op::DropResultListValueInt { v, .. }
+        | Op::DropListStrStr { v, .. }
+        | Op::DropListIntStr { v, .. }
+        | Op::DropListStrInt { v, .. }
+        | Op::DropResultStrInt { v, .. }
+        | Op::DropResultListStrInt { v, .. }
+        | Op::DropResultListStr { v, .. }
+        | Op::DropListListStr { v, .. }
+        | Op::DropVariant { v, .. }
+        | Op::DropWrapperRec { v, .. } => Some(*v),
+        _ => None,
+    }
+}
+
 fn is_drop_of(op: &Op, t: ValueId) -> bool {
     match op {
         Op::Drop { v } | Op::DropListStr { v } | Op::DropVariant { v, .. } | Op::DropValue { v } => *v == t,
