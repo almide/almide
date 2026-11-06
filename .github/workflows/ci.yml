@@ -48,7 +48,7 @@ env:
   # main, tags, schedules, manual runs, PRs into main — runs the full corpus.
   # Whole-corpus staleness / completeness checks run only on a full run, and a
   # slice never rewrites a ledger. Job names do not change with it.
-  ALMIDE_CI_SLICE: ${{ ((github.event_name == 'pull_request' && github.base_ref != 'main') || (github.event_name == 'merge_group' && github.event.merge_group.base_ref != 'refs/heads/main')) && '8' || '1' }}
+  ALMIDE_CI_SLICE: '1'  # THROWAWAY full run
   ALMIDE_CI_SEED: ${{ github.sha }}
   ALMIDE_CI_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
   RUST_TOOLCHAIN: "1.97.0"  # runner-class MSRV: the almide binary embeds wasmtime 50 (commissioned host); compiler crates keep the 1.89 claim per-crate
@@ -2654,7 +2654,7 @@ jobs:
 
   build-cross:
     name: Build (${{ matrix.os }})
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: github.event_name == 'pull_request'  # THROWAWAY: main-only gate forced on
     strategy:
       matrix:
         include:
@@ -2794,7 +2794,7 @@ jobs:
   # table, inside the same 60-minute hang budget.
   corpus-cross:
     name: Corpus gate (macos-latest, ${{ matrix.gate }})
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: github.event_name == 'pull_request'  # THROWAWAY: main-only gate forced on
     strategy:
       fail-fast: false
       matrix:
@@ -2838,7 +2838,7 @@ jobs:
 
   test-rust-cross:
     name: Test Rust (${{ matrix.os }})
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: github.event_name == 'pull_request'  # THROWAWAY: main-only gate forced on
     needs: build-cross
     strategy:
       matrix:
