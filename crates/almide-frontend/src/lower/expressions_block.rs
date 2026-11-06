@@ -150,28 +150,14 @@ fn lower_block_body_in(
     }
 }
 
-/// Lower pipe expression, unwrapping postfix operators (??, !, ?) on the RHS
-/// so the pipe targets the inner Call. e.g. `xs |> list.find(p) ?? fallback`
-/// becomes `list.find(xs, p) ?? fallback` rather than treating `??` as part of the pipe target.
+/// Lower pipe expression, unwrapping postfix operators (`!`, `?`) on the RHS
+/// so the pipe targets the inner Call. e.g. `xs |> list.find(p)!` becomes
+/// `list.find(xs, p)!` rather than treating `!` as part of the pipe target.
 fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> IrExpr {
     match &right.kind {
-        // Transparent postfix: pipe into inner, then wrap with the operator
-        ast::ExprKind::UnwrapOr { expr: inner, fallback, .. } => {
-            // The inner pipe result is Option[ty] or Result[ty, _]; codegen needs the wrapper
-            // type on the piped expression to generate correct match (Some/None vs Ok/Err).
-            // Use the checker's resolved type for the inner expression.
-            let inner_checked_ty = ctx.expr_ty(inner);
-            let is_wrapper = inner_checked_ty.is_option()
-                || matches!(inner_checked_ty, Ty::Applied(TypeConstructorId::Result, _));
-            let inner_ty = if is_wrapper {
-                inner_checked_ty
-            } else {
-                Ty::Applied(TypeConstructorId::Option, vec![ty.clone()].into())
-            };
-            let piped = lower_pipe(ctx, left, inner, inner_ty, span.clone());
-            let ir_fallback = lower_expr(ctx, fallback);
-            ctx.mk(IrExprKind::UnwrapOr { expr: Box::new(piped), fallback: Box::new(ir_fallback) }, ty, span)
-        }
+        // Transparent postfix: pipe into inner, then wrap with the operator.
+        // `??` is an infix level below `|>` since dialect 16 (#4531), so it
+        // never arrives here as a stage; only `!` and `?` do.
         ast::ExprKind::Unwrap { expr: inner, .. } => {
             // Use the checker's resolved type for the inner expression.
             // This preserves the actual error type (e.g., List[String] from result.collect)

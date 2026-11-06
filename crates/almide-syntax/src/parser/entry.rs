@@ -71,7 +71,13 @@ impl Parser {
             failed_fn_names: std::collections::HashSet::new(),
             parse_recovered: false,
             expr_comments: std::collections::HashMap::new(),
+            regrouped: Vec::new(),
         };
+        // #4531: the pre-16 reading is only worth computing when the file has
+        // a `??` (the one operator whose level moved). The tokens are taken
+        // BEFORE the parse, which respells a few in place.
+        let regroup_tokens = (!self.legacy_grouping && super::regroup::mentions_coalesce(&self.tokens))
+            .then(|| self.tokens.clone());
 
         let (mut pending, mut gap_blanks) = self.skip_newlines_collect_comments();
 
@@ -222,6 +228,12 @@ impl Parser {
         // node — fmt's conservation verifier counts LEXER tokens, so an
         // unclaimed comment still makes fmt refuse rather than vanish.
         program.expr_comments = std::mem::take(&mut self.expr_comments);
+        if let Some(tokens) = regroup_tokens.filter(|_| self.errors.is_empty()) {
+            if super::regroup::predates_regrouping(program.dialect.map(|d| d.epoch)) {
+                program.regrouped =
+                    super::regroup::regrouped_sites(&program, tokens);
+            }
+        }
         Ok(program)
     }
 }
