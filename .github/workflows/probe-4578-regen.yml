@@ -36,6 +36,7 @@ jobs:
           cargo build --release --bin almide && cp target/release/almide /tmp/almide-fix
       - name: Render every spec/wasm_cross fixture with both
         run: |
+          set +e
           mkdir -p /tmp/r/base /tmp/r/fix
           n=0; same=0; diff=0; wb=0; wf=0
           for f in spec/wasm_cross/*.almd; do
