@@ -148,6 +148,14 @@ fn report_timings(r: &almide_base::profile::PhaseReport, total_secs: f64) {
 
 pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, wasm_target: bool) {
     check_one(file, deny_warnings, timings, stamp, critical, wasm_target);
+    // NEGATIVE CONTROL (editloop-runner-class, never merged): a uniform
+    // per-module slowdown in the measured path — 4ms per module the entry
+    // imports, so the 4-line floor rung pays nothing and the 10k rung pays
+    // for every module. `ratio` must leave its band on whatever class runs it.
+    let imports = std::fs::read_to_string(file)
+        .map(|s| s.lines().filter(|l| l.starts_with("import ")).count())
+        .unwrap_or(0);
+    std::thread::sleep(std::time::Duration::from_millis(4 * imports as u64));
     err(&format!("No errors found"));
 }
 
