@@ -1,0 +1,22 @@
+name: neg-4531 (negative control, side branch only)
+on:
+  push:
+    branches: [neg-parser-4531, neg-fixit-4531]
+jobs:
+  neg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - name: Precedence and regrouping unit tests
+        continue-on-error: true
+        run: cargo test --release -p almide-syntax --lib -- test_expr_precedence test_regroup grouping 2>&1 | tail -60
+      - name: Migration unit tests
+        continue-on-error: true
+        run: cargo test --release -p almide-tools --lib regroup 2>&1 | tail -40
+      - name: Old-meaning guard
+        continue-on-error: true
+        run: cargo test --release --test precedence_regroup_corpus_test an_old_reading 2>&1 | tail -30

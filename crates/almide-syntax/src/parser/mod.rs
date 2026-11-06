@@ -137,7 +137,7 @@ impl Parser {
         let (mut tokens, inline_comments) = Self::drop_inline_comments(tokens);
         let caseless_type_names = caseless::declared_caseless_type_names(&tokens);
         caseless::reclassify(&mut tokens, &caseless_type_names);
-        Parser { caseless_type_names, tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None, last_fn_body: None, preceding_expr_fn: None, hidden_chars, idents, legacy_grouping: false }
+        Parser { caseless_type_names, tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None, last_fn_body: None, preceding_expr_fn: None, hidden_chars, idents, legacy_grouping: true }
     }
 
     /// #4092 / #4266: every raw E101 character in the tokens' verbatim text
