@@ -10,7 +10,7 @@ fn put(mut m: Map[Int, Int], k: Int, v: Int) -> Unit = {
 }
 
 fn bump(mut m: Map[String, Int], k: String) -> Unit = {
-  m[k] = map.get(m, k) ?? 0 + 1
+  m[k] = (map.get(m, k) ?? 0) + 1
 }
 
 fn main() -> Unit = {

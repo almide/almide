@@ -38,7 +38,7 @@ test "if branches with exclusive last uses" {
 test "fold with map accumulator threads without corruption" {
   let counts = [1, 2, 1, 3, 1] |> list.fold(
     map.new(),
-    (acc, n) => map.set(acc, n, map.get(acc, n) ?? 0 + 1),
+    (acc, n) => map.set(acc, n, (map.get(acc, n) ?? 0) + 1),
   )
   assert_eq(map.get(counts, 1) ?? 0, 3)
   assert_eq(map.get(counts, 2) ?? 0, 1)
