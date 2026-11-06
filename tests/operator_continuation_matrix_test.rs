@@ -183,8 +183,9 @@ fn a_leading_qq_still_needs_its_fallback_on_its_line() {
     );
 }
 
-/// A pipe chain closed by a leading `??` is the issue's own shape: `??` binds
-/// the last stage, exactly as it does written on one line.
+/// A pipe chain closed by a leading `??` is the issue's own shape: `??` takes
+/// the chain's result (an infix level below `|>` since dialect 16, #4531),
+/// exactly as it does written on one line.
 #[test]
 fn a_leading_qq_closes_a_multiline_pipe_chain() {
     let src = |body: &str| format!("fn f() -> Int = {{\n  let v = {body}\n  v\n}}\n");

@@ -17,6 +17,7 @@ mod expressions;
 mod fan;
 pub use fan::renamed_fan_head_text;
 pub mod grouping;
+pub mod regroup;
 pub mod hints;
 mod helpers;
 mod patterns;
@@ -27,6 +28,7 @@ mod statements;
 mod test_attributes;
 mod test_braceless_body;
 mod test_expr_precedence;
+mod test_regroup;
 mod test_let_rec;
 mod test_assign_ascription;
 mod test_multiline_tuple;
@@ -97,6 +99,11 @@ pub struct Parser {
     /// each interpolation hole's (a hole's sub-parser hands its list up).
     /// `parse` judges them for UTS #39 restriction level and confusables.
     pub(crate) idents: Vec<(String, usize, usize)>,
+    /// #4531: read with the pre-16 operator grouping (`??` a postfix, the
+    /// old binding powers). Only `almide fix`'s migration and the regrouping
+    /// check (`regroup`) set it; every compile path parses with the current
+    /// grammar.
+    pub(crate) legacy_grouping: bool,
 }
 
 /// A comment collected from a continuation gap (#1326): the Newline/Comment
@@ -130,7 +137,7 @@ impl Parser {
         let (mut tokens, inline_comments) = Self::drop_inline_comments(tokens);
         let caseless_type_names = caseless::declared_caseless_type_names(&tokens);
         caseless::reclassify(&mut tokens, &caseless_type_names);
-        Parser { caseless_type_names, tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None, last_fn_body: None, preceding_expr_fn: None, hidden_chars, idents }
+        Parser { caseless_type_names, tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None, last_fn_body: None, preceding_expr_fn: None, hidden_chars, idents, legacy_grouping: false }
     }
 
     /// #4092 / #4266: every raw E101 character in the tokens' verbatim text
@@ -263,6 +270,15 @@ impl Parser {
 
     pub fn with_file(mut self, file: &str) -> Self {
         self.file = Some(file.to_string());
+        self
+    }
+
+    /// Parse with the operator grouping of dialects 1–15 (#4531): `??` a
+    /// postfix binding tighter than every binary operator, `|>` below the
+    /// ranges. For reading a file the way it was WRITTEN — `almide fix`
+    /// migrates it by printing that tree with explicit parentheses.
+    pub fn with_legacy_grouping(mut self, legacy: bool) -> Self {
+        self.legacy_grouping = legacy;
         self
     }
 }
