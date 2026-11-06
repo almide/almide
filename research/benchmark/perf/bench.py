@@ -229,11 +229,12 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # regexcycle (#4392): sized after the GCE reading below; both rows the
     # same number of matches.
     # framebuf (#4550): frames per row, unequal on purpose — the relation is
-    # per frame. The local row is the fast one natively (~0.03 ms a frame),
-    # so it runs 5x the frames to clear the spawn-noise floor; a regressed
+    # per frame. The local row is the fast one natively (~0.015 ms a frame:
+    # 4000 frames read 0.057 s on one runner, under the floor), so it runs
+    # 15x the frames to clear the spawn-noise floor; a regressed
     # global row (a buffer copy per write) then reads seconds, not a hang.
     "framebuf-global": "g:800",
-    "framebuf-local": "l:4000",
+    "framebuf-local": "l:12000",
     "regexcycle-8": "8:400000",
     "regexcycle-32": "32:400000",
 }
