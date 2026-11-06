@@ -428,7 +428,7 @@ mod attr_tests {
                 out.push_str("] exp=[");
                 for (i, a) in export_attrs.iter().enumerate() {
                     if i > 0 { out.push_str(","); }
-                    out.push_str(&format!("{}|{}", a.target, a.symbol));
+                    out.push_str(&format!("{}|{}|{}", a.target, a.symbol, a.returns_address));
                 }
                 out.push_str("] attrs=[");
                 for (i, a) in attrs.iter().enumerate() {
@@ -483,6 +483,20 @@ mod attr_tests {
         ] {
             let formatted = roundtrip(src);
             assert!(formatted.contains("@extern(wasm, \"js\", \"kv_get\", returns: promise)"), "{formatted}");
+            assert_eq!(shape_of_first_fn(src), shape_of_first_fn(&formatted));
+        }
+    }
+
+    /// #4519: `returns: address` survives a format, and `returns = address`
+    /// comes out in the canonical `:` spelling.
+    #[test]
+    fn format_roundtrip_export_returns_address() {
+        for src in [
+            "@export(wasm, \"in_alloc\", returns: address)\neffect fn in_alloc(n: Int) -> Region = ffi.alloc(n)!",
+            "@export(wasm, \"in_alloc\", returns = address)\neffect fn in_alloc(n: Int) -> Region = ffi.alloc(n)!",
+        ] {
+            let formatted = roundtrip(src);
+            assert!(formatted.contains("@export(wasm, \"in_alloc\", returns: address)"), "{formatted}");
             assert_eq!(shape_of_first_fn(src), shape_of_first_fn(&formatted));
         }
     }

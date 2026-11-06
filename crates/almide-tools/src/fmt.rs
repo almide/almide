@@ -1101,7 +1101,10 @@ fn fmt_decl_fn(out: &mut String, decl: &Decl, depth: usize) {
         let promise = if a.returns_promise { ", returns: promise" } else { "" };
         wln!(out, "{i}@extern({}, \"{}\", \"{}\"{promise})", a.target, escape_dquoted(a.module.as_str()), escape_dquoted(a.function.as_str()));
     }
-    for a in export_attrs { wln!(out, "{i}@export({}, \"{}\")", a.target, escape_dquoted(a.symbol.as_str())); }
+    for a in export_attrs {
+        let address = if a.returns_address { ", returns: address" } else { "" };
+        wln!(out, "{i}@export({}, \"{}\"{address})", a.target, escape_dquoted(a.symbol.as_str()));
+    }
     for a in attrs { wln!(out, "{i}{}", format_attribute(a)); }
     out.push_str(&i); fmt_vis(out, visibility);
     // `[vis] scoped effect fn` — the qualifier order the grammar fixes (#1997).
