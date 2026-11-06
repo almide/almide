@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        side: [head]
+        side: [develop, fix]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -26,7 +26,10 @@ jobs:
         with:
           shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
           save-if: false
-      - run: git log --oneline -3
+      - name: Check out the side
+        run: |
+          if [ "${{ matrix.side }}" = fix ]; then git fetch -q origin wasm-regressions-4578-4579 && git checkout -q FETCH_HEAD -- crates src; fi
+          git status --short | head
       - run: cargo build --release --bin almide
       - name: wasmtime
         run: |

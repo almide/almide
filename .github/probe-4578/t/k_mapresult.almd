@@ -1,0 +1,6 @@
+fn main() -> Unit = {
+  let k1: Result[Int, String] = ok(1)
+  let k2: Result[Int, String] = err("x")
+  let m = map.set(map.set(map.set(map.new(), k1, "a"), k2, "b"), k1, "c")
+  println("len=${map.len(m)} get=${map.get(m, k1)}")
+}
