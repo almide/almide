@@ -248,6 +248,14 @@ impl AddrState {
     }
 }
 
+impl AddrState {
+    /// `v` copies a heap slot's snapshot and only borrows (#4562,
+    /// `native_slot_takes::SlotReads::aliases`): read through its reference.
+    pub(crate) fn slot_alias(&self, v: &ValueId) -> bool {
+        self.slot_reads.aliases.contains(v)
+    }
+}
+
 /// The owned spelling of a generated list's kind.
 fn owned_ty_of(t: Option<NTy>) -> String {
     t.map(crate::render_native_rec::owned_ty).unwrap_or_default()
