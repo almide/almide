@@ -419,6 +419,12 @@ fn last_top_level_read(
                 // it is built: follow the concatenation's result through
                 // every chain op that reads it.
                 let r = chain_end(func, chains, j)?;
+                // The chain's reader inside a loop or a branch (a key built
+                // once, read on every iteration): a release after it would
+                // run once per pass, so the value keeps its scheduled Drop.
+                if at_depth[r] != 0 {
+                    return None;
+                }
                 last = Some(last.map_or(r, |l: usize| l.max(r)));
             }
             // A print reads its string through a borrow (`rt_print_str(&v)`).
