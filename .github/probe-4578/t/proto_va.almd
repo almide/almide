@@ -48,12 +48,12 @@ fn Vowels.score(s: Vowels, x: String) -> Int = string.to_list(x) |> list.count((
 fn greatest[O: Order](o: O, names: List[String]) -> String? = {
   let r = names |> list.fold(
     (o, none),
-    ((oo, best), n) => {
-      let next = match best {
+    (acc, n) => {
+      let next = match acc.1 {
         none => some(n),
-        some(b) => if oo.cmp(n, b) > 0 then some(n) else some(b),
+        some(b) => if acc.0.cmp(n, b) > 0 then some(n) else some(b),
       }
-      (oo, next)
+      (acc.0, next)
     },
   )
   r.1
@@ -63,12 +63,12 @@ fn greatest[O: Order](o: O, names: List[String]) -> String? = {
 fn best[S: Scorer](s: S, names: List[String]) -> String? = {
   let r = names |> list.fold(
     (s, none),
-    ((ss, top), n) => {
-      let next = match top {
+    (acc, n) => {
+      let next = match acc.1 {
         none => some(n),
-        some(t) => if ss.score(n) > ss.score(t) then some(n) else some(t),
+        some(t) => if acc.0.score(n) > acc.0.score(t) then some(n) else some(t),
       }
-      (ss, next)
+      (acc.0, next)
     },
   )
   r.1
