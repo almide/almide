@@ -953,7 +953,7 @@ fn render_call_through_global_places(
         GlobalPlaceCallee::User => return Some(render_call_with_copied_global_places(callee, args, &places, render_arg)),
         _ if closure_arg => return Some(render_call_with_copied_global_places(callee, args, &places, render_arg)),
         GlobalPlaceCallee::Stdlib => {
-            return Some(match render_call_with_taken_global_places(ctx, callee, args, &places, render_arg) {
+            return Some(match render_call_with_taken_global_places(callee, args, &places, render_arg) {
                 Some(taken) => taken,
                 None => render_call_with_copied_global_places(callee, args, &places, render_arg),
             });
@@ -1034,7 +1034,6 @@ fn inert_arg_ty(t: &Ty) -> bool {
 /// (`HoistCx::must_hoist`) has already moved it in front of the whole call,
 /// as for the two forms below.
 fn render_call_with_taken_global_places(
-    ctx: &RenderContext,
     callee: &str,
     args: &[IrExpr],
     places: &[Option<(String, String)>],
