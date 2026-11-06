@@ -9,11 +9,6 @@ on:
       - '*/[a-z]*'        # dolphin/*, shark/*, octopus/*, squid/*, clownfish/*
       - 'feature/**'
       - 'worktree-*/**'
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
-      - '.tasks/**'
 
 # Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
 # concurrent runs that all re-download tools and trip the per-IP rate limit.
@@ -33,36 +28,35 @@ env:
 permissions: read-all
 
 jobs:
-  build-and-test:
-    name: Build & Test (Linux)
+  full:
+    name: Full-size sliced gates (${{ matrix.part }})
     runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: cross-target
+            cmd: cargo test --release --test wasm_runtime_cross_target
+          - part: interp-oracle-opt-parity
+            cmd: cargo test --release --test wasm_runtime_interp_oracle --test wasm_runtime_opt_parity --test wasm_runtime_interp_ledger
+          - part: native-floors
+            cmd: cargo test --release --test fan_region_floor_test --test native_verified_floor_test --test native_v1_differential_test --test crossmod_matrix_test --test dep_shaped_leg_test --test wasm_vm_parity_test
+          - part: root-rest
+            cmd: cargo test --release --test wasm_test_lane_wall_test --test wasm_imports_within_effects_test --test explain_list_test --test fmt_test --test stdlib_nominal_order_matrix_test --test wasm_dispatch_coverage_test --test kernel_conformance_test --test diagnostic_coverage_test --test diagnostic_harness_test --test almide_gate_twin_parity_test --test precedence_regroup_corpus_test
+          - part: crates
+            cmd: cargo test --release -p almide-spine --test check_parity --test run_parity --test stdlib_examples_test && cargo test --release -p almide-syntax --test ast_parity && cargo test --release -p almide-wasm --test alloc_ledger --test native_result_ownership --test surface_matrix --test witness_floor --test fuzz_differential --test wasi_gate --test size_ratchet --test backend_parity && cargo test --release -p almide-mir && cargo test --release -p almide-corpus
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
-
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-
-      # Dependencies only (see ci.yml `build`). Feature branches only READ
-      # the shared entry (develop's ci-feature run never happens — the
-      # trigger is branch-pattern-gated), so every feature push writes its
-      # own key: keep it but let the branch pay for the workspace it built.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: feature-build-${{ env.RUST_TOOLCHAIN }}
-          cache-on-failure: true
-
-      - name: Build
-        run: cargo build --release
-
-      - name: Cache wasmtime tarball
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v50.0.1-x86_64-linux
-
-      - name: Install the runtime `almide test` uses for its wasm leg
+          save-if: false
+      - name: Install wasmtime
         run: |
           set -euo pipefail
           VERSION=v50.0.1
@@ -70,43 +64,47 @@ jobs:
           bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo install -m 755 "wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
+          rm -rf "$TARBALL" "wasmtime-${VERSION}-x86_64-linux"
+      - name: Build
+        run: cargo build --release
+      - name: ${{ matrix.part }} (no ALMIDE_CI_SLICE)
+        env:
+          ALMIDE_EXPECT_TOOLS: "1"
+        run: |
+          git log --oneline -1
+          test -z "${ALMIDE_CI_SLICE:-}"
+          ${{ matrix.cmd }} 2>&1 | grep -vE "^test .* \.\.\. ok$"
+          exit ${PIPESTATUS[0]}
+  corpus-macos:
+    name: Corpus gate (macos-latest, ${{ matrix.gate }})
+    runs-on: macos-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [wasm_runtime_cross_target, wasm_runtime_opt_parity, wasm_runtime_interp_oracle]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-cross-platform-macos-latest-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - run: cargo build --release
+      - name: Install wasmtime
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-aarch64-macos.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
-
-      # No `cargo test --workspace` here, on purpose.
-      #
-      # It used to run, UNSHARDED on this one runner, and it was the whole cost
-      # of this workflow: measured median 119 min over 19 runs, the most recent
-      # 187-223 min — on a file whose first line calls it "lightweight". The
-      # same suite runs in ci.yml split across four shards (`Test Rust (shard
-      # N/4)`, ~27 min end to end), and THOSE are the required checks on
-      # develop; this job never was. So the step duplicated a required check,
-      # 8x slower, gated nothing, and — because `concurrency` only cancels a
-      # superseded push, not a merge — kept a runner for hours after its
-      # branch had already landed (2026-09-23: 2h on a merged branch).
-      #
-      # What stays is what a pre-PR branch actually needs quickly: it builds,
-      # the example corpus runs, and emit does not crash. The test suite
-      # arrives with the pull request, sharded, as a required check.
-
-      # The execution signal for feature branches. This step was a double
-      # no-op for months (#979): it globbed `exercises/` — deleted long ago —
-      # and muted even that failure with continue-on-error ("TODO: re-enable
-      # after stdlib reconnection", which happened without the re-enable).
-      # `examples/` is the live corpus ci.yml runs; the count floor keeps a
-      # renamed corpus from reading as green (the #976 lesson).
-      - name: Run examples (Rust target)
-        run: |
-          ALMIDE=./target/release/almide
-          count=$(find examples -name '*.almd' | wc -l)
-          [ "$count" -ge 10 ] || { echo "::error::only $count example files found — the corpus moved (#979)"; exit 1; }
-          $ALMIDE test examples/
-
-      - name: Emit check (smoke)
-        run: |
-          ALMIDE=./target/release/almide
-          f=examples/binary-search.almd
-          [ -f "$f" ] || { echo "::error::$f not found — pick a new smoke fixture (#979)"; exit 1; }
-          $ALMIDE "$f" --target rust > /dev/null
-          echo "Rust emit OK"
-          $ALMIDE "$f" --emit-ast > /dev/null
-          echo "AST emit OK"
+      - name: Install wasm-opt (binaryen)
+        run: brew install binaryen && wasm-opt --version
+      - name: Cargo test (${{ matrix.gate }})
+        env:
+          ALMIDE_EXPECT_TOOLS: "1"
+        run: cargo test --test tool_arming_tripwire_test --test ${{ matrix.gate }}
