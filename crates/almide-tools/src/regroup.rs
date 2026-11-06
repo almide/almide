@@ -47,7 +47,7 @@ pub fn migrate_precedence(source: &str) -> Migration {
     let Some((mut legacy, fresh)) = parse_legacy_tokens(tokens) else {
         return Migration::Refused { reason: "the file does not parse under the pre-16 grammar".into(), sites };
     };
-    let reference = grouping_value(&legacy);
+    let reference = sugar_free(grouping_value(&legacy));
     let plain = crate::fmt::format_program(&legacy);
     let parens = parenthesize_for_current(&mut legacy, fresh);
     let printed = crate::fmt::format_program(&legacy);
@@ -62,6 +62,14 @@ pub fn migrate_precedence(source: &str) -> Migration {
     }
 }
 
+/// `grouping_value` with the type spellings the formatter canonicalizes
+/// (`Option[T]` / `T?`, `T!String` / `T!`) made one, as its own verifier
+/// does: a reprint may respell a type, never group an operator differently.
+fn sugar_free(mut v: serde_json::Value) -> serde_json::Value {
+    crate::fmt::normalize_type_sugar(&mut v);
+    v
+}
+
 /// The rewrite's proof: `text` parses cleanly under the current grammar, to
 /// `reference` (the pre-16 tree, parentheses aside), with no `??` the two
 /// grammars read apart.
@@ -71,7 +79,7 @@ fn proves(text: &str, reference: &serde_json::Value) -> Result<(), String> {
         Ok(p) if check.errors.is_empty() => p,
         _ => return Err("the rewritten text does not parse".into()),
     };
-    if &grouping_value(&reparsed) != reference {
+    if &sugar_free(grouping_value(&reparsed)) != reference {
         return Err("the rewritten text does not read as the original did under the pre-16 grammar".into());
     }
     if !reparsed.regrouped.is_empty() {
@@ -101,20 +109,34 @@ fn splice_parens(source: &str, plain: &str, parened: &str) -> Option<String> {
     let s = significant(source);
     let p = significant(plain);
     let q = significant(parened);
-    // `plain` index → `source` index.
+    // `plain` index → `source` index. The reprint may respell a few tokens
+    // (`Option[T]` as `T?`, a trailing comma, `!x` as `not x`): a mismatch
+    // re-synchronises on the nearest pair of positions, a few tokens ahead
+    // on each side, where three tokens agree again. The tokens in between
+    // stay unmapped, and a parenthesis that would land on one refuses the
+    // splice.
+    const WINDOW: usize = 8;
+    let agree = |i: usize, j: usize| (0..3).all(|k| match (s.get(i + k), p.get(j + k)) {
+        (Some(a), Some(b)) => same(a, b),
+        (None, None) => true,
+        _ => false,
+    });
     let mut p_to_s: Vec<Option<usize>> = vec![None; p.len()];
     let (mut i, mut j) = (0, 0);
-    while i < s.len() || j < p.len() {
-        match (s.get(i), p.get(j)) {
-            (Some(a), Some(b)) if same(a, b) => {
-                p_to_s[j] = Some(i);
-                i += 1;
-                j += 1;
-            }
-            (_, Some(b)) if b.token_type == TokenType::Comma => j += 1,
-            (Some(a), _) if a.token_type == TokenType::Comma => i += 1,
-            _ => return None,
+    while i < s.len() && j < p.len() {
+        if same(&s[i], &p[j]) {
+            p_to_s[j] = Some(i);
+            i += 1;
+            j += 1;
+            continue;
         }
+        let resync = (1..=2 * WINDOW)
+            .flat_map(|d| (0..=d).map(move |a| (a, d - a)))
+            .filter(|&(a, b)| a <= WINDOW && b <= WINDOW)
+            .find(|&(a, b)| agree(i + a, j + b));
+        let (a, b) = resync?;
+        i += a;
+        j += b;
     }
     // Walk `parened` against `plain`: every token `plain` lacks is an added
     // parenthesis, before `plain[j]` (an opener) or after `plain[j - 1]`.
@@ -206,6 +228,17 @@ mod tests {
         ] {
             assert_eq!(migrate_precedence(src), Migration::Unchanged, "{src}");
         }
+    }
+
+    /// The splice keeps the rest of the file as written, including the type
+    /// spellings and the layout the formatter would change.
+    #[test]
+    fn the_rest_of_the_file_keeps_its_spelling() {
+        let src = "fn dec(x: Option[Int]) -> Int =\n    x ?? 0 - 1\n\nfn keep(xs: List[Int]) -> Int = list.len(xs)\n";
+        assert_eq!(
+            rewritten(src),
+            "fn dec(x: Option[Int]) -> Int =\n    (x ?? 0) - 1\n\nfn keep(xs: List[Int]) -> Int = list.len(xs)\n"
+        );
     }
 
     #[test]
