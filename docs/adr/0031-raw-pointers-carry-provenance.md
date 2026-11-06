@@ -184,6 +184,38 @@ after the call. A host normally lends back a range a push export handed it, whic
 share keeps alive. Read-only because the range is the host's statement: a writable inbound
 buffer is the push form.
 
+### A1c. A Region export whose result is its address alone (#4519, 2026-11-06)
+
+About 20 downstream JS hosts read an alloc export as one number:
+`const p = ex.in_alloc(n); new Uint8Array(ex.memory.buffer, Number(p), n).set(b)`. A1's
+multi-value `(ptr, len)` reaches JS as an array, `Number([ptr, len])` is `NaN`, and a
+`Uint8Array` takes a `NaN` offset as 0, so such a host silently writes at address 0. User
+code has no other way to hand a host one address (D1 has no `Int` spelling of one). The
+owner ruled on 2026-11-06 that these hosts stay as they are and the compiler gives them the
+form they read.
+
+An export may declare it: `@export(wasm, "in_alloc", returns: address)`. Its Region result
+crosses as one value, the view's data address, in the memory's address width (one `i32` on
+wasm32, `i64` on memory64), for a host that already knows the length it asked for. Every
+other rule of A1 holds unchanged: the adapter keeps one share of the block and files the
+address in the table, `__region_release(ptr)` gives it back, a slice crosses as its own
+address, an empty Region is `0`, and an `effect fn`'s `err` traps.
+
+- **Declared, never inferred.** The form is a word at the export. The compiler does not
+  guess it from the host or from the fn's name, and the pair stays the default.
+- **Spelling.** `returns: address` is a named argument after `@export`'s two positional
+  ones, the same `returns:` key `@extern` takes for `returns: promise` (#3371). The one
+  named argument either boundary attribute has says what the boundary returns, with a bare
+  identifier value, and `fmt` prints both in the `:` spelling. Any other named argument of
+  `@export`, `returns` with another value, a repeat, or `returns: address` on a target
+  other than `wasm`, is a parse error. On a fn that does not return a Region it is E090.
+- **Mechanism.** The same rewrite and adapter as A1. The adapter reads the declaration on
+  the export the wrapper carries and leaves the length off its results; `--host js` wraps
+  the export as `f(…) → ptr` and adds `regionRelease(ptr)` as for the pair.
+
+Evidence: spec/wasm_host_js/region_export_address.almd (C-453) and
+crates/almide-wasm/tests/ffi_host_boundary.rs (the address-only tests).
+
 ### A2. An `@export(c)` fn may take Region parameters
 
 A Region parameter crosses as the C caller's `(const uint8_t *ptr, size_t len)` and is
