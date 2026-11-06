@@ -161,6 +161,15 @@ SUITE = [
     ("framebuf-local",  "framebuf/framebuf.almd",      [],              "l:20000",    "l:2",     "bytes", ["native", "wasm"]),
     ("regexcycle-8",   "regexcycle/regexcycle.almd",   [],              "8:2000000",  "8:2000",  "bytes", ["native", "wasm"]),
     ("regexcycle-32",  "regexcycle/regexcycle.almd",   [],              "32:2000000", "32:2000", "bytes", ["native", "wasm"]),
+    # globalread (#4562): a text renderer's per-glyph cache lookups (a map
+    # and a list read per glyph), `mode:frames`. `g` reads module-level `var`s
+    # from a helper fn, `l` passes the same map and list as parameters; the
+    # per-frame relation between the two is the gate (check-perf-ratio.sh,
+    # GLOBAL READ): 0.69.1 copied the whole map natively on every lookup
+    # through the module-level var. No Rust reference: the property is the
+    # relation.
+    ("globalread-global", "globalread/globalread.almd", [],             "g:20000",    "g:2",     "bytes", ["native", "wasm"]),
+    ("globalread-local",  "globalread/globalread.almd", [],             "l:20000",    "l:2",     "bytes", ["native", "wasm"]),
 ]
 
 QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
@@ -237,6 +246,13 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "framebuf-local": "l:12000",
     "regexcycle-8": "8:400000",
     "regexcycle-32": "32:400000",
+    # globalread (#4562): frames per row, unequal on purpose — the relation is
+    # per frame. The local row is the fast one natively (~0.009 ms a frame:
+    # 8000 frames read 0.072 s on one runner, under the floor), so it runs
+    # 16000. With the copy (develop before #4562) the global row read 4.03 s
+    # for 1500 frames natively, ~190x the local row per frame.
+    "globalread-global": "g:6000",
+    "globalread-local": "l:16000",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",
