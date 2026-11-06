@@ -803,14 +803,17 @@ PYBT
 
 # GLOBAL READ RELATION (#4562). A text renderer keeps its glyph caches in
 # module-level `var`s and reads them once per glyph per frame
-# (globalread/globalread.almd: a `map.get` and a `list.get` per glyph).
+# (globalread/globalread.almd: a `map.get`, a `list.get` and a `map.get` on a
+# field of a module-level record per glyph, and a `for` walk over a
+# module-level list per frame).
 # globalread-global reads the module-level vars from a helper fn,
 # globalread-local passes the same map and list to the helper as parameters;
 # the relation is global per-frame time over local per-frame time (the rows run
 # different frame counts, so each min is divided by its own). 0.69.1 rendered a
 # borrowed argument that is a module-level var as a borrow of a deep copy
-# (`&G.with(|c| (**c.borrow()).clone())`) natively, so every lookup copied the
-# whole 1,024-entry map: about 40x per frame, far over the ceiling. The wasm
+# (`&G.with(|c| (**c.borrow()).clone())`) natively, and a field read or a `for`
+# head the same way, so every lookup copied the whole 1,024-entry map or the
+# whole record: about 190x per frame, far over the ceiling. The wasm
 # leg reads a global's handle with a reference count and is gated so that it
 # cannot start copying either.
 GLOBALREAD_CEILING_NATIVE=4
@@ -857,11 +860,12 @@ for leg in ("native", "wasm"):
         print(f"::error::perf-ratio: a frame of lookups in module-level maps costs {ratio:.3f}x the "
               f"same lookups in a map passed as a parameter on the {leg} leg (ceiling {ceiling:.2f}x, "
               f"{g:.3f}s for {frames('globalread-global')} frames vs {l:.3f}s for "
-              f"{frames('globalread-local')}, recorded {baseline[key]:.3f}x). A borrowed argument that is "
-              "a module-level `var` is being copied on every call, which is how #4562 shipped in 0.69.1. "
-              "Look at how a borrowed global argument renders (render_global_snapshot_borrow in "
-              "crates/almide-codegen/src/walker/expressions_calls_binops.rs, native). Do not raise the "
-              "ceiling.")
+              f"{frames('globalread-local')}, recorded {baseline[key]:.3f}x). A read of a module-level `var` "
+              "(a borrowed argument, a field read, a `for` head) is copying the whole var, which is how "
+              "#4562 shipped in 0.69.1. Look at how a global place renders natively (global_snapshot_place "
+              "in crates/almide-codegen/src/walker/expressions_calls_binops.rs on the standard codegen, and "
+              "the heap-slot reads on the certified render if the program renders there). Do not raise "
+              "the ceiling.")
         failed = True
         continue
     print(f"perf-ratio: {key:20s} {ratio:.3f}x the parameter per frame "
