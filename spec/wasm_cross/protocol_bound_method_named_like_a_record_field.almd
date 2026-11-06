@@ -8,11 +8,13 @@
 // consulted, and the open seed of `list.fold((o, none), …)` stayed unsolved in
 // the IR: the wasm leg walled `ty-mismatch:Scalar(Str)-vs-Unit` while native
 // ran the program. A bounded type parameter's members now come from its bounds
-// only. `Scorer.score` pins the same family for a user record (`Rule`, only
-// declared: the guess searched every registered record) with a function field
-// of that name. The receiver rides in the accumulator rather
-// than being captured, so every function here also lowers on the certified MIR
-// leg (a fold callback that captures a record is outside its brick).
+// only. `Scorer.score` pins the same family for a user record: `Judge[T]` is
+// only declared, and its `score: (T) -> Int` field had the same effect, since
+// the guess searched every registered record and a field type naming the
+// record's own type parameter is what left the seed open. The receiver rides in
+// the accumulator rather than being captured, so every function here also
+// lowers on the certified MIR leg (a fold callback that captures a record is
+// outside its brick).
 protocol Order {
   fn cmp(o: Self, a: String, b: String) -> Int
 }
@@ -21,7 +23,7 @@ protocol Scorer {
   fn score(s: Self, x: String) -> Int
 }
 
-type Rule = { score: (String) -> Int }
+type Judge[T] = { score: (T) -> Int }
 
 fn sign(a: String, b: String) -> Int = if a < b then -1 else if a > b then 1 else 0
 
