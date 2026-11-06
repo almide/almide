@@ -6,15 +6,16 @@
 // `O: Order` by guessing that record from the field name instead of asking the
 // bound, so the call typed as `Heap.cmp`, the protocol method was never
 // consulted, and the open seed of `list.fold((o, none), …)` stayed unsolved in
-// the IR: the wasm leg walled `ty-mismatch:Scalar(Str)-vs-Unit` while native
-// ran the program. A bounded type parameter's members now come from its bounds
+// the IR. In the dojo's shape (the receiver captured by the callback) the wasm
+// leg walled `ty-mismatch:Scalar(Str)-vs-Unit` while native ran; in this shape
+// the leaked type variable reaches `best ?? n` and native fails its type
+// resolution too. A bounded type parameter's members now come from its bounds
 // only. `Scorer.score` pins the same family for a user record: `Judge[T]` is
 // only declared, and its `score: (T) -> Int` field had the same effect, since
 // the guess searched every registered record and a field type naming the
-// record's own type parameter is what left the seed open. The receiver rides in
-// the accumulator rather than being captured, so every function here also
-// lowers on the certified MIR leg (a fold callback that captures a record is
-// outside its brick).
+// record's own type parameter is what leaked. The receiver rides in the
+// accumulator and the pick is a call, so every function here also lowers on the
+// certified MIR leg and the structural witness anchors every store.
 protocol Order {
   fn cmp(o: Self, a: String, b: String) -> Int
 }
@@ -44,14 +45,17 @@ type Vowels: Scorer = {  }
 
 fn Vowels.score(s: Vowels, x: String) -> Int = string.to_list(x) |> list.count((c) => string.contains("aeiou", c))
 
+// The running pick: the first name, then `n` whenever it beats the held one.
+fn keep(held: String?, n: String, beats: Bool) -> String? = match held {
+  none => some(n),
+  some(h) => if beats then some(n) else some(h),
+}
+
 // The greatest name; the first one listed among equals.
 fn greatest[O: Order](o: O, names: List[String]) -> String? = {
   let r = names |> list.fold(
     (o, none),
-    ((oo, best), n) => (oo, match best {
-      none => some(n),
-      some(b) => if oo.cmp(n, b) > 0 then some(n) else some(b),
-    }),
+    ((oo, best), n) => (oo, keep(best, n, oo.cmp(n, best ?? n) > 0)),
   )
   r.1
 }
@@ -60,10 +64,7 @@ fn greatest[O: Order](o: O, names: List[String]) -> String? = {
 fn best[S: Scorer](s: S, names: List[String]) -> String? = {
   let r = names |> list.fold(
     (s, none),
-    ((ss, top), n) => (ss, match top {
-      none => some(n),
-      some(t) => if ss.score(n) > ss.score(t) then some(n) else some(t),
-    }),
+    ((ss, top), n) => (ss, keep(top, n, ss.score(n) > ss.score(top ?? n))),
   )
   r.1
 }
