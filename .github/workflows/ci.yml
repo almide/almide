@@ -2459,7 +2459,12 @@ jobs:
     needs: [changes, build]
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # #4559, measured over 72 jobs (2026-11-05/06): without the valgrind
+    # download the slowest class (EPYC 7763) finishes at p95 16.3 min, worst
+    # 18.7 min — too close to the old 20. The limit is that worst run plus
+    # the worst observed valgrind download (14.5 min, what a cold cache on a
+    # slow mirror still pays), rounded up: 33.2 -> 35.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
@@ -2502,8 +2507,47 @@ jobs:
       # The idiom relation gates on callgrind instruction counts (wall time
       # is machine-state bimodal on this runner class — see the IDIOM_CEILING
       # comment in scripts/check-perf-ratio.sh).
+      #
+      # #4559: the install is served from cached .debs. Downloading them from
+      # the runner's apt mirror took 8.7-14.5 min in 12 of 72 jobs (16-26 MB
+      # at ~19 kB/s) and every one of the 11 timeouts of this job was one of
+      # those. The key carries the image's release and the installed libc6:
+      # valgrind depends on libc6-dbg of exactly that version, so a new image
+      # with a new libc6 misses and re-downloads instead of failing to install.
+      # gdb (only a Recommends) is not installed; callgrind does not use it.
+      - name: valgrind cache key (#4559)
+        id: valgrind-key
+        run: |
+          . /etc/os-release
+          echo "key=valgrind-debs-${VERSION_CODENAME}-$(dpkg --print-architecture)-libc6-$(dpkg-query -W -f='${Version}' libc6)-v1" >> "$GITHUB_OUTPUT"
+      - name: Restore cached valgrind packages (#4559)
+        id: valgrind-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/valgrind-debs
+          key: ${{ steps.valgrind-key.outputs.key }}
       - name: valgrind (for the Ir idiom gate)
-        run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+        env:
+          DEBS: ${{ runner.temp }}/valgrind-debs
+        run: |
+          if [ -n "$(ls "$DEBS"/*.deb 2>/dev/null)" ] \
+             && sudo apt-get install -y -q --no-install-recommends "$DEBS"/*.deb; then
+            echo "valgrind: installed from the cached packages"
+          else
+            sudo apt-get update -q
+            sudo rm -rf "$DEBS" && sudo mkdir -p "$DEBS/partial"
+            # Only valgrind's own packages land in $DEBS (not whatever the
+            # image left in /var/cache/apt/archives).
+            sudo apt-get install -y -q --no-install-recommends -o Dir::Cache::archives="$DEBS" valgrind
+            sudo rm -rf "$DEBS/partial" "$DEBS/lock"
+          fi
+          valgrind --version
+      - name: Save valgrind packages (#4559)
+        if: steps.valgrind-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/valgrind-debs
+          key: ${{ steps.valgrind-key.outputs.key }}
 
       # wasmtime runs the WASM leg of two gates in this job: the spelling ratio
       # (#2098) and the strbuild idiom relation (#2310) inside the perf ratio
