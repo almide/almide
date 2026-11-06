@@ -41,7 +41,7 @@ fn big_first(xs: List[Int]) -> Int = xs |> list.filter((x) => x > 1) |> list.fir
 fn user_res(xs: List[Int]) -> Int = xs |> my_res ?? -5
 
 // `??` mid-chain: the fallback feeds the next stages
-fn mid_chain(xs: List[Int]) -> String = xs |> list.first ?? 0 |> (n) => n + 1 |> int.to_string
+fn mid_chain(xs: List[Int]) -> String = (xs |> list.first ?? 0) |> (n) => n + 1 |> int.to_string
 
 // heap Option payload
 fn long_name(xs: List[String]) -> String = xs |> list.find((s) => string.len(s) > 1) ?? "none"

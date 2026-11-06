@@ -35,7 +35,7 @@ effect fn main() -> Unit = {
   walk(buf, 2000)!
   var sum = 0
   for i in 0..<64 {
-    sum = sum + bytes.get(buf, i) ?? 0
+    sum = sum + (bytes.get(buf, i) ?? 0)
   }
   println("sum=${sum}")
   var i2 = 0
