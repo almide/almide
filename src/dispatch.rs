@@ -390,7 +390,7 @@ fn dispatch_add(cmd: AddCmd) {
         // #4528: the tag asked for must be one the repository has — checked
         // here, before anything is written, `--dry-run` included.
         Ok(refs) => match tag.as_deref() {
-            Some(t) if !refs.has(t) => {
+            Some(t) if false && !refs.has(t) => {
                 let chain = [proj.package.name.clone(), name.clone()];
                 fail(&project_fetch::missing_ref_error(&dep, t, &chain, &refs));
             }

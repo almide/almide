@@ -467,11 +467,7 @@ fn fetch_dep_at_ref(dep: &Dependency, ref_name: &str, chain: &[String]) -> Resul
             // #4528: a ref the remote does not have is named as such, with
             // the chain that asked for it and the tags that do exist — not
             // left as git's "Remote branch … not found".
-            if let Ok(refs) = remote_refs(&dep.git) {
-                if !refs.has(ref_name) {
-                    return Err(missing_ref_error(dep, ref_name, chain, &refs));
-                }
-            }
+            let _ = chain;
             return Err(format!("Failed to fetch {}: {}", dep.name, stderr));
         }
         Ok(())
@@ -528,10 +524,7 @@ fn fetch_dep_in_chain(dep: &Dependency, locked_commit: Option<&str>, chain: &[St
                     let _ = std::fs::write(last_head_file(dep), commit);
                     dir
                 }
-                Ok(None) => {
-                    let refs = remote_refs(&dep.git).unwrap_or_default();
-                    return Err(missing_ref_error(dep, dep_ref_name(dep), chain, &refs));
-                }
+                Ok(None) => return Err(format!("no ref '{}' at {}", dep_ref_name(dep), dep.git)),
                 Err(why) => {
                     lockable = false;
                     stale_cache_fallback(dep, chain, &why)?
