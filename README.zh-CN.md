@@ -33,6 +33,37 @@
 
 Almide 是一门面向「由 AI 编写、由 AI 修改的代码」的静态类型语言。它的主张不是「模型能写对」，而是：**当模型写错时，编译器在编写阶段就指出来，并点名该怎么改。** 程序编译为原生二进制（经由 Rust）和 WebAssembly，在每一项[契约](./docs/contracts/)行为上输出逐字节相同。`almide verify` 检查 `almide build` 产出的 wasm 模块的所有权、边界、名称与能力见证，并以 SHA-256 绑定到该文件（[哪些已证明，哪些是受信任的](./docs/contracts/proven-vs-trusted.md)）。
 
+## 一眼看懂 Almide
+
+```almd
+type Order = { item: String, qty: Int, price: Int }
+
+fn parse(line: String) -> Order? = match line |> string.trim |> string.split(",") {
+  [item, qty, price] => match (int.parse(qty), int.parse(price)) {
+    (ok(q), ok(p)) => some({ item: item, qty: q, price: p }),
+    _ => none,
+  },
+  _ => none,
+}
+
+fn main() -> Unit = {
+  let csv = """
+    apple,3,120
+    pear,oops,90
+    plum,5,80
+    """
+  let orders = csv |> string.lines |> list.filter_map(parse)
+  let total = orders |> list.fold(0, (sum, o) => sum + o.qty * o.price)
+  println("${list.len(orders)} orders, total ${total}")
+}
+```
+
+```text
+2 orders, total 760
+```
+
+数字解析失败的那一行落到 `none`，被跳过：没有异常，也没有 unwrap；漏写分支的 `match` 无法通过编译。同一个程序在原生和 wasm 上输出完全相同的字节，这个文件以 [`examples/order-total.almd`](./examples/order-total.almd) 的形式在 CI 中每次运行。
+
 ## 活下来的一次修改
 
 模型给一个类型加了一个分支，并且像模型常做的那样，别的什么都没动：

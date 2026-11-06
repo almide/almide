@@ -2381,6 +2381,11 @@ jobs:
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal >/dev/null 2>&1 || true
           /tmp/almide-bin/almide run tools/almide-gates/src/main.almd -- bench docs/benchmarks --check-readme
 
+      # The first program a reader sees is examples/order-total.almd: each README shows it
+      # verbatim and the output it prints. Kept in the prose lane, so a README-only edit is checked.
+      - name: README at-a-glance program matches examples/order-total.almd and its output
+        run: python3 -I scripts/check-readme-example.py /tmp/almide-bin/almide
+
       - name: LLM-surface fences compile (#1483 — every \`\`\`almide check fence passes almide check)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-llm-surface.sh
       - name: Spec test files check and are run by a runner (#3065)
