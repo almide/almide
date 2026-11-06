@@ -33,6 +33,17 @@
 //!     no heap value, so there is no ownership event to move;
 //!   - the body is tiny (the node cap below, a trapping operator weighing
 //!     what its guard costs): the module must not grow for it.
+//!   - ONE heap shape is admitted besides scalars (#4550): a read-only
+//!     `Bytes` param (not `mut`) whose argument at the site is a bare
+//!     variable, and which the body only hands, as a bare variable, to a
+//!     module call (`bytes.len(b)`). The variable is substituted, never
+//!     bound, so the inlined body reads the caller's own block: no `let`
+//!     of a heap value, no RC event, nothing that outlives the call. This is
+//!     what a bounds predicate over a byte buffer is (`bytes.fits`, which
+//!     every typed `get_*` / `put_*` of the byte IO matrix calls), so the
+//!     matrix's wrappers stop paying a call and an RC inc/dec around it
+//!     per access — decided from each declaration's own body and the node
+//!     cap, not from a list of names.
 //!
 //! ARGUMENTS keep call semantics: each is evaluated once, in order, into a
 //! fresh `let` — except where the shared speculation rule
@@ -73,6 +84,18 @@ const PURE_PRIMS: &[&str] = &[
 
 fn is_scalar(ty: &Ty) -> bool {
     matches!(ty, Ty::Int | Ty::Float | Ty::Bool)
+}
+
+/// The one heap shape a candidate may take as a param (#4550): a byte buffer
+/// it only reads, passed through as a bare variable.
+fn is_byte_view(ty: &Ty) -> bool {
+    matches!(ty, Ty::Bytes)
+}
+
+/// A bare variable naming a byte buffer: the only heap expression an
+/// admitted body (or an admitted site's argument) may hold.
+fn is_byte_view_var(e: &IrExpr) -> bool {
+    matches!(e.kind, IrExprKind::Var { .. }) && is_byte_view(&e.ty)
 }
 
 /// The body-node count of an admissible body, or None when the body leaves
@@ -119,9 +142,13 @@ fn admissible_size(e: &IrExpr, fns: &HashSet<String>) -> Option<usize> {
 /// A call's admissible size: a `Named` call of the same space or a pure
 /// scalar prim, scalar arguments and result (split from `admissible_size`).
 fn call_size(e: &IrExpr, target: &CallTarget, args: &[IrExpr], fns: &HashSet<String>) -> Option<usize> {
+    let reads_a_view = args.iter().any(is_byte_view_var);
     let ok = match target {
         CallTarget::Named { name } => fns.contains(name.as_str()),
-        CallTarget::Module { module, func, .. } => module.as_str() == "prim" && PURE_PRIMS.contains(&func.as_str()),
+        CallTarget::Module { module, func, .. } if module.as_str() == "prim" => PURE_PRIMS.contains(&func.as_str()),
+        // A module call that reads a byte-buffer param (`bytes.len(b)`): the
+        // call itself stays as it is, only its place moves into the caller.
+        CallTarget::Module { .. } => reads_a_view,
         _ => false,
     };
     if !ok || !is_scalar(&e.ty) {
@@ -129,6 +156,10 @@ fn call_size(e: &IrExpr, target: &CallTarget, args: &[IrExpr], fns: &HashSet<Str
     }
     let mut n = 1;
     for a in args {
+        if is_byte_view_var(a) {
+            n += 1;
+            continue;
+        }
         if !is_scalar(&a.ty) {
             return None;
         }
@@ -310,7 +341,16 @@ impl Rewriter<'_> {
             return None;
         }
         let c = self.callees.get(name.as_str())?;
-        if args.len() != c.params.len() || !args.iter().all(|a| is_scalar(&a.ty)) {
+        if args.len() != c.params.len() {
+            return None;
+        }
+        // A byte-buffer param takes a bare variable only: it is substituted,
+        // so the inlined reads see the caller's block (inline_parts binds
+        // nothing for a variable).
+        let args_fit = c.params.iter().zip(args).all(|((_, pty), a)| {
+            if is_byte_view(pty) { is_byte_view_var(a) } else { is_scalar(&a.ty) }
+        });
+        if !args_fit {
             return None;
         }
         Some((c.clone(), args.clone()))
@@ -377,7 +417,7 @@ fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>) -> HashMap<String,
             || count[name] != 1
             || shadowed.contains(name)
             || !is_scalar(&f.ret_ty)
-            || !f.params.iter().all(|p| is_scalar(&p.ty) && !p.is_mut)
+            || !f.params.iter().all(|p| (is_scalar(&p.ty) || is_byte_view(&p.ty)) && !p.is_mut)
             || calls_itself(&f.body, name)
         {
             continue;
