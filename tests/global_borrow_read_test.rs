@@ -98,10 +98,11 @@ fn fn_body<'a>(rust: &'a str, name: &str) -> &'a str {
 }
 
 /// Every read-only use of a global in the emitted Rust borrows a snapshot of
-/// the cell's `Rc` and never deep-copies the global out of its cell. These
-/// programs wall on the certified native render (a heap global's slot is
-/// outside its subset), so the standard codegen printed here is what
-/// `almide build` ships.
+/// the cell's `Rc` and never deep-copies the global out of its cell. This reads
+/// the standard codegen, which `--target rust` prints. The certified native
+/// render serves the same reads from an `Rc` snapshot of its heap-slot cell;
+/// that leg is held by native_v1_differential_test and the perf ratchet's
+/// GLOBAL READ relation.
 #[test]
 fn borrowed_global_arg_is_not_copied() {
     let file = source_file("emit");
