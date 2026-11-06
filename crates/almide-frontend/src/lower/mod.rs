@@ -33,7 +33,6 @@ mod derive_codec;
 mod auto_try;
 mod declared_repr;
 mod secret_eq;
-mod effect_slot_sweep;
 
 use expressions::lower_expr;
 pub(crate) use calls::{qualify_callee_module_idents, substitute_call_params};
@@ -314,8 +313,6 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     preregister_top_lets(&mut ctx, prog, module_prefix);
     lower_decls(&mut ctx, prog, module_prefix, &mut functions, &mut top_lets, &mut type_decls);
     append_auto_derives(&mut ctx, &type_decls, &mut functions);
-    // #4545: a pure fn value in an effect slot the call/let sites never saw.
-    effect_slot_sweep::adapt_effect_slots(&mut ctx, &mut functions, &mut top_lets);
 
     let annotated_result_vars = std::mem::take(&mut ctx.annotated_result_vars);
     let mut program = build_ir_program(ctx, functions, top_lets, type_decls, env);

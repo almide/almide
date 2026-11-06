@@ -84,28 +84,3 @@ fn is_panic_call(e: &IrExpr) -> bool {
         _ => false,
     }
 }
-
-/// #4545: a FALLIBLE lambda's Unit block that ends in a statement
-/// (`() => { n = 3 }` in an `effect () -> Unit` slot) has no value tail for
-/// the lift to wrap, so it became `ok({ n = 3 })` — a tail-less block in
-/// value position, which the wasm leg refuses (E082 `expr:Block-no-tail`).
-/// Give such a block its `()` tail, through `if` / `match` arms and nested
-/// block tails, so the lift reaches a value: `{ n = 3; ok(()) }`.
-pub(crate) fn unit_tail_for_tailless_blocks(body: &mut IrExpr) {
-    if !matches!(body.ty, Ty::Unit) {
-        return;
-    }
-    let span = body.span.clone();
-    match &mut body.kind {
-        IrExprKind::Block { expr: expr @ None, .. } => {
-            *expr = Some(Box::new(IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span, def_id: None }));
-        }
-        IrExprKind::Block { expr: Some(tail), .. } => unit_tail_for_tailless_blocks(tail),
-        IrExprKind::If { then, else_, .. } => {
-            unit_tail_for_tailless_blocks(then);
-            unit_tail_for_tailless_blocks(else_);
-        }
-        IrExprKind::Match { arms, .. } => arms.iter_mut().for_each(|a| unit_tail_for_tailless_blocks(&mut a.body)),
-        _ => {}
-    }
-}
