@@ -52,6 +52,7 @@ jobs:
         if: matrix.variant == 'control'
         run: |
           git config user.email probe@example.com && git config user.name probe
+          git revert --no-edit "$(git log --format=%H -1 --grep='Read the Dup of a heap slot')"
           git revert --no-edit "$(git log --format=%H -1 --grep='Read a borrow-only heap slot as a snapshot')"
           git log --oneline -3
       - name: Build
