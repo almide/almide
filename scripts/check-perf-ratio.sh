@@ -702,19 +702,20 @@ PYRX
 # each call, one small allocation, against a store LLVM keeps in registers for
 # the local row — is recorded in the baseline, not hidden in the ceiling.
 FRAMEBUF_CEILING_NATIVE=40
+FRAMEBUF_CEILING_WASM=3
 fb_out=$(mktemp -t perf-ratio-framebuf.XXXXXX.json)
 trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,wasm \
   --bench framebuf-global,framebuf-local \
   --label ratchet-framebuf --out "$fb_out"
-python3 - "$fb_out" "$BASELINE_FILE" "$FRAMEBUF_CEILING_NATIVE" "$MIN_SECONDS" <<'PYFB'
+python3 - "$fb_out" "$BASELINE_FILE" "$FRAMEBUF_CEILING_NATIVE" "$FRAMEBUF_CEILING_WASM" "$MIN_SECONDS" <<'PYFB'
 import json, sys
 sys.path.insert(0, "research/benchmark/perf")
 from bench import QUICK_ARGS
 
-out_path, baseline_path, ceiling_native, min_s = sys.argv[1:5]
-ceilings = {"native": float(ceiling_native)}
+out_path, baseline_path, ceiling_native, ceiling_wasm, min_s = sys.argv[1:6]
+ceilings = {"native": float(ceiling_native), "wasm": float(ceiling_wasm)}
 min_s = float(min_s)
 data = json.load(open(out_path))["results"]
 baseline = {}
