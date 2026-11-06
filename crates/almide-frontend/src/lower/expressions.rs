@@ -454,6 +454,7 @@ fn lower_expr_lambda(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                     // `option.to_result(e, "none")!` — a plain Result unwrap
                     // all three consumers already handle.
                     convert_option_unwraps_to_result(ctx, &mut ir_body);
+                    crate::lower::unit_tail_for_tailless_blocks(&mut ir_body);
                     if !ir_body.ty.is_result() {
                         // The lambda's E comes off its checked Result return
                         // (ADR-0012 D2: typed-E fallible callbacks lift with

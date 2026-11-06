@@ -1276,6 +1276,16 @@ varies = "#2146 item 4 (2026-09-21): 162 days (red) at the default line, green a
 blind = "UNMAPPED"
 
 [[gate]]
+path = "scripts/check-readme-example.py"
+reads = "structured"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "README at-a-glance landing (#4567, 2026-11-06): the gate guards the first program a reader sees. Each of README.md, README.ja.md and README.zh-CN.md must show examples/order-total.almd without its tests, byte for byte, under its at-a-glance heading, and the text block under it must be exactly what `almide run examples/order-total.almd --target wasm` prints. Negative control: draft PR #4568 (branch readme-at-a-glance-negctl, never merged) changes only README.md's output block to `2 orders, total 761`; on its head 91ff10085 (the integration-0691 tree, this row included) the Emit & Format job (run 42208840419, job 127867382380) fails on this step with `::error::README.md: the README shows '2 orders, total 761', the program prints '2 orders, total 760'`, while check-gate-verification.sh passes in the same job, so the red is the README check and not the ledger. The integration tree, which shows 760, passes as the positive control ('3 READMEs show examples/order-total.almd and its output')."
+measures = "equality of each README's at-a-glance almd fence with examples/order-total.almd minus its test blocks, and of the text fence under it with the program's wasm stdout"
+varies = "negative control #4568 (2026-11-06, run 42208840419): the README.md output block read '2 orders, total 761' against the printed '2 orders, total 760' (red); the integration tree reads 760 against 760 (green)"
+blind = "the program printing a wrong total on both legs alike -> examples/order-total.almd; native stdout differing from the wasm stdout the gate reads -> examples/order-total.almd"
+
+[[gate]]
 path = "scripts/check-docs-only.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"

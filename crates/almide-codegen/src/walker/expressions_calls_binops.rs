@@ -357,7 +357,35 @@ fn render_user_call_arg(ctx: &RenderContext, arg: &IrExpr) -> String {
         };
         return format!("&{}", rc_cow_result_glue(owned, &inner.ty));
     }
+    if let Some(rendered) = render_global_snapshot_borrow(ctx, arg) {
+        return rendered;
+    }
     render_expr_owned(ctx, arg)
+}
+
+/// A read-only borrow of a heap `var` global at a call argument
+/// (`map.get(cache, k)`, `list.len(xs)`, `f(g)` with a borrowed param), #4562.
+/// The global is a `RefCell<Rc<T>>`, and its bare read is a deep copy of `T`
+/// (`(**c.borrow()).clone()`), which a borrowed parameter only reads. So every
+/// lookup in a module-level map copied the whole map.
+///
+/// The argument now borrows a SNAPSHOT of the cell's `Rc`: one reference count,
+/// not a copy. No `RefCell` borrow is held while the callee runs, so this holds
+/// whatever the callee is. A callee that runs user code that writes the global
+/// meets a shared block, and the write's `Rc::make_mut` copies it then, so the
+/// argument keeps the value it had at the call site, as the copy did. The
+/// temporary lives to the end of the enclosing statement, the same span the
+/// copy's temporary had.
+fn render_global_snapshot_borrow(ctx: &RenderContext, arg: &IrExpr) -> Option<String> {
+    use almide_ir::top_let_storage::TopLetStorage;
+    let IrExprKind::Borrow { expr: inner, as_str, mutable: false } = &arg.kind else { return None };
+    let IrExprKind::Var { id } = &inner.kind else { return None };
+    let global = ctx.ann.global(*id)?;
+    if !matches!(global.storage, TopLetStorage::RcRefCell) {
+        return None;
+    }
+    let snapshot = format!("{}.with(|__almide_cell| std::rc::Rc::clone(&*__almide_cell.borrow()))", global.static_name);
+    Some(if *as_str { format!("&**{snapshot}") } else { format!("&*{snapshot}") })
 }
 
 /// `CallTarget::Named` case of `render_generic_call`, extracted verbatim
@@ -1038,10 +1066,14 @@ fn inert_arg_ty(t: &Ty) -> bool {
 /// the place's value moves out of its cell (left empty for the call, which
 /// cannot read it), the callee writes it in place, and it moves back:
 ///
-/// `({ let mut __almide_gp0 = G.with(|__almide_gc| std::mem::take(std::rc::Rc::make_mut(&mut *__almide_gc.borrow_mut())));
+/// `({ let mut __almide_gp0 = AlmideRcCow::<Vec<u8>>::from_rc(G.with(|__almide_gc| std::mem::replace(&mut *__almide_gc.borrow_mut(), almide_empty_bytes_rc())));
 ///     let __almide_gr = f(&mut __almide_gp0, a);
-///     G.with(|__almide_gc| *std::rc::Rc::make_mut(&mut *__almide_gc.borrow_mut()) = (__almide_gp0).into());
+///     G.with(|__almide_gc| *__almide_gc.borrow_mut() = (__almide_gp0).into_rc());
 ///     __almide_gr })`
+///
+/// for a Bytes global (its `Rc` is the callee's `AlmideRcCow`, so it moves
+/// whole and nothing is allocated); a list place moves its `Vec` out with
+/// `std::mem::take(Rc::make_mut(..))` instead.
 ///
 /// `Rc::make_mut` keeps value semantics: a snapshot sharing the block
 /// (`let snap = g`) still makes the take copy it first. Only a place whose
@@ -1079,17 +1111,27 @@ fn render_call_with_taken_global_places(
                 _ => &a.ty,
             };
             let cell = "std::rc::Rc::make_mut(&mut *__almide_gc.borrow_mut())";
-            let read = if suffix.is_empty() {
-                rc_cow_result_glue(format!("{static_name}.with(|__almide_gc| std::mem::take({cell}))"), ty)
+            // A root Bytes place moves its cell's `Rc` itself (the callee's
+            // `AlmideRcCow` is that `Rc`), leaving the shared empty
+            // placeholder: nothing is allocated for the call.
+            let (read, back) = if suffix.is_empty() && matches!(ty, Ty::Bytes) {
+                (
+                    format!("AlmideRcCow::<Vec<u8>>::from_rc({static_name}.with(|__almide_gc| std::mem::replace(&mut *__almide_gc.borrow_mut(), almide_empty_bytes_rc())))"),
+                    format!("{static_name}.with(|__almide_gc| *__almide_gc.borrow_mut() = (__almide_gp{k}).into_rc());"),
+                )
+            } else if suffix.is_empty() {
+                (
+                    rc_cow_result_glue(format!("{static_name}.with(|__almide_gc| std::mem::take({cell}))"), ty),
+                    format!("{static_name}.with(|__almide_gc| *{cell} = (__almide_gp{k}).into());"),
+                )
             } else {
-                format!("{static_name}.with(|__almide_gc| std::mem::take(&mut {cell}{suffix}))")
+                (
+                    format!("{static_name}.with(|__almide_gc| std::mem::take(&mut {cell}{suffix}))"),
+                    format!("{static_name}.with(|__almide_gc| {cell}{suffix} = __almide_gp{k});"),
+                )
             };
             take_out.push(format!("let mut __almide_gp{k} = {read};"));
-            put_back.push(if suffix.is_empty() {
-                format!("{static_name}.with(|__almide_gc| *{cell} = (__almide_gp{k}).into());")
-            } else {
-                format!("{static_name}.with(|__almide_gc| {cell}{suffix} = __almide_gp{k});")
-            });
+            put_back.push(back);
             format!("&mut __almide_gp{k}")
         }
         None => render_arg(a),
@@ -1255,6 +1297,9 @@ fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::inte
             _ => "_".to_string(),
         };
         format!("&({s}).iter().map(|__e: &{elem}| (**__e).clone()).collect::<Vec<_>>()")
+    } else if let Some(rendered) = render_global_snapshot_borrow(ctx, a) {
+        // A borrowed heap global reads in place, not out of a copy (#4562).
+        rendered
     } else {
         render_expr_owned(ctx, a)
     }

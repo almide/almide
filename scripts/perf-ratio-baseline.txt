@@ -122,11 +122,12 @@ regexcycle-wasm 1.07
 # check-perf-ratio.sh, never on these values. Runner readings (PR #4555's
 # perf ratchet job): native 16.4 with the take form, the global row's one
 # small allocation per write against stores LLVM keeps in registers for the
-# local row; wasm 44.1 there, before the move-in fix of PR #4556 — the global
+# local row, and 4.4 once the Bytes global's Rc itself moved into the call
+# (PR #4563: 0.103 s for 800 frames against 0.354 s for 12000); wasm 44.1 there, before the move-in fix of PR #4556 — the global
 # shared into each `put_f32_le` and copied 80 KB per 4-byte write. With it
 # the runner read 1.10 (PR #4556: 0.217 s for 800 frames against 0.986 s for
 # 4000), the global writes costing what the local ones do.
-framebuf-native 16.4
+framebuf-native 4.4
 framebuf-wasm 1.1
 treealloc 0.343
 # btrees (rc4): treealloc's program with the depth a literal and no argument
@@ -206,3 +207,10 @@ ablation/fannkuchredux 3.069
 # a ratio of 0.083; ALMIDE_SELF_INLINE_OFF=1 reads 1.15 s, a delta of 12.1.
 fib 0.120
 ablation/fib 12.000
+# globalread (#4562): per-frame time of the module-level-var lookups over the
+# same lookups through parameters (GLOBAL READ, ceilings 4x native, 3x wasm).
+# ubuntu-latest PR runner, 2026-11-06 (g:3000 / l:8000): native 0.0354 s
+# against 0.0718 s, 1.32x per frame; wasm 0.122 s against 0.428 s, 0.76x.
+# Develop before the fix read ~190x natively (4.03 s for 1500 frames).
+globalread-native 1.320
+globalread-wasm 0.760

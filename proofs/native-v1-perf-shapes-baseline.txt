@@ -54,7 +54,7 @@ crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_list_
 crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_list_concat::{closure#0}	2
 crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_list_get_scalar::{closure#0}	1
 crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_list_set_scalar::{closure#0}	1
-crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_set_local	31
+crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_set_local	29
 crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_set_local::{closure#0}	1
 crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::render_user_fn_call	3
 crates/almide-mir/src/render_native_b.rs	almide_mir::render_native::shim_arg_in_declared_mode	9

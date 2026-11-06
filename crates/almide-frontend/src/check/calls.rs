@@ -1338,7 +1338,16 @@ impl Checker {
     // by cascade-failure detection).
     fn emit_unresolved_call_diagnostic(&mut self, name: &str) -> Ty {
         // Triple: (hint, clean fn-name fix for simple try:, rich multi-line snippet). `rich_snippet` overrides `fix_name` when present — used for hallucinations that need a conversion wrapper or operator rewrite rather than a rename.
-        let (hint, fix_name, rich_snippet) = self.unresolved_call_hint(name);
+        let (mut hint, fix_name, rich_snippet) = self.unresolved_call_hint(name);
+        // A dialect-epoch removal whose ledger rewrite keeps the argument list
+        // (`ffi.address(b)` → `ffi.region(b)`, ADR-0031). The callee rename is
+        // the whole edit only when the new fn has the old fn's type (#4525);
+        // otherwise the hint says how the type changed and the rename is a
+        // suggestion `almide fix` leaves alone.
+        let removal_rename = crate::removed_spellings::same_shape_rename(name);
+        if let Some(change) = removal_rename.as_ref().and_then(|r| r.type_change.as_ref()) {
+            hint = format!("{hint}. Not applied by `almide fix`: {change}");
+        }
         // Cascade suppression: if `name` belongs to a fn whose body failed to parse, the real error is already on top. Skip emitting E002 so the LLM focuses on the parse error, not N identical cascades.
         if self.env.failed_fn_names.contains(name) {
             return Ty::Unknown;
@@ -1362,12 +1371,15 @@ impl Checker {
             }
         }
         // `try_replace` (Phase 3): when the hint is a clean rename and the callee's source span is available, emit both a concise `try` and the exact replacement range so `Diagnostic::apply_try_to` can rewrite the source. Rich multi-line snippets (conversion wrappers, operator suggestions) stay display-only via `with_try`.
-        // A dialect-epoch removal whose ledger rewrite keeps the argument list
-        // (`ffi.address(b)` → `ffi.region(b)`, ADR-0031): the callee rename IS
-        // the edit, so `almide fix` applies it unattended.
-        let removal_rename = crate::removed_spellings::same_shape_rename(name);
-        if let (Some(to), Some(span)) = (&removal_rename, self.callee_span_hint) {
-            diag = diag.with_machine_fix(span.line, span.col, span.end_col, to.clone());
+        if let Some(rename) = removal_rename.as_ref().filter(|r| !r.is_machine_applicable()) {
+            // A rename that changes the type is no span edit at all: renaming
+            // the callee alone does not, in general, give a program that
+            // checks (the callers read the old type), and a span-anchored
+            // suggestion promises one that does. The `try:` names the new
+            // callee; the hint says what to adapt.
+            diag = diag.with_try(format!("// {wrong}(...)  →  {right}(...)\n{right}(...)", wrong = name, right = rename.to));
+        } else if let (Some(rename), Some(span)) = (&removal_rename, self.callee_span_hint) {
+            diag = diag.with_machine_fix(span.line, span.col, span.end_col, rename.to.clone());
         } else if let Some(rich) = rich_snippet {
             diag = diag.with_try(rich.to_string());
         } else if let (Some(fix), Some(span)) = (&fix_name, self.callee_span_hint) {
