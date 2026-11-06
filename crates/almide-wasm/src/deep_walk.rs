@@ -144,18 +144,60 @@ pub(crate) fn emit_queue_len(i: &mut InstructionSink<'_>, gq: u32) {
 /// frees one block and recurses into nothing).
 pub(crate) type DeepSlot = (u32, u32, u32);
 
+/// `$deep_drop_push(child, slot)`: the queue push of one deep release
+/// (`Helper::DeepDropPush`). params: 0=child, 1=slot; locals: 2=q, 3=v.
+pub(crate) fn emit_deep_drop_push(gq: u32) -> Function {
+    let mut f = Function::new([(2, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(0);
+    emit_push(&mut i, gq, 2, 3);
+    i.local_get(1);
+    emit_push(&mut i, gq, 2, 3);
+    i.end();
+    f
+}
+
+/// `$deep_drop_drain()`: the outermost drop's drain (`Helper::DeepDropDrain`)
+/// — every queued release, one level each, at depth 1 so a drained drop never
+/// starts a drain of its own; depth back to 0 after. locals: 0=q, 1=len.
+pub(crate) fn emit_deep_drop_drain(gq: u32, gd: u32, drop_ty: u32) -> Function {
+    let (q, len) = (0u32, 1u32);
+    let mut f = Function::new([(2, ValType::I32)]);
+    let mut i = f.instructions();
+    i.i32_const(1).global_set(gd);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    emit_queue_len(&mut i, gq);
+    i.i32_eqz().br_if(1);
+    emit_pop(&mut i, gq, 2, q, len);
+    i.call_indirect(0, drop_ty);
+    i.br(0);
+    i.end();
+    i.end();
+    i.i32_const(0).global_set(gd);
+    i.end();
+    f
+}
+
 /// `$drop_<shape>(block)` of a type on a cycle (#4252): `emit_drop_shape`'s
 /// credit arithmetic and releases, with the releases queued past
 /// `DEEP_LIMIT` nesting levels and drained by the outermost drop.
+///
+/// The shallow path — every drop of a value less than `DEEP_LIMIT` deep — is
+/// inline here, as `emit_drop_shape` emits it: the depth count, a direct call
+/// per handle slot, the free. The cold half is shared by every recursive type
+/// in the module (#4550): a queued release is one call to `$deep_drop_push`
+/// (`push`) instead of two inline queue pushes per slot, and the outermost
+/// drop's drain is one call to `$deep_drop_drain` (`drain`) instead of a loop
+/// per type, made only when the queue is not empty.
 pub(crate) fn emit_drop_shape_deep(
     slots: &[DeepSlot],
     tagged: Option<(u32, Vec<(u32, Vec<DeepSlot>)>)>,
     (gq, gd): (u32, u32),
-    drop_ty: u32,
+    (push, drain): (u32, u32),
 ) -> Function {
-    // params: 0=block; locals: 1=rc, 2=q, 3=v, 4=len
-    let (block, rc, q, v, len) = (0u32, 1u32, 2u32, 3u32, 4u32);
-    let mut f = Function::new([(4, ValType::I32)]);
+    // params: 0=block; locals: 1=rc
+    let (block, rc) = (0u32, 1u32);
+    let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
     i.return_();
@@ -171,9 +213,7 @@ pub(crate) fn emit_drop_shape_deep(
         let one = |i: &mut InstructionSink<'_>, &(off, dec, slot): &DeepSlot| {
             i.local_get(block).i32_load(word(almide_layout::PAYLOAD + off));
             if queue && slot != 0 {
-                emit_push(i, gq, q, v);
-                i.i32_const(slot as i32);
-                emit_push(i, gq, q, v);
+                i.i32_const(slot as i32).call(push);
             } else {
                 i.call(dec);
             }
@@ -197,19 +237,14 @@ pub(crate) fn emit_drop_shape_deep(
     releases(&mut i, false);
     i.local_get(block).call(F_FREE);
     i.global_get(gd).i32_const(1).i32_sub().global_set(gd);
-    // The outermost drop drains what the deep ones queued, one level each,
-    // at depth 1 so a drained drop never starts a drain of its own.
+    // The outermost drop drains what the deep ones queued — the call only
+    // when the queue holds something, so a shallow drop pays one length test
+    // (what the inline drain's first iteration paid) and no call.
     i.global_get(gd).i32_eqz().if_(BlockType::Empty);
-    i.i32_const(1).global_set(gd);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
     emit_queue_len(&mut i, gq);
-    i.i32_eqz().br_if(1);
-    emit_pop(&mut i, gq, 2, q, len);
-    i.call_indirect(0, drop_ty);
-    i.br(0);
+    i.if_(BlockType::Empty);
+    i.call(drain);
     i.end();
-    i.end();
-    i.i32_const(0).global_set(gd);
     i.end();
     i.else_();
     // Deep: the children's addresses are read before the block is freed.
