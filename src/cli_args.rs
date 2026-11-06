@@ -260,7 +260,10 @@ pub(crate) enum Commands {
     },
     /// Run tests
     Test {
-        /// Test file
+        /// Test file or directory. Without one, inside a project (an
+        /// almide.toml here): every .almd with a test block under the project
+        /// root, skipping dot directories, target/, node_modules/ and any
+        /// directory holding an .almideignore marker
         file: Option<String>,
         /// Filter test names by pattern
         #[arg(short = 'r', long)]

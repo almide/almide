@@ -666,20 +666,21 @@ pub(crate) fn struct_defs() -> String {
     RECS.with(|r| {
         let mut out = String::new();
         for (i, d) in r.borrow().iter().enumerate() {
-            if let Some(a) = d.alias {
-                out.push_str(&format!("type {} = {a};\n\n", struct_name(i as u16)));
+            let target = alias_target(d);
+            if let (Some(_), Some(t)) = (d.alias, &target) {
+                out.push_str(&format!("type {} = {t};\n\n", struct_name(i as u16)));
                 continue;
             }
-            if let Some((k, v)) = d.map_of {
-                out.push_str(&format!("/// `{}`\ntype {} = AlmideMap<{}, {}>;\n\n", d.name, struct_name(i as u16), owned_ty(k), owned_ty(v)));
+            if let (Some(_), Some(t)) = (d.map_of, &target) {
+                out.push_str(&format!("/// `{}`\ntype {} = {t};\n\n", d.name, struct_name(i as u16)));
                 continue;
             }
             if let Some(p) = d.option_of {
                 out.push_str(&format!("/// `{}`\ntype {} = Option<{}>;\n\n", d.name, struct_name(i as u16), owned_ty(p)));
                 continue;
             }
-            if let Some(e) = d.set_of {
-                out.push_str(&format!("/// `{}`\ntype {} = AlmideSet<{}>;\n\n", d.name, struct_name(i as u16), owned_ty(e)));
+            if let (Some(_), Some(t)) = (d.set_of, &target) {
+                out.push_str(&format!("/// `{}`\ntype {} = {t};\n\n", d.name, struct_name(i as u16)));
                 continue;
             }
             if let Some((o, e)) = d.result_of {

@@ -1,0 +1,13 @@
+// @contract: C-240
+// #4514: a `[:]` bound at a declared Map type that nothing ever reads. The
+// certified native render aliased the map's generated type to the runtime
+// `AlmideMap`, but took the runtime type's definition along only with a map
+// routine a body called, and no body calls one here: `almide check`
+// accepted the program and rustc rejected the native build (cannot find
+// type `AlmideMap`). wasm ran it. The render now takes along the definition
+// of every runtime type its type table names.
+fn main() -> Unit = {
+  let unused: Map[String, Bool] = [:]
+  let flag: Bool = true
+  println("flag = ${flag}")
+}

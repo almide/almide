@@ -1,19 +1,13 @@
-diff --git a/crates/almide-codegen/src/walker/statements_box_patterns.rs b/crates/almide-codegen/src/walker/statements_box_patterns.rs
-index af005d8b1..a6f2fa6c2 100644
---- a/crates/almide-codegen/src/walker/statements_box_patterns.rs
-+++ b/crates/almide-codegen/src/walker/statements_box_patterns.rs
-@@ -534,12 +534,12 @@ pub fn render_pattern_hinted(ctx: &RenderContext, pat: &IrPattern, subject: Opti
-         IrPattern::None => template_or(ctx, "pattern_none", &[], "None"),
-         IrPattern::Ok { inner } => {
-             let binding_s = render_pattern_hinted(ctx, inner, at(0).as_ref());
--            ctx.templates.render_with("pattern_ok", None, &[], &[("binding", binding_s.as_str())])
-+            ctx.templates.render_with("pattern_err", None, &[], &[("binding", binding_s.as_str())])
-                 .unwrap_or_else(|| format!("Ok(_)"))
+diff --git a/crates/almide-mir/src/render_native_op_families.rs b/crates/almide-mir/src/render_native_op_families.rs
+index f41eade3c..242b87e6e 100644
+--- a/crates/almide-mir/src/render_native_op_families.rs
++++ b/crates/almide-mir/src/render_native_op_families.rs
+@@ -257,7 +257,7 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError>
+             args,
+         } => {
+             tys.insert(*d, NTy::I64);
+-            line!("let {}: i64 = {}.is_err() as i64;", var(*d), var(args[0]));
++            line!("let {}: i64 = {}.is_ok() as i64;", var(*d), var(args[0]));
          }
-         IrPattern::Err { inner } => {
-             let binding_s = render_pattern_hinted(ctx, inner, at(1).as_ref());
--            ctx.templates.render_with("pattern_err", None, &[], &[("binding", binding_s.as_str())])
-+            ctx.templates.render_with("pattern_ok", None, &[], &[("binding", binding_s.as_str())])
-                 .unwrap_or_else(|| format!("Err(_)"))
-         }
-         IrPattern::Constructor { name, args } => render_pattern_constructor(ctx, name, args, subject),
+         Op::Prim {
+             kind: crate::PrimKind::ResOkScalar,

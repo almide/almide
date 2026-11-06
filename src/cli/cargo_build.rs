@@ -60,16 +60,17 @@ opt-level = 3
 lto = true
 codegen-units = 1
 "#, lib_name.replace('-', "_"));
-    let cargo_toml = build_cargo_toml(&cdylib_base, &generated_crate_deps(rs_code, native_deps));
-    std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
-        .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
+    let mut cargo_toml = build_cargo_toml(&cdylib_base, &generated_crate_deps(rs_code, native_deps));
 
     // Copy `native/*.rs` shims into src/ + inject `mod <stem>;`, then pull native
     // modules + `[native-deps]` from dependency packages — same wiring as
-    // `cargo_build_generated_with_native`.
+    // `write_generated_cargo_project`: every manifest edit is made in memory,
+    // then the manifest is written once (#4521).
     let mut lib_code = rs_code.to_string();
     let inputs = CrateInputs::collect(source_root)?;
-    inputs.apply(&mut lib_code, &src_dir, project_dir)?;
+    inputs.apply(&mut lib_code, &src_dir, &mut cargo_toml)?;
+    std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
+        .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
     std::fs::write(src_dir.join("lib.rs"), &lib_code)
         .map_err(|e| format!("failed to write lib.rs: {}", e))?;
 
@@ -258,8 +259,9 @@ fn write_generated_cargo_project(
     let mut final_code = rs_code.to_string();
 
     // The package's and its dependencies' native modules + dependency
-    // native-deps — exactly the inputs the cache key was computed from.
-    inputs.apply(&mut final_code, &src_dir, project_dir)?;
+    // native-deps — exactly the inputs the cache key was computed from. The
+    // manifest is edited in memory and written once, below (#4521).
+    inputs.apply(&mut final_code, &src_dir, &mut cargo_toml)?;
 
     // A v1 render's runtime part becomes a crate of its own, under the
     // runtime's profile (`cargo_toml::split_runtime_crate`).

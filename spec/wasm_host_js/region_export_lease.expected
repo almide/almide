@@ -1,0 +1,7 @@
+ready
+round trip: echo:hello
+an address holds until its export's next call
+an address handed out again holds one share
+10000 round trips without a release: memory settled
+a released lease ends early, and the export leases again
+releasing a superseded address traps

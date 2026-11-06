@@ -1,0 +1,35 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf.sh, #4503): n-queens
+// over List[List[Int]] accumulators, every step a self tail call that the
+// certified native render turns into a loop over heap carries — the board
+// walked by list.get / list.slice, the solutions prepended to an accumulator,
+// the next generation extended from the previous one. Before #4503 the loop
+// slots copied every board on entry and the prepend cloned every board each
+// round (1.47x the standard codegen's instructions).
+fn safe(row: Int, board: List[Int], dist: Int) -> Bool = if list.len(board) == 0 then true
+else {
+  let r = list.get(board, 0) ?? 0
+  if row == r or row == r + dist or row == r - dist then false
+  else safe(row, list.slice(board, 1, list.len(board)), dist + 1)
+}
+
+fn place(row: Int, board: List[Int], boards: List[List[Int]]) -> List[List[Int]] =
+  if row <= 0 then boards
+  else if safe(row, board, 1) then place(row - 1, board, [
+    [row] + board
+  ] + boards)
+  else place(row - 1, board, boards)
+
+fn grow(n: Int, acc: List[List[Int]], boards: List[List[Int]]) -> List[List[Int]] =
+  if list.len(boards) == 0 then acc
+  else grow(n, place(n, list.get(boards, 0) ?? [], acc), list.slice(boards, 1, list.len(boards)))
+
+fn solve(n: Int, k: Int) -> List[List[Int]] = if k == 0 then [
+  []
+]
+else grow(n, [], solve(n, k - 1))
+
+fn main() -> Unit = {
+  let n = int.parse("7") ?? 4
+  println(int.to_string(list.len(solve(n, n))))
+  println(int.to_string(list.len(solve(n - 1, n - 1))))
+}

@@ -870,6 +870,8 @@ test "description" {
 }
 ```
 
+`almide test` with no argument, inside a project (an `almide.toml` in the current directory), runs every `.almd` file holding a `test` block anywhere under the project root, `src/` included. It skips dot directories, `target/`, `node_modules/` and any directory that holds an `.almideignore` file. Name a file or directory to run just that.
+
 ### Testing effect fn error cases
 
 In test blocks, `effect fn` calls return `Result[T, String]` — no auto-unwrap. Use `!` for the value, or assert on `ok`/`err` directly:

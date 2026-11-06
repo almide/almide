@@ -293,7 +293,7 @@ fn slot_load(s: AddrSink<'_>, width: &u8, d: &ValueId, args: &[ValueId]) -> Resu
         }
     }
     if *width == 8 && matches!(bt, Some(NTy::Vec | NTy::VecRef)) {
-        if let Some(ix) = slot_index(st, &ad) {
+        if let Some(ix) = slot_index(&ad) {
             let (guard, slot) = bounds_guard(st, &ad, &ix);
             if let Some(g) = guard {
                 line!("{g}");
@@ -326,7 +326,7 @@ fn slot_load_handle(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bo
             return load_handle_rec_field(AddrSink { st, tys, out, indent }, d, ad, k, f);
         }
     }
-    if let (Some(e), Some(ix)) = (list_of(ty(tys, &ad.base)), slot_index(st, &ad)) {
+    if let (Some(e), Some(ix)) = (list_of(ty(tys, &ad.base)), slot_index(&ad)) {
         if e != NTy::I64 {
             let (guard, slot) = bounds_guard(st, &ad, &ix);
             if let Some(g) = guard {
@@ -343,7 +343,7 @@ fn slot_load_handle(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bo
             return Ok(true);
         }
     }
-    match (ty(tys, &ad.base), slot_index(st, &ad)) {
+    match (ty(tys, &ad.base), slot_index(&ad)) {
         (Some(NTy::VecStr | NTy::VecStrRef), Some(ix)) => {
             let (guard, slot) = bounds_guard(st, &ad, &ix);
             if let Some(g) = guard {
@@ -467,7 +467,7 @@ fn slot_store(s: AddrSink<'_>, args: &[ValueId]) -> Result<bool, LowerError> {
     if let (Some(NTy::Rec(i)), Some(k), None) = (ty(tys, &ad.base), rec_slot(&ad), list_of(ty(tys, &ad.base))) {
         return store_rec_field(AddrSink { st, tys, out, indent }, ad, v, i, k);
     }
-    let Some(ix) = slot_index(st, &ad) else {
+    let Some(ix) = slot_index(&ad) else {
         return Err(wall(format!("native: Store at {ad:?} — outside the slot algebra")));
     };
     store_list_slot(AddrSink { st, tys, out, indent }, ad, v, &ix)
@@ -745,8 +745,18 @@ fn enum_slot_lit(s: AddrSink<'_>, dst: &ValueId, elems: &[ValueId]) -> Result<bo
         return Err(wall("native: a heap element in an enum slot list"));
     }
     tys.insert(*dst, NTy::Rec(i));
+    let n = crate::render_native_rec::struct_name(i);
+    // A constant tag naming a payload-free case is that case: `from_slots` builds `with_tag(t)` and sets
+    // no field of it, through a slot list and a tag match (4% on nested_variant_tag_box).
+    let cases = crate::render_native_rec::enum_cases(i).unwrap_or_default();
+    let nullary = elems.first().filter(|t| !st.set_locals.contains(t)).and_then(|t| st.consts.get(t)).copied();
+    let nullary = nullary.filter(|&t| cases.iter().any(|(c, fs)| i64::from(*c) == t && fs.is_empty()));
+    if let Some(t) = nullary {
+        line!("let mut {}: {n} = {n}::C{t};", var(*dst));
+        return Ok(true);
+    }
     let items = elems.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ");
-    line!("let mut {}: {n} = {n}::from_slots(&[{items}]);", var(*dst), n = crate::render_native_rec::struct_name(i));
+    line!("let mut {}: {n} = {n}::from_slots(&[{items}]);", var(*dst));
     Ok(true)
 }
 

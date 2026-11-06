@@ -1,0 +1,23 @@
+// v1-vs-v0 shape bench: a recursive tree built and consumed in one
+// expression, `check(make(d))`, which both renders run as a region window
+// in the arena: the twin enums, the arena save and restore around the
+// window, and the twins' boxed fields allocated in the region.
+type Tree = Leaf | Node(Tree, Tree)
+
+fn make(depth: Int) -> Tree =
+  if depth == 0 then Leaf else Node(make(depth - 1), make(depth - 1))
+
+fn check(t: Tree) -> Int = match t {
+  Leaf => 1,
+  Node(l, r) => check(l) + check(r) + 1,
+}
+
+fn main() -> Unit = {
+  var total = 0
+  var i = 0
+  while i < 8 {
+    total = total + check(make(14))
+    i = i + 1
+  }
+  println(int.to_string(total))
+}

@@ -649,7 +649,7 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
 
 pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool, show_output: bool) {
     crate::resolve::parse_cache::enable();
-    let test_files: Vec<String> = discover_test_files(file, &[]);
+    let test_files: Vec<String> = discover_test_files(file);
     let scratch = std::sync::Arc::new(TestScratch::new());
 
     // Parallel: each file's compile+run is independent and rustc/cargo-free,

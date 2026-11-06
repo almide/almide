@@ -1,0 +1,1 @@
+# Marker: `almide test` sweeps never enter this directory (#4530). Its .almd files are Rust-test fixtures (deliberately broken diagnostics, snapshot inputs), not a suite.

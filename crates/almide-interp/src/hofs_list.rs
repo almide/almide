@@ -12,6 +12,13 @@ impl<'a> Interpreter<'a> {
     fn recv_items(args: &[Value]) -> Result<Vec<Value>, Flow> {
         match args.first().and_then(|v| v.as_iter_items()) {
             Some(items) => Ok(items),
+            // A Range that as_iter_items refuses is past the interp cap: the
+            // backends either take the C-197 abort or walk it counted
+            // (`MIN..<MAX |> list.fold`, #4538). Either way an answer from
+            // here would be a wrong vote — abstain, as list.len does.
+            None if matches!(args.first(), Some(Value::Range { .. })) => Err(Flow::Unsupported(
+                "range materialization beyond the interp cap (both backends take the C-197 resource path or count the range)".into(),
+            )),
             None => Err(Flow::Abort("internal: HOF receiver not iterable".into())),
         }
     }
@@ -201,6 +208,27 @@ impl<'a> Interpreter<'a> {
 
     fn hof_fold(&mut self, args: &[Value]) -> Flow {
         // fold(receiver, init, (acc, x) => ...)
+        // An exclusive range is walked, never built, as both backends count
+        // a fold's range head (#2045, #3810): `i64::MIN..<i64::MAX |>
+        // list.fold` reads its elements one at a time, so a callback that
+        // aborts on the fourth one aborts here too (#4538).
+        if let Some(Value::Range { start, end, inclusive: false }) = args.first() {
+            let (start, end) = (*start, *end);
+            let mut acc = match args.get(1) {
+                Some(v) => v.clone(),
+                None => return Flow::Abort("internal: fold missing init".into()),
+            };
+            let clo = match Self::recv_closure(args, 2) {
+                Ok(c) => c,
+                Err(f) => return f,
+            };
+            let mut x = start;
+            while x < end {
+                acc = val!(self.apply_closure(&clo, vec![acc, Value::Int(x)]));
+                x += 1;
+            }
+            return Flow::val(acc);
+        }
         let items = match Self::recv_items(args) {
             Ok(i) => i,
             Err(f) => return f,

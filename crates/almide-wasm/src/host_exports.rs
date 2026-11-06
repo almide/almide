@@ -86,6 +86,10 @@ pub enum ExportRet {
     /// memory's address width. The host holds one share of the block per
     /// address until it hands the address to `__region_release`.
     Region,
+    /// A Region declared `@export(wasm, "sym", returns: address)` (#4519):
+    /// the adapter's one result is the view's data address in the memory's
+    /// address width, 0 for an empty Region. Ownership is `Region`'s.
+    RegionAddress,
 }
 
 /// Records nest at most this deep on the boundary; a deeper (or recursive)

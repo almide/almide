@@ -43,6 +43,23 @@ pub(crate) fn range_last(start: i64, end: i64, inclusive: bool) -> Option<i64> {
     (start <= last).then_some(last)
 }
 
+/// The element count of the integer range `start..end` / `start..=end`, in
+/// u128 so the 2^64 of `i64::MIN..=i64::MAX` is exact.
+pub(crate) fn range_len(start: i64, end: i64, inclusive: bool) -> u128 {
+    match range_last(start, end, inclusive) {
+        Some(last) => (i128::from(last) - i128::from(start) + 1) as u128,
+        None => 0,
+    }
+}
+
+/// Whether building the range as a list asks for more memory than any
+/// machine has: 8-byte slots past the 2^48-byte line `prim.alloc_*` already
+/// votes as C-197's out-of-memory abort (dispatch_heap.rs). Below it a
+/// backend may still succeed, so the interp abstains there instead.
+pub(crate) fn range_beyond_any_machine(start: i64, end: i64, inclusive: bool) -> bool {
+    range_len(start, end, inclusive) >= (1u128 << 45)
+}
+
 impl std::fmt::Debug for Closure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<closure/{}>", self.params.len())
