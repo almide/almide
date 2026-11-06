@@ -642,11 +642,10 @@ pub(crate) fn emit_drop_fn(ti: u32) -> Function {
 
 /// The signatures assembly promises for the rc-glue helpers (#2010).
 pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
-    if matches!(h, Helper::IncEntries { .. } | Helper::DeepDropPush { .. }) {
-        return Some(vec![ValType::I32, ValType::I32]);
-    }
-    if matches!(h, Helper::DeepDropDrain { .. }) {
-        return Some(Vec::new());
+    match h {
+        Helper::IncEntries { .. } | Helper::DeepDropPush { .. } => return Some(vec![ValType::I32, ValType::I32]),
+        Helper::DeepDropDrain { .. } => return Some(Vec::new()),
+        _ => {}
     }
     matches!(
         h,
@@ -682,8 +681,7 @@ pub(crate) fn helper_result(h: &Helper) -> Option<ValType> {
         | Helper::DropEnv { .. }
         | Helper::DropFn { .. }
         | Helper::DropCell { .. }
-        | Helper::DeepDropPush { .. }
-        | Helper::DeepDropDrain { .. }
+        | Helper::DeepDropPush { .. } | Helper::DeepDropDrain { .. }
         | Helper::DropHttpCall => None,
         _ => Some(ValType::I32),
     }
