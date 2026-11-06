@@ -86,7 +86,9 @@ pub struct EffectValueViolation {
 pub fn effect_value_violations(program: &IrProgram) -> Vec<EffectValueViolation> {
     let Solved { g, ix, paths } = solve_program(program);
     let mut out = Vec::new();
-    for info in &ix.fns {
+    // NEGATIVE CONTROL (#4522): E109 dropped entirely.
+    #[allow(clippy::never_loop)]
+    for info in ix.fns.iter().take(0) {
         let pure = info.func.is_none_or(|f| !f.is_effect);
         if !pure || g.nodes[info.own].value.cats & graph::EFFECT_FN == 0 {
             continue;
