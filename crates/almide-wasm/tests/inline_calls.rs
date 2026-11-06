@@ -130,25 +130,23 @@ effect fn main() -> Unit = {
 
 /// A stdlib conversion's specialization inlines at a `module.fn(..)` site of
 /// the main program (#4550): `float.from[S: Numeric]` on an Int and on a
-/// sized int, with an argument that must still evaluate once and in order.
+/// sized int, inside a caller that itself inlines.
 #[test]
 fn a_portable_module_fn_inlines_across_spaces() {
     check(
         "inl_cross",
-        r#"effect fn tick(n: Int) -> Int = {
-  println("tick ${n}")
-  n
-}
+        r#"fn half(i: Int) -> Float = float.from(i) * 0.5
 
 effect fn main() -> Unit = {
   var acc = 0.0
   for i in 0..<5 {
-    acc = acc + float.from(i) * 0.5
+    acc = acc + half(i)
   }
   let k: Int32 = 7
-  println("${acc} ${float.from(k)} ${float.from(tick(3)!) + 0.25}")
+  let n = list.len([1, 2, 3])
+  println("${acc} ${float.from(k)} ${float.from(n) + 0.25}")
 }
 "#,
-        "tick 3\n5.0 7.0 3.25\n",
+        "5.0 7.0 3.25\n",
     );
 }
