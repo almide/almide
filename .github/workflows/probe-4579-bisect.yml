@@ -1,0 +1,35 @@
+# Throwaway bisect workflow for #4579 (branch probe-4579-bisect only; never merged).
+name: probe-4579-bisect
+on:
+  push:
+    branches: [probe-4579-bisect]
+permissions: read-all
+jobs:
+  at:
+    name: at ${{ matrix.sha }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sha: ['159f90671cd982e0d843a48df2bcd4d994d14d6a', '482401cbcd8c94159de2ab931b0904eb1c8469e2', '712325f69eaa0a7dfc5d4cda5a220e03af809bbb', '0eedbf29ad820c3f3d55db1a19af21f748fdb3a8', '8e1b1d99f5b9e7e88495f37eb6d548a0ecd91fd6', '5dcdaa751abf220af02014a37638d7eb7a4f4c79', '6e9127ee5564e450948c8a371dba54cb313105e9', '7daab0b8335ee48ed4e8a3510acdec9a04af2f1a', 'd16bdc95e59d617e6a0d834e1b7df819c5b47fe7', 'a842809f5af3850579956cbfaa0e8eb5bfb36aa7', '8e1cc23f0b9a2a45cfd0ebf2a68475ee1a86af99', 'b2c9de88d8dbe7eefa0fa474493852f2431e40e4', '6f11802f8812eb41562d431d38370fc77c044ffc', '1df539147f4eed04ac5f6ae88351bfc7a9fda6ea', '0620678b9ba8c070af5490207ec8118220e9ab08', 'ff1e898f1d5521414d5cae6eb1ce8621f64143f2', 'b22a080c700157afebb298f1920a62b225309cf7', 'f63cbd587a9ed8980e8ac52665369665ccdfd242', 'fc3fd606aea3fa6f39577e2c7c5b13f2d77bc4e8', '42219988bb928ba3fdae7cedc268a9bdab70f8cf']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: probe
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.sha }}
+          path: src
+      - name: toolchain
+        run: |
+          tc=$(grep -m1 -oE 'RUST_TOOLCHAIN: "[0-9.]+"' src/.github/workflows/ci.yml | grep -oE '[0-9.]+')
+          echo "TC=$tc" >> "$GITHUB_ENV"; echo "toolchain $tc"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.TC }}
+      - run: cargo build --release --bin almide
+        working-directory: src
+      - name: probe
+        run: |
+          git -C src log -1 --format='%h %ci %s'
+          ALMIDE_WALL_REASON=1 src/target/release/almide test probe/.github/probe-4579/c_lex_greatest.almd --target wasm 2>&1 | grep -E 'rendered|declin|Unsupported|wall|passed|failed' | cut -c1-300 | head -8
