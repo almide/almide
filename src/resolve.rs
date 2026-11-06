@@ -381,10 +381,7 @@ fn load_bundled_module(name: &str, source: &'static str, ctx: &mut ResolveCtx) -
 fn load_requested_root(project_root: Option<&PathBuf>, ctx: &mut ResolveCtx) -> Result<(), String> {
     let Some(importer) = ctx.root_requested_by.clone() else { return Ok(()) };
     let root_loaded = |ctx: &ResolveCtx| ctx.loaded.iter().any(|m| m.3);
-    if !root_loaded(ctx) {
-        resolve_self_import(&[crate::intern::sym("self")], None, project_root, ctx)
-            .map_err(|e| format!("{e}\n  note: '{importer}' imports `self`, the package root"))?;
-    }
+    let _ = project_root; // negative control: the root load is removed, the post-condition stays
     if !root_loaded(ctx) {
         return Err(format!(
             "cannot resolve 'import self' in '{importer}': the package root was not loaded\n  hint: `import self` names src/mod.almd; a submodule's `self` never names the submodule itself"
