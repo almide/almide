@@ -720,7 +720,7 @@ fn rewrite_unwrap_or_calls(program: &mut ast::Program, built: &mut std::collecti
 /// parenthesized when the parser's own binding powers say it would not
 /// re-parse in place (`almide::parser::grouping`).
 fn group_built_operators(program: &mut ast::Program, built: &std::collections::HashSet<ast::ExprId>) {
-    use almide::parser::grouping::{needs_parens, operand_slots_mut};
+    use almide::parser::grouping::{needs_parens_in_every_dialect as needs_parens, operand_slots_mut};
     if built.is_empty() {
         return;
     }

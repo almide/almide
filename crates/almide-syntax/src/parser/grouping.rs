@@ -119,6 +119,17 @@ fn is_range(tt: TokenType) -> bool {
     matches!(tt, TokenType::DotDotLt | TokenType::DotDotDot | TokenType::DotDot | TokenType::DotDotEq)
 }
 
+/// Whether `expr` is self-delimited: a literal, a name, a bracketed form, a
+/// postfix chain (#4531's regrouping pre-filter).
+pub fn is_closed(expr: &Expr) -> bool {
+    matches!(level(expr), Level::Closed)
+}
+
+/// Whether `expr` is an infix node of an operator other than `??`.
+pub fn is_infix_other_than_coalesce(expr: &Expr) -> bool {
+    matches!(level(expr), Level::Infix(tt) if tt != TokenType::QuestionQuestion)
+}
+
 /// Whether `expr` runs to the right with no closing token (`if`, `match`, a
 /// lambda, …): in a RIGHT operand it takes everything after it under any
 /// operator table, so its grouping cannot depend on the table.
@@ -154,6 +165,23 @@ pub fn needs_parens(child: &Expr, slot: Slot) -> bool {
             }
         }
     }
+}
+
+/// [`needs_parens`], and also where the pre-16 grammar (#4531) would read the
+/// text differently: there `??` bound tighter than every binary operator, so
+/// its value had to be a postfix chain and its fallback a prefix expression.
+/// A tool that BUILDS a `??` (`almide fix` turning `option.unwrap_or(x, d)`
+/// into `x ?? d`) groups with this, so its output means one thing in every
+/// dialect and is never an E120 site.
+pub fn needs_parens_in_every_dialect(child: &Expr, slot: Slot) -> bool {
+    needs_parens(child, slot)
+        || match slot {
+            Slot::InfixLeft(TokenType::QuestionQuestion) => !matches!(level(child), Level::Closed),
+            Slot::InfixRight(TokenType::QuestionQuestion) => {
+                matches!(level(child), Level::Infix(tt) if tt != TokenType::QuestionQuestion)
+            }
+            _ => false,
+        }
 }
 
 /// The operand children of `expr` that sit next to an operator, with the slot

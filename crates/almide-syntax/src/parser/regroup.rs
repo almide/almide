@@ -101,9 +101,36 @@ pub fn reassociate_pipe_coalesce(program: &mut Program) {
 /// differ from the pre-16 parse of the same `tokens`, by the `??` token's
 /// position. Only the innermost differing `??` of a nest is named: an outer
 /// one whose own operands did not move differs only through it.
-pub fn regrouped_sites(current: &Program, tokens: Vec<Token>) -> Vec<Span> {
-    let Some((legacy, _)) = parse_legacy_tokens(tokens) else { return Vec::new() };
+pub fn regrouped_sites(current: &mut Program, tokens: &[Token]) -> Vec<Span> {
+    if !may_regroup(current) {
+        return Vec::new();
+    }
+    let Some((legacy, _)) = parse_legacy_tokens(tokens.to_vec()) else { return Vec::new() };
     diff_sites(current, &legacy)
+}
+
+/// Whether some `??` of a current-grammar tree COULD read differently under
+/// the pre-16 grammar — a cheap superset test that spares the second parse
+/// for the common spellings. The pre-16 `??` took the postfix chain right
+/// before it and a prefix expression after it, so a `??` whose value is a
+/// closed form (a name, a call, a postfix chain, a parenthesised or bracketed
+/// form) or a pipe into a closed stage (ADR-0005 D6 re-associated that one),
+/// and whose fallback is not an infix form other than another `??`, reads
+/// alike under both grammars. `&mut` only because the walker is the mutable
+/// one; nothing is changed.
+fn may_regroup(program: &mut Program) -> bool {
+    use super::grouping::{is_closed, is_infix_other_than_coalesce};
+    let mut found = false;
+    ast::visit_exprs_mut(program, &mut |e: &mut Expr| {
+        if found {
+            return;
+        }
+        let ExprKind::UnwrapOr { expr, fallback } = &e.kind else { return };
+        let value_alike = is_closed(expr)
+            || matches!(&expr.kind, ExprKind::Pipe { right, .. } if is_closed(right));
+        found = !value_alike || is_infix_other_than_coalesce(fallback);
+    });
+    found
 }
 
 /// [`regrouped_sites`] between two parses already in hand.

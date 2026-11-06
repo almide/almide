@@ -80,10 +80,8 @@ impl Parser {
             regrouped: Vec::new(),
         };
         // #4531: the pre-16 reading is only worth computing when the file has
-        // a `??` (the one operator whose level moved). The tokens are taken
-        // BEFORE the parse, which respells a few in place.
-        let regroup_tokens = (!self.legacy_grouping && super::regroup::mentions_coalesce(&self.tokens))
-            .then(|| self.tokens.clone());
+        // a `??` (the one operator whose level moved).
+        let mentions_coalesce = !self.legacy_grouping && super::regroup::mentions_coalesce(&self.tokens);
 
         let (mut pending, mut gap_blanks) = self.skip_newlines_collect_comments();
 
@@ -238,12 +236,14 @@ impl Parser {
         // one: counting it as parse time would halve the parse speed the
         // compile-time ratchet divides by on every file with a `??`.
         drop(phase);
-        if let Some(tokens) = regroup_tokens.filter(|_| self.errors.is_empty()) {
-            if super::regroup::predates_regrouping(program.dialect.map(|d| d.epoch)) {
-                let _check = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
-                program.regrouped =
-                    super::regroup::regrouped_sites(&program, tokens);
-            }
+        // The parse respelled a few tokens in place (`||` as `or`), which
+        // the pre-16 grammar reads the same way.
+        if mentions_coalesce
+            && self.errors.is_empty()
+            && super::regroup::predates_regrouping(program.dialect.map(|d| d.epoch))
+        {
+            let _check = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
+            program.regrouped = super::regroup::regrouped_sites(&mut program, &self.tokens);
         }
         Ok(program)
     }
