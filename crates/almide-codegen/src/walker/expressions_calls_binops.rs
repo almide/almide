@@ -321,7 +321,7 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
 fn render_call_expr(ctx: &RenderContext, callee: &str, args: &[IrExpr]) -> String {
     // A user fn's `mut` param bound to a global place writes through the
     // global's cell (#2946).
-    if let Some(rendered) = render_call_through_global_places(ctx, callee, args, false, true, &|a| render_user_call_arg(ctx, a)) {
+    if let Some(rendered) = render_call_through_global_places(ctx, callee, args, false, GlobalPlaceCallee::User, &|a| render_user_call_arg(ctx, a)) {
         return rendered;
     }
     // A closure ARG is already `Rc<dyn Fn>`: the box-by-default pass boxed every
@@ -958,15 +958,24 @@ fn render_call_through_global_places(
     callee: &str,
     args: &[IrExpr],
     allow_clone_at_0: bool,
-    runs_user_code: bool,
+    kind: GlobalPlaceCallee,
     render_arg: &dyn Fn(&IrExpr) -> String,
 ) -> Option<String> {
     let places: Vec<Option<(String, String)>> = args.iter().enumerate()
         .map(|(i, a)| global_mut_place(ctx, a, allow_clone_at_0 && i == 0))
         .collect();
     if places.iter().all(Option::is_none) { return None; }
-    if runs_user_code || args.iter().any(|a| matches!(a.ty, almide_lang::types::Ty::Fn { .. })) {
-        return Some(render_call_with_copied_global_places(callee, args, &places, render_arg));
+    let closure_arg = args.iter().any(|a| matches!(a.ty, almide_lang::types::Ty::Fn { .. }));
+    match kind {
+        GlobalPlaceCallee::User => return Some(render_call_with_copied_global_places(callee, args, &places, render_arg)),
+        _ if closure_arg => return Some(render_call_with_copied_global_places(callee, args, &places, render_arg)),
+        GlobalPlaceCallee::Stdlib => {
+            return Some(match render_call_with_taken_global_places(callee, args, &places, render_arg) {
+                Some(taken) => taken,
+                None => render_call_with_copied_global_places(callee, args, &places, render_arg),
+            });
+        }
+        GlobalPlaceCallee::Runtime => {}
     }
     let mut cells: Vec<String> = Vec::new();
     let rendered: Vec<String> = args.iter().zip(&places).map(|(a, place)| match place {
@@ -983,6 +992,115 @@ fn render_call_through_global_places(
         out = format!("{static_name}.with(|__almide_gc{k}| {out})");
     }
     Some(out)
+}
+
+/// Who a call with a global `&mut` place reaches ([`render_call_through_global_places`]).
+#[derive(Clone, Copy, PartialEq)]
+enum GlobalPlaceCallee {
+    /// A native runtime fn (raw signature, runs no user code): the call runs
+    /// inside the global's cell.
+    Runtime,
+    /// A bundled stdlib fn with an Almide body whose arguments cannot carry
+    /// user code in: it names no user global and runs no user fn, so it
+    /// cannot observe the global while the call holds its block.
+    Stdlib,
+    /// Anything that may run user code: copy in, write back.
+    User,
+}
+
+/// Does `symbol` (the runtime spelling `almide_rt_<module>_<fn>`) name a
+/// bundled stdlib fn with an Almide body? Decided by the declaration.
+fn stdlib_symbol_has_almide_body(symbol: &str) -> bool {
+    let Some(rest) = symbol.strip_prefix("almide_rt_") else { return false };
+    almide_lang::stdlib_info::BUNDLED_MODULES.iter().any(|m| {
+        rest.strip_prefix(m)
+            .and_then(|r| r.strip_prefix('_'))
+            .is_some_and(|func| almide_ir::mut_args::stdlib_fn_has_almide_body(m, func))
+    })
+}
+
+/// A type no user fn can hide in: scalars, text, bytes and the builtin
+/// containers of such — never a function, a record, a variant or a type
+/// variable (a user type's protocol impl could run user code).
+fn inert_arg_ty(t: &Ty) -> bool {
+    match t {
+        Ty::Applied(_, args) | Ty::Tuple(args) => args.iter().all(inert_arg_ty),
+        Ty::Fn { .. } | Ty::Named(..) | Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. } => false,
+        Ty::TypeVar(_) | Ty::Union(_) | Ty::Unknown | Ty::Never => false,
+        _ => true,
+    }
+}
+
+/// The TAKE form of a call with global `&mut` places, for a callee that
+/// cannot observe the global ([`GlobalPlaceCallee::Stdlib`], #4550). The
+/// copy-in form cloned the whole block per call: `bytes.put_f32_le(buf, …)`
+/// on a module-level buffer copied every byte of it for a 4-byte write. Here
+/// the place's value moves out of its cell (left empty for the call, which
+/// cannot read it), the callee writes it in place, and it moves back:
+///
+/// `({ let mut __almide_gp0 = G.with(|__almide_gc| std::mem::take(std::rc::Rc::make_mut(&mut *__almide_gc.borrow_mut())));
+///     let __almide_gr = f(&mut __almide_gp0, a);
+///     G.with(|__almide_gc| *std::rc::Rc::make_mut(&mut *__almide_gc.borrow_mut()) = (__almide_gp0).into());
+///     __almide_gr })`
+///
+/// `Rc::make_mut` keeps value semantics: a snapshot sharing the block
+/// (`let snap = g`) still makes the take copy it first. Only a place whose
+/// value has an empty default (Bytes, a list) is taken, and one global at
+/// most once; `None` otherwise, and the caller copies. A sibling argument
+/// that reads the global never sees it empty: `BorrowInsertion`'s hoist
+/// (`HoistCx::must_hoist`) has already moved it in front of the whole call,
+/// as for the two forms below.
+fn render_call_with_taken_global_places(
+    callee: &str,
+    args: &[IrExpr],
+    places: &[Option<(String, String)>],
+    render_arg: &dyn Fn(&IrExpr) -> String,
+) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    let mut taken: Vec<&str> = Vec::new();
+    for (a, place) in args.iter().zip(places) {
+        let Some((static_name, _)) = place else { continue };
+        let ty = match &a.kind {
+            IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } => &inner.ty,
+            _ => &a.ty,
+        };
+        if !matches!(ty, Ty::Bytes | Ty::Applied(TC::List, _)) || taken.contains(&static_name.as_str()) {
+            return None;
+        }
+        taken.push(static_name);
+    }
+    let mut take_out: Vec<String> = Vec::new();
+    let mut put_back: Vec<String> = Vec::new();
+    let rendered: Vec<String> = args.iter().zip(places).map(|(a, place)| match place {
+        Some((static_name, suffix)) => {
+            let k = take_out.len();
+            let ty = match &a.kind {
+                IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } => &inner.ty,
+                _ => &a.ty,
+            };
+            let cell = "std::rc::Rc::make_mut(&mut *__almide_gc.borrow_mut())";
+            let read = if suffix.is_empty() {
+                rc_cow_result_glue(format!("{static_name}.with(|__almide_gc| std::mem::take({cell}))"), ty)
+            } else {
+                format!("{static_name}.with(|__almide_gc| std::mem::take(&mut {cell}{suffix}))")
+            };
+            take_out.push(format!("let mut __almide_gp{k} = {read};"));
+            put_back.push(if suffix.is_empty() {
+                format!("{static_name}.with(|__almide_gc| *{cell} = (__almide_gp{k}).into());")
+            } else {
+                format!("{static_name}.with(|__almide_gc| {cell}{suffix} = __almide_gp{k});")
+            });
+            format!("&mut __almide_gp{k}")
+        }
+        None => render_arg(a),
+    }).collect();
+    Some(format!(
+        "({{ {} let __almide_gr = {}({}); {} __almide_gr }})",
+        take_out.join(" "),
+        callee,
+        rendered.join(", "),
+        put_back.join(" "),
+    ))
 }
 
 /// The copy-in / write-back form of a call with global `&mut` places (#2960),
@@ -1148,9 +1266,17 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
     }
     let allow_clone = crate::pass_licm::is_inplace_mutator(symbol.as_str());
     // A user-module fn normalized into the runtime spelling runs user code.
-    let runs_user_code = !rc_cow_symbol_is_native_runtime(symbol.as_str());
+    // A bundled stdlib fn with an Almide body does not, unless an argument can
+    // carry it in (#4550): it takes the global's block for the call.
+    let callee = if rc_cow_symbol_is_native_runtime(symbol.as_str()) {
+        GlobalPlaceCallee::Runtime
+    } else if stdlib_symbol_has_almide_body(symbol.as_str()) && args.iter().all(|a| inert_arg_ty(&a.ty)) {
+        GlobalPlaceCallee::Stdlib
+    } else {
+        GlobalPlaceCallee::User
+    };
     if let Some(rendered) = render_call_through_global_places(ctx, symbol.as_str(), args, allow_clone,
-        runs_user_code, &|a| render_runtime_call_arg_owned(ctx, symbol, a))
+        callee, &|a| render_runtime_call_arg_owned(ctx, symbol, a))
     {
         return rendered;
     }

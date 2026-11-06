@@ -687,6 +687,80 @@ for leg in ("native", "wasm"):
 sys.exit(1 if failed else 0)
 PYRX
 
+# FRAME BUFFER RELATION (#4550). An immediate-mode renderer writes each
+# frame's instances into one byte buffer kept in a module-level `var`
+# (framebuf/framebuf.almd): 20 `bytes.put_f32_le` per quad. framebuf-global
+# writes that module-level buffer from a helper fn per quad, framebuf-local
+# the same bytes into a local buffer inline; the relation is global per-frame time over
+# local per-frame time (the rows run different frame counts, so each min is
+# divided by its own). 0.69.0 copied the whole buffer on EVERY 4-byte write
+# through the module-level var — the stdlib's self-hosted `put_*` took the
+# #2960 copy-in / write-back form natively — and a downstream editor's frame
+# went from 32 ms to 143 ms. A ceiling per leg: the defect is a whole buffer
+# per write (an 80 KB copy for a 4-byte store), hundreds of times over either
+# ceiling. What remains natively — the take and put-back of the buffer around
+# each call, one small allocation, against a store LLVM keeps in registers for
+# the local row — is recorded in the baseline, not hidden in the ceiling.
+FRAMEBUF_CEILING_NATIVE=40
+fb_out=$(mktemp -t perf-ratio-framebuf.XXXXXX.json)
+trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+python3 research/benchmark/perf/bench.py \
+  --quick --runs "$RUNS" --legs native,wasm \
+  --bench framebuf-global,framebuf-local \
+  --label ratchet-framebuf --out "$fb_out"
+python3 - "$fb_out" "$BASELINE_FILE" "$FRAMEBUF_CEILING_NATIVE" "$MIN_SECONDS" <<'PYFB'
+import json, sys
+sys.path.insert(0, "research/benchmark/perf")
+from bench import QUICK_ARGS
+
+out_path, baseline_path, ceiling_native, min_s = sys.argv[1:5]
+ceilings = {"native": float(ceiling_native)}
+min_s = float(min_s)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+
+def frames(bench):
+    return int(QUICK_ARGS[bench].split(":")[1])
+
+failed = False
+for leg in ("native", "wasm"):
+    key = f"framebuf-{leg}"
+    if key not in baseline:
+        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the frame buffer relation was "
+                 "added without its recorded value; add the line on purpose.")
+    g = data["framebuf-global"]["variants"][f"framebuf-global/{leg}"]["min"]
+    l = data["framebuf-local"]["variants"][f"framebuf-local/{leg}"]["min"]
+    if l < min_s:
+        sys.exit(f"::error::perf-ratio: framebuf-local/{leg} min {l}s is under the {min_s}s floor — "
+                 "grow the QUICK_ARGS entry instead of gating on spawn noise.")
+    ratio = (g / frames("framebuf-global")) / (l / frames("framebuf-local"))
+    ceiling = ceilings.get(leg)
+    if ceiling is None:
+        print(f"perf-ratio: {key:20s} {ratio:.3f}x the local buffer per frame "
+              f"(reported, recorded {baseline[key]:.3f}x)")
+        continue
+    if ratio > ceiling:
+        print(f"::error::perf-ratio: a frame written into a module-level buffer costs {ratio:.3f}x the "
+              f"same frame written into a local one on the {leg} leg (ceiling {ceiling:.2f}x, {g:.3f}s for "
+              f"{frames('framebuf-global')} frames vs {l:.3f}s for {frames('framebuf-local')}, recorded "
+              f"{baseline[key]:.3f}x). A `mut` argument that is a module-level `var` is being copied on "
+              "every call, which is how #4550 shipped in 0.69.0. Look at how a stdlib `mut`-param call "
+              "on a global place renders (render_call_with_taken_global_places in "
+              "crates/almide-codegen/src/walker/expressions_calls_binops.rs, native) and whether the "
+              "call site moves the global in (try_move_in_global in "
+              "crates/almide-wasm/src/writeback_move.rs, wasm). Do not raise the ceiling.")
+        failed = True
+        continue
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x the local buffer per frame "
+          f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
+sys.exit(1 if failed else 0)
+PYFB
+
 # BTREES RELATION (rc4, owner ruling 2026-11-05). btrees and treealloc build
 # and walk the same trees (2^19 + 2^19 nodes per round, 24 x depth 19 against
 # 12 x depth 20); btrees only takes its depth as a literal, so it renders whole

@@ -117,6 +117,12 @@ wordfreq-group-native-wasm 0.39
 # wasm 1.065 (the wasm leg keeps no cache and reads the same with or without it).
 regexcycle-native 1.03
 regexcycle-wasm 1.07
+# FRAME BUFFER (#4550): framebuf-global per-frame min / framebuf-local
+# per-frame min, per leg. The gate fails on FRAMEBUF_CEILING_* in
+# check-perf-ratio.sh, never on these values. Before the fix (0.69.0,
+# reduction of the same writes on the ubuntu runner): native ~1000x, wasm ~60x.
+framebuf-native 7.0
+framebuf-wasm 1.0
 treealloc 0.343
 # btrees (rc4): treealloc's program with the depth a literal and no argument
 # read, so it renders whole on the certified native leg, region window
