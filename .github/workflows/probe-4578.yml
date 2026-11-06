@@ -28,6 +28,10 @@ jobs:
           save-if: false
       - run: git log --oneline -3
       - run: cargo build --release --bin almide
+      - name: wasmtime
+        run: |
+          curl -sSfL --retry 5 -o /tmp/wt.tar.xz https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz
+          tar xf /tmp/wt.tar.xz -C /tmp && echo "/tmp/wasmtime-v50.0.1-x86_64-linux" >> "$GITHUB_PATH"
       - name: Probes
         run: bash .github/probe-4578/run.sh "$PWD/target/release/almide" .github/probe-4578/t
   released:
@@ -49,5 +53,9 @@ jobs:
           mkdir -p rel && cd rel
           gh release download ${{ matrix.version }} -R almide/almide -p almide-linux-x86_64.tar.gz
           tar -xzf almide-linux-x86_64.tar.gz
+      - name: wasmtime
+        run: |
+          curl -sSfL --retry 5 -o /tmp/wt.tar.xz https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz
+          tar xf /tmp/wt.tar.xz -C /tmp && echo "/tmp/wasmtime-v50.0.1-x86_64-linux" >> "$GITHUB_PATH"
       - name: Probes
         run: bash .github/probe-4578/run.sh "$(find "$PWD/rel" -name almide -type f | head -1)" .github/probe-4578/t

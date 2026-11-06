@@ -1,0 +1,6 @@
+fn greatest[A](names: List[String], tag: A) -> String? =
+  names |> list.fold(none, (best, n) => match best {
+    none => some(n),
+    some(b) => if n > b then some(n) else some(b),
+  })
+test "g" { assert_eq(greatest(["b", "c", "a"], 1), some("c")) }
