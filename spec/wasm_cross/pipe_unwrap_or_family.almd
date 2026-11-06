@@ -1,10 +1,11 @@
 // @contract: C-218
-// ADR-0005 D6 (#1107): `??` applied to a PIPE stage. The parser binds `??`
-// tighter than `|>`, so `xs |> f(a) ?? d` is `Pipe(xs, UnwrapOr(f(a), d))`;
-// the checker re-associates it to `UnwrapOr(f(xs, a), d)` and annotates the
-// piped operand with its RESOLVED type (#1127) BEFORE the lowering runs its
-// pipe transform, so the lowering picks the ok/err or some/none match from
-// that annotation instead of guessing Option. Through 0.53.6 the guess was
+// ADR-0005 D6 (#1107): `??` applied to a PIPE's result. Since dialect 16
+// (#4531) `??` is an infix level below `|>`, so the parser itself reads
+// `xs |> f(a) ?? d` as `UnwrapOr(Pipe(xs, f(a)), d)` and the lowering picks
+// the ok/err or some/none match from the pipe's checked type. (Through
+// dialect 15 `??` bound tighter than `|>` and the checker re-associated
+// `Pipe(xs, UnwrapOr(f(a), d))`, annotating the piped operand with its
+// RESOLVED type, #1127.) Through 0.53.6 the guess was
 // wrong for a Result operand: native emitted an Option-shaped match over a
 // Result (rustc E0308, build red) and the wasm leg read the Result block as
 // an Option — `["1", "x"] |> list.try_map(parse) ?? [0]` printed a list of
