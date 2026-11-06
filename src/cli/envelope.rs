@@ -41,6 +41,11 @@ pub enum Shape {
     Text,
 }
 
+/// The hint of a row made from an error's text rather than from a
+/// structured diagnostic.
+pub const UNSTRUCTURED_HINT: &str =
+    "the command stopped before it could report a structured diagnostic; `message` is its error text";
+
 /// The envelope as one JSON value.
 pub fn envelope(ok: bool, diagnostics: Vec<Value>, result: Value) -> Value {
     json!({
@@ -57,9 +62,10 @@ pub fn print(ok: bool, diagnostics: Vec<Value>, result: Value) {
 }
 
 /// An error that carries no structured diagnostic, as a row of the shape
-/// `check --json` prints: code "", no span, the text as `message`.
+/// `check --json` prints: code "", no span, the text as `message`, and a
+/// hint saying so (every row carries one).
 pub fn error_row(message: &str) -> Value {
-    let d = crate::diagnostic::Diagnostic::error(message, "", "");
+    let d = crate::diagnostic::Diagnostic::error(message, UNSTRUCTURED_HINT, "");
     serde_json::from_str(&crate::diagnostic_render::to_json(&d))
         .unwrap_or_else(|_| json!({ "level": "error", "code": "", "message": message }))
 }

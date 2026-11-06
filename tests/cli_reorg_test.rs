@@ -100,6 +100,14 @@ fn every_retired_spelling_names_its_replacement() {
         // `compile --json` already asks for the envelope; every other old
         // spelling is run plain, then again with --json.
         let mut json_args: Vec<&str> = args.to_vec();
+        // `compile --dry-run --json` names the `--json` spelling; the
+        // plain run above is the one that pins `--dry-run`'s message.
+        if args[0] == "compile" && !args.contains(&"--json") {
+            let o = run_in(&dir, args);
+            assert_eq!(o.status.code(), Some(2), "{args:?}: exit 2\n{}", text(&o.stderr));
+            assert_eq!(text(&o.stderr).trim_end(), want, "{args:?}");
+            continue;
+        }
         if !args.contains(&"--json") {
             let o = run_in(&dir, args);
             assert_eq!(o.status.code(), Some(2), "{args:?}: exit 2\n{}", text(&o.stderr));
