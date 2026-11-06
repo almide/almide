@@ -71,7 +71,7 @@ jobs:
         run: |
           set +e
           run() { echo "::group::$*"; "$@"; echo "rc=$? :: $*" | tee -a /tmp/status.txt; echo "::endgroup::"; }
-          run cargo test --release -p almide-mir
+          run cargo test --release -p almide-mir --no-fail-fast
           run cargo test --release --test native_verified_floor_test
           run cargo test --release --test native_v1_differential_test
           cat /tmp/status.txt
