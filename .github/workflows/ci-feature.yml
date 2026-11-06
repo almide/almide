@@ -1,6 +1,6 @@
 name: Feature Branch CI
 
-# THROWAWAY probe for #4588: which corpus programs the check refuses.
+# THROWAWAY probe for #4588: renders base vs fix.
 on:
   push:
     branches:
@@ -18,23 +18,32 @@ env:
 permissions: read-all
 
 jobs:
-  refusals:
-    name: Refusals over the shapes corpus
+  renders:
+    name: Renders ${{ matrix.ref }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      matrix:
+        ref: [base, fix]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/root-tmpdir
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: Run
         run: |
           set +e
-          cargo build -q --release -p almide-mir --example render_corpus --example emit_native_bundle; echo "build rc=$?"
-          { grep -E '^spec/' proofs/native-verified-floor.txt; ls research/benchmark/perf/v1-shapes/*.almd; } > corpus.txt
-          wc -l corpus.txt
-          for f in $(cat corpus.txt); do
-            ./target/release/examples/emit_native_bundle $f /tmp/o.rs 2>&1 >/dev/null | grep PROBE4588 | sed "s#^#$f: #"
+          if [ "${{ matrix.ref }}" != fix ]; then git checkout -q origin/post-0691-fixes -- crates; fi
+          git log --oneline -1
+          cargo build -q --release -p almide-mir --example emit_native_bundle; echo "build rc=$?"
+          mkdir -p out
+          for f in spec/wasm_cross/call_closure_lambda_param.almd spec/wasm_cross/tm_list_opt_interp.almd spec/wasm_cross/tm_list_opt_lit_print.almd spec/wasm_cross/tm_list_opt_shadow_drop.almd; do
+            b=$(basename $f .almd)
+            ./target/release/examples/emit_native_bundle $f out/$b.rs > out/$b.bundle 2> out/$b.err; echo "$b rc=$?"
           done
-          echo end
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: renders-${{ matrix.ref }}
+          path: out
