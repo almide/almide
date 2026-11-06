@@ -1,0 +1,20 @@
+protocol Scorer {
+  fn score(s: Self, x: String) -> Int
+}
+
+type Vowels: Scorer = {}
+
+fn Vowels.score(s: Vowels, x: String) -> Int = string.to_list(x) |> list.count((c) => string.contains("aeiou", c))
+
+fn best[S: Scorer](s: S, names: List[String]) -> String? = {
+  let r = names |> list.fold((s, none), ((ss, top), n) => (ss, match top {
+    none => some(n),
+    some(t) => if ss.score(n) > ss.score(t) then some(n) else some(t),
+  }))
+  r.1
+}
+
+fn main() -> Unit = {
+  let b = "best=${best(Vowels {}, ["pear", "banana"])}"
+  println(b)
+}
