@@ -47,7 +47,7 @@
 //!   - a MODULE call with scalar arguments and a scalar result is admitted in
 //!     a body like a prim op (it stays a call; only its place moves), and a
 //!     callee whose body names nothing of its own var space — no `Named`
-//!     call, no `let` — inlines ACROSS spaces at a `module.fn(..)` site
+//!     call, no `let`, no variable but its params — inlines ACROSS spaces at a `module.fn(..)` site
 //!     (#4550): such a body means the same in every space. This is what a
 //!     generic conversion's specialization is (`float.from[S: Numeric]` is
 //!     `x.__to_float()`, which mono makes `int.__to_float(x)` for an Int),
@@ -245,11 +245,13 @@ struct Callee {
     portable: bool,
 }
 
-/// Whether a body names nothing of its own space and does not call `key`
-/// (its own `module.fn` spelling) again.
-fn is_portable(body: &IrExpr, key: &str) -> bool {
+/// Whether a body names nothing of its own space — every variable is one of
+/// its `params` (a module's top-level `let` is a var of that space too) — and
+/// does not call `key` (its own `module.fn` spelling) again.
+fn is_portable(body: &IrExpr, key: &str, params: &[VarId]) -> bool {
     let mut ok = true;
     visit(body, &mut |x| match &x.kind {
+        IrExprKind::Var { id } if !params.contains(id) => ok = false,
         IrExprKind::Call { target: CallTarget::Named { .. }, .. }
         | IrExprKind::TailCall { target: CallTarget::Named { .. }, .. } => ok = false,
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. }
@@ -489,7 +491,8 @@ fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>, vt: &VarTable, mod
         }
         let params = f.params.iter().map(|p| (p.var, p.ty.clone())).collect();
         let infos = f.params.iter().map(|p| vt.get(p.var).clone()).collect();
-        let portable = module.is_some_and(|m| is_portable(&f.body, &format!("{m}.{name}")));
+        let pvars: Vec<VarId> = f.params.iter().map(|p| p.var).collect();
+        let portable = module.is_some_and(|m| is_portable(&f.body, &format!("{m}.{name}"), &pvars));
         out.insert(name.to_string(), Callee { params, infos, body: f.body.clone(), portable });
     }
     out
