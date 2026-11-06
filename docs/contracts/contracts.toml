@@ -3424,6 +3424,8 @@ evidence  = [
   { path = "spec/wasm_cross/arg_rebinds_earlier_arg.almd", class = "fixture" },
   { path = "spec/wasm_cross/arg_call_rebinds_global.almd", class = "fixture" },
   { path = "spec/wasm_cross/let_bound_closure_scope.almd", class = "fixture" },
+  { path = "spec/wasm_cross/native_map_merge_same_binding.almd", class = "fixture" },
+  { path = "spec/wasm_cross/native_same_binding_twice_arg.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-259"
