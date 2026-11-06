@@ -1,0 +1,7 @@
+fn count(a: Int, e: Int) -> Int = list.range(a, e) |> list.fold(0, (n, _x) => n + 1)
+
+fn main() -> Unit = {
+  let top = 9223372036854775807
+  println(int.to_string(count(0 - top - 1, 2147483648)))
+  println(int.to_string((0 - top - 1)..<top |> list.fold(0, (n, _x) => n + 1)))
+}

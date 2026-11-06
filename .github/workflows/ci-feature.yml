@@ -59,9 +59,9 @@ jobs:
           for f in spec/wasm_cross/range_count_overflow*.almd spec/wasm_cross/range_head_*count_overflow.almd probe4538/*.almd; do
             n=$(basename $f .almd); mkdir -p w/$n; cp $f w/$n/main.almd
             V=v0; "$E" $f w/$n/v1.rs > /dev/null 2> w/$n/wall.txt && V=v1
-            N=$( cd w/$n && timeout 120 "$A" run main.almd 2>&1; echo "exit=$?" )
-            Z=$( cd w/$n && ALMIDE_NO_VERIFIED_OK=1 timeout 120 "$A" run --no-verified main.almd 2>&1 | grep -v '^\[almide\] ALMIDE_'; echo "exit=${PIPESTATUS[0]}" )
-            W=$( cd w/$n && timeout 120 "$A" run main.almd --target wasm 2>&1; echo "exit=$?" )
+            N=$( cd w/$n && timeout 20 "$A" run main.almd 2>&1; echo "exit=$?" )
+            Z=$( cd w/$n && ALMIDE_NO_VERIFIED_OK=1 timeout 20 "$A" run --no-verified main.almd 2>&1 | grep -v '^\[almide\] ALMIDE_'; echo "exit=${PIPESTATUS[0]}" )
+            W=$( cd w/$n && timeout 20 "$A" run main.almd --target wasm 2>&1; echo "exit=$?" )
             echo "=== $n (native render: $V)"; echo "--- native default:"; echo "$N"; echo "--- native v0:"; echo "$Z"; echo "--- wasm:"; echo "$W"
             [ "$V" = v0 ] && head -3 w/$n/wall.txt; true
           done
@@ -133,8 +133,8 @@ jobs:
             chmod +x "$B"; "$B" --version
             for f in probe4538/*.almd spec/wasm_cross/range_count_overflow*.almd spec/wasm_cross/range_head_*count_overflow.almd; do
               n=$(basename $f .almd); mkdir -p w/$v/$n; cp $f w/$v/$n/main.almd
-              N=$( cd w/$v/$n && timeout 120 "$B" run main.almd 2>&1 | grep -v "^warning\|^  " ; echo "exit=${PIPESTATUS[0]}" )
-              W=$( cd w/$v/$n && timeout 120 "$B" run main.almd --target wasm 2>&1; echo "exit=$?" )
+              N=$( cd w/$v/$n && timeout 20 "$B" run main.almd 2>&1 | grep -v "^warning\|^  " ; echo "exit=${PIPESTATUS[0]}" )
+              W=$( cd w/$v/$n && timeout 20 "$B" run main.almd --target wasm 2>&1; echo "exit=$?" )
               echo "=== $v $n"; echo "--- native:"; echo "$N"; echo "--- wasm:"; echo "$W"
             done
           done
