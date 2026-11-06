@@ -7,6 +7,7 @@ fn dump() {
         "research/benchmark/perf/globalread/globalread.almd",
         "research/benchmark/perf/v1-shapes/heap_global_copy_read.almd",
         "research/benchmark/perf/v1-shapes/heap_global_slots.almd",
+        "research/benchmark/perf/v1-shapes/heap_global_borrow_read.almd",
     ]
     .iter()
     .map(|p| (p.to_string(), std::fs::read_to_string(p).unwrap()))

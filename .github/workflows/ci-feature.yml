@@ -4,7 +4,7 @@ name: Feature Branch CI
 on:
   push:
     branches:
-      - 'feature/gr4571-probe'
+      - 'feature/gr4571-probe2'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -63,7 +63,7 @@ jobs:
           set +e
           export ALMIDE_BIN=$PWD/target/release/almide
           mkdir -p /tmp/almide-bin && cp target/release/almide /tmp/almide-bin/almide
-          [ "${{ matrix.variant }}" = fix ] && cargo test --release --test zz_probe_dump_test -- --nocapture 2>&1 | tail -400
+          [ "${{ matrix.variant }}" = fix ] && cargo test --release --test zz_probe_dump_test -- --nocapture 2>&1 | grep -B2 -A12 "fn almd_glyph\|=== "
           bash scripts/check-perf-ratio.sh 2>&1 | tee perf.log; echo "RC perf-ratio=${PIPESTATUS[0]}" | tee -a status.txt
           grep -i globalread perf.log | tee -a status.txt
           if [ "${{ matrix.variant }}" = fix ]; then
