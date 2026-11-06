@@ -816,7 +816,7 @@ PYBT
 GLOBALREAD_CEILING_NATIVE=4
 GLOBALREAD_CEILING_WASM=3
 gr_out=$(mktemp -t perf-ratio-globalread.XXXXXX.json)
-trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$gr_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out" "$gr_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,wasm \
   --bench globalread-global,globalread-local \
