@@ -817,3 +817,65 @@ fn fix_keeps_escaped_control_characters_escaped() {
     assert!(run.status.success(), "{}\n{after}", String::from_utf8_lossy(&run.stderr));
     assert_eq!(run.stdout, before.stdout, "the fixed program prints different bytes:\n{after}");
 }
+
+/// The #4589 layout: a package `app` with a path dependency `dep`, and a self
+/// import read only through `<alias>.<top-level let>`. Returns the repo root
+/// (the directory ABOVE both packages).
+fn self_alias_project(label: &str, main: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("almide-fix-4589-{label}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let write = |rel: &str, body: &str| {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    };
+    write("dep/almide.toml", "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n");
+    write("dep/src/mod.almd", "pub fn twice(n: Int) -> Int = n * 2\n");
+    write(
+        "app/almide.toml",
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n",
+    );
+    write("app/src/table.almd", "pub let CODES = \"0123\"\n");
+    write("app/src/other.almd", "pub let NAME = \"other\"\n");
+    write("app/src/main.almd", main);
+    root
+}
+
+/// #4589: run from OUTSIDE the package directory, the path dependency does
+/// not resolve, the program is checked without its modules, and the E060
+/// fix-it used to delete `import self.table as t` although `t.CODES` is read.
+/// Checked without its modules, no import may be judged unused: the fix
+/// leaves the import, and the file still checks from the package directory.
+#[test]
+fn fix_from_outside_the_package_keeps_a_used_self_alias_import() {
+    let main = "import dep\nimport self.table as t\n\neffect fn main() -> Unit = {\n  println(\"${dep.twice(string.len(t.CODES))}\")\n}\n";
+    let root = self_alias_project("outside", main);
+    let fix = Command::new(almide()).args(["fix", "app/src/main.almd"]).current_dir(&root).output().unwrap();
+    let after = std::fs::read_to_string(root.join("app/src/main.almd")).unwrap();
+    assert!(
+        after.contains("import self.table as t"),
+        "the used self import was deleted:\n{}\n{after}",
+        String::from_utf8_lossy(&fix.stdout)
+    );
+    let check = Command::new(almide()).args(["check", "src/main.almd"]).current_dir(root.join("app")).output().unwrap();
+    let text = format!("{}{}", String::from_utf8_lossy(&check.stdout), String::from_utf8_lossy(&check.stderr));
+    assert!(check.status.success(), "the file no longer checks from its package:\n{text}\n{after}");
+    assert!(!text.contains("E060"), "a used import is reported unused from its package:\n{text}");
+}
+
+/// The control for the test above: inside the package directory the imports
+/// resolve, and a self import nothing reads is still unused — reported and
+/// removed by `almide fix` — while the one read through `t.CODES` stays.
+#[test]
+fn fix_inside_the_package_still_removes_an_unused_self_import() {
+    let main = "import dep\nimport self.table as t\nimport self.other as unread\n\neffect fn main() -> Unit = {\n  println(\"${dep.twice(string.len(t.CODES))}\")\n}\n";
+    let root = self_alias_project("inside", main);
+    let app = root.join("app");
+    let fix = Command::new(almide()).args(["fix", "src/main.almd"]).current_dir(&app).output().unwrap();
+    let after = std::fs::read_to_string(app.join("src/main.almd")).unwrap();
+    assert!(fix.status.success(), "fix failed:\n{}\n{after}", String::from_utf8_lossy(&fix.stderr));
+    assert!(after.contains("import self.table as t\n"), "the used self import was deleted:\n{after}");
+    assert!(!after.contains("as unread"), "the unused self import was kept:\n{after}");
+    let check = Command::new(almide()).args(["check", "src/main.almd"]).current_dir(&app).output().unwrap();
+    assert!(check.status.success(), "fixed file does not check:\n{}\n{after}", String::from_utf8_lossy(&check.stderr));
+}

@@ -54,9 +54,9 @@ impl AnalyzedDoc {
 
         // Cross-file import resolution against the caller-provided dep list —
         // analyze itself never fetches.
-        let resolved_modules = file_path
-            .map(|fp| resolve_imports_cached(fp, &program, deps))
-            .unwrap_or_default();
+        let resolved = file_path.map(|fp| resolve_imports_cached(fp, &program, deps));
+        let imports_unresolved = matches!(resolved, Some(None));
+        let resolved_modules = resolved.flatten().unwrap_or_default();
 
         let canon = crate::canonicalize::canonicalize_program(
             &program,
@@ -65,6 +65,7 @@ impl AnalyzedDoc {
         let mut checker = crate::check::Checker::from_env(canon.env);
         checker.source_text = Some(source.to_string());
         checker.diagnostics = canon.diagnostics;
+        checker.imports_unresolved = imports_unresolved;
 
         for (name, mod_prog, _) in &resolved_modules {
             let mut mod_prog_clone = mod_prog.clone();

@@ -472,11 +472,12 @@ mod dep_cache_tests {
     }
 }
 
-fn resolve_imports_cached(file_path: &str, program: &crate::ast::Program, deps: &[(crate::project::PkgId, std::path::PathBuf)]) -> Vec<(String, crate::ast::Program, bool)> {
-    match crate::resolve::resolve_imports_with_deps(file_path, program, deps) {
-        Ok(r) => r.modules.into_iter().map(|(n, p, _, s)| (n, p, s)).collect(),
-        Err(_) => vec![],
-    }
+/// The imported modules, or `None` when their resolution failed (the program
+/// is then checked alone, and no import may be judged unused, #4589).
+fn resolve_imports_cached(file_path: &str, program: &crate::ast::Program, deps: &[(crate::project::PkgId, std::path::PathBuf)]) -> Option<Vec<(String, crate::ast::Program, bool)>> {
+    crate::resolve::resolve_imports_with_deps(file_path, program, deps)
+        .ok()
+        .map(|r| r.modules.into_iter().map(|(n, p, _, s)| (n, p, s)).collect())
 }
 
 fn type_to_module(type_name: &str) -> Option<String> {
