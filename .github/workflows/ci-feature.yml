@@ -90,7 +90,7 @@ jobs:
           ALMIDE_UPDATE_SURFACE=1 run cargo test --release -p almide-wasm --test surface_matrix
           run bash proofs/output-parity.sh --update
           ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 run cargo test --release --test native_verified_floor_test
-          ALMIDE_UPDATE_INTERP_LEDGER=1 run cargo test --release --test wasm_runtime_test interp_abstain_ledger
+          ALMIDE_UPDATE_INTERP_LEDGER=1 run cargo test --release --test wasm_runtime_interp_ledger
           rm -rf w probe4538
           git status --short | grep -v "^??"
           git diff -- . ':(exclude).github' > regen.patch
