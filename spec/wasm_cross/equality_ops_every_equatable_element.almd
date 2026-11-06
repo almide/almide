@@ -45,17 +45,25 @@ fn blobs(vals: List[Int]) -> List[Bytes] = vals |> list.map((v) => bytes.from_li
 
 fn units(n: Int) -> List[Unit] = list.range(0, n) |> list.map((_) => ())
 
-fn set_line(xs: List[Set[String]], x: Set[String]) -> String =
-  "set: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${list.contains(xs, x)} index_of=${list.index_of(xs, x)}"
+fn set_line(xs: List[Set[String]], x: Set[String]) -> String = "set: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${list.contains(
+  xs,
+  x,
+)} index_of=${list.index_of(xs, x)}"
 
-fn map_line(xs: List[Map[String, Int]], x: Map[String, Int]) -> String =
-  "map: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${list.contains(xs, x)} index_of=${list.index_of(xs, x)}"
+fn map_line(xs: List[Map[String, Int]], x: Map[String, Int]) -> String = "map: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${list.contains(
+  xs,
+  x,
+)} index_of=${list.index_of(xs, x)}"
 
-fn result_line(xs: List[Result[Int, String]], x: Result[Int, String]) -> String =
-  "result: unique=${list.unique(xs)} dedup=${list.dedup(xs)} contains=${list.contains(xs, x)} index_of=${list.index_of(xs, x)}"
+fn result_line(xs: List[Result[Int, String]], x: Result[Int, String]) -> String = "result: unique=${list.unique(xs)} dedup=${list.dedup(xs)} contains=${list.contains(xs, x)} index_of=${list.index_of(
+  xs,
+  x,
+)}"
 
-fn bytes_line(xs: List[Bytes], x: Bytes) -> String =
-  "bytes: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${list.contains(xs, x)} index_of=${list.index_of(xs, x)}"
+fn bytes_line(xs: List[Bytes], x: Bytes) -> String = "bytes: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${list.contains(
+  xs,
+  x,
+)} index_of=${list.index_of(xs, x)}"
 
 // unique and dedup only: a Unit call argument is outside the MIR leg's brick.
 fn unit_line(xs: List[Unit]) -> String = "unit: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))}"
