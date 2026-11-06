@@ -1,6 +1,6 @@
 name: Feature Branch CI
 
-# THROWAWAY probe for #4588.
+# THROWAWAY probe for #4588: which corpus programs the check refuses.
 on:
   push:
     branches:
@@ -14,146 +14,27 @@ env:
   CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: "1.97.0"
   CARGO_INCREMENTAL: "0"
-  FIX: option_map_none_heap_payload_closure
 
 permissions: read-all
 
 jobs:
-  verify:
-    name: Verify and regenerate
+  refusals:
+    name: Refusals over the shapes corpus
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: feature-build-${{ env.RUST_TOOLCHAIN }}
-          save-if: false
-      - name: Install wasmtime
-        run: |
-          set -euo pipefail
-          VERSION=v50.0.1
-          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
-          tar -xf "$TARBALL"
-          sudo install -m 755 "wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
-          rm -rf "$TARBALL" "wasmtime-${VERSION}-x86_64-linux"
-      - name: Build
-        run: cargo build --release && cargo build --release -p almide-mir --example emit_native_bundle
-      - name: Probe
+      - name: Run
         run: |
           set +e
-          A=$PWD/target/release/almide
-          E=$PWD/target/release/examples/emit_native_bundle
-          for f in probe4588/*.almd spec/wasm_cross/$FIX.almd; do
-            echo "===== $f ====="
-            $A run $f; echo "native rc=$?"
-            $A run $f --target wasm; echo "wasm rc=$?"
-            ALMIDE_NO_VERIFIED_OK=1 $A run --no-verified $f; echo "v0 rc=$?"
-            $E $f /tmp/out.rs > /dev/null; echo "emit rc=$?"
+          cargo build -q --release -p almide-mir --example render_corpus --example emit_native_bundle; echo "build rc=$?"
+          { grep -E '^spec/' proofs/native-verified-floor.txt; ls research/benchmark/perf/v1-shapes/*.almd; } > corpus.txt
+          wc -l corpus.txt
+          for f in $(cat corpus.txt); do
+            ./target/release/examples/emit_native_bundle $f /tmp/o.rs 2>&1 >/dev/null | grep PROBE4588 | sed "s#^#$f: #"
           done
-          $A fmt --check spec/wasm_cross/$FIX.almd; echo "fmt rc=$?"
-          bash scripts/check-contracts.sh > /tmp/contracts.log 2>&1; echo "contracts rc=$?"; tail -5 /tmp/contracts.log
-      - name: Regenerate
-        env:
-          ALMIDE_MANIFEST_TREE_CHECK: "off"
-        run: |
-          set +e
-          export ORACLE=$PWD/target/release/almide ALMIDE_BIN=$PWD/target/release/almide
-          mkdir -p /tmp/almide-bin && cp target/release/almide /tmp/almide-bin/almide
-          export PATH=/tmp/almide-bin:$PATH
-          run() { echo "::group::$*"; "$@"; echo "rc=$? :: $*" | tee -a regen-status.txt; echo "::endgroup::"; }
-          run bash scripts/gen-run-manifest.sh
-          run bash scripts/gen-check-manifest.sh
-          run bash scripts/gen-ast-manifest.sh
-          ALMIDE_UPDATE_ALLOC=1 run cargo test --release -p almide-wasm --test alloc_ledger
-          ALMIDE_UPDATE_SIZES=1 run cargo test --release -p almide-wasm --test size_ratchet
-          ALMIDE_UPDATE_WITNESS_FLOOR=1 run cargo test --release -p almide-wasm --test witness_floor
-          ALMIDE_UPDATE_SURFACE=1 run cargo test --release -p almide-wasm --test surface_matrix
-          run bash proofs/output-parity.sh --update
-          ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 run cargo test --release --test native_verified_floor_test
-          ALMIDE_UPDATE_INTERP_LEDGER=1 run cargo test --release --test wasm_runtime_interp_ledger
-          bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md; echo "rc=$? :: conformance" | tee -a regen-status.txt
-          bash docs/contracts/generate-readme.sh > docs/contracts/README.md; echo "rc=$? :: contracts readme" | tee -a regen-status.txt
-          run bash scripts/gen-readme-stats.sh
-          run bash scripts/gen-claims.sh
-          git diff -- . ':(exclude).github' > regen.patch
-          cat regen-status.txt
-          git diff --stat
-      - name: Targeted tests
-        run: |
-          set +e
-          export ALMIDE_BIN=$PWD/target/release/almide
-          run() { echo "::group::$*"; "$@"; echo "rc=$? :: $*" | tee -a test-status.txt; echo "::endgroup::"; }
-          run cargo test --release -p almide-mir
-          run cargo test --release --test native_verified_floor_test
-          run cargo test --release --test native_v1_differential_test
-          ALMIDE_CORPUS_FILTER=$FIX run cargo test --release --test wasm_runtime_cross_target
-          ALMIDE_CORPUS_FILTER=$FIX run cargo test --release --test wasm_runtime_interp_oracle
-          cat test-status.txt
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: regen
-          path: |
-            regen.patch
-            regen-status.txt
-            test-status.txt
-  perf-small:
-    name: Perf small
-    runs-on: ubuntu-latest
-    timeout-minutes: 150
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - name: Install valgrind
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
-      - name: Build
-        run: cargo build --release --bin almide
-      - name: Gate
-        run: bash scripts/check-native-v1-perf-small.sh
-  shapes:
-    name: Perf shapes
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: llvm-tools
-      - name: Gate
-        run: bash scripts/check-native-v1-perf-shapes.sh
-  negative:
-    name: Negative control (fix reverted)
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - name: Revert the fix only
-        run: |
-          git -c user.name=ci -c user.email=ci@example.invalid revert --no-commit 4e7c4fe53909c8adac5dbcd5dca1529f739b0226
-          git status --short
-      - name: Build
-        run: cargo build --release --bin almide
-      - name: Fixture on native must fail
-        run: |
-          set +e
-          ./target/release/almide run spec/wasm_cross/$FIX.almd; rc=$?
-          echo "native rc=$rc"
-          if [ $rc -eq 0 ]; then echo "NEGATIVE CONTROL DID NOT FAIL"; exit 1; fi
-          echo "negative control failed as expected"
+          echo end
