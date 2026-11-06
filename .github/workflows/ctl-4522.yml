@@ -52,11 +52,34 @@ jobs:
             heap.pop(h)
           }
           ALMD
-          sed -i 's/^          //' /tmp/repro.almd
+          cat > /tmp/noheap.almd <<'ALMD'
+          type V = { on_context: effect (Float, Float) -> Unit }
+
+          fn on_context(v: V, f: effect (Float, Float) -> Unit) -> V = { ...v, on_context: f }
+
+          var n = 0
+          effect fn save() -> Unit = { n = n + 1 }
+
+          fn view() -> V = { on_context: (x, y) => () } |> on_context((x, y) => { save()! })
+
+          effect fn main() -> Unit = {
+            let v = view()
+            v.on_context(1.0, 2.0)!
+            println("${n}")
+          }
+
+          type Ord[A] = { cmp: (A, A) -> Int }
+
+          fn before[A](o: Ord[A], a: A, b: A) -> Bool = (o.cmp)(a, b) < 0
+
+          fn top() -> Bool = before({ cmp: (a, b) => a - b }, 1, 2)
+          ALMD
           for v in v0.67.1 v0.69.0; do
             bin=$(find "$PWD/rel/$v" -type f -name almide -perm -u+x | head -1)
             echo "=== $v: $($bin --version)"
-            (cd /tmp && $bin check repro.almd; echo "exit=$?")
+            (cd /tmp && { $bin check repro.almd; echo "exit=$?"; } || true)
+            echo "=== $v: heap-free variant"
+            (cd /tmp && { $bin check noheap.almd; echo "exit=$?"; } || true)
             echo "=== $v: tests with ALMIDE_CONTROL_BIN"
-            ALMIDE_CONTROL_BIN=$bin cargo test --test effect_value_laundering_test heap -- --test-threads=1 2>&1 | tail -40
+            ALMIDE_CONTROL_BIN=$bin cargo test --test effect_value_laundering_test heap -- --test-threads=1 2>&1 | tail -40 || true
           done
