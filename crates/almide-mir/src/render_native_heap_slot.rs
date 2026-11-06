@@ -8,16 +8,22 @@
 //!
 //! The native render has no linear memory. A slot whose declared type has a
 //! native kind (`native_slot_rewrite::heap_slot`) is a thread-local
-//! `RefCell` of an `Rc` of that type, holding the value: the borrow reads a
-//! copy of it, or, when every use of the read only borrows it, a snapshot of
-//! the `Rc` (#4562: one reference count where the copy cloned the whole
-//! value at every read-only call); the take moves it out (its type's default
-//! left behind, which nothing reads: the store follows), copying it only
-//! while a snapshot still shares it, and the store moves the new value in.
-//! The MIR
-//! and its certificates are the ones the wasm leg runs; only their storage
-//! is spelled differently. A program with a `fan` keeps the wall: its arms
-//! run on threads of their own, and a thread-local cell is per thread.
+//! `RefCell` holding the value: the borrow reads a copy of it, the take moves
+//! it out (its type's default left behind, which nothing reads: the store
+//! follows), and the store moves the new value in.
+//!
+//! A slot that some read only borrows (#4562, `native_slot_takes::
+//! snapshot_slot`) holds its value in an `Rc` instead: such a read is a
+//! snapshot of the `Rc`, read through a reference, one reference count where
+//! the copy cloned the whole map or list at every read-only call. Its take
+//! moves the value out of the `Rc` while no snapshot shares it, and copies it
+//! while one does (the copy the read no longer made); its store writes into
+//! the `Rc` while none does, and replaces it while one does, so a snapshot
+//! keeps the value it had at its read, as the copy did.
+//!
+//! The MIR and its certificates are the ones the wasm leg runs; only their
+//! storage is spelled differently. A program with a `fan` keeps the wall: its
+//! arms run on threads of their own, and a thread-local cell is per thread.
 
 use super::{AddrState, NTy};
 use crate::lower::LowerError;
@@ -26,10 +32,23 @@ use crate::{CallArg, Op, PrimKind, ValueId};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-/// The value moved out of a slot's cell (`s`): its `Rc`'s own block when no
-/// snapshot shares it, which is every take but one a borrow-only read of the
-/// slot still holds; a copy of it then, the copy that read no longer makes.
-const UNWRAP_TAKE: &str = "std::rc::Rc::try_unwrap(std::mem::take(&mut *s.borrow_mut())).unwrap_or_else(|r| (*r).clone())";
+/// The value moved out of the cell `s` of a slot, `snap` = held in an `Rc`.
+fn take_text(snap: bool) -> &'static str {
+    if snap {
+        "{ let mut c = s.borrow_mut(); match std::rc::Rc::get_mut(&mut c) { Some(v) => std::mem::take(v), None => (**c).clone() } }"
+    } else {
+        "std::mem::take(&mut *s.borrow_mut())"
+    }
+}
+
+/// The write of `rhs` into the cell `s` of a slot, `snap` = held in an `Rc`.
+fn store_text(snap: bool, rhs: &str) -> String {
+    if snap {
+        format!("{{ let mut c = s.borrow_mut(); match std::rc::Rc::get_mut(&mut c) {{ Some(v) => *v = {rhs}, None => *c = std::rc::Rc::new({rhs}) }} }}")
+    } else {
+        format!("*s.borrow_mut() = {rhs}")
+    }
+}
 
 /// Render `op` when it reads, takes or stores a heap slot. `None` = not one.
 pub(super) fn render_heap_slot_op(
@@ -47,12 +66,14 @@ pub(super) fn render_heap_slot_op(
             if st.slot_reads.rebuilds.contains(d) {
                 return Some(Err(wall("native: a heap slot read again before its write-back (each read copies the cell's value)")));
             }
-            // Every use only borrows it: a snapshot of the cell's `Rc`, read
-            // through a reference (the kind a borrowed param of the type has).
-            // (A string's copy shares its buffer already, ADR-0013.)
-            if let (true, Some((rt, spelled, whole))) =
-                (st.slot_reads.borrows.contains(d) && t != NTy::Str, super::borrowed_kind(t))
-            {
+            let snap = crate::native_slot_takes::snapshot_slot(slot);
+            let take = st.slot_reads.takes.contains(d) && crate::render_native_rec::has_default(t);
+            if snap && !take {
+                // A slot held for snapshots: every read of it that its own
+                // take does not follow is one (native_slot_takes::slot_reads).
+                let (true, Some((rt, spelled, whole))) = (st.slot_reads.borrows.contains(d), super::borrowed_kind(t)) else {
+                    return Some(Err(wall("native: a heap slot held for snapshots read as a value of its own")));
+                };
                 tys.insert(*d, rt);
                 let _ = writeln!(
                     out,
@@ -64,11 +85,7 @@ pub(super) fn render_heap_slot_op(
             }
             tys.insert(*d, t);
             // The slot's own take follows, and nothing in between sees it.
-            let read = if st.slot_reads.takes.contains(d) && crate::render_native_rec::has_default(t) {
-                UNWRAP_TAKE
-            } else {
-                "(**s.borrow()).clone()"
-            };
+            let read = if take { take_text(snap) } else { "s.borrow().clone()" };
             let _ = writeln!(
                 out,
                 "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| {read});",
@@ -88,9 +105,10 @@ pub(super) fn render_heap_slot_op(
             tys.insert(*d, t);
             let _ = writeln!(
                 out,
-                "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| {UNWRAP_TAKE});",
+                "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| {});",
                 var(*d),
-                crate::render_native_rec::owned_ty(t)
+                crate::render_native_rec::owned_ty(t),
+                take_text(crate::native_slot_takes::snapshot_slot(slot))
             );
             Some(Ok(true))
         }
@@ -108,7 +126,7 @@ pub(super) fn render_heap_slot_op(
             } else {
                 return Some(Err(wall(format!("native: a {got:?} value stored into a {t:?} heap slot"))));
             };
-            let _ = writeln!(out, "{pad}ALMD_HSLOT_{slot}.with(|s| *s.borrow_mut() = std::rc::Rc::new({rhs}));");
+            let _ = writeln!(out, "{pad}ALMD_HSLOT_{slot}.with(|s| {});", store_text(crate::native_slot_takes::snapshot_slot(slot), &rhs));
             Some(Ok(true))
         }
         _ => None,

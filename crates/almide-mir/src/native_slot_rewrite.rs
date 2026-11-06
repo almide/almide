@@ -102,8 +102,19 @@ pub(crate) fn heap_slot_at(addr: i64) -> Option<(u32, crate::render_native::NTy)
     Some((slot, t))
 }
 
+/// What the cell of heap slot `slot` (of kind `t`) holds.
+fn held_ty(slot: u32, t: crate::render_native::NTy) -> String {
+    let ty = crate::render_native_rec::owned_ty(t);
+    if crate::native_slot_takes::snapshot_slot(slot) {
+        format!("std::rc::Rc<{ty}>")
+    } else {
+        ty
+    }
+}
+
 /// The thread-local cell of every heap slot the render used (`used_shims`
-/// items): the slot's value in an `Rc` (render_native_heap_slot), its type's default until the program's
+/// items): the slot's value (in an `Rc` when reads borrow snapshots of it,
+/// render_native_heap_slot), its type's default until the program's
 /// `__mg_init` stores it.
 pub(crate) fn heap_slot_statics() -> Vec<&'static str> {
     use std::sync::{Mutex, OnceLock};
@@ -114,8 +125,8 @@ pub(crate) fn heap_slot_statics() -> Vec<&'static str> {
     used.into_iter()
         .map(|(slot, t)| {
             let text = format!(
-                "thread_local! {{ static ALMD_HSLOT_{slot}: std::cell::RefCell<std::rc::Rc<{ty}>> = std::cell::RefCell::new(Default::default()); }}",
-                ty = crate::render_native_rec::owned_ty(t)
+                "thread_local! {{ static ALMD_HSLOT_{slot}: std::cell::RefCell<{ty}> = std::cell::RefCell::new(Default::default()); }}",
+                ty = held_ty(slot, t)
             );
             match texts.get(text.as_str()) {
                 Some(t) => *t,
