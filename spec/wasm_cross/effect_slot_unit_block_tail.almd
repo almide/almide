@@ -1,0 +1,47 @@
+// @contract: C-221
+// #4545: a pure lambda whose block ends in a statement fills an
+// `effect () -> Unit` slot. The checker types it as the carrier
+// `() -> Result[Unit, String]`; the lift found no value tail to wrap and
+// produced `ok({ n = 3 })`, a tail-less block in value position that the
+// structural wasm leg refused (E082 `expr:Block-no-tail`). The block now
+// takes its `()` tail first — at the body, in `if` arms, and in `match` arms.
+type V = { on_click: effect () -> Unit }
+
+fn base() -> V = { on_click: () => () }
+
+fn on_click(v: V, f: effect () -> Unit) -> V = { ...v, on_click: f }
+
+var n = 0
+
+fn assign() -> V = base() |> on_click(() => {
+  n = 3
+})
+
+fn branch(up: Bool) -> V = on_click(base(), () => if up then {
+  n = n + 10
+} else {
+  n = n - 1
+})
+
+fn arms(k: Int) -> V = on_click(
+  base(),
+  () => match k {
+    0 => {
+      n = n * 2
+    },
+    _ => {
+      n = n + k
+    },
+  },
+)
+
+effect fn main() -> Unit = {
+  assign().on_click()!
+  println("assign ${n}")
+  branch(true).on_click()!
+  branch(false).on_click()!
+  println("branch ${n}")
+  arms(0).on_click()!
+  arms(5).on_click()!
+  println("arms ${n}")
+}
