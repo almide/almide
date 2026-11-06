@@ -150,11 +150,18 @@ fn only_dropped(ops: &[Op], j: usize) -> bool {
 /// slot meanwhile replaces the cell's `Rc` (a store) or takes it (its take
 /// finds the snapshot sharing the block and copies it then), so the snapshot
 /// keeps the value it had at the read, as the copy did.
+///
+/// The lowering reads a heap global as that borrow and a `Dup` of it (the
+/// reader's own reference, an `rc_inc` on the wasm leg). Natively that `Dup`
+/// is the copy, so a `Dup` of a borrow-only read whose every use only borrows
+/// too, and which nothing moves into an owned param, is an `alias`: it reads
+/// through the snapshot's reference as well.
 #[derive(Default)]
 pub(crate) struct SlotReads {
     pub(crate) takes: BTreeSet<ValueId>,
     pub(crate) rebuilds: BTreeSet<ValueId>,
     pub(crate) borrows: BTreeSet<ValueId>,
+    pub(crate) aliases: BTreeSet<ValueId>,
 }
 
 /// The read `d` at `ops[i]` is only borrowed: every later use of it borrows
@@ -205,6 +212,13 @@ pub(crate) fn slot_reads(func: &MirFunction) -> SlotReads {
                     out.borrows.insert(*d);
                 }
                 _ => {}
+            }
+        }
+        for (j, op) in ops.iter().enumerate() {
+            let Op::Dup { dst, src } = op else { continue };
+            let moved = ops.iter().any(|o| matches!(o, Op::Consume { v } if v == dst));
+            if out.borrows.contains(src) && !moved && borrow_only(func, j, *dst, &root) {
+                out.aliases.insert(*dst);
             }
         }
         out

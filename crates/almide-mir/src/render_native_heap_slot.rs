@@ -49,8 +49,9 @@ pub(super) fn render_heap_slot_op(
             }
             // Every use only borrows it: a snapshot of the cell's `Rc`, read
             // through a reference (the kind a borrowed param of the type has).
+            // (A string's copy shares its buffer already, ADR-0013.)
             if let (true, Some((rt, spelled, whole))) =
-                (st.slot_reads.borrows.contains(d), super::borrowed_kind(t))
+                (st.slot_reads.borrows.contains(d) && t != NTy::Str, super::borrowed_kind(t))
             {
                 tys.insert(*d, rt);
                 let _ = writeln!(
