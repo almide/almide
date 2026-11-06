@@ -196,10 +196,9 @@ form they read.
 
 An export may declare it: `@export(wasm, "in_alloc", returns: address)`. Its Region result
 crosses as one value, the view's data address, in the memory's address width (one `i32` on
-wasm32, `i64` on memory64), for a host that already knows the length it asked for. Every
-other rule of A1 holds unchanged: the adapter keeps one share of the block and files the
-address in the table, `__region_release(ptr)` gives it back, a slice crosses as its own
-address, an empty Region is `0`, and an `effect fn`'s `err` traps.
+wasm32, `i64` on memory64), for a host that already knows the length it asked for. A slice
+crosses as its own address, an empty Region is `0`, and an `effect fn`'s `err` traps, as in
+A1. How long the host holds the address is A1d's lease, not A1's counted share.
 
 - **Declared, never inferred.** The form is a word at the export. The compiler does not
   guess it from the host or from the fn's name, and the pair stays the default.
@@ -215,6 +214,63 @@ address, an empty Region is `0`, and an `effect fn`'s `err` traps.
 
 Evidence: spec/wasm_host_js/region_export_address.almd (C-453) and
 crates/almide-wasm/tests/ffi_host_boundary.rs (the address-only tests), tests/checker_test.rs (the E090 refusal).
+
+### A1d. An address-only result is a lease until the export's next call (2026-11-06)
+
+**The problem.** A1 counts the host's shares: every result files one entry and keeps one
+share until the host passes the address to `__region_release`. The downstream hosts A1c
+serves never call it, and the owner's 2026-10-29 ruling keeps them unchanged. Their bridges
+make a fresh block per call (`g_in = ffi.alloc(n)!; g_in`, `ffi.region(g_out)` over an output
+the previous call rebuilt), so every call kept one more block and one more table entry for
+the instance's lifetime. Measured on CI before this amendment
+(spec/wasm_host_js/region_export_lease.almd, the downstream round trip of `in_alloc`,
+`resolve`, `out_ptr` with 4 KB strings): the memory was 7,340,032 B after 200 warm-up round trips and 234,881,024 B after 10,000 more, 227,540,992 B of growth (about 22 KB per round trip), with two table entries filed per round trip and none ever removed.
+
+**The rule.** Each `returns: address` export holds exactly one host share, a *lease*:
+
+1. A result whose address and block are the lease's own is handed out again, and the new
+   share goes straight back. The same buffer returned any number of times holds one share.
+2. Any other result ends the previous lease (its block's share goes back) and becomes the
+   lease. An empty result ends it too and is `0`.
+3. `__region_release(ptr)` of the current lease's address ends it early. An address its
+   export has superseded is held by nothing, so releasing it traps, like any address the
+   module does not hold.
+
+**What the host may assume.** An address-only result stays valid, with its bytes in place,
+until the next call of the export that returned it, or until the host releases it,
+whichever comes first. Calls of every other export leave it in place, so `p = in_alloc(n)`,
+writing at `p`, then calling the export that reads the input, is sound, and so is reading
+`out_ptr()` after the call that filled the output. The module may keep the block longer
+(the program's own copy holds it), but that is not promised. This is the only promise
+under which a host that never releases can run in bounded memory: if the host may use
+every address it was ever handed, no block can ever be freed.
+
+So the memory a never-releasing host costs is bounded by one block per address-only
+export, and no address is freed while the promise covers it. The host's share is the
+lease's, not the table's, so the table does not grow either: each lease is two `i32`
+globals (address, block) after the table's three.
+
+**Alternatives.**
+
+- *Count shares, but make a repeated result idempotent* (rule 1 alone). Sound with no new
+  promise, and it bounds a bridge that hands out one persistent buffer. It does not bound the
+  bridges as written, which make a new block per call. It is kept as rule 1.
+- *Release the previous result only when the program still owns its block.* Then no address
+  ever loses its block while the program holds it, but a block the program dropped (the old
+  `g_in`) is the leak itself, and it stays.
+- *Bridge-side reuse* (grow `g_in` only when the request does not fit, write the output into
+  one persistent Region). It avoids an allocation per call, but it bounds memory only in
+  bridges that remember to do it, and a bridge that reuses a larger buffer has to carry the
+  requested length beside it. The compiler rule bounds every bridge; reuse is an
+  optimisation a bridge may still make, and rule 1 then keeps its one share.
+- *A1's counted share for address-only exports, with a host-side release.* Ruled out by the
+  2026-10-29 ruling: the hosts do not change.
+
+The `(ptr, len)` pair keeps A1's counted share unchanged (C-446): its hosts release each
+address, and two hand-outs of one address are two shares there.
+
+Evidence: spec/wasm_host_js/region_export_lease.almd (C-454) and the lease tests in
+crates/almide-wasm/tests/ffi_host_boundary.rs.
 
 ### A2. An `@export(c)` fn may take Region parameters
 
