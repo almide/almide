@@ -1,0 +1,8 @@
+ready
+in holds 16 bytes: host wrote this!
+in holds 5 bytes: again
+tail at +2: ain
+tail after the parent's release: ain
+an empty Region crosses as 0
+released shares free their blocks
+an err traps

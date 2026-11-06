@@ -711,7 +711,9 @@ instance.exports.inbox_show();
 instance.exports.__region_release(ptr);                // ホストの参照を返す
 ```
 
-`--host js` のグルーは Region を返す export を `f(…) → [ptr, len]` で包み、`regionRelease(ptr)` を足す。Region を受け取る export は `f(…, base, len, …)` になる。
+export に `returns: address` を書くと（`@export(wasm, "in_alloc", returns: address)`、#4519、C-453）、Region はデータ先頭のアドレス一つだけで渡る（wasm32 では `i32` 一つ）。長さを自分で知っているホストが export の戻り値を一つの数として読む形。参照の持ち方・`__region_release`・部分 Region・空の Region は `0`・`effect fn` の `err` は trap、はほかの点ですべて `(ptr, len)` の形と同じ。宣言した export だけがこの形になり、推測はしない。
+
+`--host js` のグルーは Region を返す export を `f(…) → [ptr, len]`（`returns: address` なら `f(…) → ptr`）で包み、`regionRelease(ptr)` を足す。Region を受け取る export は `f(…, base, len, …)` になる。
 
 仕組み: `crates/almide-wasm/src/extern_region.rs`（IR 書き換え: 受け取りは `ffi.__lend` を呼ぶラッパ、返却は `ffi.__export_view` を返すラッパ）と `crates/almide-wasm/src/region_export.rs`（アダプタ・アドレス表・`__region_release`）。テスト: `spec/wasm_host_js/region_export_push.almd`（push、部分 Region と解放、受け取り）、`spec/wasm_host_js/region_extern_pull.almd`（pull）、`crates/almide-wasm/tests/ffi_host_boundary.rs`、`tests/ffi_host_boundary_test.rs`（E119、`@export(c)`）。
 

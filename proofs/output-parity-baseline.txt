@@ -1129,4 +1129,5 @@ spec/wasm_host_js/fs_preopens.almd
 spec/wasm_host_js/marshal_blocks.almd
 spec/wasm_host_js/marshal_types.almd
 spec/wasm_host_js/println_only.almd
+spec/wasm_host_js/region_export_address.almd
 spec/wasm_host_js/region_export_push.almd
