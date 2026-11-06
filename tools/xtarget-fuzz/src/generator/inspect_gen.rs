@@ -1699,6 +1699,17 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    #[ignore]
+    fn dump_probe_programs_throwaway() {
+        let dir = std::path::PathBuf::from(std::env::var("DUMP_DIR").unwrap());
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["value.get_int", "value.get"] {
+            let t = target(name);
+            std::fs::write(dir.join(format!("{}.almd", name.replace('.', "_"))), t.direct_program(64, 1, true)).unwrap();
+        }
+    }
+
     /// Every catalogued function the probes give an in-domain input.
     pub(crate) fn in_domain_targets() -> Vec<Target> {
         let catalogue = crate::generator::catalogue::build();
