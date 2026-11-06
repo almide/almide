@@ -144,11 +144,15 @@ fn the_diagnostic_points_to_the_argument_without_choosing_a_replacement() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let diagnostic = text
-        .lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+    // #4590: one envelope line; the rows are its `diagnostics` array.
+    let envelope = serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap_or_default();
+    let diagnostic = envelope["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
         .find(|value| value["code"] == "E084")
-        .expect("E084 JSON diagnostic");
+        .cloned()
+        .unwrap_or_else(|| panic!("E084 JSON diagnostic:\n{text}"));
     assert_eq!(diagnostic["line"], 2);
     assert_eq!(diagnostic["col"], line.find("256").unwrap() + 1);
     assert_eq!(diagnostic["end_col"], line.find("256").unwrap() + 4);

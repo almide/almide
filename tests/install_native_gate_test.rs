@@ -1,4 +1,4 @@
-//! #4184: `almide install` builds the package as the root project, so its own
+//! #4184: `almide tool install` builds the package as the root project, so its own
 //! native code (`native/` Rust, `[native-deps]` crates, `@extern(rust|c)`)
 //! would run with the user's rights at build time. `[permissions] native`
 //! gates only dependencies, so install refuses such a package unless
@@ -22,14 +22,14 @@ fn project(root: &Path, dir: &str, native: bool) -> PathBuf {
 
 fn install(root: &Path, proj: &Path, extra: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_almide"))
-        .arg("install")
+        .args(["tool", "install"])
         .arg(proj)
         .args(["--bin-dir", root.join("bin").to_str().unwrap(), "--target", "wasm"])
         .args(extra)
         .current_dir(root)
         .env("HOME", root.join("home"))
         .output()
-        .expect("spawn almide install")
+        .expect("spawn almide tool install")
 }
 
 fn text(o: &Output) -> String {
@@ -65,7 +65,7 @@ fn an_untrusted_remote_spec_is_refused_before_any_fetch() {
     let td = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(td.path().join("home")).unwrap();
     let o = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .args(["install", "github.com/someone-untrusted/tool", "--bin-dir", td.path().join("bin").to_str().unwrap()])
+        .args(["tool", "install", "github.com/someone-untrusted/tool", "--bin-dir", td.path().join("bin").to_str().unwrap()])
         .current_dir(td.path())
         .env("HOME", td.path().join("home"))
         .output()

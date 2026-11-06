@@ -1,7 +1,7 @@
-//! `almide install` of a branch (no tag) builds the remote's CURRENT head
+//! `almide tool install` of a branch (no tag) builds the remote's CURRENT head
 //! (#1956). Before, the clone cached under the dependency's `main` entry was
 //! reused as-is on every later install, so pushing new commits and running
-//! `almide install` again silently reinstalled the stale version; only
+//! `almide tool install` again silently reinstalled the stale version; only
 //! `almide clean` fixed it. A branch install now resolves the remote head
 //! first and builds that commit (`go install pkg@latest` semantics); a tag
 //! keeps its immutable cache entry.
@@ -49,11 +49,11 @@ fn commit_version(repo: &Path, version: &str) {
     git(repo, &["commit", "-q", "-m", version]);
 }
 
-/// `almide install file://<repo>` with the dependency cache confined to
+/// `almide tool install file://<repo>` with the dependency cache confined to
 /// `home`; answers the installed binary's stdout and the install's stderr.
 fn install_and_run(repo: &Path, home: &Path, bin_dir: &Path) -> (String, String) {
     let out = Command::new(almide_bin())
-        .args(["install", &format!("file://{}", repo.display()), "--bin-dir", bin_dir.to_str().unwrap()])
+        .args(["tool", "install", &format!("file://{}", repo.display()), "--bin-dir", bin_dir.to_str().unwrap()])
         .env("HOME", home)
         .output()
         .expect("spawn almide");

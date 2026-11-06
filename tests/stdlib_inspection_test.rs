@@ -3,7 +3,7 @@
 //! evidence is filled in. The rules are in the ledger's header.
 //!
 //! This test holds the ledger to the stdlib as it is: every public function
-//! (from `almide compile <module> --json`, the same extraction the docs-gen
+//! (from `almide query interface <module> --json`, the same extraction the docs-gen
 //! count uses, plus the checker-surface `compute` / `duration` constructors)
 //! has exactly one row, no row names a function that no longer exists, and a
 //! row's `sig` is the function's current signature, so a signature change
@@ -96,14 +96,14 @@ fn surface() -> BTreeMap<String, (String, &'static str, bool)> {
     modules.dedup();
     for m in &modules {
         let o = Command::new(env!("CARGO_BIN_EXE_almide"))
-            .args(["compile", m, "--json"])
+            .args(["query", "interface", m, "--json"])
             .current_dir(root())
             .output()
-            .expect("almide compile");
+            .expect("almide query interface");
         if !o.status.success() {
             continue; // a docs page that is not a module (index pages); the count gate owns that list
         }
-        let v: Value = serde_json::from_slice(&o.stdout).expect("interface json");
+        let v: Value = serde_json::from_slice::<Value>(&o.stdout).expect("interface json")["result"].clone();
         for f in v["functions"].as_array().into_iter().flatten() {
             let name = f["name"].as_str().unwrap_or("");
             if name.starts_with("__") {

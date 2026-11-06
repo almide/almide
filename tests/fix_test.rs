@@ -89,7 +89,7 @@ effect fn main() -> Unit = {
         .output()
         .unwrap();
     assert!(out.status.success());
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    let v: serde_json::Value = serde_json::from_slice::<serde_json::Value>(&out.stdout).expect("valid json")["result"].clone();
     assert_eq!(v["schema_version"], 1);
     assert!(v["file"].is_string());
     assert!(v["imports_added"].is_array());
@@ -122,7 +122,7 @@ fn fix_applies_a_machine_applicable_fixit_it_was_never_taught() {
         .args(["fix", &path, "--json", "--dry-run"])
         .output()
         .unwrap();
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    let v: serde_json::Value = serde_json::from_slice::<serde_json::Value>(&out.stdout).expect("valid json")["result"].clone();
     let applied = v["applied"].as_array().expect("applied array");
     assert_eq!(applied.len(), 1, "expected exactly one applied fix-it: {}", v);
     assert_eq!(applied[0]["code"], "E013");
@@ -148,7 +148,7 @@ fn fix_never_applies_a_suggestion_that_decides_for_the_author() {
         .args(["fix", &path, "--json", "--dry-run"])
         .output()
         .unwrap();
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    let v: serde_json::Value = serde_json::from_slice::<serde_json::Value>(&out.stdout).expect("valid json")["result"].clone();
     assert_eq!(v["applied"].as_array().map(|a| a.len()), Some(0),
         "a maybe-incorrect fix was applied unattended: {}", v);
     let suggestions = v["suggestions"].as_array().expect("suggestions array");
@@ -182,7 +182,7 @@ fn main() -> Unit = {
         .args(["fix", &path, "--json"])
         .output()
         .unwrap();
-    let v: serde_json::Value = serde_json::from_slice(&second.stdout).expect("valid json");
+    let v: serde_json::Value = serde_json::from_slice::<serde_json::Value>(&second.stdout).expect("valid json")["result"].clone();
     assert_eq!(v["changed"], false, "second run changed the file again: {}", v);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), after_first);
 }
@@ -228,7 +228,7 @@ fn clamp(x: Int) -> Int = {
 "#;
     let path = write_tmp("fix_json_manual.almd", src);
     let out = Command::new(almide()).args(["fix", &path, "--json"]).output().unwrap();
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    let v: serde_json::Value = serde_json::from_slice::<serde_json::Value>(&out.stdout).expect("valid json")["result"].clone();
     let manual = &v["manual_pending"];
     assert!(manual.is_array() && !manual.as_array().unwrap().is_empty());
     let d = &manual[0];
@@ -607,7 +607,7 @@ effect fn main() -> Unit = {
 "#;
     let path = write_tmp("fix_e041_assign_targets.almd", src);
     let out = Command::new(almide()).args(["fix", &path, "--json", "--dry-run"]).output().unwrap();
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    let v: serde_json::Value = serde_json::from_slice::<serde_json::Value>(&out.stdout).expect("valid json")["result"].clone();
     let sugg: Vec<_> = v["suggestions"].as_array().expect("suggestions array")
         .iter().filter(|a| a["code"] == "E041").cloned().collect();
     assert_eq!(sugg.len(), 3, "one positioned E041 fix per assignment target: {v}");

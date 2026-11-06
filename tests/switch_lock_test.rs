@@ -1,7 +1,7 @@
 //! #4129: an environment the developer does not control must not make the
 //! compiler build something other than the reviewed source, or skip a check.
 //!
-//! - `almide survive`'s overlay reaches a child run only as an argument; the
+//! - `almide apply --dry-run`'s overlay reaches a child run only as an argument; the
 //!   retired `ALMIDE_SURVIVE_OVERLAY` environment variables change nothing.
 //! - Under the switch lock (a release build, or `--lock-switches` in any
 //!   build) an inherited route / gate / ablation / trap switch is ignored
@@ -57,7 +57,7 @@ fn the_overlay_environment_variables_change_nothing() {
     assert!(out.contains("from_the_disk_file"), "the disk bytes compile:\n{out}");
     assert!(!out.contains("from_the_overlay_text"), "the environment swapped the source:\n{out}");
 
-    // Control: the argument hand-off `almide survive` uses DOES overlay, so
+    // Control: the argument hand-off `almide apply --dry-run` uses DOES overlay, so
     // the read path above was the overlay-aware one.
     let o = run(
         &d,

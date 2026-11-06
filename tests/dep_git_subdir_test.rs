@@ -159,11 +159,11 @@ fn two_subdir_packages_of_one_repository_resolve_lock_and_share_a_clone() {
     assert_eq!(stderr(&out).matches("Fetching").count(), 0, "{}", stderr(&out));
     assert_eq!(shared_checkouts(&home).len(), 1, "the ref checkout, reused at the locked commit: {:?}", shared_checkouts(&home));
 
-    // `dep-path` prints the package's own directory inside the clone.
-    let out = almide(&proj, &home, &["dep-path", "snaidhm"]);
+    // `deps --path` prints the package's own directory inside the clone.
+    let out = almide(&proj, &home, &["deps", "--path", "snaidhm"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let printed = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    assert!(printed.ends_with("snaidhm/src"), "dep-path printed {printed}");
+    assert!(printed.ends_with("snaidhm/src"), "deps --path printed {printed}");
     assert!(Path::new(&printed).join("mod.almd").is_file(), "{printed}");
 
     // `deps` shows the subdir.

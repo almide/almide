@@ -304,12 +304,20 @@ fn run_check_json(file: &Path) -> Vec<DiagJson> {
         .output()
         .expect("almide check --json");
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    stdout.lines().filter_map(DiagJson::parse).collect()
+    check_json_rows(&stdout).iter().map(DiagJson::from_value).collect()
 }
 
-/// Minimal subset of the `almide check --json` payload the harness
-/// consumes. Intentionally hand-parsed so the test crate stays
-/// serde-free (matches the emitter side in `diagnostic_render.rs`).
+/// The diagnostic rows of a `check --json` run: the `diagnostics` array of
+/// its one envelope line (#4590).
+fn check_json_rows(stdout: &str) -> Vec<serde_json::Value> {
+    serde_json::from_str::<serde_json::Value>(stdout.trim())
+        .ok()
+        .and_then(|env| env["diagnostics"].as_array().cloned())
+        .unwrap_or_default()
+}
+
+/// Minimal subset of the `almide check --json` diagnostic row the harness
+/// consumes.
 #[derive(Debug)]
 struct DiagJson {
     code: Option<String>,
@@ -322,89 +330,31 @@ struct DiagJson {
     /// #1312: the applicability tag that decides whether an unattended
     /// fixer may apply this. "unspecified" means nothing applies it.
     applicability: Option<String>,
-    /// #2088: the PRIMARY span — the region the caret underlines. Emitted
-    /// at the top level of the payload, after the nested `try_replace` and
-    /// `suggestions` objects that carry the same field names, so it is read
-    /// from the LAST occurrence of each key.
+    /// #2088: the PRIMARY span — the region the caret underlines: the
+    /// top-level `line` / `col` / `end_col` of the row (the nested
+    /// `try_replace` and `suggestions` objects carry the same field names).
     span: Option<(usize, usize, usize)>,
 }
 
 impl DiagJson {
-    fn parse(line: &str) -> Option<Self> {
-        if !line.trim_start().starts_with('{') { return None; }
-        let span = match (
-            json_uint_last(line, "\"line\":"),
-            json_uint_last(line, "\"col\":"),
-            json_uint_last(line, "\"end_col\":"),
-        ) {
-            (Some(l), Some(c), Some(e)) => Some((l, c, e)),
-            _ => None,
+    fn from_value(d: &serde_json::Value) -> Self {
+        let str_field = |v: &serde_json::Value| v.as_str().map(String::from);
+        let triple = |v: &serde_json::Value| -> Option<(usize, usize, usize)> {
+            Some((
+                v["line"].as_u64()? as usize,
+                v["col"].as_u64()? as usize,
+                v["end_col"].as_u64()? as usize,
+            ))
         };
-        Some(DiagJson {
-            code: json_string(line, "\"code\":"),
-            hint: json_string(line, "\"hint\":"),
-            try_snippet: json_string(line, "\"try\":"),
-            try_replace: json_obj_uints(line, "\"try_replace\":", &["line", "col", "end_col"])
-                .map(|v| (v[0], v[1], v[2])),
-            applicability: json_string(line, "\"applicability\":"),
-            span,
-        })
-    }
-}
-
-fn json_string(blob: &str, key: &str) -> Option<String> {
-    let i = blob.find(key)?;
-    let rest = &blob[i + key.len()..];
-    let rest = rest.trim_start();
-    if rest.starts_with("null") { return None; }
-    if !rest.starts_with('"') { return None; }
-    let body = &rest[1..];
-    let mut out = String::new();
-    let mut chars = body.chars();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            match chars.next()? {
-                'n' => out.push('\n'),
-                't' => out.push('\t'),
-                '"' => out.push('"'),
-                '\\' => out.push('\\'),
-                other => { out.push(other); }
-            }
-        } else if c == '"' {
-            return Some(out);
-        } else {
-            out.push(c);
+        DiagJson {
+            code: str_field(&d["code"]),
+            hint: str_field(&d["hint"]),
+            try_snippet: str_field(&d["try"]),
+            try_replace: triple(&d["try_replace"]),
+            applicability: str_field(&d["applicability"]),
+            span: triple(d),
         }
     }
-    None
-}
-
-/// Read a top-level unsigned field. `rfind`, not `find`: `line` / `col` /
-/// `end_col` also name fields inside the `try_replace` object and every entry
-/// of `suggestions`, and the top-level pair is emitted last.
-fn json_uint_last(blob: &str, key: &str) -> Option<usize> {
-    let i = blob.rfind(key)?;
-    let tail = &blob[i + key.len()..];
-    let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
-    digits.parse().ok()
-}
-
-fn json_obj_uints(blob: &str, key: &str, fields: &[&str]) -> Option<Vec<usize>> {
-    let i = blob.find(key)?;
-    let rest = &blob[i + key.len()..].trim_start();
-    if rest.starts_with("null") { return None; }
-    if !rest.starts_with('{') { return None; }
-    let end = rest.find('}')?;
-    let inner = &rest[1..end];
-    let mut out = Vec::with_capacity(fields.len());
-    for f in fields {
-        let needle = format!("\"{}\":", f);
-        let pos = inner.find(&needle)?;
-        let tail = &inner[pos + needle.len()..];
-        let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
-        out.push(digits.parse().ok()?);
-    }
-    Some(out)
 }
 
 /// Apply a `try_replace` span to `source` — mirrors
@@ -616,9 +566,8 @@ fn repair_grep_needles_appear_in_the_diagnostic() {
             .output()
             .expect("almide check --json");
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-        let said: String = stdout.lines()
-            .filter(|l| l.trim_start().starts_with('{'))
-            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        let said: String = check_json_rows(&stdout)
+            .into_iter()
             .filter(|d| meta.expects_code.as_deref().is_none_or(|c| d["code"] == c))
             .map(|d| {
                 let mut s = String::new();
