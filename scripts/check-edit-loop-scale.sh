@@ -66,13 +66,16 @@
 #           checker, so it moves differently across classes by construction. A
 #           reference that is the checker's own work (another rung) would cancel
 #           the very slowdown this row is for. So each class carries its own
-#           anchor (`ratio@<model> <value>` in the baseline file), measured on
-#           that class from at least three CI runs, with the same +/-budget
-#           around it. A CPU model with no anchor yet REPORTS its ratio and a
-#           `::warning::` and does not fail on it: an unanchored class has no
-#           value to compare with, and borrowing another class's anchor is the
-#           random verdict this replaced. Every other row (the slopes, the
-#           shares) is class-independent and still gates on every runner.
+#           anchor (`ratio | <model> | value | runs` in the baseline file),
+#           measured on that class from at least three CI runs, with the same
+#           +/-budget around it. A CPU model with no anchor yet REPORTS its
+#           ratio and a `::warning::` and does not fail on it: an unanchored
+#           class has no value to compare with, and borrowing another class's
+#           anchor is the random verdict this replaced. `share_lex` also takes
+#           a class anchor where one class's lex/check split differs (Xeon
+#           8573C), but keeps its shared anchor for every other runner, so no
+#           runner stops gating it. The slopes and the other shares are
+#           class-independent and gate on every runner.
 #           EDIT_LOOP_RUNNER_CLASS overrides the detected model (tests only).
 #
 # Both move only on purpose: a regression fails, and a real durable win lowers
@@ -257,7 +260,13 @@ runner_class = sys.argv[13]
 PHASES = ["lex", "parse", "check"]
 # Rows anchored per runner class (see `ratio` in the header). Every other row
 # has ONE anchor and gates on every runner.
-CLASS_ROWS = {"ratio"}
+#   ratio      per class only — one value for every CPU is meaningless for it.
+#   share_lex  one shared anchor, plus a class anchor where a class's lex/check
+#              split differs from it (Xeon 8573C reads ~0.113 against ~0.100 on
+#              the AMD classes). A class without its own anchor gates on the
+#              shared one, so no runner loses this row.
+CLASS_ROWS = {"ratio", "share_lex"}
+CLASS_ONLY_ROWS = {"ratio"}
 # A class anchor needs this many CI runs on that class behind it.
 CLASS_MIN_RUNS = 3
 
@@ -369,7 +378,7 @@ try:
             class_anchors.setdefault(name, {})[" ".join(model.split())] = float(value)
         else:
             k, v = line.split()
-            if k in CLASS_ROWS:
+            if k in CLASS_ONLY_ROWS:
                 sys.exit(f"::error::editloop-scale: {baseline_path}:{lineno}: `{k}` is anchored per "
                          "runner class — one value for every CPU is what made it pass or fail by "
                          "the runner draw. Write `"
@@ -388,8 +397,10 @@ except FileNotFoundError:
     sys.exit(0)
 
 missing = {"slope", "slope_check"} | {f"share_{n}" for n in PHASES}
+missing -= CLASS_ROWS - CLASS_ONLY_ROWS
 missing -= set(baseline)
-missing |= CLASS_ROWS - set(class_anchors)
+missing |= CLASS_ONLY_ROWS - set(class_anchors)
+missing |= {n for n in CLASS_ROWS - CLASS_ONLY_ROWS if n not in baseline}
 if missing:
     sys.exit(f"::error::editloop-scale: baseline has no entry for {sorted(missing)} — "
              "an anchored quantity was added without anchoring it (a per-class row needs at least "
@@ -397,12 +408,14 @@ if missing:
 
 # Resolve the per-class rows for this runner. An unanchored class reports and
 # does not gate those rows; the class-independent rows below still gate.
-unanchored = []
+unanchored, class_scoped = [], set()
 for name in sorted(CLASS_ROWS):
-    if runner_class in class_anchors[name]:
+    if runner_class in class_anchors.get(name, {}):
         baseline[name] = class_anchors[name][runner_class]
-    else:
+        class_scoped.add(name)
+    elif name in CLASS_ONLY_ROWS:
         unanchored.append(name)
+    # else: no class anchor for this runner — the shared anchor in `baseline` gates
 
 # (name, measured, budget %, floor as a fraction of baseline).
 # The share floors are SYMMETRIC with their ceilings, unlike slope/ratio: a share
@@ -445,7 +458,8 @@ for name, value, budget, floor_frac in checks:
         if value > half_up or (name.startswith("share_") and value < half_down):
             verdict = f"ok, but past half its band ({100 * (value / base - 1):+.1f}%)"
             drifted.append(name)
-    scope = f", class `{runner_class}`" if name in CLASS_ROWS else ""
+    scope = (f", class `{runner_class}`" if name in class_scoped
+             else ", shared anchor" if name in CLASS_ROWS else "")
     print(f"editloop-scale: {name:12s} {value:.4f} (baseline {base:.4f}, +/-{budget:.0f}% budget{scope}) {verdict}")
 
 if drifted and not failed:
