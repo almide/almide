@@ -609,11 +609,12 @@ impl Checker {
     /// `guard let` binding of the Option/Result payload for the rest of
     /// the block. Verbatim text move.
     fn check_stmt_guard_let(&mut self, stmt: &mut ast::Stmt) {
-        let ast::Stmt::GuardLet { name, scrutinee, else_, .. } = stmt else { unreachable!() };
+        let ast::Stmt::GuardLet { name, scrutinee, else_, mutable, shorthand, fail, span } = stmt else { unreachable!() };
         // Swift-style: bind `name` to the value inside the scrutinee's
         // Option/Result for the REST of the block (define_var in the current
         // block scope persists across the following stmts). The else branch
         // diverges; lowering desugars the block tail into a Some/Ok match.
+        let kw = if *mutable { "guard var" } else { "guard let" };
         let scrut_ty = self.infer_expr(scrutinee);
         let resolved = resolve_ty(&scrut_ty, &self.uf);
         let bound_ty = match &resolved {
@@ -624,6 +625,15 @@ impl Checker {
                 args[0].clone()
             }
             Ty::Unknown => Ty::Unknown,
+            // #4543: the shorthand rebinds a name, so the refusal names it.
+            other if *shorthand => {
+                self.emit(super::err(
+                    format!("`{kw} {name} else …` needs `{name}` to be an Option or Result, found `{}`", other.display()),
+                    format!("the shorthand rebinds `{name}` to the payload of an Option/Result binding; `{name}` already holds a plain value, so use it directly (drop the `{kw}`)"),
+                    "guard let scrutinee".to_string(),
+                ).with_code("E001"));
+                Ty::Unknown
+            }
             other => {
                 self.emit(super::err(
                     format!("`guard let` requires an Option or Result, found `{}`", other.display()),
@@ -633,10 +643,40 @@ impl Checker {
                 Ty::Unknown
             }
         };
+        // #4543: `else err(e) => …` binds the Result's error for the else
+        // only; `else none => …` is the Option's plain else. The arm must name
+        // the failure side of the scrutinee's own type.
+        if let Some(pat) = fail.as_ref() {
+            self.env.push_scope();
+            let wrong_side = match (&resolved, pat) {
+                (Ty::Applied(TypeConstructorId::Option, _), ast::Pattern::Err { .. }) => Some(("an Option", "none =>")),
+                (Ty::Applied(TypeConstructorId::Result, _), ast::Pattern::None) => Some(("a Result", "err(e) =>")),
+                _ => None,
+            };
+            match wrong_side {
+                Some((what, arm)) => self.emit(super::err(
+                    format!("this `{kw}` unwraps {what}, so its failure arm is `{arm}`"),
+                    format!("write `else {arm} …` (or the plain `else …`) for {what}"),
+                    "guard let failure arm".to_string(),
+                ).with_code("E001")),
+                None => self.bind_pattern(pat, &resolved),
+            }
+        }
         let ety = self.infer_expr(else_);
+        if fail.is_some() {
+            self.env.pop_scope();
+        }
         // ADR-0021: inside a lambda the else returns into the lambda's channel.
         self.record_lambda_returned_err(&ety, matches!(else_.kind, ast::ExprKind::Ok { .. }), else_.span);
         self.env.define_var(name, bound_ty);
+        // #4543: `guard var` — the binding is a `var` for the rest of the block.
+        if *mutable {
+            if let Some(s) = span {
+                self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
+            }
+            self.env.mutable_vars.insert(sym(name));
+            self.env.var_lambda_depth.insert(sym(name), self.env.lambda_depth);
+        }
     }
 
 }

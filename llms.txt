@@ -221,6 +221,37 @@ effect fn open_file(path: String) -> Result[String, String] = {
 }
 ```
 
+### `guard let`: unwrap or exit early, with the error in hand
+
+```almide check
+type LoadError = | NotFound(String) | Empty
+
+fn find(users: Map[String, String], id: String) -> Result[String, LoadError] = match map.get(users, id) {
+  some(name) => if name == "" then err(Empty) else ok(name),
+  none => err(NotFound(id)),
+}
+
+fn reason(e: LoadError) -> String = match e {
+  NotFound(id) => "no user ${id}",
+  Empty => "empty name",
+}
+
+fn handle(users: Map[String, String], id: String) -> String = {
+  guard let user = find(users, id) else err(e) => "404 ${reason(e)}"   // e: LoadError
+  "200 ${user}"
+}
+
+fn greet(name: Option[String]) -> String = {
+  guard var name else { "hello, stranger" }   // shorthand: guard var name = name
+  name = string.to_upper(name)
+  "hello, ${name}"
+}
+```
+
+`else err(e) => E` is the only failure arm a guard takes (an Option's is `else none => E`,
+the same as `else E`); to split errors into cases, write a `match`. `guard let x else E`
+rebinds a local or parameter `x`; a field path (`guard let a.b`) is refused.
+
 ### `??` / `?` / `!`
 
 ```almide check
@@ -232,6 +263,16 @@ fn host(v: Value) -> Option[String] =
 
 effect fn parse_port(s: String) -> Result[Int, String] = ok(int.parse(s)!)          // unwrap a Result, propagate err (effect fn only)
 ```
+
+Precedence (dialect 16, one widely used order for every binary operator):
+postfix `. () [] ! ? ?.` > prefix `- not` > `>>` > `^` > `* / %` > `+ -` >
+`..< ...` > `|>` > `??` (right-assoc) > `== != < > <= >=` > `and` > `or`.
+So `x ?? 0 - 1` is `x ?? (0 - 1)`, `s + b ?? 0` is `(s + b) ?? 0`, and
+`xs |> list.first ?? 0` falls back on the pipe's result. Before dialect 16
+`??` bound tighter than every binary operator; in a file without a
+`@dialect(16)` stamp a `??` whose grouping changed is E120 until parentheses
+say which reading is meant (`almide fix` keeps the old one). Write the
+parentheses: `(map.get(m, k) ?? 0) + 1`.
 
 ### Which error type — a layer, not a taste call
 
@@ -528,6 +569,7 @@ context-specific rules in [E022](docs/diagnostics/E022.md) and
 | [E117](docs/diagnostics/E117.md) | `http.typed` takes a literal media type no safe module owns |
 | [E118](docs/diagnostics/E118.md) | a media type's owner is not granted, not unique, or not a literal |
 | [E119](docs/diagnostics/E119.md) | a Region lent to an `@export(c)` fn escapes its call |
+| [E120](docs/diagnostics/E120.md) | a `??` whose grouping changed at dialect 16 |
 | [E420](docs/diagnostics/E420.md) | Function visibility violation |
 
 Retired codes: **E039** (`result.collect` / `collect_map`) and **E040**

@@ -8,7 +8,8 @@ use wasm_encoder::{BlockType, Function, MemArg, ValType};
 use crate::*;
 
 /// `$alloc(len: i32) -> i32`: allocate a layout-true block (header
-/// rc=1/len/cap=len + payload), returns the block BASE. The size-class
+/// rc=1/len/cap + payload), returns the block BASE. `cap` is the PHYSICAL payload
+/// capacity on every path, so `cap >= max(len, 4)` (runtime_alloc_cap_test.rs). The size-class
 /// free lists (RC-2) are consulted first — a freed block whose class
 /// capacity covers the request is reused; otherwise bump, growing
 /// memory when needed.
@@ -69,7 +70,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool, o
         .i32_add()
         .local_set(next); // next = the class slot ADDRESS now
     crate::canonical_alloc::emit_class_head(&mut i, canonical, next, (head, 5, 6)).local_tee(head).if_(BlockType::Empty);
-    // pop: slot = head.payload[0]; headers rc=1/len/cap=len; done.
+    // pop: slot = head.payload[0]; headers rc=1/len/cap; done.
     if let Some(c) = counters {
         bump_counter(&mut i, c + crate::alloc_count::REUSED);
     }
@@ -176,7 +177,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool, o
         .unreachable()
         .end();
     i.end();
-    // header: rc = 1, len, cap = len; advance the bump head
+    // header: rc = 1, len, cap = want - PAYLOAD (physical); advance the bump head
     i.local_get(base).i32_const(1).i32_store(word(almide_layout::RC.offset));
     i.local_get(base).local_get(len).i32_store(word(almide_layout::LEN.offset));
     i.local_get(base)
@@ -640,82 +641,19 @@ pub(crate) fn emit_drop_fn(ti: u32) -> Function {
     f
 }
 
-/// The signatures assembly promises for the rc-glue helpers (#2010).
-pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
-    if matches!(h, Helper::IncEntries { .. }) {
-        return Some(vec![ValType::I32, ValType::I32]);
-    }
-    matches!(
-        h,
-        Helper::DropList { .. }
-            | Helper::IncElems
-            | Helper::CopyElems { .. }
-            | Helper::CowElems { .. }
-            | Helper::DropShape { .. }
-            | Helper::IncShape { .. }
-            | Helper::DropMapSpine { .. }
-            | Helper::DropEntries { .. }
-            | Helper::CopyEntries { .. }
-            | Helper::DropEnv { .. }
-            | Helper::DropFn { .. }
-            | Helper::DropCell { .. }
-            | Helper::DropHttpCall
-    )
-    .then(|| vec![ValType::I32])
-}
-
-/// The result type of a helper: the drops and the credit walk return
-/// nothing; the copy variants hand the block back; everything else i32
-/// unless assembly says f64.
-pub(crate) fn helper_result(h: &Helper) -> Option<ValType> {
-    match h {
-        Helper::DropList { .. }
-        | Helper::IncElems
-        | Helper::DropShape { .. }
-        | Helper::IncShape { .. }
-        | Helper::DropMapSpine { .. }
-        | Helper::DropEntries { .. }
-        | Helper::IncEntries { .. }
-        | Helper::DropEnv { .. }
-        | Helper::DropFn { .. }
-        | Helper::DropCell { .. }
-        | Helper::DropHttpCall => None,
-        _ => Some(ValType::I32),
-    }
-}
-
-/// The rc-glue helper bodies; a `DropShape` body was built at registration
-/// (`work.drop_bodies`) — a missing one is a loud stub.
-pub(crate) fn helper_body(h: &Helper, work: &crate::work::FnWork) -> Option<Function> {
-    Some(match h {
-        Helper::DropList { elem_dec } => emit_drop_list(*elem_dec),
-        Helper::IncElems => emit_inc_elems(),
-        Helper::CopyElems { inc_elems } => emit_copy_elems(*inc_elems),
-        Helper::DropMapSpine { side_clear } => emit_drop_map_spine(*side_clear),
-        Helper::DropEntries { stride, slots, side_clear } => emit_drop_entries(*stride, *slots, *side_clear),
-        Helper::IncEntries { stride, slots } => emit_inc_entries(*stride, *slots),
-        Helper::CopyEntries { inc_entries } => emit_copy_entries(*inc_entries),
-        Helper::DropEnv { slots } => emit_drop_shape(slots, None),
-        Helper::DropFn { ti } => emit_drop_fn(*ti),
-        Helper::DropHttpCall => emit_drop_http_call(),
-        Helper::DropCell { elem_dec } => emit_drop_shape(&elem_dec.map(|d| (0, d)).into_iter().collect::<Vec<_>>(), None),
-        Helper::DropShape { .. } | Helper::IncShape { .. } => {
-            let mut bodies = work.drop_bodies.borrow_mut();
-            let built = bodies.iter_mut().find(|(k, _)| k == h).and_then(|(_, f)| f.take());
-            built.unwrap_or_else(|| {
-                let mut f = Function::new([]);
-                f.instructions().unreachable().end();
-                f
-            })
-        }
-        _ => return None,
-    })
-}
+// The helper ABI (params, result, body dispatch) lives in runtime_alloc_helpers.rs.
+#[path = "runtime_alloc_helpers.rs"]
+mod helpers;
+pub(crate) use helpers::{helper_body, helper_params, helper_result};
 
 // `$map_reserve` and `$cow` live in runtime_alloc_cow.rs (the file budget).
 #[path = "runtime_alloc_cow.rs"]
 mod cow;
 pub(crate) use cow::{emit_cow, emit_map_reserve};
+
+#[cfg(test)]
+#[path = "runtime_alloc_cap_test.rs"]
+mod cap_test;
 
 #[cfg(test)]
 mod tests {

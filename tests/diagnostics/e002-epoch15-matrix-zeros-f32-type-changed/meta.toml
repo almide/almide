@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'matrix.zeros_f32'"
+hint_substring = "Not applied by `almide fix`: `matrix.zeros` returns Matrix, not Matrix[Float32]: adapt the callers"

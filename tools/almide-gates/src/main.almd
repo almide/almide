@@ -288,10 +288,10 @@ fn first_divergence(expected: String, actual: String) -> String = {
   let a = string.split(actual, "\n")
   let hit = list.range(0, int.max(list.len(e), list.len(a))) |> list.find((i) => (list.get(e, i) ?? "<missing>") != list.get(a, i) ?? "<missing>")
   match hit {
-    some(i) => "line " + int.to_string(i + 1) + "\n  committed: " + list.get(e, i) ?? "<missing>" + "\n  rendered:  " + list.get(
+    some(i) => "line " + int.to_string(i + 1) + "\n  committed: " + (list.get(e, i) ?? "<missing>") + "\n  rendered:  " + (list.get(
       a,
       i,
-    ) ?? "<missing>",
+    ) ?? "<missing>"),
     none => "",
   }
 }

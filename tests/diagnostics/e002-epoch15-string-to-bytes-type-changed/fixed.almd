@@ -1,0 +1,8 @@
+// `string.to_bytes` left at dialect epoch 15 for `bytes.from_string`, which
+// keeps the arguments but returns Bytes, not List[Int]. Renaming the callee
+// alone would hand the caller another type, so `almide fix` leaves the call
+// to the author (#4525).
+effect fn main() -> Unit = {
+  let codes: List[Int] = bytes.to_list(bytes.from_string("Hi"))
+  println(int.to_string(list.len(codes)))
+}

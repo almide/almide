@@ -414,10 +414,13 @@ impl Emitter<'_> {
         }
     }
 
+    /// `tail`: the call is the frame's tail (the linked fallback below
+    /// keeps it, #4580).
     pub(crate) fn lower_bytes_call(
         &mut self,
         func: &str,
         args: &[IrExpr],
+        tail: bool,
     ) -> ArmResult {
         // A `__`-named declaration is the width primitive under a checked
         // public wrapper (`bytes.__chunks` under `bytes.chunk`, the typed byte
@@ -662,8 +665,15 @@ impl Emitter<'_> {
                 self.emit_bytes_writeback_fresh(&recv)?;
                 Ok(None)
             }
-            // Not a native arm: the audited linked path before the wall.
-            _ => self.lower_linked_call("bytes", func, args, false),
+            // Not a native arm: the audited linked path before the wall. It
+            // keeps the site's tail position (#4580): `fn setf(mut b: Bytes, i:
+            // Int, v: Float) = bytes.put_f32_le(b, i * 4, v)` ends in this call,
+            // and as a plain call the frame shared `b` into it (rc 2) and
+            // released its own credit only after it returned, so the callee's
+            // copy-on-write judge copied the whole buffer on every call. At
+            // the tail the frame's dying `mut` param moves in (`MoveSet::Any`)
+            // and the callee meets it at the caller's count.
+            _ => self.lower_linked_call("bytes", func, args, tail),
         }
     }
 }

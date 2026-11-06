@@ -342,10 +342,10 @@ fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
 /// #4006 family B: rewrite every scalar-Option window onto the native
 /// carrier prims. The Option values are seeded from the declared types: a
 /// call to a fn returning a scalar Option, and a param declared as one.
-fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
-    let mut option_fns: std::collections::BTreeSet<String> = ir
-        .functions
-        .iter()
+fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, linked: &[LinkedSelfHost], functions: &mut [crate::MirFunction]) {
+    // The declarations: the program's, and every linked self-host source's.
+    let declared = || ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter()));
+    let mut option_fns: std::collections::BTreeSet<String> = declared()
         .filter(|f| is_scalar_option(&f.ret_ty))
         .map(|f| f.name.as_str().to_string())
         .collect();
@@ -372,7 +372,7 @@ fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
         }
     }
     let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
-        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+        declared().map(|f| (f.name.as_str(), f)).collect();
     for f in functions.iter_mut() {
         let opt_params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
             Some(d) if d.params.len() == f.params.len() => d
@@ -382,10 +382,22 @@ fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
                 .filter(|(dp, _)| is_scalar_option(&dp.ty))
                 .map(|(_, mp)| mp.value)
                 .collect(),
+            // A lifted lambda declares its params where the lowering lifts
+            // it (`crate::lambda_sigs`), after its env param.
+            None => match crate::lambda_sigs::get(&f.name) {
+                Some((ps, _)) if ps.len() + 1 == f.params.len() => ps
+                    .iter()
+                    .zip(&f.params[1..])
+                    .filter(|(t, _)| is_scalar_option(t))
+                    .map(|(_, mp)| mp.value)
+                    .collect(),
+                _ => Vec::new(),
+            },
             _ => Vec::new(),
         };
         let carriers = heap_carrier_values(ir, f);
-        crate::native_option_rewrite::rewrite_option_ops(f, &option_fns, &opt_params, &carriers);
+        let filled = crate::option_blocks::of(&f.name);
+        crate::native_option_rewrite::rewrite_option_ops(f, &option_fns, &opt_params, &carriers, &filled);
     }
 }
 

@@ -1,0 +1,35 @@
+// mutmap (#4580): a Map[Int, Int] filled and overwritten through a `mut m`
+// helper per write (`p`), against the same writes inline on a local `var`
+// (`l`). The argument is `mode:rounds`; each round writes KEYS entries. The
+// wasm leg refused an owned param from the in-place map set (a rule written
+// when params were borrowed views), so every write through the helper copied
+// the whole map: quadratic in its size.
+import env
+
+let KEYS = 4000
+
+fn put(mut m: Map[Int, Int], k: Int, v: Int) -> Unit = { m[k] = v }
+
+fn run_param(rounds: Int) -> Int = {
+  var m: Map[Int, Int] = [:]
+  for r in 0..<rounds {
+    for k in 0..<KEYS { put(m, k, k + r) }
+  }
+  (map.get(m, KEYS - 1) ?? 0) + map.len(m)
+}
+
+fn run_local(rounds: Int) -> Int = {
+  var m: Map[Int, Int] = [:]
+  for r in 0..<rounds {
+    for k in 0..<KEYS { m[k] = k + r }
+  }
+  (map.get(m, KEYS - 1) ?? 0) + map.len(m)
+}
+
+effect fn main() -> Unit = {
+  let parts = string.split(list.get(env.args(), 0) ?? "l:2", ":")
+  let mode = list.get(parts, 0) ?? "l"
+  let rounds = int.parse(list.get(parts, 1) ?? "") ?? 2
+  let got = if mode == "p" then run_param(rounds) else run_local(rounds)
+  println("rounds=${rounds} got=${got}")
+}

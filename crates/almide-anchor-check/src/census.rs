@@ -16,6 +16,10 @@
 //! payload and the address a bare `local.get`: a block's rc, len or cap
 //! word), BULK (`memory.copy` / `memory.fill`), or a payload or raw
 //! access.
+//!
+//! [`census_with`] also counts as located the self-host prim sites a
+//! verified linear certificate covers (lin.rs, #4005 A4), tallied apart as
+//! `linear`.
 
 use std::collections::HashSet;
 
@@ -31,6 +35,8 @@ pub struct Tally {
     pub located: usize,
     pub header: usize,
     pub bulk: usize,
+    /// Of `located`, the accesses only a linear certificate locates.
+    pub linear: usize,
 }
 
 /// The census of one artifact: certified frames, runtime routines.
@@ -86,6 +92,11 @@ fn located(anchors: &str) -> Result<HashSet<At>, String> {
 
 /// The census of `bodies` against `anchors`.
 pub fn census(bodies: &[Body<'_>], anchors: &str) -> Result<Census, String> {
+    census_with(bodies, anchors, &HashSet::new())
+}
+
+/// [`census`] with the accesses a verified linear certificate covers.
+pub fn census_with(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<At>) -> Result<Census, String> {
     let at = located(anchors)?;
     let (_, _, _, _, _, rc) = parse_anchors_held(anchors)?;
     let frames: HashSet<usize> = rc.map(|(_, _, f, _, _, _)| f.into_iter().map(|(p, _)| p).collect()).unwrap_or_default();
@@ -100,6 +111,9 @@ pub fn census(bodies: &[Body<'_>], anchors: &str) -> Result<Census, String> {
             let before_call = b.ops.get(k + 1).is_some_and(|o| matches!(o, Op::Call { .. })) && at.contains(&At { func, op: k + 1 });
             if here || before_call {
                 t.located += 1;
+            } else if linear.contains(&At { func, op: k }) {
+                t.located += 1;
+                t.linear += 1;
             } else if bulk {
                 t.bulk += 1;
             } else if off < 12 && b.args[k].first().copied().flatten().is_some_and(|p| matches!(b.ops[p], Op::LocalGet { .. })) {

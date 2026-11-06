@@ -1529,10 +1529,14 @@ impl Checker {
     }
 
     fn infer_pipe(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
-        // Unwrap postfix operators (??, !, ?) on the RHS so the pipe targets the inner Call.
-        // e.g. `xs |> list.find(pred) ?? fallback` → pipe into list.find, then apply ??
+        // Unwrap the postfix operators (`!`, `?`) on the RHS so the pipe targets
+        // the inner call: `xs |> f(a)!` pipes into `f`, then unwraps. `??` is
+        // not among them since dialect 16 (#4531): it is an infix level below
+        // `|>`, so `xs |> f(a) ?? d` parses as `(xs |> f(a)) ?? d` and reaches
+        // the ordinary `??` rule. The ADR-0005 D6 re-association that used to
+        // live here is what that grammar does by construction; a stage
+        // written `xs |> (f ?? g)` is a Paren and pipes into the fallback fn.
         match &mut right.kind {
-            ExprKind::UnwrapOr { expr: inner, fallback, .. } => self.infer_pipe_unwrap_or(left, inner, fallback),
             ExprKind::Unwrap { expr: inner, .. } => {
                 let erasure_mark = self.lambda_err_erasures.len();
                 let inner_ty = self.infer_pipe(left, inner);
@@ -1560,36 +1564,6 @@ impl Checker {
             }
             _ => self.infer_pipe_direct(left, right),
         }
-    }
-
-    /// `ExprKind::UnwrapOr` arm of [`Self::infer_pipe`]. Verbatim text move.
-    fn infer_pipe_unwrap_or(&mut self, left: &mut Box<ast::Expr>, inner: &mut Box<ast::Expr>, fallback: &mut Box<ast::Expr>) -> Ty {
-        let inner_ty = self.infer_pipe(left, inner);
-        let ft = self.infer_expr(fallback);
-        let resolved = resolve_ty(&inner_ty, &self.uf);
-        // #1127: annotate the piped operand with its RESOLVED type — the
-        // lowering reads it to pick the Option- vs Result-shaped unwrap
-        // (the pipe-`!` arm above has the same insert for the same reason).
-        // Without it a Result operand was matched as Some/None, a rustc
-        // E0308 behind the codegen wall.
-        self.type_map.insert(inner.id, resolved.clone());
-        // Mirror the DIRECT `??` rule (infer_expr_g3_unwrap_or): unwrap the
-        // payload first, then constrain the FALLBACK against the payload —
-        // the old code unified the fallback with the whole Option/Result.
-        let payload = if let Some(ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
-            ty
-        } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
-            ft.clone()
-        } else {
-            self.emit(super::err(
-                format!("operator '??' requires Option or Result type but got {}", resolved.display()),
-                "Use '??' only on Option[T] or Result[T, E] values",
-                "operator ??",
-            ).with_code("E034"));
-            ft.clone()
-        };
-        self.constrain(payload.clone(), ft, "?? fallback");
-        payload
     }
 
     fn infer_pipe_direct(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {

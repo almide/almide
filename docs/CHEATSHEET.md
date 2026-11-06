@@ -732,6 +732,59 @@ guard not fs.exists(path) else {
 }
 ```
 
+### guard let (unwrap or exit early)
+`guard let x = r else E` binds the Ok/Some payload of `r` as `x` for the rest of
+the block; on err/none the function returns `E`. To use the error, write the
+else as a match arm: `else err(e) => E` (`e` has the Result's error type; an
+Option's arm is `else none => E`, the same as `else E`). One failure arm only:
+to split errors into cases, write a `match`.
+
+```almide check
+type ConfigError = | Missing(String) | BadPort(Int)
+
+fn describe(e: ConfigError) -> String = match e {
+  Missing(k) => "missing ${k}",
+  BadPort(p) => "bad port ${int.to_string(p)}",
+}
+
+fn find_port(m: Map[String, Int]) -> Result[Int, ConfigError] = match map.get(m, "port") {
+  some(p) => if p > 0 then ok(p) else err(BadPort(p)),
+  none => err(Missing("port")),
+}
+
+fn status(m: Map[String, Int]) -> String = {
+  guard let port = find_port(m) else err(e) => "404 ${describe(e)}"   // e: ConfigError
+  "200 port ${int.to_string(port)}"
+}
+
+fn main() -> Unit = println(status(map.from_list([("port", 80)])))
+```
+
+`guard let x else E` is short for `guard let x = x else E` (`x` is a local or
+parameter holding an Option or Result). `guard var` makes the binding mutable.
+Both combine with the failure arm.
+
+```almide check
+fn greeting(name: Option[String]) -> String = {
+  guard var name else { "hello, stranger" }   // name: String from here on
+  name = string.to_upper(name)
+  "hello, ${name}"
+}
+
+fn parse_twice(s: String) -> Result[Int, String] = {
+  let n = int.parse(s)
+  guard let n else err(e) => err("not a number: ${s}")
+  ok(n * 2)
+}
+
+fn main() -> Unit = {
+  println(greeting(some("ann")))
+  println(greeting(none))
+  let doubled = parse_twice("21") ?? 0
+  println(int.to_string(doubled))
+}
+```
+
 ## Concurrency & deterministic time (fan)
 
 All `fan.*` forms require an `effect fn` context. There is NO `async`/`await` in Almide.
@@ -958,11 +1011,57 @@ fs.write_text(path, data)!
 Command-line arguments are accessed via `env.args()` (not main parameters); argv[0], the program name, is not in the list.
 
 ## Operators (precedence high→low)
-`. () [] ! ? ?. ??` (postfix) > `not -` (prefix) > `>>` > `^` (power) > `* / %` > `+ -` > `..< ...` > `|>` > `== != < > <= >=` (non-assoc) > `and` > `or`
+Every binary operator follows one widely used precedence order (dialect 16):
 
-`^` is exponentiation (right-associative, `**` also accepted). `+` is concatenation for strings and lists (overloaded with addition). XOR is available as `int.bxor(a, b)`.
+| level | operators | associativity |
+| --- | --- | --- |
+| postfix | `.f` `.0` `f(…)` `xs[i]` `!` `?` `?.` | — |
+| prefix | `-` `not` | prefix |
+| composition | `>>` | left |
+| power | `^` (`**` also accepted) | right |
+| multiplication | `*` `/` `%` | left |
+| addition | `+` `-` | left |
+| range | `..<` `...` | none (a chain is an error) |
+| pipe | `\|>` | left; the right side is one stage |
+| fallback | `??` | right |
+| comparison | `==` `!=` `<` `>` `<=` `>=` | none (a chain is an error) |
+| conjunction | `and` | left |
+| disjunction | `or` | left |
+
+`^` is exponentiation (right-associative). `+` is concatenation for strings and lists (overloaded with addition). XOR is available as `int.bxor(a, b)`.
+
+`??` sits below the arithmetic and `|>`: `x ?? 0 - 1` is `x ?? (0 - 1)`, `s + b ?? 0` is `(s + b) ?? 0`, and `xs |> list.first ?? 0` is the pipe's result or `0`. It sits above the comparisons: `x ?? 0 == n` is `(x ?? 0) == n`.
 
 `|>` is asymmetric: its right-hand side is a single call/compose chain, so any operator after it applies to the piped result — `xs |> list.map(f) + ys` is `(xs |> list.map(f)) + ys`, and `xs |> f >> g` pipes into the composition `f >> g`.
+
+Before dialect 16, `??` bound tighter than every binary operator (`x ?? 0 - 1` was `(x ?? 0) - 1`). In a file without a `@dialect(16)` stamp, a `??` whose grouping changed is error E120 until parentheses say which reading is meant; `almide fix` adds the ones that keep the old reading. With parentheses both readings are plain:
+
+```almide check
+fn count_after(m: Map[String, Int], k: String) -> Int = (map.get(m, k) ?? 0) + 1
+
+fn or_minus_one(x: Option[Int]) -> Int = x ?? (0 - 1)
+
+fn main() -> Unit = {
+  let m = ["a": 1]
+  println(int.to_string(count_after(m, "a")))
+  println(int.to_string(or_minus_one(none)))
+}
+```
+
+A file stamped `@dialect(16)` is read with the new grouping without the check:
+
+```almide check
+@dialect(16)
+
+fn or_minus_one(x: Option[Int]) -> Int = x ?? 0 - 1
+
+fn total(xs: List[Int]) -> Int = xs |> list.first ?? 0
+
+fn main() -> Unit = {
+  println(int.to_string(or_minus_one(none)))
+  println(int.to_string(total([4, 5]) * 2))
+}
+```
 
 ## UFCS
 Method syntax supplies the receiver as argument 1: for example,

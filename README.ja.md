@@ -33,6 +33,37 @@
 
 Almide は、AI が書き AI が編集するコードのための静的型付け言語です。主張は「モデルが正しく書く」ことではありません。**モデルが間違えたとき、コンパイラが書いている時点でそれを指摘し、直し方を名指しする。** プログラムはネイティブバイナリ（Rust 経由）と WebAssembly にコンパイルされ、[契約](./docs/contracts/)にある振る舞いではバイト単位で同じ出力になります。`almide verify` は `almide build` が出す wasm モジュールの所有権・範囲・名前・能力の証跡を、そのファイルの SHA-256 に結びつけて検査します（[何が証明済みで、何が信頼か](./docs/contracts/proven-vs-trusted.md)）。
 
+## Almide をひと目で
+
+```almd
+type Order = { item: String, qty: Int, price: Int }
+
+fn parse(line: String) -> Order? = match line |> string.trim |> string.split(",") {
+  [item, qty, price] => match (int.parse(qty), int.parse(price)) {
+    (ok(q), ok(p)) => some({ item: item, qty: q, price: p }),
+    _ => none,
+  },
+  _ => none,
+}
+
+fn main() -> Unit = {
+  let csv = """
+    apple,3,120
+    pear,oops,90
+    plum,5,80
+    """
+  let orders = csv |> string.lines |> list.filter_map(parse)
+  let total = orders |> list.fold(0, (sum, o) => sum + o.qty * o.price)
+  println("${list.len(orders)} orders, total ${total}")
+}
+```
+
+```text
+2 orders, total 760
+```
+
+数字の読めない行は `none` に落ちて読み飛ばされます。例外も unwrap もなく、場合を書き漏らした `match` はコンパイルが通りません。同じプログラムはネイティブでも wasm でも同じバイトを出力し、このファイルは [`examples/order-total.almd`](./examples/order-total.almd) として CI で毎回動いています。
+
 ## 生き残る編集
 
 モデルが型に case をひとつ足し、モデルがよくやるように、他には何も触らなかったとします。

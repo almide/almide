@@ -1,0 +1,3991 @@
+# UTF-8 producer ledger (#4005 A4; the certificate that retires it is #4395),
+# gated by scripts/check-utf8-producers.py (CI `checks`, with its --self-test
+# drill). The script's docstring is the full reference.
+#
+# proofs/TRUSTED_BASE.md trusts one representation invariant: a String block's
+# payload is valid UTF-8. Every operation that can put bytes into a String
+# block has a row here saying HOW its output stays valid. The gate derives the
+# row SET from declarations, so a new producer without a row fails CI:
+#   [[fn]]     public stdlib functions whose declared type hands out a String
+#   [[op]]     host ops the guest can call (verdict per leg: embedded / p1 / component)
+#   [[prim]]   prim.* operations the self-hosted stdlib calls
+#   [[mint]]   stdlib sources that mint String blocks (prim.alloc_str)
+#   [[helper]] the wasm emitter's runtime helpers
+#
+# The verdicts:
+#   validates     checks or lossily repairs bytes it did not make
+#   construction  builds from valid Strings and ASCII, cuts only at boundaries
+#   host          the String comes from the [[op]] rows in `ops`
+#   obligation    writes raw bytes; the calling [[mint]] / [[op]] row carries the evidence
+#   typed         (op leg) crosses an interface typed as valid text (a Component Model string, a Rust String)
+#   message       (op leg) host-authored text only: static ASCII, the guest's own path, a Rust String
+#   none          puts no bytes into a String block
+#   unserved      (op leg) the leg does not serve the op
+#   open          CAN produce invalid UTF-8 today: a named exception of the
+#                 trusted-base row, with the `fix` that closes it
+#
+# A validates/construction verdict cites evidence (`file::test`). The test must
+# feed invalid bytes: it holds a byte no UTF-8 contains. An Almide test must
+# also call the producer and check the output with its file's own `utf8_ok`
+# oracle.
+#
+# The open list only shrinks. `open_ceiling` equals the number of open rows,
+# and it comes down, in its own commit, as each fix lands.
+open_ceiling = 19
+
+# ── leaf types: return-type names no index or stdlib `type` declares ──
+# `string` says whether a value of the type can hold a String block. A
+# container's own name is false: its arguments are read where they are
+# written (List[String] is caught by `String`).
+
+[[leaf]]
+name = "String"
+string = true
+why = "the String block itself"
+
+[[leaf]]
+name = "Value"
+string = true
+why = "value.Value's Str case and object keys hold Strings (crates/almide-types builtin)"
+
+[[leaf]]
+name = "HttpRequest"
+string = true
+why = "runtime-backed (stdlib_info RUNTIME_BACKED_TYPES): method, path, headers and body text; a List[String] on wasm"
+
+[[leaf]]
+name = "HttpResponse"
+string = true
+why = "runtime-backed (stdlib_info RUNTIME_BACKED_TYPES): header and body text"
+
+[[leaf]]
+name = "HttpCall"
+string = false
+why = "runtime-backed in-flight call handle (an id); its text is read by the http fns that return String"
+
+[[leaf]]
+name = "List"
+string = false
+why = "container: its element type is read where written"
+
+[[leaf]]
+name = "Option"
+string = false
+why = "container: its payload type is read where written"
+
+[[leaf]]
+name = "Result"
+string = false
+why = "container: its ok and err types are read where written"
+
+[[leaf]]
+name = "Map"
+string = false
+why = "container: its key and value types are read where written"
+
+[[leaf]]
+name = "Set"
+string = false
+why = "container: its element type is read where written"
+
+[[leaf]]
+name = "Matrix"
+string = false
+why = "a builtin Float64 matrix"
+
+[[leaf]]
+name = "Compute"
+string = false
+why = "a builtin integer quantity of deterministic compute time"
+
+[[leaf]]
+name = "Duration"
+string = false
+why = "a builtin integer quantity of wall time"
+
+[[leaf]]
+name = "Handle"
+string = false
+why = "a raw address (Int); never user-nameable outside ffi"
+
+[[leaf]]
+name = "Bytes"
+string = false
+why = "a byte block; it is not read as UTF-8 until a validating producer (bytes.to_string, to_string_lossy) turns it into a String"
+
+[[leaf]]
+name = "Int"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "Int8"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "Int16"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "Int32"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "Int64"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "UInt8"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "UInt16"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "UInt32"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "UInt64"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "Float"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "Float32"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "Float64"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "Bool"
+string = false
+why = "scalar"
+
+[[leaf]]
+name = "Unit"
+string = false
+why = "no payload"
+
+[[leaf]]
+name = "Never"
+string = false
+why = "no value"
+
+# ── bounds: a type variable bounded by one of these is what the bound admits ──
+
+[[leaf]]
+name = "Text"
+string = true
+why = "the bound String satisfies (list.join[T: Text] concatenates Strings)"
+
+[[leaf]]
+name = "Decode"
+string = true
+why = "a decoded record can hold String fields"
+
+[[leaf]]
+name = "HttpMessage"
+string = true
+why = "HttpRequest and HttpResponse satisfy it; both hold header and body text"
+
+[[leaf]]
+name = "Numeric"
+string = false
+why = "the numeric types; none holds a String"
+
+[[leaf]]
+name = "Integer"
+string = false
+why = "the integer types; none holds a String"
+
+[[leaf]]
+name = "Read"
+string = false
+why = "the readable handles (Stdin, TcpStream, Fd), all Int handles"
+
+[[leaf]]
+name = "Write"
+string = false
+why = "the writable handles (Stdout, Stderr, TcpStream, Fd), all Int handles"
+
+[[leaf]]
+name = "Close"
+string = false
+why = "the closable handles, all Int handles"
+
+# ── fn rows: every public stdlib function that hands out a String ──
+
+[[fn]]
+id = "args.option"
+how = "host"
+ops = [29]
+
+[[fn]]
+id = "args.positional"
+how = "host"
+ops = [29]
+
+[[fn]]
+id = "base64.decode"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::byte encoders turn invalid bytes into ASCII"
+
+[[fn]]
+id = "base64.decode_url"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::byte encoders turn invalid bytes into ASCII"
+
+[[fn]]
+id = "base64.encode"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::byte encoders turn invalid bytes into ASCII"
+
+[[fn]]
+id = "base64.encode_url"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::byte encoders turn invalid bytes into ASCII"
+
+[[fn]]
+id = "bigint.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::bigint formatting and parsing stay valid"
+
+[[fn]]
+id = "bigint.parse_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::bigint formatting and parsing stay valid"
+
+[[fn]]
+id = "bigint.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::bigint formatting and parsing stay valid"
+
+[[fn]]
+id = "bigint.to_string_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::bigint formatting and parsing stay valid"
+
+[[fn]]
+id = "bool.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::float and bool formatting and parsing stay valid"
+
+[[fn]]
+id = "bool.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::float and bool formatting and parsing stay valid"
+
+[[fn]]
+id = "bytes.to_string"
+how = "validates"
+why = "str::from_utf8's acceptance table; err on any ill-formed sequence (stdlib/bytes_core.almd)"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::bytes.to_string refuses every invalid sequence and passes valid text"
+
+[[fn]]
+id = "bytes.to_string_lossy"
+how = "validates"
+why = "one U+FFFD per maximal invalid subpart (stdlib/bytes_string.almd)"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::bytes.to_string_lossy repairs every invalid sequence"
+
+[[fn]]
+id = "datetime.format"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::datetime formatting and parsing stay valid"
+
+[[fn]]
+id = "datetime.from_parts"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::datetime formatting and parsing stay valid"
+
+[[fn]]
+id = "datetime.parse_iso"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::datetime formatting and parsing stay valid"
+
+[[fn]]
+id = "datetime.to_iso"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::datetime formatting and parsing stay valid"
+
+[[fn]]
+id = "datetime.weekday"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::datetime formatting and parsing stay valid"
+
+[[fn]]
+id = "env.args"
+how = "host"
+ops = [29]
+
+[[fn]]
+id = "env.cwd"
+how = "host"
+ops = [33]
+
+[[fn]]
+id = "env.get"
+how = "host"
+ops = [26]
+
+[[fn]]
+id = "env.os"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::ip text and the os name stay valid"
+
+[[fn]]
+id = "env.remove"
+how = "host"
+ops = [37]
+
+[[fn]]
+id = "env.secret"
+how = "host"
+ops = [26]
+
+[[fn]]
+id = "env.set"
+how = "host"
+ops = [37]
+
+[[fn]]
+id = "env.vars"
+how = "host"
+ops = [77]
+
+[[fn]]
+id = "ffi.alloc"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::ffi err texts stay valid on invalid input"
+
+[[fn]]
+id = "ffi.read"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::ffi err texts stay valid on invalid input"
+
+[[fn]]
+id = "ffi.slice"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::ffi err texts stay valid on invalid input"
+
+[[fn]]
+id = "ffi.to_bytes"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::ffi err texts stay valid on invalid input"
+
+[[fn]]
+id = "ffi.write"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::ffi err texts stay valid on invalid input"
+
+[[fn]]
+id = "float.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::float and bool formatting and parsing stay valid"
+
+[[fn]]
+id = "float.to_fixed"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::float and bool formatting and parsing stay valid"
+
+[[fn]]
+id = "float.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::float and bool formatting and parsing stay valid"
+
+[[fn]]
+id = "float32.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::float and bool formatting and parsing stay valid"
+
+[[fn]]
+id = "float32.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::float and bool formatting and parsing stay valid"
+
+[[fn]]
+id = "float64.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::float and bool formatting and parsing stay valid"
+
+[[fn]]
+id = "float64.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::float and bool formatting and parsing stay valid"
+
+[[fn]]
+id = "fs.append_bytes"
+how = "host"
+ops = [4, 63, 15]
+
+[[fn]]
+id = "fs.append_text"
+how = "host"
+ops = [16]
+
+[[fn]]
+id = "fs.copy"
+how = "host"
+ops = [19]
+
+[[fn]]
+id = "fs.create_temp_dir"
+how = "host"
+ops = [10]
+
+[[fn]]
+id = "fs.create_temp_file"
+how = "host"
+ops = [21]
+
+[[fn]]
+id = "fs.fold_lines"
+how = "host"
+ops = [51]
+
+[[fn]]
+id = "fs.fold_lines_chunked"
+how = "host"
+ops = [62, 61]
+
+[[fn]]
+id = "fs.fold_lines_range"
+how = "host"
+ops = [61]
+
+[[fn]]
+id = "fs.for_each_line"
+how = "host"
+ops = [52]
+
+[[fn]]
+id = "fs.glob"
+how = "host"
+ops = [39]
+
+[[fn]]
+id = "fs.list_dir"
+how = "host"
+ops = [11]
+
+[[fn]]
+id = "fs.mkdir_p"
+how = "host"
+ops = [7]
+
+[[fn]]
+id = "fs.open_root"
+how = "host"
+ops = [5]
+
+[[fn]]
+id = "fs.read_bytes"
+how = "host"
+ops = [63]
+
+[[fn]]
+id = "fs.read_bytes_if_exists"
+how = "host"
+ops = [64]
+
+[[fn]]
+id = "fs.read_lines"
+how = "host"
+ops = [12]
+
+[[fn]]
+id = "fs.read_lines_if_exists"
+how = "host"
+ops = [24]
+
+[[fn]]
+id = "fs.read_text"
+how = "host"
+ops = [1]
+
+[[fn]]
+id = "fs.read_text_if_exists"
+how = "host"
+ops = [13]
+
+[[fn]]
+id = "fs.remove"
+how = "host"
+ops = [8]
+
+[[fn]]
+id = "fs.remove_all"
+how = "host"
+ops = [9]
+
+[[fn]]
+id = "fs.rename"
+how = "host"
+ops = [20]
+
+[[fn]]
+id = "fs.root_exists"
+how = "host"
+ops = [123]
+
+[[fn]]
+id = "fs.root_list_dir"
+how = "host"
+ops = [122]
+
+[[fn]]
+id = "fs.root_read_bytes"
+how = "host"
+ops = [121]
+
+[[fn]]
+id = "fs.root_read_text"
+how = "host"
+ops = [120]
+
+[[fn]]
+id = "fs.root_remove"
+how = "host"
+ops = [125]
+
+[[fn]]
+id = "fs.root_write_text"
+how = "host"
+ops = [124]
+
+[[fn]]
+id = "fs.stat"
+how = "host"
+ops = [38]
+
+[[fn]]
+id = "fs.temp_dir"
+how = "host"
+ops = [28]
+
+[[fn]]
+id = "fs.walk"
+how = "host"
+ops = [23]
+
+[[fn]]
+id = "fs.write_bytes"
+how = "host"
+ops = [15]
+
+[[fn]]
+id = "fs.write_text"
+how = "host"
+ops = [2]
+
+[[fn]]
+id = "hash.sha256_hex"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::byte encoders turn invalid bytes into ASCII"
+
+[[fn]]
+id = "hash.sha512_hex"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::byte encoders turn invalid bytes into ASCII"
+
+[[fn]]
+id = "hex.decode"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::byte encoders turn invalid bytes into ASCII"
+
+[[fn]]
+id = "hex.encode"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::byte encoders turn invalid bytes into ASCII"
+
+[[fn]]
+id = "hex.encode_upper"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::byte encoders turn invalid bytes into ASCII"
+
+[[fn]]
+id = "html.attr"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::html builders stay valid"
+
+[[fn]]
+id = "html.concat"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::html builders stay valid"
+
+[[fn]]
+id = "html.empty"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::html builders stay valid"
+
+[[fn]]
+id = "html.escape"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::html builders stay valid"
+
+[[fn]]
+id = "html.raw"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::html builders stay valid"
+
+[[fn]]
+id = "html.script_json"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::html builders stay valid"
+
+[[fn]]
+id = "html.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::html builders stay valid"
+
+[[fn]]
+id = "html.url_attr"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::html builders stay valid"
+
+[[fn]]
+id = "http.body"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.decode_json"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.get"
+how = "host"
+ops = [43]
+
+[[fn]]
+id = "http.get_response"
+how = "host"
+ops = [65]
+
+[[fn]]
+id = "http.header"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.header_values"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.headers"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.json"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.method"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.mount"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http routes and middleware hand handlers valid requests"
+
+[[fn]]
+id = "http.new_request"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.param"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.path"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.poll"
+how = "host"
+ops = [54, 56]
+
+[[fn]]
+id = "http.query_params"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.read_new"
+how = "host"
+ops = [56]
+
+[[fn]]
+id = "http.redirect"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.request"
+how = "host"
+ops = [43, 44, 45, 46, 47, 48]
+
+[[fn]]
+id = "http.response"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.route"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http routes and middleware hand handlers valid requests"
+
+[[fn]]
+id = "http.router"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http routes and middleware hand handlers valid requests"
+
+[[fn]]
+id = "http.send"
+how = "host"
+ops = [65]
+
+[[fn]]
+id = "http.serve"
+how = "host"
+ops = [70, 71, 72, 75]
+
+[[fn]]
+id = "http.set_body"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.set_body_bytes"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.set_header"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.set_status"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.start"
+how = "host"
+ops = [53]
+
+[[fn]]
+id = "http.typed"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.wait"
+how = "host"
+ops = [55]
+
+[[fn]]
+id = "http.with_body"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.with_headers"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http messages built from invalid bytes read back valid"
+
+[[fn]]
+id = "http.wrap"
+how = "construction"
+evidence = "spec/stdlib/utf8_http_producers_test.almd::http routes and middleware hand handlers valid requests"
+
+[[fn]]
+id = "int.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::int formatting and parsing stay valid"
+
+[[fn]]
+id = "int.parse_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::int formatting and parsing stay valid"
+
+[[fn]]
+id = "int.to_hex"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::int formatting and parsing stay valid"
+
+[[fn]]
+id = "int.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::int formatting and parsing stay valid"
+
+[[fn]]
+id = "int.to_string_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::int formatting and parsing stay valid"
+
+[[fn]]
+id = "int16.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int16.parse_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int16.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int16.to_string_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int32.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int32.parse_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int32.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int32.to_string_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int64.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int64.parse_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int64.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int64.to_string_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int8.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int8.parse_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int8.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "int8.to_string_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "io.close"
+how = "host"
+ops = [100, 112]
+
+[[fn]]
+id = "io.read"
+how = "host"
+ops = [35, 94, 108]
+
+[[fn]]
+id = "io.read_all"
+how = "validates"
+why = "the guest decodes the staged stdin bytes lossily before any String exists"
+evidence = "tests/io_stdin_invalid_utf8_test.rs::invalid_utf8_stdin_decodes_lossily_on_every_leg"
+
+[[fn]]
+id = "io.read_exact"
+how = "host"
+ops = [35, 95, 108]
+
+[[fn]]
+id = "io.read_line"
+how = "validates"
+why = "the guest decodes the staged stdin bytes lossily before any String exists"
+evidence = "tests/io_stdin_invalid_utf8_test.rs::invalid_utf8_stdin_decodes_lossily_on_every_leg"
+
+[[fn]]
+id = "io.read_to_end"
+how = "host"
+ops = [35, 94, 108]
+
+[[fn]]
+id = "io.write"
+how = "host"
+ops = [30, 73, 97, 107]
+
+[[fn]]
+id = "json.parse"
+how = "validates"
+why = "the \\u escapes pair surrogates or err; raw text is a valid String already (stdlib/json_parse.almd)"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::json.parse refuses escapes of unpaired surrogates and passes valid text"
+
+[[fn]]
+id = "json.stringify"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::json.parse refuses escapes of unpaired surrogates and passes valid text"
+
+[[fn]]
+id = "json.stringify_pretty"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::json.parse refuses escapes of unpaired surrogates and passes valid text"
+
+[[fn]]
+id = "list.join"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::joining and repeating valid pieces stays valid"
+
+[[fn]]
+id = "net.ip_to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::ip text and the os name stay valid"
+
+[[fn]]
+id = "net.lookup_host"
+how = "host"
+ops = [93]
+
+[[fn]]
+id = "net.parse_ip"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::ip text and the os name stay valid"
+
+[[fn]]
+id = "net.tcp_accept"
+how = "host"
+ops = [92]
+
+[[fn]]
+id = "net.tcp_available"
+how = "host"
+ops = [98]
+
+[[fn]]
+id = "net.tcp_connect"
+how = "host"
+ops = [93]
+
+[[fn]]
+id = "net.tcp_listen"
+how = "host"
+ops = [91]
+
+[[fn]]
+id = "net.tcp_local_port"
+how = "host"
+ops = [103]
+
+[[fn]]
+id = "net.tcp_read_timeout"
+how = "host"
+ops = [96]
+
+[[fn]]
+id = "net.tcp_set_timeout"
+how = "host"
+ops = [99]
+
+[[fn]]
+id = "net.udp_bind"
+how = "host"
+ops = [91]
+
+[[fn]]
+id = "net.udp_local_port"
+how = "host"
+ops = [103]
+
+[[fn]]
+id = "net.udp_recv_from"
+how = "host"
+ops = [94]
+
+[[fn]]
+id = "net.udp_send_to"
+how = "host"
+ops = [97]
+
+[[fn]]
+id = "path.basename"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::path functions cut only at separators and dots"
+
+[[fn]]
+id = "path.components"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::path functions cut only at separators and dots"
+
+[[fn]]
+id = "path.dirname"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::path functions cut only at separators and dots"
+
+[[fn]]
+id = "path.extension"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::path functions cut only at separators and dots"
+
+[[fn]]
+id = "path.join"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::path functions cut only at separators and dots"
+
+[[fn]]
+id = "path.join_within"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::path functions cut only at separators and dots"
+
+[[fn]]
+id = "path.normalize"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::path functions cut only at separators and dots"
+
+[[fn]]
+id = "path.relative_to"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::path functions cut only at separators and dots"
+
+[[fn]]
+id = "path.stem"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::path functions cut only at separators and dots"
+
+[[fn]]
+id = "path.with_extension"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::path functions cut only at separators and dots"
+
+[[fn]]
+id = "process.exec"
+how = "host"
+ops = [80]
+
+[[fn]]
+id = "process.kill"
+how = "host"
+ops = [88]
+
+[[fn]]
+id = "process.output"
+how = "host"
+ops = [81]
+
+[[fn]]
+id = "process.poll"
+how = "host"
+ops = [84]
+
+[[fn]]
+id = "process.read_new_stderr"
+how = "host"
+ops = [86]
+
+[[fn]]
+id = "process.read_new_stdout"
+how = "host"
+ops = [85]
+
+[[fn]]
+id = "process.run"
+how = "host"
+ops = [82]
+
+[[fn]]
+id = "process.start"
+how = "host"
+ops = [83]
+
+[[fn]]
+id = "process.stop"
+how = "host"
+ops = [87]
+
+[[fn]]
+id = "process.wait"
+how = "host"
+ops = [84]
+
+[[fn]]
+id = "regex.captures"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"
+
+[[fn]]
+id = "regex.captures_all"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"
+
+[[fn]]
+id = "regex.compile"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"
+
+[[fn]]
+id = "regex.escape"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"
+
+[[fn]]
+id = "regex.find"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"
+
+[[fn]]
+id = "regex.find_all"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"
+
+[[fn]]
+id = "regex.new"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"
+
+[[fn]]
+id = "regex.replace"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"
+
+[[fn]]
+id = "regex.replace_first"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"
+
+[[fn]]
+id = "regex.replace_first_with"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"
+
+[[fn]]
+id = "regex.replace_with"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"
+
+[[fn]]
+id = "regex.split"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"
+
+[[fn]]
+id = "string.byte_slice"
+how = "validates"
+why = "none for a range that starts or ends inside a character"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::string.byte_slice answers none off a character boundary"
+
+[[fn]]
+id = "string.capitalize"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::case mapping keeps every adversarial string valid, at its output bound"
+
+[[fn]]
+id = "string.chunk"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.count"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.dedup"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.drop"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.drop_end"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.drop_while"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.enumerate"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.filter"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.filter_map"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.find_index"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.find_map"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.first"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.fold"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.from_codepoint"
+how = "validates"
+why = "none for a surrogate or a value past U+10FFFF"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::string.from_codepoint refuses surrogates and scalars past U+10FFFF"
+
+[[fn]]
+id = "string.from_list"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::joining and repeating valid pieces stays valid"
+
+[[fn]]
+id = "string.from_utf16"
+how = "validates"
+why = "err on an unpaired surrogate or a unit outside 0..65535"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::string.from_utf16 refuses unpaired surrogates"
+
+[[fn]]
+id = "string.get"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.group_by"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.insert"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.intersperse"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.last"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.lines"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::search, split and replace cut only at matches of a valid needle"
+
+[[fn]]
+id = "string.max"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.max_by"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.max_with"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.min"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.min_by"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.min_with"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.new"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::joining and repeating valid pieces stays valid"
+
+[[fn]]
+id = "string.pad_end"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::trim and pad keep every adversarial string valid"
+
+[[fn]]
+id = "string.pad_start"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::trim and pad keep every adversarial string valid"
+
+[[fn]]
+id = "string.partition"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.pop"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.reduce"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.remove_at"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.repeat"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::joining and repeating valid pieces stays valid"
+
+[[fn]]
+id = "string.replace"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::search, split and replace cut only at matches of a valid needle"
+
+[[fn]]
+id = "string.replace_first"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::search, split and replace cut only at matches of a valid needle"
+
+[[fn]]
+id = "string.reverse"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.scan"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.slice"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.sort"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.sort_by"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.sort_with"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.split"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::search, split and replace cut only at matches of a valid needle"
+
+[[fn]]
+id = "string.split_at"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.split_once"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::search, split and replace cut only at matches of a valid needle"
+
+[[fn]]
+id = "string.strip_prefix"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::search, split and replace cut only at matches of a valid needle"
+
+[[fn]]
+id = "string.strip_suffix"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::search, split and replace cut only at matches of a valid needle"
+
+[[fn]]
+id = "string.take"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.take_end"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.take_while"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.to_list"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.to_lower"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::case mapping keeps every adversarial string valid, at its output bound"
+
+[[fn]]
+id = "string.to_upper"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::case mapping keeps every adversarial string valid, at its output bound"
+
+[[fn]]
+id = "string.trim"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::trim and pad keep every adversarial string valid"
+
+[[fn]]
+id = "string.trim_end"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::trim and pad keep every adversarial string valid"
+
+[[fn]]
+id = "string.trim_start"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::trim and pad keep every adversarial string valid"
+
+[[fn]]
+id = "string.unique"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.unique_by"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.window"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"
+
+[[fn]]
+id = "string.zip"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "string.zip_with"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"
+
+[[fn]]
+id = "uint16.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint16.parse_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint16.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint16.to_string_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint32.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint32.parse_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint32.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint32.to_string_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint64.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint64.parse_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint64.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint64.to_string_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint8.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint8.parse_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint8.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "uint8.to_string_radix"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::sized int formatting and parsing stay valid"
+
+[[fn]]
+id = "unix.accept"
+how = "host"
+ops = [106]
+
+[[fn]]
+id = "unix.connect"
+how = "host"
+ops = [104]
+
+[[fn]]
+id = "unix.listen"
+how = "host"
+ops = [105]
+
+[[fn]]
+id = "unix.select"
+how = "host"
+ops = [110]
+
+[[fn]]
+id = "unix.shm_create"
+how = "host"
+ops = [113]
+
+[[fn]]
+id = "unix.shm_read"
+how = "host"
+ops = [116]
+
+[[fn]]
+id = "unix.shm_resize"
+how = "host"
+ops = [114]
+
+[[fn]]
+id = "unix.shm_write"
+how = "host"
+ops = [115]
+
+[[fn]]
+id = "unix.write_fds"
+how = "host"
+ops = [107]
+
+[[fn]]
+id = "url.build_query"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::url encoders, parse and resolve stay valid"
+
+[[fn]]
+id = "url.decode_component"
+how = "validates"
+why = "err when the percent-decoded bytes are not UTF-8"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::url decoders refuse escapes of invalid UTF-8"
+
+[[fn]]
+id = "url.decode_form"
+how = "validates"
+why = "err when the percent-decoded bytes are not UTF-8"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::url decoders refuse escapes of invalid UTF-8"
+
+[[fn]]
+id = "url.encode_component"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::url encoders, parse and resolve stay valid"
+
+[[fn]]
+id = "url.encode_form"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::url encoders, parse and resolve stay valid"
+
+[[fn]]
+id = "url.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::url encoders, parse and resolve stay valid"
+
+[[fn]]
+id = "url.parse_query"
+how = "validates"
+why = "err when a percent-decoded key or value is not UTF-8"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::url decoders refuse escapes of invalid UTF-8"
+
+[[fn]]
+id = "url.resolve"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::url encoders, parse and resolve stay valid"
+
+[[fn]]
+id = "url.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::url encoders, parse and resolve stay valid"
+
+[[fn]]
+id = "uuid.from_bytes"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::uuid text stays valid"
+
+[[fn]]
+id = "uuid.parse"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::uuid text stays valid"
+
+[[fn]]
+id = "uuid.to_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_format_producers_test.almd::uuid text stays valid"
+
+[[fn]]
+id = "value.array"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.as_array"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.as_bool"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.as_float"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.as_int"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.as_object"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.as_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.bool"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.float"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.get"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.get_array"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.get_object"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.get_path"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.get_string"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.index"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.int"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.key"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.merge"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.null"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.object"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.omit"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.pick"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.remove_path"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.root"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.set_path"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "value.string"
+how = "construction"
+evidence = "spec/stdlib/utf8_text_producers_test.almd::value builders and readers stay valid"
+
+[[fn]]
+id = "zlib.compress"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::zlib err texts stay valid on invalid input"
+
+[[fn]]
+id = "zlib.compress_level"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::zlib err texts stay valid on invalid input"
+
+[[fn]]
+id = "zlib.decompress"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::zlib err texts stay valid on invalid input"
+
+[[fn]]
+id = "zlib.decompress_max"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::zlib err texts stay valid on invalid input"
+
+[[fn]]
+id = "zlib.deflate"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::zlib err texts stay valid on invalid input"
+
+[[fn]]
+id = "zlib.deflate_level"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::zlib err texts stay valid on invalid input"
+
+[[fn]]
+id = "zlib.gunzip"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::zlib err texts stay valid on invalid input"
+
+[[fn]]
+id = "zlib.gunzip_max"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::zlib err texts stay valid on invalid input"
+
+[[fn]]
+id = "zlib.gzip"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::zlib err texts stay valid on invalid input"
+
+[[fn]]
+id = "zlib.inflate"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::zlib err texts stay valid on invalid input"
+
+[[fn]]
+id = "zlib.inflate_max"
+how = "construction"
+evidence = "spec/stdlib/utf8_bytes_producers_test.almd::zlib err texts stay valid on invalid input"
+
+# ── op rows: every host op the guest can call (embedded host / stock p1 shim / component shim) ──
+
+[[op]]
+id = 1
+name = "fs.read_text"
+embedded = "validates"
+p1 = "validates"
+component = "validates"
+why = "the file text is validated before it becomes a String: the embedded host reads with read_to_string; the p1 fs service (shared by the component shim) checks $utf8_upto and errs (C-290); the streaming and range readers validate each line the guest folds (fs_range.rs, #3758)"
+evidence = ["tests/utf8_host_boundary_test.rs::file_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 2
+name = "fs.write_text"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 3
+name = "fs.write_bytes (the structural leg)"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 4
+name = "fs.exists"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "answers a Bool"
+
+[[op]]
+id = 5
+name = "fs.is_dir"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "answers a Bool"
+
+[[op]]
+id = 6
+name = "fs.is_file"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "answers a Bool"
+
+[[op]]
+id = 7
+name = "fs.mkdir_p"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 8
+name = "fs.remove"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 9
+name = "fs.remove_all"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 10
+name = "fs.create_temp_dir"
+embedded = "validates"
+p1 = "open"
+component = "typed"
+why = "the path is built under TMPDIR: the embedded host lossily; the component reads TMPDIR as a Component Model string; the p1 fs service copies the environ bytes unchecked"
+evidence = ["tests/utf8_host_boundary_test.rs::directory_names_reach_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 11
+name = "fs.list_dir"
+embedded = "validates"
+p1 = "open"
+component = "typed"
+why = "names: the embedded host lossily (OsStr::to_string_lossy); the component through wasi:filesystem directory entries, Component Model strings; the p1 shim copies fd_readdir bytes unchecked"
+evidence = ["tests/utf8_host_boundary_test.rs::directory_names_reach_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 12
+name = "fs.read_lines"
+embedded = "validates"
+p1 = "validates"
+component = "validates"
+why = "the file text is validated before it becomes a String: the embedded host reads with read_to_string; the p1 fs service (shared by the component shim) checks $utf8_upto and errs (C-290); the streaming and range readers validate each line the guest folds (fs_range.rs, #3758)"
+evidence = ["tests/utf8_host_boundary_test.rs::file_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 13
+name = "fs.read_text_if_exists"
+embedded = "validates"
+p1 = "validates"
+component = "validates"
+why = "the file text is validated before it becomes a String: the embedded host reads with read_to_string; the p1 fs service (shared by the component shim) checks $utf8_upto and errs (C-290); the streaming and range readers validate each line the guest folds (fs_range.rs, #3758)"
+evidence = ["tests/utf8_host_boundary_test.rs::file_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 14
+name = "fs.read_bytes (the retired number)"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 15
+name = "fs.write_bytes"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 16
+name = "fs.append_text"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 19
+name = "fs.copy"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 20
+name = "fs.rename"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 21
+name = "fs.create_temp_file"
+embedded = "validates"
+p1 = "open"
+component = "typed"
+why = "the path is built under TMPDIR: the embedded host lossily; the component reads TMPDIR as a Component Model string; the p1 fs service copies the environ bytes unchecked"
+evidence = ["tests/utf8_host_boundary_test.rs::directory_names_reach_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 22
+name = "fs.is_symlink"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "answers a Bool"
+
+[[op]]
+id = 23
+name = "fs.walk"
+embedded = "validates"
+p1 = "open"
+component = "typed"
+why = "names: the embedded host lossily (OsStr::to_string_lossy); the component through wasi:filesystem directory entries, Component Model strings; the p1 shim copies fd_readdir bytes unchecked"
+evidence = ["tests/utf8_host_boundary_test.rs::directory_names_reach_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 24
+name = "fs.read_lines_if_exists"
+embedded = "validates"
+p1 = "validates"
+component = "validates"
+why = "the file text is validated before it becomes a String: the embedded host reads with read_to_string; the p1 fs service (shared by the component shim) checks $utf8_upto and errs (C-290); the streaming and range readers validate each line the guest folds (fs_range.rs, #3758)"
+evidence = ["tests/utf8_host_boundary_test.rs::file_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 25
+name = "fs.read_bytes_if_exists"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 26
+name = "env.get"
+embedded = "validates"
+p1 = "open"
+component = "typed"
+why = "the embedded host reads std::env::var, which refuses a value that is not Unicode (none); the component reads wasi:cli/environment, Component Model strings; the p1 shim scans environ_get bytes unchecked (crates/almide-wasi/src/wasi_shims.rs)"
+evidence = ["tests/utf8_host_boundary_test.rs::environment_text_reaches_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 27
+name = "env.os"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "a constant ASCII name (\"wasi\", std::env::consts::OS)"
+
+[[op]]
+id = 28
+name = "fs.temp_dir"
+embedded = "validates"
+p1 = "open"
+component = "typed"
+why = "TMPDIR: the embedded host lossily (temp_dir().to_string_lossy); the component as a Component Model string; the p1 fs service copies the environ bytes unchecked"
+evidence = ["tests/utf8_host_boundary_test.rs::environment_text_reaches_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 29
+name = "env.args"
+embedded = "validates"
+p1 = "open"
+component = "typed"
+why = "the embedded host hands over the run's argv as Rust Strings (the CLI refuses an argument that is not Unicode); the component reads wasi:cli/environment arguments; the p1 shim frames args_get bytes unchecked"
+evidence = ["tests/utf8_host_boundary_test.rs::argv_reaches_the_guest_valid_or_not_at_all"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 30
+name = "io.write to stdout"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "writes out; answers nothing"
+
+[[op]]
+id = 32
+name = "random.bytes and the entropy readers"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "fills a Bytes or scratch block"
+
+[[op]]
+id = 33
+name = "env.cwd"
+embedded = "validates"
+p1 = "open"
+component = "typed"
+why = "the working directory: the embedded host lossily (current_dir().to_string_lossy); the component as a Component Model string; the p1 fs service copies ALMIDE_CWD / PWD bytes unchecked"
+evidence = ["tests/utf8_host_boundary_test.rs::environment_text_reaches_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 34
+name = "datetime.now"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "answers an Int"
+
+[[op]]
+id = 35
+name = "io stdin (read_line, read_all, read)"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "stages raw stdin bytes; the guest decodes them lossily before any String exists (crates/almide-wasm/src/host_read_line.rs, host_read_all.rs; the io.read_line / io.read_all rows carry the evidence) or keeps them as Bytes"
+
+[[op]]
+id = 36
+name = "env.sleep_ms"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "answers nothing"
+
+[[op]]
+id = 37
+name = "env.set / env.remove"
+embedded = "message"
+p1 = "none"
+component = "none"
+why = "writes the overlay; the embedded host answers err texts that are Rust Strings"
+
+[[op]]
+id = 38
+name = "fs.stat"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 39
+name = "fs.glob"
+embedded = "validates"
+p1 = "open"
+component = "typed"
+why = "names: the embedded host lossily (OsStr::to_string_lossy); the component through wasi:filesystem directory entries, Component Model strings; the p1 shim copies fd_readdir bytes unchecked"
+evidence = ["tests/utf8_host_boundary_test.rs::directory_names_reach_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 40
+name = "the fan prefetch offer"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "answers nothing"
+
+[[op]]
+id = 41
+name = "fs.read_text (the fan prefetch await)"
+embedded = "validates"
+p1 = "validates"
+component = "validates"
+why = "the file text is validated before it becomes a String: the embedded host reads with read_to_string; the p1 fs service (shared by the component shim) checks $utf8_upto and errs (C-290); the streaming and range readers validate each line the guest folds (fs_range.rs, #3758)"
+evidence = ["tests/utf8_host_boundary_test.rs::file_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 42
+name = "the fan prefetch drop"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "answers nothing"
+
+[[op]]
+id = 43
+name = "http.get"
+embedded = "validates"
+p1 = "unserved"
+component = "open"
+why = "the embedded host decodes the body lossily (almide-rt-core http_call_core); the component's string client stages the decoded body bytes unchecked (crates/almide-wasm-run/src/wasi_p3_http.rs, shim_http)"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 44
+name = "http.request POST"
+embedded = "validates"
+p1 = "unserved"
+component = "open"
+why = "the embedded host decodes the body lossily (almide-rt-core http_call_core); the component's string client stages the decoded body bytes unchecked (crates/almide-wasm-run/src/wasi_p3_http.rs, shim_http)"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 45
+name = "http.request PUT"
+embedded = "validates"
+p1 = "unserved"
+component = "open"
+why = "the embedded host decodes the body lossily (almide-rt-core http_call_core); the component's string client stages the decoded body bytes unchecked (crates/almide-wasm-run/src/wasi_p3_http.rs, shim_http)"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 46
+name = "http.request PATCH"
+embedded = "validates"
+p1 = "unserved"
+component = "open"
+why = "the embedded host decodes the body lossily (almide-rt-core http_call_core); the component's string client stages the decoded body bytes unchecked (crates/almide-wasm-run/src/wasi_p3_http.rs, shim_http)"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 47
+name = "http.request DELETE"
+embedded = "validates"
+p1 = "unserved"
+component = "open"
+why = "the embedded host decodes the body lossily (almide-rt-core http_call_core); the component's string client stages the decoded body bytes unchecked (crates/almide-wasm-run/src/wasi_p3_http.rs, shim_http)"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 48
+name = "http.request (framed text)"
+embedded = "validates"
+p1 = "unserved"
+component = "open"
+why = "the embedded host decodes the body lossily (almide-rt-core http_call_core); the component's string client stages the decoded body bytes unchecked (crates/almide-wasm-run/src/wasi_p3_http.rs, shim_http)"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 49
+name = "http.request (framed status)"
+embedded = "validates"
+p1 = "unserved"
+component = "open"
+why = "the embedded host decodes the body lossily (almide-rt-core http_call_core); the component's string client stages the decoded body bytes unchecked (crates/almide-wasm-run/src/wasi_p3_http.rs, shim_http)"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 51
+name = "fs.fold_lines"
+embedded = "validates"
+p1 = "validates"
+component = "validates"
+why = "the file text is validated before it becomes a String: the embedded host reads with read_to_string; the p1 fs service (shared by the component shim) checks $utf8_upto and errs (C-290); the streaming and range readers validate each line the guest folds (fs_range.rs, #3758)"
+evidence = ["tests/utf8_host_boundary_test.rs::file_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 52
+name = "fs.for_each_line"
+embedded = "validates"
+p1 = "validates"
+component = "validates"
+why = "the file text is validated before it becomes a String: the embedded host reads with read_to_string; the p1 fs service (shared by the component shim) checks $utf8_upto and errs (C-290); the streaming and range readers validate each line the guest folds (fs_range.rs, #3758)"
+evidence = ["tests/utf8_host_boundary_test.rs::file_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 53
+name = "http.start"
+embedded = "validates"
+p1 = "unserved"
+component = "unserved"
+why = "the call handle: the embedded host answers through the shared http_call_core, whose text is a lossily decoded Rust String"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 54
+name = "http.poll"
+embedded = "validates"
+p1 = "unserved"
+component = "unserved"
+why = "the call handle: the embedded host answers through the shared http_call_core, whose text is a lossily decoded Rust String"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 55
+name = "http.wait"
+embedded = "validates"
+p1 = "unserved"
+component = "unserved"
+why = "the call handle: the embedded host answers through the shared http_call_core, whose text is a lossily decoded Rust String"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 56
+name = "http.read_new"
+embedded = "validates"
+p1 = "unserved"
+component = "unserved"
+why = "the call handle: the embedded host answers through the shared http_call_core, whose text is a lossily decoded Rust String"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 57
+name = "http cancel"
+embedded = "validates"
+p1 = "unserved"
+component = "unserved"
+why = "the call handle: the embedded host answers through the shared http_call_core, whose text is a lossily decoded Rust String"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 58
+name = "http step"
+embedded = "validates"
+p1 = "unserved"
+component = "unserved"
+why = "the call handle: the embedded host answers through the shared http_call_core, whose text is a lossily decoded Rust String"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 59
+name = "http drop"
+embedded = "validates"
+p1 = "unserved"
+component = "unserved"
+why = "the call handle: the embedded host answers through the shared http_call_core, whose text is a lossily decoded Rust String"
+evidence = ["tests/utf8_host_boundary_test.rs::response_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 60
+name = "datetime.monotonic_ns"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "answers an Int"
+
+[[op]]
+id = 61
+name = "fs.fold_lines_range"
+embedded = "validates"
+p1 = "validates"
+component = "validates"
+why = "the file text is validated before it becomes a String: the embedded host reads with read_to_string; the p1 fs service (shared by the component shim) checks $utf8_upto and errs (C-290); the streaming and range readers validate each line the guest folds (fs_range.rs, #3758)"
+evidence = ["tests/utf8_host_boundary_test.rs::file_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 62
+name = "fs.fold_lines_chunked (the size probe)"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers an Int size; err texts as the other fs ops"
+
+[[op]]
+id = 63
+name = "fs.read_bytes"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 64
+name = "fs.read_bytes_if_exists"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 65
+name = "http.get_response / http.send"
+embedded = "unserved"
+p1 = "unserved"
+component = "validates"
+why = "the component-only full response: the body text decodes lossily (C-328); the embedded lane runs it as the component"
+evidence = ["tests/http_response_cross_test.rs::the_full_response_family_reads_the_same_on_native_and_the_p3_component"]
+
+[[op]]
+id = 66
+name = "fs.append_bytes"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "op 16's append under its own name (#4382): the embedded host's fs_dispatch_w append arm, the p1 fs service's op_append (spliced into the component); answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 70
+name = "http.serve bind"
+embedded = "typed"
+p1 = "unserved"
+component = "validates"
+why = "the request: the embedded host parses it with the shared http_server_core into Rust Strings (lossy); the component service shim decodes it as String::from_utf8_lossy (wasi_p3_serve.rs)"
+evidence = ["tests/http_serve_export_test.rs::the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve"]
+
+[[op]]
+id = 71
+name = "http.serve next request"
+embedded = "typed"
+p1 = "unserved"
+component = "validates"
+why = "the request: the embedded host parses it with the shared http_server_core into Rust Strings (lossy); the component service shim decodes it as String::from_utf8_lossy (wasi_p3_serve.rs)"
+evidence = ["tests/http_serve_export_test.rs::the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve"]
+
+[[op]]
+id = 72
+name = "http.serve reply"
+embedded = "typed"
+p1 = "unserved"
+component = "validates"
+why = "the request: the embedded host parses it with the shared http_server_core into Rust Strings (lossy); the component service shim decodes it as String::from_utf8_lossy (wasi_p3_serve.rs)"
+evidence = ["tests/http_serve_export_test.rs::the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve"]
+
+[[op]]
+id = 73
+name = "io.write to stderr"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "writes out; answers nothing"
+
+[[op]]
+id = 74
+name = "the instance-parallel fan offer"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "raw i64 slots, never text"
+
+[[op]]
+id = 75
+name = "http.serve (the contained loop)"
+embedded = "typed"
+p1 = "unserved"
+component = "validates"
+why = "the request: the embedded host parses it with the shared http_server_core into Rust Strings (lossy); the component service shim decodes it as String::from_utf8_lossy (wasi_p3_serve.rs)"
+evidence = ["tests/http_serve_export_test.rs::the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve"]
+
+[[op]]
+id = 76
+name = "process.exit's mark"
+embedded = "none"
+p1 = "none"
+component = "none"
+why = "answers 0"
+
+[[op]]
+id = 77
+name = "env.vars"
+embedded = "validates"
+p1 = "open"
+component = "typed"
+why = "the embedded host keeps only the entries whose key and value are Unicode (vars_os + into_string); the component reads wasi:cli/environment; the p1 shim frames environ_get bytes unchecked"
+evidence = ["tests/utf8_host_boundary_test.rs::environment_text_reaches_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 80
+name = "process (op 80)"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "child output: the embedded host decodes stdout and stderr lossily (host_process.rs / rt-core); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 81
+name = "process (op 81)"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "child output: the embedded host decodes stdout and stderr lossily (host_process.rs / rt-core); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 82
+name = "process (op 82)"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "child output: the embedded host decodes stdout and stderr lossily (host_process.rs / rt-core); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 83
+name = "process (op 83)"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "child output: the embedded host decodes stdout and stderr lossily (host_process.rs / rt-core); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 84
+name = "process (op 84)"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "child output: the embedded host decodes stdout and stderr lossily (host_process.rs / rt-core); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 85
+name = "process (op 85)"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "child output: the embedded host decodes stdout and stderr lossily (host_process.rs / rt-core); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 86
+name = "process (op 86)"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "child output: the embedded host decodes stdout and stderr lossily (host_process.rs / rt-core); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 87
+name = "process (op 87)"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "child output: the embedded host decodes stdout and stderr lossily (host_process.rs / rt-core); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 88
+name = "process (op 88)"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "child output: the embedded host decodes stdout and stderr lossily (host_process.rs / rt-core); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 89
+name = "process (op 89)"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "child output: the embedded host decodes stdout and stderr lossily (host_process.rs / rt-core); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 90
+name = "process (op 90)"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "child output: the embedded host decodes stdout and stderr lossily (host_process.rs / rt-core); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 91
+name = "net tcp (op 91)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 92
+name = "net tcp (op 92)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 93
+name = "net tcp (op 93)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 94
+name = "net tcp (op 94)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 95
+name = "net tcp (op 95)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 96
+name = "net tcp (op 96)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 97
+name = "net tcp (op 97)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 98
+name = "net tcp (op 98)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 99
+name = "net tcp (op 99)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 100
+name = "net tcp (op 100)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 101
+name = "net tcp (op 101)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 102
+name = "net tcp (op 102)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 103
+name = "net tcp (op 103)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_core)"
+
+[[op]]
+id = 104
+name = "unix / shm (op 104)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 105
+name = "unix / shm (op 105)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 106
+name = "unix / shm (op 106)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 107
+name = "unix / shm (op 107)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 108
+name = "unix / shm (op 108)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 109
+name = "unix / shm (op 109)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 110
+name = "unix / shm (op 110)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 111
+name = "unix / shm (op 111)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 112
+name = "unix / shm (op 112)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 113
+name = "unix / shm (op 113)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 114
+name = "unix / shm (op 114)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 115
+name = "unix / shm (op 115)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 116
+name = "unix / shm (op 116)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "ok answers are decimal digits or raw bytes the guest keeps as Bytes; err texts are Rust Strings (net_unix_core)"
+
+[[op]]
+id = 117
+name = "testing.assert_aborts (run a site)"
+embedded = "message"
+p1 = "unserved"
+component = "unserved"
+why = "answers the child's status; its captured output is compared, not handed over as a String"
+
+[[op]]
+id = 118
+name = "testing.assert_aborts (the selected site)"
+embedded = "none"
+p1 = "unserved"
+component = "unserved"
+why = "answers an Int"
+
+[[op]]
+id = 120
+name = "fs.root_read_text"
+embedded = "validates"
+p1 = "validates"
+component = "validates"
+why = "the file text is validated before it becomes a String: the embedded host reads with read_to_string; the p1 fs service (shared by the component shim) checks $utf8_upto and errs (C-290); the streaming and range readers validate each line the guest folds (fs_range.rs, #3758)"
+evidence = ["tests/utf8_host_boundary_test.rs::file_text_reaches_the_guest_valid"]
+
+[[op]]
+id = 121
+name = "fs.root_read_bytes"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 122
+name = "fs.root_list_dir"
+embedded = "validates"
+p1 = "open"
+component = "typed"
+why = "names: the embedded host lossily (OsStr::to_string_lossy); the component through wasi:filesystem directory entries, Component Model strings; the p1 shim copies fd_readdir bytes unchecked"
+evidence = ["tests/utf8_host_boundary_test.rs::directory_names_reach_the_guest_valid"]
+fix = "validate at the host boundary: the shim checks (or lossily repairs) the bytes before they reach a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[op]]
+id = 123
+name = "fs.root_exists"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 124
+name = "fs.root_write_text"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 125
+name = "fs.root_remove"
+embedded = "message"
+p1 = "message"
+component = "message"
+why = "answers Unit, an Int record or Bytes; err texts are Rust Strings (io::Error Display, format!), the guest's own path quoted (embedded), err texts are the static errno table (almide_base::fs_errno) and the guest's own path (p1 and the component, which splices the same service)"
+
+[[op]]
+id = 140
+name = "net udp_bind"
+embedded = "message"
+p1 = "unserved"
+component = "message"
+why = "answers the handle as decimal digits; err texts are Rust Strings from net_core (embedded, net_host.rs) or the same net_core texts rendered at emit time plus the static error-code class table, with only the guest's own host escaped in (component, wasi_p3_net_shim.rs); preview 1 has no sockets (not in P1_SERVED_OPS)"
+
+[[op]]
+id = 141
+name = "net udp_local_port"
+embedded = "message"
+p1 = "unserved"
+component = "message"
+why = "answers the port as decimal digits; err texts are Rust Strings from net_core (embedded, net_host.rs) or the same net_core texts rendered at emit time plus the static error-code class table, with only the guest's own host escaped in (component, wasi_p3_net_shim.rs); preview 1 has no sockets (not in P1_SERVED_OPS)"
+
+[[op]]
+id = 142
+name = "net udp_send_to"
+embedded = "message"
+p1 = "unserved"
+component = "message"
+why = "answers Unit; the datagram rides the guest's Bytes out; err texts are Rust Strings from net_core (embedded, net_host.rs) or the same net_core texts rendered at emit time plus the static error-code class table, with only the guest's own host escaped in (component, wasi_p3_net_shim.rs); preview 1 has no sockets (not in P1_SERVED_OPS)"
+
+[[op]]
+id = 143
+name = "net udp_recv_from"
+embedded = "message"
+p1 = "unserved"
+component = "message"
+why = "answers a `<port> <ip>` line (digits and an address printed by Rust Display on embedded, by the shim's ip_fmt on the component) then the datagram's raw bytes, which the guest keeps as Bytes, decoding only the head line with bytes.to_string_lossy (stdlib/net_wasm.almd); err texts are Rust Strings from net_core (embedded, net_host.rs) or the same net_core texts rendered at emit time plus the static error-code class table, with only the guest's own host escaped in (component, wasi_p3_net_shim.rs); preview 1 has no sockets (not in P1_SERVED_OPS)"
+
+[[op]]
+id = 144
+name = "net udp_close"
+embedded = "message"
+p1 = "unserved"
+component = "message"
+why = "answers Unit; err texts are Rust Strings from net_core (embedded, net_host.rs) or the same net_core texts rendered at emit time plus the static error-code class table, with only the guest's own host escaped in (component, wasi_p3_net_shim.rs); preview 1 has no sockets (not in P1_SERVED_OPS)"
+
+[[op]]
+id = 145
+name = "net lookup_host"
+embedded = "message"
+p1 = "unserved"
+component = "message"
+why = "answers one address per line: Rust Display Strings joined (embedded), the shim's ip_fmt digits, dots and colons (component); err texts are Rust Strings from net_core (embedded, net_host.rs) or the same net_core texts rendered at emit time plus the static error-code class table, with only the guest's own host escaped in (component, wasi_p3_net_shim.rs); preview 1 has no sockets (not in P1_SERVED_OPS)"
+
+[[op]]
+id = 146
+name = "process.start"
+embedded = "message"
+p1 = "typed"
+component = "unserved"
+why = "the process.start child (#4308): answers the child's handle as decimal digits; err texts are Rust Strings (process_core, the allowlist refusal) (embedded, host_process.rs); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load); no component world declares that interface (P3_EXCLUDED_P1_OPS)"
+
+[[op]]
+id = 147
+name = "process.poll (the exited probe)"
+embedded = "message"
+p1 = "typed"
+component = "unserved"
+why = "the process.start child (#4308): answers the digit 0 or 1; err texts are Rust Strings (embedded, host_process.rs); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load); no component world declares that interface (P3_EXCLUDED_P1_OPS)"
+
+[[op]]
+id = 148
+name = "process.wait"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "the process.start child (#4308): the child's captured stdout and stderr decode lossily (process_core AlmideProcChild::text, String::from_utf8_lossy) before the status frame (embedded, host_process.rs); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load); no component world declares that interface (P3_EXCLUDED_P1_OPS)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 149
+name = "process.stop"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "the process.start child (#4308): the child's captured stdout and stderr decode lossily (process_core AlmideProcChild::text, String::from_utf8_lossy) before the status frame (embedded, host_process.rs); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load); no component world declares that interface (P3_EXCLUDED_P1_OPS)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 150
+name = "process.read_new_stdout / read_new_stderr"
+embedded = "validates"
+p1 = "typed"
+component = "unserved"
+why = "the process.start child (#4308): the new output decodes lossily (process_core AlmideProcChild::read_new: a cut sequence waits for its rest, an invalid one is U+FFFD) (embedded, host_process.rs); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load); no component world declares that interface (P3_EXCLUDED_P1_OPS)"
+evidence = ["tests/utf8_host_boundary_test.rs::child_output_reaches_the_guest_valid"]
+
+[[op]]
+id = 151
+name = "process.child_pid"
+embedded = "message"
+p1 = "typed"
+component = "unserved"
+why = "the process.start child (#4308): answers the pid as decimal digits (-1 for an unknown handle) (embedded, host_process.rs); the p1 module forwards to the private almide:process/spawn import, whose result<string, string> only the almide host serves (a stock runtime refuses the import at load); no component world declares that interface (P3_EXCLUDED_P1_OPS)"
+
+# ── prim rows: every prim.* the self-hosted stdlib calls ──
+
+[[prim]]
+id = "alloc_bytes"
+how = "none"
+why = "a Bytes block"
+
+[[prim]]
+id = "alloc_list"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "alloc_list_f64"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "alloc_list_str"
+how = "none"
+why = "a list block of String handles; its elements are Strings made elsewhere"
+
+[[prim]]
+id = "alloc_map"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "alloc_map_kv"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "alloc_map_skv"
+how = "none"
+why = "a map block of String keys and values (handles)"
+
+[[prim]]
+id = "alloc_map_str"
+how = "none"
+why = "a map block keyed by String handles"
+
+[[prim]]
+id = "alloc_set"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "alloc_set_str"
+how = "none"
+why = "a set block of String handles"
+
+[[prim]]
+id = "alloc_str"
+how = "obligation"
+why = "a String block of n uninitialized payload bytes: valid only once its caller has written it; every caller is a [[mint]] row, whose evidence checks the finished block; the certificate that discharges this is #4395"
+
+[[prim]]
+id = "alloc_value"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "args_get_list"
+how = "host"
+ops = [29]
+
+[[prim]]
+id = "band"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "bits_to_f32"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "bor"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "bshl"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "bshr"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "bshr_u"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "bxor"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "clock_time_get"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "die"
+how = "none"
+why = "prints its message and aborts; makes no String"
+
+[[prim]]
+id = "env_get"
+how = "host"
+ops = [26]
+
+[[prim]]
+id = "f2f32"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "f2i"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "f32_2f"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "f32bits"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fabs"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fadd"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fbits"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fceil"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fcopysign"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fd_write"
+how = "none"
+why = "writes bytes out"
+
+[[prim]]
+id = "fdiv"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "feq"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "ffloor"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "ffrombits"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fge"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fgt"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fle"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "flt"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fmul"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fne"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fneg"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fsqrt"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "fsub"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "handle"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "i2f"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "i2f32"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "int_to_ptr"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "load32"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "load64"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "load8"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "load_handle"
+how = "none"
+why = "loads a handle already in a slot (a pass-through)"
+
+[[prim]]
+id = "load_str"
+how = "none"
+why = "loads a String handle already in a slot (a pass-through, no bytes made)"
+
+[[prim]]
+id = "make_dir"
+how = "host"
+ops = [7]
+
+[[prim]]
+id = "make_dir_as"
+how = "host"
+ops = [7]
+
+[[prim]]
+id = "path_exists"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "path_filestat"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "path_filestat_nofollow"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "ptr_to_int"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "random_get"
+how = "obligation"
+why = "writes entropy into the block it is handed (a Bytes or scratch block in every caller)"
+
+[[prim]]
+id = "rc_dec"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "rc_inc"
+how = "none"
+why = "no String block: a scalar, a reference count, a read"
+
+[[prim]]
+id = "read_bytes_file_as"
+how = "host"
+ops = [63]
+
+[[prim]]
+id = "read_dir"
+how = "host"
+ops = [11]
+
+[[prim]]
+id = "read_dir_as"
+how = "host"
+ops = [11, 23]
+
+[[prim]]
+id = "read_n_bytes"
+how = "host"
+ops = [35]
+
+[[prim]]
+id = "read_text_file"
+how = "host"
+ops = [1]
+
+[[prim]]
+id = "read_text_file_as"
+how = "host"
+ops = [1]
+
+[[prim]]
+id = "read_text_file_as_pair"
+how = "host"
+ops = [1]
+
+[[prim]]
+id = "remove_all"
+how = "host"
+ops = [9]
+
+[[prim]]
+id = "remove_all_as"
+how = "host"
+ops = [9]
+
+[[prim]]
+id = "rename"
+how = "host"
+ops = [20]
+
+[[prim]]
+id = "store32"
+how = "obligation"
+why = "writes four raw bytes into any block; as store8"
+
+[[prim]]
+id = "store64"
+how = "obligation"
+why = "writes eight raw bytes into any block; as store8"
+
+[[prim]]
+id = "store8"
+how = "obligation"
+why = "writes one raw byte into any block, a String's payload included; the [[mint]] row that wrote it carries the evidence"
+
+[[prim]]
+id = "store_str"
+how = "none"
+why = "stores a String handle into a slot (moves a reference, no bytes made)"
+
+[[prim]]
+id = "write_text_file"
+how = "host"
+ops = [2]
+
+[[prim]]
+id = "write_text_file_as"
+how = "host"
+ops = [2]
+
+[[prim]]
+id = "write_text_file_as_pair"
+how = "host"
+ops = [2]
+
+# ── mint rows: every stdlib source that mints String blocks (prim.alloc_str) ──
+
+[[mint]]
+id = "stdlib/base64_encode.almd"
+how = "construction"
+why = "ASCII alphabet"
+reached_by = ["base64.encode"]
+evidence = ["spec/stdlib/utf8_format_producers_test.almd::byte encoders turn invalid bytes into ASCII"]
+
+[[mint]]
+id = "stdlib/bytes_core.almd"
+how = "validates"
+why = "copies only after str::from_utf8's table accepts"
+reached_by = ["bytes.to_string"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::bytes.to_string refuses every invalid sequence and passes valid text"]
+
+[[mint]]
+id = "stdlib/bytes_string.almd"
+how = "validates"
+why = "writes U+FFFD per maximal invalid subpart"
+reached_by = ["bytes.to_string_lossy"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::bytes.to_string_lossy repairs every invalid sequence"]
+
+[[mint]]
+id = "stdlib/datetime_format.almd"
+how = "construction"
+why = "digits, ASCII names and the pattern's own characters"
+reached_by = ["datetime.format"]
+evidence = ["spec/stdlib/utf8_format_producers_test.almd::datetime formatting and parsing stay valid"]
+
+[[mint]]
+id = "stdlib/float_to_string.almd"
+how = "construction"
+why = "digits and ASCII"
+reached_by = ["float.to_string"]
+evidence = ["spec/stdlib/utf8_format_producers_test.almd::float and bool formatting and parsing stay valid"]
+
+[[mint]]
+id = "stdlib/fs_create_temp_file.almd"
+how = "construction"
+why = "a hex suffix after the guest's own prefix"
+reached_by = ["fs.create_temp_file"]
+evidence = ["tests/utf8_host_boundary_test.rs::directory_names_reach_the_guest_valid"]
+
+[[mint]]
+id = "stdlib/fs_fold_lines.almd"
+how = "construction"
+why = "cuts the read (already validated) text at \\n"
+reached_by = ["fs.fold_lines"]
+evidence = ["tests/utf8_host_boundary_test.rs::file_text_reaches_the_guest_valid"]
+
+[[mint]]
+id = "stdlib/fs_write_bytes.almd"
+how = "open"
+why = "copies a Bytes payload byte for byte into a prim.alloc_str block to hand it to the write floor: the String block holds whatever the Bytes held (stdlib/fs_write_bytes.almd)"
+fix = "retype the write floor's buffer so the bytes never sit in a String block (the #4005 A4 host-boundary fix; the certificate is #4395)"
+
+[[mint]]
+id = "stdlib/hash_impl.almd"
+how = "construction"
+why = "hex digits"
+reached_by = ["hash.sha256_hex"]
+evidence = ["spec/stdlib/utf8_format_producers_test.almd::byte encoders turn invalid bytes into ASCII"]
+
+[[mint]]
+id = "stdlib/hex_encode.almd"
+how = "construction"
+why = "hex digits"
+reached_by = ["hex.encode"]
+evidence = ["spec/stdlib/utf8_format_producers_test.almd::byte encoders turn invalid bytes into ASCII"]
+
+[[mint]]
+id = "stdlib/int_hex.almd"
+how = "construction"
+why = "hex digits"
+reached_by = ["int.to_hex"]
+evidence = ["spec/stdlib/utf8_format_producers_test.almd::int formatting and parsing stay valid"]
+
+[[mint]]
+id = "stdlib/int_to_string.almd"
+how = "construction"
+why = "decimal digits"
+reached_by = ["int.to_string"]
+evidence = ["spec/stdlib/utf8_format_producers_test.almd::int formatting and parsing stay valid"]
+
+[[mint]]
+id = "stdlib/json_parse.almd"
+how = "validates"
+why = "cuts the (valid) source at escapes; \\u escapes pair surrogates or err"
+reached_by = ["json.parse"]
+evidence = ["spec/stdlib/utf8_text_producers_test.almd::json.parse refuses escapes of unpaired surrogates and passes valid text"]
+
+[[mint]]
+id = "stdlib/list_to_string.almd"
+how = "construction"
+why = "the display of a list: brackets, commas, element texts"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/list_to_string_b.almd"
+how = "construction"
+why = "as list_to_string"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/list_to_string_f.almd"
+how = "construction"
+why = "as list_to_string"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/list_to_string_s.almd"
+how = "construction"
+why = "as list_to_string, each element quoted"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/map_to_string.almd"
+how = "construction"
+why = "the display of a map"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/option_to_string_f.almd"
+how = "construction"
+why = "the display of an option"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/option_to_string_lf.almd"
+how = "construction"
+why = "the display of an option"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/option_to_string_li.almd"
+how = "construction"
+why = "the display of an option"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/option_to_string_ls.almd"
+how = "construction"
+why = "the display of an option"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/option_to_string_msi.almd"
+how = "construction"
+why = "the display of an option"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/option_to_string_nested.almd"
+how = "construction"
+why = "the display of an option"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/option_to_string_s.almd"
+how = "construction"
+why = "the display of an option"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/regex_engine.almd"
+how = "construction"
+why = "cuts the subject at match boundaries"
+reached_by = ["regex.replace"]
+evidence = ["spec/stdlib/utf8_text_producers_test.almd::regex matches and edits stay on character boundaries"]
+
+[[mint]]
+id = "stdlib/result_map.almd"
+how = "construction"
+why = "the display of a result"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/result_to_string.almd"
+how = "construction"
+why = "the display of a result"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/set_to_string.almd"
+how = "construction"
+why = "the display of a set"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/set_to_string_s.almd"
+how = "construction"
+why = "the display of a set"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/string_byte_slice.almd"
+how = "validates"
+why = "refuses a cut inside a character"
+reached_by = ["string.byte_slice"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::string.byte_slice answers none off a character boundary"]
+
+[[mint]]
+id = "stdlib/string_chars.almd"
+how = "construction"
+why = "whole characters"
+reached_by = ["string.to_list"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"]
+
+[[mint]]
+id = "stdlib/string_concat.almd"
+how = "construction"
+why = "two valid Strings end to end"
+reached_by = ["+"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::concatenation and interpolation of valid pieces stay valid"]
+
+[[mint]]
+id = "stdlib/string_first_last.almd"
+how = "construction"
+why = "whole characters"
+reached_by = ["string.first"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"]
+
+[[mint]]
+id = "stdlib/string_from_codepoint.almd"
+how = "validates"
+why = "refuses surrogates and values past U+10FFFF"
+reached_by = ["string.from_codepoint"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::string.from_codepoint refuses surrogates and scalars past U+10FFFF"]
+
+[[mint]]
+id = "stdlib/string_join.almd"
+how = "construction"
+why = "valid pieces end to end"
+reached_by = ["list.join"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::joining and repeating valid pieces stays valid"]
+
+[[mint]]
+id = "stdlib/string_lines.almd"
+how = "construction"
+why = "cuts at \\n"
+reached_by = ["string.lines"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::search, split and replace cut only at matches of a valid needle"]
+
+[[mint]]
+id = "stdlib/string_pad.almd"
+how = "construction"
+why = "whole fill characters"
+reached_by = ["string.pad_start"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::trim and pad keep every adversarial string valid"]
+
+[[mint]]
+id = "stdlib/string_quote.almd"
+how = "construction"
+why = "escapes inside ASCII quotes"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
+
+[[mint]]
+id = "stdlib/string_repeat.almd"
+how = "construction"
+why = "copies of a valid String"
+reached_by = ["string.repeat"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::joining and repeating valid pieces stays valid"]
+
+[[mint]]
+id = "stdlib/string_reverse.almd"
+how = "construction"
+why = "whole characters in reverse order"
+reached_by = ["string.reverse"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::character iteration hands out whole characters"]
+
+[[mint]]
+id = "stdlib/string_search.almd"
+how = "construction"
+why = "cuts at matches of a valid needle"
+reached_by = ["string.replace"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::search, split and replace cut only at matches of a valid needle"]
+
+[[mint]]
+id = "stdlib/string_slice.almd"
+how = "construction"
+why = "character-index cuts"
+reached_by = ["string.slice"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"]
+
+[[mint]]
+id = "stdlib/string_slice2.almd"
+how = "construction"
+why = "character-index cuts"
+reached_by = ["string.slice"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"]
+
+[[mint]]
+id = "stdlib/string_take_drop.almd"
+how = "construction"
+why = "character-index cuts"
+reached_by = ["string.take"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"]
+
+[[mint]]
+id = "stdlib/string_to_lower.almd"
+how = "construction"
+why = "whole mapped characters"
+reached_by = ["string.to_lower"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::case mapping keeps every adversarial string valid, at its output bound"]
+
+[[mint]]
+id = "stdlib/string_to_upper.almd"
+how = "construction"
+why = "whole mapped characters"
+reached_by = ["string.to_upper"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::case mapping keeps every adversarial string valid, at its output bound"]
+
+[[mint]]
+id = "stdlib/string_trim.almd"
+how = "construction"
+why = "cuts at whitespace boundaries"
+reached_by = ["string.trim"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::trim and pad keep every adversarial string valid"]
+
+# ── helper rows: every runtime helper the wasm emitter declares ──
+
+[[helper]]
+id = "F_ALLOC"
+how = "obligation"
+why = "allocates a block of any kind; a String block's payload is its caller's to write"
+
+[[helper]]
+id = "F_APPEND_BOOL"
+how = "construction"
+why = "appends true / false"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::concatenation and interpolation of valid pieces stay valid"]
+
+[[helper]]
+id = "F_APPEND_COPY"
+how = "construction"
+why = "appends a valid String (interpolation)"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::concatenation and interpolation of valid pieces stay valid"]
+
+[[helper]]
+id = "F_APPEND_I64"
+how = "construction"
+why = "appends decimal digits"
+reached_by = ["${}"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::concatenation and interpolation of valid pieces stay valid"]
+
+[[helper]]
+id = "F_BLOCK_COPY"
+how = "obligation"
+why = "copies a block byte for byte: valid in, valid out"
+
+[[helper]]
+id = "F_BUF_TO_BLOCK"
+how = "obligation"
+why = "copies the host's staged answer into a fresh block: its validity is the [[op]] row's"
+
+[[helper]]
+id = "F_BYTES_PUSH"
+how = "none"
+why = "a Bytes block"
+
+[[helper]]
+id = "F_CONCAT"
+how = "construction"
+why = "two valid Strings end to end"
+reached_by = ["+"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::concatenation and interpolation of valid pieces stay valid"]
+
+[[helper]]
+id = "F_COPY"
+how = "obligation"
+why = "copies bytes between blocks: the caller's row carries the evidence"
+
+[[helper]]
+id = "F_COW"
+how = "obligation"
+why = "copies a shared block before a write: valid in, valid out"
+
+[[helper]]
+id = "F_CP_OFF"
+how = "none"
+why = "answers an offset"
+
+[[helper]]
+id = "F_DEC_FLAT"
+how = "none"
+why = "drops a reference"
+
+[[helper]]
+id = "F_EPRINTLN_BLOCK"
+how = "none"
+why = "writes out"
+
+[[helper]]
+id = "F_EPRINTLN_IMPORT"
+how = "none"
+why = "writes out"
+
+[[helper]]
+id = "F_EXIT_IMPORT"
+how = "none"
+why = "exits"
+
+[[helper]]
+id = "F_F16_TO_F64"
+how = "none"
+why = "answers a Float"
+
+[[helper]]
+id = "F_FN_BASE"
+how = "none"
+why = "the first user function index, not a helper"
+
+[[helper]]
+id = "F_FREE"
+how = "none"
+why = "frees"
+
+[[helper]]
+id = "F_FS_CALL"
+how = "none"
+why = "the host op import: answers a status and a length; the answer bytes are the [[op]] row's"
+
+[[helper]]
+id = "F_HOST_READ"
+how = "obligation"
+why = "the import that copies the host's staged answer into guest memory: its validity is the [[op]] row's"
+
+[[helper]]
+id = "F_INC"
+how = "none"
+why = "counts a reference"
+
+[[helper]]
+id = "F_INT_TO_STRING"
+how = "construction"
+why = "decimal digits"
+reached_by = ["int.to_string"]
+evidence = ["spec/stdlib/utf8_format_producers_test.almd::int formatting and parsing stay valid"]
+
+[[helper]]
+id = "F_ITOA"
+how = "construction"
+why = "decimal digits"
+reached_by = ["int.to_string"]
+evidence = ["spec/stdlib/utf8_format_producers_test.almd::int formatting and parsing stay valid"]
+
+[[helper]]
+id = "F_LINE_EPRINTLN"
+how = "none"
+why = "writes out"
+
+[[helper]]
+id = "F_LINE_GROW"
+how = "obligation"
+why = "grows the line buffer of the line writer: valid in, valid out"
+
+[[helper]]
+id = "F_LINE_PRINTLN"
+how = "none"
+why = "writes out"
+
+[[helper]]
+id = "F_LIST_GET_4"
+how = "none"
+why = "reads a slot"
+
+[[helper]]
+id = "F_LIST_GET_8"
+how = "none"
+why = "reads a slot"
+
+[[helper]]
+id = "F_LIST_JOIN"
+how = "construction"
+why = "valid pieces end to end"
+reached_by = ["list.join"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::joining and repeating valid pieces stays valid"]
+
+[[helper]]
+id = "F_LIST_PUSH_4"
+how = "none"
+why = "a list block"
+
+[[helper]]
+id = "F_LIST_PUSH_8"
+how = "none"
+why = "a list block"
+
+[[helper]]
+id = "F_PRINTLN_BLOCK"
+how = "none"
+why = "writes out"
+
+[[helper]]
+id = "F_PRINTLN_IMPORT"
+how = "none"
+why = "writes out"
+
+[[helper]]
+id = "F_SCAN_STR"
+how = "none"
+why = "answers an index"
+
+[[helper]]
+id = "F_SCAN_W32"
+how = "none"
+why = "answers an index"
+
+[[helper]]
+id = "F_SCAN_W64"
+how = "none"
+why = "answers an index"
+
+[[helper]]
+id = "F_STR_APPEND"
+how = "construction"
+why = "appends a valid String"
+reached_by = ["+"]
+evidence = ["spec/stdlib/utf8_display_producers_test.almd::concatenation and interpolation of valid pieces stay valid"]
+
+[[helper]]
+id = "F_STR_CMP"
+how = "none"
+why = "answers an Int"
+
+[[helper]]
+id = "F_STR_EQ"
+how = "none"
+why = "answers a Bool"
+
+[[helper]]
+id = "F_STR_LEN_CHARS"
+how = "none"
+why = "answers an Int"
+
+[[helper]]
+id = "F_STR_REPEAT"
+how = "construction"
+why = "copies of a valid String"
+reached_by = ["string.repeat"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::joining and repeating valid pieces stays valid"]
+
+[[helper]]
+id = "F_STR_REPLACE"
+how = "construction"
+why = "cuts at matches of a valid needle"
+reached_by = ["string.replace"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::search, split and replace cut only at matches of a valid needle"]
+
+[[helper]]
+id = "F_STR_SLICE"
+how = "construction"
+why = "character-index cuts"
+reached_by = ["string.slice"]
+evidence = ["spec/stdlib/utf8_string_producers_test.almd::index cuts land on character boundaries"]

@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 1022 of 1023
+# certified: 1029 of 1030
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -175,7 +175,12 @@ spec/wasm_cross/effect_mut_generic_port.almd
 spec/wasm_cross/effect_operand_unwrap_distinct.almd
 spec/wasm_cross/effect_option_explicit_bang.almd
 spec/wasm_cross/effect_slot_carrier.almd
+spec/wasm_cross/effect_slot_effect_value_control.almd
 spec/wasm_cross/effect_slot_never_err_bang.almd
+spec/wasm_cross/effect_slot_pure_fn_param.almd
+spec/wasm_cross/effect_slot_pure_let_lambda.almd
+spec/wasm_cross/effect_slot_pure_named_fn.almd
+spec/wasm_cross/effect_slot_unit_block_tail.almd
 spec/wasm_cross/effect_tail_carrier_family.almd
 spec/wasm_cross/effect_tco.almd
 spec/wasm_cross/effect_tco_err_rewrap.almd
@@ -343,6 +348,8 @@ spec/wasm_cross/grouping_unary.almd
 spec/wasm_cross/guard_chain_cons_list.almd
 spec/wasm_cross/guard_err_in_call_arg_block.almd
 spec/wasm_cross/guard_jump_in_value_fn.almd
+spec/wasm_cross/guard_let_forms.almd
+spec/wasm_cross/guard_let_forms_typed_err.almd
 spec/wasm_cross/guard_let_statement.almd
 spec/wasm_cross/guard_only_use_liveness.almd
 spec/wasm_cross/guard_statement.almd

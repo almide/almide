@@ -5,7 +5,7 @@ id = "regex-full-match-renamed"
 issue = 3942
 since_epoch = 15
 since = "0.69.0"
-removal_epoch = 16
+removal_epoch = 17
 summary = "`regex.full_match` is `@deprecated` (E052) in favour of `regex.is_full_match` (R-regex-01): every other Bool question in the stdlib is spelled `is_*`. It takes a `Regex` like the rest of the module."
 removal = "`regex.full_match(re, s)` → `regex.is_full_match(re, s)`; `almide fix` renames it"
 
@@ -822,6 +822,18 @@ breaks = [
   "an `@export(c)` signature is checked against the C ABI table (E090, #4448): a `String`, `Bytes`, list, map, set, record, variant, tuple, fn, `Option` or `Result` parameter or return, a `Region` return and a `mut` parameter are refused, where they compiled into an `extern \"C\"` fn a C caller could not call (a `String` parameter took a Rust `String`) or died at rustc; take text as a `Region` parameter, and an effect fn answers its ok value (its err writes the message to stderr and exits 1, C-452)",
 ]
 
+[[epoch]]
+n = 16
+since = "0.69.1"
+name = "one-precedence-order"
+summary = "Every binary operator follows one widely used precedence order (#4531): `??` stops being a postfix and becomes a right-associative infix level below `|>`, the ranges and the arithmetic, and above the comparisons, `and` and `or`."
+breaks = [
+  "`??` binds looser than `+` / `-`: `x ?? 0 - 1` is `x ?? (0 - 1)` and `map.get(m, k) ?? 0 + 1` is `map.get(m, k) ?? (0 + 1)`, where they were `(x ?? 0) - 1` and `(map.get(m, k) ?? 0) + 1`; `s + b ?? 0` is `(s + b) ?? 0`, where it was `s + (b ?? 0)` (E120 refuses each site in a file not stamped `@dialect(16)`; `almide fix` adds the parentheses that keep the old reading)",
+  "`??` binds looser than `*` / `/` / `%`, `^` / `**`, `>>` and the ranges `..<` / `...`: `x ?? 1 * k` is `x ?? (1 * k)` and `x ?? 0 ..< n` is `x ?? (0 ..< n)`, where they were `(x ?? 1) * k` and `(x ?? 0) ..< n` (E120; `almide fix`)",
+  "`??` binds looser than the prefix `-` and `not`: `-x ?? 0` is `(-x) ?? 0` and `not p ?? false` is `(not p) ?? false`, where they were `-(x ?? 0)` and `not (p ?? false)` (E120; `almide fix`)",
+  "`??` binds looser than `|>` on both sides: `xs |> f ?? d |> g` is `(xs |> f) ?? (d |> g)`, where it was `((xs |> f) ?? d) |> g`; `xs |> f(a) ?? d` keeps its meaning, now by the grammar instead of the checker's re-association (ADR-0005 D6), and a stage written `xs |> (f ?? g)` pipes into the fallback fn (E120; `almide fix`)",
+]
+
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
 # =============================================================
 
@@ -834,7 +846,7 @@ id = "numeric-renames-wave-2"
 issue = 3985
 since_epoch = 15
 since = "0.69.0"
-removal_epoch = 16
+removal_epoch = 17
 summary = "Three numeric functions are `@deprecated` (E052) under a new name with the same signature and answers: `int.pop_count` → `int.count_ones` (R-int-07, #3985), `int.bit_width` → `int.bit_length` (R-int-11, #4004), and `float.sign` → `float.signum` (R-float-05, #3972), which frees `sign` for the 0-for-0 answer every other number type gives."
 removal = "`int.pop_count(n)` → `int.count_ones(n)`; `int.bit_width(n)` → `int.bit_length(n)`; `float.sign(x)` → `float.signum(x)` (still 1.0 for 0.0 and -1.0 for -0.0)"
 

@@ -1,0 +1,3 @@
+expects_code = "E001"
+expects_error = "unwraps an Option, so its failure arm is `none =>`"
+hint_substring = "write `else none =>"

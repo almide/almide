@@ -34,10 +34,11 @@ pub fn rewrite_option_ops(
     option_fns: &BTreeSet<String>,
     opt_params: &[ValueId],
     carriers: &BTreeSet<ValueId>,
+    filled: &BTreeSet<ValueId>,
 ) {
     let ops = std::mem::take(&mut f.ops);
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
-    let mut t = OptionTracker::default();
+    let mut t = OptionTracker { fresh: next_value(f, &ops), filled: filled.clone(), ..OptionTracker::default() };
     t.opt_vals.extend(opt_params.iter().copied());
     for op in ops {
         let Some(op) = t.carrier_op(op, &mut out, carriers) else { continue };
@@ -47,10 +48,52 @@ pub fn rewrite_option_ops(
 }
 
 impl OptionTracker {
+    /// A 0-or-1 block filled in place (`crate::option_blocks`): None until
+    /// its hit stores the payload, then its length word 1. `true` when `op`
+    /// is one of the block's ops and was rewritten; any other length word is
+    /// left as it is (`false`), and walls.
+    fn filled_block_op(&mut self, op: &Op, out: &mut Vec<Op>) -> bool {
+        match op {
+            Op::Alloc { dst, init: Init::DynList { len }, .. } if self.filled.contains(dst) && self.const_vals.get(len) == Some(&1) => {
+                out.push(Op::Prim { kind: PrimKind::OptMakeNone, dst: Some(*dst), args: vec![] });
+                self.opt_vals.insert(*dst);
+                self.minted.insert(*dst);
+                self.filling.insert(*dst);
+            }
+            Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args }
+                if args.len() == 2 && self.addrs.get(&args[0]).is_some_and(|(o, off)| *off == 12 && self.filling.contains(o)) =>
+            {
+                self.pending.insert(self.addrs[&args[0]].0, args[1]);
+            }
+            Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args }
+                if args.len() == 2 && self.addrs.get(&args[0]).is_some_and(|(o, off)| *off == 4 && self.filling.contains(o)) =>
+            {
+                let o = self.addrs[&args[0]].0;
+                let made = match self.const_vals.get(&args[1]) {
+                    Some(0) => {
+                        self.pending.remove(&o);
+                        Some(Op::Prim { kind: PrimKind::OptMakeNone, dst: Some(ValueId(self.fresh)), args: vec![] })
+                    }
+                    Some(1) => self.pending.remove(&o).map(|p| Op::Prim { kind: PrimKind::OptMakeSome, dst: Some(ValueId(self.fresh)), args: vec![p] }),
+                    _ => None,
+                };
+                let Some(made) = made else { return false };
+                out.push(made);
+                out.push(Op::SetLocal { local: o, src: ValueId(self.fresh) });
+                self.fresh += 1;
+            }
+            _ => return false,
+        }
+        true
+    }
+
     /// The carrier-producing and carrier-reading arms: a const, a minted
     /// carrier, its ownership ops, and the swallowed `Handle`/address/load
     /// window. Hands `op` back when none of them applies.
     fn carrier_op(&mut self, op: Op, out: &mut Vec<Op>, carriers: &BTreeSet<ValueId>) -> Option<Op> {
+        if self.filled_block_op(&op, out) {
+            return None;
+        }
         match &op {
             Op::ConstInt { dst, value } => {
                 self.const_vals.insert(*dst, *value);
@@ -158,4 +201,30 @@ struct OptionTracker {
     /// A swallowed `Handle + const` → (the Option, the offset).
     addrs: BTreeMap<ValueId, (ValueId, i64)>,
     if_dsts: Vec<Option<ValueId>>,
+    /// The blocks filled in place this function's lowering recorded, the ones
+    /// this pass took over, and the payload each one's slot store holds
+    /// until its length word makes it Some.
+    filled: BTreeSet<ValueId>,
+    filling: BTreeSet<ValueId>,
+    pending: BTreeMap<ValueId, ValueId>,
+    /// The next value id no op of the function uses.
+    fresh: u32,
+}
+
+/// One past the highest value id `f`'s params and `ops` mention.
+fn next_value(f: &MirFunction, ops: &[Op]) -> u32 {
+    let mut hi = f.params.iter().map(|p| p.value.0 + 1).max().unwrap_or(0);
+    for op in ops {
+        let mut reads = Vec::new();
+        crate::mir_ops::op_reads(op, &mut reads);
+        let defined = crate::mir_ops::defined_value(op);
+        let set = match op {
+            Op::SetLocal { local, .. } => Some(*local),
+            _ => None,
+        };
+        for v in reads.into_iter().chain(defined).chain(set) {
+            hi = hi.max(v.0 + 1);
+        }
+    }
+    hi
 }

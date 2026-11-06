@@ -3004,6 +3004,11 @@ evidence  = [
   { path = "spec/lang/fallible_user_hof_test.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_fn_value_slot_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_slot_never_err_bang.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_slot_unit_block_tail.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_slot_pure_named_fn.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_slot_pure_fn_param.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_slot_pure_let_lambda.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_slot_effect_value_control.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-222"
@@ -3525,6 +3530,8 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_let_statement.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_let_forms.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_let_forms_typed_err.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-267"

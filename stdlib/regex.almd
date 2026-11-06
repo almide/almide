@@ -94,8 +94,8 @@ fn __matches(scan: List[String]) -> List[List[String]] = {
 
 // The scan with each match replaced by f of its groups.
 fn __splice(scan: List[String], f: (List[String?]) -> String) -> String = {
-  let parts = __matches(scan) |> list.map((m) => list.get(m, 0) ?? "" + f(m |> list.drop(1) |> list.map((c) => __unmark(c))))
-  list.join(parts, "") + list.get(scan, list.len(scan) - 1) ?? ""
+  let parts = __matches(scan) |> list.map((m) => (list.get(m, 0) ?? "") + f(m |> list.drop(1) |> list.map((c) => __unmark(c))))
+  list.join(parts, "") + (list.get(scan, list.len(scan) - 1) ?? "")
 }
 
 @intrinsic("almide_regex_check")

@@ -1,0 +1,8 @@
+// `guard let n else …` rebinds `n` to the payload of an Option or Result
+// binding (#4543); here `n` is an Option, so the shorthand unwraps it.
+fn bump(n: Option[Int]) -> Int = {
+  guard let n else { 0 }
+  n + 1
+}
+
+fn main() -> Unit = println(int.to_string(bump(some(1))))

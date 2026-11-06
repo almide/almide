@@ -129,6 +129,30 @@ regexcycle-wasm 1.07
 # 4000), the global writes costing what the local ones do.
 framebuf-native 4.4
 framebuf-wasm 1.1
+# framebuf-local wasm min / framebuf-local native min, the same frames (#4550):
+# 14.8-18.9 before the wasm leg inlined the byte IO bounds predicate, 11.0-12.6
+# after (two runner classes: 3.835s / 0.349s and 2.174s / 0.171s). The
+# ceiling (15) sits between the two ranges.
+framebuf-local-wasm-native 11.0
+# MUT PARAM (#4580): framebuf-param per-frame min / framebuf-local per-frame
+# min, per leg. The gate fails on MUTPARAM_CEILING_* in check-perf-ratio.sh,
+# never on these values. Perf-ratchet runner reading on #4583 (job
+# 127959241407, --quick --runs 9): native 1.015, wasm 1.160 — the helper's
+# writes cost what the inline ones do on both legs.
+framebuf-param-native 1.02
+framebuf-param-wasm 1.16
+# MUT MAP (#4580): mutmap-param per-round min / mutmap-local per-round min,
+# per leg. The gate fails on MUTMAP_CEILING_* in check-perf-ratio.sh, never on
+# these values.
+# Perf-ratchet runner reading on #4583 (job 127959241407): native 1.018,
+# wasm 2.311 (a call, a move-in and a write-back per write).
+mutmap-native 1.02
+mutmap-wasm 2.31
+# MUT SET (#4582): mutset-param per-round min / mutset-local per-round min,
+# per leg. The gate fails on MUTSET_CEILING_* in check-perf-ratio.sh, never on
+# these values. ubuntu-latest probe readings: native 1.33-1.48, wasm 2.11-2.17.
+mutset-native 1.4
+mutset-wasm 2.1
 treealloc 0.343
 # btrees (rc4): treealloc's program with the depth a literal and no argument
 # read, so it renders whole on the certified native leg, region window

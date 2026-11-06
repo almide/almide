@@ -383,4 +383,108 @@ mod tests {
         assert_eq!(parse_shape("-a + b"), "(+ (unary:- a) b)");
         assert_eq!(parse_shape("not a and b"), "(and (unary:not a) b)");
     }
+
+    // ═══════════════════════════════════════════════════════
+    //  Q: `??` as an infix level (dialect 16, #4531)
+    //  Every pair whose order moved, then the pairs that kept it.
+    // ═══════════════════════════════════════════════════════
+
+    /// The pre-16 reading of `src`, for the pairs that moved.
+    fn legacy_shape(src: &str) -> String {
+        let mut parser = Parser::new(Lexer::tokenize(src)).with_legacy_grouping(true);
+        match parser.parse_expr() {
+            Ok(expr) => shape(&expr.kind),
+            Err(e) => format!("ERR: {}", e),
+        }
+    }
+
+    #[test]
+    fn q1_fallback_then_additive() {
+        assert_eq!(parse_shape("x ?? 0 - 1"), "(?? x (- 0 1))");
+        assert_eq!(legacy_shape("x ?? 0 - 1"), "(- (?? x 0) 1)");
+        assert_eq!(parse_shape("map.get(m, k) ?? 0 + 1"), "(?? map.get(m, k) (+ 0 1))");
+        assert_eq!(legacy_shape("map.get(m, k) ?? 0 + 1"), "(+ (?? map.get(m, k) 0) 1)");
+    }
+
+    #[test]
+    fn q2_fallback_then_multiplicative() {
+        assert_eq!(parse_shape("x ?? 1 * k"), "(?? x (* 1 k))");
+        assert_eq!(parse_shape("x ?? 1 / k"), "(?? x (/ 1 k))");
+        assert_eq!(parse_shape("x ?? 1 % k"), "(?? x (% 1 k))");
+        assert_eq!(legacy_shape("x ?? 1 * k"), "(* (?? x 1) k)");
+    }
+
+    #[test]
+    fn q3_arithmetic_then_value() {
+        assert_eq!(parse_shape("s1 + b ?? 0"), "(?? (+ s1 b) 0)");
+        assert_eq!(legacy_shape("s1 + b ?? 0"), "(+ s1 (?? b 0))");
+        assert_eq!(parse_shape("s * b ?? 1"), "(?? (* s b) 1)");
+        assert_eq!(legacy_shape("s * b ?? 1"), "(* s (?? b 1))");
+    }
+
+    #[test]
+    fn q4_power_and_compose() {
+        assert_eq!(parse_shape("x ?? 2 ^ n"), "(?? x (^ 2 n))");
+        assert_eq!(legacy_shape("x ?? 2 ^ n"), "(^ (?? x 2) n)");
+        assert_eq!(parse_shape("f ?? g >> h"), "(?? f (>> g h))");
+        assert_eq!(legacy_shape("f ?? g >> h"), "(>> (?? f g) h)");
+    }
+
+    #[test]
+    fn q5_ranges() {
+        assert_eq!(parse_shape("x ?? 0 ..< n"), "(?? x (..< 0 n))");
+        assert_eq!(legacy_shape("x ?? 0 ..< n"), "(..< (?? x 0) n)");
+        assert_eq!(parse_shape("a ..< b ?? c"), "(?? (..< a b) c)");
+    }
+
+    #[test]
+    fn q6_prefix_operand() {
+        assert_eq!(parse_shape("-x ?? 0"), "(?? (unary:- x) 0)");
+        assert_eq!(legacy_shape("-x ?? 0"), "(unary:- (?? x 0))");
+        assert_eq!(parse_shape("not p ?? false"), "(?? (unary:not p) false)");
+        assert_eq!(legacy_shape("not p ?? false"), "(unary:not (?? p false))");
+    }
+
+    #[test]
+    fn q7_pipe_both_sides() {
+        // the pipe binds tighter: its result is what the fallback applies to
+        assert_eq!(parse_shape("xs |> list.first ?? 0"), "(?? (|> xs list.first) 0)");
+        assert_eq!(parse_shape("xs |> f(a) ?? d"), "(?? (|> xs f(a)) d)");
+        assert_eq!(parse_shape("xs |> list.first ?? 0 |> g"), "(?? (|> xs list.first) (|> 0 g))");
+        assert_eq!(legacy_shape("xs |> list.first ?? 0 |> g"), "(|> (|> xs (?? list.first 0)) g)");
+        assert_eq!(parse_shape("a ?? xs |> f"), "(?? a (|> xs f))");
+        // the right side of `|>` stays one stage (`>>` included)
+        assert_eq!(parse_shape("xs |> list.map(f) + ys"), "(+ (|> xs list.map(f)) ys)");
+        assert_eq!(parse_shape("xs |> f >> g ?? d"), "(?? (|> xs (>> f g)) d)");
+        assert_eq!(parse_shape("xs |> (f ?? g)"), "(|> xs (?? f g))");
+    }
+
+    #[test]
+    fn q8_coalesce_is_right_assoc() {
+        assert_eq!(parse_shape("a ?? b ?? c"), "(?? a (?? b c))");
+        assert_eq!(legacy_shape("a ?? b ?? c"), "(?? a (?? b c))");
+    }
+
+    #[test]
+    fn q9_kept_pairs() {
+        // above the comparisons, `and` and `or`, as before
+        assert_eq!(parse_shape("a ?? b == c"), "(== (?? a b) c)");
+        assert_eq!(parse_shape("a == b ?? c"), "(== a (?? b c))");
+        assert_eq!(parse_shape("a ?? b < c"), "(< (?? a b) c)");
+        assert_eq!(parse_shape("a ?? b and c"), "(and (?? a b) c)");
+        assert_eq!(parse_shape("a or b ?? c"), "(or a (?? b c))");
+        assert_eq!(parse_shape("f(x) ?? g(y)"), "(?? f(x) g(y))");
+        // everything that does not touch `??` keeps its order
+        assert_eq!(parse_shape("a + b |> f"), "(|> (+ a b) f)");
+        assert_eq!(parse_shape("0 ..< n |> list.map(f)"), "(|> (..< 0 n) list.map(f))");
+        assert_eq!(parse_shape("xs |> list.len == 0"), "(== (|> xs list.len) 0)");
+        assert_eq!(parse_shape("2 * 3 ^ 2"), "(* 2 (^ 3 2))");
+    }
+
+    #[test]
+    fn q10_chains_stay_refused() {
+        assert!(parse_shape("a < b < c").starts_with("ERR"));
+        assert!(parse_shape("a ..< b ..< c").starts_with("ERR"));
+        assert!(parse_shape("a ?? b == c == d").starts_with("ERR"));
+    }
 }

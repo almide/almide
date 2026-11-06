@@ -685,16 +685,13 @@ impl BoundedCx<'_, '_> {
     /// `left |> right`, judged as the call it lowers to (`lower_pipe`):
     /// `a |> f(b)` is `f(a, b)` and `a |> f` is `f(a)`, so ALS-B7 checks the
     /// call the pipe spells with the piped value in the first slot. A trailing
-    /// `??` / `!` / `?` on the stage is transparent — the pipe feeds the stage
-    /// under it and the operator applies to the result (ADR-0005). Any other
+    /// `!` / `?` on the stage is transparent — the pipe feeds the stage under
+    /// it and the operator applies to the result. (`??` is an infix level
+    /// below `|>` since dialect 16, #4531, so it is never a stage.) Any other
     /// stage, a lambda included, is an indirect callee, as its direct-call
     /// spelling (an immediately-applied lambda) already is.
     fn walk_pipe(&mut self, pipe: &ast::Expr, left: &ast::Expr, right: &ast::Expr) {
         match &right.kind {
-            ast::ExprKind::UnwrapOr { expr: stage, fallback } => {
-                self.walk_pipe(pipe, left, stage);
-                self.walk_expr(fallback);
-            }
             ast::ExprKind::Unwrap { expr: stage } => {
                 self.unwrap_rule(right.span);
                 self.walk_pipe(pipe, left, stage);

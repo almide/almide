@@ -349,7 +349,7 @@ test "nested scalar-value map literal churn" {
     ]
     let d: Map[String, Int] = [:]
     let got = map.get(nested, "k0") ?? d
-    count = count + map.get(got, "v") ?? 0
+    count = count + (map.get(got, "v") ?? 0)
   }
   assert_eq(count, 15)
 }
@@ -376,7 +376,7 @@ test "bare-map list literal churn" {
       ["c": i + 2]
     ]
     let d: Map[String, Int] = [:]
-    hits = hits + map.get(list.get(xs, 2) ?? d, "c") ?? 0
+    hits = hits + (map.get(list.get(xs, 2) ?? d, "c") ?? 0)
   }
   assert_eq(hits, 25)
 }

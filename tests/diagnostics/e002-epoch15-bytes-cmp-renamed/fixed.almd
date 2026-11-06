@@ -1,0 +1,8 @@
+// `bytes.cmp` left at dialect epoch 15 for `bytes.compare`, with the same
+// arguments and the same type (both are `(Bytes, Bytes) -> Int`). Renaming
+// the callee is the whole edit, so `almide fix` applies it (#4525).
+effect fn main() -> Unit = {
+  let a = bytes.from_string("a")
+  let b = bytes.from_string("b")
+  println(int.to_string(bytes.compare(a, b)))
+}

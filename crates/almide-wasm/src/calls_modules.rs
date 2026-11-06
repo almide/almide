@@ -365,7 +365,7 @@ impl Emitter<'_> {
                 self.lower_linked_call("value", func.as_str(), args, tail)
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "bytes" => {
-                self.lower_bytes_call(func.as_str(), args)
+                self.lower_bytes_call(func.as_str(), args, tail)
             }
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "string" && func.as_str() == "split" && args.len() == 2 =>
