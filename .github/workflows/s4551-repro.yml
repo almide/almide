@@ -41,3 +41,25 @@ jobs:
             done
             (cd $d && timeout 60 $ALMIDE ci/main.almd --target rust > out.rs 2>&1; echo "RESULT ${{ matrix.version }} $d [emit rust] exit=$?"; grep -A2 'fn almide_rt_sub_g' out.rs | sed 's/^/    /')
           done
+
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [self-submodule-import-4551, s4551-nc-noload, s4551-nc-nofix]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - name: Build the compiler
+        run: cargo build --release --bin almide
+      - name: Regression test (each run has a 300 s deadline)
+        run: |
+          set +e
+          cargo test --release --test self_submodule_root_import_test -- --test-threads=3 2>&1 | tee test.log
+          echo "VERDICT ${{ matrix.ref }} cargo-test-exit=${PIPESTATUS[0]}"
