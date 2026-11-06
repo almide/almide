@@ -59,16 +59,85 @@ effect fn main() -> Unit = {
 
 const WANT: &str = "1 100 true false 3 3 true\n";
 
+/// The other read positions of a heap global (#4562, second half): a field
+/// read, a `for` head, a `match` subject, `==`, interpolation, a tuple and a
+/// record destructure, and a fn that returns the global. `walk` writes the
+/// global it is iterating: the loop still walks the value it started on.
+const PLACES_SRC: &str = r#"
+type St = { items: List[Int], count: Int, name: String }
+
+var st: St = { items: [], count: 0, name: "" }
+var tl: (List[Int], Int) = ([], 0)
+var ol: Option[List[Int]] = none
+var ws: String = ""
+var wl: List[Int] = []
+
+fn field_n() -> Int = st.count
+
+fn field_len() -> Int = list.len(st.items)
+
+fn field_items() -> List[Int] = st.items
+
+fn walk() -> Int = {
+  var a = 0
+  for x in wl {
+    wl = []
+    a = a + x
+  }
+  a
+}
+
+fn opt_len() -> Int = match ol {
+  some(v) => list.len(v),
+  none => 0,
+}
+
+fn same() -> Bool = wl == []
+
+fn shout() -> String = "${ws}!"
+
+fn pair() -> Int = {
+  let (a, b) = tl
+  b + list.len(a)
+}
+
+fn rec() -> Int = {
+  let { items, count } = st
+  count + list.len(items)
+}
+
+fn whole() -> List[Int] = wl
+
+effect fn main() -> Unit = {
+  st = { items: [1, 2, 3], count: 7, name: "n" }
+  tl = ([4, 5], 6)
+  ol = some([1, 2])
+  ws = "hi"
+  wl = [1, 2, 3]
+  let w = walk()
+  println("${field_n()} ${field_len()} ${list.len(field_items())} ${w} ${list.len(wl)} ${same()} ${opt_len()} ${shout()} ${pair()} ${rec()} ${list.len(whole())}")
+}
+"#;
+
+const PLACES_WANT: &str = "7 3 3 6 0 true 2 hi! 8 10 0\n";
+
 fn source_file(tag: &str) -> std::path::PathBuf {
+    source_file_of(tag, SRC)
+}
+
+fn source_file_of(tag: &str, src: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("almide-global-borrow-read-{tag}"));
     let _ = std::fs::create_dir_all(&dir);
     let file = dir.join("main.almd");
-    std::fs::write(&file, SRC).unwrap();
+    std::fs::write(&file, src).unwrap();
     file
 }
 
 fn run(target: Option<&str>) -> String {
-    let file = source_file(target.unwrap_or("native"));
+    run_file(source_file(target.unwrap_or("native")), target)
+}
+
+fn run_file(file: std::path::PathBuf, target: Option<&str>) -> String {
     let mut cmd = Command::new(almide_bin());
     cmd.arg("run").arg(&file);
     if let Some(t) = target {
@@ -113,4 +182,34 @@ fn borrowed_global_arg_is_not_copied() {
         assert!(body.contains("std::rc::Rc::clone(&*__almide_cell.borrow())"), "`{name}` does not borrow the global's Rc:\n{body}");
         assert!(!body.contains("__almide_cell.borrow()).clone()"), "`{name}` copies the global out of its cell:\n{body}");
     }
+}
+
+#[test]
+fn global_read_places_keep_their_values_natively() {
+    let out = run_file(source_file_of("places-native", PLACES_SRC), None);
+    assert!(out.contains(PLACES_WANT), "native:\n{out}");
+}
+
+#[test]
+fn global_read_places_keep_their_values_on_wasm() {
+    let out = run_file(source_file_of("places-wasm", PLACES_SRC), Some("wasm"));
+    assert!(out.contains(PLACES_WANT), "wasm:\n{out}");
+}
+
+/// No read-only position copies the whole global out of its cell: each reads
+/// a snapshot of the cell's `Rc`, and clones at most the part it keeps.
+/// `whole` returns the global, so it keeps exactly one copy (it had two).
+#[test]
+fn global_read_places_are_not_copied() {
+    let file = source_file_of("places-emit", PLACES_SRC);
+    let out = Command::new(almide_bin()).arg(&file).args(["--target", "rust"]).output().expect("spawn almide");
+    let rust = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "emit failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    for name in ["field_n", "field_len", "field_items", "walk", "opt_len", "same", "shout", "pair", "rec"] {
+        let body = fn_body(&rust, name);
+        assert!(body.contains("std::rc::Rc::clone(&*__almide_cell.borrow())"), "`{name}` does not read a snapshot of the global's Rc:\n{body}");
+        assert!(!body.contains("__almide_cell.borrow()).clone()"), "`{name}` copies the global out of its cell:\n{body}");
+    }
+    let whole = fn_body(&rust, "whole");
+    assert_eq!(whole.matches(".clone()").count(), 1, "`whole` must copy the global once:\n{whole}");
 }
