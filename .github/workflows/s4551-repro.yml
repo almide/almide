@@ -1,0 +1,43 @@
+name: s4551 repro (throwaway)
+on:
+  push:
+    branches: [s4551-repro]
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [v0.67.1, v0.69.0]
+    steps:
+      - name: Fetch released almide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download ${{ matrix.version }} -R almide/almide -p almide-linux-x86_64.tar.gz -D dl
+          tar xzf dl/almide-linux-x86_64.tar.gz -C dl
+          BIN=$(find "$PWD/dl" -type f -name almide | head -1); chmod +x "$BIN"; echo "ALMIDE=$BIN" >> $GITHUB_ENV
+          "$BIN" --version
+      - name: Write the packages
+        run: |
+          mk() { # dir entry-extra-import
+            d=$1; mkdir -p $d/src $d/ci
+            printf '[package]\nname = "selfsub"\nversion = "0.1.0"\n' > $d/almide.toml
+            printf 'fn g() -> Int = 42\n' > $d/src/mod.almd
+            printf 'import self as selfsub\n\nlocal fn g() -> Int = selfsub.g()\n\nfn f() -> Int = g()\n' > $d/src/sub.almd
+            printf '%simport self.sub\n\ntest "t" {\n  assert_eq(sub.f(), 42)\n}\n' "$2" > $d/ci/use_test.almd
+            printf '%simport self.sub\n\neffect fn main() -> Unit = {\n  println(int.to_string(sub.f()))\n}\n' "$2" > $d/ci/main.almd
+          }
+          mk bare ""
+          mk workaround 'import self as _root\n'
+          # A submodule with no bare `import self` — the control that does not forward.
+          mk nofwd ""; printf 'fn f() -> Int = 42\n' > nofwd/src/sub.almd
+      - name: Run each command under a 120 s deadline (124 = timed out)
+        run: |
+          for d in bare workaround nofwd; do
+            for cmd in "check ci/use_test.almd" "test ci/use_test.almd" "run ci/main.almd" "run ci/main.almd --target wasm"; do
+              (cd $d && timeout 120 $ALMIDE $cmd > out.txt 2>&1; echo "RESULT ${{ matrix.version }} $d [$cmd] exit=$?"; tail -3 out.txt | sed 's/^/    /')
+            done
+            (cd $d && timeout 60 $ALMIDE ci/main.almd --target rust > out.rs 2>&1; echo "RESULT ${{ matrix.version }} $d [emit rust] exit=$?"; grep -A2 'fn almide_rt_sub_g' out.rs | sed 's/^/    /')
+          done
