@@ -469,7 +469,12 @@ impl<'a> Interpreter<'a> {
                 Some(n) => Flow::val(Value::Int(n as i64)),
                 // A Range that as_iter_items refuses is the OVER-CAP span
                 // (C-197): both backends materialize and take the defined OOM
-                // abort, so any answer here is a wrong vote — abstain.
+                // abort. A span no machine can hold (`0...i64::MAX`, #4538)
+                // votes that abort; below that line a backend may still
+                // succeed, so any answer here is a wrong vote — abstain.
+                None if matches!(v, Value::Range { start, end, inclusive } if crate::value::range_beyond_any_machine(*start, *end, *inclusive)) => {
+                    Flow::Abort("out of memory".to_string())
+                }
                 None if matches!(v, Value::Range { .. }) => Flow::Unsupported(
                     "range materialization beyond the interp cap (both backends take the C-197 resource path)".into(),
                 ),
