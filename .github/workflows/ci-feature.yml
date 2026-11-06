@@ -4,7 +4,7 @@ name: Feature Branch CI
 on:
   push:
     branches:
-      - 'feature/gr4571-probe'
+      - 'feature/gr4571-shapes'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,98 +17,6 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  perf-and-tests:
-    name: perf-ratio + native tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 240
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: [fix, control]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 20
-      - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: ${{ env.RUST_STABLE_TOOLCHAIN }}
-          components: llvm-tools
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: feature-build-${{ env.RUST_STABLE_TOOLCHAIN }}
-          save-if: false
-      - name: valgrind + wasmtime
-        run: |
-          set -euo pipefail
-          sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends valgrind
-          VERSION=v50.0.1
-          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
-          tar -xf "$TARBALL"
-          sudo install -m 755 "wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
-          rm -rf "$TARBALL" "wasmtime-${VERSION}-x86_64-linux"
-      - name: Negative control — revert the fix
-        if: matrix.variant == 'control'
-        run: |
-          git config user.email probe@example.com && git config user.name probe
-          git revert --no-edit "$(git log --format=%H -1 --grep='Read a borrow-only heap slot as a snapshot')"
-          git log --oneline -3
-      - name: Build
-        run: cargo build --release
-      - name: Gates
-        run: |
-          set +e
-          export ALMIDE_BIN=$PWD/target/release/almide
-          mkdir -p /tmp/almide-bin && cp target/release/almide /tmp/almide-bin/almide
-          bash scripts/check-perf-ratio.sh 2>&1 | tee perf.log; echo "RC perf-ratio=${PIPESTATUS[0]}" | tee -a status.txt
-          grep -i globalread perf.log | tee -a status.txt
-          if [ "${{ matrix.variant }}" = fix ]; then
-            cargo test --release --test native_v1_differential_test 2>&1 | tail -40; echo "RC native_v1_differential_test=${PIPESTATUS[0]}" | tee -a status.txt
-            cargo test --release --test native_verified_floor_test 2>&1 | tail -40; echo "RC native_verified_floor_test=${PIPESTATUS[0]}" | tee -a status.txt
-            cargo test --release --test global_borrow_read_test 2>&1 | tail -40; echo "RC global_borrow_read_test=${PIPESTATUS[0]}" | tee -a status.txt
-            cargo test --release --test native_slot_types_test 2>&1 | tail -40; echo "RC native_slot_types_test=${PIPESTATUS[0]}" | tee -a status.txt
-            cargo test --release -p almide-mir 2>&1 | grep -E "^test result|FAILED|panicked|failures" | head -60; echo "RC almide-mir=${PIPESTATUS[0]}" | tee -a status.txt
-          fi
-          cat status.txt
-          ! grep -E "^RC .*=[1-9]" status.txt
-
-  small:
-    name: native-v1-perf-small
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
-          save-if: false
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
-      - run: cargo build --release --bin almide
-      - run: bash scripts/check-native-v1-perf-small.sh
-
-  v1-vs-v0:
-    name: native-v1-perf (shape benches)
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
-          save-if: false
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
-      - run: cargo build --release --bin almide
-      - run: bash scripts/check-native-v1-perf.sh
-
   shapes:
     name: native-v1-perf-shapes
     runs-on: ubuntu-latest
@@ -120,4 +28,6 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: llvm-tools
-      - run: bash scripts/check-native-v1-perf-shapes.sh
+      - run: |
+          sed 's/counts\[key\] = counts.get(key, 0) + 1/counts[key] = counts.get(key, 0) + 1; print("REGION", reg[1], reg[5], reg[2], reg[3], repr(own[:300])) if "heap_slot" in reg[1] else None/' scripts/check-native-v1-perf-shapes.sh > scripts/_dbg-shapes.sh
+          bash scripts/_dbg-shapes.sh
