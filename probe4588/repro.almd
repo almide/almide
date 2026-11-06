@@ -1,0 +1,6 @@
+fn main() -> Unit = {
+  let s0: String? = none
+  let r2: Int? = option.map(s0, ((acc1) => 2147483647))
+  let r3: String = "ΑΒΓ"
+  println("r3 = ${r3}")
+}

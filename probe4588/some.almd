@@ -1,0 +1,8 @@
+fn main() -> Unit = {
+  let s0: String? = some("abc")
+  let r2: Int? = option.map(s0, ((acc1) => string.len(acc1) + 2147483647))
+  let n: Option[Int] = none
+  let r4: Int? = option.map(n, (x) => x + 1)
+  println("r2 = ${r2 ?? 0}")
+  println("r4 = ${r4 ?? 7}")
+}

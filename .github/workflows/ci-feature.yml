@@ -1,68 +1,38 @@
 name: Feature Branch CI
 
-# Lightweight CI for agent feature branches.
-# Build + cargo test + exercises only. No cross-platform, TS, JS, WASM.
-
+# THROWAWAY probe for #4588.
 on:
   push:
     branches:
-      - '*/[a-z]*'        # dolphin/*, shark/*, octopus/*, squid/*, clownfish/*
-      - 'feature/**'
-      - 'worktree-*/**'
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
-      - '.tasks/**'
+      - 'feature/f4588-probe'
 
-# Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
-# concurrent runs that all re-download tools and trip the per-IP rate limit.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.97.0"  # runner-class MSRV: the almide binary embeds wasmtime 50 (commissioned host); compiler crates keep the 1.89 claim per-crate
-  # Cold runners gain nothing from the workspace's release-incremental
-  # profile (#1006) — it only bloats the caches. Opt out.
+  RUST_TOOLCHAIN: "1.97.0"
   CARGO_INCREMENTAL: "0"
 
-# #4094: the same read-only token the repository default gives, stated here so a
-# settings change cannot widen it. A job that needs more declares it itself.
 permissions: read-all
 
 jobs:
-  build-and-test:
-    name: Build & Test (Linux)
+  repro:
+    name: Repro on head
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
-
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-
-      # Dependencies only (see ci.yml `build`). Feature branches only READ
-      # the shared entry (develop's ci-feature run never happens — the
-      # trigger is branch-pattern-gated), so every feature push writes its
-      # own key: keep it but let the branch pay for the workspace it built.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: feature-build-${{ env.RUST_TOOLCHAIN }}
-          cache-on-failure: true
-
-      - name: Build
-        run: cargo build --release
-
-      - name: Cache wasmtime tarball
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v50.0.1-x86_64-linux
-
-      - name: Install the runtime `almide test` uses for its wasm leg
+          save-if: false
+      - name: Install wasmtime
         run: |
           set -euo pipefail
           VERSION=v50.0.1
@@ -70,43 +40,59 @@ jobs:
           bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
           sudo install -m 755 "wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
-          wasmtime --version
-
-      # No `cargo test --workspace` here, on purpose.
-      #
-      # It used to run, UNSHARDED on this one runner, and it was the whole cost
-      # of this workflow: measured median 119 min over 19 runs, the most recent
-      # 187-223 min — on a file whose first line calls it "lightweight". The
-      # same suite runs in ci.yml split across four shards (`Test Rust (shard
-      # N/4)`, ~27 min end to end), and THOSE are the required checks on
-      # develop; this job never was. So the step duplicated a required check,
-      # 8x slower, gated nothing, and — because `concurrency` only cancels a
-      # superseded push, not a merge — kept a runner for hours after its
-      # branch had already landed (2026-09-23: 2h on a merged branch).
-      #
-      # What stays is what a pre-PR branch actually needs quickly: it builds,
-      # the example corpus runs, and emit does not crash. The test suite
-      # arrives with the pull request, sharded, as a required check.
-
-      # The execution signal for feature branches. This step was a double
-      # no-op for months (#979): it globbed `exercises/` — deleted long ago —
-      # and muted even that failure with continue-on-error ("TODO: re-enable
-      # after stdlib reconnection", which happened without the re-enable).
-      # `examples/` is the live corpus ci.yml runs; the count floor keeps a
-      # renamed corpus from reading as green (the #976 lesson).
-      - name: Run examples (Rust target)
+      - name: Build
+        run: cargo build --release && cargo build --release -p almide-mir --example emit_native_bundle
+      - name: Probe
         run: |
-          ALMIDE=./target/release/almide
-          count=$(find examples -name '*.almd' | wc -l)
-          [ "$count" -ge 10 ] || { echo "::error::only $count example files found — the corpus moved (#979)"; exit 1; }
-          $ALMIDE test examples/
-
-      - name: Emit check (smoke)
+          set +e
+          A=$PWD/target/release/almide
+          E=$PWD/target/release/examples/emit_native_bundle
+          mkdir -p out
+          for f in probe4588/*.almd; do
+            b=$(basename $f .almd)
+            echo "===== $b ====="
+            $A run $f; echo "native rc=$?"
+            $A run $f --target wasm; echo "wasm rc=$?"
+            ALMIDE_NO_VERIFIED_OK=1 $A run --no-verified $f; echo "v0 rc=$?"
+            $E $f out/$b.rs > out/$b.bundle; echo "emit rc=$?"
+            ALMIDE_DUMP_MIR=1 $E $f out/$b.mir.rs > /dev/null 2> out/$b.mir; echo "dump rc=$?"
+            echo "--- render ---"; hew out/$b.rs | grep -v '^\s*$' | sed -n '/__ALMIDE_V1_RT_END__/,$p'
+            echo "--- mir ---"; cat out/$b.mir
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: probe-out
+          path: out
+  bisect:
+    name: Bisect ${{ matrix.ref }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [166eb38b694b9ccebdb68646f589b8a6647efe32, 902e36f84e0778064efc8e564cbb30cb820ca84c, c732e8981c4eb1e98e1523547ffe44a3307f084d, dcf6d0a0ae6f2beaf321e3443544544b157f7a96, e3ed29aec623fca70298fa9f869c3a67d1931ba8, 6299c7ccb44500389d3aa3143cffead505616214, 869cb8322af19df20b34f68d5d7f28c8463f6b93, 64fbe974c638a33b9f13aa6ca6e195c49bb858d7, ca98c045a698868fb68e9ead3467849826301064, c1a344e375b557cc86526bce113377c3ebc637d9, 65f488062a6c4b9f9194902f1a81c427a5320149, f4ee60d32e579abdb16f7a10813d2ab83ff6256d]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: probe-src
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.ref }}
+          path: src
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Emit
+        working-directory: src
         run: |
-          ALMIDE=./target/release/almide
-          f=examples/binary-search.almd
-          [ -f "$f" ] || { echo "::error::$f not found — pick a new smoke fixture (#979)"; exit 1; }
-          $ALMIDE "$f" --target rust > /dev/null
-          echo "Rust emit OK"
-          $ALMIDE "$f" --emit-ast > /dev/null
-          echo "AST emit OK"
+          set +e
+          cargo build --release -p almide-mir --example emit_native_bundle; echo "build rc=$?"
+          for f in ../probe-src/probe4588/*.almd; do
+            b=$(basename $f .almd)
+            ./target/release/examples/emit_native_bundle $f /tmp/$b.rs > /dev/null; echo "$b emit rc=$?"
+            calls=$(grep -o '__almd_ci_[0-9a-z_]*(' /tmp/$b.rs | sort -u | tr -d '(')
+            for c in $calls; do
+              if grep -q "fn $c(" /tmp/$b.rs; then echo "$b: $c defined"; else echo "$b: $c MISSING  <<<<<"; fi
+            done
+          done
