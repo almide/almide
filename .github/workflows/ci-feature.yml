@@ -32,6 +32,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ matrix.ref }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: probe-src
       - uses: ./.github/actions/root-tmpdir
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -56,42 +59,22 @@ jobs:
         run: |
           cargo build --release --bin almide
           (cd tools/xtarget-fuzz && cargo build --release)
-      - name: Time
+      - name: Time the recorded finding
         run: |
           set +e
           A=$PWD/target/release/almide
-          F=spec/wasm_cross/range_head_fold_edges.almd
+          R=$PWD/probe-src/probe/repro.almd
           mkdir -p /tmp/p
-          cat > /tmp/p/bottom.almd <<'EOF'
-          effect fn main() -> Unit = {
-            let bottom_count = list.range(-9223372036854775808, -9223372036854775805) |> list.fold(0, (a, _x) => a + 1)
-            println("bottom=${bottom_count}")
-          }
-          EOF
-          cat > /tmp/p/bottom_first.almd <<'EOF'
-          effect fn main() -> Unit = {
-            let bottom_first = list.range(-9223372036854775808, -9223372036854775805) |> list.fold(0, (a, x) => if a == 0 then x else a)
-            println("first=${bottom_first}")
-          }
-          EOF
-          cat > /tmp/p/top.almd <<'EOF'
-          effect fn main() -> Unit = {
-            let top_count = list.range(9223372036854775804, 9223372036854775807) |> list.fold(0, (a, _x) => a + 1)
-            println("top=${top_count}")
-          }
-          EOF
-          t() { local s=$(date +%s.%N); timeout 120 "$@" > /tmp/p/out.txt 2>&1; local rc=$?; local e=$(date +%s.%N); echo "TIME $(echo "$e - $s" | bc) rc=$rc :: $*"; tail -c 400 /tmp/p/out.txt; }
-          for i in 1 2 3; do t $A run $F; done
-          for i in 1 2 3 4 5; do t $A run $F --target wasm; done
-          $A build $F --target wasm -o /tmp/p/edges.wasm; echo "build rc=$?"
-          for i in 1 2 3; do t wasmtime /tmp/p/edges.wasm; done
-          for p in bottom bottom_first top; do
-            t $A run /tmp/p/$p.almd
-            t $A run /tmp/p/$p.almd --target wasm
-            $A build /tmp/p/$p.almd --target wasm -o /tmp/p/$p.wasm; echo "build $p rc=$?"
-            t wasmtime /tmp/p/$p.wasm
-          done
-          for i in 1 2 3; do t ./tools/xtarget-fuzz/target/release/xtarget-fuzz replay --seed 676064306263 --index 4566 --family all --repo "$PWD" --almide "$A"; done
+          t() { local s=$(date +%s.%N); timeout "$TL" "$@" > /tmp/p/out.txt 2>&1; local rc=$?; local e=$(date +%s.%N); echo "TIME $(echo "$e - $s" | bc) rc=$rc :: $*"; tail -c 1500 /tmp/p/out.txt; }
+          TL=120
+          t $A run $R
+          t $A run $R
+          TL=60
+          t $A run $R --target wasm
+          $A build $R --target wasm -o /tmp/p/repro.wasm; echo "build rc=$?"
+          t wasmtime /tmp/p/repro.wasm
+          TL=600
+          t ./tools/xtarget-fuzz/target/release/xtarget-fuzz ladder $R --repo "$PWD" --almide "$A"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
