@@ -33,5 +33,14 @@ fn a_piece_whose_chain_a_loop_reads_is_not_released_inside_the_loop() {
     let main = &code[at..];
     let main = &main[..main.find("\n}\n").map_or(main.len(), |e| e + 2)];
     let lp = main.find("loop {").unwrap_or_else(|| panic!("no loop in:\n{main}"));
-    assert!(!main[lp..].contains("drop("), "a release inside the loop:\n{main}");
+    // The loop's body: up to the `}` that closes it (the scope-end comments
+    // name the erased releases; a rendered one is a `drop(..);` statement).
+    let body = &main[lp..];
+    let body = &body[..body.find("\n    }\n").unwrap_or_else(|| panic!("no loop end in:\n{main}"))];
+    assert!(
+        !body.lines().any(|l| l.trim_start().starts_with("drop(")),
+        "a release inside the loop:\n{main}"
+    );
+    // The key is still built once, before the loop, and read inside it.
+    assert!(main[..lp].contains("rt_int_to_string(1i64)"), "the piece moved:\n{main}");
 }
