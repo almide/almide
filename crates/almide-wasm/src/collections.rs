@@ -503,7 +503,7 @@ impl Emitter<'_> {
                     },
                     other => return unsup(&format!("map-from-of:{other:?}")),
                 };
-                if !matches!(k, SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)) {
+                if !crate::equality::has_structural_eq(k) {
                     return unsup("map-key-nonscalar");
                 }
                 let pair_def = self.types.tuple_def(pair_ti);
