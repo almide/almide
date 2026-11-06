@@ -101,6 +101,11 @@ pub(crate) fn mutable_global_slot_count() -> u32 {
     MUTABLE_GLOBAL_VARS.with(|s| s.borrow().values().map(|(i, _)| i + 1).max().unwrap_or(0))
 }
 
+/// Every storage slot's declared type, by slot index.
+pub(crate) fn mutable_global_slot_types() -> std::collections::BTreeMap<u32, Ty> {
+    MUTABLE_GLOBAL_VARS.with(|s| s.borrow().values().map(|(i, t)| (*i, t.clone())).collect())
+}
+
 /// The (slot index, declared Ty) of a mutable module-level `var`, if `var` is one.
 pub(crate) fn mutable_global_info(var: almide_ir::VarId) -> Option<(u32, Ty)> {
     MUTABLE_GLOBAL_VARS.with(|s| s.borrow().get(&var.0).cloned())

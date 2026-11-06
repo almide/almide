@@ -1,0 +1,8 @@
+// The failure arm names the failure side of the scrutinee's own type
+// (#4543): an Option fails as `none`, it has no error to bind.
+fn head_or(xs: List[Int]) -> Int = {
+  guard let h = list.first(xs) else err(e) => 0
+  h
+}
+
+fn main() -> Unit = println(int.to_string(head_or([1])))

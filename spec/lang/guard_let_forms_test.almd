@@ -1,0 +1,177 @@
+// guard let forms (#4543, ALS-ST6): the failure arm that names the error
+// (`else err(e) => …`), the `guard let x else …` shorthand, and `guard var`.
+// All three desugar into the same nested variant match as the plain
+// `guard let x = r else e`; the err arm is that match's `err(e)` arm.
+type ConfigError = | Missing(String) | BadPort(Int)
+
+fn describe(e: ConfigError) -> String = match e {
+  Missing(k) => "missing ${k}",
+  BadPort(p) => "bad port ${int.to_string(p)}",
+}
+
+fn lookup(m: Map[String, Int], k: String) -> Result[Int, ConfigError] = match map.get(m, k) {
+  some(p) => if p > 0 then ok(p) else err(BadPort(p)),
+  none => err(Missing(k)),
+}
+
+// ── 1. the failure arm binds the error ──
+fn port_text(m: Map[String, Int]) -> String = {
+  guard let p = lookup(m, "port") else err(e) => describe(e)
+  "port ${int.to_string(p)}"
+}
+
+test "err arm: the success side binds the payload" {
+  assert_eq(port_text(map.from_list([("port", 80)])), "port 80")
+}
+
+test "err arm: a typed error flows into the else" {
+  assert_eq(port_text(map.from_list([("port", 0)])), "bad port 0")
+  assert_eq(port_text(map.from_list([])), "missing port")
+}
+
+fn reason(s: String) -> String = {
+  guard let n = int.parse(s) else err(e) => {
+    let msg = "rejected: " + e
+    string.slice(msg, 0, 9)
+  }
+  int.to_string(n * 2)
+}
+
+test "err arm: a String error with a block body" {
+  assert_eq(reason("21"), "42")
+  assert_eq(reason("x"), "rejected:")
+}
+
+effect fn doubled(s: String) -> Int = {
+  guard let n = int.parse(s) else err(e) => err("not a number: ${s}")
+  n * 2
+}
+
+test "err arm: the else raises in an effect fn" {
+  assert_eq(doubled("21"), ok(42))
+  assert_eq(doubled("x"), err("not a number: x"))
+}
+
+fn wrapped(m: Map[String, Int]) -> Result[Int, String] = {
+  guard let p = lookup(m, "port") else err(e) => err("config: " + describe(e))
+  ok(p + 1)
+}
+
+test "err arm: the error is wrapped into the fn's own error" {
+  assert_eq(wrapped(map.from_list([("port", 8)])), ok(9))
+  assert_eq(wrapped(map.from_list([])), err("config: missing port"))
+}
+
+fn ignore_reason(s: String) -> Int = {
+  guard let n = int.parse(s) else err(_) => 0 - 1
+  n
+}
+
+test "err(_) arm discards the error" {
+  assert_eq(ignore_reason("5"), 5)
+  assert_eq(ignore_reason("five"), 0 - 1)
+}
+
+fn head_or(xs: List[Int]) -> Int = {
+  guard let h = list.first(xs) else 0
+  h * 10
+}
+
+test "plain else on an Option (fmt writes `else none =>` this way)" {
+  assert_eq(head_or([4]), 40)
+  assert_eq(head_or([]), 0)
+}
+
+fn count_ok(xs: List[String]) -> Int = {
+  var good = 0
+  for s in xs {
+    guard let n = int.parse(s) else err(e) => continue
+    good = good + n
+  }
+  good
+}
+
+test "err arm in a loop body continues" {
+  assert_eq(count_ok(["1", "x", "2", "y"]), 3)
+}
+
+// ── 2. the shorthand rebinds a local or a parameter ──
+fn port_or_default(raw: String?) -> String = {
+  let port = raw
+  guard let port else { "8080" }
+  port
+}
+
+test "shorthand on an Option local" {
+  assert_eq(port_or_default(some("9000")), "9000")
+  assert_eq(port_or_default(none), "8080")
+}
+
+fn plus_one(n: Result[Int, String]) -> Int = {
+  guard let n else { 0 }
+  n + 1
+}
+
+test "shorthand on a Result parameter" {
+  assert_eq(plus_one(ok(41)), 42)
+  assert_eq(plus_one(err("no")), 0)
+}
+
+fn explain(r: Result[Int, ConfigError]) -> String = {
+  guard let r else err(e) => describe(e)
+  "ok ${int.to_string(r)}"
+}
+
+test "shorthand with the err arm" {
+  assert_eq(explain(ok(3)), "ok 3")
+  assert_eq(explain(err(Missing("host"))), "missing host")
+}
+
+// ── 3. guard var: the binding is mutable for the rest of the block ──
+fn bump(xs: List[Int]) -> Int = {
+  guard var total = list.first(xs) else { 0 }
+  for x in list.drop(xs, 1) {
+    total = total + x
+  }
+  total
+}
+
+test "guard var binds a var" {
+  assert_eq(bump([1, 2, 3]), 6)
+  assert_eq(bump([]), 0)
+}
+
+fn shout(name: String?) -> String = {
+  guard var name else { "nobody" }
+  name = string.to_upper(name)
+  name + "!"
+}
+
+test "guard var with the shorthand on a parameter" {
+  assert_eq(shout(some("ann")), "ANN!")
+  assert_eq(shout(none), "nobody")
+}
+
+fn accumulate(m: Map[String, Int]) -> String = {
+  guard var p = lookup(m, "port") else err(e) => describe(e)
+  p = p * 100
+  int.to_string(p)
+}
+
+test "guard var with the err arm" {
+  assert_eq(accumulate(map.from_list([("port", 2)])), "200")
+  assert_eq(accumulate(map.from_list([("port", 0 - 3)])), "bad port -3")
+}
+
+fn chained(m: Map[String, Int]) -> String = {
+  guard let a = lookup(m, "a") else err(e) => "a: " + describe(e)
+  guard var b = lookup(m, "b") else err(e) => "b: " + describe(e)
+  b = b + a
+  int.to_string(b)
+}
+
+test "chained forms: the first failing guard answers, both bindings stay in scope" {
+  assert_eq(chained(map.from_list([("a", 1), ("b", 2)])), "3")
+  assert_eq(chained(map.from_list([("a", 1)])), "b: missing b")
+  assert_eq(chained(map.from_list([])), "a: missing a")
+}

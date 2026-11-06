@@ -1,0 +1,9 @@
+// A guard's failure arm takes no `if` guard (#4543): a condition on the
+// error splits the failure into cases, which is a `match`.
+fn parse_or(s: String) -> Int = match int.parse(s) {
+  ok(n) => n,
+  err(e) if string.len(e) > 100 => 0,
+  err(_) => 1,
+}
+
+fn main() -> Unit = println(int.to_string(parse_or("7")))

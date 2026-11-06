@@ -34,3 +34,9 @@ SpatialCert.v
 BoundsCert.v
 CoreSafe.v
 Certified.v
+InitCert.v
+FieldCert.v
+RoutineBounds.v
+RoutineBoundsCert.v
+RoutineProcs.v
+RoutineProcsCert.v

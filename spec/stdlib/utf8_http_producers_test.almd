@@ -1,0 +1,176 @@
+// The UTF-8 producer evidence for the http message functions that run without
+// a network (#4005 A4, proofs/utf8-producers.toml): requests and responses
+// built from the invalid-byte corpus (through the validating front door) and
+// read back field by field.
+import html
+import http
+
+// ── the oracle: RFC 3629 well-formedness of a String's bytes ──
+fn utf8_in(bs: List[Int], i: Int, lo: Int, hi: Int) -> Bool = match list.get(bs, i) {
+  some(b) => b >= lo and b <= hi,
+  none => false,
+}
+
+fn utf8_cont(bs: List[Int], i: Int, n: Int) -> Bool =
+  if n == 0 then true
+  else utf8_in(bs, i, 128, 191) and utf8_cont(bs, i + 1, n - 1)
+
+fn utf8_width(bs: List[Int], i: Int, b: Int) -> Int =
+  if b < 128 then 1
+  else if b >= 194 and b <= 223 then (if utf8_cont(bs, i + 1, 1) then 2 else 0)
+  else if b == 224 then (if utf8_in(bs, i + 1, 160, 191) and utf8_cont(bs, i + 2, 1) then 3 else 0)
+  else if b == 237 then (if utf8_in(bs, i + 1, 128, 159) and utf8_cont(bs, i + 2, 1) then 3 else 0)
+  else if b >= 225 and b <= 239 then (if utf8_cont(bs, i + 1, 2) then 3 else 0)
+  else if b == 240 then (if utf8_in(bs, i + 1, 144, 191) and utf8_cont(bs, i + 2, 2) then 4 else 0)
+  else if b >= 241 and b <= 243 then (if utf8_cont(bs, i + 1, 3) then 4 else 0)
+  else if b == 244 then (if utf8_in(bs, i + 1, 128, 143) and utf8_cont(bs, i + 2, 2) then 4 else 0)
+  else 0
+
+fn utf8_from(bs: List[Int], i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let w = utf8_width(bs, i, list.get(bs, i) ?? 0)
+    if w == 0 then false
+    else utf8_from(bs, i + w, n)
+  }
+
+fn utf8_ok(s: String) -> Bool = {
+  let bs = bytes.to_list(bytes.from_string(s))
+  utf8_from(bs, 0, list.len(bs))
+}
+
+// ── the invalid input: every class of ill-formed UTF-8 ──
+fn invalid_corpus() -> List[Bytes] = [
+  bytes.from_list([0xFF]),
+  bytes.from_list([0xFE, 0x41]),
+  bytes.from_list([0xC0, 0xAF]),
+  bytes.from_list([0xC1, 0xBF]),
+  bytes.from_list([0xE0, 0x80, 0xAF]),
+  bytes.from_list([0xED, 0xA0, 0x80]),
+  bytes.from_list([0xED, 0xBF, 0xBF]),
+  bytes.from_list([0xF4, 0x90, 0x80, 0x80]),
+  bytes.from_list([0xF5, 0x80, 0x80, 0x80]),
+  bytes.from_list([0xF8, 0x88, 0x80, 0x80, 0x80]),
+  bytes.from_list([0x80]),
+  bytes.from_list([0x61, 0xBF, 0x62]),
+  bytes.from_list([0xE2, 0x82]),
+  bytes.from_list([0xF0, 0x9F, 0x98]),
+  bytes.from_list([0xC3]),
+  bytes.from_list([
+    0x61,
+    0xE2,
+    0x82,
+    0x61,
+    0xF0,
+    0x9F,
+    0x98,
+    0x80,
+    0xFF
+  ]),
+  bytes.from_list([0xE2, 0x82, 0xAC, 0xC3]),
+  bytes.from_list([
+    0x0A,
+    0xFF,
+    0x0D,
+    0x0A,
+    0xC3,
+    0x0A
+  ])
+]
+
+// ── valid text beside every boundary a cut or a case map can hit ──
+fn edge_strings() -> List[String] = [
+  "",
+  "a",
+  "ab",
+  "é",
+  "€",
+  "😀",
+  "\u{10FFFF}",
+  "\u{FFFD}",
+  "\u{7F}\u{80}\u{7FF}\u{800}\u{FFFF}\u{10000}",
+  "\u{23A}\u{2C65}\u{23E}",
+  "\u{130}\u{131}\u{1E9E}\u{DF}",
+  "\u{FB03}\u{390}\u{3B0}\u{1F80}",
+  "\u{3A3}\u{3C3}\u{3C2}",
+  "e\u{301}",
+  "a😀b€cé",
+  " \t\u{3000}x\u{A0}\u{2028} ",
+  "\u{FEFF}bom",
+  "日本語テキスト",
+  "line\nnext\r\nlast\r",
+  "a,b,,c"
+]
+
+fn adversary() -> List[String] = (invalid_corpus() |> list.map((b) => bytes.to_string_lossy(b))) + edge_strings()
+
+fn err_ok[T](r: Result[T, String]) -> Bool = match r {
+  ok(_) => true,
+  err(e) => utf8_ok(e),
+}
+
+// A decode target (an input type, C-436).
+type Probe: Decode = { s: String }
+
+fn resp_ok(r: HttpResponse) -> Bool = utf8_ok(http.body(r)) and list.all(
+  http.headers(r),
+  ((k, v)) => utf8_ok(k) and utf8_ok(v),
+)
+
+effect fn echo(req: HttpRequest) -> HttpResponse = http.response(200, http.body(req))
+
+test "http messages built from invalid bytes read back valid" {
+  for s in adversary() {
+    let req = http.new_request("GET", "/" + s + "?a=" + s + "&" + s, s, [(s, s), ("k", s)])
+    assert(utf8_ok(http.body(req)) and utf8_ok(http.method(req)) and utf8_ok(http.path(req)))
+    assert(utf8_ok(http.header(req, s) ?? "") and list.all(http.header_values(req, "k"), (v) => utf8_ok(v)))
+    assert(list.all(http.headers(req), ((k, v)) => utf8_ok(k) and utf8_ok(v)))
+    assert(utf8_ok(http.param(req, s) ?? ""))
+    match http.query_params(req) {
+      ok(kvs) => assert(list.all(kvs, ((k, v)) => utf8_ok(k) and utf8_ok(v))),
+      err(e) => assert(utf8_ok(e)),
+    }
+    let req2 = http.set_header(http.set_body(req, s + s), s, s)
+    assert(utf8_ok(http.body(req2)))
+    assert(utf8_ok(http.body(http.set_body_bytes(req2, bytes.from_string(s)))))
+    let rs = [
+      http.response(200, s),
+      http.json(201, s),
+      http.response(200, html.escape(s)),
+      http.redirect(s),
+      http.with_headers(404, s, [(s, s)]),
+      http.set_status(http.response(200, s), 500)
+    ]
+    assert(list.all(rs, (r) => resp_ok(r)))
+    for body_req in [
+      req,
+      http.new_request("POST", "/", "{\"s\": \"" + s + "\"}", [])
+    ] {
+      match http.decode_json[Probe](body_req) {
+        ok(p) => assert(utf8_ok(p.s)),
+        err(r) => assert(resp_ok(r)),
+      }
+    }
+  }
+  for b in invalid_corpus() {
+    let req = http.new_request("POST", "/", "", [])
+    assert(utf8_ok(http.body(http.set_body_bytes(req, b))))
+    let typed = http.typed("text/csv", b)
+    assert(resp_ok(http.response(200, typed)) and resp_ok(http.with_body(http.response(201, "draft"), typed)))
+    assert(resp_ok(http.with_body(http.response(200, typed), bytes.to_string_lossy(b))))
+  }
+}
+
+test "http routes and middleware hand handlers valid requests" {
+  let routes = adversary() |> list.map((s) => http.route("/" + s, echo))
+  match http.router(routes + [http.mount("/m", echo)]) {
+    ok(h) => {
+      let w = http.wrap(h, [])
+      for s in adversary() {
+        assert(resp_ok(h(http.new_request("GET", "/" + s, s, [(s, s)]))!))
+        assert(resp_ok(w(http.new_request("GET", "/m/" + s, s, []))!))
+      }
+    },
+    err(e) => assert(utf8_ok(e)),
+  }
+}

@@ -23,7 +23,7 @@ effect fn main() -> Unit = {
   while i < 2000 {
     var b = bytes.zeros(1024)
     poke(b, int.band(i, 255))!
-    fresh = fresh + bytes.get(b, 0) ?? 0
+    fresh = fresh + (bytes.get(b, 0) ?? 0)
     i = i + 1
   }
   println("fresh=${fresh}")

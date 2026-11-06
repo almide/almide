@@ -24,7 +24,7 @@ fn run(dir: &std::path::Path, name: &str, wasm: bool) -> (String, String) {
 /// `call` answers a Result; `ok` renders its payload `v` as a String.
 fn probe(call: &str, ok: &str) -> String {
     format!(
-        "import fs\neffect fn main() -> Unit = {{\n  match {call} {{\n    ok(v) => println(\"ok \" + {ok}),\n    err(e) => println(\"err \" + e),\n  }}\n}}\n"
+        "import fs\neffect fn main() -> Unit = {{\n  match {call} {{\n    ok(v) => println(\"ok \" + ({ok})),\n    err(e) => println(\"err \" + e),\n  }}\n}}\n"
     )
 }
 

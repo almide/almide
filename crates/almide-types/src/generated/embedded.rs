@@ -9079,7 +9079,7 @@ fn adler32(b: Bytes) -> Int = {
   var i = 0
   let len = bytes.len(b)
   while i < len {
-    s1 = (s1 + bytes.get(b, i) ?? 0) % 65521
+    s1 = (s1 + (bytes.get(b, i) ?? 0)) % 65521
     s2 = (s2 + s1) % 65521
     i = i + 1
   }
@@ -18836,12 +18836,6 @@ else {
   if ba < bb then 0 - 1
   else if ba > bb then 1
   else __sbs_cmp_at(ah, bh, la, lb, k + 1)
-}
-
-fn __sbs_gt(a: String, b: String) -> Bool = {
-  let ha = prim.handle(a)
-  let hb = prim.handle(b)
-  __sbs_cmp_at(ha + 12, hb + 12, prim.load32(ha + 4), prim.load32(hb + 4), 0) > 0
 }
 
 
@@ -28786,6 +28780,7 @@ fn __opt_maph_some(x: String, f: (String) -> String) -> String? = {
   some(y)
 }
 
+@specializes("option.map")
 fn option_map_h(o: String?, f: (String) -> String) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -31382,8 +31377,8 @@ fn __matches(scan: List[String]) -> List[List[String]] = {
 
 
 fn __splice(scan: List[String], f: (List[String?]) -> String) -> String = {
-  let parts = __matches(scan) |> list.map((m) => list.get(m, 0) ?? "" + f(m |> list.drop(1) |> list.map((c) => __unmark(c))))
-  list.join(parts, "") + list.get(scan, list.len(scan) - 1) ?? ""
+  let parts = __matches(scan) |> list.map((m) => (list.get(m, 0) ?? "") + f(m |> list.drop(1) |> list.map((c) => __unmark(c))))
+  list.join(parts, "") + (list.get(scan, list.len(scan) - 1) ?? "")
 }
 
 @intrinsic("almide_regex_check")
@@ -43638,7 +43633,7 @@ fn zld_adler32(b: Bytes) -> Int = {
   var i = 0
   let n = bytes.len(b)
   while i < n {
-    s1 = (s1 + bytes.get(b, i) ?? 0) % 65521
+    s1 = (s1 + (bytes.get(b, i) ?? 0)) % 65521
     s2 = (s2 + s1) % 65521
     i = i + 1
   }
@@ -44251,7 +44246,7 @@ fn zli_adler32_from(b: Bytes, start: Int) -> Int = {
   var i = start
   let n = bytes.len(b)
   while i < n {
-    s1 = (s1 + bytes.get(b, i) ?? 0) % 65521
+    s1 = (s1 + (bytes.get(b, i) ?? 0)) % 65521
     s2 = (s2 + s1) % 65521
     i = i + 1
   }

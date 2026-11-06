@@ -1,0 +1,2 @@
+expects_error = "failure arm names the failure side"
+hint_substring = "The success side is the binding before `else`"

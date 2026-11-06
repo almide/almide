@@ -58,6 +58,26 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // ── #4006 C1 class D: top-level heap state, once a wall ──
+    ("top_var_heap", "var LOG = \"\"\nfn main() -> Unit = {\n  LOG = LOG + \"x\"\n  println(LOG)\n}\n"),
+    ("top_let_heap_call", "let S = int.to_string(3)\nfn main() -> Unit = {\n  println(S)\n}\n"),
+    // ── #4006 C1 class D: a module-level heap binding in its thread-local
+    //    cell (an append, a record rebuilt from its own fields), a find's
+    //    0-or-1 block on the Option carrier, a linked body's Option result ──
+    ("heap_global_list", "var LOG: List[String] = []\n\nfn note(s: String) -> Unit = {\n  LOG = LOG + [s]\n}\n\nfn main() -> Unit = {\n  note(\"a\")\n  note(\"b\")\n  println(list.join(LOG, \",\"))\n  println(int.to_string(list.len(LOG)))\n}\n"),
+    ("heap_global_record", "type C = { n: Int, tag: String }\n\nvar G: C = C { n: 0, tag: \"start\" }\n\nfn set(k: Int) -> Unit = {\n  G = C { n: k, tag: \"k\" + int.to_string(k) }\n}\n\nfn main() -> Unit = {\n  set(1)\n  set(2)\n  println(int.to_string(G.n) + \" \" + G.tag)\n}\n"),
+    ("heap_global_take_callee_reads", "var gl: List[Int] = []\n\nfn gl_len() -> Int = list.len(gl)\n\nfn via(mut xs: List[Int]) -> Unit = {\n  list.push(xs, gl_len())\n}\n\nfn main() -> Unit = {\n  for i in 0..<3 {\n    list.push(gl, i)\n  }\n  via(gl)\n  println(\"${gl}\")\n}\n"),
+    ("find_scalar_opt", "fn first_big(xs: List[Int]) -> Int? = list.find(xs, (x) => x > 10)\n\nfn main() -> Unit = {\n  println(int.to_string(first_big([3, 12, 40]) ?? -1))\n  println(int.to_string(first_big([1, 2]) ?? -1))\n}\n"),
+    ("linked_option_ret", "fn main() -> Unit = {\n  let a = option.map(some(4), (x) => x * 3) ?? 0\n  let b = option.map(none, (x) => x * 3) ?? 7\n  println(int.to_string(a + b))\n}\n"),
+    // ── #4006 C1: a combinator call its linked self-hosted body refuses,
+    //    served by the runtime body its declaration names (native_hof):
+    //    a list moved in at its last read, a list read again (copied), a
+    //    scalar capture, a Float lambda over the runtime matrix ──
+    ("hof_fold_opt", "fn main() -> Unit = {\n  let v: List[Int?] = [some(1), none, some(3)]\n  println(int.to_string(list.fold(v, 0, (a, o) => a + (o ?? 10))))\n}\n"),
+    ("hof_fold_opt_kept", "fn main() -> Unit = {\n  let base = 100\n  let v: List[Int?] = [some(1), none, some(3)]\n  let s = list.fold(v, 0, (a, o) => a + (o ?? base))\n  println(int.to_string(s))\n  println(int.to_string(list.len(v)))\n}\n"),
+    ("hof_map_opt", "fn main() -> Unit = {\n  let v: List[Int?] = [some(4), none]\n  let w = list.map(v, (o) => (o ?? 0) * 2)\n  println(int.to_string(w[0] + w[1]))\n}\n"),
+    ("hof_flat_map_rows", "fn main() -> Unit = {\n  let rows: List[List[Int]] = [[1, 2], [3]]\n  let flat = list.flat_map(rows, (r) => r)\n  println(int.to_string(list.len(flat)))\n  println(int.to_string(flat[2]))\n}\n"),
+    ("hof_matrix_map_capture", "fn main() -> Unit = {\n  let s = 2.5\n  let m = matrix.from_lists([[1.0, -2.0], [0.5, 4.0]])\n  let t = matrix.map(m, (x) => x * s)\n  println(\"${matrix.to_lists(t)}\")\n  println(\"${matrix.to_lists(m)}\")\n}\n"),
     // ── Rung 5 closures slab: scalar-capture closures are env slot blocks
     //    ([fnidx, drop-header, captures…]) dispatched via __almd_ci_* tables ──
     ("closure_capture", "fn adder(n: Int) -> (Int) -> Int = (x) => x + n\n\nfn main() -> Unit = {\n  let add3 = adder(3)\n  println(int.to_string(add3(7)))\n  println(int.to_string(add3(39)))\n}\n"),
@@ -111,7 +131,7 @@ const CORPUS: &[(&str, &str)] = &[
     ("top_var", "var COUNT = 0\nfn main() -> Unit = {\n  println(int.to_string(COUNT))\n}\n"),
     ("top_var_writes", "var COUNT = 1\nvar RATIO = 0.5\n\neffect fn bump() -> Unit = {\n  COUNT = COUNT * 3\n  RATIO = RATIO + 1.25\n}\n\neffect fn main() -> Unit = {\n  bump()!\n  bump()!\n  println(int.to_string(COUNT))\n  println(float.to_string(RATIO))\n}\n"),
     // ── #4006 family B: a scalar Option rides Option<i64> ──
-    ("option_scalar", "fn find(x: Int) -> Int? = if x > 0 then some(x * 2) else none\n\nfn get(o: Int?) -> Int = o ?? 0 - 1\n\nfn main() -> Unit = {\n  match find(3) {\n    some(v) => println(int.to_string(v)),\n    none => println(\"none\"),\n  }\n  println(int.to_string(get(find(-4))))\n  println(int.to_string(get(some(11))))\n}\n"),
+    ("option_scalar", "fn find(x: Int) -> Int? = if x > 0 then some(x * 2) else none\n\nfn get(o: Int?) -> Int = (o ?? 0) - 1\n\nfn main() -> Unit = {\n  match find(3) {\n    some(v) => println(int.to_string(v)),\n    none => println(\"none\"),\n  }\n  println(int.to_string(get(find(-4))))\n  println(int.to_string(get(some(11))))\n}\n"),
     // ── #4006 family C: scalar-Ok Results past Int, and Result[String, String] ──
     ("result_float_unit", "fn half(x: Float) -> Result[Float, String] = if x > 0.0 then ok(x / 2.0) else err(\"neg\")\n\nfn check(x: Int) -> Result[Unit, String] = if x > 0 then ok(()) else err(\"bad\")\n\nfn main() -> Unit = {\n  match half(3.0) {\n    ok(v) => println(float.to_string(v)),\n    err(e) => println(e),\n  }\n  match check(0) {\n    ok(_) => println(\"fine\"),\n    err(e) => println(e),\n  }\n}\n"),
     ("result_string_ok", "fn g(x: Int) -> Result[String, String] = if x > 0 then ok(\"pos \" + int.to_string(x)) else err(\"neg\")\n\nfn show(r: Result[String, String]) -> String = match r {\n  ok(s) => \"ok:\" + s,\n  err(e) => \"err:\" + e,\n}\n\nfn main() -> Unit = {\n  println(show(g(3)))\n  println(show(g(0)))\n  println(show(ok(\"lit\")))\n}\n"),
@@ -304,17 +324,28 @@ fn out_of_subset_walls_honestly() {
         // (#1869); a combinator over the list is still outside it.
         // list_param moved to the POSITIVE corpus — rung 4 renders scalar-list
         // params/literals/indexing natively (`vec![…]` + the bounds shims).
-        // #4006 family I: top-level state lives in native storage slots now,
-        // a SCALAR slot only. A heap-typed var or eager let still walls.
-        ("top_var_heap", "var LOG = \"\"
+        // #4006 family I and C1 class D: a heap-typed var or eager let now
+        // lives in its thread-local cell (the positive corpus above), but a
+        // write that reads the cell twice before storing back (a record
+        // rebuilt from two of its own fields) copies the cell's value per
+        // read and keeps the wall; a matrix transpose is still outside the
+        // subset.
+        ("heap_global_record_rebuild", "type C = { n: Int, tag: String }
+
+var G: C = C { n: 0, tag: \"start\" }
+
+fn bump() -> Unit = {
+  G = C { n: G.n + 1, tag: G.tag + \"!\" }
+}
+
 fn main() -> Unit = {
-  LOG = LOG + \"x\"
-  println(LOG)
+  bump()
+  println(int.to_string(G.n) + \" \" + G.tag)
 }
 "),
-        ("top_let_heap_call", "let S = int.to_string(3)
-fn main() -> Unit = {
-  println(S)
+        ("matrix_transpose", "fn main() -> Unit = {
+  let m = matrix.from_lists([[1.0, 2.0]])
+  println(\"${matrix.to_lists(matrix.transpose(m))}\")
 }
 "),
     ];

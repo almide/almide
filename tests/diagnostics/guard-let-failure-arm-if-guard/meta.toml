@@ -1,0 +1,2 @@
+expects_error = "failure arm takes no `if` guard"
+hint_substring = "write a `match`"

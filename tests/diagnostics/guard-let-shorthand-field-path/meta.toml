@@ -1,0 +1,2 @@
+expects_error = "names a field path, but the shorthand takes a local binding"
+hint_substring = "guard let port = cfg.port else"

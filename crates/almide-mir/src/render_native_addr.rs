@@ -28,6 +28,8 @@ mod carrier;
 mod map;
 #[path = "render_native_slots.rs"]
 mod slots;
+#[path = "render_native_heap_slot.rs"]
+mod heap_slot;
 pub(crate) use carrier::{carrier_values, is_carrier, CarrierSig};
 pub(crate) use slots::flag_exits;
 
@@ -105,6 +107,9 @@ pub(crate) struct AddrState {
     moves: BTreeSet<ValueId>,
     /// The movable reads after which nothing reads the block at all.
     moves_last: BTreeSet<ValueId>,
+    /// Heap slot reads that move the value out, or that a rebuild walls
+    /// (`native_slot_takes`).
+    slot_reads: crate::native_slot_takes::SlotReads,
     /// Struct blocks built whole (`render_native_slots::built_whole`), and
     /// the fields stored so far of the one being built.
     whole: BTreeSet<ValueId>,
@@ -139,6 +144,7 @@ impl AddrState {
         note_signature_recs(func, sigs, &mut alloc_rec);
         note_carrier_recs(func, sigs, &mut alloc_rec);
         note_join_recs(func, &mut alloc_rec);
+        heap_slot::note_heap_slot_recs(func, &mut alloc_rec);
         let (handle_of, consts, base_of) = block_bases(func);
         // The untyped blocks, typed from their stores and the declarations
         // that consume them, in one fixpoint (render_native_slots.rs).
@@ -229,6 +235,7 @@ impl AddrState {
             borrow_reads: crate::render_native_borrow_read::borrow_reads(func),
             moves,
             moves_last,
+            slot_reads: crate::native_slot_takes::slot_reads(func),
             whole,
             building: BTreeMap::new(),
             whole_enum,

@@ -153,6 +153,18 @@ pub(crate) struct FnPlan {
     pub(crate) param_owned: Option<Vec<bool>>,
 }
 
+/// #4005 A4: a body that emitted prim accesses names its heap-typed
+/// parameters (by wasm local, with the len stride) for the anchor file's
+/// `selfhost` line.
+fn record_heap_params(serial: u64, prims_before: usize, params: &[(VarId, SliceTy)], types: &TypeTable, shift: u32, name: &str) {
+    if crate::witness::bounds::prim_count() <= prims_before {
+        return;
+    }
+    let heap: Vec<(u32, Option<u32>)> =
+        params.iter().enumerate().filter_map(|(i, (_, ty))| ty.heap_param(types).map(|s| (i as u32 + shift, s))).collect();
+    crate::witness::bounds::heap_params(serial, &heap, name);
+}
+
 pub(crate) fn lower_fn(
     params: &[(VarId, SliceTy)],
     plan: FnPlan,
@@ -299,6 +311,7 @@ pub(crate) fn lower_fn(
     let no_ranges: HashMap<VarId, (u32, u32, bool)> = HashMap::new();
     let mut f = Function::new(local_decls);
     let anchor_serial = crate::witness::anchor::begin_fn();
+    let prims_before = crate::witness::bounds::prim_count();
     let mut calls: HashSet<usize> = HashSet::new();
     {
         let mut em = Emitter {
@@ -586,6 +599,8 @@ pub(crate) fn lower_fn(
         local_names.get(&idx).map_or_else(|| format!("local #{idx}"), |n| format!("local `{n}`"))
     })?;
     crate::witness::anchor::seal(anchor_serial, &f);
+    record_heap_params(anchor_serial, prims_before, params, ctx.types, env_shift, &fn_name);
+    crate::prim_shape::log_fn(&fn_name, cur_module, &params.iter().map(|(v, _)| *v).collect::<Vec<_>>(), body, None);
     Ok((f, calls))
 }
 
