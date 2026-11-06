@@ -5981,8 +5981,8 @@ evidence  = [
 [[contract]]
 id        = "C-453"
 spec      = "ALS-D7"
-title     = "A Region export declared returns: address crosses the wasm host boundary as its data address alone, one value in the memory's address width, with every other rule of the (ptr, len) form kept"
-statement = "ALS-D7 (almide/almide#4519, ADR-0031 amendment A1c): on the wasm target an `@export(wasm, \"sym\", returns: address)` fn returning a Region returns one value, the view's data address, in the memory's address width (one i32 on wasm32), instead of the `(ptr, len)` pair; the host is the one that knows the length it asked for. The form is declared at the export, never inferred. Every other rule of the pair form holds: the host holds one share of the block per address handed out, so bytes the host writes at the address stay in place and are what the program then reads through its own copy, until the host passes the address to `__region_release`; a sub-Region (`ffi.slice`) is returned as its own address inside its parent's block and its share alone keeps the parent alive; an empty Region is 0 and releasing 0 is a no-op; an `effect fn`'s err writes its message to stderr and traps; a host that releases every address it was handed leaks no memory. A `Float` parameter crosses as an f64, so a host passes a plain number. `returns: address` on a fn that does not return a Region, on a target other than wasm, or any other named argument of `@export`, is refused at check time. NOT covered: the address's numeric value, memory64 (the emitter declares a 32-bit memory), the WASI 0.2/0.3 component lowering."
+title     = "A Region export declared returns: address crosses the wasm host boundary as its data address alone, one value in the memory's address width"
+statement = "ALS-D7 (almide/almide#4519, ADR-0031 amendment A1c): on the wasm target an `@export(wasm, \"sym\", returns: address)` fn returning a Region returns one value, the view's data address, in the memory's address width (one i32 on wasm32), instead of the `(ptr, len)` pair; the host is the one that knows the length it asked for. The form is declared at the export, never inferred. Bytes the host writes at the address are what the program then reads through its own copy; a sub-Region (`ffi.slice`) is returned as its own address inside its parent's block and keeps the parent alive while the host holds it; an empty Region is 0 and releasing 0 is a no-op; an `effect fn`'s err writes its message to stderr and traps. How long the host holds an address is C-454's lease. A `Float` parameter crosses as an f64, so a host passes a plain number. `returns: address` on a fn that does not return a Region, on a target other than wasm, or any other named argument of `@export`, is refused at check time. NOT covered: the address's numeric value, memory64 (the emitter declares a 32-bit memory), the WASI 0.2/0.3 component lowering."
 since     = "0.69.1"
 status    = "active"
 evidence  = [
@@ -5992,4 +5992,18 @@ evidence  = [
   { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_export_keeps_every_other_a1_rule", class = "fixture" },
   { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_export_err_traps_with_its_reason", class = "fixture" },
   { path = "tests/checker_test.rs", name = "returns_address_on_a_non_region_return_is_refused", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-454"
+spec      = "ALS-D7"
+title     = "An address-only Region export holds one host share, a lease its next call ends, so a host that never releases runs in bounded memory"
+statement = "ALS-D7 (almide/almide#4560, ADR-0031 amendment A1d): on the wasm target each `@export(wasm, \"sym\", returns: address)` export holds at most one host share, its lease. An address it returns stays valid, its bytes in place, until the next call of that same export or until the host passes it to `__region_release`, whichever comes first; calls of every other export leave it in place. A result with the lease's own address and block holds that one share however many times it is returned; any other result, or an empty one (0), ends the previous lease. Releasing the current lease's address ends it early; releasing an address its export has since superseded traps, like any address the module does not hold. So a host that never calls `__region_release` runs in bounded memory: after a warm-up, any number of further calls leave the memory size unchanged. The `(ptr, len)` form keeps its counted share (C-446). NOT covered: how long the module keeps a block past the lease (the program's own copy may keep it longer), memory64, the WASI 0.2/0.3 component lowering."
+since     = "0.69.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_host_js/region_export_lease.almd", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_export_holds_one_lease_that_its_next_call_ends", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_handed_out_again_holds_one_share", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_unreleasing_host_runs_in_bounded_memory", class = "fixture" },
 ]

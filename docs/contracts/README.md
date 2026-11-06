@@ -488,5 +488,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-450 | A directory entry whose name is not UTF-8 lists as its lossy decode, and a stock host's refusal of it is a classified error | 0.69.0 | active | fixture | 0 |
 | C-451 | A scalar effect fn exported to wasm crosses as its value: the raw export answers the ok Int, Float or Bool itself (nothing for Unit), and an err writes its message to stderr and traps | 0.69.0 | active | fixture | 0 |
 | C-452 | An @export(c) fn crosses C at the C ABI table's widths, Int as int64_t; an effect fn answers its ok value, and an err writes its message to stderr and exits 1 | 0.69.0 | active | fixture | 0 |
-| C-453 | A Region export declared returns: address crosses the wasm host boundary as its data address alone, one value in the memory's address width, with every other rule of the (ptr, len) form kept | 0.69.1 | active | fixture | 0 |
+| C-453 | A Region export declared returns: address crosses the wasm host boundary as its data address alone, one value in the memory's address width | 0.69.1 | active | fixture | 0 |
+| C-454 | An address-only Region export holds one host share, a lease its next call ends, so a host that never releases runs in bounded memory | 0.69.1 | active | fixture | 0 |
 

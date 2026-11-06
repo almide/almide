@@ -8,14 +8,14 @@
 // as a Float, so a host passes a plain number, and `in_show` reads the bytes
 // back through the program's own copy (the top-level `var`).
 //
-// Every other rule of the `(ptr, len)` form holds. The host holds one share
-// of the block per address it was handed, until it gives the address back to
-// `__region_release`. `in_tail` hands out a sub-Region (`ffi.slice`) as its
-// own address inside the parent's block, and that share alone keeps the
-// parent alive after the program dropped it and the host released the
-// parent's address. An empty Region crosses as 0, and an `effect fn`'s err
-// traps. The driver is region_export_address.host.mjs; `main` prints the line
-// the native run shares.
+// How long an address stays the host's is the lease (amendment A1d,
+// region_export_lease.almd): until its export's next call, or until the host
+// gives it to `__region_release`. `in_tail` hands out a sub-Region
+// (`ffi.slice`) as its own address inside the parent's block, and its lease
+// alone keeps the parent alive after the program dropped it and the parent's
+// lease ended. An empty Region crosses as 0, and an `effect fn`'s err traps.
+// The driver is region_export_address.host.mjs; `main` prints the line the
+// native run shares.
 import ffi
 
 var g_in: Region = ffi.region(bytes.new())
