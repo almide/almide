@@ -2,6 +2,8 @@ protocol Scorer {
   fn score(s: Self, x: String) -> Int
 }
 
+type Judge[T] = { score: (T) -> Int }
+
 type Vowels: Scorer = {}
 
 fn Vowels.score(s: Vowels, x: String) -> Int = string.to_list(x) |> list.count((c) => string.contains("aeiou", c))

@@ -2,18 +2,17 @@ protocol Scorer {
   fn score(s: Self, x: String) -> Int
 }
 
-type Rule = { score: (String) -> Int }
+type Judge[T] = { score: (T) -> Int }
 
 type Vowels: Scorer = {}
 
 fn Vowels.score(s: Vowels, x: String) -> Int = string.to_list(x) |> list.count((c) => string.contains("aeiou", c))
 
 fn best[S: Scorer](s: S, names: List[String]) -> String? = {
-  let r = names |> list.fold((s, none), ((ss, top), n) => (ss, match top {
+  names |> list.fold(none, (top, n) => match top {
     none => some(n),
-    some(t) => if ss.score(n) > ss.score(t) then some(n) else some(t),
-  }))
-  r.1
+    some(t) => if s.score(n) > s.score(t) then some(n) else some(t),
+  })
 }
 
 fn main() -> Unit = {
