@@ -167,6 +167,11 @@ SUITE = [
     # relation is the MUT MAP gate (check-perf-ratio.sh).
     ("mutmap-param",   "mutmap/mutmap.almd",           [],              "p:6000",     "p:2",     "bytes", ["native", "wasm"]),
     ("mutmap-local",   "mutmap/mutmap.almd",           [],              "l:30000",     "l:2",     "bytes", ["native", "wasm"]),
+    # mutset (#4582): a Set rebound through a `mut s` helper per insert (`p`,
+    # `s = set.insert(s, x)`) against the same rebinds inline (`l`); their
+    # per-round relation is the MUT SET gate (check-perf-ratio.sh).
+    ("mutset-param",   "mutset/mutset.almd",           [],              "p:6000",     "p:2",     "bytes", ["native", "wasm"]),
+    ("mutset-local",   "mutset/mutset.almd",           [],              "l:30000",    "l:2",     "bytes", ["native", "wasm"]),
     ("regexcycle-8",   "regexcycle/regexcycle.almd",   [],              "8:2000000",  "8:2000",  "bytes", ["native", "wasm"]),
     ("regexcycle-32",  "regexcycle/regexcycle.almd",   [],              "32:2000000", "32:2000", "bytes", ["native", "wasm"]),
     # globalread (#4562): a text renderer's per-glyph cache lookups (a map
@@ -261,6 +266,10 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # (tens of ms a round on wasm), so its row runs a quarter of the rounds.
     "mutmap-param": "p:1500",
     "mutmap-local": "l:6000",
+    # mutset (#4582): the same shape as mutmap — a regressed helper copies the
+    # 4,000-member set on every insert, so its row runs a quarter of the rounds.
+    "mutset-param": "p:1500",
+    "mutset-local": "l:6000",
     "regexcycle-8": "8:400000",
     "regexcycle-32": "32:400000",
     # globalread (#4562): frames per row, unequal on purpose — the relation is
