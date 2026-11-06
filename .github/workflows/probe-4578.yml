@@ -124,3 +124,31 @@ jobs:
           set +e
           mkdir -p /tmp/c && cp ../probe/.github/probe-4578/cls/*.almd /tmp/c/ 2>/dev/null
           WALL_NAMES=1 cargo run -q --release -p almide-mir --example classify_corpus -- --out /tmp/o /tmp/c 2>&1 | grep -E '^WALLED|walled' | cut -c1-600
+  anchor:
+    if: contains(github.event.head_commit.message, '[anchor]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: probe
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: wasm-regressions-4578-4579
+          path: src
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Witness anchors of the probe files
+        working-directory: src
+        run: |
+          set +e
+          cargo build -q --bin almide && cargo build -q -p almide-wasm --example emit_structural_bundle && cargo build -q -p almide-verify -p almide-anchor-check
+          TD=target/debug; mkdir -p /tmp/a
+          for f in ../probe/.github/probe-4578/t/*.almd; do
+            n=$(basename $f .almd); cp $f spec/wasm_cross/zz_$n.almd; g=spec/wasm_cross/zz_$n.almd
+            $TD/almide build $g --target wasm -o /tmp/a/$n.wasm > /tmp/a/$n.err 2>&1 || { echo "$n: build refused"; head -3 /tmp/a/$n.err; continue; }
+            $TD/examples/emit_structural_bundle $g --artifact /tmp/a/$n.wasm --anchors /tmp/a/$n.anchors > /tmp/a/$n.bundle 2>/tmp/a/$n.perr || { echo "$n: producer refused"; head -3 /tmp/a/$n.perr; continue; }
+            $TD/almide-verify bundle /tmp/a/$n.bundle > /tmp/a/$n.verify 2>&1; echo "$n: verify rc=$?"; grep -iE 'reject' /tmp/a/$n.verify | head -3
+            $TD/almide-anchor-check /tmp/a/$n.wasm /tmp/a/$n.bundle /tmp/a/$n.anchors > /tmp/a/$n.anchor 2>&1; echo "$n: anchor rc=$?"; head -4 /tmp/a/$n.anchor
+          done
