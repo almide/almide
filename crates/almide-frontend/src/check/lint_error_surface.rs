@@ -213,9 +213,14 @@ impl ErrorSurfaceLint {
                 self.walk_expr(cond, err_binds);
                 self.walk_expr(else_, err_binds);
             }
-            S::GuardLet { scrutinee, else_, .. } => {
+            S::GuardLet { scrutinee, else_, fail, .. } => {
                 self.walk_expr(scrutinee, err_binds);
-                self.walk_expr(else_, err_binds);
+                // #4543: `else err(e) => …` is an err-pattern binding too.
+                let mut binds = err_binds.to_vec();
+                if let Some(p) = fail {
+                    collect_err_pattern_binds(p, &mut binds);
+                }
+                self.walk_expr(else_, &binds);
             }
             S::Expr { expr, .. } => self.walk_expr(expr, err_binds),
             _ => {}

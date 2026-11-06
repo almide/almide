@@ -233,6 +233,21 @@ fn option_sugar_canonicalization_verifies_as_conserving() {
     assert_eq!(format_program(&second), formatted, "fmt must stay idempotent");
 }
 
+/// #4543: `else none => e` is the plain `else e` — fmt writes the plain form
+/// and the verifier counts the dropped arm as conserving. The other forms
+/// (`guard var`, the shorthand, `else err(e) =>`) print as written.
+#[test]
+fn guard_let_forms_format_and_none_arm_normalizes() {
+    let src = "fn f(xs: List[Int], r: Result[Int, String]) -> Int = {\n  guard let h = list.first(xs) else none => 0\n  guard var r else err(e) => string.len(e)\n  r = r + h\n  r\n}\n";
+    let program = parse(src).expect("parses");
+    let formatted = format_program(&program);
+    assert!(formatted.contains("guard let h = list.first(xs) else 0\n"), "none arm normalizes:\n{formatted}");
+    assert!(formatted.contains("guard var r else err(e) => string.len(e)\n"), "forms print as written:\n{formatted}");
+    verify_format(src, &program, &formatted).expect("the none arm is the plain else");
+    let second = parse(&formatted).expect("formatted parses");
+    assert_eq!(format_program(&second), formatted, "fmt must stay idempotent");
+}
+
 /// The gauntlet manifest's reject rows, as corpus-relative path prefixes
 /// (a dir cell's row names the cell dir; its files all skip).
 fn gauntlet_reject_paths(root: &std::path::Path) -> Vec<String> {

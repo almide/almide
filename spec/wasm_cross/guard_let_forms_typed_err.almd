@@ -1,0 +1,47 @@
+// @contract: C-266
+// ALS-ST6 (docs/specs/als/expressions.md), #4543: the guard-let failure arm
+// binds a TYPED custom error (`Result[T, ConfigError]` gives `e: ConfigError`),
+// byte-identical on both targets — with a value else, through the shorthand on
+// a parameter, and through `guard var`. Kept apart from guard_let_forms.almd
+// because building a `Result[Int, ConfigError]` (`lookup` below) walls on the
+// verified native renderer independently of guard let; that program falls
+// back to the standard native codegen.
+type ConfigError = | Missing(String) | BadPort(Int)
+
+fn describe(e: ConfigError) -> String = match e {
+  Missing(k) => "missing ${k}",
+  BadPort(p) => "bad port ${int.to_string(p)}",
+}
+
+fn lookup(m: Map[String, Int], k: String) -> Result[Int, ConfigError] = match map.get(m, k) {
+  some(p) => if p > 0 then ok(p) else err(BadPort(p)),
+  none => err(Missing(k)),
+}
+
+fn port_text(m: Map[String, Int]) -> String = {
+  guard let p = lookup(m, "port") else err(e) => describe(e)
+  "port ${int.to_string(p)}"
+}
+
+fn explain(r: Result[Int, ConfigError]) -> String = {
+  guard let r else err(e) => describe(e)
+  "ok ${int.to_string(r)}"
+}
+
+fn chained(m: Map[String, Int]) -> String = {
+  guard let a = lookup(m, "a") else err(e) => "a: " + describe(e)
+  guard var b = lookup(m, "b") else err(e) => "b: " + describe(e)
+  b = b + a
+  int.to_string(b)
+}
+
+fn main() -> Unit = {
+  println(port_text(map.from_list([("port", 80)])))
+  println(port_text(map.from_list([("port", 0)])))
+  println(port_text(map.from_list([])))
+  println(explain(ok(3)))
+  println(explain(err(Missing("host"))))
+  println(chained(map.from_list([("a", 1), ("b", 2)])))
+  println(chained(map.from_list([("a", 1)])))
+  println(chained(map.from_list([])))
+}

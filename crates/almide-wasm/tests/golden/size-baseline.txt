@@ -340,6 +340,8 @@
 2322	spec/wasm_cross/guard_chain_cons_list.almd
 3369	spec/wasm_cross/guard_err_in_call_arg_block.almd
 7553	spec/wasm_cross/guard_jump_in_value_fn.almd
+13506	spec/wasm_cross/guard_let_forms.almd
+9945	spec/wasm_cross/guard_let_forms_typed_err.almd
 3463	spec/wasm_cross/guard_let_statement.almd
 2956	spec/wasm_cross/guard_only_use_liveness.almd
 2159	spec/wasm_cross/guard_statement.almd
