@@ -144,6 +144,15 @@ pub(crate) fn emit_queue_len(i: &mut InstructionSink<'_>, gq: u32) {
 /// frees one block and recurses into nothing).
 pub(crate) type DeepSlot = (u32, u32, u32);
 
+/// The body of a shared deep-drop helper (`Helper::DeepDropPush` / `DeepDropDrain`).
+pub(crate) fn emit_deep_drop_shared(h: &crate::work::Helper) -> Function {
+    match *h {
+        crate::work::Helper::DeepDropDrain { gq, gd, drop_ty } => emit_deep_drop_drain(gq, gd, drop_ty),
+        crate::work::Helper::DeepDropPush { gq } => emit_deep_drop_push(gq),
+        _ => unreachable!("not a shared deep-drop helper"),
+    }
+}
+
 /// `$deep_drop_push(child, slot)`: the queue push of one deep release
 /// (`Helper::DeepDropPush`). params: 0=child, 1=slot; locals: 2=q, 3=v.
 pub(crate) fn emit_deep_drop_push(gq: u32) -> Function {
