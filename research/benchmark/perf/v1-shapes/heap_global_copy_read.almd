@@ -1,23 +1,29 @@
-// v1-vs-v0 shape bench: a module-level list read (#4006 C1 class D) whose
-// use needs a value of its own, not a borrow: the argument of a closure call
-// is copied out of the global's cell, where a named call that only reads it
-// borrows a snapshot of the cell (#4562).
+// v1-vs-v0 shape bench: module-level bindings (#4006 C1 class D) read as a
+// value of their own, not through a snapshot of the cell (#4562): a String,
+// whose copy shares its buffer (ADR-0013), is copied out of its cell, and a
+// list handed to a closure call is copied out of its snapshot for the call,
+// where the named call that only reads it borrows the snapshot.
 var SEEN: List[Int] = []
+
+var TAG: String = ""
 
 fn note(v: Int) -> Unit = {
   SEEN = SEEN + [v]
+  TAG = int.to_string(v)
 }
+
+fn tag_len() -> Int = string.len(TAG)
 
 fn weigh_all(weigh: (List[Int]) -> Int) -> Int = {
   var total = 0
   for i in 0..<300 {
     note(i)
-    total = total + weigh(SEEN) + list.len(SEEN)
+    total = total + weigh(SEEN) + list.len(SEEN) + tag_len()
   }
   total
 }
 
 fn main() -> Unit = {
   let total = weigh_all((xs) => list.len(xs) * 2)
-  println("${total} ${list.len(SEEN)}")
+  println("${total} ${list.len(SEEN)} ${TAG}")
 }

@@ -36,11 +36,21 @@ impl Quiet {
 thread_local! {
     /// The quiet calls of the program being rendered; `None` = none known.
     static QUIET: RefCell<Option<Quiet>> = const { RefCell::new(None) };
+    /// The heap slots of the program being rendered that some read borrows a
+    /// snapshot of (`SlotReads::aliases`): their cell holds an `Rc`.
+    static SNAPSHOT_SLOTS: RefCell<BTreeSet<u32>> = const { RefCell::new(BTreeSet::new()) };
 }
 
-/// Note which calls of the program touch no heap slot; an empty `functions`
-/// forgets the last program's.
+/// Heap slot `slot` is held in an `Rc` for its snapshots (#4562). Every other
+/// heap slot is a plain cell of its value, as no read of it would share one.
+pub(crate) fn snapshot_slot(slot: u32) -> bool {
+    SNAPSHOT_SLOTS.with(|s| s.borrow().contains(&slot))
+}
+
+/// Note which calls of the program touch no heap slot, and which slots some
+/// read borrows a snapshot of; an empty `functions` forgets the last program's.
 pub(crate) fn set_quiet(functions: &[MirFunction]) {
+    SNAPSHOT_SLOTS.with(|s| s.borrow_mut().clear());
     if functions.is_empty() {
         QUIET.with(|q| *q.borrow_mut() = None);
         return;
@@ -55,6 +65,8 @@ pub(crate) fn set_quiet(functions: &[MirFunction]) {
         q.noisy.extend(noisy);
     }
     QUIET.with(|c| *c.borrow_mut() = Some(q));
+    let snapshots: BTreeSet<u32> = functions.iter().flat_map(|f| slot_reads(f).snapshot_slots).collect();
+    SNAPSHOT_SLOTS.with(|s| *s.borrow_mut() = snapshots);
 }
 
 fn consts_of(func: &MirFunction) -> BTreeMap<ValueId, i64> {
@@ -117,6 +129,31 @@ fn blocks(op: &Op, a: i64, consts: &BTreeMap<ValueId, i64>, quiet: &Quiet) -> bo
     }
 }
 
+/// The value a release op releases (every typed drop the render erases).
+pub(crate) fn released(op: &Op) -> Option<ValueId> {
+    match op {
+        Op::Drop { v, .. }
+        | Op::DropListStr { v, .. }
+        | Op::DropValue { v, .. }
+        | Op::DropListValue { v, .. }
+        | Op::DropListStrValue { v, .. }
+        | Op::DropResultValue { v, .. }
+        | Op::DropResultListValue { v, .. }
+        | Op::DropResultValueInt { v, .. }
+        | Op::DropResultListValueInt { v, .. }
+        | Op::DropListStrStr { v, .. }
+        | Op::DropListIntStr { v, .. }
+        | Op::DropListStrInt { v, .. }
+        | Op::DropResultStrInt { v, .. }
+        | Op::DropResultListStrInt { v, .. }
+        | Op::DropResultListStr { v, .. }
+        | Op::DropListListStr { v, .. }
+        | Op::DropVariant { v, .. }
+        | Op::DropWrapperRec { v, .. } => Some(*v),
+        _ => None,
+    }
+}
+
 fn is_drop_of(op: &Op, t: ValueId) -> bool {
     match op {
         Op::Drop { v } | Op::DropListStr { v } | Op::DropVariant { v, .. } | Op::DropValue { v } => *v == t,
@@ -150,11 +187,20 @@ fn only_dropped(ops: &[Op], j: usize) -> bool {
 /// slot meanwhile replaces the cell's `Rc` (a store) or takes it (its take
 /// finds the snapshot sharing the block and copies it then), so the snapshot
 /// keeps the value it had at the read, as the copy did.
+///
+/// The lowering reads a heap global as that borrow and a `Dup` of it (the
+/// reader's own reference, an `rc_inc` on the wasm leg). Natively that `Dup`
+/// is the copy, so a `Dup` of a borrow-only read whose every use only borrows
+/// too, and which nothing moves into an owned param, is an `alias`: it reads
+/// through the snapshot's reference as well.
 #[derive(Default)]
 pub(crate) struct SlotReads {
     pub(crate) takes: BTreeSet<ValueId>,
     pub(crate) rebuilds: BTreeSet<ValueId>,
     pub(crate) borrows: BTreeSet<ValueId>,
+    pub(crate) aliases: BTreeSet<ValueId>,
+    /// The slots of the aliased reads.
+    pub(crate) snapshot_slots: BTreeSet<u32>,
 }
 
 /// The read `d` at `ops[i]` is only borrowed: every later use of it borrows
@@ -165,6 +211,16 @@ fn borrow_only(func: &MirFunction, i: usize, d: ValueId, root: &BTreeMap<ValueId
         && !func.params.iter().any(|p| p.value == d)
         && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if *local == d))
         && crate::render_native_borrow_read::last_borrowing_use(func, i, d, root).is_some()
+}
+
+/// The slot at address `a`, when its kind reads through a reference (a list,
+/// a list of strings, a record: the kinds a borrowed param has). A string's
+/// copy shares its buffer already (ADR-0013), so a String slot is not one.
+fn snapshot_kind(a: i64) -> Option<u32> {
+    use crate::render_native::NTy;
+    let base = i64::from(crate::mg_slot_addr(0));
+    let slot = u32::try_from((a - base) / 8).ok()?;
+    matches!(crate::native_slot_rewrite::heap_slot(slot)?, NTy::Vec | NTy::VecStr | NTy::Rec(_)).then_some(slot)
 }
 
 /// The slot's take that ends the straight line after the read at `i` of the
@@ -191,6 +247,7 @@ pub(crate) fn slot_reads(func: &MirFunction) -> SlotReads {
         let Some(quiet) = q.as_ref() else { return out };
         let ops = &func.ops;
         let root = crate::render_native_borrow_read::roots(func);
+        let mut slot_of: BTreeMap<ValueId, u32> = BTreeMap::new();
         for (i, op) in ops.iter().enumerate() {
             let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
             let Some(a) = args.first().and_then(|v| slot_addr(&consts, v)) else { continue };
@@ -201,10 +258,20 @@ pub(crate) fn slot_reads(func: &MirFunction) -> SlotReads {
                 Some((j, false)) if only_dropped(ops, j) => {
                     out.takes.insert(*d);
                 }
-                _ if borrow_only(func, i, *d, &root) => {
-                    out.borrows.insert(*d);
+                _ => {
+                    if let (Some(slot), true) = (snapshot_kind(a), borrow_only(func, i, *d, &root)) {
+                        out.borrows.insert(*d);
+                        slot_of.insert(*d, slot);
+                    }
                 }
-                _ => {}
+            }
+        }
+        for (j, op) in ops.iter().enumerate() {
+            let Op::Dup { dst, src } = op else { continue };
+            let moved = ops.iter().any(|o| matches!(o, Op::Consume { v } if v == dst));
+            if out.borrows.contains(src) && !moved && borrow_only(func, j, *dst, &root) {
+                out.aliases.insert(*dst);
+                out.snapshot_slots.extend(slot_of.get(src).copied());
             }
         }
         out

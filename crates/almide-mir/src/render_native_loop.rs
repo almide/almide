@@ -425,6 +425,22 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         Op::Dup { dst, src } if st.borrows.arms.contains(dst) => {
             crate::borrow_join::render_arm(dst, src, &mut st.tys, &mut st.out, st.indent)?
         }
+        // A copy of a heap slot's snapshot that only borrows reads through
+        // the snapshot's reference (#4562, render_native_heap_slot); its
+        // release ends that borrow, and the snapshot frees at scope end.
+        _ if crate::native_slot_takes::released(op).is_some_and(|v| {
+            st.addrs.slot_alias(&v) && matches!(st.tys.get(&v), Some(NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)))
+        }) =>
+        {
+            line!("// drop: a heap slot's snapshot, scope-end");
+        }
+        Op::Dup { dst, src }
+            if st.addrs.slot_alias(dst) && matches!(st.tys.get(src), Some(NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) =>
+        {
+            let t = st.tys[src];
+            st.tys.insert(*dst, t);
+            line!("let mut {} = {};", var(*dst), var(*src));
+        }
         // A copy of a borrowed field read off an owned record that dies
         // here moves the field out (#4006, no-perf-loss): nothing reads
         // the record again, so its field is the copy.
