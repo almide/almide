@@ -666,6 +666,7 @@
 2791	spec/wasm_cross/opt_str_str_ctor.almd
 1565	spec/wasm_cross/option_eq.almd
 1813	spec/wasm_cross/option_heap_eq.almd
+1953	spec/wasm_cross/option_map_none_heap_payload_closure.almd
 1786	spec/wasm_cross/option_match_heap_payload.almd
 1995	spec/wasm_cross/option_none_unwrap_term.almd
 3131	spec/wasm_cross/option_payload_recursive_variant.almd
