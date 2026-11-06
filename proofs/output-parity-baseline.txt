@@ -446,6 +446,7 @@ spec/wasm_cross/guard_else_exit_code.almd
 spec/wasm_cross/guard_err_in_call_arg_block.almd
 spec/wasm_cross/guard_jump_in_value_fn.almd
 spec/wasm_cross/guard_let_forms.almd
+spec/wasm_cross/guard_let_forms_typed_err.almd
 spec/wasm_cross/guard_let_statement.almd
 spec/wasm_cross/guard_only_use_liveness.almd
 spec/wasm_cross/guard_statement.almd
