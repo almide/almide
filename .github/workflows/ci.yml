@@ -23,7 +23,7 @@ name: CI
 # wrong costs a gate. The trade is not close.
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, 'ci-full-*']
   pull_request:
     branches: [main, develop]
   # The develop merge queue (#1732 follow-on): the queue's temporary
@@ -2615,7 +2615,7 @@ jobs:
 
   build-cross:
     name: Build (${{ matrix.os }})
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: true
     strategy:
       matrix:
         include:
@@ -2755,7 +2755,7 @@ jobs:
   # table, inside the same 60-minute hang budget.
   corpus-cross:
     name: Corpus gate (macos-latest, ${{ matrix.gate }})
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: true
     strategy:
       fail-fast: false
       matrix:
@@ -2799,7 +2799,7 @@ jobs:
 
   test-rust-cross:
     name: Test Rust (${{ matrix.os }})
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: true
     needs: build-cross
     strategy:
       matrix:
@@ -3202,7 +3202,7 @@ jobs:
   commissioned-mutation-gate:
     name: Commissioned mutation gate (the net keeps its teeth)
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -3227,8 +3227,8 @@ jobs:
           save-if: false
       - name: in-scope mutants must be caught (budgeted; full sweep lives in mutation-sweep.yml)
         run: |
-          git fetch -q origin "${{ github.base_ref }}"
+          git fetch -q origin develop
           ALMIDE_MUTATION_SCOPE=incremental \
-          ALMIDE_MUTATION_BASE="origin/${{ github.base_ref }}" \
+          ALMIDE_MUTATION_BASE="origin/develop" \
           ALMIDE_MUTATION_BUDGET_SECS=1680 \
             bash scripts/check-mutation-gate.sh

@@ -23,7 +23,7 @@ on:
     # main is the RELEASE branch (#921): every release merges develop→main, and
     # before this trigger existed each release shipped without the proof spine,
     # the PCC gate, or the corpus wall ever running on that ref.
-    branches: [develop, develop-v1, main]
+    branches: [develop, develop-v1, main, 'ci-full-*']
     # #571: every release tag runs the full spine on ITS tree, and a green
     # run assembles + attests the qualification dossier (tail steps below).
     tags: ["v*"]
