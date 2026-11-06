@@ -147,6 +147,6 @@ effect fn main() -> Unit = {
   println("${acc} ${float.from(k)} ${float.from(n) + 0.25}")
 }
 "#,
-        "5.0 7.0 3.25\n",
+        "5 7 3.25\n",
     );
 }
