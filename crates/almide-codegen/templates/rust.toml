@@ -494,15 +494,12 @@ template = "{expr}.clone()"
 # 0..<i64::MAX forced to materialize by list.len/indexing panicked native
 # exit 101 while wasm aborted with the defined line). Mirrors
 # almide_rt_list_range's try_reserve discipline, inlined so the template has
-# no linkage dependency. The inclusive count is taken in i128 and converted
-# with try_from: `i64::MIN...i64::MAX` holds 2^64 elements, which `as usize`
-# wrapped to 0, so the reserve succeeded and `extend` died on a raw capacity
-# overflow panic (#4538). A count past usize saturates and the reserve fails.
+# no linkage dependency.
 [range_expr]
 template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = __almide_re.saturating_sub(__almide_rs).max(0) as usize; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort_oom(); }} __almide_rv.extend(__almide_rs..__almide_re); __almide_rv }}"
 
 [range_inclusive]
-template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = if __almide_re >= __almide_rs {{ usize::try_from((__almide_re as i128) - (__almide_rs as i128) + 1).unwrap_or(usize::MAX) }} else {{ 0 }}; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort_oom(); }} __almide_rv.extend(__almide_rs..=__almide_re); __almide_rv }}"
+template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = if __almide_re >= __almide_rs {{ ((__almide_re as i128) - (__almide_rs as i128) + 1) as usize }} else {{ 0 }}; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort_oom(); }} __almide_rv.extend(__almide_rs..=__almide_re); __almide_rv }}"
 
 [for_tuple_destructure]
 template = "({vars})"
