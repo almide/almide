@@ -81,8 +81,12 @@ impl Parser {
 
     // ── Pratt parser core ───────────────────────────────────────
 
-    /// Binding powers for infix operators.
-    /// Returns (left_bp, right_bp). left_bp < right_bp = left-assoc.
+    /// Binding powers for infix operators — the dialect-16 table (#4531):
+    /// the binary operators follow a widely used precedence order (one
+    /// level per row of `docs/CHEATSHEET.md`'s table), with `|>` placed just
+    /// above `??` and `>>` at the top.
+    /// Returns (left_bp, right_bp). left_bp < right_bp = left-assoc,
+    /// left_bp > right_bp = right-assoc.
     pub(crate) fn infix_bp(tt: &TokenType) -> Option<(u8, u8)> {
         match tt {
             //                             left  right
@@ -92,21 +96,55 @@ impl Parser {
             | TokenType::LAngle | TokenType::RAngle
             | TokenType::LtEq  | TokenType::GtEq
                                         => Some((6,  7)),   // non-assoc (enforced below)
-            TokenType::PipeArrow        => Some((8,  25)),  // ★ asymmetric
-            TokenType::DotDotLt         => Some((10, 10)),  // range, end-exclusive (#966)
-            TokenType::DotDotDot        => Some((10, 10)),  // range, end-inclusive — infix only;
+            TokenType::QuestionQuestion => Some((9,  8)),   // right-assoc: `a ?? b ?? c` = `a ?? (b ?? c)`
+            TokenType::PipeArrow        => Some((10, 25)),  // ★ asymmetric: the right side is ONE stage
+            TokenType::DotDotLt         => Some((12, 12)),  // range, end-exclusive (#966)
+            TokenType::DotDotDot        => Some((12, 12)),  // range, end-inclusive — infix only;
                                                             // prefix `...` is spread, consumed by the
                                                             // record/list item parsers before this table
-            TokenType::DotDot           => Some((10, 10)),  // RETIRED range spelling → E031 fix-it
-            TokenType::DotDotEq         => Some((10, 10)),  // RETIRED range spelling → E031 fix-it
+            TokenType::DotDot           => Some((12, 12)),  // RETIRED range spelling → E031 fix-it
+            TokenType::DotDotEq         => Some((12, 12)),  // RETIRED range spelling → E031 fix-it
             TokenType::Plus | TokenType::Minus
-            | TokenType::PlusPlus       => Some((12, 13)),  // left-assoc
+            | TokenType::PlusPlus       => Some((14, 15)),  // left-assoc
             TokenType::Star | TokenType::Slash
-            | TokenType::Percent        => Some((14, 15)),  // left-assoc
-            TokenType::Caret            => Some((17, 16)),  // right-assoc
+            | TokenType::Percent        => Some((16, 17)),  // left-assoc
+            TokenType::Caret            => Some((19, 18)),  // right-assoc
             TokenType::ComposeArrow     => Some((25, 26)),  // left-assoc, inside |>'s right
             _ => None,
         }
+    }
+
+    /// The table dialects 1–15 parsed with, kept for `almide fix`'s
+    /// migration (#4531): it reads a file the way it was written, then prints
+    /// it with the parentheses that keep that reading. `??` is absent — it
+    /// was a POSTFIX there (`parse_unwrap_or_postfix`), binding the postfix
+    /// chain before it and a `parse_unary` fallback after it.
+    pub(crate) fn legacy_infix_bp(tt: &TokenType) -> Option<(u8, u8)> {
+        match tt {
+            TokenType::Or               => Some((2,  3)),
+            TokenType::And              => Some((4,  5)),
+            TokenType::EqEq  | TokenType::BangEq
+            | TokenType::LAngle | TokenType::RAngle
+            | TokenType::LtEq  | TokenType::GtEq
+                                        => Some((6,  7)),
+            TokenType::PipeArrow        => Some((8,  25)),
+            TokenType::DotDotLt | TokenType::DotDotDot
+            | TokenType::DotDot | TokenType::DotDotEq
+                                        => Some((10, 10)),
+            TokenType::Plus | TokenType::Minus
+            | TokenType::PlusPlus       => Some((12, 13)),
+            TokenType::Star | TokenType::Slash
+            | TokenType::Percent        => Some((14, 15)),
+            TokenType::Caret            => Some((17, 16)),
+            TokenType::ComposeArrow     => Some((25, 26)),
+            _ => None,
+        }
+    }
+
+    /// The binding powers this parser runs with: the current table, or the
+    /// pre-16 one when it reads a file for migration.
+    fn bp(&self, tt: &TokenType) -> Option<(u8, u8)> {
+        if self.legacy_grouping { Self::legacy_infix_bp(tt) } else { Self::infix_bp(tt) }
     }
 
     /// All token types that are infix operators (for newline lookahead).
@@ -116,10 +154,26 @@ impl Parser {
     /// inclusive range therefore cannot break the line BEFORE its `...`.
     /// Every other row of `infix_bp` must be here (#3155: `<` and `>` were
     /// missing); tests/operator_continuation_matrix_test.rs gates the family.
-    /// The postfix `??` opens a line too, in `parse_postfix`.
+    /// `??` opens a line like the others (#3155): nothing can start a
+    /// statement with `??`, so the join changes no program that parsed before.
     pub(crate) const INFIX_TOKENS: &'static [TokenType] = &[
         TokenType::Or, TokenType::And,
         // not Almide, reported once and read as `or` / `and`
+        TokenType::PipePipe, TokenType::AmpAmp,
+        TokenType::EqEq, TokenType::BangEq, TokenType::LtEq, TokenType::GtEq,
+        TokenType::LAngle, TokenType::RAngle,
+        TokenType::QuestionQuestion,
+        TokenType::PipeArrow, TokenType::ComposeArrow,
+        TokenType::DotDot, TokenType::DotDotEq, TokenType::DotDotLt,
+        TokenType::Plus, TokenType::Minus, TokenType::PlusPlus,
+        TokenType::Star, TokenType::Slash, TokenType::Percent,
+        TokenType::Caret,
+    ];
+
+    /// `INFIX_TOKENS` as the pre-16 grammar had it: `??` opened its line from
+    /// `parse_postfix` instead, because it was a postfix.
+    const LEGACY_INFIX_TOKENS: &'static [TokenType] = &[
+        TokenType::Or, TokenType::And,
         TokenType::PipePipe, TokenType::AmpAmp,
         TokenType::EqEq, TokenType::BangEq, TokenType::LtEq, TokenType::GtEq,
         TokenType::LAngle, TokenType::RAngle,
@@ -142,7 +196,8 @@ impl Parser {
     /// stay in the stream for the statement-level collectors.
     fn skip_infix_continuation_newlines(&mut self) -> Vec<super::GapComment> {
         let saved_before_skip = self.pos;
-        let gap = self.skip_newlines_if_followed_by_any(Self::INFIX_TOKENS);
+        let infix_tokens = if self.legacy_grouping { Self::LEGACY_INFIX_TOKENS } else { Self::INFIX_TOKENS };
+        let gap = self.skip_newlines_if_followed_by_any(infix_tokens);
         if self.pos != saved_before_skip
             && self.check(TokenType::Minus)
             && self.minus_attached_to_operand()
@@ -210,7 +265,7 @@ impl Parser {
             }
 
             let tt = self.current().token_type.clone();
-            let Some((l_bp, r_bp)) = Self::infix_bp(&tt) else { break };
+            let Some((l_bp, r_bp)) = self.bp(&tt) else { break };
             if l_bp < min_bp { break; }
 
             let mut gap = match self.pending_gap.take() {
@@ -242,6 +297,10 @@ impl Parser {
                 && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace)
             {
                 left = self.parse_pipe_match(left, span)?;
+                continue;
+            }
+
+            if tt == TokenType::QuestionQuestion && !self.coalesce_fallback_follows(&op_tok) {
                 continue;
             }
 
@@ -304,6 +363,9 @@ impl Parser {
             }),
             TokenType::ComposeArrow => Expr::new(self.next_id(), span, ExprKind::Compose {
                 left: Box::new(left), right: Box::new(right),
+            }),
+            TokenType::QuestionQuestion => Expr::new(self.next_id(), span, ExprKind::UnwrapOr {
+                expr: Box::new(left), fallback: Box::new(right),
             }),
             TokenType::DotDotLt => Expr::new(self.next_id(), span, ExprKind::Range {
                 start: Box::new(left), end: Box::new(right), inclusive: false,
@@ -388,12 +450,12 @@ impl Parser {
             // receiver whose line they end (#1326); the `.` link is consumed
             // right below, so there is no outer loop to defer to.
             let mut gap = self.skip_newlines_if_method_chain();
-            // `expr\n  ?? fallback` — `??` opens its line like an infix
-            // operator does (#3155). Nothing can start a statement with `??`,
-            // so the join changes no program that parsed before. It lives
-            // here, not in INFIX_TOKENS, because `??` is a postfix: it binds
-            // the operand this loop is building.
-            gap.extend(self.skip_newlines_if_followed_by_any(&[TokenType::QuestionQuestion]));
+            // The pre-16 grammar (#4531) read `??` as a postfix, so its
+            // line-opening join (#3155) lived here; the current grammar joins
+            // it with the other infix operators (`INFIX_TOKENS`).
+            if self.legacy_grouping {
+                gap.extend(self.skip_newlines_if_followed_by_any(&[TokenType::QuestionQuestion]));
+            }
             self.attach_gap_comments(expr.id, gap);
             let (next, consumed) = self.parse_one_postfix(expr)?;
             expr = next;
@@ -436,7 +498,8 @@ impl Parser {
     }
 
     /// One postfix step applied to `expr`: a `.` chain link, a `[T](args)` call,
-    /// an `[index]`, a `(args)` call, or one of the unwrap-family operators.
+    /// an `[index]`, a `(args)` call, or one of the unwrap-family operators
+    /// (`!`, `?`, `?.`; and `??` under the pre-16 grammar only).
     /// Returns `(expr, consumed)`; `consumed = false` means nothing applied and
     /// the caller's loop ends.
     fn parse_one_postfix(&mut self, expr: Expr) -> Result<(Expr, bool), String> {
@@ -479,65 +542,68 @@ impl Parser {
         }))
     }
 
-    /// `expr ?? fallback` — unwrap with a default.
-    ///
-    /// Two diagnostics live here because both are silent-miscompile guards: a
-    /// TERMINAL `??` (nothing that can start an expression follows), and — at
-    /// statement level (delimiter depth 0) — a fallback that is not on the same
-    /// line as the `??`. #1112: without the second, the next statement is
-    /// silently swallowed as the fallback (`let v = f()??\n-5` parsed as
-    /// `f() ?? -5`, and a following `println(v)` became the fallback expr,
-    /// surfacing as a distant E003). Multiline fallbacks are spelled with parens.
-    fn parse_unwrap_or_postfix(&mut self, expr: Expr) -> Result<(Expr, bool), String> {
-        // expr ?? fallback — unwrap with default
-        let span = Some(self.current_span());
-        let qq_tok = (self.current().line, self.current().col, self.current().end_col);
-        self.advance();
-        self.skip_newlines();
-        // Terminal `??` — nothing that can start an expression follows.
-        if matches!(self.current().token_type, TokenType::RBrace | TokenType::EOF) {
-            let mut d = crate::diagnostic::Diagnostic::error(
+    /// The two `??` diagnostics, read once the operator (and the newlines
+    /// after it) are consumed. Both are silent-miscompile guards: a TERMINAL
+    /// `??` (nothing that can start an expression follows) answers `false`
+    /// and the caller builds no node, and — at statement level (delimiter
+    /// depth 0) — a fallback that is not on the same line as the `??`.
+    /// #1112: without the second, the next statement is silently swallowed
+    /// as the fallback (`let v = f()??\n-5` parsed as `f() ?? -5`, and a
+    /// following `println(v)` became the fallback expr, surfacing as a
+    /// distant E003). Multiline fallbacks are spelled with parens. `??`
+    /// itself MAY open a line (#3155): no statement starts with `??`, so
+    /// joining that line to the operand above is unambiguous.
+    fn coalesce_fallback_follows(&mut self, qq: &crate::lexer::Token) -> bool {
+        let qq_tok = (qq.line, qq.col, qq.end_col);
+        let terminal = matches!(self.current().token_type, TokenType::RBrace | TokenType::EOF);
+        let crosses_line = !terminal && self.delim_depth == 0 && self.current().line != qq_tok.0;
+        if !terminal && !crosses_line {
+            return true;
+        }
+        let mut d = if terminal {
+            crate::diagnostic::Diagnostic::error(
                 "`??` is missing its fallback operand",
                 "Write the default after ??: `expr ?? fallback`",
                 "?? fallback",
-            ).with_code("E038");
-            if let Some(f) = &self.file { d.file = Some(f.clone()); }
-            d.line = Some(qq_tok.0);
-            d.col = Some(qq_tok.1);
-            d.end_col = Some(qq_tok.2);
-            self.errors.push(d);
-            return Ok((expr, true));
-        }
-        // #1112: at statement level (delimiter depth 0) the fallback must
-        // start on the SAME line as `??` — otherwise the next statement is
-        // silently swallowed as the fallback (`let v = f()??\n-5` parsed as
-        // `f() ?? -5`, and a following `println(v)` became the fallback expr,
-        // surfacing as a distant E003). Multiline fallbacks are spelled with
-        // parens. `??` itself MAY open a line (#3155): no statement starts
-        // with `??`, so joining that line to the operand above is unambiguous.
-        if self.delim_depth == 0 && self.current().line != qq_tok.0 {
-            let mut d = crate::diagnostic::Diagnostic::error(
+            )
+        } else {
+            crate::diagnostic::Diagnostic::error(
                 "the ?? fallback is not on this line",
                 "Write the fallback on the same line as `??`; for a multiline \
                  fallback wrap the whole expression in parentheses with `??` \
                  trailing:\n        (expr ??\n          fallback)",
                 "?? fallback",
-            ).with_code("E038");
-            if let Some(f) = &self.file { d.file = Some(f.clone()); }
-            d.line = Some(qq_tok.0);
-            d.col = Some(qq_tok.1);
-            d.end_col = Some(qq_tok.2);
-            self.errors.push(d);
+            )
+        }
+        .with_code("E038");
+        if let Some(f) = &self.file { d.file = Some(f.clone()); }
+        d.line = Some(qq_tok.0);
+        d.col = Some(qq_tok.1);
+        d.end_col = Some(qq_tok.2);
+        self.errors.push(d);
+        !terminal
+    }
+
+    /// `expr ?? fallback` as the pre-16 grammar read it (#4531): a POSTFIX
+    /// on the chain built so far, with a `parse_unary` fallback. Only the
+    /// migration parser (`legacy_grouping`) reaches it; the current grammar
+    /// reads `??` as a right-associative infix level in `parse_expr_bp`.
+    fn parse_unwrap_or_postfix(&mut self, expr: Expr) -> Result<(Expr, bool), String> {
+        let span = Some(self.current_span());
+        let qq = self.current().clone();
+        self.advance();
+        self.skip_newlines();
+        if !self.coalesce_fallback_follows(&qq) {
+            return Ok((expr, true));
         }
         let fallback = self.parse_unary()?;
-        return Ok((Expr::new(self.next_id(), span, ExprKind::UnwrapOr {
+        Ok((Expr::new(self.next_id(), span, ExprKind::UnwrapOr {
             expr: Box::new(expr), fallback: Box::new(fallback),
-        }), true));
-    
+        }), true))
     }
 
     /// The unwrap-family postfixes: `expr!` (propagating unwrap),
-    /// `expr ?? fallback`, `expr?.field` (optional chain), `expr?`
+    /// `expr?.field` (optional chain), `expr?`
     /// (Result→Option). Returns `(expr, consumed)`; `consumed = false` hands
     /// the unchanged expr back to the caller's loop to break.
     fn parse_postfix_unwrap_op(&mut self, expr: Expr) -> Result<(Expr, bool), String> {
@@ -552,7 +618,7 @@ impl Parser {
                 expr: Box::new(expr),
             }), true));
         }
-        if self.check(TokenType::QuestionQuestion) {
+        if self.legacy_grouping && self.check(TokenType::QuestionQuestion) {
             return self.parse_unwrap_or_postfix(expr);
         }
         if self.check(TokenType::QuestionDot) && !self.newline_before_current() {

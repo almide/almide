@@ -52,10 +52,20 @@ impl<'a, 'c> ScopedCx<'a, 'c> {
                     self.walk_expr(cond);
                     self.walk_expr(else_);
                 }
-                ast::Stmt::GuardLet { name, scrutinee, else_, span } => {
+                ast::Stmt::GuardLet { name, scrutinee, else_, fail, span, .. } => {
                     self.refuse("`guard let`", "an early exit leaves the allocation region before its end", "spell the exit as a `match` whose value is the result", *span);
                     self.walk_expr(scrutinee);
+                    // #4543: `else err(e) => …` binds `e` for the else only.
+                    self.push_scope();
+                    let mut names = Vec::new();
+                    if let Some(p) = fail {
+                        pattern_binders(p, &mut names);
+                    }
+                    for n in names {
+                        self.bind(&n);
+                    }
                     self.walk_expr(else_);
+                    self.pop_scope();
                     self.bind(name.as_str());
                 }
                 ast::Stmt::Expr { expr, .. } => self.walk_expr(expr),

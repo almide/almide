@@ -1,0 +1,3 @@
+expects_error = "a `guard let` has one failure arm"
+hint_substring = "write a `match`"
+check_target = "wasm"

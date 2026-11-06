@@ -2,10 +2,12 @@
 //!
 //! A tool that builds an operator node from sub-trees it did not parse in
 //! that position (`almide fix` turning `option.unwrap_or(x, 0 - 1)` into
-//! `x ?? (0 - 1)`, or `bool.eq(a or b, c)` into `(a or b) == c`) prints the
+//! `x ?? (a or b)`, or `bool.eq(a or b, c)` into `(a or b) == c`) prints the
 //! tree back as text, and the formatter prints an operand as written. An
 //! operand that binds looser than its slot re-parses into a different tree —
-//! `x ?? 0 - 1` is `(x ?? 0) - 1` — so the tool must group it explicitly.
+//! `x ?? a or b` is `(x ?? a) or b` — so the tool must group it explicitly.
+//! The dialect-16 migration (#4531, `regroup`) prints a pre-16 tree with the
+//! same table.
 //!
 //! The decision is read off the parser itself: the infix binding powers come
 //! from [`Parser::infix_bp`], the table the Pratt loop uses, and an operator's
@@ -24,10 +26,6 @@ pub enum Slot {
     InfixLeft(TokenType),
     /// Right operand of an infix operator (`parse_expr_bp(r_bp)`).
     InfixRight(TokenType),
-    /// Left of `??`: the parser has read a postfix chain there.
-    CoalesceValue,
-    /// Right of `??`: the parser reads it with `parse_unary`.
-    CoalesceFallback,
     /// Operand of prefix `-` / `not`: `parse_unary`.
     PrefixOperand,
     /// Object or callee of a postfix step (`.f`, `.0`, `(…)`, `[…]`, `!`, `?`, `?.`).
@@ -38,8 +36,8 @@ pub enum Slot {
 enum Level {
     /// Self-delimited: a literal, a name, a bracketed form, a postfix chain.
     Closed,
-    /// A prefix form (`-x`, `not x`) or `a ?? b` — an operand of any infix
-    /// operator, but nothing may follow it as a postfix.
+    /// A prefix form (`-x`, `not x`) — an operand of any infix operator, but
+    /// nothing may follow it as a postfix.
     Unary,
     /// An infix node, by its operator token.
     Infix(TokenType),
@@ -54,6 +52,8 @@ pub fn infix_token(expr: &Expr) -> Option<TokenType> {
         ExprKind::Binary { op, .. } => Lexer::tokenize(op.as_str()).first().map(|t| t.token_type),
         ExprKind::Pipe { .. } => Some(TokenType::PipeArrow),
         ExprKind::Compose { .. } => Some(TokenType::ComposeArrow),
+        // `??` is an infix level since dialect 16 (#4531).
+        ExprKind::UnwrapOr { .. } => Some(TokenType::QuestionQuestion),
         ExprKind::Range { inclusive: true, .. } => Some(TokenType::DotDotDot),
         ExprKind::Range { inclusive: false, .. } => Some(TokenType::DotDotLt),
         _ => None,
@@ -96,8 +96,12 @@ fn level(expr: &Expr) -> Level {
         | ExprKind::Err { .. }
         // fmt always prints an ascription inside its own parentheses.
         | ExprKind::TypeAscription { .. } => Level::Closed,
-        ExprKind::Unary { .. } | ExprKind::UnwrapOr { .. } => Level::Unary,
-        ExprKind::Binary { .. } | ExprKind::Pipe { .. } | ExprKind::Compose { .. } | ExprKind::Range { .. } => {
+        ExprKind::Unary { .. } => Level::Unary,
+        ExprKind::Binary { .. }
+        | ExprKind::Pipe { .. }
+        | ExprKind::Compose { .. }
+        | ExprKind::Range { .. }
+        | ExprKind::UnwrapOr { .. } => {
             infix_token(expr).map_or(Level::Open, Level::Infix)
         }
         _ => Level::Open,
@@ -111,12 +115,34 @@ fn is_comparison(tt: TokenType) -> bool {
     )
 }
 
+fn is_range(tt: TokenType) -> bool {
+    matches!(tt, TokenType::DotDotLt | TokenType::DotDotDot | TokenType::DotDot | TokenType::DotDotEq)
+}
+
+/// Whether `expr` is self-delimited: a literal, a name, a bracketed form, a
+/// postfix chain (#4531's regrouping pre-filter).
+pub fn is_closed(expr: &Expr) -> bool {
+    matches!(level(expr), Level::Closed)
+}
+
+/// Whether `expr` is an infix node of an operator other than `??`.
+pub fn is_infix_other_than_coalesce(expr: &Expr) -> bool {
+    matches!(level(expr), Level::Infix(tt) if tt != TokenType::QuestionQuestion)
+}
+
+/// Whether `expr` runs to the right with no closing token (`if`, `match`, a
+/// lambda, …): in a RIGHT operand it takes everything after it under any
+/// operator table, so its grouping cannot depend on the table.
+pub fn is_open(expr: &Expr) -> bool {
+    matches!(level(expr), Level::Open)
+}
+
 /// Whether `child`, printed as written in `slot`, would re-parse into a
 /// different tree — i.e. whether it needs parentheses there.
 pub fn needs_parens(child: &Expr, slot: Slot) -> bool {
     match level(child) {
         Level::Closed => false,
-        Level::Unary => matches!(slot, Slot::CoalesceValue | Slot::PostfixBase),
+        Level::Unary => matches!(slot, Slot::PostfixBase),
         Level::Open => true,
         Level::Infix(inner) => {
             let Some((inner_l, inner_r)) = Parser::infix_bp(&inner) else { return true };
@@ -129,15 +155,33 @@ pub fn needs_parens(child: &Expr, slot: Slot) -> bool {
                     None => true,
                 },
                 // `a op (c op3 d)` stays grouped iff the right operand's loop,
-                // run at `op`'s right power, takes `op3`.
+                // run at `op`'s right power, takes `op3`. Ranges are
+                // non-associative too: a range of ranges is refused.
                 Slot::InfixRight(op) => match Parser::infix_bp(&op) {
-                    Some((_, r)) => inner_l < r,
+                    Some((_, r)) => inner_l < r || (is_range(op) && is_range(inner)),
                     None => true,
                 },
-                Slot::CoalesceValue | Slot::CoalesceFallback | Slot::PrefixOperand | Slot::PostfixBase => true,
+                Slot::PrefixOperand | Slot::PostfixBase => true,
             }
         }
     }
+}
+
+/// [`needs_parens`], and also where the pre-16 grammar (#4531) would read the
+/// text differently: there `??` bound tighter than every binary operator, so
+/// its value had to be a postfix chain and its fallback a prefix expression.
+/// A tool that BUILDS a `??` (`almide fix` turning `option.unwrap_or(x, d)`
+/// into `x ?? d`) groups with this, so its output means one thing in every
+/// dialect and is never an E120 site.
+pub fn needs_parens_in_every_dialect(child: &Expr, slot: Slot) -> bool {
+    needs_parens(child, slot)
+        || match slot {
+            Slot::InfixLeft(TokenType::QuestionQuestion) => !matches!(level(child), Level::Closed),
+            Slot::InfixRight(TokenType::QuestionQuestion) => {
+                matches!(level(child), Level::Infix(tt) if tt != TokenType::QuestionQuestion)
+            }
+            _ => false,
+        }
 }
 
 /// The operand children of `expr` that sit next to an operator, with the slot
@@ -149,13 +193,11 @@ pub fn operand_slots_mut(expr: &mut Expr) -> Vec<(&mut Expr, Slot)> {
         ExprKind::Binary { left, right, .. }
         | ExprKind::Pipe { left, right }
         | ExprKind::Compose { left, right }
-        | ExprKind::Range { start: left, end: right, .. } => match tt {
+        | ExprKind::Range { start: left, end: right, .. }
+        | ExprKind::UnwrapOr { expr: left, fallback: right } => match tt {
             Some(tt) => vec![(&mut **left, Slot::InfixLeft(tt)), (&mut **right, Slot::InfixRight(tt))],
             None => Vec::new(),
         },
-        ExprKind::UnwrapOr { expr, fallback } => {
-            vec![(&mut **expr, Slot::CoalesceValue), (&mut **fallback, Slot::CoalesceFallback)]
-        }
         ExprKind::Unary { operand, .. } => vec![(&mut **operand, Slot::PrefixOperand)],
         ExprKind::Member { object, .. }
         | ExprKind::TupleIndex { object, .. }
@@ -185,6 +227,10 @@ mod tests {
             ExprKind::Paren { expr } => shape(expr),
             ExprKind::Binary { op, left, right } => format!("({op} {} {})", shape(left), shape(right)),
             ExprKind::Pipe { left, right } => format!("(|> {} {})", shape(left), shape(right)),
+            ExprKind::Compose { left, right } => format!("(>> {} {})", shape(left), shape(right)),
+            ExprKind::Range { start, end, inclusive } => {
+                format!("({} {} {})", if *inclusive { "..." } else { "..<" }, shape(start), shape(end))
+            }
             ExprKind::UnwrapOr { expr, fallback } => format!("(?? {} {})", shape(expr), shape(fallback)),
             ExprKind::Unary { op, operand } => format!("({op} {})", shape(operand)),
             ExprKind::Member { object, field } => format!("{}.{field}", shape(object)),
@@ -210,12 +256,12 @@ mod tests {
 
     const OPERANDS: &[&str] = &[
         "a", "-a", "not a", "a ?? b", "a + b", "a - b", "a * b", "a ^ b", "a == b", "a < b", "a and b",
-        "a or b", "a |> f", "f(a)", "a.b",
+        "a or b", "a |> f", "f >> g", "a ..< b", "f(a)", "a.b",
     ];
 
     #[test]
     fn every_operand_pair_keeps_its_grouping_under_every_operator() {
-        for op in ["+", "-", "*", "/", "%", "^", "==", "!=", "<", ">=", "and", "or", "|>"] {
+        for op in ["+", "-", "*", "/", "%", "^", "==", "!=", "<", ">=", "and", "or", "|>", "??", ">>", "..<", "..."] {
             let tt = Lexer::tokenize(op)[0].token_type;
             for l in OPERANDS {
                 for r in OPERANDS {
@@ -226,21 +272,35 @@ mod tests {
     }
 
     #[test]
-    fn every_operand_keeps_its_grouping_around_coalesce() {
-        for l in OPERANDS {
-            for r in OPERANDS {
-                roundtrip(|a, b| format!("{a} ?? {b}"), l, r, (Slot::CoalesceValue, Slot::CoalesceFallback));
-            }
+    fn every_operand_keeps_its_grouping_under_a_prefix_and_a_postfix() {
+        for o in OPERANDS {
+            roundtrip(|_, b| format!("- {b}"), "a", o, (Slot::PrefixOperand, Slot::PrefixOperand));
+            roundtrip(|_, b| format!("not {b}"), "a", o, (Slot::PrefixOperand, Slot::PrefixOperand));
+            roundtrip(|a, _| format!("{a}.f"), o, "a", (Slot::PostfixBase, Slot::PostfixBase));
         }
     }
 
-    /// #4319: the fallback `0 - 1` binds looser than `??`.
+    /// #4319 and #4531: since dialect 16 `??` sits below the arithmetic, so a
+    /// compound fallback `0 - 1` needs no parentheses, a disjunction does, and
+    /// a prefix value is read as written.
     #[test]
     fn a_compound_fallback_is_grouped() {
-        assert!(needs_parens(&parse("0 - 1"), Slot::CoalesceFallback));
-        assert!(needs_parens(&parse("a or b"), Slot::CoalesceValue));
-        assert!(!needs_parens(&parse("-1"), Slot::CoalesceFallback));
-        assert!(!needs_parens(&parse("f(x)"), Slot::CoalesceValue));
-        assert!(needs_parens(&parse("-x"), Slot::CoalesceValue));
+        let qq = Slot::InfixRight(TokenType::QuestionQuestion);
+        let qv = Slot::InfixLeft(TokenType::QuestionQuestion);
+        assert!(!needs_parens(&parse("0 - 1"), qq));
+        assert!(needs_parens(&parse("a or b"), qv));
+        assert!(needs_parens(&parse("a == b"), qq));
+        assert!(!needs_parens(&parse("-1"), qq));
+        assert!(!needs_parens(&parse("f(x)"), qv));
+        assert!(!needs_parens(&parse("-x"), qv));
+        assert!(!needs_parens(&parse("xs |> f"), qv));
+        assert!(needs_parens(&parse("a ?? b"), qv));
+        assert!(!needs_parens(&parse("a ?? b"), qq));
+        // `??` next to an arithmetic operator: the `??` side is grouped.
+        assert!(needs_parens(&parse("a ?? b"), Slot::InfixLeft(TokenType::Plus)));
+        assert!(needs_parens(&parse("a ?? b"), Slot::InfixRight(TokenType::Minus)));
+        assert!(needs_parens(&parse("a ?? b"), Slot::InfixLeft(TokenType::PipeArrow)));
+        assert!(needs_parens(&parse("a ?? b"), Slot::PrefixOperand));
+        assert!(!needs_parens(&parse("a ?? b"), Slot::InfixLeft(TokenType::EqEq)));
     }
 }

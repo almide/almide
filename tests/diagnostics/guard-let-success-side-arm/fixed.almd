@@ -1,0 +1,8 @@
+// The arm after `else` is the failure side (#4543); the success side is the
+// binding before `else`.
+fn parse_or(s: String) -> Int = {
+  guard let n = int.parse(s) else err(e) => 0
+  n
+}
+
+fn main() -> Unit = println(int.to_string(parse_or("7")))

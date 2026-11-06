@@ -29,6 +29,7 @@ pub fn check_dialect_stamp_in(
     program: &ast::Program,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    check_regrouped_coalesce(module, program, diagnostics);
     let Some(stamp) = program.dialect else { return };
     let DialectStanding::Ahead { epoch } = standing(Some(stamp.epoch)) else { return };
 
@@ -59,6 +60,40 @@ pub fn check_dialect_stamp_in(
         diag.col = Some(s.col);
     }
     diagnostics.push(diag);
+}
+
+/// E120 (#4531): a `??` whose grouping changed at dialect 16.
+///
+/// Through dialect 15 `??` bound tighter than every binary operator, so
+/// `x ?? 0 - 1` meant `(x ?? 0) - 1`; since dialect 16 it is an infix level
+/// below `|>` and the arithmetic, and the same text means `x ?? (0 - 1)`.
+/// Both readings usually type-check, so a file written for the old grouping
+/// would change meaning without a word. The parser names every such site
+/// (`Program::regrouped`) for a file that is not stamped `@dialect(16)` or
+/// later, and each one is refused here until its parentheses say which
+/// reading is meant. `almide fix` adds the ones that keep the old reading.
+fn check_regrouped_coalesce(module: Option<&str>, program: &ast::Program, diagnostics: &mut Vec<Diagnostic>) {
+    for site in &program.regrouped {
+        let mut diag = Diagnostic::error(
+            "this `??` groups differently since dialect 16: the same text meant something else before",
+            "Since dialect 16 `??` binds looser than `+ - * / % ^ >>`, the ranges and `|>`, and tighter \
+             than the comparisons, `and` and `or`: `x ?? 0 - 1` is `x ?? (0 - 1)`, where it was \
+             `(x ?? 0) - 1`; `s + b ?? 0` is `(s + b) ?? 0`, where it was `s + (b ?? 0)`; `-x ?? 0` \
+             is `(-x) ?? 0`. Add the parentheses for the reading you mean. `almide fix` adds the ones \
+             that keep the reading this file was written for. A file stamped `@dialect(16)` is read \
+             with the new grouping and is not checked for this.",
+            "??",
+        )
+        .with_code("E120");
+        if let Some(m) = module {
+            diag.file = Some(m.to_string());
+        } else {
+            diag.line = Some(site.line);
+            diag.col = Some(site.col);
+            diag.end_col = Some(site.end_col);
+        }
+        diagnostics.push(diag);
+    }
 }
 
 #[cfg(test)]

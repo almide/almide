@@ -64,7 +64,7 @@ fn main() -> Unit = {
   var sum = 0
   var j = 0
   while j < 8 {
-    sum = sum + bytes.get(arena, j) ?? 0
+    sum = sum + (bytes.get(arena, j) ?? 0)
     j = j + 1
   }
   println(int.to_string(sum))

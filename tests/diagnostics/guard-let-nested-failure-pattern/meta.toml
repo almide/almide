@@ -1,0 +1,2 @@
+expects_error = "failure arm binds the whole error"
+hint_substring = "write a `match`"

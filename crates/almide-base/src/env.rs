@@ -177,6 +177,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_KEEP_SCRATCH", Flag, Tool, "keep the `almide test` scratch build directory instead of deleting it"),
     sw("ALMIDE_LSP_TRACE", Flag, Dbg, "print every LSP request and response the language server handles"),
     sw("ALMIDE_MANIFEST_TREE_CHECK", Value, Ci, "the parity-manifest generators' stale-tree refusal (#2405, scripts/lib/oracle-header.sh): `strict` (default) refuses an ORACLE that is not `<Cargo.toml version> (dev…)`, is stamped with a commit other than HEAD, or is unstamped and older than the sources; a worktree behind its upstream; and an untracked spec/ fixture. `gate` keeps only the untracked-fixture check (scripts/check-parity-goldens.sh vouches for CI's artifact). `off` is the deliberate override"),
+    sw("ALMIDE_MIGRATE_PRECEDENCE_WRITE", Flag, Harness, "rewrite every tracked `.almd` whose `??` reads differently since dialect 16 with `almide fix`'s migration instead of failing (#4531, tests/precedence_regroup_corpus_test.rs)"),
     sw("ALMIDE_MONO_DEBUG", Flag, Dbg, "print the monomorphisation discovery and instantiation decisions"),
     sw("ALMIDE_MP_PROBE", Flag, Dbg, "print the mut-param analysis decisions (IR)"),
     sw("ALMIDE_MUTATION_BASE", Value, Ci, "the base ref the mutation gate diffs against"),

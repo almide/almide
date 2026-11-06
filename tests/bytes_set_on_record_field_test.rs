@@ -39,7 +39,7 @@ fn main() -> Unit = {
   }
   var sum = 0
   for i in 0..<64 {
-    sum = sum + bytes.get(acc.buf, i) ?? 0
+    sum = sum + (bytes.get(acc.buf, i) ?? 0)
   }
   println("${sum} ${bytes.get(acc.buf, 63) ?? 0} ${bytes.get(snap.buf, 63) ?? 0} ${snap.tag}")
 }

@@ -706,10 +706,20 @@ impl<'a> Analyzer<'a> {
                         scope.push((n, Bind::Let { body, init: value }));
                     }
                 }
-                Stmt::GuardLet { name, scrutinee, else_, .. } => {
+                Stmt::GuardLet { name, scrutinee, else_, mutable, fail, .. } => {
                     self.walk(scrutinee, scope, mode);
+                    // #4543: `else err(e) => …` binds `e` for the else only.
+                    let mark = scope.len();
+                    for n in fail.iter().flat_map(pattern_binders) {
+                        scope.push((n, Bind::Let { body, init: scrutinee }));
+                    }
                     self.walk(else_, scope, mode);
-                    scope.push((*name, Bind::Let { body, init: scrutinee }));
+                    scope.truncate(mark);
+                    if *mutable {
+                        scope.push((*name, Bind::Var { body }));
+                    } else {
+                        scope.push((*name, Bind::Let { body, init: scrutinee }));
+                    }
                 }
                 Stmt::Assign { name, value, span } => {
                     self.name_ref(*name, *span, scope, mode);

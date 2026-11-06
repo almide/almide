@@ -47,6 +47,7 @@ pub use almide_interp as interp;
 
 // ── Tools (almide-tools) ──
 pub use almide_tools::fmt;
+pub use almide_tools::regroup;
 pub use almide_tools::interface;
 pub use almide_tools::almdi;
 

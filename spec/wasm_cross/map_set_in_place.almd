@@ -29,7 +29,7 @@ fn put(mut m: Map[Int, Int], k: Int, v: Int) -> Unit = {
 }
 
 fn bump(mut m: Map[String, Int], k: String) -> Unit = {
-  m[k] = map.get(m, k) ?? 0 + 1
+  m[k] = (map.get(m, k) ?? 0) + 1
 }
 
 fn main() -> Unit = {
@@ -45,7 +45,7 @@ fn main() -> Unit = {
   // map being written), and the explicit rebind spelling
   var c: Map[Int, Int] = map.new()
   for i in 0..<500 {
-    c[i % 7] = map.get(c, i % 7) ?? 0 + 1
+    c[i % 7] = (map.get(c, i % 7) ?? 0) + 1
   }
   println("B.c=" + render(c))
   var r: Map[Int, Int] = map.new()
@@ -100,7 +100,7 @@ fn main() -> Unit = {
   var s: Map[String, Int] = map.new()
   for i in 0..<30 {
     let k = "k" + int.to_string(i % 4)
-    s[k] = map.get(s, k) ?? 0 + i
+    s[k] = (map.get(s, k) ?? 0) + i
   }
   println("G.keys=" + list.join(map.keys(s), ",") + " k2=" + int.to_string(map.get(s, "k2") ?? (0 - 1)))
   var w: Map[Int, String] = map.new()
