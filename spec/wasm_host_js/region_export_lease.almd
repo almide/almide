@@ -1,0 +1,38 @@
+// @leg: structural
+// @contract: C-454
+// ADR-0031 amendment A1d: a host that never calls `__region_release` still
+// runs in bounded memory. Each `returns: address` export holds ONE host
+// share, a lease: its previous result's share is given back when the export
+// returns again, and a result the export hands out again (the same address
+// in the same block) holds that one share, not a second. An address stays
+// valid until the next call of the export that handed it out, or until the
+// host releases it; calls of every other export leave it in place.
+//
+// The bridge is the downstream shape, unchanged: `in_alloc` makes a fresh
+// `ffi.alloc` Region per call, `resolve` rebuilds the output Bytes, and
+// `out_ptr` hands the output out by address. The driver,
+// region_export_lease.host.mjs, runs the round trip 10,000 times through the
+// raw exports without one release and asserts the memory settles.
+import ffi
+
+var g_in: Region = ffi.region(bytes.new())
+
+var g_out: Bytes = bytes.new()
+
+@export(wasm, "in_alloc", returns: address)
+effect fn in_alloc(len: Float) -> Region = {
+  g_in = ffi.alloc(int.from_saturating(len))!
+  g_in
+}
+
+@export(wasm, "resolve")
+effect fn resolve() -> Float = {
+  let b = ffi.to_bytes(g_in)!
+  g_out = bytes.from_string("echo:${bytes.to_string_lossy(b)}")
+  float.from(bytes.len(g_out))
+}
+
+@export(wasm, "out_ptr", returns: address)
+fn out_ptr() -> Region = ffi.region(g_out)
+
+effect fn main() -> Unit = println("ready")
