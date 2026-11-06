@@ -10,9 +10,9 @@
 //! parameter, a return value, a record field (by field name), a top-level
 //! `let`. A fn value put anywhere else (a list, an option or variant
 //! payload, a tuple, an argument of a call whose callee is not known) is
-//! *escaped* into the pool of its arity, and a fn value read from such a
+//! *escaped* into the pool of its fn type, and a fn value read from such a
 //! position (a lambda or `for` parameter, a pattern binding, an element)
-//! carries the pool of its arity. So nothing a program can call is dropped.
+//! carries every pool its type may share. So nothing a program can call is dropped.
 
 use std::collections::{BTreeSet, HashMap};
 use almide_ir::*;
@@ -240,7 +240,7 @@ impl Scan<'_, '_> {
     }
 
     /// A fn value leaves every tracked position: callers of untracked values
-    /// of its arity are charged with it.
+    /// of a type it may share are charged with it.
     pub fn escape(&mut self, v: Option<NodeId>, ty: &Ty) {
         // A value whose type cannot hold a fn carries none (a user call's
         // result node exists whatever it returns): pooling it at the
