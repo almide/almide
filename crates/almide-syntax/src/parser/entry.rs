@@ -57,7 +57,13 @@ impl Parser {
 
     pub fn parse(&mut self) -> Result<Program, String> {
         // #1311 front-end phase accounting (no-op unless `--timings`).
-        let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Parse);
+        // The migration parser (#4531) is billed by its caller, not as parse
+        // time: the compile-time ratchet's unit is this phase's speed.
+        let phase = if self.legacy_grouping {
+            None
+        } else {
+            almide_base::profile::phase_scope(almide_base::profile::Phase::Parse)
+        };
         self.report_invalid_escapes();
         self.report_hidden_chars();
         let mut program = Program {
@@ -228,8 +234,13 @@ impl Parser {
         // node — fmt's conservation verifier counts LEXER tokens, so an
         // unclaimed comment still makes fmt refuse rather than vanish.
         program.expr_comments = std::mem::take(&mut self.expr_comments);
+        // The second, pre-16 parse is a CHECK over the file (E120), billed as
+        // one: counting it as parse time would halve the parse speed the
+        // compile-time ratchet divides by on every file with a `??`.
+        drop(phase);
         if let Some(tokens) = regroup_tokens.filter(|_| self.errors.is_empty()) {
             if super::regroup::predates_regrouping(program.dialect.map(|d| d.epoch)) {
+                let _check = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
                 program.regrouped =
                     super::regroup::regrouped_sites(&program, tokens);
             }
