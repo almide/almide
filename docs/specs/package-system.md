@@ -350,7 +350,8 @@ everything: a grant always names its owner, in a file reviewed with the rest
 of the change.
 
 **`almide add`** resolves the spec, checks the owner, probes that the
-repository exists (`git ls-remote`, prompts off), fetches it, and only then
+repository exists and has the requested tag (`git ls-remote`, prompts off;
+`--dry-run` stops here), fetches it, and only then
 writes `almide.toml` and `almide.lock`. Any refusal or failure exits 1 and
 leaves both files byte-identical:
 
@@ -409,7 +410,10 @@ each URL piece encoded injectively, so a package named `svg` fetched from
 `github.com/evil/svg` can never answer for `github.com/almide/svg`. The
 previous layout hashed the URL into 64 bits (FNV-1a), which is not collision
 resistant. Directories of older layouts are never read; `almide clean`
-removes them.
+removes them. Each entry is filled under a lock file beside it
+(`.<entry>.lock`), so concurrent `almide` processes and threads fetching one
+dependency run one clone and the others reuse it; `almide update` removes a
+stale entry under the same lock.
 
 Trust is intent, so it lives in `almide.toml`; the lock records facts and
 carries no trust bit.
@@ -535,8 +539,16 @@ Test: `tests/manifest_duplicate_key_test.rs`, `tests/lock_roundtrip_test.rs`,
 1. Parse almide.toml → direct dependencies
 2. For each dep:
    a. If almide.lock has an entry for this (git, ref) → use its exact commit
-   b. Else fetch tag/branch
-   c. With `subdir`, the package is that directory of the checkout (§6.1)
+      (no network)
+   b. Else a tag → fetch it, or reuse its cached checkout (tags never move)
+   c. Else a branch, or no ref (the remote's default branch) → ask the remote
+      for its current head (`git ls-remote`) and fetch that commit; the cache
+      is not trusted for a ref that moves. A remote that cannot be reached
+      falls back to the checkout the ref last resolved to, with a warning
+      naming its commit, and that commit is not written to the lock
+   d. A ref the remote does not have is an error naming the dependency, the
+      ref, the chain from the root that requires it and the newest tags
+   e. With `subdir`, the package is that directory of the checkout (§6.1)
 3. Parse dep's almide.toml → transitive dependencies
 4. Recurse (depth-first, leaves first)
 5. Dedup by PkgId(name, major):

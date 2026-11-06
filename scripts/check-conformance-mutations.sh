@@ -5,16 +5,40 @@
 # means the corpus is not actually load-bearing for that emit path —
 # "48 programs pass" only counts as evidence if 48 programs can FAIL.
 #
-# The mutants (proofs/conformance-mutations/):
-#   m1  swap Ok/Err match-arm patterns in native codegen (wrong arm taken)
-#   m2  drop the Err turbofish (reintroduces almide#1428 — invalid Rust)
+# The mutants (proofs/conformance-mutations/). Every one sits on the path
+# the corpus runner actually takes: all 48 programs (and the trace fixture)
+# render natively through the v1 trust-spine (ALMIDE_VERIFIED_DEBUG=1 says
+# `native: v1 trust-spine render` for each), so a mutant in the v0 walker
+# (crates/almide-codegen) is dead code here — m1, m2 and m4 lived there and
+# survived until they were moved onto their v1 successors:
+#   m1  swap which Ok/Err match arm runs: the v1 carrier's tag read
+#       (`ResTag`, render_native_op_families.rs) renders `is_ok()` for
+#       `is_err()`. Successor of the v0 walker's `pattern_ok`/`pattern_err`
+#       swap. Every corpus match takes the wrong arm.
+#   m2  render the Err carrier's string payload BORROWED (`&str` where the
+#       carrier holds an owned AlmideString) in both v1 `ResMakeErrStr` arms
+#       (the moving one in render_native_loop.rs, the copying one in
+#       render_native_op_families.rs): invalid Rust, E0308 — the class of
+#       almide#1428, an Err construction whose rendered type disagrees with
+#       its carrier. The v0 form dropped the Err turbofish; v1 spells no
+#       turbofish, and dropping its `: Result<i64, AlmideString>` annotation
+#       instead is an EQUIVALENT mutant (rustc infers the type from the
+#       carrier's i64-typed readers — measured: 48/48 still pass), so it
+#       cannot be the seeded bug.
 #   m3  flip the v1 native ok-lift's carrier to Err (`ResMakeOk`, the
 #       lifted effect fn's ok path — the live successor of the almide#1429
 #       return override, which no program reaches since the lowering builds
 #       the carrier in MIR, #3737). The corpus prints a constant per arm, so a
 #       mutant must change WHICH arm runs to be observable: a lost ok VALUE
-#       (`Ok(0)`) survives by construction.
-#   m4  reverse statement render order (trace order flips)
+#       (`Ok(0)`) survives by construction — and so does a lost Err payload.
+#   m4  reverse a function body's statement order — in the v1 lowering
+#       (`lower_body_into`, lower/mod_p3.rs), the order the render emits.
+#       Successor of the v0 walker's `render_fn_body_str` reversal. A body
+#       whose reversed statements read a binding before it exists walls and
+#       takes the standard codegen (correct output); the bodies that still
+#       lower print their trace out of order, which the corpus sees. Reversing
+#       the RENDER's op walk instead walls every program (48/48 fall back), so
+#       it would survive for the wrong reason.
 #   m5  emit every wasm print twice in the STRUCTURAL emitter (wasm-only
 #       divergence — needs a wasm runtime present, hence the hard
 #       precondition below). It lives in crates/almide-wasm because that is

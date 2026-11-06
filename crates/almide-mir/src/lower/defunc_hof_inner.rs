@@ -160,6 +160,7 @@ impl LowerCtx {
             }
             _ => xs,
         };
+        let mut range_unsigned = false;
         let (src_h, range_start_v, mut len_v) = if let IrExprKind::Range { start, end, inclusive } =
             &xs.kind
         {
@@ -168,15 +169,21 @@ impl LowerCtx {
             }
             let start_v = self.lower_scalar_value(start)?;
             let end_v = self.lower_scalar_value(end)?;
-            let mut len = self.fresh_value();
-            self.ops.push(Op::IntBinOp { dst: len, op: IntOp::Sub, a: end_v, b: start_v });
-            if *inclusive {
-                let one = self.fresh_value();
-                self.ops.push(Op::ConstInt { dst: one, value: 1 });
-                let len_inc = self.fresh_value();
-                self.ops.push(Op::IntBinOp { dst: len_inc, op: IntOp::Add, a: len, b: one });
-                len = len_inc;
-            }
+            // #4538: `end - start` wrapped negative for a span past Int max
+            // (`i64::MIN..<i64::MAX`), and the loop below ran zero times —
+            // a fold answered its init where native walks the range. A HOF
+            // that builds a result list sizes it from the count, so there the
+            // count saturates (a list that long aborts out of memory before
+            // the loop runs). A fold builds nothing and walks the range: its
+            // count is the exact element count as an UNSIGNED 64-bit value,
+            // which the loop compares unsigned, so a fold the optimizer
+            // collapses answers what stepping every element answers.
+            let len = if func == "fold" {
+                range_unsigned = true;
+                self.int_range_count_unsigned(start_v, end_v, *inclusive)
+            } else {
+                self.int_range_count(start_v, end_v, *inclusive).2
+            };
             (None, Some(start_v), len)
         } else {
             let list_v = match self.lower_call_args(std::slice::from_ref(xs)).ok()?.into_iter().next()? {
@@ -214,7 +221,8 @@ impl LowerCtx {
 
         self.ops.push(Op::LoopStart);
         let cond_v = self.fresh_value();
-        self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: len_v });
+        let cmp = if range_unsigned { IntOp::LtU } else { IntOp::Lt };
+        self.ops.push(Op::IntBinOp { dst: cond_v, op: cmp, a: i_v, b: len_v });
         self.ops.push(Op::LoopBreakUnless { cond: cond_v });
 
         // The per-iteration byte offset `i*8` (the RESULT list's slot addressing

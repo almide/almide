@@ -127,6 +127,15 @@ always comes from the Region.
   pair is the view's data address and the Region's own length, never the
   address of the Region's record (#4354). With `--host js` the glue wraps
   the export as `f(…) → [ptr, len]` and adds `regionRelease(ptr)`.
+- *The address alone, wasm.* `@export(wasm, "in_alloc", returns: address)`
+  makes the Region cross as its data address only, one i32, for a host that
+  already knows the length it asked for and reads the export as one number.
+  A slice's own address, 0 for an empty Region and a trap on `err` hold as
+  above (#4519, C-453). The host need not release it: the export holds one
+  share, a lease, and its next call gives the previous result's share back,
+  so an address is valid until the next call of the export that returned it
+  (or until the host passes it to `__region_release`), and a host that never
+  releases runs in bounded memory (C-454).
 - *Reading it back, wasm.* An `@export(wasm)` `effect fn` returning `Int`,
   `Float`, `Bool` or `Unit` answers the value itself (an i64, an f64, an i32,
   or nothing), so `inbox_sum` below hands any host its total directly. An

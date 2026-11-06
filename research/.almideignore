@@ -1,0 +1,1 @@
+# Marker: `almide test` sweeps never enter this directory (#4530). Its .almd files are experiments and benchmark corpora, not a suite; name a path to run one.

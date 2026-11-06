@@ -56,6 +56,7 @@ pub fn include_native_callback_modules(
         loaded_names: &mut loaded_names,
         loading: &mut loading,
         sources: &mut resolved.sources,
+        root_requested_by: None,
     };
     // The root module, unless the entry already imported it (under any alias).
     if src_dir.join("mod.almd").exists() && !ctx.loaded.iter().any(|m| m.3) {
@@ -74,6 +75,7 @@ pub fn include_native_callback_modules(
             load_self_module(&canonical, &mod_path, &src_dir, &mut ctx, false)?;
         }
     }
+    load_requested_root(Some(&root), &mut ctx)?;
     Ok(versioned_self_names(resolved, &src_dir, &prefix))
 }
 

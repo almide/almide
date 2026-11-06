@@ -449,8 +449,12 @@ impl Emitter<'_> {
         let reaches = !matches!(self.work.global_reach.borrow().get(i), Some(Some(set)) if !set.contains(&g));
         // A frame-tail leaf frees a LOCAL (the frame ends); a global outlives
         // it, so moving one there emptied the global (`fn show(p) =
-        // f(arena, p)` left `arena` empty for the next reader).
-        let frame_tail = self.moves.move_in.as_ref().is_some_and(|m| m.is_frame_tail(args));
+        // f(arena, p)` left `arena` empty for the next reader). Asked of the
+        // global's own place (#4550): a tail-less body made every call in it
+        // a frame-tail site for its once-read scalar params, and each
+        // `bytes.put_f32_le(buf, o, x)` on a module-level buffer then shared
+        // the buffer into the call, whose write copied all of it.
+        let frame_tail = self.moves.move_in.as_ref().is_some_and(|m| m.is_frame_tail(args, place));
         if reaches
             || frame_tail
             || !matches!(move_in, MoveSet::Vars(v) if v.contains(&place))

@@ -527,7 +527,7 @@ impl Emitter<'_> {
             self.f.instructions().local_get(hold);
             self.lower(a, Some(fty))?;
             // RC-3: a variant payload retaining a borrowed droppable
-            // (koka_reuse1's Pair2(acc1, acc2) — params stored, then
+            // (unzip_accumulator_rotate's Pair2(acc1, acc2) — params stored, then
             // epilogue-released) co-owns.
             self.rc_share_guard(a, fty);
             self.witness_store(a, fty);

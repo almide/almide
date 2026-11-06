@@ -179,7 +179,7 @@ while IFS= read -r key; do
     remedy="reconcile in almide/als first (the judge is normative), then advance $PIN_FILE"
   fi
   case "$seen_ids" in *"$id "*) ;; *) seen_ids="$seen_ids$id ";; esac
-  if echo "$allowed" | grep -qxF "$id"; then
+  if grep -qxF "$id" <<<"$allowed"; then
     # The allowance covers the judge being ahead and nothing else: text HERE
     # that the judge lacks is never in flight, whatever the list says.
     if extends "$j" "$o"; then

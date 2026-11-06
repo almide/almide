@@ -213,12 +213,13 @@ fn native_sigs_with_linked(
     record_layouts: &crate::lower::RecordLayouts,
     variant_layouts: &crate::lower::VariantLayouts,
 ) -> Result<crate::render_native::NativeSigs, LowerError> {
-    let mut sigs = build_native_sig_table(ir, functions, record_layouts, variant_layouts)?;
+    let mut sigs = build_native_sig_table(ir, functions, record_layouts, variant_layouts, &|_| true)?;
+    // A linked source's sibling the program never calls is not read: its
+    // signature would put types no rendered fn carries in the table (#4514).
+    let rendered = |name: &str| functions.iter().any(|f| f.name == name);
     for l in linked {
-        for (name, sig) in build_native_sig_table(&l.ir, &[], &l.record_layouts, &l.variant_layouts)? {
-            if functions.iter().any(|f| f.name == name) {
-                sigs.entry(name).or_insert(sig);
-            }
+        for (name, sig) in build_native_sig_table(&l.ir, &[], &l.record_layouts, &l.variant_layouts, &rendered)? {
+            sigs.entry(name).or_insert(sig);
         }
     }
     Ok(sigs)
@@ -266,6 +267,9 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     crate::charge_probe::reset_budget_used();
     crate::lambda_sigs::clear();
     let _strict = crate::lower::StrictValuesGuard::set(true);
+    // The native render loop-converts a self tail call over any heap carry
+    // (#4006 class A, #3550): `lower::owned_tco_slots`.
+    let _owned_tco = crate::lower::OwnedTcoSlotsGuard::set(true);
     let ir = {
         let _slots = SlotHeldGlobalsGuard::set(true);
         source_to_ir_with(source, &[])?

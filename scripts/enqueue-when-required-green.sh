@@ -69,7 +69,7 @@ enqueue() {
   local id out; id="$(gh pr view "$PR" --repo "$REPO" --json id --jq .id)"
   if out="$(gh api graphql -f query="mutation{enqueuePullRequest(input:{pullRequestId:\"$id\"}){clientMutationId}}" 2>&1)"; then
     echo "enqueued #$PR — required set green ($(echo "$required" | wc -l | tr -d ' ') contexts); the mutation sweep judges develop after landing"
-  elif echo "$out" | grep -qi "already in the queue"; then
+  elif grep -qi "already in the queue" <<<"$out"; then
     echo "#$PR is already in the queue (an armed auto-merge entered it) — nothing to do"
   else
     echo "::error::enqueue of #$PR failed: $out"; return 1
