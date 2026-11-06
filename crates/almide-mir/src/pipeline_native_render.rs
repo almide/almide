@@ -386,6 +386,10 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
         // Rung 1 walls every top-let above, so there are no mutable-global slots.
         mutable_global_count: 0,
     };
+    crate::native_closure_decl::set(
+        ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())),
+        linked_names.clone(),
+    );
     let rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names)?;
     let mut certs = native_ownership_certs(&program.functions, &crate::native_hof::sites());
     // Row 4: each function's bounds witness, recorded as the render wrote its
