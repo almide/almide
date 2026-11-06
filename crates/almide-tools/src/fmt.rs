@@ -809,6 +809,13 @@ pub fn verify_format(original_src: &str, program: &Program, formatted: &str) -> 
     Ok(())
 }
 
+/// Both of `verify_format`'s type-spelling normalizations, for other tools
+/// that compare a program with its reprint (`regroup`, #4531).
+pub(crate) fn normalize_type_sugar(v: &mut serde_json::Value) {
+    normalize_option_sugar(v);
+    normalize_marker_sugar(v);
+}
+
 /// Rewrite every type node spelled `Option[T]` to its `?`-sugar identity so
 /// the AST comparison treats the two spellings as one type (#1511). A node
 /// qualifies only with name "Option" AND exactly one type argument — the

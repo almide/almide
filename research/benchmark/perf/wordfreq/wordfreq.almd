@@ -47,7 +47,7 @@ effect fn main() -> Unit = {
   var counts: Map[String, Int] = [:]
   for i in list.range(0, n) {
     let w = vocab[draw(i)]
-    counts[w] = map.get(counts, w) ?? 0 + 1
+    counts[w] = (map.get(counts, w) ?? 0) + 1
   }
   let top = map.to_list(counts) |> list.sort_by(((w, c)) => (0 - c, w)) |> list.take(10)
   for (w, c) in top {

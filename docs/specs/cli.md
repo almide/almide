@@ -1309,6 +1309,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_KEEP_SCRATCH` | tool | keep the `almide test` scratch build directory instead of deleting it |
 | `ALMIDE_LSP_TRACE` | debug | print every LSP request and response the language server handles |
 | `ALMIDE_MANIFEST_TREE_CHECK=value` | ci | the parity-manifest generators' stale-tree refusal (#2405, scripts/lib/oracle-header.sh): `strict` (default) refuses an ORACLE that is not `<Cargo.toml version> (dev…)`, is stamped with a commit other than HEAD, or is unstamped and older than the sources; a worktree behind its upstream; and an untracked spec/ fixture. `gate` keeps only the untracked-fixture check (scripts/check-parity-goldens.sh vouches for CI's artifact). `off` is the deliberate override |
+| `ALMIDE_MIGRATE_PRECEDENCE_WRITE` | harness | rewrite every tracked `.almd` whose `??` reads differently since dialect 16 with `almide fix`'s migration instead of failing (#4531, tests/precedence_regroup_corpus_test.rs) |
 | `ALMIDE_MONO_DEBUG` | debug | print the monomorphisation discovery and instantiation decisions |
 | `ALMIDE_MP_PROBE` | debug | print the mut-param analysis decisions (IR) |
 | `ALMIDE_MUTATION_BASE=value` | ci | the base ref the mutation gate diffs against |

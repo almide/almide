@@ -542,6 +542,7 @@ fn empty_program() -> crate::ast::Program {
         failed_fn_names: std::collections::HashSet::new(),
         parse_recovered: false,
         expr_comments: Default::default(),
+        regrouped: Vec::new(),
     }
 }
 

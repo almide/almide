@@ -246,7 +246,7 @@ _bind_name: _ident | UNDERSCORE
 // Expressions
 //
 // A leading `_nl` marks an operator that may open a continuation line
-// (Parser::INFIX_TOKENS, plus the postfix `??`, #3155); `...` deliberately
+// (Parser::INFIX_TOKENS, `??` among them, #3155); `...` deliberately
 // may not — a line-initial `...` is a spread.
 // ═══════════════════════════════════════════════════════════════════
 
@@ -259,9 +259,16 @@ _bind_name: _ident | UNDERSCORE
 
 // Comparison is NON-ASSOCIATIVE: `a < b < c` is a parse error, so at most one
 // comparison operator may appear here.
-?cmp_level: range_level _nl cmp_op _nl range_level
-          | range_level
+?cmp_level: qq_level _nl cmp_op _nl qq_level
+          | qq_level
 !cmp_op: EQEQ | BANGEQ | LTEQ | GTEQ | LT | GT
+
+// `??` is a right-associative infix level between the comparisons and the
+// ranges / arithmetic / pipe (dialect 16, #4531): `x ?? 0 - 1` is
+// `x ?? (0 - 1)`. Before dialect 16 it was a postfix with a unary fallback;
+// both readings accept the same token strings, only the tree differs.
+?qq_level: range_level _nl QQ _nl qq_level          -> unwrap_or
+         | range_level
 
 // Ranges are NON-ASSOCIATIVE too — `0..<1..<2` is rejected (#899).
 ?range_level: bin_level _nl DOTDOTLT _nl bin_level   -> range_exclusive
@@ -292,7 +299,6 @@ postfix_op: _nl DOT _tname named_record          -> qualified_record
           | "[" expr "]"                           -> index
           | "(" call_args ")"                      -> call
           | BANG                                   -> unwrap
-          | _nl QQ _nl unary                       -> unwrap_or
           | QDOT name_tok                          -> optional_chain
           | QUESTION                               -> to_option
 

@@ -13,7 +13,7 @@ effect fn raised_set(s: Set[Int]) -> Set[Int] = set.map(s, (v) => raise(v)!)!
 fn none_eq(o: String?) -> Bool = o == none
 
 // `none ?? fallback`: the carrier is NULL, the fresh fallback joins.
-fn or_fresh(s: String) -> String = none ?? s + "!"
+fn or_fresh(s: String) -> String = (none ?? s) + "!"
 
 // A Bytes index reads a scalar byte; out of bounds aborts holding `b`.
 fn byte_of(i: Int) -> Int = {
