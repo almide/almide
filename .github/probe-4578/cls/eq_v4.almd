@@ -55,12 +55,8 @@ fn result_line(xs: List[Result[Int, String]], x: Result[Int, String]) -> String 
 fn bytes_line(xs: List[Bytes], x: Bytes) -> String =
   "bytes: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${list.contains(xs, x)} index_of=${list.index_of(xs, x)}"
 
-fn unit_line(xs: List[Unit]) -> String = {
-  let u = ()
-  let has = list.contains(xs, u)
-  let at = list.index_of(xs, u)
-  "unit: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${has} index_of=${at}"
-}
+// unique and dedup only: a Unit call argument is outside the MIR leg's brick.
+fn unit_line(xs: List[Unit]) -> String = "unit: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))}"
 
 fn unique_by_line(xs: List[String]) -> String = "unique_by bytes key=${list.unique_by(xs, (s) => bytes.from_list([string.len(s)]))}"
 
