@@ -44,6 +44,14 @@
 //!     matrix's wrappers stop paying a call and an RC inc/dec around it
 //!     per access — decided from each declaration's own body and the node
 //!     cap, not from a list of names.
+//!   - a MODULE call with scalar arguments and a scalar result is admitted in
+//!     a body like a prim op (it stays a call; only its place moves), and a
+//!     callee whose body names nothing of its own var space — no `Named`
+//!     call, no `let` — inlines ACROSS spaces at a `module.fn(..)` site
+//!     (#4550): such a body means the same in every space. This is what a
+//!     generic conversion's specialization is (`float.from[S: Numeric]` is
+//!     `x.__to_float()`, which mono makes `int.__to_float(x)` for an Int),
+//!     so the wrapper stops costing a call at every conversion site.
 //!
 //! ARGUMENTS keep call semantics: each is evaluated once, in order, into a
 //! fresh `let` — except where the shared speculation rule
@@ -57,6 +65,7 @@
 use std::collections::{HashMap, HashSet};
 
 use almide_ir::{CallTarget, IrExpr, IrExprKind, IrFunction, IrProgram, IrStmt, IrStmtKind, Mutability, VarId, VarTable};
+use almide_ir::visit_mut::IrMutVisitor as _;
 use almide_types::types::Ty;
 
 /// Inline a callee this small (in weighted body nodes) at every site: its
@@ -148,7 +157,7 @@ fn call_size(e: &IrExpr, target: &CallTarget, args: &[IrExpr], fns: &HashSet<Str
         CallTarget::Module { module, func, .. } if module.as_str() == "prim" => PURE_PRIMS.contains(&func.as_str()),
         // A module call that reads a byte-buffer param (`bytes.len(b)`): the
         // call itself stays as it is, only its place moves into the caller.
-        CallTarget::Module { .. } => reads_a_view,
+        CallTarget::Module { .. } => reads_a_view || args.iter().all(|a| is_scalar(&a.ty)),
         _ => false,
     };
     if !ok || !is_scalar(&e.ty) {
@@ -227,7 +236,32 @@ fn reads_of(body: &IrExpr, v: VarId) -> usize {
 #[derive(Clone)]
 struct Callee {
     params: Vec<(VarId, Ty)>,
+    /// The params' var infos from the callee's own table (a cross-space
+    /// site binds a fresh var of the caller's table from them).
+    infos: Vec<almide_ir::VarInfo>,
     body: IrExpr,
+    /// The body names nothing of its own var space (no `Named` call, no
+    /// `let`): it may inline at a `module.fn(..)` site of any space.
+    portable: bool,
+}
+
+/// Whether a body names nothing of its own space and does not call `key`
+/// (its own `module.fn` spelling) again.
+fn is_portable(body: &IrExpr, key: &str) -> bool {
+    let mut ok = true;
+    visit(body, &mut |x| match &x.kind {
+        IrExprKind::Call { target: CallTarget::Named { .. }, .. }
+        | IrExprKind::TailCall { target: CallTarget::Named { .. }, .. } => ok = false,
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. }
+        | IrExprKind::TailCall { target: CallTarget::Module { module, func, .. }, .. }
+            if format!("{}.{}", module.as_str(), func.as_str()) == key =>
+        {
+            ok = false
+        }
+        IrExprKind::Block { stmts, .. } if !stmts.is_empty() => ok = false,
+        _ => {}
+    });
+    ok
 }
 
 /// Copy `e` with every bound var renamed to a fresh one of `vt` (`env` maps
@@ -281,7 +315,7 @@ fn instantiate(e: &IrExpr, env: &mut HashMap<VarId, IrExpr>, vt: &mut VarTable) 
 fn inline_parts(c: &Callee, args: &[IrExpr], span: Option<almide_ir::Span>, vt: &mut VarTable) -> (Vec<IrStmt>, IrExpr) {
     let mut env = HashMap::new();
     let mut stmts = Vec::new();
-    for ((pv, pty), a) in c.params.iter().zip(args) {
+    for (k, ((pv, pty), a)) in c.params.iter().zip(args).enumerate() {
         let trivial = matches!(
             a.kind,
             IrExprKind::Var { .. } | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitBool { .. }
@@ -289,7 +323,7 @@ fn inline_parts(c: &Callee, args: &[IrExpr], span: Option<almide_ir::Span>, vt: 
         if trivial || (almide_ir::speculation::is_speculation_safe(a) && reads_of(&c.body, *pv) <= 1) {
             env.insert(*pv, a.clone());
         } else {
-            let info = vt.get(*pv).clone();
+            let info = c.infos[k].clone();
             let fresh = vt.alloc(info.name, pty.clone(), Mutability::Let, info.span);
             env.insert(*pv, IrExpr { kind: IrExprKind::Var { id: fresh }, ty: pty.clone(), span: None, def_id: None });
             stmts.push(IrStmt {
@@ -324,6 +358,8 @@ fn inline_site(c: &Callee, args: &[IrExpr], site: &IrExpr, vt: &mut VarTable) ->
 
 struct Rewriter<'a> {
     callees: &'a HashMap<String, Callee>,
+    /// Portable callees of every module, keyed `module.fn` (cross-space sites).
+    cross: &'a HashMap<String, Callee>,
     this: &'a str,
     vt: &'a mut VarTable,
     changed: bool,
@@ -332,28 +368,43 @@ struct Rewriter<'a> {
 impl Rewriter<'_> {
     /// The callee a call inlines to here, when this site admits it.
     fn admit(&self, e: &IrExpr) -> Option<(Callee, Vec<IrExpr>)> {
-        let (IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
-        | IrExprKind::TailCall { target: CallTarget::Named { name }, args }) = &e.kind
-        else {
-            return None;
+        let (c, args) = match &e.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+            | IrExprKind::TailCall { target: CallTarget::Named { name }, args } => {
+                if name.as_str() == self.this {
+                    return None;
+                }
+                (self.callees.get(name.as_str())?, args)
+            }
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            | IrExprKind::TailCall { target: CallTarget::Module { module, func, .. }, args } => {
+                let c = self.cross.get(&format!("{}.{}", module.as_str(), func.as_str()))?;
+                // Another file's spans would name lines of that file in this
+                // frame (a trap's location, the debug lines): the body takes
+                // the site's span instead.
+                let mut c = c.clone();
+                Respan(e.span).visit_expr_mut(&mut c.body);
+                return self.args_fit(&c, args).then(|| (c, args.clone()));
+            }
+            _ => return None,
         };
-        if name.as_str() == self.this {
+        if !self.args_fit(c, args) {
             return None;
         }
-        let c = self.callees.get(name.as_str())?;
+        Some((c.clone(), args.clone()))
+    }
+
+    /// The site's arguments match the callee's params (see `admit`).
+    fn args_fit(&self, c: &Callee, args: &[IrExpr]) -> bool {
         if args.len() != c.params.len() {
-            return None;
+            return false;
         }
         // A byte-buffer param takes a bare variable only: it is substituted,
         // so the inlined reads see the caller's block (inline_parts binds
         // nothing for a variable).
-        let args_fit = c.params.iter().zip(args).all(|((_, pty), a)| {
+        c.params.iter().zip(args).all(|((_, pty), a)| {
             if is_byte_view(pty) { is_byte_view_var(a) } else { is_scalar(&a.ty) }
-        });
-        if !args_fit {
-            return None;
-        }
-        Some((c.clone(), args.clone()))
+        })
     }
 
     /// A `let x = f(..)` statement inlines into the enclosing block's own
@@ -391,6 +442,16 @@ impl Rewriter<'_> {
     }
 }
 
+/// Sets every node's span to one span (a cross-space body at its site).
+struct Respan(Option<almide_ir::Span>);
+
+impl almide_ir::visit_mut::IrMutVisitor for Respan {
+    fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+        e.span = self.0;
+        almide_ir::visit_mut::walk_expr_mut(self, e);
+    }
+}
+
 impl almide_ir::visit_mut::IrMutVisitor for Rewriter<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         self.expr(e);
@@ -398,7 +459,7 @@ impl almide_ir::visit_mut::IrMutVisitor for Rewriter<'_> {
 }
 
 /// The admitted callees of one var space.
-fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>) -> HashMap<String, Callee> {
+fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>, vt: &VarTable, module: Option<&str>) -> HashMap<String, Callee> {
     let mut count: HashMap<&str, usize> = HashMap::new();
     for f in fns {
         *count.entry(f.name.as_str()).or_default() += 1;
@@ -427,7 +488,9 @@ fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>) -> HashMap<String,
             continue;
         }
         let params = f.params.iter().map(|p| (p.var, p.ty.clone())).collect();
-        out.insert(name.to_string(), Callee { params, body: f.body.clone() });
+        let infos = f.params.iter().map(|p| vt.get(p.var).clone()).collect();
+        let portable = module.is_some_and(|m| is_portable(&f.body, &format!("{m}.{name}")));
+        out.insert(name.to_string(), Callee { params, infos, body: f.body.clone(), portable });
     }
     out
 }
@@ -449,11 +512,21 @@ pub(crate) fn inline_small_scalar_calls(ir: &IrProgram) -> Option<IrProgram> {
     let mut any = false;
     for _ in 0..ROUNDS {
         let mut changed = false;
-        let callees = callees_of(&out.functions, &HashSet::new());
-        changed |= rewrite_space(&mut out.functions, &callees, &mut out.var_table);
+        // Every module's portable callees, by the `module.fn` a site spells.
+        let mut cross: HashMap<String, Callee> = HashMap::new();
+        for m in &out.modules {
+            let mname = m.name.as_str();
+            for (name, c) in callees_of(&m.functions, &entry_names, &m.var_table, Some(mname)) {
+                if c.portable {
+                    cross.insert(format!("{mname}.{name}"), c);
+                }
+            }
+        }
+        let callees = callees_of(&out.functions, &HashSet::new(), &out.var_table, None);
+        changed |= rewrite_space(&mut out.functions, &callees, &cross, &mut out.var_table);
         for m in out.modules.iter_mut() {
-            let callees = callees_of(&m.functions, &entry_names);
-            changed |= rewrite_space(&mut m.functions, &callees, &mut m.var_table);
+            let callees = callees_of(&m.functions, &entry_names, &m.var_table, Some(m.name.as_str()));
+            changed |= rewrite_space(&mut m.functions, &callees, &cross, &mut m.var_table);
         }
         any |= changed;
         if !changed {
@@ -463,8 +536,8 @@ pub(crate) fn inline_small_scalar_calls(ir: &IrProgram) -> Option<IrProgram> {
     any.then_some(out)
 }
 
-fn rewrite_space(fns: &mut [IrFunction], callees: &HashMap<String, Callee>, vt: &mut VarTable) -> bool {
-    if callees.is_empty() {
+fn rewrite_space(fns: &mut [IrFunction], callees: &HashMap<String, Callee>, cross: &HashMap<String, Callee>, vt: &mut VarTable) -> bool {
+    if callees.is_empty() && cross.is_empty() {
         return false;
     }
     let mut changed = false;
@@ -475,7 +548,7 @@ fn rewrite_space(fns: &mut [IrFunction], callees: &HashMap<String, Callee>, vt: 
             continue;
         }
         let this = f.name.as_str().to_string();
-        let mut r = Rewriter { callees, this: &this, vt, changed: false };
+        let mut r = Rewriter { callees, cross, this: &this, vt, changed: false };
         almide_ir::visit_mut::IrMutVisitor::visit_expr_mut(&mut r, &mut f.body);
         changed |= r.changed;
     }
