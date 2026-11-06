@@ -698,10 +698,10 @@ PYRX
 # #2960 copy-in / write-back form natively — and a downstream editor's frame
 # went from 32 ms to 143 ms. A ceiling per leg: the defect is a whole buffer
 # per write (an 80 KB copy for a 4-byte store), hundreds of times over either
-# ceiling. What remains natively — the take and put-back of the buffer around
-# each call, one small allocation, against a store LLVM keeps in registers for
-# the local row — is recorded in the baseline, not hidden in the ceiling.
-FRAMEBUF_CEILING_NATIVE=40
+# ceiling. What remains natively — moving the buffer's Rc out of its cell and
+# back around each call, against a store LLVM keeps in registers for the local
+# row — is recorded in the baseline, not hidden in the ceiling.
+FRAMEBUF_CEILING_NATIVE=10
 FRAMEBUF_CEILING_WASM=3
 fb_out=$(mktemp -t perf-ratio-framebuf.XXXXXX.json)
 trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
