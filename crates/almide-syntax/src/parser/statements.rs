@@ -189,19 +189,8 @@ impl Parser {
         // `guard let name = scrutinee else { … }` — Swift-style: name binds the unwrapped
         // value for the rest of the block (the frontend desugars the block tail into a
         // Some/Ok match). The scrutinee is followed by `else`, so a full expr is fine.
-        if self.check(TokenType::Let) {
-            self.expect(TokenType::Let)?;
-            self.skip_newlines();
-            let name = self.expect_ident()?;
-            self.skip_newlines();
-            self.expect(TokenType::Eq)?;
-            self.skip_newlines();
-            let scrutinee = self.parse_expr()?;
-            self.skip_newlines();
-            self.expect(TokenType::Else)?;
-            self.skip_newlines();
-            let else_ = self.parse_expr()?;
-            return Ok(Stmt::GuardLet { name, scrutinee, else_, span: Some(span) });
+        if self.check(TokenType::Let) || self.check(TokenType::Var) {
+            return self.parse_guard_let_rest(span);
         }
         let cond = self.parse_expr()?;
         self.expect(TokenType::Else)?;

@@ -392,7 +392,25 @@ pub enum Stmt {
     /// inside the scrutinee's Option/Result and stays in scope for the REST of the block;
     /// the else branch must diverge. The frontend desugars the block tail into the Some/Ok
     /// arm of a match on the scrutinee.
-    GuardLet { name: Sym, scrutinee: Expr, else_: Expr, #[serde(skip)] span: Option<Span> },
+    ///
+    /// #4543 adds three spellings, all desugared into the same match:
+    /// - `mutable`: `guard var name = …` — the binding is a `var` for the rest
+    ///   of the block.
+    /// - `shorthand`: `guard let name else …` — the scrutinee is the binding
+    ///   `name` itself (the parser fills `scrutinee` with that identifier).
+    /// - `fail`: `else err(e) => …` / `else none => …` — the failure arm's
+    ///   pattern. `err(e)` binds the Result's error in `else_`; it is only ever
+    ///   `Pattern::None` or `Pattern::Err` over an `Ident` / `Wildcard` (the
+    ///   parser refuses every other shape). `None` is the plain `else expr`.
+    GuardLet {
+        name: Sym,
+        scrutinee: Expr,
+        else_: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")] mutable: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")] shorthand: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")] fail: Option<Pattern>,
+        #[serde(skip)] span: Option<Span>,
+    },
     Expr { expr: Expr, #[serde(skip)] span: Option<Span> },
     Comment { text: String },
     /// Placeholder for a parse error — allows partial AST construction.
