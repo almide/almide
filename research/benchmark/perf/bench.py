@@ -258,7 +258,7 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "framebuf-param": "p:6000",
     # mutmap (#4580): rounds per row, unequal on purpose — the relation is per
     # round. A regressed helper copies the 4,000-entry map on every write
-    # (tens of ms a round on wasm), so its row runs a fifth of the rounds.
+    # (tens of ms a round on wasm), so its row runs a quarter of the rounds.
     "mutmap-param": "p:1500",
     "mutmap-local": "l:6000",
     "regexcycle-8": "8:400000",
