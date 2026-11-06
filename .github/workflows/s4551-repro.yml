@@ -35,6 +35,7 @@ jobs:
           mk nofwd ""; printf 'fn f() -> Int = 42\n' > nofwd/src/sub.almd
       - name: Run each command under a 120 s deadline (124 = timed out)
         run: |
+          set +e
           for d in bare workaround nofwd; do
             for cmd in "check ci/use_test.almd" "test ci/use_test.almd" "run ci/main.almd" "run ci/main.almd --target wasm"; do
               (cd $d && timeout 120 $ALMIDE $cmd > out.txt 2>&1; echo "RESULT ${{ matrix.version }} $d [$cmd] exit=$?"; tail -3 out.txt | sed 's/^/    /')
@@ -55,7 +56,7 @@ jobs:
           ref: ${{ matrix.ref }}
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          toolchain: stable
+          toolchain: "1.97.0"
       - name: Build the compiler
         run: cargo build --release --bin almide
       - name: Regression test (each run has a 300 s deadline)
