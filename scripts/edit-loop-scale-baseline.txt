@@ -220,8 +220,23 @@ share_lex 0.0942
 #   the median of its five Perf ratchet jobs since #4458:
 #     0.1082 (46815d872 queue) 0.1088 (8d6c897ce) 0.1133 (4a79e3fb4 queue)
 #     0.1134 (1904de25b, #4537) 0.1140 (2291ea939)   median 0.1133
-#   Every other class keeps gating on the shared 0.0942 above.
 share_lex | INTEL(R) XEON(R) PLATINUM 8573C | 0.1133 | 5
+# share_lex per class on the other measured classes (2026-11-06, owner ruling):
+#   the shared 0.0942 sat under every class's median, so the 7763 read past half
+#   its band (0.1088 on #4537's head) with up to 0.1103 against a 0.1130
+#   ceiling. Each class is now centred on its own median, from the same 99 Perf
+#   ratchet jobs as `ratio` above, +/-20% around it. Floors and ceilings both
+#   move up 3-8% per class: a slower checker is caught sooner, and a lex
+#   slowdown must be that much larger before it fails.
+#     EPYC 7763 (47)  0.0975-0.1103 (-4.5% / +8.0%)  median 0.1021  band 0.0817-0.1225
+#     EPYC 9V74 (26)  0.0934-0.1069 (-4.1% / +9.8%)  median 0.0973  band 0.0779-0.1168
+#     EPYC 9V45 (11)  0.0980-0.1045 (-3.6% / +2.8%)  median 0.1017  band 0.0814-0.1220
+#     Xeon 8370C (9)  0.0963-0.1024 (-2.0% / +4.2%)  median 0.0983  band 0.0786-0.1180
+#   The shared 0.0942 now gates only a class with no anchor of its own.
+share_lex | AMD EPYC 7763 64-Core Processor | 0.1021 | 47
+share_lex | AMD EPYC 9V74 80-Core Processor | 0.0973 | 26
+share_lex | AMD EPYC 9V45 96-Core Processor | 0.1017 | 11
+share_lex | Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz | 0.0983 | 9
 #     share_parse  0.1334 0.1339 0.1341 0.1347 0.1363 0.1369 0.1371 0.1378
 #                  median 0.1355, 3.2% spread (2026-08-14, M4 Pro)
 share_parse 0.1150

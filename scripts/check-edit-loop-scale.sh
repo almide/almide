@@ -71,10 +71,11 @@
 #           +/-budget around it. A CPU model with no anchor yet REPORTS its
 #           ratio and a `::warning::` and does not fail on it: an unanchored
 #           class has no value to compare with, and borrowing another class's
-#           anchor is the random verdict this replaced. `share_lex` also takes
-#           a class anchor where one class's lex/check split differs (Xeon
-#           8573C), but keeps its shared anchor for every other runner, so no
-#           runner stops gating it. The slopes and the other shares are
+#           anchor is the random verdict this replaced. `share_lex` is anchored
+#           per class too (the lex/check split differs by class: ~0.097-0.102
+#           on the AMD classes and the 8370C, ~0.113 on the Xeon 8573C), and
+#           keeps a shared anchor that gates only a class with none of its own,
+#           so no runner stops gating it. The slopes and the other shares are
 #           class-independent and gate on every runner.
 #           EDIT_LOOP_RUNNER_CLASS overrides the detected model (tests only).
 #
@@ -261,10 +262,9 @@ PHASES = ["lex", "parse", "check"]
 # Rows anchored per runner class (see `ratio` in the header). Every other row
 # has ONE anchor and gates on every runner.
 #   ratio      per class only — one value for every CPU is meaningless for it.
-#   share_lex  one shared anchor, plus a class anchor where a class's lex/check
-#              split differs from it (Xeon 8573C reads ~0.113 against ~0.100 on
-#              the AMD classes). A class without its own anchor gates on the
-#              shared one, so no runner loses this row.
+#   share_lex  a class anchor per measured class (owner ruling 2026-11-06),
+#              plus a shared anchor that gates any class without its own, so no
+#              runner loses this row.
 CLASS_ROWS = {"ratio", "share_lex"}
 CLASS_ONLY_ROWS = {"ratio"}
 # A class anchor needs this many CI runs on that class behind it.
