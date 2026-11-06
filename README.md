@@ -59,7 +59,7 @@ fn main() -> Unit = {
 ```
 
 ```text
-2 orders, total 760
+2 orders, total 761
 ```
 
 The row with a bad number falls through to `none` and is skipped: no exception and no unwrap, and a `match` that forgets a case doesn't compile. The same program prints the same bytes natively and on wasm, and this file runs in CI as [`examples/order-total.almd`](./examples/order-total.almd).
