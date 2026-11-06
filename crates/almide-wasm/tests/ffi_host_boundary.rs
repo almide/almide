@@ -428,12 +428,3 @@ fn an_address_only_export_err_traps_with_its_reason() {
     assert!(at.call(&mut r.store, -1.0).is_err());
     assert!(r.host.lock().expect("wasmtime").err.contains("ffi.alloc: negative length -1"), "{}", r.host.lock().expect("wasmtime").err);
 }
-
-/// A1c is declared, never inferred: `returns: address` on a fn whose return
-/// is not a Region is refused at check time (E090).
-#[test]
-fn returns_address_on_a_non_region_return_is_refused() {
-    let src = "@export(wasm, \"count\", returns: address)\nfn count() -> Int = 3\n\neffect fn main() -> Unit = println(\"x\")\n";
-    let err = almide_spine::s5::lower_to_ir("returns_address.almd", src).expect_err("check must refuse it");
-    assert!(err.contains("`returns: address` needs a Region return"), "{err}");
-}

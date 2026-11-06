@@ -5976,5 +5976,5 @@ evidence  = [
   { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "the_host_writes_at_an_address_only_export_and_the_next_export_reads_it", class = "fixture" },
   { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_export_keeps_every_other_a1_rule", class = "fixture" },
   { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_export_err_traps_with_its_reason", class = "fixture" },
-  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "returns_address_on_a_non_region_return_is_refused", class = "fixture" },
+  { path = "tests/checker_test.rs", name = "returns_address_on_a_non_region_return_is_refused", class = "fixture" },
 ]

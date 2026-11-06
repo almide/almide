@@ -214,7 +214,7 @@ address, an empty Region is `0`, and an `effect fn`'s `err` traps.
   the export as `f(…) → ptr` and adds `regionRelease(ptr)` as for the pair.
 
 Evidence: spec/wasm_host_js/region_export_address.almd (C-453) and
-crates/almide-wasm/tests/ffi_host_boundary.rs (the address-only tests).
+crates/almide-wasm/tests/ffi_host_boundary.rs (the address-only tests), tests/checker_test.rs (the E090 refusal).
 
 ### A2. An `@export(c)` fn may take Region parameters
 
