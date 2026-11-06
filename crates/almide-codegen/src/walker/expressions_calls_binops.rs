@@ -1028,9 +1028,11 @@ fn inert_arg_ty(t: &Ty) -> bool {
 ///
 /// `Rc::make_mut` keeps value semantics: a snapshot sharing the block
 /// (`let snap = g`) still makes the take copy it first. Only a place whose
-/// value has an empty default (Bytes, a list) is taken, and only when no
-/// other argument names the same global (a sibling read would see it
-/// empty); `None` otherwise, and the caller copies.
+/// value has an empty default (Bytes, a list) is taken, and one global at
+/// most once; `None` otherwise, and the caller copies. A sibling argument
+/// that reads the global never sees it empty: `BorrowInsertion`'s hoist
+/// (`HoistCx::must_hoist`) has already moved it in front of the whole call,
+/// as for the two forms below.
 fn render_call_with_taken_global_places(
     ctx: &RenderContext,
     callee: &str,
@@ -1050,25 +1052,6 @@ fn render_call_with_taken_global_places(
             return None;
         }
         taken.push(static_name);
-    }
-    let mentions_taken = |e: &IrExpr| -> bool {
-        struct Scan<'a, 'c> { ctx: &'a RenderContext<'c>, names: &'a [&'a str], hit: bool }
-        impl almide_ir::visit::IrVisitor for Scan<'_, '_> {
-            fn visit_expr(&mut self, e: &IrExpr) {
-                if let IrExprKind::Var { id } = &e.kind {
-                    if self.ctx.ann.global(*id).is_some_and(|g| self.names.contains(&g.static_name.as_str())) {
-                        self.hit = true;
-                    }
-                }
-                almide_ir::visit::walk_expr(self, e);
-            }
-        }
-        let mut s = Scan { ctx, names: &taken, hit: false };
-        almide_ir::visit::IrVisitor::visit_expr(&mut s, e);
-        s.hit
-    };
-    if args.iter().zip(places).any(|(a, place)| place.is_none() && mentions_taken(a)) {
-        return None;
     }
     let mut take_out: Vec<String> = Vec::new();
     let mut put_back: Vec<String> = Vec::new();
