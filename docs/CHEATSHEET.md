@@ -732,6 +732,59 @@ guard not fs.exists(path) else {
 }
 ```
 
+### guard let (unwrap or exit early)
+`guard let x = r else E` binds the Ok/Some payload of `r` as `x` for the rest of
+the block; on err/none the function returns `E`. To use the error, write the
+else as a match arm: `else err(e) => E` (`e` has the Result's error type; an
+Option's arm is `else none => E`, the same as `else E`). One failure arm only:
+to split errors into cases, write a `match`.
+
+```almide check
+type ConfigError = | Missing(String) | BadPort(Int)
+
+fn describe(e: ConfigError) -> String = match e {
+  Missing(k) => "missing ${k}",
+  BadPort(p) => "bad port ${int.to_string(p)}",
+}
+
+fn find_port(m: Map[String, Int]) -> Result[Int, ConfigError] = match map.get(m, "port") {
+  some(p) => if p > 0 then ok(p) else err(BadPort(p)),
+  none => err(Missing("port")),
+}
+
+fn status(m: Map[String, Int]) -> String = {
+  guard let port = find_port(m) else err(e) => "404 ${describe(e)}"   // e: ConfigError
+  "200 port ${int.to_string(port)}"
+}
+
+fn main() -> Unit = println(status(map.from_list([("port", 80)])))
+```
+
+`guard let x else E` is short for `guard let x = x else E` (`x` is a local or
+parameter holding an Option or Result). `guard var` makes the binding mutable.
+Both combine with the failure arm.
+
+```almide check
+fn greeting(name: Option[String]) -> String = {
+  guard var name else { "hello, stranger" }   // name: String from here on
+  name = string.to_upper(name)
+  "hello, ${name}"
+}
+
+fn parse_twice(s: String) -> Result[Int, String] = {
+  let n = int.parse(s)
+  guard let n else err(e) => err("not a number: ${s}")
+  ok(n * 2)
+}
+
+fn main() -> Unit = {
+  println(greeting(some("ann")))
+  println(greeting(none))
+  let doubled = parse_twice("21") ?? 0
+  println(int.to_string(doubled))
+}
+```
+
 ## Concurrency & deterministic time (fan)
 
 All `fan.*` forms require an `effect fn` context. There is NO `async`/`await` in Almide.

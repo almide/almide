@@ -1,6 +1,6 @@
 # ALS §E — Expression Semantics (normative)
 
-> Last updated: 2026-10-24
+> Last updated: 2026-11-06
 
 > **Status**: normative. これらの節は実装から独立した**規範**であり、v0(native)と
 > v1(MIR/wasm)の両実装がこの節に適合する義務を負う。適合の証拠は
@@ -707,8 +707,51 @@ v=21 → 42)。失敗極性なら else の err が呼び出し元へ伝搬する
 あり、修正は「証明済みの bind 形へ正規化する認識器」に variant match を
 教えることだった(ALS-ST5 と同じ機構の別の顔)。
 
+**#4543 の三つの追加形**(2026-11-06 裁定、いずれも同じ入れ子 variant
+match へ脱糖されるので MIR に現れるのは match だけ — 新しい所有権・レイアウト
+判断は生じない。既存プログラムの意味は変わらないので dialect epoch なし):
+
+1. **失敗アームが失敗を名付ける**: `guard let x = r else err(e) => expr`。
+   else は `match` のアームと同じ綴りの失敗側アームで、`e` は Result の
+   エラー型を持つ(`Result[T, ConfigError]` なら `e: ConfigError`)。脱糖は
+   wildcard アームの代わりに `err(e) =>` アーム。Option の失敗形は
+   `else none => expr` で、`else expr` と同じ(fmt は `else expr` へ正規化)。
+   `err(_) =>` はエラーを捨てる形で、wildcard アームのまま。
+   **拒否**: 失敗アームは一つだけ(二つ目は「`match` を書く」診断)。入れ子
+   パターン(`err(NotFound(p)) =>`)は全エラーを覆わないので拒否。`if` ガード、
+   `|` の選択肢、成功側アーム(`ok(v) =>` / `some(v) =>`)、`_ =>` も拒否。
+   Option に `err(e) =>`、Result に `none =>` は E001。
+2. **短縮形** `guard let x else E` = `guard let x = x else E`。`x` はスコープ内の
+   Option / Result 型の束縛(ローカルか引数)で、ブロックの残りでは payload に
+   再束縛される。形 1 と組み合わさる(`guard let x else err(e) => …`)。
+   **拒否**: `x` が Option / Result でなければ E001(「shorthand rebinds」)。
+   フィールドパス(`guard let a.b else`)は構文エラーで、修正候補
+   `guard let b = a.b else …` を示す。
+3. **`guard var x = scrut else …`**: `guard let` と同じだが、束縛はブロックの
+   残りで `var` と同じ規則の可変。脱糖は成功アームが隠れた名前を束縛し、
+   残りの先頭に `var x = <それ>` を置く — 書き手が綴れるのと同じ `var` 文。
+   形 1・2 と組み合わさる。
+
+```almide
+type ConfigError = | Missing(String) | BadPort(Int)
+
+fn describe(e: ConfigError) -> String = match e {
+  Missing(k) => "missing ${k}",
+  BadPort(p) => "bad port ${int.to_string(p)}",
+}
+
+fn port_text(r: Result[Int, ConfigError]) -> String = {
+  guard var r else err(e) => describe(e)
+  r = r * 10
+  "port ${int.to_string(r)}"
+}
+```
+
 テスト: `spec/wasm_cross/guard_let_statement.almd`(契約 C-266)、
-`spec/lang/guard_let_test.almd`(wasm レグ)。
+`spec/lang/guard_let_test.almd`(wasm レグ)。#4543 の形:
+`spec/wasm_cross/guard_let_forms.almd`(契約 C-266 の証拠を拡張)、
+`spec/lang/guard_let_forms_test.almd`、拒否診断は
+`tests/diagnostics/*guard-let-*`(各ケースに `--target wasm` の双子)。
 
 ## ALS-E29 二項演算子(`ExprKind::Binary`)
 
