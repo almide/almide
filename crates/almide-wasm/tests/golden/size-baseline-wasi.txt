@@ -620,6 +620,8 @@
 3892	spec/wasm_cross/nan_canonical_bytes_write.almd
 1528	spec/wasm_cross/nan_canonical_observation.almd
 5492	spec/wasm_cross/native_list_option_fallback_float.almd
+4774	spec/wasm_cross/native_map_merge_same_binding.almd
+16422	spec/wasm_cross/native_same_binding_twice_arg.almd
 537	spec/wasm_cross/native_unused_map_binding.almd
 5317	spec/wasm_cross/native_wall_shapes.almd
 10797	spec/wasm_cross/negative_count_rule.almd
