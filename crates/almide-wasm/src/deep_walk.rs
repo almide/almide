@@ -7,7 +7,8 @@
 //!
 //! - drop and `==` queue the nested work (the block and its release fn's
 //!   table slot; the operand pair and the comparison's slot) on a growable
-//!   list held in a global, and the OUTERMOST walk drains the queue in a loop
+//!   list held in a global, and a loop drains the queue — for `==` the
+//!   OUTERMOST walk's, for drop the deep frame's that queued first (#4550)
 //!   — `==` is the conjunction of its leaves, and the order a value's blocks
 //!   are freed in is unobservable;
 //! - display has an order, so only a nested value written LAST in its parent
@@ -166,42 +167,50 @@ pub(crate) fn emit_deep_drop_push(gq: u32) -> Function {
     f
 }
 
-/// `$deep_drop_drain()`: the outermost drop's drain (`Helper::DeepDropDrain`)
-/// — every queued release, one level each, at depth 1 so a drained drop never
-/// starts a drain of its own; depth back to 0 after. locals: 0=q, 1=len.
+/// `$deep_drop_drain()` (`Helper::DeepDropDrain`): the deep drop's drain of
+/// every queued release, in a loop, at depth `DEEP_LIMIT + 1` so a drained
+/// drop queues instead of recursing and never runs a drain of its own; depth
+/// back to `DEEP_LIMIT` after. locals: 0=q, 1=len.
 pub(crate) fn emit_deep_drop_drain(gq: u32, gd: u32, drop_ty: u32) -> Function {
     let (q, len) = (0u32, 1u32);
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
-    i.i32_const(1).global_set(gd);
+    // Called only from a deep drop, right after it queued: depth is exactly
+    // DEEP_LIMIT then, and the queue is allocated. A drain already running
+    // holds the depth at DEEP_LIMIT + 1, so a drop it runs that queues and
+    // calls back returns here at once and the running loop takes the work.
+    i.global_get(gd).i32_const(DEEP_LIMIT).i32_ne().br_if(0);
+    i.i32_const(DEEP_LIMIT + 1).global_set(gd);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
-    emit_queue_len(&mut i, gq);
-    i.i32_eqz().br_if(1);
+    // Every drop run here is past the limit, so it queues its children
+    // instead of recursing: the drain runs in one frame of its own.
+    i.global_get(gq).i32_load(len_memarg()).i32_eqz().br_if(1);
     emit_pop(&mut i, gq, 2, q, len);
     i.call_indirect(0, drop_ty);
     i.br(0);
     i.end();
     i.end();
-    i.i32_const(0).global_set(gd);
+    i.i32_const(DEEP_LIMIT).global_set(gd);
     i.end();
     f
 }
 
 /// `$drop_<shape>(block)` of a type on a cycle (#4252): `emit_drop_shape`'s
 /// credit arithmetic and releases, with the releases queued past
-/// `DEEP_LIMIT` nesting levels and drained by the outermost drop.
+/// `DEEP_LIMIT` nesting levels and drained by the deep drop that queued them.
 ///
 /// The shallow path — every drop of a value less than `DEEP_LIMIT` deep — is
 /// inline here, as `emit_drop_shape` emits it: the depth count, a direct call
 /// per handle slot, the free. The cold half is shared by every recursive type
 /// in the module (#4550): a queued release is one call to `$deep_drop_push`
-/// (`push`) instead of two inline queue pushes per slot, and the outermost
-/// drop's drain is one call to `$deep_drop_drain` (`drain`) instead of a loop
-/// per type, made only when the queue is not empty.
+/// (`push`) instead of two inline queue pushes per slot, and the drain is one
+/// call to `$deep_drop_drain` (`drain`) on the deep path itself, after the
+/// pushes, instead of a loop per type at the outermost drop: the shallow path
+/// carries no drain test and makes no extra call.
 pub(crate) fn emit_drop_shape_deep(
     slots: &[DeepSlot],
     tagged: Option<(u32, Vec<(u32, Vec<DeepSlot>)>)>,
-    (gq, gd): (u32, u32),
+    (_gq, gd): (u32, u32),
     (push, drain): (u32, u32),
 ) -> Function {
     // params: 0=block; locals: 1=rc
@@ -244,22 +253,15 @@ pub(crate) fn emit_drop_shape_deep(
     i.global_get(gd).i32_const(DEEP_LIMIT).i32_lt_u().if_(BlockType::Empty);
     i.global_get(gd).i32_const(1).i32_add().global_set(gd);
     releases(&mut i, false);
-    i.local_get(block).call(F_FREE);
     i.global_get(gd).i32_const(1).i32_sub().global_set(gd);
-    // The outermost drop drains what the deep ones queued — the call only
-    // when the queue holds something, so a shallow drop pays one length test
-    // (what the inline drain's first iteration paid) and no call.
-    i.global_get(gd).i32_eqz().if_(BlockType::Empty);
-    emit_queue_len(&mut i, gq);
-    i.if_(BlockType::Empty);
+    i.else_();
+    // Deep: the children's addresses are read before the block is freed,
+    // queued, and drained here, by the deep frame that queued them — the
+    // shallow path carries no drain code and makes no extra call (#4550).
+    releases(&mut i, true);
     i.call(drain);
     i.end();
-    i.end();
-    i.else_();
-    // Deep: the children's addresses are read before the block is freed.
-    releases(&mut i, true);
     i.local_get(block).call(F_FREE);
-    i.end();
     i.end();
     i.end();
     f
