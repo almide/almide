@@ -428,15 +428,10 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         // A copy of a heap slot's snapshot that only borrows reads through
         // the snapshot's reference (#4562, render_native_heap_slot); its
         // release ends that borrow, and the snapshot frees at scope end.
-        _ if crate::native_slot_takes::released(op).is_some_and(|v| {
-            st.addrs.slot_alias(&v) && matches!(st.tys.get(&v), Some(NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)))
-        }) =>
-        {
+        _ if crate::native_slot_takes::released(op).is_some_and(|v| st.addrs.slot_alias(&v)) => {
             line!("// drop: a heap slot's snapshot, scope-end");
         }
-        Op::Dup { dst, src }
-            if st.addrs.slot_alias(dst) && matches!(st.tys.get(src), Some(NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) =>
-        {
+        Op::Dup { dst, src } if st.addrs.slot_alias(dst) => {
             let t = st.tys[src];
             st.tys.insert(*dst, t);
             line!("let mut {} = {};", var(*dst), var(*src));
