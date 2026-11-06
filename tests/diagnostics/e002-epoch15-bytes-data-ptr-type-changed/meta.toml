@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'bytes.data_ptr'"
+hint_substring = "Not applied by `almide fix`: `ffi.region` returns Region, not Int: adapt the callers"

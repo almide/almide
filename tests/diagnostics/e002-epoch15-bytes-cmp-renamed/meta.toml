@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'bytes.cmp'"
+hint_substring = "was removed at dialect epoch 15"

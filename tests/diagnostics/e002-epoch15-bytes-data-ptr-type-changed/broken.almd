@@ -1,0 +1,11 @@
+// `bytes.data_ptr` left at dialect epoch 15 for `ffi.region`, which keeps
+// the arguments but returns Region, not Int. Renaming the callee alone would
+// hand the caller another type, so `almide fix` leaves the call to the
+// author (#4525).
+import ffi
+
+effect fn main() -> Unit = {
+  let b = bytes.from_string("abc")
+  let a: Int = bytes.data_ptr(b)
+  println(int.to_string(a))
+}
