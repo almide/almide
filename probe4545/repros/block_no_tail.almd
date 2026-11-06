@@ -1,0 +1,17 @@
+// A pure lambda whose block ends in an assignment, filling an `effect () -> Unit` slot.
+type V = { on_click: effect () -> Unit }
+
+fn base() -> V = { on_click: () => () }
+fn on_click(v: V, f: effect () -> Unit) -> V = { ...v, on_click: f }
+
+var n = 0
+
+fn view() -> V = base() |> on_click(() => { n = 3 })
+
+@export(wasm, "fire")
+effect fn fire() -> Int = {
+  view().on_click()!
+  n
+}
+
+effect fn main() -> Unit = println("${fire()!}")

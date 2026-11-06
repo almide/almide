@@ -1,0 +1,18 @@
+// A pure fn-typed parameter forwarded into an `effect () -> Unit` slot.
+type V = { on_click: effect () -> Unit }
+
+fn base() -> V = { on_click: () => () }
+fn on_click(v: V, f: effect () -> Unit) -> V = { ...v, on_click: f }
+
+var n = 0
+fn add() -> Unit = { n = n + 1 }
+
+fn button(on: () -> Unit) -> V = base() |> on_click(on)
+
+@export(wasm, "fire")
+effect fn fire() -> Int = {
+  button(() => add()).on_click()!
+  n
+}
+
+effect fn main() -> Unit = println("${fire()!}")

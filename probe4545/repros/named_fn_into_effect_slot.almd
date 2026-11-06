@@ -1,0 +1,12 @@
+// A pure named fn passed as the value of an `effect (Int) -> Bool` slot.
+type V = { on_key: effect (Int) -> Bool }
+
+fn base() -> V = { on_key: (k) => false }
+fn on_key(v: V, f: effect (Int) -> Bool) -> V = { ...v, on_key: f }
+
+fn key(k: Int) -> Bool = k > 2
+
+@export(wasm, "fire")
+effect fn fire() -> Int = if (base() |> on_key(key)).on_key(3)! then 1 else 0
+
+effect fn main() -> Unit = println("${fire()!}")

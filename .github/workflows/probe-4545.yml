@@ -1,0 +1,96 @@
+name: probe-4545
+on:
+  push:
+    branches: ['wec4545-probe*', 'wec4545-negctl*']
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_INCREMENTAL: "0"
+permissions:
+  contents: read
+jobs:
+  tree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Build the compiler
+        run: cargo build --release --bin almide
+      - name: Install wasmtime
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+      - name: Issue repros
+        run: bash probe4545/repro.sh $PWD/target/release/almide "${GITHUB_REF_NAME}"
+      - name: New fixtures on both legs
+        run: |
+          for f in spec/wasm_cross/effect_slot_*.almd; do
+            echo "=== $f"
+            target/release/almide build $f --target wasm -o /tmp/x.wasm 2>&1 | head -c 800; echo "wasm build exit=${PIPESTATUS[0]}"
+            timeout 120 target/release/almide run $f --target wasm > /tmp/w.out 2>&1; echo "wasm exit=$?"; cat /tmp/w.out
+            timeout 600 target/release/almide run $f > /tmp/n.out 2>&1; echo "native exit=$?"; cat /tmp/n.out
+            cmp -s /tmp/w.out /tmp/n.out && echo "SAME" || echo "DIFFER"
+          done
+      - name: Cross-target gate over the effect-slot fixtures
+        continue-on-error: true
+        run: ALMIDE_EXPECT_TOOLS=1 ALMIDE_BIN=$PWD/target/release/almide ALMIDE_CORPUS_FILTER=effect_slot_ cargo test --release --test wasm_runtime_cross_target -- --nocapture 2>&1 | tail -40
+      - name: Render corpus
+        run: bash probe4545/render.sh $PWD/target/release/almide /tmp/render
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: render-${{ github.ref_name }}
+          path: /tmp/render
+          retention-days: 5
+      - name: Regenerate ledgers
+        if: startsWith(github.ref_name, 'wec4545-probe')
+        run: bash probe4545/regen.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: startsWith(github.ref_name, 'wec4545-probe')
+        with:
+          name: ledgers
+          path: /tmp/ledgers.patch
+          retention-days: 5
+  released:
+    if: startsWith(github.ref_name, 'wec4545-probe')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        ver: [v0.67.1, v0.69.0]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Install wasmtime
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+      - name: Fetch the released binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/rel && cd /tmp/rel
+          gh release download ${{ matrix.ver }} -R almide/almide -p almide-linux-x86_64.tar.gz
+          tar -xzf almide-linux-x86_64.tar.gz
+          find /tmp/rel -name almide -type f
+          $(find /tmp/rel -name almide -type f | head -1) --version
+      - name: Issue repros
+        run: bash probe4545/repro.sh $(find /tmp/rel -name almide -type f | head -1) ${{ matrix.ver }}
