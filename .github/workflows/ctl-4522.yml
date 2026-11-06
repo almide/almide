@@ -1,0 +1,62 @@
+name: ctl-4522
+on:
+  push:
+    branches: ['ctl-4522-*']
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - name: Build the test binary
+        run: cargo test --test effect_value_laundering_test --no-run
+      - name: Tests against this branch's compiler
+        continue-on-error: true
+        run: cargo test --test effect_value_laundering_test heap -- --test-threads=1 2>&1 | tee this.log
+      - name: Releases
+        continue-on-error: true
+        run: |
+          mkdir -p rel && cd rel
+          for v in v0.67.1 v0.69.0; do
+            mkdir -p $v
+            gh release download $v -R almide/almide -p 'almide-linux-x86_64.tar.gz' -D $v
+            tar -xzf $v/almide-linux-x86_64.tar.gz -C $v
+          done
+          find . -type f -name almide -perm -u+x
+      - name: Release binaries on the repro and the tests
+        continue-on-error: true
+        run: |
+          cat > /tmp/repro.almd <<'ALMD'
+          type V = { on_context: effect (Float, Float) -> Unit }
+
+          fn on_context(v: V, f: effect (Float, Float) -> Unit) -> V = { ...v, on_context: f }
+
+          var n = 0
+          effect fn save() -> Unit = { n = n + 1 }
+
+          fn view() -> V = { on_context: (x, y) => () } |> on_context((x, y) => { save()! })
+
+          effect fn main() -> Unit = {
+            let v = view()
+            v.on_context(1.0, 2.0)!
+            println("${n}")
+          }
+
+          fn top(xs: List[Int]) -> Int? = {
+            var h = heap.from_list(xs)
+            heap.pop(h)
+          }
+          ALMD
+          sed -i 's/^          //' /tmp/repro.almd
+          for v in v0.67.1 v0.69.0; do
+            bin=$(find "$PWD/rel/$v" -type f -name almide -perm -u+x | head -1)
+            echo "=== $v: $($bin --version)"
+            (cd /tmp && $bin check repro.almd; echo "exit=$?")
+            echo "=== $v: tests with ALMIDE_CONTROL_BIN"
+            ALMIDE_CONTROL_BIN=$bin cargo test --test effect_value_laundering_test heap -- --test-threads=1 2>&1 | tail -40
+          done
