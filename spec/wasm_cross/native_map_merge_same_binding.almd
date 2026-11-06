@@ -1,0 +1,13 @@
+// @contract: C-258
+// #4517, the fuzz's minimized repro: `map.merge(y0, y0)` at the binding's
+// last use. The certified native render moved `y0` into the owned-reuse
+// merge at the first position and borrowed it at the second
+// (`almide_rt_map_merge_owned(v0, &v0)`), so rustc rejected the native build
+// (E0382) of a program `almide check` accepted. wasm ran it. Both operands
+// are the same value; the call now borrows it at both positions.
+fn main() -> Unit = {
+  let y0: Map[String, String] = [:]
+  let r1: Bool = map.contains(map.merge(y0, y0), " nbsp ")
+  let r2: Int = 1
+  println("r2 = ${r2}")
+}
