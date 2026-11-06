@@ -155,6 +155,7 @@ impl Checker {
     /// `@export(c)` fn, naming a Region parameter.
     pub(super) fn check_export_c_regions(&mut self, sig: ExternSig<'_>, export_attrs: &[ExportAttr], attrs: &[Attribute]) {
         let ExternSig { name: fn_name, params, return_type, span } = sig;
+        self.check_export_wasm_address(fn_name, return_type, export_attrs, span);
         let exports_c = export_attrs.iter().any(|a| a.target.as_str() == "c");
         let clauses: Vec<&Attribute> = attrs.iter().filter(|a| a.name.as_str() == REGION_ATTR).collect();
         if !exports_c {
@@ -198,6 +199,27 @@ impl Checker {
                 }
             }
         }
+    }
+
+    /// #4519: `@export(wasm, "sym", returns: address)` makes a Region
+    /// result cross as its data address alone, so the fn must return a
+    /// Region (an `effect fn` declares the Region as its return). Anything
+    /// else would carry the option and mean nothing: E090, the boundary
+    /// signature check, refuses it.
+    fn check_export_wasm_address(&mut self, fn_name: &str, return_type: &TypeExpr, export_attrs: &[ExportAttr], span: Option<Span>) {
+        if !export_attrs.iter().any(|a| a.returns_address) {
+            return;
+        }
+        let ret = self.resolve_type_expr(return_type);
+        if is_region(&ret) || ret.is_unresolved() {
+            return;
+        }
+        self.emit_extern_c(
+            format!("@export(wasm) fn '{fn_name}': `returns: address` needs a Region return, and the return type is {}", ret.display()),
+            "`returns: address` makes a Region result cross as its data address alone (ADR-0031 amendment A1c): return a Region, or drop `returns: address`".to_string(),
+            fn_name,
+            span,
+        );
     }
 
     /// E090 for an `@export(c)` parameter or return outside the C ABI table
