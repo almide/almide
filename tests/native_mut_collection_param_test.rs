@@ -108,8 +108,7 @@ fn mut_collection_param_rebind_keeps_its_values_natively() {
     assert!(out.contains(WANT), "native:\n{out}");
 }
 
-/// The standard codegen, which ships wherever the certified render walls
-/// (and which `almide test` builds).
+/// The standard codegen, which ships wherever the certified render walls.
 #[test]
 fn mut_collection_param_rebind_keeps_its_values_on_the_standard_codegen() {
     let out = run("v0", &["--no-verified"]);
