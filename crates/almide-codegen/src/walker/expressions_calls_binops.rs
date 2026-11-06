@@ -357,7 +357,35 @@ fn render_user_call_arg(ctx: &RenderContext, arg: &IrExpr) -> String {
         };
         return format!("&{}", rc_cow_result_glue(owned, &inner.ty));
     }
+    if let Some(rendered) = render_global_snapshot_borrow(ctx, arg) {
+        return rendered;
+    }
     render_expr_owned(ctx, arg)
+}
+
+/// A read-only borrow of a heap `var` global at a call argument
+/// (`map.get(cache, k)`, `list.len(xs)`, `f(g)` with a borrowed param), #4562.
+/// The global is a `RefCell<Rc<T>>`, and its bare read is a deep copy of `T`
+/// (`(**c.borrow()).clone()`), which a borrowed parameter only reads. So every
+/// lookup in a module-level map copied the whole map.
+///
+/// The argument now borrows a SNAPSHOT of the cell's `Rc`: one reference count,
+/// not a copy. No `RefCell` borrow is held while the callee runs, so this holds
+/// whatever the callee is. A callee that runs user code that writes the global
+/// meets a shared block, and the write's `Rc::make_mut` copies it then, so the
+/// argument keeps the value it had at the call site, as the copy did. The
+/// temporary lives to the end of the enclosing statement, the same span the
+/// copy's temporary had.
+fn render_global_snapshot_borrow(ctx: &RenderContext, arg: &IrExpr) -> Option<String> {
+    use almide_ir::top_let_storage::TopLetStorage;
+    let IrExprKind::Borrow { expr: inner, as_str, mutable: false } = &arg.kind else { return None };
+    let IrExprKind::Var { id } = &inner.kind else { return None };
+    let global = ctx.ann.global(*id)?;
+    if !matches!(global.storage, TopLetStorage::RcRefCell) {
+        return None;
+    }
+    let snapshot = format!("{}.with(|__almide_cell| std::rc::Rc::clone(&*__almide_cell.borrow()))", global.static_name);
+    Some(if *as_str { format!("&**{snapshot}") } else { format!("&*{snapshot}") })
 }
 
 /// `CallTarget::Named` case of `render_generic_call`, extracted verbatim
@@ -1255,6 +1283,9 @@ fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::inte
             _ => "_".to_string(),
         };
         format!("&({s}).iter().map(|__e: &{elem}| (**__e).clone()).collect::<Vec<_>>()")
+    } else if let Some(rendered) = render_global_snapshot_borrow(ctx, a) {
+        // A borrowed heap global reads in place, not out of a copy (#4562).
+        rendered
     } else {
         render_expr_owned(ctx, a)
     }
