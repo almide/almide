@@ -1,0 +1,10 @@
+effect fn main() -> Unit = {
+  let x: Value = value.object([("k1", value.int(1))])
+  let a1: String = "k${1}"
+  var i = 0
+  while i < 1 {
+    let r: Option[Int] = value.get_int(x, a1)
+    println("${option.is_some(r)}")
+    i = i + 1
+  }
+}
