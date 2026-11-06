@@ -9,6 +9,8 @@ pub mod dialect_check;
 pub mod deprecation;
 /// Where a stdlib spelling removed at a dialect epoch went (read from the ledger).
 pub mod removed_spellings;
+/// Whether a ledger rename keeps the fn's type (#4525).
+pub mod removed_signatures;
 pub mod attr_vocab;
 /// Media-type ownership read off declarations (ADR-0032 D4, D7).
 pub mod media_owners;

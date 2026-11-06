@@ -1,0 +1,8 @@
+// `matrix.zeros_f32` left at dialect epoch 15 for `matrix.zeros`, which
+// keeps the arguments but returns Matrix, not Matrix[Float32]. Renaming the
+// callee alone would hand the caller another type, so `almide fix` leaves
+// the call to the author (#4525).
+effect fn main() -> Unit = {
+  let m = matrix.zeros(2, 3)
+  println(int.to_string(matrix.rows(m)))
+}

@@ -128,22 +128,64 @@ fn breaks() -> impl Iterator<Item = (u32, &'static str)> {
     })
 }
 
-/// The callee a removed spelling renames to, when the ledger's rewrite keeps
-/// the call's argument list verbatim (`` `ffi.address(b)` → rewrite as
-/// `ffi.region(b)` ``): renaming the callee is then the whole edit, so
-/// `almide fix` applies it. A rewrite whose argument list differs is a hint
-/// only.
-pub fn same_shape_rename(name: &str) -> Option<String> {
-    breaks().find_map(|(_, text)| {
-        let (old, rest) = between(text, "`", "`")?;
-        if !text.starts_with('`') || callee(old)? != name {
-            return None;
+/// A removed spelling the ledger renames (`` `ffi.address(b)` → rewrite as
+/// `ffi.region(b)` ``): the rewrite keeps the call's argument list verbatim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rename {
+    /// The callee the call renames to.
+    pub to: String,
+    /// `None` when the new fn has the old fn's type, so renaming the callee
+    /// is the whole edit and `almide fix` applies it; otherwise how the type
+    /// changed, in one line for the hint, and the rename is a suggestion
+    /// (`removed_signatures::type_change`, #4525).
+    pub type_change: Option<String>,
+}
+
+impl Rename {
+    pub fn is_machine_applicable(&self) -> bool {
+        self.type_change.is_none()
+    }
+}
+
+/// The callee `name`'s ledger rewrite renames it to, when that rewrite
+/// keeps the call's argument list.
+fn rename_target(name: &str, text: &str) -> Option<String> {
+    let (old, rest) = between(text, "`", "`")?;
+    if !text.starts_with('`') || callee(old)? != name {
+        return None;
+    }
+    let shape = rest.trim_start().strip_prefix('→')?.trim_start().strip_prefix("rewrite as ")?;
+    let (new_call, _) = between(shape, "`", "`")?;
+    let args = |call: &str| call.split_once('(').map(|(_, a)| a.to_string());
+    (args(old)? == args(new_call)?).then(|| callee(new_call).map(str::to_string)).flatten()
+}
+
+/// The rename of a removed spelling whose ledger rewrite keeps the call's
+/// argument list. A rewrite whose argument list differs is no rename (a hint
+/// only). Whether the rename is machine-applicable is read from the two
+/// fns' types, never from the argument text alone: `string.to_bytes(s)` →
+/// `bytes.from_string(s)` keeps the text and changes `List[Int]` to `Bytes`.
+pub fn same_shape_rename(name: &str) -> Option<Rename> {
+    let to = breaks().find_map(|(_, text)| rename_target(name, text))?;
+    let type_change = crate::removed_signatures::type_change(name, &to);
+    Some(Rename { to, type_change })
+}
+
+/// Every `(old, new)` rename the ledger states, one per old name (the first
+/// entry that renames it, as `same_shape_rename` reads it).
+pub fn renames() -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for (_, text) in breaks() {
+        let Some((old, _)) = between(text, "`", "`") else { continue };
+        let Some(name) = callee(old) else { continue };
+        if out.iter().any(|(o, _)| o == name) {
+            continue;
         }
-        let shape = rest.trim_start().strip_prefix('→')?.trim_start().strip_prefix("rewrite as ")?;
-        let (new_call, _) = between(shape, "`", "`")?;
-        let args = |call: &str| call.split_once('(').map(|(_, a)| a.to_string());
-        (args(old)? == args(new_call)?).then(|| callee(new_call).map(str::to_string)).flatten()
-    })
+        if let Some(to) = rename_target(name, text) {
+            out.push((name.to_string(), to));
+        }
+    }
+    out
 }
 
 /// A removed TYPE spelling, as an epoch's `breaks` records it:
@@ -225,8 +267,11 @@ mod tests {
 
     #[test]
     fn the_adr_0031_removals_rename_only_where_the_arguments_are_kept() {
-        assert_eq!(same_shape_rename("ffi.address").as_deref(), Some("ffi.region"));
-        assert_eq!(same_shape_rename("bytes.as_ptr").as_deref(), Some("ffi.region"));
+        let to = |n: &str| same_shape_rename(n).map(|r| r.to);
+        assert_eq!(to("ffi.address").as_deref(), Some("ffi.region"));
+        assert_eq!(to("bytes.as_ptr").as_deref(), Some("ffi.region"));
+        // The argument text is kept, the type is not: `RawPtr` became `Region`.
+        assert!(same_shape_rename("ffi.address").is_some_and(|r| !r.is_machine_applicable()));
         assert_eq!(same_shape_rename("bytes.from_raw_ptr"), None, "different arguments: a hint, not a fix");
         assert_eq!(same_shape_rename("ffi.to_int"), None, "deleted, not renamed");
         let (epoch, to, _) = removed_type("RawPtr").expect("the RawPtr removal is in the ledger");

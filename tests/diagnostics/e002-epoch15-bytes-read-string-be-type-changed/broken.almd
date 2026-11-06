@@ -1,0 +1,9 @@
+// `bytes.read_string_be` left at dialect epoch 15 for `bytes.get_u32_be`,
+// which keeps the arguments but returns Option[Int], not String. Renaming
+// the callee alone would hand the caller another type, so `almide fix`
+// leaves the call to the author (#4525).
+effect fn main() -> Unit = {
+  let b = bytes.from_list([0, 0, 0, 2, 104, 105])
+  let s: String = bytes.read_string_be(b, 0)
+  println(s)
+}
