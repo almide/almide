@@ -257,6 +257,16 @@ fn heap_is_not_blamed_for_a_closure_it_never_receives_4522() {
     let (o, t) = check_with_heap(REPRO_4522);
     assert!(o.status.success(), "#4522 repro: `almide check` refused it:\n{t}");
     assert!(!t.contains("E109"), "#4522 repro: E109 reported:\n{t}");
+    // The same read in user code, without the stdlib heap: a generic fn
+    // calls a field at `(A, A) -> Int`.
+    let ord = "type Ord[A] = { cmp: (A, A) -> Int }\n\
+               fn before[A](o: Ord[A], a: A, b: A) -> Bool = (o.cmp)(a, b) < 0\n\
+               fn first_is_less() -> Bool = before({ cmp: (a, b) => a - b }, 1, 2)\n";
+    let td = tempfile::TempDir::new().unwrap();
+    project(td.path(), None, &format!("{REPRO_4522}{ord}"));
+    let o = almide(td.path(), &["check", "main.almd"]);
+    let t = text(&o);
+    assert!(o.status.success() && !t.contains("E109"), "#4522 repro without heap: `almide check` refused it:\n{t}");
 }
 
 #[test]
