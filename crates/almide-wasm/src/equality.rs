@@ -8,33 +8,6 @@ use crate::emitter::Emitter;
 use crate::types_table::NamedDef;
 use crate::*;
 
-/// Whether [`Emitter::emit_val_eq`] has a lowering for a value of `ty`: the
-/// one question every equality-needing op asks (`list.unique`, `list.dedup`,
-/// `list.index_of` / `list.contains`, a deep set or map key scan) before it
-/// compares elements, so each one admits exactly the shapes `==` compares.
-/// #4578: those ops each kept their own list of element shapes, and a list
-/// that left out `Set` walled `list.unique` over a `List[Set[String]]` while
-/// `a == b` on the same two sets lowered. A component of a compound shape is
-/// answered by the recursive comparison itself.
-///
-/// The match is exhaustive on purpose: a new `SliceTy` variant must say here
-/// whether it has equality, and the arms mirror `emit_val_eq_level`'s.
-pub(crate) fn has_structural_eq(ty: SliceTy) -> bool {
-    match ty {
-        SliceTy::Scalar(_)
-        | SliceTy::Value
-        | SliceTy::Unit
-        | SliceTy::List(_)
-        | SliceTy::Option(_)
-        | SliceTy::Result(..)
-        | SliceTy::Named(_)
-        | SliceTy::Tuple(_)
-        | SliceTy::Map(..)
-        | SliceTy::Set(_) => true,
-        SliceTy::Fn(_) | SliceTy::Matrix => false,
-    }
-}
-
 impl Emitter<'_> {
     /// Comparison operators — Int ordering, and equality over ints,
     /// bools, and byte-equal blocks (strings, List[Int/Bool]).
