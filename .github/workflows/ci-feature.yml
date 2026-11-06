@@ -1,112 +1,100 @@
 name: Feature Branch CI
 
-# Lightweight CI for agent feature branches.
-# Build + cargo test + exercises only. No cross-platform, TS, JS, WASM.
-
+# THROWAWAY (rf0691 probe): time range_head_fold_edges on wasm before/after the v0.69.1 integration.
 on:
   push:
     branches:
-      - '*/[a-z]*'        # dolphin/*, shark/*, octopus/*, squid/*, clownfish/*
-      - 'feature/**'
-      - 'worktree-*/**'
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
-      - '.tasks/**'
+      - 'feature/rf0691-probe'
 
-# Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
-# concurrent runs that all re-download tools and trip the per-IP rate limit.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.97.0"  # runner-class MSRV: the almide binary embeds wasmtime 50 (commissioned host); compiler crates keep the 1.89 claim per-crate
-  # Cold runners gain nothing from the workspace's release-incremental
-  # profile (#1006) — it only bloats the caches. Opt out.
+  RUST_TOOLCHAIN: "1.97.0"
   CARGO_INCREMENTAL: "0"
 
-# #4094: the same read-only token the repository default gives, stated here so a
-# settings change cannot widen it. A job that needs more declares it itself.
-permissions: read-all
-
 jobs:
-  build-and-test:
-    name: Build & Test (Linux)
-    runs-on: ubuntu-latest
+  probe:
+    name: probe ${{ matrix.label }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: before, ref: 166eb38b694b9ccebdb68646f589b8a6647efe32, os: ubuntu-latest, arch: x86_64 }
+          - { label: after, ref: 10d4bffbdc33b5586328d59a635f191319dcacc5, os: ubuntu-latest, arch: x86_64 }
+          - { label: before, ref: 166eb38b694b9ccebdb68646f589b8a6647efe32, os: ubuntu-24.04-arm, arch: aarch64 }
+          - { label: after, ref: 10d4bffbdc33b5586328d59a635f191319dcacc5, os: ubuntu-24.04-arm, arch: aarch64 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.ref }}
       - uses: ./.github/actions/root-tmpdir
-
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-
-      # Dependencies only (see ci.yml `build`). Feature branches only READ
-      # the shared entry (develop's ci-feature run never happens — the
-      # trigger is branch-pattern-gated), so every feature push writes its
-      # own key: keep it but let the branch pay for the workspace it built.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: feature-build-${{ env.RUST_TOOLCHAIN }}
-          cache-on-failure: true
-
-      - name: Build
-        run: cargo build --release
-
-      - name: Cache wasmtime tarball
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
-          key: wasmtime-v50.0.1-x86_64-linux
-
-      - name: Install the runtime `almide test` uses for its wasm leg
+          save-if: false
+          workspaces: |
+            .
+            tools/xtarget-fuzz
+      - name: Install wasmtime
         run: |
           set -euo pipefail
           VERSION=v50.0.1
-          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          TARBALL="wasmtime-${VERSION}-${{ matrix.arch }}-linux.tar.xz"
           bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
           tar -xf "$TARBALL"
-          sudo install -m 755 "wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
-          wasmtime --version
-
-      # No `cargo test --workspace` here, on purpose.
-      #
-      # It used to run, UNSHARDED on this one runner, and it was the whole cost
-      # of this workflow: measured median 119 min over 19 runs, the most recent
-      # 187-223 min — on a file whose first line calls it "lightweight". The
-      # same suite runs in ci.yml split across four shards (`Test Rust (shard
-      # N/4)`, ~27 min end to end), and THOSE are the required checks on
-      # develop; this job never was. So the step duplicated a required check,
-      # 8x slower, gated nothing, and — because `concurrency` only cancels a
-      # superseded push, not a merge — kept a runner for hours after its
-      # branch had already landed (2026-09-23: 2h on a merged branch).
-      #
-      # What stays is what a pre-PR branch actually needs quickly: it builds,
-      # the example corpus runs, and emit does not crash. The test suite
-      # arrives with the pull request, sharded, as a required check.
-
-      # The execution signal for feature branches. This step was a double
-      # no-op for months (#979): it globbed `exercises/` — deleted long ago —
-      # and muted even that failure with continue-on-error ("TODO: re-enable
-      # after stdlib reconnection", which happened without the re-enable).
-      # `examples/` is the live corpus ci.yml runs; the count floor keeps a
-      # renamed corpus from reading as green (the #976 lesson).
-      - name: Run examples (Rust target)
+          sudo install -m 755 "wasmtime-${VERSION}-${{ matrix.arch }}-linux/wasmtime" /usr/local/bin/wasmtime
+          rm -rf "$TARBALL" "wasmtime-${VERSION}-${{ matrix.arch }}-linux"
+      - name: Build
         run: |
-          ALMIDE=./target/release/almide
-          count=$(find examples -name '*.almd' | wc -l)
-          [ "$count" -ge 10 ] || { echo "::error::only $count example files found — the corpus moved (#979)"; exit 1; }
-          $ALMIDE test examples/
-
-      - name: Emit check (smoke)
+          cargo build --release --bin almide
+          (cd tools/xtarget-fuzz && cargo build --release)
+      - name: Time
         run: |
-          ALMIDE=./target/release/almide
-          f=examples/binary-search.almd
-          [ -f "$f" ] || { echo "::error::$f not found — pick a new smoke fixture (#979)"; exit 1; }
-          $ALMIDE "$f" --target rust > /dev/null
-          echo "Rust emit OK"
-          $ALMIDE "$f" --emit-ast > /dev/null
-          echo "AST emit OK"
+          set +e
+          A=$PWD/target/release/almide
+          F=spec/wasm_cross/range_head_fold_edges.almd
+          mkdir -p /tmp/p
+          cat > /tmp/p/bottom.almd <<'EOF'
+          effect fn main() -> Unit = {
+            let bottom_count = list.range(-9223372036854775808, -9223372036854775805) |> list.fold(0, (a, _x) => a + 1)
+            println("bottom=${bottom_count}")
+          }
+          EOF
+          cat > /tmp/p/bottom_first.almd <<'EOF'
+          effect fn main() -> Unit = {
+            let bottom_first = list.range(-9223372036854775808, -9223372036854775805) |> list.fold(0, (a, x) => if a == 0 then x else a)
+            println("first=${bottom_first}")
+          }
+          EOF
+          cat > /tmp/p/top.almd <<'EOF'
+          effect fn main() -> Unit = {
+            let top_count = list.range(9223372036854775804, 9223372036854775807) |> list.fold(0, (a, _x) => a + 1)
+            println("top=${top_count}")
+          }
+          EOF
+          t() { local s=$(date +%s.%N); timeout 120 "$@" > /tmp/p/out.txt 2>&1; local rc=$?; local e=$(date +%s.%N); echo "TIME $(echo "$e - $s" | bc) rc=$rc :: $*"; tail -c 400 /tmp/p/out.txt; }
+          for i in 1 2 3; do t $A run $F; done
+          for i in 1 2 3 4 5; do t $A run $F --target wasm; done
+          $A build $F --target wasm -o /tmp/p/edges.wasm; echo "build rc=$?"
+          for i in 1 2 3; do t wasmtime /tmp/p/edges.wasm; done
+          for p in bottom bottom_first top; do
+            t $A run /tmp/p/$p.almd
+            t $A run /tmp/p/$p.almd --target wasm
+            $A build /tmp/p/$p.almd --target wasm -o /tmp/p/$p.wasm; echo "build $p rc=$?"
+            t wasmtime /tmp/p/$p.wasm
+          done
+          for i in 1 2 3; do t ./tools/xtarget-fuzz/target/release/xtarget-fuzz replay --seed 676064306263 --index 4566 --family all --repo "$PWD" --almide "$A"; done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: probe-${{ matrix.label }}-${{ matrix.arch }}
+          path: /tmp/p/*.wasm
+          retention-days: 3
