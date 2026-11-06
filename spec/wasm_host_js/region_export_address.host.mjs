@@ -1,7 +1,7 @@
 // Driver of region_export_address.almd (#4519, ADR-0031 amendment A1c). A
 // `returns: address` export answers one number, the address, both as the raw
 // export and through the glue, which gives `regionRelease(ptr)` as for the
-// `(ptr, len)` form. The glue gives the host no instance handle, so the
+// `(ptr, len)` form; each export's address is its lease (A1d). The glue gives the host no instance handle, so the
 // instance is captured as it is created.
 import assert from "node:assert/strict";
 
@@ -41,11 +41,10 @@ export async function after(m) {
   assert.equal(t, q + 2, "a slice's address is its parent's plus its offset");
   say(`tail at +${t - q}: ${text(t, 3)}`);
 
-  // The program replaces its copy and the host gives the parent's address
-  // back: the slice's share alone keeps the block, so its bytes stay put
-  // across allocations that would reuse a freed block.
-  const next = m.in_alloc(16);
-  release(q);
+  // The program replaces its copy, and in_alloc's next call ends the
+  // parent's lease: the slice's lease alone keeps the block, so its bytes
+  // stay put across allocations that would reuse a freed block.
+  m.in_alloc(16);
   for (let i = 0; i < 64; i++) {
     const r = m.in_alloc(5);
     new Uint8Array(raw.memory.buffer, r, 5).fill(0x2a);
@@ -53,7 +52,6 @@ export async function after(m) {
   }
   say(`tail after the parent's release: ${text(t, 3)}`);
   release(t);
-  release(next);
 
   // An empty Region crosses as 0; releasing 0 is a no-op.
   assert.equal(m.in_alloc(0), 0);

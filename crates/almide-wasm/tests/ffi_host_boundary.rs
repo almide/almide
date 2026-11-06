@@ -8,6 +8,8 @@
 //!   an `ffi.alloc` Region and the next export reads what it wrote.
 //! - A1c (#4519): an export declared `returns: address` crosses as the
 //!   address alone, one i32, with every other A1 rule kept.
+//! - A1d: such an export holds one host share, a lease its next call ends,
+//!   so a host that never releases runs in bounded memory.
 //! - A4 pull: a writable `ffi.alloc` Region lent to an `@extern(wasm)`
 //!   import arrives as the (base, len) pair, the length the Region holds, and
 //!   the host fills it in place.
@@ -58,6 +60,9 @@ fn greeting_at() -> Region = ffi.region(bytes.from_string("hello"))
 
 @export(wasm, "empty_at", returns: address)
 fn empty_at() -> Region = ffi.region(bytes.new())
+
+@export(wasm, "inbox_again", returns: address)
+fn inbox_again() -> Region = inbox
 
 @export(wasm, "tail_at", returns: address)
 effect fn tail_at() -> Region = ffi.slice(inbox, 1, 2)!
@@ -427,4 +432,51 @@ fn an_address_only_export_err_traps_with_its_reason() {
     let at = r.inst.get_typed_func::<f64, i32>(&mut r.store, "inbox_at").expect("wasmtime");
     assert!(at.call(&mut r.store, -1.0).is_err());
     assert!(r.host.lock().expect("wasmtime").err.contains("ffi.alloc: negative length -1"), "{}", r.host.lock().expect("wasmtime").err);
+}
+
+/// A1d: an address-only export holds ONE host share. Its next call ends the
+/// previous lease, so the superseded address is the module's again and
+/// releasing it traps; the current lease is released like any address.
+#[test]
+fn an_address_only_export_holds_one_lease_that_its_next_call_ends() {
+    let mut r = Run::new();
+    let at = r.inst.get_typed_func::<f64, i32>(&mut r.store, "inbox_at").expect("wasmtime");
+    let p1 = at.call(&mut r.store, 4.0).expect("inbox_at");
+    assert_eq!(r.rc(p1), 2, "the inbox var's share and the lease");
+    let p2 = at.call(&mut r.store, 4.0).expect("inbox_at");
+    assert_ne!(p1, p2);
+    assert_eq!(r.rc(p2), 2, "the new block: the var's share and the lease, nothing kept for p1");
+    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").expect("wasmtime");
+    assert!(release.call(&mut r.store, p1).is_err(), "a superseded address was still the host's");
+}
+
+/// A1d: the same address in the same block, handed out again, holds the
+/// lease's one share — however many times, from one export.
+#[test]
+fn an_address_handed_out_again_holds_one_share() {
+    let mut r = Run::new();
+    let at = r.inst.get_typed_func::<f64, i32>(&mut r.store, "inbox_at").expect("wasmtime");
+    let p = at.call(&mut r.store, 4.0).expect("inbox_at");
+    let again = r.inst.get_typed_func::<(), i32>(&mut r.store, "inbox_again").expect("wasmtime");
+    for _ in 0..5 {
+        assert_eq!(again.call(&mut r.store, ()).expect("inbox_again"), p);
+    }
+    assert_eq!(r.rc(p), 3, "the var's share and one lease per export, not one per call");
+}
+
+/// A1d: a host that never calls `__region_release` runs in bounded memory:
+/// after a warm-up, thousands more 4 KB results do not grow the memory.
+#[test]
+fn an_unreleasing_host_runs_in_bounded_memory() {
+    let mut r = Run::new();
+    let at = r.inst.get_typed_func::<f64, i32>(&mut r.store, "inbox_at").expect("wasmtime");
+    for _ in 0..200 {
+        at.call(&mut r.store, 4096.0).expect("inbox_at");
+    }
+    let m = r.inst.get_memory(&mut r.store, "memory").expect("wasmtime");
+    let settled = m.data_size(&r.store);
+    for _ in 0..5000 {
+        at.call(&mut r.store, 4096.0).expect("inbox_at");
+    }
+    assert_eq!(m.data_size(&r.store), settled, "an unreleased address kept its block");
 }

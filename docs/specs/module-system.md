@@ -711,7 +711,7 @@ instance.exports.inbox_show();
 instance.exports.__region_release(ptr);                // ホストの参照を返す
 ```
 
-export に `returns: address` を書くと（`@export(wasm, "in_alloc", returns: address)`、#4519、C-453）、Region はデータ先頭のアドレス一つだけで渡る（wasm32 では `i32` 一つ）。長さを自分で知っているホストが export の戻り値を一つの数として読む形。参照の持ち方・`__region_release`・部分 Region・空の Region は `0`・`effect fn` の `err` は trap、はほかの点ですべて `(ptr, len)` の形と同じ。宣言した export だけがこの形になり、推測はしない。
+export に `returns: address` を書くと（`@export(wasm, "in_alloc", returns: address)`、#4519、C-453）、Region はデータ先頭のアドレス一つだけで渡る（wasm32 では `i32` 一つ）。長さを自分で知っているホストが export の戻り値を一つの数として読む形。部分 Region・空の Region は `0`・`effect fn` の `err` は trap、は `(ptr, len)` の形と同じ。宣言した export だけがこの形になり、推測はしない。ホストの参照は export ごとに一つだけ（リース、ADR-0031 A1d、C-454）: 同じ export を次に呼ぶと前の結果の参照が返され、同じアドレス・同じブロックをもう一度返したときは参照を増やさない。アドレスはそれを返した export の次の呼び出しまで（または `__region_release` に渡すまで）有効で、ほかの export を呼んでも動かない。`__region_release` を呼ばないホストでもメモリは増え続けない。
 
 `--host js` のグルーは Region を返す export を `f(…) → [ptr, len]`（`returns: address` なら `f(…) → ptr`）で包み、`regionRelease(ptr)` を足す。Region を受け取る export は `f(…, base, len, …)` になる。
 

@@ -27,8 +27,20 @@
 //! #4519 (amendment A1c): an export declared `@export(wasm, "sym", returns:
 //! address)` crosses as the address alone, one result in the address width,
 //! for a host that already knows the length it asked for. The adapter is the
-//! same one: it keeps the share, files the address, answers 0 for an empty
-//! Region and traps on `err`; it only leaves the length off the results.
+//! same one: it keeps a share, answers 0 for an empty Region and traps on
+//! `err`; it leaves the length off the results.
+//!
+//! Amendment A1d: such an export holds ONE host share, a lease, in two
+//! globals of its own (the address and the block) appended after the table
+//! globals, instead of an entry in the table. A result whose address and
+//! block are the lease's already gives its new share back at once; any other
+//! result ends the previous lease (its block's share is given back) and
+//! takes its place; an empty result ends it too. So a host that never calls
+//! `__region_release` holds at most one block per address-only export, and an
+//! address stays valid until its export's next call. `__region_release(ptr)`
+//! of the current lease's address ends it early; an address its export has
+//! since superseded is held by nothing, and releasing it traps like any
+//! other address the module does not hold.
 //!
 //! #4376: an `@export(wasm)` `effect fn` whose declared return is a scalar
 //! (`Int`, `Float`, `Bool`, `Unit`, the sized numbers) gets an adapter too.
@@ -75,6 +87,9 @@ pub(crate) struct ViewAt {
     pub(crate) fallible: bool,
     /// #4519: the export answers the address alone (`returns: address`).
     pub(crate) address_only: bool,
+    /// A1d: the export's lease slot among the address-only exports (its two
+    /// globals follow the table's), meaningful when `address_only`.
+    pub(crate) lease: u32,
     pub(crate) owner: u32,
     pub(crate) off: u32,
     pub(crate) len: u32,
@@ -132,6 +147,26 @@ pub(crate) enum Claimed {
 /// The export table's globals: the table block, its count and capacity.
 pub(crate) const TABLE_GLOBALS: u32 = 3;
 
+/// A1d: the lease slots, one per address-only export; each is two i32
+/// globals (address, block) after the [`TABLE_GLOBALS`].
+pub(crate) fn lease_slots(adapters: &[RegionExport]) -> u32 {
+    adapters.iter().filter(|a| a.view.as_ref().is_some_and(|v| v.address_only)).count() as u32
+}
+
+/// The globals of lease slot `k`: its address and its block.
+fn lease_globals(g: u32, k: u32) -> (u32, u32) {
+    (g + TABLE_GLOBALS + 2 * k, g + TABLE_GLOBALS + 2 * k + 1)
+}
+
+/// End the lease in `(la, lb)`: give its block's share back, clear the slot.
+fn end_lease(i: &mut wasm_encoder::InstructionSink<'_>, (la, lb): (u32, u32)) {
+    i.global_get(lb).if_(BlockType::Empty);
+    i.global_get(lb).call(F_DEC_FLAT);
+    i.end();
+    i.i32_const(0).global_set(la);
+    i.i32_const(0).global_set(lb);
+}
+
 /// Every export name claimed so far, aligned with the emitter's
 /// `export_owners`, and the Region adapters among them: plain exports and
 /// adapters share the one export namespace.
@@ -180,7 +215,8 @@ impl Claims {
             // The declaration's own word, read from the export the wrapper
             // carries (`wrap_region_exports` keeps the wasm attr on it).
             let address_only = f.export_attrs.iter().any(|a| a.target.as_str() == "wasm" && a.returns_address);
-            Some(ViewAt { fallible, address_only, owner, off, len })
+            let lease = lease_slots(&self.adapters);
+            Some(ViewAt { fallible, address_only, lease, owner, off, len })
         } else {
             None
         };
@@ -309,17 +345,17 @@ pub(crate) fn adapter(e: &RegionExport, g: u32) -> Function {
     i.local_get(view).i64_load(dword(p + at.off)).i32_wrap_i64().local_set(off);
     i.local_get(view).i64_load(dword(p + at.len)).i32_wrap_i64().local_set(len);
     i.local_get(view).call(F_DEC_FLAT);
-    // An empty view has no data: (0, 0) — 0 alone for an address-only
-    // export — and the share is released here.
+    if at.address_only {
+        lease_tail(&mut i, lease_globals(g, at.lease), (blk, off, len));
+        i.end();
+        return f;
+    }
+    // An empty view has no data: (0, 0), and the share is released here.
     i.local_get(blk).i32_eqz().local_get(len).i32_eqz().i32_or().if_(BlockType::Empty);
     i.local_get(blk).if_(BlockType::Empty);
     i.local_get(blk).call(F_DEC_FLAT);
     i.end();
-    i.i32_const(0);
-    if !at.address_only {
-        i.i32_const(0);
-    }
-    i.return_();
+    i.i32_const(0).i32_const(0).return_();
     i.end();
     // Grow the table when it is full (capacity doubles, from 8).
     i.global_get(tn).global_get(tc).i32_eq().if_(BlockType::Empty);
@@ -342,18 +378,44 @@ pub(crate) fn adapter(e: &RegionExport, g: u32) -> Function {
     i.local_get(off).i32_store(word(p));
     i.local_get(nb).local_get(blk).i32_store(word(p + 4));
     i.global_get(tn).i32_const(1).i32_add().global_set(tn);
-    i.local_get(off);
-    if !at.address_only {
-        i.local_get(len);
-    }
+    i.local_get(off).local_get(len);
     i.end();
     f
 }
 
+/// A1d: an address-only export's result, held as its lease. `blk` holds the
+/// new result's one share, `off` its offset in the block; the tail leaves the
+/// address (0 for an empty result) as the function's one result.
+fn lease_tail(i: &mut wasm_encoder::InstructionSink<'_>, (la, lb): (u32, u32), (blk, off, len): (u32, u32, u32)) {
+    let p = almide_layout::PAYLOAD;
+    // An empty result has no data: its share goes back, the previous lease
+    // ends (its validity is "until the next call"), and the answer is 0.
+    i.local_get(blk).i32_eqz().local_get(len).i32_eqz().i32_or().if_(BlockType::Empty);
+    i.local_get(blk).if_(BlockType::Empty);
+    i.local_get(blk).call(F_DEC_FLAT);
+    i.end();
+    end_lease(i, (la, lb));
+    i.i32_const(0).return_();
+    i.end();
+    i.local_get(blk).i32_const(p as i32).i32_add().local_get(off).i32_add().local_set(off);
+    // The lease's own address and block again: the one share it holds is
+    // enough, so the new one goes straight back.
+    i.local_get(off).global_get(la).i32_eq().local_get(blk).global_get(lb).i32_eq().i32_and().if_(BlockType::Empty);
+    i.local_get(blk).call(F_DEC_FLAT);
+    i.local_get(off).return_();
+    i.end();
+    // Any other result supersedes the lease.
+    end_lease(i, (la, lb));
+    i.local_get(off).global_set(la);
+    i.local_get(blk).global_set(lb);
+    i.local_get(off);
+}
+
 /// `__region_release(ptr: i32)`: give back the share an adapter filed under
 /// `ptr`, and remove the entry (the last one takes its place). 0 (an empty
-/// view) releases nothing; any other address the table does not hold traps.
-pub(crate) fn release(g: u32) -> Function {
+/// view) releases nothing. An address the table does not hold may be one of
+/// the `leases` slots' (A1d): that lease ends early. Any other address traps.
+pub(crate) fn release(g: u32, leases: u32) -> Function {
     let (tb, tn) = (g, g + 1);
     let p = almide_layout::PAYLOAD;
     let (k, at, last) = (1u32, 2u32, 3u32);
@@ -365,6 +427,13 @@ pub(crate) fn release(g: u32) -> Function {
     i.i32_const(0).local_set(k);
     i.loop_(BlockType::Empty);
     i.local_get(k).global_get(tn).i32_ge_u().if_(BlockType::Empty);
+    for slot in 0..leases {
+        let (la, lb) = lease_globals(g, slot);
+        i.global_get(la).local_get(0).i32_eq().if_(BlockType::Empty);
+        end_lease(&mut i, (la, lb));
+        i.return_();
+        i.end();
+    }
     i.unreachable();
     i.end();
     i.global_get(tb).local_get(k).i32_const(3).i32_shl().i32_add().local_tee(at);
