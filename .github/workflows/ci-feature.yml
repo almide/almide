@@ -4,7 +4,7 @@ name: Feature Branch CI
 on:
   push:
     branches:
-      - 'feature/gr4571-probe2'
+      - 'feature/gr4571-probe3'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
