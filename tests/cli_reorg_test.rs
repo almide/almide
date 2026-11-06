@@ -97,13 +97,16 @@ fn every_retired_spelling_names_its_replacement() {
     ];
     for (args, old, new) in cases {
         let want = format!("error: `{old}` was removed (#4590); use `{new}`");
-        let o = run_in(&dir, args);
-        assert_eq!(o.status.code(), Some(2), "{args:?}: exit 2\n{}", text(&o.stderr));
-        assert_eq!(text(&o.stderr).trim_end(), want, "{args:?}");
-        assert!(o.stdout.is_empty(), "{args:?}: nothing on stdout");
-
+        // `compile --json` already asks for the envelope; every other old
+        // spelling is run plain, then again with --json.
         let mut json_args: Vec<&str> = args.to_vec();
-        json_args.push("--json");
+        if !args.contains(&"--json") {
+            let o = run_in(&dir, args);
+            assert_eq!(o.status.code(), Some(2), "{args:?}: exit 2\n{}", text(&o.stderr));
+            assert_eq!(text(&o.stderr).trim_end(), want, "{args:?}");
+            assert!(o.stdout.is_empty(), "{args:?}: nothing on stdout");
+            json_args.push("--json");
+        }
         let o = run_in(&dir, &json_args);
         assert_eq!(o.status.code(), Some(2), "{json_args:?}: exit 2 under --json too");
         let v = envelope(&o, &format!("{json_args:?}"));
