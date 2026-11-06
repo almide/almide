@@ -824,7 +824,7 @@ breaks = [
 
 [[epoch]]
 n = 16
-since = "0.69.2"
+since = "0.69.1"
 name = "one-precedence-order"
 summary = "Every binary operator follows one widely used precedence order (#4531): `??` stops being a postfix and becomes a right-associative infix level below `|>`, the ranges and the arithmetic, and above the comparisons, `and` and `or`."
 breaks = [

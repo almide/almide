@@ -429,7 +429,7 @@ since = "0.69.0"
 
 [E120]
 severity = "error"
-since = "0.69.2"
+since = "0.69.1"
 
 [E420]
 severity = "error"
