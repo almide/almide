@@ -133,7 +133,9 @@ impl Parser {
         }
     }
 
-    /// The failure arm after `else`, when the else is written as one.
+    /// The failure arm after `else`, when the else is written as one. A
+    /// refused arm keeps its written pattern (the statement is already an
+    /// error) so the names it binds do not cascade into undefined-name ones.
     fn parse_guard_failure_arm(&mut self) -> Result<Option<Pattern>, String> {
         if !self.guard_arm_head_at(0) {
             return Ok(None);
@@ -157,7 +159,9 @@ impl Parser {
                     "guard let failure arm",
                 ).with_try("guard let x = r else err(e) => fallback(e)");
                 self.errors.push(at(diag));
-                Some(Pattern::Err { inner: Box::new(Pattern::Wildcard) })
+                // Keep the written pattern so its names stay bound in the
+                // else: no undefined-name cascade behind this one error.
+                Some(pattern.clone())
             }
             Pattern::Wildcard => {
                 let diag = self.diag_error(
@@ -175,7 +179,7 @@ impl Parser {
                     "guard let failure arm",
                 ).with_try("guard let x = r else err(e) => fallback(e)");
                 self.errors.push(at(diag));
-                None
+                Some(pattern.clone())
             }
         };
         if self.check(TokenType::If) || self.check(TokenType::Pipe) {

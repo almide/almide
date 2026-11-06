@@ -103,7 +103,10 @@ assign      = IDENT ("." name)* ("[" expr "]")? "=" expr (":" type)?
                ascription (`s.xs = []: List[Int]`) is optional — the target's own
                type already fixes an empty literal. *)
 guard_stmt  = "guard" expr "else" expr
-            | "guard" "let" IDENT "=" expr "else" expr     (* bind Option, else on none *)
+            | "guard" ("let" | "var") IDENT ("=" expr)? "else" fail_arm? expr
+                                                           (* bind the Ok/Some payload; no `= expr`
+                                                              = the shorthand `= IDENT` (#4543) *)
+fail_arm    = ("err" "(" (IDENT | "_") ")" | "none") "=>"  (* one arm; `err(e)` binds the error *)
 
 if_expr     = "if" expr "then" if_branch ("else" if_branch)?  (* no else => Unit *)
 if_branch   = assign | expr                                (* any `assign` target, unbraced:

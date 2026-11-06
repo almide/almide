@@ -401,7 +401,8 @@ pub enum Stmt {
     /// - `fail`: `else err(e) => …` / `else none => …` — the failure arm's
     ///   pattern. `err(e)` binds the Result's error in `else_`; it is only ever
     ///   `Pattern::None` or `Pattern::Err` over an `Ident` / `Wildcard` (the
-    ///   parser refuses every other shape). `None` is the plain `else expr`.
+    ///   parser refuses every other shape, keeping the written pattern only
+    ///   beside that parse error). `None` is the plain `else expr`.
     GuardLet {
         name: Sym,
         scrutinee: Expr,
