@@ -2459,7 +2459,12 @@ jobs:
     needs: [changes, build]
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # #4559, measured over 72 jobs (2026-11-05/06): without the valgrind
+    # download the slowest class (EPYC 7763) finishes at p95 16.3 min, worst
+    # 18.7 min — too close to the old 20. The limit is that worst run plus
+    # the worst observed valgrind download (14.5 min, what a cold cache on a
+    # slow mirror still pays), rounded up: 33.2 -> 35.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
