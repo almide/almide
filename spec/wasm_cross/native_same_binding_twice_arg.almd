@@ -1,0 +1,89 @@
+// @contract: C-258
+// #4517: one binding passed at two argument positions of one call, at its
+// last use (`map.merge(m, m)`). Both operands are the same value, read once
+// each, left to right. The certified native render moved the binding into
+// the call's owned-reuse routine at the first position and borrowed it at
+// the second (`almide_rt_map_merge_owned(v0, &v0)`): `almide check`
+// accepted the program and rustc rejected the native build (E0382). wasm
+// ran it. A binding the same call reads more than once now moves at none of
+// its positions. Cells: map.merge on a `let`, a rebind, a self tail call, a
+// fold accumulator and an Int-keyed map; and the other calls that take two
+// heap operands of one type, each given the same binding twice: the set
+// algebra, list `+` over Int, String and nested lists, string `+`, Bytes
+// `+` and a user fn.
+fn merge_let() -> String = {
+  let y0: Map[String, String] = [:]
+  let r1: Bool = map.contains(map.merge(y0, y0), " nbsp ")
+  "merge let: ${r1}"
+}
+
+fn merge_rebind() -> String = {
+  var m = map.from_list([("a" + int.to_string(1), "x"), ("b", "y")])
+  m = map.merge(m, m)
+  "merge rebind: ${map.len(m)} ${m["a1"] ?? "-"}"
+}
+
+fn go(m: Map[String, Int], n: Int) -> Map[String, Int] =
+  if n == 0 then m else go(map.merge(m, m), n - 1)
+
+fn merge_tail() -> String = {
+  let m = go(map.from_list([("k" + int.to_string(1), 1), ("k2", 2)]), 3)
+  "merge tail: ${map.len(m)}"
+}
+
+fn merge_fold() -> String = {
+  let m0 = map.from_list([("k" + int.to_string(1), 1)])
+  let m = list.fold([1, 2, 3], m0, (acc, x) => map.merge(acc, acc))
+  "merge fold: ${map.len(m)}"
+}
+
+fn merge_int_keys() -> String = {
+  let m = map.from_list([(1, 2), (3, 4)])
+  "merge int keys: ${map.len(map.merge(m, m))}"
+}
+
+fn set_ops() -> String = {
+  let a = set.from_list(["a" + int.to_string(1), "b"])
+  let b = set.from_list(["c" + int.to_string(2), "d", "e"])
+  let c = set.from_list(["f" + int.to_string(3)])
+  let d = set.from_list([1, 2, 3])
+  var e = set.from_list([4, 5])
+  e = set.union(e, e)
+  let u = set.len(set.union(a, a))
+  let i = set.len(set.intersection(b, b))
+  let x = set.len(set.difference(c, c))
+  let y = set.len(set.symmetric_difference(d, d))
+  "sets: ${u} ${i} ${x} ${y} ${set.len(e)}"
+}
+
+fn list_concats() -> String = {
+  let xs = list.range(0, 4)
+  let ss = ["a" + int.to_string(1), "b"]
+  let xss = [
+    list.range(0, 2),
+    [7]
+  ]
+  var rs = ["r" + int.to_string(1), "s"]
+  rs = rs + rs
+  "lists: ${list.len(xs + xs)} ${(ss + ss) |> list.join(",")} ${list.len(xss + xss)} ${rs |> list.join(",")}"
+}
+
+fn both(a: List[String], b: List[String]) -> List[String] = a + b
+
+fn text_and_bytes() -> String = {
+  let s = "ab" + int.to_string(3)
+  let b = bytes.from_string("cd" + int.to_string(4))
+  let xs = ["u" + int.to_string(5), "v"]
+  "text: ${s + s} ${bytes.len(b + b)} ${both(xs, xs) |> list.join(",")}"
+}
+
+fn main() -> Unit = {
+  println(merge_let())
+  println(merge_rebind())
+  println(merge_tail())
+  println(merge_fold())
+  println(merge_int_keys())
+  println(set_ops())
+  println(list_concats())
+  println(text_and_bytes())
+}

@@ -117,6 +117,45 @@ fn add(a: Int, b: Int) -> Int"#,
         assert!(attrs.is_empty());
     }
 
+    // ── #4519: `returns: address` on a wasm export ────────────────
+
+    #[test]
+    fn export_returns_address_is_recorded() {
+        for src in [
+            "@export(wasm, \"in_alloc\", returns: address)\neffect fn in_alloc(n: Int) -> Region",
+            "@export(wasm, \"in_alloc\", returns = address)\neffect fn in_alloc(n: Int) -> Region",
+        ] {
+            let prog = parse_program(src);
+            let Decl::Fn { export_attrs, attrs, .. } = first_fn(&prog) else { panic!("expected fn") };
+            assert_eq!(export_attrs.len(), 1);
+            assert!(export_attrs[0].returns_address, "{src}");
+            assert_eq!(export_attrs[0].symbol.as_str(), "in_alloc");
+            assert!(attrs.is_empty());
+        }
+        let prog = parse_program("@export(wasm, \"in_alloc\")\neffect fn in_alloc(n: Int) -> Region");
+        let Decl::Fn { export_attrs, .. } = first_fn(&prog) else { panic!("expected fn") };
+        assert!(!export_attrs[0].returns_address);
+    }
+
+    #[test]
+    fn export_named_args_other_than_returns_address_are_refused() {
+        let cases = [
+            ("@export(wasm, \"f\", result: address)\nfn f() -> Region", "no named argument `result`"),
+            ("@export(wasm, \"f\", result = \"address\")\nfn f() -> Region", "no named argument `result`"),
+            ("@export(wasm, \"f\", returns: pair)\nfn f() -> Region", "takes only `address`"),
+            ("@export(wasm, \"f\", returns: \"address\")\nfn f() -> Region", "takes only `address`"),
+            ("@export(wasm, \"f\", returns: address, returns: address)\nfn f() -> Region", "repeats"),
+            ("@export(wasm, \"f\", address)\nfn f() -> Region", "got 3"),
+            ("@export(wasm, \"f\", returns: address, \"g\")\nfn f() -> Region", "positional argument after a named one"),
+            ("@export(c, \"f\", returns: address)\nfn f() -> Int", "applies only to @export(wasm, "),
+        ];
+        for (src, want) in cases {
+            let e = parse_err(src);
+            assert!(e.contains(want), "{src}: {e}");
+            assert!(e.contains("returns: address"), "the hint names the accepted spelling: {e}");
+        }
+    }
+
     // ── Generic attribute shapes ─────────────────────────────────
 
     #[test]

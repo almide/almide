@@ -293,7 +293,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-255 | Record literals, member reads, and spread updates preserve value semantics identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-256 | break and continue take effect at their statement position, identically on both targets and the interp | 0.57.1 | active | fixture | 2 |
 | C-257 | The scalar error operators evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 7 |
+| C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 9 |
 | C-259 | Variant constructor references build values eliminated identically by match on both targets | 0.57.1 | active | fixture | 1 |
 | C-260 | The declaration family compiles and runs identically on both targets | 0.57.1 | active | fixture | 5 |
 | C-261 | Canonical float values including the negative-zero sign display identically on both targets | 0.57.1 | active | fixture | 1 |
@@ -488,4 +488,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-450 | A directory entry whose name is not UTF-8 lists as its lossy decode, and a stock host's refusal of it is a classified error | 0.69.0 | active | fixture | 0 |
 | C-451 | A scalar effect fn exported to wasm crosses as its value: the raw export answers the ok Int, Float or Bool itself (nothing for Unit), and an err writes its message to stderr and traps | 0.69.0 | active | fixture | 0 |
 | C-452 | An @export(c) fn crosses C at the C ABI table's widths, Int as int64_t; an effect fn answers its ok value, and an err writes its message to stderr and exits 1 | 0.69.0 | active | fixture | 0 |
+| C-453 | A Region export declared returns: address crosses the wasm host boundary as its data address alone, one value in the memory's address width, with every other rule of the (ptr, len) form kept | 0.69.1 | active | fixture | 0 |
 

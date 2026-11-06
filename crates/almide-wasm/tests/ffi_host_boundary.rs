@@ -6,6 +6,8 @@
 //!   one share of the block until it gives `ptr` back to `__region_release`,
 //!   so the bytes stay put across later calls; the host writes straight into
 //!   an `ffi.alloc` Region and the next export reads what it wrote.
+//! - A1c (#4519): an export declared `returns: address` crosses as the
+//!   address alone, one i32, with every other A1 rule kept.
 //! - A4 pull: a writable `ffi.alloc` Region lent to an `@extern(wasm)`
 //!   import arrives as the (base, len) pair, the length the Region holds, and
 //!   the host fills it in place.
@@ -44,6 +46,21 @@ effect fn tail_of() -> Region = ffi.slice(ffi.region(bytes.from_string("hello"))
 
 @export(wasm, "inbox_tail")
 effect fn inbox_tail() -> Region = ffi.slice(inbox, 1, 2)!
+
+@export(wasm, "inbox_at", returns: address)
+effect fn inbox_at(n: Float) -> Region = {
+  inbox = ffi.alloc(int.from_saturating(n))!
+  inbox
+}
+
+@export(wasm, "greeting_at", returns: address)
+fn greeting_at() -> Region = ffi.region(bytes.from_string("hello"))
+
+@export(wasm, "empty_at", returns: address)
+fn empty_at() -> Region = ffi.region(bytes.new())
+
+@export(wasm, "tail_at", returns: address)
+effect fn tail_at() -> Region = ffi.slice(inbox, 1, 2)!
 
 @export(wasm, "churn")
 fn churn(n: Int) -> Int = list.range(0, n) |> list.map((i) => bytes.len(bytes.from_string("filler-${i}"))) |> list.fold(0, (a, x) => a + x)
@@ -334,4 +351,80 @@ fn a_region_crosses_an_import_as_two_i32s_on_wasm32() {
     };
     assert_eq!(ty("fill"), (vec!["i32".into(), "i32".into(), "i64".into()], vec![]));
     assert_eq!(ty("sum"), (vec!["i32".into(), "i32".into()], vec!["i64".into()]));
+}
+
+/// #4519 (A1c): `returns: address` makes the export `(params…) -> i32`, the
+/// view's data address alone; a `Float` parameter stays an f64, so a host
+/// passes a plain number.
+#[test]
+fn an_address_only_region_export_returns_one_i32() {
+    let mut r = Run::new();
+    let ty = r.inst.get_func(&mut r.store, "inbox_at").expect("wasmtime").ty(&r.store);
+    assert!(matches!(ty.params().collect::<Vec<_>>()[..], [ValType::F64]), "{ty:?}");
+    assert!(matches!(ty.results().collect::<Vec<_>>()[..], [ValType::I32]), "{ty:?}");
+    let ty = r.inst.get_func(&mut r.store, "greeting_at").expect("wasmtime").ty(&r.store);
+    assert!(ty.params().len() == 0 && matches!(ty.results().collect::<Vec<_>>()[..], [ValType::I32]), "{ty:?}");
+    // The pair form beside it is unchanged.
+    let ty = r.inst.get_func(&mut r.store, "inbox_open").expect("wasmtime").ty(&r.store);
+    assert!(matches!(ty.results().collect::<Vec<_>>()[..], [ValType::I32, ValType::I32]), "{ty:?}");
+}
+
+/// A1c push: the host writes at the address the export answered, for the
+/// length it asked for, and the next export reads those bytes; the address
+/// is the one the pair form would hand out, so the host's share and
+/// `__region_release` work as for A1.
+#[test]
+fn the_host_writes_at_an_address_only_export_and_the_next_export_reads_it() {
+    let mut r = Run::new();
+    let at = r.inst.get_typed_func::<f64, i32>(&mut r.store, "inbox_at").expect("wasmtime");
+    let p = at.call(&mut r.store, 4.0).expect("inbox_at");
+    assert!(p != 0, "{p}");
+    let m = r.inst.get_memory(&mut r.store, "memory").expect("wasmtime");
+    m.data_mut(&mut r.store)[p as usize..(p + 4) as usize].copy_from_slice(&[1, 2, 3, 40]);
+    let sum = r.inst.get_typed_func::<(), i64>(&mut r.store, "inbox_sum").expect("wasmtime");
+    assert_eq!(sum.call(&mut r.store, ()).expect("wasmtime"), 46);
+    assert_eq!(r.rc(p), 2, "the inbox var's share and the host's");
+    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").expect("wasmtime");
+    release.call(&mut r.store, p).expect("wasmtime");
+    assert_eq!(r.rc(p), 1, "the release took back the host's share alone");
+    assert_eq!(sum.call(&mut r.store, ()).expect("wasmtime"), 46);
+    assert!(release.call(&mut r.store, p).is_err(), "a second release of one address did not trap");
+}
+
+/// A1c ownership: a Region only the host's share holds survives later
+/// allocation until released; a slice crosses as its own address inside its
+/// parent; an empty Region crosses as 0, whose release is a no-op.
+#[test]
+fn an_address_only_export_keeps_every_other_a1_rule() {
+    let mut r = Run::new();
+    let call0 = |r: &mut Run, name: &str| {
+        let f = r.inst.get_typed_func::<(), i32>(&mut r.store, name).expect(name);
+        f.call(&mut r.store, ())
+    };
+    let p = call0(&mut r, "greeting_at").expect("greeting_at");
+    assert_eq!(r.mem(p, 5), b"hello".to_vec());
+    assert_eq!(r.rc(p), 1, "only the host's share holds the block");
+    let churn = r.inst.get_typed_func::<i64, i64>(&mut r.store, "churn").expect("wasmtime");
+    churn.call(&mut r.store, 300).expect("wasmtime");
+    assert_eq!(r.mem(p, 5), b"hello".to_vec(), "the bytes moved under the host");
+    let release = r.inst.get_typed_func::<i32, ()>(&mut r.store, "__region_release").expect("wasmtime");
+    release.call(&mut r.store, p).expect("wasmtime");
+    let at = r.inst.get_typed_func::<f64, i32>(&mut r.store, "inbox_at").expect("wasmtime");
+    let base = at.call(&mut r.store, 4.0).expect("inbox_at");
+    let q = call0(&mut r, "tail_at").expect("tail_at");
+    assert_eq!(q, base + 1, "a slice's address is its parent's plus its offset");
+    release.call(&mut r.store, q).expect("wasmtime");
+    release.call(&mut r.store, base).expect("wasmtime");
+    assert_eq!(call0(&mut r, "empty_at").expect("empty_at"), 0);
+    release.call(&mut r.store, 0).expect("wasmtime");
+}
+
+/// A1c: an `effect fn` export's err traps with its reason on stderr, as the
+/// pair form's does.
+#[test]
+fn an_address_only_export_err_traps_with_its_reason() {
+    let mut r = Run::new();
+    let at = r.inst.get_typed_func::<f64, i32>(&mut r.store, "inbox_at").expect("wasmtime");
+    assert!(at.call(&mut r.store, -1.0).is_err());
+    assert!(r.host.lock().expect("wasmtime").err.contains("ffi.alloc: negative length -1"), "{}", r.host.lock().expect("wasmtime").err);
 }

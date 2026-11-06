@@ -82,7 +82,8 @@ fn public_functions(root: &Path) -> BTreeSet<String> {
 }
 
 /// `collect_test_files` (src/cli/mod.rs): `.almd` files with a test block,
-/// skipping hidden, `target` and `node_modules` directories and symlinks.
+/// skipping hidden, `target` and `node_modules` directories, directories that
+/// hold an `.almideignore` marker, and symlinks.
 fn test_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
     if (name.starts_with('.') && name != ".") || name == "target" || name == "node_modules" {
@@ -93,7 +94,9 @@ fn test_files(dir: &Path, out: &mut Vec<PathBuf>) {
         let path = entry.path();
         let is_link = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink());
         if path.is_dir() && !is_link {
-            test_files(&path, out);
+            if !path.join(".almideignore").is_file() {
+                test_files(&path, out);
+            }
         } else if path.extension().is_some_and(|e| e == "almd")
             && let Ok(text) = std::fs::read_to_string(&path)
             && (text.contains("\ntest ") || text.starts_with("test "))

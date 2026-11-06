@@ -56,3 +56,10 @@ pub(crate) fn confined(root: &std::path::Path, base: &std::path::Path, p: &str, 
 pub(crate) fn is_skipped_dir(name: &str) -> bool {
     (name.starts_with('.') && name != "." && name != "..") || name == "target" || name == "node_modules"
 }
+
+/// A directory whose `.almideignore` marker (an empty file) takes it out of
+/// test discovery: the walk never enters it. Applied to what a sweep FINDS,
+/// never to its root, so `almide test <dir>` on a marked directory still runs.
+pub(crate) fn has_ignore_marker(dir: &std::path::Path) -> bool {
+    dir.join(".almideignore").is_file()
+}

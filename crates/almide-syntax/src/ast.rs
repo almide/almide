@@ -441,6 +441,14 @@ pub struct ExternAttr {
 pub struct ExportAttr {
     pub target: Sym,     // "c"
     pub symbol: Sym,     // e.g., "bridge_add"
+    /// `returns: address` (#4519): an `@export(wasm, "sym", returns: address)`
+    /// fn returning a Region crosses as the view's data address alone, one
+    /// value in the memory's address width, instead of A1's `(ptr, len)`
+    /// pair. Every other A1 rule holds (the host's share, the address table,
+    /// `__region_release`, an empty Region is 0, an `err` traps). Only a
+    /// wasm export returning a Region takes it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub returns_address: bool,
 }
 
 /// Generic `@name(args)` attribute on a declaration.
