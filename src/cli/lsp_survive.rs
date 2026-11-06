@@ -7,7 +7,8 @@
 // - neither — the editor's current BUFFER for that document is the proposal
 //   (the natural question in an editor: "would my unsaved changes survive?").
 //
-// The answer is exactly what `almide survive <file> --with - --json` prints:
+// The answer is exactly what `almide apply <file> --with - --dry-run --json`
+// prints under `--raw-json` (the report without the shared envelope):
 // the handler runs the CLI as a child process, the same single path the MCP
 // tool takes, so the three surfaces cannot drift. The child runs in the
 // file's project root (the nearest `almide.toml`), where the CLI resolves
@@ -78,7 +79,7 @@ fn handle_survive(req: &Request, documents: &HashMap<Uri, String>, workspace_roo
         Err(e) => return fail(lsp_server::ErrorCode::InternalError, format!("cannot locate the almide binary: {e}")),
     };
     let child = std::process::Command::new(exe)
-        .args(["survive", "--with", "-", "--json", &as_kind, "--"])
+        .args(["--raw-json", "apply", "--with", "-", "--dry-run", "--json", &as_kind, "--"])
         .arg(&abs)
         .env("ALMIDE_DEPS_CACHE_ONLY", "1")
         .current_dir(&cwd)
@@ -88,7 +89,7 @@ fn handle_survive(req: &Request, documents: &HashMap<Uri, String>, workspace_roo
         .spawn();
     let mut child = match child {
         Ok(c) => c,
-        Err(e) => return fail(lsp_server::ErrorCode::InternalError, format!("cannot run almide survive: {e}")),
+        Err(e) => return fail(lsp_server::ErrorCode::InternalError, format!("cannot run almide apply --dry-run: {e}")),
     };
     if let Some(mut pipe) = child.stdin.take() {
         std::thread::spawn(move || {
@@ -98,7 +99,7 @@ fn handle_survive(req: &Request, documents: &HashMap<Uri, String>, workspace_roo
     }
     let out = match child.wait_with_output() {
         Ok(o) => o,
-        Err(e) => return fail(lsp_server::ErrorCode::InternalError, format!("almide survive failed: {e}")),
+        Err(e) => return fail(lsp_server::ErrorCode::InternalError, format!("almide apply --dry-run failed: {e}")),
     };
     let stdout = String::from_utf8_lossy(&out.stdout);
     match serde_json::from_str::<serde_json::Value>(stdout.trim()) {
@@ -108,7 +109,7 @@ fn handle_survive(req: &Request, documents: &HashMap<Uri, String>, workspace_roo
         },
         Err(_) => fail(
             lsp_server::ErrorCode::RequestFailed,
-            format!("almide survive produced no JSON report: {}", String::from_utf8_lossy(&out.stderr).trim()),
+            format!("almide apply --dry-run produced no JSON report: {}", String::from_utf8_lossy(&out.stderr).trim()),
         ),
     }
 }

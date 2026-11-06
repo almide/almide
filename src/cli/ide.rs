@@ -1,4 +1,4 @@
-//! `almide ide` — semantic queries that replace grep for LLM/agent API discovery.
+//! `almide query` (was `ide`, #4590) — semantic queries that replace grep for LLM/agent API discovery.
 //!
 //! `outline`: list every public decl in a file or stdlib module as one line each.
 //! `doc`: show signature + doc for a single symbol (stdlib `module.fn` or user-defined).
@@ -181,11 +181,11 @@ fn try_print_user_type_doc(iface: &almide::interface::ModuleInterface, symbol: &
 /// Handles:
 ///   `module.fn`              — stdlib lookup (e.g. `string.to_upper`)
 ///   `@stdlib/module.fn`      — same, with explicit prefix for symmetry
-///                              with `almide ide outline @stdlib/<module>`
+///                              with `almide query outline @stdlib/<module>`
 ///   `bare_name`              — user fn/type in the supplied `file`
 pub fn cmd_ide_doc(symbol: &str, file: &str) {
     // Strip the `@stdlib/` prefix for ergonomic symmetry with `outline`.
-    // `almide ide doc @stdlib/string.to_upper` and `almide ide doc
+    // `almide query doc @stdlib/string.to_upper` and `almide query doc
     // string.to_upper` now behave identically.
     let resolved = symbol.strip_prefix(STDLIB_PREFIX).unwrap_or(symbol);
     if try_print_stdlib_doc(resolved) { return; }
@@ -198,7 +198,7 @@ pub fn cmd_ide_doc(symbol: &str, file: &str) {
     if try_print_user_type_doc(&iface, symbol) { return; }
 
     err(&format!("error: symbol '{}' not found", symbol));
-    err(&format!("  hint: try `almide ide outline {}` to list available symbols", file));
+    err(&format!("  hint: try `almide query outline {}` to list available symbols", file));
     std::process::exit(1);
 }
 
