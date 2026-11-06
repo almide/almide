@@ -247,12 +247,12 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "regexcycle-8": "8:400000",
     "regexcycle-32": "32:400000",
     # globalread (#4562): frames per row, unequal on purpose — the relation is
-    # per frame. The local row is the fast one natively (~0.014 ms a frame:
-    # 3000 frames read 0.042 s on one runner, under the floor), so it runs
-    # 8000. With the copy (develop before #4562) the global row read 4.03 s
+    # per frame. The local row is the fast one natively (~0.009 ms a frame:
+    # 8000 frames read 0.072 s on one runner, under the floor), so it runs
+    # 16000. With the copy (develop before #4562) the global row read 4.03 s
     # for 1500 frames natively, ~190x the local row per frame.
-    "globalread-global": "g:3000",
-    "globalread-local": "l:8000",
+    "globalread-global": "g:6000",
+    "globalread-local": "l:16000",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",

@@ -208,6 +208,8 @@ fib 0.120
 ablation/fib 12.000
 # globalread (#4562): per-frame time of the module-level-var lookups over the
 # same lookups through parameters (GLOBAL READ, ceilings 4x native, 3x wasm).
-# PENDING: the first CI reading.
-globalread-native 1.000
-globalread-wasm 1.000
+# ubuntu-latest PR runner, 2026-11-06 (g:3000 / l:8000): native 0.0354 s
+# against 0.0718 s, 1.32x per frame; wasm 0.122 s against 0.428 s, 0.76x.
+# Develop before the fix read ~190x natively (4.03 s for 1500 frames).
+globalread-native 1.320
+globalread-wasm 0.760
