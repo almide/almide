@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-10-31
+> Last updated: 2026-11-07
 
 ## Overview
 
@@ -9,6 +9,85 @@ almide <command> [options] [arguments]
 ```
 
 プロジェクトルートに `almide.toml` + `src/main.almd` があれば、ファイル引数は省略可能。自動的に `src/main.almd` が使われる。
+
+### Command set
+
+`almide --help` (and a bare `almide`, which prints the same help and exits 0)
+lists the commands in four groups (#4590):
+
+| Group | Commands |
+|---|---|
+| Daily | `init` `run` `build` `test` `check` `fmt` `fix` `bench` `explain` |
+| Dependencies | `add` `remove` `update` `trust` `deps` (`deps --path NAME`) |
+| Agents | `apply` `query` `mcp` `lsp` |
+| Toolchain | `upgrade` `tool` `verify` `clean` `repl` |
+
+Hidden from `--help` but still accepted: `emit` (also reached through
+[Legacy Mode](#legacy-mode)), `switches`, `docs-gen`, `budgets`, `compile` (the
+`.almdi` artifact writer), and the internal `survive-test-leg` /
+`test-run-compile`.
+
+### Renamed commands
+
+#4590 renamed these with **no aliases**. Each old spelling exits 2 with an error
+that names the new spelling (under `--json`, the error is the envelope's one
+diagnostic, `ok: false`).
+
+| Old spelling | New spelling |
+|---|---|
+| `almide check --explain E001` | [`almide explain E001`](#almide-explain) |
+| `almide dep-path NAME` | [`almide deps --path NAME`](#almide-deps---path) |
+| `almide survive F --with E [--as K] [--json] [--timeout N] [--allow-removed]` | [`almide apply F --with E --dry-run [same flags]`](#almide-apply) — same report, same exit codes (0 survives / 1 does not / 2 could not judge) |
+| `almide ide outline …` | [`almide query outline …`](#almide-query) |
+| `almide ide doc SYM` | `almide query doc SYM` |
+| `almide ide stdlib-snapshot [--modules m] [--json]` | `almide query stdlib [--modules m] [--json]` |
+| `almide compile [MOD] --json` | `almide query interface [MOD] --json` |
+| `almide compile [MOD] --dry-run` | `almide query interface [MOD]` (human-readable) |
+| `almide self-update [vX] [--skip-attestation]` | [`almide upgrade [vX] [--skip-attestation]`](#almide-upgrade) |
+| `almide install SPEC [flags]` | [`almide tool install SPEC [same flags]`](#almide-tool-install) |
+| bare `almide` (started the REPL) | prints the grouped help, exit 0; the REPL is [`almide repl`](#almide-repl) |
+
+New in the same change: [`almide remove NAME`](#almide-remove) and `almide repl`.
+
+### The `--json` envelope
+
+Every command that takes `--json` prints exactly **one line** on stdout:
+
+```json
+{"schema_version":1,"ok":true,"diagnostics":[],"result":{"errors":0,"warnings":0}}
+```
+
+- `ok` is `true` exactly when the exit code is 0. Exit codes are the same as
+  without `--json`.
+- `diagnostics` rows have the shape of `almide check --json`'s rows (`level, code,
+  message, hint, here, try, try_replace, applicability, suggestions, context,
+  file, line, col, end_col, secondary`, … — see [`almide check`](#almide-check)).
+  A failure with no structured diagnostic carries one row whose `message` is the
+  error text (`code` is `""`).
+- `result` per command:
+
+| Command | `result` |
+|---|---|
+| `check --json` | `{"errors":N,"warnings":M}` (the rows are in `diagnostics`) |
+| `test --json` | `{"files":[…]}`, one object per test file |
+| `fmt --json` | the fmt report object |
+| `fix --json` | the fix report object (it keeps its own `schema_version`) |
+| `explain --list --json` | `{"codes":[…]}` |
+| `explain CODE --json` | `{"code":"E001","text":"…"}` |
+| `query outline --json` | the outline object (`module`, `source`, `types`, `constants`, `functions`) |
+| `query stdlib --json` | `{"modules":[…]}` |
+| `query interface --json` | the module interface object |
+| `apply --json` (with or without `--dry-run`) | the survival report object |
+| `deps --path NAME --json` | `{"name":"NAME","path":"/abs/dir"}` |
+| every other command with `--json` (`add`, `remove`, `update`, `trust`, `deps`, `clean`, `init`, `build`, `bench`, `upgrade`, `tool install`, `query doc`) | `{"stdout":"<text>","stderr":"<text>"}` |
+
+- A clap usage error with `--json` anywhere in argv also prints the envelope
+  (`ok: false`) and exits 2.
+- Consumers read the payload with `jq '.result'` / `json.loads(out)["result"]`,
+  and check rows with `jq '.diagnostics[]'`.
+
+Tests: `tests/check_json_exit_code_test.rs`, `tests/test_json_exit_code_test.rs`,
+`tests/mcp_test.rs`, `tests/survive_test.rs`
 
 ---
 
@@ -204,7 +283,7 @@ almide test spec/lang/                  # ディレクトリ指定
 almide test spec/lang/expr_test.almd    # ファイル指定
 almide test --run "pattern"             # テスト名でフィルタ
 almide test --target wasm               # WASM ターゲットでテスト
-almide test --json                      # 結果を JSONL (1行1ファイル) で出力
+almide test --json                      # the --json envelope; per-file results in .result.files
 almide test --update-snapshots x_test.almd  # スナップショットの受理(期待値リテラルを書き換え)
 ```
 
@@ -213,7 +292,7 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 | `-r, --run <pattern>` | テスト名のパターンフィルタ(下記) |
 | `--no-check` | 型チェックをスキップ |
 | `--locked` | `almide.lock` に無い依存のフェッチと、ロックを変える解決を拒否し、ロックを書かない(#4093)。CI 向け |
-| `--json` | JSON 形式で結果出力 |
+| `--json` | The [`--json` envelope](#the---json-envelope); `result` is `{"files":[…]}`, one object per test file |
 | `--target wasm` | wasm レグだけで実行（native fallback なし） |
 | `--update-snapshots` | `testing.assert_snapshot` の不一致を受理し、呼び出し側の期待値リテラルをソース内で書き換える(`ALMIDE_UPDATE_SNAPSHOTS=1` でも同じ) |
 | `--ci` | CI モード: スナップショットを一切書かない(`CI=true` でも同じ)。新規・乖離はどちらも失敗 |
@@ -221,8 +300,8 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 | `--show-output` | 通ったテストも含め、全テストが stdout / stderr に書いたものを表示する |
 
 実行のたびに **実行テスト数**を報告する: `2 tests in 1 file`。`--run` が何かを除外した
-ときは `0 tests in 1 file (2 filtered out)` のように除外数も付く。`--json` は各行に
-`"tests"` と `"filtered_out"` を持つ。
+ときは `0 tests in 1 file (2 filtered out)` のように除外数も付く。`--json` では
+`result.files[]` の各要素が `"tests"` と `"filtered_out"` を持つ。
 
 **ゼロの扱い**(#2084, #4264):
 
@@ -369,13 +448,15 @@ stamp は `<cache base>/.almide-evict-stamp`。
 単位ごとの実差分になる。ファイル内の失敗は**ソース行順**に並ぶので、2回の実行を
 そのまま diff できる。
 
-`--json` は1ファイル1行の JSONL:
+`--json` prints one [envelope](#the---json-envelope) line; `result.files` holds
+one object per test file (these objects were printed one per line before #4590):
 
 ```json
-{"file":"spec/lang/x_test.almd","status":"fail","exit_code":101,
- "failures":[{"name":"string mismatch","file":"spec/lang/x_test.almd","line":4,
-              "op":"assert_eq","expected":"\"a\\nB\"","found":"\"a\\nb\"",
-              "diff":"      a\n    - B\n    + b\n","message":"…"}]}
+{"schema_version":1,"ok":false,"diagnostics":[],"result":{"files":[
+ {"file":"spec/lang/x_test.almd","status":"fail","exit_code":101,
+  "failures":[{"name":"string mismatch","file":"spec/lang/x_test.almd","line":4,
+               "op":"assert_eq","expected":"\"a\\nB\"","found":"\"a\\nb\"",
+               "diff":"      a\n    - B\n    + b\n","message":"…"}]}]}}
 ```
 
 テストの書き方:
@@ -429,8 +510,7 @@ test "render" {
 almide check                            # パッケージ内: src/ 配下の .almd を全部チェック (#2165)
 almide check app.almd                   # 指定ファイルをチェック
 almide check --deny-warnings            # 警告をエラーとして扱う
-almide check --json                     # 診断を JSON で出力(パッケージ内なら src/ 全部、#2253)
-almide check --explain E001             # エラーコードの説明
+almide check --json                     # 診断を --json envelope の diagnostics で出力(パッケージ内なら src/ 全部、#2253)
 almide check --effects                  # 各関数のエフェクト分析を表示
 almide check --timings                  # フロントエンドの phase 別内訳
 almide check app.almd --profile critical --allow IO  # critical profile (#567)
@@ -441,26 +521,20 @@ almide check app.almd --profile critical --allow IO  # critical profile (#567)
 | `--deny-warnings` | 警告をエラー扱い |
 | `--profile critical` | 全関数に bounded profile を適用、capability は deny-all から(下記) |
 | `--allow <CAP>` | `--profile critical` で capability を 1 つ許可(複数回指定可) |
-| `--json` | 診断を JSON で出力（1 行 1 診断、エディタ/エージェント統合用） |
-| `--explain <code>` | エラーコードの説明(`almide explain <code>` と同じ) |
+| `--json` | The [`--json` envelope](#the---json-envelope): one row per diagnostic in `diagnostics`, `result` = `{"errors":N,"warnings":M}` (editor / agent integration) |
 | `--budget NAME=N` | コンパイルコストの予算を 1 つ設定(下記、複数回指定可。`--profile critical` では拒否) |
+| `--effects` | 各関数のエフェクト/ケイパビリティ分析。受け取ったクロージャを呼ぶ関数は `{} + whatever f (arg 1) does` と表示され pure に数えない(#3268)。クロージャのカテゴリ集合は値と一緒に流れ、呼ぶ側の呼び出し地点に課される(ADR-0026 D1、`docs/specs/effect-system.md`)。`[permissions]` 違反は `path:` 行で経路を示す(D4) |
+| `--timings` | lex / parse / check の phase 別 wall time（#1311） |
 
 `./almide.toml` にどのリーダーも読まないキー(`brnach = "main"` など)があると、
 `check` / `build` / `run` / `test` を含む全コマンドが一度だけ警告する(#3382):
 行(`almide.toml:LINE`)・キー・その表が受け付けるキー・1 編集距離の候補を出す。
 ビルドはキーが無い場合と同じに走り、終了コードは変わらない(`--deny-warnings`
-も数えない)。`--json` では `"level":"warning"` の行として stdout に、それ以外は
+も数えない)。`--json` では envelope の `diagnostics` に `"level":"warning"` の行として、それ以外は
 stderr に出る。表ごとの受理キーは [package-system.md §6](package-system.md#6-dependency-declaration)。
 
-`almide explain --list [--json]`(#2149)は全コードを 1 行ずつ出す:
-`{code, mnemonic, severity, since, verdict}`。`mnemonic` は `docs/diagnostics/<CODE>.md`
-の題、`verdict` はその `## Fix-it verdict`(mechanical / conditional / not-fixable)、
-`severity`(error / warning / error|warning)と `since`(そのコードを初めて出したリリース)は
-`docs/diagnostics/codes.toml`。行の集合はコンパイラが出すコードの集合と一致し
-(`with_code` の 77 + ビルド経路が `error[EXXX]` を直接出す E081–E083)、
-severity はフィクスチャ全件で実際の level と照合される(`tests/explain_list_test.rs`)。
-| `--effects` | 各関数のエフェクト/ケイパビリティ分析。受け取ったクロージャを呼ぶ関数は `{} + whatever f (arg 1) does` と表示され pure に数えない(#3268)。クロージャのカテゴリ集合は値と一緒に流れ、呼ぶ側の呼び出し地点に課される(ADR-0026 D1、`docs/specs/effect-system.md`)。`[permissions]` 違反は `path:` 行で経路を示す(D4) |
-| `--timings` | lex / parse / check の phase 別 wall time（#1311） |
+`almide check --explain CODE` was removed in #4590: it exits 2 with an error naming
+[`almide explain CODE`](#almide-explain).
 
 #### コンパイルコストの予算（ADR-0030, #4136）
 
@@ -569,7 +643,7 @@ almide-timings {"lex_ns":1812250,"parse_ns":1644211,"check_ns":3851626,"total_ns
 テスト: `tests/check_timings_test.rs`（キー一式、各 phase 非ゼロ、二重計上なし、
 `--timings` なしでは無出力）。ratchet 側は `scripts/check-edit-loop-scale.sh`。
 
-`--json` の 1 行は
+`--json` の `diagnostics` の各行は
 `{level, code, message, hint, here, try, try_replace, applicability, suggestions, repair?, context, file, line, col, end_col, secondary}`。
 `try` は貼り付け可能な修正スニペット、`try_replace` はそれが置換するスパン、
 `suggestions[]` は `{line, col, end_col, replacement, applicability}` の構造化された同じ修正。
@@ -621,7 +695,7 @@ almide-timings {"lex_ns":1812250,"parse_ns":1644211,"check_ns":3851626,"total_ns
 テスト: `tests/mcp_test.rs`（`json_check_reports_a_total_parse_failure_as_json`）
 
 **パッケージ全体の JSON**(#2253): FILE を省いた `almide check --json` は、素の `almide check`
-と同じ `src/` 配下の全エントリを同じ順で判定し、全診断を 1 行 1 診断で出す。各行の `file`
+と同じ `src/` 配下の全エントリを同じ順で判定し、全診断を 1 つの envelope の `diagnostics` に並べる。各行の `file`
 がどのエントリの診断かを言うので、それ以外の複数ファイル向けの形はない(エントリごとの
 `: ok` 行も出ない — 行は診断だけ)。終了コードは単一ファイル形の集約: clean でないエントリが
 1 つでもあれば `1`。判定は短絡させない — 最初の不合格エントリで止めると、その後ろの診断が
@@ -652,6 +726,31 @@ almide-timings {"lex_ns":1812250,"parse_ns":1644211,"check_ns":3851626,"total_ns
 
 ---
 
+### `almide explain`
+
+Explains a diagnostic code, or lists every code (formerly also reachable as
+`almide check --explain CODE`; that spelling exits 2 with an error naming
+`almide explain CODE`).
+
+```bash
+almide explain E001              # the reference page of one code (markdown)
+almide explain E001 --json       # result = {"code":"E001","text":"…"}
+almide explain --list            # one line per code
+almide explain --list --json     # result = {"codes":[{code, mnemonic, severity, since, verdict}, …]}
+```
+
+`almide explain --list`(#2149)は全コードを 1 行ずつ出す(`--json` では `result.codes` の要素):
+`{code, mnemonic, severity, since, verdict}`。`mnemonic` は `docs/diagnostics/<CODE>.md`
+の題、`verdict` はその `## Fix-it verdict`(mechanical / conditional / not-fixable)、
+`severity`(error / warning / error|warning)と `since`(そのコードを初めて出したリリース)は
+`docs/diagnostics/codes.toml`。行の集合はコンパイラが出すコードの集合と一致し
+(`with_code` の 77 + ビルド経路が `error[EXXX]` を直接出す E081–E083)、
+severity はフィクスチャ全件で実際の level と照合される(`tests/explain_list_test.rs`)。
+
+Tests: `tests/explain_list_test.rs`, `tests/explain_docs_test.rs`
+
+---
+
 ### `almide fmt`
 
 ソースファイルのフォーマット。
@@ -670,7 +769,7 @@ almide-timings {"lex_ns":1812250,"parse_ns":1644211,"check_ns":3851626,"total_ns
 almide fmt                              # src/**/*.almd を整形
 almide fmt app.almd                     # 指定ファイルを整形
 almide fmt --check                      # 差分があれば非ゼロで終了（CI 用）
-almide fmt --check --json               # 同じゲートを JSON 1 オブジェクトで（機械可読）
+almide fmt --check --json               # the same gate as one --json envelope (machine-readable)
 almide fmt --dry-run                    # 書き込みせず差分表示
 almide fmt --no-import-edit stdlib/     # import 行を一切触らず整形(splice-context ソース用)
 ```
@@ -678,14 +777,14 @@ almide fmt --no-import-edit stdlib/     # import 行を一切触らず整形(spl
 | オプション | 説明 |
 |---|---|
 | `--check` | 比較のみ。未整形ファイルを stderr に列挙し、あれば終了コード 1 |
-| `--json` | `--check` の機械可読版（`--check` を含意）。stdout に 1 オブジェクト、終了コードは同じ |
+| `--json` | `--check` の機械可読版（`--check` を含意）。stdout に [envelope](#the---json-envelope) 1 行、終了コードは同じ |
 | `--dry-run` | 整形結果を stdout に出すだけ。書き込まない |
 | `--no-import-edit` | import 行を一切編集しない |
 
-`--json` の出力:
+`--json` の出力（`result` が fmt のレポート）:
 
 ```json
-{"checked":2,"unformatted":["src/a.almd"],"unreadable":[],"verify_failed":false,"ok":false}
+{"schema_version":1,"ok":false,"diagnostics":[],"result":{"checked":2,"unformatted":["src/a.almd"],"unreadable":[],"verify_failed":false,"ok":false}}
 ```
 
 `--json` も `--check` も書き込みは一切しない。整形の適用は `almide fmt <path>`。
@@ -707,19 +806,34 @@ fmt は整形後に再パースして AST 同一性とコメント数を検証�
 
 ---
 
-### `almide compile`
+### `almide query`
 
-Module Interface を生成。外部ツール（binding generator 等）が型情報を読むための JSON / `.almdi` アーティファクト。
+Semantic queries for agents and tools (#4590; formerly `almide ide` and the
+interface view of `almide compile`). Each subcommand takes `--json`, which prints
+one [envelope](#the---json-envelope) line.
 
 ```bash
-almide compile                          # プロジェクト全体
-almide compile parser                   # モジュール名指定
-almide compile app.almd --json          # JSON 出力（stdout）
-almide compile --dry-run                # 人間向け表示
-almide compile -o target/compile        # 出力ディレクトリ指定
+almide query outline app.almd           # one line per public decl (fn / type / let)
+almide query outline @stdlib/string     # a stdlib module's API
+almide query outline app.almd --filter to_   # only names containing a substring
+almide query doc string.to_upper        # signature + doc comment for one symbol
+almide query doc helper --file app.almd # a user-defined symbol, looked up in a file
+almide query interface                  # the project's module interface, human-readable
+almide query interface parser           # one module by name (or a file path)
+almide query interface app.almd --json  # the interface object in `result`
+almide query stdlib                     # concatenated outlines of the core stdlib modules
+almide query stdlib --modules string,list --json
 ```
 
-JSON 出力の構造:
+| Subcommand | `result` under `--json` |
+|---|---|
+| `outline [FILE\|@stdlib/<mod>] [--filter S]` | the outline object (`module`, `source`, `types`, `constants`, `functions`) |
+| `doc SYMBOL [--file F]` | `{"stdout":"…","stderr":"…"}` (the rendered text; no structured form) |
+| `interface [MODULE]` | the interface object below |
+| `stdlib [--modules m1,m2]` | `{"modules":[…]}` (the default set is string, list, int, option, result, map, set) |
+
+`query interface --json` — the module interface for external tools (binding
+generators etc.):
 
 ```json
 {
@@ -742,6 +856,15 @@ JSON 出力の構造:
 
 `abi` フィールドは具象型（ジェネリックでない）にのみ付与。C ABI のレイアウト（size, align, field offset）。
 
+
+The `.almdi` artifact writer `almide compile MODULE [-o DIR]` (default
+`target/compile`) still exists but is hidden from `--help`. The old interface
+spellings `almide compile [MOD] --json` and `almide compile [MOD] --dry-run` exit 2
+with an error naming `almide query interface`.
+
+Tests: `tests/ide_outline_snapshot_test.rs`, `tests/ide_cache_only_test.rs`,
+`tests/interface_stability_test.rs`, `tests/removed_spellings_stay_removed_test.rs`
+
 ---
 
 ### `almide mcp`
@@ -757,21 +880,21 @@ almide mcp                              # stdio で JSON-RPC 2.0（改行区切�
 対応メソッド: `initialize` / `tools/list` / `tools/call` / `ping`。
 それ以外は JSON-RPC `-32601`（`capabilities` は `tools` のみを宣言する）。
 
-ツール（6 つ。すべて CLI の既存の機械可読出力を経由する）:
+ツール（6 つ。すべて CLI の `--json` envelope を経由する。返すのはその `diagnostics` / `result`）:
 
 | ツール | 実体 | 返すもの |
 |---|---|---|
 | `almide_check` | `almide check --json` | 構造化診断の配列（`try`/`try_replace` 込み） |
 | `almide_test` | `almide test --json` | ファイル単位の pass/fail + ランナー生出力 |
-| `almide_api` | `almide ide outline --json` / `stdlib-snapshot --json` | 公開宣言のシグネチャ一覧 |
+| `almide_api` | `almide query outline --json` / `query stdlib --json` | 公開宣言のシグネチャ一覧 |
 | `almide_explain` | `almide explain <CODE>` | 診断コードの解説（markdown） |
 | `almide_fmt_check` | `almide fmt --check --json` | 未整形ファイル一覧（書き込みなし） |
-| `almide_survive` | `almide survive --with - --json` | 編集を書き込む前の生存デルタ（下の `almide survive`） |
+| `almide_survive` | `almide apply --with - --dry-run --json` | 編集を書き込む前の生存デルタ（下の `almide apply`） |
 
 設計上の制約:
 
 - **コンパイラへの入口は 1 本**。各ツールは `current_exe()`（= 自分自身）を
-  サブプロセスとして起動し、CLI が既に出している JSON を読む。MCP 専用の
+  サブプロセスとして起動し、CLI が既に出している `--json` envelope を読む。MCP 専用の
   出力経路を作らない（作れば必ず CLI とドリフトし、しかも誰も目で読まないので
   ドリフトが見えない）
 - **人間向けテキストは決してパースしない**。機械可読な形が無い箇所
@@ -788,17 +911,22 @@ Claude Code プラグイン定義（MCP + LSP）: `tools/claude-plugin/`、
 
 ---
 
-### `almide survive`
+### `almide apply`
 
-提案された編集を **書き込む前に** 判定する（#2147）。編集をメモリ上で当て、
+Judges a proposed edit **before it is written** (#2147), and with a write gate
+writes it. `--dry-run` only judges (this was `almide survive` before #4590; the old
+spelling exits 2 with an error naming `almide apply --dry-run`).
+編集をメモリ上で当て、
 check・その編集に届くテスト・契約 fixture を編集の前後で走らせ、診断 / テスト /
-契約ごとに `{unchanged, newly_broken, newly_fixed, removed}` を返す。ファイルは
-決して書かない。
+契約ごとに `{unchanged, newly_broken, newly_fixed, removed}` を返す。`--dry-run` では
+ファイルを決して書かない。
 
 ```bash
-almide survive src/calc.almd --with fix.patch --json   # unified diff
-almide survive src/calc.almd --with new.txt  --json    # ファイル全文
-git diff src/calc.almd | almide survive src/calc.almd --with - --json
+almide apply src/calc.almd --with fix.patch --dry-run --json   # unified diff, judge only
+almide apply src/calc.almd --with new.txt  --dry-run --json    # ファイル全文
+git diff src/calc.almd | almide apply src/calc.almd --with - --dry-run --json
+almide apply src/calc.almd --with fix.patch --if-survives        # 生き残るときだけ書く
+almide apply src/calc.almd --with fix.patch --force               # 判定に関わらず書く（判定は報告する）
 ```
 
 - `--with <PATH|->` — 編集。unified diff（`--- ` / `@@ ` で始まる）か、ファイルの
@@ -819,13 +947,13 @@ git diff src/calc.almd | almide survive src/calc.almd --with - --json
   一時ディレクトリ）に置く
 - `--timeout <秒>`（既定 600）— 子プロセス 1 本ごとの上限。超えたらプロセス
   グループごと kill し、テストは `timeout`、契約は `timeout` と報告する
-- exit: `0` = 生き残る、`1` = 生き残らない、`2` = 判定できない（読めない / hunk が
-  当たらない）。`--json` 時は `2` も `{"schema_version":1,"error":"…"}` を stdout に出す
+- exit（`--dry-run`）: `0` = 生き残る、`1` = 生き残らない、`2` = 判定できない（読めない / hunk が
+  当たらない）。`--json` 時は `2` も envelope（`ok: false`、エラー文を `message` に持つ診断 1 行）を stdout に出す
 
 **生き残る** = error の診断・テスト・契約のどれも `newly_broken` に無く、
 テスト・契約のどれも `removed` に無いこと（#4267）。テストを消せば何も
 `newly_broken` にならないので、消すことは生き残ることではない。意図した削除は
-`--allow-removed`（`survive` と `apply` の両方）で通す。MCP の `almide_survive` は
+`--allow-removed`（`--dry-run` でも書き込み時でも）で通す。MCP の `almide_survive` は
 これを渡さない。名前は残ったまま、値を読むアサーション（`assert` / `assert_eq` /
 `assert_ne` / `testing.assert_*` で、引数のどれかがリテラルでないもの）を全部失った
 テスト（`assert(true)` や空の本体）は `newly_broken`（`after: "hollowed"`）になる。
@@ -864,7 +992,7 @@ warning で失敗しない。また未使用変数 lint は error の無いフ�
 走らなかった）/ `compile_error` / `timeout`（良 = `pass` と `ignored`）。
 契約は `holds` / `diverges` / `timeout`（良 = `holds`）。
 
-**JSON（`schema_version: 1`）**:
+**JSON（`schema_version: 1`、envelope の `result`）**:
 
 ```json
 {
@@ -886,11 +1014,24 @@ warning で失敗しない。また未使用変数 lint は error の無いフ�
 }
 ```
 
-check の `before` / `after` は `almide check --json` が出した診断オブジェクトを
+check の `before` / `after` は `almide check --json` の `diagnostics` の行を
 **そのまま** 運ぶ（`almide check --json` に増えるフィールドは変更なしで届く）。
 `failure` は `almide test --json` の失敗レコードと同じ形。JSON 化されずに失敗した
 check 実行は `check.unstructured` に stderr ごと残す（黙って clean 扱いにしない）。
 形を変える（名前・型・分類規則の変更）ときは `schema_version` を上げる。
+
+**Writing** (without `--dry-run`, verify-then-write):
+
+- `--if-survives[=true|false]` — 値は `true` / `false` のみ。それ以外
+  （`maybe`、`1` など）は評価もせず書かずに exit 2（fail closed）。
+  `--if-survives=false` は `--force` と併用したときだけ意味を持つ
+- `--if-survives` も `--force` も `--dry-run` も無い `apply` は exit 2（書き込みには明示の門が要る）
+- `--dry-run` は `--if-survives` とも `--force` とも併用できない（usage error）
+- `--force` は値を取らないフラグ（`--force=yes` は usage error）
+- 書き込みは原子的（同じディレクトリの一時ファイルに書いて fsync、元の権限を
+  写して rename）。判定中にファイルが変わっていたら書かずに exit 2
+- exit: `0` = 書いた、`1` = 生き残らないので書かなかった、`2` = 判定前に拒否
+- `--json` の `result` は上の JSON に `written` と `forced` を足したもの
 
 LSP からは独自リクエスト `almide/survive`
 （params `{textDocument: {uri}, text?, patch?}`、どちらも無ければ開いているバッファを
@@ -900,31 +1041,8 @@ LSP からは独自リクエスト `almide/survive`
 テスト: `tests/survive_test.rs`（`tests/survive/` の golden delta 4 本 — テストを
 壊す patch / 行挿入をまたいで残る error と直る error の全文編集 / 注釈だけの中立
 patch / `repair`（#2149）付きの E031 をそのまま `newly_broken` に運ぶ patch — と、
-書き込まないこと・apply の拒否と受理）、`tests/mcp_test.rs`、
+`--dry-run` が書き込まないこと・書き込みの拒否と受理）、`tests/mcp_test.rs`、
 `tests/lsp_test.rs`
-
----
-
-### `almide apply`
-
-`survive` の判定と書き込みを 1 手にする（verify-then-write）。
-
-```bash
-almide apply src/calc.almd --with fix.patch --if-survives        # 生き残るときだけ書く
-almide apply src/calc.almd --with fix.patch --force               # 判定に関わらず書く（判定は報告する）
-```
-
-- `--if-survives[=true|false]` — 値は `true` / `false` のみ。それ以外
-  （`maybe`、`1` など）は評価もせず書かずに exit 2（fail closed）。
-  `--if-survives=false` は `--force` と併用したときだけ意味を持つ
-- `--if-survives` も `--force` も無い `apply` は exit 2（書き込みには明示の門が要る）
-- `--force` は値を取らないフラグ（`--force=yes` は usage error）
-- 書き込みは原子的（同じディレクトリの一時ファイルに書いて fsync、元の権限を
-  写して rename）。判定中にファイルが変わっていたら書かずに exit 2
-- exit: `0` = 書いた、`1` = 生き残らないので書かなかった、`2` = 判定前に拒否
-- `--json` の出力は `survive` の JSON に `written` と `forced` を足したもの
-
-テスト: `tests/survive_test.rs`
 
 ---
 
@@ -1019,13 +1137,31 @@ almide trust bob                # github.com/bob と同じ
 
 ---
 
-### `almide install`
+### `almide remove`
+
+Undoes `almide add` (#4590): drops the dependency NAME (the key as declared in
+`almide.toml`) from `almide.toml` `[dependencies]` and from `almide.lock`.
+`[trust] owners` is left as it is — `almide trust` is its own verb.
 
 ```bash
-almide install github.com/almide/<repo>          # 既定のブランチの最新コミット
-almide install <spec> --tag v1.2.0               # タグ
-almide install ./path/to/project                 # ローカルのディレクトリ
-almide install <spec> --name tool --bin-dir ~/bin
+almide remove bindgen
+almide remove bindgen --json   # envelope; result = {"stdout":"…","stderr":"…"}
+```
+
+Tests: `tests/dep_git_subdir_test.rs`
+
+---
+
+### `almide tool install`
+
+Formerly `almide install` (#4590); the old spelling exits 2 with an error naming
+`almide tool install`. The flags are unchanged.
+
+```bash
+almide tool install github.com/almide/<repo>          # 既定のブランチの最新コミット
+almide tool install <spec> --tag v1.2.0               # タグ
+almide tool install ./path/to/project                 # ローカルのディレクトリ
+almide tool install <spec> --name tool --bin-dir ~/bin
 ```
 
 パッケージを取得し、そのパッケージをルートプロジェクトとして `--release` でビルドして、bin ディレクトリ
@@ -1045,9 +1181,30 @@ almide install <spec> --name tool --bin-dir ~/bin
 
 テスト: `tests/install_destination_test.rs`、`tests/install_native_gate_test.rs`
 
+---
+
+### `almide upgrade`
+
+Updates almide itself to the latest release, or to the named one (formerly
+`almide self-update`; the old spelling exits 2 with an error naming
+`almide upgrade`). The archive's checksum is checked and its Sigstore attestation
+is verified with `gh attestation verify`; without `gh`, or when verification fails,
+the upgrade is refused unless `--skip-attestation` is given (#4127, the same rule
+as `tools/install.sh` / `tools/install.ps1`).
+
+```bash
+almide upgrade                        # the latest release
+almide upgrade v0.69.1                # a named release
+almide upgrade --skip-attestation     # checksum only (proves integrity, not origin)
+```
+
+Tests: `scripts/check-installer-attestation.sh` (the installers' twin of the rule)
+
+---
+
 ### `almide deps`
 
-依存パッケージの一覧を表示。依存を取得し、各パッケージ(直接依存の後に、それらを通じて
+依存パッケージの一覧を表示（`--path NAME` は下記）。依存を取得し、各パッケージ(直接依存の後に、それらを通じて
 入る依存)について version、ケイパビリティ集合(`[permissions].allow` が検査するカテゴリ。
 `@extern` fn は全カテゴリ)、持ち込むネイティブコード(`native/`、`[native-deps]`、
 `@extern(rust|c)` fn)と、それが `[permissions].native` で許可されているかを表示する(#4093)。
@@ -1070,18 +1227,25 @@ almide deps
 
 ---
 
-### `almide dep-path`
+### `almide deps --path`
 
-依存パッケージのローカルキャッシュディレクトリを出力。
+Prints a dependency's local cache directory (formerly `almide dep-path NAME`; the
+old spelling exits 2 with an error naming `almide deps --path NAME`). Every
+dependency is fetched first, then NAME (the key as declared in `almide.toml`) is
+looked up; an unknown NAME is `Dependency 'NAME' not found in almide.toml`.
 
 ```bash
-almide dep-path bindgen
+almide deps --path bindgen
 # ~/.almide/cache/.sources/<encoded-source>/@/<commit>/src
-almide dep-path ceangal     # subdir 依存: 共有クローン内のパッケージディレクトリ
+almide deps --path ceangal     # subdir 依存: 共有クローン内のパッケージディレクトリ
 # ~/.almide/cache/.sources/<encoded-source>/@/<commit>/ceangal/src
+almide deps --path bindgen --json
+# {"schema_version":1,"ok":true,"diagnostics":[],"result":{"name":"bindgen","path":"/abs/dir"}}
 ```
 
 用途: 依存パッケージの `.almd` ファイルを `process.exec("almide", ["run", path])` で実行する場合のパス取得。
+
+Tests: `tests/dep_git_subdir_test.rs`, `tests/dep_relative_transitive_path_test.rs`
 
 ---
 
@@ -1146,6 +1310,19 @@ almide-verify --version                           # 検査器自身の版数（�
 
 ---
 
+### `almide repl`
+
+Starts the interactive REPL. A bare `almide` (no subcommand) no longer starts it:
+it prints the grouped help and exits 0 (#4590).
+
+```bash
+almide repl
+```
+
+Tests: `tests/repl_test.rs`
+
+---
+
 ## Legacy Mode
 
 ファイル名が `.almd` で終わる引数を最初に指定すると、`emit` コマンドとして扱われる:
@@ -1165,7 +1342,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 |---|---|
 | 0 | 成功 |
 | 1 | コンパイルエラー、テスト失敗、依存解決失敗、fmt --check の差分など |
-| 2 | コマンド固有の使い方・入力・判定不能エラー（各節参照） |
+| 2 | コマンド固有の使い方・入力・判定不能エラー（各節参照）。clap の usage error と、#4590 で改名された旧綴り（[Renamed commands](#renamed-commands)） |
 | 3 | almide verify: witness は ACCEPT だが未認証関数が残る INCOMPLETE |
 | 5 | almide test: 実行対象が 0 件（--allow-no-tests で変更可） |
 | 127 | `almide verify`: 独立検査器 `almide-verify` が見つからない（`error[verifier-missing]`） |
@@ -1302,7 +1479,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_HTTP_MAX_RESPONSE_BYTES=value` | runtime | the http client's cap on a buffered response in bytes, read by the compiled program (default 1 GiB; 0 = no cap, #2825) |
 | `ALMIDE_HTTP_TIMEOUT_SECS=value` | runtime | the http client's connect and read timeout in seconds, read by the compiled program (default 30; 0 = none) |
 | `ALMIDE_INLINE_OFF` | ablation | turn the structural leg's small scalar-fn inliner off (#2980): every call kept, for an A/B |
-| `ALMIDE_INSTALL=value` | tool | the directory `almide install` installs binaries into (overrides the default `~/.local/bin`) |
+| `ALMIDE_INSTALL=value` | tool | the directory `almide tool install` installs binaries into (overrides the default `~/.local/bin`) |
 | `ALMIDE_INTERP_SWEEP_THREADS=value` | harness | interp sweep thread count; 1 = serial (#2381) |
 | `ALMIDE_IR_FAULT=value` | route | inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary (a release build honours it only with `--allow-switch ALMIDE_IR_FAULT`, #4129) |
 | `ALMIDE_KEEP_BUNDLED_FNS` | ablation | keep every function of a loaded bundled stdlib module instead of only the ones the program reaches (#4328) — the A/B switch for the reach pruning |
@@ -1352,7 +1529,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_STDLIB_COVERAGE_PROBE=value` | harness | the one program (its repo-relative path) tests/stdlib_test_coverage_test.rs measures, for probing a single fixture |
 | `ALMIDE_STDLIB_COVERAGE_REPORT=value` | harness | where tests/stdlib_test_coverage_test.rs writes its per-function coverage table (scripts/check-stdlib-test-coverage.sh) |
 | `ALMIDE_STREAM_FUSION_OFF` | ablation | turn the stream-fusion pass off |
-| `ALMIDE_SURVIVE_OVERLAY=value` | harness | RETIRED (#4129): no longer read. `almide survive` hands its overlay to a child run as `--survive-overlay` / `--survive-overlay-text` arguments, so an environment cannot make the compiler read other text than the disk file; kept registered so the regression test can set it and watch nothing change |
+| `ALMIDE_SURVIVE_OVERLAY=value` | harness | RETIRED (#4129): no longer read. `almide apply` hands its overlay to a child run as `--survive-overlay` / `--survive-overlay-text` arguments, so an environment cannot make the compiler read other text than the disk file; kept registered so the regression test can set it and watch nothing change |
 | `ALMIDE_SURVIVE_OVERLAY_TEXT=value` | harness | RETIRED (#4129) with `ALMIDE_SURVIVE_OVERLAY`: no longer read |
 | `ALMIDE_TCO_DEBUG` | debug | print the native tail-call loop rewrite decisions |
 | `ALMIDE_TEST_ABORT_PROBE` | runtime | marks a native testing.assert_aborts child (ADR-0029) so `panic` takes the C-219 abort path there; set by the parent, never by hand |

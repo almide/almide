@@ -63,4 +63,4 @@ Modules outside their union require an explicit `import`. The generated
 - Per-module notes: [docs/stdlib/](../docs/stdlib/)
 - Cross-target semantics manifest (CI-checked, do not edit by hand):
   `docs/stdlib/semantics-manifest.toml`
-- Module interface for any module: `almide compile <module> --json`
+- Module interface for any module: `almide query interface <module> --json` (the interface is the envelope's `result`)

@@ -56,13 +56,17 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | almide mcp
 |---|---|---|
 | `almide_check` | `almide check --json` | `{ok, errors, warnings, diagnostics[]}` — each diagnostic is `{level, code, message, hint, here, try, try_replace, repair, context, file, line, col, end_col, secondary}` |
 | `almide_test` | `almide test --json` | `{ok, files_passed, files_failed, files[], runner_output_unstructured}` |
-| `almide_api` | `almide ide outline --json`, `almide ide stdlib-snapshot --json` | the public declarations of a file, of `@stdlib/<module>`, or of `@stdlib` (core snapshot), with exact signatures |
+| `almide_api` | `almide query outline --json`, `almide query stdlib --json` | the public declarations of a file, of `@stdlib/<module>`, or of `@stdlib` (core snapshot), with exact signatures |
 | `almide_explain` | `almide explain <CODE>` | the diagnostic's reference page (markdown) |
 | `almide_fmt_check` | `almide fmt --check --json` | `{checked, unformatted[], unreadable[], verify_failed, ok}` |
-| `almide_survive` | `almide survive <file> --with - --json` | the survival delta of a proposed edit, BEFORE it is written: `{schema_version, survives, reach, summary, check, tests, contracts}`, each leg `{unchanged, newly_broken, newly_fixed, removed}` |
+| `almide_survive` | `almide apply <file> --with - --dry-run --json` | the survival delta of a proposed edit, BEFORE it is written: `{schema_version, survives, reach, summary, check, tests, contracts}`, each leg `{unchanged, newly_broken, newly_fixed, removed}` |
 
 `try` is a copy-pasteable fix snippet and `try_replace` is the span it
 replaces, so a fix can be applied mechanically rather than re-derived.
+Each tool's result is the payload of the CLI's `--json` envelope
+(`{"schema_version":1,"ok":…,"diagnostics":[…],"result":…}`, see
+[specs/cli.md § The `--json` envelope](specs/cli.md)) — the diagnostic rows or
+the `result` object, not the envelope itself.
 `repair` (#2149, present only when the diagnostic has a fix) is the
 structured form: `{primary, alternatives, example}`, each edit
 `{line, col, end_col, replacement, applicability}` — apply `primary`
@@ -87,11 +91,11 @@ removed (#4267 — deleting the guarding test is not surviving it; the CLI's
 A test that loses every assertion reading a value (`assert(true)`, an empty
 body) is newly broken, `after: "hollowed"`. The file is never written.
 
-A diagnostic's `before` / `after` is the object `almide check --json` printed,
-carried verbatim, so every field that output grows reaches the agent unchanged.
+A diagnostic's `before` / `after` is a row of `almide check --json`'s
+`diagnostics` array, carried verbatim, so every field that output grows reaches the agent unchanged.
 Diagnostics are paired across the edit by a line map (an inserted line above an
 error does not make it a new error); the exact identity rule and the schema are
-in [specs/cli.md § `almide survive`](specs/cli.md).
+in [specs/cli.md § `almide apply`](specs/cli.md).
 
 The same report is the answer to the LSP request `almide/survive`
 (`{textDocument: {uri}, text?, patch?}`; with neither, the open buffer is the
@@ -125,11 +129,12 @@ reintroduce exactly the fragility this server exists to remove.
 - **Parse-error codes.** A syntax error now reaches `check --json` as JSON (it
   used to be text-only), but those diagnostics carry an empty `code`, so
   `almide_explain` has nothing to look up for them.
-- **`almide compile --json`** (the full module interface with ABI layout) is
+- **`almide query interface --json`** (the full module interface with ABI layout) is
   CLI-only. `almide_api` covers the signature-level question an agent actually
   asks; the ABI detail belongs to binding generators.
-- **`almide ide doc <symbol>`** (signature + doc comment for ONE symbol) has no
-  `--json` form, so it is not exposed rather than scraped. `almide_api` answers
+- **`almide query doc <symbol>`** (signature + doc comment for ONE symbol) has no
+  structured `--json` form (its envelope's `result` is the rendered text), so it
+  is not exposed rather than scraped. `almide_api` answers
   the same question at signature level for a whole module.
 
 ## Files
@@ -141,5 +146,5 @@ reintroduce exactly the fragility this server exists to remove.
 | `tools/claude-plugin/.claude-plugin/plugin.json` | Claude Code plugin (MCP + LSP) |
 | `.claude-plugin/marketplace.json` | this repo as a plugin marketplace |
 | `tests/mcp_test.rs` | end-to-end gate: drives the real binary over stdio |
-| `src/cli/survive*.rs`, `src/source_overlay.rs` | `almide survive` / `almide apply` and the in-memory overlay they judge through |
+| `src/cli/survive*.rs`, `src/source_overlay.rs` | `almide apply` (with and without `--dry-run`) and the in-memory overlay it judges through |
 | `tests/survive_test.rs`, `tests/survive/` | the three golden survival deltas, the no-write and apply gates |
