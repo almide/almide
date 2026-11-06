@@ -112,7 +112,7 @@ fn an_old_reading_is_refused_until_its_parentheses_say_which() {
 
     let almide::regroup::Migration::Rewritten { source: migrated, sites, .. } = almide::regroup::migrate_precedence(old)
     else {
-        panic!("the migration did not rewrite `x ?? 0 - 1`");
+        panic!("the migration did not rewrite `x ?? 0 - 1`: {:?}", almide::regroup::migrate_precedence(old));
     };
     assert_eq!(sites, 1);
     assert!(migrated.contains("(x ?? 0) - 1"), "{migrated}");

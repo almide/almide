@@ -67,10 +67,15 @@ jobs:
         env:
           ALMIDE_MANIFEST_TREE_CHECK: gate
         run: |
-          ORACLE=target/release/almide bash scripts/gen-run-manifest.sh 2>&1 | tail -5
+          ORACLE=target/release/almide bash scripts/gen-run-manifest.sh > /tmp/gen-run.log 2>&1; echo "exit $?" >> /tmp/gen-run.log
           git diff --stat -- crates/almide-spine/tests/golden/ | tee /tmp/run-manifest.diff
           git diff -- crates/almide-spine/tests/golden/spec-run-manifest.txt > /tmp/run-manifest.patch || true
           git checkout -- crates/almide-spine/tests/golden/spec-run-manifest.txt crates/almide-spine/tests/golden/ 2>/dev/null || true
+      - name: Doc fence gates with the new binary (informational)
+        continue-on-error: true
+        run: |
+          ALMIDE_BIN=$PWD/target/release/almide bash scripts/check-llm-surface.sh > /tmp/llm-surface.log 2>&1; echo "exit $?" >> /tmp/llm-surface.log
+          ALMIDE_BIN=$PWD/target/release/almide bash scripts/check-doc-fences.sh > /tmp/doc-fences.log 2>&1; echo "exit $?" >> /tmp/doc-fences.log
       - name: Export the patch
         if: always()
         run: |
@@ -88,3 +93,6 @@ jobs:
             /tmp/gate.log
             /tmp/run-manifest.diff
             /tmp/run-manifest.patch
+            /tmp/gen-run.log
+            /tmp/llm-surface.log
+            /tmp/doc-fences.log
