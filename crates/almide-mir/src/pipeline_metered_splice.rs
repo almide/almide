@@ -254,6 +254,8 @@ pub fn try_render_metered_splice(source: &str) -> Result<String, LowerError> {
     }
     crate::alias_safety::elide_unaliased_make_unique(&mut functions);
     let program = MirProgram { functions, exports: Vec::new(), mutable_global_count: 0 };
+    // No linked bodies here: no declaration left from an earlier render applies.
+    crate::native_closure_decl::set(std::iter::empty(), Default::default());
     let items = crate::render_native::render_native_items(&program, &sigs)?;
     Ok(wrap_metered_splice(&items, &roots))
 }
