@@ -58,7 +58,6 @@ jobs:
             echo "----- native"; $A run $f.almd -- alpha --flag beta --opt=7; echo "native rc=$?"
             echo "----- wasm"; $A run $f.almd --target wasm -- alpha --flag beta --opt=7; echo "wasm rc=$?"
             echo "----- v0"; ALMIDE_NO_VERIFIED_OK=1 $A run --no-verified $f.almd -- alpha; echo "v0 rc=$?"
-            echo "----- emit rust"; $A $f.almd --target rust > $f.rs; echo "emit rc=$?"; head -c 20000 $f.rs
           done
       - name: Minimized variants
         run: |
@@ -75,5 +74,6 @@ jobs:
             echo "===== MIR $f"; $P .throwaway/$f.almd --mir | grep -n -B3 -A60 'fn main' | head -250
             echo "===== RUST $f"; $P .throwaway/$f.almd | grep -n -A90 'fn almd_main\|fn main' | head -200
           done
+      - name: In-domain probe test
         working-directory: tools/xtarget-fuzz
         run: cargo test --release generator::inspect_gen
