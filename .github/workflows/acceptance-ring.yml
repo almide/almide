@@ -23,7 +23,7 @@ name: Acceptance Ring
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, 'ci-full-*']
   pull_request:
     branches: [main, develop]
   # Required contexts (Build the compiler under test, Ring (dfa/parsegen/svg))

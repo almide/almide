@@ -11,7 +11,7 @@ name: Cross-Target CI
 
 on:
   push:
-    branches: [develop]
+    branches: [develop, 'ci-full-*']
   pull_request:
   merge_group:
 
