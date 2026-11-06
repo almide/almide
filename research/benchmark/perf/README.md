@@ -240,6 +240,16 @@ nothing is published that `bench.py` did not produce.
   reverted against 1.03x with it (GCE n2-standard-4). The native cache now
   holds 1024 patterns under a hash index and evicts at random when full, so a
   cycle longer than that still keeps most of it compiled.
+- **`framebuf-global` / `framebuf-local` are the frame-buffer rows** (#4550):
+  an immediate-mode renderer's per-frame instance writes, 20
+  `bytes.put_f32_le` per quad, into a module-level `var` buffer grown by
+  doubling (`g`) or into a local buffer through a `mut` param (`l`). No Rust
+  reference — the per-frame relation between the rows is gated
+  (`check-perf-ratio.sh`, FRAME BUFFER). 0.69.0 copied the whole buffer on
+  every 4-byte write through the module-level var (the self-hosted `put_*`
+  took the copy-in / write-back form a callee that may read the global
+  needs), ~1000x natively, and a downstream editor's frame went from 32 ms
+  to 143 ms.
 
 ## Run
 

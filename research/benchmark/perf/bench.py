@@ -151,6 +151,14 @@ SUITE = [
     # identical grandchild calls; the reference keeps one call per node. A
     # VICTORY row in check-perf-ratio.sh, ablated with ALMIDE_SELF_INLINE_OFF.
     ("fib",            "fib/fib.almd",                 ["fib.rs"],      "32:300",     "20:10",   "bytes", ["native", "rust"]),
+    # framebuf (#4550): an immediate-mode renderer's per-frame instance
+    # writes (20 f32 per quad into a byte buffer), `mode:frames`. `g` writes a
+    # module-level `var` buffer, `l` a local one through a `mut` param; the
+    # relation between the two, per frame, is the gate (check-perf-ratio.sh,
+    # FRAME BUFFER): 0.69.0 copied the whole buffer on every write through the
+    # module-level var. No Rust reference: the property is the relation.
+    ("framebuf-global", "framebuf/framebuf.almd",      [],              "g:4000",     "g:2",     "bytes", ["native", "wasm"]),
+    ("framebuf-local",  "framebuf/framebuf.almd",      [],              "l:20000",    "l:2",     "bytes", ["native", "wasm"]),
     ("regexcycle-8",   "regexcycle/regexcycle.almd",   [],              "8:2000000",  "8:2000",  "bytes", ["native", "wasm"]),
     ("regexcycle-32",  "regexcycle/regexcycle.almd",   [],              "32:2000000", "32:2000", "bytes", ["native", "wasm"]),
 ]
@@ -220,6 +228,12 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "fib": "33:300",
     # regexcycle (#4392): sized after the GCE reading below; both rows the
     # same number of matches.
+    # framebuf (#4550): frames per row, unequal on purpose — the relation is
+    # per frame. The local row is the fast one natively (~0.03 ms a frame),
+    # so it runs 10x the frames to clear the spawn-noise floor; a regressed
+    # global row (a buffer copy per write) then reads seconds, not a hang.
+    "framebuf-global": "g:800",
+    "framebuf-local": "l:8000",
     "regexcycle-8": "8:400000",
     "regexcycle-32": "32:400000",
 }
