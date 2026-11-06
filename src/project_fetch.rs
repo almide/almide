@@ -301,7 +301,6 @@ fn remove_cache_dir(dir: &Path) -> Result<(), String> {
     if !dir.exists() {
         return Ok(());
     }
-    let _lock = CacheEntryLock::acquire(dir)?;
     let aside = cache_sibling(dir, "old")?;
     match std::fs::rename(dir, &aside) {
         Ok(()) => {
@@ -338,18 +337,11 @@ fn populate_cache_dir(dir: &Path, clone: impl FnOnce(&Path) -> Result<(), String
             dir.display()
         ));
     }
-    let _lock = CacheEntryLock::acquire(dir)?;
-    if dir.exists() {
-        // Another caller cloned it while this one waited for the lock.
-        return Ok(());
-    }
+    std::fs::create_dir_all(dir.parent().unwrap()).map_err(|e| e.to_string())?;
     let tmp = cache_sibling(dir, "tmp")?;
     let _ = std::fs::remove_dir_all(&tmp);
     if let Err(e) = clone(&tmp) {
         let _ = std::fs::remove_dir_all(&tmp);
-        if dir.exists() {
-            return Ok(());
-        }
         return Err(e);
     }
     match std::fs::rename(&tmp, dir) {
