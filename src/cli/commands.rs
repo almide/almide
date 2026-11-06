@@ -115,10 +115,16 @@ fn no_test_matched(counts: TestCounts) -> String {
     )
 }
 
-/// Shared "resolve `almide test [file]`'s target file list" logic — used by
-/// `cmd_test`/`cmd_test_fast` and `cmd_test_wasm`. Inside a project every leg
-/// walks the project root; `fallback_dirs` (`spec/` + `exercises/` for the
-/// native legs, none for the wasm leg) only apply outside a project.
+/// Outside a project, the standard directories a bare `almide test` searches.
+const NON_PROJECT_TEST_DIRS: [&str; 2] = ["spec", "exercises"];
+
+/// The ONE resolution of `almide test [file]`'s target file list, used by
+/// every leg — `cmd_test` (`--target rust`), `cmd_test_fast` (the default),
+/// `cmd_test_wasm` (`--target wasm`), `cmd_test_json` (`--json`) and
+/// `cmd_test_update_snapshots` — so no two legs can find different files for
+/// the same project (#4530: the wasm leg walked the project root while the
+/// native legs searched only `spec/` + `exercises/`). It takes no per-leg
+/// parameter on purpose.
 ///
 /// An empty result is reported but no longer exits here (#2084): "nothing to
 /// run" is one verdict decided by [`finish_test_run`], so a discovery that
@@ -126,7 +132,7 @@ fn no_test_matched(counts: TestCounts) -> String {
 /// the same exit code instead of 1 and 0 respectively. The "no almide.toml"
 /// refusal below is a different thing — a misaimed command, not an empty one —
 /// and keeps exiting 1.
-pub(super) fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<String> {
+pub(super) fn discover_test_files(file: &str) -> Vec<String> {
     if !file.is_empty() {
         let path = std::path::Path::new(file);
         if path.is_dir() {
@@ -158,7 +164,7 @@ pub(super) fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<Str
             // shell) where `almide check` refuses with a hint. Same refusal,
             // same hint, so the two commands agree on what "no file" means.
             let mut files = Vec::new();
-            for dir in fallback_dirs {
+            for dir in NON_PROJECT_TEST_DIRS {
                 let path = std::path::Path::new(dir);
                 if path.exists() {
                     files.extend(collect_test_files(path));
@@ -207,7 +213,7 @@ pub(super) fn run_test_binaries_parallel(compiled: Vec<(String, Result<NativeTes
 
 pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool, show_output: bool) {
     crate::resolve::parse_cache::enable();
-    let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
+    let test_files: Vec<String> = discover_test_files(file);
 
     let program_args = test_harness_args(run_filter);
     let scratch = std::sync::Arc::new(TestScratch::new());
@@ -249,7 +255,7 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_t
 /// tests pass on WASM) is ~9x faster; the native fallback preserves correctness.
 pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool, show_output: bool) {
     crate::resolve::parse_cache::enable();
-    let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
+    let test_files: Vec<String> = discover_test_files(file);
 
     let cpus = cpu_slots();
     let scratch = std::sync::Arc::new(TestScratch::new());
@@ -403,7 +409,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
 /// the default harness's: wasm first (rustc-free, so a round is cheap),
 /// native when the wasm leg walls; `wasm_only` is `--target wasm`.
 pub fn cmd_test_update_snapshots(file: &str, no_check: bool, run_filter: Option<&str>, wasm_only: bool) {
-    let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
+    let test_files: Vec<String> = discover_test_files(file);
     let program_args = test_harness_args(run_filter);
     let tmp_dir = std::env::temp_dir().join("almide-wasm-test");
     std::fs::create_dir_all(&tmp_dir).ok();
@@ -517,20 +523,7 @@ fn run_test_file_once(
 
 pub fn cmd_test_json(file: &str, run_filter: Option<&str>, allow_no_tests: bool) {
     crate::resolve::parse_cache::enable();
-    let test_files: Vec<String> = if !file.is_empty() {
-        let path = std::path::Path::new(file);
-        if path.is_dir() {
-            let mut files = collect_test_files(path);
-            files.sort();
-            files
-        } else {
-            vec![file.to_string()]
-        }
-    } else {
-        let mut files = collect_test_files(std::path::Path::new("."));
-        files.sort();
-        files
-    };
+    let test_files: Vec<String> = discover_test_files(file);
 
     let program_args = test_harness_args(run_filter);
     let mut counts = TestCounts::default();
