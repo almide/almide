@@ -103,7 +103,7 @@ pub(crate) fn heap_slot_at(addr: i64) -> Option<(u32, crate::render_native::NTy)
 }
 
 /// The thread-local cell of every heap slot the render used (`used_shims`
-/// items): the slot's value, its type's default until the program's
+/// items): the slot's value in an `Rc` (render_native_heap_slot), its type's default until the program's
 /// `__mg_init` stores it.
 pub(crate) fn heap_slot_statics() -> Vec<&'static str> {
     use std::sync::{Mutex, OnceLock};
@@ -114,7 +114,7 @@ pub(crate) fn heap_slot_statics() -> Vec<&'static str> {
     used.into_iter()
         .map(|(slot, t)| {
             let text = format!(
-                "thread_local! {{ static ALMD_HSLOT_{slot}: std::cell::RefCell<{ty}> = std::cell::RefCell::new(Default::default()); }}",
+                "thread_local! {{ static ALMD_HSLOT_{slot}: std::cell::RefCell<std::rc::Rc<{ty}>> = std::cell::RefCell::new(Default::default()); }}",
                 ty = crate::render_native_rec::owned_ty(t)
             );
             match texts.get(text.as_str()) {

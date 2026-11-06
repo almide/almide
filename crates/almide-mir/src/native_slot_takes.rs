@@ -139,12 +139,32 @@ fn only_dropped(ops: &[Op], j: usize) -> bool {
 }
 
 /// The heap slot reads of a function: the ones that move the value out of
-/// the slot, and the ones another read of the slot follows before its take
-/// (a write rebuilding the value from more than one read of it).
+/// the slot, the ones another read of the slot follows before its take
+/// (a write rebuilding the value from more than one read of it), and the
+/// ones every use of which only borrows (#4562).
+///
+/// A borrow-only read is a snapshot of the cell's `Rc`, one reference count,
+/// where a copy of the value would clone the whole map or list on every read
+/// of a module-level `var` handed to a read-only call. Nothing has to be
+/// proved about the ops between the read and its last use: a write of the
+/// slot meanwhile replaces the cell's `Rc` (a store) or takes it (its take
+/// finds the snapshot sharing the block and copies it then), so the snapshot
+/// keeps the value it had at the read, as the copy did.
 #[derive(Default)]
 pub(crate) struct SlotReads {
     pub(crate) takes: BTreeSet<ValueId>,
     pub(crate) rebuilds: BTreeSet<ValueId>,
+    pub(crate) borrows: BTreeSet<ValueId>,
+}
+
+/// The read `d` at `ops[i]` is only borrowed: every later use of it borrows
+/// (render_native_borrow_read's rule), it is not the result, and no
+/// `SetLocal` rebinds it (its binding is a reference, not an owned value).
+fn borrow_only(func: &MirFunction, i: usize, d: ValueId, root: &BTreeMap<ValueId, ValueId>) -> bool {
+    func.ret != Some(d)
+        && !func.params.iter().any(|p| p.value == d)
+        && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if *local == d))
+        && crate::render_native_borrow_read::last_borrowing_use(func, i, d, root).is_some()
 }
 
 /// The slot's take that ends the straight line after the read at `i` of the
@@ -170,6 +190,7 @@ pub(crate) fn slot_reads(func: &MirFunction) -> SlotReads {
         let mut out = SlotReads::default();
         let Some(quiet) = q.as_ref() else { return out };
         let ops = &func.ops;
+        let root = crate::render_native_borrow_read::roots(func);
         for (i, op) in ops.iter().enumerate() {
             let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
             let Some(a) = args.first().and_then(|v| slot_addr(&consts, v)) else { continue };
@@ -179,6 +200,9 @@ pub(crate) fn slot_reads(func: &MirFunction) -> SlotReads {
                 }
                 Some((j, false)) if only_dropped(ops, j) => {
                     out.takes.insert(*d);
+                }
+                _ if borrow_only(func, i, *d, &root) => {
+                    out.borrows.insert(*d);
                 }
                 _ => {}
             }
