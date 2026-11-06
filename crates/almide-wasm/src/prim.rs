@@ -78,17 +78,22 @@ impl Emitter<'_> {
             }
             ("load8", [a]) => {
                 self.lower_arg(a, Some(INT), ArgMode::Raw)?;
-                self.f.instructions().i32_wrap_i64().i32_load8_u(raw(())).i64_extend_i32_u();
+                self.f.instructions().i32_wrap_i64().i32_load8_u(raw(()));
+                crate::witness::bounds::prim(self.f);
+                self.f.instructions().i64_extend_i32_u();
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("load32", [a]) => {
                 self.lower_arg(a, Some(INT), ArgMode::Raw)?;
-                self.f.instructions().i32_wrap_i64().i32_load(raw(())).i64_extend_i32_u();
+                self.f.instructions().i32_wrap_i64().i32_load(raw(()));
+                crate::witness::bounds::prim(self.f);
+                self.f.instructions().i64_extend_i32_u();
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("load64", [a]) => {
                 self.lower_arg(a, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i32_wrap_i64().i64_load(raw(()));
+                crate::witness::bounds::prim(self.f);
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("store8", [a, v]) => {
@@ -96,6 +101,7 @@ impl Emitter<'_> {
                 self.f.instructions().i32_wrap_i64();
                 self.lower_arg(v, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i32_wrap_i64().i32_store8(raw(()));
+                crate::witness::bounds::prim(self.f);
                 Ok(None)
             }
             ("store32", [a, v]) => {
@@ -103,6 +109,7 @@ impl Emitter<'_> {
                 self.f.instructions().i32_wrap_i64();
                 self.lower_arg(v, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i32_wrap_i64().i32_store(raw(()));
+                crate::witness::bounds::prim(self.f);
                 Ok(None)
             }
             ("store64", [a, v]) => {
@@ -110,6 +117,7 @@ impl Emitter<'_> {
                 self.f.instructions().i32_wrap_i64();
                 self.lower_arg(v, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i64_store(raw(()));
+                crate::witness::bounds::prim(self.f);
                 Ok(None)
             }
             // RawPtr <-> Int identity casts (both are the i64 address).
