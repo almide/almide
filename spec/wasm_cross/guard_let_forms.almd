@@ -34,7 +34,7 @@ fn head_or(xs: List[Int]) -> Int = {
   h * 10
 }
 
-fn port_or_default(raw: Option[String]) -> String = {
+fn port_or_default(raw: String?) -> String = {
   let port = raw
   guard let port else { "8080" }
   port
@@ -45,7 +45,7 @@ fn explain(r: Result[Int, ConfigError]) -> String = {
   "ok ${int.to_string(r)}"
 }
 
-fn shout(name: Option[String]) -> String = {
+fn shout(name: String?) -> String = {
   guard var name else { "nobody" }
   name = string.to_upper(name)
   name + "!"

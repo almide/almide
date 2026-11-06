@@ -2,7 +2,6 @@
 // (`else err(e) => …`), the `guard let x else …` shorthand, and `guard var`.
 // All three desugar into the same nested variant match as the plain
 // `guard let x = r else e`; the err arm is that match's `err(e)` arm.
-
 type ConfigError = | Missing(String) | BadPort(Int)
 
 fn describe(e: ConfigError) -> String = match e {
@@ -16,7 +15,6 @@ fn lookup(m: Map[String, Int], k: String) -> Result[Int, ConfigError] = match ma
 }
 
 // ── 1. the failure arm binds the error ──
-
 fn port_text(m: Map[String, Int]) -> String = {
   guard let p = lookup(m, "port") else err(e) => describe(e)
   "port ${int.to_string(p)}"
@@ -84,26 +82,21 @@ test "plain else on an Option (fmt writes `else none =>` this way)" {
   assert_eq(head_or([]), 0)
 }
 
-fn count_ok(xs: List[String]) -> String = {
+fn count_ok(xs: List[String]) -> Int = {
   var good = 0
-  var bad = ""
   for s in xs {
-    guard let n = int.parse(s) else err(e) => {
-      bad = bad + s
-      continue
-    }
+    guard let n = int.parse(s) else err(e) => continue
     good = good + n
   }
-  "${int.to_string(good)} ${bad}"
+  good
 }
 
 test "err arm in a loop body continues" {
-  assert_eq(count_ok(["1", "x", "2", "y"]), "3 xy")
+  assert_eq(count_ok(["1", "x", "2", "y"]), 3)
 }
 
 // ── 2. the shorthand rebinds a local or a parameter ──
-
-fn port_or_default(raw: Option[String]) -> String = {
+fn port_or_default(raw: String?) -> String = {
   let port = raw
   guard let port else { "8080" }
   port
@@ -135,7 +128,6 @@ test "shorthand with the err arm" {
 }
 
 // ── 3. guard var: the binding is mutable for the rest of the block ──
-
 fn bump(xs: List[Int]) -> Int = {
   guard var total = list.first(xs) else { 0 }
   for x in list.drop(xs, 1) {
@@ -149,7 +141,7 @@ test "guard var binds a var" {
   assert_eq(bump([]), 0)
 }
 
-fn shout(name: Option[String]) -> String = {
+fn shout(name: String?) -> String = {
   guard var name else { "nobody" }
   name = string.to_upper(name)
   name + "!"
