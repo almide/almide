@@ -45,7 +45,17 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
             format!("{}.clone()", ctx.var_name(*id))
         }
         _ => {
-            let base = render_expr(ctx, iterable);
+            // A heap global's list (`for x in xs`, `for x in g.items`) is
+            // walked in place through a snapshot of its cell (#4562), unless
+            // the loop consumes its elements. The snapshot lives for the whole
+            // loop, so a body that writes the global copies the block then and
+            // the loop still walks the value it started on, as it walked the copy.
+            let in_place = matches!(&iterable.ty, Ty::Applied(TypeConstructorId::List, _))
+                && !ctx.ann.consumed_loop_vars.contains(var);
+            let base = match global_read_place(ctx, iterable) {
+                Some(place) if in_place => place,
+                _ => render_expr(ctx, iterable),
+            };
             // List types: .iter().cloned() works for both AlmideRcCow<Vec<T>>
             // (via Deref) and plain Vec<T>, giving owned T values. A binder
             // the body only borrows (`borrowed_loop_vars`, #1673) skips the

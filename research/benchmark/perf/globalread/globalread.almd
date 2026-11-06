@@ -1,35 +1,71 @@
-// globalread (#4562): the per-frame lookups of a text renderer's glyph cache.
-// Every glyph of a frame reads its entry from a 1,024-entry map and its advance
-// from a 256-entry list; a frame is 2,000 glyphs. The argument is `mode:frames`.
-// `g` keeps the map and the list in module-level `var`s, the shape a renderer
-// keeps its caches in, and reads them from a helper fn per glyph; `l` passes
-// the same map and list to the same helper as parameters. The two rows do the
-// same lookups, so their relation (check-perf-ratio.sh, GLOBAL READ) is what a
-// read through the module-level var costs over a parameter. 0.69.1 copied the
-// whole map (and the whole list) natively on every lookup through the var.
+// globalread (#4562): the per-frame reads of a text renderer's caches.
+// Every glyph of a frame reads its entry from a 1,024-entry map, its advance
+// from a 256-entry list, and its kerning from a map that is a field of a font
+// record, scaled by a scalar field of that record; a frame is 2,000 glyphs and
+// ends with a walk over the frame's 64 line widths. The argument is
+// `mode:frames`. `g` keeps the maps, the list and the record in module-level
+// `var`s, the shape a renderer keeps its caches in, and reads them from helper
+// fns; `l` passes the same values to the same helpers as parameters. The two
+// rows do the same reads, so their relation (check-perf-ratio.sh, GLOBAL READ)
+// is what a read through the module-level var costs over a parameter. 0.69.1
+// copied the whole map (and the whole list, and the whole record for a field
+// read) natively on every read through the var.
 import env
+
+type Font = { kern: Map[Int, Int], scale: Int, name: String }
 
 let GLYPHS = 2000
 
 var cache: Map[Int, Int] = map.new()
 var advances: List[Int] = []
+var font: Font = { kern: map.new(), scale: 1, name: "" }
+var widths: List[Int] = []
 
-fn glyph_global(gid: Int) -> Int = (map.get(cache, gid) ?? 0) + (list.get(advances, gid % 256) ?? 0)
+fn glyph_global(gid: Int) -> Int =
+  (map.get(cache, gid) ?? 0) + (list.get(advances, gid % 256) ?? 0) + (map.get(font.kern, gid % 512) ?? 0) * font.scale
 
-fn glyph_local(c: Map[Int, Int], adv: List[Int], gid: Int) -> Int = (map.get(c, gid) ?? 0) + (list.get(adv, gid % 256) ?? 0)
+fn glyph_local(c: Map[Int, Int], adv: List[Int], f: Font, gid: Int) -> Int =
+  (map.get(c, gid) ?? 0) + (list.get(adv, gid % 256) ?? 0) + (map.get(f.kern, gid % 512) ?? 0) * f.scale
+
+fn widest_global() -> Int = {
+  var w = 0
+  for x in widths {
+    w = if x > w then x else w
+  }
+  w
+}
+
+fn widest_local(ws: List[Int]) -> Int = {
+  var w = 0
+  for x in ws {
+    w = if x > w then x else w
+  }
+  w
+}
 
 fn gid_of(i: Int, f: Int) -> Int = (i * 7 + f) % 1024
+
+fn kern_table() -> Map[Int, Int] = {
+  var k: Map[Int, Int] = map.new()
+  for i in 0..<512 {
+    k = map.set(k, i, i % 3)
+  }
+  k
+}
 
 fn run_global(frames: Int) -> Int = {
   for i in 0..<1024 {
     cache = map.set(cache, i, i * 3)
   }
   advances = list.range(0, 256)
+  font = { kern: kern_table(), scale: 2, name: string.repeat("f", 4096) }
+  widths = list.range(0, 64) |> list.map((i) => (i * 37) % 900)
   var sum = 0
   for f in 0..<frames {
     for i in 0..<GLYPHS {
       sum = sum + glyph_global(gid_of(i, f))
     }
+    sum = sum + widest_global()
   }
   sum
 }
@@ -40,11 +76,14 @@ fn run_local(frames: Int) -> Int = {
     c = map.set(c, i, i * 3)
   }
   let adv = list.range(0, 256)
+  let fnt: Font = { kern: kern_table(), scale: 2, name: string.repeat("f", 4096) }
+  let ws = list.range(0, 64) |> list.map((i) => (i * 37) % 900)
   var sum = 0
   for f in 0..<frames {
     for i in 0..<GLYPHS {
-      sum = sum + glyph_local(c, adv, gid_of(i, f))
+      sum = sum + glyph_local(c, adv, fnt, gid_of(i, f))
     }
+    sum = sum + widest_local(ws)
   }
   sum
 }

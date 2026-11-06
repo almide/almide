@@ -209,8 +209,9 @@ fib 0.120
 ablation/fib 12.000
 # globalread (#4562): per-frame time of the module-level-var lookups over the
 # same lookups through parameters (GLOBAL READ, ceilings 4x native, 3x wasm).
-# ubuntu-latest PR runner, 2026-11-06 (g:3000 / l:8000): native 0.0354 s
-# against 0.0718 s, 1.32x per frame; wasm 0.122 s against 0.428 s, 0.76x.
-# Develop before the fix read ~190x natively (4.03 s for 1500 frames).
-globalread-native 1.320
-globalread-wasm 0.760
+# ubuntu-latest runner, 2026-11-06, with the record field read and the `for`
+# walk (g:6000 / l:16000): native 0.243 s against 0.442 s, 1.47x per frame;
+# wasm 0.786 s against 2.280 s, 0.92x. Before #4562 the map-and-list row read
+# ~190x natively (4.03 s for 1500 frames).
+globalread-native 1.470
+globalread-wasm 0.920

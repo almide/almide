@@ -233,12 +233,14 @@ nothing is published that `bench.py` did not produce.
   wordfreq rows (the NATIVE <= WASM block).
 - **`globalread-global` / `globalread-local` are the glyph-cache rows**
   (#4562): a text renderer's per-glyph lookups, one `map.get` in a
-  1,024-entry map and one `list.get` in a 256-entry list, 2,000 glyphs a
-  frame. The map and the list are module-level `var`s read from a helper fn
-  (`g`) or parameters of the same helper (`l`). No Rust reference — the
-  per-frame relation between the rows is gated (`check-perf-ratio.sh`, GLOBAL
-  READ). 0.69.1 rendered a borrowed argument that is a module-level var as a
-  borrow of a deep copy natively, so every lookup copied the whole map.
+  1,024-entry map, one `list.get` in a 256-entry list and one `map.get` in a
+  map that is a field of a font record (times a scalar field of it), 2,000
+  glyphs a frame, and a `for` walk over 64 line widths per frame. The values
+  are module-level `var`s read from helper fns (`g`) or parameters of the same
+  helpers (`l`). No Rust reference — the per-frame relation between the rows
+  is gated (`check-perf-ratio.sh`, GLOBAL READ). 0.69.1 read a module-level
+  var natively as a deep copy of it wherever it appeared (a borrowed argument,
+  a field read, a `for` head), so every lookup copied the whole map or record.
 - **`regexcycle-8` / `regexcycle-32` are the rule-table rows** (#4392): N
   `Regex` values applied in turn to every line of a four-line text, the same
   number of matches at either N. No Rust reference — the relation between the
