@@ -168,10 +168,15 @@ impl LowerCtx {
             }
             let start_v = self.lower_scalar_value(start)?;
             let end_v = self.lower_scalar_value(end)?;
-            // #4538: `end - start` wrapped negative for a span past Int max
-            // (`i64::MIN..<i64::MAX`), and the loop below ran zero times —
-            // a fold answered its init where native walks the range.
-            let (_, _, len) = self.int_range_count(start_v, end_v, *inclusive);
+            let mut len = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: len, op: IntOp::Sub, a: end_v, b: start_v });
+            if *inclusive {
+                let one = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                let len_inc = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: len_inc, op: IntOp::Add, a: len, b: one });
+                len = len_inc;
+            }
             (None, Some(start_v), len)
         } else {
             let list_v = match self.lower_call_args(std::slice::from_ref(xs)).ok()?.into_iter().next()? {
