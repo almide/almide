@@ -275,17 +275,7 @@ impl Emitter<'_> {
 /// structurally. `Fn`/`Matrix` have no equality; `Unit` never FLOWS out of
 /// a lambda body as a value (the void convention) — each walls by name.
 fn unique_by_key_equatable(kt: SliceTy) -> bool {
-    matches!(
-        kt,
-        SliceTy::Option(_)
-            | SliceTy::Result(..)
-            | SliceTy::List(_)
-            | SliceTy::Map(..)
-            | SliceTy::Set(_)
-            | SliceTy::Tuple(_)
-            | SliceTy::Named(_)
-            | SliceTy::Value
-    )
+    kt != SliceTy::Unit && crate::equality::has_structural_eq(kt)
 }
 
 impl Emitter<'_> {
