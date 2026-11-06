@@ -105,3 +105,49 @@ fn an_ignore_marker_does_not_hide_a_directory_named_explicitly() {
     assert_eq!(out.status.code(), Some(0), "stderr:\n{stderr}");
     assert!(stderr.contains("All 1 test file(s) passed"), "stderr:\n{stderr}");
 }
+
+/// The file count a leg's output reports: `(of N files)` (default and wasm
+/// legs), `All N test file(s) passed` (native leg) or one JSONL row per file
+/// (`--json`).
+fn reported_file_count(args: &[&str], out: &str) -> usize {
+    if args.contains(&"--json") {
+        return out.lines().filter(|l| l.starts_with("{\"file\":")).count();
+    }
+    if let Some(rest) = out.rsplit("(of ").next().filter(|_| out.contains("(of ")) {
+        return rest.split(' ').next().unwrap().parse().unwrap();
+    }
+    let rest = out.rsplit("All ").next().expect("a summary line");
+    rest.split(' ').next().unwrap().parse().unwrap()
+}
+
+/// #4530: every leg resolves a bare `almide test` through ONE discovery, so
+/// the same project yields the same file set on each. The wasm leg used to
+/// walk the project root while the native legs searched only `spec/` +
+/// `exercises/` — for this project the native legs found 1 file, wasm 3.
+#[test]
+fn every_leg_discovers_the_same_files_for_the_same_project() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::write(root.join("almide.toml"), "[package]\nname = \"legs\"\nversion = \"0.1.0\"\n").unwrap();
+    for (path, src) in [
+        ("spec/a_test.almd", GOOD),
+        ("src/b.almd", GOOD),
+        ("c_test.almd", GOOD),
+        ("target/d_test.almd", FAILING),
+        ("corpus/f_test.almd", FAILING),
+        ("corpus/.almideignore", ""),
+    ] {
+        let p = root.join(path);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, src).unwrap();
+    }
+    for args in [&["test"][..], &["test", "--target", "rust"], &["test", "--target", "wasm"], &["test", "--json"]] {
+        let out = Command::new(almide_bin()).args(args).current_dir(root).output().expect("spawn");
+        let all = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert_eq!(out.status.code(), Some(0), "{args:?} must pass; output:\n{all}");
+        assert_eq!(reported_file_count(args, &all), 3, "{args:?} must find spec/, src/ and the root file; output:\n{all}");
+        for skipped in ["d_test.almd", "f_test.almd"] {
+            assert!(!all.contains(skipped), "{args:?} collected {skipped}; output:\n{all}");
+        }
+    }
+}
