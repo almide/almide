@@ -1,0 +1,44 @@
+// @contract: C-221
+// #4545: a PURE named fn fills an `effect (Int) -> Bool` slot and is
+// ok-wrapped at the slot, on every route a value takes into one: a piped
+// call's argument, a record field, a spread override, a fn return, a list
+// element, and a computed call's argument. Only a direct call's argument and
+// an annotated `let` were wrapped; the other routes handed the bare
+// `(Int) -> Bool` value to a carrier slot and the structural wasm leg refused
+// it (E082 `ty-mismatch:Scalar(Bool)-vs-Result`).
+type V = { on_key: effect (Int) -> Bool }
+
+fn base() -> V = { on_key: (k) => false }
+
+fn on_key(v: V, f: effect (Int) -> Bool) -> V = { ...v, on_key: f }
+
+fn key(k: Int) -> Bool = k > 2
+
+fn zero(k: Int) -> Bool = k == 0
+
+fn mk(f: effect (Int) -> Bool) -> V = { on_key: f }
+
+fn piped() -> V = base() |> on_key(key)
+
+fn field() -> V = { on_key: key }
+
+fn spread(v: V) -> V = { ...v, on_key: key }
+
+fn ret() -> effect (Int) -> Bool = key
+
+fn table() -> List[effect (Int) -> Bool] = [key, zero]
+
+fn via(h: (effect (Int) -> Bool) -> V) -> V = h(key)
+
+effect fn hit(v: V, k: Int) -> Int = if v.on_key(k)! then 1 else 0
+
+effect fn main() -> Unit = {
+  println("piped ${hit(piped(), 3)!} ${hit(piped(), 1)!}")
+  println("field ${hit(field(), 4)!} ${hit(field(), 2)!}")
+  println("spread ${hit(spread(base()), 9)!} ${hit(base(), 9)!}")
+  let r = ret()
+  println("ret ${if r(5)! then 1 else 0} ${if r(0)! then 1 else 0}")
+  println("table " + (table() |> list.map((g) => if g(0) ?? false then "y" else "n") |> list.join(",")))
+  println("table " + (table() |> list.map((g) => if g(7) ?? false then "y" else "n") |> list.join(",")))
+  println("via ${hit(via(mk), 4)!} ${hit(via(mk), 0)!}")
+}
