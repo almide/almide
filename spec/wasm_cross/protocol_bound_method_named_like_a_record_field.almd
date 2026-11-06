@@ -17,17 +17,19 @@ protocol Counter {
   fn next(c: Self, n: Int) -> Int
 }
 
-fn sign(a: String, b: String) -> Int = if a < b then -1 else if a > b then 1 else 0
+fn sign(a: String, b: String) -> Int = if a < b then -1
+else if a > b then 1 else 0
 
-type Lexical: Order = {}
+type Lexical: Order = {  }
 
 fn Lexical.cmp(o: Lexical, a: String, b: String) -> Int = sign(a, b)
 
-type ByLength: Order = {}
+type ByLength: Order = {  }
 
 fn ByLength.cmp(o: ByLength, a: String, b: String) -> Int = {
   let c = string.len(a) - string.len(b)
-  if c < 0 then -1 else if c > 0 then 1 else sign(a, b)
+  if c < 0 then -1
+  else if c > 0 then 1 else sign(a, b)
 }
 
 type Step: Counter = { by: Int }
@@ -35,15 +37,19 @@ type Step: Counter = { by: Int }
 fn Step.next(c: Step, n: Int) -> Int = n + c.by
 
 // The greatest name; the first one listed among equals.
-fn greatest[O: Order](o: O, names: List[String]) -> String? =
-  names |> list.fold(none, (best, n) => match best {
+fn greatest[O: Order](o: O, names: List[String]) -> String? = names |> list.fold(
+  none,
+  (best, n) => match best {
     none => some(n),
     some(b) => if o.cmp(n, b) > 0 then some(n) else some(b),
-  })
+  },
+)
 
 // Stable insertion sort through the bound.
-fn sort_names[O: Order](o: O, names: List[String]) -> List[String] =
-  names |> list.fold([], (sorted, n) => insert(o, sorted, n))
+fn sort_names[O: Order](o: O, names: List[String]) -> List[String] = names |> list.fold(
+  [],
+  (sorted, n) => insert(o, sorted, n),
+)
 
 fn insert[O: Order](o: O, sorted: List[String], n: String) -> List[String] = {
   let before = sorted |> list.take_while((s) => o.cmp(s, n) <= 0)
@@ -51,23 +57,34 @@ fn insert[O: Order](o: O, sorted: List[String], n: String) -> List[String] = {
 }
 
 // The last value a counter reaches below a limit, none when the start is past it.
-fn last_below[C: Counter](c: C, start: Int, limit: Int) -> Int? =
-  list.range(0, 5) |> list.fold(none, (acc, _) => match acc {
+fn last_below[C: Counter](c: C, start: Int, limit: Int) -> Int? = list.range(0, 5) |> list.fold(
+  none,
+  (acc, _) => match acc {
     none => if start < limit then some(start) else none,
     some(v) => if c.next(v) < limit then some(c.next(v)) else some(v),
-  })
+  },
+)
 
 type Collation = | Plain(Lexical) | Short(ByLength)
 
-fn sort_by_collation(c: Collation, names: List[String]) -> List[String] =
-  match c {
-    Plain(l) => sort_names(l, names),
-    Short(s) => sort_names(s, names),
-  }
+fn sort_by_collation(c: Collation, names: List[String]) -> List[String] = match c {
+  Plain(l) => sort_names(l, names),
+  Short(s) => sort_names(s, names),
+}
 
 fn main() -> Unit = {
-  let names = ["pear", "fig", "banana", "kiwi", "apple", "fig"]
-  println("greatest lexical=${greatest(Lexical {}, names)} by length=${greatest(ByLength {}, names)} empty=${greatest(Lexical {}, [])}")
+  let names = [
+    "pear",
+    "fig",
+    "banana",
+    "kiwi",
+    "apple",
+    "fig"
+  ]
+  println("greatest lexical=${greatest(Lexical {}, names)} by length=${greatest(ByLength {}, names)} empty=${greatest(
+    Lexical {},
+    [],
+  )}")
   println("plain=${sort_by_collation(Plain(Lexical {}), names)}")
   println("short=${sort_by_collation(Short(ByLength {}), names)}")
   println("last_below=${last_below(Step { by: 3 }, 1, 12)} past=${last_below(Step { by: 3 }, 20, 12)}")
