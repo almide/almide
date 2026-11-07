@@ -3,7 +3,7 @@
 
 The prose sections of those files are hand-curated; the block between the
 BEGIN/END markers is generated from the compiler's own module interface
-(`almide compile <module> --json`, served from the bundled self-hosted
+(`almide query interface <module> --json`, served from the bundled self-hosted
 stdlib sources) so the documented surface can never drift from reality.
 The block carries every public name a caller can spell: the function
 signatures and, where a module exports any, its type declarations. The two
@@ -142,14 +142,16 @@ def entry(doc, since: str, decl: str) -> list:
 
 def module_iface(module: str) -> dict:
     out = subprocess.run(
-        [almide_bin(), "compile", module, "--json"],
+        [almide_bin(), "query", "interface", module, "--json"],
         capture_output=True, text=True, cwd=REPO,
     )
     if out.returncode != 0 or not out.stdout.strip():
         raise SystemExit(
-            f"error: `almide compile {module} --json` failed:\n{out.stderr.strip()}"
+            f"error: `almide query interface {module} --json` failed:\n{out.stderr.strip()}"
         )
-    iface = json.loads(out.stdout)
+    # The --json envelope ({schema_version, ok, diagnostics, result}) carries
+    # the interface object in `result`.
+    iface = json.loads(out.stdout)["result"]
     # __-prefixed fns are INTERNAL carriers (e.g. the fallibility-polymorphic
     # __fallible_* bodies, ADR-0006 D3) — never document them.
     iface["functions"] = [f for f in iface.get("functions", []) if not f.get("name", "").startswith("__")]
@@ -208,7 +210,7 @@ def case_decl(c: dict) -> str:
 
 
 # The two clock-constructor pages (compute, duration) document CHECKER
-# surface, not a bundled module: `almide compile compute --json` has nothing
+# surface, not a bundled module: `almide query interface compute --json` has nothing
 # to serve. Their surface is the closed unit set × the two nominal clocks,
 # owned by crates/almide-types/src/time_units.rs (TIME_UNITS, TIME_MODULES;
 # the Rust-side counter in src/cli/docs_gen.rs reads the same table

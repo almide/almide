@@ -69,6 +69,7 @@ pub(crate) mod native_region_window;
 mod native_list_ops;
 mod native_narrow_rewrite;
 mod native_hof;
+mod native_closure_decl;
 mod option_blocks;
 
 use std::collections::{BTreeMap, BTreeSet};

@@ -1,5 +1,5 @@
-//! `almide ide` looks at a project without being asked to build it, so it
-//! resolves dependencies cache-only (#4128): `ide outline` and `ide doc` on a
+//! `almide query` looks at a project without being asked to build it, so it
+//! resolves dependencies cache-only (#4128): `query outline` and `query doc` on a
 //! file of a project never clone the dependencies its manifest names and never
 //! write `almide.lock`. The LSP's `didOpen` has the same rule
 //! (`tests/lsp_test.rs`); this pins the CLI.
@@ -59,8 +59,8 @@ fn cloned(home: &Path) -> bool {
 fn ide_outline_and_doc_never_fetch_or_write_the_lock() {
     let root = tempfile::tempdir().unwrap();
     let (app, home) = project(root.path());
-    for args in [&["ide", "outline", "main.almd"][..], &["ide", "doc", "greet", "--file", "main.almd"][..]] {
-        let o = Command::new(almide()).args(args).current_dir(&app).env("HOME", &home).output().expect("run almide ide");
+    for args in [&["query", "outline", "main.almd"][..], &["query", "doc", "greet", "--file", "main.almd"][..]] {
+        let o = Command::new(almide()).args(args).current_dir(&app).env("HOME", &home).output().expect("run almide query");
         let text = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
         assert!(text.contains("greet"), "`almide {}` did not describe the file:\n{text}", args.join(" "));
         assert!(!app.join("almide.lock").exists(), "`almide {}` wrote almide.lock:\n{text}", args.join(" "));

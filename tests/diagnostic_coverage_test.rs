@@ -298,8 +298,9 @@ fn every_mechanical_verdict_emits_a_machine_applicable_repair_that_round_trips()
                 .output()
                 .expect("almide check --json");
             let stdout = String::from_utf8_lossy(&out.stdout);
-            let carries = stdout.lines()
-                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            // #4590: one envelope line; the rows are its `diagnostics` array.
+            let envelope = serde_json::from_str::<serde_json::Value>(stdout.trim()).unwrap_or_default();
+            let carries = envelope["diagnostics"].as_array().into_iter().flatten()
                 .any(|d| {
                     d["code"] == code.as_str()
                         && d["repair"]["primary"]["applicability"] == "machine-applicable"

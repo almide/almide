@@ -1,0 +1,23 @@
+// v1-vs-v0 shape bench: module-level `var`s read by a helper on every lookup
+// (#4006 C1 class D, #4562), a glyph cache's shape: each read borrows a
+// snapshot of the cell, and the reader's own copy of it reads through the
+// snapshot too, where a copy of the value copied the whole map and list.
+var CACHE: Map[Int, Int] = map.new()
+
+var ADV: List[Int] = []
+
+fn glyph(gid: Int) -> Int = (map.get(CACHE, gid) ?? 0) + (list.get(ADV, gid % 16) ?? 0)
+
+fn main() -> Unit = {
+  for i in 0..<64 {
+    CACHE = map.set(CACHE, i, i * 3)
+  }
+  ADV = list.range(0, 16)
+  var sum = 0
+  for f in 0..<200 {
+    for i in 0..<64 {
+      sum = sum + glyph((i * 7 + f) % 64)
+    }
+  }
+  println("${sum}")
+}

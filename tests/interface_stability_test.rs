@@ -2,7 +2,7 @@
 //! module interface must be a function of SIGNATURES only. This is the
 //! edit-locality `typing_modular` theorem (crates/almide-edit-belt,
 //! Typing.lean) run as a unit test over the REAL compiler — a
-//! signature-preserving body edit must leave `almide compile --json`
+//! signature-preserving body edit must leave `almide query interface --json`
 //! byte-identical, and a signature edit must change it (so byte-equality
 //! cannot pass vacuously by printing nothing).
 //!
@@ -24,12 +24,12 @@ fn interface_json(dir: &Path, source: &str) -> String {
     let path = dir.join("m.almd");
     fs::write(&path, source).expect("write module source");
     let out = Command::new(almide())
-        .args(["compile", path.to_str().unwrap(), "--json"])
+        .args(["query", "interface", path.to_str().unwrap(), "--json"])
         .output()
-        .expect("run almide compile --json");
+        .expect("run almide query interface --json");
     assert!(
         out.status.success(),
-        "compile --json failed:\n{}",
+        "query interface --json failed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8(out.stdout).expect("interface JSON is utf8")

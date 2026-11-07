@@ -129,23 +129,32 @@ almide build <file> --target wasm
 almide build <file> --target linux-musl   # static musl binary (or any rustc triple)
 almide test [file|dir]       # run tests (*.almd with `test { }` blocks); no arg = the whole project root
 almide fmt <file>            # format
-almide compile [module]      # emit .almdi module interface
 almide explain E001          # expand a diagnostic code
 almide explain --list --json # every code: {code, mnemonic, severity, since, verdict}
-almide ide outline <file>                 # one-line-per-decl summary
-almide ide outline @stdlib/string         # stdlib API listing
-almide ide doc string.to_upper            # signature + doc for a symbol
-almide ide stdlib-snapshot [--json]       # concatenated stdlib outlines for
+almide query outline <file>               # one-line-per-decl summary
+almide query outline @stdlib/string       # stdlib API listing
+almide query doc string.to_upper          # signature + doc for a symbol
+almide query interface [module] [--json]  # full module interface (types, docs, ABI layout)
+almide query stdlib [--json]              # concatenated stdlib outlines for
                                           # SYSTEM_PROMPT injection (~3.5K tokens)
+almide apply <file> --with <patch> --dry-run  # judge an edit (check + tests +
+                                          # contracts) BEFORE writing it
+almide add <pkg> / almide remove <pkg>    # add / drop a dependency
+almide deps --path <name>    # print a dependency's source directory
+almide repl                  # interactive REPL (a bare `almide` prints help)
 almide mcp                   # MCP server on stdio: check / test / api / explain /
                              # fmt-check as typed tools with JSON results
 ```
 
 Machine-readable output (prefer these when a program, not a person, reads it):
-`check --json` (one diagnostic per line: `{level, code, message, hint, try,
-try_replace, repair, file, line, col}` — apply `repair.primary` unattended only
-when its `applicability` is `"machine-applicable"`), `test --json`, `fmt --check --json`,
-`compile --json`, `ide outline --json`, `ide stdlib-snapshot --json`.
+every command that takes `--json` prints exactly one line,
+`{"schema_version":1,"ok":<bool>,"diagnostics":[...],"result":<value>}`.
+`ok` is true exactly when the exit code is 0. `check --json` puts its rows in
+`diagnostics` (`{level, code, message, hint, try, try_replace, repair, file,
+line, col}` — apply `repair.primary` unattended only when its `applicability`
+is `"machine-applicable"`); `test --json`, `fmt --check --json`,
+`query interface --json`, `query outline --json`, `query stdlib --json` and
+`apply --json` put their report in `result`.
 An MCP client (Claude Code, …) gets the same answers as tool calls via
 `almide mcp` — see [docs/mcp.md](docs/mcp.md).
 
@@ -605,7 +614,7 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 
 ## For agents and harnesses
 
-- Start by calling `almide ide stdlib-snapshot` once and embedding the
+- Start by calling `almide query stdlib` once and embedding the
   result in your SYSTEM_PROMPT. It is the authoritative inventory
   (~3.5K tokens text, ~14K JSON).
 - On compile error, read the `hint:` and `try:` sections of the

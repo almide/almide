@@ -1,4 +1,4 @@
-//! #4183: `almide install` puts the binary only at `<bin dir>/<plain name>`,
+//! #4183: `almide tool install` puts the binary only at `<bin dir>/<plain name>`,
 //! never writes through a symlink there, and does not replace a file it did
 //! not install unless `--force` is given.
 //!
@@ -24,7 +24,7 @@ fn project(root: &Path, name: &str) -> PathBuf {
 
 fn install(root: &Path, proj: &Path, bin: &Path, extra: &[&str]) -> Output {
     Command::new(almide())
-        .arg("install")
+        .args(["tool", "install"])
         .arg(proj)
         .args(["--bin-dir", bin.to_str().unwrap(), "--target", "wasm"])
         .args(extra)
@@ -32,7 +32,7 @@ fn install(root: &Path, proj: &Path, bin: &Path, extra: &[&str]) -> Output {
         .env("HOME", root.join("home"))
         .env_remove("ALMIDE_INSTALL")
         .output()
-        .expect("spawn almide install")
+        .expect("spawn almide tool install")
 }
 
 fn text(o: &Output) -> String {

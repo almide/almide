@@ -132,3 +132,34 @@ fn mut_param_tail_call_does_not_copy_the_buffer_on_wasm() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("2 6\n"), "wasm:\n{text}");
 }
+
+/// A `mut` Map param written by index in the callee (`{ m[k] = v }`): the
+/// wasm leg took the functional copy of the whole map on every call (#4580).
+const MAP_SRC: &str = r#"
+fn put(mut m: Map[Int, Int], k: Int, v: Int) -> Unit = { m[k] = v }
+
+effect fn main() -> Unit = {
+  var m: Map[Int, Int] = [:]
+  put(m, 1, 10)
+  let old = m
+  put(m, 1, 11)
+  put(m, 2, 20)
+  for k in 0..<3000 { put(m, k, k * 2) }
+  put(m, 7, 70)
+  println("${map.get(old, 1) ?? 0} ${map.len(old)} ${map.get(m, 1) ?? 0} ${map.get(m, 7) ?? 0} ${map.get(m, 2999) ?? 0} ${map.len(m)}")
+}
+"#;
+
+const MAP_WANT: &str = "10 1 2 70 5998 3000\n";
+
+#[test]
+fn mut_map_param_index_write_keeps_its_values_natively() {
+    let out = run("map", MAP_SRC, None);
+    assert!(out.contains(MAP_WANT), "native:\n{out}");
+}
+
+#[test]
+fn mut_map_param_index_write_keeps_its_values_on_wasm() {
+    let out = run("map", MAP_SRC, Some("wasm"));
+    assert!(out.contains(MAP_WANT), "wasm:\n{out}");
+}

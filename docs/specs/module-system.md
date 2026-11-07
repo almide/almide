@@ -508,7 +508,8 @@ almide add almide/almide-bindgen          # github.com/almide/ がデフォル�
 almide add almide/almide-bindgen@v0.1.0   # バージョン指定
 almide add user/repo                      # 任意の GitHub リポジトリ
 almide deps                               # 依存一覧
-almide dep-path bindgen                   # キャッシュディレクトリを出力
+almide deps --path bindgen                # キャッシュディレクトリを出力
+almide remove bindgen                     # 依存を外す(almide.toml と almide.lock から)
 ```
 
 ### almide.lock

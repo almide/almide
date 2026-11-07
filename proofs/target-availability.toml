@@ -5,7 +5,7 @@
 # (CI). Measurement = the renderer's (or the run path's) own verdict via
 # tools/target_availability_probe.py --leg <leg>, over EVERY public fn of
 # every registered module — enumerated from the compiler's own interface
-# (`almide compile <mod> --json`, the source the docs/stdlib signature
+# (`almide query interface <mod> --json`, the source the docs/stdlib signature
 # indexes are generated from); the docs-HEADING enumeration it replaces
 # reached 391 of 973 fns, so this agreement covered 40 % of the surface
 # until #1827. Each leg keeps its own two-direction agreement and its own

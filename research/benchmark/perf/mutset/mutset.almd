@@ -1,0 +1,35 @@
+// mutset (#4582): a Set[Int] rebound through a `mut s` helper per insert
+// (`p`, `s = set.insert(s, x)`), against the same rebinds inline on a local
+// `var` (`l`). The argument is `mode:rounds`; each round inserts KEYS members
+// (the set holds KEYS after the first round). The native leg called the
+// borrowing `set.insert` on the `&mut` param, so every insert through the
+// helper copied the whole set: quadratic in its size.
+import env
+
+let KEYS = 4000
+
+fn adds(mut s: Set[Int], x: Int) -> Unit = { s = set.insert(s, x) }
+
+fn run_param(rounds: Int) -> Int = {
+  var s: Set[Int] = set.new()
+  for r in 0..<rounds {
+    for k in 0..<KEYS { adds(s, (k * 7 + r) % KEYS) }
+  }
+  set.len(s) + (if set.contains(s, KEYS - 1) then 1 else 0)
+}
+
+fn run_local(rounds: Int) -> Int = {
+  var s: Set[Int] = set.new()
+  for r in 0..<rounds {
+    for k in 0..<KEYS { s = set.insert(s, (k * 7 + r) % KEYS) }
+  }
+  set.len(s) + (if set.contains(s, KEYS - 1) then 1 else 0)
+}
+
+effect fn main() -> Unit = {
+  let parts = string.split(list.get(env.args(), 0) ?? "l:2", ":")
+  let mode = list.get(parts, 0) ?? "l"
+  let rounds = int.parse(list.get(parts, 1) ?? "") ?? 2
+  let got = if mode == "p" then run_param(rounds) else run_local(rounds)
+  println("rounds=${rounds} got=${got}")
+}

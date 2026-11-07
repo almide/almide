@@ -60,11 +60,15 @@ fn the_two_modes_agree_on_every_verdict() {
 fn a_red_json_run_is_exactly_one_with_a_failing_row() {
     for (label, program) in [("a passing file", PASSING), ("a failing file", FAILING)] {
         let (_, passed, text) = both_modes(program);
-        let rows: Vec<serde_json::Value> = text
+        // #4590: one envelope line; the per-file rows are its `result.files`.
+        let envelopes: Vec<serde_json::Value> = text
             .lines()
             .filter(|l| l.trim_start().starts_with('{'))
-            .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("row is not JSON ({e}): {l}")))
+            .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("envelope is not JSON ({e}): {l}")))
             .collect();
+        assert_eq!(envelopes.len(), 1, "{label}: --json emits exactly one envelope line\n{text}");
+        assert_eq!(envelopes[0]["ok"], serde_json::Value::Bool(passed), "{label}: `ok` follows the exit code\n{text}");
+        let rows: Vec<serde_json::Value> = envelopes[0]["result"]["files"].as_array().cloned().unwrap_or_default();
         assert!(!rows.is_empty(), "{label}: --json emitted no row\n{text}");
         let has_fail_row = rows.iter().any(|r| r["status"] == "fail");
         assert_eq!(

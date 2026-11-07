@@ -2,7 +2,8 @@
 # Diagnostics-parity golden generator (unit 4). Runs the ORACLE almide binary
 # — the CLI built from THIS tree (target/release/almide; #2183) — as
 # `almide check <file> --json` over every spec/**/*.almd and records the
-# sha256 of its stdout. The greenfield `check_file_json` query must reproduce
+# sha256 of its stdout (under the internal `--raw-json`, the one-row-per-line
+# form without the `--json` envelope). The greenfield `check_file_json` query must reproduce
 # every hash byte-for-byte (crates/almide-spine/tests/check_parity.rs).
 # CI regenerates and diffs the outputs (scripts/check-parity-goldens.sh), so a
 # committed row can only change by the CLI's own output changing.
@@ -53,7 +54,9 @@ for r in $ROOTS; do
   [ -d "$r/spec" ] || { echo "::error::$r/spec missing"; exit 2; }
 done
 root_of() { if [ -e "$1" ]; then printf '.'; else printf 'als'; fi; }
-check_json() { (cd "$1" && "$ORACLE" check "$2" --json); }
+# `--raw-json` is the internal global flag that prints check's own
+# one-row-per-line output without the #4590 envelope; the parity goldens hash those bytes.
+check_json() { (cd "$1" && "$ORACLE" --raw-json check "$2" --json); }
 
 hash_out() { # normalized: empty stays empty; else exactly one trailing \n
   if [ -n "$1" ]; then printf '%s\n' "$1" | shasum -a 256 | cut -d' ' -f1

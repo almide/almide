@@ -5,7 +5,6 @@
 use wasm_encoder::{Function, ValType};
 
 use super::*;
-use crate::*;
 use crate::work::FnWork;
 
 /// The signatures assembly promises for the rc-glue helpers (#2010).

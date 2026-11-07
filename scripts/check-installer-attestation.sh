@@ -7,7 +7,7 @@
 # lists — not who built it, since both came from the same place. Origin is the
 # attestation (#1534), verified with `gh attestation verify`. Until row 16 the
 # installers installed with a note when `gh` was missing; now they refuse, as
-# `almide self-update` does, unless the command line says `--skip-attestation`.
+# `almide upgrade` does, unless the command line says `--skip-attestation`.
 #
 # This gate runs each installer against a stubbed release: `curl` (sh) and
 # `Invoke-WebRequest` (ps1) serve files from a local directory, `gh` is absent,

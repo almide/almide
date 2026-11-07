@@ -113,9 +113,12 @@ fn e015_states_its_evidence_without_a_replacement_edit() {
 
 #[test]
 fn ide_outline_recognizes_bundled_args_module() {
-    let output = Command::new(almide()).args(["ide", "outline", "@stdlib/args", "--json"])
+    let output = Command::new(almide()).args(["query", "outline", "@stdlib/args", "--json"])
         .output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let outline: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let env: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    // #4590: the outline sits in the --json envelope's `result` (under `decls`
+    // when the envelope wraps it).
+    let outline = if env["result"].get("decls").is_some() { &env["result"]["decls"] } else { &env["result"] };
     assert!(outline["functions"].as_array().unwrap().iter().any(|f| f["name"] == "option"));
 }

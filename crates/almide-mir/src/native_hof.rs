@@ -301,6 +301,17 @@ pub(crate) fn pruned(name: &str) -> bool {
     STATE.with(|s| s.borrow().pruned.contains(name))
 }
 
+/// The lifted lambda the closure block `v` of the function being rendered
+/// was built from.
+pub(crate) fn lambda_of(v: ValueId) -> Option<String> {
+    STATE.with(|s| s.borrow().origins.get(&v).map(|(name, _)| name.clone()))
+}
+
+/// The function being rendered.
+pub(crate) fn current_fn() -> Option<String> {
+    STATE.with(|s| s.borrow().at.as_ref().map(|(f, _, _)| f.clone()))
+}
+
 /// The render is at op `i` of `func`.
 pub(crate) fn at(func: &MirFunction, i: usize) {
     STATE.with(|s| {

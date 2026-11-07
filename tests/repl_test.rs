@@ -29,8 +29,9 @@ fn almide_bin() -> String {
 
 fn repl(session: &str) -> (String, Duration) {
     let started = Instant::now();
-    // The REPL is the bare binary — no subcommand.
+    // The REPL is `almide repl` (#4590: a bare `almide` prints help).
     let mut child = Command::new(almide_bin())
+        .arg("repl")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

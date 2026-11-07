@@ -43,6 +43,22 @@ fn check(program: &str) -> (bool, String) {
     (accepted, text)
 }
 
+/// The `secondary` arrays of every diagnostic row in a `check --json` run's
+/// output — the `diagnostics` array of its one envelope line (#4590). Read
+/// structurally, so the assertions below do not depend on key order.
+fn secondaries(text: &str) -> Vec<serde_json::Value> {
+    text.lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .flat_map(|env| env["diagnostics"].as_array().cloned().unwrap_or_default())
+        .map(|d| d["secondary"].clone())
+        .collect()
+}
+
+/// Whether some diagnostic carries a secondary span whose first entry is on `line`.
+fn has_secondary_on_line(text: &str, line: u64) -> bool {
+    secondaries(text).iter().any(|s| s[0]["line"].as_u64() == Some(line))
+}
+
 /// The shape that reached codegen: both readings are well typed at one
 /// argument, so nothing objected and rustc got invalid Rust. `almide 0.62.0`
 /// answers "No errors found" for both of these.
@@ -111,7 +127,7 @@ fn the_arity_error_explains_the_receiver_and_points_at_the_binding() {
         "the hint or the secondary label must name the shadowed module:\n{text}"
     );
     assert!(
-        text.contains("\"secondary\":[{\"line\":2,"),
+        has_secondary_on_line(&text, 2),
         "a secondary span must point at the binding on line 2:\n{text}"
     );
 }
@@ -238,7 +254,7 @@ fn a_parameter_named_after_a_module_is_a_local_too() {
         "the hint must still explain the receiver:\n{text}"
     );
     assert!(
-        text.contains("\"secondary\":[]"),
+        secondaries(&text).iter().any(|s| s.as_array().is_some_and(|a| a.is_empty())),
         "a param has no `let` to point at, so no secondary span is emitted:\n{text}"
     );
 }
@@ -282,7 +298,7 @@ fn an_e002_under_a_shadow_names_the_shadow_and_not_the_receiver_type() {
         "the generic hint tells the author to write what they already wrote:\n{text}"
     );
     assert!(
-        text.contains("\"secondary\":[{\"line\":4,"),
+        has_secondary_on_line(&text, 4),
         "a secondary span must point at the binding on line 4:\n{text}"
     );
 }

@@ -1,28 +1,29 @@
 # almd-outline
 
-Dogfood demo: a reimplementation of `almide ide outline`'s formatter in
+Dogfood demo: a reimplementation of `almide query outline`'s formatter in
 Almide itself.
 
-The main toolchain's `almide ide outline <file>` does three things:
+The main toolchain's `almide query outline <file>` does three things:
 
 1. Parse + type-check the source file (via compiler internals — Rust).
 2. Extract a `ModuleInterface` (via `almide-tools::interface::extract`).
 3. Render that interface as one-line-per-decl text.
 
 This example covers **step 3** — rendering — written in pure Almide.
-The input is the JSON that `almide compile --json <file>` emits.
+The input is the interface JSON that `almide query interface <file> --json`
+carries in its envelope's `result`.
 
 ## Run
 
 ```sh
 # 1. Generate a ModuleInterface JSON for some source file
-almide compile --json /path/to/your.almd > /tmp/iface.json
+almide query interface /path/to/your.almd --json | jq '.result' > /tmp/iface.json
 
 # 2. Render it with the Almide-written formatter
 almide run examples/almd-outline/src/main.almd -- /tmp/iface.json
 ```
 
-The output is bit-identical to `almide ide outline /path/to/your.almd`
+The output is bit-identical to `almide query outline /path/to/your.almd`
 for the same source.
 
 ## Why this matters

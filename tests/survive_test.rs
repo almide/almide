@@ -1,4 +1,4 @@
-//! `almide survive` / `almide apply --if-survives` end-to-end (#2147): drive
+//! `almide apply --dry-run` / `almide apply --if-survives` end-to-end (#2147): drive
 //! the REAL binary on the three golden-delta fixtures under `tests/survive/`.
 //!
 //! Each fixture directory is a tiny project, one proposed edit (`edit.patch`
@@ -47,7 +47,9 @@ fn scratch_copy(case: &str, tag: &str) -> PathBuf {
     dst
 }
 
-fn run(dir: &Path, args: &[&str]) -> (i32, Value, String) {
+/// Run the binary and return its exit code, the whole `--json` envelope
+/// (`{"schema_version","ok","diagnostics","result"}`, #4590) and a dump.
+fn run_env(dir: &Path, args: &[&str]) -> (i32, Value, String) {
     let out = Command::new(almide())
         .args(args)
         .current_dir(dir)
@@ -56,8 +58,28 @@ fn run(dir: &Path, args: &[&str]) -> (i32, Value, String) {
         .expect("spawn almide");
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-    let json = serde_json::from_str(stdout.trim()).unwrap_or(Value::Null);
-    (out.status.code().unwrap_or(-1), json, format!("stdout:\n{stdout}\nstderr:\n{stderr}"))
+    let json: Value = serde_json::from_str(stdout.trim()).unwrap_or(Value::Null);
+    let code = out.status.code().unwrap_or(-1);
+    let raw = format!("stdout:\n{stdout}\nstderr:\n{stderr}");
+    if !json.is_null() {
+        assert_eq!(json["ok"], Value::Bool(code == 0), "the envelope's `ok` follows the exit code\n{raw}");
+    }
+    (code, json, raw)
+}
+
+/// Like `run_env`, but return the envelope's `result` — the survival report.
+fn run(dir: &Path, args: &[&str]) -> (i32, Value, String) {
+    let (code, env, raw) = run_env(dir, args);
+    (code, env["result"].clone(), raw)
+}
+
+/// The refusal text of a failed `--json` run: the report's `error` field when
+/// the result carries one, else the envelope's first diagnostic message.
+fn error_text(env: &Value) -> Option<String> {
+    env["result"]["error"]
+        .as_str()
+        .or_else(|| env["diagnostics"][0]["message"].as_str())
+        .map(str::to_string)
 }
 
 /// Every file's bytes and mtime — the whole directory, so a stray temp file
@@ -79,7 +101,7 @@ fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>, std::time::SystemTime)> {
 fn the_three_golden_deltas_match() {
     for (case, file, edit) in CASES {
         let dir = scratch_copy(case, "golden");
-        let (code, got, raw) = run(&dir, &["survive", file, "--with", edit, "--json"]);
+        let (code, got, raw) = run(&dir, &["apply", file, "--with", edit, "--dry-run", "--json"]);
         let expected: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("expected.json")).unwrap()).unwrap();
         assert_eq!(
             got,
@@ -99,15 +121,15 @@ fn the_three_golden_deltas_match() {
 #[test]
 fn a_newly_broken_diagnostic_carries_its_repair_verbatim() {
     let dir = scratch_copy("breaks_diagnostic", "repair");
-    let (_, got, raw) = run(&dir, &["survive", "sum.almd", "--with", "edit.patch", "--json"]);
+    let (_, got, raw) = run(&dir, &["apply", "sum.almd", "--with", "edit.patch", "--dry-run", "--json"]);
     let broken = &got["check"]["newly_broken"][0]["after"];
     assert_eq!(broken["code"], "E031", "{raw}");
     assert_eq!(broken["repair"]["primary"]["replacement"], "..<", "{raw}");
-    let (_, check_row, raw2) = {
+    let (_, check_env, raw2) = {
         std::fs::write(dir.join("sum.almd"), std::fs::read_to_string(dir.join("sum.almd")).unwrap().replace("0..<k", "0..k")).unwrap();
-        run(&dir, &["check", "sum.almd", "--json"])
+        run_env(&dir, &["check", "sum.almd", "--json"])
     };
-    assert_eq!(&check_row, broken, "survive must carry check --json's object as-is\n{raw2}");
+    assert_eq!(&check_env["diagnostics"][0], broken, "survive must carry check --json's object as-is\n{raw2}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -119,7 +141,7 @@ fn survive_never_writes() {
     let before = snapshot(&dir);
     // A coarse mtime clock must not hide a rewrite of identical length.
     std::thread::sleep(std::time::Duration::from_millis(1100));
-    let (code, got, raw) = run(&dir, &["survive", "calc.almd", "--with", "edit.patch", "--json"]);
+    let (code, got, raw) = run(&dir, &["apply", "calc.almd", "--with", "edit.patch", "--dry-run", "--json"]);
     assert_eq!(code, 1, "{raw}");
     assert_eq!(got["written"], false, "{raw}");
     assert_eq!(snapshot(&dir), before, "survive changed the directory it judged\n{raw}");
@@ -171,9 +193,9 @@ fn apply_fails_closed_on_a_non_boolean_gate_or_no_gate() {
         vec!["apply", "greet.almd", "--with", "edit.patch", "--if-survives=false", "--json"],
         vec!["apply", "greet.almd", "--with", "edit.patch", "--json"],
     ] {
-        let (code, got, raw) = run(&dir, &args);
+        let (code, env, raw) = run_env(&dir, &args);
         assert_eq!(code, 2, "{args:?} must refuse before judging\n{raw}");
-        assert!(got["error"].is_string(), "{args:?}: the refusal is JSON under --json\n{raw}");
+        assert!(error_text(&env).is_some(), "{args:?}: the refusal is JSON under --json\n{raw}");
     }
     // `--force` is a plain flag: a value on it is a usage error, not a yes.
     let (code, _, raw) = run(&dir, &["apply", "greet.almd", "--with", "edit.patch", "--force=yes"]);
@@ -186,9 +208,9 @@ fn apply_fails_closed_on_a_non_boolean_gate_or_no_gate() {
 fn a_patch_that_does_not_apply_is_an_error_not_a_verdict() {
     let dir = scratch_copy("neutral", "badpatch");
     std::fs::write(dir.join("bad.patch"), "@@ -1,1 +1,1 @@\n-no such line\n+x\n").unwrap();
-    let (code, got, raw) = run(&dir, &["survive", "greet.almd", "--with", "bad.patch", "--json"]);
+    let (code, env, raw) = run_env(&dir, &["apply", "greet.almd", "--with", "bad.patch", "--dry-run", "--json"]);
     assert_eq!(code, 2, "{raw}");
-    assert!(got["error"].as_str().unwrap_or("").contains("does not apply"), "{raw}");
+    assert!(error_text(&env).unwrap_or_default().contains("does not apply"), "{raw}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -210,7 +232,7 @@ fn deleting_or_hollowing_the_guarding_tests_does_not_survive() {
         std::fs::write(dir.join(name), text).unwrap();
     }
     let survive = |edit: &str, extra: &[&str]| {
-        let args: Vec<&str> = ["survive", "calc_test.almd", "--with", edit, "--as", "text", "--json"].into_iter().chain(extra.iter().copied()).collect();
+        let args: Vec<&str> = ["apply", "calc_test.almd", "--with", edit, "--as", "text", "--dry-run", "--json"].into_iter().chain(extra.iter().copied()).collect();
         run(&dir, &args)
     };
 

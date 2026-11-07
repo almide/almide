@@ -24,7 +24,24 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// The `LoadHandle` destinations of `func` that may render as a borrow.
 pub(crate) fn borrow_reads(func: &MirFunction) -> BTreeSet<ValueId> {
-    // Every address value's root block (`prim.handle(r)` plus offsets).
+    let root = roots(func);
+    let mut out = BTreeSet::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
+        let Some(&base) = args.first().and_then(|a| root.get(a)) else { continue };
+        if func.ret == Some(*d) {
+            continue;
+        }
+        let Some(last) = last_borrowing_use(func, i, *d, &root) else { continue };
+        if block_untouched(func, i, last, base, &root) {
+            out.insert(*d);
+        }
+    }
+    out
+}
+
+/// Every address value's root block (`prim.handle(r)` plus offsets).
+pub(crate) fn roots(func: &MirFunction) -> BTreeMap<ValueId, ValueId> {
     let mut root: BTreeMap<ValueId, ValueId> = BTreeMap::new();
     for op in &func.ops {
         match op {
@@ -45,24 +62,12 @@ pub(crate) fn borrow_reads(func: &MirFunction) -> BTreeSet<ValueId> {
             _ => {}
         }
     }
-    let mut out = BTreeSet::new();
-    for (i, op) in func.ops.iter().enumerate() {
-        let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
-        let Some(&base) = args.first().and_then(|a| root.get(a)) else { continue };
-        if func.ret == Some(*d) {
-            continue;
-        }
-        let Some(last) = last_borrowing_use(func, i, *d, &root) else { continue };
-        if block_untouched(func, i, last, base, &root) {
-            out.insert(*d);
-        }
-    }
-    out
+    root
 }
 
 /// The index of the last op after `at` that uses `d`, when every such use only
 /// borrows it; `None` when some use needs an owned value.
-fn last_borrowing_use(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMap<ValueId, ValueId>) -> Option<usize> {
+pub(crate) fn last_borrowing_use(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMap<ValueId, ValueId>) -> Option<usize> {
     let mut last = at;
     let mut reads = Vec::new();
     for (j, op) in func.ops.iter().enumerate().skip(at + 1) {

@@ -2,17 +2,26 @@ use std::io::{self, Write, BufRead};
 use std::path::PathBuf;
 use crate::{out, out_no_nl, err};
 
+/// `almide repl` (#4590: a bare `almide` prints help instead). Without a
+/// terminal on stdin nothing prompts: no banner and no `>>>`, so piped input
+/// gets only the answers.
 pub fn run_repl() {
-    out(&format!("Almide REPL v{} — type expressions to evaluate, :q to quit",
-             env!("CARGO_PKG_VERSION")));
-    out("");
+    use std::io::IsTerminal;
+    let interactive = io::stdin().is_terminal();
+    if interactive {
+        out(&format!("Almide REPL v{} — type expressions to evaluate, :q to quit",
+                 env!("CARGO_PKG_VERSION")));
+        out("");
+    }
 
     let mut session = Session::new();
     let stdin = io::stdin();
 
     loop {
-        out_no_nl(&format!(">>> "));
-        io::stdout().flush().ok();
+        if interactive {
+            out_no_nl(&format!(">>> "));
+            io::stdout().flush().ok();
+        }
 
         let mut line = String::new();
         if stdin.lock().read_line(&mut line).unwrap_or(0) == 0 {

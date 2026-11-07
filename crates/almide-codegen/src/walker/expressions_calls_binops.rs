@@ -229,8 +229,16 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             .unwrap_or_else(|| format!("concat(_, _)"));
     }
 
-    let l = render_expr(ctx, left);
-    let r = render_expr(ctx, right);
+    // `==` / `!=` compare in place (`($a) == ($b)` borrows both sides), so a
+    // heap global operand needs no copy (#4562).
+    let (l, r) = if matches!(op, BinOp::Eq | BinOp::Neq) {
+        (
+            global_read_place(ctx, left).unwrap_or_else(|| render_expr(ctx, left)),
+            global_read_place(ctx, right).unwrap_or_else(|| render_expr(ctx, right)),
+        )
+    } else {
+        (render_expr(ctx, left), render_expr(ctx, right))
+    };
 
     if let Some(method) = int_wrapping_method(op) {
         return format!("({l}).{method}({r})");
@@ -357,35 +365,96 @@ fn render_user_call_arg(ctx: &RenderContext, arg: &IrExpr) -> String {
         };
         return format!("&{}", rc_cow_result_glue(owned, &inner.ty));
     }
-    if let Some(rendered) = render_global_snapshot_borrow(ctx, arg) {
-        return rendered;
-    }
     render_expr_owned(ctx, arg)
 }
 
-/// A read-only borrow of a heap `var` global at a call argument
-/// (`map.get(cache, k)`, `list.len(xs)`, `f(g)` with a borrowed param), #4562.
+/// A read-only borrow of a heap `var` global (#4562): `map.get(cache, k)`,
+/// `list.len(g.items)`, `f(g)` with a borrowed param, `match g { … }`.
 /// The global is a `RefCell<Rc<T>>`, and its bare read is a deep copy of `T`
-/// (`(**c.borrow()).clone()`), which a borrowed parameter only reads. So every
-/// lookup in a module-level map copied the whole map.
+/// (`(**c.borrow()).clone()`), which a borrow only reads. So every lookup in a
+/// module-level map copied the whole map.
 ///
-/// The argument now borrows a SNAPSHOT of the cell's `Rc`: one reference count,
-/// not a copy. No `RefCell` borrow is held while the callee runs, so this holds
-/// whatever the callee is. A callee that runs user code that writes the global
-/// meets a shared block, and the write's `Rc::make_mut` copies it then, so the
-/// argument keeps the value it had at the call site, as the copy did. The
-/// temporary lives to the end of the enclosing statement, the same span the
-/// copy's temporary had.
+/// The borrow now reads a SNAPSHOT of the cell's `Rc` ([`global_snapshot_place`]):
+/// one reference count, not a copy. No `RefCell` borrow is held while anything
+/// else runs, so this holds whatever the consumer is. Code that writes the
+/// global while the snapshot lives meets a shared block, and the write's
+/// `Rc::make_mut` copies it then (or `Rc::new` replaces it), so the borrow keeps
+/// the value it had where it was taken, as the copy did. The temporary lives
+/// exactly as long as the copy's temporary did: both are the operand of the
+/// same `&`, through the same field and deref places.
 fn render_global_snapshot_borrow(ctx: &RenderContext, arg: &IrExpr) -> Option<String> {
-    use almide_ir::top_let_storage::TopLetStorage;
     let IrExprKind::Borrow { expr: inner, as_str, mutable: false } = &arg.kind else { return None };
-    let IrExprKind::Var { id } = &inner.kind else { return None };
-    let global = ctx.ann.global(*id)?;
-    if !matches!(global.storage, TopLetStorage::RcRefCell) {
+    let place = global_snapshot_place(ctx, inner)?;
+    Some(if *as_str { format!("&*{place}") } else { format!("&{place}") })
+}
+
+/// The cell's `Rc` of heap `var` global `id`, as an expression (#4562): a
+/// reference count, never a copy of the value. `None` when `id` is not a
+/// global held in a `RefCell<Rc<T>>`.
+pub(crate) fn global_rc_snapshot(ctx: &RenderContext, id: VarId) -> Option<String> {
+    use almide_ir::top_let_storage::TopLetStorage;
+    let global = ctx.ann.global(id)?;
+    matches!(global.storage, TopLetStorage::RcRefCell)
+        .then(|| format!("{}.with(|__almide_cell| std::rc::Rc::clone(&*__almide_cell.borrow()))", global.static_name))
+}
+
+/// A read-only PLACE rooted at a heap `var` global (#4562): `(*snapshot)` for
+/// the global itself, `(*snapshot).f.0` through its fields and tuple slots.
+/// It has the type the copying read had, so a consumer that only reads it (a
+/// borrow, a comparison, a format argument, a loop's `.iter()`) or clones the
+/// part it needs takes no copy of the rest. A boxed field (a recursive
+/// record's cycle) is not a place here: its read moves the box out.
+pub(crate) fn global_snapshot_place(ctx: &RenderContext, expr: &IrExpr) -> Option<String> {
+    match &expr.kind {
+        IrExprKind::Var { id } => global_rc_snapshot(ctx, *id).map(|s| format!("(*{s})")),
+        IrExprKind::Member { object, field } if !super::record_field_is_boxed(ctx, &object.ty, field.as_str()) => {
+            Some(format!("{}.{}", global_snapshot_place(ctx, object)?, ctx.field_ident(field.as_str())))
+        }
+        IrExprKind::TupleIndex { object, index } => Some(format!("{}.{index}", global_snapshot_place(ctx, object)?)),
+        _ => None,
+    }
+}
+
+/// `expr` itself, or the expression under a `Clone` of it: the copy a
+/// read-only consumer of a global place does not need.
+pub(crate) fn strip_place_clone(expr: &IrExpr) -> &IrExpr {
+    match &expr.kind {
+        IrExprKind::Clone { expr: inner } => inner,
+        _ => expr,
+    }
+}
+
+/// The global place under `expr` when its consumer only reads it (#4562).
+/// A Bytes/Matrix value keeps its copy: a global stores the raw shape and
+/// the clone re-wraps it into the `AlmideRcCow` the consumer is typed for
+/// (#617).
+pub(crate) fn global_read_place(ctx: &RenderContext, expr: &IrExpr) -> Option<String> {
+    let inner = strip_place_clone(expr);
+    if rc_cow_needs_glue(&inner.ty) {
         return None;
     }
-    let snapshot = format!("{}.with(|__almide_cell| std::rc::Rc::clone(&*__almide_cell.borrow()))", global.static_name);
-    Some(if *as_str { format!("&**{snapshot}") } else { format!("&*{snapshot}") })
+    global_snapshot_place(ctx, inner)
+}
+
+/// A part of a heap global (`g.f`, `t.0`) read as an owned value (#4562): a
+/// scalar is read in place, anything else clones only that part, where the
+/// copying read cloned the whole global and then moved the part out. `None`
+/// for the global itself, whose copying read is already its one copy.
+pub(crate) fn global_part_owned(ctx: &RenderContext, expr: &IrExpr) -> Option<String> {
+    if matches!(expr.kind, IrExprKind::Var { .. }) {
+        return None;
+    }
+    let place = global_snapshot_place(ctx, expr)?;
+    Some(if ty_is_copy_scalar(&expr.ty) { place } else { format!("{place}.clone()") })
+}
+
+/// A type whose Rust value is `Copy`: read out of a place without a clone.
+fn ty_is_copy_scalar(ty: &Ty) -> bool {
+    matches!(ty,
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Unit
+        | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+        | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+        | Ty::Float32 | Ty::Float64)
 }
 
 /// `CallTarget::Named` case of `render_generic_call`, extracted verbatim
@@ -1297,9 +1366,6 @@ fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::inte
             _ => "_".to_string(),
         };
         format!("&({s}).iter().map(|__e: &{elem}| (**__e).clone()).collect::<Vec<_>>()")
-    } else if let Some(rendered) = render_global_snapshot_borrow(ctx, a) {
-        // A borrowed heap global reads in place, not out of a copy (#4562).
-        rendered
     } else {
         render_expr_owned(ctx, a)
     }

@@ -1,4 +1,5 @@
-//! `almide survive` and `almide apply --if-survives` (#2147): the survival
+//! `almide apply --dry-run` (was `survive`, #4590) and `almide apply
+//! --if-survives` (#2147): the survival
 //! delta of a proposed edit, answered BEFORE the edit is written.
 //!
 //! The failure that kills modification survival is an agent applying an edit
@@ -352,7 +353,8 @@ fn render_human(r: &Value, allow_removed: bool) {
     }
 }
 
-/// `almide survive FILE --with EDIT [--json]`. Exit 0 = survives, 1 = does
+/// `almide apply FILE --with EDIT --dry-run [--json]` (was `survive`, #4590).
+/// Exit 0 = survives, 1 = does
 /// not, 2 = the edit could not be judged (unreadable, a hunk that does not
 /// apply).
 pub fn cmd_survive(a: SurviveArgs) {
