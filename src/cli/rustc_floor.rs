@@ -33,7 +33,7 @@ pub(crate) fn min_rustc_string() -> String {
 /// The rustc the direct-rustc routes run: `rustc` on PATH, else the one
 /// rustup installs under the cargo home (`crate::find_rustc`).
 pub(crate) fn locate_rustc() -> String {
-    if std::process::Command::new("rustc").arg("--version").output().is_ok() {
+    if version_output("rustc").is_some() {
         return "rustc".to_string();
     }
     let fallback = fallback_rustc(
@@ -46,6 +46,21 @@ pub(crate) fn locate_rustc() -> String {
         Some(p) if p.exists() => p.to_string_lossy().to_string(),
         _ => "rustc".to_string(),
     }
+}
+
+/// Share the discovery probe with the version floor. Both used to start the
+/// rustup proxy independently, and every find_rustc repeated discovery again.
+/// Like the floor verdict, these observations live only for this CLI process:
+/// the next invocation rechecks the selected toolchain, including upgrades.
+fn version_output(rustc: &str) -> Option<String> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static OUTPUTS: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+    let mut outputs = OUTPUTS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    outputs.entry(rustc.to_owned()).or_insert_with(|| {
+        std::process::Command::new(rustc).arg("--version").output().ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    }).clone()
 }
 
 /// Where rustup puts rustc when it is not on PATH: `$CARGO_HOME/bin`, else
@@ -114,8 +129,8 @@ pub(crate) fn require() -> Result<(), String> {
                 candidates.push(r.to_string_lossy().into_owned());
             }
             for rustc in candidates {
-                if let Ok(o) = std::process::Command::new(&rustc).arg("--version").output() {
-                    judge(&rustc, &String::from_utf8_lossy(&o.stdout))?;
+                if let Some(version) = version_output(&rustc) {
+                    judge(&rustc, &version)?;
                 }
             }
             Ok(())
