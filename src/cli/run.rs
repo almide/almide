@@ -54,7 +54,7 @@ fn generate_native_source(file: &str, no_check: bool, test_mode: bool, native_ve
         .map_err(|_| "compile failed".to_string())?;
     t.lap("frontend");
     let rs_code = if native_verified && !test_mode {
-        super::render_v1_native_or_fallback(file, move || pending.generate(), metered, &opts)
+        super::render_v1_native_or_fallback(pending, metered, &opts)
     } else {
         let rs_code = pending.generate();
         // The NATIVE TEST harness rides the standard codegen: link the

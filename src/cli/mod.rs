@@ -426,16 +426,17 @@ fn incremental_cache_dir() -> std::path::PathBuf {
 /// from `rs_code`: a user string literal is emitted into that text verbatim,
 /// and `println("almide_rt_prim_budget_x")` was refused here, #3486).
 ///
-/// `rs_code` produces the standard codegen's Rust. It runs only on a route
+/// `pending` retains the parsed entry and produces the standard codegen's Rust. It runs only on a route
 /// that ships it (a wall, a bounded fs program, a metered splice): a program
 /// the v1 render covers never pays for it (#4595).
 pub(crate) fn render_v1_native_or_fallback(
-    file: &str,
-    rs_code: impl FnOnce() -> String,
+    mut pending: crate::compile_driver::PendingRust,
     metered: Option<almide::ir::IrProgram>,
     opts: &crate::codegen::CodegenOptions,
 ) -> String {
-    let source_text = almide::source_overlay::read_to_string(file).unwrap_or_default();
+    let source_text = std::mem::take(&mut pending.source);
+    let native_program = pending.native_program.take();
+    let rs_code = move || pending.generate();
     // ALMIDE_FORCE_METER_CODEGEN=1 meters the program in the standard
     // codegen even when the whole program renders — the differential that
     // holds the codegen meter to the v1 render (tests/fan_region_floor_test.rs).
@@ -449,7 +450,12 @@ pub(crate) fn render_v1_native_or_fallback(
     // whole program renders — the differential that holds the two routes'
     // spends equal (tests/fan_meter_splice_test.rs).
     let force_splice = metered.is_some() && almide_base::env::flag("ALMIDE_FORCE_METER_SPLICE");
-    match almide_mir::pipeline::try_render_rust_source(&source_text) {
+    let rendered = match native_program {
+        Some(program) => almide_mir::pipeline::try_render_rust_program(&source_text, program),
+        // JSON AST input historically takes the source API and its fallback.
+        None => almide_mir::pipeline::try_render_rust_source(&source_text),
+    };
+    match rendered {
         Ok(_) if force_splice => {
             let ir = metered.expect("force_splice implies a metered program");
             link_metered_regions(&source_text, rs_code(), "forced by ALMIDE_FORCE_METER_SPLICE", ir, opts)

@@ -307,7 +307,7 @@ pub fn cmd_build(args: BuildArgs) {
     // falls back to the v0 source above — honest-wall discipline: a v1-rendered
     // program is never wrong.
     let rs_code = if native_verified && !repr_c && !cdylib {
-        super::render_v1_native_or_fallback(file, move || pending.generate(), metered, &opts)
+        super::render_v1_native_or_fallback(pending, metered, &opts)
     } else {
         pending.generate()
     };
