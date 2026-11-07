@@ -35,11 +35,9 @@ fn check_json(dir: &Path) -> (i32, Vec<serde_json::Value>) {
         .current_dir(dir)
         .output()
         .expect("almide check");
-    let diags = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| serde_json::from_str(l).expect("one JSON diagnostic per line"))
-        .collect();
+    // #4590: one envelope line; the rows are its `diagnostics` array.
+    let envelope: serde_json::Value = serde_json::from_slice(&out.stdout).expect("one JSON envelope on stdout");
+    let diags = envelope["diagnostics"].as_array().cloned().expect("a diagnostics array");
     (out.status.code().unwrap_or(-1), diags)
 }
 

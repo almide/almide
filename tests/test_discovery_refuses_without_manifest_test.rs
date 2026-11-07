@@ -107,11 +107,15 @@ fn an_ignore_marker_does_not_hide_a_directory_named_explicitly() {
 }
 
 /// The file count a leg's output reports: `(of N files)` (default and wasm
-/// legs), `All N test file(s) passed` (native leg) or one JSONL row per file
-/// (`--json`).
+/// legs), `All N test file(s) passed` (native leg) or one row per file in
+/// the `--json` envelope's `result.files` (#4590).
 fn reported_file_count(args: &[&str], out: &str) -> usize {
     if args.contains(&"--json") {
-        return out.lines().filter(|l| l.starts_with("{\"file\":")).count();
+        return out
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter_map(|env| env["result"]["files"].as_array().map(Vec::len))
+            .sum();
     }
     if let Some(rest) = out.rsplit("(of ").next().filter(|_| out.contains("(of ")) {
         return rest.split(' ').next().unwrap().parse().unwrap();

@@ -54,10 +54,12 @@ fn silent_programs_check_with_no_diagnostic() {
             .output()
             .expect("almide check --json");
         let stdout = String::from_utf8_lossy(&out.stdout);
-        // One JSON object per diagnostic; anything else on stdout (a summary
-        // line) is not a verdict. The exit status is judged separately so a
-        // failure that prints no JSON still counts.
-        let diagnostics: Vec<&str> = stdout.lines().filter(|l| l.trim_start().starts_with('{')).collect();
+        // One envelope line (#4590) whose `diagnostics` array holds one object
+        // per diagnostic. The exit status is judged separately so a failure
+        // that prints no JSON still counts.
+        let envelope = serde_json::from_str::<serde_json::Value>(stdout.trim()).unwrap_or_default();
+        let diagnostics: Vec<String> =
+            envelope["diagnostics"].as_array().into_iter().flatten().map(|d| d.to_string()).collect();
         if !out.status.success() || !diagnostics.is_empty() {
             loud.push(format!(
                 "{} (exit {:?}):\n  {}{}",

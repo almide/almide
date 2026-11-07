@@ -16,10 +16,10 @@ fn check_json(tag: &str, src: &str) -> Vec<serde_json::Value> {
         .arg("check").arg("--json").arg(&file)
         .output().expect("almide");
     let _ = std::fs::remove_dir_all(Path::new(&dir));
-    String::from_utf8_lossy(&out.stdout).lines()
-        .filter(|l| l.starts_with('{'))
-        .map(|l| serde_json::from_str(l).expect("one JSON diagnostic per line"))
-        .collect()
+    // #4590: one envelope line; the rows are its `diagnostics` array.
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("one JSON envelope on stdout");
+    envelope["diagnostics"].as_array().cloned().expect("a diagnostics array")
 }
 
 /// Every `try_replace` / `suggestions[]` position lies on a line of `src`, at

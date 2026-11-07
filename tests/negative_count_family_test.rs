@@ -10,7 +10,7 @@
 //!
 //! Two checks:
 //! 1. The population — every `Int` parameter of every public fn of list,
-//!    string, bytes and matrix, read from `almide compile <m> --json` — equals
+//!    string, bytes and matrix, read from `almide query interface <m> --json` — equals
 //!    the ledger's rows, so a new count-taking function cannot escape the rule
 //!    and a stale row cannot linger.
 //! 2. Every `[[cell]]` runs with N = 0, -1 and i64::MIN on native, on the
@@ -104,9 +104,9 @@ fn ledger() -> (Vec<Cell>, BTreeMap<String, String>) {
 fn population() -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     for m in MODULES {
-        let o = Command::new(almide()).args(["compile", m, "--json"]).current_dir(root()).output().unwrap();
-        assert!(o.status.success(), "almide compile {m} --json failed:\n{}", String::from_utf8_lossy(&o.stderr));
-        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        let o = Command::new(almide()).args(["query", "interface", m, "--json"]).current_dir(root()).output().unwrap();
+        assert!(o.status.success(), "almide query interface {m} --json failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        let v: serde_json::Value = serde_json::from_slice::<serde_json::Value>(&o.stdout).unwrap()["result"].clone();
         for f in v["functions"].as_array().unwrap() {
             let name = f["name"].as_str().unwrap();
             if name.starts_with('_') {

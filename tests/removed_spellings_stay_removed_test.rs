@@ -3,7 +3,7 @@
 //! `proofs/dialect-epochs.toml` is the one place a removal is written: each
 //! removed spelling is a `breaks` entry, and `almide_frontend::removed_spellings`
 //! parses it for the check-time hint. This gate reads the same entries and
-//! holds them against the DECLARED public surface (`almide compile <module>
+//! holds them against the DECLARED public surface (`almide query interface <module>
 //! --json`): a spelling the ledger says is gone must not be public again. So
 //! the set is never a hand list — adding a removal to the ledger extends the
 //! gate, and re-adding a removed function (security table row 20: `hash.md5`,
@@ -21,14 +21,14 @@ use almide_frontend::removed_spellings;
 /// the ledger removed whole, `mem`).
 fn declared(module: &str) -> Option<BTreeSet<String>> {
     let o = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .args(["compile", module, "--json"])
+        .args(["query", "interface", module, "--json"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
-        .expect("almide compile");
+        .expect("almide query interface");
     if !o.status.success() {
         return None;
     }
-    let v: serde_json::Value = serde_json::from_slice(&o.stdout).expect("interface json");
+    let v: serde_json::Value = serde_json::from_slice::<serde_json::Value>(&o.stdout).expect("interface json")["result"].clone();
     Some(v["functions"].as_array().into_iter().flatten().filter_map(|f| f["name"].as_str().map(String::from)).collect())
 }
 

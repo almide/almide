@@ -233,7 +233,15 @@ fn the_cli_warns_once_and_exits_zero() {
         .expect("spawn almide");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "a warning must not fail check --json: {stdout}");
-    let row = stdout.lines().find(|l| l.contains("verison")).unwrap_or_else(|| panic!("no JSON row: {stdout}"));
+    // #4590: one envelope line; the rows are its `diagnostics` array.
+    let envelope = serde_json::from_str::<serde_json::Value>(stdout.trim()).unwrap_or_else(|e| panic!("not a JSON envelope ({e}): {stdout}"));
+    let row = envelope["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|d| d.to_string())
+        .find(|d| d.contains("verison"))
+        .unwrap_or_else(|| panic!("no JSON row: {stdout}"));
     assert!(row.contains("\"level\":\"warning\""), "{row}");
     assert!(row.contains("\"line\":3"), "{row}");
 

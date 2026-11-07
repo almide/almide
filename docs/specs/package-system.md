@@ -182,7 +182,8 @@ table under `[target.<platform>]` is already an error (§6.2).
 
 The build still runs exactly as if the key were absent, and the exit code does
 not change (`check --deny-warnings` does not count it either). `almide check
---json` carries the warning as a `"level":"warning"` row on stdout; every other
+--json` carries the warning as a `"level":"warning"` row in its envelope's
+`diagnostics`; every other
 command prints it on stderr. Escalating it to an error is planned for a later
 dialect epoch, after a release that carries the warning; there is no epoch
 entry yet. The key lists live beside their readers in `src/project.rs`, and
@@ -259,12 +260,12 @@ error: almide.toml:6: subdir `pkgs/ceangal` of dependency `ceangal` does not exi
   `--git <url>` the first argument is the name. `add` fetches and checks the
   package BEFORE it writes `almide.toml`, so a wrong `subdir` leaves the
   manifest as it was. `almide deps` prints `… (<ref>) subdir <dir>`, and
-  `almide dep-path <name>` prints the package's directory inside the clone
+  `almide deps --path <name>` prints the package's directory inside the clone
   (its `src/` when it has one). `almide update` advances the entry like any
   other git dependency.
 
 Tests: `tests/dep_git_subdir_test.rs` (a local repository holding two packages:
-check, lock, one shared clone, `dep-path`, `deps`, `add --subdir`, every
+check, lock, one shared clone, `deps --path`, `deps`, `add --subdir`, every
 refusal), the `project_fetch` unit tests (`package_dir_in_checks_the_subdir_against_the_checkout`,
 `subdir_packages_of_one_repository_share_a_clone_root`), `tests/lock_roundtrip_test.rs`.
 

@@ -5,7 +5,7 @@
 //! compare it rests on exists for the {Bytes, String} pair.
 //!
 //! The shapes the row rests on, read from the DECLARED surface
-//! (`almide compile <module> --json`, the interface every caller type-checks
+//! (`almide query interface <module> --json`, the interface every caller type-checks
 //! against), not from source text:
 //!
 //! - the key and the tag are `Secret[Bytes]`: the tag prints as `Secret(***)`
@@ -74,12 +74,12 @@ fn declared(module: &str) -> BTreeMap<String, String> {
 
 fn read_surface(module: &str) -> BTreeMap<String, String> {
     let o = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .args(["compile", module, "--json"])
+        .args(["query", "interface", module, "--json"])
         .current_dir(root())
         .output()
-        .expect("almide compile");
-    assert!(o.status.success(), "almide compile {module} --json: {}", String::from_utf8_lossy(&o.stderr));
-    let v: Value = serde_json::from_slice(&o.stdout).expect("interface json");
+        .expect("almide query interface");
+    assert!(o.status.success(), "almide query interface {module} --json: {}", String::from_utf8_lossy(&o.stderr));
+    let v: Value = serde_json::from_slice::<Value>(&o.stdout).expect("interface json")["result"].clone();
     let mut out = BTreeMap::new();
     for f in v["functions"].as_array().into_iter().flatten() {
         let name = f["name"].as_str().unwrap_or("").to_string();

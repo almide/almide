@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """#1423 stage 1 / #1827 — measure the single-leg stdlib surface WITH THE
 RENDERER'S EYES, over the WHOLE public surface: for every public stdlib fn
-(the compiler's own module interface, `almide compile <mod> --json` — the
+(the compiler's own module interface, `almide query interface <mod> --json` — the
 source the docs/stdlib signature indexes are generated from), synthesize a
 minimal well-typed call and attempt the leg's build (or run). Record
 ok | wall | unprobed | error.
@@ -349,10 +349,10 @@ def enumerate_surface():
         raise SystemExit(f"::error::registered stdlib modules without a docs/stdlib page: {', '.join(missing)}")
     sigs, types = [], {}
     for mod in sorted(docs):
-        r = subprocess.run([ALMIDE, "compile", mod, "--json"], capture_output=True, text=True, cwd=ROOT)
+        r = subprocess.run([ALMIDE, "query", "interface", mod, "--json"], capture_output=True, text=True, cwd=ROOT)
         if r.returncode != 0 or not r.stdout.strip():
-            raise SystemExit(f"::error::`almide compile {mod} --json` failed:\n{r.stderr.strip()}")
-        iface = json.loads(r.stdout)
+            raise SystemExit(f"::error::`almide query interface {mod} --json` failed:\n{r.stderr.strip()}")
+        iface = json.loads(r.stdout)["result"]  # the --json envelope's payload
         for t in iface.get("types", []):
             types[t["name"]] = (mod, t["kind"])
         for f in iface.get("functions", []):

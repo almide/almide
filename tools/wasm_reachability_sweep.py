@@ -140,11 +140,11 @@ def surface(module_filter=None, modules=None):
     for module in (modules if modules is not None else stdlib_modules()):
         if module_filter and module not in module_filter:
             continue
-        rc = subprocess.run([ALMIDE, "compile", module, "--json"],
+        rc = subprocess.run([ALMIDE, "query", "interface", module, "--json"],
                             capture_output=True, text=True, cwd=REPO)
         if rc.returncode != 0:
             continue
-        for f in json.loads(rc.stdout)["functions"]:
+        for f in json.loads(rc.stdout)["result"]["functions"]:
             if f["name"].startswith("__"):
                 continue
             out.append(dict(module=module, name=f["name"],

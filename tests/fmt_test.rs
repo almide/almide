@@ -793,9 +793,12 @@ fn fmt_unused_import_verdict_agrees_with_checker_on_all_spec_files() {
             .args(["check", "--json", path.to_str().unwrap()])
             .output().expect("almide check");
         if !check.status.success() { continue; }
-        let checker: std::collections::BTreeSet<String> = String::from_utf8_lossy(&check.stdout)
-            .lines()
-            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        // #4590: one envelope line; the rows are its `diagnostics` array.
+        let envelope = serde_json::from_slice::<serde_json::Value>(&check.stdout).unwrap_or_default();
+        let checker: std::collections::BTreeSet<String> = envelope["diagnostics"]
+            .as_array()
+            .into_iter()
+            .flatten()
             .filter(|v| v["code"] == "E060")
             .filter_map(|v| v["message"].as_str()?.strip_prefix("unused import '")?.strip_suffix('\'').map(String::from))
             .collect();

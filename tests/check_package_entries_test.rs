@@ -45,6 +45,14 @@ fn check_in(dir: &Path, args: &[&str]) -> (bool, String) {
     (out.status.success(), text)
 }
 
+/// The diagnostic rows of a `check --json` run: the `diagnostics` array of
+/// its one envelope line (#4590).
+fn json_rows(text: &str) -> Vec<serde_json::Value> {
+    let env: serde_json::Value = serde_json::from_str(text.trim())
+        .unwrap_or_else(|e| panic!("--json output is not one JSON envelope ({e}): {text}"));
+    env["diagnostics"].as_array().cloned().unwrap_or_default()
+}
+
 #[test]
 fn bare_check_judges_every_entry_and_names_each() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -87,8 +95,8 @@ fn json_on_a_clean_package_is_silent_and_green() {
     package(dir.path(), MAIN_OK);
     let (ok, text) = check_in(dir.path(), &["--json"]);
     assert!(ok, "--json on a clean package:\n{text}");
-    assert!(!text.contains(": ok"), "--json is rows only, no per-entry verdict lines:\n{text}");
-    assert_eq!(text.trim(), "", "a clean package has no rows:\n{text}");
+    assert!(!text.contains(": ok"), "--json is the envelope only, no per-entry verdict lines:\n{text}");
+    assert!(json_rows(&text).is_empty(), "a clean package has no rows:\n{text}");
 }
 
 /// #2253: the bare `--json` form walks the package like the bare form does —
@@ -111,11 +119,7 @@ fn json_judges_every_entry_and_each_row_names_its_file() {
     // diagnostic across every entry, in walk order, each naming its file, and
     // all of that is asserted below unchanged.
     assert!(!ok, "a type error must turn the json check red too:\n{text}");
-    let rows: Vec<serde_json::Value> = text
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("row is not JSON ({e}): {l}")))
-        .collect();
+    let rows = json_rows(&text);
     let files: Vec<&str> = rows.iter().map(|r| r["file"].as_str().expect("row names its file")).collect();
     assert!(files.contains(&"src/main.almd"), "the broken main entry is reported:\n{text}");
     assert!(files.contains(&"src/inner/util.almd"), "the broken nested entry is reported too:\n{text}");

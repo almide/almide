@@ -30,7 +30,7 @@
     },
     {
       "title": "Getting Started & CLI",
-      "purpose": "Installation (make install) and the almide CLI subcommands implemented in src/main.rs and src/cli/: init, run, build, test, check, fmt, compile, clean, add, deps, dep-path, lsp, ide, explain, and the REPL. Include --target rust|wasm|wgsl usage and passing program arguments after --.",
+      "purpose": "Installation (make install) and the almide CLI subcommands implemented in src/main.rs and src/cli/: init, run, build, test, check, fmt, fix, bench, explain; add, remove, update, trust, deps (deps --path); apply, query, mcp, lsp; upgrade, tool install, verify, clean, and repl. Include --target rust|wasm|wgsl usage and passing program arguments after --.",
       "parent": null
     },
     {
@@ -105,7 +105,7 @@
     },
     {
       "title": "Package System & Dependencies",
-      "purpose": "almide.toml and PkgId (src/project.rs), git dependency fetching (src/project_fetch.rs), minimal version selection, version coexistence, package self-reference via import self, and the almide add / deps / dep-path / clean commands.",
+      "purpose": "almide.toml and PkgId (src/project.rs), git dependency fetching (src/project_fetch.rs), minimal version selection, version coexistence, package self-reference via import self, and the almide add / remove / deps (deps --path) / clean commands.",
       "parent": "Module & Package System"
     },
     {
@@ -150,7 +150,7 @@
     },
     {
       "title": "Tooling & Developer Experience",
-      "purpose": "almide fmt and the ALMDI module-interface tooling in crates/almide-tools, the LSP server (src/cli/lsp.rs), almide ide semantic queries for agents (outline, doc, stdlib-snapshot), the grammar/ submodule feeding the tree-sitter and TextMate generators, the REPL, and the WASM-powered playground/.",
+      "purpose": "almide fmt and the ALMDI module-interface tooling in crates/almide-tools, the LSP server (src/cli/lsp.rs), almide query semantic queries for agents (outline, doc, interface, stdlib), the grammar/ submodule feeding the tree-sitter and TextMate generators, the REPL, and the WASM-powered playground/.",
       "parent": null
     },
     {

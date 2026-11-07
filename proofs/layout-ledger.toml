@@ -65,7 +65,7 @@ why = "IrProgram/IrFunction and their metadata — same pre-existing IR surface"
 [[frozen]]
 path = "crates/almide-tools/src/interface.rs"
 serde_types = 15
-why = "the `almide compile --json` module interface — a pre-existing wire format"
+why = "the `almide query interface --json` module interface — a pre-existing wire format"
 
 [[frozen]]
 path = "crates/almide-types/src/types/mod.rs"
