@@ -1,0 +1,122 @@
+// @contract: C-015
+// The equality-needing list, set and map ops over every element and key shape
+// `==` compares (#4578). The wasm leg's `list.unique` kept its own list of
+// element shapes, and that list left out Set: `list.unique` over a
+// `List[Set[String]]` walled `list-unique-elem:Set` while `a == b` on the same
+// two sets lowered and native ran the program. `list.dedup`, `list.index_of`
+// (and `list.contains`, which is index_of), `map.from_list`, the Set/Map type
+// mapping and the deep key scan each kept another copy of that list, so a Map,
+// Result, Bytes or Unit element, a List, Set or Bytes set member and a List or
+// Option map key walled too. Every one of them now asks the predicate equality
+// itself answers. (`set.from_list` keeps its own copy until its inspection
+// stamp is re-measured; the sets here are built by `set.insert`.) Sets and maps
+// compare by content, not insertion order. Each value is built by a function
+// from flat literals, so every function here also lowers on the certified MIR
+// leg.
+type Item = { name: String, tags: Set[String] }
+
+fn tag_set(raw: String) -> Set[String] = string.split(raw, ",") |> list.filter((t) => t != "") |> set.from_list
+
+fn item(name: String, raw: String) -> Item = Item { name: name, tags: tag_set(raw) }
+
+fn tags_text(tags: Set[String]) -> String = set.to_list(tags) |> list.sort |> list.join(",")
+
+// Items grouped by identical tag sets, groups in first-seen order.
+fn groups(items: List[Item]) -> List[String] = {
+  let keys = items |> list.map((i) => i.tags) |> list.unique
+  keys |> list.map((k) => {
+    let names = items |> list.filter((i) => i.tags == k) |> list.map((i) => i.name)
+    tags_text(k) + ": " + list.join(names, ",")
+  })
+}
+
+fn items() -> List[Item] = ["a=x", "b=x,y", "c=x", "d=y,x", "e="] |> list.map((s) => {
+  let parts = string.split(s, "=")
+  item(list.get(parts, 0) ?? "", list.get(parts, 1) ?? "")
+})
+
+fn sets(raw: List[String]) -> List[Set[String]] = raw |> list.map(tag_set)
+
+fn maps(vals: List[Int]) -> List[Map[String, Int]] = vals |> list.map((v) => map.set(map.set(map.new(), "a", v), "b", 2))
+
+fn results(codes: List[Int]) -> List[Result[Int, String]] = codes |> list.map((c) => if c > 0 then ok(c) else err("e${0 - c}"))
+
+fn blobs(vals: List[Int]) -> List[Bytes] = vals |> list.map((v) => bytes.from_list([v, v + 1]))
+
+fn units(n: Int) -> List[Unit] = list.range(0, n) |> list.map((_) => ())
+
+fn set_line(xs: List[Set[String]], x: Set[String]) -> String = "set: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${list.contains(
+  xs,
+  x,
+)} index_of=${list.index_of(xs, x)}"
+
+fn map_line(xs: List[Map[String, Int]], x: Map[String, Int]) -> String = "map: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${list.contains(
+  xs,
+  x,
+)} index_of=${list.index_of(xs, x)}"
+
+fn result_line(xs: List[Result[Int, String]], x: Result[Int, String]) -> String = "result: unique=${list.unique(xs)} dedup=${list.dedup(xs)} contains=${list.contains(xs, x)} index_of=${list.index_of(
+  xs,
+  x,
+)}"
+
+fn bytes_line(xs: List[Bytes], x: Bytes) -> String = "bytes: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))} contains=${list.contains(
+  xs,
+  x,
+)} index_of=${list.index_of(xs, x)}"
+
+// unique and dedup only: a Unit call argument is outside the MIR leg's brick.
+fn unit_line(xs: List[Unit]) -> String = "unit: unique=${list.len(list.unique(xs))} dedup=${list.len(list.dedup(xs))}"
+
+fn unique_by_line(xs: List[String]) -> String = "unique_by bytes key=${list.unique_by(xs, (s) => bytes.from_list([string.len(s)]))}"
+
+fn set_of_list_line(xs: List[List[Int]]) -> String = {
+  let s = xs |> list.fold(set.new(), (acc, x) => set.insert(acc, x))
+  "set of list: len=${set.len(s)} has=${set.contains(s, [3])} has_not=${set.contains(s, [2, 1])}"
+}
+
+fn set_of_set_line(xs: List[Set[String]], hit: Set[String]) -> String = {
+  let s = xs |> list.fold(set.new(), (acc, x) => set.insert(acc, x))
+  "set of set: len=${set.len(s)} has=${set.contains(s, hit)}"
+}
+
+fn set_of_bytes_line(xs: List[Bytes], hit: Bytes) -> String = {
+  let s = xs |> list.fold(set.new(), (acc, x) => set.insert(acc, x))
+  "set of bytes: len=${set.len(s)} has=${set.contains(s, hit)}"
+}
+
+fn list_key_line(keys: List[List[Int]], vals: List[String]) -> String = {
+  let m = map.from_list(list.zip(keys, vals))
+  "list key: len=${map.len(m)} get=${map.get(m, [1])} miss=${map.get(m, [3])}"
+}
+
+fn option_key_line(keys: List[String?], vals: List[Int], hit: String?) -> String = {
+  let m = map.from_list(list.zip(keys, vals))
+  "option key: len=${map.len(m)} get=${map.get(m, hit)} none=${map.get(m, none)}"
+}
+
+fn result_key_line(k1: Result[Int, String], k2: Result[Int, String]) -> String = {
+  let m = map.set(map.set(map.set(map.new(), k1, "a"), k2, "b"), k1, "c")
+  "result key: len=${map.len(m)} get=${map.get(m, k1)} has=${map.contains(m, k2)}"
+}
+
+fn int_lists(raw: List[String]) -> List[List[Int]] = raw |> list.map((s) => string.split(s, ",") |> list.map((t) => int.parse(t) ?? 0))
+
+fn opt_strings(raw: List[String]) -> List[String?] = raw |> list.map((s) => if s == "" then none else some(s))
+
+fn main() -> Unit = {
+  let g = groups(items())
+  println("groups=${g}")
+  println(set_line(sets(["a,b", "b,a", "c", "c"]), tag_set("c")))
+  println(map_line(maps([1, 1, 3]), map.set(map.set(map.new(), "b", 2), "a", 3)))
+  println(result_line(results([1, -1, 1, -1, -2]), err("e2")))
+  println(bytes_line(blobs([1, 1, 3]), bytes.from_list([3, 4])))
+  println(unit_line(units(3)))
+  println(unique_by_line(["ab", "ac", "b", "cd"]))
+  println(set_of_list_line(int_lists(["1,2", "1,2", "3"])))
+  println(set_of_set_line(sets(["a,b", "b,a", "c"]), tag_set("c")))
+  println(set_of_bytes_line(blobs([1, 1, 2]), bytes.from_list([2, 3])))
+  println(list_key_line(int_lists(["1", "1", "2"]), ["x", "y", "z"]))
+  println(option_key_line(opt_strings(["a", "", "a"]), [1, 2, 3], some("a")))
+  println(result_key_line(ok(1), err("x")))
+}
