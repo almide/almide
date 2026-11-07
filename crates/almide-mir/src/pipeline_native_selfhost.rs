@@ -279,7 +279,7 @@ fn link_native_self_host(
 }
 
 impl SelfHostLinker<'_> {
-    /// The link's fixpoint; a refusal carries the root impl it happened under.
+    /// The link's fixpoint; a refusal carries the roots it happened under.
     fn link_all(
         &mut self,
         functions: &mut Vec<crate::MirFunction>,
