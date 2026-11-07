@@ -168,7 +168,7 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
     if rust_params.len() != dparams.len() || rust_agrees(&dret, &rust_ret) != Some(false) {
         return Err(format!("runtime signature {rust_params:?} -> {rust_ret} disagrees"));
     }
-    let params = dparams
+    let params: Vec<(DTy, bool)> = dparams
         .into_iter()
         .zip(&rust_params)
         .map(|(d, r)| rust_agrees(&d, r).map(|b| (d, b)))
