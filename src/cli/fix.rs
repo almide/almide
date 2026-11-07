@@ -458,16 +458,24 @@ fn apply_batch(source: &str, diagnostics: &[Diagnostic]) -> (String, Vec<FixItJs
 /// runs in descending span order, so dropping line `line` moves no line a
 /// later fix in the batch names.
 fn drop_emptied_line(before: &str, after: String, line: usize) -> String {
-    let blank = |text: &str| text.split_inclusive('\n').nth(line.wrapping_sub(1)).map(|l| l.trim().is_empty());
+    // `split` retains the empty final line after deleting an unterminated
+    // import; `split_inclusive` alone loses that line entirely.
+    let blank = |text: &str| text.split('\n').nth(line.wrapping_sub(1)).map(|l| l.trim().is_empty());
     if blank(before) != Some(false) || blank(&after) != Some(true) {
         return after;
     }
     let mut lines: Vec<&str> = after.split_inclusive('\n').collect();
+    if after.is_empty() || after.ends_with('\n') {
+        lines.push("");
+    }
     let removed = lines.remove(line - 1);
     let mut out: String = lines.concat();
     // The last line had no newline of its own: take the one before it.
     if !removed.ends_with('\n') && out.ends_with('\n') {
         out.pop();
+        if out.ends_with('\r') {
+            out.pop();
+        }
     }
     out
 }
@@ -1037,6 +1045,12 @@ mod batching_tests {
         assert_eq!(out, "import json\n\nfn main() -> Unit = println(\"hi\")\n");
         let (last, _) = apply_batch("import json\nimport int", &[drop_import(2, "import int")]);
         assert_eq!(last, "import json");
+        let (crlf, _) = apply_batch("import json\r\nimport int", &[drop_import(2, "import int")]);
+        assert_eq!(crlf, "import json", "remove the complete CRLF before the last line");
+        let (only, _) = apply_batch("import int", &[drop_import(1, "import int")]);
+        assert_eq!(only, "", "an unterminated sole import leaves no line");
+        let (crlf_line, _) = apply_batch("import int\r\nfn main() -> Unit = ()\r\n", &[drop_import(1, "import int")]);
+        assert_eq!(crlf_line, "fn main() -> Unit = ()\r\n");
         // A deletion that leaves text on its line keeps the line.
         let partial = Diagnostic::warning("x", "", "").with_machine_fix(1, 1, 4, "");
         let (kept, _) = apply_batch("abcdef\nnext\n", &[partial]);
