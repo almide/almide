@@ -439,7 +439,7 @@ fn apply_batch(source: &str, diagnostics: &[Diagnostic]) -> (String, Vec<FixItJs
     let mut applied = Vec::new();
     for (d, (line, col, end_col), replacement) in select_batch(diagnostics) {
         let Some(rewritten) = d.apply_try_to(&working) else { continue };
-        working = rewritten;
+        working = if replacement.is_empty() { drop_emptied_line(&working, rewritten, line) } else { rewritten };
         applied.push(FixItJson {
             code: d.code.unwrap_or("E???").to_string(),
             line, col, end_col,
@@ -448,6 +448,28 @@ fn apply_batch(source: &str, diagnostics: &[Diagnostic]) -> (String, Vec<FixItJs
         });
     }
     (working, applied)
+}
+
+/// A deletion that leaves its line with nothing on it deletes the line, its
+/// newline included (#4608): E060 removes a whole `import`, and the empty
+/// line it left was not what `almide fmt` writes, so `fmt --check` failed
+/// straight after `fix` (a run of them where adjacent imports went). A line
+/// that was already blank, and every other line, is left as it is. The batch
+/// runs in descending span order, so dropping line `line` moves no line a
+/// later fix in the batch names.
+fn drop_emptied_line(before: &str, after: String, line: usize) -> String {
+    let blank = |text: &str| text.split_inclusive('\n').nth(line.wrapping_sub(1)).map(|l| l.trim().is_empty());
+    if blank(before) != Some(false) || blank(&after) != Some(true) {
+        return after;
+    }
+    let mut lines: Vec<&str> = after.split_inclusive('\n').collect();
+    let removed = lines.remove(line - 1);
+    let mut out: String = lines.concat();
+    // The last line had no newline of its own: take the one before it.
+    if !removed.ends_with('\n') && out.ends_with('\n') {
+        out.pop();
+    }
+    out
 }
 
 /// Drive the engine to a fixpoint: apply every machine-applicable fix-it,
