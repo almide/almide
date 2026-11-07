@@ -82,7 +82,6 @@ fn mismatch(name: &str, args: &[CallArg], user_fns: &BTreeMap<&str, &MirFunction
             let Some(CallArg::Handle(v)) = args.get(*i) else { continue };
             let Some(got) = closure_sig(&d, *v, user_fns) else { continue };
             if !sig_agrees(want, &got) {
-                eprintln!("PROBE4588 refuse {name} in {:?}: want {want:?} got {got:?}", crate::native_hof::current_fn());
                 return Err(crate::render_native::wall(format!(
                     "native: the closure passed to `{name}` is not of the signature its param {i} declares (#4588)"
                 )));
