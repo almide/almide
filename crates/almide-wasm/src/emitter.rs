@@ -135,6 +135,8 @@ pub(crate) struct Emitter<'a> {
     /// separately-lowered modules each restart VarIds at 0, so the bare
     /// id is ambiguous — lookups pair it with `var_space`.
     pub(crate) globals: &'a HashMap<crate::GVar, (u32, SliceTy)>,
+    /// Hints only: a runtime equality guard is required before specialization.
+    pub(crate) global_constants: &'a HashMap<crate::GVar, i64>,
     /// Which VarTable this function's VarIds index (0 = the entry
     /// program, i+1 = `ir.modules[i]`).
     pub(crate) var_space: u32,

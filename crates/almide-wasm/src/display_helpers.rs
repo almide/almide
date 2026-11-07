@@ -157,6 +157,7 @@ pub(crate) fn build_helper_body(
     let anchor_serial = crate::witness::anchor::begin_fn();
     let mut calls = std::collections::HashSet::new();
     let empty_locals = std::collections::HashMap::new();
+    let empty_constants = std::collections::HashMap::new();
     let empty_globals = std::collections::HashMap::new();
     let empty_ranges = std::collections::HashMap::new();
     let empty_cells = std::collections::HashSet::new();
@@ -193,6 +194,7 @@ pub(crate) fn build_helper_body(
             build_depth: 0,
             work,
             globals: &empty_globals,
+            global_constants: &empty_constants,
             deferred_ranges: &empty_ranges,
             metered: false,
             cells: &empty_cells,

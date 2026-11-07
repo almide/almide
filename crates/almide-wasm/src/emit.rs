@@ -270,6 +270,7 @@ fn emit_program_pass(
     let mut pool = Pool::new();
 
     let (global_map, global_decls, init_lets) = build_globals(ir, &types);
+    let global_constants = crate::global_constants::literal_divisors(ir);
 
     // Function-VALUE work shared by every lowering below (funcref table,
     // call_indirect types, lifted lambdas).
@@ -326,7 +327,7 @@ fn emit_program_pass(
             }
             let params: Vec<(VarId, SliceTy)> =
                 f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
-            let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
+            let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, global_constants: &global_constants, var_name: &var_name };
             let cur_module = fn_module(qual.as_deref(), f);
             let effect_raw = if f.is_effect {
                 match slice_ty_of(&f.ret_ty, &types) {
@@ -414,7 +415,7 @@ fn emit_program_pass(
 
     // `main`: top-lets as the eager prelude, then the body. Failure here is
     // fatal — main is always reachable.
-    let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
+    let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, global_constants: &global_constants, var_name: &var_name };
     let main_plan = FnPlan {
         ret: None,
         cur_module: None,

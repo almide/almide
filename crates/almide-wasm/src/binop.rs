@@ -279,8 +279,22 @@ impl Emitter<'_> {
                 let ovf = self.pool.intern("Error: integer overflow");
                 let r = self.hold_i64()?;
                 let l = self.hold_i64()?;
+                self.f.instructions().local_set(r).local_set(l);
+                let hinted = match &right.kind {
+                    IrExprKind::Var { id } if matches!(left.ty, Ty::Int) && matches!(right.ty, Ty::Int)
+                        && !self.locals.contains_key(id) => self.global_constants.get(&(self.var_space, *id)).copied(),
+                    _ => None,
+                };
+                if let Some(c) = hinted {
+                    // The public export can run before main: the global
+                    // is then still zero. Evaluate both operands once and
+                    // retain the ordinary abort on the nonmatching arm.
+                    self.f.instructions().local_get(r).i64_const(c).i64_eq().if_(BlockType::Result(ValType::I64));
+                    self.f.instructions().local_get(l);
+                    self.emit_const_div(c, matches!(op, DivInt))?;
+                    self.f.instructions().else_();
+                }
                 let mut i = self.f.instructions();
-                i.local_set(r).local_set(l);
                 i.local_get(r).i64_eqz().if_(BlockType::Empty);
                 i.i32_const(div0 as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
                 if unsigned {
@@ -310,6 +324,7 @@ impl Emitter<'_> {
                         _ => i.i64_rem_s(),
                     };
                 }
+                if hinted.is_some() { i.end(); }
                 self.release_i64();
                 self.release_i64();
                 Ok(INT)

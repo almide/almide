@@ -62,6 +62,9 @@ impl Pool {
     ///    at each writer, which tests the static boundary itself —
     ///    `emit_str_append` (`addr >= G_LINE_END`) and `try_map_set_in_place`
     ///    (`addr >= G_LINE_END && rc == 1`).
+    ///    The self-hosted ASCII uppercase path instead requires rc == 1
+    ///    AND cap > len; pooled strings here always have cap == len. This
+    ///    sufficient heap test deliberately skips exact-fit heap strings.
     /// 3. The RC ops refuse statics outright (`emit_inc`, `emit_dec_flat`
     ///    early-return below the line), so `$free` is unreachable for a pool
     ///    address through the dec path — which matters because `emit_free`
@@ -360,6 +363,7 @@ pub(crate) fn lower_fn(
             build_depth: 0,
             work: ctx.work,
             globals: ctx.globals,
+            global_constants: ctx.global_constants,
             deferred_ranges: &deferred_ranges,
             metered,
             cells: &cell_vars,

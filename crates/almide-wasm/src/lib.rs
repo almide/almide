@@ -140,6 +140,7 @@ mod collect;
 mod collections;
 mod collections_hof;
 mod group_count;
+mod global_constants;
 mod collections_set;
 mod map_inplace;
 mod map_holes;
@@ -654,6 +655,8 @@ pub(crate) struct Ctx<'a> {
     /// (global index, slice type). Functions read them across function
     /// boundaries — the class main-local top-lets could never serve.
     pub(crate) globals: &'a HashMap<GVar, (u32, SliceTy)>,
+    /// Hints only: a runtime equality guard is required before specialization.
+    pub(crate) global_constants: &'a HashMap<crate::GVar, i64>,
     /// Source name of a variable, by (var space, VarId) — for the E083
     /// diagnostic (`value: local \`x\``). None for synthetic vars.
     pub(crate) var_name: &'a dyn Fn(u32, VarId) -> Option<String>,
@@ -752,3 +755,9 @@ pub(crate) struct InitLet {
     pub(crate) module: Option<String>,
     pub(crate) tl: IrTopLet,
 }
+
+#[cfg(test)]
+mod key_helper_tests;
+
+#[cfg(test)]
+mod pool_string_capacity_tests;
