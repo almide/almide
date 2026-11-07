@@ -1382,6 +1382,7 @@ statement = "json.stringify_pretty produces the same indented JSON on both backe
 since     = "0.27.6"
 status    = "active"
 evidence  = [
+  { path = "spec/wasm_cross/json_parse_astral_before_u_escape.almd", class = "fixture" },
   { path = "spec/wasm_cross/json_stringify_pretty.almd", class = "fixture" },
   { path = "spec/wasm_cross/json_stringify_control_chars.almd", class = "fixture" },
 ]
@@ -3437,6 +3438,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/call_lambda_ctor.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fold_float_literal_lambda.almd", class = "fixture" },
   { path = "spec/wasm_cross/hof_fn_value_callbacks.almd", class = "fixture" },
   { path = "spec/wasm_cross/fold_family_source_before_init.almd", class = "fixture" },
   { path = "spec/wasm_cross/fold_init_rebinds_source.almd", class = "fixture" },
@@ -3876,6 +3878,7 @@ evidence  = [
   { path = "spec/wasm_cross/guard_chain_cons_list.almd", class = "fixture" },
   { path = "spec/wasm_cross/guard_only_use_liveness.almd", class = "fixture" },
   { path = "spec/wasm_cross/koka_hqueens.almd", class = "fixture" },
+  { path = "spec/wasm_cross/loop_frame_exit_before_later_let.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_local_scrutinee_dup.almd", class = "fixture" },
   { path = "spec/wasm_cross/merge_runs_shadowed_scrutinee.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_ctor_swap_two_types.almd", class = "fixture" },
