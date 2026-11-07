@@ -268,9 +268,16 @@ pub(super) fn binary_digest_path(bin: &std::path::Path) -> std::path::PathBuf {
 
 /// The lowercase hex SHA-256 of the file at `path`.
 fn file_sha256(path: &std::path::Path) -> Option<String> {
-    use sha2::{Digest, Sha256};
     let bytes = std::fs::read(path).ok()?;
-    Some(Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect())
+    #[cfg(any(unix, windows))]
+    let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
+    #[cfg(not(any(unix, windows)))]
+    let digest = {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(&bytes)
+    };
+    let digest: &[u8] = digest.as_ref();
+    Some(digest.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Is the cached binary at `bin` the one this compiler built there: present,
