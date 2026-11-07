@@ -424,9 +424,13 @@ fn incremental_cache_dir() -> std::path::PathBuf {
 /// (`almide_ir::runtime_use::uses_metered_prims`, read from the IR, never
 /// from `rs_code`: a user string literal is emitted into that text verbatim,
 /// and `println("almide_rt_prim_budget_x")` was refused here, #3486).
+///
+/// `rs_code` produces the standard codegen's Rust. It runs only on a route
+/// that ships it (a wall, a bounded fs program, a metered splice): a program
+/// the v1 render covers never pays for it (#4595).
 pub(crate) fn render_v1_native_or_fallback(
     file: &str,
-    rs_code: String,
+    rs_code: impl FnOnce() -> String,
     metered: Option<almide::ir::IrProgram>,
     opts: &crate::codegen::CodegenOptions,
 ) -> String {
@@ -447,7 +451,7 @@ pub(crate) fn render_v1_native_or_fallback(
     match almide_mir::pipeline::try_render_rust_source(&source_text) {
         Ok(_) if force_splice => {
             let ir = metered.expect("force_splice implies a metered program");
-            link_metered_regions(&source_text, rs_code, "forced by ALMIDE_FORCE_METER_SPLICE", ir, opts)
+            link_metered_regions(&source_text, rs_code(), "forced by ALMIDE_FORCE_METER_SPLICE", ir, opts)
         }
         // `[permissions] fs` (#4022) bounds a program's fs calls by wrapping
         // them around the scoped twin of the standard build's fs runtime
@@ -458,7 +462,7 @@ pub(crate) fn render_v1_native_or_fallback(
             if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
                 err("native: v1 render makes fs host calls under `[permissions] fs`: the standard build (bounded) is used");
             }
-            rs_code
+            rs_code()
         }
         Ok(v1_code) => {
             if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
@@ -482,7 +486,7 @@ pub(crate) fn render_v1_native_or_fallback(
             // codegen builds it with the v1-rendered regions linked in
             // (#3669), or meters the regions itself (#3673).
             if let Some(ir) = metered {
-                return link_metered_regions(&source_text, rs_code, &e.to_string(), ir, opts);
+                return link_metered_regions(&source_text, rs_code(), &e.to_string(), ir, opts);
             }
             // #931 made this note loud because verified was an explicit
             // opt-in; #1074 makes it opt-in again because verified is now the
@@ -496,7 +500,7 @@ pub(crate) fn render_v1_native_or_fallback(
             if almide_base::env::flag("ALMIDE_VERBOSE") || almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
                 err(&format!("note: verified native render walled — building via the standard codegen\n  reason: {e}"));
             }
-            rs_code
+            rs_code()
         }
     }
 }
