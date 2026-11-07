@@ -45,3 +45,4 @@ fn main() -> Unit = {
   println(set_line(sets(["a,b", "b,a", "c", "c", ""]), tag_set("c")))
   println(bytes_line(blobs([1, 1, 2, 5]), bytes.from_list([2, 3]), bytes.from_list([3, 2])))
 }
+// (negative-control touch so the CI slice selects this fixture)
