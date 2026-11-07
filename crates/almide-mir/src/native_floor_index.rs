@@ -1,3 +1,6 @@
+/// One top-level item: (kind, name, whole text, whether `#[cfg…]`-attributed).
+type TopItem<'a> = (ItemKind, &'a str, &'a str, bool);
+
 // ── the runtime index of native_floor.rs, include!-spliced back at module level ──
 //
 // A pure code move: this file continues its parent verbatim. The split exists
@@ -12,6 +15,8 @@ struct RtItem {
 }
 
 struct RuntimeIndex {
+    /// Addresses of assembled fs items, retained across generated loading.
+    fs_built: BTreeSet<usize>,
     /// Items defined exactly once at the top level of the runtime modules.
     items: HashMap<&'static str, RtItem>,
     /// Every name the runtime and its prelude define (a type, a macro, a
@@ -23,206 +28,6 @@ struct RuntimeIndex {
     trait_methods: BTreeSet<&'static str>,
     /// Every fn name the runtime defines at its top level (taken or not).
     fns: BTreeSet<&'static str>,
-}
-
-fn runtime_index() -> &'static RuntimeIndex {
-    static IDX: OnceLock<RuntimeIndex> = OnceLock::new();
-    IDX.get_or_init(build_runtime_index)
-}
-
-/// What the first scan over the runtime modules' top-level items collects.
-#[derive(Default)]
-struct RuntimeScan {
-    items: HashMap<&'static str, RtItem>,
-    seen: BTreeMap<&'static str, usize>,
-    /// A module the runtime glob-imports (`mod almide_libm { … } pub use
-    /// almide_libm::*;`) puts its names in scope unqualified: each of them
-    /// takes the whole module and its glob along.
-    glob_mods: Vec<(&'static str, &'static str)>,
-    /// Runtime types and their impl blocks: a type travels with its
-    /// inherent impls and its impls of std traits.
-    types: Vec<(&'static str, &'static str)>,
-    impls: Vec<(&'static str, &'static str)>,
-    fns: BTreeSet<&'static str>,
-}
-
-/// One top-level item: (kind, name, whole text, whether `#[cfg…]`-attributed).
-type TopItem<'a> = (ItemKind, &'a str, &'a str, bool);
-
-impl RuntimeScan {
-    fn scan() -> Self {
-        let mut scan = RuntimeScan::default();
-        for (_, src) in almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES {
-            for item in top_level_items(src) {
-                scan.add(src, item);
-            }
-        }
-        scan
-    }
-
-    fn add(&mut self, src: &'static str, (kind, name, text, attributed): TopItem<'static>) {
-        if kind == ItemKind::Impl {
-            if !attributed {
-                self.impls.push((name, text));
-            }
-            return;
-        }
-        if kind == ItemKind::Fn {
-            self.fns.insert(name);
-        }
-        if kind == ItemKind::Type && !attributed {
-            self.types.push((name, text));
-        }
-        *self.seen.entry(name).or_default() += 1;
-        // A `#[cfg]`-gated item may have a sibling for another target:
-        // never take one along.
-        if matches!(kind, ItemKind::Fn | ItemKind::Const) && !attributed {
-            self.items.insert(name, RtItem { text });
-        }
-        let is_mod = kind == ItemKind::Other && lex(text).iter().take_while(|t| t.text != name).any(|t| t.text == "mod");
-        if is_mod && !attributed && src.contains(&format!("\npub use {name}::*;")) {
-            let whole: &'static str = Box::leak(format!("{text}\npub use {name}::*;").into_boxed_str());
-            self.glob_mods.push((name, whole));
-        }
-    }
-}
-
-fn build_runtime_index() -> RuntimeIndex {
-    let RuntimeScan { mut items, seen, glob_mods, types, impls, fns } = RuntimeScan::scan();
-    items.retain(|n, _| seen.get(n) == Some(&1));
-    take_glob_mods(&mut items, &seen, glob_mods);
-    // Every name the runtime or the v0 prelude defines, at any depth: what
-    // a body may reach only as a takeable item. The prelude rides in the
-    // runtime crate's source (`emit_runtime_crate`).
-    let prelude: &'static str = Box::leak(almide_codegen::emit_runtime_crate().into_boxed_str());
-    let mut defined: BTreeSet<&'static str> = defined_names(prelude);
-    let mut trait_methods = trait_method_names(prelude);
-    let mut runtime_traits: BTreeSet<&'static str> = BTreeSet::new();
-    for (_, src) in almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES {
-        defined.extend(defined_names(src));
-        defined.extend(thread_local_names(src));
-        trait_methods.extend(trait_method_names(src));
-        runtime_traits.extend(trait_names(src));
-    }
-    let mut idx = take_prelude_traits(prelude, &runtime_traits, RuntimeIndex { items, defined, trait_methods, fns });
-    take_types(&mut idx, &seen, types, &impls);
-    take_runtime_traits(&mut idx, &seen, &impls);
-    take_fs_host_module(&mut idx);
-    idx
-}
-
-/// Each glob-imported module defined once travels whole, taken by its name
-/// or any name it defines that is not an item of its own.
-fn take_glob_mods(
-    items: &mut HashMap<&'static str, RtItem>,
-    seen: &BTreeMap<&'static str, usize>,
-    glob_mods: Vec<(&'static str, &'static str)>,
-) {
-    for (name, whole) in glob_mods {
-        if seen.get(name) != Some(&1) {
-            continue;
-        }
-        let body = &whole[whole.find('{').unwrap_or(0) + 1..whole.rfind("} //").or_else(|| whole.rfind('}')).unwrap_or(whole.len())];
-        items.insert(name, RtItem { text: whole });
-        for inner in defined_names(body) {
-            if !items.contains_key(inner) && !seen.contains_key(inner) {
-                items.insert(inner, RtItem { text: whole });
-            }
-        }
-    }
-}
-
-/// A trait the prelude alone defines travels whole: its declaration and
-/// every prelude impl of it, taken by any of its methods or its name.
-/// (An impl a runtime module adds is not taken, so a body that reaches
-/// the method through such a type fails the compile gate, never a
-/// user's build.)
-fn take_prelude_traits(prelude: &'static str, runtime_traits: &BTreeSet<&'static str>, idx: RuntimeIndex) -> RuntimeIndex {
-    let RuntimeIndex { mut items, defined, mut trait_methods, fns } = idx;
-    let traits: Vec<_> = prelude_traits(prelude)
-        .into_iter()
-        .filter(|(name, ..)| !runtime_traits.contains(name) && !items.contains_key(name))
-        .collect();
-    for (name, decl, _, methods) in &traits {
-        items.insert(name, RtItem { text: decl });
-        for m in methods {
-            trait_methods.remove(m);
-            items.entry(m).or_insert(RtItem { text: decl });
-        }
-    }
-    // An impl for a type the header cannot carry (it reaches such a
-    // name) stays behind: no carried body holds a value of that type.
-    let provisional = RuntimeIndex { items, defined, trait_methods, fns };
-    let mut taken: Vec<(&'static str, &'static str, Vec<&'static str>)> = Vec::new();
-    for (name, decl, impls, methods) in traits {
-        let mut whole = String::from(decl);
-        for imp in impls.into_iter().filter(|imp| references_in(&provisional, imp).is_ok()) {
-            whole.push('\n');
-            whole.push_str(imp);
-        }
-        taken.push((name, &*Box::leak(whole.into_boxed_str()), methods));
-    }
-    let RuntimeIndex { mut items, defined, trait_methods, fns } = provisional;
-    for (name, whole, methods) in taken {
-        items.insert(name, RtItem { text: whole });
-        for m in methods {
-            items.insert(m, RtItem { text: whole });
-        }
-    }
-    RuntimeIndex { items, defined, trait_methods, fns }
-}
-
-/// A runtime type travels with its inherent impls and its impls of std
-/// traits (a trait the runtime or the prelude defines stays behind, as
-/// a runtime module's impl of a prelude trait does above). Added last,
-/// so the prelude traits' impl filter above never takes an impl for one.
-fn take_types(
-    idx: &mut RuntimeIndex,
-    seen: &BTreeMap<&'static str, usize>,
-    types: Vec<(&'static str, &'static str)>,
-    impls: &[(&'static str, &'static str)],
-) {
-    for (name, decl) in types {
-        if seen.get(name) != Some(&1) || idx.items.contains_key(name) {
-            continue;
-        }
-        let mut whole = String::from(decl);
-        for (_, imp) in impls.iter().filter(|(n, _)| *n == name) {
-            let trait_of = impl_parts(&lex(imp)).and_then(|(t, _)| t);
-            if trait_of.is_some_and(|t| idx.defined.contains(t)) {
-                continue;
-            }
-            whole.push('\n');
-            whole.push_str(imp);
-        }
-        idx.items.insert(name, RtItem { text: Box::leak(whole.into_boxed_str()) });
-    }
-}
-
-/// A runtime trait defined once travels whole too: its declaration and
-/// every runtime impl of it (`AlmideMapKey` and its blanket impls), taken
-/// by its name or any of its methods.
-fn take_runtime_traits(idx: &mut RuntimeIndex, seen: &BTreeMap<&'static str, usize>, impls: &[(&'static str, &'static str)]) {
-    for (_, src) in almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES {
-        for (name, decl, _, methods) in prelude_traits(src) {
-            if seen.get(name) != Some(&1) || idx.items.contains_key(name) {
-                continue;
-            }
-            let mut whole = String::from(decl);
-            for (_, imp) in impls {
-                if impl_parts(&lex(imp)).and_then(|(t, _)| t) == Some(name) {
-                    whole.push('\n');
-                    whole.push_str(imp);
-                }
-            }
-            let whole: &'static str = Box::leak(whole.into_boxed_str());
-            idx.items.insert(name, RtItem { text: whole });
-            for m in methods {
-                idx.trait_methods.remove(m);
-                idx.items.entry(m).or_insert(RtItem { text: whole });
-            }
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -508,62 +313,6 @@ fn rust_signature(text: &str) -> Option<(Vec<String>, String)> {
     Some((params, ret))
 }
 
-/// The runtime body of `symbol` and every item it reaches, or `None` when it
-/// reaches something the native header cannot carry.
-fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>, String> {
-    let mut taken: BTreeSet<&'static str> = BTreeSet::new();
-    let mut texts: BTreeSet<&'static str> = BTreeSet::new();
-    let mut todo: Vec<String> = vec![symbol.to_string()];
-    let mut out = Vec::new();
-    while let Some(name) = todo.pop() {
-        let (&key, item) = rt
-            .items
-            .get_key_value(name.as_str())
-            .ok_or_else(|| format!("`{name}` is not a takeable runtime item"))?;
-        if header_items().contains(key) || !taken.insert(key) || !texts.insert(item.text) {
-            continue;
-        }
-        // A runtime module that needs a crate (`almide_codegen::runtime_crate_deps`)
-        // cannot ride the native program, which links no dependency.
-        if let Some((dep, _)) = almide_codegen::runtime_crate_deps(item.text).first() {
-            return Err(format!("`{key}` needs the `{dep}` crate, which a native program does not link"));
-        }
-        out.push(item.text);
-        for r in references(item.text).map_err(|n| format!("`{key}` reaches `{n}`, which the native header cannot carry"))? {
-            if !taken.contains(r.as_str()) {
-                todo.push(r);
-            }
-        }
-    }
-    fs_host_gate(symbol, &out)?;
-    Ok(out)
-}
-
-/// The runtime items `text` names, each closed over what it reaches: what a
-/// render takes along for the runtime types its generated table aliases
-/// (#4514), the way a floor body takes its callees. A declared type nobody
-/// operates on is reached by no body, so without this its alias would name a
-/// definition that never arrives. `Err` names one the header cannot carry.
-pub(crate) fn runtime_items_named_by(text: &str) -> Result<Vec<&'static str>, String> {
-    let mut out = Vec::new();
-    for name in references(text).map_err(|n| format!("the generated types reach `{n}`, which the native header cannot carry"))? {
-        out.extend(closure(&name, runtime_index())?);
-    }
-    Ok(out)
-}
-
-/// The runtime item names `text` reaches that need a definition beside it,
-/// or `Err(name)` when it reaches a name the runtime or its prelude defines that
-/// is not an item we can take along (a type, a macro, a module, a prelude
-/// fn, a `#[cfg]` twin). A name neither of them defines is Rust's own.
-fn references(text: &str) -> Result<Vec<String>, String> {
-    if is_fs_host_text(text) {
-        // The fs host module's own names, at any depth, are its own.
-        return references_seeded(runtime_index(), text, fs_host_own_names());
-    }
-    references_in(runtime_index(), text)
-}
-
 fn references_in(rt: &RuntimeIndex, text: &str) -> Result<Vec<String>, String> {
     references_seeded(rt, text, &BTreeSet::new())
 }
@@ -687,15 +436,6 @@ fn by_name(rt: &RuntimeIndex, header: &BTreeSet<&'static str>, locals: &BTreeSet
 }
 
 /// The names the native header defines for a floor body.
-/// Is `text` a runtime item (the floor header or an item of the embedded
-/// runtime the floor takes along)? The render places these in the program's
-/// runtime part (`render_native::RT_MOD`), which the build compiles as its
-/// own crate with the runtime's profile (owner ruling 2026-11-02).
-pub(crate) fn is_runtime_text(text: &str) -> bool {
-    static TEXTS: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
-    text == FLOOR_HEADER || TEXTS.get_or_init(|| runtime_index().items.values().map(|i| i.text).collect()).contains(text)
-}
-
 /// `text` with every top-level item it opens made `pub` (a fn, const,
 /// static, type, trait or module that is not already): the runtime part is a
 /// module, or a crate of its own, that the program reaches through a glob.

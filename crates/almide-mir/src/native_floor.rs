@@ -26,14 +26,10 @@
 //!   that rustc would reject fails a test, not a user's build.
 
 use almide_lang::ast::{AttrValue, Decl, TypeExpr};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Mutex, OnceLock};
 
-/// The runtime items the native header itself defines for a floor body: the
-/// §13 abort (`Error: <msg>` on stderr, exit 1), the v0 prelude's
-/// `almide_abort` / `almide_abort_oom` with the render's own stdout (std's
-/// line-buffered handle, nothing of ours to flush first).
-pub(crate) const FLOOR_HEADER: &str = "fn almide_abort(msg: impl std::fmt::Display) -> ! { eprintln!(\"Error: {}\", msg); std::process::exit(1) }\nfn almide_abort_oom() -> ! { almide_abort(\"out of memory\") }";
+include!("native_floor_header.rs");
 
 /// A declared parameter's native kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -792,6 +788,9 @@ fn is_option_name(n: &str) -> bool {
 include!("native_floor_sig.rs");
 include!("native_floor_index.rs");
 include!("native_floor_host.rs");
+include!("native_floor_scan.rs");
+include!("native_floor_resolve.rs");
+include!("native_floor_generated.rs");
 include!("native_floor_tail.rs");
 include!("native_floor_ret.rs");
 include!("native_floor_kinds.rs");
