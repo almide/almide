@@ -1010,6 +1010,39 @@ mod batching_tests {
         assert!(!spans_overlap((1, 9, 9), (1, 5, 9)));
     }
 
+    /// The E060 fix-it as the checker states it: the import's own span,
+    /// replaced by nothing.
+    fn drop_import(line: usize, text: &str) -> Diagnostic {
+        Diagnostic::warning("unused import", "", "").with_code("E060").with_machine_fix(line, 1, text.chars().count() + 1, "")
+    }
+
+    #[test]
+    fn deleting_adjacent_imports_deletes_their_lines() {
+        // #4608: two adjacent removed imports, between a kept one and the
+        // blank line before the code.
+        let src = "import json\nimport int\nimport float\n\nfn main() -> Unit = println(\"hi\")\n";
+        let diags = vec![drop_import(2, "import int"), drop_import(3, "import float")];
+        let (out, applied) = apply_batch(src, &diags);
+        assert_eq!(applied.len(), 2);
+        assert_eq!(out, "import json\n\nfn main() -> Unit = println(\"hi\")\n");
+    }
+
+    #[test]
+    fn a_kept_import_keeps_the_blank_line_beside_it() {
+        // The negative control: the blank line next to a kept import is the
+        // author's, not the fix's, and survives. A last-line import takes
+        // the newline before it, since it has none of its own.
+        let src = "import json\n\nimport int\nfn main() -> Unit = println(\"hi\")\n";
+        let (out, _) = apply_batch(src, &[drop_import(3, "import int")]);
+        assert_eq!(out, "import json\n\nfn main() -> Unit = println(\"hi\")\n");
+        let (last, _) = apply_batch("import json\nimport int", &[drop_import(2, "import int")]);
+        assert_eq!(last, "import json");
+        // A deletion that leaves text on its line keeps the line.
+        let partial = Diagnostic::warning("x", "", "").with_machine_fix(1, 1, 4, "");
+        let (kept, _) = apply_batch("abcdef\nnext\n", &[partial]);
+        assert_eq!(kept, "def\nnext\n");
+    }
+
     #[test]
     fn a_batch_keeps_one_fix_per_conflicting_region_in_descending_order() {
         // Three fix-its, two of which overlap: the batch takes the later
