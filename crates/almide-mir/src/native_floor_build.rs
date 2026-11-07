@@ -301,4 +301,3 @@ fn trait_method_names(src: &str) -> BTreeSet<&str> {
     }
     out
 }
-

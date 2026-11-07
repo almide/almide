@@ -298,4 +298,3 @@ fn char_end(b: &[u8], q: usize) -> Option<usize> {
     let after = i + ch.len_utf8();
     (b.get(after) == Some(&b'\'')).then_some(after + 1)
 }
-
