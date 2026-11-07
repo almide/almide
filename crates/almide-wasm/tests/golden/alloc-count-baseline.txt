@@ -583,7 +583,7 @@
 81	57	1505	81	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 21	13	244	21	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
 41	19	463	41	spec/wasm_cross/mut_call_nested_read_before.almd
-26	16	302	26	spec/wasm_cross/mut_call_two_mut_args_read.almd
+25	15	286	25	spec/wasm_cross/mut_call_two_mut_args_read.almd
 67	26	619	67	spec/wasm_cross/mut_heap_param.almd
 63	39	444	63	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
 19	7	200	19	spec/wasm_cross/mut_map_param.almd
