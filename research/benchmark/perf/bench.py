@@ -172,6 +172,14 @@ SUITE = [
     # per-round relation is the MUT SET gate (check-perf-ratio.sh).
     ("mutset-param",   "mutset/mutset.almd",           [],              "p:6000",     "p:2",     "bytes", ["native", "wasm"]),
     ("mutset-local",   "mutset/mutset.almd",           [],              "l:30000",    "l:2",     "bytes", ["native", "wasm"]),
+    # mutread (#4594): a buffer bumped in place through a `mut b: Bytes` helper
+    # whose value argument reads the same buffer (`setf(buf, i, getf(buf, i) +
+    # 1.0)`), on a threaded `mut` param (`a`) and on a local `var` (`v`),
+    # against the read hoisted into a `let` first (`h`), `mode:rounds`; their
+    # per-round relation is the MUT READ gate (check-perf-ratio.sh).
+    ("mutread-arg",    "mutread/mutread.almd",         [],              "a:6000",     "a:2",     "bytes", ["native", "wasm"]),
+    ("mutread-var",    "mutread/mutread.almd",         [],              "v:6000",     "v:2",     "bytes", ["native", "wasm"]),
+    ("mutread-let",    "mutread/mutread.almd",         [],              "h:24000",    "h:2",     "bytes", ["native", "wasm"]),
     ("regexcycle-8",   "regexcycle/regexcycle.almd",   [],              "8:2000000",  "8:2000",  "bytes", ["native", "wasm"]),
     ("regexcycle-32",  "regexcycle/regexcycle.almd",   [],              "32:2000000", "32:2000", "bytes", ["native", "wasm"]),
     # globalread (#4562): a text renderer's per-glyph cache lookups (a map
@@ -270,6 +278,13 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # 4,000-member set on every insert, so its row runs a quarter of the rounds.
     "mutset-param": "p:1500",
     "mutset-local": "l:6000",
+    # mutread (#4594): rounds per row, unequal on purpose — the relation is per
+    # round. A regressed call copies the 32 KB buffer on every element (8,192
+    # copies a round), so the reading rows run an eighth of the `let` row's
+    # rounds and then read tens of seconds, not a hang.
+    "mutread-arg": "a:1500",
+    "mutread-var": "v:1500",
+    "mutread-let": "h:12000",
     "regexcycle-8": "8:400000",
     "regexcycle-32": "32:400000",
     # globalread (#4562): frames per row, unequal on purpose — the relation is

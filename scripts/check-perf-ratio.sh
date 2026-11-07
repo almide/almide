@@ -944,6 +944,72 @@ for leg in ("native", "wasm"):
 sys.exit(1 if failed else 0)
 PYMS
 
+# MUT READ RELATION (#4594): mutread-arg and mutread-var bump a buffer in
+# place through a `mut b: Bytes` helper whose value argument reads the same
+# buffer (`setf(buf, i, getf(buf, i) + 1.0)`) — on a threaded `mut` param and on
+# a local `var` — and mutread-let reads the element into a `let` first; the
+# relation is each reading row's per-round time over the `let` row's. The wasm
+# call site refused to move the buffer into the `mut` param while another
+# argument mentioned it, so it shared it (rc 2) and the callee copied the whole
+# 32 KB buffer on every call. A ceiling per leg on both reading rows: the copy
+# reads tens of x.
+MUTREAD_CEILING_NATIVE=3
+MUTREAD_CEILING_WASM=3
+mr_out=$(mktemp -t perf-ratio-mutread.XXXXXX.json)
+trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out" "$mr_out" "${mm_out:-}" "${ms_out:-}"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+python3 research/benchmark/perf/bench.py \
+  --quick --runs "$RUNS" --legs native,wasm \
+  --bench mutread-arg,mutread-var,mutread-let \
+  --label ratchet-mutread --out "$mr_out"
+python3 - "$mr_out" "$BASELINE_FILE" "$MUTREAD_CEILING_NATIVE" "$MUTREAD_CEILING_WASM" "$MIN_SECONDS" <<'PYMR'
+import json, sys
+sys.path.insert(0, "research/benchmark/perf")
+from bench import QUICK_ARGS
+
+out_path, baseline_path, ceiling_native, ceiling_wasm, min_s = sys.argv[1:6]
+ceilings = {"native": float(ceiling_native), "wasm": float(ceiling_wasm)}
+min_s = float(min_s)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+
+def rounds(bench):
+    return int(QUICK_ARGS[bench].split(":")[1])
+
+failed = False
+for leg in ("native", "wasm"):
+    h = data["mutread-let"]["variants"][f"mutread-let/{leg}"]["min"]
+    if h < min_s:
+        sys.exit(f"::error::perf-ratio: mutread-let/{leg} min {h}s is under the {min_s}s floor — "
+                 "grow the QUICK_ARGS entry instead of gating on spawn noise.")
+    for row in ("arg", "var"):
+        key = f"mutread-{row}-{leg}"
+        if key not in baseline:
+            sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the mut read relation was "
+                     "added without its recorded value; add the line on purpose.")
+        bench = f"mutread-{row}"
+        r = data[bench]["variants"][f"{bench}/{leg}"]["min"]
+        ratio = (r / rounds(bench)) / (h / rounds("mutread-let"))
+        ceiling = ceilings[leg]
+        if ratio > ceiling:
+            print(f"::error::perf-ratio: a `mut` call whose argument reads the buffer it lends costs {ratio:.3f}x "
+                  f"the same call with the read in a `let` first on the {leg} leg ({bench}, ceiling {ceiling:.2f}x, "
+                  f"{r:.3f}s for {rounds(bench)} rounds vs {h:.3f}s for {rounds('mutread-let')}, recorded "
+                  f"{baseline[key]:.3f}x). The buffer is being copied on every call, which is #4594. Look at "
+                  "whether the call site still moves the buffer in while a borrowed call in another argument "
+                  "reads it (other_arg_holds / mentions_beyond_scalar in crates/almide-wasm/src/writeback_move.rs). "
+                  "Do not raise the ceiling.")
+            failed = True
+            continue
+        print(f"perf-ratio: {key:20s} {ratio:.3f}x the hoisted read per round "
+              f"(ceiling {ceiling:.2f}, recorded {baseline[key]:.3f}x) ok")
+sys.exit(1 if failed else 0)
+PYMR
+
 # BTREES RELATION (rc4, owner ruling 2026-11-05). btrees and treealloc build
 # and walk the same trees (2^19 + 2^19 nodes per round, 24 x depth 19 against
 # 12 x depth 20); btrees only takes its depth as a literal, so it renders whole
@@ -1001,7 +1067,7 @@ PYBT
 GLOBALREAD_CEILING_NATIVE=4
 GLOBALREAD_CEILING_WASM=3
 gr_out=$(mktemp -t perf-ratio-globalread.XXXXXX.json)
-trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out" "$gr_out" "${mm_out:-}"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+trap 'rm -f "$out" "$sb_out" "$wf_out" "$rx_out" "$fb_out" "$gr_out" "${mm_out:-}" "${mr_out:-}"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,wasm \
   --bench globalread-global,globalread-local \

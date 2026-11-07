@@ -278,6 +278,14 @@ nothing is published that `bench.py` did not produce.
   per round (`check-perf-ratio.sh`, MUT SET). The standard native codegen
   called the borrowing `set.insert` on the `&mut` param, so each insert
   through the helper copied the set; the param now moves into the owned twin.
+- **`mutread-arg` / `mutread-var` / `mutread-let` are the mut-read rows**
+  (#4594): a 32 KB Float buffer bumped in place, one element per call, through
+  a `mut b: Bytes` helper whose value argument reads the same buffer
+  (`setf(buf, i, getf(buf, i) + 1.0)`), on a threaded `mut` param (`a`) or a
+  local `var` (`v`), against the read hoisted into a `let` first (`h`). Gated
+  per round (`check-perf-ratio.sh`, MUT READ). The wasm leg shared the buffer
+  into the `mut` call while that argument read it, so the callee copied the
+  whole buffer on every call.
 
 ## Run
 

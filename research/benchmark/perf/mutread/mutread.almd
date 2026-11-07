@@ -1,0 +1,59 @@
+// mutread (#4594): a Float buffer bumped in place, one element per call,
+// through a `mut b: Bytes` helper whose value argument reads the same buffer:
+// `setf(buf, i, getf(buf, i) + 1.0)`. The argument is `mode:rounds`; each
+// round bumps all FLOATS elements of a 32 KB buffer. `a` makes the call in a
+// fn whose own `mut buf` param is threaded through, `v` on a local `var`, and
+// `h` reads the element into a `let` first — the form that never copied. The
+// wasm leg shared the buffer into the `mut` call while the argument read it
+// (rc 2), so the callee copied all 32 KB on every call in `a` and `v`; their
+// per-round relation to `h` (check-perf-ratio.sh, MUT READ) is that copy.
+import env
+
+let FLOATS = 8192
+
+fn getf(b: Bytes, i: Int) -> Float = bytes.get_f32_le(b, i * 4) ?? 0.0
+
+fn setf(mut b: Bytes, i: Int, v: Float) -> Unit = bytes.put_f32_le(b, i * 4, v)
+
+fn bump_arg(mut buf: Bytes) -> Unit = {
+  for i in 0..<FLOATS { setf(buf, i, getf(buf, i) + 1.0) }
+}
+
+fn bump_let(mut buf: Bytes) -> Unit = {
+  for i in 0..<FLOATS {
+    let v = getf(buf, i) + 1.0
+    setf(buf, i, v)
+  }
+}
+
+fn run_arg(rounds: Int) -> Float = {
+  var buf = bytes.zeros(FLOATS * 4)
+  for _ in 0..<rounds { bump_arg(buf) }
+  getf(buf, FLOATS - 1)
+}
+
+fn run_var(rounds: Int) -> Float = {
+  var buf = bytes.zeros(FLOATS * 4)
+  for _ in 0..<rounds {
+    for i in 0..<FLOATS { setf(buf, i, getf(buf, i) + 1.0) }
+  }
+  getf(buf, FLOATS - 1)
+}
+
+fn run_let(rounds: Int) -> Float = {
+  var buf = bytes.zeros(FLOATS * 4)
+  for _ in 0..<rounds { bump_let(buf) }
+  getf(buf, FLOATS - 1)
+}
+
+effect fn main() -> Unit = {
+  let parts = string.split(list.get(env.args(), 0) ?? "h:2", ":")
+  let mode = list.get(parts, 0) ?? "h"
+  let rounds = int.parse(list.get(parts, 1) ?? "") ?? 2
+  let got = match mode {
+    "a" => run_arg(rounds),
+    "v" => run_var(rounds),
+    _ => run_let(rounds),
+  }
+  println("rounds=${rounds} got=${got}")
+}
