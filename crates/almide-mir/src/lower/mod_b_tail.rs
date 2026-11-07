@@ -343,7 +343,10 @@ fn panic_die_expr(name: &str, args: &[IrExpr]) -> Option<IrExpr> {
             else {
                 return;
             };
-            if let Some(text) = panic_die_expr(name.as_str(), args) {
+            if let Some(mut text) = panic_die_expr(name.as_str(), args) {
+                // Keep the checked Never type when the abort is a value arm
+                // (including the fallback of `??`). It does not yield Unit.
+                text.ty = e.ty.clone();
                 *e = text;
                 self.changed = true;
                 return;

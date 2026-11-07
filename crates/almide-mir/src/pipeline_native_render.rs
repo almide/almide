@@ -318,14 +318,14 @@ fn render_native_with_runtime_hofs(
 /// certificates of the MIR it rendered from, and that MIR.
 fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     dump_native_mir_if_requested(source);
-    render_native_parts_with(|| source_to_ir_with(source, &[]))
+    render_native_parts_with(|| program_to_ir_mode(parse_or_wall(source)?, &[], true))
 }
 
 /// Reuse an entry already parsed without recovery errors. The caller must reject
 /// parser diagnostics before calling; native checking and preparation remain shared.
 pub fn try_render_rust_program(source: &str, program: almide_lang::ast::Program) -> Result<String, LowerError> {
     dump_native_mir_if_requested(source);
-    render_native_parts_with(|| program_to_ir_with(program, &[])).map(|(rust, _, _)| rust)
+    render_native_parts_with(|| program_to_ir_mode(program, &[], true)).map(|(rust, _, _)| rust)
 }
 
 fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgram, LowerError>) -> Result<NativeRenderParts, LowerError> {

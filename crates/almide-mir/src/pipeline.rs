@@ -19,6 +19,9 @@ use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
 use std::collections::HashMap;
 
+#[path = "pipeline_native_bundled.rs"]
+mod native_bundled;
+
 /// The mangled flat name a user-module function gets when resolved to a user `CallFn`
 /// (`bindgen` + `get_str` → `almide_rt_bindgen_get_str`) — the v1 analogue of v0's
 /// `ir_link_flatten` module-fn renaming, and the call-site target this resolution emits.
@@ -410,8 +413,16 @@ fn source_to_ir_with(
 }
 
 fn program_to_ir_with(
+    prog: almide_lang::ast::Program,
+    modules: &[(String, almide_lang::ast::Program, bool)],
+) -> Result<almide_ir::IrProgram, LowerError> {
+    program_to_ir_mode(prog, modules, false)
+}
+
+fn program_to_ir_mode(
     mut prog: almide_lang::ast::Program,
     modules: &[(String, almide_lang::ast::Program, bool)],
+    native_bodies: bool,
 ) -> Result<almide_ir::IrProgram, LowerError> {
     // #1052: an import this render was NOT handed a module for can never
     // type-check — every reference through it would surface as "undefined
@@ -483,13 +494,20 @@ fn program_to_ir_with(
         ir.modules.push(mod_ir);
     }
 
-    resolve_user_module_calls(&mut ir);
-
-    almide_driver::link_ir(&mut ir);
+    if native_bodies {
+        native_bundled::link(&mut ir, &mut checker)?;
+    } else {
+        resolve_user_module_calls(&mut ir);
+        almide_driver::link_ir(&mut ir);
+    }
     // #1557 leg 2, round 2: mono (inside link_ir) mints bare Named calls to
     // sibling convention impls the round-1 pass could not see; mangle them so
     // the link set carries them (user modules only — see the impl doc).
-    resolve_user_module_calls_round2(&mut ir);
+    if native_bodies {
+        ir = native_bundled::flatten(ir)?;
+    } else {
+        resolve_user_module_calls_round2(&mut ir);
+    }
     // R-map-09: a call whose self-hosted body takes a callback's tuple parameter
     // spread (`map_core`'s `f(k, v)`) gets its callback adapted to that protocol
     // (almide_ir::entry_split, read from the registered body's declaration).
@@ -518,6 +536,10 @@ fn program_to_ir_with(
     // it); excluded shapes (multi-mut-param, same-name, non-Unit effect) keep it
     // and keep walling.
     almide_ir::mut_param::lower_mut_params_move_mode(&mut ir);
+    if native_bodies {
+        native_bundled::own_written_params(&mut ir);
+        native_bundled::snapshot_mut_reads(&mut ir);
+    }
     // Block call-arguments absorb their call (shared with classify: desugar-before-both).
     // BEFORE the guard restructure: a `guard … else err(m)!` inside an argument block
     // (`f({ let g = r!; guard c else err("g")!; g })`) only reaches the fn-body tail

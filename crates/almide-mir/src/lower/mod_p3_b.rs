@@ -592,7 +592,7 @@ impl LowerCtx {
     /// (see lower_branch_arm's twin).
     fn lower_block_stmt_tail(&mut self, t: &IrExpr) -> Result<(), LowerError> {
         match &t.kind {
-            IrExprKind::Call { .. } if matches!(t.ty, Ty::Unit) => self.lower_stmt_expr(t),
+            IrExprKind::Call { .. } if matches!(t.ty, Ty::Unit | Ty::Never) => self.lower_stmt_expr(t),
             IrExprKind::If { cond, then, else_ } => {
                 if !self.try_lower_unit_if(cond, then, else_) {
                     self.lower_branch(t)?;
