@@ -124,7 +124,7 @@ impl SelfHostLinker<'_> {
 
     /// Retarget registry call names onto impl names, and collect what is missing.
     fn collect_wanted(
-        &self,
+        &mut self,
         functions: &mut [crate::MirFunction],
     ) -> Result<Vec<(&'static str, String)>, LowerError> {
         let defined: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
