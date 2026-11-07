@@ -271,11 +271,8 @@ fn env_shapes_the_binary(name: &str) -> bool {
 pub(super) fn toolchain_identity() -> &'static str {
     static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     ID.get_or_init(|| {
-        std::process::Command::new(crate::find_rustc())
-            .arg("-vV")
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().replace('\n', "|"))
+        super::rustc_floor::version_output(&crate::find_rustc())
+            .map(|out| out.trim().replace('\n', "|"))
             .unwrap_or_default()
     })
 }
