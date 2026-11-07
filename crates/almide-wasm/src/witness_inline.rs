@@ -213,15 +213,18 @@ impl Emitter<'_> {
         self.witness_loop_close();
     }
 
-    /// A fused `src |> map* |> filter* |> fold` (list_fuse.rs), at the top
+    /// A fused `src |> map* |> filter* |> fold/sum` (list_fuse.rs), at the top
     /// of each iteration: the chain node is consumed whole (its stages are
     /// inlined, never built), one activation covers every stage, and a heap
-    /// accumulator is the loop-carried owner `list.fold`'s is.
-    pub(crate) fn witness_fused_open(&mut self, chain: &almide_ir::IrExpr, cb: &almide_ir::IrExpr, acc: u32, t: SliceTy) {
+    /// accumulator is the loop-carried owner `list.fold`'s is. Sum has no
+    /// callback or heap accumulator; its stages use the same activation.
+    pub(crate) fn witness_fused_open(&mut self, chain: &almide_ir::IrExpr, cb: Option<&almide_ir::IrExpr>, acc: u32, t: SliceTy) {
         let carried = self.rc_droppable(t);
         let Some(w) = self.witness.as_mut() else { return };
         w.note_arg(chain as *const almide_ir::IrExpr as usize);
-        w.note_arg(cb as *const almide_ir::IrExpr as usize);
+        if let Some(cb) = cb {
+            w.note_arg(cb as *const almide_ir::IrExpr as usize);
+        }
         w.loop_open();
         w.fused_open();
         if carried {
