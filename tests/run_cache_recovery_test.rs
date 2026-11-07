@@ -640,12 +640,21 @@ fn week_old_runtime_rlib_dirs_are_evicted_and_the_one_in_use_is_touched() {
     let mine = rtlib_dirs(&cache_base(&tmp));
     assert_eq!(mine.len(), 1, "the rlib fast path must have built exactly one rlib dir: {mine:?}");
     let mine = mine.into_iter().next().unwrap();
+    // The v0 runtime (`libalmide_rt.rlib`) or, for a program the v1 trust
+    // spine renders, its runtime crate (`libalmide_v1_rt.rlib`): whichever
+    // this build links.
+    let rlib = std::fs::read_dir(&mine)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "rlib"))
+        .unwrap_or_else(|| panic!("no rlib in {}", mine.display()));
 
     // The dir this build will link, aged a month; plus a dead sibling.
     let month = Duration::from_secs(30 * 24 * 60 * 60);
     let then = SystemTime::now() - month;
-    for name in [".almide-build.lock", "almide_rt.rs", "libalmide_rt.rlib"] {
-        set_mtime(&mine.join(name), then);
+    for e in std::fs::read_dir(&mine).unwrap().flatten() {
+        set_mtime(&e.path(), then);
     }
     let _ = std::fs::remove_file(cache_base(&tmp).join(".almide-evict-stamp"));
     let dead = fake_rtlib(&cache_base(&tmp), "deadbeefdeadbeef", month);
@@ -658,10 +667,10 @@ fn week_old_runtime_rlib_dirs_are_evicted_and_the_one_in_use_is_touched() {
     assert_eq!(String::from_utf8_lossy(&out.stdout), "two\n");
 
     assert!(
-        age_of(&mine.join("libalmide_rt.rlib")) < Duration::from_secs(60 * 60),
+        age_of(&rlib) < Duration::from_secs(60 * 60),
         "linking the rlib must refresh its mtime — nothing else does, a warm cache is a bare exists()"
     );
-    assert!(mine.join("libalmide_rt.rlib").is_file(), "the rlib in use must survive its own sweep");
+    assert!(rlib.is_file(), "the rlib in use must survive its own sweep");
     let left: Vec<String> = std::fs::read_dir(&dead)
         .unwrap()
         .flatten()
@@ -682,12 +691,12 @@ fn week_old_runtime_rlib_dirs_are_evicted_and_the_one_in_use_is_touched() {
     let c = write_program(td.path(), "c.almd", "three");
     // Backdate the in-use rlib again, so its refresh is evidence that THIS
     // build consulted the rlib cache rather than the previous one's touch.
-    set_mtime(&mine.join("libalmide_rt.rlib"), SystemTime::now() - month);
+    set_mtime(&rlib, SystemTime::now() - month);
     let out = almide_run_rtlib(td.path(), &c);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(String::from_utf8_lossy(&out.stdout), "three\n");
     assert!(
-        age_of(&mine.join("libalmide_rt.rlib")) < Duration::from_secs(60),
+        age_of(&rlib) < Duration::from_secs(60),
         "this build must really have gone through the rlib cache (else the next assert proves nothing)"
     );
     assert!(dead2.join("libalmide_rt.rlib").is_file(), "a sweep within the stamp interval must not run");
