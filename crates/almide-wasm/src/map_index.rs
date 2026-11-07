@@ -291,6 +291,17 @@ pub(crate) fn emit_hash_str() -> Function {
     i.i32_const(0x811C_9DC5_u32 as i32).local_set(h);
     i.local_get(s).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_tee(p);
     i.local_get(s).i32_load(len_memarg()).i32_add().local_set(end);
+    // Preserve FNV-1a exactly, but amortize the loop branch over four
+    // bytes. A remaining-length guard keeps every load inside the string;
+    // the tail handles empty and short keys without reading padding.
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(end).local_get(p).i32_sub().i32_const(4).i32_lt_u().br_if(1);
+    for offset in 0..4 {
+        i.local_get(h).local_get(p).i32_load8_u(MemArg { offset, ..byte });
+        i.i32_xor().i32_const(0x0100_0193).i32_mul().local_set(h);
+    }
+    i.local_get(p).i32_const(4).i32_add().local_set(p);
+    i.br(0).end().end();
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(p).local_get(end).i32_ge_u().br_if(1);
     i.local_get(h).local_get(p).i32_load8_u(byte).i32_xor().i32_const(0x0100_0193).i32_mul().local_set(h);

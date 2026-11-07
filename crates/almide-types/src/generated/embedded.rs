@@ -36720,6 +36720,7 @@ pub const SRC_STRING: &str = r#"
 
 /// s without leading/trailing whitespace.
 @intrinsic("almide_rt_string_trim")
+@reuse(s)
 fn trim(s: String) -> String = _
 
 /// Pieces around sep; empty pieces kept.
@@ -36779,10 +36780,12 @@ fn capitalize(s: String) -> String = _
 
 /// Unicode uppercase; never folds non-ASCII into ASCII; not for identity.
 @intrinsic("almide_rt_string_to_upper")
+@reuse(s)
 fn to_upper(s: String) -> String = _
 
 /// Unicode lowercase; never folds non-ASCII into ASCII; not for identity.
 @intrinsic("almide_rt_string_to_lower")
+@reuse(s)
 fn to_lower(s: String) -> String = _
 
 /// Every from replaced by to.
@@ -36852,10 +36855,12 @@ fn pad_end(s: String, n: Int, fill: String) -> String = _
 
 /// s without leading whitespace.
 @intrinsic("almide_rt_string_trim_start")
+@reuse(s)
 fn trim_start(s: String) -> String = _
 
 /// s without trailing whitespace.
 @intrinsic("almide_rt_string_trim_end")
+@reuse(s)
 fn trim_end(s: String) -> String = _
 
 /// Non-overlapping needle count; len+1 if needle empty.
@@ -39329,18 +39334,40 @@ fn string_to_upper(s: String) -> String = {
   let sp = "0003990003080003010003A50003080003010005350005520000000003A50003130000000003A50003130003000003A50003130003010003A5000313000342001F08000399000000001F09000399000000001F0A000399000000001F0B000399000000001F0C000399000000001F0D000399000000001F0E000399000000001F0F000399000000001F08000399000000001F09000399000000001F0A000399000000001F0B000399000000001F0C000399000000001F0D000399000000001F0E000399000000001F0F000399000000001F28000399000000001F29000399000000001F2A000399000000001F2B000399000000001F2C000399000000001F2D000399000000001F2E000399000000001F2F000399000000001F28000399000000001F29000399000000001F2A000399000000001F2B000399000000001F2C000399000000001F2D000399000000001F2E000399000000001F2F000399000000001F68000399000000001F69000399000000001F6A000399000000001F6B000399000000001F6C000399000000001F6D000399000000001F6E000399000000001F6F000399000000001F68000399000000001F69000399000000001F6A000399000000001F6B000399000000001F6C000399000000001F6D000399000000001F6E000399000000001F6F000399000000001FBA000399000000000391000399000000000386000399000000000391000342000000000391000342000399000391000399000000001FCA0003990000000003970003990000000003890003990000000003970003420000000003970003420003990003970003990000000003990003080003000003990003080003010003990003420000000003990003080003420003A50003080003000003A50003080003010003A10003130000000003A50003420000000003A5000308000342001FFA0003990000000003A900039900000000038F0003990000000003A90003420000000003A90003420003990003A900039900000000054400054600000000054400053500000000054400053B00000000054E00054600000000054400053D000000"
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
-  let buf = prim.alloc_str(blen * 3 + 8)
-  let outn = __to_upper_walk(
-    h + 12,
-    h + 12 + blen,
-    prim.handle(tbl) + 12,
-    285,
-    prim.handle(sp) + 12,
-    prim.handle(buf) + 12,
-    0,
-  )
-  prim.store32(prim.handle(buf) + 4, outn)
-  buf
+
+
+
+
+
+
+
+
+  let unique = prim.load32(h) == 1 and prim.load32(h + 8) > blen
+  var ascii_end = 0
+  if unique then {
+    while ascii_end < blen {
+      let b = prim.load8(h + 12 + ascii_end)
+      if b >= 128 then break
+      else ()
+      prim.store8(h + 12 + ascii_end, if b >= 97 and b <= 122 then b - 32 else b)
+      ascii_end = ascii_end + 1
+    }
+  } else ()
+  if unique and ascii_end == blen then s
+  else {
+    let buf = prim.alloc_str(blen * 3 + 8)
+    let outn = __to_upper_walk(
+      h + 12,
+      h + 12 + blen,
+      prim.handle(tbl) + 12,
+      285,
+      prim.handle(sp) + 12,
+      prim.handle(buf) + 12,
+      0,
+    )
+    prim.store32(prim.handle(buf) + 4, outn)
+    buf
+  }
 }
 "#;
 pub const SRC_STRING_TRIM: &str = r#"

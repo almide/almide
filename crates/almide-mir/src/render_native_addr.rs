@@ -188,7 +188,10 @@ impl AddrState {
             .map(|b| (b, false))
             .collect();
         let reassigned = stale_handles(func);
-        let const_lists = slots::const_str_lists(func, &base_of, &consts);
+        // A carrier can share DynListStr's physical layout, but is not a
+        // constant string table. Its payload still needs a real binding.
+        let const_lists: BTreeMap<_, _> = slots::const_str_lists(func, &base_of, &consts)
+            .into_iter().filter(|(v, _)| !alloc_rec.contains_key(v) && func.ret != Some(*v)).collect();
         set_const_lists(const_lists.keys().copied().collect());
         let const_elems = const_list_elems(func, &const_lists.keys().copied().collect(), &base_of);
         let stored = func

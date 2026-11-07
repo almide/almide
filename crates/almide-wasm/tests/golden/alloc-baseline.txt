@@ -165,7 +165,7 @@
 70208	spec/wasm_cross/effect_call_arg_credit.almd
 68368	spec/wasm_cross/effect_dispatcher_many_arms.almd
 66304	spec/wasm_cross/effect_fn_value.almd
-73392	spec/wasm_cross/effect_fn_value_slot_family.almd
+73424	spec/wasm_cross/effect_fn_value_slot_family.almd
 65840	spec/wasm_cross/effect_main_guard_err.almd
 66096	spec/wasm_cross/effect_main_guard_ok.almd
 66112	spec/wasm_cross/effect_mut_generic_port.almd
@@ -228,7 +228,7 @@
 66048	spec/wasm_cross/fan_map_err_runs_every_element.almd
 66048	spec/wasm_cross/fan_map_inline_err.almd
 67168	spec/wasm_cross/fan_map_inline_lambda.almd
-67984	spec/wasm_cross/fan_map_nested_combinators.almd
+67920	spec/wasm_cross/fan_map_nested_combinators.almd
 71600	spec/wasm_cross/fan_map_parallel_scalar.almd
 66000	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 ~	spec/wasm_cross/fan_ordered_arms.almd
@@ -269,6 +269,7 @@
 65872	spec/wasm_cross/float_to_int_edges.almd
 65856	spec/wasm_cross/float_to_int_trio.almd
 66368	spec/wasm_cross/fold_family_source_before_init.almd
+66416	spec/wasm_cross/fold_float_literal_lambda.almd
 66048	spec/wasm_cross/fold_heap_acc.almd
 67056	spec/wasm_cross/fold_init_rebinds_source.almd
 65936	spec/wasm_cross/for_in_forms.almd
@@ -414,6 +415,7 @@
 116144	spec/wasm_cross/json_gltf_walk.almd
 536464	spec/wasm_cross/json_many_keys.almd
 69920	spec/wasm_cross/json_number_unicode.almd
+68320	spec/wasm_cross/json_parse_astral_before_u_escape.almd
 438220	spec/wasm_cross/json_parse_depth_bound.almd
 68752	spec/wasm_cross/json_parse_lenient_edges.almd
 68928	spec/wasm_cross/json_parse_strict_strings.almd
@@ -507,6 +509,7 @@
 65648	spec/wasm_cross/loop_break_continue.almd
 3210980	spec/wasm_cross/loop_buffer_churn.almd
 65952	spec/wasm_cross/loop_effect_match_stmt.almd
+65984	spec/wasm_cross/loop_frame_exit_before_later_let.almd
 65920	spec/wasm_cross/loop_outer_inplace_mutate_rc.almd
 25159532	spec/wasm_cross/loop_push_trailing_increment.almd
 66688	spec/wasm_cross/map_core_trio.almd
@@ -836,7 +839,7 @@
 65840	spec/wasm_cross/string_bool_ordering.almd
 197760	spec/wasm_cross/string_byte_slice.almd
 83184	spec/wasm_cross/string_case_no_ascii_fold.almd
-82624	spec/wasm_cross/string_case_unicode.almd
+82640	spec/wasm_cross/string_case_unicode.almd
 67344	spec/wasm_cross/string_codepoint.almd
 66944	spec/wasm_cross/string_codepoint_index.almd
 69648	spec/wasm_cross/string_count_truncation.almd
@@ -851,10 +854,11 @@
 66416	spec/wasm_cross/string_ops.almd
 66784	spec/wasm_cross/string_ops_drain.almd
 65888	spec/wasm_cross/string_pad_ceiling_oom.almd
-72016	spec/wasm_cross/string_passthrough_share.almd
+72032	spec/wasm_cross/string_passthrough_share.almd
 10666880	spec/wasm_cross/string_position_large_offset.almd
 94464	spec/wasm_cross/string_predicates.almd
 66144	spec/wasm_cross/string_repeat_empty.almd
+84016	spec/wasm_cross/string_reuse_pipeline.almd
 66288	spec/wasm_cross/string_rle.almd
 66928	spec/wasm_cross/string_split_rle_codepoint.almd
 71840	spec/wasm_cross/string_to_upper.almd

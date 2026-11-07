@@ -493,13 +493,13 @@ pub(crate) fn emit_str_eq() -> Function {
     let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
-    i.local_get(a).i32_load(len_memarg()).local_set(la);
-    i.local_get(la).local_get(b).i32_load(len_memarg()).i32_ne().if_(BlockType::Empty);
-    i.i32_const(0).return_();
-    i.end();
     // The same block is equal to itself.
     i.local_get(a).local_get(b).i32_eq().if_(BlockType::Empty);
     i.i32_const(1).return_();
+    i.end();
+    i.local_get(a).i32_load(len_memarg()).local_set(la);
+    i.local_get(la).local_get(b).i32_load(len_memarg()).i32_ne().if_(BlockType::Empty);
+    i.i32_const(0).return_();
     i.end();
     i.i32_const(0).local_set(idx);
     // Eight bytes at a time while a whole word is left (wasm loads need no

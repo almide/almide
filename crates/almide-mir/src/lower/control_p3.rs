@@ -147,7 +147,8 @@ impl LowerCtx {
         // guard when the value-match path learns the propagation arm.
         let fallback_propagates =
             matches!(&fallback.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. });
-        if !is_heap_ty(&fallback.ty) && !fallback_propagates {
+        let value_ty = Self::unwrap_or_value_ty(expr, fallback);
+        if !is_heap_ty(&value_ty) && !fallback_propagates {
             let out = self.try_lower_scalar_unwrap_or_match_first(expr, fallback);
             if out.is_some() {
                 return out;
@@ -160,7 +161,7 @@ impl LowerCtx {
         // before this excision. A shape neither path takes DECLINES to the
         // honest wall; nothing blind-reads anything (the old scalar terminal's
         // len@4 misread class died with the chain).
-        if !is_heap_ty(&fallback.ty) || fallback_propagates {
+        if !is_heap_ty(&value_ty) || fallback_propagates {
             return None;
         }
         // The CLOSURE payload class (`map.get(m, "add") ?? ((x) => x)` — the
@@ -186,7 +187,7 @@ impl LowerCtx {
         // hand-written `match` (the bind-position route with the branch lift)
         // is right. Decline here so the bind-position rewrite takes that
         // proven route; the inline position materializes through it too.
-        if let Ty::Tuple(ts) = &fallback.ty {
+        if let Ty::Tuple(ts) = &value_ty {
             if ts.iter().any(is_heap_ty) {
                 crate::trace::trace("ALMIDE_DBG_QQ", || format!("[qq] declined {:?} ?? (heap tuple payload — bind route)", expr.ty));
                 return None;
@@ -194,7 +195,7 @@ impl LowerCtx {
         }
         let synth = IrExpr {
             kind: IrExprKind::Unit,
-            ty: fallback.ty.clone(),
+            ty: value_ty,
             span: expr.span.clone(),
             def_id: None,
         };
@@ -292,6 +293,9 @@ impl LowerCtx {
         // produces) EXECUTES recursively via the scalar-if machinery; otherwise the
         // tail is a scalar value or a scalar call.
         let val = tail.and_then(|t| match &t.kind {
+            IrExprKind::Call { .. } if matches!(t.ty, Ty::Never) => {
+                self.lower_abort_scalar_arm(t)
+            }
             IrExprKind::If { cond, then, else_ } => {
                 self.try_lower_scalar_if(cond, then, else_, &t.ty)
             }

@@ -62,6 +62,9 @@ impl Pool {
     ///    at each writer, which tests the static boundary itself —
     ///    `emit_str_append` (`addr >= G_LINE_END`) and `try_map_set_in_place`
     ///    (`addr >= G_LINE_END && rc == 1`).
+    ///    The self-hosted ASCII uppercase path instead requires rc == 1
+    ///    AND cap > len; pooled strings here always have cap == len. This
+    ///    sufficient heap test deliberately skips exact-fit heap strings.
     /// 3. The RC ops refuse statics outright (`emit_inc`, `emit_dec_flat`
     ///    early-return below the line), so `$free` is unreachable for a pool
     ///    address through the dec path — which matters because `emit_free`
@@ -321,6 +324,7 @@ pub(crate) fn lower_fn(
             tail_release_allowed: false, rc_frame_params: Vec::new(),
             tail_consumed: Default::default(),
             loop_back_releasable: Default::default(),
+            loop_carried: Default::default(), loop_carried_raw: Default::default(),
             self_index,
             rc_owned: std::collections::BTreeSet::new(),
             owned_ty: std::collections::HashMap::new(),
@@ -360,6 +364,7 @@ pub(crate) fn lower_fn(
             build_depth: 0,
             work: ctx.work,
             globals: ctx.globals,
+            global_constants: ctx.global_constants,
             deferred_ranges: &deferred_ranges,
             metered,
             cells: &cell_vars,
@@ -412,6 +417,7 @@ pub(crate) fn lower_fn(
             }
         }
         populate_tail_release_set(&mut em, cur_module, env_shift, params, body, &param_owned);
+        em.populate_loop_carried(body);
         if em.tail_release_allowed && effect_raw.is_none() { em.note_dying_frame_tail(body) } // #3406
         if let Some((_, dl)) = em.region_repair {
             em.f.instructions().global_get(G_DET_DEPTH).local_set(dl);

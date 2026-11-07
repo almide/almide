@@ -1,0 +1,15 @@
+// @contract: C-258
+// A Float-typed lambda whose body returns a Float it never computes on (a
+// literal) behaves the same on every leg when the fold is served by the linked
+// body's closure dispatch (#4606): the native table declares an `f64` result
+// while the lambda renders the literal as its i64 bits, and the table reads
+// those bits back as the Float.
+fn main() -> Unit = {
+  let b: Bool = true
+  let r: List[Float] = if b then [
+    list.fold(if b then ["a"]
+    else ["b"], 0.0, (acc, s) => 0.1)
+  ]
+  else [1.0]
+  println("${r}")
+}

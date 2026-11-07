@@ -8,7 +8,8 @@ pub fn almide_rt_list_last<A: Clone>(xs: &[A]) -> Option<A> { xs.last().cloned()
 pub fn almide_rt_list_get<T: Clone>(xs: &[T], i: i64) -> Option<T> { xs.get(i as usize).cloned() }
 pub fn almide_rt_list_contains<T: PartialEq>(xs: &[T], x: T) -> bool { xs.contains(&x) }
 pub fn almide_rt_list_index_of<T: PartialEq>(xs: &[T], x: T) -> Option<i64> { xs.iter().position(|v| *v == x).map(|i| i as i64) }
-pub fn almide_rt_list_join(xs: &[AlmideString], sep: &str) -> AlmideString { let __almide_out: String = xs.join(sep); __almide_out.into() }
+#[inline]
+pub fn almide_rt_list_join(xs: &[AlmideString], sep: &str) -> AlmideString { AlmideString::join(xs, sep) }
 pub fn almide_rt_list_reverse<A: Clone>(xs: &[A]) -> Vec<A> { xs.iter().rev().cloned().collect() }
 pub fn almide_rt_list_sort<A: Ord + Clone>(xs: &[A]) -> Vec<A> { let mut v = xs.to_vec(); v.sort(); v }
 // Float ordering uses IEEE-754 totalOrder (`f64::total_cmp`): NaN takes its

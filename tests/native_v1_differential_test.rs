@@ -58,6 +58,10 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // A returned Option shares a string-list layout; its literal is not a
+    // constant-table-only value and must survive native materialization.
+    ("literal_option_return", "fn f() -> String? = some(\"payload\")\nfn main() -> Unit = println(f() ?? \"bad\")\n"),
+    ("literal_list_return", "fn f() -> List[String] = [\"one\", \"two\"]\nfn main() -> Unit = println(list.join(f(), \",\"))\n"),
     // ── #4006 C1 class D: top-level heap state, once a wall ──
     ("top_var_heap", "var LOG = \"\"\nfn main() -> Unit = {\n  LOG = LOG + \"x\"\n  println(LOG)\n}\n"),
     ("top_let_heap_call", "let S = int.to_string(3)\nfn main() -> Unit = {\n  println(S)\n}\n"),
@@ -248,6 +252,21 @@ fn native_v1_matches_v0_byte_for_byte() {
             "native v1 diverges from v0 on `{name}`"
         );
     }
+}
+
+#[test]
+fn float_literal_returns_cross_the_declared_abi_as_bits() {
+    // A recursive body cannot be replaced with a constant at every call.
+    // MIR's literal result is an i64 bit lane, but its caller expects f64.
+    let src = "fn zero(n: Int) -> Float = if n <= 0 then -0.0 else zero(n - 1)\n\
+               fn fraction(n: Int) -> Float = if n <= 0 then 0.1 else fraction(n - 1)\n\
+               fn main() -> Unit = {\n\
+                 println(int.to_string(float.to_bits(zero(4))))\n\
+                 println(int.to_string(float.to_bits(fraction(4))))\n\
+               }\n";
+    let expected = ("-9223372036854775808\n4591870180066957722\n".to_string(), 0);
+    assert_eq!(run_v0("float_return_bits_v0", src), expected);
+    assert_eq!(run_v1("float_return_bits_v1", src), expected);
 }
 
 #[test]

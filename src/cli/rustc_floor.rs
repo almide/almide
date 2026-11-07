@@ -48,17 +48,18 @@ pub(crate) fn locate_rustc() -> String {
     }
 }
 
-/// Share the discovery probe with the version floor. Both used to start the
-/// rustup proxy independently, and every find_rustc repeated discovery again.
+/// Share one verbose probe between discovery, the version floor and the
+/// build-cache toolchain identity. The first line is the ordinary version;
+/// the remaining lines distinguish compiler commits, hosts and LLVM builds.
 /// Like the floor verdict, these observations live only for this CLI process:
 /// the next invocation rechecks the selected toolchain, including upgrades.
-fn version_output(rustc: &str) -> Option<String> {
+pub(super) fn version_output(rustc: &str) -> Option<String> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     static OUTPUTS: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
     let mut outputs = OUTPUTS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
     outputs.entry(rustc.to_owned()).or_insert_with(|| {
-        std::process::Command::new(rustc).arg("--version").output().ok()
+        std::process::Command::new(rustc).arg("-vV").output().ok()
             .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
     }).clone()
 }
@@ -110,7 +111,7 @@ pub(crate) fn judge(rustc: &str, out: &str) -> Result<(), String> {
              verified on {need}."
         )),
         None => Err(format!(
-            "error: could not read the rustc version (`{rustc} --version` printed {:?}); Almide requires rustc {need} or newer\n  \
+            "error: could not read the rustc version (`{rustc} -vV` printed {:?}); Almide requires rustc {need} or newer\n  \
              hint: run `rustup update`",
             out.trim()
         )),

@@ -30,7 +30,13 @@ fn finish_native_fn(
             Some((_, Some(NativeSigKind::Res)))
         )
         && matches!(func.ret.and_then(|v| tys.get(&v)), Some(NTy::I64));
-    let ret_override = if lifted_wrap { Some(NTy::Res) } else { None };
+    // Constants and raw FloatBits results retain the MIR's i64 bit lane.
+    // A declared Float return crosses the same boundary as a Float argument;
+    // changing the value's type here would also change a passthrough param.
+    let float_wrap = !is_main
+        && matches!(sigs.get(func.name.as_str()), Some((_, Some(NativeSigKind::F64))))
+        && matches!(func.ret.and_then(|v| tys.get(&v)), Some(NTy::I64));
+    let ret_override = if lifted_wrap { Some(NTy::Res) } else if float_wrap { Some(NTy::F64) } else { None };
     // Signature: the return type is known only after the body typed `func.ret`.
     let mut sig = render_native_fn_sig(func, tys, is_main, ret_override)?;
     sig.push_str(" {\n");
@@ -40,6 +46,8 @@ fn finish_native_fn(
         out.push_str("    ");
         if lifted_wrap {
             out.push_str(&format!("Ok({})", var(v)));
+        } else if float_wrap {
+            out.push_str(&as_f64_arg(&var(v), tys[&v])?);
         } else {
             out.push_str(&native_ret_expr(v, tys[&v]));
         }
@@ -47,7 +55,7 @@ fn finish_native_fn(
     }
     out.push_str("}\n");
     let mut out = crate::render_native_or_else::option_or_else(crate::render_native_loops::iterator_loops(drop_unread_static_strs(out)));
-    let ret_nty = if lifted_wrap { Some(NTy::Res) } else { func.ret.map(|v| tys[&v]) };
+    let ret_nty = ret_override.or_else(|| func.ret.map(|v| tys[&v]));
     // T1-1: patch every strict-cut marker with the now-known typed default
     // (never observed — the region verdict is Err by the time a cut fires).
     if out.contains(CUT_RET_MARKER) {

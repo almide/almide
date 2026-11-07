@@ -439,7 +439,7 @@ fn apply_batch(source: &str, diagnostics: &[Diagnostic]) -> (String, Vec<FixItJs
     let mut applied = Vec::new();
     for (d, (line, col, end_col), replacement) in select_batch(diagnostics) {
         let Some(rewritten) = d.apply_try_to(&working) else { continue };
-        working = rewritten;
+        working = if replacement.is_empty() { drop_emptied_line(&working, rewritten, line) } else { rewritten };
         applied.push(FixItJson {
             code: d.code.unwrap_or("E???").to_string(),
             line, col, end_col,
@@ -448,6 +448,36 @@ fn apply_batch(source: &str, diagnostics: &[Diagnostic]) -> (String, Vec<FixItJs
         });
     }
     (working, applied)
+}
+
+/// A deletion that leaves its line with nothing on it deletes the line, its
+/// newline included (#4608): E060 removes a whole `import`, and the empty
+/// line it left was not what `almide fmt` writes, so `fmt --check` failed
+/// straight after `fix` (a run of them where adjacent imports went). A line
+/// that was already blank, and every other line, is left as it is. The batch
+/// runs in descending span order, so dropping line `line` moves no line a
+/// later fix in the batch names.
+fn drop_emptied_line(before: &str, after: String, line: usize) -> String {
+    // `split` retains the empty final line after deleting an unterminated
+    // import; `split_inclusive` alone loses that line entirely.
+    let blank = |text: &str| text.split('\n').nth(line.wrapping_sub(1)).map(|l| l.trim().is_empty());
+    if blank(before) != Some(false) || blank(&after) != Some(true) {
+        return after;
+    }
+    let mut lines: Vec<&str> = after.split_inclusive('\n').collect();
+    if after.is_empty() || after.ends_with('\n') {
+        lines.push("");
+    }
+    let removed = lines.remove(line - 1);
+    let mut out: String = lines.concat();
+    // The last line had no newline of its own: take the one before it.
+    if !removed.ends_with('\n') && out.ends_with('\n') {
+        out.pop();
+        if out.ends_with('\r') {
+            out.pop();
+        }
+    }
+    out
 }
 
 /// Drive the engine to a fixpoint: apply every machine-applicable fix-it,
@@ -986,6 +1016,45 @@ mod batching_tests {
         assert!(spans_overlap((1, 7, 7), (1, 7, 7)));
         // An insert at the exclusive end of a range is past it.
         assert!(!spans_overlap((1, 9, 9), (1, 5, 9)));
+    }
+
+    /// The E060 fix-it as the checker states it: the import's own span,
+    /// replaced by nothing.
+    fn drop_import(line: usize, text: &str) -> Diagnostic {
+        Diagnostic::warning("unused import", "", "").with_code("E060").with_machine_fix(line, 1, text.chars().count() + 1, "")
+    }
+
+    #[test]
+    fn deleting_adjacent_imports_deletes_their_lines() {
+        // #4608: two adjacent removed imports, between a kept one and the
+        // blank line before the code.
+        let src = "import json\nimport int\nimport float\n\nfn main() -> Unit = println(\"hi\")\n";
+        let diags = vec![drop_import(2, "import int"), drop_import(3, "import float")];
+        let (out, applied) = apply_batch(src, &diags);
+        assert_eq!(applied.len(), 2);
+        assert_eq!(out, "import json\n\nfn main() -> Unit = println(\"hi\")\n");
+    }
+
+    #[test]
+    fn a_kept_import_keeps_the_blank_line_beside_it() {
+        // The negative control: the blank line next to a kept import is the
+        // author's, not the fix's, and survives. A last-line import takes
+        // the newline before it, since it has none of its own.
+        let src = "import json\n\nimport int\nfn main() -> Unit = println(\"hi\")\n";
+        let (out, _) = apply_batch(src, &[drop_import(3, "import int")]);
+        assert_eq!(out, "import json\n\nfn main() -> Unit = println(\"hi\")\n");
+        let (last, _) = apply_batch("import json\nimport int", &[drop_import(2, "import int")]);
+        assert_eq!(last, "import json");
+        let (crlf, _) = apply_batch("import json\r\nimport int", &[drop_import(2, "import int")]);
+        assert_eq!(crlf, "import json", "remove the complete CRLF before the last line");
+        let (only, _) = apply_batch("import int", &[drop_import(1, "import int")]);
+        assert_eq!(only, "", "an unterminated sole import leaves no line");
+        let (crlf_line, _) = apply_batch("import int\r\nfn main() -> Unit = ()\r\n", &[drop_import(1, "import int")]);
+        assert_eq!(crlf_line, "fn main() -> Unit = ()\r\n");
+        // A deletion that leaves text on its line keeps the line.
+        let partial = Diagnostic::warning("x", "", "").with_machine_fix(1, 1, 4, "");
+        let (kept, _) = apply_batch("abcdef\nnext\n", &[partial]);
+        assert_eq!(kept, "def\nnext\n");
     }
 
     #[test]

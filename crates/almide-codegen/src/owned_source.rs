@@ -57,7 +57,7 @@ pub const SCALAR_SOURCE_READS: &[&str] = &["almide_rt_list_len", "almide_rt_list
 /// The var a source `Borrow` reads (`&p`), if that is its shape.
 pub fn borrowed_var(arg: &IrExpr) -> Option<VarId> {
     match &arg.kind {
-        IrExprKind::Borrow { expr, as_str: false, mutable: false } => match &expr.kind {
+        IrExprKind::Borrow { expr, mutable: false, .. } => match &expr.kind {
             IrExprKind::Var { id } => Some(*id),
             _ => None,
         },

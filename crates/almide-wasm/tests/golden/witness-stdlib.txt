@@ -232,6 +232,7 @@ __selfhost_.__matrix_to_bytes_f16_le
 __selfhost_.__matrix_zip_row
 __selfhost_.__matrix_zip_rows
 __selfhost_.__matrix_zip_with
+__selfhost_.__mx_gather_one
 __selfhost_.__mx_get_none
 __selfhost_.__mx_get_some
 __selfhost_.__mx_load_none
@@ -942,6 +943,8 @@ bigint.is_odd
 bigint.limb
 bigint.long_divide
 bigint.make
+bigint.max
+bigint.min
 bigint.modulo
 bigint.mul
 bigint.mul_mag
@@ -970,6 +973,7 @@ bigint.sub
 bigint.sub_from
 bigint.sub_mag
 bigint.text_limit_error
+bigint.to_string_radix
 bigint.top_bits
 bigint.top_nonzero
 bigint.trim

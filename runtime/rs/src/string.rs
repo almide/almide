@@ -17,8 +17,11 @@ pub fn almide_rt_string_len(s: &str) -> i64 { s.chars().count() as i64 }
 fn almide_case_push(out: &mut String, c: char, mapped: impl Iterator<Item = char> + Clone) {
     if !c.is_ascii() && mapped.clone().any(|m| m.is_ascii()) { out.push(c) } else { out.extend(mapped) }
 }
+#[inline]
 pub fn almide_rt_string_to_upper(s: &str) -> AlmideString {
-    if s.is_ascii() { return s.to_ascii_uppercase().into(); }
+    if s.is_ascii() {
+        return AlmideString::from_ascii_uppercase(s);
+    }
     let mut out = String::with_capacity(s.len());
     for c in s.chars() { almide_case_push(&mut out, c, c.to_uppercase()); }
     out.into()
@@ -27,8 +30,11 @@ pub fn almide_rt_string_to_upper(s: &str) -> AlmideString {
 // source string); every other scalar lowers alone. Walk that result in step
 // with the per-scalar lengths so each source scalar's span is known, and hold
 // back a span that would fold a non-ASCII scalar into ASCII.
+#[inline]
 pub fn almide_rt_string_to_lower(s: &str) -> AlmideString {
-    if s.is_ascii() { return s.to_ascii_lowercase().into(); }
+    if s.is_ascii() {
+        return AlmideString::from_ascii_lowercase(s);
+    }
     let full = s.to_lowercase();
     let mut lowered = full.chars();
     let mut out = String::with_capacity(full.len());
@@ -38,9 +44,48 @@ pub fn almide_rt_string_to_lower(s: &str) -> AlmideString {
     }
     out.into()
 }
-pub fn almide_rt_string_trim(s: &str) -> AlmideString { let __almide_out: String = s.trim().to_string(); __almide_out.into() }
-pub fn almide_rt_string_trim_start(s: &str) -> AlmideString { let __almide_out: String = s.trim_start().to_string(); __almide_out.into() }
-pub fn almide_rt_string_trim_end(s: &str) -> AlmideString { let __almide_out: String = s.trim_end().to_string(); __almide_out.into() }
+#[inline]
+pub fn almide_rt_string_trim(s: &str) -> AlmideString { s.trim().into() }
+#[inline]
+pub fn almide_rt_string_trim_start(s: &str) -> AlmideString { s.trim_start().into() }
+#[inline]
+pub fn almide_rt_string_trim_end(s: &str) -> AlmideString { s.trim_end().into() }
+// The declaration's @reuse(s) selects these only for an owned last use or
+// temporary. Unique buffers survive trim/case pipelines; shared/static
+// buffers retain their other owners' bytes. Unicode keeps the ordinary path.
+#[inline]
+pub fn almide_rt_string_to_upper_owned(mut s: AlmideString) -> AlmideString {
+    if !s.is_ascii() { return almide_rt_string_to_upper(&s); }
+    if !s.is_empty() { s.unique().make_ascii_uppercase(); }
+    s
+}
+#[inline]
+pub fn almide_rt_string_to_lower_owned(mut s: AlmideString) -> AlmideString {
+    if !s.is_ascii() { return almide_rt_string_to_lower(&s); }
+    if !s.is_empty() { s.unique().make_ascii_lowercase(); }
+    s
+}
+#[inline]
+pub fn almide_rt_string_trim_owned(mut s: AlmideString) -> AlmideString {
+    let tail = s.trim_start();
+    let start = s.len() - tail.len();
+    let end = start + tail.trim_end().len();
+    s.retain_range(start..end);
+    s
+}
+#[inline]
+pub fn almide_rt_string_trim_start_owned(mut s: AlmideString) -> AlmideString {
+    let end = s.len();
+    let start = end - s.trim_start().len();
+    s.retain_range(start..end);
+    s
+}
+#[inline]
+pub fn almide_rt_string_trim_end_owned(mut s: AlmideString) -> AlmideString {
+    let end = s.trim_end().len();
+    s.retain_range(0..end);
+    s
+}
 pub fn almide_rt_string_contains(s: &str, sub: &str) -> bool { s.contains(sub) }
 /// C-418's escaper (#4126), for `string.__err_text`: the self-hosted error
 /// texts' twin of what the native runtime calls directly.

@@ -6,13 +6,16 @@
 //! example with coverage instrumentation and reads which render paths the
 //! perf gate's corpus reaches; the verdicts let it confirm the corpus it
 //! meant to run actually rendered.
+//! `--reasons` appends the full refusal reason to WALL rows, for planning
+//! coverage work without grouping distinct unsupported shapes together.
 
 use std::io::{BufRead, Write};
 
 fn main() {
+    let reasons = std::env::args().any(|arg| arg == "--reasons");
     std::thread::Builder::new()
         .stack_size(512 << 20)
-        .spawn(|| {
+        .spawn(move || {
             for line in std::io::stdin().lock().lines() {
                 let path = line.expect("stdin");
                 let path = path.trim();
@@ -21,8 +24,9 @@ fn main() {
                 }
                 let src = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
                 let verdict = match almide_mir::pipeline::try_render_rust_source(&src) {
-                    Ok(_) => "OK",
-                    Err(_) => "WALL",
+                    Ok(_) => "OK".to_string(),
+                    Err(e) if reasons => format!("WALL\t{}", e.to_string().replace(['\t', '\n', '\r'], " ")),
+                    Err(_) => "WALL".to_string(),
                 };
                 writeln!(std::io::stdout(), "{path}\t{verdict}").expect("write stdout");
             }
