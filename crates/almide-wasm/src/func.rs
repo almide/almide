@@ -321,6 +321,7 @@ pub(crate) fn lower_fn(
             tail_release_allowed: false, rc_frame_params: Vec::new(),
             tail_consumed: Default::default(),
             loop_back_releasable: Default::default(),
+            loop_carried: Default::default(), loop_carried_raw: Default::default(),
             self_index,
             rc_owned: std::collections::BTreeSet::new(),
             owned_ty: std::collections::HashMap::new(),
@@ -412,6 +413,7 @@ pub(crate) fn lower_fn(
             }
         }
         populate_tail_release_set(&mut em, cur_module, env_shift, params, body, &param_owned);
+        em.populate_loop_carried(body);
         if em.tail_release_allowed && effect_raw.is_none() { em.note_dying_frame_tail(body) } // #3406
         if let Some((_, dl)) = em.region_repair {
             em.f.instructions().global_get(G_DET_DEPTH).local_set(dl);
