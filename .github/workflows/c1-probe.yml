@@ -20,9 +20,12 @@ jobs:
           save-if: false
       - name: walls
         run: |
+          cargo test --release -p almide-mir --lib c1_probe_routes -- --nocapture 2>&1 | grep ROUTE > c1-routes.tsv || true
           cargo test --release --test c1_probe_walls_test -- --nocapture
           cargo test --release --test native_verified_floor_test -- --nocapture 2>&1 | tail -80 || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: c1-walls
-          path: c1-walls.tsv
+          path: |
+            c1-walls.tsv
+            c1-routes.tsv

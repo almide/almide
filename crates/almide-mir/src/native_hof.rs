@@ -736,6 +736,16 @@ pub(crate) fn prune(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn c1_probe_routes() {
+        let mut names: Vec<&str> = crate::mir_ops::self_host_runtime().iter().flat_map(|(_, p)| p.iter().map(|(i, _)| *i)).collect();
+        names.sort();
+        names.dedup();
+        for n in names {
+            eprintln!("ROUTE\t{n}\t{:?}\t{:?}", super::registry_call(n), super::derive_explained(n).map(|h| (h.symbol, h.twin)));
+        }
+    }
+
     /// Each linked combinator a native call can refuse has its runtime
     /// route, read off the declaration of the fn it implements.
     #[test]
