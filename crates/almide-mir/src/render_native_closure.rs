@@ -100,9 +100,12 @@ pub(crate) fn lambda_sig(sigs: &NativeSigs, name: &str) -> Option<(Vec<NativeSig
 type DispatchTables<'a> = BTreeMap<String, (Vec<NativeSigKind>, Option<NativeSigKind>, Vec<(usize, &'a str)>)>;
 
 /// The typed dispatch tables: one per signature that some lambda has.
+/// `fn_rets` is each rendered fn's body-typed result, which the arm reconciles
+/// with the table's declared one ([`arm_call`]).
 pub(crate) fn push_typed_dispatch_tables(
     out: &mut String,
     user_fns: &BTreeMap<&str, &MirFunction>,
+    fn_rets: &BTreeMap<String, Option<NTy>>,
     sigs: &NativeSigs,
 ) {
     let mut tables: DispatchTables<'_> = BTreeMap::new();
@@ -118,9 +121,23 @@ pub(crate) fn push_typed_dispatch_tables(
         let ret_s = ret.map(|r| format!(" -> {}", crate::render_native_rec::owned_ty(owned_nty(r)))).unwrap_or_default();
         let _ = write!(out, "fn __almd_ci_{key}(idx: i64, env: &[i64]{params}){ret_s} {{\n    match idx {{\n");
         for (idx, name) in fns {
-            let _ = writeln!(out, "        {idx} => {}(env{args}),", crate::render_native::mangle(name));
+            let call = format!("{}(env{args})", crate::render_native::mangle(name));
+            let _ = writeln!(out, "        {idx} => {},", arm_call(call, ret, fn_rets.get(name).copied().flatten()));
         }
         out.push_str("        _ => { eprintln!(\"Error: closure index out of range\"); std::process::exit(1) }\n    }\n}\n\n");
+    }
+}
+
+/// One table arm's call, read as the table's declared result `ret`. A lambda's
+/// rendered result type is the type its body gave the returned value, and a
+/// Float the body never computed on (a literal, a passed-through Float slot)
+/// is still the i64 bits the MIR carries every Float in, so a lambda declared
+/// `-> Float` can return `i64` (#4606). Those bits ARE the Float: the arm
+/// converts them, bit-exact, as every other boundary into an `f64` does.
+fn arm_call(call: String, ret: Option<NativeSigKind>, body: Option<NTy>) -> String {
+    match (ret, body) {
+        (Some(NativeSigKind::F64), Some(NTy::I64)) => format!("f64::from_bits({call} as u64)"),
+        _ => call,
     }
 }
 
