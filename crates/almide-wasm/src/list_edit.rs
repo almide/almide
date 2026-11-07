@@ -421,16 +421,7 @@ impl Emitter<'_> {
             other => return unsup(&format!("list-index-of-of:{other:?}")),
         };
         let elem = self.types.el(h);
-        if !matches!(
-            elem,
-            INT | FLOAT
-                | STR
-                | BOOL
-                | SliceTy::Tuple(_)
-                | SliceTy::Named(_)
-                | SliceTy::List(_)
-                | SliceTy::Option(_)
-        ) {
+        if !crate::equality::has_structural_eq(elem) {
             return unsup(&format!("list-index-of-elem:{elem:?}"));
         }
         let stride = elem.slot_size() as i32;

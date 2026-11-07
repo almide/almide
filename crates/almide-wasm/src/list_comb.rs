@@ -206,16 +206,7 @@ impl Emitter<'_> {
             other => return unsup(&format!("list-dedup-of:{other:?}")),
         };
         let elem = self.types.el(h);
-        if !matches!(
-            elem,
-            INT | FLOAT
-                | STR
-                | BOOL
-                | SliceTy::Tuple(_)
-                | SliceTy::Named(_)
-                | SliceTy::List(_)
-                | SliceTy::Option(_)
-        ) {
+        if !crate::equality::has_structural_eq(elem) {
             return unsup(&format!("list-dedup-elem:{elem:?}"));
         }
         let stride = elem.slot_size() as i32;
@@ -577,16 +568,7 @@ impl Emitter<'_> {
             other => return unsup(&format!("list-unique-of:{other:?}")),
         };
         let elem = self.types.el(h);
-        if !matches!(
-            elem,
-            INT | FLOAT
-                | STR
-                | BOOL
-                | SliceTy::Tuple(_)
-                | SliceTy::Named(_)
-                | SliceTy::List(_)
-                | SliceTy::Option(_)
-        ) {
+        if !crate::equality::has_structural_eq(elem) {
             return unsup(&format!("list-unique-elem:{elem:?}"));
         }
         if crate::map_index::index_key(elem).is_some() {
