@@ -491,29 +491,48 @@ const LANE_F64: &str = "trait AlmdLaneF64 { fn lane_f64(self) -> f64; }\nimpl Al
 
 /// The adapter: a closure, borrowing the env array `env` (a copy of the
 /// closure block's scalar slots), that calls the lifted lambda `lambda`
-/// (params of kinds `ps`) on each element it is lent. `bits[i]`: that param
-/// is a runtime `f64` the lambda takes as its bits. `float_ret`: the
-/// declared result is a `Float` (read through [`LANE_F64`]); else the
-/// lambda's result kind `ret` is the runtime's.
-fn adapter(lambda: &str, env: &str, ps: &[NativeSigKind], bits: &[bool], ret: NativeSigKind, float_ret: bool) -> Option<String> {
+/// (params of kinds `ps`) on each element it is lent. `bits[i]`: how that
+/// param crosses into the lambda's lane ([`Lane`]). `ret_lane`: a declared
+/// `Float` result is read through [`LANE_F64`], a declared `Bool` one is
+/// tested `!= 0`; else the lambda's result kind `ret` is the runtime's.
+fn adapter(lambda: &str, env: &str, ps: &[NativeSigKind], bits: &[Lane], ret: NativeSigKind, ret_lane: Lane) -> Option<String> {
     if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) {
         return None;
     }
-    let spell = |k: NativeSigKind, b: bool| if b { "f64".to_string() } else { rec::owned_ty(clo::owned_nty(k)) };
+    let spell = |k: NativeSigKind, b: Lane| match b {
+        Lane::F64 => "f64".to_string(),
+        Lane::Bool => "bool".to_string(),
+        Lane::Same => rec::owned_ty(clo::owned_nty(k)),
+    };
     let params: Vec<String> = ps.iter().zip(bits).enumerate().map(|(i, (k, b))| format!("__p{i}: {}", spell(*k, *b))).collect();
     let args: String = ps
         .iter()
         .zip(bits)
         .enumerate()
-        .map(|(i, (k, b))| match k {
-            _ if *b => format!(", __p{i}.to_bits() as i64"),
-            NativeSigKind::Str | NativeSigKind::ListI64 | NativeSigKind::ListStr | NativeSigKind::Rec(_) => format!(", &__p{i}"),
+        .map(|(i, (k, b))| match (k, b) {
+            (_, Lane::F64) => format!(", __p{i}.to_bits() as i64"),
+            (_, Lane::Bool) => format!(", __p{i} as i64"),
+            (NativeSigKind::Str | NativeSigKind::ListI64 | NativeSigKind::ListStr | NativeSigKind::Rec(_), _) => format!(", &__p{i}"),
             _ => format!(", __p{i}"),
         })
         .collect();
     let call = format!("{}(&{env}{args})", crate::render_native::mangle(lambda));
-    let (call, ret_ty) = if float_ret { (format!("AlmdLaneF64::lane_f64({call})"), "f64".to_string()) } else { (call, spell(ret, false)) };
+    let (call, ret_ty) = match ret_lane {
+        Lane::F64 => (format!("AlmdLaneF64::lane_f64({call})"), "f64".to_string()),
+        Lane::Bool => (format!("({call}) != 0"), "bool".to_string()),
+        Lane::Same => (call, spell(ret, Lane::Same)),
+    };
     Some(format!("|{}| -> {ret_ty} {{ {call} }}", params.join(", ")))
+}
+
+/// How a closure param or result the runtime spells crosses into the
+/// lambda's i64 lane: as is, a runtime `f64` taken as its bits, or a runtime
+/// `bool` taken as 0/1.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Lane {
+    Same,
+    F64,
+    Bool,
 }
 
 /// One non-function argument in the runtime's mode: borrowed as is, or owned
@@ -578,9 +597,21 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
     if ps.len() != dps.len() || !matches!(t, NTy::Vec | NTy::VecRef) {
         return None;
     }
-    let bits: Vec<bool> = dps.iter().zip(&ps).map(|(dp, k)| bind_lambda(env, dp, *k)).collect::<Option<_>>()?;
-    let float_ret = *dret == DTy::Float;
-    if float_ret {
+    let bits: Vec<Lane> = dps
+        .iter()
+        .zip(&ps)
+        .map(|(dp, k)| match bind_lambda(env, dp, *k)? {
+            true => Some(Lane::F64),
+            false if *dp == DTy::Bool => Some(Lane::Bool),
+            false => Some(Lane::Same),
+        })
+        .collect::<Option<_>>()?;
+    let ret_lane = match dret {
+        DTy::Float => Lane::F64,
+        DTy::Bool => Lane::Bool,
+        _ => Lane::Same,
+    };
+    if ret_lane == Lane::F64 {
         side.shims.push(LANE_F64);
     } else if bind_lambda(env, dret, ret) != Some(false) {
         return None;
@@ -595,7 +626,7 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
         })
         .collect::<Option<_>>()?;
     let name = format!("__env_{}_{}", cx.at, side.prelude.len());
-    let closure = adapter(lambda, &name, &ps, &bits, ret, float_ret)?;
+    let closure = adapter(lambda, &name, &ps, &bits, ret, ret_lane)?;
     side.prelude.push(format!("let {name}: [i64; {}] = [{}];", slots.len(), slots.join(", ")));
     Some(closure)
 }
