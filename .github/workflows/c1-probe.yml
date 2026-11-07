@@ -22,35 +22,25 @@ jobs:
           save-if: false
       - name: build
         run: cargo build --release --bin almide && cargo build --release -p almide-mir --example emit_native_bundle
-      - name: dumps
-        run: |
-          set +e
-          mkdir -p dumps
-          for f in closures_and_variants list_heapelem_rc; do
-            p=spec/wasm_cross/$f.almd
-            ./target/release/examples/emit_native_bundle $p dumps/$f.v1.rs > /dev/null
-            ./target/release/almide $p --target rust > dumps/$f.v0.rs 2>&1
-            ALMIDE_VERIFIED_DEBUG=1 ./target/release/almide build $p -o dumps/$f.bin > dumps/$f.build.log 2>&1
-            tail -60 dumps/$f.build.log
-          done
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: dumps
-          path: dumps
+      - name: floor
+        run: cargo test --release --test native_verified_floor_test -- --nocapture 2>&1 | grep -E "native verified render|now wall|not on the floor|test result" || true
       - name: v1 and v0 outputs of the newly certified programs
         run: |
           set +e
           for f in closures_and_variants list_heapelem_rc list_modify_heap list_update_heap sort_by_str_key_heap; do
             p=spec/wasm_cross/$f.almd
-            ./target/release/almide run $p > v1.out 2>v1.err; a=$?
-            ./target/release/almide run --no-verified $p > v0.out 2>v0.err; b=$?
+            ALMIDE_VERIFIED_DEBUG=1 ./target/release/almide build $p -o /tmp/$f.v1 > /tmp/$f.v1.log 2>&1 || { echo "V1 BUILD FAIL $f"; tail -20 /tmp/$f.v1.log; }
+            grep -i "verified\|v1\|fallback\|wall" /tmp/$f.v1.log | head -3
+            ALMIDE_NO_VERIFIED_OK=1 ./target/release/almide build $p --no-verified -o /tmp/$f.v0 > /dev/null 2>&1 || echo "V0 BUILD FAIL $f"
+            /tmp/$f.v1 > v1.out 2>v1.err; a=$?
+            /tmp/$f.v0 > v0.out 2>v0.err; b=$?
             if cmp -s v1.out v0.out && cmp -s v1.err v0.err && [ $a = $b ]; then echo "SAME $f exit=$a lines=$(wc -l < v1.out)"; else echo "DIFF $f $a $b"; diff v1.out v0.out | head; fi
           done
-      - name: certificate corruption control
+      - name: profile list_heapelem_rc
         run: |
-          cargo build --release -p almide-mir --example emit_native_bundle && cargo build --release -p almide-verify
-          ./target/release/examples/emit_native_bundle spec/wasm_cross/list_modify_heap.almd /tmp/lmh.rs > /tmp/lmh.bundle
           set +e
-          ./target/release/almide-verify bundle /tmp/lmh.bundle | tail -5; echo "original exit=${PIPESTATUS[0]}"
-          python3 scripts/c1probe/corrupt.py /tmp/lmh.bundle /tmp/lmh.bad.bundle
-          ./target/release/almide-verify bundle /tmp/lmh.bad.bundle | grep -v ": ACCEPT" | tail -8; echo "corrupted exit=${PIPESTATUS[0]}"
+          sudo apt-get install -y -qq valgrind > /dev/null
+          for l in v1 v0; do
+            valgrind --tool=callgrind --callgrind-out-file=/tmp/cg.$l /tmp/list_heapelem_rc.$l > /dev/null 2>&1
+            echo "== $l"; callgrind_annotate /tmp/cg.$l 2>/dev/null | head -45 | cut -c1-200
+          done
