@@ -251,6 +251,21 @@ fn native_v1_matches_v0_byte_for_byte() {
 }
 
 #[test]
+fn float_literal_returns_cross_the_declared_abi_as_bits() {
+    // A recursive body cannot be replaced with a constant at every call.
+    // MIR's literal result is an i64 bit lane, but its caller expects f64.
+    let src = "fn zero(n: Int) -> Float = if n <= 0 then -0.0 else zero(n - 1)\n\
+               fn fraction(n: Int) -> Float = if n <= 0 then 0.1 else fraction(n - 1)\n\
+               fn main() -> Unit = {\n\
+                 println(int.to_string(float.to_bits(zero(4))))\n\
+                 println(int.to_string(float.to_bits(fraction(4))))\n\
+               }\n";
+    let expected = ("-9223372036854775808\n4591870180066957722\n".to_string(), 0);
+    assert_eq!(run_v0("float_return_bits_v0", src), expected);
+    assert_eq!(run_v1("float_return_bits_v1", src), expected);
+}
+
+#[test]
 fn divzero_abort_matches_v0() {
     let src = "fn main() -> Unit = {\n  let a = 10\n  let b = 0\n  println(int.to_string(a / b))\n}\n";
     // v0 oracle
