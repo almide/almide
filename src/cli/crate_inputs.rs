@@ -37,6 +37,11 @@ struct PackageNatives {
 }
 
 impl CrateInputs {
+    /// Nothing to copy into the crate and no dependency to declare.
+    pub(super) fn is_empty(&self) -> bool {
+        self.packages.iter().all(|p| p.files.is_empty() && p.mod_stems.is_empty()) && self.dep_native_deps.is_empty()
+    }
+
     /// Read the `native/` trees and dependency `[native-deps]` reachable from
     /// `source_root`. Nothing is written.
     ///

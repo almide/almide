@@ -40,6 +40,7 @@ mod survive_edit;
 mod survive_legs;
 mod docs_gen;
 mod cargo_build;
+mod v1_rustc_build;
 mod module_files;
 pub(crate) mod rustc_floor;
 mod cargo_ice;
