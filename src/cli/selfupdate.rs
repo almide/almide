@@ -41,7 +41,7 @@ pub fn cmd_self_update(version: Option<&str>, skip_attestation: bool) {
     // carries fixes it lacks. Only an explicit version may go backwards.
     if version.is_none() && is_older(&target_version, CURRENT_VERSION) {
         err(&format!(
-            "almide {} is newer than the latest release ({}); nothing to update.\n       To install {} anyway, name it: `almide self-update v{}`",
+            "almide {} is newer than the latest release ({}); nothing to update.\n       To install {} anyway, name it: `almide upgrade v{}`",
             CURRENT_VERSION, target_version, target_version, target_version
         ));
         return;

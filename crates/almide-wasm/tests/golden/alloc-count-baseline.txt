@@ -63,7 +63,7 @@
 11	7	117	11	spec/wasm_cross/bytes_negative_offset_family.almd
 2	0	27	1	spec/wasm_cross/bytes_new_exhaustion.almd
 5	2	32	3	spec/wasm_cross/bytes_pad_ceiling_oom.almd
-18	6	174	18	spec/wasm_cross/bytes_param_writeback.almd
+15	4	134	15	spec/wasm_cross/bytes_param_writeback.almd
 16	1	261809	16	spec/wasm_cross/bytes_push_growth.almd
 1	0	0	1	spec/wasm_cross/bytes_push_inplace.almd
 808	700	23412	808	spec/wasm_cross/bytes_rawptr.almd
@@ -76,6 +76,7 @@
 98	82	2927	98	spec/wasm_cross/bytes_to_string_err_release.almd
 102	70	2652	102	spec/wasm_cross/bytes_writer_family.almd
 130	104	1678	130	spec/wasm_cross/bytes_writer_mut_from_declaration.almd
+0	0	0	0	spec/wasm_cross/call_arg_eval_order_with_drops.almd
 5	0	35	5	spec/wasm_cross/call_closure_lambda_param.almd
 1	0	32	1	spec/wasm_cross/call_lambda_ctor.almd
 14	7	98	14	spec/wasm_cross/callee_shadowing_family.almd
@@ -86,6 +87,7 @@
 13	9	57	13	spec/wasm_cross/closure_accumulator.almd
 27	2	301	27	spec/wasm_cross/closure_borrowed_arg_guard.almd
 28	16	214	28	spec/wasm_cross/closure_bytes_list_index_arg.almd
+4	1	46	4	spec/wasm_cross/closure_capture_escapes_frame.almd
 30	13	187	30	spec/wasm_cross/closure_captured_list_mutation.almd
 38	24	764	38	spec/wasm_cross/closure_captured_map_key_write.almd
 18012	17995	144108	18012	spec/wasm_cross/closure_captured_map_records.almd
@@ -126,6 +128,7 @@
 83	47	1520	83	spec/wasm_cross/compound_repr_interp.almd
 69	33	1225	69	spec/wasm_cross/compound_repr_records_interp.almd
 43	0	492	43	spec/wasm_cross/compound_repr_recursive_interp.almd
+28	14	256	28	spec/wasm_cross/cons_map_rebuild_swap.almd
 3	2	21	3	spec/wasm_cross/const_fold_nonfinite_float.almd
 9	0	49	9	spec/wasm_cross/container_alias_return.almd
 1	0	32	1	spec/wasm_cross/control_flow.almd
@@ -159,7 +162,7 @@
 30	13	453	30	spec/wasm_cross/edge_string_unicode.almd
 23	10	247	23	spec/wasm_cross/effect_assign_unwrap.almd
 36	26	481	36	spec/wasm_cross/effect_branch_keeps_result.almd
-14001	13994	4336064	14001	spec/wasm_cross/effect_call_arg_credit.almd
+10001	9995	2160064	10001	spec/wasm_cross/effect_call_arg_credit.almd
 271	240	2898	271	spec/wasm_cross/effect_dispatcher_many_arms.almd
 14	10	244	10	spec/wasm_cross/effect_fn_value.almd
 97	67	977	97	spec/wasm_cross/effect_fn_value_slot_family.almd
@@ -169,7 +172,12 @@
 15	8	240	15	spec/wasm_cross/effect_operand_unwrap_distinct.almd
 25	8	256	25	spec/wasm_cross/effect_option_explicit_bang.almd
 7	4	112	7	spec/wasm_cross/effect_slot_carrier.almd
+35	18	413	35	spec/wasm_cross/effect_slot_effect_value_control.almd
 5	3	80	5	spec/wasm_cross/effect_slot_never_err_bang.almd
+13	3	132	13	spec/wasm_cross/effect_slot_pure_fn_param.almd
+9	2	96	9	spec/wasm_cross/effect_slot_pure_let_lambda.almd
+38	24	440	38	spec/wasm_cross/effect_slot_pure_named_fn.almd
+14	4	156	14	spec/wasm_cross/effect_slot_unit_block_tail.almd
 10	4	141	10	spec/wasm_cross/effect_tail_carrier_family.almd
 3	0	48	3	spec/wasm_cross/effect_tco.almd
 ~	spec/wasm_cross/effect_tco_err_rewrap.almd
@@ -180,7 +188,7 @@
 7	0	93	7	spec/wasm_cross/empty_collection_fold.almd
 9	2	80	9	spec/wasm_cross/empty_from_list_mono.almd
 69	61	739	69	spec/wasm_cross/encoding_base64.almd
-49	24	958	49	spec/wasm_cross/endian_auto_import.almd
+46	22	934	46	spec/wasm_cross/endian_auto_import.almd
 9	1	223	9	spec/wasm_cross/endian_explicit_import.almd
 6	0	64	6	spec/wasm_cross/enumerate_unnameable_element.almd
 ~	spec/wasm_cross/env_args.almd
@@ -191,6 +199,7 @@
 ~	spec/wasm_cross/env_set_refusal.almd
 ~	spec/wasm_cross/env_sleep_pause.almd
 ~	spec/wasm_cross/env_vars_remove.almd
+299	257	2972	299	spec/wasm_cross/equality_ops_every_equatable_element.almd
 28	17	342	28	spec/wasm_cross/err_arm_takes_let_match_type.almd
 712	641	6682	712	spec/wasm_cross/err_text_operand_escape_families.almd
 4	0	56	4	spec/wasm_cross/error_operators.almd
@@ -307,6 +316,7 @@
 10	3	80	10	spec/wasm_cross/generic_concat.almd
 11	1	132	11	spec/wasm_cross/generic_fn_in_inferred_lambda.almd
 46	33	353	46	spec/wasm_cross/generic_pattern_binds_instanced.almd
+2	0	40	2	spec/wasm_cross/generic_pick_drops_other.almd
 28	14	194	28	spec/wasm_cross/generic_protocol_conformance.almd
 8	4	65	8	spec/wasm_cross/generic_record_anon_field.almd
 5	0	64	5	spec/wasm_cross/generic_record_field_size.almd
@@ -333,9 +343,13 @@
 12	1	178	12	spec/wasm_cross/grain_records_enums.almd
 17	12	218	17	spec/wasm_cross/grain_string_escapes.almd
 1	0	4	1	spec/wasm_cross/grouping_unary.almd
+2	0	40	2	spec/wasm_cross/guard_chain_cons_list.almd
 28	20	266	28	spec/wasm_cross/guard_err_in_call_arg_block.almd
 50	38	482	50	spec/wasm_cross/guard_jump_in_value_fn.almd
+26	19	343	26	spec/wasm_cross/guard_let_forms.almd
+51	43	708	51	spec/wasm_cross/guard_let_forms_typed_err.almd
 5	1	66	5	spec/wasm_cross/guard_let_statement.almd
+7	2	99	7	spec/wasm_cross/guard_only_use_liveness.almd
 3	0	34	3	spec/wasm_cross/guard_statement.almd
 25	10	389	25	spec/wasm_cross/guard_value_exit_in_loop.almd
 9196	9155	358817	9196	spec/wasm_cross/gzip_inflate_members.almd
@@ -414,23 +428,7 @@
 208	178	2397	208	spec/wasm_cross/json_to_map_duplicate_keys.almd
 133	82	1816	133	spec/wasm_cross/json_value.almd
 6	1	96	6	spec/wasm_cross/kernel_conformance.almd
-130	106	1331	130	spec/wasm_cross/koka_186_reused_names.almd
-18	9	121	18	spec/wasm_cross/koka_beans_pairs.almd
 4217	4130	56492	4217	spec/wasm_cross/koka_hqueens.almd
-16	7	112	16	spec/wasm_cross/koka_inline4_joinsep.almd
-13	7	157	13	spec/wasm_cross/koka_inline_ctor_reuse.almd
-21	5	154	21	spec/wasm_cross/koka_issue894_seq_match.almd
-4	1	46	4	spec/wasm_cross/koka_parc13_closure_escape.almd
-2	0	40	2	spec/wasm_cross/koka_parc14_generic_pick.almd
-9	3	83	9	spec/wasm_cross/koka_parc18_two_scrutinees.almd
-0	0	0	0	spec/wasm_cross/koka_parc21_eval_order.almd
-2	0	40	2	spec/wasm_cross/koka_parc3_guard_chain.almd
-8	1	160	8	spec/wasm_cross/koka_parc6_local_scrutinee.almd
-8	4	76	8	spec/wasm_cross/koka_parcleak1_half_consumed.almd
-68	43	672	68	spec/wasm_cross/koka_rbtree_balance.almd
-58	39	450	58	spec/wasm_cross/koka_reuse1_unzip.almd
-28	14	256	28	spec/wasm_cross/koka_reuse4_map_rebuild.almd
-10	4	111	10	spec/wasm_cross/koka_unicode_combining.almd
 28	17	225	28	spec/wasm_cross/lambda_captures_mut_param.almd
 123	110	1788	123	spec/wasm_cross/lambda_failure_channel.almd
 765	749	7836	765	spec/wasm_cross/leak_free_list_rest_exit.almd
@@ -531,7 +529,7 @@
 5	1	24	5	spec/wasm_cross/map_of_maps_value.almd
 3	0	76	3	spec/wasm_cross/map_rich_variant_key.almd
 27	9	424	27	spec/wasm_cross/map_set_eq.almd
-899	780	209538	899	spec/wasm_cross/map_set_in_place.almd
+895	776	209522	895	spec/wasm_cross/map_set_in_place.almd
 3361	2871	92794	3361	spec/wasm_cross/map_set_index_threshold.almd
 34	13	768	34	spec/wasm_cross/map_set_ops.almd
 178	145	1792	178	spec/wasm_cross/map_set_typechange.almd
@@ -544,6 +542,7 @@
 18	14	219	18	spec/wasm_cross/match_err_arm_typed_payload.almd
 3	0	31	3	spec/wasm_cross/match_forms.almd
 54	42	500	54	spec/wasm_cross/match_guard_eq_borrows_binding.almd
+8	1	160	8	spec/wasm_cross/match_local_scrutinee_dup.almd
 77	35	1060	77	spec/wasm_cross/match_payload_string_literal.almd
 25	21	240	25	spec/wasm_cross/match_result.almd
 25	22	401	25	spec/wasm_cross/math_atan_tanh.almd
@@ -578,20 +577,21 @@
 109	78	1424	109	spec/wasm_cross/matrix_slice_rows_domain.almd
 119	93	1674	119	spec/wasm_cross/matrix_zero_cols_rows.almd
 329	160	13136	329	spec/wasm_cross/memory_stress.almd
+130	106	1331	130	spec/wasm_cross/merge_runs_shadowed_scrutinee.almd
 26	15	235	26	spec/wasm_cross/mg_rebuild_two_phase.almd
 8	2	57	8	spec/wasm_cross/module_global_const.almd
 5	2	100	5	spec/wasm_cross/module_var_alias_cow.almd
 81	57	1505	81	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 21	13	244	21	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
 41	19	463	41	spec/wasm_cross/mut_call_nested_read_before.almd
-26	16	302	26	spec/wasm_cross/mut_call_two_mut_args_read.almd
+25	15	286	25	spec/wasm_cross/mut_call_two_mut_args_read.almd
 67	26	619	67	spec/wasm_cross/mut_heap_param.almd
 63	39	444	63	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
-23	10	216	23	spec/wasm_cross/mut_map_param.almd
-172	73	75140	172	spec/wasm_cross/mut_param_alias_cow.almd
+19	7	200	19	spec/wasm_cross/mut_map_param.almd
+170	71	75134	170	spec/wasm_cross/mut_param_alias_cow.almd
 43	24	1289	43	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
 9	0	96	9	spec/wasm_cross/mut_param_branch_forward.almd
-20110	20102	803553	20110	spec/wasm_cross/mut_param_call_chain.almd
+10110	10102	163553	10110	spec/wasm_cross/mut_param_call_chain.almd
 266	221	2830	266	spec/wasm_cross/mut_param_cell_tail_capture_read.almd
 107	84	1051	107	spec/wasm_cross/mut_param_cell_tail_capture_write.almd
 24	18	308	24	spec/wasm_cross/mut_param_closure_capture_read.almd
@@ -620,19 +620,24 @@
 28	17	580	28	spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd
 10	1	80	10	spec/wasm_cross/mutable_global_repeat_writes.almd
 1	0	16	1	spec/wasm_cross/mutable_global_scalar_assign.almd
-145	88	1221	145	spec/wasm_cross/mutator_writeback_releases_old_block.almd
+142	85	1173	142	spec/wasm_cross/mutator_writeback_releases_old_block.almd
 37	31	116	37	spec/wasm_cross/mutual_append.almd
 10	0	120	10	spec/wasm_cross/mutual_recursive_types.almd
 0	0	0	0	spec/wasm_cross/mutual_tail_recursion.almd
 76	57	3540	76	spec/wasm_cross/nan_canonical_bytes_set_write.almd
 23	10	1122	23	spec/wasm_cross/nan_canonical_bytes_write.almd
 0	0	0	0	spec/wasm_cross/nan_canonical_observation.almd
+11	6	124	11	spec/wasm_cross/native_list_option_fallback_float.almd
+2	0	0	2	spec/wasm_cross/native_map_merge_same_binding.almd
+98	80	1254	98	spec/wasm_cross/native_same_binding_twice_arg.almd
+0	0	0	0	spec/wasm_cross/native_unused_map_binding.almd
 21	10	265	21	spec/wasm_cross/native_wall_shapes.almd
 281	260	3302	281	spec/wasm_cross/negative_count_rule.almd
 7	5	29	7	spec/wasm_cross/negative_float_literal_sized.almd
 47	24	516	47	spec/wasm_cross/negative_offset_and_width_totality.almd
 40	35	640	40	spec/wasm_cross/nested_box_guard_binder.almd
 15	11	152	15	spec/wasm_cross/nested_ctor_pattern.almd
+13	7	157	13	spec/wasm_cross/nested_ctor_swap_two_types.almd
 44910	44788	758864	44910	spec/wasm_cross/nested_field_path_mut.almd
 22	10	248	22	spec/wasm_cross/nested_hof_lambda_inference.almd
 90	58	687	90	spec/wasm_cross/nested_list_list_int.almd
@@ -640,6 +645,7 @@
 23	4	238	23	spec/wasm_cross/nested_list_option_result.almd
 14	9	104	14	spec/wasm_cross/nested_map_list_values.almd
 41	29	353	41	spec/wasm_cross/nested_match_heap_arm.almd
+9	3	83	9	spec/wasm_cross/nested_match_two_scrutinees.almd
 2	0	24	2	spec/wasm_cross/nested_payload_guard.almd
 75	35	1190	75	spec/wasm_cross/nested_place_assign.almd
 16	3	176	16	spec/wasm_cross/nested_scalar_record_append.almd
@@ -661,6 +667,7 @@
 4	0	24	4	spec/wasm_cross/opt_str_str_ctor.almd
 3	0	24	3	spec/wasm_cross/option_eq.almd
 3	0	12	3	spec/wasm_cross/option_heap_eq.almd
+0	0	0	0	spec/wasm_cross/option_map_none_heap_payload_closure.almd
 3	1	12	3	spec/wasm_cross/option_match_heap_payload.almd
 2	0	11	0	spec/wasm_cross/option_none_unwrap_term.almd
 15	5	128	15	spec/wasm_cross/option_payload_recursive_variant.almd
@@ -679,6 +686,7 @@
 3	0	34	2	spec/wasm_cross/panic_value_arm.almd
 101	86	592	101	spec/wasm_cross/path_extension_hidden.almd
 139	127	1488	139	spec/wasm_cross/path_safepath_stays_inside.almd
+8	4	76	8	spec/wasm_cross/payload_half_consumed_release.almd
 2	0	16	2	spec/wasm_cross/phantom_type_param.almd
 0	0	0	0	spec/wasm_cross/pipe_chain_scalar_bind.almd
 2	0	48	2	spec/wasm_cross/pipe_compose_forms.almd
@@ -692,6 +700,7 @@
 21	16	320	21	spec/wasm_cross/positional_variant_field_literal.almd
 2	0	36	1	spec/wasm_cross/prim_alloc_count_domain.almd
 ~	spec/wasm_cross/process_args.almd
+202	180	1348	202	spec/wasm_cross/protocol_bound_method_named_like_a_record_field.almd
 12	5	55	12	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
 17	10	181	17	spec/wasm_cross/pure_bang_propagation.almd
 9	3	82	7	spec/wasm_cross/pure_fn_output_and_assert_abort.almd
@@ -709,13 +718,20 @@
 2	0	43	2	spec/wasm_cross/range_bind_huge.almd
 29	3	247	29	spec/wasm_cross/range_bind_no_materialize.almd
 8	1	75	8	spec/wasm_cross/range_bind_walled_no_materialize.almd
+1	0	20	0	spec/wasm_cross/range_count_overflow_exclusive.almd
+1	0	20	0	spec/wasm_cross/range_count_overflow_inclusive.almd
+1	0	20	0	spec/wasm_cross/range_count_overflow_inclusive_full.almd
+0	0	0	0	spec/wasm_cross/range_count_overflow_list_range.almd
 0	0	0	0	spec/wasm_cross/range_exclusive_end_at_min.almd
 0	0	0	0	spec/wasm_cross/range_first_class.almd
+0	0	0	0	spec/wasm_cross/range_head_fold_count_overflow.almd
 16	8	53	16	spec/wasm_cross/range_head_fold_edges.almd
 4	0	61	4	spec/wasm_cross/range_head_fold_huge.almd
+0	0	0	0	spec/wasm_cross/range_head_map_count_overflow.almd
 0	0	0	0	spec/wasm_cross/range_inclusive_end_at_max.almd
 7	4	156	7	spec/wasm_cross/range_inclusive_runtime_max.almd
 1	0	20	0	spec/wasm_cross/range_materialize_oom.almd
+68	43	672	68	spec/wasm_cross/rbtree_balance_rotations.almd
 4330	4233	190772	4330	spec/wasm_cross/rc_alloc_stress.almd
 150001	149996	1040006	150001	spec/wasm_cross/rc_reclaim_churn.almd
 28	16	197	28	spec/wasm_cross/record_default_field_omitted.almd
@@ -741,8 +757,6 @@
 6	0	63	6	spec/wasm_cross/ref_grain_nan_struct.almd
 13	10	77	13	spec/wasm_cross/ref_grain_or_pattern_alias_match.almd
 0	0	0	0	spec/wasm_cross/ref_int_min_div_abort.almd
-7	2	99	7	spec/wasm_cross/ref_koka_guard_liveness.almd
-11	6	102	11	spec/wasm_cross/ref_koka_rescrutinee.almd
 12	2	401	12	spec/wasm_cross/ref_roc_shared_cow.almd
 820	798	644997	820	spec/wasm_cross/ref_roc_trmc_control.almd
 23	14	368	23	spec/wasm_cross/ref_rust_or_pattern_guard_count.almd
@@ -761,6 +775,7 @@
 ~	spec/wasm_cross/repeat_size_ceiling.almd
 7	3	32	7	spec/wasm_cross/replace_empty_pat.almd
 14	6	178	14	spec/wasm_cross/repr_parity_pin.almd
+11	6	102	11	spec/wasm_cross/rescrutinee_rebuild_live_binding.almd
 0	0	0	0	spec/wasm_cross/reserved_keyword_fn.almd
 17	4	265	17	spec/wasm_cross/result_combinators_heap_ok.almd
 10	1	11682	10	spec/wasm_cross/result_ctor_call_payload.almd
@@ -790,9 +805,12 @@
 189	124	2285	189	spec/wasm_cross/secret_eq_and_decode.almd
 323	237	3651	303	spec/wasm_cross/secret_never_rendered.almd
 58	40	416	58	spec/wasm_cross/self_call_swapped_params.almd
+21	5	154	21	spec/wasm_cross/sequential_match_two_arg_call.almd
 50001	49969	543345	50001	spec/wasm_cross/set_entries_reclaim.almd
+89	66	852	89	spec/wasm_cross/set_from_list_every_equatable_element.almd
 530	462	27311	530	spec/wasm_cross/set_index_order.almd
 75	63	901	75	spec/wasm_cross/set_insertion_order.almd
+15	7	109	15	spec/wasm_cross/shared_arg_pair_dup.almd
 1332	1291	28562	1332	spec/wasm_cross/sized_display_matrix.almd
 19	12	1097	19	spec/wasm_cross/sized_field_default_matrix.almd
 23	21	102	23	spec/wasm_cross/sized_int_overflow_wrap.almd
@@ -828,6 +846,7 @@
 40	23	2045881	40	spec/wasm_cross/string_interp_large_hole.almd
 1	0	3	1	spec/wasm_cross/string_interpolation.almd
 11	9	176	11	spec/wasm_cross/string_is_alphanumeric.almd
+16	7	112	16	spec/wasm_cross/string_join_accumulator.almd
 52	47	178	52	spec/wasm_cross/string_lines.almd
 24	8	104	24	spec/wasm_cross/string_ops.almd
 44	27	284	44	spec/wasm_cross/string_ops_drain.almd
@@ -956,6 +975,7 @@
 311	223	3479	303	spec/wasm_cross/uint64_assert_display.almd
 28	20	495	28	spec/wasm_cross/uint64_upper_half.almd
 2	0	8	2	spec/wasm_cross/unannotated_toplet_generic_ctor.almd
+10	4	111	10	spec/wasm_cross/unicode_combining_marks.almd
 10	2	149	10	spec/wasm_cross/unicode_identifiers.almd
 5	0	32	5	spec/wasm_cross/unique_non_flat_element.almd
 9	5	144	9	spec/wasm_cross/unit_effect_abi.almd
@@ -975,6 +995,7 @@
 10	6	84	10	spec/wasm_cross/unwrap_or_tuple_payload_extract.almd
 249	217	2972	249	spec/wasm_cross/unwrap_or_unwrap_fallback.almd
 47	34	576	47	spec/wasm_cross/unwrap_or_value_fn_named_parse.almd
+53	35	422	53	spec/wasm_cross/unzip_accumulator_rotate.almd
 18	8	190	18	spec/wasm_cross/uoe_heap_ok_share.almd
 2054	1983	20541	2054	spec/wasm_cross/url_authority_edges.almd
 7960	7877	83113	7960	spec/wasm_cross/url_whatwg_probes.almd

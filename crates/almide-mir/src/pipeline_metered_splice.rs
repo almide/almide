@@ -244,8 +244,8 @@ pub fn try_render_metered_splice(source: &str) -> Result<String, LowerError> {
     }
     rewrite_native_result_windows(&ir, &mut functions);
     rewrite_native_result_str_windows(&ir, &mut functions);
-    rewrite_native_option_windows(&ir, &mut functions);
-    let mut sigs = build_native_sig_table(&ir, &functions, &record_layouts, &variant_layouts)?;
+    rewrite_native_option_windows(&ir, &[], &mut functions);
+    let mut sigs = build_native_sig_table(&ir, &functions, &record_layouts, &variant_layouts, &|_| true)?;
     let exempt = crate::charge_probe::entry_exempt_set(&ir);
     for (clone, base) in crate::charge_probe::insert_probe_charges(&mut functions, &exempt) {
         if let Some(sig) = sigs.get(base.as_str()).cloned() {
@@ -254,6 +254,8 @@ pub fn try_render_metered_splice(source: &str) -> Result<String, LowerError> {
     }
     crate::alias_safety::elide_unaliased_make_unique(&mut functions);
     let program = MirProgram { functions, exports: Vec::new(), mutable_global_count: 0 };
+    // No linked bodies here: no declaration left from an earlier render applies.
+    crate::native_closure_decl::set(std::iter::empty(), Default::default());
     let items = crate::render_native::render_native_items(&program, &sigs)?;
     Ok(wrap_metered_splice(&items, &roots))
 }

@@ -2,7 +2,7 @@
 //! declaration of `IpAddr` / `FileStat` / … takes the #433 module-qualified
 //! identity (`self.IpAddr` in the entry program) so the stdlib's bare key is
 //! never rebound — but the owning module's OWN declaration is that bare key,
-//! also when the module is compiled on its own (`almide compile net --json`
+//! also when the module is compiled on its own (`almide query interface net --json`
 //! stages the bundled source as the entry program). Both spellings are
 //! pinned here because the second one feeds every consumer of the module
 //! interface JSON: the wasm reachability sweep keys its argument synthesizer
@@ -17,18 +17,18 @@ fn almide() -> &'static str {
     env!("CARGO_BIN_EXE_almide")
 }
 
-/// `almide compile <target> --json`, parsed.
+/// `almide query interface <target> --json`, parsed.
 fn interface_json(target: &str) -> serde_json::Value {
     let out = Command::new(almide())
-        .args(["compile", target, "--json"])
+        .args(["query", "interface", target, "--json"])
         .output()
-        .expect("run almide compile --json");
+        .expect("run almide query interface --json");
     assert!(
         out.status.success(),
-        "compile {target} --json failed:\n{}",
+        "query interface {target} --json failed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    serde_json::from_slice(&out.stdout).expect("interface JSON parses")
+    serde_json::from_slice::<serde_json::Value>(&out.stdout).expect("interface JSON parses")["result"].clone()
 }
 
 /// Every nominal type name the interface spells: each declared type's name
@@ -89,7 +89,7 @@ fn bundled_owner_modules_spell_their_own_types_bare() {
         let scoped: Vec<&String> = names.iter().filter(|n| n.starts_with("self.")).collect();
         assert!(
             scoped.is_empty(),
-            "`almide compile {module} --json` spells a stdlib type under the entry \
+            "`almide query interface {module} --json` spells a stdlib type under the entry \
              program's shadow scope — the bundled module's own declaration must keep \
              the bare key: {scoped:?}"
         );
@@ -103,7 +103,7 @@ fn bundled_owner_modules_spell_their_own_types_bare() {
             }
             assert!(
                 names.iter().any(|n| n == ty),
-                "`almide compile {module} --json` never spells its own `{ty}` bare; spelled: {names:?}"
+                "`almide query interface {module} --json` never spells its own `{ty}` bare; spelled: {names:?}"
             );
         }
     }

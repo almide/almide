@@ -176,7 +176,7 @@ fn rewrite_native_linked_mir(
         functions,
     );
     rewrite_native_result_str_windows(ir, functions);
-    rewrite_native_option_windows(ir, functions);
+    rewrite_native_option_windows(ir, linked, functions);
     crate::native_slot_rewrite::rewrite_slot_ops(functions, crate::lower::mutable_global_slot_count());
     // Narrow-width arithmetic computes in its declared integer type (#4006).
     for f in functions.iter_mut() {
@@ -189,6 +189,29 @@ fn rewrite_native_linked_mir(
         ));
     }
     Ok(())
+}
+
+/// The storage slots holding a heap value whose declared type has a native
+/// kind (`native_slot_rewrite::heap_slot`), with a default to leave behind
+/// when one is taken. None in a program with a `fan`: its arms run on
+/// threads of their own.
+fn native_heap_slots(
+    functions: &[crate::MirFunction],
+    record_layouts: &crate::lower::RecordLayouts,
+    variant_layouts: &crate::lower::VariantLayouts,
+) -> std::collections::BTreeMap<u32, crate::render_native::NTy> {
+    if functions.iter().any(|f| f.name.starts_with("__fan_arm_")) {
+        return Default::default();
+    }
+    crate::lower::mutable_global_slot_types()
+        .into_iter()
+        .filter(|(_, t)| crate::lower::is_heap_ty(t))
+        .filter_map(|(slot, t)| {
+            let k = native_sig_kind(&t, record_layouts, variant_layouts)?;
+            let nty = crate::render_native_closure::owned_nty(k);
+            crate::render_native_rec::has_default(nty).then_some((slot, nty))
+        })
+        .collect()
 }
 
 /// When the program synthesized `__mg_init`, `main` calls it first.
@@ -213,12 +236,13 @@ fn native_sigs_with_linked(
     record_layouts: &crate::lower::RecordLayouts,
     variant_layouts: &crate::lower::VariantLayouts,
 ) -> Result<crate::render_native::NativeSigs, LowerError> {
-    let mut sigs = build_native_sig_table(ir, functions, record_layouts, variant_layouts)?;
+    let mut sigs = build_native_sig_table(ir, functions, record_layouts, variant_layouts, &|_| true)?;
+    // A linked source's sibling the program never calls is not read: its
+    // signature would put types no rendered fn carries in the table (#4514).
+    let rendered = |name: &str| functions.iter().any(|f| f.name == name);
     for l in linked {
-        for (name, sig) in build_native_sig_table(&l.ir, &[], &l.record_layouts, &l.variant_layouts)? {
-            if functions.iter().any(|f| f.name == name) {
-                sigs.entry(name).or_insert(sig);
-            }
+        for (name, sig) in build_native_sig_table(&l.ir, &[], &l.record_layouts, &l.variant_layouts, &rendered)? {
+            sigs.entry(name).or_insert(sig);
         }
     }
     Ok(sigs)
@@ -246,7 +270,10 @@ fn insert_native_probe_charges(
 
 /// The ownership certificate of every function, then the program's
 /// `native-calls` witness.
-fn native_ownership_certs(functions: &[crate::MirFunction]) -> Vec<NativeCert> {
+fn native_ownership_certs(
+    functions: &[crate::MirFunction],
+    runtime_sites: &std::collections::BTreeMap<(String, usize), String>,
+) -> Vec<NativeCert> {
     let mut certs: Vec<NativeCert> = functions
         .iter()
         .map(|f| ("ownership".to_string(), f.name.to_string(), crate::certificate::ownership_certificate(f)))
@@ -254,9 +281,37 @@ fn native_ownership_certs(functions: &[crate::MirFunction]) -> Vec<NativeCert> {
     certs.push((
         "native-calls".to_string(),
         "program".to_string(),
-        crate::certificate::native_calls_witness(functions),
+        crate::certificate::native_calls_witness_with(functions, runtime_sites),
     ));
     certs
+}
+
+/// The native render of `program`, with the calls `crate::native_hof` serves
+/// through their runtime body: when it served any, the linked bodies those
+/// calls left unreached are dropped and the program rendered again, so the
+/// render and the certificates speak of the same functions; and the closure
+/// blocks only those calls read are not built (their slots reach the call
+/// as a stack env).
+fn render_native_with_runtime_hofs(
+    program: &mut MirProgram,
+    sigs: &crate::render_native::NativeSigs,
+    linked: &std::collections::BTreeSet<String>,
+) -> Result<String, LowerError> {
+    crate::native_hof::reset(Default::default(), Default::default());
+    let recs = crate::render_native_rec::snapshot();
+    let first = crate::render_native::try_render_native_program(program, sigs);
+    let sites = crate::native_hof::sites();
+    if sites.is_empty() {
+        return first;
+    }
+    let dropped = crate::native_hof::prune(&mut program.functions, linked, &sites);
+    let elided = crate::native_hof::elidable(&program.functions, &sites);
+    if dropped.is_empty() && elided.is_empty() {
+        return first;
+    }
+    crate::render_native_rec::restore(recs);
+    crate::native_hof::reset(dropped, elided);
+    crate::render_native::try_render_native_program(program, sigs)
 }
 
 /// The body of [`try_render_rust_source_certified`]: the native render, the
@@ -265,6 +320,7 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     dump_native_mir_if_requested(source);
     crate::charge_probe::reset_budget_used();
     crate::lambda_sigs::clear();
+    crate::option_blocks::clear();
     let _strict = crate::lower::StrictValuesGuard::set(true);
     // The native render loop-converts a self tail call over any heap carry
     // (#4006 class A, #3550): `lower::owned_tco_slots`.
@@ -303,8 +359,14 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     let mut ir = ir;
     prepare_native_top_lets(&mut ir);
     let mut functions = lower_native_functions(&ir, &record_layouts, &variant_layouts)?;
+    let own: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
     // #4006: the registry bodies the program calls, linked as certified MIR.
     let linked = link_native_self_host(&mut functions, &ir)?;
+    let linked_names: std::collections::BTreeSet<String> =
+        functions.iter().filter(|f| !own.contains(&f.name)).map(|f| f.name.clone()).collect();
+    crate::native_slot_rewrite::set_heap_slots(native_heap_slots(&functions, &record_layouts, &variant_layouts));
+    // No function is known to leave the heap slots alone until this program's are read.
+    crate::native_slot_takes::set_quiet(&[]);
     rewrite_native_linked_mir(&ir, &linked, &mut functions)?;
     let mut sigs = native_sigs_with_linked(&ir, &functions, &linked, &record_layouts, &variant_layouts)?;
     insert_native_probe_charges(&ir, &mut functions, &mut sigs);
@@ -317,14 +379,19 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     // and every call hands the argument over at the call.
     crate::native_move_params::rewrite(&mut functions);
     crate::native_region_window::bracket_windows(&mut functions, &windows)?;
-    let mut certs = native_ownership_certs(&functions);
-    let program = MirProgram {
+    crate::native_slot_takes::set_quiet(&functions);
+    let mut program = MirProgram {
         functions,
         exports: Vec::new(),
         // Rung 1 walls every top-let above, so there are no mutable-global slots.
         mutable_global_count: 0,
     };
-    let rust = crate::render_native::try_render_native_program(&program, &sigs)?;
+    crate::native_closure_decl::set(
+        ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())),
+        linked_names.clone(),
+    );
+    let rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names)?;
+    let mut certs = native_ownership_certs(&program.functions, &crate::native_hof::sites());
     // Row 4: each function's bounds witness, recorded as the render wrote its
     // element accesses (render_native_bounds).
     for (name, w) in crate::render_native_bounds::take() {

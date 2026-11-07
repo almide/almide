@@ -28,7 +28,10 @@ impl Emitter<'_> {
             BOOL => Ok(F_SCAN_W32),
             STR => Ok(F_SCAN_STR),
             FLOAT => Ok(self.work.helper(Helper::ScanF64)),
-            SliceTy::Tuple(_) | SliceTy::Named(_) => {
+            // Every other shape `==` compares is an i32 word (a handle, or
+            // Unit's zero) the deep scan loads and compares with the
+            // type-directed equality (#4578).
+            _ if crate::equality::has_structural_eq(k) => {
                 let key = self.types.intern(k);
                 Ok(self.work.helper(Helper::ScanDeep { key }))
             }
@@ -500,7 +503,7 @@ impl Emitter<'_> {
                     },
                     other => return unsup(&format!("map-from-of:{other:?}")),
                 };
-                if !matches!(k, SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)) {
+                if !crate::equality::has_structural_eq(k) {
                     return unsup("map-key-nonscalar");
                 }
                 let pair_def = self.types.tuple_def(pair_ti);

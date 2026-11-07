@@ -1,0 +1,13 @@
+// @contract: C-238, C-197
+// `list.range(i64::MIN, i64::MAX)` holds 2^64 - 1 elements, a count no Int
+// holds: `end - start` wraps to -1. Building it is the defined abort,
+// `Error: out of memory` and exit 1, on both targets, never an empty list
+// read off the wrapped count (#4538). The bounds arrive at run time.
+fn build(a: Int, e: Int) -> Int = list.len(list.range(a, e))
+
+fn main() -> Unit = {
+  let top = 9223372036854775807
+  println("before")
+  println(int.to_string(build(0 - top - 1, top)))
+  println("unreachable")
+}

@@ -54,6 +54,23 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
              __almide_cv.extend({chain}); __almide_cv }}"
         );
     }
+    // #4538: a counted span holds up to 2^64 - 1 elements, and `count() as
+    // i64` wrapped a length past Int max negative (`list.range(i64::MIN,
+    // i64::MAX) |> list.map(f) |> list.len` answered -1). A list that long
+    // cannot exist, so the length is the C-197 out-of-memory abort, as when
+    // the list is built.
+    if counted.is_some() {
+        let count = match collector {
+            IterCollector::Count { lambda } => Some(format!("{}.filter({}).count()", chain, render_expr(ctx, lambda))),
+            IterCollector::Len => Some(format!("{}.count()", chain)),
+            _ => None,
+        };
+        if let Some(count) = count {
+            return format!(
+                "({{ let __almide_cn: usize = {count}; if __almide_cn > i64::MAX as usize {{ almide_abort_oom(); }} __almide_cn as i64 }})"
+            );
+        }
+    }
     render_iter_collector(ctx, &chain, collector)
 }
 
@@ -212,8 +229,16 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             .unwrap_or_else(|| format!("concat(_, _)"));
     }
 
-    let l = render_expr(ctx, left);
-    let r = render_expr(ctx, right);
+    // `==` / `!=` compare in place (`($a) == ($b)` borrows both sides), so a
+    // heap global operand needs no copy (#4562).
+    let (l, r) = if matches!(op, BinOp::Eq | BinOp::Neq) {
+        (
+            global_read_place(ctx, left).unwrap_or_else(|| render_expr(ctx, left)),
+            global_read_place(ctx, right).unwrap_or_else(|| render_expr(ctx, right)),
+        )
+    } else {
+        (render_expr(ctx, left), render_expr(ctx, right))
+    };
 
     if let Some(method) = int_wrapping_method(op) {
         return format!("({l}).{method}({r})");
@@ -304,7 +329,7 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
 fn render_call_expr(ctx: &RenderContext, callee: &str, args: &[IrExpr]) -> String {
     // A user fn's `mut` param bound to a global place writes through the
     // global's cell (#2946).
-    if let Some(rendered) = render_call_through_global_places(ctx, callee, args, false, true, &|a| render_user_call_arg(ctx, a)) {
+    if let Some(rendered) = render_call_through_global_places(ctx, callee, args, false, GlobalPlaceCallee::User, &|a| render_user_call_arg(ctx, a)) {
         return rendered;
     }
     // A closure ARG is already `Rc<dyn Fn>`: the box-by-default pass boxed every
@@ -341,6 +366,95 @@ fn render_user_call_arg(ctx: &RenderContext, arg: &IrExpr) -> String {
         return format!("&{}", rc_cow_result_glue(owned, &inner.ty));
     }
     render_expr_owned(ctx, arg)
+}
+
+/// A read-only borrow of a heap `var` global (#4562): `map.get(cache, k)`,
+/// `list.len(g.items)`, `f(g)` with a borrowed param, `match g { … }`.
+/// The global is a `RefCell<Rc<T>>`, and its bare read is a deep copy of `T`
+/// (`(**c.borrow()).clone()`), which a borrow only reads. So every lookup in a
+/// module-level map copied the whole map.
+///
+/// The borrow now reads a SNAPSHOT of the cell's `Rc` ([`global_snapshot_place`]):
+/// one reference count, not a copy. No `RefCell` borrow is held while anything
+/// else runs, so this holds whatever the consumer is. Code that writes the
+/// global while the snapshot lives meets a shared block, and the write's
+/// `Rc::make_mut` copies it then (or `Rc::new` replaces it), so the borrow keeps
+/// the value it had where it was taken, as the copy did. The temporary lives
+/// exactly as long as the copy's temporary did: both are the operand of the
+/// same `&`, through the same field and deref places.
+fn render_global_snapshot_borrow(ctx: &RenderContext, arg: &IrExpr) -> Option<String> {
+    let IrExprKind::Borrow { expr: inner, as_str, mutable: false } = &arg.kind else { return None };
+    let place = global_snapshot_place(ctx, inner)?;
+    Some(if *as_str { format!("&*{place}") } else { format!("&{place}") })
+}
+
+/// The cell's `Rc` of heap `var` global `id`, as an expression (#4562): a
+/// reference count, never a copy of the value. `None` when `id` is not a
+/// global held in a `RefCell<Rc<T>>`.
+pub(crate) fn global_rc_snapshot(ctx: &RenderContext, id: VarId) -> Option<String> {
+    use almide_ir::top_let_storage::TopLetStorage;
+    let global = ctx.ann.global(id)?;
+    matches!(global.storage, TopLetStorage::RcRefCell)
+        .then(|| format!("{}.with(|__almide_cell| std::rc::Rc::clone(&*__almide_cell.borrow()))", global.static_name))
+}
+
+/// A read-only PLACE rooted at a heap `var` global (#4562): `(*snapshot)` for
+/// the global itself, `(*snapshot).f.0` through its fields and tuple slots.
+/// It has the type the copying read had, so a consumer that only reads it (a
+/// borrow, a comparison, a format argument, a loop's `.iter()`) or clones the
+/// part it needs takes no copy of the rest. A boxed field (a recursive
+/// record's cycle) is not a place here: its read moves the box out.
+pub(crate) fn global_snapshot_place(ctx: &RenderContext, expr: &IrExpr) -> Option<String> {
+    match &expr.kind {
+        IrExprKind::Var { id } => global_rc_snapshot(ctx, *id).map(|s| format!("(*{s})")),
+        IrExprKind::Member { object, field } if !super::record_field_is_boxed(ctx, &object.ty, field.as_str()) => {
+            Some(format!("{}.{}", global_snapshot_place(ctx, object)?, ctx.field_ident(field.as_str())))
+        }
+        IrExprKind::TupleIndex { object, index } => Some(format!("{}.{index}", global_snapshot_place(ctx, object)?)),
+        _ => None,
+    }
+}
+
+/// `expr` itself, or the expression under a `Clone` of it: the copy a
+/// read-only consumer of a global place does not need.
+pub(crate) fn strip_place_clone(expr: &IrExpr) -> &IrExpr {
+    match &expr.kind {
+        IrExprKind::Clone { expr: inner } => inner,
+        _ => expr,
+    }
+}
+
+/// The global place under `expr` when its consumer only reads it (#4562).
+/// A Bytes/Matrix value keeps its copy: a global stores the raw shape and
+/// the clone re-wraps it into the `AlmideRcCow` the consumer is typed for
+/// (#617).
+pub(crate) fn global_read_place(ctx: &RenderContext, expr: &IrExpr) -> Option<String> {
+    let inner = strip_place_clone(expr);
+    if rc_cow_needs_glue(&inner.ty) {
+        return None;
+    }
+    global_snapshot_place(ctx, inner)
+}
+
+/// A part of a heap global (`g.f`, `t.0`) read as an owned value (#4562): a
+/// scalar is read in place, anything else clones only that part, where the
+/// copying read cloned the whole global and then moved the part out. `None`
+/// for the global itself, whose copying read is already its one copy.
+pub(crate) fn global_part_owned(ctx: &RenderContext, expr: &IrExpr) -> Option<String> {
+    if matches!(expr.kind, IrExprKind::Var { .. }) {
+        return None;
+    }
+    let place = global_snapshot_place(ctx, expr)?;
+    Some(if ty_is_copy_scalar(&expr.ty) { place } else { format!("{place}.clone()") })
+}
+
+/// A type whose Rust value is `Copy`: read out of a place without a clone.
+fn ty_is_copy_scalar(ty: &Ty) -> bool {
+    matches!(ty,
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Unit
+        | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+        | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+        | Ty::Float32 | Ty::Float64)
 }
 
 /// `CallTarget::Named` case of `render_generic_call`, extracted verbatim
@@ -941,15 +1055,24 @@ fn render_call_through_global_places(
     callee: &str,
     args: &[IrExpr],
     allow_clone_at_0: bool,
-    runs_user_code: bool,
+    kind: GlobalPlaceCallee,
     render_arg: &dyn Fn(&IrExpr) -> String,
 ) -> Option<String> {
     let places: Vec<Option<(String, String)>> = args.iter().enumerate()
         .map(|(i, a)| global_mut_place(ctx, a, allow_clone_at_0 && i == 0))
         .collect();
     if places.iter().all(Option::is_none) { return None; }
-    if runs_user_code || args.iter().any(|a| matches!(a.ty, almide_lang::types::Ty::Fn { .. })) {
-        return Some(render_call_with_copied_global_places(callee, args, &places, render_arg));
+    let closure_arg = args.iter().any(|a| matches!(a.ty, almide_lang::types::Ty::Fn { .. }));
+    match kind {
+        GlobalPlaceCallee::User => return Some(render_call_with_copied_global_places(callee, args, &places, render_arg)),
+        _ if closure_arg => return Some(render_call_with_copied_global_places(callee, args, &places, render_arg)),
+        GlobalPlaceCallee::Stdlib => {
+            return Some(match render_call_with_taken_global_places(callee, args, &places, render_arg) {
+                Some(taken) => taken,
+                None => render_call_with_copied_global_places(callee, args, &places, render_arg),
+            });
+        }
+        GlobalPlaceCallee::Runtime => {}
     }
     let mut cells: Vec<String> = Vec::new();
     let rendered: Vec<String> = args.iter().zip(&places).map(|(a, place)| match place {
@@ -966,6 +1089,129 @@ fn render_call_through_global_places(
         out = format!("{static_name}.with(|__almide_gc{k}| {out})");
     }
     Some(out)
+}
+
+/// Who a call with a global `&mut` place reaches ([`render_call_through_global_places`]).
+#[derive(Clone, Copy, PartialEq)]
+enum GlobalPlaceCallee {
+    /// A native runtime fn (raw signature, runs no user code): the call runs
+    /// inside the global's cell.
+    Runtime,
+    /// A bundled stdlib fn with an Almide body whose arguments cannot carry
+    /// user code in: it names no user global and runs no user fn, so it
+    /// cannot observe the global while the call holds its block.
+    Stdlib,
+    /// Anything that may run user code: copy in, write back.
+    User,
+}
+
+/// Does `symbol` (the runtime spelling `almide_rt_<module>_<fn>`) name a
+/// bundled stdlib fn with an Almide body? Decided by the declaration.
+fn stdlib_symbol_has_almide_body(symbol: &str) -> bool {
+    let Some(rest) = symbol.strip_prefix("almide_rt_") else { return false };
+    almide_lang::stdlib_info::BUNDLED_MODULES.iter().any(|m| {
+        rest.strip_prefix(m)
+            .and_then(|r| r.strip_prefix('_'))
+            .is_some_and(|func| almide_ir::mut_args::stdlib_fn_has_almide_body(m, func))
+    })
+}
+
+/// A type no user fn can hide in: scalars, text, bytes and the builtin
+/// containers of such — never a function, a record, a variant or a type
+/// variable (a user type's protocol impl could run user code).
+fn inert_arg_ty(t: &Ty) -> bool {
+    match t {
+        Ty::Applied(_, args) | Ty::Tuple(args) => args.iter().all(inert_arg_ty),
+        Ty::Fn { .. } | Ty::Named(..) | Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. } => false,
+        Ty::TypeVar(_) | Ty::Union(_) | Ty::Unknown | Ty::Never => false,
+        _ => true,
+    }
+}
+
+/// The TAKE form of a call with global `&mut` places, for a callee that
+/// cannot observe the global ([`GlobalPlaceCallee::Stdlib`], #4550). The
+/// copy-in form cloned the whole block per call: `bytes.put_f32_le(buf, …)`
+/// on a module-level buffer copied every byte of it for a 4-byte write. Here
+/// the place's value moves out of its cell (left empty for the call, which
+/// cannot read it), the callee writes it in place, and it moves back:
+///
+/// `({ let mut __almide_gp0 = AlmideRcCow::<Vec<u8>>::from_rc(G.with(|__almide_gc| std::mem::replace(&mut *__almide_gc.borrow_mut(), almide_empty_bytes_rc())));
+///     let __almide_gr = f(&mut __almide_gp0, a);
+///     G.with(|__almide_gc| *__almide_gc.borrow_mut() = (__almide_gp0).into_rc());
+///     __almide_gr })`
+///
+/// for a Bytes global (its `Rc` is the callee's `AlmideRcCow`, so it moves
+/// whole and nothing is allocated); a list place moves its `Vec` out with
+/// `std::mem::take(Rc::make_mut(..))` instead.
+///
+/// `Rc::make_mut` keeps value semantics: a snapshot sharing the block
+/// (`let snap = g`) still makes the take copy it first. Only a place whose
+/// value has an empty default (Bytes, a list) is taken, and one global at
+/// most once; `None` otherwise, and the caller copies. A sibling argument
+/// that reads the global never sees it empty: `BorrowInsertion`'s hoist
+/// (`HoistCx::must_hoist`) has already moved it in front of the whole call,
+/// as for the two forms below.
+fn render_call_with_taken_global_places(
+    callee: &str,
+    args: &[IrExpr],
+    places: &[Option<(String, String)>],
+    render_arg: &dyn Fn(&IrExpr) -> String,
+) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    let mut taken: Vec<&str> = Vec::new();
+    for (a, place) in args.iter().zip(places) {
+        let Some((static_name, _)) = place else { continue };
+        let ty = match &a.kind {
+            IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } => &inner.ty,
+            _ => &a.ty,
+        };
+        if !matches!(ty, Ty::Bytes | Ty::Applied(TC::List, _)) || taken.contains(&static_name.as_str()) {
+            return None;
+        }
+        taken.push(static_name);
+    }
+    let mut take_out: Vec<String> = Vec::new();
+    let mut put_back: Vec<String> = Vec::new();
+    let rendered: Vec<String> = args.iter().zip(places).map(|(a, place)| match place {
+        Some((static_name, suffix)) => {
+            let k = take_out.len();
+            let ty = match &a.kind {
+                IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } => &inner.ty,
+                _ => &a.ty,
+            };
+            let cell = "std::rc::Rc::make_mut(&mut *__almide_gc.borrow_mut())";
+            // A root Bytes place moves its cell's `Rc` itself (the callee's
+            // `AlmideRcCow` is that `Rc`), leaving the shared empty
+            // placeholder: nothing is allocated for the call.
+            let (read, back) = if suffix.is_empty() && matches!(ty, Ty::Bytes) {
+                (
+                    format!("AlmideRcCow::<Vec<u8>>::from_rc({static_name}.with(|__almide_gc| std::mem::replace(&mut *__almide_gc.borrow_mut(), almide_empty_bytes_rc())))"),
+                    format!("{static_name}.with(|__almide_gc| *__almide_gc.borrow_mut() = (__almide_gp{k}).into_rc());"),
+                )
+            } else if suffix.is_empty() {
+                (
+                    rc_cow_result_glue(format!("{static_name}.with(|__almide_gc| std::mem::take({cell}))"), ty),
+                    format!("{static_name}.with(|__almide_gc| *{cell} = (__almide_gp{k}).into());"),
+                )
+            } else {
+                (
+                    format!("{static_name}.with(|__almide_gc| std::mem::take(&mut {cell}{suffix}))"),
+                    format!("{static_name}.with(|__almide_gc| {cell}{suffix} = __almide_gp{k});"),
+                )
+            };
+            take_out.push(format!("let mut __almide_gp{k} = {read};"));
+            put_back.push(back);
+            format!("&mut __almide_gp{k}")
+        }
+        None => render_arg(a),
+    }).collect();
+    Some(format!(
+        "({{ {} let __almide_gr = {}({}); {} __almide_gr }})",
+        take_out.join(" "),
+        callee,
+        rendered.join(", "),
+        put_back.join(" "),
+    ))
 }
 
 /// The copy-in / write-back form of a call with global `&mut` places (#2960),
@@ -1131,9 +1377,17 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
     }
     let allow_clone = crate::pass_licm::is_inplace_mutator(symbol.as_str());
     // A user-module fn normalized into the runtime spelling runs user code.
-    let runs_user_code = !rc_cow_symbol_is_native_runtime(symbol.as_str());
+    // A bundled stdlib fn with an Almide body does not, unless an argument can
+    // carry it in (#4550): it takes the global's block for the call.
+    let callee = if rc_cow_symbol_is_native_runtime(symbol.as_str()) {
+        GlobalPlaceCallee::Runtime
+    } else if stdlib_symbol_has_almide_body(symbol.as_str()) && args.iter().all(|a| inert_arg_ty(&a.ty)) {
+        GlobalPlaceCallee::Stdlib
+    } else {
+        GlobalPlaceCallee::User
+    };
     if let Some(rendered) = render_call_through_global_places(ctx, symbol.as_str(), args, allow_clone,
-        runs_user_code, &|a| render_runtime_call_arg_owned(ctx, symbol, a))
+        callee, &|a| render_runtime_call_arg_owned(ctx, symbol, a))
     {
         return rendered;
     }

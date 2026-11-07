@@ -44,14 +44,13 @@ fn diagnostics(dir: &std::path::Path, source: &str) -> Vec<Diag> {
         .args(["check", file.to_str().unwrap(), "--json"])
         .output()
         .expect("run almide check --json");
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    text.lines()
-        .filter(|l| l.trim_start().starts_with('{'))
-        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+    // #4590: one envelope line on stdout; the rows are its `diagnostics` array.
+    let envelope = serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap_or_default();
+    envelope["diagnostics"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
         .filter(|v| v.get("line").and_then(|x| x.as_u64()).is_some())
         .map(|v| Diag {
             line: v["line"].as_u64().unwrap() as usize,

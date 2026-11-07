@@ -1,0 +1,4 @@
+// Fixed: the parentheses keep the reading the file was written for.
+fn add_at(s: Int, b: Bytes, i: Int) -> Int = s + (bytes.get(b, i) ?? 0)
+
+fn main() -> Unit = println(int.to_string(add_at(1, bytes.from_list([7]), 0)))

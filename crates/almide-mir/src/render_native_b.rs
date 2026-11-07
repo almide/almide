@@ -206,8 +206,23 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
     let NativeSink { user_fns, sigs, tys, out, indent, used_shims } = sink;
     let name = call.name;
     if let Some(callee) = user_fns.get(name.as_str()) {
-        render_user_fn_call(call, callee, sigs, OpSink { tys, out, indent, used_shims })
-    } else if name == "__str_concat" && render_concat_in_place(call, tys, out, indent) {
+        // A closure argument of another signature than the linked body
+        // declares is an argument kind it refuses (#4588): the call it
+        // rendered is taken back.
+        let marks = (out.len(), used_shims.len());
+        let rendered = render_user_fn_call(call, callee, sigs, OpSink { tys: &mut *tys, out: &mut *out, indent, used_shims: &mut *used_shims })
+            .and_then(|()| crate::native_closure_decl::check(call, user_fns, (&mut *out, &mut *used_shims), marks));
+        return match rendered {
+            // A linked self-hosted body that refuses the call's argument
+            // kinds: the runtime body its declaration names serves it, if any.
+            Err(e) => crate::native_hof::serve_or(e, call, user_fns, sigs, OpSink { tys, out, indent, used_shims }),
+            ok => ok,
+        };
+    }
+    if crate::native_hof::pruned(name) {
+        return crate::native_hof::render_pruned(call, user_fns, sigs, OpSink { tys, out, indent, used_shims });
+    }
+    if name == "__str_concat" && render_concat_in_place(call, tys, out, indent) {
         Ok(())
     } else if let Some(shim_entry) = shim(name) {
         render_closed_shim_call(call, shim_entry, OpSink { tys, out, indent, used_shims })

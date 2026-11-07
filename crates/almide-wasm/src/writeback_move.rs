@@ -30,7 +30,7 @@
 //! alias it takes itself (`let ys = xs`) still makes its judge copy.
 
 use almide_ir::visit::{walk_expr, IrVisitor};
-use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
+use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
 
 use crate::emitter::Emitter;
 
@@ -38,37 +38,62 @@ use crate::emitter::Emitter;
 /// its block? A scalar-typed argument that only READS it by index or field
 /// (`xs[0]`, `h.n`) is computed before the var is emptied, carries no
 /// handle and writes nothing, so it cannot.
-fn mentions_beyond_scalar(a: &IrExpr, var: VarId) -> bool {
-    use almide_types::types::Ty;
-    struct Reads {
+///
+/// #4594: nor can a scalar-typed CALL that passes the var itself to a callee
+/// `lends` admits (`getf(buf, i)` in `setf(buf, i, getf(buf, i) + 1.0)`):
+/// one that can neither write the block nor keep a share of it past its own
+/// return (no `mut` param, no closure among its arguments, no module-level
+/// variable in its reach, no heap address in its Int result). Its scalar
+/// result carries no handle, so the read is over before the var is emptied
+/// and the moved block is the `mut` callee's alone. A position the reader
+/// OWNS is admitted too: the share the site takes for it has nowhere to go
+/// but the reader's own exit, which releases it before the `mut` call runs.
+/// Refusing the call shared the var into the `mut` call (rc 2), and that
+/// callee's copy-on-write judge copied the whole buffer on every call.
+fn mentions_beyond_scalar(a: &IrExpr, var: VarId, lends: &dyn Fn(&CallTarget, &[IrExpr]) -> bool) -> bool {
+    struct Reads<'l> {
         var: VarId,
         other: bool,
+        lends: &'l dyn Fn(&CallTarget, &[IrExpr]) -> bool,
     }
-    impl IrVisitor for Reads {
+    impl IrVisitor for Reads<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
+            let v = self.var;
+            let is_var = move |x: &IrExpr| matches!(&x.kind, IrExprKind::Var { id } if *id == v);
             match &e.kind {
-                IrExprKind::IndexAccess { object, index } if matches!(&object.kind, IrExprKind::Var { id } if *id == self.var) => {
-                    self.visit_expr(index)
-                }
-                IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-                    if matches!(&object.kind, IrExprKind::Var { id } if *id == self.var) => {}
+                IrExprKind::IndexAccess { object, index } if is_var(object) => self.visit_expr(index),
+                IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } if is_var(object) => {}
                 IrExprKind::Var { id } if *id == self.var => self.other = true,
                 IrExprKind::Block { .. } | IrExprKind::Lambda { .. } => self.other |= crate::rc_ownership::rc_mentions_var(e, self.var),
+                IrExprKind::Call { target, args, .. } if scalar_ty(&e.ty) && args.iter().any(|x| is_var(x)) => {
+                    if !(self.lends)(target, args) {
+                        self.other = true;
+                        return;
+                    }
+                    for x in args.iter().filter(|x| !is_var(x)) {
+                        self.visit_expr(x);
+                    }
+                }
                 _ => walk_expr(self, e),
             }
         }
     }
-    let scalar = matches!(
-        a.ty,
-        Ty::Int | Ty::Float | Ty::Bool | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
-            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 | Ty::Float64
-    );
-    if !scalar {
+    if !scalar_ty(&a.ty) {
         return crate::rc_ownership::rc_mentions_var(a, var);
     }
-    let mut r = Reads { var, other: false };
+    let mut r = Reads { var, other: false, lends };
     r.visit_expr(a);
     r.other
+}
+
+/// A type that carries no handle.
+fn scalar_ty(t: &almide_types::types::Ty) -> bool {
+    use almide_types::types::Ty;
+    matches!(
+        t,
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 | Ty::Float64
+    )
 }
 
 /// A type no closure can hide in: scalars, text, bytes, and the builtin
@@ -361,7 +386,7 @@ impl Emitter<'_> {
             MoveSet::Vars(v) => v.contains(&place),
             MoveSet::Any => matches!(place, Place::Var(_)) && !self.cells.contains(&root),
         };
-        if !listed || args.iter().enumerate().any(|(j, o)| j != k && mentions_beyond_scalar(o, root)) {
+        if !listed || self.other_arg_holds(args, k, root) {
             return Ok(None);
         }
         // A C-319 cell (#3343) is shared with every closure that captured
@@ -374,6 +399,32 @@ impl Emitter<'_> {
         let Some(emptied) = self.emptied_place(place, idx, root_ty, want)? else { return Ok(None) };
         self.hand_over_moved(&emptied, &args[k], want, is_mut)?;
         Ok(Some(emptied))
+    }
+
+    /// Does an argument other than `k` mention `var` in a way that could
+    /// hold or change its block (`mentions_beyond_scalar`)? A call lending
+    /// the var is admitted where the callee table says it can neither write
+    /// the block nor keep it (#4594): no `mut` param, no host import, no
+    /// address-yielding result, an empty global reach (global_reach.rs).
+    /// A C-319 cell lends nothing: a closure shares it.
+    fn other_arg_holds(&self, args: &[IrExpr], k: usize, var: VarId) -> bool {
+        let lends = |target: &CallTarget, cargs: &[IrExpr]| -> bool {
+            let CallTarget::Named { name } = target else { return false };
+            let Some(ci) = self.resolve_named_fn(name.as_str()).filter(|_| !self.cells.contains(&var)) else {
+                return false;
+            };
+            let info = &self.table.infos[ci];
+            let reach_none = matches!(self.work.global_reach.borrow().get(ci), Some(Some(set)) if set.is_empty());
+            info.refuse.is_none()
+                && info.import.is_none()
+                && !info.yields_address
+                && !info.scoped_entry
+                && info.params.len() == cargs.len()
+                && !info.param_mut_decl.iter().chain(&info.param_mut).any(|&m| m)
+                && reach_none
+                && cargs.iter().all(|x| inert_ty(&x.ty))
+        };
+        args.iter().enumerate().any(|(j, o)| j != k && mentions_beyond_scalar(o, var, &lends))
     }
 
     /// Does the local at `idx` hold its own credit (an owned frame param,
@@ -449,12 +500,16 @@ impl Emitter<'_> {
         let reaches = !matches!(self.work.global_reach.borrow().get(i), Some(Some(set)) if !set.contains(&g));
         // A frame-tail leaf frees a LOCAL (the frame ends); a global outlives
         // it, so moving one there emptied the global (`fn show(p) =
-        // f(arena, p)` left `arena` empty for the next reader).
-        let frame_tail = self.moves.move_in.as_ref().is_some_and(|m| m.is_frame_tail(args));
+        // f(arena, p)` left `arena` empty for the next reader). Asked of the
+        // global's own place (#4550): a tail-less body made every call in it
+        // a frame-tail site for its once-read scalar params, and each
+        // `bytes.put_f32_le(buf, o, x)` on a module-level buffer then shared
+        // the buffer into the call, whose write copied all of it.
+        let frame_tail = self.moves.move_in.as_ref().is_some_and(|m| m.is_frame_tail(args, place));
         if reaches
             || frame_tail
             || !matches!(move_in, MoveSet::Vars(v) if v.contains(&place))
-            || args.iter().enumerate().any(|(j, o)| j != k && mentions_beyond_scalar(o, id))
+            || self.other_arg_holds(args, k, id)
         {
             return Ok(None);
         }

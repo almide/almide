@@ -1105,7 +1105,7 @@ pub fn check_compiler_version_with(project: &Project, skip: bool) -> Result<(), 
         .map_err(|e| format!("internal: installed version '{}' unparseable: {}", installed, e))?;
     if req.matches(&have) { return Ok(()); }
     Err(format!(
-        "package '{}' requires almide >= {}\n  installed version: {}\n  run 'almide self-update' to update, \
+        "package '{}' requires almide >= {}\n  installed version: {}\n  run 'almide upgrade' to update, \
          or set ALMIDE_SKIP_VERSION_CHECK=1 to bypass (a release build honours it only with \
          `--allow-switch ALMIDE_SKIP_VERSION_CHECK`)",
         project.package.name, required, installed

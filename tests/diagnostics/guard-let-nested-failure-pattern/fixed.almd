@@ -1,0 +1,15 @@
+// A guard's failure arm binds the whole error (#4543): `err(Missing(k)) =>`
+// would leave every other error of the Result unhandled.
+type ConfigError = | Missing(String) | BadPort(Int)
+
+fn describe(e: ConfigError) -> String = match e {
+  Missing(k) => "missing ${k}",
+  BadPort(p) => "bad port ${int.to_string(p)}",
+}
+
+fn port_text(r: Result[Int, ConfigError]) -> String = {
+  guard let p = r else err(e) => describe(e)
+  int.to_string(p)
+}
+
+fn main() -> Unit = println(port_text(err(Missing("port"))))

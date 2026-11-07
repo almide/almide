@@ -178,9 +178,10 @@ fn applied_builtin_of(
         }
         (TypeConstructorId::Map, [a, b]) => {
             let k = slice_ty_of(a, types)?;
-            // Keys need defined equality: scalars via the word/byte
-            // scans, tuples/records via the deep-scan lane.
-            if !matches!(k, SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)) {
+            // Keys need defined equality: Int/Bool/String/Float via the
+            // word/byte scans, every other shape `==` compares via the
+            // deep-scan lane (#4578 — the same question the list ops ask).
+            if !crate::equality::has_structural_eq(k) {
                 return None;
             }
             let v = slice_ty_of(b, types)?;
@@ -188,7 +189,7 @@ fn applied_builtin_of(
         }
         (TypeConstructorId::Set, [a]) => {
             let e = slice_ty_of(a, types)?;
-            if !matches!(e, SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)) {
+            if !crate::equality::has_structural_eq(e) {
                 return None;
             }
             Some(SliceTy::Set(types.intern(e)))

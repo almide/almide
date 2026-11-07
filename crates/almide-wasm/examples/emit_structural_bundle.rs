@@ -36,6 +36,17 @@
 //!
 //! `--only` prints one witness's bytes instead (the gate.sh feeder). Exit 2
 //! when the program does not build or the witness is absent.
+//!
+//! `--tests <test.almd> --write-artifact <file.wasm> --anchors <file>` takes
+//! the TEST lane's route instead (`almide::wasm_route::route_wasm_tests`, the
+//! function `almide test --target wasm` renders a test file through): the
+//! file's `__test_runner` module. There is no build artifact to compare with,
+//! so the stock-WASI bytes the route produced are WRITTEN to the named file
+//! and pinned (the stdlib-test leg of proofs/structural-wall.sh then runs
+//! that file under a stock runtime: the bytes judged are the bytes that pass
+//! the tests). Exit 3 when the module needs the embedded host — an op the
+//! stock p1 shim does not serve (`testing.assert_aborts`'s abort sites,
+//! ADR-0029) — so there is no stock artifact to judge.
 
 use std::io::Write;
 
@@ -47,11 +58,19 @@ fn fail(msg: &str) -> ! {
 use almide_wasm::witness::bundle::Record;
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let tests = args.first().is_some_and(|a| a == "--tests");
+    if tests {
+        args.remove(0);
+    }
     // Absolute before the chdir below, so the paths name the files the
     // caller meant.
     let abs = |a: &String| std::path::absolute(a).unwrap_or_else(|e| fail(&format!("{a}: {e}")));
     let (rel, only, artifact, anchors) = match args.as_slice() {
+        [rel, flag, a, flag2, n] if tests && flag == "--write-artifact" && flag2 == "--anchors" => {
+            (rel.clone(), None, Some(abs(a)), Some(abs(n)))
+        }
+        _ if tests => fail("usage: emit_structural_bundle --tests <test.almd> --write-artifact <file.wasm> --anchors <file>"),
         [rel] => (rel.clone(), None, None, None),
         [rel, flag, p, f] if flag == "--only" => (rel.clone(), Some((p.clone(), f.clone())), None, None),
         [rel, flag, a] if flag == "--artifact" => (rel.clone(), None, Some(abs(a)), None),
@@ -66,7 +85,7 @@ fn main() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     std::env::set_current_dir(&root).unwrap_or_else(|e| fail(&format!("cd {}: {e}", root.display())));
     let text = std::fs::read_to_string(&rel).unwrap_or_else(|e| fail(&format!("read {rel}: {e}")));
-    let (records, uncertified, shipped, anchor_file) = produce(&rel, &text);
+    let (records, uncertified, shipped, anchor_file) = produce(&rel, &text, tests);
     if let Some((p, f)) = only {
         match records.iter().find(|r| r.property == p && r.function == f) {
             Some(r) => {
@@ -78,6 +97,9 @@ fn main() {
     }
     let pinned = artifact.is_some();
     let pin = artifact.map(|path| {
+        if tests {
+            std::fs::write(&path, &shipped).unwrap_or_else(|e| fail(&format!("write {}: {e}", path.display())));
+        }
         let file = std::fs::read(&path).unwrap_or_else(|e| fail(&format!("read {}: {e}", path.display())));
         if file != shipped {
             fail(&format!(
@@ -115,12 +137,22 @@ type Produced = (Vec<Record>, Vec<(String, String)>, Vec<u8>, String);
 
 /// Build `rel` through the product route and collect every witness, with
 /// the stock-WASI bytes the witnesses describe (witness_bundle.rs).
-fn produce(rel: &str, text: &str) -> Produced {
-    use almide::wasm_route::{render_wasm_routed, ModuleSource, RouteOptions};
+fn produce(rel: &str, text: &str, tests: bool) -> Produced {
+    use almide::wasm_route::{render_wasm_routed, route_wasm_tests, ModuleSource, RouteOptions};
     almide_wasm::witness::start_collecting();
-    let opts = RouteOptions { library: true, ..RouteOptions::default() };
-    let routed = render_wasm_routed(rel, text, ModuleSource::Disk { dep_paths: &[] }, opts)
-        .unwrap_or_else(|e| fail(&format!("{rel} does not build on the structural leg: {e:?}")));
+    let routed = if tests {
+        let routed = route_wasm_tests(rel, text, &[], None, true, &|_| Ok(()))
+            .unwrap_or_else(|(stage, e)| fail(&format!("{rel} does not build on the structural leg ({stage}): {e}")));
+        if let Some(op) = routed.host_ops.iter().find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op)) {
+            let _ = writeln!(std::io::stderr(), "{rel}: host op {op} needs the embedded host — no stock artifact to judge");
+            std::process::exit(3);
+        }
+        routed
+    } else {
+        let opts = RouteOptions { library: true, ..RouteOptions::default() };
+        render_wasm_routed(rel, text, ModuleSource::Disk { dep_paths: &[] }, opts)
+            .unwrap_or_else(|e| fail(&format!("{rel} does not build on the structural leg: {e:?}")))
+    };
     let shipped = routed.stock_wasi().unwrap_or_else(|e| fail(&format!("to_wasi: {e}")));
     // The same transform with its function map: where each emitted body
     // ships (the anchors' locator).

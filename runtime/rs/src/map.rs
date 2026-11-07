@@ -450,11 +450,18 @@ impl AlmideKeyLookup {
 /// only beside a `Built` index (the linear lanes shift instead — their scan
 /// is O(n) per lookup anyway), and `remove` compacts once they outnumber
 /// the live entries.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct AlmideMap<K, V> {
     entries: Vec<Option<(K, V)>>,
     dead: usize,
     lookup: AlmideKeyLookup,
+}
+
+/// The empty map for EVERY key and value type (a derived `Default` would bound
+/// them): the place a `mut` param's value moves out of (`std::mem::take`,
+/// #4582).
+impl<K, V> Default for AlmideMap<K, V> {
+    fn default() -> Self { AlmideMap::new() }
 }
 
 impl<K, V> AlmideMap<K, V> {

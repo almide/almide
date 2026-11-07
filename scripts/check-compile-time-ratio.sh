@@ -65,13 +65,13 @@ CORPUS=(
   spec/wasm_cross/effect_tco_err_rewrap.almd
   spec/wasm_cross/effect_unwrap_in_loop.almd
   spec/wasm_cross/gleam_records_tuples.almd
-  spec/wasm_cross/koka_rbtree_balance.almd
   spec/wasm_cross/leak_free_spread_produced_base.almd
   spec/wasm_cross/list_update_callback_result_ownership.almd
   spec/wasm_cross/match_box_pattern_backstop.almd
   spec/wasm_cross/mutual_tail_recursion.almd
   spec/wasm_cross/nested_payload_guard.almd
   spec/wasm_cross/ord_recursive.almd
+  spec/wasm_cross/rbtree_balance_rotations.almd
   spec/wasm_cross/recursive_payload_closure_capture.almd
   spec/wasm_cross/string_count_truncation.almd
   spec/wasm_cross/string_repeat_empty.almd

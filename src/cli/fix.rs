@@ -61,6 +61,9 @@ struct FixReport<'a> {
     operator_rewrites: usize,
     range_rewrites: usize,
     return_removed: usize,
+    /// #4531: `??` sites given the parentheses that keep their pre-dialect-16
+    /// reading.
+    precedence_rewrites: usize,
     /// #1312: every span-anchored fix-it this run applied, in application
     /// order. Each one is `machine-applicable` by construction — the engine
     /// reads nothing else.
@@ -111,6 +114,7 @@ struct FixOutcome<'a> {
     imports_added: Vec<String>,
     operator_count: usize,
     return_count: usize,
+    precedence_count: usize,
     /// The engine's output: every machine-applicable fix-it applied.
     /// The per-code counts below are views over this list — there is no
     /// second bookkeeping to drift from it.
@@ -134,6 +138,12 @@ impl FixOutcome<'_> {
 /// grep for; everything the engine applies beyond them is reported
 /// generically, keyed by the diagnostic code that stated the fix.
 fn print_fix_detail_lines(outcome: &FixOutcome, print: fn(&str)) {
+    if outcome.precedence_count > 0 {
+        print(&format!(
+            "  Parenthesized {} `??` site(s) to keep their pre-dialect-16 grouping (`x ?? 0 - 1` → `(x ?? 0) - 1`)",
+            outcome.precedence_count
+        ));
+    }
     if outcome.operator_count > 0 {
         print(&format!(
             "  Rewrote {} comparison / fallback call(s) to operator form (int.gt/lt/eq/... → > < == ...; option/result.unwrap_or → ??; a regex pattern → regex.new(…))",
@@ -225,6 +235,7 @@ fn report_fix_result(outcome: FixOutcome, dry_run: bool, json: bool) {
             operator_rewrites: outcome.operator_count,
             range_rewrites,
             return_removed: outcome.return_count,
+            precedence_rewrites: outcome.precedence_count,
             applied: outcome.applied,
             suggestions: outcome.suggestions,
             manual_pending: outcome.manual,
@@ -288,18 +299,21 @@ fn collect_diagnostics(file: &str, source: &str) -> (Vec<Diagnostic>, usize) {
 /// `args`, or a sibling file) unresolved, so the diagnostics `check` reports
 /// on those calls — and the fix-its they carry — never reached the engine.
 /// A program whose imports do not resolve is checked alone, as before;
-/// `almide check` is where that failure is reported.
+/// `almide check` is where that failure is reported. Checked alone, no import
+/// is judged unused (#4589): the uses the missing modules would have resolved
+/// are invisible, and E060's deletion would strand them.
 fn infer_entry(file: &str, source: &str, prog: &mut almide::ast::Program) -> Vec<Diagnostic> {
     use almide::check::Checker;
     use almide::canonicalize;
 
     static DEP_PATHS: std::sync::OnceLock<Vec<(almide::project::PkgId, std::path::PathBuf)>> = std::sync::OnceLock::new();
     let dep_paths = DEP_PATHS.get_or_init(super::dep_paths_from_cwd_toml);
-    let modules = almide::resolve::resolve_imports_with_deps(file, prog, dep_paths)
-        .map(|r| r.modules)
-        .unwrap_or_default();
+    let resolved = almide::resolve::resolve_imports_with_deps(file, prog, dep_paths);
+    let imports_unresolved = resolved.is_err();
+    let modules = resolved.map(|r| r.modules).unwrap_or_default();
     let canon = canonicalize::canonicalize_program(prog, modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)));
     let mut checker = Checker::from_env(canon.env);
+    checker.imports_unresolved = imports_unresolved;
     checker.set_source(file, source);
     checker.diagnostics = canon.diagnostics;
     almide::resolve::refresh_module_toplets(&mut checker, &modules);
@@ -534,6 +548,23 @@ fn apply_ast_family(file: &str, source: &str) -> (String, Vec<String>, usize) {
 pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
     let (_, disk_source, _) = parse_file(file);
 
+    // #4531 FIRST: the dialect-16 regrouping of `??` reads the file the way
+    // it was written (the pre-16 grammar), so it must see the author's text
+    // before any other stage reprints it under the current grammar — and the
+    // E120 errors it clears would otherwise count against every later stage.
+    // The migration proves its own output (`almide::regroup`); a refusal is
+    // reported and leaves the text alone, with E120 still standing.
+    let (disk_source, precedence_count) = match almide::regroup::migrate_precedence(&disk_source) {
+        almide::regroup::Migration::Rewritten { source, sites, .. } => (source, sites),
+        almide::regroup::Migration::Refused { reason, sites } => {
+            err(&format!(
+                "{file}: {sites} `??` site(s) group differently since dialect 16 and were NOT rewritten: {reason}"
+            ));
+            (disk_source, 0)
+        }
+        almide::regroup::Migration::Unchanged => (disk_source, 0),
+    };
+
     // The engine runs FIRST, on the raw text, so everything after it —
     // auto-imports, the comparison-call rewrite, the formatter — sees a
     // program whose mechanically-stated errors are already gone instead of
@@ -562,7 +593,8 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
         return_count = 0;
     }
 
-    let any_change = !applied.is_empty()
+    let any_change = precedence_count > 0
+        || !applied.is_empty()
         || !import_messages.is_empty()
         || operator_count > 0
         || return_count > 0;
@@ -584,7 +616,7 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
 
     report_fix_result(FixOutcome {
         file, working: &working, import_messages: &import_messages, imports_added,
-        operator_count, return_count, applied, suggestions, manual, any_change,
+        operator_count, return_count, precedence_count, applied, suggestions, manual, any_change,
     }, dry_run, json);
 }
 
@@ -691,7 +723,7 @@ fn rewrite_unwrap_or_calls(program: &mut ast::Program, built: &mut std::collecti
 /// parenthesized when the parser's own binding powers say it would not
 /// re-parse in place (`almide::parser::grouping`).
 fn group_built_operators(program: &mut ast::Program, built: &std::collections::HashSet<ast::ExprId>) {
-    use almide::parser::grouping::{needs_parens, operand_slots_mut};
+    use almide::parser::grouping::{needs_parens_in_every_dialect as needs_parens, operand_slots_mut};
     if built.is_empty() {
         return;
     }

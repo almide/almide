@@ -94,10 +94,19 @@ fn extern_named_args(attr: &Attribute, named: &[AttrArg], target: &str, module: 
 /// Convert a generic `Attribute` that the user wrote as `@export(...)`
 /// into the legacy typed `ExportAttr`.
 fn extract_export_attr(attr: &Attribute) -> Result<ExportAttr, String> {
-    let args = &attr.args;
+    let positional = attr.args.iter().take_while(|a| a.name.is_none()).count();
+    let args = &attr.args[..positional];
     if args.len() != 2 {
+        // A 3rd positional is most likely the address marker written bare:
+        // name the one spelling there is (#4519).
+        let hint = if args.len() > 2 {
+            let at = attr.span.map(|s| format!(" at line {}:{}", s.line, s.col)).unwrap_or_default();
+            format!("{at}\n  Hint: Anything after the 2nd argument is named; the only one is `returns: address`, for a wasm export whose Region result crosses as its address alone: `@export(wasm, \"name\", returns: address)`")
+        } else {
+            String::new()
+        };
         return Err(format!(
-            "@export expects 2 positional arguments (target, \"symbol\"); got {}",
+            "@export expects 2 positional arguments (target, \"symbol\"); got {}{hint}",
             args.len()
         ));
     }
@@ -109,7 +118,51 @@ fn extract_export_attr(attr: &Attribute) -> Result<ExportAttr, String> {
         AttrArg { name: None, value: AttrValue::String { value } } => sym(value),
         _ => return Err("@export second argument must be a string literal symbol".into()),
     };
-    Ok(ExportAttr { target, symbol })
+    let returns_address = export_named_args(attr, &attr.args[positional..], target.as_str(), symbol.as_str())?;
+    Ok(ExportAttr { target, symbol, returns_address })
+}
+
+/// The named arguments after `@export`'s two positional ones (#4519). The
+/// only one is `returns: address`, on `@export(wasm, "name", ...)`: the
+/// export's Region result crosses as its data address alone. The same
+/// `returns:` key `@extern` takes for `returns: promise` (#3371), so the one
+/// named argument either boundary attribute has says what the boundary
+/// returns. Returns whether it is present.
+fn export_named_args(attr: &Attribute, named: &[AttrArg], target: &str, symbol: &str) -> Result<bool, String> {
+    let at = attr.span.map(|s| format!(" at line {}:{}", s.line, s.col)).unwrap_or_default();
+    let spelled = format!("@export(wasm, \"{symbol}\", returns: address)");
+    let mut returns_address = false;
+    for arg in named {
+        let Some(name) = arg.name else {
+            return Err(format!(
+                "@export takes its 2 positional arguments first; a positional argument after a named one is not allowed{at}\n  Hint: Write the target and \"symbol\" first, then the named argument: `{spelled}`"
+            ));
+        };
+        match (name.as_str(), &arg.value) {
+            ("returns", AttrValue::Ident { name: v }) if v.as_str() == "address" => {
+                if returns_address {
+                    return Err(format!("@export repeats `returns: address`{at}\n  Hint: Write it once: `{spelled}`"));
+                }
+                returns_address = true;
+            }
+            ("returns", _) => {
+                return Err(format!(
+                    "@export's `returns` takes only `address` (the Region result crosses as its data address alone){at}\n  Hint: Write `{spelled}`, or drop `returns` for the `(ptr, len)` pair"
+                ));
+            }
+            (other, _) => {
+                return Err(format!(
+                    "@export has no named argument `{other}`{at}\n  Hint: The only named argument is `returns: address`, for a wasm export whose Region result crosses as its address alone: `{spelled}`"
+                ));
+            }
+        }
+    }
+    if returns_address && target != "wasm" {
+        return Err(format!(
+            "`returns: address` applies only to @export(wasm, ...), not @export({target}, ...){at}\n  Hint: It makes a wasm export's Region result cross as its data address alone: `{spelled}`"
+        ));
+    }
+    Ok(returns_address)
 }
 
 impl Parser {

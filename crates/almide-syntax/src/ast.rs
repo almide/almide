@@ -392,7 +392,26 @@ pub enum Stmt {
     /// inside the scrutinee's Option/Result and stays in scope for the REST of the block;
     /// the else branch must diverge. The frontend desugars the block tail into the Some/Ok
     /// arm of a match on the scrutinee.
-    GuardLet { name: Sym, scrutinee: Expr, else_: Expr, #[serde(skip)] span: Option<Span> },
+    ///
+    /// #4543 adds three spellings, all desugared into the same match:
+    /// - `mutable`: `guard var name = …` — the binding is a `var` for the rest
+    ///   of the block.
+    /// - `shorthand`: `guard let name else …` — the scrutinee is the binding
+    ///   `name` itself (the parser fills `scrutinee` with that identifier).
+    /// - `fail`: `else err(e) => …` / `else none => …` — the failure arm's
+    ///   pattern. `err(e)` binds the Result's error in `else_`; it is only ever
+    ///   `Pattern::None` or `Pattern::Err` over an `Ident` / `Wildcard` (the
+    ///   parser refuses every other shape, keeping the written pattern only
+    ///   beside that parse error). `None` is the plain `else expr`.
+    GuardLet {
+        name: Sym,
+        scrutinee: Expr,
+        else_: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")] mutable: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")] shorthand: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")] fail: Option<Pattern>,
+        #[serde(skip)] span: Option<Span>,
+    },
     Expr { expr: Expr, #[serde(skip)] span: Option<Span> },
     Comment { text: String },
     /// Placeholder for a parse error — allows partial AST construction.
@@ -441,6 +460,14 @@ pub struct ExternAttr {
 pub struct ExportAttr {
     pub target: Sym,     // "c"
     pub symbol: Sym,     // e.g., "bridge_add"
+    /// `returns: address` (#4519): an `@export(wasm, "sym", returns: address)`
+    /// fn returning a Region crosses as the view's data address alone, one
+    /// value in the memory's address width, instead of A1's `(ptr, len)`
+    /// pair. Every other A1 rule holds (the host's share, the address table,
+    /// `__region_release`, an empty Region is 0, an `err` traps). Only a
+    /// wasm export returning a Region takes it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub returns_address: bool,
 }
 
 /// Generic `@name(args)` attribute on a declaration.
@@ -666,6 +693,14 @@ pub struct Program {
     /// the node already carries, nothing downstream has to know this exists.
     #[serde(skip)]
     pub expr_comments: std::collections::HashMap<ExprId, ExprComments>,
+    /// #4531: the `??` operators whose grouping changed at dialect 16 —
+    /// each one read differently under the pre-16 grammar, so a file written
+    /// for it would silently change meaning. Filled by the parser for a file
+    /// not stamped `@dialect(16)` or later (`parser::regroup`); the checker
+    /// refuses each site with E120 and `almide fix` adds the parentheses that
+    /// keep the old reading.
+    #[serde(skip)]
+    pub regrouped: Vec<Span>,
 }
 
 impl Program {
@@ -676,7 +711,7 @@ impl Program {
     pub fn clone_retaining(&self, keep: impl Fn(&Decl) -> bool) -> Program {
         let Program {
             dialect, module, imports, decls, comment_map, doc_map, blank_lines_map, failed_fn_names,
-            parse_recovered, expr_comments,
+            parse_recovered, expr_comments, regrouped,
         } = self;
         Program {
             dialect: *dialect,
@@ -689,6 +724,7 @@ impl Program {
             failed_fn_names: failed_fn_names.clone(),
             parse_recovered: *parse_recovered,
             expr_comments: expr_comments.clone(),
+            regrouped: regrouped.clone(),
         }
     }
 }

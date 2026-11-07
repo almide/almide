@@ -222,7 +222,7 @@ for f in "$COVDIR/hello.almd" spec/wasm_cross/http_response_headers.almd \
     c=$((c+1))
 done
 echo "  component emit (p2 + p3 shims): $c fixture(s)"
-# `almide survive` / `apply --if-survives` (#2147) are reached only through
+# `almide apply --dry-run` / `apply --if-survives` (#2147) are reached only through
 # their own subcommands, which no spec test drives; their golden-delta
 # fixtures (tests/survive/, pinned by tests/survive_test.rs) are the workload.
 # Each run gets a scratch copy — `apply` writes. The legs are child `almide`
@@ -234,12 +234,12 @@ for spec_ in breaks_test:calc.almd:edit.patch breaks_diagnostic:sum.almd:edit.pa
     [ -d "tests/survive/$case_" ] || continue
     d_="$COVDIR/survive-$case_"
     rm -rf "$d_"; cp -R "tests/survive/$case_" "$d_"
-    ( cd "$d_" && LLVM_PROFILE_FILE="$COVDIR/cli-%m-%p.profraw" "$CLI" survive "$file_" --with "$edit_" --json >/dev/null 2>&1 || true
-      LLVM_PROFILE_FILE="$COVDIR/cli-%m-%p.profraw" "$CLI" survive "$file_" --with "$edit_" >/dev/null 2>&1 || true
+    ( cd "$d_" && LLVM_PROFILE_FILE="$COVDIR/cli-%m-%p.profraw" "$CLI" apply "$file_" --with "$edit_" --dry-run --json >/dev/null 2>&1 || true
+      LLVM_PROFILE_FILE="$COVDIR/cli-%m-%p.profraw" "$CLI" apply "$file_" --with "$edit_" --dry-run >/dev/null 2>&1 || true
       LLVM_PROFILE_FILE="$COVDIR/cli-%m-%p.profraw" "$CLI" apply "$file_" --with "$edit_" --if-survives --json >/dev/null 2>&1 || true )
     s=$((s+1))
 done
-echo "  survive / apply golden deltas: $s case(s)"
+echo "  apply --dry-run / --if-survives golden deltas: $s case(s)"
 
 echo "== 4/4 merge + report (compiler crate lines) =="
 nprof="$(ls "$COVDIR"/*.profraw 2>/dev/null | wc -l | tr -d ' ')"

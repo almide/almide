@@ -1,0 +1,3 @@
+expects_code = "E001"
+expects_error = "needs `n` to be an Option or Result, found `Int`"
+hint_substring = "the shorthand rebinds `n`"

@@ -25,8 +25,8 @@ successful parity run. See [the scope](../design/EQUIVALENCE.md).
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](../contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> <!-- counts:generated:start (as of 2026-11-02) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-> **Ledger: 448 contracts — 448 active, 0 flagged-for-revision.**
+> <!-- counts:generated:start (as of 2026-11-05) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+> **Ledger: 452 contracts — 452 active, 0 flagged-for-revision.**
 > <!-- counts:generated:end -->
 >
 > **Contracts flagged for revision: none.** Every contract is marked
@@ -53,7 +53,7 @@ Scope, ledger mechanics, and the evidence stack (contract ledger, cross-target f
 You write no ownership annotations, lifetimes, or `free`: the compiler places
 Perceus-style ownership operations. The Rocq/Coq checkers prove modeled witness
 properties, not complete artifact memory safety or semantic correctness.
-The proof spine has 138 audited theorems; `proofs/check.sh` checks this count
+The proof spine has 152 audited theorems; `proofs/check.sh` checks this count
 against its `Print Assumptions` audits and independently rechecks the spine.
 `almide verify <file.almd> --emit <bundle>` now records the structural Wasm
 bundle; the independent `almide-verify` checks it. Supported **core artifacts**
@@ -137,11 +137,11 @@ Embedded wasm host (Perceus RC in linear memory) against the native binary, same
 The stamped totals behind the [project status](../status.md), and the mutation score of the gate net.
 
 <!-- stats:generated:start — derived from docs/stdlib/*.md, spec/, and docs/contracts/contracts.toml by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-<!-- counts:generated:start (as of 2026-11-02) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+<!-- counts:generated:start (as of 2026-11-05) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 | Derived count | Value |
 |---|---|
 | Stdlib | 1324 functions across 51 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 581 `.almd` test files under `spec/` (`almide test spec/`) + the 448-contract cross-target ledger |
+| Tests | 583 `.almd` test files under `spec/` (`almide test spec/`) + the 452-contract cross-target ledger |
 <!-- counts:generated:end -->
 <!-- stats:generated:end -->
 

@@ -244,6 +244,75 @@ pub fn resolve_cached_deps(project: &Project) -> Result<Vec<FetchedDep>, String>
     fetch_all_deps(project)
 }
 
+/// A cross-process exclusive lock on one cache entry (#4529): the file
+/// `.<leaf>.lock` beside the entry `dir`, held with `flock(LOCK_EX)` /
+/// `LockFileEx` (fs2, as `BuildDirLock` does for build dirs). Each acquire
+/// opens its own file handle, so threads of one process exclude each other
+/// as well as separate `almide` processes sharing `~/.almide`. The OS drops
+/// the lock when the holder exits, so a killed fetch never wedges the next.
+///
+/// The lock file is never deleted: unlinking it while another caller waits
+/// on it would let a third caller lock a new file of the same name.
+struct CacheEntryLock {
+    #[cfg(any(unix, windows))]
+    _file: std::fs::File,
+}
+
+impl CacheEntryLock {
+    fn acquire(dir: &Path) -> Result<CacheEntryLock, String> {
+        let parent = dir.parent().ok_or_else(|| "cache dir has no parent".to_string())?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create cache dir: {}", e))?;
+        #[cfg(any(unix, windows))]
+        {
+            use fs2::FileExt;
+            let leaf = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let lock_path = parent.join(format!(".{leaf}.lock"));
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(false)
+                .open(&lock_path)
+                .map_err(|e| format!("Failed to open cache lock {}: {}", lock_path.display(), e))?;
+            file.lock_exclusive()
+                .map_err(|e| format!("Failed to lock {}: {}", lock_path.display(), e))?;
+            Ok(CacheEntryLock { _file: file })
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Ok(CacheEntryLock {})
+        }
+    }
+}
+
+static CACHE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A fresh sibling name for `dir`: `.<leaf>.<what>-<pid>-<seq>`.
+fn cache_sibling(dir: &Path, what: &str) -> Result<PathBuf, String> {
+    let parent = dir.parent().ok_or_else(|| "cache dir has no parent".to_string())?;
+    let leaf = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let seq = CACHE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Ok(parent.join(format!(".{}.{}-{}-{}", leaf, what, std::process::id(), seq)))
+}
+
+/// Remove cache entry `dir` under its [`CacheEntryLock`] (#4529): renamed
+/// aside first, so no fetch holding the lock ever sees it half-deleted, and
+/// the path is either the whole old checkout or absent.
+fn remove_cache_dir(dir: &Path) -> Result<(), String> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    let _lock = CacheEntryLock::acquire(dir)?;
+    let aside = cache_sibling(dir, "old")?;
+    match std::fs::rename(dir, &aside) {
+        Ok(()) => {
+            let _ = std::fs::remove_dir_all(&aside);
+            Ok(())
+        }
+        Err(_) if !dir.exists() => Ok(()),
+        Err(e) => Err(format!("Failed to remove stale cache entry {}: {}", dir.display(), e)),
+    }
+}
+
 /// Populate cache dir `dir` atomically: run `clone` against a fresh sibling
 /// temp dir, then rename it into place. Callers may race — `almide test`
 /// compiles test files on parallel threads and every thread resolves deps,
@@ -251,8 +320,14 @@ pub fn resolve_cached_deps(project: &Project) -> Result<Vec<FetchedDep>, String>
 /// "`dir.exists()` then clone into `dir`" let several clones write into the
 /// same directory (`fatal: cannot copy ... File exists`) and left a
 /// half-populated dir that later runs took for a finished cache. With the
-/// rename, `dir` exists only when it is complete; the first rename wins and
-/// the losers discard their own copy.
+/// rename, `dir` exists only when it is complete.
+///
+/// The check → clone → rename runs under the entry's [`CacheEntryLock`]
+/// (#4529), so ONE caller clones and the others wait for it and reuse its
+/// checkout: N simultaneous clones of one repository were what invited the
+/// remote to turn some of them away. A caller whose clone failed still
+/// succeeds when the entry is there after all (another process without the
+/// lock — an older almide — filled it).
 fn populate_cache_dir(dir: &Path, clone: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
     if dir.exists() {
         return Ok(());
@@ -263,16 +338,18 @@ fn populate_cache_dir(dir: &Path, clone: impl FnOnce(&Path) -> Result<(), String
             dir.display()
         ));
     }
-    let parent = dir.parent().ok_or_else(|| "cache dir has no parent".to_string())?;
-    std::fs::create_dir_all(parent)
-        .map_err(|e| format!("Failed to create cache dir: {}", e))?;
-    let leaf = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = parent.join(format!(".{}.tmp-{}-{}", leaf, std::process::id(), seq));
+    let _lock = CacheEntryLock::acquire(dir)?;
+    if dir.exists() {
+        // Another caller cloned it while this one waited for the lock.
+        return Ok(());
+    }
+    let tmp = cache_sibling(dir, "tmp")?;
     let _ = std::fs::remove_dir_all(&tmp);
     if let Err(e) = clone(&tmp) {
         let _ = std::fs::remove_dir_all(&tmp);
+        if dir.exists() {
+            return Ok(());
+        }
         return Err(e);
     }
     match std::fs::rename(&tmp, dir) {
@@ -289,25 +366,54 @@ fn populate_cache_dir(dir: &Path, clone: impl FnOnce(&Path) -> Result<(), String
     }
 }
 
-/// `fetch_dep_with_lock`'s locked-commit path: clone into a commit-keyed
-/// cache dir and checkout the exact commit.
-fn fetch_dep_at_commit(dep: &Dependency, commit: &str) -> Result<PathBuf, String> {
+/// How [`fetch_dep_at_commit`] clones a commit it does not have yet.
+#[derive(Clone, Copy)]
+enum CloneHow<'a> {
+    /// A lock pinned the commit: the whole history, then check it out.
+    Locked,
+    /// `git ls-remote` just named the commit as the head of a floating ref
+    /// (`Some(branch)`, or the remote's default branch): a depth-1 clone of
+    /// that ref, kept when its HEAD is the commit (the ref may have moved in
+    /// between, and then the full clone runs).
+    Head(Option<&'a str>),
+}
+
+/// `fetch_dep_with_lock`'s commit path: clone into a commit-keyed cache dir
+/// and checkout the exact commit — for a commit a lock pins, and for the
+/// commit a floating ref resolved to on its remote (#4527).
+fn fetch_dep_at_commit(dep: &Dependency, commit: &str, how: CloneHow) -> Result<PathBuf, String> {
     let dir = dep_cache_root(dep).join(&commit[..12.min(commit.len())]);
     if dir.exists() {
         return Ok(dir);
     }
     // The checkout this run (or an earlier one) made at the dependency's own
-    // ref, when it sits at exactly the locked commit: the lock is written right
-    // after that fetch, so a second resolution in the same command (check's
-    // whole-program pass) would otherwise clone the same commit again.
-    if let Some(ref_name) = dep.tag.as_deref().or(dep.branch.as_deref()) {
-        let at_ref = dep_cache_root(dep).join(ref_name);
-        if at_ref.exists() && git_head_hash(&at_ref).ok().as_deref() == Some(commit) {
-            return Ok(at_ref);
-        }
+    // ref, when it sits at exactly the commit: a tag's checkout is ref-keyed
+    // and the lock is written right after that fetch, so a second resolution
+    // in the same command (check's whole-program pass) would otherwise clone
+    // the same commit again. A ref-keyed branch checkout an older almide left
+    // is reused only at the exact commit, so its age does not matter.
+    let at_ref = dep_cache_root(dep).join(dep_ref_name(dep));
+    if at_ref.exists() && git_head_hash(&at_ref).ok().as_deref() == Some(commit) {
+        return Ok(at_ref);
     }
-    err(&format!("Fetching {} from {} (locked: {})", dep.name, dep.git, &commit[..8.min(commit.len())]));
+    let short = &commit[..12.min(commit.len())];
     populate_cache_dir(&dir, |tmp| {
+        match how {
+            CloneHow::Locked => err(&format!("Fetching {} from {} (locked: {})", dep.name, dep.git, &commit[..8.min(commit.len())])),
+            CloneHow::Head(_) => err(&format!("Fetching {} from {} ({} → {short})", dep.name, dep.git, dep_ref_name(dep))),
+        }
+        if let CloneHow::Head(branch) = how {
+            let mut cmd = Command::new("git");
+            cmd.arg("clone").arg("--depth").arg("1");
+            if let Some(b) = branch {
+                cmd.arg("--branch").arg(b);
+            }
+            let shallow = cmd.arg(&dep.git).arg(tmp).env("GIT_TERMINAL_PROMPT", "0").output();
+            if shallow.is_ok_and(|o| o.status.success()) && git_head_hash(tmp).ok().as_deref() == Some(commit) {
+                return Ok(());
+            }
+            let _ = std::fs::remove_dir_all(tmp);
+        }
         let output = Command::new("git")
             .arg("clone").arg(&dep.git).arg(tmp)
             .output()
@@ -328,18 +434,19 @@ fn fetch_dep_at_commit(dep: &Dependency, commit: &str) -> Result<PathBuf, String
     Ok(dir)
 }
 
-/// `fetch_dep_with_lock`'s ref-based path (tag/branch, no lock pin): clone
-/// into a ref-keyed cache dir.
-fn fetch_dep_at_ref(dep: &Dependency, ref_name: &str) -> Result<PathBuf, String> {
+/// `fetch_dep_with_lock`'s ref-keyed path: clone into a ref-keyed cache dir,
+/// or reuse it. Correct for a TAG, which never moves. A floating ref goes
+/// through here only in cache-only mode ([`offline`]), which reads what is
+/// on disk by definition.
+fn fetch_dep_at_ref(dep: &Dependency, ref_name: &str, chain: &[String]) -> Result<PathBuf, String> {
     let dep_dir = dep_cache_root(dep).join(ref_name);
 
     if dep_dir.exists() {
         return Ok(dep_dir);
     }
 
-    err(&format!("Fetching {} from {} ({})", dep.name, dep.git, ref_name));
-
     populate_cache_dir(&dep_dir, |tmp| {
+        err(&format!("Fetching {} from {} ({})", dep.name, dep.git, ref_name));
         let mut cmd = Command::new("git");
         cmd.arg("clone")
             .arg("--depth").arg("1")
@@ -357,6 +464,14 @@ fn fetch_dep_at_ref(dep: &Dependency, ref_name: &str) -> Result<PathBuf, String>
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            // #4528: a ref the remote does not have is named as such, with
+            // the chain that asked for it and the tags that do exist — not
+            // left as git's "Remote branch … not found".
+            if let Ok(refs) = remote_refs(&dep.git) {
+                if !refs.has(ref_name) {
+                    return Err(missing_ref_error(dep, ref_name, chain, &refs));
+                }
+            }
             return Err(format!("Failed to fetch {}: {}", dep.name, stderr));
         }
         Ok(())
@@ -367,19 +482,235 @@ fn fetch_dep_at_ref(dep: &Dependency, ref_name: &str) -> Result<PathBuf, String>
 
 /// Fetch a dependency, optionally pinned to a locked commit hash.
 pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Result<PathBuf, String> {
+    fetch_dep_in_chain(dep, locked_commit, std::slice::from_ref(&dep.name)).map(|f| f.dir)
+}
+
+/// What [`fetch_dep_in_chain`] produced: the package directory, and whether
+/// its commit may be written to `almide.lock`.
+struct Fetched {
+    dir: PathBuf,
+    /// False when a floating ref could not be resolved on its remote and the
+    /// cached checkout was used instead: the lock must not turn that
+    /// fallback into a pin (#4527), so the next build that reaches the
+    /// remote resolves the ref again.
+    lockable: bool,
+}
+
+/// [`fetch_dep_with_lock`], told the chain of dependency names from the root
+/// that requires `dep` (for the error a missing ref gets, #4528).
+///
+/// Without a lock pin, a tag is fetched (or reused) by its name. A FLOATING
+/// ref — a branch, or no ref at all (the remote's default branch) — is
+/// resolved on its remote first (`git ls-remote`) and that commit is fetched
+/// into its commit-keyed dir (#4527). The ref-keyed checkout of a branch is a
+/// snapshot of whenever it was first cloned, so reusing it re-locked an old
+/// commit after `almide.lock` was deleted. Cache-only mode ([`offline`])
+/// still reads the cache and never asks the remote.
+fn fetch_dep_in_chain(dep: &Dependency, locked_commit: Option<&str>, chain: &[String]) -> Result<Fetched, String> {
     // Path dependency: use local directory directly, no fetch needed.
     if let Some(ref path) = dep.path {
         let p = PathBuf::from(path);
-        if p.exists() { return Ok(p); }
+        if p.exists() { return Ok(Fetched { dir: p, lockable: true }); }
         return Err(format!("path dependency '{}' not found: {}", dep.name, path));
     }
 
-    // If locked to a specific commit, use commit-based cache dir
-    let checkout = match locked_commit {
-        Some(commit) => fetch_dep_at_commit(dep, commit)?,
-        None => fetch_dep_at_ref(dep, dep_ref_name(dep))?,
+    let mut lockable = true;
+    let checkout = match (locked_commit, dep.tag.is_some() || offline()) {
+        (Some(commit), _) => fetch_dep_at_commit(dep, commit, CloneHow::Locked)?,
+        (None, true) => fetch_dep_at_ref(dep, dep_ref_name(dep), chain)?,
+        (None, false) => {
+            let branch = dep.branch.as_deref();
+            match remote_head_once(&dep.git, branch) {
+                Ok(Some(commit)) => {
+                    let dir = fetch_dep_at_commit(dep, &commit, CloneHow::Head(branch))?;
+                    // Best effort: which commit the ref was last seen at,
+                    // for the unreachable-remote fallback below.
+                    let _ = std::fs::write(last_head_file(dep), commit);
+                    dir
+                }
+                Ok(None) => {
+                    let refs = remote_refs(&dep.git).unwrap_or_default();
+                    return Err(missing_ref_error(dep, dep_ref_name(dep), chain, &refs));
+                }
+                Err(why) => {
+                    lockable = false;
+                    stale_cache_fallback(dep, chain, &why)?
+                }
+            }
+        }
     };
-    package_dir_in(dep, &checkout)
+    Ok(Fetched { dir: package_dir_in(dep, &checkout)?, lockable })
+}
+
+/// A floating ref whose remote could not be asked (#4527): the cached
+/// checkout of that ref, with a warning naming the commit it holds — the
+/// same answer a cache-only resolve gives, said out loud — or, when nothing
+/// is cached, an error naming the dependency and the way out.
+fn stale_cache_fallback(dep: &Dependency, chain: &[String], why: &str) -> Result<PathBuf, String> {
+    let ref_name = dep_ref_name(dep);
+    let root = dep_cache_root(dep);
+    let via = chain_text(chain);
+    // The commit-keyed checkout the ref was last resolved to, else the
+    // ref-keyed checkout an older almide made.
+    let last = std::fs::read_to_string(last_head_file(dep))
+        .ok()
+        .map(|c| c.trim().chars().take(12).collect::<String>())
+        .filter(|c| !c.is_empty())
+        .map(|c| root.join(c))
+        .filter(|d| d.is_dir())
+        .or_else(|| Some(root.join(ref_name)).filter(|d| d.is_dir()));
+    match last.and_then(|d| git_head_hash(&d).ok().map(|c| (d, c))) {
+        Some((cached, commit)) => {
+            err(&format!(
+                "warning: could not reach {} to resolve {ref_name} of dependency `{}`{via}; \
+                 using the cached checkout at {} (it may be behind the remote), and not locking it\n  \
+                 git: {why}\n  \
+                 hint: once the remote is reachable, the next build resolves {ref_name} again",
+                dep.git, dep.name, &commit[..12.min(commit.len())]
+            ));
+            Ok(cached)
+        }
+        None => Err(format!(
+            "{}error: could not reach {} to resolve {ref_name} of dependency `{}`{via}, and it is not in the cache\n  \
+             git: {why}\n  \
+             hint: connect to the network and run the command again, or pin the dependency with an `almide.lock` entry or a `tag`",
+            dep.location_prefix(), dep.git, dep.name
+        )),
+    }
+}
+
+/// Where a floating ref's last remote resolution is recorded:
+/// `.<ref>.head` beside its ref-keyed dir, holding the commit.
+fn last_head_file(dep: &Dependency) -> PathBuf {
+    let at_ref = dep_cache_root(dep).join(dep_ref_name(dep));
+    let leaf = at_ref.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    at_ref.with_file_name(format!(".{leaf}.head"))
+}
+
+/// ` (required by root → a → b)` for a chain of more than the dependency
+/// itself, else nothing.
+fn chain_text(chain: &[String]) -> String {
+    if chain.len() > 1 { format!(" (required by {})", chain.join(" → ")) } else { String::new() }
+}
+
+/// The refs a remote has, from one `git ls-remote --heads --tags`.
+#[derive(Debug, Default)]
+pub struct RemoteRefs {
+    pub heads: Vec<String>,
+    pub tags: Vec<String>,
+}
+
+impl RemoteRefs {
+    /// Whether `name` is a tag or a branch of the remote — what
+    /// `git clone --branch <name>` accepts.
+    pub fn has(&self, name: &str) -> bool {
+        self.tags.iter().chain(self.heads.iter()).any(|r| r == name)
+    }
+
+    /// The newest `n` tags, newest first (version order, `v` ignored; a tag
+    /// that is no version sorts below every version, by name).
+    pub fn newest_tags(&self, n: usize) -> Vec<String> {
+        let key = |t: &String| semver::Version::parse(t.trim_start_matches('v')).ok();
+        let mut tags = self.tags.clone();
+        tags.sort_by(|a, b| key(b).cmp(&key(a)).then_with(|| b.cmp(a)));
+        tags.truncate(n);
+        tags
+    }
+
+    fn parse(listing: &str) -> RemoteRefs {
+        let mut refs = RemoteRefs::default();
+        for name in listing.lines().filter_map(|l| l.split_whitespace().nth(1)) {
+            if let Some(t) = name.strip_prefix("refs/tags/") {
+                let t = t.trim_end_matches("^{}").to_string();
+                if !refs.tags.contains(&t) {
+                    refs.tags.push(t);
+                }
+            } else if let Some(h) = name.strip_prefix("refs/heads/") {
+                refs.heads.push(h.to_string());
+            }
+        }
+        refs
+    }
+}
+
+/// `git ls-remote --heads --tags <url>`, with git's terminal prompts off.
+pub fn remote_refs(url: &str) -> Result<RemoteRefs, String> {
+    let out = Command::new("git")
+        .args(["ls-remote", "--heads", "--tags", url])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(RemoteRefs::parse(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// The error for a dependency ref its remote does not have (#4528): which
+/// dependency, which ref, the chain that requires it, and the newest tags
+/// the remote does have.
+pub fn missing_ref_error(dep: &Dependency, ref_name: &str, chain: &[String], refs: &RemoteRefs) -> String {
+    let kind = match (&dep.tag, &dep.branch) {
+        (Some(_), _) => "tag",
+        (None, Some(_)) => "branch",
+        (None, None) => "its default branch",
+    };
+    let asked = match kind {
+        "its default branch" => "its default branch".to_string(),
+        k => format!("{k} {ref_name}"),
+    };
+    let tags = refs.newest_tags(5);
+    let hint = match tags.is_empty() {
+        true => format!("hint: {} has no tags; check the ref in the manifest, or push it first", dep.git),
+        false => format!(
+            "hint: the newest tags are {}{} — name one of them, or push {ref_name} first",
+            tags.join(", "),
+            if refs.tags.len() > tags.len() { ", …" } else { "" }
+        ),
+    };
+    format!(
+        "{}error: dependency `{}`{} asks for {asked}, which {} does not have\n  {hint}",
+        dep.location_prefix(), dep.name, chain_text(chain), dep.git
+    )
+}
+
+/// The current commit of a floating ref on its remote — `branch`, or the
+/// default branch (`HEAD`, what `git clone` without `--branch` checks out)
+/// — asked once per process (#4527). `almide test` resolves the
+/// dependencies on every worker thread; the memo keeps that to one
+/// `ls-remote` per ref and makes every thread build the same commit even if
+/// the branch moves mid-run. `Ok(None)`: the remote answered and has no
+/// such ref.
+fn remote_head_once(url: &str, branch: Option<&str>) -> Result<Option<String>, String> {
+    type Memo = std::collections::HashMap<(String, Option<String>), Result<Option<String>, String>>;
+    static MEMO: std::sync::OnceLock<std::sync::Mutex<Memo>> = std::sync::OnceLock::new();
+    let mut memo = MEMO.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner());
+    let key = (url.to_string(), branch.map(str::to_string));
+    if let Some(hit) = memo.get(&key) {
+        return hit.clone();
+    }
+    let answer = remote_head(url, branch);
+    memo.insert(key, answer.clone());
+    answer
+}
+
+/// One `git ls-remote <url> <ref>` for [`remote_head_once`]: the line whose
+/// ref is exactly `refs/heads/<branch>` (or `HEAD`).
+fn remote_head(url: &str, branch: Option<&str>) -> Result<Option<String>, String> {
+    let want = branch.map(|b| format!("refs/heads/{b}")).unwrap_or_else(|| "HEAD".to_string());
+    let out = Command::new("git")
+        .args(["ls-remote", url, &want])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.split_once(char::is_whitespace))
+        .find(|(_, r)| r.trim() == want)
+        .map(|(sha, _)| sha.to_string()))
 }
 
 /// One fetch the walk made: the request as the lock would name it, the
@@ -508,6 +839,7 @@ pub fn fetch_all_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
     }
 
     let mut walk = Walk {
+        root: &project.package.name,
         locked: &locked,
         trusted: &project.trust_owners,
         fetched: Vec::new(),
@@ -635,6 +967,9 @@ fn semver_of(v: &str) -> semver::Version {
 /// The dependency walk's state: the lock, the root's `[trust] owners`, and
 /// what the walk has fetched so far.
 struct Walk<'a> {
+    /// The root package's name: the first link of the chain a fetch error
+    /// names (#4528).
+    root: &'a str,
     locked: &'a [LockedDep],
     /// The ROOT manifest's `[trust] owners` (#4093). A dependency's own
     /// `[trust]` is never consulted.
@@ -674,7 +1009,7 @@ impl Walk<'_> {
 
 fn fetch_one_dep_recursive(dep: &Dependency, walk: &mut Walk, chain: &[String]) -> Result<(), String> {
     let locked = walk.locked;
-    let (fetched, visited, resolved) = (&mut walk.fetched, &mut walk.visited, &mut walk.resolved);
+    let (fetched, visited) = (&walk.fetched, &mut walk.visited);
     let version_str = resolve_dep_version(dep);
     let pkg_id = PkgId::from_version_str(&dep.name, &version_str);
 
@@ -749,14 +1084,16 @@ fn fetch_one_dep_recursive(dep: &Dependency, walk: &mut Walk, chain: &[String]) 
     let locked_commit = locked.iter()
         .find(|l| l.git == dep.git && l.ref_name == want_ref)
         .map(|l| l.commit.as_str());
-    let path = fetch_dep_with_lock(dep, locked_commit)?;
+    let shown: Vec<String> = std::iter::once(walk.root.to_string()).chain(chain.iter().cloned()).collect();
+    let Fetched { dir: path, lockable } = fetch_dep_in_chain(dep, locked_commit, &shown)?;
+    let (fetched, resolved) = (&mut walk.fetched, &mut walk.resolved);
 
     // Record what THIS dependency resolved to, here, where the manifest entry
     // and the checkout it produced are both in hand. Pairing them later — from
     // the flattened graph, by position or by a reconstructed key — is what
     // #2529 was. A dependency with no git metadata (a path dependency) records
     // nothing and is simply absent from the lock, as it was before.
-    let git_commit = git_head_hash(&path).ok();
+    let git_commit = git_head_hash(&path).ok().filter(|_| lockable);
 
     let (module_name, source_dir, transitive_deps) = resolve_fetched_dep_manifest(&path, &dep.name);
 
@@ -962,17 +1299,27 @@ pub fn update_locked_deps(project: &Project, only: Option<&str>) -> Result<Vec<(
             err(&format!("{} is pinned to tag {} — not updated", dep.name, ref_name));
             continue;
         }
-        let head = git_remote_head(&dep.git, ref_name)?;
+        // The ref the build follows: the branch, or the remote's default
+        // branch when the manifest names none (what the clone checks out).
+        let head = match remote_head(&dep.git, dep.branch.as_deref()) {
+            Ok(Some(head)) => head,
+            Ok(None) => {
+                let chain = [project.package.name.clone(), dep.name.clone()];
+                return Err(missing_ref_error(dep, ref_name, &chain, &remote_refs(&dep.git).unwrap_or_default()));
+            }
+            Err(e) => return Err(format!("git ls-remote {} {} failed: {}", dep.git, ref_name, e)),
+        };
         let before = locked.iter().find(|l| l.name == dep.name).map(|l| l.commit.clone());
         if before.as_deref() == Some(head.as_str()) {
             err(&format!("{} already at {} ({})", dep.name, &head[..head.len().min(12)], ref_name));
             continue;
         }
-        // Drop the stale cache dir so the next fetch re-clones at the new
-        // head — under THIS dependency's source key, so advancing one project's
-        // branch cannot evict a same-named package fetched from elsewhere.
-        let cached = dep_cache_root(dep).join(ref_name);
-        let _ = std::fs::remove_dir_all(&cached);
+        // Drop the stale ref-keyed checkout (the next fetch takes the new
+        // head's commit-keyed one) — under THIS dependency's source key, so
+        // advancing one project's branch cannot evict a same-named package
+        // fetched from elsewhere — and under the entry's lock, so a
+        // concurrent fetch never sees it half-deleted (#4529).
+        remove_cache_dir(&dep_cache_root(dep).join(ref_name))?;
         match locked.iter_mut().find(|l| l.name == dep.name) {
             Some(entry) => {
                 entry.git = dep.git.clone();
@@ -1015,18 +1362,19 @@ pub enum ProbeFailure {
     Unreachable(String),
 }
 
-/// Does the repository at `url` exist? One `git ls-remote`, no clone, with
-/// git's terminal prompts off: GitHub answers a missing repository with an
-/// authentication request, which an interactive git would turn into a
-/// password prompt (#4093).
-pub fn probe_source(url: &str) -> Result<(), ProbeFailure> {
+/// Does the repository at `url` exist, and which refs does it have? One
+/// `git ls-remote`, no clone, with git's terminal prompts off: GitHub
+/// answers a missing repository with an authentication request, which an
+/// interactive git would turn into a password prompt (#4093). The listing
+/// lets `almide add` refuse a tag the repository does not have (#4528).
+pub fn probe_source(url: &str) -> Result<RemoteRefs, ProbeFailure> {
     let out = Command::new("git")
         .args(["ls-remote", "--heads", "--tags", url])
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .map_err(|e| ProbeFailure::Unreachable(format!("failed to run git: {e}")))?;
     if out.status.success() {
-        return Ok(());
+        return Ok(RemoteRefs::parse(&String::from_utf8_lossy(&out.stdout)));
     }
     let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
     let lower = stderr.to_ascii_lowercase();
@@ -1302,7 +1650,7 @@ mod tests {
         assert!(dir.join("marker").is_file());
         let leftovers: Vec<_> = std::fs::read_dir(dir.parent().unwrap()).unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .filter(|n| n != "abcdef123456")
+            .filter(|n| n != "abcdef123456" && n != ".abcdef123456.lock")
             .collect();
         assert!(leftovers.is_empty(), "leftover temp dirs: {:?}", leftovers);
         let _ = std::fs::remove_dir_all(&root);
@@ -1319,7 +1667,92 @@ mod tests {
         });
         assert_eq!(r, Err("boom".to_string()));
         assert!(!dir.exists());
-        assert!(std::fs::read_dir(dir.parent().unwrap()).unwrap().next().is_none());
+        // Only the entry's lock file is left (it is never deleted, see
+        // `CacheEntryLock`); no temp dir.
+        let left: Vec<String> = std::fs::read_dir(dir.parent().unwrap()).unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, vec![".deadbeef0000.lock".to_string()]);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// #4529: callers racing on one cache entry run ONE clone; the others
+    /// wait for it under the entry's lock and reuse its checkout. Without
+    /// the lock every caller cloned, which is what invited the remote to
+    /// turn some of them away.
+    #[test]
+    fn concurrent_callers_of_one_entry_clone_once() {
+        let root = std::env::temp_dir().join(format!("almide-populate-once-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("dep").join("0123456789ab");
+        let clones = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let handles: Vec<_> = (0..8).map(|_| {
+            let (dir, clones) = (dir.clone(), clones.clone());
+            std::thread::spawn(move || {
+                populate_cache_dir(&dir, |tmp| {
+                    clones.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    std::fs::create_dir_all(tmp).map_err(|e| e.to_string())?;
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    std::fs::write(tmp.join("marker"), "x").map_err(|e| e.to_string())
+                })
+            })
+        }).collect();
+        for h in handles {
+            h.join().unwrap().unwrap();
+        }
+        assert!(dir.join("marker").is_file());
+        assert_eq!(clones.load(std::sync::atomic::Ordering::SeqCst), 1, "every racing caller cloned");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// #4529: a caller whose clone failed, but which finds the entry filled
+    /// by then (by a process that does not take the lock), succeeds instead
+    /// of failing the whole command.
+    #[test]
+    fn a_failed_clone_succeeds_when_the_entry_was_filled_meanwhile() {
+        let root = std::env::temp_dir().join(format!("almide-populate-filled-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("dep").join("feedface0000");
+        let r = populate_cache_dir(&dir, |tmp| {
+            // A sibling (no lock: an older almide) renames its finished
+            // clone into place while ours is failing.
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            std::fs::write(dir.join("marker"), "sibling").map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(tmp).map_err(|e| e.to_string())?;
+            Err("early EOF".to_string())
+        });
+        assert_eq!(r, Ok(()));
+        assert!(dir.join("marker").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// #4529: `update`'s removal of a ref-keyed checkout waits for the
+    /// entry's lock, so it cannot delete a checkout a fetch is populating.
+    #[test]
+    fn removing_an_entry_waits_for_its_lock() {
+        let root = std::env::temp_dir().join(format!("almide-remove-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("dep").join("main");
+        std::fs::create_dir_all(&dir).unwrap();
+        let held = CacheEntryLock::acquire(&dir).unwrap();
+        let remover = {
+            let dir = dir.clone();
+            std::thread::spawn(move || remove_cache_dir(&dir))
+        };
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(dir.exists(), "the checkout was removed while its lock was held");
+        drop(held);
+        remover.join().unwrap().unwrap();
+        assert!(!dir.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remote_refs_parse_and_order_tags_newest_first() {
+        let listing = "a1\trefs/heads/main\nb2\trefs/tags/v0.1.0\nc3\trefs/tags/v0.10.0\nc4\trefs/tags/v0.10.0^{}\nd4\trefs/tags/v0.2.0\ne5\trefs/tags/nightly\n";
+        let refs = RemoteRefs::parse(listing);
+        assert!(refs.has("main") && refs.has("v0.2.0") && !refs.has("v9.9.9"));
+        assert_eq!(refs.newest_tags(3), vec!["v0.10.0", "v0.2.0", "v0.1.0"]);
+        assert_eq!(refs.tags.len(), 4, "a peeled tag line is the same tag: {:?}", refs.tags);
     }
 }

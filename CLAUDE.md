@@ -177,9 +177,12 @@ almide test spec/lang/           # Run tests in a directory
 almide test spec/lang/expr_test.almd  # Run a single test file
 almide test --run "pattern"      # Filter tests by name
 almide bench app.almd            # Verify-then-time (median; --target wasm for the embedded host)
-almide compile                    # Module interface (project)
-almide compile parser             # Module interface (by name)
-almide compile app.almd --json    # Module interface (JSON)
+almide query interface           # Module interface (project)
+almide query interface parser    # Module interface (by name)
+almide query interface app.almd --json  # Module interface (JSON envelope; the interface is `.result`)
+almide query outline @stdlib/string  # One line per public decl
+almide apply app.almd --with fix.patch --dry-run  # Judge an edit (check + tests + contracts) without writing it
+almide explain E001              # Explain a diagnostic code (--list for all)
 almide check app.almd             # Type check only
 almide check app.almd --target wasm# + the wasm build route: E081/E082 at check time (#1922)
 almide check app.almd --profile critical --allow IO  # Critical profile (#567): bounded rules on every fn, capabilities deny-all
@@ -189,8 +192,10 @@ almide fmt --no-import-edit stdlib/  # Format WITHOUT touching imports (splice-c
 almide clean                     # Clear dependency cache + native build scratch (#2500)
 almide add almide/pkg@v0.1.0    # Add dependency (github.com/almide/ default)
 almide update [dep]              # Advance a locked git dep to its ref's remote head (tags never move)
+almide remove pkg                # Remove a dependency (almide.toml + almide.lock)
 almide deps                      # List dependencies
-almide dep-path bindgen          # Print cached source dir of a dependency
+almide deps --path bindgen       # Print cached source dir of a dependency
+almide repl                      # Interactive REPL (a bare `almide` prints help)
 almide app.almd --target rust    # Emit Rust source
 almide app.almd --target rust --repr-c  # Emit with #[repr(C)]
 almide app.almd --emit-ast       # Emit AST as JSON
@@ -198,7 +203,13 @@ almide app.almd --emit-ast       # Emit AST as JSON
 
 ## Test Structure
 
-`almide test` recursively finds all `.almd` files containing `test` blocks.
+`almide test` recursively finds all `.almd` files containing `test` blocks. With no
+argument inside a project (an `almide.toml` in the current directory) it walks the whole
+project root — `src/` included — skipping dot directories (`.git`, `.almide/`), `target/`,
+`node_modules/` and any directory that holds an `.almideignore` marker file. Outside a
+project it searches `spec/` and `exercises/`, and refuses when those are absent (#1928).
+This repo's root has no `almide.toml`, so a bare `almide test` here still runs `spec/`;
+`research/` and `tests/` carry `.almideignore` markers so `almide test .` skips them.
 
 - **Inline tests**: Write `test "name" { }` in any `.almd` file
 - **Test files**: Use `*_test.almd` suffix for dedicated test files (convention)

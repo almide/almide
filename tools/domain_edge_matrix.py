@@ -366,16 +366,16 @@ def build_program(sig, target_idx, value):
 # the self-host implementation helpers (`json_path_rm_index`, `list_swap_value`,
 # …) that live beside the public fns and are spliced in by name — a program
 # cannot call them, so a probe against one is E002 on both legs and was
-# counted as AGREE. The public surface is what `almide compile <module> --json`
-# lists; helpers are NAMED in the summary but are not slots. If the interface
+# counted as AGREE. The public surface is what `almide query interface <module>
+# --json` lists (its envelope's `result`); helpers are NAMED in the summary but are not slots. If the interface
 # cannot be read the walk is trusted whole and any helper surfaces as an E002
 # skip, which is the louder failure.
 def public_surface(almide, module):
     env = dict(os.environ, PATH="/opt/homebrew/bin:" + os.environ.get("PATH", ""))
     try:
-        p = subprocess.run([almide, "compile", module, "--json"], capture_output=True,
+        p = subprocess.run([almide, "query", "interface", module, "--json"], capture_output=True,
                            text=True, errors="replace", timeout=60, env=env)
-        return {f["name"] for f in json.loads(p.stdout)["functions"]} if p.returncode == 0 else None
+        return {f["name"] for f in json.loads(p.stdout)["result"]["functions"]} if p.returncode == 0 else None
     except (subprocess.TimeoutExpired, ValueError, KeyError, OSError):
         return None
 

@@ -105,3 +105,48 @@ effect fn main() -> Unit = {
         "12 12\n",
     );
 }
+
+/// A read-only byte-buffer param (#4550): the predicate inlines with the
+/// caller's own buffer substituted, reading it after the caller grew it and
+/// at the edges of the room test (the negative and past-the-end positions).
+#[test]
+fn a_byte_view_param_reads_the_callers_buffer() {
+    check(
+        "inl_byte_view",
+        r#"fn room(b: Bytes, pos: Int, w: Int) -> Bool = pos >= 0 and pos <= bytes.len(b) - w
+
+effect fn main() -> Unit = {
+  var b = bytes.zeros(4)
+  println("${room(b, 0, 4)} ${room(b, 1, 4)} ${room(b, -1, 1)}")
+  bytes.push(b, 7)
+  println("${room(b, 1, 4)} ${bytes.len(b)}")
+  bytes.put_u16_le(b, 3, 513)
+  println("${bytes.get_u16_le(b, 3) ?? -1} ${bytes.get_u16_le(b, 4) ?? -1}")
+}
+"#,
+        "true false false\ntrue 5\n513 -1\n",
+    );
+}
+
+/// A stdlib conversion's specialization inlines at a `module.fn(..)` site of
+/// the main program (#4550): `float.from[S: Numeric]` on an Int and on a
+/// sized int, inside a caller that itself inlines.
+#[test]
+fn a_portable_module_fn_inlines_across_spaces() {
+    check(
+        "inl_cross",
+        r#"fn half(i: Int) -> Float = float.from(i) * 0.5
+
+effect fn main() -> Unit = {
+  var acc = 0.0
+  for i in 0..<5 {
+    acc = acc + half(i)
+  }
+  let k: Int32 = 7
+  let n = list.len([1, 2, 3])
+  println("${acc} ${float.from(k)} ${float.from(n) + 0.25}")
+}
+"#,
+        "5 7 3.25\n",
+    );
+}

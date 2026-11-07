@@ -204,6 +204,7 @@ evidence  = [
   { path = "spec/wasm_cross/compound_repr_interp.almd", class = "fixture" },
   { path = "spec/wasm_cross/repr_parity_pin.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuzz_found_nested_interp_capture.almd", class = "fixture" },
+  { path = "spec/wasm_cross/native_list_option_fallback_float.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-009"
@@ -311,6 +312,8 @@ evidence  = [
   { path = "spec/wasm_cross/variant_record_literal_equality.almd", class = "fixture" },
   { path = "spec/wasm_cross/unique_non_flat_element.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_of_tuples_equality.almd", class = "fixture" },
+  { path = "spec/wasm_cross/equality_ops_every_equatable_element.almd", class = "fixture" },
+  { path = "spec/wasm_cross/set_from_list_every_equatable_element.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_rich_variant_key.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_guard_eq_borrows_binding.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_catchall_binder_eq.almd", class = "fixture" },
@@ -1369,6 +1372,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/protocol_ufcs_inferred_lambda.almd", class = "fixture" },
+  { path = "spec/wasm_cross/protocol_bound_method_named_like_a_record_field.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-095"
@@ -2649,6 +2653,11 @@ evidence  = [
   { path = "spec/wasm_cross/fan_worker_abort_keeps_stdout.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_all_workers_abort_one_line.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_inclusive.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_inclusive_full.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_exclusive.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_list_range.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_head_map_count_overflow.almd", class = "fixture" },
   { path = "tests/alloc_bump_wrap_test.rs", class = "fixture", name = "bump_head_wrap_is_the_defined_oom_abort" },
   { path = "tests/alloc_size_wrap_test.rs", class = "fixture", name = "alloc_length_wrap_is_the_defined_oom_abort" },
   { path = "tests/alloc_size_wrap_test.rs", class = "fixture", name = "concat_length_sum_wrap_is_the_defined_oom_abort" },
@@ -2998,6 +3007,11 @@ evidence  = [
   { path = "spec/lang/fallible_user_hof_test.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_fn_value_slot_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_slot_never_err_bang.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_slot_unit_block_tail.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_slot_pure_named_fn.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_slot_pure_fn_param.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_slot_pure_let_lambda.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_slot_effect_value_control.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-222"
@@ -3207,6 +3221,12 @@ evidence  = [
   { path = "spec/wasm_cross/range_inclusive_runtime_max.almd", class = "fixture" },
   { path = "spec/wasm_cross/range_head_fold_huge.almd", class = "fixture" },
   { path = "spec/wasm_cross/range_head_fold_edges.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_inclusive.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_inclusive_full.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_exclusive.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_count_overflow_list_range.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_head_map_count_overflow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_head_fold_count_overflow.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-239"
@@ -3228,6 +3248,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/collection_literals.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_index_string_key_shapes.almd", class = "fixture" },
+  { path = "spec/wasm_cross/native_unused_map_binding.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-241"
@@ -3422,6 +3443,9 @@ evidence  = [
   { path = "spec/wasm_cross/arg_rebinds_earlier_arg.almd", class = "fixture" },
   { path = "spec/wasm_cross/arg_call_rebinds_global.almd", class = "fixture" },
   { path = "spec/wasm_cross/let_bound_closure_scope.almd", class = "fixture" },
+  { path = "spec/wasm_cross/native_map_merge_same_binding.almd", class = "fixture" },
+  { path = "spec/wasm_cross/native_same_binding_twice_arg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/option_map_none_heap_payload_closure.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-259"
@@ -3510,6 +3534,8 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_let_statement.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_let_forms.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_let_forms_typed_err.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-267"
@@ -3822,11 +3848,15 @@ statement = "The executable distillation of the reference-compiler test mining (
 since     = "0.57.2"
 status    = "active"
 evidence  = [
+  { path = "spec/wasm_cross/call_arg_eval_order_with_drops.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_capture_escapes_frame.almd", class = "fixture" },
+  { path = "spec/wasm_cross/cons_map_rebuild_swap.almd", class = "fixture" },
   { path = "spec/wasm_cross/edge_closure_matrix.almd", class = "fixture" },
   { path = "spec/wasm_cross/edge_float_formatting.almd", class = "fixture" },
   { path = "spec/wasm_cross/edge_int_boundaries.almd", class = "fixture" },
   { path = "spec/wasm_cross/edge_map_order.almd", class = "fixture" },
   { path = "spec/wasm_cross/edge_string_unicode.almd", class = "fixture" },
+  { path = "spec/wasm_cross/generic_pick_drops_other.almd", class = "fixture" },
   { path = "spec/wasm_cross/gleam_bool_shortcircuit.almd", class = "fixture" },
   { path = "spec/wasm_cross/gleam_equality_matrix.almd", class = "fixture" },
   { path = "spec/wasm_cross/gleam_float_sci.almd", class = "fixture" },
@@ -3843,33 +3873,29 @@ evidence  = [
   { path = "spec/wasm_cross/grain_pattern_guards.almd", class = "fixture" },
   { path = "spec/wasm_cross/grain_records_enums.almd", class = "fixture" },
   { path = "spec/wasm_cross/grain_string_escapes.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_186_reused_names.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_beans_pairs.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_chain_cons_list.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_only_use_liveness.almd", class = "fixture" },
   { path = "spec/wasm_cross/koka_hqueens.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_inline4_joinsep.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_inline_ctor_reuse.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_issue894_seq_match.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_parc13_closure_escape.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_parc14_generic_pick.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_parc18_two_scrutinees.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_parc21_eval_order.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_parc3_guard_chain.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_parc6_local_scrutinee.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_parcleak1_half_consumed.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_rbtree_balance.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_reuse1_unzip.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_reuse4_map_rebuild.almd", class = "fixture" },
-  { path = "spec/wasm_cross/koka_unicode_combining.almd", class = "fixture" },
+  { path = "spec/wasm_cross/match_local_scrutinee_dup.almd", class = "fixture" },
+  { path = "spec/wasm_cross/merge_runs_shadowed_scrutinee.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_ctor_swap_two_types.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_match_two_scrutinees.almd", class = "fixture" },
+  { path = "spec/wasm_cross/payload_half_consumed_release.almd", class = "fixture" },
+  { path = "spec/wasm_cross/rbtree_balance_rotations.almd", class = "fixture" },
   { path = "spec/wasm_cross/ref_gleam_capture_shadow.almd", class = "fixture" },
   { path = "spec/wasm_cross/ref_gleam_div_zero_abort.almd", class = "fixture" },
   { path = "spec/wasm_cross/ref_gleam_fnvalue_shadow.almd", class = "fixture" },
   { path = "spec/wasm_cross/ref_gleam_tail_deep.almd", class = "fixture" },
   { path = "spec/wasm_cross/ref_grain_nan_struct.almd", class = "fixture" },
   { path = "spec/wasm_cross/ref_int_min_div_abort.almd", class = "fixture" },
-  { path = "spec/wasm_cross/ref_koka_guard_liveness.almd", class = "fixture" },
-  { path = "spec/wasm_cross/ref_koka_rescrutinee.almd", class = "fixture" },
   { path = "spec/wasm_cross/ref_roc_shared_cow.almd", class = "fixture" },
   { path = "spec/wasm_cross/ref_roc_trmc_control.almd", class = "fixture" },
+  { path = "spec/wasm_cross/rescrutinee_rebuild_live_binding.almd", class = "fixture" },
+  { path = "spec/wasm_cross/sequential_match_two_arg_call.almd", class = "fixture" },
+  { path = "spec/wasm_cross/shared_arg_pair_dup.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_join_accumulator.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unicode_combining_marks.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unzip_accumulator_rotate.almd", class = "fixture" },
 ]
 
 # ── NESTED-CONTAINER MATRIX ─
@@ -5962,4 +5988,33 @@ evidence  = [
   { path = "tests/export_c_abi_test.rs", name = "every_export_c_row_crosses_at_its_c_type_as_fn_and_effect_fn", class = "fixture" },
   { path = "tests/export_c_abi_test.rs", name = "an_effect_export_err_writes_its_message_and_exits_1", class = "fixture" },
   { path = "tests/export_c_abi_test.rs", name = "export_c_types_without_a_c_form_are_e090", class = "fixture" },
+]
+[[contract]]
+id        = "C-453"
+spec      = "ALS-D7"
+title     = "A Region export declared returns: address crosses the wasm host boundary as its data address alone, one value in the memory's address width"
+statement = "ALS-D7 (almide/almide#4519, ADR-0031 amendment A1c): on the wasm target an `@export(wasm, \"sym\", returns: address)` fn returning a Region returns one value, the view's data address, in the memory's address width (one i32 on wasm32), instead of the `(ptr, len)` pair; the host is the one that knows the length it asked for. The form is declared at the export, never inferred. Bytes the host writes at the address are what the program then reads through its own copy; a sub-Region (`ffi.slice`) is returned as its own address inside its parent's block and keeps the parent alive while the host holds it; an empty Region is 0 and releasing 0 is a no-op; an `effect fn`'s err writes its message to stderr and traps. How long the host holds an address is C-454's lease. A `Float` parameter crosses as an f64, so a host passes a plain number. `returns: address` on a fn that does not return a Region, on a target other than wasm, or any other named argument of `@export`, is refused at check time. NOT covered: the address's numeric value, memory64 (the emitter declares a 32-bit memory), the WASI 0.2/0.3 component lowering."
+since     = "0.69.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_host_js/region_export_address.almd", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_region_export_returns_one_i32", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "the_host_writes_at_an_address_only_export_and_the_next_export_reads_it", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_export_keeps_every_other_a1_rule", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_export_err_traps_with_its_reason", class = "fixture" },
+  { path = "tests/checker_test.rs", name = "returns_address_on_a_non_region_return_is_refused", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-454"
+spec      = "ALS-D7"
+title     = "An address-only Region export holds one host share, a lease its next call ends, so a host that never releases runs in bounded memory"
+statement = "ALS-D7 (almide/almide#4560, ADR-0031 amendment A1d): on the wasm target each `@export(wasm, \"sym\", returns: address)` export holds at most one host share, its lease. An address it returns stays valid, its bytes in place, until the next call of that same export or until the host passes it to `__region_release`, whichever comes first; calls of every other export leave it in place. A result with the lease's own address and block holds that one share however many times it is returned; any other result, or an empty one (0), ends the previous lease. Releasing the current lease's address ends it early; releasing an address its export has since superseded traps, like any address the module does not hold. So a host that never calls `__region_release` runs in bounded memory: after a warm-up, any number of further calls leave the memory size unchanged. The `(ptr, len)` form keeps its counted share (C-446). NOT covered: how long the module keeps a block past the lease (the program's own copy may keep it longer), memory64, the WASI 0.2/0.3 component lowering."
+since     = "0.69.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_host_js/region_export_lease.almd", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_export_holds_one_lease_that_its_next_call_ends", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_handed_out_again_holds_one_share", class = "fixture" },
+  { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_unreleasing_host_runs_in_bounded_memory", class = "fixture" },
 ]

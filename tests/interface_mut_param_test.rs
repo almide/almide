@@ -1,5 +1,5 @@
 //! The module interface carries the `mut` parameter modifier. Before it did,
-//! `almide compile <module> --json` dropped it, so every surface rendered from
+//! `almide query interface <module> --json` dropped it, so every surface rendered from
 //! that JSON — the docs/stdlib signature indexes, the stdlib README, the
 //! release interface diff — showed `bytes.push(b: Bytes, …)` for a
 //! function whose caller must pass a `var` (E032 otherwise), and a reader of
@@ -19,11 +19,11 @@ fn root() -> &'static Path {
 
 fn interface_json(module: &str) -> serde_json::Value {
     let out = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .args(["compile", module, "--json"])
+        .args(["query", "interface", module, "--json"])
         .output()
-        .expect("run almide compile --json");
-    assert!(out.status.success(), "compile {module} --json failed:\n{}", String::from_utf8_lossy(&out.stderr));
-    serde_json::from_slice(&out.stdout).expect("interface JSON parses")
+        .expect("run almide query interface --json");
+    assert!(out.status.success(), "query interface {module} --json failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    serde_json::from_slice::<serde_json::Value>(&out.stdout).expect("interface JSON parses")["result"].clone()
 }
 
 /// The `mut` parameter names of `fn <name>` as declared in the module's

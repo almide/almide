@@ -508,7 +508,8 @@ almide add almide/almide-bindgen          # github.com/almide/ がデフォル�
 almide add almide/almide-bindgen@v0.1.0   # バージョン指定
 almide add user/repo                      # 任意の GitHub リポジトリ
 almide deps                               # 依存一覧
-almide dep-path bindgen                   # キャッシュディレクトリを出力
+almide deps --path bindgen                # キャッシュディレクトリを出力
+almide remove bindgen                     # 依存を外す(almide.toml と almide.lock から)
 ```
 
 ### almide.lock
@@ -711,7 +712,9 @@ instance.exports.inbox_show();
 instance.exports.__region_release(ptr);                // ホストの参照を返す
 ```
 
-`--host js` のグルーは Region を返す export を `f(…) → [ptr, len]` で包み、`regionRelease(ptr)` を足す。Region を受け取る export は `f(…, base, len, …)` になる。
+export に `returns: address` を書くと（`@export(wasm, "in_alloc", returns: address)`、#4519、C-453）、Region はデータ先頭のアドレス一つだけで渡る（wasm32 では `i32` 一つ）。長さを自分で知っているホストが export の戻り値を一つの数として読む形。部分 Region・空の Region は `0`・`effect fn` の `err` は trap、は `(ptr, len)` の形と同じ。宣言した export だけがこの形になり、推測はしない。ホストの参照は export ごとに一つだけ（リース、ADR-0031 A1d、C-454）: 同じ export を次に呼ぶと前の結果の参照が返され、同じアドレス・同じブロックをもう一度返したときは参照を増やさない。アドレスはそれを返した export の次の呼び出しまで（または `__region_release` に渡すまで）有効で、ほかの export を呼んでも動かない。`__region_release` を呼ばないホストでもメモリは増え続けない。
+
+`--host js` のグルーは Region を返す export を `f(…) → [ptr, len]`（`returns: address` なら `f(…) → ptr`）で包み、`regionRelease(ptr)` を足す。Region を受け取る export は `f(…, base, len, …)` になる。
 
 仕組み: `crates/almide-wasm/src/extern_region.rs`（IR 書き換え: 受け取りは `ffi.__lend` を呼ぶラッパ、返却は `ffi.__export_view` を返すラッパ）と `crates/almide-wasm/src/region_export.rs`（アダプタ・アドレス表・`__region_release`）。テスト: `spec/wasm_host_js/region_export_push.almd`（push、部分 Region と解放、受け取り）、`spec/wasm_host_js/region_extern_pull.almd`（pull）、`crates/almide-wasm/tests/ffi_host_boundary.rs`、`tests/ffi_host_boundary_test.rs`（E119、`@export(c)`）。
 

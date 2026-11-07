@@ -86,11 +86,11 @@ fn a_red_json_check_is_exactly_one_that_emitted_an_error_row() {
         ("a warning with no error", WARNING_ONLY),
     ] {
         let (_, accepted, text) = both_modes(program);
-        let rows: Vec<serde_json::Value> = text
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("row is not JSON ({e}): {l}")))
-            .collect();
+        // #4590: one envelope line; the rows are its `diagnostics` array.
+        let env: serde_json::Value = serde_json::from_str(text.trim())
+            .unwrap_or_else(|e| panic!("--json output is not one JSON envelope ({e}): {text}"));
+        assert_eq!(env["ok"], serde_json::Value::Bool(accepted), "{label}: `ok` follows the exit code\n{text}");
+        let rows = env["diagnostics"].as_array().cloned().unwrap_or_default();
         let has_error_row = rows.iter().any(|r| r["level"] == "error");
         assert_eq!(
             !accepted, has_error_row,
@@ -117,12 +117,15 @@ fn a_type_error_under_json_does_not_report_success() {
     );
 }
 
-/// `--json` writes its rows to stdout and nothing else: a consumer parses the
-/// stream line by line, so a stray human verdict line would break it. The fix
-/// changes the status, not the stream.
+/// `--json` writes its one envelope line to stdout and nothing else: a
+/// consumer parses that line, so a stray human verdict line would break it.
+/// The fix changes the status, not the stream.
 #[test]
 fn a_clean_json_check_writes_nothing() {
     let (_, accepted, text) = both_modes(CLEAN);
     assert!(accepted, "the clean program must be accepted:\n{text}");
-    assert_eq!(text.trim(), "", "a clean --json check emits no rows:\n{text}");
+    assert_eq!(text.trim().lines().count(), 1, "a clean --json check emits exactly the envelope line:\n{text}");
+    let env: serde_json::Value = serde_json::from_str(text.trim()).expect("the envelope is JSON");
+    assert_eq!(env["ok"], true, "{text}");
+    assert_eq!(env["diagnostics"], serde_json::json!([]), "a clean --json check emits no rows:\n{text}");
 }

@@ -33,6 +33,37 @@
 
 Almide is a statically-typed language for code that AI writes and edits. The claim is not that the model gets it right. It is that **when the model is wrong, the compiler says so at author time and names the fix**. Programs compile to native binaries (via Rust) and to WebAssembly, with byte-identical output on every [contracted behaviour](./docs/contracts/). `almide verify` checks the ownership, bounds, name and capability witnesses of the wasm module `almide build` ships, pinned to that file by its SHA-256 ([what is proven, what is trusted](./docs/contracts/proven-vs-trusted.md)).
 
+## Almide at a glance
+
+```almd
+type Order = { item: String, qty: Int, price: Int }
+
+fn parse(line: String) -> Order? = match line |> string.trim |> string.split(",") {
+  [item, qty, price] => match (int.parse(qty), int.parse(price)) {
+    (ok(q), ok(p)) => some({ item: item, qty: q, price: p }),
+    _ => none,
+  },
+  _ => none,
+}
+
+fn main() -> Unit = {
+  let csv = """
+    apple,3,120
+    pear,oops,90
+    plum,5,80
+    """
+  let orders = csv |> string.lines |> list.filter_map(parse)
+  let total = orders |> list.fold(0, (sum, o) => sum + o.qty * o.price)
+  println("${list.len(orders)} orders, total ${total}")
+}
+```
+
+```text
+2 orders, total 760
+```
+
+The row with a bad number falls through to `none` and is skipped: no exception and no unwrap, and a `match` that forgets a case doesn't compile. The same program prints the same bytes natively and on wasm, and this file runs in CI as [`examples/order-total.almd`](./examples/order-total.almd).
+
 ## An edit that survives
 
 A model adds a case to a type and, as models do, touches nothing else:

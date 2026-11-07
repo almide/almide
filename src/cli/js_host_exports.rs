@@ -44,6 +44,16 @@ pub(super) enum RetPlan {
     /// `[ptr, len]`, as numbers. No copy: the host reads and writes the
     /// module's memory at `ptr` and gives `ptr` back to `regionRelease`.
     Region,
+    /// A Region export declared `returns: address` (#4519): the adapter's one
+    /// result, the address, as a number. Ownership is `Region`'s.
+    RegionAddress,
+}
+
+impl RetPlan {
+    /// Does the export hand the host a share it gives back to `regionRelease`?
+    pub(super) fn hands_out_share(&self) -> bool {
+        matches!(self, RetPlan::Region | RetPlan::RegionAddress)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,6 +146,7 @@ pub(super) fn plan_export(f: &HostFn, params: Option<&[AbiShape]>, ret: Option<&
     let ok = |s: &AbiShape| s.unsupported().is_none() && agrees(vis, s);
     let plan = match (ret, returns_result(f)) {
         (Some(ExportRet::Region), _) if almide_lang::types::extern_abi::is_region(&f.ret) => Some(RetPlan::Region),
+        (Some(ExportRet::RegionAddress), _) if almide_lang::types::extern_abi::is_region(&f.ret) => Some(RetPlan::RegionAddress),
         (Some(ExportRet::Void), false) if matches!(vis, Ty::Unit) => Some(RetPlan::Void),
         (Some(ExportRet::Value(s)), false) if ok(s) => Some(match s {
             AbiShape::Int => RetPlan::Scalar(Marshal::Int),
@@ -251,6 +262,7 @@ pub(super) fn export_dts(f: &HostFn, plan: &ExportPlan, entry: Entry) -> String 
         RetPlan::Scalar(m) => ts_marshal(*m).to_string(),
         RetPlan::Block(s) | RetPlan::Unwrap(s) => ts_shape(s, true),
         RetPlan::Region => "[ptr: number, len: number]".to_string(),
+        RetPlan::RegionAddress => "number".to_string(),
     };
     let ret = if entry == Entry::Async { format!("Promise<{ret}>") } else { ret };
     format!("export function {}({}): {ret};\n", f.name, params.join(", "))
@@ -319,6 +331,8 @@ pub(super) fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool], plan: &Expor
         // Two results in the address width: i32 numbers on wasm32, BigInts
         // on memory64, so both become numbers here.
         (RetPlan::Region, _) => format!("    const [ptr, len] = {call};\n    return [Number(ptr), Number(len)];\n"),
+        // One result in the address width (#4519): a number either way.
+        (RetPlan::RegionAddress, _) => format!("    return Number({call});\n"),
     };
     let names: Vec<&str> = f.params.iter().map(|(p, _)| p.as_str()).collect();
     let guard = if entry == Entry::Guarded { format!("  idle(\"{}\");\n", f.name) } else { String::new() };

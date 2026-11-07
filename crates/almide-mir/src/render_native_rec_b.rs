@@ -477,3 +477,35 @@ pub(crate) fn is_region(i: u16) -> bool {
 pub(crate) fn box_new(i: u16) -> &'static str {
     if is_region(i) { "almide_rgn_alloc" } else { "Box::new" }
 }
+
+/// The table as it stands, and putting it back (a render run again).
+pub(crate) fn snapshot() -> Vec<RecDecl> {
+    RECS.with(|r| r.borrow().clone())
+}
+pub(crate) fn restore(recs: Vec<RecDecl>) {
+    RECS.with(|r| *r.borrow_mut() = recs);
+}
+
+// ── runtime alias targets (#4514) ─────────────────────────────────────
+
+/// The type a generated entry aliases when the render does not define it
+/// itself: a runtime type (`AlmideValue`, `AlmideMap<K, V>`, `AlmideSet<T>`,
+/// `AlmideMatrix`) or a std one (`Vec<u8>`). `None` for a carrier, list or
+/// struct the render spells in full.
+fn alias_target(d: &RecDecl) -> Option<String> {
+    if let Some(a) = d.alias {
+        return Some(a.to_string());
+    }
+    if let Some((k, v)) = d.map_of {
+        return Some(format!("AlmideMap<{}, {}>", owned_ty(k), owned_ty(v)));
+    }
+    d.set_of.map(|e| format!("AlmideSet<{}>", owned_ty(e)))
+}
+
+/// Every alias target the installed table spells, one per line: the text
+/// whose runtime names the render takes along (#4514). A type the program
+/// declares but never operates on names its runtime definition here and
+/// nowhere else.
+pub(crate) fn alias_targets() -> String {
+    RECS.with(|r| r.borrow().iter().filter_map(alias_target).map(|t| t + ";\n").collect())
+}

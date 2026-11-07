@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'bytes.read_string_be'"
+hint_substring = "Not applied by `almide fix`: `bytes.get_u32_be` returns Option[Int], not String: adapt the callers"

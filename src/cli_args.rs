@@ -1,5 +1,12 @@
 //! The `almide` command line as clap reads it: the top-level flags, every
-//! subcommand and its options, and the `ide` subcommands.
+//! subcommand and its options, and the `query` / `tool` subcommands.
+//!
+//! The command set (#4590): one verb per job, daily work flat, rare work under
+//! a group noun, internal tools hidden. `--help` lists the visible commands in
+//! four groups ([`HELP_TEMPLATE`]); a unit test below keeps that list and the
+//! enum in step. A retired spelling (`survive`, `ide`, `self-update`,
+//! `install`, `dep-path`, `check --explain`, `compile --json`) is kept only as
+//! a hidden catch-all whose one job is the error naming the new spelling.
 
 use clap::{Parser, Subcommand};
 
@@ -20,8 +27,56 @@ fn program_arg() -> impl clap::builder::TypedValueParser<Value = String> {
     clap::builder::OsStringValueParser::new().map(|a| a.to_string_lossy().into_owned())
 }
 
+/// `almide --help`, grouped Daily / Dependencies / Agents / Toolchain (#4590).
+/// clap lists subcommands in one flat block, so the groups are written here;
+/// `the_grouped_help_lists_exactly_the_visible_commands` fails when a visible
+/// command is missing from it or a listed one does not exist.
+pub(crate) const HELP_TEMPLATE: &str = "\
+{before-help}{name} {version}
+The Almide compiler and toolchain
+
+{usage-heading} {usage}
+
+Daily:
+  init      Create a new Almide project
+  run       Compile and execute
+  build     Build a binary
+  test      Run tests
+  check     Type check only
+  fmt       Format source files
+  fix       Apply mechanically-safe fixes to a file
+  bench     Benchmark a program: verify-then-time, median headline
+  explain   Explain a diagnostic code, or list every code (--list)
+
+Dependencies:
+  add       Add a dependency
+  remove    Remove a dependency (the twin of add)
+  update    Advance a locked git dependency to its ref's current remote head
+  trust     Trust a source owner
+  deps      List dependencies; --path <name> prints one's source directory
+
+Agents:
+  apply     Judge an edit and write it if it survives; --dry-run only judges
+  query     Semantic queries: outline, doc, interface, stdlib
+  mcp       Start the Model Context Protocol server on stdio
+  lsp       Start the Language Server Protocol server
+
+Toolchain:
+  upgrade   Update almide to the latest version
+  tool      Install an Almide CLI from a git repo: tool install <repo>
+  verify    Re-check the certificates of a built wasm module
+  clean     Clear the dependency cache and the native build scratch dirs
+  repl      Start the interactive REPL
+
+Every command that prints a report takes --json: one line on stdout with
+schema_version, ok, diagnostics[] and result.
+Run `almide <command> --help` for a command's options.
+
+Options:
+{options}{after-help}";
+
 #[derive(Parser)]
-#[command(name = "almide", version = VERSION_LINE)]
+#[command(name = "almide", version = VERSION_LINE, help_template = HELP_TEMPLATE)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Option<Commands>,
@@ -66,6 +121,13 @@ pub(crate) struct Cli {
     /// The file holding the proposed text for `--survive-overlay`.
     #[arg(long = "survive-overlay-text", value_name = "FILE", global = true, hide = true, requires = "survive_overlay")]
     pub(crate) survive_overlay_text: Option<String>,
+    /// Print a command's `--json` output as the command itself writes it,
+    /// without the shared envelope (#4590). The envelope is built by a parent
+    /// that runs the command with this flag as its child; the internal
+    /// callers that read one command's raw rows (`apply`'s check leg, the MCP
+    /// tools, the editor's survive preview) pass it too.
+    #[arg(long = "raw-json", global = true, hide = true)]
+    pub(crate) raw_json: bool,
 }
 
 /// Was this binary built by the release workflow? `build.rs` writes the kind
@@ -78,7 +140,11 @@ pub(crate) fn is_release_build() -> bool {
 #[derive(Subcommand)]
 pub(crate) enum Commands {
     /// Create a new Almide project
-    Init,
+    Init {
+        /// Report as the --json envelope
+        #[arg(long)]
+        json: bool,
+    },
     /// Compile and execute
     #[command(trailing_var_arg = true)]
     Run {
@@ -142,6 +208,9 @@ pub(crate) enum Commands {
         /// time: `almide bench nbody.almd -- 200000`).
         #[arg(last = true, value_parser = program_arg())]
         program_args: Vec<String>,
+        /// Report as the --json envelope
+        #[arg(long)]
+        json: bool,
     },
     /// Build a binary
     Build {
@@ -257,10 +326,16 @@ pub(crate) enum Commands {
         /// default: without it the module is byte-identical.
         #[arg(long)]
         debug: bool,
+        /// Report as the --json envelope
+        #[arg(long)]
+        json: bool,
     },
     /// Run tests
     Test {
-        /// Test file
+        /// Test file or directory. Without one, inside a project (an
+        /// almide.toml here): every .almd with a test block under the project
+        /// root, skipping dot directories, target/, node_modules/ and any
+        /// directory holding an .almideignore marker
         file: Option<String>,
         /// Filter test names by pattern
         #[arg(short = 'r', long)]
@@ -305,8 +380,9 @@ pub(crate) enum Commands {
         /// Output diagnostics as JSON (one per line)
         #[arg(long)]
         json: bool,
-        /// Explain an error code (e.g., --explain E001)
-        #[arg(long)]
+        /// Retired (#4590): `almide explain <code>` is the one spelling. Kept
+        /// only to name it.
+        #[arg(long, hide = true)]
         explain: Option<String>,
         /// Show effect/capability analysis for each function
         #[arg(long)]
@@ -353,8 +429,9 @@ pub(crate) enum Commands {
         /// List every diagnostic code: code, severity, since, fix-it verdict, title
         #[arg(long, conflicts_with = "code")]
         list: bool,
-        /// With --list: one JSON array of {code, mnemonic, severity, since, verdict}
-        #[arg(long, requires = "list")]
+        /// Report as the --json envelope: `{code, text}` for one code, or
+        /// `{codes: [{code, mnemonic, severity, since, verdict}]}` with --list
+        #[arg(long)]
         json: bool,
     },
     /// Format source files
@@ -377,15 +454,17 @@ pub(crate) enum Commands {
         #[arg(long)]
         no_import_edit: bool,
     },
-    /// Compile source to .almdi (module interface + IR artifact)
+    /// Compile source to .almdi (module interface + IR artifact). Internal:
+    /// the interface view is `almide query interface` (#4590)
+    #[command(hide = true)]
     Compile {
         /// Module name (e.g., "json", "parser") or file path; defaults to project
         module: Option<String>,
-        /// Output interface as machine-readable JSON (no artifact)
-        #[arg(long)]
+        /// Retired (#4590): `almide query interface --json`
+        #[arg(long, hide = true)]
         json: bool,
-        /// Print human-readable interface (no artifact)
-        #[arg(long)]
+        /// Retired (#4590): `almide query interface`
+        #[arg(long, hide = true)]
         dry_run: bool,
         /// Output directory for .almdi files (default: target/compile)
         #[arg(long, short)]
@@ -395,9 +474,16 @@ pub(crate) enum Commands {
     Update {
         /// Dependency name (default: every non-tag-pinned dependency)
         dep: Option<String>,
+        /// Report as the --json envelope
+        #[arg(long)]
+        json: bool,
     },
     /// Clear the dependency cache and the native build scratch dirs
-    Clean,
+    Clean {
+        /// Report as the --json envelope
+        #[arg(long)]
+        json: bool,
+    },
     /// Add a dependency
     Add {
         /// Package specifier
@@ -423,62 +509,46 @@ pub(crate) enum Commands {
         /// repository exists; fetch and write nothing
         #[arg(long)]
         dry_run: bool,
+        /// Report as the --json envelope
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a dependency: the twin of `add` (#4590). Drops its entry from
+    /// almide.toml `[dependencies]` and from almide.lock; `[trust] owners`
+    /// is left as it is (`trust` is its own verb)
+    Remove {
+        /// Dependency name (as declared in almide.toml)
+        name: String,
+        /// Report as the --json envelope
+        #[arg(long)]
+        json: bool,
     },
     /// Trust a source owner (`host/owner`, or `owner` for github.com):
     /// add it to `[trust] owners` in almide.toml (#4093)
     Trust {
         /// The owner, e.g. `github.com/alice`
         owner: String,
+        /// Report as the --json envelope
+        #[arg(long)]
+        json: bool,
     },
-    /// List dependencies
-    Deps,
-    /// Print the cached source directory of a dependency
-    DepPath {
-        /// Dependency name (as declared in almide.toml)
-        name: String,
+    /// List dependencies, or print one's cached source directory (--path)
+    Deps {
+        /// Print the cached source directory of this dependency (as declared
+        /// in almide.toml) instead of the list
+        #[arg(long, value_name = "NAME")]
+        path: Option<String>,
+        /// Report as the --json envelope (`{name, path}` with --path)
+        #[arg(long)]
+        json: bool,
     },
-    /// Install an Almide CLI from a git repo into ~/.local/bin (or
-    /// $ALMIDE_INSTALL). Like `go install`: clone, build --release,
-    /// drop the binary on PATH.
-    Install {
-        /// Package spec: `github.com/<owner>/<repo>`, a full git URL,
-        /// or a local path
-        spec: String,
-        /// Git tag to install (default: latest commit on the default branch)
-        #[arg(long)]
-        tag: Option<String>,
-        /// Git branch
-        #[arg(long)]
-        branch: Option<String>,
-        /// Override the binary name (default: [package].name from almide.toml)
-        #[arg(long)]
-        name: Option<String>,
-        /// Override the install directory (default: $ALMIDE_INSTALL or ~/.local/bin)
-        #[arg(long = "bin-dir")]
-        bin_dir: Option<std::path::PathBuf>,
-        /// Build target (default: native)
-        #[arg(long)]
-        target: Option<String>,
-        /// Replace an existing file at the destination that `almide install`
-        /// did not put there (#4183). Without it such a file is refused, so
-        /// a package named `git` or `almide` cannot silently replace a tool.
-        #[arg(long)]
-        force: bool,
-        /// Trust the owner of a remote spec that is not trusted by default
-        /// (#4184): `host/owner`, or `owner` for github.com. Only
-        /// github.com/almide is trusted without it.
-        #[arg(long)]
-        trust: Option<String>,
-        /// Allow the installed package's own native code to be compiled
-        /// (#4184): its `native/` Rust files, its `[native-deps]` crates (their
-        /// build scripts run at build time) and its `@extern(rust|c)` fns.
-        /// Without it such a package is refused and its native code listed.
-        #[arg(long = "allow-native")]
-        allow_native: bool,
+    /// Toolchain tools: `tool install <repo>`
+    Tool {
+        #[command(subcommand)]
+        cmd: ToolCommand,
     },
     /// Update almide to the latest version
-    #[command(name = "self-update")]
-    SelfUpdate {
+    Upgrade {
         /// Target version (e.g., v0.13.0); defaults to latest
         version: Option<String>,
         /// Install without verifying the release's Sigstore attestation
@@ -488,6 +558,39 @@ pub(crate) enum Commands {
         /// and refuses when `gh` is missing.
         #[arg(long = "skip-attestation")]
         skip_attestation: bool,
+        /// Report as the --json envelope
+        #[arg(long)]
+        json: bool,
+    },
+    /// Start the interactive REPL (a bare `almide` prints help instead)
+    Repl,
+    /// Retired spellings (#4590), hidden: each one's only job is the error
+    /// naming its replacement. `args` swallows whatever followed, so the
+    /// error is the same whatever flags the old command line carried.
+    #[command(hide = true, disable_help_flag = true)]
+    Survive {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    #[command(hide = true, disable_help_flag = true)]
+    Ide {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    #[command(name = "self-update", hide = true, disable_help_flag = true)]
+    SelfUpdate {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    #[command(hide = true, disable_help_flag = true)]
+    Install {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    #[command(name = "dep-path", hide = true, disable_help_flag = true)]
+    DepPath {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Re-check the certificates of the wasm module `almide build --target
     /// wasm` ships with the independent `almide-verify` binary (found next to
@@ -501,11 +604,6 @@ pub(crate) enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Agent/LLM semantic queries (outline, doc, stdlib-snapshot)
-    Ide {
-        #[command(subcommand)]
-        cmd: IdeCommand,
-    },
     /// Apply mechanically-safe fixes to a file (auto-import; reports remaining
     /// try: snippets for manual application).
     Fix {
@@ -518,35 +616,14 @@ pub(crate) enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Judge a proposed edit BEFORE writing it: apply it in memory, run check,
-    /// the tests that reach the file and its contract fixtures on both sides,
-    /// and report each diagnostic / test / contract as unchanged, newly_broken,
-    /// newly_fixed or removed. Never writes. Exit 0 = survives, 1 = does not,
-    /// 2 = the edit could not be judged.
-    Survive {
-        /// The .almd file the edit is to
-        file: String,
-        /// The edit: a path (or `-` for stdin) holding a unified diff or the
-        /// file's full new text
-        #[arg(long)]
-        with: String,
-        /// How to read `--with`: auto (a diff if it starts `--- ` / `@@ `), patch, text
-        #[arg(long = "as", default_value = "auto")]
-        as_kind: String,
-        /// Emit the survival delta as JSON (schema_version 1)
-        #[arg(long)]
-        json: bool,
-        /// Per-run time limit in seconds for every child check / test / run
-        #[arg(long, default_value_t = 600)]
-        timeout: u64,
-        /// Let an edit that DELETES tests or `// @contract:` lines survive. By
-        /// default a test or contract present before the edit and absent after
-        /// it does not survive (#4267)
-        #[arg(long = "allow-removed")]
-        allow_removed: bool,
-    },
-    /// Verify-then-write: run `survive` on the edit and write it (atomically)
-    /// only if nothing is newly broken. `--force` writes whatever the verdict.
+    /// Judge a proposed edit, then write it (atomically) only if nothing is
+    /// newly broken. Judging applies the edit in memory, runs check, the tests
+    /// that reach the file and its contract fixtures on both sides, and
+    /// reports each diagnostic / test / contract as unchanged, newly_broken,
+    /// newly_fixed or removed. `--dry-run` only judges and never writes (exit
+    /// 0 = survives, 1 = does not, 2 = the edit could not be judged);
+    /// `--if-survives` writes on a surviving verdict; `--force` writes
+    /// whatever the verdict.
     Apply {
         /// The .almd file to edit
         file: String,
@@ -562,9 +639,13 @@ pub(crate) enum Commands {
         #[arg(long = "if-survives", num_args = 0..=1, require_equals = true, default_missing_value = "true")]
         if_survives: Option<String>,
         /// Write even if the edit does not survive (the verdict is still reported)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "dry_run")]
         force: bool,
-        /// Emit the survival delta (plus `written`) as JSON
+        /// Judge only: report the verdict and write nothing
+        #[arg(long, conflicts_with = "if_survives")]
+        dry_run: bool,
+        /// Report as the --json envelope (the survival delta, plus `written`
+        /// unless --dry-run, in `result`)
         #[arg(long)]
         json: bool,
         /// Per-run time limit in seconds for every child check / test / run
@@ -575,7 +656,12 @@ pub(crate) enum Commands {
         #[arg(long = "allow-removed")]
         allow_removed: bool,
     },
-    /// Internal to `almide survive`: compile one file's test harness and run it
+    /// Agent/LLM semantic queries: outline, doc, interface, stdlib
+    Query {
+        #[command(subcommand)]
+        cmd: QueryCommand,
+    },
+    /// Internal to `almide apply`: compile one file's test harness and run it
     /// captured, printing `{compiled, exit_code, output}` as one JSON line.
     #[command(name = "survive-test-leg", hide = true)]
     SurviveTestLeg {
@@ -596,7 +682,7 @@ pub(crate) enum Commands {
     /// Check canonical docs (llms.txt, etc.) against source-of-truth inputs
     /// (Cargo version, diagnostic code inventory, stdlib auto-import list).
     /// Fails CI when drift is detected.
-    #[command(name = "docs-gen")]
+    #[command(name = "docs-gen", hide = true)]
     DocsGen {
         /// Verify mode: exit 1 if any drift is found, 0 otherwise.
         #[arg(long)]
@@ -635,6 +721,7 @@ pub(crate) enum Commands {
     },
     /// List the compile-cost budgets (ADR-0030): what each counts, its
     /// default and the diagnostic that ends a run over it.
+    #[command(hide = true)]
     Budgets {
         /// Render the markdown table `docs/specs/cli.md` embeds.
         #[arg(long)]
@@ -650,8 +737,57 @@ pub(crate) enum Commands {
     },
 }
 
+/// `almide tool ...` (#4590): toolchain tools under one group noun, so the
+/// verb says what gets installed.
 #[derive(clap::Subcommand, Debug)]
-pub(crate) enum IdeCommand {
+pub(crate) enum ToolCommand {
+    /// Install an Almide CLI from a git repo into ~/.local/bin (or
+    /// $ALMIDE_INSTALL). Like `go install`: clone, build --release,
+    /// drop the binary on PATH.
+    Install {
+        /// Package spec: `github.com/<owner>/<repo>`, a full git URL,
+        /// or a local path
+        spec: String,
+        /// Git tag to install (default: latest commit on the default branch)
+        #[arg(long)]
+        tag: Option<String>,
+        /// Git branch
+        #[arg(long)]
+        branch: Option<String>,
+        /// Override the binary name (default: [package].name from almide.toml)
+        #[arg(long)]
+        name: Option<String>,
+        /// Override the install directory (default: $ALMIDE_INSTALL or ~/.local/bin)
+        #[arg(long = "bin-dir")]
+        bin_dir: Option<std::path::PathBuf>,
+        /// Build target (default: native)
+        #[arg(long)]
+        target: Option<String>,
+        /// Replace an existing file at the destination that `almide tool install`
+        /// did not put there (#4183). Without it such a file is refused, so
+        /// a package named `git` or `almide` cannot silently replace a tool.
+        #[arg(long)]
+        force: bool,
+        /// Trust the owner of a remote spec that is not trusted by default
+        /// (#4184): `host/owner`, or `owner` for github.com. Only
+        /// github.com/almide is trusted without it.
+        #[arg(long)]
+        trust: Option<String>,
+        /// Allow the installed package's own native code to be compiled
+        /// (#4184): its `native/` Rust files, its `[native-deps]` crates (their
+        /// build scripts run at build time) and its `@extern(rust|c)` fns.
+        /// Without it such a package is refused and its native code listed.
+        #[arg(long = "allow-native")]
+        allow_native: bool,
+        /// Report as the --json envelope
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `almide query ...` (#4590, was `ide`): agent/LLM semantic queries.
+#[derive(clap::Subcommand, Debug)]
+pub(crate) enum QueryCommand {
     /// Print one-line summary of each public decl (fn / type / let).
     /// Use this instead of `grep` to discover a package's API.
     /// Accepts a file path or `@stdlib/<module>` (e.g. `@stdlib/string`).
@@ -661,7 +797,7 @@ pub(crate) enum IdeCommand {
         /// Filter to a substring (e.g. `upper` or `to_`)
         #[arg(long)]
         filter: Option<String>,
-        /// Emit JSON instead of one-line text
+        /// Report as the --json envelope (`{decls: [...]}` in `result`)
         #[arg(long)]
         json: bool,
     },
@@ -673,16 +809,61 @@ pub(crate) enum IdeCommand {
         /// File context (default: src/main.almd — used for user-defined lookup)
         #[arg(long)]
         file: Option<String>,
+        /// Report as the --json envelope
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a module's interface: its public types and functions with their
+    /// signatures (was `compile --dry-run` / `compile --json`)
+    Interface {
+        /// Module name (e.g., "json", "parser") or file path; defaults to project
+        module: Option<String>,
+        /// Report as the --json envelope (the interface object in `result`)
+        #[arg(long)]
+        json: bool,
     },
     /// Dump concatenated stdlib outlines in one call.
     /// Intended for LLM harnesses that embed a stdlib API inventory in SYSTEM_PROMPT.
     /// Default modules: string, list, int, option, result, map, set.
-    StdlibSnapshot {
+    Stdlib {
         /// Comma-separated module list (e.g. `string,list,int`). Defaults to the core set.
         #[arg(long)]
         modules: Option<String>,
-        /// Emit JSON array instead of concatenated text sections
+        /// Report as the --json envelope (`{modules: [...]}` in `result`)
         #[arg(long)]
         json: bool,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    /// The grouped `--help` (#4590) is hand-written; this keeps it honest:
+    /// every visible subcommand is listed in a group, and every listed name
+    /// is a visible subcommand.
+    #[test]
+    fn the_grouped_help_lists_exactly_the_visible_commands() {
+        let cmd = Cli::command();
+        let mut visible: Vec<String> = cmd
+            .get_subcommands()
+            .filter(|s| !s.is_hide_set())
+            .map(|s| s.get_name().to_string())
+            .collect();
+        visible.sort();
+        let mut listed: Vec<String> = HELP_TEMPLATE
+            .lines()
+            .filter(|l| l.starts_with("  ") && !l.starts_with("   "))
+            .filter_map(|l| l.split_whitespace().next())
+            .map(str::to_string)
+            .collect();
+        listed.sort();
+        assert_eq!(visible, listed, "HELP_TEMPLATE's groups and the visible subcommands differ");
+    }
+
+    #[test]
+    fn the_command_line_definition_is_consistent() {
+        Cli::command().debug_assert();
+    }
 }

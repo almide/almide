@@ -41,9 +41,16 @@ fn the_split_form_is_quiet() {
 fn json_carries_the_warning() {
     let (ok, text) = check("#!/usr/bin/env almide run", &["--json"]);
     assert!(ok, "{text}");
+    // #4590: one envelope line; the rows are its `diagnostics` array.
     let line = text.lines().find(|l| l.contains("E062")).unwrap_or_else(|| panic!("no E062 JSON line:\n{text}"));
-    assert!(line.trim_start().starts_with('{'), "not JSON: {line}");
-    assert!(line.contains("\"warning\""), "level missing: {line}");
+    let envelope: serde_json::Value = serde_json::from_str(line).unwrap_or_else(|e| panic!("not JSON ({e}): {line}"));
+    let row = envelope["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|d| d["code"] == "E062")
+        .unwrap_or_else(|| panic!("no E062 row: {line}"));
+    assert_eq!(row["level"], "warning", "level missing: {line}");
 }
 
 #[test]

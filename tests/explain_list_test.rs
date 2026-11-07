@@ -32,7 +32,8 @@ fn list_rows() -> Vec<serde_json::Value> {
         .expect("almide explain --list --json");
     assert!(out.status.success(), "explain --list failed: {}", String::from_utf8_lossy(&out.stderr));
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("explain --list --json is JSON");
-    v.as_array().expect("a JSON array").clone()
+    // #4590: the rows sit at `result.codes` of the --json envelope.
+    v["result"]["codes"].as_array().expect("a JSON array at result.codes").clone()
 }
 
 /// Codes the compiler emits, read from source.
@@ -135,9 +136,9 @@ fn every_severity_matches_what_the_binary_emits() {
             .arg(&broken)
             .output()
             .expect("almide check --json");
-        for d in String::from_utf8_lossy(&out.stdout).lines()
-            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-        {
+        // #4590: one envelope line; the rows are its `diagnostics` array.
+        let envelope = serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap_or_default();
+        for d in envelope["diagnostics"].as_array().into_iter().flatten() {
             let (Some(code), Some(level)) = (d["code"].as_str(), d["level"].as_str()) else { continue };
             if code.is_empty() { continue; }
             seen += 1;

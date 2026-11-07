@@ -117,6 +117,13 @@ pub struct Checker {
     /// around the ENTRY program's inference only (imported modules,
     /// stdlib above all, are the trusted runtime below the profile).
     pub profile_critical: bool,
+    /// #4589: the program is checked WITHOUT the modules it imports — their
+    /// resolution failed (a package root not found from the working directory,
+    /// a path dependency that does not load). A use of an import through such
+    /// a module (`t.CODES` on `import self.table as t`) cannot be seen, so no
+    /// import may be judged unused: E060's fix-it is a deletion, and applied
+    /// here it strands every reference the check could not resolve.
+    pub imports_unresolved: bool,
     /// The GRANTED module names under `--profile critical`, already
     /// expanded from capability names (`--allow Rand` → `random`) at the
     /// CLI boundary. Empty = deny-all.
@@ -712,6 +719,7 @@ impl Checker {
             source_file: None, source_text: None,
             in_bundled_module: false,
             profile_critical: false,
+            imports_unresolved: false,
             critical_allow: Vec::new(),
             outside_guarantee: Vec::new(),
             current_span: None,
@@ -1356,7 +1364,10 @@ impl Checker {
             .collect();
         // The verdict needs a fully parsed file: recovery drops the text that
         // may have been the use, and the parse error is already the diagnosis.
-        let judge_unused = !program.parse_recovered;
+        // It also needs the imported modules (#4589): checked without them, a
+        // use through an import's alias is not recorded, and the resolution
+        // failure is what `almide check` reports.
+        let judge_unused = !program.parse_recovered && !self.imports_unresolved;
         for imp in program.imports.iter().filter(|_| judge_unused) {
             let (path, alias, names, span) = match imp {
                 ast::Decl::Import { path, alias, names, span } => (path, alias, names, span),

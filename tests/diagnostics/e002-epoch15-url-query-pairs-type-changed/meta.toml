@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'url.query_pairs'"
+hint_substring = "Not applied by `almide fix`: `url.parse_query` returns Result[List[(String, String)], String], not List[(String, String)]: adapt the callers"

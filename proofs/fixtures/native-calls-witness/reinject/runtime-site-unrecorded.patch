@@ -1,0 +1,14 @@
+diff --git a/crates/almide-mir/src/certificate_native_calls.rs b/crates/almide-mir/src/certificate_native_calls.rs
+index 762e9f509..e0a9f8be5 100644
+--- a/crates/almide-mir/src/certificate_native_calls.rs
++++ b/crates/almide-mir/src/certificate_native_calls.rs
+@@ -91,7 +91,8 @@ pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTr
+             let mut hosts: Vec<String> = Vec::new();
+             for (at, op) in f.ops.iter().enumerate() {
+                 match op {
+-                    Op::CallFn { args, .. } if runtime.contains_key(&(f.name.clone(), at)) => {
++                    // RE-INJECTED (#4006 C1 drill): the runtime site is not recorded.
++                    Op::CallFn { args, .. } if runtime.contains_key(&(f.name.clone(), at)) && f.name.is_empty() => {
+                         let key = (runtime[&(f.name.clone(), at)].clone(), borrow_modes(args).len());
+                         let idx = names.len() + runtime_blocks.iter().position(|b| *b == key).unwrap_or(runtime_blocks.len());
+                         sites.push(site_row(idx, &borrow_modes(args)));

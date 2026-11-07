@@ -4,7 +4,7 @@
 //! **One path into the compiler.** Every tool runs THE CLI —
 //! `std::env::current_exe()` with the flags a human would type — and reads the
 //! machine-readable output the CLI already emits (`check --json`,
-//! `test --json`, `fmt --check --json`, `ide outline --json`). There is
+//! `test --json`, `fmt --check --json`, `query outline --json`). There is
 //! deliberately no second, MCP-only rendering of a diagnostic or a test result:
 //! a parallel formatter drifts from the CLI's, and the drift is invisible
 //! precisely because nobody reads the MCP output by eye.
@@ -59,7 +59,10 @@ fn run_cli_with_stdin(args: &[String], cwd: Option<&std::path::Path>, stdin: Opt
     let exe = std::env::current_exe()
         .map_err(|e| format!("cannot locate the almide binary: {}", e))?;
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(args)
+    // `--raw-json`: each tool reads the command's own rows, not the shared
+    // `--json` envelope (#4590), and builds its typed result from them.
+    cmd.arg("--raw-json")
+        .args(args)
         .env("ALMIDE_DEPS_CACHE_ONLY", "1")
         .stdin(if stdin.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() })
         .stdout(std::process::Stdio::piped())
@@ -257,14 +260,14 @@ fn tool_test(args: &Value) -> Result<Value, String> {
     }))
 }
 
-/// `almide ide outline --json` / `almide ide stdlib-snapshot --json` → the API
+/// `almide query outline --json` / `almide query stdlib --json` → the API
 /// surface of a file or a stdlib module.
 fn tool_api(args: &Value) -> Result<Value, String> {
     let target = require_str(args, "target")?;
     let pl = place(args)?;
-    let mut argv: Vec<String> = vec!["ide".into()];
+    let mut argv: Vec<String> = vec!["query".into()];
     if target == "@stdlib" {
-        argv.push("stdlib-snapshot".into());
+        argv.push("stdlib".into());
         argv.push("--json".into());
         if let Some(modules) = arg_str(args, "modules") {
             argv.push(flag_eq("--modules", &modules));
@@ -291,7 +294,7 @@ fn tool_api(args: &Value) -> Result<Value, String> {
         ));
     }
     let outline: Value = serde_json::from_str(run.stdout.trim())
-        .map_err(|e| format!("almide ide emitted output this server could not parse as JSON: {}", e))?;
+        .map_err(|e| format!("almide query emitted output this server could not parse as JSON: {}", e))?;
     Ok(json!({ "target": target, "outline": outline }))
 }
 
@@ -332,15 +335,15 @@ fn tool_fmt_check(args: &Value) -> Result<Value, String> {
     Ok(obj)
 }
 
-/// `almide survive <file> --with - --json` → the survival delta of a proposed
-/// edit, verbatim: the report `survive` prints (`schema_version`, `survives`,
+/// `almide apply <file> --with - --dry-run --json` → the survival delta of a
+/// proposed edit, verbatim: the report `apply --dry-run` prints (`schema_version`, `survives`,
 /// and `{unchanged, newly_broken, newly_fixed, removed}` per check / tests /
 /// contracts). The edit is handed over on stdin; the file is never written.
 fn tool_survive(args: &Value) -> Result<Value, String> {
     let file = require_str(args, "file")?;
     let edit = require_str(args, "edit")?;
     let pl = place(args)?;
-    let mut argv: Vec<String> = vec!["survive".into(), "--with".into(), "-".into(), "--json".into()];
+    let mut argv: Vec<String> = vec!["apply".into(), "--with".into(), "-".into(), "--dry-run".into(), "--json".into()];
     if let Some(kind) = arg_str(args, "kind") {
         if !matches!(kind.as_str(), "auto" | "patch" | "text") {
             return Err(format!("`kind` = `{}` is not one of auto, patch, text", kind));
@@ -351,7 +354,7 @@ fn tool_survive(args: &Value) -> Result<Value, String> {
     argv.push(path_arg(&pl, &file, "file")?);
     let run = run_cli_with_stdin(&argv, Some(&pl.cwd), Some(&edit))?;
     let report: Value = serde_json::from_str(run.stdout.trim()).map_err(|_| {
-        format!("almide survive produced no JSON report (exit {}): {}", run.exit_code, run.stderr.trim())
+        format!("almide apply --dry-run produced no JSON report (exit {}): {}", run.exit_code, run.stderr.trim())
     })?;
     if let Some(e) = report.get("error").and_then(|e| e.as_str()) {
         return Err(e.to_string());
@@ -427,7 +430,7 @@ fn tool_api_def() -> Value {
     json!({
         "name": "almide_api",
         "title": "List the API surface of a module",
-        "description": "List every public declaration with its exact signature — use this instead of guessing a stdlib name or grepping. `target` is a .almd path, `@stdlib/<module>` (e.g. @stdlib/string), or `@stdlib` for a snapshot of the core modules. Runs `almide ide outline --json` / `almide ide stdlib-snapshot --json`.",
+        "description": "List every public declaration with its exact signature — use this instead of guessing a stdlib name or grepping. `target` is a .almd path, `@stdlib/<module>` (e.g. @stdlib/string), or `@stdlib` for a snapshot of the core modules. Runs `almide query outline --json` / `almide query stdlib --json`.",
         "inputSchema": obj_schema(
             json!({
                 "target": { "type": "string", "description": "A .almd file path, `@stdlib/<module>`, or `@stdlib`" },
@@ -474,7 +477,7 @@ fn tool_survive_def() -> Value {
     json!({
         "name": "almide_survive",
         "title": "Judge an edit before writing it",
-        "description": "Apply a proposed edit IN MEMORY and report what it would change: check diagnostics, the tests that reach the file, and its contract fixtures, each bucketed {unchanged, newly_broken, newly_fixed, removed}, plus `survives` (no newly broken error, test or contract, no removed test or contract, and no test hollowed to assertions that read nothing). `edit` is a unified diff or the file's full new text. The file is never written; like almide_test it compiles and runs tests (build artifacts under the system temp dir). Runs `almide survive --with - --json`.",
+        "description": "Apply a proposed edit IN MEMORY and report what it would change: check diagnostics, the tests that reach the file, and its contract fixtures, each bucketed {unchanged, newly_broken, newly_fixed, removed}, plus `survives` (no newly broken error, test or contract, no removed test or contract, and no test hollowed to assertions that read nothing). `edit` is a unified diff or the file's full new text. The file is never written; like almide_test it compiles and runs tests (build artifacts under the system temp dir). Runs `almide apply --with - --dry-run --json`.",
         "inputSchema": obj_schema(
             json!({
                 "file": { "type": "string", "description": "The .almd file the edit is to" },

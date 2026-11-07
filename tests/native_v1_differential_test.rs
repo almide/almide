@@ -58,6 +58,29 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // ── #4006 C1 class D: top-level heap state, once a wall ──
+    ("top_var_heap", "var LOG = \"\"\nfn main() -> Unit = {\n  LOG = LOG + \"x\"\n  println(LOG)\n}\n"),
+    ("top_let_heap_call", "let S = int.to_string(3)\nfn main() -> Unit = {\n  println(S)\n}\n"),
+    // ── #4006 C1 class D: a module-level heap binding in its thread-local
+    //    cell (an append, a record rebuilt from its own fields), a find's
+    //    0-or-1 block on the Option carrier, a linked body's Option result ──
+    ("heap_global_list", "var LOG: List[String] = []\n\nfn note(s: String) -> Unit = {\n  LOG = LOG + [s]\n}\n\nfn main() -> Unit = {\n  note(\"a\")\n  note(\"b\")\n  println(list.join(LOG, \",\"))\n  println(int.to_string(list.len(LOG)))\n}\n"),
+    ("heap_global_record", "type C = { n: Int, tag: String }\n\nvar G: C = C { n: 0, tag: \"start\" }\n\nfn set(k: Int) -> Unit = {\n  G = C { n: k, tag: \"k\" + int.to_string(k) }\n}\n\nfn main() -> Unit = {\n  set(1)\n  set(2)\n  println(int.to_string(G.n) + \" \" + G.tag)\n}\n"),
+    ("heap_global_take_callee_reads", "var gl: List[Int] = []\n\nfn gl_len() -> Int = list.len(gl)\n\nfn via(mut xs: List[Int]) -> Unit = {\n  list.push(xs, gl_len())\n}\n\nfn main() -> Unit = {\n  for i in 0..<3 {\n    list.push(gl, i)\n  }\n  via(gl)\n  println(\"${gl}\")\n}\n"),
+    // A read-only module-level var argument borrows a snapshot of its cell (#4562):
+    // a callee that writes the var meanwhile leaves the argument as it was.
+    ("heap_global_borrow_snapshot", "var m: Map[Int, Int] = map.new()\nvar xs: List[Int] = []\n\nfn bump() -> Unit = {\n  m = map.set(m, 1, 100)\n}\n\nfn read_after_bump(x: Map[Int, Int]) -> Int = {\n  bump()\n  map.get(x, 1) ?? 0\n}\n\nfn look(k: Int) -> Int = map.get(m, k) ?? 0\n\nfn count() -> Int = list.len(xs)\n\nfn main() -> Unit = {\n  m = map.set(m, 1, 1)\n  let a = read_after_bump(m)\n  xs = [1, 2, 3]\n  let snap = xs\n  xs = [9]\n  println(\"${a} ${look(1)} ${count()} ${list.len(snap)} ${list.get(xs, 0) ?? 0}\")\n}\n"),
+    ("find_scalar_opt", "fn first_big(xs: List[Int]) -> Int? = list.find(xs, (x) => x > 10)\n\nfn main() -> Unit = {\n  println(int.to_string(first_big([3, 12, 40]) ?? -1))\n  println(int.to_string(first_big([1, 2]) ?? -1))\n}\n"),
+    ("linked_option_ret", "fn main() -> Unit = {\n  let a = option.map(some(4), (x) => x * 3) ?? 0\n  let b = option.map(none, (x) => x * 3) ?? 7\n  println(int.to_string(a + b))\n}\n"),
+    // ── #4006 C1: a combinator call its linked self-hosted body refuses,
+    //    served by the runtime body its declaration names (native_hof):
+    //    a list moved in at its last read, a list read again (copied), a
+    //    scalar capture, a Float lambda over the runtime matrix ──
+    ("hof_fold_opt", "fn main() -> Unit = {\n  let v: List[Int?] = [some(1), none, some(3)]\n  println(int.to_string(list.fold(v, 0, (a, o) => a + (o ?? 10))))\n}\n"),
+    ("hof_fold_opt_kept", "fn main() -> Unit = {\n  let base = 100\n  let v: List[Int?] = [some(1), none, some(3)]\n  let s = list.fold(v, 0, (a, o) => a + (o ?? base))\n  println(int.to_string(s))\n  println(int.to_string(list.len(v)))\n}\n"),
+    ("hof_map_opt", "fn main() -> Unit = {\n  let v: List[Int?] = [some(4), none]\n  let w = list.map(v, (o) => (o ?? 0) * 2)\n  println(int.to_string(w[0] + w[1]))\n}\n"),
+    ("hof_flat_map_rows", "fn main() -> Unit = {\n  let rows: List[List[Int]] = [[1, 2], [3]]\n  let flat = list.flat_map(rows, (r) => r)\n  println(int.to_string(list.len(flat)))\n  println(int.to_string(flat[2]))\n}\n"),
+    ("hof_matrix_map_capture", "fn main() -> Unit = {\n  let s = 2.5\n  let m = matrix.from_lists([[1.0, -2.0], [0.5, 4.0]])\n  let t = matrix.map(m, (x) => x * s)\n  println(\"${matrix.to_lists(t)}\")\n  println(\"${matrix.to_lists(m)}\")\n}\n"),
     // ── Rung 5 closures slab: scalar-capture closures are env slot blocks
     //    ([fnidx, drop-header, captures…]) dispatched via __almd_ci_* tables ──
     ("closure_capture", "fn adder(n: Int) -> (Int) -> Int = (x) => x + n\n\nfn main() -> Unit = {\n  let add3 = adder(3)\n  println(int.to_string(add3(7)))\n  println(int.to_string(add3(39)))\n}\n"),
@@ -111,7 +134,7 @@ const CORPUS: &[(&str, &str)] = &[
     ("top_var", "var COUNT = 0\nfn main() -> Unit = {\n  println(int.to_string(COUNT))\n}\n"),
     ("top_var_writes", "var COUNT = 1\nvar RATIO = 0.5\n\neffect fn bump() -> Unit = {\n  COUNT = COUNT * 3\n  RATIO = RATIO + 1.25\n}\n\neffect fn main() -> Unit = {\n  bump()!\n  bump()!\n  println(int.to_string(COUNT))\n  println(float.to_string(RATIO))\n}\n"),
     // ── #4006 family B: a scalar Option rides Option<i64> ──
-    ("option_scalar", "fn find(x: Int) -> Int? = if x > 0 then some(x * 2) else none\n\nfn get(o: Int?) -> Int = o ?? 0 - 1\n\nfn main() -> Unit = {\n  match find(3) {\n    some(v) => println(int.to_string(v)),\n    none => println(\"none\"),\n  }\n  println(int.to_string(get(find(-4))))\n  println(int.to_string(get(some(11))))\n}\n"),
+    ("option_scalar", "fn find(x: Int) -> Int? = if x > 0 then some(x * 2) else none\n\nfn get(o: Int?) -> Int = (o ?? 0) - 1\n\nfn main() -> Unit = {\n  match find(3) {\n    some(v) => println(int.to_string(v)),\n    none => println(\"none\"),\n  }\n  println(int.to_string(get(find(-4))))\n  println(int.to_string(get(some(11))))\n}\n"),
     // ── #4006 family C: scalar-Ok Results past Int, and Result[String, String] ──
     ("result_float_unit", "fn half(x: Float) -> Result[Float, String] = if x > 0.0 then ok(x / 2.0) else err(\"neg\")\n\nfn check(x: Int) -> Result[Unit, String] = if x > 0 then ok(()) else err(\"bad\")\n\nfn main() -> Unit = {\n  match half(3.0) {\n    ok(v) => println(float.to_string(v)),\n    err(e) => println(e),\n  }\n  match check(0) {\n    ok(_) => println(\"fine\"),\n    err(e) => println(e),\n  }\n}\n"),
     ("result_string_ok", "fn g(x: Int) -> Result[String, String] = if x > 0 then ok(\"pos \" + int.to_string(x)) else err(\"neg\")\n\nfn show(r: Result[String, String]) -> String = match r {\n  ok(s) => \"ok:\" + s,\n  err(e) => \"err:\" + e,\n}\n\nfn main() -> Unit = {\n  println(show(g(3)))\n  println(show(g(0)))\n  println(show(ok(\"lit\")))\n}\n"),
@@ -171,6 +194,47 @@ const CORPUS: &[(&str, &str)] = &[
     //    materialized at each use: literals, const arithmetic over other
     //    lets (wrapping), a float division and a string. ──
     ("top_let_consts", "let LIMIT = 10\nlet SCALE = LIMIT * 3 + 9223372036854775807\nlet HALF = 1.0 / 2.0\nlet NAME = \"almide\"\nfn main() -> Unit = {\n  println(int.to_string(LIMIT + SCALE))\n  println(float.to_string(HALF))\n  println(NAME)\n}\n"),
+    // ── #4514: a runtime-typed value the program declares but never operates
+    //    on still names its runtime type (an unused `[:]` aliases
+    //    `AlmideMap`), and a linked self-hosted body's uncalled siblings no
+    //    longer put `Value` in the type table (`option.unwrap_or` over a
+    //    List[Float] links from the source that defines the Value routines).
+    //    Both rendered code rustc rejected. ──
+    ("unused_map_binding", "fn main() -> Unit = {\n  let unused: Map[String, Bool] = [:]\n  let flag: Bool = true\n  println(\"flag = ${flag}\")\n}\n"),
+    ("list_option_fallback_float", "fn main() -> Unit = {\n  let base: List[Float] = [1.5, 2.25]\n  let picked: List[Float] = option.unwrap_or(some([-42.5, 0.0]), base)\n  println(\"picked = ${picked}\")\n  let ints: List[Int] = option.unwrap_or(some([42, 42]), [7])\n  println(\"ints = ${ints}\")\n}\n"),
+    // ── #4538: a range whose element count does not fit in an Int. Built, it
+    //    is the out-of-memory abort on both renders (v0 converted the 2^64
+    //    count of `MIN...MAX` to 0 and died on a capacity-overflow panic);
+    //    counted, it walks the range (v1 read the wrapped `end - start` as a
+    //    zero-length loop, so the fold answered its init). ──
+    ("range_count_overflow_inclusive", "fn direct(a: Int, e: Int) -> Int = list.len(a...e)\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(direct(top - 9223372036854775807, top)))\n}\n"),
+    ("range_count_overflow_inclusive_full", "fn span(a: Int, e: Int) -> Int = {\n  let r = a...e\n  list.len(r)\n}\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(span(0 - top - 1, top)))\n}\n"),
+    ("range_head_map_count_overflow", "fn doubled(a: Int, e: Int) -> Int = list.len(list.range(a, e) |> list.map((x) => x * 2))\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(doubled(0 - top - 1, top)))\n}\n"),
+    ("range_head_fold_count_overflow", "fn walk(a: Int, e: Int) -> Int = a..<e |> list.fold(0, (acc, x) => acc + 100 / (x - a - 3))\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(walk(0 - top - 1, top)))\n}\n"),
+    // The count of `list.range(i64::MIN, 2^31)` is 2^63 + 2^31: a counting
+    //    fold the optimizer collapses must answer what stepping every element
+    //    answers, `a + 1` wrapping to -9223372034707292160 (fuzz seed
+    //    674247930034 index 3227). v1 read the wrapped `end - start` as a
+    //    zero-length loop and answered 0.
+    ("range_head_fold_count_past_int_max", "fn count(a: Int, e: Int) -> Int = list.range(a, e) |> list.fold(0, (n, _x) => n + 1)\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(int.to_string(count(0 - top - 1, 2147483648)))\n  println(int.to_string((0 - top - 1)..<top |> list.fold(0, (n, _x) => n + 1)))\n}\n"),
+    ("range_head_fold_list_range_count_overflow", "fn walk(a: Int, e: Int) -> Int = list.range(a, e) |> list.fold(0, (acc, x) => acc + 100 / (x - a - 3))\nfn main() -> Unit = {\n  let top = 9223372036854775807\n  println(\"before\")\n  println(int.to_string(walk(0 - top, top)))\n}\n"),
+    // ── #4517: one binding passed at two argument positions of one call at
+    //    its last use. The render moved it into `map.merge`'s owned-reuse
+    //    routine at the first position and borrowed it at the second
+    //    (`almide_rt_map_merge_owned(v0, &v0)`, rustc E0382); a binding the
+    //    same call reads more than once now moves at none of its positions.
+    //    The other two-operand calls (set algebra, list/string/Bytes `+`, a
+    //    user fn) given the same binding twice are pinned beside it. ──
+    ("merge_same_binding_let", "fn main() -> Unit = {\n  let y0: Map[String, String] = [:]\n  let r1: Bool = map.contains(map.merge(y0, y0), \" nbsp \")\n  let r2: Int = 1\n  println(\"r2 = ${r2}\")\n}\n"),
+    ("merge_same_binding_rebind", "fn main() -> Unit = {\n  var m = map.from_list([(\"a\" + int.to_string(1), \"x\"), (\"b\", \"y\")])\n  m = map.merge(m, m)\n  println(\"${map.len(m)}\")\n}\n"),
+    ("merge_same_binding_tail_call", "fn go(m: Map[String, Int], n: Int) -> Map[String, Int] =\n  if n == 0 then m else go(map.merge(m, m), n - 1)\n\nfn main() -> Unit = {\n  let m = go(map.from_list([(\"k\" + int.to_string(1), 1)]), 3)\n  println(\"${map.len(m)}\")\n}\n"),
+    ("merge_same_binding_fold_acc", "fn main() -> Unit = {\n  let m0 = map.from_list([(\"k\" + int.to_string(1), 1)])\n  let m = list.fold([1, 2, 3], m0, (acc, x) => map.merge(acc, acc))\n  println(\"${map.len(m)}\")\n}\n"),
+    ("merge_same_binding_int_keys", "fn main() -> Unit = {\n  let m = map.from_list([(1, 2), (3, 4)])\n  println(\"${map.len(map.merge(m, m))}\")\n}\n"),
+    ("set_union_same_binding", "fn main() -> Unit = {\n  let s = set.from_list([\"a\" + int.to_string(1), \"b\"])\n  println(\"${set.len(set.union(s, s))}\")\n}\n"),
+    ("list_concat_same_binding", "fn main() -> Unit = {\n  let xs = [\"a\" + int.to_string(1), \"b\"]\n  println((xs + xs) |> list.join(\",\"))\n}\n"),
+    ("str_concat_same_binding", "fn main() -> Unit = {\n  let s = \"ab\" + int.to_string(3)\n  println(s + s)\n}\n"),
+    ("bytes_concat_same_binding", "fn main() -> Unit = {\n  let b = bytes.from_string(\"ab\" + int.to_string(3))\n  println(\"${bytes.len(b + b)}\")\n}\n"),
+    ("user_fn_same_binding_twice", "fn both(a: List[String], b: List[String]) -> List[String] = a + b\n\nfn main() -> Unit = {\n  let xs = [\"a\" + int.to_string(1), \"b\"]\n  println(both(xs, xs) |> list.join(\",\"))\n}\n"),
 ];
 
 #[test]
@@ -263,17 +327,28 @@ fn out_of_subset_walls_honestly() {
         // (#1869); a combinator over the list is still outside it.
         // list_param moved to the POSITIVE corpus — rung 4 renders scalar-list
         // params/literals/indexing natively (`vec![…]` + the bounds shims).
-        // #4006 family I: top-level state lives in native storage slots now,
-        // a SCALAR slot only. A heap-typed var or eager let still walls.
-        ("top_var_heap", "var LOG = \"\"
+        // #4006 family I and C1 class D: a heap-typed var or eager let now
+        // lives in its thread-local cell (the positive corpus above), but a
+        // write that reads the cell twice before storing back (a record
+        // rebuilt from two of its own fields) copies the cell's value per
+        // read and keeps the wall; a matrix transpose is still outside the
+        // subset.
+        ("heap_global_record_rebuild", "type C = { n: Int, tag: String }
+
+var G: C = C { n: 0, tag: \"start\" }
+
+fn bump() -> Unit = {
+  G = C { n: G.n + 1, tag: G.tag + \"!\" }
+}
+
 fn main() -> Unit = {
-  LOG = LOG + \"x\"
-  println(LOG)
+  bump()
+  println(int.to_string(G.n) + \" \" + G.tag)
 }
 "),
-        ("top_let_heap_call", "let S = int.to_string(3)
-fn main() -> Unit = {
-  println(S)
+        ("matrix_transpose", "fn main() -> Unit = {
+  let m = matrix.from_lists([[1.0, 2.0]])
+  println(\"${matrix.to_lists(matrix.transpose(m))}\")
 }
 "),
     ];

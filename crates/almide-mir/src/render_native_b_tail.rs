@@ -355,7 +355,7 @@ fn join_rhs(v: ValueId, t: NTy, arm_own: bool, copy: String) -> String {
 }
 
 /// A rendered call argument with the NTy it carries (`Imm` is always i64).
-fn call_arg(a: &CallArg, tys: &BTreeMap<ValueId, NTy>) -> Result<(String, NTy), LowerError> {
+pub(crate) fn call_arg(a: &CallArg, tys: &BTreeMap<ValueId, NTy>) -> Result<(String, NTy), LowerError> {
     match a {
         CallArg::Handle(v) | CallArg::Scalar(v) => {
             let t = *tys.get(v).ok_or_else(|| wall("native: call arg untyped"))?;

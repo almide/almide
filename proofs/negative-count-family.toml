@@ -2,8 +2,8 @@
 # the sequence modules, held by tests/negative_count_family_test.rs.
 #
 # POPULATION: every public fn of list, string, bytes and matrix with an `Int`
-# parameter, read from the compiler's own module interface (`almide compile
-# <module> --json`). Every slot of it is a row here, either a `[[cell]]` the
+# parameter, read from the compiler's own module interface (`almide query
+# interface <module> --json`). Every slot of it is a row here, either a `[[cell]]` the
 # test RUNS or a slot named under `[outside]` with the reason its class is not a
 # count. A new Int parameter with no row fails the gate, and so does a row whose
 # slot no longer exists, so the family cannot gain a member that escapes it.
