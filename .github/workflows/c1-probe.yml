@@ -1,0 +1,28 @@
+name: C1 probe
+on:
+  push:
+    branches: [c1-probe-walls]
+env:
+  CARGO_TERM_COLOR: never
+jobs:
+  walls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          shared-key: linux-release-1.97.0
+          save-if: false
+      - name: walls
+        run: |
+          cargo test --release --test c1_probe_walls_test -- --nocapture
+          cargo test --release --test native_verified_floor_test -- --nocapture 2>&1 | tail -80 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c1-walls
+          path: c1-walls.tsv
