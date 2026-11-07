@@ -37,7 +37,12 @@ fn self_host_source_to_ir(
 }
 
 /// The registry's call table: call name → (source, impl name), and source →
-/// its entries. A call the native runtime floor already serves keeps that route.
+/// its entries. The first registry entry of a call name wins. Whether the
+/// native runtime floor already serves a call (it then keeps that route) is
+/// asked per call the program makes ([`served_natively`]), not per registry
+/// entry: the floor's answer derives the call's runtime closure, and doing that
+/// for every registry entry was half of a small program's `almide build`
+/// (#4595).
 type SelfHostCallTable = (
     std::collections::BTreeMap<&'static str, (&'static str, &'static str)>,
     std::collections::BTreeMap<&'static str, &'static [(&'static str, &'static str)]>,
@@ -53,15 +58,19 @@ fn self_host_call_table() -> SelfHostCallTable {
     for (src, pairs) in crate::mir_ops::self_host_runtime() {
         entries_of.entry(*src).or_insert(*pairs);
         for (impl_fn, call) in pairs.iter() {
-            if crate::render_native_shims::shim(call).is_none()
-                && crate::native_floor::declared(call).is_none()
-                && !crate::native_list_ops::is_list_concat(call)
-            {
-                by_call.entry(*call).or_insert((*src, *impl_fn));
-            }
+            by_call.entry(*call).or_insert((*src, *impl_fn));
         }
     }
     (by_call, entries_of)
+}
+
+/// Does the native render serve `call` itself (a shim, the runtime floor, or
+/// the list-concat lowering)? Such a call keeps that route and is never
+/// retargeted onto a self-host body.
+fn served_natively(call: &str) -> bool {
+    crate::render_native_shims::shim(call).is_some()
+        || crate::native_floor::declared(call).is_some()
+        || crate::native_list_ops::is_list_concat(call)
 }
 
 /// The link's working state across its fixpoint rounds.
@@ -88,7 +97,7 @@ impl SelfHostLinker<'_> {
         &self,
         name: &mut String,
     ) -> Result<Option<(&'static str, String)>, LowerError> {
-        match self.by_call.get(name.as_str()) {
+        match self.by_call.get(name.as_str()).filter(|_| !served_natively(name)) {
             Some(&(src, impl_fn)) => {
                 if self.user_names.contains(impl_fn) {
                     return Err(self.clash(impl_fn));
