@@ -59,6 +59,8 @@ enum DTy {
     Matrix,
     List(Box<DTy>),
     Opt(Box<DTy>),
+    /// `Map[K, V]`: v0's runtime `AlmideMap<K, V>`, the generated map alias.
+    Map(Box<DTy>, Box<DTy>),
     Fn(Vec<DTy>, Box<DTy>),
 }
 
@@ -93,6 +95,9 @@ fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
             "?" | "Option" => DTy::Opt(Box::new(dty_of(&args[0], tps)?)),
             _ => return None,
         },
+        TypeExpr::Generic { name, args } if args.len() == 2 && name.as_str() == "Map" => {
+            DTy::Map(Box::new(dty_of(&args[0], tps)?), Box::new(dty_of(&args[1], tps)?))
+        }
         TypeExpr::Fn { params, ret, is_effect: false } => {
             DTy::Fn(params.iter().map(|p| dty_of(p, tps)).collect::<Option<_>>()?, Box::new(dty_of(ret, tps)?))
         }
@@ -114,6 +119,7 @@ fn rust_agrees(d: &DTy, r: &str) -> Option<bool> {
         DTy::Var(_) => r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !by_ref,
         DTy::List(_) => r.starts_with("Vec<") || (by_ref && r.starts_with('[')),
         DTy::Opt(_) => r.starts_with("Option<") && !by_ref,
+        DTy::Map(..) => r.starts_with("AlmideMap<"),
         DTy::Fn(..) => r.starts_with("std::rc::Rc<dynFn(") && !by_ref,
     };
     ok.then_some(by_ref)
@@ -157,9 +163,6 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
         .ok_or("no @intrinsic")?;
     let tps: BTreeSet<String> = generics.iter().flatten().map(|g| g.name.as_str().to_string()).collect();
     let dparams: Vec<DTy> = params.iter().map(|p| dty_of(&p.ty, &tps)).collect::<Option<_>>().ok_or("a param type outside the map")?;
-    if !dparams.iter().any(|p| matches!(p, DTy::Fn(..))) {
-        return Err("no function-typed param".into());
-    }
     let dret = dty_of(ret, &tps).ok_or("a return type outside the map")?;
     let (rust_params, rust_ret, items) = crate::native_floor::runtime_body(&symbol).ok_or_else(|| format!("`{symbol}` is no takeable runtime body"))?;
     if rust_params.len() != dparams.len() || rust_agrees(&dret, &rust_ret) != Some(false) {
@@ -171,7 +174,13 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
         .map(|(d, r)| rust_agrees(&d, r).map(|b| (d, b)))
         .collect::<Option<_>>()
         .ok_or_else(|| format!("runtime params {rust_params:?} disagree"))?;
-    let (twin, text) = static_twin(&symbol, items.first().copied().ok_or("no runtime body text")?).ok_or("the runtime body has no `Rc<dyn Fn>` param to take statically")?;
+    let text = items.first().copied().ok_or("no runtime body text")?;
+    // A combinator takes its closure statically (`static_twin`); a call with
+    // no function-typed param calls the runtime body as it is.
+    if !params.iter().any(|(d, _)| matches!(d, DTy::Fn(..))) {
+        return Ok(Hof { twin: symbol.clone(), symbol, params, ret: dret, items });
+    }
+    let (twin, text) = static_twin(&symbol, text).ok_or("the runtime body has no `Rc<dyn Fn>` param to take statically")?;
     let mut items = items;
     items[0] = Box::leak(text.into_boxed_str());
     Ok(Hof { symbol, params, ret: dret, items, twin })
@@ -413,6 +422,14 @@ fn bind_param(env: &mut Env, d: &DTy, t: NTy) -> Option<()> {
         DTy::Opt(e) => bind_inner(env, e, opt_payload(t)?),
         DTy::Var(v) => bind(env, v, crate::render_native::owned_nty(t)),
         DTy::Matrix => rec::is_matrix(t).then_some(()),
+        DTy::Map(k, v) => {
+            let (kk, vk) = match t {
+                NTy::Rec(i) | NTy::RecRef(i) => rec::map_kinds(i)?,
+                _ => return None,
+            };
+            bind_inner(env, k, kk)?;
+            bind_inner(env, v, vk)
+        }
         DTy::Int | DTy::Bool => (t == NTy::I64).then_some(()),
         DTy::Float => (t == NTy::F64).then_some(()),
         DTy::Str => matches!(t, NTy::Str | NTy::StrRef).then_some(()),
@@ -441,6 +458,7 @@ fn kind_of(env: &Env, d: &DTy) -> Option<NTy> {
             NTy::F64 => return None,
             k => NTy::Rec(rec::option_type_of(k)),
         },
+        DTy::Map(k, v) => NTy::Rec(rec::map_type_of(kind_of(env, k)?, kind_of(env, v)?)),
         DTy::Fn(..) => return None,
     })
 }
@@ -642,6 +660,8 @@ fn plan(
     for (((d, by_ref), (code, t)), a) in hof.params.iter().zip(&got).zip(call.args.iter()) {
         rendered.push(match d {
             DTy::Fn(dps, dret) => fn_arg(&cx, &mut env, (dps, dret), (a, *t), &mut side)?,
+            // The render carries a Bool in its i64 lane; the runtime takes `bool`.
+            DTy::Bool => format!("({code} != 0)"),
             _ => {
                 let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
                 runtime_arg(code, *t, *by_ref, dying)
@@ -650,6 +670,8 @@ fn plan(
     }
     let ret = kind_of(&env, &hof.ret)?;
     let expr = format!("{}({})", hof.twin, rendered.join(", "));
+    // A declared Bool result: the runtime's `bool` in the render's i64 lane.
+    let expr = if hof.ret == DTy::Bool { format!("({expr}) as i64") } else { expr };
     Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims)))
 }
 
@@ -731,10 +753,12 @@ mod tests {
         }
     }
 
-    /// A linked body with no function-typed param has none.
+    /// A linked body with no function-typed param has the route its
+    /// declaration names, called as it is (no static twin).
     #[test]
-    fn a_body_without_a_function_param_has_no_route() {
-        assert!(super::of("list_contains_str").is_none());
+    fn a_body_without_a_function_param_calls_its_runtime_body_as_it_is() {
+        let derived = super::derive_explained("list_contains_str");
+        assert_eq!(derived.as_ref().map(|h| (h.symbol.as_str(), h.twin.as_str())), Ok(("almide_rt_list_contains", "almide_rt_list_contains")));
     }
 }
 
