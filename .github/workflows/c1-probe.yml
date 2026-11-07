@@ -20,17 +20,26 @@ jobs:
         with:
           shared-key: linux-release-1.97.0
           save-if: false
-      - name: tests
+      - name: build
+        run: cargo build --release --bin almide && cargo build --release -p almide-mir --example emit_native_bundle
+      - name: dumps
         run: |
-          set -x
-          cargo build --release --bin almide
-          cargo test --release --test native_verified_floor_test -- --nocapture 2>&1 | tail -40
-          cargo test --release -p almide-mir --lib native_hof 2>&1 | tail -15
-          cargo test --release --test native_bundled_bodies_test 2>&1 | tail -8
-          cargo test --release --test native_floor_compile_test 2>&1 | tail -8
-          cargo test --release --test native_v1_differential_test 2>&1 | tail -12
+          set +e
+          mkdir -p dumps
+          for f in closures_and_variants list_heapelem_rc; do
+            p=spec/wasm_cross/$f.almd
+            ./target/release/examples/emit_native_bundle $p dumps/$f.v1.rs > /dev/null
+            ./target/release/almide $p --target rust > dumps/$f.v0.rs 2>&1
+            ALMIDE_VERIFIED_DEBUG=1 ./target/release/almide build $p -o dumps/$f.bin > dumps/$f.build.log 2>&1
+            tail -60 dumps/$f.build.log
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: dumps
+          path: dumps
       - name: v1 and v0 outputs of the newly certified programs
         run: |
+          set +e
           for f in closures_and_variants list_heapelem_rc list_modify_heap list_update_heap sort_by_str_key_heap; do
             p=spec/wasm_cross/$f.almd
             ./target/release/almide run $p > v1.out 2>v1.err; a=$?
@@ -41,28 +50,7 @@ jobs:
         run: |
           cargo build --release -p almide-mir --example emit_native_bundle && cargo build --release -p almide-verify
           ./target/release/examples/emit_native_bundle spec/wasm_cross/list_modify_heap.almd /tmp/lmh.rs > /tmp/lmh.bundle
+          set +e
           ./target/release/almide-verify bundle /tmp/lmh.bundle | tail -5; echo "original exit=${PIPESTATUS[0]}"
           python3 scripts/c1probe/corrupt.py /tmp/lmh.bundle /tmp/lmh.bad.bundle
           ./target/release/almide-verify bundle /tmp/lmh.bad.bundle | grep -v ": ACCEPT" | tail -8; echo "corrupted exit=${PIPESTATUS[0]}"
-  negative-control:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          fetch-depth: 0
-      - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
-        with:
-          toolchain: "1.97.0"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
-        with:
-          shared-key: linux-release-1.97.0
-          save-if: false
-      - name: with the fix reverted the floor test must fail
-        run: |
-          git -c user.name=p -c user.email=p@p revert --no-commit eeccd924f
-          git status --short
-          if cargo test --release --test native_verified_floor_test 2>&1 | tee nc.log | tail -30; [ "${PIPESTATUS[0]}" = 0 ]; then echo "NEGATIVE CONTROL FAILED: floor test passed"; exit 1; fi
-          grep -o "now wall[^:]*: \[.*\]" nc.log | head -3
-          echo "NEGATIVE CONTROL OK"
