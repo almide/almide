@@ -68,6 +68,9 @@ fn fake_rustc(dir: &Path) {
         r#"fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() == 1 && args[0] == "--version" {
+        use std::io::Write;
+        let path = std::env::var("ALMIDE_VERSION_PROBES").unwrap();
+        writeln!(std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap(), "probe").unwrap();
         println!("rustc {} (0000000 2020-01-01)", std::env::var("ALMIDE_FAKE_RUSTC_VERSION").unwrap());
         return;
     }
@@ -97,10 +100,13 @@ fn build_with(bin: &Path, version: &str) -> (bool, String, PathBuf, tempfile::Te
         .env("PATH", std::env::join_paths(dirs).unwrap())
         .env("ALMIDE_FAKE_RUSTC_VERSION", version)
         .env("ALMIDE_REAL_RUSTC", real_rustc())
+        .env("ALMIDE_VERSION_PROBES", tmp.path().join("version-probes"))
         .env_remove("RUSTC")
         .current_dir(tmp.path())
         .output()
         .unwrap();
+    let probes = std::fs::read_to_string(tmp.path().join("version-probes")).unwrap();
+    assert_eq!(probes.lines().count(), 1, "discovery and the floor must share one version probe");
     (o.status.success(), String::from_utf8_lossy(&o.stderr).into_owned(), out, tmp)
 }
 

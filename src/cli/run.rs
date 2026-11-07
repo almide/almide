@@ -50,12 +50,13 @@ fn generate_native_source(file: &str, no_check: bool, test_mode: bool, native_ve
     let opts = crate::codegen::CodegenOptions::default();
     // `metered`: from the IR, not the text — a user literal spelled like a
     // prim is emitted into `rs_code` verbatim (#3486).
-    let (rs_code, metered) = crate::try_compile_with_ir(file, no_check, &opts)
+    let (pending, metered, _) = crate::try_compile_pending(file, no_check, &opts)
         .map_err(|_| "compile failed".to_string())?;
-    t.lap("frontend+emit");
+    t.lap("frontend");
     let rs_code = if native_verified && !test_mode {
-        super::render_v1_native_or_fallback(file, rs_code, metered, &opts)
+        super::render_v1_native_or_fallback(pending, metered, &opts)
     } else {
+        let rs_code = pending.generate();
         // The NATIVE TEST harness rides the standard codegen: link the
         // v1-rendered regions in, exactly as the run path does when the whole
         // program walls (#3669), or meter them in the codegen (#3673).
@@ -267,9 +268,16 @@ pub(super) fn binary_digest_path(bin: &std::path::Path) -> std::path::PathBuf {
 
 /// The lowercase hex SHA-256 of the file at `path`.
 fn file_sha256(path: &std::path::Path) -> Option<String> {
-    use sha2::{Digest, Sha256};
     let bytes = std::fs::read(path).ok()?;
-    Some(Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect())
+    #[cfg(any(unix, windows))]
+    let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
+    #[cfg(not(any(unix, windows)))]
+    let digest = {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(&bytes)
+    };
+    let digest: &[u8] = digest.as_ref();
+    Some(digest.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Is the cached binary at `bin` the one this compiler built there: present,

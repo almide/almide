@@ -318,6 +318,17 @@ fn render_native_with_runtime_hofs(
 /// certificates of the MIR it rendered from, and that MIR.
 fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     dump_native_mir_if_requested(source);
+    render_native_parts_with(|| source_to_ir_with(source, &[]))
+}
+
+/// Reuse an entry already parsed without recovery errors. The caller must reject
+/// parser diagnostics before calling; native checking and preparation remain shared.
+pub fn try_render_rust_program(source: &str, program: almide_lang::ast::Program) -> Result<String, LowerError> {
+    dump_native_mir_if_requested(source);
+    render_native_parts_with(|| program_to_ir_with(program, &[])).map(|(rust, _, _)| rust)
+}
+
+fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgram, LowerError>) -> Result<NativeRenderParts, LowerError> {
     crate::charge_probe::reset_budget_used();
     crate::lambda_sigs::clear();
     crate::option_blocks::clear();
@@ -327,7 +338,7 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
     let _owned_tco = crate::lower::OwnedTcoSlotsGuard::set(true);
     let ir = {
         let _slots = SlotHeldGlobalsGuard::set(true);
-        source_to_ir_with(source, &[])?
+        prepare()?
     };
     crate::charge_probe::note_program_regions(almide_ir::meter_plan::program_has_regions(&ir));
     // #4447: the native rungs render no `@export(c)` wrapper — the wall

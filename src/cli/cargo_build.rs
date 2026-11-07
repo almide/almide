@@ -190,7 +190,7 @@ pub(super) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path
 /// ~2.0 MB while one the cargo path built (no runtime use) shipped at 0.37 MB.
 /// Only `.debug_*` sections go: the code, the symbol table (backtraces still
 /// name their frames) and every message the program prints are unchanged.
-const FAST_PATH_RELEASE_ARGS: [&str; 6] = ["-C", "lto=fat", "-C", "codegen-units=1", "-C", "strip=debuginfo"];
+pub(super) const FAST_PATH_RELEASE_ARGS: [&str; 6] = ["-C", "lto=fat", "-C", "codegen-units=1", "-C", "strip=debuginfo"];
 
 fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<Result<std::path::PathBuf, String>> {
     let opt_level = if release { "3" } else { "1" };
@@ -200,8 +200,10 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
     // The release LLVM options reach the runtime too: a loop it vectorized
     // before LTO stays vectorized through it.
     let llvm: &[&str] = if release { super::native_target::RELEASE_LLVM_ARGS } else { &[] };
-    let rlib = ensure_runtime_rlib(opt_level, cpu.as_deref(), llvm).ok()?;
+    // Slim first: a source without the runtime boundary (a v1 render) has no
+    // use for the v0 runtime rlib, so it must not pay for building one.
     let mut slim = crate::codegen::slim_main_with_external_runtime(rs_code)?;
+    let rlib = ensure_runtime_rlib(opt_level, cpu.as_deref(), llvm).ok()?;
     if !defines_entry_point(&slim) {
         slim.push_str("\nfn main() {}\n");
     }
@@ -378,6 +380,13 @@ pub(super) fn cargo_build_generated_with_native(
         if let Some(built) = try_rlib_fast_build(rs_code, project_dir, release) {
             return built;
         }
+        // No runtime boundary to slim at (a v1 render): the crate still
+        // depends on nothing but std, so rustc builds it without cargo.
+        if inputs.is_empty() {
+            if let Some(built) = super::v1_rustc_build::try_build(rs_code, project_dir, release) {
+                return built;
+            }
+        }
     }
 
     let src_dir = write_generated_cargo_project(rs_code, project_dir, native_deps, inputs)?;
@@ -461,7 +470,7 @@ fn append_release_rustflags(cmd: &mut std::process::Command, split: Option<&supe
 /// precompiled printer allocates through its own copy of the default
 /// allocator, which is the program's allocator only when the program has
 /// not replaced it.
-fn release_split_for(rs_code: &str) -> Option<&'static super::std_split::StdSplit> {
+pub(super) fn release_split_for(rs_code: &str) -> Option<&'static super::std_split::StdSplit> {
     if rs_code.contains("global_allocator") {
         return None;
     }

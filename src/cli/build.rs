@@ -287,11 +287,12 @@ pub fn cmd_build(args: BuildArgs) {
     });
 
     let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false, trace: false, meter_in_codegen: false };
-    let (rs_code, metered, outside_guarantee) = crate::try_compile_reporting(file, no_check, &opts)
+    let (pending, metered, outside_guarantee) = crate::try_compile_pending(file, no_check, &opts)
         .unwrap_or_else(|_| std::process::exit(1));
 
     // WASI target: use bare rustc (no external crate deps needed for WASM)
     if is_wasm {
+        let rs_code = pending.generate();
         let rs_code = match heap_cap {
             Some(n) => inject_heap_cap(&rs_code, n),
             None => rs_code,
@@ -306,9 +307,9 @@ pub fn cmd_build(args: BuildArgs) {
     // falls back to the v0 source above — honest-wall discipline: a v1-rendered
     // program is never wrong.
     let rs_code = if native_verified && !repr_c && !cdylib {
-        super::render_v1_native_or_fallback(file, rs_code, metered, &opts)
+        super::render_v1_native_or_fallback(pending, metered, &opts)
     } else {
-        rs_code
+        pending.generate()
     };
 
     // --heap-cap (#1530): wrap the binary's allocator AFTER the v1/v0 source

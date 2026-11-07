@@ -442,17 +442,44 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
 /// memory-safety guarantee (#4008), which `almide build` names on its
 /// `Built` line. Empty under `--no-check`, which checks nothing.
 pub(crate) fn try_compile_reporting(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>, Vec<String>), String> {
+    try_compile_pending(file, no_check, codegen_opts).map(|(pending, metered, outside)| (pending.generate(), metered, outside))
+}
+
+/// A program checked, lowered and linked, whose standard-codegen Rust has not
+/// been generated yet. The native route renders a program on the v1 trust
+/// spine first and ships that render when it applies; the standard codegen is
+/// then never read, so it runs only when something asks for it (#4595: it was
+/// ~10% of a small program's `almide build`). Every step that can print a
+/// diagnostic or refuse the program has already run: the codegen reports
+/// nothing of its own.
+pub(crate) struct PendingRust {
+    ir: almide::ir::IrProgram,
+    opts: codegen::CodegenOptions,
+    pub(crate) source: String,
+    pub(crate) native_program: Option<ast::Program>,
+}
+
+impl PendingRust {
+    /// The standard codegen's Rust (Codegen v3: Nanopass + Templates).
+    pub(crate) fn generate(mut self) -> String {
+        let t = cli::PhaseTimer::start();
+        let code = match codegen::codegen_with(&mut self.ir, codegen::pass::Target::Rust, &self.opts) {
+            codegen::CodegenOutput::Source(s) => s,
+            codegen::CodegenOutput::Binary(_) => unreachable!(),
+        };
+        t.lap("codegen");
+        code
+    }
+}
+
+/// [`try_compile_reporting`] up to, not including, the codegen.
+pub(crate) fn try_compile_pending(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(PendingRust, Option<almide::ir::IrProgram>, Vec<String>), String> {
     let t = cli::PhaseTimer::start();
-    let (mut ir_program, outside_guarantee) = compile_to_linked_ir(file, no_check, &t)?;
+    let (ir_program, outside_guarantee, program, source) = compile_to_linked_ir_with_source(file, no_check, &t)?;
     let metered = ir_program.as_ref().filter(|ir| almide::ir::runtime_use::uses_metered_prims(ir)).cloned();
-    // Codegen v3: three-layer pipeline (Nanopass + Templates)
-    let ir = ir_program.as_mut().expect("IR required for codegen");
-    let code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, codegen_opts) {
-        codegen::CodegenOutput::Source(s) => s,
-        codegen::CodegenOutput::Binary(_) => unreachable!(),
-    };
-    t.lap("codegen");
-    Ok((code, metered, outside_guarantee))
+    let ir = ir_program.expect("IR required for codegen");
+    let native_program = (!file.ends_with(".json")).then_some(program);
+    Ok((PendingRust { ir, opts: codegen_opts.clone(), source, native_program }, metered, outside_guarantee))
 }
 
 /// Everything [`try_compile_reporting`] does before codegen — every step that
@@ -465,8 +492,15 @@ pub(crate) fn check_through_link(file: &str) -> Result<(), String> {
 }
 
 fn compile_to_linked_ir(file: &str, no_check: bool, t: &cli::PhaseTimer) -> Result<(Option<almide::ir::IrProgram>, Vec<String>), String> {
+    compile_to_linked_ir_with_source(file, no_check, t).map(|(ir, outside, _, _)| (ir, outside))
+}
+
+fn compile_to_linked_ir_with_source(file: &str, no_check: bool, t: &cli::PhaseTimer) -> Result<(Option<almide::ir::IrProgram>, Vec<String>, ast::Program, String), String> {
     let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, parsed_project, self_versioned) = parse_and_resolve_for_compile(file)?;
     t.lap("parse+resolve");
+    // Preserve the input AST: inference mutates it, while the v1 checker has
+    // its own environment and must see the same entry as its source API.
+    let native_program = program.clone();
 
     let mut ir_program: Option<almide::ir::IrProgram> = None;
     let mut module_irs = std::collections::HashMap::new();
@@ -482,7 +516,7 @@ fn compile_to_linked_ir(file: &str, no_check: bool, t: &cli::PhaseTimer) -> Resu
     let permissions_project = project::permissions_project_for(file).or(parsed_project);
     optimize_verify_and_link(&mut ir_program, &permissions_project, (file, &source_text))?;
     t.lap("optimize+link");
-    Ok((ir_program, outside_guarantee))
+    Ok((ir_program, outside_guarantee, native_program, source_text))
 }
 
 /// Each dependency package's capability set (#4093, `almide deps`): the
