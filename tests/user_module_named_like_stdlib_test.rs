@@ -26,9 +26,12 @@ fn run(dir: &Path, args: &[&str]) -> (bool, String) {
     (out.status.success(), text)
 }
 
+/// The codes of the rows in a `check --json` run's output, in order: the
+/// `diagnostics` array of its one envelope line (#4590).
 fn codes(text: &str) -> Vec<String> {
     text.lines().filter(|l| l.starts_with('{'))
-        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["code"].as_str().unwrap().to_string())
+        .flat_map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["diagnostics"].as_array().cloned().unwrap_or_default())
+        .map(|d| d["code"].as_str().unwrap().to_string())
         .collect()
 }
 

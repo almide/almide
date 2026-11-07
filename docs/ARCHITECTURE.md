@@ -118,17 +118,19 @@ workspace roster. See [`Cargo.toml`](../Cargo.toml) for all members.
 ```
 almide/                    Workspace root
 ├── src/                   CLI binary (almide)
-│   ├── main.rs            Subcommands: init, run, build, test, check, lsp,
-│   │                      explain, fmt, compile, clean, add, deps, dep-path,
-│   │                      install, self-update, ide, fix, docs-gen
-│   │                      (no subcommand → REPL)
+│   ├── main.rs            Subcommands (cli_args.rs): init, run, build, test,
+│   │                      check, fmt, fix, bench, explain; add, remove,
+│   │                      update, trust, deps; apply, query, mcp, lsp;
+│   │                      upgrade, tool, verify, clean, repl
+│   │                      (no subcommand → grouped help)
 │   ├── compile_driver.rs  Shared front half: parse → check → lower → optimize
 │   ├── resolve.rs         Module resolution (filesystem + git deps)
 │   ├── project.rs         almide.toml parsing, PkgId
 │   ├── project_fetch.rs   Git dependency fetching
 │   └── cli/               Subcommand implementations; lsp.rs is the LSP server
 │                          (lsp-server over stdio); repl.rs; ide.rs = semantic
-│                          queries for agents (outline, doc, stdlib-snapshot)
+│                          queries for agents (`almide query outline / doc /
+│                          interface / stdlib`)
 │
 ├── crates/
 │   ├── almide-base/       Foundation: Sym interning (lasso), Span, Diagnostic
@@ -158,7 +160,7 @@ almide/                    Workspace root
 │   ├── almide-verify/     Independent certificate checker, shipped beside almide
 │   ├── almide-anchor-check/  Check located witness events against shipped wasm bytes
 │   ├── almide-interp/     Pre-codegen IR interpreter — 3rd cross-target oracle
-│   ├── almide-tools/      Formatter, module interface (almide compile), ALMDI
+│   ├── almide-tools/      Formatter, module interface (almide query interface), ALMDI
 │   ├── almide-dialect/    Pure-Rust MLIR dialect schema (no FFI)
 │   ├── almide-egg-lab/    Equality-saturation engine used by EggSaturationPass
 │   ├── almide-kernel/     [cargo-excluded] target-specific SIMD numeric kernels

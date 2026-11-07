@@ -1,4 +1,4 @@
-//! Golden snapshot for `almide ide outline @stdlib/<module>`.
+//! Golden snapshot for `almide query outline @stdlib/<module>`.
 //!
 //! dojo (and any SYSTEM_PROMPT that embeds a stdlib snapshot) depends on
 //! this output format being stable. A change here — whether adding a
@@ -13,16 +13,23 @@ fn almide() -> &'static str {
     env!("CARGO_BIN_EXE_almide")
 }
 
+/// The outline object inside a `query outline --json` envelope (#4590): under
+/// `result.decls` when the envelope wraps it, else `result` itself.
+fn outline_of(env: &serde_json::Value) -> &serde_json::Value {
+    let r = &env["result"];
+    if r.get("decls").is_some() { &r["decls"] } else { r }
+}
+
 fn run_outline(args: &[&str]) -> String {
     let output = Command::new(almide())
-        .arg("ide")
+        .arg("query")
         .arg("outline")
         .args(args)
         .output()
         .expect("failed to run almide");
     assert!(
         output.status.success(),
-        "almide ide outline {:?} failed:\n{}",
+        "almide query outline {:?} failed:\n{}",
         args,
         String::from_utf8_lossy(&output.stderr)
     );
@@ -67,7 +74,8 @@ fn stdlib_set_outline() {
 #[test]
 fn stdlib_json_schema_shape() {
     let out = run_outline(&["@stdlib/option", "--json"]);
-    let v: serde_json::Value = serde_json::from_str(&out).expect("valid json");
+    let env: serde_json::Value = serde_json::from_str(&out).expect("valid json");
+    let v = outline_of(&env);
     assert_eq!(v["source"], "stdlib");
     assert_eq!(v["module"], "option");
     assert!(v["functions"].is_array());
@@ -83,11 +91,11 @@ fn ide_doc_accepts_stdlib_prefix() {
     // ergonomic symmetry with `outline @stdlib/<m>`: `doc @stdlib/<m>.<fn>`
     // works exactly like `doc <m>.<fn>`.
     let bare = Command::new(almide())
-        .args(["ide", "doc", "string.to_upper", "--file", "spec/lang/default_args_test.almd"])
+        .args(["query", "doc", "string.to_upper", "--file", "spec/lang/default_args_test.almd"])
         .output()
         .unwrap();
     let prefixed = Command::new(almide())
-        .args(["ide", "doc", "@stdlib/string.to_upper", "--file", "spec/lang/default_args_test.almd"])
+        .args(["query", "doc", "@stdlib/string.to_upper", "--file", "spec/lang/default_args_test.almd"])
         .output()
         .unwrap();
     assert_eq!(bare.stdout, prefixed.stdout, "prefix should be transparent");
@@ -97,7 +105,7 @@ fn ide_doc_accepts_stdlib_prefix() {
 #[test]
 fn stdlib_snapshot_default_modules() {
     let output = Command::new(almide())
-        .args(["ide", "stdlib-snapshot"])
+        .args(["query", "stdlib"])
         .output()
         .expect("run");
     assert!(output.status.success());
@@ -111,7 +119,7 @@ fn stdlib_snapshot_default_modules() {
 #[test]
 fn stdlib_snapshot_modules_filter() {
     let output = Command::new(almide())
-        .args(["ide", "stdlib-snapshot", "--modules", "option,result"])
+        .args(["query", "stdlib", "--modules", "option,result"])
         .output()
         .expect("run");
     assert!(output.status.success());
@@ -125,11 +133,14 @@ fn stdlib_snapshot_modules_filter() {
 #[test]
 fn stdlib_snapshot_json_is_array() {
     let output = Command::new(almide())
-        .args(["ide", "stdlib-snapshot", "--modules", "option", "--json"])
+        .args(["query", "stdlib", "--modules", "option", "--json"])
         .output()
         .expect("run");
     assert!(output.status.success());
-    let v: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    let env: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    assert_eq!(env["ok"], true);
+    // #4590: the --json envelope carries the module array at `result.modules`.
+    let v = &env["result"]["modules"];
     assert!(v.is_array());
     assert_eq!(v[0]["module"], "option");
     assert_eq!(v[0]["source"], "stdlib");
@@ -138,7 +149,7 @@ fn stdlib_snapshot_json_is_array() {
 #[test]
 fn unknown_stdlib_module_errors_with_hint() {
     let output = Command::new(almide())
-        .args(["ide", "outline", "@stdlib/nope"])
+        .args(["query", "outline", "@stdlib/nope"])
         .output()
         .expect("run");
     assert!(!output.status.success());

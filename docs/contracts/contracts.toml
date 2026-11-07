@@ -312,6 +312,8 @@ evidence  = [
   { path = "spec/wasm_cross/variant_record_literal_equality.almd", class = "fixture" },
   { path = "spec/wasm_cross/unique_non_flat_element.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_of_tuples_equality.almd", class = "fixture" },
+  { path = "spec/wasm_cross/equality_ops_every_equatable_element.almd", class = "fixture" },
+  { path = "spec/wasm_cross/set_from_list_every_equatable_element.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_rich_variant_key.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_guard_eq_borrows_binding.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_catchall_binder_eq.almd", class = "fixture" },
@@ -1370,6 +1372,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/protocol_ufcs_inferred_lambda.almd", class = "fixture" },
+  { path = "spec/wasm_cross/protocol_bound_method_named_like_a_record_field.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-095"
@@ -3442,6 +3445,7 @@ evidence  = [
   { path = "spec/wasm_cross/let_bound_closure_scope.almd", class = "fixture" },
   { path = "spec/wasm_cross/native_map_merge_same_binding.almd", class = "fixture" },
   { path = "spec/wasm_cross/native_same_binding_twice_arg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/option_map_none_heap_payload_closure.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-259"

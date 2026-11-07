@@ -239,6 +239,18 @@ impl Checker {
                 return result;
             }
         }
+        // A declared type parameter with protocol bounds (`[O: Order]`) is
+        // known only through those bounds: its members are the protocols'
+        // methods, which the caller resolves next. Guessing a record from the
+        // field name instead unified the parameter with whatever registered
+        // record happened to have that field (#4579): the auto-imported
+        // `Heap[A]` carries a `cmp` field, so `o.cmp(a, b)` on an `O: Order`
+        // typed as a call of `Heap.cmp`, the protocol method was never
+        // consulted, and the open types around the call (a `list.fold(none,
+        // …)` seed) were left unsolved in the IR, so the wasm leg walled.
+        if !tv.as_str().starts_with('?') && self.env.generic_protocol_bounds.contains_key(tv) {
+            return Ty::Unknown;
+        }
         // Search env.types for record types with this field.
         // Only unify if exactly one candidate exists (unambiguous).
         let field_sym = almide_base::intern::sym(field);

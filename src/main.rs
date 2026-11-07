@@ -207,6 +207,26 @@ fn run_main() {
         return;
     }
 
-    let cli = Cli::parse();
+    let cli = parse_cli(&raw_args);
     dispatch(cli);
+}
+
+/// clap's parse, except that under `--json` a usage error is the shared
+/// envelope (#4590): one line on stdout with `ok: false` and clap's message
+/// as the diagnostic, exit 2 as clap's own error exit.
+fn parse_cli(raw_args: &[std::ffi::OsString]) -> Cli {
+    match Cli::try_parse_from(raw_args) {
+        Ok(cli) => cli,
+        Err(e) => {
+            use clap::error::ErrorKind;
+            let informational = matches!(
+                e.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+            );
+            if informational || !cli::envelope::requested(raw_args) {
+                e.exit();
+            }
+            cli::envelope::fail_now(e.to_string().trim());
+        }
+    }
 }

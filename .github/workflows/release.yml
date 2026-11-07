@@ -129,7 +129,7 @@ jobs:
           Copy-Item "LICENSE" "$staging/"
           # The folder itself, not its contents: the zip unpacks into
           # `$staging/` like the tarballs, which is where tools/install.ps1 and
-          # `almide self-update` look for almide.exe (#3359).
+          # `almide upgrade` look for almide.exe (#3359).
           Compress-Archive -Path "$staging" -DestinationPath "$staging.zip"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $entries = [System.IO.Compression.ZipFile]::OpenRead("$PWD/$staging.zip").Entries.FullName -replace '\\', '/'

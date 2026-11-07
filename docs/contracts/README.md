@@ -50,7 +50,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-012 | Const-folded non-finite floats emit named constants | 0.24.0 | active | fixture | 1 |
 | C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 11 |
 | C-014 | Set is insertion-ordered and deterministic | 0.24.0 | active | fixture | 3 |
-| C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 11 |
+| C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 13 |
 | C-016 | UTF-8 codepoint-aware string ops are byte-identical | 0.24.0 | active | fixture | 3 |
 | C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 2 |
 | C-018 | Unicode string predicates match Rust char methods over the full domain | 0.24.0 | active | fixture | 1 |
@@ -129,7 +129,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-091 | A nested sub-pattern in let-destructuring binds every leaf | 0.27.6 | active | fixture | 1 |
 | C-092 | A generic record field is sized by its instantiated type at construction | 0.27.6 | active | fixture | 3 |
 | C-093 | Mutually-recursive variant types compile on both targets | 0.27.6 | active | fixture | 1 |
-| C-094 | A protocol-method UFCS call on an inferred lambda param resolves the element type | 0.27.6 | active | fixture | 1 |
+| C-094 | A protocol-method UFCS call on an inferred lambda param resolves the element type | 0.27.6 | active | fixture | 2 |
 | C-095 | json.stringify_pretty is byte-identical indented output across targets | 0.27.6 | active | fixture | 2 |
 | C-096 | env.args works on WASM and matches native | 0.27.6 | active | fixture | 1 |
 | C-097 | generic + on a type parameter concatenates strings/lists identically across targets | 0.27.6 | active | fixture | 1 |
@@ -293,7 +293,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-255 | Record literals, member reads, and spread updates preserve value semantics identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-256 | break and continue take effect at their statement position, identically on both targets and the interp | 0.57.1 | active | fixture | 2 |
 | C-257 | The scalar error operators evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 9 |
+| C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 10 |
 | C-259 | Variant constructor references build values eliminated identically by match on both targets | 0.57.1 | active | fixture | 1 |
 | C-260 | The declaration family compiles and runs identically on both targets | 0.57.1 | active | fixture | 5 |
 | C-261 | Canonical float values including the negative-zero sign display identically on both targets | 0.57.1 | active | fixture | 1 |

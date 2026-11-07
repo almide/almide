@@ -104,9 +104,9 @@ fn dep_path_names_the_transitive_dependency_beside_its_declarer() {
         return;
     }
     let app = scratch("dep-path");
-    let (ok, out) = almide_in(&app, &["dep-path", "d"]);
-    assert!(ok, "dep-path d:\n{out}");
+    let (ok, out) = almide_in(&app, &["deps", "--path", "d"]);
+    assert!(ok, "deps --path d:\n{out}");
     let printed = PathBuf::from(out.trim());
-    assert!(printed.is_dir(), "dep-path d printed a non-directory: {out}");
-    assert!(printed.ends_with("deps/d/src"), "dep-path d: {out}");
+    assert!(printed.is_dir(), "deps --path d printed a non-directory: {out}");
+    assert!(printed.ends_with("deps/d/src"), "deps --path d: {out}");
 }

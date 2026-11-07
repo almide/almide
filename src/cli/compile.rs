@@ -16,7 +16,7 @@ pub(crate) fn resolve_module_to_file(module: &str) -> (String, Option<String>) {
 
     // Stdlib modules are self-hosted `.almd` bundled into the compiler:
     // serve the embedded source through the normal pipeline via a temp file
-    // so `almide compile string --json` works like any module.
+    // so `almide query interface string --json` works like any module.
     //
     // Keyed on `is_any_stdlib`, NOT the hardcoded stdlib list: `path`, `args`,
     // `html` and `mem` exist only as bundled modules, so the narrower gate let
@@ -79,7 +79,7 @@ pub(crate) fn resolve_module_to_file(module: &str) -> (String, Option<String>) {
     }
 
     err(&format!("error: module '{}' not found", module));
-    err(&format!("  hint: specify a module name (e.g., 'almide compile parser') or file path (e.g., 'almide compile src/parser.almd')"));
+    err(&format!("  hint: specify a module name (e.g., 'almide query interface parser') or file path (e.g., 'almide query interface src/parser.almd')"));
     std::process::exit(1);
 }
 

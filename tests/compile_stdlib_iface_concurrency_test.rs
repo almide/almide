@@ -1,4 +1,4 @@
-//! Concurrent `almide compile <stdlib module> --json` runs each read the whole
+//! Concurrent `almide query interface <stdlib module> --json` runs each read the whole
 //! module. The bundled source is staged at one temp path per module; a plain
 //! write truncated that file under a concurrent run's read, which then parsed
 //! an empty module and reported an interface with zero functions — the
@@ -14,11 +14,11 @@ fn concurrent_stdlib_interfaces_all_list_the_whole_module() {
         .map(|_| {
             std::thread::spawn(|| {
                 let out = Command::new(env!("CARGO_BIN_EXE_almide"))
-                    .args(["compile", "value", "--json"])
+                    .args(["query", "interface", "value", "--json"])
                     .output()
-                    .expect("run almide compile value --json");
-                assert!(out.status.success(), "compile value --json failed:\n{}", String::from_utf8_lossy(&out.stderr));
-                let iface: serde_json::Value = serde_json::from_slice(&out.stdout).expect("interface JSON parses");
+                    .expect("run almide query interface value --json");
+                assert!(out.status.success(), "query interface value --json failed:\n{}", String::from_utf8_lossy(&out.stderr));
+                let iface: serde_json::Value = serde_json::from_slice::<serde_json::Value>(&out.stdout).expect("interface JSON parses")["result"].clone();
                 iface["functions"]
                     .as_array()
                     .unwrap()

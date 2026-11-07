@@ -1,4 +1,4 @@
-//! The three legs `almide survive` runs on each side of an edit (#2147): the
+//! The three legs `almide apply` runs on each side of an edit (#2147): the
 //! reach scan that decides WHAT to run, and the check / test / contract runs.
 //!
 //! Every run is a child `almide` process (`current_exe`, the flags a human
@@ -45,6 +45,9 @@ pub fn run_self(args: &[&str], overlay: Option<&OverlayEnv>, timeout: Duration) 
     use std::io::Read;
     let exe = std::env::current_exe().map_err(|e| format!("cannot locate the almide binary: {}", e))?;
     let mut cmd = std::process::Command::new(exe);
+    // The legs read each command's own rows (`check --json`'s one diagnostic
+    // per line), not the shared envelope (#4590).
+    cmd.arg("--raw-json");
     if let Some(ov) = overlay {
         // Before the subcommand: the overlay is a top-level argument (#4129).
         cmd.arg("--survive-overlay").arg(&ov.target).arg("--survive-overlay-text").arg(&ov.text_file);

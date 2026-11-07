@@ -95,13 +95,13 @@ pub fn unavailable_rows(toml: &str) -> HashMap<String, Vec<String>> {
 /// set when the module has none (an unknown module, a compile failure).
 fn public_fns(almide: &Path, module: &str) -> BTreeSet<String> {
     let out = Command::new(almide)
-        .args(["compile", module, "--json"])
+        .args(["query", "interface", module, "--json"])
         .output();
     let Ok(out) = out else { return BTreeSet::new() };
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
         return BTreeSet::new();
     };
-    v["functions"]
+    v["result"]["functions"]
         .as_array()
         .map(|fs| {
             fs.iter()

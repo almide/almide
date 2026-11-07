@@ -8,7 +8,7 @@
 #   $env:ALMIDE_INSTALL = "$HOME\bin"; .\install.ps1          # custom install dir
 #
 # The release attestation is verified with the GitHub CLI (`gh`). Without it
-# the installer refuses (security row 16), as `almide self-update` does:
+# the installer refuses (security row 16), as `almide upgrade` does:
 # `--skip-attestation` installs on the checksum alone, which proves the
 # archive is the one the release lists, not who built it.
 

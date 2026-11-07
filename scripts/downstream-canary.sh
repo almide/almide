@@ -76,15 +76,22 @@ mkdir -p "$work/tmp-baseline" "$work/tmp-candidate"
 
 # Warm the dependency source cache with the baseline compiler, so a
 # network failure shows up here as infra instead of as a compile verdict
-# later. `dep-path` fetches EVERY dependency before it looks the name up, so
+# later. `deps --path` fetches EVERY dependency before it looks the name up, so
 # asking for a name no project has turns "fetch ok" into one exact message
 # (a real dependency name would not do: the almide.toml key and the package
 # name may differ, and the lookup then fails after a successful fetch).
 if (cd "$work/src" && python3 -c 'import sys,tomllib; sys.exit(0 if tomllib.load(open("almide.toml","rb")).get("dependencies") else 1)'); then
   probe=__downstream_canary_probe__
+  # `deps --path NAME` since #4590; a baseline released before it only knows
+  # the old `dep-path NAME` spelling, so pick the form the baseline accepts.
+  if "$BASELINE_BIN" deps --help 2>/dev/null | grep -q -- '--path'; then
+    probe_cmd=(deps --path)
+  else
+    probe_cmd=(dep-path)
+  fi
   deps_ok=""
   for i in 1 2 3; do
-    (cd "$work/baseline" && TMPDIR="$work/tmp-baseline" "$BASELINE_BIN" dep-path "$probe") >"$out/deps.log" 2>&1
+    (cd "$work/baseline" && TMPDIR="$work/tmp-baseline" "$BASELINE_BIN" "${probe_cmd[@]}" "$probe") >"$out/deps.log" 2>&1
     if grep -q "Dependency '$probe' not found" "$out/deps.log"; then
       deps_ok=yes; break
     fi

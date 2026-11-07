@@ -199,6 +199,7 @@
 6705	spec/wasm_cross/env_set_refusal.almd
 1991	spec/wasm_cross/env_sleep_pause.almd
 16149	spec/wasm_cross/env_vars_remove.almd
+26806	spec/wasm_cross/equality_ops_every_equatable_element.almd
 3863	spec/wasm_cross/err_arm_takes_let_match_type.almd
 35148	spec/wasm_cross/err_text_operand_escape_families.almd
 2083	spec/wasm_cross/error_operators.almd
@@ -353,7 +354,7 @@
 5797	spec/wasm_cross/guard_value_exit_in_loop.almd
 23843	spec/wasm_cross/gzip_inflate_members.almd
 5813	spec/wasm_cross/hash_digests.almd
-31494	spec/wasm_cross/hash_hmac_rfc4231.almd
+31470	spec/wasm_cross/hash_hmac_rfc4231.almd
 2416	spec/wasm_cross/heap_result_err_interp.almd
 2838	spec/wasm_cross/heap_result_if_append.almd
 11662	spec/wasm_cross/heap_result_if_bind.almd
@@ -583,7 +584,7 @@
 11773	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 4565	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
 10092	spec/wasm_cross/mut_call_nested_read_before.almd
-6401	spec/wasm_cross/mut_call_two_mut_args_read.almd
+6397	spec/wasm_cross/mut_call_two_mut_args_read.almd
 5391	spec/wasm_cross/mut_heap_param.almd
 5174	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
 8816	spec/wasm_cross/mut_map_param.almd
@@ -666,6 +667,7 @@
 2791	spec/wasm_cross/opt_str_str_ctor.almd
 1565	spec/wasm_cross/option_eq.almd
 1813	spec/wasm_cross/option_heap_eq.almd
+1953	spec/wasm_cross/option_map_none_heap_payload_closure.almd
 1786	spec/wasm_cross/option_match_heap_payload.almd
 1995	spec/wasm_cross/option_none_unwrap_term.almd
 3131	spec/wasm_cross/option_payload_recursive_variant.almd
@@ -698,6 +700,7 @@
 4463	spec/wasm_cross/positional_variant_field_literal.almd
 2400	spec/wasm_cross/prim_alloc_count_domain.almd
 3648	spec/wasm_cross/process_args.almd
+7923	spec/wasm_cross/protocol_bound_method_named_like_a_record_field.almd
 2472	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
 4540	spec/wasm_cross/pure_bang_propagation.almd
 5733	spec/wasm_cross/pure_fn_output_and_assert_abort.almd
@@ -804,6 +807,7 @@
 5239	spec/wasm_cross/self_call_swapped_params.almd
 4116	spec/wasm_cross/sequential_match_two_arg_call.almd
 9718	spec/wasm_cross/set_entries_reclaim.almd
+11890	spec/wasm_cross/set_from_list_every_equatable_element.almd
 11759	spec/wasm_cross/set_index_order.almd
 13230	spec/wasm_cross/set_insertion_order.almd
 2662	spec/wasm_cross/shared_arg_pair_dup.almd

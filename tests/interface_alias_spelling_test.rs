@@ -15,13 +15,13 @@ use std::process::Command;
 
 fn interface_json(args: &[&str]) -> serde_json::Value {
     let out = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .args(["compile"])
+        .args(["query", "interface"])
         .args(args)
         .arg("--json")
         .output()
-        .expect("run almide compile --json");
-    assert!(out.status.success(), "compile {args:?} --json failed:\n{}", String::from_utf8_lossy(&out.stderr));
-    serde_json::from_slice(&out.stdout).expect("interface JSON parses")
+        .expect("run almide query interface --json");
+    assert!(out.status.success(), "query interface {args:?} --json failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    serde_json::from_slice::<serde_json::Value>(&out.stdout).expect("interface JSON parses")["result"].clone()
 }
 
 fn function<'a>(iface: &'a serde_json::Value, name: &str) -> &'a serde_json::Value {

@@ -13,7 +13,7 @@
 # "the version bump matches the interface diff" is checked, not remembered.
 #
 # WHY THE DOC INDEX, NOT THE COMPILER. The stdlib is EMBEDDED in the almide
-# binary, so "run `almide compile --json` at both revisions" means building
+# binary, so "run `almide query interface --json` at both revisions" means building
 # the compiler at the old tag — a full release build per release, forever
 # (this is a sealed-forever measurement's worst nightmare). The machine-owned
 # signature index in docs/stdlib/*.md is generated from exactly that

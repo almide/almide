@@ -153,6 +153,16 @@ mutmap-wasm 2.31
 # these values. ubuntu-latest probe readings: native 1.33-1.48, wasm 2.11-2.17.
 mutset-native 1.4
 mutset-wasm 2.1
+# MUT READ (#4594): mutread-arg / mutread-var per-round min over mutread-let
+# per-round min, per leg. The gate fails on MUTREAD_CEILING_* in
+# check-perf-ratio.sh, never on these values. ubuntu-latest probe (run
+# 42313839693, --quick --runs 3): native 1.024 / 1.026, wasm 1.027 / 1.027;
+# before the fix (run 42310916336) wasm read 13.1 / 13.3 — a 32 KB copy per
+# call — and native the same 1.03.
+mutread-arg-native 1.03
+mutread-var-native 1.03
+mutread-arg-wasm 1.03
+mutread-var-wasm 1.03
 treealloc 0.343
 # btrees (rc4): treealloc's program with the depth a literal and no argument
 # read, so it renders whole on the certified native leg, region window

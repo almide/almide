@@ -3,7 +3,8 @@
 //! command but the exempt ones passes first.
 
 use crate::cli;
-use crate::cli_args::{Commands, IdeCommand};
+use crate::cli::envelope::Shape;
+use crate::cli_args::{Commands, QueryCommand, ToolCommand};
 use crate::{collect_almd_files, print_error_explanation, resolve_file, warn_no_verified_deprecated, DIAGNOSTIC_DOCS};
 use crate::{diagnostic_render, err, out, project, project_fetch};
 
@@ -101,7 +102,6 @@ struct CheckCmd {
     file: Option<String>,
     deny_warnings: bool,
     json: bool,
-    explain: Option<String>,
     effects: bool,
     timings: bool,
     stamp: bool,
@@ -110,14 +110,9 @@ struct CheckCmd {
     target: Option<String>,
 }
 
-/// `dispatch`'s `Commands::Check` arm. `--explain` prints the code's text
-/// and nothing else runs.
+/// `dispatch`'s `Commands::Check` arm.
 fn dispatch_check(args: CheckCmd) {
-    let CheckCmd { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target } = args;
-    if let Some(code) = explain {
-        print_error_explanation(&code);
-        return;
-    }
+    let CheckCmd { file, deny_warnings, json, effects, timings, stamp, profile, allow, target } = args;
     let critical = critical_profile_grants(profile.as_deref(), &allow);
     if critical.is_some() {
         refuse_build_switches_under_critical();
@@ -260,21 +255,25 @@ fn expand_capability_grants(allow: &[String]) -> Vec<String> {
     modules
 }
 
-/// `dispatch`'s `Commands::Ide` arm (nested `IdeCommand` match). Extracted verbatim.
-fn dispatch_ide(cmd: IdeCommand) {
+/// `dispatch`'s `Commands::Query` arm (#4590, was `ide`).
+fn dispatch_query(cmd: QueryCommand) {
     match cmd {
-        IdeCommand::Outline { target, filter, json } => {
+        QueryCommand::Outline { target, filter, json } => {
             let target = match target {
                 Some(t) if t.starts_with("@stdlib/") => t,
                 other => resolve_file(other),
             };
             cli::cmd_ide_outline(&target, filter.as_deref(), json);
         }
-        IdeCommand::Doc { symbol, file } => {
+        QueryCommand::Doc { symbol, file, json: _ } => {
             let file = resolve_file(file);
             cli::cmd_ide_doc(&symbol, &file);
         }
-        IdeCommand::StdlibSnapshot { modules, json } => {
+        // The interface view `compile --json` / `compile --dry-run` printed.
+        QueryCommand::Interface { module, json } => {
+            cli::cmd_compile(module.as_deref(), json, !json, None);
+        }
+        QueryCommand::Stdlib { modules, json } => {
             cli::cmd_ide_stdlib_snapshot(modules.as_deref(), json);
         }
     }
@@ -599,8 +598,9 @@ fn print_dependency_details(n: &crate::native_grant::DepNative, caps: Option<&st
     }
 }
 
-/// `dispatch`'s `Commands::DepPath` arm. Extracted verbatim.
-fn dispatch_dep_path(name: String) {
+/// `almide deps --path <name>` (#4590, was `dep-path`): the cached source
+/// directory of one dependency; under `--json`, `{name, path}`.
+fn dispatch_dep_path(name: String, json: bool) {
     if !std::path::Path::new("almide.toml").exists() {
         err(&format!("No almide.toml found"));
         std::process::exit(1);
@@ -610,6 +610,7 @@ fn dispatch_dep_path(name: String) {
     let fetched = project_fetch::fetch_all_deps(&proj)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
     match fetched.iter().find(|fd| fd.pkg_id.name == name) {
+        Some(fd) if json => out(&serde_json::json!({ "name": name, "path": fd.source_dir.display().to_string() }).to_string()),
         Some(fd) => out(&format!("{}", fd.source_dir.display())),
         None => {
             err(&format!("Dependency '{}' not found in almide.toml", name));
@@ -630,19 +631,24 @@ fn dispatch_tooling(command: Commands) {
             cli::mcp::run_mcp();
         }
         Commands::Explain { code, list, json } => match code {
+            Some(code) if !list && json => explain_code_json(&code),
             Some(code) if !list => print_error_explanation(&code),
             _ => cli::explain::print_list(DIAGNOSTIC_DOCS, json),
         },
-        Commands::Ide { cmd } => dispatch_ide(cmd),
+        Commands::Query { cmd } => dispatch_query(cmd),
         Commands::Fmt { files, check, json, dry_run, no_import_edit } => dispatch_fmt(files, check, json, dry_run, no_import_edit),
-        Commands::Compile { module, json, dry_run, output } => {
-            cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
+        // The `.almdi` artifact writer; its interface view is `query
+        // interface`, and `--json` / `--dry-run` were refused above.
+        Commands::Compile { module, json: _, dry_run: _, output } => {
+            cli::cmd_compile(module.as_deref(), false, false, output.as_deref());
         }
         Commands::Verify { args } => std::process::exit(cli::cmd_verify(&args)),
-        Commands::Survive { file, with, as_kind, json, timeout, allow_removed } => {
+        // `--dry-run` is what `survive` was: the same report, the same exit
+        // codes (0 survives, 1 does not, 2 could not be judged).
+        Commands::Apply { file, with, as_kind, if_survives: _, force: _, dry_run: true, json, timeout, allow_removed } => {
             cli::cmd_survive(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout, allow_removed });
         }
-        Commands::Apply { file, with, as_kind, if_survives, force, json, timeout, allow_removed } => {
+        Commands::Apply { file, with, as_kind, if_survives, force, dry_run: false, json, timeout, allow_removed } => {
             cli::cmd_apply(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout, allow_removed }, if_survives, force);
         }
         Commands::SurviveTestLeg { file } => cli::cmd_survive_test_leg(&file),
@@ -658,13 +664,14 @@ fn dispatch_tooling(command: Commands) {
 /// dependencies, installs and self-update.
 fn dispatch_packages(command: Commands) {
     match command {
-        Commands::Clean => cli::cmd_clean(),
-        Commands::Add { pkg, git, tag, subdir, trust, dry_run } => dispatch_add(AddCmd { pkg, git, tag, subdir, trust, dry_run }),
-        Commands::Trust { owner } => dispatch_trust(owner),
-        Commands::Update { dep } => dispatch_update(dep),
-        Commands::Deps => dispatch_deps(),
-        Commands::DepPath { name } => dispatch_dep_path(name),
-        Commands::Install { spec, tag, branch, name, bin_dir, target, force, trust, allow_native } => {
+        Commands::Clean { json: _ } => cli::cmd_clean(),
+        Commands::Add { pkg, git, tag, subdir, trust, dry_run, json: _ } => dispatch_add(AddCmd { pkg, git, tag, subdir, trust, dry_run }),
+        Commands::Remove { name, json: _ } => cli::cmd_remove(&name),
+        Commands::Trust { owner, json: _ } => dispatch_trust(owner),
+        Commands::Update { dep, json: _ } => dispatch_update(dep),
+        Commands::Deps { path: Some(name), json } => dispatch_dep_path(name, json),
+        Commands::Deps { path: None, json: _ } => dispatch_deps(),
+        Commands::Tool { cmd: ToolCommand::Install { spec, tag, branch, name, bin_dir, target, force, trust, allow_native, json: _ } } => {
             cli::cmd_install(
                 &spec,
                 tag.as_deref(),
@@ -675,9 +682,10 @@ fn dispatch_packages(command: Commands) {
                 cli::InstallGrants { force, trust: trust.as_deref(), allow_native },
             );
         }
-        Commands::SelfUpdate { version, skip_attestation } => {
+        Commands::Upgrade { version, skip_attestation, json: _ } => {
             cli::cmd_self_update(version.as_deref(), skip_attestation);
         }
+        Commands::Repl => cli::repl::run_repl(),
         // `command`'s static type is the full `Commands` enum — Rust can't
         // narrow it to the variants `dispatch` and `dispatch_tooling` leave
         // unhandled across the function boundary, so this match must stay
@@ -699,11 +707,12 @@ fn dispatch_packages(command: Commands) {
 fn refuse_invalid_manifest(command: &Commands) {
     if matches!(
         command,
-        Commands::Init
-            | Commands::Clean
+        Commands::Init { .. }
+            | Commands::Clean { .. }
             | Commands::Lsp
             | Commands::Mcp
-            | Commands::SelfUpdate { .. }
+            | Commands::Repl
+            | Commands::Upgrade { .. }
             | Commands::DocsGen { .. }
             | Commands::Switches { .. }
             | Commands::Budgets { .. }
@@ -736,9 +745,9 @@ fn refuse_invalid_manifest(command: &Commands) {
 /// that checks or compiles it — not only the native build, whose compile
 /// driver was the one reader. A package pinning the release that carries a
 /// fix (a soundness or a permission fix) must not be built, checked or run
-/// by an older compiler on any target. Package management (`add`, `deps`,
-/// `update`, `install`) and `fmt` still run, so the pin can be read and
-/// changed.
+/// by an older compiler on any target. Package management (`add`, `remove`,
+/// `deps`, `update`, `tool install`) and `fmt` still run, so the pin can be
+/// read and changed.
 fn refuse_older_compiler(command: &Commands, path: &std::path::Path) {
     let compiles = matches!(
         command,
@@ -748,8 +757,8 @@ fn refuse_older_compiler(command: &Commands, path: &std::path::Path) {
             | Commands::Test { .. }
             | Commands::Check { .. }
             | Commands::Compile { .. }
+            | Commands::Query { cmd: QueryCommand::Interface { .. } }
             | Commands::Fix { .. }
-            | Commands::Survive { .. }
             | Commands::Apply { .. }
             | Commands::SurviveTestLeg { .. }
             | Commands::TestRunCompile { .. }
@@ -771,7 +780,7 @@ fn refuse_older_compiler(command: &Commands, path: &std::path::Path) {
 /// --json` carries it as a diagnostic row on stdout; every other command
 /// prints it on stderr, so no other machine-readable stdout changes. The
 /// exit code never changes: the build runs exactly as if the key were absent.
-/// `survive-test-leg` is a child of `survive`, and `test-run-compile` of
+/// `survive-test-leg` is a child of `apply`, and `test-run-compile` of
 /// `test`, which already warned.
 fn report_manifest_warnings(command: &Commands, path: &std::path::Path, content: &str) {
     if matches!(command, Commands::SurviveTestLeg { .. } | Commands::TestRunCompile { .. }) {
@@ -789,7 +798,7 @@ fn report_manifest_warnings(command: &Commands, path: &std::path::Path, content:
 
 /// #4129: a release build locks the switches that change what is compiled or
 /// which check runs — an inherited one is ignored unless `--allow-switch`
-/// names it — and `almide survive`'s overlay arrives only as an argument.
+/// names it — and `almide apply`'s overlay arrives only as an argument.
 /// Before any switch is read.
 fn arm_switch_lock(cli: &crate::cli_args::Cli) {
     for name in &cli.allow_switch {
@@ -835,6 +844,24 @@ fn arm_budgets(cli: &crate::cli_args::Cli) {
 }
 
 pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
+    // #4590: a retired spelling is an error naming the new one, whatever
+    // else the command line says; a bare `almide` prints the grouped help.
+    match &cli.command {
+        None => {
+            print_help();
+            return;
+        }
+        Some(cmd) => {
+            if let Some((old, new)) = retired_spelling(cmd) {
+                refuse_retired(&old, &new);
+            }
+        }
+    }
+    // #4590: `--json` is the shared envelope, built around the command run
+    // as a `--raw-json` child (`cli::envelope`).
+    if !cli.raw_json && let Some(shape) = cli.command.as_ref().and_then(json_shape) {
+        cli::envelope::run_enveloped(shape);
+    }
     arm_switch_lock(&cli);
     arm_budgets(&cli);
     if cli.verbose {
@@ -850,13 +877,7 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
             std::process::exit(2);
         }
     }
-    let command = match cli.command {
-        Some(cmd) => cmd,
-        None => {
-            cli::repl::run_repl();
-            return;
-        }
-    };
+    let Some(command) = cli.command else { return };
     refuse_invalid_manifest(&command);
     // #4093: `--locked` holds for every fetch this process makes.
     if matches!(command, Commands::Run { locked: true, .. } | Commands::Build { locked: true, .. } | Commands::Test { locked: true, .. }) {
@@ -878,14 +899,14 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
         cli::check_cwd_media_grants_or_exit();
     }
     match command {
-        Commands::Init => cli::cmd_init(),
+        Commands::Init { json: _ } => cli::cmd_init(),
         Commands::Run { file, no_check, locked: _, release, target, verified: _, no_verified, time_report, program_args } =>
             dispatch_run(RunCmd { file, no_check, release, target, no_verified, time_report, program_args }),
-        Commands::Bench { file, runs, target, program_args } => {
+        Commands::Bench { file, runs, target, program_args, json: _ } => {
             let file = resolve_file(file);
             cli::cmd_bench(&file, runs, target.as_deref(), &program_args);
         }
-        Commands::Build { file, o, target, release, fast, target_cpu, print_release_rustflags, unchecked_index, no_check, locked: _, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host, debug } => {
+        Commands::Build { file, o, target, release, fast, target_cpu, print_release_rustflags, unchecked_index, no_check, locked: _, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host, debug, json: _ } => {
             // `--print-release-rustflags` builds nothing, so it needs no source file.
             let file = if print_release_rustflags { file.unwrap_or_default() } else { resolve_file(file) };
             warn_no_verified_deprecated(no_verified);
@@ -914,8 +935,8 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
         Commands::Test { file, run, no_check, locked: _, json, target, update_snapshots, ci, allow_no_tests, show_output } => {
             dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output })
         }
-        Commands::Check { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target } => {
-            dispatch_check(CheckCmd { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target })
+        Commands::Check { file, deny_warnings, json, explain: _, effects, timings, stamp, profile, allow, target } => {
+            dispatch_check(CheckCmd { file, deny_warnings, json, effects, timings, stamp, profile, allow, target })
         }
         Commands::Fix { file, dry_run, json } => {
             let file = resolve_file(file);
@@ -931,5 +952,101 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
             print!("{}", if md { almide_base::env::markdown_table() } else { almide_base::env::plain_table() });
         }
         other => dispatch_tooling(other),
+    }
+}
+
+/// A bare `almide` (#4590): the grouped help on stdout, exit 0. It never
+/// reads stdin — the REPL is `almide repl`.
+fn print_help() {
+    use clap::CommandFactory;
+    let mut cmd = crate::cli_args::Cli::command();
+    if let Err(e) = cmd.print_help() {
+        err(&format!("error: {e}"));
+        std::process::exit(1);
+    }
+}
+
+/// `(old spelling, new spelling)` when `cmd` is a retired one (#4590). There
+/// are no aliases: the old spelling only names the new one.
+fn retired_spelling(cmd: &Commands) -> Option<(String, String)> {
+    fn first(args: &[String]) -> Option<String> {
+        args.iter().find(|a| !a.starts_with('-')).cloned()
+    }
+    fn pair(old: &str, new: &str) -> Option<(String, String)> {
+        Some((old.to_string(), new.to_string()))
+    }
+    match cmd {
+        Commands::Survive { .. } => pair("almide survive", "almide apply --dry-run"),
+        Commands::Ide { args } => match first(args).as_deref() {
+            Some("stdlib-snapshot") => pair("almide ide stdlib-snapshot", "almide query stdlib"),
+            Some(sub @ ("outline" | "doc")) => pair(&format!("almide ide {sub}"), &format!("almide query {sub}")),
+            _ => pair("almide ide", "almide query"),
+        },
+        Commands::SelfUpdate { .. } => pair("almide self-update", "almide upgrade"),
+        Commands::Install { .. } => pair("almide install", "almide tool install"),
+        Commands::DepPath { args } => {
+            let name = first(args).unwrap_or_else(|| "<name>".to_string());
+            pair("almide dep-path", &format!("almide deps --path {name}"))
+        }
+        Commands::Check { explain: Some(code), .. } => pair("almide check --explain", &format!("almide explain {code}")),
+        Commands::Compile { json: true, .. } => pair("almide compile --json", "almide query interface --json"),
+        Commands::Compile { dry_run: true, .. } => pair("almide compile --dry-run", "almide query interface"),
+        _ => None,
+    }
+}
+
+/// Exit 2 naming the new spelling — the same text on stderr and, under
+/// `--json`, as the envelope's one diagnostic.
+fn refuse_retired(old: &str, new: &str) -> ! {
+    let msg = format!("error: `{old}` was removed (#4590); use `{new}`");
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if cli::envelope::requested(&args) {
+        cli::envelope::fail_now(&msg);
+    }
+    err(&msg);
+    std::process::exit(2);
+}
+
+/// How `cmd`'s `--json` output becomes the envelope; `None` when it did not
+/// ask for `--json`.
+fn json_shape(cmd: &Commands) -> Option<Shape> {
+    let shape = match cmd {
+        Commands::Check { json: true, .. } => Shape::Diagnostics,
+        Commands::Test { json: true, .. } => Shape::Records("files"),
+        Commands::Fmt { json: true, .. } | Commands::Fix { json: true, .. } | Commands::Apply { json: true, .. } => Shape::Value("report"),
+        Commands::Explain { json: true, .. } => Shape::Value("codes"),
+        Commands::Deps { json: true, path: Some(_) } => Shape::Value("dependency"),
+        Commands::Query { cmd } => match cmd {
+            QueryCommand::Outline { json: true, .. } => Shape::Value("decls"),
+            QueryCommand::Interface { json: true, .. } => Shape::Value("interface"),
+            QueryCommand::Stdlib { json: true, .. } => Shape::Value("modules"),
+            QueryCommand::Doc { json: true, .. } => Shape::Text,
+            _ => return None,
+        },
+        Commands::Init { json: true }
+        | Commands::Build { json: true, .. }
+        | Commands::Bench { json: true, .. }
+        | Commands::Add { json: true, .. }
+        | Commands::Remove { json: true, .. }
+        | Commands::Update { json: true, .. }
+        | Commands::Trust { json: true, .. }
+        | Commands::Deps { json: true, path: None }
+        | Commands::Clean { json: true }
+        | Commands::Upgrade { json: true, .. }
+        | Commands::Tool { cmd: ToolCommand::Install { json: true, .. } } => Shape::Text,
+        _ => return None,
+    };
+    Some(shape)
+}
+
+/// `almide explain <code> --json`'s raw output: `{code, text}`.
+fn explain_code_json(code: &str) {
+    let code = code.to_ascii_uppercase();
+    match DIAGNOSTIC_DOCS.iter().find(|(k, _)| *k == code) {
+        Some((k, doc)) => out(&serde_json::json!({ "code": k, "text": doc }).to_string()),
+        None => {
+            err(&format!("Unknown error code: {}", code));
+            std::process::exit(1);
+        }
     }
 }

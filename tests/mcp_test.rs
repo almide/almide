@@ -190,9 +190,12 @@ fn json_check_reports_a_total_parse_failure_as_json() {
         .output()
         .expect("almide check --json");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let lines: Vec<&str> = stdout.lines().filter(|l| !l.trim().is_empty()).collect();
-    assert!(!lines.is_empty(), "no JSON emitted; stderr: {}", String::from_utf8_lossy(&out.stderr));
-    let d: Value = serde_json::from_str(lines[0]).expect("diagnostic is JSON");
+    // #4590: one envelope line; the rows are its `diagnostics` array.
+    let envelope: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("no JSON envelope emitted ({e}); stderr: {}", String::from_utf8_lossy(&out.stderr)));
+    assert_eq!(envelope["ok"], false, "{envelope}");
+    let d: Value = envelope["diagnostics"][0].clone();
+    assert!(d.is_object(), "no diagnostic row emitted: {envelope}");
     assert_eq!(d["level"], "error");
     assert_eq!(d["line"], 1);
     assert!(d["message"].as_str().unwrap().contains("Missing '='"), "{}", d);
@@ -249,7 +252,7 @@ fn fmt_check_json_reports_drift_and_keeps_the_gate_exit_code() {
     let tidy = write_temp(dir.path(), "tidy.almd", "fn f(a: Int) -> Int = a + 1\n");
 
     let out = Command::new(almide()).args(["fmt", "--check", "--json", &messy]).output().unwrap();
-    let report: Value = serde_json::from_str(String::from_utf8_lossy(&out.stdout).trim()).unwrap();
+    let report: Value = serde_json::from_str::<Value>(String::from_utf8_lossy(&out.stdout).trim()).unwrap()["result"].clone();
     assert_eq!(report["ok"], false);
     assert_eq!(report["checked"], 1);
     assert_eq!(report["unformatted"].as_array().unwrap().len(), 1);
@@ -258,7 +261,7 @@ fn fmt_check_json_reports_drift_and_keeps_the_gate_exit_code() {
     assert_eq!(std::fs::read_to_string(&messy).unwrap(), "fn f(a: Int) -> Int =     a  +  1\n");
 
     let out = Command::new(almide()).args(["fmt", "--check", "--json", &tidy]).output().unwrap();
-    let report: Value = serde_json::from_str(String::from_utf8_lossy(&out.stdout).trim()).unwrap();
+    let report: Value = serde_json::from_str::<Value>(String::from_utf8_lossy(&out.stdout).trim()).unwrap()["result"].clone();
     assert_eq!(report["ok"], true);
     assert_eq!(out.status.code(), Some(0));
 
