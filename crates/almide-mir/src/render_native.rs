@@ -390,7 +390,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     // through a CallIndirect with a heap result, which walls above, so its
     // missing arm can never be hit; the `_` arm is the §13 controlled halt.
     push_closure_dispatch_tables(&mut out, &user_fns, &fn_rets, sigs);
-    crate::render_native_closure::push_typed_dispatch_tables(&mut out, &user_fns, sigs);
+    crate::render_native_closure::push_typed_dispatch_tables(&mut out, &user_fns, &fn_rets, sigs);
     if fan_rendered() {
         // #4006 family H: the fan runtime ahead of every other item (its
         // output macros shadow std's for all that follows), and every exit

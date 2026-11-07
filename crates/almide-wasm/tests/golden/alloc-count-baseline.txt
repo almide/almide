@@ -269,6 +269,7 @@
 11	8	103	11	spec/wasm_cross/float_to_int_edges.almd
 12	9	142	12	spec/wasm_cross/float_to_int_trio.almd
 17	9	344	17	spec/wasm_cross/fold_family_source_before_init.almd
+3	1	15	3	spec/wasm_cross/fold_float_literal_lambda.almd
 17	9	93	17	spec/wasm_cross/fold_heap_acc.almd
 62	32	448	62	spec/wasm_cross/fold_init_rebinds_source.almd
 6	0	88	6	spec/wasm_cross/for_in_forms.almd
@@ -414,6 +415,7 @@
 6039	4690	70113	6039	spec/wasm_cross/json_gltf_walk.almd
 78713	72678	2237334	78713	spec/wasm_cross/json_many_keys.almd
 126	82	1722	126	spec/wasm_cross/json_number_unicode.almd
+35	21	607	35	spec/wasm_cross/json_parse_astral_before_u_escape.almd
 63623	58588	980129	63623	spec/wasm_cross/json_parse_depth_bound.almd
 231	213	3212	231	spec/wasm_cross/json_parse_lenient_edges.almd
 254	242	4462	254	spec/wasm_cross/json_parse_strict_strings.almd
@@ -507,6 +509,7 @@
 0	0	0	0	spec/wasm_cross/loop_break_continue.almd
 186	152	5761600	186	spec/wasm_cross/loop_buffer_churn.almd
 21	14	207	21	spec/wasm_cross/loop_effect_match_stmt.almd
+17	10	119	17	spec/wasm_cross/loop_frame_exit_before_later_let.almd
 12	5	50	12	spec/wasm_cross/loop_outer_inplace_mutate_rc.almd
 158	127	33409688	158	spec/wasm_cross/loop_push_trailing_increment.almd
 18	6	417	18	spec/wasm_cross/map_core_trio.almd

@@ -53,6 +53,11 @@ pub(crate) struct Emitter<'a> {
     /// #2976: the params a raw-rule loop-form self call still releases at
     /// the loop-back (`exit_plan::raw_address_sources`); empty elsewhere.
     pub(crate) loop_back_releasable: std::collections::BTreeSet<u32>,
+    /// #4607: the owner locals of a loop-form frame (exit_plan.rs
+    /// `populate_loop_carried`); `loop_carried_raw` is the subset a raw
+    /// address may be read through. Empty outside a self tail-calling body.
+    pub(crate) loop_carried: std::collections::BTreeSet<u32>,
+    pub(crate) loop_carried_raw: std::collections::BTreeSet<u32>,
     /// This fn's own wasm index (see FnPlan::self_index).
     pub(crate) self_index: Option<u32>,
     /// Locals the Bind/Assign routes made OWNERS of a droppable block

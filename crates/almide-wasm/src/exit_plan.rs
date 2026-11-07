@@ -59,6 +59,11 @@ pub(crate) struct ExitPlan {
     /// Frame credits that survive the edge. `released ⊎ carried` is the
     /// whole frame.
     pub(crate) carried: BTreeSet<u32>,
+    /// The released locals no bind on THIS path has reached yet
+    /// ([`Emitter::loop_carried_unbound`]): released like the rest, but not
+    /// witness events — on this path the local is unborn, and the block it
+    /// may hold was already accounted at the loop-back that carried it.
+    pub(crate) unbound: BTreeSet<u32>,
 }
 
 impl Emitter<'_> {
@@ -97,7 +102,8 @@ impl Emitter<'_> {
 
     pub(crate) fn exit_plan(&self, continuation: Continuation) -> ExitPlan {
         let (owned, params) = self.frame_credits();
-        let frame: BTreeSet<u32> = owned.union(&params).copied().collect();
+        let unbound = self.loop_carried_unbound(continuation);
+        let frame: BTreeSet<u32> = owned.union(&params).chain(&unbound).copied().collect();
         let released: BTreeSet<u32> = match continuation {
             Continuation::ReturnSuccess
             | Continuation::ReturnError
@@ -131,10 +137,68 @@ impl Emitter<'_> {
                 }
             }
         };
+        let released: BTreeSet<u32> = released.union(&unbound).copied().collect();
         let carried: BTreeSet<u32> = frame.difference(&released).copied().collect();
         debug_assert!(released.is_disjoint(&carried));
         debug_assert_eq!(released.len() + carried.len(), frame.len());
-        ExitPlan { continuation, released, carried }
+        ExitPlan { continuation, released, carried, unbound }
+    }
+
+    /// #4607: the owner locals an EARLY exit of a loop-form frame must also
+    /// release although no bind lowered so far made them owners. The frame
+    /// is one `loop` (tco.rs) and its binds are lowered in source order, so
+    /// an exit lowered before a bind still runs on an iteration after that
+    /// bind ran: the local holds the block an earlier iteration bound,
+    /// carried by the loop-back to its rebind or the epilogue. A frame-
+    /// replacing `return_call`, an error return or a guard return reaches
+    /// neither, so that block leaked once per carried iteration
+    /// (`__jp_str_check`: every 4-byte character followed by a `\u` escape
+    /// kept the `(cp, l)` tuple). On a path where the bind has not run the
+    /// local is still zero, and a release of zero is a no-op, as at a first
+    /// rebind. Under the raw-address rule a `return_call` keeps a local a raw
+    /// address may be read through (leak, never a dangle). The fall-through
+    /// epilogue is lowered after every bind and has the full owner set, and
+    /// a loop-back carries the local on.
+    fn loop_carried_unbound(&self, continuation: Continuation) -> BTreeSet<u32> {
+        let tail = match continuation {
+            Continuation::ReturnError | Continuation::GuardReturn => false,
+            Continuation::TailTransfer { replaces_frame: true } => true,
+            _ => return BTreeSet::new(),
+        };
+        self.loop_carried
+            .iter()
+            .copied()
+            .filter(|i| !self.rc_owned.contains(i) && !self.arm_rests.contains(*i))
+            .filter(|i| !(tail && !self.tail_release_allowed && self.loop_carried_raw.contains(i)))
+            .collect()
+    }
+
+    /// #4607: record the owner locals of a self tail-calling frame — every
+    /// non-cell `let` of a droppable type, which the Bind route makes an
+    /// owner (stmts.rs `lower_stmt_bind`). Lifted lambdas are their own
+    /// frames and are not entered.
+    pub(crate) fn populate_loop_carried(&mut self, body: &almide_ir::IrExpr) {
+        let Some(me) = self.self_index else { return };
+        let self_tail = |t: &almide_ir::CallTarget| {
+            matches!(t, almide_ir::CallTarget::Named { name }
+                if self.resolve_named_fn(name).is_some_and(|j| self.table.infos[j].wasm_index == me))
+        };
+        let binds = frame_binds(body);
+        if binds.is_empty() || !any_tail_call(body, &self_tail) {
+            return;
+        }
+        let raw = if self.tail_release_allowed { Default::default() } else { raw_address_sources(body, &binds) };
+        for v in binds {
+            let Some(&(idx, ty)) = self.locals.get(&v) else { continue };
+            if idx < self.rc_param_ceiling || self.cells.contains(&v) || self.deferred_ranges.contains_key(&v) || !self.rc_droppable(ty) {
+                continue;
+            }
+            self.loop_carried.insert(idx);
+            self.owned_ty.entry(idx).or_insert(ty);
+            if raw.contains(&v) {
+                self.loop_carried_raw.insert(idx);
+            }
+        }
     }
 
     /// The ONE writer of a frame's exit releases. Safe by the epilogue's
@@ -161,7 +225,7 @@ impl Emitter<'_> {
                 }
             }
             Continuation::TailTransfer { replaces_frame } => {
-                for &idx in &plan.released {
+                for &idx in plan.released.difference(&plan.unbound) {
                     self.witness_dec(idx);
                 }
                 // These were the frame's last events on this path; the dead
@@ -196,7 +260,7 @@ impl Emitter<'_> {
                 }
             }
             Continuation::ReturnError if self.witness.as_mut().is_some_and(|w| w.take_err_exit()) => {
-                for &idx in &plan.released {
+                for &idx in plan.released.difference(&plan.unbound) {
                     self.witness_dec(idx);
                 }
             }
@@ -204,7 +268,7 @@ impl Emitter<'_> {
             // does (its value already settled, `witness_exit_value`); the
             // path ends here.
             Continuation::GuardReturn => {
-                for &idx in &plan.released {
+                for &idx in plan.released.difference(&plan.unbound) {
                     self.witness_dec(idx);
                 }
                 if let Some(w) = self.witness.as_mut() {
@@ -409,6 +473,43 @@ fn check_window(
 /// One set with the shared IR's address-hold rule (almide_ir::addr_hold, #4153).
 pub(crate) fn is_raw_address_op(target: &almide_ir::CallTarget) -> bool {
     almide_ir::addr_hold::is_address_op(target)
+}
+
+/// The `let` variables of a frame's body, lifted lambdas not entered.
+fn frame_binds(body: &almide_ir::IrExpr) -> Vec<almide_ir::VarId> {
+    struct Scan(Vec<almide_ir::VarId>);
+    impl almide_ir::visit::IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if !matches!(e.kind, almide_ir::IrExprKind::Lambda { .. }) {
+                almide_ir::visit::walk_expr(self, e);
+            }
+        }
+        fn visit_stmt(&mut self, s: &almide_ir::IrStmt) {
+            if let almide_ir::IrStmtKind::Bind { var, .. } = &s.kind
+                && !self.0.contains(var)
+            {
+                self.0.push(*var);
+            }
+            almide_ir::visit::walk_stmt(self, s);
+        }
+    }
+    let mut s = Scan(Vec::new());
+    almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
+    s.0
+}
+
+/// Is a call in TAIL position of `e` (the branches of an `if` / `match`, a
+/// block's value, a `!` / `?` over it) one that satisfies `hit`? A tail
+/// call is a plain `Call` the emitter lowers in tail position.
+fn any_tail_call(e: &almide_ir::IrExpr, hit: &dyn Fn(&almide_ir::CallTarget) -> bool) -> bool {
+    use almide_ir::IrExprKind as K;
+    match &e.kind {
+        K::Call { target, .. } | K::TailCall { target, .. } => hit(target),
+        K::If { then, else_, .. } => any_tail_call(then, hit) || any_tail_call(else_, hit),
+        K::Match { arms, .. } => arms.iter().any(|a| any_tail_call(&a.body, hit)),
+        K::Block { expr: Some(x), .. } | K::Try { expr: x } | K::Unwrap { expr: x } => any_tail_call(x, hit),
+        _ => false,
+    }
 }
 
 /// Does any call in `body` satisfy `hit`?

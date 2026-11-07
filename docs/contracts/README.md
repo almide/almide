@@ -130,7 +130,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-092 | A generic record field is sized by its instantiated type at construction | 0.27.6 | active | fixture | 3 |
 | C-093 | Mutually-recursive variant types compile on both targets | 0.27.6 | active | fixture | 1 |
 | C-094 | A protocol-method UFCS call on an inferred lambda param resolves the element type | 0.27.6 | active | fixture | 2 |
-| C-095 | json.stringify_pretty is byte-identical indented output across targets | 0.27.6 | active | fixture | 2 |
+| C-095 | json.stringify_pretty is byte-identical indented output across targets | 0.27.6 | active | fixture | 3 |
 | C-096 | env.args works on WASM and matches native | 0.27.6 | active | fixture | 1 |
 | C-097 | generic + on a type parameter concatenates strings/lists identically across targets | 0.27.6 | active | fixture | 1 |
 | C-098 | cross-module derived Codec methods dispatch on WASM and match native | 0.27.6 | active | fixture | 0 |
@@ -293,7 +293,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-255 | Record literals, member reads, and spread updates preserve value semantics identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-256 | break and continue take effect at their statement position, identically on both targets and the interp | 0.57.1 | active | fixture | 2 |
 | C-257 | The scalar error operators evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 10 |
+| C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 11 |
 | C-259 | Variant constructor references build values eliminated identically by match on both targets | 0.57.1 | active | fixture | 1 |
 | C-260 | The declaration family compiles and runs identically on both targets | 0.57.1 | active | fixture | 5 |
 | C-261 | Canonical float values including the negative-zero sign display identically on both targets | 0.57.1 | active | fixture | 1 |
@@ -327,7 +327,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-289 | The Float equality family compares with f64 equality on both targets | 0.57.1 | active | fixture | 1 |
 | C-290 | fs text readers refuse invalid UTF-8 identically on both targets; the bytes readers keep the raw bytes | 0.57.2 | active | fixture | 1 |
 | C-291 | Each error-channel operator agrees with its defining function on both targets | 0.57.1 | active | fixture | 2 |
-| C-292 | The reference-suite conformance corpus runs byte-identical across targets | 0.57.2 | active | fixture | 48 |
+| C-292 | The reference-suite conformance corpus runs byte-identical across targets | 0.57.2 | active | fixture | 49 |
 | C-293 | Two-level container nestings run byte-identical; the third level and map-valued shapes are pinned walls | 0.57.2 | active | fixture | 6 |
 | C-294 | A zero compute budget admits inlined loop-free callees on every leg | 0.57.2 | active | fixture | 2 |
 | C-295 | A checker-exhaustive match of guard-lowered box patterns still builds on native | 0.57.2 | active | fixture | 1 |

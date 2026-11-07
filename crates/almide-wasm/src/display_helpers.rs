@@ -172,6 +172,8 @@ pub(crate) fn build_helper_body(
             rc_frame_params: Vec::new(),
             tail_consumed: Default::default(),
             loop_back_releasable: Default::default(),
+            loop_carried: Default::default(),
+            loop_carried_raw: Default::default(),
             self_index: None,
             rc_owned: std::collections::BTreeSet::new(),
             owned_ty: std::collections::HashMap::new(),
