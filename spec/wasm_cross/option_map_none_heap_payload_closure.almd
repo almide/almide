@@ -1,0 +1,13 @@
+// @contract: C-258
+// An inline lambda passed to option.map behaves the same on every leg whatever
+// the Option's payload type (#4588): a `none` of `String?` mapped by a
+// `(String) -> Int` lambda yields `none` without calling it. The native leg's
+// linked option.map body declares an Int payload, and the call must not reach
+// it with a closure of another signature.
+fn main() -> Unit = {
+  let s0: String? = none
+  let r2: Int? = option.map(s0, (acc1) => 2147483647)
+  let r3: String = "ΑΒΓ"
+  println("r3 = ${r3}")
+  println("r2 = ${r2 ?? -1}")
+}
