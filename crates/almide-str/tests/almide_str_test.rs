@@ -6,6 +6,45 @@ use almide_str::{AlmideStr, AlmideStrStatic};
 use std::collections::{BTreeSet, HashMap};
 
 #[test]
+fn ascii_case_construction_preserves_unicode_and_shared_inputs() {
+    for text in ["", "aBc\0z!", "ßıİKΣςéAbZ", "東京🦀aZ"] {
+        let original = AlmideStr::from(text);
+        original.mark_shared();
+        let alias = original.clone();
+        let upper = AlmideStr::from_ascii_uppercase(original.as_str());
+        let lower = AlmideStr::from_ascii_lowercase(alias.as_str());
+        assert_eq!(upper.as_str(), text.to_ascii_uppercase());
+        assert_eq!(lower.as_str(), text.to_ascii_lowercase());
+        assert_eq!(original.as_str(), text);
+        assert_eq!(alias.as_str(), text);
+        if !text.is_empty() {
+            assert!(!AlmideStr::ptr_eq(&upper, &original));
+            assert!(!AlmideStr::ptr_eq(&lower, &original));
+            assert_eq!(upper.capacity(), text.len());
+            assert_eq!(lower.capacity(), text.len());
+        }
+    }
+    static TEXT: AlmideStrStatic<3> = AlmideStrStatic::new("aBz");
+    let original = AlmideStr::from_static(&TEXT);
+    assert_eq!(AlmideStr::from_ascii_uppercase(&original).as_str(), "ABZ");
+    assert_eq!(AlmideStr::from_ascii_lowercase(&original).as_str(), "abz");
+    assert_eq!(original.as_str(), "aBz");
+}
+
+#[test]
+fn ascii_case_construction_covers_every_ascii_byte_and_preserves_static_empty() {
+    let ascii: String = (0u8..=127).map(char::from).collect();
+    let text = format!("{ascii}é🦀Az");
+    assert_eq!(AlmideStr::from_ascii_uppercase(&text).as_str(), text.to_ascii_uppercase());
+    assert_eq!(AlmideStr::from_ascii_lowercase(&text).as_str(), text.to_ascii_lowercase());
+    let empty = AlmideStr::new();
+    for converted in [AlmideStr::from_ascii_uppercase(""), AlmideStr::from_ascii_lowercase("")] {
+        assert!(AlmideStr::ptr_eq(&converted, &empty));
+        assert_eq!(converted.capacity(), 0);
+    }
+}
+
+#[test]
 fn the_empty_string_is_static_and_never_allocates() {
     let e = AlmideStr::new();
     assert_eq!(e.ref_count(), 0);

@@ -152,6 +152,31 @@ impl AlmideStr {
         if cap == 0 { AlmideStr::new() } else { AlmideStr { ptr: almide_str_alloc(cap, 0) } }
     }
 
+    /// Copy a slice into one block, uppercasing only its ASCII bytes.
+    #[inline]
+    pub fn from_ascii_uppercase(s: &str) -> Self {
+        let out = AlmideStr::from(s);
+        if !s.is_empty() {
+            // SAFETY: `from` copied this nonempty slice into a fresh, uniquely
+            // owned block of `s.len()` initialized bytes. ASCII case mapping
+            // preserves length and UTF-8 validity; no reference has escaped.
+            unsafe { &mut *std::ptr::slice_from_raw_parts_mut(out.data(), s.len()) }.make_ascii_uppercase();
+        }
+        out
+    }
+
+    /// Copy a slice into one block, lowercasing only its ASCII bytes.
+    #[inline]
+    pub fn from_ascii_lowercase(s: &str) -> Self {
+        let out = AlmideStr::from(s);
+        if !s.is_empty() {
+            // SAFETY: as above. Empty strings skip the write and keep their
+            // immortal static block; non-ASCII bytes are unchanged.
+            unsafe { &mut *std::ptr::slice_from_raw_parts_mut(out.data(), s.len()) }.make_ascii_lowercase();
+        }
+        out
+    }
+
     #[inline]
     fn rc_cell(&self) -> &AtomicU32 {
         // SAFETY: `ptr` always points at a live header, heap or static; only the count is borrowed.
