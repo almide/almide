@@ -58,6 +58,10 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // A returned Option shares a string-list layout; its literal is not a
+    // constant-table-only value and must survive native materialization.
+    ("literal_option_return", "fn f() -> String? = some(\"payload\")\nfn main() -> Unit = println(f() ?? \"bad\")\n"),
+    ("literal_list_return", "fn f() -> List[String] = [\"one\", \"two\"]\nfn main() -> Unit = println(list.join(f(), \",\"))\n"),
     // ── #4006 C1 class D: top-level heap state, once a wall ──
     ("top_var_heap", "var LOG = \"\"\nfn main() -> Unit = {\n  LOG = LOG + \"x\"\n  println(LOG)\n}\n"),
     ("top_let_heap_call", "let S = int.to_string(3)\nfn main() -> Unit = {\n  println(S)\n}\n"),
