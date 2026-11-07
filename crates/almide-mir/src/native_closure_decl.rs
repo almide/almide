@@ -56,10 +56,25 @@ pub(crate) fn set<'a>(decls: impl Iterator<Item = &'a almide_ir::IrFunction>, li
     DECLS.with(|d| *d.borrow_mut() = Decls { fn_params, linked });
 }
 
-/// The call `name(args)` from the function being rendered: an error when a
-/// closure argument's declared signature disagrees with the param `name`
-/// declares for it.
-pub(crate) fn check(name: &str, args: &[CallArg], user_fns: &BTreeMap<&str, &MirFunction>) -> Result<(), LowerError> {
+/// The call just rendered into `out` (and `shims`) from the lengths `marks`:
+/// when a closure argument's declared signature disagrees with the param the
+/// callee declares for it, the rendered call is taken back and the call is
+/// refused. Checked after the body took the call's other arguments, so a call
+/// it refuses anyway keeps that refusal.
+pub(crate) fn check(
+    call: crate::render_native::NativeCall<'_>,
+    user_fns: &BTreeMap<&str, &MirFunction>,
+    (out, shims): (&mut String, &mut Vec<&'static str>),
+    (out_mark, shims_mark): (usize, usize),
+) -> Result<(), LowerError> {
+    let Err(e) = mismatch(call.name, call.args, user_fns) else { return Ok(()) };
+    out.truncate(out_mark);
+    shims.truncate(shims_mark);
+    Err(e)
+}
+
+/// `Err` when a closure argument of `name(args)` disagrees with the param.
+fn mismatch(name: &str, args: &[CallArg], user_fns: &BTreeMap<&str, &MirFunction>) -> Result<(), LowerError> {
     DECLS.with(|d| {
         let d = d.borrow();
         let Some(params) = d.fn_params.get(name).filter(|_| d.linked.contains(name)) else { return Ok(()) };
