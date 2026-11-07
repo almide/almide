@@ -165,7 +165,7 @@
 70208	spec/wasm_cross/effect_call_arg_credit.almd
 68368	spec/wasm_cross/effect_dispatcher_many_arms.almd
 66304	spec/wasm_cross/effect_fn_value.almd
-73392	spec/wasm_cross/effect_fn_value_slot_family.almd
+73424	spec/wasm_cross/effect_fn_value_slot_family.almd
 65840	spec/wasm_cross/effect_main_guard_err.almd
 66096	spec/wasm_cross/effect_main_guard_ok.almd
 66112	spec/wasm_cross/effect_mut_generic_port.almd
@@ -228,7 +228,7 @@
 66048	spec/wasm_cross/fan_map_err_runs_every_element.almd
 66048	spec/wasm_cross/fan_map_inline_err.almd
 67168	spec/wasm_cross/fan_map_inline_lambda.almd
-67984	spec/wasm_cross/fan_map_nested_combinators.almd
+67920	spec/wasm_cross/fan_map_nested_combinators.almd
 71600	spec/wasm_cross/fan_map_parallel_scalar.almd
 66000	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 ~	spec/wasm_cross/fan_ordered_arms.almd
@@ -836,7 +836,7 @@
 65840	spec/wasm_cross/string_bool_ordering.almd
 197760	spec/wasm_cross/string_byte_slice.almd
 83184	spec/wasm_cross/string_case_no_ascii_fold.almd
-82624	spec/wasm_cross/string_case_unicode.almd
+82640	spec/wasm_cross/string_case_unicode.almd
 67344	spec/wasm_cross/string_codepoint.almd
 66944	spec/wasm_cross/string_codepoint_index.almd
 69648	spec/wasm_cross/string_count_truncation.almd
@@ -851,10 +851,11 @@
 66416	spec/wasm_cross/string_ops.almd
 66784	spec/wasm_cross/string_ops_drain.almd
 65888	spec/wasm_cross/string_pad_ceiling_oom.almd
-72016	spec/wasm_cross/string_passthrough_share.almd
+72032	spec/wasm_cross/string_passthrough_share.almd
 10666880	spec/wasm_cross/string_position_large_offset.almd
 94464	spec/wasm_cross/string_predicates.almd
 66144	spec/wasm_cross/string_repeat_empty.almd
+84016	spec/wasm_cross/string_reuse_pipeline.almd
 66288	spec/wasm_cross/string_rle.almd
 66928	spec/wasm_cross/string_split_rle_codepoint.almd
 71840	spec/wasm_cross/string_to_upper.almd

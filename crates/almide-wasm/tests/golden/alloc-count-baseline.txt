@@ -165,7 +165,7 @@
 10001	9995	2160064	10001	spec/wasm_cross/effect_call_arg_credit.almd
 271	240	2898	271	spec/wasm_cross/effect_dispatcher_many_arms.almd
 14	10	244	10	spec/wasm_cross/effect_fn_value.almd
-97	67	977	97	spec/wasm_cross/effect_fn_value_slot_family.almd
+95	64	925	95	spec/wasm_cross/effect_fn_value_slot_family.almd
 2	0	36	0	spec/wasm_cross/effect_main_guard_err.almd
 3	0	33	3	spec/wasm_cross/effect_main_guard_ok.almd
 8	3	86	8	spec/wasm_cross/effect_mut_generic_port.almd
@@ -228,7 +228,7 @@
 11	4	207	8	spec/wasm_cross/fan_map_err_runs_every_element.almd
 10	3	153	5	spec/wasm_cross/fan_map_inline_err.almd
 71	29	814	71	spec/wasm_cross/fan_map_inline_lambda.almd
-92	37	1427	92	spec/wasm_cross/fan_map_nested_combinators.almd
+91	37	1403	91	spec/wasm_cross/fan_map_nested_combinators.almd
 201	113	5338	201	spec/wasm_cross/fan_map_parallel_scalar.almd
 10	4	152	7	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 ~	spec/wasm_cross/fan_ordered_arms.almd
@@ -609,7 +609,7 @@
 86	38	940	86	spec/wasm_cross/mut_param_move_mode_gaps.almd
 182	93	1818	182	spec/wasm_cross/mut_param_nested_place_writeback.almd
 69	25	744	69	spec/wasm_cross/mut_param_pure_result_fn_propagates.almd
-371	293	3607	371	spec/wasm_cross/mut_param_reassign_from_hof.almd
+370	292	3593	370	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2	0	32	2	spec/wasm_cross/mut_param_spread_reassign.almd
 19	6	8144	19	spec/wasm_cross/mut_param_tail_recursion.almd
 13	3	327	13	spec/wasm_cross/mut_param_writeback_growth.almd
@@ -692,7 +692,7 @@
 2	0	48	2	spec/wasm_cross/pipe_compose_forms.almd
 0	0	0	0	spec/wasm_cross/pipe_lambda_block_value.almd
 12	0	177	12	spec/wasm_cross/pipe_tuple_pattern_lambda.almd
-103	86	1219	103	spec/wasm_cross/pipe_unwrap_or_family.almd
+102	85	1195	102	spec/wasm_cross/pipe_unwrap_or_family.almd
 10	2	164	10	spec/wasm_cross/place_assign_ascription.almd
 12	4	193	12	spec/wasm_cross/place_mutation.almd
 147	101	2521	147	spec/wasm_cross/playground_default.almd
@@ -836,7 +836,7 @@
 0	0	0	0	spec/wasm_cross/string_bool_ordering.almd
 18	10	120062	18	spec/wasm_cross/string_byte_slice.almd
 203	181	2110	203	spec/wasm_cross/string_case_no_ascii_fold.almd
-121	115	2079	121	spec/wasm_cross/string_case_unicode.almd
+119	112	2057	119	spec/wasm_cross/string_case_unicode.almd
 278	249	2178	278	spec/wasm_cross/string_codepoint.almd
 44	17	352	44	spec/wasm_cross/string_codepoint_index.almd
 123	40	1621	123	spec/wasm_cross/string_count_truncation.almd
@@ -851,10 +851,11 @@
 24	8	104	24	spec/wasm_cross/string_ops.almd
 44	27	284	44	spec/wasm_cross/string_ops_drain.almd
 3	0	36	1	spec/wasm_cross/string_pad_ceiling_oom.almd
-17	12	71	17	spec/wasm_cross/string_passthrough_share.almd
+16	10	60	16	spec/wasm_cross/string_passthrough_share.almd
 37	9	11600400	37	spec/wasm_cross/string_position_large_offset.almd
 400	387	9572	400	spec/wasm_cross/string_predicates.almd
 25	10	56	25	spec/wasm_cross/string_repeat_empty.almd
+45	19	433	45	spec/wasm_cross/string_reuse_pipeline.almd
 192	172	1158	192	spec/wasm_cross/string_rle.almd
 78	38	524	78	spec/wasm_cross/string_split_rle_codepoint.almd
 6	2	92	6	spec/wasm_cross/string_to_upper.almd
