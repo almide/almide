@@ -216,6 +216,7 @@ impl Emitter<'_> {
         m: &IrExpr,
         cb: &IrExpr,
     ) -> ArmResult {
+        if let Some(out) = self.lower_group_count(m, cb)? { return Ok(Some(out)); }
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (mh, k, v) = self.map_hof_open(m)?;
         let (koff, voff, esz) = entry_layout(k, v);

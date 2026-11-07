@@ -139,6 +139,7 @@ mod unroll;
 mod collect;
 mod collections;
 mod collections_hof;
+mod group_count;
 mod collections_set;
 mod map_inplace;
 mod map_holes;
