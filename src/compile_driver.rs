@@ -442,17 +442,41 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
 /// memory-safety guarantee (#4008), which `almide build` names on its
 /// `Built` line. Empty under `--no-check`, which checks nothing.
 pub(crate) fn try_compile_reporting(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>, Vec<String>), String> {
+    try_compile_pending(file, no_check, codegen_opts).map(|(pending, metered, outside)| (pending.generate(), metered, outside))
+}
+
+/// A program checked, lowered and linked, whose standard-codegen Rust has not
+/// been generated yet. The native route renders a program on the v1 trust
+/// spine first and ships that render when it applies; the standard codegen is
+/// then never read, so it runs only when something asks for it (#4595: it was
+/// ~10% of a small program's `almide build`). Every step that can print a
+/// diagnostic or refuse the program has already run: the codegen reports
+/// nothing of its own.
+pub(crate) struct PendingRust {
+    ir: almide::ir::IrProgram,
+    opts: codegen::CodegenOptions,
+}
+
+impl PendingRust {
+    /// The standard codegen's Rust (Codegen v3: Nanopass + Templates).
+    pub(crate) fn generate(mut self) -> String {
+        let t = cli::PhaseTimer::start();
+        let code = match codegen::codegen_with(&mut self.ir, codegen::pass::Target::Rust, &self.opts) {
+            codegen::CodegenOutput::Source(s) => s,
+            codegen::CodegenOutput::Binary(_) => unreachable!(),
+        };
+        t.lap("codegen");
+        code
+    }
+}
+
+/// [`try_compile_reporting`] up to, not including, the codegen.
+pub(crate) fn try_compile_pending(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(PendingRust, Option<almide::ir::IrProgram>, Vec<String>), String> {
     let t = cli::PhaseTimer::start();
-    let (mut ir_program, outside_guarantee) = compile_to_linked_ir(file, no_check, &t)?;
+    let (ir_program, outside_guarantee) = compile_to_linked_ir(file, no_check, &t)?;
     let metered = ir_program.as_ref().filter(|ir| almide::ir::runtime_use::uses_metered_prims(ir)).cloned();
-    // Codegen v3: three-layer pipeline (Nanopass + Templates)
-    let ir = ir_program.as_mut().expect("IR required for codegen");
-    let code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, codegen_opts) {
-        codegen::CodegenOutput::Source(s) => s,
-        codegen::CodegenOutput::Binary(_) => unreachable!(),
-    };
-    t.lap("codegen");
-    Ok((code, metered, outside_guarantee))
+    let ir = ir_program.expect("IR required for codegen");
+    Ok((PendingRust { ir, opts: codegen_opts.clone() }, metered, outside_guarantee))
 }
 
 /// Everything [`try_compile_reporting`] does before codegen — every step that
