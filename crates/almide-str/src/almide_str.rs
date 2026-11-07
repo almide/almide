@@ -267,6 +267,25 @@ impl AlmideStr {
         self.unique_with(0)
     }
 
+    /// Keep a UTF-8 byte range, reusing a unique block and copying only the
+    /// retained bytes of a shared/static block. Invalid boundaries panic
+    /// before changing the string.
+    pub fn retain_range(&mut self, range: std::ops::Range<usize>) {
+        let kept = &self.as_str()[range.clone()];
+        if range.start == 0 && range.end == self.len() { return; }
+        if !self.is_unique() {
+            *self = AlmideStr::from(kept);
+            return;
+        }
+        let mut u = self.unique();
+        let len = range.end - range.start;
+        // SAFETY: slicing above checked bounds and both UTF-8 boundaries.
+        // The unique view owns the initialized source and destination, which
+        // may overlap. The kept bytes form a complete UTF-8 string.
+        unsafe { std::ptr::copy(u.data.add(range.start), u.data, len) };
+        u.len = len;
+    }
+
     #[inline]
     pub fn push_str(&mut self, t: &str) {
         let (len, n) = (self.len(), t.len());
@@ -554,6 +573,20 @@ pub struct AlmideUniqueStr<'a> {
 }
 
 impl AlmideUniqueStr<'_> {
+    /// Change only ASCII bytes; UTF-8 length and non-ASCII scalars stay intact.
+    #[inline]
+    pub fn make_ascii_uppercase(&mut self) {
+        // SAFETY: this unique heap view owns `len` initialized bytes. ASCII
+        // case mapping preserves byte length and UTF-8 validity.
+        unsafe { &mut *std::ptr::slice_from_raw_parts_mut(self.data, self.len) }.make_ascii_uppercase();
+    }
+
+    #[inline]
+    pub fn make_ascii_lowercase(&mut self) {
+        // SAFETY: the same unique-view and UTF-8 invariants as uppercase.
+        unsafe { &mut *std::ptr::slice_from_raw_parts_mut(self.data, self.len) }.make_ascii_lowercase();
+    }
+
     #[inline]
     pub fn push_str(&mut self, t: &str) {
         let n = t.len();

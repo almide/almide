@@ -36720,6 +36720,7 @@ pub const SRC_STRING: &str = r#"
 
 /// s without leading/trailing whitespace.
 @intrinsic("almide_rt_string_trim")
+@reuse(s)
 fn trim(s: String) -> String = _
 
 /// Pieces around sep; empty pieces kept.
@@ -36779,10 +36780,12 @@ fn capitalize(s: String) -> String = _
 
 /// Unicode uppercase; never folds non-ASCII into ASCII; not for identity.
 @intrinsic("almide_rt_string_to_upper")
+@reuse(s)
 fn to_upper(s: String) -> String = _
 
 /// Unicode lowercase; never folds non-ASCII into ASCII; not for identity.
 @intrinsic("almide_rt_string_to_lower")
+@reuse(s)
 fn to_lower(s: String) -> String = _
 
 /// Every from replaced by to.
@@ -36852,10 +36855,12 @@ fn pad_end(s: String, n: Int, fill: String) -> String = _
 
 /// s without leading whitespace.
 @intrinsic("almide_rt_string_trim_start")
+@reuse(s)
 fn trim_start(s: String) -> String = _
 
 /// s without trailing whitespace.
 @intrinsic("almide_rt_string_trim_end")
+@reuse(s)
 fn trim_end(s: String) -> String = _
 
 /// Non-overlapping needle count; len+1 if needle empty.
