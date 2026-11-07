@@ -1,3 +1,5 @@
+// @contract: C-020, C-021, C-033, C-100
+// Reusing a string preserves live aliases, Unicode case and whitespace semantics.
 fn reuse_upper(s: String) -> String = string.to_upper(string.trim(s))
 fn lower(s: String) -> String = string.to_lower(string.trim(s))
 fn repeat_trim(s: String, n: Int) -> String =

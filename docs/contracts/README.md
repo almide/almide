@@ -55,8 +55,8 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 2 |
 | C-018 | Unicode string predicates match Rust char methods over the full domain | 0.24.0 | active | fixture | 1 |
 | C-019 | rt_string_extra ops (replace_first, strip_*, predicates, cmp) match native | 0.24.0 | active | fixture | 2 |
-| C-020 | Unicode case transforms (to_upper/to_lower/capitalize) are full-Unicode | 0.24.0 | active | fixture | 1 |
-| C-021 | Whitespace trim / is_whitespace use the full Unicode White_Space property | 0.24.0 | active | fixture | 1 |
+| C-020 | Unicode case transforms (to_upper/to_lower/capitalize) are full-Unicode | 0.24.0 | active | fixture | 2 |
+| C-021 | Whitespace trim / is_whitespace use the full Unicode White_Space property | 0.24.0 | active | fixture | 2 |
 | C-022 | bytes.to_string_lossy is UTF-8-lossy decode (inverse of bytes.from_string) | 0.24.0 | active | fixture | 1 |
 | C-023 | float.to_string is shortest round-tripping decimal, byte-equal to Rust Display | 0.24.0 | active | fuzz(100000) | 2 |
 | C-024 | float.parse is correctly-rounded round-to-nearest-even (Clinger AlgorithmM) | 0.24.0 | active | fixture | 1 |
@@ -68,7 +68,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-030 | hex.encode / hex.decode are byte-identical incl. positional error detail | 0.24.0 | active | fixture | 2 |
 | C-031 | value get/set/remove_path edge cases match the native oracle, which never fails on a path edge case | 0.24.0 | active | fixture | 3 |
 | C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 7 |
-| C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 23 |
+| C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 24 |
 | C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 8 |
 | C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 6 |
 | C-036 | Records, variants, and pattern matching are byte-identical | 0.24.0 | active | fixture | 10 |
@@ -135,7 +135,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-097 | generic + on a type parameter concatenates strings/lists identically across targets | 0.27.6 | active | fixture | 1 |
 | C-098 | cross-module derived Codec methods dispatch on WASM and match native | 0.27.6 | active | fixture | 0 |
 | C-099 | comparison/equality operators byte-match native across all operand types on the v1 wasm path | 0.27.6 | active | fixture | 10 |
-| C-100 | Self-hosted String classification/transform ops byte-match native on wasm | 0.27.6 | active | fixture | 4 |
+| C-100 | Self-hosted String classification/transform ops byte-match native on wasm | 0.27.6 | active | fixture | 5 |
 | C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 18 |
 | C-102 | List iteration, call-result element materialization, and tail-recursive list traversal byte-match native | 0.27.6 | active | fixture | 5 |
 | C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 8 |
