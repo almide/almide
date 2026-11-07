@@ -8,11 +8,11 @@
 // mapping and the deep key scan each kept another copy of that list, so a Map,
 // Result, Bytes or Unit element, a List, Set or Bytes set member and a List or
 // Option map key walled too. Every one of them now asks the predicate equality
-// itself answers. (`set.from_list` keeps its own copy until its inspection
-// stamp is re-measured; the sets here are built by `set.insert`.) Sets and maps
-// compare by content, not insertion order. Each value is built by a function
-// from flat literals, so every function here also lowers on the certified MIR
-// leg.
+// itself answers. (`set.from_list`, which asks it too, is pinned by
+// set_from_list_every_equatable_element.almd; the sets here are built by
+// `set.insert`.) Sets and maps compare by content, not insertion order. Each
+// value is built by a function from flat literals, so every function here also
+// lowers on the certified MIR leg.
 type Item = { name: String, tags: Set[String] }
 
 fn tag_set(raw: String) -> Set[String] = string.split(raw, ",") |> list.filter((t) => t != "") |> set.from_list

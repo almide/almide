@@ -313,6 +313,7 @@ evidence  = [
   { path = "spec/wasm_cross/unique_non_flat_element.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_of_tuples_equality.almd", class = "fixture" },
   { path = "spec/wasm_cross/equality_ops_every_equatable_element.almd", class = "fixture" },
+  { path = "spec/wasm_cross/set_from_list_every_equatable_element.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_rich_variant_key.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_guard_eq_borrows_binding.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_catchall_binder_eq.almd", class = "fixture" },

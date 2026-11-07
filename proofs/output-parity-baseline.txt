@@ -911,6 +911,7 @@ spec/wasm_cross/secret_eq_and_decode.almd
 spec/wasm_cross/self_call_swapped_params.almd
 spec/wasm_cross/sequential_match_two_arg_call.almd
 spec/wasm_cross/set_entries_reclaim.almd
+spec/wasm_cross/set_from_list_every_equatable_element.almd
 spec/wasm_cross/set_index_order.almd
 spec/wasm_cross/set_insertion_order.almd
 spec/wasm_cross/shared_arg_pair_dup.almd

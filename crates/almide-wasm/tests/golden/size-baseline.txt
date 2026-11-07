@@ -807,6 +807,7 @@
 5250	spec/wasm_cross/self_call_swapped_params.almd
 4102	spec/wasm_cross/sequential_match_two_arg_call.almd
 10079	spec/wasm_cross/set_entries_reclaim.almd
+12191	spec/wasm_cross/set_from_list_every_equatable_element.almd
 11673	spec/wasm_cross/set_index_order.almd
 13900	spec/wasm_cross/set_insertion_order.almd
 2682	spec/wasm_cross/shared_arg_pair_dup.almd

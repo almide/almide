@@ -657,10 +657,7 @@ impl Emitter<'_> {
                     SliceTy::List(h) => self.types.el(h),
                     other => return unsup(&format!("set-from-of:{other:?}")),
                 };
-                if !matches!(
-                    e,
-                    SliceTy::Scalar(_) | SliceTy::Tuple(_) | SliceTy::Named(_)
-                ) {
+                if !crate::equality::has_structural_eq(e) {
                     return unsup("set-elem-nonscalar");
                 }
                 // The result is fresh and ours alone, so it grows in place
