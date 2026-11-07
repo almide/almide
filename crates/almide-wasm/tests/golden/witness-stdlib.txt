@@ -973,6 +973,7 @@ bigint.sub
 bigint.sub_from
 bigint.sub_mag
 bigint.text_limit_error
+bigint.to_string_radix
 bigint.top_bits
 bigint.top_nonzero
 bigint.trim
