@@ -1,0 +1,47 @@
+// @contract: C-015
+// `set.from_list` over every member shape `==` compares (#4578 follow-up). The
+// wasm leg's `set.from_list` kept its own list of member shapes (scalars,
+// tuples, named types) after every other equality-needing op moved to the one
+// predicate equality answers, so a `List[List[Int]]`, a `List[Set[String]]` or
+// a `List[Bytes]` walled `set-elem-nonscalar` while `set.insert` built the
+// same set and native ran the program. Duplicates collapse by content, and the
+// set equals the one `set.insert` folds from the same list. Each value is built
+// by a function from flat literals, so every function here also lowers on the
+// certified MIR leg.
+fn tag_set(raw: String) -> Set[String] = string.split(raw, ",") |> list.filter((t) => t != "") |> set.from_list
+
+fn sets(raw: List[String]) -> List[Set[String]] = raw |> list.map(tag_set)
+
+fn int_lists(raw: List[String]) -> List[List[Int]] = raw |> list.map((s) => string.split(s, ",") |> list.map((t) => int.parse(t) ?? 0))
+
+fn blobs(vals: List[Int]) -> List[Bytes] = vals |> list.map((v) => bytes.from_list([v, v + 1]))
+
+fn list_line(xs: List[List[Int]]) -> String = {
+  let s = set.from_list(xs)
+  let folded = xs |> list.fold(set.new(), (acc, x) => set.insert(acc, x))
+  "set.from_list of list: len=${set.len(s)} has=${set.contains(s, [3])} has_not=${set.contains(
+    s,
+    [1],
+  )} same=${s == folded}"
+}
+
+fn set_line(xs: List[Set[String]], hit: Set[String]) -> String = {
+  let s = set.from_list(xs)
+  let folded = xs |> list.fold(set.new(), (acc, x) => set.insert(acc, x))
+  "set.from_list of set: len=${set.len(s)} has=${set.contains(s, hit)} same=${s == folded}"
+}
+
+fn bytes_line(xs: List[Bytes], hit: Bytes, miss: Bytes) -> String = {
+  let s = set.from_list(xs)
+  let folded = xs |> list.fold(set.new(), (acc, x) => set.insert(acc, x))
+  "set.from_list of bytes: len=${set.len(s)} has=${set.contains(s, hit)} has_not=${set.contains(
+    s,
+    miss,
+  )} same=${s == folded}"
+}
+
+fn main() -> Unit = {
+  println(list_line(int_lists(["1,2", "1,2", "3", "2,1", "3"])))
+  println(set_line(sets(["a,b", "b,a", "c", "c", ""]), tag_set("c")))
+  println(bytes_line(blobs([1, 1, 2, 5]), bytes.from_list([2, 3]), bytes.from_list([3, 2])))
+}
