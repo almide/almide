@@ -190,6 +190,7 @@ fn __lsuv_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) ->
     __lsuv_fill(sh, bh, n, i, f, j + 1)
   }
 
+@specializes("list.update")
 fn list_update_value(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)

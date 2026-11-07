@@ -82,9 +82,9 @@ struct SelfHostLinker<'u> {
     linked: Vec<LinkedSelfHost>,
     linked_srcs: std::collections::BTreeMap<&'static str, usize>,
     done: std::collections::BTreeSet<String>,
-    /// Each linked name's ROOT: the registry impl a user function calls whose
-    /// link wanted it (a root is its own).
-    roots: std::collections::BTreeMap<String, String>,
+    /// Each linked name's ROOTS: the registry impls user functions call whose
+    /// links want it (a root is its own).
+    roots: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     /// The roots served by their declared runtime body instead of a link.
     route_served: std::collections::BTreeSet<String>,
     /// Every call name the link rewrote: (function, op, the name before).
@@ -129,7 +129,7 @@ impl SelfHostLinker<'_> {
     ) -> Result<Vec<(&'static str, String)>, LowerError> {
         let defined: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
         let mut wanted: Vec<(&'static str, String)> = Vec::new();
-        let mut roots: Vec<(String, String)> = Vec::new();
+        let mut roots: Vec<(String, std::collections::BTreeSet<String>)> = Vec::new();
         for (fi, f) in functions.iter_mut().enumerate() {
             let caller_root = self.roots.get(&f.name).cloned();
             for (oi, op) in f.ops.iter_mut().enumerate() {
@@ -146,14 +146,14 @@ impl SelfHostLinker<'_> {
                 if self.route_served.contains(&impl_fn) {
                     continue;
                 }
+                roots.push((impl_fn.clone(), caller_root.clone().unwrap_or_else(|| [impl_fn.clone()].into())));
                 if !defined.contains(&impl_fn) && !self.done.contains(&impl_fn) {
-                    roots.push((impl_fn.clone(), caller_root.clone().unwrap_or_else(|| impl_fn.clone())));
                     wanted.push((src, impl_fn));
                 }
             }
         }
         for (n, r) in roots {
-            self.roots.entry(n).or_insert(r);
+            self.roots.entry(n).or_default().extend(r);
         }
         Ok(wanted)
     }
@@ -203,13 +203,13 @@ impl SelfHostLinker<'_> {
             &sh.variant_layouts,
         )
         .map_err(|e| LowerError::at(func.body.span, format!("native: self-host fn `{impl_fn}`: {e:?}")))?;
-        let root = self.roots.get(&impl_fn).cloned().unwrap_or_else(|| impl_fn.clone());
+        let root = self.roots.get(&impl_fn).cloned().unwrap_or_else(|| [impl_fn.clone()].into());
         for g in &all {
             if self.user_names.contains(&g.name) {
                 return Err(self.clash(&g.name));
             }
             self.done.insert(g.name.clone());
-            self.roots.entry(g.name.clone()).or_insert_with(|| root.clone());
+            self.roots.entry(g.name.clone()).or_default().extend(root.iter().cloned());
         }
         self.done.insert(impl_fn);
         functions.extend(all);
@@ -255,9 +255,15 @@ fn link_native_self_host(
             route_served: route_served.clone(),
             renamed: Vec::new(),
         };
-        match linker.link_all(functions) {
+        let refused = match linker.link_all(functions) {
             Ok(()) => return Ok(NativeLink { linked: linker.linked, route_served }),
-            Err((_, Some(root))) if crate::native_hof::of(&root).is_some() && route_served.insert(root.clone()) => {
+            Err(refused) => refused,
+        };
+        // Every root under the refusal that has a runtime route takes it.
+        let routed: Vec<String> = refused.1.iter().filter(|r| crate::native_hof::of(r).is_some()).cloned().collect();
+        let grew = routed.into_iter().fold(false, |g, r| route_served.insert(r) || g);
+        match refused {
+            _ if grew => {
                 // Start over from the program's own functions, their call
                 // names as they were.
                 functions.truncate(own);
@@ -267,22 +273,25 @@ fn link_native_self_host(
                     }
                 }
             }
-            Err((e, _)) => return Err(e),
+            (e, _) => return Err(e),
         }
     }
 }
 
 impl SelfHostLinker<'_> {
     /// The link's fixpoint; a refusal carries the root impl it happened under.
-    fn link_all(&mut self, functions: &mut Vec<crate::MirFunction>) -> Result<(), (LowerError, Option<String>)> {
+    fn link_all(
+        &mut self,
+        functions: &mut Vec<crate::MirFunction>,
+    ) -> Result<(), (LowerError, std::collections::BTreeSet<String>)> {
         loop {
-            let wanted = self.collect_wanted(functions).map_err(|e| (e, None))?;
+            let wanted = self.collect_wanted(functions).map_err(|e| (e, Default::default()))?;
             if wanted.is_empty() {
                 return Ok(());
             }
             for (src, impl_fn) in wanted {
-                let root = self.roots.get(&impl_fn).cloned();
-                self.link_one(functions, src, impl_fn).map_err(|e| (e, root))?;
+                let roots = self.roots.get(&impl_fn).cloned().unwrap_or_default();
+                self.link_one(functions, src, impl_fn).map_err(|e| (e, roots))?;
             }
         }
     }
