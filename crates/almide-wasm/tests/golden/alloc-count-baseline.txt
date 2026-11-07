@@ -807,6 +807,7 @@
 58	40	416	58	spec/wasm_cross/self_call_swapped_params.almd
 21	5	154	21	spec/wasm_cross/sequential_match_two_arg_call.almd
 50001	49969	543345	50001	spec/wasm_cross/set_entries_reclaim.almd
+89	66	852	89	spec/wasm_cross/set_from_list_every_equatable_element.almd
 530	462	27311	530	spec/wasm_cross/set_index_order.almd
 75	63	901	75	spec/wasm_cross/set_insertion_order.almd
 15	7	109	15	spec/wasm_cross/shared_arg_pair_dup.almd
