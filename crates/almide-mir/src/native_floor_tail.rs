@@ -129,7 +129,54 @@ struct Tok<'a> {
     depth: u32,
 }
 
+/// [`lex_uncached`], remembered by content for the life of the process (#4595).
+///
+/// Building the runtime index lexes the same texts over and over: each
+/// runtime module once per name scan (items, defined names, trait names,
+/// trait methods, thread-locals, prelude traits) and each of its items again
+/// inside several of those scans. That repetition was a fifth of a small
+/// program's `almide build`. A hit is checked against the stored text itself,
+/// not only its hash, so a collision can never hand back another text's
+/// tokens; tokens are stored as offsets, so the memo is independent of the
+/// caller's lifetime. Short texts (a signature, an alias line) are lexed
+/// directly: hashing them would cost about as much as lexing.
 fn lex(src: &str) -> Vec<Tok<'_>> {
+    use std::hash::{Hash, Hasher};
+    type Packed = Vec<(u32, u32, u32)>;
+    type Memo = HashMap<(u64, usize), Vec<(Box<str>, Packed)>>;
+    static MEMO: OnceLock<Mutex<Memo>> = OnceLock::new();
+    if src.len() < 512 {
+        return lex_uncached(src);
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    src.hash(&mut h);
+    let key = (h.finish(), src.len());
+    let memo = MEMO.get_or_init(Default::default);
+    let rebuild = |packed: &Packed| -> Vec<Tok<'_>> {
+        packed
+            .iter()
+            .map(|&(off, len, depth)| {
+                let off = off as usize;
+                Tok { text: &src[off..off + len as usize], off, depth }
+            })
+            .collect()
+    };
+    if let Some(hit) = memo
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+        .and_then(|texts| texts.iter().find(|(text, _)| &**text == src))
+        .map(|(_, packed)| rebuild(packed))
+    {
+        return hit;
+    }
+    let toks = lex_uncached(src);
+    let packed: Packed = toks.iter().map(|t| (t.off as u32, t.text.len() as u32, t.depth)).collect();
+    memo.lock().unwrap_or_else(|e| e.into_inner()).entry(key).or_default().push((src.into(), packed));
+    toks
+}
+
+fn lex_uncached(src: &str) -> Vec<Tok<'_>> {
     let b = src.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
@@ -675,6 +722,19 @@ mod tests {
         let t = lex("fn a() { let s = \"}\"; let c = '{'; x(s) }\nfn b<'a>(x: &'a str) {}");
         let fns: Vec<_> = t.iter().filter(|t| t.text == "fn").map(|t| t.depth).collect();
         assert_eq!(fns, vec![0, 0]);
+    }
+
+    /// The memo hands back exactly what the lexer produces, on the first call
+    /// and on a hit, and a different text of the same length is not a hit.
+    #[test]
+    fn lex_memo_matches_the_lexer() {
+        let view = |t: &[Tok]| t.iter().map(|t| (t.text.to_string(), t.off, t.depth)).collect::<Vec<_>>();
+        let a = "fn a() { let s = \"}\"; x(s) }\n".repeat(40);
+        let b = a.replace("x(s)", "y(s)");
+        assert_eq!(a.len(), b.len());
+        assert_eq!(view(&lex(&a)), view(&lex_uncached(&a)));
+        assert_eq!(view(&lex(&a)), view(&lex_uncached(&a)), "a memo hit");
+        assert_eq!(view(&lex(&b)), view(&lex_uncached(&b)), "same length, other text");
     }
 
     #[test]
