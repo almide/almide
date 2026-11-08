@@ -28,7 +28,8 @@
 //! direct named call sites keeps borrowing: `main`, a function taken as a
 //! value (`FuncRef`, so a closure call may reach it), and the render-linked
 //! runtime names (dotted or `__`-prefixed). A dotted name the program itself
-//! defines (a type's `T.decode`, its derived workers) is called by name only.
+//! defines (a type's `T.decode`, its derived workers, a lifted `__almd_lift_N`)
+//! is called by name only.
 
 use crate::{MirFunction, Op, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
@@ -642,7 +643,8 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>) {
         let eligible = |f: &MirFunction| {
             f.name != "main"
                 && (!f.name.contains('.') || own.contains(&f.name))
-                && (closure(f) || (!taken.contains(&f.name) && !f.name.starts_with("__")))
+                && (closure(f)
+                    || (!taken.contains(&f.name) && (!f.name.starts_with("__") || own.contains(&f.name))))
         };
         let takes_at = |f: &MirFunction, k: usize| {
             !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0)
