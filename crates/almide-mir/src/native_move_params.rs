@@ -163,6 +163,11 @@ fn consumed_params(
         };
         // Reads before them stay reads of the param it still holds.
         let given: Vec<usize> = named.iter().copied().filter(|&i| gives(i) && !crate::mir_liveness::live_after(func, i, p.value)).collect();
+        if std::env::var("PROBE_DBG").is_ok() && func.name.contains("erratw") {
+            let gv: Vec<usize> = named.iter().copied().filter(|&i| gives(i)).collect();
+            eprintln!("PROBE {} k={} named={:?} gives={:?} given={:?} hands={} arm={:?} every={}", func.name, k, named, gv, given, hands(k),
+                arm_release(func, p.value, &given, &depth), crate::mir_liveness::last_use_on_every_path(func, p.value, &given));
+        }
         if !given.is_empty() && func.ret != Some(p.value) && crate::mir_liveness::last_use_on_every_path(func, p.value, &given) {
             out.extend(given.iter().map(|&i| (k, i)));
             continue;
@@ -331,6 +336,10 @@ fn own_params(
     at.sort_unstable();
     for i in at.into_iter().rev() {
         f.ops.remove(i);
+    }
+    if std::env::var("PROBE_DBG").is_ok() && func.name.contains("erratw") {
+        eprintln!("PROBE own {} verify={:?}", func.name, crate::verify_ownership(&f).err().map(|v| format!("{v:?}")));
+        for (i, op) in f.ops.iter().enumerate() { eprintln!("PROBE op {i}: {op:?}"); }
     }
     crate::verify_ownership(&f).is_ok().then_some(f)
 }
