@@ -54,6 +54,7 @@ use std::sync::{Mutex, OnceLock};
 #[derive(Clone, Debug, PartialEq)]
 enum DTy {
     Var(String),
+    Unit,
     Int,
     Bool,
     Float,
@@ -78,6 +79,9 @@ pub(crate) struct Hof {
     pub symbol: String,
     /// Each param's declared type and whether the runtime borrows it.
     params: Vec<(DTy, bool)>,
+    /// Mutable loans come from the source declaration and must agree with
+    /// the runtime's `&mut` signature. They never pass a copied receiver.
+    mutable: Vec<bool>,
     ret: DTy,
     /// The runtime body's static-dispatch twin (`static_twin`) and every
     /// other runtime item the body reaches.
@@ -90,6 +94,7 @@ pub(crate) struct Hof {
 fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
     Some(match t {
         TypeExpr::Simple { name } => match name.as_str() {
+            "Unit" => DTy::Unit,
             "Int" => DTy::Int,
             "Bool" => DTy::Bool,
             "Float" => DTy::Float,
@@ -126,6 +131,7 @@ fn rust_agrees(d: &DTy, r: &str) -> Option<bool> {
     let by_ref = r.starts_with('&');
     let r = r.strip_prefix('&').unwrap_or(r);
     let ok = match d {
+        DTy::Unit => (r == "()" || r.is_empty()) && !by_ref,
         DTy::Int => r == "i64",
         DTy::Bool => r == "bool",
         DTy::Float => r == "f64",
@@ -195,22 +201,24 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
     if rust_params.len() != dparams.len() || rust_agrees(&dret, &rust_ret) != Some(false) {
         return Err(format!("runtime signature {rust_params:?} -> {rust_ret} disagrees"));
     }
+    let mutable: Vec<bool> = params.iter().map(|p| p.is_mut).collect();
     let params: Vec<(DTy, bool)> = dparams
         .into_iter()
         .zip(&rust_params)
-        .map(|(d, r)| rust_agrees(&d, r).map(|b| (d, b)))
+        .zip(&mutable)
+        .map(|((d, r), m)| declared_param_mode(&d, *m, r).map(|b| (d, b)))
         .collect::<Option<_>>()
         .ok_or_else(|| format!("runtime params {rust_params:?} disagree"))?;
     let text = items.first().copied().ok_or("no runtime body text")?;
     // A combinator takes its closure statically (`static_twin`); a call with
     // no function-typed param calls the runtime body as it is.
     if !params.iter().any(|(d, _)| matches!(d, DTy::Fn(..))) {
-        return Ok(Hof { twin: symbol.clone(), symbol, params, ret: dret, items, bounds });
+        return Ok(Hof { twin: symbol.clone(), symbol, params, mutable, ret: dret, items, bounds });
     }
     let (twin, text) = static_twin(&symbol, text).ok_or("the runtime body has no `Rc<dyn Fn>` param to take statically")?;
     let mut items = items;
     items[0] = Box::leak(text.into_boxed_str());
-    Ok(Hof { symbol, params, ret: dret, items, twin, bounds })
+    Ok(Hof { symbol, params, mutable, ret: dret, items, twin, bounds })
 }
 
 /// The runtime body `text` of `symbol` with every `std::rc::Rc<dyn Fn(..) ->
@@ -409,6 +417,7 @@ fn closure_origins(func: &MirFunction) -> BTreeMap<ValueId, (String, Vec<ValueId
 // ── rendering a served call ──
 
 include!("native_hof_types.rs");
+include!("native_hof_mut.rs");
 
 /// A declared `Float` result read off a lambda that may return it as a real
 /// `f64` or as its i64 bits (the lane the MIR carries a Float in): both are
@@ -620,16 +629,38 @@ fn plan(
     }
     let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
-    for (((d, by_ref), (code, t)), a) in hof.params.iter().zip(&got).zip(call.args.iter()) {
+    for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {
+        if hof.mutable[k] {
+            rendered.push(mutable_place_arg(a, code, *t, tys)?);
+            continue;
+        }
         rendered.push(match d {
             DTy::Fn(dps, dret) => fn_arg(&cx, &mut env, (dps, dret), (a, *t), &mut side)?,
+            DTy::Unit => "()".to_string(),
             // The render carries a Bool in its i64 lane; the runtime takes `bool`.
             DTy::Bool => format!("({code} != 0)"),
             _ => {
+                if hof.mutable.iter().any(|m| *m) {
+                    // Evaluate the other values before lending the receiver
+                    // exclusively, including an argument that reads its alias.
+                    let snapshot = format!("__arg_{}_{}", at.1, k);
+                    let owned = crate::render_native::owned_nty(*t);
+                    let value = runtime_arg(code, *t, false, false);
+                    side.prelude.push(format!("let {snapshot} = {value};"));
+                    if *by_ref { runtime_arg(&snapshot, owned, true, false) } else { snapshot }
+                } else {
                 let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
                 runtime_arg(code, *t, *by_ref, dying)
+                }
             }
         });
+    }
+    // Constructors without a value argument cannot bind their result-only
+    // type parameters from arguments. The linked declaration's concrete
+    // signature supplies those bindings; never guess a scalar default.
+    if kind_of(&env, &hof.ret).is_none() {
+        let ret = sigs.get(call.name)?.1?;
+        bind_param(&mut env, &hof.ret, clo::owned_nty(ret))?;
     }
     let ret = kind_of(&env, &hof.ret)?;
     let expr = format!("{}({})", hof.twin, rendered.join(", "));

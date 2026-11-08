@@ -75,7 +75,7 @@ fn bind_param(env: &mut Env, d: &DTy, t: NTy) -> Option<()> {
             bind_inner(env, k, kk)?;
             bind_inner(env, v, vk)
         }
-        DTy::Int | DTy::Bool => (t == NTy::I64).then_some(()),
+        DTy::Unit | DTy::Int | DTy::Bool => (t == NTy::I64).then_some(()),
         DTy::Float => (t == NTy::F64).then_some(()),
         DTy::Str => matches!(t, NTy::Str | NTy::StrRef).then_some(()),
         DTy::Tuple(..) | DTy::Fn(..) => None,
@@ -87,10 +87,14 @@ fn kind_of(env: &Env, d: &DTy) -> Option<NTy> {
     Some(match d {
         DTy::Var(v) => *env.get(v)?,
         DTy::Tuple(es) => {
-            let fields = es.iter().map(|e| kind_of(env, e)).collect::<Option<Vec<_>>>()?;
+            // Tuple fields follow MIR's scalar lanes even when a runtime
+            // container binds a type parameter to an actual Rust f64.
+            let fields = es.iter().map(|e| kind_of(env, e).map(|k|
+                if k == NTy::F64 { NTy::I64 } else { k }))
+                .collect::<Option<Vec<_>>>()?;
             NTy::Rec(rec::tuple_type_of(&fields))
         }
-        DTy::Int | DTy::Bool => NTy::I64,
+        DTy::Unit | DTy::Int | DTy::Bool => NTy::I64,
         DTy::Float => NTy::F64,
         DTy::Str => NTy::Str,
         DTy::Matrix => NTy::Rec(rec::matrix_index()),

@@ -110,6 +110,11 @@ fn parent_slot_kind(i: u16, slot: Option<usize>) -> Option<NTy> {
 /// The heap kind a read of a typed parent's slot binds as: the declared kind,
 /// or an enum slot's one heap kind.
 fn slot_read_kind(i: u16, slot: Option<usize>) -> Option<NTy> {
+    // A shared Result slot has two possible heap types. Without the tag,
+    // neither is a fact about this read; the render chooses under the arm.
+    if rec::result_payloads(i).is_some_and(|(a, b)| a != b) {
+        return None;
+    }
     if rec::enum_cases(i).is_some() {
         let heap: Vec<NTy> = rec::enum_slot_kinds(i, slot?).into_iter().filter(|t| *t != NTy::I64).collect();
         return (heap.len() == 1).then(|| heap[0]);

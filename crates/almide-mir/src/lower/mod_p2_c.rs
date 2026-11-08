@@ -28,6 +28,10 @@ impl VariantLayout {
 /// over the RAW registry entry is blind to any concrete instantiation. Recurses into `Named`'s
 /// own args and `Applied`'s args (a generic parameter could itself appear nested, e.g.
 /// `List[L]`) so a partially-generic composite field also resolves correctly.
+pub(crate) fn substitute_display_type(ty: &Ty, subst: &HashMap<almide_lang::intern::Sym, Ty>) -> Ty {
+    calls::subst_type_var(ty, subst)
+}
+
 fn substitute_generic_ty(ty: &Ty, subst: &HashMap<almide_lang::intern::Sym, Ty>) -> Ty {
     use almide_lang::types::constructor::TypeConstructorId;
     match ty {

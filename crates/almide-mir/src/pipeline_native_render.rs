@@ -391,12 +391,13 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     let mut ir = ir;
     almide_codegen::pass_region_window_native::native_region_windows(&mut ir);
     let windows = crate::native_region_window::window_fns(&ir);
-    let ir = crate::fan_native::lift_fan_arms(ir)?;
+    let mut ir = crate::fan_native::lift_fan_arms(ir)?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
     // them a record literal lowers as an Opaque skeleton and every field read
     // strict-walls (the probe_native trap recorded in the trust-spine ledger).
     let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
     let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
+    crate::native_display::expand(&mut ir, &record_layouts, &variant_layouts);
     // #4006 A5: the generated record structs, derived from the declared layouts.
     let _records = crate::render_native_rec::install_derived(
         &record_layouts,

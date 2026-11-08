@@ -39,10 +39,14 @@ pub fn rewrite_option_ops(
     let ops = std::mem::take(&mut f.ops);
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = OptionTracker { fresh: next_value(f, &ops), filled: filled.clone(), ..OptionTracker::default() };
+    // A generic runtime declaration can serve both scalar and heap payloads.
+    // A typed handle read is positive evidence of the latter: preserve its
+    // entire address window, including the owner edge the checker follows.
+    let heap_payloads = heap_payload_roots(&ops);
     t.opt_vals.extend(opt_params.iter().copied());
     for op in ops {
         let Some(op) = t.carrier_op(op, &mut out, carriers) else { continue };
-        t.flow_op(op, &mut out, option_fns);
+        t.flow_op(op, &mut out, option_fns, &heap_payloads);
     }
     f.ops = out;
 }
@@ -140,11 +144,12 @@ impl OptionTracker {
     }
 
     /// The call, if-join and pass-through arms.
-    fn flow_op(&mut self, op: Op, out: &mut Vec<Op>, option_fns: &BTreeSet<String>) {
+    fn flow_op(&mut self, op: Op, out: &mut Vec<Op>, option_fns: &BTreeSet<String>, heap_payloads: &BTreeSet<ValueId>) {
         match &op {
             Op::CallFn { dst, name, args, result } => {
                 if let Some(d) = dst {
-                    if option_fns.contains(name) || crate::native_floor::declared_scalar_option(name) {
+                    if !heap_payloads.contains(d)
+                        && (option_fns.contains(name) || crate::native_floor::declared_scalar_option(name)) {
                         self.opt_vals.insert(*d);
                     }
                 }
@@ -177,6 +182,30 @@ impl OptionTracker {
             _ => out.push(op),
         }
     }
+}
+
+/// Roots whose slot windows contain a typed heap load. Unlike the generic
+/// callee's name, that load describes this call's instantiated payload.
+fn heap_payload_roots(ops: &[Op]) -> BTreeSet<ValueId> {
+    let mut roots = BTreeMap::new();
+    let mut heap = BTreeSet::new();
+    for op in ops {
+        match op {
+            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
+                roots.insert(*d, args[0]);
+            }
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
+                if let Some(root) = roots.get(a).or_else(|| roots.get(b)).copied() {
+                    roots.insert(*dst, root);
+                }
+            }
+            Op::Prim { kind: PrimKind::LoadHandle, args, .. } if args.len() == 1 => {
+                if let Some(root) = roots.get(&args[0]) { heap.insert(*root); }
+            }
+            _ => {}
+        }
+    }
+    heap
 }
 
 /// The Option read a swallowed `Load` at offset `off` of Option `o` is: the

@@ -14,6 +14,9 @@ fn has_runtime_tuple(d: &DTy) -> bool {
 /// Evaluate the runtime expression exactly once, transferring each payload
 /// into its declared native field. No layout casts or positional byte reads.
 fn runtime_result(env: &Env, d: &DTy, code: &str) -> Option<String> {
+    if *d == DTy::Unit {
+        return Some(format!("{{ {code}; 0_i64 }}"));
+    }
     if !has_runtime_tuple(d) {
         return Some(if *d == DTy::Bool { format!("({code}) as i64") } else { code.to_string() });
     }
@@ -22,7 +25,11 @@ fn runtime_result(env: &Env, d: &DTy, code: &str) -> Option<String> {
             let NTy::Rec(i) = kind_of(env, d)? else { return None };
             let names: Vec<String> = (0..es.len()).map(|i| format!("__tuple_{i}")).collect();
             let fields = es.iter().zip(&names).enumerate().map(|(k, (e, name))| {
-                Some(format!("f{k}: {}", runtime_result(env, e, name)?))
+                let value = runtime_result(env, e, name)?;
+                let value = if kind_of(env, e)? == NTy::F64 {
+                    format!("({value}).to_bits() as i64")
+                } else { value };
+                Some(format!("f{k}: {value}"))
             }).collect::<Option<Vec<_>>>()?;
             let names = if names.is_empty() { String::new() } else { format!("{},", names.join(", ")) };
             format!("{{ let ({names}) = {code}; {} {{ {} }} }}", rec::struct_name(i), fields.join(", "))
@@ -67,5 +74,19 @@ mod tuple_result_tests {
         assert!(!expr.contains(&format!("{} {{", rec::struct_name(0))));
         let unsupported = DTy::Set(Box::new(DTy::Tuple(vec![DTy::Int])));
         assert!(runtime_result(&env, &unsupported, "runtime_call()").is_none());
+    }
+
+    #[test]
+    fn generic_runtime_float_tuple_fields_preserve_bits() {
+        let _guard = rec::install(vec![rec::RecDecl {
+            name: "Tuple([String, Float])".into(), fields: vec![NTy::Str, NTy::I64],
+            ..Default::default()
+        }]);
+        let env = Env::from([("V".into(), NTy::F64)]);
+        let pair = DTy::Tuple(vec![DTy::Str, DTy::Var("V".into())]);
+        assert_eq!(kind_of(&env, &pair), Some(NTy::Rec(0)));
+        let code = runtime_result(&env, &pair, "read_map()").unwrap();
+        assert!(code.contains("(__tuple_1).to_bits() as i64"));
+        assert_eq!(code.matches("read_map()").count(), 1);
     }
 }

@@ -6,6 +6,174 @@ use std::process::Command;
 fn value_representations_preserve_cross_target_observations() {
     let cases = [
         (
+            "display_maps_and_sets",
+            r#"
+fn main() -> Unit = {
+ let texts = ["b": "q", "a": "x"]
+ println("${texts}")
+ println("${["x": 2.0, "y": -0.0]}")
+ println("${["x": true, "y": false]}")
+ let empty: Map[String, List[Int]] = [:]
+ println("${empty}")
+ let nil: List[Int] = []
+ println("${["x": [1, 2], "y": nil]}")
+ println("${set.from_list(["b", "a", "b"])}")
+ println("${texts}")
+}
+"#,
+        ),
+        (
+            "display_declared_secret",
+            r#"
+import secret
+type Wrap = { token: Secret[String], name: String }
+fn main() -> Unit = {
+ let s = secret.new("canary-mutation-display")
+ println("${s}")
+ println("${Wrap { token: s, name: "p" }}")
+ let ok_value: Result[Secret[String], String] = ok(s)
+ let err_value: Result[Secret[String], String] = err("oops")
+ println("${ok_value}")
+ println("${err_value}")
+ println("${some(s)}")
+ println("${[s]}")
+ println(int.to_string(string.len(secret.reveal(s))))
+}
+"#,
+        ),
+        (
+            "display_nested_records",
+            r#"
+type Box[A] = { value: A, label: String }
+fn main() -> Unit = {
+ let x: Box[List[Option[String]]] = { value: [some("a"), none], label: "x" }
+ println("${x}")
+ println("${[x]}")
+ println("${some(x)}")
+ let r: Result[Box[List[Option[String]]], String] = err("bad")
+ println("${r}")
+ println(x.label)
+}
+"#,
+        ),
+        (
+            "display_variant_payloads",
+            r#"
+type Choice = Empty | Pair(String, List[Int]) | Fields { _name: String, n: Float }
+fn main() -> Unit = {
+ let xs = [Empty, Pair("a", [1, 2]), Fields { _name: "z", n: 2.0 }]
+ for x in xs { println("${x}") }
+ println("${xs}")
+ println(int.to_string(list.len(xs)))
+}
+"#,
+        ),
+        (
+            "display_structural_and_bits",
+            r#"
+fn main() -> Unit = {
+ let x = { z: ("a", -0.0), a: true }
+ println("${x}")
+ let ys = [("q", 1.25), ("r", 2.0)]
+ println("${ys}")
+ println("${some((false, 3))}")
+ println("${x}")
+}
+"#,
+        ),
+        (
+            "mutable_scalar_lists",
+            r#"
+fn main() -> Unit = {
+ var xs = [1, 2, 3]
+ let alias = xs
+ println(int.to_string(list.pop(xs) ?? -1))
+ println("${xs}")
+ println("${alias}")
+ list.push(xs, 9)
+ println("${xs}")
+ list.clear(xs)
+ println(int.to_string(list.len(xs)))
+ println(int.to_string(list.pop(xs) ?? -1))
+ println("${alias}")
+}
+"#,
+        ),
+        (
+            "mutable_heap_lists",
+            r#"
+type Item = { label: String, n: Int }
+fn main() -> Unit = {
+ var xs = ["a", "b"]
+ let alias = xs
+ println(list.pop(xs) ?? "empty")
+ println(list.join(xs, ","))
+ println(list.join(alias, ","))
+ list.clear(xs)
+ println(list.pop(xs) ?? "empty")
+ var items = [Item { label: "kept", n: 7 }, Item { label: "popped", n: 8 }]
+ let old = items
+ let item = list.pop(items) ?? Item { label: "bad", n: -1 }
+ println(item.label)
+ println(int.to_string(item.n))
+ println(int.to_string(list.len(items)))
+ println(int.to_string(list.len(old)))
+ var nested = [[1, 2], [3, 4]]
+ let before = nested
+ let tail = list.pop(nested) ?? []
+ println("${tail}")
+ println(int.to_string(list.len(nested)))
+ println(int.to_string(list.len(before)))
+}
+"#,
+        ),
+        (
+            "mutable_list_forwarding",
+            r#"
+fn take(mut xs: List[Int]) -> Int = list.pop(xs) ?? -1
+fn forward(mut xs: List[Int]) -> Int = take(xs)
+fn main() -> Unit = {
+ var xs = [4, 5, 6]
+ let alias = xs
+ println(int.to_string(forward(xs)))
+ println("${xs}")
+ println("${alias}")
+ println(int.to_string(take(xs)))
+ println("${xs}")
+}
+"#,
+        ),
+        (
+            "mutable_list_field",
+            r#"
+type Box = { values: List[String], label: String }
+fn main() -> Unit = {
+ var box = Box { values: ["a", "b"], label: "original" }
+ let alias = box
+ println(list.pop(box.values) ?? "empty")
+ println(list.join(box.values, ","))
+ println(list.join(alias.values, ","))
+ println(alias.label)
+}
+"#,
+        ),
+        (
+            "mutable_list_scalar_bits",
+            r#"
+fn main() -> Unit = {
+ var xs: List[Float] = [1.25, -0.0]
+ let alias = xs
+ println(float.to_string(list.pop(xs) ?? 9.0))
+ println(float.to_string(list.pop(xs) ?? 9.0))
+ println(float.to_string(list.pop(xs) ?? 9.0))
+ println(int.to_string(list.len(alias)))
+ var bs = [true, false]
+ println(if list.pop(bs) ?? true then "true" else "false")
+ println(if list.pop(bs) ?? false then "true" else "false")
+}
+"#,
+        ),
+        (
             "stored_scalar_closures",
             r#"
 type Handler = { f: (Int) -> Int, name: String }
@@ -438,6 +606,16 @@ fn main() -> Unit = {
             );
             assert!(actual.stderr.is_empty(), "{name}");
             let expected: &[u8] = match name {
+            "display_maps_and_sets" => b"[\"b\": \"q\", \"a\": \"x\"]\n[\"x\": 2, \"y\": -0]\n[\"x\": true, \"y\": false]\n[:]\n[\"x\": [1, 2], \"y\": []]\nset.from_list([\"b\", \"a\"])\n[\"b\": \"q\", \"a\": \"x\"]\n",
+            "display_declared_secret" => b"Secret(***)\nWrap { token: Secret(***), name: \"p\" }\nok(Secret(***))\nerr(\"oops\")\nsome(Secret(***))\n[Secret(***)]\n23\n",
+            "display_nested_records" => b"Box { value: [some(\"a\"), none], label: \"x\" }\n[Box { value: [some(\"a\"), none], label: \"x\" }]\nsome(Box { value: [some(\"a\"), none], label: \"x\" })\nerr(\"bad\")\nx\n",
+            "display_variant_payloads" => b"Empty\nPair(\"a\", [1, 2])\nFields { _name: \"z\", n: 2 }\n[Empty, Pair(\"a\", [1, 2]), Fields { _name: \"z\", n: 2 }]\n3\n",
+            "display_structural_and_bits" => b"{ a: true, z: (\"a\", -0) }\n[(\"q\", 1.25), (\"r\", 2)]\nsome((false, 3))\n{ a: true, z: (\"a\", -0) }\n",
+            "mutable_scalar_lists" => b"3\n[1, 2]\n[1, 2, 3]\n[1, 2, 9]\n0\n-1\n[1, 2, 3]\n",
+            "mutable_heap_lists" => b"b\na\na,b\nempty\npopped\n8\n1\n2\n[3, 4]\n1\n2\n",
+            "mutable_list_forwarding" => b"6\n[4, 5]\n[4, 5, 6]\n5\n[4]\n",
+            "mutable_list_field" => b"b\na\na,b\noriginal\n",
+            "mutable_list_scalar_bits" => b"-0.0\n1.25\n9.0\n2\nfalse\ntrue\n",
             "stored_scalar_closures" => b"7\n8\ncaptured\ncopy\n5\n8\n[x]\n",
             "compound_strings" => "some(\"a\\\\\\\"\\n\\r\\t日本語\")\nok(\"a\\\\\\\"\\n\\r\\t日本語\")\nnone\nerr(\"\")\nok(some(\"z\"))\n".as_bytes(),
             "set_heap_elements" => b"2\nhit\nmiss\n1\n2\n3\n2\nempty\na:b\n\n1\nbytes\n1\nb:a\n",
