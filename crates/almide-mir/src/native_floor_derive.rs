@@ -13,6 +13,7 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         // that declares the stdlib fn it specializes is served as that fn.
         return match specialized_target(call) {
             Some(target) if target.contains('.') => {
+                let str_elems = str_elems || specialized_elems(call, &target)?;
                 derive_for(&target, str_elems).map_err(|e| format!("specializes `{target}`: {e}"))
             }
             _ => Err("not a module.fn call".into()),
@@ -36,18 +37,7 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         // the floor serves it as that fn.
         return match specialized_target(call) {
             Some(target) if target != call => {
-                let elem = specialized_list_elem(call);
-                // A Float list's cells are its bits on the native render: a
-                // generic that needs equality or ordering would compare the
-                // bits (`-0.0` against `0.0`, NaN against itself), never the
-                // floats the specialization exists to compare.
-                let bounded = target
-                    .split_once('.')
-                    .is_some_and(|(m, f)| almide_lang::capability_bounds::of(m, f).next().is_some());
-                if elem.as_deref() == Some("Float") && bounded {
-                    return Err(format!("specializes `{target}` over Float bits, whose generic needs equality or ordering"));
-                }
-                let str_elems = elem.as_deref() == Some("String");
+                let str_elems = specialized_elems(call, &target)?;
                 derive_for(&target, str_elems).map_err(|e| format!("specializes `{target}`: {e}"))
             }
             _ => Err("no declaration".into()),
@@ -154,6 +144,23 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
     let str_only = elem_typed && almide_lang::capability_bounds::of(module, func).next().is_some();
     let borrow_twin = borrow_twin_of(fret, &symbol, &rust_params, rt);
     Ok(with_by_ref_twin(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only, borrow_twin, by_ref: None }, &rust_params, &rust_ret, rt))
+}
+
+/// Whether the self-hosted body `call`, served as `target`, specializes it
+/// over a String list (an equality or ordering bound then meets a String's).
+/// A Float list's cells are its bits on the native render: a generic that
+/// needs equality or ordering would compare the bits (`-0.0` against `0.0`,
+/// NaN against itself), never the floats the specialization exists to
+/// compare, so that specialization is refused.
+fn specialized_elems(call: &str, target: &str) -> Result<bool, String> {
+    let elem = specialized_list_elem(call);
+    let bounded = target
+        .split_once('.')
+        .is_some_and(|(m, f)| almide_lang::capability_bounds::of(m, f).next().is_some());
+    if elem.as_deref() == Some("Float") && bounded {
+        return Err(format!("specializes `{target}` over Float bits, whose generic needs equality or ordering"));
+    }
+    Ok(elem.as_deref() == Some("String"))
 }
 
 /// A declared param `p` with the borrow mode its runtime spelling `r` takes
