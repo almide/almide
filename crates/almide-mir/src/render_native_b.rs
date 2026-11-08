@@ -507,30 +507,6 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
     // right one). The right list's last use, when its elements own heap
     // (a `List[String]`, a list of lists — #4503's prepend `[x] + xss`):
     // move its elements over instead of cloning each one.
-    // The left list a borrowed field or payload read whose carrier dies at
-    // the concatenation (`sc = { ...sc, funs: sc.funs + [..] }`,
-    // `set_moving_args`' taken args): grow that list itself, moved out of
-    // the carrier, unless the right side reads the same carrier.
-    if let [CallArg::Handle(l), CallArg::Handle(r)] = args.as_slice() {
-        let base_of = |x: ValueId| {
-            crate::render_native_addr::payload_take_of(x)
-                .map(|p| p.0)
-                .or_else(|| crate::render_native_addr::field_of(x).map(|p| p.0))
-        };
-        let take = crate::render_native_move::taken_arg(*l);
-        if let Some(take) = take.filter(|_| l != r && owned_list(bt) && base_of(*r).is_none_or(|b| Some(b) != base_of(*l)) && Some(*r) != base_of(*l)) {
-            let tail = if crate::render_native_move::moving_arg(*r) && bt != NTy::Vec {
-                format!("r.extend({})", crate::render_native_move::take_expr(&b))
-            } else if bt == NTy::Vec && crate::render_native_move::is_stack_single(*r) {
-                format!("r.push({b}[0])")
-            } else {
-                format!("r.extend_from_slice({sb})")
-            };
-            writeln!(out, "let mut {}: {ty} = {{ let mut r: {ty} = {take}; {tail}; r }};", var(*d))
-                .expect("writing to a String cannot fail");
-            return Ok(());
-        }
-    }
     if let [CallArg::Handle(l), CallArg::Handle(r)] = args.as_slice() {
         if l != r && owned_list(at) && owned_list(bt) {
             let left = crate::render_native_move::moving_arg(*l);
