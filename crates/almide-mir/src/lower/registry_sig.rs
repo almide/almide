@@ -194,6 +194,12 @@ impl Drop for DeclaredRouteGuard {
 }
 pub(super) fn declared_route_or(module: &str, func: &str, routed: String) -> String {
     if routed != refusal_twin(module, func) { return routed; }
+    declared_refusal_or(module, func, routed)
+}
+/// A router explicitly classified this shape as unsupported on its ABI.
+/// A target can offer a checked declaration route without changing wasm's
+/// refusal spelling or guessing refusal status from a function name.
+pub(super) fn declared_refusal_or(module: &str, func: &str, routed: String) -> String {
     let base = format!("{module}.{func}");
     if DECLARED_ROUTE.with(|r| r.get().is_some_and(|resolve| resolve(&base))) { base } else { routed }
 }

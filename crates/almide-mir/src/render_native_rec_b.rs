@@ -309,7 +309,8 @@ impl Derive<'_> {
     fn prune(&self, mut set: std::collections::BTreeSet<String>) -> std::collections::BTreeSet<String> {
         loop {
             let before = set.len();
-            set = set.iter().filter(|n| self.fields_of(n).iter().all(|t| self.kind(t, &set).is_some()) && self.res_free(n, &set)).cloned().collect();
+            set = set.iter().filter(|n| self.fields_of(n).iter().all(|t| self.kind(t, &set).is_some()) && self.res_free(n, &set)
+                && (!self.maps.contains(*n) || self.exact_eq_type(&self.decls[*n].1[0].1[0], &mut Default::default()))).cloned().collect();
             if set.len() == before {
                 break;
             }

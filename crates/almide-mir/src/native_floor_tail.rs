@@ -255,9 +255,10 @@ fn runtime_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: b
         FloorParam::SetElem(by_ref) => {
             let want = cx.set_e.ok_or_else(mismatch)?;
             let owned = owned_arg(want, code, *got).ok_or_else(mismatch)?;
-            let own_value = matches!(got, NTy::Str);
+            let own_value = matches!(got, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_));
             match (by_ref, own_value, dying_here) {
                 (true, true, _) => format!("&{code}"),
+                (true, false, _) if matches!(got, NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) => code.to_string(),
                 (true, false, _) if *got == NTy::I64 => format!("&{code}"),
                 (true, false, _) => format!("&{owned}"),
                 (false, true, true) => format!("std::mem::take(&mut {code})"),
@@ -323,8 +324,9 @@ fn map_entry_arg(cx: &CallCx, p: &FloorParam, by_ref: bool, code: &str, got: &NT
     let owned = owned_arg(want, code, *got).ok_or_else(mismatch)?;
     let own_value = matches!(got, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_));
     Ok(match (by_ref, own_value, dying_here) {
-        // Borrow the caller's own value; a borrowed one is copied once.
+        // Borrow the caller's exact owned value or existing borrowed view.
         (true, true, _) => format!("&{code}"),
+        (true, false, _) if matches!(got, NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) => code.to_string(),
         (true, false, _) if *got == NTy::I64 => format!("&{code}"),
         (true, false, _) => format!("&{owned}"),
         // The caller's value, not read again: moved in.

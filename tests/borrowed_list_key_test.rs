@@ -69,6 +69,30 @@ fn borrowed_list_keys_build_and_agree_with_wasm() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("keys.almd");
     std::fs::write(&source, SOURCE).unwrap();
+    // The product may still fall back to v0. Require v1 itself here.
+    let (rust, certificates) =
+        almide_mir::pipeline::try_render_rust_source_certified(SOURCE).unwrap();
+    assert!(certificates.iter().any(|(p, _, _)| p == "ownership"));
+    assert!(certificates.iter().any(|(p, _, _)| p == "native-calls"));
+    let direct_rs = dir.path().join("direct.rs");
+    let direct = dir.path().join("direct");
+    std::fs::write(&direct_rs, rust).unwrap();
+    let built = Command::new("rustc")
+        .arg("--edition=2021")
+        .arg(direct_rs)
+        .arg("-o")
+        .arg(&direct)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let out = Command::new(direct).output().unwrap();
+    assert!(out.status.success());
+    assert!(out.stderr.is_empty());
+    assert_eq!(out.stdout, b"yes\n10\nyes\n20\nno\n-1\nyes\nno\n");
     let bin = env!("CARGO_BIN_EXE_almide");
     for (name, args) in [
         ("native", vec![]),

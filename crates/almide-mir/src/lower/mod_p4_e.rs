@@ -35,6 +35,8 @@ enum MapName {
     Suffix(&'static str),
     /// Used verbatim, replacing `map.<func>`.
     Full(&'static str),
+    /// An explicit representation refusal, with a target-specific declaration alternative.
+    Refused(&'static str),
 }
 
 /// Everything the map repr table reads about one `map.*` call.
@@ -185,6 +187,7 @@ fn map_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty, map_key_nullary: bo
     let variant = map_variant_heap_key(route).or_else(|| map_variant_other(route));
     match variant {
         Some(MapName::Suffix(s)) => Some(format!("map.{func}{s}")),
+        Some(MapName::Refused(s)) => Some(crate::lower::registry_sig::declared_refusal_or("map", func, format!("map.{func}{s}"))),
         Some(MapName::Full(name)) => Some(name.to_string()),
         None => None,
     }
@@ -299,7 +302,7 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
             return Some(name);
         }
         if !r.val_is_string {
-            return Some(MapName::Suffix("_hval_wall"));
+            return Some(MapName::Refused("_hval_wall"));
         }
     }
     // A fn OUTSIDE the family's implemented list must fall to an UNREGISTERED
@@ -333,7 +336,7 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
         ) {
             MapName::Suffix("_str")
         } else {
-            MapName::Suffix("_str_wall")
+            MapName::Refused("_str_wall")
         });
     }
     // TYPE-CHANGING `map.map` skv → str (`map.map(mi, (v) => int.to_string(v)
@@ -609,12 +612,12 @@ fn map_variant_skv_rows(r: MapRoute<'_>) -> Option<MapName> {
     // it also needs the RESULT map's value scalar (a `(v) => int.to_string(v)` maps
     // into the `_str` repr — no skv form; wall it rather than mislink).
     (true, false) if key_is_string && func == "map" && !is_map_scalar_val(result_ty) => {
-        Some(MapName::Suffix("_skv_wall"))
+        Some(MapName::Refused("_skv_wall"))
     }
     (true, false) if key_is_string => Some(if SKV_FUNCS.contains(&func) {
         MapName::Suffix("_skv")
     } else {
-        MapName::Suffix("_skv_wall")
+        MapName::Refused("_skv_wall")
     }),
         _ => None,
     }
@@ -666,7 +669,7 @@ fn map_variant_vkey_rows(r: MapRoute<'_>) -> Option<MapName> {
     // to the bare `map.{func}` name, which links against the scalar-key map_core generic
     // and produces INVALID WASM (an i32/i64 ABI-width mismatch, CONFIRMED by probe) —
     // a crash, not the honest compile-time wall this repr gate exists to guarantee.
-    (true, true) | (true, false) => Some(MapName::Suffix("_key_wall")),
+    (true, true) | (true, false) => Some(MapName::Refused("_key_wall")),
         _ => None,
     }
 }
@@ -716,7 +719,7 @@ fn map_variant_other_scalar_key(r: MapRoute<'_>) -> Option<MapName> {
     {
         Some(MapName::Suffix("_ivh2core"))
     }
-    (false, true) => Some(MapName::Suffix("_ivh_wall")),
+    (false, true) => Some(MapName::Refused("_ivh_wall")),
     // `Map[Int, Float]` from_list (the float_map literal): ONE scalar-KV impl
     // (map_if.almd) — the paired i64 slots carry f64 bits verbatim. Display
     // routes separately (the interp table's to_string_if). Other scalar-scalar
