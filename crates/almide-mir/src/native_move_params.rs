@@ -667,6 +667,12 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
         // Only eligible closures carry modes, and a pinned one is not
         // eligible: every retry pins at least one more, so this ends.
         let disagree = owned.disagreeing(&best);
+        if std::env::var("ALMIDE_DEBUG_MOVES").is_ok() {
+            for f in best.iter().filter(|f| !f.owned_params.is_empty()) {
+                eprintln!("DBG owned {} {:?} closure={}", f.name, f.params.iter().map(|p| f.owned_params.contains(&p.value)).collect::<Vec<_>>(), closure(f));
+            }
+            eprintln!("DBG disagree={:?} pinned={:?}", disagree, pinned);
+        }
         if disagree.is_empty() {
             functions.clone_from_slice(&best);
             return;

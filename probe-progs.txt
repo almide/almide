@@ -1,0 +1,4 @@
+spec/wasm_cross/field_and_interp_accumulator.almd
+spec/wasm_cross/map_core_trio.almd
+spec/wasm_cross/range_head_fold_edges.almd
+spec/wasm_cross/mut_param_loop_stays_in_place.almd
