@@ -492,7 +492,12 @@ fn through_block(op: &Op, v: ValueId, derived: &mut std::collections::BTreeSet<V
             true
         }
         Op::Dup { src, .. } => *src != v,
-        Op::CallFn { args, .. } => !args.iter().any(|a| matches!(a, crate::CallArg::Handle(x) | crate::CallArg::Scalar(x) if *x == v)),
+        // A call reading only values that borrow from `v`, never `v` itself.
+        Op::CallFn { .. } => {
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(op, &mut reads);
+            !reads.contains(&v)
+        }
         _ => false,
     }
 }
@@ -511,13 +516,7 @@ pub(crate) fn block_read_release(v: ValueId) -> bool {
 
 /// `op` is the release of `v` (any of the typed releases).
 fn releases(op: &Op, v: ValueId) -> bool {
-    matches!(op,
-        Op::Drop { v: x } | Op::DropListStr { v: x } | Op::DropVariant { v: x, .. } | Op::DropWrapperRec { v: x, .. }
-        | Op::DropValue { v: x } | Op::DropListValue { v: x } | Op::DropListStrValue { v: x }
-        | Op::DropResultValue { v: x } | Op::DropResultListValue { v: x } | Op::DropResultValueInt { v: x }
-        | Op::DropResultListValueInt { v: x } | Op::DropListStrStr { v: x } | Op::DropListIntStr { v: x }
-        | Op::DropListStrInt { v: x } | Op::DropResultStrInt { v: x } | Op::DropResultListStrInt { v: x }
-        | Op::DropResultListStr { v: x } | Op::DropListListStr { v: x } if *x == v)
+    crate::native_move_params::is_release(op, v)
 }
 
 /// The op that closes the top-level loop or branch holding `ops[j]` (`j`
