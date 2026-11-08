@@ -1,0 +1,27 @@
+# Release evidence seal — v0.69.1. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.69.1"
+tag = "v0.69.1"
+tag_commit = "20809e12fcdfae893b154e213d9677b90a2eec20"
+date = "2026-11-07"
+url = "https://github.com/almide/almide/releases/tag/v0.69.1"
+
+[derived]
+cargo_version = "0.69.1"
+contracts_sha256 = "2f89d4a3502123302f2fbe9ece3f821d8f5a1d34b940119f3aa88f4286290e18"
+contracts_total = "454"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "96a54cda057e287265de8e53a47773b90aa99d8f20556d0d0b2ca7154dbcd617"
+abstain_ledger_entries = "17"
+wasm_cross_fixtures = "1038"
+rust_toolchain = "1.97.0"
+wasmtime = "v50.0.1"
+
+[recorded]
+release_gate = "Final on the same commit as v0.69.1-rc1 (tagged 2026-11-07 on 20809e12f, prerelease); no I-*/regression issue opened during its soak. Tag on the merge of release PR #4603 (20809e12f, tree of develop eb215df01); #4603 204 check-runs, 191 success, 13 skipped, 0 failed. Main CI on the merge green (run 42339668237); Trust spine on the tag green (run 42431484901); Release workflow on the tag green (run 42431484808, dossier attached). Blocker gate at the tag: 0 (#1482). Interface diff v0.69.0 -> v0.69.1: identical (added=0 removed=0); v0.69.1-rc1 -> v0.69.1: identical (#1488). Release-gate fuzz on the commit (fuzz-nightly run 42339711544, workflow_dispatch on ref v0.69.1-rc1 = 20809e12f, minutes=60): shards 8/8, 481.2 of 480 planned minutes delivered, 72,158 programs generated, 0 findings (slow=0, leak=0, correctness=0); MC/DC, structural and condition-level coverage jobs green; night verdict success."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256, almide-dossier-v0.69.1.md (release run 42431484808, published 2026-11-08, not a prerelease)"
+known_problems = "Open at the tag, none labeled I-*/regression (blocker count 0): (1) fuzz-found bugs filed before the tag: #4606 (native build E0308 for a Float-returning lambda through the typed closure dispatch table), #4607 and #4604 (wasm leak-at-exit: json.parse leaks a block per 4-byte character followed by a \\u escape), #4587 (nightly 2026-11-06 cross-target findings, under triage); (2) native/structural codegen gaps filed before the tag: #4597, #4598, #4599; (3) A-perf issues with no I-* class, among them #4497 (the --release backtrace split adds 20-32 KB per native binary) and #4457 (native spectral norm 1.2x handwritten Rust). #4514, open at v0.69.0, was fixed before this tag."
