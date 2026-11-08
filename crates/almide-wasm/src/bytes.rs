@@ -27,6 +27,71 @@ pub(crate) fn byte_k(k: u8) -> MemArg {
     }
 }
 
+/// What a bytes producer's VALUE is over the byte block it reads (#4612).
+/// An intrinsic has no body for a pass to read, so its value semantics live
+/// in its lowering arm; this is that arm's declaration, and
+/// [`Emitter::lower_bytes_call`] dispatches the two arms THROUGH it, so the
+/// form a consumer reads and the code a materialized call runs cannot drift
+/// apart. A consumer asks for a form, never for a function.
+#[derive(Clone, Copy)]
+pub(crate) enum ByteForm<'e> {
+    /// A fresh block holding the same bytes as its argument, a layout twin
+    /// (String and Bytes share the packed layout): lowered as `$block_copy`.
+    Copy(&'e IrExpr),
+    /// A `List[Int]` whose element `k` is byte `k` zero-extended (0..=255),
+    /// one element per byte, in order.
+    Widen(&'e IrExpr),
+}
+
+impl ByteForm<'_> {
+    /// Both forms read their argument and write only their own fresh
+    /// result: a pipeline stage that is pure and cannot abort, in the shared
+    /// vocabulary the fusion judgment reads (`almide_ir::fusion`).
+    pub(crate) fn stage(self) -> almide_ir::fusion::Stage {
+        almide_ir::fusion::Stage { pure: true, total: true, short_circuits: false }
+    }
+}
+
+fn byte_form_of<'e>(func: &str, args: &'e [IrExpr]) -> Option<ByteForm<'e>> {
+    match (func, args) {
+        ("from_string", [s]) => Some(ByteForm::Copy(s)),
+        ("to_list", [b]) => Some(ByteForm::Widen(b)),
+        _ => None,
+    }
+}
+
+/// The form of `e`, when it is a call of a bytes producer that has one.
+pub(crate) fn byte_form(e: &IrExpr) -> Option<ByteForm<'_>> {
+    let almide_ir::IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, args, .. } = &e.kind
+    else {
+        return None;
+    };
+    (module.as_str() == "bytes").then(|| byte_form_of(func.as_str(), args)).flatten()
+}
+
+/// The list `e` as a WALK over a byte block read in place: a widen, through
+/// any number of copies of its block (a copy holds the same bytes, and a
+/// walk only reads). Returns the block expression and the producer nodes the
+/// walk consumes without lowering them, outermost first, for the witness
+/// audit. A walk elides allocations only; whether the consumer may run it
+/// element by element is the consumer's stage judgment, with [`ByteForm::stage`]
+/// as the producer's verdict.
+pub(crate) fn widened_byte_walk(e: &IrExpr) -> Option<(&IrExpr, Vec<&IrExpr>)> {
+    let ByteForm::Widen(mut block) = byte_form(e)? else { return None };
+    let mut consumed = vec![e];
+    while let Some(ByteForm::Copy(src)) = byte_form(block) {
+        consumed.push(block);
+        block = src;
+    }
+    Some((block, consumed))
+}
+
+/// Push byte `idx` of the block in `base`, zero-extended to i64: the element
+/// a [`ByteForm::Widen`] holds, whether it is materialized or walked.
+pub(crate) fn emit_widened_byte(i: &mut wasm_encoder::InstructionSink<'_>, base: u32, idx: u32) {
+    i.local_get(base).local_get(idx).i32_add().i64_load8_u(byte_k(0));
+}
+
 impl Emitter<'_> {
 
     fn lower_bytes_new(&mut self, n: &IrExpr) -> ArmResult {
@@ -230,7 +295,7 @@ impl Emitter<'_> {
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hc).local_get(bh).i32_load(len_memarg()).i32_ge_u().br_if(1);
         i.local_get(ho).local_get(hc).i32_const(8).i32_mul().i32_add();
-        i.local_get(bh).local_get(hc).i32_add().i64_load8_u(byte_k(0));
+        emit_widened_byte(&mut i, bh, hc);
         i.i64_store(slot_memarg(0));
         i.local_get(hc).i32_const(1).i32_add().local_set(hc);
         i.br(0).end().end();
@@ -386,10 +451,8 @@ impl Emitter<'_> {
     fn lower_bytes_unary(&mut self, func: &str, x: &IrExpr) -> ArmResult {
         match func {
             "to_string" => self.lower_bytes_to_string(x),
-            "to_list" => self.lower_bytes_to_list(x),
             "to_string_lossy" => self.lower_bytes_lossy(x),
             "len" => self.lower_bytes_len(x),
-            "from_string" => self.lower_bytes_from_string(x),
             "from_list" => self.lower_bytes_from_list(x),
             _ => self.lower_bytes_new(x),
         }
@@ -440,10 +503,16 @@ impl Emitter<'_> {
         if let Some(out) = self.lower_bytes_rw(func, args)? {
             return Ok(out);
         }
+        // The producers with a declared form lower through it (#4612).
+        match byte_form_of(func, args) {
+            Some(ByteForm::Copy(s)) => return self.lower_bytes_from_string(s),
+            Some(ByteForm::Widen(b)) => return self.lower_bytes_to_list(b),
+            None => {}
+        }
         match (func, args) {
             // Shape-grouped dispatch (pattern-count complexity; the
             // name split lives in the per-shape sub-dispatchers).
-            ("to_string" | "to_list" | "to_string_lossy" | "len" | "from_string"
+            ("to_string" | "to_string_lossy" | "len"
             | "from_list" | "zeros", [x]) => self.lower_bytes_unary(func, x),
             ("__concat" | "chunks" | "repeat" | "get" | "split", [a, b]) => {
                 self.lower_bytes_pair(func, a, b)
