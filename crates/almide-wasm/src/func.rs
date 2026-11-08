@@ -354,6 +354,7 @@ pub(crate) fn lower_fn(
             cow_flags: HashMap::new(),
             cow_prejudged: HashSet::new(),
             bounds_facts: None, payload_ptrs: HashMap::new(), // #3345
+            int_ranges: HashMap::new(), loop_entry_ranges: None, // #4611
             in_tail: false,
             try_see_through: false,
             branch_depth: 0,

@@ -195,6 +195,12 @@ pub(crate) struct Emitter<'a> {
     /// #3345: bounds facts (bounds_facts.rs; `None` = off), payload pointers (payload_ptr.rs).
     pub(crate) bounds_facts: Option<Vec<(VarId, VarId, i64)>>,
     pub(crate) payload_ptrs: HashMap<VarId, u32>,
+    /// #4611: integer range facts (int_range.rs) — `Int` locals' known
+    /// intervals where the code being lowered runs.
+    pub(crate) int_ranges: HashMap<VarId, crate::int_range::Range>,
+    /// #4611: the entry ranges a `while` statement hands its loop, keyed
+    /// by the address of the loop's condition (int_range.rs).
+    pub(crate) loop_entry_ranges: Option<(usize, HashMap<VarId, crate::int_range::Range>)>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits

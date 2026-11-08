@@ -104,3 +104,39 @@ fn captured_map_writes_keep_stage_order() {
     assert_eq!(r.exit, 0, "{}", r.stderr);
     assert_eq!(r.stdout, "3\n");
 }
+
+/// #4612: a widened byte block under a pure reduction is walked in place —
+/// `bytes.from_string` copies nothing and `bytes.to_list` builds nothing — and
+/// each byte is zero-extended (é is 0xC3 0xA9).
+#[test]
+fn a_widened_byte_walk_allocates_nothing() {
+    let want = "hé-llo".bytes().map(i64::from).sum::<i64>();
+    for expr in [
+        "list.sum(bytes.to_list(bytes.from_string(\"hé-llo\")))",
+        "bytes.to_list(bytes.from_string(\"hé-llo\")) |> list.fold(0, (a, x) => a + x)",
+        "bytes.to_list(bytes.from_string(\"hé-llo\")) |> list.map((x) => x) |> list.sum",
+    ] {
+        let r = expression(expr);
+        assert_eq!(r.exit, 0, "{expr}: {}", r.stderr);
+        assert_eq!(r.stdout, format!("{want}\n"), "{expr}");
+        let c = r.alloc_count.expect("counters");
+        assert_eq!((c.allocs, c.bytes, c.frees), (0, 0, 0), "{expr}: the walk must allocate nothing");
+    }
+}
+
+/// #4612: a fold whose callback writes the Bytes variable it walks is not a
+/// pure stage: the list is built (a snapshot) and the overwritten byte is
+/// never read.
+#[test]
+fn a_byte_walk_whose_callback_writes_its_block_stays_staged() {
+    let r = run(r#"effect fn main() -> Unit = {
+  var b = bytes.from_string("abc")
+  let total = bytes.to_list(b) |> list.fold(0, (acc, x) => {
+    b = bytes.set(b, 2, 0)
+    acc + x
+  })
+  println("${total}")
+}"#);
+    assert_eq!(r.exit, 0, "{}", r.stderr);
+    assert_eq!(r.stdout, "294\n");
+}
