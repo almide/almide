@@ -515,18 +515,13 @@ fn render_declared_floor_call(
         };
         let base = base_of(v);
         let shared = args.iter().enumerate().any(|(j, b)| {
-            j != k && matches!(b, CallArg::Handle(x) if Some(*x) == base || (base.is_some() && base_of(x) == base))
+            (j != k) & matches!(b, CallArg::Handle(x) if Some(*x) == base || (base.is_some() && base_of(x) == base))
         });
-        if !by_value || shared {
+        // Only a borrowed read has a payload to take.
+        let owned = crate::render_native::owned_nty(rendered[k].1);
+        if !by_value || shared || owned == rendered[k].1 {
             continue;
         }
-        let owned = match rendered[k].1 {
-            NTy::StrRef => NTy::Str,
-            NTy::VecRef => NTy::Vec,
-            NTy::VecStrRef => NTy::VecStr,
-            NTy::RecRef(j) => NTy::Rec(j),
-            _ => continue,
-        };
         rendered[k] = (format!("{{ {take} }}"), owned);
         dying[k] = true;
     }
