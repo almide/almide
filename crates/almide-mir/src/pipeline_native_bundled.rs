@@ -217,7 +217,10 @@ pub(super) fn own_written_params(ir: &mut IrProgram) {
         writes.visit_expr(&f.body);
         let mut bindings = Vec::new();
         for p in &mut f.params {
-            if !writes.0.contains(&p.var) || !crate::lower::is_heap_ty(&p.ty) { continue; }
+            // A `mut` param is the caller's own var, moved in and written back
+            // by the move-mode rewrite (C-132): the body already owns it, and
+            // a copy would cost a whole clone per call or loop pass.
+            if p.is_mut || !writes.0.contains(&p.var) || !crate::lower::is_heap_ty(&p.ty) { continue; }
             let local = p.var;
             ir.var_table.entries[local.0 as usize].mutability = Mutability::Var;
             p.var = ir.var_table.alloc(p.name, p.ty.clone(), Mutability::Let, None);
