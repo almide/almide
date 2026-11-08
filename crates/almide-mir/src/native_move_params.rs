@@ -360,10 +360,7 @@ fn release_after(func: &MirFunction, call: usize, v: ValueId, depth: &[i32]) -> 
     derived.remove(&v);
     let base = depth[call];
     for j in call + 1..ops.len() {
-        // The block ends where the depth drops below the call's: an `Else`,
-        // `EndIf` or `LoopEnd` at the call's own depth closes a region nested
-        // in the block, which the scan passes (it reads nothing of `v`).
-        if depth[j] < base {
+        if depth[j] < base || (depth[j] == base && matches!(ops[j], Op::Else { .. } | Op::EndIf { .. } | Op::LoopEnd)) {
             return None;
         }
         if matches!(ops[j], Op::Return { .. } | Op::LoopBreakUnless { .. }) {
