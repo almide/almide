@@ -61,7 +61,10 @@ BIN="$TARGET/release/examples/render_corpus"
 
 { grep -E '^spec/' proofs/native-verified-floor.txt; ls research/benchmark/perf/v1-shapes/*.almd; } \
   | grep -vE "${NATIVE_V1_SHAPES_DROP:-^\$}" > "$WORK/corpus.txt"
-LLVM_PROFILE_FILE="$WORK/run-%m.profraw" "$BIN" < "$WORK/corpus.txt" > "$WORK/verdicts.txt"
+LLVM_PROFILE_FILE="$WORK/run-%m.profraw" "$BIN" < "$WORK/corpus.txt" > "$WORK/verdicts.txt"; echo "render_corpus exit=$?"
+echo "VERDICTS corpus=$(wc -l < "$WORK/corpus.txt") rendered=$(wc -l < "$WORK/verdicts.txt") ok=$(grep -c $'\tOK$' "$WORK/verdicts.txt")"
+grep -v $'\tOK$' "$WORK/verdicts.txt" | sed 's/^/NOTOK /' | head -50
+ls -la "$WORK"/*.profraw | head
 fail=0
 # A floor program that no longer renders blinds the corpus; a shape bench
 # that does not render is not compared by the perf gate either (UNCERTIFIED
