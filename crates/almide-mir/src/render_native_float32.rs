@@ -29,6 +29,37 @@ pub(crate) fn lane_arg(code: &str, t: NTy) -> Result<String, LowerError> {
     }
 }
 
+fn un_expr(op: &FUnOp, a: &str) -> String {
+    match op {
+        FUnOp::Neg => format!("-({a})"),
+        FUnOp::Abs => format!("({a}).abs()"),
+        FUnOp::Sqrt => format!("({a}).sqrt()"),
+        FUnOp::Floor => format!("({a}).floor()"),
+        FUnOp::Ceil => format!("({a}).ceil()"),
+        FUnOp::Nearest => format!("({a}).round_ties_even()"),
+    }
+}
+
+fn bin_expr(op: &FBinOp, a: &str, b: &str) -> Result<String, LowerError> {
+    Ok(match op {
+        FBinOp::Add => format!("{a} + {b}"),
+        FBinOp::Sub => format!("{a} - {b}"),
+        FBinOp::Mul => format!("{a} * {b}"),
+        FBinOp::Div => format!("{a} / {b}"),
+        FBinOp::CopySign => format!("({a}).copysign({b})"),
+        // Rust min/max select the non-NaN operand; wasm propagates
+        // NaN. Do not silently substitute the host's semantics.
+        FBinOp::Min | FBinOp::Max => return Err(wall("native: Float32 min/max NaN semantics are not rendered")),
+    })
+}
+
+fn cmp_sym(op: &FCmpOp) -> &'static str {
+    match op {
+        FCmpOp::Lt => "<", FCmpOp::Le => "<=", FCmpOp::Gt => ">",
+        FCmpOp::Ge => ">=", FCmpOp::Eq => "==", FCmpOp::Ne => "!=",
+    }
+}
+
 pub(crate) fn render(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
     let Op::Prim { kind, dst: Some(d), args } = op else { return Ok(false) };
     let arity = match kind {
@@ -51,39 +82,19 @@ pub(crate) fn render(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
         PrimKind::IntToF32 => (NTy::I64, format!("({} as f32).to_bits() as i64", lane(args[0], s.tys)?)),
         PrimKind::F32Bits => (NTy::I64, lane(args[0], s.tys)?),
         PrimKind::F32Un(op) => {
-            let a = f32_arg(args[0], s.tys)?;
-            let expr = match op {
-                FUnOp::Neg => format!("-({a})"),
-                FUnOp::Abs => format!("({a}).abs()"),
-                FUnOp::Sqrt => format!("({a}).sqrt()"),
-                FUnOp::Floor => format!("({a}).floor()"),
-                FUnOp::Ceil => format!("({a}).ceil()"),
-                FUnOp::Nearest => format!("({a}).round_ties_even()"),
-            };
+            let expr = un_expr(op, &f32_arg(args[0], s.tys)?);
             (NTy::I64, format!("({expr}).to_bits() as i64"))
         }
         PrimKind::F32Bin(op) => {
             let a = f32_arg(args[0], s.tys)?;
             let b = f32_arg(args[1], s.tys)?;
-            let expr = match op {
-                FBinOp::Add => format!("{a} + {b}"),
-                FBinOp::Sub => format!("{a} - {b}"),
-                FBinOp::Mul => format!("{a} * {b}"),
-                FBinOp::Div => format!("{a} / {b}"),
-                FBinOp::CopySign => format!("({a}).copysign({b})"),
-                // Rust min/max select the non-NaN operand; wasm propagates
-                // NaN. Do not silently substitute the host's semantics.
-                FBinOp::Min | FBinOp::Max => return Err(wall("native: Float32 min/max NaN semantics are not rendered")),
-            };
+            let expr = bin_expr(op, &a, &b)?;
             (NTy::I64, format!("({expr}).to_bits() as i64"))
         }
         PrimKind::F32Cmp(op) => {
             let a = f32_arg(args[0], s.tys)?;
             let b = f32_arg(args[1], s.tys)?;
-            let sym = match op {
-                FCmpOp::Lt => "<", FCmpOp::Le => "<=", FCmpOp::Gt => ">",
-                FCmpOp::Ge => ">=", FCmpOp::Eq => "==", FCmpOp::Ne => "!=",
-            };
+            let sym = cmp_sym(op);
             (NTy::I64, format!("({a} {sym} {b}) as i64"))
         }
         _ => unreachable!("the arity dispatch selects only Float32 primitives"),

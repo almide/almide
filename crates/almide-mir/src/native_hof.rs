@@ -136,10 +136,7 @@ fn generic_dty(name: &str, args: &[TypeExpr], tps: &BTreeSet<String>) -> Option<
 fn rust_agrees(d: &DTy, r: &str) -> Option<bool> {
     let by_ref = r.starts_with('&');
     let r = r.strip_prefix('&').unwrap_or(r);
-    let ok = match scalar_agrees(d, r, by_ref) {
-        Some(ok) => ok,
-        None => composite_agrees(d, r, by_ref),
-    };
+    let ok = scalar_agrees(d, r, by_ref).unwrap_or_else(|| composite_agrees(d, r, by_ref));
     ok.then_some(by_ref)
 }
 

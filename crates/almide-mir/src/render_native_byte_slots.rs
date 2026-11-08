@@ -16,21 +16,7 @@ pub(super) fn render(
         ..
     } = op
     {
-        let i = *st.alloc_rec.get(dst)?;
-        if !crate::render_native_rec::is_bytes(NTy::Rec(i)) {
-            return None;
-        }
-        if tys.get(len) != Some(&NTy::I64) {
-            return Some(Err(wall(
-                "native: byte allocation with a non-scalar length",
-            )));
-        }
-        let (v, n) = (var(*dst), var(*len));
-        writeln!(out, "{pad}let mut {v}: Vec<u8> = Vec::new();").expect("writing to a String cannot fail");
-        writeln!(out, "{pad}if {n} < 0 || {v}.try_reserve_exact({n} as usize).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }}").expect("writing to a String cannot fail");
-        writeln!(out, "{pad}{v}.resize({n} as usize, 0);").expect("writing to a String cannot fail");
-        tys.insert(*dst, NTy::Rec(i));
-        return Some(Ok(true));
+        return render_alloc(st, tys, out, &pad, (*dst, *len));
     }
     let (width, dst, args) = match op {
         Op::Prim {
@@ -92,12 +78,7 @@ pub(super) fn render(
             .map(|n| format!("{b}[{at} + {n}]"))
             .collect::<Vec<_>>()
             .join(", ");
-        let expr = match width {
-            1 => format!("{b}[{at}] as i64"),
-            2 => format!("u16::from_le_bytes([{bytes}]) as i64"),
-            4 => format!("u32::from_le_bytes([{bytes}]) as i64"),
-            _ => format!("i64::from_le_bytes([{bytes}])"),
-        };
+        let expr = load_expr(width, &b, &at, &bytes);
         writeln!(out, "{pad}let mut {}: i64 = {expr};", var(d)).expect("writing to a String cannot fail");
         tys.insert(d, NTy::I64);
     } else {
@@ -115,6 +96,42 @@ pub(super) fn render(
         }
     }
     Some(Ok(true))
+}
+
+/// A byte buffer of `len` bytes, zeroed, as the block `dst`.
+fn render_alloc(
+    st: &AddrState,
+    tys: &mut BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    pad: &str,
+    (dst, len): (ValueId, ValueId),
+) -> Option<Result<bool, LowerError>> {
+    let i = *st.alloc_rec.get(&dst)?;
+    if !crate::render_native_rec::is_bytes(NTy::Rec(i)) {
+        return None;
+    }
+    if tys.get(&len) != Some(&NTy::I64) {
+        return Some(Err(wall(
+            "native: byte allocation with a non-scalar length",
+        )));
+    }
+    let (v, n) = (var(dst), var(len));
+    writeln!(out, "{pad}let mut {v}: Vec<u8> = Vec::new();").expect("writing to a String cannot fail");
+    writeln!(out, "{pad}if {n} < 0 || {v}.try_reserve_exact({n} as usize).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }}").expect("writing to a String cannot fail");
+    writeln!(out, "{pad}{v}.resize({n} as usize, 0);").expect("writing to a String cannot fail");
+    tys.insert(dst, NTy::Rec(i));
+    Some(Ok(true))
+}
+
+/// The little-endian read of `width` bytes of `b` at `at` (`bytes`: the
+/// bytes, listed).
+fn load_expr(width: u8, b: &str, at: &str, bytes: &str) -> String {
+    match width {
+        1 => format!("{b}[{at}] as i64"),
+        2 => format!("u16::from_le_bytes([{bytes}]) as i64"),
+        4 => format!("u32::from_le_bytes([{bytes}]) as i64"),
+        _ => format!("i64::from_le_bytes([{bytes}])"),
+    }
 }
 
 #[cfg(test)]

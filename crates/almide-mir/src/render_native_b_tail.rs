@@ -476,3 +476,49 @@ fn op_name(op: &Op) -> String {
     let d = format!("{op:?}");
     d.split([' ', '{', '(']).next().unwrap_or("Op").to_string()
 }
+
+/// [`render_declared_floor_call`]'s moved payloads: a borrowed read whose
+/// carrier dies at the call is taken, moved out, where the floor fn's param
+/// (or its `@reuse` twin's) is by value and no other arg reads that carrier.
+fn take_dying_payloads(
+    args: &[CallArg],
+    floor: &crate::native_floor::FloorFn,
+    rendered: &mut [(String, NTy)],
+    dying: &mut [bool],
+) {
+    for (k, a) in args.iter().enumerate() {
+        let CallArg::Handle(v) = a else { continue };
+        let Some(take) = crate::render_native_move::taken_arg(*v) else { continue };
+        let by_value = matches!(
+            floor.params.get(k),
+            Some(
+                crate::native_floor::FloorParam::Map(false)
+                    | crate::native_floor::FloorParam::Set(false)
+                    | crate::native_floor::FloorParam::Value(false)
+                    | crate::native_floor::FloorParam::Matrix(false)
+            )
+        ) || floor.twin.as_ref().is_some_and(|t| t.0 == k);
+        // No other arg may read the same carrier while it is edited.
+        let base_of = |x: &ValueId| {
+            crate::render_native_addr::payload_take_of(*x)
+                .map(|p| p.0)
+                .or_else(|| crate::render_native_addr::field_of(*x).map(|p| p.0))
+        };
+        let base = base_of(v);
+        let shared = args.iter().enumerate().any(|(j, b)| {
+            j != k && matches!(b, CallArg::Handle(x) if Some(*x) == base || (base.is_some() && base_of(x) == base))
+        });
+        if !by_value || shared {
+            continue;
+        }
+        let owned = match rendered[k].1 {
+            NTy::StrRef => NTy::Str,
+            NTy::VecRef => NTy::Vec,
+            NTy::VecStrRef => NTy::VecStr,
+            NTy::RecRef(j) => NTy::Rec(j),
+            _ => continue,
+        };
+        rendered[k] = (format!("{{ {take} }}"), owned);
+        dying[k] = true;
+    }
+}
