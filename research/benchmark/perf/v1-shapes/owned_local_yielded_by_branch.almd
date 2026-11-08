@@ -1,0 +1,13 @@
+// v1-vs-v0 shape bench: an owned local string yielded by one arm of a branch
+// at its last use (the copy moves it), inside a loop.
+fn main() -> Unit = {
+  var total = 0
+  var i = 0
+  while i < 200000 {
+    let s = int.to_string(i)
+    let r = if i % 2 == 0 then s else "odd"
+    total = total + string.len(r)
+    i = i + 1
+  }
+  println(int.to_string(total))
+}
