@@ -30,6 +30,9 @@ while read -r f; do
       echo "$n $leg BUILD-FAIL" >> $OUT/summary.txt
     fi
   done
+  if [ -f probe-mir.txt ] && grep -qx "$f" probe-mir.txt; then
+    ALMIDE_DUMP_MIR=1 timeout 600 $A build "$f" -o "$OUT/$n.mir.bin" > "$OUT/$n.mir.txt" 2>&1; rm -f "$OUT/$n.mir.bin"
+  fi
   echo "done $f"
 done < "$1"
 awk '{k=$1; if($2=="v1") a[k]=$3; else b[k]=$3} END {for (k in a) if (b[k]>0) printf "%s v1=%s v0=%s ratio=%.3f\n", k, a[k], b[k], a[k]/b[k]}' $OUT/summary.txt | sort > $OUT/ratios.txt
