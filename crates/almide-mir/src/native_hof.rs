@@ -246,9 +246,13 @@ pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
         .filter(|(implementation, source)| *source == call || *implementation == call)
         .filter_map(|(implementation, _)| of(implementation))
         .collect();
+    // A body with a callback is served only when the callback's types fit,
+    // which the render decides; one the linked body serves instead lends,
+    // and taken over there the caller would copy for nothing.
     !hofs.is_empty()
         && hofs.iter().all(|h| {
             !h.mutable.iter().any(|m| *m)
+                && !h.params.iter().any(|(d, _)| matches!(d, DTy::Fn(..)))
                 && matches!(h.params.get(k), Some((d, false)) if !matches!(d, DTy::Fn(..)) && !has_runtime_tuple(d))
         })
 }

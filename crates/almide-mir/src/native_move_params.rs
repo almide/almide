@@ -627,9 +627,23 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], sigs: &crate::render_native
     // 8)`, a violation of the body as lowered): the caller cannot hand it
     // over, so that param of every possible callee keeps borrowing while its
     // other params may still be taken over.
+    // Nor one a site fills with a list literal (`decode_default(v, "ns",
+    // [1, 2])`): only lent, the render keeps it on the stack as an array;
+    // handed over, it would be a heap list built on every call.
     for f in functions.iter() {
-        let Err(found) = crate::verify_ownership(f) else { continue };
-        let untracked: BTreeSet<ValueId> = found.iter().map(|v| v.value).collect();
+        let literals: BTreeSet<ValueId> = f
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::ListLit { dst, .. } => Some(*dst),
+                _ => None,
+            })
+            .collect();
+        let untracked: BTreeSet<ValueId> = match crate::verify_ownership(f) {
+            Ok(()) => BTreeSet::new(),
+            Err(found) => found.iter().map(|v| v.value).collect(),
+        };
+        let untracked: BTreeSet<ValueId> = untracked.union(&literals).copied().collect();
         for op in &f.ops {
             let (callees, args): (Vec<String>, &[crate::CallArg]) = match op {
                 Op::CallFn { name, args, .. } => (vec![name.clone()], args),
