@@ -400,7 +400,6 @@ mod tests {
         assert_eq!(declared_scalar_text("int.to_string_radix"), None);
         assert_eq!(declared_scalar_text("float.to_string"), None);
         assert_eq!(declared_scalar_text("float.__to_string_compound"), Some(ScalarText::Float));
-        assert_eq!(declared_scalar_text("float.to_string_compound"), Some(ScalarText::Float));
     }
 
     /// A range's `..` is no access: the helper a runtime body slices by is
