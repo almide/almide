@@ -265,6 +265,13 @@ fn render_user_fn_call(
         let (code, got) = call_arg(a, s.tys)?;
         let arg = if callee.owned_params.contains(&p.value) {
             moved_arg(name, crate::render_native::owned_nty(want), code, got)?
+        } else if matches!(want, NTy::Res | NTy::ResStr)
+            && got == want
+            && matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))
+        {
+            // A by-value Result param given the caller's dying Result: moved,
+            // where the copy would leave the caller one it never reads.
+            crate::render_native_move::take_expr(&code)
         } else {
             user_arg_in_declared_mode(name, want, code, got)?
         };
