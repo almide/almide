@@ -104,13 +104,6 @@ fn referring(func: &MirFunction, src: ValueId) -> BTreeSet<ValueId> {
 /// path after `ops[at]`. `true` whenever the control flow is not modelled.
 pub(crate) fn live_after(func: &MirFunction, at: usize, src: ValueId) -> bool {
     let Some(succ) = successors(func) else { return true };
-    let live_in = live_in(func, &succ, src);
-    succ[at].iter().any(|&s| live_in[s])
-}
-
-/// Whether `src` (or anything referring to its storage) may be read on some
-/// path from each op on, that op included.
-fn live_in(func: &MirFunction, succ: &[Vec<usize>], src: ValueId) -> Vec<bool> {
     let refs = referring(func, src);
     let n = func.ops.len();
     let mut uses = vec![false; n];
@@ -151,40 +144,7 @@ fn live_in(func: &MirFunction, succ: &[Vec<usize>], src: ValueId) -> Vec<bool> {
             break;
         }
     }
-    live_in
-}
-
-/// The first op of each branch arm `src` is dead on entry to while the
-/// branch itself still reads it on some path: the arms a value given away
-/// on the other arms dies at unread (`none => [(c, 1)]` beside `some(..) =>
-/// runs + [..]`). Each is an `IfThen`'s then-arm start or an `Else`'s
-/// else-arm start; an `if` with no `else` has no op of its own on its false
-/// path and is never one. Empty when the control flow is not modelled.
-pub(crate) fn dead_arm_starts(func: &MirFunction, src: ValueId) -> Vec<usize> {
-    let Some(succ) = successors(func) else { return Vec::new() };
-    let live = live_in(func, &succ, src);
-    let mut ifs: Vec<usize> = Vec::new();
-    let mut out = Vec::new();
-    for (i, op) in func.ops.iter().enumerate() {
-        match op {
-            Op::IfThen { .. } => {
-                ifs.push(i);
-                if live[i] && !live[i + 1] {
-                    out.push(i + 1);
-                }
-            }
-            Op::Else { .. } => {
-                if ifs.last().is_some_and(|&b| live[b]) && !live[i + 1] {
-                    out.push(i + 1);
-                }
-            }
-            Op::EndIf { .. } => {
-                ifs.pop();
-            }
-            _ => {}
-        }
-    }
-    out
+    succ[at].iter().any(|&s| live_in[s])
 }
 
 /// The copy at `ops[at]` may move `src` out: `src` is this function's own

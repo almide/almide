@@ -165,20 +165,6 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Mo
             out.extend(given.iter().map(|&i| (k, i)));
             continue;
         }
-        // Or given away on some arms and never read again on the others
-        // (`some(..) => runs + [..], none => [(c, 1)]`): taken over, it is
-        // released where it dies unread, at the start of each such arm (the
-        // release lands after the op before that start).
-        if !given.is_empty() && func.ret != Some(p.value) {
-            let dead = crate::mir_liveness::dead_arm_starts(func, p.value);
-            let mut ends = given.clone();
-            ends.extend(dead.iter().copied());
-            if !dead.is_empty() && crate::mir_liveness::last_use_on_every_path(func, p.value, &ends) {
-                out.extend(given.iter().map(|&i| (k, i)));
-                out.extend(dead.iter().map(|&s| (k, s - 1)));
-                continue;
-            }
-        }
         // Or a field of it is given away (`{ ...b, m: map.set(b.m, k, v) }`):
         // taken over, the record dies after its last read, so the field it
         // hands to a by-value position at its own last use moves out of it
