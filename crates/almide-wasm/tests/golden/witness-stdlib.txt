@@ -178,6 +178,7 @@ __selfhost_.__ipio2_table
 __selfhost_.__is_alnum_scan
 __selfhost_.__is_alpha_scan
 __selfhost_.__is_case_scan
+__selfhost_.__is_null
 __selfhost_.__itos_neg
 __selfhost_.__itos_pos
 __selfhost_.__jp_array
