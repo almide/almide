@@ -288,7 +288,11 @@ fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Modes<'
     for i in at.into_iter().rev() {
         f.ops.remove(i);
     }
-    crate::verify_ownership(&f).is_ok().then_some(f)
+    let r = crate::verify_ownership(&f);
+    if std::env::var("ALMIDE_DEBUG_MOVES").is_ok() {
+        eprintln!("DBG own_params {} movable={:?} consumed={:?} verify={:?}", func.name, movable, consumed, r.as_ref().err().map(|e| format!("{e:?}").chars().take(400).collect::<String>()));
+    }
+    r.is_ok().then_some(f)
 }
 
 /// Whether the caller can move `v` into the call at `call` without a copy:
@@ -595,7 +599,19 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
         let takes_at = |f: &MirFunction, k: usize| {
             !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0)
         };
-        let Some((best, owned)) = solve_modes(functions, &table, &eligible, &takes_at) else {
+        if std::env::var("ALMIDE_DEBUG_MOVES").is_ok() {
+            for f in functions.iter() {
+                eprintln!("DBG fn {} eligible={} closure={} params={:?}", f.name, eligible(f), closure(f), f.params.iter().map(|p| (p.value, p.repr.is_heap())).collect::<Vec<_>>());
+                if f.name.contains("lambda") || f.name.contains("r2o_arr") || f.name == "f" || f.name == "first_leaf" {
+                    for (i, op) in f.ops.iter().enumerate() { eprintln!("DBG   {i}: {op:?}"); }
+                }
+            }
+        }
+        let solved = solve_modes(functions, &table, &eligible, &takes_at);
+        if std::env::var("ALMIDE_DEBUG_MOVES").is_ok() {
+            eprintln!("DBG solve ok={} pinned={:?}", solved.is_some(), pinned);
+        }
+        let Some((best, owned)) = solved else {
             // A closure call the mirror refuses to hand over at leaves every
             // closure borrowing, as before closures took part.
             let closures: Vec<String> = functions.iter().filter(|f| closure(f)).map(|f| f.name.clone()).collect();
