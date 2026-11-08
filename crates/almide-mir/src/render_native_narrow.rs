@@ -10,8 +10,8 @@
 //!
 //! A local reassigned by `SetLocal` whose every value is a narrow integer of
 //! one kind — the result of a narrow ring op, a call returning that kind,
-//! another such local, the identity re-wrap of one, or a constant in its
-//! range — is declared in that type. Every read widens it back with `as i64`,
+//! the identity re-wrap of one, or a constant in its range — is declared in
+//! that type. Every read widens it back with `as i64`,
 //! every write narrows with `as`: exact both ways, since each value it is ever
 //! given already fits the type. The kind is read off the MIR's narrow ops and
 //! the signature table, never off a type or a name. Integer locals carry no
@@ -32,20 +32,24 @@ pub(crate) fn narrow_locals(func: &MirFunction, sigs: &NativeSigs, rendered: Str
         .fold(rendered, |text, (v, ty)| respell(&text, &var(v), ty).unwrap_or(text))
 }
 
+/// A narrow integer kind: (bits, signed).
+type Kind = (u8, bool);
+
+/// Not a narrow kind: a value no narrow kind describes.
+const WIDE: Kind = (64, true);
+
 /// One value a local can be given.
 #[derive(Clone, Copy)]
 enum Src {
-    /// Exactly this narrow kind.
-    Narrow(&'static str),
-    /// A constant (fits a kind or not).
+    Narrow(Kind),
     Const(i64),
-    /// Whatever the local or identity copy `v` holds.
-    Same(ValueId),
-    /// Something no narrow kind describes.
     Wide,
 }
 
 /// The narrow kind of each mutable local all of whose values are of it.
+///
+/// A local given another local's value is kept wide: its values are known
+/// only through that local's, and no program has needed the chase.
 fn narrow_local_kinds(func: &MirFunction, sigs: &NativeSigs) -> BTreeMap<ValueId, &'static str> {
     let params: BTreeSet<ValueId> = func.params.iter().map(|p| p.value).collect();
     let mut def: BTreeMap<ValueId, Src> = BTreeMap::new();
@@ -57,98 +61,52 @@ fn narrow_local_kinds(func: &MirFunction, sigs: &NativeSigs) -> BTreeMap<ValueId
                 continue;
             }
             Op::ConstInt { value, .. } => Src::Const(*value),
-            Op::Prim { kind: PrimKind::NativeNarrowBin { bits, signed, .. }, .. } => {
-                NativeSigKind::Narrow { bits: *bits, signed: *signed }.narrow_rust().map_or(Src::Wide, Src::Narrow)
-            }
+            Op::Prim { kind: PrimKind::NativeNarrowBin { bits, signed, .. }, .. } => Src::Narrow((*bits, *signed)),
             Op::CallFn { name, .. } => {
-                sigs.get(name.as_str()).and_then(|(_, r)| (*r).and_then(|k| k.narrow_rust())).map_or(Src::Wide, Src::Narrow)
+                sigs.get(name.as_str()).and_then(|(_, r)| (*r).and_then(narrow_kind)).map_or(Src::Wide, Src::Narrow)
             }
-            Op::IntBinOp { op: IntOp::Or, a, b, .. } if a == b => Src::Same(*a),
+            // The identity a fused re-wrap left (`native_narrow_rewrite`): its
+            // operand is the ring op's own result, never a local.
+            Op::IntBinOp { op: IntOp::Or, a, b, .. } if a == b => def.get(a).copied().unwrap_or(Src::Wide),
             _ => Src::Wide,
         };
         if let Some(d) = crate::mir_ops::defined_value(op) {
             def.insert(d, src);
         }
     }
-    // Optimistic fixpoint: a local is narrow until one of its values is not;
-    // a local given only constants and locals still open waits for a kind.
-    let mut kind: BTreeMap<ValueId, Option<&'static str>> =
-        sets.keys().filter(|v| !params.contains(v)).map(|v| (*v, None)).collect();
-    let mut wide: BTreeSet<ValueId> = BTreeSet::new();
-    let mut changed = true;
-    while changed {
-        changed = false;
-        let open: Vec<ValueId> = kind.keys().filter(|v| !wide.contains(v)).copied().collect();
-        for v in &open {
-            let srcs = &sets[v];
-            let first = def.get(v).copied().unwrap_or(Src::Wide);
-            // A source that is itself a local gives whatever that local holds.
-            let of = |s: &ValueId| if sets.contains_key(s) { Src::Same(*s) } else { def.get(s).copied().unwrap_or(Src::Wide) };
-            let given = std::iter::once(first).chain(srcs.iter().map(of));
-            let resolved: Vec<Resolved> = given.map(|s| resolve(s, &def, &kind, &wide)).collect();
-            let kinds: BTreeSet<&'static str> =
-                resolved.iter().filter_map(|r| if let Resolved::Kind(t) = r { Some(*t) } else { None }).collect();
-            let got = kinds.iter().next().copied();
-            let narrow = kinds.len() <= 1
-                && resolved.iter().all(|r| match r {
-                    Resolved::Wide => false,
-                    Resolved::Const(c) => got.is_none_or(|t| fits(t, *c)),
-                    Resolved::Kind(_) | Resolved::Pending => true,
-                });
-            if !narrow {
-                wide.insert(*v);
-                changed = true;
-            } else if kind[v] != got {
-                kind.insert(*v, got);
-                changed = true;
-            }
-        }
-    }
-    kind.into_iter().filter(|(v, _)| !wide.contains(v)).filter_map(|(v, t)| Some((v, t?))).collect()
+    let given = |s: &ValueId| [def.get(s).copied().unwrap_or(Src::Wide), Src::Wide][sets.contains_key(s) as usize];
+    sets.iter()
+        .filter(|(v, _)| !params.contains(v))
+        .filter_map(|(v, srcs)| {
+            let views: Vec<(Option<Kind>, Option<i64>)> =
+                std::iter::once(def.get(v).copied().unwrap_or(Src::Wide)).chain(srcs.iter().map(&given)).map(view).collect();
+            let kinds: BTreeSet<Kind> = views.iter().filter_map(|w| w.0).collect();
+            let k = kinds.first().copied().unwrap_or(WIDE);
+            let narrow = (kinds.len() == 1) & (k != WIDE) & views.iter().filter_map(|w| w.1).all(|c| fits(k, c));
+            let ty = NativeSigKind::Narrow { bits: k.0, signed: k.1 }.narrow_rust();
+            narrow.then_some((*v, ty?))
+        })
+        .collect()
 }
 
-enum Resolved {
-    Kind(&'static str),
-    Const(i64),
-    /// A local not yet given a kind (it takes the others').
-    Pending,
-    Wide,
+/// The narrow kind of a signature kind, if it is one.
+fn narrow_kind(k: NativeSigKind) -> Option<Kind> {
+    if let NativeSigKind::Narrow { bits, signed } = k { Some((bits, signed)) } else { None }
 }
 
-fn resolve(
-    s: Src,
-    def: &BTreeMap<ValueId, Src>,
-    kind: &BTreeMap<ValueId, Option<&'static str>>,
-    wide: &BTreeSet<ValueId>,
-) -> Resolved {
+/// A value's kind (a constant has none of its own) and constant.
+fn view(s: Src) -> (Option<Kind>, Option<i64>) {
     match s {
-        Src::Narrow(t) => Resolved::Kind(t),
-        Src::Const(c) => Resolved::Const(c),
-        Src::Wide => Resolved::Wide,
-        Src::Same(v) if wide.contains(&v) => Resolved::Wide,
-        Src::Same(v) => match kind.get(&v) {
-            Some(Some(t)) => Resolved::Kind(*t),
-            Some(None) => Resolved::Pending,
-            // An identity copy: what its operand is.
-            None => match def.get(&v) {
-                Some(Src::Same(u)) if *u != v => resolve(Src::Same(*u), def, kind, wide),
-                Some(&inner) if matches!(inner, Src::Narrow(_) | Src::Const(_)) => resolve(inner, def, kind, wide),
-                _ => Resolved::Wide,
-            },
-        },
+        Src::Narrow(k) => (Some(k), None),
+        Src::Const(c) => (None, Some(c)),
+        Src::Wide => (Some(WIDE), None),
     }
 }
 
-/// Whether the constant `c` is a value of the narrow Rust type `t`.
-fn fits(t: &str, c: i64) -> bool {
-    match t {
-        "i8" => i8::try_from(c).is_ok(),
-        "i16" => i16::try_from(c).is_ok(),
-        "i32" => i32::try_from(c).is_ok(),
-        "u8" => u8::try_from(c).is_ok(),
-        "u16" => u16::try_from(c).is_ok(),
-        _ => u32::try_from(c).is_ok(),
-    }
+/// Whether the constant `c` is a value of kind `k`.
+fn fits(k: Kind, c: i64) -> bool {
+    let (half, s) = (1i128 << (k.0 - 1), i128::from(k.1));
+    (-half * s..=half * (2 - s) - 1).contains(&i128::from(c))
 }
 
 /// `text` with the local `name` declared as `ty`, or `None` where its text is
@@ -193,19 +151,15 @@ fn widen_reads(code: &str, name: &str) -> Option<String> {
         let (before, after) = (&rest[..at], &rest[at + name.len()..]);
         out.push_str(before);
         rest = after;
-        if out.chars().next_back().is_some_and(is_ident) || after.chars().next().is_some_and(is_ident) {
-            out.push_str(name);
-            continue;
-        }
+        // Part of a longer identifier: not this local.
+        let joined = out.chars().next_back().is_some_and(is_ident) | after.chars().next().is_some_and(is_ident);
         let trail = after.trim_start();
         let writes = trail.starts_with(':')
-            || (trail.starts_with('=') && !trail.starts_with("=="))
-            || ["+=", "-=", "*=", "/=", "%=", "|=", "&=", "^=", "<<=", ">>="].iter().any(|w| trail.starts_with(w));
+            | (trail.starts_with('=') & !trail.starts_with("=="))
+            | ["+=", "-=", "*=", "/=", "%=", "|=", "&=", "^=", "<<=", ">>="].iter().any(|w| trail.starts_with(w));
         let binds = ["&mut ", "let ", "for ", "|", "|(", "."].iter().any(|p| out.ends_with(p));
-        if writes || binds || code.contains('"') {
-            return None;
-        }
-        out.push_str(&format!("({name} as i64)"));
+        (joined | !(writes | binds | code.contains('"'))).then_some(())?;
+        out.push_str(&[format!("({name} as i64)"), name.to_string()][usize::from(joined)]);
     }
     out.push_str(rest);
     Some(out)
@@ -213,7 +167,15 @@ fn widen_reads(code: &str, name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{respell, widen_reads};
+    use super::{fits, respell, widen_reads};
+
+    #[test]
+    fn a_constant_fits_a_kind_exactly_within_its_range() {
+        assert!(fits((8, true), -128) && fits((8, true), 127) && !fits((8, true), 128) && !fits((8, true), -129));
+        assert!(fits((8, false), 0) && fits((8, false), 255) && !fits((8, false), 256) && !fits((8, false), -1));
+        assert!(fits((32, true), i32::MIN.into()) && !fits((32, true), i64::from(i32::MAX) + 1));
+        assert!(fits((32, false), u32::MAX.into()) && !fits((32, false), -1));
+    }
 
     #[test]
     fn a_narrow_local_is_declared_narrow_and_widened_at_each_read() {
