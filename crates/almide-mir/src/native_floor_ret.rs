@@ -35,7 +35,7 @@ fn plain_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
         FloorRet::Bytes => (call, Some(NTy::Rec(crate::render_native_rec::bytes_index()))),
         FloorRet::Value => (call, Some(NTy::Rec(crate::render_native_rec::value_index()))),
         FloorRet::ListStr => (
-            format!("crate::almide_str_block::str_list({call})"),
+            format!("({call}).into_iter().map(AlmideString::from).collect::<Vec<AlmideString>>()"),
             Some(NTy::VecStr),
         ),
         FloorRet::Opt(Scalar::Int) => (call, Some(NTy::Opt)),
@@ -71,7 +71,7 @@ fn carrier_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
             Some(NTy::Rec(crate::render_native_rec::option_type_of(NTy::Str))),
         ),
         FloorRet::ResListStr => (
-            format!("({call}).map(crate::almide_str_block::str_list).map_err(AlmideString::from)"),
+            format!("({call}).map(|v| v.into_iter().map(AlmideString::from).collect::<Vec<AlmideString>>()).map_err(AlmideString::from)"),
             Some(NTy::Rec(crate::render_native_rec::result_type_of(NTy::VecStr, NTy::Str))),
         ),
         FloorRet::ResStrValuePairs => {

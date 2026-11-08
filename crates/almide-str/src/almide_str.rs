@@ -840,40 +840,6 @@ impl fmt::Display for IntText {
     }
 }
 
-/// A runtime call's string list as `Vec<AlmideStr>`: the list itself when it
-/// already is one (every runtime list of strings today), element by element
-/// otherwise. A rendered call converted every result element by element,
-/// a full pass and a fresh vector for a list it already had.
-pub trait IntoStrList {
-    fn into_str_list(self) -> Vec<AlmideStr>;
-}
-
-impl IntoStrList for Vec<AlmideStr> {
-    #[inline(always)]
-    fn into_str_list(self) -> Vec<AlmideStr> {
-        self
-    }
-}
-
-impl IntoStrList for Vec<String> {
-    fn into_str_list(self) -> Vec<AlmideStr> {
-        self.into_iter().map(AlmideStr::from).collect()
-    }
-}
-
-impl IntoStrList for Vec<&str> {
-    fn into_str_list(self) -> Vec<AlmideStr> {
-        self.into_iter().map(AlmideStr::from).collect()
-    }
-}
-
-/// [`IntoStrList::into_str_list`] as a function, so a call site needs no
-/// trait in scope.
-#[inline(always)]
-pub fn str_list<L: IntoStrList>(l: L) -> Vec<AlmideStr> {
-    l.into_str_list()
-}
-
 impl fmt::Display for AlmideStr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self.as_str(), f)
