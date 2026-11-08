@@ -1,4 +1,2 @@
-spec/wasm_cross/assign_self_call_release.almd
 spec/wasm_cross/map_index_released_with_block.almd
 spec/wasm_cross/string_rle.almd
-spec/wasm_cross/tuple_bound_list_mapped_in_loop.almd
