@@ -513,6 +513,24 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
     }
 }
 
+/// The ownership mirror finds nothing wrong in `after` that it did not find
+/// in `before`, the function as it was lowered. A body the rewrite leaves
+/// alone is the lowering's; a linked body whose raw slot loads the mirror
+/// does not model (`LoadHandle` of an address it does not track) reads as a
+/// use of an unknown value both before and after its call sites hand an
+/// argument over, and the moves add no violation of their own.
+fn no_new_violations(before: &MirFunction, after: &MirFunction) -> bool {
+    let Err(found) = crate::verify_ownership(after) else { return true };
+    if before.ops == after.ops && before.owned_params == after.owned_params {
+        return true;
+    }
+    let known: BTreeSet<(ValueId, String)> = match crate::verify_ownership(before) {
+        Ok(()) => BTreeSet::new(),
+        Err(vs) => vs.iter().map(|v| (v.value, format!("{:?}", v.kind))).collect(),
+    };
+    found.iter().all(|v| known.contains(&(v.value, format!("{:?}", v.kind))))
+}
+
 /// The modes to a fixpoint, and the rewritten functions under them.
 /// To a fixpoint: a body that hands its param to a callee's move param takes
 /// it over in turn, once that callee's mode is known. From no move params up
@@ -557,12 +575,12 @@ fn solve_modes<'t>(
         if owned.by_name.is_empty() {
             return Some((functions.to_vec(), owned));
         }
-        for f in next.iter_mut() {
+        for (f, before) in next.iter_mut().zip(functions) {
             // The join releases sunk into the arms first, so an arm's call takes
             // the slot over; the plain body if the mirror refuses that.
             let sunk = move_at_sites(&sink_join_releases(f, &owned), &owned);
-            let moved = if crate::verify_ownership(&sunk).is_ok() { sunk } else { move_at_sites(f, &owned) };
-            if crate::verify_ownership(&moved).is_err() {
+            let moved = if no_new_violations(before, &sunk) { sunk } else { move_at_sites(f, &owned) };
+            if !no_new_violations(before, &moved) {
                 return None;
             }
             *f = moved;
