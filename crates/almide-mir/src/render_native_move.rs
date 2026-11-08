@@ -89,6 +89,27 @@ pub(crate) fn last_use(
     if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) | NTy::Res | NTy::ResStr) {
         return false;
     }
+    // A Result param is the callee's own (there is no borrowed Result kind:
+    // the caller hands a copy or its dying value over). Never rebound and not
+    // read again on any later op, outside every loop, it moves as itself.
+    if matches!(t, NTy::Res | NTy::ResStr) && func.params.iter().any(|p| p.value == src) {
+        let mut reads = Vec::new();
+        let dead = loop_of(func)[at].is_none()
+            && !func.ops.iter().any(|op| matches!(op, Op::SetLocal { local, .. } if *local == src))
+            && func.ret != Some(src)
+            && func.ops[at + 1..].iter().all(|op| {
+                if bookkeeping(op) {
+                    return true;
+                }
+                reads.clear();
+                crate::mir_ops::op_reads(op, &mut reads);
+                !reads.contains(&src)
+            });
+        if dead {
+            CARRIER_PARAMS.with(|m| m.borrow_mut().insert(src));
+        }
+        return dead;
+    }
     // A kind with no `Default` (a Result) moves only where its binding moves
     // as itself ([`take_expr`]): nothing is left behind to fill.
     if !crate::render_native_rec::has_default(t) && !moves_as_itself(src) {
@@ -549,6 +570,7 @@ pub(crate) fn set_rebound(func: &MirFunction) {
         _ => None,
     }));
     REBOUND.with(|m| *m.borrow_mut() = set);
+    CARRIER_PARAMS.with(|m| m.borrow_mut().clear());
 }
 
 /// The move of a dying value's binding `code` (#4006, no-perf-loss): a value
@@ -559,14 +581,23 @@ pub(crate) fn set_rebound(func: &MirFunction) {
 /// Whether `v`'s binding moves as itself in [`take_expr`] (bound once, or
 /// re-initialized before any read).
 fn moves_as_itself(v: ValueId) -> bool {
-    !REBOUND.with(|m| m.borrow().contains(&v)) || REINIT.with(|m| m.borrow().contains(&v))
+    !REBOUND.with(|m| m.borrow().contains(&v))
+        || REINIT.with(|m| m.borrow().contains(&v))
+        || CARRIER_PARAMS.with(|m| m.borrow().contains(&v))
+}
+
+thread_local! {
+    /// The by-value Result params of the fn being rendered that a last use
+    /// moves as themselves (see [`last_use`]).
+    static CARRIER_PARAMS: std::cell::RefCell<std::collections::BTreeSet<ValueId>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
 }
 
 pub(crate) fn take_expr(code: &str) -> String {
     let once = code
         .strip_prefix('v')
         .and_then(|n| n.parse::<u32>().ok())
-        .is_some_and(|n| !REBOUND.with(|m| m.borrow().contains(&ValueId(n))) || REINIT.with(|m| m.borrow().contains(&ValueId(n))));
+        .is_some_and(|n| moves_as_itself(ValueId(n)));
     if once && !drill_no_moves() {
         code.to_string()
     } else {
