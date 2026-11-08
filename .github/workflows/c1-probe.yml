@@ -51,7 +51,7 @@ jobs:
             ALMIDE_VERIFIED_DEBUG=1 ./target/release/almide build $f -o /tmp/$n.v1 > /dev/null 2>&1 || echo "V1 FAIL $n"
             ALMIDE_NO_VERIFIED_OK=1 ./target/release/almide build $f --no-verified -o /tmp/$n.v0 > /dev/null 2>&1 || echo "V0 FAIL $n"
             for l in v1 v0; do
-              valgrind --tool=callgrind --callgrind-out-file=/tmp/cg.$n.$l /tmp/$n.$l > /dev/null 2>&1
+              valgrind --tool=callgrind --collect-atstart=no --toggle-collect='almide_*::main' --toggle-collect='*almide_stack_guard_install' --callgrind-out-file=/tmp/cg.$n.$l /tmp/$n.$l > /dev/null 2>&1
               callgrind_annotate --inclusive=no /tmp/cg.$n.$l 2>/dev/null | grep -v "ld-linux\\|/elf/\\|^--\\|^ *$" | head -40 | cut -c1-220 > dumps/$n.$l.prof
             done
           done
