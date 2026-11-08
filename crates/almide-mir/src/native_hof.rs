@@ -674,6 +674,9 @@ fn handed_over<'h>(hof: &'h Hof, k: usize, a: &CallArg, t: NTy) -> Option<&'h st
     (dying && owned && !hof.mutable.iter().any(|m| *m) && hof.params[*param].1).then_some(name.as_str())
 }
 
+/// Each closure value's lambda name and captured values (`closure_origins`).
+type ClosureOrigins = BTreeMap<ValueId, (String, Vec<ValueId>)>;
+
 /// A `list.flat_map` whose callback is a lambda ending in a list literal of
 /// at most eight elements runs as the runtime's array twin
 /// (`almide_rt_list_flat_map_arr`, #1337), calling the lambda's array twin
@@ -682,7 +685,7 @@ fn handed_over<'h>(hof: &'h Hof, k: usize, a: &CallArg, t: NTy) -> Option<&'h st
 /// standard codegen takes the same route (`lower_flat_map_arrays`).
 fn flat_map_array_route(
     call: &crate::render_native::NativeCall<'_>,
-    (origins, user_fns): (&BTreeMap<ValueId, (String, Vec<ValueId>)>, &BTreeMap<&str, &MirFunction>),
+    (origins, user_fns): (&ClosureOrigins, &BTreeMap<&str, &MirFunction>),
     rendered: &mut [String],
     side: &mut FnArgOut,
 ) -> Option<&'static str> {
