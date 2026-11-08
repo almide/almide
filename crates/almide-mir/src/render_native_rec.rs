@@ -109,16 +109,24 @@ pub(crate) fn is_native_set(t: &almide_lang::types::Ty) -> bool {
     matches!(t, Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 && native_set_element_type(&a[0]))
 }
 
-/// The generated `AlmideSet<elem>` alias, appended on first use.
-pub(crate) fn set_type_of(e: NTy) -> u16 {
+/// The generated type `decl` declares: the first one `same` matches, or
+/// `decl` appended at the end (so no earlier index moves) on first use. Every
+/// on-demand type (`Bytes`, `Value`, `Matrix`, the list, set, map, option,
+/// result and slot types) is registered through it.
+fn intern(same: impl Fn(&RecDecl) -> bool, decl: RecDecl) -> u16 {
     RECS.with(|r| {
         let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.set_of == Some(e)) {
+        if let Some(i) = r.iter().position(same) {
             return i as u16;
         }
-        r.push(RecDecl { name: format!("Set<{e:?}>"), set_of: Some(e), ..RecDecl::default() });
+        r.push(decl);
         (r.len() - 1) as u16
     })
+}
+
+/// The generated `AlmideSet<elem>` alias, appended on first use.
+pub(crate) fn set_type_of(e: NTy) -> u16 {
+    intern(|d| d.set_of == Some(e), RecDecl { name: format!("Set<{e:?}>"), set_of: Some(e), ..RecDecl::default() })
 }
 
 /// The payload kind of a generated `Option` carrier.
@@ -148,14 +156,7 @@ pub(crate) fn is_scalar_instance(t: &almide_lang::types::Ty) -> bool {
 /// it joins, so no earlier index moves; the header is assembled after the
 /// bodies render, so a body may be the first user.
 pub(crate) fn bytes_index() -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.name == BYTES_KEY) {
-            return i as u16;
-        }
-        r.push(RecDecl { name: BYTES_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None });
-        (r.len() - 1) as u16
-    })
+    intern(|d| d.name == BYTES_KEY, RecDecl { name: BYTES_KEY.into(), alias: Some("Vec<u8>"), ..RecDecl::default() })
 }
 
 /// The table key of the stdlib's dynamic `Value` type.
@@ -164,14 +165,7 @@ pub(crate) const VALUE_KEY: &str = "Ty::Value";
 /// The generated `Value` type: v0's own runtime enum (`AlmideValue`), so a
 /// declared-floor body takes it as is. Appended on first use, like `Bytes`.
 pub(crate) fn value_index() -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.name == VALUE_KEY) {
-            return i as u16;
-        }
-        r.push(RecDecl { name: VALUE_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None });
-        (r.len() - 1) as u16
-    })
+    intern(|d| d.name == VALUE_KEY, RecDecl { name: VALUE_KEY.into(), alias: Some("AlmideValue"), ..RecDecl::default() })
 }
 
 /// `t` is the generated `Value` type.
@@ -185,14 +179,7 @@ pub(crate) const MATRIX_KEY: &str = "Ty::Matrix";
 /// The generated `Matrix` type: v0's own runtime struct (`AlmideMatrix`), so a
 /// declared-floor body takes it as is. Appended on first use, like `Bytes`.
 pub(crate) fn matrix_index() -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.name == MATRIX_KEY) {
-            return i as u16;
-        }
-        r.push(RecDecl { name: MATRIX_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None });
-        (r.len() - 1) as u16
-    })
+    intern(|d| d.name == MATRIX_KEY, RecDecl { name: MATRIX_KEY.into(), alias: Some("AlmideMatrix"), ..RecDecl::default() })
 }
 
 /// `t` is the generated `Matrix` type.
@@ -203,24 +190,7 @@ pub(crate) fn is_matrix(t: NTy) -> bool {
 /// The generated `Result<ok, err>` carrier, appended on first use (a
 /// declared-floor call returns one the program's signatures never spell).
 pub(crate) fn result_type_of(ok: NTy, err: NTy) -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.result_of == Some((ok, err))) {
-            return i as u16;
-        }
-        r.push(RecDecl {
-            name: format!("Result<{ok:?}, {err:?}>"),
-            fields: Vec::new(),
-            cases: None,
-            list_of: None,
-            alias: None,
-            default_tag: None,
-            option_of: None,
-            result_of: Some((ok, err)),
-            map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None,
-        });
-        (r.len() - 1) as u16
-    })
+    intern(|d| d.result_of == Some((ok, err)), RecDecl { name: format!("Result<{ok:?}, {err:?}>"), result_of: Some((ok, err)), ..RecDecl::default() })
 }
 
 thread_local! {
@@ -241,84 +211,26 @@ pub(crate) fn declared_map(v: crate::ValueId) -> Option<u16> {
 
 /// The generated `AlmideMap<key, value>` alias, appended on first use.
 pub(crate) fn map_type_of(key: NTy, value: NTy) -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.map_of == Some((key, value))) {
-            return i as u16;
-        }
-        r.push(RecDecl {
-            name: format!("Map<{key:?}, {value:?}>"),
-            fields: Vec::new(),
-            cases: None,
-            list_of: None,
-            alias: None,
-            default_tag: None,
-            option_of: None,
-            result_of: None,
-            map_of: Some((key, value)), eq_safe: false, set_of: None, closure_of: None, cell_of: None,
-        });
-        (r.len() - 1) as u16
-    })
+    intern(|d| d.map_of == Some((key, value)), RecDecl { name: format!("Map<{key:?}, {value:?}>"), map_of: Some((key, value)), ..RecDecl::default() })
 }
 
 /// The generated `Option<payload>` carrier, appended on first use.
 pub(crate) fn option_type_of(payload: NTy) -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.option_of == Some(payload)) {
-            return i as u16;
-        }
-        r.push(RecDecl {
-            name: format!("Option<{payload:?}>"),
-            fields: Vec::new(),
-            cases: None,
-            list_of: None,
-            alias: None,
-            default_tag: None,
-            option_of: Some(payload),
-            result_of: None,
-            map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None,
-        });
-        (r.len() - 1) as u16
-    })
+    intern(|d| d.option_of == Some(payload), RecDecl { name: format!("Option<{payload:?}>"), option_of: Some(payload), ..RecDecl::default() })
 }
 
 /// The generated list type of `e` elements, appended on first use (at the
 /// end, like `Bytes`, so no earlier index moves).
 pub(crate) fn list_type_of(e: NTy) -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.list_of == Some(e)) {
-            return i as u16;
-        }
-        r.push(RecDecl {
-            name: format!("List<{e:?}>"),
-            fields: Vec::new(),
-            cases: None,
-            list_of: Some(e),
-            alias: None,
-            default_tag: None,
-            option_of: None,
-            result_of: None,
-            map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None,
-        });
-        (r.len() - 1) as u16
-    })
+    intern(|d| d.list_of == Some(e), RecDecl { name: format!("List<{e:?}>"), list_of: Some(e), ..RecDecl::default() })
 }
 
 /// The generated struct of an untyped block whose slot kinds its stores give
 /// (`render_native_slots`): field `fK` holds slot `K`. Appended on first use
 /// at the end, like a list type, so no earlier index moves.
 pub(crate) fn slots_type_of(fields: &[NTy]) -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        let name = format!("slots {fields:?}");
-        if let Some(i) = r.iter().position(|d| d.name == name) {
-            return i as u16;
-        }
-        r.push(RecDecl { name, fields: fields.to_vec(), cases: None, list_of: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None, alias: None, default_tag: None });
-        (r.len() - 1) as u16
-    })
+    let name = format!("slots {fields:?}");
+    intern(|d| d.name == name, RecDecl { fields: fields.to_vec(), name: name.clone(), ..RecDecl::default() })
 }
 
 /// `t` is the generated `Bytes` type.
