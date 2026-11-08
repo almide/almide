@@ -499,23 +499,6 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             st.tys.insert(*dst, owned);
             line!("let mut {} = {take};", var(*dst));
         }
-        // The same move out of a String-Ok Result param (the callee's own,
-        // never rebound) that no path reads after the copy: it goes by value,
-        // the param needing no `mut`.
-        Op::Dup { dst, src }
-            if st.tys.get(src) == Some(&NTy::StrRef)
-                && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
-                    st.tys.get(&base) == Some(&NTy::ResStr)
-                        && crate::render_native_move::result_param_dies(func, i, base)
-                        && crate::render_native_addr::reads_of_take(&take)
-                            .iter()
-                            .all(|r| !crate::mir_liveness::live_after(func, i, *r))
-                }) =>
-        {
-            let (base, _) = crate::render_native_addr::payload_take_of(*src).expect("a payload read");
-            st.tys.insert(*dst, NTy::Str);
-            line!("let mut {} = match {} {{ Ok(s) | Err(s) => s }};", var(*dst), var(base));
-        }
         // A copy of a value nothing reads again moves it (no clone).
         Op::Dup { dst, src }
             if st
