@@ -1,39 +1,17 @@
 set +e
 curl -sSfL https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz | tar -xJ -C /tmp; export PATH=/tmp/wasmtime-v50.0.1-x86_64-linux:$PATH
-for v in var lit; do
-if [ $v = var ]; then body='let f = (x) => spin(x)
-  list.sum(list.map(xs, f))'; else body='list.sum(list.map(xs, (x) => spin(x)))'; fi
-cat > /tmp/m_$v.almd <<X
-fn spin(n: Int) -> Int = {
-  var i = 0
-  while i < n {
-    i = i + 1
-  }
-  i
+cat > /tmp/mx.almd <<'X'
+fn main() -> Unit = {
+  let m = matrix.from_lists([[1.0, 2.0]])
+  println("${matrix.to_lists(matrix.concat_rows([m, m]))}")
+  println("${matrix.to_lists(matrix.zip_with(m, m, (a, b) => a + b))}")
 }
-
-fn mapped(xs: List[Int]) -> Int = {
-  $body
-}
-
-effect fn units(ns: Int) -> Result[Int, String] =
-  if ns > 6000 then ok(-1)
-  else {
-    let r = fan.bounded(compute.ns(ns)) { mapped([1, 2, 3]) } ?? -1
-    if r >= 0 then ok(ns / 3) else units(ns + 3)!
-  }
-
-effect fn main() -> Unit = println("units: \${units(0)!}")
 X
-echo "=== $v"; almide run /tmp/m_$v.almd; almide run /tmp/m_$v.almd --target wasm
-touch /tmp/marker; sleep 1
-almide build /tmp/m_$v.almd -o /tmp/mb > /dev/null 2>&1
-find "${TMPDIR:-/tmp}" /tmp -name 'main.rs' -newer /tmp/marker 2>/dev/null | head -3
-f=$(find "${TMPDIR:-/tmp}" /tmp -name 'main.rs' -newer /tmp/marker 2>/dev/null | head -1)
-echo "--- $f"; [ -n "$f" ] && cp "$f" /tmp/cired-out-m_$v.rs
-done
-for v in var lit; do
-cargo run -q --release -p almide-mir --example probe_native /tmp/m_$v.almd > /tmp/cired-out-render-$v.rs 2>&1
-cargo run -q --release -p almide-mir --example probe_native /tmp/m_$v.almd --mir > /tmp/cired-out-mir-$v.txt 2>&1
-echo "=== render $v"; grep -n "^fn \|charge\|budget\|CallIndirect\|__lambda\|list_map\|list_sum" /tmp/cired-out-render-$v.rs | grep -v "^[0-9]*:\s*//" | head -80
-done
+echo "=== matrix native"; almide run /tmp/mx.almd 2>&1 | grep -v "^\s*$" | head -20 | cut -c1-300
+echo "=== matrix wasm"; almide run /tmp/mx.almd --target wasm 2>&1 | head -5
+echo "=== reachability"; ALMIDE_BIN=$(command -v almide) bash proofs/check-wasm-reachability.sh 2>&1 | tail -15
+echo "=== listbuild"; almide run research/benchmark/perf/listbuild/listbuild_append.almd -- 12; almide run research/benchmark/perf/listbuild/listbuild_append.almd --target wasm -- 12
+echo "=== suite"
+cargo test --release --no-fail-fast --test fan_region_floor_test --test fan_meter_splice_test --test runtime_spelling_hygiene_test --test counted_index_chain_test --test ord_record_variant_test --test ord_recursive_test --test runtime_top_level_names_test --test native_verified_floor_test 2>&1 | grep -E "^test .*(ok|FAILED)$|panicked|left:|right:|test result" -A2 | cut -c1-400 | head -150
+cargo test --release -p almide-ir --test fn_clone_discipline 2>&1 | grep "test result"
+cargo test --release -p almide-mir --lib 2>&1 | grep -E "FAILED|test result|panicked" | head
