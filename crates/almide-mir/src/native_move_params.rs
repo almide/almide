@@ -211,11 +211,11 @@ fn arm_release(func: &MirFunction, p: ValueId, given: &[usize], depth: &[i32]) -
     let start = (0..first).rev().find(|&i| depth[i] == 0 && matches!(func.ops[i], Op::IfThen { .. }))?;
     let mut els = None;
     let mut end = None;
-    for j in start + 1..func.ops.len() {
+    for (j, op) in func.ops.iter().enumerate().skip(start + 1) {
         if depth[j] != 0 {
             continue;
         }
-        match func.ops[j] {
+        match op {
             Op::Else { .. } => els = Some(j),
             Op::EndIf { .. } => {
                 end = Some(j);
