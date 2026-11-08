@@ -261,7 +261,7 @@ fn with_by_ref_twin(mut f: FloorFn, rust_params: &[String], rust_ret: &str, rt: 
         return f;
     }
     let Ok(items) = closure(&twin, rt) else { return f };
-    let by_ref = FloorFn { symbol: twin, params, ret: f.ret, items, twin: None, str_only: f.str_only, borrow_twin: None, by_ref: None };
+    let by_ref = FloorFn { symbol: twin, params, ret: f.ret, items, twin: None, str_only: f.str_only, ordered: f.ordered, borrow_twin: None, by_ref: None };
     f.by_ref = Some(Box::new(by_ref));
     f
 }

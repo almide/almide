@@ -21,7 +21,7 @@ fn byte_words_preserve_endianness_bits_and_reject_invalid_ranges() {
     );
     let mut tys = BTreeMap::from([(base, NTy::Rec(0)), (index, NTy::I64), (value, NTy::I64)]);
     let dir = std::env::temp_dir().join(format!("almide-native-byte-words-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir_all(&dir).expect("create the temp dir");
     let mut source = format!(
         "{}\nfn main() {{ let {}: i64 = std::env::args().nth(1).unwrap().parse().unwrap();\n",
         crate::render_native::OOB_SHIM,
@@ -69,20 +69,20 @@ fn byte_words_preserve_endianness_bits_and_reject_invalid_ranges() {
     source.push_str("}\n");
     let rs = dir.join("words.rs");
     let bin = dir.join("words");
-    std::fs::write(&rs, source).unwrap();
+    std::fs::write(&rs, source).expect("write the probe source");
     let compiled = Command::new("rustc")
         .arg(&rs)
         .arg("-o")
         .arg(&bin)
         .output()
-        .unwrap();
+        .expect("run rustc");
     assert!(
         compiled.status.success(),
         "{}",
         String::from_utf8_lossy(&compiled.stderr)
     );
     for index in [0i64, 2, -1, 3, 10, i64::MAX, i64::MIN] {
-        let output = Command::new(&bin).arg(index.to_string()).output().unwrap();
+        let output = Command::new(&bin).arg(index.to_string()).output().expect("run the probe binary");
         assert_eq!(
             output.status.code(),
             Some(if matches!(index, 0 | 2) { 0 } else { 1 }),
@@ -126,5 +126,5 @@ fn byte_words_preserve_endianness_bits_and_reject_invalid_ranges() {
     )
     .unwrap()
     .is_err());
-    std::fs::remove_dir_all(dir).unwrap();
+    std::fs::remove_dir_all(dir).expect("remove the temp dir");
 }

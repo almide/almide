@@ -222,47 +222,61 @@ pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
             tags.retain(|_, base| *base != root);
             for (base, _) in &mut arms { if *base == Some(root) { *base = None; } }
         }
-        match op {
-            Op::ConstInt { dst, value } => {
-                consts.insert(*dst, *value);
-            }
-            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
-                at.insert(*d, (args[0], 0));
-            }
-            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
-                if let (Some(&(r, o)), Some(c)) = (at.get(a), consts.get(b)) {
-                    at.insert(*dst, (r, o + c));
-                }
-            }
-            Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(d), args } if args.len() == 1 => {
-                // The tag word of either Result layout (an Option's length
-                // word lands here too; only a Result's payload read asks).
-                if let Some(&(r, o)) = at.get(&args[0]) {
-                    if o == RESULT_TAG_OFFSET || o == i64::from(BLOCK_LEN_OFFSET) {
-                        tags.insert(*d, r);
-                    }
-                }
-            }
-            Op::Prim { kind: PrimKind::LoadHandle | PrimKind::Load { width: 8 }, dst: Some(d), args } if args.len() == 1 => {
-                if let Some(&(r, o)) = at.get(&args[0]) {
-                    if o == i64::from(BLOCK_HEADER) {
-                        reads.insert(*d, r);
-                    }
-                }
-            }
-            Op::IfThen { cond, .. } => arms.push((tags.get(cond).copied(), true)),
-            Op::Else { .. } => {
-                if let Some(a) = arms.last_mut() {
-                    a.1 = false;
-                }
-            }
-            Op::EndIf { .. } => {
-                arms.pop();
-            }
-            _ => {}
-        }
+        note_hoist_facts(op, &mut consts, &mut at, &mut tags, &mut reads, &mut arms);
     }
     sides.into_iter().filter_map(|(v, s)| s.map(|s| (v, s))).collect()
+}
+
+/// [`hoisted_sides`]' facts from one op: the constants, the addresses off a
+/// block's handle, the tag words and payload reads loaded through them, and
+/// the open tag tests.
+fn note_hoist_facts(
+    op: &Op,
+    consts: &mut BTreeMap<ValueId, i64>,
+    at: &mut BTreeMap<ValueId, (ValueId, i64)>,
+    tags: &mut BTreeMap<ValueId, ValueId>,
+    reads: &mut BTreeMap<ValueId, ValueId>,
+    arms: &mut Vec<(Option<ValueId>, bool)>,
+) {
+    match op {
+        Op::ConstInt { dst, value } => {
+            consts.insert(*dst, *value);
+        }
+        Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
+            at.insert(*d, (args[0], 0));
+        }
+        Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
+            if let (Some(&(r, o)), Some(c)) = (at.get(a), consts.get(b)) {
+                at.insert(*dst, (r, o + c));
+            }
+        }
+        Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(d), args } if args.len() == 1 => {
+            // The tag word of either Result layout (an Option's length
+            // word lands here too; only a Result's payload read asks).
+            if let Some(&(r, o)) = at.get(&args[0]) {
+                if o == RESULT_TAG_OFFSET || o == i64::from(BLOCK_LEN_OFFSET) {
+                    tags.insert(*d, r);
+                }
+            }
+        }
+        Op::Prim { kind: PrimKind::LoadHandle | PrimKind::Load { width: 8 }, dst: Some(d), args } if args.len() == 1 => {
+            if let Some(&(r, o)) = at.get(&args[0]) {
+                if o == i64::from(BLOCK_HEADER) {
+                    reads.insert(*d, r);
+                }
+            }
+        }
+        Op::IfThen { cond, .. } => arms.push((tags.get(cond).copied(), true)),
+        Op::Else { .. } => {
+            if let Some(a) = arms.last_mut() {
+                a.1 = false;
+            }
+        }
+        Op::EndIf { .. } => {
+            arms.pop();
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -518,7 +532,7 @@ impl CarrierCx<'_> {
         // A borrow-only read inside its tag test (render_native_borrow_read):
         // a reference into the carrier, no copy of the payload.
         if let Some(then) = arm {
-            if self.borrowed_result_read(d, ad.base, b, then, (o, e), ok_v) {
+            if self.borrowed_result_read((d, ad.base), b, then, (o, e), ok_v) {
                 return Some(Err(Ok(true)));
             }
         }
@@ -574,7 +588,7 @@ impl CarrierCx<'_> {
 
     /// The borrow-only read inside the `then` (Err) or else (Ok) arm of its
     /// tag test, rendered when the payload kind has a reference form.
-    fn borrowed_result_read(&mut self, d: ValueId, base: ValueId, b: &str, then: bool, (o, e): (NTy, NTy), ok_v: &str) -> bool {
+    fn borrowed_result_read(&mut self, (d, base): (ValueId, ValueId), b: &str, then: bool, (o, e): (NTy, NTy), ok_v: &str) -> bool {
         let (k, side, other) = if then { (e, "Err", "Ok") } else { (o, "Ok", "Err") };
         let by_ref = match k {
             NTy::Rec(j) => Some((NTy::RecRef(j), format!("&{}", struct_name(j)), if then { "v" } else { ok_v })),

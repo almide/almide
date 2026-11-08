@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 777  implementations = 1739
+# holes = 790  implementations = 1759
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -158,6 +158,13 @@ native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
+[[hole]]
+module   = "bytes"
+name     = "__eq"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "bytes"
 name     = "__concat"
@@ -1049,6 +1056,13 @@ selfhost = 2
 total    = 3
 [[hole]]
 module   = "float"
+name     = "__to_string_compound"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "float"
 name     = "__to_int"
 native   = 1
 emitter  = 0
@@ -1194,6 +1208,13 @@ native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
+[[hole]]
+module   = "float32"
+name     = "__to_string_compound"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
 [[hole]]
 module   = "fs"
 name     = "read_text"
@@ -2436,6 +2457,48 @@ total    = 2
 [[hole]]
 module   = "list"
 name     = "__eq_str"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__eq_list_int"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__eq_list_float"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__eq_list_str"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__eq_opt_int"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__eq_opt_str"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "__eq_res_int"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -4996,6 +5059,13 @@ emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
+module   = "string"
+name     = "__quote"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
 module   = "testing"
 name     = "__abort_site_run"
 native   = 1
@@ -5291,6 +5361,13 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "value"
+name     = "__eq"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "value"
 name     = "merge"
 native   = 1
 emitter  = 1
@@ -5352,6 +5429,20 @@ native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
+[[hole]]
+module   = "value"
+name     = "__err_at"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "value"
+name     = "__err_at_index"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
 [[hole]]
 module   = "value"
 name     = "as_object"

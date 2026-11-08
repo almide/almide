@@ -28,7 +28,7 @@ fn nested_carriers_keep_their_declared_payload_types() {
         let index = decls
             .iter()
             .position(|d| d.name == tuple_key(&outer))
-            .unwrap() as u16;
+            .expect("the outer tuple is declared") as u16;
         assert_eq!(get(&list).list_of, Some(NTy::Rec(index)));
     }
 }
