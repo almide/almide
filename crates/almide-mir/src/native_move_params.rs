@@ -193,7 +193,16 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Mo
         // convention does; one whose release follows the call hands it over.
         let exits_before = |end: usize| func.ops[..end].iter().any(|op| matches!(op, Op::Return { .. }));
         if at_top && plain && func.ret != Some(p.value) {
-            if let Some(end) = field_given(func, p.value, owned).filter(|&end| depth[end] == 0 && !exits_before(end)) {
+            // A field given inside a top-level branch (`match r { ok(xs) =>
+            // some(xs), err(_) => none }`): nothing reads the record after
+            // it, so the release follows the branch's close.
+            let close = |end: usize| {
+                if depth[end] == 0 {
+                    return Some(end);
+                }
+                (end + 1..func.ops.len()).find(|&j| depth[j] == 0 && !matches!(func.ops[j], Op::Else { .. })).filter(|&j| matches!(func.ops[j], Op::EndIf { .. }))
+            };
+            if let Some(end) = field_given(func, p.value, owned).and_then(close).filter(|&end| !exits_before(end)) {
                 out.push((k, end));
             }
         }
