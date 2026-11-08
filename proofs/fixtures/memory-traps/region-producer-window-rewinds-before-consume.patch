@@ -12,3 +12,50 @@ index 8d11023bd..0b775fb87 100644
      }
      a
  }
+diff --git a/crates/almide-codegen/src/pass_region_window_native.rs b/crates/almide-codegen/src/pass_region_window_native.rs
+index 64606a3ae..c4caef7d6 100644
+--- a/crates/almide-codegen/src/pass_region_window_native.rs
++++ b/crates/almide-codegen/src/pass_region_window_native.rs
+@@ -123,12 +123,37 @@ impl WindowRewriter<'_> {
+             }
+             let fa: Vec<IrExpr> = fargs.iter().map(|x| param(x, self.vt)).collect();
+             let twin_ty = Ty::Named(twin_name(enum_name(&a.ty)?), Default::default());
++            let mut pparams: Vec<IrParam> = Vec::new();
++            let pargs: Vec<IrExpr> = fa
++                .iter()
++                .map(|x| {
++                    let n = sym(&format!("__rgn_p{}", pparams.len()));
++                    let v = self.vt.alloc(n, x.ty.clone(), Mutability::Let, x.span);
++                    pparams.push(IrParam { var: v, ty: x.ty.clone(), name: n, borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: Vec::new() });
++                    IrExpr { kind: IrExprKind::Var { id: v }, ty: x.ty.clone(), span: x.span, def_id: None }
++                })
++                .collect();
++            let pname = sym(&format!("__rgn_window_{}", self.windows.len()));
++            self.windows.push(IrFunction {
++                name: pname,
++                params: pparams,
++                ret_ty: twin_ty.clone(),
++                body: IrExpr { kind: IrExprKind::Call { target: CallTarget::Named { name: twin_name(*produce) }, args: pargs, type_args: ftargs.clone() }, ty: twin_ty.clone(), span: a.span, def_id: None },
++                is_effect: false,
++                is_test: false,
++                generics: None,
++                extern_attrs: vec![],
++                export_attrs: vec![],
++                attrs: vec![IrFunction::scoped_marker(REGION_WINDOW_ATTR)],
++                visibility: IrVisibility::Public,
++                doc: None,
++                blank_lines_before: 1,
++                def_id: None,
++                mutated_params: Vec::new(),
++                module_origin: None,
++            });
+             inner.push(IrExpr {
+-                kind: IrExprKind::Call {
+-                    target: CallTarget::Named { name: twin_name(*produce) },
+-                    args: fa,
+-                    type_args: ftargs.clone(),
+-                },
++                kind: IrExprKind::Call { target: CallTarget::Named { name: pname }, args: fa, type_args: Vec::new() },
+                 ty: twin_ty,
+                 span: a.span,
+                 def_id: None,
