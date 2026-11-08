@@ -89,6 +89,11 @@ pub(crate) struct Hof {
     /// The twin's name.
     pub twin: String,
     bounds: Vec<(String, almide_lang::capability_bounds::Cap)>,
+    /// The `@reuse` declaration's route (#3707): the param its owned twin
+    /// takes by value and that twin's static-dispatch name. A call that is
+    /// the last reader of that argument hands it over instead of the
+    /// borrowing body copying it into its result.
+    owned: Option<(usize, String)>,
 }
 
 fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
@@ -244,10 +249,43 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
     // A combinator takes its closure statically (`static_twin`); a call with
     // no function-typed param calls the runtime body as it is.
     if !params.iter().any(|(d, _)| matches!(d, DTy::Fn(..))) {
-        return Ok(Hof { twin: symbol.clone(), symbol, params, mutable, ret: dret, items, bounds });
+        return Ok(Hof { twin: symbol.clone(), symbol, params, mutable, ret: dret, items, bounds, owned: None });
     }
-    let (twin, items) = static_runtime_closure(&symbol, items).ok_or("the runtime body has no static callback route")?;
-    Ok(Hof { symbol, params, mutable, ret: dret, items, twin, bounds })
+    let (twin, mut items) = static_runtime_closure(&symbol, items).ok_or("the runtime body has no static callback route")?;
+    let owned = reuse_route(&symbol, &params, &dret, &mut items);
+    Ok(Hof { symbol, params, mutable, ret: dret, items, twin, bounds, owned })
+}
+
+/// The static route of `symbol`'s `@reuse` owned twin: the reused param and
+/// the twin's static name, adding the twin's items when the borrowing body
+/// does not already forward to it. Only an update that returns the same
+/// container it borrows qualifies, as on the declared floor
+/// (`native_floor::takes_by_value`).
+fn reuse_route(symbol: &str, params: &[(DTy, bool)], ret: &DTy, items: &mut Vec<&'static str>) -> Option<(usize, String)> {
+    let r = almide_lang::reuse::of_intrinsic(symbol)?;
+    let t = r.owned_twin?;
+    let (d, by_ref) = params.get(r.param)?;
+    if !*by_ref || d != ret || !matches!(d, DTy::List(_) | DTy::Set(_) | DTy::Map(..) | DTy::Bytes) {
+        return None;
+    }
+    let (tparams, _, titems) = crate::native_floor::runtime_body(t)?;
+    if tparams.len() != params.len() || tparams.get(r.param)?.trim_start().starts_with('&') {
+        return None;
+    }
+    let name = format!("{t}_static");
+    let carried = |items: &[&str]| items.iter().any(|i| crate::native_floor::runtime_fn_name(i).as_deref() == Some(name.as_str()));
+    if !carried(items.as_slice()) {
+        let (tw, more) = static_runtime_closure(t, titems)?;
+        if tw != name {
+            return None;
+        }
+        for i in more {
+            if !items.contains(&i) {
+                items.push(i);
+            }
+        }
+    }
+    carried(items.as_slice()).then_some((r.param, name))
 }
 
 include!("native_hof_static.rs");
@@ -579,9 +617,15 @@ fn plan(
     }
     let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
+    let mut twin = hof.twin.as_str();
     for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {
         if hof.mutable[k] {
             rendered.push(mutable_place_arg(a, code, *t, tys)?);
+            continue;
+        }
+        if let Some(owned) = handed_over(hof, k, a, *t) {
+            twin = owned;
+            rendered.push(runtime_arg(code, *t, false, true));
             continue;
         }
         rendered.push(match d {
@@ -609,9 +653,19 @@ fn plan(
         bind_param(&mut env, &hof.ret, clo::owned_nty(ret))?;
     }
     let ret = kind_of(&env, &hof.ret)?;
-    let expr = format!("{}({})", hof.twin, rendered.join(", "));
+    let expr = format!("{}({})", twin, rendered.join(", "));
     let expr = runtime_result(&env, &hof.ret, &expr)?;
     Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims, side.reads)))
+}
+
+/// The owned twin's name when argument `k` (`a`, of kind `t`) is the
+/// `@reuse` param, the call is its last reader, and the render holds it
+/// owned: the twin takes it over instead of the borrowing body copying it.
+fn handed_over<'h>(hof: &'h Hof, k: usize, a: &CallArg, t: NTy) -> Option<&'h str> {
+    let (param, name) = hof.owned.as_ref().filter(|(p, _)| *p == k)?;
+    let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
+    let owned = matches!(t, NTy::Vec | NTy::VecStr | NTy::Rec(_)) && crate::render_native::owned_nty(t) == t;
+    (dying && owned && !hof.mutable.iter().any(|m| *m) && hof.params[*param].1).then_some(name.as_str())
 }
 
 /// [`plan`]'s rendering of the plain value argument `k` of the call at op
