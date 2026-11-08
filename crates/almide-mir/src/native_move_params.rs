@@ -377,21 +377,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
         .iter()
         .map(|f| {
             let takes = |k: usize| !not_handle.contains(&(f.name.clone(), k));
-            if eligible(f) {
-                let r = own_params(f, &takes);
-                if std::env::var("C1_DBG").is_ok() {
-                    eprintln!("MOVEDBG fn {} movable={:?} consumed={:?} accepted={}", f.name, movable_params(f, &takes), consumed_params(f, &takes), r.is_some());
-                    if r.is_none() && !movable_params(f, &takes).is_empty() {
-                        let mut g = f.clone();
-                        for (k, at) in movable_params(f, &takes) { if let Op::Dup { dst, .. } = g.ops[at] { g.params[k].value = dst; g.owned_params.insert(dst); } }
-                        eprintln!("MOVEDBG   verify err: {:?}", crate::verify_ownership(&g).err());
-                    }
-                    if movable_params(f, &takes).is_empty() {
-                        for p in &f.params { if p.repr.is_heap() { let named: Vec<String> = f.ops.iter().filter(|op| values(op).contains(&p.value)).map(|op| format!("{op:?}")).collect(); eprintln!("MOVEDBG   param {:?} named by {:?}", p.value, named); } }
-                    }
-                }
-                r.unwrap_or_else(|| f.clone())
-            } else { f.clone() }
+            if eligible(f) { own_params(f, &takes).unwrap_or_else(|| f.clone()) } else { f.clone() }
         })
         .collect();
     let owned: BTreeMap<String, Vec<bool>> = next
@@ -408,7 +394,6 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
         let sunk = move_at_sites(&sink_join_releases(f, &owned), &owned);
         let moved = if crate::verify_ownership(&sunk).is_ok() { sunk } else { move_at_sites(f, &owned) };
         if crate::verify_ownership(&moved).is_err() {
-            if std::env::var("C1_DBG").is_ok() { eprintln!("MOVEDBG BAIL at {}: {:?}", f.name, crate::verify_ownership(&moved).err()); }
             return;
         }
         *f = moved;
