@@ -36,7 +36,18 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         // the floor serves it as that fn.
         return match specialized_target(call) {
             Some(target) if target != call => {
-                let str_elems = specialized_list_elem(call).as_deref() == Some("String");
+                let elem = specialized_list_elem(call);
+                // A Float list's cells are its bits on the native render: a
+                // generic that needs equality or ordering would compare the
+                // bits (`-0.0` against `0.0`, NaN against itself), never the
+                // floats the specialization exists to compare.
+                let bounded = target
+                    .split_once('.')
+                    .is_some_and(|(m, f)| almide_lang::capability_bounds::of(m, f).next().is_some());
+                if elem.as_deref() == Some("Float") && bounded {
+                    return Err(format!("specializes `{target}` over Float bits, whose generic needs equality or ordering"));
+                }
+                let str_elems = elem.as_deref() == Some("String");
                 derive_for(&target, str_elems).map_err(|e| format!("specializes `{target}`: {e}"))
             }
             _ => Err("no declaration".into()),

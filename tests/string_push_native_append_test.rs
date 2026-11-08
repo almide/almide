@@ -67,8 +67,10 @@ fn pushing_a_string_onto_itself_keeps_the_concat() {
 ",
     );
     // The hazard is an in-place push of a string onto itself, which rustc
-    // rejects: the doubling must be a concat, or (once the result only feeds a
-    // fused println) the two reads formatted in place.
+    // rejects: the doubling must be a concat (the shim, or `AlmideStr::concat`
+    // onto the dying left side, which copies a shared buffer before it edits),
+    // or (once the result only feeds a fused println) the two reads formatted
+    // in place.
     let self_push = main_body(&rust).lines().any(|l| {
         let Some((recv, arg)) = l.trim().split_once(".push_str(&") else { return false };
         let recv = recv.rsplit(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap_or(recv);
@@ -77,7 +79,7 @@ fn pushing_a_string_onto_itself_keeps_the_concat() {
     assert!(!self_push, "`s.push_str(&s)` cannot borrow `s` twice:\n{rust}");
     let body = main_body(&rust);
     assert!(
-        body.contains("rt_str_concat(") || body.contains("format_args!(\"{}{}\", &v"),
+        body.contains("rt_str_concat(") || body.contains(".concat(&v") || body.contains("format_args!(\"{}{}\", &v"),
         "the self-append is neither a concat nor two in-place reads:\n{rust}"
     );
 }

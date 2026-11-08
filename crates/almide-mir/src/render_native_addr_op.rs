@@ -417,6 +417,7 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
         );
         return Ok(true);
     }
+    crate::render_native_addr::note_field_copy(*d);
     line!(
         "let mut {}: {} = {}.f{k}.clone();",
         var(*d),
