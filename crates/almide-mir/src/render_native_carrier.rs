@@ -585,6 +585,13 @@ impl CarrierCx<'_> {
             _ => None,
         };
         let (true, Some((t, ty, val))) = (self.st.borrow_reads.contains(&d), by_ref) else { return false };
+        // An Ok list of an owned carrier that dies at the read: the list
+        // itself, the carrier's release skipped (render_native_keyed).
+        if t == NTy::VecRef && !then && matches!(self.tys.get(&base), Some(NTy::Rec(_))) && crate::render_native_keyed::payload_moves(d, base) {
+            self.tys.insert(d, NTy::Vec);
+            self.emit(&format!("let mut {}: Vec<i64> = match {b} {{ Ok(v) => v, Err(_) => unreachable!() }};", var(d)));
+            return true;
+        }
         self.tys.insert(d, t);
         self.emit(&format!("let mut {}: {ty} = match &{b} {{ {side}(v) => {val}, {other}(_) => unreachable!() }};", var(d)));
         // A borrowed Ok payload (`*v`) is not the carrier's to give away.

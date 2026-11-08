@@ -53,6 +53,8 @@ struct Current {
     /// (`native_cell_window`), and the takes whose cell a read emptied.
     func: Option<MirFunction>,
     emptied: BTreeSet<ValueId>,
+    /// Its borrow-join arms (`borrow_join`), for the liveness reads.
+    arms: BTreeSet<ValueId>,
 }
 
 thread_local! {
@@ -152,7 +154,7 @@ pub(crate) fn set_program(user_fns: &BTreeMap<&str, &MirFunction>, sigs: &crate:
 }
 
 /// Enter `func`'s render.
-pub(crate) fn begin_fn(func: &MirFunction) {
+pub(crate) fn begin_fn(func: &MirFunction, arms: &BTreeSet<ValueId>) {
     let params: BTreeMap<ValueId, usize> = PROGRAM.with(|p| {
         p.borrow().keyed.get(&func.name).map(|ks| ks.iter().enumerate().map(|(i, v)| (*v, i)).collect()).unwrap_or_default()
     });
@@ -161,7 +163,7 @@ pub(crate) fn begin_fn(func: &MirFunction) {
     } else {
         dispatch_reads(func).into_iter().filter_map(|(r, p)| params.get(&p).map(|k| (r, *k))).collect()
     };
-    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads, func: Some(func.clone()), emptied: BTreeSet::new() });
+    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads, func: Some(func.clone()), emptied: BTreeSet::new(), arms: arms.clone() });
 }
 
 /// The shared-cell read `d` of `cell` takes the payload out
@@ -175,6 +177,27 @@ pub(crate) fn cell_read_takes(d: ValueId, cell: ValueId, tys: &BTreeMap<ValueId,
         let at = func.ops.iter().position(|op| matches!(op, Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(x), .. } if *x == d));
         let end = at.and_then(|at| crate::native_cell_window::take_window(func, at, (d, cell), tys, &program_fn));
         end.is_some_and(|x| c.emptied.insert(x))
+    })
+}
+
+/// The payload read `d` of the owned carrier `base` may move the payload out:
+/// nothing reads the carrier, or an address into it, after the read, and
+/// its binding is its own (no param, never rebound) — Rust's drop flag then
+/// skips the carrier's release, where a view left it to drop whole.
+pub(crate) fn payload_moves(d: ValueId, base: ValueId) -> bool {
+    CURRENT.with(|c| {
+        let c = c.borrow();
+        let Some(func) = c.func.as_ref() else { return false };
+        let Some(at) = func.ops.iter().position(|op| matches!(op, Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(x), .. } if *x == d)) else { return false };
+        let root = crate::render_native_borrow_read::roots(func);
+        let own = !rebound(func).contains(&base) && !func.params.iter().any(|p| p.value == base);
+        let mut reads = Vec::new();
+        own && crate::render_native_move::dying_after(func, at, base, &c.arms)
+            && func.ops[at + 1..].iter().all(|op| {
+                reads.clear();
+                crate::mir_ops::op_reads(op, &mut reads);
+                crate::render_native_move::bookkeeping(op) || !reads.iter().any(|r| *r == base || root.get(r) == Some(&base))
+            })
     })
 }
 
