@@ -615,11 +615,21 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
                 _ => None,
             })
             .collect();
+        // Its elements are scalars (constants, arithmetic): a list of heap
+        // elements is a heap list whether lent or handed over.
+        let scalars: BTreeSet<ValueId> = f
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::ConstInt { dst, .. } | Op::IntBinOp { dst, .. } => Some(*dst),
+                _ => None,
+            })
+            .collect();
         let literals: BTreeSet<ValueId> = f
             .ops
             .iter()
             .filter_map(|op| match op {
-                Op::ListLit { dst, elems } if !elems.is_empty() && !rebound.contains(dst) => Some(*dst),
+                Op::ListLit { dst, elems } if !elems.is_empty() && !rebound.contains(dst) && elems.iter().all(|e| scalars.contains(e)) => Some(*dst),
                 _ => None,
             })
             .collect();
