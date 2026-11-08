@@ -1,0 +1,62 @@
+// @contract: C-226
+// A copy of a list the program reads again must stay a copy. Each shape below
+// copies a value, writes the copy through a `mut` parameter, and reads the
+// original afterwards on some path, so the original keeps its own contents:
+// read right after the copy, read by a later loop pass before it is rebound,
+// read on one branch only, read by a closure made before the copy, and passed
+// twice to one call.
+fn bump(mut xs: List[Int], v: Int) -> Unit = list.push(xs, v)
+
+fn both(a: List[Int], b: List[Int]) -> Int = list.len(a) * 10 + list.len(b)
+
+fn read_after_copy() -> String = {
+  var a: List[Int] = [1, 2]
+  var b = a
+  bump(b, 3)
+  "${list.len(a)} ${list.len(b)}"
+}
+
+fn read_in_later_pass() -> String = {
+  var acc: List[Int] = [0]
+  var seen = ""
+  var i = 0
+  while i < 4 {
+    var c = acc
+    bump(c, i)
+    seen = seen + "${list.len(acc)}"
+    if i == 2 then acc = c else ()
+    i = i + 1
+  }
+  seen
+}
+
+fn read_on_one_branch(flag: Bool) -> String = {
+  var s: List[Int] = [5]
+  var t = s
+  bump(t, 6)
+  if flag then "${list.len(s)}" else "${list.len(t)}"
+}
+
+fn read_by_closure() -> String = {
+  var s: List[Int] = [7, 8]
+  let count = () => list.len(s)
+  var t = s
+  bump(t, 9)
+  "${count()} ${list.len(t)}"
+}
+
+fn passed_twice() -> Int = {
+  var s: List[Int] = [1]
+  var t = s
+  bump(t, 2)
+  both(s, s) + both(t, s)
+}
+
+fn main() -> Unit = {
+  println(read_after_copy())
+  println(read_in_later_pass())
+  println(read_on_one_branch(true))
+  println(read_on_one_branch(false))
+  println(read_by_closure())
+  println(int.to_string(passed_twice()))
+}
