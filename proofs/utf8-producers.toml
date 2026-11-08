@@ -3584,13 +3584,6 @@ reached_by = ["${}"]
 evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
 
 [[mint]]
-id = "stdlib/option_to_string_s.almd"
-how = "construction"
-why = "the display of an option"
-reached_by = ["${}"]
-evidence = ["spec/stdlib/utf8_display_producers_test.almd::the display of every container shape stays valid"]
-
-[[mint]]
 id = "stdlib/regex_engine.almd"
 how = "construction"
 why = "cuts the subject at match boundaries"
