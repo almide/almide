@@ -2,6 +2,13 @@ name: Native v1 vs v0 perf (nightly)
 
 on:
   workflow_dispatch:
+    inputs:
+      head:
+        description: commit to verify
+        required: true
+      base:
+        description: commit to compare the rendered corpus against
+        required: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -11,21 +18,86 @@ permissions:
   contents: read
 
 jobs:
-  probe:
-    name: Probe shapes coverage by candidate
+  shapes:
+    name: shapes gate at head
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.head }}
       - uses: ./.github/actions/root-tmpdir
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: llvm-tools
-      - name: Probe
-        run: bash probe-shapes.sh
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
+      - name: shapes gate
+        run: bash scripts/check-native-v1-perf-shapes.sh
+
+  parity:
+    name: rendered corpus identical to base
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: probe
-          path: probe-out
+          path: tool
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.head }}
+          path: h
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.base }}
+          path: b
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: build and render both
+        run: |
+          set -u
+          (cd h && find spec examples research stdlib tests -name '*.almd' | sort) > list.txt
+          wc -l list.txt
+          for r in b h; do
+            cp tool/tools-shapes2/render_corpus.rs $r/crates/almide-mir/examples/render_corpus.rs
+            (cd $r && cargo build -q --release -p almide-mir --example render_corpus) || exit 2
+            (cd $r && ./target/release/examples/render_corpus < ../list.txt > ../$r.txt)
+          done
+          wc -l b.txt h.txt
+          echo "OK at base: $(grep -c $'\tOK\t' b.txt)  OK at head: $(grep -c $'\tOK\t' h.txt)"
+          python3 - <<'PY'
+          import sys
+          b = {l.split("\t")[0]: l.rstrip("\n").split("\t")[1:] for l in open("b.txt")}
+          h = {l.split("\t")[0]: l.rstrip("\n").split("\t")[1:] for l in open("h.txt")}
+          bad = 0; moved = 0
+          for p in sorted(set(b) | set(h)):
+              x, y = b.get(p), h.get(p)
+              if x == y: continue
+              if x and y and x[0] == "WALL" and y[0] == "WALL":
+                  moved += 1; print("WALL-REASON", p, "|", x[1][:150], "=>", y[1][:150]); continue
+              bad += 1; print("DIFF", p, x, y)
+          print(f"parity: {bad} programs differ, {moved} walls changed reason")
+          sys.exit(1 if bad else 0)
+          PY
+
+  tests:
+    name: almide-mir tests and warning ratchets at head
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.head }}
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - name: almide-mir tests
+        run: cargo test -q --release -p almide-mir
+      - name: rustc warning ratchet
+        if: always()
+        run: bash scripts/check-rustc-warnings.sh
+      - name: clippy warning ratchet
+        if: always()
+        run: bash scripts/check-clippy-warnings.sh
