@@ -50,7 +50,8 @@ fn program_profile_args(rs_code: &str, release: bool) -> Vec<String> {
     } else {
         // rustc turns debug assertions off above opt-level 0; cargo's dev
         // profile keeps them on for the program's own code.
-        args.extend(["-C".into(), "opt-level=1".into(), "-C".into(), "debug-assertions=on".into()]);
+        let da = if std::env::var("ALMIDE_PROBE_DA_OFF").is_ok() { "debug-assertions=off" } else { "debug-assertions=on" };
+        args.extend(["-C".into(), "opt-level=1".into(), "-C".into(), da.into()]);
     }
     args
 }
