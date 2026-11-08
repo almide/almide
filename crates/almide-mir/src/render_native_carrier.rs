@@ -526,7 +526,9 @@ impl CarrierCx<'_> {
         // it: a reference into the carrier, the other side's (never
         // used) a reference to a Default the render keeps beside it.
         if let (None, Some(err_side), true) = (arm, self.st.hoisted.get(&d).copied(), self.st.borrow_reads.contains(&d)) {
-            let (k, side, other) = if err_side { (e, "Err", "Ok") } else { (o, "Ok", "Err") };
+            // `val`: the read side's payload reference (`*v` for an Ok side
+            // held through the borrowing twin).
+            let (k, side, other, val) = if err_side { (e, "Err", "Ok", "v") } else { (o, "Ok", "Err", ok_v) };
             let dv = var(d);
             match k {
                 NTy::Str => {
@@ -538,7 +540,6 @@ impl CarrierCx<'_> {
                     self.tys.insert(d, NTy::RecRef(j));
                     let t = struct_name(j);
                     self.emit(&format!("let {dv}_absent: {t} = Default::default();"));
-                    let val = if err_side { "v" } else { ok_v };
                     self.emit(&format!("let mut {dv}: &{t} = match &{b} {{ {side}(v) => {val}, {other}(_) => &{dv}_absent }};"));
                     // A borrowed Ok payload (`*v`) is not the carrier's to give away.
                     if val == "v" {
