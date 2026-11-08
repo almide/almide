@@ -60,6 +60,11 @@ jobs:
           grep -n 'i32_lt_u().br_if(0)' /tmp/nc2/crates/almide-wasm/src/value_helpers.rs
           (cd /tmp/nc2 && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
           cp "$GITHUB_WORKSPACE/target/release/almide" /tmp/bins/almide-nc2
+          # Experiment (not committed): word-wise small copies in $copy.
+          git worktree add /tmp/wc HEAD
+          (cd /tmp/wc && git apply .github/wasm-perf-4612-wcopy.patch && git diff --stat)
+          (cd /tmp/wc && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
+          cp "$GITHUB_WORKSPACE/target/release/almide" /tmp/bins/almide-wcopy
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bins
@@ -139,7 +144,14 @@ jobs:
           }
           EOF
           sed -i 's/^          //' strchurn.almd
-          for v in base new; do
+          printf 'fn main() -> Unit = {\n  println("hello")\n}\n' > hello.almd
+          printf 'fn main() -> Unit = {\n  println(string.split("a,b", ",") |> list.join("|"))\n}\n' > splitone.almd
+          for v in base new wcopy; do
+            for prog in hello splitone; do
+              /tmp/bins/almide-$v build $prog.almd --target wasm -o $prog-$v.wasm && echo "size $prog $v $(stat -c %s $prog-$v.wasm)"
+            done
+          done
+          for v in base new wcopy; do
             /tmp/bins/almide-$v build strchurn.almd --target wasm -o strchurn-$v.wasm
             ls -l strchurn-$v.wasm
             wasmtime compile strchurn-$v.wasm -o strchurn-$v.cwasm
@@ -149,9 +161,9 @@ jobs:
           python3 - <<'EOF'
           import subprocess, time, statistics
           outs = {}
-          times = {"base": [], "new": []}
-          for r in range(12):
-              order = ["base", "new"] if r % 2 == 0 else ["new", "base"]
+          times = {"base": [], "new": [], "wcopy": []}
+          for r in range(13):
+              order = [["base", "new", "wcopy"], ["new", "wcopy", "base"], ["wcopy", "base", "new"]][r % 3]
               for v in order:
                   t0 = time.perf_counter()
                   p = subprocess.run(["wasmtime", "run", "--allow-precompiled", f"strchurn-{v}.cwasm"], capture_output=True)
@@ -161,10 +173,11 @@ jobs:
                   assert outs[v] == p.stdout
                   if r >= 2:
                       times[v].append(dt)
-          print("outputs equal:", outs["base"] == outs["new"], outs["new"])
+          print("outputs equal:", outs["base"] == outs["new"] == outs["wcopy"], outs["new"])
           for v in times:
               print(v, "median %.2f ms" % statistics.median(times[v]), ["%.1f" % t for t in times[v]])
           print("ratio new/base = %.4f" % (statistics.median(times["new"]) / statistics.median(times["base"])))
+          print("ratio wcopy/new = %.4f" % (statistics.median(times["wcopy"]) / statistics.median(times["new"])))
           EOF
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
