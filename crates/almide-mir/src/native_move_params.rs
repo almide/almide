@@ -41,6 +41,16 @@ fn by_value(name: &str, k: usize) -> bool {
     crate::native_floor::takes_by_value(name, k) || crate::native_hof::takes_by_value(name, k)
 }
 
+thread_local! {
+    /// The (function, param index) pairs whose native signature is a
+    /// generated `Option` carrier of a heap payload ([`rewrite`] sets them).
+    static CARRIERS: std::cell::RefCell<BTreeSet<(String, usize)>> = const { std::cell::RefCell::new(BTreeSet::new()) };
+}
+
+fn carrier(name: &str, k: usize) -> bool {
+    CARRIERS.with(|c| c.borrow().contains(&(name.to_string(), k)))
+}
+
 fn values(op: &Op) -> Vec<ValueId> {
     let mut out = Vec::new();
     crate::mir_ops::op_values(op, &mut out);
@@ -202,7 +212,7 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Mo
                 }
                 (end + 1..func.ops.len()).find(|&j| depth[j] == 0 && !matches!(func.ops[j], Op::Else { .. })).filter(|&j| matches!(func.ops[j], Op::EndIf { .. }))
             };
-            if let Some(end) = field_given(func, p.value, owned).and_then(close).filter(|&end| !exits_before(end)) {
+            if let Some(end) = field_given(func, p.value, owned, carrier(&func.name, k)).and_then(close).filter(|&end| !exits_before(end)) {
                 out.push((k, end));
             }
         }
@@ -213,7 +223,11 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Mo
 /// The last op that reads `p` or anything loaded from it, when `p` is only
 /// read (its fields, its scalar slots) and a field loaded from it is handed
 /// to a by-value position at that field's last use.
-fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>) -> Option<usize> {
+/// An `Option` carrier param (`carrier`) needs no give: the render copies its
+/// payload out of a borrowed carrier whole at the payload read, and moves it
+/// out of one the body owns, so taking it over trades that copy for the
+/// caller's (made only when the caller reads its argument again).
+fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>, carrier: bool) -> Option<usize> {
     let mut derived: BTreeSet<ValueId> = [p].into_iter().collect();
     let mut children: BTreeSet<ValueId> = BTreeSet::new();
     let mut end = None;
@@ -258,7 +272,7 @@ fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>) -> Option<usiz
             _ => return None,
         }
     }
-    given.then_some(end).flatten()
+    (given || (carrier && !children.is_empty())).then_some(end).flatten()
 }
 
 /// Make the movable parameters of `func` move parameters, if the ownership
@@ -548,10 +562,27 @@ impl Modes<'_> {
 /// other function's; its env (param 0) is always lent. A lambda that a
 /// closure call of several possible callees may reach keeps borrowing, and
 /// the modes are solved again.
-pub(crate) fn rewrite(functions: &mut [MirFunction]) {
+pub(crate) fn rewrite(functions: &mut [MirFunction], sigs: &crate::render_native::NativeSigs) {
     if crate::render_native_move::drill_no_moves() {
         return;
     }
+    let carriers: BTreeSet<(String, usize)> = sigs
+        .iter()
+        .flat_map(|(name, (params, _))| {
+            params.iter().enumerate().filter_map(move |(k, p)| match p {
+                crate::render_native::NativeSigKind::Rec(i)
+                    if crate::render_native_rec::option_payload(*i).is_some_and(|t| {
+                        use crate::render_native::NTy;
+                        matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) | NTy::Res | NTy::ResStr)
+                    }) =>
+                {
+                    Some((name.clone(), k))
+                }
+                _ => None,
+            })
+        })
+        .collect();
+    CARRIERS.with(|c| *c.borrow_mut() = carriers);
     let taken: BTreeSet<String> = functions
         .iter()
         .flat_map(|f| f.ops.iter())
