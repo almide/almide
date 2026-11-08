@@ -153,19 +153,6 @@ fn indirect_args(rest: &[CallArg], handed: &[ValueId], tys: &BTreeMap<ValueId, N
     let mut moved = Vec::new();
     let mut codes = Vec::new();
     for a in rest {
-        if let CallArg::Handle(v) = a {
-            if handed.contains(v) {
-                let t = *tys.get(v).ok_or_else(|| wall("native: CallIndirect arg untyped"))?;
-                if !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) | NTy::Res | NTy::ResStr | NTy::Opt) {
-                    return Err(wall("native: a borrowed or scalar arg handed to a closure's move param"));
-                }
-                kinds.push(arg_kind(t));
-                moved.push(true);
-                codes.push(var(*v));
-                continue;
-            }
-        }
-        moved.push(false);
         let (code, t) = match a {
             CallArg::Handle(v) | CallArg::Scalar(v) => {
                 (var(*v), *tys.get(v).ok_or_else(|| wall("native: CallIndirect arg untyped"))?)
@@ -173,8 +160,13 @@ fn indirect_args(rest: &[CallArg], handed: &[ValueId], tys: &BTreeMap<ValueId, N
             CallArg::Imm(n) => (format!("{n}i64"), NTy::I64),
             other => return Err(wall(format!("native: CallIndirect arg {other:?}"))),
         };
+        // The call-site move hands over an owned value (the caller's own, or
+        // the copy it made for the call); rustc refuses anything else.
+        let handed_here = matches!(a, CallArg::Handle(v) if handed.contains(v));
         kinds.push(arg_kind(t));
+        moved.push(handed_here);
         codes.push(match t {
+            _ if handed_here => code,
             NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) => format!("&{code}"),
             NTy::Res | NTy::ResStr => format!("{code}.clone()"),
             _ => code,
@@ -255,11 +247,10 @@ pub(crate) fn render_typed_call_indirect(
 /// The values the call-site moves right after op `i` of `func` hand over
 /// (`MirFunction::call_moves`).
 pub(crate) fn handed_after(func: &MirFunction, i: usize) -> Vec<ValueId> {
-    (i + 1..func.ops.len())
-        .take_while(|j| func.call_moves.contains(j))
-        .filter_map(|j| match func.ops[j] {
-            Op::Consume { v } => Some(v),
-            _ => None,
-        })
-        .collect()
+    // Each call-site move is a `Consume` of the one value it hands over.
+    let mut out = Vec::new();
+    for j in (i + 1..func.ops.len()).take_while(|j| func.call_moves.contains(j)) {
+        crate::mir_ops::op_values(&func.ops[j], &mut out);
+    }
+    out
 }
