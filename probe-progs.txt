@@ -1,0 +1,3 @@
+research/benchmark/perf/v1-shapes/result_param_tag_then_relay.almd
+research/benchmark/perf/v1-shapes/result_param_relay.almd
+research/benchmark/perf/v1-shapes/loop_slot_read_then_if.almd
