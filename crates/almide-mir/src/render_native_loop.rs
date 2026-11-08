@@ -531,6 +531,19 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             st.tys.insert(*dst, t);
             line!("let mut {} = {};", var(*dst), crate::render_native_move::take_expr(&var(*src)));
         }
+        // A String-Ok carrier over an owned string nothing reads again takes it.
+        Op::Prim { kind: crate::PrimKind::ResStrMake, dst: Some(d), args }
+            if args.len() == 1
+                && st.tys.get(&args[0]) == Some(&NTy::Str)
+                && crate::render_native_move::last_use(func, i, args[0], NTy::Str, &st.borrows.arms) =>
+        {
+            st.tys.insert(*d, NTy::ResStr);
+            line!(
+                "let mut {}: Result<AlmideString, AlmideString> = Ok({});",
+                var(*d),
+                crate::render_native_move::take_expr(&var(args[0]))
+            );
+        }
         // An error carrier over an owned string nothing reads again takes it.
         Op::Prim { kind: crate::PrimKind::ResMakeErrStr, dst: Some(d), args }
             if args.len() == 1
