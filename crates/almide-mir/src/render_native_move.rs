@@ -383,7 +383,26 @@ pub(crate) fn set_stack_lits(func: &MirFunction, user_fns: &std::collections::BT
             }
         }
     }
+    let single = func
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::ListLit { dst, elems } if elems.len() == 1 && lits.contains(dst) => Some(*dst),
+            _ => None,
+        })
+        .collect();
+    STACK_SINGLES.with(|m| *m.borrow_mut() = single);
     STACK_LITS.with(|m| *m.borrow_mut() = lits);
+}
+
+thread_local! {
+    static STACK_SINGLES: std::cell::RefCell<std::collections::BTreeSet<ValueId>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// A stack literal of one element (`[x]`): a list `+` appends it as a push.
+pub(crate) fn is_stack_single(v: ValueId) -> bool {
+    STACK_SINGLES.with(|m| m.borrow().contains(&v))
 }
 
 pub(crate) fn is_stack_lit(v: ValueId) -> bool {
