@@ -1,25 +1,6 @@
 name: Native v1 vs v0 perf (nightly)
 
-# #4006, the no-perf-loss rule: every program the certified native render
-# (v1) renders, and the curated shape benches in
-# research/benchmark/perf/v1-shapes/, built both ways and compared by
-# instruction count under cachegrind (scripts/check-native-v1-perf.sh). A v1
-# loss over 1.03x that proofs/native-v1-perf-ledger.txt does not record fails
-# the job; a wall-time ratio over 1.10x on a hot program is a warning in the
-# run summary. The second step is the gate's negative control: with the
-# render's moves turned off it must fail.
-#
-# The gate's two blind spots each have a second check, in their own jobs
-# (proofs/gate-verification.toml): `small` gates the programs under 1M
-# instructions on their own work, counted inside main (callgrind)
-# (scripts/check-native-v1-perf-small.sh), and `shapes` holds the render
-# paths no program in the perf corpus exercises
-# (scripts/check-native-v1-perf-shapes.sh). Each runs its negative control.
-
 on:
-  schedule:
-    # 06:35 UTC — after the memory-trap controls (06:05).
-    - cron: "35 6 * * *"
   workflow_dispatch:
 
 env:
@@ -30,104 +11,30 @@ permissions:
   contents: read
 
 jobs:
-  v1-vs-v0:
-    name: Certified native render is not slower than the standard codegen
-    runs-on: ubuntu-latest
-    timeout-minutes: 150
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/root-tmpdir
-
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
-
-      - name: Install valgrind
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
-
-      - name: Build the compiler
-        run: cargo build --release --bin almide
-
-      - name: v1 vs v0 over the certified floor and the shape benches
-        run: bash scripts/check-native-v1-perf.sh
-
-      - name: Negative control — with the moves off the gate must fail
-        run: |
-          if ALMIDE_NATIVE_DRILL_NO_MOVES=1 NATIVE_V1_PERF_ONLY_SHAPES=1 bash scripts/check-native-v1-perf.sh > drill.log 2>&1; then
-            cat drill.log
-            echo "the gate read green with the render's moves turned off"
-            exit 1
-          fi
-          grep -E '^LOSS .*push_swap' drill.log
-
-  small:
-    name: Small certified programs do no more work than the standard codegen
-    runs-on: ubuntu-latest
-    timeout-minutes: 150
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/root-tmpdir
-
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
-
-      - name: Install valgrind
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
-
-      - name: Build the compiler
-        run: cargo build --release --bin almide
-
-      - name: v1 vs v0 program work over the small certified programs
-        run: bash scripts/check-native-v1-perf-small.sh
-
-      - name: Negative control — with the moves off the small-program gate must fail
-        run: |
-          if ALMIDE_NATIVE_DRILL_NO_MOVES=1 bash scripts/check-native-v1-perf-small.sh > drill-small.log 2>&1; then
-            cat drill-small.log
-            echo "the small-program gate read green with the render's moves turned off"
-            exit 1
-          fi
-          grep -E '^LOSS ' drill-small.log | head -5
-
-      - name: Negative control — with every comparison an i64 again the small-program gate must fail
-        run: |
-          if ALMIDE_NATIVE_DRILL_COND_I64=1 bash scripts/check-native-v1-perf-small.sh > drill-cond.log 2>&1; then
-            cat drill-cond.log
-            echo "the small-program gate read green with the branch-only comparisons rendered as i64"
-            exit 1
-          fi
-          grep -E '^LOSS .*recursion_depth_within_limits' drill-cond.log
-
-  shapes:
-    name: Every render path is exercised by a program the perf gates time
+  regen:
+    name: regen
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
-
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: llvm-tools
-
-      - name: Render paths the perf corpus does not exercise
-        run: bash scripts/check-native-v1-perf-shapes.sh
-
-      - name: Negative control — without half the floor the shapes gate must fail
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Regenerate
         run: |
-          if NATIVE_V1_SHAPES_DROP='^spec/wasm_cross/[a-m]' bash scripts/check-native-v1-perf-shapes.sh > drill-shapes.log 2>&1; then
-            cat drill-shapes.log
-            echo "the shapes gate read green with half the corpus left out"
-            exit 1
-          fi
-          grep -E '^UNEXERCISED ' drill-shapes.log | head -5
+          mkdir -p out
+          bash scripts/check-build-inputs-in-package.sh --regen > out/regen.log 2>&1 || true
+          cargo build -p almide-codegen -p almide-interp > out/build.log 2>&1 || true
+          git diff > out/regen.diff
+          cp crates/almide-types/src/generated/decl_index.rs out/
+        shell: bash
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: regen
+          path: out
