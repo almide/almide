@@ -218,6 +218,7 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
         FloorParam::Int => (*got == NTy::I64).then(|| code.to_string()).ok_or_else(mismatch)?,
         FloorParam::Bool => (*got == NTy::I64).then(|| format!("({code} != 0)")).ok_or_else(mismatch)?,
         FloorParam::Float => as_f64_arg(code, *got)?,
+        FloorParam::Float32 => crate::render_native_float32::lane_arg(code, *got)?,
         FloorParam::Str => matches!(got, NTy::Str | NTy::StrRef)
             .then(|| as_str_arg(code, *got))
             .ok_or_else(mismatch)?,

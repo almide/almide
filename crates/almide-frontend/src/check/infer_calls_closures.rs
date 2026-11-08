@@ -1013,6 +1013,14 @@ impl Checker {
         // `n ?? "hello"` / `n ?? some(1)` (fallback type ≠ unwrapped T)
         // passed check and died as rustc E0308 behind the codegen wall.
         // constrain routes the same unification through the reporting solver.
+        // The payload fixes this value position's width, as a peer fixes an
+        // if-arm. Only a literal fallback may adopt it; range-check that
+        // literal against the same type the lowering will use.
+        self.join_sized_peers(&[
+            (inner_ty.clone(), inner.span, false),
+            (ft.clone(), fallback.span, super::is_literal_numeric_ast(fallback)),
+        ], "?? fallback");
+        self.record_int_literal_context(fallback, &inner_ty);
         self.constrain(inner_ty.clone(), ft, "?? fallback");
         inner_ty
     }

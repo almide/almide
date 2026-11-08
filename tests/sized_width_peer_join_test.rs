@@ -51,6 +51,16 @@ fn assert_accepted(src: &str) {
     assert!(errs.is_empty(), "unexpected rejection for {src}: {errs:?}");
 }
 
+#[test]
+fn a_coalescing_fallback_uses_the_payload_width_and_range() {
+    assert_accepted("fn f(x: Float32?) -> Float32 = x ?? -7.0");
+    assert_accepted("fn f(x: UInt8?) -> UInt8 = x ?? 255");
+    assert_rejected("fn f(x: UInt8?) -> UInt8 = x ?? 256", "out of range");
+    assert_rejected("fn f(x: Float32?) -> Float32 = x ?? 1e300", "out of range");
+    assert_rejected("fn f(x: Float32?, y: Float) -> Float32 = x ?? y", "mixes sized numeric type Float32");
+    assert_rejected("fn f(x: UInt8?, y: Int) -> UInt8 = x ?? y", "mixes sized numeric type UInt8");
+}
+
 /// The peer sets, with a canonical VALUE (not a literal) as one member.
 #[test]
 fn a_canonical_value_may_not_join_a_sized_peer() {
