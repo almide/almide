@@ -403,7 +403,7 @@ const LANE_F64: &str = "trait AlmdLaneF64 { fn lane_f64(self) -> f64; }\nimpl Al
 /// param crosses into the lambda's lane ([`Lane`]). `ret_lane`: a declared
 /// `Float` result is read through [`LANE_F64`], a declared `Bool` one is
 /// tested `!= 0`; else the lambda's result kind `ret` is the runtime's.
-fn adapter(lambda: Option<&str>, env: &str, ps: &[NativeSigKind], bits: &[Lane], ret: NativeSigKind, ret_lane: Lane) -> Option<String> {
+fn adapter(lambda: Option<&str>, env: &str, (ps, moved): (&[NativeSigKind], &[bool]), bits: &[Lane], (ret, ret_lane): (NativeSigKind, Lane)) -> Option<String> {
     if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) {
         return None;
     }
@@ -420,7 +420,8 @@ fn adapter(lambda: Option<&str>, env: &str, ps: &[NativeSigKind], bits: &[Lane],
         .map(|(i, (k, b))| match (k, b) {
             (_, Lane::F64) => format!(", __p{i}.to_bits() as i64"),
             (_, Lane::Bool) => format!(", __p{i} as i64"),
-            (NativeSigKind::Str | NativeSigKind::ListI64 | NativeSigKind::ListStr | NativeSigKind::Rec(_), _) => format!(", &__p{i}"),
+            (NativeSigKind::Str | NativeSigKind::ListI64 | NativeSigKind::ListStr | NativeSigKind::Rec(_), _)
+                if !moved.get(i).copied().unwrap_or(false) => format!(", &__p{i}"),
             _ => format!(", __p{i}"),
         })
         .collect();

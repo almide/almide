@@ -122,8 +122,8 @@ fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_nati
     })
 }
 
-fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, dps: &[DTy], dret: &DTy,
-    ps: &[NativeSigKind], ret: NativeSigKind) -> Option<String> {
+fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, (dps, dret): (&[DTy], &DTy),
+    (ps, moved): (&[NativeSigKind], &[bool]), ret: NativeSigKind) -> Option<String> {
     if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) { return None; }
     let mut params = Vec::new();
     let mut setup = Vec::new();
@@ -135,7 +135,8 @@ fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, dps: 
         let ty = clo::owned_nty(*k);
         let value = convert_callback_value(env, d, ty, code, true)?;
         setup.push(format!("let __a{i} = {value};"));
-        let borrow = matches!(ty, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_));
+        // A param the lambda takes over gets the converted value itself.
+        let borrow = matches!(ty, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) && !moved.get(i).copied().unwrap_or(false);
         args.push(format!("{}__a{i}", if borrow { "&" } else { "" }));
     }
     let call = format!("{}{})", callback_head(lambda, captured, ps, ret),

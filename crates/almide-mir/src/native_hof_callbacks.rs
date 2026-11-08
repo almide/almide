@@ -26,9 +26,16 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
     let (CallArg::Handle(blk) | CallArg::Scalar(blk)) = a else { return None };
     let origin = cx.origins.get(blk);
     let lambda = origin.map(|(name, _)| name.as_str());
-    if let Some(lambda) = lambda {
-        if !cx.user_fns.get(lambda).is_some_and(|l| l.owned_params.is_empty()) { return None; }
-    }
+    // A lambda borrows its env; a user param it takes over (a move param,
+    // `native_move_params`) gets the value the runtime hands the adapter.
+    let moved: Vec<bool> = match lambda {
+        Some(lambda) => {
+            let l = cx.user_fns.get(lambda)?;
+            if l.params.first().is_some_and(|p| l.owned_params.contains(&p.value)) { return None; }
+            clo::lambda_moves(l)
+        }
+        None => Vec::new(),
+    };
     let declared = match t {
         NTy::Rec(i) | NTy::RecRef(i) => rec::closure_sig(i),
         _ => None,
@@ -79,8 +86,8 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
         .collect::<Option<_>>();
     let name = format!("__env_{}_{}", cx.at, side.prelude.len());
     if tuples && ret == NativeSigKind::F64 { side.shims.push(LANE_F64); }
-    let closure = if tuples { tuple_callback_adapter(env, lambda, &name, dps, dret, &ps, ret)? }
-        else { adapter(lambda, &name, &ps, &bits, ret, ret_lane)? };
+    let closure = if tuples { tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), ret)? }
+        else { adapter(lambda, &name, (&ps, &moved), &bits, (ret, ret_lane))? };
     if matches!(t, NTy::Vec | NTy::VecRef) {
         let slots = slots?;
         side.prelude.push(format!("let {name}: [i64; {}] = [{}];", slots.len(), slots.join(", ")));
@@ -100,6 +107,6 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
 /// in the call's prelude, before the runtime invokes the callback.
 fn callback_head(lambda: Option<&str>, env: &str, ps: &[NativeSigKind], ret: NativeSigKind) -> String {
     if let Some(lambda) = lambda { return format!("{}(&{env}", crate::render_native::mangle(lambda)); }
-    let key = clo::sig_key(ps, Some(ret)).unwrap_or_else(|| ps.len().to_string());
+    let key = clo::sig_key(ps, &[], Some(ret)).unwrap_or_else(|| ps.len().to_string());
     format!("__almd_ci_{key}({env}_index, &{env}")
 }

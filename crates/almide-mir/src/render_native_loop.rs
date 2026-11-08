@@ -236,7 +236,7 @@ fn render_fn_step<'a>(
         return Ok(false);
     }
     // #4006 family G: a closure call with a heap arg or result.
-    if crate::render_native_closure::render_typed_call_indirect(op, st.sigs, &mut st.tys, &mut st.out, st.indent)? {
+    if crate::render_native_closure::render_typed_call_indirect(op, &crate::render_native_closure::handed_after(st.func, i), st.sigs, &mut st.tys, &mut st.out, st.indent)? {
         return Ok(false);
     }
     render_fn_op(st, i, op)?;
@@ -452,7 +452,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             if matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef | NTy::RecRef(_)))
                 && crate::render_native_addr::field_of(*src).is_some_and(|(base, place)| {
                     matches!(st.tys.get(&base), Some(NTy::Rec(_)))
-                        && crate::render_native_move::dying_after(func, i, base, &st.borrows.arms)
+                        && crate::render_native_move::carrier_dies_after(func, i, base, &st.borrows.arms)
                         && crate::render_native_addr::reads_of_place(&place)
                             .iter()
                             .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))
@@ -470,7 +470,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             if matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef | NTy::RecRef(_)))
                 && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
                     matches!(st.tys.get(&base), Some(NTy::Rec(_)))
-                        && crate::render_native_move::dying_after(func, i, base, &st.borrows.arms)
+                        && crate::render_native_move::carrier_dies_after(func, i, base, &st.borrows.arms)
                         && crate::render_native_addr::reads_of_take(&take)
                             .iter()
                             .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))
