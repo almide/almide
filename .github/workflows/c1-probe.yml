@@ -53,6 +53,9 @@ jobs:
       - name: debug
         if: always()
         run: C1DBG=1 ./target/release/almide build spec/wasm_cross/block_line_collect.almd -o /tmp/cc 2>&1 | grep C1DBG | head -150 || true
+      - name: glue
+        if: always()
+        run: sudo apt-get install -y -qq valgrind > /dev/null; bash scripts/c1probe/glue.sh || true
       - name: dumps and profiles
         if: always()
         run: |
