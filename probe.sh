@@ -20,7 +20,7 @@ while read -r f; do
     [ -n "$src" ] && cp "$src" "$OUT/$n.$leg.rs"
     if [ -x "$OUT/$n.$leg.bin" ]; then
       timeout 900 valgrind --tool=callgrind --fair-sched=yes --collect-atstart=no --toggle-collect='almide_*::main' --toggle-collect='*thread_start*' \
-        --toggle-collect='*almide_stack_guard_install' --callgrind-out-file="$OUT/$n.$leg.cg" "$OUT/$n.$leg.bin" > "$OUT/$n.$leg.stdout" 2>&1 </dev/null
+        --toggle-collect='*almide_stack_guard_install' --callgrind-out-file="$OUT/$n.$leg.cg" "$OUT/$n.$leg.bin" >/dev/null 2>&1 </dev/null
       callgrind_annotate --inclusive=no "$OUT/$n.$leg.cg" 2>/dev/null | head -60 > "$OUT/$n.$leg.top"
       callgrind_annotate --inclusive=yes "$OUT/$n.$leg.cg" 2>/dev/null | head -60 > "$OUT/$n.$leg.itop"
       tot=$(callgrind_annotate --auto=no "$OUT/$n.$leg.cg" 2>/dev/null | awk '/PROGRAM TOTALS/ { gsub(",", "", $1); print $1 }')
