@@ -216,6 +216,9 @@ pub fn almide_rt_value_null() -> AlmideValue { AlmideValue::Null }
 // positions the walker lowers itself, so the first runtime-emitted call site
 // (the #1522 record-default decode arm) came up E0425.
 pub fn almide_rt_value_eq(a: AlmideValue, b: AlmideValue) -> bool { a == b }
+/// `almide_rt_value_eq` over borrowed Values: the same comparison, no copy of
+/// either side (the certified native render lends the caller's Values).
+pub fn almide_rt_value_eq_ref(a: &AlmideValue, b: &AlmideValue) -> bool { a == b }
 
 // ── Access ──
 

@@ -234,3 +234,34 @@ fn borrow_twin_of(ret: FloorRet, symbol: &str, rust_params: &[String], rt: &'sta
     let from_ref = rust_params.iter().any(|p| squash(&without_lifetimes(p)) == "&AlmideValue");
     (same && borrowed && from_ref).then(|| Some((twin.clone(), closure(&twin, rt).ok()?)))?
 }
+
+/// `f` with its by-reference twin (`FloorFn::by_ref`): the runtime fn
+/// `<symbol>_ref`, paired from the signatures — the same params and result,
+/// except that each Value `f` takes by value it borrows. The render then
+/// lends the caller's Value where the body would be handed a copy of it.
+fn with_by_ref_twin(mut f: FloorFn, rust_params: &[String], rust_ret: &str, rt: &'static RuntimeIndex) -> FloorFn {
+    if !f.params.contains(&FloorParam::Value(false)) {
+        return f;
+    }
+    let twin = format!("{}_ref", f.symbol);
+    let Some((tp, tr)) = signature_text(rt, &twin).and_then(rust_signature) else { return f };
+    if tp.len() != rust_params.len() || squash(&without_lifetimes(&tr)) != squash(&without_lifetimes(rust_ret)) {
+        return f;
+    }
+    let mut params = f.params.clone();
+    for (k, (a, b)) in tp.iter().zip(rust_params).enumerate() {
+        let (a, b) = (squash(&without_lifetimes(a)), squash(&without_lifetimes(b)));
+        if a == b {
+            continue;
+        }
+        if f.params[k] == FloorParam::Value(false) && b == "AlmideValue" && a == "&AlmideValue" {
+            params[k] = FloorParam::Value(true);
+            continue;
+        }
+        return f;
+    }
+    let Ok(items) = closure(&twin, rt) else { return f };
+    let by_ref = FloorFn { symbol: twin, params, ret: f.ret, items, twin: None, str_only: f.str_only, borrow_twin: None, by_ref: None };
+    f.by_ref = Some(Box::new(by_ref));
+    f
+}

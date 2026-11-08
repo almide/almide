@@ -550,6 +550,8 @@ fn render_declared_floor_call(
 ) -> Result<(), LowerError> {
     let NativeCall { dst, name, args, .. } = call;
     let OpSink { tys, out, indent, used_shims } = s;
+    // The body only reads the Values it takes by value: lend them instead.
+    let floor = floor.by_ref.as_deref().unwrap_or(floor);
     let mut rendered: Vec<(String, NTy)> = args.iter().map(|a| call_arg(a, tys)).collect::<Result<_, _>>()?;
     let mut dying: Vec<bool> =
         args.iter().map(|a| matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))).collect();
