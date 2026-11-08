@@ -14,5 +14,7 @@ for v in append combinator; do
 done
 echo "=== native floor + perf gate pieces"
 curl -sSfL https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz | tar -xJ -C /tmp; export PATH=/tmp/wasmtime-v50.0.1-x86_64-linux:$PATH
-cargo test --release --test native_verified_floor_test 2>&1 | grep -E "test result|panicked" -A3 | head -20
+cargo test --release --test native_verified_floor_test --test wasm_runtime_cross_target 2>&1 | grep -E "test result|panicked" -A3 | head -20
 cargo test --release -p almide-mir --lib 2>&1 | grep -E "test result|FAILED" | head
+grep -n "flat_map_arr\|__arr" /tmp/cired-out-v1-combinator.rs | head -8 | cut -c1-200
+for f in spec/wasm_cross/list_comprehensive.almd; do echo "=== $f"; almide run $f > /tmp/n.txt 2>&1; almide run $f --target wasm > /tmp/w.txt 2>&1; cmp /tmp/n.txt /tmp/w.txt && echo SAME; done
