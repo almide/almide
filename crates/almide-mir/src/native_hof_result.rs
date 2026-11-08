@@ -36,21 +36,10 @@ fn runtime_result(env: &Env, d: &DTy, code: &str) -> Option<String> {
         }
         DTy::List(e) => {
             let body = runtime_result(env, e, "__item")?;
-            // Where the tuple and its record have one layout, the standard
-            // library's collect writes the records into the tuples' own buffer
-            // and allocates nothing (a fresh buffer and a free per conversion
-            // cost a dispatcher 3% of its work). Otherwise the records get a
-            // buffer of their own, reserved the way the runtime reserves
-            // (C-197's aborting reservation), never an infallibly sized
-            // `collect`.
+            // Reserved the way the runtime reserves (C-197's aborting
+            // reservation), never an infallibly sized `collect`.
             format!(
-                "{{ fn __records<S, D>(src: Vec<S>, f: impl FnMut(S) -> D) -> Vec<D> {{ \
-                 if std::mem::size_of::<S>() == std::mem::size_of::<D>() && std::mem::align_of::<S>() == std::mem::align_of::<D>() {{ \
-                 return src.into_iter().map(f).collect(); }} \
-                 let mut out: Vec<D> = Vec::new(); \
-                 if out.try_reserve_exact(src.len()).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }} \
-                 out.extend(src.into_iter().map(f)); out }} \
-                 __records::<_, {}>({code}, |__item| {body}) }}",
+                "{{ let __src = {code}; let mut __out: Vec<{}> = Vec::new(); if __out.try_reserve_exact(__src.len()).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }} __out.extend(__src.into_iter().map(|__item| {body})); __out }}",
                 rec::owned_ty(kind_of(env, e)?)
             )
         }
