@@ -1,0 +1,1 @@
+ANCHORS REJECT: rc: function 6: recorded events with no call [a0]; calls with no recorded event [a@40 on [1, 8]]
