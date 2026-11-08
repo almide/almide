@@ -679,12 +679,15 @@ pub(crate) fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
             dst: Some(d),
             args,
         } if args.len() == 2 => render_float_bin(op, d, args, tys, out, indent)?,
-        // `float.__from_int` — int (i64) to f64, carried per the float floor.
+        // Both integer-to-f64 primitives use the same representation boundary.
         Op::Prim {
-            kind: crate::PrimKind::F64FromInt,
+            kind: crate::PrimKind::F64FromInt | crate::PrimKind::IntToFloat,
             dst: Some(d),
             args,
         } if args.len() == 1 => {
+            if tys.get(&args[0]) != Some(&NTy::I64) {
+                return Err(wall("native: integer-to-float conversion requires an i64 operand"));
+            }
             tys.insert(*d, NTy::F64);
             line!("let mut {}: f64 = ({} as f64);", var(*d), var(args[0]));
         }
@@ -715,7 +718,7 @@ pub(crate) fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
             tys.insert(*d, NTy::I64);
             line!("let mut {}: i64 = {bits};", var(*d));
         }
-        _ => return Ok(false),
+        _ => return crate::render_native_float32::render(op, OpSink { tys, out, indent, used_shims: s.used_shims }),
     }
     Ok(true)
 }
