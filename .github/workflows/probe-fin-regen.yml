@@ -1,0 +1,52 @@
+name: probe-fin-regen (throwaway)
+on:
+  push:
+    branches: [fin-probe-regen]
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+jobs:
+  regen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - run: git log --oneline -1 && cargo build --release --bin almide
+      - name: Regenerate derived files
+        run: |
+          set -x
+          mkdir -p /tmp/out
+          bash scripts/check-build-inputs-in-package.sh --regen || true
+          target/release/almide run tools/almide-gates/src/main.almd -- impl-count . --update || true
+          INSTA_UPDATE=always cargo test --release --test ide_outline_snapshot_test 2>&1 | tail -5 || true
+          git status --short
+          git diff -- . ':!.github' > /tmp/out/regen.diff || true
+          git diff --stat
+      - name: Gates after regeneration
+        run: |
+          set +e
+          bash scripts/check-str-twin-ratchet.sh 2>&1 | tee /tmp/out/str-twin.txt
+          bash scripts/check-build-inputs-in-package.sh --regen 2>&1 | tail -3 | tee /tmp/out/build-inputs.txt
+          target/release/almide run tools/almide-gates/src/main.almd -- impl-count . 2>&1 | tail -5 | tee /tmp/out/impl-count.txt
+          cargo test --release --test list_eq_cells_test --test native_runtime_boundaries_test --test ide_outline_snapshot_test --test native_verified_floor_test 2>&1 | tee /tmp/out/tests.txt | grep -E "^test |test result|FAILED|panicked" | head -80
+          cargo test --release -p almide-mir --lib 2>&1 | tee /tmp/out/mir.txt | grep -E "test result|FAILED|panicked" | head -40
+          cargo test --release -p almide-interp 2>&1 | grep -E "test result|FAILED|panicked" | head -20
+          cargo clippy --release -p almide-mir -p almide-wasm -p almide-interp -- -D warnings 2>&1 | tail -15 | tee /tmp/out/clippy.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: regen
+          path: /tmp/out
+          retention-days: 7
