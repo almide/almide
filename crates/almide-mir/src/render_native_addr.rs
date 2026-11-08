@@ -679,7 +679,7 @@ fn bounds_guard(st: &AddrState, a: &Addr, ix: &str) -> (Option<String>, crate::r
     }
     crate::render_native_bounds::check(s);
     (
-        Some(format!("if {ix} >= {}.len() {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}", var(a.base))),
+        Some(format!("if {ix} >= {}.len() {{ almide_oob() }}", var(a.base))),
         s,
     )
 }

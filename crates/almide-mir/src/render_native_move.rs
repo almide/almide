@@ -331,12 +331,23 @@ thread_local! {
 /// block per evaluation (a closure value built per recursive call read 65x
 /// the standard codegen's instructions). Each of those uses borrows it as
 /// `&[i64]`, which an array coerces to.
+///
+/// A constant int list (`Alloc { init: IntList }`: a folded literal or a
+/// top-level list `let` read inside a function) under the same rule is a stack
+/// array too: a lookup table indexed in a loop allocated, filled and freed its
+/// `vec![…]` on every iteration, where the standard codegen reads its lazy
+/// static. At most [`STACK_TABLE_MAX`] elements, so a frame stays small.
 pub(crate) fn set_stack_lits(func: &MirFunction, user_fns: &std::collections::BTreeSet<&str>) {
     let mut lits: std::collections::BTreeSet<ValueId> = func
         .ops
         .iter()
         .filter_map(|op| match op {
             Op::ListLit { dst, .. } => Some(*dst),
+            Op::Alloc { dst, init: crate::Init::IntList(vs), .. }
+                if !vs.is_empty() && vs.len() <= STACK_TABLE_MAX =>
+            {
+                Some(*dst)
+            }
             _ => None,
         })
         .collect();
@@ -354,7 +365,7 @@ pub(crate) fn set_stack_lits(func: &MirFunction, user_fns: &std::collections::BT
             continue;
         }
         let allowed: Vec<ValueId> = match op {
-            Op::ListLit { dst, .. } => vec![*dst],
+            Op::ListLit { dst, .. } | Op::Alloc { dst, init: crate::Init::IntList(_), .. } => vec![*dst],
             Op::CallFn { name, args, .. } if user_fns.contains(name.as_str()) => args
                 .iter()
                 .filter_map(|a| match a {
@@ -409,6 +420,9 @@ thread_local! {
 pub(crate) fn is_stack_single(v: ValueId) -> bool {
     STACK_SINGLES.with(|m| m.borrow().contains(&v))
 }
+
+/// The largest constant int list [`set_stack_lits`] puts on the stack.
+pub(crate) const STACK_TABLE_MAX: usize = 256;
 
 pub(crate) fn is_stack_lit(v: ValueId) -> bool {
     STACK_LITS.with(|m| m.borrow().contains(&v))

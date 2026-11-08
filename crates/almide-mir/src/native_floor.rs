@@ -259,7 +259,8 @@ pub(crate) fn declared_scalar_option(name: &str) -> bool {
 
 /// The scalar a stdlib fn declared `@scalar_text` turns into its canonical
 /// text: `Some(ScalarText::Int)` for an `Int` param (decimal digits),
-/// `Some(ScalarText::Bool)` for a `Bool` one (`true` / `false`), `None` for a
+/// `Some(ScalarText::Bool)` for a `Bool` one (`true` / `false`),
+/// `Some(ScalarText::Float)` for a `Float` one (its `{}` Display), `None` for a
 /// fn without the declaration. The certified render folds such a call into
 /// the format string of the text it builds, reading only this declaration.
 pub(crate) fn declared_scalar_text(call: &str) -> Option<ScalarText> {
@@ -278,11 +279,19 @@ pub(crate) fn declared_scalar_text(call: &str) -> Option<ScalarText> {
 pub(crate) enum ScalarText {
     Int,
     Bool,
+    Float,
 }
 
 fn scalar_text_of(call: &str) -> Option<ScalarText> {
     let (module, func) = call.split_once('.')?;
     let program = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached)?;
+    // A self-hosted body that declares the fn it specializes
+    // (`@specializes("float.__to_string_compound")`) has that fn's text, as
+    // the floor serves it as that fn ([`derive_for`]).
+    let declared_here = program.decls.iter().any(|d| matches!(d, Decl::Fn { name, .. } if name.as_str() == func));
+    if !declared_here {
+        return specialized_target(call).filter(|t| t != call).and_then(|t| scalar_text_of(&t));
+    }
     program.decls.iter().find_map(|d| match d {
         Decl::Fn { name, attrs, params, .. }
             if name.as_str() == func && attrs.iter().any(|a| a.name.as_str() == "scalar_text") =>
@@ -291,6 +300,7 @@ fn scalar_text_of(call: &str) -> Option<ScalarText> {
                 [p] => match simple(&p.ty) {
                     Some("Int") => Some(ScalarText::Int),
                     Some("Bool") => Some(ScalarText::Bool),
+                    Some("Float") => Some(ScalarText::Float),
                     _ => None,
                 },
                 _ => None,
