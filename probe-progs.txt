@@ -1,0 +1,4 @@
+spec/wasm_cross/list_arg_map_view.almd
+spec/wasm_cross/closure_captured_map_records.almd
+spec/wasm_cross/closure_tail_recursion.almd
+spec/wasm_cross/closure_bytes_list_index_arg.almd
