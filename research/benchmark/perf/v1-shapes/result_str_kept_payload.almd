@@ -1,0 +1,21 @@
+// v1-vs-v0 shape bench: a String-Ok Result built over a string the caller
+// reads again after, so the Result holds a copy of it.
+fn wrap(s: String, i: Int) -> Result[String, String] = if i % 3 == 0 then err(s) else ok(s)
+
+fn width(r: Result[String, String]) -> Int =
+  match r {
+    ok(x) => string.len(x),
+    err(e) => 0 - string.len(e),
+  }
+
+fn main() -> Unit = {
+  var total = 0
+  var i = 0
+  while i < 200000 {
+    let s = int.to_string(i)
+    let r = wrap(s, i)
+    total = total + width(r) + string.len(s)
+    i = i + 1
+  }
+  println(int.to_string(total))
+}
