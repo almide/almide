@@ -14,7 +14,7 @@ fn rc(body: &str, events: &str) -> Result<RcReport, String> {
     let mut r = RcReport::default();
     // `$alloc` (function 0) stands in for the release routine.
     let releases = [0u32].into_iter().collect();
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, events.to_string())], &[vec![], vec![]], &mut r).map(|()| r)
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, events.to_string())], &[vec![], vec![]], &mut r).map(|()| r)
 }
 
 #[test]
@@ -53,11 +53,11 @@ fn a_rebind_release_matches_a_release_or_the_judge_on_its_local() -> Result<(), 
     let releases = std::collections::HashSet::new();
     let mut r = RcReport::default();
     // The call at 1 is the recorded judge: the rebind's release is inside it.
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[At { func: 1, op: 1 }] }, &[(1, "o0".into())], &[vec![], vec![]], &mut r)?;
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[At { func: 1, op: 1 }], alloc: None }, &[(1, "o0".into())], &[vec![], vec![]], &mut r)?;
     assert_eq!((r.rebind_unmatched, r.judges_unmatched), (0, 0));
     // No judge and no release: the rebind is counted as one with no instruction.
     let mut r = RcReport::default();
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "o0".into())], &[vec![], vec![]], &mut r)?;
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "o0".into())], &[vec![], vec![]], &mut r)?;
     assert_eq!(r.rebind_unmatched, 1);
     Ok(())
 }
@@ -69,11 +69,11 @@ fn an_rc_call_inside_an_arm_window_needs_its_event() -> Result<(), String> {
     let releases = [0u32].into_iter().collect();
     // With no event it is refused: the arm-internal class is retired
     // (#4278 B1).
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, String::new())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, String::new())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
     // The arm's own temporary, logged in its window, takes it.
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "d-@0-2".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default())?;
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "d-@0-2".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default())?;
     // Outside the window it is an unrecorded release.
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, String::new())], &[vec![(1, 2, 2)], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, String::new())], &[vec![(1, 2, 2)], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -84,7 +84,7 @@ fn an_arm_share_out_takes_only_the_rc_inc_in_its_own_window_on_its_variable() ->
     let bodies = decode(&bytes)?;
     let none = std::collections::HashSet::new();
     let arms = [vec![(1, 0, 2)], vec![]];
-    let run = |events: &str| check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[] }, &[(1, events.to_string())], &arms, &mut RcReport::default());
+    let run = |events: &str| check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, events.to_string())], &arms, &mut RcReport::default());
     run("s0@0-2")?;
     // An event on another variable, in another window, or in none: refused.
     assert!(run("s1@0-2").is_err());
@@ -92,7 +92,7 @@ fn an_arm_share_out_takes_only_the_rc_inc_in_its_own_window_on_its_variable() ->
     assert!(run("s0").is_err());
     // The +1 dropped under its event: the share-out has no call.
     let gone = module("(local i32 i32)", "local.get 0 drop");
-    assert!(check_rc(&decode(&gone)?, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[] }, &[(1, "s0@0-2".into())], &arms, &mut RcReport::default())
+    assert!(check_rc(&decode(&gone)?, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "s0@0-2".into())], &arms, &mut RcReport::default())
         .unwrap_err()
         .contains("no call [s0]"));
     Ok(())
@@ -104,9 +104,9 @@ fn a_variables_release_inside_its_judge_is_matched() -> Result<(), String> {
     let bodies = decode(&bytes)?;
     let releases = std::collections::HashSet::new();
     let mut r = RcReport::default();
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[At { func: 1, op: 1 }] }, &[(1, "d0".into())], &[vec![], vec![]], &mut r)?;
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[At { func: 1, op: 1 }], alloc: None }, &[(1, "d0".into())], &[vec![], vec![]], &mut r)?;
     // Without the judge there is no instruction for it.
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -130,23 +130,23 @@ fn an_unlogged_routine_or_element_release_is_refused() -> Result<(), String> {
     let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop");
     let bodies = decode(&bytes)?;
     let mut r = RcReport::default();
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, String::new())], &[vec![], vec![(1, 0, 2)]], &mut r).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, String::new())], &[vec![], vec![(1, 0, 2)]], &mut r).is_err());
     // So it is inside an arm's window (the arm-internal class is retired).
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, String::new())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, String::new())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
     // A value loaded out of a block's slot and released, then the slot
     // rewritten: the slot's consume — an `r` event in the release's window
     // (#4278 B1). With no event it is refused: the element class is retired.
     let bytes = module("(local i32 i32)", "local.get 0 i32.load offset=12 call $alloc drop local.get 0 local.get 1 i32.store offset=12");
     let bodies = decode(&bytes)?;
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "r-@0-2".into())], &[vec![], vec![]], &mut RcReport::default())?;
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, String::new())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "r-@0-2".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, String::new())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     // An `r` event outside its release's window takes nothing.
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "r-@3-6".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "r-@3-6".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     // Released with no store to that slot after it, the slot still holds
     // the released block: refused.
     let bytes = module("(local i32 i32)", "local.get 0 i32.load offset=12 call $alloc drop");
     let bodies = decode(&bytes)?;
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, String::new())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, String::new())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -180,9 +180,9 @@ fn a_release_an_arm_consumes_is_matched_inside_its_window() -> Result<(), String
     let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop");
     let bodies = decode(&bytes)?;
     let none = std::collections::HashSet::new();
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &none, sigs: &Default::default(), judges: &[] }, &[(1, "d0".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &none, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "d0".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
     // Outside any window it is a release with no instruction.
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &none, sigs: &Default::default(), judges: &[] }, &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &none, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -207,7 +207,7 @@ fn consuming(main: &str, events: &str, signed: &[u32]) -> Result<RcReport, Strin
     let releases = [0u32].into_iter().collect();
     let sigs: std::collections::HashMap<u32, Vec<bool>> = signed.iter().map(|&g| (g, vec![true])).collect();
     let mut r = RcReport::default();
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &sigs, judges: &[] }, &[(3, events.to_string())], &[vec![(3, 0, usize::MAX)], vec![]], &mut r).map(|()| r)
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &sigs, judges: &[], alloc: None }, &[(3, events.to_string())], &[vec![(3, 0, usize::MAX)], vec![]], &mut r).map(|()| r)
 }
 
 /// The consumption is the callee's DECLARATION (#4278 B1), never a reading
@@ -249,10 +249,10 @@ fn an_alias_release_does_not_steal_the_aliased_variables_call() -> Result<(), St
     let bodies = decode(&bytes)?;
     let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
     let mut r = RcReport::default();
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "d0 d1".into())], &[vec![], vec![]], &mut r)?;
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "d0 d1".into())], &[vec![], vec![]], &mut r)?;
     assert_eq!(r.calls, 2);
     // Three releases for two calls is still refused.
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "d0 d1 d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "d0 d1 d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -263,8 +263,8 @@ fn an_unnamed_event_takes_the_call_outside_the_arm_window_first() -> Result<(), 
     let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop local.get 0 call $alloc drop");
     let bodies = decode(&bytes)?;
     let none = std::collections::HashSet::new();
-    assert!(check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[] }, &[(1, "a-".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
-    check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[] }, &[(1, "a- a-@0-2".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "a-".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
+    check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "a- a-@0-2".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default())?;
     Ok(())
 }
 
@@ -277,15 +277,15 @@ fn a_move_into_an_arm_accounts_for_one_release_inside_its_window() -> Result<(),
     let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
     let win = [vec![(1, 0, 2)], vec![]];
     let mut r = RcReport::default();
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "m0@0-2".into())], &win, &mut r)?;
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "m0@0-2".into())], &win, &mut r)?;
     assert_eq!(r.calls, 1);
     // The move names another window: the release is a frame variable's
     // credit left over inside an arm, refused.
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "m0@5-9".into())], &win, &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "m0@5-9".into())], &win, &mut RcReport::default()).is_err());
     // One move, two releases: one is left over.
     let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop local.get 0 call $alloc drop");
     let bodies = decode(&bytes)?;
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "m0@0-5".into())], &[vec![(1, 0, 5)], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "m0@0-5".into())], &[vec![(1, 0, 5)], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -299,10 +299,10 @@ fn a_move_released_once_per_path_is_accounted_on_every_path() -> Result<(), Stri
         "local.get 1 (if (then local.get 0 call $alloc drop) (else local.get 0 call $alloc drop))",
     );
     let bodies = decode(&bytes)?;
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "m0@0-20".into())], &[vec![(1, 0, 20)], vec![]], &mut RcReport::default())?;
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "m0@0-20".into())], &[vec![(1, 0, 20)], vec![]], &mut RcReport::default())?;
     let bytes = module("(local i32 i32)", "local.get 1 (if (then local.get 0 call $alloc drop local.get 0 call $alloc drop))");
     let bodies = decode(&bytes)?;
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "m0@0-20".into())], &[vec![(1, 0, 20)], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "m0@0-20".into())], &[vec![(1, 0, 20)], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -317,12 +317,12 @@ fn an_event_outside_every_branch_site_accounts_for_one_release_per_path() -> Res
         "local.get 1 (if (then local.get 0 call $alloc drop) (else local.get 0 call $alloc drop))",
     );
     let bodies = decode(&bytes)?;
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default())?;
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "( d0 )".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "( d0 )".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     // Twice on one path is never one event's.
     let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop local.get 0 call $alloc drop");
     let bodies = decode(&bytes)?;
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -333,8 +333,8 @@ fn a_cell_variables_event_meets_a_call_through_its_cell() -> Result<(), String> 
     let bytes = module("(local i32 i32)", "local.get 0 i32.load offset=12 local.set 1 local.get 1 call $alloc drop");
     let bodies = decode(&bytes)?;
     let none = std::collections::HashSet::new();
-    check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[] }, &[(1, "a0".into())], &[vec![], vec![]], &mut RcReport::default())?;
-    assert!(check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[] }, &[(1, "a0 a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "a0".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "a0 a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -349,13 +349,13 @@ fn code_past_an_if_whose_arms_both_leave_is_dead() -> Result<(), String> {
         "local.get 1 (if (then local.get 0 call $alloc drop return) (else local.get 0 call $alloc drop return)) local.get 0 call $alloc drop",
     );
     let bodies = decode(&bytes)?;
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "( d0 d0 )".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "( d0 d0 )".into())], &[vec![], vec![]], &mut RcReport::default())?;
     let bytes = module(
         "(local i32 i32)",
         "local.get 1 (if (then local.get 0 call $alloc drop br 0) (else local.get 0 call $alloc drop return)) local.get 0 call $alloc drop",
     );
     let bodies = decode(&bytes)?;
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "( d0 d0 )".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "( d0 d0 )".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -372,7 +372,7 @@ fn a_call_result_names_the_argument_its_callee_may_return() -> Result<(), String
     .expect("wat");
     let bodies = decode(&bytes)?;
     let none = std::collections::HashSet::new();
-    check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[] }, &[(2, "a0".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[], alloc: None }, &[(2, "a0".into())], &[vec![], vec![]], &mut RcReport::default())?;
     // A callee that never returns its argument: the result is not local 0's.
     let bytes = wat::parse_str(
         r#"(module (memory 1)
@@ -382,7 +382,7 @@ fn a_call_result_names_the_argument_its_callee_may_return() -> Result<(), String
     )
     .expect("wat");
     let bodies = decode(&bytes)?;
-    assert!(check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[] }, &[(2, "a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[], alloc: None }, &[(2, "a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -393,8 +393,8 @@ fn a_move_may_be_released_by_an_enclosing_window() -> Result<(), String> {
     let bytes = module("(local i32 i32)", "nop nop nop local.get 0 call $alloc drop");
     let bodies = decode(&bytes)?;
     let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "m0@0-2".into())], &[vec![(1, 0, 2), (1, 0, 6)], vec![]], &mut RcReport::default())?;
-    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "m0@0-2".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "m0@0-2".into())], &[vec![(1, 0, 2), (1, 0, 6)], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "m0@0-2".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -406,8 +406,8 @@ fn events_in_two_arms_of_one_site_share_the_call_past_the_join() -> Result<(), S
     let bytes = module("(local i32 i32 i32)", "local.get 2 (if (result i32) (then local.get 0) (else local.get 0)) call $alloc drop");
     let bodies = decode(&bytes)?;
     let none = std::collections::HashSet::new();
-    check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[] }, &[(1, "( a0 | a0 )".into())], &[vec![], vec![]], &mut RcReport::default())?;
-    assert!(check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[] }, &[(1, "a0 a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
+    check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "( a0 | a0 )".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    assert!(check_rc(&bodies, 0, RcFns { inc: Some(0), releases: &none, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "a0 a0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -418,8 +418,8 @@ fn an_unreachable_release_is_never_refused_and_may_carry_an_event() -> Result<()
     let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
     let bytes = module("(local i32 i32)", "unreachable local.get 0 call $alloc drop");
     let bodies = decode(&bytes)?;
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default())?;
-    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, "".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default())?;
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "".into())], &[vec![], vec![]], &mut RcReport::default())?;
     Ok(())
 }
 
@@ -458,7 +458,7 @@ fn an_anchored_if_pairs_each_arm_event_with_its_arm_value() -> Result<(), String
     let bytes = module("(local i32 i32 i32)", "local.get 2 (if (result i32) (then local.get 0) (else local.get 1)) call $alloc drop");
     let bodies = decode(&bytes)?;
     let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
-    let run = |ev: &str| check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default());
+    let run = |ev: &str| check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default());
     run("(@1-3 d0 |@1-3 d1 )")?;
     assert!(run("(@1-3 d1 |@1-3 d0 )").is_err(), "arms swapped");
     assert!(run("( d0 | d1 )").is_err(), "no anchor");
@@ -474,7 +474,7 @@ fn a_select_site_over_an_anchored_if_pairs_too() -> Result<(), String> {
     let bytes = module("(local i32 i32 i32)", "local.get 2 (if (result i32) (then local.get 0) (else local.get 1)) call $alloc drop");
     let bodies = decode(&bytes)?;
     let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
-    let run = |ev: &str| check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[] }, &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default());
+    let run = |ev: &str| check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default());
     run("(@1-3 |@1-3 ) (@1-3 d0 |@1-3 d1 )")?;
     assert!(run("(@1-3 |@1-3 ) (@1-3 d1 |@1-3 d0 )").is_err());
     Ok(())
@@ -513,5 +513,19 @@ fn a_release_followed_by_a_rewrite_or_no_path_to_a_read_is_the_last_read() -> Re
     rc("i32.const 1 if local.get 0 call $alloc drop else local.get 0 drop end", "d0")?;
     // A loop that rebinds the local before its next read.
     rc("loop i32.const 0 local.set 0 local.get 0 call $alloc drop i32.const 1 br_if 0 end", "d0")?;
+    Ok(())
+}
+
+#[test]
+fn an_if_on_a_local_the_path_set_takes_only_the_arm_its_value_selects() -> Result<(), String> {
+    // fs_fold.rs shape: the error path releases the buffer, builds the error
+    // carrier into a local, and the join tests it — the arm that releases the
+    // buffer again (and reads it) is not on that path.
+    rc("local.get 0 call $alloc drop i32.const 1 local.set 1 local.get 1 if else local.get 0 drop end", "d0")?;
+    rc("local.get 0 call $alloc drop i32.const 0 local.set 1 local.get 1 i32.eqz if else local.get 0 drop end", "d0")?;
+    // Zero selects the arm that reads it.
+    assert!(rc("local.get 0 call $alloc drop i32.const 0 local.set 1 local.get 1 if else local.get 0 drop end", "d0").is_err());
+    // A value the path does not know: both arms.
+    assert!(rc("local.get 0 call $alloc drop local.get 1 if else local.get 0 drop end", "d0").is_err());
     Ok(())
 }

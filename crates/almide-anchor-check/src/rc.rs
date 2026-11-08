@@ -142,6 +142,10 @@ pub struct RcFns<'r> {
     pub sigs: &'r HashMap<u32, Vec<bool>>,
     /// The located copy-on-write judge calls (the anchor file's `judges`).
     pub judges: &'r [crate::At],
+    /// `$alloc` (the anchor file's `alloc`): a local just set from it holds
+    /// a live block, never 0 — the last-read walk (after.rs) takes only the
+    /// arm a test of that local selects.
+    pub alloc: Option<u32>,
 }
 
 /// What the RC check saw.
@@ -365,7 +369,7 @@ pub fn check_rc(
         rep.calls += fr.calls[..fr.live].iter().filter(|c| c.1 != 'j').count();
         rep.events += fr.ev.evs.len();
         fr.verdict(rep)?;
-        fr.last_reads(rep)?;
+        fr.last_reads(rc_fns.alloc, rep)?;
         rep.frames += 1;
     }
     Ok(())
@@ -453,14 +457,14 @@ impl<'x, 'a> Frame<'x, 'a> {
 
     /// after.rs: every live release call on a local is that local's last
     /// read on every path from it.
-    fn last_reads(&self, rep: &mut RcReport) -> Result<(), String> {
+    fn last_reads(&self, alloc: Option<u32>, rep: &mut RcReport) -> Result<(), String> {
         let cfg = after::Cfg::new(self.b);
         for &(k, kind, _) in &self.calls[..self.live] {
             if kind != 'd' {
                 continue;
             }
             let Some(l) = after::released_local(self.b, k) else { continue };
-            if let Some(j) = after::read_after(self.b, &cfg, k, l) {
+            if let Some(j) = after::read_after(self.b, &cfg, alloc, k, l) {
                 return Err(format!("rc: function {}: local {l} read at @{j} after its release at @{k}", self.pos));
             }
             rep.last_reads += 1;
