@@ -362,12 +362,13 @@ thread_local! {
 }
 
 /// The heap values of `func` released before their scheduled `Drop`, keyed by
-/// the op index before which they go: a value bound and read only at the top
-/// level of the body (no loop, no branch), every read a call argument or a
-/// print, released
-/// by exactly one `Drop` and never consumed, rebound, returned or handled as
-/// an address, and never read by an interpolation chain (whose reads the
-/// render moves to the chain's end). It goes right after its last read.
+/// the op index before which they go: a value bound at the top level of the
+/// body, every read of it a top-level call argument or print, or a read
+/// through its block (its address, an element, a slot) anywhere, released by
+/// exactly one release op and never consumed, rebound or returned, and never
+/// read by an interpolation chain (whose reads the render moves to the
+/// chain's end). It goes right after its last read, or after the loop or
+/// branch holding that read.
 fn early_releases(func: &MirFunction, chains: &crate::render_native_interp::Chains) -> BTreeMap<usize, Vec<ValueId>> {
     EARLY_DROPPED.with(|e| e.borrow_mut().clear());
     let at_depth = op_depths(func);
@@ -412,14 +413,26 @@ fn last_top_level_read(
 ) -> Option<usize> {
     let mut last = None;
     let mut drops = 0;
+    // `v` and every value that may borrow from it: its address, an address
+    // computed from that, an element read through one, a local holding one.
+    let mut derived: std::collections::BTreeSet<ValueId> = std::iter::once(v).collect();
     for (j, op) in func.ops.iter().enumerate().skip(d + 1) {
         let mut vs = Vec::new();
         crate::mir_ops::op_values(op, &mut vs);
-        if !vs.contains(&v) {
+        if !vs.iter().any(|x| derived.contains(x)) {
+            continue;
+        }
+        if !vs.contains(&v) || block_read(op) {
+            // A read through the block: it borrows, it never moves `v`.
+            if drops != 0 || !through_block(op, v, &mut derived) {
+                return None;
+            }
+            let r = top_level_end(func, at_depth, j)?;
+            last = Some(last.map_or(r, |l: usize| l.max(r)));
             continue;
         }
         match op {
-            Op::Drop { v: x } if *x == v => drops += 1,
+            op if releases(op, v) => drops += 1,
             Op::CallFn { args, .. }
                 if drops == 0 && at_depth[j] == 0 && args.iter().all(|a| !matches!(a, crate::CallArg::Scalar(x) if *x == v)) =>
             {
@@ -445,6 +458,63 @@ fn last_top_level_read(
         }
     }
     (drops == 1).then_some(last).flatten()
+}
+
+/// An op that reads a heap value through its block without taking it: its
+/// address, a slot load or store, a copy.
+fn block_read(op: &Op) -> bool {
+    matches!(
+        op,
+        Op::Prim { kind: crate::PrimKind::Handle | crate::PrimKind::Load { .. } | crate::PrimKind::LoadHandle | crate::PrimKind::Store { .. }, .. }
+            | Op::Dup { .. }
+    )
+}
+
+/// A read of `v`'s block, or of a value borrowing from it, that leaves `v`
+/// where it is: what it defines may borrow too (a copy, a call result or a
+/// scalar slot load does not). `false` = an op that could take `v` or hand a
+/// borrow of it to something that outlives the release (a return, a rebind
+/// of `v`, a call or store taking `v` itself).
+fn through_block(op: &Op, v: ValueId, derived: &mut std::collections::BTreeSet<ValueId>) -> bool {
+    match op {
+        Op::Return { .. } | Op::Consume { .. } => false,
+        Op::SetLocal { local, src } => {
+            if *local == v || !derived.contains(src) {
+                return false;
+            }
+            derived.insert(*local);
+            true
+        }
+        Op::Dup { .. } | Op::Prim { kind: crate::PrimKind::Load { .. }, .. } => true,
+        Op::CallFn { args, .. } => !args.iter().any(|a| matches!(a, crate::CallArg::Handle(x) | crate::CallArg::Scalar(x) if *x == v)),
+        _ if releases(op, v) => false,
+        _ => {
+            if let Some(dv) = crate::mir_ops::defined_value(op) {
+                derived.insert(dv);
+            }
+            true
+        }
+    }
+}
+
+/// `op` is the release of `v` (any of the typed releases).
+fn releases(op: &Op, v: ValueId) -> bool {
+    matches!(op,
+        Op::Drop { v: x } | Op::DropListStr { v: x } | Op::DropVariant { v: x, .. } | Op::DropWrapperRec { v: x, .. }
+        | Op::DropValue { v: x } | Op::DropListValue { v: x } | Op::DropListStrValue { v: x }
+        | Op::DropResultValue { v: x } | Op::DropResultListValue { v: x } | Op::DropResultValueInt { v: x }
+        | Op::DropResultListValueInt { v: x } | Op::DropListStrStr { v: x } | Op::DropListIntStr { v: x }
+        | Op::DropListStrInt { v: x } | Op::DropResultStrInt { v: x } | Op::DropResultListStrInt { v: x }
+        | Op::DropResultListStr { v: x } | Op::DropListListStr { v: x } if *x == v)
+}
+
+/// The op that closes the top-level loop or branch holding `ops[j]` (`j`
+/// itself at the top level): a release after it runs once.
+fn top_level_end(func: &MirFunction, at_depth: &[i32], j: usize) -> Option<usize> {
+    if at_depth[j] == 0 && !matches!(func.ops[j], Op::IfThen { .. } | Op::LoopStart | Op::Else { .. }) {
+        return Some(j);
+    }
+    (j + 1..func.ops.len()).find(|&k| at_depth[k] == 0 && matches!(func.ops[k], Op::EndIf { .. } | Op::LoopEnd))
 }
 
 /// The op at which the render writes the read `ops[j]` makes: `j` itself,
