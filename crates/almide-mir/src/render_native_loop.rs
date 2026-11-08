@@ -445,18 +445,6 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             st.tys.insert(*dst, t);
             line!("let mut {} = {};", var(*dst), var(*src));
         }
-        // A copy no op reads, only releases (`let snap = b.m` read through
-        // the field it was taken from): the copy and its release cancel, and
-        // the releases erase to scope end, so nothing is made at all.
-        Op::Dup { dst, src }
-            if !crate::render_native_move::drill_no_moves()
-                && matches!(st.tys.get(src), Some(NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)))
-                && unread_copy(func, i, *dst) =>
-        {
-            let t = st.tys[src];
-            st.tys.insert(*dst, t);
-            line!("// {}: a copy nothing reads, elided", var(*dst));
-        }
         // A copy of a borrowed field read off an owned record that dies
         // here moves the field out (#4006, no-perf-loss): nothing reads
         // the record again, so its field is the copy.
@@ -606,19 +594,4 @@ fn owned_of_ref(t: NTy) -> NTy {
         NTy::RecRef(j) => NTy::Rec(j),
         _ => NTy::VecStr,
     }
-}
-
-/// The copy `dst` made at `ops[at]` is never read: every other op naming it
-/// releases exactly it, and it is not the function's result.
-fn unread_copy(func: &MirFunction, at: usize, dst: ValueId) -> bool {
-    let mut vs = Vec::new();
-    func.ret != Some(dst)
-        && func.ops.iter().enumerate().all(|(j, op)| {
-            if j == at {
-                return true;
-            }
-            vs.clear();
-            crate::mir_ops::op_values(op, &mut vs);
-            !vs.contains(&dst) || crate::native_move_params::is_release(op, dst)
-        })
 }
