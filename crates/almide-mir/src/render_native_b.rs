@@ -574,6 +574,18 @@ fn render_declared_floor_call(
     };
     let dst_map = dst.and_then(crate::render_native_rec::declared_map);
     let (expr, ret) = crate::native_floor::render_call(floor, name, &rendered, &dying, dst_map)?;
+    // A result read only through borrows, from a Value the function borrows:
+    // the runtime's borrowing twin, no copy of the field (v0's decode path).
+    let by_ref = match (dst, &floor.borrow_twin) {
+        (Some(d), Some((twin, items))) if crate::render_native_borrow_read::borrowed_result(*d) && edited.is_none() => {
+            Some((twin.as_str(), items))
+        }
+        _ => None,
+    };
+    let expr = match by_ref {
+        Some((twin, _)) => expr.replacen(&format!("{}(", floor.symbol), &format!("{twin}("), 1),
+        None => expr,
+    };
     let (expr, ret) = match edited {
         Some((src, own)) => (
             format!("{{ let mut __edited: {t} = {src}; {expr}; __edited }}", t = crate::render_native_rec::owned_ty(own)),
@@ -582,8 +594,9 @@ fn render_declared_floor_call(
         None => (expr, ret),
     };
     used_shims.push(crate::native_floor::FLOOR_HEADER);
-    match &floor.twin {
-        Some((_, twin, items)) if expr.contains(&format!("{twin}(")) => used_shims.extend(items.iter().copied()),
+    match (&floor.twin, by_ref) {
+        (_, Some((_, items))) => used_shims.extend(items.iter().copied()),
+        (Some((_, twin, items)), None) if expr.contains(&format!("{twin}(")) => used_shims.extend(items.iter().copied()),
         _ => used_shims.extend(floor.items.iter().copied()),
     }
     for _ in 0..indent {
@@ -592,7 +605,13 @@ fn render_declared_floor_call(
     match (dst, ret) {
         (Some(d), Some(t)) => {
             tys.insert(*d, t);
-            let ty_name = crate::render_native_rec::owned_ty(t);
+            let ty_name = match by_ref {
+                Some(_) => format!(
+                    "Result<&{}, AlmideString>",
+                    crate::render_native_rec::owned_ty(NTy::Rec(crate::render_native_rec::value_index()))
+                ),
+                None => crate::render_native_rec::owned_ty(t),
+            };
             writeln!(out, "let mut {}: {} = {};", var(*d), ty_name, expr).expect("writing to a String cannot fail");
         }
         (None, _) => writeln!(out, "{expr};").expect("writing to a String cannot fail"),

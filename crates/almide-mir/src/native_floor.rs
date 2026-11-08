@@ -209,6 +209,9 @@ pub(crate) struct FloorFn {
     /// only (owner ruling ○, 2026-11-04): the call's list must be a String
     /// list, which carries no Float bits.
     pub str_only: bool,
+    /// The runtime's borrowing `_ref` twin of a `Result[Value, String]` body
+    /// (its symbol, its items): the Ok side a reference into the Value arg.
+    pub borrow_twin: Option<(String, Vec<&'static str>)>,
 }
 
 /// The floor entry the declaration of stdlib call `call` (`module.fn`) gives,
@@ -702,7 +705,8 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         same.then(|| Some((r.param, t.to_string(), closure(t, rt).ok()?)))?
     });
     let str_only = elem_typed && almide_lang::capability_bounds::of(module, func).next().is_some();
-    Ok(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only })
+    let borrow_twin = borrow_twin_of(fret, &symbol, &rust_params, rt);
+    Ok(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only, borrow_twin })
 }
 
 fn simple(t: &TypeExpr) -> Option<&str> {
