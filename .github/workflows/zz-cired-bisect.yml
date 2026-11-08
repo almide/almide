@@ -10,14 +10,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sha: [ddfbee11ee30, 4b783ec68dd5, 3e7bee510add, 7b6d79c952b6, a1b2e0d5e9b9, fea08cf366de, b345382cfe43, 7c4cee50c3ae, 08aed3731420, 6ea62c3e9643, f394a10ec964, 1856930196cb, 9eb529043ae4, 0adac2f7d808, c9821cd45bcb]
+        sha: [ddfbee11ee306ae3eb9809c0183b8bdace319042, 4b783ec68dd599cf5d9b408e26ec44aaea9d4218, 3e7bee510add1f909f1a6150adf47be05d11a1ef, 7b6d79c952b64d914497298bc2a41bbb10985d06, a1b2e0d5e9b964c29be2a95e2fba8659b545f57a, fea08cf366de255b0421e85e4bcedc1a485e3e94, b345382cfe43f37c66a79e5a4299fab9b092caea, 7c4cee50c3ae379d80243babab9d0c402b772e99, 08aed3731420c8ef7675e4002e775d64c2d0751a, 6ea62c3e9643d3b0ae996716b077e24e0c637779, f394a10ec9645b84fa1164283c1e5ba593867881, 1856930196cbc523efaa2850ecec8347ee625418, 9eb529043ae42fcf54ec73fef353ecec7bd4e9da, 0adac2f7d808998f0dd1759d0fd88867e02ef7a0, c9821cd45bcb363651e948d70e3ba71db33224cc]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { path: tool }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { path: src, ref: "${{ matrix.sha }}", fetch-depth: 0 }
+        with: { path: src, ref: "${{ matrix.sha }}", fetch-depth: 1 }
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with: { toolchain: "1.97.0" }
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
