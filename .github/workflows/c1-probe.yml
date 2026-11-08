@@ -38,6 +38,9 @@ jobs:
             /tmp/$n.force > /tmp/$n.force.out 2>&1; echo "exit $?" >> /tmp/$n.force.out
             cmp -s /tmp/$n.force.out /tmp/$n.v0.out && echo "FORCE SAME $n" || { echo "FORCE DIFF $n"; diff /tmp/$n.force.out /tmp/$n.v0.out; }
           done
+      - name: debug
+        if: always()
+        run: C1DBG=1 ./target/release/almide build spec/wasm_cross/mut_param_call_chain.almd -o /tmp/cc 2>&1 | grep C1DBG | head -80 || true
       - name: dumps and profiles
         if: always()
         run: |

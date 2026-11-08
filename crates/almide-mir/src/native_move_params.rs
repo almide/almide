@@ -131,6 +131,10 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BT
         // Or copied only, once on each path (`if c then f(xs) else ()`'s
         // write-back copy in each arm): each copy is its last use there.
         let copies = named.iter().all(|&i| matches!(func.ops[i], Op::Dup { src, .. } if src == p.value));
+        if std::env::var("C1DBG").is_ok() && func.name.contains("grow_if") {
+            eprintln!("C1DBG {} k={k} named={:?} copies={copies} every={}", func.name, named, crate::mir_liveness::last_use_on_every_path(func, p.value, &named));
+            for (i, op) in func.ops.iter().enumerate() { eprintln!("C1DBG   {i}: {op:?}"); }
+        }
         if copies && func.ret != Some(p.value) && crate::mir_liveness::last_use_on_every_path(func, p.value, &named) {
             out.extend(named.iter().map(|&i| (k, i)));
         }
@@ -174,6 +178,7 @@ fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BTreeMa
     for i in at.into_iter().rev() {
         f.ops.remove(i);
     }
+    if std::env::var("C1DBG").is_ok() && f.name.contains("grow_if") { eprintln!("C1DBG verify {:?}", crate::verify_ownership(&f).err()); }
     crate::verify_ownership(&f).is_ok().then_some(f)
 }
 
