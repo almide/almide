@@ -18,7 +18,6 @@ fn __filterrc_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) 
     } else __filterrc_fill(dh, sh, f, n, i + 1, di)
   }
 
-@specializes("list.filter")
 fn list_filter_rc(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)

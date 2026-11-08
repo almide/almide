@@ -22,21 +22,9 @@ jobs:
           save-if: false
       - name: build
         run: cargo build --release --bin almide && cargo build --release -p almide-mir --example emit_native_bundle
-      - name: profile closures_and_variants
-        run: |
-          set +e
-          sudo apt-get install -y -qq valgrind > /dev/null
-          mkdir -p dumps
-          f=closures_and_variants
-          ./target/release/examples/emit_native_bundle spec/wasm_cross/$f.almd dumps/$f.v1.rs > /dev/null 2>&1
-          ./target/release/almide spec/wasm_cross/$f.almd --target rust > dumps/$f.v0.rs 2>&1
-          ALMIDE_VERIFIED_DEBUG=1 ./target/release/almide build spec/wasm_cross/$f.almd -o /tmp/$f.v1 > /dev/null 2>&1
-          ALMIDE_NO_VERIFIED_OK=1 ./target/release/almide build spec/wasm_cross/$f.almd --no-verified -o /tmp/$f.v0 > /dev/null 2>&1
-          for l in v1 v0; do
-            valgrind --tool=callgrind --callgrind-out-file=/tmp/cg.$l /tmp/$f.$l > /dev/null 2>&1
-            echo "== $l"; callgrind_annotate --inclusive=no /tmp/cg.$l 2>/dev/null | grep -v "ld-linux" | head -60 | cut -c1-200
-          done
+      - name: walls
+        run: cargo test --release --test c1_probe_walls_test -- --nocapture
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: dumps
-          path: dumps
+          name: c1-walls
+          path: c1-walls.tsv
