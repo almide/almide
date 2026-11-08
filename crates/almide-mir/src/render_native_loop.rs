@@ -511,6 +511,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         Op::Dup { dst, src }
             if st.tys.get(src) == Some(&NTy::StrRef)
                 && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
+                    if !matches!(st.tys.get(&base), Some(NTy::ResStr | NTy::Res)) { eprintln!("HIT513 {} {:?} {:?}", func.name, st.tys.get(&base), take); }
                     matches!(st.tys.get(&base), Some(NTy::ResStr | NTy::Res))
                         && crate::render_native_move::result_param_dies(func, i, base)
                         && crate::render_native_addr::reads_of_take(&take)
