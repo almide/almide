@@ -175,7 +175,13 @@ impl Emitter<'_> {
             let k = c.trailing_zeros();
             let mut i = self.f.instructions();
             i.local_get(hx);
-            i.local_get(hx).i64_const(63).i64_shr_s().i64_const(64 - i64::from(k)).i64_shr_u();
+            // The bias `(x >>s 63) >>u (64 - k)`: for k = 1 that is the
+            // sign bit itself, `x >>u 63` (#4611).
+            if k == 1 {
+                i.local_get(hx).i64_const(63).i64_shr_u();
+            } else {
+                i.local_get(hx).i64_const(63).i64_shr_s().i64_const(64 - i64::from(k)).i64_shr_u();
+            }
             i.i64_add().i64_const(i64::from(k)).i64_shr_s();
             if !is_div {
                 i.local_set(scr);
@@ -262,7 +268,20 @@ impl Emitter<'_> {
                 {
                     let c = *c;
                     if !matches!(c, 0 | -1 | i64::MIN) {
+                        // #4611: a dividend the range facts prove >= 0
+                        // (int_range.rs) divides by 2^k as one unsigned
+                        // shift, and its remainder is a mask.
+                        let nonneg_pow2 = c > 1 && (c as u64).is_power_of_two() && self.int_nonneg(left);
                         self.lower(left, Some(INT))?;
+                        if nonneg_pow2 {
+                            let mut i = self.f.instructions();
+                            if matches!(op, DivInt) {
+                                i.i64_const(i64::from(c.trailing_zeros())).i64_shr_u();
+                            } else {
+                                i.i64_const(c - 1).i64_and();
+                            }
+                            return Ok(INT);
+                        }
                         if c == 1 {
                             if matches!(op, ModInt) {
                                 self.f.instructions().i64_const(0).i64_and();
