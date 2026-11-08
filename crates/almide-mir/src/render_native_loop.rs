@@ -505,7 +505,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         Op::Dup { dst, src }
             if st.tys.get(src) == Some(&NTy::StrRef)
                 && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
-                    st.tys.get(&base) == Some(&NTy::ResStr)
+                    matches!(st.tys.get(&base), Some(NTy::ResStr | NTy::Res))
                         && crate::render_native_move::result_param_dies(func, i, base)
                         && crate::render_native_addr::reads_of_take(&take)
                             .iter()
@@ -514,7 +514,11 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         {
             let (base, _) = crate::render_native_addr::payload_take_of(*src).expect("a payload read");
             st.tys.insert(*dst, NTy::Str);
-            line!("let mut {} = match {} {{ Ok(s) | Err(s) => s }};", var(*dst), var(base));
+            if st.tys.get(&base) == Some(&NTy::ResStr) {
+                line!("let mut {} = match {} {{ Ok(s) | Err(s) => s }};", var(*dst), var(base));
+            } else {
+                line!("let mut {} = match {} {{ Err(e) => e, Ok(_) => AlmideString::new() }};", var(*dst), var(base));
+            }
         }
         // A copy of a value nothing reads again moves it (no clone).
         Op::Dup { dst, src }
@@ -526,6 +530,19 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             let t = st.tys[src];
             st.tys.insert(*dst, t);
             line!("let mut {} = {};", var(*dst), crate::render_native_move::take_expr(&var(*src)));
+        }
+        // A String-Ok carrier over an owned string nothing reads again takes it.
+        Op::Prim { kind: crate::PrimKind::ResStrMake, dst: Some(d), args }
+            if args.len() == 1
+                && st.tys.get(&args[0]) == Some(&NTy::Str)
+                && crate::render_native_move::last_use(func, i, args[0], NTy::Str, &st.borrows.arms) =>
+        {
+            st.tys.insert(*d, NTy::ResStr);
+            line!(
+                "let mut {}: Result<AlmideString, AlmideString> = Ok({});",
+                var(*d),
+                crate::render_native_move::take_expr(&var(args[0]))
+            );
         }
         // An error carrier over an owned string nothing reads again takes it.
         Op::Prim { kind: crate::PrimKind::ResMakeErrStr, dst: Some(d), args }
