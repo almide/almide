@@ -127,19 +127,19 @@ fn main() {
 }
 "#);
     let dir = std::env::temp_dir().join(format!("almide-native-f32-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir_all(&dir).expect("create the temp dir");
     let path = dir.join("family.rs");
-    std::fs::write(&path, source).unwrap();
+    std::fs::write(&path, source).expect("write the probe source");
     for opt in ["0", "3"] {
         let binary = dir.join(format!("family-{opt}"));
         let compiled = Command::new("rustc").args(["--edition=2021", "-C", &format!("opt-level={opt}")])
-            .arg(&path).arg("-o").arg(&binary).output().unwrap();
+            .arg(&path).arg("-o").arg(&binary).output().expect("run rustc");
         assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
-        let ran = Command::new(binary).output().unwrap();
+        let ran = Command::new(binary).output().expect("run the probe binary");
         assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
         assert!(ran.stdout.is_empty());
     }
-    std::fs::remove_dir_all(dir).unwrap();
+    std::fs::remove_dir_all(dir).expect("remove the temp dir");
 }
 
 #[test]

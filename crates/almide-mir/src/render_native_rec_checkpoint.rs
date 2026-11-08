@@ -46,7 +46,7 @@ mod checkpoint_tests {
             vec![a.clone()],
             Default::default(),
         );
-        let first = rec_index(&block_key(&a)).unwrap();
+        let first = rec_index(&block_key(&a)).expect("the installed tuple has a record index");
         let checkpoint = link_checkpoint();
         extend_with(std::slice::from_ref(&b));
         assert!(rec_index(&block_key(&b)).is_some());

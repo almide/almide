@@ -258,7 +258,10 @@ test "fallible map stops at the first err" {
 // Sum uses the same sequential reducer as fold on the wasm leg, including
 // a counted range head and numeric results after heap-valued map stages.
 test "sum streams range map filter without changing numeric order" {
-  assert_eq(list.range(0, 1000) |> list.map((x) => x * 3) |> list.filter((x) => x % 2 == 0) |> list.sum, 748500)
+  assert_eq(
+    list.range(0, 1000) |> list.map((x) => x * 3) |> list.filter((x) => x % 2 == 0) |> list.sum,
+    748500,
+  )
   assert_eq(list.range(5, 2) |> list.map((x) => x + 1) |> list.sum, 0)
   assert_eq([9223372036854775807, 1] |> list.map((x) => x) |> list.sum, -9223372036854775808)
   assert_eq([10000000000000000.0, 1.0, -10000000000000000.0] |> list.map((x) => x) |> list.sum, 0.0)

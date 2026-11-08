@@ -20,7 +20,7 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
                 Err(wall("native: a shared cell must have exactly one slot"))
             } else {
                 tys.insert(*dst, NTy::Rec(i));
-                writeln!(out, "let mut {}: {} = Default::default();", var(*dst), rec::struct_name(i)).unwrap();
+                writeln!(out, "let mut {}: {} = Default::default();", var(*dst), rec::struct_name(i)).expect("writing to a String cannot fail");
                 Ok(())
             });
         }
@@ -38,7 +38,7 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
     Some((|| {
         if matches!(op, Op::Prim { kind: PrimKind::Load { width: 4 }, .. }) && ad.off == i64::from(BLOCK_LEN_OFFSET) && ad.idx.is_none() {
             let Op::Prim { dst: Some(d), .. } = op else { return Err(wall("native: a cell length read without a destination")) };
-            tys.insert(*d, NTy::I64); writeln!(out, "let mut {}: i64 = 1;", var(*d)).unwrap(); return Ok(());
+            tys.insert(*d, NTy::I64); writeln!(out, "let mut {}: i64 = 1;", var(*d)).expect("writing to a String cannot fail"); return Ok(());
         }
         if rec_slot(&ad) != Some(0) { return Err(wall("native: shared cell access outside its sole fixed slot")); }
         let slot = bounds_slot(st, &ad);
@@ -49,15 +49,15 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
         match op {
             Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(d), .. } if payload == NTy::I64 => {
                 crate::render_native_bounds::access(slot); tys.insert(*d, payload);
-                writeln!(out, "let mut {}: i64 = {base}.borrow().as_ref().copied().expect(\"initialized shared cell\");", var(*d)).unwrap();
+                writeln!(out, "let mut {}: i64 = {base}.borrow().as_ref().copied().expect(\"initialized shared cell\");", var(*d)).expect("writing to a String cannot fail");
             }
             Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), .. } if payload != NTy::I64 => {
                 crate::render_native_bounds::access(slot); tys.insert(*d, payload);
-                writeln!(out, "let mut {}: {} = {base}.borrow().as_ref().expect(\"initialized shared cell\").clone();", var(*d), rec::owned_ty(payload)).unwrap();
+                writeln!(out, "let mut {}: {} = {base}.borrow().as_ref().expect(\"initialized shared cell\").clone();", var(*d), rec::owned_ty(payload)).expect("writing to a String cannot fail");
             }
             Op::CallFn { dst: Some(d), name, .. } if name == "__mg_take" => {
                 crate::render_native_bounds::access(slot); tys.insert(*d, payload);
-                writeln!(out, "let mut {}: {} = {base}.borrow_mut().take().expect(\"initialized shared cell\");", var(*d), rec::owned_ty(payload)).unwrap();
+                writeln!(out, "let mut {}: {} = {base}.borrow_mut().take().expect(\"initialized shared cell\");", var(*d), rec::owned_ty(payload)).expect("writing to a String cannot fail");
             }
             Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 => {
                 let rhs = args[1];
@@ -81,7 +81,7 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
                     } }
                 };
                 crate::render_native_bounds::store(slot);
-                writeln!(out, "*{base}.borrow_mut() = Some({value});").unwrap();
+                writeln!(out, "*{base}.borrow_mut() = Some({value});").expect("writing to a String cannot fail");
             }
             _ => return Err(wall("native: unsupported shared-cell operation")),
         }

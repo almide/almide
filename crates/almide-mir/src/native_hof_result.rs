@@ -68,7 +68,7 @@ mod tuple_result_tests {
         let d = DTy::List(Box::new(DTy::Tuple(vec![DTy::Int, DTy::Str])));
         let env = Env::new();
         assert_eq!(kind_of(&env, &DTy::Tuple(vec![DTy::Int, DTy::Str])), Some(NTy::Rec(1)));
-        let expr = runtime_result(&env, &d, "runtime_call()").unwrap();
+        let expr = runtime_result(&env, &d, "runtime_call()").expect("a list of int-string tuples has a runtime result");
         assert_eq!(expr.matches("runtime_call()").count(), 1);
         assert!(expr.contains(&rec::struct_name(1)));
         assert!(!expr.contains(&format!("{} {{", rec::struct_name(0))));
@@ -85,7 +85,7 @@ mod tuple_result_tests {
         let env = Env::from([("V".into(), NTy::F64)]);
         let pair = DTy::Tuple(vec![DTy::Str, DTy::Var("V".into())]);
         assert_eq!(kind_of(&env, &pair), Some(NTy::Rec(0)));
-        let code = runtime_result(&env, &pair, "read_map()").unwrap();
+        let code = runtime_result(&env, &pair, "read_map()").expect("a string-float tuple has a runtime result");
         assert!(code.contains("(__tuple_1).to_bits() as i64"));
         assert_eq!(code.matches("read_map()").count(), 1);
     }
