@@ -451,6 +451,18 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             st.tys.insert(*dst, t);
             line!("let mut {} = {};", var(*dst), var(*src));
         }
+        // A copy no op reads, only releases (`let snap = b.m` read through
+        // the field it was taken from): the copy and its release cancel, and
+        // the releases erase to scope end, so nothing is made at all.
+        Op::Dup { dst, src }
+            if !crate::render_native_move::drill_no_moves()
+                && matches!(st.tys.get(src), Some(NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)))
+                && unread_copy(func, i, *dst) =>
+        {
+            let t = st.tys[src];
+            st.tys.insert(*dst, t);
+            line!("// {}: a copy nothing reads, elided", var(*dst));
+        }
         // A copy of a borrowed field read off an owned record that dies
         // here moves the field out (#4006, no-perf-loss): nothing reads
         // the record again, so its field is the copy.
@@ -464,10 +476,16 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                             .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))
                 }) =>
         {
-            let (_, place) = crate::render_native_addr::field_of(*src).expect("a field read");
+            let (base, place) = crate::render_native_addr::field_of(*src).expect("a field read");
             let owned = owned_of_ref(st.tys[src]);
             st.tys.insert(*dst, owned);
-            line!("let mut {} = std::mem::take(&mut {place});", var(*dst));
+            // A record rebound next leaves by a plain partial move: no
+            // `Default` written into a block about to be dropped.
+            if crate::render_native_addr::rebound_next(func, i, base) {
+                line!("let mut {} = {place};", var(*dst));
+            } else {
+                line!("let mut {} = std::mem::take(&mut {place});", var(*dst));
+            }
         }
         // The same move for a borrowed payload read with no place of its own
         // (an enum case's slot, a Result side): the carrier dies at the copy,
@@ -475,7 +493,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         Op::Dup { dst, src }
             if matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef | NTy::RecRef(_)))
                 && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
-                    matches!(st.tys.get(&base), Some(NTy::Rec(_)))
+                    crate::render_native_move::payload_carrier(st.tys.get(&base).copied())
                         && crate::render_native_move::carrier_dies_after(func, i, base, &st.borrows.arms)
                         && crate::render_native_addr::reads_of_take(&take)
                             .iter()
@@ -486,6 +504,27 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             let owned = owned_of_ref(st.tys[src]);
             st.tys.insert(*dst, owned);
             line!("let mut {} = {take};", var(*dst));
+        }
+        // The same move out of a String-Ok Result param (the callee's own,
+        // never rebound) that no path reads after the copy: it goes by value,
+        // the param needing no `mut`.
+        Op::Dup { dst, src }
+            if st.tys.get(src) == Some(&NTy::StrRef)
+                && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
+                    matches!(st.tys.get(&base), Some(NTy::ResStr | NTy::Res))
+                        && crate::render_native_move::result_param_dies(func, i, base)
+                        && crate::render_native_addr::reads_of_take(&take)
+                            .iter()
+                            .all(|r| !crate::mir_liveness::live_after(func, i, *r))
+                }) =>
+        {
+            let (base, _) = crate::render_native_addr::payload_take_of(*src).expect("a payload read");
+            st.tys.insert(*dst, NTy::Str);
+            if st.tys.get(&base) == Some(&NTy::ResStr) {
+                line!("let mut {} = match {} {{ Ok(s) | Err(s) => s }};", var(*dst), var(base));
+            } else {
+                line!("let mut {} = match {} {{ Err(e) => e, Ok(_) => AlmideString::new() }};", var(*dst), var(base));
+            }
         }
         // A copy of a value nothing reads again moves it (no clone).
         Op::Dup { dst, src }
@@ -600,4 +639,19 @@ fn owned_of_ref(t: NTy) -> NTy {
         NTy::RecRef(j) => NTy::Rec(j),
         _ => NTy::VecStr,
     }
+}
+
+/// The copy `dst` made at `ops[at]` is never read: every other op naming it
+/// releases exactly it, and it is not the function's result.
+fn unread_copy(func: &MirFunction, at: usize, dst: ValueId) -> bool {
+    let mut vs = Vec::new();
+    func.ret != Some(dst)
+        && func.ops.iter().enumerate().all(|(j, op)| {
+            if j == at {
+                return true;
+            }
+            vs.clear();
+            crate::mir_ops::op_values(op, &mut vs);
+            !vs.contains(&dst) || crate::native_move_params::is_release(op, dst)
+        })
 }

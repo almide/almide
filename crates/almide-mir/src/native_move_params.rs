@@ -27,7 +27,9 @@
 //! Out of scope, by one rule — a function whose callers are not all its
 //! direct named call sites keeps borrowing: `main`, a function taken as a
 //! value (`FuncRef`, so a closure call may reach it), and the render-linked
-//! runtime names (dotted or `__`-prefixed).
+//! runtime names (dotted or `__`-prefixed). A dotted name the program itself
+//! defines (a type's `T.decode`, its derived workers, a lifted `__almd_lift_N`)
+//! is called by name only.
 
 use crate::{MirFunction, Op, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
@@ -99,7 +101,12 @@ fn movable_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Vec<(usi
 /// `List[List[Int]]` carry starts its slot as `acc + []`, which copied every
 /// element list per call where the standard codegen moves the argument in.
 /// Returns (param index, the concatenation's op index).
-fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Modes<'_>) -> Vec<(usize, usize)> {
+fn consumed_params(
+    func: &MirFunction,
+    takes: &dyn Fn(usize) -> bool,
+    hands: &dyn Fn(usize) -> bool,
+    owned: &Modes<'_>,
+) -> Vec<(usize, usize)> {
     let depth = depths(func);
     let mut out = Vec::new();
     for (k, p) in func.params.iter().enumerate() {
@@ -162,6 +169,19 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Mo
             out.extend(given.iter().map(|&i| (k, i)));
             continue;
         }
+        // Or given away in one arm of a top-level `if` and only read in the
+        // other (`match r { ok(_) => r, err(e) => err(f(e)) }`): taken over,
+        // the other arm releases it at its end. Only where every call site
+        // hands over a value it releases right after the call: a site that
+        // reads its argument again would copy it on both arms, where the
+        // borrowing body copies on the giving arm only.
+        if !given.is_empty() && func.ret != Some(p.value) && hands(k) {
+            if let Some(at) = arm_release(func, p.value, &given, &depth) {
+                out.extend(given.iter().map(|&i| (k, i)));
+                out.push((k, at));
+                continue;
+            }
+        }
         // Or a field of it is given away (`{ ...b, m: map.set(b.m, k, v) }`):
         // taken over, the record dies after its last read, so the field it
         // hands to a by-value position at its own last use moves out of it
@@ -176,6 +196,50 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Mo
         }
     }
     out
+}
+
+/// The op after which the non-giving arm of the top-level `if` that holds
+/// every give of `p` (`given`) releases it: that arm's last op (its `IfThen`
+/// or `Else` when it is empty). `None` unless the gives all sit in one arm,
+/// the other arm neither exits nor breaks, nothing after the `if` reads `p`,
+/// and with the release every path from the entry passes one of them.
+fn arm_release(func: &MirFunction, p: ValueId, given: &[usize], depth: &[i32]) -> Option<usize> {
+    let &first = given.first()?;
+    if given.iter().any(|&g| depth[g] < 1) {
+        return None;
+    }
+    let start = (0..first).rev().find(|&i| depth[i] == 0 && matches!(func.ops[i], Op::IfThen { .. }))?;
+    let mut els = None;
+    let mut end = None;
+    for j in start + 1..func.ops.len() {
+        if depth[j] != 0 {
+            continue;
+        }
+        match func.ops[j] {
+            Op::Else { .. } => els = Some(j),
+            Op::EndIf { .. } => {
+                end = Some(j);
+                break;
+            }
+            _ => return None,
+        }
+    }
+    let (els, end) = (els?, end?);
+    let (at, other) = if given.iter().all(|&g| g > start && g < els) {
+        (end - 1, els + 1..end)
+    } else if given.iter().all(|&g| g > els && g < end) {
+        (els - 1, start + 1..els)
+    } else {
+        return None;
+    };
+    let exits = func.ops[other].iter().any(|op| matches!(op, Op::Return { .. } | Op::LoopBreakUnless { .. }));
+    if exits || crate::mir_liveness::live_after(func, end, p) {
+        return None;
+    }
+    let mut f = func.clone();
+    f.ops.insert(at + 1, Op::Drop { v: p });
+    let moved: Vec<usize> = given.iter().map(|&g| if g > at { g + 1 } else { g }).chain([at + 1]).collect();
+    crate::mir_liveness::last_use_on_every_path(&f, p, &moved).then_some(at)
 }
 
 /// The last op that reads `p` or anything loaded from it, when `p` is only
@@ -231,9 +295,14 @@ fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>) -> Option<usiz
 
 /// Make the movable parameters of `func` move parameters, if the ownership
 /// mirror accepts the result.
-fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Modes<'_>) -> Option<MirFunction> {
+fn own_params(
+    func: &MirFunction,
+    takes: &dyn Fn(usize) -> bool,
+    hands: &dyn Fn(usize) -> bool,
+    owned: &Modes<'_>,
+) -> Option<MirFunction> {
     let movable = movable_params(func, takes);
-    let consumed: Vec<(usize, usize)> = consumed_params(func, takes, owned)
+    let consumed: Vec<(usize, usize)> = consumed_params(func, takes, hands, owned)
         .into_iter()
         .filter(|(k, _)| !movable.iter().any(|m| m.0 == *k))
         .collect();
@@ -292,7 +361,10 @@ fn release_after(func: &MirFunction, call: usize, v: ValueId, depth: &[i32]) -> 
     derived.remove(&v);
     let base = depth[call];
     for j in call + 1..ops.len() {
-        if depth[j] < base || (depth[j] == base && matches!(ops[j], Op::Else { .. } | Op::EndIf { .. } | Op::LoopEnd)) {
+        // The block ends where the depth drops below the call's: an `Else`,
+        // `EndIf` or `LoopEnd` at the call's own depth closes a region nested
+        // in the block, which the scan passes (it reads nothing of `v`).
+        if depth[j] < base {
             return None;
         }
         if matches!(ops[j], Op::Return { .. } | Op::LoopBreakUnless { .. }) {
@@ -516,7 +588,7 @@ impl Modes<'_> {
 /// other function's; its env (param 0) is always lent. A lambda that a
 /// closure call of several possible callees may reach keeps borrowing, and
 /// the modes are solved again.
-pub(crate) fn rewrite(functions: &mut [MirFunction]) {
+pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>) {
     if crate::render_native_move::drill_no_moves() {
         return;
     }
@@ -546,6 +618,23 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
             }
         }
     }
+    // (callee, position) pairs some call site fills with a value it does not
+    // release right after the call (it reads it again): that site would copy.
+    let mut kept: BTreeSet<(String, usize)> = BTreeSet::new();
+    for f in functions.iter() {
+        let depth = depths(f);
+        for (i, op) in f.ops.iter().enumerate() {
+            let Op::CallFn { name, args, .. } = op else { continue };
+            for (k, a) in args.iter().enumerate() {
+                if let crate::CallArg::Handle(v) = a {
+                    if release_after(f, i, *v, &depth).is_none() {
+                        kept.insert((name.clone(), k));
+                    }
+                }
+            }
+        }
+    }
+    let hands_at = |f: &MirFunction, k: usize| !taken.contains(&f.name) && !kept.contains(&(f.name.clone(), k));
     let mut pinned: BTreeSet<String> = BTreeSet::new();
     loop {
         let closure = |f: &MirFunction| {
@@ -553,13 +642,14 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
         };
         let eligible = |f: &MirFunction| {
             f.name != "main"
-                && !f.name.contains('.')
-                && (closure(f) || (!taken.contains(&f.name) && !f.name.starts_with("__")))
+                && (!f.name.contains('.') || own.contains(&f.name))
+                && (closure(f)
+                    || (!taken.contains(&f.name) && (!f.name.starts_with("__") || own.contains(&f.name))))
         };
         let takes_at = |f: &MirFunction, k: usize| {
             !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0)
         };
-        let Some((best, owned)) = solve_modes(functions, &table, &eligible, &takes_at) else {
+        let Some((best, owned)) = solve_modes(functions, &table, &eligible, &takes_at, &hands_at) else {
             // A closure call the mirror refuses to hand over at leaves every
             // closure borrowing, as before closures took part.
             let closures: Vec<String> = functions.iter().filter(|f| closure(f)).map(|f| f.name.clone()).collect();
@@ -609,6 +699,7 @@ fn solve_modes<'t>(
     table: &'t [(String, Vec<bool>)],
     eligible: &dyn Fn(&MirFunction) -> bool,
     takes_at: &dyn Fn(&MirFunction, usize) -> bool,
+    hands_at: &dyn Fn(&MirFunction, usize) -> bool,
 ) -> Option<(Vec<MirFunction>, Modes<'t>)> {
     let solve = |start: BTreeMap<String, Vec<bool>>, strict: bool| -> Option<(Vec<MirFunction>, Modes<'t>)> {
         let mut owned = Modes { by_name: start, table };
@@ -619,7 +710,8 @@ fn solve_modes<'t>(
                 .iter()
                 .map(|f| {
                     let takes = |k: usize| takes_at(f, k);
-                    if eligible(f) { own_params(f, &takes, &owned).unwrap_or_else(|| f.clone()) } else { f.clone() }
+                    let hands = |k: usize| hands_at(f, k);
+                    if eligible(f) { own_params(f, &takes, &hands, &owned).unwrap_or_else(|| f.clone()) } else { f.clone() }
                 })
                 .collect();
             let modes: BTreeMap<String, Vec<bool>> = next
