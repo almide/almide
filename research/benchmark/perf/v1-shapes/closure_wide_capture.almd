@@ -1,0 +1,19 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf.sh, #4006): a closure
+// capturing more words than the closure environment keeps inline, built and
+// called on every turn of a loop.
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn main() -> Unit = {
+  var i = 0
+  var acc = 0
+  while i < 200000 {
+    let a = i
+    let b = i + 1
+    let c = i + 2
+    let d = i + 3
+    let e = i + 4
+    acc = acc + apply((x) => x + a + b * c - d + e, i)
+    i = i + 1
+  }
+  println("${acc}")
+}
