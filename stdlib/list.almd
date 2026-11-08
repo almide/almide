@@ -144,8 +144,8 @@ fn __eq_str(a: List[String], b: List[String]) -> Bool = _
 // (`List[List[String]]`, `List[String?]`), so the element type is the type
 // argument instead of a name suffix. A Float specialization is refused by the
 // native route: its runtime generic would compare a Float list's bits.
-@intrinsic("almide_rt_list_eq")
-fn __eq[A](a: List[A], b: List[A]) -> Bool = _
+@intrinsic("almide_rt_list_eq_any")
+fn __eq_any[A](a: List[A], b: List[A]) -> Bool = _
 
 // Structural equality at the same declared boundary for nested containers.
 // Float elements retain IEEE equality, including signed zero and NaN.
