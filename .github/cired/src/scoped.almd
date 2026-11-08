@@ -1,0 +1,15 @@
+fn via_closure(xs: List[Int], n: Int) -> Int = {
+  let f = (i: Int) => list.get(xs, i) ?? 0
+  f(n) + f(n + 1)
+}
+
+fn main() -> Unit = {
+  let xs = list.range(0, 200000)
+  var t = 0
+  var k = 0
+  while k < 500 {
+    t = t + via_closure(xs, k)
+    k = k + 1
+  }
+  println("${t}")
+}

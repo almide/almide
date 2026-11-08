@@ -1,0 +1,30 @@
+import env
+
+type Buf = { text: String, n: Int }
+
+fn field(n: Int) -> Int = {
+  var b = Buf { text: "", n: 0 }
+  for _ in 0..<n {
+    b.text = b.text + "ab"
+    b.n = b.n + 1
+  }
+  b.n
+}
+
+fn interp(n: Int) -> Int = {
+  var s = ""
+  for _ in 0..<n {
+    s = "${s}ab"
+  }
+  string.len(s)
+}
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = int.parse(list.get(args, 1) ?? "0") ?? 0
+  let r = match list.get(args, 0) ?? "" {
+    "field" => field(n),
+    _ => interp(n),
+  }
+  println(int.to_string(r))
+}

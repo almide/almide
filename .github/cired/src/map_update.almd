@@ -1,0 +1,16 @@
+effect fn main() -> Unit = {
+  var m: Map[Int, Int] = list.range(0, 80000) |> list.map((i) => (i, 0)) |> map.from_list
+  let before = m
+  var i = 0
+  while i < 80000 {
+    m = map.update(m, i, (v) => v + i)
+    i = i + 1
+  }
+  m = map.update(m, -1, (v) => v + 1)
+  println("${map.len(m)} ${map.get(m, 0)} ${map.get(m, 79999)} ${map.get(m, -1)} ${map.get(before, 79999)}")
+  var s: Map[String, String] = map.from_list([("a", "x"), ("b", "y")])
+  let keep = s
+  s = map.update(s, "a", (v) => v + "!")
+  s = map.update(s, "zz", (v) => v + "?")
+  println("${s} ${keep}")
+}
