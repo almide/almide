@@ -36,7 +36,12 @@ fn runtime_result(env: &Env, d: &DTy, code: &str) -> Option<String> {
         }
         DTy::List(e) => {
             let body = runtime_result(env, e, "__item")?;
-            format!("({code}).into_iter().map(|__item| {body}).collect::<Vec<{}>>()", rec::owned_ty(kind_of(env, e)?))
+            // Reserved the way the runtime reserves (C-197's aborting
+            // reservation), never an infallibly sized `collect`.
+            format!(
+                "{{ let __src = {code}; let mut __out: Vec<{}> = Vec::new(); if __out.try_reserve_exact(__src.len()).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }} __out.extend(__src.into_iter().map(|__item| {body})); __out }}",
+                rec::owned_ty(kind_of(env, e)?)
+            )
         }
         DTy::Opt(e) => format!("({code}).map(|__some| {})", runtime_result(env, e, "__some")?),
         DTy::Result(ok, err) => format!("({code}).map(|__ok| {}).map_err(|__err| {})",

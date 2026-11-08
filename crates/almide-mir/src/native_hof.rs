@@ -89,6 +89,11 @@ pub(crate) struct Hof {
     /// The twin's name.
     pub twin: String,
     bounds: Vec<(String, almide_lang::capability_bounds::Cap)>,
+    /// The `@reuse` declaration's route (#3707): the param its owned twin
+    /// takes by value and that twin's static-dispatch name. A call that is
+    /// the last reader of that argument hands it over instead of the
+    /// borrowing body copying it into its result.
+    owned: Option<(usize, String)>,
 }
 
 fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
@@ -160,7 +165,14 @@ fn scalar_agrees(d: &DTy, r: &str, by_ref: bool) -> Option<bool> {
 fn composite_agrees(d: &DTy, r: &str, by_ref: bool) -> bool {
     match d {
         DTy::Tuple(_) => r.starts_with('(') && r.ends_with(')') && !by_ref,
-        DTy::List(_) => r.starts_with("Vec<") || (by_ref && r.starts_with('[')),
+        // A runtime generic standing for a concrete declared element
+        // (`fn f<M: Deref<Target = AlmideMatrix>>(xs: &[M])`) carries a bound
+        // the native element kind need not meet: not this route's.
+        DTy::List(e) => {
+            let inner = r.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).or_else(|| r.strip_prefix('[').and_then(|x| x.strip_suffix(']')));
+            let bare_param = inner.is_some_and(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_uppercase()));
+            (r.starts_with("Vec<") || (by_ref && r.starts_with('['))) && !(bare_param && !matches!(**e, DTy::Var(_)))
+        }
         DTy::Opt(_) => r.starts_with("Option<") && !by_ref,
         DTy::Map(..) => r.starts_with("AlmideMap<"),
         DTy::Set(_) => r.starts_with("AlmideSet<"),
@@ -210,6 +222,12 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
         generics.as_ref().and_then(|gs| gs.get(b.generic))
             .map(|g| (g.name.as_str().to_string(), b.cap)).ok_or("runtime bound has no declared generic")
     }).collect::<Result<Vec<_>, _>>()?;
+    // A Float list's cells are its bits on the native render: a Float
+    // specialization served by a runtime generic that compares its elements
+    // would compare the bits (`-0.0` against `0.0`, NaN against itself).
+    if !bounds.is_empty() && target != call && crate::native_floor::specialized_elem(call).as_deref() == Some("Float") {
+        return Err(format!("a Float specialization of `{target}`, whose runtime generic compares the list's bits"));
+    }
     let tps: BTreeSet<String> = generics.iter().flatten().map(|g| g.name.as_str().to_string()).collect();
     let dparams: Vec<DTy> = params.iter().map(|p| dty_of(&p.ty, &tps)).collect::<Option<_>>().ok_or("a param type outside the map")?;
     let dret = dty_of(ret, &tps).ok_or("a return type outside the map")?;
@@ -231,10 +249,43 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
     // A combinator takes its closure statically (`static_twin`); a call with
     // no function-typed param calls the runtime body as it is.
     if !params.iter().any(|(d, _)| matches!(d, DTy::Fn(..))) {
-        return Ok(Hof { twin: symbol.clone(), symbol, params, mutable, ret: dret, items, bounds });
+        return Ok(Hof { twin: symbol.clone(), symbol, params, mutable, ret: dret, items, bounds, owned: None });
     }
-    let (twin, items) = static_runtime_closure(&symbol, items).ok_or("the runtime body has no static callback route")?;
-    Ok(Hof { symbol, params, mutable, ret: dret, items, twin, bounds })
+    let (twin, mut items) = static_runtime_closure(&symbol, items).ok_or("the runtime body has no static callback route")?;
+    let owned = reuse_route(&symbol, &params, &dret, &mut items);
+    Ok(Hof { symbol, params, mutable, ret: dret, items, twin, bounds, owned })
+}
+
+/// The static route of `symbol`'s `@reuse` owned twin: the reused param and
+/// the twin's static name, adding the twin's items when the borrowing body
+/// does not already forward to it. Only an update that returns the same
+/// container it borrows qualifies, as on the declared floor
+/// (`native_floor::takes_by_value`).
+fn reuse_route(symbol: &str, params: &[(DTy, bool)], ret: &DTy, items: &mut Vec<&'static str>) -> Option<(usize, String)> {
+    let r = almide_lang::reuse::of_intrinsic(symbol)?;
+    let t = r.owned_twin?;
+    let (d, by_ref) = params.get(r.param)?;
+    if !*by_ref || d != ret || !matches!(d, DTy::List(_) | DTy::Set(_) | DTy::Map(..) | DTy::Bytes) {
+        return None;
+    }
+    let (tparams, _, titems) = crate::native_floor::runtime_body(t)?;
+    if tparams.len() != params.len() || tparams.get(r.param)?.trim_start().starts_with('&') {
+        return None;
+    }
+    let name = format!("{t}_static");
+    let carried = |items: &[&str]| items.iter().any(|i| crate::native_floor::runtime_fn_name(i).as_deref() == Some(name.as_str()));
+    if !carried(items.as_slice()) {
+        let (tw, more) = static_runtime_closure(t, titems)?;
+        if tw != name {
+            return None;
+        }
+        for i in more {
+            if !items.contains(&i) {
+                items.push(i);
+            }
+        }
+    }
+    carried(items.as_slice()).then_some((r.param, name))
 }
 
 include!("native_hof_static.rs");
@@ -559,11 +610,22 @@ fn plan(
     // key types accompany this adapter, only String-bound keys are admitted.
     let tuple_input = hof.params.iter().any(|(d, _)| !matches!(d, DTy::Fn(..)) && has_runtime_tuple(d));
     if tuple_input && hof.bounds.iter().any(|(v, _)| env.get(v) != Some(&NTy::Str)) { return None; }
+    // A generated struct or enum (a declared record or variant, a tuple)
+    // derives no ordering: an ordering-bound generic bound to one is v0's.
+    if hof.bounds.iter().any(|(v, cap)| *cap == almide_lang::capability_bounds::Cap::Ord && env.get(v).and_then(|k| k.rec()).is_some_and(|i| rec::field_count(i) > 0 || rec::enum_cases(i).is_some())) {
+        return None;
+    }
     let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
+    let mut twin = hof.twin.as_str();
     for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {
         if hof.mutable[k] {
             rendered.push(mutable_place_arg(a, code, *t, tys)?);
+            continue;
+        }
+        if let Some(owned) = handed_over(hof, k, a, *t) {
+            twin = owned;
+            rendered.push(runtime_arg(code, *t, false, true));
             continue;
         }
         rendered.push(match d {
@@ -591,9 +653,19 @@ fn plan(
         bind_param(&mut env, &hof.ret, clo::owned_nty(ret))?;
     }
     let ret = kind_of(&env, &hof.ret)?;
-    let expr = format!("{}({})", hof.twin, rendered.join(", "));
+    let expr = format!("{}({})", twin, rendered.join(", "));
     let expr = runtime_result(&env, &hof.ret, &expr)?;
     Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims, side.reads)))
+}
+
+/// The owned twin's name when argument `k` (`a`, of kind `t`) is the
+/// `@reuse` param, the call is its last reader, and the render holds it
+/// owned: the twin takes it over instead of the borrowing body copying it.
+fn handed_over<'h>(hof: &'h Hof, k: usize, a: &CallArg, t: NTy) -> Option<&'h str> {
+    let (param, name) = hof.owned.as_ref().filter(|(p, _)| *p == k)?;
+    let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
+    let owned = matches!(t, NTy::Vec | NTy::VecStr | NTy::Rec(_)) && crate::render_native::owned_nty(t) == t;
+    (dying && owned && !hof.mutable.iter().any(|m| *m) && hof.params[*param].1).then_some(name.as_str())
 }
 
 /// [`plan`]'s rendering of the plain value argument `k` of the call at op

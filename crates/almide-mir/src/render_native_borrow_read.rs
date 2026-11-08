@@ -33,7 +33,7 @@ pub(crate) fn borrow_reads(func: &MirFunction) -> BTreeSet<ValueId> {
             continue;
         }
         let Some(last) = last_borrowing_use(func, i, *d, &root) else { continue };
-        if block_untouched(func, i, last, base, &root) {
+        if block_untouched(func, i, through_enclosing_loops(func, i, last), base, &root) {
             out.insert(*d);
         }
     }
@@ -102,6 +102,36 @@ pub(crate) fn last_borrowing_use(func: &MirFunction, at: usize, d: ValueId, root
     Some(last)
 }
 
+/// `last` pushed out to the end of the outermost loop that holds it but not
+/// `from`: that loop's next round reads the value again after every op of its
+/// body, so the block must stay untouched through the whole loop, not only up
+/// to the value's last use in op order (a loop over a field whose body rebinds
+/// the record).
+fn through_enclosing_loops(func: &MirFunction, from: usize, last: usize) -> usize {
+    let mut stack: Vec<usize> = Vec::new();
+    let mut from_loops: Vec<usize> = Vec::new();
+    let mut outer: Option<usize> = None;
+    for (i, op) in func.ops.iter().enumerate() {
+        if i == from {
+            from_loops = stack.clone();
+        }
+        if i == last {
+            outer = stack.iter().copied().find(|s| !from_loops.contains(s));
+        }
+        match op {
+            Op::LoopStart => stack.push(i),
+            Op::LoopEnd => {
+                let start = stack.pop();
+                if outer.is_some() && start == outer {
+                    return i;
+                }
+            }
+            _ => {}
+        }
+    }
+    last
+}
+
 /// No op in `(from, to]` writes, rebinds or moves `base`'s block: the ops that
 /// name it (or an address into it) are address arithmetic and loads only.
 fn block_untouched(func: &MirFunction, from: usize, to: usize, base: ValueId, root: &BTreeMap<ValueId, ValueId>) -> bool {
@@ -160,8 +190,7 @@ pub(crate) fn borrowed_results(func: &MirFunction) -> BTreeSet<ValueId> {
             continue;
         }
         let sources_borrowed = floor.params.iter().zip(args).all(|(p, a)| match (p, a) {
-            (crate::native_floor::FloorParam::Value(_), CallArg::Handle(v)) => borrowed_param(*v),
-            (crate::native_floor::FloorParam::Value(_), _) => false,
+            (crate::native_floor::FloorParam::Value(_), a) => matches!(a, CallArg::Handle(v) if borrowed_param(*v)),
             _ => true,
         });
         if sources_borrowed && only_borrowed_reads(func, i, *d, &root, &reads) {
