@@ -95,6 +95,9 @@ jobs:
           components: clippy
       - name: almide-mir tests
         run: cargo test -q --release -p almide-mir
+      - name: native differential and floor tests
+        if: always()
+        run: cargo test -q --release --test native_v1_differential_test --test native_verified_floor_test
       - name: rustc warning ratchet
         if: always()
         run: bash scripts/check-rustc-warnings.sh
