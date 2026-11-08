@@ -1,0 +1,23 @@
+// v1-vs-v0 shape bench: a Result-of-tuple param (a generated carrier) whose
+// String error is yielded by one match arm while the caller still reads the
+// Result after the call, so the param stays borrowed and the error is copied
+// out, inside a loop.
+fn reason(r: Result[(Int, Int), String]) -> String = match r {
+  ok((a, b)) => int.to_string(a + b),
+  err(e) => e,
+}
+
+fn main() -> Unit = {
+  var total = 0
+  var i = 0
+  while i < 100000 {
+    let r: Result[(Int, Int), String] = if i % 3 == 0 then err(int.to_string(i)) else ok((i, 1))
+    let tag = match r {
+      ok(_) => 1,
+      err(_) => 2,
+    }
+    total = total + string.len(reason(r)) + tag
+    i = i + 1
+  }
+  println(int.to_string(total))
+}
