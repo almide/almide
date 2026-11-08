@@ -119,10 +119,12 @@ pub(super) fn type_blocks(
     alloc_rec: &mut BTreeMap<ValueId, u16>,
     f: &Facts<'_>,
 ) -> BTreeSet<ValueId> {
-    // A block the lowering built as an all-scalar tuple, record or variant
-    // takes its declared type's by-value struct or enum.
+    // A block the lowering built as a typed aggregate or inlined Value
+    // takes its declared type's native representation.
     for (v, key) in &func.aggregate_blocks {
-        if let Some(i) = rec::rec_index(key).filter(|i| rec::all_scalar_struct(*i) || rec::enum_cases(*i).is_some()) {
+        if key == rec::VALUE_KEY {
+            alloc_rec.entry(*v).or_insert_with(rec::value_index);
+        } else if let Some(i) = rec::rec_index(key).filter(|i| rec::all_scalar_struct(*i) || rec::enum_cases(*i).is_some()) {
             alloc_rec.entry(*v).or_insert(i);
         } else if let Some(n) = anon_scalar_record_len(func, *v, key) {
             // An anonymous all-scalar record (`list.map((i) => { x: i, y: i })`)

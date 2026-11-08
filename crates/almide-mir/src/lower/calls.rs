@@ -139,6 +139,10 @@ impl LowerCtx {
             let zero = self.fresh_value();
             self.ops.push(Op::ConstInt { dst: zero, value: 0 });
             self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![addr, zero] });
+            // Inlining removes the call's declared return type. Preserve it
+            // just as for other typed aggregate allocations; native must not
+            // guess Value versus List from their shared physical layout.
+            self.aggregate_blocks.insert(dst, crate::render_native_rec::VALUE_KEY.to_string());
             return Ok(Some(dst));
         }
         // C1 DEFUNCTIONALIZATION — a `list.map`/`filter`/`fold` whose closure arg is an

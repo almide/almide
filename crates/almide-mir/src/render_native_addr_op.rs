@@ -244,6 +244,14 @@ fn addr_elem(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bool, Low
 fn slot_access_op(op: &Op, s: AddrSink<'_>) -> Result<Option<bool>, LowerError> {
     let AddrSink { st, tys, out, indent } = s;
     match op {
+        Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args }
+            if args.len() == 2 && st.null_init.remove(&args[0]) =>
+        {
+            // The exact fresh-Value constructor was checked before rendering;
+            // alloc_rec_block has already initialized its native Null value.
+            // Consume this site: a later tag mutation must still wall.
+            Ok(Some(true))
+        }
         Op::Prim { kind: PrimKind::Load { width }, dst: Some(d), args } if args.len() == 1 && st.addrs.contains_key(&args[0]) => {
             slot_load(AddrSink { st, tys, out, indent }, width, d, args).map(Some)
         }

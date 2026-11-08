@@ -30,6 +30,8 @@ mod map;
 mod slots;
 #[path = "render_native_heap_slot.rs"]
 mod heap_slot;
+#[path = "render_native_value.rs"]
+mod value;
 pub(crate) use carrier::{carrier_values, is_carrier, CarrierSig};
 pub(crate) use slots::flag_exits;
 
@@ -81,6 +83,8 @@ pub(crate) struct AddrState {
     /// from the type-bearing ops that consume them (a typed drop, a return, an
     /// argument to a user fn) — the declarations, never the slot contents.
     alloc_rec: BTreeMap<ValueId, u16>,
+    /// The one initializing tag store of each fresh, declared Null Value.
+    null_init: BTreeSet<ValueId>,
     /// DynList allocs whose every stored element is a string.
     str_lists: BTreeSet<ValueId>,
     /// A Result carrier's tag read → the carrier (its `if` selects the arm).
@@ -203,9 +207,11 @@ impl AddrState {
             })
             .collect();
         let addr_operands = addr_operands_of(func);
+        let null_init = value::null_initializers(func, &alloc_rec);
         AddrState {
             str_lists,
             alloc_rec,
+            null_init,
             addr_operands,
             consts: BTreeMap::new(),
             scaled: BTreeSet::new(),

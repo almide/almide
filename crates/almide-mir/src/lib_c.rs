@@ -50,10 +50,10 @@ pub struct MirFunction {
     /// The certificate writes these as the call-site move-out `M` on the
     /// argument's line, which proofs/NativeCalls.v binds to the site.
     pub call_moves: BTreeSet<usize>,
-    /// RENDER-ONLY side table: a block built as an all-scalar tuple or record
-    /// → its declared type (spelled as `render_native_rec::block_key`). The
-    /// native render builds it as that type's by-value struct; the block's
-    /// ops and the certificate are unchanged (the same slot list).
+    /// RENDER-ONLY side table: an aggregate allocation → its declared type
+    /// (spelled as `render_native_rec::block_key`). The native render uses
+    /// that type's struct, enum or container, including an inlined Value
+    /// constructor. The block's ops and the certificate are unchanged.
     pub aggregate_blocks: BTreeMap<ValueId, String>,
 }
 
