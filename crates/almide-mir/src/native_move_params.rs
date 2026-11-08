@@ -143,6 +143,11 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BT
             _ => false,
         };
         // Reads before them stay reads of the param it still holds.
+        if std::env::var("C1DBG").is_ok() && (func.name.contains("collect_block") || func.name.contains("block_line")) {
+            eprintln!("C1DBG {} k={k} named={:?} owned={:?}", func.name, named, owned);
+            for &i in &named { eprintln!("C1DBG   named {i}: gives={} live={} {:?}", gives(i), crate::mir_liveness::live_after(func, i, p.value), func.ops[i]); }
+            if k == 2 { for (i, op) in func.ops.iter().enumerate() { eprintln!("C1DBG   {i}: {op:?}"); } }
+        }
         let given: Vec<usize> = named.iter().copied().filter(|&i| gives(i) && !crate::mir_liveness::live_after(func, i, p.value)).collect();
         if !given.is_empty() && func.ret != Some(p.value) && crate::mir_liveness::last_use_on_every_path(func, p.value, &given) {
             out.extend(given.iter().map(|&i| (k, i)));
