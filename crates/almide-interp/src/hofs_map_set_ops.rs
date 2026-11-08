@@ -87,7 +87,9 @@ impl<'a> Interpreter<'a> {
     fn map_entries(&mut self, args: &[Value]) -> Flow {
         match args.first() {
             Some(Value::Map(e)) => Flow::val(Value::list(
-                e.iter().map(|(k, v)| Value::tuple(vec![k.clone(), v.clone()])).collect(),
+                e.iter()
+                    .map(|(k, v)| Value::tuple(vec![k.clone(), v.clone()]))
+                    .collect(),
             )),
             _ => Flow::Abort("internal: map.to_list on non-map".into()),
         }
@@ -103,7 +105,9 @@ impl<'a> Interpreter<'a> {
     fn map_get(&mut self, args: &[Value]) -> Flow {
         match (args.first(), args.get(1)) {
             (Some(Value::Map(e)), Some(k)) => Flow::val(Value::Option(
-                e.iter().find(|(ek, _)| ek == k).map(|(_, v)| Box::new(v.clone())),
+                e.iter()
+                    .find(|(ek, _)| ek == k)
+                    .map(|(_, v)| Box::new(v.clone())),
             )),
             _ => Flow::Abort("internal: map.get bad args".into()),
         }
@@ -111,7 +115,9 @@ impl<'a> Interpreter<'a> {
 
     fn map_contains_key(&mut self, args: &[Value]) -> Flow {
         match (args.first(), args.get(1)) {
-            (Some(Value::Map(e)), Some(k)) => Flow::val(Value::Bool(e.iter().any(|(ek, _)| ek == k))),
+            (Some(Value::Map(e)), Some(k)) => {
+                Flow::val(Value::Bool(e.iter().any(|(ek, _)| ek == k)))
+            }
             _ => Flow::Abort("internal: map.contains_key bad args".into()),
         }
     }
@@ -129,14 +135,18 @@ impl<'a> Interpreter<'a> {
 
     fn map_keys(&mut self, args: &[Value]) -> Flow {
         match args.first() {
-            Some(Value::Map(e)) => Flow::val(Value::list(e.iter().map(|(k, _)| k.clone()).collect())),
+            Some(Value::Map(e)) => {
+                Flow::val(Value::list(e.iter().map(|(k, _)| k.clone()).collect()))
+            }
             _ => Flow::Abort("internal: map.keys on non-map".into()),
         }
     }
 
     fn map_values(&mut self, args: &[Value]) -> Flow {
         match args.first() {
-            Some(Value::Map(e)) => Flow::val(Value::list(e.iter().map(|(_, v)| v.clone()).collect())),
+            Some(Value::Map(e)) => {
+                Flow::val(Value::list(e.iter().map(|(_, v)| v.clone()).collect()))
+            }
             _ => Flow::Abort("internal: map.values on non-map".into()),
         }
     }
@@ -168,7 +178,10 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn set_pair<'v>(args: &'v [Value], op: &str) -> Result<(&'v Rc<Vec<Value>>, &'v Rc<Vec<Value>>), Flow> {
+    fn set_pair<'v>(
+        args: &'v [Value],
+        op: &str,
+    ) -> Result<(&'v Rc<Vec<Value>>, &'v Rc<Vec<Value>>), Flow> {
         match (args.first(), args.get(1)) {
             (Some(Value::Set(a)), Some(Value::Set(b))) => Ok((a, b)),
             _ => Err(Flow::Abort(format!("internal: set.{op} bad args"))),
@@ -285,6 +298,7 @@ impl<'a> Interpreter<'a> {
         match func {
             "is_some" => Some(self.option_is_some(args)),
             "is_none" => Some(self.option_is_none(args)),
+            "flatten" => Some(self.option_flatten(args)),
             "unwrap_or" => Some(self.option_unwrap_or(args)),
             "to_list" => Some(self.option_to_list(args)),
             "zip" => Some(self.option_zip(args)),
@@ -307,6 +321,19 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    // Structural Option flatten, matching runtime/rs/src/option.rs. The
+    // generic payload stays a Value: routing through the scalar pool body
+    // would lose its type before the inner Option is read back.
+    fn option_flatten(&mut self, args: &[Value]) -> Flow {
+        match args {
+            [Value::Option(Some(inner))] if matches!(inner.as_ref(), Value::Option(_)) => {
+                Flow::val(inner.as_ref().clone())
+            }
+            [Value::Option(None)] => Flow::val(Value::Option(None)),
+            _ => Flow::Unsupported("option.flatten requires a nested Option".into()),
+        }
+    }
+
     fn option_unwrap_or(&mut self, args: &[Value]) -> Flow {
         match (args.first(), args.get(1)) {
             (Some(Value::Option(Some(v))), _) => Flow::val((**v).clone()),
@@ -319,9 +346,12 @@ impl<'a> Interpreter<'a> {
     /// `option.zip(a, b)`: both some → some((va, vb)), else none.
     fn option_zip(&mut self, args: &[Value]) -> Flow {
         match (args.first(), args.get(1)) {
-            (Some(Value::Option(Some(a))), Some(Value::Option(Some(b)))) => Flow::val(Value::Option(Some(
-                Box::new(Value::Tuple(Rc::new(vec![a.as_ref().clone(), b.as_ref().clone()]))),
-            ))),
+            (Some(Value::Option(Some(a))), Some(Value::Option(Some(b)))) => {
+                Flow::val(Value::Option(Some(Box::new(Value::Tuple(Rc::new(vec![
+                    a.as_ref().clone(),
+                    b.as_ref().clone(),
+                ]))))))
+            }
             (Some(Value::Option(_)), Some(Value::Option(_))) => Flow::val(Value::Option(None)),
             _ => Flow::Abort("internal: option.zip on non-options".into()),
         }
@@ -375,9 +405,12 @@ impl<'a> Interpreter<'a> {
     /// `result.zip(a, b)`: both ok → ok((va, vb)), else the FIRST err.
     fn result_zip(&mut self, args: &[Value]) -> Flow {
         match (args.first(), args.get(1)) {
-            (Some(Value::Result(Ok(a))), Some(Value::Result(Ok(b)))) => Flow::val(Value::Result(Ok(Box::new(
-                Value::Tuple(Rc::new(vec![a.as_ref().clone(), b.as_ref().clone()])),
-            )))),
+            (Some(Value::Result(Ok(a))), Some(Value::Result(Ok(b)))) => {
+                Flow::val(Value::Result(Ok(Box::new(Value::Tuple(Rc::new(vec![
+                    a.as_ref().clone(),
+                    b.as_ref().clone(),
+                ]))))))
+            }
             (Some(Value::Result(Err(e))), Some(Value::Result(_))) => {
                 Flow::val(Value::Result(Err(e.clone())))
             }
@@ -463,7 +496,10 @@ impl<'a> Interpreter<'a> {
                         }
                     }
                 }
-                Flow::val(Value::Tuple(std::rc::Rc::new(vec![Value::list(oks), Value::list(errs)])))
+                Flow::val(Value::Tuple(std::rc::Rc::new(vec![
+                    Value::list(oks),
+                    Value::list(errs),
+                ])))
             }
             None => Flow::Abort("internal: result.partition on non-list".into()),
         }

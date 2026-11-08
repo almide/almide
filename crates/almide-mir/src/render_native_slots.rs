@@ -117,14 +117,11 @@ fn slot_read_kind(i: u16, slot: Option<usize>) -> Option<NTy> {
     parent_slot_kind(i, slot).filter(|t| *t != NTy::I64)
 }
 
-/// Type the untyped slot blocks of `func` into `alloc_rec` (block → generated
-/// type) and return the blocks that are `List[String]`.
-pub(super) fn type_blocks(
-    func: &MirFunction,
-    sigs: &NativeSigs,
-    alloc_rec: &mut BTreeMap<ValueId, u16>,
-    f: &Facts<'_>,
-) -> BTreeSet<ValueId> {
+/// Seed declarations before call-site inference. A linked self-host body may
+/// spell a heap-generic payload as String; that signature must not overwrite
+/// the actual caller's List/Option/Result representation before routing.
+pub(super) fn declared_blocks(func: &MirFunction) -> BTreeMap<ValueId, u16> {
+    let mut alloc_rec = BTreeMap::new();
     // A block the lowering built as a typed aggregate or inlined Value
     // takes its declared type's native representation.
     for (v, key) in &func.aggregate_blocks {
@@ -140,6 +137,17 @@ pub(super) fn type_blocks(
             alloc_rec.entry(*v).or_insert(rec::slots_type_of(&vec![NTy::I64; n]));
         }
     }
+    alloc_rec
+}
+
+/// Type the untyped slot blocks of `func` into `alloc_rec` (block → generated
+/// type) and return the blocks that are `List[String]`.
+pub(super) fn type_blocks(
+    func: &MirFunction,
+    sigs: &NativeSigs,
+    alloc_rec: &mut BTreeMap<ValueId, u16>,
+    f: &Facts<'_>,
+) -> BTreeSet<ValueId> {
     let mut tb = BlockTyping {
         func,
         sigs,

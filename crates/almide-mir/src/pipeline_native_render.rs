@@ -75,6 +75,22 @@ fn collect_local_native_types(ir: &almide_ir::IrProgram, ts: &mut Vec<almide_lan
             }
         }
     }
+    // A computed call argument may never enter var_table. Its checked
+    // expression type still owns a native representation (some(some(xs))).
+    for f in &ir.functions { collect_expr_native_types(&f.body, ts); }
+    for t in &ir.top_lets { collect_expr_native_types(&t.value, ts); }
+}
+
+fn collect_expr_native_types(expr: &almide_ir::IrExpr, ts: &mut Vec<almide_lang::types::Ty>) {
+    use almide_ir::IrVisitor;
+    struct Types<'a>(&'a mut Vec<almide_lang::types::Ty>);
+    impl IrVisitor for Types<'_> {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            crate::render_native_rec::collect_tuples(&expr.ty, self.0);
+            almide_ir::walk_expr(self, expr);
+        }
+    }
+    Types(ts).visit_expr(expr);
 }
 
 /// #4006 family I: top-level state lives in storage slots initialised

@@ -149,7 +149,7 @@ pub(crate) struct AddrState {
 
 impl AddrState {
     pub(crate) fn new(func: &MirFunction, sigs: &crate::render_native::NativeSigs) -> Self {
-        let mut alloc_rec: BTreeMap<ValueId, u16> = BTreeMap::new();
+        let mut alloc_rec = slots::declared_blocks(func);
         note_signature_recs(func, sigs, &mut alloc_rec);
         note_carrier_recs(func, sigs, &mut alloc_rec);
         note_join_recs(func, &mut alloc_rec);

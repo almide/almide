@@ -127,6 +127,61 @@ fn main() -> Unit = {
 }
 "#,
         ),
+        (
+            "result_callbacks",
+            r#"
+fn show(r: Result[List[Int], String]) -> Unit = match r {
+ ok(xs) => for x in xs { println(int.to_string(x)) }, err(e) => println(e),
+}
+fn main() -> Unit = {
+ let source: Result[List[Int], String] = ok([2, 3])
+ show(result.map(source, (xs) => xs + [4]))
+ show(source)
+ let bad: Result[List[Int], String] = err("bad")
+ show(result.map_err(bad, (e) => e + "!"))
+ show(bad)
+ let restored = result.unwrap_or_else(bad, (e) => [string.len(e)])
+ for n in restored { println(int.to_string(n)) }
+}
+"#,
+        ),
+        (
+            "computed_container_args",
+            r#"
+fn wrap(xs: List[String]) -> Result[List[String], String] = ok(xs)
+fn read(r: Result[List[String], String]) -> Unit = match r {
+ ok(xs) => for x in xs { println(x) }, err(e) => println(e),
+}
+fn main() -> Unit = {
+ read(wrap(["a", "b"] + ["c"]))
+ read(wrap([]))
+ read(err("end"))
+}
+"#,
+        ),
+        (
+            "option_callbacks",
+            r#"
+fn show(o: List[Int]?) -> Unit = match o {
+ some(xs) => for x in xs { println(int.to_string(x)) }, none => println("none"),
+}
+fn main() -> Unit = {
+ let source: List[Int]? = some([2, 3])
+ show(option.filter(source, (xs) => list.len(xs) == 2))
+ show(option.filter(source, (xs) => list.len(xs) == 0))
+ show(source)
+ let absent: List[Int]? = none
+ show(option.or_else(absent, () => some([8])))
+ let restored = option.unwrap_or_else(absent, () => [9])
+ for x in restored { println(int.to_string(x)) }
+ show(option.flatten(some(source)))
+ let inner_empty: (List[Int]?)? = some(none)
+ let outer_empty: (List[Int]?)? = none
+ show(option.flatten(inner_empty))
+ show(option.flatten(outer_empty))
+}
+"#,
+        ),
     ];
     let dir =
         std::env::temp_dir().join(format!("almide-native-value-matrix-{}", std::process::id()));
@@ -174,6 +229,9 @@ fn main() -> Unit = {
             "string_filter" => b"a\nbb\na\n\nbb\n",
             "byte_words" => b"8\n287454020\n21862\n-1\n",
             "nested_aliases" => b"7\n-1\n7\n-1\n-2\n",
+            "result_callbacks" => b"2\n3\n4\n2\n3\nbad!\nbad\n3\n",
+            "computed_container_args" => b"a\nb\nc\nend\n",
+            "option_callbacks" => b"2\n3\nnone\n2\n3\n8\n9\n2\n3\nnone\nnone\n",
             _ => unreachable!(),
         };
         assert_eq!(actual.stdout, expected, "{name}");

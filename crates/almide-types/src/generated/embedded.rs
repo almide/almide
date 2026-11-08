@@ -28798,6 +28798,7 @@ fn option_map_h(o: String?, f: (String) -> String) -> String? = {
 
 fn __opt_unwrap_else_h(f: () -> String) -> String = f()
 
+@specializes("option.unwrap_or_else")
 fn option_unwrap_or_else_h(o: String?, f: () -> String) -> String = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -28848,6 +28849,7 @@ fn __opt_filterh_some(x: String, pred: (String) -> Bool) -> String? = {
   if p then some(x) else none
 }
 
+@specializes("option.filter")
 fn option_filter_h(o: String?, pred: (String) -> Bool) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -28867,6 +28869,7 @@ fn __opt_orelse_none_h(f: () -> String?) -> String? = {
   r
 }
 
+@specializes("option.or_else")
 fn option_or_else_h(o: String?, f: () -> String?) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -28878,6 +28881,7 @@ fn option_or_else_h(o: String?, f: () -> String?) -> String? = {
 
 
 
+@specializes("option.flatten")
 fn option_flatten_h(o: (String?)?) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -34342,6 +34346,7 @@ fn __rmh_map_ok(x: String, f: (String) -> String) -> Result[String, String] = {
   ok(y)
 }
 
+@specializes("result.map")
 fn result_map_h(r: Result[String, String], f: (String) -> String) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -34360,6 +34365,7 @@ fn __rmh_maperr_err(e: String, f: (String) -> String) -> Result[String, String] 
   err(y)
 }
 
+@specializes("result.map_err")
 fn result_map_err_h(r: Result[String, String], f: (String) -> String) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -34378,6 +34384,7 @@ fn __rmh_flatmap_ok(x: String, f: (String) -> Result[String, String]) -> Result[
   r2
 }
 
+@specializes("result.flat_map")
 fn result_flat_map_h(r: Result[String, String], f: (String) -> Result[String, String]) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -34396,6 +34403,7 @@ fn __rmh_uoe_err(e: String, f: (String) -> String) -> String = {
   y
 }
 
+@specializes("result.unwrap_or_else")
 fn result_unwrap_or_else_h(r: Result[String, String], f: (String) -> String) -> String = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -34432,6 +34440,7 @@ fn result_filter_h(r: Result[String, String], pred: (String) -> Bool, err_val: S
 }
 
 
+@specializes("result.to_option")
 fn result_to_option_h(r: Result[String, String]) -> String? = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -34442,6 +34451,7 @@ fn result_to_option_h(r: Result[String, String]) -> String? = {
 }
 
 
+@specializes("result.to_err_option")
 fn result_to_err_option_h(r: Result[String, String]) -> String? = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -34461,6 +34471,7 @@ fn __res_map_s2h_ok(x: Int, f: (Int) -> Value) -> Result[Value, String] = {
   ok(y)
 }
 
+@specializes("result.map")
 fn result_map_s2h(r: Result[Int, String], f: (Int) -> Value) -> Result[Value, String] = {
   let h = prim.handle(r)
   let len = prim.load32(h + 4)

@@ -760,6 +760,10 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
             a.iter().for_each(|e| collect_tuples(e, out));
         }
         Ty::Applied(_, a) => a.iter().for_each(|e| collect_tuples(e, out)),
+        Ty::Fn { params, ret, .. } => {
+            params.iter().for_each(|p| collect_tuples(p, out));
+            collect_tuples(ret, out);
+        }
         Ty::Bytes | Ty::Matrix if !out.contains(t) => out.push(t.clone()),
         t if crate::lower::is_value_ty(t) => {
             push_new(out, t);
@@ -790,3 +794,5 @@ fn bind_type_params(
 }
 
 include!("render_native_rec_b.rs");
+
+include!("render_native_rec_checkpoint.rs");

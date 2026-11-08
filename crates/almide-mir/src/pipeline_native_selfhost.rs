@@ -172,12 +172,13 @@ impl SelfHostLinker<'_> {
             self.done.insert(impl_fn);
             return Ok(());
         };
-        let recs = crate::render_native_rec::snapshot();
+        let recs = crate::render_native_rec::link_checkpoint();
         let lambdas = crate::lambda_sigs::snapshot();
         let options = crate::option_blocks::snapshot();
-        crate::render_native_rec::extend_with(
-            &func.params.iter().map(|p| p.ty.clone()).chain(std::iter::once(func.ret_ty.clone())).collect::<Vec<_>>(),
-        );
+        let mut declared_types: Vec<_> = func.params.iter().map(|p| p.ty.clone())
+            .chain(std::iter::once(func.ret_ty.clone())).collect();
+        collect_expr_native_types(&func.body, &mut declared_types);
+        crate::render_native_rec::extend_with(&declared_types);
         let lowered = native_sig_subset_check(func, &sh.record_layouts, &sh.variant_layouts).and_then(|()| {
             crate::lower::lower_function_all_with_globals(
                 func,
@@ -192,7 +193,7 @@ impl SelfHostLinker<'_> {
             Ok(all) => all,
             Err(error) => {
                 // A failed attempt must not seed another function's type facts.
-                crate::render_native_rec::restore(recs);
+                crate::render_native_rec::restore_link_checkpoint(recs);
                 crate::lambda_sigs::restore(lambdas);
                 crate::option_blocks::restore(options);
                 self.done.insert(impl_fn.clone());

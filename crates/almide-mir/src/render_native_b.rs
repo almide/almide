@@ -313,10 +313,7 @@ fn declared_param_want(
 /// An argument handed to a MOVE param (#4006 class P): the caller's own value,
 /// moved (its `Consume` follows the call — `MirFunction::call_moves`).
 fn moved_arg(name: &str, want: NTy, code: String, got: NTy) -> Result<String, LowerError> {
-    let same = match (want, got) {
-        (NTy::Rec(i), NTy::Rec(j)) => i == j,
-        (w, g) => w == g,
-    };
+    let same = crate::native_value_repr::same_owned(want, got);
     if !same || matches!(got, NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) {
         return Err(wall(format!("native: a borrowed or other-typed arg to a move param of `{name}`")));
     }
@@ -344,9 +341,12 @@ fn user_arg_in_declared_mode(
             NTy::VecStrRef => Ok(code),
             _ => Err(wall(format!("native: non-string-list arg ({got:?}) to List[String] param of `{name}`"))),
         },
-        NTy::RecRef(i) | NTy::Rec(i) => match got {
-            NTy::Rec(j) if j == i => Ok(format!("&{code}")),
-            NTy::RecRef(j) if j == i => Ok(code),
+        NTy::RecRef(_) | NTy::Rec(_) => match got {
+            g if crate::native_value_repr::same_owned(want, g) => {
+                Ok(if matches!(g, NTy::RecRef(_) | NTy::VecRef | NTy::VecStrRef | NTy::StrRef) {
+                    code
+                } else { format!("&{code}") })
+            }
             _ => Err(wall(format!("native: arg of another type ({got:?}) to a record param ({want:?}) of `{name}`"))),
         },
         NTy::ResStr | NTy::Res | NTy::Opt => carrier_arg_in_declared_mode(name, want, code, got),

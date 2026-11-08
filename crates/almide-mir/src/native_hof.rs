@@ -1,5 +1,7 @@
-//! A stdlib call with a function argument, served by its declared runtime
+//! A stdlib call served by its declared runtime
 //! body when the linked self-hosted body cannot take the call (#4006, C1).
+//! Calls without a function argument use the same declaration checks and
+//! call witness; they invoke the runtime body without a closure adapter.
 //!
 //! A stdlib combinator (`list.fold`, `list.map`, `list.flat_map`,
 //! `option.map`, `matrix.map`) reaches the native render through the
@@ -59,6 +61,7 @@ enum DTy {
     Matrix,
     List(Box<DTy>),
     Opt(Box<DTy>),
+    Result(Box<DTy>, Box<DTy>),
     /// `Map[K, V]`: v0's runtime `AlmideMap<K, V>`, the generated map alias.
     Map(Box<DTy>, Box<DTy>),
     Fn(Vec<DTy>, Box<DTy>),
@@ -98,6 +101,9 @@ fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
         TypeExpr::Generic { name, args } if args.len() == 2 && name.as_str() == "Map" => {
             DTy::Map(Box::new(dty_of(&args[0], tps)?), Box::new(dty_of(&args[1], tps)?))
         }
+        TypeExpr::Generic { name, args } if args.len() == 2 && name.as_str() == "Result" => {
+            DTy::Result(Box::new(dty_of(&args[0], tps)?), Box::new(dty_of(&args[1], tps)?))
+        }
         TypeExpr::Fn { params, ret, is_effect: false } => {
             DTy::Fn(params.iter().map(|p| dty_of(p, tps)).collect::<Option<_>>()?, Box::new(dty_of(ret, tps)?))
         }
@@ -120,6 +126,7 @@ fn rust_agrees(d: &DTy, r: &str) -> Option<bool> {
         DTy::List(_) => r.starts_with("Vec<") || (by_ref && r.starts_with('[')),
         DTy::Opt(_) => r.starts_with("Option<") && !by_ref,
         DTy::Map(..) => r.starts_with("AlmideMap<"),
+        DTy::Result(..) => r.starts_with("Result<"),
         DTy::Fn(..) => r.starts_with("std::rc::Rc<dynFn(") && !by_ref,
     };
     ok.then_some(by_ref)
@@ -372,117 +379,7 @@ fn closure_origins(func: &MirFunction) -> BTreeMap<ValueId, (String, Vec<ValueId
 
 // ── rendering a served call ──
 
-/// The call's type-param bindings, as owned native kinds.
-type Env = BTreeMap<String, NTy>;
-
-fn bind(env: &mut Env, v: &str, t: NTy) -> Option<()> {
-    match env.get(v) {
-        Some(b) if *b != t => None,
-        Some(_) => Some(()),
-        None => {
-            env.insert(v.to_string(), t);
-            Some(())
-        }
-    }
-}
-
-/// An element or payload of declared type `d` carried as `t`.
-fn bind_inner(env: &mut Env, d: &DTy, t: NTy) -> Option<()> {
-    match d {
-        DTy::Var(v) => bind(env, v, t),
-        DTy::Int | DTy::Bool => (t == NTy::I64).then_some(()),
-        DTy::Str => (t == NTy::Str).then_some(()),
-        _ => None,
-    }
-}
-
-/// The element kind of a list the render carries.
-fn list_elem(t: NTy) -> Option<NTy> {
-    match t {
-        NTy::Vec | NTy::VecRef => Some(NTy::I64),
-        NTy::VecStr | NTy::VecStrRef => Some(NTy::Str),
-        NTy::Rec(i) | NTy::RecRef(i) => rec::list_elem(i),
-        _ => None,
-    }
-}
-
-/// The payload kind of an Option the render carries.
-fn opt_payload(t: NTy) -> Option<NTy> {
-    match t {
-        NTy::Opt => Some(NTy::I64),
-        NTy::Rec(i) | NTy::RecRef(i) => rec::option_payload(i),
-        _ => None,
-    }
-}
-
-/// Bind the type params a non-function param of declared type `d` fixes.
-fn bind_param(env: &mut Env, d: &DTy, t: NTy) -> Option<()> {
-    match d {
-        DTy::List(e) => bind_inner(env, e, list_elem(t)?),
-        DTy::Opt(e) => bind_inner(env, e, opt_payload(t)?),
-        DTy::Var(v) => bind(env, v, crate::render_native::owned_nty(t)),
-        DTy::Matrix => rec::is_matrix(t).then_some(()),
-        DTy::Map(k, v) => {
-            let (kk, vk) = match t {
-                NTy::Rec(i) | NTy::RecRef(i) => rec::map_kinds(i)?,
-                _ => return None,
-            };
-            bind_inner(env, k, kk)?;
-            bind_inner(env, v, vk)
-        }
-        DTy::Int | DTy::Bool => (t == NTy::I64).then_some(()),
-        DTy::Float => (t == NTy::F64).then_some(()),
-        DTy::Str => matches!(t, NTy::Str | NTy::StrRef).then_some(()),
-        DTy::Fn(..) => None,
-    }
-}
-
-/// The native kind a declared type stands for under `env`.
-fn kind_of(env: &Env, d: &DTy) -> Option<NTy> {
-    Some(match d {
-        DTy::Var(v) => *env.get(v)?,
-        DTy::Int | DTy::Bool => NTy::I64,
-        DTy::Float => NTy::F64,
-        DTy::Str => NTy::Str,
-        DTy::Matrix => NTy::Rec(rec::matrix_index()),
-        // A list or Option of Float bits would leave the render's lanes
-        // (`Vec<i64>`, `Option<i64>`) for the runtime's `f64`: refused.
-        DTy::List(e) => match kind_of(env, e)? {
-            NTy::I64 => NTy::Vec,
-            NTy::Str => NTy::VecStr,
-            NTy::F64 => return None,
-            k => NTy::Rec(rec::list_type_of(k)),
-        },
-        DTy::Opt(e) => match kind_of(env, e)? {
-            NTy::I64 => NTy::Opt,
-            NTy::F64 => return None,
-            k => NTy::Rec(rec::option_type_of(k)),
-        },
-        DTy::Map(k, v) => NTy::Rec(rec::map_type_of(kind_of(env, k)?, kind_of(env, v)?)),
-        DTy::Fn(..) => return None,
-    })
-}
-
-/// A declared closure param or result of declared type `d` and lambda kind
-/// `k`: binds the type params it leaves unbound, else the kinds must agree.
-/// `Some(true)` = a declared `Float` the lambda takes in its i64 lane (the
-/// MIR carries a Float as its bits), so the adapter converts it.
-fn bind_lambda(env: &mut Env, d: &DTy, k: NativeSigKind) -> Option<bool> {
-    if *d == DTy::Float && k == NativeSigKind::I64 {
-        return Some(true);
-    }
-    if let Some(t) = kind_of(env, d) {
-        return (clo::arg_kind(t) == k).then_some(false);
-    }
-    let t = clo::owned_nty(k);
-    match d {
-        DTy::Var(v) => bind(env, v, t),
-        DTy::List(e) => bind_inner(env, e, list_elem(t)?),
-        DTy::Opt(e) => bind_inner(env, e, opt_payload(t)?),
-        _ => None,
-    }?;
-    (kind_of(env, d).map(clo::arg_kind) == Some(k)).then_some(false)
-}
+include!("native_hof_types.rs");
 
 /// A declared `Float` result read off a lambda that may return it as a real
 /// `f64` or as its i64 bits (the lane the MIR carries a Float in): both are
