@@ -444,7 +444,7 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     crate::alias_safety::elide_unaliased_make_unique(&mut functions);
     // #4006 class P: a heap param its body takes over becomes a move param,
     // and every call hands the argument over at the call.
-    crate::native_move_params::rewrite(&mut functions, &own);
+    crate::native_move_params::rewrite(&mut functions, &own, &sigs);
     crate::native_region_window::bracket_windows(&mut functions, &windows)?;
     crate::native_slot_takes::set_quiet(&functions);
     let mut program = MirProgram {

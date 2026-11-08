@@ -55,6 +55,16 @@ thread_local! {
     static DYING_SITES: std::cell::RefCell<BTreeSet<(String, usize)>> = const { std::cell::RefCell::new(BTreeSet::new()) };
 }
 
+thread_local! {
+    /// The (function, param index) pairs whose native signature is a native
+    /// `Result` ([`rewrite`] sets them).
+    static NATIVE_RESULTS: std::cell::RefCell<BTreeSet<(String, usize)>> = const { std::cell::RefCell::new(BTreeSet::new()) };
+}
+
+fn native_result(name: &str, k: usize) -> bool {
+    NATIVE_RESULTS.with(|d| d.borrow().contains(&(name.to_string(), k)))
+}
+
 fn dying_at_every_site(name: &str, k: usize) -> bool {
     DYING_SITES.with(|d| d.borrow().contains(&(name.to_string(), k)))
 }
@@ -258,7 +268,9 @@ fn consumed_params(
             // Inside a branch the field moves on one path only, so the take
             // over must cost no caller a copy: every site hands a value that
             // dies at the call.
-            let close = |end: usize| close(end).filter(|&c| c == end || dying_at_every_site(&func.name, k));
+            // A native `Result` param is the callee's own already (there is no
+            // borrowed Result kind): taking it over changes nothing.
+            let close = |end: usize| close(end).filter(|&c| c == end || (dying_at_every_site(&func.name, k) && !native_result(&func.name, k)));
             if let Some(end) = field_given(func, p.value, owned).and_then(close).filter(|&end| !exits_before(end)) {
                 out.push((k, end));
             }
@@ -657,7 +669,7 @@ impl Modes<'_> {
 /// other function's; its env (param 0) is always lent. A lambda that a
 /// closure call of several possible callees may reach keeps borrowing, and
 /// the modes are solved again.
-pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>) {
+pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sigs: &crate::render_native::NativeSigs) {
     if crate::render_native_move::drill_no_moves() {
         return;
     }
@@ -673,6 +685,15 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>) {
     // generated drop (`DropVariant` / `DropWrapperRec` name their target) and
     // a fan arm (the render spawns it on a thread of its own).
     DYING_SITES.with(|d| *d.borrow_mut() = dying_sites(functions));
+    let results: BTreeSet<(String, usize)> = sigs
+        .iter()
+        .flat_map(|(name, (params, _))| {
+            params.iter().enumerate().filter_map(move |(k, p)| {
+                matches!(p, crate::render_native::NativeSigKind::Res | crate::render_native::NativeSigKind::ResStr).then(|| (name.clone(), k))
+            })
+        })
+        .collect();
+    NATIVE_RESULTS.with(|d| *d.borrow_mut() = results);
     let reached_otherwise: BTreeSet<String> = functions
         .iter()
         .flat_map(|f| f.ops.iter())
