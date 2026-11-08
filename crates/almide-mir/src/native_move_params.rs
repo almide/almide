@@ -27,8 +27,7 @@
 //! Out of scope, by one rule — a function whose callers are not all its
 //! direct named call sites keeps borrowing: `main`, a function taken as a
 //! value (`FuncRef`, so a closure call may reach it), and the render-linked
-//! runtime names (dotted or `__`-prefixed). A dotted name the program itself
-//! defines (a type's `T.decode`, its derived workers) is called by name only.
+//! runtime names (dotted or `__`-prefixed).
 
 use crate::{MirFunction, Op, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
@@ -584,7 +583,7 @@ impl Modes<'_> {
 /// other function's; its env (param 0) is always lent. A lambda that a
 /// closure call of several possible callees may reach keeps borrowing, and
 /// the modes are solved again.
-pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>) {
+pub(crate) fn rewrite(functions: &mut [MirFunction]) {
     if crate::render_native_move::drill_no_moves() {
         return;
     }
@@ -638,7 +637,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>) {
         };
         let eligible = |f: &MirFunction| {
             f.name != "main"
-                && (!f.name.contains('.') || own.contains(&f.name))
+                && !f.name.contains('.')
                 && (closure(f) || (!taken.contains(&f.name) && !f.name.starts_with("__")))
         };
         let takes_at = |f: &MirFunction, k: usize| {
