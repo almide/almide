@@ -72,7 +72,7 @@ pub(super) fn render(
     };
     let at = format!("__byte_at_{}", args[0].0);
     writeln!(out, "{pad}let {at} = {index} + {offset};").unwrap();
-    writeln!(out, "{pad}if {at} < 0 || {at} > {b}.len() as i128 - {width} {{ almide_oob() }}").unwrap();
+    writeln!(out, "{pad}if {at} < 0 || {at} > {b}.len() as i128 - {width} {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}").unwrap();
     writeln!(out, "{pad}let {at} = {at} as usize;").unwrap();
     let slots: Vec<_> = (0..width)
         .map(|n| crate::render_native_bounds::Slot {
