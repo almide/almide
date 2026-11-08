@@ -161,7 +161,7 @@ pub(super) fn movable_loads(
 /// own block (not inside a nested `if` or loop, before the block ends), with
 /// no exit from the loop or the fn on the way: every path from `at` passes
 /// it before anything after it runs.
-fn rebound_in_block(func: &MirFunction, at: usize, b: ValueId) -> Option<usize> {
+pub(super) fn rebound_in_block(func: &MirFunction, at: usize, b: ValueId) -> Option<usize> {
     let mut depth = 0usize;
     for (k, op) in func.ops.iter().enumerate().skip(at + 1) {
         match op {
