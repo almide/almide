@@ -537,7 +537,7 @@ pub(crate) fn set_moving_args(
                 .filter(|v| tys.get(v).is_some_and(|t| moves_at_call(func, at, *v, *t, borrow_arms)))
                 .collect()
         }
-        _ => resstr_make_move(func, at, tys, borrow_arms).into_iter().collect(),
+        _ => Default::default(),
     };
     // A rebound arg whose own rebind comes next, with only its release
     // between (the loop write-back `Drop v; SetLocal v = ..`): its binding
@@ -594,24 +594,15 @@ pub(crate) fn set_moving_args(
     MOVING.with(|m| *m.borrow_mut() = moving);
 }
 
-/// The owned string a String-Ok Result built at `ops[at]` wraps, when nothing
-/// reads it again: the Result takes it in, no copy.
-fn resstr_make_move(
-    func: &MirFunction,
-    at: usize,
-    tys: &std::collections::BTreeMap<ValueId, NTy>,
-    borrow_arms: &std::collections::BTreeSet<ValueId>,
-) -> Option<ValueId> {
-    let Op::Prim { kind: crate::PrimKind::ResStrMake, args, .. } = &func.ops[at] else { return None };
-    let v = args[0];
-    (tys.get(&v) == Some(&NTy::Str) && last_use(func, at, v, NTy::Str, borrow_arms)).then_some(v)
-}
-
 /// The Result param `base` (the callee's own: there is no borrowed Result
-/// kind) is read on no path after `ops[at]`, nor anything borrowed from it
-/// (a rebind or a return reads it first).
+/// kind) is never rebound nor returned, and no path after `ops[at]` reads it
+/// or anything borrowed from it.
 pub(crate) fn result_param_dies(func: &MirFunction, at: usize, base: ValueId) -> bool {
-    !drill_no_moves() && func.params.iter().any(|p| p.value == base) && !crate::mir_liveness::live_after(func, at, base)
+    !drill_no_moves()
+        && func.params.iter().any(|p| p.value == base)
+        && !func.ops.iter().any(|op| matches!(op, Op::SetLocal { local, .. } if *local == base))
+        && func.ret != Some(base)
+        && !crate::mir_liveness::live_after(func, at, base)
 }
 
 /// An owned carrier a borrowed payload read can be moved out of when it
