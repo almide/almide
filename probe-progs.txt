@@ -1,2 +1,13 @@
+probe-empty.almd
 spec/wasm_cross/codec_decode_field_order.almd
+spec/wasm_cross/codec_doc_array.almd
+spec/wasm_cross/codec_list_default_field.almd
+spec/wasm_cross/codec_list_default.almd
+spec/wasm_cross/codec_list_list_field.almd
+spec/wasm_cross/codec_nested_records.almd
+spec/wasm_cross/codec_variant_roundtrip.almd
+spec/wasm_cross/codec_whitespace_tolerance.almd
 spec/wasm_cross/map_index_order.almd
+spec/wasm_cross/set_index_order.almd
+spec/wasm_cross/record_map_field_update.almd
+spec/wasm_cross/field_and_interp_accumulator.almd
