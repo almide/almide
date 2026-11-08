@@ -194,7 +194,7 @@ fn addr_elem(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bool, Low
         return Err(wall("native: ElemAddr with a non-scalar index"));
     }
     line!(
-        "if {i} < 0 || {i} as usize >= {b}.len() {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}",
+        "if {i} < 0 || {i} as usize >= {b}.len() {{ almide_oob() }}",
         i = var(i),
         b = var(ad.base)
     );
