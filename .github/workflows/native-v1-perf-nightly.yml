@@ -38,3 +38,25 @@ jobs:
         with:
           name: probe
           path: probe-out
+  tests:
+    name: MIR tests and the verified floor
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: almide-mir tests
+        run: cargo test --release -p almide-mir 2>&1 | tail -60
+        shell: bash
+      - name: Build the compiler
+        run: cargo build --release --bin almide
+      - name: Verified floor
+        run: cargo test --release --test native_verified_floor_test 2>&1 | tail -80
+        shell: bash
