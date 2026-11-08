@@ -26,10 +26,11 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
                 tys.insert(dst, NTy::Rec(i));
                 if let Some(elems) = elems {
                     let words: Vec<String> = elems.iter().map(|v| word(*v, tys)).collect::<Result<_, _>>()?;
-                    writeln!(out, "let mut {}: {} = __AlmdClosure {{ words: __AlmdWords::from_slice(&[{}]), heaps: None }};", var(dst), rec::struct_name(i), words.join(", ")).unwrap();
+                    writeln!(out, "let mut {}: {} = __AlmdClosure {{ words: {}, heaps: None }};", var(dst), rec::struct_name(i), rec::closure_words(&words)).unwrap();
                 } else {
                     let len = len.unwrap();
                     if ty(tys, &len) != Some(NTy::I64) { return Err(wall("native: untyped closure length")); }
+                    rec::note_wide_closure();
                     writeln!(out, "let mut {}: {} = __AlmdClosure::new({}.max(0) as usize);", var(dst), rec::struct_name(i), var(len)).unwrap();
                 }
                 Ok(())
