@@ -369,6 +369,8 @@ pub(crate) fn elem_option_is_scalar(call: &str) -> bool {
 /// a caller that reads its argument again would copy it whole for the call.
 pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
     declared(call).is_some_and(|f| {
+        // The render calls the `_ref` twin where there is one: it lends.
+        let f = f.by_ref.as_deref().unwrap_or(f);
         matches!(f.params.get(k), Some(FloorParam::Map(false) | FloorParam::Set(false) | FloorParam::Value(false) | FloorParam::Matrix(false)))
             || f.twin.as_ref().is_some_and(|t| {
                 t.0 == k
