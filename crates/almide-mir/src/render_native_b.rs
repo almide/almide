@@ -510,6 +510,9 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
                 };
                 let tail = if right {
                     format!("r.extend({})", crate::render_native_move::take_expr(&b))
+                } else if bt == NTy::Vec && crate::render_native_move::is_stack_single(*r) {
+                    // `xs + [x]` on a dying `xs`: a push, not a slice copy.
+                    format!("r.push({b}[0])")
                 } else {
                     format!("r.extend_from_slice({sb})")
                 };
