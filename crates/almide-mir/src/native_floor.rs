@@ -254,8 +254,7 @@ pub(crate) fn declared_scalar_option(name: &str) -> bool {
 
 /// The scalar a stdlib fn declared `@scalar_text` turns into its canonical
 /// text: `Some(ScalarText::Int)` for an `Int` param (decimal digits),
-/// `Some(ScalarText::Bool)` for a `Bool` one (`true` / `false`),
-/// `Some(ScalarText::Float)` for a `Float` one (its `{}` Display), `None` for a
+/// `Some(ScalarText::Bool)` for a `Bool` one (`true` / `false`), `None` for a
 /// fn without the declaration. The certified render folds such a call into
 /// the format string of the text it builds, reading only this declaration.
 pub(crate) fn declared_scalar_text(call: &str) -> Option<ScalarText> {
@@ -274,7 +273,6 @@ pub(crate) fn declared_scalar_text(call: &str) -> Option<ScalarText> {
 pub(crate) enum ScalarText {
     Int,
     Bool,
-    Float,
 }
 
 fn scalar_text_of(call: &str) -> Option<ScalarText> {
@@ -288,7 +286,6 @@ fn scalar_text_of(call: &str) -> Option<ScalarText> {
                 [p] => match simple(&p.ty) {
                     Some("Int") => Some(ScalarText::Int),
                     Some("Bool") => Some(ScalarText::Bool),
-                    Some("Float") => Some(ScalarText::Float),
                     _ => None,
                 },
                 _ => None,

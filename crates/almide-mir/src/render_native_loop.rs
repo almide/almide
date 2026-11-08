@@ -29,7 +29,7 @@ struct FnLoop<'a> {
     chains: crate::render_native_interp::Chains,
     printed: std::collections::BTreeSet<usize>,
     scalar_defs: std::collections::BTreeSet<usize>,
-    scalar_prints: BTreeMap<usize, (ValueId, crate::native_floor::ScalarText)>,
+    scalar_prints: BTreeMap<usize, (ValueId, bool)>,
     /// The owned values released right after each op (`early_releases`).
     early: BTreeMap<usize, Vec<ValueId>>,
 }
@@ -251,18 +251,12 @@ fn render_printed_scalar(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerErr
             writeln!(st.out, $($arg)*).unwrap();
         }};
     }
-    let Some(&(n, text)) = st.scalar_prints.get(&i) else { return Ok(false) };
-    if text == crate::native_floor::ScalarText::Float {
-        let arg = crate::render_native_interp::float_arg(n, &st.tys).ok_or_else(|| wall("native: a printed Float that is not a float"))?;
-        st.used_shims.push(crate::render_native_shims::PRINT_SHIMS);
-        line!("rt_println_fmt(format_args!(\"{{}}\", {arg}));");
-        return Ok(true);
-    }
+    let Some(&(n, is_bool)) = st.scalar_prints.get(&i) else { return Ok(false) };
     if st.tys.get(&n) != Some(&NTy::I64) {
         return Err(wall("native: a printed number that is not an Int"));
     }
     st.used_shims.push(crate::render_native_shims::PRINT_SHIMS);
-    if text == crate::native_floor::ScalarText::Bool {
+    if is_bool {
         line!("rt_println_fmt(format_args!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }}));", var(n));
     } else {
         // By value: a reference would pin the local to memory. Through

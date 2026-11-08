@@ -31,8 +31,6 @@ pub(crate) enum Piece {
     Int(ValueId),
     /// A Bool formatted in place (`bool.to_string`'s text).
     Bool(ValueId),
-    /// A Float formatted in place (its `{}` Display, the declared text).
-    Float(ValueId),
     /// A string value.
     Str(ValueId),
 }
@@ -157,7 +155,6 @@ impl ChainScan<'_> {
                 skip.push(def.expect("defined"));
                 Some(match crate::native_floor::declared_scalar_text(name) {
                     Some(crate::native_floor::ScalarText::Bool) => Piece::Bool(*n),
-                    Some(crate::native_floor::ScalarText::Float) => Piece::Float(*n),
                     _ => Piece::Int(*n),
                 })
             }
@@ -313,10 +310,6 @@ fn fmt_parts(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy
                 template.push_str("{}");
                 args.push(format!("if {} != 0 {{ \"true\" }} else {{ \"false\" }}", var(*n)));
             }
-            Piece::Float(n) => {
-                template.push_str("{}");
-                args.push(float_arg(*n, tys)?);
-            }
             Piece::Str(v) => {
                 let t = *tys.get(v)?;
                 if !matches!(t, NTy::Str | NTy::StrRef) {
@@ -331,23 +324,12 @@ fn fmt_parts(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy
     Some((template, args))
 }
 
-/// A Float piece's `{}` argument: the real `f64`, or the MIR's bits read back
-/// as one (bit-exact). `None` for any other carrier.
-pub(crate) fn float_arg(n: ValueId, tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
-    use crate::render_native::{var, NTy};
-    match tys.get(&n)? {
-        NTy::F64 => Some(format!("{{ {} }}", var(n))),
-        NTy::I64 => Some(format!("f64::from_bits({} as u64)", var(n))),
-        _ => None,
-    }
-}
-
 /// A number or Bool rendered to a string only to be printed (#4006,
 /// no-perf-loss): `println(int.to_string(n))`. The print formats the scalar
 /// itself, as the standard codegen does, and the string is never built.
 /// Returns the definitions that render nothing and, per print op, the
 /// scalar and whether it is a Bool.
-pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<usize, (ValueId, crate::native_floor::ScalarText)>) {
+pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<usize, (ValueId, bool)>) {
     let ops = &func.ops;
     let mut occurs: BTreeMap<ValueId, Vec<usize>> = BTreeMap::new();
     let mut vals = Vec::new();
@@ -373,8 +355,9 @@ pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<
         }
         let Op::CallFn { dst: Some(dv), name, args: dargs, .. } = &ops[*d] else { continue };
         let [CallArg::Scalar(n)] = dargs.as_slice() else { continue };
-        let Some(text) = crate::native_floor::declared_scalar_text(name) else { continue };
-        if dv != v {
+        let text = crate::native_floor::declared_scalar_text(name);
+        let is_bool = text == Some(crate::native_floor::ScalarText::Bool);
+        if dv != v || text.is_none() {
             continue;
         }
         // The scalar keeps its value from the definition to the print, which
@@ -386,7 +369,7 @@ pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<
         });
         if !rebound && !crosses {
             skip.insert(*d);
-            prints.insert(j, (*n, text));
+            prints.insert(j, (*n, is_bool));
         }
     }
     (skip, prints)
