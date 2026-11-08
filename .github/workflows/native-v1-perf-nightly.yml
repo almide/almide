@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        nc: [none, keyed, env, view, take, rescopy, paymove]
+        nc: [none, refdup, guard, storemove, elemshare, pairs, take]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
