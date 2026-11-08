@@ -236,7 +236,7 @@ fn render_fn_step<'a>(
         return Ok(false);
     }
     // #4006 family G: a closure call with a heap arg or result.
-    if crate::render_native_closure::render_typed_call_indirect(op, &crate::render_native_closure::handed_after(st.func, i), st.sigs, &mut st.tys, &mut st.out, st.indent)? {
+    if crate::render_native_closure::render_typed_call_indirect(op, &crate::render_native_closure::handed_after(st.func, i), &mut st.tys, &mut st.out, st.indent)? {
         return Ok(false);
     }
     render_fn_op(st, i, op)?;
@@ -261,8 +261,8 @@ fn render_printed_scalar(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerErr
         line!("rt_println_fmt(format_args!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }}));", var(n));
     } else {
         // By value: a reference would pin the local to memory. Through
-        // `IntText`, the runtime's digit writer (render_native_interp).
-        line!("rt_println_fmt(format_args!(\"{{}}\", crate::almide_str_block::IntText({})));", var(n));
+        // `AlmideIntText`, the runtime's digit writer (render_native_interp).
+        line!("rt_println_fmt(format_args!(\"{{}}\", crate::almide_str_block::AlmideIntText({})));", var(n));
     }
     Ok(true)
 }
@@ -295,8 +295,14 @@ fn render_chain_final(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerError>
     // A chain whose head string dies here grows that string's own
     // buffer, as v0's `AlmideConcat` consumes its owned left side.
     if let Some(crate::render_native_interp::Piece::Str(head)) = pieces.first() {
+        // Released right after the chain, or rebound to the chain's own result
+        // by the next op (`s = "${s}ab"` in a loop): nothing reads it again.
+        let rebound = func.ops[i + 1..]
+            .iter()
+            .find(|o| !crate::render_native_move::bookkeeping(o))
+            .is_some_and(|o| matches!(o, Op::SetLocal { local, src } if local == head && *src == dst));
         let dies = !pieces[1..].contains(&crate::render_native_interp::Piece::Str(*head))
-            && chain_end(func, &st.chains, i).and_then(|e| st.early.get(&(e + 1))).is_some_and(|vs| vs.contains(head))
+            && (rebound || chain_end(func, &st.chains, i).and_then(|e| st.early.get(&(e + 1))).is_some_and(|vs| vs.contains(head)))
             && st.tys.get(head) == Some(&NTy::Str)
             && st.out.contains(&format!("let mut {}:", var(*head)));
         if let Some(rest) = dies.then(|| crate::render_native_interp::push_pieces(&pieces[1..], &st.tys)).flatten() {

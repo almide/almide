@@ -4,8 +4,8 @@
 //! (`render_native::push_closure_dispatch_tables`). Other signatures use a
 //! table per declared parameter AND result kinds. A source function value
 //! retains that complete signature through captures, fields and returns;
-//! `CallIndirect` selects its table from that declaration. Hand-authored MIR
-//! without a source function type retains the conservative legacy inference.
+//! `CallIndirect` selects its table from that declaration; an environment
+//! without one walls.
 //! Heap args are borrowed, as at every MIR call, unless the call hands an
 //! arg over to a lambda that takes it over (a move param,
 //! `native_move_params`): that call picks the table whose key marks the
@@ -15,7 +15,7 @@
 
 use crate::lower::LowerError;
 use crate::render_native::{var, wall, NTy, NativeSigKind, NativeSigs};
-use crate::{CallArg, MirFunction, Op, Repr, ValueId};
+use crate::{CallArg, MirFunction, Op, ValueId};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -104,13 +104,12 @@ pub(crate) fn lambda_moves(f: &MirFunction) -> Vec<bool> {
     f.params.iter().skip(1).map(|p| f.owned_params.contains(&p.value)).collect()
 }
 
-/// The owned copy of the lent arg `a` of kind `k`, for a lambda that takes
-/// that param over.
+/// The owned copy of the lent (borrowed-spelled) arg `a` of kind `k`, for a
+/// lambda that takes that param over.
 fn owned_copy(k: NativeSigKind, a: &str) -> String {
     match k {
         NativeSigKind::Str => format!("AlmideString::from({a})"),
-        _ if param_spelling(k).starts_with('&') => format!("ToOwned::to_owned({a})"),
-        _ => a.to_string(),
+        _ => format!("ToOwned::to_owned({a})"),
     }
 }
 
@@ -163,7 +162,8 @@ pub(crate) fn push_typed_dispatch_tables(out: &mut String, user_fns: &BTreeMap<&
                 .iter()
                 .enumerate()
                 .map(|(i, k)| match (handed[i], takes.get(i).copied().unwrap_or(false)) {
-                    (false, true) => format!(", {}", owned_copy(*k, &format!("a{i}"))),
+                    // A param passed by value is already the lambda's own.
+                    (false, true) if param_spelling(*k).starts_with('&') => format!(", {}", owned_copy(*k, &format!("a{i}"))),
                     _ => format!(", a{i}"),
                 })
                 .collect();
@@ -204,69 +204,48 @@ fn indirect_args(rest: &[CallArg], handed: &[ValueId], tys: &BTreeMap<ValueId, N
     Ok((kinds, moved, codes))
 }
 
-/// The result kind: the one every lambda of these param kinds returns.
-fn indirect_ret(sigs: &NativeSigs, kinds: &[NativeSigKind], dst: &Option<ValueId>) -> Result<Option<NativeSigKind>, LowerError> {
-    let mut rets: Vec<Option<NativeSigKind>> = Vec::new();
-    for (name, (ps, r)) in sigs.iter() {
-        if name.starts_with("__lambda_") && ps.get(1..) == Some(kinds) && !rets.contains(r) {
-            rets.push(*r);
-        }
-    }
-    match (dst, rets.as_slice()) {
-        (_, [one]) => Ok(*one),
-        (None, _) => Err(wall("native: a dropped closure result of several kinds")),
-        (Some(_), _) => Err(wall("native: a closure call whose result kind no lambda signature fixes")),
-    }
-}
-
 /// The closure env as the table fn takes it (a borrowed block).
 fn indirect_env(env: &ValueId, tys: &BTreeMap<ValueId, NTy>) -> Result<String, LowerError> {
     let et = *tys.get(env).ok_or_else(|| wall("native: CallIndirect env untyped"))?;
     match et {
         NTy::Rec(i) if crate::render_native_rec::closure_sig(i).is_some() => Ok(format!("&{}", var(*env))),
         NTy::RecRef(i) if crate::render_native_rec::closure_sig(i).is_some() => Ok(var(*env)),
-        NTy::Vec => Ok(format!("&{}", var(*env))),
-        NTy::VecRef => Ok(var(*env)),
         _ => Err(wall("native: CallIndirect env is not a closure block")),
     }
 }
 
-/// A `CallIndirect` with a heap arg or result, through its signature's table.
-/// `Ok(false)`: an all-scalar call (the per-arity tables serve it), or `op`
-/// is no `CallIndirect`. `handed`: the values a call-site move right after
-/// `op` hands over.
+/// A `CallIndirect`, through the table of its declared function type (an
+/// all-scalar one: the per-arity table). `Ok(false)`: `op` is no
+/// `CallIndirect`. `handed`: the values a call-site move right after `op`
+/// hands over.
 pub(crate) fn render_typed_call_indirect(
     op: &Op,
     handed: &[ValueId],
-    sigs: &NativeSigs,
     tys: &mut BTreeMap<ValueId, NTy>,
     out: &mut String,
     indent: usize,
 ) -> Result<bool, LowerError> {
-    let Op::CallIndirect { dst, table_idx, args, result } = op else { return Ok(false) };
-    let Some((CallArg::Handle(env), rest)) = args.split_first() else { return Ok(false) };
-    let (mut kinds, moved, mut codes) = indirect_args(rest, handed, tys)?;
-    let declared = match tys.get(env) {
-        Some(NTy::Rec(i) | NTy::RecRef(i)) => crate::render_native_rec::closure_sig(*i),
-        _ => None,
+    let Op::CallIndirect { dst, table_idx, args, .. } = op else { return Ok(false) };
+    let Some((CallArg::Handle(env), rest)) = args.split_first() else {
+        return Err(wall("native: CallIndirect without a leading env arg"));
     };
-    let declared_ret = if let Some((params, ret)) = &declared {
-        if params.len() != kinds.len() { return Err(wall("native: indirect call arity disagrees with its checked function type")); }
-        for ((kind, code), want) in kinds.iter_mut().zip(&mut codes).zip(params) {
-            let got = owned_nty(*kind);
-            if got != *want && !crate::native_value_repr::same_owned(got, *want) {
-                *code = crate::native_value_repr::scalar_recode(code, got, *want)
-                    .ok_or_else(|| wall("native: indirect argument disagrees with its checked function type"))?;
-            }
-            *kind = arg_kind(*want);
+    let (mut kinds, moved, mut codes) = indirect_args(rest, handed, tys)?;
+    let Some(NTy::Rec(i) | NTy::RecRef(i)) = tys.get(env).copied() else {
+        return Err(wall("native: CallIndirect env is not a closure block"));
+    };
+    let Some((params, ret)) = crate::render_native_rec::closure_sig(i) else {
+        return Err(wall("native: an indirect call through an environment with no checked function type"));
+    };
+    if params.len() != kinds.len() { return Err(wall("native: indirect call arity disagrees with its checked function type")); }
+    for ((kind, code), want) in kinds.iter_mut().zip(&mut codes).zip(&params) {
+        let got = owned_nty(*kind);
+        if got != *want && !crate::native_value_repr::same_owned(got, *want) {
+            *code = crate::native_value_repr::scalar_recode(code, got, *want)
+                .ok_or_else(|| wall("native: indirect argument disagrees with its checked function type"))?;
         }
-        Some(ret.map(arg_kind))
-    } else { None };
-    let scalar_result = matches!(result, Some(Repr::Scalar { .. }));
-    if declared.is_none() && kinds.iter().all(|k| *k == NativeSigKind::I64) && (scalar_result || dst.is_none()) {
-        return Ok(false);
+        *kind = arg_kind(*want);
     }
-    let ret = match declared_ret { Some(r) => r, None => indirect_ret(sigs, &kinds, dst)? };
+    let ret = ret.map(arg_kind);
     let key = sig_key(&kinds, &moved, ret).unwrap_or_else(|| kinds.len().to_string());
     let env_code = indirect_env(env, tys)?;
     let call = format!(

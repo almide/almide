@@ -36,7 +36,12 @@ fn runtime_result(env: &Env, d: &DTy, code: &str) -> Option<String> {
         }
         DTy::List(e) => {
             let body = runtime_result(env, e, "__item")?;
-            format!("({code}).into_iter().map(|__item| {body}).collect::<Vec<{}>>()", rec::owned_ty(kind_of(env, e)?))
+            // Reserved the way the runtime reserves (C-197's aborting
+            // reservation), never an infallibly sized `collect`.
+            format!(
+                "{{ let __src = {code}; let mut __out: Vec<{}> = Vec::new(); if __out.try_reserve_exact(__src.len()).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }} __out.extend(__src.into_iter().map(|__item| {body})); __out }}",
+                rec::owned_ty(kind_of(env, e)?)
+            )
         }
         DTy::Opt(e) => format!("({code}).map(|__some| {})", runtime_result(env, e, "__some")?),
         DTy::Result(ok, err) => format!("({code}).map(|__ok| {}).map_err(|__err| {})",
@@ -68,7 +73,7 @@ mod tuple_result_tests {
         let d = DTy::List(Box::new(DTy::Tuple(vec![DTy::Int, DTy::Str])));
         let env = Env::new();
         assert_eq!(kind_of(&env, &DTy::Tuple(vec![DTy::Int, DTy::Str])), Some(NTy::Rec(1)));
-        let expr = runtime_result(&env, &d, "runtime_call()").unwrap();
+        let expr = runtime_result(&env, &d, "runtime_call()").expect("a list of int-string tuples has a runtime result");
         assert_eq!(expr.matches("runtime_call()").count(), 1);
         assert!(expr.contains(&rec::struct_name(1)));
         assert!(!expr.contains(&format!("{} {{", rec::struct_name(0))));
@@ -85,7 +90,7 @@ mod tuple_result_tests {
         let env = Env::from([("V".into(), NTy::F64)]);
         let pair = DTy::Tuple(vec![DTy::Str, DTy::Var("V".into())]);
         assert_eq!(kind_of(&env, &pair), Some(NTy::Rec(0)));
-        let code = runtime_result(&env, &pair, "read_map()").unwrap();
+        let code = runtime_result(&env, &pair, "read_map()").expect("a string-float tuple has a runtime result");
         assert!(code.contains("(__tuple_1).to_bits() as i64"));
         assert_eq!(code.matches("read_map()").count(), 1);
     }

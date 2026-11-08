@@ -222,8 +222,21 @@ pub(crate) fn runtime_body(symbol: &str) -> Option<(Vec<String>, String, Vec<&'s
     Some((params.iter().map(|p| squash(p)).collect(), squash(&ret), closure(symbol, rt).ok()?))
 }
 
+/// The runtime item `symbol` names and every item it reaches, taken whole
+/// without reading its signature (a const-generic array twin's bounds hold
+/// parentheses the signature reader does not expect).
+pub(crate) fn runtime_items(symbol: &str) -> Option<Vec<&'static str>> {
+    closure(symbol, runtime_index()).ok()
+}
+
 /// The stdlib fn the self-hosted body registered under `call` declares it
 /// specializes, if any (`@specializes`).
 pub(crate) fn specializes(call: &str) -> Option<String> {
     specialized_target(call)
+}
+
+/// The element type the self-hosted body registered under `call` declares
+/// for its first list param (`list.unique_float`'s `List[Float]` → `Float`).
+pub(crate) fn specialized_elem(call: &str) -> Option<String> {
+    specialized_list_elem(call)
 }
