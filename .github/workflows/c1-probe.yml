@@ -23,7 +23,7 @@ jobs:
       - name: outputs (v1, v0, wasm) and the force-moves control
         run: |
           set +e
-          for n in mut_param_copy_kept_when_read mut_param_copy_moved_when_dead; do
+          for n in mut_param_copy_kept_when_read mut_param_copy_moved_when_dead mut_param_copy_kept_closure; do
             f=spec/wasm_cross/$n.almd
             ALMIDE_VERIFIED_DEBUG=1 ./target/release/almide build $f -o /tmp/$n.v1 > /tmp/$n.v1.log 2>&1 || { echo "V1 BUILD FAIL $n"; tail -30 /tmp/$n.v1.log; }
             grep -i "v1\|verified\|wall" /tmp/$n.v1.log | head -3
