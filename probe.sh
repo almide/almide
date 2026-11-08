@@ -35,3 +35,7 @@ while read -r f; do
 done < "$1"
 awk '{k=$1; if($2=="v1") a[k]=$3; else b[k]=$3} END {for (k in a) if (b[k]>0) printf "%s v1=%s v0=%s ratio=%.3f\n", k, a[k], b[k], a[k]/b[k]}' $OUT/summary.txt | sort > $OUT/ratios.txt
 cat $OUT/ratios.txt
+# empty-program glue, as the small gate subtracts it
+printf 'fn main() -> Unit = ()\n' > /tmp/empty.almd
+ALMIDE_VERIFIED_DEBUG=1 $A build /tmp/empty.almd -o /tmp/empty.v1 >/dev/null 2>&1; ALMIDE_NO_VERIFIED_OK=1 $A build /tmp/empty.almd --no-verified -o /tmp/empty.v0 >/dev/null 2>&1
+for l in v1 v0; do valgrind --tool=callgrind --fair-sched=yes --collect-atstart=no --toggle-collect='almide_*::main' --toggle-collect='*thread_start*' --toggle-collect='*almide_stack_guard_install' --callgrind-out-file=/tmp/e.$l.cg /tmp/empty.$l </dev/null >/dev/null 2>&1; echo "glue $l $(callgrind_annotate --auto=no /tmp/e.$l.cg | awk '/PROGRAM TOTALS/ { gsub(",", "", $1); print $1 }')"; done | tee -a $OUT/ratios.txt
