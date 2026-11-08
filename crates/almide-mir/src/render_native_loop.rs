@@ -481,7 +481,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         Op::Dup { dst, src }
             if matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef | NTy::RecRef(_)))
                 && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
-                    crate::render_native_move::payload_carrier(st.tys.get(&base).copied())
+                    matches!(st.tys.get(&base), Some(NTy::Rec(_)))
                         && crate::render_native_move::carrier_dies_after(func, i, base, &st.borrows.arms)
                         && crate::render_native_addr::reads_of_take(&take)
                             .iter()
