@@ -790,7 +790,9 @@ impl Hash for AlmideStr {
 }
 
 /// `n`'s decimal digits, written right-aligned into `buf`; returns where they
-/// start. Two digits per division, as `core::fmt` renders integers.
+/// start. Two digits per division, as `core::fmt` renders integers. Inlined
+/// into each writer, as `from_i64` had it before the writers shared it.
+#[inline(always)]
 fn i64_digits(n: i64, buf: &mut [u8; 20]) -> usize {
     const PAIRS: &[u8; 200] = b"0001020304050607080910111213141516171819\
         2021222324252627282930313233343536373839\
