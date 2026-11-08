@@ -567,27 +567,8 @@ pub(super) fn borrowed_stores(
         let [address, value] = args.as_slice() else { return None };
         let src = handles.get(value)?;
         let (base, _) = bases.get(address)?;
-        let consumed = matches!(func.ops.get(at + 1), Some(Op::Consume { v }) if v == src) || handed_to_store(func, at, *src, *value);
-        (!consumed).then_some((*base, *value))
+        (!matches!(func.ops.get(at + 1), Some(Op::Consume { v }) if v == src)).then_some((*base, *value))
     }).collect()
-}
-
-/// The value `src` was handed over (`Consume`) before the store at `ops[at]`
-/// and nothing but the store's own handle names it from that hand-over on: a
-/// call result consumed where it is bound (a `map` callback's value) and then
-/// stored. The store is the consumer, so the element takes the value itself.
-fn handed_to_store(func: &MirFunction, at: usize, src: ValueId, handle: ValueId) -> bool {
-    let Some(c) = func.ops[..at].iter().rposition(|op| matches!(op, Op::Consume { v } if *v == src)) else { return false };
-    let mut vs = Vec::new();
-    func.ops.iter().enumerate().skip(c + 1).all(|(j, op)| {
-        if j == at {
-            return true;
-        }
-        vs.clear();
-        crate::mir_ops::op_values(op, &mut vs);
-        let handle_def = matches!(op, Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if *d == handle && args.as_slice() == [src]);
-        handle_def || (!vs.contains(&src) && (j > at || !vs.contains(&handle)))
-    })
 }
 
 #[cfg(test)]
