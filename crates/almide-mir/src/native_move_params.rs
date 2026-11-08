@@ -99,7 +99,7 @@ fn movable_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Vec<(usi
 /// `List[List[Int]]` carry starts its slot as `acc + []`, which copied every
 /// element list per call where the standard codegen moves the argument in.
 /// Returns (param index, the concatenation's op index).
-fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BTreeMap<String, Vec<bool>>) -> Vec<(usize, usize)> {
+fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Modes<'_>) -> Vec<(usize, usize)> {
     let depth = depths(func);
     let mut out = Vec::new();
     for (k, p) in func.params.iter().enumerate() {
@@ -120,7 +120,12 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BT
                         // Or a program function whose own param there is a
                         // move param: the body hands the param on (`poke(mut
                         // b) = bytes.put_u8(b, 0, v)` over a linked body).
-                        || owned.get(name.as_str()).is_some_and(|modes| modes.get(k).copied().unwrap_or(false))))
+                        || owned.moves(&func.ops[last], k)))
+                && values(&func.ops[last]).iter().filter(|x| **x == p.value).count() == 1)
+            // Or a closure call whose every possible callee takes it over there.
+            || matches!(&func.ops[last], Op::CallIndirect { args, .. }
+                if args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value))
+                    .is_some_and(|k| owned.moves(&func.ops[last], k))
                 && values(&func.ops[last]).iter().filter(|x| **x == p.value).count() == 1);
         let plain = named.iter().all(|&i| !matches!(func.ops[i], Op::Dup { .. } | Op::SetLocal { .. }));
         let early_exit = func.ops[..last].iter().any(|op| matches!(op, Op::Return { .. }));
@@ -136,9 +141,15 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BT
             Op::CallFn { name, args, .. } => {
                 values(&func.ops[i]).iter().filter(|x| **x == p.value).count() == 1
                     && args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value)).is_some_and(|k| {
-                        crate::native_floor::takes_by_value(name, k)
-                            || owned.get(name.as_str()).is_some_and(|modes| modes.get(k).copied().unwrap_or(false))
+                        crate::native_floor::takes_by_value(name, k) || owned.moves(&func.ops[i], k)
                     })
+            }
+            Op::CallIndirect { args, .. } => {
+                values(&func.ops[i]).iter().filter(|x| **x == p.value).count() == 1
+                    && args
+                        .iter()
+                        .position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value))
+                        .is_some_and(|k| owned.moves(&func.ops[i], k))
             }
             _ => false,
         };
@@ -153,7 +164,7 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BT
 
 /// Make the movable parameters of `func` move parameters, if the ownership
 /// mirror accepts the result.
-fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BTreeMap<String, Vec<bool>>) -> Option<MirFunction> {
+fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Modes<'_>) -> Option<MirFunction> {
     let movable = movable_params(func, takes);
     let consumed: Vec<(usize, usize)> = consumed_params(func, takes, owned)
         .into_iter()
@@ -263,13 +274,11 @@ fn region_of(ops: &[Op], end: usize) -> Option<(usize, Option<usize>)> {
 }
 
 /// Whether `ops` hands `s` to a move position of a program function.
-fn hands_over(ops: &[Op], s: ValueId, owned: &BTreeMap<String, Vec<bool>>) -> bool {
+fn hands_over(ops: &[Op], s: ValueId, owned: &Modes<'_>) -> bool {
     ops.iter().any(|op| match op {
-        Op::CallFn { name, args, .. } => owned.get(name.as_str()).is_some_and(|modes| {
-            args.iter()
-                .enumerate()
-                .any(|(k, a)| matches!(a, crate::CallArg::Handle(v) if *v == s) && modes.get(k).copied().unwrap_or(false))
-        }),
+        Op::CallFn { args, .. } | Op::CallIndirect { args, .. } => {
+            args.iter().enumerate().any(|(k, a)| matches!(a, crate::CallArg::Handle(v) if *v == s) && owned.moves(op, k))
+        }
         _ => false,
     })
 }
@@ -284,7 +293,7 @@ fn hands_over(ops: &[Op], s: ValueId, owned: &BTreeMap<String, Vec<bool>>) -> bo
 /// Nested regions sink in turn (a release that lands right after an inner
 /// `EndIf` whose merge is the arm's value). Not across an arm that exits,
 /// breaks, or yields `s` itself.
-fn sink_join_releases(func: &MirFunction, owned: &BTreeMap<String, Vec<bool>>) -> MirFunction {
+fn sink_join_releases(func: &MirFunction, owned: &Modes<'_>) -> MirFunction {
     let mut f = func.clone();
     'again: loop {
         for j in 1..f.ops.len() {
@@ -315,16 +324,16 @@ fn sink_join_releases(func: &MirFunction, owned: &BTreeMap<String, Vec<bool>>) -
 }
 
 /// Hand every owned-parameter argument of `func`'s calls over at the call.
-fn move_at_sites(func: &MirFunction, owned: &BTreeMap<String, Vec<bool>>) -> MirFunction {
+fn move_at_sites(func: &MirFunction, owned: &Modes<'_>) -> MirFunction {
     let mut f = func.clone();
     let mut fresh = next_value(&f);
     let mut i = 0;
     while i < f.ops.len() {
-        let Op::CallFn { name, args, .. } = &f.ops[i] else {
+        let (Op::CallFn { args, .. } | Op::CallIndirect { args, .. }) = &f.ops[i] else {
             i += 1;
             continue;
         };
-        let Some(modes) = owned.get(name.as_str()) else {
+        let Some(modes) = owned.of(&f.ops[i]) else {
             i += 1;
             continue;
         };
@@ -350,7 +359,7 @@ fn move_at_sites(func: &MirFunction, owned: &BTreeMap<String, Vec<bool>>) -> Mir
                     fresh += 1;
                     f.ops.insert(call, Op::Dup { dst: t, src: v });
                     call += 1;
-                    if let Op::CallFn { args, .. } = &mut f.ops[call] {
+                    if let Op::CallFn { args, .. } | Op::CallIndirect { args, .. } = &mut f.ops[call] {
                         args[k] = crate::CallArg::Handle(t);
                     }
                     consumes.push(t);
@@ -366,10 +375,86 @@ fn move_at_sites(func: &MirFunction, owned: &BTreeMap<String, Vec<bool>>) -> Mir
     f
 }
 
+/// The call modes the solver reads at a call site: each program function's
+/// heap-param modes by name, and the closure table — every function some
+/// `FuncRef` names, with each param's heap-ness — that a `CallIndirect` may
+/// reach.
+pub(crate) struct Modes<'t> {
+    by_name: BTreeMap<String, Vec<bool>>,
+    table: &'t [(String, Vec<bool>)],
+}
+
+impl Modes<'_> {
+    /// The possible callees of a closure call: the table entries whose param
+    /// shape (arity, heap-ness per slot) matches its arguments — the same
+    /// over-approximation the native-calls witness rows the site against
+    /// (`certificate_c::indirect_callee_indices`).
+    fn possible<'a>(&'a self, args: &'a [crate::CallArg]) -> impl Iterator<Item = &'a str> + 'a {
+        self.table
+            .iter()
+            .filter(move |(_, shape)| {
+                shape.len() == args.len()
+                    && shape.iter().zip(args).all(|(h, a)| *h == matches!(a, crate::CallArg::Handle(_)))
+            })
+            .map(|(n, _)| n.as_str())
+    }
+
+    /// The modes `op` hands its arguments over in: a call to a program
+    /// function with a move param, or a closure call every possible callee of
+    /// which declares the same modes, one of them a move.
+    fn of(&self, op: &Op) -> Option<Vec<bool>> {
+        match op {
+            Op::CallFn { name, .. } => self.by_name.get(name.as_str()).cloned(),
+            Op::CallIndirect { args, .. } => {
+                let mut modes: Option<Vec<bool>> = None;
+                for callee in self.possible(args) {
+                    let m = self.by_name.get(callee).cloned().unwrap_or_else(|| vec![false; args.len()]);
+                    match &modes {
+                        None => modes = Some(m),
+                        Some(prev) if *prev == m => {}
+                        Some(_) => return None,
+                    }
+                }
+                modes.filter(|m| m.iter().any(|x| *x))
+            }
+            _ => None,
+        }
+    }
+
+    /// `op` takes its argument `k` over.
+    fn moves(&self, op: &Op, k: usize) -> bool {
+        self.of(op).is_some_and(|m| m.get(k).copied().unwrap_or(false))
+    }
+
+    /// The closure-table entries of a closure call whose possible callees
+    /// declare different modes: the native-calls witness rows the site
+    /// against each of them in one mode, which the checker refuses.
+    fn disagreeing(&self, functions: &[MirFunction]) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for op in functions.iter().flat_map(|f| f.ops.iter()) {
+            let Op::CallIndirect { args, .. } = op else { continue };
+            let callees: Vec<&str> = self.possible(args).collect();
+            let mode = |c: &str| self.by_name.get(c).cloned().unwrap_or_else(|| vec![false; args.len()]);
+            if callees.iter().any(|c| mode(c) != mode(callees[0])) {
+                out.extend(callees.iter().filter(|c| self.by_name.contains_key(**c)).map(|c| c.to_string()));
+            }
+        }
+        out
+    }
+}
+
 /// The pass: move parameters where the body takes its parameter over, and
 /// the call-site moves that feed them. All or nothing per program: a caller
 /// the ownership mirror refuses after the rewrite leaves the whole program on
 /// the borrow convention.
+///
+/// A lifted lambda (a declared closure signature, `crate::lambda_sigs`) is
+/// reached only through closure calls: the `CallIndirect` sites, whose modes
+/// are those its possible callees agree on, and the runtime callback
+/// adapters, which hand over the values the runtime gives them. Its user
+/// params take part like any other function's; its env (param 0) is always
+/// lent. A lambda whose possible callees at some closure call disagree on a
+/// mode keeps borrowing, and the modes are solved again.
 pub(crate) fn rewrite(functions: &mut [MirFunction]) {
     if crate::render_native_move::drill_no_moves() {
         return;
@@ -382,9 +467,12 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
             _ => None,
         })
         .collect();
-    let eligible = |f: &MirFunction| {
-        f.name != "main" && !taken.contains(&f.name) && !f.name.contains('.') && !f.name.starts_with("__")
-    };
+    // The closure table: every taken function in the program, by param shape.
+    let table: Vec<(String, Vec<bool>)> = functions
+        .iter()
+        .filter(|f| taken.contains(&f.name))
+        .map(|f| (f.name.clone(), f.params.iter().map(|p| p.repr.is_heap()).collect()))
+        .collect();
     // (callee, position) pairs some call site fills with something other than
     // a heap handle: that position cannot take a handed-over reference.
     let mut not_handle: BTreeSet<(String, usize)> = BTreeSet::new();
@@ -397,20 +485,52 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
             }
         }
     }
-    // To a fixpoint: a body that hands its param to a callee's move param
-    // takes it over in turn, once that callee's mode is known. From no move
-    // params up first; then, for functions that hand a param to each other
-    // (`collect(xs) = … step(xs)`, `step(xs) = … collect(xs)`), from every
-    // handle position down, kept only if every body it leaves verifies.
-    let solve = |start: BTreeMap<String, Vec<bool>>, strict: bool| -> Option<Vec<MirFunction>> {
-        let mut owned = start;
+    let mut pinned: BTreeSet<String> = BTreeSet::new();
+    loop {
+        let closure = |f: &MirFunction| {
+            taken.contains(&f.name) && crate::lambda_sigs::get(&f.name).is_some() && !pinned.contains(&f.name)
+        };
+        let eligible = |f: &MirFunction| {
+            f.name != "main"
+                && !f.name.contains('.')
+                && (closure(f) || (!taken.contains(&f.name) && !f.name.starts_with("__")))
+        };
+        let takes_at = |f: &MirFunction, k: usize| {
+            !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0)
+        };
+        let Some((best, owned)) = solve_modes(functions, &table, &eligible, &takes_at) else { return };
+        // Only eligible closures carry modes, and a pinned one is not
+        // eligible: every round pins at least one more, so this ends.
+        let disagree = owned.disagreeing(&best);
+        if disagree.is_empty() {
+            functions.clone_from_slice(&best);
+            return;
+        }
+        pinned.extend(disagree);
+    }
+}
+
+/// The modes to a fixpoint, and the rewritten functions under them.
+/// To a fixpoint: a body that hands its param to a callee's move param takes
+/// it over in turn, once that callee's mode is known. From no move params up
+/// first; then, for functions that hand a param to each other (`collect(xs) =
+/// … step(xs)`, `step(xs) = … collect(xs)`), from every handle position down,
+/// kept only if every body it leaves verifies.
+fn solve_modes<'t>(
+    functions: &[MirFunction],
+    table: &'t [(String, Vec<bool>)],
+    eligible: &dyn Fn(&MirFunction) -> bool,
+    takes_at: &dyn Fn(&MirFunction, usize) -> bool,
+) -> Option<(Vec<MirFunction>, Modes<'t>)> {
+    let solve = |start: BTreeMap<String, Vec<bool>>, strict: bool| -> Option<(Vec<MirFunction>, Modes<'t>)> {
+        let mut owned = Modes { by_name: start, table };
         let mut next: Vec<MirFunction>;
         let mut rounds = 0;
         loop {
             next = functions
                 .iter()
                 .map(|f| {
-                    let takes = |k: usize| !not_handle.contains(&(f.name.clone(), k));
+                    let takes = |k: usize| takes_at(f, k);
                     if eligible(f) { own_params(f, &takes, &owned).unwrap_or_else(|| f.clone()) } else { f.clone() }
                 })
                 .collect();
@@ -419,7 +539,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
                 .filter(|f| !f.owned_params.is_empty())
                 .map(|f| (f.name.clone(), f.params.iter().map(|p| f.owned_params.contains(&p.value)).collect()))
                 .collect();
-            if modes == owned {
+            if modes == owned.by_name {
                 break;
             }
             if rounds == 8 {
@@ -429,10 +549,10 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
                 break;
             }
             rounds += 1;
-            owned = modes;
+            owned.by_name = modes;
         }
-        if owned.is_empty() {
-            return Some(functions.to_vec());
+        if owned.by_name.is_empty() {
+            return Some((functions.to_vec(), owned));
         }
         for f in next.iter_mut() {
             // The join releases sunk into the arms first, so an arm's call takes
@@ -444,18 +564,17 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
             }
             *f = moved;
         }
-        Some(next)
+        Some((next, owned))
     };
-    let Some(up) = solve(BTreeMap::new(), false) else { return };
+    let up = solve(BTreeMap::new(), false)?;
     let top: BTreeMap<String, Vec<bool>> = functions
         .iter()
         .filter(|f| eligible(f))
-        .map(|f| (f.name.clone(), (0..f.params.len()).map(|k| f.params[k].repr.is_heap() && !not_handle.contains(&(f.name.clone(), k))).collect()))
+        .map(|f| (f.name.clone(), (0..f.params.len()).map(|k| f.params[k].repr.is_heap() && takes_at(f, k)).collect()))
         .collect();
     let owned_count = |fs: &[MirFunction]| fs.iter().map(|f| f.owned_params.len()).sum::<usize>();
-    let best = match solve(top, true) {
-        Some(down) if owned_count(&down) > owned_count(&up) => down,
+    Some(match solve(top, true) {
+        Some(down) if owned_count(&down.0) > owned_count(&up.0) => down,
         _ => up,
-    };
-    functions.clone_from_slice(&best);
+    })
 }
