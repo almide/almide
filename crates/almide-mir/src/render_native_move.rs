@@ -116,46 +116,6 @@ pub(crate) fn dying_after(
     src: ValueId,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
-    dying_after_skipping(func, at, src, borrow_arms, &Default::default())
-}
-
-/// [`dying_after`] for a record a field is moved out of at `at`: a later read
-/// of one of its scalar slots (`ListGetScalar`, or the address `prim.handle`
-/// takes of it and nothing reads) does not see the field, which the move
-/// leaves empty, so it does not keep the record alive.
-pub(crate) fn carrier_dies_after(
-    func: &MirFunction,
-    at: usize,
-    src: ValueId,
-    borrow_arms: &std::collections::BTreeSet<ValueId>,
-) -> bool {
-    let unread = |d: ValueId| {
-        !func.ops.iter().any(|op| {
-            let mut reads = Vec::new();
-            crate::mir_ops::op_reads(op, &mut reads);
-            reads.contains(&d)
-        })
-    };
-    let scalar_reads: std::collections::BTreeSet<usize> = func.ops[at + 1..]
-        .iter()
-        .enumerate()
-        .filter(|(_, op)| match op {
-            Op::ListGetScalar { list, .. } => *list == src,
-            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } => args.as_slice() == [src] && unread(*d),
-            _ => false,
-        })
-        .map(|(j, _)| at + 1 + j)
-        .collect();
-    dying_after_skipping(func, at, src, borrow_arms, &scalar_reads)
-}
-
-fn dying_after_skipping(
-    func: &MirFunction,
-    at: usize,
-    src: ValueId,
-    borrow_arms: &std::collections::BTreeSet<ValueId>,
-    skip: &std::collections::BTreeSet<usize>,
-) -> bool {
     if drill_no_moves() {
         return false;
     }
@@ -174,7 +134,7 @@ fn dying_after_skipping(
     if joined {
         return false;
     }
-    if let Some(verdict) = scan_after_copy(func, at, src, owned_param, skip) {
+    if let Some(verdict) = scan_after_copy(func, at, src, owned_param) {
         return verdict;
     }
     // The returned value is read at the end.
@@ -213,10 +173,51 @@ fn dying_after_skipping(
     defs.iter().any(|&d| d < at && loops[d] == loops[at]) && defs.iter().all(|&d| d < at && within(d))
 }
 
+/// [`dying_after`] for a record a field is moved out of at `at`: a later read
+/// of one of its scalar slots (`ListGetScalar`, or the address `prim.handle`
+/// takes of it and nothing reads) does not see the field, which the move
+/// leaves empty, so it does not keep the record alive.
+pub(crate) fn carrier_dies_after(
+    func: &MirFunction,
+    at: usize,
+    src: ValueId,
+    borrow_arms: &std::collections::BTreeSet<ValueId>,
+) -> bool {
+    let unread = |d: ValueId| {
+        !func.ops.iter().any(|op| {
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(op, &mut reads);
+            reads.contains(&d)
+        })
+    };
+    let scalar_reads: std::collections::BTreeSet<usize> = func.ops[at + 1..]
+        .iter()
+        .enumerate()
+        .filter(|(_, op)| match op {
+            Op::ListGetScalar { list, .. } => *list == src,
+            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } => args.as_slice() == [src] && unread(*d),
+            _ => false,
+        })
+        .map(|(j, _)| at + 1 + j)
+        .collect();
+    SKIP_READS.with(|m| *m.borrow_mut() = scalar_reads);
+    let dies = dying_after(func, at, src, borrow_arms);
+    SKIP_READS.with(|m| m.borrow_mut().clear());
+    dies
+}
+
+thread_local! {
+    /// The op indices [`carrier_dies_after`] reads past while it asks
+    /// [`dying_after`].
+    static SKIP_READS: std::cell::RefCell<std::collections::BTreeSet<usize>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
 /// The forward scan of [`dying_after`] over the ops after the copy at
 /// `ops[at]`: `Some(true)` = released first, `Some(false)` = read or rebound
 /// first, `None` = neither before the end of the function.
-fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: bool, skip: &std::collections::BTreeSet<usize>) -> Option<bool> {
+fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: bool) -> Option<bool> {
+    let skip = SKIP_READS.with(|m| m.borrow().clone());
     // `src` is released, unconditionally and before anything reads it again,
     // in the copy's own block: the value dies there, whatever later rebinds
     // the slot (a loop slot's write-back `Drop v; SetLocal v = ..`). A copy
