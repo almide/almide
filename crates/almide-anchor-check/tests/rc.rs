@@ -486,3 +486,30 @@ fn a_windowed_temporary_event_takes_a_call_in_its_window() -> Result<(), String>
     assert!(rc("local.get 0 call $alloc drop", "d-@2-3").is_err());
     Ok(())
 }
+
+// ── a release is its local's last read (#4277, rc/after.rs) ───────────────
+
+#[test]
+fn a_read_of_the_local_after_its_matched_release_is_refused() {
+    // Matched one to one, but the local is read on after its release.
+    assert!(rc("local.get 0 call $alloc drop local.get 0 drop", "d0").unwrap_err().contains("local 0 read at @"));
+    // In one arm of an `if` only.
+    assert!(rc("local.get 0 call $alloc drop i32.const 1 if local.get 0 drop end", "d0").unwrap_err().contains("after its release"));
+    // Round a loop's back edge: the next iteration reads the released local.
+    assert!(rc("loop local.get 0 call $alloc drop i32.const 1 br_if 0 end", "d0").unwrap_err().contains("after its release"));
+    // Through `local.tee`: the tee'd local holds the released block.
+    assert!(rc("i32.const 8 local.tee 1 call $alloc drop local.get 1 drop", "d-").unwrap_err().contains("local 1 read at"));
+}
+
+#[test]
+fn a_release_followed_by_a_rewrite_or_no_path_to_a_read_is_the_last_read() -> Result<(), String> {
+    let r = rc("local.get 0 call $alloc drop i32.const 0 local.set 0 local.get 0 drop", "d0")?;
+    assert_eq!(r.last_reads, 1);
+    // The read lies past a branch out: no path reaches it.
+    rc("block local.get 0 call $alloc drop br 0 local.get 0 drop end", "d0")?;
+    // The other arm of an `if` reads it, not the arm that released it.
+    rc("i32.const 1 if local.get 0 call $alloc drop else local.get 0 drop end", "d0")?;
+    // A loop that rebinds the local before its next read.
+    rc("loop i32.const 0 local.set 0 local.get 0 call $alloc drop i32.const 1 br_if 0 end", "d0")?;
+    Ok(())
+}

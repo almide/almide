@@ -95,6 +95,11 @@
 //! `arm-internal` by the routines' and arms' own logged events. A new
 //! trusted class is an owner decision, not a checker edit.
 //!
+//! A matched release is its local's last read (after.rs): from every live
+//! release call whose argument is read straight out of a local, no path
+//! reaches a read of that local before a write of it — a release moved before
+//! the variable's last use is refused although its event still matches it.
+//!
 //! TRUSTED (#4278): that `rcfns` names every rc_inc and release routine.
 //! (An arm's and a compound routine's RC are no longer trusted: each of
 //! their calls is one of their logged events.)
@@ -108,6 +113,7 @@ use wasmparser::Operator as Op;
 use crate::decode::{store_width, Body};
 use crate::operands::{chain, Flow, Src, T, FUEL};
 
+mod after;
 mod events;
 mod matching;
 
@@ -148,6 +154,8 @@ pub struct RcReport {
     pub judges_unmatched: usize,
     /// Releases (or +1s) a callee's checked signature consumes (#4278 B1).
     pub signed: usize,
+    /// Live release calls on a local held to no later read of it (after.rs).
+    pub last_reads: usize,
 }
 
 /// One open construct of [`dead`]'s walk: whether the code now reached in
@@ -357,6 +365,7 @@ pub fn check_rc(
         rep.calls += fr.calls[..fr.live].iter().filter(|c| c.1 != 'j').count();
         rep.events += fr.ev.evs.len();
         fr.verdict(rep)?;
+        fr.last_reads(rep)?;
         rep.frames += 1;
     }
     Ok(())
@@ -440,6 +449,23 @@ impl<'x, 'a> Frame<'x, 'a> {
         fr.collect_calls(&dead, rc_fns);
         fr.collect_takers(&dead);
         Ok(fr)
+    }
+
+    /// after.rs: every live release call on a local is that local's last
+    /// read on every path from it.
+    fn last_reads(&self, rep: &mut RcReport) -> Result<(), String> {
+        let cfg = after::Cfg::new(self.b);
+        for &(k, kind, _) in &self.calls[..self.live] {
+            if kind != 'd' {
+                continue;
+            }
+            let Some(l) = after::released_local(self.b, k) else { continue };
+            if let Some(j) = after::read_after(self.b, &cfg, k, l) {
+                return Err(format!("rc: function {}: local {l} read at @{j} after its release at @{k}", self.pos));
+            }
+            rep.last_reads += 1;
+        }
+        Ok(())
     }
 
     /// [`names_through`] two calls deep, in this frame.
