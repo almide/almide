@@ -790,7 +790,9 @@ impl Hash for AlmideStr {
 }
 
 /// `n`'s decimal digits, written right-aligned into `buf`; returns where they
-/// start. Two digits per division, as `core::fmt` renders integers.
+/// start. Two digits per division, as `core::fmt` renders integers. Inlined
+/// into each writer, as `from_i64` had it before the writers shared it.
+#[inline(always)]
 fn i64_digits(n: i64, buf: &mut [u8; 20]) -> usize {
     const PAIRS: &[u8; 200] = b"0001020304050607080910111213141516171819\
         2021222324252627282930313233343536373839\
@@ -836,6 +838,40 @@ impl fmt::Display for IntText {
         // SAFETY: `buf[i..]` holds only ASCII digits and an optional `-`.
         f.write_str(unsafe { std::str::from_utf8_unchecked(&buf[i..]) })
     }
+}
+
+/// A runtime call's string list as `Vec<AlmideStr>`: the list itself when it
+/// already is one (every runtime list of strings today), element by element
+/// otherwise. A rendered call converted every result element by element,
+/// a full pass and a fresh vector for a list it already had.
+pub trait IntoStrList {
+    fn into_str_list(self) -> Vec<AlmideStr>;
+}
+
+impl IntoStrList for Vec<AlmideStr> {
+    #[inline(always)]
+    fn into_str_list(self) -> Vec<AlmideStr> {
+        self
+    }
+}
+
+impl IntoStrList for Vec<String> {
+    fn into_str_list(self) -> Vec<AlmideStr> {
+        self.into_iter().map(AlmideStr::from).collect()
+    }
+}
+
+impl IntoStrList for Vec<&str> {
+    fn into_str_list(self) -> Vec<AlmideStr> {
+        self.into_iter().map(AlmideStr::from).collect()
+    }
+}
+
+/// [`IntoStrList::into_str_list`] as a function, so a call site needs no
+/// trait in scope.
+#[inline(always)]
+pub fn str_list<L: IntoStrList>(l: L) -> Vec<AlmideStr> {
+    l.into_str_list()
 }
 
 impl fmt::Display for AlmideStr {
