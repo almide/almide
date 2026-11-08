@@ -358,7 +358,10 @@ fn retaining_utf8_ranges_reuses_unique_capacity_and_preserves_aliases() {
 
 #[test]
 fn invalid_retained_ranges_panic_before_mutation() {
-    for range in [1..2, 0..1, 0..10, 3..2] {
+    // The reversed range is spelled as a struct literal: it is meant to be
+    // empty-and-invalid here, which the range syntax would be linted for.
+    let reversed = std::ops::Range { start: 3, end: 2 };
+    for range in [1..2, 0..1, 0..10, reversed] {
         let mut text = AlmideStr::from("éAz");
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| text.retain_range(range)));
         assert!(result.is_err());
