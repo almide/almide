@@ -89,8 +89,7 @@ pub(crate) fn last_use(
     if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) || !crate::render_native_rec::has_default(t) {
         return false;
     }
-    // Or no path after the copy reads it again (`mir_liveness`).
-    dying_after(func, at, src, borrow_arms) || crate::mir_liveness::dead_after(func, at, src, borrow_arms)
+    dying_after(func, at, src, borrow_arms)
 }
 
 /// Whether the value `src` is never read again after `ops[at]` (whatever its
@@ -106,6 +105,16 @@ fn released(op: &Op, v: ValueId) -> bool {
 }
 
 pub(crate) fn dying_after(
+    func: &MirFunction,
+    at: usize,
+    src: ValueId,
+    borrow_arms: &std::collections::BTreeSet<ValueId>,
+) -> bool {
+    // Or no path after the copy reads it again (`mir_liveness`).
+    dying_after_shape(func, at, src, borrow_arms) || crate::mir_liveness::dead_after(func, at, src, borrow_arms)
+}
+
+fn dying_after_shape(
     func: &MirFunction,
     at: usize,
     src: ValueId,
