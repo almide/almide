@@ -36,3 +36,27 @@ jobs:
         with:
           name: probe
           path: probe-out
+
+  unit:
+    name: Unit tests of the touched crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: almide-str and almide-mir unit tests
+        run: set -o pipefail; cargo test --release -p almide-str -p almide-mir --lib --tests 2>&1 | tail -80
+      - name: native render integration tests
+        run: |
+          cargo build --release --bin almide
+          for t in native_v1_differential_test native_float32_test native_main_result_test bytes_push_index_cells_test native_projection_ownership_test native_runtime_profile_test; do
+            [ -f tests/$t.rs ] || continue
+            echo "== $t"; cargo test --release --test $t 2>&1 | tail -15
+          done
