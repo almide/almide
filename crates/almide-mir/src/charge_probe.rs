@@ -179,19 +179,7 @@ fn specialize_metered_clones(functions: &mut Vec<MirFunction>, exempt: &std::col
     let mut uses_funcref = false;
     let mut queue: VecDeque<String> = names.iter().filter(|n| is_root(n)).cloned().collect();
     let mut visited: BTreeSet<String> = queue.iter().cloned().collect();
-    let mut lambdas_seeded = false;
-    loop {
-        let Some(n) = queue.pop_front() else {
-            // The lambdas are metered globally once a region reaches a
-            // FuncRef, so what they call is region-reachable too: their
-            // callees run as metered clones, as every other region callee.
-            if uses_funcref && !lambdas_seeded {
-                lambdas_seeded = true;
-                queue.extend(names.iter().filter(|n| n.starts_with("__lambda_") && visited.insert((*n).clone())).cloned());
-                continue;
-            }
-            break;
-        };
+    while let Some(n) = queue.pop_front() {
         let Some(&i) = by_name.get(&n) else { continue };
         for op in &functions[i].ops {
             match op {
@@ -238,7 +226,6 @@ fn specialize_metered_clones(functions: &mut Vec<MirFunction>, exempt: &std::col
             retarget(f, &reachable);
             charge_fn(f, exempt);
         } else if uses_funcref && name.starts_with("__lambda_") {
-            retarget(f, &reachable);
             charge_fn(f, exempt);
         } else {
             strip_dyn_charges(f);
