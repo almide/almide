@@ -554,7 +554,16 @@ fn specialized_list_elem(call: &str) -> Option<String> {
 /// element meets a String's, never a Float's bits.
 fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
 
-    let (module, func) = call.split_once('.').ok_or("not a module.fn call")?;
+    let Some((module, func)) = call.split_once('.') else {
+        // A bare registry helper (one generated code calls by its own name)
+        // that declares the stdlib fn it specializes is served as that fn.
+        return match specialized_target(call) {
+            Some(target) if target.contains('.') => {
+                derive_for(&target, str_elems).map_err(|e| format!("specializes `{target}`: {e}"))
+            }
+            _ => Err("not a module.fn call".into()),
+        };
+    };
     if !almide_lang::stdlib_info::is_bundled_module(module) {
         return Err("not a bundled stdlib module".into());
     }
