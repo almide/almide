@@ -10,7 +10,7 @@ env:
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
   HEAD_REF: wasm-copy-wordwise
-  BASE_REF: 488198d00
+  BASE_REF: 723302004
   FIXTURE: spec/wasm_cross/string_slice_concat_short_unaligned.almd
 jobs:
   regen:
@@ -111,14 +111,15 @@ jobs:
       - run: cargo build --release --bin almide
       - name: Negative control — unit tests must fail
         run: |
-          set -uo pipefail
+          set +e -uo pipefail
           cargo test --release -p almide-wasm --lib copy_helper 2>&1 | tail -30
           rc=${PIPESTATUS[0]}
           echo "unit test exit $rc"
           if [ "$rc" = 0 ]; then echo "NEGATIVE CONTROL (unit): NOT CAUGHT"; exit 1; else echo "NEGATIVE CONTROL (unit): caught"; fi
       - name: Negative control — fixture byte-compare must diverge
+        if: always()
         run: |
-          set -uo pipefail
+          set +e -uo pipefail
           A=target/release/almide
           $A run "$FIXTURE" > /tmp/native.out 2>&1; echo "native exit $?"
           $A run "$FIXTURE" --target wasm > /tmp/wasm.out 2>&1; echo "wasm exit $?"
