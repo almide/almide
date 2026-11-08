@@ -156,6 +156,11 @@ pub(crate) fn render_call(
     if f.str_only && elem_str != Some(true) {
         return Err(wall(format!("native: floor call `{name}` bounds its element by equality or ordering, served for a String list only")));
     }
+    // A generated struct or enum (a declared record or variant, a tuple) has
+    // no `Ord`: an ordering-bound element of that kind is v0's to render.
+    if f.ordered && elem_kind.and_then(NTy::rec).is_some_and(|i| crate::render_native_rec::field_count(i) > 0 || crate::render_native_rec::enum_cases(i).is_some()) {
+        return Err(wall(format!("native: floor call `{name}` orders a declared record or variant, whose generated type derives no ordering")));
+    }
     let cx = CallCx { mismatch: &mismatch, map_kv, elem_str, elem_kind, set_e, name, params: &f.params, args };
     let mut rendered = Vec::new();
     for ((code, got), p) in args.iter().zip(&f.params) {

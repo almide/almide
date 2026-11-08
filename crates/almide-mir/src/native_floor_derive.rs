@@ -141,8 +141,9 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         same.then(|| Some((r.param, t.to_string(), closure(t, rt).ok()?)))?
     });
     let str_only = elem_typed && almide_lang::capability_bounds::of(module, func).next().is_some();
+    let ordered = list_elem_ordered((module, func), generics.iter().flatten().map(|g| g.name.as_str()).collect(), params);
     let borrow_twin = borrow_twin_of(fret, &symbol, &rust_params, rt);
-    Ok(with_by_ref_twin(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only, borrow_twin, by_ref: None }, &rust_params, &rust_ret, rt))
+    Ok(with_by_ref_twin(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only, ordered, borrow_twin, by_ref: None }, &rust_params, &rust_ret, rt))
 }
 
 /// A declared param `p` with the borrow mode its runtime spelling `r` takes
@@ -171,4 +172,18 @@ fn elem_typed_decided(fparams: &[FloorParam], (module, func): (&str, &str), str_
         return Err("an element-typed generic that needs equality or ordering".into());
     }
     Ok(())
+}
+
+/// Whether `module.func` bounds the element of one of its `List[A]` params by
+/// ordering (`capability_bounds`, read off the runtime's generic bounds). A
+/// bound on another generic (`sort_by`'s key) leaves the element unordered.
+fn list_elem_ordered((module, func): (&str, &str), generics: Vec<&str>, params: &[almide_lang::ast::Param]) -> bool {
+    almide_lang::capability_bounds::of(module, func).any(|b| {
+        b.cap == almide_lang::capability_bounds::Cap::Ord
+            && generics.get(b.generic).is_some_and(|g| {
+                params.iter().any(|p| {
+                    matches!(&p.ty, TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 && simple(&args[0]) == Some(*g))
+                })
+            })
+    })
 }

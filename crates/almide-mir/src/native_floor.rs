@@ -209,6 +209,10 @@ pub(crate) struct FloorFn {
     /// only (owner ruling ○, 2026-11-04): the call's list must be a String
     /// list, which carries no Float bits.
     pub str_only: bool,
+    /// The element of the `List[A]` param is ordering-bound (`list.sort`,
+    /// `list.min`, …): a generated struct or enum derives no ordering, so a
+    /// call over a list of declared records or variants walls.
+    pub ordered: bool,
     /// The runtime's borrowing `_ref` twin of a `Result[Value, String]` body
     /// (its symbol, its items): the Ok side a reference into the Value arg.
     pub borrow_twin: Option<(String, Vec<&'static str>)>,

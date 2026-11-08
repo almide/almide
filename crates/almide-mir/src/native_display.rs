@@ -109,7 +109,8 @@ impl Display<'_> {
             ret_ty: Ty::String, body, is_effect: false, is_test: false,
             generics: None, extern_attrs: Vec::new(), export_attrs: Vec::new(),
             attrs: Vec::new(), visibility: IrVisibility::Private, doc: None,
-            blank_lines_before: 0, def_id: None, mutated_params: Vec::new(), module_origin: None,
+            blank_lines_before: 0, def_id: None, module_origin: None,
+            mutated_params: Vec::new(), // fresh-fn: a synthesized display helper whose one param is an immutable owned value
         });
     }
 
