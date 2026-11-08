@@ -93,7 +93,22 @@ pub(crate) fn last_use(
     // the caller hands a copy or its dying value over). Never rebound and not
     // read again on any later op, outside every loop, it moves as itself.
     if matches!(t, NTy::Res | NTy::ResStr) && func.params.iter().any(|p| p.value == src) {
+        // The param and what borrows into it (its handle, an address off it,
+        // a payload read through one): none may be read after the move.
+        let mut derived: std::collections::BTreeSet<ValueId> = [src].into_iter().collect();
         let mut reads = Vec::new();
+        for op in &func.ops {
+            let d = match op {
+                Op::Prim { kind: crate::PrimKind::Handle | crate::PrimKind::LoadHandle, dst: Some(d), .. } => *d,
+                Op::IntBinOp { dst, .. } => *dst,
+                _ => continue,
+            };
+            reads.clear();
+            crate::mir_ops::op_reads(op, &mut reads);
+            if reads.iter().any(|r| derived.contains(r)) {
+                derived.insert(d);
+            }
+        }
         let dead = loop_of(func)[at].is_none()
             && !func.ops.iter().any(|op| matches!(op, Op::SetLocal { local, .. } if *local == src))
             && func.ret != Some(src)
@@ -103,7 +118,7 @@ pub(crate) fn last_use(
                 }
                 reads.clear();
                 crate::mir_ops::op_reads(op, &mut reads);
-                !reads.contains(&src)
+                !reads.iter().any(|r| derived.contains(r))
             });
         if dead {
             CARRIER_PARAMS.with(|m| m.borrow_mut().insert(src));
