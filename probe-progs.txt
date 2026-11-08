@@ -1,10 +1,8 @@
+spec/wasm_cross/autotry_construction.almd
 spec/wasm_cross/codec_decode_field_order.almd
 spec/wasm_cross/codec_decode_errors.almd
 spec/wasm_cross/codec_list_list_field.almd
 spec/wasm_cross/codec_variant_roundtrip.almd
-spec/wasm_cross/codec_variant_tuple_arity.almd
 spec/wasm_cross/codec_doc_array.almd
-spec/wasm_cross/codec_decode_error_surface.almd
-spec/wasm_cross/json_gltf_walk.almd
-spec/wasm_cross/json_value.almd
-spec/wasm_cross/value_eq.almd
+spec/wasm_cross/field_and_interp_accumulator.almd
+spec/wasm_cross/record_map_field_update.almd
