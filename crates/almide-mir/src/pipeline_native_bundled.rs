@@ -167,6 +167,7 @@ pub(super) fn link(ir: &mut IrProgram, checker: &mut Checker) -> Result<(), Lowe
     let mut extra = Demands::default();
     loop {
         load(ir, checker, &extra)?;
+        refresh_declared_reprs(ir, checker);
         let mut linked = ir.clone();
         almide_driver::link_ir(&mut linked);
         let mut demands = Demands::default();
@@ -191,6 +192,23 @@ pub(super) fn link(ir: &mut IrProgram, checker: &mut Checker) -> Result<(), Lowe
             *ir = linked;
             return Ok(());
         }
+    }
+}
+
+/// Loading a primary module registers explicit convention methods that the
+/// initial surface-only environment did not yet know. Supply those facts to
+/// the shared post-monomorphization renderer rule before specializing calls.
+fn refresh_declared_reprs(ir: &mut IrProgram, checker: &Checker) {
+    use almide_frontend::canonicalize::registration::{declared_convention_key, convention_emit_key};
+    for &name in ir.declared_reprs.shapes.keys() {
+        if declared_convention_key(&checker.env, name.as_str(), "repr").is_none() { continue; }
+        let Some(key) = convention_emit_key(&checker.env, name.as_str(), "repr") else { continue };
+        let target = match key.as_str().split_once('.') {
+            Some((m, f)) if almide_lang::stdlib_info::is_bundled_module(m) && f.contains('.') =>
+                CallTarget::Module { module: sym(m), func: sym(f), def_id: None },
+            _ => CallTarget::Named { name: key },
+        };
+        ir.declared_reprs.targets.insert(name, target);
     }
 }
 

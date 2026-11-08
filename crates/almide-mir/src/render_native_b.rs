@@ -347,7 +347,9 @@ fn user_arg_in_declared_mode(
                     code
                 } else { format!("&{code}") })
             }
-            _ => Err(wall(format!("native: arg of another type ({got:?}) to a record param ({want:?}) of `{name}`"))),
+            _ => crate::native_value_repr::tuple_copy(&code, got, want)
+                .map(|value| format!("&({value})"))
+                .ok_or_else(|| wall(format!("native: arg of another type ({got:?}) to a record param ({want:?}) of `{name}`"))),
         },
         NTy::ResStr | NTy::Res | NTy::Opt => carrier_arg_in_declared_mode(name, want, code, got),
         NTy::VecRef | NTy::Vec => {

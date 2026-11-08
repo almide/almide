@@ -40,7 +40,13 @@ pub(crate) fn same_owned(a: NTy, b: NTy) -> bool {
                 (Some(a), Some(b)) => same(a, b, seen),
                 _ => match (rec::result_payloads(i), rec::result_payloads(j)) {
                     (Some((a, e)), Some((b, f))) => same(a, b, seen) && same(e, f, seen),
-                    _ => false,
+                    _ => match (rec::map_kinds(i), rec::map_kinds(j)) {
+                        (Some((k, v)), Some((l, w))) => same(k, l, seen) && same(v, w, seen),
+                        _ => match (rec::set_elem(i), rec::set_elem(j)) {
+                            (Some(a), Some(b)) => same(a, b, seen),
+                            _ => false,
+                        },
+                    },
                 },
             },
         };
@@ -58,6 +64,21 @@ pub(crate) fn scalar_recode(code: &str, from: NTy, to: NTy) -> Option<String> {
         (NTy::F64, NTy::I64) => Some(format!("{code}.to_bits() as i64")),
         _ => None,
     }
+}
+
+/// Runtime tuples choose a structural identity from their native field kinds.
+/// Several checked tuples can share those kinds (Float and Int use i64 lanes)
+/// while still having distinct Rust structs. Rebuild the requested struct;
+/// never declare those structs interchangeable or reinterpret a nominal type.
+pub(crate) fn tuple_copy(code: &str, from: NTy, to: NTy) -> Option<String> {
+    let (NTy::Rec(i), NTy::Rec(j)) = (owned_nty(from), owned_nty(to)) else { return None };
+    let (a, b) = (rec::tuple_fields(i)?, rec::tuple_fields(j)?);
+    if a.len() != b.len() || !a.iter().zip(&b).all(|(a, b)| same_owned(*a, *b)) {
+        return None;
+    }
+    let fields = a.iter().enumerate().map(|(k, _)|
+        format!("f{k}: __tuple.f{k}.clone()")).collect::<Vec<_>>().join(", ");
+    Some(format!("{{ let __tuple = &({code}); {} {{ {fields} }} }}", rec::struct_name(j)))
 }
 
 /// A value used ONLY on the unobserved side of a hoisted carrier read.

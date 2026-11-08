@@ -175,14 +175,15 @@ fn map_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> R
             let (k, v) = cx.map_kv.ok_or_else(mismatch)?;
             // The generated list of the program's `(K, V)` tuple, as the
             // self-hosted body this call specializes declares it.
-            // A program that never spells that tuple gets the generated struct
-            // of the pair's slot kinds, the type an untyped block of them takes.
+            // A generic runtime route may have no specialized return type.
+            // Reuse a checked structural tuple with these field kinds before
+            // falling back to an untyped slot struct.
             let list = specialized_ret(cx.name)
                 .as_ref()
                 .and_then(ty_of)
                 .and_then(|t| crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(&t)))
                 .unwrap_or_else(|| {
-                    crate::render_native_rec::list_type_of(NTy::Rec(crate::render_native_rec::slots_type_of(&[k, v])))
+                    crate::render_native_rec::list_type_of(NTy::Rec(crate::render_native_rec::tuple_type_of(&[k, v])))
                 });
             let Some(NTy::Rec(pair)) = crate::render_native_rec::list_elem(list) else { return Err(mismatch()) };
             let fields_agree = crate::render_native_rec::field_count(pair) == 2

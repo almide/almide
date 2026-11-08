@@ -582,6 +582,14 @@ pub(crate) fn tuple_type_of(fields: &[NTy]) -> u16 {
     existing.map(|i| i as u16).unwrap_or_else(|| slots_type_of(fields))
 }
 
+/// Only structural tuples may be rebuilt across runtime tuple identities.
+/// Nominal records and container aliases are never admitted by field shape.
+pub(crate) fn tuple_fields(i: u16) -> Option<Vec<NTy>> {
+    RECS.with(|r| r.borrow().get(i as usize)
+        .filter(|d| d.name.starts_with("Tuple(") && d.cases.is_none())
+        .map(|d| d.fields.clone()))
+}
+
 /// One closure admission rule for signatures and aggregate fields. Its env
 /// is an owned scalar block; this does not relax capture or call checking.
 pub(crate) fn closure_env_type(t: &almide_lang::types::Ty, admits: impl Fn(&almide_lang::types::Ty) -> bool) -> bool {
