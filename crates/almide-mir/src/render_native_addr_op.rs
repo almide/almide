@@ -235,7 +235,7 @@ fn slot_access_op(op: &Op, s: AddrSink<'_>) -> Result<Option<bool>, LowerError> 
             }
             // The structural builder check proves 0 <= count <= allocated length,
             // with no alias and no later header write that could re-expose the tail.
-            writeln!(out, "{}{}.truncate({} as usize);", "    ".repeat(indent), var(base), var(args[1])).unwrap();
+            writeln!(out, "{}{}.truncate({} as usize);", "    ".repeat(indent), var(base), var(args[1])).expect("writing to a String cannot fail");
             crate::render_native_bounds::invalidate(base);
             Ok(Some(true))
         }
@@ -419,6 +419,7 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
         );
         return Ok(true);
     }
+    crate::render_native_addr::note_field_copy(*d);
     line!(
         "let mut {}: {} = {}.f{k}.clone();",
         var(*d),
@@ -508,23 +509,20 @@ fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
     }
     let field = crate::render_native_rec::rec_field(i, k)
         .ok_or_else(|| wall("native: a store past a record's last field"))?;
-    let rhs = match (field, st.addrs.get(&v).copied(), ty(tys, &v)) {
+    let got = ty(tys, &v);
+    let rhs = match (field, st.addrs.get(&v).copied(), got) {
         (f, None, Some(NTy::Opt)) if crate::native_value_repr::same_owned(f, NTy::Opt) => var(v),
         (NTy::I64, None, Some(NTy::I64)) => var(v),
         (NTy::I64, None, Some(NTy::F64)) => format!("{}.to_bits() as i64", var(v)),
-        (f, Some(sv), _) if sv.off == 0 && sv.idx.is_none() => match ty(tys, &sv.base) {
-            Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g)
-                .ok_or_else(|| wall("native: a record field write of an unowned kind"))?,
-            // `[]` into a field of another list type: that type's empty list.
-            Some(NTy::Vec)
-                if st.empty_lists.contains(&sv.base)
-                    && (f == NTy::VecStr || matches!(f, NTy::Rec(i) if crate::render_native_rec::list_elem(i).is_some())) =>
-            {
-                "Vec::new()".to_string()
+        (f, Some(sv), _) if sv.off == 0 && sv.idx.is_none() => {
+            let base = ty(tys, &sv.base);
+            match base {
+                Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g)
+                    .ok_or_else(|| wall("native: a record field write of an unowned kind"))?,
+                _ => return Err(wall(format!("native: a {base:?} value stored into a {f:?} record field"))),
             }
-            g => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
-        },
-        (f, _, g) => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
+        }
+        _ => return Err(wall(format!("native: a {got:?} value stored into a {field:?} record field"))),
     };
     if let Some(done) = st.building.get_mut(&ad.base) {
         // A struct built whole: the field waits in its own local
@@ -557,9 +555,13 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
     let by_value = |e: NTy| crate::native_value_repr::same_owned(e, NTy::Opt)
         && ty(tys, &v) == Some(NTy::Opt) && !st.addrs.contains_key(&v);
     if let (Some(NTy::Rec(_)), Some(e)) = (ty(tys, &ad.base), list_of(ty(tys, &ad.base)).filter(|e| st.addrs.contains_key(&v) || by_value(*e))) {
-        let rhs = match st.addrs.get(&v).copied() {
-            None => var(v),
-            Some(sv) => {
+        // A map entry left unbuilt goes into its entry list, unbuilt too
+        // (crate::native_map_entries::leave_unbuilt), as a pair.
+        let pair = st.addrs.get(&v).and_then(|sv| crate::native_map_entries::pair_of(sv.base));
+        let rhs = match (pair.clone(), st.addrs.get(&v).copied()) {
+            (Some(p), _) => p,
+            (None, None) => var(v),
+            (None, Some(sv)) => {
                 let g = ty(tys, &sv.base).filter(|g| sv.off == 0 && sv.idx.is_none() && field_accepts(e, *g));
                 g.and_then(|g| {
                     if st.borrowed_list_slots.contains(&(ad.base, v)) && matches!(g, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_))
@@ -574,14 +576,18 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
         };
         if let Some((n, k)) = st.literal.get(&ad.base).copied() {
             let b = var(ad.base);
-            line!("let {b}_e{k}: {} = {rhs};", crate::render_native_rec::owned_ty(e));
+            if pair.is_some() {
+                line!("let {b}_e{k} = {rhs};");
+            } else {
+                line!("let {b}_e{k}: {} = {rhs};", crate::render_native_rec::owned_ty(e));
+            }
             st.literal.insert(ad.base, (n, k + 1));
             if let Some(stored) = st.single_rec.get_mut(&ad.base) {
                 // Its one element waits for the append that pushes it.
                 *stored = true;
                 return Ok(true);
             }
-            if k + 1 == n {
+            if k + 1 == n && !crate::native_map_entries::unbuilt(ad.base) {
                 let es: Vec<String> = (0..n).map(|j| format!("{b}_e{j}")).collect();
                 line!("let mut {b}: {} = vec![{}];", owned_ty_of(ty(tys, &ad.base)), es.join(", "));
             }
@@ -608,6 +614,10 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
                 Some(NTy::StrRef) => format!("AlmideString::from({})", var(sv.base)),
                 other => return Err(wall(format!("native: a {other:?} handle stored into a List[String] slot"))),
             };
+            if let Some(k) = crate::native_map_entries::pair_slot(ad.base) {
+                line!("let {}_e{k}: AlmideString = {rhs};", var(ad.base));
+                return Ok(true);
+            }
             if let Some(done) = st.single.get_mut(&ad.base) {
                 line!("let mut {}_e0: AlmideString = {rhs};", var(ad.base));
                 *done = true;

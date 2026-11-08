@@ -209,66 +209,15 @@ pub fn desugar_variant_guard_match(
                 branches[bi].rows.push(IrMatchArm { pattern: pat.clone(), guard: guard.clone(), body: body.clone() });
             }
         }
-        for (i, n) in copies.iter().enumerate() {
-            if *n > 1
-                && (introduces_binder(&arms[i].body)
-                    || arms[i].guard.as_ref().is_some_and(introduces_binder))
-            {
-                return None;
-            }
+        if duplicates_binder(arms, &copies) {
+            return None;
         }
         let mut out_arms: Vec<IrMatchArm> = Vec::with_capacity(2);
         for (bi, branch) in branches.into_iter().enumerate() {
             if !branch.closed {
                 return None;
             }
-            let k = ctors[bi];
-            let mut rows = branch.rows;
-            let (payload_pat, arm_body) = match &payload_tys[bi] {
-                // A nullary constructor: the guard chain of its rows, ending in the
-                // first unguarded one (the branch is closed, so one exists).
-                None => {
-                    let last = rows.pop()?;
-                    let mut acc = last.body;
-                    while let Some(r) = rows.pop() {
-                        acc = match r.guard {
-                            Some(g) => mk(
-                                IrExprKind::If { cond: Box::new(g), then: Box::new(r.body), else_: Box::new(acc) },
-                                &e.ty,
-                                &span,
-                            ),
-                            None => r.body,
-                        };
-                    }
-                    (None, acc)
-                }
-                // A single unguarded row with a plain payload pattern needs no inner match.
-                Some(_) if rows.len() == 1 && rows[0].guard.is_none() && simple(&rows[0].pattern) => {
-                    let r = rows.pop()?;
-                    (Some(r.pattern), r.body)
-                }
-                Some(pty) => {
-                    let pv = VarId(*next);
-                    *next += 1;
-                    let inner = mk(
-                        IrExprKind::Match {
-                            subject: Box::new(mk(IrExprKind::Var { id: pv }, pty, &span)),
-                            arms: rows,
-                        },
-                        &e.ty,
-                        &span,
-                    );
-                    (Some(IrPattern::Bind { var: pv, ty: pty.clone() }), inner)
-                }
-            };
-            let pattern = match (k, payload_pat) {
-                (K::Some_, Some(p)) => IrPattern::Some { inner: Box::new(p) },
-                (K::Ok_, Some(p)) => IrPattern::Ok { inner: Box::new(p) },
-                (K::Err_, Some(p)) => IrPattern::Err { inner: Box::new(p) },
-                (K::None_, _) => IrPattern::None,
-                _ => return None,
-            };
-            out_arms.push(IrMatchArm { pattern, guard: None, body: arm_body });
+            out_arms.push(branch_arm(ctors[bi], branch.rows, payload_tys[bi].as_ref(), (&e.ty, &span), next)?);
         }
         let m = IrExpr {
             kind: IrExprKind::Match { subject: Box::new(subj), arms: out_arms },
@@ -286,6 +235,76 @@ pub fn desugar_variant_guard_match(
                 def_id: e.def_id,
             }
         })
+    }
+
+    /// An arm copied into both branches whose body or guard introduces a
+    /// binder: the copies would bind the same var twice.
+    fn duplicates_binder(arms: &[IrMatchArm], copies: &[usize]) -> bool {
+        for (i, n) in copies.iter().enumerate() {
+            if *n > 1
+                && (introduces_binder(&arms[i].body)
+                    || arms[i].guard.as_ref().is_some_and(introduces_binder))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Constructor `k`'s arm of the specialized match, from its branch's
+    /// closed `rows` (`payload_ty`: its payload's type, `None` if nullary).
+    fn branch_arm(
+        k: K,
+        mut rows: Vec<IrMatchArm>,
+        payload_ty: Option<&Ty>,
+        (ty, span): (&Ty, &Option<almide_ir::Span>),
+        next: &mut u32,
+    ) -> Option<IrMatchArm> {
+        let (payload_pat, arm_body) = match payload_ty {
+            // A nullary constructor: the guard chain of its rows, ending in the
+            // first unguarded one (the branch is closed, so one exists).
+            None => {
+                let last = rows.pop()?;
+                let mut acc = last.body;
+                while let Some(r) = rows.pop() {
+                    acc = match r.guard {
+                        Some(g) => mk(
+                            IrExprKind::If { cond: Box::new(g), then: Box::new(r.body), else_: Box::new(acc) },
+                            ty,
+                            span,
+                        ),
+                        None => r.body,
+                    };
+                }
+                (None, acc)
+            }
+            // A single unguarded row with a plain payload pattern needs no inner match.
+            Some(_) if rows.len() == 1 && rows[0].guard.is_none() && simple(&rows[0].pattern) => {
+                let r = rows.pop()?;
+                (Some(r.pattern), r.body)
+            }
+            Some(pty) => {
+                let pv = VarId(*next);
+                *next += 1;
+                let inner = mk(
+                    IrExprKind::Match {
+                        subject: Box::new(mk(IrExprKind::Var { id: pv }, pty, span)),
+                        arms: rows,
+                    },
+                    ty,
+                    span,
+                );
+                (Some(IrPattern::Bind { var: pv, ty: pty.clone() }), inner)
+            }
+        };
+        let pattern = match (k, payload_pat) {
+            (K::Some_, Some(p)) => IrPattern::Some { inner: Box::new(p) },
+            (K::Ok_, Some(p)) => IrPattern::Ok { inner: Box::new(p) },
+            (K::Err_, Some(p)) => IrPattern::Err { inner: Box::new(p) },
+            (K::None_, _) => IrPattern::None,
+            _ => return None,
+        };
+        Some(IrMatchArm { pattern, guard: None, body: arm_body })
     }
 
     struct V<'a> {

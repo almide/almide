@@ -32,6 +32,6 @@ fn returning_either_borrowed_arm_certifies_the_actual_ret_inc() {
     let result = harness::run_wasm(&bytes).expect("run");
     assert_eq!(result.exit, 0, "{}", result.stderr);
     assert_eq!(result.stdout, "left right v-1 left\nleft left right\n");
-    let counts = result.alloc_count.unwrap();
+    let counts = result.alloc_count.expect("the harness counts allocations");
     assert_eq!(counts.allocs, counts.frees);
 }

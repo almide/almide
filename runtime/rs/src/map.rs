@@ -856,7 +856,7 @@ pub fn almide_rt_map_map_values<K: PartialEq + Clone + 'static, V: Clone, W>(m: 
     m.iter().map(|(k, v)| (k.clone(), f((*v).clone()))).collect()
 }
 
-pub fn almide_rt_map_from_entries<K: PartialEq + 'static, V>(entries: Vec<(K, V)>) -> AlmideMap<K, V> { entries.into_iter().collect() }
+pub fn almide_rt_map_from_entries<K: PartialEq + 'static, V, I: IntoIterator<Item = (K, V)>>(entries: I) -> AlmideMap<K, V> { entries.into_iter().collect() }
 pub fn almide_rt_map_from_list<K: PartialEq + Clone + 'static, V: Clone>(keys: &[K], values: &[V]) -> AlmideMap<K, V> { keys.iter().cloned().zip(values.iter().cloned()).collect() }
 
 pub fn almide_rt_map_fold<K: Clone, V: Clone, A>(m: &AlmideMap<K, V>, init: A, f: std::rc::Rc<dyn Fn(A, (K, V)) -> A>) -> A {

@@ -43,8 +43,6 @@ struct Program {
 
 #[derive(Default)]
 struct Current {
-    /// The keyed params of the function being rendered → their key.
-    params: BTreeMap<ValueId, usize>,
     /// Its dispatch-index reads of a keyed param → that key.
     reads: BTreeMap<ValueId, usize>,
     /// The function itself, for the shared-cell windows
@@ -165,7 +163,7 @@ pub(crate) fn begin_fn(func: &MirFunction, arms: &BTreeSet<ValueId>) {
     } else {
         dispatch_reads(func).into_iter().filter_map(|(r, p)| params.get(&p).map(|k| (r, *k))).collect()
     };
-    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads, func: Some(func.clone()), emptied: BTreeSet::new(), guards: Vec::new(), in_place: BTreeSet::new(), arms: arms.clone() });
+    CURRENT.with(|c| *c.borrow_mut() = Current { reads, func: Some(func.clone()), emptied: BTreeSet::new(), guards: Vec::new(), in_place: BTreeSet::new(), arms: arms.clone() });
 }
 
 /// The shared-cell read `d` of `cell` takes the payload out

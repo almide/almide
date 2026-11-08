@@ -109,7 +109,8 @@ impl Display<'_> {
             ret_ty: Ty::String, body, is_effect: false, is_test: false,
             generics: None, extern_attrs: Vec::new(), export_attrs: Vec::new(),
             attrs: Vec::new(), visibility: IrVisibility::Private, doc: None,
-            blank_lines_before: 0, def_id: None, mutated_params: Vec::new(), module_origin: None,
+            blank_lines_before: 0, def_id: None, module_origin: None,
+            mutated_params: Vec::new(), // fresh-fn: a synthesized display helper whose one param is an immutable owned value
         });
     }
 
@@ -119,62 +120,9 @@ impl Display<'_> {
         }
         match obj.ty.clone() {
             Ty::Bytes => self.format(call("bytes", "to_list", obj, Ty::list(Ty::Int))),
-            Ty::Tuple(ts) => {
-                let mut parts = vec![text("(")];
-                for (i, t) in ts.iter().enumerate() {
-                    if i > 0 { parts.push(text(", ")); }
-                    let field = node(IrExprKind::TupleIndex { object: Box::new(obj.clone()), index: i }, t.clone());
-                    parts.push(self.format(field)?);
-                }
-                parts.push(text(")"));
-                Some(concat(parts))
-            }
-            Ty::Record { mut fields } => {
-                if let Some((shape, _)) = self.shapes.lookup(&fields) {
-                    let name = shape.label.clone();
-                    let ordered = shape.fields.iter().map(|(n, _)|
-                        fields.iter().find(|(f, _)| f == n).cloned()).collect::<Option<Vec<_>>>()?;
-                    return self.record(obj, &name, ordered);
-                }
-                fields.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
-                self.record(obj, "", fields)
-            }
-            Ty::Named(n, args) => {
-                if let Some((gs, fs)) = self.records.get(n.as_str()).cloned() {
-                    let fields = instantiate(&gs, &args, &fs)?;
-                    self.record(obj, almide_ir::declared_type_name(n.as_str()), fields)
-                } else if let Some(layout) = self.variants.by_type.get(n.as_str()).cloned() {
-                    let mut arms = Vec::new();
-                    for case in layout.cases {
-                        let fields = instantiate(&layout.generics, &args, &case.fields)?;
-                        let record = self.record_cases.contains(&(n, case.ctor));
-                        let mut patterns = Vec::new();
-                        let mut parts = vec![text(case.ctor.as_str())];
-                        if !fields.is_empty() { parts.push(text(if record { " { " } else { "(" })); }
-                        for (i, (field, ty)) in fields.iter().enumerate() {
-                            if i > 0 { parts.push(text(", ")); }
-                            if record { parts.push(text(&format!("{field}: "))); }
-                            let v = self.vars.alloc_fresh("display_field", ty.clone(), Mutability::Let, None);
-                            let p = IrPattern::Bind { var: v, ty: ty.clone() };
-                            patterns.push((*field, p));
-                            parts.push(self.format(var_expr(v, ty))?);
-                        }
-                        if !fields.is_empty() { parts.push(text(if record { " }" } else { ")" })); }
-                        let pattern = if record {
-                            IrPattern::RecordPattern { name: case.ctor.to_string(), fields: patterns.into_iter()
-                                .map(|(n, p)| IrFieldPattern { name: n.to_string(), pattern: Some(p) }).collect(), rest: false }
-                        } else {
-                            IrPattern::Constructor { name: case.ctor.to_string(), args: patterns.into_iter().map(|(_, p)| p).collect() }
-                        };
-                        arms.push(IrMatchArm { pattern, guard: None, body: concat(parts) });
-                    }
-                    Some(node(IrExprKind::Match { subject: Box::new(obj), arms }, Ty::String))
-                } else {
-                    let surface = almide_lang::stdlib_info::runtime_backed_repr_surface(n.as_str())?;
-                    let (module, func) = surface.rsplit_once('.')?;
-                    Some(call(module, func, obj, Ty::String))
-                }
-            }
+            Ty::Tuple(ts) => self.tuple(obj, &ts),
+            Ty::Record { fields } => self.record_ty(obj, fields),
+            Ty::Named(n, args) => self.named(obj, n, &args),
             Ty::Applied(TC::List, args) if args.len() == 1 => self.sequence(obj, &args[0], None),
             Ty::Applied(TC::Option, args) if args.len() == 1 => self.carrier(obj, &args, true),
             Ty::Applied(TC::Result, args) if args.len() == 2 => self.carrier(obj, &args, false),
@@ -185,6 +133,71 @@ impl Display<'_> {
             Ty::Applied(TC::Map, args) if args.len() == 2 => self.map(obj, &args),
             _ => None,
         }
+    }
+
+    fn tuple(&mut self, obj: IrExpr, ts: &[Ty]) -> Option<IrExpr> {
+        let mut parts = vec![text("(")];
+        for (i, t) in ts.iter().enumerate() {
+            if i > 0 { parts.push(text(", ")); }
+            let field = node(IrExprKind::TupleIndex { object: Box::new(obj.clone()), index: i }, t.clone());
+            parts.push(self.format(field)?);
+        }
+        parts.push(text(")"));
+        Some(concat(parts))
+    }
+
+    fn record_ty(&mut self, obj: IrExpr, mut fields: Vec<(Sym, Ty)>) -> Option<IrExpr> {
+        if let Some((shape, _)) = self.shapes.lookup(&fields) {
+            let name = shape.label.clone();
+            let ordered = shape.fields.iter().map(|(n, _)|
+                fields.iter().find(|(f, _)| f == n).cloned()).collect::<Option<Vec<_>>>()?;
+            return self.record(obj, &name, ordered);
+        }
+        fields.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        self.record(obj, "", fields)
+    }
+
+    fn named(&mut self, obj: IrExpr, n: Sym, args: &[Ty]) -> Option<IrExpr> {
+        if let Some((gs, fs)) = self.records.get(n.as_str()).cloned() {
+            let fields = instantiate(&gs, args, &fs)?;
+            self.record(obj, almide_ir::declared_type_name(n.as_str()), fields)
+        } else if let Some(layout) = self.variants.by_type.get(n.as_str()).cloned() {
+            let mut arms = Vec::new();
+            for case in layout.cases {
+                let fields = instantiate(&layout.generics, args, &case.fields)?;
+                arms.push(self.variant_arm(n, case.ctor, fields)?);
+            }
+            Some(node(IrExprKind::Match { subject: Box::new(obj), arms }, Ty::String))
+        } else {
+            let surface = almide_lang::stdlib_info::runtime_backed_repr_surface(n.as_str())?;
+            let (module, func) = surface.rsplit_once('.')?;
+            Some(call(module, func, obj, Ty::String))
+        }
+    }
+
+    /// The display arm of constructor `ctor` of variant type `n`, its fields
+    /// instantiated.
+    fn variant_arm(&mut self, n: Sym, ctor: Sym, fields: Vec<(Sym, Ty)>) -> Option<IrMatchArm> {
+        let record = self.record_cases.contains(&(n, ctor));
+        let mut patterns = Vec::new();
+        let mut parts = vec![text(ctor.as_str())];
+        if !fields.is_empty() { parts.push(text(if record { " { " } else { "(" })); }
+        for (i, (field, ty)) in fields.iter().enumerate() {
+            if i > 0 { parts.push(text(", ")); }
+            if record { parts.push(text(&format!("{field}: "))); }
+            let v = self.vars.alloc_fresh("display_field", ty.clone(), Mutability::Let, None);
+            let p = IrPattern::Bind { var: v, ty: ty.clone() };
+            patterns.push((*field, p));
+            parts.push(self.format(var_expr(v, ty))?);
+        }
+        if !fields.is_empty() { parts.push(text(if record { " }" } else { ")" })); }
+        let pattern = if record {
+            IrPattern::RecordPattern { name: ctor.to_string(), fields: patterns.into_iter()
+                .map(|(n, p)| IrFieldPattern { name: n.to_string(), pattern: Some(p) }).collect(), rest: false }
+        } else {
+            IrPattern::Constructor { name: ctor.to_string(), args: patterns.into_iter().map(|(_, p)| p).collect() }
+        };
+        Some(IrMatchArm { pattern, guard: None, body: concat(parts) })
     }
 
     fn map(&mut self, obj: IrExpr, args: &[Ty]) -> Option<IrExpr> {
