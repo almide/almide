@@ -5,6 +5,12 @@
 # site does. A new site needs `class = "justified"` and a `why`.
 
 [[site]]
+id = "crates/almide-interp/src/hofs.rs::eval_hof_map_mod::or-pattern"
+class = "justified"
+names = 3
+why = "The interpreter's structural-container tier dispatches map.any, map.all and map.count to their executable semantics over Value::Map entries and interpreter closures. These are operation identities, not a shared ownership, borrowing or optimization property to infer from a declaration. The evaluator preserves insertion order, empty identities, short circuit and apply_closure fuel; native_callback_matrix_test compares the interpreter with direct certified native, v0 and wasm."
+
+[[site]]
 id = "crates/almide-codegen/src/owned_source.rs::SCALAR_SOURCE_READS::table"
 class = "legacy"
 names = 2
