@@ -344,8 +344,10 @@ pub(crate) fn set_static_strs(func: &MirFunction) {
     STATIC_STRS.with(|m| *m.borrow_mut() = lits);
 }
 
+/// A slot that starts at a literal and is rebound holds owned strings
+/// later: an edit of it copies only the literal, once.
 pub(crate) fn is_static_str(v: ValueId) -> bool {
-    STATIC_STRS.with(|m| m.borrow().contains_key(&v))
+    !REBOUND.with(|m| m.borrow().contains(&v)) && STATIC_STRS.with(|m| m.borrow().contains_key(&v))
 }
 
 /// A string literal read as a `&str` operand (#4006, no-perf-loss): the
