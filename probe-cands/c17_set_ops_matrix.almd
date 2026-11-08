@@ -1,0 +1,14 @@
+fn main() -> Unit = {
+  var total = 0
+  var r = 0
+  while r < 2000 {
+    let a = set.from_list(list.range(0, 10 + r % 4))
+    let b = set.from_list(list.range(5, 20))
+    let u = set.union(a, b)
+    let i = set.intersection(a, b)
+    let d = set.difference(a, b)
+    total = total + set.len(u) + set.len(i) + set.len(d) + list.len(set.to_list(u))
+    r = r + 1
+  }
+  println(int.to_string(total))
+}

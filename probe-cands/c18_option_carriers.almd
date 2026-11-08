@@ -1,0 +1,19 @@
+fn find(xs: List[String], k: String) -> Option[String] = list.find(xs, (x) => x == k)
+
+fn parse_all(xs: List[String]) -> Result[List[Int], String] = {
+  let ns = xs |> list.map((x) => int.parse(x) ?? 0)
+  if list.len(ns) > 100 then err("too many") else ok(ns)
+}
+
+fn main() -> Unit = {
+  var total = 0
+  var r = 0
+  while r < 3000 {
+    let xs = ["a", "b", int.to_string(r % 7)]
+    let o = find(xs, "3")
+    let p = parse_all(xs)
+    total = total + string.len(o ?? "") + list.len(p ?? []) + (match p { ok(v) => list.sum(v), err(_) => 0 })
+    r = r + 1
+  }
+  println(int.to_string(total))
+}

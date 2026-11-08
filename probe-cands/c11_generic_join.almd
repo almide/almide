@@ -4,8 +4,8 @@ fn main() -> Unit = {
   while r < 5000 {
     let xs = [r, r + 1, r + 2]
     let s = list.join(list.map(xs, (x) => int.to_string(x)), ",")
-    let fs = [1.5, float.from_int(r)]
-    total = total + string.len(s) + list.len(list.sort(xs)) + float.to_int(list.sum(fs)) + list.sum(xs)
+    let fs = [1.5, float.from(r)]
+    total = total + string.len(s) + list.len(list.sort(xs)) + int.from(list.sum(fs)) + list.sum(xs) + list.max(xs) ?? 0
     r = r + 1
   }
   println(int.to_string(total))

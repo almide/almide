@@ -1,0 +1,10 @@
+fn main() -> Unit = {
+  var total = 0
+  var r = 0
+  while r < 2000 {
+    let ps = list.range(0, 40) |> list.map((i) => { x: i, y: i * 2 + r })
+    total = total + list.fold(ps, 0, (a, p) => a + p.x + p.y)
+    r = r + 1
+  }
+  println(int.to_string(total))
+}

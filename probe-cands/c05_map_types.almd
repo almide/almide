@@ -5,7 +5,7 @@ fn main() -> Unit = {
     let m = map.from_list([("a", [r, 2]), ("b", [3])])
     let f = map.from_list([(r, 1.5), (2, 2.5)])
     let o = map.get(m, "a") ?? []
-    total = total + map.len(m) + list.len(o) + map.len(f) + float.to_int(map.get(f, 2) ?? 0.0)
+    total = total + map.len(m) + list.len(o) + map.len(f) + int.from(map.get(f, 2) ?? 0.0)
     r = r + 1
   }
   println(int.to_string(total))

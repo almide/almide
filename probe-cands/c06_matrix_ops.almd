@@ -2,9 +2,10 @@ fn main() -> Unit = {
   var acc = 0.0
   var r = 0
   while r < 2000 {
-    let a = matrix.from_lists([[1.0, 2.0], [3.0, float.from_int(r % 7)]])
-    let b = matrix.add(a, a)
-    acc = acc + matrix.get(b, 1, 1) + float.from_int(matrix.rows(b) + matrix.cols(b))
+    let a = matrix.from_lists([[1.0, 2.0], [3.0, float.from(r % 7)]])
+    let b = matrix.scale(a, 2.0)
+    let c = matrix.transpose(b)
+    acc = acc + (matrix.get(c, 1, 1) ?? 0.0) + float.from(matrix.rows(b) + matrix.cols(c))
     r = r + 1
   }
   println(float.to_string(acc))
