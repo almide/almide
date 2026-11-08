@@ -34,6 +34,9 @@ pub(super) struct Cfg {
     else_of: Vec<Option<usize>>,
     if_of: Vec<usize>,
     parent: Vec<Option<usize>>,
+    /// The locals some `if` / `br_if` tests directly (`local.get X`, or
+    /// `local.get X; i32.eqz`): the only ones the walk tracks a value of.
+    tested: std::collections::HashSet<u32>,
 }
 
 impl Cfg {
@@ -59,7 +62,20 @@ impl Cfg {
                 _ => {}
             }
         }
-        Cfg { close, else_of, if_of, parent }
+        let tested = (0..n)
+            .filter(|&j| matches!(b.ops[j], Op::If { .. } | Op::BrIf { .. }))
+            .filter_map(|j| {
+                let mut p = b.args.get(j)?.last().copied().flatten()?;
+                if matches!(b.ops[p], Op::I32Eqz) {
+                    p = b.args.get(p)?.first().copied().flatten()?;
+                }
+                match b.ops[p] {
+                    Op::LocalGet { local_index } => Some(local_index),
+                    _ => None,
+                }
+            })
+            .collect();
+        Cfg { close, else_of, if_of, parent, tested }
     }
 
     /// Where a branch of relative depth `d` at `i` continues: a `loop`'s
@@ -132,21 +148,73 @@ pub(super) fn released_local(b: &Body<'_>, k: usize) -> Option<u32> {
     }
 }
 
+/// What a path knows of a local's value: nonzero (`true`) or zero.
+type Known = Vec<(u32, bool)>;
+
+/// The value instruction `p` pushes, when it is known zero or nonzero: a
+/// constant, or a fresh block out of `$alloc`.
+fn known_value(b: &Body<'_>, alloc: Option<u32>, p: usize) -> Option<bool> {
+    match b.ops[p] {
+        Op::I32Const { value } => Some(value != 0),
+        Op::Call { function_index } if Some(function_index) == alloc => Some(true),
+        _ => None,
+    }
+}
+
+/// A condition's truth on this path, when a local the path knows decides
+/// it: `local.get X`, or `local.get X; i32.eqz`.
+fn decided(b: &Body<'_>, known: &Known, j: usize) -> Option<bool> {
+    // The condition is the operand popped last.
+    let p = b.args.get(j)?.last().copied().flatten()?;
+    let (p, negate) = match b.ops[p] {
+        Op::I32Eqz => (b.args.get(p)?.first().copied().flatten()?, true),
+        _ => (p, false),
+    };
+    let Op::LocalGet { local_index } = b.ops[p] else { return None };
+    known.iter().find(|k| k.0 == local_index).map(|k| k.1 != negate)
+}
+
 /// The first `local.get l` some path from the call at `k` reaches before a
-/// write of `l`, if any.
-pub(super) fn read_after(b: &Body<'_>, cfg: &Cfg, k: usize, l: u32) -> Option<usize> {
-    let mut seen = vec![false; b.ops.len()];
-    let mut work: Vec<usize> = Vec::new();
-    cfg.succ(b, k, &mut work);
-    while let Some(j) = work.pop() {
-        if std::mem::replace(&mut seen[j], true) {
+/// write of `l`, if any. The walk is path-sensitive in one respect only: a
+/// local the path set to a constant or to a fresh `$alloc` block is known
+/// zero or nonzero, and an `if` / `br_if` testing it takes only the arm the
+/// value selects (an error carrier built after a release, then tested).
+pub(super) fn read_after(b: &Body<'_>, cfg: &Cfg, alloc: Option<u32>, k: usize, l: u32) -> Option<usize> {
+    let mut seen: std::collections::HashSet<(usize, Known)> = std::collections::HashSet::new();
+    let mut work: Vec<(usize, Known)> = Vec::new();
+    let mut succ = Vec::new();
+    cfg.succ(b, k, &mut succ);
+    work.extend(succ.drain(..).map(|j| (j, Known::new())));
+    while let Some((j, mut known)) = work.pop() {
+        if !seen.insert((j, known.clone())) {
             continue;
         }
         match b.ops[j] {
             Op::LocalGet { local_index } if local_index == l => return Some(j),
             Op::LocalSet { local_index } | Op::LocalTee { local_index } if local_index == l => continue,
-            _ => cfg.succ(b, j, &mut work),
+            Op::LocalSet { local_index } | Op::LocalTee { local_index } => {
+                known.retain(|x| x.0 != local_index);
+                let v = b.args.get(j).and_then(|a| a.first().copied().flatten()).and_then(|p| known_value(b, alloc, p));
+                if let (Some(v), true) = (v, cfg.tested.contains(&local_index)) {
+                    known.push((local_index, v));
+                    known.sort_unstable();
+                }
+            }
+            _ => {}
         }
+        match (&b.ops[j], decided(b, &known, j)) {
+            // An `if` the path decides: only the arm its value selects.
+            (Op::If { .. }, Some(true)) => succ.push(j + 1),
+            (Op::If { .. }, Some(false)) => match cfg.else_of[j] {
+                Some(e) => succ.push(e + 1),
+                None => succ.extend((cfg.close[j] != usize::MAX).then_some(cfg.close[j])),
+            },
+            // A `br_if` the path decides: taken, or not.
+            (Op::BrIf { relative_depth }, Some(true)) => succ.extend(cfg.target(b, j, *relative_depth)),
+            (Op::BrIf { .. }, Some(false)) => succ.extend((j + 1 < b.ops.len()).then_some(j + 1)),
+            _ => cfg.succ(b, j, &mut succ),
+        }
+        work.extend(succ.drain(..).map(|s| (s, known.clone())));
     }
     None
 }
