@@ -109,7 +109,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-071 | Single-part interpolation RC balance | 0.27.6 | active | fixture | 1 |
 | C-072 | Inferred named-record repr parity | 0.27.6 | active | fixture | 2 |
 | C-073 | Tuple pattern testing a variant constructor | 0.27.6 | active | fixture | 1 |
-| C-074 | Iterative split/replace on large inputs | 0.27.6 | active | fixture | 1 |
+| C-074 | Iterative split/replace on large inputs | 0.27.6 | active | fixture | 2 |
 | C-075 | lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough | 0.27.6 | active | fixture | 3 |
 | C-076 | Producer-side in-module variant construction is target-stable | 0.27.6 | active | fixture | 3 |
 | C-077 | Cross-module heap-global init order is dependency-respecting | 0.27.6 | active | fixture | 1 |
@@ -205,7 +205,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-167 | float.clamp returns its input unchanged when in range, sign bit included | 0.36.0 | active | fixture | 1 |
 | C-168 | list.flatten borrows its argument, so it composes with another borrow of the same binding | 0.36.0 | active | fixture | 2 |
 | C-169 | list.repeat over the size ceiling aborts in the T6 form on both targets | 0.36.0 | active | fixture | 1 |
-| C-170 | Integer arithmetic wraps in every position, including a module-level let | 0.36.0 | active | fixture | 3 |
+| C-170 | Integer arithmetic wraps in every position, including a module-level let | 0.36.0 | active | fixture | 4 |
 | C-171 | Byte-offset bound checks do not overflow at the i64 boundary | 0.36.0 | active | fixture | 1 |
 | C-172 | unwrap_or over any heap payload yields the same value on both targets | 0.36.0 | active | fixture | 2 |
 | C-173 | An integer literal outside what its context can represent is a checker error on both targets, never a silent value | 0.36.0 | active | fixture | 2 |

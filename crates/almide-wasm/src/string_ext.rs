@@ -453,6 +453,17 @@ impl Emitter<'_> {
         sep: &IrExpr,
     ) -> ArmResult {
         self.lower_arg(subject, Some(STR), ArgMode::Borrow)?;
+        // A separator that is one byte at compile time (#4612) needs no
+        // search table: the one-byte kernel, handed the byte itself. The
+        // literal is consumed here, never lowered as a value.
+        if let IrExprKind::LitStr { value } = &sep.kind
+            && let [byte] = value.as_bytes()
+        {
+            self.witness_inline_arg(sep);
+            let sp = self.work.helper(Helper::StringSplitByte);
+            self.f.instructions().i32_const(i32::from(*byte)).call(sp);
+            return Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(STR)))));
+        }
         let h = self.hold_i32()?;
         self.f.instructions().local_set(h);
         self.lower_arg(sep, Some(STR), ArgMode::Borrow)?;

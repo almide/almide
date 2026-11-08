@@ -93,6 +93,9 @@ pub(crate) enum Helper {
     /// kept, count = separators + 1. Empty separator traps (Rust's
     /// empty-pattern oddity is out of contract).
     StringSplit,
+    /// `$split_byte(str, byte) -> i32` — `$split` for a separator that is
+    /// one byte at compile time (#4612; value_helpers.rs).
+    StringSplitByte,
     /// `$display_<ti>(block, cursor) -> cursor` — the runtime-recursive
     /// display of a RECURSIVE Named type (emit-time inlining follows the
     /// type shape and cycles are cut here; the body is Emitter-built in
