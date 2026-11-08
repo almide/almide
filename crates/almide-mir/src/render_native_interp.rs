@@ -159,9 +159,10 @@ impl ChainScan<'_> {
                 })
             }
             _ => {
-                // Read again at the last step: its other reads must come
-                // after it, and nothing may rebind it before then.
-                if uses.iter().any(|u| Some(*u) != def && *u != step && *u <= last) || self.rebound(p, step, last) {
+                // Read again at the last step: no other read may fall between
+                // its own step and the last one (a read before its step still
+                // reads it first), and nothing may rebind it before then.
+                if uses.iter().any(|u| Some(*u) != def && *u > step && *u <= last) || self.rebound(p, step, last) {
                     return None;
                 }
                 Some(Piece::Str(p))
