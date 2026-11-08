@@ -210,6 +210,12 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
         generics.as_ref().and_then(|gs| gs.get(b.generic))
             .map(|g| (g.name.as_str().to_string(), b.cap)).ok_or("runtime bound has no declared generic")
     }).collect::<Result<Vec<_>, _>>()?;
+    // A Float list's cells are its bits on the native render: a Float
+    // specialization served by a runtime generic that compares its elements
+    // would compare the bits (`-0.0` against `0.0`, NaN against itself).
+    if !bounds.is_empty() && target != call && crate::native_floor::specialized_elem(call).as_deref() == Some("Float") {
+        return Err(format!("a Float specialization of `{target}`, whose runtime generic compares the list's bits"));
+    }
     let tps: BTreeSet<String> = generics.iter().flatten().map(|g| g.name.as_str().to_string()).collect();
     let dparams: Vec<DTy> = params.iter().map(|p| dty_of(&p.ty, &tps)).collect::<Option<_>>().ok_or("a param type outside the map")?;
     let dret = dty_of(ret, &tps).ok_or("a return type outside the map")?;

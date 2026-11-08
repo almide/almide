@@ -282,9 +282,13 @@ fn matrix_or_bytes_mut_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy) -
             (NTy::Rec(_) | NTy::RecRef(_), false) if crate::render_native_rec::is_matrix(*got) => format!("{code}.clone()"),
             _ => return Err(mismatch()),
         },
-        // Only the caller's own binding: a borrowed one cannot be written.
+        // Only the caller's own binding: a borrowed one cannot be written, and
+        // an owned copy of a record's field would take the write in place of
+        // the field.
         FloorParam::BytesMut => match got {
-            NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&mut {code}"),
+            NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) && !crate::render_native_addr::is_field_copy(code) => {
+                format!("&mut {code}")
+            }
             _ => return Err(mismatch()),
         },
         _ => return Err(mismatch()),
