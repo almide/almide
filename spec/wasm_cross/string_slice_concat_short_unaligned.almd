@@ -1,0 +1,19 @@
+// @contract: C-016
+// #4612: the structural wasm leg copies a block under 16 bytes as one 8-byte
+// word, one 4-byte word and the last 0..3 bytes. Every length 0..16 is
+// sliced at every source offset 0..7 (an unaligned source) and appended after
+// a prefix of 0..7 bytes (an unaligned destination), so a lost, duplicated or
+// misplaced byte in any of the three steps changes a line.
+fn piece(start: Int, n: Int) -> String = {
+  let src = "abcdefghijklmnopqrstuvwxyz0123456789"
+  let body = string.slice(src, start, start + n)
+  let prefix = string.slice("#######", 0, (n * 3 + start) % 8)
+  let joined = prefix + body
+  "${string.len(body)}/${string.len(joined)}:${joined}"
+}
+
+fn main() -> Unit = {
+  for start in 0..<8 {
+    println(list.map(0..<17, (n) => piece(start, n)) |> list.join(" "))
+  }
+}

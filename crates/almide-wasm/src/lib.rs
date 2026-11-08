@@ -760,6 +760,9 @@ pub(crate) struct InitLet {
 }
 
 #[cfg(test)]
+mod copy_helper_tests;
+
+#[cfg(test)]
 mod key_helper_tests;
 
 #[cfg(test)]
