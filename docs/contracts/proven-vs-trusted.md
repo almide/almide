@@ -40,9 +40,16 @@ every `xs[i]` / `b[i]` read and store (#4005). `proofs/structural-wall.sh`
 judges every certified fixture's bundle with the extracted checker, the Rocq
 kernel and `almide-verify`, all three agreeing, and pins the SHA-256 of the
 file `almide build --target wasm` wrote. The rows below do not apply to it;
-what it trusts is that the recorded events are the instructions the bytes
-contain (the recording discipline), and every heap access outside the index
-operator. Per clause of `MemorySafe`, the proven / checked-per-build / trusted
+the recorded events are held to the instructions the bytes contain by
+`almide-anchor-check` per build — the bounds, init and fields events located
+one by one (#4011 (d)), the ownership witness's RC events matched one to one
+to the rc_inc and release calls on the values they name, every matched
+release its local's last read (#4277). What it still trusts there: that the
+anchor file names the right runtime routines (`$alloc`, the rc_inc and
+release routines, the copy-on-write judges), a read of a released block
+through another local or a slot that holds it without its own credit, and
+every heap access outside the index operator. The native leg (#4006) is
+unchanged. Per clause of `MemorySafe`, the proven / checked-per-build / trusted
 split is the gap table in
 [docs/design/MEMORY-SAFETY.md](../design/MEMORY-SAFETY.md#the-gap-table-2026-10-24-4011).
 Its other evidence is differential and CI-gated: byte-identity against native

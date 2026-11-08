@@ -296,8 +296,9 @@ fn render_native_with_runtime_hofs(
     program: &mut MirProgram,
     sigs: &crate::render_native::NativeSigs,
     linked: &std::collections::BTreeSet<String>,
+    route_served: &std::collections::BTreeSet<String>,
 ) -> Result<String, LowerError> {
-    crate::native_hof::reset(Default::default(), Default::default());
+    crate::native_hof::reset(route_served.clone(), Default::default());
     let recs = crate::render_native_rec::snapshot();
     let first = crate::render_native::try_render_native_program(program, sigs);
     let sites = crate::native_hof::sites();
@@ -310,7 +311,7 @@ fn render_native_with_runtime_hofs(
         return first;
     }
     crate::render_native_rec::restore(recs);
-    crate::native_hof::reset(dropped, elided);
+    crate::native_hof::reset(dropped.into_iter().chain(route_served.iter().cloned()).collect(), elided);
     crate::render_native::try_render_native_program(program, sigs)
 }
 
@@ -372,7 +373,7 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     let mut functions = lower_native_functions(&ir, &record_layouts, &variant_layouts)?;
     let own: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
     // #4006: the registry bodies the program calls, linked as certified MIR.
-    let linked = link_native_self_host(&mut functions, &ir)?;
+    let NativeLink { linked, route_served } = link_native_self_host(&mut functions, &ir)?;
     let linked_names: std::collections::BTreeSet<String> =
         functions.iter().filter(|f| !own.contains(&f.name)).map(|f| f.name.clone()).collect();
     crate::native_slot_rewrite::set_heap_slots(native_heap_slots(&functions, &record_layouts, &variant_layouts));
@@ -401,7 +402,7 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
         ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())),
         linked_names.clone(),
     );
-    let rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names)?;
+    let rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names, &route_served)?;
     let mut certs = native_ownership_certs(&program.functions, &crate::native_hof::sites());
     // Row 4: each function's bounds witness, recorded as the render wrote its
     // element accesses (render_native_bounds).

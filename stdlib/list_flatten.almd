@@ -57,6 +57,7 @@ else {
   __flat_fill_rc(dh, oh, n, i + 1, off1)
 }
 
+@specializes("list.flatten")
 fn list_flatten_rc(xss: List[Int]) -> List[Int] = {
   let oh = prim.handle(xss)
   let n = prim.load32(oh + 4)
