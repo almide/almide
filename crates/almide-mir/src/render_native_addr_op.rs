@@ -609,7 +609,7 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
         (Some(NTy::VecStr), Some(sv)) if sv.off == 0 && sv.idx.is_none() => {
             // Move consumed handles; preserve the source of a borrow-view.
             let rhs = match ty(tys, &sv.base) {
-                Some(NTy::Str) if st.borrowed_list_slots.contains(&(ad.base, v)) && !crate::render_native_keyed::dies_at_store(sv.base, v, NTy::Str) => format!("{}.clone()", var(sv.base)),
+                Some(NTy::Str) if st.borrowed_list_slots.contains(&(ad.base, v)) => format!("{}.clone()", var(sv.base)),
                 Some(NTy::Str) => crate::render_native_move::take_expr(&var(sv.base)),
                 Some(NTy::StrRef) => format!("AlmideString::from({})", var(sv.base)),
                 other => return Err(wall(format!("native: a {other:?} handle stored into a List[String] slot"))),
