@@ -3,12 +3,15 @@
 // sole owner of a heap buffer with spare capacity. Every other holder of the
 // string must still read the original bytes: a caller that keeps the string,
 // a closure capture, a record field, a list element, a map value, the same
-// string passed twice in one call, a loop variable and a parameter the callee
-// still reads. The strings are built at run time so they are heap blocks, not
+// string passed twice in one call, a loop variable, a parameter the callee
+// still reads, a top-level let, a field read, a map.get result and an option
+// payload. The strings are built at run time so they are heap blocks, not
 // pooled literals.
 type Box = { name: String, n: Int }
 
 fn fresh(tag: String, n: Int) -> String = "${tag}-${n}-mixed Case"
+
+let banner = fresh("global", 0)
 
 fn pair(a: String, b: String) -> String = "${a}|${b}"
 
@@ -84,6 +87,20 @@ fn param_still_used() -> Unit = {
   println("last use: ${upper_last_use(fresh("last", 15))}")
 }
 
+fn read_through_places() -> Unit = {
+  println("global: ${string.to_upper(banner)} ${banner}")
+  let b = { name: fresh("field", 17), n: 2 }
+  println("field: ${string.to_upper(b.name)} ${b.name}")
+  let m = ["k": fresh("get", 18)]
+  let got = map.get(m, "k") ?? ""
+  println("get: ${string.to_upper(got)} ${got} ${m}")
+  let o = some(fresh("opt", 19))
+  match o {
+    some(v) => println("opt: ${string.to_upper(v)} ${v} ${o}"),
+    none => println("opt: none"),
+  }
+}
+
 fn unicode_after_ascii() -> Unit = {
   let s = "${fresh("uni", 16)} ße"
   let u = string.to_upper(s)
@@ -97,5 +114,7 @@ fn main() -> Unit = {
   passed_twice()
   loop_vars()
   param_still_used()
+  read_through_places()
   unicode_after_ascii()
+  println("global after: ${banner}")
 }
