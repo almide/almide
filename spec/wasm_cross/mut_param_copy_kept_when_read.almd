@@ -3,8 +3,8 @@
 // copies a value, writes the copy through a `mut` parameter, and reads the
 // original afterwards on some path, so the original keeps its own contents:
 // read right after the copy, read by a later loop pass before it is rebound,
-// read on one branch only, read by a closure made before the copy, and passed
-// twice to one call.
+// read on one branch only, and passed twice to one call (a closure made before
+// the copy: mut_param_copy_kept_closure.almd).
 fn bump(mut xs: List[Int], v: Int) -> Unit = list.push(xs, v)
 
 fn both(a: List[Int], b: List[Int]) -> Int = list.len(a) * 10 + list.len(b)
@@ -24,7 +24,9 @@ fn read_in_later_pass() -> String = {
     var c = acc
     bump(c, i)
     seen = seen + "${list.len(acc)}"
-    if i == 2 then acc = c else ()
+    if i == 2 then {
+      acc = c
+    } else ()
     i = i + 1
   }
   seen
@@ -35,14 +37,6 @@ fn read_on_one_branch(flag: Bool) -> String = {
   var t = s
   bump(t, 6)
   if flag then "${list.len(s)}" else "${list.len(t)}"
-}
-
-fn read_by_closure() -> String = {
-  var s: List[Int] = [7, 8]
-  let count = () => list.len(s)
-  var t = s
-  bump(t, 9)
-  "${count()} ${list.len(t)}"
 }
 
 fn passed_twice() -> Int = {
@@ -57,6 +51,5 @@ fn main() -> Unit = {
   println(read_in_later_pass())
   println(read_on_one_branch(true))
   println(read_on_one_branch(false))
-  println(read_by_closure())
   println(int.to_string(passed_twice()))
 }
