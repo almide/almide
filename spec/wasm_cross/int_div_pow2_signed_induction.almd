@@ -1,0 +1,52 @@
+// @contract: C-170
+// #4611: the shapes where the non-negative `/` and `%` by a power of two
+// (int_div_pow2_nonneg_induction.almd) must NOT fire, each printing values an
+// unsigned shift or mask would get wrong:
+// - an induction variable that starts negative (`-10 / 4` is -2, `-10 % 4` is -2);
+// - a product that WRAPS: `i * (i + 1)` passes 2^63 near i = 3037000500, so
+//   its interval leaves i64 and nothing is known — the wrapped value is
+//   negative and its signed half is printed;
+// - a variable counting down, and one assigned on two branches: neither is an
+//   induction variable.
+fn starts_negative() -> Unit = {
+  var k = -10
+  while k < 6 {
+    println("${k / 4} ${k % 4} ${(k * 3) / 2}")
+    k = k + 4
+  }
+}
+
+fn wraps() -> Unit = {
+  var i = 3037000498
+  while i < 3037000502 {
+    println("${i * (i + 1) / 2} ${i * (i + 1) % 8}")
+    i = i + 1
+  }
+}
+
+fn counts_down() -> Int = {
+  var acc = 0
+  var d = 20
+  while d > 0 {
+    acc = acc + (d - 25) / 2 + (d - 25) % 8
+    d = d - 1
+  }
+  acc
+}
+
+fn two_branches() -> Int = {
+  var acc = 0
+  var m = -7
+  while m < 40 {
+    acc = acc + m / 8 + m % 2
+    if m % 3 == 0 then { m = m + 2 } else { m = m + 1 }
+  }
+  acc
+}
+
+fn main() -> Unit = {
+  starts_negative()
+  wraps()
+  println("${counts_down()}")
+  println("${two_branches()}")
+}

@@ -211,6 +211,8 @@ pub(crate) fn build_helper_body(
             cow_prejudged: HashSet::new(),
             bounds_facts: None,
             payload_ptrs: HashMap::new(),
+            int_ranges: HashMap::new(),
+            loop_entry_ranges: None,
             in_tail: false,
             try_see_through: false,
             branch_depth: 0,
