@@ -53,6 +53,14 @@ pub(super) fn movable_loads(
     // interpolation chain reads its pieces at its last step).
     let mut first = BTreeSet::new();
     let mut since_bind: BTreeSet<(ValueId, usize)> = BTreeSet::new();
+    let consts: BTreeMap<ValueId, i64> = func
+        .ops
+        .iter()
+        .filter_map(|o| match o {
+            Op::ConstInt { dst, value } => Some((*dst, *value)),
+            _ => None,
+        })
+        .collect();
     // The open loops' starts, and where each value is defined.
     let mut loops: Vec<usize> = Vec::new();
     let mut def_at: BTreeMap<ValueId, usize> = BTreeMap::new();
@@ -105,6 +113,10 @@ pub(super) fn movable_loads(
                 // The ownership marks render nothing; an op that hands the
                 // block on reads it itself.
                 Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. } => true,
+                // A scalar read of another slot, by its constant index.
+                Op::ListGetScalar { list, idx, .. } => {
+                    *list == b && consts.get(idx).is_some_and(|x| usize::try_from(*x).is_ok_and(|x| x != k))
+                }
                 Op::Prim { kind: PrimKind::Handle, args, .. } => args.first() == Some(&b),
                 Op::IntBinOp { op: crate::IntOp::Add, a, b: y, .. } => rooted(a, b) || rooted(y, b),
                 Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, args, .. } => args.first().is_some_and(|a| {
