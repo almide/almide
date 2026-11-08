@@ -99,7 +99,7 @@ fn movable_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Vec<(usi
 /// `List[List[Int]]` carry starts its slot as `acc + []`, which copied every
 /// element list per call where the standard codegen moves the argument in.
 /// Returns (param index, the concatenation's op index).
-fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BTreeMap<String, Vec<bool>>) -> Vec<(usize, usize)> {
+fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Vec<(usize, usize)> {
     let depth = depths(func);
     let mut out = Vec::new();
     for (k, p) in func.params.iter().enumerate() {
@@ -116,11 +116,7 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BT
             if (((crate::native_list_ops::is_list_concat(name) || name == "__str_concat")
                 && matches!(args.first(), Some(crate::CallArg::Handle(v)) if *v == p.value))
                 || args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value))
-                    .is_some_and(|k| crate::native_floor::takes_by_value(name, k)
-                        // Or a program function whose own param there is a
-                        // move param: the body hands the param on (`poke(mut
-                        // b) = bytes.put_u8(b, 0, v)` over a linked body).
-                        || owned.get(name.as_str()).is_some_and(|modes| modes.get(k).copied().unwrap_or(false))))
+                    .is_some_and(|k| crate::native_floor::takes_by_value(name, k)))
                 && values(&func.ops[last]).iter().filter(|x| **x == p.value).count() == 1);
         let plain = named.iter().all(|&i| !matches!(func.ops[i], Op::Dup { .. } | Op::SetLocal { .. }));
         let early_exit = func.ops[..last].iter().any(|op| matches!(op, Op::Return { .. }));
@@ -133,9 +129,9 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BT
 
 /// Make the movable parameters of `func` move parameters, if the ownership
 /// mirror accepts the result.
-fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BTreeMap<String, Vec<bool>>) -> Option<MirFunction> {
+fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Option<MirFunction> {
     let movable = movable_params(func, takes);
-    let consumed: Vec<(usize, usize)> = consumed_params(func, takes, owned)
+    let consumed: Vec<(usize, usize)> = consumed_params(func, takes)
         .into_iter()
         .filter(|(k, _)| !movable.iter().any(|m| m.0 == *k))
         .collect();
@@ -377,30 +373,18 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
             }
         }
     }
-    // To a fixpoint: a body that hands its param to a callee's move param
-    // takes it over in turn, once that callee's mode is known.
-    let mut owned: BTreeMap<String, Vec<bool>> = BTreeMap::new();
-    let mut next: Vec<MirFunction>;
-    let mut rounds = 0;
-    loop {
-        next = functions
-            .iter()
-            .map(|f| {
-                let takes = |k: usize| !not_handle.contains(&(f.name.clone(), k));
-                if eligible(f) { own_params(f, &takes, &owned).unwrap_or_else(|| f.clone()) } else { f.clone() }
-            })
-            .collect();
-        let modes: BTreeMap<String, Vec<bool>> = next
-            .iter()
-            .filter(|f| !f.owned_params.is_empty())
-            .map(|f| (f.name.clone(), f.params.iter().map(|p| f.owned_params.contains(&p.value)).collect()))
-            .collect();
-        if modes == owned || rounds == 8 {
-            break;
-        }
-        rounds += 1;
-        owned = modes;
-    }
+    let mut next: Vec<MirFunction> = functions
+        .iter()
+        .map(|f| {
+            let takes = |k: usize| !not_handle.contains(&(f.name.clone(), k));
+            if eligible(f) { own_params(f, &takes).unwrap_or_else(|| f.clone()) } else { f.clone() }
+        })
+        .collect();
+    let owned: BTreeMap<String, Vec<bool>> = next
+        .iter()
+        .filter(|f| !f.owned_params.is_empty())
+        .map(|f| (f.name.clone(), f.params.iter().map(|p| f.owned_params.contains(&p.value)).collect()))
+        .collect();
     if owned.is_empty() {
         return;
     }

@@ -37,7 +37,6 @@ pub mod coown_names;
 pub mod host_ops;
 pub mod lower;
 pub mod mir_ops;
-pub(crate) mod mir_liveness;
 pub(crate) mod mir_wellformed;
 pub mod native_result_rewrite;
 pub mod pipeline;
