@@ -280,6 +280,13 @@ pub(crate) enum ScalarText {
 fn scalar_text_of(call: &str) -> Option<ScalarText> {
     let (module, func) = call.split_once('.')?;
     let program = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached)?;
+    // A self-hosted body that declares the fn it specializes
+    // (`@specializes("float.__to_string_compound")`) has that fn's text, as
+    // the floor serves it as that fn ([`derive_for`]).
+    let declared_here = program.decls.iter().any(|d| matches!(d, Decl::Fn { name, .. } if name.as_str() == func));
+    if !declared_here {
+        return specialized_target(call).filter(|t| t != call).and_then(|t| scalar_text_of(&t));
+    }
     program.decls.iter().find_map(|d| match d {
         Decl::Fn { name, attrs, params, .. }
             if name.as_str() == func && attrs.iter().any(|a| a.name.as_str() == "scalar_text") =>
