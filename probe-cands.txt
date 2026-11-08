@@ -1,0 +1,14 @@
+probe-cands/c01_rec_empty_list_field.almd
+probe-cands/c02_bytes_get_put.almd
+probe-cands/c03_bytes_append_read.almd
+probe-cands/c04_set_of_lists.almd
+probe-cands/c05_map_types.almd
+probe-cands/c06_matrix_ops.almd
+probe-cands/c07_option_record_field.almd
+probe-cands/c08_result_map_value.almd
+probe-cands/c09_if_value_arms.almd
+probe-cands/c10_eq_records.almd
+probe-cands/c11_generic_join.almd
+probe-cands/c12_tuple_list_build.almd
+probe-cands/c13_float_ops.almd
+probe-cands/c14_string_bytes.almd

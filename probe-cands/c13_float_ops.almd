@@ -1,0 +1,11 @@
+fn main() -> Unit = {
+  var acc = 0.0
+  var r = 0
+  while r < 20000 {
+    let x = float.from_int(r) * 0.5
+    acc = acc + float.sqrt(x) + float.abs(0.0 - x) + float.floor(x) + float.min(x, 3.0) + float.max(x, 1.0)
+    acc = acc + (if x > 10.0 then 1.0 else 0.0) + float.from_int(float.to_int(x))
+    r = r + 1
+  }
+  println(float.to_string(acc))
+}

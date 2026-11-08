@@ -1,0 +1,14 @@
+type Box = { names: List[String], tags: List[List[Int]], n: Int }
+
+fn make(r: Int) -> Box = Box { names: [], tags: [], n: r }
+
+fn main() -> Unit = {
+  var total = 0
+  var r = 0
+  while r < 20000 {
+    let b = make(r)
+    total = total + b.n + list.len(b.names) + list.len(b.tags)
+    r = r + 1
+  }
+  println(int.to_string(total))
+}

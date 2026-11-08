@@ -1,0 +1,14 @@
+fn main() -> Unit = {
+  var total = 0
+  var r = 0
+  while r < 20000 {
+    var b = bytes.zeros(16)
+    bytes.put_u8(b, 0, r % 256)
+    bytes.put_u16_le(b, 2, r % 65536)
+    bytes.put_u32_le(b, 4, r)
+    bytes.put_i64_le(b, 8, r * 3)
+    total = total + (bytes.get_u8(b, 0) ?? 0) + (bytes.get_u16_le(b, 2) ?? 0) + (bytes.get_u32_le(b, 4) ?? 0) + (bytes.get_i64_le(b, 8) ?? 0)
+    r = r + 1
+  }
+  println(int.to_string(total))
+}

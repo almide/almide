@@ -1,0 +1,16 @@
+type P = { x: Int, y: Int, name: String }
+
+type Shape = | Dot(Int) | Line(Int, Int)
+
+fn main() -> Unit = {
+  var total = 0
+  var r = 0
+  while r < 20000 {
+    let a = P { x: r, y: 2, name: "p" }
+    let b = P { x: r % 3, y: 2, name: "p" }
+    let s = if r % 2 == 0 then Dot(r) else Line(r, 1)
+    total = total + (if a == b then 1 else 0) + (if s == Dot(r) then 2 else 0) + (if (r, "a") == (1, "a") then 4 else 0)
+    r = r + 1
+  }
+  println(int.to_string(total))
+}

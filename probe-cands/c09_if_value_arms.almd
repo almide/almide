@@ -1,0 +1,14 @@
+fn pick(r: Int) -> List[String] = if r % 2 == 0 then ["a", int.to_string(r)] else []
+
+fn pick2(r: Int) -> (Int, String) = if r % 3 == 0 then (r, "x") else (0, "")
+
+fn main() -> Unit = {
+  var total = 0
+  var r = 0
+  while r < 20000 {
+    let (a, s) = pick2(r)
+    total = total + list.len(pick(r)) + a + string.len(s)
+    r = r + 1
+  }
+  println(int.to_string(total))
+}

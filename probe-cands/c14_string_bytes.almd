@@ -1,0 +1,11 @@
+fn main() -> Unit = {
+  var total = 0
+  var r = 0
+  while r < 5000 {
+    let s = "abc" + int.to_string(r)
+    let b = bytes.from_string(s)
+    total = total + bytes.len(b) + (bytes.get_u8(b, 0) ?? 0) + string.len(bytes.to_string(b) ?? "")
+    r = r + 1
+  }
+  println(int.to_string(total))
+}

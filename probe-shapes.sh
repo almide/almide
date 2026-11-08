@@ -11,13 +11,13 @@ RUSTFLAGS="-C instrument-coverage" LLVM_PROFILE_FILE="$W/build-%m-%p.profraw" \
   cargo build -q --release -p almide-mir --example render_corpus --target-dir "$TARGET" || exit 2
 BIN="$TARGET/release/examples/render_corpus"
 SRCS=$(ls crates/almide-mir/src/render_native*.rs)
-{ grep -E '^spec/' proofs/native-verified-floor.txt; ls research/benchmark/perf/v1-shapes/*.almd; } > "$W/corpus.txt"
+{ grep -E '^spec/' proofs/native-verified-floor.txt; ls research/benchmark/perf/v1-shapes/*.almd; } | grep -vxFf <(cat probe-cands.txt 2>/dev/null || true) > "$W/corpus.txt"
 mkdir -p "$W/gate"
 LLVM_PROFILE_FILE="$W/gate/run-%m.profraw" "$BIN" < "$W/corpus.txt" > "$OUT/gate-verdicts.txt"
 "$LLVM_BIN/llvm-profdata" merge -sparse "$W"/gate/*.profraw -o "$W/gate.profdata"
 "$LLVM_BIN/llvm-cov" export "$BIN" -instr-profile="$W/gate.profdata" -skip-expansions $SRCS > "$W/gate.json"
 # Candidates: every other .almd that renders.
-find spec examples research stdlib tests -name '*.almd' 2>/dev/null | sort | grep -vxFf "$W/corpus.txt" > "$W/cands.txt"
+if [ -f probe-cands.txt ]; then grep -v '^#' probe-cands.txt > "$W/cands.txt"; else find spec examples research stdlib tests -name '*.almd' 2>/dev/null | sort | grep -vxFf "$W/corpus.txt" > "$W/cands.txt"; fi
 mkdir -p "$W/c"
 awk '{print NR, $0}' "$W/cands.txt" > "$W/index.txt"
 run_one() {
@@ -96,6 +96,13 @@ for i,(p,v) in idx.items():
     h=set(open(hp).read().split())&set(targets)
     if h: progs[p]=(v,h)
     for k in h: cover[k].append((v,p))
+with open(OUT+"/percand.txt","w") as o:
+    for i,(p,v) in sorted(idx.items(),key=lambda x:int(x[0])):
+        hp=W+"/c/"+i+"/hit.txt"
+        h=set(open(hp).read().split())&set(targets) if os.path.exists(hp) else set()
+        vt=open(W+"/c/"+i+"/v.txt").read().strip() if os.path.exists(W+"/c/"+i+"/v.txt") else ""
+        o.write(f"## {p}\t{len(h)}\t{vt}\n")
+        for k in sorted(h): o.write(f"   {k}\t{targets[k][:80]}\n")
 with open(OUT+"/targets.txt","w") as o:
     for k in sorted(targets):
         cs=cover.get(k,[])

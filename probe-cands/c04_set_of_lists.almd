@@ -1,0 +1,12 @@
+fn main() -> Unit = {
+  var total = 0
+  var r = 0
+  while r < 3000 {
+    let s = set.from_list([[r, 1], [2, 3], [r, 1]])
+    let t: Set[String] = set.from_list(["a", "b", int.to_string(r % 5)])
+    let u = set.from_list([set.from_list([1, 2]), set.from_list([r % 3])])
+    total = total + set.len(s) + set.len(t) + set.len(u) + (if set.contains(s, [2, 3]) then 1 else 0)
+    r = r + 1
+  }
+  println(int.to_string(total))
+}

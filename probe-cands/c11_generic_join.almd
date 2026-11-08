@@ -1,0 +1,12 @@
+fn main() -> Unit = {
+  var total = 0
+  var r = 0
+  while r < 5000 {
+    let xs = [r, r + 1, r + 2]
+    let s = list.join(list.map(xs, (x) => int.to_string(x)), ",")
+    let fs = [1.5, float.from_int(r)]
+    total = total + string.len(s) + list.len(list.sort(xs)) + float.to_int(list.sum(fs)) + list.sum(xs)
+    r = r + 1
+  }
+  println(int.to_string(total))
+}
