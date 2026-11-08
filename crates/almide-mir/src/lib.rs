@@ -67,6 +67,7 @@ pub mod native_option_rewrite;
 pub mod native_result_str_rewrite;
 pub mod native_slot_rewrite;
 mod native_slot_takes;
+mod native_cell_window;
 pub mod native_move_params;
 pub(crate) mod native_region_window;
 mod native_list_ops;

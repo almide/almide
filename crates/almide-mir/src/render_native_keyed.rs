@@ -39,6 +39,8 @@ struct Program {
     keyed: BTreeMap<String, Vec<ValueId>>,
     /// A lifted lambda's dispatch-table index.
     lambdas: BTreeMap<String, usize>,
+    /// Every program function.
+    fns: BTreeSet<String>,
 }
 
 #[derive(Default)]
@@ -47,6 +49,10 @@ struct Current {
     params: BTreeMap<ValueId, usize>,
     /// Its dispatch-index reads of a keyed param → that key.
     reads: BTreeMap<ValueId, usize>,
+    /// The function itself, for the shared-cell windows
+    /// (`native_cell_window`), and the takes whose cell a read emptied.
+    func: Option<MirFunction>,
+    emptied: BTreeSet<ValueId>,
 }
 
 thread_local! {
@@ -140,7 +146,8 @@ pub(crate) fn set_program(user_fns: &BTreeMap<&str, &MirFunction>, sigs: &crate:
             (n, order)
         })
         .collect();
-    PROGRAM.with(|p| *p.borrow_mut() = Program { keyed, lambdas });
+    let fns = user_fns.keys().map(|n| n.to_string()).collect();
+    PROGRAM.with(|p| *p.borrow_mut() = Program { keyed, lambdas, fns });
     CURRENT.with(|c| *c.borrow_mut() = Current::default());
 }
 
@@ -154,7 +161,26 @@ pub(crate) fn begin_fn(func: &MirFunction) {
     } else {
         dispatch_reads(func).into_iter().filter_map(|(r, p)| params.get(&p).map(|k| (r, *k))).collect()
     };
-    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads });
+    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads, func: Some(func.clone()), emptied: BTreeSet::new() });
+}
+
+/// The shared-cell read `d` of `cell` takes the payload out
+/// (`native_cell_window`); the take ending its window is then noted as
+/// finding the cell emptied.
+pub(crate) fn cell_read_takes(d: ValueId, cell: ValueId, tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> bool {
+    let program_fn = |n: &str| PROGRAM.with(|p| p.borrow().fns.contains(n));
+    CURRENT.with(|c| {
+        let mut c = c.borrow_mut();
+        let Some(func) = c.func.as_ref() else { return false };
+        let at = func.ops.iter().position(|op| matches!(op, Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(x), .. } if *x == d));
+        let end = at.and_then(|at| crate::native_cell_window::take_window(func, at, (d, cell), tys, &program_fn));
+        end.is_some_and(|x| c.emptied.insert(x))
+    })
+}
+
+/// The take `x` finds its cell emptied by the read before it.
+pub(crate) fn cell_emptied(x: ValueId) -> bool {
+    CURRENT.with(|c| c.borrow().emptied.contains(&x))
 }
 
 /// The key a dispatch-index read `d` of the function being rendered takes.
