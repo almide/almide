@@ -47,6 +47,33 @@ fn by_value(name: &str, k: usize) -> bool {
     }
 }
 
+thread_local! {
+    /// The (function, param index) pairs every call site of the program fills
+    /// with a value released right after the call ([`rewrite`] sets them).
+    static DYING_SITES: std::cell::RefCell<BTreeSet<(String, usize)>> = const { std::cell::RefCell::new(BTreeSet::new()) };
+}
+
+fn dying_at_every_site(name: &str, k: usize) -> bool {
+    DYING_SITES.with(|d| d.borrow().contains(&(name.to_string(), k)))
+}
+
+/// Every call site of each function, by position: whether its argument there
+/// is a value the caller releases right after the call (`release_after`).
+fn dying_sites(functions: &[MirFunction]) -> BTreeSet<(String, usize)> {
+    let mut seen: BTreeMap<(String, usize), bool> = BTreeMap::new();
+    for f in functions {
+        let depth = depths(f);
+        for (i, op) in f.ops.iter().enumerate() {
+            let Op::CallFn { name, args, .. } = op else { continue };
+            for (k, a) in args.iter().enumerate() {
+                let dies = matches!(a, crate::CallArg::Handle(v) if release_after(f, i, *v, &depth).is_some());
+                *seen.entry((name.clone(), k)).or_insert(true) &= dies;
+            }
+        }
+    }
+    seen.into_iter().filter(|(_, d)| *d).map(|(s, _)| s).collect()
+}
+
 fn values(op: &Op) -> Vec<ValueId> {
     let mut out = Vec::new();
     crate::mir_ops::op_values(op, &mut out);
@@ -208,6 +235,10 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Mo
                 }
                 (end + 1..func.ops.len()).find(|&j| depth[j] == 0 && !matches!(func.ops[j], Op::Else { .. })).filter(|&j| matches!(func.ops[j], Op::EndIf { .. }))
             };
+            // Inside a branch the field moves on one path only, so the take
+            // over must cost no caller a copy: every site hands a value that
+            // dies at the call.
+            let close = |end: usize| close(end).filter(|&c| c == end || dying_at_every_site(&func.name, k));
             if let Some(end) = field_given(func, p.value, owned).and_then(close).filter(|&end| !exits_before(end)) {
                 out.push((k, end));
             }
@@ -569,6 +600,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
     // The functions some op reaches other than by a direct named call: a
     // generated drop (`DropVariant` / `DropWrapperRec` name their target) and
     // a fan arm (the render spawns it on a thread of its own).
+    DYING_SITES.with(|d| *d.borrow_mut() = dying_sites(functions));
     let reached_otherwise: BTreeSet<String> = functions
         .iter()
         .flat_map(|f| f.ops.iter())
