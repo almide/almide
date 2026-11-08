@@ -301,7 +301,7 @@ fn render_end_if(
             line!("}}");
             return Ok(());
         }
-        let rhs = owned_copy_rhs(v, t);
+        let rhs = end_if_copy_rhs(v, t);
         if let Some(recode) = crate::native_value_repr::scalar_recode(&var(v), t, join_t) {
             line!("{} = {};", var(d), recode);
             *indent -= 1;
@@ -323,7 +323,7 @@ fn render_end_if(
 /// The owned copy of `v`, by its NTy: an if-value arm's yield copied into the
 /// join (the copy [`join_rhs`] keeps when the value outlives the arm), or a
 /// `SetLocal`'s source.
-fn owned_copy_rhs(v: ValueId, t: NTy) -> String {
+fn end_if_copy_rhs(v: ValueId, t: NTy) -> String {
     match t {
         NTy::I64 | NTy::F64 => var(v),
         NTy::Str => format!("{}.clone()", var(v)),

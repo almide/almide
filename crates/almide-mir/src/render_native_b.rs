@@ -93,7 +93,7 @@ pub(crate) fn render_set_local(
         }};
     }
     let t = *tys.get(src).ok_or_else(|| wall("native: SetLocal of untyped value"))?;
-    let rhs = owned_copy_rhs(*src, t);
+    let rhs = end_if_copy_rhs(*src, t);
     let store_t = crate::render_native::owned_nty(t);
     if let Some(prev) = tys.get(local) {
         if let Some(recode) = crate::native_value_repr::scalar_recode(&var(*src), t, *prev) {
