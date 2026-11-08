@@ -122,6 +122,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_div_mod_ok.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_rem_pow2_zero.almd", class = "fixture" },
 ]
 
 # ── FAN DETERMINISM (PR #377, #369) ──────────────────────────────────

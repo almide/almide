@@ -405,6 +405,7 @@
 65712	spec/wasm_cross/int_pow_negative_exponent.almd
 65744	spec/wasm_cross/int_pow_operator_negative_base.almd
 65696	spec/wasm_cross/int_pow_overflow_wraps.almd
+66752	spec/wasm_cross/int_rem_pow2_zero.almd
 66336	spec/wasm_cross/int_rotate_negative_count.almd
 65744	spec/wasm_cross/int_wrap_rotate_width.almd
 65776	spec/wasm_cross/interp_diverging_part.almd
