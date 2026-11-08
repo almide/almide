@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let xs: List[Bool] = [true]
+  let r: Bool = list.fold(xs, list.is_empty(list.sort_by(xs, ((y) => 1))), ((a, b) => a))
+  println("${r}")
+}

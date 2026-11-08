@@ -1,0 +1,5 @@
+effect fn main() -> Unit = {
+  let z = 0.0
+  let nan = z / z
+  println("${list.unique([0.0, -0.0, 1.5, 1.5])} ${list.len(list.unique([nan, nan]))}")
+}

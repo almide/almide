@@ -1,0 +1,12 @@
+type Parent = { kids: List[Int] }
+effect fn main() -> Unit = {
+  var h = Parent { kids: [2, 3] }
+  var total = 0
+  for k in h.kids {
+    total = total + k
+    h = Parent { kids: [99] }
+  }
+  assert_eq(total, 5)
+  assert_eq(h.kids, [99])
+  println("ok")
+}

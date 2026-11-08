@@ -1,0 +1,13 @@
+type Item = { id: Int, kids: List[Int] }
+effect fn main() -> Unit = {
+  var it = { id: 7, kids: [1, 2, 3, 4, 5] }
+  let snap = it
+  for i in 0..<4 {
+    if i % 2 == 0 then {
+      let _ = list.pop(it.kids)
+    } else {
+      list.push(it.kids, i * 10)
+    }
+  }
+  println("${it.kids} ${snap.kids} ${it.id}")
+}
