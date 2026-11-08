@@ -114,6 +114,7 @@ jobs:
           git diff --exit-code spec/ || { echo "FORMAT DRIFT (diff above)"; fail=1; }
           exit $fail
       - name: Negative controls
+        if: always()
         run: |
           set +e -uo pipefail
           for nc in nc1:spec/wasm_cross/bytes_walk_reduction_fused.almd nc2:spec/wasm_cross/split_one_byte_separator.almd; do
@@ -123,6 +124,7 @@ jobs:
             if cmp -s /tmp/native.out /tmp/nc.out; then echo "NEGATIVE CONTROL $b: NOT CAUGHT"; else echo "NEGATIVE CONTROL $b: caught"; diff /tmp/native.out /tmp/nc.out; fi
           done
       - name: strchurn — allocations, outputs, AOT timing (base vs branch, one runner)
+        if: always()
         run: |
           set -euo pipefail
           mkdir -p /tmp/perf && cd /tmp/perf
