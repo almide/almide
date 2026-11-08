@@ -204,17 +204,24 @@ fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>) -> Option<usiz
                 children.insert(*c);
             }
             Op::Prim { kind: crate::PrimKind::Load { .. }, .. } | Op::ListGetScalar { .. } => {}
+            // A field copied at its own last use (a spread's other fields):
+            // out of a record that dies, the copy is the field itself.
+            Op::Dup { src, .. } if children.contains(src) => {
+                given |= !crate::mir_liveness::live_after(func, i, *src);
+            }
             Op::CallFn { name, args, .. } => {
-                // Only a loaded field may reach a call, once, at a by-value
-                // position, at its own last use.
+                // A loaded field reaches a call once: given at a by-value
+                // position at its own last use, else lent to a read.
                 let at = args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if children.contains(v)))?;
                 let crate::CallArg::Handle(c) = args[at] else { return None };
-                let once = vs.iter().filter(|v| derived.contains(v)).count() == 1;
-                let by_value = crate::native_floor::takes_by_value(name, at) || owned.moves(op, at);
-                if !once || !by_value || crate::mir_liveness::live_after(func, i, c) {
+                if vs.iter().filter(|v| derived.contains(v)).count() != 1 {
                     return None;
                 }
-                given = true;
+                let by_value = crate::native_floor::takes_by_value(name, at)
+                    || owned.moves(op, at)
+                    // The list or string a concatenation grows in place.
+                    || (at == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"));
+                given |= by_value && !crate::mir_liveness::live_after(func, i, c);
             }
             _ => return None,
         }
