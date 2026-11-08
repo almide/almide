@@ -6,7 +6,7 @@ pub(crate) fn struct_defs() -> String {
         let mut out = String::new();
         for (i, d) in r.borrow().iter().enumerate() {
             let target = alias_target(d);
-            if let (Some(_), Some(t)) = (d.alias, &target) {
+            if let (true, Some(t)) = (d.alias.is_some() || d.cell_of.is_some(), &target) {
                 out.push_str(&format!("type {} = {t};\n\n", struct_name(i as u16)));
                 continue;
             }

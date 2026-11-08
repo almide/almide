@@ -405,7 +405,7 @@ impl LowerCtx {
         // params bound to the args, captures resolved through `value_of`). Recorded
         // for BOTH the liftable and the capturing case — the call site prefers inline.
         self.lambda_bindings.insert(var, (params.clone(), (**body).clone()));
-        if let Some(dst) = self.lift_lambda(params, body) {
+        if let Some(dst) = self.lift_lambda(params, body, ty) {
             self.value_of.insert(var, dst);
             return Ok(());
         }

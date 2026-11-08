@@ -46,6 +46,11 @@ pub(crate) struct RecDecl {
     /// A `Set[A]`: v0's runtime `AlmideSet<elem>`, so the declared floor's
     /// set bodies take it as is.
     pub set_of: Option<NTy>,
+    /// A checked callable signature. All closure values share the native
+    /// environment representation; this identity retains their call types.
+    pub closure_of: Option<(Vec<NTy>, Option<NTy>)>,
+    /// A shared captured variable; cloning its handle preserves storage identity.
+    pub cell_of: Option<NTy>,
 }
 
 /// A type the MIR carries in one i64 lane, read off its `Repr` (the layout
@@ -126,6 +131,8 @@ pub(crate) fn result_payloads(i: u16) -> Option<(NTy, NTy)> {
     RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.result_of))
 }
 
+include!("render_native_env_types.rs");
+
 // Default support follows the declared fields recursively.
 include!("render_native_defaults.rs");
 
@@ -146,7 +153,7 @@ pub(crate) fn bytes_index() -> u16 {
         if let Some(i) = r.iter().position(|d| d.name == BYTES_KEY) {
             return i as u16;
         }
-        r.push(RecDecl { name: BYTES_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None });
+        r.push(RecDecl { name: BYTES_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None });
         (r.len() - 1) as u16
     })
 }
@@ -162,7 +169,7 @@ pub(crate) fn value_index() -> u16 {
         if let Some(i) = r.iter().position(|d| d.name == VALUE_KEY) {
             return i as u16;
         }
-        r.push(RecDecl { name: VALUE_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None });
+        r.push(RecDecl { name: VALUE_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None });
         (r.len() - 1) as u16
     })
 }
@@ -183,7 +190,7 @@ pub(crate) fn matrix_index() -> u16 {
         if let Some(i) = r.iter().position(|d| d.name == MATRIX_KEY) {
             return i as u16;
         }
-        r.push(RecDecl { name: MATRIX_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None });
+        r.push(RecDecl { name: MATRIX_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None });
         (r.len() - 1) as u16
     })
 }
@@ -210,7 +217,7 @@ pub(crate) fn result_type_of(ok: NTy, err: NTy) -> u16 {
             default_tag: None,
             option_of: None,
             result_of: Some((ok, err)),
-            map_of: None, eq_safe: false, set_of: None,
+            map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None,
         });
         (r.len() - 1) as u16
     })
@@ -248,7 +255,7 @@ pub(crate) fn map_type_of(key: NTy, value: NTy) -> u16 {
             default_tag: None,
             option_of: None,
             result_of: None,
-            map_of: Some((key, value)), eq_safe: false, set_of: None,
+            map_of: Some((key, value)), eq_safe: false, set_of: None, closure_of: None, cell_of: None,
         });
         (r.len() - 1) as u16
     })
@@ -270,7 +277,7 @@ pub(crate) fn option_type_of(payload: NTy) -> u16 {
             default_tag: None,
             option_of: Some(payload),
             result_of: None,
-            map_of: None, eq_safe: false, set_of: None,
+            map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None,
         });
         (r.len() - 1) as u16
     })
@@ -293,7 +300,7 @@ pub(crate) fn list_type_of(e: NTy) -> u16 {
             default_tag: None,
             option_of: None,
             result_of: None,
-            map_of: None, eq_safe: false, set_of: None,
+            map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None,
         });
         (r.len() - 1) as u16
     })
@@ -309,7 +316,7 @@ pub(crate) fn slots_type_of(fields: &[NTy]) -> u16 {
         if let Some(i) = r.iter().position(|d| d.name == name) {
             return i as u16;
         }
-        r.push(RecDecl { name, fields: fields.to_vec(), cases: None, list_of: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, alias: None, default_tag: None });
+        r.push(RecDecl { name, fields: fields.to_vec(), cases: None, list_of: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None, alias: None, default_tag: None });
         (r.len() - 1) as u16
     })
 }
@@ -382,6 +389,7 @@ impl Drop for RecGuard {
 }
 
 pub(crate) fn install(recs: Vec<RecDecl>) -> RecGuard {
+    CAPTURE_KINDS.with(|k| k.borrow_mut().clear());
     RECS.with(|r| *r.borrow_mut() = recs);
     RecGuard
 }
@@ -725,6 +733,7 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
         }
         Ty::Applied(_, a) => a.iter().for_each(|e| collect_tuples(e, out)),
         Ty::Fn { params, ret, .. } => {
+            push_new(out, t);
             params.iter().for_each(|p| collect_tuples(p, out));
             collect_tuples(ret, out);
         }

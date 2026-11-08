@@ -39,7 +39,8 @@ fn defined_names(src: &str) -> BTreeSet<&str> {
 }
 
 /// The statics a top-level `thread_local! { static NAME: … }` defines: the
-/// item scan does not see inside a macro, and none of them can be taken along.
+/// name scan includes conditional blocks too, so an unavailable TLS name
+/// cannot silently be mistaken for an item supplied by Rust.
 fn thread_local_names(src: &str) -> BTreeSet<&str> {
     let toks = lex(src);
     let mut out = BTreeSet::new();

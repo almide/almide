@@ -46,12 +46,28 @@ impl LowerCtx {
         &mut self,
         params: &[(VarId, Ty)],
         body: &IrExpr,
+        fn_ty: &Ty,
     ) -> Option<ValueId> {
+        // Contextual numeric checking stamps the leaves but can leave the
+        // enclosing if/block's type widened. The checked callable declaration
+        // owns its return ABI, just as a named function's declaration does.
+        let mut typed_body;
+        let body = if let Ty::Fn { ret, is_effect: false, .. } = fn_ty {
+            if **ret != body.ty {
+                typed_body = body.clone();
+                typed_body.ty = (**ret).clone();
+                &typed_body
+            } else { body }
+        } else { body };
         let captured = self.collect_lambda_captures(params, body)?;
         let layout = self.partition_capture_drop_classes(captured)?;
         let cap_vals = self.resolve_capture_values(&layout)?;
         let name = self.lower_lifted_lambda_body(params, body, &layout)?;
-        Some(self.materialize_closure_block(name, &layout, cap_vals))
+        let ty = Ty::Fn { params: params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(body.ty.clone()), is_effect: false };
+        crate::trace::trace("ALMIDE_DBG_ANF", || format!("[lift] {name} type {ty:?}"));
+        let block = self.materialize_closure_block(name, &layout, cap_vals);
+        self.aggregate_blocks.insert(block, crate::render_native_rec::block_key(&ty));
+        Some(block)
     }
 
     /// Phase 1 of [`Self::lift_lambda`]: the lambda's CAPTURES, with their types, in
@@ -100,6 +116,13 @@ impl LowerCtx {
         }
         let mut cc = CapCollect { free: &free, out: Vec::new() };
         almide_ir::visit::IrVisitor::visit_expr(&mut cc, body);
+        // A write-only capture has no Var expression to supply its type.
+        // The checked binding still declares it (MapInsert/FieldAssign).
+        for v in &free {
+            if !cc.out.iter().any(|(id, _)| id == v) {
+                cc.out.push((*v, self.var_decl_tys.get(v)?.clone()));
+            }
+        }
         // HONEST-WALL GATE — a MUTATED capture without a SHARED CELL: env slots are
         // VALUE COPIES / co-owns, so writing the copy silently LOSES the mutation
         // (sort_by_call_count printed calls=0; the closure-mutation wasm_runtime
@@ -252,11 +275,16 @@ impl LowerCtx {
                 closure_caps.push((v, ty));
                 continue;
             }
-            if one_level_exact(&ty) {
+            if one_level_exact(&ty) || matches!(ty, Ty::Bytes) {
                 heap_caps.push((v, ty));
                 continue;
             }
-            if is_nested_list_str(&ty) || is_nested_result_str(&ty) {
+            // A String-keyed scalar map owns exactly len key handles. Its
+            // value region contains raw lanes, so the existing nested capture
+            // sweep releases all owned children without touching those lanes.
+            let scalar_map = matches!(&ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2 && a[0] == Ty::String && !is_heap_ty(&a[1]));
+            if is_nested_list_str(&ty) || is_nested_result_str(&ty) || scalar_map {
                 nested_heap_caps.push((v, ty));
                 continue;
             }
@@ -473,15 +501,8 @@ impl LowerCtx {
         for (v, ty) in params {
             let pv = sub.fresh_value();
             sub.value_of.insert(*v, pv);
-            // A FUNCTION-typed PARAM (`list.map(fns, (f) => f(10))` — `f`'s own type is
-            // `(Int)->Int`, NOT a capture): mirrors `bind_params`'s IDENTICAL Fn-param arm
-            // exactly — the caller passes a closure block, and `f(x)` inside the lifted
-            // body must lower to `Op::CallIndirect` through it. `lift_lambda`'s param loop
-            // never had this (only a CAPTURED closure got `closure_values.insert`, at the
-            // prologue loop below) — a lifted lambda whose OWN parameter is itself callable
-            // (the `list.map` over a `List[Closure]` shape) fell to `lower_body_into`
-            // declining `f(10)` as a call through an unknown target, so `lift_lambda`
-            // returned `None` and the whole HOF call walled.
+            // A callable lambda parameter uses the same indirect dispatch as
+            // a captured function value.
             if matches!(ty, Ty::Fn { .. }) {
                 sub.closure_values.insert(pv);
             }
@@ -601,6 +622,9 @@ impl LowerCtx {
             aggregate_blocks: std::mem::take(&mut sub.aggregate_blocks),
         };
         crate::lambda_sigs::record(&name, params.iter().map(|(_, t)| t.clone()).collect(), body.ty.clone());
+        crate::lambda_sigs::record_captures(&name, layout.captures.iter().enumerate().map(|(i, (v, ty))| {
+            crate::lambda_sigs::Capture { ty: ty.clone(), rich: layout.is_rich(i), cell: self.cell_of.contains_key(v) }
+        }).collect());
         self.lifted.push(lifted_fn);
         self.lifted.append(&mut nested);
         Some(name)
@@ -675,6 +699,11 @@ impl LowerCtx {
                 repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
                 init: Init::DynList { len: two },
             });
+            if self.cell_of.contains_key(cap_var) {
+                self.aggregate_blocks.insert(w, crate::lambda_sigs::cell_wrapper_key(cap_ty));
+            } else {
+                self.aggregate_blocks.insert(w, crate::render_native_rec::block_key(&Ty::Tuple(vec![Ty::Int, cap_ty.clone()].into())));
+            }
             let wh = self.fresh_value();
             self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(wh), args: vec![w] });
             let tv = self.fresh_value();

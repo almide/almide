@@ -36,6 +36,10 @@ mod value;
 mod byte_slots;
 #[path = "render_native_scalar_slots.rs"]
 mod scalar_slots;
+#[path = "render_native_env_slots.rs"]
+mod env_slots;
+#[path = "render_native_cell_slots.rs"]
+mod cell_slots;
 pub(crate) use carrier::{carrier_values, is_carrier, CarrierSig};
 pub(crate) use slots::flag_exits;
 
@@ -116,8 +120,7 @@ pub(crate) struct AddrState {
     moves: BTreeSet<ValueId>,
     /// The movable reads after which nothing reads the block at all.
     moves_last: BTreeSet<ValueId>,
-    /// Heap slot reads that move the value out, or that a rebuild walls
-    /// (`native_slot_takes`).
+    /// Heap slot reads that move out, or whose rebuild walls (`native_slot_takes`).
     slot_reads: crate::native_slot_takes::SlotReads,
     /// Struct blocks built whole (`render_native_slots::built_whole`), and
     /// the fields stored so far of the one being built.
@@ -145,6 +148,7 @@ pub(crate) struct AddrState {
     /// last store (each element bound as `<list>_e<k>` at its store), as the
     /// standard codegen builds a list literal: (length, elements stored).
     literal: BTreeMap<ValueId, (usize, usize)>,
+    borrowed_list_slots: BTreeSet<(ValueId, ValueId)>,
 }
 
 impl AddrState {
@@ -173,7 +177,7 @@ impl AddrState {
                 // generated struct, is built as a slot list.
                 Op::ListLit { dst, elems } => alloc_rec
                     .get(dst)
-                    .filter(|i| crate::render_native_rec::enum_cases(**i).is_some() || crate::render_native_rec::all_scalar_struct(**i)
+                    .filter(|i| crate::render_native_rec::enum_cases(**i).is_some() || crate::render_native_rec::all_scalar_struct(**i) || crate::render_native_rec::closure_sig(**i).is_some()
                         || (elems.is_empty() && crate::render_native_rec::is_empty_collection(**i)))
                     .map(|i| (*dst, *i)),
                 _ => None,
@@ -262,6 +266,7 @@ impl AddrState {
             single_rec,
             pushed,
             literal: BTreeMap::new(),
+            borrowed_list_slots: slots::borrowed_stores(func, &handle_of, &base_of),
         }
     }
 }
@@ -468,7 +473,7 @@ fn note_join_recs(func: &MirFunction, alloc_rec: &mut BTreeMap<ValueId, u16>) {
 
 /// The handle, constant and base-offset facts of a function's blocks.
 #[allow(clippy::type_complexity)]
-fn block_bases(func: &MirFunction) -> (BTreeMap<ValueId, ValueId>, BTreeMap<ValueId, i64>, BTreeMap<ValueId, (ValueId, Option<i64>)>) {
+pub(crate) fn block_bases(func: &MirFunction) -> (BTreeMap<ValueId, ValueId>, BTreeMap<ValueId, i64>, BTreeMap<ValueId, (ValueId, Option<i64>)>) {
     // A block stored into a typed parent's slot takes the slot's declared
     // kind: a list's element, a record's field, an enum slot's one record kind.
     let mut handle_of: BTreeMap<ValueId, ValueId> = BTreeMap::new();

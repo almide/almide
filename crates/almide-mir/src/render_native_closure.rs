@@ -1,11 +1,11 @@
 //! #4006 family G: closures with heap params or a heap result.
 //!
 //! A scalar closure dispatches through the per-arity `__almd_ci_N` tables
-//! (`render_native::push_closure_dispatch_tables`). A closure whose declared
-//! signature (`crate::lambda_sigs`, recorded at the lift) has a heap param or
-//! result dispatches through a table per SIGNATURE: every lifted lambda with
-//! the same parameter and result kinds shares one `__almd_ci_<key>` fn, and a
-//! `CallIndirect` picks the table by its arguments' kinds and its result.
+//! (`render_native::push_closure_dispatch_tables`). Other signatures use a
+//! table per declared parameter AND result kinds. A source function value
+//! retains that complete signature through captures, fields and returns;
+//! `CallIndirect` selects its table from that declaration. Hand-authored MIR
+//! without a source function type retains the conservative legacy inference.
 //! Heap args are borrowed, as at every MIR call; the result is owned.
 
 use crate::lower::LowerError;
@@ -113,10 +113,11 @@ pub(crate) fn push_typed_dispatch_tables(out: &mut String, user_fns: &BTreeMap<&
         tables.entry(key).or_insert_with(|| (ps, ret, Vec::new())).2.push((idx, name));
     }
     for (key, (ps, ret, fns)) in tables {
+        let env_ty = dispatch_env(sigs, fns[0].1);
         let params: String = ps.iter().enumerate().map(|(i, k)| format!(", a{i}: {}", param_spelling(*k))).collect();
         let args: String = (0..ps.len()).map(|i| format!(", a{i}")).collect();
         let ret_s = ret.map(|r| format!(" -> {}", crate::render_native_rec::owned_ty(owned_nty(r)))).unwrap_or_default();
-        let _ = write!(out, "fn __almd_ci_{key}(idx: i64, env: &[i64]{params}){ret_s} {{\n    match idx {{\n");
+        let _ = write!(out, "fn __almd_ci_{key}(idx: i64, env: {env_ty}{params}){ret_s} {{\n    match idx {{\n");
         for (idx, name) in fns {
             let _ = writeln!(out, "        {idx} => {}(env{args}),", crate::render_native::mangle(name));
         }
@@ -165,6 +166,8 @@ fn indirect_ret(sigs: &NativeSigs, kinds: &[NativeSigKind], dst: &Option<ValueId
 fn indirect_env(env: &ValueId, tys: &BTreeMap<ValueId, NTy>) -> Result<String, LowerError> {
     let et = *tys.get(env).ok_or_else(|| wall("native: CallIndirect env untyped"))?;
     match et {
+        NTy::Rec(i) if crate::render_native_rec::closure_sig(i).is_some() => Ok(format!("&{}", var(*env))),
+        NTy::RecRef(i) if crate::render_native_rec::closure_sig(i).is_some() => Ok(var(*env)),
         NTy::Vec => Ok(format!("&{}", var(*env))),
         NTy::VecRef => Ok(var(*env)),
         _ => Err(wall("native: CallIndirect env is not a closure block")),
@@ -183,13 +186,29 @@ pub(crate) fn render_typed_call_indirect(
 ) -> Result<bool, LowerError> {
     let Op::CallIndirect { dst, table_idx, args, result } = op else { return Ok(false) };
     let Some((CallArg::Handle(env), rest)) = args.split_first() else { return Ok(false) };
-    let (kinds, codes) = indirect_args(rest, tys)?;
+    let (mut kinds, mut codes) = indirect_args(rest, tys)?;
+    let declared = match tys.get(env) {
+        Some(NTy::Rec(i) | NTy::RecRef(i)) => crate::render_native_rec::closure_sig(*i),
+        _ => None,
+    };
+    let declared_ret = if let Some((params, ret)) = &declared {
+        if params.len() != kinds.len() { return Err(wall("native: indirect call arity disagrees with its checked function type")); }
+        for ((kind, code), want) in kinds.iter_mut().zip(&mut codes).zip(params) {
+            let got = owned_nty(*kind);
+            if got != *want && !crate::native_value_repr::same_owned(got, *want) {
+                *code = crate::native_value_repr::scalar_recode(code, got, *want)
+                    .ok_or_else(|| wall("native: indirect argument disagrees with its checked function type"))?;
+            }
+            *kind = arg_kind(*want);
+        }
+        Some(ret.map(arg_kind))
+    } else { None };
     let scalar_result = matches!(result, Some(Repr::Scalar { .. }));
-    if kinds.iter().all(|k| *k == NativeSigKind::I64) && (scalar_result || dst.is_none()) {
+    if declared.is_none() && kinds.iter().all(|k| *k == NativeSigKind::I64) && (scalar_result || dst.is_none()) {
         return Ok(false);
     }
-    let ret = indirect_ret(sigs, &kinds, dst)?;
-    let Some(key) = sig_key(&kinds, ret) else { return Ok(false) };
+    let ret = match declared_ret { Some(r) => r, None => indirect_ret(sigs, &kinds, dst)? };
+    let key = sig_key(&kinds, ret).unwrap_or_else(|| kinds.len().to_string());
     let env_code = indirect_env(env, tys)?;
     let call = format!(
         "__almd_ci_{key}({}, {env_code}{})",
@@ -211,4 +230,13 @@ pub(crate) fn render_typed_call_indirect(
         (Some(_), None) => return Err(wall("native: a Unit closure result bound to a value")),
     }
     Ok(true)
+}
+
+/// Hand-authored MIR can retain the scalar slice environment; checked source
+/// closures carry a declared function type and use the typed environment.
+pub(crate) fn dispatch_env(sigs: &NativeSigs, name: &str) -> &'static str {
+    if sigs.get(name).and_then(|(ps, _)| ps.first())
+        .is_some_and(|k| crate::render_native_rec::is_closure(owned_nty(*k))) {
+        "&__AlmdClosure"
+    } else { "&[i64]" }
 }

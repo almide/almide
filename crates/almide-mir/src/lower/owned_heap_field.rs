@@ -75,7 +75,7 @@ impl LowerCtx {
             // block and pushes it live), which the enclosing aggregate then Consumes into its
             // slot. The record's drop frees it via the generated `__drop_closure` field arm.
             IrExprKind::Lambda { params, body, .. } => {
-                let blk = self.lift_lambda(params, body)?;
+                let blk = self.lift_lambda(params, body, &expr.ty)?;
                 self.track_owned_field(blk)
             }
             // An `Option[<scalar>]` CTOR field (`("k0", some(1))` / `("j", none)` — the

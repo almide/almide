@@ -6,6 +6,20 @@ use std::process::Command;
 #[test]
 fn nested_carriers_preserve_cross_target_observations() {
     let cases = [
+        ("option_result", r#"
+fn read(v: Result[Int, String]?) -> String = match v {
+ none => "none",
+ some(r) => match r { ok(n) => "ok:${n}", err(e) => "err:" + e },
+}
+fn main() -> Unit = {
+ let xs: List[Result[Int, String]] = [ok(4), err("bad")]
+ println(read(none))
+ println(read(list.get(xs, 0)))
+ println(read(list.get(xs, 1)))
+ println(read(list.get(xs, 2)))
+ println(read(list.get(xs, 0)))
+}
+"#),
         ("nested_option", r#"
 fn make(x: Int) -> (Int?)? = if x == 0 then none else if x == 1 then some(none) else some(some(x))
 fn read(x: (Int?)?) -> Int = match x { none => -1, some(y) => y ?? -2 }
@@ -57,6 +71,7 @@ fn main() -> Unit = {
         assert!(actual.status.success(), "{name}: {}", String::from_utf8_lossy(&actual.stderr));
         assert!(actual.stderr.is_empty(), "{name}");
         let expected: &[u8] = match name {
+            "option_result" => b"none\nok:4\nerr:bad\nnone\nok:4\n",
             "nested_option" => b"-1\n-2\n42\n42\n",
             "option_list" => b"7\n-1\n9\n7\n-1\n9\n",
             "result_option" => b"empty\n-2\n42\n42\n",

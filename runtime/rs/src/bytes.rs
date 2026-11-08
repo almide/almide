@@ -40,6 +40,7 @@ fn window(pos: i64, width: usize, len: usize) -> Option<usize> {
 /// self-host `list_make.almd` already uses — one limit, one message.
 
 pub fn almide_rt_bytes_len(b: &Vec<u8>) -> i64 { b.len() as i64 }
+pub fn almide_rt_bytes_eq(a: &[u8], b: &[u8]) -> bool { a == b }
 pub fn almide_rt_bytes_is_empty(b: &Vec<u8>) -> bool { b.is_empty() }
 #[inline(always)] pub fn almide_rt_bytes_get(b: &Vec<u8>, i: i64) -> Option<i64> { b.get(i as usize).map(|&x| x as i64) }
 pub fn almide_rt_bytes_set(b: &Vec<u8>, i: i64, val: i64) -> Vec<u8> { let mut b = b.clone(); if (i as usize) < b.len() { b[i as usize] = val as u8; } b }

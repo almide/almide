@@ -483,8 +483,8 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
     let (b, bt) = call_arg(b, tys)?;
     let mismatch = || wall(format!("native: `{name}` over operands outside the native lists ({at:?}, {bt:?})"));
     let (sa, ty) = crate::native_list_ops::as_slice(&a, at).ok_or_else(mismatch)?;
-    let (sb, ty_b) = crate::native_list_ops::as_slice(&b, bt).ok_or_else(mismatch)?;
-    if ty != ty_b {
+    let (sb, _) = crate::native_list_ops::as_slice(&b, bt).ok_or_else(mismatch)?;
+    if !crate::native_value_repr::same_owned(at, bt) {
         return Err(mismatch());
     }
     let Some(d) = dst else {
