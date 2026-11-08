@@ -571,13 +571,6 @@ fn render_native_drop_op(
         Op::DropVariant { v, .. } | Op::DropWrapperRec { v, .. } if matches!(tys.get(v), Some(NTy::Rec(_))) => {
             line!("// drop(record): scope-end");
         }
-        // A record read in place (a borrow-only read, render_native_borrow_read,
-        // or its reference copy): the release ends the borrow; the owner frees.
-        Op::DropVariant { v, .. } | Op::DropWrapperRec { v, .. }
-            if matches!(tys.get(v), Some(NTy::RecRef(_))) && crate::render_native_keyed::in_place(*v) =>
-        {
-            line!("// drop(borrowed record): the borrow ends");
-        }
         Op::DropVariant { v, ty } if ty.as_str() == "closure" => match tys.get(v) {
             Some(NTy::Vec) => line!("// drop(closure block): scope-end"),
             other => {
@@ -662,9 +655,6 @@ fn render_drop_list_str_block(
         Some(NTy::ResStr) => line!("// drop(result carrier): scope-end"),
         Some(NTy::VecStrRef) if crate::render_native_addr::is_const_list(*v) => {
             line!("// a constant table: borrowed from its static")
-        }
-        Some(NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) if crate::render_native_keyed::in_place(*v) => {
-            line!("// drop: read in place, the borrow ends")
         }
         Some(NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) => {
             return Err(wall(
