@@ -134,7 +134,7 @@ crates/almide-mir/src/render_native_move.rs	almide_mir::render_native_move::scan
 crates/almide-mir/src/render_native_move.rs	almide_mir::render_native_move::set_stack_lits	3
 crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::opt_operand	1
 crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_narrow_bin_op	8
-crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_native_float_op	13
+crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_native_float_op	4
 crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_native_meter_op	5
 crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_native_scalar_op	1
 crates/almide-mir/src/render_native_op_families.rs	almide_mir::render_native_op_families::render_native_termination_op	1
