@@ -1,0 +1,27 @@
+// v1-vs-v0 shape bench: a variant param's String payload yielded by one match
+// arm while the caller still reads the variant after the call, so the param
+// stays borrowed and the payload read is copied out, inside a loop.
+type V = | A(String) | B(Int)
+
+fn name(v: V) -> String = match v {
+  A(s) => s,
+  B(_) => "b",
+}
+
+fn main() -> Unit = {
+  var total = 0
+  var i = 0
+  while i < 100000 {
+    let v = if i % 2 == 0 then A(int.to_string(i)) else B(i)
+    let tag = match v {
+      A(_) => 1,
+      B(_) => 2,
+    }
+    total = total + string.len(name(v)) + tag + (match v {
+      A(s) => string.len(s),
+      B(n) => n % 3,
+    })
+    i = i + 1
+  }
+  println(int.to_string(total))
+}
