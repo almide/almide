@@ -273,6 +273,8 @@ impl LowerCtx {
             repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
             init: Init::DynList { len: len_c },
         });
+        crate::lambda_sigs::record_cell(ty);
+        self.aggregate_blocks.insert(cell, crate::lambda_sigs::cell_key(ty));
         let addr = self.cell_slot_addr(cell);
         match class {
             CellClass::Scalar => {

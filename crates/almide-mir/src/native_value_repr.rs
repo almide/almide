@@ -34,6 +34,12 @@ pub(crate) fn same_owned(a: NTy, b: NTy) -> bool {
             return false;
         }
         seen.push((i, j));
+        if let (Some((ap, ar)), Some((bp, br))) = (rec::closure_sig(i), rec::closure_sig(j)) {
+            let result = ap.len() == bp.len() && ap.iter().zip(&bp).all(|(a, b)| same(*a, *b, seen))
+                && match (ar, br) { (Some(a), Some(b)) => same(a, b, seen), (None, None) => true, _ => false };
+            seen.pop();
+            return result;
+        }
         let answer = match (rec::list_elem(i), rec::list_elem(j)) {
             (Some(a), Some(b)) => same(a, b, seen),
             _ => match (rec::option_payload(i), rec::option_payload(j)) {

@@ -245,7 +245,7 @@ pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
             }
             Op::Prim { kind: PrimKind::LoadHandle | PrimKind::Load { width: 8 }, dst: Some(d), args } if args.len() == 1 => {
                 if let Some(&(r, o)) = at.get(&args[0]) {
-                    if o == i64::from(BLOCK_HEADER) && arms.iter().all(|(t, _)| *t != Some(r)) {
+                    if o == i64::from(BLOCK_HEADER) {
                         reads.insert(*d, r);
                     }
                 }
@@ -470,18 +470,27 @@ impl CarrierCx<'_> {
         }
         let b = var(ad.base);
         let read = if let Some(p) = option_payload(i) {
-            if !has_default(p) {
-                return Some(Err(wall("native: an Option payload read with no Default for its absent case")));
-            }
+            let absent = if has_default(p) { "Default::default()".to_string() }
+                else if self.st.hoisted.get(&d) == Some(&true) {
+                    // Every use is under this unchanged Option's Some tag.
+                    // A nested Result has no Default; its absent-side value
+                    // is an unobserved placeholder, never a fabricated hit.
+                    let Some(value) = crate::native_value_repr::unused_payload(p) else {
+                        return Some(Err(wall("native: no value for an unobserved Option payload")));
+                    };
+                    value
+                } else {
+                    return Some(Err(wall("native: an Option payload without Default read outside its Some guard")));
+                };
             // The last read of an owned carrier's payload moves it out
             // (render_native_slots::movable_loads): nothing reads it again.
             // A by-value match, not `.take()`: `take` writes `None` back
             // through `mem::replace`, whose pointer checks the program's
             // debug-assertion profile keeps (string_index_loop, 1.037x v0).
             if self.st.moves_last.contains(&d) && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_))) {
-                (p, format!("match {b} {{ Some(v) => v, None => Default::default() }}"))
+                (p, format!("match {b} {{ Some(v) => v, None => {absent} }}"))
             } else {
-                (p, format!("match &{b} {{ Some(v) => v.clone(), None => Default::default() }}"))
+                (p, format!("match &{b} {{ Some(v) => v.clone(), None => {absent} }}"))
             }
         } else {
             match self.result_read(d, ad, i, &b)? {
@@ -502,10 +511,14 @@ impl CarrierCx<'_> {
         let (o, e) = result_payloads(i)?;
         // The arm of the innermost tag test of this Result, if any.
         let arm = self.st.arms.iter().rev().find(|(r, _)| *r == Some(ad.base)).map(|(_, then)| *then);
+        // A floor result held through the runtime's borrowing twin: its Ok
+        // side is already a reference (`&AlmideValue`).
+        let ok_ref = crate::render_native_borrow_read::borrowed_result(ad.base);
+        let ok_v = if ok_ref { "*v" } else { "v" };
         // A borrow-only read inside its tag test (render_native_borrow_read):
         // a reference into the carrier, no copy of the payload.
         if let Some(then) = arm {
-            if self.borrowed_result_read(d, ad.base, b, then, (o, e)) {
+            if self.borrowed_result_read(d, ad.base, b, then, (o, e), ok_v) {
                 return Some(Err(Ok(true)));
             }
         }
@@ -525,12 +538,16 @@ impl CarrierCx<'_> {
                     self.tys.insert(d, NTy::RecRef(j));
                     let t = struct_name(j);
                     self.emit(&format!("let {dv}_absent: {t} = Default::default();"));
-                    self.emit(&format!("let mut {dv}: &{t} = match &{b} {{ {side}(v) => v, {other}(_) => &{dv}_absent }};"));
-                    crate::render_native_addr::note_payload_take(
-                        d,
-                        ad.base,
-                        format!("match &mut {b} {{ {side}(v) => std::mem::take(v), {other}(_) => Default::default() }}"),
-                    );
+                    let val = if err_side { "v" } else { ok_v };
+                    self.emit(&format!("let mut {dv}: &{t} = match &{b} {{ {side}(v) => {val}, {other}(_) => &{dv}_absent }};"));
+                    // A borrowed Ok payload (`*v`) is not the carrier's to give away.
+                    if val == "v" {
+                        crate::render_native_addr::note_payload_take(
+                            d,
+                            ad.base,
+                            format!("match &mut {b} {{ {side}(v) => std::mem::take(v), {other}(_) => Default::default() }}"),
+                        );
+                    }
                     return Some(Err(Ok(true)));
                 }
                 _ => {}
@@ -538,8 +555,8 @@ impl CarrierCx<'_> {
         }
         Some(Ok(match (arm, self.st.hoisted.get(&d).copied()) {
             (Some(true), _) => (e, format!("match &{b} {{ Err(v) => v.clone(), Ok(_) => unreachable!() }}")),
-            (Some(false), _) => (o, format!("match &{b} {{ Ok(v) => v.clone(), Err(_) => unreachable!() }}")),
-            (None, _) if o == e => (o, format!("match &{b} {{ Ok(v) | Err(v) => v.clone() }}")),
+            (Some(false), _) => (o, format!("match &{b} {{ Ok(v) => ({ok_v}).clone(), Err(_) => unreachable!() }}")),
+            (None, _) if o == e && !ok_ref => (o, format!("match &{b} {{ Ok(v) | Err(v) => v.clone() }}")),
             // Read above the tag test, used under its Ok side: the Err
             // side's read is never used, so it is a Default.
             (None, Some(side)) => {
@@ -547,7 +564,8 @@ impl CarrierCx<'_> {
                 let Some(unused) = crate::native_value_repr::unused_payload(kind) else {
                     return Some(Err(Err(wall("native: no value for an unobserved carrier payload"))));
                 };
-                (kind, format!("match &{b} {{ {selected}(v) => v.clone(), {other}(_) => {unused} }}"))
+                let val = if side { "v" } else { ok_v };
+                (kind, format!("match &{b} {{ {selected}(v) => ({val}).clone(), {other}(_) => {unused} }}"))
             }
             _ => return Some(Err(Err(wall("native: a Result payload read outside its tag test")))),
         }))
@@ -555,17 +573,18 @@ impl CarrierCx<'_> {
 
     /// The borrow-only read inside the `then` (Err) or else (Ok) arm of its
     /// tag test, rendered when the payload kind has a reference form.
-    fn borrowed_result_read(&mut self, d: ValueId, base: ValueId, b: &str, then: bool, (o, e): (NTy, NTy)) -> bool {
+    fn borrowed_result_read(&mut self, d: ValueId, base: ValueId, b: &str, then: bool, (o, e): (NTy, NTy), ok_v: &str) -> bool {
         let (k, side, other) = if then { (e, "Err", "Ok") } else { (o, "Ok", "Err") };
         let by_ref = match k {
-            NTy::Rec(j) => Some((NTy::RecRef(j), format!("&{}", struct_name(j)), "v")),
+            NTy::Rec(j) => Some((NTy::RecRef(j), format!("&{}", struct_name(j)), if then { "v" } else { ok_v })),
             NTy::Str => Some((NTy::StrRef, "&str".to_string(), "&v[..]")),
             _ => None,
         };
         let (true, Some((t, ty, val))) = (self.st.borrow_reads.contains(&d), by_ref) else { return false };
         self.tys.insert(d, t);
         self.emit(&format!("let mut {}: {ty} = match &{b} {{ {side}(v) => {val}, {other}(_) => unreachable!() }};", var(d)));
-        if has_default(k) {
+        // A borrowed Ok payload (`*v`) is not the carrier's to give away.
+        if has_default(k) && (then || ok_v == "v") {
             crate::render_native_addr::note_payload_take(
                 d,
                 base,

@@ -46,6 +46,19 @@ impl LowerCtx {
         format!("__eq_list_{}__{}", sanitize_ty_ident(tyname), sanitize_ty_ident(&self.fn_name))
     }
 
+    /// A borrowed heap argument denotes the block, not its scalar address.
+    /// The recursive slot reader also supplies loaded handles, which already
+    /// denote the block. Undo only a direct Handle projection; never an offset
+    /// or arbitrary integer that could refer to an interior slot.
+    fn eq_handle_arg(&self, v: ValueId) -> crate::CallArg {
+        let base = self.ops.iter().rev().find_map(|op| match op {
+            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args }
+                if *d == v && args.len() == 1 => Some(args[0]),
+            _ => None,
+        }).unwrap_or(v);
+        crate::CallArg::Handle(base)
+    }
+
     /// Emit the Bool-returning helper call at an eq SITE (both operands are
     /// heap slot values — i64 addresses or i32 loaded handles; the wasm render
     /// wraps address-repr'd Handle args).
@@ -54,7 +67,7 @@ impl LowerCtx {
         self.ops.push(Op::CallFn {
             dst: Some(dst),
             name,
-            args: vec![crate::CallArg::Handle(lv), crate::CallArg::Handle(rv)],
+            args: vec![self.eq_handle_arg(lv), self.eq_handle_arg(rv)],
             result: Some(crate::Repr::Scalar { width: crate::ScalarWidth::Double }),
         });
         dst

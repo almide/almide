@@ -602,7 +602,12 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             Init::IntList(vs) => {
                 tys.insert(*dst, NTy::Vec);
                 let items = vs.iter().map(|v| format!("{v}i64")).collect::<Vec<_>>().join(", ");
-                line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+                if crate::render_native_move::is_stack_lit(*dst) {
+                    // Borrowed only (crate::render_native_move::set_stack_lits).
+                    line!("let mut {}: [i64; {}] = [{items}];", var(*dst), vs.len());
+                } else {
+                    line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+                }
             }
             other => {
                 return Err(wall(format!(

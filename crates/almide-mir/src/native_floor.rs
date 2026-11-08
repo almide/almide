@@ -209,6 +209,11 @@ pub(crate) struct FloorFn {
     /// only (owner ruling ○, 2026-11-04): the call's list must be a String
     /// list, which carries no Float bits.
     pub str_only: bool,
+    /// The runtime's borrowing `_ref` twin of a `Result[Value, String]` body
+    /// (its symbol, its items): the Ok side a reference into the Value arg.
+    pub borrow_twin: Option<(String, Vec<&'static str>)>,
+    /// The runtime's `_ref` twin taking each by-value Value param by reference.
+    pub by_ref: Option<Box<FloorFn>>,
 }
 
 /// The floor entry the declaration of stdlib call `call` (`module.fn`) gives,
@@ -254,7 +259,8 @@ pub(crate) fn declared_scalar_option(name: &str) -> bool {
 
 /// The scalar a stdlib fn declared `@scalar_text` turns into its canonical
 /// text: `Some(ScalarText::Int)` for an `Int` param (decimal digits),
-/// `Some(ScalarText::Bool)` for a `Bool` one (`true` / `false`), `None` for a
+/// `Some(ScalarText::Bool)` for a `Bool` one (`true` / `false`),
+/// `Some(ScalarText::Float)` for a `Float` one (its `{}` Display), `None` for a
 /// fn without the declaration. The certified render folds such a call into
 /// the format string of the text it builds, reading only this declaration.
 pub(crate) fn declared_scalar_text(call: &str) -> Option<ScalarText> {
@@ -273,11 +279,19 @@ pub(crate) fn declared_scalar_text(call: &str) -> Option<ScalarText> {
 pub(crate) enum ScalarText {
     Int,
     Bool,
+    Float,
 }
 
 fn scalar_text_of(call: &str) -> Option<ScalarText> {
     let (module, func) = call.split_once('.')?;
     let program = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached)?;
+    // A self-hosted body that declares the fn it specializes
+    // (`@specializes("float.__to_string_compound")`) has that fn's text, as
+    // the floor serves it as that fn ([`derive_for`]).
+    let declared_here = program.decls.iter().any(|d| matches!(d, Decl::Fn { name, .. } if name.as_str() == func));
+    if !declared_here {
+        return specialized_target(call).filter(|t| t != call).and_then(|t| scalar_text_of(&t));
+    }
     program.decls.iter().find_map(|d| match d {
         Decl::Fn { name, attrs, params, .. }
             if name.as_str() == func && attrs.iter().any(|a| a.name.as_str() == "scalar_text") =>
@@ -286,6 +300,7 @@ fn scalar_text_of(call: &str) -> Option<ScalarText> {
                 [p] => match simple(&p.ty) {
                     Some("Int") => Some(ScalarText::Int),
                     Some("Bool") => Some(ScalarText::Bool),
+                    Some("Float") => Some(ScalarText::Float),
                     _ => None,
                 },
                 _ => None,
@@ -554,7 +569,16 @@ fn specialized_list_elem(call: &str) -> Option<String> {
 /// element meets a String's, never a Float's bits.
 fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
 
-    let (module, func) = call.split_once('.').ok_or("not a module.fn call")?;
+    let Some((module, func)) = call.split_once('.') else {
+        // A bare registry helper (one generated code calls by its own name)
+        // that declares the stdlib fn it specializes is served as that fn.
+        return match specialized_target(call) {
+            Some(target) if target.contains('.') => {
+                derive_for(&target, str_elems).map_err(|e| format!("specializes `{target}`: {e}"))
+            }
+            _ => Err("not a module.fn call".into()),
+        };
+    };
     if !almide_lang::stdlib_info::is_bundled_module(module) {
         return Err("not a bundled stdlib module".into());
     }
@@ -693,7 +717,8 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         same.then(|| Some((r.param, t.to_string(), closure(t, rt).ok()?)))?
     });
     let str_only = elem_typed && almide_lang::capability_bounds::of(module, func).next().is_some();
-    Ok(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only })
+    let borrow_twin = borrow_twin_of(fret, &symbol, &rust_params, rt);
+    Ok(with_by_ref_twin(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only, borrow_twin, by_ref: None }, &rust_params, &rust_ret, rt))
 }
 
 fn simple(t: &TypeExpr) -> Option<&str> {

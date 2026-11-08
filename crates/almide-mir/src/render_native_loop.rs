@@ -86,6 +86,7 @@ fn render_fn(
     crate::render_native_move::set_static_strs(func);
     crate::render_native_addr::clear_str_fields();
     crate::render_native_move::set_rebound(func);
+    crate::render_native_borrow_read::set_borrowed_results(func);
     // Interpolation chains built in one buffer (crate::render_native_interp).
     let chains = crate::render_native_interp::chains(func);
     crate::render_native_move::set_stack_lits(func, &user_fns.keys().copied().collect());
@@ -259,8 +260,9 @@ fn render_printed_scalar(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerErr
     if is_bool {
         line!("rt_println_fmt(format_args!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }}));", var(n));
     } else {
-        // By value: a reference would pin the local to memory.
-        line!("rt_println_fmt(format_args!(\"{{}}\", {{ {} }}));", var(n));
+        // By value: a reference would pin the local to memory. Through
+        // `IntText`, the runtime's digit writer (render_native_interp).
+        line!("rt_println_fmt(format_args!(\"{{}}\", crate::almide_str_block::IntText({})));", var(n));
     }
     Ok(true)
 }

@@ -85,6 +85,16 @@ fn __field(v: Value, key: String) -> Result[Value, String] = _
 @intrinsic("almide_rt_value_keys")
 fn __keys(v: Value) -> List[String] = _
 
+// Internal boundary for the derived Codec decode path (#1675); kept off the
+// public surface. The self-hosted codec_decode helpers declare these.
+/// The decode error e with the path segment seg spliced in.
+@intrinsic("almide_rt_value_err_at")
+fn __err_at(e: String, seg: String) -> String = _
+
+/// The decode error e with the list index segment `[i]` spliced in.
+@intrinsic("almide_rt_value_err_at_index")
+fn __err_at_index(e: String, i: Int) -> String = _
+
 /// Object pairs in order; err if v is another kind.
 @intrinsic("almide_rt_value_as_object")
 fn as_object(v: Value) -> Result[List[(String, Value)], String] = _

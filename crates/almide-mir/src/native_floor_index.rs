@@ -95,6 +95,11 @@ impl<'a> ItemScan<'a> {
             "const" | "static" => (ItemKind::Const, j + 1),
             "struct" | "enum" | "type" | "union" => (ItemKind::Type, j + 1),
             "trait" | "mod" | "macro_rules" => (ItemKind::Other, j + 1),
+            "thread_local" if self.toks.get(j + 1).is_some_and(|t| t.text == "!")
+                && self.toks.get(j + 2).is_some_and(|t| t.text == "{") => {
+                self.thread_local_item(j, start_off);
+                return true;
+            }
             "impl" => {
                 self.impl_item(j, start_off);
                 return true;
@@ -156,6 +161,25 @@ impl<'a> ItemScan<'a> {
         self.i = end + 1;
         self.cfg_attr = false;
         self.attr_start = None;
+    }
+
+    /// A std thread-local declaration travels as one macro, selected by any
+    /// static it defines. Conditional declarations remain unavailable; copying
+    /// only an inner static would lose both its TLS semantics and its attributes.
+    fn thread_local_item(&mut self, j: usize, start_off: usize) {
+        let end = item_end(&self.toks, j);
+        let end_off = self.end_off(end);
+        let inner = &self.src[self.toks[j + 2].off + 1..self.toks[end].off];
+        let items = top_level_items(inner);
+        let conditional = self.cfg_attr || items.iter().any(|(_, _, _, cfg)| *cfg);
+        let valid = !items.is_empty() && items.iter().all(|(kind, _, text, _)|
+            *kind == ItemKind::Const && lex(text).iter().take(3).any(|t| t.text == "static"));
+        let from = self.attr_start.unwrap_or(start_off);
+        let whole = &self.src[from..end_off];
+        for (_, name, _, _) in items {
+            self.out.push((ItemKind::Const, name, whole, conditional || !valid));
+        }
+        self.finish(end);
     }
 
     /// An `impl` block whose keyword is token `j`.
@@ -511,4 +535,22 @@ fn pub_edit(toks: &[Tok], i: usize) -> Option<(usize, usize, &'static str)> {
     let opens = matches!(t.text, "fn" | "const" | "static" | "struct" | "enum" | "type" | "trait" | "mod" | "union" | "unsafe" | "use")
         && !(t.text == "unsafe" && toks.get(i + 1).is_some_and(|n| n.text == "impl"));
     opens.then_some((t.off, 0, "pub "))
+}
+
+#[cfg(test)]
+mod thread_local_item_tests {
+    use super::*;
+    #[test]
+    fn macro_statics_share_one_complete_declaration_and_keep_conditional_gates() {
+        let src = "thread_local! { static A: Cell<i64> = Cell::new(0); static B: RefCell<Vec<i64>> = RefCell::new(Vec::new()); } fn after() {}";
+        let items = top_level_items(src);
+        assert_eq!(items.iter().map(|(_, n, _, c)| (*n, *c)).collect::<Vec<_>>(), [("A", false), ("B", false), ("after", false)]);
+        assert_eq!(items[0].2, items[1].2);
+        assert!(items[0].2.starts_with("thread_local!"));
+        for gated in [
+            "#[cfg(unix)] thread_local! { static A: Cell<i64> = Cell::new(0); }",
+            "thread_local! { #[cfg(unix)] static A: Cell<i64> = Cell::new(0); static B: i64 = 0; }",
+        ] { assert!(top_level_items(gated).iter().all(|(_, _, _, cfg)| *cfg)); }
+        assert_eq!(top_level_items("other_macro! { static A: i64 = 0; }").len(), 0);
+    }
 }

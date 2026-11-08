@@ -248,6 +248,8 @@ fn native_sigs_with_linked(
     record_layouts: &crate::lower::RecordLayouts,
     variant_layouts: &crate::lower::VariantLayouts,
 ) -> Result<crate::render_native::NativeSigs, LowerError> {
+    crate::render_native_rec::extend_with(&crate::lambda_sigs::declared_types());
+    crate::render_native_rec::install_cell_types();
     let mut sigs = build_native_sig_table(ir, functions, record_layouts, variant_layouts, &|_| true)?;
     // A linked source's sibling the program never calls is not read: its
     // signature would put types no rendered fn carries in the table (#4514).

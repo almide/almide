@@ -315,7 +315,7 @@ impl LowerCtx {
                 // is_known_free, no body to mismatch). The lifted lambda's caps reach this
                 // function through the FuncRef edge (folded at creation), so a printing
                 // closure can never be silently caps-verified.
-                IrExprKind::Lambda { params, body, .. } => match self.lift_lambda(params, body) {
+                IrExprKind::Lambda { params, body, .. } => match self.lift_lambda(params, body, &a.ty) {
                     // The closure BLOCK is passed like any heap arg (borrowed; it stays in
                     // the live set here and is dropped at scope end after the combinator).
                     Some(blk) => out.push(CallArg::Handle(blk)),
