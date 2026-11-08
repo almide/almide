@@ -295,14 +295,8 @@ fn render_chain_final(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerError>
     // A chain whose head string dies here grows that string's own
     // buffer, as v0's `AlmideConcat` consumes its owned left side.
     if let Some(crate::render_native_interp::Piece::Str(head)) = pieces.first() {
-        // Released right after the chain, or rebound to the chain's own result
-        // by the next op (`s = "${s}ab"` in a loop): nothing reads it again.
-        let rebound = func.ops[i + 1..]
-            .iter()
-            .find(|o| !crate::render_native_move::bookkeeping(o))
-            .is_some_and(|o| matches!(o, Op::SetLocal { local, src } if local == head && *src == dst));
         let dies = !pieces[1..].contains(&crate::render_native_interp::Piece::Str(*head))
-            && (rebound || chain_end(func, &st.chains, i).and_then(|e| st.early.get(&(e + 1))).is_some_and(|vs| vs.contains(head)))
+            && chain_end(func, &st.chains, i).and_then(|e| st.early.get(&(e + 1))).is_some_and(|vs| vs.contains(head))
             && st.tys.get(head) == Some(&NTy::Str)
             && st.out.contains(&format!("let mut {}:", var(*head)));
         if let Some(rest) = dies.then(|| crate::render_native_interp::push_pieces(&pieces[1..], &st.tys)).flatten() {
