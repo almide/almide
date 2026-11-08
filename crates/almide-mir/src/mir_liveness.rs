@@ -244,3 +244,28 @@ fn rebound_before_named(func: &MirFunction, succ: &[Vec<usize>], at: usize, v: V
     }
     true
 }
+
+/// The ops at `at` are the last uses of `p` on every path through `func`
+/// (#4006, class P): each path from the entry to an exit passes exactly one
+/// of them, and no path after one reads `p` again. A borrowed parameter
+/// copied only there (one copy per branch arm) can then be taken over: the
+/// copy on each path is its last use.
+pub(crate) fn last_use_on_every_path(func: &MirFunction, p: ValueId, at: &[usize]) -> bool {
+    let Some(succ) = successors(func) else { return false };
+    if func.ops.is_empty() || at.iter().any(|&i| live_after(func, i, p)) {
+        return false;
+    }
+    // No exit is reachable from the entry without passing one of `at`.
+    let mut seen = vec![false; func.ops.len()];
+    let mut work = vec![0usize];
+    while let Some(i) = work.pop() {
+        if std::mem::replace(&mut seen[i], true) || at.contains(&i) {
+            continue;
+        }
+        if succ[i].is_empty() {
+            return false;
+        }
+        work.extend(succ[i].iter().copied());
+    }
+    true
+}
