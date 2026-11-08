@@ -1,0 +1,9 @@
+spec/wasm_cross/list_reduce_fused_fold_release.almd
+spec/wasm_cross/codec_list_default_field.almd
+spec/wasm_cross/codec_list_default.almd
+spec/wasm_cross/string_rle.almd
+spec/wasm_cross/json_gltf_walk.almd
+spec/wasm_cross/enumerate_unnameable_element.almd
+spec/wasm_cross/tuple_bound_list_mapped_in_loop.almd
+spec/wasm_cross/recursive_payload_nested_pattern.almd
+spec/wasm_cross/playground_default.almd
