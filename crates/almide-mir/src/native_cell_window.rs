@@ -30,6 +30,55 @@ fn is_cell(t: NTy) -> bool {
     matches!(t, NTy::Rec(i) | NTy::RecRef(i) if crate::render_native_rec::cell_inner(i).is_some())
 }
 
+/// The ops between a cell read and the end of its window, judged one by one
+/// in order (see the module docs).
+struct Window<'a> {
+    root: BTreeMap<ValueId, ValueId>,
+    funcrefs: BTreeSet<ValueId>,
+    /// The blocks the window made (and the read itself): none is a cell or
+    /// a closure.
+    fresh: BTreeSet<ValueId>,
+    cell: ValueId,
+    tys: &'a BTreeMap<ValueId, NTy>,
+    program_fn: &'a dyn Fn(&str) -> bool,
+}
+
+impl Window<'_> {
+    fn plain(&self, v: &ValueId) -> bool {
+        self.fresh.contains(v) || self.tys.get(v).is_some_and(|t| !is_cell(*t) && !crate::render_native_rec::is_closure(*t))
+    }
+
+    fn block_ok(&self, a: &ValueId) -> bool {
+        self.root.get(a).is_some_and(|b| *b != self.cell && self.plain(b))
+    }
+
+    /// `op` cannot look at the cell.
+    fn admits(&mut self, op: &Op) -> bool {
+        match op {
+            Op::CallFn { name, args, .. } => {
+                name != "__mg_take" && !(self.program_fn)(name) && args.iter().all(|a| !matches!(a, CallArg::Handle(v) if !self.plain(v)))
+            }
+            Op::Prim { kind: PrimKind::Handle, .. } | Op::IntBinOp { .. } | Op::ConstInt { .. } => true,
+            Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle | PrimKind::Store { .. } | PrimKind::ElemAddr, args, .. } => {
+                args.first().is_some_and(|a| self.block_ok(a))
+            }
+            Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => *list != self.cell && self.plain(list),
+            Op::Dup { dst, src } => self.plain(src) && self.fresh.insert(*dst),
+            Op::Alloc { dst, .. } => self.fresh.insert(*dst),
+            Op::ListLit { dst, elems } => !elems.iter().any(|e| self.funcrefs.contains(e)) && self.fresh.insert(*dst),
+            op => crate::render_native_move::bookkeeping(op),
+        }
+    }
+}
+
+fn window<'a>(func: &MirFunction, (d, cell): (ValueId, ValueId), tys: &'a BTreeMap<ValueId, NTy>, program_fn: &'a dyn Fn(&str) -> bool) -> Window<'a> {
+    let funcrefs = func.ops.iter().filter_map(|op| match op {
+        Op::FuncRef { dst, .. } => Some(*dst),
+        _ => None,
+    }).collect();
+    Window { root: crate::render_native_borrow_read::roots(func), funcrefs, fresh: BTreeSet::from([d]), cell, tys, program_fn }
+}
+
 /// The `__mg_take` result that ends the window of the cell read `d` (op `at`
 /// of `func`, of the cell `cell`), when the read may take the payload.
 pub(crate) fn take_window(
@@ -39,42 +88,47 @@ pub(crate) fn take_window(
     tys: &BTreeMap<ValueId, NTy>,
     program_fn: &dyn Fn(&str) -> bool,
 ) -> Option<ValueId> {
-    let root = crate::render_native_borrow_read::roots(func);
-    let funcrefs: BTreeSet<ValueId> = func.ops.iter().filter_map(|op| match op {
-        Op::FuncRef { dst, .. } => Some(*dst),
-        _ => None,
-    }).collect();
-    // The blocks the window made (and `d`, the read itself): none is a cell
-    // or a closure.
-    let mut fresh: BTreeSet<ValueId> = BTreeSet::from([d]);
-    let plain = |v: &ValueId, fresh: &BTreeSet<ValueId>| {
-        fresh.contains(v) || tys.get(v).is_some_and(|t| !is_cell(*t) && !crate::render_native_rec::is_closure(*t))
-    };
-    let block_ok = |a: &ValueId, fresh: &BTreeSet<ValueId>| root.get(a).is_some_and(|b| *b != cell && plain(b, fresh));
+    let mut w = window(func, (d, cell), tys, program_fn);
     for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
-        let ok = match op {
-            Op::CallFn { name, args, dst, .. } if name == "__mg_take" => {
-                let same = matches!(args.as_slice(), [CallArg::Scalar(a)] if root.get(a) == Some(&cell));
+        if let Op::CallFn { name, args, dst, .. } = op {
+            if name == "__mg_take" {
+                let same = matches!(args.as_slice(), [CallArg::Scalar(a)] if w.root.get(a) == Some(&cell));
                 return (*dst).filter(|x| same && only_released(func, j, *x));
             }
-            Op::CallFn { name, args, .. } => {
-                !program_fn(name) && args.iter().all(|a| !matches!(a, CallArg::Handle(v) if !plain(v, &fresh)))
-            }
-            Op::Prim { kind: PrimKind::Handle, .. } | Op::IntBinOp { .. } | Op::ConstInt { .. } => true,
-            Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle | PrimKind::Store { .. }, args, .. } => {
-                args.first().is_some_and(|a| block_ok(a, &fresh))
-            }
-            Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => *list != cell && plain(list, &fresh),
-            Op::Dup { dst, src } => plain(src, &fresh) && fresh.insert(*dst),
-            Op::Alloc { dst, .. } => fresh.insert(*dst),
-            Op::ListLit { dst, elems } => !elems.iter().any(|e| funcrefs.contains(e)) && fresh.insert(*dst),
-            op => crate::render_native_move::bookkeeping(op),
-        };
-        if !ok {
+        }
+        if !w.admits(op) {
             return None;
         }
     }
     None
+}
+
+/// The last op that reads the cell read `d` (op `at` of `func`, of the cell
+/// `cell`) or a reference copy of it (`ref_dups`), when nothing up to there
+/// can look at the cell: the read may borrow the payload in place until
+/// then. A read whose window ends no later than its own op borrows nothing.
+pub(crate) fn borrow_window(
+    func: &MirFunction,
+    at: usize,
+    (d, cell): (ValueId, ValueId),
+    tys: &BTreeMap<ValueId, NTy>,
+    program_fn: &dyn Fn(&str) -> bool,
+) -> Option<usize> {
+    let mut aliases = BTreeSet::from([d]);
+    let mut last = at;
+    let mut reads = Vec::new();
+    for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
+        reads.clear();
+        crate::mir_ops::op_reads(op, &mut reads);
+        if reads.iter().any(|r| aliases.contains(r)) && !crate::render_native_move::bookkeeping(op) {
+            last = j;
+            if let Op::Dup { dst, .. } = op {
+                aliases.insert(*dst);
+            }
+        }
+    }
+    let mut w = window(func, (d, cell), tys, program_fn);
+    (func.ret.is_none_or(|r| !aliases.contains(&r)) && func.ops[at + 1..=last].iter().all(|op| w.admits(op))).then_some(last)
 }
 
 /// After `ops[at]`, `x` is only released.

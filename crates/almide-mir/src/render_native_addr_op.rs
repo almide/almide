@@ -298,6 +298,8 @@ fn slot_load_handle(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bo
             // reference into the list's element.
             if st.borrow_reads.contains(d) {
                 tys.insert(*d, NTy::StrRef);
+                // A copy of it shares the element's handle (render_dup).
+                note_field(*d, ad.base, format!("{}[{ix}]", var(ad.base)));
                 line!("let mut {}: &str = &{}[{ix}][..];", var(*d), var(ad.base));
                 return Ok(true);
             }
@@ -560,7 +562,9 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
             Some(sv) => {
                 let g = ty(tys, &sv.base).filter(|g| sv.off == 0 && sv.idx.is_none() && field_accepts(e, *g));
                 g.and_then(|g| {
-                    if st.borrowed_list_slots.contains(&(ad.base, v)) && matches!(g, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) {
+                    if st.borrowed_list_slots.contains(&(ad.base, v)) && matches!(g, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_))
+                        && !crate::render_native_keyed::dies_at_store(sv.base, v, g)
+                    {
                         Some(format!("{}.clone()", var(sv.base)))
                     } else { owned_from(&var(sv.base), g) }
                 }).ok_or_else(|| {
@@ -599,7 +603,7 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
         (Some(NTy::VecStr), Some(sv)) if sv.off == 0 && sv.idx.is_none() => {
             // Move consumed handles; preserve the source of a borrow-view.
             let rhs = match ty(tys, &sv.base) {
-                Some(NTy::Str) if st.borrowed_list_slots.contains(&(ad.base, v)) => format!("{}.clone()", var(sv.base)),
+                Some(NTy::Str) if st.borrowed_list_slots.contains(&(ad.base, v)) && !crate::render_native_keyed::dies_at_store(sv.base, v, NTy::Str) => format!("{}.clone()", var(sv.base)),
                 Some(NTy::Str) => crate::render_native_move::take_expr(&var(sv.base)),
                 Some(NTy::StrRef) => format!("AlmideString::from({})", var(sv.base)),
                 other => return Err(wall(format!("native: a {other:?} handle stored into a List[String] slot"))),
