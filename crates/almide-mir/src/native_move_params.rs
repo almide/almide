@@ -688,9 +688,11 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sig
     let results: BTreeSet<(String, usize)> = sigs
         .iter()
         .flat_map(|(name, (params, _))| {
-            params.iter().enumerate().filter_map(move |(k, p)| {
-                matches!(p, crate::render_native::NativeSigKind::Res | crate::render_native::NativeSigKind::ResStr).then(|| (name.clone(), k))
-            })
+            params
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| matches!(p, crate::render_native::NativeSigKind::Res | crate::render_native::NativeSigKind::ResStr))
+                .map(move |(k, _)| (name.clone(), k))
         })
         .collect();
     NATIVE_RESULTS.with(|d| *d.borrow_mut() = results);
