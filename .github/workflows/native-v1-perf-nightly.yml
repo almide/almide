@@ -105,6 +105,11 @@ jobs:
       - name: native differential and floor tests
         if: always()
         run: cargo test -q --release --test native_v1_differential_test --test native_verified_floor_test
+      - name: clippy over almide-mir alone
+        if: always()
+        run: |
+          cargo clippy --release -p almide-mir --all-targets --message-format=short 2>&1 | grep -E '^(crates|src)/.*(warning|error)' | sort | uniq -c | sort -rn | head -40
+          echo "almide-mir clippy diagnostics: $(cargo clippy --release -p almide-mir --all-targets --message-format=short 2>&1 | grep -cE '^(crates|src)/.*(warning|error)')"
       - name: rustc warning ratchet
         if: always()
         run: bash scripts/check-rustc-warnings.sh
