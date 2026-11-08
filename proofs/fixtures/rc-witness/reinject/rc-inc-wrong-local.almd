@@ -4,7 +4,7 @@
 // not on the value the event names.
 fn total() -> Int = {
   let a = [1, 2, 3]
-  let c = [9]
+  let c = [9, 9, 9, 9, 9]
   let alias = a
   list.len(alias) + list.len(a) + list.len(c)
 }
