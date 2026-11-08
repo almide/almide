@@ -1,0 +1,3 @@
+spec/wasm_cross/map_index_order.almd
+spec/wasm_cross/set_index_order.almd
+spec/wasm_cross/edge_int_boundaries.almd
