@@ -42,5 +42,5 @@ jobs:
           sudo apt-get install -y -qq valgrind > /dev/null
           for l in v1 v0; do
             valgrind --tool=callgrind --callgrind-out-file=/tmp/cg.$l /tmp/list_heapelem_rc.$l > /dev/null 2>&1
-            echo "== $l"; callgrind_annotate --inclusive=no /tmp/cg.$l 2>/dev/null | grep "list_heapelem_rc\]\|PROGRAM" | head -40 | cut -c1-220
+            echo "== $l"; callgrind_annotate --inclusive=no /tmp/cg.$l 2>/dev/null | grep -v "ld-linux" | head -70 | cut -c1-230
           done
