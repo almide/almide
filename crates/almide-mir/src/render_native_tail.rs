@@ -704,16 +704,14 @@ pub(crate) fn render_dup(
         .get(src)
         .ok_or_else(|| wall("native: Dup of untyped value"))?;
     match t {
-        NTy::I64 => {
-            tys.insert(*dst, NTy::I64);
+        // A scalar lane copies itself.
+        NTy::I64 | NTy::F64 | NTy::Opt => {
+            tys.insert(*dst, t);
             line!("let mut {} = {};", var(*dst), var(*src));
         }
-        NTy::Res => {
-            tys.insert(*dst, NTy::Res);
-            line!("let mut {} = {}.clone();", var(*dst), var(*src));
-        }
-        NTy::Str => {
-            tys.insert(*dst, NTy::Str);
+        // An owned heap value clones.
+        NTy::Str | NTy::Vec | NTy::VecStr | NTy::Res | NTy::ResStr => {
+            tys.insert(*dst, t);
             line!("let mut {} = {}.clone();", var(*dst), var(*src));
         }
         NTy::StrRef => {
@@ -725,22 +723,10 @@ pub(crate) fn render_dup(
                 None => line!("let mut {} = AlmideString::from({});", var(*dst), var(*src)),
             }
         }
-        NTy::Vec => {
-            tys.insert(*dst, NTy::Vec);
-            line!("let mut {} = {}.clone();", var(*dst), var(*src));
-        }
         NTy::VecRef => {
             // Dup of a borrowed list param mints a fresh owned Vec.
             tys.insert(*dst, NTy::Vec);
             line!("let mut {} = {}.to_vec();", var(*dst), var(*src));
-        }
-        NTy::F64 => {
-            tys.insert(*dst, NTy::F64);
-            line!("let mut {} = {};", var(*dst), var(*src));
-        }
-        NTy::VecStr => {
-            tys.insert(*dst, NTy::VecStr);
-            line!("let mut {} = {}.clone();", var(*dst), var(*src));
         }
         NTy::VecStrRef => {
             tys.insert(*dst, NTy::VecStr);
@@ -748,14 +734,6 @@ pub(crate) fn render_dup(
         }
         NTy::Rec(i) | NTy::RecRef(i) => {
             tys.insert(*dst, NTy::Rec(i));
-            line!("let mut {} = {}.clone();", var(*dst), var(*src));
-        }
-        NTy::Opt => {
-            tys.insert(*dst, NTy::Opt);
-            line!("let mut {} = {};", var(*dst), var(*src));
-        }
-        NTy::ResStr => {
-            tys.insert(*dst, NTy::ResStr);
             line!("let mut {} = {}.clone();", var(*dst), var(*src));
         }
     }

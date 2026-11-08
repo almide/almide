@@ -93,26 +93,8 @@ pub(crate) fn render_set_local(
         }};
     }
     let t = *tys.get(src).ok_or_else(|| wall("native: SetLocal of untyped value"))?;
-    let rhs = match t {
-        NTy::I64 | NTy::F64 => var(*src),
-        NTy::Str => format!("{}.clone()", var(*src)),
-        NTy::StrRef => format!("AlmideString::from({})", var(*src)),
-        NTy::Vec => format!("{}.clone()", var(*src)),
-        NTy::VecRef => format!("{}.to_vec()", var(*src)),
-        NTy::Res => format!("{}.clone()", var(*src)),
-        NTy::VecStr => format!("{}.clone()", var(*src)),
-        NTy::VecStrRef => format!("{}.to_vec()", var(*src)),
-        NTy::Rec(_) | NTy::RecRef(_) => format!("{}.clone()", var(*src)),
-        NTy::Opt => var(*src),
-        NTy::ResStr => format!("{}.clone()", var(*src)),
-    };
-    let store_t = match t {
-        NTy::StrRef => NTy::Str,
-        NTy::VecRef => NTy::Vec,
-        NTy::VecStrRef => NTy::VecStr,
-        NTy::RecRef(i) => NTy::Rec(i),
-        other => other,
-    };
+    let rhs = owned_copy_rhs(*src, t);
+    let store_t = crate::render_native::owned_nty(t);
     if let Some(prev) = tys.get(local) {
         if let Some(recode) = crate::native_value_repr::scalar_recode(&var(*src), t, *prev) {
             line!("{} = {};", var(*local), recode);
