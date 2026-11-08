@@ -95,12 +95,14 @@ fn const_or_empty_alloc(op: &Op, s: AddrSink<'_>) -> Option<bool> {
     }
 }
 
-/// A string list filled in order (`pushed`: its constant length): each
-/// element waits in its own local, and the list is one `vec![…]` once its
-/// last element is stored — or, a map entry's pair, never built
-/// (crate::native_map_entries). The comment the alloc renders as.
+/// A string list filled by pushes. Of a constant length, each element waits
+/// in its own local and the list is one `vec![…]` once its last element is
+/// stored — or, a map entry's pair, never built (crate::native_map_entries);
+/// otherwise it is reserved and pushed onto. The line the alloc renders as.
 fn whole_str_list(st: &mut AddrState, dst: &ValueId, len: &ValueId) -> String {
-    let n = st.consts.get(len).map_or(0, |n| usize::try_from(*n).unwrap_or(0));
+    let Some(n) = st.consts.get(len).and_then(|n| usize::try_from(*n).ok()) else {
+        return format!("let mut {}: Vec<AlmideString> = {};", var(*dst), reserved_vec(&var(*len)));
+    };
     st.literal.insert(*dst, (n, 0));
     let what = if crate::native_map_entries::defer_pair(*dst) { "a map entry, its key and value bound one by one" } else { "built whole at its last element" };
     format!("// {}: a list of {n}, {what}", var(*dst))
