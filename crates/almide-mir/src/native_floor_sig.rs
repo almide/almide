@@ -201,7 +201,7 @@ fn floor_ret_result_str_container(ok: &TypeExpr) -> Option<FloorRet> {
     }
 }
 
-/// A squashed Rust type with its lifetime parameters left out (`&'a T` -> `&T`).
+/// A Rust type with its lifetime parameters left out (`&'a T` -> `& T`).
 fn without_lifetimes(t: &str) -> String {
     let mut out = String::new();
     let mut chars = t.chars().peekable();
@@ -230,9 +230,9 @@ fn borrow_twin_of(ret: FloorRet, symbol: &str, rust_params: &[String], rt: &'sta
     let (tp, tr) = rust_signature(signature_text(rt, &twin)?)?;
     eprintln!("PROBE twin {twin}: tp={tp:?} tr={tr:?} base={rust_params:?} closure={:?}", closure(&twin, rt).map(|v| v.len()));
     let same = tp.len() == rust_params.len()
-        && tp.iter().zip(rust_params).all(|(a, b)| without_lifetimes(&squash(a)) == without_lifetimes(&squash(b)));
-    let borrowed = result_parts(&without_lifetimes(&squash(&tr))).is_some_and(|(ok, err)| ok == "&AlmideValue" && err == "AlmideString");
+        && tp.iter().zip(rust_params).all(|(a, b)| squash(&without_lifetimes(a)) == squash(&without_lifetimes(b)));
+    let borrowed = result_parts(&squash(&without_lifetimes(&tr))).is_some_and(|(ok, err)| ok == "&AlmideValue" && err == "AlmideString");
     // The twin borrows from a param the call holds by reference.
-    let from_ref = rust_params.iter().any(|p| without_lifetimes(&squash(p)) == "&AlmideValue");
+    let from_ref = rust_params.iter().any(|p| squash(&without_lifetimes(p)) == "&AlmideValue");
     (same && borrowed && from_ref).then(|| Some((twin.clone(), closure(&twin, rt).ok()?)))?
 }
