@@ -347,7 +347,7 @@ pub(crate) fn float_arg(n: ValueId, tys: &BTreeMap<ValueId, crate::render_native
 /// itself, as the standard codegen does, and the string is never built.
 /// Returns the definitions that render nothing and, per print op, the
 /// scalar and whether it is a Bool.
-pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<usize, (ValueId, crate::native_floor::ScalarText)>) {
+pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<usize, (ValueId, bool)>) {
     let ops = &func.ops;
     let mut occurs: BTreeMap<ValueId, Vec<usize>> = BTreeMap::new();
     let mut vals = Vec::new();
@@ -373,8 +373,11 @@ pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<
         }
         let Op::CallFn { dst: Some(dv), name, args: dargs, .. } = &ops[*d] else { continue };
         let [CallArg::Scalar(n)] = dargs.as_slice() else { continue };
-        let Some(text) = crate::native_floor::declared_scalar_text(name) else { continue };
-        if dv != v {
+        // A Float's text is only ever printed inside an interpolation (the
+        // chain's `Piece::Float`): its fn is not callable on its own.
+        let text = crate::native_floor::declared_scalar_text(name).filter(|t| *t != crate::native_floor::ScalarText::Float);
+        let is_bool = text == Some(crate::native_floor::ScalarText::Bool);
+        if dv != v || text.is_none() {
             continue;
         }
         // The scalar keeps its value from the definition to the print, which
@@ -386,7 +389,7 @@ pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<
         });
         if !rebound && !crosses {
             skip.insert(*d);
-            prints.insert(j, (*n, text));
+            prints.insert(j, (*n, is_bool));
         }
     }
     (skip, prints)
