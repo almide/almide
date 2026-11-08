@@ -84,6 +84,12 @@ pub(crate) fn map_kinds(i: u16) -> Option<(NTy, NTy)> {
     RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.map_of))
 }
 
+/// Collection identities whose zero-element literal is their empty value.
+/// A record/carrier with a Default is not an empty collection.
+pub(crate) fn is_empty_collection(i: u16) -> bool {
+    list_elem(i).is_some() || map_kinds(i).is_some() || set_elem(i).is_some()
+}
+
 /// The element kind of a generated set type.
 pub(crate) fn set_elem(i: u16) -> Option<NTy> {
     RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.set_of))

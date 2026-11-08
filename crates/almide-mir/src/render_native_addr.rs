@@ -168,13 +168,13 @@ impl AddrState {
                     alloc_rec.get(dst).filter(|i| carrier::is_carrier(**i)).map(|i| (*dst, *i))
                 }
                 Op::Alloc { dst, init: Init::IntList(vs), .. } if vs.is_empty() => alloc_rec.get(dst).copied()
-                    .filter(|i| crate::render_native_rec::list_elem(*i).is_some()).map(|i| (*dst, i)),
+                    .filter(|i| crate::render_native_rec::is_empty_collection(*i)).map(|i| (*dst, i)),
                 // A scalar-only constructor of a heap variant, or an all-scalar
                 // generated struct, is built as a slot list.
                 Op::ListLit { dst, elems } => alloc_rec
                     .get(dst)
                     .filter(|i| crate::render_native_rec::enum_cases(**i).is_some() || crate::render_native_rec::all_scalar_struct(**i)
-                        || (elems.is_empty() && crate::render_native_rec::list_elem(**i).is_some()))
+                        || (elems.is_empty() && crate::render_native_rec::is_empty_collection(**i)))
                     .map(|i| (*dst, *i)),
                 _ => None,
             })

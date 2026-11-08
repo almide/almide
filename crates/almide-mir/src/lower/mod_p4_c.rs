@@ -359,7 +359,7 @@ fn heap_fold_call_name(module: &str, arg_tys: &[Ty], result_ty: &Ty) -> String {
     if let Some(name) = heap_fold_call_name_hsca(module, arg_tys, result_ty) {
         return name;
     }
-    format!("{module}.fold_hacc")
+    crate::lower::registry_sig::declared_refusal_or(module, "fold", format!("{module}.fold_hacc"))
 }
 
 /// Extracted from `heap_fold_call_name` (codopsy7 complexity sweep, group 1 of 5): the ONE

@@ -44,11 +44,12 @@ fn const_or_empty_alloc(op: &Op, s: AddrSink<'_>) -> Option<bool> {
     }
     if let Some(dst) = match op { Op::Alloc { dst, .. } | Op::ListLit { dst, .. } => Some(dst), _ => None }
         .filter(|dst| st.empty_lists.contains(dst)) {
-        let t = st.alloc_rec.get(dst).copied().filter(|i| crate::render_native_rec::list_elem(*i).is_some()).map(NTy::Rec)
-            .or_else(|| st.str_lists.contains(dst).then_some(NTy::VecStr));
+        let t = st.alloc_rec.get(dst).copied().filter(|i| crate::render_native_rec::is_empty_collection(*i)).map(NTy::Rec).or_else(|| st.str_lists.contains(dst).then_some(NTy::VecStr));
         if let Some(t) = t {
             tys.insert(*dst, t);
-            line!("let mut {}: {} = Vec::new();", var(*dst), crate::render_native_rec::owned_ty(t));
+            let empty = if matches!(t, NTy::Rec(i) if crate::render_native_rec::map_kinds(i).is_some()
+                || crate::render_native_rec::set_elem(i).is_some()) { "Default::default()" } else { "Vec::new()" };
+            line!("let mut {}: {} = {empty};", var(*dst), crate::render_native_rec::owned_ty(t));
             return Some(true);
         }
     }

@@ -49,6 +49,7 @@ fn list_fold_str_hacc(xs: List[String], init: Value, f: (Value, String) -> Value
 // `Set[String]` shares the walk above under its own name: the registry maps one
 // impl fn to one call name, so the alias needs a definition rather than a second
 // row over `list_fold_str_hacc`.
+@specializes("set.fold")
 fn set_fold_str_hacc(xs: Set[String], init: Value, f: (Value, String) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)

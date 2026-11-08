@@ -194,14 +194,14 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
     let tps: BTreeSet<String> = generics.iter().flatten().map(|g| g.name.as_str().to_string()).collect();
     let dparams: Vec<DTy> = params.iter().map(|p| dty_of(&p.ty, &tps)).collect::<Option<_>>().ok_or("a param type outside the map")?;
     let dret = dty_of(ret, &tps).ok_or("a return type outside the map")?;
-    // Tuple results have an explicit runtime-to-native adapter. Tuple arguments
-    // (including callback signatures) need the reverse adapter before admission.
-    if dparams.iter().any(has_runtime_tuple) { return Err("runtime tuple argument needs an adapter".into()); }
     let (rust_params, rust_ret, items) = crate::native_floor::runtime_body(&symbol).ok_or_else(|| format!("`{symbol}` is no takeable runtime body"))?;
     if rust_params.len() != dparams.len() || rust_agrees(&dret, &rust_ret) != Some(false) {
         return Err(format!("runtime signature {rust_params:?} -> {rust_ret} disagrees"));
     }
     let mutable: Vec<bool> = params.iter().map(|p| p.is_mut).collect();
+    if dparams.iter().zip(&mutable).any(|(d, m)| *m && has_runtime_tuple(d)) {
+        return Err("mutable tuple arguments need a write-back adapter".into());
+    }
     let params: Vec<(DTy, bool)> = dparams
         .into_iter()
         .zip(&rust_params)
@@ -209,56 +209,16 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
         .map(|((d, r), m)| declared_param_mode(&d, *m, r).map(|b| (d, b)))
         .collect::<Option<_>>()
         .ok_or_else(|| format!("runtime params {rust_params:?} disagree"))?;
-    let text = items.first().copied().ok_or("no runtime body text")?;
     // A combinator takes its closure statically (`static_twin`); a call with
     // no function-typed param calls the runtime body as it is.
     if !params.iter().any(|(d, _)| matches!(d, DTy::Fn(..))) {
         return Ok(Hof { twin: symbol.clone(), symbol, params, mutable, ret: dret, items, bounds });
     }
-    let (twin, text) = static_twin(&symbol, text).ok_or("the runtime body has no `Rc<dyn Fn>` param to take statically")?;
-    let mut items = items;
-    items[0] = Box::leak(text.into_boxed_str());
+    let (twin, items) = static_runtime_closure(&symbol, items).ok_or("the runtime body has no static callback route")?;
     Ok(Hof { symbol, params, mutable, ret: dret, items, twin, bounds })
 }
 
-/// The runtime body `text` of `symbol` with every `std::rc::Rc<dyn Fn(..) ->
-/// ..>` param taken as `impl Fn(..) -> ..` instead, under the name
-/// `<symbol>_static`: the same body, monomorphized over the caller's closure
-/// (no allocation for the closure, a direct call LLVM can inline), the way
-/// the standard codegen inlines these combinators. `None` when the body has
-/// no such param or does not spell its own name.
-fn static_twin(symbol: &str, text: &str) -> Option<(String, String)> {
-    const RC: &str = "std::rc::Rc<dyn ";
-    let head = format!("fn {symbol}");
-    let at = text.find(&head)?;
-    let twin = format!("{symbol}_static");
-    let mut out = format!("{}fn {twin}{}", &text[..at], &text[at + head.len()..]);
-    let mut found = false;
-    while let Some(i) = out.find(RC) {
-        // The `>` that closes the `Rc<`.
-        let mut depth = 1i32;
-        let mut close = None;
-        for (k, c) in out[i + RC.len()..].char_indices() {
-            match c {
-                '<' | '(' => depth += 1,
-                ')' => depth -= 1,
-                '>' if out[i + RC.len()..][..k].ends_with('-') => {}
-                '>' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        close = Some(i + RC.len() + k);
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        let close = close?;
-        out = format!("{}impl {}{}", &out[..i], &out[i + RC.len()..close], &out[close + 1..]);
-        found = true;
-    }
-    found.then_some((twin, out))
-}
+include!("native_hof_static.rs");
 
 /// The runtime route of the linked impl fn `impl_fn`, when the declaration
 /// of the stdlib fn it implements gives one.
@@ -528,17 +488,21 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
     if !cx.user_fns.get(lambda.as_str()).is_some_and(|l| l.owned_params.is_empty()) {
         return None;
     }
-    if !cx.bounds.is_empty() {
-        let (ptys, rty) = crate::lambda_sigs::get(lambda)?;
-        if ptys.len() != dps.len() || !dps.iter().zip(&ptys).all(|(d, t)| bounded_type_agrees(cx.bounds, d, t))
-            || !bounded_type_agrees(cx.bounds, dret, &rty) { return None; }
-    }
     let (ps, ret) = clo::lambda_sig(cx.sigs, lambda)?;
     let ret = ret?;
-    if ps.len() != dps.len() || !matches!(t, NTy::Vec | NTy::VecRef) {
-        return None;
+    if !matches!(t, NTy::Vec | NTy::VecRef) { return None; }
+    let layout = callback_layout(dps, ps.len())?;
+    if !cx.bounds.is_empty() {
+        let (ptys, rty) = crate::lambda_sigs::get(lambda)?;
+        if ptys.len() != layout.len() || !layout.iter().zip(&ptys).all(|((d, _), t)| bounded_type_agrees(cx.bounds, d, t))
+            || !bounded_type_agrees(cx.bounds, dret, &rty) { return None; }
     }
-    let bits: Vec<Lane> = dps
+    let tuples = dps.iter().any(has_runtime_tuple) || has_runtime_tuple(dret);
+    let bits: Vec<Lane> = if tuples {
+        for ((d, _), k) in layout.iter().zip(&ps) { bind_callback_shape(env, d, clo::owned_nty(*k))?; }
+        bind_callback_shape(env, dret, clo::owned_nty(ret))?;
+        Vec::new()
+    } else { dps
         .iter()
         .zip(&ps)
         .map(|(dp, k)| match bind_lambda(env, dp, *k)? {
@@ -546,15 +510,15 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
             false if *dp == DTy::Bool => Some(Lane::Bool),
             false => Some(Lane::Same),
         })
-        .collect::<Option<_>>()?;
+        .collect::<Option<_>>()? };
     let ret_lane = match dret {
         DTy::Float => Lane::F64,
         DTy::Bool => Lane::Bool,
         _ => Lane::Same,
     };
-    if ret_lane == Lane::F64 {
+    if !tuples && ret_lane == Lane::F64 {
         side.shims.push(LANE_F64);
-    } else if bind_lambda(env, dret, ret) != Some(false) {
+    } else if !tuples && bind_lambda(env, dret, ret) != Some(false) {
         return None;
     }
     // The env: a copy of the block's slots, every one a scalar.
@@ -567,7 +531,9 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
         })
         .collect::<Option<_>>()?;
     let name = format!("__env_{}_{}", cx.at, side.prelude.len());
-    let closure = adapter(lambda, &name, &ps, &bits, ret, ret_lane)?;
+    if tuples && ret == NativeSigKind::F64 { side.shims.push(LANE_F64); }
+    let closure = if tuples { tuple_callback_adapter(env, lambda, &name, dps, dret, &ps, ret)? }
+        else { adapter(lambda, &name, &ps, &bits, ret, ret_lane)? };
     side.prelude.push(format!("let {name}: [i64; {}] = [{}];", slots.len(), slots.join(", ")));
     Some(closure)
 }
@@ -624,9 +590,15 @@ fn plan(
     let mut env = Env::new();
     for ((d, _), (_, t)) in hof.params.iter().zip(&got) {
         if !matches!(d, DTy::Fn(..)) {
-            bind_param(&mut env, d, *t)?;
+            if has_runtime_tuple(d) { bind_callback_shape(&mut env, d, *t)?; }
+            else { bind_param(&mut env, d, *t)?; }
         }
     }
+    // Tuple slots erase scalar source types to lanes. A runtime comparison
+    // bound must not silently compare Float bits as Int keys. Until source
+    // key types accompany this adapter, only String-bound keys are admitted.
+    let tuple_input = hof.params.iter().any(|(d, _)| !matches!(d, DTy::Fn(..)) && has_runtime_tuple(d));
+    if tuple_input && hof.bounds.iter().any(|(v, _)| env.get(v) != Some(&NTy::Str)) { return None; }
     let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
     for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {
@@ -639,6 +611,15 @@ fn plan(
             DTy::Unit => "()".to_string(),
             // The render carries a Bool in its i64 lane; the runtime takes `bool`.
             DTy::Bool => format!("({code} != 0)"),
+            d if has_runtime_tuple(d) => {
+                let owned = runtime_arg(code, *t, false, false);
+                let value = convert_callback_value(&env, d, crate::render_native::owned_nty(*t), &owned, false)?;
+                if *by_ref {
+                    let snapshot = format!("__tuple_arg_{}_{}", at.1, k);
+                    side.prelude.push(format!("let {snapshot} = {value};"));
+                    format!("&{snapshot}")
+                } else { value }
+            }
             _ => {
                 if hof.mutable.iter().any(|m| *m) {
                     // Evaluate the other values before lending the receiver
@@ -768,3 +749,4 @@ mod tests {
 include!("native_hof_result.rs");
 
 include!("native_hof_bounds.rs");
+include!("native_hof_tuple.rs");

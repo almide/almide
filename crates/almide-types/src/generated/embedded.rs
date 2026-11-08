@@ -16675,6 +16675,7 @@ fn list_fold_str_hacc(xs: List[String], init: Value, f: (Value, String) -> Value
 
 
 
+@specializes("set.fold")
 fn set_fold_str_hacc(xs: Set[String], init: Value, f: (Value, String) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -21496,6 +21497,7 @@ fn __mfh_str_loop(sh: Int, f: (Map[String, Int], String, String) -> Map[String, 
     __mfh_str_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_str_msi(m: Map[String, String], init: Map[String, Int], f: (Map[String, Int], String, String) -> Map[String, Int]) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -21511,6 +21513,7 @@ fn __mfh_skv_loop(sh: Int, f: (Map[String, Int], String, Int) -> Map[String, Int
     __mfh_skv_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_skv_msi(m: Map[String, Int], init: Map[String, Int], f: (Map[String, Int], String, Int) -> Map[String, Int]) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -21530,6 +21533,7 @@ fn __mfh_str_sacc_loop(sh: Int, f: (String, String, String) -> String, entries: 
     __mfh_str_sacc_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_str_sacc(m: Map[String, String], init: String, f: (String, String, String) -> String) -> String = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -21574,6 +21578,7 @@ fn __mfh_skv_hacc_loop(sh: Int, f: (String, String, Int) -> String, entries: Int
     __mfh_skv_hacc_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_skv_hacc(m: Map[String, Int], init: String, f: (String, String, Int) -> String) -> String = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -21846,6 +21851,7 @@ fn __hvf_at(pairs: List[(String, List[Int])], i: Int, m: Map[String, List[Int]])
     none => m,
   }
 
+@specializes("map.from_list")
 fn map_from_list_hval(pairs: List[(String, List[Int])]) -> Map[String, List[Int]] = __hvf_at(
   pairs,
   0,
@@ -22311,6 +22317,7 @@ fn __mlo_from_at(ph: Int, n: Int, i: Int, m: Map[String, List[Int?]]) -> Map[Str
     __mlo_from_at(ph, n, i + 1, nm)
   }
 
+@specializes("map.from_list")
 fn map_from_list_mlo(pairs: List[(String, List[Int?])]) -> Map[String, List[Int?]] = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)
@@ -22503,6 +22510,7 @@ fn __msv_from_at(ph: Int, n: Int, i: Int, m: Map[String, Map[String, String]]) -
     __msv_from_at(ph, n, i + 1, nm)
   }
 
+@specializes("map.from_list")
 fn map_from_list_msv(pairs: List[(String, Map[String, String])]) -> Map[String, Map[String, String]] = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)
@@ -22912,6 +22920,7 @@ else {
   __skv_compact_values(rh, from, to, w, j + 1)
 }
 
+@specializes("map.filter")
 fn map_filter_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let sentries = prim.load32(sh + 4)
@@ -22935,6 +22944,7 @@ fn __skv_count_hits(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int, acc
     else __skv_count_hits(sh, entries, f, i + 1, acc)
   }
 
+@specializes("map.all")
 fn map_all_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -22942,6 +22952,7 @@ fn map_all_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   hits >= entries
 }
 
+@specializes("map.any")
 fn map_any_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -22949,6 +22960,7 @@ fn map_any_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   hits > 0
 }
 
+@specializes("map.count")
 fn map_count_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Int = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -22981,6 +22993,7 @@ fn __skv_find_loop(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int) -> (
   if i >= entries then __skv_find_none()
   else __skv_find_at(sh, entries, f, i)
 
+@specializes("map.find")
 fn map_find_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> (String, Int)? = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -22999,6 +23012,7 @@ fn __skv_fold_loop(sh: Int, f: (Int, String, Int) -> Int, entries: Int, i: Int, 
     __skv_fold_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_skv(m: Map[String, Int], init: Int, f: (Int, String, Int) -> Int) -> Int = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -23143,6 +23157,7 @@ fn __skv_update_copy(sh: Int, rh: Int, entries: Int, k: String, f: (Int) -> Int,
 
 
 
+@specializes("map.upsert")
 fn map_upsert_skv(m: Map[String, Int], k: String, init: Int, f: (Int) -> Int) -> Map[String, Int] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -23151,6 +23166,7 @@ fn map_upsert_skv(m: Map[String, Int], k: String, init: Int, f: (Int) -> Int) ->
   map_set_skv(m, k, v)
 }
 
+@specializes("map.update")
 fn map_update_skv(m: Map[String, Int], k: String, f: (Int) -> Int) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -23172,6 +23188,7 @@ fn __skv_map_copy(sh: Int, rh: Int, entries: Int, f: (Int) -> Int, i: Int) -> In
     __skv_map_copy(sh, rh, entries, f, i + 1)
   }
 
+@specializes("map.map")
 fn map_map_skv(m: Map[String, Int], f: (Int) -> Int) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)

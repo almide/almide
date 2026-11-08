@@ -131,6 +131,7 @@ fn __hvf_at(pairs: List[(String, List[Int])], i: Int, m: Map[String, List[Int]])
     none => m,
   }
 
+@specializes("map.from_list")
 fn map_from_list_hval(pairs: List[(String, List[Int])]) -> Map[String, List[Int]] = __hvf_at(
   pairs,
   0,

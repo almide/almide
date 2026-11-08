@@ -223,6 +223,7 @@ else {
   __skv_compact_values(rh, from, to, w, j + 1)
 }
 
+@specializes("map.filter")
 fn map_filter_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let sentries = prim.load32(sh + 4)
@@ -246,6 +247,7 @@ fn __skv_count_hits(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int, acc
     else __skv_count_hits(sh, entries, f, i + 1, acc)
   }
 
+@specializes("map.all")
 fn map_all_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -253,6 +255,7 @@ fn map_all_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   hits >= entries
 }
 
+@specializes("map.any")
 fn map_any_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -260,6 +263,7 @@ fn map_any_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   hits > 0
 }
 
+@specializes("map.count")
 fn map_count_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Int = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -292,6 +296,7 @@ fn __skv_find_loop(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int) -> (
   if i >= entries then __skv_find_none()
   else __skv_find_at(sh, entries, f, i)
 
+@specializes("map.find")
 fn map_find_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> (String, Int)? = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -310,6 +315,7 @@ fn __skv_fold_loop(sh: Int, f: (Int, String, Int) -> Int, entries: Int, i: Int, 
     __skv_fold_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_skv(m: Map[String, Int], init: Int, f: (Int, String, Int) -> Int) -> Int = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -454,6 +460,7 @@ fn __skv_update_copy(sh: Int, rh: Int, entries: Int, k: String, f: (Int) -> Int,
 // the onebrc/fold_lines count shape): a PRESENT key maps through f(old), an
 // ABSENT one inserts `init` (f NOT called — v0's exact contract). Functional
 // like every skv op: one fresh map via map_set_skv over the computed value.
+@specializes("map.upsert")
 fn map_upsert_skv(m: Map[String, Int], k: String, init: Int, f: (Int) -> Int) -> Map[String, Int] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -462,6 +469,7 @@ fn map_upsert_skv(m: Map[String, Int], k: String, init: Int, f: (Int) -> Int) ->
   map_set_skv(m, k, v)
 }
 
+@specializes("map.update")
 fn map_update_skv(m: Map[String, Int], k: String, f: (Int) -> Int) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -483,6 +491,7 @@ fn __skv_map_copy(sh: Int, rh: Int, entries: Int, f: (Int) -> Int, i: Int) -> In
     __skv_map_copy(sh, rh, entries, f, i + 1)
   }
 
+@specializes("map.map")
 fn map_map_skv(m: Map[String, Int], f: (Int) -> Int) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)

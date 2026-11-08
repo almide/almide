@@ -95,6 +95,7 @@ fn __msv_from_at(ph: Int, n: Int, i: Int, m: Map[String, Map[String, String]]) -
     __msv_from_at(ph, n, i + 1, nm)
   }
 
+@specializes("map.from_list")
 fn map_from_list_msv(pairs: List[(String, Map[String, String])]) -> Map[String, Map[String, String]] = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)

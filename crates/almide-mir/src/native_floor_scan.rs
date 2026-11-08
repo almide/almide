@@ -298,3 +298,22 @@ fn char_end(b: &[u8], q: usize) -> Option<usize> {
     let after = i + ch.len_utf8();
     (b.get(after) == Some(&b'\'')).then_some(after + 1)
 }
+
+/// Token-level runtime specialization helpers. Comments and strings never
+/// participate in renaming a function or one of its forwarding calls.
+pub(crate) fn runtime_fn_name(text: &str) -> Option<String> {
+    lex(text).windows(2).find(|w| w[0].text == "fn" && w[0].depth == 0)
+        .map(|w| w[1].text.to_string())
+}
+pub(crate) fn runtime_identifiers(text: &str) -> BTreeSet<String> {
+    lex(text).into_iter().filter(|t| is_ident(t.text)).map(|t| t.text.to_string()).collect()
+}
+pub(crate) fn rewrite_runtime_identifiers(text: &str, rename: &std::collections::BTreeMap<String, String>) -> String {
+    let mut out = text.to_string();
+    for token in lex(text).into_iter().rev() {
+        if let Some(name) = rename.get(token.text) {
+            out.replace_range(token.off..token.off + token.text.len(), name);
+        }
+    }
+    out
+}

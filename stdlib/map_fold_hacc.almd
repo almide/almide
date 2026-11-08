@@ -16,6 +16,7 @@ fn __mfh_str_loop(sh: Int, f: (Map[String, Int], String, String) -> Map[String, 
     __mfh_str_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_str_msi(m: Map[String, String], init: Map[String, Int], f: (Map[String, Int], String, String) -> Map[String, Int]) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -31,6 +32,7 @@ fn __mfh_skv_loop(sh: Int, f: (Map[String, Int], String, Int) -> Map[String, Int
     __mfh_skv_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_skv_msi(m: Map[String, Int], init: Map[String, Int], f: (Map[String, Int], String, Int) -> Map[String, Int]) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -50,6 +52,7 @@ fn __mfh_str_sacc_loop(sh: Int, f: (String, String, String) -> String, entries: 
     __mfh_str_sacc_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_str_sacc(m: Map[String, String], init: String, f: (String, String, String) -> String) -> String = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -94,6 +97,7 @@ fn __mfh_skv_hacc_loop(sh: Int, f: (String, String, Int) -> String, entries: Int
     __mfh_skv_hacc_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_skv_hacc(m: Map[String, Int], init: String, f: (String, String, Int) -> String) -> String = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
