@@ -501,9 +501,18 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
         let takes_at = |f: &MirFunction, k: usize| {
             !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0)
         };
-        let Some((best, owned)) = solve_modes(functions, &table, &eligible, &takes_at) else { return };
+        let Some((best, owned)) = solve_modes(functions, &table, &eligible, &takes_at) else {
+            // A closure call the mirror refuses to hand over at leaves every
+            // closure borrowing, as before closures took part.
+            let closures: Vec<String> = functions.iter().filter(|f| closure(f)).map(|f| f.name.clone()).collect();
+            if closures.is_empty() {
+                return;
+            }
+            pinned.extend(closures);
+            continue;
+        };
         // Only eligible closures carry modes, and a pinned one is not
-        // eligible: every round pins at least one more, so this ends.
+        // eligible: every retry pins at least one more, so this ends.
         let disagree = owned.disagreeing(&best);
         if disagree.is_empty() {
             functions.clone_from_slice(&best);
