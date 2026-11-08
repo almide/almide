@@ -272,23 +272,14 @@ fn native_op_reads(op: &Op) -> Vec<ValueId> {
     }
 }
 
-/// The CALL-shaped ops that render through an [`OpSink`]: indirect dispatch,
-/// the rung-4 bounds-checked element accessors, and witness-level runtime
-/// calls (`println` lowers through these). A CallIndirect dispatches through
-/// the arity's `__almd_ci_*` table: the leading Handle arg is the closure
-/// block (BORROWED env — `&[i64]`), the rest are scalar user args, the result
-/// an i64; heap args/results are outside this slab (the wasm leg keeps them;
-/// native walls). The element accessors' shims abort with the byte-identical
-/// "Error: index out of bounds" + exit 1 the wasm `$elem_addr_chk` and v0
-/// native emit. `Ok(false)` = not this tier's op.
+/// The CALL-shaped ops that render through an [`OpSink`]: the rung-4
+/// bounds-checked element accessors and witness-level runtime calls
+/// (`println` lowers through these). A `CallIndirect` renders through its
+/// declared function type (`render_native_closure`). The element accessors'
+/// shims abort with the byte-identical "Error: index out of bounds" + exit 1
+/// the wasm `$elem_addr_chk` and v0 native emit. `Ok(false)` = not this tier's op.
 fn render_native_call_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
     match op {
-        Op::CallIndirect {
-            dst,
-            table_idx,
-            args,
-            result,
-        } => render_call_indirect(dst, table_idx, args, result, s)?,
         Op::ListGetScalar { dst, list, idx } => render_list_get_scalar(dst, list, idx, s)?,
         Op::ListSetScalar { list, idx, val } => render_list_set_scalar(list, idx, val, s)?,
         Op::Call {

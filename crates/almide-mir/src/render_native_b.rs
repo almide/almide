@@ -13,57 +13,6 @@ pub(crate) struct OpSink<'a> {
     pub used_shims: &'a mut Vec<&'static str>,
 }
 
-/// `Op::CallIndirect` — dispatch through the arity's `__almd_ci_*` table.
-fn render_call_indirect(
-    dst: &Option<ValueId>,
-    table_idx: &ValueId,
-    args: &[CallArg],
-    result: &Option<Repr>,
-    sink: OpSink<'_>,
-) -> Result<(), LowerError> {
-    let OpSink { tys, out, indent, used_shims: _ } = sink;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    let Some((CallArg::Handle(env), rest)) = args.split_first() else {
-        return Err(wall("native: CallIndirect without a leading env arg"));
-    };
-    let et = *tys
-        .get(env)
-        .ok_or_else(|| wall("native: CallIndirect env untyped"))?;
-    if !et.is_veccy() {
-        return Err(wall("native: CallIndirect env is not a closure block"));
-    }
-    let env_code = if et == NTy::Vec { format!("&{}", var(*env)) } else { var(*env) };
-    let mut rendered = vec![var(*table_idx), env_code];
-    for a in rest {
-        let (code, got) = call_arg(a, tys)?;
-        if got != NTy::I64 {
-            return Err(wall(
-                "native: CallIndirect non-scalar user arg — outside the closures slab",
-            ));
-        }
-        rendered.push(code);
-    }
-    let call = format!("__almd_ci_{}({})", rest.len(), rendered.join(", "));
-    match (dst, result) {
-        (Some(d), Some(Repr::Scalar { .. })) => {
-            tys.insert(*d, NTy::I64);
-            line!("let mut {}: i64 = {call};", var(*d));
-        }
-        (None, _) => line!("{call};"),
-        _ => {
-            return Err(wall(
-                "native: CallIndirect heap result — outside the closures slab",
-            ))
-        }
-    }
-    Ok(())
-}
-
 /// `Op::ListGetScalar` — bounds-checked element load via the `almide_idx_get` shim.
 fn render_list_get_scalar(
     dst: &ValueId,
