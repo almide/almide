@@ -2,23 +2,21 @@
 // v0 truncates to N bits with SIGN extension (`n as i8/i16/i32`), widened back to Int:
 // take the low N bits, then if bit N-1 is set, subtract 2^N to sign-extend. to_int64 is
 // the identity. Composed from the prim band floor; cert-untouching (scalar).
-// Branch-free: for `low` in [0, 2 * half), `(low ^ half) - half` is `low` below `half` and
-// `low - 2 * half` from it — the shape an optimizer folds to one sign extension.
-fn __sext(low: Int, half: Int) -> Int = prim.bxor(low, half) - half
+fn __sext(low: Int, half: Int, full: Int) -> Int = if low >= half then low - full else low
 
 fn int_to_int8(n: Int) -> Int = {
   let low = prim.band(n, 255)
-  __sext(low, 128)
+  __sext(low, 128, 256)
 }
 
 fn int_to_int16(n: Int) -> Int = {
   let low = prim.band(n, 65535)
-  __sext(low, 32768)
+  __sext(low, 32768, 65536)
 }
 
 fn int_to_int32(n: Int) -> Int = {
   let low = prim.band(n, 4294967295)
-  __sext(low, 2147483648)
+  __sext(low, 2147483648, 4294967296)
 }
 
 fn int_to_int64(n: Int) -> Int = n
