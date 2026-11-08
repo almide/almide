@@ -262,7 +262,7 @@ fn env_shapes_the_binary(name: &str) -> bool {
         name,
         "RUSTFLAGS" | "CARGO_ENCODED_RUSTFLAGS" | "CARGO_BUILD_RUSTFLAGS" | "RUSTC" | "RUSTC_WRAPPER"
             | "CARGO_BUILD_RUSTC" | "CARGO_BUILD_RUSTC_WRAPPER" | "ALMIDE_NO_RTLIB" | "ALMIDE_RELEASE_STD_UNSPLIT"
-    ) || name.starts_with("CARGO_PROFILE_")
+    ) || name == "PROBE_NODA" || name.starts_with("CARGO_PROFILE_")
         || (name.starts_with("CARGO_TARGET_") && (name.ends_with("_RUSTFLAGS") || name.ends_with("_LINKER")))
 }
 
