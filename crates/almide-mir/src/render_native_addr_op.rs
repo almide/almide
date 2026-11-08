@@ -609,18 +609,28 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
         (Some(NTy::VecStr), Some(sv)) if sv.off == 0 && sv.idx.is_none() => {
             // Move consumed handles; preserve the source of a borrow-view.
             let rhs = match ty(tys, &sv.base) {
-                Some(NTy::Str) if st.borrowed_list_slots.contains(&(ad.base, v)) => format!("{}.clone()", var(sv.base)),
+                // A borrowed slot whose string is read again: a copy no
+                // program the perf gates time takes, so it builds on the
+                // standard codegen.
+                Some(NTy::Str) if st.borrowed_list_slots.contains(&(ad.base, v)) && !crate::render_native_keyed::dies_at_store(sv.base, v, NTy::Str) => {
+                    return Err(wall("native: a string list slot borrowing a string read again"));
+                }
                 Some(NTy::Str) => crate::render_native_move::take_expr(&var(sv.base)),
                 Some(NTy::StrRef) => format!("AlmideString::from({})", var(sv.base)),
                 other => return Err(wall(format!("native: a {other:?} handle stored into a List[String] slot"))),
             };
-            if let Some(k) = crate::native_map_entries::pair_slot(ad.base) {
-                line!("let {}_e{k}: AlmideString = {rhs};", var(ad.base));
-                return Ok(true);
-            }
             if let Some(done) = st.single.get_mut(&ad.base) {
                 line!("let mut {}_e0: AlmideString = {rhs};", var(ad.base));
                 *done = true;
+                return Ok(true);
+            }
+            if let Some((n, k)) = st.literal.get(&ad.base).copied() {
+                let b = var(ad.base);
+                line!("let {b}_e{k}: AlmideString = {rhs};");
+                st.literal.insert(ad.base, (n, k + 1));
+                if k + 1 == n && !crate::native_map_entries::is_deferred(ad.base) {
+                    line!("let mut {b}: Vec<AlmideString> = vec![{}];", elem_locals(&b, n));
+                }
                 return Ok(true);
             }
             if st.pushed.contains(&ad.base) {
@@ -796,4 +806,9 @@ fn rec_scalar_set(s: AddrSink<'_>, list: &ValueId, idx: &ValueId, val: &ValueId)
     }
     line!("{}.f{k} = {};", var(*list), var(*val));
     Ok(true)
+}
+
+/// The element locals `b_e0, …` of a list of `n` built whole.
+fn elem_locals(b: &str, n: usize) -> String {
+    (0..n).map(|j| format!("{b}_e{j}")).collect::<Vec<_>>().join(", ")
 }

@@ -95,6 +95,19 @@ fn const_or_empty_alloc(op: &Op, s: AddrSink<'_>) -> Option<bool> {
     }
 }
 
+/// A string list filled by pushes. Of a constant length, each element waits
+/// in its own local and the list is one `vec![…]` once its last element is
+/// stored — or, a map entry's pair, never built (crate::native_map_entries);
+/// otherwise it is reserved and pushed onto. The line the alloc renders as.
+fn whole_str_list(st: &mut AddrState, dst: &ValueId, len: &ValueId) -> String {
+    let Some(n) = st.consts.get(len).and_then(|n| usize::try_from(*n).ok()) else {
+        return format!("let mut {}: Vec<AlmideString> = {};", var(*dst), reserved_vec(&var(*len)));
+    };
+    st.literal.insert(*dst, (n, 0));
+    let what = if crate::native_map_entries::defer_pair(*dst) { "a map entry, its key and value bound one by one" } else { "built whole at its last element" };
+    format!("// {}: a list of {n}, {what}", var(*dst))
+}
+
 /// `Alloc{DynListStr}` of an untyped block: a string list.
 fn alloc_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
     let AddrSink { st, tys, out, indent } = s;
@@ -110,7 +123,7 @@ fn alloc_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
         return true;
     }
     if st.pushed.contains(dst) {
-        line!("let mut {}: Vec<AlmideString> = {};", var(*dst), reserved_vec(&var(*len)));
+        line!("{}", whole_str_list(st, dst, len));
         return true;
     }
     line!(
@@ -201,12 +214,8 @@ fn alloc_typed_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
         }};
     }
     tys.insert(*dst, NTy::VecStr);
-    if crate::native_map_entries::defer_pair(*dst) {
-        line!("// {}: a map entry, its key and value bound one by one", var(*dst));
-        return true;
-    }
     if st.pushed.contains(dst) {
-        line!("let mut {}: Vec<AlmideString> = {};", var(*dst), reserved_vec(&var(*len)));
+        line!("{}", whole_str_list(st, dst, len));
         return true;
     }
     line!(
