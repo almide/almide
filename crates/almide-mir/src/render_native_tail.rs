@@ -187,19 +187,13 @@ fn render_native_fn_sig(
             let spelled = match t {
                 t if crate::render_native_rec::is_closure(t) && func.name.starts_with("__lambda_")
                     && func.params.first().is_some_and(|first| first.value == p.value) => "&impl __AlmdEnv".to_string(),
-                NTy::Str if owned => "AlmideString".to_string(),
-                NTy::Vec if owned => "Vec<i64>".to_string(),
-                NTy::VecStr if owned => "Vec<AlmideString>".to_string(),
-                NTy::Rec(i) if owned => crate::render_native_rec::struct_name(i),
+                NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) if owned => crate::render_native_rec::owned_ty(t),
                 NTy::StrRef | NTy::Str => "&str".to_string(),
                 NTy::VecRef | NTy::Vec => "&[i64]".to_string(),
                 NTy::VecStrRef | NTy::VecStr => "&[AlmideString]".to_string(),
-                NTy::RecRef(i) | NTy::Rec(i) => format!("&{}", crate::render_native_rec::struct_name(i)),
-                NTy::I64 => "i64".to_string(),
-                NTy::F64 => "f64".to_string(),
-                NTy::Res => "Result<i64, AlmideString>".to_string(),
-                NTy::Opt => "Option<i64>".to_string(),
-                NTy::ResStr => "Result<AlmideString, AlmideString>".to_string(),
+                NTy::RecRef(_) | NTy::Rec(_) => format!("&{}", crate::render_native_rec::owned_ty(t)),
+                // A scalar or a carrier passes as itself.
+                _ => crate::render_native_rec::owned_ty(t),
             };
             let mut_prefix = if reassigned.contains(&p.value) || owned {
                 "mut "
@@ -211,18 +205,9 @@ fn render_native_fn_sig(
         .collect();
     let ret = match func.ret {
         None => String::new(),
+        // The result is owned whatever kind the returned value has.
         Some(v) => match ret_override.as_ref().or_else(|| tys.get(&v)) {
-            Some(NTy::I64) => " -> i64".to_string(),
-            Some(NTy::Str) => " -> AlmideString".to_string(),
-            Some(NTy::StrRef) => " -> AlmideString".to_string(),
-            Some(NTy::Vec) => " -> Vec<i64>".to_string(),
-            Some(NTy::VecRef) => " -> Vec<i64>".to_string(),
-            Some(NTy::F64) => " -> f64".to_string(),
-            Some(NTy::Res) => " -> Result<i64, AlmideString>".to_string(),
-            Some(NTy::VecStr | NTy::VecStrRef) => " -> Vec<AlmideString>".to_string(),
-            Some(NTy::Rec(i) | NTy::RecRef(i)) => format!(" -> {}", crate::render_native_rec::struct_name(*i)),
-            Some(NTy::Opt) => " -> Option<i64>".to_string(),
-            Some(NTy::ResStr) => " -> Result<AlmideString, AlmideString>".to_string(),
+            Some(t) => format!(" -> {}", crate::render_native_rec::owned_ty(*t)),
             None => return Err(wall("native: return value untyped")),
         },
     };
