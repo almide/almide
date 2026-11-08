@@ -424,7 +424,7 @@ pub(crate) fn set_moving_args(
     // A rebound arg whose own rebind comes next, with only its release
     // between (the loop write-back `Drop v; SetLocal v = ..`): its binding
     // is re-initialized before any read, so it moves as itself.
-    let reinit = moving
+    let mut reinit: std::collections::BTreeSet<ValueId> = moving
         .iter()
         .copied()
         .filter(|v| {
@@ -434,6 +434,9 @@ pub(crate) fn set_moving_args(
                 .is_some_and(|o| matches!(o, Op::SetLocal { local, .. } if local == v))
         })
         .collect();
+    // Any rebound value the op reads that every later path rebinds before
+    // naming it again (`mir_liveness`).
+    reinit.extend(crate::mir_liveness::reinit_reads(func, at));
     REINIT.with(|m| *m.borrow_mut() = reinit);
     MOVING.with(|m| *m.borrow_mut() = moving);
 }

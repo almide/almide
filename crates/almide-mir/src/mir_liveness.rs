@@ -166,3 +166,63 @@ pub(crate) fn dead_after(
 fn force_moves() -> bool {
     almide_base::env::flag("ALMIDE_NATIVE_DRILL_FORCE_MOVES")
 }
+
+/// The rebound values `ops[at]` reads (params and `SetLocal` targets) whose
+/// Rust binding the render may move out as itself rather than through
+/// `std::mem::take` (#4006, no-perf-loss): on every path after the op, the
+/// binding is rebound before any op names it again, so the moved-from
+/// binding is never seen, and the rebind writes into an empty slot instead of
+/// dropping a `take`n default. A release only erases to scope end, where
+/// Rust's drop flag covers a moved binding; the return value never moves.
+/// Rust's own move check rejects any path this misjudges, so a wrong verdict
+/// is a build failure, never a read of an emptied value.
+pub(crate) fn reinit_reads(func: &MirFunction, at: usize) -> BTreeSet<ValueId> {
+    let mut reads = Vec::new();
+    crate::mir_ops::op_reads(&func.ops[at], &mut reads);
+    let rebound: BTreeSet<ValueId> = func
+        .params
+        .iter()
+        .map(|p| p.value)
+        .chain(func.ops.iter().filter_map(|op| match op {
+            Op::SetLocal { local, .. } => Some(*local),
+            _ => None,
+        }))
+        .collect();
+    let candidates: BTreeSet<ValueId> = reads.into_iter().filter(|v| rebound.contains(v) && func.ret != Some(*v)).collect();
+    if candidates.is_empty() {
+        return candidates;
+    }
+    let Some(succ) = successors(func) else { return BTreeSet::new() };
+    candidates.into_iter().filter(|v| rebound_before_named(func, &succ, at, *v)).collect()
+}
+
+/// Every path from the successors of `ops[at]` rebinds `v` (or defines it
+/// afresh) before an op names it or anything referring to its storage.
+fn rebound_before_named(func: &MirFunction, succ: &[Vec<usize>], at: usize, v: ValueId) -> bool {
+    let refs = referring(func, v);
+    let mut seen = vec![false; func.ops.len()];
+    let mut work: Vec<usize> = succ[at].clone();
+    while let Some(i) = work.pop() {
+        if std::mem::replace(&mut seen[i], true) {
+            continue;
+        }
+        let op = &func.ops[i];
+        let mut reads = Vec::new();
+        crate::mir_ops::op_reads(op, &mut reads);
+        let reads_refs = reads.iter().any(|r| refs.contains(r));
+        let rebinds = matches!(op, Op::SetLocal { local, .. } if *local == v) || crate::mir_ops::defined_value(op) == Some(v);
+        if rebinds && !reads_refs {
+            continue;
+        }
+        let mut vs = Vec::new();
+        crate::mir_ops::op_values(op, &mut vs);
+        let erased_release = crate::render_native_move::bookkeeping(op)
+            && !matches!(op, Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. })
+            && vs == [v];
+        if reads_refs || (vs.contains(&v) && !erased_release) {
+            return false;
+        }
+        work.extend(succ[i].iter().copied());
+    }
+    true
+}
