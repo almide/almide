@@ -165,11 +165,11 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Mo
         // Or a field of it is given away (`{ ...b, m: map.set(b.m, k, v) }`):
         // taken over, the record dies after its last read, so the field it
         // hands to a by-value position at its own last use moves out of it
-        // instead of being copied. Only where every caller hands its argument
-        // over as it is (its release follows the call): a caller that keeps
-        // it would copy the whole record for the call.
-        if at_top && plain && !early_exit && func.ret != Some(p.value) && owned.hands_over_freely(&func.name, k) {
-            let exits_before = |end: usize| func.ops[..end].iter().any(|op| matches!(op, Op::Return { .. }));
+        // instead of being copied. A caller that reads its argument again
+        // copies the record for the call, as the standard codegen's by-value
+        // convention does; one whose release follows the call hands it over.
+        let exits_before = |end: usize| func.ops[..end].iter().any(|op| matches!(op, Op::Return { .. }));
+        if at_top && plain && func.ret != Some(p.value) {
             if let Some(end) = field_given(func, p.value, owned).filter(|&end| depth[end] == 0 && !exits_before(end)) {
                 out.push((k, end));
             }
@@ -442,9 +442,6 @@ fn move_at_sites(func: &MirFunction, owned: &Modes<'_>) -> MirFunction {
 pub(crate) struct Modes<'t> {
     by_name: BTreeMap<String, Vec<bool>>,
     table: &'t [(String, Vec<bool>)],
-    /// (callee, position) pairs some call site fills with an argument it
-    /// still holds after the call (no release right after it).
-    held: &'t BTreeSet<(String, usize)>,
 }
 
 impl Modes<'_> {
@@ -477,11 +474,6 @@ impl Modes<'_> {
             },
             _ => None,
         }
-    }
-
-    /// Every call site of `callee` hands its argument `k` over as it is.
-    fn hands_over_freely(&self, callee: &str, k: usize) -> bool {
-        !self.held.contains(&(callee.to_string(), k))
     }
 
     /// `op` takes its argument `k` over.
@@ -547,29 +539,6 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
             }
         }
     }
-    // (callee, position) pairs some call site keeps its argument at: the
-    // argument's next occurrence after the call is not its release there.
-    // A closure call counts against every possible callee.
-    let mut held: BTreeSet<(String, usize)> = BTreeSet::new();
-    let probe = Modes { by_name: BTreeMap::new(), table: &table, held: &held };
-    let mut kept: Vec<(String, usize)> = Vec::new();
-    for f in functions.iter() {
-        let depth = depths(f);
-        for (i, op) in f.ops.iter().enumerate() {
-            let (callees, args): (Vec<String>, &Vec<crate::CallArg>) = match op {
-                Op::CallFn { name, args, .. } => (vec![name.clone()], args),
-                Op::CallIndirect { args, .. } => (probe.possible(args).map(str::to_string).collect(), args),
-                _ => continue,
-            };
-            for (k, a) in args.iter().enumerate() {
-                let crate::CallArg::Handle(v) = a else { continue };
-                if release_after(f, i, *v, &depth).is_none() {
-                    kept.extend(callees.iter().map(|c| (c.clone(), k)));
-                }
-            }
-        }
-    }
-    held.extend(kept);
     let mut pinned: BTreeSet<String> = BTreeSet::new();
     loop {
         let closure = |f: &MirFunction| {
@@ -583,7 +552,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
         let takes_at = |f: &MirFunction, k: usize| {
             !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0)
         };
-        let Some((best, owned)) = solve_modes(functions, &table, &held, &eligible, &takes_at) else {
+        let Some((best, owned)) = solve_modes(functions, &table, &eligible, &takes_at) else {
             // A closure call the mirror refuses to hand over at leaves every
             // closure borrowing, as before closures took part.
             let closures: Vec<String> = functions.iter().filter(|f| closure(f)).map(|f| f.name.clone()).collect();
@@ -631,12 +600,11 @@ fn no_new_violations(before: &MirFunction, after: &MirFunction) -> bool {
 fn solve_modes<'t>(
     functions: &[MirFunction],
     table: &'t [(String, Vec<bool>)],
-    held: &'t BTreeSet<(String, usize)>,
     eligible: &dyn Fn(&MirFunction) -> bool,
     takes_at: &dyn Fn(&MirFunction, usize) -> bool,
 ) -> Option<(Vec<MirFunction>, Modes<'t>)> {
     let solve = |start: BTreeMap<String, Vec<bool>>, strict: bool| -> Option<(Vec<MirFunction>, Modes<'t>)> {
-        let mut owned = Modes { by_name: start, table, held };
+        let mut owned = Modes { by_name: start, table };
         let mut next: Vec<MirFunction>;
         let mut rounds = 0;
         loop {
