@@ -265,6 +265,10 @@ fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>) -> Option<usiz
 /// Make the movable parameters of `func` move parameters, if the ownership
 /// mirror accepts the result.
 fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Modes<'_>) -> Option<MirFunction> {
+    if func.name == "__is_null" && std::env::var("ALMIDE_DEBUG_MOVES").is_ok() {
+        for (i, op) in func.ops.iter().enumerate() { eprintln!("DBG   {i}: {op:?}"); }
+        eprintln!("DBG consumed={:?} movable={:?}", consumed_params(func, takes, owned), movable_params(func, takes));
+    }
     let movable = movable_params(func, takes);
     let consumed: Vec<(usize, usize)> = consumed_params(func, takes, owned)
         .into_iter()

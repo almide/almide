@@ -1,0 +1,1 @@
+spec/wasm_cross/codec_list_default.almd
