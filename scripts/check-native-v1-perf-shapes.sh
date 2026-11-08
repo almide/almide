@@ -156,7 +156,7 @@ for reg in regions:
     # code of its own: it renders nothing either.
     if "wall(" not in own and re.search(r"[A-Za-z_]", own):
         counts[key] = counts.get(key, 0) + 1
-        if os.environ.get("SHAPES_DETAIL"):
+        if True:
             print(f"DETAIL {reg[1]}:{reg[2][0]}:{reg[2][1]}-{reg[3][0]}:{reg[3][1]} {reg[5]} :: {own.strip()[:160]!r}")
 
 rows = {}
