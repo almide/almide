@@ -86,7 +86,12 @@ pub(crate) fn last_use(
     t: NTy,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
-    if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) || !crate::render_native_rec::has_default(t) {
+    if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) | NTy::Res | NTy::ResStr) {
+        return false;
+    }
+    // A kind with no `Default` (a Result) moves only where its binding moves
+    // as itself ([`take_expr`]): nothing is left behind to fill.
+    if !crate::render_native_rec::has_default(t) && !moves_as_itself(src) {
         return false;
     }
     // Or no path after the copy reads it again (`mir_liveness`).
@@ -537,6 +542,12 @@ pub(crate) fn set_rebound(func: &MirFunction) {
 /// binding is never read again, and Rust's drop flag covers its scope end —
 /// where `std::mem::take` would build a default in its place and drop it
 /// later. Anything else (a rebound slot, a field place) is taken.
+/// Whether `v`'s binding moves as itself in [`take_expr`] (bound once, or
+/// re-initialized before any read).
+fn moves_as_itself(v: ValueId) -> bool {
+    !REBOUND.with(|m| m.borrow().contains(&v)) || REINIT.with(|m| m.borrow().contains(&v))
+}
+
 pub(crate) fn take_expr(code: &str) -> String {
     let once = code
         .strip_prefix('v')
