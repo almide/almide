@@ -85,6 +85,9 @@ fn param_still_used() -> Unit = {
   println("param: ${keep_param(s)} ${s}")
   println("param fresh: ${keep_param(fresh("param", 14))}")
   println("last use: ${upper_last_use(fresh("last", 15))}")
+  let t = fresh("tail", 20)
+  let tu = upper_last_use(t)
+  println("tail: ${tu} ${t}")
 }
 
 fn read_through_places() -> Unit = {
