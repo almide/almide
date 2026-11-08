@@ -126,12 +126,10 @@ pub(crate) fn last_use(
         return dead;
     }
     // A kind with no `Default` (a Result) moves only where its binding moves
-    // as itself ([`take_expr`]): nothing is left behind to fill.
-    if !crate::render_native_rec::has_default(t) && !moves_as_itself(src) {
-        return false;
-    }
-    // Or no path after the copy reads it again (`mir_liveness`).
-    dying_after(func, at, src, borrow_arms) || crate::mir_liveness::dead_after(func, at, src, borrow_arms)
+    // as itself ([`take_expr`]): nothing is left behind to fill. And only
+    // where no path after the copy reads it again (`mir_liveness`).
+    (crate::render_native_rec::has_default(t) || moves_as_itself(src))
+        && (dying_after(func, at, src, borrow_arms) || crate::mir_liveness::dead_after(func, at, src, borrow_arms))
 }
 
 /// Whether the value `src` is never read again after `ops[at]` (whatever its
