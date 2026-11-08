@@ -327,6 +327,9 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
             let s = crate::render_native_rec::struct_name(j);
             let r = acc.replacen("()", "_ref()", 1);
             tys.insert(*d, NTy::RecRef(j));
+            if !crate::render_native_rec::is_region(i) {
+                note_payload_take(*d, ad.base, format!("{}.take_{acc}", var(ad.base)));
+            }
             line!(
                 "let {v}_d: {s}; let mut {v}: &{s} = match {b}.{r} {{ Some(r) => r, None => {{ {v}_d = {s}::default(); &{v}_d }} }};",
                 v = var(*d),

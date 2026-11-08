@@ -616,6 +616,30 @@ pub(crate) fn reads_of_place(place: &str) -> Vec<ValueId> {
 
 pub(crate) fn clear_str_fields() {
     STR_FIELDS.with(|m| m.borrow_mut().clear());
+    PAYLOAD_TAKES.with(|m| m.borrow_mut().clear());
+}
+
+thread_local! {
+    static PAYLOAD_TAKES: std::cell::RefCell<BTreeMap<ValueId, (ValueId, String)>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+/// A borrowed read of a payload that has no place expression of its own (an
+/// enum case's slot, a Result side): the carrier, and the expression that
+/// moves the payload out of it, leaving the payload's `Default` behind. A
+/// copy of the read is then that move when the carrier dies at the copy
+/// (#4006, no-perf-loss), as for a record field ([`note_field`]).
+pub(crate) fn note_payload_take(v: ValueId, base: ValueId, take: String) {
+    PAYLOAD_TAKES.with(|m| m.borrow_mut().insert(v, (base, take)));
+}
+
+/// The carrier and move-out expression a borrowed payload read was taken from.
+pub(crate) fn payload_take_of(v: ValueId) -> Option<(ValueId, String)> {
+    PAYLOAD_TAKES.with(|m| m.borrow().get(&v).cloned())
+}
+
+/// Every borrowed read noted with the move-out expression `take`.
+pub(crate) fn reads_of_take(take: &str) -> Vec<ValueId> {
+    PAYLOAD_TAKES.with(|m| m.borrow().iter().filter(|(_, p)| p.1 == take).map(|(v, _)| *v).collect())
 }
 
 /// The borrowed kind of a heap value of kind `f` read in place, its Rust

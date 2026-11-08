@@ -505,7 +505,7 @@ impl CarrierCx<'_> {
         // A borrow-only read inside its tag test (render_native_borrow_read):
         // a reference into the carrier, no copy of the payload.
         if let Some(then) = arm {
-            if self.borrowed_result_read(d, b, then, (o, e)) {
+            if self.borrowed_result_read(d, ad.base, b, then, (o, e)) {
                 return Some(Err(Ok(true)));
             }
         }
@@ -526,6 +526,11 @@ impl CarrierCx<'_> {
                     let t = struct_name(j);
                     self.emit(&format!("let {dv}_absent: {t} = Default::default();"));
                     self.emit(&format!("let mut {dv}: &{t} = match &{b} {{ {side}(v) => v, {other}(_) => &{dv}_absent }};"));
+                    crate::render_native_addr::note_payload_take(
+                        d,
+                        ad.base,
+                        format!("match &mut {b} {{ {side}(v) => std::mem::take(v), {other}(_) => Default::default() }}"),
+                    );
                     return Some(Err(Ok(true)));
                 }
                 _ => {}
@@ -550,7 +555,7 @@ impl CarrierCx<'_> {
 
     /// The borrow-only read inside the `then` (Err) or else (Ok) arm of its
     /// tag test, rendered when the payload kind has a reference form.
-    fn borrowed_result_read(&mut self, d: ValueId, b: &str, then: bool, (o, e): (NTy, NTy)) -> bool {
+    fn borrowed_result_read(&mut self, d: ValueId, base: ValueId, b: &str, then: bool, (o, e): (NTy, NTy)) -> bool {
         let (k, side, other) = if then { (e, "Err", "Ok") } else { (o, "Ok", "Err") };
         let by_ref = match k {
             NTy::Rec(j) => Some((NTy::RecRef(j), format!("&{}", struct_name(j)), "v")),
@@ -560,6 +565,13 @@ impl CarrierCx<'_> {
         let (true, Some((t, ty, val))) = (self.st.borrow_reads.contains(&d), by_ref) else { return false };
         self.tys.insert(d, t);
         self.emit(&format!("let mut {}: {ty} = match &{b} {{ {side}(v) => {val}, {other}(_) => unreachable!() }};", var(d)));
+        if has_default(k) {
+            crate::render_native_addr::note_payload_take(
+                d,
+                base,
+                format!("match &mut {b} {{ {side}(v) => std::mem::take(v), {other}(_) => unreachable!() }}"),
+            );
+        }
         true
     }
 
