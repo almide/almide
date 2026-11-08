@@ -1,5 +1,4 @@
 set +e
 bash .github/cired/probe.sh $(command -v almide)
-T=$(mktemp -d)
-for n in p1_pop_arm p6_sibling; do cp .github/cired/progs/$n.almd $T/; (cd $T && ALMIDE_DUMP_MIR=1 almide build $n.almd -o $n.bin > /tmp/cired-out-mir-$n.txt 2>&1); done
-cargo test --release --test zz_cired_render -- --nocapture 2>&1 | grep -v "^\s*Compiling" > /tmp/cired-out-render.txt; tail -3 /tmp/cired-out-render.txt
+cargo test --release --test field_pop_in_loop_test --test for_in_clone_elision_test --test chain_source_borrow_vs_consuming_seed_test --test list_unique_linear_test --test list_unique_wasm_linear_test --test mut_field_arg_sibling_read_test --test string_push_native_append_test 2>&1 | grep -E "^test |test result|panicked|FAILED|^error" | head -80
+cargo test --release -p almide-mir 2>&1 | grep -E "test result|panicked|FAILED|^error" | head -40
