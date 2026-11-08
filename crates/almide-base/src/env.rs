@@ -190,6 +190,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_MUTATION_SHARDS", Value, Ci, "how many shards the mutation gate is split into"),
     sw("ALMIDE_NAMES_DEBUG", Flag, Dbg, "print the native name-verification map and its scoped shadowing decisions"),
     sw("ALMIDE_NATIVE_DRILL_COND_I64", Flag, Ablation, "make the certified native render keep every comparison an i64 0/1 tested with `!= 0`, never a branch-only `bool` — the negative control of the branch-only comparison render in scripts/check-native-v1-perf-small.sh (recursion_depth_within_limits)"),
+    sw("ALMIDE_NATIVE_DRILL_FORCE_MOVES", Flag, Ablation, "make the certified native render move every copy whose source it does not already know is dead, ignoring the MIR liveness verdict — the negative control of the copy-to-move liveness rule (#4006)"),
     sw("ALMIDE_NATIVE_DRILL_NO_MOVES", Flag, Ablation, "make the certified native render keep every copy it would elide (no in-place `list.push`, a clone for each last-use Dup/SetLocal) — the negative control of scripts/check-native-v1-perf.sh (#4006)"),
     sw("ALMIDE_NO_AVAIL_CHECK", Flag, Gate, "bypass the E081 stdlib availability check (the measurement escape the availability probe builds through)"),
     sw("ALMIDE_NO_RTLIB", Flag, Route, "build the native runtime inline instead of linking the prebuilt runtime crate (the self-contained cargo path; `almide test` sets it for the harness build)"),

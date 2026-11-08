@@ -110,6 +110,16 @@ pub(crate) fn dying_after(
     src: ValueId,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
+    // Or no path after the copy reads it again (`mir_liveness`).
+    dying_after_shape(func, at, src, borrow_arms) || crate::mir_liveness::dead_after(func, at, src, borrow_arms)
+}
+
+fn dying_after_shape(
+    func: &MirFunction,
+    at: usize,
+    src: ValueId,
+    borrow_arms: &std::collections::BTreeSet<ValueId>,
+) -> bool {
     if drill_no_moves() {
         return false;
     }
