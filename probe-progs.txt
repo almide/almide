@@ -1,10 +1,4 @@
-spec/wasm_cross/scoped_region_value.almd
-spec/wasm_cross/json_gltf_walk.almd
-spec/wasm_cross/value_merge_wide_left.almd
-spec/wasm_cross/json_stringify_control_chars.almd
-spec/wasm_cross/json_many_keys.almd
-spec/wasm_cross/value_object_ops_share.almd
-spec/wasm_cross/value_eq.almd
-spec/wasm_cross/value_deep_eq.almd
-spec/wasm_cross/json_value.almd
-spec/wasm_cross/json_number_unicode.almd
+spec/wasm_cross/field_and_interp_accumulator.almd
+spec/wasm_cross/record_map_field_update.almd
+spec/wasm_cross/inplace_clear_alias_field.almd
+spec/wasm_cross/map_index_order.almd
