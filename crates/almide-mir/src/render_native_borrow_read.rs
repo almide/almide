@@ -62,10 +62,21 @@ pub(crate) fn ref_dups(func: &MirFunction) -> BTreeSet<ValueId> {
     out
 }
 
-/// [`last_borrowing_use`] of `d` where a copy of it that only borrows counts
-/// as `d` itself (its uses extend the span; it joins `dups`).
+/// The last op after `at` that reads `d` (or an address into it) other than
+/// to release it, when every use only borrows ([`last_borrowing_use`]); a
+/// copy of it that only borrows counts as `d` itself (its uses extend the
+/// span; it joins `dups`). A release only ends a reference's borrow.
 fn alias_span(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMap<ValueId, ValueId>, dups: &mut BTreeSet<ValueId>) -> Option<usize> {
-    let mut last = last_borrowing_use(func, at, d, root)?;
+    last_borrowing_use(func, at, d, root)?;
+    let mut reads = Vec::new();
+    let mut last = at;
+    for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
+        reads.clear();
+        crate::mir_ops::op_reads(op, &mut reads);
+        if !crate::render_native_move::bookkeeping(op) && reads.iter().any(|v| *v == d || root.get(v) == Some(&d)) {
+            last = j;
+        }
+    }
     for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
         let Op::Dup { dst, src } = op else { continue };
         let fixed = func.ret != Some(*dst) && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if local == dst));

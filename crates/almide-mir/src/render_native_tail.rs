@@ -643,7 +643,7 @@ fn render_native_drop_op(
             line!("// drop: released after its last read");
         }
         Op::Drop { v } => {
-            if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) {
+            if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) && !crate::render_native_keyed::in_place(*v) {
                 return Err(wall(
                     "native: Drop of a borrowed param — MIR call-mode violation",
                 ));
