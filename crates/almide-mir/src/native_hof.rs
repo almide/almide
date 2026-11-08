@@ -160,7 +160,14 @@ fn scalar_agrees(d: &DTy, r: &str, by_ref: bool) -> Option<bool> {
 fn composite_agrees(d: &DTy, r: &str, by_ref: bool) -> bool {
     match d {
         DTy::Tuple(_) => r.starts_with('(') && r.ends_with(')') && !by_ref,
-        DTy::List(_) => r.starts_with("Vec<") || (by_ref && r.starts_with('[')),
+        // A runtime generic standing for a concrete declared element
+        // (`fn f<M: Deref<Target = AlmideMatrix>>(xs: &[M])`) carries a bound
+        // the native element kind need not meet: not this route's.
+        DTy::List(e) => {
+            let inner = r.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).or_else(|| r.strip_prefix('[').and_then(|x| x.strip_suffix(']')));
+            let bare_param = inner.is_some_and(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_uppercase()));
+            (r.starts_with("Vec<") || (by_ref && r.starts_with('['))) && !(bare_param && !matches!(**e, DTy::Var(_)))
+        }
         DTy::Opt(_) => r.starts_with("Option<") && !by_ref,
         DTy::Map(..) => r.starts_with("AlmideMap<"),
         DTy::Set(_) => r.starts_with("AlmideSet<"),
