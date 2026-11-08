@@ -228,23 +228,24 @@ pub(crate) fn carrier_dies_after(
     };
     // The address of one of its scalar slots (`sc.n` beside `sc.funs`): the
     // handle, the offsets added to it, and the scalar loads through them.
-    let scalar_slot = |j: usize, d: ValueId| -> Option<Vec<usize>> {
+    let scalar_slot = |j: usize, d: ValueId| -> Vec<usize> {
         let mut addrs = vec![d];
         let mut ops = vec![j];
+        let mut other = false;
         for (k, op) in func.ops.iter().enumerate() {
             let mut reads = Vec::new();
             crate::mir_ops::op_reads(op, &mut reads);
-            if !reads.iter().any(|r| addrs.contains(r)) {
-                continue;
+            if reads.iter().any(|r| addrs.contains(r)) {
+                ops.push(k);
+                addrs.extend(match op {
+                    Op::IntBinOp { dst, op: crate::IntOp::Add, .. } => Some(*dst),
+                    _ => None,
+                });
+                other |= !matches!(op, Op::IntBinOp { op: crate::IntOp::Add, .. } | Op::Prim { kind: crate::PrimKind::Load { .. }, .. });
             }
-            match op {
-                Op::IntBinOp { dst, op: crate::IntOp::Add, .. } => addrs.push(*dst),
-                Op::Prim { kind: crate::PrimKind::Load { .. }, .. } => {}
-                _ => return None,
-            }
-            ops.push(k);
         }
-        Some(ops)
+        // Any other read of the address leaves the handle a read of the record.
+        ops.into_iter().filter(|_| !other).collect()
     };
     let scalar_reads: std::collections::BTreeSet<usize> = func.ops[at + 1..]
         .iter()
@@ -252,9 +253,7 @@ pub(crate) fn carrier_dies_after(
         .flat_map(|(j, op)| match op {
             Op::ListGetScalar { list, .. } if *list == src => vec![at + 1 + j],
             Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } if args.as_slice() == [src] && unread(*d) => vec![at + 1 + j],
-            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } if args.as_slice() == [src] => {
-                scalar_slot(at + 1 + j, *d).unwrap_or_default()
-            }
+            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } if args.as_slice() == [src] => scalar_slot(at + 1 + j, *d),
             _ => Vec::new(),
         })
         .collect();
