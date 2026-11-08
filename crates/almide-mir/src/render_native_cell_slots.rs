@@ -52,7 +52,6 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
                 writeln!(out, "let mut {}: i64 = {base}.borrow().as_ref().copied().expect(\"initialized shared cell\");", var(*d)).expect("writing to a String cannot fail");
             }
             Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), .. } if payload != NTy::I64 => {
-<<<<<<< HEAD
                 crate::render_native_bounds::access(slot);
                 // A read the cell's own take follows with nothing between
                 // that can look at the cell (native_cell_window): the payload
@@ -79,14 +78,6 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
                 // The read before it took the payload: what is left to release is none.
                 let taken = if crate::render_native_keyed::cell_emptied(*d) { "Default::default()".to_string() } else { format!("{base}.borrow_mut().take().expect(\"initialized shared cell\")") };
                 writeln!(out, "let mut {}: {} = {taken};", var(*d), rec::owned_ty(payload)).expect("writing to a String cannot fail");
-=======
-                crate::render_native_bounds::access(slot); tys.insert(*d, payload);
-                writeln!(out, "let mut {}: {} = {base}.borrow().as_ref().expect(\"initialized shared cell\").clone();", var(*d), rec::owned_ty(payload)).expect("writing to a String cannot fail");
-            }
-            Op::CallFn { dst: Some(d), name, .. } if name == "__mg_take" => {
-                crate::render_native_bounds::access(slot); tys.insert(*d, payload);
-                writeln!(out, "let mut {}: {} = {base}.borrow_mut().take().expect(\"initialized shared cell\");", var(*d), rec::owned_ty(payload)).expect("writing to a String cannot fail");
->>>>>>> origin/post-rc1-fixes
             }
             Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 => {
                 let rhs = args[1];
