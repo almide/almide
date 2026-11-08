@@ -12,7 +12,7 @@ while read -r f; do
   for leg in v1 v0; do
     touch "$OUT/.mark"; sleep 1
     if [ $leg = v1 ]; then
-      ALMIDE_VERIFIED_DEBUG=1 timeout 600 $A build "$f" -o "$OUT/$n.$leg.bin" > "$OUT/$n.$leg.buildlog" 2>&1
+      PROBE_MOVES=1 ALMIDE_VERIFIED_DEBUG=1 timeout 600 $A build "$f" -o "$OUT/$n.$leg.bin" > "$OUT/$n.$leg.buildlog" 2>&1
     else
       ALMIDE_NO_VERIFIED_OK=1 timeout 600 $A build "$f" --no-verified -o "$OUT/$n.$leg.bin" > "$OUT/$n.$leg.buildlog" 2>&1
     fi

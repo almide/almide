@@ -505,6 +505,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
         // Only eligible closures carry modes, and a pinned one is not
         // eligible: every round pins at least one more, so this ends.
         let disagree = owned.disagreeing(&best);
+        if std::env::var("PROBE_MOVES").is_ok() { eprintln!("PROBE modes={:?} disagree={disagree:?} pinned={pinned:?}", owned.by_name); }
         if disagree.is_empty() {
             functions.clone_from_slice(&best);
             return;
@@ -581,6 +582,7 @@ fn solve_modes<'t>(
             let sunk = move_at_sites(&sink_join_releases(f, &owned), &owned);
             let moved = if no_new_violations(before, &sunk) { sunk } else { move_at_sites(f, &owned) };
             if !no_new_violations(before, &moved) {
+                if std::env::var("PROBE_MOVES").is_ok() { eprintln!("PROBE refuse {} strict={strict}: {:?}", f.name, crate::verify_ownership(&moved)); }
                 return None;
             }
             *f = moved;
