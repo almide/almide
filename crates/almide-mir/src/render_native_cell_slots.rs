@@ -75,9 +75,13 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
             }
             Op::CallFn { dst: Some(d), name, .. } if name == "__mg_take" => {
                 crate::render_native_bounds::access(slot); tys.insert(*d, payload);
-                // The read before it took the payload: what is left to release is none.
-                let taken = if crate::render_native_keyed::cell_emptied(*d) { "Default::default()".to_string() } else { format!("{base}.borrow_mut().take().expect(\"initialized shared cell\")") };
-                writeln!(out, "let mut {}: {} = {taken};", var(*d), rec::owned_ty(payload)).expect("writing to a String cannot fail");
+                // The read before it took the payload: nothing is left, and the
+                // take's result is only released (native_cell_window::take_window).
+                if crate::render_native_keyed::cell_emptied(*d) {
+                    writeln!(out, "// {}: the payload the read before took", var(*d)).expect("writing to a String cannot fail");
+                } else {
+                    writeln!(out, "let mut {}: {} = {base}.borrow_mut().take().expect(\"initialized shared cell\");", var(*d), rec::owned_ty(payload)).expect("writing to a String cannot fail");
+                }
             }
             Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 => {
                 let rhs = args[1];
