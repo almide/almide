@@ -42,9 +42,9 @@ pub(crate) fn borrow_reads(func: &MirFunction) -> BTreeSet<ValueId> {
 
 /// The copies (`Dup`) of borrow-only reads that may stay references: every
 /// use of the copy only borrows too, it is never rebound nor returned, and
-/// the block the read borrows from is untouched up to the copy's last use as
-/// well. A copy rendered owned cloned the whole value (a captured map read
-/// for one `map.get`).
+/// the block the read borrows from is untouched up to the last read of
+/// anything borrowed from it ([`borrow_span`]). A copy rendered owned cloned
+/// the whole value (a captured map read for one `map.get`).
 pub(crate) fn ref_dups(func: &MirFunction) -> BTreeSet<ValueId> {
     let root = roots(func);
     let reads = borrow_reads(func);
@@ -52,41 +52,44 @@ pub(crate) fn ref_dups(func: &MirFunction) -> BTreeSet<ValueId> {
     for (i, op) in func.ops.iter().enumerate() {
         let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
         let (true, Some(&base)) = (reads.contains(d), args.first().and_then(|a| root.get(a))) else { continue };
-        let mut dups = BTreeSet::new();
-        if let Some(last) = alias_span(func, i, *d, &root, &mut dups) {
-            if block_untouched(func, i, last, base, &root) {
-                out.extend(dups);
-            }
+        let (last, dups) = borrow_span(func, i, *d);
+        let fixed = |v: &ValueId| func.ret != Some(*v) && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if local == v));
+        let borrowing = |(j, v): &(usize, ValueId)| fixed(v) && last_borrowing_use(func, *j, *v, &root).is_some();
+        if dups.iter().all(borrowing) && block_untouched(func, i, last, base, &root) {
+            out.extend(dups.iter().map(|(_, v)| *v));
         }
     }
     out
 }
 
-/// The last op after `at` that reads `d` (or an address into it) other than
-/// to release it, when every use only borrows ([`last_borrowing_use`]); a
-/// copy of it that only borrows counts as `d` itself (its uses extend the
-/// span; it joins `dups`). A release only ends a reference's borrow.
-fn alias_span(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMap<ValueId, ValueId>, dups: &mut BTreeSet<ValueId>) -> Option<usize> {
-    last_borrowing_use(func, at, d, root)?;
-    let mut reads = Vec::new();
+/// The last op after `at` that reads, other than to release it, `d` or
+/// anything borrowed from it — its copies, addresses into it and into them,
+/// and the reads through those — and the copies (`Dup`, with their ops).
+/// A release only ends a borrow; a call's result is its own.
+pub(crate) fn borrow_span(func: &MirFunction, at: usize, d: ValueId) -> (usize, Vec<(usize, ValueId)>) {
+    let mut taint = BTreeSet::from([d]);
+    let mut dups = Vec::new();
     let mut last = at;
+    let mut reads = Vec::new();
     for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
         reads.clear();
         crate::mir_ops::op_reads(op, &mut reads);
-        if !crate::render_native_move::bookkeeping(op) && reads.iter().any(|v| *v == d || root.get(v) == Some(&d)) {
-            last = j;
+        if crate::render_native_move::bookkeeping(op) || !reads.iter().any(|v| taint.contains(v)) {
+            continue;
         }
+        last = j;
+        let borrowed = match op {
+            Op::Dup { dst, .. } => {
+                dups.push((j, *dst));
+                Some(*dst)
+            }
+            Op::Prim { kind: PrimKind::Handle | PrimKind::ElemAddr | PrimKind::LoadHandle, dst, .. } => *dst,
+            Op::IntBinOp { dst, op: IntOp::Add, .. } => Some(*dst),
+            _ => None,
+        };
+        taint.extend(borrowed);
     }
-    for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
-        let Op::Dup { dst, src } = op else { continue };
-        let fixed = func.ret != Some(*dst) && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if local == dst));
-        if *src == d && fixed {
-            let l = alias_span(func, j, *dst, root, dups)?;
-            dups.insert(*dst);
-            last = last.max(l);
-        }
-    }
-    Some(last)
+    (last, dups)
 }
 
 thread_local! {

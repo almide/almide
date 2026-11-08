@@ -104,7 +104,7 @@ pub(crate) fn take_window(
 }
 
 /// The last op that reads the cell read `d` (op `at` of `func`, of the cell
-/// `cell`) or a reference copy of it (`ref_dups`), when nothing up to there
+/// `cell`) or anything borrowed from it (`borrow_span`), when nothing up to there
 /// can look at the cell: the read may borrow the payload in place until
 /// then. A read whose window ends no later than its own op borrows nothing.
 pub(crate) fn borrow_window(
@@ -114,21 +114,10 @@ pub(crate) fn borrow_window(
     tys: &BTreeMap<ValueId, NTy>,
     program_fn: &dyn Fn(&str) -> bool,
 ) -> Option<usize> {
-    let mut aliases = BTreeSet::from([d]);
-    let mut last = at;
-    let mut reads = Vec::new();
-    for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
-        reads.clear();
-        crate::mir_ops::op_reads(op, &mut reads);
-        if reads.iter().any(|r| aliases.contains(r)) && !crate::render_native_move::bookkeeping(op) {
-            last = j;
-            if let Op::Dup { dst, .. } = op {
-                aliases.insert(*dst);
-            }
-        }
-    }
+    let (last, dups) = crate::render_native_borrow_read::borrow_span(func, at, d);
     let mut w = window(func, (d, cell), tys, program_fn);
-    (func.ret.is_none_or(|r| !aliases.contains(&r)) && func.ops[at + 1..=last].iter().all(|op| w.admits(op))).then_some(last)
+    let returned = func.ret.is_some_and(|r| r == d || dups.iter().any(|(_, v)| *v == r));
+    (!returned && func.ops[at + 1..=last].iter().all(|op| w.admits(op))).then_some(last)
 }
 
 /// After `ops[at]`, `x` is only released.
