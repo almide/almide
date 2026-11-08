@@ -171,11 +171,17 @@ pub(crate) fn cell_read_takes(d: ValueId, cell: ValueId, tys: &BTreeMap<ValueId,
     let program_fn = |n: &str| PROGRAM.with(|p| p.borrow().fns.contains(n));
     CURRENT.with(|c| {
         let mut c = c.borrow_mut();
-        let Some(func) = c.func.as_ref() else { return false };
-        let at = func.ops.iter().position(|op| matches!(op, Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(x), .. } if *x == d));
-        let end = at.and_then(|at| crate::native_cell_window::take_window(func, at, (d, cell), tys, &program_fn));
+        let end = c.func.as_ref().and_then(|func| {
+            let at = load_at(func, d)?;
+            crate::native_cell_window::take_window(func, at, (d, cell), tys, &program_fn)
+        });
         end.is_some_and(|x| c.emptied.insert(x))
     })
+}
+
+/// The op of `func` that loads `d`.
+fn load_at(func: &MirFunction, d: ValueId) -> Option<usize> {
+    func.ops.iter().position(|op| matches!(op, Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(x), .. } if *x == d))
 }
 
 /// The payload read `d` of the owned carrier `base` may move the payload out:
@@ -185,17 +191,19 @@ pub(crate) fn cell_read_takes(d: ValueId, cell: ValueId, tys: &BTreeMap<ValueId,
 pub(crate) fn payload_moves(d: ValueId, base: ValueId) -> bool {
     CURRENT.with(|c| {
         let c = c.borrow();
-        let Some(func) = c.func.as_ref() else { return false };
-        let Some(at) = func.ops.iter().position(|op| matches!(op, Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(x), .. } if *x == d)) else { return false };
-        let root = crate::render_native_borrow_read::roots(func);
-        let own = !rebound(func).contains(&base) && !func.params.iter().any(|p| p.value == base);
-        let mut reads = Vec::new();
-        own && crate::render_native_move::dying_after(func, at, base, &c.arms)
-            && func.ops[at + 1..].iter().all(|op| {
-                reads.clear();
-                crate::mir_ops::op_reads(op, &mut reads);
-                crate::render_native_move::bookkeeping(op) || !reads.iter().any(|r| *r == base || root.get(r) == Some(&base))
-            })
+        let moves = c.func.as_ref().and_then(|func| {
+            let at = load_at(func, d)?;
+            let root = crate::render_native_borrow_read::roots(func);
+            let own = !rebound(func).contains(&base) && !func.params.iter().any(|p| p.value == base);
+            let mut reads = Vec::new();
+            Some(own && crate::render_native_move::dying_after(func, at, base, &c.arms)
+                && func.ops[at + 1..].iter().all(|op| {
+                    reads.clear();
+                    crate::mir_ops::op_reads(op, &mut reads);
+                    crate::render_native_move::bookkeeping(op) || !reads.iter().any(|r| *r == base || root.get(r) == Some(&base))
+                }))
+        });
+        moves.unwrap_or(false)
     })
 }
 
