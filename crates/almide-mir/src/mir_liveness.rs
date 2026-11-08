@@ -207,19 +207,37 @@ fn rebound_before_named(func: &MirFunction, succ: &[Vec<usize>], at: usize, v: V
             continue;
         }
         let op = &func.ops[i];
-        let mut reads = Vec::new();
-        crate::mir_ops::op_reads(op, &mut reads);
-        let reads_refs = reads.iter().any(|r| refs.contains(r));
-        let rebinds = matches!(op, Op::SetLocal { local, .. } if *local == v) || crate::mir_ops::defined_value(op) == Some(v);
-        if rebinds && !reads_refs {
-            continue;
-        }
         let mut vs = Vec::new();
         crate::mir_ops::op_values(op, &mut vs);
-        let erased_release = crate::render_native_move::bookkeeping(op)
+        // A release of `v` alone erases to scope end: it names nothing.
+        if crate::render_native_move::bookkeeping(op)
             && !matches!(op, Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. })
-            && vs == [v];
-        if reads_refs || (vs.contains(&v) && !erased_release) {
+            && vs == [v]
+        {
+            work.extend(succ[i].iter().copied());
+            continue;
+        }
+        // A rebind writes the binding from a value not viewing it.
+        match op {
+            Op::SetLocal { local, src } if *local == v => {
+                if refs.contains(src) {
+                    return false;
+                }
+                continue;
+            }
+            _ if crate::mir_ops::defined_value(op) == Some(v) && !matches!(op, Op::SetLocal { .. }) => {
+                let mut reads = Vec::new();
+                crate::mir_ops::op_reads(op, &mut reads);
+                if reads.iter().any(|r| refs.contains(r)) {
+                    return false;
+                }
+                continue;
+            }
+            _ => {}
+        }
+        let mut reads = Vec::new();
+        crate::mir_ops::op_reads(op, &mut reads);
+        if vs.contains(&v) || reads.iter().any(|r| refs.contains(r)) {
             return false;
         }
         work.extend(succ[i].iter().copied());
