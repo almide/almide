@@ -70,6 +70,9 @@ pub(crate) mod native_region_window;
 mod native_list_ops;
 mod native_narrow_rewrite;
 mod native_hof;
+mod native_link_routes;
+mod native_list_finish;
+mod native_value_repr;
 mod native_closure_decl;
 mod option_blocks;
 

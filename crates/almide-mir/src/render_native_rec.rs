@@ -118,16 +118,8 @@ pub(crate) fn result_payloads(i: u16) -> Option<(NTy, NTy)> {
     RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.result_of))
 }
 
-/// A value of kind `t` has a `Default` (a carrier's absent payload reads as one).
-pub(crate) fn has_default(t: NTy) -> bool {
-    match t {
-        // A Result carrier has none (the runtime `Value` and `Matrix` get
-        // theirs from `runtime_default_impls`).
-        NTy::Rec(i) | NTy::RecRef(i) => RECS.with(|r| r.borrow().get(i as usize).is_some_and(|d| d.result_of.is_none())),
-        NTy::Res | NTy::ResStr => false,
-        _ => true,
-    }
-}
+// Default support follows the declared fields recursively.
+include!("render_native_defaults.rs");
 
 /// The table key of the builtin `Bytes` type.
 pub(crate) const BYTES_KEY: &str = "Ty::Bytes";
@@ -695,7 +687,8 @@ pub(crate) fn struct_defs() -> String {
                 out.push_str(&enum_def(i as u16, d, cases));
                 continue;
             }
-            out.push_str(&format!("/// record `{}`\n#[derive(Clone, Default)]\nstruct {} {{\n", d.name, struct_name(i as u16)));
+            let default = if has_default(NTy::Rec(i as u16)) { ", Default" } else { "" };
+            out.push_str(&format!("/// record `{}`\n#[derive(Clone{default})]\nstruct {} {{\n", d.name, struct_name(i as u16)));
             for (k, f) in d.fields.iter().enumerate() {
                 out.push_str(&format!("    f{k}: {},\n", owned_ty(*f)));
             }

@@ -57,24 +57,20 @@ fn native_struct_tuples(
     for l in variant_layouts.by_type.values() {
         l.cases.iter().flat_map(|c| c.fields.iter()).for_each(|(_, t)| crate::render_native_rec::collect_tuples(t, &mut ts));
     }
-    collect_local_scalar_tuples(ir, &mut ts);
+    collect_local_native_types(ir, &mut ts);
     ts
 }
 
-/// An all-scalar tuple a local holds (`let v: List[(Int, Int)]`) is a
-/// by-value struct as well, declared in a signature or not.
-fn collect_local_scalar_tuples(ir: &almide_ir::IrProgram, ts: &mut Vec<almide_lang::types::Ty>) {
+/// Local containers use their checked type even when no function signature
+/// mentions it. This includes empty lists and nested Option/Result values.
+fn collect_local_native_types(ir: &almide_ir::IrProgram, ts: &mut Vec<almide_lang::types::Ty>) {
     for info in &ir.var_table.entries {
         let mut found = Vec::new();
         crate::render_native_rec::collect_tuples(&info.ty, &mut found);
         for t in found {
-            let scalar = matches!(&t, almide_lang::types::Ty::Tuple(es)
-                if !es.is_empty() && es.iter().all(crate::render_native_rec::is_lane_scalar));
-            // A map or set a local holds (`let m: Map[String, Int] = [:]`):
-            // its generated type, for the empty container that starts it.
-            let container = matches!(&t, almide_lang::types::Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, _))
-                || crate::render_native_rec::is_native_set(&t);
-            if (scalar || container) && !ts.contains(&t) {
+            // Locals and signatures share the same declared representations,
+            // including an empty nested carrier with no stores to infer from.
+            if !ts.contains(&t) {
                 ts.push(t);
             }
         }
@@ -296,20 +292,22 @@ fn render_native_with_runtime_hofs(
     program: &mut MirProgram,
     sigs: &crate::render_native::NativeSigs,
     linked: &std::collections::BTreeSet<String>,
+    runtime: &std::collections::BTreeSet<String>,
 ) -> Result<String, LowerError> {
-    crate::native_hof::reset(Default::default(), Default::default());
+    crate::native_hof::reset(runtime.clone(), Default::default());
     let recs = crate::render_native_rec::snapshot();
     let first = crate::render_native::try_render_native_program(program, sigs);
     let sites = crate::native_hof::sites();
     if sites.is_empty() {
         return first;
     }
-    let dropped = crate::native_hof::prune(&mut program.functions, linked, &sites);
+    let mut dropped = crate::native_hof::prune(&mut program.functions, linked, &sites);
     let elided = crate::native_hof::elidable(&program.functions, &sites);
     if dropped.is_empty() && elided.is_empty() {
         return first;
     }
     crate::render_native_rec::restore(recs);
+    dropped.extend(runtime.iter().cloned());
     crate::native_hof::reset(dropped, elided);
     crate::render_native::try_render_native_program(program, sigs)
 }
@@ -372,7 +370,7 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     let mut functions = lower_native_functions(&ir, &record_layouts, &variant_layouts)?;
     let own: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
     // #4006: the registry bodies the program calls, linked as certified MIR.
-    let linked = link_native_self_host(&mut functions, &ir)?;
+    let (linked, runtime) = link_native_self_host(&mut functions, &ir)?;
     let linked_names: std::collections::BTreeSet<String> =
         functions.iter().filter(|f| !own.contains(&f.name)).map(|f| f.name.clone()).collect();
     crate::native_slot_rewrite::set_heap_slots(native_heap_slots(&functions, &record_layouts, &variant_layouts));
@@ -401,7 +399,7 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
         ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())),
         linked_names.clone(),
     );
-    let rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names)?;
+    let rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names, &runtime)?;
     let mut certs = native_ownership_certs(&program.functions, &crate::native_hof::sites());
     // Row 4: each function's bounds witness, recorded as the render wrote its
     // element accesses (render_native_bounds).

@@ -226,21 +226,13 @@ fn synthesize_slot_init(ir: &almide_ir::IrProgram) -> Option<almide_ir::IrFuncti
 /// bits, Unit as 0) and whose Err is a String: the T1-3 carrier
 /// `Result<i64, AlmideString>` (#4006 family C widened it past Int | Bool).
 fn is_native_result_ty(t: &almide_lang::types::Ty) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    use almide_lang::types::Ty;
-    matches!(t, Ty::Applied(TypeConstructorId::Result, a)
-        if a.len() == 2
-            && (crate::render_native_rec::is_lane_scalar(&a[0]) || matches!(a[0], Ty::Unit))
-            && matches!(a[1], Ty::String))
+    crate::render_native_rec::scalar_carrier_kind(t) == Some(crate::render_native::NTy::Res)
 }
 
 /// `Result[String, String]`: the String-Ok carrier `Result<AlmideString,
 /// AlmideString>` (#4006 family C).
 fn is_string_result_ty(t: &almide_lang::types::Ty) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    use almide_lang::types::Ty;
-    matches!(t, Ty::Applied(TypeConstructorId::Result, a)
-        if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String))
+    crate::render_native_rec::scalar_carrier_kind(t) == Some(crate::render_native::NTy::ResStr)
 }
 
 /// #4006 family C: rewrite every String-Ok Result window onto its carrier.
@@ -333,10 +325,7 @@ fn returns_lifted_carrier(f: &almide_ir::IrFunction) -> bool {
 /// An `Option` whose payload is one of the native scalar kinds (Int, Bool,
 /// Float): the `Option<i64>` carrier (#4006 family B), read off the type.
 fn is_scalar_option(t: &almide_lang::types::Ty) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    use almide_lang::types::Ty;
-    matches!(t, Ty::Applied(TypeConstructorId::Option, a)
-        if a.len() == 1 && crate::render_native_rec::is_lane_scalar(&a[0]))
+    crate::render_native_rec::scalar_carrier_kind(t) == Some(crate::render_native::NTy::Opt)
 }
 
 /// #4006 family B: rewrite every scalar-Option window onto the native

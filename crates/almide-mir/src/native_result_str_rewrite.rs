@@ -88,10 +88,17 @@ pub fn rewrite_result_str_ops(
 ) {
     let (recognized, piece_handle_ids) = recognize(&f.ops, carriers);
     let ops = std::mem::take(&mut f.ops);
+    let stored: BTreeSet<_> = ops.iter().filter_map(|op| match op {
+        Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.len() == 2 => Some(args[1]),
+        _ => None,
+    }).collect();
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = Tracker::default();
     t.vals.extend(res_str_params.iter().copied());
     for op in ops {
+        if let Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } = &op {
+            if args.len() == 1 && stored.contains(d) && t.vals.contains(&args[0]) { out.push(op.clone()); }
+        }
         let Some(op) = t.window_op(op, &mut out, &recognized, &piece_handle_ids) else { continue };
         let Some(op) = t.ownership_op(op, &mut out) else { continue };
         t.flow_op(op, &mut out, res_str_fns);

@@ -53,6 +53,10 @@ pub fn rewrite_result_ops(
     carriers: &BTreeSet<ValueId>,
 ) {
     let ops = std::mem::take(&mut f.ops);
+    let stored: BTreeSet<_> = ops.iter().filter_map(|op| match op {
+        Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.len() == 2 => Some(args[1]),
+        _ => None,
+    }).collect();
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = ResultWindowTracker::default();
     // A param declared as a carrier Result (#4006 family C) is one.
@@ -94,9 +98,13 @@ pub fn rewrite_result_ops(
             Op::Dup { src: v, .. } if t.minted.contains(v) => t.track_minted_copy(op, &mut out),
             Op::Prim {
                 kind: PrimKind::Handle,
-                dst: Some(_),
+                dst: Some(d),
                 args,
             } if args.len() == 1 => {
+                // A Result stored inside another typed value still needs
+                // its symbolic handle; only the Result's own access windows
+                // disappear in this rewrite.
+                if stored.contains(d) && t.res_vals.contains(&args[0]) { out.push(op.clone()); }
                 t.track_handle(op, &mut out);
             }
             Op::IntBinOp {

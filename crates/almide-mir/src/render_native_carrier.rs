@@ -92,6 +92,9 @@ pub(crate) fn carrier_values(
     callee: &dyn Fn(&str) -> Option<CarrierSig>,
 ) -> BTreeMap<ValueId, u16> {
     let mut ty = BTreeMap::new();
+    for (v, key) in &f.aggregate_blocks {
+        set_carrier(&mut ty, *v, crate::render_native_rec::rec_index(key).filter(|i| is_carrier(*i)));
+    }
     for (p, k) in f.params.iter().zip(&own.0) {
         set_carrier(&mut ty, p.value, *k);
     }
@@ -206,6 +209,16 @@ pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
     for op in &func.ops {
         // Uses first: a read used under a tag test of its own block.
         note_hoisted_uses(op, &reads, &arms, &mut sides);
+        let changed = match op {
+            Op::SetLocal { local, .. } => Some(*local),
+            Op::Prim { kind: PrimKind::Store { .. }, args, .. } => args.first().and_then(|a| at.get(a)).map(|(root, _)| *root),
+            _ => None,
+        };
+        if let Some(root) = changed {
+            for (read, base) in &reads { if *base == root { sides.insert(*read, None); } }
+            tags.retain(|_, base| *base != root);
+            for (base, _) in &mut arms { if *base == Some(root) { *base = None; } }
+        }
         match op {
             Op::ConstInt { dst, value } => {
                 consts.insert(*dst, *value);
@@ -249,6 +262,10 @@ pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
     sides.into_iter().filter_map(|(v, s)| s.map(|s| (v, s))).collect()
 }
 
+#[cfg(test)]
+#[path = "render_native_carrier_guard_test.rs"]
+mod guard_tests;
+
 /// The carrier index of a value's kind.
 fn carrier_of(t: Option<NTy>) -> Option<u16> {
     t?.rec().filter(|i| is_carrier(*i))
@@ -263,6 +280,11 @@ fn emit(out: &mut String, indent: usize, s: &str) {
 
 /// The owned copy of `v` as a slot of kind `k` (a carrier payload write).
 fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy) -> Result<String, LowerError> {
+    // A scalar Option is Copy and already materialized by the Option
+    // rewrite. It is a typed payload, not an address into an allocation.
+    if crate::native_value_repr::same_owned(k, NTy::Opt) && tys.get(&v) == Some(&NTy::Opt) && !st.addrs.contains_key(&v) {
+        return Ok(var(v));
+    }
     let Some(sv) = st.addrs.get(&v).copied().filter(|a| a.off == 0 && a.idx.is_none()) else {
         return Err(wall(format!("native: a {:?} carrier payload that is not a heap handle", tys.get(&v))));
     };
@@ -276,6 +298,7 @@ fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy)
 /// Render `op` if it touches a carrier. `None` = not a carrier op.
 pub(super) fn render_carrier_op(
     op: &Op,
+    used: &std::collections::BTreeSet<ValueId>,
     st: &mut AddrState,
     tys: &mut BTreeMap<ValueId, NTy>,
     out: &mut String,
@@ -294,6 +317,13 @@ pub(super) fn render_carrier_op(
         }
         Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } if args.len() == 1 => {
             let (ad, i) = cx.base_of(&args[0])?;
+            // Lowering reads both Result payload views before testing the
+            // tag. An unused view has no ownership event or observable
+            // read; it need not pick a Rust payload type at all. Keep the
+            // declared carrier and exact payload-slot checks here.
+            if rec_slot(&ad) == Some(0) && !used.contains(d) {
+                return Some(Ok(true));
+            }
             cx.load_handle(*d, ad, i)
         }
         Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 => {
@@ -504,8 +534,12 @@ impl CarrierCx<'_> {
             (None, _) if o == e => (o, format!("match &{b} {{ Ok(v) | Err(v) => v.clone() }}")),
             // Read above the tag test, used under its Ok side: the Err
             // side's read is never used, so it is a Default.
-            (None, Some(false)) if has_default(o) => {
-                (o, format!("match &{b} {{ Ok(v) => v.clone(), Err(_) => Default::default() }}"))
+            (None, Some(side)) => {
+                let (kind, selected, other) = if side { (e, "Err", "Ok") } else { (o, "Ok", "Err") };
+                let Some(unused) = crate::native_value_repr::unused_payload(kind) else {
+                    return Some(Err(Err(wall("native: no value for an unobserved carrier payload"))));
+                };
+                (kind, format!("match &{b} {{ {selected}(v) => v.clone(), {other}(_) => {unused} }}"))
             }
             _ => return Some(Err(Err(wall("native: a Result payload read outside its tag test")))),
         }))

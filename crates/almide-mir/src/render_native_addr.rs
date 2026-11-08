@@ -32,6 +32,10 @@ mod slots;
 mod heap_slot;
 #[path = "render_native_value.rs"]
 mod value;
+#[path = "render_native_byte_slots.rs"]
+mod byte_slots;
+#[path = "render_native_scalar_slots.rs"]
+mod scalar_slots;
 pub(crate) use carrier::{carrier_values, is_carrier, CarrierSig};
 pub(crate) use slots::flag_exits;
 
@@ -85,6 +89,7 @@ pub(crate) struct AddrState {
     alloc_rec: BTreeMap<ValueId, u16>,
     /// The one initializing tag store of each fresh, declared Null Value.
     null_init: BTreeSet<ValueId>,
+    list_finish: BTreeMap<ValueId, ValueId>,
     /// DynList allocs whose every stored element is a string.
     str_lists: BTreeSet<ValueId>,
     /// A Result carrier's tag read → the carrier (its `if` selects the arm).
@@ -158,15 +163,18 @@ impl AddrState {
             .ops
             .iter()
             .filter_map(|op| match op {
-                Op::Alloc { dst, init: Init::DynList { .. } | Init::DynListStr { .. } | Init::Empty, .. } => alloc_rec.get(dst).map(|i| (*dst, *i)),
+                Op::Alloc { dst, init: Init::DynList { .. } | Init::DynListStr { .. } | Init::DynStr { .. } | Init::Empty, .. } => alloc_rec.get(dst).map(|i| (*dst, *i)),
                 Op::Alloc { dst, init: Init::OptNone | Init::ResOkScalar { .. }, .. } => {
                     alloc_rec.get(dst).filter(|i| carrier::is_carrier(**i)).map(|i| (*dst, *i))
                 }
+                Op::Alloc { dst, init: Init::IntList(vs), .. } if vs.is_empty() => alloc_rec.get(dst).copied()
+                    .filter(|i| crate::render_native_rec::list_elem(*i).is_some()).map(|i| (*dst, i)),
                 // A scalar-only constructor of a heap variant, or an all-scalar
                 // generated struct, is built as a slot list.
-                Op::ListLit { dst, .. } => alloc_rec
+                Op::ListLit { dst, elems } => alloc_rec
                     .get(dst)
-                    .filter(|i| crate::render_native_rec::enum_cases(**i).is_some() || crate::render_native_rec::all_scalar_struct(**i))
+                    .filter(|i| crate::render_native_rec::enum_cases(**i).is_some() || crate::render_native_rec::all_scalar_struct(**i)
+                        || (elems.is_empty() && crate::render_native_rec::list_elem(**i).is_some()))
                     .map(|i| (*dst, *i)),
                 _ => None,
             })
@@ -212,6 +220,7 @@ impl AddrState {
             str_lists,
             alloc_rec,
             null_init,
+            list_finish: crate::native_list_finish::finalizers(func),
             addr_operands,
             consts: BTreeMap::new(),
             scaled: BTreeSet::new(),
@@ -562,6 +571,8 @@ fn is_enum(t: Option<NTy>) -> Option<u16> {
 /// The owned copy of a heap value `code` of kind `t` (for a field write).
 fn owned_from(code: &str, t: NTy) -> Option<String> {
     Some(match t {
+        NTy::Opt => code.to_string(),
+        NTy::Res | NTy::ResStr => format!("{code}.clone()"),
         NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) => crate::render_native_move::take_expr(code),
         NTy::StrRef => format!("AlmideString::from({code})"),
         NTy::VecRef | NTy::VecStrRef => format!("{code}.to_vec()"),
@@ -572,13 +583,7 @@ fn owned_from(code: &str, t: NTy) -> Option<String> {
 
 /// A field of kind `field` accepts a value of kind `got`.
 fn field_accepts(field: NTy, got: NTy) -> bool {
-    match field {
-        NTy::Str => matches!(got, NTy::Str | NTy::StrRef),
-        NTy::Vec => matches!(got, NTy::Vec | NTy::VecRef),
-        NTy::VecStr => matches!(got, NTy::VecStr | NTy::VecStrRef),
-        NTy::Rec(i) => matches!(got, NTy::Rec(j) | NTy::RecRef(j) if j == i),
-        _ => false,
-    }
+    crate::native_value_repr::same_owned(field, got)
 }
 
 thread_local! {
@@ -785,21 +790,6 @@ pub(crate) fn single_concat(func: &MirFunction, i: usize, tys: &mut BTreeMap<Val
     Some((format!("let mut {}: Vec<AlmideString> = {{ {left} r }};", var(*d)), true))
 }
 
-pub(crate) fn single_push(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, NTy>, st: &mut AddrState) -> Option<(String, bool)> {
-    let (s, x, d) = crate::render_native_append::self_append_window(func, i)?;
-    // A generated list's element: its window was checked when it was chosen.
-    if st.single_rec.remove(&x) == Some(true) {
-        return Some((format!("{}.push({}_e0);", var(s), var(x)), true));
-    }
-    if st.single.get(&x) != Some(&true) {
-        return None;
-    }
-    st.single.remove(&x);
-    if tys.get(&s) == Some(&NTy::VecStr) && func.ret != Some(d) && crate::render_native_append::touches(func, d) == 2 {
-        return Some((format!("{}.push({}_e0);", var(s), var(x)), true));
-    }
-    Some((format!("let mut {x}: Vec<AlmideString> = vec![{x}_e0];", x = var(x)), false))
-}
 
 include!("render_native_addr_op.rs");
 include!("render_native_addr_alloc.rs");

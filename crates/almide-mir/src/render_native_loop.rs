@@ -549,8 +549,9 @@ fn render_fn_tier_op(st: &mut FnLoop<'_>, other: &Op) -> Result<(), LowerError> 
         &mut st.if_stack,
     )?;
     if !handled {
-        let detail = if let Op::Prim { kind, .. } = other {
-            format!("Prim {kind:?}")
+        let detail = if let Op::Prim { kind, args, .. } = other {
+            let kinds: Vec<_> = args.iter().map(|v| st.tys.get(v)).collect();
+            format!("Prim {kind:?} with {kinds:?}")
         } else {
             op_name(other)
         };

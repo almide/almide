@@ -49,6 +49,9 @@ fn heap_of_sig(k: NativeSigKind) -> Option<NTy> {
         NativeSigKind::ListI64 => NTy::Vec,
         NativeSigKind::ListStr => NTy::VecStr,
         NativeSigKind::Rec(i) => NTy::Rec(i),
+        NativeSigKind::Opt => NTy::Opt,
+        NativeSigKind::Res => NTy::Res,
+        NativeSigKind::ResStr => NTy::ResStr,
         _ => return None,
     })
 }
@@ -82,6 +85,9 @@ fn call_result(name: &str, sigs: &NativeSigs) -> Option<NTy> {
         FloorRet::Bytes => Some(NTy::Rec(rec::bytes_index())),
         FloorRet::Value => Some(NTy::Rec(rec::value_index())),
         FloorRet::Matrix => Some(NTy::Rec(rec::matrix_index())),
+        FloorRet::Res(_) => Some(NTy::Res),
+        FloorRet::ResStr => Some(NTy::ResStr),
+        FloorRet::Opt(_) => Some(NTy::Opt),
         _ => None,
     }
 }
@@ -124,7 +130,7 @@ pub(super) fn type_blocks(
     for (v, key) in &func.aggregate_blocks {
         if key == rec::VALUE_KEY {
             alloc_rec.entry(*v).or_insert_with(rec::value_index);
-        } else if let Some(i) = rec::rec_index(key).filter(|i| rec::all_scalar_struct(*i) || rec::enum_cases(*i).is_some()) {
+        } else if let Some(i) = rec::rec_index(key) {
             alloc_rec.entry(*v).or_insert(i);
         } else if let Some(n) = anon_scalar_record_len(func, *v, key) {
             // An anonymous all-scalar record (`list.map((i) => { x: i, y: i })`)
@@ -215,6 +221,13 @@ impl BlockTyping<'_, '_> {
             Op::Prim { kind: PrimKind::OptMakeSome | PrimKind::OptMakeNone | PrimKind::OptCopy, dst: Some(d), .. } => {
                 self.known.insert(*d, NTy::Opt);
             }
+            Op::Prim { kind: PrimKind::ResMakeOk | PrimKind::ResMakeErrStr, dst: Some(d), .. } => {
+                self.known.insert(*d, NTy::Res);
+            }
+            Op::Prim { kind: PrimKind::ResStrMake, dst: Some(d), .. } => {
+                self.known.insert(*d, NTy::ResStr);
+            }
+            Op::Prim { kind: PrimKind::ResCopy, dst: Some(d), args } if args.len() == 1 => self.dups.push((*d, args[0])),
             Op::Alloc { dst, init: Init::IntList(_), .. } | Op::ListLit { dst, .. } if !self.alloc_rec.contains_key(dst) => {
                 self.known.insert(*dst, NTy::Vec);
             }
@@ -231,7 +244,7 @@ impl BlockTyping<'_, '_> {
                     self.concats.push((*d, *a, *b));
                 }
             }
-            Op::Dup { dst, src } => self.dups.push((*dst, *src)),
+            Op::Dup { dst, src } | Op::SetLocal { local: dst, src } => self.dups.push((*dst, *src)),
             Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => self.scan_join(op, open),
             // A typed drop that names a list of a generated type `T`.
             Op::DropVariant { v, ty } if !self.alloc_rec.contains_key(v) => {
@@ -304,6 +317,10 @@ impl BlockTyping<'_, '_> {
     /// A declared block type crosses a copy or a join, in either direction:
     /// both arms of an `if` and its result are one value's type.
     fn across(&mut self) {
+        // Preserve nominal types before inferring anonymous slot structs.
+        for (v, t) in &self.known {
+            if let NTy::Rec(i) = t { self.alloc_rec.entry(*v).or_insert(*i); }
+        }
         for (d, s) in &self.dups {
             for (x, y) in [(d, s), (s, d)] {
                 if let Some(&i) = self.alloc_rec.get(x) {
@@ -319,6 +336,21 @@ impl BlockTyping<'_, '_> {
             }
         }
         self.across_concats();
+        self.empty_string_lists();
+    }
+
+    fn empty_string_lists(&mut self) {
+        let empty = super::empty_list_blocks(self.func);
+        let edges = self.dups.iter().copied().chain(self.joins.iter().flat_map(|(d, a, b)| [(*d, *a), (*d, *b), (*a, *b)]));
+        let mut pending = Vec::new();
+        for (a, b) in edges {
+            for (src, dst) in [(a, b), (b, a)] {
+                if self.kind_of(&src) == Some(NTy::VecStr) && empty.contains(&dst) && !self.alloc_rec.contains_key(&dst) {
+                    pending.push(dst);
+                }
+            }
+        }
+        for v in pending { self.scalar_blocks.remove(&v); self.str_lists.insert(v); self.known.insert(v, NTy::VecStr); }
     }
 
     /// A list concatenation's operands and result are one list type: a
@@ -337,11 +369,12 @@ impl BlockTyping<'_, '_> {
                 continue;
             };
             for v in [a, b] {
-                if self.alloc_rec.contains_key(&v) || self.str_lists.contains(&v) || self.known.contains_key(&v) {
+                if self.alloc_rec.contains_key(&v) {
                     continue;
                 }
                 if self.blocks.iter().any(|(r, _)| *r == v) && self.block_stores(v).is_some_and(|s| s.is_empty()) {
                     self.scalar_blocks.remove(&v);
+                    self.str_lists.remove(&v);
                     self.alloc_rec.insert(v, i);
                 }
             }

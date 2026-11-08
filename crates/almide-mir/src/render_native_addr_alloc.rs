@@ -17,10 +17,10 @@ fn block_alloc_op(op: &Op, s: AddrSink<'_>) -> Result<Option<bool>, LowerError> 
         Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. }
             if st.alloc_rec.get(dst).is_some_and(|i| crate::render_native_rec::list_elem(*i).is_some()) =>
         {
-            Ok(Some(alloc_rec_list(AddrSink { st, tys, out, indent }, dst, len)))
+            alloc_rec_list(AddrSink { st, tys, out, indent }, dst, len).map(Some)
         }
         Op::Alloc { dst, init: Init::DynList { .. }, .. } if st.alloc_rec.contains_key(dst) => {
-            Ok(Some(alloc_rec_block(AddrSink { st, tys, out, indent }, dst)))
+            alloc_rec_block(AddrSink { st, tys, out, indent }, dst).map(Some)
         }
         Op::Alloc { dst, init: Init::DynList { len }, .. } if ty(tys, len) == Some(NTy::I64) && st.str_lists.contains(dst) => {
             Ok(Some(alloc_typed_str_list(AddrSink { st, tys, out, indent }, dst, len)))
@@ -41,6 +41,16 @@ fn const_or_empty_alloc(op: &Op, s: AddrSink<'_>) -> Option<bool> {
             for _ in 0..indent { out.push_str("    "); }
             writeln!(out, $($arg)*).unwrap();
         }};
+    }
+    if let Some(dst) = match op { Op::Alloc { dst, .. } | Op::ListLit { dst, .. } => Some(dst), _ => None }
+        .filter(|dst| st.empty_lists.contains(dst)) {
+        let t = st.alloc_rec.get(dst).copied().filter(|i| crate::render_native_rec::list_elem(*i).is_some()).map(NTy::Rec)
+            .or_else(|| st.str_lists.contains(dst).then_some(NTy::VecStr));
+        if let Some(t) = t {
+            tys.insert(*dst, t);
+            line!("let mut {}: {} = Vec::new();", var(*dst), crate::render_native_rec::owned_ty(t));
+            return Some(true);
+        }
     }
     match op {
         // A typed empty container: its type's empty value.
@@ -111,7 +121,7 @@ fn alloc_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
 }
 
 /// A list alloc whose declared type is a generated list.
-fn alloc_rec_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
+fn alloc_rec_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> Result<bool, LowerError> {
     let AddrSink { st, tys, out, indent } = s;
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -127,10 +137,17 @@ fn alloc_rec_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
         if let Some(n) = st.consts.get(len).and_then(|n| usize::try_from(*n).ok()) {
             st.literal.insert(*dst, (n, 0));
             line!("// {}: a list of {n}, built whole at its last element", var(*dst));
-            return true;
+            return Ok(true);
         }
         line!("let mut {}: {} = {};", var(*dst), crate::render_native_rec::struct_name(i), reserved_vec(&var(*len)));
-        return true;
+        return Ok(true);
+    }
+    if st.consts.get(len) == Some(&0) {
+        line!("let mut {}: {} = Vec::new();", var(*dst), crate::render_native_rec::struct_name(i));
+        return Ok(true);
+    }
+    if !crate::render_native_rec::list_elem(i).is_some_and(crate::render_native_rec::has_default) {
+        return Err(wall("native: list elements must be built before reading their value"));
     }
     line!(
         "let mut {}: {} = (0..{}.max(0)).map(|_| Default::default()).collect();",
@@ -138,11 +155,11 @@ fn alloc_rec_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
         crate::render_native_rec::struct_name(i),
         var(*len)
     );
-    true
+    Ok(true)
 }
 
 /// A `DynList` alloc whose declared type is a record or an enum.
-fn alloc_rec_block(s: AddrSink<'_>, dst: &ValueId) -> bool {
+fn alloc_rec_block(s: AddrSink<'_>, dst: &ValueId) -> Result<bool, LowerError> {
     let AddrSink { st, tys, out, indent } = s;
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -155,15 +172,18 @@ fn alloc_rec_block(s: AddrSink<'_>, dst: &ValueId) -> bool {
     if let (true, Some(n)) = (st.whole.contains(dst), slots::struct_width(i)) {
         line!("let mut {}: {};", var(*dst), crate::render_native_rec::struct_name(i));
         st.building.insert(*dst, vec![false; n]);
-        return true;
+        return Ok(true);
     }
     if let Some(&(t, n)) = st.whole_enum.get(dst) {
         line!("let mut {}: {};", var(*dst), crate::render_native_rec::struct_name(i));
         st.building_enum.insert(*dst, (t, vec![None; n]));
-        return true;
+        return Ok(true);
+    }
+    if !crate::render_native_rec::has_default(NTy::Rec(i)) {
+        return Err(wall("native: all record fields must be initialized before use"));
     }
     line!("let mut {}: {} = Default::default();", var(*dst), crate::render_native_rec::struct_name(i));
-    true
+    Ok(true)
 }
 
 /// A `DynList` alloc every stored element of which is a string.
@@ -258,4 +278,21 @@ fn const_list_elems(
 /// source the length can be a range's span, which no machine may hold.
 pub(crate) fn reserved_vec(len: &str) -> String {
     format!("{{ let mut r = Vec::new(); if r.try_reserve_exact({len}.max(0) as usize).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }} r }}")
+}
+
+// Materialize a singleton only when it cannot be appended directly.
+pub(crate) fn single_push(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, NTy>, st: &mut AddrState) -> Option<(String, bool)> {
+    let (s, x, d) = crate::render_native_append::self_append_window(func, i)?;
+    // A generated list's element: its window was checked when it was chosen.
+    if st.single_rec.remove(&x) == Some(true) {
+        return Some((format!("{}.push({}_e0);", var(s), var(x)), true));
+    }
+    if st.single.get(&x) != Some(&true) {
+        return None;
+    }
+    st.single.remove(&x);
+    if tys.get(&s) == Some(&NTy::VecStr) && func.ret != Some(d) && crate::render_native_append::touches(func, d) == 2 {
+        return Some((format!("{}.push({}_e0);", var(s), var(x)), true));
+    }
+    Some((format!("let mut {x}: Vec<AlmideString> = vec![{x}_e0];", x = var(x)), false))
 }

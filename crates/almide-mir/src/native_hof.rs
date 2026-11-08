@@ -474,27 +474,34 @@ const LANE_F64: &str = "trait AlmdLaneF64 { fn lane_f64(self) -> f64; }\nimpl Al
 /// The adapter: a closure, borrowing the env array `env` (a copy of the
 /// closure block's scalar slots), that calls the lifted lambda `lambda`
 /// (params of kinds `ps`) on each element it is lent. `bits[i]`: that param
-/// is a runtime `f64` the lambda takes as its bits. `float_ret`: the
-/// declared result is a `Float` (read through [`LANE_F64`]); else the
-/// lambda's result kind `ret` is the runtime's.
-fn adapter(lambda: &str, env: &str, ps: &[NativeSigKind], bits: &[bool], ret: NativeSigKind, float_ret: bool) -> Option<String> {
+/// is a runtime `f64` the lambda takes as its bits. The declared types also
+/// preserve Bool at this boundary: native MIR uses i64, Rust uses bool.
+fn adapter(lambda: &str, env: &str, ps: &[NativeSigKind], bits: &[bool], ret: NativeSigKind, (dps, dret): (&[DTy], &DTy)) -> Option<String> {
     if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) {
         return None;
     }
     let spell = |k: NativeSigKind, b: bool| if b { "f64".to_string() } else { rec::owned_ty(clo::owned_nty(k)) };
-    let params: Vec<String> = ps.iter().zip(bits).enumerate().map(|(i, (k, b))| format!("__p{i}: {}", spell(*k, *b))).collect();
+    let params: Vec<String> = ps.iter().zip(bits).enumerate().map(|(i, (k, b))| {
+        let ty = if dps[i] == DTy::Bool { "bool".to_string() } else { spell(*k, *b) };
+        format!("__p{i}: {ty}")
+    }).collect();
     let args: String = ps
         .iter()
         .zip(bits)
         .enumerate()
         .map(|(i, (k, b))| match k {
+            _ if dps[i] == DTy::Bool => format!(", i64::from(__p{i})"),
             _ if *b => format!(", __p{i}.to_bits() as i64"),
             NativeSigKind::Str | NativeSigKind::ListI64 | NativeSigKind::ListStr | NativeSigKind::Rec(_) => format!(", &__p{i}"),
             _ => format!(", __p{i}"),
         })
         .collect();
     let call = format!("{}(&{env}{args})", crate::render_native::mangle(lambda));
-    let (call, ret_ty) = if float_ret { (format!("AlmdLaneF64::lane_f64({call})"), "f64".to_string()) } else { (call, spell(ret, false)) };
+    let (call, ret_ty) = match dret {
+        DTy::Float => (format!("AlmdLaneF64::lane_f64({call})"), "f64".to_string()),
+        DTy::Bool => (format!("({call}) != 0"), "bool".to_string()),
+        _ => (call, spell(ret, false)),
+    };
     Some(format!("|{}| -> {ret_ty} {{ {call} }}", params.join(", ")))
 }
 
@@ -577,7 +584,7 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
         })
         .collect::<Option<_>>()?;
     let name = format!("__env_{}_{}", cx.at, side.prelude.len());
-    let closure = adapter(lambda, &name, &ps, &bits, ret, float_ret)?;
+    let closure = adapter(lambda, &name, &ps, &bits, ret, (dps, dret))?;
     side.prelude.push(format!("let {name}: [i64; {}] = [{}];", slots.len(), slots.join(", ")));
     Some(closure)
 }
@@ -642,6 +649,7 @@ fn plan(
     for (((d, by_ref), (code, t)), a) in hof.params.iter().zip(&got).zip(call.args.iter()) {
         rendered.push(match d {
             DTy::Fn(dps, dret) => fn_arg(&cx, &mut env, (dps, dret), (a, *t), &mut side)?,
+            DTy::Bool => format!("({code} != 0)"),
             _ => {
                 let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
                 runtime_arg(code, *t, *by_ref, dying)
@@ -650,6 +658,7 @@ fn plan(
     }
     let ret = kind_of(&env, &hof.ret)?;
     let expr = format!("{}({})", hof.twin, rendered.join(", "));
+    let expr = if hof.ret == DTy::Bool { format!("i64::from({expr})") } else { expr };
     Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims)))
 }
 
@@ -722,6 +731,7 @@ mod tests {
             ("list_fold_str", "almide_rt_list_fold"),
             ("list_map_str", "almide_rt_list_map"),
             ("list_map", "almide_rt_list_map"),
+            ("list_filter_rc", "almide_rt_list_filter"),
             ("list_flat_map_str", "almide_rt_list_flat_map"),
             ("option_map", "almide_rt_option_map"),
             ("matrix_map", "almide_rt_matrix_map"),

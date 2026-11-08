@@ -18,6 +18,9 @@ impl LowerCtx {
         let r = self.lower_heap_result_arm_unmarked(arm, result_ty);
         self.unit_arm_depth -= 1;
         self.in_frame -= 1;
+        if let Some(dst) = r {
+            self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(result_ty));
+        }
         r
     }
 
@@ -607,6 +610,18 @@ impl LowerCtx {
     /// The OWNED heap payload a general `some(<heap>)` arm moves into the Option.
     fn arm_some_heap_piece(&mut self, expr: &IrExpr) -> Option<ValueId> {
         Some(match &expr.kind {
+            // Nested constructors use the same typed materializer as a
+            // let-bound Some payload. Keep temporary owners within this arm;
+            // the returned fresh owner is consumed by the outer wrapper.
+            IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
+            | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => {
+                let mark = self.live_heap_handles.len();
+                let p = self.try_lower_option_ctor(expr, &expr.ty)?;
+                self.live_heap_handles.retain(|h| *h != p);
+                self.drop_arm_locals(mark);
+                p
+            }
+
             // `some(v)` over a Var STILL OWNED elsewhere (a borrowed param, or a local with
             // its own scope-end drop): `Op::Dup` a fresh owned reference (cert `a`) to MOVE
             // into the Option, leaving the original to drop once at its scope — never a bare

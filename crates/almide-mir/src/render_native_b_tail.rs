@@ -302,6 +302,12 @@ fn render_end_if(
             return Ok(());
         }
         let rhs = end_if_copy_rhs(v, t);
+        if let Some(recode) = crate::native_value_repr::scalar_recode(&var(v), t, join_t) {
+            line!("{} = {};", var(d), recode);
+            *indent -= 1;
+            line!("}}");
+            return Ok(());
+        }
         let arm_t = match t {
             NTy::StrRef => NTy::Str,
             NTy::VecRef => NTy::Vec,
@@ -309,8 +315,9 @@ fn render_end_if(
             NTy::RecRef(i) => NTy::Rec(i),
             other => other,
         };
-        if arm_t != join_t {
-            return Err(wall("native: if-value arms disagree on type"));
+        if arm_t != join_t && !(crate::render_native::owned_nty(join_t) == join_t
+            && crate::native_value_repr::same_owned(arm_t, join_t)) {
+            return Err(wall(format!("native: if-value arms disagree on type ({join_t:?} vs {arm_t:?})")));
         }
         line!("{} = {};", var(d), join_rhs(v, t, !known.contains(&v), rhs));
     }

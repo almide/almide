@@ -181,7 +181,7 @@ impl OptionTracker {
 
 /// The Option read a swallowed `Load` at offset `off` of Option `o` is: the
 /// tag (length word) or the payload slot; `None` for any other window.
-fn load_window(kind: &PrimKind, off: i64, d: ValueId, o: ValueId) -> Option<Op> {
+pub(crate) fn load_window(kind: &PrimKind, off: i64, d: ValueId, o: ValueId) -> Option<Op> {
     match (kind, off) {
         (PrimKind::Load { width: 4 }, 4) => Some(Op::Prim { kind: PrimKind::OptTag, dst: Some(d), args: vec![o] }),
         (PrimKind::Load { width: 8 }, 12) => Some(Op::Prim { kind: PrimKind::OptPayload, dst: Some(d), args: vec![o] }),

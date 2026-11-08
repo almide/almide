@@ -10,8 +10,9 @@
 // and every call site is retargeted from the call name to that impl name.
 // The linked functions go through the same subset check, ownership
 // verification and certificate as user functions — a linked body is
-// certified, not trusted — and a body that does not lower walls the program
-// (no per-fn fallback on this render, so no silent drop).
+// certified, not trusted. A refused body walls unless every path to it is
+// cut by a declared native_hof runtime call. Those calls keep the existing
+// trusted-runtime boundary and must pass its per-site checks and witness.
 
 /// One linked registry source: its IR (signatures, Result shapes) and layouts.
 struct LinkedSelfHost {
@@ -82,6 +83,7 @@ struct SelfHostLinker<'u> {
     linked: Vec<LinkedSelfHost>,
     linked_srcs: std::collections::BTreeMap<&'static str, usize>,
     done: std::collections::BTreeSet<String>,
+    refused: std::collections::BTreeMap<String, LowerError>,
 }
 
 impl SelfHostLinker<'_> {
@@ -124,7 +126,7 @@ impl SelfHostLinker<'_> {
         let mut wanted: Vec<(&'static str, String)> = Vec::new();
         for f in functions.iter_mut() {
             for op in &mut f.ops {
-                let crate::Op::CallFn { name, .. } = op else { continue };
+                let (crate::Op::CallFn { name, .. } | crate::Op::FuncRef { name, .. }) = op else { continue };
                 if defined.contains(name.as_str()) {
                     continue;
                 }
@@ -170,18 +172,34 @@ impl SelfHostLinker<'_> {
             self.done.insert(impl_fn);
             return Ok(());
         };
+        let recs = crate::render_native_rec::snapshot();
+        let lambdas = crate::lambda_sigs::snapshot();
+        let options = crate::option_blocks::snapshot();
         crate::render_native_rec::extend_with(
             &func.params.iter().map(|p| p.ty.clone()).chain(std::iter::once(func.ret_ty.clone())).collect::<Vec<_>>(),
         );
-        native_sig_subset_check(func, &sh.record_layouts, &sh.variant_layouts)?;
-        let all = crate::lower::lower_function_all_with_globals(
-            func,
-            &Default::default(),
-            &Default::default(),
-            &sh.record_layouts,
-            &sh.variant_layouts,
-        )
-        .map_err(|e| LowerError::at(func.body.span, format!("native: self-host fn `{impl_fn}`: {e:?}")))?;
+        let lowered = native_sig_subset_check(func, &sh.record_layouts, &sh.variant_layouts).and_then(|()| {
+            crate::lower::lower_function_all_with_globals(
+                func,
+                &Default::default(),
+                &Default::default(),
+                &sh.record_layouts,
+                &sh.variant_layouts,
+            )
+            .map_err(|e| LowerError::at(func.body.span, format!("native: self-host fn `{impl_fn}`: {e:?}")))
+        });
+        let all = match lowered {
+            Ok(all) => all,
+            Err(error) => {
+                // A failed attempt must not seed another function's type facts.
+                crate::render_native_rec::restore(recs);
+                crate::lambda_sigs::restore(lambdas);
+                crate::option_blocks::restore(options);
+                self.done.insert(impl_fn.clone());
+                self.refused.insert(impl_fn, error);
+                return Ok(());
+            }
+        };
         for g in &all {
             if self.user_names.contains(&g.name) {
                 return Err(self.clash(&g.name));
@@ -199,7 +217,7 @@ impl SelfHostLinker<'_> {
 fn link_native_self_host(
     functions: &mut Vec<crate::MirFunction>,
     user_ir: &almide_ir::IrProgram,
-) -> Result<Vec<LinkedSelfHost>, LowerError> {
+) -> Result<(Vec<LinkedSelfHost>, std::collections::BTreeSet<String>), LowerError> {
     let (by_call, entries_of) = self_host_call_table();
     let mut linker = SelfHostLinker {
         user_ir,
@@ -209,6 +227,7 @@ fn link_native_self_host(
         linked: Vec::new(),
         linked_srcs: std::collections::BTreeMap::new(),
         done: std::collections::BTreeSet::new(),
+        refused: std::collections::BTreeMap::new(),
     };
     loop {
         let wanted = linker.collect_wanted(functions)?;
@@ -219,5 +238,6 @@ fn link_native_self_host(
             linker.link_one(functions, src, impl_fn)?;
         }
     }
-    Ok(linker.linked)
+    let runtime = crate::native_link_routes::route(functions, &linker.user_names, &linker.refused)?;
+    Ok((linker.linked, runtime))
 }

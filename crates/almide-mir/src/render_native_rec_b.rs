@@ -239,6 +239,9 @@ impl Derive<'_> {
 
     /// The kind a field or element of type `t` holds (see [`FieldKind`]).
     fn kind(&self, t: &almide_lang::types::Ty, set: &std::collections::BTreeSet<String>) -> FieldKind {
+        if let Some(k) = scalar_carrier_kind(t) {
+            return Some(Ok(k));
+        }
         if let Some(k) = self.kind_head(t, set) {
             return k;
         }
@@ -509,3 +512,24 @@ fn alias_target(d: &RecDecl) -> Option<String> {
 pub(crate) fn alias_targets() -> String {
     RECS.with(|r| r.borrow().iter().filter_map(alias_target).map(|t| t + ";\n").collect())
 }
+
+/// The builtin by-value carriers, derived identically at call boundaries
+/// and inside aggregate fields. Nested types must not lose this spelling.
+pub(crate) fn scalar_carrier_kind(t: &almide_lang::types::Ty) -> Option<NTy> {
+    use almide_lang::types::{constructor::TypeConstructorId, Ty};
+    match t {
+        Ty::Applied(TypeConstructorId::Option, a)
+            if a.len() == 1 && is_lane_scalar(&a[0]) => Some(NTy::Opt),
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && a[1] == Ty::String => {
+            if is_lane_scalar(&a[0]) || a[0] == Ty::Unit { Some(NTy::Res) }
+            else if a[0] == Ty::String { Some(NTy::ResStr) }
+            else { None }
+        }
+        _ => None,
+    }
+}
+
+
+#[cfg(test)]
+#[path = "render_native_carrier_types_test.rs"]
+mod carrier_types_test;

@@ -165,8 +165,13 @@ pub(crate) fn render_set_local(
         other => other,
     };
     if let Some(prev) = tys.get(local) {
-        if *prev != store_t {
-            return Err(wall("native: SetLocal changes a value's type"));
+        if let Some(recode) = crate::native_value_repr::scalar_recode(&var(*src), t, *prev) {
+            line!("{} = {};", var(*local), recode);
+            return Ok(());
+        }
+        if *prev != store_t && !(crate::render_native::owned_nty(*prev) == *prev
+            && crate::native_value_repr::same_owned(*prev, store_t)) {
+            return Err(wall(format!("native: SetLocal changes a value's type ({prev:?} <- {store_t:?})")));
         }
         line!("{} = {};", var(*local), rhs);
     } else {

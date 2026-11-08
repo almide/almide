@@ -23,3 +23,11 @@ pub(crate) fn get(name: &str) -> Option<(Vec<Ty>, Ty)> {
 pub(crate) fn clear() {
     SIGS.with(|s| s.borrow_mut().clear());
 }
+
+pub(crate) fn snapshot() -> BTreeMap<String, (Vec<Ty>, Ty)> {
+    SIGS.with(|s| s.borrow().clone())
+}
+
+pub(crate) fn restore(saved: BTreeMap<String, (Vec<Ty>, Ty)>) {
+    SIGS.with(|s| *s.borrow_mut() = saved);
+}

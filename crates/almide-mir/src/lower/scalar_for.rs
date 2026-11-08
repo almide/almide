@@ -427,6 +427,10 @@ impl LowerCtx {
         self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(elem), args: vec![addr] });
         self.value_of.insert(var, elem);
         self.param_values.insert(elem);
+        // The list owns this element, exactly as a caller owns a borrowed
+        // parameter. Preserve its declared Option/Result read shape so a
+        // match or ?? in the loop reads the element rather than declining.
+        self.seed_variant_param(elem, &plan.elem_ty);
         // A heap-AGGREGATE element (tuple/record): register the borrowed block handle as a
         // materialized aggregate so a `p.0`/`r.x` field projection and a `let (x, y) = p`
         // destructure read the ELEMENT's slots (not the container) — the same per-element borrow

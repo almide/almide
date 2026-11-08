@@ -430,7 +430,7 @@ fn render_narrow_bin_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
 }
 
 /// The scalar-Option carrier arms of [`render_native_result_op`].
-fn render_option_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+pub(crate) fn render_option_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
     let OpSink {
         tys,
         out,
