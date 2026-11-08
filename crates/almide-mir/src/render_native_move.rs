@@ -594,6 +594,17 @@ pub(crate) fn set_moving_args(
     MOVING.with(|m| *m.borrow_mut() = moving);
 }
 
+/// The Result param `base` (the callee's own: there is no borrowed Result
+/// kind) is never rebound nor returned, and no path after `ops[at]` reads it
+/// or anything borrowed from it.
+pub(crate) fn result_param_dies(func: &MirFunction, at: usize, base: ValueId) -> bool {
+    !drill_no_moves()
+        && func.params.iter().any(|p| p.value == base)
+        && !func.ops.iter().any(|op| matches!(op, Op::SetLocal { local, .. } if *local == base))
+        && func.ret != Some(base)
+        && !crate::mir_liveness::live_after(func, at, base)
+}
+
 /// An owned carrier a borrowed payload read can be moved out of when it
 /// dies: a record or enum block, or the String-Ok Result whose one slot
 /// holds either side's string.
