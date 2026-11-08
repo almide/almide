@@ -138,6 +138,10 @@ def own_text(reg):
                 row[k] = " "
     return "\n".join("".join(l) for l in lines)
 
+for f in data["functions"]:
+    if "render_fn_move_op" in demangle(f["name"]):
+        for r in f["regions"]:
+            print("REG", demangle(f["name"]).split("::")[-1], r[:8])
 counts = {}
 seen_fns = set()
 for reg in regions:
@@ -153,6 +157,8 @@ for reg in regions:
     # code of its own: it renders nothing either.
     if "wall(" not in own and re.search(r"[A-Za-z_]", own):
         counts[key] = counts.get(key, 0) + 1
+        if "render_fn_move_op" in key[1]:
+            print("ZERO", key[1], reg[2], reg[3], own.strip()[:200].replace("\n", " "))
 
 rows = {}
 if os.path.exists(baseline):
