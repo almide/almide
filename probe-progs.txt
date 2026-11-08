@@ -1,0 +1,2 @@
+spec/wasm_cross/tuple_bound_list_mapped_in_loop.almd
+spec/wasm_cross/string_rle.almd
