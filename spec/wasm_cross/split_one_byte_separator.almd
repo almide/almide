@@ -4,9 +4,9 @@
 // search. The pieces are the general split's: empty pieces at either end and
 // between adjacent separators are kept, the empty string is one empty piece,
 // multibyte characters never match a one-byte separator, and a large input
-// (5000+ segments) is split iteratively. The last lines take the general
-// kernel — a multibyte separator, a one-byte separator held in a variable,
-// and a non-ASCII separator — and must agree with the one-byte kernel.
+// (5000+ segments) is split iteratively. Every split here has a one-byte
+// literal separator: a program with any other separator ships the search
+// kernel anyway and routes these through it too.
 fn show(parts: List[String]) -> String = "${list.len(parts)}:[${parts |> list.join("|")}]"
 
 fn main() -> Unit = {
@@ -20,8 +20,4 @@ fn main() -> Unit = {
   println(show(string.split("item-7, value 49 ,  tag7  ,x", ",")))
   let big = string.split(string.repeat("ab,", 6000), ",")
   println("${list.len(big)} ${big |> list.first ?? "none"} ${big |> list.last ?? "none"}")
-  let sep = string.slice(",;", 0, 1)
-  println(show(string.split(",a,,b,", sep)))
-  println(show(string.split("a::b::::c", "::")))
-  println(show(string.split("a→b→", "→")))
 }

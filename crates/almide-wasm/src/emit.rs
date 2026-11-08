@@ -278,6 +278,9 @@ fn emit_program_pass(
     let work = FnWork { region_pure: std::cell::RefCell::new(region_pure), global_reach: reach.into(), ..FnWork::default() };
     work.deep_global_base.set(crate::deep_walk::global_base(global_decls.len()));
     work.bounded_lines.set(bounded_lines);
+    work.split_search_linked.set(crate::string_ext::needs_split_search(
+        program_fns.iter().map(|f| &f.0.body).chain(ir.top_lets.iter().map(|t| &t.value)),
+    ));
     // Calls made from display-helper bodies (BFS roots).
     let mut display_helper_calls: std::collections::HashSet<usize> = HashSet::new();
     work.itype_base.set(T_FN_BASE + table.infos.len() as u32);
