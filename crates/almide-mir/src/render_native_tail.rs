@@ -573,8 +573,7 @@ fn render_native_drop_op(
         }
         // A record read in place (a borrow-only read, render_native_borrow_read,
         // or its reference copy): the release ends the borrow; the owner frees.
-        Op::DropVariant { v, .. } | Op::DropWrapperRec { v, .. }
-            if matches!(tys.get(v), Some(NTy::RecRef(_))) && crate::render_native_keyed::in_place(*v) =>
+        Op::DropVariant { v, .. } if matches!(tys.get(v), Some(NTy::RecRef(_))) && crate::render_native_keyed::in_place(*v) =>
         {
             line!("// drop(borrowed record): the borrow ends");
         }
@@ -663,13 +662,12 @@ fn render_drop_list_str_block(
         Some(NTy::VecStrRef) if crate::render_native_addr::is_const_list(*v) => {
             line!("// a constant table: borrowed from its static")
         }
-        Some(NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) if crate::render_native_keyed::in_place(*v) => {
-            line!("// drop: read in place, the borrow ends")
-        }
+        // A list or record read in place: the release ends the borrow.
         Some(NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) => {
-            return Err(wall(
-                "native: DropListStr of a borrowed param — MIR call-mode violation",
-            ))
+            if !crate::render_native_keyed::in_place(*v) {
+                return Err(wall("native: DropListStr of a borrowed param — MIR call-mode violation"));
+            }
+            line!("// drop: read in place, the borrow ends")
         }
         other => {
             return Err(wall(format!(
