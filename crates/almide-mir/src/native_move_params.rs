@@ -38,7 +38,7 @@ fn values(op: &Op) -> Vec<ValueId> {
     out
 }
 
-fn is_release(op: &Op, v: ValueId) -> bool {
+pub(crate) fn is_release(op: &Op, v: ValueId) -> bool {
     crate::render_native_move::bookkeeping(op)
         && !matches!(op, Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. })
         && values(op) == [v]
