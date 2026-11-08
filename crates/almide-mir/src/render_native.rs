@@ -363,7 +363,6 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         verify_ownership_or_wall(func)?;
         let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
             .map_err(|e| e.with_fn_context(&func.name))?;
-        let rendered = crate::render_native_narrow::narrow_locals(func, sigs, rendered);
         let rendered = narrow_abi_wrapper(func, sigs, rendered)?;
         fn_rets.insert(func.name.clone(), ret_nty);
         bodies.push_str(&rendered);
