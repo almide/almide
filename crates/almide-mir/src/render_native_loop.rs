@@ -505,7 +505,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         Op::Dup { dst, src }
             if st.tys.get(src) == Some(&NTy::StrRef)
                 && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
-                    st.tys.get(&base) == Some(&NTy::ResStr)
+                    matches!(st.tys.get(&base), Some(NTy::ResStr | NTy::Res))
                         && crate::render_native_move::result_param_dies(func, i, base)
                         && crate::render_native_addr::reads_of_take(&take)
                             .iter()
@@ -514,7 +514,11 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         {
             let (base, _) = crate::render_native_addr::payload_take_of(*src).expect("a payload read");
             st.tys.insert(*dst, NTy::Str);
-            line!("let mut {} = match {} {{ Ok(s) | Err(s) => s }};", var(*dst), var(base));
+            if st.tys.get(&base) == Some(&NTy::ResStr) {
+                line!("let mut {} = match {} {{ Ok(s) | Err(s) => s }};", var(*dst), var(base));
+            } else {
+                line!("let mut {} = match {} {{ Err(e) => e, Ok(_) => AlmideString::new() }};", var(*dst), var(base));
+            }
         }
         // A copy of a value nothing reads again moves it (no clone).
         Op::Dup { dst, src }
