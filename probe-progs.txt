@@ -1,3 +1,4 @@
+probe-empty.almd
 spec/wasm_cross/codec_decode_field_order.almd
 spec/wasm_cross/codec_doc_array.almd
 spec/wasm_cross/codec_list_default_field.almd
