@@ -80,7 +80,7 @@ jobs:
           mkdir -p out/hp
           python3 bench4611/probe.py out/head.wasm out/hp || true
           args="base=out/base.wasm head=out/head.wasm"
-          for v in p_nobc p_shr p_nobc_shr; do
+          for v in p_nobc p_shr p_bias p_nobc_shr; do
             [ -f out/$v.wasm ] && args="$args base_$v=out/$v.wasm"
           done
           [ -f out/hp/p_nobc.wasm ] && args="$args head_nobc=out/hp/p_nobc.wasm"

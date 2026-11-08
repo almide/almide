@@ -21,10 +21,15 @@ SHR = (re.compile(r"local\.get (\d+)\n\s*local\.get \1\n\s*i64\.const 63\n\s*i64
 CSE = (re.compile(r"local\.get (\d+)\n\s*local\.get (\d+)\n\s*i64\.add\n\s*local\.get \1\n\s*local\.get \2\n\s*i64\.add\n\s*i64\.const 1\n\s*i64\.add\n\s*i64\.mul\n\s*local\.set (\d+)\n"),
        lambda m: "local.get %s\nlocal.get %s\ni64.add\nlocal.tee %s\nlocal.get %s\ni64.const 1\ni64.add\ni64.mul\nlocal.set %s\n" % (m.group(1), m.group(2), m.group(3), m.group(3), m.group(3)))
 
-EDITS = {"nobc": NOBC, "shr": SHR, "cse": CSE}
+# Only the bias simplification: `(x >>s 63) >>u 63` is `x >>u 63`.
+BIAS = (re.compile(r"i64\.const 63\n\s*i64\.shr_s\n\s*i64\.const 63\n\s*i64\.shr_u\n"),
+        lambda m: "i64.const 63\ni64.shr_u\n")
+
+EDITS = {"nobc": NOBC, "shr": SHR, "cse": CSE, "bias": BIAS}
 VARIANTS = {
     "p_nobc": ["nobc"],
     "p_shr": ["shr"],
+    "p_bias": ["bias"],
     "p_cse": ["cse"],
     "p_nobc_shr": ["nobc", "shr"],
     "p_all3": ["nobc", "shr", "cse"],
