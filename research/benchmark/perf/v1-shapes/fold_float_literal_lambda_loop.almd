@@ -2,7 +2,7 @@
 // through the typed dispatch table as the f64 its signature declares
 // (render_native_closure's arm_call, #4606).
 fn main() -> Unit = {
-  var total = 0.0
+  var total = float.from(0)
   var i = 0
   while i < 20000 {
     let b: Bool = i % 2 == 0

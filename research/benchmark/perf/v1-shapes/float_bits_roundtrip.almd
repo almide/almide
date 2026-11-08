@@ -5,7 +5,7 @@ fn mix(x: Float, k: Int) -> Int = float.to_bits(x * 1.5 + float.from(k))
 
 fn main() -> Unit = {
   var acc = 0
-  var f = 0.25
+  var f = float.from(1) / 4.0
   var i = 0
   while i < 200000 {
     let b = mix(f, i)
