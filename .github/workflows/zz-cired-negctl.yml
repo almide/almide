@@ -1,0 +1,28 @@
+name: cired negctl
+on:
+  push:
+    branches: ["cired-negctl*"]
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+jobs:
+  n:
+    strategy:
+      fail-fast: false
+      matrix:
+        revert: [c4fb7ed57, 17847fd70, 311cd33de, 357926b79, 6a7efa54d, 4edecb271]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { path: tool }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { path: src, ref: cired-own, fetch-depth: 30 }
+      - run: cd src && git -c user.name=ci -c user.email=ci@x revert --no-edit ${{ matrix.revert }} && git log --oneline -2
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with: { toolchain: "1.97.0" }
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with: { shared-key: ci-build-1.97.0, save-if: false, workspaces: src }
+      - run: cd src && cargo build --release
+      - run: cd tool && bash .github/cired/probe.sh $GITHUB_WORKSPACE/src/target/release/almide 2>&1 | sed "s/^/[revert ${{ matrix.revert }}] /"
+      - run: cd src && cargo test --release --no-fail-fast --test mut_field_arg_sibling_read_test --test string_push_native_append_test --test list_unique_linear_test --test for_in_clone_elision_test 2>&1 | grep -E "^test |test result" | sed "s/^/[revert ${{ matrix.revert }}] /"
