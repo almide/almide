@@ -591,6 +591,37 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
             }
         }
     }
+    // Nor a position some site fills with a value the ownership mirror does
+    // not track in its caller (a raw slot load, `prim.load_str(h + 12 + i *
+    // 8)`, a violation of the body as lowered): the caller cannot hand it
+    // over, so that param of every possible callee keeps borrowing while its
+    // other params may still be taken over.
+    for f in functions.iter() {
+        let Err(found) = crate::verify_ownership(f) else { continue };
+        let untracked: BTreeSet<ValueId> = found.iter().map(|v| v.value).collect();
+        for op in &f.ops {
+            let (callees, args): (Vec<String>, &[crate::CallArg]) = match op {
+                Op::CallFn { name, args, .. } => (vec![name.clone()], args),
+                Op::CallIndirect { args, .. } => (
+                    table
+                        .iter()
+                        .filter(|(_, shape)| {
+                            shape.len() == args.len()
+                                && shape.iter().zip(args.iter()).all(|(h, a)| *h == matches!(a, crate::CallArg::Handle(_)))
+                        })
+                        .map(|(n, _)| n.clone())
+                        .collect(),
+                    args,
+                ),
+                _ => continue,
+            };
+            for (k, a) in args.iter().enumerate() {
+                if matches!(a, crate::CallArg::Handle(v) if untracked.contains(v)) {
+                    not_handle.extend(callees.iter().map(|c| (c.clone(), k)));
+                }
+            }
+        }
+    }
     let mut pinned: BTreeSet<String> = BTreeSet::new();
     loop {
         let closure = |f: &MirFunction| {
