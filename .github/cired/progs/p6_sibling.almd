@@ -1,0 +1,12 @@
+type R = { buf: Bytes, s: String, xs: List[Int], m: Map[String, Int], n: Int }
+
+fn pos(r: R) -> Int = r.n + 1
+
+fn show(r: R) -> String = "${bytes.to_list(r.buf)} ${r.n}"
+
+effect fn main() -> Unit = {
+  var r = R { buf: bytes.zeros(4), s: "s", xs: [0], m: [:], n: 0 }
+  bytes.__set_u8(r.buf, pos(r), pos(r))
+  r.n = (r.n + 1) % 5
+  println(show(r))
+}
