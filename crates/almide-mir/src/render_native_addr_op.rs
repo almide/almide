@@ -557,7 +557,7 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
     if let (Some(NTy::Rec(_)), Some(e)) = (ty(tys, &ad.base), list_of(ty(tys, &ad.base)).filter(|e| st.addrs.contains_key(&v) || by_value(*e))) {
         // A map entry left unbuilt goes into its entry list, unbuilt too
         // (crate::native_map_entries::leave_unbuilt), as a pair.
-        let pair = st.addrs.get(&v).and_then(|sv| crate::native_map_entries::pair_of(sv.base));
+        let pair = crate::native_map_entries::pair_of(v);
         let rhs = match (pair.clone(), st.addrs.get(&v).copied()) {
             (Some(p), _) => p,
             (None, None) => var(v),
