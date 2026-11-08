@@ -1,0 +1,5 @@
+spec/wasm_cross/codec_list_default.almd
+spec/wasm_cross/codec_list_default_field.almd
+spec/wasm_cross/list_reduce_fused_fold_release.almd
+spec/wasm_cross/field_and_interp_accumulator.almd
+spec/wasm_cross/json_gltf_walk.almd
