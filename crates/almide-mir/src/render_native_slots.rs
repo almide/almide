@@ -576,6 +576,9 @@ pub(super) fn borrowed_stores(
             && !func.params.iter().any(|p| p.value == *src)
             && func.ret != Some(*src)
             && !crate::mir_liveness::live_after(func, at, *src);
+        if std::env::var("ALMIDE_DEBUG_MOVES").is_ok() {
+            eprintln!("DBG store {} at={at} value={value:?} src={src:?} base={base:?} consumed={consumed} dies={dies}", func.name);
+        }
         (!consumed && !dies).then_some((*base, *value))
     }).collect()
 }
