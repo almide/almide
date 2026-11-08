@@ -707,23 +707,6 @@ pub(crate) fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
             dst: Some(d),
             args,
         } if args.len() == 2 => render_float_cmp(op, d, args, tys, out, indent)?,
-        // MIR holds both directions of the raw reinterpret in an i64 slot.
-        // Native float operations instead produce f64 locals: preserve their
-        // bits, not their numeric value. NaN observation is canonicalized by
-        // the checked stdlib body, not by this raw primitive.
-        Op::Prim {
-            kind: crate::PrimKind::FloatBits,
-            dst: Some(d),
-            args,
-        } if args.len() == 1 => {
-            let bits = match tys.get(&args[0]) {
-                Some(NTy::I64) => var(args[0]),
-                Some(NTy::F64) => format!("{}.to_bits() as i64", var(args[0])),
-                other => return Err(wall(format!("native: float bits of a non-scalar value ({other:?})"))),
-            };
-            tys.insert(*d, NTy::I64);
-            line!("let mut {}: i64 = {bits};", var(*d));
-        }
         _ => return crate::render_native_float32::render(op, OpSink { tys, out, indent, used_shims: s.used_shims }),
     }
     Ok(true)
