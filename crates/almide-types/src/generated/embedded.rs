@@ -5842,6 +5842,7 @@ fn to_string(x: Float) -> String = _
 
 /// Shortest round-trip digits, without the integer .0 suffix.
 @intrinsic("almide_rt_float_to_string_compound")
+@scalar_text
 fn __to_string_compound(x: Float) -> String = _
 
 /// Truncates toward 0, saturating; NaN gives 0.

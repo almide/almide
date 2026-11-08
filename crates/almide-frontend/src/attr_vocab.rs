@@ -43,7 +43,8 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // (crates/almide-mir native_floor)
     "specializes",
     // A stdlib fn whose result is its one scalar param's canonical text
-    // (Int: decimal digits, Bool: true / false), so a render may format the
+    // (Int: decimal digits, Bool: true / false, Float: shortest round-trip
+    // digits as `{}` prints them), so a render may format the
     // scalar in place instead of calling it (crates/almide-mir native_floor
     // `declared_scalar_text`, read by the certified render's interpolation)
     "scalar_text",
