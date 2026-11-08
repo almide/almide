@@ -324,7 +324,7 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
     // The last read of a boxed record slot of an owned enum
     // (render_native_slots::movable_loads) moves the payload out.
     if let NTy::Rec(_) = t {
-        if st.moves.contains(d)
+        if st.moves_first.contains(d)
             && matches!(ty(tys, &ad.base), Some(NTy::Rec(_)))
             && crate::render_native_rec::has_default(t)
             && !crate::render_native_rec::is_region(i)
@@ -384,7 +384,7 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
     // The last read of a heap field of an owned record whose block the loop
     // rebinds right after (render_native_slots::movable_loads) moves the
     // value out, so the rebuild edits it in place instead of copying it.
-    if st.moves.contains(d)
+    if st.moves_first.contains(d)
         && !st.moves_last.contains(d)
         && matches!(ty(tys, &ad.base), Some(NTy::Rec(_)))
         && crate::render_native_rec::has_default(f)

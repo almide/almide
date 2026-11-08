@@ -457,7 +457,53 @@ pub(crate) fn set_moving_args(
     // naming it again (`mir_liveness`).
     reinit.extend(crate::mir_liveness::reinit_reads(func, at));
     REINIT.with(|m| *m.borrow_mut() = reinit);
+    // A borrowed payload or field read handed to the call whose carrier dies
+    // here, as do the carrier's other borrowed reads of it: the call can take
+    // the payload itself, moved out of the carrier (#4006, no-perf-loss).
+    let taken: std::collections::BTreeMap<ValueId, String> = match &func.ops[at] {
+        Op::CallFn { args, .. } if !drill_no_moves() => args
+            .iter()
+            .filter_map(|a| match a {
+                crate::CallArg::Handle(v) => Some(*v),
+                _ => None,
+            })
+            .filter(|v| !moving.contains(v) && args.iter().filter(|a| matches!(a, crate::CallArg::Handle(x) if x == v)).count() == 1)
+            .filter_map(|v| {
+                if !matches!(tys.get(&v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) {
+                    return None;
+                }
+                let (base, take, reads) = match crate::render_native_addr::payload_take_of(v) {
+                    Some((base, take)) => {
+                        let reads = crate::render_native_addr::reads_of_take(&take);
+                        (base, take, reads)
+                    }
+                    None => {
+                        let (base, place) = crate::render_native_addr::field_of(v)?;
+                        let reads = crate::render_native_addr::reads_of_place(&place);
+                        (base, format!("std::mem::take(&mut {place})"), reads)
+                    }
+                };
+                let ok = matches!(tys.get(&base), Some(NTy::Rec(_)))
+                    && dying_after(func, at, base, borrow_arms)
+                    && reads.iter().all(|r| dying_after(func, at, *r, borrow_arms));
+                ok.then_some((v, take))
+            })
+            .collect(),
+        _ => Default::default(),
+    };
+    TAKEN_ARGS.with(|m| *m.borrow_mut() = taken);
     MOVING.with(|m| *m.borrow_mut() = moving);
+}
+
+thread_local! {
+    static TAKEN_ARGS: std::cell::RefCell<std::collections::BTreeMap<ValueId, String>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+/// The move-out expression of a borrowed arg of the call being rendered whose
+/// carrier dies at the call ([`set_moving_args`]), if any.
+pub(crate) fn taken_arg(v: ValueId) -> Option<String> {
+    TAKEN_ARGS.with(|m| m.borrow().get(&v).cloned())
 }
 
 thread_local! {
