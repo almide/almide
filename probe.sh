@@ -25,16 +25,18 @@ while read -r f; do
       callgrind_annotate --inclusive=yes "$OUT/$n.$leg.cg" 2>/dev/null | head -60 > "$OUT/$n.$leg.itop"
       tot=$(callgrind_annotate --auto=no "$OUT/$n.$leg.cg" 2>/dev/null | awk '/PROGRAM TOTALS/ { gsub(",", "", $1); print $1 }')
       echo "$n $leg $tot" >> $OUT/summary.txt
+      timeout 120 "$OUT/$n.$leg.bin" > "$OUT/$n.$leg.out" 2>&1 </dev/null; echo "exit=$?" >> "$OUT/$n.$leg.out"
       if [ -n "${PROBE_ASM:-}" ]; then objdump -d --no-show-raw-insn -C "$OUT/$n.$leg.bin" | awk -v pat="$PROBE_ASM" '/^[0-9a-f]+ <.*>:$/ { keep = ($0 ~ pat) } keep' | head -4000 > "$OUT/$n.$leg.asm"; fi
       rm -f "$OUT/$n.$leg.cg" "$OUT/$n.$leg.bin"
     else
       echo "$n $leg BUILD-FAIL" >> $OUT/summary.txt
     fi
   done
+  cmp -s "$OUT/$n.v1.out" "$OUT/$n.v0.out" || echo "OUTDIFF $n" >> $OUT/outdiff.txt
   echo "done $f"
 done < "$1"
 awk '{k=$1; if($2=="v1") a[k]=$3; else b[k]=$3} END {for (k in a) if (b[k]>0) printf "%s v1=%s v0=%s ratio=%.3f\n", k, a[k], b[k], a[k]/b[k]}' $OUT/summary.txt | sort > $OUT/ratios.txt
-cat $OUT/ratios.txt
+cat $OUT/ratios.txt; cat $OUT/outdiff.txt 2>/dev/null
 # empty-program glue, as the small gate subtracts it
 printf 'fn main() -> Unit = ()\n' > /tmp/empty.almd
 ALMIDE_VERIFIED_DEBUG=1 $A build /tmp/empty.almd -o /tmp/empty.v1 >/dev/null 2>&1; ALMIDE_NO_VERIFIED_OK=1 $A build /tmp/empty.almd --no-verified -o /tmp/empty.v0 >/dev/null 2>&1
