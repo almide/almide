@@ -43,7 +43,7 @@ fn build_step<'o>(later: &'o Op, b: &ValueId, base_of: &BTreeMap<ValueId, (Value
 pub(super) fn movable_loads(
     func: &MirFunction,
     base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
-) -> (BTreeSet<ValueId>, BTreeSet<ValueId>, BTreeSet<ValueId>, BTreeSet<ValueId>) {
+) -> (BTreeSet<ValueId>, BTreeSet<ValueId>, BTreeSet<ValueId>) {
     let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
     let mut out = BTreeSet::new();
     let mut last = BTreeSet::new();
@@ -52,11 +52,6 @@ pub(super) fn movable_loads(
     // value precedes them, so none can be rendered later than them (an
     // interpolation chain reads its pieces at its last step).
     let mut first = BTreeSet::new();
-    // The movable reads whose block the same straight run rebinds next (`r =
-    // { ...r, f: g(r.f) }`): nothing names the block whole before the rebind,
-    // so the field can leave by a plain move, no `Default` written back into
-    // a block that is about to be dropped.
-    let mut partial = BTreeSet::new();
     let mut since_bind: BTreeSet<(ValueId, usize)> = BTreeSet::new();
     let consts: BTreeMap<ValueId, i64> = func
         .ops
@@ -142,9 +137,6 @@ pub(super) fn movable_loads(
             }
         }
         if movable {
-            if rebound || rebound_in_block(func, i, b).is_some() {
-                partial.insert(*d);
-            }
             out.insert(*d);
             if !other_slot && !rebound {
                 last.insert(*d);
@@ -154,7 +146,7 @@ pub(super) fn movable_loads(
             }
         }
     }
-    (out, last, first, partial)
+    (out, last, first)
 }
 
 /// The rebind of `b` from another value that follows the op at `at` in its
