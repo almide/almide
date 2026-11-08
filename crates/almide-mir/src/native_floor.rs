@@ -209,6 +209,11 @@ pub(crate) struct FloorFn {
     /// only (owner ruling ○, 2026-11-04): the call's list must be a String
     /// list, which carries no Float bits.
     pub str_only: bool,
+    /// The runtime's borrowing `_ref` twin of a `Result[Value, String]` body
+    /// (its symbol, its items): the Ok side a reference into the Value arg.
+    pub borrow_twin: Option<(String, Vec<&'static str>)>,
+    /// The runtime's `_ref` twin taking each by-value Value param by reference.
+    pub by_ref: Option<Box<FloorFn>>,
 }
 
 /// The floor entry the declaration of stdlib call `call` (`module.fn`) gives,
@@ -554,7 +559,16 @@ fn specialized_list_elem(call: &str) -> Option<String> {
 /// element meets a String's, never a Float's bits.
 fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
 
-    let (module, func) = call.split_once('.').ok_or("not a module.fn call")?;
+    let Some((module, func)) = call.split_once('.') else {
+        // A bare registry helper (one generated code calls by its own name)
+        // that declares the stdlib fn it specializes is served as that fn.
+        return match specialized_target(call) {
+            Some(target) if target.contains('.') => {
+                derive_for(&target, str_elems).map_err(|e| format!("specializes `{target}`: {e}"))
+            }
+            _ => Err("not a module.fn call".into()),
+        };
+    };
     if !almide_lang::stdlib_info::is_bundled_module(module) {
         return Err("not a bundled stdlib module".into());
     }
@@ -693,7 +707,8 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         same.then(|| Some((r.param, t.to_string(), closure(t, rt).ok()?)))?
     });
     let str_only = elem_typed && almide_lang::capability_bounds::of(module, func).next().is_some();
-    Ok(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only })
+    let borrow_twin = borrow_twin_of(fret, &symbol, &rust_params, rt);
+    Ok(with_by_ref_twin(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only, borrow_twin, by_ref: None }, &rust_params, &rust_ret, rt))
 }
 
 fn simple(t: &TypeExpr) -> Option<&str> {

@@ -4237,6 +4237,7 @@ fn __err_scan(e: String, n: Int, i: Int) -> Int = if i + 5 > n then 0 - 1
 else if string.slice(e, i, i + 5) == ", at " then i
 else __err_scan(e, n, i + 1)
 
+@specializes("value.__err_at")
 fn __err_at(e: String, seg: String) -> String = {
   let n = string.len(e)
   let i = __err_scan(e, n, 0)
@@ -4249,6 +4250,7 @@ fn __err_at(e: String, seg: String) -> String = {
 }
 
 
+@specializes("value.__err_at_index")
 fn __err_at_index(e: String, i: Int) -> String = __err_at(e, "[" + int.to_string(i) + "]")
 
 fn __dl_string(items: List[Value], n: Int, i: Int, acc: List[String]) -> Result[List[String], String] =
@@ -41459,6 +41461,16 @@ fn __field(v: Value, key: String) -> Result[Value, String] = _
 /// Object keys in order; [] for non-objects.
 @intrinsic("almide_rt_value_keys")
 fn __keys(v: Value) -> List[String] = _
+
+
+
+/// The decode error e with the path segment seg spliced in.
+@intrinsic("almide_rt_value_err_at")
+fn __err_at(e: String, seg: String) -> String = _
+
+/// The decode error e with the list index segment `[i]` spliced in.
+@intrinsic("almide_rt_value_err_at_index")
+fn __err_at_index(e: String, i: Int) -> String = _
 
 /// Object pairs in order; err if v is another kind.
 @intrinsic("almide_rt_value_as_object")
