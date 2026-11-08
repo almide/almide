@@ -695,7 +695,7 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
     let items = closure(&symbol, rt)?;
     let twin = almide_lang::reuse::of_intrinsic(&symbol).and_then(|r| {
         let t = r.owned_twin?;
-        if !matches!(fparams.get(r.param), Some(FloorParam::List(_) | FloorParam::Set(_) | FloorParam::Map(_) | FloorParam::Bytes)) {
+        if !matches!(fparams.get(r.param), Some(FloorParam::List(_) | FloorParam::Set(_) | FloorParam::Map(_) | FloorParam::Bytes | FloorParam::Value(_))) {
             return None;
         }
         let (tp, tr) = rust_signature(signature_text(rt, t)?)?;

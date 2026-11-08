@@ -635,8 +635,22 @@ fn plan(
                     side.prelude.push(format!("let {snapshot} = {value};"));
                     if *by_ref { runtime_arg(&snapshot, owned, true, false) } else { snapshot }
                 } else {
-                let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
-                runtime_arg(code, *t, *by_ref, dying)
+                // A borrowed payload whose carrier dies at the call: the
+                // payload itself, moved out, where the param takes it by value.
+                let taken = match a {
+                    CallArg::Handle(v) if !*by_ref => crate::render_native_move::taken_arg(*v).and_then(|take| {
+                        let owned = crate::render_native::owned_nty(*t);
+                        (owned != *t).then(|| (format!("{{ {take} }}"), owned))
+                    }),
+                    _ => None,
+                };
+                match taken {
+                    Some((take, owned)) => runtime_arg(&take, owned, false, true),
+                    None => {
+                        let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
+                        runtime_arg(code, *t, *by_ref, dying)
+                    }
+                }
                 }
             }
         });

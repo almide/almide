@@ -86,7 +86,12 @@ pub(crate) fn last_use(
     t: NTy,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
-    if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) || !crate::render_native_rec::has_default(t) {
+    if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) | NTy::Res | NTy::ResStr) {
+        return false;
+    }
+    // A kind with no `Default` (a Result) moves only where its binding moves
+    // as itself ([`take_expr`]): nothing is left behind to fill.
+    if !crate::render_native_rec::has_default(t) && !moves_as_itself(src) {
         return false;
     }
     // Or no path after the copy reads it again (`mir_liveness`).
@@ -457,7 +462,53 @@ pub(crate) fn set_moving_args(
     // naming it again (`mir_liveness`).
     reinit.extend(crate::mir_liveness::reinit_reads(func, at));
     REINIT.with(|m| *m.borrow_mut() = reinit);
+    // A borrowed payload or field read handed to the call whose carrier dies
+    // here, as do the carrier's other borrowed reads of it: the call can take
+    // the payload itself, moved out of the carrier (#4006, no-perf-loss).
+    let taken: std::collections::BTreeMap<ValueId, String> = match &func.ops[at] {
+        Op::CallFn { args, .. } if !drill_no_moves() => args
+            .iter()
+            .filter_map(|a| match a {
+                crate::CallArg::Handle(v) => Some(*v),
+                _ => None,
+            })
+            .filter(|v| !moving.contains(v) && args.iter().filter(|a| matches!(a, crate::CallArg::Handle(x) if x == v)).count() == 1)
+            .filter_map(|v| {
+                if !matches!(tys.get(&v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) {
+                    return None;
+                }
+                let (base, take, reads) = match crate::render_native_addr::payload_take_of(v) {
+                    Some((base, take)) => {
+                        let reads = crate::render_native_addr::reads_of_take(&take);
+                        (base, take, reads)
+                    }
+                    None => {
+                        let (base, place) = crate::render_native_addr::field_of(v)?;
+                        let reads = crate::render_native_addr::reads_of_place(&place);
+                        (base, format!("std::mem::take(&mut {place})"), reads)
+                    }
+                };
+                let ok = matches!(tys.get(&base), Some(NTy::Rec(_)))
+                    && dying_after(func, at, base, borrow_arms)
+                    && reads.iter().all(|r| dying_after(func, at, *r, borrow_arms));
+                ok.then_some((v, take))
+            })
+            .collect(),
+        _ => Default::default(),
+    };
+    TAKEN_ARGS.with(|m| *m.borrow_mut() = taken);
     MOVING.with(|m| *m.borrow_mut() = moving);
+}
+
+thread_local! {
+    static TAKEN_ARGS: std::cell::RefCell<std::collections::BTreeMap<ValueId, String>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+/// The move-out expression of a borrowed arg of the call being rendered whose
+/// carrier dies at the call ([`set_moving_args`]), if any.
+pub(crate) fn taken_arg(v: ValueId) -> Option<String> {
+    TAKEN_ARGS.with(|m| m.borrow().get(&v).cloned())
 }
 
 thread_local! {
@@ -491,6 +542,12 @@ pub(crate) fn set_rebound(func: &MirFunction) {
 /// binding is never read again, and Rust's drop flag covers its scope end —
 /// where `std::mem::take` would build a default in its place and drop it
 /// later. Anything else (a rebound slot, a field place) is taken.
+/// Whether `v`'s binding moves as itself in [`take_expr`] (bound once, or
+/// re-initialized before any read).
+fn moves_as_itself(v: ValueId) -> bool {
+    !REBOUND.with(|m| m.borrow().contains(&v)) || REINIT.with(|m| m.borrow().contains(&v))
+}
+
 pub(crate) fn take_expr(code: &str) -> String {
     let once = code
         .strip_prefix('v')

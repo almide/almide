@@ -620,6 +620,20 @@ fn enum_slot_fns(i: u16, k: usize, kind: NTy, cases: &[(u32, Vec<NTy>)]) -> Stri
         }
         get_ref.push_str("            _ => None,\n        }\n    }\n");
         out.push_str(&get_ref);
+        // The move-out twin of the borrowed read: a copy of the read whose
+        // carrier dies at the copy takes the slot (the Default left behind).
+        if has_default(kind) && !is_region(i) {
+            let mut take = format!("    fn take_s{k}_{suf}(&mut self) -> {ty} {{\n        match self {{\n");
+            for (t, fs) in cases {
+                if fs.get(k - 1) != Some(&kind) {
+                    continue;
+                }
+                let r = if enum_field_boxed(i, kind) { "&mut **f" } else { "f" };
+                take.push_str(&format!("            Self::C{t}({}) => std::mem::take({r}),\n", slot_binds(fs.len(), k)));
+            }
+            take.push_str("            _ => Default::default(),\n        }\n    }\n");
+            out.push_str(&take);
+        }
     }
     out
 }

@@ -321,12 +321,29 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
     let Some((acc, t)) = enum_read(i, k, false) else {
         return Err(wall("native: a heap read of an enum slot of several heap kinds"));
     };
+    // The last read of a boxed record slot of an owned enum
+    // (render_native_slots::movable_loads) moves the payload out.
+    if let NTy::Rec(_) = t {
+        if st.moves_first.contains(d)
+            && matches!(ty(tys, &ad.base), Some(NTy::Rec(_)))
+            && crate::render_native_rec::has_default(t)
+            && !crate::render_native_rec::is_region(i)
+            && !crate::render_native_move::drill_no_moves()
+        {
+            tys.insert(*d, t);
+            line!("let mut {}: {} = {}.take_{acc};", var(*d), crate::render_native_rec::owned_ty(t), var(ad.base));
+            return Ok(true);
+        }
+    }
     // A borrow-only read of a boxed record: a reference into the block.
     if let NTy::Rec(j) = t {
         if st.borrow_reads.contains(d) && crate::render_native_rec::has_default(t) {
             let s = crate::render_native_rec::struct_name(j);
             let r = acc.replacen("()", "_ref()", 1);
             tys.insert(*d, NTy::RecRef(j));
+            if !crate::render_native_rec::is_region(i) {
+                note_payload_take(*d, ad.base, format!("{}.take_{acc}", var(ad.base)));
+            }
             line!(
                 "let {v}_d: {s}; let mut {v}: &{s} = match {b}.{r} {{ Some(r) => r, None => {{ {v}_d = {s}::default(); &{v}_d }} }};",
                 v = var(*d),
@@ -364,6 +381,19 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
             writeln!(out, $($arg)*).unwrap();
         }};
     }
+    // The last read of a heap field of an owned record whose block the loop
+    // rebinds right after (render_native_slots::movable_loads) moves the
+    // value out, so the rebuild edits it in place instead of copying it.
+    if st.moves_first.contains(d)
+        && !st.moves_last.contains(d)
+        && matches!(ty(tys, &ad.base), Some(NTy::Rec(_)))
+        && crate::render_native_rec::has_default(f)
+        && !crate::render_native_move::drill_no_moves()
+    {
+        tys.insert(*d, f);
+        line!("let mut {}: {} = std::mem::take(&mut {}.f{k});", var(*d), crate::render_native_rec::owned_ty(f), var(ad.base));
+        return Ok(true);
+    }
     // A borrow-only read (crate::render_native_borrow_read): a
     // reference into the record's field, where the owned read
     // would copy it (a string's bytes, a list's elements).
@@ -374,8 +404,9 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
         return Ok(true);
     }
     tys.insert(*d, f);
-    // The last read of the slot of an owned record moves the value out.
-    if st.moves.contains(d) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) {
+    // The last read of the slot of an owned record moves the value out
+    // (a kind with a `Default` to leave in the slot).
+    if st.moves.contains(d) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) && crate::render_native_rec::has_default(f) {
         line!(
             "let mut {}: {} = std::mem::take(&mut {}.f{k});",
             var(*d),

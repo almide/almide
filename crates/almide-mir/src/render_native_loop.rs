@@ -447,7 +447,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         // here moves the field out (#4006, no-perf-loss): nothing reads
         // the record again, so its field is the copy.
         Op::Dup { dst, src }
-            if matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef))
+            if matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef | NTy::RecRef(_)))
                 && crate::render_native_addr::field_of(*src).is_some_and(|(base, place)| {
                     matches!(st.tys.get(&base), Some(NTy::Rec(_)))
                         && crate::render_native_move::dying_after(func, i, base, &st.borrows.arms)
@@ -457,13 +457,27 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                 }) =>
         {
             let (_, place) = crate::render_native_addr::field_of(*src).expect("a field read");
-            let owned = match st.tys[src] {
-                NTy::StrRef => NTy::Str,
-                NTy::VecRef => NTy::Vec,
-                _ => NTy::VecStr,
-            };
+            let owned = owned_of_ref(st.tys[src]);
             st.tys.insert(*dst, owned);
             line!("let mut {} = std::mem::take(&mut {place});", var(*dst));
+        }
+        // The same move for a borrowed payload read with no place of its own
+        // (an enum case's slot, a Result side): the carrier dies at the copy,
+        // so its payload is the copy, moved out by the noted expression.
+        Op::Dup { dst, src }
+            if matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef | NTy::RecRef(_)))
+                && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
+                    matches!(st.tys.get(&base), Some(NTy::Rec(_)))
+                        && crate::render_native_move::dying_after(func, i, base, &st.borrows.arms)
+                        && crate::render_native_addr::reads_of_take(&take)
+                            .iter()
+                            .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))
+                }) =>
+        {
+            let (_, take) = crate::render_native_addr::payload_take_of(*src).expect("a payload read");
+            let owned = owned_of_ref(st.tys[src]);
+            st.tys.insert(*dst, owned);
+            line!("let mut {} = {take};", var(*dst));
         }
         // A copy of a value nothing reads again moves it (no clone).
         Op::Dup { dst, src }
@@ -568,4 +582,14 @@ fn render_fn_tier_op(st: &mut FnLoop<'_>, other: &Op) -> Result<(), LowerError> 
         )));
     }
     Ok(())
+}
+
+/// The owned kind a borrowed read's copy holds.
+fn owned_of_ref(t: NTy) -> NTy {
+    match t {
+        NTy::StrRef => NTy::Str,
+        NTy::VecRef => NTy::Vec,
+        NTy::RecRef(j) => NTy::Rec(j),
+        _ => NTy::VecStr,
+    }
 }
