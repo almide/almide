@@ -1,10 +1,10 @@
 diff --git a/crates/almide-codegen/src/pass_region_window.rs b/crates/almide-codegen/src/pass_region_window.rs
-index a6128e5e6..71745650a 100644
+index 8d11023bd..0b775fb87 100644
 --- a/crates/almide-codegen/src/pass_region_window.rs
 +++ b/crates/almide-codegen/src/pass_region_window.rs
 @@ -617,6 +617,9 @@ fn twin_produce_arg(mut a: IrExpr, produce: Sym) -> IrExpr {
          *name = twin_name(produce);
-         a.ty = Ty::Named(twin_name(enum_name(&a.ty).expect("site enum")), vec![]);
+         a.ty = Ty::Named(twin_name(enum_name(&a.ty).expect("site enum")), Default::default());
          a.def_id = None;
 +        let ty = a.ty.clone();
 +        let span = a.span;
