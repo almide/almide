@@ -564,41 +564,7 @@ fn render_declared_floor_call(
         args.iter().map(|a| matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))).collect();
     // A borrowed read whose carrier dies at the call: the call takes the
     // payload, moved out, where its param (or its `@reuse` twin's) is by value.
-    for (k, a) in args.iter().enumerate() {
-        let CallArg::Handle(v) = a else { continue };
-        let Some(take) = crate::render_native_move::taken_arg(*v) else { continue };
-        let by_value = matches!(
-            floor.params.get(k),
-            Some(
-                crate::native_floor::FloorParam::Map(false)
-                    | crate::native_floor::FloorParam::Set(false)
-                    | crate::native_floor::FloorParam::Value(false)
-                    | crate::native_floor::FloorParam::Matrix(false)
-            )
-        ) || floor.twin.as_ref().is_some_and(|t| t.0 == k);
-        // No other arg may read the same carrier while it is edited.
-        let base_of = |x: &ValueId| {
-            crate::render_native_addr::payload_take_of(*x)
-                .map(|p| p.0)
-                .or_else(|| crate::render_native_addr::field_of(*x).map(|p| p.0))
-        };
-        let base = base_of(v);
-        let shared = args.iter().enumerate().any(|(j, b)| {
-            j != k && matches!(b, CallArg::Handle(x) if Some(*x) == base || (base.is_some() && base_of(x) == base))
-        });
-        if !by_value || shared {
-            continue;
-        }
-        let owned = match rendered[k].1 {
-            NTy::StrRef => NTy::Str,
-            NTy::VecRef => NTy::Vec,
-            NTy::VecStrRef => NTy::VecStr,
-            NTy::RecRef(j) => NTy::Rec(j),
-            _ => continue,
-        };
-        rendered[k] = (format!("{{ {take} }}"), owned);
-        dying[k] = true;
-    }
+    take_dying_payloads(args, floor, &mut rendered, &mut dying);
     // A `mut b: Bytes` fn called for its result (the move-mode rewrite's
     // `c = bytes.append_u16_le(c, x)`): it edits the arg itself, which dies
     // here, and that buffer is the result.

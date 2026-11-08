@@ -235,7 +235,7 @@ fn slot_access_op(op: &Op, s: AddrSink<'_>) -> Result<Option<bool>, LowerError> 
             }
             // The structural builder check proves 0 <= count <= allocated length,
             // with no alias and no later header write that could re-expose the tail.
-            writeln!(out, "{}{}.truncate({} as usize);", "    ".repeat(indent), var(base), var(args[1])).unwrap();
+            writeln!(out, "{}{}.truncate({} as usize);", "    ".repeat(indent), var(base), var(args[1])).expect("writing to a String cannot fail");
             crate::render_native_bounds::invalidate(base);
             Ok(Some(true))
         }

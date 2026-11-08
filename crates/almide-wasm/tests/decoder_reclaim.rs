@@ -6,9 +6,9 @@ fn extraction_preserves_constant_stack_tail_calls() {
     let source = r#"effect fn bounce(n: Int) -> Int = if n == 0 then 42 else bounce(n - 1)!
 effect fn main() -> Unit = println(int.to_string(bounce(200000)!))
 "#;
-    let ir = almide_spine::s5::lower_to_ir("tail_extraction.almd", source).unwrap();
-    let bytes = almide_wasm::emit_program(&ir).unwrap();
-    let out = harness::run_wasm(&bytes).unwrap();
+    let ir = almide_spine::s5::lower_to_ir("tail_extraction.almd", source).expect("the source lowers");
+    let bytes = almide_wasm::emit_program(&ir).expect("the program emits");
+    let out = harness::run_wasm(&bytes).expect("the module runs");
     assert_eq!(out.exit, 0, "{}", out.stderr);
     assert_eq!(out.stdout.trim(), "42");
 }
@@ -22,10 +22,10 @@ fn extraction_preserves_mutable_call_writeback() {
     ] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(format!("../../spec/wasm_cross/{name}.almd"));
-        let source = std::fs::read_to_string(&path).unwrap();
-        let ir = almide_spine::s5::lower_to_ir(&path.to_string_lossy(), &source).unwrap();
+        let source = std::fs::read_to_string(&path).expect("the fixture is readable");
+        let ir = almide_spine::s5::lower_to_ir(&path.to_string_lossy(), &source).expect("the source lowers");
         let bytes = almide_wasm::emit_program(&ir).unwrap_or_else(|e| panic!("{name}: {e:?}"));
-        let out = harness::run_wasm(&bytes).unwrap();
+        let out = harness::run_wasm(&bytes).expect("the module runs");
         assert_eq!(out.exit, 0, "{name}: {}", out.stderr);
         assert_eq!(out.stdout.trim(), expected, "{name}: writeback output");
     }
