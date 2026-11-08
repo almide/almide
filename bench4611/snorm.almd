@@ -1,0 +1,47 @@
+fn eval_a(i: Int, j: Int) -> Float = {
+  let ij = i + j
+  1.0 / float.from(ij * (ij + 1) / 2 + i + 1)
+}
+
+fn mul_av(v: List[Float], n: Int) -> List[Float] = {
+  var out = list.repeat(0.0, n)
+  var i = 0
+  while i < n {
+    var sum = 0.0
+    var j = 0
+    while j < n { sum = sum + eval_a(i, j) * v[j]; j = j + 1 }
+    out[i] = sum
+    i = i + 1
+  }
+  out
+}
+
+fn mul_atv(v: List[Float], n: Int) -> List[Float] = {
+  var out = list.repeat(0.0, n)
+  var i = 0
+  while i < n {
+    var sum = 0.0
+    var j = 0
+    while j < n { sum = sum + eval_a(j, i) * v[j]; j = j + 1 }
+    out[i] = sum
+    i = i + 1
+  }
+  out
+}
+
+fn main() -> Unit = {
+  let n = 1200
+  var u = list.repeat(1.0, n)
+  var v = list.repeat(0.0, n)
+  var k = 0
+  while k < 10 {
+    v = mul_atv(mul_av(u, n), n)
+    u = mul_atv(mul_av(v, n), n)
+    k = k + 1
+  }
+  var vbv = 0.0
+  var vv = 0.0
+  var i = 0
+  while i < n { vbv = vbv + u[i] * v[i]; vv = vv + v[i] * v[i]; i = i + 1 }
+  println("${math.sqrt(vbv / vv)}")
+}

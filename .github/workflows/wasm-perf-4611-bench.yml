@@ -1,0 +1,100 @@
+name: wasm perf 4611 bench (probe branch only)
+
+# Measurement-only workflow for #4611 (snorm on wasm). Lives on the
+# wasm-perf-4611-bench probe branch; never merged.
+#
+# BASE_SHA builds the base compiler; this ref builds the head compiler. Both
+# emit bench4611/snorm.almd to wasm; probe.py derives hand-edited variants of
+# the base module; timeit.py times every module on this one runner,
+# alternating, median after warmup.
+
+on:
+  push:
+    branches: [wasm-perf-4611-bench]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.97.0"
+  BASE_SHA: a0f6b9040abddf69bb87928825dcbe7a0766090f
+  ROUNDS: "21"
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-wasip1
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install wasmtime and wasm-tools
+        run: |
+          curl -sSL -o /tmp/wt.tar.xz https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz
+          tar -xf /tmp/wt.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+          curl -sSL -o /tmp/wtools.tar.gz https://github.com/bytecodealliance/wasm-tools/releases/download/v1.262.0/wasm-tools-1.262.0-x86_64-linux.tar.gz
+          tar -xzf /tmp/wtools.tar.gz -C /tmp
+          sudo mv /tmp/wasm-tools-1.262.0-x86_64-linux/wasm-tools /usr/local/bin/
+          wasmtime --version; wasm-tools --version
+          lscpu | grep -E 'Model name|^CPU\(s\)'
+
+      - name: Build head compiler
+        run: |
+          cargo build --release --bin almide
+          cp target/release/almide /tmp/almide-head
+
+      - name: Build base compiler
+        run: |
+          git worktree add /tmp/base "$BASE_SHA"
+          cd /tmp/base
+          CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide
+          cp "$GITHUB_WORKSPACE/target/release/almide" /tmp/almide-base
+
+      - name: Emit modules and probes
+        run: |
+          mkdir -p out
+          /tmp/almide-base build bench4611/snorm.almd --target wasm -o out/base.wasm
+          /tmp/almide-head build bench4611/snorm.almd --target wasm -o out/head.wasm
+          ls -l out
+          wasm-tools print out/base.wasm > out/base.wat
+          wasm-tools print out/head.wasm > out/head.wat
+          python3 bench4611/probe.py out/base.wasm out
+          rustc --edition 2021 --target wasm32-wasip1 -C opt-level=3 bench4611/snorm.rs -o out/rust.wasm
+          ls -l out/*.wasm
+
+      - name: Time (same runner, alternating)
+        run: |
+          args="base=out/base.wasm head=out/head.wasm"
+          for v in p_nobc p_shr p_cse p_nobc_shr p_all3; do
+            [ -f out/$v.wasm ] && args="$args $v=out/$v.wasm"
+          done
+          python3 bench4611/timeit.py "$ROUNDS" $args | tee out/time.txt
+          echo "--- indicative: Rust wasm32-wasip1 -O3 against base"
+          python3 bench4611/timeit.py "$ROUNDS" base=out/base.wasm rust=out/rust.wasm | tee out/time-rust.txt
+
+      - name: Executed instructions (n = 100)
+        run: |
+          for m in base head p_nobc p_shr p_nobc_shr p_all3; do
+            [ -f out/$m.wasm ] || continue
+            echo "=== $m"
+            python3 bench4611/wi.py out/$m.wasm --patch-i64 1200 100 --top 6 | head -12
+          done | tee out/wi.txt
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: bench4611
+          path: out/
