@@ -513,16 +513,9 @@ fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
         (f, Some(sv), _) if sv.off == 0 && sv.idx.is_none() => match ty(tys, &sv.base) {
             Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g)
                 .ok_or_else(|| wall("native: a record field write of an unowned kind"))?,
-            // `[]` into a field of another list type: that type's empty list.
-            Some(NTy::Vec)
-                if st.empty_lists.contains(&sv.base)
-                    && (f == NTy::VecStr || matches!(f, NTy::Rec(i) if crate::render_native_rec::list_elem(i).is_some())) =>
-            {
-                "Vec::new()".to_string()
-            }
-            g => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
+            _ => return Err(wall(format!("native: a {:?} value stored into a {f:?} record field", ty(tys, &sv.base)))),
         },
-        (f, _, g) => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
+        _ => return Err(wall(format!("native: a {:?} value stored into a {field:?} record field", ty(tys, &v)))),
     };
     if let Some(done) = st.building.get_mut(&ad.base) {
         // A struct built whole: the field waits in its own local
