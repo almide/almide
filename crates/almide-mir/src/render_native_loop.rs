@@ -265,9 +265,8 @@ fn render_printed_scalar(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerErr
     if text == crate::native_floor::ScalarText::Bool {
         line!("rt_println_fmt(format_args!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }}));", var(n));
     } else {
-        // By value: a reference would pin the local to memory. Through
-        // `IntText`, the runtime's digit writer (render_native_interp).
-        line!("rt_println_fmt(format_args!(\"{{}}\", crate::almide_str_block::IntText({})));", var(n));
+        // By value: a reference would pin the local to memory.
+        line!("rt_println_fmt(format_args!(\"{{}}\", {{ {} }}));", var(n));
     }
     Ok(true)
 }
