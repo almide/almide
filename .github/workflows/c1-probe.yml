@@ -5,7 +5,7 @@ on:
 env:
   CARGO_TERM_COLOR: never
 jobs:
-  checks:
+  dumps:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -19,54 +19,17 @@ jobs:
           shared-key: linux-release-1.97.0
           save-if: false
       - name: build
-        run: cargo build --release --bin almide && cargo build --release -p almide-mir --example emit_native_bundle && cargo build --release -p almide-verify
-      - name: tests
+        run: cargo build --release --bin almide && cargo build --release -p almide-mir --example emit_native_bundle
+      - name: dumps
         run: |
           set +e
-          cargo test --release --test native_verified_floor_test 2>&1 | grep -E "test result|panicked|fixture"
-          cargo test --release -p almide-mir --lib native_hof 2>&1 | grep -E "test result|panicked"
-          cargo test --release --test native_bundled_bodies_test 2>&1 | grep -E "test result|panicked"
-          cargo test --release --test native_floor_compile_test 2>&1 | grep -E "test result|panicked"
-          cargo test --release --test native_v1_differential_test 2>&1 | grep -E "test result|panicked"
-      - name: v1 and v0 outputs of the newly certified programs
-        run: |
-          set +e
-          for f in list_heapelem_rc list_modify_heap list_update_heap sort_by_str_key_heap; do
-            p=spec/wasm_cross/$f.almd
-            ALMIDE_VERIFIED_DEBUG=1 ./target/release/almide build $p -o /tmp/$f.v1 > /tmp/$f.v1.log 2>&1 || { echo "V1 BUILD FAIL $f"; tail -20 /tmp/$f.v1.log; }
-            ALMIDE_NO_VERIFIED_OK=1 ./target/release/almide build $p --no-verified -o /tmp/$f.v0 > /dev/null 2>&1 || echo "V0 BUILD FAIL $f"
-            /tmp/$f.v1 > v1.out 2>v1.err; a=$?
-            /tmp/$f.v0 > v0.out 2>v0.err; b=$?
-            if cmp -s v1.out v0.out && cmp -s v1.err v0.err && [ $a = $b ]; then echo "SAME $f exit=$a lines=$(wc -l < v1.out)"; else echo "DIFF $f $a $b"; diff v1.out v0.out | head; fi
+          mkdir -p dumps
+          for f in $(cat scripts/c1probe/list.txt); do
+            p=$f; n=$(basename $f .almd)
+            ./target/release/examples/emit_native_bundle $p dumps/$n.v1.rs > /dev/null 2>dumps/$n.err
+            ./target/release/almide $p --target rust > dumps/$n.v0.rs 2>&1
           done
-      - name: certificate corruption control
-        run: |
-          set +e
-          for f in list_modify_heap sort_by_str_key_heap; do
-            ./target/release/examples/emit_native_bundle spec/wasm_cross/$f.almd /tmp/$f.rs > /tmp/$f.bundle
-            ./target/release/almide-verify bundle /tmp/$f.bundle | tail -1; echo "$f original exit=${PIPESTATUS[0]}"
-            python3 scripts/c1probe/corrupt.py /tmp/$f.bundle /tmp/$f.bad.bundle
-            ./target/release/almide-verify bundle /tmp/$f.bad.bundle | grep -v ": ACCEPT\|^ACCEPT" | tail -3; echo "$f corrupted exit=${PIPESTATUS[0]}"
-          done
-  negative-control:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          fetch-depth: 0
-      - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
-        with:
-          toolchain: "1.97.0"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
-        with:
-          shared-key: linux-release-1.97.0
-          save-if: false
-      - name: with the fix reverted the floor test must fail
-        run: |
-          git -c user.name=p -c user.email=p@p revert --no-commit 2221c5a63
-          git status --short
-          if cargo test --release --test native_verified_floor_test 2>&1 | tee nc.log | tail -5; [ "${PIPESTATUS[0]}" = 0 ]; then echo "NEGATIVE CONTROL FAILED: floor test passed"; exit 1; fi
-          grep -o "now wall[^:]*: \[.*\]" nc.log | head -3
-          echo "NEGATIVE CONTROL OK"
+          name: dumps
+          path: dumps
