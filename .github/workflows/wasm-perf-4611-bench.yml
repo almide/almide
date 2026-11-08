@@ -77,24 +77,101 @@ jobs:
 
       - name: Time (same runner, alternating)
         run: |
+          mkdir -p out/hp
+          python3 bench4611/probe.py out/head.wasm out/hp || true
           args="base=out/base.wasm head=out/head.wasm"
-          for v in p_nobc p_shr p_cse p_nobc_shr p_all3; do
-            [ -f out/$v.wasm ] && args="$args $v=out/$v.wasm"
+          for v in p_nobc p_shr p_nobc_shr; do
+            [ -f out/$v.wasm ] && args="$args base_$v=out/$v.wasm"
           done
+          [ -f out/hp/p_nobc.wasm ] && args="$args head_nobc=out/hp/p_nobc.wasm"
           python3 bench4611/timeit.py "$ROUNDS" $args | tee out/time.txt
-          echo "--- indicative: Rust wasm32-wasip1 -O3 against base"
-          python3 bench4611/timeit.py "$ROUNDS" base=out/base.wasm rust=out/rust.wasm | tee out/time-rust.txt
+          echo "--- indicative: Rust wasm32-wasip1 -O3 against base and head"
+          python3 bench4611/timeit.py "$ROUNDS" base=out/base.wasm head=out/head.wasm rust=out/rust.wasm | tee out/time-rust.txt
 
       - name: Executed instructions (n = 100)
         run: |
-          for m in base head p_nobc p_shr p_nobc_shr p_all3; do
-            [ -f out/$m.wasm ] || continue
+          for m in base.wasm head.wasm p_nobc_shr.wasm hp/p_nobc.wasm; do
+            [ -f out/$m ] || continue
             echo "=== $m"
-            python3 bench4611/wi.py out/$m.wasm --patch-i64 1200 100 --top 6 | head -12
+            python3 bench4611/wi.py out/$m --patch-i64 1200 100 --top 6 | head -12
           done | tee out/wi.txt
+          ls -l out/*.wasm | tee out/sizes.txt
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: bench4611
+          path: out/
+
+  regen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install wasmtime
+        run: |
+          curl -sSL -o /tmp/wt.tar.xz https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz
+          tar -xf /tmp/wt.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+
+      - name: Build the compiler
+        run: cargo build --release --bin almide
+
+      - name: Format of the new fixtures
+        run: |
+          mkdir -p out
+          for f in spec/wasm_cross/int_div_pow2_*.almd; do
+            target/release/almide fmt "$f"
+          done
+          git diff -- spec/ | tee out/fmt.patch
+
+      - name: New fixtures, native against wasm
+        run: |
+          for f in spec/wasm_cross/int_div_pow2_*.almd; do
+            echo "=== $f"
+            target/release/almide run "$f" > /tmp/n.txt 2>&1; echo "native rc=$?"
+            target/release/almide run "$f" --target wasm > /tmp/w.txt 2>&1; echo "wasm rc=$?"
+            cat /tmp/w.txt
+            diff /tmp/n.txt /tmp/w.txt && echo SAME || echo DIFFER
+          done | tee out/fixtures.txt
+
+      - name: Regenerate the ledgers
+        run: |
+          export ORACLE="$PWD/target/release/almide"
+          bash scripts/gen-run-manifest.sh || echo "run manifest rc=$?"
+          bash scripts/gen-check-manifest.sh || echo "check manifest rc=$?"
+          bash scripts/gen-ast-manifest.sh || echo "ast manifest rc=$?"
+          ALMIDE_UPDATE_ALLOC=1 cargo test --release -p almide-wasm --test alloc_ledger 2>&1 | tail -20 || true
+          ALMIDE_UPDATE_SIZES=1 cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -20 || true
+          git diff --stat | tee out/ledgers.stat
+          git diff -- crates/ > out/ledgers.patch
+
+      - name: Negative control — every power-of-two dividend taken as non-negative
+        run: |
+          git stash -q || true
+          sed -i 's/self.int_nonneg(left)/true/' crates/almide-wasm/src/binop.rs
+          grep -n 'is_power_of_two() && true' crates/almide-wasm/src/binop.rs
+          cargo build --release --bin almide
+          f=spec/wasm_cross/int_div_pow2_signed_induction.almd
+          target/release/almide run "$f" > /tmp/n.txt 2>&1
+          target/release/almide run "$f" --target wasm > /tmp/w.txt 2>&1
+          if diff /tmp/n.txt /tmp/w.txt > out/negctl.diff; then
+            echo "the must-not-fire fixture agreed with the transform forced on"; exit 1
+          fi
+          cat out/negctl.diff
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: regen4611
           path: out/
