@@ -26,9 +26,9 @@ pub(super) fn render(
             )));
         }
         let (v, n) = (var(*dst), var(*len));
-        writeln!(out, "{pad}let mut {v}: Vec<u8> = Vec::new();").unwrap();
-        writeln!(out, "{pad}if {n} < 0 || {v}.try_reserve_exact({n} as usize).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }}").unwrap();
-        writeln!(out, "{pad}{v}.resize({n} as usize, 0);").unwrap();
+        writeln!(out, "{pad}let mut {v}: Vec<u8> = Vec::new();").expect("writing to a String cannot fail");
+        writeln!(out, "{pad}if {n} < 0 || {v}.try_reserve_exact({n} as usize).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }}").expect("writing to a String cannot fail");
+        writeln!(out, "{pad}{v}.resize({n} as usize, 0);").expect("writing to a String cannot fail");
         tys.insert(*dst, NTy::Rec(i));
         return Some(Ok(true));
     }
@@ -71,9 +71,9 @@ pub(super) fn render(
         var(ad.base)
     };
     let at = format!("__byte_at_{}", args[0].0);
-    writeln!(out, "{pad}let {at} = {index} + {offset};").unwrap();
-    writeln!(out, "{pad}if {at} < 0 || {at} > {b}.len() as i128 - {width} {{ almide_oob() }}").unwrap();
-    writeln!(out, "{pad}let {at} = {at} as usize;").unwrap();
+    writeln!(out, "{pad}let {at} = {index} + {offset};").expect("writing to a String cannot fail");
+    writeln!(out, "{pad}if {at} < 0 || {at} > {b}.len() as i128 - {width} {{ almide_oob() }}").expect("writing to a String cannot fail");
+    writeln!(out, "{pad}let {at} = {at} as usize;").expect("writing to a String cannot fail");
     let slots: Vec<_> = (0..width)
         .map(|n| crate::render_native_bounds::Slot {
             base: ad.base,
@@ -98,7 +98,7 @@ pub(super) fn render(
             4 => format!("u32::from_le_bytes([{bytes}]) as i64"),
             _ => format!("i64::from_le_bytes([{bytes}])"),
         };
-        writeln!(out, "{pad}let mut {}: i64 = {expr};", var(d)).unwrap();
+        writeln!(out, "{pad}let mut {}: i64 = {expr};", var(d)).expect("writing to a String cannot fail");
         tys.insert(d, NTy::I64);
     } else {
         let value = args[1];
@@ -108,10 +108,10 @@ pub(super) fn render(
             _ => return Some(Err(wall("native: a non-scalar byte store"))),
         };
         let bytes = format!("__byte_bits_{}", args[0].0);
-        writeln!(out, "{pad}let {bytes} = ({bits}).to_le_bytes();").unwrap();
+        writeln!(out, "{pad}let {bytes} = ({bits}).to_le_bytes();").expect("writing to a String cannot fail");
         for (n, slot) in slots.iter().enumerate() {
             crate::render_native_bounds::store(*slot);
-            writeln!(out, "{pad}{b}[{at} + {n}] = {bytes}[{n}];").unwrap();
+            writeln!(out, "{pad}{b}[{at} + {n}] = {bytes}[{n}];").expect("writing to a String cannot fail");
         }
     }
     Some(Ok(true))

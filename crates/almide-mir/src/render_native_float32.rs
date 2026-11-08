@@ -91,6 +91,6 @@ pub(crate) fn render(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
     s.tys.insert(*d, ty);
     let rust_ty = if ty == NTy::F64 { "f64" } else { "i64" };
     for _ in 0..s.indent { s.out.push_str("    "); }
-    writeln!(s.out, "let mut {}: {rust_ty} = {expr};", var(*d)).unwrap();
+    writeln!(s.out, "let mut {}: {rust_ty} = {expr};", var(*d)).expect("writing to a String cannot fail");
     Ok(true)
 }

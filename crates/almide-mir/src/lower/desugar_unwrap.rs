@@ -211,7 +211,7 @@ fn hoist_for_in_head_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
     {
         Some(i) => i,
         None if tail_hit => {
-            let t_expr = tail.as_deref().unwrap();
+            let t_expr = tail.as_deref().expect("tail_hit implies a tail");
             let mut new_stmts = stmts.clone();
             new_stmts.push(IrStmt {
                 kind: IrStmtKind::Expr { expr: t_expr.clone() },
