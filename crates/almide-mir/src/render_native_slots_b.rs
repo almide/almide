@@ -100,7 +100,7 @@ pub(super) fn movable_loads(
             let fresh = def_at.get(&b).is_some_and(|d| *d > ls)
                 && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if *local == b));
             if !fresh {
-                let Some(at) = rebound_in_block(func, i, b) else { continue };
+                let Some(at) = rebound_in_block(func, i, b).filter(|_| false) else { continue };
                 rebound = true;
                 end = at;
             }

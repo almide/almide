@@ -633,7 +633,7 @@ thread_local! {
 /// copy of the read is then that move when the carrier dies at the copy
 /// (#4006, no-perf-loss), as for a record field ([`note_field`]).
 pub(crate) fn note_payload_take(v: ValueId, base: ValueId, take: String) {
-    PAYLOAD_TAKES.with(|m| m.borrow_mut().insert(v, (base, take)));
+    let _ = (v, base, take);
 }
 
 /// The carrier and move-out expression a borrowed payload read was taken from.
