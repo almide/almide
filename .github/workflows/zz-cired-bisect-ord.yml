@@ -1,0 +1,49 @@
+name: cired bisect ord
+on:
+  push:
+    branches: ["cired-bisect-ord"]
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  GIT_TERMINAL_PROMPT: "0"
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      shas: ${{ steps.s.outputs.shas }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: s
+        run: echo "shas=$(python3 -c 'import json;print(json.dumps(open(".github/cired/shas.txt").read().split()))')" >> $GITHUB_OUTPUT
+  run:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        sha: ${{ fromJson(needs.plan.outputs.shas) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: cp .github/cired/bisect.sh /tmp/bisect.sh && git checkout -q ${{ matrix.sha }}
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-1.97.0
+          save-if: false
+      - run: |
+          curl -sSfL https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz | tar -xJ -C /tmp
+          echo /tmp/wasmtime-v50.0.1-x86_64-linux >> $GITHUB_PATH
+      - run: cargo build --release && mkdir -p ~/.local/bin && cp target/release/almide ~/.local/bin/ && echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: bisect
+        run: bash /tmp/bisect.sh 2>&1 | tee /tmp/out-${{ matrix.sha }}.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: out-${{ matrix.sha }}
+          path: /tmp/out-*.txt
