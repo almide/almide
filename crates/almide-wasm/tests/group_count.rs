@@ -25,8 +25,8 @@ fn group_counts_avoid_group_storage_and_keep_counts() {
     let b = run(&staged);
     assert_eq!(a.stdout, "2000 5\n");
     assert_eq!(a.stdout, b.stdout);
-    let ac = a.alloc_count.unwrap();
-    let bc = b.alloc_count.unwrap();
+    let ac = a.alloc_count.expect("the harness counts allocations");
+    let bc = b.alloc_count.expect("the harness counts allocations");
     assert!(ac.bytes + 50_000 < bc.bytes, "counts must not allocate group element storage: {ac:?} / {bc:?}");
     assert_eq!(ac.allocs, ac.frees, "counts leak");
 }
@@ -45,7 +45,7 @@ fn owned_keys_aliases_empty_inputs_and_order_are_preserved() {
       println("${map.get(bs, true) ?? 0} ${map.get(bs, false) ?? 0}")
     }"#);
     assert_eq!(r.stdout, "b! 2\na! 2\né! 1\nb a 5\n0\n2 1\n");
-    let c = r.alloc_count.unwrap();
+    let c = r.alloc_count.expect("the harness counts allocations");
     assert_eq!(c.allocs, c.frees, "owned keys and source elements must not leak");
 }
 
@@ -96,8 +96,8 @@ fn mapped_counts_stream_ranges_without_intermediate_storage() {
     let b = run(&staged);
     assert_eq!(a.stdout, "2000 5\n");
     assert_eq!(a.stdout, b.stdout);
-    let ac = a.alloc_count.unwrap();
-    let bc = b.alloc_count.unwrap();
+    let ac = a.alloc_count.expect("the harness counts allocations");
+    let bc = b.alloc_count.expect("the harness counts allocations");
     assert!(ac.bytes + 100_000 < bc.bytes, "range and mapped list must disappear: {ac:?} / {bc:?}");
     assert_eq!(ac.allocs, ac.frees, "owned mapped keys must settle on both lookup arms");
 }
@@ -121,7 +121,7 @@ fn mapped_counts_keep_source_snapshots_and_capture_order() {
       println("${map.len(empty)}")
     }"#);
     assert_eq!(r.stdout, "bab 2 changed a\n1 9\n0\n");
-    let c = r.alloc_count.unwrap();
+    let c = r.alloc_count.expect("the harness counts allocations");
     assert_eq!(c.allocs, c.frees, "source snapshots and borrowed mapped keys must settle");
 }
 
@@ -132,8 +132,8 @@ fn mapped_abort_and_nonidentity_key_keep_staged_observations() {
       println("${map.len(counts)}")
     }"#;
     let staged = fused.replace("let counts =", "let words =").replace(" |> list.group_by", "\nlet counts = words |> list.group_by");
-    let a = run_wasm(&emit(fused)).unwrap();
-    let b = run_wasm(&emit(&staged)).unwrap();
+    let a = run_wasm(&emit(fused)).expect("the module runs");
+    let b = run_wasm(&emit(&staged)).expect("the module runs");
     assert_ne!(a.exit, 0);
     assert_eq!((a.stdout, a.stderr, a.exit), (b.stdout, b.stderr, b.exit));
     let r = run(r#"effect fn main() -> Unit = {

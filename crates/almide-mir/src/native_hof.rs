@@ -89,38 +89,49 @@ pub(crate) struct Hof {
     /// The twin's name.
     pub twin: String,
     bounds: Vec<(String, almide_lang::capability_bounds::Cap)>,
+    /// The `@reuse` declaration's route (#3707): the param its owned twin
+    /// takes by value and that twin's static-dispatch name. A call that is
+    /// the last reader of that argument hands it over instead of the
+    /// borrowing body copying it into its result.
+    owned: Option<(usize, String)>,
 }
 
 fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
     Some(match t {
-        TypeExpr::Simple { name } => match name.as_str() {
-            "Unit" => DTy::Unit,
-            "Int" => DTy::Int,
-            "Bool" => DTy::Bool,
-            "Float" => DTy::Float,
-            "String" => DTy::Str,
-            "Matrix" => DTy::Matrix,
-            "Value" => DTy::Value,
-            "Bytes" => DTy::Bytes,
-            a if tps.contains(a) => DTy::Var(a.to_string()),
-            _ => return None,
-        },
+        TypeExpr::Simple { name } => simple_dty(name.as_str(), tps)?,
         TypeExpr::Tuple { elements } => DTy::Tuple(elements.iter().map(|e| dty_of(e, tps)).collect::<Option<_>>()?),
-        TypeExpr::Generic { name, args } if args.len() == 1 => match name.as_str() {
-            "List" => DTy::List(Box::new(dty_of(&args[0], tps)?)),
-            "Set" => DTy::Set(Box::new(dty_of(&args[0], tps)?)),
-            "?" | "Option" => DTy::Opt(Box::new(dty_of(&args[0], tps)?)),
-            _ => return None,
-        },
-        TypeExpr::Generic { name, args } if args.len() == 2 && name.as_str() == "Map" => {
-            DTy::Map(Box::new(dty_of(&args[0], tps)?), Box::new(dty_of(&args[1], tps)?))
-        }
-        TypeExpr::Generic { name, args } if args.len() == 2 && name.as_str() == "Result" => {
-            DTy::Result(Box::new(dty_of(&args[0], tps)?), Box::new(dty_of(&args[1], tps)?))
-        }
+        TypeExpr::Generic { name, args } => generic_dty(name.as_str(), args, tps)?,
         TypeExpr::Fn { params, ret, is_effect: false } => {
             DTy::Fn(params.iter().map(|p| dty_of(p, tps)).collect::<Option<_>>()?, Box::new(dty_of(ret, tps)?))
         }
+        _ => return None,
+    })
+}
+
+/// [`dty_of`] for a bare type name: a primitive or a declared type parameter.
+fn simple_dty(name: &str, tps: &BTreeSet<String>) -> Option<DTy> {
+    Some(match name {
+        "Unit" => DTy::Unit,
+        "Int" => DTy::Int,
+        "Bool" => DTy::Bool,
+        "Float" => DTy::Float,
+        "String" => DTy::Str,
+        "Matrix" => DTy::Matrix,
+        "Value" => DTy::Value,
+        "Bytes" => DTy::Bytes,
+        a if tps.contains(a) => DTy::Var(a.to_string()),
+        _ => return None,
+    })
+}
+
+/// [`dty_of`] for an applied generic: the one- and two-argument containers.
+fn generic_dty(name: &str, args: &[TypeExpr], tps: &BTreeSet<String>) -> Option<DTy> {
+    Some(match (name, args.len()) {
+        ("List", 1) => DTy::List(Box::new(dty_of(&args[0], tps)?)),
+        ("Set", 1) => DTy::Set(Box::new(dty_of(&args[0], tps)?)),
+        ("?" | "Option", 1) => DTy::Opt(Box::new(dty_of(&args[0], tps)?)),
+        ("Map", 2) => DTy::Map(Box::new(dty_of(&args[0], tps)?), Box::new(dty_of(&args[1], tps)?)),
+        ("Result", 2) => DTy::Result(Box::new(dty_of(&args[0], tps)?), Box::new(dty_of(&args[1], tps)?)),
         _ => return None,
     })
 }
@@ -130,7 +141,13 @@ fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
 fn rust_agrees(d: &DTy, r: &str) -> Option<bool> {
     let by_ref = r.starts_with('&');
     let r = r.strip_prefix('&').unwrap_or(r);
-    let ok = match d {
+    let ok = scalar_agrees(d, r, by_ref).unwrap_or_else(|| composite_agrees(d, r, by_ref));
+    ok.then_some(by_ref)
+}
+
+/// [`rust_agrees`] for the leaf types; `None` for a composite.
+fn scalar_agrees(d: &DTy, r: &str, by_ref: bool) -> Option<bool> {
+    Some(match d {
         DTy::Unit => (r == "()" || r.is_empty()) && !by_ref,
         DTy::Int => r == "i64",
         DTy::Bool => r == "bool",
@@ -140,15 +157,29 @@ fn rust_agrees(d: &DTy, r: &str) -> Option<bool> {
         DTy::Value => r == "AlmideValue",
         DTy::Bytes => r == "Vec<u8>" || (by_ref && r == "[u8]"),
         DTy::Var(_) => r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !by_ref,
+        _ => return None,
+    })
+}
+
+/// [`rust_agrees`] for the composite types (every leaf is [`scalar_agrees`]'s).
+fn composite_agrees(d: &DTy, r: &str, by_ref: bool) -> bool {
+    match d {
         DTy::Tuple(_) => r.starts_with('(') && r.ends_with(')') && !by_ref,
-        DTy::List(_) => r.starts_with("Vec<") || (by_ref && r.starts_with('[')),
+        // A runtime generic standing for a concrete declared element
+        // (`fn f<M: Deref<Target = AlmideMatrix>>(xs: &[M])`) carries a bound
+        // the native element kind need not meet: not this route's.
+        DTy::List(e) => {
+            let inner = r.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).or_else(|| r.strip_prefix('[').and_then(|x| x.strip_suffix(']')));
+            let bare_param = inner.is_some_and(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_uppercase()));
+            (r.starts_with("Vec<") || (by_ref && r.starts_with('['))) && !(bare_param && !matches!(**e, DTy::Var(_)))
+        }
         DTy::Opt(_) => r.starts_with("Option<") && !by_ref,
         DTy::Map(..) => r.starts_with("AlmideMap<"),
         DTy::Set(_) => r.starts_with("AlmideSet<"),
         DTy::Result(..) => r.starts_with("Result<"),
         DTy::Fn(..) => r.starts_with("std::rc::Rc<dynFn(") && !by_ref,
-    };
-    ok.then_some(by_ref)
+        _ => false,
+    }
 }
 
 /// The registry call a linked impl fn serves.
@@ -191,6 +222,12 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
         generics.as_ref().and_then(|gs| gs.get(b.generic))
             .map(|g| (g.name.as_str().to_string(), b.cap)).ok_or("runtime bound has no declared generic")
     }).collect::<Result<Vec<_>, _>>()?;
+    // A Float list's cells are its bits on the native render: a Float
+    // specialization served by a runtime generic that compares its elements
+    // would compare the bits (`-0.0` against `0.0`, NaN against itself).
+    if !bounds.is_empty() && target != call && crate::native_floor::specialized_elem(call).as_deref() == Some("Float") {
+        return Err(format!("a Float specialization of `{target}`, whose runtime generic compares the list's bits"));
+    }
     let tps: BTreeSet<String> = generics.iter().flatten().map(|g| g.name.as_str().to_string()).collect();
     let dparams: Vec<DTy> = params.iter().map(|p| dty_of(&p.ty, &tps)).collect::<Option<_>>().ok_or("a param type outside the map")?;
     let dret = dty_of(ret, &tps).ok_or("a return type outside the map")?;
@@ -212,10 +249,43 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
     // A combinator takes its closure statically (`static_twin`); a call with
     // no function-typed param calls the runtime body as it is.
     if !params.iter().any(|(d, _)| matches!(d, DTy::Fn(..))) {
-        return Ok(Hof { twin: symbol.clone(), symbol, params, mutable, ret: dret, items, bounds });
+        return Ok(Hof { twin: symbol.clone(), symbol, params, mutable, ret: dret, items, bounds, owned: None });
     }
-    let (twin, items) = static_runtime_closure(&symbol, items).ok_or("the runtime body has no static callback route")?;
-    Ok(Hof { symbol, params, mutable, ret: dret, items, twin, bounds })
+    let (twin, mut items) = static_runtime_closure(&symbol, items).ok_or("the runtime body has no static callback route")?;
+    let owned = reuse_route(&symbol, &params, &dret, &mut items);
+    Ok(Hof { symbol, params, mutable, ret: dret, items, twin, bounds, owned })
+}
+
+/// The static route of `symbol`'s `@reuse` owned twin: the reused param and
+/// the twin's static name, adding the twin's items when the borrowing body
+/// does not already forward to it. Only an update that returns the same
+/// container it borrows qualifies, as on the declared floor
+/// (`native_floor::takes_by_value`).
+fn reuse_route(symbol: &str, params: &[(DTy, bool)], ret: &DTy, items: &mut Vec<&'static str>) -> Option<(usize, String)> {
+    let r = almide_lang::reuse::of_intrinsic(symbol)?;
+    let t = r.owned_twin?;
+    let (d, by_ref) = params.get(r.param)?;
+    if !*by_ref || d != ret || !matches!(d, DTy::List(_) | DTy::Set(_) | DTy::Map(..) | DTy::Bytes) {
+        return None;
+    }
+    let (tparams, _, titems) = crate::native_floor::runtime_body(t)?;
+    if tparams.len() != params.len() || tparams.get(r.param)?.trim_start().starts_with('&') {
+        return None;
+    }
+    let name = format!("{t}_static");
+    let carried = |items: &[&str]| items.iter().any(|i| crate::native_floor::runtime_fn_name(i).as_deref() == Some(name.as_str()));
+    if !carried(items.as_slice()) {
+        let (tw, more) = static_runtime_closure(t, titems)?;
+        if tw != name {
+            return None;
+        }
+        for i in more {
+            if !items.contains(&i) {
+                items.push(i);
+            }
+        }
+    }
+    carried(items.as_slice()).then_some((r.param, name))
 }
 
 include!("native_hof_static.rs");
@@ -564,11 +634,22 @@ fn plan(
     // key types accompany this adapter, only String-bound keys are admitted.
     let tuple_input = hof.params.iter().any(|(d, _)| !matches!(d, DTy::Fn(..)) && has_runtime_tuple(d));
     if tuple_input && hof.bounds.iter().any(|(v, _)| env.get(v) != Some(&NTy::Str)) { return None; }
+    // A generated struct or enum (a declared record or variant, a tuple)
+    // derives no ordering: an ordering-bound generic bound to one is v0's.
+    if hof.bounds.iter().any(|(v, cap)| *cap == almide_lang::capability_bounds::Cap::Ord && env.get(v).and_then(|k| k.rec()).is_some_and(|i| rec::field_count(i) > 0 || rec::enum_cases(i).is_some())) {
+        return None;
+    }
     let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
+    let mut twin = hof.twin.as_str();
     for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {
         if hof.mutable[k] {
             rendered.push(mutable_place_arg(a, code, *t, tys)?);
+            continue;
+        }
+        if let Some(owned) = handed_over(hof, k, a, *t) {
+            twin = owned;
+            rendered.push(runtime_arg(code, *t, false, true));
             continue;
         }
         rendered.push(match d {
@@ -585,34 +666,7 @@ fn plan(
                     format!("&{snapshot}")
                 } else { value }
             }
-            _ => {
-                if hof.mutable.iter().any(|m| *m) {
-                    // Evaluate the other values before lending the receiver
-                    // exclusively, including an argument that reads its alias.
-                    let snapshot = format!("__arg_{}_{}", at.1, k);
-                    let owned = crate::render_native::owned_nty(*t);
-                    let value = runtime_arg(code, *t, false, false);
-                    side.prelude.push(format!("let {snapshot} = {value};"));
-                    if *by_ref { runtime_arg(&snapshot, owned, true, false) } else { snapshot }
-                } else {
-                // A borrowed payload whose carrier dies at the call: the
-                // payload itself, moved out, where the param takes it by value.
-                let taken = match a {
-                    CallArg::Handle(v) if !*by_ref => crate::render_native_move::taken_arg(*v).and_then(|take| {
-                        let owned = crate::render_native::owned_nty(*t);
-                        (owned != *t).then(|| (format!("{{ {take} }}"), owned))
-                    }),
-                    _ => None,
-                };
-                match taken {
-                    Some((take, owned)) => runtime_arg(&take, owned, false, true),
-                    None => {
-                        let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
-                        runtime_arg(code, *t, *by_ref, dying)
-                    }
-                }
-                }
-            }
+            _ => value_arg(hof, (at.1, k), (a, code.as_str(), *t), &mut side),
         });
     }
     // Constructors without a value argument cannot bind their result-only
@@ -623,9 +677,50 @@ fn plan(
         bind_param(&mut env, &hof.ret, clo::owned_nty(ret))?;
     }
     let ret = kind_of(&env, &hof.ret)?;
-    let expr = format!("{}({})", hof.twin, rendered.join(", "));
+    let expr = format!("{}({})", twin, rendered.join(", "));
     let expr = runtime_result(&env, &hof.ret, &expr)?;
     Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims, side.reads)))
+}
+
+/// The owned twin's name when argument `k` (`a`, of kind `t`) is the
+/// `@reuse` param, the call is its last reader, and the render holds it
+/// owned: the twin takes it over instead of the borrowing body copying it.
+fn handed_over<'h>(hof: &'h Hof, k: usize, a: &CallArg, t: NTy) -> Option<&'h str> {
+    let (param, name) = hof.owned.as_ref().filter(|(p, _)| *p == k)?;
+    let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
+    let owned = matches!(t, NTy::Vec | NTy::VecStr | NTy::Rec(_)) && crate::render_native::owned_nty(t) == t;
+    (dying && owned && !hof.mutable.iter().any(|m| *m) && hof.params[*param].1).then_some(name.as_str())
+}
+
+/// [`plan`]'s rendering of the plain value argument `k` of the call at op
+/// `at` (`a`, rendered as `code`, of kind `t`).
+fn value_arg(hof: &Hof, (at, k): (usize, usize), (a, code, t): (&CallArg, &str, NTy), side: &mut FnArgOut) -> String {
+    let by_ref = hof.params[k].1;
+    if hof.mutable.iter().any(|m| *m) {
+        // Evaluate the other values before lending the receiver
+        // exclusively, including an argument that reads its alias.
+        let snapshot = format!("__arg_{}_{}", at, k);
+        let owned = crate::render_native::owned_nty(t);
+        let value = runtime_arg(code, t, false, false);
+        side.prelude.push(format!("let {snapshot} = {value};"));
+        return if by_ref { runtime_arg(&snapshot, owned, true, false) } else { snapshot };
+    }
+    // A borrowed payload whose carrier dies at the call: the
+    // payload itself, moved out, where the param takes it by value.
+    let taken = match a {
+        CallArg::Handle(v) if !by_ref => crate::render_native_move::taken_arg(*v).and_then(|take| {
+            let owned = crate::render_native::owned_nty(t);
+            (owned != t).then(|| (format!("{{ {take} }}"), owned))
+        }),
+        _ => None,
+    };
+    match taken {
+        Some((take, owned)) => runtime_arg(&take, owned, false, true),
+        None => {
+            let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
+            runtime_arg(code, t, by_ref, dying)
+        }
+    }
 }
 
 /// A call the linked body `call.name` refused with `refused`: served here,

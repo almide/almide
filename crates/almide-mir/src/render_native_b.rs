@@ -13,57 +13,6 @@ pub(crate) struct OpSink<'a> {
     pub used_shims: &'a mut Vec<&'static str>,
 }
 
-/// `Op::CallIndirect` — dispatch through the arity's `__almd_ci_*` table.
-fn render_call_indirect(
-    dst: &Option<ValueId>,
-    table_idx: &ValueId,
-    args: &[CallArg],
-    result: &Option<Repr>,
-    sink: OpSink<'_>,
-) -> Result<(), LowerError> {
-    let OpSink { tys, out, indent, used_shims: _ } = sink;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    let Some((CallArg::Handle(env), rest)) = args.split_first() else {
-        return Err(wall("native: CallIndirect without a leading env arg"));
-    };
-    let et = *tys
-        .get(env)
-        .ok_or_else(|| wall("native: CallIndirect env untyped"))?;
-    if !et.is_veccy() {
-        return Err(wall("native: CallIndirect env is not a closure block"));
-    }
-    let env_code = if et == NTy::Vec { format!("&{}", var(*env)) } else { var(*env) };
-    let mut rendered = vec![var(*table_idx), env_code];
-    for a in rest {
-        let (code, got) = call_arg(a, tys)?;
-        if got != NTy::I64 {
-            return Err(wall(
-                "native: CallIndirect non-scalar user arg — outside the closures slab",
-            ));
-        }
-        rendered.push(code);
-    }
-    let call = format!("__almd_ci_{}({})", rest.len(), rendered.join(", "));
-    match (dst, result) {
-        (Some(d), Some(Repr::Scalar { .. })) => {
-            tys.insert(*d, NTy::I64);
-            line!("let mut {}: i64 = {call};", var(*d));
-        }
-        (None, _) => line!("{call};"),
-        _ => {
-            return Err(wall(
-                "native: CallIndirect heap result — outside the closures slab",
-            ))
-        }
-    }
-    Ok(())
-}
-
 /// `Op::ListGetScalar` — bounds-checked element load via the `almide_idx_get` shim.
 fn render_list_get_scalar(
     dst: &ValueId,
@@ -144,26 +93,8 @@ pub(crate) fn render_set_local(
         }};
     }
     let t = *tys.get(src).ok_or_else(|| wall("native: SetLocal of untyped value"))?;
-    let rhs = match t {
-        NTy::I64 | NTy::F64 => var(*src),
-        NTy::Str => format!("{}.clone()", var(*src)),
-        NTy::StrRef => format!("AlmideString::from({})", var(*src)),
-        NTy::Vec => format!("{}.clone()", var(*src)),
-        NTy::VecRef => format!("{}.to_vec()", var(*src)),
-        NTy::Res => format!("{}.clone()", var(*src)),
-        NTy::VecStr => format!("{}.clone()", var(*src)),
-        NTy::VecStrRef => format!("{}.to_vec()", var(*src)),
-        NTy::Rec(_) | NTy::RecRef(_) => format!("{}.clone()", var(*src)),
-        NTy::Opt => var(*src),
-        NTy::ResStr => format!("{}.clone()", var(*src)),
-    };
-    let store_t = match t {
-        NTy::StrRef => NTy::Str,
-        NTy::VecRef => NTy::Vec,
-        NTy::VecStrRef => NTy::VecStr,
-        NTy::RecRef(i) => NTy::Rec(i),
-        other => other,
-    };
+    let rhs = end_if_copy_rhs(*src, t);
+    let store_t = crate::render_native::owned_nty(t);
     if let Some(prev) = tys.get(local) {
         if let Some(recode) = crate::native_value_repr::scalar_recode(&var(*src), t, *prev) {
             line!("{} = {};", var(*local), recode);
@@ -569,41 +500,7 @@ fn render_declared_floor_call(
         args.iter().map(|a| matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))).collect();
     // A borrowed read whose carrier dies at the call: the call takes the
     // payload, moved out, where its param (or its `@reuse` twin's) is by value.
-    for (k, a) in args.iter().enumerate() {
-        let CallArg::Handle(v) = a else { continue };
-        let Some(take) = crate::render_native_move::taken_arg(*v) else { continue };
-        let by_value = matches!(
-            floor.params.get(k),
-            Some(
-                crate::native_floor::FloorParam::Map(false)
-                    | crate::native_floor::FloorParam::Set(false)
-                    | crate::native_floor::FloorParam::Value(false)
-                    | crate::native_floor::FloorParam::Matrix(false)
-            )
-        ) || floor.twin.as_ref().is_some_and(|t| t.0 == k);
-        // No other arg may read the same carrier while it is edited.
-        let base_of = |x: &ValueId| {
-            crate::render_native_addr::payload_take_of(*x)
-                .map(|p| p.0)
-                .or_else(|| crate::render_native_addr::field_of(*x).map(|p| p.0))
-        };
-        let base = base_of(v);
-        let shared = args.iter().enumerate().any(|(j, b)| {
-            j != k && matches!(b, CallArg::Handle(x) if Some(*x) == base || (base.is_some() && base_of(x) == base))
-        });
-        if !by_value || shared {
-            continue;
-        }
-        let owned = match rendered[k].1 {
-            NTy::StrRef => NTy::Str,
-            NTy::VecRef => NTy::Vec,
-            NTy::VecStrRef => NTy::VecStr,
-            NTy::RecRef(j) => NTy::Rec(j),
-            _ => continue,
-        };
-        rendered[k] = (format!("{{ {take} }}"), owned);
-        dying[k] = true;
-    }
+    take_dying_payloads(args, floor, &mut rendered, &mut dying);
     // A `mut b: Bytes` fn called for its result (the move-mode rewrite's
     // `c = bytes.append_u16_le(c, x)`): it edits the arg itself, which dies
     // here, and that buffer is the result.
