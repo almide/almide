@@ -1,0 +1,2 @@
+spec/wasm_cross/bytes_to_string_err_release.almd
+spec/wasm_cross/bang_in_record_literal_field.almd
