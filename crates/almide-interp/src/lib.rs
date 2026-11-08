@@ -578,7 +578,7 @@ impl<'a> Interpreter<'a> {
         // definition both backends run — see `stdlib_pool`. Program fns are
         // inserted first and `or_insert` keeps them authoritative, so a fixture
         // fn can never be shadowed by a pool body; the pool's own intra-source
-        // calls (`__sext`, a sibling impl) resolve pool-first while a pool body
+        // calls (`__sat_clamp`, a sibling impl) resolve pool-first while a pool body
         // executes (`cur_pool`), so a program fn spelled like one cannot
         // capture them either (#3825).
         for f in stdlib_pool::pool().fns.values() {

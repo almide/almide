@@ -103,7 +103,7 @@ pub const DECL_INDEX: &[DeclRow] = &[
     ("int_hex", &["__hex_count_pos", "__hex_count", "__hex_char", "__int_hex_fill", "int_to_hex"], &[], false),
     ("int_rotate", &["__rotate_count", "int_rotate_left", "int_rotate_right"], &[], false),
     ("int_scalar", &["int_abs", "int_min", "int_max", "int_clamp"], &[], false),
-    ("int_sized", &["__sext", "int_to_int8", "int_to_int16", "int_to_int32", "int_to_int64", "int_to_uint64", "int_from_int64", "int_from_uint64", "int_from_int8", "int_from_int16", "int_from_int32", "int_from_uint8", "int_from_uint16", "int_from_uint32", "int_to_uint8", "int_to_uint16", "int_to_uint32", "__sat_clamp", "int_to_int8_saturating", "int_to_int16_saturating", "int_to_int32_saturating", "int_to_uint8_saturating", "int_to_uint16_saturating", "int_to_uint32_saturating", "int_to_uint64_saturating"], &[], false),
+    ("int_sized", &["int_to_int8", "int_to_int16", "int_to_int32", "int_to_int64", "int_to_uint64", "int_from_int64", "int_from_uint64", "int_from_int8", "int_from_int16", "int_from_int32", "int_from_uint8", "int_from_uint16", "int_from_uint32", "int_to_uint8", "int_to_uint16", "int_to_uint32", "__sat_clamp", "int_to_int8_saturating", "int_to_int16_saturating", "int_to_int32_saturating", "int_to_uint8_saturating", "int_to_uint16_saturating", "int_to_uint32_saturating", "int_to_uint64_saturating"], &[], false),
     ("int_to_float", &["int_to_float", "int_to_float64", "int_to_float32"], &[], false),
     ("int_to_string", &["__itos_count_digits", "__itos_fill", "__itos_pos", "__itos_count_digits_neg", "__itos_fill_neg", "__itos_neg", "int_to_string"], &[], false),
     ("int_wrap", &["int_wrap_add", "int_wrap_mul"], &[], false),

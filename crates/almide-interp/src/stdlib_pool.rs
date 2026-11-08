@@ -1,7 +1,7 @@
 //! The self-hosted stdlib bodies, lowered once and shared by every interpreter.
 //!
 //! The stdlib is self-hosted: `int.__to_int8` is not a Rust intrinsic but pure
-//! Almide (`stdlib/int_sized.almd` — `prim.band` + a sign-extend helper), and the
+//! Almide (`stdlib/int_sized.almd` — a `prim.bshl` and `prim.bshr` pair), and the
 //! WASM leg links exactly those bodies into every build via
 //! `almide_lang::self_host_registry`. This module lowers the SAME sources through
 //! the SAME frontend, so the third oracle can evaluate the same definition both
@@ -46,7 +46,7 @@ use almide_lang::parser::Parser;
 
 pub(crate) struct StdlibPool {
     /// Every impl fn from every registry source that lowered cleanly, keyed by
-    /// its flat impl name (`int_to_int8`). Helpers (`__sext`) ride along so
+    /// its flat impl name (`int_to_int8`). Helpers (`__sat_clamp`) ride along so
     /// intra-source calls resolve through the interpreter's layered fn table.
     pub(crate) fns: HashMap<Sym, IrFunction>,
     /// `("int", "__to_int8")` → `int_to_int8` — the registry's mapping, split at

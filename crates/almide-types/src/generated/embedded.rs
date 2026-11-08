@@ -13090,22 +13090,15 @@ pub const SRC_INT_SIZED: &str = r#"
 
 
 
-fn __sext(low: Int, half: Int, full: Int) -> Int = if low >= half then low - full else low
 
-fn int_to_int8(n: Int) -> Int = {
-  let low = prim.band(n, 255)
-  __sext(low, 128, 256)
-}
 
-fn int_to_int16(n: Int) -> Int = {
-  let low = prim.band(n, 65535)
-  __sext(low, 32768, 65536)
-}
 
-fn int_to_int32(n: Int) -> Int = {
-  let low = prim.band(n, 4294967295)
-  __sext(low, 2147483648, 4294967296)
-}
+
+fn int_to_int8(n: Int) -> Int = prim.bshr(prim.bshl(n, 56), 56)
+
+fn int_to_int16(n: Int) -> Int = prim.bshr(prim.bshl(n, 48), 48)
+
+fn int_to_int32(n: Int) -> Int = prim.bshr(prim.bshl(n, 32), 32)
 
 fn int_to_int64(n: Int) -> Int = n
 
