@@ -116,6 +116,46 @@ pub(crate) fn dying_after(
     src: ValueId,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
+    dying_after_skipping(func, at, src, borrow_arms, &Default::default())
+}
+
+/// [`dying_after`] for a record a field is moved out of at `at`: a later read
+/// of one of its scalar slots (`ListGetScalar`, or the address `prim.handle`
+/// takes of it and nothing reads) does not see the field, which the move
+/// leaves empty, so it does not keep the record alive.
+pub(crate) fn carrier_dies_after(
+    func: &MirFunction,
+    at: usize,
+    src: ValueId,
+    borrow_arms: &std::collections::BTreeSet<ValueId>,
+) -> bool {
+    let unread = |d: ValueId| {
+        !func.ops.iter().any(|op| {
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(op, &mut reads);
+            reads.contains(&d)
+        })
+    };
+    let scalar_reads: std::collections::BTreeSet<usize> = func.ops[at + 1..]
+        .iter()
+        .enumerate()
+        .filter(|(_, op)| match op {
+            Op::ListGetScalar { list, .. } => *list == src,
+            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } => args.as_slice() == [src] && unread(*d),
+            _ => false,
+        })
+        .map(|(j, _)| at + 1 + j)
+        .collect();
+    dying_after_skipping(func, at, src, borrow_arms, &scalar_reads)
+}
+
+fn dying_after_skipping(
+    func: &MirFunction,
+    at: usize,
+    src: ValueId,
+    borrow_arms: &std::collections::BTreeSet<ValueId>,
+    skip: &std::collections::BTreeSet<usize>,
+) -> bool {
     if drill_no_moves() {
         return false;
     }
@@ -134,7 +174,7 @@ pub(crate) fn dying_after(
     if joined {
         return false;
     }
-    if let Some(verdict) = scan_after_copy(func, at, src, owned_param) {
+    if let Some(verdict) = scan_after_copy(func, at, src, owned_param, skip) {
         return verdict;
     }
     // The returned value is read at the end.
@@ -176,7 +216,7 @@ pub(crate) fn dying_after(
 /// The forward scan of [`dying_after`] over the ops after the copy at
 /// `ops[at]`: `Some(true)` = released first, `Some(false)` = read or rebound
 /// first, `None` = neither before the end of the function.
-fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: bool) -> Option<bool> {
+fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: bool, skip: &std::collections::BTreeSet<usize>) -> Option<bool> {
     // `src` is released, unconditionally and before anything reads it again,
     // in the copy's own block: the value dies there, whatever later rebinds
     // the slot (a loop slot's write-back `Drop v; SetLocal v = ..`). A copy
@@ -184,7 +224,10 @@ fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: boo
     let mut depth = 0i32;
     let mut straight = true;
     let mut reads = Vec::new();
-    for op in &func.ops[at + 1..] {
+    for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
+        if skip.contains(&j) {
+            continue;
+        }
         if straight {
             match op {
                 Op::IfThen { .. } | Op::LoopStart => depth += 1,
@@ -503,7 +546,7 @@ pub(crate) fn set_moving_args(
                     }
                 };
                 let ok = matches!(tys.get(&base), Some(NTy::Rec(_)))
-                    && dying_after(func, at, base, borrow_arms)
+                    && carrier_dies_after(func, at, base, borrow_arms)
                     && reads.iter().all(|r| dying_after(func, at, *r, borrow_arms));
                 ok.then_some((v, take))
             })
