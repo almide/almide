@@ -628,6 +628,10 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
                 }
                 return Ok(true);
             }
+            if st.pushed.contains(&ad.base) {
+                line!("{}.push({rhs});", var(ad.base));
+                return Ok(true);
+            }
             let (guard, slot) = bounds_guard(st, &ad, ix);
             if let Some(g) = guard {
                 line!("{g}");
