@@ -11,9 +11,8 @@
 //! and the closure's word otherwise, plus `NAME` itself, a wrapper passing
 //! `-1` for every key, which every other call site keeps calling. A call
 //! whose closure argument is a block the caller built from a lifted lambda
-//! (`native_hof::lambda_of`), or the caller's own keyed param, names the
-//! specialization with that lambda's table index (or the caller's own key),
-//! and the dispatch folds to the direct call.
+//! (`native_hof::lambda_of`) names the specialization with that lambda's
+//! table index, and the dispatch folds to the direct call.
 //!
 //! Sound because the key equals the word it replaces: a lambda-built block is
 //! defined once, from a `FuncRef` defined once, and the keyed param is never
@@ -23,8 +22,7 @@
 //!
 //! A param is keyed when it is never rebound and a `CallIndirect` of the
 //! function dispatches on its first word (`ListGetScalar` at the constant
-//! index 0) with it as the env; a keyed function handing its keyed param back
-//! to itself (a recursion) passes its own key on. Lifted lambdas
+//! index 0) with it as the env. Lifted lambdas
 //! (dispatch-table arms, which call by name) and narrow-ABI functions keep
 //! their one shape.
 
@@ -53,6 +51,8 @@ struct Current {
     /// (`native_cell_window`), and the takes whose cell a read emptied.
     func: Option<MirFunction>,
     emptied: BTreeSet<ValueId>,
+    /// Its borrow-join arms (`borrow_join`), for the liveness reads.
+    arms: BTreeSet<ValueId>,
 }
 
 thread_local! {
@@ -152,7 +152,7 @@ pub(crate) fn set_program(user_fns: &BTreeMap<&str, &MirFunction>, sigs: &crate:
 }
 
 /// Enter `func`'s render.
-pub(crate) fn begin_fn(func: &MirFunction) {
+pub(crate) fn begin_fn(func: &MirFunction, arms: &BTreeSet<ValueId>) {
     let params: BTreeMap<ValueId, usize> = PROGRAM.with(|p| {
         p.borrow().keyed.get(&func.name).map(|ks| ks.iter().enumerate().map(|(i, v)| (*v, i)).collect()).unwrap_or_default()
     });
@@ -161,7 +161,7 @@ pub(crate) fn begin_fn(func: &MirFunction) {
     } else {
         dispatch_reads(func).into_iter().filter_map(|(r, p)| params.get(&p).map(|k| (r, *k))).collect()
     };
-    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads, func: Some(func.clone()), emptied: BTreeSet::new() });
+    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads, func: Some(func.clone()), emptied: BTreeSet::new(), arms: arms.clone() });
 }
 
 /// The shared-cell read `d` of `cell` takes the payload out
@@ -175,6 +175,27 @@ pub(crate) fn cell_read_takes(d: ValueId, cell: ValueId, tys: &BTreeMap<ValueId,
         let at = func.ops.iter().position(|op| matches!(op, Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(x), .. } if *x == d));
         let end = at.and_then(|at| crate::native_cell_window::take_window(func, at, (d, cell), tys, &program_fn));
         end.is_some_and(|x| c.emptied.insert(x))
+    })
+}
+
+/// The payload read `d` of the owned carrier `base` may move the payload out:
+/// nothing reads the carrier, or an address into it, after the read, and
+/// its binding is its own (no param, never rebound) — Rust's drop flag then
+/// skips the carrier's release, where a view left it to drop whole.
+pub(crate) fn payload_moves(d: ValueId, base: ValueId) -> bool {
+    CURRENT.with(|c| {
+        let c = c.borrow();
+        let Some(func) = c.func.as_ref() else { return false };
+        let Some(at) = func.ops.iter().position(|op| matches!(op, Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(x), .. } if *x == d)) else { return false };
+        let root = crate::render_native_borrow_read::roots(func);
+        let own = !rebound(func).contains(&base) && !func.params.iter().any(|p| p.value == base);
+        let mut reads = Vec::new();
+        own && crate::render_native_move::dying_after(func, at, base, &c.arms)
+            && func.ops[at + 1..].iter().all(|op| {
+                reads.clear();
+                crate::mir_ops::op_reads(op, &mut reads);
+                crate::render_native_move::bookkeeping(op) || !reads.iter().any(|r| *r == base || root.get(r) == Some(&base))
+            })
     })
 }
 
@@ -201,13 +222,8 @@ pub(crate) fn call_head(name: &str, args: &[CallArg], callee: &MirFunction) -> O
                 Some(CallArg::Handle(v)) => Some(*v),
                 _ => None,
             });
-            let key = arg.and_then(|v| {
-                if let Some(k) = CURRENT.with(|c| c.borrow().params.get(&v).copied()) {
-                    return Some(format!("K{k}"));
-                }
-                let lambda = crate::native_hof::lambda_of(v)?;
-                PROGRAM.with(|p| p.borrow().lambdas.get(&lambda).map(|i| i.to_string()))
-            });
+            let lambda = arg.and_then(crate::native_hof::lambda_of);
+            let key = lambda.and_then(|l| PROGRAM.with(|p| p.borrow().lambdas.get(&l).map(|i| i.to_string())));
             known |= key.is_some();
             format!("{{ {} }}", key.unwrap_or_else(|| "-1".to_string()))
         })
@@ -222,11 +238,9 @@ pub(crate) fn specialize(func: &MirFunction, rendered: String) -> Result<String,
     let Some(ks) = PROGRAM.with(|p| p.borrow().keyed.get(&func.name).cloned()) else { return Ok(rendered) };
     let m = crate::render_native::mangle(&func.name);
     let head = format!("fn {m}(");
-    let wall = |s: &str| crate::render_native::wall(format!("native: keyed dispatch of `{}`: {s}", func.name));
-    if !rendered.starts_with(&head) {
-        return Err(wall("the rendered head is not found"));
-    }
-    let sig_end = rendered.find(" {\n").ok_or_else(|| wall("the rendered signature is not found"))?;
+    let (true, Some(sig_end)) = (rendered.starts_with(&head), rendered.find(" {\n")) else {
+        return Err(crate::render_native::wall(format!("native: keyed dispatch of `{}`: the rendered signature is not found", func.name)));
+    };
     let consts: Vec<String> = (0..ks.len()).map(|i| format!("const K{i}: i64")).collect();
     let body = rendered.replacen(&head, &format!("fn {m}__k<{}>(", consts.join(", ")), 1);
     // The wrapper: the same signature (no param is rebound in it), every key
