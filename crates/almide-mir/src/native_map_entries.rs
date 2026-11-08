@@ -192,6 +192,11 @@ fn entries(func: &MirFunction) -> Entries {
         for (p, a) in floor.params.iter().zip(args) {
             let (FloorParam::MapPairs, CallArg::Handle(arg)) = (p, a) else { continue };
             let list = root.get(arg).unwrap_or(arg);
+            if std::env::var("ALMIDE_DEBUG_MAPENTRIES").is_ok() {
+                eprintln!("MAPENTRIES fn={} call={name} arg={arg:?} list={list:?} alloc={:?} stores={:?} reads={:?}", func.name, alloc(list), stores.get(list), other_reads(*list));
+                for (_, _, pb) in stores.get(list).into_iter().flatten() { eprintln!("MAPENTRIES  pair={pb:?} alloc={:?} stores={:?} reads={:?}", alloc(pb), stores.get(pb), other_reads(*pb)); }
+                for (k, o) in func.ops.iter().enumerate() { let mut r = Vec::new(); crate::mir_ops::op_reads(o, &mut r); if r.iter().any(|v| v == list || root.get(v) == Some(list)) { eprintln!("MAPENTRIES  op{k}: {o:?}"); } }
+            }
             let Some((at, n)) = alloc(list).filter(|(_, n)| *n > 0 && slots_once(*list, *n)) else { continue };
             let held: Vec<(usize, ValueId)> = stores[list].iter().map(|(s, _, v)| (*s, *v)).collect();
             // A pair: two slots, read only by its one store into the list.
