@@ -43,10 +43,16 @@ fn build_step<'o>(later: &'o Op, b: &ValueId, base_of: &BTreeMap<ValueId, (Value
 pub(super) fn movable_loads(
     func: &MirFunction,
     base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
-) -> (BTreeSet<ValueId>, BTreeSet<ValueId>) {
+) -> (BTreeSet<ValueId>, BTreeSet<ValueId>, BTreeSet<ValueId>) {
     let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
     let mut out = BTreeSet::new();
     let mut last = BTreeSet::new();
+    // The movable reads that are the first read of their slot since the
+    // block was last bound: no other read of that slot of the same block
+    // value precedes them, so none can be rendered later than them (an
+    // interpolation chain reads its pieces at its last step).
+    let mut first = BTreeSet::new();
+    let mut since_bind: BTreeSet<(ValueId, usize)> = BTreeSet::new();
     // The open loops' starts, and where each value is defined.
     let mut loops: Vec<usize> = Vec::new();
     let mut def_at: BTreeMap<ValueId, usize> = BTreeMap::new();
@@ -64,11 +70,15 @@ pub(super) fn movable_loads(
         if let Some(v) = crate::mir_ops::defined_value(op) {
             def_at.entry(v).or_insert(i);
         }
+        if let Op::SetLocal { local, .. } = op {
+            since_bind.retain(|(b, _)| b != local);
+        }
         let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
         let Some(&(b, Some(off))) = args.first().and_then(|a| base_of.get(a)) else { continue };
         let Some(k) = slot_of(Some(off)) else { continue };
         let earlier = seen.entry((b, k)).or_default().clone();
         seen.get_mut(&(b, k)).expect("just inserted").push(*d);
+        let first_read = since_bind.insert((b, k));
         // Inside a loop the block must be born in the same iteration (defined
         // after the innermost loop's start, never rebound): a block from
         // before the loop would be read again by the next iteration.
@@ -92,6 +102,9 @@ pub(super) fn movable_loads(
         for later in &func.ops[i + 1..end] {
             let fine = match later {
                 Op::Drop { v } | Op::DropListStr { v } | Op::DropVariant { v, .. } | Op::DropWrapperRec { v, .. } => *v == b,
+                // The ownership marks render nothing; an op that hands the
+                // block on reads it itself.
+                Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. } => true,
                 Op::Prim { kind: PrimKind::Handle, args, .. } => args.first() == Some(&b),
                 Op::IntBinOp { op: crate::IntOp::Add, a, b: y, .. } => rooted(a, b) || rooted(y, b),
                 Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, args, .. } => args.first().is_some_and(|a| {
@@ -116,9 +129,12 @@ pub(super) fn movable_loads(
             if !other_slot && !rebound {
                 last.insert(*d);
             }
+            if first_read {
+                first.insert(*d);
+            }
         }
     }
-    (out, last)
+    (out, last, first)
 }
 
 /// The rebind of `b` from another value that follows the op at `at` in its
