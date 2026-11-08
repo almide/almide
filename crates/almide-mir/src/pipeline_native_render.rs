@@ -183,6 +183,11 @@ fn rewrite_native_linked_mir(
             f.name
         )));
     }
+    // A closure block only its direct calls named, all of them inlined, is
+    // never built (no copy of what it captures).
+    for f in functions.iter_mut() {
+        crate::native_unread_closure::elide(f);
+    }
     rewrite_native_result_windows_over(
         ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())),
         functions,
@@ -395,7 +400,8 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     let windows = crate::native_region_window::window_fns(&ir);
     let mut ir = crate::fan_native::lift_fan_arms(ir)?;
     if let Some(f) = crate::charge_probe::region_reaching_callback(&ir) {
-        return Err(LowerError::Unsupported(format!(
+        let span = ir.functions.iter().find(|g| g.name.as_str() == f).and_then(|g| g.body.span);
+        return Err(LowerError::at(span, format!(
             "native: metered region fn `{f}` hands a callback on, which the v1 meter does not charge as the meter plan does"
         )));
     }

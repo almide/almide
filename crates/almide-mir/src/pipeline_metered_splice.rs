@@ -236,7 +236,8 @@ pub fn try_render_metered_splice(source: &str) -> Result<String, LowerError> {
     let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
     let roots = metered_region_roots(&ir)?;
     if let Some(f) = crate::charge_probe::region_reaching_callback(&ir) {
-        return Err(LowerError::Unsupported(format!(
+        let span = ir.functions.iter().find(|g| g.name.as_str() == f).and_then(|g| g.body.span);
+        return Err(LowerError::at(span, format!(
             "native: metered region fn `{f}` hands a callback on, which the v1 meter does not charge as the meter plan does"
         )));
     }

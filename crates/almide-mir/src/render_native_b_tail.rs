@@ -308,13 +308,7 @@ fn render_end_if(
             line!("}}");
             return Ok(());
         }
-        let arm_t = match t {
-            NTy::StrRef => NTy::Str,
-            NTy::VecRef => NTy::Vec,
-            NTy::VecStrRef => NTy::VecStr,
-            NTy::RecRef(i) => NTy::Rec(i),
-            other => other,
-        };
+        let arm_t = crate::render_native::owned_nty(t);
         if arm_t != join_t && !(crate::render_native::owned_nty(join_t) == join_t
             && crate::native_value_repr::same_owned(arm_t, join_t)) {
             return Err(wall(format!("native: if-value arms disagree on type ({join_t:?} vs {arm_t:?})")));
@@ -326,8 +320,9 @@ fn render_end_if(
     Ok(())
 }
 
-/// The `else` arm's yield copied into the join, by its NTy (the copy
-/// [`join_rhs`] keeps when the value outlives the arm).
+/// The owned copy of `v`, by its NTy: an if-value arm's yield copied into the
+/// join (the copy [`join_rhs`] keeps when the value outlives the arm), or a
+/// `SetLocal`'s source.
 fn end_if_copy_rhs(v: ValueId, t: NTy) -> String {
     match t {
         NTy::I64 | NTy::F64 => var(v),
@@ -508,16 +503,11 @@ fn take_dying_payloads(
         let shared = args.iter().enumerate().any(|(j, b)| {
             j != k && matches!(b, CallArg::Handle(x) if Some(*x) == base || (base.is_some() && base_of(x) == base))
         });
-        if !by_value || shared {
+        // Only a borrowed read has a payload to take.
+        let owned = crate::render_native::owned_nty(rendered[k].1);
+        if !by_value || shared || owned == rendered[k].1 {
             continue;
         }
-        let owned = match rendered[k].1 {
-            NTy::StrRef => NTy::Str,
-            NTy::VecRef => NTy::Vec,
-            NTy::VecStrRef => NTy::VecStr,
-            NTy::RecRef(j) => NTy::Rec(j),
-            _ => continue,
-        };
         rendered[k] = (format!("{{ {take} }}"), owned);
         dying[k] = true;
     }
