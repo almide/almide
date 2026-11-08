@@ -528,25 +528,12 @@ impl CarrierCx<'_> {
         if let (None, Some(err_side), true) = (arm, self.st.hoisted.get(&d).copied(), self.st.borrow_reads.contains(&d)) {
             let (k, side, other) = if err_side { (e, "Err", "Ok") } else { (o, "Ok", "Err") };
             let dv = var(d);
-            // A string or list payload: a slice of it, the other side's an
-            // empty one. A copy where the carrier dies moves it out.
-            let slice = match k {
-                NTy::Str => Some((NTy::StrRef, "&str", "\"\"")),
-                NTy::Vec => Some((NTy::VecRef, "&[i64]", "&[]")),
-                NTy::VecStr => Some((NTy::VecStrRef, "&[AlmideString]", "&[]")),
-                _ => None,
-            };
-            if let Some((t, ty, empty)) = slice {
-                self.tys.insert(d, t);
-                self.emit(&format!("let mut {dv}: {ty} = match &{b} {{ {side}(v) => &v[..], {other}(_) => {empty} }};"));
-                crate::render_native_addr::note_payload_take(
-                    d,
-                    ad.base,
-                    format!("match &mut {b} {{ {side}(v) => std::mem::take(v), {other}(_) => Default::default() }}"),
-                );
-                return Some(Err(Ok(true)));
-            }
             match k {
+                NTy::Str => {
+                    self.tys.insert(d, NTy::StrRef);
+                    self.emit(&format!("let mut {dv}: &str = match &{b} {{ {side}(v) => &v[..], {other}(_) => \"\" }};"));
+                    return Some(Err(Ok(true)));
+                }
                 NTy::Rec(j) if has_default(k) => {
                     self.tys.insert(d, NTy::RecRef(j));
                     let t = struct_name(j);
@@ -591,8 +578,6 @@ impl CarrierCx<'_> {
         let by_ref = match k {
             NTy::Rec(j) => Some((NTy::RecRef(j), format!("&{}", struct_name(j)), if then { "v" } else { ok_v })),
             NTy::Str => Some((NTy::StrRef, "&str".to_string(), "&v[..]")),
-            NTy::Vec => Some((NTy::VecRef, "&[i64]".to_string(), "&v[..]")),
-            NTy::VecStr => Some((NTy::VecStrRef, "&[AlmideString]".to_string(), "&v[..]")),
             _ => None,
         };
         let (true, Some((t, ty, val))) = (self.st.borrow_reads.contains(&d), by_ref) else { return false };
