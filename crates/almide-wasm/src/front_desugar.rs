@@ -210,7 +210,7 @@ impl Rewriter<'_> {
             ("list", f, [xs]) if f.starts_with("__to_string_") => IrExprKind::StringInterp {
                 parts: vec![almide_ir::IrStringPart::Expr { expr: std::mem::take(xs) }],
             },
-            ("list", f, [a, b]) if f == "__eq" || f.starts_with("__eq_") => IrExprKind::BinOp {
+            ("list", f, [a, b]) if f.starts_with("__eq_") => IrExprKind::BinOp {
                 op: almide_ir::BinOp::Eq,
                 left: Box::new(std::mem::take(a)),
                 right: Box::new(std::mem::take(b)),

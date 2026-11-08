@@ -8,7 +8,7 @@
 //! one cell per lane-scalar element type (Int, Float, Bool) and String. A list
 //! of String-bearing containers (`List[List[String]]`, `List[String?]`) has no
 //! String-suffixed cell: its self-hosted body specializes the one generic cell
-//! `list.__eq[A]`, so the element type is a type argument, not a `_str` twin
+//! `list.__eq_any[A]`, so the element type is a type argument, not a `_str` twin
 //! (#1460's ratchet, scripts/check-str-twin-ratchet.sh).
 
 const CELLS: &[(&str, &str)] = &[
@@ -48,10 +48,10 @@ fn nested_string_bodies_specialize_the_generic_cell() {
     let list = std::fs::read_to_string("stdlib/list.almd").unwrap();
     let rt = std::fs::read_to_string("runtime/rs/src/list.rs").unwrap();
     let core = std::fs::read_to_string("stdlib/value_core.almd").unwrap();
-    assert!(list.contains("@intrinsic(\"almide_rt_list_eq\")\nfn __eq[A](a: List[A], b: List[A]) -> Bool = _"));
-    assert!(rt.contains("pub fn almide_rt_list_eq<A: PartialEq>(a: &[A], b: &[A]) -> bool"));
+    assert!(list.contains("@intrinsic(\"almide_rt_list_eq_any\")\nfn __eq_any[A](a: List[A], b: List[A]) -> Bool = _"));
+    assert!(rt.contains("pub fn almide_rt_list_eq_any<A: PartialEq>(a: &[A], b: &[A]) -> bool"));
     for body in ["list_eq_list_str", "list_eq_opt_str"] {
-        assert!(core.contains(&format!("@specializes(\"list.__eq\")\nfn {body}(")), "`{body}` does not specialize list.__eq");
+        assert!(core.contains(&format!("@specializes(\"list.__eq_any\")\nfn {body}(")), "`{body}` does not specialize list.__eq_any");
     }
     for twin in ["fn __eq_list_str(", "fn __eq_opt_str("] {
         assert!(!list.contains(twin), "`{twin}` is a String-suffixed cell again");
