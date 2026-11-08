@@ -226,7 +226,9 @@ fn borrow_twin_of(ret: FloorRet, symbol: &str, rust_params: &[String], rt: &'sta
         return None;
     }
     let twin = format!("{symbol}_ref");
+    eprintln!("PROBE twin {twin}: text={:?}", signature_text(rt, &twin).map(|t| &t[..t.len().min(120)]));
     let (tp, tr) = rust_signature(signature_text(rt, &twin)?)?;
+    eprintln!("PROBE twin {twin}: tp={tp:?} tr={tr:?} base={rust_params:?} closure={:?}", closure(&twin, rt).map(|v| v.len()));
     let same = tp.len() == rust_params.len()
         && tp.iter().zip(rust_params).all(|(a, b)| without_lifetimes(&squash(a)) == without_lifetimes(&squash(b)));
     let borrowed = result_parts(&without_lifetimes(&squash(&tr))).is_some_and(|(ok, err)| ok == "&AlmideValue" && err == "AlmideString");

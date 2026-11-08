@@ -164,6 +164,7 @@ pub(crate) fn borrowed_results(func: &MirFunction) -> BTreeSet<ValueId> {
             (crate::native_floor::FloorParam::Value(_), _) => false,
             _ => true,
         });
+        eprintln!("PROBE {} op{i} {name} d={d:?} src_borrowed={sources_borrowed} only={} params={:?} owned={:?}", func.name, only_borrowed_reads(func, i, *d, &root, &reads), func.params.iter().map(|p| p.value).collect::<Vec<_>>(), func.owned_params);
         if sources_borrowed && only_borrowed_reads(func, i, *d, &root, &reads) {
             out.insert(*d);
         }
