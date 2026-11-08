@@ -362,7 +362,7 @@ fn closure_origins(func: &MirFunction) -> BTreeMap<ValueId, (String, Vec<ValueId
         }
     }
     let once = |v: ValueId| count.get(&v) == Some(&1);
-    func.ops
+    let mut out: BTreeMap<_, _> = func.ops
         .iter()
         .filter_map(|op| match op {
             Op::ListLit { dst, elems } if once(*dst) => {
@@ -371,7 +371,20 @@ fn closure_origins(func: &MirFunction) -> BTreeMap<ValueId, (String, Vec<ValueId
             }
             _ => None,
         })
-        .collect()
+        .collect();
+    let (_, _, bases) = crate::render_native_addr::block_bases(func);
+    for op in &func.ops {
+        let Op::Prim { kind: crate::PrimKind::Store { width: 8 }, args, .. } = op else { continue };
+        let [addr, rhs] = args.as_slice() else { continue };
+        let Some((block, Some(off))) = bases.get(addr) else { continue };
+        let Some(name) = refs.get(rhs) else { continue };
+        let stores = func.ops.iter().filter(|op| matches!(op, Op::Prim { kind: crate::PrimKind::Store { .. }, args, .. }
+            if args.first().and_then(|a| bases.get(a)) == Some(&(*block, Some(*off))))).count();
+        if *off == i64::from(crate::lower::layout::BLOCK_HEADER) && once(*block) && once(*rhs) && stores == 1 {
+            out.insert(*block, (name.to_string(), Vec::new()));
+        }
+    }
+    out
 }
 
 // ── rendering a served call ──
@@ -386,12 +399,11 @@ const LANE_F64: &str = "trait AlmdLaneF64 { fn lane_f64(self) -> f64; }\nimpl Al
 
 /// The adapter: a closure, borrowing the env array `env` (a copy of the
 /// closure block's scalar slots), that calls the lifted lambda `lambda`
-/// (params of kinds `ps`) on each element it is lent — or hands it over, at
-/// a param the lambda takes over (`moved`). `bits[i]`: how that
+/// (params of kinds `ps`) on each element it is lent. `bits[i]`: how that
 /// param crosses into the lambda's lane ([`Lane`]). `ret_lane`: a declared
 /// `Float` result is read through [`LANE_F64`], a declared `Bool` one is
 /// tested `!= 0`; else the lambda's result kind `ret` is the runtime's.
-fn adapter(lambda: &str, env: &str, (ps, moved): (&[NativeSigKind], &[bool]), bits: &[Lane], (ret, ret_lane): (NativeSigKind, Lane)) -> Option<String> {
+fn adapter(lambda: Option<&str>, env: &str, (ps, moved): (&[NativeSigKind], &[bool]), bits: &[Lane], (ret, ret_lane): (NativeSigKind, Lane)) -> Option<String> {
     if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) {
         return None;
     }
@@ -413,7 +425,7 @@ fn adapter(lambda: &str, env: &str, (ps, moved): (&[NativeSigKind], &[bool]), bi
             _ => format!(", __p{i}"),
         })
         .collect();
-    let call = format!("{}(&{env}{args})", crate::render_native::mangle(lambda));
+    let call = format!("{}{args})", callback_head(lambda, env, ps, ret));
     let (call, ret_ty) = match ret_lane {
         Lane::F64 => (format!("AlmdLaneF64::lane_f64({call})"), "f64".to_string()),
         Lane::Bool => (format!("({call}) != 0"), "bool".to_string()),
@@ -461,87 +473,7 @@ fn call_args(call: &crate::render_native::NativeCall<'_>, fname: &str, tys: &BTr
         .collect()
 }
 
-/// What the function-typed arguments add before and beside the call: the
-/// env arrays' bindings, and the shims they need.
-#[derive(Default)]
-struct FnArgOut {
-    prelude: Vec<String>,
-    shims: Vec<&'static str>,
-}
-
-/// What rendering the function-typed argument needs to see.
-struct FnArgCx<'a> {
-    user_fns: &'a BTreeMap<&'a str, &'a MirFunction>,
-    sigs: &'a NativeSigs,
-    tys: &'a BTreeMap<ValueId, NTy>,
-    origins: &'a BTreeMap<ValueId, (String, Vec<ValueId>)>,
-    /// The op index, which names the env array.
-    at: usize,
-    bounds: &'a [(String, almide_lang::capability_bounds::Cap)],
-}
-
-/// The adapter for the function-typed argument `a` (kind `t`) of declared
-/// type `(dps) -> dret`, binding the type params it fixes; the env array's
-/// binding and any shim it needs go to `side`.
-fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): (&CallArg, NTy), side: &mut FnArgOut) -> Option<String> {
-    let CallArg::Handle(blk) = a else { return None };
-    let (lambda, env_elems) = cx.origins.get(blk)?;
-    // The lambda borrows its env; a user param it takes over (a move param,
-    // `native_move_params`) gets the value the runtime hands the adapter.
-    let l = cx.user_fns.get(lambda.as_str())?;
-    if l.params.first().is_some_and(|p| l.owned_params.contains(&p.value)) {
-        return None;
-    }
-    let moved = clo::lambda_moves(l);
-    let (ps, ret) = clo::lambda_sig(cx.sigs, lambda)?;
-    let ret = ret?;
-    if !matches!(t, NTy::Vec | NTy::VecRef) { return None; }
-    let layout = callback_layout(dps, ps.len())?;
-    if !cx.bounds.is_empty() {
-        let (ptys, rty) = crate::lambda_sigs::get(lambda)?;
-        if ptys.len() != layout.len() || !layout.iter().zip(&ptys).all(|((d, _), t)| bounded_type_agrees(cx.bounds, d, t))
-            || !bounded_type_agrees(cx.bounds, dret, &rty) { return None; }
-    }
-    let tuples = dps.iter().any(has_runtime_tuple) || has_runtime_tuple(dret);
-    let bits: Vec<Lane> = if tuples {
-        for ((d, _), k) in layout.iter().zip(&ps) { bind_callback_shape(env, d, clo::owned_nty(*k))?; }
-        bind_callback_shape(env, dret, clo::owned_nty(ret))?;
-        Vec::new()
-    } else { dps
-        .iter()
-        .zip(&ps)
-        .map(|(dp, k)| match bind_lambda(env, dp, *k)? {
-            true => Some(Lane::F64),
-            false if *dp == DTy::Bool => Some(Lane::Bool),
-            false => Some(Lane::Same),
-        })
-        .collect::<Option<_>>()? };
-    let ret_lane = match dret {
-        DTy::Float => Lane::F64,
-        DTy::Bool => Lane::Bool,
-        _ => Lane::Same,
-    };
-    if !tuples && ret_lane == Lane::F64 {
-        side.shims.push(LANE_F64);
-    } else if !tuples && bind_lambda(env, dret, ret) != Some(false) {
-        return None;
-    }
-    // The env: a copy of the block's slots, every one a scalar.
-    let slots: Vec<String> = env_elems
-        .iter()
-        .map(|e| match cx.tys.get(e) {
-            Some(NTy::I64) => Some(var(*e)),
-            Some(NTy::F64) => Some(format!("{}.to_bits() as i64", var(*e))),
-            _ => None,
-        })
-        .collect::<Option<_>>()?;
-    let name = format!("__env_{}_{}", cx.at, side.prelude.len());
-    if tuples && ret == NativeSigKind::F64 { side.shims.push(LANE_F64); }
-    let closure = if tuples { tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), ret)? }
-        else { adapter(lambda, &name, (&ps, &moved), &bits, (ret, ret_lane))? };
-    side.prelude.push(format!("let {name}: [i64; {}] = [{}];", slots.len(), slots.join(", ")));
-    Some(closure)
-}
+include!("native_hof_callbacks.rs");
 
 /// Render `call` (to the linked body `call.name`) through its runtime body.
 /// `Ok(false)` = this route does not serve it (the caller's wall stands).
@@ -553,7 +485,11 @@ pub(crate) fn try_render(
 ) -> Result<bool, LowerError> {
     let crate::render_native::OpSink { tys, out, indent, used_shims } = s;
     let Some((hof, at, served)) = plan(&call, user_fns, sigs, tys) else { return Ok(false) };
-    let (expr, ret, prelude, shims) = served;
+    let (expr, ret, prelude, shims, reads) = served;
+    for slot in reads {
+        crate::render_native_bounds::check(slot);
+        crate::render_native_bounds::access(slot);
+    }
     used_shims.push(crate::native_floor::FLOOR_HEADER);
     used_shims.extend(hof.items.iter().copied());
     used_shims.extend(shims);
@@ -574,7 +510,7 @@ pub(crate) fn try_render(
 
 /// A served call: the expression, its result kind, the env bindings before
 /// it, and the shims it needs.
-type Served = (String, NTy, Vec<String>, Vec<&'static str>);
+type Served = (String, NTy, Vec<String>, Vec<&'static str>, Vec<crate::render_native_bounds::Slot>);
 
 /// The served rendering of `call`, or `None` when this route does not serve it.
 fn plan(
@@ -635,8 +571,22 @@ fn plan(
                     side.prelude.push(format!("let {snapshot} = {value};"));
                     if *by_ref { runtime_arg(&snapshot, owned, true, false) } else { snapshot }
                 } else {
-                let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
-                runtime_arg(code, *t, *by_ref, dying)
+                // A borrowed payload whose carrier dies at the call: the
+                // payload itself, moved out, where the param takes it by value.
+                let taken = match a {
+                    CallArg::Handle(v) if !*by_ref => crate::render_native_move::taken_arg(*v).and_then(|take| {
+                        let owned = crate::render_native::owned_nty(*t);
+                        (owned != *t).then(|| (format!("{{ {take} }}"), owned))
+                    }),
+                    _ => None,
+                };
+                match taken {
+                    Some((take, owned)) => runtime_arg(&take, owned, false, true),
+                    None => {
+                        let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
+                        runtime_arg(code, *t, *by_ref, dying)
+                    }
+                }
                 }
             }
         });
@@ -651,7 +601,7 @@ fn plan(
     let ret = kind_of(&env, &hof.ret)?;
     let expr = format!("{}({})", hof.twin, rendered.join(", "));
     let expr = runtime_result(&env, &hof.ret, &expr)?;
-    Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims)))
+    Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims, side.reads)))
 }
 
 /// A call the linked body `call.name` refused with `refused`: served here,

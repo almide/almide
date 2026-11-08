@@ -36,6 +36,10 @@ mod value;
 mod byte_slots;
 #[path = "render_native_scalar_slots.rs"]
 mod scalar_slots;
+#[path = "render_native_env_slots.rs"]
+mod env_slots;
+#[path = "render_native_cell_slots.rs"]
+mod cell_slots;
 pub(crate) use carrier::{carrier_values, is_carrier, CarrierSig};
 pub(crate) use slots::flag_exits;
 
@@ -116,8 +120,10 @@ pub(crate) struct AddrState {
     moves: BTreeSet<ValueId>,
     /// The movable reads after which nothing reads the block at all.
     moves_last: BTreeSet<ValueId>,
-    /// Heap slot reads that move the value out, or that a rebuild walls
-    /// (`native_slot_takes`).
+    /// The movable reads that are their slot's first read since the block
+    /// was bound: the ones a borrow may give way to a move.
+    moves_first: BTreeSet<ValueId>,
+    /// Heap slot reads that move out, or whose rebuild walls (`native_slot_takes`).
     slot_reads: crate::native_slot_takes::SlotReads,
     /// Struct blocks built whole (`render_native_slots::built_whole`), and
     /// the fields stored so far of the one being built.
@@ -145,6 +151,7 @@ pub(crate) struct AddrState {
     /// last store (each element bound as `<list>_e<k>` at its store), as the
     /// standard codegen builds a list literal: (length, elements stored).
     literal: BTreeMap<ValueId, (usize, usize)>,
+    borrowed_list_slots: BTreeSet<(ValueId, ValueId)>,
 }
 
 impl AddrState {
@@ -157,7 +164,7 @@ impl AddrState {
         let (handle_of, consts, base_of) = block_bases(func);
         // The untyped blocks, typed from their stores and the declarations
         // that consume them, in one fixpoint (render_native_slots.rs).
-        let (moves, moves_last) = slots::movable_loads(func, &base_of);
+        let (moves, moves_last, moves_first) = slots::movable_loads(func, &base_of);
         let str_lists = slots::type_blocks(func, sigs, &mut alloc_rec, &slots::Facts { handle_of: &handle_of, base_of: &base_of, consts: &consts });
         let alloc_rec = func
             .ops
@@ -173,7 +180,7 @@ impl AddrState {
                 // generated struct, is built as a slot list.
                 Op::ListLit { dst, elems } => alloc_rec
                     .get(dst)
-                    .filter(|i| crate::render_native_rec::enum_cases(**i).is_some() || crate::render_native_rec::all_scalar_struct(**i)
+                    .filter(|i| crate::render_native_rec::enum_cases(**i).is_some() || crate::render_native_rec::all_scalar_struct(**i) || crate::render_native_rec::closure_sig(**i).is_some()
                         || (elems.is_empty() && crate::render_native_rec::is_empty_collection(**i)))
                     .map(|i| (*dst, *i)),
                 _ => None,
@@ -253,6 +260,7 @@ impl AddrState {
             borrow_reads: crate::render_native_borrow_read::borrow_reads(func),
             moves,
             moves_last,
+            moves_first,
             slot_reads: crate::native_slot_takes::slot_reads(func),
             whole,
             building: BTreeMap::new(),
@@ -262,6 +270,7 @@ impl AddrState {
             single_rec,
             pushed,
             literal: BTreeMap::new(),
+            borrowed_list_slots: slots::borrowed_stores(func, &handle_of, &base_of),
         }
     }
 }
@@ -468,7 +477,7 @@ fn note_join_recs(func: &MirFunction, alloc_rec: &mut BTreeMap<ValueId, u16>) {
 
 /// The handle, constant and base-offset facts of a function's blocks.
 #[allow(clippy::type_complexity)]
-fn block_bases(func: &MirFunction) -> (BTreeMap<ValueId, ValueId>, BTreeMap<ValueId, i64>, BTreeMap<ValueId, (ValueId, Option<i64>)>) {
+pub(crate) fn block_bases(func: &MirFunction) -> (BTreeMap<ValueId, ValueId>, BTreeMap<ValueId, i64>, BTreeMap<ValueId, (ValueId, Option<i64>)>) {
     // A block stored into a typed parent's slot takes the slot's declared
     // kind: a list's element, a record's field, an enum slot's one record kind.
     let mut handle_of: BTreeMap<ValueId, ValueId> = BTreeMap::new();
@@ -616,6 +625,30 @@ pub(crate) fn reads_of_place(place: &str) -> Vec<ValueId> {
 
 pub(crate) fn clear_str_fields() {
     STR_FIELDS.with(|m| m.borrow_mut().clear());
+    PAYLOAD_TAKES.with(|m| m.borrow_mut().clear());
+}
+
+thread_local! {
+    static PAYLOAD_TAKES: std::cell::RefCell<BTreeMap<ValueId, (ValueId, String)>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+/// A borrowed read of a payload that has no place expression of its own (an
+/// enum case's slot, a Result side): the carrier, and the expression that
+/// moves the payload out of it, leaving the payload's `Default` behind. A
+/// copy of the read is then that move when the carrier dies at the copy
+/// (#4006, no-perf-loss), as for a record field ([`note_field`]).
+pub(crate) fn note_payload_take(v: ValueId, base: ValueId, take: String) {
+    PAYLOAD_TAKES.with(|m| m.borrow_mut().insert(v, (base, take)));
+}
+
+/// The carrier and move-out expression a borrowed payload read was taken from.
+pub(crate) fn payload_take_of(v: ValueId) -> Option<(ValueId, String)> {
+    PAYLOAD_TAKES.with(|m| m.borrow().get(&v).cloned())
+}
+
+/// Every borrowed read noted with the move-out expression `take`.
+pub(crate) fn reads_of_take(take: &str) -> Vec<ValueId> {
+    PAYLOAD_TAKES.with(|m| m.borrow().iter().filter(|(_, p)| p.1 == take).map(|(v, _)| *v).collect())
 }
 
 /// The borrowed kind of a heap value of kind `f` read in place, its Rust
@@ -651,7 +684,7 @@ fn bounds_guard(st: &AddrState, a: &Addr, ix: &str) -> (Option<String>, crate::r
     }
     crate::render_native_bounds::check(s);
     (
-        Some(format!("if {ix} >= {}.len() {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}", var(a.base))),
+        Some(format!("if {ix} >= {}.len() {{ almide_oob() }}", var(a.base))),
         s,
     )
 }

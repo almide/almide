@@ -753,7 +753,7 @@ impl LowerCtx {
     /// Lambda arm body, verbatim, re-narrowed via `let-else`.
     fn lower_tail_heap_lambda(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
         let IrExprKind::Lambda { params, body, .. } = &tail.kind else { unreachable!() };
-        match self.lift_lambda(params, body) {
+        match self.lift_lambda(params, body, &tail.ty) {
             Some(blk) => {
                 self.live_heap_handles.retain(|h| *h != blk);
                 Ok(Some(blk))

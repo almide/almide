@@ -9,7 +9,7 @@
 /// params before this table is read). The arms are tried in their original
 /// order across three groups: lane scalars and carriers, slot-block kinds,
 /// then the generated-type kinds (the last group's verdict is final).
-fn native_sig_kind(
+pub(crate) fn native_sig_kind(
     t: &almide_lang::types::Ty,
     record_layouts: &crate::lower::RecordLayouts,
     variant_layouts: &crate::lower::VariantLayouts,
@@ -138,8 +138,11 @@ fn native_closure_sig_kind(
     record_layouts: &crate::lower::RecordLayouts,
     variant_layouts: &crate::lower::VariantLayouts,
 ) -> Option<crate::render_native::NativeSigKind> {
-    crate::render_native_rec::closure_env_type(t, |p| native_sig_kind(p, record_layouts, variant_layouts).is_some())
-        .then_some(crate::render_native::NativeSigKind::ListI64)
+    let _ = (record_layouts, variant_layouts);
+    if !matches!(t, almide_lang::types::Ty::Fn { .. }) { return None; }
+    crate::render_native_rec::rec_index(&crate::render_native_rec::block_key(t))
+        .filter(|i| crate::render_native_rec::closure_sig(*i).is_some())
+        .map(crate::render_native::NativeSigKind::Rec)
 }
 
 /// [`native_sig_kind`]'s last group: the generated-type kinds (`Value`,
@@ -291,14 +294,6 @@ fn heap_lambda_native_sig(
 ) -> Option<NativeSig> {
     use crate::render_native::NativeSigKind;
     let (ptys, rty) = crate::lambda_sigs::get(&f.name)?;
-    let heap = f.params[1..].iter().any(|p| !matches!(p.repr, crate::Repr::Scalar { .. }))
-        || crate::lower::is_heap_ty(&rty);
-    // A scalar MIR repr alone erases Float to i64. Generic runtime callbacks
-    // must retain numeric equality (-0 == +0, NaN != NaN), not compare bits.
-    let float = ptys.iter().chain([&rty]).any(crate::render_native_rec::is_f64_scalar);
-    if !heap && !float {
-        return None;
-    }
     if ptys.len() + 1 != f.params.len() {
         return None;
     }
@@ -311,7 +306,8 @@ fn heap_lambda_native_sig(
         native_sig_kind(&rty, record_layouts, variant_layouts).map(Some)
     };
     let (Some(ps), Some(ret)) = (ps, ret) else { return None };
-    let mut all = vec![crate::render_native::NativeSigKind::ListI64];
+    let closure_ty = almide_lang::types::Ty::Fn { params: ptys, ret: Box::new(rty), is_effect: false };
+    let mut all = vec![native_sig_kind(&closure_ty, record_layouts, variant_layouts)?];
     all.extend(ps.into_iter().map(NativeSigKind::lane));
     Some((all, ret.map(NativeSigKind::lane)))
 }

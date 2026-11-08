@@ -265,6 +265,13 @@ fn render_user_fn_call(
         let (code, got) = call_arg(a, s.tys)?;
         let arg = if callee.owned_params.contains(&p.value) {
             moved_arg(name, crate::render_native::owned_nty(want), code, got)?
+        } else if matches!(want, NTy::Res | NTy::ResStr)
+            && got == want
+            && matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))
+        {
+            // A by-value Result param given the caller's dying Result: moved,
+            // where the copy would leave the caller one it never reads.
+            crate::render_native_move::take_expr(&code)
         } else {
             user_arg_in_declared_mode(name, want, code, got)?
         };
@@ -483,8 +490,8 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
     let (b, bt) = call_arg(b, tys)?;
     let mismatch = || wall(format!("native: `{name}` over operands outside the native lists ({at:?}, {bt:?})"));
     let (sa, ty) = crate::native_list_ops::as_slice(&a, at).ok_or_else(mismatch)?;
-    let (sb, ty_b) = crate::native_list_ops::as_slice(&b, bt).ok_or_else(mismatch)?;
-    if ty != ty_b {
+    let (sb, _) = crate::native_list_ops::as_slice(&b, bt).ok_or_else(mismatch)?;
+    if !crate::native_value_repr::same_owned(at, bt) {
         return Err(mismatch());
     }
     let Some(d) = dst else {
@@ -550,9 +557,48 @@ fn render_declared_floor_call(
 ) -> Result<(), LowerError> {
     let NativeCall { dst, name, args, .. } = call;
     let OpSink { tys, out, indent, used_shims } = s;
+    // The body only reads the Values it takes by value: lend them instead.
+    let floor = floor.by_ref.as_deref().unwrap_or(floor);
     let mut rendered: Vec<(String, NTy)> = args.iter().map(|a| call_arg(a, tys)).collect::<Result<_, _>>()?;
     let mut dying: Vec<bool> =
         args.iter().map(|a| matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))).collect();
+    // A borrowed read whose carrier dies at the call: the call takes the
+    // payload, moved out, where its param (or its `@reuse` twin's) is by value.
+    for (k, a) in args.iter().enumerate() {
+        let CallArg::Handle(v) = a else { continue };
+        let Some(take) = crate::render_native_move::taken_arg(*v) else { continue };
+        let by_value = matches!(
+            floor.params.get(k),
+            Some(
+                crate::native_floor::FloorParam::Map(false)
+                    | crate::native_floor::FloorParam::Set(false)
+                    | crate::native_floor::FloorParam::Value(false)
+                    | crate::native_floor::FloorParam::Matrix(false)
+            )
+        ) || floor.twin.as_ref().is_some_and(|t| t.0 == k);
+        // No other arg may read the same carrier while it is edited.
+        let base_of = |x: &ValueId| {
+            crate::render_native_addr::payload_take_of(*x)
+                .map(|p| p.0)
+                .or_else(|| crate::render_native_addr::field_of(*x).map(|p| p.0))
+        };
+        let base = base_of(v);
+        let shared = args.iter().enumerate().any(|(j, b)| {
+            j != k && matches!(b, CallArg::Handle(x) if Some(*x) == base || (base.is_some() && base_of(x) == base))
+        });
+        if !by_value || shared {
+            continue;
+        }
+        let owned = match rendered[k].1 {
+            NTy::StrRef => NTy::Str,
+            NTy::VecRef => NTy::Vec,
+            NTy::VecStrRef => NTy::VecStr,
+            NTy::RecRef(j) => NTy::Rec(j),
+            _ => continue,
+        };
+        rendered[k] = (format!("{{ {take} }}"), owned);
+        dying[k] = true;
+    }
     // A `mut b: Bytes` fn called for its result (the move-mode rewrite's
     // `c = bytes.append_u16_le(c, x)`): it edits the arg itself, which dies
     // here, and that buffer is the result.
@@ -574,6 +620,18 @@ fn render_declared_floor_call(
     };
     let dst_map = dst.and_then(crate::render_native_rec::declared_map);
     let (expr, ret) = crate::native_floor::render_call(floor, name, &rendered, &dying, dst_map)?;
+    // A result read only through borrows, from a Value the function borrows:
+    // the runtime's borrowing twin, no copy of the field (v0's decode path).
+    let by_ref = match (dst, &floor.borrow_twin) {
+        (Some(d), Some((twin, items))) if crate::render_native_borrow_read::borrowed_result(*d) && edited.is_none() => {
+            Some((twin.as_str(), items))
+        }
+        _ => None,
+    };
+    let expr = match by_ref {
+        Some((twin, _)) => expr.replacen(&format!("{}(", floor.symbol), &format!("{twin}("), 1),
+        None => expr,
+    };
     let (expr, ret) = match edited {
         Some((src, own)) => (
             format!("{{ let mut __edited: {t} = {src}; {expr}; __edited }}", t = crate::render_native_rec::owned_ty(own)),
@@ -582,8 +640,9 @@ fn render_declared_floor_call(
         None => (expr, ret),
     };
     used_shims.push(crate::native_floor::FLOOR_HEADER);
-    match &floor.twin {
-        Some((_, twin, items)) if expr.contains(&format!("{twin}(")) => used_shims.extend(items.iter().copied()),
+    match (&floor.twin, by_ref) {
+        (_, Some((_, items))) => used_shims.extend(items.iter().copied()),
+        (Some((_, twin, items)), None) if expr.contains(&format!("{twin}(")) => used_shims.extend(items.iter().copied()),
         _ => used_shims.extend(floor.items.iter().copied()),
     }
     for _ in 0..indent {
@@ -592,7 +651,13 @@ fn render_declared_floor_call(
     match (dst, ret) {
         (Some(d), Some(t)) => {
             tys.insert(*d, t);
-            let ty_name = crate::render_native_rec::owned_ty(t);
+            let ty_name = match by_ref {
+                Some(_) => format!(
+                    "Result<&{}, AlmideString>",
+                    crate::render_native_rec::owned_ty(NTy::Rec(crate::render_native_rec::value_index()))
+                ),
+                None => crate::render_native_rec::owned_ty(t),
+            };
             writeln!(out, "let mut {}: {} = {};", var(*d), ty_name, expr).expect("writing to a String cannot fail");
         }
         (None, _) => writeln!(out, "{expr};").expect("writing to a String cannot fail"),

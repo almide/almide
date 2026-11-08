@@ -292,6 +292,13 @@ fn from_i64_renders_like_to_string_in_one_exact_block() {
 }
 
 #[test]
+fn int_text_formats_like_display() {
+    for n in [0i64, 1, -1, 9, 10, -10, 99, 100, 12345, -98765, i64::MAX, i64::MIN, 1 << 40, -(1 << 40)] {
+        assert_eq!(format!("<{}>", almide_str::IntText(n)), format!("<{n}>"));
+    }
+}
+
+#[test]
 fn join_matches_slice_join_and_leaves_the_parts_shared() {
     let cases: Vec<Vec<&str>> = vec![vec![], vec![""], vec!["a"], vec!["", ""], vec!["ab", "", "cde"], vec!["x"; 50]];
     for parts in &cases {

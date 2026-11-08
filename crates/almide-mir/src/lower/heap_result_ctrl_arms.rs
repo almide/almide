@@ -16,6 +16,14 @@ impl LowerCtx {
     /// `_` arm): a suffix split cannot change which arm commits.
     fn lower_heap_result_arm_ctrl(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         match &arm.kind {
+            IrExprKind::Lambda { params, body, .. } if matches!(result_ty, Ty::Fn { .. }) => {
+                let mark = self.live_heap_handles.len();
+                let obj = self.lift_lambda(params, body, result_ty)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.live_heap_handles.retain(|v| *v != obj);
+                self.drop_arm_locals(mark);
+                Some(obj)
+            }
             IrExprKind::Match { subject, arms }
                 if self.is_variant_shaped_match_subject(&subject.ty) =>
             {

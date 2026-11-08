@@ -183,6 +183,10 @@ pub fn almide_rt_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> { let 
 // `size_of::<T>()`, so the limit is the same number on both legs whatever the
 // native element happens to be.
 pub const ALMIDE_LIST_REPEAT_MAX_ELEMS: i64 = (1 << 31) / 8;
+// Out of line: inlined at a call whose count is a literal, the fill loop's
+// unroll is picked to divide that count (5 for 2^28) instead of the one the
+// out-of-line body runs for every count — 1.16x the instructions per element.
+#[inline(never)]
 pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> {
     if n > ALMIDE_LIST_REPEAT_MAX_ELEMS {
         almide_abort("repeat result too large");
@@ -1285,6 +1289,12 @@ pub fn almide_rt_list_eq_int(a: &[i64], b: &[i64]) -> bool { a == b }
 pub fn almide_rt_list_eq_float(a: &[f64], b: &[f64]) -> bool { a == b }
 pub fn almide_rt_list_eq_bool(a: &[bool], b: &[bool]) -> bool { a == b }
 pub fn almide_rt_list_eq_str(a: &[AlmideString], b: &[AlmideString]) -> bool { a == b }
+pub fn almide_rt_list_eq_list_int(a: &[Vec<i64>], b: &[Vec<i64>]) -> bool { a == b }
+pub fn almide_rt_list_eq_list_float(a: &[Vec<f64>], b: &[Vec<f64>]) -> bool { a == b }
+pub fn almide_rt_list_eq_list_str(a: &[Vec<AlmideString>], b: &[Vec<AlmideString>]) -> bool { a == b }
+pub fn almide_rt_list_eq_opt_int(a: &[Option<i64>], b: &[Option<i64>]) -> bool { a == b }
+pub fn almide_rt_list_eq_opt_str(a: &[Option<AlmideString>], b: &[Option<AlmideString>]) -> bool { a == b }
+pub fn almide_rt_list_eq_res_int(a: &[Result<i64, AlmideString>], b: &[Result<i64, AlmideString>]) -> bool { a == b }
 pub fn almide_rt_list_to_string_str(xs: &[AlmideString]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push('"'); o.push_str(&e.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t")); o.push('"'); } o.push(']'); o.into() }
 
 // ── Algorithmic primitives (Phase 3 stdlib expansion) ──

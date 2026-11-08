@@ -206,7 +206,7 @@ impl LowerCtx {
                 let owned = ctx.fresh_value();
                 ctx.ops.push(Op::Dup { dst: owned, src: borrowed });
                 ctx.ops.push(Op::Else { val: Some(owned) });
-                let fb = ctx.lift_lambda(&params, &body)?;
+                let fb = ctx.lift_lambda(&params, &body, &fallback.ty)?;
                 // The fallback block is ELSE-ARM-LOCAL and MOVES into
                 // the merge — remove it from the scope-end drop set
                 // (`lift_lambda` pushed it): an unconditional drop

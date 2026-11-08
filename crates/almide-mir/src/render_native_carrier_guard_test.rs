@@ -96,3 +96,17 @@ fn hoisted_payload_requires_one_matching_tag_arm_and_an_unchanged_carrier() {
     );
     assert!(!hoisted_sides(&written).contains_key(&ValueId(7)));
 }
+
+#[test]
+fn option_payload_may_be_read_inside_its_some_guard_but_not_after_rebinding() {
+    let mut f = guarded();
+    if let Op::ConstInt { value, .. } = &mut f.ops[1] { *value = i64::from(BLOCK_LEN_OFFSET); }
+    // Read and use both occur in the Some arm, after its tag test.
+    let read = f.ops.remove(6);
+    f.ops.insert(7, read);
+    let used = f.ops.remove(9);
+    f.ops.insert(8, used);
+    assert_eq!(hoisted_sides(&f).get(&ValueId(7)), Some(&true));
+    f.ops.insert(7, Op::SetLocal { local: ValueId(0), src: ValueId(10) });
+    assert!(!hoisted_sides(&f).contains_key(&ValueId(7)));
+}

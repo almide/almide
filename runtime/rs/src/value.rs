@@ -216,6 +216,9 @@ pub fn almide_rt_value_null() -> AlmideValue { AlmideValue::Null }
 // positions the walker lowers itself, so the first runtime-emitted call site
 // (the #1522 record-default decode arm) came up E0425.
 pub fn almide_rt_value_eq(a: AlmideValue, b: AlmideValue) -> bool { a == b }
+/// `almide_rt_value_eq` over borrowed Values: the same comparison, no copy of
+/// either side (the certified native render lends the caller's Values).
+pub fn almide_rt_value_eq_ref(a: &AlmideValue, b: &AlmideValue) -> bool { a == b }
 
 // ── Access ──
 
@@ -237,7 +240,12 @@ fn almide_rt_value_kind(v: &AlmideValue) -> &'static str {
 /// parent segments prepend (`city` -> `address.city`), index segments join
 /// bracket-style (`tags[1]`). The wasm leg's `__err_at` twin composes the
 /// same bytes.
-pub fn almide_rt___err_at(e: AlmideString, seg: AlmideString) -> AlmideString {
+pub fn almide_rt___err_at(e: AlmideString, seg: AlmideString) -> AlmideString { almide_rt_value_err_at(&e, &seg) }
+
+/// The borrowed body of `almide_rt___err_at`: the runtime body that the
+/// declaration `value.__err_at` names, so the certified native render calls it
+/// where the self-hosted helper specializing that declaration is called.
+pub fn almide_rt_value_err_at(e: &str, seg: &str) -> AlmideString {
     let __almide_out: String = {
         match e.split_once(", at ") {
             Some((head, path)) if path.starts_with('[') => format!("{head}, at {seg}{path}"),
@@ -249,7 +257,10 @@ pub fn almide_rt___err_at(e: AlmideString, seg: AlmideString) -> AlmideString {
 }
 
 /// #1675: the list-element frame — `[i]` joins the path bracket-style.
-pub fn almide_rt___err_at_index(e: AlmideString, i: i64) -> AlmideString { almide_rt___err_at(e, AlmideString::from(format!("[{i}]"))) }
+pub fn almide_rt___err_at_index(e: AlmideString, i: i64) -> AlmideString { almide_rt_value_err_at_index(&e, i) }
+
+/// The borrowed body of `almide_rt___err_at_index` (`value.__err_at_index`).
+pub fn almide_rt_value_err_at_index(e: &str, i: i64) -> AlmideString { almide_rt_value_err_at(e, &format!("[{i}]")) }
 
 pub fn almide_rt_value_field(v: &AlmideValue, key: &str) -> Result<AlmideValue, AlmideString> {
     let __almide_r: Result<AlmideValue, String> = (|| {

@@ -11,7 +11,7 @@ pub(crate) fn has_default(t: NTy) -> bool {
                     return false;
                 }
                 // Empty containers do not need their elements to be Default.
-                if d.alias.is_some()
+                if d.cell_of.is_some() || d.alias.is_some()
                     || d.list_of.is_some()
                     || d.option_of.is_some()
                     || d.map_of.is_some()

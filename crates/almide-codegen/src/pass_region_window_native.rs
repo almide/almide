@@ -24,7 +24,7 @@ use almide_ir::*;
 use almide_lang::types::Ty;
 
 use super::pass::{NanoPass, Target};
-use super::pass_region_window::{build_cx, enum_name, find_sites, is_scalar_ty, plan_twins, twin_name, TwinPlan};
+use super::pass_region_window::{build_cx, declared_plan, enum_name, find_sites, is_scalar_ty, plan_twins, twin_name, TwinPlan};
 use super::pass_region_window_clone::synthesize_twins;
 
 /// Rewrite every discovered window of `program` onto `__rgn_` twins and a
@@ -36,22 +36,47 @@ use super::pass_region_window_clone::synthesize_twins;
 /// a resolved copy; the plan (the admitted pairs, the twin enums and the
 /// callee closure, all by name) is then applied to `program` itself.
 pub fn native_region_windows(program: &mut IrProgram) -> bool {
-    if almide_base::env::flag("ALMIDE_REGION_OFF") {
-        return false;
-    }
     let resolved = super::pass_resolve_calls::ResolveCallsPass.run(program.clone(), Target::Rust).program;
     let cx = build_cx(&resolved);
     if cx.pure.is_empty() {
         return false;
     }
-    let sites = find_sites(&resolved, &cx);
-    if sites.is_empty() {
+    let mut fns: HashSet<Sym> = HashSet::new();
+    let mut enums: HashSet<Sym> = HashSet::new();
+    // The DECLARED windows (`scoped { … }` entries, #1997), as the standard
+    // codegen honours them: an entry over scalar params with a scalar result
+    // whose callee closure twins and is region-pure throughout runs on its
+    // twins inside a window fn. Any other entry runs on ownership, as before.
+    // A declared region is an obligation, so the A/B knob leaves it on.
+    let mut declared: HashSet<Sym> = HashSet::new();
+    for f in resolved.functions.iter().filter(|f| f.is_scoped_block_entry()) {
+        if !f.params.iter().all(|p| is_scalar_ty(&p.ty)) || !is_scalar_ty(&f.ret_ty) {
+            continue;
+        }
+        let Some((fs, es)) = declared_plan(&resolved, &cx, f.name) else { continue };
+        if !fs.iter().all(|n| cx.pure.contains(n)) {
+            continue;
+        }
+        declared.insert(f.name);
+        fns.extend(fs);
+        enums.extend(es);
+    }
+    let mut admitted: HashSet<(Sym, Sym)> = HashSet::new();
+    if !almide_base::env::flag("ALMIDE_REGION_OFF") {
+        let sites = find_sites(&resolved, &cx);
+        if !sites.is_empty() {
+            if let Some(plan) = plan_twins(&resolved, &cx, sites) {
+                admitted = plan.sites.iter().map(|s| (s.consume, s.produce)).collect();
+                fns.extend(plan.fns);
+                enums.extend(plan.enums);
+            }
+        }
+    }
+    if admitted.is_empty() && declared.is_empty() {
         return false;
     }
-    let Some(plan) = plan_twins(&resolved, &cx, sites) else { return false };
-    let admitted: HashSet<(Sym, Sym)> = plan.sites.iter().map(|s| (s.consume, s.produce)).collect();
-    synthesize_twins(program, &TwinPlan { sites: Vec::new(), enums: plan.enums, fns: plan.fns });
-    let mut rw = WindowRewriter { admitted: &admitted, vt: &mut program.var_table, windows: Vec::new() };
+    synthesize_twins(program, &TwinPlan { sites: Vec::new(), enums, fns });
+    let mut rw = WindowRewriter { admitted: &admitted, declared: &declared, vt: &mut program.var_table, windows: Vec::new() };
     for f in &mut program.functions {
         rw.visit_expr_mut(&mut f.body);
     }
@@ -64,6 +89,7 @@ pub fn native_region_windows(program: &mut IrProgram) -> bool {
 /// Replace each admitted site by a call to a fresh window fn.
 struct WindowRewriter<'a> {
     admitted: &'a HashSet<(Sym, Sym)>,
+    declared: &'a HashSet<Sym>,
     vt: &'a mut VarTable,
     windows: Vec<IrFunction>,
 }
@@ -71,7 +97,7 @@ struct WindowRewriter<'a> {
 impl IrMutVisitor for WindowRewriter<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         walk_expr_mut(self, e);
-        if let Some(call) = self.window_call(e) {
+        if let Some(call) = self.window_call(e).or_else(|| self.declared_call(e)) {
             *e = call;
         }
     }
@@ -144,6 +170,51 @@ impl WindowRewriter<'_> {
             span: e.span,
             def_id: None,
         };
+        Some(self.window_fn(params, body, outer, e))
+    }
+
+    /// A call to a declared entry (all its args scalar, its result scalar):
+    /// a window fn over the entry's twin.
+    fn declared_call(&mut self, e: &IrExpr) -> Option<IrExpr> {
+        let IrExprKind::Call { target: CallTarget::Named { name }, args, type_args } = &e.kind else {
+            return None;
+        };
+        if !self.declared.contains(name) || !is_scalar_ty(&e.ty) || !args.iter().all(|a| is_scalar_ty(&a.ty)) {
+            return None;
+        }
+        let mut outer: Vec<IrExpr> = Vec::new();
+        let mut params: Vec<IrParam> = Vec::new();
+        let inner: Vec<IrExpr> = args
+            .iter()
+            .map(|a| {
+                let pname = sym(&format!("__rgn_a{}", params.len()));
+                let var = self.vt.alloc(pname, a.ty.clone(), Mutability::Let, a.span);
+                params.push(IrParam {
+                    var,
+                    ty: a.ty.clone(),
+                    name: pname,
+                    borrow: ParamBorrow::Own,
+                    is_mut: false,
+                    open_record: None,
+                    default: None,
+                    attrs: Vec::new(),
+                });
+                outer.push(a.clone());
+                IrExpr { kind: IrExprKind::Var { id: var }, ty: a.ty.clone(), span: a.span, def_id: None }
+            })
+            .collect();
+        let body = IrExpr {
+            kind: IrExprKind::Call { target: CallTarget::Named { name: twin_name(*name) }, args: inner, type_args: type_args.clone() },
+            ty: e.ty.clone(),
+            span: e.span,
+            def_id: None,
+        };
+        Some(self.window_fn(params, body, outer, e))
+    }
+
+    /// Push the window fn `__rgn_window_<k>(params) = body`, marked
+    /// [`REGION_WINDOW_ATTR`], and return the site's call to it.
+    fn window_fn(&mut self, params: Vec<IrParam>, body: IrExpr, outer: Vec<IrExpr>, e: &IrExpr) -> IrExpr {
         let name = sym(&format!("__rgn_window_{}", self.windows.len()));
         self.windows.push(IrFunction {
             name,
@@ -163,11 +234,11 @@ impl WindowRewriter<'_> {
             mutated_params: Vec::new(), // fresh-fn: a synthesized window over scalar params, none `mut`
             module_origin: None,
         });
-        Some(IrExpr {
+        IrExpr {
             kind: IrExprKind::Call { target: CallTarget::Named { name }, args: outer, type_args: Vec::new() },
             ty: e.ty.clone(),
             span: e.span,
             def_id: None,
-        })
+        }
     }
 }

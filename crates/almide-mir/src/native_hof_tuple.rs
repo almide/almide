@@ -122,7 +122,7 @@ fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_nati
     })
 }
 
-fn tuple_callback_adapter(env: &Env, lambda: &str, captured: &str, (dps, dret): (&[DTy], &DTy),
+fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, (dps, dret): (&[DTy], &DTy),
     (ps, moved): (&[NativeSigKind], &[bool]), ret: NativeSigKind) -> Option<String> {
     if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) { return None; }
     let mut params = Vec::new();
@@ -139,7 +139,7 @@ fn tuple_callback_adapter(env: &Env, lambda: &str, captured: &str, (dps, dret): 
         let borrow = matches!(ty, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) && !moved.get(i).copied().unwrap_or(false);
         args.push(format!("{}__a{i}", if borrow { "&" } else { "" }));
     }
-    let call = format!("{}(&{captured}{})", crate::render_native::mangle(lambda),
+    let call = format!("{}{})", callback_head(lambda, captured, ps, ret),
         args.iter().map(|a| format!(", {a}")).collect::<String>());
     let call = if ret == NativeSigKind::F64 { format!("AlmdLaneF64::lane_f64({call})") } else { call };
     let result = convert_callback_value(env, dret, clo::owned_nty(ret), &call, false)?;
