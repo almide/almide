@@ -549,7 +549,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
     let mut pinned: BTreeSet<String> = BTreeSet::new();
     loop {
         let closure = |f: &MirFunction| {
-            taken.contains(&f.name) && crate::lambda_sigs::get(&f.name).is_some() && !pinned.contains(&f.name)
+            false && taken.contains(&f.name) && crate::lambda_sigs::get(&f.name).is_some() && !pinned.contains(&f.name)
         };
         let eligible = |f: &MirFunction| {
             f.name != "main"
