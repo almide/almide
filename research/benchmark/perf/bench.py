@@ -280,11 +280,12 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "mutset-local": "l:6000",
     # mutread (#4594): rounds per row, unequal on purpose — the relation is per
     # round. A regressed call copies the 32 KB buffer on every element (8,192
-    # copies a round), so the reading rows run an eighth of the `let` row's
-    # rounds and then read tens of seconds, not a hang.
+    # copies a round), so the reading rows run a sixteenth of the `let` row's
+    # rounds and then read tens of seconds, not a hang. The `let` row ran
+    # 0.056 s native at 12,000 rounds on a fast runner, under the 0.08 s floor.
     "mutread-arg": "a:1500",
     "mutread-var": "v:1500",
-    "mutread-let": "h:12000",
+    "mutread-let": "h:24000",
     "regexcycle-8": "8:400000",
     "regexcycle-32": "32:400000",
     # globalread (#4562): frames per row, unequal on purpose — the relation is
