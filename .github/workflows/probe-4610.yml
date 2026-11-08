@@ -1,0 +1,167 @@
+name: probe-4610 (throwaway)
+on:
+  push:
+    branches: [probe/wasm-4610]
+permissions:
+  contents: read
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  BASE_SHA: a0f6b9040abddf69bb87928825dcbe7a0766090f
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [base, rule, iv, wrong]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.variant == 'base' && env.BASE_SHA || (matrix.variant == 'iv' && 'wasm-perf-4610-iv' || 'wasm-perf-4610') }}
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Force the rule wrong (negative control)
+        if: matrix.variant == 'wrong'
+        run: |
+          grep -n 'checked_shr' crates/almide-wasm/src/rem_test.rs
+          sed -i 's/mask = mask.checked_shr(d.trailing_zeros()).unwrap_or(0);/let _ = d;/' crates/almide-wasm/src/rem_test.rs
+          ! grep -n 'checked_shr' crates/almide-wasm/src/rem_test.rs
+      - run: git log --oneline -1 && cargo build --release --bin almide
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: almide-${{ matrix.variant }}
+          path: target/release/almide
+          retention-days: 7
+
+  regen:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [rule, iv]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.variant == 'iv' && 'wasm-perf-4610-iv' || 'wasm-perf-4610' }}
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - run: cargo build --release --bin almide
+      - name: Unit tests of the new rules
+        run: cargo test --release -p almide-wasm --lib -- rem_test list_fuse 2>&1 | tail -30
+      - name: Fixture check + fmt + both legs
+        run: |
+          F=spec/wasm_cross/int_rem_pow2_zero.almd
+          target/release/almide check $F
+          target/release/almide fmt --check $F || { target/release/almide fmt $F; git diff -- $F; }
+          target/release/almide run $F > /tmp/native.txt; echo "native exit $?"
+          target/release/almide run $F --target wasm > /tmp/wasm.txt; echo "wasm exit $?"
+          cat /tmp/native.txt
+          diff /tmp/native.txt /tmp/wasm.txt && echo "FIXTURE EQUAL"
+      - name: Regenerate ledgers
+        env:
+          ALMIDE_MANIFEST_TREE_CHECK: "off"
+        run: |
+          set -x
+          ORACLE=target/release/almide bash scripts/gen-run-manifest.sh || true
+          ORACLE=target/release/almide bash scripts/gen-check-manifest.sh || true
+          ORACLE=target/release/almide bash scripts/gen-ast-manifest.sh || true
+          git diff --stat
+          cargo test --release -p almide-wasm --test size_ratchet 2>&1 | grep -E "B, pinned|REGRESSION|NEW fixture|row\(s\) moved" | head -400 || true
+          ALMIDE_UPDATE_ALLOC=1 cargo test --release -p almide-wasm --test alloc_ledger 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_SIZES=1 cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_SIZE_LADDER=1 cargo test --release -p almide-wasm --test size_ladder 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_DUMPS=1 cargo test --release -p almide-wasm --test section_dump 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --release --test native_verified_floor_test 2>&1 | tail -5 || true
+          git status --short
+          mkdir -p /tmp/out
+          git diff > /tmp/out/ledgers.diff || true
+          git diff --stat
+      - name: Ledger gates after regeneration (almide-wasm suite)
+        run: cargo test --release -p almide-wasm --no-fail-fast 2>&1 | grep -E "^test result|FAILED|panicked|failures:" | head -80
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ledgers-${{ matrix.variant }}
+          path: /tmp/out
+          retention-days: 7
+
+  time:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-wasip1
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+          wasmtime --version
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: bins
+      - name: Emit modules
+        run: |
+          set -e
+          mkdir -p /tmp/w
+          for v in base rule iv wrong; do
+            chmod +x bins/almide-$v/almide
+            for p in iter noop; do
+              bins/almide-$v/almide build probe-4610/$p.almd --target wasm -o /tmp/w/$p-$v.wasm
+              wasmtime compile /tmp/w/$p-$v.wasm -o /tmp/w/$p-$v.cwasm
+            done
+          done
+          rustc -C opt-level=3 --edition 2021 --target wasm32-wasip1 probe-4610/iter.rs -o /tmp/w/iter-rust.wasm
+          wasmtime compile /tmp/w/iter-rust.wasm -o /tmp/w/iter-rust.cwasm
+          ls -l /tmp/w
+      - name: Negative control (fixture native vs wasm per build)
+        run: |
+          for v in base rule iv wrong; do
+            A=bins/almide-$v/almide
+            $A run spec/wasm_cross/int_rem_pow2_zero.almd > /tmp/n-$v.txt 2>&1
+            $A run spec/wasm_cross/int_rem_pow2_zero.almd --target wasm > /tmp/w-$v.txt 2>&1
+            if cmp -s /tmp/n-$v.txt /tmp/w-$v.txt; then echo "$v: EQUAL"; else echo "$v: DIVERGES"; diff /tmp/n-$v.txt /tmp/w-$v.txt | head -20; fi
+          done
+      - name: Time (JIT)
+        run: |
+          python3 probe-4610/time.py jit 11 base=/tmp/w/iter-base.wasm rule=/tmp/w/iter-rule.wasm iv=/tmp/w/iter-iv.wasm rust=/tmp/w/iter-rust.wasm noop-base=/tmp/w/noop-base.wasm noop-rule=/tmp/w/noop-rule.wasm
+          python3 probe-4610/time.py jit 11 base=/tmp/w/iter-base.wasm rule=/tmp/w/iter-rule.wasm iv=/tmp/w/iter-iv.wasm
+      - name: Time (AOT)
+        run: |
+          python3 probe-4610/time.py aot 11 base=/tmp/w/iter-base.cwasm rule=/tmp/w/iter-rule.cwasm iv=/tmp/w/iter-iv.cwasm rust=/tmp/w/iter-rust.cwasm noop-base=/tmp/w/noop-base.cwasm noop-rule=/tmp/w/noop-rule.cwasm
+          python3 probe-4610/time.py aot 11 base=/tmp/w/iter-base.cwasm rule=/tmp/w/iter-rule.cwasm iv=/tmp/w/iter-iv.cwasm
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: modules
+          path: /tmp/w/*.wasm
+          retention-days: 7

@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let s = list.range(0, 10000000) |> list.map((x) => x * 3) |> list.filter((x) => x % 2 == 0) |> list.sum
+  println("${s}")
+}
