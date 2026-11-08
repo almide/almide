@@ -74,6 +74,7 @@
 44	28	361	44	spec/wasm_cross/bytes_set_value_semantics.almd
 60122	60088	3842877	60122	spec/wasm_cross/bytes_temp_receiver.almd
 98	82	2927	98	spec/wasm_cross/bytes_to_string_err_release.almd
+11	4	548	11	spec/wasm_cross/bytes_walk_reduction_fused.almd
 102	70	2652	102	spec/wasm_cross/bytes_writer_family.almd
 130	104	1678	130	spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 0	0	0	0	spec/wasm_cross/call_arg_eval_order_with_drops.almd
@@ -828,6 +829,7 @@
 17095	15855	462470	17095	spec/wasm_cross/sort_by_compound_key.almd
 180061	180037	1280468	180061	spec/wasm_cross/sort_by_str_key_heap.almd
 28	3	107	28	spec/wasm_cross/split_empty_sep.almd
+6052	41	54376	6052	spec/wasm_cross/split_one_byte_separator.almd
 56	31	525	56	spec/wasm_cross/spread_record_share.almd
 557	537	30856	557	spec/wasm_cross/sql_highlight_tokens.almd
 ~	spec/wasm_cross/statement_after_tail_walker_bang.almd
