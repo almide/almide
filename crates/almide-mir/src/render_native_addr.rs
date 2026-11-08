@@ -613,11 +613,6 @@ fn note_field(v: ValueId, base: ValueId, place: String) {
     STR_FIELDS.with(|m| m.borrow_mut().insert(v, (base, place)));
 }
 
-/// The block `b`, read at `ops[at]`, is rebound next in the same straight run.
-pub(crate) fn rebound_next(func: &MirFunction, at: usize, b: ValueId) -> bool {
-    slots::rebound_in_block(func, at, b).is_some()
-}
-
 pub(crate) fn str_field_of(v: ValueId) -> Option<String> {
     STR_FIELDS.with(|m| m.borrow().get(&v).map(|p| p.1.clone()))
 }

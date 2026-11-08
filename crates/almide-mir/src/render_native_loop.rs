@@ -470,16 +470,10 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                             .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))
                 }) =>
         {
-            let (base, place) = crate::render_native_addr::field_of(*src).expect("a field read");
+            let (_, place) = crate::render_native_addr::field_of(*src).expect("a field read");
             let owned = owned_of_ref(st.tys[src]);
             st.tys.insert(*dst, owned);
-            // A record rebound next leaves by a plain partial move: no
-            // `Default` written into a block about to be dropped.
-            if crate::render_native_addr::rebound_next(func, i, base) {
-                line!("let mut {} = {place};", var(*dst));
-            } else {
-                line!("let mut {} = std::mem::take(&mut {place});", var(*dst));
-            }
+            line!("let mut {} = std::mem::take(&mut {place});", var(*dst));
         }
         // The same move for a borrowed payload read with no place of its own
         // (an enum case's slot, a Result side): the carrier dies at the copy,
