@@ -1,1 +1,4 @@
-spec/wasm_cross/string_rle enumerate_unnameable_element tuple_bound_list_mapped_in_loop playground_default.almd
+spec/wasm_cross/string_rle.almd
+spec/wasm_cross/enumerate_unnameable_element.almd
+spec/wasm_cross/tuple_bound_list_mapped_in_loop.almd
+spec/wasm_cross/playground_default.almd
