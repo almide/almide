@@ -46,8 +46,8 @@ jobs:
             /tmp/basetarget/debug/almide-anchor-check $OUT/$N.wasm $OUT/$N.bundle $OUT/$N.anchors > $OUT/$N.base 2>&1 || printf '%s\t%s\n' "$f" "$(grep -m1 REJECT $OUT/$N.base | cut -c1-300)" >> $OUT/base-reject
           done < $OUT/list
           echo "artifacts: $N"
-          echo "== base rejects: $(wc -l < $OUT/base-reject)"; hew $OUT/base-reject
-          echo "== new rejects: $(wc -l < $OUT/new-reject)"; hew $OUT/new-reject
+          echo "== base rejects: $(wc -l < $OUT/base-reject)"; while IFS= read -r l; do echo "$l"; done < $OUT/base-reject
+          echo "== new rejects: $(wc -l < $OUT/new-reject)"; while IFS= read -r l; do echo "$l"; done < $OUT/new-reject
           python3 - $OUT <<'PY'
           import os,re,sys
           out=sys.argv[1]; t={}
