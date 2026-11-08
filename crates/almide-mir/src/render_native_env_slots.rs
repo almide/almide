@@ -26,7 +26,7 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
                 tys.insert(dst, NTy::Rec(i));
                 if let Some(elems) = elems {
                     let words: Vec<String> = elems.iter().map(|v| word(*v, tys)).collect::<Result<_, _>>()?;
-                    writeln!(out, "let mut {}: {} = __AlmdClosure {{ words: __AlmdWords::from_slice(&[{}]), heaps: Vec::new() }};", var(dst), rec::struct_name(i), words.join(", ")).unwrap();
+                    writeln!(out, "let mut {}: {} = __AlmdClosure {{ words: __AlmdWords::from_slice(&[{}]), heaps: None }};", var(dst), rec::struct_name(i), words.join(", ")).unwrap();
                 } else {
                     let len = len.unwrap();
                     if ty(tys, &len) != Some(NTy::I64) { return Err(wall("native: untyped closure length")); }
