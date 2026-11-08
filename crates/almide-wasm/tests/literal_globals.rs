@@ -55,27 +55,27 @@ fn exported_division_keeps_preinitialization_abort_and_postinitialization_value(
     let src = "let divisor = 8\nfn divide(x: Int) -> Int = x / divisor\nfn remainder(x: Int) -> Int = x % divisor\nfn main() -> Unit = ()";
     let bytes = emit(src);
     let engine = wasmtime::Engine::default();
-    let module = wasmtime::Module::new(&engine, bytes).unwrap();
+    let module = wasmtime::Module::new(&engine, bytes).expect("the module compiles");
     let mut linker = wasmtime::Linker::new(&engine);
-    linker.define_unknown_imports_as_traps(&module).unwrap();
+    linker.define_unknown_imports_as_traps(&module).expect("the imports resolve to traps");
     let mut store = wasmtime::Store::new(&engine, ());
-    let inst = linker.instantiate(&mut store, &module).unwrap();
+    let inst = linker.instantiate(&mut store, &module).expect("the module instantiates");
     let div = inst
         .get_typed_func::<i64, i64>(&mut store, "divide")
-        .unwrap();
+        .expect("the export has the expected signature");
     let rem = inst
         .get_typed_func::<i64, i64>(&mut store, "remainder")
-        .unwrap();
+        .expect("the export has the expected signature");
     // Before main the global is zero: each operation must still abort,
     // reaching the deliberately unbound diagnostic import here.
     assert!(div.call(&mut store, 17).is_err());
     assert!(rem.call(&mut store, 17).is_err());
     inst.get_typed_func::<(), ()>(&mut store, "main")
-        .unwrap()
+        .expect("the export has the expected signature")
         .call(&mut store, ())
-        .unwrap();
+        .expect("the call does not trap");
     for x in [i64::MIN, -17, -1, 0, 1, 17, i64::MAX] {
-        assert_eq!(div.call(&mut store, x).unwrap(), x / 8);
-        assert_eq!(rem.call(&mut store, x).unwrap(), x % 8);
+        assert_eq!(div.call(&mut store, x).expect("the call does not trap"), x / 8);
+        assert_eq!(rem.call(&mut store, x).expect("the call does not trap"), x % 8);
     }
 }

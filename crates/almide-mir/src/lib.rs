@@ -72,6 +72,7 @@ pub mod native_move_params;
 pub(crate) mod native_region_window;
 mod native_list_ops;
 mod native_narrow_rewrite;
+mod native_unread_closure;
 mod native_entry;
 mod native_hof;
 mod native_link_routes;

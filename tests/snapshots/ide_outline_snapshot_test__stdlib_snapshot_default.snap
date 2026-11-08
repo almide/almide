@@ -6,6 +6,7 @@ expression: text
 fn string.__err_text(s: String) -> String
 fn string.__from_codepoint(n: Int) -> String
 fn string.__join(xs: List[String], sep: String) -> String
+fn string.__quote(s: String) -> String
 fn string.__string_media_type(s: String) -> String
 fn string.__string_to_text(s: String) -> String
 fn string.byte_len(s: String) -> Int
@@ -105,6 +106,12 @@ fn string.zip_with[B, C](s: String, ys: List[B], f: fn(String, B) -> C) -> List[
 fn list.__eq_bool(a: List[Bool], b: List[Bool]) -> Bool
 fn list.__eq_float(a: List[Float], b: List[Float]) -> Bool
 fn list.__eq_int(a: List[Int], b: List[Int]) -> Bool
+fn list.__eq_list_float(a: List[List[Float]], b: List[List[Float]]) -> Bool
+fn list.__eq_list_int(a: List[List[Int]], b: List[List[Int]]) -> Bool
+fn list.__eq_list_str(a: List[List[String]], b: List[List[String]]) -> Bool
+fn list.__eq_opt_int(a: List[Option[Int]], b: List[Option[Int]]) -> Bool
+fn list.__eq_opt_str(a: List[Option[String]], b: List[Option[String]]) -> Bool
+fn list.__eq_res_int(a: List[Result[Int, String]], b: List[Result[Int, String]]) -> Bool
 fn list.__eq_str(a: List[String], b: List[String]) -> Bool
 fn list.__fallible_all[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
 fn list.__fallible_any[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]

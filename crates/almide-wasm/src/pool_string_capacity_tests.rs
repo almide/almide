@@ -8,7 +8,7 @@ fn pooled_strings_have_no_spare_capacity() {
             let s: String = std::iter::repeat_n(ch, n).collect();
             let base = pool.intern(&s) as usize;
             let read = |offset: u32| {
-                u32::from_le_bytes(pool.data[base + offset as usize..][..4].try_into().unwrap())
+                u32::from_le_bytes(pool.data[base + offset as usize..][..4].try_into().expect("a four-byte slice"))
             };
             assert_eq!(read(almide_layout::LEN.offset), s.len() as u32);
             assert_eq!(

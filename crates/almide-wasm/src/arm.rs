@@ -203,7 +203,7 @@ impl crate::emitter::Emitter<'_> {
     /// every hold an arm took inside has been released).
     pub(crate) fn release_borrowed_temps(&mut self, depth: usize) {
         while self.borrowed_temps.len() > depth {
-            let (h, ty) = self.borrowed_temps.pop().unwrap();
+            let (h, ty) = self.borrowed_temps.pop().expect("the loop guard keeps a temp above depth");
             let dec = self.dec_fn_of(ty);
             self.f.instructions().local_get(h).call(dec);
         }

@@ -26,12 +26,12 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
                 tys.insert(dst, NTy::Rec(i));
                 if let Some(elems) = elems {
                     let words: Vec<String> = elems.iter().map(|v| word(*v, tys)).collect::<Result<_, _>>()?;
-                    writeln!(out, "let mut {}: {} = __AlmdClosure {{ words: {}, heaps: None }};", var(dst), rec::struct_name(i), rec::closure_words(&words)).unwrap();
+                    writeln!(out, "let mut {}: {} = __AlmdClosure {{ words: {}, heaps: None }};", var(dst), rec::struct_name(i), rec::closure_words(&words)).expect("writing to a String cannot fail");
                 } else {
-                    let len = len.unwrap();
+                    let len = len.expect("a closure literal without elems carries a length");
                     if ty(tys, &len) != Some(NTy::I64) { return Err(wall("native: untyped closure length")); }
                     rec::note_wide_closure();
-                    writeln!(out, "let mut {}: {} = __AlmdClosure::new({}.max(0) as usize);", var(dst), rec::struct_name(i), var(len)).unwrap();
+                    writeln!(out, "let mut {}: {} = __AlmdClosure::new({}.max(0) as usize);", var(dst), rec::struct_name(i), var(len)).expect("writing to a String cannot fail");
                 }
                 Ok(())
             })());
@@ -43,11 +43,11 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
             crate::render_native_bounds::check(slot);
             crate::render_native_bounds::access(slot);
             tys.insert(*dst, NTy::I64);
-            writeln!(out, "if {} as usize >= {}.len() {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}", var(*idx), var(*list)).unwrap();
+            writeln!(out, "if {} as usize >= {}.len() {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}", var(*idx), var(*list)).expect("writing to a String cannot fail");
             match crate::render_native_keyed::read_key(*dst) {
                 // A dispatch index the caller may know (render_native_keyed).
-                Some(k) => writeln!(out, "let mut {}: i64 = if K{k} >= 0 {{ K{k} }} else {{ {}.words()[{} as usize] }};", var(*dst), var(*list), var(*idx)).unwrap(),
-                None => writeln!(out, "let mut {}: i64 = {}.words()[{} as usize];", var(*dst), var(*list), var(*idx)).unwrap(),
+                Some(k) => writeln!(out, "let mut {}: i64 = if K{k} >= 0 {{ K{k} }} else {{ {}.words()[{} as usize] }};", var(*dst), var(*list), var(*idx)).expect("writing to a String cannot fail"),
+                None => writeln!(out, "let mut {}: i64 = {}.words()[{} as usize];", var(*dst), var(*list), var(*idx)).expect("writing to a String cannot fail"),
             }
             return Some(Ok(()));
         }
@@ -59,17 +59,17 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
         if matches!(kind, PrimKind::Load { width: 4 }) && ad.off == i64::from(BLOCK_LEN_OFFSET) && ad.idx.is_none() {
             let dst = dst.ok_or_else(|| wall("native: closure length read without destination"))?;
             tys.insert(dst, NTy::I64);
-            writeln!(out, "let mut {}: i64 = {}.len() as i64;", var(dst), var(ad.base)).unwrap();
+            writeln!(out, "let mut {}: i64 = {}.len() as i64;", var(dst), var(ad.base)).expect("writing to a String cannot fail");
             return Ok(());
         }
         let k = rec_slot(&ad).ok_or_else(|| wall("native: closure access outside a fixed capture slot"))?;
         let (guard, slot) = bounds_guard(st, &ad, &format!("{k}usize"));
-        if let Some(guard) = guard { writeln!(out, "{guard}").unwrap(); }
+        if let Some(guard) = guard { writeln!(out, "{guard}").expect("writing to a String cannot fail"); }
         match (kind, dst, args.as_slice()) {
             (PrimKind::Load { width: 8 }, Some(d), [_]) => {
                 crate::render_native_bounds::access(slot);
                 tys.insert(*d, NTy::I64);
-                writeln!(out, "let mut {}: i64 = {}.words()[{k}];", var(*d), var(ad.base)).unwrap();
+                writeln!(out, "let mut {}: i64 = {}.words()[{k}];", var(*d), var(ad.base)).expect("writing to a String cannot fail");
             }
             (PrimKind::LoadHandle, Some(d), [_]) => {
                 let current = crate::native_hof::current_fn().ok_or_else(|| wall("native: missing closure context"))?;
@@ -80,10 +80,10 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
                 let place = format!("match {}.heap({k}) {{ Some(__AlmdCapture::{variant}(x)) => x, _ => {{ eprintln!(\"Error: closure capture kind mismatch\"); std::process::exit(1) }} }}", var(ad.base));
                 if let Some((borrowed, spelled, suffix)) = borrowed_kind(t) {
                     tys.insert(*d, borrowed);
-                    writeln!(out, "let mut {}: {spelled} = &(*({place})){suffix};", var(*d)).unwrap();
+                    writeln!(out, "let mut {}: {spelled} = &(*({place})){suffix};", var(*d)).expect("writing to a String cannot fail");
                 } else {
                     tys.insert(*d, t);
-                    writeln!(out, "let mut {}: {} = ({place}).clone();", var(*d), rec::owned_ty(t)).unwrap();
+                    writeln!(out, "let mut {}: {} = ({place}).clone();", var(*d), rec::owned_ty(t)).expect("writing to a String cannot fail");
                 }
             }
             (PrimKind::Store { width: 8 }, None, [_, rhs]) => {
@@ -99,9 +99,9 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
                         NTy::RecRef(_) => format!("(*{}).clone()", var(src.base)),
                         _ => var(src.base),
                     };
-                    writeln!(out, "{}.put({k}, __AlmdCapture::{variant}({value}));", var(ad.base)).unwrap();
+                    writeln!(out, "{}.put({k}, __AlmdCapture::{variant}({value}));", var(ad.base)).expect("writing to a String cannot fail");
                 } else {
-                    writeln!(out, "{}.words[{k}] = {};", var(ad.base), word(*rhs, tys)?).unwrap();
+                    writeln!(out, "{}.words[{k}] = {};", var(ad.base), word(*rhs, tys)?).expect("writing to a String cannot fail");
                 }
             }
             _ => return Err(wall("native: unsupported typed closure slot operation")),

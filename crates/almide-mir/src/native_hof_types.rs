@@ -105,6 +105,15 @@ fn kind_of(env: &Env, d: &DTy) -> Option<NTy> {
             rec::native_set_element_kind(inner).then_some(())?;
             NTy::Rec(rec::set_type_of(inner))
         }
+        DTy::List(_) | DTy::Opt(_) | DTy::Result(..) => return wrapped_kind(env, d),
+        DTy::Map(k, v) => NTy::Rec(rec::map_type_of(kind_of(env, k)?, kind_of(env, v)?)),
+        DTy::Fn(..) => return None,
+    })
+}
+
+/// [`kind_of`] for a list, an Option or a Result.
+fn wrapped_kind(env: &Env, d: &DTy) -> Option<NTy> {
+    Some(match d {
         // A list or Option of Float bits would leave the render's lanes
         // (`Vec<i64>`, `Option<i64>`) for the runtime's `f64`: refused.
         DTy::List(e) => match kind_of(env, e)? {
@@ -124,8 +133,7 @@ fn kind_of(env: &Env, d: &DTy) -> Option<NTy> {
             (NTy::F64, _) | (_, NTy::F64) => return None,
             (ok, err) => NTy::Rec(rec::result_type_of(ok, err)),
         },
-        DTy::Map(k, v) => NTy::Rec(rec::map_type_of(kind_of(env, k)?, kind_of(env, v)?)),
-        DTy::Fn(..) => return None,
+        _ => return None,
     })
 }
 

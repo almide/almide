@@ -134,12 +134,6 @@ pub(super) fn declared_blocks(func: &MirFunction) -> BTreeMap<ValueId, u16> {
             alloc_rec.entry(*v).or_insert_with(rec::value_index);
         } else if let Some(i) = rec::rec_index(key) {
             alloc_rec.entry(*v).or_insert(i);
-        } else if let Some(n) = anon_scalar_record_len(func, *v, key) {
-            // An anonymous all-scalar record (`list.map((i) => { x: i, y: i })`)
-            // has no declaration to name, so it takes the by-value struct of its
-            // slots, as a declared one does — not a `Vec<i64>` per record, which
-            // cost such a list 28x against the standard codegen.
-            alloc_rec.entry(*v).or_insert(rec::slots_type_of(&vec![NTy::I64; n]));
         }
     }
     alloc_rec
@@ -259,12 +253,6 @@ impl BlockTyping<'_, '_> {
             }
             Op::Dup { dst, src } | Op::SetLocal { local: dst, src } => self.dups.push((*dst, *src)),
             Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => self.scan_join(op, open),
-            // A typed drop that names a list of a generated type `T`.
-            Op::DropVariant { v, ty } if !self.alloc_rec.contains_key(v) => {
-                if let Some(j) = ty.strip_prefix("list_").and_then(rec::rec_index) {
-                    self.alloc_rec.insert(*v, rec::list_type_of(NTy::Rec(j)));
-                }
-            }
             _ => {}
         }
     }
@@ -540,19 +528,6 @@ fn slot_kinds(stores: &[(Option<usize>, NTy)], len: Option<i64>, mask: Option<&V
 }
 
 include!("render_native_slots_b.rs");
-
-/// The slot count of block `v` when the lowering built it as an anonymous
-/// record of scalars: a `ListLit` of its field values whose recorded type is a
-/// structural record (`block_key` of a `Ty::Record`).
-fn anon_scalar_record_len(func: &MirFunction, v: ValueId, key: &str) -> Option<usize> {
-    if !key.starts_with("Record {") {
-        return None;
-    }
-    func.ops.iter().find_map(|op| match op {
-        Op::ListLit { dst, elems } if *dst == v && !elems.is_empty() => Some(elems.len()),
-        _ => None,
-    })
-}
 
 /// A borrow-view stores existing handles without consuming them. Native Vec
 /// elements own their values, so those stores copy; an owned constructor's
