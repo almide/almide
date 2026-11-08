@@ -346,12 +346,25 @@ pub(crate) fn elem_option_is_scalar(call: &str) -> bool {
 
 /// The declared return of the self-hosted body registered under `call`.
 /// Whether the declared floor fn of `call` takes its param `k` by value (the
-/// runtime body consumes it, or its `@reuse` twin does at a last use): a
-/// heap param handed there at its last use is the body's to give away.
+/// runtime body consumes it, or its `@reuse` twin does at a last use, where
+/// the borrowing body would copy that container into its result — an update
+/// that returns the same kind of container): a heap param handed there at
+/// its last use is the body's to give away. A twin whose borrowing body only
+/// reads the container (`map.values`) gains nothing from taking it over, and
+/// a caller that reads its argument again would copy it whole for the call.
 pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
     declared(call).is_some_and(|f| {
         matches!(f.params.get(k), Some(FloorParam::Map(false) | FloorParam::Set(false) | FloorParam::Value(false) | FloorParam::Matrix(false)))
-            || f.twin.as_ref().is_some_and(|t| t.0 == k)
+            || f.twin.as_ref().is_some_and(|t| {
+                t.0 == k
+                    && matches!(
+                        (f.params.get(k), f.ret),
+                        (Some(FloorParam::List(_)), FloorRet::ListInt | FloorRet::ListStr | FloorRet::Elem(ElemRet::List))
+                            | (Some(FloorParam::Set(_)), FloorRet::Set)
+                            | (Some(FloorParam::Map(_)), FloorRet::Map)
+                            | (Some(FloorParam::Bytes), FloorRet::Bytes)
+                    )
+            })
     })
 }
 
