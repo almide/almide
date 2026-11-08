@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
 
 env:
-  CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: "1.97.0"
 
 permissions:
@@ -12,29 +11,20 @@ permissions:
 
 jobs:
   probe:
-    name: Probe v1 and v0 renders
+    name: Hand-edited narrow local
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/root-tmpdir
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
-          save-if: false
       - name: Install valgrind
         run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
-      - name: Build the compiler
-        run: cargo build --release --bin almide
-      - name: Probe
-        run: |
-          bash probe.sh probe-progs.txt probe-out/base
-          ALMIDE_PROBE_DA_OFF=1 bash probe.sh probe-progs.txt probe-out/daoff
+      - name: Run
+        run: bash hand/run.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: probe
-          path: probe-out
+          path: hand-out
