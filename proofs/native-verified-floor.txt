@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 694 of 1043
+# rendered: 697 of 1046
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -49,6 +49,7 @@ spec/wasm_cross/bytes_index_bounds_read_negative.almd
 spec/wasm_cross/bytes_index_bounds_read_past_end.almd
 spec/wasm_cross/bytes_index_bounds_write_negative.almd
 spec/wasm_cross/bytes_index_bounds_write_past_end.almd
+spec/wasm_cross/bytes_index_write_truncates.almd
 spec/wasm_cross/bytes_negative_offset_family.almd
 spec/wasm_cross/bytes_new_exhaustion.almd
 spec/wasm_cross/bytes_pad_ceiling_oom.almd
@@ -392,6 +393,8 @@ spec/wasm_cross/mut_map_param.almd
 spec/wasm_cross/mut_param_alias_cow.almd
 spec/wasm_cross/mut_param_call_chain.almd
 spec/wasm_cross/mut_param_cell_tail_capture_read.almd
+spec/wasm_cross/mut_param_copy_kept_when_read.almd
+spec/wasm_cross/mut_param_copy_moved_when_dead.almd
 spec/wasm_cross/mut_param_effect_never_err.almd
 spec/wasm_cross/mut_param_loop_stays_in_place.almd
 spec/wasm_cross/mut_param_spread_reassign.almd

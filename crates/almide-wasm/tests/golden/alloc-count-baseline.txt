@@ -600,6 +600,9 @@
 24	18	308	24	spec/wasm_cross/mut_param_closure_capture_read.almd
 58	46	690	58	spec/wasm_cross/mut_param_closure_capture_write.almd
 108	76	1875	108	spec/wasm_cross/mut_param_closure_field_path_write.almd
+5	0	87	5	spec/wasm_cross/mut_param_copy_kept_closure.almd
+23	18	218	23	spec/wasm_cross/mut_param_copy_kept_when_read.almd
+115	100	42424	115	spec/wasm_cross/mut_param_copy_moved_when_dead.almd
 72	15	848	16	spec/wasm_cross/mut_param_effect_can_err.almd
 9	6	88	9	spec/wasm_cross/mut_param_effect_never_err.almd
 44	32	642	44	spec/wasm_cross/mut_param_effect_unpropagated.almd
