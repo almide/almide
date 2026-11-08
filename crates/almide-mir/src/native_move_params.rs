@@ -141,7 +141,10 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Mo
             Op::CallFn { name, args, .. } => {
                 values(&func.ops[i]).iter().filter(|x| **x == p.value).count() == 1
                     && args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value)).is_some_and(|k| {
-                        crate::native_floor::takes_by_value(name, k) || owned.moves(&func.ops[i], k)
+                        crate::native_floor::takes_by_value(name, k)
+                            || owned.moves(&func.ops[i], k)
+                            // The list or string a concatenation grows in place.
+                            || (k == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"))
                     })
             }
             Op::CallIndirect { args, .. } => {
