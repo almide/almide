@@ -582,7 +582,7 @@ pub(crate) fn set_moving_args(
                         (base, format!("std::mem::take(&mut {place})"), reads)
                     }
                 };
-                let ok = matches!(tys.get(&base), Some(NTy::Rec(_)))
+                let ok = payload_carrier(tys.get(&base).copied())
                     && carrier_dies_after(func, at, base, borrow_arms)
                     && reads.iter().all(|r| dying_after(func, at, *r, borrow_arms));
                 ok.then_some((v, take))
@@ -592,6 +592,13 @@ pub(crate) fn set_moving_args(
     };
     TAKEN_ARGS.with(|m| *m.borrow_mut() = taken);
     MOVING.with(|m| *m.borrow_mut() = moving);
+}
+
+/// An owned carrier a borrowed payload read can be moved out of when it
+/// dies: a record or enum block, or the String-Ok Result whose one slot
+/// holds either side's string.
+pub(crate) fn payload_carrier(t: Option<NTy>) -> bool {
+    matches!(t, Some(NTy::Rec(_) | NTy::ResStr))
 }
 
 thread_local! {
