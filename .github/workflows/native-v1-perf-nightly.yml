@@ -9,6 +9,10 @@ on:
       base:
         description: commit to compare the rendered corpus against
         required: true
+      mode:
+        description: verify | cands
+        required: false
+        default: verify
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,6 +24,7 @@ permissions:
 jobs:
   shapes:
     name: shapes gate at head
+    if: inputs.mode == 'verify'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -36,6 +41,7 @@ jobs:
 
   parity:
     name: rendered corpus identical to base
+    if: inputs.mode == 'verify'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -82,6 +88,7 @@ jobs:
 
   tests:
     name: almide-mir tests and warning ratchets at head
+    if: inputs.mode == 'verify'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -104,3 +111,52 @@ jobs:
       - name: clippy warning ratchet
         if: always()
         run: bash scripts/check-clippy-warnings.sh
+
+  cands:
+    name: candidate shape benches through the shapes gate
+    if: inputs.mode == 'cands'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: tool
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.head }}
+          path: h
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: llvm-tools
+      - name: gate with the candidates
+        run: |
+          cp tool/tools-shapes2/cands/*.almd h/research/benchmark/perf/v1-shapes/
+          cd h
+          bash scripts/check-native-v1-perf-shapes.sh || true
+          ls ../tool/tools-shapes2/cands/*.almd | sed 's#^../tool/tools-shapes2/cands/#research/benchmark/perf/v1-shapes/#' | target/shapes-cov/release/examples/render_corpus --reasons
+
+  cands-perf:
+    name: candidate shape benches through the perf gate
+    if: inputs.mode == 'cands'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: tool
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.head }}
+          path: h
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Install valgrind
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
+      - name: perf over the shape benches with the candidates
+        run: |
+          cp tool/tools-shapes2/cands/*.almd h/research/benchmark/perf/v1-shapes/
+          cd h
+          cargo build -q --release --bin almide
+          NATIVE_V1_PERF_ONLY_SHAPES=1 bash scripts/check-native-v1-perf.sh 2>&1 | tail -60 || true

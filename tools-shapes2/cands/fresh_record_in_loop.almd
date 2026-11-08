@@ -1,0 +1,14 @@
+// v1-vs-v0 shape bench: a record with a heap field built inside the loop
+// body and read in the same iteration.
+type P = { name: String, k: Int }
+
+fn main() -> Unit = {
+  var total = 0
+  var i = 0
+  while i < 300000 {
+    let p = P { name: int.to_string(i), k: i }
+    total = total + string.len(p.name) + p.k
+    i = i + 1
+  }
+  println(int.to_string(total))
+}
