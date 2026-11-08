@@ -226,6 +226,16 @@ pub(crate) fn carrier_dies_after(
             reads.contains(&d)
         })
     };
+    let mut scalar_reads: std::collections::BTreeSet<usize> = func.ops[at + 1..]
+        .iter()
+        .enumerate()
+        .filter(|(_, op)| match op {
+            Op::ListGetScalar { list, .. } => *list == src,
+            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } => args.as_slice() == [src] && unread(*d),
+            _ => false,
+        })
+        .map(|(j, _)| at + 1 + j)
+        .collect();
     // The address of one of its scalar slots (`sc.n` beside `sc.funs`): the
     // handle, the offsets added to it, and the scalar loads through them.
     let scalar_slot = |j: usize, d: ValueId| -> Vec<usize> {
@@ -247,16 +257,6 @@ pub(crate) fn carrier_dies_after(
         // Any other read of the address leaves the handle a read of the record.
         ops.into_iter().filter(|_| !other).collect()
     };
-    let mut scalar_reads: std::collections::BTreeSet<usize> = func.ops[at + 1..]
-        .iter()
-        .enumerate()
-        .filter(|(_, op)| match op {
-            Op::ListGetScalar { list, .. } => *list == src,
-            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } => args.as_slice() == [src] && unread(*d),
-            _ => false,
-        })
-        .map(|(j, _)| at + 1 + j)
-        .collect();
     for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
         if let Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } = op {
             if args.as_slice() == [src] {
