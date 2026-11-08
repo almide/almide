@@ -1,7 +1,8 @@
 // v1-vs-v0 shape bench: the raw float bit reinterpret both ways in a loop —
 // `float.to_bits` of a computed f64 and `float.from_bits` of an Int lane, and
 // the self-hosted Float bodies that reinterpret through it (`list.max` and
-// `list.sort` over Floats, `float.to_fixed`, a Float `%`) — render_native_float_op's
+// `list.sort` over Floats, `float.to_fixed`, a Float `%`, `float.min`/`max`,
+// `float.parse`) — render_native_float_op's
 // FloatBits arm over an F64 and an I64 operand.
 fn mix(x: Float, k: Int) -> Int = float.to_bits(x * 1.5 + float.from(k))
 
@@ -16,7 +17,9 @@ fn main() -> Unit = {
     let xs = [3.5, f, 1.25]
     let top = list.max(xs) ?? 0.0
     let low = (list.sort(xs))[0]
-    acc = acc + float.to_bits(top + low + f % 0.75)
+    let mm = float.min(f, 0.5) + float.max(f, 0.25)
+    let parsed = float.parse("1.25") ?? 0.0
+    acc = acc + float.to_bits(top + low + f % 0.75 + mm + parsed)
     i = i + 1
   }
   println(int.to_string(acc))
