@@ -534,7 +534,6 @@ impl CarrierCx<'_> {
             // empty one. A copy where the carrier dies moves it out.
             let slice = match k {
                 NTy::Str => Some((NTy::StrRef, "&str", "\"\"")),
-                NTy::Vec => Some((NTy::VecRef, "&[i64]", "&[]")),
                 NTy::VecStr => Some((NTy::VecStrRef, "&[AlmideString]", "&[]")),
                 _ => None,
             };
@@ -592,7 +591,6 @@ impl CarrierCx<'_> {
         let by_ref = match k {
             NTy::Rec(j) => Some((NTy::RecRef(j), format!("&{}", struct_name(j)), if then { "v" } else { ok_v })),
             NTy::Str => Some((NTy::StrRef, "&str".to_string(), "&v[..]")),
-            NTy::Vec => Some((NTy::VecRef, "&[i64]".to_string(), "&v[..]")),
             NTy::VecStr => Some((NTy::VecStrRef, "&[AlmideString]".to_string(), "&v[..]")),
             _ => None,
         };
