@@ -13,8 +13,8 @@ on:
 permissions: read-all
 
 concurrency:
-  group: wasm-perf-4612-${{ github.ref }}
-  cancel-in-progress: true
+  group: wasm-perf-4612-${{ github.sha }}
+  cancel-in-progress: false
 
 env:
   RUST_TOOLCHAIN: "1.97.0"
@@ -96,12 +96,13 @@ jobs:
           wasmtime --version
       - name: New fixtures, native vs wasm, and the formatter
         run: |
-          set -uo pipefail
+          set +e -uo pipefail
           A=/tmp/bins/almide-new
           fail=0
           for f in spec/wasm_cross/bytes_walk_reduction_fused.almd spec/wasm_cross/split_one_byte_separator.almd spec/wasm_cross/r5_wasm_split_replace_iterative.almd; do
             echo "== $f"
             $A run "$f" > /tmp/native.out 2>&1; echo "native exit $?"
+            head -c 2000 /tmp/native.out
             $A run "$f" --target wasm > /tmp/wasm.out 2>&1; echo "wasm exit $?"
             /tmp/bins/almide-base run "$f" --target wasm > /tmp/basewasm.out 2>&1; echo "base wasm exit $?"
             cat /tmp/native.out
@@ -114,7 +115,7 @@ jobs:
           exit $fail
       - name: Negative controls
         run: |
-          set -uo pipefail
+          set +e -uo pipefail
           for nc in nc1:spec/wasm_cross/bytes_walk_reduction_fused.almd nc2:spec/wasm_cross/split_one_byte_separator.almd; do
             b=${nc%%:*}; f=${nc#*:}
             /tmp/bins/almide-new run "$f" > /tmp/native.out 2>&1
