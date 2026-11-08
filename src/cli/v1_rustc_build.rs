@@ -141,6 +141,10 @@ pub(super) fn try_build(rs_code: &str, project_dir: &Path, release: bool) -> Opt
         .arg(&bin_path);
     let mut record = serde_json::Map::new();
     if let Some(runtime) = runtime {
+        let mut runtime = runtime;
+        if std::env::var("ALMIDE_PROBE_ANCHOR").is_ok() {
+            runtime.push_str(probe_anchors(&runtime).as_str());
+        }
         let (rlib, runtime_argv) = runtime_rlib(&runtime, &runtime_profile_args(rs_code, release)).ok()?;
         cmd.arg("--extern").arg(format!("{RT_CRATE}={}", rlib.display()));
         cmd.arg("-L").arg(rlib.parent()?);
@@ -153,6 +157,40 @@ pub(super) fn try_build(rs_code: &str, project_dir: &Path, release: bool) -> Opt
         return None;
     }
     Some(source_still_ours(&rs_path, &program).map(|()| bin_path))
+}
+
+fn probe_anchors(rt: &str) -> String {
+    let mut a = String::from("\n#[doc(hidden)]\npub fn __almide_probe_inst() {\n    use std::hint::black_box as bb;\n    bb(core::ptr::drop_in_place::<Vec<crate::almide_str_block::AlmideStr>> as unsafe fn(*mut Vec<crate::almide_str_block::AlmideStr>));\n");
+    if rt.contains("pub fn almide_rt_map_set<") {
+        a.push_str("    type M = crate::AlmideMap<i64, i64>;\n");
+        a.push_str("    bb(almide_rt_map_contains::<i64, i64, i64> as fn(&M, &i64) -> bool);\n");
+        a.push_str("    bb(almide_rt_map_get::<i64, i64, i64> as fn(&M, &i64) -> Option<i64>);\n");
+        a.push_str("    bb(almide_rt_map_keys::<i64, i64> as fn(&M) -> Vec<i64>);\n");
+        a.push_str("    bb(almide_rt_map_values::<i64, i64> as fn(&M) -> Vec<i64>);\n");
+        a.push_str("    bb(almide_rt_map_merge_owned::<i64, i64> as fn(M, &M) -> M);\n");
+        a.push_str("    bb(almide_rt_map_new::<i64, i64> as fn() -> M);\n");
+        a.push_str("    bb(almide_rt_map_remove_owned::<i64, i64> as fn(M, i64) -> M);\n");
+        a.push_str("    bb(almide_rt_map_set::<i64, i64> as fn(M, i64, i64) -> M);\n");
+        a.push_str("    bb(core::ptr::drop_in_place::<M> as unsafe fn(*mut M));\n");
+    }
+    if rt.contains("pub fn almide_rt_set_insert_owned<") {
+        a.push_str("    type S = crate::AlmideSet<i64>;\n");
+        a.push_str("    bb(almide_rt_set_contains::<i64, i64> as fn(&S, &i64) -> bool);\n");
+        a.push_str("    bb(almide_rt_set_difference::<i64> as fn(&S, &S) -> S);\n");
+        a.push_str("    bb(almide_rt_set_intersection::<i64> as fn(&S, &S) -> S);\n");
+        a.push_str("    bb(almide_rt_set_symmetric_difference::<i64> as fn(&S, &S) -> S);\n");
+        a.push_str("    bb(almide_rt_set_union::<i64> as fn(&S, &S) -> S);\n");
+        a.push_str("    bb(almide_rt_set_from_list::<i64> as fn(&[i64]) -> S);\n");
+        a.push_str("    bb(almide_rt_set_insert_owned::<i64> as fn(S, i64) -> S);\n");
+        a.push_str("    bb(almide_rt_set_remove_owned::<i64> as fn(S, i64) -> S);\n");
+        a.push_str("    bb(almide_rt_set_is_disjoint::<i64> as fn(&S, &S) -> bool);\n");
+        a.push_str("    bb(almide_rt_set_is_subset::<i64> as fn(&S, &S) -> bool);\n");
+        a.push_str("    bb(almide_rt_set_new::<i64> as fn() -> S);\n");
+        a.push_str("    bb(almide_rt_set_to_list::<i64> as fn(&S) -> Vec<i64>);\n");
+        a.push_str("    bb(core::ptr::drop_in_place::<S> as unsafe fn(*mut S));\n");
+    }
+    a.push_str("}\n");
+    a
 }
 
 #[cfg(test)]

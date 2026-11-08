@@ -31,54 +31,12 @@ jobs:
         run: cargo build --release --bin almide
       - name: Probe
         run: |
-          bash probe.sh probe-int.txt probe-out/int
           bash probe.sh probe-rt.txt probe-out/base
           mkdir -p "$TMPDIR/fresh"; rm -rf ~/.almide
-          TMPDIR="$TMPDIR/fresh" ALMIDE_PROBE_DA_OFF=1 bash probe.sh probe-rt.txt probe-out/daoff
+          TMPDIR="$TMPDIR/fresh" ALMIDE_PROBE_ANCHOR=1 bash probe.sh probe-rt.txt probe-out/anchor
+          for f in "$TMPDIR"/fresh/almide-*/almide-rtlib-v1-*/lib.rs; do grep -l __almide_probe_inst "$f"; done || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: probe
           path: probe-out
-  tests:
-    name: Tests touched by the change
-    runs-on: ubuntu-latest
-    timeout-minutes: 150
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
-          save-if: false
-      - name: Wasm size ratchet (regenerate)
-        continue-on-error: true
-        run: |
-          ALMIDE_UPDATE_SIZES=1 cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -30
-          mkdir -p out; git diff crates/almide-wasm/tests/golden > out/size.diff; git diff --stat
-      - name: Wasm size ratchet (check)
-        continue-on-error: true
-        run: cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -30
-      - name: Wasm alloc ledger
-        continue-on-error: true
-        run: cargo test --release -p almide-wasm --test alloc_ledger 2>&1 | tail -30
-      - name: almide-mir
-        continue-on-error: true
-        run: cargo test --release -p almide-mir 2>&1 | tail -30
-      - name: almide-interp
-        continue-on-error: true
-        run: cargo test --release -p almide-interp 2>&1 | tail -30
-      - name: native floor
-        continue-on-error: true
-        run: cargo test --release --test native_verified_floor_test 2>&1 | tail -30
-      - name: generated sources fresh
-        continue-on-error: true
-        run: git status --short; git diff --stat crates/almide-types/src/generated
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: tests
-          path: out
