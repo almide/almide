@@ -123,6 +123,9 @@ pub(crate) struct AddrState {
     /// The movable reads that are their slot's first read since the block
     /// was bound: the ones a borrow may give way to a move.
     moves_first: BTreeSet<ValueId>,
+    /// The movable reads whose block is rebound next in the same straight
+    /// run: they move the field out by a plain (partial) move.
+    moves_partial: BTreeSet<ValueId>,
     /// Heap slot reads that move out, or whose rebuild walls (`native_slot_takes`).
     slot_reads: crate::native_slot_takes::SlotReads,
     /// Struct blocks built whole (`render_native_slots::built_whole`), and
@@ -164,7 +167,7 @@ impl AddrState {
         let (handle_of, consts, base_of) = block_bases(func);
         // The untyped blocks, typed from their stores and the declarations
         // that consume them, in one fixpoint (render_native_slots.rs).
-        let (moves, moves_last, moves_first) = slots::movable_loads(func, &base_of);
+        let (moves, moves_last, moves_first, moves_partial) = slots::movable_loads(func, &base_of);
         let str_lists = slots::type_blocks(func, sigs, &mut alloc_rec, &slots::Facts { handle_of: &handle_of, base_of: &base_of, consts: &consts });
         let alloc_rec = func
             .ops
@@ -261,6 +264,7 @@ impl AddrState {
             moves,
             moves_last,
             moves_first,
+            moves_partial,
             slot_reads: crate::native_slot_takes::slot_reads(func),
             whole,
             building: BTreeMap::new(),

@@ -375,6 +375,18 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
 }
 
 /// The record arm of [`slot_load_handle`]: heap field `k` (of kind `f`).
+/// The move of field `k` out of the owned record `base` for the read `d`: a
+/// plain partial move where the block is rebound next (nothing names it whole
+/// before then, and Rust re-initializes it at the rebind), else a take that
+/// leaves the field's `Default` behind.
+fn field_move(st: &AddrState, d: ValueId, base: ValueId, k: usize) -> String {
+    if st.moves_partial.contains(&d) {
+        format!("{}.f{k}", var(base))
+    } else {
+        format!("std::mem::take(&mut {}.f{k})", var(base))
+    }
+}
+
 fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NTy) -> Result<bool, LowerError> {
     let AddrSink { st, tys, out, indent } = s;
     macro_rules! line {
@@ -393,7 +405,7 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
         && !crate::render_native_move::drill_no_moves()
     {
         tys.insert(*d, f);
-        line!("let mut {}: {} = std::mem::take(&mut {}.f{k});", var(*d), crate::render_native_rec::owned_ty(f), var(ad.base));
+        line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, ad.base, k));
         return Ok(true);
     }
     // A borrow-only read (crate::render_native_borrow_read): a
@@ -409,12 +421,7 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
     // The last read of the slot of an owned record moves the value out
     // (a kind with a `Default` to leave in the slot).
     if st.moves.contains(d) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) && crate::render_native_rec::has_default(f) {
-        line!(
-            "let mut {}: {} = std::mem::take(&mut {}.f{k});",
-            var(*d),
-            crate::render_native_rec::owned_ty(f),
-            var(ad.base)
-        );
+        line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, ad.base, k));
         return Ok(true);
     }
     line!(
