@@ -105,7 +105,7 @@ crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_fn
 crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_printed_scalar	3
 crates/almide-mir/src/render_native_map.rs	almide_mir::render_native_addr::map::note_add	1
 crates/almide-mir/src/render_native_map.rs	almide_mir::render_native_addr::map::note_arith	3
-crates/almide-mir/src/render_native_move.rs	almide_mir::render_native_move::dying_after	3
+crates/almide-mir/src/render_native_move.rs	almide_mir::render_native_move::dying_after	2
 crates/almide-mir/src/render_native_move.rs	almide_mir::render_native_move::moves_at_call	1
 crates/almide-mir/src/render_native_move.rs	almide_mir::render_native_move::scan_after_copy	3
 crates/almide-mir/src/render_native_move.rs	almide_mir::render_native_move::set_stack_lits	3
