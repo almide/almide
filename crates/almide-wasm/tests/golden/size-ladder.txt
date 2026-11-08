@@ -5,9 +5,9 @@
 489	T1 Int print	research/benchmark/perf/wasm-size/fibonacci.almd
 7366	T1 Int print	research/benchmark/perf/binarytrees/binarytrees.almd
 9282	T2 Float print	research/benchmark/perf/spectralnorm/spectralnorm.almd
-6907	T3 String	research/benchmark/perf/strchurn/strchurn.almd
+6254	T3 String	research/benchmark/perf/strchurn/strchurn.almd
 5977	T3 String	research/benchmark/perf/strbuild/strbuild_append.almd
-13535	T3 String	research/benchmark/perf/strchurn/strchurn_case.almd
+12765	T3 String	research/benchmark/perf/strchurn/strchurn_case.almd
 18560	T4 List	research/benchmark/perf/listbuild/listbuild_append.almd
 18891	T4 List	research/benchmark/perf/listbuild/listbuild_combinator.almd
 11777	T5 Map	research/benchmark/perf/mapbuild/mapbuild.almd
@@ -16,4 +16,4 @@
 42571	T6 JSON	research/benchmark/perf/decode/decode.almd
 36476	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
 43082	T7 regex	spec/wasm_cross/regex_engine.almd
-240673	Σ	total
+239250	Σ	total
