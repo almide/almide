@@ -253,12 +253,6 @@ impl BlockTyping<'_, '_> {
             }
             Op::Dup { dst, src } | Op::SetLocal { local: dst, src } => self.dups.push((*dst, *src)),
             Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => self.scan_join(op, open),
-            // A typed drop that names a list of a generated type `T`.
-            Op::DropVariant { v, ty } if !self.alloc_rec.contains_key(v) => {
-                if let Some(j) = ty.strip_prefix("list_").and_then(rec::rec_index) {
-                    self.alloc_rec.insert(*v, rec::list_type_of(NTy::Rec(j)));
-                }
-            }
             _ => {}
         }
     }
