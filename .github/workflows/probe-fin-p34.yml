@@ -1,0 +1,48 @@
+name: probe-fin-p34 (throwaway)
+on:
+  push:
+    branches: [fin-probe-p34]
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - run: git log --oneline -1 && cargo build --release --bin almide && mkdir -p /tmp/out
+      - name: Item 4 — output parity baseline through the gate's update path
+        run: |
+          set +e
+          bash proofs/output-parity.sh 2>&1 | tail -30 | tee /tmp/out/parity-before.txt
+          bash proofs/output-parity.sh --update 2>&1 | tail -5 | tee /tmp/out/parity-update.txt
+          git diff -- proofs/output-parity-baseline.txt | tee /tmp/out/parity.diff
+          bash proofs/output-parity.sh 2>&1 | tail -10 | tee /tmp/out/parity-after.txt
+      - name: Item 3 — live allocations of the oracle programs
+        run: bash fin-probe/run.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: p34
+          path: /tmp/out
+          retention-days: 7
