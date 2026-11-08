@@ -138,6 +138,10 @@ def own_text(reg):
                 row[k] = " "
     return "\n".join("".join(l) for l in lines)
 
+for f in data["functions"]:
+    if "render_fn_move_op" in demangle(f["name"]):
+        for r in f["regions"]:
+            print("REG", demangle(f["name"]).split("::")[-1], r[:8])
 counts = {}
 seen_fns = set()
 for reg in regions:
