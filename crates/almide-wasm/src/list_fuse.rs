@@ -222,6 +222,12 @@ impl Emitter<'_> {
         };
         self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(acc);
+        // #4610: an affine first map over a counted range is carried, not
+        // recomputed (list_fuse_iv.rs). The counter holds the start here.
+        let iv = match (src, enumerated, stages[0]) {
+            (LoopSrc::Count { cur, .. }, None, Stage::Map(f)) => self.open_affine_iv(f, cur),
+            _ => None,
+        };
 
         let elem0 = src.elem();
         let pair = match (enumerated, src) {
@@ -250,7 +256,12 @@ impl Emitter<'_> {
             // stores straight into its value field.
             self.f.instructions().local_get(p);
         }
-        self.loop_src_load(src);
+        match iv {
+            Some(iv) => {
+                self.f.instructions().local_get(iv.local);
+            }
+            None => self.loop_src_load(src),
+        }
         let mut cur_ty = elem0;
         if let Some((p, pair_ty, io, vo, ih)) = pair {
             // `pair, element` are on the stack: park the element, then the
@@ -269,7 +280,7 @@ impl Emitter<'_> {
         // drops it. A borrowed map result stays its source's.
         let mut owners: Vec<(u32, SliceTy)> = Vec::new();
         let mut pending: Option<SliceTy> = None;
-        for st in stages {
+        for st in stages.iter().skip(usize::from(iv.is_some())) {
             match st {
                 Stage::Map(f) => {
                     let (p, body) = self.hof_lambda(f, 1)?;
@@ -333,6 +344,9 @@ impl Emitter<'_> {
         self.release_fused_owners(&owners);
         self.witness_fused_close();
         self.f.instructions().end(); // skip-block
+        if let Some(iv) = iv {
+            self.step_affine_iv(iv);
+        }
         self.loop_src_step(src);
         if let Some((p, ..)) = pair {
             self.f.instructions().local_get(p).call(F_DEC_FLAT);
@@ -341,6 +355,9 @@ impl Emitter<'_> {
         self.f.instructions().local_get(acc);
         let _ = cur_ty;
         self.loop_src_close(src);
+        if iv.is_some() {
+            self.release_i64();
+        }
         if cb.is_none() {
             self.release_val(acc_ty);
             self.release_val(acc_ty);

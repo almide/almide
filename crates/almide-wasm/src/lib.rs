@@ -104,6 +104,8 @@ mod bytes_append;
 mod kmp;
 /// #4610: a remainder by a power of two compared against zero.
 mod rem_test;
+/// #4610: induction-variable strength reduction for a fused affine map.
+mod list_fuse_iv;
 /// #4278 B1: a runtime helper's declared RC signature and its body's log.
 pub(crate) mod helper_sig;
 mod runtime_push;
