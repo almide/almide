@@ -127,7 +127,8 @@ fn entries(func: &MirFunction) -> Entries {
     let mut slot_of: BTreeMap<ValueId, (ValueId, i64)> = BTreeMap::new();
     for op in &func.ops {
         if let Op::IntBinOp { dst, op: IntOp::Add, a, b } = op {
-            if let (Some(base), Some(off)) = (root.get(a), consts.get(b)) {
+            let (h, c) = if consts.contains_key(b) { (a, b) } else { (b, a) };
+            if let (Some(base), Some(off)) = (root.get(h), consts.get(c)) {
                 let k = (off - i64::from(BLOCK_HEADER)) / i64::from(SLOT_SIZE);
                 slot_of.insert(*dst, (*base, k));
             }
@@ -163,10 +164,8 @@ fn entries(func: &MirFunction) -> Entries {
             let own = match op {
                 Op::Prim { kind: PrimKind::Handle, args, .. } => args.as_slice() == [b],
                 Op::IntBinOp { .. } => true,
-                Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } => {
-                    args.first().and_then(|a| slot_of.get(a)).is_some_and(|(x, _)| *x == b)
-                }
-                Op::Consume { .. } | Op::MakeUnique { .. } => false,
+                // A write into the block itself (a slot, or its length word).
+                Op::Prim { kind: PrimKind::Store { .. }, args, .. } => args.first().and_then(|a| root.get(a)) == Some(&b),
                 op => crate::render_native_move::bookkeeping(op),
             };
             if !own {
@@ -191,7 +190,8 @@ fn entries(func: &MirFunction) -> Entries {
         let Op::CallFn { name, args, .. } = op else { continue };
         let Some(floor) = crate::native_floor::declared(name) else { continue };
         for (p, a) in floor.params.iter().zip(args) {
-            let (FloorParam::MapPairs, CallArg::Handle(list)) = (p, a) else { continue };
+            let (FloorParam::MapPairs, CallArg::Handle(arg)) = (p, a) else { continue };
+            let list = root.get(arg).unwrap_or(arg);
             let Some((at, n)) = alloc(list).filter(|(_, n)| *n > 0 && slots_once(*list, *n)) else { continue };
             let held: Vec<(usize, ValueId)> = stores[list].iter().map(|(s, _, v)| (*s, *v)).collect();
             // A pair: two slots, read only by its one store into the list.
