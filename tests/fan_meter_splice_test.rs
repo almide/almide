@@ -87,7 +87,7 @@ fn a_region_outside_the_v1_subset_is_metered_by_the_standard_codegen() {
     let path = dir.join("split_in_arm.almd");
     std::fs::write(
         &path,
-        "fn parts(s: String) -> Int = list.len(string.split(s, \",\")) + list.sum([0])\n\
+        "fn parts(s: String) -> Int = list.len(string.split(s, \",\")) + list.len(list.chunk([0], 1)) - 1\n\
          effect fn main() -> Unit = println(int.to_string(fan.min(compute.ms(100)) { parts(\"a,b\"), parts(\"c\") } ?? 0))\n",
     )
     .unwrap();
@@ -97,9 +97,9 @@ fn a_region_outside_the_v1_subset_is_metered_by_the_standard_codegen() {
     assert_eq!(out.status.code(), Some(0), "stdout={stdout:?} stderr={stderr:?}");
     assert_eq!(stdout, "2\n");
     assert!(
-        // `string.split` and the String-list reverse joined the declared
-        // native floor (#4006), so the region walls on `list.sum`.
-        stderr.contains("its regions metered by the standard codegen") && stderr.contains("list.sum"),
+        // `string.split`, the String-list reverse and `list.sum` joined the
+        // declared native floor (#4006), so the region walls on `list.chunk`.
+        stderr.contains("its regions metered by the standard codegen") && stderr.contains("list.chunk"),
         "the note must name the meter that ran, and why the region splice could not: {stderr}"
     );
 }
@@ -119,7 +119,7 @@ fn a_single_call_bodys_argument_is_charged_by_the_standard_codegen_meter() {
     let src = format!(
         "fn heavy(n: Int) -> Int = {{\n  var i = 0\n  var acc = 0\n  while i < n {{\n    acc = (acc + i * 7) % 999983\n    i = i + 1\n  }}\n  acc\n}}\n\
          fn pick(a: Int, b: Int) -> Int = a + b\n\
-         fn two() -> Int = list.sum([1, 1])\n\
+         fn two() -> Int = list.len(list.chunk([1, 1], 1))\n\
          effect fn main() -> Unit = {{\n{}{}{}}}\n",
         body(30, 100000),
         body(3006, 1000),
