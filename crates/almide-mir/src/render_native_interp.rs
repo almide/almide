@@ -335,10 +335,10 @@ fn fmt_parts(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy
 /// as one (bit-exact). `None` for any other carrier.
 pub(crate) fn float_arg(n: ValueId, tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
     use crate::render_native::{var, NTy};
+    let v = var(n);
     match tys.get(&n)? {
-        NTy::F64 => Some(format!("{{ {} }}", var(n))),
-        NTy::I64 => Some(format!("f64::from_bits({} as u64)", var(n))),
-        _ => None,
+        NTy::F64 => Some(format!("{{ {v} }}")),
+        t => (*t == NTy::I64).then(|| format!("f64::from_bits({v} as u64)")),
     }
 }
 
@@ -375,9 +375,9 @@ pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<
         let [CallArg::Scalar(n)] = dargs.as_slice() else { continue };
         // A Float's text is only ever printed inside an interpolation (the
         // chain's `Piece::Float`): its fn is not callable on its own.
-        let text = crate::native_floor::declared_scalar_text(name).filter(|t| *t != crate::native_floor::ScalarText::Float);
+        let text = crate::native_floor::declared_scalar_text(name);
         let is_bool = text == Some(crate::native_floor::ScalarText::Bool);
-        if dv != v || text.is_none() {
+        if dv != v || text.is_none() || text == Some(crate::native_floor::ScalarText::Float) {
             continue;
         }
         // The scalar keeps its value from the definition to the print, which
