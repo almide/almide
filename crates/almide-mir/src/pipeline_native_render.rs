@@ -310,6 +310,33 @@ fn render_native_with_runtime_hofs(
     linked: &std::collections::BTreeSet<String>,
     runtime: &std::collections::BTreeSet<String>,
 ) -> Result<String, LowerError> {
+    let first = render_native_hof_pass(program, sigs, linked, runtime);
+    if first.is_ok() { return first; }
+    // A body can lower successfully yet refuse native representation (e.g.
+    // set slots). Apply the same declared boundary graph as a lowering refusal.
+    // User roots and function references still cannot be routed away.
+    let mut runtime = runtime.clone();
+    runtime.extend(linked.iter().filter(|n| !program.functions.iter().any(|f| f.name == **n)).cloned());
+    let recs = crate::render_native_rec::snapshot();
+    crate::native_hof::reset(runtime.clone(), Default::default());
+    let refused = crate::render_native::refused_native_bodies(program, sigs, linked);
+    crate::render_native_rec::restore(recs);
+    let refused = refused?;
+    if refused.is_empty() { return first; }
+    let roots = program.functions.iter().filter(|f| !linked.contains(&f.name))
+        .map(|f| f.name.clone()).collect();
+    let mut routed = crate::native_link_routes::route(&mut program.functions, &roots, &refused)?;
+    if routed.is_empty() { return first; }
+    routed.extend(runtime.iter().cloned());
+    render_native_hof_pass(program, sigs, linked, &routed)
+}
+
+fn render_native_hof_pass(
+    program: &mut MirProgram,
+    sigs: &crate::render_native::NativeSigs,
+    linked: &std::collections::BTreeSet<String>,
+    runtime: &std::collections::BTreeSet<String>,
+) -> Result<String, LowerError> {
     crate::native_hof::reset(runtime.clone(), Default::default());
     let recs = crate::render_native_rec::snapshot();
     let first = crate::render_native::try_render_native_program(program, sigs);

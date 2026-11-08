@@ -576,6 +576,7 @@ fn list_eq_list_str(a: List[List[String]], b: List[List[String]]) -> Bool = {
 // Object/Array element's block while LEAKING its nested children (the very reason this lives in
 // value_core, where __drop_value is in scope, not in list_modify). The result is a List[Value] so it
 // drops via the recursive DropListValue. v0 indexes `i as usize`, so negative/>=len silently no-ops.
+@specializes("value.__eq")
 fn value_eq(a: Value, b: Value) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)

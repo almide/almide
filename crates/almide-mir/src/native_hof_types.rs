@@ -59,6 +59,15 @@ fn bind_param(env: &mut Env, d: &DTy, t: NTy) -> Option<()> {
         }
         DTy::Var(v) => bind(env, v, crate::render_native::owned_nty(t)),
         DTy::Matrix => rec::is_matrix(t).then_some(()),
+        DTy::Value => rec::is_value(t).then_some(()),
+        DTy::Bytes => rec::is_bytes(t).then_some(()),
+        DTy::Set(e) => {
+            let inner = rec::set_elem(t.rec()?)?;
+            // These are the same two element representations accepted by
+            // is_native_set; no Float-bit or Bool-lane equality substitution.
+            matches!(inner, NTy::I64 | NTy::Str).then_some(())?;
+            bind_inner(env, e, inner)
+        }
         DTy::Map(k, v) => {
             let (kk, vk) = match t {
                 NTy::Rec(i) | NTy::RecRef(i) => rec::map_kinds(i)?,
@@ -82,6 +91,13 @@ fn kind_of(env: &Env, d: &DTy) -> Option<NTy> {
         DTy::Float => NTy::F64,
         DTy::Str => NTy::Str,
         DTy::Matrix => NTy::Rec(rec::matrix_index()),
+        DTy::Value => NTy::Rec(rec::value_index()),
+        DTy::Bytes => NTy::Rec(rec::bytes_index()),
+        DTy::Set(e) => {
+            let inner = kind_of(env, e)?;
+            matches!(inner, NTy::I64 | NTy::Str).then_some(())?;
+            NTy::Rec(rec::set_type_of(inner))
+        }
         // A list or Option of Float bits would leave the render's lanes
         // (`Vec<i64>`, `Option<i64>`) for the runtime's `f64`: refused.
         DTy::List(e) => match kind_of(env, e)? {
@@ -127,6 +143,37 @@ fn bind_lambda(env: &mut Env, d: &DTy, k: NativeSigKind) -> Option<bool> {
 #[cfg(test)]
 mod type_tests {
     use super::*;
+    #[test]
+    fn runtime_values_and_sets_bind_only_their_declared_representations() {
+        let _guard = rec::install(vec![]);
+        let mut env = Env::new();
+        let value = NTy::Rec(rec::value_index());
+        let bytes = NTy::Rec(rec::bytes_index());
+        assert_eq!(bind_param(&mut env, &DTy::Bytes, bytes), Some(()));
+        assert_eq!(bind_param(&mut env, &DTy::Bytes, NTy::Vec), None);
+        assert_eq!(kind_of(&env, &DTy::Bytes), Some(bytes));
+        assert_eq!(rust_agrees(&DTy::Bytes, "&[u8]"), Some(true));
+        assert_eq!(rust_agrees(&DTy::Bytes, "&Vec<u8>"), Some(true));
+        assert_eq!(rust_agrees(&DTy::Bytes, "Vec<u8>"), Some(false));
+        assert_eq!(rust_agrees(&DTy::Bytes, "&mutVec<u8>"), None);
+        assert_eq!(rust_agrees(&DTy::Str, "AlmideString"), Some(false));
+        assert_eq!(rust_agrees(&DTy::Str, "&str"), Some(true));
+        assert_eq!(rust_agrees(&DTy::Str, "String"), None);
+        assert_eq!(rust_agrees(&DTy::Str, "str"), None);
+        assert_eq!(bind_param(&mut env, &DTy::Value, value), Some(()));
+        assert_eq!(bind_param(&mut env, &DTy::Value, NTy::Str), None);
+        for inner in [NTy::I64, NTy::Str] {
+            let set = NTy::Rec(rec::set_type_of(inner));
+            let declared = DTy::Set(Box::new(DTy::Var("A".into())));
+            let mut binding = Env::new();
+            assert_eq!(bind_param(&mut binding, &declared, set), Some(()));
+            assert_eq!(kind_of(&binding, &declared), Some(set));
+            assert_eq!(bind_param(&mut binding, &declared, value), None);
+        }
+        assert_eq!(kind_of(&env, &DTy::Set(Box::new(DTy::Float))), None);
+        assert_eq!(kind_of(&env, &DTy::Set(Box::new(DTy::Value))), None);
+    }
+
     #[test]
     fn recursive_payload_bindings_keep_both_result_arms_and_nominal_types() {
         let _guard = rec::install(vec![

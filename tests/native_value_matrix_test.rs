@@ -16,6 +16,11 @@ fn main() -> Unit = {
  for x in xs { println(show(ok(x))) }
  for x in xs { println(show(ok(x))) }
  println(show(err("outer")))
+ for x in list.slice(xs, 0, 2) { println(show(ok(x))) }
+ let options: List[Int?] = [some(7), none]
+ for x in list.slice(options, 0, 2) { println(int.to_string(x ?? -1)) }
+ let texts: List[Result[String, String]] = [ok("yes"), err("error")]
+ for x in list.slice(texts, 0, 2) { println(match x { ok(s) => s, err(e) => e }) }
 }
 "#,
         ),
@@ -182,45 +187,147 @@ fn main() -> Unit = {
 }
 "#,
         ),
+        (
+            "value_equality",
+            r#"
+fn report(a: Value, b: Value) -> Unit = println(if a == b then "equal" else "different")
+fn main() -> Unit = {
+ let leaves = [value.null(), value.bool(true), value.int(7), value.float(1.5), value.string("text")]
+ let tree = value.object([("items", value.array(leaves))])
+ report(tree, value.object([("items", value.array(leaves))]))
+ report(tree, value.object([("items", value.array([]))]))
+ report(value.object([("a", value.int(1)), ("b", value.int(2))]),
+        value.object([("b", value.int(2)), ("a", value.int(1))]))
+ report(value.int(1), value.float(1.0))
+ report(value.float(-0.0), value.float(0.0))
+ report(value.string("あ"), value.string("あ"))
+ report(tree, tree)
+ for item in leaves { report(item, item) }
+}
+"#,
+        ),
+        (
+            "heap_accumulator_folds",
+            r#"
+fn main() -> Unit = {
+ let words = ["a", "b"]
+ println(list.fold(words, "seed", (a, x) => a + x))
+ let numbers = [2, 3]
+ let initial = [1]
+ let collected = list.fold(numbers, initial, (a, x) => a + [x])
+ for n in collected { println(int.to_string(n)) }
+ for n in initial { println(int.to_string(n)) }
+ let optional: List[String]? = some([])
+ let joined = list.fold(words, optional, (a, x) => some((a ?? []) + [x]))
+ for word in (joined ?? []) { println(word) }
+ let values = [value.int(2), value.int(3)]
+ let last = list.fold(values, value.null(), (a, x) => x)
+ println(int.to_string(value.as_int(last) ?? -1))
+ let initial_map: Map[String, Int] = map.new()
+ let counts = list.fold(words, initial_map, (a, x) => map.set(a, x, string.len(x)))
+ println(int.to_string(map.get(counts, "a") ?? -1))
+ println(int.to_string(map.len(initial_map)))
+ for word in words { println(word) }
+}
+"#,
+        ),
+        (
+            "set_int_callbacks",
+            r#"
+fn show(s: Set[Int]) -> Unit = for n in set.to_list(s) { println(int.to_string(n)) }
+fn main() -> Unit = {
+ let source = set.from_list([3, 1, 3, 2])
+ let minimum = 2
+ show(set.filter(source, (n) => n >= minimum))
+ show(set.map(source, (n) => n % 2))
+ println(int.to_string(set.fold(source, 0, (a, n) => a * 10 + n)))
+ println(if set.any(source, (n) => n == 1) then "any" else "none")
+ println(if set.all(source, (n) => n > 0) then "all" else "some")
+ let empty: Set[Int] = set.new()
+ println(if set.any(empty, (n) => n > 0) then "bad" else "empty")
+ println(if set.all(empty, (n) => n > 0) then "all" else "bad")
+ show(source)
+}
+"#,
+        ),
+        (
+            "set_string_callbacks",
+            r#"
+fn show(s: Set[String]) -> Unit = for text in set.to_list(s) { println(text) }
+fn main() -> Unit = {
+ let source = set.from_list(["b", "aa", "b", ""])
+ show(set.filter(source, (text) => string.len(text) > 0))
+ println(int.to_string(set.fold(source, 0, (n, text) => n + string.len(text))))
+ println(if set.any(source, (text) => text == "") then "empty" else "none")
+ println(if set.all(source, (text) => string.len(text) > 0) then "all" else "some")
+ show(source)
+}
+"#,
+        ),
     ];
     let dir =
         std::env::temp_dir().join(format!("almide-native-value-matrix-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
+    let mut failures = Vec::new();
     for (name, source) in cases {
-        let input = dir.join(format!("{name}.almd"));
-        let rs = dir.join(format!("{name}.rs"));
-        let binary = dir.join(name);
-        std::fs::write(&input, source).unwrap();
-        let (rust, certs) = almide_mir::pipeline::try_render_rust_source_certified(source)
-            .unwrap_or_else(|e| panic!("{name}: {e}"));
-        for prop in ["ownership", "native-calls", "bounds"] {
+        // Complete the matrix even when one case fails, so a batch exposes
+        // every independent representation gap in one compiler build.
+        let result = std::panic::catch_unwind(|| {
+            let input = dir.join(format!("{name}.almd"));
+            let rs = dir.join(format!("{name}.rs"));
+            let binary = dir.join(name);
+            std::fs::write(&input, source).unwrap();
+            let (rust, certs) = almide_mir::pipeline::try_render_rust_source_certified(source)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            for prop in ["ownership", "native-calls", "bounds"] {
+                assert!(
+                    certs.iter().any(|(p, _, _)| p == prop),
+                    "{name}: missing {prop}"
+                );
+            }
+            if matches!(name, "set_int_callbacks" | "set_string_callbacks") {
+                assert!(
+                    rust.contains("almide_rt_set_filter_static"),
+                    "{name}: runtime boundary"
+                );
+                let owners: Vec<_> = certs.iter().filter(|(p, _, _)| p == "ownership").collect();
+                assert!(
+                    !owners.iter().any(|(_, f, _)| f.starts_with("set_filter")
+                        || f.starts_with("__set_str_filter")),
+                    "{name}: unreachable helper certified"
+                );
+                let calls = &certs
+                    .iter()
+                    .find(|(p, _, _)| p == "native-calls")
+                    .unwrap()
+                    .2;
+                assert!(
+                    calls.split('#').count() > owners.len(),
+                    "{name}: missing runtime call witness"
+                );
+            }
+            std::fs::write(&rs, rust).unwrap();
+            let compiled = Command::new("rustc")
+                .args(["--edition=2021", "-C", "opt-level=1"])
+                .arg(&rs)
+                .arg("-o")
+                .arg(&binary)
+                .output()
+                .unwrap();
             assert!(
-                certs.iter().any(|(p, _, _)| p == prop),
-                "{name}: missing {prop}"
+                compiled.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&compiled.stderr)
             );
-        }
-        std::fs::write(&rs, rust).unwrap();
-        let compiled = Command::new("rustc")
-            .args(["--edition=2021", "-C", "opt-level=1"])
-            .arg(&rs)
-            .arg("-o")
-            .arg(&binary)
-            .output()
-            .unwrap();
-        assert!(
-            compiled.status.success(),
-            "{name}: {}",
-            String::from_utf8_lossy(&compiled.stderr)
-        );
-        let actual = Command::new(&binary).output().unwrap();
-        assert!(
-            actual.status.success(),
-            "{name}: {}",
-            String::from_utf8_lossy(&actual.stderr)
-        );
-        assert!(actual.stderr.is_empty(), "{name}");
-        let expected: &[u8] = match name {
-            "nested_results" => b"4\nbad\n4\nbad\nouter\n",
+            let actual = Command::new(&binary).output().unwrap();
+            assert!(
+                actual.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&actual.stderr)
+            );
+            assert!(actual.stderr.is_empty(), "{name}");
+            let expected: &[u8] = match name {
+            "nested_results" => b"4\nbad\n4\nbad\nouter\n4\nbad\n7\n-1\nyes\nerror\n",
             "nested_strings" => b"inner\nnone\nerror\nyes\nempty\n",
             "typed_empty" => b"a\nb\n0\n0\nr\n2\n",
             "record_updates" => b"b\n4\na\n1\n",
@@ -232,57 +339,70 @@ fn main() -> Unit = {
             "result_callbacks" => b"2\n3\n4\n2\n3\nbad!\nbad\n3\n",
             "computed_container_args" => b"a\nb\nc\nend\n",
             "option_callbacks" => b"2\n3\nnone\n2\n3\n8\n9\n2\n3\nnone\nnone\n",
+            "value_equality" => b"equal\ndifferent\ndifferent\ndifferent\nequal\nequal\nequal\nequal\nequal\nequal\nequal\nequal\n",
+            "heap_accumulator_folds" => b"seedab\n1\n2\n3\n1\na\nb\n3\n1\n0\na\nb\n",
+            "set_int_callbacks" => b"3\n2\n1\n0\n312\nany\nall\nempty\nall\n3\n1\n2\n",
+            "set_string_callbacks" => b"b\naa\n3\nempty\nsome\nb\naa\n\n",
             _ => unreachable!(),
         };
-        assert_eq!(actual.stdout, expected, "{name}");
-        let ir = almide::wasm_leg::lower_to_ir(input.to_str().unwrap(), source).unwrap();
-        let reference = almide_interp::Interpreter::new(&ir).run_main();
-        assert!(
-            matches!(reference.status, almide_interp::RunStatus::Ok),
-            "{name}: {:?}",
-            reference.status
-        );
-        assert_eq!(
-            (
-                actual.stdout.as_slice(),
-                actual.stderr.as_slice(),
-                actual.status.code()
-            ),
-            (
-                reference.stdout.as_bytes(),
-                reference.stderr.as_bytes(),
-                Some(reference.exit_code())
-            ),
-            "{name}: interp"
-        );
-        let oracle = dir.join(format!("{name}-v0"));
-        let built = Command::new(env!("CARGO_BIN_EXE_almide"))
-            .args(["build", "--no-verified"])
-            .arg(&input)
-            .arg("-o")
-            .arg(&oracle)
-            .env("ALMIDE_NO_VERIFIED_OK", "1")
-            .output()
-            .unwrap();
-        assert!(
-            built.status.success(),
-            "{name}: {}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        let v0 = Command::new(oracle).output().unwrap();
-        let wasm = Command::new(env!("CARGO_BIN_EXE_almide"))
-            .arg("run")
-            .arg(&input)
-            .args(["--target", "wasm"])
-            .output()
-            .unwrap();
-        for (leg, other) in [("v0", v0), ("wasm", wasm)] {
-            assert_eq!(
-                (&actual.stdout, &actual.stderr, actual.status.code()),
-                (&other.stdout, &other.stderr, other.status.code()),
-                "{name}: {leg}"
+            assert_eq!(actual.stdout, expected, "{name}");
+            let ir = almide::wasm_leg::lower_to_ir(input.to_str().unwrap(), source).unwrap();
+            let reference = almide_interp::Interpreter::new(&ir).run_main();
+            assert!(
+                matches!(reference.status, almide_interp::RunStatus::Ok),
+                "{name}: {:?}",
+                reference.status
             );
+            assert_eq!(
+                (
+                    actual.stdout.as_slice(),
+                    actual.stderr.as_slice(),
+                    actual.status.code()
+                ),
+                (
+                    reference.stdout.as_bytes(),
+                    reference.stderr.as_bytes(),
+                    Some(reference.exit_code())
+                ),
+                "{name}: interp"
+            );
+            let oracle = dir.join(format!("{name}-v0"));
+            let built = Command::new(env!("CARGO_BIN_EXE_almide"))
+                .args(["build", "--no-verified"])
+                .arg(&input)
+                .arg("-o")
+                .arg(&oracle)
+                .env("ALMIDE_NO_VERIFIED_OK", "1")
+                .output()
+                .unwrap();
+            assert!(
+                built.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&built.stderr)
+            );
+            let v0 = Command::new(oracle).output().unwrap();
+            let wasm = Command::new(env!("CARGO_BIN_EXE_almide"))
+                .arg("run")
+                .arg(&input)
+                .args(["--target", "wasm"])
+                .output()
+                .unwrap();
+            for (leg, other) in [("v0", v0), ("wasm", wasm)] {
+                assert_eq!(
+                    (&actual.stdout, &actual.stderr, actual.status.code()),
+                    (&other.stdout, &other.stderr, other.status.code()),
+                    "{name}: {leg}"
+                );
+            }
+        });
+        if result.is_err() {
+            failures.push(name);
         }
     }
+    assert!(
+        failures.is_empty(),
+        "failed value cases: {failures:?}; artifacts: {}",
+        dir.display()
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }

@@ -36,6 +36,13 @@ fn float(f: Float) -> Value = _
 @intrinsic("almide_rt_value_int")
 fn int(n: Int) -> Value = _
 
+// Internal boundary for the existing Value == operator and Codec calls.
+// The self-hosted value_eq body declares this representation specialization.
+/// Structural equality; arrays and object entries compare in order.
+@intrinsic("almide_rt_value_eq")
+@consume(a, b)
+fn __eq(a: Value, b: Value) -> Bool = _
+
 /// Shallow merge, b's keys win; b if not both objects.
 @intrinsic("almide_rt_value_merge")
 fn merge(a: Value, b: Value) -> Value = _

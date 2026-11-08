@@ -310,6 +310,27 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
     render_items(prog, sigs, false)
 }
 
+/// Probe linked bodies after a refused program render. Only a renderer
+/// refusal can propose a declared runtime route; retained bodies still pass
+/// ownership verification in the final render, before certificates are made.
+/// The caller restores the representation table and resets render state before
+/// using the proposal. Each surviving call is checked again by native_hof.
+pub(crate) fn refused_native_bodies(
+    prog: &MirProgram,
+    sigs: &NativeSigs,
+    linked: &std::collections::BTreeSet<String>,
+) -> Result<BTreeMap<String, LowerError>, LowerError> {
+    let user_fns = prog.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    let mut refused = BTreeMap::new();
+    for func in prog.functions.iter().filter(|f| linked.contains(&f.name)) {
+        match render_fn(func, &user_fns, sigs, &mut Vec::new()) {
+            Err(e) => { refused.insert(func.name.clone(), e.with_fn_context(&func.name)); }
+            Ok(_) => verify_ownership_or_wall(func)?,
+        }
+    }
+    Ok(refused)
+}
+
 fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> Result<String, LowerError> {
     let user_fns: BTreeMap<&str, &MirFunction> = prog
         .functions

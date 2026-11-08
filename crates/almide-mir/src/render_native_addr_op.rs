@@ -86,48 +86,7 @@ pub(crate) fn is_const_list(v: ValueId) -> bool {
     CONST_LISTS.with(|c| c.borrow().contains(&v))
 }
 
-/// The `Handle`s of reassigned locals that could go stale: some address
-/// derived from the handle (by an offset or `ElemAddr`) is read at or after a
-/// `SetLocal` of the local, or a loop edge lies between the handle and a read
-/// of it. Every other handle of a reassigned local reads the one value the
-/// local holds over the handle's whole live range, as its rendered variable does.
-fn stale_handles(func: &MirFunction) -> BTreeSet<ValueId> {
-    let set_at: Vec<(usize, ValueId)> = func
-        .ops
-        .iter()
-        .enumerate()
-        .filter_map(|(i, op)| match op {
-            Op::SetLocal { local, .. } => Some((i, *local)),
-            _ => None,
-        })
-        .collect();
-    let mut stale = BTreeSet::new();
-    for (i, op) in func.ops.iter().enumerate() {
-        let Some((d, x)) = handle_of(op) else { continue };
-        let d = &d;
-        if !set_at.iter().any(|(_, l)| *l == x) {
-            continue;
-        }
-        // The handle and every address derived from it, and where each is last read.
-        let mut derived: BTreeSet<ValueId> = BTreeSet::from([*d]);
-        let mut last = i;
-        for (j, later) in func.ops.iter().enumerate().skip(i + 1) {
-            let mut reads = Vec::new();
-            crate::mir_ops::op_reads(later, &mut reads);
-            if !reads.iter().any(|v| derived.contains(v)) {
-                continue;
-            }
-            last = j;
-            if let Op::IntBinOp { dst, op: IntOp::Add, .. } | Op::Prim { kind: PrimKind::ElemAddr, dst: Some(dst), .. } = later {
-                derived.insert(*dst);
-            }
-        }
-        let crosses = func.ops[i..=last].iter().any(|o| matches!(o, Op::LoopStart | Op::LoopEnd))
-            || set_at.iter().any(|(k, l)| *l == x && *k > i && *k <= last);
-        stale.extend(crosses.then_some(*d));
-    }
-    stale
-}
+include!("render_native_addr_live.rs");
 
 /// The address-forming arms of [`render_addr_op`]: constants, a handle, the
 /// address arithmetic, and `ElemAddr`.

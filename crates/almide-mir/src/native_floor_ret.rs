@@ -206,7 +206,7 @@ fn elem_ret_of(shape: ElemRet, name: &str, call: String, cx: &CallCx) -> Result<
     let (elem_str, elem_kind) = (cx.elem_str, cx.elem_kind);
     Ok(match (elem_str, shape) {
         // A generated list's element: itself, its generated `Option`, its list.
-        (Some(false), _) if matches!(elem_kind, Some(NTy::Rec(_)) | Some(NTy::Vec) | Some(NTy::VecStr)) => {
+        (Some(false), _) if matches!(elem_kind, Some(NTy::Rec(_) | NTy::Vec | NTy::VecStr | NTy::Opt | NTy::Res | NTy::ResStr)) => {
             let e = elem_kind.expect("matched");
             let t = match shape {
                 ElemRet::Value => e,

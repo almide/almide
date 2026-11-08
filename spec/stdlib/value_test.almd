@@ -1,6 +1,21 @@
 import value
 import json
 
+test "Value equality covers every kind and preserves object order" {
+  let scalars = [value.null(), value.bool(true), value.int(7), value.float(1.5), value.string("あ")]
+  for x in scalars { assert_eq(x == x, true) }
+  assert_eq(value.bool(false) == value.bool(true), false)
+  assert_eq(value.int(1) == value.float(1.0), false)
+  assert_eq(value.float(-0.0) == value.float(0.0), true)
+  assert_eq(value.float(float.nan()) == value.float(float.nan()), false)
+  let nested = value.object([("items", value.array(scalars))])
+  assert_eq(nested == value.object([("items", value.array(scalars))]), true)
+  assert_eq(nested == value.object([("items", value.array([]))]), false)
+  assert_eq(value.object([("a", value.int(1)), ("b", value.int(2))]) ==
+                     value.object([("b", value.int(2)), ("a", value.int(1))]), false)
+  assert_eq(nested == nested, true)
+}
+
 // value_test — Value type construction and stringify
 test "value.int" {
   let v = value.int(42)

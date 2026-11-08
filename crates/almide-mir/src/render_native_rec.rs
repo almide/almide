@@ -707,6 +707,7 @@ pub(crate) fn tuple_key(t: &almide_lang::types::Ty) -> String {
 /// non-generic aggregate by its name, any other by its spelled type.
 pub(crate) fn block_key(t: &almide_lang::types::Ty) -> String {
     match t {
+        t if crate::lower::is_value_ty(t) => VALUE_KEY.to_string(),
         almide_lang::types::Ty::Named(n, args) if args.is_empty() => n.as_str().to_string(),
         t => tuple_key(t),
     }

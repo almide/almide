@@ -16580,6 +16580,7 @@ fn __fold_hrec_loop(h: Int, f: (Value, Value) -> Value, n: Int, i: Int, acc: Val
     __fold_hrec_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_hrec(xs: List[Value], init: Value, f: (Value, Value) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16604,6 +16605,7 @@ fn __fold_hsca_loop(h: Int, f: (Value, Int) -> Value, n: Int, i: Int, acc: Value
     __fold_hsca_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_hsca(xs: List[Int], init: Value, f: (Value, Int) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16626,6 +16628,7 @@ fn __fold_ols_loop(h: Int, f: (List[String]?, String) -> List[String]?, n: Int, 
     __fold_ols_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_ols(xs: List[String], init: List[String]?, f: (List[String]?, String) -> List[String]?) -> List[String]? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16650,6 +16653,7 @@ fn __fold_str_hacc_loop(h: Int, f: (Value, String) -> Value, n: Int, i: Int, acc
     __fold_str_hacc_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_str_hacc(xs: List[String], init: Value, f: (Value, String) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -21532,6 +21536,7 @@ fn __fold_smsi_loop(h: Int, f: (Map[String, Int], String) -> Map[String, Int], n
     __fold_smsi_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_str_msi(xs: List[String], init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Map[String, Int] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -41503,6 +41508,13 @@ fn float(f: Float) -> Value = _
 @intrinsic("almide_rt_value_int")
 fn int(n: Int) -> Value = _
 
+
+
+/// Structural equality; arrays and object entries compare in order.
+@intrinsic("almide_rt_value_eq")
+@consume(a, b)
+fn __eq(a: Value, b: Value) -> Bool = _
+
 /// Shallow merge, b's keys win; b if not both objects.
 @intrinsic("almide_rt_value_merge")
 fn merge(a: Value, b: Value) -> Value = _
@@ -42323,6 +42335,7 @@ fn list_eq_list_str(a: List[List[String]], b: List[List[String]]) -> Bool = {
 
 
 
+@specializes("value.__eq")
 fn value_eq(a: Value, b: Value) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)

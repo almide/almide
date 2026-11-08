@@ -59,11 +59,14 @@ enum DTy {
     Float,
     Str,
     Matrix,
+    Value,
+    Bytes,
     List(Box<DTy>),
     Opt(Box<DTy>),
     Result(Box<DTy>, Box<DTy>),
     /// `Map[K, V]`: v0's runtime `AlmideMap<K, V>`, the generated map alias.
     Map(Box<DTy>, Box<DTy>),
+    Set(Box<DTy>),
     Fn(Vec<DTy>, Box<DTy>),
 }
 
@@ -90,11 +93,14 @@ fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
             "Float" => DTy::Float,
             "String" => DTy::Str,
             "Matrix" => DTy::Matrix,
+            "Value" => DTy::Value,
+            "Bytes" => DTy::Bytes,
             a if tps.contains(a) => DTy::Var(a.to_string()),
             _ => return None,
         },
         TypeExpr::Generic { name, args } if args.len() == 1 => match name.as_str() {
             "List" => DTy::List(Box::new(dty_of(&args[0], tps)?)),
+            "Set" => DTy::Set(Box::new(dty_of(&args[0], tps)?)),
             "?" | "Option" => DTy::Opt(Box::new(dty_of(&args[0], tps)?)),
             _ => return None,
         },
@@ -120,12 +126,15 @@ fn rust_agrees(d: &DTy, r: &str) -> Option<bool> {
         DTy::Int => r == "i64",
         DTy::Bool => r == "bool",
         DTy::Float => r == "f64",
-        DTy::Str => r == "str",
+        DTy::Str => (by_ref && r == "str") || (!by_ref && r == "AlmideString"),
         DTy::Matrix => r == "AlmideMatrix",
+        DTy::Value => r == "AlmideValue",
+        DTy::Bytes => r == "Vec<u8>" || (by_ref && r == "[u8]"),
         DTy::Var(_) => r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !by_ref,
         DTy::List(_) => r.starts_with("Vec<") || (by_ref && r.starts_with('[')),
         DTy::Opt(_) => r.starts_with("Option<") && !by_ref,
         DTy::Map(..) => r.starts_with("AlmideMap<"),
+        DTy::Set(_) => r.starts_with("AlmideSet<"),
         DTy::Result(..) => r.starts_with("Result<"),
         DTy::Fn(..) => r.starts_with("std::rc::Rc<dynFn(") && !by_ref,
     };
@@ -675,6 +684,15 @@ mod tests {
             ("list_flat_map_str", "almide_rt_list_flat_map"),
             ("option_map", "almide_rt_option_map"),
             ("matrix_map", "almide_rt_matrix_map"),
+            ("set_filter", "almide_rt_set_filter"),
+            ("set_filter_str", "almide_rt_set_filter"),
+            ("set_map", "almide_rt_set_map"),
+            ("set_fold", "almide_rt_set_fold"),
+            ("set_fold_str", "almide_rt_set_fold"),
+            ("set_any", "almide_rt_set_any"),
+            ("set_all", "almide_rt_set_all"),
+            ("bytes_split", "almide_rt_bytes_split"),
+            ("float_to_string", "almide_rt_float_to_string"),
         ] {
             let derived = super::derive_explained(impl_fn);
             assert_eq!(derived.as_ref().map(|h| h.symbol.as_str()), Ok(symbol), "{impl_fn}");

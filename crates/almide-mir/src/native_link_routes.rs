@@ -66,8 +66,8 @@ fn plan_links(
 }
 
 /// Keep the existing successful path byte-for-byte. Only a native lowering
-/// refusal permits proposing a declared runtime boundary; frontend errors
-/// and name clashes never enter this map.
+/// or representation refusal permits proposing a declared runtime boundary;
+/// frontend errors and name clashes never enter this map.
 pub(crate) fn route(
     functions: &mut Vec<MirFunction>,
     roots: &BTreeSet<String>,

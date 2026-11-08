@@ -312,12 +312,20 @@ impl BlockTyping<'_, '_> {
     /// Down: a block stored into a typed parent's slot.
     fn down(&mut self) {
         let (func, f) = (self.func, self.f);
+        let empty = super::empty_list_blocks(func);
         for op in &func.ops {
             let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op else { continue };
             let (Some(&(r, off)), Some(&vsrc)) = (f.base_of.get(&args[0]), f.handle_of.get(&args[1])) else { continue };
             let Some(&i) = self.alloc_rec.get(&r) else { continue };
-            if let Some(NTy::Rec(j)) = parent_slot_kind(i, slot_of(off)) {
-                self.alloc_rec.entry(vsrc).or_insert(j);
+            match parent_slot_kind(i, slot_of(off)) {
+                Some(NTy::Rec(j)) => { self.alloc_rec.entry(vsrc).or_insert(j); }
+                // An empty literal has no element store to establish String.
+                // Preserve the parent's declared list type at allocation;
+                // never discard or reinterpret an already populated list.
+                Some(NTy::VecStr) if empty.contains(&vsrc) => {
+                    self.alloc_rec.entry(vsrc).or_insert_with(|| rec::list_type_of(NTy::Str));
+                }
+                _ => {}
             }
         }
     }
