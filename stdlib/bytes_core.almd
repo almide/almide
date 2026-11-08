@@ -174,6 +174,8 @@ fn bytes_cmp(a: Bytes, b: Bytes) -> Int = {
 }
 
 // `a == b` over Bytes (the eq lowering's `bytes.eq`): same length and the same bytes.
+@implements("bytes.__eq")
+@specializes("bytes.__eq")
 fn bytes_eq(a: Bytes, b: Bytes) -> Bool = {
   let na = prim.load32(prim.handle(a) + 4)
   let nb = prim.load32(prim.handle(b) + 4)

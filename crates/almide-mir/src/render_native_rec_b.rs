@@ -29,6 +29,7 @@ struct Derive<'a> {
     results: std::collections::BTreeSet<String>,
     maps: std::collections::BTreeSet<String>,
     sets: std::collections::BTreeSet<String>,
+    closures: std::collections::BTreeMap<String, almide_lang::types::Ty>,
     uses_bytes: bool,
     uses_matrix: bool,
     uses_value: bool,
@@ -52,6 +53,7 @@ pub(crate) fn derive_records(
         results: BTreeSet::new(),
         maps: BTreeSet::new(),
         sets: BTreeSet::new(),
+        closures: Default::default(),
         uses_bytes: false,
         uses_matrix: false,
         uses_value: false,
@@ -146,6 +148,12 @@ impl Derive<'_> {
     fn note_structural(&mut self, t: &almide_lang::types::Ty) {
         use almide_lang::types::constructor::TypeConstructorId;
         use almide_lang::types::Ty;
+        if let Ty::Fn { params, ret, .. } = t {
+            let fields = params.iter().chain([ret.as_ref()])
+                .filter(|t| !matches!(t, Ty::Unit)).cloned().collect();
+            self.decls.entry(tuple_key(t)).or_insert((false, vec![(0, fields)]));
+            self.closures.insert(tuple_key(t), t.clone());
+        }
         if let Ty::Tuple(es) = t {
             self.decls.entry(tuple_key(t)).or_insert((false, vec![(0, es.iter().cloned().collect())]));
             // An all-scalar tuple is a by-value struct too, as an anonymous
@@ -229,7 +237,8 @@ impl Derive<'_> {
     /// An all-scalar aggregate keeps the `Vec<i64>` slot convention.
     /// (A generated carrier or map is never a slot block, whatever its payloads.)
     fn scalar(&self, n: &str) -> bool {
-        !self.anons.contains(n)
+        !self.closures.contains_key(n)
+            && !self.anons.contains(n)
             && !self.options.contains(n)
             && !self.results.contains(n)
             && !self.maps.contains(n)
@@ -257,7 +266,7 @@ impl Derive<'_> {
             Ty::String => Some(Ok(NTy::Str)),
             // Fields use the same closure ABI as parameters and returns.
             // Construction/call validation still checks captures and signatures.
-            t if closure_env_type(t, |p| self.kind(p, set).is_some()) => Some(Ok(NTy::Vec)),
+            Ty::Fn { .. } if set.contains(&tuple_key(t)) => Some(Err(tuple_key(t))),
             // A list of lane scalars, an all-scalar tuple: one i64 slot block.
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_lane_scalar(&a[0]) => Some(Ok(NTy::Vec)),
             Ty::Tuple(es) if es.iter().all(is_lane_scalar) && !set.contains(&tuple_key(t)) => Some(Ok(NTy::Vec)),
@@ -283,7 +292,7 @@ impl Derive<'_> {
             Ty::Named(_, args) if !args.is_empty() && self.scalar(&tuple_key(t)) => Some(Ok(NTy::Vec)),
             // An Option field or element holds its carrier; a Result never
             // does (it has no `Default` to start a struct or a list from).
-            Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Map | TypeConstructorId::Set, _) if set.contains(&tuple_key(t)) => {
+            Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result | TypeConstructorId::Map | TypeConstructorId::Set, _) if set.contains(&tuple_key(t)) => {
                 Some(Err(tuple_key(t)))
             }
             _ => None,
@@ -297,7 +306,8 @@ impl Derive<'_> {
     /// A struct or enum starts from `Default`, which a Result carrier lacks:
     /// only a list, Option, Result or map holds one.
     fn res_free(&self, n: &str, set: &std::collections::BTreeSet<String>) -> bool {
-        self.lists.contains(n)
+        self.closures.contains_key(n)
+            || self.lists.contains(n)
             || self.sets.contains(n)
             || self.options.contains(n)
             || self.results.contains(n)
@@ -321,7 +331,7 @@ impl Derive<'_> {
     fn by_value_edges(&self, set: &std::collections::BTreeSet<String>) -> std::collections::BTreeMap<String, Vec<String>> {
         set.iter()
             .map(|n| {
-                let e = if self.decls[n].0 || self.lists.contains(n) || self.maps.contains(n) || self.sets.contains(n) {
+                let e = if self.closures.contains_key(n) || self.decls[n].0 || self.lists.contains(n) || self.maps.contains(n) || self.sets.contains(n) {
                     Vec::new()
                 } else {
                     self.fields_of(n).iter().filter_map(|t| self.kind(t, set)?.err()).collect()
@@ -385,7 +395,8 @@ impl Derive<'_> {
         snapshot: &std::collections::BTreeMap<String, usize>,
         set: &std::collections::BTreeSet<String>,
     ) -> bool {
-        self.lists.contains(n)
+        self.closures.contains_key(n)
+            || self.lists.contains(n)
             || self.maps.contains(n)
             || self.sets.contains(n)
             || self.options.contains(n)
@@ -414,34 +425,42 @@ impl Derive<'_> {
         rank: &std::collections::BTreeMap<String, usize>,
     ) -> RecDecl {
         let spell = |t: &almide_lang::types::Ty| self.spell(t, set, names);
+        if let Some(almide_lang::types::Ty::Fn { params, ret, .. }) = self.closures.get(n) {
+            let scalar_or_heap = |t: &almide_lang::types::Ty| {
+                if is_f64_scalar(t) { NTy::F64 } else if matches!(t, almide_lang::types::Ty::Unit) { NTy::I64 } else { spell(t) }
+            };
+            let result = (!matches!(ret.as_ref(), almide_lang::types::Ty::Unit)).then(|| scalar_or_heap(ret));
+            return RecDecl { name: n.to_string(), alias: Some("__AlmdClosure"),
+                closure_of: Some((params.iter().map(scalar_or_heap).collect(), result)), ..RecDecl::default() };
+        }
         if n == VALUE_KEY {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None };
         }
         if n == MATRIX_KEY {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None };
         }
         if n == BYTES_KEY {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None };
         }
         let (is_enum, cases) = &self.decls[n];
         let eq_safe = self.exact_eq_decl(n, &mut Default::default());
         if self.maps.contains(n) {
             let (k, v) = (spell(&cases[0].1[0]), spell(&cases[0].1[1]));
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: Some((k, v)), eq_safe: false, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: Some((k, v)), eq_safe: false, set_of: None, closure_of: None, cell_of: None };
         }
         if self.sets.contains(n) {
             return RecDecl { name: n.to_string(), set_of: Some(spell(&cases[0].1[0])), ..RecDecl::default() };
         }
         if self.options.contains(n) {
             let p = spell(&cases[0].1[0]);
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: Some(p), result_of: None, map_of: None, eq_safe: false, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: Some(p), result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None };
         }
         if self.results.contains(n) {
             let (o, e) = (spell(&cases[0].1[0]), spell(&cases[0].1[1]));
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: Some((o, e)), map_of: None, eq_safe: false, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: Some((o, e)), map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None };
         }
         if self.lists.contains(n) {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])), alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])), alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None, closure_of: None, cell_of: None };
         }
         if *is_enum {
             let r = rank[n];
@@ -456,10 +475,10 @@ impl Derive<'_> {
                 option_of: None,
                 result_of: None,
                 map_of: None,
-                eq_safe, set_of: None,
+                eq_safe, set_of: None, closure_of: None, cell_of: None,
             }
         } else {
-            RecDecl { name: n.to_string(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe, set_of: None }
+            RecDecl { name: n.to_string(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe, set_of: None, closure_of: None, cell_of: None }
         }
     }
 }
@@ -501,6 +520,7 @@ pub(crate) fn restore(recs: Vec<RecDecl>) {
 /// `AlmideMatrix`) or a std one (`Vec<u8>`). `None` for a carrier, list or
 /// struct the render spells in full.
 fn alias_target(d: &RecDecl) -> Option<String> {
+    if let Some(t) = d.cell_of { return Some(format!("std::rc::Rc<std::cell::RefCell<Option<{}>>>", owned_ty(t))); }
     if let Some(a) = d.alias {
         return Some(a.to_string());
     }
@@ -588,14 +608,4 @@ pub(crate) fn tuple_fields(i: u16) -> Option<Vec<NTy>> {
     RECS.with(|r| r.borrow().get(i as usize)
         .filter(|d| d.name.starts_with("Tuple(") && d.cases.is_none())
         .map(|d| d.fields.clone()))
-}
-
-/// One closure admission rule for signatures and aggregate fields. Its env
-/// is an owned scalar block; this does not relax capture or call checking.
-pub(crate) fn closure_env_type(t: &almide_lang::types::Ty, admits: impl Fn(&almide_lang::types::Ty) -> bool) -> bool {
-    use almide_lang::types::Ty;
-    let Ty::Fn { params, ret, is_effect } = t else { return false };
-    let scalar = |p: &Ty| matches!(p, Ty::Int | Ty::Bool);
-    (params.iter().all(scalar) && scalar(ret))
-        || (!is_effect && params.iter().all(&admits) && (matches!(**ret, Ty::Unit) || admits(ret)))
 }

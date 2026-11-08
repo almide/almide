@@ -245,7 +245,7 @@ pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
             }
             Op::Prim { kind: PrimKind::LoadHandle | PrimKind::Load { width: 8 }, dst: Some(d), args } if args.len() == 1 => {
                 if let Some(&(r, o)) = at.get(&args[0]) {
-                    if o == i64::from(BLOCK_HEADER) && arms.iter().all(|(t, _)| *t != Some(r)) {
+                    if o == i64::from(BLOCK_HEADER) {
                         reads.insert(*d, r);
                     }
                 }
@@ -470,18 +470,27 @@ impl CarrierCx<'_> {
         }
         let b = var(ad.base);
         let read = if let Some(p) = option_payload(i) {
-            if !has_default(p) {
-                return Some(Err(wall("native: an Option payload read with no Default for its absent case")));
-            }
+            let absent = if has_default(p) { "Default::default()".to_string() }
+                else if self.st.hoisted.get(&d) == Some(&true) {
+                    // Every use is under this unchanged Option's Some tag.
+                    // A nested Result has no Default; its absent-side value
+                    // is an unobserved placeholder, never a fabricated hit.
+                    let Some(value) = crate::native_value_repr::unused_payload(p) else {
+                        return Some(Err(wall("native: no value for an unobserved Option payload")));
+                    };
+                    value
+                } else {
+                    return Some(Err(wall("native: an Option payload without Default read outside its Some guard")));
+                };
             // The last read of an owned carrier's payload moves it out
             // (render_native_slots::movable_loads): nothing reads it again.
             // A by-value match, not `.take()`: `take` writes `None` back
             // through `mem::replace`, whose pointer checks the program's
             // debug-assertion profile keeps (string_index_loop, 1.037x v0).
             if self.st.moves_last.contains(&d) && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_))) {
-                (p, format!("match {b} {{ Some(v) => v, None => Default::default() }}"))
+                (p, format!("match {b} {{ Some(v) => v, None => {absent} }}"))
             } else {
-                (p, format!("match &{b} {{ Some(v) => v.clone(), None => Default::default() }}"))
+                (p, format!("match &{b} {{ Some(v) => v.clone(), None => {absent} }}"))
             }
         } else {
             match self.result_read(d, ad, i, &b)? {

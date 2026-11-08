@@ -77,6 +77,10 @@ fn clear(mut b: Bytes) -> Unit = _
 @intrinsic("almide_rt_bytes_cmp")
 fn compare(a: Bytes, b: Bytes) -> Int = _
 
+// The equality lowering's read-only comparison, also implemented by bytes_core.
+@intrinsic("almide_rt_bytes_eq")
+fn __eq(a: Bytes, b: Bytes) -> Bool = _
+
 /// New Bytes holding a then b.
 @intrinsic("almide_rt_bytes_concat")
 fn __concat(a: Bytes, b: Bytes) -> Bytes = _

@@ -17,9 +17,9 @@ impl LowerCtx {
     /// handle — fnidx in slot 0, captures in slots 1…); the callee invokes it
     /// via `Op::CallIndirect`. A lambda outside the liftable subset is
     /// rejected (an empty deferred closure env would be a silent miscompile).
-    fn lambda_call_arg(&mut self, params: &[(VarId, Ty)], body: &IrExpr) -> Result<CallArg, LowerError> {
+    fn lambda_call_arg(&mut self, params: &[(VarId, Ty)], body: &IrExpr, fn_ty: &Ty) -> Result<CallArg, LowerError> {
         Ok(
-    match self.lift_lambda(params, body) {
+    match self.lift_lambda(params, body, fn_ty) {
         Some(blk) => CallArg::Handle(blk),
         // A lambda OUTSIDE the liftable subset would materialize a
         // deferred `Init::Opaque` (an EMPTY closure env) and pass it to
@@ -109,7 +109,7 @@ impl LowerCtx {
             // it via `Op::CallIndirect` through its function-typed param. This is
             // the call-site half of higher-order self-host (`list.map`/`filter`/
             // `fold`), capturing lambdas included (scalar captures).
-            IrExprKind::Lambda { params, body, .. } => self.lambda_call_arg(params, body)?,
+            IrExprKind::Lambda { params, body, .. } => self.lambda_call_arg(params, body, &a.ty)?,
             // A STRING INTERPOLATION argument (`println("x=${n}")`, `f("hi ${s}")`)
             // over the executable subset — lowered to a fresh owned String via the
             // __str_concat chain, borrowed into the call and dropped at scope end

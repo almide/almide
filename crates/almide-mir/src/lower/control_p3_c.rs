@@ -216,7 +216,7 @@ impl LowerCtx {
             self.ops.push(Op::CallFn {
                 dst: Some(dst),
                 name: name.to_string(),
-                args: vec![CallArg::Handle(lv), CallArg::Handle(rv)],
+                args: vec![self.eq_handle_arg(lv), self.eq_handle_arg(rv)],
                 result: Some(result),
             });
             return Some(Some(dst));

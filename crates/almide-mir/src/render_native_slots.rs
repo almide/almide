@@ -381,24 +381,33 @@ impl BlockTyping<'_, '_> {
     /// way keeps its kind, so a real disagreement still walls at the render.
     fn across_concats(&mut self) {
         let concats = self.concats.clone();
+        let empty = super::empty_list_blocks(self.func);
         for (d, a, b) in concats {
-            let Some(i) = [d, a, b]
-                .iter()
-                .find_map(|v| self.alloc_rec.get(v).copied())
-                .filter(|i| rec::list_elem(*i).is_some())
-            else {
-                continue;
-            };
-            for v in [a, b] {
-                if self.alloc_rec.contains_key(&v) {
-                    continue;
+            let Some(t) = [d, a, b].iter().find_map(|v| match self.kind_of(v) {
+                Some(NTy::VecStr | NTy::VecStrRef) => Some(NTy::VecStr),
+                Some(NTy::Rec(i) | NTy::RecRef(i)) if rec::list_elem(i).is_some() => {
+                    Some(if rec::list_elem(i) == Some(NTy::Str) { NTy::VecStr } else { NTy::Rec(i) })
                 }
-                if self.blocks.iter().any(|(r, _)| *r == v) && self.block_stores(v).is_some_and(|s| s.is_empty()) {
+                _ => None,
+            }) else { continue };
+            for v in [a, b] {
+                if self.alloc_rec.contains_key(&v) { continue; }
+                if (empty.contains(&v) || self.blocks.iter().any(|(r, _)| *r == v))
+                    && self.block_stores(v).is_some_and(|s| s.is_empty()) {
                     self.scalar_blocks.remove(&v);
-                    self.str_lists.remove(&v);
-                    self.alloc_rec.insert(v, i);
+                    if let NTy::Rec(i) = t {
+                        self.str_lists.remove(&v);
+                        self.alloc_rec.insert(v, i);
+                    } else {
+                        self.str_lists.insert(v);
+                        self.known.insert(v, t);
+                    }
                 }
             }
+            // Keep the existing scalar/string-list representation. Generated
+            // lists carry their element declaration through later concats too.
+            if let NTy::Rec(i) = t { self.alloc_rec.entry(d).or_insert(i); }
+            else { self.known.entry(d).or_insert(t); }
         }
     }
 
@@ -543,4 +552,39 @@ fn anon_scalar_record_len(func: &MirFunction, v: ValueId, key: &str) -> Option<u
         Op::ListLit { dst, elems } if *dst == v && !elems.is_empty() => Some(elems.len()),
         _ => None,
     })
+}
+
+/// A borrow-view stores existing handles without consuming them. Native Vec
+/// elements own their values, so those stores copy; an owned constructor's
+/// Store/Consume pair can still move. Any less direct ownership shape copies.
+pub(super) fn borrowed_stores(
+    func: &MirFunction,
+    handles: &BTreeMap<ValueId, ValueId>,
+    bases: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+) -> BTreeSet<(ValueId, ValueId)> {
+    func.ops.iter().enumerate().filter_map(|(at, op)| {
+        let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op else { return None };
+        let [address, value] = args.as_slice() else { return None };
+        let src = handles.get(value)?;
+        let (base, _) = bases.get(address)?;
+        (!matches!(func.ops.get(at + 1), Some(Op::Consume { v }) if v == src)).then_some((*base, *value))
+    }).collect()
+}
+
+#[cfg(test)]
+mod store_ownership_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_borrowed_elements_copy_and_explicit_handoffs_move() {
+        let store = |address, value| Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None,
+            args: vec![ValueId(address), ValueId(value)] };
+        let f = MirFunction { ops: vec![
+            store(10, 20), store(11, 21), Op::Consume { v: ValueId(1) },
+            store(12, 22), Op::Consume { v: ValueId(9) },
+        ], ..Default::default() };
+        let handles = BTreeMap::from([(ValueId(20), ValueId(1)), (ValueId(21), ValueId(1)), (ValueId(22), ValueId(2))]);
+        let bases = BTreeMap::from([(ValueId(10), (ValueId(3), Some(12))), (ValueId(11), (ValueId(3), Some(20))), (ValueId(12), (ValueId(3), Some(28)))]);
+        assert_eq!(borrowed_stores(&f, &handles, &bases), BTreeSet::from([(ValueId(3), ValueId(20)), (ValueId(3), ValueId(22))]));
+    }
 }

@@ -185,6 +185,8 @@ fn render_native_fn_sig(
             // A MOVE param (#4006 class P) takes the caller's value itself.
             let owned = func.owned_params.contains(&p.value);
             let spelled = match t {
+                t if crate::render_native_rec::is_closure(t) && func.name.starts_with("__lambda_")
+                    && func.params.first().is_some_and(|first| first.value == p.value) => "&impl __AlmdEnv".to_string(),
                 NTy::Str if owned => "AlmideString".to_string(),
                 NTy::Vec if owned => "Vec<i64>".to_string(),
                 NTy::VecStr if owned => "Vec<AlmideString>".to_string(),

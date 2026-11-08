@@ -264,9 +264,10 @@ fn push_closure_dispatch_tables(
         arities.entry(arity).or_default().push((idx, name));
     }
     for (arity, fns) in arities {
+        let env_ty = crate::render_native_closure::dispatch_env(sigs, fns[0].1);
         let params: String = (0..arity).map(|i| format!(", a{i}: i64")).collect();
         out.push_str(&format!(
-            "fn __almd_ci_{arity}(idx: i64, env: &[i64]{params}) -> i64 {{\n    match idx {{\n"
+            "fn __almd_ci_{arity}(idx: i64, env: {env_ty}{params}) -> i64 {{\n    match idx {{\n"
         ));
         for (idx, name) in fns {
             // This table serves the MIR scalar ABI: every argument/result
@@ -347,6 +348,7 @@ pub(crate) fn refused_native_bodies(
 }
 
 fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> Result<String, LowerError> {
+    crate::render_native_rec::reset_capture_kinds();
     let user_fns: BTreeMap<&str, &MirFunction> = prog
         .functions
         .iter()
@@ -416,6 +418,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         out.push_str(&format!("}}\n{RT_MOD_END}pub use {RT_MOD}::*;\n\n"));
     }
     out.push_str(&crate::render_native_rec::struct_defs());
+    out.push_str(&crate::render_native_rec::closure_env_defs());
     for s in glue {
         out.push_str(s);
         out.push_str("\n\n");
