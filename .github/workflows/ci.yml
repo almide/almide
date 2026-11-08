@@ -22,6 +22,7 @@ name: CI
 # Running the suite on a README edit costs runner minutes. Getting the guess
 # wrong costs a gate. The trade is not close.
 on:
+  workflow_dispatch:
   push:
     branches: [main, develop]
   pull_request:
