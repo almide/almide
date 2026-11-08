@@ -11,9 +11,8 @@
 //! and the closure's word otherwise, plus `NAME` itself, a wrapper passing
 //! `-1` for every key, which every other call site keeps calling. A call
 //! whose closure argument is a block the caller built from a lifted lambda
-//! (`native_hof::lambda_of`), or the caller's own keyed param, names the
-//! specialization with that lambda's table index (or the caller's own key),
-//! and the dispatch folds to the direct call.
+//! (`native_hof::lambda_of`) names the specialization with that lambda's
+//! table index, and the dispatch folds to the direct call.
 //!
 //! Sound because the key equals the word it replaces: a lambda-built block is
 //! defined once, from a `FuncRef` defined once, and the keyed param is never
@@ -23,8 +22,7 @@
 //!
 //! A param is keyed when it is never rebound and a `CallIndirect` of the
 //! function dispatches on its first word (`ListGetScalar` at the constant
-//! index 0) with it as the env; a keyed function handing its keyed param back
-//! to itself (a recursion) passes its own key on. Lifted lambdas
+//! index 0) with it as the env. Lifted lambdas
 //! (dispatch-table arms, which call by name) and narrow-ABI functions keep
 //! their one shape.
 
@@ -224,13 +222,8 @@ pub(crate) fn call_head(name: &str, args: &[CallArg], callee: &MirFunction) -> O
                 Some(CallArg::Handle(v)) => Some(*v),
                 _ => None,
             });
-            let key = arg.and_then(|v| {
-                if let Some(k) = CURRENT.with(|c| c.borrow().params.get(&v).copied()) {
-                    return Some(format!("K{k}"));
-                }
-                let lambda = crate::native_hof::lambda_of(v)?;
-                PROGRAM.with(|p| p.borrow().lambdas.get(&lambda).map(|i| i.to_string()))
-            });
+            let lambda = arg.and_then(crate::native_hof::lambda_of);
+            let key = lambda.and_then(|l| PROGRAM.with(|p| p.borrow().lambdas.get(&l).map(|i| i.to_string())));
             known |= key.is_some();
             format!("{{ {} }}", key.unwrap_or_else(|| "-1".to_string()))
         })
@@ -245,11 +238,9 @@ pub(crate) fn specialize(func: &MirFunction, rendered: String) -> Result<String,
     let Some(ks) = PROGRAM.with(|p| p.borrow().keyed.get(&func.name).cloned()) else { return Ok(rendered) };
     let m = crate::render_native::mangle(&func.name);
     let head = format!("fn {m}(");
-    let wall = |s: &str| crate::render_native::wall(format!("native: keyed dispatch of `{}`: {s}", func.name));
-    if !rendered.starts_with(&head) {
-        return Err(wall("the rendered head is not found"));
-    }
-    let sig_end = rendered.find(" {\n").ok_or_else(|| wall("the rendered signature is not found"))?;
+    let (true, Some(sig_end)) = (rendered.starts_with(&head), rendered.find(" {\n")) else {
+        return Err(crate::render_native::wall(format!("native: keyed dispatch of `{}`: the rendered signature is not found", func.name)));
+    };
     let consts: Vec<String> = (0..ks.len()).map(|i| format!("const K{i}: i64")).collect();
     let body = rendered.replacen(&head, &format!("fn {m}__k<{}>(", consts.join(", ")), 1);
     // The wrapper: the same signature (no param is rebound in it), every key
