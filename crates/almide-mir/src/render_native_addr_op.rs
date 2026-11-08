@@ -404,8 +404,9 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
         return Ok(true);
     }
     tys.insert(*d, f);
-    // The last read of the slot of an owned record moves the value out.
-    if st.moves.contains(d) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) {
+    // The last read of the slot of an owned record moves the value out
+    // (a kind with a `Default` to leave in the slot).
+    if st.moves.contains(d) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) && crate::render_native_rec::has_default(f) {
         line!(
             "let mut {}: {} = std::mem::take(&mut {}.f{k});",
             var(*d),
