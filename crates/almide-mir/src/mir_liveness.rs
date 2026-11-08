@@ -122,16 +122,12 @@ fn live_in(func: &MirFunction, succ: &[Vec<usize>], src: ValueId) -> Vec<bool> {
         let releases = crate::render_native_move::bookkeeping(op)
             && !matches!(op, Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. })
             && vs == [src];
-        let mut reads = Vec::new();
-        crate::mir_ops::op_reads(op, &mut reads);
-        // A fresh definition of the value ends the one before it: a value
-        // defined in a loop body (an `if`'s merge, a call's result) is a new
-        // one each iteration, never read across the back edge.
-        let redefines = crate::mir_ops::defined_value(op) == Some(src) && !matches!(op, Op::SetLocal { .. }) && !reads.contains(&src);
-        if releases || redefines || matches!(op, Op::SetLocal { local, src: s } if *local == src && *s != src) {
+        if releases || matches!(op, Op::SetLocal { local, src: s } if *local == src && *s != src) {
             kills[i] = true;
             continue;
         }
+        let mut reads = Vec::new();
+        crate::mir_ops::op_reads(op, &mut reads);
         uses[i] = reads.iter().any(|r| refs.contains(r)) || (names_src && crate::mir_ops::defined_value(op) != Some(src));
     }
     // live_in[i] = uses[i] || (!kills[i] && any live_in[successor]).
