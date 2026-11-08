@@ -28,8 +28,9 @@ X
 echo "=== $v"; almide run /tmp/m_$v.almd; almide run /tmp/m_$v.almd --target wasm
 touch /tmp/marker; sleep 1
 almide build /tmp/m_$v.almd -o /tmp/mb > /dev/null 2>&1
-f=$(find "${TMPDIR:-/tmp}" /tmp -name '*.rs' -newer /tmp/marker 2>/dev/null | xargs grep -l "__almd_charge" 2>/dev/null | head -1)
-echo "--- $f"; [ -n "$f" ] && cp "$f" /tmp/cired-out-m_$v.rs && grep -n "^fn \|^pub fn \|__almd_charge\|almide_rt_list_map\|almide_rt_list_sum" "$f" | grep -v "^\s*//" | head -60
+find "${TMPDIR:-/tmp}" /tmp -name 'main.rs' -newer /tmp/marker 2>/dev/null | head -3
+f=$(find "${TMPDIR:-/tmp}" /tmp -name 'main.rs' -newer /tmp/marker 2>/dev/null | head -1)
+echo "--- $f"; [ -n "$f" ] && cp "$f" /tmp/cired-out-m_$v.rs
 done
 echo "=== suite"
-cargo test --release --test fan_region_floor_test --test fan_meter_splice_test --test runtime_spelling_hygiene_test --test counted_index_chain_test --test ord_record_variant_test --test ord_recursive_test 2>&1 | grep -E "^test .*(ok|FAILED)$|panicked|left:|right:" -A2 | cut -c1-400 | head -80
+cargo test --release --no-fail-fast --test fan_region_floor_test --test fan_meter_splice_test --test runtime_spelling_hygiene_test --test counted_index_chain_test --test ord_record_variant_test --test ord_recursive_test 2>&1 | grep -E "^test .*(ok|FAILED)$|panicked|left:|right:" -A2 | cut -c1-400 | head -150
