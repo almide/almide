@@ -53,6 +53,8 @@ struct Current {
     emptied: BTreeSet<ValueId>,
     /// The shared-cell borrows open: (the op of their last read, the guard).
     guards: Vec<(usize, String)>,
+    /// The shared-cell reads rendered as such a borrow.
+    in_place: BTreeSet<ValueId>,
     /// Its borrow-join arms (`borrow_join`), for the liveness reads.
     arms: BTreeSet<ValueId>,
 }
@@ -163,7 +165,7 @@ pub(crate) fn begin_fn(func: &MirFunction, arms: &BTreeSet<ValueId>) {
     } else {
         dispatch_reads(func).into_iter().filter_map(|(r, p)| params.get(&p).map(|k| (r, *k))).collect()
     };
-    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads, func: Some(func.clone()), emptied: BTreeSet::new(), guards: Vec::new(), arms: arms.clone() });
+    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads, func: Some(func.clone()), emptied: BTreeSet::new(), guards: Vec::new(), in_place: BTreeSet::new(), arms: arms.clone() });
 }
 
 /// The shared-cell read `d` of `cell` takes the payload out
@@ -192,8 +194,18 @@ pub(crate) fn cell_read_borrows(d: ValueId, cell: ValueId, tys: &BTreeMap<ValueI
             let at = load_at(func, d)?;
             crate::native_cell_window::borrow_window(func, at, (d, cell), tys, &program_fn)
         });
-        last.map(|l| c.guards.push((l, guard))).is_some()
+        last.map(|l| {
+            c.guards.push((l, guard));
+            c.in_place.insert(d);
+        }).is_some()
     })
+}
+
+/// `v` is a value the MIR owns that the render reads in place: a shared
+/// cell's borrowed read, or a reference copy of a borrow-only read
+/// (`render_native_borrow_read::ref_dup`). Its release only ends the borrow.
+pub(crate) fn in_place(v: ValueId) -> bool {
+    CURRENT.with(|c| c.borrow().in_place.contains(&v)) || crate::render_native_borrow_read::ref_dup(v)
 }
 
 /// The cell guards whose window ends at or before op `i`, closed now.
