@@ -38,6 +38,9 @@ struct Window<'a> {
     /// The blocks the window made (and the read itself): none is a cell or
     /// a closure.
     fresh: BTreeSet<ValueId>,
+    /// The kinds of the fresh values known here (the read's payload, its
+    /// copies): a read out of one is fresh when its element kind is plain.
+    kinds: BTreeMap<ValueId, NTy>,
     cell: ValueId,
     tys: &'a BTreeMap<ValueId, NTy>,
     program_fn: &'a dyn Fn(&str) -> bool,
@@ -59,11 +62,30 @@ impl Window<'_> {
                 name != "__mg_take" && !(self.program_fn)(name) && args.iter().all(|a| !matches!(a, CallArg::Handle(v) if !self.plain(v)))
             }
             Op::Prim { kind: PrimKind::Handle, .. } | Op::IntBinOp { .. } | Op::ConstInt { .. } => true,
-            Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle | PrimKind::Store { .. } | PrimKind::ElemAddr, args, .. } => {
+            Op::Prim { kind: PrimKind::LoadHandle, args, dst } => {
+                let ok = args.first().is_some_and(|a| self.block_ok(a));
+                // An element of a list of a plain kind read out of a known block.
+                let elem = args.first().and_then(|a| self.root.get(a)).and_then(|b| self.kinds.get(b)).and_then(|t| match t {
+                    NTy::Rec(i) | NTy::RecRef(i) => crate::render_native_rec::list_elem(*i),
+                    _ => None,
+                });
+                if let (true, Some(e), Some(x)) = (ok, elem, dst) {
+                    if !is_cell(e) && !crate::render_native_rec::is_closure(e) {
+                        self.fresh.insert(*x);
+                    }
+                }
+                ok
+            }
+            Op::Prim { kind: PrimKind::Load { .. } | PrimKind::Store { .. } | PrimKind::ElemAddr, args, .. } => {
                 args.first().is_some_and(|a| self.block_ok(a))
             }
             Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => *list != self.cell && self.plain(list),
-            Op::Dup { dst, src } => self.plain(src) && self.fresh.insert(*dst),
+            Op::Dup { dst, src } => {
+                if let Some(t) = self.kinds.get(src).copied() {
+                    self.kinds.insert(*dst, t);
+                }
+                self.plain(src) && self.fresh.insert(*dst)
+            }
             Op::Alloc { dst, .. } => self.fresh.insert(*dst),
             Op::ListLit { dst, elems } => !elems.iter().any(|e| self.funcrefs.contains(e)) && self.fresh.insert(*dst),
             op => crate::render_native_move::bookkeeping(op),
@@ -71,12 +93,12 @@ impl Window<'_> {
     }
 }
 
-fn window<'a>(func: &MirFunction, (d, cell): (ValueId, ValueId), tys: &'a BTreeMap<ValueId, NTy>, program_fn: &'a dyn Fn(&str) -> bool) -> Window<'a> {
+fn window<'a>(func: &MirFunction, (d, cell, kind): (ValueId, ValueId, NTy), tys: &'a BTreeMap<ValueId, NTy>, program_fn: &'a dyn Fn(&str) -> bool) -> Window<'a> {
     let funcrefs = func.ops.iter().filter_map(|op| match op {
         Op::FuncRef { dst, .. } => Some(*dst),
         _ => None,
     }).collect();
-    Window { root: crate::render_native_borrow_read::roots(func), funcrefs, fresh: BTreeSet::from([d]), cell, tys, program_fn }
+    Window { root: crate::render_native_borrow_read::roots(func), funcrefs, fresh: BTreeSet::from([d]), kinds: BTreeMap::from([(d, kind)]), cell, tys, program_fn }
 }
 
 /// The `__mg_take` result that ends the window of the cell read `d` (op `at`
@@ -84,11 +106,11 @@ fn window<'a>(func: &MirFunction, (d, cell): (ValueId, ValueId), tys: &'a BTreeM
 pub(crate) fn take_window(
     func: &MirFunction,
     at: usize,
-    (d, cell): (ValueId, ValueId),
+    (d, cell, kind): (ValueId, ValueId, NTy),
     tys: &BTreeMap<ValueId, NTy>,
     program_fn: &dyn Fn(&str) -> bool,
 ) -> Option<ValueId> {
-    let mut w = window(func, (d, cell), tys, program_fn);
+    let mut w = window(func, (d, cell, kind), tys, program_fn);
     for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
         if let Op::CallFn { name, args, dst, .. } = op {
             if name == "__mg_take" {
@@ -110,12 +132,12 @@ pub(crate) fn take_window(
 pub(crate) fn borrow_window(
     func: &MirFunction,
     at: usize,
-    (d, cell): (ValueId, ValueId),
+    (d, cell, kind): (ValueId, ValueId, NTy),
     tys: &BTreeMap<ValueId, NTy>,
     program_fn: &dyn Fn(&str) -> bool,
 ) -> Option<usize> {
     let (last, dups) = crate::render_native_borrow_read::borrow_span(func, at, d);
-    let mut w = window(func, (d, cell), tys, program_fn);
+    let mut w = window(func, (d, cell, kind), tys, program_fn);
     let returned = func.ret.is_some_and(|r| r == d || dups.iter().any(|(_, v)| *v == r));
     (!returned && func.ops[at + 1..=last].iter().all(|op| w.admits(op))).then_some(last)
 }

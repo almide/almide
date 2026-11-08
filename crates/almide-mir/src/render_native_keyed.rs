@@ -171,13 +171,13 @@ pub(crate) fn begin_fn(func: &MirFunction, arms: &BTreeSet<ValueId>) {
 /// The shared-cell read `d` of `cell` takes the payload out
 /// (`native_cell_window`); the take ending its window is then noted as
 /// finding the cell emptied.
-pub(crate) fn cell_read_takes(d: ValueId, cell: ValueId, tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> bool {
+pub(crate) fn cell_read_takes(d: ValueId, (cell, kind): (ValueId, crate::render_native::NTy), tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> bool {
     let program_fn = |n: &str| PROGRAM.with(|p| p.borrow().fns.contains(n));
     CURRENT.with(|c| {
         let mut c = c.borrow_mut();
         let end = c.func.as_ref().and_then(|func| {
             let at = load_at(func, d)?;
-            crate::native_cell_window::take_window(func, at, (d, cell), tys, &program_fn)
+            crate::native_cell_window::take_window(func, at, (d, cell, kind), tys, &program_fn)
         });
         end.is_some_and(|x| c.emptied.insert(x))
     })
@@ -186,13 +186,13 @@ pub(crate) fn cell_read_takes(d: ValueId, cell: ValueId, tys: &BTreeMap<ValueId,
 /// The shared-cell read `d` of `cell` borrows the payload in place
 /// (`native_cell_window::borrow_window`) through the guard `guard`, released
 /// once the render is past the window's last read ([`guards_through`]).
-pub(crate) fn cell_read_borrows(d: ValueId, cell: ValueId, tys: &BTreeMap<ValueId, crate::render_native::NTy>, guard: String) -> bool {
+pub(crate) fn cell_read_borrows(d: ValueId, (cell, kind): (ValueId, crate::render_native::NTy), tys: &BTreeMap<ValueId, crate::render_native::NTy>, guard: String) -> bool {
     let program_fn = |n: &str| PROGRAM.with(|p| p.borrow().fns.contains(n));
     CURRENT.with(|c| {
         let mut c = c.borrow_mut();
         let last = c.func.as_ref().and_then(|func| {
             let at = load_at(func, d)?;
-            crate::native_cell_window::borrow_window(func, at, (d, cell), tys, &program_fn)
+            crate::native_cell_window::borrow_window(func, at, (d, cell, kind), tys, &program_fn)
         });
         last.map(|l| {
             c.guards.push((l, guard));
