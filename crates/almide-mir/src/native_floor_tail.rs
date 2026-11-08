@@ -227,7 +227,7 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
         FloorParam::Map(by_ref) => map_arg(cx, *by_ref, code, got, dying_here)?,
         FloorParam::MapKey(by_ref) | FloorParam::MapVal(by_ref) => map_entry_arg(cx, p, *by_ref, code, got, dying_here)?,
         FloorParam::MapPairs => map_pairs_arg(cx, code, got)?,
-        FloorParam::Value(by_ref) => value_arg(cx, *by_ref, code, got)?,
+        FloorParam::Value(by_ref) => value_arg(cx, *by_ref, code, got, dying_here)?,
         FloorParam::Set(_) | FloorParam::SetElem(_) | FloorParam::Matrix(_) | FloorParam::BytesMut => runtime_arg(cx, p, code, got, dying_here)?,
         FloorParam::Bytes => match got {
             NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&{code}"),
@@ -351,9 +351,13 @@ fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerErro
 }
 
 /// A `Value` param's argument.
-fn value_arg(cx: &CallCx, by_ref: bool, code: &str, got: &NTy) -> Result<String, LowerError> {
+fn value_arg(cx: &CallCx, by_ref: bool, code: &str, got: &NTy, dying_here: bool) -> Result<String, LowerError> {
     Ok(match (got, by_ref) {
         (NTy::Rec(_), true) if crate::render_native_rec::is_value(*got) => format!("&{code}"),
+        // The caller's Value, not read again: v0's move (#4006, no-perf-loss).
+        (NTy::Rec(_), false) if dying_here && crate::render_native_rec::is_value(*got) => {
+            crate::render_native_move::take_expr(code)
+        }
         (NTy::RecRef(_), true) if crate::render_native_rec::is_value(*got) => code.to_string(),
         (NTy::Rec(_) | NTy::RecRef(_), false) if crate::render_native_rec::is_value(*got) => format!("{code}.clone()"),
         _ => return Err((cx.mismatch)()),

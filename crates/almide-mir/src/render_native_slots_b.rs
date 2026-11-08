@@ -67,16 +67,24 @@ pub(super) fn movable_loads(
         // Inside a loop the block must be born in the same iteration (defined
         // after the innermost loop's start, never rebound): a block from
         // before the loop would be read again by the next iteration.
+        // Or the block is a loop slot every path from the read to the back
+        // edge rebinds (`b = { ...b, f: g(b.f) }`): the next iteration reads
+        // the new block, never this one's slot (#4006, no-perf-loss).
+        // The scan then stops at that rebind: what follows reads the new block.
+        let mut rebound = false;
+        let mut end = func.ops.len();
         if let Some(&ls) = loops.last() {
             let fresh = def_at.get(&b).is_some_and(|d| *d > ls)
                 && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if *local == b));
             if !fresh {
-                continue;
+                let Some(at) = rebound_in_block(func, i, b) else { continue };
+                rebound = true;
+                end = at;
             }
         }
         let mut movable = true;
         let mut other_slot = false;
-        for later in &func.ops[i + 1..] {
+        for later in &func.ops[i + 1..end] {
             let fine = match later {
                 Op::Drop { v } | Op::DropListStr { v } | Op::DropVariant { v, .. } | Op::DropWrapperRec { v, .. } => *v == b,
                 Op::Prim { kind: PrimKind::Handle, args, .. } => args.first() == Some(&b),
@@ -99,12 +107,31 @@ pub(super) fn movable_loads(
         }
         if movable {
             out.insert(*d);
-            if !other_slot {
+            if !other_slot && !rebound {
                 last.insert(*d);
             }
         }
     }
     (out, last)
+}
+
+/// The rebind of `b` from another value that follows the op at `at` in its
+/// own block (not inside a nested `if` or loop, before the block ends), with
+/// no exit from the loop or the fn on the way: every path from `at` passes
+/// it before anything after it runs.
+fn rebound_in_block(func: &MirFunction, at: usize, b: ValueId) -> Option<usize> {
+    let mut depth = 0usize;
+    for (k, op) in func.ops.iter().enumerate().skip(at + 1) {
+        match op {
+            Op::IfThen { .. } | Op::LoopStart => depth += 1,
+            Op::EndIf { .. } | Op::LoopEnd | Op::Else { .. } if depth == 0 => return None,
+            Op::EndIf { .. } | Op::LoopEnd => depth -= 1,
+            Op::Return { .. } | Op::LoopBreakUnless { .. } => return None,
+            Op::SetLocal { local, src } if depth == 0 && *local == b => return (*src != b).then_some(k),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// The field count of a generated plain struct (not a list, an enum or a carrier).
