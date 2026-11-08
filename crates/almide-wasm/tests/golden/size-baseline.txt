@@ -636,7 +636,7 @@
 803	spec/wasm_cross/native_unused_map_binding.almd
 5265	spec/wasm_cross/native_wall_shapes.almd
 10786	spec/wasm_cross/negative_count_rule.almd
-4787	spec/wasm_cross/negative_float_literal_sized.almd
+5234	spec/wasm_cross/negative_float_literal_sized.almd
 8857	spec/wasm_cross/negative_offset_and_width_totality.almd
 3808	spec/wasm_cross/nested_box_guard_binder.almd
 2736	spec/wasm_cross/nested_ctor_pattern.almd
