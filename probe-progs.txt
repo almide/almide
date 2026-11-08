@@ -1,8 +1,3 @@
-spec/wasm_cross/map_index_order.almd
-spec/wasm_cross/enumerate_unnameable_element.almd
-spec/wasm_cross/err_text_operand_escape_families.almd
+research/benchmark/perf/v1-shapes/float_interp_hole.almd
 spec/wasm_cross/float_interp_forms.almd
-spec/wasm_cross/path_extension_hidden.almd
-spec/wasm_cross/heap_result_if_match_arm_frame.almd
-spec/wasm_cross/edge_int_boundaries.almd
-spec/wasm_cross/gzip_inflate_members.almd
+spec/wasm_cross/float_clamp_negative_zero.almd
