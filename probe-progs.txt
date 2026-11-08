@@ -1,0 +1,8 @@
+spec/wasm_cross/effect_slot_pure_fn_param.almd
+spec/wasm_cross/assign_concat_operand_release.almd
+spec/wasm_cross/mut_param_loop_stays_in_place.almd
+spec/wasm_cross/assign_nested_mut_writeback_release.almd
+spec/wasm_cross/assign_mut_callee_consumes_var.almd
+spec/wasm_cross/field_and_interp_accumulator.almd
+spec/wasm_cross/map_core_trio.almd
+spec/wasm_cross/range_head_fold_edges.almd
