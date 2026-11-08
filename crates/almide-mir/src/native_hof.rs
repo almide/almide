@@ -329,6 +329,9 @@ struct State {
     /// The closure blocks only served sites read (`elidable`): their slots
     /// reach the call as its stack env, so the block itself is not built.
     elided: BTreeSet<(String, ValueId)>,
+    /// The lambdas a served `list.flat_map` calls through their array twin
+    /// (`array_twins`): each one's literal arity and result value.
+    array_twins: BTreeMap<String, (usize, ValueId)>,
 }
 
 thread_local! {
@@ -653,6 +656,9 @@ fn plan(
         bind_param(&mut env, &hof.ret, clo::owned_nty(ret))?;
     }
     let ret = kind_of(&env, &hof.ret)?;
+    if hof.symbol == "almide_rt_list_flat_map" && twin == hof.twin {
+        twin = flat_map_array_route(call, (&origins, user_fns), &mut rendered, &mut side).unwrap_or(twin);
+    }
     let expr = format!("{}({})", twin, rendered.join(", "));
     let expr = runtime_result(&env, &hof.ret, &expr)?;
     Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims, side.reads)))
@@ -666,6 +672,78 @@ fn handed_over<'h>(hof: &'h Hof, k: usize, a: &CallArg, t: NTy) -> Option<&'h st
     let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
     let owned = matches!(t, NTy::Vec | NTy::VecStr | NTy::Rec(_)) && crate::render_native::owned_nty(t) == t;
     (dying && owned && !hof.mutable.iter().any(|m| *m) && hof.params[*param].1).then_some(name.as_str())
+}
+
+/// A `list.flat_map` whose callback is a lambda ending in a list literal of
+/// at most eight elements runs as the runtime's array twin
+/// (`almide_rt_list_flat_map_arr`, #1337), calling the lambda's array twin
+/// (`array_twins`): the result is sized once and no element builds a Vec of
+/// its own, where the Vec route allocated and freed one per element. The
+/// standard codegen takes the same route (`lower_flat_map_arrays`).
+fn flat_map_array_route(
+    call: &crate::render_native::NativeCall<'_>,
+    (origins, user_fns): (&BTreeMap<ValueId, (String, Vec<ValueId>)>, &BTreeMap<&str, &MirFunction>),
+    rendered: &mut [String],
+    side: &mut FnArgOut,
+) -> Option<&'static str> {
+    const ARR: &str = "almide_rt_list_flat_map_arr";
+    let (lambda, n, lit) = call.args.iter().find_map(|a| fixed_literal_callback(a, origins, user_fns))?;
+    let items = crate::native_floor::runtime_items(ARR)?;
+    let head = format!("{}(", crate::render_native::mangle(&lambda));
+    let k = rendered.iter().position(|r| r.contains(&head) && r.contains("-> Vec<i64>"))?;
+    rendered[k] = rendered[k]
+        .replacen(&head, &format!("{}__arr(", crate::render_native::mangle(&lambda)), 1)
+        .replacen("-> Vec<i64>", &format!("-> [i64; {n}]"), 1);
+    side.shims.extend(items);
+    STATE.with(|s| s.borrow_mut().array_twins.insert(lambda, (n, lit)));
+    Some(ARR)
+}
+
+/// A callback argument naming a lambda whose result is one list literal of
+/// at most eight elements that nothing else reads: the lambda, the arity and
+/// the literal.
+fn fixed_literal_callback(
+    a: &CallArg,
+    origins: &BTreeMap<ValueId, (String, Vec<ValueId>)>,
+    user_fns: &BTreeMap<&str, &MirFunction>,
+) -> Option<(String, usize, ValueId)> {
+    let (CallArg::Handle(v) | CallArg::Scalar(v)) = a else { return None };
+    let (name, _) = origins.get(v)?;
+    let l = user_fns.get(name.as_str())?;
+    let ret = l.ret?;
+    let n = l.ops.iter().find_map(|op| match op {
+        Op::ListLit { dst, elems } if *dst == ret && (1..=8).contains(&elems.len()) => Some(elems.len()),
+        _ => None,
+    })?;
+    let mut reads = Vec::new();
+    for op in &l.ops {
+        crate::mir_ops::op_reads(op, &mut reads);
+    }
+    (!reads.contains(&ret)).then(|| (name.clone(), n, ret))
+}
+
+/// The array twins [`flat_map_array_route`] called, rendered from each
+/// lambda's own text (`texts`, by fn name): the same body returning
+/// `[i64; N]`, its literal an array. Taken once per render.
+pub(crate) fn array_twins(texts: &BTreeMap<String, String>) -> Result<String, LowerError> {
+    let twins = STATE.with(|s| std::mem::take(&mut s.borrow_mut().array_twins));
+    let mut out = String::new();
+    for (lambda, (n, lit)) in twins {
+        let mangled = crate::render_native::mangle(&lambda);
+        let text = texts.get(&lambda).ok_or_else(|| wall(format!("native: no rendered body for the array twin of `{lambda}`")))?;
+        let lit_line = format!("let mut {}: Vec<i64> = vec![", var(lit));
+        let (head, ret) = (format!("fn {mangled}("), ") -> Vec<i64> {");
+        if !(text.contains(&head) && text.contains(ret) && text.contains(&lit_line)) {
+            return Err(wall(format!("native: `{lambda}` does not render as its array twin expects")));
+        }
+        let twin = text
+            .replacen(&head, &format!("fn {mangled}__arr("), 1)
+            .replacen(ret, &format!(") -> [i64; {n}] {{"), 1)
+            .replacen(&lit_line, &format!("let mut {}: [i64; {n}] = [", var(lit)), 1);
+        out.push_str(&twin);
+        out.push('\n');
+    }
+    Ok(out)
 }
 
 /// [`plan`]'s rendering of the plain value argument `k` of the call at op
