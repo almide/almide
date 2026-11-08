@@ -7,6 +7,11 @@ for v in append combinator; do
   almide build $D/listbuild_$v.almd -o /tmp/lb_$v >/dev/null 2>&1
   echo "=== $v"; /tmp/lb_$v 12
   valgrind --tool=callgrind --callgrind-out-file=/tmp/cg_$v.out /tmp/lb_$v 20 2>&1 | grep -E "Collected|refs"
+  head -c 300 /tmp/cired-out-v1-$v.rs; echo
   callgrind_annotate /tmp/cg_$v.out 2>/dev/null | head -40 > /tmp/cired-out-cg-$v.txt
   head -30 /tmp/cired-out-cg-$v.txt | cut -c1-200
 done
+echo "=== native floor + perf gate pieces"
+curl -sSfL https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz | tar -xJ -C /tmp; export PATH=/tmp/wasmtime-v50.0.1-x86_64-linux:$PATH
+cargo test --release --test native_verified_floor_test 2>&1 | grep -E "test result|panicked" -A3 | head -20
+cargo test --release -p almide-mir --lib 2>&1 | grep -E "test result|FAILED" | head
