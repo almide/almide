@@ -403,23 +403,18 @@ impl Modes<'_> {
     }
 
     /// The modes `op` hands its arguments over in: a call to a program
-    /// function with a move param, or a closure call every possible callee of
-    /// which declares the same modes, one of them a move.
+    /// function with a move param, or a closure call whose one possible
+    /// callee has one. A closure call that may reach several callees lends:
+    /// the native-calls witness rows the site once per possible callee and
+    /// the checker binds each row's move to its own mark, while the site
+    /// makes one move (proofs/NativeCalls.v `marks_ok`).
     fn of(&self, op: &Op) -> Option<Vec<bool>> {
         match op {
             Op::CallFn { name, .. } => self.by_name.get(name.as_str()).cloned(),
-            Op::CallIndirect { args, .. } => {
-                let mut modes: Option<Vec<bool>> = None;
-                for callee in self.possible(args) {
-                    let m = self.by_name.get(callee).cloned().unwrap_or_else(|| vec![false; args.len()]);
-                    match &modes {
-                        None => modes = Some(m),
-                        Some(prev) if *prev == m => {}
-                        Some(_) => return None,
-                    }
-                }
-                modes.filter(|m| m.iter().any(|x| *x))
-            }
+            Op::CallIndirect { args, .. } => match self.possible(args).collect::<Vec<_>>().as_slice() {
+                [one] => self.by_name.get(*one).cloned(),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -429,16 +424,15 @@ impl Modes<'_> {
         self.of(op).is_some_and(|m| m.get(k).copied().unwrap_or(false))
     }
 
-    /// The closure-table entries of a closure call whose possible callees
-    /// declare different modes: the native-calls witness rows the site
-    /// against each of them in one mode, which the checker refuses.
+    /// The closure-table entries with a move param that a closure call of
+    /// several possible callees may reach: that site lends ([`Self::of`]),
+    /// and the checker refuses a lending row against a move param.
     fn disagreeing(&self, functions: &[MirFunction]) -> BTreeSet<String> {
         let mut out = BTreeSet::new();
         for op in functions.iter().flat_map(|f| f.ops.iter()) {
             let Op::CallIndirect { args, .. } = op else { continue };
             let callees: Vec<&str> = self.possible(args).collect();
-            let mode = |c: &str| self.by_name.get(c).cloned().unwrap_or_else(|| vec![false; args.len()]);
-            if callees.iter().any(|c| mode(c) != mode(callees[0])) {
+            if callees.len() > 1 {
                 out.extend(callees.iter().filter(|c| self.by_name.contains_key(**c)).map(|c| c.to_string()));
             }
         }
@@ -452,12 +446,12 @@ impl Modes<'_> {
 /// the borrow convention.
 ///
 /// A lifted lambda (a declared closure signature, `crate::lambda_sigs`) is
-/// reached only through closure calls: the `CallIndirect` sites, whose modes
-/// are those its possible callees agree on, and the runtime callback
-/// adapters, which hand over the values the runtime gives them. Its user
-/// params take part like any other function's; its env (param 0) is always
-/// lent. A lambda whose possible callees at some closure call disagree on a
-/// mode keeps borrowing, and the modes are solved again.
+/// reached only through closure calls: the `CallIndirect` sites whose one
+/// possible callee it is, and the runtime callback adapters, which hand over
+/// the values the runtime gives them. Its user params take part like any
+/// other function's; its env (param 0) is always lent. A lambda that a
+/// closure call of several possible callees may reach keeps borrowing, and
+/// the modes are solved again.
 pub(crate) fn rewrite(functions: &mut [MirFunction]) {
     if crate::render_native_move::drill_no_moves() {
         return;
