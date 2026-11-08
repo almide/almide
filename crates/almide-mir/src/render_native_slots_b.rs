@@ -110,6 +110,12 @@ pub(super) fn movable_loads(
                 end = at;
             }
         }
+        // A scan that runs to the end of the fn: the fn's result is read whole
+        // after its last op (a `mut` param's write-back included), so no slot
+        // of it may be taken.
+        if !rebound && func.ret == Some(b) {
+            continue;
+        }
         let mut movable = true;
         let mut other_slot = false;
         for later in &func.ops[i + 1..end] {

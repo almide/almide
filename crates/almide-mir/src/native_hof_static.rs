@@ -80,7 +80,7 @@ mod static_callback_tests {
     fn forwarded_callbacks_specialize_the_dependency_without_changing_literals() {
         let root = "pub fn root(f: std::rc::Rc<dyn Fn(i64) -> i64>) -> i64 { helper(f) }";
         let helper = "pub fn helper(f: std::rc::Rc<dyn Fn(i64) -> i64>) -> i64 { let _ = \"helper(f)\"; f(1) }";
-        let (name, texts) = static_runtime_closure("root", vec![root, helper]).unwrap();
+        let (name, texts) = static_runtime_closure("root", vec![root, helper]).expect("the forwarded callback specializes");
         assert_eq!(name, "root_static");
         let text = texts.join("\n");
         assert!(text.contains("fn root_static(f: impl Fn(i64) -> i64) -> i64 { helper_static(f) }"));

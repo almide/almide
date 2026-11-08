@@ -235,7 +235,7 @@ fn slot_access_op(op: &Op, s: AddrSink<'_>) -> Result<Option<bool>, LowerError> 
             }
             // The structural builder check proves 0 <= count <= allocated length,
             // with no alias and no later header write that could re-expose the tail.
-            writeln!(out, "{}{}.truncate({} as usize);", "    ".repeat(indent), var(base), var(args[1])).unwrap();
+            writeln!(out, "{}{}.truncate({} as usize);", "    ".repeat(indent), var(base), var(args[1])).expect("writing to a String cannot fail");
             crate::render_native_bounds::invalidate(base);
             Ok(Some(true))
         }
@@ -424,6 +424,7 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
         line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, ad.base, k));
         return Ok(true);
     }
+    crate::render_native_addr::note_field_copy(*d);
     line!(
         "let mut {}: {} = {}.f{k}.clone();",
         var(*d),
