@@ -505,6 +505,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
         // Only eligible closures carry modes, and a pinned one is not
         // eligible: every round pins at least one more, so this ends.
         let disagree = owned.disagreeing(&best);
+        if std::env::var("PROBE_MOVES").is_ok() { eprintln!("PROBE modes={:?} disagree={disagree:?} pinned={pinned:?}", owned.by_name); }
         if disagree.is_empty() {
             functions.clone_from_slice(&best);
             return;
@@ -537,6 +538,7 @@ fn solve_modes<'t>(
                     if eligible(f) { own_params(f, &takes, &owned).unwrap_or_else(|| f.clone()) } else { f.clone() }
                 })
                 .collect();
+            if std::env::var("PROBE_MOVES").is_ok() { eprintln!("PROBE round strict={strict} modes={:?}", owned.by_name); }
             let modes: BTreeMap<String, Vec<bool>> = next
                 .iter()
                 .filter(|f| !f.owned_params.is_empty())
@@ -562,7 +564,8 @@ fn solve_modes<'t>(
             // the slot over; the plain body if the mirror refuses that.
             let sunk = move_at_sites(&sink_join_releases(f, &owned), &owned);
             let moved = if crate::verify_ownership(&sunk).is_ok() { sunk } else { move_at_sites(f, &owned) };
-            if crate::verify_ownership(&moved).is_err() {
+            if let Err(e) = crate::verify_ownership(&moved) {
+                if std::env::var("PROBE_MOVES").is_ok() { eprintln!("PROBE refuse {} strict={strict}: {e:?}\nmodes={:?}\nops={:#?}", f.name, owned.by_name, moved.ops); }
                 return None;
             }
             *f = moved;
