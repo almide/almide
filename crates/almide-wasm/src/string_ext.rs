@@ -453,6 +453,17 @@ impl Emitter<'_> {
         sep: &IrExpr,
     ) -> ArmResult {
         self.lower_arg(subject, Some(STR), ArgMode::Borrow)?;
+        // A separator that is one byte at compile time (#4612) needs no
+        // search table: the one-byte kernel, handed the byte itself. The
+        // literal is consumed here, never lowered as a value.
+        if let Some(byte) = one_byte_literal(sep)
+            && !self.work.split_search_linked.get()
+        {
+            self.witness_inline_arg(sep);
+            let sp = self.work.helper(Helper::StringSplitByte);
+            self.f.instructions().i32_const(i32::from(byte)).call(sp);
+            return Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(STR)))));
+        }
         let h = self.hold_i32()?;
         self.f.instructions().local_set(h);
         self.lower_arg(sep, Some(STR), ArgMode::Borrow)?;
@@ -464,4 +475,40 @@ impl Emitter<'_> {
         self.release_i32();
         Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(STR)))))
     }
+}
+
+/// The separator's one byte, when it is a literal of exactly one byte.
+fn one_byte_literal(sep: &IrExpr) -> Option<u8> {
+    match &sep.kind {
+        IrExprKind::LitStr { value } => match value.as_bytes() {
+            [byte] => Some(*byte),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether any `string.split` in these bodies needs the search kernel: its
+/// separator is not a one-byte literal (see `FnWork::split_search_linked`).
+pub(crate) fn needs_split_search<'a>(bodies: impl Iterator<Item = &'a IrExpr>) -> bool {
+    struct Scan(bool);
+    impl almide_ir::visit::IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            | IrExprKind::TailCall { target: CallTarget::Module { module, func, .. }, args } = &e.kind
+                && module.as_str() == "string"
+                && func.as_str() == "split"
+                && let [_, sep] = args.as_slice()
+                && one_byte_literal(sep).is_none()
+            {
+                self.0 = true;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut scan = Scan(false);
+    for body in bodies {
+        almide_ir::visit::IrVisitor::visit_expr(&mut scan, body);
+    }
+    scan.0
 }

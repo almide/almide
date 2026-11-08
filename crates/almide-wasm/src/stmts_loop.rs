@@ -20,6 +20,9 @@ impl Emitter<'_> {
     /// `continue` brs to the loop head (the next cond CHECK, which
     /// charges — the interp's per-check meter), `break` to the block.
     pub(crate) fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), EmitError> {
+        // #4611: forget what the loop assigns before any of its code is
+        // lowered (int_range.rs); its induction facts are set below.
+        let entry = self.ranges_enter_loop(cond, body);
         // #2150: one copy-on-write judge per loop entry for a list the loop
         // reaches only element-wise — cleared before the unrolled lane too,
         // which runs copies of this same condition and body.
@@ -40,6 +43,7 @@ impl Emitter<'_> {
         // #2319: element counts this loop cannot change are loaded once,
         // before the loop — the bounds checks inside read the local.
         let hoisted = self.hoist_invariant_counts(Some(cond), body)?;
+        let induction = self.induction_ranges(cond, body, &entry);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         // Deterministic meter: one loop-head charge per condition
         // CHECK (n iterations = n+1 checks), ALS-DT2.
@@ -47,16 +51,23 @@ impl Emitter<'_> {
         // The witness (#2757): an iteration runs the condition, then either
         // leaves (the failing check) or runs the body.
         self.witness_loop_open();
+        for &(v, head, _) in &induction {
+            self.int_ranges.insert(v, head);
+        }
         self.lower(cond, Some(BOOL))?;
         self.f.instructions().i32_eqz().br_if(1);
         self.witness_branch_open();
         self.witness_branch_arm();
         self.witness_loop_jump();
         self.witness_branch_arm();
+        for &(v, _, in_body) in &induction {
+            self.int_ranges.insert(v, in_body);
+        }
         self.lower_loop_body(body, false)?;
         self.witness_branch_close();
         self.witness_loop_close();
         self.f.instructions().br(0).end().end();
+        self.ranges_leave_loop(cond, body);
         self.drop_hoisted_counts(hoisted);
         self.drop_payload_ptrs(ptrs);
         self.drop_prejudged(pre);
