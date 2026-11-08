@@ -302,14 +302,6 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> 
                     var(*d),
                     var(args[0])
                 );
-                // Noted for the by-value move out of a dying Result param
-                // (render_native_loop); a local of this kind is not a payload
-                // carrier (`render_native_move::payload_carrier`).
-                crate::render_native_addr::note_payload_take(
-                    *d,
-                    args[0],
-                    format!("match &mut {} {{ Err(e) => std::mem::take(e), Ok(_) => AlmideString::new() }}", var(args[0])),
-                );
             }
         }
         _ => return Ok(false),
