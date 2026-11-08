@@ -126,6 +126,13 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BT
         let early_exit = func.ops[..last].iter().any(|op| matches!(op, Op::Return { .. }));
         if at_top && grows && plain && !early_exit && func.ret != Some(p.value) {
             out.push((k, last));
+            continue;
+        }
+        // Or copied only, once on each path (`if c then f(xs) else ()`'s
+        // write-back copy in each arm): each copy is its last use there.
+        let copies = named.iter().all(|&i| matches!(func.ops[i], Op::Dup { src, .. } if src == p.value));
+        if copies && func.ret != Some(p.value) && crate::mir_liveness::last_use_on_every_path(func, p.value, &named) {
+            out.extend(named.iter().map(|&i| (k, i)));
         }
     }
     out
