@@ -4266,7 +4266,6 @@ fn __dl_string(items: List[Value], n: Int, i: Int, acc: List[String]) -> Result[
     err(e) => err(__err_at_index(e, i)),
   }
 
-@specializes("value.__decode_list_string")
 fn __decode_list_string(v: Value) -> Result[List[String], String] = match value.as_array(v) {
   ok(items) => __dl_string(items, list.len(items), 0, []),
   err(e) => err(e),
@@ -41500,10 +41499,6 @@ fn __err_at(e: String, seg: String) -> String = _
 /// The decode error e with the list index segment `[i]` spliced in.
 @intrinsic("almide_rt_value_err_at_index")
 fn __err_at_index(e: String, i: Int) -> String = _
-
-/// The strings of the Array v, read in place; err if v or an element is another kind.
-@intrinsic("almide_rt___decode_list_string")
-fn __decode_list_string(v: Value) -> Result[List[String], String] = _
 
 /// Object pairs in order; err if v is another kind.
 @intrinsic("almide_rt_value_as_object")

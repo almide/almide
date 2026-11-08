@@ -95,10 +95,6 @@ fn __err_at(e: String, seg: String) -> String = _
 @intrinsic("almide_rt_value_err_at_index")
 fn __err_at_index(e: String, i: Int) -> String = _
 
-/// The strings of the Array v, read in place; err if v or an element is another kind.
-@intrinsic("almide_rt___decode_list_string")
-fn __decode_list_string(v: Value) -> Result[List[String], String] = _
-
 /// Object pairs in order; err if v is another kind.
 @intrinsic("almide_rt_value_as_object")
 fn as_object(v: Value) -> Result[List[(String, Value)], String] = _
