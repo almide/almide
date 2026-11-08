@@ -1,0 +1,37 @@
+// @contract: C-170
+// #4612: a pure reduction over `bytes.to_list(…)` walks the byte block in
+// place on the structural wasm leg — `bytes.from_string` makes no copy of the
+// String and `bytes.to_list` builds no List[Int]. The answers are the staged
+// ones: every byte zero-extended (a multibyte character contributes its UTF-8
+// bytes, each 128..=255), the empty string sums to 0, a map stage after the
+// walk still runs per byte, and the weighted fold wraps on i64 overflow as
+// every `*` and `+` does.
+//
+// The last line is the shape that must stay staged: the fold's callback
+// writes the Bytes variable the list came from. Staged, `bytes.to_list`
+// snapshots the bytes first and the sum is 97 + 98 + 99 = 294; a walk read
+// in place would see the overwritten byte and answer 195.
+fn byte_sum(s: String) -> Int = list.sum(bytes.to_list(bytes.from_string(s)))
+
+fn weighted(b: Bytes) -> Int = bytes.to_list(b) |> list.fold(0, (acc, x) => acc * 31 + x)
+
+fn doubled_odd(s: String) -> Int = bytes.to_list(bytes.from_string(s)) |> list.map((x) => x * 2 + 1) |> list.filter((y) => y % 3 == 0) |> list.sum
+
+effect fn written_while_walked() -> Int = {
+  var b = bytes.from_string("abc")
+  bytes.to_list(b) |> list.fold(0, (acc, x) => {
+    b = bytes.set(b, 2, 0)
+    acc + x
+  })
+}
+
+effect fn main() -> Unit = {
+  println("${byte_sum("hello")} ${byte_sum("")} ${byte_sum("héllo→")}")
+  let long = string.repeat("zebra-", 40)
+  println("${weighted(bytes.from_string(long))} ${weighted(bytes.from_string(""))}")
+  println("${doubled_odd("item-123, value 861")} ${doubled_odd("")}")
+  let total = ["a", "bb", "ccc"] |> list.fold(0, (acc, s) => acc * 7 + byte_sum(s))
+  println("${total}")
+  let written = written_while_walked()!
+  println("${written}")
+}

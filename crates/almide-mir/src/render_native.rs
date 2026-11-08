@@ -361,16 +361,20 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     crate::render_native_keyed::set_program(&user_fns, sigs);
     crate::render_native_bounds::reset();
     let mut fn_rets: BTreeMap<String, Option<NTy>> = BTreeMap::new();
+    let mut texts: BTreeMap<String, String> = BTreeMap::new();
     for func in &prog.functions {
         verify_ownership_or_wall(func)?;
         let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
             .map_err(|e| e.with_fn_context(&func.name))?;
+        let rendered = crate::render_native_narrow::narrow_locals(func, sigs, rendered);
         let rendered = narrow_abi_wrapper(func, sigs, rendered)?;
         let rendered = crate::render_native_keyed::specialize(func, rendered)?;
         fn_rets.insert(func.name.clone(), ret_nty);
         bodies.push_str(&rendered);
         bodies.push('\n');
+        texts.insert(func.name.clone(), rendered);
     }
+    bodies.push_str(&crate::native_hof::array_twins(&texts)?);
     used_shims.extend(crate::native_slot_rewrite::heap_slot_statics());
     // Every element check exits through it (never inlined, dropped by the
     // linker when no check is written).

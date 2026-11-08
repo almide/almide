@@ -122,6 +122,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_div_mod_ok.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_rem_pow2_zero.almd", class = "fixture" },
 ]
 
 # ── FAN DETERMINISM (PR #377, #369) ──────────────────────────────────
@@ -1159,6 +1160,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_wasm_split_replace_iterative.almd", class = "fixture" },
+  { path = "spec/wasm_cross/split_one_byte_separator.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-075"
@@ -2322,6 +2324,9 @@ evidence  = [
   { path = "spec/wasm_cross/toplevel_const_wrapping.almd", class = "fixture" },
   { path = "spec/wasm_cross/accum_recursion_int.almd", class = "fixture" },
   { path = "spec/wasm_cross/accum_recursion_declined.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_div_pow2_nonneg_induction.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_div_pow2_signed_induction.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_walk_reduction_fused.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-171"
