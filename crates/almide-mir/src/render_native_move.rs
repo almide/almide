@@ -226,37 +226,15 @@ pub(crate) fn carrier_dies_after(
             reads.contains(&d)
         })
     };
-    // The address of one of its scalar slots (`sc.n` beside `sc.funs`): the
-    // handle, the offsets added to it, and the scalar loads through them.
-    let scalar_slot = |j: usize, d: ValueId| -> Option<Vec<usize>> {
-        let mut addrs = vec![d];
-        let mut ops = vec![j];
-        for (k, op) in func.ops.iter().enumerate() {
-            let mut reads = Vec::new();
-            crate::mir_ops::op_reads(op, &mut reads);
-            if !reads.iter().any(|r| addrs.contains(r)) {
-                continue;
-            }
-            match op {
-                Op::IntBinOp { dst, op: crate::IntOp::Add, .. } => addrs.push(*dst),
-                Op::Prim { kind: crate::PrimKind::Load { .. }, .. } => {}
-                _ => return None,
-            }
-            ops.push(k);
-        }
-        Some(ops)
-    };
     let scalar_reads: std::collections::BTreeSet<usize> = func.ops[at + 1..]
         .iter()
         .enumerate()
-        .flat_map(|(j, op)| match op {
-            Op::ListGetScalar { list, .. } if *list == src => vec![at + 1 + j],
-            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } if args.as_slice() == [src] && unread(*d) => vec![at + 1 + j],
-            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } if args.as_slice() == [src] => {
-                scalar_slot(at + 1 + j, *d).unwrap_or_default()
-            }
-            _ => Vec::new(),
+        .filter(|(_, op)| match op {
+            Op::ListGetScalar { list, .. } => *list == src,
+            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } => args.as_slice() == [src] && unread(*d),
+            _ => false,
         })
+        .map(|(j, _)| at + 1 + j)
         .collect();
     SKIP_READS.with(|m| *m.borrow_mut() = scalar_reads);
     let dies = dying_after(func, at, src, borrow_arms);
