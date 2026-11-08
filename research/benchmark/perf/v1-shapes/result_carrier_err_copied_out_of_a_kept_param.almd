@@ -8,15 +8,16 @@ fn reason(r: Result[(Int, Int), String]) -> String = match r {
 }
 
 fn main() -> Unit = {
+  let bad: Result[(Int, Int), String] = err("boom")
+  let good: Result[(Int, Int), String] = ok((1, 2))
   var total = 0
   var i = 0
   while i < 100000 {
-    let r: Result[(Int, Int), String] = if i % 3 == 0 then err(int.to_string(i)) else ok((i, 1))
-    let tag = match r {
+    let tag = match bad {
       ok(_) => 1,
       err(_) => 2,
     }
-    total = total + string.len(reason(r)) + tag
+    total = total + string.len(reason(bad)) + string.len(reason(good)) + tag
     i = i + 1
   }
   println(int.to_string(total))
