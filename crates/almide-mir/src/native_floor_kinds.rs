@@ -234,9 +234,3 @@ pub(crate) fn runtime_items(symbol: &str) -> Option<Vec<&'static str>> {
 pub(crate) fn specializes(call: &str) -> Option<String> {
     specialized_target(call)
 }
-
-/// The element type the self-hosted body registered under `call` declares
-/// for its first list param (`list.unique_float`'s `List[Float]` → `Float`).
-pub(crate) fn specialized_elem(call: &str) -> Option<String> {
-    specialized_list_elem(call)
-}

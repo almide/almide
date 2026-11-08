@@ -1309,9 +1309,8 @@ pub fn almide_rt_list_eq_bool(a: &[bool], b: &[bool]) -> bool { a == b }
 pub fn almide_rt_list_eq_str(a: &[AlmideString], b: &[AlmideString]) -> bool { a == b }
 pub fn almide_rt_list_eq_list_int(a: &[Vec<i64>], b: &[Vec<i64>]) -> bool { a == b }
 pub fn almide_rt_list_eq_list_float(a: &[Vec<f64>], b: &[Vec<f64>]) -> bool { a == b }
-pub fn almide_rt_list_eq_list_str(a: &[Vec<AlmideString>], b: &[Vec<AlmideString>]) -> bool { a == b }
 pub fn almide_rt_list_eq_opt_int(a: &[Option<i64>], b: &[Option<i64>]) -> bool { a == b }
-pub fn almide_rt_list_eq_opt_str(a: &[Option<AlmideString>], b: &[Option<AlmideString>]) -> bool { a == b }
+pub fn almide_rt_list_eq<A: PartialEq>(a: &[A], b: &[A]) -> bool { a == b }
 pub fn almide_rt_list_eq_res_int(a: &[Result<i64, AlmideString>], b: &[Result<i64, AlmideString>]) -> bool { a == b }
 pub fn almide_rt_list_to_string_str(xs: &[AlmideString]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push('"'); o.push_str(&e.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t")); o.push('"'); } o.push(']'); o.into() }
 

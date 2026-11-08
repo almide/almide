@@ -488,8 +488,7 @@ else {
   else false
 }
 
-@implements("list.__eq_opt_str")
-@specializes("list.__eq_opt_str")
+@specializes("list.__eq")
 fn list_eq_opt_str(a: List[String?], b: List[String?]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -573,8 +572,7 @@ else {
   else false
 }
 
-@implements("list.__eq_list_str")
-@specializes("list.__eq_list_str")
+@specializes("list.__eq")
 fn list_eq_list_str(a: List[List[String]], b: List[List[String]]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)

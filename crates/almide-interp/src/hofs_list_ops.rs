@@ -344,6 +344,7 @@ impl<'a> Interpreter<'a> {
             "__eq_float" => list_eq_cell(args),
             "__eq_bool" => list_eq_cell(args),
             "__eq_str" => list_eq_cell(args),
+            "__eq" => list_eq_cell(args),
             // Structural, element-type-blind, mirroring the v0 runtime
             // exactly (runtime/rs/src/list.rs): dedup drops CONSECUTIVE
             // equals, unique keeps first occurrences, both under the same

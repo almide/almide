@@ -224,8 +224,9 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
     }).collect::<Result<Vec<_>, _>>()?;
     // A Float list's cells are its bits on the native render: a Float
     // specialization served by a runtime generic that compares its elements
-    // would compare the bits (`-0.0` against `0.0`, NaN against itself).
-    if !bounds.is_empty() && target != call && crate::native_floor::specialized_elem(call).as_deref() == Some("Float") {
+    // would compare the bits (`-0.0` against `0.0`, NaN against itself),
+    // at any depth of the element (`List[List[Float]]`, `List[Float?]`).
+    if !bounds.is_empty() && target != call && crate::native_floor::specialized_list_elem_holds_float(call) {
         return Err(format!("a Float specialization of `{target}`, whose runtime generic compares the list's bits"));
     }
     let tps: BTreeSet<String> = generics.iter().flatten().map(|g| g.name.as_str().to_string()).collect();
