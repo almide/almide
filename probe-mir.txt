@@ -1,0 +1,2 @@
+spec/wasm_cross/field_and_interp_accumulator.almd
+spec/wasm_cross/record_map_field_update.almd
