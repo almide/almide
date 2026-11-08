@@ -105,8 +105,6 @@ fn list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
 fn twin_takes(param: Option<&FloorParam>, (code, got): &(String, NTy)) -> bool {
     match (param, got) {
         (_, NTy::Vec | NTy::VecStr) => true,
-        // An owned String (not a borrowed `&str`), not read again.
-        (Some(FloorParam::Str), NTy::Str) => true,
         (Some(FloorParam::List(elem)), NTy::Rec(_)) => list_arg(*elem, code, *got).is_some_and(|r| r == format!("&{code}")),
         _ => false,
     }
