@@ -1,0 +1,6 @@
+spec/wasm_cross/opt_str_str_ctor.almd
+spec/wasm_cross/regex_engine.almd
+spec/wasm_cross/map_core_trio.almd
+spec/wasm_cross/field_and_interp_accumulator.almd
+spec/wasm_cross/range_head_fold_edges.almd
+spec/wasm_cross/unwrap_or_unwrap_fallback.almd
