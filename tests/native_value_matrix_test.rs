@@ -6,6 +6,117 @@ use std::process::Command;
 fn value_representations_preserve_cross_target_observations() {
     let cases = [
         (
+            "stored_scalar_closures",
+            r#"
+type Handler = { f: (Int) -> Int, name: String }
+type TextHandler = { f: (String) -> String }
+fn bracket(s: String) -> String = "[" + s + "]"
+fn make(k: Int) -> Handler = { f: (n) => n + k, name: "captured" }
+fn call(h: Handler, n: Int) -> Int = h.f(n)
+fn main() -> Unit = {
+ let a = make(3)
+ let b = { ...a, name: "copy" }
+ println(int.to_string(call(a, 4)))
+ println(int.to_string(call(b, 5)))
+ println(a.name)
+ println(b.name)
+ let fs = [(n: Int) => n + 1, (n: Int) => n * 2]
+ for f in fs { println(int.to_string(f(4))) }
+ let text = TextHandler { f: bracket }
+ println(text.f("x"))
+}
+"#,
+        ),
+        (
+            "runtime_tuple_results",
+            r#"
+fn indexed(xs: List[String]) -> List[(Int, String)] = list.enumerate(xs)
+fn main() -> Unit = {
+ let xs = ["a", "b"]
+ for (i, x) in indexed(xs) { println(int.to_string(i) + ":" + x) }
+ println(list.join(xs, ","))
+ for (i, x) in list.enumerate([7, 9]) { println(int.to_string(i + x)) }
+ for (i, x) in list.enumerate([[1, 2], []]) { println(int.to_string(i) + ":" + int.to_string(list.len(x))) }
+ for (a, b) in list.zip(["x", "y", "z"], [4, 5]) { println(a + int.to_string(b)) }
+ let halves = list.partition([1, -2, 3], (x) => x > 0)
+ for x in halves.0 { println(int.to_string(x)) }
+ for x in halves.1 { println(int.to_string(x)) }
+ println(int.to_string(list.len(indexed([]))))
+}
+"#,
+        ),
+        (
+            "codec_null_defaults",
+            r#"
+type Setting: Codec = { n: Int = 7 }
+fn show(v: Value) -> Unit = {
+ let s = Setting.decode(v) ?? Setting { n: -1 }
+ println(int.to_string(s.n))
+}
+fn main() -> Unit = {
+ show(value.object([]))
+ show(value.object([("n", value.null())]))
+ show(value.object([("n", value.int(9))]))
+ show(value.object([("n", value.bool(false))]))
+}
+"#,
+        ),
+        (
+            "value_object_pairs",
+            r#"
+import json
+fn pairs(v: Value) -> Result[List[(String, Value)], String] = value.as_object(v)
+fn main() -> Unit = {
+ let v = value.object([("a", value.int(1)), ("b", value.string("text")), ("a", value.int(3))])
+ for (k, x) in pairs(v) ?? [] { println(k) println(json.stringify(x)) }
+ for (k, x) in pairs(v) ?? [] { println(k) println(json.stringify(x)) }
+ println(int.to_string(list.len(pairs(value.object([])) ?? [])))
+ println(match pairs(value.null()) { ok(_) => "wrong", err(e) => e })
+ println(match pairs(value.array([])) { ok(_) => "wrong", err(e) => e })
+}
+"#,
+        ),
+        (
+            "set_heap_elements",
+            r#"
+fn ints(s: Set[List[Int]], k: List[Int]) -> Bool = set.contains(s, k)
+fn main() -> Unit = {
+ let s = set.from_list([[1, 2], [3], [1, 2]])
+ println(int.to_string(set.len(s)))
+ println(if ints(s, [1, 2]) then "hit" else "miss")
+ println(if ints(s, [2, 1]) then "hit" else "miss")
+ let kept = set.filter(s, (xs) => list.len(xs) > 1)
+ for xs in set.to_list(kept) { for x in xs { println(int.to_string(x)) } }
+ println(int.to_string(set.fold(s, 0, (acc, xs) => acc + list.len(xs))))
+ let ss = set.from_list([["a", "b"], [], ["a", "b"]])
+ println(int.to_string(set.len(ss)))
+ println(if set.contains(ss, []) then "empty" else "missing")
+ for xs in set.to_list(ss) { println(list.join(xs, ":")) }
+ let bs = set.from_list([bytes.from_list([1, 2]), bytes.from_list([1, 2])])
+ println(int.to_string(set.len(bs)))
+ println(if set.contains(bs, bytes.from_list([1, 2])) then "bytes" else "missing")
+ let nested = set.from_list([set.from_list(["b", "a"]), set.from_list(["a", "b"])])
+ println(int.to_string(set.len(nested)))
+ for inner in set.to_list(nested) { println(list.join(set.to_list(inner), ":")) }
+}
+"#,
+        ),
+        (
+            "compound_strings",
+            r#"
+fn show(o: String?, r: Result[String, String]) -> Unit = {
+ println("${o}")
+ println("${r}")
+}
+fn main() -> Unit = {
+ show(some("a\\\"\n\r\t日本語"), ok("a\\\"\n\r\t日本語"))
+ show(none, err(""))
+ let nested: Result[String?, String] = ok(some("z"))
+ println("${nested}")
+}
+"#,
+        ),
+        (
             "nested_results",
             r#"
 fn show(r: Result[Result[Int, String], String]) -> String = match r {
@@ -327,6 +438,12 @@ fn main() -> Unit = {
             );
             assert!(actual.stderr.is_empty(), "{name}");
             let expected: &[u8] = match name {
+            "stored_scalar_closures" => b"7\n8\ncaptured\ncopy\n5\n8\n[x]\n",
+            "compound_strings" => "some(\"a\\\\\\\"\\n\\r\\t日本語\")\nok(\"a\\\\\\\"\\n\\r\\t日本語\")\nnone\nerr(\"\")\nok(some(\"z\"))\n".as_bytes(),
+            "set_heap_elements" => b"2\nhit\nmiss\n1\n2\n3\n2\nempty\na:b\n\n1\nbytes\n1\nb:a\n",
+            "value_object_pairs" => b"a\n3\nb\n\"text\"\na\n3\nb\n\"text\"\n0\nexpected Object, received Null\nexpected Object, received Array\n",
+            "codec_null_defaults" => b"7\n7\n9\n-1\n",
+            "runtime_tuple_results" => b"0:a\n1:b\na,b\n7\n10\n0:2\n1:0\nx4\ny5\n1\n3\n-2\n0\n",
             "nested_results" => b"4\nbad\n4\nbad\nouter\n4\nbad\n7\n-1\nyes\nerror\n",
             "nested_strings" => b"inner\nnone\nerror\nyes\nempty\n",
             "typed_empty" => b"a\nb\n0\n0\nr\n2\n",
@@ -381,13 +498,24 @@ fn main() -> Unit = {
                 String::from_utf8_lossy(&built.stderr)
             );
             let v0 = Command::new(oracle).output().unwrap();
-            let wasm = Command::new(env!("CARGO_BIN_EXE_almide"))
-                .arg("run")
-                .arg(&input)
-                .args(["--target", "wasm"])
-                .output()
-                .unwrap();
-            for (leg, other) in [("v0", v0), ("wasm", wasm)] {
+            // Execute the routed module directly so compiler warnings are not
+            // mistaken for the program's stderr (Result interpolation warns).
+            let wasm = almide::wasm_route::route_wasm(
+                input.to_str().unwrap(),
+                source,
+                almide::wasm_route::ModuleSource::Disk { dep_paths: &[] },
+                None,
+                Default::default(),
+                &mut |_| {},
+            )
+            .unwrap_or_else(|e| panic!("{name}: wasm route {e:?}"));
+            let wasm = almide_wasm_run::run_wasm(&wasm.bytes).unwrap();
+            assert_eq!(
+                (&actual.stdout, &actual.stderr, actual.status.code()),
+                (&wasm.stdout_bytes, &wasm.stderr_bytes, Some(wasm.exit)),
+                "{name}: wasm"
+            );
+            for (leg, other) in [("v0", v0)] {
                 assert_eq!(
                     (&actual.stdout, &actual.stderr, actual.status.code()),
                     (&other.stdout, &other.stderr, other.status.code()),

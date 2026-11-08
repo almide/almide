@@ -255,6 +255,9 @@ impl Derive<'_> {
         Some(match t {
             t if is_lane_scalar(t) => Some(Ok(NTy::I64)),
             Ty::String => Some(Ok(NTy::Str)),
+            // Fields use the same closure ABI as parameters and returns.
+            // Construction/call validation still checks captures and signatures.
+            t if closure_env_type(t, |p| self.kind(p, set).is_some()) => Some(Ok(NTy::Vec)),
             // A list of lane scalars, an all-scalar tuple: one i64 slot block.
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_lane_scalar(&a[0]) => Some(Ok(NTy::Vec)),
             Ty::Tuple(es) if es.iter().all(is_lane_scalar) && !set.contains(&tuple_key(t)) => Some(Ok(NTy::Vec)),
@@ -411,32 +414,33 @@ impl Derive<'_> {
     ) -> RecDecl {
         let spell = |t: &almide_lang::types::Ty| self.spell(t, set, names);
         if n == VALUE_KEY {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None };
         }
         if n == MATRIX_KEY {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None };
         }
         if n == BYTES_KEY {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None };
         }
         let (is_enum, cases) = &self.decls[n];
+        let eq_safe = self.exact_eq_decl(n, &mut Default::default());
         if self.maps.contains(n) {
             let (k, v) = (spell(&cases[0].1[0]), spell(&cases[0].1[1]));
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: Some((k, v)), set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: Some((k, v)), eq_safe: false, set_of: None };
         }
         if self.sets.contains(n) {
             return RecDecl { name: n.to_string(), set_of: Some(spell(&cases[0].1[0])), ..RecDecl::default() };
         }
         if self.options.contains(n) {
             let p = spell(&cases[0].1[0]);
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: Some(p), result_of: None, map_of: None, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: Some(p), result_of: None, map_of: None, eq_safe: false, set_of: None };
         }
         if self.results.contains(n) {
             let (o, e) = (spell(&cases[0].1[0]), spell(&cases[0].1[1]));
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: Some((o, e)), map_of: None, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: Some((o, e)), map_of: None, eq_safe: false, set_of: None };
         }
         if self.lists.contains(n) {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])), alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])), alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, set_of: None };
         }
         if *is_enum {
             let r = rank[n];
@@ -451,10 +455,10 @@ impl Derive<'_> {
                 option_of: None,
                 result_of: None,
                 map_of: None,
-                set_of: None,
+                eq_safe, set_of: None,
             }
         } else {
-            RecDecl { name: n.to_string(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None }
+            RecDecl { name: n.to_string(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe, set_of: None }
         }
     }
 }
@@ -533,3 +537,56 @@ pub(crate) fn scalar_carrier_kind(t: &almide_lang::types::Ty) -> Option<NTy> {
 #[cfg(test)]
 #[path = "render_native_carrier_types_test.rs"]
 mod carrier_types_test;
+
+/// Exact runtime representations admitted as a Set element, recursively.
+fn native_set_element_type(t: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::{Ty, constructor::TypeConstructorId};
+    match t {
+        Ty::Int | Ty::String | Ty::Bytes => true,
+        Ty::Applied(TypeConstructorId::List | TypeConstructorId::Set, a) if a.len() == 1 => native_set_element_type(&a[0]),
+        _ => false,
+    }
+}
+
+/// Native counterpart used after declaration types have been bound at a call.
+pub(crate) fn native_set_element_kind(t: NTy) -> bool {
+    match t {
+        NTy::I64 | NTy::Str | NTy::Vec | NTy::VecStr => true,
+        NTy::Rec(i) => is_bytes(t) || list_elem(i).or_else(|| set_elem(i)).is_some_and(native_set_element_kind),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod set_element_tests {
+    use super::*;
+    use almide_lang::types::Ty;
+
+    #[test]
+    fn set_elements_preserve_runtime_types_recursively() {
+        for e in [Ty::Int, Ty::String, Ty::Bytes, Ty::list(Ty::Int), Ty::list(Ty::String), Ty::list(Ty::list(Ty::Int)), Ty::set_of(Ty::String)] {
+            assert!(is_native_set(&Ty::set_of(e.clone())), "{e:?}");
+        }
+        // A Bool or Float bit lane must not silently acquire Int equality or repr.
+        for e in [Ty::Bool, Ty::Float, Ty::Float32, Ty::list(Ty::Bool), Ty::list(Ty::Float), Ty::set_of(Ty::Bool)] {
+            assert!(!is_native_set(&Ty::set_of(e.clone())), "{e:?}");
+        }
+    }
+}
+
+/// A runtime tuple result takes the program's structural tuple identity. Named
+/// records with identical fields remain distinct. Otherwise use a fresh slot type.
+pub(crate) fn tuple_type_of(fields: &[NTy]) -> u16 {
+    let existing = RECS.with(|r| r.borrow().iter().position(|d| d.name.starts_with("Tuple(") && d.fields == fields && d.cases.is_none()));
+    existing.map(|i| i as u16).unwrap_or_else(|| slots_type_of(fields))
+}
+
+/// One closure admission rule for signatures and aggregate fields. Its env
+/// is an owned scalar block; this does not relax capture or call checking.
+pub(crate) fn closure_env_type(t: &almide_lang::types::Ty, admits: impl Fn(&almide_lang::types::Ty) -> bool) -> bool {
+    use almide_lang::types::Ty;
+    let Ty::Fn { params, ret, is_effect } = t else { return false };
+    let scalar = |p: &Ty| matches!(p, Ty::Int | Ty::Bool);
+    (params.iter().all(scalar) && scalar(ret))
+        || (!is_effect && params.iter().all(&admits) && (matches!(**ret, Ty::Unit) || admits(ret)))
+}

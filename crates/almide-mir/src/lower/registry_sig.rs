@@ -175,3 +175,45 @@ pub fn refuse_unless_fits(module: &str, func: &str, name: String, arg_tys: &[Ty]
         }
     }
 }
+
+// A caller may offer a declaration-backed route for a representation refusal.
+// The shared lowerer knows no runtime symbols: the native pipeline supplies
+// its checked declaration resolver, and wasm keeps the registry refusal.
+type DeclaredRouteResolver = fn(&str) -> bool;
+thread_local! {
+    static DECLARED_ROUTE: std::cell::Cell<Option<DeclaredRouteResolver>> = const { std::cell::Cell::new(None) };
+}
+pub(crate) struct DeclaredRouteGuard(Option<DeclaredRouteResolver>);
+impl DeclaredRouteGuard {
+    pub(crate) fn set(resolve: DeclaredRouteResolver) -> Self {
+        Self(DECLARED_ROUTE.with(|r| r.replace(Some(resolve))))
+    }
+}
+impl Drop for DeclaredRouteGuard {
+    fn drop(&mut self) { DECLARED_ROUTE.with(|r| r.set(self.0)); }
+}
+pub(super) fn declared_route_or(module: &str, func: &str, routed: String) -> String {
+    if routed != refusal_twin(module, func) { return routed; }
+    let base = format!("{module}.{func}");
+    if DECLARED_ROUTE.with(|r| r.get().is_some_and(|resolve| resolve(&base))) { base } else { routed }
+}
+
+#[cfg(test)]
+mod declared_route_tests {
+    use super::*;
+    #[test]
+    fn declaration_routes_are_scoped_and_preserve_other_registered_names() {
+        let wall = "set.contains_x".to_string();
+        assert_eq!(declared_route_or("set", "contains", wall.clone()), wall);
+        {
+            let _guard = DeclaredRouteGuard::set(|name| name == "set.contains");
+            assert_eq!(declared_route_or("set", "contains", wall.clone()), "set.contains");
+            assert_eq!(declared_route_or("set", "contains", "set.contains_str".into()), "set.contains_str");
+            assert_eq!(declared_route_or("user", "contains", "user.contains_x".into()), "user.contains_x");
+            { let _nested = DeclaredRouteGuard::set(|_| false);
+              assert_eq!(declared_route_or("set", "contains", wall.clone()), wall); }
+            assert_eq!(declared_route_or("set", "contains", wall.clone()), "set.contains");
+        }
+        assert_eq!(declared_route_or("set", "contains", wall.clone()), wall);
+    }
+}

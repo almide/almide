@@ -63,9 +63,8 @@ fn bind_param(env: &mut Env, d: &DTy, t: NTy) -> Option<()> {
         DTy::Bytes => rec::is_bytes(t).then_some(()),
         DTy::Set(e) => {
             let inner = rec::set_elem(t.rec()?)?;
-            // These are the same two element representations accepted by
-            // is_native_set; no Float-bit or Bool-lane equality substitution.
-            matches!(inner, NTy::I64 | NTy::Str).then_some(())?;
+            // Preserve the recursively declared element representation.
+            rec::native_set_element_kind(inner).then_some(())?;
             bind_inner(env, e, inner)
         }
         DTy::Map(k, v) => {
@@ -79,7 +78,7 @@ fn bind_param(env: &mut Env, d: &DTy, t: NTy) -> Option<()> {
         DTy::Int | DTy::Bool => (t == NTy::I64).then_some(()),
         DTy::Float => (t == NTy::F64).then_some(()),
         DTy::Str => matches!(t, NTy::Str | NTy::StrRef).then_some(()),
-        DTy::Fn(..) => None,
+        DTy::Tuple(..) | DTy::Fn(..) => None,
     }
 }
 
@@ -87,6 +86,10 @@ fn bind_param(env: &mut Env, d: &DTy, t: NTy) -> Option<()> {
 fn kind_of(env: &Env, d: &DTy) -> Option<NTy> {
     Some(match d {
         DTy::Var(v) => *env.get(v)?,
+        DTy::Tuple(es) => {
+            let fields = es.iter().map(|e| kind_of(env, e)).collect::<Option<Vec<_>>>()?;
+            NTy::Rec(rec::tuple_type_of(&fields))
+        }
         DTy::Int | DTy::Bool => NTy::I64,
         DTy::Float => NTy::F64,
         DTy::Str => NTy::Str,
@@ -95,7 +98,7 @@ fn kind_of(env: &Env, d: &DTy) -> Option<NTy> {
         DTy::Bytes => NTy::Rec(rec::bytes_index()),
         DTy::Set(e) => {
             let inner = kind_of(env, e)?;
-            matches!(inner, NTy::I64 | NTy::Str).then_some(())?;
+            rec::native_set_element_kind(inner).then_some(())?;
             NTy::Rec(rec::set_type_of(inner))
         }
         // A list or Option of Float bits would leave the render's lanes

@@ -271,6 +271,24 @@ impl<'a> Interpreter<'a> {
 
         let l = val!(self.eval_expr(left, scope));
         let r = val!(self.eval_expr(right, scope));
+        // Pool helpers may carry a Value as its arena address. Equality is
+        // structural even inside that tier; two separate Null blocks are equal.
+        // Read through the declared type, never treat arbitrary Ints as pointers.
+        let (l, r) = if matches!(op, BinOp::Eq | BinOp::Neq) {
+            let sync = |v: Value, ty: &Ty| -> Result<Value, String> {
+                let dynamic = match ty { Ty::Named(n, _) | Ty::Variant { name: n, .. } => n.as_str() == "Value", _ => false };
+                if !dynamic { return Ok(v); }
+                let canonical = Ty::Named(almide_base::intern::sym("Value"), vec![].into());
+                match self.sync_value(&v, &canonical)? {
+                    Some(value) => Ok(value),
+                    None if matches!(v, Value::Int(_)) => Err("Value equality: no faithful arena read-back".into()),
+                    None => Ok(v),
+                }
+            };
+            let l = match sync(l, &left.ty) { Ok(v) => v, Err(e) => return Flow::Unsupported(e) };
+            let r = match sync(r, &right.ty) { Ok(v) => v, Err(e) => return Flow::Unsupported(e) };
+            (l, r)
+        } else { (l, r) };
         // A Matrix operand: the operator IS a `matrix.*` call (`a + b` →
         // `matrix.__add`, `m * k` → `matrix.scale`), the rewrite both
         // backends' lowering applies, answered by the same registry bodies.

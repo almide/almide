@@ -125,7 +125,7 @@ fn render_list_set_scalar(
     let slot = crate::render_native_bounds::Slot { base: *list, idx: Some(*idx), k: 0 };
     crate::render_native_bounds::check(slot);
     crate::render_native_bounds::store(slot);
-    line!("almide_idx_set(&mut {}, {}, {});", var(*list), var(*idx), var(*val));
+    line!("almide_idx_set(&mut {}, {}, {});", var(*list), var(*idx), scalar_bits(*val, tys)?);
     Ok(())
 }
 

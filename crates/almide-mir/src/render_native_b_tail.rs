@@ -373,13 +373,24 @@ pub(crate) fn call_arg(a: &CallArg, tys: &BTreeMap<ValueId, NTy>) -> Result<(Str
     }
 }
 
+/// MIR scalar slots and integer operations carry IEEE bits for Float values.
+/// Numeric float arithmetic uses FloatBin; this conversion never casts a value.
+pub(crate) fn scalar_bits(v: ValueId, tys: &BTreeMap<ValueId, NTy>) -> Result<String, LowerError> {
+    match tys.get(&v) {
+        Some(NTy::I64) => Ok(var(v)),
+        Some(NTy::F64) => Ok(format!("({}.to_bits() as i64)", var(v))),
+        other => Err(wall(format!("native: scalar bits of {other:?}"))),
+    }
+}
+
 pub(crate) fn render_int_binop(
     op: &IntOp,
     a: ValueId,
     b: ValueId,
+    tys: &BTreeMap<ValueId, NTy>,
     used_shims: &mut Vec<&'static str>,
 ) -> Result<String, LowerError> {
-    let (l, r) = (var(a), var(b));
+    let (l, r) = (scalar_bits(a, tys)?, scalar_bits(b, tys)?);
     Ok(match op {
         IntOp::Add => format!("{l}.wrapping_add({r})"),
         IntOp::Sub => format!("{l}.wrapping_sub({r})"),

@@ -2,7 +2,7 @@
 // __decode_list_T (Array → List[T], first element error propagates), __decode_option_T
 // (field: Null/absent → None, else Some(as_T)), __decode_default_T (Null/absent → default).
 // Element decode reuses the self-hosted value.as_T; op order + error text mirror v0.
-fn __is_null(v: Value) -> Bool = prim.load32(prim.handle(v) + 4) == 0
+fn __is_null(v: Value) -> Bool = v == value.null()
 
 // ── List ──
 fn __dl_int(items: List[Value], n: Int, i: Int, acc: List[Int]) -> Result[List[Int], String] =

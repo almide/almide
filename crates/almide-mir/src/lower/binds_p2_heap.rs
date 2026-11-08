@@ -5,10 +5,16 @@ impl LowerCtx {
     /// The HEAP half of [`Self::lower_bind`]: the heap-`??` executable subset,
     /// then the fresh-vs-alias match over every heap producer. Verbatim text move.
     pub(crate) fn lower_bind_heap(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
-        if self.try_lower_bind_heap_unwrap_or_precheck(var, ty, value)? {
-            return Ok(());
+        if !self.try_lower_bind_heap_unwrap_or_precheck(var, ty, value)? {
+            self.lower_bind_heap_kind(var, ty, value)?;
         }
-        self.lower_bind_heap_kind(var, ty, value)
+        // Keep the checked binding type even when no later call constrains
+        // it (for example a set read only through len). Existing exact layout
+        // facts take precedence over this declaration-level fallback.
+        if let Some(dst) = self.value_of.get(&var) {
+            self.aggregate_blocks.entry(*dst).or_insert_with(|| crate::render_native_rec::block_key(ty));
+        }
+        Ok(())
     }
 
     /// Extracted from `Self::lower_bind_heap` (third-round split, cog reduction): the

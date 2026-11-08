@@ -58,6 +58,20 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // A typed Float lambda also needs the scalar MIR dispatch table when
+    // its caller carries the result as bits. Integer closures share arity.
+    ("float_closure_scalar_abi", r#"
+fn apply(f: (Int) -> Float, x: Int) -> Float = f(x)
+fn apply_float(f: (Float) -> Float, x: Float) -> Float = f(x)
+fn main() -> Unit = {
+ let g: (Int) -> Float = (x) => if x > 0 then -0.0 else 2.5
+ let integer = (x: Int) => x + 1
+ println(int.to_string(integer(3)))
+ println(int.to_string(float.to_bits(g(1))))
+ println(float.to_string(apply(g, 0)))
+ println(float.to_string(apply_float((x) => x * 2.0, 1.5)))
+}
+"#),
     // A returned Option shares a string-list layout; its literal is not a
     // constant-table-only value and must survive native materialization.
     ("literal_option_return", "fn f() -> String? = some(\"payload\")\nfn main() -> Unit = println(f() ?? \"bad\")\n"),

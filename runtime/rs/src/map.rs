@@ -139,10 +139,10 @@ fn almide_map_key_hash_compound(a: &dyn std::any::Any) -> Option<u64> {
         return Some(almide_rt_map_hash_pair(*x as u64, almide_rt_map_hash_bytes(y.as_bytes())));
     }
     if let Some(xs) = a.downcast_ref::<Vec<i64>>() {
-        return Some(almide_map_hash_seq(xs.iter().map(|x| *x as u64)));
+        return xs.as_slice().almide_key_hash();
     }
     if let Some(xs) = a.downcast_ref::<Vec<AlmideString>>() {
-        return Some(almide_map_hash_seq(xs.iter().map(|s| almide_rt_map_hash_bytes(s.as_bytes()))));
+        return xs.as_slice().almide_key_hash();
     }
     almide_map_key_hash_sized_int(a)
 }
@@ -162,7 +162,7 @@ fn almide_map_key_hash_sized_int(a: &dyn std::any::Any) -> Option<u64> {
 
 /// What a lookup key must provide: its hash, agreeing with the stored key
 /// type's hash for every `K: Borrow<Q>` pair the read side admits. The
-/// blanket impl covers every sized key; `str` is the one unsized borrow —
+/// blanket impl covers every sized key; `str` and slices cover unsized borrows —
 /// a `&str` parameter (the borrow-inferred rendering of a String param)
 /// probes a `Map[String, _]` without materializing a String first, and
 /// hashes byte-identically to the stored `AlmideString`.
@@ -192,6 +192,38 @@ impl AlmideMapKey for str {
     }
 }
 
+// Borrow-inferred List parameters are slices (#4597). Their hash and ordered
+// key must agree with the owned Vec, including empty lists. Unsupported element
+// types keep the same linear lookup as their owned counterpart; no unsafe cast.
+impl<T: 'static> AlmideMapKey for [T] {
+    fn almide_key_hash(&self) -> Option<u64> {
+        use std::any::{Any, TypeId};
+        if TypeId::of::<T>() == TypeId::of::<i64>() {
+            return Some(almide_map_hash_seq(self.iter().map(|x| *(x as &dyn Any).downcast_ref::<i64>().unwrap() as u64)));
+        }
+        if TypeId::of::<T>() == TypeId::of::<AlmideString>() {
+            return Some(almide_map_hash_seq(self.iter().map(|x| almide_rt_map_hash_bytes((x as &dyn Any).downcast_ref::<AlmideString>().unwrap().as_bytes()))));
+        }
+        None
+    }
+    fn almide_key_bytes(&self) -> Option<Vec<u8>> {
+        use std::any::{Any, TypeId};
+        if TypeId::of::<T>() == TypeId::of::<i64>() {
+            return Some(self.iter().flat_map(|x| (x as &dyn Any).downcast_ref::<i64>().unwrap().to_le_bytes()).collect());
+        }
+        if TypeId::of::<T>() == TypeId::of::<AlmideString>() {
+            let mut bytes = Vec::new();
+            for x in self {
+                let s = (x as &dyn Any).downcast_ref::<AlmideString>().unwrap();
+                bytes.extend_from_slice(&(s.len() as u64).to_le_bytes());
+                bytes.extend_from_slice(s.as_bytes());
+            }
+            return Some(bytes);
+        }
+        None
+    }
+}
+
 /// The canonical bytes of a key the index supports (#4104): one-to-one
 /// within a key type, so two keys of one map are equal exactly when their
 /// bytes are. Covers the same types as [`almide_rt_map_key_hash`]; a String
@@ -212,8 +244,8 @@ pub fn almide_rt_map_key_bytes<K: 'static>(k: &K) -> Option<Vec<u8>> {
     if let Some((x, y)) = a.downcast_ref::<(AlmideString, AlmideString)>() { return Some([lp(x.as_bytes()), y.as_bytes().to_vec()].concat()); }
     if let Some((x, y)) = a.downcast_ref::<(AlmideString, i64)>() { return Some([lp(x.as_bytes()), le(*y)].concat()); }
     if let Some((x, y)) = a.downcast_ref::<(i64, AlmideString)>() { return Some([le(*x), y.as_bytes().to_vec()].concat()); }
-    if let Some(xs) = a.downcast_ref::<Vec<i64>>() { return Some(xs.iter().flat_map(|x| x.to_le_bytes()).collect()); }
-    if let Some(xs) = a.downcast_ref::<Vec<AlmideString>>() { return Some(xs.iter().flat_map(|s| lp(s.as_bytes())).collect()); }
+    if let Some(xs) = a.downcast_ref::<Vec<i64>>() { return xs.as_slice().almide_key_bytes(); }
+    if let Some(xs) = a.downcast_ref::<Vec<AlmideString>>() { return xs.as_slice().almide_key_bytes(); }
     if let Some(x) = a.downcast_ref::<i32>() { return Some(x.to_le_bytes().to_vec()); }
     if let Some(x) = a.downcast_ref::<i16>() { return Some(x.to_le_bytes().to_vec()); }
     if let Some(x) = a.downcast_ref::<i8>() { return Some(x.to_le_bytes().to_vec()); }

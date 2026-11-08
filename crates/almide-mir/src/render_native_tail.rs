@@ -44,7 +44,11 @@ fn finish_native_fn(
     // The trailing return expression (moved out — fresh owned for heap).
     if let Some(v) = func.ret {
         out.push_str("    ");
-        if lifted_wrap {
+        if is_main {
+            // Match the codegen entry wrapper: consume the Result, ignore an
+            // Ok payload, and report a String error with exit status 1.
+            out.push_str(&format!("if let Err(__almd_main_err) = {} {{\n        let _ = std::io::Write::flush(&mut std::io::stdout());\n        eprintln!(\"Error: {{}}\", __almd_main_err);\n        std::process::exit(1);\n    }}", native_ret_expr(v, tys[&v])));
+        } else if lifted_wrap {
             out.push_str(&format!("Ok({})", var(v)));
         } else if float_wrap {
             out.push_str(&as_f64_arg(&var(v), tys[&v])?);
@@ -55,7 +59,7 @@ fn finish_native_fn(
     }
     out.push_str("}\n");
     let mut out = crate::render_native_or_else::option_or_else(crate::render_native_loops::iterator_loops(drop_unread_static_strs(out)));
-    let ret_nty = ret_override.or_else(|| func.ret.map(|v| tys[&v]));
+    let ret_nty = if is_main { None } else { ret_override.or_else(|| func.ret.map(|v| tys[&v])) };
     // T1-1: patch every strict-cut marker with the now-known typed default
     // (never observed — the region verdict is Err by the time a cut fires).
     if out.contains(CUT_RET_MARKER) {
@@ -140,8 +144,19 @@ fn render_native_fn_sig(
     ret_override: Option<NTy>,
 ) -> Result<String, LowerError> {
     if is_main {
-        if func.ret.is_some() {
-            return Err(wall("native: main with a return value"));
+        if let Some(v) = func.ret {
+            // Plain main discards its return in v0; only an effect entry
+            // reports an Err. Unknown declarations keep the old refusal.
+            if crate::native_entry::is_effect_main() != Some(true) {
+                return Err(wall("native: returned main value needs a checked effect entry"));
+            }
+            let string_error = match tys.get(&v) {
+                Some(NTy::Res | NTy::ResStr) => true,
+                Some(NTy::Rec(i)) => crate::render_native_rec::result_payloads(*i)
+                    .is_some_and(|(_, err)| err == NTy::Str),
+                _ => false,
+            };
+            if !string_error { return Err(wall("native: main return needs a Result with a String error")); }
         }
         // Out of line, as the standard codegen's program body is: the
         // small-program perf check counts a program's work by toggling

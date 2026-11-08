@@ -304,3 +304,18 @@ pub fn almide_rt_string_drop_end(s: &str, n: i64) -> AlmideString { let __almide
 pub fn almide_rt_string_push(s: &mut AlmideString, suffix: &str) { s.push_str(suffix); }
 pub fn almide_rt_string_push_char(s: &mut AlmideString, ch: &str) { s.push_str(ch); }
 pub fn almide_rt_string_clear(s: &mut AlmideString) { s.clear(); }
+
+// The String-field spelling shared by compound-value formatters.
+pub fn almide_rt_string_quote(s: &str) -> AlmideString {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"), '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"), '\r' => out.push_str("\\r"), '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out.into()
+}

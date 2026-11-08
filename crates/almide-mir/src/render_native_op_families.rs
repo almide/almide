@@ -8,7 +8,7 @@
 use crate::lower::LowerError;
 use crate::render_native::{
     render_dup, render_float_bin, render_float_cmp, render_float_un, render_int_binop,
-    render_set_local, OpSink,
+    render_set_local, scalar_bits, OpSink,
 };
 use crate::render_native::{var, wall, NTy};
 use crate::render_native_shims::{
@@ -636,11 +636,12 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
         }
         Op::SetLocal { local, src } => render_set_local(local, src, tys, out, indent)?,
         Op::IntBinOp { dst, op, a, b } => {
-            tys.insert(*dst, NTy::I64);
-            match crate::render_native::cmp_int_expr(op, &var(*a), &var(*b)) {
+            let (l, r) = (scalar_bits(*a, tys)?, scalar_bits(*b, tys)?);
+            match crate::render_native::cmp_int_expr(op, &l, &r) {
                 Some(e) => line!("{}", crate::render_native_cond::bind(*dst, &e)),
-                None => line!("let mut {}: i64 = {};", var(*dst), render_int_binop(op, *a, *b, used_shims)?),
+                None => line!("let mut {}: i64 = {};", var(*dst), render_int_binop(op, *a, *b, tys, used_shims)?),
             }
+            tys.insert(*dst, NTy::I64);
         }
         _ => {
             return render_native_float_op(

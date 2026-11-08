@@ -374,6 +374,7 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     crate::lambda_sigs::clear();
     crate::option_blocks::clear();
     let _strict = crate::lower::StrictValuesGuard::set(true);
+    let _declared_routes = crate::lower::registry_sig::DeclaredRouteGuard::set(|name| crate::native_floor::declared(name).is_some() || crate::native_hof::declared_call(name));
     // The native render loop-converts a self tail call over any heap carry
     // (#4006 class A, #3550): `lower::owned_tco_slots`.
     let _owned_tco = crate::lower::OwnedTcoSlotsGuard::set(true);
@@ -442,6 +443,7 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
         ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())),
         linked_names.clone(),
     );
+    let _entry = crate::native_entry::EntryGuard::set(ir.functions.iter().any(|f| f.name.as_str() == "main" && f.is_effect));
     let rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names, &runtime)?;
     let mut certs = native_ownership_certs(&program.functions, &crate::native_hof::sites());
     // Row 4: each function's bounds witness, recorded as the render wrote its

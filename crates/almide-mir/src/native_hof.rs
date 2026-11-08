@@ -62,6 +62,7 @@ enum DTy {
     Value,
     Bytes,
     List(Box<DTy>),
+    Tuple(Vec<DTy>),
     Opt(Box<DTy>),
     Result(Box<DTy>, Box<DTy>),
     /// `Map[K, V]`: v0's runtime `AlmideMap<K, V>`, the generated map alias.
@@ -83,6 +84,7 @@ pub(crate) struct Hof {
     items: Vec<&'static str>,
     /// The twin's name.
     pub twin: String,
+    bounds: Vec<(String, almide_lang::capability_bounds::Cap)>,
 }
 
 fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
@@ -98,6 +100,7 @@ fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
             a if tps.contains(a) => DTy::Var(a.to_string()),
             _ => return None,
         },
+        TypeExpr::Tuple { elements } => DTy::Tuple(elements.iter().map(|e| dty_of(e, tps)).collect::<Option<_>>()?),
         TypeExpr::Generic { name, args } if args.len() == 1 => match name.as_str() {
             "List" => DTy::List(Box::new(dty_of(&args[0], tps)?)),
             "Set" => DTy::Set(Box::new(dty_of(&args[0], tps)?)),
@@ -131,6 +134,7 @@ fn rust_agrees(d: &DTy, r: &str) -> Option<bool> {
         DTy::Value => r == "AlmideValue",
         DTy::Bytes => r == "Vec<u8>" || (by_ref && r == "[u8]"),
         DTy::Var(_) => r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !by_ref,
+        DTy::Tuple(_) => r.starts_with('(') && r.ends_with(')') && !by_ref,
         DTy::List(_) => r.starts_with("Vec<") || (by_ref && r.starts_with('[')),
         DTy::Opt(_) => r.starts_with("Option<") && !by_ref,
         DTy::Map(..) => r.starts_with("AlmideMap<"),
@@ -177,9 +181,16 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
             _ => None,
         })
         .ok_or("no @intrinsic")?;
+    let bounds = almide_lang::capability_bounds::of(module, func).map(|b| {
+        generics.as_ref().and_then(|gs| gs.get(b.generic))
+            .map(|g| (g.name.as_str().to_string(), b.cap)).ok_or("runtime bound has no declared generic")
+    }).collect::<Result<Vec<_>, _>>()?;
     let tps: BTreeSet<String> = generics.iter().flatten().map(|g| g.name.as_str().to_string()).collect();
     let dparams: Vec<DTy> = params.iter().map(|p| dty_of(&p.ty, &tps)).collect::<Option<_>>().ok_or("a param type outside the map")?;
     let dret = dty_of(ret, &tps).ok_or("a return type outside the map")?;
+    // Tuple results have an explicit runtime-to-native adapter. Tuple arguments
+    // (including callback signatures) need the reverse adapter before admission.
+    if dparams.iter().any(has_runtime_tuple) { return Err("runtime tuple argument needs an adapter".into()); }
     let (rust_params, rust_ret, items) = crate::native_floor::runtime_body(&symbol).ok_or_else(|| format!("`{symbol}` is no takeable runtime body"))?;
     if rust_params.len() != dparams.len() || rust_agrees(&dret, &rust_ret) != Some(false) {
         return Err(format!("runtime signature {rust_params:?} -> {rust_ret} disagrees"));
@@ -194,12 +205,12 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
     // A combinator takes its closure statically (`static_twin`); a call with
     // no function-typed param calls the runtime body as it is.
     if !params.iter().any(|(d, _)| matches!(d, DTy::Fn(..))) {
-        return Ok(Hof { twin: symbol.clone(), symbol, params, ret: dret, items });
+        return Ok(Hof { twin: symbol.clone(), symbol, params, ret: dret, items, bounds });
     }
     let (twin, text) = static_twin(&symbol, text).ok_or("the runtime body has no `Rc<dyn Fn>` param to take statically")?;
     let mut items = items;
     items[0] = Box::leak(text.into_boxed_str());
-    Ok(Hof { symbol, params, ret: dret, items, twin })
+    Ok(Hof { symbol, params, ret: dret, items, twin, bounds })
 }
 
 /// The runtime body `text` of `symbol` with every `std::rc::Rc<dyn Fn(..) ->
@@ -252,6 +263,15 @@ pub(crate) fn of(impl_fn: &str) -> Option<&'static Hof> {
     let made = derive(impl_fn).map(|h| &*Box::leak(Box::new(h)));
     cache.lock().unwrap_or_else(|e| e.into_inner()).insert(impl_fn.to_string(), made);
     made
+}
+
+/// A declaration-backed generic route for a source call. The linker will
+/// still resolve its registered body; every actual call is type-checked by
+/// `plan` before that body can be replaced by the runtime implementation.
+pub(crate) fn declared_call(call: &str) -> bool {
+    crate::mir_ops::self_host_runtime().iter().any(|(_, pairs)| {
+        pairs.iter().any(|(implementation, source)| *source == call && of(implementation).is_some())
+    })
 }
 
 // ── per-render state ──
@@ -486,6 +506,7 @@ struct FnArgCx<'a> {
     origins: &'a BTreeMap<ValueId, (String, Vec<ValueId>)>,
     /// The op index, which names the env array.
     at: usize,
+    bounds: &'a [(String, almide_lang::capability_bounds::Cap)],
 }
 
 /// The adapter for the function-typed argument `a` (kind `t`) of declared
@@ -497,6 +518,11 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
     // The lambda borrows every param, as its signature spells it.
     if !cx.user_fns.get(lambda.as_str()).is_some_and(|l| l.owned_params.is_empty()) {
         return None;
+    }
+    if !cx.bounds.is_empty() {
+        let (ptys, rty) = crate::lambda_sigs::get(lambda)?;
+        if ptys.len() != dps.len() || !dps.iter().zip(&ptys).all(|(d, t)| bounded_type_agrees(cx.bounds, d, t))
+            || !bounded_type_agrees(cx.bounds, dret, &rty) { return None; }
     }
     let (ps, ret) = clo::lambda_sig(cx.sigs, lambda)?;
     let ret = ret?;
@@ -592,7 +618,7 @@ fn plan(
             bind_param(&mut env, d, *t)?;
         }
     }
-    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1 };
+    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
     for (((d, by_ref), (code, t)), a) in hof.params.iter().zip(&got).zip(call.args.iter()) {
         rendered.push(match d {
@@ -607,8 +633,7 @@ fn plan(
     }
     let ret = kind_of(&env, &hof.ret)?;
     let expr = format!("{}({})", hof.twin, rendered.join(", "));
-    // A declared Bool result: the runtime's `bool` in the render's i64 lane.
-    let expr = if hof.ret == DTy::Bool { format!("({expr}) as i64") } else { expr };
+    let expr = runtime_result(&env, &hof.ret, &expr)?;
     Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims)))
 }
 
@@ -708,3 +733,7 @@ mod tests {
     }
 }
 
+
+include!("native_hof_result.rs");
+
+include!("native_hof_bounds.rs");

@@ -4187,7 +4187,7 @@ pub const SRC_CODEC_DECODE: &str = r#"
 
 
 
-fn __is_null(v: Value) -> Bool = prim.load32(prim.handle(v) + 4) == 0
+fn __is_null(v: Value) -> Bool = v == value.null()
 
 
 fn __dl_int(items: List[Value], n: Int, i: Int, acc: List[Int]) -> Result[List[Int], String] =
@@ -5839,6 +5839,11 @@ pub const SRC_FLOAT: &str = r#"
 @intrinsic("almide_rt_float_to_string")
 fn to_string(x: Float) -> String = _
 
+
+/// Shortest round-trip digits, without the integer .0 suffix.
+@intrinsic("almide_rt_float_to_string_compound")
+fn __to_string_compound(x: Float) -> String = _
+
 /// Truncates toward 0, saturating; NaN gives 0.
 @intrinsic("almide_rt_float_to_int")
 fn __to_int(n: Float) -> Int = _
@@ -6064,6 +6069,11 @@ local fn pad9(s: String) -> String = if string.len(s) >= 9 then s else pad9("0" 
 pub const SRC_FLOAT32: &str = r#"/// Shortest f32 round-trip digits, no exponent; 0.1 stays 0.1, 2.0 keeps .0.
 @intrinsic("almide_rt_float32_to_string")
 fn to_string(x: Float32) -> String = _
+
+
+/// Shortest round-trip digits, without the integer .0 suffix.
+@intrinsic("almide_rt_float32_to_string_compound")
+fn __to_string_compound(x: Float32) -> String = _
 
 
 /// -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
@@ -7367,6 +7377,7 @@ fn float_to_string(x: Float) -> String = __sf_main(x, true)
 
 
 
+@specializes("float.__to_string_compound")
 fn float_to_string_compound(x: Float) -> String = __sf_main(x, false)
 
 
@@ -7397,6 +7408,7 @@ fn __sf32_main(x: Float32, dot0: Bool) -> String = {
 fn float32_to_string(x: Float32) -> String = __sf32_main(x, true)
 
 
+@specializes("float32.__to_string_compound")
 fn float32_to_string_compound(x: Float32) -> String = __sf32_main(x, false)
 
 
@@ -29817,80 +29829,8 @@ fn option_to_string_oi(o: (Int?)?) -> String = match o {
 }
 "#;
 pub const SRC_OPTION_TO_STRING_S: &str = r#"
-
-
-
-
-
-
-
-fn __ots_is_escaped(b: Int) -> Bool = if b == 92 then true
-else if b == 34 then true
-else if b == 10 then true
-else if b == 13 then true
-else if b == 9 then true else false
-
-
-fn __ots_esc_len(src: Int, slen: Int, i: Int, acc: Int) -> Int = if i >= slen then acc
-else {
-  let b = prim.load8(src + i)
-  let w = if __ots_is_escaped(b) then 2 else 1
-  __ots_esc_len(src, slen, i + 1, acc + w)
-}
-
-
-fn __ots_esc_char(b: Int) -> Int = if b == 10 then 110
-else if b == 13 then 114
-else if b == 9 then 116 else b
-
-
-fn __ots_fill_esc(src: Int, slen: Int, i: Int, pos: Int) -> Int = if i >= slen then pos
-else {
-  let b = prim.load8(src + i)
-  let pos1 = if __ots_is_escaped(b) then {
-    prim.store8(pos, 92)
-
-    prim.store8(pos + 1, __ots_esc_char(b))
-    pos + 2
-  } else {
-    prim.store8(pos, b)
-    pos + 1
-  }
-  __ots_fill_esc(src, slen, i + 1, pos1)
-}
-
-
-fn __ots_some(v: String) -> String = {
-  let h = prim.handle(v)
-  let slen = prim.load32(h + 4)
-  let src = h + 12
-  let body = __ots_esc_len(src, slen, 0, 0)
-  let total = 8 + body
-
-  let buf = prim.alloc_str(total)
-  let base = prim.handle(buf) + 12
-  prim.store8(base, 115)
-
-  prim.store8(base + 1, 111)
-
-  prim.store8(base + 2, 109)
-
-  prim.store8(base + 3, 101)
-
-  prim.store8(base + 4, 40)
-
-  prim.store8(base + 5, 34)
-
-  let mid = __ots_fill_esc(src, slen, 0, base + 6)
-  prim.store8(mid, 34)
-
-  prim.store8(mid + 1, 41)
-
-  buf
-}
-
 fn option_to_string_s(o: String?) -> String = match o {
-  some(v) => __ots_some(v),
+  some(v) => "some(" + string.__quote(v) + ")",
   none => "none",
 }
 "#;
@@ -34577,56 +34517,10 @@ else {
 }
 
 
-fn __rts_err(e: String) -> String = {
-  let h = prim.handle(e)
-  let slen = prim.load32(h + 4)
-  let src = h + 12
-  let body = __rts_esc_len(src, slen, 0, 0)
-  let buf = prim.alloc_str(7 + body)
-
-  let base = prim.handle(buf) + 12
-  prim.store8(base, 101)
-
-  prim.store8(base + 1, 114)
-
-  prim.store8(base + 2, 114)
-
-  prim.store8(base + 3, 40)
-
-  prim.store8(base + 4, 34)
-
-  let mid = __rts_fill_esc(src, slen, 0, base + 5)
-  prim.store8(mid, 34)
-
-  prim.store8(mid + 1, 41)
-
-  buf
-}
+fn __rts_err(e: String) -> String = "err(" + string.__quote(e) + ")"
 
 
-fn __rts_ok_s(v: String) -> String = {
-  let h = prim.handle(v)
-  let slen = prim.load32(h + 4)
-  let src = h + 12
-  let body = __rts_esc_len(src, slen, 0, 0)
-  let buf = prim.alloc_str(6 + body)
-
-  let base = prim.handle(buf) + 12
-  prim.store8(base, 111)
-
-  prim.store8(base + 1, 107)
-
-  prim.store8(base + 2, 40)
-
-  prim.store8(base + 3, 34)
-
-  let mid = __rts_fill_esc(src, slen, 0, base + 4)
-  prim.store8(mid, 34)
-
-  prim.store8(mid + 1, 41)
-
-  buf
-}
+fn __rts_ok_s(v: String) -> String = "ok(" + string.__quote(v) + ")"
 
 
 
@@ -34786,21 +34680,7 @@ fn result_to_string_ls(r: Result[List[String], String]) -> String = match r {
 
 
 
-fn __rts_quote(s: String) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let src = h + 12
-  let body = __rts_esc_len(src, slen, 0, 0)
-  let buf = prim.alloc_str(2 + body)
-
-  let base = prim.handle(buf) + 12
-  prim.store8(base, 34)
-
-  let mid = __rts_fill_esc(src, slen, 0, base + 1)
-  prim.store8(mid, 34)
-
-  buf
-}
+fn __rts_quote(s: String) -> String = string.__quote(s)
 
 
 
@@ -37236,6 +37116,11 @@ fn __err_text(s: String) -> String = _
 fn __string_media_type(s: String) -> String = "text/plain; charset=utf-8"
 
 fn __string_to_text(s: String) -> String = s
+
+
+/// Quote a String and escape backslash, quote, newline, carriage return and tab.
+@intrinsic("almide_rt_string_quote")
+fn __quote(s: String) -> String = _
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
@@ -38206,6 +38091,7 @@ else {
   __sq_fill_esc(src, slen, i + 1, pos1)
 }
 
+@specializes("string.__quote")
 fn string_quote(s: String) -> String = {
   let sh = prim.handle(s)
   let slen = prim.load32(sh + 4)

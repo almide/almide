@@ -1,5 +1,10 @@
 // float extern — Rust native implementations
 
+// Interpolation uses Display without the explicit to_string integer suffix.
+// Keep binary32 in its original lane so its shortest spelling is not widened.
+pub fn almide_rt_float_to_string_compound(n: f64) -> AlmideString { format!("{}", n).into() }
+pub fn almide_rt_float32_to_string_compound(n: f32) -> AlmideString { format!("{}", n).into() }
+
 pub fn almide_rt_float_to_string(n: f64) -> AlmideString {
     let __almide_out: String = {
         let s = format!("{}", n);

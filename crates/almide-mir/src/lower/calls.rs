@@ -269,6 +269,9 @@ impl LowerCtx {
             args: lowered,
             result: Some(repr),
         });
+        if repr.is_heap() {
+            self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(result_ty));
+        }
         Ok(dst)
     }
 

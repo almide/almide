@@ -93,7 +93,10 @@ pub(crate) fn carrier_values(
 ) -> BTreeMap<ValueId, u16> {
     let mut ty = BTreeMap::new();
     for (v, key) in &f.aggregate_blocks {
-        set_carrier(&mut ty, *v, crate::render_native_rec::rec_index(key).filter(|i| is_carrier(*i)));
+        set_carrier(&mut ty, *v, crate::render_native_rec::rec_index(key).filter(|i| {
+            is_carrier(*i) || crate::render_native_rec::map_kinds(*i).is_some()
+                || crate::render_native_rec::set_elem(*i).is_some()
+        }));
     }
     for (p, k) in f.params.iter().zip(&own.0) {
         set_carrier(&mut ty, p.value, *k);

@@ -138,27 +138,8 @@ fn native_closure_sig_kind(
     record_layouts: &crate::lower::RecordLayouts,
     variant_layouts: &crate::lower::VariantLayouts,
 ) -> Option<crate::render_native::NativeSigKind> {
-    use almide_lang::types::Ty;
-    use crate::render_native::NativeSigKind;
-
-    match t {
-        // A scalar closure travels as its env block (rung-5 closures slab).
-        Ty::Fn { is_effect: _, params, ret }
-            if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
-                && matches!(**ret, Ty::Int | Ty::Bool) =>
-        {
-            Some(NativeSigKind::ListI64)
-        }
-        // #4006 family G: a closure of typed params and result rides the same
-        // env block; its call dispatches by signature.
-        Ty::Fn { is_effect: false, params, ret }
-            if params.iter().all(|p| native_sig_kind(p, record_layouts, variant_layouts).is_some())
-                && (matches!(**ret, Ty::Unit) || native_sig_kind(ret, record_layouts, variant_layouts).is_some()) =>
-        {
-            Some(NativeSigKind::ListI64)
-        }
-        _ => None,
-    }
+    crate::render_native_rec::closure_env_type(t, |p| native_sig_kind(p, record_layouts, variant_layouts).is_some())
+        .then_some(crate::render_native::NativeSigKind::ListI64)
 }
 
 /// [`native_sig_kind`]'s last group: the generated-type kinds (`Value`,
@@ -299,7 +280,7 @@ fn declare_native_lambda_sigs(
     Ok(())
 }
 
-/// #4006 family G: a lambda with a heap param or a heap result is typed
+/// A lambda with a heap or Float parameter/result is typed
 /// from its declared signature (recorded at the lift). `None` = not such a
 /// lambda, or a kind with no native spelling: it falls through to the scalar
 /// slab, which walls a heap param as before.
@@ -312,7 +293,10 @@ fn heap_lambda_native_sig(
     let (ptys, rty) = crate::lambda_sigs::get(&f.name)?;
     let heap = f.params[1..].iter().any(|p| !matches!(p.repr, crate::Repr::Scalar { .. }))
         || crate::lower::is_heap_ty(&rty);
-    if !heap {
+    // A scalar MIR repr alone erases Float to i64. Generic runtime callbacks
+    // must retain numeric equality (-0 == +0, NaN != NaN), not compare bits.
+    let float = ptys.iter().chain([&rty]).any(crate::render_native_rec::is_f64_scalar);
+    if !heap && !float {
         return None;
     }
     if ptys.len() + 1 != f.params.len() {

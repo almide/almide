@@ -219,12 +219,16 @@ impl LowerCtx {
     /// all-scalar aggregate tail).
     fn classify_elem_drop_containers(&self, elem_ty: &Ty) -> Option<ListElemDrop> {
         if matches!(elem_ty,
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, i)
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List
+                | almide_lang::types::constructor::TypeConstructorId::Set, i)
                 if i.len() == 1 && matches!(i[0], Ty::String))
         {
             // A `List[List[String]]` literal (`[["b","2"], ["a","1"]]` — the sort_by
             // string-key shape): each inner list is a fresh owned DynListStr; the outer
             // drop is the recursive list-of-list-str free (`list_list_str_lists`).
+            // Set[String] has the same owned-string slots and length header
+            // (set_str.almd); its index sidecar owns no heap. Keep its declared
+            // Set type for native rendering, while reusing that exact sweep.
             return Some(ListElemDrop::ListStr);
         }
         if matches!(elem_ty,
@@ -450,6 +454,10 @@ impl LowerCtx {
             self.live_heap_handles.retain(|x| *x != obj);
         }
         self.register_list_drop_kind(dst, kind);
+        // Preserve container identity: a List[Set[String]] has the same drop
+        // shape as List[List[String]], but a distinct native element type.
+        self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(
+            &Ty::Applied(TypeConstructorId::List, vec![elem_ty].into())));
         // The literal is a REAL, POPULATED nested-ownership block (every element built
         // and moved in above) — admit the element-precise `xs[i]` borrow over the bound
         // var (`try_lower_heap_field_borrow`'s materialized_lists gate; the fan.settle

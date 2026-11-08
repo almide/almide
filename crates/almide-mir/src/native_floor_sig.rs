@@ -150,6 +150,7 @@ fn result_ret_agrees(r: FloorRet, t: &str) -> bool {
     let string = is_rust_string;
     match r {
         FloorRet::ResValue => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideValue" && string(err)),
+        FloorRet::ResStrValuePairs => result_parts(t).is_some_and(|(ok, err)| ok == "Vec<(AlmideString,AlmideValue)>" && string(err)),
         FloorRet::ResListValue => result_parts(t).is_some_and(|(ok, err)| ok == "Vec<AlmideValue>" && string(err)),
         FloorRet::ResListStr => result_parts(t).is_some_and(|(ok, err)| {
             ok.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(string) && string(err)
@@ -179,5 +180,23 @@ fn res_ok_agrees(k: Option<Scalar>, ok: &str) -> bool {
         Some(Scalar::Int) => ok == "i64",
         Some(Scalar::Bool) => ok == "bool",
         Some(Scalar::Float) => ok == "f64",
+    }
+}
+
+/// A Result's `List[String]` / `Option[String]` ok type.
+fn floor_ret_result_str_container(ok: &TypeExpr) -> Option<FloorRet> {
+    match ok {
+        TypeExpr::Generic { name, args: a } if name.as_str() == "List" && a.len() == 1 && simple(&a[0]) == Some("String") => {
+            Some(FloorRet::ResListStr)
+        }
+        TypeExpr::Generic { name, args: a } if name.as_str() == "List" && a.len() == 1 && simple(&a[0]) == Some(VALUE_TYPE) => {
+            return Some(FloorRet::ResListValue)
+        }
+        TypeExpr::Generic { name, args: a } if name.as_str() == "List" && a.len() == 1
+            && matches!(&a[0], TypeExpr::Tuple { elements } if elements.iter().map(simple).collect::<Vec<_>>() == [Some("String"), Some(VALUE_TYPE)]) => Some(FloorRet::ResStrValuePairs),
+        TypeExpr::Generic { name, args: a } if is_option_name(name.as_str()) && a.len() == 1 && simple(&a[0]) == Some("String") => {
+            Some(FloorRet::ResOptStr)
+        }
+        _ => None,
     }
 }

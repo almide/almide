@@ -509,3 +509,8 @@ fn __err_text(s: String) -> String = _
 fn __string_media_type(s: String) -> String = "text/plain; charset=utf-8"
 
 fn __string_to_text(s: String) -> String = s
+
+// Internal compound-value representation; kept off the public surface.
+/// Quote a String and escape backslash, quote, newline, carriage return and tab.
+@intrinsic("almide_rt_string_quote")
+fn __quote(s: String) -> String = _

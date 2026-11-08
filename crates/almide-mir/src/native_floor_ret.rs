@@ -15,6 +15,7 @@ fn render_ret(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> R
         | FloorRet::ResValue
         | FloorRet::OptStr
         | FloorRet::ResListValue
+        | FloorRet::ResStrValuePairs
         | FloorRet::ResListStr
         | FloorRet::ResBytes
         | FloorRet::ResOptStr => Ok(carrier_ret_of(r, call)),
@@ -73,6 +74,17 @@ fn carrier_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
             format!("({call}).map(|v| v.into_iter().map(AlmideString::from).collect::<Vec<AlmideString>>()).map_err(AlmideString::from)"),
             Some(NTy::Rec(crate::render_native_rec::result_type_of(NTy::VecStr, NTy::Str))),
         ),
+        FloorRet::ResStrValuePairs => {
+            let fields = [NTy::Str, NTy::Rec(crate::render_native_rec::value_index())];
+            let ty = almide_lang::types::Ty::Tuple(vec![almide_lang::types::Ty::String,
+                almide_lang::types::Ty::Named(almide_base::intern::sym("Value"), Default::default())].into());
+            let pair = crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(&ty))
+                .unwrap_or_else(|| crate::render_native_rec::slots_type_of(&fields));
+            let pair_name = crate::render_native_rec::struct_name(pair);
+            let list = NTy::Rec(crate::render_native_rec::list_type_of(NTy::Rec(pair)));
+            let result = crate::render_native_rec::result_type_of(list, NTy::Str);
+            (format!("({call}).map(|xs| xs.into_iter().map(|(k, v)| {pair_name} {{ f0: k, f1: v }}).collect::<Vec<{pair_name}>>()).map_err(AlmideString::from)"), Some(NTy::Rec(result)))
+        }
         FloorRet::ResListValue => {
             let l = NTy::Rec(crate::render_native_rec::list_type_of(NTy::Rec(crate::render_native_rec::value_index())));
             (format!("({call}).map_err(AlmideString::from)"), Some(NTy::Rec(crate::render_native_rec::result_type_of(l, NTy::Str))))
@@ -103,23 +115,16 @@ fn set_matrix_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16
             // No set arg (`set.new()`, `set.from_list(xs)`): the result's
             // declared set type, whose elements the list arg must be.
             (None, Some(i)) if crate::render_native_rec::set_elem(i).is_some() => {
-                let e = crate::render_native_rec::set_elem(i);
-                let list_ok = cx.params.iter().zip(cx.args).all(|(p, (_, got))| match p {
-                    FloorParam::List(ListElem::Any) => match e {
-                        Some(NTy::I64) => matches!(got, NTy::Vec | NTy::VecRef),
-                        Some(NTy::Str) => matches!(got, NTy::VecStr | NTy::VecStrRef),
-                        _ => false,
-                    },
-                    _ => true,
-                });
+                let e = crate::render_native_rec::set_elem(i).ok_or_else(mismatch)?;
+                let list_ok = set_list_agrees(cx.params, cx.args, e);
                 if !list_ok {
-                    return Err(mismatch());
+                    return Err(wall(format!("native: floor call `{name}` set element {e:?} disagrees with list arguments {:?}", cx.args)));
                 }
                 (call, Some(NTy::Rec(i)))
             }
             // Or the type the self-hosted body this call specializes declares.
             _ => match specialized_ret(name).as_ref().and_then(|t| declared_kinds(t, "Set")) {
-                Some(e) if e.len() == 1 && matches!(e[0], NTy::I64 | NTy::Str) && set_list_agrees(cx.params, cx.args, e[0]) => {
+                Some(e) if e.len() == 1 && crate::render_native_rec::native_set_element_kind(e[0]) && set_list_agrees(cx.params, cx.args, e[0]) => {
                     (call, Some(NTy::Rec(crate::render_native_rec::set_type_of(e[0]))))
                 }
                 _ => return Err(mismatch()),
@@ -128,6 +133,7 @@ fn set_matrix_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16
         FloorRet::SetElems => match set_e.ok_or_else(mismatch)? {
             NTy::I64 => (call, Some(NTy::Vec)),
             NTy::Str => (call, Some(NTy::VecStr)),
+            e if crate::render_native_rec::native_set_element_kind(e) => (call, Some(NTy::Rec(crate::render_native_rec::list_type_of(e)))),
             _ => return Err(mismatch()),
         },
         FloorRet::OptMatrix => {

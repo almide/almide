@@ -135,6 +135,7 @@ pub(crate) enum FloorRet {
     /// `Result[List[Value], String]` — the generated carrier of the runtime's
     /// `Vec<AlmideValue>`.
     ResListValue,
+    ResStrValuePairs,
     /// The builtin `Matrix` — the runtime's own `AlmideMatrix`.
     Matrix,
     /// `Matrix?` — the generated carrier of an `Option<AlmideMatrix>`.
@@ -325,7 +326,7 @@ fn set_list_agrees(params: &[FloorParam], args: &[(String, NTy)], e: NTy) -> boo
         FloorParam::List(ListElem::Any) => match e {
             NTy::I64 => matches!(got, NTy::Vec | NTy::VecRef),
             NTy::Str => matches!(got, NTy::VecStr | NTy::VecStrRef),
-            _ => false,
+            e => matches!(got, NTy::Rec(i) | NTy::RecRef(i) if crate::render_native_rec::list_elem(*i).is_some_and(|got| crate::native_value_repr::same_owned(got, e))),
         },
         _ => true,
     })
@@ -636,7 +637,7 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
     let counted_host_op = crate::host_ops::host_op(module, func)
         .is_some_and(|o| o.intrinsic_fn == func && o.symbol == symbol && !o.caps.is_empty());
     if is_effect
-        && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResListValue | FloorRet::ResBytes | FloorRet::ResOptStr)
+        && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResListValue | FloorRet::ResStrValuePairs | FloorRet::ResBytes | FloorRet::ResOptStr)
         && !counted_host_op
     {
         return Err("an effect fn whose return is not a Result carrier".into());
@@ -764,22 +765,6 @@ fn floor_ret_result(ok: &TypeExpr, err: &TypeExpr) -> Option<FloorRet> {
         "String" => Some(FloorRet::ResStr),
         n if n == VALUE_TYPE => Some(FloorRet::ResValue),
         ok => scalar_of(ok).map(|k| FloorRet::Res(Some(k))),
-    }
-}
-
-/// A Result's `List[String]` / `Option[String]` ok type.
-fn floor_ret_result_str_container(ok: &TypeExpr) -> Option<FloorRet> {
-    match ok {
-        TypeExpr::Generic { name, args: a } if name.as_str() == "List" && a.len() == 1 && simple(&a[0]) == Some("String") => {
-            Some(FloorRet::ResListStr)
-        }
-        TypeExpr::Generic { name, args: a } if name.as_str() == "List" && a.len() == 1 && simple(&a[0]) == Some(VALUE_TYPE) => {
-            return Some(FloorRet::ResListValue)
-        }
-        TypeExpr::Generic { name, args: a } if is_option_name(name.as_str()) && a.len() == 1 && simple(&a[0]) == Some("String") => {
-            Some(FloorRet::ResOptStr)
-        }
-        _ => None,
     }
 }
 

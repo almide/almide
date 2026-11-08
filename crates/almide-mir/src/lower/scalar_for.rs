@@ -431,6 +431,11 @@ impl LowerCtx {
         // parameter. Preserve its declared Option/Result read shape so a
         // match or ?? in the loop reads the element rather than declining.
         self.seed_variant_param(elem, &plan.elem_ty);
+        // A function element is this borrowed closure block, not the list.
+        // Its existing indirect-call path checks the signature and captures.
+        if matches!(plan.elem_ty, Ty::Fn { .. }) {
+            self.closure_values.insert(elem);
+        }
         // A heap-AGGREGATE element (tuple/record): register the borrowed block handle as a
         // materialized aggregate so a `p.0`/`r.x` field projection and a `let (x, y) = p`
         // destructure read the ELEMENT's slots (not the container) — the same per-element borrow

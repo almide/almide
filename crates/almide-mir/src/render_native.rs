@@ -247,11 +247,11 @@ fn push_closure_dispatch_tables(
         .copied()
         .filter(|n| n.starts_with("__lambda_"));
     for (idx, name) in lambda_names.enumerate() {
-        if !matches!(fn_rets.get(name), Some(Some(NTy::I64)) | Some(None)) {
+        if !matches!(fn_rets.get(name), Some(Some(NTy::I64 | NTy::F64)) | Some(None)) {
             continue;
         }
         // A heap-param lambda dispatches through its signature's typed table.
-        if sigs.get(name).is_some_and(|(ps, _)| ps.iter().skip(1).any(|k| *k != NativeSigKind::I64)) {
+        if sigs.get(name).is_some_and(|(ps, _)| ps.iter().skip(1).any(|k| !matches!(k, NativeSigKind::I64 | NativeSigKind::F64))) {
             continue;
         }
         let arity = user_fns[name].params.len().saturating_sub(1);
@@ -259,13 +259,22 @@ fn push_closure_dispatch_tables(
     }
     for (arity, fns) in arities {
         let params: String = (0..arity).map(|i| format!(", a{i}: i64")).collect();
-        let args: String = (0..arity).map(|i| format!(", a{i}")).collect();
         out.push_str(&format!(
             "fn __almd_ci_{arity}(idx: i64, env: &[i64]{params}) -> i64 {{\n    match idx {{\n"
         ));
         for (idx, name) in fns {
+            // This table serves the MIR scalar ABI: every argument/result
+            // is an i64 lane. Decode/encode Float only at the declared
+            // lambda boundary, preserving the bits for its scalar caller.
+            let args: String = (0..arity).map(|i| {
+                if sigs.get(name).and_then(|(ps, _)| ps.get(i + 1)) == Some(&NativeSigKind::F64) {
+                    format!(", f64::from_bits(a{i} as u64)")
+                } else { format!(", a{i}") }
+            }).collect();
             if fn_rets.get(name) == Some(&None) {
                 out.push_str(&format!("        {idx} => {{ {}(env{args}); 0 }}\n", mangle(name)));
+            } else if fn_rets.get(name) == Some(&Some(NTy::F64)) {
+                out.push_str(&format!("        {idx} => {}(env{args}).to_bits() as i64,\n", mangle(name)));
             } else {
                 out.push_str(&format!("        {idx} => {}(env{args}),\n", mangle(name)));
             }
