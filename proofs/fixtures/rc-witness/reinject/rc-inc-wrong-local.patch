@@ -1,0 +1,20 @@
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index ebfb6f6b1..084ed3894 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -262,7 +262,14 @@ impl Emitter<'_> {
+         // other mutation is a functional rebind — the bind-time copy
+         // (which left a fresh rhs at rc 1 forever) is gone.
+         if self.rc_droppable(declared) && !self.rc_owned_result(value) && moved.is_none() {
+-            self.rc_inc_top();
++            // RE-INJECTED (#4277 drill): the +1 of `alias`'s borrowed bind is
++            // taken on another owned local; its recorded event stays.
++            if self.vt.get(*var).name.as_str() == "alias" {
++                let other = self.rc_owned.iter().copied().max().expect("an owned local");
++                self.f.instructions().local_get(other).call(crate::F_INC);
++            } else {
++                self.rc_inc_top();
++            }
+         }
+         if self.cells.contains(var) {
+             // C-319: the bind allocates the shared cell; the

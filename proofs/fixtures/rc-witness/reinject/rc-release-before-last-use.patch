@@ -1,0 +1,56 @@
+diff --git a/crates/almide-wasm/src/exit_plan.rs b/crates/almide-wasm/src/exit_plan.rs
+index 70f5ae9b3..d85685810 100644
+--- a/crates/almide-wasm/src/exit_plan.rs
++++ b/crates/almide-wasm/src/exit_plan.rs
+@@ -215,6 +215,11 @@ impl Emitter<'_> {
+             if omit_first && k == 0 {
+                 continue;
+             }
++            // RE-INJECTED (#4277 drill): the release moved before the last use.
++            if idx == EARLY.load(std::sync::atomic::Ordering::Relaxed) && matches!(plan.continuation, Continuation::ReturnSuccess) {
++                EARLY.store(u32::MAX, std::sync::atomic::Ordering::Relaxed);
++                continue;
++            }
+             let dec = self.dec_fn_of_local(idx);
+             self.f.instructions().local_get(idx).call(dec);
+         }
+@@ -286,6 +291,8 @@ impl Emitter<'_> {
+ 
+ /// The negative-test switch: when set, `emit_exit` skips the first release
+ /// of every plan. Process-wide; tests/exit_validation.rs is its one user.
++// RE-INJECTED (#4277 drill): the local released early.
++pub(crate) static EARLY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+ static OMIT_FIRST_RELEASE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+ 
+ /// Test hook (E083 negative half): make the emitter omit the first release
+@@ -679,7 +686,10 @@ pub(crate) fn validate_exits(
+     drop_fns: &[u32],
+     name_of: impl Fn(u32) -> String,
+ ) -> Result<(), EmitError> {
+-    if ledger.is_empty() {
++    // RE-INJECTED (#4277 drill): the producer's own exit validator is part of
++    // the producer the byte check does not trust — off, as a producer bug would
++    // leave it.
++    if ledger.is_empty() || true {
+         return Ok(());
+     }
+     let d = Defects { function };
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index ebfb6f6b1..b541c5427 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -300,6 +300,14 @@ impl Emitter<'_> {
+                 }
+             }
+             self.f.instructions().local_set(idx);
++            // RE-INJECTED (#4277 drill): `early_freed` is released right after
++            // its bind, before its last use; its exit release is not emitted,
++            // its recorded event stays.
++            if self.rc_droppable(declared) && self.vt.get(*var).name.as_str() == "early_freed" {
++                let dec = self.dec_fn_of(declared);
++                self.f.instructions().local_get(idx).call(dec);
++                crate::exit_plan::EARLY.store(idx, std::sync::atomic::Ordering::Relaxed);
++            }
+             if let Some((_, src)) = moved {
+                 self.empty_rebound(idx, src);
+             }
