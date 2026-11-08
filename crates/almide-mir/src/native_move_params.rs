@@ -142,8 +142,10 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BT
             }
             _ => false,
         };
-        if named.iter().all(|&i| gives(i)) && func.ret != Some(p.value) && crate::mir_liveness::last_use_on_every_path(func, p.value, &named) {
-            out.extend(named.iter().map(|&i| (k, i)));
+        // Reads before them stay reads of the param it still holds.
+        let given: Vec<usize> = named.iter().copied().filter(|&i| gives(i) && !crate::mir_liveness::live_after(func, i, p.value)).collect();
+        if !given.is_empty() && func.ret != Some(p.value) && crate::mir_liveness::last_use_on_every_path(func, p.value, &given) {
+            out.extend(given.iter().map(|&i| (k, i)));
         }
     }
     out
@@ -396,41 +398,64 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
         }
     }
     // To a fixpoint: a body that hands its param to a callee's move param
-    // takes it over in turn, once that callee's mode is known.
-    let mut owned: BTreeMap<String, Vec<bool>> = BTreeMap::new();
-    let mut next: Vec<MirFunction>;
-    let mut rounds = 0;
-    loop {
-        next = functions
-            .iter()
-            .map(|f| {
-                let takes = |k: usize| !not_handle.contains(&(f.name.clone(), k));
-                if eligible(f) { own_params(f, &takes, &owned).unwrap_or_else(|| f.clone()) } else { f.clone() }
-            })
-            .collect();
-        let modes: BTreeMap<String, Vec<bool>> = next
-            .iter()
-            .filter(|f| !f.owned_params.is_empty())
-            .map(|f| (f.name.clone(), f.params.iter().map(|p| f.owned_params.contains(&p.value)).collect()))
-            .collect();
-        if modes == owned || rounds == 8 {
-            break;
+    // takes it over in turn, once that callee's mode is known. From no move
+    // params up first; then, for functions that hand a param to each other
+    // (`collect(xs) = … step(xs)`, `step(xs) = … collect(xs)`), from every
+    // handle position down, kept only if every body it leaves verifies.
+    let solve = |start: BTreeMap<String, Vec<bool>>, strict: bool| -> Option<Vec<MirFunction>> {
+        let mut owned = start;
+        let mut next: Vec<MirFunction>;
+        let mut rounds = 0;
+        loop {
+            next = functions
+                .iter()
+                .map(|f| {
+                    let takes = |k: usize| !not_handle.contains(&(f.name.clone(), k));
+                    if eligible(f) { own_params(f, &takes, &owned).unwrap_or_else(|| f.clone()) } else { f.clone() }
+                })
+                .collect();
+            let modes: BTreeMap<String, Vec<bool>> = next
+                .iter()
+                .filter(|f| !f.owned_params.is_empty())
+                .map(|f| (f.name.clone(), f.params.iter().map(|p| f.owned_params.contains(&p.value)).collect()))
+                .collect();
+            if modes == owned {
+                break;
+            }
+            if rounds == 8 {
+                if strict {
+                    return None;
+                }
+                break;
+            }
+            rounds += 1;
+            owned = modes;
         }
-        rounds += 1;
-        owned = modes;
-    }
-    if owned.is_empty() {
-        return;
-    }
-    for f in next.iter_mut() {
-        // The join releases sunk into the arms first, so an arm's call takes
-        // the slot over; the plain body if the mirror refuses that.
-        let sunk = move_at_sites(&sink_join_releases(f, &owned), &owned);
-        let moved = if crate::verify_ownership(&sunk).is_ok() { sunk } else { move_at_sites(f, &owned) };
-        if crate::verify_ownership(&moved).is_err() {
-            return;
+        if owned.is_empty() {
+            return Some(functions.to_vec());
         }
-        *f = moved;
-    }
-    functions.clone_from_slice(&next);
+        for f in next.iter_mut() {
+            // The join releases sunk into the arms first, so an arm's call takes
+            // the slot over; the plain body if the mirror refuses that.
+            let sunk = move_at_sites(&sink_join_releases(f, &owned), &owned);
+            let moved = if crate::verify_ownership(&sunk).is_ok() { sunk } else { move_at_sites(f, &owned) };
+            if crate::verify_ownership(&moved).is_err() {
+                return None;
+            }
+            *f = moved;
+        }
+        Some(next)
+    };
+    let Some(up) = solve(BTreeMap::new(), false) else { return };
+    let top: BTreeMap<String, Vec<bool>> = functions
+        .iter()
+        .filter(|f| eligible(f))
+        .map(|f| (f.name.clone(), (0..f.params.len()).map(|k| f.params[k].repr.is_heap() && !not_handle.contains(&(f.name.clone(), k))).collect()))
+        .collect();
+    let owned_count = |fs: &[MirFunction]| fs.iter().map(|f| f.owned_params.len()).sum::<usize>();
+    let best = match solve(top, true) {
+        Some(down) if owned_count(&down) > owned_count(&up) => down,
+        _ => up,
+    };
+    functions.clone_from_slice(&best);
 }
