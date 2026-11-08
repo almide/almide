@@ -228,7 +228,7 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
         FloorParam::Elem(by_ref) => elem_arg(cx, *by_ref, code, got)?,
         FloorParam::Map(by_ref) => map_arg(cx, *by_ref, code, got, dying_here)?,
         FloorParam::MapKey(by_ref) | FloorParam::MapVal(by_ref) => map_entry_arg(cx, p, *by_ref, code, got, dying_here)?,
-        FloorParam::MapPairs => map_pairs_arg(cx, code, got, dying_here)?,
+        FloorParam::MapPairs => map_pairs_arg(cx, code, got)?,
         FloorParam::Value(by_ref) => value_arg(cx, *by_ref, code, got, dying_here)?,
         FloorParam::Set(_) | FloorParam::SetElem(_) | FloorParam::Matrix(_) | FloorParam::BytesMut => runtime_arg(cx, p, code, got, dying_here)?,
         FloorParam::Bytes => match got {
@@ -337,16 +337,11 @@ fn map_entry_arg(cx: &CallCx, p: &FloorParam, by_ref: bool, code: &str, got: &NT
     })
 }
 
-/// A `List[(K, V)]` param's argument. The caller's own list, not read again
-/// (a map literal's entries): its pairs move into the map, where a borrowed
-/// one is copied pair by pair.
-fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy, dying_here: bool) -> Result<String, LowerError> {
+/// A `List[(K, V)]` param's argument.
+fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerError> {
     let mismatch = cx.mismatch;
     let (NTy::Rec(i) | NTy::RecRef(i)) = got else { return Err(mismatch()) };
     let pair = crate::render_native_rec::list_elem(*i).ok_or_else(mismatch)?;
-    if let (NTy::Rec(_), true, NTy::VecStr) = (got, dying_here, pair) {
-        return Ok(format!("std::mem::take(&mut {code}).into_iter().map(|mut t| (std::mem::take(&mut t[0]), std::mem::take(&mut t[1]))).collect::<Vec<_>>()"));
-    }
     let (a, b) = match pair {
         NTy::Vec | NTy::VecRef => ("t[0]".to_string(), "t[1]".to_string()),
         // A pair of Strings the slot typing read as a String list.

@@ -41,7 +41,8 @@ pub(crate) fn borrow_reads(func: &MirFunction) -> BTreeSet<ValueId> {
 }
 
 /// The copies (`Dup`) of borrow-only reads that may stay references: every
-/// use of the copy only borrows too, it is never rebound nor returned, and
+/// use of the copy only borrows too, it is never rebound, returned or
+/// handed over, and
 /// the block the read borrows from is untouched up to the last read of
 /// anything borrowed from it ([`borrow_span`]). A copy rendered owned cloned
 /// the whole value (a captured map read for one `map.get`).
@@ -53,7 +54,12 @@ pub(crate) fn ref_dups(func: &MirFunction) -> BTreeSet<ValueId> {
         let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
         let (true, Some(&base)) = (reads.contains(d), args.first().and_then(|a| root.get(a))) else { continue };
         let (last, dups) = borrow_span(func, i, *d);
-        let fixed = |v: &ValueId| func.ret != Some(*v) && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if local == v));
+        // Never rebound, returned, or handed over (a call-site move, a
+        // uniqueness claim): the copy exists to be owned there.
+        let fixed = |v: &ValueId| {
+            func.ret != Some(*v)
+                && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local: x, .. } | Op::Consume { v: x } | Op::MakeUnique { v: x } if x == v))
+        };
         let borrowing = |(j, v): &(usize, ValueId)| fixed(v) && last_borrowing_use(func, *j, *v, &root).is_some();
         if dups.iter().all(borrowing) && block_untouched(func, i, last, base, &root) {
             out.extend(dups.iter().map(|(_, v)| *v));
