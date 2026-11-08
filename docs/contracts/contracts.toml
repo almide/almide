@@ -376,6 +376,7 @@ statement = "`to_upper` / `to_lower` / `capitalize` produce the SAME bytes as na
 since     = "0.24.0"
 status    = "active"
 evidence  = [
+  { path = "spec/wasm_cross/string_upper_inplace_aliases.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_reuse_pipeline.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_case_unicode.almd", class = "fixture" },
 ]
@@ -542,6 +543,7 @@ since     = "0.24.0"
 status    = "active"
 doc       = "C-033-cow-truth-table.md"
 evidence  = [
+  { path = "spec/wasm_cross/string_upper_inplace_aliases.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_reuse_pipeline.almd", class = "fixture" },
   { path = "spec/wasm_cross/alias_cow.almd", class = "fixture" },
   { path = "spec/lang/alias_cow_test.almd", class = "fixture" },

@@ -1,0 +1,101 @@
+// @contract: C-020, C-033
+// `string.to_upper` may uppercase ASCII in place when its argument is the
+// sole owner of a heap buffer with spare capacity. Every other holder of the
+// string must still read the original bytes: a caller that keeps the string,
+// a closure capture, a record field, a list element, a map value, the same
+// string passed twice in one call, a loop variable and a parameter the callee
+// still reads. The strings are built at run time so they are heap blocks, not
+// pooled literals.
+type Box = { name: String, n: Int }
+
+fn fresh(tag: String, n: Int) -> String = "${tag}-${n}-mixed Case"
+
+fn pair(a: String, b: String) -> String = "${a}|${b}"
+
+fn keep_param(s: String) -> String = {
+  let u = string.to_upper(s)
+  "${s}/${u}"
+}
+
+fn upper_last_use(s: String) -> String = string.to_upper(s)
+
+fn kept_after_call() -> Unit = {
+  let s = fresh("keep", 1)
+  let u = string.to_upper(s)
+  println("keep: ${s} ${u}")
+  let t = "${fresh("concat", 2)}" + " tail"
+  let v = string.to_upper(t)
+  println("concat: ${t} ${v}")
+}
+
+fn captured_in_closure() -> Unit = {
+  let s = fresh("closure", 3)
+  let f = () => s
+  let u = string.to_upper(s)
+  println("closure: ${f()} ${u} ${f()}")
+}
+
+fn stored_before_call() -> Unit = {
+  let s = fresh("record", 4)
+  let b = { name: s, n: 1 }
+  let u = string.to_upper(s)
+  println("record: ${b.name} ${u}")
+  let l = fresh("list", 5)
+  let xs = [l, l]
+  let lu = string.to_upper(l)
+  println("list: ${xs} ${lu}")
+  let m0 = fresh("map", 6)
+  let m = ["k": m0]
+  let mu = string.to_upper(m0)
+  println("map: ${m} ${mu}")
+  let h = fresh("elem", 7)
+  let ys = [h]
+  let eu = string.to_upper(ys[0])
+  println("elem: ${ys} ${eu}")
+}
+
+fn passed_twice() -> Unit = {
+  let s = fresh("twice", 8)
+  println("twice a: ${pair(string.to_upper(s), s)}")
+  let t = fresh("twice", 9)
+  println("twice b: ${pair(t, string.to_upper(t))}")
+}
+
+fn loop_vars() -> Unit = {
+  let words = [fresh("loop", 10), fresh("loop", 11)]
+  for w in words {
+    let u = string.to_upper(w)
+    println("loop: ${w} ${u}")
+  }
+  println("loop after: ${words}")
+  var acc = fresh("var", 12)
+  for i in list.range(0, 3) {
+    let u = string.to_upper(acc)
+    println("var: ${acc} ${u}")
+    acc = acc + "x${i}"
+  }
+  println("var after: ${acc}")
+}
+
+fn param_still_used() -> Unit = {
+  let s = fresh("param", 13)
+  println("param: ${keep_param(s)} ${s}")
+  println("param fresh: ${keep_param(fresh("param", 14))}")
+  println("last use: ${upper_last_use(fresh("last", 15))}")
+}
+
+fn unicode_after_ascii() -> Unit = {
+  let s = "${fresh("uni", 16)} ße"
+  let u = string.to_upper(s)
+  println("unicode: ${s} ${u}")
+}
+
+fn main() -> Unit = {
+  kept_after_call()
+  captured_in_closure()
+  stored_before_call()
+  passed_twice()
+  loop_vars()
+  param_still_used()
+  unicode_after_ascii()
+}
