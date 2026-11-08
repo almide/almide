@@ -1,0 +1,18 @@
+// v1-vs-v0 shape bench: a fold lambda whose body is a Float literal, read
+// through the typed dispatch table as the f64 its signature declares
+// (render_native_closure's arm_call, #4606).
+fn main() -> Unit = {
+  var total = 0.0
+  var i = 0
+  while i < 20000 {
+    let b: Bool = i % 2 == 0
+    let r: List[Float] = if b then [
+      list.fold(if b then ["a", "b"]
+      else ["c"], 0.0, (acc, s) => 0.5)
+    ]
+    else [1.0]
+    total = total + r[0]
+    i = i + 1
+  }
+  println(float.to_string(total))
+}
