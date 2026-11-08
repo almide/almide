@@ -394,6 +394,11 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     almide_codegen::pass_region_window_native::native_region_windows(&mut ir);
     let windows = crate::native_region_window::window_fns(&ir);
     let mut ir = crate::fan_native::lift_fan_arms(ir)?;
+    if let Some(f) = crate::charge_probe::region_reaching_callback(&ir) {
+        return Err(LowerError::Unsupported(format!(
+            "native: metered region fn `{f}` hands a callback on, which the v1 meter does not charge as the meter plan does"
+        )));
+    }
     // Rung-5 records slab: the layout registries the wasm leg threads — without
     // them a record literal lowers as an Opaque skeleton and every field read
     // strict-walls (the probe_native trap recorded in the trust-spine ledger).

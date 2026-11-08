@@ -99,6 +99,68 @@ pub fn note_program_regions(has: bool) {
     PROGRAM_HAS_REGIONS.with(|b| b.set(has));
 }
 
+/// The first fn a metered region reaches (the region itself included) that
+/// hands a callback on: a lambda, or a fn value passed as a call argument.
+/// The meter plan (`almide_ir::meter_plan`) charges such a callback as the
+/// wasm leg and the standard codegen run it — a literal one given to a stdlib
+/// higher-order call is that call's loop body and charges nothing, a fn value
+/// charges a hop per call — while this pass charges every loop head and lambda
+/// entry the lowering leaves. A region that reaches one is metered by the
+/// standard codegen instead (C-204 / C-205: the legs charge alike).
+pub fn region_reaching_callback(ir: &almide_ir::IrProgram) -> Option<String> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    use almide_ir::{CallTarget, IrExpr, IrExprKind};
+    struct Scan {
+        callback: bool,
+        calls: Vec<String>,
+    }
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::Lambda { .. } => self.callback = true,
+                IrExprKind::Call { target, args, .. } => {
+                    if args.iter().any(|a| matches!(a.ty, almide_lang::types::Ty::Fn { .. })) {
+                        self.callback = true;
+                    }
+                    if let CallTarget::Named { name } = target {
+                        self.calls.push(name.as_str().to_string());
+                    }
+                }
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+    }
+    // The probe meters every fn by this pass on purpose (its trace is the
+    // measurement), so it keeps the v1 render.
+    if probe_enabled() {
+        return None;
+    }
+    let by_name: std::collections::HashMap<&str, &IrExpr> =
+        ir.functions.iter().map(|f| (f.name.as_str(), &f.body)).collect();
+    let mut queue: Vec<String> = ir
+        .functions
+        .iter()
+        .filter(|f| almide_ir::runtime_use::is_metered_region(f.name.as_str()))
+        .map(|f| f.name.as_str().to_string())
+        .collect();
+    let mut seen: std::collections::HashSet<String> = queue.iter().cloned().collect();
+    while let Some(n) = queue.pop() {
+        let Some(body) = by_name.get(n.as_str()) else { continue };
+        let mut scan = Scan { callback: false, calls: Vec::new() };
+        scan.visit_expr(body);
+        if scan.callback {
+            return Some(n);
+        }
+        for c in scan.calls {
+            if seen.insert(c.clone()) {
+                queue.push(c);
+            }
+        }
+    }
+    None
+}
+
 /// Drop the lowering's concat charges from a fn that is not metered.
 fn strip_dyn_charges(f: &mut MirFunction) {
     f.ops.retain(|op| !matches!(op, Op::ChargeDyn { .. }));
@@ -179,19 +241,7 @@ fn specialize_metered_clones(functions: &mut Vec<MirFunction>, exempt: &std::col
     let mut uses_funcref = false;
     let mut queue: VecDeque<String> = names.iter().filter(|n| is_root(n)).cloned().collect();
     let mut visited: BTreeSet<String> = queue.iter().cloned().collect();
-    let mut lambdas_seeded = false;
-    loop {
-        let Some(n) = queue.pop_front() else {
-            // The lambdas are metered globally once a region reaches a
-            // FuncRef, so what they call is region-reachable too: their
-            // callees run as metered clones, as every other region callee.
-            if uses_funcref && !lambdas_seeded {
-                lambdas_seeded = true;
-                queue.extend(names.iter().filter(|n| n.starts_with("__lambda_") && visited.insert((*n).clone())).cloned());
-                continue;
-            }
-            break;
-        };
+    while let Some(n) = queue.pop_front() {
         let Some(&i) = by_name.get(&n) else { continue };
         for op in &functions[i].ops {
             match op {
@@ -238,7 +288,6 @@ fn specialize_metered_clones(functions: &mut Vec<MirFunction>, exempt: &std::col
             retarget(f, &reachable);
             charge_fn(f, exempt);
         } else if uses_funcref && name.starts_with("__lambda_") {
-            retarget(f, &reachable);
             charge_fn(f, exempt);
         } else {
             strip_dyn_charges(f);
