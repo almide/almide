@@ -45,7 +45,6 @@ thread_local! {
 /// Record the entry lists and pair blocks of the function about to render.
 pub(crate) fn begin(func: &MirFunction) {
     let found = entries(func);
-    if std::env::var("ALMIDE_DEBUG_MAPENTRIES").is_ok() { eprintln!("MAPENTRIES begin {} lists={:?}", func.name, found.lists); }
     ENTRIES.with(|e| *e.borrow_mut() = found);
 }
 
@@ -54,7 +53,6 @@ pub(crate) fn defer_pair(v: ValueId) -> bool {
     ENTRIES.with(|e| {
         let mut e = e.borrow_mut();
         let pair = e.pairs.contains(&v);
-        if std::env::var("ALMIDE_DEBUG_MAPENTRIES").is_ok() { eprintln!("MAPENTRIES defer_pair {v:?} {pair} lists={:?}", e.lists.keys().collect::<Vec<_>>()); }
         if pair {
             e.deferred.insert(v, 0);
         }
@@ -194,11 +192,6 @@ fn entries(func: &MirFunction) -> Entries {
         for (p, a) in floor.params.iter().zip(args) {
             let (FloorParam::MapPairs, CallArg::Handle(arg)) = (p, a) else { continue };
             let list = root.get(arg).unwrap_or(arg);
-            if std::env::var("ALMIDE_DEBUG_MAPENTRIES").is_ok() {
-                eprintln!("MAPENTRIES fn={} call={name} arg={arg:?} list={list:?} alloc={:?} stores={:?} reads={:?}", func.name, alloc(list), stores.get(list), other_reads(*list));
-                for (_, _, pb) in stores.get(list).into_iter().flatten() { eprintln!("MAPENTRIES  pair={pb:?} alloc={:?} stores={:?} reads={:?}", alloc(pb), stores.get(pb), other_reads(*pb)); }
-                for (k, o) in func.ops.iter().enumerate() { let mut r = Vec::new(); crate::mir_ops::op_reads(o, &mut r); if r.iter().any(|v| v == list || root.get(v) == Some(list)) { eprintln!("MAPENTRIES  op{k}: {o:?}"); } }
-            }
             let Some((at, n)) = alloc(list).filter(|(_, n)| *n > 0 && slots_once(*list, *n)) else { continue };
             let held: Vec<(usize, ValueId)> = stores[list].iter().map(|(s, _, v)| (*s, *v)).collect();
             // A pair: two slots, read only by its one store into the list.
@@ -209,7 +202,6 @@ fn entries(func: &MirFunction) -> Entries {
             let pair_at: Option<Vec<usize>> = held.iter().map(pair).collect();
             let Some(first) = pair_at.and_then(|v| v.into_iter().chain([at]).min()) else { continue };
             let fixed = func.ret != Some(*list) && !func.ops[first..j].iter().any(flow);
-            if std::env::var("ALMIDE_DEBUG_MAPENTRIES").is_ok() { eprintln!("MAPENTRIES  first={first} fixed={fixed} flowops={:?}", func.ops[first..j].iter().filter(|o| flow(o)).collect::<Vec<_>>()); }
             if fixed && other_reads(*list) == [j] {
                 out.pairs.extend(held.iter().map(|(_, v)| *v));
                 out.lists.insert(*list, held.into_iter().map(|(_, v)| v).collect());
