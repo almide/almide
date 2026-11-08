@@ -43,7 +43,11 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
             crate::render_native_bounds::access(slot);
             tys.insert(*dst, NTy::I64);
             writeln!(out, "if {} as usize >= {}.len() {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}", var(*idx), var(*list)).unwrap();
-            writeln!(out, "let mut {}: i64 = {}.words()[{} as usize];", var(*dst), var(*list), var(*idx)).unwrap();
+            match crate::render_native_keyed::read_key(*dst) {
+                // A dispatch index the caller may know (render_native_keyed).
+                Some(k) => writeln!(out, "let mut {}: i64 = if K{k} >= 0 {{ K{k} }} else {{ {}.words()[{} as usize] }};", var(*dst), var(*list), var(*idx)).unwrap(),
+                None => writeln!(out, "let mut {}: i64 = {}.words()[{} as usize];", var(*dst), var(*list), var(*idx)).unwrap(),
+            }
             return Some(Ok(()));
         }
     }
