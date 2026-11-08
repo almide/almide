@@ -1,0 +1,15 @@
+// v1-vs-v0 shape bench: a lambda over a heap param whose body is a Float
+// literal, called through a function value — its typed dispatch table reads
+// the literal's i64 bit lane as the f64 the signature declares
+// (render_native_closure's arm_call, #4606).
+fn weigh(f: (String) -> Float, s: String) -> Float = f(s)
+
+fn main() -> Unit = {
+  var total = float.from(0)
+  var i = 0
+  while i < 20000 {
+    total = total + weigh((s) => 0.5, "a") + weigh((s) => float.from(string.len(s)), "bc")
+    i = i + 1
+  }
+  println(float.to_string(total))
+}
