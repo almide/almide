@@ -183,10 +183,6 @@ pub fn almide_rt_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> { let 
 // `size_of::<T>()`, so the limit is the same number on both legs whatever the
 // native element happens to be.
 pub const ALMIDE_LIST_REPEAT_MAX_ELEMS: i64 = (1 << 31) / 8;
-// Out of line: inlined at a call whose count is a literal, the fill loop's
-// unroll is picked to divide that count (5 for 2^28) instead of the one the
-// out-of-line body runs for every count — 1.16x the instructions per element.
-#[inline(never)]
 pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> {
     if n > ALMIDE_LIST_REPEAT_MAX_ELEMS {
         almide_abort("repeat result too large");
