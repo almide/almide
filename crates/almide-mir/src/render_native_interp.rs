@@ -129,13 +129,7 @@ impl ChainScan<'_> {
     fn render_pieces(&self, pieces: &[(usize, ValueId)], last: usize, skip: &mut Vec<usize>) -> Option<Vec<Piece>> {
         let mut rendered = Vec::with_capacity(pieces.len());
         for &(step, p) in pieces {
-            match self.render_piece(step, p, last, skip)? {
-                // An empty literal adds nothing to any rendering of the chain,
-                // and left in front (`"${s}ab"` starts with one) it would hide
-                // the head string the chain could grow in place.
-                Piece::Lit(s) if s.is_empty() => {}
-                piece => rendered.push(piece),
-            }
+            rendered.push(self.render_piece(step, p, last, skip)?);
         }
         Some(rendered)
     }
