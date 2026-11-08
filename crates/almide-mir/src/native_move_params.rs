@@ -29,7 +29,8 @@
 //! value (`FuncRef`, so a closure call may reach it), a linked stdlib entry
 //! (a dotted name, whose call the render may serve through its runtime
 //! body), and a function an op reaches other than by a named call (a
-//! generated drop, a fan arm the render spawns on a thread). A linked
+//! generated drop, a fan arm the render spawns on a thread, a linked body
+//! a declared runtime route may serve instead). A linked
 //! private helper (`__r2o_arr`) is called by name like any other function.
 
 use crate::{MirFunction, Op, ValueId};
@@ -645,6 +646,9 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
             f.name != "main"
                 && !f.name.contains('.')
                 && (closure(f) || (!taken.contains(&f.name) && !reached_otherwise.contains(&f.name)))
+                // A linked body a declared runtime route may serve instead:
+                // that call lends, whatever the body's modes.
+                && crate::native_hof::of(&f.name).is_none()
         };
         let takes_at = |f: &MirFunction, k: usize| {
             !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0)
