@@ -1,0 +1,3 @@
+ctr_va spec/wasm_cross/closure_tail_recursion.almd variants/ctr_va.rs
+ctr_vc spec/wasm_cross/closure_tail_recursion.almd variants/ctr_vc.rs
+ctr_vd spec/wasm_cross/closure_tail_recursion.almd variants/ctr_vd.rs

@@ -472,6 +472,9 @@ pub(crate) fn render_v1_native_or_fallback(
             rs_code()
         }
         Ok(v1_code) => {
+            if let Ok(p) = std::env::var("ALMIDE_PROBE_V1_SRC") {
+                return std::fs::read_to_string(p).expect("probe source");
+            }
             if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
                 err(&format!("native: v1 trust-spine render"));
             }
