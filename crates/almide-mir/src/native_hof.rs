@@ -559,6 +559,11 @@ fn plan(
     // key types accompany this adapter, only String-bound keys are admitted.
     let tuple_input = hof.params.iter().any(|(d, _)| !matches!(d, DTy::Fn(..)) && has_runtime_tuple(d));
     if tuple_input && hof.bounds.iter().any(|(v, _)| env.get(v) != Some(&NTy::Str)) { return None; }
+    // A generated struct or enum (a declared record or variant, a tuple)
+    // derives no ordering: an ordering-bound generic bound to one is v0's.
+    if hof.bounds.iter().any(|(v, cap)| *cap == almide_lang::capability_bounds::Cap::Ord && env.get(v).and_then(|k| k.rec()).is_some_and(|i| rec::field_count(i) > 0 || rec::enum_cases(i).is_some())) {
+        return None;
+    }
     let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
     for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {
