@@ -361,7 +361,8 @@ thread_local! {
 /// exactly one release op and never consumed, rebound or returned, and never
 /// read by an interpolation chain (whose reads the render moves to the
 /// chain's end). It goes right after its last read, or after the loop or
-/// branch holding that read.
+/// branch holding that read. A value bound by a top-level `if`'s result (an
+/// `x ?? default` unwrap) counts as bound there.
 fn early_releases(func: &MirFunction, chains: &crate::render_native_interp::Chains) -> BTreeMap<usize, Vec<ValueId>> {
     EARLY_DROPPED.with(|e| e.borrow_mut().clear());
     BLOCK_READ_RELEASES.with(|b| b.borrow_mut().clear());
@@ -370,7 +371,7 @@ fn early_releases(func: &MirFunction, chains: &crate::render_native_interp::Chai
     let mut out: BTreeMap<usize, Vec<ValueId>> = BTreeMap::new();
     for (d, def) in func.ops.iter().enumerate() {
         let Some(v) = crate::mir_ops::defined_value(def) else { continue };
-        if at_depth[d] != 0 || params.contains(&v) || func.ret == Some(v) || !matches!(def, Op::CallFn { .. } | Op::Alloc { .. } | Op::ListLit { .. }) {
+        if at_depth[d] != 0 || params.contains(&v) || func.ret == Some(v) || !matches!(def, Op::CallFn { .. } | Op::Alloc { .. } | Op::ListLit { .. } | Op::IfThen { .. }) {
             continue;
         }
         if let Some(l) = last_top_level_read(func, chains, &at_depth, d, v) {
