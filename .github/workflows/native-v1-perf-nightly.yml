@@ -30,7 +30,7 @@ jobs:
       - name: Build the compiler
         run: cargo build --release --bin almide
       - name: Probe
-        run: bash probe.sh probe-progs.txt
+        run: PROBE_ASM="::main>:|almd_codes>:|almd_decode>:" bash probe.sh probe-progs.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

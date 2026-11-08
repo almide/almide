@@ -25,6 +25,7 @@ while read -r f; do
       callgrind_annotate --inclusive=yes "$OUT/$n.$leg.cg" 2>/dev/null | head -60 > "$OUT/$n.$leg.itop"
       tot=$(callgrind_annotate --auto=no "$OUT/$n.$leg.cg" 2>/dev/null | awk '/PROGRAM TOTALS/ { gsub(",", "", $1); print $1 }')
       echo "$n $leg $tot" >> $OUT/summary.txt
+      if [ -n "${PROBE_ASM:-}" ]; then objdump -d --no-show-raw-insn -C "$OUT/$n.$leg.bin" | awk -v pat="$PROBE_ASM" '/^[0-9a-f]+ <.*>:$/ { keep = ($0 ~ pat) } keep' | head -4000 > "$OUT/$n.$leg.asm"; fi
       rm -f "$OUT/$n.$leg.cg" "$OUT/$n.$leg.bin"
     else
       echo "$n $leg BUILD-FAIL" >> $OUT/summary.txt
