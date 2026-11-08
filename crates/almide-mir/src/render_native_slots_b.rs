@@ -50,6 +50,9 @@ pub(super) fn movable_loads(
     // The open loops' starts, and where each value is defined.
     let mut loops: Vec<usize> = Vec::new();
     let mut def_at: BTreeMap<ValueId, usize> = BTreeMap::new();
+    // The earlier reads of each (block, slot): a borrowed one still read
+    // after a later read would see the slot that read moved out.
+    let mut seen: BTreeMap<(ValueId, usize), Vec<ValueId>> = BTreeMap::new();
     for (i, op) in func.ops.iter().enumerate() {
         match op {
             Op::LoopStart => loops.push(i),
@@ -64,6 +67,8 @@ pub(super) fn movable_loads(
         let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
         let Some(&(b, Some(off))) = args.first().and_then(|a| base_of.get(a)) else { continue };
         let Some(k) = slot_of(Some(off)) else { continue };
+        let earlier = seen.entry((b, k)).or_default().clone();
+        seen.get_mut(&(b, k)).expect("just inserted").push(*d);
         // Inside a loop the block must be born in the same iteration (defined
         // after the innermost loop's start, never rebound): a block from
         // before the loop would be read again by the next iteration.
@@ -100,7 +105,8 @@ pub(super) fn movable_loads(
             }
             let mut reads = Vec::new();
             crate::mir_ops::op_reads(later, &mut reads);
-            if reads.iter().any(|v| *v == b || rooted(v, b)) {
+            let earlier_live = !crate::render_native_move::bookkeeping(later) && reads.iter().any(|v| earlier.contains(v));
+            if earlier_live || reads.iter().any(|v| *v == b || rooted(v, b)) {
                 movable = false;
                 break;
             }
