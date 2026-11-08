@@ -1,0 +1,65 @@
+name: probe-land-wasm-trap-regen (throwaway)
+on:
+  push:
+    branches: [probe/land-wasm-trap-regen]
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+jobs:
+  regen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: land-wasm-trap
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - run: git log --oneline -1 && cargo build --release --bin almide
+      - name: Regenerate ledgers
+        env:
+          ALMIDE_MANIFEST_TREE_CHECK: "off"
+        run: |
+          set -x
+          mkdir -p /tmp/out
+          ORACLE=target/release/almide bash scripts/gen-run-manifest.sh || true
+          ORACLE=target/release/almide bash scripts/gen-check-manifest.sh || true
+          ORACLE=target/release/almide bash scripts/gen-ast-manifest.sh || true
+          git diff --stat
+          cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tee /tmp/out/size-ratchet-before.txt | grep -E "B, pinned|REGRESSION|NEW fixture|row\(s\) moved" | head -400 || true
+          ALMIDE_UPDATE_ALLOC=1 cargo test --release -p almide-wasm --test alloc_ledger 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_SIZES=1 cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_SIZE_LADDER=1 cargo test --release -p almide-wasm --test size_ladder 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_DUMPS=1 cargo test --release -p almide-wasm --test section_dump 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --release --test native_verified_floor_test 2>&1 | tail -5 || true
+          git status --short
+          git diff > /tmp/out/ledgers.diff || true
+          git diff --stat
+      - name: Ledger gates after regeneration (almide-wasm suite)
+        run: |
+          cargo test --release -p almide-wasm --no-fail-fast 2>&1 | tee /tmp/out/wasm-suite.txt | grep -E "^test result|FAILED|panicked|failures:" | head -80
+          cargo test --release --test native_verified_floor_test 2>&1 | tail -5
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ledgers
+          path: /tmp/out
+          retention-days: 7
