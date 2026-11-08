@@ -428,7 +428,9 @@ fn an_unreachable_release_is_never_refused_and_may_carry_an_event() -> Result<()
 /// rebind moves to share the join's release and the exit event takes its own.
 #[test]
 fn rebinds_in_two_arms_share_the_release_past_the_join() -> Result<(), String> {
-    let body = "local.get 1 (if (then) (else)) local.get 0 call $alloc drop local.get 0 call $alloc drop";
+    // The rebind writes the local after releasing its old block (a read of it
+    // after the release, with no write between, is refused: rc/after.rs).
+    let body = "local.get 1 (if (then) (else)) local.get 0 call $alloc drop i32.const 0 local.set 0 local.get 0 call $alloc drop";
     rc(body, "( o0 | o0 ) d0")?;
     // Outside any site, two rebinds and an exit release are three releases.
     assert!(rc(body, "o0 o0 d0").is_err());
