@@ -183,6 +183,7 @@ jobs:
           print("ratio wcopy/new = %.4f" % (statistics.median(times["wcopy"]) / statistics.median(times["new"])))
           EOF
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
         with:
           name: perf-wasm
           path: /tmp/perf/*.wasm
@@ -225,11 +226,10 @@ jobs:
           ORACLE=target/release/almide bash scripts/gen-check-manifest.sh
           ORACLE=target/release/almide bash scripts/gen-ast-manifest.sh
           git diff --stat
-      - name: This shard's gates, re-recording the ledgers
+      - name: This shard's gates against the committed ledgers
         if: matrix.shard != 'cross'
         run: |
           set -uo pipefail
-          export ALMIDE_UPDATE_ALLOC=1 ALMIDE_UPDATE_SIZES=1 ALMIDE_UPDATE_WITNESS_FLOOR=1 ALMIDE_UPDATE_SURFACE=1 ALMIDE_UPDATE_SIZE_LADDER=1
           ARGS="$(bash scripts/ci-commissioned-wasm-shard.sh args ${{ matrix.shard }})"
           # shellcheck disable=SC2086
           cargo test --release --locked --no-fail-fast -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout -- $ARGS > /tmp/shard.log 2>&1
