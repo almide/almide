@@ -95,6 +95,17 @@ fn const_or_empty_alloc(op: &Op, s: AddrSink<'_>) -> Option<bool> {
     }
 }
 
+/// A string list filled in order (`pushed`: its constant length): each
+/// element waits in its own local, and the list is one `vec![…]` once its
+/// last element is stored — or, a map entry's pair, never built
+/// (crate::native_map_entries). The comment the alloc renders as.
+fn whole_str_list(st: &mut AddrState, dst: &ValueId, len: &ValueId) -> String {
+    let n = st.consts.get(len).map_or(0, |n| usize::try_from(*n).unwrap_or(0));
+    st.literal.insert(*dst, (n, 0));
+    let what = if crate::native_map_entries::defer_pair(*dst) { "a map entry, its key and value bound one by one" } else { "built whole at its last element" };
+    format!("// {}: a list of {n}, {what}", var(*dst))
+}
+
 /// `Alloc{DynListStr}` of an untyped block: a string list.
 fn alloc_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
     let AddrSink { st, tys, out, indent } = s;
@@ -110,7 +121,7 @@ fn alloc_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
         return true;
     }
     if st.pushed.contains(dst) {
-        line!("let mut {}: Vec<AlmideString> = {};", var(*dst), reserved_vec(&var(*len)));
+        line!("{}", whole_str_list(st, dst, len));
         return true;
     }
     line!(
@@ -201,13 +212,8 @@ fn alloc_typed_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
         }};
     }
     tys.insert(*dst, NTy::VecStr);
-    // Filled in order (a constant length): each element waits in its own
-    // local, and the list is one `vec![…]` once its last element is stored —
-    // or, a map entry's pair, never built (crate::native_map_entries).
-    if let (true, Some(n)) = (st.pushed.contains(dst), st.consts.get(len).and_then(|n| usize::try_from(*n).ok())) {
-        st.literal.insert(*dst, (n, 0));
-        let what = if crate::native_map_entries::defer_pair(*dst) { "a map entry, its key and value bound one by one" } else { "built whole at its last element" };
-        line!("// {}: a list of {n}, {what}", var(*dst));
+    if st.pushed.contains(dst) {
+        line!("{}", whole_str_list(st, dst, len));
         return true;
     }
     line!(
