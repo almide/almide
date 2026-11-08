@@ -39,26 +39,26 @@ fn module(function: wasm_encoder::Function, arity: usize) -> Vec<u8> {
 fn emitted_hash_matches_fnv_for_every_short_tail_and_page_edge() {
     let engine = wasmtime::Engine::default();
     let mut store = wasmtime::Store::new(&engine, ());
-    let m = wasmtime::Module::new(&engine, module(crate::map_index::emit_hash_str(), 1)).unwrap();
-    let inst = wasmtime::Instance::new(&mut store, &m, &[]).unwrap();
-    let memory = inst.get_memory(&mut store, "memory").unwrap();
+    let m = wasmtime::Module::new(&engine, module(crate::map_index::emit_hash_str(), 1)).expect("the module compiles");
+    let inst = wasmtime::Instance::new(&mut store, &m, &[]).expect("the module instantiates");
+    let memory = inst.get_memory(&mut store, "memory").expect("the module exports its memory");
     let hash = inst
         .get_typed_func::<i32, i32>(&mut store, "probe")
-        .unwrap();
+        .expect("the export has the expected signature");
     for n in (0..=256).chain([511, 512, 513, 4095, 4096, 4097]) {
         let bytes: Vec<u8> = (0..n).map(|i| ((i * 73 + n * 19) % 256) as u8).collect();
         let p = 65536 - n - almide_layout::PAYLOAD as usize;
         memory
             .write(&mut store, p + 4, &(n as u32).to_le_bytes())
-            .unwrap();
+            .expect("the write is inside the memory");
         memory
             .write(&mut store, p + almide_layout::PAYLOAD as usize, &bytes)
-            .unwrap();
+            .expect("the write is inside the memory");
         let h = bytes.iter().fold(0x811c9dc5_u32, |h, &b| {
             (h ^ u32::from(b)).wrapping_mul(0x01000193)
         });
         assert_eq!(
-            hash.call(&mut store, p as i32).unwrap() as u32,
+            hash.call(&mut store, p as i32).expect("the call does not trap") as u32,
             h ^ (h >> 15),
             "length {n}"
         );
@@ -69,12 +69,12 @@ fn emitted_hash_matches_fnv_for_every_short_tail_and_page_edge() {
 fn emitted_string_equality_preserves_aliases_lengths_and_tail_bytes() {
     let engine = wasmtime::Engine::default();
     let mut store = wasmtime::Store::new(&engine, ());
-    let m = wasmtime::Module::new(&engine, module(crate::runtime::emit_str_eq(), 2)).unwrap();
-    let inst = wasmtime::Instance::new(&mut store, &m, &[]).unwrap();
-    let memory = inst.get_memory(&mut store, "memory").unwrap();
+    let m = wasmtime::Module::new(&engine, module(crate::runtime::emit_str_eq(), 2)).expect("the module compiles");
+    let inst = wasmtime::Instance::new(&mut store, &m, &[]).expect("the module instantiates");
+    let memory = inst.get_memory(&mut store, "memory").expect("the module exports its memory");
     let eq = inst
         .get_typed_func::<(i32, i32), i32>(&mut store, "probe")
-        .unwrap();
+        .expect("the export has the expected signature");
     for n in 0..=65 {
         let bytes: Vec<u8> = (0..n).map(|i| (i * 13) as u8).collect();
         let a = 64usize;
@@ -82,22 +82,22 @@ fn emitted_string_equality_preserves_aliases_lengths_and_tail_bytes() {
         for p in [a, b] {
             memory
                 .write(&mut store, p + 4, &(n as u32).to_le_bytes())
-                .unwrap();
+                .expect("the write is inside the memory");
             memory
                 .write(&mut store, p + almide_layout::PAYLOAD as usize, &bytes)
-                .unwrap();
+                .expect("the write is inside the memory");
         }
-        assert_eq!(eq.call(&mut store, (a as i32, a as i32)).unwrap(), 1);
-        assert_eq!(eq.call(&mut store, (a as i32, b as i32)).unwrap(), 1);
+        assert_eq!(eq.call(&mut store, (a as i32, a as i32)).expect("the call does not trap"), 1);
+        assert_eq!(eq.call(&mut store, (a as i32, b as i32)).expect("the call does not trap"), 1);
         if n > 0 {
             memory
                 .write(&mut store, 65535, &[bytes[n - 1] ^ 1])
-                .unwrap();
-            assert_eq!(eq.call(&mut store, (a as i32, b as i32)).unwrap(), 0);
+                .expect("the write is inside the memory");
+            assert_eq!(eq.call(&mut store, (a as i32, b as i32)).expect("the call does not trap"), 0);
             memory
                 .write(&mut store, b + 4, &((n - 1) as u32).to_le_bytes())
-                .unwrap();
-            assert_eq!(eq.call(&mut store, (a as i32, b as i32)).unwrap(), 0);
+                .expect("the write is inside the memory");
+            assert_eq!(eq.call(&mut store, (a as i32, b as i32)).expect("the call does not trap"), 0);
         }
     }
 }

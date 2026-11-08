@@ -129,7 +129,13 @@ impl ChainScan<'_> {
     fn render_pieces(&self, pieces: &[(usize, ValueId)], last: usize, skip: &mut Vec<usize>) -> Option<Vec<Piece>> {
         let mut rendered = Vec::with_capacity(pieces.len());
         for &(step, p) in pieces {
-            rendered.push(self.render_piece(step, p, last, skip)?);
+            match self.render_piece(step, p, last, skip)? {
+                // An empty literal adds nothing to any rendering of the chain,
+                // and left in front (`"${s}ab"` starts with one) it would hide
+                // the head string the chain could grow in place.
+                Piece::Lit(s) if s.is_empty() => {}
+                piece => rendered.push(piece),
+            }
         }
         Some(rendered)
     }
@@ -303,9 +309,9 @@ fn fmt_parts(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy
                 }
                 template.push_str("{}");
                 // By value: a reference would pin the integer's local to
-                // memory for the rest of the function. Through `IntText`: the
+                // memory for the rest of the function. Through `AlmideIntText`: the
                 // runtime's digit writer, not `i64`'s padding-aware Display.
-                args.push(format!("crate::almide_str_block::IntText({})", var(*n)));
+                args.push(format!("crate::almide_str_block::AlmideIntText({})", var(*n)));
             }
             Piece::Bool(n) => {
                 if tys.get(n) != Some(&NTy::I64) {

@@ -19,8 +19,10 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
         FloorParam::Str => r == "&str",
         FloorParam::Map(_) => is_generic_map(r.strip_prefix('&').unwrap_or(&r)),
         FloorParam::MapKey(_) | FloorParam::MapVal(_) => is_type_param(r.strip_prefix('&').unwrap_or(&r)),
+        // A `Vec` of the pairs, or any iterable of them (an array literal's).
         FloorParam::MapPairs => r
             .strip_prefix("Vec<(")
+            .or_else(|| r.strip_prefix("implIntoIterator<Item=("))
             .and_then(|x| x.strip_suffix(")>"))
             .and_then(|x| x.split_once(','))
             .is_some_and(|(a, b)| is_type_param(a) && is_type_param(b)),
@@ -261,7 +263,7 @@ fn with_by_ref_twin(mut f: FloorFn, rust_params: &[String], rust_ret: &str, rt: 
         return f;
     }
     let Ok(items) = closure(&twin, rt) else { return f };
-    let by_ref = FloorFn { symbol: twin, params, ret: f.ret, items, twin: None, str_only: f.str_only, borrow_twin: None, by_ref: None };
+    let by_ref = FloorFn { symbol: twin, params, ret: f.ret, items, twin: None, str_only: f.str_only, ordered: f.ordered, borrow_twin: None, by_ref: None };
     f.by_ref = Some(Box::new(by_ref));
     f
 }

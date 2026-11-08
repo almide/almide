@@ -156,6 +156,11 @@ pub(crate) fn render_call(
     if f.str_only && elem_str != Some(true) {
         return Err(wall(format!("native: floor call `{name}` bounds its element by equality or ordering, served for a String list only")));
     }
+    // A generated struct or enum (a declared record or variant, a tuple) has
+    // no `Ord`: an ordering-bound element of that kind is v0's to render.
+    if f.ordered && elem_kind.and_then(NTy::rec).is_some_and(|i| crate::render_native_rec::field_count(i) > 0 || crate::render_native_rec::enum_cases(i).is_some()) {
+        return Err(wall(format!("native: floor call `{name}` orders a declared record or variant, whose generated type derives no ordering")));
+    }
     let cx = CallCx { mismatch: &mismatch, map_kv, elem_str, elem_kind, set_e, name, params: &f.params, args };
     let mut rendered = Vec::new();
     for ((code, got), p) in args.iter().zip(&f.params) {
@@ -282,9 +287,13 @@ fn matrix_or_bytes_mut_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy) -
             (NTy::Rec(_) | NTy::RecRef(_), false) if crate::render_native_rec::is_matrix(*got) => format!("{code}.clone()"),
             _ => return Err(mismatch()),
         },
-        // Only the caller's own binding: a borrowed one cannot be written.
+        // Only the caller's own binding: a borrowed one cannot be written, and
+        // an owned copy of a record's field would take the write in place of
+        // the field.
         FloorParam::BytesMut => match got {
-            NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&mut {code}"),
+            NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) && !crate::render_native_addr::is_field_copy(code) => {
+                format!("&mut {code}")
+            }
             _ => return Err(mismatch()),
         },
         _ => return Err(mismatch()),
@@ -339,6 +348,10 @@ fn map_entry_arg(cx: &CallCx, p: &FloorParam, by_ref: bool, code: &str, got: &NT
 
 /// A `List[(K, V)]` param's argument.
 fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerError> {
+    // A literal's entries left unbuilt (crate::native_map_entries): its pairs.
+    if let Some(pairs) = crate::native_map_entries::array_of(code) {
+        return Ok(pairs);
+    }
     let mismatch = cx.mismatch;
     let (NTy::Rec(i) | NTy::RecRef(i)) = got else { return Err(mismatch()) };
     let pair = crate::render_native_rec::list_elem(*i).ok_or_else(mismatch)?;
