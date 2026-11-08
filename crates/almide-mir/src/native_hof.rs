@@ -239,11 +239,10 @@ pub(crate) fn of(impl_fn: &str) -> Option<&'static Hof> {
 /// moves in (`runtime_arg`'s dying arm) where a borrowed one is copied. A
 /// site the render serves through the linked body instead lends it.
 pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
-    // The call names the linked body (`list_enumerate`) or its source call.
     let hofs: Vec<&Hof> = crate::mir_ops::self_host_runtime()
         .iter()
         .flat_map(|(_, pairs)| pairs.iter())
-        .filter(|(implementation, source)| *source == call || *implementation == call)
+        .filter(|(_, source)| *source == call)
         .filter_map(|(implementation, _)| of(implementation))
         .collect();
     !hofs.is_empty()
