@@ -5,6 +5,18 @@ on:
 env:
   CARGO_TERM_COLOR: never
 jobs:
+  shapes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: "1.97.0"
+          components: llvm-tools
+      - name: shapes detail
+        run: bash scripts/c1probe/shapes-detail.sh || true
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 150
