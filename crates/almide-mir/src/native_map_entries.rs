@@ -32,6 +32,8 @@ struct Entries {
     lists: BTreeMap<ValueId, Vec<ValueId>>,
     /// Pair blocks that may stay unbuilt.
     pairs: BTreeSet<ValueId>,
+    /// The handle each pair is stored into its entry list as → the pair.
+    handles: BTreeMap<ValueId, ValueId>,
     /// Pairs left unbuilt by the render → the slots bound so far.
     deferred: BTreeMap<ValueId, usize>,
     /// Entry lists left unbuilt by the render → their element kind.
@@ -70,11 +72,14 @@ pub(crate) fn pair_slot(v: ValueId) -> Option<usize> {
     })
 }
 
-/// The Rust pair an unbuilt pair block `v` stands for.
-pub(crate) fn pair_of(v: ValueId) -> Option<String> {
-    let deferred = ENTRIES.with(|e| e.borrow().deferred.contains_key(&v));
-    let p = var(v);
-    deferred.then(|| format!("({p}_e0, {p}_e1)"))
+/// The Rust pair the handle `h` of an unbuilt pair block, stored into its
+/// entry list, stands for.
+pub(crate) fn pair_of(h: ValueId) -> Option<String> {
+    let p = ENTRIES.with(|e| {
+        let e = e.borrow();
+        e.handles.get(&h).copied().filter(|p| e.deferred.contains_key(p))
+    })?;
+    Some(format!("({0}_e0, {0}_e1)", var(p)))
 }
 
 /// At the alloc of the entry list `v` of element kind `elem`: whether it
@@ -136,10 +141,12 @@ fn entries(func: &MirFunction) -> Entries {
     }
     // Every slot store, per block: (op index, slot, the stored value's block).
     let mut stores: BTreeMap<ValueId, Vec<(usize, i64, ValueId)>> = BTreeMap::new();
+    let mut stored: BTreeMap<usize, ValueId> = BTreeMap::new();
     for (j, op) in func.ops.iter().enumerate() {
         if let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op {
             if let ([_, v], Some((b, k))) = (args.as_slice(), args.first().and_then(|a| slot_of.get(a))) {
                 stores.entry(*b).or_default().push((j, *k, root.get(v).copied().unwrap_or(*v)));
+                stored.insert(j, *v);
             }
         }
     }
@@ -204,6 +211,7 @@ fn entries(func: &MirFunction) -> Entries {
             let fixed = func.ret != Some(*list) && !func.ops[first..j].iter().any(flow);
             if fixed && other_reads(*list) == [j] {
                 out.pairs.extend(held.iter().map(|(_, v)| *v));
+                out.handles.extend(held.iter().map(|(s, v)| (stored[s], *v)));
                 out.lists.insert(*list, held.into_iter().map(|(_, v)| v).collect());
             }
         }
