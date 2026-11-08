@@ -1276,7 +1276,7 @@ pub fn almide_rt_list_clear<A>(xs: &mut Vec<A>) { xs.clear(); }
 // ── `${xs}` reprs (the compound `[a, b]` of the standard codegen's AlmideRepr) ──
 // Each element as AlmideRepr renders it inside a container: a number or Bool
 // through `format!("{}", …)`, a String double-quoted with `\ " \n \r \t` escaped.
-pub fn almide_rt_list_to_string_int(xs: &[i64]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push_str(&format!("{}", e)); } o.push(']'); o.into() }
+pub fn almide_rt_list_to_string_int(xs: &[i64]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } let _ = std::fmt::Write::write_fmt(&mut o, format_args!("{}", e)); } o.push(']'); o.into() }
 pub fn almide_rt_list_to_string_float(xs: &[f64]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push_str(&format!("{}", e)); } o.push(']'); o.into() }
 pub fn almide_rt_list_to_string_bool(xs: &[bool]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push_str(&format!("{}", e)); } o.push(']'); o.into() }
 // ── `==` of two lists of one scalar element type (the standard codegen's `==`
