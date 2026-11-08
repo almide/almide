@@ -160,7 +160,14 @@ fn scalar_agrees(d: &DTy, r: &str, by_ref: bool) -> Option<bool> {
 fn composite_agrees(d: &DTy, r: &str, by_ref: bool) -> bool {
     match d {
         DTy::Tuple(_) => r.starts_with('(') && r.ends_with(')') && !by_ref,
-        DTy::List(_) => r.starts_with("Vec<") || (by_ref && r.starts_with('[')),
+        // A runtime generic standing for a concrete declared element
+        // (`fn f<M: Deref<Target = AlmideMatrix>>(xs: &[M])`) carries a bound
+        // the native element kind need not meet: not this route's.
+        DTy::List(e) => {
+            let inner = r.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).or_else(|| r.strip_prefix('[').and_then(|x| x.strip_suffix(']')));
+            let bare_param = inner.is_some_and(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_uppercase()));
+            (r.starts_with("Vec<") || (by_ref && r.starts_with('['))) && !(bare_param && !matches!(**e, DTy::Var(_)))
+        }
         DTy::Opt(_) => r.starts_with("Option<") && !by_ref,
         DTy::Map(..) => r.starts_with("AlmideMap<"),
         DTy::Set(_) => r.starts_with("AlmideSet<"),
@@ -210,6 +217,12 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
         generics.as_ref().and_then(|gs| gs.get(b.generic))
             .map(|g| (g.name.as_str().to_string(), b.cap)).ok_or("runtime bound has no declared generic")
     }).collect::<Result<Vec<_>, _>>()?;
+    // A Float list's cells are its bits on the native render: a Float
+    // specialization served by a runtime generic that compares its elements
+    // would compare the bits (`-0.0` against `0.0`, NaN against itself).
+    if !bounds.is_empty() && target != call && crate::native_floor::specialized_elem(call).as_deref() == Some("Float") {
+        return Err(format!("a Float specialization of `{target}`, whose runtime generic compares the list's bits"));
+    }
     let tps: BTreeSet<String> = generics.iter().flatten().map(|g| g.name.as_str().to_string()).collect();
     let dparams: Vec<DTy> = params.iter().map(|p| dty_of(&p.ty, &tps)).collect::<Option<_>>().ok_or("a param type outside the map")?;
     let dret = dty_of(ret, &tps).ok_or("a return type outside the map")?;
@@ -559,6 +572,11 @@ fn plan(
     // key types accompany this adapter, only String-bound keys are admitted.
     let tuple_input = hof.params.iter().any(|(d, _)| !matches!(d, DTy::Fn(..)) && has_runtime_tuple(d));
     if tuple_input && hof.bounds.iter().any(|(v, _)| env.get(v) != Some(&NTy::Str)) { return None; }
+    // A generated struct or enum (a declared record or variant, a tuple)
+    // derives no ordering: an ordering-bound generic bound to one is v0's.
+    if hof.bounds.iter().any(|(v, cap)| *cap == almide_lang::capability_bounds::Cap::Ord && env.get(v).and_then(|k| k.rec()).is_some_and(|i| rec::field_count(i) > 0 || rec::enum_cases(i).is_some())) {
+        return None;
+    }
     let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
     for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {

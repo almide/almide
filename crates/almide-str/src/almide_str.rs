@@ -334,7 +334,7 @@ impl AlmideStr {
     /// Building a `String` and converting it would allocate, copy and free a second time.
     pub fn from_i64(n: i64) -> AlmideStr {
         let mut buf = [0u8; 20];
-        let i = i64_digits(n, &mut buf);
+        let i = almide_i64_digits(n, &mut buf);
         let len = buf.len() - i;
         let out = AlmideStr { ptr: almide_str_alloc(len, len) };
         // SAFETY: a fresh block with room for exactly `len` bytes, which the ASCII digits fill.
@@ -793,7 +793,7 @@ impl Hash for AlmideStr {
 /// start. Two digits per division, as `core::fmt` renders integers. Inlined
 /// into each writer, as `from_i64` had it before the writers shared it.
 #[inline(always)]
-fn i64_digits(n: i64, buf: &mut [u8; 20]) -> usize {
+fn almide_i64_digits(n: i64, buf: &mut [u8; 20]) -> usize {
     const PAIRS: &[u8; 200] = b"0001020304050607080910111213141516171819\
         2021222324252627282930313233343536373839\
         4041424344454647484950515253545556575859\
@@ -828,13 +828,13 @@ fn i64_digits(n: i64, buf: &mut [u8; 20]) -> usize {
 /// writes, handed to the formatter in one `write_str`. `i64`'s own `Display`
 /// goes through `pad_integral`'s width, fill and sign handling, which no
 /// interpolation hole uses — the same text for more work.
-pub struct IntText(pub i64);
+pub struct AlmideIntText(pub i64);
 
-impl fmt::Display for IntText {
+impl fmt::Display for AlmideIntText {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut buf = [0u8; 20];
-        let i = i64_digits(self.0, &mut buf);
+        let i = almide_i64_digits(self.0, &mut buf);
         // SAFETY: `buf[i..]` holds only ASCII digits and an optional `-`.
         f.write_str(unsafe { std::str::from_utf8_unchecked(&buf[i..]) })
     }
@@ -844,33 +844,33 @@ impl fmt::Display for IntText {
 /// already is one (every runtime list of strings today), element by element
 /// otherwise. A rendered call converted every result element by element,
 /// a full pass and a fresh vector for a list it already had.
-pub trait IntoStrList {
+pub trait AlmideIntoStrList {
     fn into_str_list(self) -> Vec<AlmideStr>;
 }
 
-impl IntoStrList for Vec<AlmideStr> {
+impl AlmideIntoStrList for Vec<AlmideStr> {
     #[inline(always)]
     fn into_str_list(self) -> Vec<AlmideStr> {
         self
     }
 }
 
-impl IntoStrList for Vec<String> {
+impl AlmideIntoStrList for Vec<String> {
     fn into_str_list(self) -> Vec<AlmideStr> {
         self.into_iter().map(AlmideStr::from).collect()
     }
 }
 
-impl IntoStrList for Vec<&str> {
+impl AlmideIntoStrList for Vec<&str> {
     fn into_str_list(self) -> Vec<AlmideStr> {
         self.into_iter().map(AlmideStr::from).collect()
     }
 }
 
-/// [`IntoStrList::into_str_list`] as a function, so a call site needs no
+/// [`AlmideIntoStrList::into_str_list`] as a function, so a call site needs no
 /// trait in scope.
 #[inline(always)]
-pub fn str_list<L: IntoStrList>(l: L) -> Vec<AlmideStr> {
+pub fn almide_str_list<L: AlmideIntoStrList>(l: L) -> Vec<AlmideStr> {
     l.into_str_list()
 }
 

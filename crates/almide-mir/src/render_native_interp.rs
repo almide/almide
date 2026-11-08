@@ -303,9 +303,9 @@ fn fmt_parts(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy
                 }
                 template.push_str("{}");
                 // By value: a reference would pin the integer's local to
-                // memory for the rest of the function. Through `IntText`: the
+                // memory for the rest of the function. Through `AlmideIntText`: the
                 // runtime's digit writer, not `i64`'s padding-aware Display.
-                args.push(format!("crate::almide_str_block::IntText({})", var(*n)));
+                args.push(format!("crate::almide_str_block::AlmideIntText({})", var(*n)));
             }
             Piece::Bool(n) => {
                 if tys.get(n) != Some(&NTy::I64) {

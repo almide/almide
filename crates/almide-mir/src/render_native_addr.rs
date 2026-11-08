@@ -521,6 +521,25 @@ pub(crate) fn reads_of_place(place: &str) -> Vec<ValueId> {
 pub(crate) fn clear_str_fields() {
     STR_FIELDS.with(|m| m.borrow_mut().clear());
     PAYLOAD_TAKES.with(|m| m.borrow_mut().clear());
+    FIELD_COPIES.with(|m| m.borrow_mut().clear());
+}
+
+thread_local! {
+    static FIELD_COPIES: std::cell::RefCell<std::collections::BTreeSet<ValueId>> = const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// An owned copy of a record's heap field (`r.f.clone()`). The MIR read lends
+/// the field itself, so a write through the read edits the record; through
+/// the copy it would edit only the copy, and the write would be lost.
+pub(crate) fn note_field_copy(v: ValueId) {
+    FIELD_COPIES.with(|m| m.borrow_mut().insert(v));
+}
+
+/// Whether the rendered operand `code` is a binding [`note_field_copy`] made.
+pub(crate) fn is_field_copy(code: &str) -> bool {
+    code.strip_prefix('v')
+        .and_then(|n| n.parse::<u32>().ok())
+        .is_some_and(|n| FIELD_COPIES.with(|m| m.borrow().contains(&ValueId(n))))
 }
 
 thread_local! {

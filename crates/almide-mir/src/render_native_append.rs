@@ -102,9 +102,15 @@ pub(crate) fn list_self_append(
     if own != x_own {
         return None;
     }
+    // A stack literal (`[T; N]`, render_native_move::set_stack_lits) is
+    // borrowed as a slice and never moved: a one-element one is pushed, a
+    // longer one copied from below.
+    if st == NTy::Vec && crate::render_native_move::is_stack_single(x) {
+        return Some(format!("{}.push({}[0]);", var(s), var(x)));
+    }
     // An owned appended list nothing reads again moves its elements over
     // (no per-element copy).
-    if xt == st && crate::render_native_move::last_use(func, i, x, xt, borrow_arms) {
+    if xt == st && !crate::render_native_move::is_stack_lit(x) && crate::render_native_move::last_use(func, i, x, xt, borrow_arms) {
         return Some(format!("{}.append(&mut {});", var(s), var(x)));
     }
     Some(format!("{}.extend_from_slice({xs});", var(s)))

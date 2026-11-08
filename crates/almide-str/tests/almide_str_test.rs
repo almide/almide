@@ -294,7 +294,7 @@ fn from_i64_renders_like_to_string_in_one_exact_block() {
 #[test]
 fn int_text_formats_like_display() {
     for n in [0i64, 1, -1, 9, 10, -10, 99, 100, 12345, -98765, i64::MAX, i64::MIN, 1 << 40, -(1 << 40)] {
-        assert_eq!(format!("<{}>", almide_str::IntText(n)), format!("<{n}>"));
+        assert_eq!(format!("<{}>", almide_str::AlmideIntText(n)), format!("<{n}>"));
     }
 }
 

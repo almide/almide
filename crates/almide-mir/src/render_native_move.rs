@@ -237,9 +237,29 @@ pub(crate) fn carrier_dies_after(
         .map(|(j, _)| at + 1 + j)
         .collect();
     SKIP_READS.with(|m| *m.borrow_mut() = scalar_reads);
+    CARRIER_SCAN.with(|m| m.set(true));
     let dies = dying_after(func, at, src, borrow_arms);
+    CARRIER_SCAN.with(|m| m.set(false));
     SKIP_READS.with(|m| m.borrow_mut().clear());
     dies
+}
+
+thread_local! {
+    /// Set while [`carrier_dies_after`] asks [`dying_after`]: a field moves
+    /// out, not the whole block, so a later load of another slot through an
+    /// address into the block does not keep it alive (its scalar reads are
+    /// [`SKIP_READS`]).
+    static CARRIER_SCAN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The address values rooted at `src`'s block (its handle and the offsets
+/// off it). The render spells a load through one as a read of `src` itself
+/// (`src.f1`), so after `src` moves such a load reads the moved-from binding.
+fn addresses_into(func: &MirFunction, src: ValueId) -> std::collections::BTreeSet<ValueId> {
+    if CARRIER_SCAN.with(|m| m.get()) {
+        return std::collections::BTreeSet::new();
+    }
+    crate::render_native_borrow_read::roots(func).into_iter().filter(|(_, r)| *r == src).map(|(a, _)| a).collect()
 }
 
 thread_local! {
@@ -254,6 +274,9 @@ thread_local! {
 /// first, `None` = neither before the end of the function.
 fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: bool) -> Option<bool> {
     let skip = SKIP_READS.with(|m| m.borrow().clone());
+    // An address into the block computed before the copy and read after it
+    // reads the block: the copy is not its last use.
+    let addrs = addresses_into(func, src);
     // `src` is released, unconditionally and before anything reads it again,
     // in the copy's own block: the value dies there, whatever later rebinds
     // the slot (a loop slot's write-back `Drop v; SetLocal v = ..`). A copy
@@ -284,7 +307,7 @@ fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: boo
         }
         reads.clear();
         crate::mir_ops::op_reads(op, &mut reads);
-        if reads.contains(&src) {
+        if reads.contains(&src) || reads.iter().any(|r| addrs.contains(r)) {
             return Some(false);
         }
         if matches!(op, Op::SetLocal { local, .. } if *local == src) {
