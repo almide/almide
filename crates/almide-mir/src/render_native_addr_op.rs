@@ -506,23 +506,20 @@ fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
     }
     let field = crate::render_native_rec::rec_field(i, k)
         .ok_or_else(|| wall("native: a store past a record's last field"))?;
-    let rhs = match (field, st.addrs.get(&v).copied(), ty(tys, &v)) {
+    let got = ty(tys, &v);
+    let rhs = match (field, st.addrs.get(&v).copied(), got) {
         (f, None, Some(NTy::Opt)) if crate::native_value_repr::same_owned(f, NTy::Opt) => var(v),
         (NTy::I64, None, Some(NTy::I64)) => var(v),
         (NTy::I64, None, Some(NTy::F64)) => format!("{}.to_bits() as i64", var(v)),
-        (f, Some(sv), _) if sv.off == 0 && sv.idx.is_none() => match ty(tys, &sv.base) {
-            Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g)
-                .ok_or_else(|| wall("native: a record field write of an unowned kind"))?,
-            // `[]` into a field of another list type: that type's empty list.
-            Some(NTy::Vec)
-                if st.empty_lists.contains(&sv.base)
-                    && (f == NTy::VecStr || matches!(f, NTy::Rec(i) if crate::render_native_rec::list_elem(i).is_some())) =>
-            {
-                "Vec::new()".to_string()
+        (f, Some(sv), _) if sv.off == 0 && sv.idx.is_none() => {
+            let base = ty(tys, &sv.base);
+            match base {
+                Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g)
+                    .ok_or_else(|| wall("native: a record field write of an unowned kind"))?,
+                _ => return Err(wall(format!("native: a {base:?} value stored into a {f:?} record field"))),
             }
-            g => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
-        },
-        (f, _, g) => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
+        }
+        _ => return Err(wall(format!("native: a {got:?} value stored into a {field:?} record field"))),
     };
     if let Some(done) = st.building.get_mut(&ad.base) {
         // A struct built whole: the field waits in its own local
