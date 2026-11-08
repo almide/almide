@@ -3072,6 +3072,8 @@ since     = "0.56.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mut_param_call_chain.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_copy_kept_when_read.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_copy_moved_when_dead.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_mut_arg_in_nested_match.almd", class = "fixture" },
   { path = "spec/wasm_cross/lambda_captures_mut_param.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_call_arg_credit.almd", class = "fixture" },
