@@ -51,6 +51,10 @@ struct Current {
     /// (`native_cell_window`), and the takes whose cell a read emptied.
     func: Option<MirFunction>,
     emptied: BTreeSet<ValueId>,
+    /// The shared-cell borrows open: (the op of their last read, the guard).
+    guards: Vec<(usize, String)>,
+    /// The shared-cell reads rendered as such a borrow.
+    in_place: BTreeSet<ValueId>,
     /// Its borrow-join arms (`borrow_join`), for the liveness reads.
     arms: BTreeSet<ValueId>,
 }
@@ -161,50 +165,76 @@ pub(crate) fn begin_fn(func: &MirFunction, arms: &BTreeSet<ValueId>) {
     } else {
         dispatch_reads(func).into_iter().filter_map(|(r, p)| params.get(&p).map(|k| (r, *k))).collect()
     };
-    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads, func: Some(func.clone()), emptied: BTreeSet::new(), arms: arms.clone() });
+    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads, func: Some(func.clone()), emptied: BTreeSet::new(), guards: Vec::new(), in_place: BTreeSet::new(), arms: arms.clone() });
 }
 
 /// The shared-cell read `d` of `cell` takes the payload out
 /// (`native_cell_window`); the take ending its window is then noted as
 /// finding the cell emptied.
-pub(crate) fn cell_read_takes(d: ValueId, cell: ValueId, tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> bool {
+pub(crate) fn cell_read_takes(d: ValueId, (cell, kind): (ValueId, crate::render_native::NTy), tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> bool {
     let program_fn = |n: &str| PROGRAM.with(|p| p.borrow().fns.contains(n));
     CURRENT.with(|c| {
         let mut c = c.borrow_mut();
         let end = c.func.as_ref().and_then(|func| {
             let at = load_at(func, d)?;
-            crate::native_cell_window::take_window(func, at, (d, cell), tys, &program_fn)
+            crate::native_cell_window::take_window(func, at, (d, cell, kind), tys, &program_fn)
         });
         end.is_some_and(|x| c.emptied.insert(x))
+    })
+}
+
+/// The shared-cell read `d` of `cell` borrows the payload in place
+/// (`native_cell_window::borrow_window`) through the guard `guard`, released
+/// once the render is past the window's last read ([`guards_through`]).
+pub(crate) fn cell_read_borrows(d: ValueId, (cell, kind): (ValueId, crate::render_native::NTy), tys: &BTreeMap<ValueId, crate::render_native::NTy>, guard: String) -> bool {
+    let program_fn = |n: &str| PROGRAM.with(|p| p.borrow().fns.contains(n));
+    CURRENT.with(|c| {
+        let mut c = c.borrow_mut();
+        let last = c.func.as_ref().and_then(|func| {
+            let at = load_at(func, d)?;
+            crate::native_cell_window::borrow_window(func, at, (d, cell, kind), tys, &program_fn)
+        });
+        last.map(|l| {
+            c.guards.push((l, guard));
+            c.in_place.insert(d);
+        }).is_some()
+    })
+}
+
+/// `v` is a value the MIR owns that the render reads in place: a shared
+/// cell's borrowed read, or a reference copy of a borrow-only read
+/// (`render_native_borrow_read::ref_dup`). Its release only ends the borrow.
+pub(crate) fn in_place(v: ValueId) -> bool {
+    CURRENT.with(|c| c.borrow().in_place.contains(&v)) || crate::render_native_borrow_read::ref_dup(v)
+}
+
+/// The cell guards whose window ends at or before op `i`, closed now.
+pub(crate) fn guards_through(i: usize) -> Vec<String> {
+    CURRENT.with(|c| {
+        let mut c = c.borrow_mut();
+        let (done, open): (Vec<_>, Vec<_>) = std::mem::take(&mut c.guards).into_iter().partition(|(l, _)| *l <= i);
+        c.guards = open;
+        done.into_iter().map(|(_, g)| g).collect()
+    })
+}
+
+/// The value `src` (of kind `t`), whose handle `value` a list-slot store writes, is not
+/// read after that store (`render_native_move::last_use`): the store may move
+/// it where it kept a copy for later readers.
+pub(crate) fn dies_at_store(src: ValueId, value: ValueId, t: crate::render_native::NTy) -> bool {
+    CURRENT.with(|c| {
+        let c = c.borrow();
+        let dies = c.func.as_ref().and_then(|func| {
+            let at = func.ops.iter().position(|op| matches!(op, Op::Prim { kind: crate::PrimKind::Store { .. }, args, .. } if args.get(1) == Some(&value)))?;
+            Some(crate::render_native_move::last_use(func, at, src, t, &c.arms))
+        });
+        dies.unwrap_or(false)
     })
 }
 
 /// The op of `func` that loads `d`.
 fn load_at(func: &MirFunction, d: ValueId) -> Option<usize> {
     func.ops.iter().position(|op| matches!(op, Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(x), .. } if *x == d))
-}
-
-/// The payload read `d` of the owned carrier `base` may move the payload out:
-/// nothing reads the carrier, or an address into it, after the read, and
-/// its binding is its own (no param, never rebound) — Rust's drop flag then
-/// skips the carrier's release, where a view left it to drop whole.
-pub(crate) fn payload_moves(d: ValueId, base: ValueId) -> bool {
-    CURRENT.with(|c| {
-        let c = c.borrow();
-        let moves = c.func.as_ref().and_then(|func| {
-            let at = load_at(func, d)?;
-            let root = crate::render_native_borrow_read::roots(func);
-            let own = !rebound(func).contains(&base) && !func.params.iter().any(|p| p.value == base);
-            let mut reads = Vec::new();
-            Some(own && crate::render_native_move::dying_after(func, at, base, &c.arms)
-                && func.ops[at + 1..].iter().all(|op| {
-                    reads.clear();
-                    crate::mir_ops::op_reads(op, &mut reads);
-                    crate::render_native_move::bookkeeping(op) || !reads.iter().any(|r| *r == base || root.get(r) == Some(&base))
-                }))
-        });
-        moves.unwrap_or(false)
-    })
 }
 
 /// The take `x` finds its cell emptied by the read before it.

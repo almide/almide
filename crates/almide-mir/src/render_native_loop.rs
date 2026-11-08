@@ -154,7 +154,15 @@ fn render_fn(
             }
         }
         prev_start = st.out.len();
-        if render_fn_step(&mut st, i, op, &mut ops)? && flag_exits.contains(&i) {
+        let stepped = render_fn_step(&mut st, i, op, &mut ops)?;
+        // A shared cell's in-place borrow ends with its last read.
+        for g in crate::render_native_keyed::guards_through(i) {
+            for _ in 0..st.indent {
+                st.out.push_str("    ");
+            }
+            let _ = writeln!(st.out, "drop({g});");
+        }
+        if stepped && flag_exits.contains(&i) {
             for _ in 0..st.indent {
                 st.out.push_str("    ");
             }
@@ -440,6 +448,16 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         // release ends that borrow, and the snapshot frees at scope end.
         _ if crate::native_slot_takes::released(op).is_some_and(|v| st.addrs.slot_alias(&v)) => {
             line!("// drop: a heap slot's snapshot, scope-end");
+        }
+        // A copy of a borrow-only read whose own uses only borrow
+        // (render_native_borrow_read::ref_dups): the same reference.
+        Op::Dup { dst, src }
+            if crate::render_native_borrow_read::ref_dup(*dst)
+                && matches!(st.tys.get(src), Some(NTy::RecRef(_) | NTy::VecRef | NTy::VecStrRef | NTy::StrRef)) =>
+        {
+            let t = st.tys[src];
+            st.tys.insert(*dst, t);
+            line!("let mut {} = {};", var(*dst), var(*src));
         }
         Op::Dup { dst, src } if st.addrs.slot_alias(dst) => {
             let t = st.tys[src];
