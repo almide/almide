@@ -268,9 +268,7 @@ fn consumed_params(
             // Inside a branch the field moves on one path only, so the take
             // over must cost no caller a copy: every site hands a value that
             // dies at the call.
-            // A native `Result` param is the callee's own already (there is no
-            // borrowed Result kind): taking it over changes nothing.
-            let close = |end: usize| close(end).filter(|&c| c == end || (dying_at_every_site(&func.name, k) && !native_result(&func.name, k)));
+            let close = |end: usize| close(end).filter(|&c| c == end || dying_at_every_site(&func.name, k));
             if let Some(end) = field_given(func, p.value, owned).and_then(close).filter(|&end| !exits_before(end)) {
                 out.push((k, end));
             }
@@ -818,8 +816,10 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sig
                 // that call lends, whatever the body's modes.
                 && crate::native_hof::of(&f.name).is_none()
         };
+        // A native `Result` param is the callee's own already (there is no
+        // borrowed Result kind): taking it over changes nothing.
         let takes_at = |f: &MirFunction, k: usize| {
-            !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0)
+            !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0) && !native_result(&f.name, k)
         };
         let Some((best, owned)) = solve_modes(functions, &table, &eligible, &takes_at, &hands_at) else {
             // A closure call the mirror refuses to hand over at leaves every
