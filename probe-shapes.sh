@@ -34,12 +34,13 @@ hit=set()
 for f in d["functions"]:
   fs=f["filenames"]
   for r in f["regions"]:
-    if r[7]==0 and r[4]>0: hit.add("%s:%d:%d:%d:%d"%(fs[r[5]].split("/src/")[-1],r[0],r[1],r[2],r[3]))
+    if r[7]==0 and r[4]>0 and "/render_native" in fs[r[5]]: hit.add("%s:%d:%d:%d:%d"%(fs[r[5]].split("/src/")[-1],r[0],r[1],r[2],r[3]))
 print("\n".join(sorted(hit)))' > "$d/hit.txt"
   rm -f "$d"/*.profraw "$d/p.profdata"
 }
 export -f run_one; export W BIN LLVM_BIN SRCS
 awk '{print $1, $2}' "$W/index.txt" | xargs -P "$(nproc)" -n 2 bash -c 'run_one "$0" "$1"'
+tar czf "$OUT/hits.tgz" -C "$W" c index.txt gate.json
 python3 - "$W" "$OUT" "$(git rev-parse --show-toplevel)" <<'PY'
 import json,sys,os,re,collections
 W,OUT,root=sys.argv[1],sys.argv[2],sys.argv[3]+"/"
@@ -56,6 +57,7 @@ for f in d["functions"]:
     for r in f["regions"]:
         if r[7]!=0: continue
         path=f["filenames"][r[5]]
+        if not re.search(r"crates/almide-mir/src/render_native[a-z_]*\.rs$", path): continue
         regs.append((path,(r[0],r[1]),(r[2],r[3]),r[4],f["name"]))
 by=collections.defaultdict(list)
 for g in regs: by[g[0]].append(g)
