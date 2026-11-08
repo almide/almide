@@ -51,6 +51,10 @@ struct Current {
     /// (`native_cell_window`), and the takes whose cell a read emptied.
     func: Option<MirFunction>,
     emptied: BTreeSet<ValueId>,
+    /// The shared-cell borrows open: (the op of their last read, the guard).
+    guards: Vec<(usize, String)>,
+    /// Its borrow-join arms (`borrow_join`), for the liveness reads.
+    arms: BTreeSet<ValueId>,
 }
 
 thread_local! {
@@ -150,7 +154,7 @@ pub(crate) fn set_program(user_fns: &BTreeMap<&str, &MirFunction>, sigs: &crate:
 }
 
 /// Enter `func`'s render.
-pub(crate) fn begin_fn(func: &MirFunction) {
+pub(crate) fn begin_fn(func: &MirFunction, arms: &BTreeSet<ValueId>) {
     let params: BTreeMap<ValueId, usize> = PROGRAM.with(|p| {
         p.borrow().keyed.get(&func.name).map(|ks| ks.iter().enumerate().map(|(i, v)| (*v, i)).collect()).unwrap_or_default()
     });
@@ -159,7 +163,7 @@ pub(crate) fn begin_fn(func: &MirFunction) {
     } else {
         dispatch_reads(func).into_iter().filter_map(|(r, p)| params.get(&p).map(|k| (r, *k))).collect()
     };
-    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads, func: Some(func.clone()), emptied: BTreeSet::new() });
+    CURRENT.with(|c| *c.borrow_mut() = Current { params, reads, func: Some(func.clone()), emptied: BTreeSet::new(), guards: Vec::new(), arms: arms.clone() });
 }
 
 /// The shared-cell read `d` of `cell` takes the payload out
@@ -174,6 +178,45 @@ pub(crate) fn cell_read_takes(d: ValueId, cell: ValueId, tys: &BTreeMap<ValueId,
             crate::native_cell_window::take_window(func, at, (d, cell), tys, &program_fn)
         });
         end.is_some_and(|x| c.emptied.insert(x))
+    })
+}
+
+/// The shared-cell read `d` of `cell` borrows the payload in place
+/// (`native_cell_window::borrow_window`) through the guard `guard`, released
+/// once the render is past the window's last read ([`guards_through`]).
+pub(crate) fn cell_read_borrows(d: ValueId, cell: ValueId, tys: &BTreeMap<ValueId, crate::render_native::NTy>, guard: String) -> bool {
+    let program_fn = |n: &str| PROGRAM.with(|p| p.borrow().fns.contains(n));
+    CURRENT.with(|c| {
+        let mut c = c.borrow_mut();
+        let last = c.func.as_ref().and_then(|func| {
+            let at = load_at(func, d)?;
+            crate::native_cell_window::borrow_window(func, at, (d, cell), tys, &program_fn)
+        });
+        last.map(|l| c.guards.push((l, guard))).is_some()
+    })
+}
+
+/// The cell guards whose window ends at or before op `i`, closed now.
+pub(crate) fn guards_through(i: usize) -> Vec<String> {
+    CURRENT.with(|c| {
+        let mut c = c.borrow_mut();
+        let (done, open): (Vec<_>, Vec<_>) = std::mem::take(&mut c.guards).into_iter().partition(|(l, _)| *l <= i);
+        c.guards = open;
+        done.into_iter().map(|(_, g)| g).collect()
+    })
+}
+
+/// The value `src` (of kind `t`), whose handle `value` a list-slot store writes, is not
+/// read after that store (`render_native_move::last_use`): the store may move
+/// it where it kept a copy for later readers.
+pub(crate) fn dies_at_store(src: ValueId, value: ValueId, t: crate::render_native::NTy) -> bool {
+    CURRENT.with(|c| {
+        let c = c.borrow();
+        let dies = c.func.as_ref().and_then(|func| {
+            let at = func.ops.iter().position(|op| matches!(op, Op::Prim { kind: crate::PrimKind::Store { .. }, args, .. } if args.get(1) == Some(&value)))?;
+            Some(crate::render_native_move::last_use(func, at, src, t, &c.arms))
+        });
+        dies.unwrap_or(false)
     })
 }
 

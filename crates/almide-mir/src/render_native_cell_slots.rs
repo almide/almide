@@ -56,7 +56,19 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
                 // A read the cell's own take follows with nothing between
                 // that can look at the cell (native_cell_window): the payload
                 // itself, not a copy of it.
-                let read = if rec::has_default(payload) && crate::render_native_keyed::cell_read_takes(*d, ad.base, tys) { "borrow_mut().take()" } else { "borrow().as_ref()" };
+                let takes = rec::has_default(payload) && crate::render_native_keyed::cell_read_takes(*d, ad.base, tys);
+                // A read whose every use only borrows, with nothing up to its
+                // last use that can look at the cell: a reference into the
+                // cell, its guard released after that use.
+                if let (false, true, Some((t, spelled, whole))) = (takes, st.borrow_reads.contains(d), borrowed_kind(payload)) {
+                    let g = format!("{}_g", var(*d));
+                    if crate::render_native_keyed::cell_read_borrows(*d, ad.base, tys, g.clone()) {
+                        tys.insert(*d, t);
+                        writeln!(out, "let {g} = {base}.borrow(); let mut {}: {spelled} = &(*{g}.as_ref().expect(\"initialized shared cell\")){whole};", var(*d)).unwrap();
+                        return Ok(());
+                    }
+                }
+                let read = if takes { "borrow_mut().take()" } else { "borrow().as_ref()" };
                 let copy = if read.ends_with("as_ref()") { ".clone()" } else { "" };
                 tys.insert(*d, payload);
                 writeln!(out, "let mut {}: {} = {base}.{read}.expect(\"initialized shared cell\"){copy};", var(*d), rec::owned_ty(payload)).unwrap();
