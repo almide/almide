@@ -35,7 +35,7 @@ jobs:
           cargo build --release --bin almide
           mkdir -p /tmp/almide-bin && cp target/release/almide /tmp/almide-bin/
           /tmp/almide-bin/almide run tools/almide-gates/src/main.almd -- impl-count . > out/impl.log 2>&1 || true
-          /tmp/almide-bin/almide run tools/almide-gates/src/main.almd -- impl-count --update . > out/impl-update.log 2>&1 || true
+          /tmp/almide-bin/almide run tools/almide-gates/src/main.almd -- impl-count . --update > out/impl-update.log 2>&1 || true
           git diff -- proofs/impl-count-ledger.toml > out/impl.diff
           git checkout -- proofs
           cargo clippy --release --workspace --all-targets --message-format=json > out/clippy.json 2> out/clippy.err || true
