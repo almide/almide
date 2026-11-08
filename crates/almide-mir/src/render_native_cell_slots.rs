@@ -52,12 +52,32 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
                 writeln!(out, "let mut {}: i64 = {base}.borrow().as_ref().copied().expect(\"initialized shared cell\");", var(*d)).unwrap();
             }
             Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), .. } if payload != NTy::I64 => {
-                crate::render_native_bounds::access(slot); tys.insert(*d, payload);
-                writeln!(out, "let mut {}: {} = {base}.borrow().as_ref().expect(\"initialized shared cell\").clone();", var(*d), rec::owned_ty(payload)).unwrap();
+                crate::render_native_bounds::access(slot);
+                // A read the cell's own take follows with nothing between
+                // that can look at the cell (native_cell_window): the payload
+                // itself, not a copy of it.
+                let takes = rec::has_default(payload) && crate::render_native_keyed::cell_read_takes(*d, ad.base, tys);
+                // A read whose every use only borrows, with nothing up to its
+                // last use that can look at the cell: a reference into the
+                // cell, its guard released after that use.
+                if let (false, true, Some((t, spelled, whole))) = (takes, st.borrow_reads.contains(d), borrowed_kind(payload)) {
+                    let g = format!("{}_g", var(*d));
+                    if crate::render_native_keyed::cell_read_borrows(*d, ad.base, tys, g.clone()) {
+                        tys.insert(*d, t);
+                        writeln!(out, "let {g} = {base}.borrow(); let mut {}: {spelled} = &(*{g}.as_ref().expect(\"initialized shared cell\")){whole};", var(*d)).unwrap();
+                        return Ok(());
+                    }
+                }
+                let read = if takes { "borrow_mut().take()" } else { "borrow().as_ref()" };
+                let copy = if read.ends_with("as_ref()") { ".clone()" } else { "" };
+                tys.insert(*d, payload);
+                writeln!(out, "let mut {}: {} = {base}.{read}.expect(\"initialized shared cell\"){copy};", var(*d), rec::owned_ty(payload)).unwrap();
             }
             Op::CallFn { dst: Some(d), name, .. } if name == "__mg_take" => {
                 crate::render_native_bounds::access(slot); tys.insert(*d, payload);
-                writeln!(out, "let mut {}: {} = {base}.borrow_mut().take().expect(\"initialized shared cell\");", var(*d), rec::owned_ty(payload)).unwrap();
+                // The read before it took the payload: what is left to release is none.
+                let taken = if crate::render_native_keyed::cell_emptied(*d) { "Default::default()".to_string() } else { format!("{base}.borrow_mut().take().expect(\"initialized shared cell\")") };
+                writeln!(out, "let mut {}: {} = {taken};", var(*d), rec::owned_ty(payload)).unwrap();
             }
             Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 => {
                 let rhs = args[1];

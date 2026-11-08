@@ -40,6 +40,64 @@ pub(crate) fn borrow_reads(func: &MirFunction) -> BTreeSet<ValueId> {
     out
 }
 
+/// The copies (`Dup`) of borrow-only reads that may stay references: every
+/// use of the copy only borrows too, it is never rebound nor returned, and
+/// the block the read borrows from is untouched up to the copy's last use as
+/// well. A copy rendered owned cloned the whole value (a captured map read
+/// for one `map.get`).
+pub(crate) fn ref_dups(func: &MirFunction) -> BTreeSet<ValueId> {
+    let root = roots(func);
+    let reads = borrow_reads(func);
+    let mut out = BTreeSet::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
+        let (true, Some(&base)) = (reads.contains(d), args.first().and_then(|a| root.get(a))) else { continue };
+        let mut dups = BTreeSet::new();
+        if let Some(last) = alias_span(func, i, *d, &root, &mut dups) {
+            if block_untouched(func, i, last, base, &root) {
+                out.extend(dups);
+            }
+        }
+    }
+    out
+}
+
+/// The last op after `at` that reads `d` (or an address into it) other than
+/// to release it, when every use only borrows ([`last_borrowing_use`]); a
+/// copy of it that only borrows counts as `d` itself (its uses extend the
+/// span; it joins `dups`). A release only ends a reference's borrow.
+fn alias_span(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMap<ValueId, ValueId>, dups: &mut BTreeSet<ValueId>) -> Option<usize> {
+    last_borrowing_use(func, at, d, root)?;
+    let mut reads = Vec::new();
+    let mut last = at;
+    for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
+        reads.clear();
+        crate::mir_ops::op_reads(op, &mut reads);
+        if !crate::render_native_move::bookkeeping(op) && reads.iter().any(|v| *v == d || root.get(v) == Some(&d)) {
+            last = j;
+        }
+    }
+    for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
+        let Op::Dup { dst, src } = op else { continue };
+        let fixed = func.ret != Some(*dst) && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if local == dst));
+        if *src == d && fixed {
+            let l = alias_span(func, j, *dst, root, dups)?;
+            dups.insert(*dst);
+            last = last.max(l);
+        }
+    }
+    Some(last)
+}
+
+thread_local! {
+    static REF_DUPS: std::cell::RefCell<BTreeSet<ValueId>> = const { std::cell::RefCell::new(BTreeSet::new()) };
+}
+
+/// `v` is a [`ref_dups`] copy of the function being rendered.
+pub(crate) fn ref_dup(v: ValueId) -> bool {
+    REF_DUPS.with(|m| m.borrow().contains(&v))
+}
+
 /// Every address value's root block (`prim.handle(r)` plus offsets).
 pub(crate) fn roots(func: &MirFunction) -> BTreeMap<ValueId, ValueId> {
     let mut root: BTreeMap<ValueId, ValueId> = BTreeMap::new();
@@ -208,6 +266,8 @@ thread_local! {
 pub(crate) fn set_borrowed_results(func: &MirFunction) {
     let set = borrowed_results(func);
     BORROWED_RESULTS.with(|m| *m.borrow_mut() = set);
+    let dups = ref_dups(func);
+    REF_DUPS.with(|m| *m.borrow_mut() = dups);
 }
 
 /// `v` is a floor result of the function being rendered that holds a
