@@ -247,16 +247,23 @@ pub(crate) fn carrier_dies_after(
         // Any other read of the address leaves the handle a read of the record.
         ops.into_iter().filter(|_| !other).collect()
     };
-    let scalar_reads: std::collections::BTreeSet<usize> = func.ops[at + 1..]
+    let mut scalar_reads: std::collections::BTreeSet<usize> = func.ops[at + 1..]
         .iter()
         .enumerate()
-        .flat_map(|(j, op)| match op {
-            Op::ListGetScalar { list, .. } if *list == src => vec![at + 1 + j],
-            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } if args.as_slice() == [src] && unread(*d) => vec![at + 1 + j],
-            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } if args.as_slice() == [src] => scalar_slot(at + 1 + j, *d),
-            _ => Vec::new(),
+        .filter(|(_, op)| match op {
+            Op::ListGetScalar { list, .. } => *list == src,
+            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } => args.as_slice() == [src] && unread(*d),
+            _ => false,
         })
+        .map(|(j, _)| at + 1 + j)
         .collect();
+    for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
+        if let Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } = op {
+            if args.as_slice() == [src] {
+                scalar_reads.extend(scalar_slot(j, *d));
+            }
+        }
+    }
     SKIP_READS.with(|m| *m.borrow_mut() = scalar_reads);
     let dies = dying_after(func, at, src, borrow_arms);
     SKIP_READS.with(|m| m.borrow_mut().clear());
