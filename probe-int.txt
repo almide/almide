@@ -1,0 +1,1 @@
+spec/wasm_cross/effect_dispatcher_many_arms.almd
