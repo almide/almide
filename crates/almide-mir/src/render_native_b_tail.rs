@@ -242,8 +242,8 @@ fn render_else(
                 NTy::VecStr,
                 if t == NTy::VecStr { format!("{}.clone()", var(v)) } else { format!("{}.to_vec()", var(v)) },
             ),
-            // Declared unset: both arms assign it (a placeholder would be
-            // built and dropped on every pass through the join).
+            // Declared unset: both arms assign it (a `Default` placeholder
+            // would be built and dropped on every pass through the join).
             NTy::Rec(i) | NTy::RecRef(i) => (
                 format!("let mut {}: {};", var(*d), crate::render_native_rec::struct_name(i)),
                 NTy::Rec(i),
@@ -255,7 +255,7 @@ fn render_else(
                 var(v),
             ),
             NTy::ResStr => (
-                format!("let mut {}: Result<AlmideString, AlmideString>;", var(*d)),
+                format!("let mut {}: Result<AlmideString, AlmideString> = Ok(AlmideString::new());", var(*d)),
                 NTy::ResStr,
                 format!("{}.clone()", var(v)),
             ),

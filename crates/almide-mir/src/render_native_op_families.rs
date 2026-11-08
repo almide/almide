@@ -339,6 +339,10 @@ fn render_result_str_and_slot_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerEr
             args,
         } => {
             let src = match tys.get(&args[0]) {
+                // The last read of the string: the Result takes it in.
+                Some(NTy::Str) if crate::render_native_move::moving_arg(args[0]) => {
+                    crate::render_native_move::take_expr(&var(args[0]))
+                }
                 Some(NTy::Str) => format!("{}.clone()", var(args[0])),
                 Some(NTy::StrRef) => format!("AlmideString::from({})", var(args[0])),
                 other => {
