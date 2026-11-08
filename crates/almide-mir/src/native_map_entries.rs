@@ -34,8 +34,8 @@ struct Entries {
     pairs: BTreeSet<ValueId>,
     /// The handle each pair is stored into its entry list as → the pair.
     handles: BTreeMap<ValueId, ValueId>,
-    /// Pairs left unbuilt by the render → the slots bound so far.
-    deferred: BTreeMap<ValueId, usize>,
+    /// Pairs left unbuilt by the render.
+    deferred: BTreeSet<ValueId>,
     /// Entry lists left unbuilt by the render → their element kind.
     unbuilt: BTreeMap<ValueId, NTy>,
 }
@@ -56,20 +56,15 @@ pub(crate) fn defer_pair(v: ValueId) -> bool {
         let mut e = e.borrow_mut();
         let pair = e.pairs.contains(&v);
         if pair {
-            e.deferred.insert(v, 0);
+            e.deferred.insert(v);
         }
         pair
     })
 }
 
-/// The slot number of the next store into the unbuilt pair `v`.
-pub(crate) fn pair_slot(v: ValueId) -> Option<usize> {
-    ENTRIES.with(|e| {
-        let mut e = e.borrow_mut();
-        let k = e.deferred.get_mut(&v)?;
-        *k += 1;
-        Some(*k - 1)
-    })
+/// `v` is a pair block left unbuilt.
+pub(crate) fn is_deferred(v: ValueId) -> bool {
+    ENTRIES.with(|e| e.borrow().deferred.contains(&v))
 }
 
 /// The Rust pair the handle `h` of an unbuilt pair block, stored into its
@@ -77,7 +72,7 @@ pub(crate) fn pair_slot(v: ValueId) -> Option<usize> {
 pub(crate) fn pair_of(h: ValueId) -> Option<String> {
     let p = ENTRIES.with(|e| {
         let e = e.borrow();
-        e.handles.get(&h).copied().filter(|p| e.deferred.contains_key(p))
+        e.handles.get(&h).copied().filter(|p| e.deferred.contains(p))
     })?;
     Some(format!("({0}_e0, {0}_e1)", var(p)))
 }
@@ -88,7 +83,7 @@ pub(crate) fn leave_unbuilt(v: ValueId, elem: Option<NTy>) -> bool {
     ENTRIES.with(|e| {
         let mut e = e.borrow_mut();
         let ok = e.lists.get(&v).is_some_and(|pairs| match elem {
-            Some(NTy::VecStr) => pairs.iter().all(|p| e.deferred.contains_key(p)),
+            Some(NTy::VecStr) => pairs.iter().all(|p| e.deferred.contains(p)),
             Some(NTy::Rec(j)) => crate::render_native_rec::field_count(j) == 2,
             _ => false,
         });

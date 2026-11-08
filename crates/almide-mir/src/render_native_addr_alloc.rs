@@ -201,12 +201,13 @@ fn alloc_typed_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
         }};
     }
     tys.insert(*dst, NTy::VecStr);
-    if crate::native_map_entries::defer_pair(*dst) {
-        line!("// {}: a map entry, its key and value bound one by one", var(*dst));
-        return true;
-    }
-    if st.pushed.contains(dst) {
-        line!("let mut {}: Vec<AlmideString> = {};", var(*dst), reserved_vec(&var(*len)));
+    // Filled in order (a constant length): each element waits in its own
+    // local, and the list is one `vec![…]` once its last element is stored —
+    // or, a map entry's pair, never built (crate::native_map_entries).
+    if let (true, Some(n)) = (st.pushed.contains(dst), st.consts.get(len).and_then(|n| usize::try_from(*n).ok())) {
+        st.literal.insert(*dst, (n, 0));
+        let what = if crate::native_map_entries::defer_pair(*dst) { "a map entry, its key and value bound one by one" } else { "built whole at its last element" };
+        line!("// {}: a list of {n}, {what}", var(*dst));
         return true;
     }
     line!(
