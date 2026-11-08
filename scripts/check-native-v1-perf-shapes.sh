@@ -153,6 +153,8 @@ for reg in regions:
     # code of its own: it renders nothing either.
     if "wall(" not in own and re.search(r"[A-Za-z_]", own):
         counts[key] = counts.get(key, 0) + 1
+        if "render_fn_move_op" in key[1]:
+            print("ZERO", key[1], reg[2], reg[3], own.strip()[:200].replace("\n", " "))
 
 rows = {}
 if os.path.exists(baseline):
