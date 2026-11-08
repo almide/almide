@@ -35,12 +35,6 @@
 use crate::{MirFunction, Op, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// A declared floor or runtime-served call that takes its argument `k` by
-/// value: handed there at its last use, the argument moves in.
-fn by_value(name: &str, k: usize) -> bool {
-    crate::native_floor::takes_by_value(name, k) || crate::native_hof::takes_by_value(name, k)
-}
-
 fn values(op: &Op) -> Vec<ValueId> {
     let mut out = Vec::new();
     crate::mir_ops::op_values(op, &mut out);
@@ -125,7 +119,7 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Mo
             if (((crate::native_list_ops::is_list_concat(name) || name == "__str_concat")
                 && matches!(args.first(), Some(crate::CallArg::Handle(v)) if *v == p.value))
                 || args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value))
-                    .is_some_and(|k| by_value(name, k)
+                    .is_some_and(|k| crate::native_floor::takes_by_value(name, k)
                         // Or a program function whose own param there is a
                         // move param: the body hands the param on (`poke(mut
                         // b) = bytes.put_u8(b, 0, v)` over a linked body).
@@ -150,7 +144,7 @@ fn consumed_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &Mo
             Op::CallFn { name, args, .. } => {
                 values(&func.ops[i]).iter().filter(|x| **x == p.value).count() == 1
                     && args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value)).is_some_and(|k| {
-                        by_value(name, k)
+                        crate::native_floor::takes_by_value(name, k)
                             || owned.moves(&func.ops[i], k)
                             // The list or string a concatenation grows in place.
                             || (k == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"))
@@ -249,7 +243,7 @@ fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>) -> Option<usiz
                 if vs.iter().filter(|v| derived.contains(v)).count() != 1 {
                     return None;
                 }
-                let by_value = by_value(name, at)
+                let by_value = crate::native_floor::takes_by_value(name, at)
                     || owned.moves(op, at)
                     // The list or string a concatenation grows in place.
                     || (at == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"));

@@ -233,25 +233,6 @@ pub(crate) fn of(impl_fn: &str) -> Option<&'static Hof> {
     made
 }
 
-/// Whether every runtime body a declared route of `call` may serve takes its
-/// param `k` by value, plainly (not a tuple list it converts, not beside a
-/// mutable loan it snapshots for): an argument handed there at its last use
-/// moves in (`runtime_arg`'s dying arm) where a borrowed one is copied. A
-/// site the render serves through the linked body instead lends it.
-pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
-    let hofs: Vec<&Hof> = crate::mir_ops::self_host_runtime()
-        .iter()
-        .flat_map(|(_, pairs)| pairs.iter())
-        .filter(|(_, source)| *source == call)
-        .filter_map(|(implementation, _)| of(implementation))
-        .collect();
-    !hofs.is_empty()
-        && hofs.iter().all(|h| {
-            !h.mutable.iter().any(|m| *m)
-                && matches!(h.params.get(k), Some((d, false)) if !matches!(d, DTy::Fn(..)) && !has_runtime_tuple(d))
-        })
-}
-
 /// A declaration-backed generic route for a source call. The linker will
 /// still resolve its registered body; every actual call is type-checked by
 /// `plan` before that body can be replaced by the runtime implementation.
