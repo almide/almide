@@ -217,6 +217,19 @@ pub(crate) fn carrier_dies_after(
     src: ValueId,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
+    carrier_dies_after_reading(func, at, src, borrow_arms, false)
+}
+
+/// [`carrier_dies_after`], where `slots` also leaves out a record's scalar
+/// slot reads through an offset address (`sc.n` beside the list field the
+/// concatenation takes, `set_moving_args`).
+pub(crate) fn carrier_dies_after_reading(
+    func: &MirFunction,
+    at: usize,
+    src: ValueId,
+    borrow_arms: &std::collections::BTreeSet<ValueId>,
+    slots: bool,
+) -> bool {
     let unread = |d: ValueId| {
         !func.ops.iter().any(|op| {
             let mut reads = Vec::new();
@@ -255,7 +268,7 @@ pub(crate) fn carrier_dies_after(
         // Any other read of the address leaves the handle a read of the record.
         ops.into_iter().filter(|_| !other).collect()
     };
-    for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
+    for (j, op) in func.ops.iter().enumerate().skip(at + 1).filter(|_| slots) {
         if let Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } = op {
             if args.as_slice() == [src] {
                 scalar_reads.extend(scalar_slot(j, *d));
@@ -634,7 +647,7 @@ pub(crate) fn set_moving_args(
                     }
                 };
                 let ok = payload_carrier(tys.get(&base).copied())
-                    && carrier_dies_after(func, at, base, borrow_arms)
+                    && carrier_dies_after_reading(func, at, base, borrow_arms, true)
                     && reads.iter().all(|r| dying_after(func, at, *r, borrow_arms));
                 ok.then_some((v, take))
             })
