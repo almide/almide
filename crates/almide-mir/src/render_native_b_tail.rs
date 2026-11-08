@@ -255,7 +255,7 @@ fn render_else(
                 var(v),
             ),
             NTy::ResStr => (
-                format!("let mut {}: Result<AlmideString, AlmideString>;", var(*d)),
+                format!("let mut {}: Result<AlmideString, AlmideString> = Ok(AlmideString::new());", var(*d)),
                 NTy::ResStr,
                 format!("{}.clone()", var(v)),
             ),
