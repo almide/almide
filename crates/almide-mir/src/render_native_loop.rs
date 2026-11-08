@@ -88,6 +88,7 @@ fn render_fn(
     crate::render_native_move::set_rebound(func);
     crate::render_native_borrow_read::set_borrowed_results(func);
     crate::render_native_keyed::begin_fn(func, &borrows.arms);
+    crate::native_map_entries::begin(func);
     // Interpolation chains built in one buffer (crate::render_native_interp).
     let chains = crate::render_native_interp::chains(func);
     crate::render_native_move::set_stack_lits(func, &user_fns.keys().copied().collect());

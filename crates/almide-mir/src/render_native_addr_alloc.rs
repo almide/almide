@@ -105,6 +105,10 @@ fn alloc_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
         }};
     }
     tys.insert(*dst, NTy::VecStr);
+    if crate::native_map_entries::defer_pair(*dst) {
+        line!("// {}: a map entry, its key and value bound one by one", var(*dst));
+        return true;
+    }
     if st.single.contains_key(dst) {
         line!("// {}: a one-element list, its element pushed at the append", var(*dst));
         return true;
@@ -137,6 +141,10 @@ fn alloc_rec_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> Result<bool,
         // is one `vec![…]` once its last element is stored.
         if let Some(n) = st.consts.get(len).and_then(|n| usize::try_from(*n).ok()) {
             st.literal.insert(*dst, (n, 0));
+            if crate::native_map_entries::leave_unbuilt(*dst, crate::render_native_rec::list_elem(i)) {
+                line!("// {}: a map's {n} entries, handed over as an array", var(*dst));
+                return Ok(true);
+            }
             line!("// {}: a list of {n}, built whole at its last element", var(*dst));
             return Ok(true);
         }
