@@ -183,11 +183,6 @@ fn rewrite_native_linked_mir(
             f.name
         )));
     }
-    // A closure block only its direct calls named, all of them inlined, is
-    // never built (no copy of what it captures).
-    for f in functions.iter_mut() {
-        crate::native_unread_closure::elide(f);
-    }
     rewrite_native_result_windows_over(
         ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())),
         functions,
