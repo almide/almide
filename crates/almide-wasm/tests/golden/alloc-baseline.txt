@@ -395,6 +395,8 @@
 65744	spec/wasm_cross/int_div_by_zero_literal.almd
 65728	spec/wasm_cross/int_div_mod_ok.almd
 65744	spec/wasm_cross/int_div_overflow.almd
+66816	spec/wasm_cross/int_div_pow2_nonneg_induction.almd
+65696	spec/wasm_cross/int_div_pow2_signed_induction.almd
 66592	spec/wasm_cross/int_float_ops.almd
 67904	spec/wasm_cross/int_from_hex.almd
 65744	spec/wasm_cross/int_mod_by_zero.almd

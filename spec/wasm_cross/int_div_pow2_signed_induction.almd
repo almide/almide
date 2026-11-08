@@ -39,7 +39,11 @@ fn two_branches() -> Int = {
   var m = -7
   while m < 40 {
     acc = acc + m / 8 + m % 2
-    if m % 3 == 0 then { m = m + 2 } else { m = m + 1 }
+    if m % 3 == 0 then {
+      m = m + 2
+    } else {
+      m = m + 1
+    }
   }
   acc
 }
