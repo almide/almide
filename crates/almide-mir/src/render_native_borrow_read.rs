@@ -190,8 +190,7 @@ pub(crate) fn borrowed_results(func: &MirFunction) -> BTreeSet<ValueId> {
             continue;
         }
         let sources_borrowed = floor.params.iter().zip(args).all(|(p, a)| match (p, a) {
-            (crate::native_floor::FloorParam::Value(_), CallArg::Handle(v)) => borrowed_param(*v),
-            (crate::native_floor::FloorParam::Value(_), _) => false,
+            (crate::native_floor::FloorParam::Value(_), a) => matches!(a, CallArg::Handle(v) if borrowed_param(*v)),
             _ => true,
         });
         if sources_borrowed && only_borrowed_reads(func, i, *d, &root, &reads) {

@@ -187,19 +187,13 @@ fn render_native_fn_sig(
             let spelled = match t {
                 t if crate::render_native_rec::is_closure(t) && func.name.starts_with("__lambda_")
                     && func.params.first().is_some_and(|first| first.value == p.value) => "&impl __AlmdEnv".to_string(),
-                NTy::Str if owned => "AlmideString".to_string(),
-                NTy::Vec if owned => "Vec<i64>".to_string(),
-                NTy::VecStr if owned => "Vec<AlmideString>".to_string(),
-                NTy::Rec(i) if owned => crate::render_native_rec::struct_name(i),
+                NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) if owned => crate::render_native_rec::owned_ty(t),
                 NTy::StrRef | NTy::Str => "&str".to_string(),
                 NTy::VecRef | NTy::Vec => "&[i64]".to_string(),
                 NTy::VecStrRef | NTy::VecStr => "&[AlmideString]".to_string(),
-                NTy::RecRef(i) | NTy::Rec(i) => format!("&{}", crate::render_native_rec::struct_name(i)),
-                NTy::I64 => "i64".to_string(),
-                NTy::F64 => "f64".to_string(),
-                NTy::Res => "Result<i64, AlmideString>".to_string(),
-                NTy::Opt => "Option<i64>".to_string(),
-                NTy::ResStr => "Result<AlmideString, AlmideString>".to_string(),
+                NTy::RecRef(_) | NTy::Rec(_) => format!("&{}", crate::render_native_rec::owned_ty(t)),
+                // A scalar or a carrier passes as itself.
+                _ => crate::render_native_rec::owned_ty(t),
             };
             let mut_prefix = if reassigned.contains(&p.value) || owned {
                 "mut "
@@ -211,18 +205,9 @@ fn render_native_fn_sig(
         .collect();
     let ret = match func.ret {
         None => String::new(),
+        // The result is owned whatever kind the returned value has.
         Some(v) => match ret_override.as_ref().or_else(|| tys.get(&v)) {
-            Some(NTy::I64) => " -> i64".to_string(),
-            Some(NTy::Str) => " -> AlmideString".to_string(),
-            Some(NTy::StrRef) => " -> AlmideString".to_string(),
-            Some(NTy::Vec) => " -> Vec<i64>".to_string(),
-            Some(NTy::VecRef) => " -> Vec<i64>".to_string(),
-            Some(NTy::F64) => " -> f64".to_string(),
-            Some(NTy::Res) => " -> Result<i64, AlmideString>".to_string(),
-            Some(NTy::VecStr | NTy::VecStrRef) => " -> Vec<AlmideString>".to_string(),
-            Some(NTy::Rec(i) | NTy::RecRef(i)) => format!(" -> {}", crate::render_native_rec::struct_name(*i)),
-            Some(NTy::Opt) => " -> Option<i64>".to_string(),
-            Some(NTy::ResStr) => " -> Result<AlmideString, AlmideString>".to_string(),
+            Some(t) => format!(" -> {}", crate::render_native_rec::owned_ty(*t)),
             None => return Err(wall("native: return value untyped")),
         },
     };
@@ -272,23 +257,14 @@ fn native_op_reads(op: &Op) -> Vec<ValueId> {
     }
 }
 
-/// The CALL-shaped ops that render through an [`OpSink`]: indirect dispatch,
-/// the rung-4 bounds-checked element accessors, and witness-level runtime
-/// calls (`println` lowers through these). A CallIndirect dispatches through
-/// the arity's `__almd_ci_*` table: the leading Handle arg is the closure
-/// block (BORROWED env — `&[i64]`), the rest are scalar user args, the result
-/// an i64; heap args/results are outside this slab (the wasm leg keeps them;
-/// native walls). The element accessors' shims abort with the byte-identical
-/// "Error: index out of bounds" + exit 1 the wasm `$elem_addr_chk` and v0
-/// native emit. `Ok(false)` = not this tier's op.
+/// The CALL-shaped ops that render through an [`OpSink`]: the rung-4
+/// bounds-checked element accessors and witness-level runtime calls
+/// (`println` lowers through these). A `CallIndirect` renders through its
+/// declared function type (`render_native_closure`). The element accessors'
+/// shims abort with the byte-identical "Error: index out of bounds" + exit 1
+/// the wasm `$elem_addr_chk` and v0 native emit. `Ok(false)` = not this tier's op.
 fn render_native_call_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
     match op {
-        Op::CallIndirect {
-            dst,
-            table_idx,
-            args,
-            result,
-        } => render_call_indirect(dst, table_idx, args, result, s)?,
         Op::ListGetScalar { dst, list, idx } => render_list_get_scalar(dst, list, idx, s)?,
         Op::ListSetScalar { list, idx, val } => render_list_set_scalar(list, idx, val, s)?,
         Op::Call {
@@ -713,16 +689,14 @@ pub(crate) fn render_dup(
         .get(src)
         .ok_or_else(|| wall("native: Dup of untyped value"))?;
     match t {
-        NTy::I64 => {
-            tys.insert(*dst, NTy::I64);
+        // A scalar lane copies itself.
+        NTy::I64 | NTy::F64 | NTy::Opt => {
+            tys.insert(*dst, t);
             line!("let mut {} = {};", var(*dst), var(*src));
         }
-        NTy::Res => {
-            tys.insert(*dst, NTy::Res);
-            line!("let mut {} = {}.clone();", var(*dst), var(*src));
-        }
-        NTy::Str => {
-            tys.insert(*dst, NTy::Str);
+        // An owned heap value clones.
+        NTy::Str | NTy::Vec | NTy::VecStr | NTy::Res | NTy::ResStr => {
+            tys.insert(*dst, t);
             line!("let mut {} = {}.clone();", var(*dst), var(*src));
         }
         NTy::StrRef => {
@@ -734,22 +708,10 @@ pub(crate) fn render_dup(
                 None => line!("let mut {} = AlmideString::from({});", var(*dst), var(*src)),
             }
         }
-        NTy::Vec => {
-            tys.insert(*dst, NTy::Vec);
-            line!("let mut {} = {}.clone();", var(*dst), var(*src));
-        }
         NTy::VecRef => {
             // Dup of a borrowed list param mints a fresh owned Vec.
             tys.insert(*dst, NTy::Vec);
             line!("let mut {} = {}.to_vec();", var(*dst), var(*src));
-        }
-        NTy::F64 => {
-            tys.insert(*dst, NTy::F64);
-            line!("let mut {} = {};", var(*dst), var(*src));
-        }
-        NTy::VecStr => {
-            tys.insert(*dst, NTy::VecStr);
-            line!("let mut {} = {}.clone();", var(*dst), var(*src));
         }
         NTy::VecStrRef => {
             tys.insert(*dst, NTy::VecStr);
@@ -757,14 +719,6 @@ pub(crate) fn render_dup(
         }
         NTy::Rec(i) | NTy::RecRef(i) => {
             tys.insert(*dst, NTy::Rec(i));
-            line!("let mut {} = {}.clone();", var(*dst), var(*src));
-        }
-        NTy::Opt => {
-            tys.insert(*dst, NTy::Opt);
-            line!("let mut {} = {};", var(*dst), var(*src));
-        }
-        NTy::ResStr => {
-            tys.insert(*dst, NTy::ResStr);
             line!("let mut {} = {}.clone();", var(*dst), var(*src));
         }
     }

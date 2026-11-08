@@ -236,7 +236,7 @@ fn render_fn_step<'a>(
         return Ok(false);
     }
     // #4006 family G: a closure call with a heap arg or result.
-    if crate::render_native_closure::render_typed_call_indirect(op, &crate::render_native_closure::handed_after(st.func, i), st.sigs, &mut st.tys, &mut st.out, st.indent)? {
+    if crate::render_native_closure::render_typed_call_indirect(op, &crate::render_native_closure::handed_after(st.func, i), &mut st.tys, &mut st.out, st.indent)? {
         return Ok(false);
     }
     render_fn_op(st, i, op)?;
