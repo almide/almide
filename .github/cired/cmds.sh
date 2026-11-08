@@ -32,5 +32,8 @@ find "${TMPDIR:-/tmp}" /tmp -name 'main.rs' -newer /tmp/marker 2>/dev/null | hea
 f=$(find "${TMPDIR:-/tmp}" /tmp -name 'main.rs' -newer /tmp/marker 2>/dev/null | head -1)
 echo "--- $f"; [ -n "$f" ] && cp "$f" /tmp/cired-out-m_$v.rs
 done
-echo "=== suite"
-cargo test --release --no-fail-fast --test fan_region_floor_test --test fan_meter_splice_test --test runtime_spelling_hygiene_test --test counted_index_chain_test --test ord_record_variant_test --test ord_recursive_test 2>&1 | grep -E "^test .*(ok|FAILED)$|panicked|left:|right:" -A2 | cut -c1-400 | head -150
+for v in var lit; do
+cargo run -q --release -p almide-mir --example probe_native /tmp/m_$v.almd > /tmp/cired-out-render-$v.rs 2>&1
+cargo run -q --release -p almide-mir --example probe_native /tmp/m_$v.almd --mir > /tmp/cired-out-mir-$v.txt 2>&1
+echo "=== render $v"; grep -n "^fn \|charge\|budget\|CallIndirect\|__lambda\|list_map\|list_sum" /tmp/cired-out-render-$v.rs | grep -v "^[0-9]*:\s*//" | head -80
+done
