@@ -44,8 +44,18 @@ pub fn almide_rt_string_to_lower(s: &str) -> AlmideString {
     }
     out.into()
 }
+// ASCII ends are trimmed byte by byte (the char::is_whitespace ASCII set: tab, LF, VT, FF, CR, space); a non-ASCII end falls back to str::trim.
+fn almide_trim_ws(s: &str) -> &str {
+    let b = s.as_bytes();
+    let ws = |c: u8| matches!(c, b'\t' | b'\n' | 0x0B | 0x0C | b'\r' | b' ');
+    let (mut i, mut j) = (0, b.len());
+    while i < j && ws(b[i]) { i += 1; }
+    while j > i && ws(b[j - 1]) { j -= 1; }
+    let r = &s[i..j];
+    if r.as_bytes().first().is_some_and(|c| *c >= 0x80) || r.as_bytes().last().is_some_and(|c| *c >= 0x80) { r.trim() } else { r }
+}
 #[inline]
-pub fn almide_rt_string_trim(s: &str) -> AlmideString { s.trim().into() }
+pub fn almide_rt_string_trim(s: &str) -> AlmideString { almide_trim_ws(s).into() }
 #[inline]
 pub fn almide_rt_string_trim_start(s: &str) -> AlmideString { s.trim_start().into() }
 #[inline]
