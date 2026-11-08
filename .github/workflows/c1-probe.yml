@@ -20,6 +20,8 @@ jobs:
           save-if: false
       - name: build
         run: cargo build --release --bin almide && cargo build --release -p almide-mir --example emit_native_bundle
+      - name: walls
+        run: cargo test --release --test c1_probe_walls_test -- --nocapture; cp c1-walls.tsv dumps/ 2>/dev/null; mkdir -p dumps; cp c1-walls.tsv dumps/
       - name: dumps
         run: |
           set +e
