@@ -10,9 +10,23 @@ env:
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
   HEAD_REF: wasm-copy-wordwise
-  BASE_REF: 723302004
+  BASE_REF: b91f29236
   FIXTURE: spec/wasm_cross/string_slice_concat_short_unaligned.almd
 jobs:
+  inspection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HEAD_REF }}
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - run: git log --oneline -1
+      - name: stdlib_inspection_test
+        run: cargo test --test stdlib_inspection_test -- --nocapture
+
   regen:
     runs-on: ubuntu-latest
     timeout-minutes: 180
