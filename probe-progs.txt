@@ -1,0 +1,1 @@
+spec/wasm_cross/field_and_interp_accumulator.almd
