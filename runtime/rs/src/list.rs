@@ -102,7 +102,25 @@ pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C>(a: Vec<A>, b: Vec<B>, f: s
 // (differential fuzz). A slice parameter takes a borrow like every other
 // read-only list fn, and an owned `Vec` still deref-coerces into it.
 pub fn almide_rt_list_flatten<T: Clone>(xs: &[Vec<T>]) -> Vec<T> { xs.iter().flatten().cloned().collect() }
-pub fn almide_rt_list_flat_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Vec<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().flat_map(f).collect() }
+// One loop, not `flat_map().collect()`: `FlatMap`'s size hint has a lower
+// bound of 0, so the collect grew its result by doubling, and its adapter
+// cost more per element than the callback's own list. The first sublist's
+// length times the source's sizes the result once (a hint: a failed
+// reservation leaves the appends to grow it), and each sublist's elements
+// move over without a per-element copy.
+pub fn almide_rt_list_flat_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Vec<B>>) -> Vec<B> {
+    let f = move |a| f(a);
+    let n = xs.len();
+    let mut out: Vec<B> = Vec::new();
+    for a in xs {
+        let mut part = f(a);
+        if out.capacity() == 0 {
+            let _ = out.try_reserve(n.saturating_mul(part.len()));
+        }
+        out.append(&mut part);
+    }
+    out
+}
 // FIXED-ARITY twin of `almide_rt_list_flat_map`, for the `|x| … [a, b]` shape
 // the CHEATSHEET's recommended build idiom produces
 // (`list.range |> list.flat_map`). `RustLoweringPass::lower_flat_map_arrays`

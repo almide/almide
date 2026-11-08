@@ -598,13 +598,6 @@ fn plan(
         return None;
     }
     let got = call_args(call, &at.0, tys)?;
-    // The standard codegen builds a `list.flat_map` callback that ends in a
-    // fixed-arity list literal into an array per element
-    // (`almide_rt_list_flat_map_arr`, #1337); this route allocates a Vec per
-    // element, so that shape is left to it (the no-perf-loss rule, #4006).
-    if hof.symbol == "almide_rt_list_flat_map" && call.args.iter().any(|a| fixed_literal_callback(a, &origins, user_fns)) {
-        return None;
-    }
     let mut env = Env::new();
     for ((d, _), (_, t)) in hof.params.iter().zip(&got) {
         if !matches!(d, DTy::Fn(..)) {
@@ -673,14 +666,6 @@ fn handed_over<'h>(hof: &'h Hof, k: usize, a: &CallArg, t: NTy) -> Option<&'h st
     let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
     let owned = matches!(t, NTy::Vec | NTy::VecStr | NTy::Rec(_)) && crate::render_native::owned_nty(t) == t;
     (dying && owned && !hof.mutable.iter().any(|m| *m) && hof.params[*param].1).then_some(name.as_str())
-}
-
-/// A callback argument naming a lambda whose result is one list literal of
-/// at most eight elements (the arity the standard codegen's array twin takes).
-fn fixed_literal_callback(a: &CallArg, origins: &BTreeMap<ValueId, (String, Vec<ValueId>)>, user_fns: &BTreeMap<&str, &MirFunction>) -> bool {
-    let (CallArg::Handle(v) | CallArg::Scalar(v)) = a else { return false };
-    let Some(l) = origins.get(v).and_then(|(n, _)| user_fns.get(n.as_str())) else { return false };
-    l.ops.iter().any(|op| matches!(op, Op::ListLit { dst, elems } if l.ret == Some(*dst) && (1..=8).contains(&elems.len())))
 }
 
 /// [`plan`]'s rendering of the plain value argument `k` of the call at op
