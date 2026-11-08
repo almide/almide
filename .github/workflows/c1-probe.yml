@@ -5,7 +5,7 @@ on:
 env:
   CARGO_TERM_COLOR: never
 jobs:
-  dumps:
+  checks:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -20,15 +20,40 @@ jobs:
           save-if: false
       - name: build
         run: cargo build --release --bin almide && cargo build --release -p almide-mir --example emit_native_bundle
-      - name: movedbg
+      - name: outputs (v1, v0, wasm) and the force-moves control
         run: |
           set +e
-          mkdir -p dumps
-          for f in $(cat scripts/c1probe/list.txt); do
-            n=$(basename $f .almd)
-            echo "=== $n"
-            C1_DBG=1 ./target/release/examples/emit_native_bundle $f dumps/$n.v1.rs 2>&1 >/dev/null | grep MOVEDBG | cut -c1-600 | head -40
+          for n in mut_param_copy_kept_when_read mut_param_copy_moved_when_dead; do
+            f=spec/wasm_cross/$n.almd
+            ALMIDE_VERIFIED_DEBUG=1 ./target/release/almide build $f -o /tmp/$n.v1 > /tmp/$n.v1.log 2>&1 || { echo "V1 BUILD FAIL $n"; tail -30 /tmp/$n.v1.log; }
+            grep -i "v1\|verified\|wall" /tmp/$n.v1.log | head -3
+            ALMIDE_NO_VERIFIED_OK=1 ./target/release/almide build $f --no-verified -o /tmp/$n.v0 > /dev/null 2>&1 || echo "V0 BUILD FAIL $n"
+            /tmp/$n.v1 > /tmp/$n.v1.out 2>&1; echo "exit $?" >> /tmp/$n.v1.out
+            /tmp/$n.v0 > /tmp/$n.v0.out 2>&1; echo "exit $?" >> /tmp/$n.v0.out
+            ./target/release/almide run --target wasm $f > /tmp/$n.wasm.out 2>&1; echo "exit $?" >> /tmp/$n.wasm.out
+            echo "== $n v1"; cat /tmp/$n.v1.out
+            cmp -s /tmp/$n.v1.out /tmp/$n.v0.out && echo "SAME v1=v0 $n" || { echo "DIFF v1/v0 $n"; diff /tmp/$n.v1.out /tmp/$n.v0.out; }
+            cmp -s /tmp/$n.v1.out /tmp/$n.wasm.out && echo "SAME v1=wasm $n" || { echo "DIFF v1/wasm $n"; diff /tmp/$n.v1.out /tmp/$n.wasm.out; }
+            ALMIDE_NATIVE_DRILL_FORCE_MOVES=1 ALMIDE_VERIFIED_DEBUG=1 ./target/release/almide build $f -o /tmp/$n.force > /tmp/$n.force.log 2>&1 || { echo "FORCE BUILD FAIL $n"; grep -A6 "^error" /tmp/$n.force.log | head -20; }
+            /tmp/$n.force > /tmp/$n.force.out 2>&1; echo "exit $?" >> /tmp/$n.force.out
+            cmp -s /tmp/$n.force.out /tmp/$n.v0.out && echo "FORCE SAME $n" || { echo "FORCE DIFF $n"; diff /tmp/$n.force.out /tmp/$n.v0.out; }
           done
+      - name: walls
+        run: mkdir -p dumps; cargo test --release --test c1_probe_walls_test -- --nocapture; cp c1-walls.tsv dumps/
+      - name: ledgers
+        if: always()
+        run: |
+          set +e
+          export ORACLE=$PWD/target/release/almide
+          bash scripts/gen-run-manifest.sh > /dev/null 2>dumps/run-manifest.err
+          bash scripts/gen-check-manifest.sh > /dev/null 2>dumps/check-manifest.err
+          bash scripts/gen-ast-manifest.sh > /dev/null 2>dumps/ast-manifest.err
+          ALMIDE_UPDATE_ALLOC=1 cargo test --release -p almide-wasm --test alloc_ledger 2>&1 | tail -3
+          ALMIDE_UPDATE_SIZES=1 cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -3
+          ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor 2>&1 | tail -3
+          bash proofs/output-parity.sh --update 2>&1 | tail -3
+          ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --release --test native_verified_floor_test 2>&1 | tail -3
+          git diff > dumps/ledgers.patch; git diff --stat
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
