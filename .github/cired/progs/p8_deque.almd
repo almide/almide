@@ -1,0 +1,6 @@
+fn main() -> Unit = {
+  var d = deque.from_list([1, 2, 3])
+  let x = deque.pop(d)
+  let y = deque.pop_front(d)
+  println("${x} ${y}")
+}
