@@ -129,7 +129,7 @@ fn a_widened_byte_walk_allocates_nothing() {
 /// never read.
 #[test]
 fn a_byte_walk_whose_callback_writes_its_block_stays_staged() {
-    let r = run(r#"fn main() -> Unit = {
+    let r = run(r#"effect fn main() -> Unit = {
   var b = bytes.from_string("abc")
   let total = bytes.to_list(b) |> list.fold(0, (acc, x) => {
     b = bytes.set(b, 2, 0)

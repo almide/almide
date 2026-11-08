@@ -15,13 +15,9 @@ fn byte_sum(s: String) -> Int = list.sum(bytes.to_list(bytes.from_string(s)))
 
 fn weighted(b: Bytes) -> Int = bytes.to_list(b) |> list.fold(0, (acc, x) => acc * 31 + x)
 
-fn doubled_odd(s: String) -> Int =
-  bytes.to_list(bytes.from_string(s))
-    |> list.map((x) => x * 2 + 1)
-    |> list.filter((y) => y % 3 == 0)
-    |> list.sum
+fn doubled_odd(s: String) -> Int = bytes.to_list(bytes.from_string(s)) |> list.map((x) => x * 2 + 1) |> list.filter((y) => y % 3 == 0) |> list.sum
 
-fn written_while_walked() -> Int = {
+effect fn written_while_walked() -> Int = {
   var b = bytes.from_string("abc")
   bytes.to_list(b) |> list.fold(0, (acc, x) => {
     b = bytes.set(b, 2, 0)
@@ -29,12 +25,13 @@ fn written_while_walked() -> Int = {
   })
 }
 
-fn main() -> Unit = {
+effect fn main() -> Unit = {
   println("${byte_sum("hello")} ${byte_sum("")} ${byte_sum("héllo→")}")
   let long = string.repeat("zebra-", 40)
   println("${weighted(bytes.from_string(long))} ${weighted(bytes.from_string(""))}")
   println("${doubled_odd("item-123, value 861")} ${doubled_odd("")}")
   let total = ["a", "bb", "ccc"] |> list.fold(0, (acc, s) => acc * 7 + byte_sum(s))
   println("${total}")
-  println("${written_while_walked()}")
+  let written = written_while_walked()!
+  println("${written}")
 }
