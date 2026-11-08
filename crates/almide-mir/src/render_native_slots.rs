@@ -567,7 +567,16 @@ pub(super) fn borrowed_stores(
         let [address, value] = args.as_slice() else { return None };
         let src = handles.get(value)?;
         let (base, _) = bases.get(address)?;
-        (!matches!(func.ops.get(at + 1), Some(Op::Consume { v }) if v == src)).then_some((*base, *value))
+        let consumed = matches!(func.ops.get(at + 1), Some(Op::Consume { v }) if v == src);
+        // A function-local handle no path reads after the store (the
+        // `if .. then "<b>${c}</b>" else c` merge a `list.map` pushes): its
+        // reference only waits for its release, so the slot takes the value
+        // itself instead of a copy.
+        let dies = !crate::render_native_move::drill_no_moves()
+            && !func.params.iter().any(|p| p.value == *src)
+            && func.ret != Some(*src)
+            && !crate::mir_liveness::live_after(func, at, *src);
+        (!consumed && !dies).then_some((*base, *value))
     }).collect()
 }
 
