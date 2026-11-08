@@ -14,3 +14,4 @@ spec/wasm_cross/heap_result_if_match_arm_frame.almd
 spec/wasm_cross/matrix_shape_family.almd
 spec/wasm_cross/sized_field_default_matrix.almd
 spec/wasm_cross/json_number_unicode.almd
+research/benchmark/perf/v1-shapes/int32_recurrence.almd
