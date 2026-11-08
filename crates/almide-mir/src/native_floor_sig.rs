@@ -15,6 +15,7 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
         FloorParam::Int => r == "i64",
         FloorParam::Bool => r == "bool",
         FloorParam::Float => r == "f64",
+        FloorParam::Float32 => r == "f32",
         FloorParam::Str => r == "&str",
         FloorParam::Map(_) => is_generic_map(r.strip_prefix('&').unwrap_or(&r)),
         FloorParam::MapKey(_) | FloorParam::MapVal(_) => is_type_param(r.strip_prefix('&').unwrap_or(&r)),

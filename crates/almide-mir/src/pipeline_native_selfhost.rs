@@ -82,6 +82,13 @@ struct SelfHostLinker<'u> {
     linked: Vec<LinkedSelfHost>,
     linked_srcs: std::collections::BTreeMap<&'static str, usize>,
     done: std::collections::BTreeSet<String>,
+    /// Each linked name's ROOTS: the registry impls user functions call whose
+    /// links want it (a root is its own).
+    roots: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    /// The roots served by their declared runtime body instead of a link.
+    route_served: std::collections::BTreeSet<String>,
+    /// Every call name the link rewrote: (function, op, the name before).
+    renamed: Vec<(usize, usize, String)>,
 }
 
 impl SelfHostLinker<'_> {
@@ -117,22 +124,36 @@ impl SelfHostLinker<'_> {
 
     /// Retarget registry call names onto impl names, and collect what is missing.
     fn collect_wanted(
-        &self,
+        &mut self,
         functions: &mut [crate::MirFunction],
     ) -> Result<Vec<(&'static str, String)>, LowerError> {
         let defined: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
         let mut wanted: Vec<(&'static str, String)> = Vec::new();
-        for f in functions.iter_mut() {
-            for op in &mut f.ops {
+        let mut roots: Vec<(String, std::collections::BTreeSet<String>)> = Vec::new();
+        for (fi, f) in functions.iter_mut().enumerate() {
+            let caller_root = self.roots.get(&f.name).cloned();
+            for (oi, op) in f.ops.iter_mut().enumerate() {
                 let crate::Op::CallFn { name, .. } = op else { continue };
                 if defined.contains(name.as_str()) {
                     continue;
                 }
-                let Some((src, impl_fn)) = self.retarget_call(name)? else { continue };
+                let before = name.clone();
+                let retargeted = self.retarget_call(name)?;
+                if *name != before {
+                    self.renamed.push((fi, oi, before));
+                }
+                let Some((src, impl_fn)) = retargeted else { continue };
+                if self.route_served.contains(&impl_fn) {
+                    continue;
+                }
+                roots.push((impl_fn.clone(), caller_root.clone().unwrap_or_else(|| [impl_fn.clone()].into())));
                 if !defined.contains(&impl_fn) && !self.done.contains(&impl_fn) {
                     wanted.push((src, impl_fn));
                 }
             }
+        }
+        for (n, r) in roots {
+            self.roots.entry(n).or_default().extend(r);
         }
         Ok(wanted)
     }
@@ -182,11 +203,13 @@ impl SelfHostLinker<'_> {
             &sh.variant_layouts,
         )
         .map_err(|e| LowerError::at(func.body.span, format!("native: self-host fn `{impl_fn}`: {e:?}")))?;
+        let root = self.roots.get(&impl_fn).cloned().unwrap_or_else(|| [impl_fn.clone()].into());
         for g in &all {
             if self.user_names.contains(&g.name) {
                 return Err(self.clash(&g.name));
             }
             self.done.insert(g.name.clone());
+            self.roots.entry(g.name.clone()).or_default().extend(root.iter().cloned());
         }
         self.done.insert(impl_fn);
         functions.extend(all);
@@ -194,30 +217,82 @@ impl SelfHostLinker<'_> {
     }
 }
 
+/// The registry bodies linked into a native render, and the registry impls
+/// whose calls their declared runtime body serves instead.
+struct NativeLink {
+    linked: Vec<LinkedSelfHost>,
+    route_served: std::collections::BTreeSet<String>,
+}
+
 /// Link every registry body the program (transitively) calls. Returns the
 /// linked sources, for the signature table and the Result rewrite.
+///
+/// A body written for the wasm leg's representation may not lower here (it
+/// reads a list of heap elements through raw slots). When the registry impl
+/// a user function calls has a runtime route — the body its stdlib
+/// DECLARATION names (`crate::native_hof`) — and its link, or the link of a
+/// helper it wants, refuses, that impl is not linked: its calls stay named
+/// for it and the render serves them through the runtime body, or walls
+/// there. The link then starts over without it. A refusal under an impl with
+/// no runtime route walls the program, as before.
 fn link_native_self_host(
     functions: &mut Vec<crate::MirFunction>,
     user_ir: &almide_ir::IrProgram,
-) -> Result<Vec<LinkedSelfHost>, LowerError> {
-    let (by_call, entries_of) = self_host_call_table();
-    let mut linker = SelfHostLinker {
-        user_ir,
-        by_call,
-        entries_of,
-        user_names: functions.iter().map(|f| f.name.clone()).collect(),
-        linked: Vec::new(),
-        linked_srcs: std::collections::BTreeMap::new(),
-        done: std::collections::BTreeSet::new(),
-    };
+) -> Result<NativeLink, LowerError> {
+    let own = functions.len();
+    let mut route_served = std::collections::BTreeSet::new();
     loop {
-        let wanted = linker.collect_wanted(functions)?;
-        if wanted.is_empty() {
-            break;
-        }
-        for (src, impl_fn) in wanted {
-            linker.link_one(functions, src, impl_fn)?;
+        let (by_call, entries_of) = self_host_call_table();
+        let mut linker = SelfHostLinker {
+            user_ir,
+            by_call,
+            entries_of,
+            user_names: functions[..own].iter().map(|f| f.name.clone()).collect(),
+            linked: Vec::new(),
+            linked_srcs: std::collections::BTreeMap::new(),
+            done: std::collections::BTreeSet::new(),
+            roots: std::collections::BTreeMap::new(),
+            route_served: route_served.clone(),
+            renamed: Vec::new(),
+        };
+        let refused = match linker.link_all(functions) {
+            Ok(()) => return Ok(NativeLink { linked: linker.linked, route_served }),
+            Err(refused) => refused,
+        };
+        // Every root under the refusal that has a runtime route takes it.
+        let routed: Vec<String> = refused.1.iter().filter(|r| crate::native_hof::of(r).is_some()).cloned().collect();
+        let grew = routed.into_iter().fold(false, |g, r| route_served.insert(r) || g);
+        match refused {
+            _ if grew => {
+                // Start over from the program's own functions, their call
+                // names as they were.
+                functions.truncate(own);
+                for (fi, oi, name) in linker.renamed.into_iter().rev() {
+                    if let Some(crate::Op::CallFn { name: n, .. }) = functions.get_mut(fi).and_then(|f| f.ops.get_mut(oi)) {
+                        *n = name;
+                    }
+                }
+            }
+            (e, _) => return Err(e),
         }
     }
-    Ok(linker.linked)
+}
+
+impl SelfHostLinker<'_> {
+    /// The link's fixpoint; a refusal carries the roots it happened under.
+    fn link_all(
+        &mut self,
+        functions: &mut Vec<crate::MirFunction>,
+    ) -> Result<(), (LowerError, std::collections::BTreeSet<String>)> {
+        loop {
+            let wanted = self.collect_wanted(functions).map_err(|e| (e, Default::default()))?;
+            if wanted.is_empty() {
+                return Ok(());
+            }
+            for (src, impl_fn) in wanted {
+                let roots = self.roots.get(&impl_fn).cloned().unwrap_or_default();
+                self.link_one(functions, src, impl_fn).map_err(|e| (e, roots))?;
+            }
+        }
+    }
 }

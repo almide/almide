@@ -40,6 +40,8 @@ pub(crate) enum FloorParam {
     Bool,
     /// `Float` — the runtime takes `f64`.
     Float,
+    /// `Float32` — decode the lane's low binary32 bits as an `f32`.
+    Float32,
     /// `String` — the runtime borrows `&str`.
     Str,
     /// `List[E]` — the runtime borrows a slice (`&[T]` / `&Vec<T>`).
@@ -706,6 +708,7 @@ fn floor_param(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorPara
             "Int" => Some(FloorParam::Int),
             "Bool" => Some(FloorParam::Bool),
             "Float" => Some(FloorParam::Float),
+            "Float32" => Some(FloorParam::Float32),
             "String" => Some(FloorParam::Str),
             "Bytes" => Some(FloorParam::Bytes),
             "Matrix" => Some(FloorParam::Matrix(false)),
