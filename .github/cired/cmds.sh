@@ -1,4 +1,5 @@
 set +e
+git diff --stat; git diff > /tmp/cired-out-regen.patch
 sudo apt-get install -y -qq valgrind >/dev/null 2>&1
 D=research/benchmark/perf/listbuild
 for v in append combinator; do
