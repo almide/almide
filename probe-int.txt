@@ -1,0 +1,13 @@
+research/benchmark/perf/v1-shapes/int32_recurrence.almd
+spec/wasm_cross/accum_recursion_declined.almd
+spec/wasm_cross/checked_conversion_value_match.almd
+spec/wasm_cross/float_to_int_edges.almd
+spec/wasm_cross/int8_div_overflow.almd
+spec/wasm_cross/newtype_string_form.almd
+spec/wasm_cross/number_parse_ascii_trim_sized.almd
+spec/wasm_cross/number_parse_ascii_trim.almd
+spec/wasm_cross/sized_field_default_matrix.almd
+spec/wasm_cross/sized_int_record_fields.almd
+spec/wasm_cross/sized_numeric_literals.almd
+spec/wasm_cross/sized_tail_literal_matrix.almd
+spec/wasm_cross/unsigned_literal_domain.almd
