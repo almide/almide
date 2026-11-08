@@ -1,5 +1,2 @@
 spec/wasm_cross/list_arg_map_view.almd
 spec/wasm_cross/closure_captured_map_records.almd
-research/benchmark/perf/v1-shapes/closure_wide_capture.almd
-research/benchmark/perf/v1-shapes/list_arg_string_kept.almd
-spec/wasm_cross/closure_tail_recursion.almd
