@@ -862,6 +862,7 @@
 66288	spec/wasm_cross/string_rle.almd
 66928	spec/wasm_cross/string_split_rle_codepoint.almd
 71840	spec/wasm_cross/string_to_upper.almd
+74016	spec/wasm_cross/string_upper_inplace_aliases.almd
 67936	spec/wasm_cross/string_whitespace.almd
 66208	spec/wasm_cross/tail_bang_over_declared_result_callee.almd
 131840	spec/wasm_cross/tco_bytes_value_arg.almd

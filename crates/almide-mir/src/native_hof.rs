@@ -59,6 +59,8 @@ enum DTy {
     Matrix,
     List(Box<DTy>),
     Opt(Box<DTy>),
+    /// `Map[K, V]`: v0's runtime `AlmideMap<K, V>`, the generated map alias.
+    Map(Box<DTy>, Box<DTy>),
     Fn(Vec<DTy>, Box<DTy>),
 }
 
@@ -93,6 +95,9 @@ fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
             "?" | "Option" => DTy::Opt(Box::new(dty_of(&args[0], tps)?)),
             _ => return None,
         },
+        TypeExpr::Generic { name, args } if args.len() == 2 && name.as_str() == "Map" => {
+            DTy::Map(Box::new(dty_of(&args[0], tps)?), Box::new(dty_of(&args[1], tps)?))
+        }
         TypeExpr::Fn { params, ret, is_effect: false } => {
             DTy::Fn(params.iter().map(|p| dty_of(p, tps)).collect::<Option<_>>()?, Box::new(dty_of(ret, tps)?))
         }
@@ -114,6 +119,7 @@ fn rust_agrees(d: &DTy, r: &str) -> Option<bool> {
         DTy::Var(_) => r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !by_ref,
         DTy::List(_) => r.starts_with("Vec<") || (by_ref && r.starts_with('[')),
         DTy::Opt(_) => r.starts_with("Option<") && !by_ref,
+        DTy::Map(..) => r.starts_with("AlmideMap<"),
         DTy::Fn(..) => r.starts_with("std::rc::Rc<dynFn(") && !by_ref,
     };
     ok.then_some(by_ref)
@@ -157,21 +163,24 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
         .ok_or("no @intrinsic")?;
     let tps: BTreeSet<String> = generics.iter().flatten().map(|g| g.name.as_str().to_string()).collect();
     let dparams: Vec<DTy> = params.iter().map(|p| dty_of(&p.ty, &tps)).collect::<Option<_>>().ok_or("a param type outside the map")?;
-    if !dparams.iter().any(|p| matches!(p, DTy::Fn(..))) {
-        return Err("no function-typed param".into());
-    }
     let dret = dty_of(ret, &tps).ok_or("a return type outside the map")?;
     let (rust_params, rust_ret, items) = crate::native_floor::runtime_body(&symbol).ok_or_else(|| format!("`{symbol}` is no takeable runtime body"))?;
     if rust_params.len() != dparams.len() || rust_agrees(&dret, &rust_ret) != Some(false) {
         return Err(format!("runtime signature {rust_params:?} -> {rust_ret} disagrees"));
     }
-    let params = dparams
+    let params: Vec<(DTy, bool)> = dparams
         .into_iter()
         .zip(&rust_params)
         .map(|(d, r)| rust_agrees(&d, r).map(|b| (d, b)))
         .collect::<Option<_>>()
         .ok_or_else(|| format!("runtime params {rust_params:?} disagree"))?;
-    let (twin, text) = static_twin(&symbol, items.first().copied().ok_or("no runtime body text")?).ok_or("the runtime body has no `Rc<dyn Fn>` param to take statically")?;
+    let text = items.first().copied().ok_or("no runtime body text")?;
+    // A combinator takes its closure statically (`static_twin`); a call with
+    // no function-typed param calls the runtime body as it is.
+    if !params.iter().any(|(d, _)| matches!(d, DTy::Fn(..))) {
+        return Ok(Hof { twin: symbol.clone(), symbol, params, ret: dret, items });
+    }
+    let (twin, text) = static_twin(&symbol, text).ok_or("the runtime body has no `Rc<dyn Fn>` param to take statically")?;
     let mut items = items;
     items[0] = Box::leak(text.into_boxed_str());
     Ok(Hof { symbol, params, ret: dret, items, twin })
@@ -413,6 +422,14 @@ fn bind_param(env: &mut Env, d: &DTy, t: NTy) -> Option<()> {
         DTy::Opt(e) => bind_inner(env, e, opt_payload(t)?),
         DTy::Var(v) => bind(env, v, crate::render_native::owned_nty(t)),
         DTy::Matrix => rec::is_matrix(t).then_some(()),
+        DTy::Map(k, v) => {
+            let (kk, vk) = match t {
+                NTy::Rec(i) | NTy::RecRef(i) => rec::map_kinds(i)?,
+                _ => return None,
+            };
+            bind_inner(env, k, kk)?;
+            bind_inner(env, v, vk)
+        }
         DTy::Int | DTy::Bool => (t == NTy::I64).then_some(()),
         DTy::Float => (t == NTy::F64).then_some(()),
         DTy::Str => matches!(t, NTy::Str | NTy::StrRef).then_some(()),
@@ -441,6 +458,7 @@ fn kind_of(env: &Env, d: &DTy) -> Option<NTy> {
             NTy::F64 => return None,
             k => NTy::Rec(rec::option_type_of(k)),
         },
+        DTy::Map(k, v) => NTy::Rec(rec::map_type_of(kind_of(env, k)?, kind_of(env, v)?)),
         DTy::Fn(..) => return None,
     })
 }
@@ -473,36 +491,48 @@ const LANE_F64: &str = "trait AlmdLaneF64 { fn lane_f64(self) -> f64; }\nimpl Al
 
 /// The adapter: a closure, borrowing the env array `env` (a copy of the
 /// closure block's scalar slots), that calls the lifted lambda `lambda`
-/// (params of kinds `ps`) on each element it is lent. `bits[i]`: that param
-/// is a runtime `f64` the lambda takes as its bits. The declared types also
-/// preserve Bool at this boundary: native MIR uses i64, Rust uses bool.
-fn adapter(lambda: &str, env: &str, ps: &[NativeSigKind], bits: &[bool], ret: NativeSigKind, (dps, dret): (&[DTy], &DTy)) -> Option<String> {
+/// (params of kinds `ps`) on each element it is lent. `bits[i]`: how that
+/// param crosses into the lambda's lane ([`Lane`]). `ret_lane`: a declared
+/// `Float` result is read through [`LANE_F64`], a declared `Bool` one is
+/// tested `!= 0`; else the lambda's result kind `ret` is the runtime's.
+fn adapter(lambda: &str, env: &str, ps: &[NativeSigKind], bits: &[Lane], ret: NativeSigKind, ret_lane: Lane) -> Option<String> {
     if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) {
         return None;
     }
-    let spell = |k: NativeSigKind, b: bool| if b { "f64".to_string() } else { rec::owned_ty(clo::owned_nty(k)) };
-    let params: Vec<String> = ps.iter().zip(bits).enumerate().map(|(i, (k, b))| {
-        let ty = if dps[i] == DTy::Bool { "bool".to_string() } else { spell(*k, *b) };
-        format!("__p{i}: {ty}")
-    }).collect();
+    let spell = |k: NativeSigKind, b: Lane| match b {
+        Lane::F64 => "f64".to_string(),
+        Lane::Bool => "bool".to_string(),
+        Lane::Same => rec::owned_ty(clo::owned_nty(k)),
+    };
+    let params: Vec<String> = ps.iter().zip(bits).enumerate().map(|(i, (k, b))| format!("__p{i}: {}", spell(*k, *b))).collect();
     let args: String = ps
         .iter()
         .zip(bits)
         .enumerate()
-        .map(|(i, (k, b))| match k {
-            _ if dps[i] == DTy::Bool => format!(", i64::from(__p{i})"),
-            _ if *b => format!(", __p{i}.to_bits() as i64"),
-            NativeSigKind::Str | NativeSigKind::ListI64 | NativeSigKind::ListStr | NativeSigKind::Rec(_) => format!(", &__p{i}"),
+        .map(|(i, (k, b))| match (k, b) {
+            (_, Lane::F64) => format!(", __p{i}.to_bits() as i64"),
+            (_, Lane::Bool) => format!(", __p{i} as i64"),
+            (NativeSigKind::Str | NativeSigKind::ListI64 | NativeSigKind::ListStr | NativeSigKind::Rec(_), _) => format!(", &__p{i}"),
             _ => format!(", __p{i}"),
         })
         .collect();
     let call = format!("{}(&{env}{args})", crate::render_native::mangle(lambda));
-    let (call, ret_ty) = match dret {
-        DTy::Float => (format!("AlmdLaneF64::lane_f64({call})"), "f64".to_string()),
-        DTy::Bool => (format!("({call}) != 0"), "bool".to_string()),
-        _ => (call, spell(ret, false)),
+    let (call, ret_ty) = match ret_lane {
+        Lane::F64 => (format!("AlmdLaneF64::lane_f64({call})"), "f64".to_string()),
+        Lane::Bool => (format!("({call}) != 0"), "bool".to_string()),
+        Lane::Same => (call, spell(ret, Lane::Same)),
     };
     Some(format!("|{}| -> {ret_ty} {{ {call} }}", params.join(", ")))
+}
+
+/// How a closure param or result the runtime spells crosses into the
+/// lambda's i64 lane: as is, a runtime `f64` taken as its bits, or a runtime
+/// `bool` taken as 0/1.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Lane {
+    Same,
+    F64,
+    Bool,
 }
 
 /// One non-function argument in the runtime's mode: borrowed as is, or owned
@@ -567,9 +597,21 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
     if ps.len() != dps.len() || !matches!(t, NTy::Vec | NTy::VecRef) {
         return None;
     }
-    let bits: Vec<bool> = dps.iter().zip(&ps).map(|(dp, k)| bind_lambda(env, dp, *k)).collect::<Option<_>>()?;
-    let float_ret = *dret == DTy::Float;
-    if float_ret {
+    let bits: Vec<Lane> = dps
+        .iter()
+        .zip(&ps)
+        .map(|(dp, k)| match bind_lambda(env, dp, *k)? {
+            true => Some(Lane::F64),
+            false if *dp == DTy::Bool => Some(Lane::Bool),
+            false => Some(Lane::Same),
+        })
+        .collect::<Option<_>>()?;
+    let ret_lane = match dret {
+        DTy::Float => Lane::F64,
+        DTy::Bool => Lane::Bool,
+        _ => Lane::Same,
+    };
+    if ret_lane == Lane::F64 {
         side.shims.push(LANE_F64);
     } else if bind_lambda(env, dret, ret) != Some(false) {
         return None;
@@ -584,7 +626,7 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
         })
         .collect::<Option<_>>()?;
     let name = format!("__env_{}_{}", cx.at, side.prelude.len());
-    let closure = adapter(lambda, &name, &ps, &bits, ret, (dps, dret))?;
+    let closure = adapter(lambda, &name, &ps, &bits, ret, ret_lane)?;
     side.prelude.push(format!("let {name}: [i64; {}] = [{}];", slots.len(), slots.join(", ")));
     Some(closure)
 }
@@ -649,6 +691,7 @@ fn plan(
     for (((d, by_ref), (code, t)), a) in hof.params.iter().zip(&got).zip(call.args.iter()) {
         rendered.push(match d {
             DTy::Fn(dps, dret) => fn_arg(&cx, &mut env, (dps, dret), (a, *t), &mut side)?,
+            // The render carries a Bool in its i64 lane; the runtime takes `bool`.
             DTy::Bool => format!("({code} != 0)"),
             _ => {
                 let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
@@ -658,7 +701,8 @@ fn plan(
     }
     let ret = kind_of(&env, &hof.ret)?;
     let expr = format!("{}({})", hof.twin, rendered.join(", "));
-    let expr = if hof.ret == DTy::Bool { format!("i64::from({expr})") } else { expr };
+    // A declared Bool result: the runtime's `bool` in the render's i64 lane.
+    let expr = if hof.ret == DTy::Bool { format!("({expr}) as i64") } else { expr };
     Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims)))
 }
 
@@ -731,7 +775,6 @@ mod tests {
             ("list_fold_str", "almide_rt_list_fold"),
             ("list_map_str", "almide_rt_list_map"),
             ("list_map", "almide_rt_list_map"),
-            ("list_filter_rc", "almide_rt_list_filter"),
             ("list_flat_map_str", "almide_rt_list_flat_map"),
             ("option_map", "almide_rt_option_map"),
             ("matrix_map", "almide_rt_matrix_map"),
@@ -741,10 +784,12 @@ mod tests {
         }
     }
 
-    /// A linked body with no function-typed param has none.
+    /// A linked body with no function-typed param has the route its
+    /// declaration names, called as it is (no static twin).
     #[test]
-    fn a_body_without_a_function_param_has_no_route() {
-        assert!(super::of("list_contains_str").is_none());
+    fn a_body_without_a_function_param_calls_its_runtime_body_as_it_is() {
+        let derived = super::derive_explained("list_contains_str");
+        assert_eq!(derived.as_ref().map(|h| (h.symbol.as_str(), h.twin.as_str())), Ok(("almide_rt_list_contains", "almide_rt_list_contains")));
     }
 }
 

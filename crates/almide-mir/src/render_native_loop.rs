@@ -126,7 +126,14 @@ fn render_fn(
         // silent read of an emptied value.
         for v in st.early.get(&i).cloned().into_iter().flatten() {
             let v = &v;
-            let owned = matches!(st.tys.get(v), Some(NTy::Str | NTy::VecStr | NTy::Vec | NTy::Rec(_)));
+            let owned = match st.tys.get(v) {
+                // Read through its block: a list only (an element is never
+                // moved out of one; a record field or a carrier payload may be).
+                Some(NTy::VecStr | NTy::Vec) => true,
+                Some(NTy::Rec(r)) if block_read_release(*v) => crate::render_native_rec::list_elem(*r).is_some(),
+                Some(NTy::Str | NTy::Rec(_)) => !block_read_release(*v),
+                _ => false,
+            };
             // (A value its last call moved in is gone already.)
             let named = matches!(&func.ops[i - 1], Op::CallFn { args, .. } if args.iter().any(|a| matches!(a, crate::CallArg::Handle(x) if x == v)));
             // A call the floor renders with the value only borrowed (`f(&v)`)

@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 581 of 1042
+# rendered: 585 of 1043
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/allocation_within_limits.almd
@@ -258,8 +258,10 @@ spec/wasm_cross/licm_zero_trip_hoist.almd
 spec/wasm_cross/list_call_element.almd
 spec/wasm_cross/list_eq.almd
 spec/wasm_cross/list_eq_float_bool.almd
+spec/wasm_cross/list_heapelem_rc.almd
 spec/wasm_cross/list_iter_tco.almd
 spec/wasm_cross/list_minmax_str.almd
+spec/wasm_cross/list_modify_heap.almd
 spec/wasm_cross/list_product_overflow.almd
 spec/wasm_cross/list_push_on_record_field.almd
 spec/wasm_cross/list_range_step_extremes.almd
@@ -268,6 +270,7 @@ spec/wasm_cross/list_set_value.almd
 spec/wasm_cross/list_sort_str.almd
 spec/wasm_cross/list_string_param_join_len.almd
 spec/wasm_cross/list_swap_oob.almd
+spec/wasm_cross/list_update_heap.almd
 spec/wasm_cross/literal_int_forms.almd
 spec/wasm_cross/literal_unit.almd
 spec/wasm_cross/loop_break_continue.almd
@@ -437,6 +440,7 @@ spec/wasm_cross/scoped_region_value.almd
 spec/wasm_cross/scoped_worker_in_and_out.almd
 spec/wasm_cross/sized_numeric_literals.almd
 spec/wasm_cross/snapshot_mismatch_abort.almd
+spec/wasm_cross/sort_by_str_key_heap.almd
 spec/wasm_cross/split_empty_sep.almd
 spec/wasm_cross/sql_highlight_tokens.almd
 spec/wasm_cross/str_result_heap_bind.almd

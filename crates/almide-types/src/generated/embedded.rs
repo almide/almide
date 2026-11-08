@@ -16436,6 +16436,7 @@ else {
   __flat_fill_rc(dh, oh, n, i + 1, off1)
 }
 
+@specializes("list.flatten")
 fn list_flatten_rc(xss: List[Int]) -> List[Int] = {
   let oh = prim.handle(xss)
   let n = prim.load32(oh + 4)
@@ -16844,6 +16845,7 @@ fn __lshu_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) ->
     __lshu_fill(sh, bh, n, i, f, j + 1)
   }
 
+@specializes("list.update")
 fn list_update_heapelem(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17543,6 +17545,7 @@ fn __lsuv_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) ->
     __lsuv_fill(sh, bh, n, i, f, j + 1)
   }
 
+@specializes("list.update")
 fn list_update_value(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -18937,6 +18940,7 @@ fn __sbsr_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) ->
     __sbsr_init(bh, sh, kh, f, n, i + 1)
   }
 
+@specializes("list.sort_by")
 fn list_sort_by_str_key_rc(xs: List[Int], f: (Int) -> String) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
@@ -19230,6 +19234,7 @@ else {
   __sbr_init(bh, sh, kh, f, n, i + 1)
 }
 
+@specializes("list.sort_by")
 fn list_sort_by_rc(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
