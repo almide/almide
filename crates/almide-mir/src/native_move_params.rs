@@ -26,11 +26,8 @@
 //!
 //! Out of scope, by one rule — a function whose callers are not all its
 //! direct named call sites keeps borrowing: `main`, a function taken as a
-//! value (`FuncRef`, so a closure call may reach it), a linked stdlib entry
-//! (a dotted name, whose call the render may serve through its runtime
-//! body), and a function an op reaches other than by a named call (a
-//! generated drop, a fan arm the render spawns on a thread). A linked
-//! private helper (`__r2o_arr`) is called by name like any other function.
+//! value (`FuncRef`, so a closure call may reach it), and the render-linked
+//! runtime names (dotted or `__`-prefixed).
 
 use crate::{MirFunction, Op, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
@@ -560,19 +557,6 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
             _ => None,
         })
         .collect();
-    // The functions some op reaches other than by a direct named call: a
-    // generated drop (`DropVariant` / `DropWrapperRec` name their target) and
-    // a fan arm (the render spawns it on a thread of its own).
-    let reached_otherwise: BTreeSet<String> = functions
-        .iter()
-        .flat_map(|f| f.ops.iter())
-        .filter_map(|op| match op {
-            Op::DropVariant { ty, .. } => Some(format!("__drop_{}", crate::lower::drop_fn_ident(ty))),
-            Op::DropWrapperRec { drop_fn, .. } => Some(format!("__drop_{}", crate::lower::drop_fn_ident(drop_fn))),
-            Op::CallFn { name, .. } if crate::fan_native::arm(name).is_some() => Some(name.clone()),
-            _ => None,
-        })
-        .collect();
     // The closure table: every taken function in the program, by param shape.
     let table: Vec<(String, Vec<bool>)> = functions
         .iter()
@@ -630,7 +614,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
         let eligible = |f: &MirFunction| {
             f.name != "main"
                 && !f.name.contains('.')
-                && (closure(f) || (!taken.contains(&f.name) && !reached_otherwise.contains(&f.name)))
+                && (closure(f) || (!taken.contains(&f.name) && !f.name.starts_with("__")))
         };
         let takes_at = |f: &MirFunction, k: usize| {
             !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0)
