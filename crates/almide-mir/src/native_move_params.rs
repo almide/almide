@@ -606,11 +606,20 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
     // [1, 2])`): only lent, the render keeps it on the stack as an array;
     // handed over, it would be a heap list built on every call.
     for f in functions.iter() {
+        // A `var` the literal starts (`var xs = []`) is rebound, a heap list.
+        let rebound: BTreeSet<ValueId> = f
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::SetLocal { local, .. } => Some(*local),
+                _ => None,
+            })
+            .collect();
         let literals: BTreeSet<ValueId> = f
             .ops
             .iter()
             .filter_map(|op| match op {
-                Op::ListLit { dst, .. } => Some(*dst),
+                Op::ListLit { dst, elems } if !elems.is_empty() && !rebound.contains(dst) => Some(*dst),
                 _ => None,
             })
             .collect();
