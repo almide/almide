@@ -49,6 +49,10 @@ impl Emitter<'_> {
         if matches!(op, Lt | Gt | Lte | Gte) {
             return self.lower_order_cmp(op, left, right);
         }
+        // #4610: `x % 2^k == 0` is a low-bits test (rem_test.rs).
+        if let Some(t) = self.try_lower_rem_zero_test(op, left, right)? {
+            return Ok(t);
+        }
         let lt = self.lower(left, None)?;
         self.lower(right, Some(lt))?;
         self.emit_val_eq(lt)?;

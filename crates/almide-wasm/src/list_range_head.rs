@@ -27,13 +27,17 @@ pub(crate) enum LoopSrc {
     Block { elem: SliceTy, base: u32, count: u32, idx: u32, kept: Option<SliceTy> },
     /// `list.range(a, b)`: the next element and the exclusive end.
     Count { cur: u32, end: u32 },
+    /// A widened byte walk (`bytes::widened_byte_walk`, #4612): the byte
+    /// block in `base`, read in place, `count` bytes, one zero-extended Int
+    /// per byte. `kept` as for `Block`.
+    Bytes { base: u32, count: u32, idx: u32, kept: Option<SliceTy> },
 }
 
 impl LoopSrc {
     pub(crate) fn elem(self) -> SliceTy {
         match self {
             LoopSrc::Block { elem, .. } => elem,
-            LoopSrc::Count { .. } => INT,
+            LoopSrc::Count { .. } | LoopSrc::Bytes { .. } => INT,
         }
     }
 }
@@ -145,10 +149,34 @@ impl Emitter<'_> {
         Ok(LoopSrc::Block { elem, base, count, idx, kept: keep.then_some(got) })
     }
 
+    /// [`Self::loop_src_open`] over a widened byte walk's block (#4612): the
+    /// String or Bytes is evaluated, and kept, exactly as a list source is —
+    /// only the list the walk stands for is never built. The caller notes the
+    /// producer nodes the walk consumes, and runs it only under a stage
+    /// judgment that admits element-by-element evaluation, so nothing writes
+    /// the block while it is read.
+    pub(crate) fn loop_src_open_bytes(&mut self, block: &IrExpr, init: &IrExpr) -> Result<LoopSrc, EmitError> {
+        let (got, keep) = self.lower_fold_source(block, init)?;
+        if got != STR && got != crate::bytes::BYTES {
+            return unsup(&format!("byte-walk-of:{got:?}"));
+        }
+        let base = self.hold_i32()?;
+        let count = self.hold_i32()?;
+        let idx = self.hold_i32()?;
+        self.f
+            .instructions()
+            .local_tee(base)
+            .i32_load(len_memarg())
+            .local_set(count)
+            .i32_const(0)
+            .local_set(idx);
+        Ok(LoopSrc::Bytes { base, count, idx, kept: keep.then_some(got) })
+    }
+
     /// Inside `block { loop {`: leave the loop once the source is exhausted.
     pub(crate) fn loop_src_exit(&mut self, s: LoopSrc) {
         match s {
-            LoopSrc::Block { count, idx, .. } => {
+            LoopSrc::Block { count, idx, .. } | LoopSrc::Bytes { count, idx, .. } => {
                 self.f.instructions().local_get(idx).local_get(count).i32_ge_u().br_if(1);
             }
             LoopSrc::Count { cur, end } => {
@@ -173,13 +201,16 @@ impl Emitter<'_> {
             LoopSrc::Count { cur, .. } => {
                 self.f.instructions().local_get(cur);
             }
+            LoopSrc::Bytes { base, idx, .. } => {
+                crate::bytes::emit_widened_byte(&mut self.f.instructions(), base, idx);
+            }
         }
     }
 
     /// Advance, branch back, and close the `block { loop {`.
     pub(crate) fn loop_src_step(&mut self, s: LoopSrc) {
         match s {
-            LoopSrc::Block { idx, .. } => self.hof_step(idx),
+            LoopSrc::Block { idx, .. } | LoopSrc::Bytes { idx, .. } => self.hof_step(idx),
             LoopSrc::Count { cur, .. } => {
                 self.f.instructions().local_get(cur).i64_const(1).i64_add().local_set(cur).br(0).end().end();
             }
@@ -189,7 +220,7 @@ impl Emitter<'_> {
     /// Release a kept source and the holds [`Self::loop_src_open`] took.
     pub(crate) fn loop_src_close(&mut self, s: LoopSrc) {
         match s {
-            LoopSrc::Block { base, kept, .. } => {
+            LoopSrc::Block { base, kept, .. } | LoopSrc::Bytes { base, kept, .. } => {
                 self.release_fold_source(base, kept);
                 self.release_i32();
                 self.release_i32();
