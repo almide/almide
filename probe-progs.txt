@@ -1,0 +1,17 @@
+spec/wasm_cross/assign_concat_operand_release.almd
+spec/wasm_cross/assign_mut_callee_consumes_var.almd
+spec/wasm_cross/assign_nested_mut_writeback_release.almd
+spec/wasm_cross/codec_list_default_field.almd
+spec/wasm_cross/codec_list_default.almd
+spec/wasm_cross/effect_slot_pure_fn_param.almd
+spec/wasm_cross/enumerate_unnameable_element.almd
+spec/wasm_cross/field_and_interp_accumulator.almd
+spec/wasm_cross/json_gltf_walk.almd
+spec/wasm_cross/list_reduce_fused_fold_release.almd
+spec/wasm_cross/map_core_trio.almd
+spec/wasm_cross/mut_param_loop_stays_in_place.almd
+spec/wasm_cross/playground_default.almd
+spec/wasm_cross/range_head_fold_edges.almd
+spec/wasm_cross/recursive_payload_nested_pattern.almd
+spec/wasm_cross/string_rle.almd
+spec/wasm_cross/tuple_bound_list_mapped_in_loop.almd
