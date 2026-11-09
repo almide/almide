@@ -13,7 +13,59 @@ env:
   BASE_REF: 5bf353a2ddb0571e79d5398c687eb626b38f70df
   ROUNDS: "15"
 jobs:
+  quick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - name: Build head compiler
+        run: |
+          set -euxo pipefail
+          cp -r .github/probe /tmp/probe
+          git worktree add /tmp/src-head "$HEAD_REF"
+          (cd /tmp/src-head && git log --oneline -1 && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
+          mkdir -p /tmp/bins && cp target/release/almide /tmp/bins/almide-head
+      - name: Behaviour of the json/value fixtures and tests
+        run: bash /tmp/probe/quick.sh /tmp/bins/almide-head /tmp/src-head /tmp/quick
+      - name: jsonround allocations and instruction counts
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/perf && cd /tmp/perf
+          bash /tmp/probe/bench/make.sh /tmp/perf
+          for p in full build str; do
+            echo "== $p"; ALMIDE_WASM_ALLOC_COUNT=1 /tmp/bins/almide-head run jr_$p.almd --target wasm
+            /tmp/bins/almide-head build jr_${p}_small.almd --target wasm -o jr_${p}_small.wasm && echo "size $p $(stat -c %s jr_${p}_small.wasm)"
+            timeout 1200 python3 /tmp/probe/wi.py jr_${p}_small.wasm --top 30 > wi-$p.txt 2>&1; head -12 wi-$p.txt
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: quick
+          path: |
+            /tmp/quick
+            /tmp/perf/*.wasm
+            /tmp/perf/wi-*.txt
+          retention-days: 7
+
   wasm:
+    if: contains(github.event.head_commit.message, '[timing]')
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -121,6 +173,7 @@ jobs:
           retention-days: 7
 
   native:
+    if: contains(github.event.head_commit.message, '[timing]')
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
