@@ -394,6 +394,50 @@ fn op_depths(func: &MirFunction) -> Vec<i32> {
 
 /// The op after which `v` (defined at `d`) is read no more, when every use
 /// of it is a top-level call reading it as a handle and its one release.
+/// #4621: a snapshot of a heap slot read at the top level (a borrow-only
+/// read, `native_slot_takes::SlotReads::borrows`) held its `Rc` to the end
+/// of the function, so a later take or store of the slot found it shared and
+/// copied the whole value, where v0's read is a temporary of its statement.
+/// Its `Rc` is released right after the top-level op holding the last op
+/// that reads it or any value that can borrow from it (a field's address,
+/// an element, a local holding one): later ops cannot reach the reference.
+fn snapshot_releases(func: &MirFunction, chains: &crate::render_native_interp::Chains) -> BTreeMap<usize, Vec<ValueId>> {
+    let snaps = crate::native_slot_takes::slot_reads(func).borrows;
+    let at_depth = op_depths(func);
+    let mut out: BTreeMap<usize, Vec<ValueId>> = BTreeMap::new();
+    for (d, def) in func.ops.iter().enumerate() {
+        let Some(v) = crate::mir_ops::defined_value(def) else { continue };
+        if at_depth[d] != 0 || !snaps.contains(&v) {
+            continue;
+        }
+        let mut derived: std::collections::BTreeSet<ValueId> = std::iter::once(v).collect();
+        let mut last = Some(d);
+        for (j, op) in func.ops.iter().enumerate().skip(d + 1) {
+            let mut vs = Vec::new();
+            crate::mir_ops::op_values(op, &mut vs);
+            // A release renders as the end of a borrow, not a read.
+            if vs.iter().any(|x| derived.contains(x)) && !vs.iter().any(|x| releases(op, *x)) {
+                // A piece of an interpolation chain is read where the render
+                // writes the chain, at its final reader.
+                last = last.zip(chain_end(func, chains, j)).map(|(l, r)| l.max(r));
+                // What can hold a reference into it: an address, a value
+                // loaded through one, a copy or a local of one. A call's
+                // result is its own value.
+                if matches!(op, Op::Prim { .. } | Op::IntBinOp { .. } | Op::Dup { .. } | Op::SetLocal { .. }) {
+                    derived.extend(vs);
+                }
+            }
+        }
+        if func.ret.is_some_and(|r| derived.contains(&r)) {
+            continue;
+        }
+        if let Some(end) = last.and_then(|l| top_level_end(func, &at_depth, l)) {
+            out.entry(end + 1).or_default().push(v);
+        }
+    }
+    out
+}
+
 fn last_top_level_read(
     func: &MirFunction,
     chains: &crate::render_native_interp::Chains,

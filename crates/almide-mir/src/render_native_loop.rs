@@ -32,7 +32,23 @@ struct FnLoop<'a> {
     scalar_prints: BTreeMap<usize, (ValueId, bool)>,
     /// The owned values released right after each op (`early_releases`).
     early: BTreeMap<usize, Vec<ValueId>>,
+    /// The slot snapshots released right after each op (`snapshot_releases`).
+    snapshots: BTreeMap<usize, Vec<ValueId>>,
     borrowed_tails: std::collections::BTreeSet<usize>,
+}
+
+/// The slot snapshots whose last reader was the op before `i` release their
+/// `Rc` now (`snapshot_releases`).
+fn release_snapshots(st: &mut FnLoop<'_>, i: usize) {
+    for v in st.snapshots.get(&i).cloned().into_iter().flatten() {
+        let rc = format!("{}_rc", var(v));
+        if st.out.contains(&format!("let {rc}:")) {
+            for _ in 0..st.indent {
+                st.out.push_str("    ");
+            }
+            let _ = writeln!(st.out, "drop({rc});");
+        }
+    }
 }
 
 fn render_fn(
@@ -100,6 +116,7 @@ fn render_fn(
     let printed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     let (scalar_defs, scalar_prints) = crate::render_native_interp::printed_scalars(func);
     let early = early_releases(func, &chains);
+    let snapshots = snapshot_releases(func, &chains);
     let mut st = FnLoop {
         func,
         user_fns,
@@ -117,6 +134,7 @@ fn render_fn(
         scalar_defs,
         scalar_prints,
         early,
+        snapshots,
         borrowed_tails,
     };
     // The op iterator runs over the loop state's own view of the function, so
@@ -132,6 +150,7 @@ fn render_fn(
         // otherwise hold every dead buffer to its end. A plain move, so any
         // later use the render made of it would be a compile error, never a
         // silent read of an emptied value.
+        release_snapshots(&mut st, i);
         for v in st.early.get(&i).cloned().into_iter().flatten() {
             let v = &v;
             let owned = match st.tys.get(v) {
