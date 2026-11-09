@@ -24,7 +24,13 @@
 #   anchors (#4011 (d)) — an instruction the bounds, init or fields witness names,
 #   changed while its recording call stays: the proven checkers still
 #   accept both witnesses (step 2 requires it), and almide-anchor-check,
-#   which holds each event to the shipped bytes, must reject.
+#   which holds each event to the shipped bytes, must reject;
+#   family (ADR-0033 D7) — the family-module `$inc` / `$dec_flat` retarget
+#   changed (dropped, so an interior word is counted on its own; the root
+#   computed 4 bytes off): proofs/check-structural-bytes.sh, which holds the
+#   emitter's dumped trees to the byte lists StructuralDecode.v decodes into
+#   the trees StructuralRuntime.v / FamilyRc.v prove, must reject (its FAIL
+#   lines are pinned as <name>.reject). The verdict needs no program.
 # Each proofs/fixtures/<property>-witness/reinject/<name>.patch puts one such
 # bug into the emitter; <name>.almd is its reproduction. In a throwaway
 # worktree, for each:
@@ -57,7 +63,7 @@
 # anchors drill's subject: the event stays, the instruction changes, and the
 # byte-level check (#4011 (d)) is what rejects.
 #
-#   scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc> [name ...]   (default: every patch)
+#   scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc|family> [name ...]   (default: every patch)
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -72,7 +78,8 @@ case "$PROP" in
   native-bounds) ISSUE=4006 ;;
   anchors) ISSUE=4011 ;;
   rc) ISSUE=4277 ;;
-  *) echo "usage: scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc> [name ...]" >&2; exit 2 ;;
+  family) ISSUE=adr0033 ;;
+  *) echo "usage: scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc|family> [name ...]" >&2; exit 2 ;;
 esac
 shift
 DIR="$ROOT/proofs/fixtures/$PROP-witness/reinject"
@@ -87,7 +94,10 @@ wt=$(mktemp -d)
 trap 'git -C "$ROOT" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"' EXIT
 git -C "$ROOT" worktree add --detach -q "$wt" HEAD || exit 2
 
-if [ "$PROP" = native ] || [ "$PROP" = native-calls ] || [ "$PROP" = native-bounds ]; then
+if [ "$PROP" = family ]; then
+  # The verdict builds what it needs (the byte dump's test binary).
+  build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo test -q -p almide-wasm --lib --no-run 2>/dev/null); }
+elif [ "$PROP" = native ] || [ "$PROP" = native-calls ] || [ "$PROP" = native-bounds ]; then
   build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-mir --example emit_native_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify); }
 elif [ "$PROP" = anchors ] || [ "$PROP" = rc ]; then
   build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-wasm --example emit_structural_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify -p almide-anchor-check); }
@@ -117,6 +127,16 @@ while i < len(b):
 }
 # verdict <name>: almide-verify's exit on the reproduction's $PROP witness.
 verdict() {
+  if [ "$PROP" = family ]; then
+    # The byte-grounding gate on the worktree's emitter: exit 0 when the
+    # dumped family trees are StructuralDecode.v's lists, 1 when they drift.
+    (cd "$wt" && CARGO_TARGET_DIR="$TARGET" bash proofs/check-structural-bytes.sh) > "$wt/gate.out" 2>&1
+    local rc=$?
+    grep -E '^FAIL' "$wt/gate.out" > "$wt/witness.w"
+    [ "$rc" = 0 ] && cp "$wt/gate.out" "$wt/witness.w"
+    echo "$rc"
+    return
+  fi
   if [ "$PROP" = native-bounds ]; then
     if ! "$TARGET/debug/examples/emit_native_bundle" "$DIR/$1.almd" "$wt/native.rs" > "$wt/native.bundle" 2> "$wt/producer.err"; then
       echo "producer-failed"; return
@@ -238,6 +258,7 @@ print("ok" if d == want else "moved " + " ".join(f"{k}{v:+d}" for k, v in d.item
   # of its own: the witnesses it judges are the accepted ones).
   [ "$PROP" = anchors ] && pinned="$ROOT/proofs/fixtures/anchors-witness/reinject/$name.reject"
   [ "$PROP" = rc ] && pinned="$ROOT/proofs/fixtures/rc-witness/reinject/$name.reject"
+  [ "$PROP" = family ] && pinned="$ROOT/proofs/fixtures/family-witness/reinject/$name.reject"
   if [ "$v" = 1 ] && [ "${REINJECT_UPDATE:-0}" = 1 ]; then cp "$wt/witness.w" "$pinned"; fi
   if [ "$v" = 1 ] && ! cmp -s "$wt/witness.w" "$pinned"; then
     echo "FAIL $name: rejected, but the witness is not the pinned poisoned certificate ${pinned#"$ROOT"/} (REINJECT_UPDATE=1 rewrites it): $(head -c 200 "$wt/witness.w")"

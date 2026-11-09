@@ -220,6 +220,7 @@ pub(crate) fn emit_drop_shape_deep(
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
     i.return_();
     i.end();
+    crate::family::emit_forward_dec(&mut i, block);
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
     i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
     i.unreachable();

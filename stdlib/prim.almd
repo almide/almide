@@ -590,3 +590,31 @@ fn die(s: Int) -> Unit = _
 @prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_map_kv")
 fn alloc_map_kv[K, V](slots: Int) -> Map[K, V] = _
+
+// ADR-0033 D7 — ALLOCATION FAMILIES: one allocation carved into many interior
+// blocks. Lowered ONLY by the structural wasm leg (crates/almide-wasm/src/carve.rs),
+// in a module that links a `@family_producer`; each op is one fixed shape the init
+// witness records and almide-anchor-check holds to the shipped bytes.
+//
+// The root of a family of `n` carve bytes (the exact sum of the carved sizes,
+// `12 + max(4, round4(len))` per block): a Bytes block whose first payload word is
+// the carve cursor, set to 16 (the first block goes right after it).
+@prim_op(host)
+@intrinsic("almide_rt_prim_family")
+fn family(n: Int) -> Bytes = _
+
+// Carve one interior block of `len` payload bytes at the cursor and answer its
+// base address. Aborts (a defined abort) unless it fits inside the root; then
+// writes the whole block — its header (the interior rc word, len, cap) and every
+// payload byte zeroed — and advances the cursor. The caller's payload stores
+// write into initialized memory.
+@prim_op(host)
+@intrinsic("almide_rt_prim_carve")
+fn carve(fam: Bytes, len: Int) -> Int = _
+
+// Aborts unless the cursor reached the root's end exactly: every byte of the
+// root carved. Called once, after the last carve and before any carved block
+// is published.
+@prim_op(host)
+@intrinsic("almide_rt_prim_family_seal")
+fn family_seal(fam: Bytes) -> Unit = _

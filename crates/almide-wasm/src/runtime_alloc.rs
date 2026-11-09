@@ -300,6 +300,7 @@ pub(crate) fn emit_inc() -> Function {
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
     i.return_();
     i.end();
+    crate::family::emit_retarget(&mut i, block);
     i.local_get(block);
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_add();
     i.i32_store(word(almide_layout::RC.offset));
@@ -320,6 +321,7 @@ pub(crate) fn emit_dec_flat() -> Function {
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
     i.return_();
     i.end();
+    crate::family::emit_retarget(&mut i, block);
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
     // The double-free trap (#4023, on in every build): a dec of a block
     // already at rc 0 — a freed block — hits `unreachable` instead of
@@ -353,6 +355,7 @@ pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
     i.return_();
     i.end();
+    crate::family::emit_forward_dec(&mut i, block);
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
     i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
     i.unreachable();
@@ -386,6 +389,7 @@ pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u3
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
     i.return_();
     i.end();
+    crate::family::emit_forward_dec(&mut i, block);
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
     i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
     i.unreachable();
@@ -424,6 +428,7 @@ pub(crate) fn emit_drop_http_call() -> Function {
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
     i.return_();
     i.end();
+    crate::family::emit_forward_dec(&mut i, block);
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
     i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
     i.unreachable();
@@ -453,6 +458,7 @@ pub(crate) fn emit_drop_map_spine(side_clear: u32) -> Function {
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
     i.return_();
     i.end();
+    crate::family::emit_forward_dec(&mut i, block);
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
     i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
     i.unreachable();
@@ -482,6 +488,7 @@ pub(crate) fn emit_drop_entries(stride: u32, slots: [Option<(u32, u32)>; 2], sid
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
     i.return_();
     i.end();
+    crate::family::emit_forward_dec(&mut i, block);
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
     i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
     i.unreachable();
@@ -609,6 +616,28 @@ pub(crate) fn emit_cow_elems(inc_elems: u32) -> (Function, crate::helper_sig::He
     let out = sig.object(None);
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
+    // ADR-0033 D1 (family modules only): an INTERIOR block reads as shared,
+    // but its family may be held by this one credit alone — `$cow` would
+    // release it (freeing the family through the root) BEFORE the copy took
+    // its element credits, which are interior handles of that family. So an
+    // interior block is copied, the copy takes its credits, and only then is
+    // the original released.
+    if crate::family::armed() {
+        let word = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
+        i.local_get(block).i32_load(word).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+        sig.branch();
+        i.local_get(block).call(F_BLOCK_COPY).local_set(1);
+        sig.op(out, 'i');
+        i.local_get(1).call(inc_elems);
+        i.local_get(block).call(F_DEC_FLAT);
+        sig.rc(block as usize, 'd');
+        i.local_get(1).return_();
+        sig.op(out, 'm');
+        sig.exit();
+        i.end();
+        sig.arm();
+        sig.join();
+    }
     // `$cow` takes the block and answers the owned result.
     sig.op(block as usize, 'm');
     sig.op(out, 'i');
@@ -701,6 +730,10 @@ mod tests {
             got, 0xbfcb37f9a80fb934,
             "runtime tree bytes drifted from the proofs/StructuralRuntime.v transcription (got {got:#x})"
         );
+        // ADR-0033 D1: the family-module variants (`inc_family` /
+        // `dec_flat_family` in the dump) are these plain trees plus one
+        // retarget splice after the floor guard, byte for byte.
+        crate::family::tests::assert_family_trees();
     }
 }
 
@@ -722,6 +755,10 @@ mod byte_dump {
             // 0 stands in for the per-program OOM message address; the
             // .v side carries that immediate as a parameter.
             ("alloc", super::emit_alloc(0, None, false, false)),
+            // ADR-0033 D1: the family-module trees (a module linking a
+            // `@family_producer`), new keys; the plain keys are unchanged.
+            ("inc_family", { let _g = crate::family::FamilyGuard::set(true); super::emit_inc() }),
+            ("dec_flat_family", { let _g = crate::family::FamilyGuard::set(true); super::emit_dec_flat() }),
         ] {
             let mut cs = CodeSection::new();
             cs.function(&f);
