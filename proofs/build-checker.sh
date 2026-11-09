@@ -162,6 +162,13 @@ printf 'h12 w8 v4 r0 f4 t8'  > $GATE_TMP/init_fill.cert      # a range's loop fi
 printf 'h12 w8 v4 r0 f4 t16' > $GATE_TMP/init_fill_skip.cert # the cursor skips a slot per step → REJECT
 runi $GATE_TMP/init_fill.cert 0
 runi $GATE_TMP/init_fill_skip.cert 1
+# ADR-0033 D7: a family root, a literal carve, a computed carve and the seal.
+printf 'k16 ; c12 w4 n4 s0 s1 s2 s3 ; c12 w4 v7 f7 t4 ; e12' > $GATE_TMP/init_family.cert # → ACCEPT
+printf 'k16 ; c12 w4 n4 s0 s1 s3 ; e12'  > $GATE_TMP/init_carve_misplaced.cert # payload word 2 never stored → REJECT
+printf 'c12 w4 v7 f7 t8'                 > $GATE_TMP/init_carve_skip.cert      # the zero loop skips a word → REJECT
+runi $GATE_TMP/init_family.cert 0
+runi $GATE_TMP/init_carve_misplaced.cert 1
+runi $GATE_TMP/init_carve_skip.cert 1
 
 # FIELDS witness (#4013 / #4279): layouts `L R c C n N z S (o O w W)*`, record /
 # tuple / variant sites `k R c C (s I)*`, accesses `a R c C f I`, tag reads `t R`.

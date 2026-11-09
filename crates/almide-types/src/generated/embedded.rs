@@ -30767,6 +30767,34 @@ fn die(s: Int) -> Unit = _
 @prim_op(alloc, block=owned_slots)
 @intrinsic("almide_rt_prim_alloc_map_kv")
 fn alloc_map_kv[K, V](slots: Int) -> Map[K, V] = _
+
+
+
+
+
+
+
+
+
+@prim_op(host)
+@intrinsic("almide_rt_prim_family")
+fn family(n: Int) -> Bytes = _
+
+
+
+
+
+
+@prim_op(host)
+@intrinsic("almide_rt_prim_carve")
+fn carve(fam: Bytes, len: Int) -> Int = _
+
+
+
+
+@prim_op(host)
+@intrinsic("almide_rt_prim_family_seal")
+fn family_seal(fam: Bytes) -> Unit = _
 "#;
 pub const SRC_PRINT_STR: &str = r#"
 

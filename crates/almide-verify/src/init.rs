@@ -9,6 +9,11 @@
 //! empty string is vacuous. A fixed site is accepted iff H > 0, W > 0, every
 //! slot below N is stored and no store names a slot at or past N
 //! (`site_ok`); a loop fill iff H > 0, W > 0, K = L and S = W (`fill_ok`).
+//!
+//! ADR-0033 D7, an allocation family's records: a carve `c H w W n N`
+//! with `s I` stores or `c H w W v K f L t S` (judged as a site / a fill,
+//! with no `r`), a family root `k F` (accepted iff F = 16) and a seal
+//! `e H` (accepted iff H = 12).
 
 use crate::nat::Nat;
 use std::collections::BTreeSet;
@@ -16,6 +21,8 @@ use std::collections::BTreeSet;
 enum Site {
     Fixed { hdr: Nat, width: Nat, count: Nat, stores: Vec<Nat> },
     Fill { hdr: Nat, width: Nat, count_local: Nat, counter: Nat, step: Nat },
+    /// `k F` / `e H`: the number, and what it must be.
+    Exact { got: Nat, want: &'static [u8] },
 }
 
 fn is_space(b: u8) -> bool {
@@ -40,9 +47,53 @@ fn field(s: &[u8], i: usize, tag: u8) -> Option<(Nat, usize)> {
     Some((Nat::from_digits(&s[start..end]), end))
 }
 
+/// The end of a record: blanks, then the end or a `;`.
+fn at_end(s: &[u8], i: usize) -> Option<usize> {
+    let j = skip_blank(s, i);
+    matches!(s.get(j), None | Some(b';')).then_some(j)
+}
+
+/// `carve_at`: a family record (`c ..`, `k F`, `e H`).
+fn carve_at(s: &[u8], i: usize) -> Option<(Site, usize)> {
+    if let Some((hdr, i)) = field(s, i, b'c') {
+        let (width, i) = field(s, i, b'w')?;
+        if let Some((count, i)) = field(s, i, b'n') {
+            return stores_at(s, i, Site::Fixed { hdr, width, count, stores: Vec::new() });
+        }
+        let (count_local, i) = field(s, i, b'v')?;
+        let (counter, i) = field(s, i, b'f')?;
+        let (step, i) = field(s, i, b't')?;
+        return at_end(s, i).map(|j| (Site::Fill { hdr, width, count_local, counter, step }, j));
+    }
+    if let Some((got, i)) = field(s, i, b'k') {
+        return at_end(s, i).map(|j| (Site::Exact { got, want: b"16" }, j));
+    }
+    let (got, i) = field(s, i, b'e')?;
+    at_end(s, i).map(|j| (Site::Exact { got, want: b"12" }, j))
+}
+
+/// The `s I` stores of a fixed site or carve, to the end or a `;`.
+fn stores_at(s: &[u8], mut i: usize, mut site: Site) -> Option<(Site, usize)> {
+    loop {
+        let j = skip_blank(s, i);
+        match s.get(j) {
+            None | Some(b';') => return Some((site, j)),
+            _ => {
+                let (n, k) = field(s, j, b's')?;
+                if let Site::Fixed { stores, .. } = &mut site {
+                    stores.push(n);
+                }
+                i = k;
+            }
+        }
+    }
+}
+
 /// `site_at`: one site, and where the rest begins (the end or a `;`).
 fn site_at(s: &[u8], i: usize) -> Option<(Site, usize)> {
-    let (hdr, i) = field(s, i, b'h')?;
+    let Some((hdr, i)) = field(s, i, b'h') else {
+        return carve_at(s, i);
+    };
     let (width, i) = field(s, i, b'w')?;
     if let Some((count, i)) = field(s, i, b'n') {
         let (_repr, mut i) = field(s, i, b'r')?;
@@ -101,6 +152,7 @@ fn site_ok(site: &Site) -> bool {
         Site::Fill { hdr, width, count_local, counter, step } => {
             *hdr != zero && *width != zero && count_local == counter && step == width
         }
+        Site::Exact { got, want } => *got == Nat::from_digits(want),
     }
 }
 
@@ -135,6 +187,19 @@ mod tests {
         assert!(check_init_cert(b"h12 w8 n1 r0 s0 ;"));
         assert!(check_init_cert(b"h012 w8 n01 r0 s000"));
         assert!(!check_init_cert(b";"));
+    }
+
+    #[test]
+    fn family_records() {
+        assert!(check_init_cert(b"k16 ; c12 w4 n4 s0 s1 s2 s3 ; c12 w4 v7 f7 t4 ; e12"));
+        assert!(!check_init_cert(b"c12 w4 n4 s0 s1 s3"));
+        assert!(!check_init_cert(b"c12 w4 n4 s0 s1 s2 s3 s4"));
+        assert!(!check_init_cert(b"c12 w4 v7 f8 t4"));
+        assert!(!check_init_cert(b"c12 w4 v7 f7 t8"));
+        assert!(!check_init_cert(b"k12"));
+        assert!(!check_init_cert(b"e8"));
+        assert!(!check_init_cert(b"k16 s0"));
+        assert!(!check_init_cert(b"c12 w4"));
     }
 
     #[test]
