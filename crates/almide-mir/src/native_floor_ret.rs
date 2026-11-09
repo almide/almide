@@ -43,7 +43,7 @@ fn plain_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
         FloorRet::Float => (call, Some(NTy::F64)),
         FloorRet::Str => (format!("AlmideString::from({call})"), Some(NTy::Str)),
         FloorRet::ListInt => (call, Some(NTy::Vec)),
-        FloorRet::Bytes => (format!("AlmideBytes::from({call})"), Some(NTy::Rec(crate::render_native_rec::bytes_index()))),
+        FloorRet::Bytes => (call, Some(NTy::Rec(crate::render_native_rec::bytes_index()))),
         FloorRet::Value => (call, Some(NTy::Rec(crate::render_native_rec::value_index()))),
         FloorRet::ListStr => (
             format!("crate::almide_str_block::almide_str_list({call})"),
@@ -102,7 +102,7 @@ fn carrier_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
         }
         FloorRet::ResBytes => {
             let b = NTy::Rec(crate::render_native_rec::bytes_index());
-            (format!("({call}).map(AlmideBytes::from).map_err(AlmideString::from)"), Some(NTy::Rec(crate::render_native_rec::result_type_of(b, NTy::Str))))
+            (format!("({call}).map_err(AlmideString::from)"), Some(NTy::Rec(crate::render_native_rec::result_type_of(b, NTy::Str))))
         }
         FloorRet::ResOptListStr => {
             let o = NTy::Rec(crate::render_native_rec::option_type_of(NTy::VecStr));
@@ -116,7 +116,7 @@ fn carrier_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
         FloorRet::ResOptBytes => {
             let b = NTy::Rec(crate::render_native_rec::bytes_index());
             let o = NTy::Rec(crate::render_native_rec::option_type_of(b));
-            (format!("({call}).map(|o| o.map(AlmideBytes::from)).map_err(AlmideString::from)"),
+            (format!("({call}).map_err(AlmideString::from)"),
                 Some(NTy::Rec(crate::render_native_rec::result_type_of(o, NTy::Str))))
         }
         FloorRet::ResOptStr => {
@@ -283,7 +283,7 @@ fn aggregate_host_ret(r: FloorRet, call: String, declared: Option<u16>) -> Resul
         ),
         FloorRet::ResBytesStrInt => (
             Ty::Tuple(vec![Ty::Bytes, Ty::String, Ty::Int].into()),
-            [NTy::Rec(rec::bytes_index()), NTy::Str, NTy::I64], ["AlmideBytes::from(s.0)", "s.1", "s.2"],
+            [NTy::Rec(rec::bytes_index()), NTy::Str, NTy::I64], ["s.0", "s.1", "s.2"],
         ),
         _ => unreachable!("only aggregate host results"),
     };
