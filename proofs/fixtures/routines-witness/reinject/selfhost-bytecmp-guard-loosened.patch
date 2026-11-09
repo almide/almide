@@ -1,0 +1,11 @@
+--- a/stdlib/bytes_core.almd
++++ b/stdlib/bytes_core.almd
+@@ -152,7 +152,7 @@
+ fn __bytecmp(pa: Int, pb: Int, na: Int, nb: Int, i: Int) -> Int =
+   if i >= na then (if i >= nb then 0 else 0 - 1)
+   else {
+-    if i >= nb then 1
++    if i >= nb + 1 then 1
+     else {
+       let x = prim.load8(pa + i)
+       let y = prim.load8(pb + i)
