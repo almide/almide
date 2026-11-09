@@ -264,7 +264,11 @@ impl Emitter<'_> {
                 self.f.instructions().drop();
                 Ok(None)
             }
-            _ => unsup(&format!("call:prim.{func}")),
+            // ADR-0033 D7: the family carve ops (carve.rs).
+            _ => match self.lower_carve_op(func, args) {
+                Some(r) => r,
+                None => unsup(&format!("call:prim.{func}")),
+            },
         }
     }
 

@@ -265,6 +265,7 @@ pub fn check_init(
     if init.trim().is_empty() && anch.trim().is_empty() {
         return Ok(());
     }
+    let (mut families, mut seals) = (Vec::new(), Vec::new());
     if sites.len() != anchors.len() {
         return Err(format!(
             "init: {} sites, {} anchor groups",
@@ -280,6 +281,58 @@ pub fn check_init(
             .collect::<Result<_, _>>()?;
         let at = |k: usize| g.get(k).copied().flatten();
         let what = |e: String| format!("init site {n} `{site}`: {e}");
+        // ADR-0033 D7: the family records (carve.rs).
+        if let Some(c) = t.first().and_then(|x| x.chars().next()).filter(|c| matches!(c, 'k' | 'c' | 'e')) {
+            if g.iter().all(Option::is_none) {
+                rep.init_unlocated += 1;
+                continue;
+            }
+            let located: Vec<At> = g
+                .iter()
+                .map(|a| a.ok_or_else(|| what("a family record partly unlocated".into())))
+                .collect::<Result<_, _>>()?;
+            match c {
+                'k' => {
+                    if t.len() != 1 {
+                        return Err(what("a family is `k F`".into()));
+                    }
+                    families.push(ctx.family(num(t[0], 'k').map_err(what)? as i32, &located).map_err(what)?);
+                    rep.families += 1;
+                }
+                'e' => {
+                    if t.len() != 1 {
+                        return Err(what("a seal is `e H`".into()));
+                    }
+                    seals.push(ctx.seal(num(t[0], 'e').map_err(what)? as i32, &located).map_err(what)?);
+                    rep.seals += 1;
+                }
+                _ => {
+                    if t.len() < 3 {
+                        return Err(what("too short".into()));
+                    }
+                    let (h, w) = (num(t[0], 'c').map_err(what)?, num(t[1], 'w').map_err(what)?);
+                    if t[2].starts_with('v') {
+                        if t.len() != 5 {
+                            return Err(what("a computed carve is `c w v f t`".into()));
+                        }
+                        let (k, l, s) = (
+                            num(t[2], 'v').map_err(what)?,
+                            num(t[3], 'f').map_err(what)?,
+                            num(t[4], 't').map_err(what)?,
+                        );
+                        ctx.carve_fill(h, w, k as u32, l as u32, s, &located).map_err(what)?;
+                        rep.carve_fills += 1;
+                    } else {
+                        let nn = num(t[2], 'n').map_err(what)?;
+                        let stores: Vec<u64> =
+                            t[3..].iter().map(|x| num(x, 's')).collect::<Result<_, _>>().map_err(what)?;
+                        ctx.carve_fixed(h, w, nn, &stores, &located).map_err(what)?;
+                        rep.carves += 1;
+                    }
+                }
+            }
+            continue;
+        }
         if t.len() < 4 {
             return Err(what("too short".into()));
         }
@@ -330,6 +383,10 @@ pub fn check_init(
             rep.init_stores += ctx.fixed_site(h, w, nn, a, &paired).map_err(what)?;
             rep.init_sites += 1;
         }
+    }
+    // Every family is sealed before its function leaves the family's block.
+    for f in families {
+        ctx.sealed(f, &seals).map_err(|e| format!("init: {e}"))?;
     }
     Ok(())
 }
