@@ -81,6 +81,10 @@ fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_nati
             DTy::Unit if native == NTy::I64 => Some(if into_native {
                 format!("{{ {code}; 0_i64 }}")
             } else { format!("{{ let _ = {code}; () }}") }),
+            // The runtime's `Vec<u8>` and the program's shared `AlmideBytes`.
+            DTy::Bytes => Some(if into_native {
+                format!("AlmideBytes::from({code})")
+            } else { format!("Vec::<u8>::from({code})") }),
             _ => {
                 let runtime = kind_of(env, d)?;
                 if crate::native_value_repr::same_owned(runtime, native) { return Some(code.into()); }

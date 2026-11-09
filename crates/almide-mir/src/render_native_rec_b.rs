@@ -440,7 +440,7 @@ impl Derive<'_> {
             return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, record_labels: None };
         }
         if n == BYTES_KEY {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, record_labels: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideBytes"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, record_labels: None };
         }
         let (is_enum, cases) = &self.decls[n];
         let eq_safe = self.exact_eq_decl(n, &mut Default::default());

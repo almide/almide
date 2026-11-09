@@ -165,7 +165,7 @@ pub(crate) fn is_scalar_instance(t: &almide_lang::types::Ty) -> bool {
 /// it joins, so no earlier index moves; the header is assembled after the
 /// bodies render, so a body may be the first user.
 pub(crate) fn bytes_index() -> u16 {
-    intern(&|d| d.name == BYTES_KEY, RecDecl { name: BYTES_KEY.into(), alias: Some("Vec<u8>"), ..RecDecl::default() })
+    intern(&|d| d.name == BYTES_KEY, RecDecl { name: BYTES_KEY.into(), alias: Some("AlmideBytes"), ..RecDecl::default() })
 }
 
 pub(crate) fn runtime_type_index(t: crate::native_runtime_types::RuntimeType) -> u16 {
