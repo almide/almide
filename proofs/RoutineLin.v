@@ -1749,3 +1749,33 @@ Proof. reflexivity. Qed.
 (* A procedure whose postcondition its return does not prove: refused. *)
 Example rejects_unproven_post : laccepts [(0, mkProc [] [kz 1%Z] 0 (LRet [([], 1%Z)]))] LEnd = false.
 Proof. reflexivity. Qed.
+
+(* #4005 A4: the cap word. Slot 0 := the base of region 7, slot 1 := its
+   capacity (LCap). Facts after LCap: 0 `VS1 - VC7`, 1 `VC7 - VS1`,
+   2 `-VB7`, 3 `-VC7`, 4 wf, 5 `VS0 - VB7`, 6 `VB7 - VS0`. A one-byte read at
+   base + cap + off: at off 11 it is the payload's last byte (5 + 0), at
+   off 12 one past it — no combination reaches that. *)
+Definition cap_read (off : Z) : LProg :=
+  LHandle 0 7 (LWf 7 (LCap 1 7
+    (LAcc 7 1%Z off (ladd (v1 (VS 0)) (v1 (VS 1)))
+      ([(2, 1%Z); (6, 1%Z); (3, 1%Z); (1, 1%Z)], 1%Z) ([(6, 1%Z); (3, 1%Z); (1, 1%Z)], 1%Z) ([(5, 1%Z); (0, 1%Z)], 1%Z) LEnd))).
+
+Example accepts_last_byte_by_cap : laccepts [] (cap_read 11%Z) = true.
+Proof. vm_compute. reflexivity. Qed.
+
+Example rejects_byte_past_cap : laccepts [] (cap_read 12%Z) = false.
+Proof. vm_compute. reflexivity. Qed.
+
+(* An i32 result: `VS1 := VS0 + 1` with 0 <= VS0 <= 10. Its two range
+   proofs given, it is LAsn's equality; without them, only its range. *)
+Definition asnu_f : Facts := [lneg (v1 (VS 0)); lsub (v1 (VS 0)) (kz 10)].
+
+Example asnu_exact_when_proven :
+  asnu_facts asnu_f 1 (ladd (v1 (VS 0)) (kz 1)) ([(0, 1%Z)], 1%Z) ([(1, 1%Z)], 1%Z)
+  = eqs (VS 1) (ladd (v1 (VS 0)) (kz 1)) ++ asnu_f.
+Proof. vm_compute. reflexivity. Qed.
+
+Example asnu_range_only_unproven :
+  asnu_facts asnu_f 1 (ladd (v1 (VS 0)) (kz 1)) ([], 1%Z) ([], 1%Z)
+  = lsub (kz 0) (v1 (VS 1)) :: lsub (v1 (VS 1)) (kz (ADDR - 1)) :: asnu_f.
+Proof. vm_compute. reflexivity. Qed.
