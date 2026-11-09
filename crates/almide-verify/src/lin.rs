@@ -637,6 +637,26 @@ fn call_facts(p: &Table, f: &[Lin], it: &Item) -> Option<Facts> {
     Some(out)
 }
 
+/// `LCap n r`: n is r's capacity.
+fn cap_facts(f: &[Lin], n: &Nat, r: &Nat) -> Facts {
+    let mut g = eqs(&Var::S(n.clone()), &v1(Var::C(r.clone())));
+    g.extend(kill(f, &Var::S(n.clone())));
+    g
+}
+
+/// `asnu_facts`: an i32 result proven in [0, 2^32) is LAsn's, else only
+/// its range.
+fn asnu_facts(f: &[Lin], x: &Nat, l: &Lin, lo: &Pf, hi: &Pf) -> Facts {
+    let top = Z::pow2(32).sub(&one());
+    if entails(f, lo, &lneg(l)) && entails(f, hi, &lsub(l, &kz(top.clone()))) {
+        return asn_facts(f, x, l, lo, hi);
+    }
+    let vx = v1(Var::S(x.clone()));
+    let mut g = vec![lsub(&kz(Z::zero()), &vx), lsub(&vx, &kz(top))];
+    g.extend(kill(f, &Var::S(x.clone())));
+    g
+}
+
 // ── The checker ────────────────────────────────────────────────────────
 
 /// (loop invariant inside a loop, postcondition)
@@ -703,22 +723,8 @@ fn lcheck(p: &Table, c: Ctx, mut f: Facts, items: &[Item]) -> Option<(St, St)> {
                 f = g;
             }
             Item::Asn { x, l, lo, hi } => f = asn_facts(&f, x, l, lo, hi),
-            Item::Cap(n, r) => {
-                let mut g = eqs(&Var::S(n.clone()), &v1(Var::C(r.clone())));
-                g.extend(kill(&f, &Var::S(n.clone())));
-                f = g;
-            }
-            Item::AsnU { x, l, lo, hi } => {
-                let top = Z::pow2(32).sub(&one());
-                f = if entails(&f, lo, &lneg(l)) && entails(&f, hi, &lsub(l, &kz(top.clone()))) {
-                    asn_facts(&f, x, l, lo, hi)
-                } else {
-                    let vx = v1(Var::S(x.clone()));
-                    let mut g = vec![lsub(&kz(Z::zero()), &vx), lsub(&vx, &kz(top))];
-                    g.extend(kill(&f, &Var::S(x.clone())));
-                    g
-                };
-            }
+            Item::Cap(n, r) => f = cap_facts(&f, n, r),
+            Item::AsnU { x, l, lo, hi } => f = asnu_facts(&f, x, l, lo, hi),
             Item::Test { thn, els, .. } | Item::Branch(thn, els) => {
                 let (ft, fe) = match it {
                     Item::Test { a, b, sgn, pa, pb, nn, .. } => {
