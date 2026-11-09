@@ -1330,6 +1330,12 @@ fn translate_inner(m: &Module<'_>, pos: usize, i: TrIn<'_>, mode: Mode) -> Resul
     }
     t.rslot = t.fresh(t.result.unwrap_or(ValType::I64));
     let mut out = Vec::new();
+    // A declared block is never the null address: a body that tests the
+    // parameter against 0 says it may be (an Option's `none`), and the
+    // declaration is refused rather than trusted.
+    if let Some(p) = heap.keys().find(|&&p| null_tested(&body.ops, p)) {
+        return Err(format!("heap parameter {p} is tested against null"));
+    }
     for (&p, &s) in heap {
         if params.get(p as usize) != Some(&ValType::I32) {
             return Err(format!("heap parameter {p} is not an i32"));
@@ -1355,6 +1361,17 @@ fn translate_inner(m: &Module<'_>, pos: usize, i: TrIn<'_>, mode: Mode) -> Resul
         return Err("a prim site in an unreachable stretch".into());
     }
     Ok(Skel { rslot: t.rslot, body: out, sites: t.covered })
+}
+
+/// Does the body test local `p` against null: `local.get p` read as a
+/// condition (`i32.eqz`, `if`, `br_if`, `select`'s), or compared with the
+/// constant 0 (either operand order)?
+fn null_tested(ops: &[Op<'_>], p: u32) -> bool {
+    let get = |o: &Op<'_>| matches!(o, Op::LocalGet { local_index } | Op::LocalTee { local_index } if *local_index == p);
+    let zero = |o: &Op<'_>| matches!(o, Op::I32Const { value: 0 });
+    let cmp = |o: &Op<'_>| matches!(o, Op::I32Eq | Op::I32Ne);
+    ops.windows(2).any(|w| get(&w[0]) && matches!(w[1], Op::I32Eqz | Op::If { .. } | Op::BrIf { .. } | Op::Select))
+        || ops.windows(3).any(|w| (get(&w[0]) && zero(&w[1]) || zero(&w[0]) && get(&w[1])) && cmp(&w[2]))
 }
 
 // ── Templates: the certificate text with holes ────────────────────────────
