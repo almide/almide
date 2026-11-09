@@ -1,0 +1,13 @@
+crates/almide-codegen/src/pass_ir_link_flatten.rs
+crates/almide-codegen/src/walker/program_render.rs
+crates/almide-mir/src/lib_b.rs
+crates/almide-mir/src/lower/binds_p4_b.rs
+crates/almide-mir/src/lower/control_p2_e.rs
+crates/almide-mir/src/lower/desugar_branch.rs
+crates/almide-mir/src/lower/desugar_loop.rs
+crates/almide-mir/src/lower/heap_result_arm.rs
+crates/almide-mir/src/lower/mod_b_tail.rs
+crates/almide-mir/src/lower/mod_p2_c.rs
+crates/almide-mir/src/lower/owned_heap_field.rs
+crates/almide-optimize/src/mono/mod.rs
+crates/almide-optimize/src/optimize/sink_inline.rs

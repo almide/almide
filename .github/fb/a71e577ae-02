@@ -1,0 +1,13 @@
+crates/almide-codegen/src/certify_ownership.rs
+crates/almide-codegen/src/pass_stream_fusion.rs
+crates/almide-mir/src/host_ops.rs
+crates/almide-mir/src/lower/binds_p3_b.rs
+crates/almide-mir/src/lower/calls_p4_b_tail.rs
+crates/almide-mir/src/lower/defunc_hof_inner.rs
+crates/almide-mir/src/lower/desugar_guard.rs
+crates/almide-mir/src/lower/desugar_unwrap.rs
+crates/almide-mir/src/lower/inline_scalar_fns.rs
+crates/almide-mir/src/lower/mod_c_tail.rs
+crates/almide-mir/src/lower/newtype_erase.rs
+crates/almide-mir/src/lower/tail_c.rs
+crates/almide-optimize/src/mono/rewrite.rs
