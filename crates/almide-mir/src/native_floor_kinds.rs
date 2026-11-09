@@ -248,9 +248,3 @@ pub fn has_native_host_route(call: &str) -> bool {
     declared(call).is_some() || crate::native_hof::declared_call(call)
         || crate::native_hof::of(call).is_some()
 }
-
-/// The element type the self-hosted body registered under `call` declares
-/// for its first list param (`list.unique_float`'s `List[Float]` → `Float`).
-pub(crate) fn specialized_elem(call: &str) -> Option<String> {
-    specialized_list_elem(call)
-}

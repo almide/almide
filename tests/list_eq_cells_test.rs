@@ -6,8 +6,10 @@
 //!
 //! The family's completeness rule is the repr cells' (tests/list_repr_cells_test.rs):
 //! one cell per lane-scalar element type (Int, Float, Bool) and String. A list
-//! of any other element (a nested list, an Option, a Result, a Value) compares
-//! through its own self-hosted body and has no cell, on purpose.
+//! of String-bearing containers (`List[List[String]]`, `List[String?]`) has no
+//! String-suffixed cell: its self-hosted body specializes the one generic cell
+//! `list.__eq_any[A]`, so the element type is a type argument, not a `_str` twin
+//! (#1460's ratchet, scripts/check-str-twin-ratchet.sh).
 
 const CELLS: &[(&str, &str)] = &[
     // (cell, the self-hosted body that specializes it; its call name is `list.eq_<cell>`)
@@ -36,6 +38,23 @@ fn every_cell_is_declared_specialized_and_on_the_native_floor() {
         for call in [format!("list.eq_{cell}"), format!("list.__eq_{cell}")] {
             assert_eq!(almide_mir::native_floor::refusal(&call), None, "`{call}` is not on the native floor");
         }
+    }
+}
+
+/// The String-bearing nested bodies reach the native render through the one
+/// generic cell, and no String-suffixed nested cell is declared.
+#[test]
+fn nested_string_bodies_specialize_the_generic_cell() {
+    let list = std::fs::read_to_string("stdlib/list.almd").unwrap();
+    let rt = std::fs::read_to_string("runtime/rs/src/list.rs").unwrap();
+    let core = std::fs::read_to_string("stdlib/value_core.almd").unwrap();
+    assert!(list.contains("@intrinsic(\"almide_rt_list_eq_any\")\nfn __eq_any[A](a: List[A], b: List[A]) -> Bool = _"));
+    assert!(rt.contains("pub fn almide_rt_list_eq_any<A: PartialEq>(a: &[A], b: &[A]) -> bool"));
+    for body in ["list_eq_list_str", "list_eq_opt_str"] {
+        assert!(core.contains(&format!("@specializes(\"list.__eq_any\")\nfn {body}(")), "`{body}` does not specialize list.__eq_any");
+    }
+    for twin in ["fn __eq_list_str(", "fn __eq_opt_str("] {
+        assert!(!list.contains(twin), "`{twin}` is a String-suffixed cell again");
     }
 }
 

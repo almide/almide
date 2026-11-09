@@ -378,7 +378,7 @@ fn v0_mutual_tail_recursion_survives_opt_level_0() {
 fn out_of_subset_walls_honestly() {
     let walls = [
         // C export wrappers still require their separately checked ABI path.
-        ("c_export", "@export(c, \"answer\")\nfn answer() -> Int = 42\nfn main() -> Unit = println(answer())\n"),
+        ("c_export", "@export(c, \"answer\")\nfn answer() -> Int = 42\nfn main() -> Unit = println(\"${answer()}\")\n"),
     ];
     for (name, src) in walls {
         let refusal = almide_mir::pipeline::try_render_rust_source(src)

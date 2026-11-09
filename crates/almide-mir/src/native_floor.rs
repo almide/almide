@@ -587,6 +587,34 @@ fn specialized_list_elem(call: &str) -> Option<String> {
     })
 }
 
+/// Whether the element type of the first list param the self-hosted body
+/// `call` names declares holds a Float at any depth (`List[List[Float]]`'s
+/// `List[Float]`, `List[Float?]`'s `Float?`): the native render carries every
+/// such Float as its bits.
+pub(crate) fn specialized_list_elem_holds_float(call: &str) -> bool {
+    fn holds_float(t: &TypeExpr) -> bool {
+        match t {
+            TypeExpr::Simple { name } => name.as_str() == "Float",
+            TypeExpr::Generic { args, .. } => args.iter().any(holds_float),
+            TypeExpr::Tuple { elements } => elements.iter().any(holds_float),
+            TypeExpr::Union { members } => members.iter().any(holds_float),
+            TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => fields.iter().any(|f| holds_float(&f.ty)),
+            _ => false,
+        }
+    }
+    crate::mir_ops::self_host_runtime().iter().any(|(src, pairs)| {
+        pairs.iter().filter(|(_, c)| *c == call).any(|(impl_fn, _)| {
+            almide_lang::parse_cached(src).is_some_and(|program| program.decls.iter().any(|d| match d {
+                Decl::Fn { name, params, .. } if name.as_str() == *impl_fn => params.iter().find_map(|p| match &p.ty {
+                    TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 => Some(holds_float(&args[0])),
+                    _ => None,
+                }) == Some(true),
+                _ => false,
+            }))
+        })
+    })
+}
+
 
 fn simple(t: &TypeExpr) -> Option<&str> {
     match t {

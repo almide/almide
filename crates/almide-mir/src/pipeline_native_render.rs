@@ -457,6 +457,7 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     crate::alias_safety::elide_unaliased_make_unique(&mut functions);
     // #4006 class P: a heap param its body takes over becomes a move param,
     // and every call hands the argument over at the call.
+    let before_modes = functions.clone();
     crate::native_move_params::rewrite(&mut functions, &own, &sigs);
     crate::native_region_window::bracket_windows(&mut functions, &windows)?;
     crate::native_slot_takes::delay_publications(&mut functions)?;
@@ -472,7 +473,26 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
         linked_names.clone(),
     );
     let _entry = crate::native_entry::EntryGuard::set(ir.functions.iter().any(|f| f.name.as_str() == "main" && f.is_effect));
-    let rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names, &runtime)?;
+    let initial_records = crate::render_native_rec::snapshot();
+    let mut rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names, &runtime)?;
+    // Runtime adapters can make linked indirect callers unreachable. Such
+    // callers must not keep pinning the surviving callbacks to borrowing:
+    // a fold would then clone its growing accumulator on every iteration.
+    // Start from pristine MIR: repeating move insertion on already rewritten
+    // functions would duplicate transfers and invalidate their call witnesses.
+    if program.functions.len() < before_modes.len() {
+        let retained: std::collections::BTreeSet<_> = program.functions.iter().map(|f| f.name.clone()).collect();
+        let mut fresh: Vec<_> = before_modes.into_iter().filter(|f| retained.contains(&f.name)).collect();
+        crate::render_native_rec::restore(initial_records);
+        crate::native_move_params::rewrite(&mut fresh, &own, &sigs);
+        crate::native_region_window::bracket_windows(&mut fresh, &windows)?;
+        crate::native_slot_takes::delay_publications(&mut fresh)?;
+        crate::native_slot_takes::set_quiet(&fresh);
+        program.functions = fresh;
+        let mut routed = runtime.clone();
+        routed.extend(linked_names.iter().filter(|n| !retained.contains(*n)).cloned());
+        rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names, &routed)?;
+    }
     let mut certs = native_ownership_certs(&program.functions, &crate::native_hof::sites());
     // Row 4: each function's bounds witness, recorded as the render wrote its
     // element accesses (render_native_bounds).
@@ -480,4 +500,20 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
         certs.push(("bounds".to_string(), name, w));
     }
     Ok((rust, certs, program.functions))
+}
+
+#[cfg(test)]
+mod reachable_callback_modes_tests {
+    #[test]
+    fn a_runtime_fold_takes_its_accumulator_after_unreachable_callers_are_pruned() {
+        std::thread::Builder::new().stack_size(512 << 20).spawn(|| {
+            let source = include_str!("../../../spec/wasm_cross/json_set_path_depth_bound.almd");
+            let (_, _, functions) = super::render_native_parts(source).unwrap();
+            for name in ["__lambda_path_of_0", "__lambda_nest_0"] {
+                let f = functions.iter().find(|f| f.name == name).unwrap();
+                assert!(!f.owned_params.contains(&f.params[0].value), "the environment stays borrowed");
+                assert!(f.owned_params.contains(&f.params[1].value), "{name} must take the growing accumulator");
+            }
+        }).unwrap().join().unwrap();
+    }
 }

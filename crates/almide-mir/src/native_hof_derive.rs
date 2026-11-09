@@ -37,7 +37,7 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
     // Keep the upstream rejection unless declaration-level specialization
     // establishes a Float value adapter instead of comparing erased bits.
     let needs_float_comparison = !bounds.is_empty() && target != call
-        && crate::native_floor::specialized_elem(&call).as_deref() == Some("Float");
+        && crate::native_floor::specialized_list_elem_holds_float(&call);
     let tps: BTreeSet<String> = generics.iter().flatten().map(|g| g.name.as_str().to_string()).collect();
     let dparams: Vec<DTy> = params.iter().map(|p| dty_of(&p.ty, &tps)).collect::<Option<_>>().ok_or("a param type outside the map")?;
     let mut dret = dty_of(ret, &tps).ok_or("a return type outside the map")?;
