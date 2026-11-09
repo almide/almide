@@ -70,9 +70,7 @@ impl Emitter<'_> {
                     | SliceTy::Tuple(_)
                     | SliceTy::Named(_)
                     | SliceTy::Option(_)
-                    | SliceTy::Result(..)
-                    // A Value is a box block like any other (value.rs).
-                    | SliceTy::Value => {}
+                    | SliceTy::Result(..) => {}
                     other => return unsup(&format!("prim-handle-of:{other:?}")),
                 }
                 self.f.instructions().i64_extend_i32_u();
