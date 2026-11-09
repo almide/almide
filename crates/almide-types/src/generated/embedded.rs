@@ -6654,6 +6654,7 @@ pub const SRC_FLOAT_PARSE: &str = r#"
 
 
 
+
 fn __fp_isdigit(b: Int) -> Bool = b >= 48 and b <= 57
 
 
@@ -6901,20 +6902,25 @@ fn __hpd_bits(i: Int) -> Int = if i > 17 then 59 else i * 33219 / 10000
 
 
 fn __hpd_to_half(hb: Int, e2: Int) -> Int = if __hpd_dp(hb) > 0 then {
-  let k = __hpd_bits(__hpd_dp(hb))
+  let k = if __hpd_dp(hb) > 17 then 59 else __hpd_bits(__hpd_dp(hb)) + 1
   __hpd_rsh(hb, k)
   __hpd_to_half(hb, e2 + k)
 } else e2
 
-fn __hpd_from_half(hb: Int, e2: Int) -> Int =
-  if __hpd_dp(hb) < 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(
-    hb,
-    0,
-  ) < 5) then {
-    let k = if __hpd_dp(hb) < 0 then __hpd_bits(0 - __hpd_dp(hb)) else 1
-    __hpd_lsh(hb, k)
-    __hpd_from_half(hb, e2 - k)
-  } else e2
+fn __hpd_from_tenth(hb: Int, e2: Int) -> Int = if __hpd_dp(hb) < 0 then {
+  let k = __hpd_bits(0 - __hpd_dp(hb))
+  __hpd_lsh(hb, k)
+  __hpd_from_tenth(hb, e2 - k)
+} else e2
+
+
+
+fn __hpd_doublings(hb: Int) -> Int = {
+  let m3 = __hpd_ri(hb, 0, 3, __hpd_n(hb), 0)
+  if m3 >= 500 then 0
+  else if m3 >= 250 then 1
+  else if m3 >= 125 then 2 else 3
+}
 
 
 fn __hpd_ri(hb: Int, i: Int, dp: Int, n: Int, acc: Int) -> Int = if i < dp then __hpd_ri(
@@ -6983,15 +6989,19 @@ fn __fp_exact(hb: Int, neg: Bool) -> Float = {
   else if __hpd_dp(hb) > 310 then (if neg then 0.0 - inf else inf)
   else {
 
-    let eb = __hpd_from_half(hb, __hpd_to_half(hb, 0))
-    let e2 = eb - 1
+
+    let e0 = __hpd_from_tenth(hb, __hpd_to_half(hb, 0))
+    let t = __hpd_doublings(hb)
+    let e2 = e0 - t - 1
 
     let e3 = if e2 < 0 - 1022 then 0 - 1022 else e2
-    __hpd_rsh(hb, (if e2 < 0 - 1022 then (0 - 1022) - e2 else 0))
+    let den = if e2 < 0 - 1022 then (0 - 1022) - e2 else 0
     if e3 > 1023 then (if neg then 0.0 - inf else inf)
     else {
 
-      __hpd_lsh(hb, 53)
+
+      let net = t + 53 - den
+      if net >= 0 then __hpd_lsh(hb, net) else __hpd_rsh(hb, 0 - net)
       let m0 = __hpd_ri(hb, 0, __hpd_dp(hb), __hpd_n(hb), 0)
       let m1 = if __hpd_round_up(hb) then m0 + 1 else m0
 
