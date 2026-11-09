@@ -9,7 +9,7 @@ env:
   RUST_TOOLCHAIN: "1.97.0"
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
-  HEAD_REF: origin/json-substrate-w3-routed
+  HEAD_REF: origin/json-substrate-w3-parser
   BASE_REF: c9ad9ea2f
   ROUNDS: "13"
 jobs:
