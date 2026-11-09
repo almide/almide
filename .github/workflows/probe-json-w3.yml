@@ -1,7 +1,7 @@
-name: probe-json-reborn (throwaway)
+name: probe-json-w3 (throwaway)
 on:
   push:
-    branches: [probe/json-reborn, probe/json-negctl, probe/json-swar]
+    branches: [probe/json-w3]
   workflow_dispatch:
 permissions:
   contents: read
@@ -9,11 +9,12 @@ env:
   RUST_TOOLCHAIN: "1.97.0"
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
-  HEAD_REF: ${{ github.ref_name == 'probe/json-negctl' && 'origin/json-reborn-negctl' || github.ref_name == 'probe/json-swar' && 'origin/json-reborn-swar' || 'origin/json-reborn' }}
-  BASE_REF: 6a633ef11a6fd62695e92c8118bf7cba0f558bff
+  HEAD_REF: origin/json-substrate-w3-parser
+  BASE_REF: c9ad9ea2f
   ROUNDS: "15"
 jobs:
   quick:
+    if: contains(github.event.head_commit.message, '[quick]')
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -73,6 +74,42 @@ jobs:
             /tmp/perf/*.wasm
             /tmp/perf/wi-*.txt
             /tmp/perf/*.wat
+          retention-days: 7
+
+  census:
+    if: contains(github.event.head_commit.message, '[census]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    strategy:
+      fail-fast: false
+      matrix:
+        v: [head, base]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Census
+        run: |
+          set -uo pipefail
+          if [ "${{ matrix.v }}" = base ] && ! grep -q '\[base-census\]' <<< "${{ github.event.head_commit.message }}"; then echo skip; exit 0; fi
+          ref=$HEAD_REF; [ "${{ matrix.v }}" = base ] && ref=$BASE_REF
+          cp -r .github/probe /tmp/probe
+          git worktree add /tmp/src "$ref"; (cd /tmp/src && git log --oneline -1)
+          [ -d /tmp/probe/w3/extra ] && cp /tmp/probe/w3/extra/*.almd /tmp/src/spec/wasm_cross/ 2>/dev/null || true
+          CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" bash /tmp/probe/w3/census.sh /tmp/src /tmp/census ${{ matrix.v }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: census-${{ matrix.v }}
+          path: /tmp/census
           retention-days: 7
 
   wasm:
