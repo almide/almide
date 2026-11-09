@@ -378,6 +378,7 @@ jobs:
             ref=$BASE_REF; [ $v = head ] && ref=$HEAD_REF
             git worktree add /tmp/fp-$v "$ref"
             cp .github/probe/zz_fp_dump.rs /tmp/fp-$v/tests/
+            sed -e 's#^//!#//#' -e 's/^#!\[/\/\/ #![/' /tmp/fp-$v/tests/stdlib_inspection_test.rs > /tmp/fp-$v/tests/zz_src.rs
             (cd /tmp/fp-$v && FP_OUT=/tmp/fp/$v.txt CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test zz_fp_dump zz_dump_fingerprints 2>&1 | tail -3)
           done
           diff /tmp/fp/base.txt /tmp/fp/head.txt | tee /tmp/fp/diff.txt || true

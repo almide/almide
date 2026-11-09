@@ -1,5 +1,5 @@
 // Throwaway (probe only): every ledger row's implementation fingerprint.
-include!("stdlib_inspection_test.rs");
+include!("zz_src.rs");
 
 #[test]
 fn zz_dump_fingerprints() {
