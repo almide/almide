@@ -150,7 +150,8 @@ impl<'a> Ctx<'_, 'a> {
             let j = start + k;
             let op = b.ops.get(j).ok_or_else(|| format!("{what}: the body ends at instruction {j}"))?;
             if !op_is(p, op, bind) {
-                return Err(format!("{what}: instruction {j} is {op:?}"));
+                let window: Vec<String> = b.ops[start..(j + 2).min(b.ops.len())].iter().map(|o| format!("{o:?}")).collect();
+                return Err(format!("{what}: instruction {j} (step {k} of the shape) is {op:?}; from {start}: {}", window.join("; ")));
             }
             if marked {
                 let a = anchors.get(next).ok_or_else(|| format!("{what}: fewer anchors than the shape marks"))?;
