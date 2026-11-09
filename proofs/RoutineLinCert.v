@@ -25,12 +25,14 @@
              | 'W' N Z Z lin pf pf pf        LSto
              | 'h' N N                       LHandle h r
              | 'n' N N Z                     LLen n r s
+             | 'K' N N                       LCap n r
              | 'a' N N lin pf pf             LAlloc h r sz lo hi  (lo: 0 <= sz, hi: sz < 2^32)
              | 'f' N                         LWf r
              | 'g' N Z Z                     LStatic r b c
              | 's' N                         LSet x
              | 'r' N Z Z                     LSetR x lo hi
              | '=' N lin pf pf               LAsn x l lo hi
+             | 'U' N lin pf pf               LAsnU x l lo hi  (an i32 result)
              | 'T' ('+' | 'u') lin lin pf pf pf pf pf pf '{' lprog '|' lprog '}'
                                              LTest a b signed? (a-proofs) (b-proofs) (nonneg proofs) thn els
              | 'B' '{' lprog '|' lprog '}'   LBranch
@@ -178,6 +180,9 @@ Fixpoint lprog_at (fuel : nat) (cs : list ascii) : option (LProg * list ascii) :
           else if ch c "n"%char then
             let* (n, r1) := nat_at r in let* (rg, r2) := nat_at r1 in let* (s, r3) := z_at r2 in
             let* (k, r4) := lprog_at f r3 in Some (LLen n rg s k, r4)
+          else if ch c "K"%char then
+            let* (n, r1) := nat_at r in let* (rg, r2) := nat_at r1 in
+            let* (k, r3) := lprog_at f r2 in Some (LCap n rg k, r3)
           else if ch c "a"%char then
             let* (h, r1) := nat_at r in let* (rg, r2) := nat_at r1 in let* (sz, r3) := lin_at f r2 in
             let* (lo, r4) := pf_at f r3 in let* (hi, r5) := pf_at f r4 in
@@ -192,10 +197,11 @@ Fixpoint lprog_at (fuel : nat) (cs : list ascii) : option (LProg * list ascii) :
           else if ch c "r"%char then
             let* (x, r1) := nat_at r in let* (lo, r2) := z_at r1 in let* (hi, r3) := z_at r2 in
             let* (k, r4) := lprog_at f r3 in Some (LSetR x lo hi k, r4)
-          else if ch c "="%char then
+          else if ch c "="%char || ch c "U"%char then
             let* (x, r1) := nat_at r in let* (l, r2) := lin_at f r1 in
             let* (lo, r3) := pf_at f r2 in let* (hi, r4) := pf_at f r3 in
-            let* (k, r5) := lprog_at f r4 in Some (LAsn x l lo hi k, r5)
+            let* (k, r5) := lprog_at f r4 in
+            Some ((if ch c "="%char then LAsn x l lo hi k else LAsnU x l lo hi k), r5)
           else if ch c "T"%char then
             match sk r with
             | sg :: r0 =>
