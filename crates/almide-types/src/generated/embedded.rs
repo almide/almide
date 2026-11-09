@@ -6653,7 +6653,6 @@ pub const SRC_FLOAT_PARSE: &str = r#"
 
 
 
-
 fn __fp_isdigit(b: Int) -> Bool = b >= 48 and b <= 57
 
 
@@ -6772,27 +6771,25 @@ fn __hpd_cap(hb: Int) -> Unit = {
 
 
 
-fn __hpd_lshk_loop(hb: Int, r: Int, k: Int, carry: Int) -> Int = if r < 0 then carry
-else {
-  let v = prim.bshl(__hpd_d(hb, r), k) + carry
+fn __hpd_lshk_loop(hb: Int, r: Int, k: Int, carry: Int) -> Unit = if r >= 0 - 8 then {
+  let dv = if r >= 0 then __hpd_d(hb, r) else 0
+  let v = prim.bshl(dv, k) + carry
   __hpd_sd(hb, r + 8, v % 10)
   __hpd_lshk_loop(hb, r - 1, k, v / 10)
-}
-
-fn __hpd_lshk_head(hb: Int, w: Int, carry: Int) -> Unit = if w >= 0 then {
-  __hpd_sd(hb, w, carry % 10)
-  __hpd_lshk_head(hb, w - 1, carry / 10)
 } else ()
 
-fn __hpd_lshk(hb: Int, k: Int) -> Unit = {
+fn __hpd_lsh(hb: Int, k: Int) -> Unit = if k > 0 then {
+  let s = if k > 26 then 26 else k
   let n = __hpd_n(hb)
-  __hpd_lshk_head(hb, 7, __hpd_lshk_loop(hb, n - 1, k, 0))
+  __hpd_lshk_loop(hb, n - 1, s, 0)
   __hpd_sn(hb, n + 8)
   __hpd_sdp(hb, __hpd_dp(hb) + 8)
   __hpd_strip(hb)
   __hpd_cap(hb)
   __hpd_sn(hb, __hpd_trim(hb, __hpd_n(hb)))
-}
+  __hpd_lsh(hb, k - s)
+} else ()
+
 
 
 
@@ -6816,25 +6813,13 @@ fn __hpd_rshk_main(hb: Int, r: Int, acc: Int, w: Int, n: Int, k: Int) -> Int =
     __hpd_rshk_main(hb, r + 1, nx, (if w < 800 then w + 1 else w), n, k)
   } else w
 
-fn __hpd_rshk(hb: Int, k: Int) -> Unit = {
-  let n = __hpd_n(hb)
-  let r = __hpd_rshk_prime(hb, 0, 0, prim.bshl(1, k), n)
-  __hpd_sdp(hb, __hpd_dp(hb) - (r - 1))
-  let w = __hpd_rshk_main(hb, r, __hpd_ri(hb, 0, r, n, 0), 0, n, k)
-  __hpd_sn(hb, __hpd_trim(hb, w))
-  __hpd_strip(hb)
-}
-
 fn __hpd_rsh(hb: Int, k: Int) -> Unit = if k > 0 then {
   let s = if k > 59 then 59 else k
-  __hpd_rshk(hb, s)
+  let n = __hpd_n(hb)
+  let r = __hpd_rshk_prime(hb, 0, 0, prim.bshl(1, s), n)
+  __hpd_sdp(hb, __hpd_dp(hb) - (r - 1))
+  __hpd_sn(hb, __hpd_trim(hb, __hpd_rshk_main(hb, r, __hpd_ri(hb, 0, r, n, 0), 0, n, s)))
   __hpd_rsh(hb, k - s)
-} else ()
-
-fn __hpd_lsh(hb: Int, k: Int) -> Unit = if k > 0 then {
-  let s = if k > 26 then 26 else k
-  __hpd_lshk(hb, s)
-  __hpd_lsh(hb, k - s)
 } else ()
 
 
@@ -6846,25 +6831,20 @@ fn __hpd_bits(i: Int) -> Int = if i > 17 then 59 else i * 33219 / 10000
 
 
 fn __hpd_to_half(hb: Int, e2: Int) -> Int = if __hpd_dp(hb) > 0 then {
-  let k = if __hpd_dp(hb) > 17 then 59 else __hpd_bits(__hpd_dp(hb)) + 1
+  let k = __hpd_bits(__hpd_dp(hb))
   __hpd_rsh(hb, k)
   __hpd_to_half(hb, e2 + k)
 } else e2
 
-fn __hpd_from_tenth(hb: Int, e2: Int) -> Int = if __hpd_dp(hb) < 0 then {
-  let k = __hpd_bits(0 - __hpd_dp(hb))
-  __hpd_lsh(hb, k)
-  __hpd_from_tenth(hb, e2 - k)
-} else e2
-
-
-
-fn __hpd_doublings(hb: Int) -> Int = {
-  let m3 = __hpd_ri(hb, 0, 3, __hpd_n(hb), 0)
-  if m3 >= 500 then 0
-  else if m3 >= 250 then 1
-  else if m3 >= 125 then 2 else 3
-}
+fn __hpd_from_half(hb: Int, e2: Int) -> Int =
+  if __hpd_dp(hb) < 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(
+    hb,
+    0,
+  ) < 5) then {
+    let k = if __hpd_dp(hb) < 0 then __hpd_bits(0 - __hpd_dp(hb)) else 1
+    __hpd_lsh(hb, k)
+    __hpd_from_half(hb, e2 - k)
+  } else e2
 
 
 fn __hpd_ri(hb: Int, i: Int, dp: Int, n: Int, acc: Int) -> Int = if i < dp then __hpd_ri(
@@ -6933,19 +6913,15 @@ fn __fp_exact(hb: Int, neg: Bool) -> Float = {
   else if __hpd_dp(hb) > 310 then (if neg then 0.0 - inf else inf)
   else {
 
-
-    let e0 = __hpd_from_tenth(hb, __hpd_to_half(hb, 0))
-    let t = __hpd_doublings(hb)
-    let e2 = e0 - t - 1
+    let eb = __hpd_from_half(hb, __hpd_to_half(hb, 0))
+    let e2 = eb - 1
 
     let e3 = if e2 < 0 - 1022 then 0 - 1022 else e2
-    let den = if e2 < 0 - 1022 then (0 - 1022) - e2 else 0
+    __hpd_rsh(hb, (if e2 < 0 - 1022 then (0 - 1022) - e2 else 0))
     if e3 > 1023 then (if neg then 0.0 - inf else inf)
     else {
 
-
-      let net = t + 53 - den
-      if net >= 0 then __hpd_lsh(hb, net) else __hpd_rsh(hb, 0 - net)
+      __hpd_lsh(hb, 53)
       let m0 = __hpd_ri(hb, 0, __hpd_dp(hb), __hpd_n(hb), 0)
       let m1 = if __hpd_round_up(hb) then m0 + 1 else m0
 
