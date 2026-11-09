@@ -94,7 +94,7 @@ pub(crate) fn emit_json_quote_helper(frags: JsonFrags, ctrl: Option<crate::work:
     for _ in 0..5 {
         i.end();
     }
-    i.local_get(p).i32_const(1).i32_add().local_set(run);
+    i.local_get(p).local_set(run);
     i.end();
     i.local_get(p).i32_const(1).i32_add().local_set(p);
     i.br(0);

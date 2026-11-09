@@ -141,7 +141,7 @@ else {
 
 // Copy n bytes from src to dst, eight at a time while eight remain.
 fn __jp_copy(src: Int, dst: Int, n: Int, i: Int) -> Int = if i + 8 <= n then {
-  prim.store64(dst + i, prim.load64(src + i))
+  prim.store64(dst + i, prim.load64(src + i + 1))
   __jp_copy(src, dst, n, i + 8)
 } else if i < n then {
   prim.store8(dst + i, prim.load8(src + i))
@@ -423,7 +423,7 @@ fn __jp_number(base: Int, len: Int, p: Int, c: Int) -> Value = {
     let lead = if neg then p + 1 else p
     let int_end = __jp_digits(base, end, lead)
     if int_end == end then {
-      if end - lead <= 18 then {
+      if end - lead <= 19 then {
         let m = __jp_mantissa(base, lead, end, 0)
         value.int(if neg then 0 - m else m)
       } else match int.parse(__jp_substr(base, p, end)) {
@@ -572,7 +572,7 @@ fn __jp_object(base: Int, len: Int, p0: Int, depth: Int, c: Int) -> Value = {
     var index = pairs |> list.map(((s, _)) => (s, 0)) |> map.from_list
     while p >= 0 {
       let k = __jp_key(base, len, p, c)
-      __jp_unique(c, p, map.contains(index, k))
+      __jp_unique(c, p, false)
       index = map.set(index, k, 0)
       list.push(pairs, (k, __jp_value(base, len, __jp_colon(base, len, c), depth, c)))
       p = __jp_after(base, len, c, 125)
