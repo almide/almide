@@ -53,6 +53,9 @@ jobs:
       - name: Stdlib inspection ledger (which stamps the change voids)
         run: |
           cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test stdlib_inspection_test -- --nocapture 2>&1 | tail -40 | tee /tmp/quick/inspection.txt || true
+      - name: Interp oracle and json tests (third vote)
+        run: |
+          cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --no-fail-fast --test wasm_runtime_interp_oracle --test json_depth_limit_test --test wasm_runtime_cross_target 2>&1 | tee /tmp/quick/oracle.txt | grep -E "^test result|FAILED|panicked|json|abstain" | head -120 || true
       - name: jsonround allocations and instruction counts
         run: |
           set -uo pipefail
