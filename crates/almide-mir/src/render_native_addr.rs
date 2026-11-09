@@ -40,6 +40,8 @@ mod scalar_slots;
 mod env_slots;
 #[path = "render_native_cell_slots.rs"]
 mod cell_slots;
+#[path = "render_native_list_literal.rs"]
+mod list_literal;
 pub(crate) use carrier::{carrier_values, is_carrier, CarrierSig};
 pub(crate) use slots::flag_exits;
 
