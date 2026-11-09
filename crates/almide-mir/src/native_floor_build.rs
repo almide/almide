@@ -56,7 +56,7 @@ impl RuntimeScan {
 }
 
 fn build_runtime_index() -> RuntimeIndex {
-    let RuntimeScan { mut items, seen, modules, types, impls, fns } = RuntimeScan::scan();
+    let RuntimeScan { mut items, mut seen, modules, mut types, mut impls, fns } = RuntimeScan::scan();
     items.retain(|n, _| seen.get(n) == Some(&1));
     take_modules(&mut items, &seen, modules);
     take_complementary_cfg_functions(&mut items, &seen);
@@ -71,6 +71,22 @@ fn build_runtime_index() -> RuntimeIndex {
     let mut prelude_counts = BTreeMap::new();
     for (kind, name, _, _) in &prelude_items {
         if *kind != ItemKind::Impl { *prelude_counts.entry(*name).or_insert(0usize) += 1; }
+    }
+    // Some value handles are defined by the generated prelude rather than a
+    // runtime module. Give those unique, unconditional types the same complete
+    // declaration + impl treatment as module-defined types. A native callback
+    // can require such a host handle even when its MIR uses a plain Vec.
+    let prelude_types: BTreeSet<_> = prelude_items.iter()
+        .filter(|(kind, name, _, gated)| *kind == ItemKind::Type && !gated
+            && !seen.contains_key(name) && prelude_counts.get(name) == Some(&1))
+        .map(|(_, name, _, _)| *name).collect();
+    for (kind, name, text, gated) in &prelude_items {
+        if *gated || !prelude_types.contains(name) { continue; }
+        match kind {
+            ItemKind::Type => { seen.insert(name, 1); types.push((name, text)); }
+            ItemKind::Impl => impls.push((name, text)),
+            _ => {}
+        }
     }
     for (kind, name, text, gated) in prelude_items {
         if kind == ItemKind::Fn && !gated && !seen.contains_key(name) && prelude_counts.get(name) == Some(&1) {

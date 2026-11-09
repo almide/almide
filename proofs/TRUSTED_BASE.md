@@ -471,7 +471,11 @@ effect-declared calls also reach FOREIGN_EFFECT (11), propagated to callers.
 These are the structural wasm leg's registry ids and the existing capability
 subset rule. Host code, declared purity, ABI conversions and Rust realization
 remain trusted; this does not prove a foreign library's memory safety.
-Unsupported mutable/nominal/closure/address adapters still refuse the v1
+Pure mutable foreign parameters use typed copies with the shared IR
+write-back transformation. Borrowed callbacks use native typed dispatch;
+their host signatures retain the program's value types, including shared
+strings and Bytes/Matrix handles. Neither proves properties of host code.
+Fallible mutable, nominal and foreign-address adapters still refuse the v1
 route. Target-priority tests use deliberately different fallback bodies so
 an inliner cannot silently substitute them for the selected foreign call.
 

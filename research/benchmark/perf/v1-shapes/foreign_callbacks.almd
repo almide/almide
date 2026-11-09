@@ -1,0 +1,41 @@
+// Native foreign callback ABI: the host lends a typed callback, and the
+// callback's owned result is copied into the native representation.
+// The portable bodies are the reference for the separate wasm comparison.
+@extern(rust, "std::option::Option::<i64>", "map")
+fn host_string(v: Int?, f: (Int) -> String) -> String? = match v {
+  some(n) => some(f(n)),
+  none => none,
+}
+
+@extern(rust, "std::option::Option::<i64>", "map")
+fn host_bytes(v: Int?, f: (Int) -> Bytes) -> Bytes? = match v {
+  some(n) => some(f(n)),
+  none => none,
+}
+
+@extern(rust, "std::option::Option::<i64>", "map")
+fn host_matrix(v: Int?, f: (Int) -> Matrix) -> Matrix? = match v {
+  some(n) => some(f(n)),
+  none => none,
+}
+
+@extern(rust, "std::option::Option::<i64>", "map")
+fn host_result(v: Int?, f: (Int) -> Result[Int, String]) -> Option[Result[Int, String]] = match v {
+  some(n) => some(f(n)),
+  none => none,
+}
+
+effect fn main() -> Unit = {
+  let suffix = "!"
+  println(host_string(some(4), (n) => int.to_string(n) + suffix) ?? "none")
+  println(host_string(none, (n) => int.to_string(n) + suffix) ?? "none")
+  let b = bytes.from_string("ABC")
+  let got = host_bytes(some(1), (_) => b) ?? bytes.new()
+  println(int.to_string(bytes.len(got)))
+  println(int.to_string(bytes.len(b)))
+  let m = host_matrix(some(2), (n) => matrix.zeros(n, 3)) ?? matrix.zeros(0, 0)
+  println(int.to_string(matrix.rows(m)))
+  let r: Result[Int, String] = host_result(some(5), (n) => ok(n + 2)) ?? err("none")
+  println(int.to_string(r ?? -1))
+  println(suffix)
+}

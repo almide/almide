@@ -12,14 +12,14 @@ fn callback(value: &str, params: &[Ty], ret: &Ty, effect: bool, kind: NTy) -> Re
     let mut host_params = Vec::new();
     for (j, (ty, kind)) in params.iter().zip(kinds).enumerate() {
         host_params.push(format!("__host_p{j}: {}", host_type(ty)?));
-        let native = convert(&format!("&__host_p{j}"), ty, kind, false, 0)?;
+        let native = convert_value(&format!("&__host_p{j}"), ty, kind, false, 0, true)?;
         write!(bindings, "let __native_p{j}: {} = {native}; ", crate::render_native_rec::owned_ty(kind)).unwrap();
-        let borrowed = !matches!(kind, NTy::I64 | NTy::F64 | NTy::F32);
+        let borrowed = matches!(kind, NTy::Str | NTy::StrRef | NTy::Vec | NTy::VecRef | NTy::VecStr | NTy::VecStrRef | NTy::Rec(_) | NTy::RecRef(_));
         args.push(format!("{}__native_p{j}", if borrowed { "&" } else { "" }));
     }
     let call = format!("__almd_ci_{key}(__foreign_index, __foreign_env{})", args.iter().map(|a| format!(", {a}")).collect::<String>());
     let body = match result {
-        Some(k) => format!("let __native_result = {call}; {}", convert("&__native_result", &ret_ty, k, true, 0)?),
+        Some(k) => format!("let __native_result = {call}; {}", convert_value("&__native_result", &ret_ty, k, true, 0, true)?),
         None if ret_ty == Ty::Unit => format!("{call}; ()"),
         _ => return Err(wall("native: foreign callback return differs from its checked signature")),
     };
@@ -29,8 +29,8 @@ fn callback(value: &str, params: &[Ty], ret: &Ty, effect: bool, kind: NTy) -> Re
 fn host_type(ty: &Ty) -> Result<String, LowerError> {
     if let Some(s) = scalar_host_type(ty) { return Ok(s.into()); }
     Ok(match ty {
-        Ty::Unit => "()".into(), Ty::String => "String".into(), Ty::Bytes => "Vec<u8>".into(),
-        t if crate::render_native_rec::is_matrix_ty(t) => "AlmideMatrix".into(),
+        Ty::Unit => "()".into(), Ty::String => "AlmideString".into(), Ty::Bytes => "AlmideRcCow<Vec<u8>>".into(),
+        t if crate::render_native_rec::is_matrix_ty(t) => "AlmideRcCow<AlmideMatrix>".into(),
         Ty::Applied(c, a) => {
             let name = match c {
                 C::List => "Vec", C::Option => "Option", C::Result => "Result",

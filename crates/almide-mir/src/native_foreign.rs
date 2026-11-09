@@ -218,6 +218,27 @@ pub(crate) fn render(
 include!("native_foreign_values.rs");
 include!("native_foreign_callback.rs");
 
+/// A foreign callback can mention a runtime value handle that the native
+/// body's own representation does not use (Bytes is a Vec there). Carry
+/// the actual host signature's type dependencies through the shared index.
+pub(crate) fn runtime_items() -> Result<Vec<&'static str>, LowerError> {
+    let types = DECLS.with(|d| {
+        let mut types = String::new();
+        for decl in d.borrow().values() {
+            for p in &decl.host.params {
+                if let Ty::Fn { params, ret, .. } = &p.ty {
+                    for t in params.iter().chain(std::iter::once(ret.as_ref())) {
+                        types.push_str(&host_type(t)?);
+                        types.push('\n');
+                    }
+                }
+            }
+        }
+        Ok::<_, LowerError>(types)
+    })?;
+    crate::native_floor::runtime_items_named_by(&types).map_err(wall)
+}
+
 #[cfg(test)]
 #[path = "native_foreign_tests.rs"]
 mod tests;

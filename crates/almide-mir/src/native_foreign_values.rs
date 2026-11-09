@@ -1,6 +1,13 @@
 // A borrowed native/host value copied to the other side of the declared ABI.
 // Native scalar slots can hold float bits; the value kind fixes the distinction.
 fn convert(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: usize) -> Result<String, LowerError> {
+    convert_value(e, ty, kind, to_host, depth, false)
+}
+
+// Callback signatures retain Almide's value types (including shared strings
+// and Bytes/Matrix handles); only a direct foreign value boundary translates
+// structural strings into std::String.
+fn convert_value(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: usize, host_uses_almide_types: bool) -> Result<String, LowerError> {
     let kind = owned_nty(kind);
     if let Some(host) = scalar_host_type(ty) {
         return Ok(match (ty, kind, to_host) {
@@ -18,13 +25,15 @@ fn convert(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: usize) -> Result<S
         });
     }
     let x = format!("__foreign_x{depth}");
-    let nested = |e: &str, t: &Ty, k| convert(e, t, k, to_host, depth + 1);
+    let nested = |e: &str, t: &Ty, k| convert_value(e, t, k, to_host, depth + 1, host_uses_almide_types);
     match ty {
         Ty::Unit if kind == NTy::I64 => Ok(if to_host { "()" } else { "0i64" }.into()),
-        Ty::String if kind == NTy::Str => Ok(if to_host {
+        Ty::String if kind == NTy::Str => Ok(if to_host && !host_uses_almide_types {
             format!("({e}).to_string()")
         } else { format!("AlmideString::from(({e}).as_str())") }),
-        Ty::Bytes if crate::render_native_rec::is_bytes(kind) => Ok(format!("({e}).to_vec()")),
+        Ty::Bytes if crate::render_native_rec::is_bytes(kind) => Ok(if to_host && host_uses_almide_types {
+            format!("AlmideRcCow::from(({e}).to_vec())")
+        } else { format!("({e}).to_vec()") }),
         Ty::Applied(C::List, a) if a.len() == 1 => {
             let k = match kind {
                 NTy::Vec => Some(NTy::I64), NTy::VecStr => Some(NTy::Str),
@@ -49,7 +58,12 @@ fn convert(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: usize) -> Result<S
                 nested(&x, &a[0], k)?, nested(&y, &a[1], v)?))
         }
         t if crate::render_native_rec::is_matrix_ty(t) && crate::render_native_rec::is_matrix(kind) => {
-            Ok(format!("(*({e})).clone()"))
+            Ok(if !to_host {
+                // The ABI accepts either a raw Matrix or its value handle.
+                format!("{{ let __foreign_matrix: &AlmideMatrix = {e}; __foreign_matrix.clone() }}")
+            } else if host_uses_almide_types {
+                format!("AlmideRcCow::from((*({e})).clone())")
+            } else { format!("(*({e})).clone()") })
         }
         Ty::Applied(C::Option, a) if a.len() == 1 => {
             let k = match kind { NTy::Opt => Some(NTy::I64), NTy::Rec(i) => crate::render_native_rec::option_payload(i), _ => None }

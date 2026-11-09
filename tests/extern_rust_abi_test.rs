@@ -319,6 +319,48 @@ fn native_v1_foreign_value_adapters_execute_the_documented_rust_abi() {
     }
 }
 
+/// A callback uses the program's value types, rather than the structural
+/// std::String conversion used by a direct foreign argument. Exercise both
+/// carrier values passed by value and heap values lent to native dispatch.
+#[test]
+fn native_v1_foreign_callbacks_preserve_value_types() {
+    let rows = [
+        Row { id: "cb_string", almide_params: "f: (String) -> String", almide_ret: "String",
+            host_params: "f: &dyn Fn(AlmideString) -> AlmideString", host_ret: "String",
+            host_body: "format!(\"{}:{}\", f(AlmideString::from(\"a\")), f(AlmideString::from(\"b\")))",
+            call: "let suffix = \"!\"\n  println(f_cb_string((s) => s + suffix))\n  println(suffix)", expected: "a!:b!\n!" },
+        Row { id: "cb_option", almide_params: "f: (Int?) -> Int?", almide_ret: "Int",
+            host_params: "f: &dyn Fn(Option<i64>) -> Option<i64>", host_ret: "i64",
+            host_body: "f(Some(5)).unwrap() + f(None).unwrap_or(7)",
+            call: "println(int.to_string(f_cb_option((x) => x)))", expected: "12" },
+        Row { id: "cb_result", almide_params: "f: (Result[Int, String]) -> Result[Int, String]", almide_ret: "Int",
+            host_params: "f: &dyn Fn(Result<i64, AlmideString>) -> Result<i64, AlmideString>", host_ret: "i64",
+            host_body: "f(Ok(5)).unwrap() + f(Err(AlmideString::from(\"bad\"))).unwrap_err().len() as i64",
+            call: "println(int.to_string(f_cb_result((x) => x)))", expected: "8" },
+        Row { id: "cb_list", almide_params: "f: (List[String]) -> List[String]", almide_ret: "Int",
+            host_params: "f: &dyn Fn(Vec<AlmideString>) -> Vec<AlmideString>", host_ret: "i64",
+            host_body: "f(vec![AlmideString::from(\"abc\")]).iter().map(|s| s.len() as i64).sum()",
+            call: "println(int.to_string(f_cb_list((x) => x)))", expected: "3" },
+        Row { id: "cb_bytes", almide_params: "f: (Bytes) -> Bytes", almide_ret: "Int",
+            host_params: "f: &dyn Fn(AlmideRcCow<Vec<u8>>) -> AlmideRcCow<Vec<u8>>", host_ret: "i64",
+            host_body: "f(vec![2u8, 3u8].into()).iter().map(|b| *b as i64).sum()",
+            call: "println(int.to_string(f_cb_bytes((x) => x)))", expected: "5" },
+        Row { id: "cb_matrix", almide_params: "f: (Matrix) -> Matrix", almide_ret: "Int",
+            host_params: "f: &dyn Fn(AlmideRcCow<AlmideMatrix>) -> AlmideRcCow<AlmideMatrix>", host_ret: "i64",
+            host_body: "f(AlmideMatrix { rows: 2, cols: 1, data: vec![0.0; 2] }.into()).rows as i64",
+            call: "println(int.to_string(f_cb_matrix((x) => x)))", expected: "2" },
+    ];
+    let mut failures = Vec::new();
+    for row in &rows {
+        let (almd, host) = rust_program(std::slice::from_ref(row), "rust");
+        let (ok, stdout, stderr) = run_package(row.id, &almd, &host, &["run"]);
+        if !ok || stdout != format!("{}\n", row.expected) || !stderr.contains("native: v1 trust-spine render") {
+            failures.push(format!("{}: success={ok}, stdout={stdout:?}\n{stderr}", row.id));
+        }
+    }
+    assert!(failures.is_empty(), "{} callback ABI rows failed:\n{}", failures.len(), failures.join("\n"));
+}
+
 /// `rs` is the older spelling of `rust`: the same wrapper, the same ABI.
 #[test]
 fn every_rust_row_runs_under_the_rs_spelling_too() {

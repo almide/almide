@@ -404,6 +404,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     // definitions, whether or not a body operates on them (#4514).
     let aliased = crate::native_floor::runtime_items_named_by(&crate::render_native_rec::alias_targets()).map_err(wall)?;
     used_shims.extend(aliased);
+    used_shims.extend(crate::native_foreign::runtime_items()?);
     let fs_scope = crate::native_fs_scope::plan(&used_shims, &bodies);
     if let Some(scope) = &fs_scope {
         let support = crate::native_floor::scoped_fs_runtime_items(&scope.prelude, &used_shims, fan_rendered()).map_err(wall)?;
