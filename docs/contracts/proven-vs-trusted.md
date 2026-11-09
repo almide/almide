@@ -58,7 +58,15 @@ semantic-mutation nets over the emitter, per-fixture allocation and size
 ledgers, a refusal ratchet (a shape it refuses must stay refused — silently
 emitting it again is the #1688 regression class), and
 `proofs/check-structural-bytes.sh`, which grounds the structural runtime's
-bytes against the Coq decoder model `StructuralDecode.v`.
+bytes against the Coq decoder model `StructuralDecode.v` — since ADR-0033
+also the family-module `$inc` / `$dec_flat`, whose retarget to the family
+root is proven to credit the root (`StructuralRuntime.inc_family_interior`,
+`dec_family_interior`) and whose credited traces are TEMPORAL
+(`FamilyRc.family_rc_gives_temporal`). The other release routines' forward to
+the family `$dec_flat`, and every copy-on-write judge's unsigned compare of an
+interior rc word, are not transcribed: they stay with the runtime helpers'
+bodies on the trusted side, pinned by the rc-word inventory test
+(`crates/almide-wasm/tests/rc_word_inventory.rs`).
 
 ## Where the boundary runs (the MIR certificate pipeline)
 
