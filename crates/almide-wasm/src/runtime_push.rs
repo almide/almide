@@ -2,6 +2,7 @@
 //! runtime.rs for the file budget when they gained their RC signatures
 //! (#4278 B1, helper_sig.rs).
 
+const _UNCLASSIFIED_RC_SITE: u32 = almide_layout::RC.offset;
 use wasm_encoder::{BlockType, Function, MemArg, ValType};
 
 use crate::helper_sig::{HelperSig, Mode};
