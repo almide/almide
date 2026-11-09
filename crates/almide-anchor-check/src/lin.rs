@@ -838,7 +838,7 @@ impl<'m, 'a> Tr<'m, 'a> {
         }
         let pos = f.checked_sub(self.m.imports).map(|p| p as usize);
         if f == self.alloc {
-            let sz = match args.pop() {
+            let mut sz = match args.pop() {
                 Some(Av::I32(l, _)) => l,
                 Some(other) => match self.bind(out, other, ValType::I32) {
                     Av::I32(l, _) => l,
@@ -846,6 +846,14 @@ impl<'m, 'a> Tr<'m, 'a> {
                 },
                 None => return Err("alloc arity".into()),
             };
+            // A runtime routine's size: the i32 the allocator receives, bound
+            // to a slot of its own (`U`), so it is known in [0, 2^32) even
+            // when nothing proves the expression it came from is.
+            if self.routine && sz.as_const().is_none() {
+                let t = self.fresh(ValType::I32);
+                out.push(It::AsnU { x: t, l: sz });
+                sz = Lin::slot(t);
+            }
             let h = self.fresh(ValType::I32);
             let r = self.region();
             out.push(It::Alloc { h, r, sz });

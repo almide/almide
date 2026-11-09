@@ -21,6 +21,15 @@
 #   wrong slot holder, or a consuming routine that no longer consumes) while
 #   its recorded event stays: almide-verify still accepts the bundle, and
 #   almide-anchor-check's RC check must reject;
+#   routines (#4005 A4) — a check a runtime routine or a self-host body
+#   leans on, dropped from the emitter (or the stdlib body, in the throwaway
+#   worktree only). Its accesses are certified by the LINEAR certificates
+#   (almide-lin-prove, judged by the proven checker), not by a recorded
+#   event, so a lost check shows twice: the control's certificate held to
+#   the re-injected bytes is LIN REJECT (the bytes changed under it), and
+#   the prover over the re-injected bytes leaves the access uncovered — the
+#   <name>.routine label's covered count falls, which the heap-access ledger
+#   (proofs/lib/heap_ledger.py) fails on every wall run;
 #   anchors (#4011 (d)) — an instruction the bounds, init or fields witness names,
 #   changed while its recording call stays: the proven checkers still
 #   accept both witnesses (step 2 requires it), and almide-anchor-check,
@@ -57,7 +66,7 @@
 # anchors drill's subject: the event stays, the instruction changes, and the
 # byte-level check (#4011 (d)) is what rejects.
 #
-#   scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc> [name ...]   (default: every patch)
+#   scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc|routines> [name ...]   (default: every patch)
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -72,7 +81,8 @@ case "$PROP" in
   native-bounds) ISSUE=4006 ;;
   anchors) ISSUE=4011 ;;
   rc) ISSUE=4277 ;;
-  *) echo "usage: scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc> [name ...]" >&2; exit 2 ;;
+  routines) ISSUE=4005 ;;
+  *) echo "usage: scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc|routines> [name ...]" >&2; exit 2 ;;
 esac
 shift
 DIR="$ROOT/proofs/fixtures/$PROP-witness/reinject"
@@ -89,6 +99,8 @@ git -C "$ROOT" worktree add --detach -q "$wt" HEAD || exit 2
 
 if [ "$PROP" = native ] || [ "$PROP" = native-calls ] || [ "$PROP" = native-bounds ]; then
   build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-mir --example emit_native_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify); }
+elif [ "$PROP" = routines ]; then
+  build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-wasm --example emit_structural_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify -p almide-anchor-check && CARGO_TARGET_DIR="$TARGET" cargo build -q --release -p almide-lin-prove); }
 elif [ "$PROP" = anchors ] || [ "$PROP" = rc ]; then
   build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-wasm --example emit_structural_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify -p almide-anchor-check); }
 else
@@ -191,6 +203,64 @@ verdict() {
 
 build || { echo "FAIL: the unpatched tree does not build"; exit 2; }
 fail=0
+if [ "$PROP" = routines ]; then
+  # certify <name> <dir>: the reproduction built, both linear certificates
+  # proven, verified against the bytes and judged by almide-verify, and the
+  # census per function; prints the covered count of <name>.routine's label.
+  certify() {
+    local d="$2"
+    mkdir -p "$d"
+    "$TARGET/debug/examples/emit_structural_bundle" "$DIR/$1.almd" --anchors "$d/a.anchors" > "$d/a.bundle" 2> "$d/producer.err" || { echo producer-failed; return; }
+    "$TARGET/release/almide-lin-prove" "$d/a.anchors.wasm" "$d/a.anchors" > "$d/l.cert" 2> "$d/l.prove" || { echo lin-prove-failed; return; }
+    "$TARGET/release/almide-lin-prove" --routines "$d/a.anchors.wasm" "$d/a.anchors" "$d/r.sel" > "$d/r.cert" 2> "$d/r.prove" || { echo routine-prove-failed; return; }
+    "$TARGET/debug/almide-anchor-check" --lin-verify "$d/a.anchors.wasm" "$d/a.anchors" "$d/l.cert" > /dev/null 2>&1 || { echo lin-verify-failed; return; }
+    "$TARGET/debug/almide-anchor-check" --lin-verify-routines "$d/a.anchors.wasm" "$d/a.anchors" "$d/r.cert" "$d/r.sel" > /dev/null 2>&1 || { echo routine-verify-failed; return; }
+    for c in l r; do "$TARGET/debug/almide-verify" bounds "$d/$c.cert" > /dev/null 2>&1 || { echo "$c-cert-rejected"; return; }; done
+    "$TARGET/debug/almide-anchor-check" --census --census-fns --lin "$d/l.cert" --rlin "$d/r.cert" "$d/r.sel" "$d/a.anchors.wasm" "$d/a.bundle" "$d/a.anchors" > "$d/census" 2>&1 || { echo anchors-rejected; return; }
+    python3 -c '
+import re, sys
+want = open(sys.argv[2]).read().strip()
+n = 0
+for l in open(sys.argv[1]):
+    p = l.split()
+    if p and p[0] == "CENSUSFN" and re.sub(r"^__selfhost_\d+\.", "", p[4]) == want:
+        n += int(p[6])
+print(n)
+' "$d/census" "$DIR/$1.routine"
+  }
+  for name in "${names[@]}"; do
+    git -C "$wt" checkout -q -- .
+    build >/dev/null 2>&1
+    ctl=$(certify "$name" "$wt/ctl")
+    case "$ctl" in ''|*[!0-9]*) echo "FAIL $name: CONTROL — unpatched, the certificates do not verify ($ctl)"; fail=1; continue ;; esac
+    if [ "$ctl" -eq 0 ]; then echo "FAIL $name: CONTROL — unpatched, no access of $(cat "$DIR/$name.routine") is certified"; fail=1; continue; fi
+    if ! git -C "$wt" apply "$DIR/$name.patch"; then
+      echo "FAIL $name: the patch no longer applies — regenerate it from the current tree"; fail=1; continue
+    fi
+    if ! build; then echo "FAIL $name: the re-injected tree does not build"; fail=1; continue; fi
+    got=$(certify "$name" "$wt/bug")
+    case "$got" in ''|*[!0-9]*) echo "FAIL $name: re-injected, the certificates do not verify ($got) — the prover must leave the access counted, not emit a refused certificate"; fail=1; continue ;; esac
+    # The control's certificate, held to the re-injected bytes.
+    if [ -s "$wt/ctl/r.sel" ] && grep -q '[0-9] [0-9]' "$wt/ctl/r.sel"; then
+      "$TARGET/debug/almide-anchor-check" --lin-verify-routines "$wt/bug/a.anchors.wasm" "$wt/bug/a.anchors" "$wt/ctl/r.cert" "$wt/ctl/r.sel" > "$wt/held" 2>&1; held=$?
+    fi
+    if [ "${held:-0}" -ne 1 ]; then
+      "$TARGET/debug/almide-anchor-check" --lin-verify "$wt/bug/a.anchors.wasm" "$wt/bug/a.anchors" "$wt/ctl/l.cert" > "$wt/held" 2>&1; held=$?
+    fi
+    pinned="$DIR/$name.reject"
+    head -1 "$wt/held" | cut -c1-160 > "$wt/held1"
+    if [ "${REINJECT_UPDATE:-0}" = 1 ]; then cp "$wt/held1" "$pinned"; fi
+    if [ "$got" -lt "$ctl" ] && [ "$held" -eq 1 ] && cmp -s "$wt/held1" "$pinned"; then
+      echo "ok   $name: control covers $ctl access(es) of $(cat "$DIR/$name.routine"); re-injected, $got (the ledger rises by $((ctl - got))); the control's certificate on the new bytes: $(cat "$wt/held1")"
+    else
+      echo "FAIL $name: covered $ctl -> $got (want fewer), the control's certificate on the new bytes exits $held (want 1 and the pinned ${pinned#"$ROOT"/}): $(cat "$wt/held1")"
+      fail=1
+    fi
+    unset held
+  done
+  [ "$fail" -eq 0 ] && echo "routines-reinject: every lost check leaves its access uncovered and refuses the old certificate"
+  exit "$fail"
+fi
 for name in "${names[@]}"; do
   v=$(verdict "$name")
   cp "$wt/witness.w" "$wt/control.w" 2>/dev/null

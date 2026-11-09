@@ -148,6 +148,10 @@ fn prove(f: &[L], t: &L) -> Option<String> {
     if let Some(j) = f.iter().position(|g| g == t) {
         return Some(format!("({j}:1)1"));
     }
+    // A constant: the empty combination, whatever the budget.
+    if t.t.iter().all(|(_, a)| *a == 0) {
+        return (t.c <= 0).then(|| "()1".to_string());
+    }
     // One fact, scaled: λ·g = μ·t coefficientwise, λ·c_g >= μ·c_t.
     let tc = coefs(t);
     if let Some((v0, a0)) = tc.iter().next() {
