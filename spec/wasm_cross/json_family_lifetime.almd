@@ -1,0 +1,80 @@
+// @contract: C-087, C-400, C-401
+// A parsed document is one allocation family (ADR-0033 D1, D9): its strings,
+// lists and pairs live inside one block, and a sub-value handed out keeps the
+// whole document alive. Each case below takes a string, a list or an object
+// out of a document, drops the document, allocates more, and reads the
+// sub-value afterwards; or mutates what it took out, which must copy (the
+// interior block is shared) and leave the document as it was. Every leg
+// prints the same bytes.
+import json
+
+fn parse(text: String) -> Value = json.parse(text) ?? value.null()
+
+fn doc_text(i: Int) -> String = "{\"s\":\"str-${i}\",\"xs\":[${i},\"x${i}\",[${i}]],\"o\":{\"k\":${i},\"t\":\"t${i}\"}}"
+
+// The three sub-values of one document; the document itself is dropped on
+// the way out.
+fn take(i: Int) -> (String, List[Value], List[(String, Value)]) = {
+  let doc = parse(doc_text(i))
+  let s = value.as_string(value.get(doc, "s") ?? value.null()) ?? ""
+  let xs = value.as_array(value.get(doc, "xs") ?? value.null()) ?? []
+  let o = value.as_object(value.get(doc, "o") ?? value.null()) ?? []
+  (s, xs, o)
+}
+
+// Only the deepest piece survives its document.
+fn inner(i: Int) -> Value = {
+  let doc = parse(doc_text(i))
+  let xs = value.as_array(value.get(doc, "xs") ?? value.null()) ?? []
+  list.get(xs, 2) ?? value.null()
+}
+
+fn pairs_text(o: List[(String, Value)]) -> String = o |> list.map(((k, v)) => k + "=" + json.stringify(v)) |> list.join(",")
+
+effect fn main() -> Unit = {
+  // Sub-values outlive their documents, read after other documents and
+  // other allocations reused the memory around them.
+  let (s, xs, o) = take(1)
+  let noise = list.range(0, 50) |> list.map((i) => json.stringify(parse(doc_text(i + 100))))
+  println("${list.len(noise)} ${s} ${json.stringify(value.array(xs))} ${pairs_text(o)}")
+  let kept = list.range(0, 40) |> list.map((i) => inner(i))
+  println(kept |> list.map((v) => json.stringify(v)) |> list.join(""))
+  let strs = list.range(0, 40) |> list.map((i) => {
+    let (t, _, _) = take(i)
+    t
+  })
+  println(strs |> list.join(","))
+  // Mutating what was taken out copies it; the document is unchanged.
+  let doc = parse(doc_text(7))
+  var ys = value.as_array(value.get(doc, "xs") ?? value.null()) ?? []
+  list.push(ys, value.int(99))
+  ys = list.set(ys, 0, value.string("zero"))
+  var ps = value.as_object(value.get(doc, "o") ?? value.null()) ?? []
+  list.push(ps, ("added", value.bool(true)))
+  ps = list.set(ps, 0, ("k", value.null()))
+  let str = value.as_string(value.get(doc, "s") ?? value.null()) ?? ""
+  let up = string.to_upper(str)
+  let more = str + "-more"
+  println(json.stringify(value.array(ys)))
+  println(pairs_text(ps))
+  println("${up} ${more} ${str}")
+  println(json.stringify(doc))
+  // The same value read twice, shared into a new document, and the old
+  // document dropped first.
+  let built = {
+    let d = parse("[{\"a\":[1,2]},\"b\"]")
+    let first = list.get(value.as_array(d) ?? [], 0) ?? value.null()
+    value.object([("x", first), ("y", first), ("z", value.get(first, "a") ?? value.null())])
+  }
+  println(json.stringify(built))
+  // A document parsed, its top level rebuilt from the parts, many times
+  // over: every family is released when its last part goes.
+  var total = 0
+  for i in list.range(0, 300) {
+    let d = parse(doc_text(i))
+    let parts = value.as_object(d) ?? []
+    let rebuilt = value.object(parts |> list.map(((k, v)) => (k + "!", v)))
+    total = total + string.len(json.stringify(rebuilt))
+  }
+  println("total ${total}")
+}
