@@ -1,0 +1,35 @@
+name: probe-filebisect (throwaway)
+on:
+  push:
+    branches: ['probe/blockers-1109-filebisect']
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "1"
+jobs:
+  fb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { commit: 45af5fc5a, part: "00", targets: "spec/wasm_cross/never_fn_value_positions.almd spec/wasm_host_js/region_export_push.almd" }
+          - { commit: 45af5fc5a, part: "01", targets: "spec/wasm_cross/never_fn_value_positions.almd spec/wasm_host_js/region_export_push.almd" }
+          - { commit: 45af5fc5a, part: "02", targets: "spec/wasm_cross/never_fn_value_positions.almd spec/wasm_host_js/region_export_push.almd" }
+          - { commit: 45af5fc5a, part: "03", targets: "spec/wasm_cross/never_fn_value_positions.almd spec/wasm_host_js/region_export_push.almd" }
+          - { commit: a71e577ae, part: "00", targets: "spec/lang/generic_type_alias_test.almd spec/wasm_cross/option_result_ctors.almd" }
+          - { commit: a71e577ae, part: "01", targets: "spec/lang/generic_type_alias_test.almd spec/wasm_cross/option_result_ctors.almd" }
+          - { commit: a71e577ae, part: "02", targets: "spec/lang/generic_type_alias_test.almd spec/wasm_cross/option_result_ctors.almd" }
+          - { commit: a71e577ae, part: "03", targets: "spec/lang/generic_type_alias_test.almd spec/wasm_cross/option_result_ctors.almd" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: cp -r .github/fb /tmp/fb
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - name: bisect by file
+        run: bash /tmp/fb/run.sh ${{ matrix.commit }} /tmp/fb/${{ matrix.commit }}-${{ matrix.part }} ${{ matrix.targets }} | tee /tmp/fb.txt; cat /tmp/fb.txt >> "$GITHUB_STEP_SUMMARY"
