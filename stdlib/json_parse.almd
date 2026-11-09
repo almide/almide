@@ -438,7 +438,7 @@ fn __jp_tok(t: String, p: Int) -> Int = {
     var q = p
     var r = n * 512
     while q < n {
-      let c = prim.load8(prim.handle(t) + 12 + q)
+      let c = if q < 0 then 0 else prim.load8(prim.handle(t) + 12 + q)
       if c == 32 or c == 9 or c == 10 or c == 13 then {
         q = q + 1
       } else {
@@ -469,7 +469,7 @@ fn __jp_strend(t: String, q: Int) -> Int = {
     var at = n
     var stop = 0 - 1
     while e < n {
-      let c = prim.load8(prim.handle(t) + 12 + e)
+      let c = if e < 0 then 0 else prim.load8(prim.handle(t) + 12 + e)
       if c == 34 or c == 92 or c < 32 or c >= 239 then {
         stop = c
         at = e
@@ -497,7 +497,7 @@ fn __jp_int_fast(t: String, q: Int) -> Int = {
       var e = lead
       var at = n
       while e < n {
-        let c = prim.load8(prim.handle(t) + 12 + e)
+        let c = if e < 0 then 0 else prim.load8(prim.handle(t) + 12 + e)
         if c < 48 then {
           at = e
           e = n
@@ -531,10 +531,9 @@ fn __jp_lit(t: String, q: Int, b: Int) -> Int = {
   if q < 0 then __jp_code(q, kind)
   else if q > n - w then __jp_code(q, kind)
   else {
-    let h = prim.handle(t) + 12 + q
-    let ok4 = if b == 116 then prim.load8(h) == 116 and prim.load8(h + 1) == 114 and prim.load8(h + 2) == 117 and prim.load8(h + 3) == 101
-    else if b == 110 then prim.load8(h) == 110 and prim.load8(h + 1) == 117 and prim.load8(h + 2) == 108 and prim.load8(h + 3) == 108
-    else prim.load8(h) == 102 and prim.load8(h + 1) == 97 and prim.load8(h + 2) == 108 and prim.load8(h + 3) == 115 and prim.load8(h + 4) == 101
+    let ok4 = if b == 116 then prim.load8(prim.handle(t) + 12 + q) == 116 and prim.load8(prim.handle(t) + 13 + q) == 114 and prim.load8(prim.handle(t) + 14 + q) == 117 and prim.load8(prim.handle(t) + 15 + q) == 101
+    else if b == 110 then prim.load8(prim.handle(t) + 12 + q) == 110 and prim.load8(prim.handle(t) + 13 + q) == 117 and prim.load8(prim.handle(t) + 14 + q) == 108 and prim.load8(prim.handle(t) + 15 + q) == 108
+    else prim.load8(prim.handle(t) + 12 + q) == 102 and prim.load8(prim.handle(t) + 13 + q) == 97 and prim.load8(prim.handle(t) + 14 + q) == 108 and prim.load8(prim.handle(t) + 15 + q) == 115 and prim.load8(prim.handle(t) + 16 + q) == 101
     if ok4 then q + w else __jp_code(q, kind)
   }
 }
