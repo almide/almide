@@ -856,13 +856,13 @@ Proof. repeat split; reflexivity. Qed.
      fsited_init    the INITIALIZATION clause for traces whose allocations
                     are sites OR families (sited_init, extended).
 
-   HONEST SCOPE. This is the proof side. A carve is held to the same
-   recorded-events trust as a site: that the witness's carve records are the
-   stores the bytes contain is the anchor check's job, and the emitter does
-   not record carves yet (crates/almide-wasm/src/witness_init.rs records
-   list literals and ranges). Until it does, the parse's carve stores sit
-   where every other `prim.alloc_*` site sits today (the INIT gap-table row):
-   uncertified, not newly trusted. The TYPE clause is per BLOCK in
+   HONEST SCOPE. A carve is held to the same recorded-events trust as a
+   site: that the witness's carve records are the stores the bytes contain
+   is the anchor check's job (crates/almide-anchor-check/src/carve.rs); the
+   emitter records every carve (crates/almide-wasm/src/carve.rs, the `k` /
+   `c` / `e` records parsed below as EFamily / ECarve / ECarveFill / ESeal),
+   and the run-time side — each carve's room test, the cursor, the seal — is
+   the section at the end of this file. The TYPE clause is per BLOCK in
    MemorySafe.v, so a member's own representation is not expressible on the
    credited trace (its stores are typed as the root's k); that a member is
    read as the type it was carved as stays with the layout trust row. *)
