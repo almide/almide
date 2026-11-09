@@ -1,0 +1,15 @@
+--- a/crates/almide-wasm/src/family.rs
++++ b/crates/almide-wasm/src/family.rs
+@@ -81,11 +81,7 @@
+     if !armed() {
+         return;
+     }
+-    i.local_get(block).i32_load(rc_word()).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+-    i.local_get(block);
+-    i.local_get(block).i32_load(rc_word()).i32_const(DISTANCE_MASK).i32_and();
+-    i.i32_sub().local_set(block);
+-    i.end();
++    let _ = (i, block); // re-injected: the retarget is dropped; an interior word is counted on its own
+ }
+ 
+ /// Every other dec routine's forward (armed only): an INTERIOR block is

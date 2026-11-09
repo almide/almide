@@ -1,0 +1,25 @@
+// jsonround: 50,000 records -> stringify -> parse -> sum meta.score; prints sum and byte length.
+import json
+
+let n = 50000
+
+fn record(i: Int) -> Value = value.object([
+  ("id", value.int(i)),
+  ("name", value.string("user_${i}")),
+  ("tags", value.array([value.string("t${i % 7}"), value.string("t${i % 11}")])),
+  ("meta", value.object([
+    ("score", value.int((i * 37) % 1000)),
+    ("active", value.bool(i % 2 == 0)),
+  ])),
+])
+
+fn score(r: Value) -> Int =
+  value.get_int(value.get(r, "meta") ?? value.null(), "score") ?? 0
+
+fn main() -> Unit = {
+  let doc = value.array(list.range(0, n) |> list.map(record))
+  let text = json.stringify(doc)
+  let back = json.parse(text) ?? value.null()
+  let sum = (value.as_array(back) ?? []) |> list.map(score) |> list.sum
+  println("${sum} ${string.len(text)}")
+}
