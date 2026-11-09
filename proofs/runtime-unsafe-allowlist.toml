@@ -29,7 +29,7 @@
 path = "runtime/rs/src/list.rs"
 count = 6
 class = "fan-sync"
-reason = "the fan gate: a lifetime-erasing transmute of the take closure, one `unsafe impl Sync` (AlmideFanGate), raw parent pointers, the take-cell read and the slot reads (almide_fan_deal .. almide_fan_steal). kept: std::thread::scope in its place (no unsafe) measured 1.13-1.32x the pool's wall time on offers of fine and medium elements and 0.95-1.00x on coarse ones (mandelbrot, binarytrees, fanblock), Apple M-series 14 cores, 2026-10-24 (#4007). Checked under Miri with four CPUs and helpers on by scripts/miri-fan-gate.sh (miri-nightly.yml miri-fan), whose control drops the caller's wait and must come back UB"
+reason = "the fan gate: a lifetime-erasing transmute of the take closure, one `unsafe impl Sync` (AlmideFanGate), raw parent pointers, the take-cell read, the helper's deref of the gate it entered (a raw pointer, never a reference parameter: a protected borrow outlived the caller's free, #4452) and the slot reads (almide_fan_deal .. almide_fan_steal). kept: std::thread::scope in its place (no unsafe) measured 1.13-1.32x the pool's wall time on offers of fine and medium elements and 0.95-1.00x on coarse ones (mandelbrot, binarytrees, fanblock), Apple M-series 14 cores, 2026-10-24 (#4007). Checked under Miri with four CPUs and helpers on by scripts/miri-fan-gate.sh (miri-nightly.yml miri-fan), whose control drops the caller's wait and must come back UB"
 
 [[file]]
 path = "runtime/rs/src/ffi.rs"
