@@ -32,39 +32,16 @@ fn emit_nonfinite_test(i: &mut wasm_encoder::InstructionSink, v: u32, m_pay: was
 /// `$vrepr_quote` (`ctrl` = None): the same walker without the control
 /// branch — the nested-String repr (`almide_repr_str`), which keeps the
 /// other control bytes raw on every leg.
-///
-/// The bytes between two rewritten ones are one run, copied by one
-/// `$append_copy` when the next rewritten byte (or the end) is reached
-/// (#4613) — the native escape_into's slice copy. A string with nothing to
-/// rewrite is one copy between its quotes; the walk used to store every
-/// byte on its own after five failed escape tests and a room check.
 pub(crate) fn emit_json_quote_helper(frags: JsonFrags, ctrl: Option<crate::work::CtrlFrags>) -> Function {
-    let (cursor, sb, p, end, b, run) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
-    let mut f = Function::new([(4, ValType::I32)]);
+    let (cursor, sb, p, end, b) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let mut f = Function::new([(3, ValType::I32)]);
     let mut i = f.instructions();
     frag(&mut i, cursor, frags.quote, 1);
-    i.local_get(sb).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_tee(p).local_set(run);
+    i.local_get(sb).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
     i.local_get(p).local_get(sb).i32_load(len_memarg()).i32_add().local_set(end);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(p).local_get(end).i32_ge_u().br_if(1);
     i.local_get(p).i32_load8_u(raw8()).local_set(b);
-    // Is `b` a byte the rule rewrites? `"` and `\`, and every byte < 0x20
-    // (JSON) or the three short-escaped controls (repr).
-    i.local_get(b).i32_const(34).i32_eq();
-    i.local_get(b).i32_const(92).i32_eq().i32_or();
-    match ctrl {
-        Some(_) => {
-            i.local_get(b).i32_const(0x20).i32_lt_u().i32_or();
-        }
-        None => {
-            for byte in [10, 13, 9] {
-                i.local_get(b).i32_const(byte).i32_eq().i32_or();
-            }
-        }
-    }
-    i.if_(BlockType::Empty);
-    // the run before it, in one copy
-    i.local_get(cursor).local_get(run).local_get(p).local_get(run).i32_sub().call(F_APPEND_COPY).local_set(cursor);
     for (byte, fr) in [
         (92, frags.esc_backslash),
         (34, frags.esc_quote),
@@ -79,6 +56,7 @@ pub(crate) fn emit_json_quote_helper(frags: JsonFrags, ctrl: Option<crate::work:
     // any other control byte (JSON only): "\u00" + two lowercase hex digits,
     // each one byte copied out of the pooled "0123456789abcdef" at its nibble.
     if let Some(ctrl) = ctrl {
+        i.local_get(b).i32_const(0x20).i32_lt_u().if_(BlockType::Empty);
         frag(&mut i, cursor, ctrl.esc_u00, 4);
         for shift_or_mask in [None, Some(15)] {
             i.local_get(cursor)
@@ -90,18 +68,22 @@ pub(crate) fn emit_json_quote_helper(frags: JsonFrags, ctrl: Option<crate::work:
             };
             i.i32_add().i32_const(1).call(F_APPEND_COPY).local_set(cursor);
         }
+        i.else_();
     }
-    for _ in 0..5 {
+    // plain byte — a direct store at the PHYSICAL cursor, the room grown
+    // first when the byte would leave it (#1826; the guard used to trap).
+    i.local_get(cursor).global_get(G_LINE_ROOM).i32_ge_u().if_(BlockType::Empty);
+    i.local_get(cursor).i32_const(1).call(F_LINE_GROW);
+    i.end();
+    i.local_get(cursor).global_get(G_LINE_DELTA).i32_add().local_get(b).i32_store8(raw8());
+    i.local_get(cursor).i32_const(1).i32_add().local_set(cursor);
+    for _ in 0..(5 + usize::from(ctrl.is_some())) {
         i.end();
     }
-    i.local_get(p).i32_const(1).i32_add().local_set(run);
-    i.end();
     i.local_get(p).i32_const(1).i32_add().local_set(p);
     i.br(0);
     i.end();
     i.end();
-    // the run after the last rewritten byte
-    i.local_get(cursor).local_get(run).local_get(end).local_get(run).i32_sub().call(F_APPEND_COPY).local_set(cursor);
     frag(&mut i, cursor, frags.quote, 1);
     i.local_get(cursor);
     i.end();
