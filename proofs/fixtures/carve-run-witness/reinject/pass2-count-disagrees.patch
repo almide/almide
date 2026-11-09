@@ -1,0 +1,13 @@
+diff --git a/stdlib/json_parse.almd b/stdlib/json_parse.almd
+index 996770fcc..b3c60a954 100644
+--- a/stdlib/json_parse.almd
++++ b/stdlib/json_parse.almd
+@@ -100,7 +100,7 @@ fn json_parse(text: String) -> Result[Value, String] = {
+     let total = prim.load64(s)
+     if total < 0 then prim.die(prim.handle("Error: json parse: the passes disagree\n")) else ()
+     if total > 2147483647 then prim.die(prim.handle("Error: json parse: the document is too large\n")) else ()
+-    let fam = prim.family(total)
++    let fam = prim.family(total - 28)
+     prim.store64(s + 8, 32)
+     let _e = __jp_v2(text, tl, 0, fam, sc)
+     // The passes must agree: every byte carved, one handle left.
