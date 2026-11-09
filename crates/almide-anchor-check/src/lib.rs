@@ -268,6 +268,18 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         let sigs = helper_sigs(bundle, function_imports(wasm), &frames, &helpers)?;
         check_rc(&bodies, function_imports(wasm), RcFns { inc, releases: &decs, sigs: &sigs, judges: &judges, alloc: Some(alloc) }, &frames, &[arms, routines], &mut r)?;
         rep.rc = Some(r);
+        // #4631 (b1-inc): each named frame's ownership witness claims a count
+        // of rc_inc letters its recorded (and so its shipped) calls allow.
+        let b = rc_bounds::check_rc_bounds(bundle, anchors)?;
+        if let Some((f, _, w, rc)) = b.refused.first() {
+            return Err(format!(
+                "rc bounds: frame `{f}`: the ownership witness claims {}..{} rc_inc(s), its recorded calls {}..{}",
+                w.min,
+                w.max.map_or("any".into(), |m| m.to_string()),
+                rc.min,
+                rc.max.map_or("any".into(), |m| m.to_string())
+            ));
+        }
     }
     Ok(rep)
 }

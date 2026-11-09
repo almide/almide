@@ -1,26 +1,29 @@
-//! #4631 (b1'): the ownership witness's RC-call letters held to the frame's
-//! recorded RC events, per kind, by count bounds.
+//! #4631 (b1-inc): the ownership witness's rc_inc letters held to the
+//! frame's recorded RC calls by count bounds.
 //!
 //! The ownership witness the checkers judge is the recorder's RENDERING of
 //! its event log: one line per object (and per loop activation), each a set
 //! of path classes `{p|q}`. The bytes are tied to a different record, the
 //! anchor file's `rc` line (rc.rs matches each event to a shipped call).
-//! This check ties the two by counting, per frame and per kind:
-//!
-//! - `inc`: the witness's `a` / `s` against the rc line's `a` / `s`;
-//! - `rel`: the witness's `d` against the rc line's `d` / `o` / `r`.
+//! This check ties the two for the rc_inc family: the witness's `a` / `s`
+//! letters against the rc line's `a` / `s` events.
 //!
 //! Over every path a frame can take, the witness claims (summing each
-//! object's lines) between `w.min` and `w.max` calls of a kind, and the rc
-//! line's events (choosing an arm at every recorded site) between `r.min`
-//! and `r.max`. A real path's count lies in both, so the intervals must
-//! meet: a witness whose count cannot be any count the recorded events
-//! allow — an added release, a dropped one in a frame with one path — is
-//! refused. A witness line with a loop item claims no upper bound.
+//! object's lines) between `w.min` and `w.max` rc_incs, and the rc line's
+//! events (choosing an arm at every recorded site) between `r.min` and
+//! `r.max`. A real path's count lies in both, so the intervals must meet:
+//! a witness claiming an rc_inc the shipped calls do not hold (the
+//! use-after-free direction: the checker would believe a count the bytes
+//! never take), or dropping one in a frame with one path, is refused. A
+//! witness line with a loop item claims no upper bound.
 //!
-//! What stays TRUSTED (#4632): how ops are partitioned into path classes
-//! and objects, and any change that keeps both intervals meeting (a `|`
-//! moved inside a branch, an op moved between objects' lines).
+//! The release family is NOT checked here: the rc line is a call log and
+//! the witness a per-holder net account — a rebind's release of a local
+//! that held nothing, a borrowed parameter's moved-in credit, a slot
+//! consume inside an arm do not map one to one (measured: 7324 of 25141
+//! corpus frames would be refused). That correspondence is the rendering
+//! #4632 re-derives. TRUSTED: release accounting and the partition of ops
+//! into path classes and objects (#4632).
 
 use std::collections::HashMap;
 
@@ -47,7 +50,8 @@ impl Span {
     }
 }
 
-/// The two RC-call kinds the rc line records.
+/// The two RC-call letter families (only `Inc` is enforced; `Rel` is
+/// measured by the tests, see the module note).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Inc,
@@ -195,11 +199,9 @@ pub fn check_rc_bounds(bundle: &[u8], anchors: &str) -> Result<RcBoundsReport, S
         let Some(name) = p.parse::<usize>().ok().and_then(|p| names.get(&p)) else { continue };
         let Some(w) = witnesses.get(*name) else { continue };
         rep.frames += 1;
-        for kind in [Kind::Inc, Kind::Rel] {
-            let (ws, rs) = (witness_span(w, kind), rc_span(events, kind));
-            if !ws.meets(rs) {
-                rep.refused.push((name.to_string(), kind, ws, rs));
-            }
+        let (ws, rs) = (witness_span(w, Kind::Inc), rc_span(events, Kind::Inc));
+        if !ws.meets(rs) {
+            rep.refused.push((name.to_string(), Kind::Inc, ws, rs));
         }
     }
     Ok(rep)
