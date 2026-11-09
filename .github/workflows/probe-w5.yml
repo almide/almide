@@ -240,9 +240,13 @@ jobs:
               echo "$tag $f: $(head -1 /tmp/fs/$f-$tag.txt)"
             done
           done < /tmp/pw/refs.txt
+          sudo apt-get install -y -qq binaryen >/dev/null 2>&1 || true
+          for w in /tmp/fs/float_parse-*.wasm; do wasm-dis --enable-tail-call "$w" -o "${w%.wasm}.wat" 2>/dev/null || wasm-dis -all "$w" -o "${w%.wasm}.wat" || true; done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: fsizes
-          path: /tmp/fs/*.txt
+          path: |
+            /tmp/fs/*.txt
+            /tmp/fs/*.wat
           retention-days: 7
