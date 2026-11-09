@@ -12,7 +12,9 @@ R=$CARGO_TARGET_DIR/release
 A=$R/almide; P=$R/examples/emit_structural_bundle; LP=$R/almide-lin-prove; AC=$R/almide-anchor-check
 : > "$O/rows-$tag.tsv"
 k=0
-for f in $(command ls spec/wasm_cross/ | grep -E '^(json|value|codec)' | sed 's|^|spec/wasm_cross/|') $(command ls spec/stdlib/ | grep -E '^(json|value)' | sed 's|^|spec/stdlib/|') ${EXTRA_FIXTURES:-}; do
+LIST=$(command ls spec/wasm_cross/ | grep -E '^(json|value|codec)' | sed 's|^|spec/wasm_cross/|'; command ls spec/stdlib/ | grep -E '^(json|value)' | sed 's|^|spec/stdlib/|')
+[ -f /tmp/probe/w3/census-only ] && LIST=$(grep -v '^#' /tmp/probe/w3/census-only)
+for f in $LIST; do
   k=$((k+1)); d="$O/$tag/$k"; mkdir -p "$d"
   case "$f" in
     spec/stdlib/*) "$P" --tests "$f" --write-artifact "$d/a.wasm" --anchors "$d/a.anchors" > "$d/a.bundle" 2> "$d/err" || { echo "SKIP(test-route rc=$?) $f"; continue; } ;;
@@ -28,6 +30,26 @@ for f in $(command ls spec/wasm_cross/ | grep -E '^(json|value|codec)' | sed 's|
     echo "$f :: $(cat $d/a.lin) :: $(tail -1 $d/a.lverify) :: $(cut -c1-200 $d/a.census)"
   else
     echo "$f :: no prim sites"
+  fi
+done
+# The translation of the json bodies of one artifact, holes as `_`.
+for d in "$O/$tag"/*/; do
+  if [ -f "$d/a.anchors" ] && grep -q "json_parse" "$d/a.anchors"; then
+    "$AC" --lin-skel "$d/a.wasm" "$d/a.anchors" > "$O/skel-$tag.txt" 2>&1
+    python3 - "$d/a.anchors" "$O/skel-$tag.txt" "${SKEL_FNS:-json_parse,__jp_byte,__jp_word}" <<'PY2'
+import sys, re
+anch, skel, want = open(sys.argv[1]).read(), open(sys.argv[2]).read().splitlines(), sys.argv[3].split(",")
+line = next((l for l in anch.splitlines() if l.startswith("selfhost ")), "")
+names = {}
+for t in line.split()[1:]:
+    parts = t.split(":")
+    if len(parts) >= 3: names[parts[0]] = re.sub(r"^__selfhost_\d+\.", "", parts[2])
+for l in skel:
+    m = re.match(r"Q(\d+)\{", l)
+    if m and names.get(m.group(1)) in want:
+        print("SKEL", names[m.group(1)], l[:6000])
+PY2
+    break
   fi
 done
 python3 - "$O/rows-$tag.tsv" <<'PY'
