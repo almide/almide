@@ -164,8 +164,8 @@ pub fn cmd_install(
         repr_c: false,
         cdylib: false,
         emit_unverified: false,
-        verified: false,         // v0 codegen for install
-        native_verified: false,  // v0 codegen for install
+        verified: false,
+        native_verified: true,   // Same checked v1 route as an ordinary build.
         wasm_opt: false,
         component: false,
         heap_cap: None,

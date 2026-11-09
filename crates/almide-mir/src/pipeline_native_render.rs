@@ -410,6 +410,18 @@ pub fn try_render_rust_checked_certified(
         .map(|(rust, certs, _)| (rust, certs))
 }
 
+/// The checked frontend route with the project's filesystem policy. Scope
+/// guards and their trusted host support are emitted before artifact binding.
+pub fn try_render_rust_checked_scoped_certified(
+    source: &str,
+    ir: almide_ir::IrProgram,
+    checker: Checker,
+    fs_roots: Option<Vec<String>>,
+) -> Result<(String, Vec<NativeCert>), LowerError> {
+    let _scope = crate::native_fs_scope::ScopeGuard::enter(fs_roots);
+    try_render_rust_checked_certified(source, ir, checker)
+}
+
 fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgram, LowerError>) -> Result<NativeRenderParts, LowerError> {
     let _error_displays = crate::native_display::ErrorDisplayScope::enter();
     crate::charge_probe::reset_budget_used();

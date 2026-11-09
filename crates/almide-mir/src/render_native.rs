@@ -391,6 +391,11 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     // definitions, whether or not a body operates on them (#4514).
     let aliased = crate::native_floor::runtime_items_named_by(&crate::render_native_rec::alias_targets()).map_err(wall)?;
     used_shims.extend(aliased);
+    let fs_scope = crate::native_fs_scope::plan(&used_shims, &bodies);
+    if let Some(scope) = &fs_scope {
+        let support = crate::native_floor::scoped_fs_runtime_items(&scope.prelude, &used_shims, fan_rendered()).map_err(wall)?;
+        used_shims.extend(support);
+    }
     used_shims.sort();
     used_shims.dedup();
     let (runtime, glue): (Vec<&str>, Vec<&str>) = used_shims.into_iter().partition(|s| crate::native_floor::is_runtime_text(s));
@@ -430,6 +435,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         out.push_str(&crate::render_native_rec::runtime_default_impls());
         out.push_str(&format!("}}\n{RT_MOD_END}pub use {RT_MOD}::*;\n\n"));
     }
+    let user_start = out.len();
     out.push_str(&crate::render_native_rec::struct_defs());
     out.push_str(&crate::render_native_rec::closure_env_defs());
     for s in glue {
@@ -446,6 +452,13 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     // missing arm can never be hit; the `_` arm is the §13 controlled halt.
     push_closure_dispatch_tables(&mut out, &user_fns, &fn_rets, sigs);
     crate::render_native_closure::push_typed_dispatch_tables(&mut out, &user_fns, sigs);
+    if let Some(scope) = fs_scope {
+        let user = scope.wrap_calls(&out[user_start..]);
+        out.truncate(user_start);
+        out.push_str(&scope.prelude);
+        out.push_str(&user);
+        out.insert_str(0, &format!("{}\n", almide_codegen::fs_scope::SCOPE_MARKER));
+    }
     if fan_rendered() {
         // #4006 family H: the fan runtime ahead of every other item (its
         // output macros shadow std's for all that follows), and every exit

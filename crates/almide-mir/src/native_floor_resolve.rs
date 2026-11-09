@@ -15,6 +15,18 @@ fn closure_using(
     rt: &'static RuntimeIndex,
     refs: impl Fn(&str) -> Result<Vec<String>, String>,
 ) -> Result<Vec<&'static str>, String> {
+    let out = closure_contents_using(symbol, rt, refs)?;
+    fs_host_gate(symbol, &out)?;
+    Ok(out)
+}
+
+/// Runtime dependency closure, also used for the support of an already
+/// admitted scoped fs host call. Public floor admission still uses the gate.
+fn closure_contents_using(
+    symbol: &str,
+    rt: &'static RuntimeIndex,
+    refs: impl Fn(&str) -> Result<Vec<String>, String>,
+) -> Result<Vec<&'static str>, String> {
     let mut taken: BTreeSet<&'static str> = BTreeSet::new();
     let mut texts: BTreeSet<&'static str> = BTreeSet::new();
     let mut todo: Vec<String> = vec![symbol.to_string()];
@@ -39,7 +51,6 @@ fn closure_using(
             }
         }
     }
-    fs_host_gate(symbol, &out)?;
     Ok(out)
 }
 
@@ -168,4 +179,27 @@ mod fs_host_tests {
 
 fn is_fs_host_text(text: &str) -> bool {
     is_fs_host_text_in(runtime_index(), text)
+}
+
+/// Additional trusted runtime support for a scoped host implementation. This
+/// is not an admission route: the render must already carry a named fs host.
+pub(crate) fn scoped_fs_runtime_items(text: &str, used: &[&str], with_fan: bool) -> Result<Vec<&'static str>, String> {
+    if !used.iter().any(|s| is_fs_host_text(s)) {
+        return Err("a scoped filesystem runtime requires an admitted fs host call".into());
+    }
+    let glue = if with_fan { crate::render_native::fan_glue() } else { String::new() };
+    let mut supplied = defined_names(&glue);
+    supplied.extend(thread_local_names(&glue));
+    let refs = |s: &str| if with_fan {
+        references_with_supplied(runtime_index(), s, &supplied)
+    } else { references(s) };
+    let mut out = Vec::new();
+    for name in refs(text)? {
+        out.extend(closure_contents_using(&name, runtime_index(), refs)?);
+    }
+    Ok(out)
+}
+
+pub(crate) fn carries_fs_host(used: &[&str]) -> bool {
+    used.iter().any(|s| is_fs_host_text(s))
 }

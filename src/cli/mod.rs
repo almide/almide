@@ -3,7 +3,6 @@
 mod run;
 mod build_dir;
 pub(crate) mod build;
-mod fs_scope_twin;
 mod build_wasm;
 mod wasm_compile;
 mod wasm_run_cache;
@@ -451,7 +450,7 @@ pub(crate) fn render_v1_native_or_fallback(
     // spends equal (tests/fan_meter_splice_test.rs).
     let force_splice = metered.is_some() && almide_base::env::flag("ALMIDE_FORCE_METER_SPLICE");
     let rendered = match native_input {
-        Some((ir, checker)) => almide_mir::pipeline::try_render_rust_checked_certified(&source_text, ir, checker)
+        Some((ir, checker)) => almide_mir::pipeline::try_render_rust_checked_scoped_certified(&source_text, ir, checker, almide_wasm_run::fs_scope())
             .map(|(rust, _)| rust),
         // A caller without checked IR retains the standalone source route.
         None => almide_mir::pipeline::try_render_rust_source(&source_text),
@@ -460,17 +459,6 @@ pub(crate) fn render_v1_native_or_fallback(
         Ok(_) if force_splice => {
             let ir = metered.expect("force_splice implies a metered program");
             link_metered_regions(&source_text, rs_code(), "forced by ALMIDE_FORCE_METER_SPLICE", ir, opts)
-        }
-        // `[permissions] fs` (#4022) bounds a program's fs calls by wrapping
-        // them around the scoped twin of the standard build's fs runtime
-        // (`build::inject_fs_scope`). A certified render that makes native fs
-        // host calls (#4006 class E) carries only the fs code its calls reach,
-        // not the twin's, so it takes the standard build, which is bounded.
-        Ok(v1_code) if almide_wasm_run::fs_scope().is_some() && v1_code.contains("almide_rt_fs_") => {
-            if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
-                err("native: v1 render makes fs host calls under `[permissions] fs`: the standard build (bounded) is used");
-            }
-            rs_code()
         }
         Ok(v1_code) => {
             if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {

@@ -795,6 +795,7 @@ pub use runtime_crates::{runtime_crate_deps, RUNTIME_MODULE_CRATES};
 mod runtime_namespace;
 pub use runtime_namespace::RUNTIME_MODULE;
 pub mod rust_idents;
+pub mod fs_scope;
 
 /// Emit the full `almide_rt` runtime crate source: the prelude (pub items +
 /// exported macros) plus every std-only runtime module. Built once into an
