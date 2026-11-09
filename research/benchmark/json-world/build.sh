@@ -23,18 +23,21 @@ step() { # <name> <cmd...>
 
 # ---- Almide ---------------------------------------------------------------
 A="$HERE/almide"
+# Each almide build gets a fresh TMPDIR: the native build cache lives under the
+# temp dir and must not hand one compiler's (or one --target-cpu's) binary to another.
+abuild() { local d; d="$(mktemp -d "$OUT/almide-tmp.XXXX")"; TMPDIR="$d" "$@"; local rc=$?; rm -rf "$d"; return $rc; }
 for tag in head reborn; do
   var="ALMIDE_${tag^^}"; almide="${!var:-}"
   [ -x "$almide" ] || { echo "no almide for $tag"; FAILED+=("almide-$tag"); continue; }
   "$almide" --version || true
   # Native --release defaults to -C target-cpu=x86-64-v3 (AVX2) on x86-64.
-  step "almide-${tag}__v3"       "$almide" build "$A/jsonround_phased.almd" -o "$OUT/native/almide-${tag}__v3" --release
-  step "almide-${tag}__portable" "$almide" build "$A/jsonround_phased.almd" -o "$OUT/native/almide-${tag}__portable" --release --target-cpu portable
-  step "almide-${tag}__native"   "$almide" build "$A/jsonround_phased.almd" -o "$OUT/native/almide-${tag}__native" --release --target-cpu native
-  step "almide-$tag-exact__v3" "$almide" build "$A/jsonround.almd" -o "$OUT/native/almide-$tag-exact__v3" --release
-  step "almide-${tag}__wasm"     "$almide" build "$A/jsonround_phased.almd" --target wasm -o "$OUT/wasm/almide-${tag}__plain.wasm"
+  step "almide-${tag}__v3"       abuild "$almide" build "$A/jsonround_phased.almd" -o "$OUT/native/almide-${tag}__v3" --release
+  step "almide-${tag}__portable" abuild "$almide" build "$A/jsonround_phased.almd" -o "$OUT/native/almide-${tag}__portable" --release --target-cpu portable
+  step "almide-${tag}__native"   abuild "$almide" build "$A/jsonround_phased.almd" -o "$OUT/native/almide-${tag}__native" --release --target-cpu native
+  step "almide-$tag-exact__v3" abuild "$almide" build "$A/jsonround.almd" -o "$OUT/native/almide-$tag-exact__v3" --release
+  step "almide-${tag}__wasm"     abuild "$almide" build "$A/jsonround_phased.almd" --target wasm -o "$OUT/wasm/almide-${tag}__plain.wasm"
   for p in jsonround_phased jr_build jr_stringify; do
-    step "count-almide-$tag-$p" env ALMIDE_ALLOC_COUNT=1 "$almide" build "$A/$p.almd" -o "$OUT/count/native/almide-$tag-$p" --release
+    step "count-almide-$tag-$p" abuild env ALMIDE_ALLOC_COUNT=1 "$almide" build "$A/$p.almd" -o "$OUT/count/native/almide-$tag-$p" --release
   done
 done
 
@@ -96,7 +99,7 @@ for w in "$OUT"/wasm/*.wasm; do
   step "aot-$(basename "$w" .wasm)" wasmtime compile "$w" -o "${w%.wasm}.cwasm"
 done
 
-echo "== built"; ls -la "$OUT/native" "$OUT/wasm" "$OUT/count/native" "$OUT/count/wasm"
+echo "== built"; sha256sum "$OUT"/native/almide-* "$OUT"/wasm/almide-*.wasm "$OUT"/count/native/almide-*; ls -la "$OUT/native" "$OUT/wasm" "$OUT/count/native" "$OUT/count/wasm"
 if [ ${#FAILED[@]} -gt 0 ]; then echo "BUILD-FAILED: ${FAILED[*]}"; fi
 printf '%s\n' "${FAILED[@]}" > "$OUT/build-failed.txt"
 exit 0

@@ -173,7 +173,7 @@ def allocations():
         for prog in ("jsonround_phased", "jr_build", "jr_stringify"):
             src = os.path.join(HERE, "almide", prog + ".almd")
             p, _ = run_once([almide, "run", src, "--target", "wasm"], {"ALMIDE_WASM_ALLOC_COUNT": "1"})
-            m = re.search(r"__ALMD_WASM_ALLOC (\S+) heap_end=(\S+)", p.stderr)
+            m = re.search(r"__ALMD_WASM_ALLOC (?:allocs=)?(\d+).*?heap_end=(\S+)", p.stderr)
             res["wasm"][f"almide-{tag}-{prog}"] = {
                 "rc": p.returncode, "first": (p.stdout.splitlines() or [""])[0],
                 "almide_wasm": {"count": m.group(1), "heap_end": m.group(2)} if m else None,
