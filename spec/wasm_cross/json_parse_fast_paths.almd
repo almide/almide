@@ -75,6 +75,14 @@ effect fn main() -> Unit = {
   // The first refusal wins: a repeated key before a bad value after it.
   println(s('{"a":1,"a":tru}'))
   println(s('[1,{"a":"\\q"},@]'))
+  // Siblings share their keys: the same keys, reordered, escaped, missing,
+  // extra, nested, and a repeat that a shared key must not hide.
+  println(s('[{"id":1,"m":{"s":1,"t":2}},{"id":2,"m":{"s":3,"t":4}},{"m":{"t":5,"s":6},"id":3}]'))
+  println(s('[{"a":1,"b":2},{"\u0061":3,"b":4},{"b":5},{"a":6,"b":7,"c":8},[],{"a":9}]'))
+  println(s('[{"k":{"x":1}},{"k":[1]},{"k":{"x":2,"y":{"z":3}}},{"k":{"x":4,"y":{"z":5}}}]'))
+  println(s('[{"a":1},{"a":1,"a":2}]'))
+  println(s('[{"a":{"b":1}},{"a":{"b":1,"b":2}}]'))
+  println(s('[' + wide(20) + "," + wide(20) + "," + wide_dup(20, 5) + "]"))
   // Malformed input at every position class.
   for t in ["", "   ", "x", "@", "日", "[", "[1", "[1,", "[1,]", "[1 2]", "[1:2]", "{", '{"a"', '{"a":', '{"a":1', '{"a":1,', '{"a" 1}', "{1:1}", '{"a":1,}', '{"a":1 "b":2}', "-", "1.", "1e+", "01", "1.5e", "1 x", "{} {}", "nul", "tru", "fals", "nulx", "[true,fals]"] {
     println(s(t))
