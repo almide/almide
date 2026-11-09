@@ -151,6 +151,9 @@ mod tests {
         assert!(!c(b"|1 1|0\niM\nid#1||\ndam"));
         assert!(!c(b"|5 0|\nid"));
         assert!(c(b"||| 0\nid"));
-        assert!(!c(b"||| 29\nid"));
+        assert!(c(b"||| 29\nid"));
+        assert!(c(b"||| 30 31\nid"));
+        assert!(c(b"||| 32 33 34 35 36 37\nid"));
+        assert!(!c(b"||| 38\nid"));
     }
 }
