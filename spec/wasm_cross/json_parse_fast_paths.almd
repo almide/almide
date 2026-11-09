@@ -1,0 +1,85 @@
+// @contract: C-087, C-400, C-401
+// json.parse reads each value where it lies (#4613): a string with no escape
+// is copied in one pass (eight bytes at a time, then the tail), an Int of at
+// most 18 digits and a Float in the exact range are read in place, a longer
+// number goes to int.parse / float.parse, a key is checked against the keys
+// read so far and against an index from 16 keys on, and the first refusal is
+// the one reported. Each line below sits on one side of one of those edges,
+// and every leg prints the same bytes.
+import json
+
+fn s(text: String) -> String = match json.parse(text) {
+  ok(v) => "ok " + json.stringify(v),
+  err(e) => "err " + e,
+}
+
+fn q(body: String) -> String = '"' + body + '"'
+
+// `{"k0":0,"k1":1,…}` with n keys, and the same with key `dup` written again
+// at the end.
+fn keys(n: Int) -> String = list.range(0, n) |> list.map((i) => "\"k${i}\":${i}") |> list.join(",")
+
+fn wide(n: Int) -> String = "{" + keys(n) + "}"
+
+fn wide_dup(n: Int, dup: Int) -> String = "{" + keys(n) + ",\"k${dup}\":0}"
+
+effect fn main() -> Unit = {
+  // Strings without an escape, at every length around the eight-byte copy.
+  for n in [0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65] {
+    println(s(q(string.repeat("a", n))))
+  }
+  println(s(q(string.repeat("abcdefgh", 40) + "xyz")))
+  // Multibyte text without an escape is copied as it is.
+  println(s(q("é日本語😀" + string.repeat("ß", 9) + "語")))
+  // An escape anywhere sends the string through the decoder.
+  println(s(q(string.repeat("abcdefgh", 4) + "\\n")))
+  println(s(q("\\t" + string.repeat("abcdefgh", 4))))
+  println(s(q(string.repeat("ab\\\"", 12))))
+  // Control characters: raw is refused, escaped decodes (and is written back
+  // escaped), and so is the error position in a long string.
+  println(s(q("ab\u{1F}cd")))
+  println(s(q(string.repeat("x", 300) + "\u{1}")))
+  println(s(q("\\u0000\\u001f\\u0007\\u007f\\u0080")))
+  // Unicode escapes at each UTF-8 width, and pairs at the ends of a string.
+  println(s(q("\\u007f\\u0080\\u07ff\\u0800\\uffef")))
+  println(s(q("\\udbff\\udfff")))
+  println(s(q("\\ud83d\\ude00" + string.repeat("z", 20) + "\\ud83d\\ude00")))
+  println(s(q(string.repeat("y", 40) + "\\ud800")))
+  println(s(q(string.repeat("y", 40) + "\\u12")))
+  println(s(q(string.repeat("y", 40) + "\\q")))
+  // Ints: 18 digits are read in place; 19 and more go to int.parse.
+  println(s("[999999999999999999,-999999999999999999,100000000000000000]"))
+  println(s("[9223372036854775807,-9223372036854775808,1234567890123456789]"))
+  println(s("9223372036854775808"))
+  println(s("-9223372036854775809"))
+  println(s("[1,99999999999999999999]"))
+  // Floats: 15 digits and a power of ten up to 22 are exact in place.
+  println(s("[0.1,0.5,123456789012345.0,1.23456789012345,-0.0,0e0,0E+0]"))
+  println(s("[1e22,1e-22,1e23,1e-23,123456789012345e-22,1.5e300,5e-324]"))
+  println(s("[1234567890123456.0,0.30000000000000004,2.2250738585072014e-308]"))
+  println(s("[1e0001,1e-0005,4e002,1.7976931348623157e308]"))
+  println(s("1e309"))
+  println(s("[1,-1e400]"))
+  // Keys: pairwise below 16, an index from 16 on; a repeat is refused at its
+  // quote whichever side of 16 it falls on.
+  println(s(wide(15)))
+  println(s(wide(16)))
+  println(s(wide(17)))
+  println(s(wide(40)))
+  println(s(wide_dup(14, 3)))
+  println(s(wide_dup(15, 3)))
+  println(s(wide_dup(16, 3)))
+  println(s(wide_dup(40, 2)))
+  println(s(wide_dup(40, 39)))
+  println(s('{"a":1,"\\u0061":2}'))
+  // The first refusal wins: a repeated key before a bad value after it.
+  println(s('{"a":1,"a":tru}'))
+  println(s('[1,{"a":"\\q"},@]'))
+  // Malformed input at every position class.
+  for t in ["", "   ", "x", "@", "日", "[", "[1", "[1,", "[1,]", "[1 2]", "[1:2]", "{", '{"a"', '{"a":', '{"a":1', '{"a":1,', '{"a" 1}', "{1:1}", '{"a":1,}', '{"a":1 "b":2}', "-", "1.", "1e+", "01", "1.5e", "1 x", "{} {}", "nul", "tru", "fals", "nulx", "[true,fals]"] {
+    println(s(t))
+  }
+  // Nesting mixes arrays and objects down to the bound.
+  println(string.len(s(string.repeat('{"a":[', 500) + "1" + string.repeat("]}", 500))))
+  println(s(string.repeat('{"a":[', 501) + "1" + string.repeat("]}", 501)))
+}
