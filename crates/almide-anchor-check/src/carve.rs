@@ -9,8 +9,11 @@
 //! - `c H w W n N s0 .. s(N-1)` (a literal carve) and `c H w W v K f K t W`
 //!   (a computed one): the cursor load [a] and the root's len load [a]; the
 //!   ROOM TEST `cur + size >u 12 + len` in i64 (so nothing wraps), opening
-//!   an `if` with no `else` whose body ends in `unreachable` [a, at its
-//!   `end`]; then — after it, so the test dominates every store — the
+//!   an ABORT [a, at its `end`] — an `if` with no `else` whose body holds
+//!   only constants, local reads, drops and calls and ends in `unreachable`
+//!   (no branch, no return: it cannot fall through; its length is the
+//!   bytes', since `to_wasi` lowers the exit call to more than one call);
+//!   then — after it, so the test dominates every store — the
 //!   cursor store `cur + size` [a], `base = root + cur` [a], the three
 //!   header stores through `local.get base` at 0 / 4 / 8 [a ×3] (the rc
 //!   word is `0x8000_0000 | cur`, the interior word), and the payload: N
@@ -53,6 +56,12 @@ enum P {
     Ld(u64),
     St(u64),
     Is(fn(&Op<'_>) -> bool),
+    /// The aborting `if`: `if` (no result), a body of constants, local
+    /// reads, drops and calls only, `unreachable`, `end` — no `else`, no
+    /// branch, no return, so the body cannot fall through. Its length is the
+    /// bytes': the host transform may lower one exit call to more than one
+    /// (`to_wasi`). Marked, it is anchored at its `end`.
+    Abort,
 }
 
 /// The bindings a match produced.
@@ -83,34 +92,29 @@ impl Bind {
     }
 }
 
-fn is_if_empty(o: &Op<'_>) -> bool {
-    matches!(o, Op::If { blockty: BlockType::Empty })
+const ABORT: [(P, bool); 1] = [(P::Abort, true)];
+
+/// The `end` of the aborting `if` at `j`, when it is one (see [`P::Abort`]).
+fn abort_end(b: &Body<'_>, j: usize) -> Option<usize> {
+    if !matches!(b.ops.get(j)?, Op::If { blockty: BlockType::Empty }) {
+        return None;
+    }
+    let mut k = j + 1;
+    while matches!(
+        b.ops.get(k)?,
+        Op::I32Const { .. } | Op::I64Const { .. } | Op::Call { .. } | Op::LocalGet { .. } | Op::Drop
+    ) {
+        k += 1;
+    }
+    (matches!(b.ops.get(k)?, Op::Unreachable) && matches!(b.ops.get(k + 1)?, Op::End)).then_some(k + 1)
 }
 
-/// The aborting `if` the ops emit after a condition: `if; i32.const;
-/// call; i32.const; call; unreachable; end` — no `else`, and the body
-/// cannot fall through. The `end` is the anchor.
-const ABORT: [(P, bool); 7] = [
-    (P::Is(is_if_empty), false),
-    (P::Is(is_i32_const), false),
-    (P::Is(is_call), false),
-    (P::Is(is_i32_const), false),
-    (P::Is(is_call), false),
-    (P::Is(is_unreachable), false),
-    (P::Is(is_end), true),
-];
-
-fn is_i32_const(o: &Op<'_>) -> bool {
-    matches!(o, Op::I32Const { .. })
-}
-fn is_call(o: &Op<'_>) -> bool {
-    matches!(o, Op::Call { .. })
-}
-fn is_unreachable(o: &Op<'_>) -> bool {
-    matches!(o, Op::Unreachable)
-}
-fn is_end(o: &Op<'_>) -> bool {
-    matches!(o, Op::End)
+/// The `if` of the aborting `if` whose `end` is at `end`: the body holds no
+/// block, so it is the nearest instruction back at the `if`'s own depth.
+fn abort_start(b: &Body<'_>, end: usize) -> Option<usize> {
+    let d = b.depth.get(end)?.checked_sub(1)?;
+    let i = (0..end).rev().find(|&k| b.depth[k] <= d)?;
+    (abort_end(b, i) == Some(end)).then_some(i)
 }
 
 fn op_is(p: P, o: &Op<'_>, bind: &mut Bind) -> bool {
@@ -146,10 +150,15 @@ impl<'a> Ctx<'_, 'a> {
         let mut bind = Bind::default();
         let bind = &mut bind;
         let mut next = 0;
+        let mut j = start;
         for (k, &(p, marked)) in pat.iter().enumerate() {
-            let j = start + k;
             let op = b.ops.get(j).ok_or_else(|| format!("{what}: the body ends at instruction {j}"))?;
-            if !op_is(p, op, bind) {
+            if let P::Abort = p {
+                match abort_end(b, j) {
+                    Some(e) => j = e,
+                    None => return Err(format!("{what}: instruction {j} (step {k} of the shape) opens no abort that cannot fall through")),
+                }
+            } else if !op_is(p, op, bind) {
                 let window: Vec<String> = b.ops[start..(j + 2).min(b.ops.len())].iter().map(|o| format!("{o:?}")).collect();
                 return Err(format!("{what}: instruction {j} (step {k} of the shape) is {op:?}; from {start}: {}", window.join("; ")));
             }
@@ -160,6 +169,7 @@ impl<'a> Ctx<'_, 'a> {
                 }
                 next += 1;
             }
+            j += 1;
         }
         if next != anchors.len() {
             return Err(format!("{what}: {} anchors for {next} marked instructions", anchors.len()));
@@ -306,7 +316,7 @@ impl<'a> Ctx<'_, 'a> {
         let a0 = *anchors.first().ok_or("carve: no anchors")?;
         let b = self.body(a0)?;
         // The guard: `local.tee T; i64.const MAX; i64.gt_u` then the abort.
-        let start = a0.op.checked_sub(9).ok_or("carve: no room")?;
+        let start = abort_start(b, a0.op).and_then(|i| i.checked_sub(3)).ok_or("carve: the length guard's anchor is not the end of an abort")?;
         let mut pat: Vec<(P, bool)> = vec![
             (P::Tee('T'), false),
             (P::I64(0x7FFF_0000), false),
