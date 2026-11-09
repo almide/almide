@@ -37,10 +37,24 @@ jobs:
             (cd /tmp/src-$tag && echo "=== $tag $(git log --oneline -1)" && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test float_parse_cost -- --nocapture 2>&1 | grep -E "RATCHET|panicked|test result|differ|answered" ) || true
           done < /tmp/pw/refs.txt
 
-  diff:
+  refs:
     if: contains(github.event.head_commit.message, '[diff]')
     runs-on: ubuntu-latest
+    outputs:
+      m: ${{ steps.m.outputs.m }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: m
+        run: echo "m=$(python3 -c "import json;print(json.dumps([l.split()[0]+' '+l.split()[1] for l in open('.github/probe-w5/diff-refs.txt') if l.strip()]))")" >> "$GITHUB_OUTPUT"
+
+  diff:
+    needs: refs
+    runs-on: ubuntu-latest
     timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ${{ fromJSON(needs.refs.outputs.m) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -65,7 +79,7 @@ jobs:
           set -uo pipefail
           cp -r .github/probe-w5 /tmp/pw
           mkdir -p /tmp/out
-          while read -r tag sha; do
+          echo "${{ matrix.ref }}" | while read -r tag sha; do
             [ -z "$tag" ] && continue
             git worktree add -f /tmp/d-$tag "$sha" >/dev/null 2>&1
             cd /tmp/d-$tag
@@ -90,18 +104,18 @@ jobs:
               if [ "$a" != "$b" ] || [ $ra != $rb ]; then echo "DIVERGE $f ($ra/$rb)"; fail=$((fail+1)); fi
             done
             echo "VERDICT-FIXTURES $tag: $fail of $n diverge"
-            if [ "$tag" = "w5" ] || [ "${DIFF_LEDGERS:-}" = 1 ]; then
+            if [ "$tag" = "w5" ] || [ "$tag" = "fast" ]; then
               echo "--- size ratchet"; CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test size_ratchet -- --nocapture > /tmp/out/$tag-size.txt 2>&1; grep -E "REGRESSION|NEW fixture|moved|B, pinned|test result|improv|shrank|smaller|larger" /tmp/out/$tag-size.txt | head -150
               echo "--- alloc ledger"; CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test alloc_ledger -- --nocapture > /tmp/out/$tag-alloc.txt 2>&1; grep -E "REGRESSION|moved|test result|float_parse|json" /tmp/out/$tag-alloc.txt | head -60
               echo "--- stdlib inspection"; CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test stdlib_inspection_test -- --nocapture > /tmp/out/$tag-inspection.txt 2>&1; grep -E 're-inspect|ceiling|uninspected|test result|float_parse|stale|FAIL' /tmp/out/$tag-inspection.txt | head -60
             fi
             git checkout -q -- . ; git clean -fdq tests
             cd "$GITHUB_WORKSPACE"
-          done < /tmp/pw/diff-refs.txt
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: diff
+          name: diff-${{ strategy.job-index }}
           path: /tmp/out
           retention-days: 7
 
