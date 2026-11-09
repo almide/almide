@@ -4,7 +4,7 @@ name: Probe fan 4452 loom revert
 on:
   workflow_dispatch:
   push:
-    branches: [probe/fan-4452]
+    branches: [probe/fan-4452-off]
 
 env:
   CARGO_TERM_COLOR: always

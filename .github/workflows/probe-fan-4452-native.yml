@@ -1,0 +1,58 @@
+name: Probe fan 4452 native fold
+
+on:
+  push:
+    branches: [probe/fan-4452]
+
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  BASE: b6307a0d0
+
+permissions:
+  contents: read
+
+jobs:
+  native-fold:
+    name: Native fold program (old harness shape), output and exit
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [old, new]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+      - name: Pre-fix runtime
+        if: matrix.runtime == 'old'
+        run: |
+          git show $BASE:runtime/rs/src/list.rs > runtime/rs/src/list.rs
+          git show $BASE:crates/almide-codegen/src/generated/rust_runtime.rs > crates/almide-codegen/src/generated/rust_runtime.rs
+      - run: cargo +${{ env.RUST_TOOLCHAIN }} build --release --bin almide
+      - name: build and run natively
+        shell: bash {0}
+        run: |
+          mkdir -p /tmp/f/crate && cd /tmp/f
+          cat > main.almd <<'EOF2'
+          import fs
+
+          effect fn main() -> Unit = {
+            let text = list.range(0, 40) |> list.map((i) => "line " + int.to_string(i)) |> list.join("\n")
+            fs.write_text("fold.txt", text + "\n")!
+            let parts = fs.fold_lines_chunked("fold.txt", 4, 0, (acc, line) => acc + string.len(line))!
+            println("parts=" + int.to_string(list.len(parts)) + " total=" + int.to_string(list.fold(parts, 0, (a, b) => a + b)))
+          }
+          EOF2
+          sed -i 's/^          //' main.almd
+          ALMIDE_NO_RTLIB=1 ALMIDE_RUN_PROJECT_DIR=/tmp/f/crate $GITHUB_WORKSPACE/target/release/almide build main.almd -o /tmp/f/crate/bin > build.log 2>&1; echo "build exit=$?"; tail -5 build.log
+          cd /tmp/f/crate
+          for i in $(seq 1 20); do ALMIDE_FAN_COST_OFF=1 ./bin > out 2> err; echo "run $i exit=$? out=[$(cat out)] err=[$(head -c 300 err)]"; done
+          echo "--- piped as the harness does:"; ALMIDE_FAN_COST_OFF=1 ./bin | sort -u; echo "pipe status=${PIPESTATUS[0]}"
