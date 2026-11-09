@@ -64,6 +64,24 @@ fn vacant_take_text(snap: bool) -> &'static str {
     }
 }
 
+/// The take `d` of slot `slot` (type `t`). One whose old value the store
+/// that follows drops (`native_slot_takes::dropped_by_store`) renders nothing.
+fn render_slot_take(dropped: bool, d: ValueId, slot: u32, t: NTy, out: &mut String, pad: &str) {
+    if dropped {
+        let _ = writeln!(out, "{pad}// {}: the old value, dropped by the store that follows", var(d));
+        return;
+    }
+    let snap = crate::native_slot_takes::snapshot_slot(slot);
+    let take = if crate::render_native_rec::has_default(t) { take_text(snap) } else { vacant_take_text(snap) };
+    let _ = writeln!(
+        out,
+        "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| {});",
+        var(d),
+        crate::render_native_rec::owned_ty(t),
+        take
+    );
+}
+
 /// Render `op` when it reads, takes or stores a heap slot. `None` = not one.
 pub(super) fn render_heap_slot_op(
     op: &Op,
@@ -117,16 +135,8 @@ pub(super) fn render_heap_slot_op(
                 return Some(Err(wall("native: a slot take whose address is not one scalar")));
             };
             let (slot, t) = slot_of(st, a)?;
-            let snap = crate::native_slot_takes::snapshot_slot(slot);
-            let take = if crate::render_native_rec::has_default(t) { take_text(snap) } else { vacant_take_text(snap) };
             tys.insert(*d, t);
-            let _ = writeln!(
-                out,
-                "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| {});",
-                var(*d),
-                crate::render_native_rec::owned_ty(t),
-                take
-            );
+            render_slot_take(st.slot_reads.dropped_takes.contains(d), *d, slot, t, out, &pad);
             Some(Ok(true))
         }
         Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 => {

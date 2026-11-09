@@ -208,6 +208,27 @@ pub(crate) struct SlotReads {
     pub(crate) borrows: BTreeSet<ValueId>,
     /// Each alias, and the slot whose snapshot it reads through.
     pub(crate) aliases: BTreeMap<ValueId, u32>,
+    /// The takes the render leaves out (#4621): a take whose old value is
+    /// only dropped, with nothing but that drop and the new value's handle
+    /// between it and the store into the same slot. The store's assignment
+    /// drops the old value in the cell itself, so taking it out first only
+    /// adds a second cell access and leaves a default to drop.
+    pub(crate) dropped_takes: BTreeSet<ValueId>,
+}
+
+/// The take at `j` (of the slot at `a`) is one the following store drops.
+fn dropped_by_store(ops: &[Op], j: usize, a: i64, consts: &BTreeMap<ValueId, i64>) -> bool {
+    let Op::CallFn { dst: Some(t), .. } = &ops[j] else { return false };
+    if !only_dropped(ops, j) { return false; }
+    for o in &ops[j + 1..] {
+        match o {
+            Op::Prim { kind: PrimKind::Store { .. }, .. } => return accessed(o, consts) == Some(a),
+            Op::ConstInt { .. } | Op::Prim { kind: PrimKind::Handle, .. } => {}
+            _ if is_drop_of(o, *t) => {}
+            _ => return false,
+        }
+    }
+    false
 }
 
 /// The read `d` at `ops[i]` is only borrowed: every later use of it borrows
@@ -267,6 +288,13 @@ pub(crate) fn slot_reads(func: &MirFunction) -> SlotReads {
                         out.borrows.insert(*d);
                         slot_of.insert(*d, slot);
                     }
+                }
+            }
+        }
+        for (j, op) in ops.iter().enumerate() {
+            if let (Op::CallFn { name, dst: Some(t), .. }, Some(a)) = (op, accessed(op, &consts)) {
+                if name == "__mg_take" && dropped_by_store(ops, j, a, &consts) {
+                    out.dropped_takes.insert(*t);
                 }
             }
         }
