@@ -51,6 +51,7 @@ jobs:
         if: always()
         run: cargo clippy -p almide-wasm -p almide-frontend --all-targets 2>&1 | grep -E -A6 '^(warning|error)' | grep -E -B2 -A6 'family|deep_walk|runtime_alloc|attr_vocab|emit\.rs|rc_word_inventory' || echo "no clippy finding in the touched files"
   byte-identity:
+    if: github.ref_name == 'probe/w1-runtime'
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
