@@ -28,6 +28,8 @@
 //! holds exactly one store, of W bytes at offset 0 addressed by
 //! `local.get C`, no branch, and no write of B, C, L or K.
 //!
+//! INIT, the family records `k` / `c` / `e` (ADR-0033 D7): carve.rs.
+//!
 //! BOUNDS, per token: a `c` is `i64.ge_u` (the list compare) or `i32.eqz`
 //! (the Bytes room test), then `if` (empty), then `i32.const` — anchored at
 //! the const — and that `if` has no `else` and ends in `unreachable` (the
@@ -60,6 +62,7 @@ use wasmparser::Operator as Op;
 
 mod anchors;
 mod bounds;
+mod carve;
 mod census;
 mod decode;
 mod fields;
@@ -105,6 +108,12 @@ pub struct Report {
     pub init_stores: usize,
     pub fill_sites: usize,
     pub init_unlocated: usize,
+    /// ADR-0033 D7 (carve.rs): family roots, literal and computed carves,
+    /// and seals held to their shapes.
+    pub families: usize,
+    pub carves: usize,
+    pub carve_fills: usize,
+    pub seals: usize,
     pub bounds_checks: usize,
     pub bounds_accesses: usize,
     pub bounds_unlocated: usize,

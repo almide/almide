@@ -266,6 +266,11 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `carve_window` | InitCert.v | Closed under the global context |
 | `family_window` | InitCert.v | Closed under the global context |
 | `fsited_init` | InitCert.v | Closed under the global context |
+| `carve_entry_window` | InitCert.v | Closed under the global context |
+| `carve_fill_entry_window` | InitCert.v | Closed under the global context |
+| `room_run_tiles` | InitCert.v | Closed under the global context |
+| `carves_prefix_window` | InitCert.v | Closed under the global context |
+| `sealed_family_window` | InitCert.v | Closed under the global context |
 | `rsite_window` | FieldCert.v | Closed under the global context |
 | `ftrace_safe` | FieldCert.v | Closed under the global context |
 | `fields_memory_safe` | FieldCert.v | Closed under the global context |
@@ -759,7 +764,7 @@ The earlier progression described its scope as follows:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (175 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (180 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties

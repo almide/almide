@@ -265,3 +265,36 @@ Allocations per run (50k records): yyjson 32, simdjson 37–38, sonic-rs 600k, s
 - Copy-out on escape (D9). It needs its own ADR if falsifier 3 fires.
 - A compact node layout on wasm (Alternative C). It needs falsifier 5.
 - German / Umbra strings (Alternative E). It needs owner question 4's condition.
+
+## Progress
+
+### Phase 0 — done (2026-11-09)
+
+- **The world bench** lives in `research/benchmark/perf/json-world/` (`.github/workflows/json-world-bench.yml`, started by a `[world]` commit on a `json-substrate*` branch). It adds the corpus rows (`corpus.sh`): twitter, citm_catalog and canada at a pinned nativejson-benchmark commit, digest-pinned in `.github/pinned-downloads.txt`.
+- **The JSON ratchet** is `crates/almide-wasm/tests/json_ratchet.rs` with `golden/json-ratchet.txt`: wasmtime fuel and `$alloc` / `$free` counts per jsonround phase at N = 2,000. The rows only move down, and the update mode refuses to write a raise. It runs in the release `rest` shard.
+- **The retention probe** is `json_retention_probe_reports`, printed every run and not pinned. On the json-reborn compiler it reads 5.7 retained bytes per kept byte.
+- **Pins** are taken on the json-reborn compiler (probe run 42595010181):
+
+| phase | fuel / record | allocs / record | yyjson allocs, whole run |
+|---|---:|---:|---:|
+| build | 6,134.9 | 21.00 | 29 |
+| stringify | 7,217.9 | 0.00 (2 per run) | 1 |
+| parse | 14,144.0 | 30.01 | 2 |
+| sum | 1,698.1 | 6.00 | — |
+
+- **Negative controls** (probe runs 42598717788 and 42601172093):
+  - The control branch `json-substrate-p0-control` passes.
+  - One extra allocation per parsed value fails: parse allocs 60,014 → 78,015, and parse fuel rises.
+  - Restoring the pre-reborn parser fails: parse fuel 28.3M → 51.0M, and allocs 60,014 → 172,016.
+- **Noise floor**: two compilers with the same compiler source, on one GitHub runner, alternating, n = 15 (probe run 42595010181). wasm AOT head/base = 1.0069, native = 1.0015. Medians differ by up to 1.8× between runner machines, so only same-run ratios are compared.
+- **Corpus rows** (run 42601233615; parse ms, wasm AOT / native):
+  - twitter: Almide 6.9 / 2.6; serde_json 3.2 / 2.2; yyjson 0.63 / 0.78.
+  - citm_catalog: Almide 10.6 / 13.4; serde_json 5.2 / 3.9; yyjson 1.6 / 2.0.
+  - canada: Almide **1934** / 28.7; serde_json 10.9 / 12.8; yyjson 4.1 / 3.1.
+  - canada on wasm is float.parse's slow path: an 800-digit decimal shifted one bit per pass, taken by every float of 16 or more digits.
+
+### Phase 1 — the writer move measured and withheld
+
+- The self-hosted compact writer (a size pass, one exact String, a room-checked fill; 9198cc27a, then SWAR clean runs in d7235dce0) printed byte-identical output on jsonround.
+- It cost **+27% stringify fuel** (7,218 → 9,198 per record) and **+9.4% jsonround wall time** on wasm (probe run 42598565892), so it was reverted (4c0589585).
+- Its per-value cost is the size pass's second tree walk and a call per leaf. It returns in phase 4 with the families' clean flag (a clean string is one bulk copy and needs no size scan) and the two-digit table.
