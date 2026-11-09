@@ -42,8 +42,15 @@ jobs:
           git worktree add /tmp/src-head "$HEAD_REF"
           (cd /tmp/src-head && git log --oneline -1 && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
           mkdir -p /tmp/bins && cp target/release/almide /tmp/bins/almide-head
+      - name: Generated files the build rewrote
+        run: |
+          mkdir -p /tmp/quick
+          cd /tmp/src-head && git status --short && git diff > /tmp/quick/generated.diff; wc -l /tmp/quick/generated.diff
       - name: Behaviour of the json/value fixtures and tests
         run: bash /tmp/probe/quick.sh /tmp/bins/almide-head /tmp/src-head /tmp/quick
+      - name: Stdlib inspection ledger (which stamps the change voids)
+        run: |
+          cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test stdlib_inspection_test -- --nocapture 2>&1 | tail -40 | tee /tmp/quick/inspection.txt || true
       - name: jsonround allocations and instruction counts
         run: |
           set -uo pipefail
@@ -210,22 +217,87 @@ jobs:
             ALMIDE_ALLOC_COUNT=1 /tmp/bins/almide-$v build --release jr_full.almd -o jrc-$v >/dev/null 2>&1
             echo "== $v alloc"; ./jrc-$v
           done
+          (cd /tmp/probe/jsonround_rs && cargo build --release 2>&1 | tail -1 && cp target/release/jsonround /tmp/nat/jr-rust)
           python3 - <<'EOF'
           import subprocess, time, statistics, os
           R = int(os.environ["ROUNDS"])
-          outs, times = {}, {"base": [], "head": []}
+          outs, times = {}, {"base": [], "head": [], "rust": []}
           for r in range(R + 2):
-              for v in (["base", "head"] if r % 2 == 0 else ["head", "base"]):
+              for v in (["base", "head", "rust"] if r % 2 == 0 else ["rust", "head", "base"]):
                   t0 = time.perf_counter(); p = subprocess.run(["./jr-" + v], capture_output=True); dt = (time.perf_counter() - t0) * 1000
                   assert p.returncode == 0; outs.setdefault(v, p.stdout); assert outs[v] == p.stdout
                   if r >= 2: times[v].append(dt)
-          print("outputs equal:", outs["base"] == outs["head"], outs["head"])
+          print("outputs:", {k: v.decode().strip() for k, v in outs.items()})
           for v in times: print(v, "median %.2f ms" % statistics.median(times[v]))
-          print("ratio head/base = %.4f" % (statistics.median(times["head"]) / statistics.median(times["base"])))
+          b, h, rs = (statistics.median(times[k]) for k in ("base", "head", "rust"))
+          print("ratio head/base = %.4f   head/rust (indicative) = %.4f" % (h / b, h / rs))
           EOF
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: native-gen
           path: /tmp/nat/gen-*.rs
+          retention-days: 7
+
+  regen:
+    if: contains(github.event.head_commit.message, '[regen]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - name: Build head
+        run: |
+          set -eux
+          git checkout -q --detach "$HEAD_REF"
+          git log --oneline -1
+          cargo build --release --bin almide
+          mkdir -p /tmp/out
+          target/release/almide fmt spec/wasm_cross/json_parse_fast_paths.almd
+          git status --short
+      - name: Size ratchet before regeneration
+        run: cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tee /tmp/out/size-ratchet-before.txt | grep -E "B, pinned|REGRESSION|NEW fixture|row\(s\) moved|test result" | head -100 || true
+      - name: Regenerate ledgers
+        env:
+          ALMIDE_MANIFEST_TREE_CHECK: "off"
+        run: |
+          set -x
+          ORACLE=target/release/almide bash scripts/gen-run-manifest.sh || true
+          ORACLE=target/release/almide bash scripts/gen-check-manifest.sh || true
+          ORACLE=target/release/almide bash scripts/gen-ast-manifest.sh || true
+          ALMIDE_UPDATE_ALLOC=1 cargo test --release -p almide-wasm --test alloc_ledger 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_SIZES=1 cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_SIZE_LADDER=1 cargo test --release -p almide-wasm --test size_ladder 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_DUMPS=1 cargo test --release -p almide-wasm --test section_dump 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --release --test native_verified_floor_test 2>&1 | tail -5 || true
+          git status --short
+          git diff > /tmp/out/ledgers.diff || true
+          git diff --stat
+      - name: Ledger gates after regeneration
+        run: |
+          cargo test --release -p almide-wasm --no-fail-fast 2>&1 | tee /tmp/out/wasm-suite.txt | grep -E "^test result|FAILED|panicked|failures:" | head -80
+          cargo test --release --test native_verified_floor_test 2>&1 | tail -5
+          bash scripts/check-contracts.sh 2>&1 | tail -5
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ledgers
+          path: /tmp/out
           retention-days: 7
