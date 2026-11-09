@@ -26,13 +26,65 @@
 //!
 //! Out of scope, by one rule — a function whose callers are not all its
 //! direct named call sites keeps borrowing: `main`, a function taken as a
-//! value (`FuncRef`, so a closure call may reach it), and the render-linked
-//! runtime names (dotted or `__`-prefixed). A dotted name the program itself
-//! defines (a type's `T.decode`, its derived workers, a lifted `__almd_lift_N`)
-//! is called by name only.
+//! value (`FuncRef`, so a closure call may reach it), a linked stdlib entry
+//! (a dotted name, whose call the render may serve through its runtime
+//! body), and a function an op reaches other than by a named call (a
+//! generated drop, a fan arm the render spawns on a thread, a linked body
+//! a declared runtime route may serve instead). A linked
+//! private helper (`__r2o_arr`) is called by name like any other function, as
+//! is a dotted name the program itself defines (a type's `T.decode`, its
+//! derived workers, a lifted `__almd_lift_N`).
 
 use crate::{MirFunction, Op, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// A declared floor or runtime-served call that takes its argument `k` by
+/// value: handed there at its last use, the argument moves in.
+fn by_value(name: &str, k: usize) -> bool {
+    // A call the floor declares renders through the floor body, whose own
+    // modes decide; only a call it does not reaches the runtime route.
+    match crate::native_floor::declared(name) {
+        Some(_) => crate::native_floor::takes_by_value(name, k),
+        None => crate::native_hof::takes_by_value(name, k),
+    }
+}
+
+thread_local! {
+    /// The (function, param index) pairs every call site of the program fills
+    /// with a value released right after the call ([`rewrite`] sets them).
+    static DYING_SITES: std::cell::RefCell<BTreeSet<(String, usize)>> = const { std::cell::RefCell::new(BTreeSet::new()) };
+}
+
+thread_local! {
+    /// The (function, param index) pairs whose native signature is a native
+    /// `Result` ([`rewrite`] sets them).
+    static NATIVE_RESULTS: std::cell::RefCell<BTreeSet<(String, usize)>> = const { std::cell::RefCell::new(BTreeSet::new()) };
+}
+
+fn native_result(name: &str, k: usize) -> bool {
+    NATIVE_RESULTS.with(|d| d.borrow().contains(&(name.to_string(), k)))
+}
+
+fn dying_at_every_site(name: &str, k: usize) -> bool {
+    DYING_SITES.with(|d| d.borrow().contains(&(name.to_string(), k)))
+}
+
+/// Every call site of each function, by position: whether its argument there
+/// is a value the caller releases right after the call (`release_after`).
+fn dying_sites(functions: &[MirFunction]) -> BTreeSet<(String, usize)> {
+    let mut seen: BTreeMap<(String, usize), bool> = BTreeMap::new();
+    for f in functions {
+        let depth = depths(f);
+        for (i, op) in f.ops.iter().enumerate() {
+            let Op::CallFn { name, args, .. } = op else { continue };
+            for (k, a) in args.iter().enumerate() {
+                let dies = matches!(a, crate::CallArg::Handle(v) if release_after(f, i, *v, &depth).is_some());
+                *seen.entry((name.clone(), k)).or_insert(true) &= dies;
+            }
+        }
+    }
+    seen.into_iter().filter(|(_, d)| *d).map(|(s, _)| s).collect()
+}
 
 fn values(op: &Op) -> Vec<ValueId> {
     let mut out = Vec::new();
@@ -123,7 +175,7 @@ fn consumed_params(
             if (((crate::native_list_ops::is_list_concat(name) || name == "__str_concat")
                 && matches!(args.first(), Some(crate::CallArg::Handle(v)) if *v == p.value))
                 || args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value))
-                    .is_some_and(|k| crate::native_floor::takes_by_value(name, k)
+                    .is_some_and(|k| by_value(name, k)
                         // Or a program function whose own param there is a
                         // move param: the body hands the param on (`poke(mut
                         // b) = bytes.put_u8(b, 0, v)` over a linked body).
@@ -148,7 +200,7 @@ fn consumed_params(
             Op::CallFn { name, args, .. } => {
                 values(&func.ops[i]).iter().filter(|x| **x == p.value).count() == 1
                     && args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value)).is_some_and(|k| {
-                        crate::native_floor::takes_by_value(name, k)
+                        by_value(name, k)
                             || owned.moves(&func.ops[i], k)
                             // The list or string a concatenation grows in place.
                             || (k == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"))
@@ -168,6 +220,20 @@ fn consumed_params(
         if !given.is_empty() && func.ret != Some(p.value) && crate::mir_liveness::last_use_on_every_path(func, p.value, &given) {
             out.extend(given.iter().map(|&i| (k, i)));
             continue;
+        }
+        // Or given away on some arms and never read again on the others
+        // (`some(..) => runs + [..], none => [(c, 1)]`): taken over, it is
+        // released where it dies unread, at the start of each such arm (the
+        // release lands after the op before that start).
+        if !given.is_empty() && func.ret != Some(p.value) {
+            let dead = crate::mir_liveness::dead_arm_starts(func, p.value);
+            let mut ends = given.clone();
+            ends.extend(dead.iter().copied());
+            if !dead.is_empty() && crate::mir_liveness::last_use_on_every_path(func, p.value, &ends) {
+                out.extend(given.iter().map(|&i| (k, i)));
+                out.extend(dead.iter().map(|&s| (k, s - 1)));
+                continue;
+            }
         }
         // Or given away in one arm of a top-level `if` and only read in the
         // other (`match r { ok(_) => r, err(e) => err(f(e)) }`): taken over,
@@ -190,7 +256,20 @@ fn consumed_params(
         // convention does; one whose release follows the call hands it over.
         let exits_before = |end: usize| func.ops[..end].iter().any(|op| matches!(op, Op::Return { .. }));
         if at_top && plain && func.ret != Some(p.value) {
-            if let Some(end) = field_given(func, p.value, owned).filter(|&end| depth[end] == 0 && !exits_before(end)) {
+            // A field given inside a top-level branch (`match r { ok(xs) =>
+            // some(xs), err(_) => none }`): nothing reads the record after
+            // it, so the release follows the branch's close.
+            let close = |end: usize| {
+                if depth[end] == 0 {
+                    return Some(end);
+                }
+                (end + 1..func.ops.len()).find(|&j| depth[j] == 0 && !matches!(func.ops[j], Op::Else { .. })).filter(|&j| matches!(func.ops[j], Op::EndIf { .. }))
+            };
+            // Inside a branch the field moves on one path only, so the take
+            // over must cost no caller a copy: every site hands a value that
+            // dies at the call.
+            let close = |end: usize| close(end).filter(|&c| c == end || dying_at_every_site(&func.name, k));
+            if let Some(end) = field_given(func, p.value, owned).and_then(close).filter(|&end| !exits_before(end)) {
                 out.push((k, end));
             }
         }
@@ -281,7 +360,7 @@ fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>) -> Option<usiz
                 if vs.iter().filter(|v| derived.contains(v)).count() != 1 {
                     return None;
                 }
-                let by_value = crate::native_floor::takes_by_value(name, at)
+                let by_value = by_value(name, at)
                     || owned.moves(op, at)
                     // The list or string a concatenation grows in place.
                     || (at == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"));
@@ -588,7 +667,7 @@ impl Modes<'_> {
 /// other function's; its env (param 0) is always lent. A lambda that a
 /// closure call of several possible callees may reach keeps borrowing, and
 /// the modes are solved again.
-pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>) {
+pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sigs: &crate::render_native::NativeSigs) {
     if crate::render_native_move::drill_no_moves() {
         return;
     }
@@ -597,6 +676,31 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>) {
         .flat_map(|f| f.ops.iter())
         .filter_map(|op| match op {
             Op::FuncRef { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    // The functions some op reaches other than by a direct named call: a
+    // generated drop (`DropVariant` / `DropWrapperRec` name their target) and
+    // a fan arm (the render spawns it on a thread of its own).
+    DYING_SITES.with(|d| *d.borrow_mut() = dying_sites(functions));
+    let results: BTreeSet<(String, usize)> = sigs
+        .iter()
+        .flat_map(|(name, (params, _))| {
+            params
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| matches!(p, crate::render_native::NativeSigKind::Res | crate::render_native::NativeSigKind::ResStr))
+                .map(move |(k, _)| (name.clone(), k))
+        })
+        .collect();
+    NATIVE_RESULTS.with(|d| *d.borrow_mut() = results);
+    let reached_otherwise: BTreeSet<String> = functions
+        .iter()
+        .flat_map(|f| f.ops.iter())
+        .filter_map(|op| match op {
+            Op::DropVariant { ty, .. } => Some(format!("__drop_{}", crate::lower::drop_fn_ident(ty))),
+            Op::DropWrapperRec { drop_fn, .. } => Some(format!("__drop_{}", crate::lower::drop_fn_ident(drop_fn))),
+            Op::CallFn { name, .. } if crate::fan_native::arm(name).is_some() => Some(name.clone()),
             _ => None,
         })
         .collect();
@@ -614,6 +718,70 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>) {
             for (k, a) in args.iter().enumerate() {
                 if !matches!(a, crate::CallArg::Handle(_)) {
                     not_handle.insert((name.clone(), k));
+                }
+            }
+        }
+    }
+    // Nor a position some site fills with a value the ownership mirror does
+    // not track in its caller (a raw slot load, `prim.load_str(h + 12 + i *
+    // 8)`, a violation of the body as lowered): the caller cannot hand it
+    // over, so that param of every possible callee keeps borrowing while its
+    // other params may still be taken over.
+    // Nor one a site fills with a list literal (`decode_default(v, "ns",
+    // [1, 2])`): only lent, the render keeps it on the stack as an array;
+    // handed over, it would be a heap list built on every call.
+    for f in functions.iter() {
+        // A `var` the literal starts (`var xs = []`) is rebound, a heap list.
+        let rebound: BTreeSet<ValueId> = f
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::SetLocal { local, .. } => Some(*local),
+                _ => None,
+            })
+            .collect();
+        // Its elements are scalars (constants, arithmetic): a list of heap
+        // elements is a heap list whether lent or handed over.
+        let scalars: BTreeSet<ValueId> = f
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::ConstInt { dst, .. } | Op::IntBinOp { dst, .. } => Some(*dst),
+                _ => None,
+            })
+            .collect();
+        let literals: BTreeSet<ValueId> = f
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::ListLit { dst, elems } if !elems.is_empty() && !rebound.contains(dst) && elems.iter().all(|e| scalars.contains(e)) => Some(*dst),
+                _ => None,
+            })
+            .collect();
+        let untracked: BTreeSet<ValueId> = match crate::verify_ownership(f) {
+            Ok(()) => BTreeSet::new(),
+            Err(found) => found.iter().map(|v| v.value).collect(),
+        };
+        let untracked: BTreeSet<ValueId> = untracked.union(&literals).copied().collect();
+        for op in &f.ops {
+            let (callees, args): (Vec<String>, &[crate::CallArg]) = match op {
+                Op::CallFn { name, args, .. } => (vec![name.clone()], args),
+                Op::CallIndirect { args, .. } => (
+                    table
+                        .iter()
+                        .filter(|(_, shape)| {
+                            shape.len() == args.len()
+                                && shape.iter().zip(args.iter()).all(|(h, a)| *h == matches!(a, crate::CallArg::Handle(_)))
+                        })
+                        .map(|(n, _)| n.clone())
+                        .collect(),
+                    args,
+                ),
+                _ => continue,
+            };
+            for (k, a) in args.iter().enumerate() {
+                if matches!(a, crate::CallArg::Handle(v) if untracked.contains(v)) {
+                    not_handle.extend(callees.iter().map(|c| (c.clone(), k)));
                 }
             }
         }
@@ -643,11 +811,15 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>) {
         let eligible = |f: &MirFunction| {
             f.name != "main"
                 && (!f.name.contains('.') || own.contains(&f.name))
-                && (closure(f)
-                    || (!taken.contains(&f.name) && (!f.name.starts_with("__") || own.contains(&f.name))))
+                && (closure(f) || (!taken.contains(&f.name) && !reached_otherwise.contains(&f.name)))
+                // A linked body a declared runtime route may serve instead:
+                // that call lends, whatever the body's modes.
+                && crate::native_hof::of(&f.name).is_none()
         };
+        // A native `Result` param is the callee's own already (there is no
+        // borrowed Result kind): taking it over changes nothing.
         let takes_at = |f: &MirFunction, k: usize| {
-            !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0)
+            !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0) && !native_result(&f.name, k)
         };
         let Some((best, owned)) = solve_modes(functions, &table, &eligible, &takes_at, &hands_at) else {
             // A closure call the mirror refuses to hand over at leaves every
