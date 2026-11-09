@@ -241,23 +241,23 @@ export OUT LINPROVE ANCHORCHECK VERIFY
 : >> "$OUT/index"
 JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)"
 cut -f1 "$OUT/index" | xargs -P "$JOBS" -I{} bash -c 'stage2 "$1"' _ {}
-while IFS="$(printf '\t')" read -r N f; do
-  if [ -f "$OUT/$N.s2fail" ]; then
-    echo "STRUCTURAL WALL FAIL: $f: $(head -1 "$OUT/$N.s2fail")" >&2
-    tail -n +2 "$OUT/$N.s2fail" | sed 's/^/  /' >&2
+while IFS="$(printf '\t')" read -r K f; do
+  if [ -f "$OUT/$K.s2fail" ]; then
+    echo "STRUCTURAL WALL FAIL: $f: $(head -1 "$OUT/$K.s2fail")" >&2
+    tail -n +2 "$OUT/$K.s2fail" | sed 's/^/  /' >&2
     exit 1
   fi
-  [ -f "$OUT/$N.arc" ] || { echo "STRUCTURAL WALL FAIL: $f: the anchor check did not run" >&2; exit 1; }
-  arc="$(cat "$OUT/$N.arc")"
+  [ -f "$OUT/$K.arc" ] || { echo "STRUCTURAL WALL FAIL: $f: the anchor check did not run" >&2; exit 1; }
+  arc="$(cat "$OUT/$K.arc")"
   if [ "$arc" -ne 0 ] && [ "$MODE" = tests ]; then
     # The stdlib-test leg names each artifact whose events are not its
     # instructions (judged against the exception ledger's `anchors` rows
     # below) and judges the rest; its totals leave this artifact out.
-    printf '%s\t%s\n' "$f" "$(grep -m1 'REJECT' "$OUT/$N.anchor" | cut -c1-200)" >> "$OUT/anchor-rejects"
-    mv "$OUT/$N.anchor" "$OUT/$N.anchor-rejected"
+    printf '%s\t%s\n' "$f" "$(grep -m1 'REJECT' "$OUT/$K.anchor" | cut -c1-200)" >> "$OUT/anchor-rejects"
+    mv "$OUT/$K.anchor" "$OUT/$K.anchor-rejected"
   elif [ "$arc" -ne 0 ]; then
     echo "STRUCTURAL WALL FAIL: $f: a witness event is not the instruction the shipped bytes hold:" >&2
-    sed 's/^/  /' "$OUT/$N.anchor" >&2
+    sed 's/^/  /' "$OUT/$K.anchor" >&2
     exit 1
   fi
 done < "$OUT/index"
