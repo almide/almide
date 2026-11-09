@@ -143,18 +143,24 @@ def mutations(prop, w):
 
 print("== mutation matrix: mutation x judge (R = reject, A = ACCEPT)")
 pick = {"ownership": [], "bounds": []}
+want = {("ownership", "plain"): 3, ("ownership", "("): 4, ("ownership", "{"): 4, ("bounds", "plain"): 3, ("bounds", "("): 3, ("bounds", "{"): 3, ("bounds", "|"): 3}
+got = {k: 0 for k in want}
 for rec in sorted(allw, key=lambda r: len(r[5])):
     k, f, idx, prop, fn, w = rec
-    if prop not in pick or len(pick[prop]) >= 6:
+    if prop not in pick:
         continue
     if prop == "ownership" and sum(1 for c in w if c in OPS) < 2:
         continue
     if prop == "bounds" and not re.search(r"[acw]\d+", w):
         continue
+    kind = next((c for c in ("(", "{", "|") if c in w and (prop, c) in want), "plain")
+    if got[(prop, kind)] >= want[(prop, kind)]:
+        continue
     if judge_checker(prop, w) != 0:
         continue
-    # prefer variety: one with `(`, one with `{`, then any
+    got[(prop, kind)] += 1
     pick[prop].append(rec)
+print("  picked:", {f"{p}/{c}": n for (p, c), n in got.items()})
 accepts = 0
 for prop, recs in pick.items():
     for k, f, idx, _, fn, w in recs:
