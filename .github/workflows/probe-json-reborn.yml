@@ -303,3 +303,53 @@ jobs:
           name: ledgers
           path: /tmp/out
           retention-days: 7
+
+  fuzz:
+    if: contains(github.event.head_commit.message, '[fuzz]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - name: Build head and the fuzzer
+        run: |
+          set -eux
+          git checkout -q --detach "$HEAD_REF"
+          git log --oneline -1
+          cargo build --release --bin almide
+          (cd tools/xtarget-fuzz && cargo build --release 2>&1 | tail -2)
+      - name: Inspect the json and value functions (parity, diamond; complexity is not stampable here)
+        run: |
+          set +e
+          mkdir -p /tmp/fz
+          XF=tools/xtarget-fuzz/target/release/xtarget-fuzz
+          for fn in json.parse json.stringify json.stringify_pretty value.object value.array value.string; do
+            $XF inspect "$fn" --repo "$PWD" > /tmp/fz/$fn.txt 2>/tmp/fz/$fn.err; echo "exit $?" >> /tmp/fz/$fn.txt
+            echo "== $fn"; grep -E "^(# |parity|diamond|alloc|complexity|exit)" /tmp/fz/$fn.txt | cut -c1-300
+          done
+      - name: Differential fuzz campaign
+        run: |
+          set +e
+          tools/xtarget-fuzz/target/release/xtarget-fuzz run --minutes 30 --jobs 4 --repo "$PWD" --almide "$PWD/target/release/almide" --seed 4613 2>&1 | tail -40 | tee /tmp/fz/run.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: fuzz
+          path: /tmp/fz
+          retention-days: 7
