@@ -1,0 +1,113 @@
+name: Probe fan 4452 controls
+
+# Negative controls for #4452 (probe branch only, never merged).
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.97.0"
+  MIRI_TOOLCHAIN: "nightly-2026-08-01"
+  BASE: b6307a0d0
+
+permissions:
+  contents: read
+
+jobs:
+  loom-revert:
+    name: Loom, fix reverted (must show a causality violation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Unbroken model on the fixed source, then on the pre-fix list.rs
+        run: |
+          set -o pipefail
+          cargo test --release --locked --manifest-path tools/loom-fan-gate/Cargo.toml -- --test-threads=3 > /tmp/fixed.log 2>&1; echo "FIXED exit=$?"
+          grep -E '^test .* \.\.\. (ok|FAILED)$' /tmp/fixed.log
+          git show $BASE:runtime/rs/src/list.rs > runtime/rs/src/list.rs
+          git diff --stat
+          start=$(date +%s)
+          cargo test --release --locked --manifest-path tools/loom-fan-gate/Cargo.toml -- --test-threads=3 > /tmp/revert.log 2>&1; echo "REVERTED exit=$? in $(( $(date +%s) - start ))s"
+          grep -E '^test .* \.\.\. (ok|FAILED)$' /tmp/revert.log
+          grep -m3 -E 'Causality violation[^.]*' /tmp/revert.log || echo "NO causality violation"
+          grep -m5 -B2 -A12 'Causality violation' /tmp/revert.log | head -60
+
+  miri-fold:
+    name: Miri fold shape, ${{ matrix.harness }} harness, seeds 0..64
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        harness: [old, new]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.MIRI_TOOLCHAIN }}
+          components: miri, rust-src
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+      - run: cargo +${{ env.RUST_TOOLCHAIN }} build --release --bin almide
+      - run: cargo +${{ env.MIRI_TOOLCHAIN }} miri setup
+      - name: fold shape
+        env:
+          ALMIDE_BIN: ${{ github.workspace }}/target/release/almide
+          MIRI_SEEDS: "0..64"
+          MIRI_SHAPES: fold
+        run: |
+          [ ${{ matrix.harness }} = old ] && git show $BASE:scripts/miri-fan-gate.sh > scripts/miri-fan-gate.sh
+          bash scripts/miri-fan-gate.sh 2>&1 | tee /tmp/fold.log; echo "VERDICT exit=${PIPESTATUS[0]}"
+
+  miri-gate:
+    name: Miri gate shape, ${{ matrix.runtime }} runtime, seeds ${{ matrix.seeds }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [old, new]
+        seeds: ["0..64", "64..128", "128..192", "192..256"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.MIRI_TOOLCHAIN }}
+          components: miri, rust-src
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+      - name: Pre-fix runtime
+        if: matrix.runtime == 'old'
+        run: |
+          git show $BASE:runtime/rs/src/list.rs > runtime/rs/src/list.rs
+          git show $BASE:crates/almide-codegen/src/generated/rust_runtime.rs > crates/almide-codegen/src/generated/rust_runtime.rs
+          git diff --stat
+      - run: cargo +${{ env.RUST_TOOLCHAIN }} build --release --bin almide
+      - run: cargo +${{ env.MIRI_TOOLCHAIN }} miri setup
+      - name: gate shape
+        env:
+          ALMIDE_BIN: ${{ github.workspace }}/target/release/almide
+          MIRI_SEEDS: ${{ matrix.seeds }}
+          MIRI_SHAPES: gate
+        run: |
+          bash scripts/miri-fan-gate.sh 2>&1 | tee /tmp/gate.log; echo "VERDICT exit=${PIPESTATUS[0]}"
