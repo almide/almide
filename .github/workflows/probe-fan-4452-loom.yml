@@ -1,0 +1,42 @@
+name: Probe fan 4452 loom revert
+
+# Negative controls for #4452 (probe branch only, never merged).
+on:
+  workflow_dispatch:
+  push:
+    branches: [probe/fan-4452]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.97.0"
+  MIRI_TOOLCHAIN: "nightly-2026-08-01"
+  BASE: b6307a0d0
+
+permissions:
+  contents: read
+
+jobs:
+  loom-revert:
+    name: Loom, fix reverted (must show a causality violation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Unbroken model on the fixed source, then on the pre-fix list.rs
+        shell: bash {0}
+        run: |
+          cargo test --release --locked --manifest-path tools/loom-fan-gate/Cargo.toml -- --test-threads=3 > /tmp/fixed.log 2>&1; echo "FIXED exit=$?"
+          grep -E '^test .* \.\.\. (ok|FAILED)$' /tmp/fixed.log
+          git show $BASE:runtime/rs/src/list.rs > runtime/rs/src/list.rs
+          git diff --stat
+          start=$(date +%s)
+          cargo test --release --locked --manifest-path tools/loom-fan-gate/Cargo.toml -- --test-threads=3 > /tmp/revert.log 2>&1; echo "REVERTED exit=$? in $(( $(date +%s) - start ))s"
+          grep -E '^test .* \.\.\. (ok|FAILED)$' /tmp/revert.log
+          grep -m3 -E 'Causality violation[^.]*' /tmp/revert.log || echo "NO causality violation"
+          grep -m5 -B2 -A12 'Causality violation' /tmp/revert.log | head -60
+
