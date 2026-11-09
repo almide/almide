@@ -58,7 +58,7 @@ jobs:
       - name: Interp oracle and json tests (third vote)
         if: always()
         run: |
-          cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --no-fail-fast --test wasm_runtime_interp_oracle --test json_depth_limit_test --test wasm_runtime_cross_target 2>&1 | tee /tmp/quick/oracle.txt | grep -E "^test result|FAILED|panicked|json|abstain|BOTH" | head -120 || true
+          cd /tmp/src-head && ALMIDE_BIN=/tmp/bins/almide-head ALMIDE_EXPECT_TOOLS=1 CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --no-fail-fast --test wasm_runtime_interp_oracle --test json_depth_limit_test --test wasm_runtime_cross_target 2>&1 | tee /tmp/quick/oracle.txt | grep -E "^test result|FAILED|panicked|json|abstain|BOTH|agree|dissent|corpus:" | head -120 || true
       - name: Interp ledgers (check, then regenerate and diff)
         if: always()
         run: |
