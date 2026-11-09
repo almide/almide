@@ -427,6 +427,8 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_parse.almd", class = "fixture" },
+  { path = "tests/float_parse_cross_target_test.rs", name = "float_parse_cross_target_fixed_and_random", class = "fuzz", n = 9600 },
+  { path = "tests/float_parse_cross_target_test.rs", name = "float_parse_cross_target_halfway", class = "fuzz", n = 180 },
 ]
 [[contract]]
 id        = "C-025"
