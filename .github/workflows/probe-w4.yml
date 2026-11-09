@@ -34,6 +34,14 @@ jobs:
           tr ';' '\n' < /tmp/init.w | wc -l
           ./target/debug/examples/emit_structural_bundle $f --anchors /tmp/a.anchors > /tmp/a.bundle || true
           ./target/debug/almide-anchor-check /tmp/a.anchors.wasm /tmp/a.bundle /tmp/a.anchors || true
+          git apply proofs/fixtures/init-witness/reinject/carve-store-lost.patch
+          git diff --stat
+          cargo build -q -p almide-wasm --example emit_structural_bundle
+          ./target/debug/examples/emit_structural_bundle $f --only init '(program)' > /tmp/init2.w || true
+          tr ';' '\n' < /tmp/init2.w | grep -n -E '^ *[kce][0-9]' | head -40
+          tr ';' '\n' < /tmp/init2.w | head -3
+          ./target/debug/almide-verify init /tmp/init2.w; echo "verify exit $?"
+          git checkout -- .
   drills:
     runs-on: ubuntu-latest
     timeout-minutes: 180
