@@ -1,0 +1,26 @@
+// The corpus row (ADR-0033 phase 0): parse `corpus.json` K times (each
+// document dropped before the next) and stringify one parsed document K times.
+// Line 1 is a checksum every implementation must print alike; line 2 is the
+// per-operation time in ns. (Writers may differ in number spelling, so the
+// written length is reported, not compared across implementations.)
+import fs
+import json
+
+let k = 20
+
+effect fn main() -> Unit = {
+  let text = fs.read_text("corpus.json")!
+  let doc = json.parse(text) ?? value.null()
+  let t0 = datetime.monotonic_ns()
+  let parsed = list.range(0, k)
+    |> list.map((_) => match json.parse(text) {
+      ok(_) => 1,
+      err(_) => 0,
+    })
+    |> list.sum
+  let t1 = datetime.monotonic_ns()
+  let written = list.range(0, k) |> list.map((_) => string.len(json.stringify(doc))) |> list.sum
+  let t2 = datetime.monotonic_ns()
+  println("${parsed} ${written / k}")
+  println("CORPUS parse=${(t1 - t0) / k} stringify=${(t2 - t1) / k}")
+}
