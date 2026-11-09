@@ -1202,45 +1202,85 @@ fn __jp_pairs(fam: Bytes, sc: Bytes, k: Int) -> Unit = {
 
 // PASS 2's walk: one tape entry at a time, in document post-order.
 fn __jp_build(t: String, tl: Int, fam: Bytes, sc: Bytes) -> Unit = {
-  let end = __jp_word(sc, 8)
-  var at = 64
-  while at < end {
-    __jp_node(t, tl, fam, sc, __jp_word(sc, at))
-    at = at + 8
+  let sn = prim.load32(prim.handle(sc) + 4)
+  let fl = prim.load32(prim.handle(fam) + 4)
+  if sn < 64 then __jp_disagree()
+  else {
+    let end = prim.load64(prim.handle(sc) + 20)
+    var at = 64
+    while at < end {
+      if at < 64 then {
+        prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+        at = end
+      } else if at > sn - 8 then {
+        prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+        at = end
+      } else {
+        let w = prim.load64(prim.handle(sc) + 12 + at)
+        let kind = prim.band(w, 15)
+        if kind == 2 then __jp_push_at(sc, __jp_str2(t, fam, sc, w))
+        else if kind == 9 then __jp_list(fam, sc, prim.bshr(w, 4), 5)
+        else if kind == 10 then __jp_pairs(fam, sc, prim.bshr(w, 4))
+        else {
+          // A scalar: its payload first (a string carves its String), then
+          // its Value box, carved and pushed here.
+          let x = if kind == 1 then __jp_str2(t, fam, sc, w)
+          else if kind == 3 then __jp_mantissa(t, prim.bshr(w, 32), prim.bshr(w, 32) + prim.band(prim.bshr(w, 4), 31), 0)
+          else if kind == 4 then 0 - __jp_mantissa(t, prim.bshr(w, 32), prim.bshr(w, 32) + prim.band(prim.bshr(w, 4), 31), 0)
+          else if kind == 6 then 1
+          else if kind < 9 then 0
+          else __jp_number2(t, tl, w)
+          let tag = if kind == 1 then 4 else if kind < 5 then 2 else if kind == 5 then 3 else if kind == 8 then 0 else if kind < 9 then 1 else 2
+          let cur = prim.load64(prim.handle(sc) + 12)
+          let top = prim.load64(prim.handle(sc) + 36)
+          if cur < 0 then {
+            prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+            at = end
+          } else if cur > fl - 28 then {
+            prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+            at = end
+          } else if top < 32 then {
+            prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+            at = end
+          } else if top > sn - 4 then {
+            prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+            at = end
+          } else {
+            prim.store32(prim.handle(fam) + 12 + cur, cur + 2147483660)
+            prim.store32(prim.handle(fam) + 16 + cur, 16)
+            prim.store32(prim.handle(fam) + 20 + cur, 16)
+            prim.store32(prim.handle(fam) + 24 + cur, tag)
+            prim.store32(prim.handle(fam) + 28 + cur, 0)
+            prim.store64(prim.handle(fam) + 32 + cur, x)
+            prim.store64(prim.handle(sc) + 12, cur + 28)
+            prim.store32(prim.handle(sc) + 12 + top, prim.handle(fam) + 12 + cur)
+            prim.store64(prim.handle(sc) + 36, top + 4)
+          }
+        }
+        at = at + 8
+      }
+    }
   }
 }
 
-fn __jp_node(t: String, tl: Int, fam: Bytes, sc: Bytes, w: Int) -> Unit = {
-  let kind = prim.band(w, 15)
-  if kind == 1 then __jp_box(fam, sc, 4, __jp_str2(t, fam, sc, w))
-  else if kind == 2 then __jp_push_at(sc, __jp_str2(t, fam, sc, w))
-  else if kind == 3 then {
-    let lead = prim.bshr(w, 32)
-    __jp_box(fam, sc, 2, __jp_mantissa(t, lead, lead + prim.band(prim.bshr(w, 4), 31), 0))
-  } else if kind == 4 then {
-    let lead = prim.bshr(w, 32)
-    __jp_box(fam, sc, 2, 0 - __jp_mantissa(t, lead, lead + prim.band(prim.bshr(w, 4), 31), 0))
-  } else if kind == 10 then __jp_pairs(fam, sc, prim.bshr(w, 4))
-  else if kind == 9 then __jp_list(fam, sc, prim.bshr(w, 4), 5)
-  else if kind == 6 then __jp_box(fam, sc, 1, 1)
-  else if kind == 7 then __jp_box(fam, sc, 1, 0)
-  else if kind == 8 then __jp_box(fam, sc, 0, 0)
-  else if kind == 5 then {
-    let q = prim.bshr(w, 32)
-    match float.parse(__jp_substr(t, tl, q, q + prim.band(prim.bshr(w, 4), 268435455))) {
-      ok(x) => __jp_box(fam, sc, 3, prim.fbits(x)),
-      err(_) => __jp_disagree(),
-    }
-  } else if kind == 11 then {
-    let q = prim.bshr(w, 32)
-    let end = q + prim.band(prim.bshr(w, 4), 268435455)
+// A Float's bits, or an Int past 18 digits, from its tape entry.
+fn __jp_number2(t: String, tl: Int, w: Int) -> Int = {
+  let q = prim.bshr(w, 32)
+  let end = q + prim.band(prim.bshr(w, 4), 268435455)
+  if prim.band(w, 15) == 5 then match float.parse(__jp_substr(t, tl, q, end)) {
+    ok(x) => prim.fbits(x),
+    err(_) => {
+      __jp_disagree()
+      0
+    },
+  } else {
     let neg = __jp_byte(t, q) == 45
     let lead = if neg then q + 1 else q
     let d = end - lead
     let m = __jp_mantissa(t, lead, if d > 18 then lead + 18 else end, 0)
     let last = if d > 18 then __jp_byte(t, lead + 18) - 48 else 0
-    __jp_box(fam, sc, 2, if d > 18 then (if neg then (0 - m) * 10 - last else m * 10 + last) else if neg then 0 - m else m)
-  } else __jp_disagree()
+    if d > 18 then (if neg then (0 - m) * 10 - last else m * 10 + last) else if neg then 0 - m else m
+  }
 }
 
 // The list block of the stack's top k handles (popped, in stack order) and
@@ -1310,6 +1350,14 @@ fn __jp_copy_tf(t: String, a: Int, fam: Bytes, d: Int, k: Int) -> Unit = {
       } else {
         prim.store64(prim.handle(fam) + 12 + d + i, prim.load64(prim.handle(t) + 12 + a + i))
         i = i + 8
+      }
+    }
+    while i <= k - 4 {
+      if i < 0 then {
+        i = k
+      } else {
+        prim.store32(prim.handle(fam) + 12 + d + i, prim.load32(prim.handle(t) + 12 + a + i))
+        i = i + 4
       }
     }
     while i < k {
