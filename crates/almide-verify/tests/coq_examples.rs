@@ -57,6 +57,14 @@ fn ownership_checker_examples() {
             // check_bc
             ("i{i|i}dd", true),
             // check_xc (format v5, the arm-exit marker)
+            // #4631: an unterminated region, a stray separator or closer, a
+            // `(` reopened inside a loop
+            ("{|id", false),
+            ("(id", false),
+            ("[id|", false),
+            ("i|d", false),
+            ("id}", false),
+            ("(id(id)", false),
             ("i{dx|}d", true),
             ("i{|dx}d", true),
             ("i{mx|}d", true),

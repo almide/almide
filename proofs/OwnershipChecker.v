@@ -1156,14 +1156,14 @@ Definition close_brx (st : brxst) : CertItem :=
       else CBranch (rev th) (rev el)
   end.
 
-(* Flush the in-progress line, defensively closing a dangling `{`-branch first
-   (well-formed certs close every `{` before newline/EOF), else deferring to
-   the format-v3 flush. *)
+(* Flush the in-progress line. A `{`, `[` or `(` still open at the newline
+   or the end poisons the line (#4631): the recorder closes every region, and
+   a closing byte dropped from a witness must not read as if it were there. *)
 Definition finish_line_x (cur : list CertItem) (lp : option (list Op))
                          (cp : option condst) (bp : option brxst) : list CertItem :=
-  match bp with
-  | Some st => rev (close_brx st :: cur)
-  | None => finish_line_c cur lp cp
+  match bp, cp, lp with
+  | None, None, None => rev cur
+  | _, _, _ => rev (CPoison :: cur)
   end.
 
 Fixpoint parse_xc (s : string) (cur : list CertItem)
@@ -1221,12 +1221,20 @@ Fixpoint parse_xc (s : string) (cur : list CertItem)
           | None =>
               if Ascii.eqb b lbrace then parse_xc rest cur lp None (Some (false, false, false, false, false, false, [], []))
               else if Ascii.eqb b lbracket then parse_xc rest cur lp (Some (false, [], [])) None
-              else if Ascii.eqb b lparen then parse_xc rest cur (Some []) None None
+              else if Ascii.eqb b lparen then
+                (* a `(` inside an open loop would drop that loop's body *)
+                match lp with
+                | Some _ => parse_xc rest (CPoison :: cur) (Some []) None None
+                | None => parse_xc rest cur (Some []) None None
+                end
               else if Ascii.eqb b rparen then
                 match lp with
                 | Some body => parse_xc rest (CLoop (rev body) :: cur) None None None
-                | None => parse_xc rest cur None None None
+                | None => parse_xc rest (CPoison :: cur) None None None
                 end
+              (* a separator or a closer outside the region it belongs to *)
+              else if orb (Ascii.eqb b bar) (orb (Ascii.eqb b rbrace) (Ascii.eqb b rbracket))
+              then parse_xc rest (CPoison :: cur) lp None None
               else match parse_byte b with
                    | Some op =>
                        match lp with
@@ -1547,6 +1555,23 @@ Example cert_xc_abort_fault_rejects : check_xc "{dt|}"%string = false.
 Proof. reflexivity. Qed.
 (* A PATH THAT "ABORTS" BUT CONTINUES: an op after `t` is malformed. *)
 Example cert_xc_abort_continues_rejects : check_xc "i{td|d}"%string = false.
+Proof. reflexivity. Qed.
+
+(* #4631: structure the recorder always closes. An unterminated region, a
+   stray separator or closer, or a `(` reopened inside a loop poisons the
+   line, so a witness with a closing byte dropped no longer reads as the
+   closed one. *)
+Example cert_xc_unclosed_branch_rejects : check_xc "{|id"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_unclosed_loop_rejects : check_xc "(id"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_unclosed_filter_rejects : check_xc "[id|"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_stray_bar_rejects : check_xc "i|d"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_stray_closer_rejects : check_xc "id}"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_reopened_loop_rejects : check_xc "(id(id)"%string = false.
 Proof. reflexivity. Qed.
 (* outside a branch / both arms terminal / exit and abort on one site. *)
 Example cert_xc_abort_toplevel_rejects : check_xc "it"%string = false.
