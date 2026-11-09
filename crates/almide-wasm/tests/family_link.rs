@@ -22,8 +22,10 @@ fn has_retarget(bytes: &[u8]) -> bool {
     bytes.windows(RETARGET.len()).any(|w| w == RETARGET)
 }
 
+// `local`: an entry-program `fn` is public, and a public fn is an export
+// (a DCE root, so linked); a local one nobody calls is not linked.
 const UNREACHED: &str = r#"ATTR
-fn make(n: Int) -> String = "v" + int.to_string(n)
+local fn make(n: Int) -> String = "v" + int.to_string(n)
 
 fn main() -> Unit = {
   let s = "a" + int.to_string(3)
@@ -49,6 +51,7 @@ fn a_module_that_links_no_producer_keeps_its_bytes() {
     let plain = emit(&variant(UNREACHED, false));
     let declared = emit(&variant(UNREACHED, true));
     assert!(!has_retarget(&plain));
+    assert!(!has_retarget(&declared), "an unreached producer must not arm the redirect");
     assert_eq!(plain, declared, "an unreached producer declaration must not move a byte");
 }
 
