@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn almide_bin() -> String {
-    env!("CARGO_BIN_EXE_almide").to_string()
+    std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string())
 }
 
 fn fresh_root(tag: &str) -> PathBuf {

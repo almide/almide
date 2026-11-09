@@ -14,12 +14,21 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        old: [v0.67.1, cf004ae7a^]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: "1.97.0"
-      - run: cargo build --release --bin almide && cargo test --release --no-run --test concurrent_build_artifact_test
+      - run: cargo test --release --no-run --test concurrent_build_artifact_test
+      - name: build the old compiler
+        run: |
+          git fetch -q --tags origin || true
+          git worktree add /tmp/old "${{ matrix.old }}"
+          (cd /tmp/old && cargo build --release --bin almide)
+          echo "ALMIDE_BIN=/tmp/old/target/release/almide" >> "$GITHUB_ENV"
       - name: race x3 (2 cpus on linux)
         run: |
           for i in 1 2 3; do
