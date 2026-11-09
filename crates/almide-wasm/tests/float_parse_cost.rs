@@ -67,8 +67,9 @@ fn fuel_of(src: &str) -> (u64, i64) {
 
 /// The fuel per 17–18-digit literal float.parse may spend. The one-bit
 /// shifter spent 195,871; the multi-bit shifter spends 15,244 (probe run
-/// 42607999728). Only moves DOWN.
-const CEILING_PER_FLOAT: u64 = 16_000;
+/// 42607999728); the direct normalization 13,018 (probe run 42613154831).
+/// Only moves DOWN.
+const CEILING_PER_FLOAT: u64 = 14_000;
 
 #[test]
 fn float_parse_long_literals_cost_a_few_passes() {
