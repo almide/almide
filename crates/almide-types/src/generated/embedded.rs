@@ -6796,22 +6796,24 @@ fn __hpd_lshk(hb: Int, k: Int) -> Unit = {
 
 
 
-fn __hpd_rshk_prime(hb: Int, r: Int, acc: Int, p: Int, n: Int) -> Int = if acc < p then __hpd_rshk_prime(
-  hb,
-  r + 1,
-  acc * 10 + (if r < n then __hpd_d(hb, r) else 0),
-  p,
-  n,
-)
-else r
+fn __hpd_rshk_prime(hb: Int, r: Int, acc: Int, p: Int, n: Int) -> Int =
+  if acc < p then __hpd_rshk_prime(
+    hb,
+    r + 1,
+    acc * 10 + (if r < n then __hpd_d(hb, r) else 0),
+    p,
+    n,
+  )
+  else r
 
-fn __hpd_rshk_main(hb: Int, r: Int, acc: Int, w: Int, n: Int, k: Int) -> Int = if r < n or acc > 0 then {
-  let out = prim.bshr(acc, k)
-  let nx = (acc - prim.bshl(out, k)) * 10 + (if r < n then __hpd_d(hb, r) else 0)
-  if w < 800 then __hpd_sd(hb, w, out)
-  else (if out != 0 then __hpd_str8(hb, 1) else ())
-  __hpd_rshk_main(hb, r + 1, nx, (if w < 800 then w + 1 else w), n, k)
-} else w
+fn __hpd_rshk_main(hb: Int, r: Int, acc: Int, w: Int, n: Int, k: Int) -> Int =
+  if r < n or acc > 0 then {
+    let out = prim.bshr(acc, k)
+    let nx = (acc - prim.bshl(out, k)) * 10 + (if r < n then __hpd_d(hb, r) else 0)
+    if w < 800 then __hpd_sd(hb, w, out)
+    else (if out != 0 then __hpd_str8(hb, 1) else ())
+    __hpd_rshk_main(hb, r + 1, nx, (if w < 800 then w + 1 else w), n, k)
+  } else w
 
 fn __hpd_rshk(hb: Int, k: Int) -> Unit = {
   let n = __hpd_n(hb)
