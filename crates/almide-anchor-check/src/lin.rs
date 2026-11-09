@@ -273,7 +273,7 @@ pub fn code_params(anchors: &str) -> BTreeMap<usize, BTreeMap<u32, Option<i128>>
 /// (the linear certificate's) or on both left out.
 pub fn table_params(anchors: &str) -> BTreeMap<usize, BTreeMap<u32, Option<i128>>> {
     let (routines, selfhost) = (routine_params(anchors), selfhost_params(anchors));
-    let code = code_params(anchors).into_iter().filter(|(p, _)| !selfhost.contains_key(p) && !routines.contains_key(p));
+    let code: Vec<_> = code_params(anchors).into_iter().filter(|(p, _)| !selfhost.contains_key(p) && !routines.contains_key(p)).collect();
     routines.into_iter().filter(|(p, _)| !selfhost.contains_key(p)).chain(code).collect()
 }
 
