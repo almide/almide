@@ -100,12 +100,11 @@ fn json_parse(text: String) -> Result[Value, String] = {
     let total = prim.load64(s)
     if total < 0 then prim.die(prim.handle("Error: json parse: the passes disagree\n")) else ()
     if total > 2147483647 then prim.die(prim.handle("Error: json parse: the document is too large\n")) else ()
-    let fam = prim.alloc_bytes(total)
-    prim.store64(s, 0)
+    let fam = prim.family(total)
     prim.store64(s + 8, 32)
     let _e = __jp_v2(text, tl, 0, fam, sc)
     // The passes must agree: every byte carved, one handle left.
-    if prim.load64(s) != total then __jp_disagree() else ()
+    prim.family_seal(fam)
     if prim.load64(s + 8) != 36 then __jp_disagree() else ()
     let top: Value = prim.load_handle(s + 32)
     ok(top)
@@ -897,18 +896,13 @@ else {
 // A Value box with `tag` and the 8-byte payload `x`, carved and pushed.
 fn __jp_box(fam: Bytes, sc: Bytes, tag: Int, x: Int) -> Unit = {
   let fl = prim.load32(prim.handle(fam) + 4)
-  let cur = __jp_word(sc, 0)
-  if cur < 0 then __jp_disagree()
-  else if cur + 28 > fl then __jp_disagree()
+  let b = prim.carve(fam, 16)
+  let o = b - prim.handle(fam) - 12
+  if o < 0 then __jp_disagree()
+  else if o + 28 > fl then __jp_disagree()
   else {
-    let b = prim.handle(fam) + 12 + cur
-    prim.store32(b, cur + 2147483660)
-    prim.store32(b + 4, 16)
-    prim.store32(b + 8, 16)
-    prim.store32(b + 12, tag)
-    prim.store32(b + 16, 0)
-    prim.store64(b + 20, x)
-    __jp_set_word(sc, 0, cur + 28)
+    prim.store32(prim.handle(fam) + 12 + o + 12, tag)
+    prim.store64(prim.handle(fam) + 12 + o + 20, x)
     __jp_push(sc, b)
   }
 }
@@ -944,50 +938,29 @@ fn __jp_pop(sc: Bytes) -> Int = {
 // A (key, value) pair block, carved; answers its handle.
 fn __jp_pair(fam: Bytes, sc: Bytes, kh: Int, vh: Int) -> Int = {
   let fl = prim.load32(prim.handle(fam) + 4)
-  let cur = __jp_word(sc, 0)
-  if cur < 0 then {
+  let b = prim.carve(fam, 8)
+  let o = b - prim.handle(fam) - 12
+  if o < 0 then {
     __jp_disagree()
     0
-  } else if cur + 20 > fl then {
+  } else if o + 20 > fl then {
     __jp_disagree()
     0
   } else {
-    let b = prim.handle(fam) + 12 + cur
-    prim.store32(b, cur + 2147483660)
-    prim.store32(b + 4, 8)
-    prim.store32(b + 8, 8)
-    prim.store32(b + 12, kh)
-    prim.store32(b + 16, vh)
-    __jp_set_word(sc, 0, cur + 20)
+    prim.store32(prim.handle(fam) + 12 + o + 12, kh)
+    prim.store32(prim.handle(fam) + 12 + o + 16, vh)
     b
   }
 }
 
 // A list block of the top `k` handles (popped), in stack order.
 fn __jp_list(fam: Bytes, sc: Bytes, k: Int) -> Int = {
-  let fl = prim.load32(prim.handle(fam) + 4)
-  let cur = __jp_word(sc, 0)
-  let cap = __jp_cap(k * 4)
-  if cur < 0 then {
-    __jp_disagree()
-    0
-  } else if cur + 12 + cap > fl then {
-    __jp_disagree()
-    0
-  } else if cap < k * 4 then {
-    __jp_disagree()
-    0
-  } else {
-    let b = prim.handle(fam) + 12 + cur
-    prim.store32(b, cur + 2147483660)
-    prim.store32(b + 4, k * 4)
-    prim.store32(b + 8, cap)
-    __jp_set_word(sc, 0, cur + 12 + cap)
-    let top = __jp_word(sc, 8)
-    __jp_copy_sf(sc, top - k * 4, fam, cur + 12, k * 4)
-    __jp_set_word(sc, 8, top - k * 4)
-    b
-  }
+  let b = prim.carve(fam, k * 4)
+  let o = b - prim.handle(fam) - 12
+  let top = __jp_word(sc, 8)
+  __jp_copy_sf(sc, top - k * 4, fam, o + 12, k * 4)
+  __jp_set_word(sc, 8, top - k * 4)
+  b
 }
 
 // Copy scratch bytes [a, a + k) to family offset d (a stack slice into a
@@ -1052,27 +1025,13 @@ fn __jp_copy_tf(t: String, a: Int, fam: Bytes, d: Int, k: Int) -> Unit = {
 // The String block of the checked string opened at p (scan answer r),
 // carved; answers its handle.
 fn __jp_str2(t: String, p: Int, r: Int, fam: Bytes, sc: Bytes) -> Int = {
-  let fl = prim.load32(prim.handle(fam) + 4)
   let n = __jp_scan_n(r)
-  let cap = __jp_cap(n)
-  let cur = __jp_word(sc, 0)
-  if cur < 0 then {
-    __jp_disagree()
-    0
-  } else if cur + 12 + cap > fl then {
-    __jp_disagree()
-    0
-  } else {
-    let b = prim.handle(fam) + 12 + cur
-    prim.store32(b, cur + 2147483660)
-    prim.store32(b + 4, n)
-    prim.store32(b + 8, cap)
-    __jp_set_word(sc, 0, cur + 12 + cap)
-    if __jp_scan_esc(r) == 0 then __jp_copy_tf(t, p + 1, fam, cur + 12, n)
-    else if __jp_str_fill(t, p + 1, __jp_scan_end(r), fam, cur + 12, cur + 12 + n) != cur + 12 + n then __jp_disagree()
-    else ()
-    b
-  }
+  let b = prim.carve(fam, n)
+  let o = b - prim.handle(fam) - 12
+  if __jp_scan_esc(r) == 0 then __jp_copy_tf(t, p + 1, fam, o + 12, n)
+  else if __jp_str_fill(t, p + 1, __jp_scan_end(r), fam, o + 12, o + 12 + n) != o + 12 + n then __jp_disagree()
+  else ()
+  b
 }
 
 // Decode text [p, e) of a checked string into family offsets from o, below
