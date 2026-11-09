@@ -253,12 +253,21 @@ fn snapshot_kind(a: i64) -> Option<u32> {
 
 /// The slot's take that ends the straight line after the read at `i` of the
 /// slot at `a`, and whether another read of it comes first.
+///
+/// A loop or branch opened and closed between the two is no edge out of the
+/// straight line (#4621: a loop of field writes on the taken value, the
+/// global taken once around it): its exits land before the take. One that
+/// encloses the read, and any return, still ends the line.
 fn take_after(ops: &[Op], i: usize, a: i64, consts: &BTreeMap<ValueId, i64>, quiet: &Quiet) -> Option<(usize, bool)> {
     let mut reread = false;
+    let mut depth = 0usize;
     for (j, o) in ops.iter().enumerate().skip(i + 1) {
         match o {
-            Op::CallFn { name, .. } if name == "__mg_take" && accessed(o, consts) == Some(a) => return Some((j, reread)),
+            Op::CallFn { name, .. } if depth == 0 && name == "__mg_take" && accessed(o, consts) == Some(a) => return Some((j, reread)),
             Op::Prim { kind: PrimKind::LoadHandle, .. } if accessed(o, consts) == Some(a) => reread = true,
+            Op::LoopStart | Op::IfThen { .. } => depth += 1,
+            Op::LoopEnd | Op::EndIf { .. } if depth > 0 => depth -= 1,
+            Op::LoopBreakUnless { .. } | Op::Else { .. } if depth > 0 => {}
             _ if blocks(o, a, consts, quiet) => return None,
             _ => {}
         }
