@@ -1231,12 +1231,13 @@ fn __jp_build(t: String, tl: Int, fam: Bytes, sc: Bytes) -> Unit = {
           else if kind < 9 then 0
           else __jp_number2(t, tl, w)
           let tag = if kind == 1 then 4 else if kind < 5 then 2 else if kind == 5 then 3 else if kind == 8 then 0 else if kind < 9 then 1 else 2
-          let cur = prim.load64(prim.handle(sc) + 12)
+          let b = prim.carve(fam, 16)
+          let o = b - prim.handle(fam)
           let top = prim.load64(prim.handle(sc) + 36)
-          if cur < 0 then {
+          if o < 0 then {
             prim.die(prim.handle("Error: json parse: the passes disagree\n"))
             at = end
-          } else if cur > fl - 28 then {
+          } else if o > fl - 16 then {
             prim.die(prim.handle("Error: json parse: the passes disagree\n"))
             at = end
           } else if top < 32 then {
@@ -1246,14 +1247,9 @@ fn __jp_build(t: String, tl: Int, fam: Bytes, sc: Bytes) -> Unit = {
             prim.die(prim.handle("Error: json parse: the passes disagree\n"))
             at = end
           } else {
-            prim.store32(prim.handle(fam) + 12 + cur, cur + 2147483660)
-            prim.store32(prim.handle(fam) + 16 + cur, 16)
-            prim.store32(prim.handle(fam) + 20 + cur, 16)
-            prim.store32(prim.handle(fam) + 24 + cur, tag)
-            prim.store32(prim.handle(fam) + 28 + cur, 0)
-            prim.store64(prim.handle(fam) + 32 + cur, x)
-            prim.store64(prim.handle(sc) + 12, cur + 28)
-            prim.store32(prim.handle(sc) + 12 + top, prim.handle(fam) + 12 + cur)
+            prim.store32(prim.handle(fam) + 12 + o, tag)
+            prim.store64(prim.handle(fam) + 20 + o, x)
+            prim.store32(prim.handle(sc) + 12 + top, b)
             prim.store64(prim.handle(sc) + 36, top + 4)
           }
         }
