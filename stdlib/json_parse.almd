@@ -44,10 +44,13 @@
 //     later, pass 2's handle stack) and, for an object of 16 keys or more,
 //     a transient key index (deterministic hash, sort fallback, owner Q11).
 //     A refused document costs no family.
-//   - PASS 2 (`__jp_v2` …) allocates the family ONCE — a flat Bytes root of
-//     the exact size — and carves every block of the document inside it,
-//     post-order: a container's children first (their handles pushed on the
-//     scratch stack), then its list block, filled from the stack. Every
+//   - PASS 1 also records the TAPE: one 8-byte entry per token, in
+//     post-order (a container's entry after its members), so pass 2 never
+//     reads the grammar again.
+//   - PASS 2 (`__jp_build`) allocates the family ONCE — a flat Bytes root of
+//     the exact size — and walks the tape, carving every block of the
+//     document inside it: a container's children first (their handles pushed
+//     on the scratch stack), then its list block, filled from the stack. Every
 //     carve checks `cursor + size <= end` and every push its room, and dies
 //     (a defined abort) otherwise: pass 2 never trusts pass 1's arithmetic.
 // An INTERIOR block keeps the ordinary layout `[rc][len][cap][payload]`; its
@@ -76,21 +79,26 @@ fn __json_depth_error() -> String = "json: nesting deeper than 1000"
 //
 // ── the scratch block ──
 // [0] i64 family bytes (pass 1) / carve cursor (pass 2)
-// [8] i64 handle count (pass 1) / handle stack top, a byte offset (pass 2)
+// [8] i64 the tape's end, a byte offset
 // [16] i64 key-span stack top, a byte offset (pass 1)
-// [24] i64 unused
-// [32 ..] the key-span stack (pass 1: 8 bytes a key) / the handle stack
-//         (pass 2: 4 bytes a handle). Sized from the text length: a key
-//         takes at least four bytes of text and a handle at least 4/3.
+// [24] i64 handle stack top, a byte offset (pass 2)
+// [32] i64 the tape's limit, B = 6 * len(text) + 96
+// [64, B) the tape: a token takes at least two bytes of text (a separator
+//         or a bracket with it), save one, so 4 * len + 8 tape bytes.
+// [B ..] the key-span stack (pass 1: 8 bytes a key, a key takes at least
+//         four bytes of text) / the handle stack (pass 2: 4 bytes a handle,
+//         a handle at least 4/3 of a text byte).
 @family_producer
 fn json_parse(text: String) -> Result[Value, String] = {
   let tl = prim.load32(prim.handle(text) + 4)
-  if tl > 1000000000 then prim.die(prim.handle("Error: json parse: text too long\n")) else ()
-  let sc = prim.alloc_bytes(tl * 3 + 64)
+  if tl > 100000000 then prim.die(prim.handle("Error: json parse: text too long\n")) else ()
+  let base = tl * 6 + 96
+  let sc = prim.alloc_bytes(tl * 9 + 160)
   __jp_set_word(sc, 0, 0)
-  __jp_set_word(sc, 8, 0)
-  __jp_set_word(sc, 16, 32)
-  __jp_set_word(sc, 24, 0)
+  __jp_set_word(sc, 8, 64)
+  __jp_set_word(sc, 16, base)
+  __jp_set_word(sc, 24, base)
+  __jp_set_word(sc, 32, base)
   let r = __jp_v1(text, tl, 0, 0, sc)
   let q = if r < 0 then r else __jp_trail(text, tl, r)
   if q < 0 then err(__jp_message(text, tl, 0 - 1 - q))
@@ -100,24 +108,26 @@ fn json_parse(text: String) -> Result[Value, String] = {
     if total > 2147483647 then prim.die(prim.handle("Error: json parse: the document is too large\n")) else ()
     let fam = prim.alloc_bytes(total)
     __jp_set_word(sc, 0, 0)
-    __jp_set_word(sc, 8, 32)
-    let _e = __jp_v2(text, tl, 0, fam, sc)
+    __jp_build(text, tl, fam, sc)
     // The passes must agree: every byte carved, one handle left.
     if __jp_word(sc, 0) != total then __jp_disagree() else ()
-    if __jp_word(sc, 8) != 36 then __jp_disagree() else ()
-    ok(__jp_top(sc))
+    if __jp_word(sc, 24) != base + 4 then __jp_disagree() else ()
+    ok(__jp_top(sc, base))
   }
 }
 
 // The document's top Value: the one handle left on the scratch stack, read
 // as a share of the family (prim.load_handle).
-fn __jp_top(sc: Bytes) -> Value = {
+fn __jp_top(sc: Bytes, at: Int) -> Value = {
   let n = prim.load32(prim.handle(sc) + 4)
-  if n < 36 then {
+  if at < 0 then {
+    prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+    value.null()
+  } else if at > n - 4 then {
     prim.die(prim.handle("Error: json parse: the passes disagree\n"))
     value.null()
   } else {
-    let top: Value = prim.load_handle(prim.handle(sc) + 44)
+    let top: Value = prim.load_handle(prim.handle(sc) + 12 + at)
     top
   }
 }
@@ -420,11 +430,31 @@ fn __jp_set_word(sc: Bytes, off: Int, v: Int) -> Unit = {
 // Each reader takes its start position and answers the position after what
 // it read, or a refusal code (negative). Counts go to the scratch words.
 
-// Add `x` bytes to the family's count (scratch word [0]).
-fn __jp_count(sc: Bytes, x: Int) -> Unit = {
+// Pass 1's record of one token: `x` bytes more for the family, and the
+// tape entry `w` appended (scratch word [8] is the tape's end, [32] its
+// limit, 0 when there is no tape). Pass 2 reads the tape instead of the
+// text's grammar.
+//   kind (low 4 bits) | 1 string, 2 key: esc << 4, decoded len << 5, the
+//   opening quote's offset << 32 | 3 Int, 4 negative Int: digits << 4, the
+//   first digit's offset << 32 | 5 Float, 11 Int past 18 digits: token
+//   length << 4, its offset << 32 | 6 true, 7 false, 8 null | 9 array,
+//   10 object: members << 4.
+fn __jp_tape(sc: Bytes, w: Int, x: Int) -> Unit = {
   let sn = prim.load32(prim.handle(sc) + 4)
   if sn < 64 then __jp_disagree()
-  else prim.store64(prim.handle(sc) + 12, prim.load64(prim.handle(sc) + 12) + x)
+  else {
+    let at = prim.load64(prim.handle(sc) + 20)
+    let lim = prim.load64(prim.handle(sc) + 44)
+    if lim == 0 then prim.store64(prim.handle(sc) + 12, prim.load64(prim.handle(sc) + 12) + x)
+    else if at < 64 then __jp_disagree()
+    else if lim > sn then __jp_disagree()
+    else if at > lim - 8 then __jp_disagree()
+    else {
+      prim.store64(prim.handle(sc) + 12 + at, w)
+      prim.store64(prim.handle(sc) + 20, at + 8)
+      prim.store64(prim.handle(sc) + 12, prim.load64(prim.handle(sc) + 12) + x)
+    }
+  }
 }
 
 // The first non-whitespace byte from p (space, tab, LF, CR; RFC 8259 §2)
@@ -485,10 +515,8 @@ fn __jp_strend(t: String, sc: Bytes, q: Int, add: Int) -> Int = {
     else __jp_str_scan(t, at, q, 0, at - q - 1)
     if r >= 0 then {
       if add >= 0 then {
-        let sn = prim.load32(prim.handle(sc) + 4)
         let k = prim.band(prim.bshr(r, 1), 2147483647)
-        if sn < 64 then __jp_disagree()
-        else prim.store64(prim.handle(sc) + 12, prim.load64(prim.handle(sc) + 12) + add + 12 + __jp_cap(k))
+        __jp_tape(sc, 1 + prim.band(r, 1) * 16 + k * 32 + q * 4294967296, add + 12 + __jp_cap(k))
       } else ()
     } else ()
     r
@@ -529,7 +557,7 @@ fn __jp_int_fast(t: String, sc: Bytes, q: Int, add: Int) -> Int = {
       else if d > 1 and d0 == 48 then 0 - 1
       else if stop == 43 or stop == 45 or stop == 46 or stop == 101 or stop == 69 then 0 - 1
       else {
-        if add >= 0 then __jp_count(sc, add) else ()
+        if add >= 0 then __jp_tape(sc, (if lead > q then 4 else 3) + d * 16 + lead * 4294967296, add) else ()
         at
       }
     }
@@ -549,7 +577,7 @@ fn __jp_lit(t: String, sc: Bytes, q: Int, b: Int) -> Int = {
     else if b == 110 then prim.load8(prim.handle(t) + 12 + q) == 110 and prim.load8(prim.handle(t) + 13 + q) == 117 and prim.load8(prim.handle(t) + 14 + q) == 108 and prim.load8(prim.handle(t) + 15 + q) == 108
     else prim.load8(prim.handle(t) + 12 + q) == 102 and prim.load8(prim.handle(t) + 13 + q) == 97 and prim.load8(prim.handle(t) + 14 + q) == 108 and prim.load8(prim.handle(t) + 15 + q) == 115 and prim.load8(prim.handle(t) + 16 + q) == 101
     if ok4 then {
-      __jp_count(sc, 28)
+      __jp_tape(sc, if b == 116 then 6 else if b == 102 then 7 else 8, 28)
       q + w
     } else __jp_code(q, kind)
   }
@@ -618,7 +646,7 @@ fn __jp_array1(t: String, tl: Int, p: Int, depth: Int, sc: Bytes) -> Int = {
   }
   if q < 0 then q
   else {
-    __jp_count(sc, 40 + __jp_cap(k * 4))
+    __jp_tape(sc, 9 + k * 16, 40 + __jp_cap(k * 4))
     q - tl - 1
   }
 }
@@ -647,7 +675,7 @@ fn __jp_key1(t: String, sc: Bytes, from: Int, open: Int, r: Int, k: Int) -> Bool
       prim.store32(prim.handle(sc) + 12 + top, open * 2 + esc)
       prim.store32(prim.handle(sc) + 16 + top, e)
       prim.store64(prim.handle(sc) + 28, top + 8)
-      prim.store64(prim.handle(sc) + 12, prim.load64(prim.handle(sc) + 12) + 12 + __jp_cap(nb))
+      __jp_tape(sc, 2 + esc * 16 + nb * 32 + open * 4294967296, 12 + __jp_cap(nb))
       if k >= 16 then false
       else {
         var u = if from < 32 then top else from
@@ -714,7 +742,7 @@ fn __jp_object1(t: String, tl: Int, p: Int, depth: Int, sc: Bytes) -> Int = {
   if d >= 0 and (q >= 0 or d < __jp_code_pos(q)) then __jp_code(d, 11)
   else if q < 0 then q
   else {
-    __jp_count(sc, 40 + __jp_cap(k * 4) + k * 20)
+    __jp_tape(sc, 10 + k * 16, 40 + __jp_cap(k * 4) + k * 20)
     q - tl - 1
   }
 }
@@ -864,7 +892,7 @@ fn __jp_number1(t: String, tl: Int, p: Int, sc: Bytes) -> Int = {
     let fits = if __jp_digits(t, lead) < end then __jp_float_fits(t, tl, p, end)
     else __jp_int_fits(t, lead, end - lead, neg)
     if fits then {
-      __jp_count(sc, 28)
+      __jp_tape(sc, (if __jp_digits(t, lead) < end then 5 else 11) + (end - p) * 16 + p * 4294967296, 28)
       end
     } else __jp_code(p, 14)
   }
@@ -1065,38 +1093,34 @@ else {
 
 // ══ PASS 2: carve the family ══
 // The family root is the flat block `fam`; scratch word [0] is the carve
-// cursor, [8] the handle stack top. Every carve has one shape: the room
+// cursor, [24] the handle stack top. Every carve has one shape: the room
 // test `cursor + size <= len(fam)` (a defined abort when it fails — pass 2
 // never trusts pass 1's arithmetic), then the interior header at
 // `base = fam + 12 + cursor` — rc `0x8000_0000 | (base - fam)`, len, cap —
 // and the payload at base + 12, all inside [cursor, cursor + size).
 
-// Push handle x on the scratch stack (word [8] is its top, a byte offset).
+// Push handle x on the scratch stack (word [24] is its top, a byte offset).
 fn __jp_push_at(sc: Bytes, x: Int) -> Unit = {
   let sn = prim.load32(prim.handle(sc) + 4)
   if sn < 64 then __jp_disagree()
   else {
-    let top = prim.load64(prim.handle(sc) + 20)
+    let top = prim.load64(prim.handle(sc) + 36)
     if top < 32 then __jp_disagree()
     else if top > sn - 4 then __jp_disagree()
     else {
       prim.store32(prim.handle(sc) + 12 + top, x)
-      prim.store64(prim.handle(sc) + 20, top + 4)
+      prim.store64(prim.handle(sc) + 36, top + 4)
     }
   }
 }
 
-// The string whose opening quote is at q, carved — its String block, and
-// when `boxed` its Value box right after it, pushed. Answers the offset
-// after the closing quote times 2^32 plus the String's handle (a key) or
-// the box's (a value).
-fn __jp_str2(t: String, fam: Bytes, sc: Bytes, q: Int, boxed: Bool) -> Int = {
-  let r = __jp_strend(t, sc, q, 0 - 1)
-  if r < 0 then __jp_disagree() else ()
+// The String of tape entry `w` (a string or a key: its opening quote, its
+// decoded length, whether it has an escape), carved; answers its handle.
+fn __jp_str2(t: String, fam: Bytes, sc: Bytes, w: Int) -> Int = {
   let fl = prim.load32(prim.handle(fam) + 4)
   let sn = prim.load32(prim.handle(sc) + 4)
-  let n = prim.band(prim.bshr(r, 1), 2147483647)
-  let e = prim.bshr(r, 32)
+  let n = prim.band(prim.bshr(w, 5), 134217727)
+  let q = prim.bshr(w, 32)
   let cap = __jp_cap(n)
   if sn < 64 then {
     __jp_disagree()
@@ -1120,14 +1144,11 @@ fn __jp_str2(t: String, fam: Bytes, sc: Bytes, q: Int, boxed: Bool) -> Int = {
       prim.store32(b, cur + 2147483660)
       prim.store32(b + 4, n)
       prim.store32(b + 8, cap)
-      if prim.band(r, 1) == 0 then __jp_copy_tf(t, q + 1, fam, cur + 12, n)
-      else if __jp_str_fill(t, q + 1, e, fam, cur + 12, cur + 12 + n) != cur + 12 + n then __jp_disagree()
+      if prim.band(w, 16) == 0 then __jp_copy_tf(t, q + 1, fam, cur + 12, n)
+      else if __jp_str_fill(t, q + 1, fam, cur + 12, cur + 12 + n) != cur + 12 + n then __jp_disagree()
       else ()
       prim.store64(prim.handle(sc) + 12, cur + 12 + cap)
-      if boxed then {
-        __jp_box(fam, sc, 4, b)
-        (e + 1) * 4294967296
-      } else (e + 1) * 4294967296 + b
+      b
     }
   }
 }
@@ -1139,7 +1160,7 @@ fn __jp_box(fam: Bytes, sc: Bytes, tag: Int, x: Int) -> Unit = {
   if sn < 64 then __jp_disagree()
   else {
     let cur = prim.load64(prim.handle(sc) + 12)
-    let top = prim.load64(prim.handle(sc) + 20)
+    let top = prim.load64(prim.handle(sc) + 36)
     if cur < 0 then __jp_disagree()
     else if cur > fl - 28 then __jp_disagree()
     else if top < 32 then __jp_disagree()
@@ -1154,75 +1175,111 @@ fn __jp_box(fam: Bytes, sc: Bytes, tag: Int, x: Int) -> Unit = {
       prim.store64(b + 20, x)
       prim.store64(prim.handle(sc) + 12, cur + 28)
       prim.store32(prim.handle(sc) + 12 + top, b)
-      prim.store64(prim.handle(sc) + 20, top + 4)
+      prim.store64(prim.handle(sc) + 36, top + 4)
     }
   }
 }
 
-// A checked literal or number at q (b its first byte), boxed and pushed:
-// the offset after it. An Int is read in place (19 digits included — pass 1
-// kept only what fits), a Float goes through float.parse.
-fn __jp_scalar2(t: String, tl: Int, fam: Bytes, sc: Bytes, q: Int, b: Int) -> Int =
-  if b == 116 then {
-    __jp_box(fam, sc, 1, 1)
-    q + 4
-  } else if b == 102 then {
-    __jp_box(fam, sc, 1, 0)
-    q + 5
-  } else if b == 110 then {
-    __jp_box(fam, sc, 0, 0)
-    q + 4
-  } else {
-    let fast = __jp_int_fast(t, sc, q, 0 - 1)
-    let neg = b == 45
-    let lead = if neg then q + 1 else q
-    if fast >= 0 then {
-      let m = __jp_mantissa(t, lead, fast, 0)
-      __jp_box(fam, sc, 2, if neg then 0 - m else m)
-      fast
-    } else {
-      let end = __jp_numrun(t, q)
-      if __jp_digits(t, lead) < end then {
-        match float.parse(__jp_substr(t, tl, q, end)) {
-          ok(x) => __jp_box(fam, sc, 3, prim.fbits(x)),
-          err(_) => __jp_disagree(),
-        }
-        end
-      } else {
-        let d = end - lead
-        let m = __jp_mantissa(t, lead, if d > 18 then lead + 18 else end, 0)
-        let last = if d > 18 then __jp_byte(t, lead + 18) - 48 else 0
-        let x = if d > 18 then (if neg then (0 - m) * 10 - last else m * 10 + last) else if neg then 0 - m else m
-        __jp_box(fam, sc, 2, x)
-        end
-      }
-    }
-  }
-
-// The (key, value) pair of the String `kh` and the stack's top value, carved;
-// the value popped and the pair pushed in its place.
-fn __jp_pair(fam: Bytes, sc: Bytes, kh: Int) -> Unit = {
+// An object's k members: the stack's top 2k handles (key, value, key, …),
+// each pair carved and its handle written back in place over the first k
+// slots; then the list and its box, as for an array.
+fn __jp_pairs(fam: Bytes, sc: Bytes, k: Int) -> Unit = {
   let fl = prim.load32(prim.handle(fam) + 4)
   let sn = prim.load32(prim.handle(sc) + 4)
   if sn < 64 then __jp_disagree()
+  else if k < 0 then __jp_disagree()
+  else if k > sn then __jp_disagree()
   else {
-    let cur = prim.load64(prim.handle(sc) + 12)
-    let top = prim.load64(prim.handle(sc) + 20)
-    if cur < 0 then __jp_disagree()
-    else if cur > fl - 20 then __jp_disagree()
-    else if top < 36 then __jp_disagree()
+    let top = prim.load64(prim.handle(sc) + 36)
+    let from = top - k * 8
+    if from < 32 then __jp_disagree()
     else if top > sn then __jp_disagree()
     else {
-      let b = prim.handle(fam) + 12 + cur
-      prim.store32(b, cur + 2147483660)
-      prim.store32(b + 4, 8)
-      prim.store32(b + 8, 8)
-      prim.store32(b + 12, kh)
-      prim.store32(b + 16, prim.load32(prim.handle(sc) + 8 + top))
-      prim.store32(prim.handle(sc) + 8 + top, b)
-      prim.store64(prim.handle(sc) + 12, cur + 20)
+      var i = 0
+      while i < k {
+        let a = from + i * 8
+        let d = from + i * 4
+        let cur = prim.load64(prim.handle(sc) + 12)
+        if i < 0 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else if a < 32 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else if a > sn - 8 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else if d < 32 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else if d > sn - 4 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else if cur < 0 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else if cur > fl - 20 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else {
+          let b = prim.handle(fam) + 12 + cur
+          prim.store32(b, cur + 2147483660)
+          prim.store32(b + 4, 8)
+          prim.store32(b + 8, 8)
+          prim.store32(b + 12, prim.load32(prim.handle(sc) + 12 + a))
+          prim.store32(b + 16, prim.load32(prim.handle(sc) + 16 + a))
+          prim.store32(prim.handle(sc) + 12 + d, b)
+          prim.store64(prim.handle(sc) + 12, cur + 20)
+          i = i + 1
+        }
+      }
+      prim.store64(prim.handle(sc) + 36, from + k * 4)
+      __jp_list(fam, sc, k, 6)
     }
   }
+}
+
+// PASS 2's walk: one tape entry at a time, in document post-order.
+fn __jp_build(t: String, tl: Int, fam: Bytes, sc: Bytes) -> Unit = {
+  let end = __jp_word(sc, 8)
+  var at = 64
+  while at < end {
+    __jp_node(t, tl, fam, sc, __jp_word(sc, at))
+    at = at + 8
+  }
+}
+
+fn __jp_node(t: String, tl: Int, fam: Bytes, sc: Bytes, w: Int) -> Unit = {
+  let kind = prim.band(w, 15)
+  if kind == 1 then __jp_box(fam, sc, 4, __jp_str2(t, fam, sc, w))
+  else if kind == 2 then __jp_push_at(sc, __jp_str2(t, fam, sc, w))
+  else if kind == 3 then {
+    let lead = prim.bshr(w, 32)
+    __jp_box(fam, sc, 2, __jp_mantissa(t, lead, lead + prim.band(prim.bshr(w, 4), 31), 0))
+  } else if kind == 4 then {
+    let lead = prim.bshr(w, 32)
+    __jp_box(fam, sc, 2, 0 - __jp_mantissa(t, lead, lead + prim.band(prim.bshr(w, 4), 31), 0))
+  } else if kind == 10 then __jp_pairs(fam, sc, prim.bshr(w, 4))
+  else if kind == 9 then __jp_list(fam, sc, prim.bshr(w, 4), 5)
+  else if kind == 6 then __jp_box(fam, sc, 1, 1)
+  else if kind == 7 then __jp_box(fam, sc, 1, 0)
+  else if kind == 8 then __jp_box(fam, sc, 0, 0)
+  else if kind == 5 then {
+    let q = prim.bshr(w, 32)
+    match float.parse(__jp_substr(t, tl, q, q + prim.band(prim.bshr(w, 4), 268435455))) {
+      ok(x) => __jp_box(fam, sc, 3, prim.fbits(x)),
+      err(_) => __jp_disagree(),
+    }
+  } else if kind == 11 then {
+    let q = prim.bshr(w, 32)
+    let end = q + prim.band(prim.bshr(w, 4), 268435455)
+    let neg = __jp_byte(t, q) == 45
+    let lead = if neg then q + 1 else q
+    let d = end - lead
+    let m = __jp_mantissa(t, lead, if d > 18 then lead + 18 else end, 0)
+    let last = if d > 18 then __jp_byte(t, lead + 18) - 48 else 0
+    __jp_box(fam, sc, 2, if d > 18 then (if neg then (0 - m) * 10 - last else m * 10 + last) else if neg then 0 - m else m)
+  } else __jp_disagree()
 }
 
 // The list block of the stack's top k handles (popped, in stack order) and
@@ -1234,7 +1291,7 @@ fn __jp_list(fam: Bytes, sc: Bytes, k: Int, tag: Int) -> Unit = {
   if sn < 64 then __jp_disagree()
   else {
     let cur = prim.load64(prim.handle(sc) + 12)
-    let top = prim.load64(prim.handle(sc) + 20)
+    let top = prim.load64(prim.handle(sc) + 36)
     if k < 0 then __jp_disagree()
     else if cur < 0 then __jp_disagree()
     else if cap < 4 then __jp_disagree()
@@ -1246,58 +1303,11 @@ fn __jp_list(fam: Bytes, sc: Bytes, k: Int, tag: Int) -> Unit = {
       prim.store32(b + 4, k * 4)
       prim.store32(b + 8, cap)
       __jp_copy_sf(sc, top - k * 4, fam, cur + 12, k * 4)
-      prim.store64(prim.handle(sc) + 20, top - k * 4)
+      prim.store64(prim.handle(sc) + 36, top - k * 4)
       prim.store64(prim.handle(sc) + 12, cur + 12 + cap)
       __jp_box(fam, sc, tag, b)
     }
   }
-}
-
-// The value at p, carved and its box pushed; answers the offset after it.
-// The text was checked by pass 1, so a byte it does not expect dies.
-fn __jp_v2(t: String, tl: Int, p: Int, fam: Bytes, sc: Bytes) -> Int = {
-  let f = __jp_tok(t, p)
-  let q = prim.bshr(f, 9)
-  let b = (prim.band(f, 511) - 1)
-  if b == 34 then __jp_scan_end(__jp_str2(t, fam, sc, q, true))
-  else if b == 123 then __jp_object2(t, tl, q + 1, fam, sc)
-  else if b == 91 then __jp_array2(t, tl, q + 1, fam, sc)
-  else if b == 116 or b == 102 or b == 110 or b == 45 or (b >= 48 and b <= 57) then __jp_scalar2(t, tl, fam, sc, q, b)
-  else {
-    __jp_disagree()
-    tl
-  }
-}
-
-fn __jp_array2(t: String, tl: Int, p: Int, fam: Bytes, sc: Bytes) -> Int = {
-  let f = __jp_tok(t, p)
-  var k = 0
-  var q = if (prim.band(f, 511) - 1) == 93 then tl + 2 + prim.bshr(f, 9) else prim.bshr(f, 9)
-  while q >= 0 and q <= tl {
-    let v = __jp_v2(t, tl, q, fam, sc)
-    k = k + 1
-    q = __jp_after(t, tl, v, 93)
-  }
-  if q < 0 then __jp_disagree() else ()
-  __jp_list(fam, sc, k, 5)
-  q - tl - 1
-}
-
-fn __jp_object2(t: String, tl: Int, p: Int, fam: Bytes, sc: Bytes) -> Int = {
-  let f = __jp_tok(t, p)
-  var k = 0
-  var q = if (prim.band(f, 511) - 1) == 125 then tl + 2 + prim.bshr(f, 9) else prim.bshr(f, 9)
-  while q >= 0 and q <= tl {
-    let kr = __jp_str2(t, fam, sc, q, false)
-    let c = __jp_tok(t, __jp_scan_end(kr))
-    let v = __jp_v2(t, tl, prim.bshr(c, 9) + 1, fam, sc)
-    __jp_pair(fam, sc, prim.band(kr, 4294967295))
-    k = k + 1
-    q = __jp_after(t, tl, v, 125)
-  }
-  if q < 0 then __jp_disagree() else ()
-  __jp_list(fam, sc, k, 6)
-  q - tl - 1
 }
 
 // Copy scratch bytes [a, a + k) to family offset d (a stack slice into a
@@ -1365,18 +1375,19 @@ fn __jp_copy_tf(t: String, a: Int, fam: Bytes, d: Int, k: Int) -> Unit = {
   }
 }
 
-// Decode text [p, e) of a checked string into family offsets from o, below
-// oe; answers the offset after the last byte written.
-fn __jp_str_fill(t: String, p: Int, e: Int, fam: Bytes, o: Int, oe: Int) -> Int = if p >= e then o
+// Decode a checked string's text from p into family offsets [o, oe) — its
+// decoded length is known, so the closing quote is where oe is reached;
+// answers the offset after the last byte written.
+fn __jp_str_fill(t: String, p: Int, fam: Bytes, o: Int, oe: Int) -> Int = if o >= oe then o
 else {
-  let q = __jp_str_run(t, p)
-  let stop = if q < e then q else e
+  let stop = __jp_str_run(t, p)
   if stop > p then {
+    if o > oe - (stop - p) then __jp_disagree() else ()
     __jp_copy_tf(t, p, fam, o, stop - p)
-    __jp_str_fill(t, stop, e, fam, o + (stop - p), oe)
+    __jp_str_fill(t, stop, fam, o + (stop - p), oe)
   } else {
     let x = __jp_next_cp(t, p)
-    __jp_str_fill(t, p + x % 16, e, fam, o + __jp_utf8_write(fam, oe, o, x / 16), oe)
+    __jp_str_fill(t, p + x % 16, fam, o + __jp_utf8_write(fam, oe, o, x / 16), oe)
   }
 }
 
