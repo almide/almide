@@ -9,7 +9,7 @@ env:
   RUST_TOOLCHAIN: "1.97.0"
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
-  BASE_REF: e8a3546e7aa8f3e4b0b4e3b8ad6c3c8f0b1f1e2a
+  BASE_REF: e8a3546e7cf76e25f2012df438e337a2fd791a5f
 jobs:
   family-tests:
     runs-on: ubuntu-latest
