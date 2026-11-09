@@ -27,8 +27,15 @@
 //! the checker rejects (scripts/witness-reinject.sh init re-injects such a
 //! bug and requires the rejection).
 //!
-//! COVERAGE: list literals (`[a, b, c]`, emitter.rs) and range lists
-//! (`a..b`, ranges.rs — a loop fill). Every other allocation
+//! FAMILIES (ADR-0033 D7, carve.rs): `k F` a family root whose carve cursor
+//! starts at F; `c H w W n N s0 ..` a carve of a literal length and
+//! `c H w W v K f K t W` one of a computed length — a site placed inside the
+//! root, every payload word zeroed by the op itself — and `e H` the seal.
+//! Each is recorded once its whole shape is emitted, with an anchor per
+//! instruction almide-anchor-check holds (anchor-check carve.rs).
+//!
+//! COVERAGE: list literals (`[a, b, c]`, emitter.rs), range lists
+//! (`a..b`, ranges.rs — a loop fill) and family carves. Every other allocation
 //! site — records, variants, strings, the runtime's routines — records
 //! nothing yet, so INITIALIZATION is certified for list-literal blocks only;
 //! the corpus count of recorded sites is reported by proofs/structural-wall.sh.
@@ -146,6 +153,53 @@ pub(crate) fn store(site: Option<Site>, i: usize, at: &wasm_encoder::Function) {
     }
 }
 
+/// A whole record, its tokens and its anchors, emitted at once (the carve
+/// ops of carve.rs emit their full shape in one call, so they record it
+/// in one).
+fn record(tokens: String, anchors: &[String]) {
+    with(|s| {
+        s.sites.push(tokens);
+        s.anchors.push(anchors.join(" "));
+    });
+}
+
+/// ADR-0033 D7: `prim.family` — a family root was allocated and its carve
+/// cursor set to `first`: `k F`, anchored at the root's `local.set` and
+/// the cursor store.
+pub(crate) fn family(first: u32, anchors: &[String]) {
+    record(format!("k{first}"), anchors);
+}
+
+/// `prim.carve` of a literal length: an interior block of an `hdr`-byte
+/// header and `n` zeroed `w`-byte payload words, every store emitted:
+/// `c H w W n N s0 .. s(N-1)` (each `s i` taken as its store was emitted),
+/// anchored at the cursor load, the root len load, the room test's `if`,
+/// the cursor store, the base's `local.set`, the three header stores and
+/// each payload store.
+pub(crate) fn carve_fixed(hdr: u32, w: u32, n: usize, stores: &[usize], anchors: &[String]) {
+    record(carve_fixed_tokens(hdr, w, n, stores), anchors);
+}
+
+fn carve_fixed_tokens(hdr: u32, w: u32, n: usize, stores: &[usize]) -> String {
+    let stores: String = stores.iter().map(|i| format!(" s{i}")).collect();
+    format!("c{hdr} w{w} n{n}{stores}")
+}
+
+/// `prim.carve` of a run-time length: the payload word count in local
+/// `k`, zeroed by the countdown on `k` whose cursor steps one word:
+/// `c H w W v K f K t W`, anchored at the length guard's `if`, the six
+/// head anchors of [`carve_fixed`], the len and cap stores, the loop's
+/// store and the `local.get` of the base after the loop.
+pub(crate) fn carve_fill(hdr: u32, w: u32, k: u32, anchors: &[String]) {
+    record(format!("c{hdr} w{w} v{k} f{k} t{w}"), anchors);
+}
+
+/// `prim.family_seal`: the cursor must equal the root's end, `hdr` + its
+/// len: `e H`, anchored at the cursor load, the len load and the `if`.
+pub(crate) fn seal(hdr: u32, anchors: &[String]) {
+    record(format!("e{hdr}"), anchors);
+}
+
 /// Every pass's init witness, in emission order.
 pub fn take() -> Vec<(usize, String)> {
     let mut g = state().lock().expect("init sink");
@@ -181,5 +235,13 @@ mod tests {
         s.sites.push("h12 w4 n0 r5 ".into());
         s.flush();
         assert_eq!(s.done, vec![(0, "h12 w8 n2 r3 s0 s1;h12 w4 n0 r5".to_string())]);
+    }
+
+    #[test]
+    fn a_literal_carve_lists_every_payload_word() {
+        assert_eq!(carve_fixed_tokens(12, 4, 2, &[0, 1]), "c12 w4 n2 s0 s1");
+        assert_eq!(carve_fixed_tokens(12, 4, 1, &[0]), "c12 w4 n1 s0");
+        // A store the emitter lost is a slot the record lacks.
+        assert_eq!(carve_fixed_tokens(12, 4, 3, &[0, 2]), "c12 w4 n3 s0 s2");
     }
 }

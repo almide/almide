@@ -120,6 +120,8 @@ mod bytes_split;
 pub mod alloc_count;
 pub mod canonical_alloc;
 pub mod checked_alloc;
+pub mod family;
+mod carve;
 mod alloc_inline;
 pub mod heap_cap;
 pub mod host_exports;

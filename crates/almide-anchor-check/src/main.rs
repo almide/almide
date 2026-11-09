@@ -90,6 +90,10 @@ fn main() {
                 r.init_sites, r.init_stores, r.fill_sites, r.init_unlocated, r.bounds_checks, r.bounds_accesses, r.bounds_unlocated, r.bounds_operands
             );
             println!(
+                "CARVES OK: {} family root(s), {} literal carve(s), {} computed carve(s), {} seal(s)",
+                r.families, r.carves, r.carve_fills, r.seals
+            );
+            println!(
                 "FIELDS OK: {} site(s) / {} store(s), {} access(es) ({} case field(s) under their tag test), {} tag read(s), {} unlocated",
                 r.field_sites, r.field_stores, r.field_accesses, r.field_guarded, r.field_tags, r.field_unlocated
             );
