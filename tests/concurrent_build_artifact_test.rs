@@ -73,7 +73,7 @@ fn a_build_that_reports_success_installed_its_own_program_under_concurrent_build
     let root = fresh_root("race");
     let mut wrong = Vec::new();
     let mut built = 0;
-    for round in 0..3 {
+    for round in 0..8 {
         let mut handles = Vec::new();
         for n in 0..6 {
             let id = round * 10 + n;
@@ -105,7 +105,7 @@ fn a_build_that_reports_success_installed_its_own_program_under_concurrent_build
         for h in handles {
             let (id, ok, stderr, out) = h.join().expect("build thread");
             if !ok {
-                // A refused build is honest; only a success is checked.
+                wrong.push(format!("program {id}: build FAILED: {}", stderr.trim()));
                 continue;
             }
             built += 1;

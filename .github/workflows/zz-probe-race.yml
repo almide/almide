@@ -1,0 +1,28 @@
+name: probe-race (throwaway)
+on:
+  push:
+    branches: ['probe/blockers-1109-race']
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: never
+jobs:
+  race:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - run: cargo build --release --bin almide && cargo test --release --no-run --test concurrent_build_artifact_test
+      - name: race x3 (2 cpus on linux)
+        run: |
+          for i in 1 2 3; do
+            if [ "$RUNNER_OS" = Linux ]; then P="taskset -c 0,1"; else P=""; fi
+            $P cargo test --release --test concurrent_build_artifact_test -- --nocapture 2>&1 | tail -40 || true
+          done
