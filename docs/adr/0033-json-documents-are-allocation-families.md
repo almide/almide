@@ -201,6 +201,35 @@ They run over **word reads of the text at `i` under a room test `i + w <= len`**
 - A dynamic `value.object(xs)` keeps today's behaviour: one box, the list moved in when it is unique.
 - This is a lowering rule over constructor calls the compiler already sees. It does not depend on the benchmark's shape.
 
+### D4b. Whole-collection families: a constructed collection and its elements are one family
+
+Per-record fusion (D4) still leaves one family per record: about 4 allocations × 50k records = 200k, against yyjson's 29 for the whole build. The owner's target (2026-11-09) is build allocations **in the tens**. So the family boundary moves from the literal to the **collection**.
+
+**The rule.** A *construction site* is a `list.map` (including `list.range(..) |> list.map`, `list.filter_map`, and a list comprehension's lowering) whose callback result is **owned only by the result list**: every block the callback allocates either flows into the returned element or dies inside the callback. For such a site:
+
+- The result list and every block that flows into its elements are carved from one **construction arena**, which is a family (D1).
+- Temporaries that die inside the callback stay on the ordinary heap and are freed as today.
+- Interpolated strings, `int.to_string` results and other variable-size producers that flow into an element are carved too: the arena is **chunked** (below), so their size need not be known in advance.
+- A child that was built elsewhere and moved in (a captured `Value`, a parameter) becomes a **link** (D1): a moved credit, never a copy.
+
+**Chunked arena.** A two-pass size for an arbitrary callback is not computable (the callback's string lengths depend on its inputs), so the arena grows by chunks rather than by realloc:
+
+- A chunk is one heap block (geometric: 4 KB, then doubling to a 1 MB cap). The first chunk is the root.
+- An interior block's rc word holds the distance back to **its chunk's header**. A non-root chunk's header rc word is itself INTERIOR-marked and its cap word holds the root's address, so the redirect is: interior → chunk header → root. That is one extra load only for blocks in non-root chunks.
+- Chunks are links of the root (D1), so the family free is O(chunks).
+- 50k jsonround records are about 3–4 MB of blocks, so the whole build is **about 12 chunks + the list** — tens of allocations, the same order as yyjson's 29.
+
+**Why it is general, not shape-keyed.** The trigger is ownership, not a name or a shape: *the result list is the unique owner of everything the callback returns*. The compiler already computes this (the ownership witness's `move` / `dying` facts and the capture analysis); the arena is chosen by the allocation's **destination**, the way the region window (#1961) is chosen by a call's result type. binarytrees is the precedent: the region window frees its whole tree in one rewind and runs 5× faster than Rust; D4b gives escaping collections the same family free, with the count on the root so the collection may outlive its builder.
+
+**What blocks it, exactly, when it cannot fire** (each is a refusal, not a special case):
+
+1. **A callback block that escapes elsewhere** (stored into a `var` outside the callback, pushed into a captured mutable list, sent to `fan`). Ownership is not unique to the result, so the block stays on the heap. The certificate needs nothing new: the site is not a construction site.
+2. **An effect callback that can fail mid-collection** (`list.map((x) => f(x)!)!`). The first-err exit drops the partial arena as one family free; this is legal but needs the partial-family drop on the error edge, which the exit plan (`exit_plan.rs`) must emit. Until it does, fallible callbacks are refused.
+3. **Mutation after construction.** Interior blocks are immutable (D1); the CoW judges copy them on the first write. A program that builds a collection and then mutates every element in place pays one copy per element. That is correct, and measured by the alias fixtures; it is the cost of the escape rule, not a correctness hole.
+4. **Unknown-size growth inside a `var` + `for` loop** (`acc = acc + [x]`). This is not a construction site by the rule above (the accumulator is re-owned per iteration). The idiomatic `list.map` form fires; the loop form does not. Extending the rule to loops needs a proof that the accumulator is linear across iterations, which the borrow inference already records; it is listed as follow-up work, not assumed.
+
+**Certification** is the same as D1/D2: the carve sites are `init`-witness carve sites; each carve's room test (`cursor + size <= chunk_end`, else allocate the next chunk) is a `bounds` check; the chunk redirect is one more `$inc` / `$dec` tree in `StructuralRuntime.v`, proven by `FamilyRc.v`'s two-level case. Negative controls: `chunk-root-pointer-wrong`, `chunk-not-linked`, `carve-crosses-chunk-end`.
+
 ### D5. Writing: one buffer, sized before it is written
 
 - `json.stringify` computes the output length in a counting pass over the tree.
@@ -331,7 +360,7 @@ After a parity gate, `runtime/rs/src/json.rs` and the `prim` parser are deleted.
 **Better**:
 
 - Parse allocations go from 27 per jsonround record to one family per document.
-- Build allocations go from 27 to about 4 (D4).
+- Build allocations go from 27 per record to about 4 per record (D4), then to tens per collection (D4b: one chunked family for the whole list).
 - `as_array` / `as_object` / `as_string` on parsed data become O(1).
 - Stringify writes once into an exact buffer.
 - split / lines / words allocate once.

@@ -12,7 +12,7 @@
 
 **Reference bench:** `research/benchmark/json-world/` (branch `probe/json-world`). It runs jsonround in Almide, serde_json, sonic-rs, simd-json, yyjson and simdjson, native and wasm, timed on CI.
 
-**Order.** The world bench (run 42587113062) shows that the leaders win by arenas and layout, not by SIMD: simdjson without SIMD parses jsonround in 22 ms on wasm, forcing westmere costs it 0.7 ms natively, and yyjson builds 250k values with 29 allocations. So the phases run **0 → 1 → 2 (families) → 4 (fused construction and the exact writer) → 3 (scanning) → 5**, then 6 → 7 on native. The phase numbers are kept as names.
+**Order.** The world bench (run 42587113062) shows that the leaders win by arenas and layout, not by SIMD: simdjson without SIMD parses jsonround in 22 ms on wasm, forcing westmere costs it 0.7 ms natively, and yyjson builds 250k values with 29 allocations. So the phases run **0 → 1 → 2 (families) → 4 / 4b (fused construction, whole-collection families, the exact writer) → 3 (scanning) → 5**, then 6 → 7 on native. The phase numbers are kept as names.
 
 **json-reborn (owner Q13).** It does not land alone. Its size and allocation rows are re-measured after phase 2, and the owner rules once on the net movement and the stdlib re-inspection.
 
@@ -142,6 +142,17 @@
   - If the constructor-fusion nanopass sits in `almide-codegen`, it is shared with native. It needs coordination with the other session.
   - Keep the native render of the fused form identical to today's.
 - **Touches `render_native_*` / `runtime/rs`?** Only if the pass is shared: `almide-codegen` passes, a medium collision. Otherwise no.
+
+## Phase 4b — whole-collection families (wasm; ADR-0033 D4b)
+
+- **Work.** A `list.map` / `range |> map` / `filter_map` whose callback result is uniquely owned by the result list carves the list and every block flowing into its elements from one chunked construction arena (a family). Temporaries stay on the heap. Moved-in children become links.
+- **Gate.**
+  - jsonround **build allocations ≤ 50 for the whole run** (yyjson: 29).
+  - Every measurement table reports allocations per phase against yyjson (build 29, stringify 1, parse 2).
+  - Alias fixtures: an element taken out and mutated (CoW copies), an element kept after the list is dropped (retains the arena), a fallible callback (refused until the error-edge family drop lands).
+- **Negative controls.** `chunk-root-pointer-wrong`, `chunk-not-linked`, `carve-crosses-chunk-end`, plus the phase 2 family drills on the arena producer.
+- **Refusals that are not failures.** An escaping callback block, a fallible callback, and the `var` + `for` accumulator form do not fire; each is a fixture that shows the rule does not fire.
+- **Touches `render_native_*` / `runtime/rs`?** No for wasm. The ownership fact it reads is computed in shared passes, which it reads without changing.
 
 ## Phase 5 — String families (wasm)
 
