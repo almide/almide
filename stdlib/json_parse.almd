@@ -48,7 +48,7 @@ fn __json_max_depth() -> Int = 1000
 // program its formatting code); the test pins it to json_depth_error().
 fn __json_depth_error() -> String = "json: nesting deeper than 1000"
 
-fn json_parse(text: String) -> Result[Value, String] = {
+@family_producer fn json_parse(text: String) -> Result[Value, String] = {
   let h = prim.handle(text)
   let blen = prim.load32(h + 4)
   let cell = prim.alloc_bytes(8)
