@@ -25,7 +25,19 @@ fn wide_dup(n: Int, dup: Int) -> String = "{" + keys(n) + ",\"k${dup}\":0}"
 
 effect fn main() -> Unit = {
   // Strings without an escape, at every length around the eight-byte copy.
-  for n in [0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65] {
+  for n in [
+    0,
+    1,
+    7,
+    8,
+    9,
+    15,
+    16,
+    17,
+    63,
+    64,
+    65
+  ] {
     println(s(q(string.repeat("a", n))))
   }
   println(s(q(string.repeat("abcdefgh", 40) + "xyz")))
@@ -84,7 +96,40 @@ effect fn main() -> Unit = {
   println(s('[{"a":{"b":1}},{"a":{"b":1,"b":2}}]'))
   println(s('[' + wide(20) + "," + wide(20) + "," + wide_dup(20, 5) + "]"))
   // Malformed input at every position class.
-  for t in ["", "   ", "x", "@", "日", "[", "[1", "[1,", "[1,]", "[1 2]", "[1:2]", "{", '{"a"', '{"a":', '{"a":1', '{"a":1,', '{"a" 1}', "{1:1}", '{"a":1,}', '{"a":1 "b":2}', "-", "1.", "1e+", "01", "1.5e", "1 x", "{} {}", "nul", "tru", "fals", "nulx", "[true,fals]"] {
+  for t in [
+    "",
+    "   ",
+    "x",
+    "@",
+    "日",
+    "[",
+    "[1",
+    "[1,",
+    "[1,]",
+    "[1 2]",
+    "[1:2]",
+    "{",
+    '{"a"',
+    '{"a":',
+    '{"a":1',
+    '{"a":1,',
+    '{"a" 1}',
+    "{1:1}",
+    '{"a":1,}',
+    '{"a":1 "b":2}',
+    "-",
+    "1.",
+    "1e+",
+    "01",
+    "1.5e",
+    "1 x",
+    "{} {}",
+    "nul",
+    "tru",
+    "fals",
+    "nulx",
+    "[true,fals]"
+  ] {
     println(s(t))
   }
   // Nesting mixes arrays and objects down to the bound.
