@@ -334,10 +334,13 @@ fn __jp_cp(t: String, p: Int) -> Int = {
 
 // The CHAR index of byte offset `p` (count non-continuation bytes) — only for
 // the oracle's `at pos N` error message, linear once per error.
-fn __jp_charpos(t: String, p: Int) -> Int = list.range(0, p) |> list.fold(0, (acc, i) => {
+fn __jp_charpos(t: String, p: Int) -> Int = __jp_charpos_from(t, p, 0, 0)
+
+fn __jp_charpos_from(t: String, p: Int, i: Int, acc: Int) -> Int = if i >= p then acc
+else {
   let b = __jp_byte(t, i)
-  if b >= 128 and b < 192 then acc else acc + 1
-})
+  __jp_charpos_from(t, p, i + 1, if b >= 128 and b < 192 then acc else acc + 1)
+}
 
 // A fresh String copy of text bytes [from, to) — for the err-time number
 // texts and float.parse.
@@ -830,9 +833,15 @@ fn __jp_set_tword(tb: Bytes, at: Int, v: Int) -> Unit = {
 // [w + 4n, w + 8n) of the table block; within each run of equal keys every
 // key after the first is a repeat, and the earliest such is the answer.
 fn __jp_sort_dups(t: String, sc: Bytes, tb: Bytes, w: Int, n: Int, from: Int) -> Int = {
-  list.range(0, n) |> list.each((i) => __jp_set_tword(tb, w + i * 4, from + i * 8))
+  __jp_fill_idx(tb, w, n, from, 0)
   let a = __jp_msort(t, sc, tb, w, w + n * 4, n * 4, 4)
   __jp_runs(t, sc, tb, a, n * 4, 4, 0 - 1)
+}
+
+fn __jp_fill_idx(tb: Bytes, w: Int, n: Int, from: Int, i: Int) -> Unit = if i >= n then ()
+else {
+  __jp_set_tword(tb, w + i * 4, from + i * 8)
+  __jp_fill_idx(tb, w, n, from, i + 1)
 }
 
 // Slot k before slot u: by key, then by position.
