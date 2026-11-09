@@ -622,7 +622,7 @@ pub(crate) fn emit_cow_elems(inc_elems: u32) -> (Function, crate::helper_sig::He
     // its element credits, which are interior handles of that family. So an
     // interior block is copied, the copy takes its credits, and only then is
     // the original released.
-    if crate::family::armed() {
+    if false {
         let word = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
         i.local_get(block).i32_load(word).i32_const(0).i32_lt_s().if_(BlockType::Empty);
         sig.branch();
