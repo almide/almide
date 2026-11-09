@@ -3,6 +3,8 @@ name: Probe fan 4452 controls
 # Negative controls for #4452 (probe branch only, never merged).
 on:
   workflow_dispatch:
+  push:
+    branches: [probe/fan-4452]
 
 env:
   CARGO_TERM_COLOR: always
