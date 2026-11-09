@@ -81,30 +81,31 @@ fn __jp_refuse(c: Int, p: Int, kind: Int) -> Value = {
 // ── refusal texts, spelled at the top only ──
 fn __jp_message(base: Int, len: Int, code: Int) -> String = {
   let p = code / 32
-  match code % 32 {
-    0 => __jp_at("json: unterminated string", base, p),
-    1 => __jp_at("json: control character in string", base, p),
-    2 => __jp_at("json: unknown escape", base, p),
-    3 => __jp_at("json: invalid unicode escape", base, p),
-    4 => __jp_at("json: lone surrogate", base, p),
-    5 => __jp_at("json: noncharacter", base, p),
-    6 => "unexpected end of input",
-    7 => __jp_at("json: trailing comma", base, p),
-    8 => __jp_at("json: expected ',' or ']'", base, p),
-    9 => __jp_at("json: expected ',' or '}'", base, p),
-    10 => __jp_at("json: unquoted key", base, p),
-    11 => __jp_at("json: duplicate key", base, p),
-    12 => __jp_at("json: expected ':'", base, p),
-    13 => __jp_at("json: invalid number", base, p),
-    14 => __jp_number_error(base, len, p),
-    15 => "expected bool",
-    16 => "expected null",
-    17 => __json_depth_error(),
-    _ => {
-      let cp = __jp_cp(base, p)
-      "unexpected char '" + string.__err_text(string.from_codepoint(cp) ?? "") + "' at pos " + int.to_string(__jp_charpos(base, p, 0, 0))
-    },
-  }
+  let kind = code % 32
+  if kind == 6 then "unexpected end of input"
+  else if kind == 14 then __jp_number_error(base, len, p)
+  else if kind == 15 then "expected bool"
+  else if kind == 16 then "expected null"
+  else if kind == 17 then __json_depth_error()
+  else if kind == 18 then "unexpected char '" + string.__err_text(string.from_codepoint(__jp_cp(base, p)) ?? "") + "' at pos " + int.to_string(__jp_charpos(base, p, 0, 0))
+  else __jp_at(__jp_what(kind), base, p)
+}
+
+// The refusals that name a position.
+fn __jp_what(kind: Int) -> String = match kind {
+  0 => "json: unterminated string",
+  1 => "json: control character in string",
+  2 => "json: unknown escape",
+  3 => "json: invalid unicode escape",
+  4 => "json: lone surrogate",
+  5 => "json: noncharacter",
+  7 => "json: trailing comma",
+  8 => "json: expected ',' or ']'",
+  9 => "json: expected ',' or '}'",
+  10 => "json: unquoted key",
+  11 => "json: duplicate key",
+  12 => "json: expected ':'",
+  _ => "json: invalid number",
 }
 
 // A number the in-place reader handed over (too many digits for its exact
