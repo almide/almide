@@ -1,0 +1,38 @@
+// @armty: String
+// p10: a localhost server in arm 0 and its client in arm 1. Nothing here is
+// @ordered, so the arms stay threaded. Sequential reading: arm 0 blocks in
+// accept with no client ever started -- the program does not terminate.
+import env
+import io
+import net
+
+effect fn server(port: Int) -> Result[String, String] = {
+  let l = net.tcp_listen("127.0.0.1", port)!
+  let peer = net.tcp_accept(l)!
+  let got = io.read_exact(peer, 5)!
+  ok("server got ${bytes.to_string(got) ?? "?"}")
+}
+
+effect fn try_connect(port: Int, left: Int) -> Result[net.TcpStream, String] = match net.tcp_connect("127.0.0.1", port) {
+  ok(s) => ok(s),
+  err(e) => if left <= 0 then err(e) else {
+    env.sleep_ms(5)
+    try_connect(port, left - 1)
+  },
+}
+
+effect fn client(port: Int) -> Result[String, String] = {
+  let s = try_connect(port, 400)!
+  io.write(s, bytes.from_string("hello"))!
+  ok("client sent")
+}
+
+effect fn main() -> Unit = {
+  let port = 47391
+  let __seq_r1: Result[String, String] = server(port)
+  let __seq_r2: Result[String, String] = client(port)
+  let a = __seq_r1!
+  let b = __seq_r2!
+  println(a)
+  println(b)
+}

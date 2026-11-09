@@ -1,0 +1,21 @@
+// @armty: String
+// p08: two arms read stdin (io.read_line is @ordered). The driver feeds
+// "l1\nl2\nl3\nl4\n". Sequential reading: arm 0 gets l1,l2 and arm 1 l3,l4.
+import env
+import io
+
+effect fn read_two(id: Int, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  let a = io.read_line() ?? "eof"
+  let b = io.read_line() ?? "eof"
+  ok("arm ${id}: ${a},${b}")
+}
+
+effect fn main() -> Unit = {
+  let (x, y) = fan {
+    read_two(0, 50)!
+    read_two(1, 0)!
+  }
+  println(x)
+  println(y)
+}

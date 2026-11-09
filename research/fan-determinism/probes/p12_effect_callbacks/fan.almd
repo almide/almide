@@ -1,0 +1,50 @@
+// p12: effect callbacks. fan.map / fan.settle with an effect callback run
+// sequentially by design; a callback whose only effect is a nested fan is
+// parallelised (Purity::for_fan). Sequential reading: "overlap false" and the
+// nested arms' lines in element order.
+import env
+
+effect fn stamped(x: Int) -> Result[Int, String] = {
+  let t0 = datetime.monotonic_ns()
+  env.sleep_ms(20)
+  println("cb ${x}")
+  ok(t0)
+}
+
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn left(x: Int) -> Result[Int, String] = {
+  let s = burn((8 - x) * 200000)
+  println("left ${x} ${s}")
+  ok(s)
+}
+
+effect fn right(x: Int) -> Result[Int, String] = {
+  println("right ${x}")
+  ok(x)
+}
+
+effect fn main() -> Unit = {
+  let starts = fan.map(list.range(0, 6), (x) => stamped(x))!
+  let gaps = list.zip(starts, list.drop(starts, 1)) |> list.map(((a, b)) => b - a)
+  let overlap = list.any(gaps, (g) => g < 15000000)
+  println("overlap ${overlap}")
+  let rs = fan.settle(list.range(0, 4), (x) => stamped(x + 100))
+  println("settled ${list.len(rs)}")
+  let ys = fan.map(list.range(0, 8), (x) => {
+    let (a, b) = fan {
+      left(x)!
+      right(x)!
+    }
+    ok(a + b)
+  })!
+  println("nested sum ${list.fold(ys, 0, (a, y) => (a + y) % 1000003)}")
+}

@@ -1,0 +1,39 @@
+// p03c: two arms trap, the lower one late (index out of bounds after a long
+// loop), the higher one at once (division by zero). Sequential reading:
+// "Error: index out of bounds..." and arm 2's line never appears.
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn late_oob() -> Result[Int, String] = {
+  let s = burn(3000000)
+  println("arm 0 before trap ${s}")
+  let xs = [1, 2]
+  ok(xs[s % 2 + 5])
+}
+
+effect fn fast_div() -> Result[Int, String] = {
+  println("arm 1 before trap")
+  let zero = int.parse("0") ?? 1
+  ok(7 / zero)
+}
+
+effect fn after() -> Result[Int, String] = {
+  println("arm 2")
+  ok(3)
+}
+
+effect fn main() -> Unit = {
+  let (a, b, c) = fan {
+    late_oob()!
+    fast_div()!
+    after()!
+  }
+  println("unreachable ${a} ${b} ${c}")
+}

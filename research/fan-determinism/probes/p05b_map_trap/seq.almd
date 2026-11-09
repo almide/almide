@@ -1,0 +1,48 @@
+// p05b: a 200k-element parallel fan.map where element 100 traps late (index
+// out of bounds after heavy work) and element 190000 traps at once (division
+// by zero). Sequential reading: the lines of elements below 100, then
+// "Error: index out of bounds ...".
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+fn elem(x: Int, z: Int) -> Int = {
+  if x == 100 then {
+    let big = burn(5000000)
+    [1, 2][big % 2 + 5]
+  } else if x == 190000 then 10 / z
+  else (burn(x % 50 + 100) + x) % 1000003
+}
+
+// The sequential reading of fan.map: every element runs in list order, the
+// lowest-index Err is the result.
+fn seq_map(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[List[Int], String] = {
+  let rs = list.map(xs, f)
+  let errs = list.filter_map(rs, (r) => match r {
+    ok(_) => none,
+    err(e) => some(e),
+  })
+  match list.first(errs) {
+    some(e) => err(e),
+    none => ok(list.filter_map(rs, (r) => match r {
+      ok(v) => some(v),
+      err(_) => none,
+    })),
+  }
+}
+
+effect fn main() -> Unit = {
+  let z = string.len("")
+  let xs = list.range(0, 200000)
+  let ys = seq_map(xs, (x) => {
+    if x % 25 == 0 then println("e ${x}") else ()
+    ok(elem(x, z))
+  })!
+  println("unreachable ${list.len(ys)}")
+}

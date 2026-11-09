@@ -1,0 +1,40 @@
+// p01: output only. Four arms with reversed finishing order (arm 0 is the
+// slowest), stdout and stderr interleaved inside every arm, then the same
+// shape in the record form. The sequential reading: arm 0's lines, then
+// arm 1's, ... on each stream.
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn arm(id: Int, lines: Int, work: Int) -> Result[Int, String] = {
+  var k = 0
+  var acc = 0
+  while k < lines {
+    acc = (acc + burn(work)) % 1000003
+    println("arm ${id} out ${k} ${acc}")
+    if k % 3 == 0 then eprintln("arm ${id} err ${k}") else ()
+    k = k + 1
+  }
+  ok(acc)
+}
+
+effect fn main() -> Unit = {
+  let (a, b, c, d) = fan {
+    arm(0, 40, 60000)!
+    arm(1, 40, 30000)!
+    arm(2, 40, 5000)!
+    arm(3, 40, 0)!
+  }
+  println("tuple ${a} ${b} ${c} ${d}")
+  let r = fan {
+    x: arm(10, 20, 50000)!
+    y: arm(11, 20, 0)!
+  }
+  println("record ${r.x} ${r.y}")
+}

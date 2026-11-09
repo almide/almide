@@ -1,0 +1,47 @@
+// p14: deep non-tail recursion in arms. DEPTH (env) sets the depth; MODE=map
+// runs it inside a parallel fan.map instead of a fan block. Sequential
+// reading: the same answer whenever the sequential run has the stack for it.
+import env
+
+fn deep(n: Int) -> Int = if n <= 0 then 1 else {
+  let r = deep(n - 1)
+  (r * 31 + n) % 1000003
+}
+
+effect fn arm(id: Int, n: Int) -> Result[Int, String] = {
+  let v = deep(n)
+  println("arm ${id} ${v}")
+  ok(v)
+}
+
+// The sequential reading of fan.map: every element runs in list order, the
+// lowest-index Err is the result.
+fn seq_map(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[List[Int], String] = {
+  let rs = list.map(xs, f)
+  let errs = list.filter_map(rs, (r) => match r {
+    ok(_) => none,
+    err(e) => some(e),
+  })
+  match list.first(errs) {
+    some(e) => err(e),
+    none => ok(list.filter_map(rs, (r) => match r {
+      ok(v) => some(v),
+      err(_) => none,
+    })),
+  }
+}
+
+effect fn main() -> Unit = {
+  let n = int.parse(env.get("DEPTH") ?? "1000") ?? 1000
+  let mode = env.get("MODE") ?? "block"
+  if mode == "map" then {
+    let ys = seq_map(list.range(0, 4), (i) => ok(deep(n + i)))!
+    println("map ${list.join(list.map(ys, (y) => int.to_string(y)), ",")}")
+  } else {
+    let __seq_r1: Result[Int, String] = arm(0, n)
+    let __seq_r2: Result[Int, String] = arm(1, n)
+    let a = __seq_r1!
+    let b = __seq_r2!
+    println("block ${a} ${b}")
+  }
+}

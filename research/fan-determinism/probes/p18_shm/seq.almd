@@ -1,0 +1,28 @@
+// @armty: String
+// p18: shared memory (unix.shm_*) is process-local state a sibling arm can
+// read, but it is not @ordered. Arm 0 writes late, arm 1 reads early.
+// Sequential reading: "read written!".
+import env
+import unix
+
+effect fn writer(fd: unix.Fd, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  unix.shm_write(fd, 0, bytes.from_string("written!"))!
+  ok("wrote")
+}
+
+effect fn reader(fd: unix.Fd, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  let b = unix.shm_read(fd, 0, 8)!
+  ok("read ${bytes.to_string(b) ?? "?"}")
+}
+
+effect fn main() -> Unit = {
+  let fd = unix.shm_create(64)!
+  unix.shm_write(fd, 0, bytes.from_string("initial!"))!
+  let __seq_r1: Result[String, String] = writer(fd, 80)
+  let __seq_r2: Result[String, String] = reader(fd, 10)
+  let w = __seq_r1!
+  let r = __seq_r2!
+  println("${w} ${r}")
+}

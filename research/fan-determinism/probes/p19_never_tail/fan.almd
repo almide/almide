@@ -1,0 +1,11 @@
+// p19: side finding of p16 (no fan involved): a Result fn whose tail is
+// process.exit (type Never) type-checks, runs on wasm (exit 3), and fails the
+// native build with rustc E0308 (expected Result, found ()).
+import process
+
+effect fn quit(code: Int) -> Result[Int, String] = process.exit(code)
+
+effect fn main() -> Unit = {
+  let x = quit(3)!
+  println("${x}")
+}

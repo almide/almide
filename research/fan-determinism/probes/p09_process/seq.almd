@@ -1,0 +1,23 @@
+// @armty: String
+// p09: child processes in arms (process.exec is @ordered). A child of arm 0
+// writes a file late; arm 1's child reads it early. A child writes to its
+// inherited stderr between the arm's own eprintln lines.
+// Sequential reading: "2 x" and the stderr lines grouped per arm.
+import process
+
+effect fn sh(id: Int, script: String) -> Result[String, String] = {
+  eprintln("arm ${id} before child")
+  let out = process.exec("sh", ["-c", script])!
+  eprintln("arm ${id} after child")
+  ok("arm ${id} -> ${string.trim(out)}")
+}
+
+effect fn main() -> Unit = {
+  let __seq_r1: Result[String, String] = sh(0, "sleep 0.08; echo x > proc.txt; echo child0 >&2; echo done0")
+  let __seq_r2: Result[String, String] = sh(1, "sleep 0.01; echo child1 >&2; cat proc.txt 2>/dev/null || echo none")
+  let a = __seq_r1!
+  let b = __seq_r2!
+  println(a)
+  println(b)
+  println("pid same ${process.pid() == process.pid()}")
+}

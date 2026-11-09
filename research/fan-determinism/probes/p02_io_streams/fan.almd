@@ -1,0 +1,37 @@
+// p02: the io.* output routes inside threaded arms: io.print (stdout,
+// flushes), io.eprint (stderr), io.write on io.stdout() / io.stderr().
+// The sequential reading: arm 0's bytes, then arm 1's, on each stream.
+import io
+
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn arm(id: Int, lines: Int, work: Int) -> Result[Int, String] = {
+  var k = 0
+  var acc = 0
+  while k < lines {
+    acc = (acc + burn(work)) % 1000003
+    io.print("p ${id} ${k}\n")
+    io.eprint("e ${id} ${k}\n")
+    io.write(io.stdout()!, bytes.from_string("w ${id} ${k}\n"))!
+    io.write(io.stderr()!, bytes.from_string("x ${id} ${k}\n"))!
+    k = k + 1
+  }
+  ok(acc)
+}
+
+effect fn main() -> Unit = {
+  let (a, b, c) = fan {
+    arm(0, 30, 60000)!
+    arm(1, 30, 20000)!
+    arm(2, 30, 0)!
+  }
+  println("done ${a} ${b} ${c}")
+}

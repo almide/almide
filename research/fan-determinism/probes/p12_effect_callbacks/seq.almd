@@ -1,0 +1,67 @@
+// p12: effect callbacks. fan.map / fan.settle with an effect callback run
+// sequentially by design; a callback whose only effect is a nested fan is
+// parallelised (Purity::for_fan). Sequential reading: "overlap false" and the
+// nested arms' lines in element order.
+import env
+
+effect fn stamped(x: Int) -> Result[Int, String] = {
+  let t0 = datetime.monotonic_ns()
+  env.sleep_ms(20)
+  println("cb ${x}")
+  ok(t0)
+}
+
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn left(x: Int) -> Result[Int, String] = {
+  let s = burn((8 - x) * 200000)
+  println("left ${x} ${s}")
+  ok(s)
+}
+
+effect fn right(x: Int) -> Result[Int, String] = {
+  println("right ${x}")
+  ok(x)
+}
+
+// The sequential reading of fan.map: every element runs in list order, the
+// lowest-index Err is the result.
+fn seq_map(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[List[Int], String] = {
+  let rs = list.map(xs, f)
+  let errs = list.filter_map(rs, (r) => match r {
+    ok(_) => none,
+    err(e) => some(e),
+  })
+  match list.first(errs) {
+    some(e) => err(e),
+    none => ok(list.filter_map(rs, (r) => match r {
+      ok(v) => some(v),
+      err(_) => none,
+    })),
+  }
+}
+
+effect fn main() -> Unit = {
+  let starts = seq_map(list.range(0, 6), (x) => stamped(x))!
+  let gaps = list.zip(starts, list.drop(starts, 1)) |> list.map(((a, b)) => b - a)
+  let overlap = list.any(gaps, (g) => g < 15000000)
+  println("overlap ${overlap}")
+  let rs = list.map(list.range(0, 4), (x) => stamped(x + 100))
+  println("settled ${list.len(rs)}")
+  let ys = seq_map(list.range(0, 8), (x) => {
+    let __seq_r1: Result[Int, String] = left(x)
+    let __seq_r2: Result[Int, String] = right(x)
+    let a = __seq_r1!
+    let b = __seq_r2!
+    ok(a + b)
+  })!
+  println("nested sum ${list.fold(ys, 0, (a, y) => (a + y) % 1000003)}")
+}

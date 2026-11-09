@@ -1,0 +1,57 @@
+// p04b: a trap inside a nested fan. outer 0 is slow; outer 1's inner arm 1
+// traps at once; outer 2 prints at once. Sequential reading: all of outer 0,
+// outer 1 start, leaf 1.0, leaf 1.1 before-trap line, then
+// "Error: division by zero"; nothing of leaf 1.2 or outer 2.
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn leaf(o: Int, i: Int, work: Int) -> Result[Int, String] = {
+  let s = burn(work)
+  println("leaf ${o}.${i} ${s}")
+  ok(s)
+}
+
+effect fn bomb(o: Int) -> Result[Int, String] = {
+  println("leaf ${o}.1 before trap")
+  let zero = int.parse("0") ?? 1
+  ok(1 / zero)
+}
+
+effect fn outer_ok(o: Int, work: Int) -> Result[Int, String] = {
+  println("outer ${o} start")
+  let __seq_r1: Result[Int, String] = leaf(o, 0, work)
+  let __seq_r2: Result[Int, String] = leaf(o, 1, 0)
+  let a = __seq_r1!
+  let b = __seq_r2!
+  println("outer ${o} end")
+  ok(a + b)
+}
+
+effect fn outer_bomb(o: Int) -> Result[Int, String] = {
+  println("outer ${o} start")
+  let __seq_r3: Result[Int, String] = leaf(o, 0, 100000)
+  let __seq_r4: Result[Int, String] = bomb(o)
+  let __seq_r5: Result[Int, String] = leaf(o, 2, 0)
+  let a = __seq_r3!
+  let b = __seq_r4!
+  let c = __seq_r5!
+  println("outer ${o} end")
+  ok(a + b + c)
+}
+
+effect fn main() -> Unit = {
+  let __seq_r6: Result[Int, String] = outer_ok(0, 3000000)
+  let __seq_r7: Result[Int, String] = outer_bomb(1)
+  let __seq_r8: Result[Int, String] = outer_ok(2, 0)
+  let x = __seq_r6!
+  let y = __seq_r7!
+  let z = __seq_r8!
+  println("unreachable ${x} ${y} ${z}")
+}

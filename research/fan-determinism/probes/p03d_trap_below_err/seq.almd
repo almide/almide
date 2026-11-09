@@ -1,0 +1,39 @@
+// p03d: arm 0 returns Err at once, arm 1 traps late, arm 2 prints at once.
+// Sequential reading: arm 0's line, arm 1's line, then the trap aborts:
+// "Error: division by zero"; arm 2 never prints.
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn fast_err() -> Result[Int, String] = {
+  println("arm 0 err")
+  err("arm 0 failed")
+}
+
+effect fn slow_crash() -> Result[Int, String] = {
+  let s = burn(3000000)
+  println("arm 1 ${s}")
+  let zero = int.parse("0") ?? 1
+  ok(100 / zero)
+}
+
+effect fn after() -> Result[Int, String] = {
+  println("arm 2")
+  ok(3)
+}
+
+effect fn main() -> Unit = {
+  let __seq_r1: Result[Int, String] = fast_err()
+  let __seq_r2: Result[Int, String] = slow_crash()
+  let __seq_r3: Result[Int, String] = after()
+  let a = __seq_r1!
+  let b = __seq_r2!
+  let c = __seq_r3!
+  println("unreachable ${a} ${b} ${c}")
+}

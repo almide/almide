@@ -1,0 +1,36 @@
+// @armty: String
+// p17: the program is its own "outside system" (ADR-0024 D2). A listener made
+// before the fan; arm 0 connects late and sends "A", arm 1 connects at once
+// and sends "B", arm 2 accepts twice. Nothing is @ordered. Sequential
+// reading: "got AB".
+import env
+import io
+import net
+
+effect fn send_after(port: Int, msg: String, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  let s = net.tcp_connect("127.0.0.1", port)!
+  io.write(s, bytes.from_string(msg))!
+  ok("sent ${msg}")
+}
+
+effect fn accept_two(l: net.TcpListener) -> Result[String, String] = {
+  let p1 = net.tcp_accept(l)!
+  let a = io.read_exact(p1, 1)!
+  let p2 = net.tcp_accept(l)!
+  let b = io.read_exact(p2, 1)!
+  ok("got ${bytes.to_string(a) ?? "?"}${bytes.to_string(b) ?? "?"}")
+}
+
+effect fn main() -> Unit = {
+  let l = net.tcp_listen("127.0.0.1", 0)!
+  let port = net.tcp_local_port(l)!
+  let (a, b, c) = fan {
+    send_after(port, "A", 80)!
+    send_after(port, "B", 0)!
+    accept_two(l)!
+  }
+  println(a)
+  println(b)
+  println(c)
+}
