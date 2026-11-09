@@ -90,7 +90,7 @@ pub fn parse_anchors_held(text: &str) -> Result<AnchorsHeld, String> {
     // A4), read by `prims_anchors` and lin.rs.
     let mut rest: Vec<&str> = lines
         .filter(|l| {
-            !["fields", "prims", "selfhost", "routines"].iter().any(|k| *l == *k || l.strip_prefix(k).is_some_and(|r| r.starts_with(' ')))
+            !["fields", "prims", "selfhost", "routines", "rcnames"].iter().any(|k| *l == *k || l.strip_prefix(k).is_some_and(|r| r.starts_with(' ')))
         })
         .collect();
     let rc_at = rest.iter().position(|l| l.starts_with("rcfns"));

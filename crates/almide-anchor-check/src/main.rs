@@ -35,6 +35,9 @@ fn main() {
     // certificate (#4005 A4); the accesses its selection names count as
     // located once lin_routines.rs verifies it.
     let rlin = take_values(&mut args, "--rlin", 2).map(|v| (v[0].clone(), v[1].clone()));
+    // `--rc-bounds-report`: print the #4631 (b1') per-kind bounds of every
+    // named rc frame against its ownership witness (`RCBOUNDS` lines).
+    let rc_bounds_report = args.iter().position(|a| a == "--rc-bounds-report").map(|at| args.remove(at)).is_some();
     // `--lin-skel <artifact.wasm> <anchors>`: the linear certificate's
     // translation of every self-host body (lin.rs), holes as `_`.
     if args.first().map(String::as_str) == Some("--lin-skel") {
@@ -109,6 +112,17 @@ fn main() {
     };
     let (w, b, a) = (read(wasm), read(bundle), read(anchors));
     let a = String::from_utf8_lossy(&a).into_owned();
+    if rc_bounds_report {
+        match almide_anchor_check::rc_bounds::check_rc_bounds(&b, &a) {
+            Ok(r) => {
+                println!("RCBOUNDS {} frame(s), {} refused", r.frames, r.refused.len());
+                for (f, k, w, rc) in &r.refused {
+                    println!("RCBOUNDS REFUSE {f} {k:?} witness {w:?} rc {rc:?}");
+                }
+            }
+            Err(e) => println!("RCBOUNDS unreadable: {e}"),
+        }
+    }
     let limit = std::time::Duration::from_secs(almide_anchor_check::DEADLINE_SECS);
     let counted = census.then(|| {
         let at = |v: Vec<(usize, usize)>| -> std::collections::HashSet<almide_anchor_check::At> {
