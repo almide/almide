@@ -23,7 +23,7 @@ name: CI
 # wrong costs a gate. The trade is not close.
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, probe/fan-4452-cibase]
   pull_request:
     branches: [main, develop]
   # The develop merge queue (#1732 follow-on): the queue's temporary
