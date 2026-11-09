@@ -393,33 +393,54 @@ fn site_entails(s: &Site, c: &L) -> bool {
     tr_lin(&tr, c).is_some_and(|c2| entailed(&s.facts, &c2))
 }
 
+/// One procedure's proof attempt: its certificate stretch (or why not),
+/// its call sites, its returns' facts, and (a routine's selection pass) the
+/// accesses no region held.
+struct Proved {
+    stretch: Result<String, String>,
+    sites: Vec<Site>,
+    rets: Vec<Vec<L>>,
+    dropped: Vec<usize>,
+}
+
 /// One procedure proven: its certificate stretch, or why not.
-#[allow(clippy::type_complexity)]
-fn prove_proc(skels: &BTreeMap<usize, Skel>, contracts: &BTreeMap<usize, Contract>, pos: usize) -> (Result<String, String>, Vec<Site>, Vec<Vec<L>>) {
+fn prove_proc(skels: &BTreeMap<usize, Skel>, contracts: &BTreeMap<usize, Contract>, pos: usize, skip: bool) -> Proved {
     let sk = &skels[&pos];
     let pre = contracts.get(&pos).map(|c| c.pre.clone()).unwrap_or_default();
     let post = contracts.get(&pos).map(|c| c.post.clone()).unwrap_or_default();
-    let mut sim = Sim { skels, contracts, fills: Vec::new(), sites: Vec::new(), rets: Vec::new(), conts: Vec::new(), probe: 0, err: None };
+    let mut sim = Sim {
+        skels,
+        contracts,
+        fills: Vec::new(),
+        sites: Vec::new(),
+        rets: Vec::new(),
+        conts: Vec::new(),
+        probe: 0,
+        err: None,
+        skip,
+        dropped: Vec::new(),
+    };
     sim.fills.push(pre.iter().map(L::text).collect::<Vec<_>>().join(" "));
     sim.fills.push(post.iter().map(L::text).collect::<Vec<_>>().join(" "));
     let r = sim.lcheck(None, &post, pre, &sk.body);
     let _ = sim.skels;
-    match r {
+    let stretch = match r {
         Some((None, None)) => {
             let tpl = lin::template(pos, sk);
             let mut out = String::new();
-            let mut it = sim.fills.into_iter();
+            let mut it = std::mem::take(&mut sim.fills).into_iter();
             for t in &tpl {
                 match t {
                     Tok::Lit(l) => out.push_str(l),
                     Tok::Hole(_) => out.push_str(&it.next().unwrap_or_default()),
                 }
             }
-            (Ok(out), sim.sites, sim.rets)
+            Ok(out)
         }
-        Some(_) => (Err("a path does not end in a return".into()), sim.sites, sim.rets),
-        None => (Err(sim.err.unwrap_or_else(|| "refused".into())), sim.sites, sim.rets),
-    }
+        Some(_) => Err("a path does not end in a return".into()),
+        None => Err(sim.err.take().unwrap_or_else(|| "refused".into())),
+    };
+    Proved { stretch, sites: sim.sites, rets: sim.rets, dropped: sim.dropped }
 }
 
 /// The certificate for a module: `;`-separated `Q` stretches, and per
@@ -445,10 +466,10 @@ pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<Certified, String> {
     let (alloc, ..) = almide_anchor_check::parse_anchors(anchors)?;
     let mut table: BTreeSet<usize> = sites0.keys().copied().collect();
     loop {
-        let input = Input { m: &m, sites: &sites0, heap: &heap, alloc };
+        let input = Input { m: &m, sites: &sites0, heap: &heap, alloc, routine: false };
         let Some(skels) = translate_table(&input, &mut table, &mut refused) else { continue };
         let entry = entry_points(&m, &exported, &table);
-        let results = infer_contracts(&skels, &table, &entry);
+        let (results, _) = infer_contracts(&skels, &table, &entry, false);
         // Drop what is not proven; prove the rest again without it.
         let failed: Vec<usize> = results.iter().filter(|(_, r)| r.is_err()).map(|(p, _)| *p).collect();
         if failed.is_empty() {
@@ -463,12 +484,14 @@ pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<Certified, String> {
 }
 
 /// What the translation of a table reads: the module, each function's prim
-/// sites and heap parameters, and the allocator's index.
+/// sites and heap parameters, the allocator's index, and whether the table
+/// is the runtime routines' (#4005 A4) or the self-host bodies'.
 struct Input<'a> {
     m: &'a lin::Module<'a>,
     sites: &'a BTreeMap<usize, BTreeSet<usize>>,
     heap: &'a BTreeMap<usize, BTreeMap<u32, Option<i128>>>,
     alloc: u32,
+    routine: bool,
 }
 
 /// Every table function's translation; `None` when one is refused (it
@@ -479,7 +502,13 @@ fn translate_table(input: &Input<'_>, table: &mut BTreeSet<usize>, refused: &mut
     let none = BTreeSet::new();
     for &pos in &table.clone() {
         let hp = input.heap.get(&pos).cloned().unwrap_or_default();
-        match lin::translate(input.m, pos, input.sites.get(&pos).unwrap_or(&none), &hp, table, input.alloc) {
+        let s = input.sites.get(&pos).unwrap_or(&none);
+        let tr = if input.routine {
+            lin::translate_routine(input.m, pos, s, &hp, table, input.alloc)
+        } else {
+            lin::translate(input.m, pos, s, &hp, table, input.alloc)
+        };
+        match tr {
             Ok(s) => {
                 skels.insert(pos, s);
             }
@@ -535,11 +564,15 @@ fn minimize(mut pre: Vec<L>) -> Vec<L> {
 
 type Results = BTreeMap<usize, Result<String, String>>;
 
+/// Per function, the accesses its selection pass dropped (#4005 A4).
+type Dropped = BTreeMap<usize, Vec<usize>>;
+
 /// Contracts to a fixpoint (at most 8 rounds); each function's result
-/// under the last.
-fn infer_contracts(skels: &BTreeMap<usize, Skel>, table: &BTreeSet<usize>, entry: &BTreeSet<usize>) -> Results {
+/// under the last, and (`skip`, a routine table) the accesses it dropped.
+fn infer_contracts(skels: &BTreeMap<usize, Skel>, table: &BTreeSet<usize>, entry: &BTreeSet<usize>, skip: bool) -> (Results, Dropped) {
     let mut contracts: BTreeMap<usize, Contract> = BTreeMap::new();
     let mut results = BTreeMap::new();
+    let mut dropped = BTreeMap::new();
     for round in 0..8 {
         if round > 0 && past_deadline() {
             break;
@@ -547,11 +580,15 @@ fn infer_contracts(skels: &BTreeMap<usize, Skel>, table: &BTreeSet<usize>, entry
         let mut sites: Vec<Site> = Vec::new();
         let mut rets: BTreeMap<usize, Vec<Vec<L>>> = BTreeMap::new();
         results.clear();
+        dropped.clear();
         for &pos in table {
-            let (r, s, rt) = prove_proc(skels, &contracts, pos);
-            sites.extend(s);
-            rets.insert(pos, rt);
-            results.insert(pos, r);
+            let p = prove_proc(skels, &contracts, pos, skip);
+            sites.extend(p.sites);
+            rets.insert(pos, p.rets);
+            results.insert(pos, p.stretch);
+            if !p.dropped.is_empty() {
+                dropped.insert(pos, p.dropped);
+            }
         }
         let next: BTreeMap<usize, Contract> = table
             .iter()
@@ -563,7 +600,67 @@ fn infer_contracts(skels: &BTreeMap<usize, Skel>, table: &BTreeSet<usize>, entry
         }
         contracts = next;
     }
-    results
+    (results, dropped)
+}
+
+/// [`certify_routines`]'s answer: the routine certificate, its site
+/// selection (one `<position> <op>...` line per procedure), the reason
+/// each routine left out was, and per certified routine the accesses it
+/// left counted.
+pub type RoutinesCertified = (String, String, BTreeMap<usize, String>, BTreeMap<usize, (usize, usize)>);
+
+/// The runtime routines' certificate (#4005 A4): every routine the anchor
+/// file's `routines` line names, each access of its body a candidate
+/// event. An access no region holds leaves the routine's selection (it
+/// stays counted) and the table is proven again; a routine whose body
+/// cannot be translated or proven otherwise leaves the table.
+pub fn certify_routines(wasm: &[u8], anchors: &str) -> Result<RoutinesCertified, String> {
+    let budget = almide_base::env::var("ALMIDE_LIN_PIVOTS").and_then(|s| s.parse().ok()).unwrap_or(PIVOT_BUDGET);
+    BUDGET.with(|b| b.set(budget));
+    lp::reset_pivots();
+    let m = lin::Module::read(wasm)?;
+    let exported = lin::exported_or_tabled(wasm, m.imports)?;
+    let heap = lin::routine_params(anchors);
+    let (alloc, ..) = almide_anchor_check::parse_anchors(anchors)?;
+    let all: BTreeMap<usize, BTreeSet<usize>> = heap.keys().map(|&p| (p, lin::access_sites(&m, p))).collect();
+    let mut sel = all.clone();
+    let mut refused: BTreeMap<usize, String> = BTreeMap::new();
+    // A routine with no access is nothing to certify.
+    let mut table: BTreeSet<usize> = all.iter().filter(|(_, s)| !s.is_empty()).map(|(p, _)| *p).collect();
+    for _ in 0..64 {
+        let input = Input { m: &m, sites: &sel, heap: &heap, alloc, routine: true };
+        let Some(skels) = translate_table(&input, &mut table, &mut refused) else { continue };
+        let entry = entry_points(&m, &exported, &table);
+        let (results, dropped) = infer_contracts(&skels, &table, &entry, true);
+        if !dropped.is_empty() {
+            for (p, ks) in dropped {
+                if let Some(s) = sel.get_mut(&p) {
+                    for k in ks {
+                        s.remove(&k);
+                    }
+                }
+            }
+            continue;
+        }
+        let failed: Vec<usize> = results.iter().filter(|(_, r)| r.is_err()).map(|(p, _)| *p).collect();
+        if failed.is_empty() {
+            let cert: Vec<String> = table.iter().map(|p| results[p].clone().unwrap_or_default()).collect();
+            let lines: Vec<String> = table
+                .iter()
+                .map(|p| {
+                    let ops: Vec<String> = sel[p].iter().map(usize::to_string).collect();
+                    format!("{p} {}", ops.join(" ")).trim_end().to_string()
+                })
+                .collect();
+            let counts = table.iter().map(|p| (*p, (sel[p].len(), all[p].len() - sel[p].len()))).collect();
+            return Ok((cert.join(" ; "), lines.join("\n"), refused, counts));
+        }
+        for p in failed {
+            refused.insert(p, results[&p].clone().err().unwrap_or_default());
+            table.remove(&p);
+        }
+    }
+    Err("the routine table did not settle in 64 rounds".into())
 }
 
 /// ALMIDE_LIN_DEBUG: each round's results, call sites and preconditions.

@@ -110,12 +110,15 @@ pub fn census_with(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<At>) -> 
 }
 
 /// One defined function's census: its position, its class (a certified
-/// frame or a runtime routine), its label — the anchor file's `routines`
-/// label, else its `selfhost` name, else `-` — and its counts.
+/// frame or a runtime routine), what the anchor file says it is (`routine`:
+/// a runtime routine on the `routines` line; `selfhost`: a self-host body
+/// on the `selfhost` line; `code`: anything else — user code, closures),
+/// its label (that line's name, else `-`) and its counts.
 #[derive(Debug, Clone)]
 pub struct FnCensus {
     pub func: usize,
     pub frame: bool,
+    pub source: &'static str,
     pub label: String,
     pub tally: Tally,
 }
@@ -147,8 +150,12 @@ pub fn census_fns(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<At>) -> R
                 t.header += 1;
             }
         }
-        let label = routines.get(&func).or_else(|| selfhost.get(&func)).cloned().unwrap_or_else(|| "-".to_string());
-        out.push(FnCensus { func, frame: frames.contains(&func), label, tally: t });
+        let (source, label) = match (routines.get(&func), selfhost.get(&func)) {
+            (Some(l), _) => ("routine", l.clone()),
+            (None, Some(l)) => ("selfhost", l.clone()),
+            (None, None) => ("code", "-".to_string()),
+        };
+        out.push(FnCensus { func, frame: frames.contains(&func), source, label, tally: t });
     }
     Ok(out)
 }

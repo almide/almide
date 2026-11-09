@@ -6,6 +6,17 @@
 
 use std::io::Write;
 
+/// `flag <value>...` (`n` values) taken out of the arguments (exit 2 when
+/// one is missing).
+fn take_values(args: &mut Vec<String>, flag: &str, n: usize) -> Option<Vec<String>> {
+    let at = args.iter().position(|a| a == flag)?;
+    args.remove(at);
+    if at + n > args.len() {
+        std::process::exit(2)
+    }
+    Some(args.drain(at..at + n).collect())
+}
+
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(at) = args.iter().position(|a| a == "--explain") {
@@ -19,10 +30,11 @@ fn main() {
     let census_fns = args.iter().position(|a| a == "--census-fns").map(|at| args.remove(at)).is_some();
     // `--lin <cert>` (with `--census`): the module's linear certificate; the
     // prim sites it covers count as located once lin.rs verifies it.
-    let lin_cert = args.iter().position(|a| a == "--lin").map(|at| {
-        args.remove(at);
-        if at < args.len() { args.remove(at) } else { std::process::exit(2) }
-    });
+    let lin_cert = take_values(&mut args, "--lin", 1).map(|mut v| v.remove(0));
+    // `--rlin <cert> <selection>` (with `--census`): the runtime routines'
+    // certificate (#4005 A4); the accesses its selection names count as
+    // located once lin_routines.rs verifies it.
+    let rlin = take_values(&mut args, "--rlin", 2).map(|v| (v[0].clone(), v[1].clone()));
     // `--lin-skel <artifact.wasm> <anchors>`: the linear certificate's
     // translation of every self-host body (lin.rs), holes as `_`.
     if args.first().map(String::as_str) == Some("--lin-skel") {
@@ -37,6 +49,26 @@ fn main() {
                     }
                 }
             }
+            Err(e) => {
+                println!("LIN REJECT: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+    // `--lin-verify-routines <artifact.wasm> <anchors> <cert> <selection>`:
+    // the runtime routines' certificate is the translation of the routines
+    // it names, each with the events its selection names (#4005 A4).
+    if args.first().map(String::as_str) == Some("--lin-verify-routines") {
+        let (Some(w), Some(a), Some(c), Some(s)) = (args.get(1), args.get(2), args.get(3), args.get(4)) else { std::process::exit(2) };
+        let (w, a, c, s) = (
+            std::fs::read(w).unwrap_or_default(),
+            std::fs::read_to_string(a).unwrap_or_default(),
+            std::fs::read_to_string(c).unwrap_or_default(),
+            std::fs::read_to_string(s).unwrap_or_default(),
+        );
+        match almide_anchor_check::lin_routines::verify_routines(&w, &a, c.trim_end(), &s) {
+            Ok(r) => println!("LIN OK: {} routine procedure(s), {} access(es) certified, {} counted", r.procs, r.sites, r.counted),
             Err(e) => {
                 println!("LIN REJECT: {e}");
                 std::process::exit(1);
@@ -79,11 +111,21 @@ fn main() {
     let a = String::from_utf8_lossy(&a).into_owned();
     let limit = std::time::Duration::from_secs(almide_anchor_check::DEADLINE_SECS);
     let counted = census.then(|| {
-        let linear = match &lin_cert {
-            None => Ok(std::collections::HashSet::new()),
-            Some(p) => almide_anchor_check::lin::verify(&w, &a, String::from_utf8_lossy(&read(p)).trim_end())
-                .map(|r| r.located.into_iter().map(|(func, op)| almide_anchor_check::At { func, op }).collect()),
+        let at = |v: Vec<(usize, usize)>| -> std::collections::HashSet<almide_anchor_check::At> {
+            v.into_iter().map(|(func, op)| almide_anchor_check::At { func, op }).collect()
         };
+        let mut linear = match &lin_cert {
+            None => Ok(std::collections::HashSet::new()),
+            Some(p) => almide_anchor_check::lin::verify(&w, &a, String::from_utf8_lossy(&read(p)).trim_end()).map(|r| at(r.located)),
+        };
+        if let Some((c, s)) = &rlin {
+            let (c, s) = (String::from_utf8_lossy(&read(c)).into_owned(), String::from_utf8_lossy(&read(s)).into_owned());
+            let routines = almide_anchor_check::lin_routines::verify_routines(&w, &a, c.trim_end(), &s).map(|r| at(r.located));
+            linear = linear.and_then(|mut l| {
+                l.extend(routines?);
+                Ok(l)
+            });
+        }
         linear.and_then(|l| {
             almide_anchor_check::decode(&w).and_then(|bodies| {
                 let fns = if census_fns { almide_anchor_check::census_fns(&bodies, &a, &l)? } else { Vec::new() };
@@ -106,9 +148,10 @@ fn main() {
                     for f in fns.iter().filter(|f| f.tally.accesses > 0) {
                         let t = &f.tally;
                         println!(
-                            "CENSUSFN {} {} {} {} {} {} {} {}",
+                            "CENSUSFN {} {} {} {} {} {} {} {} {}",
                             f.func,
                             if f.frame { "frame" } else { "routine" },
+                            f.source,
                             f.label,
                             t.accesses,
                             t.located,

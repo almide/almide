@@ -65,6 +65,7 @@ mod decode;
 mod fields;
 mod init;
 pub mod lin;
+pub mod lin_routines;
 mod operands;
 pub mod rc;
 pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, prims_anchors, Anchors, AnchorsHeld, RcLines};

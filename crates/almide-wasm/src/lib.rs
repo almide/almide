@@ -563,14 +563,17 @@ impl SliceTy {
 
     /// A parameter of this type holds a heap block's base (#4005 A4: the
     /// linear certificate binds it to a block): `Some(stride)` then, the
-    /// stride its len word counts in when it counts payload units (a
-    /// String's or Bytes' bytes, a list's slots), else `Some(None)`. Unit
-    /// and closures are left out: no self-host body addresses them.
-    fn heap_param(self, types: &TypeTable) -> Option<Option<u32>> {
+    /// stride its len word counts in when it counts the payload (a String's,
+    /// Bytes' or list's), else `Some(None)`. The len word counts payload
+    /// BYTES for every counted block (almide-layout `LEN`; a list's count
+    /// is `len / slot`), so the stride is 1: the translation reads the word
+    /// itself as the count, and a list's slot size there would claim
+    /// `slot * len <= cap`, which a list of more than one slot breaks.
+    /// Unit and closures are left out: no self-host body addresses them.
+    fn heap_param(self, _types: &TypeTable) -> Option<Option<u32>> {
         match self {
-            SliceTy::Scalar(Scalar::Str | Scalar::Bytes) => Some(Some(1)),
+            SliceTy::Scalar(Scalar::Str | Scalar::Bytes) | SliceTy::List(_) => Some(Some(1)),
             SliceTy::Scalar(_) | SliceTy::Fn(_) | SliceTy::Unit => None,
-            SliceTy::List(e) => Some(Some(types.el(e).slot_size())),
             SliceTy::Option(_)
             | SliceTy::Result(..)
             | SliceTy::Map(..)

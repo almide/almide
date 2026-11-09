@@ -158,6 +158,56 @@ const STATIC_LABELS: [&str; 37] = [
     "line_eprintln",
 ];
 
+/// The fixed-slot helpers' heap parameters, in F_* slot order (#4005 A4):
+/// each `(wasm parameter, Some(1))` is a String, Bytes or List block every
+/// caller hands in — a COUNTED block, its len word the payload's byte
+/// count and its cap word its capacity, both written by the allocator
+/// alone (almide-layout). The routine certificate's translation binds each
+/// to a block (`h p r`, as a self-host body's typed parameter). A helper
+/// whose parameter may be a block of another representation (`$cow`,
+/// `$block_copy`: any copyable value; `$inc` / `$dec_flat` / `$free`: a
+/// handle below the heap floor too) or a raw address (the line buffer, the
+/// scan family's entry walk) declares none.
+const STATIC_HEAP: [&[(u32, Option<u32>)]; 37] = [
+    &[(0, Some(1))],              // println_block(base)
+    &[(0, Some(1))],              // eprintln_block(base)
+    &[],                          // append_copy(cur, src, len)
+    &[],                          // itoa(v)
+    &[],                          // append_i64(cur, v)
+    &[],                          // append_bool(cur, b)
+    &[],                          // alloc(size)
+    &[],                          // int_to_string(v)
+    &[(0, Some(1)), (1, Some(1))], // concat(a, b)
+    &[(0, Some(1)), (1, Some(1))], // str_eq(a, b)
+    &[(0, Some(1))],              // list_get_8(list, idx)
+    &[(0, Some(1))],              // list_get_4(list, idx)
+    &[(0, Some(1))],              // list_push_8(list, v)
+    &[(0, Some(1))],              // list_push_4(list, v)
+    &[(0, Some(1)), (1, Some(1))], // list_join(list, sep)
+    &[],                          // block_copy(src)
+    &[],                          // buf_to_block(start, cur)
+    &[(0, Some(1))],              // str_len_chars(base)
+    &[],                          // scan_w64(block, stride, off, needle)
+    &[],                          // scan_w32
+    &[],                          // scan_str
+    &[],                          // f16_to_f64(bits)
+    &[(0, Some(1))],              // cp_off(base, idx)
+    &[(0, Some(1))],              // str_slice(base, start, end)
+    &[(0, Some(1))],              // str_repeat(base, n)
+    &[(0, Some(1)), (1, Some(1))], // str_cmp(a, b)
+    &[(0, Some(1)), (1, Some(1)), (2, Some(1))], // str_replace(s, from, to, first)
+    &[],                          // copy(dst, src, len)
+    &[],                          // free(block)
+    &[],                          // inc(handle)
+    &[],                          // dec_flat(handle)
+    &[],                          // cow(block)
+    &[(0, Some(1)), (1, Some(1))], // str_append(dst, src)
+    &[(0, Some(1))],              // bytes_push(b, v)
+    &[],                          // line_grow(cur, len)
+    &[],                          // line_println(start, cur)
+    &[],                          // line_eprintln(start, cur)
+];
+
 /// The pool as ONE active segment that skips its zero head and tail (#3114):
 /// linear memory starts zeroed, so the null guard + itoa scratch the pool
 /// reserves at address 0 (112 bytes in every module) need no initializer.
@@ -524,7 +574,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     for (k, (idx, f, sig)) in static_helpers.iter().enumerate() {
         if used.contains(idx) {
             code.function(f);
-            crate::witness::routines::label(*idx, STATIC_LABELS[k], &[]);
+            crate::witness::routines::label(*idx, STATIC_LABELS[k], STATIC_HEAP[k]);
             if let Some(sig) = sig {
                 crate::witness::rc::helper(*idx, sig);
             }

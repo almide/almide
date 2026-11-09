@@ -44,12 +44,16 @@ pub(crate) enum Item {
     Sto { r: Nat, w: Z, off: Z, addr: Lin, p: [Pf; 3] },
     Handle(Nat, Nat),
     Len(Nat, Nat, Z),
+    /// `LCap n r`: n := r's capacity (the cap word).
+    Cap(Nat, Nat),
     Alloc { h: Nat, r: Nat, sz: Lin, lo: Pf, hi: Pf },
     Wf(Nat),
     Static(Nat, Z, Z),
     Set(Nat),
     SetR(Nat, Z, Z),
     Asn { x: Nat, l: Lin, lo: Pf, hi: Pf },
+    /// `LAsnU x l lo hi`: x := l mod 2^32 (an i32 result).
+    AsnU { x: Nat, l: Lin, lo: Pf, hi: Pf },
     Test { a: Lin, b: Lin, sgn: bool, pa: (Pf, Pf), pb: (Pf, Pf), nn: (Pf, Pf), thn: Vec<Item>, els: Vec<Item> },
     Branch(Vec<Item>, Vec<Item>),
     Loop { inv: Facts, pin: Vec<Pf>, body: Vec<Item> },
@@ -225,6 +229,11 @@ fn lprog_at(s: &[u8], mut i: usize) -> Option<(Vec<Item>, usize)> {
                 let (st, k) = z_at(s, k)?;
                 (Item::Len(n, rg, st), k)
             }
+            b'K' => {
+                let (n, k) = nat_at(s, r)?;
+                let (rg, k) = nat_at(s, k)?;
+                (Item::Cap(n, rg), k)
+            }
             b'a' => {
                 let (h, k) = nat_at(s, r)?;
                 let (rg, k) = nat_at(s, k)?;
@@ -253,12 +262,12 @@ fn lprog_at(s: &[u8], mut i: usize) -> Option<(Vec<Item>, usize)> {
                 let (hi, k) = z_at(s, k)?;
                 (Item::SetR(x, lo, hi), k)
             }
-            b'=' => {
+            b'=' | b'U' => {
                 let (x, k) = nat_at(s, r)?;
                 let (l, k) = lin_at(s, k)?;
                 let (lo, k) = pf_at(s, k)?;
                 let (hi, k) = pf_at(s, k)?;
-                (Item::Asn { x, l, lo, hi }, k)
+                (if c == b'=' { Item::Asn { x, l, lo, hi } } else { Item::AsnU { x, l, lo, hi } }, k)
             }
             b'T' => {
                 let g = sk(s, r);
@@ -529,8 +538,8 @@ fn tr_lin(tr: &dyn Fn(&Var) -> Option<Lin>, l: &Lin) -> Option<Lin> {
 fn writes(items: &[Item], out: &mut Vec<Nat>) {
     for it in items {
         match it {
-            Item::Handle(h, _) | Item::Len(h, _, _) | Item::Set(h) | Item::SetR(h, _, _) => out.push(h.clone()),
-            Item::Alloc { h, .. } | Item::Asn { x: h, .. } => out.push(h.clone()),
+            Item::Handle(h, _) | Item::Len(h, _, _) | Item::Cap(h, _) | Item::Set(h) | Item::SetR(h, _, _) => out.push(h.clone()),
+            Item::Alloc { h, .. } | Item::Asn { x: h, .. } | Item::AsnU { x: h, .. } => out.push(h.clone()),
             Item::Call { res, .. } => out.push(res.clone()),
             Item::Test { thn, els, .. } | Item::Branch(thn, els) => {
                 writes(thn, out);
@@ -694,6 +703,22 @@ fn lcheck(p: &Table, c: Ctx, mut f: Facts, items: &[Item]) -> Option<(St, St)> {
                 f = g;
             }
             Item::Asn { x, l, lo, hi } => f = asn_facts(&f, x, l, lo, hi),
+            Item::Cap(n, r) => {
+                let mut g = eqs(&Var::S(n.clone()), &v1(Var::C(r.clone())));
+                g.extend(kill(&f, &Var::S(n.clone())));
+                f = g;
+            }
+            Item::AsnU { x, l, lo, hi } => {
+                let top = Z::pow2(32).sub(&one());
+                f = if entails(&f, lo, &lneg(l)) && entails(&f, hi, &lsub(l, &kz(top.clone()))) {
+                    asn_facts(&f, x, l, lo, hi)
+                } else {
+                    let vx = v1(Var::S(x.clone()));
+                    let mut g = vec![lsub(&kz(Z::zero()), &vx), lsub(&vx, &kz(top))];
+                    g.extend(kill(&f, &Var::S(x.clone())));
+                    g
+                };
+            }
             Item::Test { thn, els, .. } | Item::Branch(thn, els) => {
                 let (ft, fe) = match it {
                     Item::Test { a, b, sgn, pa, pb, nn, .. } => {

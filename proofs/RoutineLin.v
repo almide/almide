@@ -21,6 +21,8 @@
 
      LHandle h r       h := r's base address (`prim.handle`);
      LLen n r s        n := a count of r's block at stride s (0 <= n, s·n <= cap);
+     LCap n r          n := r's capacity (the cap word at +8: a block's
+                       extent is PAYLOAD + its cap word, RoutineBounds.v);
      LAlloc h r sz     h := a fresh block, now region r, of capacity >= sz
                        (sz the i32 the allocator receives, proven in
                        [0, 2^32) so it is the size asked);
@@ -30,6 +32,9 @@
      LAsn x l          x := l, with a proof that l does not wrap (an
                        invertible step `x := x + d` keeps every fact on x);
      LSetR x lo hi     x := a value the instruction bounds (a byte load);
+     LAsnU x l         x := l mod 2^32 (a wasm i32 add, subtract or multiply
+                       by a constant): x = l when 0 <= l < 2^32 is proven
+                       (then as LAsn), else only 0 <= x < 2^32;
      LTest a b         the code's own compare `a >= b`: a fact in each arm;
      LCall             the callee's postcondition, its precondition proven;
 
@@ -381,12 +386,15 @@ Inductive LProg : Type :=
   | LSto (r : Slot) (w off : Z) (addr : Lin) (p0 p1 p2 : Pf) (k : LProg)
   | LHandle (h r : Slot) (k : LProg)
   | LLen (n r : Slot) (s : Z) (k : LProg)
+  | LCap (n r : Slot) (k : LProg)
   | LAlloc (h r : Slot) (sz : Lin) (lo hi : Pf) (k : LProg)
   | LWf (r : Slot) (k : LProg)
   | LStatic (r : Slot) (b0 c0 : Z) (k : LProg)
   | LSet (x : Slot) (k : LProg)
   | LSetR (x : Slot) (lo hi : Z) (k : LProg)
   | LAsn (x : Slot) (l : Lin) (lo hi : Pf) (k : LProg)
+  (* An i32 result: lo proves 0 <= l, hi proves l <= 2^32 - 1. *)
+  | LAsnU (x : Slot) (l : Lin) (lo hi : Pf) (k : LProg)
   (* `a >= b` (signed, or unsigned with both sides proven not negative):
      `thn` when it holds, `els` when not. *)
   | LTest (a b : Lin) (sgn : bool) (pa pb nn : Pf * Pf) (thn els : LProg) (k : LProg)
@@ -418,7 +426,8 @@ Fixpoint writes (p : LProg) : list Slot :=
   match p with
   | LEnd | LCont _ | LBrk | LTrap | LRet _ => []
   | LAcc _ _ _ _ _ _ _ k | LSto _ _ _ _ _ _ _ k | LWf _ k | LStatic _ _ _ k => writes k
-  | LHandle h _ k | LLen h _ _ k | LAlloc h _ _ _ _ k | LSet h k | LSetR h _ _ k | LAsn h _ _ _ k => h :: writes k
+  | LHandle h _ k | LLen h _ _ k | LCap h _ k | LAlloc h _ _ _ _ k | LSet h k | LSetR h _ _ k | LAsn h _ _ _ k
+  | LAsnU h _ _ _ k => h :: writes k
   | LTest _ _ _ _ _ _ thn els k | LBranch thn els k => writes thn ++ writes els ++ writes k
   | LLoop _ _ b k => writes b ++ writes k
   | LCall _ _ _ _ res _ k => res :: writes k
@@ -427,8 +436,8 @@ Fixpoint writes (p : LProg) : list Slot :=
 Fixpoint rebinds (p : LProg) : list Slot :=
   match p with
   | LEnd | LCont _ | LBrk | LTrap | LRet _ => []
-  | LAcc _ _ _ _ _ _ _ k | LSto _ _ _ _ _ _ _ k | LWf _ k | LHandle _ _ k | LLen _ _ _ k
-  | LSet _ k | LSetR _ _ _ k | LAsn _ _ _ _ k => rebinds k
+  | LAcc _ _ _ _ _ _ _ k | LSto _ _ _ _ _ _ _ k | LWf _ k | LHandle _ _ k | LLen _ _ _ k | LCap _ _ k
+  | LSet _ k | LSetR _ _ _ k | LAsn _ _ _ _ k | LAsnU _ _ _ _ k => rebinds k
   | LAlloc _ r _ _ _ k | LStatic r _ _ k => r :: rebinds k
   | LTest _ _ _ _ _ _ thn els k | LBranch thn els k => rebinds thn ++ rebinds els ++ rebinds k
   | LLoop _ _ b k => rebinds b ++ rebinds k
@@ -536,7 +545,11 @@ Inductive lrun : Bm -> Env -> LProg -> list Ev -> Out -> Prop :=
       (forall r' r, In (r', r) reps -> bm' r' = bm r) ->
       lrun bm' e' (body d) t1 OAbort ->
       lrun bm e (LCall f args reps outs res pfs k) t1 OAbort
-  | LRRet : forall bm e pfs, lrun bm e (LRet pfs) [] (ORet bm e).
+  | LRRet : forall bm e pfs, lrun bm e (LRet pfs) [] (ORet bm e)
+  | LRCap : forall bm e n r k t o,
+      lrun bm (upd e n (CAP (lb (bm r)))) k t o -> lrun bm e (LCap n r k) t o
+  | LRAsnU : forall bm e x l lo hi k t o,
+      lrun bm (upd e x (eval (val bm e) l mod 2 ^ 32)) k t o -> lrun bm e (LAsnU x l lo hi k) t o.
 End Run.
 
 (* ── The checker ──────────────────────────────────────────────────────── *)
@@ -612,6 +625,13 @@ Definition asn_facts (F : Facts) (x : Slot) (l : Lin) (lo hi : Pf) : Facts :=
     else if Z.eqb c 1 then map (subst (VS x) (lsub (v1 (VS x)) (mkL (dropv (VS x) (terms l)) (cst l)))) F
     else kill F (VS x)
   else kill F (VS x).
+
+(* An i32 result: in [0, 2^32) it is l itself, and LAsn's facts follow (the
+   same proofs show l in the i64 range); otherwise only its range. *)
+Definition asnu_facts (F : Facts) (x : Slot) (l : Lin) (lo hi : Pf) : Facts :=
+  if entails F lo (lneg l) && entails F hi (lsub l (kz (ADDR - 1)))
+  then asn_facts F x l lo hi
+  else lsub (kz 0) (v1 (VS x)) :: lsub (v1 (VS x)) (kz (ADDR - 1)) :: kill F (VS x).
 
 (* ── Calls: the translation of a contract across the call ─────────────── *)
 
@@ -708,6 +728,7 @@ Fixpoint lcheck (P : Procs) (C : Ctx) (F : Facts) (p : LProg) {struct p} : optio
       if acc_ok F r w off addr p0 p1 p2 then lcheck P C F k else None
   | LHandle h r k => lcheck P C (eqs (VS h) (v1 (VB r)) ++ kill F (VS h)) k
   | LLen n r s k => lcheck P C (lneg (v1 (VS n)) :: lsub (lmul s (v1 (VS n))) (v1 (VC r)) :: kill F (VS n)) k
+  | LCap n r k => lcheck P C (eqs (VS n) (v1 (VC r)) ++ kill F (VS n)) k
   | LAlloc h r sz lo hi k =>
       if entails F lo (lneg sz) && entails F hi (lsub sz (kz (ADDR - 1))) && negb (mentions (VS h) sz) && negb (mentions (VB r) sz) && negb (mentions (VC r) sz)
       then lcheck P C (eqs (VS h) (v1 (VB r)) ++ lsub sz (v1 (VC r)) :: kill_region (kill F (VS h)) r) k
@@ -719,6 +740,7 @@ Fixpoint lcheck (P : Procs) (C : Ctx) (F : Facts) (p : LProg) {struct p} : optio
   | LSet x k => lcheck P C (kill F (VS x)) k
   | LSetR x lo hi k => lcheck P C (lsub (kz lo) (v1 (VS x)) :: lsub (v1 (VS x)) (kz hi) :: kill F (VS x)) k
   | LAsn x l lo hi k => lcheck P C (asn_facts F x l lo hi) k
+  | LAsnU x l lo hi k => lcheck P C (asnu_facts F x l lo hi) k
   | LTest a b sgn pa pb nn thn els k =>
       let '(ft, fe) := test_facts F a b sgn pa pb nn in
       after_arms (fun G => lcheck P C G k) (lcheck P C (ft ++ F) thn) (lcheck P C (fe ++ F) els)
@@ -1050,6 +1072,10 @@ Proof.
     + rewrite (Hr y (ni_r2 _ _ _ Hy)). apply bouts_other. apply assoc_none_notin. exact (ni_l2 _ _ _ Hy).
   - (* CallAbort *) discriminate.
   - (* Ret *) injection Hs as <- <-. split; intros; reflexivity.
+  - (* Cap *) destruct (IHHrun bm2 e2 Hs) as [Hw Hr]. split; intros y Hy; [| apply Hr; exact Hy].
+    rewrite (Hw y (ni_tl _ _ _ Hy)). exact (upd_ni e n _ y _ Hy).
+  - (* AsnU *) destruct (IHHrun bm2 e2 Hs) as [Hw Hr]. split; intros y Hy; [| apply Hr; exact Hy].
+    rewrite (Hw y (ni_tl _ _ _ Hy)). exact (upd_ni e x _ y _ Hy).
 Qed.
 
 
@@ -1186,6 +1212,29 @@ Proof.
       unfold rupd at 1. rewrite var_eqb_refl. rewrite Hz. unfold eval.
       rewrite (eval_terms_drop rho (VS x) (terms l)), E1. lia. }
     rewrite Hd. rewrite (eval_ext _ rho) by (intros; apply rupd_back). apply HF. exact Hf0.
+Qed.
+
+Lemma good_cap : forall bm e F n r, good bm e F ->
+  good bm (upd e n (CAP (lb (bm r)))) (eqs (VS n) (v1 (VC r)) ++ kill F (VS n)).
+Proof.
+  intros bm e F n r Hg.
+  assert (Hc : is_i64 (CAP (lb (bm r)))) by (destruct (Hwf (bm r)) as [H0 [H1 H2]]; unfold is_i64, ADDR, PAYLOAD in *; lia).
+  destruct (good_kill_upd bm e F n (CAP (lb (bm r))) Hg Hc) as [HK [Hi Ho]].
+  split; [| tauto]. apply lsat_app; [| exact HK]. apply eqs_sound. evals. cbn [val]. apply upd_same.
+Qed.
+
+Lemma good_asnu : forall bm e F x l lo hi, good bm e F ->
+  good bm (upd e x (eval (val lb base bm e) l mod 2 ^ 32)) (asnu_facts F x l lo hi).
+Proof.
+  intros bm e F x l lo hi Hg. unfold asnu_facts.
+  pose proof (Z.mod_pos_bound (eval (val lb base bm e) l) (2 ^ 32) ltac:(lia)) as Hm.
+  destruct (entails F lo (lneg l) && entails F hi (lsub l (kz (ADDR - 1)))) eqn:Hp.
+  - apply andb_true_iff in Hp. destruct Hp as [Hlo Hhi]. pose proof Hg as [HF _].
+    apply (entails_sound _ _ _ _ HF) in Hlo. apply (entails_sound _ _ _ _ HF) in Hhi. evals.
+    assert (He : eval (val lb base bm e) l mod 2 ^ 32 = wrap (eval (val lb base bm e) l)).
+    { rewrite Z.mod_small by (unfold ADDR in *; lia). symmetry. apply wrap_small. unfold I64MIN, I64MAX, ADDR in *. lia. }
+    rewrite He. apply good_asn. exact Hg.
+  - apply good_setr; [exact Hg | unfold is_i64; lia | unfold ADDR; lia].
 Qed.
 
 Lemma unsigned_small : forall v, 0 <= v <= I64MAX -> unsigned v = v.
@@ -1549,6 +1598,8 @@ Proof.
   - (* Ret *)
     destruct (proves F (snd C) pfs) eqn:Hpr; [| discriminate]. injection Hc as <-.
     split; [constructor |]. simpl. destruct Hg as [HF Hr]. split; [exact (proves_sound _ F _ pfs HF Hpr) | exact Hr].
+  - (* Cap *) exact (IHHrun C _ rr (good_cap bm e F n r Hg) Hc).
+  - (* AsnU *) exact (IHHrun C _ rr (good_asnu bm e F x l lo hi Hg) Hc).
 Qed.
 
 End Sound.
