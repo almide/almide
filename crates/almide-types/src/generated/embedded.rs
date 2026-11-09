@@ -6758,16 +6758,6 @@ fn __hpd_strip(hb: Int) -> Unit = {
 
 
 
-fn __hpd_cap(hb: Int) -> Unit = {
-  let n = __hpd_n(hb)
-  if n > 800 then {
-    if __hpd_nz_after(hb, 800, n) then __hpd_str8(hb, 1) else ()
-    __hpd_sn(hb, 800)
-  } else ()
-}
-
-
-
 
 
 
@@ -6785,8 +6775,10 @@ fn __hpd_lsh(hb: Int, k: Int) -> Unit = if k > 0 then {
   __hpd_sn(hb, n + 8)
   __hpd_sdp(hb, __hpd_dp(hb) + 8)
   __hpd_strip(hb)
-  __hpd_cap(hb)
-  __hpd_sn(hb, __hpd_trim(hb, __hpd_n(hb)))
+
+  let m = __hpd_n(hb)
+  if m > 800 and __hpd_nz_after(hb, 800, m) then __hpd_str8(hb, 1) else ()
+  __hpd_sn(hb, __hpd_trim(hb, (if m > 800 then 800 else m)))
   __hpd_lsh(hb, k - s)
 } else ()
 
@@ -6837,10 +6829,7 @@ fn __hpd_to_half(hb: Int, e2: Int) -> Int = if __hpd_dp(hb) > 0 then {
 } else e2
 
 fn __hpd_from_half(hb: Int, e2: Int) -> Int =
-  if __hpd_dp(hb) < 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(
-    hb,
-    0,
-  ) < 5) then {
+  if __hpd_dp(hb) < 0 or (__hpd_dp(hb) == 0 and __hpd_d(hb, 0) < 5) then {
     let k = if __hpd_dp(hb) < 0 then __hpd_bits(0 - __hpd_dp(hb)) else 1
     __hpd_lsh(hb, k)
     __hpd_from_half(hb, e2 - k)
