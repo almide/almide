@@ -192,11 +192,16 @@ fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use
 /// `cmd_build`'s native binary target: the content-cached build shared with
 /// `almide run` — the cache key is the generated code, so identical output
 /// from any caller (or any source path) reuses one binary and skips cargo
-/// entirely. Locking and atomic binary staging live inside
-/// `build_native_cached`; the copy-out below reads a content-named,
-/// atomically-renamed file, so it needs no lock.
+/// entirely. The shared dir's lock is taken before the cache check and held
+/// through the copy-out (#4269), so writing the source, cargo and the copy
+/// to `output` are one critical section: a concurrent build, run or cache
+/// sweep of that dir waits instead of changing the binary under the copy.
 fn cmd_build_native(rs_code: &str, output: &str, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>, note: &str) {
-    match super::run::build_native_cached(rs_code, false, use_release, None, native_deps, source_root) {
+    let project_dir = super::build_dir::shared_run_project_dir();
+    let _ = std::fs::create_dir_all(&project_dir);
+    let flock = super::build_dir::BuildDirLock::acquire(&project_dir)
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    match super::run::build_native_cached_locked(rs_code, use_release, native_deps, source_root, &flock) {
         Ok(bin_path) => {
             if let Err(e) = install_artifact(&bin_path, std::path::Path::new(output)) {
                 err(&format!("Failed to copy binary to {}: {}", output, e));

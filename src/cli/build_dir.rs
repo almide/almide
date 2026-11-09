@@ -172,9 +172,10 @@ pub(crate) const BUILD_LOCK_FILE: &str = ".almide-build.lock";
 /// mutual exclusion, and the shared `src/main.rs` race the lock exists to
 /// prevent is back for exactly one build. An empty lockfile costs nothing.
 ///
-/// What this cannot cover: a lock-free cache HIT (`build_native_cached`
-/// returns the `almide-<hash>` path without locking) that execs after the
-/// removal. `clean` is the user's own request to drop the cache, so that
+/// What this cannot cover: a lock-free cache HIT of `almide run`
+/// (`build_native_cached` returns the `almide-<hash>` path without locking)
+/// that execs after the removal. `almide build` holds the lock from its
+/// cache check through its copy-out (#4269), so it never sees one. `clean` is the user's own request to drop the cache, so that
 /// one run reports "Failed to execute" and the next rebuilds.
 pub(crate) fn clear_build_dir(dir: &std::path::Path) -> Result<bool, String> {
     let _lock = BuildDirLock::acquire(dir)?;

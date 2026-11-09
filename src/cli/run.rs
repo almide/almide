@@ -118,6 +118,34 @@ pub(crate) fn build_native_cached(
     native_deps: &[crate::project::NativeDep],
     source_root: Option<&std::path::Path>,
 ) -> Result<std::path::PathBuf, String> {
+    build_native_cached_in(rs_code, use_test_harness, release, project_dir_override, native_deps, source_root, None)
+}
+
+/// [`build_native_cached`] in the shared dir whose [`BuildDirLock`] the caller
+/// already holds (#4269): `almide build` takes it before the cache check and
+/// keeps it through the copy to `-o`, so the whole write-source → cargo →
+/// copy window is one critical section. A concurrent build or `almide run`
+/// in the same dir waits for it, and none can evict or rebuild the binary
+/// between this build and its install.
+pub(crate) fn build_native_cached_locked(
+    rs_code: &str,
+    release: bool,
+    native_deps: &[crate::project::NativeDep],
+    source_root: Option<&std::path::Path>,
+    held: &BuildDirLock,
+) -> Result<std::path::PathBuf, String> {
+    build_native_cached_in(rs_code, false, release, None, native_deps, source_root, Some(held))
+}
+
+fn build_native_cached_in(
+    rs_code: &str,
+    use_test_harness: bool,
+    release: bool,
+    project_dir_override: Option<&std::path::Path>,
+    native_deps: &[crate::project::NativeDep],
+    source_root: Option<&std::path::Path>,
+    held: Option<&BuildDirLock>,
+) -> Result<std::path::PathBuf, String> {
     // Scratch dir. A per-call `project_dir_override` (one dir per test file)
     // gives each parallel worker its own `src/main.rs`, so cold rustc builds
     // run truly in parallel instead of serializing on the shared dir's
@@ -187,7 +215,11 @@ pub(crate) fn build_native_cached(
     let _guard = project_dir_override
         .is_none()
         .then(|| BUILD_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
-    let _flock = BuildDirLock::acquire(&project_dir)?;
+    // A second flock on the same file from this process would wait on itself.
+    let _flock = match held {
+        Some(_) => None,
+        None => Some(BuildDirLock::acquire(&project_dir)?),
+    };
 
     // Re-check the cache under the lock: another process/thread may have built
     // this exact binary while we waited, making a rebuild redundant. A binary
