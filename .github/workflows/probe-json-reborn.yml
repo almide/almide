@@ -336,19 +336,25 @@ jobs:
           git log --oneline -1
           cargo build --release --bin almide
           (cd tools/xtarget-fuzz && cargo build --release 2>&1 | tail -2)
-      - name: Inspect the json and value functions (parity, diamond; complexity is not stampable here)
+      - name: Build the base compiler too
+        run: |
+          set -eux
+          git worktree add /tmp/fz-base "$BASE_REF"
+          (cd /tmp/fz-base && CARGO_TARGET_DIR=/tmp/fz-target cargo build --release --bin almide 2>&1 | tail -1)
+          mkdir -p /tmp/fz && cp /tmp/fz-target/release/almide /tmp/fz/almide-base && cp target/release/almide /tmp/fz/almide-head
+      - name: Focused campaigns on base and head, same seeds
         run: |
           set +e
-          mkdir -p /tmp/fz
           XF=tools/xtarget-fuzz/target/release/xtarget-fuzz
-          for fn in json.parse json.stringify json.stringify_pretty value.object value.array value.string; do
-            $XF inspect "$fn" --repo "$PWD" > /tmp/fz/$fn.txt 2>/tmp/fz/$fn.err; echo "exit $?" >> /tmp/fz/$fn.txt
-            echo "== $fn"; grep -E "^(# |parity|diamond|alloc|complexity|exit)" /tmp/fz/$fn.txt | cut -c1-300
+          for v in base head; do
+            for fs in json.parse:1794205202 json.stringify:1794205405 value.object:1794205778 value.array:1794205945 value.string:1794206107; do
+              fn=${fs%%:*}; seed=${fs##*:}
+              $XF run --family synthesis --focus "$fn" --count 200 --seed "$seed" --jobs 4 --almide /tmp/fz/almide-$v --out /tmp/fz/$v/$fn > /tmp/fz/$v-$fn.log 2>&1
+              echo "$v $fn: $(grep -E 'unique findings' /tmp/fz/$v-$fn.log | tail -1)"
+            done
+            $XF run --minutes 15 --jobs 4 --repo "$PWD" --almide /tmp/fz/almide-$v --seed 4613 --out /tmp/fz/$v/campaign > /tmp/fz/$v-campaign.log 2>&1
+            echo "$v campaign: $(grep -E 'findings=' /tmp/fz/$v-campaign.log | tail -1)"
           done
-      - name: Differential fuzz campaign
-        run: |
-          set +e
-          tools/xtarget-fuzz/target/release/xtarget-fuzz run --minutes 30 --jobs 4 --repo "$PWD" --almide "$PWD/target/release/almide" --seed 4613 2>&1 | tail -40 | tee /tmp/fz/run.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
