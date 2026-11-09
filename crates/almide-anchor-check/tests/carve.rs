@@ -269,3 +269,26 @@ fn a_seal_of_another_local_is_refused() {
     let src = format!("{}\n|\n{}\n|\n{}", family(), literal(), seal(4));
     assert!(check(&src, LITERAL_W).unwrap_err().contains("no seal"));
 }
+
+#[test]
+fn an_abort_whose_exit_the_host_transform_lowered_to_two_calls_is_accepted() -> Result<(), String> {
+    let src = whole(&literal()).replace(
+        "call $alloc\n  unreachable",
+        "call $alloc\n  i32.const 1\n  call $alloc\n  unreachable",
+    );
+    let r = check(&src, LITERAL_W)?;
+    assert_eq!((r.families, r.carves, r.seals), (1, 1, 1));
+    Ok(())
+}
+
+#[test]
+fn an_abort_that_falls_through_is_refused() {
+    let src = whole(&literal()).replacen("unreachable", "drop\n  drop", 2);
+    assert!(check(&src, LITERAL_W).unwrap_err().contains("abort"));
+}
+
+#[test]
+fn an_abort_that_branches_out_is_refused() {
+    let src = whole(&literal()).replacen("call $alloc\n  unreachable", "call $alloc\n  br 0\n  unreachable", 2);
+    assert!(check(&src, LITERAL_W).unwrap_err().contains("abort"));
+}
