@@ -1,0 +1,37 @@
+name: probe-wall-trace (throwaway)
+on:
+  push:
+    branches: ['probe/blockers-1109-trace']
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        commit: ["45af5fc5a", "a71e577ae", "1b2357886"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: cp .github/probe-trace.py /tmp/probe-trace.py && git checkout -q ${{ matrix.commit }} && python3 /tmp/probe-trace.py
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-1.97.0
+          save-if: false
+      - name: classify the seven files
+        run: |
+          cargo build -q -p almide-mir --example classify_corpus
+          for f in spec/lang/generic_type_alias_test.almd spec/wasm_cross/never_fn_value_positions.almd spec/wasm_cross/option_result_ctors.almd spec/wasm_host_js/effect_export_scalar.almd spec/wasm_host_js/region_export_address.almd spec/wasm_host_js/region_export_lease.almd spec/wasm_host_js/region_export_push.almd; do
+            d=$(mktemp -d); cp "$f" "$d/"; mkdir -p /tmp/out
+            echo "################ $f"
+            WALLTRACE=1 RUST_BACKTRACE=1 WALL_NAMES=1 cargo run -q -p almide-mir --example classify_corpus -- --out /tmp/out "$d" 2>&1 | grep -E "^WALLTRACE|^WALLED|almide_mir::lower|almide_mir::[a-z_]+::[a-z_]+" | grep -v "WALLED NATIVE" | sed -E 's/^ +[0-9]+: //' | head -400
+          done
