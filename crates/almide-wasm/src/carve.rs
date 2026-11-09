@@ -225,7 +225,7 @@ impl Emitter<'_> {
         };
         i.i64_add().local_get(root).i32_load(len_memarg());
         anchors.push(self.anchor_here());
-        self.f.instructions().i64_extend_i32_u().i64_const(almide_layout::PAYLOAD as i64).i64_add().i64_gt_u();
+        self.f.instructions().i64_extend_i32_u().i64_const(almide_layout::PAYLOAD as i64 + 1).i64_add().i64_gt_u();
         self.carve_abort_if(FULL_TEXT);
         anchors.push(self.anchor_here());
         let mut i = self.f.instructions();
