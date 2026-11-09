@@ -27,9 +27,9 @@ jobs:
       - name: stdlib_inspection_test
         run: cargo test --test stdlib_inspection_test -- --nocapture
 
-  regen:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,183 +50,14 @@ jobs:
           tar -xf /tmp/wasmtime.tar.xz -C /tmp
           sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
       - run: git log --oneline -1 && cargo build --release --bin almide
-      - name: Fixture byte-compare and format
-        run: |
-          set -uo pipefail
-          mkdir -p /tmp/out
-          A=target/release/almide
-          $A run "$FIXTURE" > /tmp/out/native.out 2>&1; echo "native exit $?"
-          $A run "$FIXTURE" --target wasm > /tmp/out/wasm.out 2>&1; echo "wasm exit $?"
-          cat /tmp/out/native.out
-          cmp -s /tmp/out/native.out /tmp/out/wasm.out && echo "IDENTICAL native == wasm" || { echo "DIVERGES"; diff /tmp/out/native.out /tmp/out/wasm.out; }
-          $A fmt "$FIXTURE"
-          git diff "$FIXTURE" | tee /tmp/out/fixture-fmt.diff
-          git checkout -- "$FIXTURE"
-      - name: Copy helper unit tests
-        run: cargo test --release -p almide-wasm --lib copy_helper 2>&1 | tail -15
-      - name: Regenerate ledgers
-        env:
-          ALMIDE_MANIFEST_TREE_CHECK: "off"
-        run: |
-          set -x
-          ORACLE=target/release/almide bash scripts/gen-run-manifest.sh || true
-          ORACLE=target/release/almide bash scripts/gen-check-manifest.sh || true
-          ORACLE=target/release/almide bash scripts/gen-ast-manifest.sh || true
-          git diff --stat
-          cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tee /tmp/out/size-ratchet-before.txt | grep -E "B, pinned|REGRESSION|NEW fixture|row\(s\) moved" | head -400 || true
-          ALMIDE_UPDATE_ALLOC=1 cargo test --release -p almide-wasm --test alloc_ledger 2>&1 | tail -5 || true
-          ALMIDE_UPDATE_SIZES=1 cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -5 || true
-          ALMIDE_UPDATE_SIZE_LADDER=1 cargo test --release -p almide-wasm --test size_ladder 2>&1 | tail -5 || true
-          ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor 2>&1 | tail -5 || true
-          ALMIDE_UPDATE_DUMPS=1 cargo test --release -p almide-wasm --test section_dump 2>&1 | tail -5 || true
-          ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --release --test native_verified_floor_test 2>&1 | tail -5 || true
-          git status --short
-          git diff > /tmp/out/ledgers.diff || true
-          git diff --stat
-      - name: Ledger gates after regeneration (almide-wasm suite)
-        run: |
-          cargo test --release -p almide-wasm --no-fail-fast 2>&1 | tee /tmp/out/wasm-suite.txt | grep -E "^test result|FAILED|panicked|failures:" | head -80
-          cargo test --release --test native_verified_floor_test 2>&1 | tail -5
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: ledgers
-          path: /tmp/out
-          retention-days: 7
-
-  negctl:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.HEAD_REF }}
-      - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
-          save-if: false
-      - name: Install wasmtime
-        run: |
-          bash scripts/fetch-pinned.sh \
-            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
-            /tmp/wasmtime.tar.xz
-          tar -xf /tmp/wasmtime.tar.xz -C /tmp
-          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
-      - name: Break the tail (drop the last tail byte of every short copy)
-        run: |
-          sed -i 's/^    i\.local_get(src)\.local_get(endp)\.i32_ge_u()\.br_if(1);$/    i.local_get(src).i32_const(1).i32_add().local_get(endp).i32_ge_u().br_if(1);/' crates/almide-wasm/src/runtime.rs
-          git diff --stat
-          git diff
-          test "$(git diff --numstat | awk '{print $1}')" = 1
-      - run: cargo build --release --bin almide
-      - name: Negative control — unit tests must fail
-        run: |
-          set +e -uo pipefail
-          cargo test --release -p almide-wasm --lib copy_helper 2>&1 | tail -30
-          rc=${PIPESTATUS[0]}
-          echo "unit test exit $rc"
-          if [ "$rc" = 0 ]; then echo "NEGATIVE CONTROL (unit): NOT CAUGHT"; exit 1; else echo "NEGATIVE CONTROL (unit): caught"; fi
-      - name: Negative control — fixture byte-compare must diverge
+      - name: Contract ledger
+        run: bash scripts/check-contracts.sh
+      - name: Fixture format
+        run: target/release/almide fmt --check "$FIXTURE"
+      - name: almide-wasm ledger suite against the committed ledgers
+        run: cargo test --release -p almide-wasm --no-fail-fast 2>&1 | tee /tmp/wasm-suite.txt | grep -E "^test result|FAILED|panicked|failures:" | head -80; test "${PIPESTATUS[0]}" = 0
+      - name: Manifests and native verified floor against the committed ledgers
         if: always()
         run: |
-          set +e -uo pipefail
-          A=target/release/almide
-          $A run "$FIXTURE" > /tmp/native.out 2>&1; echo "native exit $?"
-          $A run "$FIXTURE" --target wasm > /tmp/wasm.out 2>&1; echo "wasm exit $?"
-          if cmp -s /tmp/native.out /tmp/wasm.out; then echo "NEGATIVE CONTROL (fixture): NOT CAUGHT"; exit 1; else echo "NEGATIVE CONTROL (fixture): caught"; diff /tmp/native.out /tmp/wasm.out | head -20; fi
-
-  timing:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.HEAD_REF }}
-          fetch-depth: 0
-      - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
-          save-if: false
-      - name: Install wasmtime
-        run: |
-          bash scripts/fetch-pinned.sh \
-            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
-            /tmp/wasmtime.tar.xz
-          tar -xf /tmp/wasmtime.tar.xz -C /tmp
-          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
-      - name: Build base and head compilers
-        run: |
-          set -euxo pipefail
-          mkdir -p /tmp/bins
-          git log --oneline -1
-          cargo build --release --bin almide
-          cp target/release/almide /tmp/bins/almide-head
-          git worktree add /tmp/base "$BASE_REF"
-          (cd /tmp/base && git log --oneline -1 && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
-          cp target/release/almide /tmp/bins/almide-base
-      - name: strchurn — outputs, sizes, AOT timing (base vs head, one runner)
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/perf && cd /tmp/perf
-          cat > strchurn.almd <<'EOF'
-          // strchurn: 200,000 strings through interpolate -> split -> trim -> to_upper -> join.
-          let n = 200000
-          let prime = 1000000007
-
-          fn build(i: Int) -> String =
-            "item-${i}, value ${(i * 7) % 1000} ,  tag${i % 13}  ,x"
-              |> string.split(",")
-              |> list.map((p) => string.to_upper(string.trim(p)))
-              |> list.join("|")
-
-          fn main() -> Unit = {
-            let strs = list.range(0, n) |> list.map(build)
-            let total = strs |> list.map((s) => string.len(s)) |> list.sum
-            let ck = strs |> list.fold(0, (acc, s) => (acc * 31 + list.sum(bytes.to_list(bytes.from_string(s)))) % prime)
-            println("${total} ${ck}")
-          }
-          EOF
-          sed -i 's/^          //' strchurn.almd
-          printf 'fn main() -> Unit = {\n  println("hello")\n}\n' > hello.almd
-          printf 'fn main() -> Unit = {\n  println(string.split("a,b", ",") |> list.join("|"))\n}\n' > splitone.almd
-          for v in base head; do
-            for prog in hello splitone strchurn; do
-              /tmp/bins/almide-$v build $prog.almd --target wasm -o $prog-$v.wasm && echo "size $prog $v $(stat -c %s $prog-$v.wasm)"
-            done
-            wasmtime compile strchurn-$v.wasm -o strchurn-$v.cwasm
-            echo "== $v alloc counters"
-            ALMIDE_WASM_ALLOC_COUNT=1 /tmp/bins/almide-$v run strchurn.almd --target wasm
-          done
-          python3 - <<'EOF'
-          import subprocess, time, statistics
-          outs = {}
-          times = {"base": [], "head": []}
-          for r in range(17):
-              order = ["base", "head"] if r % 2 == 0 else ["head", "base"]
-              for v in order:
-                  t0 = time.perf_counter()
-                  p = subprocess.run(["wasmtime", "run", "--allow-precompiled", f"strchurn-{v}.cwasm"], capture_output=True)
-                  dt = (time.perf_counter() - t0) * 1000
-                  assert p.returncode == 0, p.stderr
-                  outs.setdefault(v, p.stdout)
-                  assert outs[v] == p.stdout
-                  if r >= 2:
-                      times[v].append(dt)
-          print("outputs equal:", outs["base"] == outs["head"], outs["head"])
-          for v in times:
-              print(v, "n=%d median %.2f ms" % (len(times[v]), statistics.median(times[v])), ["%.1f" % t for t in times[v]])
-          print("ratio head/base = %.4f" % (statistics.median(times["head"]) / statistics.median(times["base"])))
-          EOF
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: perf-wasm
-          path: /tmp/perf/*.wasm
-          retention-days: 7
+          cargo test --release -p almide-spine -p almide-syntax --no-fail-fast 2>&1 | grep -E "^test result|FAILED|panicked" | head -60; test "${PIPESTATUS[0]}" = 0
+          cargo test --release --test native_verified_floor_test 2>&1 | tail -5; test "${PIPESTATUS[0]}" = 0
