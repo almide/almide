@@ -148,12 +148,17 @@ impl Emitter<'_> {
                 let mut i = self.f.instructions();
                 i.local_get(base).i32_const((4 * words) as i32).i32_store(word(almide_layout::CAP.offset.into()));
                 anchors.push(self.anchor_here());
+                // Each payload word's record is taken where its store is
+                // emitted: a lost store is a lost `s i`, which the proven
+                // checker rejects.
+                let mut stores = Vec::new();
                 for k in 0..words {
                     self.f.instructions().local_get(base).i32_const(0).i32_store(word(12 + 4 * k as u64));
                     anchors.push(self.anchor_here());
+                    stores.push(k as usize);
                 }
                 self.f.instructions().local_get(base);
-                crate::witness::init::carve_fixed(almide_layout::PAYLOAD, 4, words as usize, &anchors);
+                crate::witness::init::carve_fixed(almide_layout::PAYLOAD, 4, words as usize, &stores, &anchors);
             }
             None => {
                 let (n, k, s, p) = (self.hold_i32()?, self.hold_i32()?, self.hold_i32()?, self.hold_i32()?);
