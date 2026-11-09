@@ -289,11 +289,27 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> 
                     var(*d),
                     var(args[0])
                 );
+                // A copy of this read where the carrier dies moves the string
+                // out of its one slot (render_native_loop's payload move),
+                // whichever side the tag dispatch read it under.
+                crate::render_native_addr::note_payload_take(
+                    *d,
+                    args[0],
+                    format!("match &mut {} {{ Ok(s) | Err(s) => std::mem::take(s) }}", var(args[0])),
+                );
             } else {
                 line!(
                     "let {}: &str = match &{} {{ Err(e) => e.as_str(), Ok(_) => \"\" }};",
                     var(*d),
                     var(args[0])
+                );
+                // Noted for the by-value move out of a dying Result param
+                // (render_native_loop); a local of this kind is not a payload
+                // carrier (`render_native_move::payload_carrier`).
+                crate::render_native_addr::note_payload_take(
+                    *d,
+                    args[0],
+                    format!("match &mut {} {{ Err(e) => std::mem::take(e), Ok(_) => AlmideString::new() }}", var(args[0])),
                 );
             }
         }
@@ -603,7 +619,12 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             Init::IntList(vs) => {
                 tys.insert(*dst, NTy::Vec);
                 let items = vs.iter().map(|v| format!("{v}i64")).collect::<Vec<_>>().join(", ");
-                line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+                if crate::render_native_move::is_stack_lit(*dst) {
+                    // Borrowed only (crate::render_native_move::set_stack_lits).
+                    line!("let mut {}: [i64; {}] = [{items}];", var(*dst), vs.len());
+                } else {
+                    line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+                }
             }
             other => {
                 return Err(wall(format!(
@@ -712,15 +733,9 @@ pub(crate) fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
             dst: Some(d),
             args,
         } if args.len() == 2 => render_float_cmp(op, d, args, tys, out, indent)?,
-        // MIR holds both directions of the raw reinterpret in an i64 slot.
-        // Native float operations instead produce f64 locals: preserve their
-        // bits, not their numeric value. NaN observation is canonicalized by
-        // the checked stdlib body, not by this raw primitive.
-        Op::Prim {
-            kind: crate::PrimKind::FloatBits,
-            dst: Some(d),
-            args,
-        } if args.len() == 1 => {
+        // Exercised by float32_arithmetic_rounds -> float_fmod. Preserve
+        // the bits of an f64 local; an i64 operand already holds those bits.
+        Op::Prim { kind: crate::PrimKind::FloatBits, dst: Some(d), args } if args.len() == 1 => {
             let bits = match tys.get(&args[0]) {
                 Some(NTy::I64) => var(args[0]),
                 Some(NTy::F64) => format!("{}.to_bits() as i64", var(args[0])),

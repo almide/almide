@@ -26,7 +26,8 @@ pub(crate) fn expand(ir: &mut IrProgram) -> Result<(), LowerError> {
     if !gate.mint { return Ok(()); }
     if gate.foreign || almide_ir::meter_plan::program_has_regions(ir) || ir.functions.iter().any(|f|
         !f.extern_attrs.is_empty() || !f.export_attrs.is_empty()) {
-        return Err(LowerError::Unsupported("native: Region storage needs a closed Almide-owned address domain".into()));
+        return Err(LowerError::at(gate.address_span,
+            "native: Region storage needs a closed Almide-owned address domain"));
     }
     // Map every annotation together: the checked logical Handle becomes a
     // physical closure, including records, signatures and local binders.
@@ -58,13 +59,16 @@ pub(crate) fn expand(ir: &mut IrProgram) -> Result<(), LowerError> {
 }
 
 #[derive(Default)]
-struct Gate { mint: bool, foreign: bool }
+struct Gate { mint: bool, foreign: bool, address_span: Option<almide_ir::Span> }
 impl IrVisitor for Gate {
     fn visit_expr(&mut self, e: &IrExpr) {
         match &e.kind {
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
                 let raw = module.as_str() == "ffi" && matches!(func.as_str(), "__address" | "__load" | "__store");
                 self.mint |= raw && func.as_str() == "__address";
+                if raw && func.as_str() == "__address" && self.address_span.is_none() {
+                    self.address_span = e.span;
+                }
                 // A host call that consumes or creates any address-bearing
                 // value cannot use the private cell representation.
                 self.foreign |= !raw && (has_address(&e.ty) || args.iter().any(|a| has_address(&a.ty)));

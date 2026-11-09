@@ -68,6 +68,17 @@ trap 'rm -f "$json" "$err"' EXIT
 
 if ! $CARGO clippy --release --workspace --all-targets --message-format=json > "$json" 2> "$err"; then
   cat "$err" >&2
+  # With --message-format=json the compiler's own error text goes to the
+  # JSON stream, not stderr: print the rendered errors so the log names them.
+  python3 - "$json" <<'PY' >&2 || true
+import json, sys
+for line in open(sys.argv[1], encoding="utf-8"):
+    if not line.startswith("{"):
+        continue
+    m = json.loads(line)
+    if m.get("reason") == "compiler-message" and m["message"].get("level") == "error":
+        print(m["message"].get("rendered") or m["message"].get("message"))
+PY
   echo "::error::clippy-warnings: \`cargo clippy --workspace --all-targets\` FAILED."
   echo "This gate counts warnings; it cannot do that on a tree that does not compile."
   exit 1

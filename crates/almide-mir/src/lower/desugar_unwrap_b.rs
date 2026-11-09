@@ -303,7 +303,7 @@ pub fn desugar_unwrap_rewrap_identity(body: &IrExpr) -> Option<IrExpr> {
 /// Which binding form a `let … = e!` statement uses — both early-return the
 /// `Err(E)` and bind/destructure the `Ok(T)`.
 enum LetUnwrapTarget {
-    Single { var: VarId, ty: Ty },
+    Single { var: VarId, ty: Ty, mutability: almide_ir::Mutability },
     Destructure { pattern: almide_ir::IrPattern },
 }
 
@@ -319,9 +319,9 @@ enum LetUnwrapTarget {
 /// Result-destructured-as-a-tuple.
 fn find_let_unwrap_target(stmts: &[IrStmt]) -> Option<(usize, LetUnwrapTarget, IrExpr)> {
     stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
-        IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
+        IrStmtKind::Bind { var, ty, value, mutability } => match &value.kind {
             IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
-                Some((i, LetUnwrapTarget::Single { var: *var, ty: ty.clone() }, (**expr).clone()))
+                Some((i, LetUnwrapTarget::Single { var: *var, ty: ty.clone(), mutability: *mutability }, (**expr).clone()))
             }
             _ => None,
         },
@@ -418,13 +418,22 @@ fn let_unwrap_ok_binding(
     ok_ty: &Ty,
 ) -> (almide_ir::IrPattern, Vec<IrStmt>) {
     match target {
-        LetUnwrapTarget::Single { var, ty }
+        LetUnwrapTarget::Single { var, ty, .. }
             if matches!(ty, Ty::Unit) && var_unread_after(var, rest, tail) =>
         {
             (almide_ir::IrPattern::Wildcard, rest.to_vec())
         }
-        LetUnwrapTarget::Single { var, ty } => {
-            (almide_ir::IrPattern::Bind { var, ty }, rest.to_vec())
+        LetUnwrapTarget::Single { var, ty, mutability } => {
+            let pat = almide_ir::IrPattern::Bind { var, ty };
+            let mut rest = rest.to_vec();
+            if mutability == almide_ir::Mutability::Var {
+                let wrapped = almide_ir::IrPattern::Ok { inner: Box::new(pat) };
+                let mut next_var = crate::lower::desugar_var_seed();
+                let almide_ir::IrPattern::Ok { inner } = mutable_unwrap_binding(
+                    wrapped, &mut rest, &mut next_var, body.span,
+                ) else { unreachable!() };
+                (*inner, rest)
+            } else { (pat, rest) }
         }
         LetUnwrapTarget::Destructure { pattern } => {
             let p2 = VarId(crate::lower::desugar_var_seed());
@@ -738,82 +747,4 @@ fn stmt_has_unwrap(s: &IrStmt) -> bool {
     u.0
 }
 
-/// `let v = if c then e! else d` — an unwrap-`!` INSIDE an `if` arm (base64 decode_chunks:
-/// `let v1 = if remaining > 1 then char_to_val(..)! else 0`). LIFT the `!` out of the arm: wrap each
-/// NON-unwrap arm in `ok(..)` and strip `!` from each unwrap arm, so the `if` becomes a `Result[T,E]`,
-/// bind it to `$r`, then `let v = $r!` — a plain let-unwrap the [`desugar_let_unwrap`] pass then
-/// handles (and the let-bound heap-result `if` `$r` the pre-TCO pass tail-duplicates). Composes the
-/// two existing desugars to reach the unwrap-in-if-arm shape. v0's `!` early-returns identically.
-pub fn desugar_if_arm_unwrap(body: &IrExpr) -> Option<IrExpr> {
-    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
-        return None;
-    };
-    let (i, bind_var, bind_ty, cond, then_e, else_e) =
-        stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
-            IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
-                IrExprKind::If { cond, then, else_ }
-                    if matches!(&then.kind, IrExprKind::Unwrap { .. })
-                        || matches!(&else_.kind, IrExprKind::Unwrap { .. }) =>
-                {
-                    Some((i, *var, ty.clone(), (**cond).clone(), (**then).clone(), (**else_).clone()))
-                }
-                _ => None,
-            },
-            _ => None,
-        })?;
-    // The `Result[T, E]` type the arms unify to — take it from an unwrap arm's operand.
-    let res_ty = match (&then_e.kind, &else_e.kind) {
-        (IrExprKind::Unwrap { expr }, _) | (_, IrExprKind::Unwrap { expr }) => expr.ty.clone(),
-        _ => return None,
-    };
-    let mk = |kind: IrExprKind, ty: Ty| IrExpr {
-        kind,
-        ty,
-        span: body.span.clone(),
-        def_id: body.def_id,
-    };
-    // strip `!` from an unwrap arm (already Result[T,E]); wrap a plain arm in `ok(..)`.
-    let conv = |arm: IrExpr| -> IrExpr {
-        match arm.kind {
-            IrExprKind::Unwrap { expr } => *expr,
-            _ => mk(IrExprKind::ResultOk { expr: Box::new(arm) }, res_ty.clone()),
-        }
-    };
-    let new_if = mk(
-        IrExprKind::If {
-            cond: Box::new(cond),
-            then: Box::new(conv(then_e)),
-            else_: Box::new(conv(else_e)),
-        },
-        res_ty.clone(),
-    );
-    let r_var = VarId(crate::lower::desugar_var_seed());
-    let r_bind = IrStmt {
-        kind: IrStmtKind::Bind {
-            var: r_var,
-            ty: res_ty.clone(),
-            value: new_if,
-            mutability: almide_ir::Mutability::Let,
-        },
-        span: None,
-    };
-    let v_value = mk(
-        IrExprKind::Unwrap { expr: Box::new(mk(IrExprKind::Var { id: r_var }, res_ty)) },
-        bind_ty.clone(),
-    );
-    let v_bind = IrStmt {
-        kind: IrStmtKind::Bind {
-            var: bind_var,
-            ty: bind_ty,
-            value: v_value,
-            mutability: almide_ir::Mutability::Let,
-        },
-        span: None,
-    };
-    let mut new_stmts = stmts[..i].to_vec();
-    new_stmts.push(r_bind);
-    new_stmts.push(v_bind);
-    new_stmts.extend_from_slice(&stmts[i + 1..]);
-    Some(mk(IrExprKind::Block { stmts: new_stmts, expr: tail.clone() }, body.ty.clone()))
-}
-
+include!("desugar_unwrap_if_arm.rs");

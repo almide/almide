@@ -6,6 +6,16 @@ pub(crate) fn parallel_runtime_body(symbol: &str) -> Result<(Vec<String>, String
     if !almide_codegen::generated::runtime_fn_modes::crosses_threads(symbol) {
         return Err(format!("`{symbol}` is not a thread-crossing runtime call"));
     }
+    runtime_body_with_fan(symbol)
+}
+
+/// The generated Send-free twin preserves the declared host operation.
+pub(crate) fn send_free_runtime_body(symbol: &str) -> Option<(Vec<String>, String, Vec<&'static str>)> {
+    let twin = almide_codegen::generated::runtime_fn_modes::send_free_twin(symbol)?;
+    runtime_body_with_fan(twin).ok()
+}
+
+fn runtime_body_with_fan(symbol: &str) -> Result<(Vec<String>, String, Vec<&'static str>), String> {
     let rt = runtime_index();
     let text = signature_text(rt, symbol).ok_or("no runtime item")?;
     let (params, ret) = rust_signature(text).ok_or("no runtime signature")?;

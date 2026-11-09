@@ -11,7 +11,14 @@ fn static_twin(symbol: &str, text: &str) -> Option<(String, String)> {
     let twin = format!("{symbol}_static");
     let mut out = format!("{}fn {twin}{}", &text[..at], &text[at + head.len()..]);
     let mut found = false;
+    let mut dereferenced_params = Vec::new();
     while let Some(i) = out.find(RC) {
+        if out.find('{').is_some_and(|body| i < body) {
+            if let Some((prefix, _)) = out[..i].rsplit_once(':') {
+                let name = prefix.trim_end().rsplit(|c: char| !c.is_ascii_alphanumeric() && c != '_').next().unwrap_or("");
+                if !name.is_empty() && out.contains(&format!("&*{name}")) { dereferenced_params.push(name.to_string()); }
+            }
+        }
         // The `>` that closes the `Rc<`.
         let mut depth = 1i32;
         let mut close = None;
@@ -33,6 +40,12 @@ fn static_twin(symbol: &str, text: &str) -> Option<(String, String)> {
         let close = close?;
         out = format!("{}impl {}{}", &out[..i], &out[i + RC.len()..close], &out[close + 1..]);
         found = true;
+    }
+    // A runtime body may pass `&*callback` to a borrowed worker. Preserve
+    // that spelling by lending the static callback within its own frame.
+    if let Some(body) = out.find('{') {
+        let bindings = dereferenced_params.iter().map(|n| format!(" let {n} = &{n};")).collect::<String>();
+        out.insert_str(body + 1, &bindings);
     }
     found.then_some((twin, out))
 }
@@ -82,10 +95,19 @@ fn static_runtime_closure(symbol: &str, mut items: Vec<&'static str>) -> Option<
 mod static_callback_tests {
     use super::*;
     #[test]
+    fn static_callback_can_be_lent_to_a_runtime_worker() {
+        let source = "fn route(callback: std::rc::Rc<dyn Fn(i64) -> i64>) -> i64 { worker(&*callback) }";
+        let (_, body) = static_twin("route", source).unwrap();
+        assert!(body.contains("callback: impl Fn(i64) -> i64"));
+        assert!(body.contains("let callback = &callback;"));
+        assert!(body.contains("worker(&*callback)"));
+    }
+
+    #[test]
     fn forwarded_callbacks_specialize_the_dependency_without_changing_literals() {
         let root = "pub fn root(f: std::rc::Rc<dyn Fn(i64) -> i64>) -> i64 { helper(f) }";
         let helper = "pub fn helper(f: std::rc::Rc<dyn Fn(i64) -> i64>) -> i64 { let _ = \"helper(f)\"; f(1) }";
-        let (name, texts) = static_runtime_closure("root", vec![root, helper]).unwrap();
+        let (name, texts) = static_runtime_closure("root", vec![root, helper]).expect("the forwarded callback specializes");
         assert_eq!(name, "root_static");
         let text = texts.join("\n");
         assert!(text.contains("fn root_static(f: impl Fn(i64) -> i64) -> i64 { helper_static(f) }"));
@@ -109,13 +131,13 @@ mod native_host_callback_tests {
         assert!(derive_explained("io.read_line").is_err(), "effect calls outside this boundary stay refused");
         let env = Env::new();
         for lambda in [Some("visit"), None] {
-            let code = tuple_callback_adapter(&env, lambda, "captured", &[DTy::Str],
-                &DTy::Unit, &[NativeSigKind::Str], None).unwrap();
+            let code = tuple_callback_adapter(&env, lambda, "captured", (&[DTy::Str], &DTy::Unit),
+                (&[NativeSigKind::Str], &[]), None).unwrap();
             assert!(code.contains("-> ()"), "{code}");
             assert!(!code.contains("0_i64"), "void return must not fabricate a value: {code}");
         }
-        assert!(tuple_callback_adapter(&env, Some("visit"), "captured", &[DTy::Str],
-            &DTy::Int, &[NativeSigKind::Str], None).is_none());
+        assert!(tuple_callback_adapter(&env, Some("visit"), "captured", (&[DTy::Str], &DTy::Int),
+            (&[NativeSigKind::Str], &[]), None).is_none());
     }
 
     #[test]

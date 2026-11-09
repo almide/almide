@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 800 of 1046
+# rendered: 806 of 1051
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -68,11 +68,13 @@ spec/wasm_cross/bytes_set_on_record_field.almd
 spec/wasm_cross/bytes_set_value_semantics.almd
 spec/wasm_cross/bytes_temp_receiver.almd
 spec/wasm_cross/bytes_to_string_err_release.almd
+spec/wasm_cross/bytes_walk_reduction_fused.almd
 spec/wasm_cross/bytes_writer_family.almd
 spec/wasm_cross/call_arg_eval_order_with_drops.almd
 spec/wasm_cross/call_closure_lambda_param.almd
 spec/wasm_cross/call_lambda_ctor.almd
 spec/wasm_cross/callee_shadowing_family.almd
+spec/wasm_cross/captured_var_value_stored.almd
 spec/wasm_cross/checked_conversion_value_match.almd
 spec/wasm_cross/chunk_str.almd
 spec/wasm_cross/closure_accumulator.almd
@@ -309,6 +311,8 @@ spec/wasm_cross/int_div_by_zero_inlined_arg.almd
 spec/wasm_cross/int_div_by_zero_literal.almd
 spec/wasm_cross/int_div_mod_ok.almd
 spec/wasm_cross/int_div_overflow.almd
+spec/wasm_cross/int_div_pow2_nonneg_induction.almd
+spec/wasm_cross/int_div_pow2_signed_induction.almd
 spec/wasm_cross/int_float_ops.almd
 spec/wasm_cross/int_from_hex.almd
 spec/wasm_cross/int_mod_by_zero.almd
@@ -316,6 +320,7 @@ spec/wasm_cross/int_mod_overflow.almd
 spec/wasm_cross/int_parse_overflow.almd
 spec/wasm_cross/int_pow_negative_exponent.almd
 spec/wasm_cross/int_pow_overflow_wraps.almd
+spec/wasm_cross/int_rem_pow2_zero.almd
 spec/wasm_cross/int_rotate_negative_count.almd
 spec/wasm_cross/int_wrap_rotate_width.almd
 spec/wasm_cross/interp_diverging_part.almd
@@ -624,6 +629,7 @@ spec/wasm_cross/sized_tail_literal_matrix.almd
 spec/wasm_cross/snapshot_mismatch_abort.almd
 spec/wasm_cross/sort_by_str_key_heap.almd
 spec/wasm_cross/split_empty_sep.almd
+spec/wasm_cross/split_one_byte_separator.almd
 spec/wasm_cross/spread_record_share.almd
 spec/wasm_cross/sql_highlight_tokens.almd
 spec/wasm_cross/stdlib_call_temporaries_release.almd

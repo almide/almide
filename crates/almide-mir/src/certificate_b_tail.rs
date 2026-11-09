@@ -501,7 +501,11 @@ impl CertScan {
         let base = self.paths.view_src.get(&from).copied().unwrap_or(from);
         self.paths.view_src.insert(v, base);
         self.paths.rebound.remove(&v);
-        if self.paths.rebound.contains(&from) {
+        // A raw child's retained reference can survive its parent's rebind.
+        // Its derived addresses keep pointing to that child: probe the child
+        // chain, which also rejects access after the retained reference dies.
+        // Only an ended address/carrier propagates unconditional invalidity.
+        if self.paths.rebound.contains(&from) && !self.is_raw_child(from) {
             self.paths.rebound.insert(v);
         }
     }

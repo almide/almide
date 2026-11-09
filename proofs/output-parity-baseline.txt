@@ -508,6 +508,7 @@ spec/wasm_cross/int_parse_overflow.almd
 spec/wasm_cross/int_pow_negative_exponent.almd
 spec/wasm_cross/int_pow_operator_negative_base.almd
 spec/wasm_cross/int_pow_overflow_wraps.almd
+spec/wasm_cross/int_rem_pow2_zero.almd
 spec/wasm_cross/int_rotate_negative_count.almd
 spec/wasm_cross/int_wrap_rotate_width.almd
 spec/wasm_cross/interp_diverging_part.almd
@@ -704,6 +705,9 @@ spec/wasm_cross/mut_param_cell_tail_capture_write.almd
 spec/wasm_cross/mut_param_closure_capture_read.almd
 spec/wasm_cross/mut_param_closure_capture_write.almd
 spec/wasm_cross/mut_param_closure_field_path_write.almd
+spec/wasm_cross/mut_param_copy_kept_closure.almd
+spec/wasm_cross/mut_param_copy_kept_when_read.almd
+spec/wasm_cross/mut_param_copy_moved_when_dead.almd
 spec/wasm_cross/mut_param_effect_can_err.almd
 spec/wasm_cross/mut_param_effect_never_err.almd
 spec/wasm_cross/mut_param_effect_unpropagated.almd

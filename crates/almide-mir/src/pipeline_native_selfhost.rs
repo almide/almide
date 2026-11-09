@@ -103,6 +103,11 @@ impl SelfHostLinker<'_> {
         &mut self,
         name: &mut String,
     ) -> Result<Option<(&'static str, String)>, LowerError> {
+        // A registry call the declared floor serves keeps that route, even
+        // where a linked source carries a body of the same name.
+        if self.by_call.contains_key(name.as_str()) && crate::native_floor::declared(name).is_some() {
+            return Ok(None);
+        }
         match self.by_call.get(name.as_str()).filter(|_| !served_natively(name)) {
             Some(&(src, impl_fn)) => {
                 let at = self.source_index(src)?;

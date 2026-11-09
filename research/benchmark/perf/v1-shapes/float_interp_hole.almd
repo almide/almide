@@ -1,0 +1,15 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf.sh): computed Floats
+// interpolated beside an Int — each hole must be formatted into the one
+// buffer the interpolation builds, not rendered to a string of its own first.
+fn main() -> Unit = {
+  var acc = 0
+  var x = 0.5
+  var i = 0
+  while i < 20000 {
+    let s = "${x * 1.5}:${i}"
+    acc = acc + string.len(s)
+    x = x + 0.25
+    i = i + 1
+  }
+  println(int.to_string(acc))
+}

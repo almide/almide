@@ -150,12 +150,10 @@ impl Streams {
     fn balance(&self, o: ValueId) -> i64 {
         let mut b = self.stream.get(&o).map(|line| seg_net(line)).unwrap_or(0);
         for fr in &self.frames {
-            if let Some(t) = fr.then_ev.get(&o) {
-                b += seg_net(t);
-            }
-            if let Some(e) = fr.else_ev.get(&o) {
-                b += seg_net(e);
-            }
+            // Only the active arm has executed. Counting the completed then
+            // arm here hides the else arm's still-owned merge reference.
+            let active = if fr.in_else { &fr.else_ev } else { &fr.then_ev };
+            if let Some(events) = active.get(&o) { b += seg_net(events); }
         }
         b
     }
@@ -375,11 +373,10 @@ impl CertScan {
             self.s.event(o, 'd');
             return;
         }
-        // An allocator-class prim result is a +1, like `Alloc` — a fresh owned value on its
-        // OWN stream (`i`), balanced by the caller's scope-end drop or a heap-return move-out.
+        // Allocator-class prims own a fresh reference, just like Alloc. Route
+        // a loop feeder's credit to its slot before the old value is dropped.
         if let Some(d) = alloc_class_prim_dst(op) {
-            self.s.of.insert(d, d);
-            self.s.event(d, 'i');
+            self.feed_or_own(d, 'i');
             return;
         }
         // A call that returns a FRESH OWNED heap value (the callee allocated

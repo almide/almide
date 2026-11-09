@@ -49,7 +49,7 @@ mod tuple_result_tests {
         let d = DTy::List(Box::new(DTy::Tuple(vec![DTy::Int, DTy::Str])));
         let env = Env::new();
         assert_eq!(kind_of(&env, &DTy::Tuple(vec![DTy::Int, DTy::Str])), Some(NTy::Rec(1)));
-        let expr = runtime_result(&env, &d, "runtime_call()").unwrap();
+        let expr = runtime_result(&env, &d, "runtime_call()").expect("a list of int-string tuples has a runtime result");
         assert_eq!(expr.matches("runtime_call()").count(), 1);
         assert!(expr.contains(&rec::struct_name(1)));
         assert!(!expr.contains(&format!("{} {{", rec::struct_name(0))));
@@ -70,4 +70,23 @@ mod tuple_result_tests {
         assert!(code.contains("to_bits() as i64"));
         assert_eq!(code.matches("read_map()").count(), 1);
     }
+}
+
+/// A representation-specialized body can disagree with a concrete source
+/// result. Leave its call sites borrowing until the runtime adapter resolves
+/// that representation; moving first would forbid the adapter and its proof.
+pub(crate) fn representation_adapters_needed(functions: &[MirFunction], sigs: &NativeSigs) -> BTreeSet<String> {
+    let mut pinned = BTreeSet::new();
+    for caller in functions {
+        for op in &caller.ops {
+            let Op::CallFn { name, dst: Some(dst), .. } = op else { continue };
+            if of(name).is_none() { continue; }
+            let Some(want) = caller.aggregate_blocks.get(dst).and_then(|k| rec::declared_kind(k)) else { continue };
+            let Some((_, Some(got))) = sigs.get(name.as_str()) else { continue };
+            if !crate::native_value_repr::same_owned(want, clo::owned_nty(*got)) {
+                pinned.insert(name.clone());
+            }
+        }
+    }
+    pinned
 }

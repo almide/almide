@@ -196,7 +196,7 @@ fn addr_elem(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bool, Low
         return Err(wall("native: ElemAddr with a non-scalar index"));
     }
     line!(
-        "if {i} < 0 || {i} as usize >= {b}.len() {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}",
+        "if {i} < 0 || {i} as usize >= {b}.len() {{ almide_oob() }}",
         i = var(i),
         b = var(ad.base)
     );
@@ -235,7 +235,7 @@ fn slot_access_op(op: &Op, s: AddrSink<'_>) -> Result<Option<bool>, LowerError> 
             }
             // The structural builder check proves 0 <= count <= allocated length,
             // with no alias and no later header write that could re-expose the tail.
-            writeln!(out, "{}{}.truncate({} as usize);", "    ".repeat(indent), var(base), var(args[1])).unwrap();
+            writeln!(out, "{}{}.truncate({} as usize);", "    ".repeat(indent), var(base), var(args[1])).expect("writing to a String cannot fail");
             crate::render_native_bounds::invalidate(base);
             Ok(Some(true))
         }
@@ -347,12 +347,29 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
             return Ok(true);
         }
     }
+    // The last read of a boxed record slot of an owned enum
+    // (render_native_slots::movable_loads) moves the payload out.
+    if let NTy::Rec(_) = t {
+        if st.moves_first.contains(d)
+            && matches!(ty(tys, &ad.base), Some(NTy::Rec(_)))
+            && crate::render_native_rec::has_default(t)
+            && !crate::render_native_rec::is_region(i)
+            && !crate::render_native_move::drill_no_moves()
+        {
+            tys.insert(*d, t);
+            line!("let mut {}: {} = {}.take_{acc};", var(*d), crate::render_native_rec::owned_ty(t), var(ad.base));
+            return Ok(true);
+        }
+    }
     // A borrow-only read of a boxed record: a reference into the block.
     if let NTy::Rec(j) = t {
         if st.borrow_reads.contains(d) && crate::render_native_rec::has_default(t) {
             let s = crate::render_native_rec::struct_name(j);
             let r = acc.replacen("()", "_ref()", 1);
             tys.insert(*d, NTy::RecRef(j));
+            if !crate::render_native_rec::is_region(i) {
+                note_payload_take(*d, ad.base, format!("{}.take_{acc}", var(ad.base)));
+            }
             line!(
                 "let {v}_d: {s}; let mut {v}: &{s} = match {b}.{r} {{ Some(r) => r, None => {{ {v}_d = {s}::default(); &{v}_d }} }};",
                 v = var(*d),
@@ -382,6 +399,18 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
 }
 
 /// The record arm of [`slot_load_handle`]: heap field `k` (of kind `f`).
+/// The move of field `k` out of the owned record `base` for the read `d`: a
+/// plain partial move where the block is rebound next (nothing names it whole
+/// before then, and Rust re-initializes it at the rebind), else a take that
+/// leaves the field's `Default` behind.
+fn field_move(st: &AddrState, d: ValueId, base: ValueId, k: usize) -> String {
+    if st.moves_partial.contains(&d) {
+        format!("{}.f{k}", var(base))
+    } else {
+        format!("std::mem::take(&mut {}.f{k})", var(base))
+    }
+}
+
 fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NTy) -> Result<bool, LowerError> {
     let AddrSink { st, tys, out, indent } = s;
     macro_rules! line {
@@ -389,6 +418,19 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
             for _ in 0..indent { out.push_str("    "); }
             writeln!(out, $($arg)*).unwrap();
         }};
+    }
+    // The last read of a heap field of an owned record whose block the loop
+    // rebinds right after (render_native_slots::movable_loads) moves the
+    // value out, so the rebuild edits it in place instead of copying it.
+    if st.moves_first.contains(d)
+        && !st.moves_last.contains(d)
+        && matches!(ty(tys, &ad.base), Some(NTy::Rec(_)))
+        && crate::render_native_rec::has_default(f)
+        && !crate::render_native_move::drill_no_moves()
+    {
+        tys.insert(*d, f);
+        line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, ad.base, k));
+        return Ok(true);
     }
     // A borrow-only read (crate::render_native_borrow_read): a
     // reference into the record's field, where the owned read
@@ -400,16 +442,13 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
         return Ok(true);
     }
     tys.insert(*d, f);
-    // The last read of the slot of an owned record moves the value out.
-    if st.moves.contains(d) && crate::render_native_rec::has_default(f) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) {
-        line!(
-            "let mut {}: {} = std::mem::take(&mut {}.f{k});",
-            var(*d),
-            crate::render_native_rec::owned_ty(f),
-            var(ad.base)
-        );
+    // The last read of the slot of an owned record moves the value out
+    // (a kind with a `Default` to leave in the slot).
+    if st.moves.contains(d) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) && crate::render_native_rec::has_default(f) {
+        line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, ad.base, k));
         return Ok(true);
     }
+    crate::render_native_addr::note_field_copy(*d);
     line!(
         "let mut {}: {} = {}.f{k}.clone();",
         var(*d),
@@ -499,7 +538,8 @@ fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
     }
     let field = crate::render_native_rec::rec_field(i, k)
         .ok_or_else(|| wall("native: a store past a record's last field"))?;
-    let rhs = match (field, st.addrs.get(&v).copied(), ty(tys, &v)) {
+    let got = ty(tys, &v);
+    let rhs = match (field, st.addrs.get(&v).copied(), got) {
         (f, None, Some(NTy::Opt)) if crate::native_value_repr::same_owned(f, NTy::Opt) => var(v),
         (NTy::I64, None, Some(NTy::I64)) => var(v),
         (NTy::I64, None, Some(NTy::F64)) => format!("{}.to_bits() as i64", var(v)),
@@ -515,9 +555,9 @@ fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
             {
                 "Vec::new()".to_string()
             }
-            g => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
+            other => return Err(wall(format!("native: a {other:?} value stored into a {f:?} record field"))),
         },
-        (f, _, g) => return Err(wall(format!("native: a {g:?} value stored into a {f:?} record field"))),
+        _ => return Err(wall(format!("native: a {got:?} value stored into a {field:?} record field"))),
     };
     if let Some(done) = st.building.get_mut(&ad.base) {
         // A struct built whole: the field waits in its own local
@@ -639,149 +679,4 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
     }
 }
 
-/// The slot-list arms of [`render_addr_op`] over generated structs, in their
-/// order: an enum's scalar read, the struct literals, a record's scalar read
-/// and write.
-fn struct_slot_op(op: &Op, s: AddrSink<'_>) -> Result<Option<bool>, LowerError> {
-    if let Some(done) = const_or_empty_alloc(op, AddrSink { st: &mut *s.st, tys: &mut *s.tys, out: &mut *s.out, indent: s.indent }) {
-        return Ok(Some(done));
-    }
-    let AddrSink { st, tys, out, indent } = s;
-    match op {
-        Op::ListGetScalar { dst, list, idx } if is_enum(ty(tys, list)).is_some() => {
-            enum_scalar_get(AddrSink { st, tys, out, indent }, dst, list, idx).map(Some)
-        }
-        Op::ListLit { dst, elems } if st.alloc_rec.get(dst).is_some_and(|i| crate::render_native_rec::all_scalar_struct(*i)) => {
-            scalar_struct_lit(AddrSink { st, tys, out, indent }, dst, elems).map(Some)
-        }
-        Op::ListLit { dst, elems } if st.alloc_rec.contains_key(dst) => {
-            enum_slot_lit(AddrSink { st, tys, out, indent }, dst, elems).map(Some)
-        }
-        Op::ListGetScalar { dst, list, idx } if matches!(ty(tys, list), Some(NTy::Rec(_) | NTy::RecRef(_))) => {
-            rec_scalar_get(AddrSink { st, tys, out, indent }, dst, list, idx).map(Some)
-        }
-        Op::ListSetScalar { list, idx, val } if matches!(ty(tys, list), Some(NTy::Rec(_) | NTy::RecRef(_))) => {
-            rec_scalar_set(AddrSink { st, tys, out, indent }, list, idx, val).map(Some)
-        }
-        _ => Ok(None),
-    }
-}
-
-/// `ListGetScalar` of an enum: its tag or a scalar payload at a constant slot.
-fn enum_scalar_get(s: AddrSink<'_>, dst: &ValueId, list: &ValueId, idx: &ValueId) -> Result<bool, LowerError> {
-    let AddrSink { st, tys, out, indent } = s;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    let (Some(i), Some(&k)) = (is_enum(ty(tys, list)), st.consts.get(idx)) else {
-        return Err(wall("native: an enum slot read at a computed slot"));
-    };
-    let (acc, _) = enum_read(i, k as usize, true).ok_or_else(|| wall("native: a scalar read of a heap enum slot"))?;
-    tys.insert(*dst, NTy::I64);
-    line!("let mut {}: i64 = {}.{acc};", var(*dst), var(*list));
-    Ok(true)
-}
-
-/// The all-scalar struct literal arm of [`struct_slot_op`].
-fn scalar_struct_lit(s: AddrSink<'_>, dst: &ValueId, elems: &[ValueId]) -> Result<bool, LowerError> {
-    let AddrSink { st, tys, out, indent } = s;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    // An all-scalar struct literal: slot K is field `fK` (a real f64
-    // goes in as its bits, the value the MIR stores there).
-    let i = st.alloc_rec[dst];
-    let mut fields = Vec::with_capacity(elems.len());
-    for (k, e) in elems.iter().enumerate() {
-        fields.push(match ty(tys, e) {
-            Some(NTy::I64) => format!("f{k}: {}", var(*e)),
-            Some(NTy::F64) => format!("f{k}: {}.to_bits() as i64", var(*e)),
-            _ => return Err(wall("native: a heap element in an all-scalar struct literal")),
-        });
-    }
-    if fields.len() != crate::render_native_rec::field_count(i) {
-        return Err(wall("native: a struct literal of the wrong width"));
-    }
-    tys.insert(*dst, NTy::Rec(i));
-    line!("let mut {}: {n} = {n} {{ {} }};", var(*dst), fields.join(", "), n = crate::render_native_rec::struct_name(i));
-    Ok(true)
-}
-
-/// A scalar-only enum constructor built from its slot list.
-fn enum_slot_lit(s: AddrSink<'_>, dst: &ValueId, elems: &[ValueId]) -> Result<bool, LowerError> {
-    let AddrSink { st, tys, out, indent } = s;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    let i = st.alloc_rec[dst];
-    if elems.iter().any(|e| !matches!(ty(tys, e), Some(NTy::I64 | NTy::F64))) {
-        return Err(wall("native: a heap element in an enum slot list"));
-    }
-    tys.insert(*dst, NTy::Rec(i));
-    let n = crate::render_native_rec::struct_name(i);
-    // A constant tag naming a payload-free case is that case: `from_slots` builds `with_tag(t)` and sets
-    // no field of it, through a slot list and a tag match (4% on nested_variant_tag_box).
-    let cases = crate::render_native_rec::enum_cases(i).unwrap_or_default();
-    let nullary = elems.first().filter(|t| !st.set_locals.contains(t)).and_then(|t| st.consts.get(t)).copied();
-    let nullary = nullary.filter(|&t| cases.iter().any(|(c, fs)| i64::from(*c) == t && fs.is_empty()));
-    if let Some(t) = nullary {
-        line!("let mut {}: {n} = {n}::C{t};", var(*dst));
-        return Ok(true);
-    }
-    // MIR's scalar slots carry Float bits, just as scalar_struct_lit does.
-    // Preserve NaN payloads and signed zero; numeric `as i64` would lose both.
-    let items = elems.iter().map(|e| match ty(tys, e) {
-        Some(NTy::F64) => format!("{}.to_bits() as i64", var(*e)),
-        _ => var(*e),
-    }).collect::<Vec<_>>().join(", ");
-    line!("let mut {}: {n} = {n}::from_slots(&[{items}]);", var(*dst));
-    Ok(true)
-}
-
-/// `ListGetScalar` of a record: a scalar field at a constant slot.
-fn rec_scalar_get(s: AddrSink<'_>, dst: &ValueId, list: &ValueId, idx: &ValueId) -> Result<bool, LowerError> {
-    let AddrSink { st, tys, out, indent } = s;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    let (Some(NTy::Rec(i) | NTy::RecRef(i)), Some(&k)) = (ty(tys, list), st.consts.get(idx)) else {
-        return Err(wall("native: a record field read at a computed slot"));
-    };
-    if crate::render_native_rec::rec_field(i, k as usize) != Some(NTy::I64) {
-        return Err(wall("native: a scalar read of a heap record field"));
-    }
-    tys.insert(*dst, NTy::I64);
-    line!("let mut {}: i64 = {}.f{k};", var(*dst), var(*list));
-    Ok(true)
-}
-
-/// `ListSetScalar` of an owned record: a scalar field at a constant slot.
-fn rec_scalar_set(s: AddrSink<'_>, list: &ValueId, idx: &ValueId, val: &ValueId) -> Result<bool, LowerError> {
-    let AddrSink { st, tys, out, indent } = s;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    let (Some(NTy::Rec(i)), Some(&k)) = (ty(tys, list), st.consts.get(idx)) else {
-        return Err(wall("native: a record field write on a borrowed record or at a computed slot"));
-    };
-    if crate::render_native_rec::rec_field(i, k as usize) != Some(NTy::I64) || ty(tys, val) != Some(NTy::I64) {
-        return Err(wall("native: a scalar write of a heap record field"));
-    }
-    line!("{}.f{k} = {};", var(*list), var(*val));
-    Ok(true)
-}
+include!("render_native_addr_struct_ops.rs");

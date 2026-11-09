@@ -171,13 +171,21 @@ impl Emitter<'_> {
                 _ => break,
             }
         }
-        if stages_rev.is_empty() {
+        // A source that is itself a producer the reduction can walk in place
+        // (#4612: a widened byte block) is the chain's FIRST stage: fused
+        // even with no map or filter after it, under the same judgment.
+        let walk = crate::bytes::widened_byte_walk(cur);
+        if stages_rev.is_empty() && walk.is_none() {
             return Ok(None);
         }
         // Every callback a literal lambda, and the stages — in source order,
-        // the fold's (its init included) last — mergeable under the shared
-        // rule (#2953): all pure, at most one that can abort.
+        // the producer's first and the fold's (its init included) last —
+        // mergeable under the shared rule (#2953): all pure, at most one that
+        // can abort.
         let mut verdicts = Vec::new();
+        if walk.is_some() {
+            verdicts.extend(crate::bytes::byte_form(cur).map(|f| f.stage()));
+        }
         for st in stages_rev.iter().rev() {
             let f = match st {
                 Stage::Map(f) | Stage::Filter(f) => *f,
@@ -204,7 +212,7 @@ impl Emitter<'_> {
         // get one private pair slot refilled per element, exactly as the
         // scalar enumerate/fold does. The stages are pure, so nothing can
         // write the source while it is walked and no snapshot is taken.
-        let enumerated = self.enumerate_adapter(cur, stages[0]);
+        let enumerated = stages.first().and_then(|first| self.enumerate_adapter(cur, first));
 
         let Some(acc_ty) = slice_ty_of(&init.ty, self.types) else {
             return unsup(&format!("list-fold-acc:{}", ty_name(&init.ty)));
@@ -216,9 +224,16 @@ impl Emitter<'_> {
         };
         // The source first, then the init — argument order, as native
         // evaluates them; a `list.range` head is counted, not built (#2045).
-        let src = match enumerated {
-            Some(inner) => self.loop_src_open_block(inner, init)?,
-            None => self.loop_src_open(cur, init)?,
+        let src = match (enumerated, &walk) {
+            (Some(inner), _) => self.loop_src_open_block(inner, init)?,
+            (None, Some((block, consumed))) => {
+                // The producers are consumed here, never lowered as values.
+                for node in consumed {
+                    self.witness_inline_arg(node);
+                }
+                self.loop_src_open_bytes(block, init)?
+            }
+            (None, None) => self.loop_src_open(cur, init)?,
         };
         self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(acc);

@@ -122,6 +122,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_div_mod_ok.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_rem_pow2_zero.almd", class = "fixture" },
 ]
 
 # ── FAN DETERMINISM (PR #377, #369) ──────────────────────────────────
@@ -1159,6 +1160,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_wasm_split_replace_iterative.almd", class = "fixture" },
+  { path = "spec/wasm_cross/split_one_byte_separator.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-075"
@@ -2322,6 +2324,9 @@ evidence  = [
   { path = "spec/wasm_cross/toplevel_const_wrapping.almd", class = "fixture" },
   { path = "spec/wasm_cross/accum_recursion_int.almd", class = "fixture" },
   { path = "spec/wasm_cross/accum_recursion_declined.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_div_pow2_nonneg_induction.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_div_pow2_signed_induction.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_walk_reduction_fused.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-171"
@@ -2467,7 +2472,7 @@ evidence  = [
 id        = "C-182"
 spec      = "ALS-E3"
 title     = "A negated float literal takes its context's float type on both targets"
-statement = "`let f: Float32 = -2.5` (and the same literal in argument position) carries the CONTEXT's float type, exactly as the positive literal already did (#890). Lowered as a `UnOp::NegFloat` over an operand still typed bare `Float` while the enclosing node claimed the annotated `Float32`, native emitted `-(2.5f64)` into an `f32` slot — `error[E0308]`, a hard build failure — and the wasm leg read the mismatched slot as `0.0`, a silent wrong value that a program doing `let scale: Float32 = -1.5` would compute with. The negation is now FOLDED into the literal at the context type, the same rule the Int case has had since #626 (which is why `let a: Int8 = -128` always worked). A negated EXPRESSION (not a literal) still negates at runtime, and the sized-float `NegFloat` selection now recognises `Float32`/`Float64` operands rather than only bare `Float`. The same width rule applies to literal fallbacks of Option/Result ?? expressions: the checked payload type determines the fallback literal representation before either backend runs, including negative Float32 literals; out-of-range fallbacks are rejected during checking."
+statement = "`let f: Float32 = -2.5` (and the same literal in argument position) carries the CONTEXT's float type, exactly as the positive literal already did (#890). Lowered as a `UnOp::NegFloat` over an operand still typed bare `Float` while the enclosing node claimed the annotated `Float32`, native emitted `-(2.5f64)` into an `f32` slot — `error[E0308]`, a hard build failure — and the wasm leg read the mismatched slot as `0.0`, a silent wrong value that a program doing `let scale: Float32 = -1.5` would compute with. The negation is now FOLDED into the literal at the context type, the same rule the Int case has had since #626 (which is why `let a: Int8 = -128` always worked). A negated EXPRESSION (not a literal) still negates at runtime, and the sized-float `NegFloat` selection now recognises `Float32`/`Float64` operands rather than only bare `Float`."
 since     = "0.37.0"
 status    = "active"
 evidence  = [

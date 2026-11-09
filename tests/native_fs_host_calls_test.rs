@@ -75,4 +75,9 @@ fn named_host_boundary_accepts_optional_bytes_and_rejects_unknown_ids() {
     }
     // A named host is no exemption from the caller's ownership obligations.
     assert!(!check(Property::NativeCalls, format!("||| {id}\nidd").as_bytes()));
+    // Keep the saved poison outside the admitted set when that set grows.
+    let poison = include_str!("../proofs/poisoned-certs/native-calls/4006-host-outside-set.cert");
+    let host = poison.lines().next().unwrap().strip_prefix("|||").unwrap();
+    assert_eq!(host.parse::<usize>().unwrap(), NATIVE_FS_HOST_CALLS.len());
+    assert!(!check(Property::NativeCalls, poison.as_bytes()));
 }

@@ -15,8 +15,9 @@
 /// - `sites`: one row per `CallFn` to a program function (its block index,
 ///   then one mode per heap param of the callee: 1 where the caller handed
 ///   the argument over — a call-site move follows the call — else 0), and
-///   per `CallIndirect` one row per possible callee (closure targets never
-///   move: a function taken as a value keeps borrowing). The checker holds
+///   per `CallIndirect` one row per possible callee, in the modes the caller
+///   handed its arguments over in (a lifted lambda's user params can be move
+///   params, `native_move_params`; its possible callees agree). The checker holds
 ///   each row to the callee's declared modes, so a site that keeps an
 ///   argument its callee takes over is refused;
 /// - `marks`: for every call-site move (`MirFunction::call_moves`), the line
@@ -130,7 +131,22 @@ pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTr
                         sites.push(site_row(idx, &modes));
                     }
                     Op::CallIndirect { args, .. } => {
-                        let actual = borrow_modes(args);
+                        // What the caller did with each heap argument: handed it
+                        // over (a call-site move follows the call) or kept it.
+                        let handed: Vec<ValueId> = (at + 1..f.ops.len())
+                            .take_while(|j| f.call_moves.contains(j))
+                            .filter_map(|j| match f.ops[j] {
+                                Op::Consume { v } => Some(v),
+                                _ => None,
+                            })
+                            .collect();
+                        let actual: Vec<String> = args
+                            .iter()
+                            .filter_map(|a| match a {
+                                CallArg::Handle(v) => Some(if handed.contains(v) { "1" } else { "0" }.to_string()),
+                                _ => None,
+                            })
+                            .collect();
                         let possible =
                             indirect_callee_indices(&program, &index_of, args, (table_targets.as_slice(), table_unseeable));
                         if possible.is_empty() {

@@ -58,6 +58,13 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // The native matrix route now supports transpose, including its value
+    // representation when the result is converted back to nested lists.
+    ("matrix_transpose", "fn main() -> Unit = {
+  let m = matrix.from_lists([[1.0, 2.0]])
+  println(\"${matrix.to_lists(matrix.transpose(m))}\")
+}
+"),
     // Multiple reads retain snapshots while rebuilding the global record.
     ("heap_global_record_rebuild", "type C = { n: Int, tag: String }
 
@@ -370,17 +377,12 @@ fn v0_mutual_tail_recursion_survives_opt_level_0() {
 #[test]
 fn out_of_subset_walls_honestly() {
     let walls = [
-        // Matrix transpose remains outside the native value subset.
-        ("matrix_transpose", "fn main() -> Unit = {
-  let m = matrix.from_lists([[1.0, 2.0]])
-  println(\"${matrix.to_lists(matrix.transpose(m))}\")
-}
-"),
+        // C export wrappers still require their separately checked ABI path.
+        ("c_export", "@export(c, \"answer\")\nfn answer() -> Int = 42\nfn main() -> Unit = println(answer())\n"),
     ];
     for (name, src) in walls {
-        assert!(
-            almide_mir::pipeline::try_render_rust_source(src).is_err(),
-            "`{name}` should WALL (outside rung 1) but rendered"
-        );
+        let refusal = almide_mir::pipeline::try_render_rust_source(src)
+            .expect_err(&format!("`{name}` should refuse the unsupported export wrapper"));
+        assert!(refusal.to_string().contains("is @export(c)"), "{name}: {refusal}");
     }
 }

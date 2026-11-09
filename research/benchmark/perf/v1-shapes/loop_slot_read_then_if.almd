@@ -1,0 +1,15 @@
+// v1-vs-v0 shape bench: a loop record whose list field is read, an if, and
+// then the record rebound, every iteration.
+type Acc = { items: List[String], n: Int }
+
+fn main() -> Unit = {
+  var a = Acc { items: ["x", "yy", "zzz"], n: 0 }
+  var i = 0
+  while i < 300000 {
+    let first = list.get(a.items, i % 3) ?? ""
+    let w = if i % 2 == 0 then string.len(first) else 1
+    a = { ...a, n: a.n + w }
+    i = i + 1
+  }
+  println(int.to_string(a.n))
+}

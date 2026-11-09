@@ -118,8 +118,15 @@ fn desugar_effect_unwrap_inner(
         }
         // The continuation = the rest of the block `{ stmts[i+1..]; tail }`, typed as the whole body
         // (it produces the fn's return). RECURSE so a LATER `!` in the continuation also desugars.
+        // A pattern binder is a borrowed payload, not the mutable slot of
+        // `var x = f()!`. Retain that slot as an explicit binding in the Ok
+        // continuation so later assignments preserve existing aliases.
+        let mut rest = stmts[i + 1..].to_vec();
+        let ok_pat = if matches!(&s.kind, IrStmtKind::Bind { mutability: almide_ir::Mutability::Var, .. }) {
+            mutable_unwrap_binding(ok_pat, &mut rest, next_var, s.span)
+        } else { ok_pat };
         let cont = IrExpr {
-            kind: IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
+            kind: IrExprKind::Block { stmts: rest, expr: tail.clone() },
             ty: body.ty.clone(),
             span: body.span.clone(),
             def_id: body.def_id,
@@ -211,7 +218,7 @@ fn hoist_for_in_head_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
     {
         Some(i) => i,
         None if tail_hit => {
-            let t_expr = tail.as_deref().unwrap();
+            let t_expr = tail.as_deref().expect("tail_hit implies a tail");
             let mut new_stmts = stmts.clone();
             new_stmts.push(IrStmt {
                 kind: IrStmtKind::Expr { expr: t_expr.clone() },
@@ -273,6 +280,27 @@ fn hoist_for_in_head_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
         span: body.span.clone(),
         def_id: body.def_id,
     })
+}
+
+fn mutable_unwrap_binding(
+    pattern: almide_ir::IrPattern,
+    rest: &mut Vec<IrStmt>,
+    next_var: &mut u32,
+    span: Option<almide_base::Span>,
+) -> almide_ir::IrPattern {
+    use almide_ir::IrPattern;
+    let IrPattern::Ok { inner } = &pattern else { return pattern };
+    let IrPattern::Bind { var, ty } = inner.as_ref() else { return pattern };
+    let payload = VarId(*next_var);
+    *next_var += 1;
+    rest.insert(0, IrStmt {
+        kind: IrStmtKind::Bind {
+            var: *var, mutability: almide_ir::Mutability::Var, ty: ty.clone(),
+            value: IrExpr { kind: IrExprKind::Var { id: payload }, ty: ty.clone(), span, def_id: None },
+        },
+        span,
+    });
+    IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: payload, ty: ty.clone() }) }
 }
 
 fn stmt_effect_unwrap_target(s: &IrStmt) -> Option<(IrExpr, almide_ir::IrPattern)> {

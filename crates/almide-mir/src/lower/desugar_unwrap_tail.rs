@@ -1,3 +1,7 @@
+// the effect-`!` desugar's return/tail-position recursion, include!-spliced back from
+// desugar_unwrap.rs at module level (a code move under the 800-line ceiling the
+// codopsy gate holds this crate to).
+
 /// Recurse the effect-`!` desugar into RETURN/TAIL positions — an `if`/`match` arm body or a nested
 /// block tail — so a stmt-`!` inside a branch (porta_init's `else { … fs.write(p, c)!; … }`,
 /// signal_instance's nested if/else arm blocks) desugars to the same nested-match continuation. The

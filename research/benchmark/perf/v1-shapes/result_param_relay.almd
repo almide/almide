@@ -1,0 +1,21 @@
+// v1-vs-v0 shape bench: a by-value Result param handed on to a callee that
+// takes it over, at its last use and outside any loop, so the render moves
+// it instead of copying it.
+fn describe(r: Result[Int, String]) -> String =
+  match r {
+    ok(n) => int.to_string(n),
+    err(e) => e,
+  }
+
+fn relay(r: Result[Int, String]) -> String = describe(r)
+
+fn main() -> Unit = {
+  var total = 0
+  var i = 0
+  while i < 200000 {
+    let r: Result[Int, String] = if i % 3 == 0 then err("e" + int.to_string(i)) else ok(i)
+    total = total + string.len(relay(r))
+    i = i + 1
+  }
+  println(int.to_string(total))
+}

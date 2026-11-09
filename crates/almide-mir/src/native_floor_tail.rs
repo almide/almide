@@ -111,6 +111,8 @@ fn twin_takes(param: Option<&FloorParam>, (code, got): &(String, NTy)) -> bool {
     match (param, got) {
         (_, NTy::Vec | NTy::VecStr) => true,
         (Some(FloorParam::List(elem)), NTy::Rec(_)) => list_arg(*elem, code, *got).is_some_and(|r| r == format!("&{code}")),
+        // A dying owned Value (`as_array(v)` at v's last use): its items move.
+        (Some(FloorParam::Value(_)), NTy::Rec(_)) => crate::render_native_rec::is_value(*got),
         _ => false,
     }
 }
@@ -158,6 +160,11 @@ pub(crate) fn render_call(
     let elem_str = elem_kind.map(|k| k == NTy::Str);
     if f.str_only && elem_str != Some(true) {
         return Err(wall(format!("native: floor call `{name}` bounds its element by equality or ordering, served for a String list only")));
+    }
+    // A generated struct or enum (a declared record or variant, a tuple) has
+    // no `Ord`: an ordering-bound element of that kind is v0's to render.
+    if f.ordered && elem_kind.and_then(NTy::rec).is_some_and(|i| crate::render_native_rec::field_count(i) > 0 || crate::render_native_rec::enum_cases(i).is_some()) {
+        return Err(wall(format!("native: floor call `{name}` orders a declared record or variant, whose generated type derives no ordering")));
     }
     let cx = CallCx { mismatch: &mismatch, map_kv, elem_str, elem_kind, set_e, name, params: &f.params, args };
     let mut rendered = Vec::new();
@@ -234,7 +241,7 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
         FloorParam::Map(by_ref) => map_arg(cx, *by_ref, code, got, dying_here)?,
         FloorParam::MapKey(by_ref) | FloorParam::MapVal(by_ref) => map_entry_arg(cx, p, *by_ref, code, got, dying_here)?,
         FloorParam::MapPairs => map_pairs_arg(cx, code, got)?,
-        FloorParam::Value(by_ref) => value_arg(cx, *by_ref, code, got)?,
+        FloorParam::Value(by_ref) => value_arg(cx, *by_ref, code, got, dying_here)?,
         FloorParam::Set(_) | FloorParam::SetElem(_) | FloorParam::Matrix(_) | FloorParam::BytesMut => runtime_arg(cx, p, code, got, dying_here)?,
         FloorParam::Bytes => match got {
             NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&{code}"),
@@ -290,9 +297,13 @@ fn matrix_or_bytes_mut_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy) -
             (NTy::Rec(_) | NTy::RecRef(_), false) if crate::render_native_rec::is_matrix(*got) => format!("{code}.clone()"),
             _ => return Err(mismatch()),
         },
-        // Only the caller's own binding: a borrowed one cannot be written.
+        // Only the caller's own binding: a borrowed one cannot be written, and
+        // an owned copy of a record's field would take the write in place of
+        // the field.
         FloorParam::BytesMut => match got {
-            NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&mut {code}"),
+            NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) && !crate::render_native_addr::is_field_copy(code) => {
+                format!("&mut {code}")
+            }
             _ => return Err(mismatch()),
         },
         _ => return Err(mismatch()),
@@ -382,9 +393,13 @@ fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerErro
 }
 
 /// A `Value` param's argument.
-fn value_arg(cx: &CallCx, by_ref: bool, code: &str, got: &NTy) -> Result<String, LowerError> {
+fn value_arg(cx: &CallCx, by_ref: bool, code: &str, got: &NTy, dying_here: bool) -> Result<String, LowerError> {
     Ok(match (got, by_ref) {
         (NTy::Rec(_), true) if crate::render_native_rec::is_value(*got) => format!("&{code}"),
+        // The caller's Value, not read again: v0's move (#4006, no-perf-loss).
+        (NTy::Rec(_), false) if dying_here && crate::render_native_rec::is_value(*got) => {
+            crate::render_native_move::take_expr(code)
+        }
         (NTy::RecRef(_), true) if crate::render_native_rec::is_value(*got) => code.to_string(),
         (NTy::Rec(_) | NTy::RecRef(_), false) if crate::render_native_rec::is_value(*got) => format!("{code}.clone()"),
         _ => return Err((cx.mismatch)()),
@@ -457,6 +472,8 @@ mod tests {
         assert_eq!(declared_scalar_text("bool.to_string"), Some(ScalarText::Bool));
         assert_eq!(declared_scalar_text("int.to_string_radix"), None);
         assert_eq!(declared_scalar_text("float.to_string"), None);
+        assert_eq!(declared_scalar_text("float.__to_string_compound"), Some(ScalarText::Float));
+        assert_eq!(declared_scalar_text("float.to_string_compound"), Some(ScalarText::Float));
     }
 
     /// A range's `..` is no access: the helper a runtime body slices by is

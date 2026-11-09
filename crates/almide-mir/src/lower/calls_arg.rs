@@ -88,7 +88,7 @@ impl LowerCtx {
                 | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
                 | IrExprKind::IndexAccess { .. }) {
                 let value = self.lower_scalar_value(a).ok_or_else(||
-                    LowerError::Unsupported("Unit argument value could not be lowered".into()))?;
+                    LowerError::at(a.span, "Unit argument value could not be lowered"))?;
                 return Ok(Some(ArgOutcome::Value(CallArg::Scalar(value))));
             }
             self.lower_stmt_expr(a)?;

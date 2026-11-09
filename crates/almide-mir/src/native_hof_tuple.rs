@@ -124,8 +124,8 @@ fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_nati
     })
 }
 
-fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, dps: &[DTy], dret: &DTy,
-    ps: &[NativeSigKind], ret: Option<NativeSigKind>) -> Option<String> {
+fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, (dps, dret): (&[DTy], &DTy),
+    (ps, moved): (&[NativeSigKind], &[bool]), ret: Option<NativeSigKind>) -> Option<String> {
     if ps.iter().chain(ret.iter()).any(|k| matches!(k, NativeSigKind::Narrow { .. })) { return None; }
     let mut params = Vec::new();
     let mut setup = Vec::new();
@@ -137,7 +137,8 @@ fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, dps: 
         let ty = clo::owned_nty(*k);
         let value = convert_callback_value(env, d, ty, code, true)?;
         setup.push(format!("let __a{i} = {value};"));
-        let borrow = matches!(ty, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_));
+        // A param the lambda takes over gets the converted value itself.
+        let borrow = matches!(ty, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) && !moved.get(i).copied().unwrap_or(false);
         args.push(format!("{}__a{i}", if borrow { "&" } else { "" }));
     }
     let call = format!("{}{})", callback_head(lambda, captured, ps, ret),
@@ -159,7 +160,7 @@ mod tuple_callback_tests {
     fn spread_callback_arguments_follow_the_declared_tuple_positions() {
         let pair = DTy::Tuple(vec![DTy::Str, DTy::Int]);
         let acc = DTy::Var("A".into());
-        let layout = callback_layout(&[acc.clone(), pair.clone()], 3).unwrap();
+        let layout = callback_layout(&[acc.clone(), pair.clone()], 3).expect("a two-parameter callback with a tuple splits into three slots");
         assert_eq!(layout, vec![(acc, "__p0".into()), (DTy::Str, "__p1.0".into()), (DTy::Int, "__p1.1".into())]);
         assert_eq!(callback_layout(&[pair.clone()], 1), Some(vec![(pair.clone(), "__p0".into())]));
         assert!(callback_layout(&[pair], 3).is_none());
@@ -179,10 +180,10 @@ mod tuple_callback_tests {
         let mut env = Env::new();
         assert_eq!(bind_callback_shape(&mut env, &pair, NTy::Rec(0)), Some(()));
         assert_eq!(bind_callback_shape(&mut env, &pair, NTy::Rec(1)), None);
-        let input = convert_callback_value(&env, &pair, NTy::Rec(0), "read_once()", true).unwrap();
+        let input = convert_callback_value(&env, &pair, NTy::Rec(0), "read_once()", true).expect("the tuple input converts");
         assert_eq!(input.matches("read_once()").count(), 1);
         assert!(input.contains("to_bits()"));
-        let output = convert_callback_value(&env, &pair, NTy::Rec(0), "result_once()", false).unwrap();
+        let output = convert_callback_value(&env, &pair, NTy::Rec(0), "result_once()", false).expect("the tuple output converts");
         assert_eq!(output.matches("result_once()").count(), 1);
         assert!(output.contains("f64::from_bits"));
         assert!(convert_callback_value(&env, &pair, NTy::Rec(1), "wrong", true).is_none());

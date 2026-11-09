@@ -1,0 +1,27 @@
+// v1-vs-v0 shape bench: a by-value Result param whose tag is read first and
+// which is then handed on at its last use, outside any loop.
+fn describe(r: Result[String, String]) -> String =
+  match r {
+    ok(s) => s,
+    err(e) => e,
+  }
+
+fn relay(r: Result[String, String]) -> Int = {
+  let bonus = match r {
+    ok(_) => 1,
+    err(_) => 2,
+  }
+  string.len(describe(r)) + bonus
+}
+
+fn main() -> Unit = {
+  var total = 0
+  var i = 0
+  while i < 200000 {
+    let s = int.to_string(i)
+    let r: Result[String, String] = if i % 3 == 0 then err(s) else ok(s)
+    total = total + relay(r)
+    i = i + 1
+  }
+  println(int.to_string(total))
+}

@@ -694,3 +694,26 @@ mod native_capture_tests {
     }
 
 }
+
+impl LowerCtx {
+    /// Phase 3 of [`Self::lift_lambda`]: resolve every capture to a lowered local value
+    /// (a cell capture to its CELL BLOCK). Verbatim.
+    fn resolve_capture_values(&self, layout: &CaptureLayout) -> Option<Vec<ValueId>> {
+        // Every capture must resolve to a lowered local value HERE (a capture of a
+        // deferred/opaque binding has no readable value). A captured Fn var must be a
+        // KNOWN closure block (closure_values), or its slot would hold a non-block.
+        let mut cap_vals: Vec<ValueId> = Vec::new();
+        for (i, (v, _)) in layout.captures.iter().enumerate() {
+            // A cell capture resolves to its CELL BLOCK (shared storage), not a value.
+            let cv = match self.cell_of.get(v) {
+                Some(&c) => c,
+                None => *self.value_of.get(v)?,
+            };
+            if i < layout.n_closure && !self.closure_values.contains(&cv) {
+                return None;
+            }
+            cap_vals.push(cv);
+        }
+        Some(cap_vals)
+    }
+}

@@ -83,10 +83,19 @@ pub(crate) fn is_runtime_text(text: &str) -> bool {
     text == FLOOR_HEADER || TEXTS.get_or_init(|| runtime_index().items.values().map(|i| i.text).collect()).contains(text)
 }
 
-/// `Err` when the closure of `symbol` carries the fs host module and
-/// `symbol` is not one of the named native fs host calls.
+/// A runtime implementation of a named host operation. The generated
+/// Send-free twin has the same operation identity and capability witness;
+/// it changes callback scheduling, not the admitted host interface.
+fn is_native_fs_host_body(symbol: &str) -> bool {
+    crate::host_ops::is_native_fs_host_call(symbol)
+        || crate::host_ops::NATIVE_FS_HOST_CALLS.iter().any(|host|
+            almide_codegen::generated::runtime_fn_modes::send_free_twin(host) == Some(symbol))
+}
+
+/// `Err` when the closure carries fs code but implements neither a named
+/// host call nor its generated Send-free twin. Witnesses name the operation.
 fn fs_host_gate(symbol: &str, items: &[&'static str]) -> Result<(), String> {
-    if items.iter().any(|t| is_fs_host_text(t)) && !crate::host_ops::is_native_fs_host_call(symbol) {
+    if items.iter().any(|t| is_fs_host_text(t)) && !is_native_fs_host_body(symbol) {
         return Err(format!(
             "`{symbol}` reaches the native fs host module, which only the named native fs host calls may (proofs/TRUSTED_BASE.md)"
         ));
@@ -129,6 +138,12 @@ mod fs_host_tests {
         let fs_item = runtime_index().items.get("almide_rt_fs_write").expect("fs.write_text's body is an item").text;
         assert!(is_fs_host_text(fs_item));
         assert!(fs_host_gate("almide_rt_fs_write", &[fs_item]).is_ok());
+        for host in crate::host_ops::NATIVE_FS_HOST_CALLS {
+            if let Some(twin) = almide_codegen::generated::runtime_fn_modes::send_free_twin(host) {
+                assert!(fs_host_gate(twin, &[fs_item]).is_ok());
+            }
+        }
+        assert!(fs_host_gate("almide_rt_fs_write_seq", &[fs_item]).is_err());
         let refused = fs_host_gate("almide_rt_string_len", &[fs_item]).unwrap_err();
         assert!(refused.contains("native fs host module"), "{refused}");
         assert!(fs_host_gate("almide_rt_string_len", &["fn f() {}"]).is_ok());

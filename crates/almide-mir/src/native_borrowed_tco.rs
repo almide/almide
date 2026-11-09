@@ -61,7 +61,8 @@ pub(crate) fn sites(f: &MirFunction) -> BTreeSet<usize> {
 pub(crate) fn begin(f: &MirFunction, tys: &BTreeMap<ValueId, NTy>, out: &mut String) -> Result<(), LowerError> {
     for p in &f.params {
         if !tys.get(&p.value).is_some_and(|t| borrowed_or_scalar(*t)) {
-            return Err(LowerError::Unsupported("native: borrowed tail loop has an owned or non-lane parameter".into()));
+            return Err(LowerError::at(crate::native_closure_decl::source_span(&f.name),
+                "native: borrowed tail loop has an owned or non-lane parameter"));
         }
         let v = var(p.value);
         out.push_str(&format!("    let mut {v} = {v};\n"));
@@ -80,7 +81,8 @@ pub(crate) fn render(f: &MirFunction, op: &Op, tys: &mut BTreeMap<ValueId, NTy>,
     for (p, arg) in f.params.iter().zip(args) {
         let (code, got) = call_arg(arg, tys)?;
         if !borrowed_or_scalar(got) || tys.get(&p.value) != Some(&got) {
-            return Err(LowerError::Unsupported("native: borrowed tail argument must preserve its exact reference type".into()));
+            return Err(LowerError::at(crate::native_closure_decl::source_span(&f.name),
+                "native: borrowed tail argument must preserve its exact reference type"));
         }
         staged.push(code);
     }

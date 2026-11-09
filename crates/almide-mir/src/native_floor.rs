@@ -215,6 +215,15 @@ pub(crate) struct FloorFn {
     /// only (owner ruling ○, 2026-11-04): the call's list must be a String
     /// list, which carries no Float bits.
     pub str_only: bool,
+    /// The element of the `List[A]` param is ordering-bound (`list.sort`,
+    /// `list.min`, …): a generated struct or enum derives no ordering, so a
+    /// call over a list of declared records or variants walls.
+    pub ordered: bool,
+    /// The runtime's borrowing `_ref` twin of a `Result[Value, String]` body
+    /// (its symbol, its items): the Ok side a reference into the Value arg.
+    pub borrow_twin: Option<(String, Vec<&'static str>)>,
+    /// The runtime's `_ref` twin taking each by-value Value param by reference.
+    pub by_ref: Option<Box<FloorFn>>,
 }
 
 /// The floor entry the declaration of stdlib call `call` (`module.fn`) gives,
@@ -260,7 +269,8 @@ pub(crate) fn declared_scalar_option(name: &str) -> bool {
 
 /// The scalar a stdlib fn declared `@scalar_text` turns into its canonical
 /// text: `Some(ScalarText::Int)` for an `Int` param (decimal digits),
-/// `Some(ScalarText::Bool)` for a `Bool` one (`true` / `false`), `None` for a
+/// `Some(ScalarText::Bool)` for a `Bool` one (`true` / `false`),
+/// `Some(ScalarText::Float)` for a `Float` one (its `{}` Display), `None` for a
 /// fn without the declaration. The certified render folds such a call into
 /// the format string of the text it builds, reading only this declaration.
 pub(crate) fn declared_scalar_text(call: &str) -> Option<ScalarText> {
@@ -279,11 +289,19 @@ pub(crate) fn declared_scalar_text(call: &str) -> Option<ScalarText> {
 pub(crate) enum ScalarText {
     Int,
     Bool,
+    Float,
 }
 
 fn scalar_text_of(call: &str) -> Option<ScalarText> {
     let (module, func) = call.split_once('.')?;
     let program = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached)?;
+    // A self-hosted body that declares the fn it specializes
+    // (`@specializes("float.__to_string_compound")`) has that fn's text, as
+    // the floor serves it as that fn ([`derive_for`]).
+    let declared_here = program.decls.iter().any(|d| matches!(d, Decl::Fn { name, .. } if name.as_str() == func));
+    if !declared_here {
+        return specialized_target(call).filter(|t| t != call).and_then(|t| scalar_text_of(&t));
+    }
     program.decls.iter().find_map(|d| match d {
         Decl::Fn { name, attrs, params, .. }
             if name.as_str() == func && attrs.iter().any(|a| a.name.as_str() == "scalar_text") =>
@@ -292,6 +310,7 @@ fn scalar_text_of(call: &str) -> Option<ScalarText> {
                 [p] => match simple(&p.ty) {
                     Some("Int") => Some(ScalarText::Int),
                     Some("Bool") => Some(ScalarText::Bool),
+                    Some("Float") => Some(ScalarText::Float),
                     _ => None,
                 },
                 _ => None,
@@ -352,12 +371,25 @@ pub(crate) fn elem_option_is_scalar(call: &str) -> bool {
 
 /// The declared return of the self-hosted body registered under `call`.
 /// Whether the declared floor fn of `call` takes its param `k` by value (the
-/// runtime body consumes it, or its `@reuse` twin does at a last use): a
-/// heap param handed there at its last use is the body's to give away.
+/// runtime body consumes it, or its `@reuse` twin does at a last use, where
+/// the borrowing body would copy that container into its result — an update
+/// that returns the same kind of container): a heap param handed there at
+/// its last use is the body's to give away. A twin whose borrowing body only
+/// reads the container (`map.values`) gains nothing from taking it over, and
+/// a caller that reads its argument again would copy it whole for the call.
 pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
     declared(call).is_some_and(|f| {
         matches!(f.params.get(k), Some(FloorParam::Map(false) | FloorParam::Set(false) | FloorParam::Value(false) | FloorParam::Matrix(false)))
-            || f.twin.as_ref().is_some_and(|t| t.0 == k)
+            || f.twin.as_ref().is_some_and(|t| {
+                t.0 == k
+                    && matches!(
+                        (f.params.get(k), f.ret),
+                        (Some(FloorParam::List(_)), FloorRet::ListInt | FloorRet::ListStr | FloorRet::Elem(ElemRet::List))
+                            | (Some(FloorParam::Set(_)), FloorRet::Set)
+                            | (Some(FloorParam::Map(_)), FloorRet::Map)
+                            | (Some(FloorParam::Bytes), FloorRet::Bytes)
+                    )
+            })
     })
 }
 
@@ -555,155 +587,6 @@ fn specialized_list_elem(call: &str) -> Option<String> {
     })
 }
 
-/// `str_elems`: the call is a self-hosted body over a String list that
-/// specializes this declaration, so an equality or ordering bound on its
-/// element meets a String's, never a Float's bits.
-fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
-
-    let (module, func) = call.split_once('.').ok_or("not a module.fn call")?;
-    if !almide_lang::stdlib_info::is_bundled_module(module) {
-        return Err("not a bundled stdlib module".into());
-    }
-    let program = almide_lang::stdlib_info::bundled_source(module)
-        .and_then(almide_lang::parse_cached)
-        .ok_or("the module's source does not parse")?;
-    let mut decls = program.decls.iter().filter_map(|d| match d {
-        Decl::Fn { name, effect, attrs, generics, params, return_type, body, .. } if name.as_str() == func => {
-            Some((effect, attrs, generics, params, return_type, body))
-        }
-        _ => None,
-    });
-    let Some((effect, attrs, generics, params, ret, body)) = decls.next() else {
-        // A self-hosted representation-specialized body (`map.set_skv`)
-        // declares the stdlib fn it specializes (`@specializes("map.set")`):
-        // the floor serves it as that fn.
-        return match specialized_target(call) {
-            Some(target) if target != call => {
-                let str_elems = specialized_list_elem(call).as_deref() == Some("String");
-                derive_for(&target, str_elems).map_err(|e| format!("specializes `{target}`: {e}"))
-            }
-            _ => Err("no declaration".into()),
-        };
-    };
-    if decls.next().is_some() {
-        return Err("declared more than once".into());
-    }
-    // A body that is one call of another stdlib fn with its own params, in
-    // order, IS that fn: its floor entry is the callee's.
-    if !attrs.iter().any(|a| a.name.as_str() == "intrinsic") {
-        if let Some(target) = body.as_ref().and_then(|b| forwarded_call(b, params)) {
-            return derive_explained(&target).map_err(|e| format!("forwards to `{target}`: {e}"));
-        }
-    }
-    let is_effect = effect.unwrap_or(false);
-    let symbol = attrs
-        .iter()
-        .find(|a| a.name.as_str() == "intrinsic")
-        .and_then(|a| a.args.first())
-        .and_then(|a| match &a.value {
-            AttrValue::String { value } => Some(value.to_string()),
-            _ => None,
-        })
-        .ok_or("no @intrinsic (an Almide body)")?;
-    let type_params: BTreeSet<String> = generics
-        .iter()
-        .flatten()
-        .map(|g| g.name.as_str().to_string())
-        .collect();
-    // A `Map[K, V]` (or `List[(K, V)]`) param binds K and V: its key, value,
-    // and the returns spelled over them, take the map's native kinds.
-    let map_kv = params.iter().find_map(|p| map_params(&p.ty, &type_params)).or_else(|| map_params(ret, &type_params));
-    // A `Set[A]` param or return binds A the same way.
-    let set_a = params.iter().find_map(|p| set_param_name(&p.ty, &type_params)).or_else(|| set_param_name(ret, &type_params));
-    let fparams: Vec<FloorParam> = params
-        .iter()
-        .map(|p| {
-            map_kv
-                .as_ref()
-                .and_then(|kv| map_param(&p.ty, kv))
-                .or_else(|| set_a.as_ref().and_then(|a| set_param(&p.ty, a)))
-                .or_else(|| (p.is_mut && simple(&p.ty) == Some("Bytes")).then_some(FloorParam::BytesMut))
-                .or_else(|| floor_param(&p.ty, &type_params))
-                .ok_or_else(|| format!("param type {:?} outside the per-type map", p.ty))
-        })
-        .collect::<Result<_, _>>()?;
-    let fret = map_kv
-        .as_ref()
-        .and_then(|kv| map_ret(ret, kv))
-        .or_else(|| set_a.as_ref().and_then(|a| set_ret(ret, a)))
-        .or_else(|| floor_ret(ret, &type_params))
-        .ok_or_else(|| format!("return type {ret:?} outside the per-type map"))?;
-    if fret == FloorRet::ResFileStat && (module != "fs" || !file_stat_decl_agrees(&program.decls)) {
-        return Err("runtime FileStat layout disagrees with its bundled declaration".into());
-    }
-    // An effect fn's error reaches its caller through its declared Result,
-    // the carrier the call site's `!` reads; any other effect return walls.
-    // A HOST OP is the other admitted effect: its effect is a capability, not
-    // an error channel, and the certificate counts that capability at the
-    // call site (`certificate::cap_witness`, the ids the wasm leg's op_caps
-    // uses). It joins the floor when its row agrees with this declaration:
-    // the same intrinsic fn, the same runtime symbol, at least one capability.
-    let counted_host_op = crate::host_ops::host_op(module, func)
-        .is_some_and(|o| o.intrinsic_fn == func && o.symbol == symbol && !o.caps.is_empty());
-    if is_effect
-        && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResListValue | FloorRet::ResStrValuePairs | FloorRet::ResBytes | FloorRet::ResOptStr | FloorRet::ResOptBytes | FloorRet::ResOptListStr | FloorRet::ResFileStat)
-        && !counted_host_op
-    {
-        return Err("an effect fn whose return is not a Result carrier".into());
-    }
-    let rt = runtime_index();
-    let body = signature_text(rt, &symbol).ok_or_else(|| format!("`{symbol}` is not a takeable runtime item"))?;
-    let (rust_params, rust_ret) = rust_signature(body).ok_or("the runtime signature does not parse")?;
-    if rust_params.len() != fparams.len() || !fparams.iter().zip(&rust_params).all(|(p, r)| param_agrees(*p, r)) {
-        return Err(format!("runtime params {rust_params:?} disagree with the declaration"));
-    }
-    if !ret_agrees(fret, &rust_ret) {
-        return Err(format!("runtime return `{rust_ret}` disagrees with the declaration"));
-    }
-    // An element-typed param or return needs the list that decides it, and
-    // no equality or ordering capability on its generic (the declared
-    // `capability_bounds`, read off the runtime's bounds): a native
-    // `Vec<i64>` may carry Float bits, which `i64` comparison would misjudge.
-    let elem_typed = matches!(fret, FloorRet::Elem(_)) || fparams.iter().any(|p| matches!(p, FloorParam::Elem(_)));
-    if elem_typed {
-        if !fparams.iter().any(|p| matches!(p, FloorParam::List(ListElem::Any))) {
-            return Err("an element-typed param or return with no `List[A]` param to decide it".into());
-        }
-        if almide_lang::capability_bounds::of(module, func).next().is_some() && !str_elems {
-            return Err("an element-typed generic that needs equality or ordering".into());
-        }
-    }
-    let fparams: Vec<FloorParam> = fparams
-        .into_iter()
-        .zip(&rust_params)
-        .map(|(p, r)| match p {
-            FloorParam::Elem(_) => FloorParam::Elem(squash(r).starts_with('&')),
-            FloorParam::Value(_) => FloorParam::Value(squash(r).starts_with('&')),
-            FloorParam::Matrix(_) => FloorParam::Matrix(squash(r).starts_with('&')),
-            FloorParam::Set(_) => FloorParam::Set(squash(r).starts_with('&')),
-            FloorParam::SetElem(_) => FloorParam::SetElem(squash(r).starts_with('&')),
-            FloorParam::Map(_) => FloorParam::Map(squash(r).starts_with('&')),
-            FloorParam::MapKey(_) => FloorParam::MapKey(squash(r).starts_with('&')),
-            FloorParam::MapVal(_) => FloorParam::MapVal(squash(r).starts_with('&')),
-            other => other,
-        })
-        .collect();
-    let items = closure(&symbol, rt)?;
-    let twin = almide_lang::reuse::of_intrinsic(&symbol).and_then(|r| {
-        let t = r.owned_twin?;
-        if !matches!(fparams.get(r.param), Some(FloorParam::List(_) | FloorParam::Set(_) | FloorParam::Map(_) | FloorParam::Bytes)) {
-            return None;
-        }
-        let (tp, tr) = rust_signature(signature_text(rt, t)?)?;
-        // The twin differs only in taking the source by value.
-        let same = tp.len() == rust_params.len()
-            && tp.iter().zip(&rust_params).enumerate().all(|(k, (a, b))| k == r.param || squash(a) == squash(b))
-            && squash(&tr) == squash(&rust_ret);
-        same.then(|| Some((r.param, t.to_string(), closure(t, rt).ok()?)))?
-    });
-    let str_only = elem_typed && almide_lang::capability_bounds::of(module, func).next().is_some();
-    Ok(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only })
-}
 
 fn simple(t: &TypeExpr) -> Option<&str> {
     match t {
@@ -793,3 +676,4 @@ include!("native_floor_tail.rs");
 include!("native_floor_ret.rs");
 include!("native_floor_kinds.rs");
 include!("native_floor_parallel.rs");
+include!("native_floor_derive.rs");

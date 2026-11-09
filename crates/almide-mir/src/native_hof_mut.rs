@@ -90,7 +90,7 @@ mod mutable_route_tests {
         for view in [NTy::VecRef, NTy::VecStrRef, NTy::RecRef(0), NTy::StrRef] {
             assert_eq!(mutable_runtime_arg("xs", view), None);
         }
-        let pop = derive_explained("list_pop").unwrap();
+        let pop = derive_explained("list_pop").expect("list_pop has a derived runtime signature");
         assert_eq!(pop.mutable, [true]);
         assert_eq!(pop.symbol, "almide_rt_list_pop");
     }

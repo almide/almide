@@ -4243,6 +4243,7 @@ fn __err_scan(e: String, n: Int, i: Int) -> Int = if i + 5 > n then 0 - 1
 else if string.slice(e, i, i + 5) == ", at " then i
 else __err_scan(e, n, i + 1)
 
+@specializes("value.__err_at")
 fn __err_at(e: String, seg: String) -> String = {
   let n = string.len(e)
   let i = __err_scan(e, n, 0)
@@ -4255,6 +4256,7 @@ fn __err_at(e: String, seg: String) -> String = {
 }
 
 
+@specializes("value.__err_at_index")
 fn __err_at_index(e: String, i: Int) -> String = __err_at(e, "[" + int.to_string(i) + "]")
 
 fn __dl_string(items: List[Value], n: Int, i: Int, acc: List[String]) -> Result[List[String], String] =
@@ -4264,6 +4266,7 @@ fn __dl_string(items: List[Value], n: Int, i: Int, acc: List[String]) -> Result[
     err(e) => err(__err_at_index(e, i)),
   }
 
+@specializes("value.__decode_list_string")
 fn __decode_list_string(v: Value) -> Result[List[String], String] = match value.as_array(v) {
   ok(items) => __dl_string(items, list.len(items), 0, []),
   err(e) => err(e),
@@ -5848,6 +5851,7 @@ fn to_string(x: Float) -> String = _
 
 /// Shortest round-trip digits, without the integer .0 suffix.
 @intrinsic("almide_rt_float_to_string_compound")
+@scalar_text
 fn __to_string_compound(x: Float) -> String = _
 
 /// Truncates toward 0, saturating; NaN gives 0.
@@ -41547,6 +41551,20 @@ fn __field(v: Value, key: String) -> Result[Value, String] = _
 /// Object keys in order; [] for non-objects.
 @intrinsic("almide_rt_value_keys")
 fn __keys(v: Value) -> List[String] = _
+
+
+
+/// The decode error e with the path segment seg spliced in.
+@intrinsic("almide_rt_value_err_at")
+fn __err_at(e: String, seg: String) -> String = _
+
+/// The decode error e with the list index segment `[i]` spliced in.
+@intrinsic("almide_rt_value_err_at_index")
+fn __err_at_index(e: String, i: Int) -> String = _
+
+/// The strings of the Array v, read in place; err if v or an element is another kind.
+@intrinsic("almide_rt___decode_list_string")
+fn __decode_list_string(v: Value) -> Result[List[String], String] = _
 
 /// Object pairs in order; err if v is another kind.
 @intrinsic("almide_rt_value_as_object")

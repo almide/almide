@@ -649,6 +649,12 @@ order: `almide_rt_fs_read_text`, `almide_rt_fs_read_bytes`, `almide_rt_fs_read_l
 `native-calls` witness, and `NativeCalls.hosts_ok` (the extracted checker,
 the Rocq kernel and almide-verify) refuses a host call outside the set; a
 floor body outside the set that would carry fs code is refused by the render.
+The runtime's generated Send-free twin is another implementation of its named
+operation, with the same host witness id and capabilities. The native adapter
+uses this sequential implementation when it cannot establish an effect-free
+callback, preserving the accepted closure-value route's observable order.
+The twin's signature and dependency closure are checked separately; its host
+semantics remain trusted like those of the original runtime implementation.
 `tests/native_fs_host_calls_test.rs` holds this list, `host_ops::NATIVE_FS_HOST_CALLS`,
 `NativeCalls.native_fs_host_calls` and almide-verify's copy to one list.
 TRUSTED: the runtime fs code itself (tested on both legs by the cross-target

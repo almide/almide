@@ -86,11 +86,50 @@ pub(crate) fn last_use(
     t: NTy,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
-    if drill_no_moves() || aliases::read_after(func, at, src) || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) || !crate::render_native_rec::has_default(t) {
+    if drill_no_moves() || aliases::read_after(func, at, src) || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) | NTy::Res | NTy::ResStr) {
         return false;
     }
-    // Or no path after the copy reads it again (`mir_liveness`).
-    dying_after(func, at, src, borrow_arms) || crate::mir_liveness::dead_after(func, at, src, borrow_arms)
+    // A Result param is the callee's own (there is no borrowed Result kind:
+    // the caller hands a copy or its dying value over). Never rebound and not
+    // read again on any later op, outside every loop, it moves as itself.
+    if matches!(t, NTy::Res | NTy::ResStr) && func.params.iter().any(|p| p.value == src) {
+        // The param and what borrows into it (its handle, an address off it,
+        // a payload read through one): none may be read after the move.
+        let mut derived: std::collections::BTreeSet<ValueId> = [src].into_iter().collect();
+        let mut reads = Vec::new();
+        for op in &func.ops {
+            let d = match op {
+                Op::Prim { kind: crate::PrimKind::Handle | crate::PrimKind::LoadHandle, dst: Some(d), .. } => *d,
+                Op::IntBinOp { dst, .. } => *dst,
+                _ => continue,
+            };
+            reads.clear();
+            crate::mir_ops::op_reads(op, &mut reads);
+            if reads.iter().any(|r| derived.contains(r)) {
+                derived.insert(d);
+            }
+        }
+        let dead = loop_of(func)[at].is_none()
+            && !func.ops.iter().any(|op| matches!(op, Op::SetLocal { local, .. } if *local == src))
+            && func.ret != Some(src)
+            && func.ops[at + 1..].iter().all(|op| {
+                if bookkeeping(op) {
+                    return true;
+                }
+                reads.clear();
+                crate::mir_ops::op_reads(op, &mut reads);
+                !reads.iter().any(|r| derived.contains(r))
+            });
+        if dead {
+            CARRIER_PARAMS.with(|m| m.borrow_mut().insert(src));
+        }
+        return dead;
+    }
+    // A kind with no `Default` (a Result) moves only where its binding moves
+    // as itself ([`take_expr`]): nothing is left behind to fill. And only
+    // where no path after the copy reads it again (`mir_liveness`).
+    (crate::render_native_rec::has_default(t) || moves_as_itself(src))
+        && (dying_after(func, at, src, borrow_arms) || crate::mir_liveness::dead_after(func, at, src, borrow_arms))
 }
 
 /// Whether the value `src` is never read again after `ops[at]` (whatever its
@@ -168,10 +207,74 @@ pub(crate) fn dying_after(
     defs.iter().any(|&d| d < at && loops[d] == loops[at]) && defs.iter().all(|&d| d < at && within(d))
 }
 
+/// [`dying_after`] for a record a field is moved out of at `at`: a later read
+/// of one of its scalar slots (`ListGetScalar`, or the address `prim.handle`
+/// takes of it and nothing reads) does not see the field, which the move
+/// leaves empty, so it does not keep the record alive.
+pub(crate) fn carrier_dies_after(
+    func: &MirFunction,
+    at: usize,
+    src: ValueId,
+    borrow_arms: &std::collections::BTreeSet<ValueId>,
+) -> bool {
+    let unread = |d: ValueId| {
+        !func.ops.iter().any(|op| {
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(op, &mut reads);
+            reads.contains(&d)
+        })
+    };
+    let scalar_reads: std::collections::BTreeSet<usize> = func.ops[at + 1..]
+        .iter()
+        .enumerate()
+        .filter(|(_, op)| match op {
+            Op::ListGetScalar { list, .. } => *list == src,
+            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } => args.as_slice() == [src] && unread(*d),
+            _ => false,
+        })
+        .map(|(j, _)| at + 1 + j)
+        .collect();
+    SKIP_READS.with(|m| *m.borrow_mut() = scalar_reads);
+    CARRIER_SCAN.with(|m| m.set(true));
+    let dies = dying_after(func, at, src, borrow_arms);
+    CARRIER_SCAN.with(|m| m.set(false));
+    SKIP_READS.with(|m| m.borrow_mut().clear());
+    dies
+}
+
+thread_local! {
+    /// Set while [`carrier_dies_after`] asks [`dying_after`]: a field moves
+    /// out, not the whole block, so a later load of another slot through an
+    /// address into the block does not keep it alive (its scalar reads are
+    /// [`SKIP_READS`]).
+    static CARRIER_SCAN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The address values rooted at `src`'s block (its handle and the offsets
+/// off it). The render spells a load through one as a read of `src` itself
+/// (`src.f1`), so after `src` moves such a load reads the moved-from binding.
+fn addresses_into(func: &MirFunction, src: ValueId) -> std::collections::BTreeSet<ValueId> {
+    if CARRIER_SCAN.with(|m| m.get()) {
+        return std::collections::BTreeSet::new();
+    }
+    crate::render_native_borrow_read::roots(func).into_iter().filter(|(_, r)| *r == src).map(|(a, _)| a).collect()
+}
+
+thread_local! {
+    /// The op indices [`carrier_dies_after`] reads past while it asks
+    /// [`dying_after`].
+    static SKIP_READS: std::cell::RefCell<std::collections::BTreeSet<usize>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
 /// The forward scan of [`dying_after`] over the ops after the copy at
 /// `ops[at]`: `Some(true)` = released first, `Some(false)` = read or rebound
 /// first, `None` = neither before the end of the function.
 fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: bool) -> Option<bool> {
+    let skip = SKIP_READS.with(|m| m.borrow().clone());
+    // An address into the block computed before the copy and read after it
+    // reads the block: the copy is not its last use.
+    let addrs = addresses_into(func, src);
     // `src` is released, unconditionally and before anything reads it again,
     // in the copy's own block: the value dies there, whatever later rebinds
     // the slot (a loop slot's write-back `Drop v; SetLocal v = ..`). A copy
@@ -179,7 +282,10 @@ fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: boo
     let mut depth = 0i32;
     let mut straight = true;
     let mut reads = Vec::new();
-    for op in &func.ops[at + 1..] {
+    for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
+        if skip.contains(&j) {
+            continue;
+        }
         if straight {
             match op {
                 Op::IfThen { .. } | Op::LoopStart => depth += 1,
@@ -199,7 +305,7 @@ fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: boo
         }
         reads.clear();
         crate::mir_ops::op_reads(op, &mut reads);
-        if reads.contains(&src) {
+        if reads.contains(&src) || reads.iter().any(|r| addrs.contains(r)) {
             return Some(false);
         }
         if matches!(op, Op::SetLocal { local, .. } if *local == src) {
@@ -296,8 +402,10 @@ pub(crate) fn set_static_strs(func: &MirFunction) {
     STATIC_STRS.with(|m| *m.borrow_mut() = lits);
 }
 
+/// A slot that starts at a literal and is rebound holds owned strings
+/// later: an edit of it copies only the literal, once.
 pub(crate) fn is_static_str(v: ValueId) -> bool {
-    STATIC_STRS.with(|m| m.borrow().contains_key(&v))
+    !REBOUND.with(|m| m.borrow().contains(&v)) && STATIC_STRS.with(|m| m.borrow().contains_key(&v))
 }
 
 /// A string literal read as a `&str` operand (#4006, no-perf-loss): the
@@ -326,12 +434,23 @@ thread_local! {
 /// block per evaluation (a closure value built per recursive call read 65x
 /// the standard codegen's instructions). Each of those uses borrows it as
 /// `&[i64]`, which an array coerces to.
+///
+/// A constant int list (`Alloc { init: IntList }`: a folded literal or a
+/// top-level list `let` read inside a function) under the same rule is a stack
+/// array too: a lookup table indexed in a loop allocated, filled and freed its
+/// `vec![…]` on every iteration, where the standard codegen reads its lazy
+/// static. At most [`STACK_TABLE_MAX`] elements, so a frame stays small.
 pub(crate) fn set_stack_lits(func: &MirFunction, user_fns: &std::collections::BTreeSet<&str>) {
     let mut lits: std::collections::BTreeSet<ValueId> = func
         .ops
         .iter()
         .filter_map(|op| match op {
             Op::ListLit { dst, .. } => Some(*dst),
+            Op::Alloc { dst, init: crate::Init::IntList(vs), .. }
+                if !vs.is_empty() && vs.len() <= STACK_TABLE_MAX =>
+            {
+                Some(*dst)
+            }
             _ => None,
         })
         .collect();
@@ -349,7 +468,7 @@ pub(crate) fn set_stack_lits(func: &MirFunction, user_fns: &std::collections::BT
             continue;
         }
         let allowed: Vec<ValueId> = match op {
-            Op::ListLit { dst, .. } => vec![*dst],
+            Op::ListLit { dst, .. } | Op::Alloc { dst, init: crate::Init::IntList(_), .. } => vec![*dst],
             Op::CallFn { name, args, .. } if user_fns.contains(name.as_str()) => args
                 .iter()
                 .filter_map(|a| match a {
@@ -405,6 +524,9 @@ pub(crate) fn is_stack_single(v: ValueId) -> bool {
     STACK_SINGLES.with(|m| m.borrow().contains(&v))
 }
 
+/// The largest constant int list [`set_stack_lits`] puts on the stack.
+pub(crate) const STACK_TABLE_MAX: usize = 256;
+
 pub(crate) fn is_stack_lit(v: ValueId) -> bool {
     STACK_LITS.with(|m| m.borrow().contains(&v))
 }
@@ -457,7 +579,67 @@ pub(crate) fn set_moving_args(
     // naming it again (`mir_liveness`).
     reinit.extend(crate::mir_liveness::reinit_reads(func, at));
     REINIT.with(|m| *m.borrow_mut() = reinit);
+    // A borrowed payload or field read handed to the call whose carrier dies
+    // here, as do the carrier's other borrowed reads of it: the call can take
+    // the payload itself, moved out of the carrier (#4006, no-perf-loss).
+    let taken: std::collections::BTreeMap<ValueId, String> = match &func.ops[at] {
+        Op::CallFn { args, .. } if !drill_no_moves() => args
+            .iter()
+            .filter_map(|a| match a {
+                crate::CallArg::Handle(v) => Some(*v),
+                _ => None,
+            })
+            .filter(|v| !moving.contains(v) && args.iter().filter(|a| matches!(a, crate::CallArg::Handle(x) if x == v)).count() == 1)
+            .filter_map(|v| {
+                if !matches!(tys.get(&v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) {
+                    return None;
+                }
+                let (base, take, reads) = match crate::render_native_addr::payload_take_of(v) {
+                    Some((base, take)) => {
+                        let reads = crate::render_native_addr::reads_of_take(&take);
+                        (base, take, reads)
+                    }
+                    None => {
+                        let (base, place) = crate::render_native_addr::field_of(v)?;
+                        let reads = crate::render_native_addr::reads_of_place(&place);
+                        (base, format!("std::mem::take(&mut {place})"), reads)
+                    }
+                };
+                let ok = payload_carrier(tys.get(&base).copied())
+                    && carrier_dies_after(func, at, base, borrow_arms)
+                    && reads.iter().all(|r| dying_after(func, at, *r, borrow_arms));
+                ok.then_some((v, take))
+            })
+            .collect(),
+        _ => Default::default(),
+    };
+    TAKEN_ARGS.with(|m| *m.borrow_mut() = taken);
     MOVING.with(|m| *m.borrow_mut() = moving);
+}
+
+/// The Result param `base` (the callee's own: there is no borrowed Result
+/// kind) is read on no path after `ops[at]`, nor anything borrowed from it
+/// (a rebind or a return reads it first).
+pub(crate) fn result_param_dies(func: &MirFunction, at: usize, base: ValueId) -> bool {
+    !drill_no_moves() && func.params.iter().any(|p| p.value == base) && !crate::mir_liveness::live_after(func, at, base)
+}
+
+/// An owned carrier a borrowed payload read can be moved out of when it
+/// dies: a record or enum block, or the String-Ok Result whose one slot
+/// holds either side's string.
+pub(crate) fn payload_carrier(t: Option<NTy>) -> bool {
+    matches!(t, Some(NTy::Rec(_) | NTy::ResStr))
+}
+
+thread_local! {
+    static TAKEN_ARGS: std::cell::RefCell<std::collections::BTreeMap<ValueId, String>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+/// The move-out expression of a borrowed arg of the call being rendered whose
+/// carrier dies at the call ([`set_moving_args`]), if any.
+pub(crate) fn taken_arg(v: ValueId) -> Option<String> {
+    TAKEN_ARGS.with(|m| m.borrow().get(&v).cloned())
 }
 
 thread_local! {
@@ -484,6 +666,7 @@ pub(crate) fn set_rebound(func: &MirFunction) {
         _ => None,
     }));
     REBOUND.with(|m| *m.borrow_mut() = set);
+    CARRIER_PARAMS.with(|m| m.borrow_mut().clear());
 }
 
 /// The move of a dying value's binding `code` (#4006, no-perf-loss): a value
@@ -491,11 +674,26 @@ pub(crate) fn set_rebound(func: &MirFunction) {
 /// binding is never read again, and Rust's drop flag covers its scope end —
 /// where `std::mem::take` would build a default in its place and drop it
 /// later. Anything else (a rebound slot, a field place) is taken.
+/// Whether `v`'s binding moves as itself in [`take_expr`] (bound once, or
+/// re-initialized before any read).
+fn moves_as_itself(v: ValueId) -> bool {
+    !REBOUND.with(|m| m.borrow().contains(&v))
+        || REINIT.with(|m| m.borrow().contains(&v))
+        || CARRIER_PARAMS.with(|m| m.borrow().contains(&v))
+}
+
+thread_local! {
+    /// The by-value Result params of the fn being rendered that a last use
+    /// moves as themselves (see [`last_use`]).
+    static CARRIER_PARAMS: std::cell::RefCell<std::collections::BTreeSet<ValueId>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
 pub(crate) fn take_expr(code: &str) -> String {
     let once = code
         .strip_prefix('v')
         .and_then(|n| n.parse::<u32>().ok())
-        .is_some_and(|n| !REBOUND.with(|m| m.borrow().contains(&ValueId(n))) || REINIT.with(|m| m.borrow().contains(&ValueId(n))));
+        .is_some_and(|n| moves_as_itself(ValueId(n)));
     if once && !drill_no_moves() {
         code.to_string()
     } else {

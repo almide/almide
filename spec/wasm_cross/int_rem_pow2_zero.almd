@@ -1,0 +1,98 @@
+// @contract: C-003
+// `x % 2^k == 0` is a low-bits test on wasm (#4610), and a literal factor of
+// the dividend divides out of it: `(c * x) % 2 == 0` is `x & 1 == 0` for an
+// odd `c`. Every verdict must equal the truncating remainder's: on both
+// signs, at i64::MIN and i64::MAX, through a wrapping product, for odd, even
+// and zero factors and negative divisors. A comparison against a NON-zero
+// remainder, or a divisor that is not a power of two, keeps the remainder:
+// those columns are where the rule must not fire. The dividend is still
+// evaluated exactly once (`noisy` prints when it runs).
+fn b(v: Bool) -> String = if v then "1" else "0"
+
+fn bits(vs: List[Bool]) -> String = vs |> list.map((v) => b(v)) |> list.join("")
+
+fn zero_tests(x: Int) -> String = bits([
+  x % 2 == 0,
+  x % 2 != 0,
+  0 == x % 4,
+  0 != x % 8,
+  x % -2 == 0,
+  x % -8 != 0,
+  x % 4611686018427387904 == 0,
+  (x * 3) % 2 == 0,
+  (3 * x) % 2 != 0,
+  (x * -5) % 8 == 0,
+  (x * 6) % 4 == 0,
+  (2 * x) % 2 == 0,
+  (x * 0) % 8 == 0,
+  (x * 12) % 8 == 0,
+  (x * 3 * 4) % 16 == 0,
+  (9223372036854775807 * x) % 4 == 0
+])
+
+fn kept_tests(x: Int) -> String = bits([
+  x % 2 == 1,
+  x % 2 == -1,
+  x % 4 == 3,
+  x % 4 == -1,
+  x % 6 == 0,
+  x % 3 != 0,
+  (x * 3) % 2 == 1,
+  x % 8 == x
+])
+
+fn noisy(x: Int) -> Int = {
+  println("eval ${int.to_string(x)}")
+  x * 7
+}
+
+fn main() -> Unit = {
+  let top = 9223372036854775807
+  let min = 0 - top - 1
+  let xs = [
+    0,
+    1,
+    -1,
+    2,
+    -2,
+    3,
+    -3,
+    4,
+    -4,
+    5,
+    -5,
+    6,
+    -6,
+    7,
+    -7,
+    8,
+    -8,
+    12,
+    -12,
+    16,
+    -16,
+    24,
+    -24,
+    min,
+    min + 1,
+    min + 2,
+    top,
+    top - 1,
+    4611686018427387904,
+    0 - 4611686018427387904,
+    6148914691236517206
+  ]
+  for x in xs {
+    println("${int.to_string(x)} ${zero_tests(x)} ${kept_tests(x)} ${int.to_string(x % 4)} ${int.to_string((x * 3) % 2)}")
+  }
+  println(b(noisy(6) % 2 == 0))
+  println(b((noisy(5) * 3) % 4 != 0))
+  let s = list.range(-10, 11) |> list.map((x) => x * 3) |> list.filter((x) => x % 2 == 0) |> list.sum
+  let t = list.range(min, min + 20) |> list.map((x) => x * 3) |> list.filter((x) => x % 4 != 0) |> list.fold(
+    0,
+    (a, x) => a + x,
+  )
+  let u = list.range(-20, 20) |> list.filter((x) => (x * 5) % 2 == 1) |> list.sum
+  let v = list.range(-20, 20) |> list.map((x) => x * 6) |> list.filter((x) => x % 8 == 0) |> list.sum
+  println("${int.to_string(s)} ${int.to_string(t)} ${int.to_string(u)} ${int.to_string(v)}")
+}

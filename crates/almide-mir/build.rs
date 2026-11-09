@@ -33,20 +33,20 @@ fn main() {
                     .then(|| (i, start - base, start - base + item.text.len()))
             });
         if let Some((i, start, end)) = slice {
-            writeln!(out, "let text = &almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES[{i}].1[{start}..{end}];").unwrap();
+            writeln!(out, "let text = &almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES[{i}].1[{start}..{end}];").expect("writing to a String cannot fail");
         } else {
-            writeln!(out, "let text: &'static str = {:?};", item.text).unwrap();
+            writeln!(out, "let text: &'static str = {:?};", item.text).expect("writing to a String cannot fail");
         }
         if is_fs_host_text_in(&index, item.text) {
             out.push_str("fs.insert(text.as_ptr() as usize);\n");
         }
-        writeln!(out, "items.insert({name:?}, RtItem {{ text }});").unwrap();
+        writeln!(out, "items.insert({name:?}, RtItem {{ text }});").expect("writing to a String cannot fail");
     }
     out.push_str("RuntimeIndex { items, fs_built: fs,\n");
     for (name, set) in [("defined", index.defined), ("trait_methods", index.trait_methods), ("fns", index.fns)] {
-        writeln!(out, "{name}: {:?}.into_iter().collect(),", set.into_iter().collect::<Vec<_>>()).unwrap();
+        writeln!(out, "{name}: {:?}.into_iter().collect(),", set.into_iter().collect::<Vec<_>>()).expect("writing to a String cannot fail");
     }
     out.push_str("}\n}\n");
-    let path = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("native_floor_index.rs");
-    std::fs::write(path, out).unwrap();
+    let path = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR for build scripts")).join("native_floor_index.rs");
+    std::fs::write(path, out).expect("OUT_DIR is writable");
 }

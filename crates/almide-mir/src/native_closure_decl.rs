@@ -25,6 +25,8 @@ type FnSig = (Vec<Ty>, Ty);
 
 #[derive(Default)]
 struct Decls {
+    /// Nearest source node for diagnostics emitted after MIR lowering.
+    spans: BTreeMap<String, almide_ir::Span>,
     /// Each declared function's function-typed params, by position.
     fn_params: BTreeMap<String, BTreeMap<usize, FnSig>>,
     /// The linked bodies: the callees the check applies to.
@@ -39,7 +41,9 @@ thread_local! {
 /// functions are linked bodies.
 pub(crate) fn set<'a>(decls: impl Iterator<Item = &'a almide_ir::IrFunction>, linked: BTreeSet<String>) {
     let mut fn_params: BTreeMap<String, BTreeMap<usize, FnSig>> = BTreeMap::new();
+    let mut spans = BTreeMap::new();
     for f in decls {
+        if let Some(span) = f.body.span { spans.entry(f.name.to_string()).or_insert(span); }
         let by_pos: BTreeMap<usize, FnSig> = f
             .params
             .iter()
@@ -53,7 +57,11 @@ pub(crate) fn set<'a>(decls: impl Iterator<Item = &'a almide_ir::IrFunction>, li
             fn_params.entry(f.name.as_str().to_string()).or_insert(by_pos);
         }
     }
-    DECLS.with(|d| *d.borrow_mut() = Decls { fn_params, linked });
+    DECLS.with(|d| *d.borrow_mut() = Decls { spans, fn_params, linked });
+}
+
+pub(crate) fn source_span(name: &str) -> Option<almide_ir::Span> {
+    DECLS.with(|d| d.borrow().spans.get(name).copied())
 }
 
 /// The call just rendered into `out` (and `shims`) from the lengths `marks`:
