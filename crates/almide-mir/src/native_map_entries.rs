@@ -194,7 +194,7 @@ fn entries(func: &MirFunction) -> Entries {
         for (p, a) in floor.params.iter().zip(args) {
             let (FloorParam::MapPairs, CallArg::Handle(arg)) = (p, a) else { continue };
             let list = root.get(arg).unwrap_or(arg);
-            let Some((at, n)) = alloc(list).filter(|(_, n)| *n > 0 && slots_once(*list, *n)) else { continue };
+            let Some((at, _)) = alloc(list).filter(|(_, n)| *n > 0 && slots_once(*list, *n)) else { continue };
             let held: Vec<(usize, ValueId)> = stores[list].iter().map(|(s, _, v)| (*s, *v)).collect();
             // A pair: two slots, read only by its one store into the list.
             let pair = |(s, pb): &(usize, ValueId)| {

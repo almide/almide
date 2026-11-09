@@ -102,6 +102,8 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 mod bytes;
 mod bytes_append;
 mod kmp;
+/// #4610: a remainder by a power of two compared against zero.
+mod rem_test;
 /// #4278 B1: a runtime helper's declared RC signature and its body's log.
 pub(crate) mod helper_sig;
 mod runtime_push;
@@ -188,6 +190,7 @@ mod list_order;
 mod list_sort;
 mod string_scan;
 mod len_hoist;
+mod int_range;
 mod cow_hoist;
 mod stmts;
 mod stmts_index;

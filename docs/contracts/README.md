@@ -30,15 +30,15 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-<!-- counts:generated:start (as of 2026-11-05) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-452 contracts
+<!-- counts:generated:start (as of 2026-11-08) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+454 contracts
 <!-- counts:generated:end -->
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
 | C-001 | Integer division/modulo by zero is total — it aborts, never traps | 0.24.0 | active | fixture | 5 |
 | C-002 | Signed MIN / -1 overflow aborts, at the TRUE per-width MIN | 0.24.0 | active | fixture | 3 |
-| C-003 | Non-aborting integer div/mod stay byte-identical | 0.24.0 | active | fixture | 1 |
+| C-003 | Non-aborting integer div/mod stay byte-identical | 0.24.0 | active | fixture | 2 |
 | C-004 | fan.map / fan.settle are deterministic by list order | 0.24.0 | active | fixture | 11 |
 | C-005 | fan error propagation surfaces as the unified main-error abort | 0.24.0 | active | fixture | 5 |
 | C-006 | [fan.timeout does not exist — wall-clock deadlines live at the host boundary](C-006-fan-timeout-removed.md) | 0.29.0 | active | fixture | 0 |
@@ -109,7 +109,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-071 | Single-part interpolation RC balance | 0.27.6 | active | fixture | 1 |
 | C-072 | Inferred named-record repr parity | 0.27.6 | active | fixture | 2 |
 | C-073 | Tuple pattern testing a variant constructor | 0.27.6 | active | fixture | 1 |
-| C-074 | Iterative split/replace on large inputs | 0.27.6 | active | fixture | 1 |
+| C-074 | Iterative split/replace on large inputs | 0.27.6 | active | fixture | 2 |
 | C-075 | lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough | 0.27.6 | active | fixture | 3 |
 | C-076 | Producer-side in-module variant construction is target-stable | 0.27.6 | active | fixture | 3 |
 | C-077 | Cross-module heap-global init order is dependency-respecting | 0.27.6 | active | fixture | 1 |
@@ -205,7 +205,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-167 | float.clamp returns its input unchanged when in range, sign bit included | 0.36.0 | active | fixture | 1 |
 | C-168 | list.flatten borrows its argument, so it composes with another borrow of the same binding | 0.36.0 | active | fixture | 2 |
 | C-169 | list.repeat over the size ceiling aborts in the T6 form on both targets | 0.36.0 | active | fixture | 1 |
-| C-170 | Integer arithmetic wraps in every position, including a module-level let | 0.36.0 | active | fixture | 3 |
+| C-170 | Integer arithmetic wraps in every position, including a module-level let | 0.36.0 | active | fixture | 6 |
 | C-171 | Byte-offset bound checks do not overflow at the i64 boundary | 0.36.0 | active | fixture | 1 |
 | C-172 | unwrap_or over any heap payload yields the same value on both targets | 0.36.0 | active | fixture | 2 |
 | C-173 | An integer literal outside what its context can represent is a checker error on both targets, never a silent value | 0.36.0 | active | fixture | 2 |
