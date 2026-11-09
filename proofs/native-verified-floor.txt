@@ -333,6 +333,7 @@ spec/wasm_cross/json_many_keys.almd
 spec/wasm_cross/json_number_unicode.almd
 spec/wasm_cross/json_parse_astral_before_u_escape.almd
 spec/wasm_cross/json_parse_depth_bound.almd
+spec/wasm_cross/json_parse_fast_paths.almd
 spec/wasm_cross/json_parse_lenient_edges.almd
 spec/wasm_cross/json_parse_strict_strings.almd
 spec/wasm_cross/json_parse_strict_structure.almd
