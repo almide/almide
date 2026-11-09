@@ -104,10 +104,10 @@ mod declared_callback_tests {
     #[test]
     fn listener_keeps_network_and_callback_effects_in_the_capability_graph() {
         let main = MirFunction { name: "main".into(), ops: vec![
-            Op::FuncRef { dst: ValueId(0), name: "handle".into() },
+            Op::FuncRef { dst: ValueId(0), name: "on_request".into() },
             Op::CallFn { name: "http.serve".into(), dst: None, args: vec![], result: None },
         ], ..Default::default() };
-        let handler = MirFunction { name: "handle".into(), ops: vec![
+        let handler = MirFunction { name: "on_request".into(), ops: vec![
             Op::CallFn { name: "fs.write_text".into(), dst: None, args: vec![], result: None },
         ], ..Default::default() };
         reset(Default::default(), Default::default());
