@@ -6782,8 +6782,11 @@ fn __hpd_lsh(hb: Int, k: Int) -> Unit = if k > 0 then {
   __hpd_strip(hb)
 
   let m = __hpd_n(hb)
-  if m > 800 and __hpd_nz_after(hb, 800, m) then __hpd_str8(hb, 1) else ()
-  __hpd_sn(hb, __hpd_trim(hb, (if m > 800 then 800 else m)))
+  let c = if m > 800 then {
+    if __hpd_nz_after(hb, 800, m) then __hpd_str8(hb, 1) else ()
+    800
+  } else m
+  __hpd_sn(hb, __hpd_trim(hb, c))
   __hpd_lsh(hb, k - s)
 } else ()
 
