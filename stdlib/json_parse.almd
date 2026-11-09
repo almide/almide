@@ -445,7 +445,7 @@ fn __jp_tape(sc: Bytes, w: Int, x: Int) -> Unit = {
   else {
     let at = prim.load64(prim.handle(sc) + 20)
     let lim = prim.load64(prim.handle(sc) + 44)
-    if lim == 0 then prim.store64(prim.handle(sc) + 12, prim.load64(prim.handle(sc) + 12) + x)
+    if lim < 64 then prim.store64(prim.handle(sc) + 12, prim.load64(prim.handle(sc) + 12) + x)
     else if at < 64 then __jp_disagree()
     else if lim > sn then __jp_disagree()
     else if at > lim - 8 then __jp_disagree()
@@ -568,19 +568,24 @@ fn __jp_int_fast(t: String, sc: Bytes, q: Int, add: Int) -> Int = {
 // it, or the refusal its kind names.
 fn __jp_lit(t: String, sc: Bytes, q: Int, b: Int) -> Int = {
   let n = prim.load32(prim.handle(t) + 4)
-  let w = if b == 102 then 5 else 4
   let kind = if b == 110 then 16 else 15
   if q < 0 then __jp_code(q, kind)
-  else if q > n - w then __jp_code(q, kind)
-  else {
-    let ok4 = if b == 116 then prim.load8(prim.handle(t) + 12 + q) == 116 and prim.load8(prim.handle(t) + 13 + q) == 114 and prim.load8(prim.handle(t) + 14 + q) == 117 and prim.load8(prim.handle(t) + 15 + q) == 101
-    else if b == 110 then prim.load8(prim.handle(t) + 12 + q) == 110 and prim.load8(prim.handle(t) + 13 + q) == 117 and prim.load8(prim.handle(t) + 14 + q) == 108 and prim.load8(prim.handle(t) + 15 + q) == 108
-    else prim.load8(prim.handle(t) + 12 + q) == 102 and prim.load8(prim.handle(t) + 13 + q) == 97 and prim.load8(prim.handle(t) + 14 + q) == 108 and prim.load8(prim.handle(t) + 15 + q) == 115 and prim.load8(prim.handle(t) + 16 + q) == 101
-    if ok4 then {
-      __jp_tape(sc, if b == 116 then 6 else if b == 102 then 7 else 8, 28)
-      q + w
+  else if q > n - 4 then __jp_code(q, kind)
+  else if b == 102 then {
+    if q > n - 5 then __jp_code(q, kind)
+    else if prim.load8(prim.handle(t) + 12 + q) == 102 and prim.load8(prim.handle(t) + 13 + q) == 97 and prim.load8(prim.handle(t) + 14 + q) == 108 and prim.load8(prim.handle(t) + 15 + q) == 115 and prim.load8(prim.handle(t) + 16 + q) == 101 then {
+      __jp_tape(sc, 7, 28)
+      q + 5
     } else __jp_code(q, kind)
-  }
+  } else if b == 116 then {
+    if prim.load8(prim.handle(t) + 12 + q) == 116 and prim.load8(prim.handle(t) + 13 + q) == 114 and prim.load8(prim.handle(t) + 14 + q) == 117 and prim.load8(prim.handle(t) + 15 + q) == 101 then {
+      __jp_tape(sc, 6, 28)
+      q + 4
+    } else __jp_code(q, kind)
+  } else if prim.load8(prim.handle(t) + 12 + q) == 110 and prim.load8(prim.handle(t) + 13 + q) == 117 and prim.load8(prim.handle(t) + 14 + q) == 108 and prim.load8(prim.handle(t) + 15 + q) == 108 then {
+    __jp_tape(sc, 8, 28)
+    q + 4
+  } else __jp_code(q, kind)
 }
 
 // After a member that ended at `np`: the next member's offset (whitespace
