@@ -216,7 +216,25 @@ fn __jw_esc(b: Int) -> Int = if b == 34 or b == 92 or b == 10 or b == 13 or b ==
 else if b < 32 then 6
 else 1
 
-fn __jw_strsize(p: Int, e: Int, acc: Int) -> Int = if p >= e then acc
+// Does the 8-byte word `x` hold a byte below 0x20, a '"' or a '\'? The
+// SWAR has-less / has-zero tests (exact as booleans): eight string bytes per
+// step on the clean runs, which are nearly all of a JSON text.
+fn __jw_special8(x: Int) -> Bool = {
+  let ones = 72340172838076673
+  let q = prim.bxor(x, 2459565876494606882)
+  let b = prim.bxor(x, 6655295901103053916)
+  let ctl = prim.band(x - 2314885530818453536, prim.bxor(x, 0 - 1))
+  let quo = prim.band(q - ones, prim.bxor(q, 0 - 1))
+  let bsl = prim.band(b - ones, prim.bxor(b, 0 - 1))
+  prim.band(prim.bor(prim.bor(ctl, quo), bsl), 0 - 9187201950435737472) != 0
+}
+
+fn __jw_strsize(p: Int, e: Int, acc: Int) -> Int = if p + 8 <= e and not __jw_special8(prim.load64(p)) then __jw_strsize(
+  p + 8,
+  e,
+  acc + 8,
+)
+else if p >= e then acc
 else __jw_strsize(p + 1, e, acc + __jw_esc(prim.load8(p)))
 
 // The quoted size of the String block at `s`.
@@ -278,16 +296,20 @@ fn __jw_put4(o: Int, lim: Int, a: Int, b: Int, c: Int, d: Int) -> Int = {
 
 fn __jw_hex(n: Int) -> Int = if n < 10 then 48 + n else 87 + n
 
-// One string byte at `o` (room for 6 already checked); answers the next `o`.
-fn __jw_putb(b: Int, o: Int) -> Int = if b == 34 or b == 92 then {
+// One string byte at `o`, each branch checking the room its own text takes;
+// answers the next `o`.
+fn __jw_putb(b: Int, o: Int, lim: Int) -> Int = if b == 34 or b == 92 then {
+  __jw_room(o, 2, lim)
   prim.store8(o, 92)
   prim.store8(o + 1, b)
   o + 2
 } else if b == 10 or b == 13 or b == 9 then {
+  __jw_room(o, 2, lim)
   prim.store8(o, 92)
   prim.store8(o + 1, if b == 10 then 110 else if b == 13 then 114 else 116)
   o + 2
 } else if b < 32 then {
+  __jw_room(o, 6, lim)
   prim.store8(o, 92)
   prim.store8(o + 1, 117)
   prim.store8(o + 2, 48)
@@ -296,15 +318,19 @@ fn __jw_putb(b: Int, o: Int) -> Int = if b == 34 or b == 92 then {
   prim.store8(o + 5, __jw_hex(b % 16))
   o + 6
 } else {
+  __jw_room(o, 1, lim)
   prim.store8(o, b)
   o + 1
 }
 
-fn __jw_putbytes(p: Int, e: Int, o: Int, lim: Int) -> Int = if p >= e then o
-else {
-  __jw_room(o, 6, lim)
-  __jw_putbytes(p + 1, e, __jw_putb(prim.load8(p), o), lim)
-}
+// A clean 8-byte word is copied whole; any other byte goes through
+// __jw_putb.
+fn __jw_putbytes(p: Int, e: Int, o: Int, lim: Int) -> Int = if p + 8 <= e and not __jw_special8(prim.load64(p)) then {
+  __jw_room(o, 8, lim)
+  prim.store64(o, prim.load64(p))
+  __jw_putbytes(p + 8, e, o + 8, lim)
+} else if p >= e then o
+else __jw_putbytes(p + 1, e, __jw_putb(prim.load8(p), o, lim), lim)
 
 // The String block at `s`, quoted.
 fn __jw_putstr(s: Int, o: Int, lim: Int) -> Int = {
