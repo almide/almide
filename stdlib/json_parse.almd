@@ -1233,7 +1233,8 @@ fn __jp_build(t: String, tl: Int, fam: Bytes, sc: Bytes) -> Unit = {
           else if kind == 3 then __jp_mantissa(t, prim.bshr(w, 32), prim.bshr(w, 32) + prim.band(prim.bshr(w, 4), 31), 0)
           else if kind == 4 then 0 - __jp_mantissa(t, prim.bshr(w, 32), prim.bshr(w, 32) + prim.band(prim.bshr(w, 4), 31), 0)
           else if kind == 6 then 1
-          else if kind < 9 then 0
+          else if kind == 7 then 0
+          else if kind == 8 then 0
           else __jp_number2(t, tl, w)
           let tag = if kind == 1 then 4 else if kind < 5 then 2 else if kind == 5 then 3 else if kind == 8 then 0 else if kind < 9 then 1 else 2
           let b = prim.carve(fam, 16)
