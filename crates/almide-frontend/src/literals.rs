@@ -37,7 +37,7 @@ pub(crate) fn radix_and_digits(clean: &str) -> (u32, &str) {
 /// the lexer cannot produce such a token, and a magnitude past `u64::MAX` is
 /// E024 in every context — the fallback context when no type is recorded is
 /// `Int`, the strictest of them.
-pub(crate) fn int_value(raw: &str) -> i64 {
+pub fn int_value(raw: &str) -> i64 {
     let clean = raw.replace('_', "");
     let (radix, digits) = radix_and_digits(&clean);
     if let Ok(v) = i64::from_str_radix(digits, radix) {
@@ -51,7 +51,7 @@ pub(crate) fn int_value(raw: &str) -> i64 {
 /// Parsing the negation as part of the token rather than negating afterwards is
 /// what lets `-9223372036854775808` land on `i64::MIN`, whose magnitude has no
 /// positive `i64` representation to negate.
-pub(crate) fn negated_int_value(raw: &str) -> Option<i64> {
+pub fn negated_int_value(raw: &str) -> Option<i64> {
     let clean = raw.replace('_', "");
     let (radix, digits) = radix_and_digits(&clean);
     i64::from_str_radix(&format!("-{digits}"), radix).ok()

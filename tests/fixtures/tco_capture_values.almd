@@ -1,0 +1,10 @@
+fn chain(n: Int, acc: (Int) -> Int) -> (Int) -> Int = if n == 0 then acc
+else chain(n - 1, (x) => acc(x) + n)
+fn collect(n: Int, acc: List[(Int) -> Int]) -> List[(Int) -> Int] = if n == 0 then acc
+else collect(n - 1, acc + [(x) => x + n])
+fn main() -> Unit = {
+  let f = chain(3, (x) => x)
+  println("${f(1)} ${f(4)}")
+  let fs = collect(3, [])
+  println("${list.map(fs, (g) => g(10))}")
+}

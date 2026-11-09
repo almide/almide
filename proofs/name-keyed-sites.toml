@@ -524,22 +524,22 @@ class = "legacy"
 names = 3
 
 [[site]]
-id = "crates/almide-mir/src/lower/mod_p3_b.rs::BYTES_INPLACE_APPENDS::table"
+id = "crates/almide-mir/src/lower/mod_p3_mutators.rs::BYTES_INPLACE_APPENDS::table"
 class = "legacy"
 names = 17
 
 [[site]]
-id = "crates/almide-mir/src/lower/mod_p3_b.rs::rewrite_bytes_append::or-pattern"
+id = "crates/almide-mir/src/lower/mod_p3_mutators.rs::rewrite_bytes_append::or-pattern"
 class = "legacy"
 names = 2
 
 [[site]]
-id = "crates/almide-mir/src/lower/mod_p3_b.rs::rewrite_clear::or-pattern"
+id = "crates/almide-mir/src/lower/mod_p3_mutators.rs::rewrite_clear::or-pattern"
 class = "legacy"
 names = 4
 
 [[site]]
-id = "crates/almide-mir/src/lower/mod_p3_b.rs::rewrite_push_concat::or-pattern"
+id = "crates/almide-mir/src/lower/mod_p3_mutators.rs::rewrite_push_concat::or-pattern"
 class = "legacy"
 names = 2
 

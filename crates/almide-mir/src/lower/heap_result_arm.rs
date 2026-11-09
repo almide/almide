@@ -311,6 +311,7 @@ impl LowerCtx {
                 let obj = self
                     .try_lower_scalar_tuple_construct(elements)
                     .or_else(|| self.try_lower_tuple_construct(elements))?;
+                self.aggregate_blocks.insert(obj, crate::render_native_rec::block_key(result_ty));
                 self.ops.push(Op::Consume { v: obj });
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
@@ -610,6 +611,17 @@ impl LowerCtx {
     /// The OWNED heap payload a general `some(<heap>)` arm moves into the Option.
     fn arm_some_heap_piece(&mut self, expr: &IrExpr) -> Option<ValueId> {
         Some(match &expr.kind {
+            // Optional chaining produces some(record.field). Retain an
+            // owned snapshot before the match's borrowed record goes away;
+            // the Option constructor consumes this credit below.
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } | IrExprKind::IndexAccess { .. }
+                if crate::lower::owned_tco_slots() => {
+                let mark = self.live_heap_handles.len();
+                let p = self.lower_owned_heap_field(expr)?;
+                self.live_heap_handles.retain(|h| *h != p);
+                self.drop_arm_locals(mark);
+                p
+            }
             // Nested constructors use the same typed materializer as a
             // let-bound Some payload. Keep temporary owners within this arm;
             // the returned fresh owner is consumed by the outer wrapper.
@@ -732,3 +744,5 @@ impl LowerCtx {
         })
     }
 }
+
+include!("heap_result_diverge.rs");

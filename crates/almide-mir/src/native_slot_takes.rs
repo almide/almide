@@ -19,6 +19,15 @@ use crate::{CallArg, MirFunction, Op, PrimKind, ValueId};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
+#[path = "native_slot_publish.rs"]
+mod publish;
+
+pub(crate) fn delay_publications(functions: &mut [MirFunction]) -> Result<(), crate::lower::LowerError> {
+    set_quiet(functions);
+    for f in functions { publish::delay(f)?; }
+    Ok(())
+}
+
 /// The calls of a program that touch no heap slot: its functions that touch
 /// none, directly or through any call, and the builtins the render spells
 /// itself (a runtime body has no slot to reach), except the slot builtins
@@ -176,9 +185,9 @@ fn only_dropped(ops: &[Op], j: usize) -> bool {
 }
 
 /// The heap slot reads of a function: the ones that move the value out of
-/// the slot, the ones another read of the slot follows before its take
-/// (a write rebuilding the value from more than one read of it), and the
-/// ones every use of which only borrows (#4562).
+/// the slot, and the ones every use of which only borrows (#4562). When a
+/// later read precedes the take, the earlier read must retain a snapshot;
+/// the later read still needs the original cell value.
 ///
 /// A borrow-only read is a snapshot of the cell's `Rc`, one reference count,
 /// where a copy of the value would clone the whole map or list on every read
@@ -196,7 +205,6 @@ fn only_dropped(ops: &[Op], j: usize) -> bool {
 #[derive(Default)]
 pub(crate) struct SlotReads {
     pub(crate) takes: BTreeSet<ValueId>,
-    pub(crate) rebuilds: BTreeSet<ValueId>,
     pub(crate) borrows: BTreeSet<ValueId>,
     /// Each alias, and the slot whose snapshot it reads through.
     pub(crate) aliases: BTreeMap<ValueId, u32>,
@@ -251,9 +259,6 @@ pub(crate) fn slot_reads(func: &MirFunction) -> SlotReads {
             let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
             let Some(a) = args.first().and_then(|v| slot_addr(&consts, v)) else { continue };
             match take_after(ops, i, a, &consts, quiet) {
-                Some((_, true)) => {
-                    out.rebuilds.insert(*d);
-                }
                 Some((j, false)) if only_dropped(ops, j) => {
                     out.takes.insert(*d);
                 }

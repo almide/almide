@@ -80,18 +80,22 @@ pub fn almide_rt_random_shuffle<T: Clone>(mut xs: Vec<T>) -> Vec<T> {
 // negative n is a contract violation (the ALS-T6 abort, the text the wasm
 // self-host `random_bytes` dies with). A source that fails is an abort too:
 // handing back fewer or predictable bytes would be silent.
-#[cfg(any(unix, windows))]
-fn almide_os_entropy(chunk: &mut [u8]) -> bool {
-    almide_rt_sys_ffi::fill_entropy(chunk)
-}
+// Keep both target implementations in one scoped runtime item. A renderer
+// carrying this module cannot accidentally select just one cfg sibling.
+mod almide_random_entropy {
+    #[cfg(any(unix, windows))]
+    pub fn almide_os_entropy(chunk: &mut [u8]) -> bool {
+        super::almide_rt_sys_ffi::fill_entropy(chunk)
+    }
 
-// No OS source known for this target: every draw aborts rather than return
-// predictable bytes. tests/runtime_random_float_construction_test.rs runs the
-// fill on each CI OS, so a host that lands here is a red test, not a silent one.
-#[cfg(not(any(unix, windows)))]
-fn almide_os_entropy(_chunk: &mut [u8]) -> bool {
-    false
+    // No known source: abort rather than return predictable bytes. The
+    // runtime_random_float_construction test exercises the CI OS source.
+    #[cfg(not(any(unix, windows)))]
+    pub fn almide_os_entropy(_chunk: &mut [u8]) -> bool {
+        false
+    }
 }
+pub use almide_random_entropy::*;
 
 pub fn almide_rt_random_bytes(n: i64) -> Vec<u8> {
     if n < 0 {

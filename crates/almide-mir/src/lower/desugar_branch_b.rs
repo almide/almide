@@ -482,7 +482,11 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
         IrStmtKind::Bind { var, ty, value, .. }
             if (is_heap_ty(ty) || arm_has_error_op(value))
                 && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
-                && !is_first_ok_chain(value) =>
+                && !is_first_ok_chain(value)
+                // Keep the continuation once for native heap-carrier rewraps.
+                // General scalar/conditional Result joins still need the
+                // per-arm drop discipline of continuation distribution.
+                && !(crate::lower::owned_tco_slots() && crate::native_propagation::joins_owned_carrier(value)) =>
         {
             Some((i, *var, ty.clone(), value))
         }

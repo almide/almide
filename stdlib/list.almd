@@ -234,6 +234,21 @@ fn fold[A, B](xs: List[A], init: B, f: (B, A) -> B) -> B = _
 @consume(xs)
 fn sort_by[A, B](xs: List[A], f: (A) -> B) -> List[A] = _
 
+// Native declaration for the Float-key self-hosted specializations. Keep the
+// callback result typed: the wasm bodies carry its f64 bits in an Int lane.
+@intrinsic("almide_rt_list_sort_by_float")
+@consume(xs)
+fn __sort_by_float[A](xs: List[A], f: (A) -> Float) -> List[A] = _
+
+@intrinsic("almide_rt_list_sort_float")
+fn __sort_float(xs: List[Float]) -> List[Float] = _
+
+@intrinsic("almide_rt_list_min_float")
+fn __min_float(xs: List[Float]) -> Float? = _
+
+@intrinsic("almide_rt_list_max_float")
+fn __max_float(xs: List[Float]) -> Float? = _
+
 /// Longest prefix where f holds.
 @intrinsic("almide_rt_list_take_while")
 @reuse(xs)

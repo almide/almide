@@ -508,6 +508,12 @@ impl LowerCtx {
     /// calls, and the ANF Block wrapper. Verbatim.
     fn lower_owned_heap_field_branch_or_call(&mut self, expr: &IrExpr) -> Option<Option<ValueId>> {
         Some(match &expr.kind {
+            IrExprKind::UnwrapOr { expr, fallback } if crate::lower::owned_tco_slots() => {
+                // Reuse the lazy Option/Result selection and acquire exactly
+                // one owned field; the aggregate consumes that reference.
+                let obj = self.try_lower_option_unwrap_or(expr, fallback, true)?;
+                self.track_owned_field(obj)
+            }
             // A heap-result `if`/`match` ELEMENT (`(if retries == 0 then "pass-1shot" else "pass-retry",
             // "")` — the dojo `classify` tuple-result-if shape). EXECUTE it via the proven heap-result-`if`
             // machinery: each arm `Alloc`s + `Consume`s its value (the per-arm `"im"` move-out balance),

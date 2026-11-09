@@ -154,9 +154,37 @@ struct Orderer<'a, 'w> {
     writes: &'a CallWrites<'w>,
 }
 
+impl Orderer<'_, '_> {
+    fn snapshot_match_subject(&mut self, e: &mut IrExpr) -> Option<IrStmt> {
+        let IrExprKind::Match { subject, arms } = &mut e.kind else { return None; };
+        let root = plain_read_root(subject)?;
+        if !crate::arg_temps::bindable_ty(&subject.ty) { return None; }
+        let rebound = arms.iter().any(|arm|
+            self.writes.assigned_by(&arm.body).contains(&root.0)
+                || arm.guard.as_ref().is_some_and(|g| self.writes.assigned_by(g).contains(&root.0)));
+        if !rebound { return None; }
+        // Pattern binders borrow this subject throughout the selected arm.
+        // A guard or callee can replace its root; keep a normal Bind credit
+        // until the whole match finishes, including failed guard retries.
+        let (ty, span) = (subject.ty.clone(), subject.span);
+        let var = self.vars.alloc(sym("__match_before_rebind"), ty.clone(), Mutability::Let, span);
+        let value = std::mem::replace(subject.as_mut(), IrExpr {
+            kind: IrExprKind::Var { id: var }, ty: ty.clone(), span, def_id: None,
+        });
+        Some(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value }, span })
+    }
+}
+
 impl IrMutVisitor for Orderer<'_, '_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         walk_expr_mut(self, e);
+        if let Some(bind) = self.snapshot_match_subject(e) {
+            *self.changed = true;
+            let (ty, span) = (e.ty.clone(), e.span);
+            let node = std::mem::take(e);
+            *e = IrExpr { kind: IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(node)) }, ty, span, def_id: None };
+            return;
+        }
         let Some(ops) = operands(e) else { return };
         if ops.len() < 2 {
             return;

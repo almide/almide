@@ -172,7 +172,21 @@ impl LowerCtx {
             return None;
         };
         let (h, tag) = self.variant_dispatch_handle_and_tag(subj, unwrap_single);
-        let emitted = if sole_ctor_heap {
+        let emitted = if sole_ctor_heap && owned_tco_slots() && layout.cases.len() == 1 {
+            // A one-constructor type needs no tag branch. Acquire the body
+            // through its ordinary owned binding, then transfer that credit
+            // to the caller. This avoids a fake String in an unreachable arm
+            // whose actual result may be a nominal record or closure.
+            let (kind, body) = &plans[0];
+            self.bind_variant_arm(kind, h, subj);
+            let mark = self.live_heap_handles.len();
+            let value = self.lower_owned_binding(body);
+            if let Some(v) = value {
+                self.live_heap_handles.retain(|h| *h != v);
+                self.drop_arm_locals(mark);
+            }
+            value
+        } else if sole_ctor_heap {
             let (kind, body) = &plans[0];
             self.emit_single_ctor_heap_arm(h, tag, VariantArm { kind, body }, result_ty, subj)
         } else {
@@ -443,6 +457,7 @@ impl LowerCtx {
                     // BORROW the slot handle: the subject owns the String; a move-out auto-Dups
                     // in `lower_heap_result_arm`, a consuming re-use Dups in `lower_owned_heap_field`.
                     let p = self.load_at_offset(h, off, crate::PrimKind::LoadHandle);
+                    self.aggregate_blocks.insert(p, crate::render_native_rec::block_key(fty));
                     self.param_values.insert(p);
                     // An Option/Result PAYLOAD field (`Box(Option[Int])` — the depth-2
                     // single-outer + builtin-inner class): seed the borrowed handle's

@@ -274,6 +274,12 @@ impl LowerCtx {
     /// unchanged bit-for-bit.
     fn opt_heap_general_piece(&mut self, expr: &IrExpr) -> Option<ValueId> {
         let piece = match &expr.kind {
+            // Native owns the declared tuple value and its recursive Rust
+            // drop. Preserve its field types through the Option constructor;
+            // the flat wasm drop routes remain with the specific cases above.
+            IrExprKind::Tuple { elements } if crate::lower::owned_tco_slots() => {
+                self.try_lower_tuple_construct(elements)?
+            }
             IrExprKind::Var { id } if self.is_live_heap_var(*id) => {
                 self.piece_from_live_heap_var(*id)?
             }

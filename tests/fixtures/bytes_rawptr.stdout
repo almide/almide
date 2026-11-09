@@ -1,0 +1,32 @@
+104,101,108,108,111,44,32,119,111,114,108,100
+97,195,177,98
+97,32,116,101,109,112,111,114,97,114,121
+104,101,108,100
+104,101,108,112,101,114
+rebind: ok 115,101,99,114,101,116,45,116; 50; b=1
+rebind: err ffi.write: the region is read-only (ffi.region views a Bytes value)
+loop: ok 108,111,111,112,45,104,101,108,100; 50; b=AAAAAAAAAAAAAAAAAAAAAAA19
+grow: ok 103,114,111,119; err ffi.read: 5 bytes at offset 0 are outside a region of 4 bytes; 50; b=516
+alloc: ok; ok
+alloc: ok 1,2,9,4; let 1,2,3,4
+alloc: err ffi.write: the region is read-only (ffi.region views a Bytes value); let 1,2,3,4
+edge: ok 65,66,67,68
+edge: err ffi.read: 4 bytes at offset 1 are outside a region of 4 bytes
+edge: err ffi.read: 1 bytes at offset 4 are outside a region of 4 bytes
+edge: ok 
+edge: err ffi.read: 1 bytes at offset -1 are outside a region of 4 bytes
+edge: err ffi.read: negative count -1
+edge: err ffi.read: 1 bytes at offset 9223372036854775807 are outside a region of 4 bytes
+edge: err ffi.write: 3 bytes at offset 1 are outside a region of 3 bytes
+edge: err ffi.write: 1 bytes at offset -9223372036854775807 are outside a region of 3 bytes
+edge: ok 0,0,0
+empty: 0 ok  err ffi.read: 1 bytes at offset 0 are outside a region of 0 bytes
+alloc: err ffi.alloc: negative length -1
+slice: ok 66,67; err ffi.read: 2 bytes at offset 1 are outside a region of 2 bytes
+slice: ok 0 writable false; err ffi.slice: 2 bytes at offset 3 are outside a region of 4 bytes
+slice: err ffi.slice: 1 bytes at offset -1 are outside a region of 4 bytes; err ffi.slice: negative count -1
+slice: err ffi.slice: 1 bytes at offset 9223372036854775807 are outside a region of 4 bytes
+slice: ok 3 writable false; err ffi.write: the region is read-only (ffi.region views a Bytes value)
+slice: ok; ok 6,7,0
+slice: err ffi.slice: 3 bytes at offset 1 are outside a region of 3 bytes; ok 0
+slice: ok 98,108,111,99,107; 50

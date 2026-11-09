@@ -38,6 +38,14 @@ fn values(op: &Op) -> Vec<ValueId> {
     out
 }
 
+/// The ownership mirror accepts nested control flow that the portable
+/// certificate format may not represent. An optional move optimization must
+/// preserve both obligations; an unrepresentable branch keeps borrowing.
+fn ownership_representable(f: &MirFunction) -> bool {
+    crate::verify_ownership(f).is_ok()
+        && !crate::certificate::ownership_certificate_with_poison(f).1
+}
+
 pub(crate) fn is_release(op: &Op, v: ValueId) -> bool {
     crate::render_native_move::bookkeeping(op)
         && !matches!(op, Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. })
@@ -187,7 +195,7 @@ fn own_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool, owned: &BTreeMa
     for i in at.into_iter().rev() {
         f.ops.remove(i);
     }
-    crate::verify_ownership(&f).is_ok().then_some(f)
+    ownership_representable(&f).then_some(f)
 }
 
 /// Whether the caller can move `v` into the call at `call` without a copy:
@@ -438,8 +446,8 @@ pub(crate) fn rewrite(functions: &mut [MirFunction]) {
             // The join releases sunk into the arms first, so an arm's call takes
             // the slot over; the plain body if the mirror refuses that.
             let sunk = move_at_sites(&sink_join_releases(f, &owned), &owned);
-            let moved = if crate::verify_ownership(&sunk).is_ok() { sunk } else { move_at_sites(f, &owned) };
-            if crate::verify_ownership(&moved).is_err() {
+            let moved = if ownership_representable(&sunk) { sunk } else { move_at_sites(f, &owned) };
+            if !ownership_representable(&moved) {
                 return None;
             }
             *f = moved;

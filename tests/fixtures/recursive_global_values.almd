@@ -1,0 +1,15 @@
+type Tree = | Leaf(String) | Node(Tree, Tree)
+let root = Node(Node(Leaf("a"), Leaf("b")), Leaf("c"))
+let branch = match root { Node(l, _) => l, Leaf(s) => Leaf(s) }
+let label = match branch { Node(Leaf(s), _) => s, _ => "?" }
+var selected = branch
+fn first(t: Tree) -> String = match t { Leaf(s) => s, Node(l, _) => first(l) }
+fn replace() -> Unit = { selected = Leaf("changed") }
+fn main() -> Unit = {
+  println("${first(root)} ${first(branch)} ${label}")
+  match selected {
+    Node(l, _) => { replace(); println("held ${first(l)}") },
+    Leaf(s) => println(s),
+  }
+  println("${first(selected)} ${first(branch)}")
+}

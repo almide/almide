@@ -34,7 +34,8 @@ pub(crate) fn struct_defs() -> String {
                 out.push_str(&enum_def(i as u16, d, cases));
                 continue;
             }
-            let eq = if d.eq_safe { ", PartialEq" } else { "" };
+            let eq = if native_order_safe(i as u16) { ", PartialEq, Eq, PartialOrd, Ord" }
+                else if d.eq_safe { ", PartialEq" } else { "" };
             let default = if has_default(NTy::Rec(i as u16)) { ", Default" } else { "" };
             out.push_str(&format!("/// record `{}`\n#[derive(Clone{default}{eq})]\nstruct {} {{\n", d.name, struct_name(i as u16)));
             for (k, f) in d.fields.iter().enumerate() {

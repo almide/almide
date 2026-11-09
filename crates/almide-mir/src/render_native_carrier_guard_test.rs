@@ -110,3 +110,27 @@ fn option_payload_may_be_read_inside_its_some_guard_but_not_after_rebinding() {
     f.ops.insert(7, Op::SetLocal { local: ValueId(0), src: ValueId(10) });
     assert!(!hoisted_sides(&f).contains_key(&ValueId(7)));
 }
+
+#[test]
+fn compared_tags_preserve_branch_polarity_and_reject_reassigned_inputs() {
+    for (op, constant, side) in [
+        (IntOp::Ne, 0, false), (IntOp::Eq, 1, false),
+        (IntOp::Eq, 0, true), (IntOp::Ne, 1, true),
+    ] {
+        let mut f = guarded();
+        f.ops.splice(7..7, [
+            Op::ConstInt { dst: ValueId(10), value: constant },
+            Op::IntBinOp { dst: ValueId(11), op, a: ValueId(4), b: ValueId(10) },
+        ]);
+        f.ops[9] = Op::IfThen { cond: ValueId(11), dst: None };
+        assert_eq!(hoisted_sides(&f).get(&ValueId(7)), Some(&side));
+        for target in [4, 10, 11] {
+            let mut bad = f.clone();
+            bad.ops.insert(9, Op::SetLocal { local: ValueId(target), src: ValueId(12) });
+            assert!(!hoisted_sides(&bad).contains_key(&ValueId(7)));
+        }
+    }
+    let tags = BTreeMap::from([(ValueId(1), (ValueId(0), true))]);
+    assert_eq!(tag_comparison(IntOp::Eq, ValueId(1), ValueId(2),
+        &BTreeMap::from([(ValueId(2), 2)]), &tags), None);
+}

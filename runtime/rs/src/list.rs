@@ -41,9 +41,12 @@ pub fn almide_rt_list_sort_float(xs: &[f64]) -> Vec<f64> { let mut v = xs.to_vec
 pub fn almide_rt_list_min_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().min_by(almide_float_order) }
 pub fn almide_rt_list_max_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().max_by(almide_float_order) }
 pub fn almide_rt_list_sort_by_float<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> f64>) -> Vec<A> {
-    let f = move |a| f(a);
     let mut v = xs;
-    v.sort_by(|a, b| almide_float_order(&f(a.clone()), &f(b.clone())));
+    // C-055: extract each key once, including when the callback mutates a
+    // captured value. Integer order keys preserve the canonical NaN order.
+    // Rust's cached sort skips key extraction for a singleton.
+    if v.len() == 1 { let _ = f(v[0].clone()); }
+    v.sort_by_cached_key(|a| almide_float_order_key(f(a.clone())));
     v
 }
 // `list.sum`/`list.product` follow the language's integer-overflow law:
@@ -207,7 +210,12 @@ pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
 }
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }
-pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<A> { let f = move |a| f(a); xs.sort_by_cached_key(|x| f(x.clone())); xs }  // #560: cached_key calls the key fn ONCE PER ELEMENT (n), matching the wasm precomputed-key array + the key-extraction intent; sort_by_key called it per COMPARISON (n log n), an observable native!=wasm divergence for side-effectful keys.
+pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<A> {
+    // C-055: sort_by_cached_key evaluates every key once except a singleton.
+    if xs.len() == 1 { let _ = f(xs[0].clone()); }
+    xs.sort_by_cached_key(|x| f(x.clone()));
+    xs
+}
 pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, AlmideString>>) -> Result<B, AlmideString> { let __almide_r: Result<B, String> = (|| { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, AlmideString> = (|| { let f = move |a| f(a); xs.into_iter().map(f).collect() })(); __almide_r.map_err(Into::into) }
 

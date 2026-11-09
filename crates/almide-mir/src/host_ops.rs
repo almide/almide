@@ -263,6 +263,15 @@ pub const NATIVE_FS_HOST_CALLS: &[&str] = &[
     "almide_rt_fs___root_remove",
     "almide_rt_fs_create_temp_dir",
     "almide_rt_fs_create_temp_file",
+    "almide_rt_fs_read_bytes_if_exists",
+    "almide_rt_fs_read_lines_if_exists",
+    "almide_rt_fs_stat",
+    "almide_rt_fs_fold_lines",
+    "almide_rt_fs_for_each_line",
+    "almide_rt_fs_fold_lines_effect",
+    "almide_rt_fs_for_each_line_effect",
+    "almide_rt_fs_fold_lines_range",
+    "almide_rt_fs_fold_lines_chunked",
 ];
 
 /// Is the runtime `symbol` one of the [`NATIVE_FS_HOST_CALLS`]?

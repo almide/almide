@@ -82,7 +82,8 @@ impl LowerCtx {
                 // local. NO MakeUnique first — as for the heap FIELD write below, the guard
                 // composed with the Assign's drop-old into an rc-underflow trap on an alias
                 // (`let ys = xs; xs[1] = "B"` trapped on the wasm test lane, `List[Int]` passed).
-                if matches!(&value.ty, Ty::String) || crate::lower::is_value_ty(&value.ty) {
+                if matches!(&value.ty, Ty::String) || crate::lower::is_value_ty(&value.ty)
+                    || (crate::lower::owned_tco_slots() && is_heap_ty(&value.ty)) {
                     return self.lower_heap_elem_index_rebind(target, index, value);
                 }
                 // COW-guard the buffer (rebinds the local to a unique copy if shared), then ACTUALLY
@@ -90,7 +91,7 @@ impl LowerCtx {
                 // assignment lowered to ONLY the MakeUnique guard (a silent no-op — `xs[1] = 99` never
                 // wrote; v1-spine hole #29). The `$elem_addr` is bounds-checked (traps OOB, matching
                 // native's panic). The store runs AFTER MakeUnique so it writes the unique copy.
-                self.lower_place_mutation(target)?;
+                self.lower_place_mutation(target, value.span)?;
                 // The SCALAR-element store subset (`List[Int/Float/Bool]`, a lowerable scalar index +
                 // value) — the #29 shape. Attempt it; on a miss (a heap-element store, or a non-scalar
                 // index/value) ROLL BACK to the prior behavior (record the operands' calls for caps,
@@ -203,7 +204,8 @@ impl LowerCtx {
         Ok(())
     }
 
-    /// The HEAP String/Value element index-assign: emit the C-067 bounds guard
+    /// Heap element index-assign (String/Value on wasm, typed heaps on native):
+    /// emit the C-067 bounds guard
     /// then desugar to the functional rebind `xs = list.set(xs, i, v)`.
     ///
     /// C-067 (#807): the index-operator WRITE must abort on OOB
@@ -310,6 +312,7 @@ impl LowerCtx {
                 let rebind_ty = self.var_decl_tys.get(&target).cloned().filter(|rec_ty| {
                     self.aggregate_field_tys(rec_ty).is_some_and(|(_, tys)| {
                         is_heap_ty(&value.ty) || tys.iter().any(is_heap_ty)
+                            || self.cell_of.contains_key(&target)
                     })
                 });
                 if let Some(rec_ty) = rebind_ty {
@@ -340,7 +343,7 @@ impl LowerCtx {
                 // store, the assignment lowered to ONLY the MakeUnique guard — EVERY record
                 // field-assign was a silent no-op on the verified default (v1 read back the
                 // pre-assign value while native mutated: the recassign wrong-value class).
-                self.lower_place_mutation(target)?;
+                self.lower_place_mutation(target, value.span)?;
                 let ops_mark = self.ops.len();
                 let lhh_mark = self.live_heap_handles.len();
                 let stored = if !is_heap_ty(&value.ty) {
@@ -464,7 +467,7 @@ impl LowerCtx {
                         IrStmt { kind: IrStmtKind::Assign { var: target, value: call }, span: None };
                     return self.lower_stmt(&assign);
                 }
-                self.lower_place_mutation(target)?;
+                self.lower_place_mutation(target, value.span)?;
                 // STRICT value mode: the insert itself was ELIDED (only the MakeUnique
                 // guard emitted) — `m[k] = v` was a silent no-op on the verified default
                 // (native inserted, v1 read the map unchanged). REFUSE so the fn walls
@@ -658,174 +661,4 @@ impl LowerCtx {
     }
 }
 
-/// The MULTI-BYTE in-place byte appends (the functional twins live in
-/// bytes_append_multi.almd).
-const BYTES_INPLACE_APPENDS: &[&str] = &[
-    "push", "append_u8",
-    "append_u16_le", "append_u16_be", "append_i16_le", "append_i16_be",
-    "append_u32_le", "append_u32_be", "append_i32_le", "append_i32_be",
-    "append_i64_le", "append_i64_be", "append_f32_le", "append_f32_be",
-    "append_f64_le", "append_f64_be",
-    "append_bool",
-];
-
-/// Rewrite a v0 IN-PLACE mutator call in statement position to its functional
-/// rebind, or `None` when the call is not one (the effect-call path keeps it).
-/// v1 has value semantics, so `bytes.push(buf, x)` becomes `buf =
-/// bytes.append(buf, x)`, `list.push(xs, v)` / `string.push(s, x)` become the one synthetic
-/// concat the source Call node already credits (mir <= ir holds), and
-/// `map.clear(m)` / `list.clear(xs)` rebind to the EMPTY literal of the
-/// receiver's own type (adds no call). Only a bare `Var` receiver qualifies
-/// (push also admits a FIELD receiver — the C-132 mut-param write-back shape,
-/// routed through FieldAssign); any other receiver keeps the (walling)
-/// effect-call path.
-fn rewrite_inplace_mutation(expr: &IrExpr) -> Option<IrStmt> {
-    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &expr.kind
-    else {
-        return None;
-    };
-    let (module, func) = (module.as_str(), func.as_str());
-    rewrite_bytes_append(module, func, args)
-        .or_else(|| rewrite_push_concat(module, func, args))
-        .or_else(|| rewrite_clear(module, func, args))
-}
-
-/// `bytes.push(buf, x)` — the v0 intrinsic is an IN-PLACE mutation (`mut b -> Unit`).
-/// Rewrite it to a functional rebind `buf = bytes.append(buf, x)` and re-dispatch —
-/// the Assign path then handles it (a scalar-loop accumulator SetLocal via the
-/// general heap-reassign, or a top-level rebind). `bytes.append` is the
-/// self-hosted functional append (bytes_core). Unblocks bigint.from_int / rsa.
-/// `bytes.append_u8(buf, x)` is the SAME in-place byte push under another
-/// name (`almide_rt_bytes_append_u8`) — identical rewrite; push/append_u8 route
-/// to the 1-byte `bytes.append`, every multi-byte variant keeps its own name.
-fn rewrite_bytes_append(module: &str, func: &str, args: &[IrExpr]) -> Option<IrStmt> {
-    if module != "bytes"
-        || !BYTES_INPLACE_APPENDS.contains(&func)
-        || !matches!(args.len(), 2 | 3)
-    {
-        return None;
-    }
-    let IrExprKind::Var { id } = &args[0].kind else { return None };
-    let fname = match func {
-        // The 1-byte pushes both route to the one `bytes.append` twin.
-        "push" | "append_u8" => "append",
-        _ => func,
-    };
-    let append = IrExpr {
-        kind: IrExprKind::Call {
-            target: CallTarget::Module { module: sym("bytes"), func: sym(fname), def_id: None },
-            args: args.to_vec(),
-            type_args: vec![],
-        },
-        ty: args[0].ty.clone(),
-        span: None,
-        def_id: None,
-    };
-    Some(IrStmt { kind: IrStmtKind::Assign { var: *id, value: append }, span: None })
-}
-
-/// `list.push(xs, v)` / `string.push(s, x)` — v0 in-place appends: the
-/// same functional-rebind treatment as bytes.push (`xs = xs + [v]` /
-/// `s = s + x`); the ConcatList/ConcatStr lowering then emits the ONE
-/// synthetic concat call the source Call node already credits (mir <= ir
-/// holds). A `Var` receiver rebinds via Assign; a FIELD receiver
-/// (`list.push(b.xs, v)` — the C-132 mut-param write-back shape) routes
-/// through FieldAssign, whose spread rebind owns the write-back.
-fn rewrite_push_concat(module: &str, func: &str, args: &[IrExpr]) -> Option<IrStmt> {
-    if func != "push" || !matches!(module, "list" | "string") || args.len() != 2 {
-        return None;
-    }
-    let recv_ok = matches!(&args[0].kind, IrExprKind::Var { .. })
-        || matches!(&args[0].kind, IrExprKind::Member { object, .. }
-            if matches!(&object.kind, IrExprKind::Var { .. }));
-    if !recv_ok {
-        return None;
-    }
-    let is_list = module == "list";
-    let recv = args[0].clone();
-    let rhs = if is_list {
-        IrExpr {
-            kind: IrExprKind::List { elements: vec![args[1].clone()] },
-            ty: recv.ty.clone(),
-            span: None,
-            def_id: None,
-        }
-    } else {
-        args[1].clone()
-    };
-    let concat = IrExpr {
-        kind: IrExprKind::BinOp {
-            op: if is_list { almide_ir::BinOp::ConcatList } else { almide_ir::BinOp::ConcatStr },
-            left: Box::new(recv.clone()),
-            right: Box::new(rhs),
-        },
-        ty: recv.ty.clone(),
-        span: None,
-        def_id: None,
-    };
-    let stmt = match &recv.kind {
-        IrExprKind::Var { id } => {
-            IrStmt { kind: IrStmtKind::Assign { var: *id, value: concat }, span: None }
-        }
-        IrExprKind::Member { object, field } => {
-            let IrExprKind::Var { id } = &object.kind else { unreachable!() };
-            IrStmt {
-                kind: IrStmtKind::FieldAssign { target: *id, field: *field, value: concat },
-                span: None,
-            }
-        }
-        _ => unreachable!(),
-    };
-    Some(stmt)
-}
-
-/// `map.clear(m)` / `list.clear(xs)` / `string.clear(s)` / `bytes.clear(b)` —
-/// the in-place empty: rebind the var to a FRESH empty value of the receiver's
-/// own type. The var write-back is the C-033 discipline (#2465): an alias or
-/// holder bound BEFORE the clear keeps the pre-clear block, and through a `mut`
-/// parameter the rebind persists to the caller exactly as `list.clear` does.
-/// The self-hosted `string_clear` / `bytes_clear` bodies (a length-header
-/// store into the SHARED block) must never be reached from here — they are
-/// the alias-observes-clear defect the released 0.62.0 default route shipped.
-/// map / list / string rebind to a literal (adds no call); bytes rebinds to
-/// `bytes.zeros(0)` — one call for the one clear call the source node credits
-/// (mir <= ir holds). A `Var` receiver rebinds via Assign; a FIELD receiver
-/// (`string.clear(r.name)` — the C-132 mut-param write-back shape) routes
-/// through FieldAssign exactly as `list.push(b.xs, v)` does, so the record's
-/// alias keeps its field too. Any other receiver keeps the (walling)
-/// effect-call path.
-fn rewrite_clear(module: &str, func: &str, args: &[IrExpr]) -> Option<IrStmt> {
-    if func != "clear" || !matches!(module, "map" | "list" | "string" | "bytes") || args.len() != 1 {
-        return None;
-    }
-    let (var, field) = match &args[0].kind {
-        IrExprKind::Var { id } => (*id, None),
-        IrExprKind::Member { object, field } => match &object.kind {
-            IrExprKind::Var { id } => (*id, Some(*field)),
-            _ => return None,
-        },
-        _ => return None,
-    };
-    let ty = args[0].ty.clone();
-    let kind = match module {
-        "map" => IrExprKind::EmptyMap,
-        "list" => IrExprKind::List { elements: vec![] },
-        "string" => IrExprKind::LitStr { value: String::new() },
-        _ => IrExprKind::Call {
-            target: CallTarget::Module { module: sym("bytes"), func: sym("zeros"), def_id: None },
-            args: vec![IrExpr {
-                kind: IrExprKind::LitInt { value: 0 },
-                ty: Ty::Int,
-                span: None,
-                def_id: None,
-            }],
-            type_args: vec![],
-        },
-    };
-    let value = IrExpr { kind, ty, span: None, def_id: None };
-    let kind = match field {
-        None => IrStmtKind::Assign { var, value },
-        Some(field) => IrStmtKind::FieldAssign { target: var, field, value },
-    };
-    Some(IrStmt { kind, span: None })
-}
+include!("mod_p3_mutators.rs");

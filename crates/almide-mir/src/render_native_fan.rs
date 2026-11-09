@@ -23,6 +23,10 @@ pub(crate) fn fan_rendered() -> bool {
     FAN_RENDERED.with(|c| c.get())
 }
 
+pub(crate) fn require_fan_runtime() {
+    FAN_RENDERED.with(|c| c.set(true));
+}
+
 pub(crate) fn fan_rendered_reset() {
     FAN_RENDERED.with(|c| c.set(false));
 }
@@ -119,6 +123,8 @@ pub(crate) fn fan_glue() -> String {
          use std::process::exit as almide_process_exit;\n\
          thread_local! { static ALMIDE_STDOUT_BUF: std::cell::RefCell<std::io::Stdout> = std::cell::RefCell::new(std::io::stdout()); }\n\
          fn almide_stdout_flush() { let _ = std::io::Write::flush(&mut std::io::stdout()); }\n\
+         fn almide_stdout_write_bytes(bytes: &[u8]) { almide_out_write(false, bytes); }\n\
+         fn almide_stderr_write_bytes(bytes: &[u8]) { almide_stdout_flush(); almide_out_write(true, bytes); }\n\
          fn almide_stdout_is_terminal() -> bool { std::io::IsTerminal::is_terminal(&std::io::stdout()) }\n\
          fn almide_stack_guard_register() {\n    #[cfg(all(any(target_os = \"linux\", target_os = \"macos\"), not(miri)))]\n    almide_stack_guard::register();\n}\n\
          fn almide_v1_out(err: bool, args: std::fmt::Arguments<'_>, newline: bool) {\n\

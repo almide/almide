@@ -3,6 +3,10 @@ use almide_base::intern::{Sym, sym};
 use crate::import_table::ImportTable;
 
 pub struct EnvKeySnapshot {
+    /// Bare convention aliases exist only while checking their owner module.
+    /// Keeping them afterward creates a second apparent definition beside
+    /// the canonical module-qualified key on the next registration pass.
+    explicit_convention_fns: std::collections::HashSet<Sym>,
     functions: std::collections::HashSet<Sym>,
     types: std::collections::HashSet<Sym>,
     /// key → candidate count at snapshot time. Constructor registration
@@ -481,6 +485,7 @@ impl TypeEnv {
             keys,
         };
         EnvKeySnapshot {
+            explicit_convention_fns: self.explicit_convention_fns.clone(),
             functions: self.functions.keys().cloned().collect(),
             types: self.types.keys().cloned().collect(),
             constructors: self.constructors.iter().map(|(k, v)| (*k, v.len())).collect(),
@@ -493,6 +498,7 @@ impl TypeEnv {
     /// snapshot was taken. Registration pushes candidates in order, so
     /// truncating to the snapshot count drops exactly the temp additions.
     pub fn restore_keys(&mut self, snapshot: EnvKeySnapshot) {
+        self.explicit_convention_fns = snapshot.explicit_convention_fns;
         self.functions.retain(|k, _| snapshot.functions.contains(k));
         self.types.retain(|k, _| snapshot.types.contains(k));
         self.constructors.retain(|k, _| snapshot.constructors.contains_key(k));

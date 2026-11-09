@@ -96,6 +96,7 @@ fn __sbs_msort(bvh: Int, bkh: Int, tvh: Int, tkh: Int, n: Int) -> Int = {
   }
 }
 
+@specializes("list.sort_by")
 fn list_sort_by_str_key(xs: List[Int], f: (Int) -> String) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)

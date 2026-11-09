@@ -145,7 +145,8 @@ pub(crate) fn render_set_local(
     }
     let t = *tys.get(src).ok_or_else(|| wall("native: SetLocal of untyped value"))?;
     let rhs = match t {
-        NTy::I64 | NTy::F64 => var(*src),
+        NTy::Never => format!("match {} {{}}", var(*src)),
+        NTy::I64 | NTy::F32 | NTy::F64 => var(*src),
         NTy::Str => format!("{}.clone()", var(*src)),
         NTy::StrRef => format!("AlmideString::from({})", var(*src)),
         NTy::Vec => format!("{}.clone()", var(*src)),
@@ -171,6 +172,12 @@ pub(crate) fn render_set_local(
         }
         if *prev != store_t && !(crate::render_native::owned_nty(*prev) == *prev
             && crate::native_value_repr::same_owned(*prev, store_t)) {
+            if crate::render_native::owned_nty(*prev) == *prev {
+                if let Some(copy) = crate::native_value_repr::tuple_copy(&var(*src), t, *prev) {
+                    line!("{} = {};", var(*local), copy);
+                    return Ok(());
+                }
+            }
             return Err(wall(format!("native: SetLocal changes a value's type ({prev:?} <- {store_t:?})")));
         }
         line!("{} = {};", var(*local), rhs);
@@ -210,12 +217,17 @@ pub(crate) struct NativeSink<'a, 'f> {
 fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), LowerError> {
     let NativeSink { user_fns, sigs, tys, out, indent, used_shims } = sink;
     let name = call.name;
+    if crate::native_hof::parallel_selected(name) {
+        return crate::native_hof::serve_or(wall("native: selected parallel map runtime adapter refused"),
+            call, user_fns, sigs, OpSink { tys, out, indent, used_shims });
+    }
     if let Some(callee) = user_fns.get(name.as_str()) {
         // A closure argument of another signature than the linked body
         // declares is an argument kind it refuses (#4588): the call it
         // rendered is taken back.
         let marks = (out.len(), used_shims.len());
-        let rendered = render_user_fn_call(call, callee, sigs, OpSink { tys: &mut *tys, out: &mut *out, indent, used_shims: &mut *used_shims })
+        let rendered = crate::native_hof::check_result(&call, user_fns, sigs)
+            .and_then(|()| render_user_fn_call(call, callee, sigs, OpSink { tys: &mut *tys, out: &mut *out, indent, used_shims: &mut *used_shims }))
             .and_then(|()| crate::native_closure_decl::check(call, user_fns, (&mut *out, &mut *used_shims), marks));
         return match rendered {
             // A linked self-hosted body that refuses the call's argument
@@ -226,6 +238,10 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
     }
     if crate::native_hof::pruned(name) {
         return crate::native_hof::render_pruned(call, user_fns, sigs, OpSink { tys, out, indent, used_shims });
+    }
+    if crate::host_ops::host_op_for_call_name(name).is_some() && crate::native_hof::of(name).is_some() {
+        return crate::native_hof::serve_or(wall("native: declared host callback adapter refused"),
+            call, user_fns, sigs, OpSink { tys, out, indent, used_shims });
     }
     if name == "__str_concat" && render_concat_in_place(call, tys, out, indent) {
         Ok(())
@@ -292,6 +308,7 @@ fn declared_param_want(
     p: &crate::MirParam,
 ) -> Result<NTy, LowerError> {
     Ok(match callee_sig.and_then(|(ps, _)| ps.get(i)) {
+        Some(NativeSigKind::Never) => NTy::Never,
         Some(NativeSigKind::I64 | NativeSigKind::Narrow { .. }) => NTy::I64,
         Some(NativeSigKind::Str) => NTy::StrRef,
         Some(NativeSigKind::ListI64) => NTy::VecRef,
@@ -314,10 +331,35 @@ fn declared_param_want(
 /// moved (its `Consume` follows the call — `MirFunction::call_moves`).
 fn moved_arg(name: &str, want: NTy, code: String, got: NTy) -> Result<String, LowerError> {
     let same = crate::native_value_repr::same_owned(want, got);
-    if !same || matches!(got, NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) {
-        return Err(wall(format!("native: a borrowed or other-typed arg to a move param of `{name}`")));
+    if matches!(got, NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) {
+        return Err(wall(format!("native: a borrowed or other-typed arg ({got:?}, wanted {want:?}) to a move param of `{name}`")));
     }
-    Ok(code)
+    if same { return Ok(code); }
+    // A checked structural argument may have a distinct generated Rust
+    // struct from the named parameter, including inside lists. Rebuild the
+    // declared value just as at a borrowed boundary. The MIR still consumes
+    // the caller's owned argument; this adapter adds no borrowed credit.
+    crate::native_value_repr::tuple_copy(&code, got, want)
+        .ok_or_else(|| wall(format!("native: an incompatible owned arg ({got:?}, wanted {want:?}) to a move param of `{name}`")))
+}
+
+#[cfg(test)]
+mod moved_structural_arg_tests {
+    use super::*;
+    #[test]
+    fn structural_move_rebuilds_owned_values_but_never_admits_a_borrow() {
+        use crate::render_native_rec::{install, RecDecl};
+        let decl = |name: &str, anonymous| RecDecl {
+            name: name.into(), fields: vec![NTy::Str],
+            record_labels: Some((anonymous, vec!["name".into()])),
+            ..Default::default()
+        };
+        let _guard = install(vec![decl("named", false), decl("structural", true), decl("other", false)]);
+        assert!(moved_arg("take", NTy::Rec(0), "v".into(), NTy::Rec(1)).is_ok());
+        assert!(moved_arg("take", NTy::Rec(0), "v".into(), NTy::RecRef(1)).is_err());
+        assert!(moved_arg("take", NTy::Rec(0), "v".into(), NTy::Rec(2)).is_err());
+        assert!(moved_arg("take", NTy::Rec(0), "v".into(), NTy::RecRef(0)).is_err());
+    }
 }
 
 fn user_arg_in_declared_mode(
@@ -434,6 +476,7 @@ fn bind_user_fn_result(
             // A heap result is FRESH OWNED (the callee moved it out).
             // Its KIND comes from the callee's declared return.
             let t = match callee_sig.and_then(|(_, r)| *r) {
+                Some(NativeSigKind::Never) => NTy::Never,
                 Some(NativeSigKind::ListI64) => NTy::Vec,
                 Some(NativeSigKind::ListStr) => NTy::VecStr,
                 Some(NativeSigKind::Rec(i)) => NTy::Rec(i),
@@ -481,7 +524,10 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
     };
     let (a, at) = call_arg(a, tys)?;
     let (b, bt) = call_arg(b, tys)?;
-    let mismatch = || wall(format!("native: `{name}` over operands outside the native lists ({at:?}, {bt:?})"));
+    let mismatch = || {
+        crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[concat] {a}: {at:?}, {b}: {bt:?}"));
+        wall(format!("native: `{name}` over operands outside the native lists ({at:?}, {bt:?})"))
+    };
     let (sa, ty) = crate::native_list_ops::as_slice(&a, at).ok_or_else(mismatch)?;
     let (sb, _) = crate::native_list_ops::as_slice(&b, bt).ok_or_else(mismatch)?;
     if !crate::native_value_repr::same_owned(at, bt) {

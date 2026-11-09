@@ -7,21 +7,26 @@ use crate::render_native::{as_f64_arg, as_str_arg, wall, NTy};
 /// carries, when its element kind is the declared one.
 /// The owned value of kind `want` that a call arg of kind `got` gives.
 fn owned_arg(want: NTy, code: &str, got: NTy) -> Option<String> {
+    if let Some(code) = crate::native_value_repr::scalar_recode(code, got, want) { return Some(code); }
     Some(match (want, got) {
+        (NTy::F32, NTy::F32) => code.to_string(),
         (NTy::I64, NTy::I64) => code.to_string(),
         (NTy::I64, NTy::F64) => format!("{code}.to_bits() as i64"),
         (NTy::Str, NTy::Str) => format!("{code}.clone()"),
         (NTy::Str, NTy::StrRef) => format!("AlmideString::from({code})"),
         (NTy::Vec, NTy::Vec | NTy::VecRef) => format!("{code}.to_vec()"),
         (NTy::VecStr, NTy::VecStr | NTy::VecStrRef) => format!("{code}.to_vec()"),
+        (a @ (NTy::Opt | NTy::Res | NTy::ResStr), b) if a == b => format!("{code}.clone()"),
         (NTy::Rec(i), NTy::Rec(j) | NTy::RecRef(j)) if i == j => format!("{code}.clone()"),
-        _ => return None,
+        _ => return crate::native_value_repr::tuple_copy(code, got, want),
     })
 }
 
 /// The (key, value) kinds of a generated list of pairs.
 fn pair_kinds(list: u16) -> Option<(NTy, NTy)> {
     match crate::render_native_rec::list_elem(list)? {
+        NTy::Vec => Some((NTy::I64, NTy::I64)),
+        NTy::VecStr => Some((NTy::Str, NTy::Str)),
         NTy::Rec(t) => Some((crate::render_native_rec::rec_field(t, 0)?, crate::render_native_rec::rec_field(t, 1)?)),
         _ => None,
     }
@@ -125,16 +130,16 @@ pub(crate) fn render_call(
     let mismatch = || wall(format!("native: floor call `{name}` arg type mismatch"));
     // The (key, value) kinds of the call's map, from its `Map[K, V]` arg or
     // its `List[(K, V)]` pairs.
-    let map_kv: Option<(NTy, NTy)> = f.params.iter().zip(args).find_map(|(p, (_, got))| match (p, got) {
+    let map_kv: Option<(NTy, NTy)> = dst_map.and_then(crate::render_native_rec::map_kinds).or_else(|| f.params.iter().zip(args).find_map(|(p, (_, got))| match (p, got) {
         (FloorParam::Map(_), NTy::Rec(i) | NTy::RecRef(i)) => crate::render_native_rec::map_kinds(*i),
         (FloorParam::MapPairs, NTy::Rec(i) | NTy::RecRef(i)) => pair_kinds(*i),
         _ => None,
-    });
+    }));
     // The element kind of the call's set, from its `Set[A]` arg.
     let set_e: Option<NTy> = f.params.iter().zip(args).find_map(|(p, (_, got))| match (p, got) {
         (FloorParam::Set(_), NTy::Rec(i) | NTy::RecRef(i)) => crate::render_native_rec::set_elem(*i),
         _ => None,
-    });
+    }).or_else(|| dst_map.and_then(crate::render_native_rec::set_elem));
     // The element kind of the call's `List[A]` arg, for an element-typed
     // param or return: an Int list's `i64`, a String list's `AlmideString`.
     // A generated list's element is its declared kind (a record, a nested
@@ -222,6 +227,8 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
         FloorParam::Str => matches!(got, NTy::Str | NTy::StrRef)
             .then(|| as_str_arg(code, *got))
             .ok_or_else(mismatch)?,
+        FloorParam::List(ListElem::Any) if cx.set_e.is_some() =>
+            set_source_list_arg(cx.set_e.unwrap(), code, *got).ok_or_else(mismatch)?,
         FloorParam::List(elem) => list_arg(*elem, code, *got).ok_or_else(mismatch)?,
         FloorParam::Elem(by_ref) => elem_arg(cx, *by_ref, code, got)?,
         FloorParam::Map(by_ref) => map_arg(cx, *by_ref, code, got, dying_here)?,
@@ -255,13 +262,16 @@ fn runtime_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: b
         FloorParam::SetElem(by_ref) => {
             let want = cx.set_e.ok_or_else(mismatch)?;
             let owned = owned_arg(want, code, *got).ok_or_else(mismatch)?;
+            if !crate::native_value_repr::same_owned(want, crate::render_native::owned_nty(*got)) {
+                return Ok(if *by_ref { format!("&({owned})") } else { owned });
+            }
             let own_value = matches!(got, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_));
             match (by_ref, own_value, dying_here) {
                 (true, true, _) => format!("&{code}"),
                 (true, false, _) if matches!(got, NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) => code.to_string(),
                 (true, false, _) if *got == NTy::I64 => format!("&{code}"),
                 (true, false, _) => format!("&{owned}"),
-                (false, true, true) => format!("std::mem::take(&mut {code})"),
+                (false, true, true) if crate::render_native_rec::has_default(*got) => format!("std::mem::take(&mut {code})"),
                 (false, _, _) => owned,
             }
         }
@@ -301,6 +311,20 @@ fn elem_arg(cx: &CallCx, by_ref: bool, code: &str, got: &NTy) -> Result<String, 
     Ok(if by_ref { format!("&{v}") } else { v })
 }
 
+/// A constructor preserves its declared Set member type when source literals
+/// have structural record identities. Rebuild fields before runtime insertion.
+fn set_source_list_arg(want: NTy, code: &str, got: NTy) -> Option<String> {
+    let elem = match got {
+        NTy::Vec | NTy::VecRef => NTy::I64,
+        NTy::VecStr | NTy::VecStrRef => NTy::Str,
+        NTy::Rec(i) | NTy::RecRef(i) => crate::render_native_rec::list_elem(i)?,
+        _ => return None,
+    };
+    if crate::native_value_repr::same_owned(want, elem) { return list_arg(ListElem::Any, code, got); }
+    let value = owned_arg(want, "(*__item)", elem)?;
+    Some(format!("&({code}).iter().map(|__item| {value}).collect::<Vec<_>>()"))
+}
+
 /// A `Map[K, V]` param's argument.
 fn map_arg(cx: &CallCx, by_ref: bool, code: &str, got: &NTy, dying_here: bool) -> Result<String, LowerError> {
     let ok = matches!(got, NTy::Rec(i) | NTy::RecRef(i) if crate::render_native_rec::map_kinds(*i).is_some());
@@ -322,6 +346,9 @@ fn map_entry_arg(cx: &CallCx, p: &FloorParam, by_ref: bool, code: &str, got: &NT
     let (k, v) = cx.map_kv.ok_or_else(mismatch)?;
     let want = if matches!(p, FloorParam::MapKey(_)) { k } else { v };
     let owned = owned_arg(want, code, *got).ok_or_else(mismatch)?;
+    if !crate::native_value_repr::same_owned(want, crate::render_native::owned_nty(*got)) {
+        return Ok(if by_ref { format!("&({owned})") } else { owned });
+    }
     let own_value = matches!(got, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_));
     Ok(match (by_ref, own_value, dying_here) {
         // Borrow the caller's exact owned value or existing borrowed view.
@@ -330,7 +357,7 @@ fn map_entry_arg(cx: &CallCx, p: &FloorParam, by_ref: bool, code: &str, got: &NT
         (true, false, _) if *got == NTy::I64 => format!("&{code}"),
         (true, false, _) => format!("&{owned}"),
         // The caller's value, not read again: moved in.
-        (false, true, true) => format!("std::mem::take(&mut {code})"),
+        (false, true, true) if crate::render_native_rec::has_default(*got) => format!("std::mem::take(&mut {code})"),
         (false, _, _) => owned,
     })
 }
@@ -347,6 +374,10 @@ fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerErro
         NTy::Rec(j) if crate::render_native_rec::field_count(j) == 2 => ("t.f0.clone()".to_string(), "t.f1.clone()".to_string()),
         _ => return Err(mismatch()),
     };
+    let (got_k, got_v) = pair_kinds(*i).ok_or_else(mismatch)?;
+    let (want_k, want_v) = cx.map_kv.ok_or_else(mismatch)?;
+    let a = if crate::native_value_repr::same_owned(want_k, got_k) { a } else { owned_arg(want_k, &a, got_k).ok_or_else(mismatch)? };
+    let b = if crate::native_value_repr::same_owned(want_v, got_v) { b } else { owned_arg(want_v, &b, got_v).ok_or_else(mismatch)? };
     Ok(format!("{code}.iter().map(|t| ({a}, {b})).collect::<Vec<_>>()"))
 }
 
@@ -363,6 +394,16 @@ fn value_arg(cx: &CallCx, by_ref: bool, code: &str, got: &NTy) -> Result<String,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn map_entry_carriers_copy_only_matching_payload_representations() {
+        for kind in [NTy::Opt, NTy::Res, NTy::ResStr] {
+            assert!(owned_arg(kind, "entry", kind).is_some());
+            assert!(owned_arg(kind, "entry", NTy::I64).is_none());
+        }
+        assert!(owned_arg(NTy::Res, "entry", NTy::ResStr).is_none());
+        assert!(owned_arg(NTy::ResStr, "entry", NTy::Res).is_none());
+    }
 
     #[test]
     fn lexer_skips_literals_and_tracks_depth() {
@@ -389,6 +430,23 @@ mod tests {
         let (p, r) = rust_signature("pub fn almide_rt_x<T: Clone>(xs: &[T], n: i64) -> Result<i64, AlmideString> { x }").unwrap();
         assert_eq!(p, vec!["&[T]", "i64"]);
         assert_eq!(r, "Result<i64, AlmideString>");
+        let (p, r) = rust_signature("pub fn apply<A, F: Fn(A) -> Result<A, String> + Send>(xs: Vec<A>, f: F) -> Vec<A> { x }").unwrap();
+        assert_eq!(p, ["Vec<A>", "F"]);
+        assert_eq!(r, "Vec<A>");
+        let (p, r) = rust_signature("fn apply(f: std::rc::Rc<dyn Fn(i64) -> i64>, n: i64) -> i64 { x }").unwrap();
+        assert_eq!(p, ["std::rc::Rc<dyn Fn(i64) -> i64>", "i64"]);
+        assert_eq!(r, "i64");
+    }
+
+    #[test]
+    fn runtime_scanner_preserves_unsafe_impl_qualifier() {
+        let source = "unsafe impl Sync for Gate {}";
+        let items = top_level_items(source);
+        assert_eq!(items.len(), 1);
+        assert!(items[0].0 == ItemKind::Impl);
+        assert_eq!(items[0].1, "Gate");
+        assert_eq!(items[0].2, source);
+        assert_eq!(impl_parts(&lex(items[0].2)), Some((Some("Sync"), "Gate")));
     }
 
     /// The interpolation fold reads `@scalar_text` off the declaration: the

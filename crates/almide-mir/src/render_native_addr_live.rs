@@ -5,6 +5,9 @@
 /// of it. Every other handle of a reassigned local reads the one value the
 /// local holds over the handle's whole live range, as its rendered variable does.
 fn stale_handles(func: &MirFunction) -> BTreeSet<ValueId> {
+    let paths = address_branch_paths(&func.ops);
+    let compatible = |a: usize, b: usize| paths[a].iter().all(|(id, side)|
+        paths[b].iter().all(|(other, branch)| id != other || side == branch));
     let set_at: Vec<(usize, ValueId)> = func
         .ops
         .iter()
@@ -41,6 +44,7 @@ fn stale_handles(func: &MirFunction) -> BTreeSet<ValueId> {
         // The handle and every address derived from it, and where each is last read.
         let mut derived: BTreeSet<ValueId> = BTreeSet::from([*d]);
         let mut last = i;
+        let mut reads_at = Vec::new();
         for (j, later) in func.ops.iter().enumerate().skip(i + 1) {
             let mut reads = Vec::new();
             crate::mir_ops::op_reads(later, &mut reads);
@@ -48,6 +52,7 @@ fn stale_handles(func: &MirFunction) -> BTreeSet<ValueId> {
                 continue;
             }
             last = j;
+            reads_at.push(j);
             if let Op::IntBinOp {
                 dst,
                 op: IntOp::Add,
@@ -62,7 +67,9 @@ fn stale_handles(func: &MirFunction) -> BTreeSet<ValueId> {
                 derived.insert(*dst);
             }
         }
-        let crosses = set_at.iter().any(|(k, l)| *l == x && *k > i && *k <= last)
+        let crosses = set_at.iter().any(|(k, l)| *l == x && *k > i
+            && compatible(i, *k)
+            && reads_at.iter().any(|j| *k <= *j && compatible(*k, *j)))
             || loops.iter().any(|(start, end)| {
                 ((*start >= i && *start <= last) || (*end >= i && *end <= last))
                     && set_at
@@ -72,6 +79,25 @@ fn stale_handles(func: &MirFunction) -> BTreeSet<ValueId> {
         stale.extend(crosses.then_some(*d));
     }
     stale
+}
+
+/// Else's value is read in the then arm; EndIf's value in the else arm.
+/// Keep their operand paths before switching/closing the branch. A write in
+/// one arm cannot invalidate a handle used only by its sibling in the same
+/// iteration. Loop-edge checks stay conservative across iterations.
+fn address_branch_paths(ops: &[Op]) -> Vec<Vec<(usize, bool)>> {
+    let mut active = Vec::new();
+    let mut paths = Vec::with_capacity(ops.len());
+    for (i, op) in ops.iter().enumerate() {
+        paths.push(active.clone());
+        match op {
+            Op::IfThen { .. } => active.push((i, true)),
+            Op::Else { .. } => { if let Some((_, side)) = active.last_mut() { *side = false; } }
+            Op::EndIf { .. } => { active.pop(); }
+            _ => {}
+        }
+    }
+    paths
 }
 
 #[cfg(test)]
@@ -103,6 +129,17 @@ mod live_tests {
             ..Default::default()
         })
         .contains(&ValueId(1))
+    }
+    #[test]
+    fn sibling_branch_writes_do_not_reach_each_others_reads() {
+        let branch = || Op::IfThen { cond: ValueId(9), dst: None };
+        assert!(!stale(vec![handle(), branch(), assign(), Op::Else { val: None }, read(), Op::EndIf { val: None }]));
+        assert!(stale(vec![handle(), branch(), assign(), Op::Else { val: None }, read(), Op::EndIf { val: None }, read()]));
+        assert!(stale(vec![handle(), branch(), assign(), read(), Op::Else { val: None }, Op::EndIf { val: None }]));
+        // Re-entering the loop may select a different arm. A handle taken
+        // before the loop must retain the conservative back-edge rejection.
+        assert!(stale(vec![handle(), Op::LoopStart, branch(), assign(), Op::Else { val: None }, read(), Op::EndIf { val: None }, Op::LoopEnd]));
+        assert!(!stale(vec![Op::LoopStart, handle(), branch(), assign(), Op::Else { val: None }, read(), Op::EndIf { val: None }, Op::LoopEnd]));
     }
     #[test]
     fn finished_accumulation_does_not_invalidate_a_later_handle() {

@@ -174,10 +174,10 @@ fn rewrite_stmts(stmts: Vec<IrStmt>, vt: &mut Cx<'_>, changed: &mut bool) -> Vec
 }
 
 /// Lower a match with list patterns to an if/else chain.
-/// Uses the subject expression directly (no temp variable) to avoid
-/// type mismatches when borrow passes later change the parameter type.
+/// Evaluate a computed subject once before the length tests and projections.
 fn lower_list_match(subject: IrExpr, arms: Vec<IrMatchArm>, result_ty: &Ty, _vt: &mut Cx<'_>) -> IrExprKind {
-    build_list_if_chain(&subject, &arms, result_ty, _vt, 0, usize::MAX).kind
+    super::pass_list_pattern_nested::with_subject(subject, _vt,
+        |s, vt| build_list_if_chain(&s, &arms, result_ty, vt, 0, usize::MAX)).kind
 }
 
 /// `IrPattern::List` case of `build_list_if_chain`, extracted verbatim

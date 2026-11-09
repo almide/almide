@@ -156,9 +156,10 @@ fn native_sig_subset_check(
 /// refused: no leg turns that into a loop.
 fn recurses_on_a_heap_arg(f: &crate::MirFunction) -> bool {
     use crate::{CallArg, Op};
+    let borrowed_loops = crate::native_borrowed_tco::sites(f);
     f.ops.iter().enumerate().any(|(i, op)| {
         let Op::CallFn { name, args, dst: Some(d), .. } = op else { return false };
-        if *name != f.name || !args.iter().any(|a| matches!(a, CallArg::Handle(_))) {
+        if borrowed_loops.contains(&i) || *name != f.name || !args.iter().any(|a| matches!(a, CallArg::Handle(_))) {
             return false;
         }
         // Every release that erases to scope end (a typed list or carrier
@@ -237,14 +238,19 @@ fn is_string_result_ty(t: &almide_lang::types::Ty) -> bool {
 
 /// #4006 family C: rewrite every String-Ok Result window onto its carrier.
 fn rewrite_native_result_str_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
-    let fns: std::collections::BTreeSet<String> = ir
-        .functions
-        .iter()
+    rewrite_native_result_str_windows_over(ir.functions.iter(), functions);
+}
+
+fn rewrite_native_result_str_windows_over<'a>(
+    decls: impl Iterator<Item = &'a almide_ir::IrFunction>, functions: &mut [crate::MirFunction],
+) {
+    let decl_list: Vec<_> = decls.collect();
+    let fns: std::collections::BTreeSet<String> = decl_list.iter()
         .filter(|f| is_string_result_ty(&f.ret_ty))
         .map(|f| f.name.as_str().to_string())
         .collect();
     let decls: std::collections::HashMap<&str, &almide_ir::IrFunction> =
-        ir.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+        decl_list.iter().map(|f| (f.name.as_str(), *f)).collect();
     for f in functions.iter_mut() {
         let params: Vec<crate::ValueId> = match decls.get(f.name.as_str()) {
             Some(d) if d.params.len() == f.params.len() => d
@@ -256,7 +262,7 @@ fn rewrite_native_result_str_windows(ir: &almide_ir::IrProgram, functions: &mut 
                 .collect(),
             _ => Vec::new(),
         };
-        let carriers = heap_carrier_values(ir, f);
+        let carriers = heap_carrier_values_in(&|n: &str| decls.get(n).copied(), f);
         crate::native_result_str_rewrite::rewrite_result_str_ops(f, &fns, &params, &carriers);
     }
 }
@@ -299,8 +305,13 @@ fn heap_carrier_values_in<'a>(
     f: &crate::MirFunction,
 ) -> std::collections::BTreeSet<crate::ValueId> {
     let sig = |name: &str| -> Option<crate::render_native_addr::CarrierSig> {
-        let d = decl(name)?;
-        Some((d.params.iter().map(|p| heap_carrier_of(&p.ty)).collect(), heap_carrier_of(&d.ret_ty)))
+        if let Some(d) = decl(name) {
+            return Some((d.params.iter().map(|p| heap_carrier_of(&p.ty)).collect(), heap_carrier_of(&d.ret_ty)));
+        }
+        // Lifted callbacks carry their checked signature in lambda_sigs,
+        // including heap Result payloads. Their leading env is no carrier.
+        let (params, ret) = crate::lambda_sigs::get(name)?;
+        Some((std::iter::once(None).chain(params.iter().map(heap_carrier_of)).collect(), heap_carrier_of(&ret)))
     };
     let own = sig(f.name.as_str()).unwrap_or_default();
     crate::render_native_addr::carrier_values(f, &own, &sig).into_keys().collect()
@@ -391,7 +402,7 @@ fn rewrite_native_option_windows(ir: &almide_ir::IrProgram, linked: &[LinkedSelf
 }
 
 fn rewrite_native_result_windows(ir: &almide_ir::IrProgram, functions: &mut [crate::MirFunction]) {
-    rewrite_native_result_windows_over(ir.functions.iter(), functions)
+    rewrite_native_result_windows_over(ir.functions.iter(), functions, &NativeHostResults::new())
 }
 
 /// [`rewrite_native_result_windows`] over the declarations of several
@@ -399,6 +410,7 @@ fn rewrite_native_result_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
 fn rewrite_native_result_windows_over<'a>(
     decls: impl Iterator<Item = &'a almide_ir::IrFunction>,
     functions: &mut [crate::MirFunction],
+    host_results: &NativeHostResults,
 ) {
 // T1-3: rewrite the stereotyped Result block windows onto the native
 // carrier prims (NTy::Res). Native-leg only — the wasm renderer never
@@ -436,7 +448,8 @@ fn rewrite_native_result_windows_over<'a>(
             _ => Vec::new(),
         };
         let carriers = heap_carrier_values_in(&|n: &str| decls.get(n).copied(), f);
-        crate::native_result_rewrite::rewrite_result_ops(f, &result_fns, &res_params, &carriers);
+        let host_values = host_results.get(&f.name).cloned().unwrap_or_default();
+        crate::native_result_rewrite::rewrite_result_ops_with_host_values(f, &result_fns, &res_params, &carriers, &host_values);
     }
 }
 }
@@ -470,8 +483,7 @@ pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<Nat
 /// the wasm leg's (`cert_project::caps`) for the same program.
 pub fn native_capability_reach(source: &str) -> Result<std::collections::BTreeSet<u32>, LowerError> {
     let (_, _, functions) = render_native_parts(source)?;
-    let program: std::collections::BTreeMap<String, crate::MirFunction> =
-        functions.into_iter().map(|f| (f.name.to_string(), f)).collect();
+    let program = crate::native_hof::capability_program(functions);
     let mut seen = std::collections::BTreeSet::new();
     Ok(crate::certificate::reachable_caps("main", &program, &mut seen).into_iter().map(|c| c.id()).collect())
 }

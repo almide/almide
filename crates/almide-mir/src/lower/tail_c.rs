@@ -497,7 +497,9 @@ impl LowerCtx {
         // Any heap payload: a tuple or record, and also a `??` fallback or a
         // call (#3780's `ok(env.get(k) ?? "unset")`). The bind below refuses
         // whatever it can only defer, so widening the shape stays honest.
-        if !is_heap_ty(&payload.ty) {
+        // A bound payload has already tried the direct constructor route.
+        // Rebinding it again cannot make progress and recurses indefinitely.
+        if !is_heap_ty(&payload.ty) || matches!(payload.kind, IrExprKind::Var { .. }) {
             return None;
         }
         let mark = self.ops.len();
@@ -537,3 +539,22 @@ impl LowerCtx {
 }
 
 include!("closure_variant_capture.rs");
+
+#[cfg(test)]
+mod result_payload_retry_tests {
+    use super::*;
+    #[test]
+    fn bound_result_payload_does_not_retry_an_identical_constructor() {
+        use almide_lang::types::constructor::TypeConstructorId as C;
+        let mut ctx = LowerCtx::default();
+        let ty = Ty::Tuple(vec![Ty::String, Ty::Int].into());
+        let payload = IrExpr { kind: IrExprKind::Var { id: VarId(0) }, ty: ty.clone(), span: None, def_id: None };
+        let ctor = IrExpr { kind: IrExprKind::ResultOk { expr: Box::new(payload) },
+            ty: Ty::Applied(C::Result, vec![ty, Ty::String].into()), span: None, def_id: None };
+        ctx.value_of.insert(VarId(0), ValueId(0));
+        ctx.param_values.insert(ValueId(0));
+        ctx.materialized_aggregates.insert(ValueId(0));
+        assert!(ctx.lower_result_ctor_bound_payload(&ctor, &ctor.ty).is_none());
+        assert!(ctx.ops.is_empty(), "a declined retry must leave the original binding intact");
+    }
+}

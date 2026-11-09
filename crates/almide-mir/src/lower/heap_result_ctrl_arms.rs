@@ -16,6 +16,14 @@ impl LowerCtx {
     /// `_` arm): a suffix split cannot change which arm commits.
     fn lower_heap_result_arm_ctrl(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         match &arm.kind {
+            IrExprKind::IndexAccess { .. } if crate::lower::owned_tco_slots() => {
+                let mark = self.live_heap_handles.len();
+                let obj = self.lower_owned_heap_field(arm)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.live_heap_handles.retain(|v| *v != obj);
+                self.drop_arm_locals(mark);
+                Some(obj)
+            }
             IrExprKind::Lambda { params, body, .. } if matches!(result_ty, Ty::Fn { .. }) => {
                 let mark = self.live_heap_handles.len();
                 let obj = self.lift_lambda(params, body, result_ty)?;
@@ -335,6 +343,8 @@ impl LowerCtx {
         let arm_mark = self.live_heap_handles.len();
         let obj = self
             .lower_pure_module_value_call(module.as_str(), func.as_str(), args, result_ty)
+            .inspect_err(|e| crate::trace::trace("ALMIDE_DBG_ELEM", ||
+                format!("[heap-if-arm] {module}.{func} declined: {e:?}")))
             .ok()?;
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);

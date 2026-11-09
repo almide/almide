@@ -296,6 +296,7 @@ impl LowerCtx {
         use almide_ir::BinOp;
         let &StrListLiteralClass { elem_str, elem_list_scalar, .. } = class;
         match &e.kind {
+            IrExprKind::UnwrapOr { .. } => elem_str && crate::lower::owned_tco_slots(),
             IrExprKind::LitStr { .. } | IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => true,
             // A `${...}` interpolation element (`["", "[[${emit_path(...)}]]"]` — the toml
             // emit_sections shape): a fresh owned String, moved into the slot exactly like a concat.
@@ -304,7 +305,8 @@ impl LowerCtx {
             // An inner scalar-list LITERAL (`[1.0, 2.0]` in a List[List[Float]]) —
             // buildable iff every inner element is a lowerable scalar (the flat
             // builder itself re-checks; a non-scalar inner defers there).
-            IrExprKind::List { .. } => elem_list_scalar,
+            IrExprKind::List { .. } => elem_list_scalar || (crate::lower::owned_tco_slots()
+                && (class.elem_list_str || class.elem_list_flat)),
             // A RECORD-CTOR VARIANT element (`[Click { x, y }, KeyPress { key }, …]` — the
             // event-list shape): a `Record` literal whose NAME is a registered constructor is
             // a TAGGED variant value, materialized via `try_lower_variant_ctor` below (NOT the
@@ -345,6 +347,8 @@ impl LowerCtx {
             ref elem_recdrop, elem_flat_variant, ref elem_rich_variant, ..
         } = class;
         match &e.kind {
+            IrExprKind::Call { target: CallTarget::Computed { .. }, .. } =>
+                class.elem_str && crate::lower::owned_tco_slots(),
             IrExprKind::Record { name: Some(n), .. }
                 if (elem_flat_variant || elem_rich_variant.is_some())
                     && self.variant_layouts.is_ctor_for(n.as_str(), &e.ty) =>
@@ -410,6 +414,12 @@ impl LowerCtx {
         } = class;
         let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
         let ev = match &elem.kind {
+            IrExprKind::Call { target: CallTarget::Computed { .. }, .. }
+                if class.elem_str && crate::lower::owned_tco_slots() => {
+                let owned = self.lower_owned_heap_field(elem)?;
+                self.live_heap_handles.retain(|v| *v != owned);
+                owned
+            }
             IrExprKind::LitStr { value: s } => {
                 let obj = self.fresh_value();
                 self.ops.push(Op::Alloc { dst: obj, repr: ptr, init: Init::Str(s.clone()) });
@@ -453,6 +463,15 @@ impl LowerCtx {
             // fresh owned block moved into the outer slot.
             IrExprKind::List { elements: inner } if elem_list_scalar => {
                 self.try_lower_scalar_list_slots(inner)?
+            }
+            // The outer class already describes the full recursive drop.
+            // Build a nested literal through the same typed field builder as
+            // a record field, then transfer its owned credit into this list.
+            IrExprKind::List { .. } if crate::lower::owned_tco_slots()
+                && (class.elem_list_str || class.elem_list_flat) => {
+                let owned = self.lower_owned_heap_field(elem)?;
+                self.live_heap_handles.retain(|v| *v != owned);
+                owned
             }
             IrExprKind::Record { .. } => self.try_lower_scalar_record_construct(elem)?,
             // A scalar-only tuple literal element (`(1, 100)`) — materialize a fresh OWNED
@@ -505,6 +524,10 @@ impl LowerCtx {
     ) -> Option<ValueId> {
         let &StrListLiteralClass { elem_str, elem_value, elem_list_flat, elem_flat_variant, ref elem_rich_variant, .. } = class;
         let ev = match &elem.kind {
+            IrExprKind::UnwrapOr { expr, fallback }
+                if elem_str && crate::lower::owned_tco_slots() => {
+                self.try_lower_option_unwrap_or(expr, fallback, false)?
+            }
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
                 if elem_value || elem_str || elem_list_flat =>
             {
@@ -574,6 +597,14 @@ impl LowerCtx {
     /// and [`Self::lower_str_list_literal_elem`]; this fn keeps the original order —
     /// classify → admit → gate → alloc → per-element move-in — unchanged.
     pub(crate) fn try_lower_str_list_literal(&mut self, value: &IrExpr) -> Option<ValueId> {
+        if crate::lower::owned_tco_slots() {
+            self.speculate(|ctx| ctx.build_str_list_literal(value))
+        } else {
+            self.build_str_list_literal(value)
+        }
+    }
+
+    fn build_str_list_literal(&mut self, value: &IrExpr) -> Option<ValueId> {
         let IrExprKind::List { elements } = &value.kind else {
             return None;
         };
@@ -582,6 +613,7 @@ impl LowerCtx {
             return None;
         }
         if !self.str_list_literal_elems_lowerable(elements, &class) {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[str-list] shape declined: {elements:?}"));
             return None;
         }
         let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
@@ -589,6 +621,7 @@ impl LowerCtx {
         self.ops.push(Op::ConstInt { dst: n, value: elements.len() as i64 });
         let list = self.fresh_value();
         self.ops.push(Op::Alloc { dst: list, repr: ptr, init: Init::DynListStr { len: n } });
+        self.aggregate_blocks.insert(list, crate::render_native_rec::block_key(&value.ty));
         // A `List[Value]` drops via `Op::DropListValue` (recursive `$__drop_value` per element); a
         // String/aggregate list via the flat-element `Op::DropListStr`. Marking the right set is what
         // makes the scope-end drop reclaim each element's nested payload (no leak).
@@ -606,7 +639,10 @@ impl LowerCtx {
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });
         for (i, elem) in elements.iter().enumerate() {
-            let ev = self.lower_str_list_literal_elem(elem, &class)?;
+            let Some(ev) = self.lower_str_list_literal_elem(elem, &class) else {
+                crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[str-list] lowering declined: {elem:?}"));
+                return None;
+            };
             let off = self.fresh_value();
             self.ops.push(Op::ConstInt { dst: off, value: 12 + (i as i64) * 8 });
             let slot = self.fresh_value();
@@ -633,3 +669,28 @@ include!("binds_p4.rs");
 include!("owned_heap_field.rs");
 include!("binds_p4_b.rs");
 include!("binds_p4_b_b.rs");
+
+#[cfg(test)]
+mod native_capture_tests {
+    use super::*;
+    #[test]
+    fn recursive_capture_classes_require_native_mode_and_a_checked_type() {
+        use almide_lang::types::constructor::TypeConstructorId::Map;
+        let ty = Ty::Applied(Map, vec![Ty::String, Ty::String].into());
+        let ctx = LowerCtx::default();
+        let captured = || vec![(VarId(0), ty.clone())];
+        let _types = crate::render_native_rec::install_derived(&Default::default(),
+            &Default::default(), vec![ty.clone()], Default::default());
+        let _off = crate::lower::OwnedTcoSlotsGuard::set(false);
+        assert!(ctx.partition_capture_drop_classes(captured()).is_none());
+        {
+            let _on = crate::lower::OwnedTcoSlotsGuard::set(true);
+            let layout = ctx.partition_capture_drop_classes(captured()).unwrap();
+            assert_eq!(layout.handle_slots(), 1);
+            let unknown = Ty::Named(almide_lang::intern::sym("UndeclaredCapture"), Default::default());
+            assert!(ctx.partition_capture_drop_classes(vec![(VarId(0), unknown)]).is_none());
+        }
+        assert!(ctx.partition_capture_drop_classes(captured()).is_none());
+    }
+
+}

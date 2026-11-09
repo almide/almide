@@ -81,10 +81,37 @@ impl LowerCtx {
         a: &IrExpr,
         out: &mut Vec<CallArg>,
     ) -> Result<Option<ArgOutcome>, LowerError> {
+        // Unit has one value, but producing it may run effects. Evaluate at
+        // this argument's position exactly once, then retain its zero lane.
+        if a.ty == Ty::Unit {
+            if matches!(a.kind, IrExprKind::Unit | IrExprKind::Var { .. }
+                | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+                | IrExprKind::IndexAccess { .. }) {
+                let value = self.lower_scalar_value(a).ok_or_else(||
+                    LowerError::Unsupported("Unit argument value could not be lowered".into()))?;
+                return Ok(Some(ArgOutcome::Value(CallArg::Scalar(value))));
+            }
+            self.lower_stmt_expr(a)?;
+            return Ok(Some(ArgOutcome::Value(CallArg::Imm(0))));
+        }
         let _ = &out;
         Ok(Some(ArgOutcome::Value(match &a.kind {
+            // A block is evaluated at this argument's position. Binding its
+            // result uses the ordinary owned-value / scalar-copy discipline,
+            // so later operands cannot observe a view of its mutable tail.
+            IrExprKind::Block { expr: Some(_), .. } => {
+                let var = self.fresh_synth_var();
+                self.lower_bind(var, &a.ty, a)?;
+                let value = IrExpr { kind: IrExprKind::Var { id: var }, ty: a.ty.clone(), span: a.span, def_id: None };
+                self.lower_call_arg_into(&value, out)?;
+                return Ok(Some(ArgOutcome::Pushed));
+            }
             IrExprKind::Var { id } if matches!(a.ty, Ty::Fn { .. }) => {
-                CallArg::Scalar(self.value_or_global(*id)?)
+                let v = self.value_or_global(*id)?;
+                // Tracked function values are borrowed closure blocks, including
+                // a middleware's function argument. Only raw function indices
+                // use the scalar lane; call-mode witnesses follow this choice.
+                if self.closure_values.contains(&v) { CallArg::Handle(v) } else { CallArg::Scalar(v) }
             }
             IrExprKind::Var { id } if is_heap_ty(&a.ty) => {
                 let v = self.value_or_global(*id)?;
@@ -329,6 +356,12 @@ impl LowerCtx {
                 // component in STRICT mode (a Const-0 would silently corrupt `len`).
                 Some(dst) => {
                     let repr = repr_of(ty)?;
+                    if crate::lower::owned_tco_slots() {
+                        // Each selected arm produced a checked heap value. Keep
+                        // its Result/Option tag layout when this match is itself
+                        // the subject of another match (e.g. error carry).
+                        self.seed_variant_value_shape(dst, ty);
+                    }
                     self.materialized_call_arg(dst, repr, ty)
                 }
                 None => {

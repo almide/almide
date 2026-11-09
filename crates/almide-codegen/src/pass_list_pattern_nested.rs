@@ -32,6 +32,29 @@ use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId, VariantPayload};
 use almide_base::intern::Sym;
 
+/// Length tests, element bindings and guard fallthrough all read the same
+/// computed scrutinee. A parameter/local already has a stable identity for
+/// the later borrow passes; a call or projection needs a named temporary.
+pub(crate) fn with_subject(
+    subject: IrExpr,
+    cx: &mut Cx<'_>,
+    lower: impl FnOnce(IrExpr, &mut Cx<'_>) -> IrExpr,
+) -> IrExpr {
+    if matches!(subject.kind, IrExprKind::Var { .. }) { return lower(subject, cx); }
+    let ty = subject.ty.clone();
+    let span = subject.span;
+    let var = cx.vars.alloc_fresh("list_pattern_subject", ty.clone(), Mutability::Let, None);
+    let body = lower(IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span, def_id: None }, cx);
+    let result_ty = body.ty.clone();
+    IrExpr {
+        kind: IrExprKind::Block {
+            stmts: vec![IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: subject }, span }],
+            expr: Some(Box::new(body)),
+        },
+        ty: result_ty, span, def_id: None,
+    }
+}
+
 /// One case of a declared variant: its enum, the enum's generic parameter
 /// names, and its payload.
 #[derive(Clone)]

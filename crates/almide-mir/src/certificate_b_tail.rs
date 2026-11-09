@@ -197,6 +197,11 @@ pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, 
     for (i, op) in func.ops.iter().enumerate() {
         scan.call_move = func.call_moves.contains(&i);
         scan.step(op);
+        if crate::mir_wellformed::aborts_before_arm_end(&func.ops, i) {
+            let mut objects: BTreeSet<_> = scan.s.of.values().copied().collect();
+            objects.extend(scan.paths.retired.iter().copied());
+            for object in objects { scan.s.event(object, 't'); }
+        }
     }
 
     // Defensive: a dangling IfThen (no EndIf — malformed MIR) still flushes, so

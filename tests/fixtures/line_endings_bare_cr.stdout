@@ -1,0 +1,65 @@
+cr-end
+  lines   'abc<CR>'
+  read    'abc<CR>'
+  fold    'abc<CR>'
+  fold_i  5
+  fold_!  5
+  each    'abc<CR>'
+cr-cr-end
+  lines   'abc<CR><CR>'
+  read    'abc<CR><CR>'
+  fold    'abc<CR><CR>'
+  fold_i  6
+  fold_!  6
+  each    'abc<CR><CR>'
+cr-ends-last-line
+  lines   'a' 'bc<CR>'
+  read    'a' 'bc<CR>'
+  fold    'a''bc<CR>'
+  fold_i  204
+  fold_!  204
+  each    'a'
+  each    'bc<CR>'
+crlf-end
+  lines   'abc'
+  read    'abc'
+  fold    'abc'
+  fold_i  4
+  fold_!  4
+  each    'abc'
+lf-end
+  lines   'abc'
+  read    'abc'
+  fold    'abc'
+  fold_i  4
+  fold_!  4
+  each    'abc'
+empty
+  lines   
+  read    
+  fold    
+  fold_i  0
+  fold_!  0
+lone-cr
+  lines   '<CR>'
+  read    '<CR>'
+  fold    '<CR>'
+  fold_i  2
+  fold_!  2
+  each    '<CR>'
+crlf-then-cr
+  lines   '' '<CR>'
+  read    '' '<CR>'
+  fold    '''<CR>'
+  fold_i  102
+  fold_!  102
+  each    ''
+  each    '<CR>'
+cr-mid-and-doubled
+  lines   'a<CR>b<CR>' '<CR>c<CR>'
+  read    'a<CR>b<CR>' '<CR>c<CR>'
+  fold    'a<CR>b<CR>''<CR>c<CR>'
+  fold_i  504
+  fold_!  504
+  each    'a<CR>b<CR>'
+  each    '<CR>c<CR>'

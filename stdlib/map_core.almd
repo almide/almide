@@ -201,12 +201,19 @@ fn __map_eqm_at(ah: Int, an: Int, bh: Int, bn: Int, bcap: Int, i: Int) -> Bool =
   }
 
 fn map_eq(a: Map[Int, Int], b: Map[Int, Int]) -> Bool = {
-  let ah = prim.handle(a)
-  let bh = prim.handle(b)
-  let an = prim.load32(ah + 4)
-  let bn = prim.load32(bh + 4)
-  if an != bn then false
-  else __map_eqm_at(ah, an, bh, bn, prim.load32(bh + 8), 0)
+  if map.len(a) != map.len(b) then false
+  else {
+    var same = true
+    for (k, v) in a {
+      if same then {
+        same = match map.get(b, k) {
+          some(other) => v == other,
+          none => false,
+        }
+      } else ()
+    }
+    same
+  }
 }
 
 // Copy all `len` entries (key+value pairs) from sh to rh.

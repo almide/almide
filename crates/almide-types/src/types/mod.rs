@@ -6,6 +6,7 @@ mod heap;
 mod unify;
 pub mod constructor;
 pub mod extern_abi;
+pub mod fan;
 mod ty_vec;
 
 pub use ty_vec::TyVec;

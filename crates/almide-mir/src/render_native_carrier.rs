@@ -41,6 +41,10 @@ fn len_tagged(i: u16) -> bool {
     result_payloads(i).is_some_and(|(o, e)| o == NTy::I64 && e == NTy::I64)
 }
 
+fn scalar_ok(i: u16) -> bool {
+    result_payloads(i).is_some_and(|(o, _)| o == NTy::I64)
+}
+
 /// The i64 a scalar payload slot holds for value `v`.
 fn scalar_rhs(tys: &BTreeMap<ValueId, NTy>, v: ValueId) -> Result<String, LowerError> {
     match tys.get(&v) {
@@ -178,6 +182,22 @@ fn close_over_edges(ty: &mut BTreeMap<ValueId, u16>, edges: &[(ValueId, ValueId)
     }
 }
 
+/// Compare a proven binary tag (possibly inverted) against 0 or 1. The
+/// boolean records which original tag side a true predicate selects.
+fn tag_comparison(
+    op: crate::IntOp, a: ValueId, b: ValueId,
+    consts: &BTreeMap<ValueId, i64>, tags: &BTreeMap<ValueId, (ValueId, bool)>,
+) -> Option<(ValueId, bool)> {
+    if !matches!(op, crate::IntOp::Eq | crate::IntOp::Ne) { return None; }
+    [(a, b), (b, a)].into_iter().find_map(|(tag, constant)| {
+        let &(root, side) = tags.get(&tag)?;
+        let &n = consts.get(&constant)?;
+        if !matches!(n, 0 | 1) { return None; }
+        let positive = (op == crate::IntOp::Eq) == (n == 1);
+        Some((root, if positive { side } else { !side }))
+    })
+}
+
 /// The side each hoisted payload read `op` reads is used under (`None` once
 /// two uses disagree).
 fn note_hoisted_uses(
@@ -205,10 +225,12 @@ fn note_hoisted_uses(
 pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
     let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
     let mut at: BTreeMap<ValueId, (ValueId, i64)> = BTreeMap::new();
-    let mut tags: BTreeMap<ValueId, ValueId> = BTreeMap::new();
+    let mut tags: BTreeMap<ValueId, (ValueId, bool)> = BTreeMap::new();
     let mut reads: BTreeMap<ValueId, ValueId> = BTreeMap::new();
     let mut sides: BTreeMap<ValueId, Option<bool>> = BTreeMap::new();
     let mut arms: Vec<(Option<ValueId>, bool)> = Vec::new();
+    let mutable: std::collections::BTreeSet<_> = func.ops.iter().filter_map(|op|
+        if let Op::SetLocal { local, .. } = op { Some(*local) } else { None }).collect();
     for op in &func.ops {
         // Uses first: a read used under a tag test of its own block.
         note_hoisted_uses(op, &reads, &arms, &mut sides);
@@ -219,12 +241,12 @@ pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
         };
         if let Some(root) = changed {
             for (read, base) in &reads { if *base == root { sides.insert(*read, None); } }
-            tags.retain(|_, base| *base != root);
+            tags.retain(|key, (base, _)| *key != root && *base != root);
             for (base, _) in &mut arms { if *base == Some(root) { *base = None; } }
         }
         match op {
             Op::ConstInt { dst, value } => {
-                consts.insert(*dst, *value);
+                if !mutable.contains(dst) { consts.insert(*dst, *value); }
             }
             Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
                 at.insert(*d, (args[0], 0));
@@ -239,7 +261,7 @@ pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
                 // word lands here too; only a Result's payload read asks).
                 if let Some(&(r, o)) = at.get(&args[0]) {
                     if o == RESULT_TAG_OFFSET || o == i64::from(BLOCK_LEN_OFFSET) {
-                        tags.insert(*d, r);
+                        if !mutable.contains(d) { tags.insert(*d, (r, true)); }
                     }
                 }
             }
@@ -250,10 +272,16 @@ pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
                     }
                 }
             }
-            Op::IfThen { cond, .. } => arms.push((tags.get(cond).copied(), true)),
+            Op::IntBinOp { dst, op: cmp @ (crate::IntOp::Eq | crate::IntOp::Ne), a, b } => {
+                if !mutable.contains(dst) {
+                    if let Some(tag) = tag_comparison(*cmp, *a, *b, &consts, &tags) { tags.insert(*dst, tag); }
+                }
+            }
+            Op::IfThen { cond, .. } => arms.push(tags.get(cond).copied()
+                .map(|(r, s)| (Some(r), s)).unwrap_or((None, true))),
             Op::Else { .. } => {
                 if let Some(a) = arms.last_mut() {
-                    a.1 = false;
+                    a.1 = !a.1;
                 }
             }
             Op::EndIf { .. } => {
@@ -283,6 +311,9 @@ fn emit(out: &mut String, indent: usize, s: &str) {
 
 /// The owned copy of `v` as a slot of kind `k` (a carrier payload write).
 fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy) -> Result<String, LowerError> {
+    if st.known_none.contains(&v) && k.rec().is_some_and(|i| option_payload(i).is_some()) {
+        return Ok("None".into());
+    }
     // A scalar Option is Copy and already materialized by the Option
     // rewrite. It is a typed payload, not an address into an allocation.
     if crate::native_value_repr::same_owned(k, NTy::Opt) && tys.get(&v) == Some(&NTy::Opt) && !st.addrs.contains_key(&v) {
@@ -292,8 +323,14 @@ fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy)
         return Err(wall(format!("native: a {:?} carrier payload that is not a heap handle", tys.get(&v))));
     };
     let g = tys.get(&sv.base).copied();
+    if st.empty_lists.contains(&sv.base) && (matches!(k, NTy::Vec | NTy::VecStr)
+        || k.rec().is_some_and(|i| crate::render_native_rec::list_elem(i).is_some())) {
+        return Ok("Vec::new()".into());
+    }
     match g {
         Some(g) if field_accepts(k, g) => owned_from(&var(sv.base), g).ok_or_else(|| wall("native: an unowned carrier payload")),
+        Some(g) if crate::native_value_repr::tuple_copy(&var(sv.base), g, k).is_some() =>
+            Ok(crate::native_value_repr::tuple_copy(&var(sv.base), g, k).unwrap()),
         g => Err(wall(format!("native: a {g:?} value as a {k:?} carrier payload"))),
     }
 }
@@ -309,6 +346,14 @@ pub(super) fn render_carrier_op(
 ) -> Option<Result<bool, LowerError>> {
     let mut cx = CarrierCx { st, tys, out, indent };
     match op {
+        Op::IntBinOp { dst, op: cmp @ (crate::IntOp::Eq | crate::IntOp::Ne), a, b } => {
+            if ![dst, a, b].iter().any(|v| cx.st.set_locals.contains(v)) {
+                if let Some(tag) = tag_comparison(*cmp, *a, *b, &cx.st.consts, &cx.st.res_tags) {
+                    cx.st.res_tags.insert(*dst, tag);
+                }
+            }
+            None
+        }
         Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => {
             cx.track_arms(op);
             None
@@ -335,6 +380,9 @@ pub(super) fn render_carrier_op(
         }
         Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args } if args.len() == 2 => {
             let (ad, i) = cx.base_of(&args[0])?;
+            if option_payload(i).is_some() {
+                return Some(cx.store_option_tag(ad, args));
+            }
             let (o, e) = result_payloads(i)?;
             Some(cx.store_tag(ad, args, o, e))
         }
@@ -351,6 +399,19 @@ struct CarrierCx<'a> {
 }
 
 impl CarrierCx<'_> {
+    fn store_option_tag(&mut self, ad: Addr, args: &[ValueId]) -> Result<bool, LowerError> {
+        let tag = self.st.option_tags.remove(&args[0])
+            .ok_or_else(|| wall("native: an Option tag write outside its checked constructor"))?;
+        if ad.off != i64::from(BLOCK_LEN_OFFSET) || ad.idx.is_some()
+            || self.st.consts.get(&args[1]) != Some(&i64::from(tag)) {
+            return Err(wall("native: an Option constructor's tag changed"));
+        }
+        // The fresh allocation is None; a committed payload store already
+        // assigned Some. No arbitrary length mutation is erased here.
+        if !tag { self.emit(&format!("{} = None;", var(ad.base))); }
+        Ok(true)
+    }
+
     fn emit(&mut self, s: &str) {
         emit(self.out, self.indent, s);
     }
@@ -364,12 +425,13 @@ impl CarrierCx<'_> {
     fn track_arms(&mut self, op: &Op) {
         match op {
             Op::IfThen { cond, .. } => {
-                let res = self.st.res_tags.get(cond).copied();
-                self.st.arms.push((res, true));
+                let (res, side) = self.st.res_tags.get(cond).copied()
+                    .map(|(r, s)| (Some(r), s)).unwrap_or((None, true));
+                self.st.arms.push((res, side));
             }
             Op::Else { .. } => {
                 if let Some(a) = self.st.arms.last_mut() {
-                    a.1 = false;
+                    a.1 = !a.1;
                 }
             }
             _ => {
@@ -380,7 +442,20 @@ impl CarrierCx<'_> {
 
     fn alloc(&mut self, op: &Op, dst: ValueId, init: &Init) -> Option<Result<bool, LowerError>> {
         match init {
-            Init::ResOkScalar { payload } if self.st.alloc_rec.get(&dst).is_some_and(|i| len_tagged(*i)) => {
+            Init::ResErrStr { piece } if self.st.alloc_rec.get(&dst).is_some_and(|i| result_payloads(*i).is_some()) => {
+                let i = self.st.alloc_rec[&dst];
+                let (_, expected) = result_payloads(i).unwrap();
+                let rhs = self.tys.get(piece).copied().and_then(|got| {
+                    if field_accepts(expected, got) { owned_from(&var(*piece), got) }
+                    else { crate::native_value_repr::tuple_copy(&var(*piece), got, expected) }
+                }).ok_or_else(|| wall("native: semantic Err payload disagrees with its declared carrier"));
+                Some(rhs.map(|rhs| {
+                    self.tys.insert(dst, NTy::Rec(i));
+                    self.emit(&format!("let mut {}: {} = Err({rhs});", var(dst), struct_name(i)));
+                    true
+                }))
+            }
+            Init::ResOkScalar { payload } if self.st.alloc_rec.get(&dst).is_some_and(|i| scalar_ok(*i)) => {
                 let i = self.st.alloc_rec[&dst];
                 self.tys.insert(dst, NTy::Rec(i));
                 Some(scalar_rhs(self.tys, *payload).map(|rhs| {
@@ -430,7 +505,7 @@ impl CarrierCx<'_> {
     fn tag_read(&mut self, d: ValueId, b: &str, base: ValueId, err: bool) -> Result<bool, LowerError> {
         self.tys.insert(d, NTy::I64);
         if err {
-            self.st.res_tags.insert(d, base);
+            if !self.st.set_locals.contains(&d) { self.st.res_tags.insert(d, (base, true)); }
             self.emit(&format!("let mut {}: i64 = {b}.is_err() as i64;", var(d)));
         } else {
             self.emit(&format!("let mut {}: i64 = {b}.is_some() as i64;", var(d)));
@@ -444,15 +519,16 @@ impl CarrierCx<'_> {
         if len_word && option_payload(i).is_some() {
             return self.tag_read(d, &b, ad.base, false);
         }
-        if len_word && len_tagged(i) {
+        if len_word && scalar_ok(i) {
             return self.tag_read(d, &b, ad.base, true);
         }
-        if width == 8 && len_tagged(i) && rec_slot(&ad) == Some(0) {
+        if width == 8 && scalar_ok(i) && rec_slot(&ad) == Some(0) {
             let arm = self.st.arms.iter().rev().find(|(r, _)| *r == Some(ad.base)).map(|(_, then)| *then);
             let read = match arm.or_else(|| self.st.hoisted.get(&d).copied()) {
-                Some(true) => format!("match &{b} {{ Err(v) => *v, Ok(_) => 0 }}"),
+                Some(true) if len_tagged(i) => format!("match &{b} {{ Err(v) => *v, Ok(_) => 0 }}"),
                 Some(false) => format!("match &{b} {{ Ok(v) => *v, Err(_) => 0 }}"),
-                None => format!("match &{b} {{ Ok(v) | Err(v) => *v }}"),
+                None if len_tagged(i) => format!("match &{b} {{ Ok(v) | Err(v) => *v }}"),
+                _ => return Err(wall("native: a scalar Result payload read outside its Ok guard")),
             };
             self.tys.insert(d, NTy::I64);
             self.emit(&format!("let mut {}: i64 = {read};", var(d)));
@@ -582,9 +658,12 @@ impl CarrierCx<'_> {
                 true
             });
         }
-        if len_tagged(i) {
+        if scalar_ok(i) {
             // A one-slot block of this Result is its Err (length word 1).
-            return scalar_rhs(self.tys, v).map(|rhs| {
+            let (_, err) = result_payloads(i).unwrap();
+            let rhs = if err == NTy::I64 { scalar_rhs(self.tys, v) }
+                else { payload_rhs(self.st, self.tys, v, err) };
+            return rhs.map(|rhs| {
                 self.emit(&format!("{} = Err({rhs});", var(ad.base)));
                 true
             });

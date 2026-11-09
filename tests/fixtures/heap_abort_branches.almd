@@ -1,0 +1,24 @@
+type Box = { label: String, values: List[String] }
+fn from_option(x: Box?) -> Box = match x {
+  some(value) => value,
+  none => panic("missing box"),
+}
+fn choose_list(n: Int, xs: List[String]) -> List[String] =
+  if n > 0 then xs else panic("bad list")
+fn choose_text(n: Int, s: String) -> String =
+  if n < 0 then panic("bad text") else s
+fn choose_tuple(n: Int, s: String) -> (String, List[String]) =
+  if n > 0 then (s, [s, "tuple"]) else panic("bad tuple")
+fn main() -> Unit = {
+  let original = Box { label: "owned", values: ["a", "b"] }
+  let alias = original
+  let selected = from_option(some(original))
+  println(selected.label)
+  println(list.join(choose_list(1, selected.values), ":"))
+  println(choose_text(0, selected.label))
+  let pair = choose_tuple(1, selected.label)
+  println(pair.0)
+  println(list.join(pair.1, ":"))
+  println(alias.label)
+  println(list.join(alias.values, ":"))
+}

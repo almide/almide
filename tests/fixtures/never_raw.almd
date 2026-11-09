@@ -1,0 +1,2 @@
+fn stop(s: String) -> Never = panic(s)
+fn main() -> Unit = { println("before"); stop("stopped") }

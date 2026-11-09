@@ -86,7 +86,7 @@ pub(crate) fn last_use(
     t: NTy,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
-    if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) || !crate::render_native_rec::has_default(t) {
+    if drill_no_moves() || aliases::read_after(func, at, src) || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) || !crate::render_native_rec::has_default(t) {
         return false;
     }
     // Or no path after the copy reads it again (`mir_liveness`).
@@ -111,7 +111,7 @@ pub(crate) fn dying_after(
     src: ValueId,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
-    if drill_no_moves() {
+    if drill_no_moves() || aliases::read_after(func, at, src) {
         return false;
     }
     // A borrowed param is the caller's; a MOVE param (#4006 class P) is ours.
@@ -502,3 +502,6 @@ pub(crate) fn take_expr(code: &str) -> String {
         format!("std::mem::take(&mut {code})")
     }
 }
+
+#[path = "render_native_move_alias.rs"]
+mod aliases;

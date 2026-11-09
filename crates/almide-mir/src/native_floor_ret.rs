@@ -18,7 +18,7 @@ fn render_ret(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> R
         | FloorRet::ResStrValuePairs
         | FloorRet::ResListStr
         | FloorRet::ResBytes
-        | FloorRet::ResOptStr => Ok(carrier_ret_of(r, call)),
+        | FloorRet::ResOptStr | FloorRet::ResOptBytes | FloorRet::ResOptListStr | FloorRet::ResFileStat => Ok(carrier_ret_of(r, call)),
         _ => Ok(plain_ret_of(r, call)),
     }
 }
@@ -93,6 +93,21 @@ fn carrier_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
             let b = NTy::Rec(crate::render_native_rec::bytes_index());
             (format!("({call}).map_err(AlmideString::from)"), Some(NTy::Rec(crate::render_native_rec::result_type_of(b, NTy::Str))))
         }
+        FloorRet::ResOptListStr => {
+            let o = NTy::Rec(crate::render_native_rec::option_type_of(NTy::VecStr));
+            (format!("({call}).map(|o| o.map(|xs| xs.into_iter().map(AlmideString::from).collect::<Vec<AlmideString>>())).map_err(AlmideString::from)"),
+                Some(NTy::Rec(crate::render_native_rec::result_type_of(o, NTy::Str))))
+        }
+        FloorRet::ResFileStat => (
+            format!("({call}).map(|s| vec![s.size, s.is_dir as i64, s.is_file as i64, s.modified]).map_err(AlmideString::from)"),
+            Some(NTy::Rec(crate::render_native_rec::result_type_of(NTy::Vec, NTy::Str))),
+        ),
+        FloorRet::ResOptBytes => {
+            let b = NTy::Rec(crate::render_native_rec::bytes_index());
+            let o = NTy::Rec(crate::render_native_rec::option_type_of(b));
+            (format!("({call}).map_err(AlmideString::from)"),
+                Some(NTy::Rec(crate::render_native_rec::result_type_of(o, NTy::Str))))
+        }
         FloorRet::ResOptStr => {
             let o = NTy::Rec(crate::render_native_rec::option_type_of(NTy::Str));
             (
@@ -131,6 +146,7 @@ fn set_matrix_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16
             },
         },
         FloorRet::SetElems => match set_e.ok_or_else(mismatch)? {
+            NTy::F32 => (format!("({call}).into_iter().map(|x| x.to_bits() as i64).collect::<Vec<_>>()"), Some(NTy::Vec)),
             NTy::I64 => (call, Some(NTy::Vec)),
             NTy::Str => (call, Some(NTy::VecStr)),
             e if crate::render_native_rec::native_set_element_kind(e) => (call, Some(NTy::Rec(crate::render_native_rec::list_type_of(e)))),
@@ -168,11 +184,16 @@ fn map_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> R
             },
         },
         FloorRet::MapOptVal => match cx.map_kv.ok_or_else(mismatch)?.1 {
+            NTy::F32 => (format!("({call}).map(|x| x.to_bits() as i64)"), Some(NTy::Opt)),
             NTy::I64 => (call, Some(NTy::Opt)),
             v => (call, Some(NTy::Rec(crate::render_native_rec::option_type_of(v)))),
         },
         FloorRet::MapEntries => {
             let (k, v) = cx.map_kv.ok_or_else(mismatch)?;
+            let lane = |t| if t == NTy::F32 { NTy::I64 } else { t };
+            let recode = |code: &str, ty| if ty == NTy::F32 { format!("({code}).to_bits() as i64") } else { code.to_string() };
+            let (key, value) = (recode("k", k), recode("v", v));
+            let (k, v) = (lane(k), lane(v));
             // The generated list of the program's `(K, V)` tuple, as the
             // self-hosted body this call specializes declares it.
             // A generic runtime route may have no specialized return type.
@@ -182,6 +203,10 @@ fn map_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> R
                 .as_ref()
                 .and_then(ty_of)
                 .and_then(|t| crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(&t)))
+                .filter(|list| matches!(crate::render_native_rec::list_elem(*list), Some(NTy::Rec(pair))
+                    if crate::render_native_rec::field_count(pair) == 2
+                        && crate::render_native_rec::rec_field(pair, 0) == Some(k)
+                        && crate::render_native_rec::rec_field(pair, 1) == Some(v)))
                 .unwrap_or_else(|| {
                     crate::render_native_rec::list_type_of(NTy::Rec(crate::render_native_rec::tuple_type_of(&[k, v])))
                 });
@@ -193,11 +218,12 @@ fn map_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> R
                 return Err(mismatch());
             }
             let s = crate::render_native_rec::struct_name(pair);
-            (format!("({call}).into_iter().map(|(k, v)| {s} {{ f0: k, f1: v }}).collect::<Vec<{s}>>()"), Some(NTy::Rec(list)))
+            (format!("({call}).into_iter().map(|(k, v)| {s} {{ f0: {key}, f1: {value} }}).collect::<Vec<{s}>>()"), Some(NTy::Rec(list)))
         }
         _ => {
             let (k, v) = cx.map_kv.ok_or_else(mismatch)?;
             let e = if r == FloorRet::MapKeys { k } else { v };
+            if e == NTy::F32 { return Ok((format!("({call}).into_iter().map(|x| x.to_bits() as i64).collect::<Vec<_>>()"), Some(NTy::Vec))); }
             let t = match e {
                 NTy::I64 => NTy::Vec,
                 NTy::Str => NTy::VecStr,

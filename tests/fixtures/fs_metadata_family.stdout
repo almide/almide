@@ -1,0 +1,10 @@
+size=5
+mt_pos=true
+isd=true isf=true isd_f=false isf_d=false miss=false
+app=hello world fresh=born
+copy=hello world
+badcopy=err
+tf_exists=true tf_size=0
+cwd_nonempty=true
+path_some=true
+miss=err

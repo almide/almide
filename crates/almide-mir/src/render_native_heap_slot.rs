@@ -22,8 +22,10 @@
 //! keeps the value it had at its read, as the copy did.
 //!
 //! The MIR and its certificates are the ones the wasm leg runs; only their
-//! storage is spelled differently. A program with a `fan` keeps the wall: its
-//! arms run on threads of their own, and a thread-local cell is per thread.
+//! storage is spelled differently. A `fan` that can reach a program slot
+//! keeps the wall: its arms run on threads of their own, and a thread-local
+//! cell is per thread. Unrelated fan arms may coexist with these slots;
+//! `fan_native::reaches_global_slots` checks their transitive reach first.
 
 use super::{AddrState, NTy};
 use crate::lower::LowerError;
@@ -63,16 +65,13 @@ pub(super) fn render_heap_slot_op(
     match op {
         Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } if args.len() == 1 => {
             let (slot, t) = slot_of(st, &args[0])?;
-            if st.slot_reads.rebuilds.contains(d) {
-                return Some(Err(wall("native: a heap slot read again before its write-back (each read copies the cell's value)")));
-            }
             let snap = crate::native_slot_takes::snapshot_slot(slot);
             let take = st.slot_reads.takes.contains(d) && crate::render_native_rec::has_default(t);
-            if snap && !take {
+            if snap && !take && st.slot_reads.borrows.contains(d) {
                 // A slot held for snapshots: every read of it that its own
                 // take does not follow is one (native_slot_takes::slot_reads).
-                let (true, Some((rt, spelled, whole))) = (st.slot_reads.borrows.contains(d), super::borrowed_kind(t)) else {
-                    return Some(Err(wall("native: a heap slot held for snapshots read as a value of its own")));
+                let Some((rt, spelled, whole)) = super::borrowed_kind(t) else {
+                    return Some(Err(wall("native: a snapshot slot without a borrowed representation")));
                 };
                 tys.insert(*d, rt);
                 let _ = writeln!(
@@ -85,7 +84,9 @@ pub(super) fn render_heap_slot_op(
             }
             tys.insert(*d, t);
             // The slot's own take follows, and nothing in between sees it.
-            let read = if take { take_text(snap) } else { "s.borrow().clone()" };
+            // An owned read of an Rc-backed slot copies the contained value,
+            // not the Rc. Its later mutations cannot change an older snapshot.
+            let read = if take { take_text(snap) } else if snap { "(**s.borrow()).clone()" } else { "s.borrow().clone()" };
             let _ = writeln!(
                 out,
                 "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| {read});",

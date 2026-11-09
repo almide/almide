@@ -520,17 +520,7 @@ fn never_err_short_circuit(
     ))
 }
 
-/// A typed error falling into a `String` channel (ADR-0021 D2, #2725): the text
-/// `"${e}"` shows — its repr — as a one-part interpolation, so the lowering's own
-/// Display desugar (and the corpus call counter, which reads the same node) renders it.
-fn erased_err_text(err: IrExpr) -> IrExpr {
-    IrExpr {
-        span: err.span.clone(),
-        kind: IrExprKind::StringInterp { parts: vec![almide_ir::IrStringPart::Expr { expr: err }] },
-        ty: Ty::String,
-        def_id: None,
-    }
-}
+include!("desugar_error_text.rs");
 
 /// The `err($x) => err(<payload>)` arm's payload — the propagated error IS the
 /// function result.

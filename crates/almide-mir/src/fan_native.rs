@@ -19,16 +19,16 @@
 //! The PRECONDITIONS the concurrent run relies on (proofs/TRUSTED_BASE.md,
 //! "fan arms on threads") are checked here, and a program whose fan does not
 //! meet them keeps the honest decline (the standard codegen builds it):
-//! - every arm is a direct call of a user function, and every argument is a
-//!   literal or an immutable `let` local (a `var` reaches no arm);
+//! - each threaded arm is a checked call/expression or an explicit Result
+//!   scope, with only immutable free locals as captures; inline blocks keep
+//!   the shared product classification and ordinary sequential MIR lowering;
 //! - every argument and every arm result is of a type whose native value may
 //!   cross a thread ([`thread_crossable`]); its strings are marked
 //!   thread-shared before the spawn (ADR-0013 design point 3);
 //! - the program has no metered region (a `fan.bounded` budget is a
 //!   per-thread counter);
-//! - no arm holds a higher-order call (`list.map` under `fan` is a parallel
-//!   chunk map on the standard codegen; the sequential form would be slower),
-//!   and the program calls no `fan.map` / `fan.any_map` (likewise).
+//! - higher-order calls selected by the shared routing keep registered
+//!   parallel runtime sites. Ordered/effectful mappers use certified sequential MIR.
 
 use almide_ir::visit::{walk_expr, IrVisitor};
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
@@ -80,16 +80,47 @@ pub(crate) fn arm_name(group: usize, index: usize) -> String {
 
 const DECLINE: &str = "native: fan concurrency requires the scoped-thread codegen";
 
+/// Thread-local program slots may coexist with a fan only when no arm can
+/// reach them. Follow user calls and closure references transitively; an
+/// indirect/imported call is conservatively unknown. This runs before the
+/// slot rewrite, while every slot access still carries its literal address.
+pub(crate) fn reaches_global_slots(functions: &[crate::MirFunction]) -> bool {
+    let roots = functions.iter().filter(|f| arm(&f.name).is_some() || crate::native_parallel_maps::is_wrapper(&f.name)).map(|f| f.name.as_str()).collect();
+    reaches_slot_range(functions, roots, crate::lower::mutable_global_slot_count())
+}
+
+fn reaches_slot_range<'a>(functions: &'a [crate::MirFunction], mut todo: Vec<&'a str>, slots: u32) -> bool {
+    let by_name: BTreeMap<_, _> = functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    let mut seen = HashSet::new();
+    let base = crate::mg_slot_addr(0) as i64;
+    let end = base + 8 * i64::from(slots);
+    while let Some(name) = todo.pop() {
+        if !seen.insert(name) { continue; }
+        let Some(f) = by_name.get(name) else { continue };
+        for op in &f.ops {
+            match op {
+                crate::Op::ConstInt { value, .. } if *value >= base && *value < end => return true,
+                crate::Op::CallIndirect { .. } | crate::Op::CallImport { .. } => return true,
+                crate::Op::CallFn { name, .. } | crate::Op::FuncRef { name, .. } => todo.push(name.as_str()),
+                _ => {}
+            }
+        }
+    }
+    false
+}
+
 /// Lift every threadable fan block's arms (module header), or decline the
 /// program with the standing fan wall.
 pub(crate) fn lift_fan_arms(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
     ARMS.with(|a| a.borrow_mut().clear());
+    crate::native_parallel_maps::prepare(&mut ir)?;
+    // Share the product backend's decision for ordered effects and captures
+    // that cannot cross threads. These blocks use the ordinary MIR fan
+    // desugar: settle every arm in order, then propagate the first error.
+    almide_codegen::pass_fan_lowering::mark_inline_fans(&mut ir);
     let fans = Fans::of(&ir);
-    if fans.blocks == 0 && fans.declined.is_none() {
+    if fans.blocks == 0 {
         return Ok(ir);
-    }
-    if let Some(span) = fans.declined {
-        return Err(LowerError::at(span, DECLINE));
     }
     if almide_ir::meter_plan::program_has_regions(&ir) {
         return Err(LowerError::at(fans.first, format!("{DECLINE} (a metered region's budget is per thread)")));
@@ -101,7 +132,7 @@ pub(crate) fn lift_fan_arms(mut ir: IrProgram) -> Result<IrProgram, LowerError> 
         .map(|f| (f.name.as_str().to_string(), (f.params.iter().map(|p| p.ty.clone()).collect(), f.ret_ty.clone(), f.is_effect)))
         .collect();
     let globals: HashSet<VarId> = ir.top_lets.iter().map(|t| t.var).collect();
-    let mut lift = Lift { user: &user, globals: &globals, vt: &mut ir.var_table, decls: &ir.type_decls, out: Vec::new(), err: None, next_group: 0 };
+    let mut lift = Lift { user: &user, globals: &globals, vt: &mut ir.var_table, decls: &ir.type_decls, inline: &ir.codegen_annotations, out: Vec::new(), err: None, next_group: 0 };
     for f in ir.functions.iter_mut().filter(|f| !f.is_test) {
         lift.visit_expr_mut(&mut f.body);
     }
@@ -127,15 +158,15 @@ pub(crate) fn lift_fan_arms(mut ir: IrProgram) -> Result<IrProgram, LowerError> 
 
 /// What the program's fans need: how many blocks of two or more arms, and
 /// the first fan form this render cannot thread (a decline).
-struct Fans {
+struct Fans<'a> {
+    inline: &'a almide_ir::annotations::CodegenAnnotations,
     blocks: usize,
     first: Option<almide_ir::Span>,
-    declined: Option<Option<almide_ir::Span>>,
 }
 
-impl Fans {
-    fn of(ir: &IrProgram) -> Fans {
-        let mut v = Fans { blocks: 0, first: None, declined: None };
+impl<'a> Fans<'a> {
+    fn of(ir: &'a IrProgram) -> Fans<'a> {
+        let mut v = Fans { inline: &ir.codegen_annotations, blocks: 0, first: None };
         for f in ir.functions.iter().filter(|f| !f.is_test) {
             v.visit_expr(&f.body);
         }
@@ -143,25 +174,14 @@ impl Fans {
     }
 }
 
-impl IrVisitor for Fans {
+impl IrVisitor for Fans<'_> {
     fn visit_expr(&mut self, e: &IrExpr) {
         match &e.kind {
-            IrExprKind::Fan { exprs } => {
+            IrExprKind::Fan { exprs } if !self.inline.is_inline_fan(e.span) => {
                 self.first = self.first.or(e.span);
                 if exprs.len() >= 2 {
                     self.blocks += 1;
                 }
-                if exprs.iter().any(holds_higher_order_call) && self.declined.is_none() {
-                    self.declined = Some(e.span);
-                }
-            }
-            // An element-wise fan call — a list and a function over it
-            // (`fan.map`, `fan.any_map`): a parallel map on the standard
-            // codegen, so its sequential render here would be slower.
-            IrExprKind::Call { target: CallTarget::Module { module, .. }, args, .. }
-                if module.as_str() == "fan" && is_element_wise(args) && self.declined.is_none() =>
-            {
-                self.declined = Some(e.span);
             }
             _ => {}
         }
@@ -169,29 +189,7 @@ impl IrVisitor for Fans {
     }
 }
 
-/// A list argument and a function argument: the call maps the function over
-/// the list's elements (read from the argument types, not the callee's name).
-fn is_element_wise(args: &[IrExpr]) -> bool {
-    args.iter().any(|a| matches!(&a.ty, Ty::Applied(TC::List, _))) && args.iter().any(|a| matches!(a.ty, Ty::Fn { .. }))
-}
 
-/// Does `e` hold a call that takes a function literal (a higher-order call)?
-fn holds_higher_order_call(e: &IrExpr) -> bool {
-    struct H(bool);
-    impl IrVisitor for H {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Call { args, .. } = &e.kind {
-                if args.iter().any(|a| matches!(a.kind, IrExprKind::Lambda { .. })) {
-                    self.0 = true;
-                }
-            }
-            walk_expr(self, e);
-        }
-    }
-    let mut h = H(false);
-    h.visit_expr(e);
-    h.0
-}
 
 /// A type whose native value may move to, or be read from, another thread
 /// once its strings are marked thread-shared (ADR-0013 design point 3):
@@ -204,20 +202,26 @@ pub(crate) fn thread_crossable(ty: &Ty, decls: &[almide_ir::IrTypeDecl], depth: 
     }
     let ok = |t: &Ty| thread_crossable(t, decls, depth + 1);
     match ty {
-        Ty::Int | Ty::Float | Ty::Bool | Ty::Unit | Ty::String => true,
-        Ty::Applied(TC::List | TC::Option | TC::Result, args) => args.iter().all(ok),
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Unit | Ty::String | Ty::Bytes => true,
+        t if crate::render_native_rec::is_lane_scalar(t) => true,
+        Ty::Applied(TC::List | TC::Option | TC::Result | TC::Map | TC::Set, args) => args.iter().all(ok),
         Ty::Tuple(elems) => elems.iter().all(ok),
         Ty::Record { fields } => fields.iter().all(|(_, t)| ok(t)),
         Ty::Named(name, args) if args.is_empty() => decls.iter().find(|d| d.name == *name).is_some_and(|d| match &d.kind {
             almide_ir::IrTypeDeclKind::Record { fields } => fields.iter().all(|f| ok(&f.ty)),
             almide_ir::IrTypeDeclKind::Alias { target } => ok(target),
-            almide_ir::IrTypeDeclKind::Variant { .. } => false,
+            almide_ir::IrTypeDeclKind::Variant { cases, .. } => cases.iter().all(|c| match &c.kind {
+                almide_ir::IrVariantKind::Unit => true,
+                almide_ir::IrVariantKind::Tuple { fields } => fields.iter().all(ok),
+                almide_ir::IrVariantKind::Record { fields } => fields.iter().all(|f| ok(&f.ty)),
+            }),
         }),
         _ => false,
     }
 }
 
 struct Lift<'a> {
+    inline: &'a almide_ir::annotations::CodegenAnnotations,
     user: &'a BTreeMap<String, (Vec<Ty>, Ty, bool)>,
     globals: &'a HashSet<VarId>,
     vt: &'a mut almide_ir::VarTable,
@@ -234,6 +238,7 @@ impl IrMutVisitor for Lift<'_> {
             return;
         }
         let span = e.span;
+        if self.inline.is_inline_fan(span) { return; }
         let IrExprKind::Fan { exprs } = &mut e.kind else { return };
         if exprs.len() < 2 {
             return;
@@ -291,15 +296,25 @@ impl Lift<'_> {
                     return Err(format!("an arm that is not a call or an operator expression: {shape}"));
                 }
                 let is_effect = calls_effect_fn(x, self.user);
-                (x.clone(), x.ty.clone(), is_effect)
+                // The fresh lifted function is the scoped arm's function
+                // boundary, so keep its body without an extra closure call.
+                let body = match &x.kind {
+                    IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } if args.is_empty() => {
+                        match &callee.kind {
+                            IrExprKind::Lambda { params, body, .. } if params.is_empty() => (**body).clone(),
+                            _ => x.clone(),
+                        }
+                    }
+                    _ => x.clone(),
+                };
+                (body, x.ty.clone(), is_effect)
             }
         };
         if !thread_crossable(&x.ty, self.decls, 0) || !thread_crossable(&ret, self.decls, 0) {
             return Err(format!("an arm whose result `{:?}` cannot cross a thread", x.ty));
         }
         // Every local the arm reads becomes a parameter of the lifted fn.
-        let mut free = Vec::new();
-        collect_vars(&body, &mut free);
+        let free = almide_ir::free_vars::free_vars(&body, &HashSet::new());
         let mut subst: BTreeMap<VarId, VarId> = BTreeMap::new();
         let mut params = Vec::new();
         let mut outer_args = Vec::new();
@@ -376,15 +391,24 @@ fn is_arg_leaf(a: &IrExpr) -> bool {
 }
 
 /// An arm the lift moves whole: literals, locals, operators, `if`, and
-/// calls of user functions over them — nothing that binds a variable, so
-/// every variable it reads is free.
+/// calls of user functions over them. A frontend scoped arm is already a
+/// zero-argument closure with its own explicit Result; keep that scope whole.
 fn is_arm_expr(e: &IrExpr) -> bool {
     match &e.kind {
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. } => true,
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => elements.iter().all(is_arm_expr),
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } | IrExprKind::OptionSome { expr } => is_arm_expr(expr),
+        IrExprKind::OptionNone | IrExprKind::Lambda { .. } => true,
         IrExprKind::BinOp { left, right, .. } => is_arm_expr(left) && is_arm_expr(right),
         IrExprKind::UnOp { operand, .. } => is_arm_expr(operand),
         IrExprKind::If { cond, then, else_ } => is_arm_expr(cond) && is_arm_expr(then) && is_arm_expr(else_),
         IrExprKind::Call { target: CallTarget::Named { .. }, args, .. } => args.iter().all(is_arm_expr),
+        IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } if args.is_empty() =>
+            matches!(&callee.kind, IrExprKind::Lambda { params, body, .. }
+                if params.is_empty() && body.ty == e.ty && e.ty.is_result()),
+        IrExprKind::UnwrapOr { expr, fallback } => is_arm_expr(expr) && is_arm_expr(fallback),
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =>
+            crate::purity::is_pure(module.as_str(), func.as_str()) && args.iter().all(is_arm_expr),
         _ => false,
     }
 }
@@ -397,7 +421,8 @@ fn calls_implicit_result_effect_fn(e: &IrExpr, user: &BTreeMap<String, (Vec<Ty>,
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind {
                 if let Some((_, ret, true)) = self.0.get(name.as_str()) {
-                    self.1 |= !matches!(ret, Ty::Applied(TC::Result, _));
+                    self.1 |= !matches!(ret, Ty::Applied(TC::Result, _))
+                        && !crate::lower::is_never_err_lifted(name.as_str());
                 }
             }
             walk_expr(self, e);
@@ -426,22 +451,8 @@ fn calls_effect_fn(e: &IrExpr, user: &BTreeMap<String, (Vec<Ty>, Ty, bool)>) -> 
     c.1
 }
 
-/// Every local `e` reads, in order (repeats included).
-fn collect_vars(e: &IrExpr, out: &mut Vec<VarId>) {
-    struct V<'a>(&'a mut Vec<VarId>);
-    impl IrVisitor for V<'_> {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Var { id } = &e.kind {
-                self.0.push(*id);
-            }
-            walk_expr(self, e);
-        }
-    }
-    V(out).visit_expr(e);
-}
-
 /// Rename the locals of `e` by `subst`.
-fn rename_vars(e: &mut IrExpr, subst: &BTreeMap<VarId, VarId>) {
+pub(crate) fn rename_vars(e: &mut IrExpr, subst: &BTreeMap<VarId, VarId>) {
     struct R<'a>(&'a BTreeMap<VarId, VarId>);
     impl IrMutVisitor for R<'_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
@@ -459,6 +470,33 @@ fn rename_vars(e: &mut IrExpr, subst: &BTreeMap<VarId, VarId>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thread_local_slots_require_no_transitive_arm_access() {
+        use crate::{MirFunction, Op, ValueId};
+        let f = |name: &str, ops| MirFunction { name: name.into(), ops, ..Default::default() };
+        let call = |name: &str| Op::CallFn { name: name.into(), dst: None, args: vec![], result: None };
+        let slot = || Op::ConstInt { dst: ValueId(0), value: crate::mg_slot_addr(0) as i64 };
+        let functions = vec![f("arm", vec![call("leaf")]), f("leaf", vec![]), f("main", vec![slot()])];
+        assert!(!reaches_slot_range(&functions, vec!["arm"], 1), "main-only slots are safe");
+        let mut functions = functions;
+        functions[1].ops.push(slot());
+        assert!(reaches_slot_range(&functions, vec!["arm"], 1), "transitive slot read");
+        functions[0].ops = vec![slot()];
+        assert!(reaches_slot_range(&functions, vec!["arm"], 1), "direct slot read");
+        functions[0].ops = vec![Op::FuncRef { dst: ValueId(0), name: "leaf".into() }];
+        assert!(reaches_slot_range(&functions, vec!["arm"], 1), "closure reaches slot");
+        functions[0].ops = vec![Op::CallIndirect { dst: None, table_idx: ValueId(0), args: vec![], result: None }];
+        assert!(reaches_slot_range(&functions, vec!["arm"], 1), "unknown closure");
+        functions[0].ops = vec![Op::CallImport { dst: None, module: "host".into(), name: "f".into(),
+            args: vec![], abi: vec![], result: None, result_abi: None }];
+        assert!(reaches_slot_range(&functions, vec!["arm"], 1), "unknown import");
+        functions[0].ops = vec![call("leaf")];
+        functions[1].ops = vec![call("arm")];
+        assert!(!reaches_slot_range(&functions, vec!["arm"], 1), "slot-free cycle terminates");
+        functions[1].ops.push(slot());
+        assert!(reaches_slot_range(&functions, vec!["arm"], 1), "cycle still visits every body");
+    }
 
     fn lift(src: &str) -> Result<IrProgram, LowerError> {
         let ir = crate::pipeline::source_to_ir_for_tests(src).expect("ir");
@@ -507,10 +545,32 @@ mod tests {
     }
 
     #[test]
-    fn a_fan_holding_a_higher_order_call_declines() {
+    fn container_threadability_recurses_into_every_stored_type() {
+        let closure = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int), is_effect: false };
+        for container in [TC::List, TC::Option, TC::Set] {
+            assert!(thread_crossable(&Ty::Applied(container.clone(), vec![Ty::String].into()), &[], 0));
+            assert!(!thread_crossable(&Ty::Applied(container, vec![closure.clone()].into()), &[], 0));
+        }
+        assert!(thread_crossable(&Ty::Applied(TC::Map, vec![Ty::String, Ty::Int].into()), &[], 0));
+        assert!(!thread_crossable(&Ty::Applied(TC::Map, vec![Ty::String, closure].into()), &[], 0));
+    }
+
+    #[test]
+    fn ordered_mappers_share_the_product_parallel_decision() {
+        let ordered = "fn f(x: Int) -> Result[Int, String] = { println(int.to_string(x)); ok(x) }\neffect fn main() -> Unit = { let xs = fan.map([1, 2], (x) => f(x))!; println(int.to_string(list.len(xs))) }\n";
+        assert!(lift(ordered).is_ok(), "observable callback effects stay in list order");
+        let parallel = "effect fn main() -> Unit = { let xs = fan.map([1, 2], (x) => ok(x + 1))!; println(int.to_string(list.len(xs))) }\n";
+        let lifted = lift(parallel).expect("parallel site lifts");
+        assert!(lifted.functions.iter().any(|f| crate::native_parallel_maps::is_wrapper(f.name.as_str())),
+            "parallel mapper must retain its registered runtime site");
+    }
+
+    #[test]
+    fn a_fan_holding_a_higher_order_call_keeps_its_selected_runtime() {
         let e = lift(
             "effect fn main() -> Unit = {\n  let ys = fan { list.map([1, 2], (x) => x + 1) }\n  println(int.to_string(list.len(ys)))\n}\n",
         );
-        assert!(e.is_err());
+        let ir = e.expect("a declared parallel callback lifts");
+        assert!(ir.functions.iter().any(|f| crate::native_parallel_maps::is_wrapper(f.name.as_str())));
     }
 }

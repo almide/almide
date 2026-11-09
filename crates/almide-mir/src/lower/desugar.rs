@@ -335,6 +335,9 @@ pub fn desugar_method_calls(
 /// `list.sort_by_keys` self-host. Gated to a Var/literal source (no double evaluation),
 /// an INLINE single-param lambda, and Int elements/keys (the self-host's domain).
 pub fn desugar_sort_by_cached_keys(body: &IrExpr) -> Option<IrExpr> {
+    // Native's checked callback adapter invokes the declared cached-key
+    // runtime directly; retain that call instead of a wasm address loop.
+    if crate::lower::owned_tco_slots() { return None; }
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     use almide_lang::intern::sym;
     use almide_lang::types::constructor::TypeConstructorId;

@@ -16,6 +16,7 @@ use std::fmt::Write as _;
 
 fn kind_code(k: NativeSigKind) -> String {
     match k {
+        NativeSigKind::Never => "n".into(),
         NativeSigKind::I64 | NativeSigKind::Narrow { .. } => "i".into(),
         NativeSigKind::F64 => "f".into(),
         NativeSigKind::Str => "s".into(),
@@ -31,6 +32,7 @@ fn kind_code(k: NativeSigKind) -> String {
 /// The borrowed spelling of a param of kind `k`.
 fn param_spelling(k: NativeSigKind) -> String {
     match k {
+        NativeSigKind::Never => "std::convert::Infallible".into(),
         NativeSigKind::I64 | NativeSigKind::Narrow { .. } => "i64".into(),
         NativeSigKind::F64 => "f64".into(),
         NativeSigKind::Str => "&str".into(),
@@ -46,6 +48,7 @@ fn param_spelling(k: NativeSigKind) -> String {
 /// The owned value kind a result of kind `k` binds as.
 pub(crate) fn owned_nty(k: NativeSigKind) -> NTy {
     match k {
+        NativeSigKind::Never => NTy::Never,
         NativeSigKind::I64 | NativeSigKind::Narrow { .. } => NTy::I64,
         NativeSigKind::F64 => NTy::F64,
         NativeSigKind::Str => NTy::Str,
@@ -61,7 +64,8 @@ pub(crate) fn owned_nty(k: NativeSigKind) -> NTy {
 /// The kind a value of `t` passes as.
 pub(crate) fn arg_kind(t: NTy) -> NativeSigKind {
     match t {
-        NTy::I64 => NativeSigKind::I64,
+        NTy::Never => NativeSigKind::Never,
+        NTy::I64 | NTy::F32 => NativeSigKind::I64,
         NTy::F64 => NativeSigKind::F64,
         NTy::Str | NTy::StrRef => NativeSigKind::Str,
         NTy::Vec | NTy::VecRef => NativeSigKind::ListI64,

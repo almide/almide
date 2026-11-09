@@ -632,54 +632,6 @@ impl LowerCtx {
     }
 
     /// Extracted from `Self::lower_scalar_binop_pow_float` (eighth-round split, cog
-    /// reduction): the `**` pow-desugar sub-chain, verbatim.
-    fn lower_scalar_binop_pow(
-        &mut self,
-        expr: &IrExpr,
-        op: &almide_ir::BinOp,
-        left: &IrExpr,
-        right: &IrExpr,
-    ) -> Option<ValueId> {
-        use almide_ir::BinOp;
-        // The `**` OPERATOR has no single hardware instruction — it desugars to a CALL into
-        // the self-hosted pow stdlib (`math.__fpow(a, b)` / `int.pow(a, b)`).
-        // `PowFloat` → `math.__fpow` (the bit-exact libm transcription),
-        // `PowInt` → `int.pow` (exponentiation-by-squaring). Both callees live in a
-        // PURE_MODULES module, so the synthesized `Op::CallFn` carries an EMPTY capability
-        // witness (sound), and the corpus `count_ir_calls` credits the operator node 1:1 so
-        // `mir_calls <= ir_calls` holds BY CONSTRUCTION (no elision-masking over-count).
-        let pow_callee = match op {
-            BinOp::PowFloat => Some("math.__fpow"),
-            BinOp::PowInt => Some("int.pow"),
-            _ => None,
-        };
-        if let Some(callee) = pow_callee {
-            let a = self.lower_scalar_value(left)?;
-            let b = self.lower_scalar_value(right)?;
-            let repr = repr_of(&expr.ty).ok()?;
-            let dst = self.fresh_value();
-            self.ops.push(Op::CallFn {
-                dst: Some(dst),
-                name: callee.to_string(),
-                args: vec![CallArg::Scalar(a), CallArg::Scalar(b)],
-                result: Some(repr),
-            });
-            // `int.pow` computes in the i64 carrier every integer rides here, so a
-            // NARROW result type (`Int32`, `UInt8`, …) has to come back to its declared
-            // width — the same wrap `*` and `+` already apply through `narrow_wrap`.
-            // Without it `let a: Int32 = 999997` made `a ^ 2` print the un-narrowed
-            // `999994000009` on wasm against native's `-733379959`, while `a * a` at the
-            // very same type agreed on both legs. `math.__fpow` returns a float and has no
-            // declared-width notion, so only the integer operator wraps.
-            if matches!(op, BinOp::PowInt) {
-                return Some(self.wrap_to_declared_width(dst, &expr.ty));
-            }
-            return Some(dst);
-        }
-        None
-    }
-
-    /// Extracted from `Self::lower_scalar_binop_pow_float` (eighth-round split, cog
     /// reduction): the FLOAT prim-floor sub-chain, verbatim.
     /// Extracted from `Self::lower_scalar_binop_float_prim` (ninth-round split, cog
     /// reduction): the pure `BinOp` + f32/f64-shape → `PrimKind` lookup, verbatim (a
@@ -796,3 +748,5 @@ impl LowerCtx {
         self.lower_scalar_binop_eq_list_map(op, left, right)
     }
 }
+
+include!("calls_scalar_math.rs");

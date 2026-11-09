@@ -99,6 +99,27 @@ fn a_fresh_prefix_has_a_bounded_final_length() {
 }
 
 #[test]
+fn exclusive_filter_arms_commit_once_but_successive_arms_cannot() {
+    let mut f = builder();
+    let increment = [
+        Op::IntBinOp { dst: ValueId(11), op: IntOp::Add, a: ValueId(2), b: ValueId(4) },
+        Op::SetLocal { local: ValueId(2), src: ValueId(11) },
+    ];
+    // Both alternatives increment, but no execution takes both alternatives.
+    f.ops.splice(15..15, increment.clone());
+    assert_eq!(finalizers(&f), BTreeMap::from([(ValueId(7), ValueId(1))]));
+
+    let mut f = builder();
+    // A second independent condition can execute after the first increment.
+    f.ops.splice(16..16, [
+        Op::IfThen { cond: ValueId(8), dst: None },
+        increment[0].clone(), increment[1].clone(),
+        Op::Else { val: None }, Op::EndIf { val: None },
+    ]);
+    assert!(finalizers(&f).is_empty());
+}
+
+#[test]
 fn counter_or_alias_changes_cannot_be_misread_as_prefix_commitment() {
     let v = ValueId;
     let mut cases = Vec::new();

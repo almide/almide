@@ -234,6 +234,11 @@ impl LowerCtx {
         body: &[IrStmt],
     ) -> bool {
         use crate::PrimKind;
+        if crate::lower::owned_tco_slots() && var_tuple.is_none() {
+            if let Some((vars, body)) = self.native_map_entry_binding(var, iterable, body) {
+                return self.try_lower_scalar_for_map(var, &Some(vars), iterable, &body);
+            }
+        }
         let Some(plan) = plan_scalar_for_map(var, var_tuple, iterable) else {
             return false;
         };
@@ -295,9 +300,10 @@ impl LowerCtx {
         self.ops.push(Op::LoopBreakUnless { cond: cond_v });
         let base = self.load_addr(h, 12);
         let (addr_k, addr_v) = self.map_entry_addrs(interleaved, base, i_v, entries_v);
-        let mut binds = vec![(k_local, k_var, addr_k)];
+        let Ty::Applied(_, types) = &iterable.ty else { unreachable!("map plan checked") };
+        let mut binds = vec![(k_local, k_var, addr_k, types[0].clone())];
         if let Some(vv) = v_var {
-            binds.push((v_local, vv, addr_v));
+            binds.push((v_local, vv, addr_v, types[1].clone()));
         }
         self.bind_map_components(binds);
 
@@ -381,8 +387,9 @@ impl LowerCtx {
         let str_list_literal =
             elem_heap && matches!(&iterable.kind, IrExprKind::List { elements } if !elements.is_empty());
         if str_list_literal {
-            let v = self.try_lower_str_list_literal(iterable)?;
-            self.live_heap_handles.push(v);
+            let v = self.try_lower_record_list_literal(iterable)
+                .or_else(|| self.try_lower_str_list_literal(iterable))?;
+            if !self.live_heap_handles.contains(&v) { self.live_heap_handles.push(v); }
             return Some(v);
         }
         self.borrow_loop_iterable(iterable)
@@ -528,9 +535,9 @@ impl LowerCtx {
     /// binds the BORROWED handle fresh per iteration (recorded in
     /// `param_values` — the map owns its keys/values; the loop vars are never
     /// second owners).
-    fn bind_map_components(&mut self, binds: Vec<(Option<ValueId>, VarId, ValueId)>) {
+    fn bind_map_components(&mut self, binds: Vec<(Option<ValueId>, VarId, ValueId, Ty)>) {
         use crate::PrimKind;
-        for (local, bind_var, addr) in binds {
+        for (local, bind_var, addr, ty) in binds {
             if let Some(x) = local {
                 let elem = self.fresh_value();
                 self.ops
@@ -542,6 +549,10 @@ impl LowerCtx {
                     .push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(elem), args: vec![addr] });
                 self.value_of.insert(bind_var, elem);
                 self.param_values.insert(elem);
+                if crate::lower::owned_tco_slots() {
+                    self.seed_faithful_read_shape(elem, &ty);
+                    self.seed_variant_read_shape(elem, &ty);
+                }
             }
         }
     }
@@ -584,11 +595,18 @@ fn plan_scalar_for_map(
     // (String/scalar). A heap side must be EXACTLY String — a record/variant/list
     // component is a different physical flavor (hval/ivh/…), walled for now.
     let interleaved = match (&kty, &vty) {
+        _ if crate::lower::owned_tco_slots() => false,
         _ if !k_heap && !v_heap => true,
         (Ty::String, Ty::String) => true,
         (Ty::String, _) if !v_heap => false,
         _ => return None,
     };
+    // The native map adapter exposes one logical entry count and separate
+    // key/value windows for every map kind. Wasm retains each physical
+    // layout, including String/String's interleaved slot-count header.
+    let interleaved = interleaved && !crate::lower::owned_tco_slots();
     let len_is_slots = interleaved && k_heap;
     Some(ScalarForMapPlan { k_var, v_var, k_heap, v_heap, interleaved, len_is_slots })
 }
+
+include!("scalar_for_map_entry.rs");

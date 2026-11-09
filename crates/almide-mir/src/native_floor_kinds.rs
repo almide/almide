@@ -218,7 +218,7 @@ pub(crate) fn generated_list_of(p: FloorParam) -> Option<u16> {
 /// takeable item of that name or it reaches one the header cannot carry.
 pub(crate) fn runtime_body(symbol: &str) -> Option<(Vec<String>, String, Vec<&'static str>)> {
     let rt = runtime_index();
-    let (params, ret) = rust_signature(rt.items.get(symbol)?.text)?;
+    let (params, ret) = rust_signature(signature_text(rt, symbol)?)?;
     Some((params.iter().map(|p| squash(p)).collect(), squash(&ret), closure(symbol, rt).ok()?))
 }
 
@@ -226,4 +226,18 @@ pub(crate) fn runtime_body(symbol: &str) -> Option<(Vec<String>, String, Vec<&'s
 /// specializes, if any (`@specializes`).
 pub(crate) fn specializes(call: &str) -> Option<String> {
     specialized_target(call)
+}
+
+/// The exact callback-bearing definition within a named fs module. The
+/// original module stays whole; only this definition gets a static twin.
+pub(crate) fn native_host_callback_body(symbol: &str) -> Option<&'static str> {
+    crate::host_ops::is_native_fs_host_call(symbol)
+        .then(|| signature_text(runtime_index(), symbol)).flatten()
+}
+
+/// A declared host route, before per-call callback type and ownership checks.
+/// Used to hold the named host set to the union of simple and callback routes.
+pub fn has_native_host_route(call: &str) -> bool {
+    declared(call).is_some() || crate::native_hof::declared_call(call)
+        || crate::native_hof::of(call).is_some()
 }

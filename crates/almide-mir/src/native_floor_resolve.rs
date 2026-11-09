@@ -7,6 +7,14 @@ fn runtime_index() -> &'static RuntimeIndex {
 /// The runtime body of `symbol` and every item it reaches, or `None` when it
 /// reaches something the native header cannot carry.
 fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>, String> {
+    closure_using(symbol, rt, references)
+}
+
+fn closure_using(
+    symbol: &str,
+    rt: &'static RuntimeIndex,
+    refs: impl Fn(&str) -> Result<Vec<String>, String>,
+) -> Result<Vec<&'static str>, String> {
     let mut taken: BTreeSet<&'static str> = BTreeSet::new();
     let mut texts: BTreeSet<&'static str> = BTreeSet::new();
     let mut todo: Vec<String> = vec![symbol.to_string()];
@@ -25,7 +33,7 @@ fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>,
             return Err(format!("`{key}` needs the `{dep}` crate, which a native program does not link"));
         }
         out.push(item.text);
-        for r in references(item.text).map_err(|n| format!("`{key}` reaches `{n}`, which the native header cannot carry"))? {
+        for r in refs(item.text).map_err(|n| format!("`{key}` reaches `{n}`, which the native header cannot carry"))? {
             if !taken.contains(r.as_str()) {
                 todo.push(r);
             }
@@ -53,6 +61,12 @@ pub(crate) fn runtime_items_named_by(text: &str) -> Result<Vec<&'static str>, St
 /// is not an item we can take along (a type, a macro, a module, a prelude
 /// fn, a `#[cfg]` twin). A name neither of them defines is Rust's own.
 fn references(text: &str) -> Result<Vec<String>, String> {
+    if text == almide_codegen::generated::rust_runtime::ALMIDE_KERNEL_INLINE {
+        // Internal helpers and cfg twins are defined inside this whole module.
+        static OWN: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
+        let own = OWN.get_or_init(|| defined_names(almide_codegen::generated::rust_runtime::ALMIDE_KERNEL_INLINE));
+        return references_seeded(runtime_index(), text, own);
+    }
     if is_fs_host_text(text) {
         // The fs host module's own names, at any depth, are its own.
         return references_seeded(runtime_index(), text, fs_host_own_names());

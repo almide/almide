@@ -32,6 +32,7 @@ struct FnLoop<'a> {
     scalar_prints: BTreeMap<usize, (ValueId, bool)>,
     /// The owned values released right after each op (`early_releases`).
     early: BTreeMap<usize, Vec<ValueId>>,
+    borrowed_tails: std::collections::BTreeSet<usize>,
 }
 
 fn render_fn(
@@ -46,6 +47,8 @@ fn render_fn(
     let is_main = func.name == "main";
     let mut out = String::new();
     let indent = 1usize;
+    let borrowed_tails = crate::native_borrowed_tco::sites(func);
+    if !borrowed_tails.is_empty() { crate::native_borrowed_tco::begin(func, &tys, &mut out)?; }
     // Each open if-as-value join: (marker, dst) — the decl is patched in once the
     // first arm yield reveals the join type.
     let if_stack: Vec<Option<IfJoin>> = Vec::new();
@@ -110,6 +113,7 @@ fn render_fn(
         scalar_defs,
         scalar_prints,
         early,
+        borrowed_tails,
     };
     // The op iterator runs over the loop state's own view of the function, so
     // a phase that consumes ops ahead (`ops.nth(..)`) shares its lifetime.
@@ -202,6 +206,10 @@ fn render_fn_step<'a>(
 ) -> Result<bool, LowerError> {
     crate::render_native_bounds::at(i);
     crate::native_hof::at(st.func, i);
+    if st.borrowed_tails.contains(&i) {
+        crate::native_borrowed_tco::render(st.func, op, &mut st.tys, &mut st.out, st.indent)?;
+        return Ok(false);
+    }
     if let (true, Op::ListLit { dst, .. }) = (crate::native_hof::elided(st.func, op), op) {
         // Typed as the block it stands for; only its releases name it, and
         // they render nothing.
@@ -405,7 +413,7 @@ fn render_fn_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<(), LowerError
                 used_shims: &mut *st.used_shims,
             },
         )?,
-        other => render_fn_tier_op(st, other)?,
+        other => render_fn_tier_op(st, i, other)?,
     }
     Ok(())
 }
@@ -506,7 +514,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
 
 /// Every op tier in turn — call-shaped, meter, Result carrier, termination,
 /// scalar, control flow; an op none of them takes is outside the rung subset.
-fn render_fn_tier_op(st: &mut FnLoop<'_>, other: &Op) -> Result<(), LowerError> {
+fn render_fn_tier_op(st: &mut FnLoop<'_>, i: usize, other: &Op) -> Result<(), LowerError> {
     let handled = render_native_call_op(
         other,
         OpSink {
@@ -549,6 +557,7 @@ fn render_fn_tier_op(st: &mut FnLoop<'_>, other: &Op) -> Result<(), LowerError> 
         },
     )? || render_native_flow_op(
         other,
+        i > 0 && crate::mir_wellformed::aborts_before_arm_end(&st.func.ops, i - 1),
         &st.borrows.joins,
         &mut st.tys,
         &mut st.out,

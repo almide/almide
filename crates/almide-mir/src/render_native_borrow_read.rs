@@ -79,7 +79,13 @@ pub(crate) fn last_borrowing_use(func: &MirFunction, at: usize, d: ValueId, root
         }
         let ok = crate::render_native_move::bookkeeping(op)
             || match op {
-                Op::CallFn { args, .. } => args.iter().all(|a| !matches!(a, CallArg::Scalar(v) if *v == d)),
+                Op::CallFn { name, args, .. } => args.iter().enumerate().all(|(k, a)| match a {
+                    CallArg::Scalar(v) if *v == d => false,
+                    // A declared runtime mutator needs the owned temporary
+                    // that the lowering publishes back into its source place.
+                    CallArg::Handle(v) if *v == d => !crate::native_hof::mutable_argument(name, k),
+                    _ => true,
+                }),
                 Op::Dup { src, .. } => *src == d,
                 Op::Prim { kind: PrimKind::Handle, args, .. } => args.as_slice() == [d],
                 // An address into `d`'s own block, or a load through one.
@@ -128,4 +134,24 @@ fn block_untouched(func: &MirFunction, from: usize, to: usize, base: ValueId, ro
         }
     }
     true
+}
+
+#[cfg(test)]
+mod mutation_tests {
+    use super::*;
+    #[test]
+    fn a_mutating_runtime_receiver_is_not_a_read_only_payload_view() {
+        let v = ValueId;
+        let mut f = MirFunction { ops: vec![
+            Op::Prim { kind: PrimKind::Handle, dst: Some(v(1)), args: vec![v(0)] },
+            Op::ConstInt { dst: v(2), value: 12 },
+            Op::IntBinOp { dst: v(3), op: IntOp::Add, a: v(1), b: v(2) },
+            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(v(4)), args: vec![v(3)] },
+            Op::CallFn { dst: None, name: "read_only".into(), args: vec![CallArg::Handle(v(4))], result: None },
+        ], ..Default::default() };
+        assert!(borrow_reads(&f).contains(&v(4)));
+        let Op::CallFn { name, .. } = &mut f.ops[4] else { unreachable!() };
+        *name = "list_pop".into();
+        assert!(!borrow_reads(&f).contains(&v(4)));
+    }
 }

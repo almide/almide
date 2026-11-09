@@ -68,7 +68,7 @@ pub(crate) fn render_addr_op(
         return Err(wall(format!(
             "native: slot address {} escapes into {:?} — outside the slot algebra",
             var(*v),
-            std::mem::discriminant(op)
+            op
         )));
     }
     Ok(false)
@@ -320,9 +320,33 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
             writeln!(out, $($arg)*).unwrap();
         }};
     }
-    let Some((acc, t)) = enum_read(i, k, false) else {
+    let known = st.declared_values.get(d).copied().or_else(|| {
+        let tag = st.guarded_enum_reads.get(d)?;
+        crate::render_native_rec::enum_cases(i)?.into_iter().find(|(case, _)| case == tag)?
+            .1.get(k.checked_sub(1)?).copied()
+    });
+    let read = match known {
+        Some(t) => crate::render_native_rec::enum_slot_kinds(i, k).into_iter()
+            .find(|k| crate::native_value_repr::same_owned(*k, t))
+            .map(|knd| (format!("s{k}_{}()", crate::render_native_rec::kind_suffix(knd)), knd)),
+        None => enum_read(i, k, false),
+    };
+    let Some((acc, t)) = read else {
         return Err(wall("native: a heap read of an enum slot of several heap kinds"));
     };
+    let guarded = st.guarded_enum_reads.get(d).is_some_and(|tag|
+        crate::render_native_rec::enum_cases(i).unwrap_or_default().iter().any(|(case, fields)|
+            case == tag && k.checked_sub(1).and_then(|k| fields.get(k))
+                .is_some_and(|field| crate::native_value_repr::same_owned(*field, t))));
+    if guarded && st.borrow_reads.contains(d) {
+        if let NTy::Rec(j) = t {
+            let s = crate::render_native_rec::struct_name(j);
+            let r = acc.replacen("()", "_ref()", 1);
+            tys.insert(*d, NTy::RecRef(j));
+            line!("let mut {}: &{s} = {}.{r}.expect(\"checked variant payload\");", var(*d), var(ad.base));
+            return Ok(true);
+        }
+    }
     // A borrow-only read of a boxed record: a reference into the block.
     if let NTy::Rec(j) = t {
         if st.borrow_reads.contains(d) && crate::render_native_rec::has_default(t) {
@@ -377,7 +401,7 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
     }
     tys.insert(*d, f);
     // The last read of the slot of an owned record moves the value out.
-    if st.moves.contains(d) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) {
+    if st.moves.contains(d) && crate::render_native_rec::has_default(f) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) {
         line!(
             "let mut {}: {} = std::mem::take(&mut {}.f{k});",
             var(*d),
@@ -482,6 +506,8 @@ fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
         (f, Some(sv), _) if sv.off == 0 && sv.idx.is_none() => match ty(tys, &sv.base) {
             Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g)
                 .ok_or_else(|| wall("native: a record field write of an unowned kind"))?,
+            Some(g) if crate::native_value_repr::tuple_copy(&var(sv.base), g, f).is_some() =>
+                crate::native_value_repr::tuple_copy(&var(sv.base), g, f).unwrap(),
             // `[]` into a field of another list type: that type's empty list.
             Some(NTy::Vec)
                 if st.empty_lists.contains(&sv.base)
@@ -532,7 +558,8 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
                     if st.borrowed_list_slots.contains(&(ad.base, v)) && matches!(g, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) {
                         Some(format!("{}.clone()", var(sv.base)))
                     } else { owned_from(&var(sv.base), g) }
-                }).ok_or_else(|| {
+                }).or_else(|| (sv.off == 0 && sv.idx.is_none()).then(||
+                    crate::native_value_repr::tuple_copy(&var(sv.base), ty(tys, &sv.base)?, e)).flatten()).ok_or_else(|| {
                     wall(format!("native: a {:?} element stored into a list of {e:?}", ty(tys, &sv.base)))
                 })?
             }
@@ -590,9 +617,10 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
             line!("{}[{ix}] = {rhs};", var(ad.base));
             Ok(true)
         }
-        (Some(NTy::Vec), None) if ty(tys, &v) == Some(NTy::I64) => {
+        (Some(NTy::Vec), None) if matches!(ty(tys, &v), Some(NTy::I64 | NTy::F64)) => {
+            let rhs = if ty(tys, &v) == Some(NTy::F64) { format!("{}.to_bits() as i64", var(v)) } else { var(v) };
             if st.pushed.contains(&ad.base) {
-                line!("{}.push({});", var(ad.base), var(v));
+                line!("{}.push({rhs});", var(ad.base));
                 return Ok(true);
             }
             let (guard, slot) = bounds_guard(st, &ad, ix);
@@ -600,7 +628,7 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
                 line!("{g}");
             }
             crate::render_native_bounds::store(slot);
-            line!("{}[{ix}] = {};", var(ad.base), var(v));
+            line!("{}[{ix}] = {rhs};", var(ad.base));
             Ok(true)
         }
         (bt, sv) => Err(wall(format!(
@@ -695,7 +723,7 @@ fn enum_slot_lit(s: AddrSink<'_>, dst: &ValueId, elems: &[ValueId]) -> Result<bo
         }};
     }
     let i = st.alloc_rec[dst];
-    if elems.iter().any(|e| ty(tys, e) != Some(NTy::I64)) {
+    if elems.iter().any(|e| !matches!(ty(tys, e), Some(NTy::I64 | NTy::F64))) {
         return Err(wall("native: a heap element in an enum slot list"));
     }
     tys.insert(*dst, NTy::Rec(i));
@@ -709,7 +737,12 @@ fn enum_slot_lit(s: AddrSink<'_>, dst: &ValueId, elems: &[ValueId]) -> Result<bo
         line!("let mut {}: {n} = {n}::C{t};", var(*dst));
         return Ok(true);
     }
-    let items = elems.iter().map(|e| var(*e)).collect::<Vec<_>>().join(", ");
+    // MIR's scalar slots carry Float bits, just as scalar_struct_lit does.
+    // Preserve NaN payloads and signed zero; numeric `as i64` would lose both.
+    let items = elems.iter().map(|e| match ty(tys, e) {
+        Some(NTy::F64) => format!("{}.to_bits() as i64", var(*e)),
+        _ => var(*e),
+    }).collect::<Vec<_>>().join(", ");
     line!("let mut {}: {n} = {n}::from_slots(&[{items}]);", var(*dst));
     Ok(true)
 }

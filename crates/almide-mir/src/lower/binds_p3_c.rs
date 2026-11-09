@@ -144,6 +144,7 @@ impl LowerCtx {
         // Drop selection: a NESTED-variant type uses the recursive `Op::DropVariant` (the
         // generated `$__drop_<T>` frees every heap field — variant slots recursively, String
         // slots flat — then the block). A String-only-field type uses the masked DropListStr.
+        self.aggregate_blocks.insert(dst, type_name.clone());
         if needs_rec {
             self.value_drops.entry(dst).or_default().named_route = Some(type_name);
         } else if !heap_slots.is_empty() {
@@ -241,6 +242,7 @@ impl LowerCtx {
         let heap_slots = self.record_heap_slot_mask(&names, &tys, &fields)?;
         let slots = self.lower_record_field_slots(&names, &fields)?;
         let dst = self.emit_record_slot_block(n, slots);
+        self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(&value.ty));
         self.record_masks.insert(dst, heap_slots);
         self.materialized_aggregates.insert(dst);
         if let Some(name) = self.record_drop_type_name(&value.ty) {

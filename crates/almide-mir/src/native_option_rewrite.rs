@@ -42,7 +42,10 @@ pub fn rewrite_option_ops(
     // A generic runtime declaration can serve both scalar and heap payloads.
     // A typed handle read is positive evidence of the latter: preserve its
     // entire address window, including the owner edge the checker follows.
-    let heap_payloads = heap_payload_roots(&ops);
+    let mut heap_payloads = heap_payload_roots(&ops);
+    // A stored/passed heap Option may never load its payload in this frame.
+    // Its checked carrier type still excludes the scalar Option rewrite.
+    heap_payloads.extend(carriers.iter().copied());
     t.opt_vals.extend(opt_params.iter().copied());
     for op in ops {
         let Some(op) = t.carrier_op(op, &mut out, carriers) else { continue };
@@ -119,7 +122,7 @@ impl OptionTracker {
                 self.minted.insert(*dst);
             }
             Op::Drop { v } | Op::DropListStr { v } if self.minted.contains(v) => {}
-            Op::Consume { v } if self.opt_vals.contains(v) => {}
+            Op::Consume { v } if self.minted.contains(v) => {}
             Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 && self.opt_vals.contains(&args[0]) => {
                 self.handles.insert(*d, args[0]);
             }
@@ -165,17 +168,23 @@ impl OptionTracker {
                 out.push(Op::CallFn { dst: *dst, name: name.clone(), args, result: *result });
             }
             Op::IfThen { dst, .. } => {
-                self.if_dsts.push(*dst);
+                self.if_dsts.push((*dst, true));
                 out.push(op);
             }
             Op::Else { val } | Op::EndIf { val } => {
-                if let (Some(v), Some(Some(d))) = (val, self.if_dsts.last()) {
+                if let Some((_, all_minted)) = self.if_dsts.last_mut() {
+                    *all_minted &= val.is_some_and(|v| self.minted.contains(&v));
+                }
+                if let (Some(v), Some((Some(d), _))) = (val, self.if_dsts.last()) {
                     if self.opt_vals.contains(v) {
                         self.opt_vals.insert(*d);
                     }
                 }
                 if matches!(op, Op::EndIf { .. }) {
-                    self.if_dsts.pop();
+                    // A join of two value-only Options owns no heap object.
+                    // Keep a call-result arm's ownership credit if either arm
+                    // has one; merely knowing the Option type is insufficient.
+                    if let Some((Some(d), true)) = self.if_dsts.pop() { self.minted.insert(d); }
                 }
                 out.push(op);
             }
@@ -229,7 +238,7 @@ struct OptionTracker {
     handles: BTreeMap<ValueId, ValueId>,
     /// A swallowed `Handle + const` → (the Option, the offset).
     addrs: BTreeMap<ValueId, (ValueId, i64)>,
-    if_dsts: Vec<Option<ValueId>>,
+    if_dsts: Vec<(Option<ValueId>, bool)>,
     /// The blocks filled in place this function's lowering recorded, the ones
     /// this pass took over, and the payload each one's slot store holds
     /// until its length word makes it Some.
@@ -256,4 +265,72 @@ fn next_value(f: &MirFunction, ops: &[Op]) -> u32 {
         }
     }
     hi
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn declared_heap_option_keeps_its_handle_without_a_payload_read() {
+        let v = ValueId;
+        let mut f = MirFunction { ops: vec![
+            Op::CallFn { dst: Some(v(0)), name: "find".into(), args: vec![],
+                result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }) },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(v(1)), args: vec![v(0)] },
+            Op::Consume { v: v(0) },
+        ], ..Default::default() };
+        rewrite_option_ops(&mut f, &BTreeSet::from(["find".into()]), &[],
+            &BTreeSet::from([v(0)]), &Default::default());
+        assert!(f.ops.iter().any(|op| matches!(op,
+            Op::Prim { kind: PrimKind::Handle, dst: Some(d), .. } if *d == v(1))));
+        assert!(crate::verify_ownership(&f).is_ok());
+    }
+    #[test]
+    fn call_returned_option_keeps_its_transfer_credit() {
+        let v = ValueId;
+        let mut f = MirFunction {
+            name: "option_call_transfer".into(),
+            ops: vec![
+                Op::CallFn { dst: Some(v(0)), name: "find".into(), args: vec![],
+                    result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }) },
+                Op::Consume { v: v(0) },
+            ],
+            ..Default::default()
+        };
+        assert!(crate::verify_ownership(&f).is_ok());
+        rewrite_option_ops(&mut f, &BTreeSet::from(["find".into()]), &[], &Default::default(), &Default::default());
+        assert!(crate::verify_ownership(&f).is_ok(), "the call's owned return must still be transferred");
+        f.ops.pop();
+        assert!(crate::verify_ownership(&f).is_err(), "dropping the transfer leaks the call result");
+    }
+    #[test]
+    fn option_join_is_value_only_only_when_both_arms_are_minted() {
+        let v = ValueId;
+        let make = |call_arm: bool| MirFunction {
+            name: "option_join".into(),
+            ops: vec![
+                Op::ConstInt { dst: v(0), value: 1 },
+                Op::IfThen { cond: v(0), dst: Some(v(1)) },
+                Op::Alloc { dst: v(2), repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }, init: Init::OptSome { payload: v(0) } },
+                Op::Consume { v: v(2) },
+                Op::Else { val: Some(v(2)) },
+                if call_arm { Op::CallFn { dst: Some(v(3)), name: "find".into(), args: vec![], result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }) } }
+                else { Op::Alloc { dst: v(3), repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }, init: Init::OptNone } },
+                Op::Consume { v: v(3) },
+                Op::EndIf { val: Some(v(3)) },
+                Op::Dup { dst: v(4), src: v(1) },
+                Op::Drop { v: v(4) },
+                Op::Drop { v: v(1) },
+            ],
+            ..Default::default()
+        };
+        let mut pure = make(false);
+        rewrite_option_ops(&mut pure, &Default::default(), &[], &Default::default(), &Default::default());
+        assert!(crate::verify_ownership(&pure).is_ok());
+        assert!(pure.ops.iter().any(|op| matches!(op, Op::Prim { kind: PrimKind::OptCopy, dst: Some(d), .. } if *d == v(4))));
+        let mut mixed = make(true);
+        rewrite_option_ops(&mut mixed, &BTreeSet::from(["find".into()]), &[], &Default::default(), &Default::default());
+        assert!(mixed.ops.iter().any(|op| matches!(op, Op::Dup { dst, src } if *dst == v(4) && *src == v(1))));
+        assert!(mixed.ops.iter().any(|op| matches!(op, Op::Drop { v: d } if *d == v(1))));
+    }
 }

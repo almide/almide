@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
+include!("native_floor_cfg.rs");
 // Shared by build.rs and the generated-index verification test.
 /// What the first scan over the runtime modules' top-level items collects.
 #[derive(Default)]
 struct RuntimeScan {
     items: HashMap<&'static str, RtItem>,
     seen: BTreeMap<&'static str, usize>,
-    /// A module the runtime glob-imports (`mod almide_libm { … } pub use
-    /// almide_libm::*;`) puts its names in scope unqualified: each of them
-    /// takes the whole module and its glob along.
-    glob_mods: Vec<(&'static str, &'static str)>,
+    /// Whole modules and whether the runtime glob-imports their contents.
+    /// Private module members stay scoped; a glob also exposes their names.
+    modules: Vec<(&'static str, &'static str, bool)>,
     /// Runtime types and their impl blocks: a type travels with its
     /// inherent impls and its impls of std traits.
     types: Vec<(&'static str, &'static str)>,
@@ -47,17 +47,19 @@ impl RuntimeScan {
             self.items.insert(name, RtItem { text });
         }
         let is_mod = kind == ItemKind::Other && lex(text).iter().take_while(|t| t.text != name).any(|t| t.text == "mod");
-        if is_mod && !attributed && src.contains(&format!("\npub use {name}::*;")) {
-            let whole: &'static str = Box::leak(format!("{text}\npub use {name}::*;").into_boxed_str());
-            self.glob_mods.push((name, whole));
+        if is_mod && !attributed {
+            let glob = src.contains(&format!("\npub use {name}::*;"));
+            let whole = if glob { &*Box::leak(format!("{text}\npub use {name}::*;").into_boxed_str()) } else { text };
+            self.modules.push((name, whole, glob));
         }
     }
 }
 
 fn build_runtime_index() -> RuntimeIndex {
-    let RuntimeScan { mut items, seen, glob_mods, types, impls, fns } = RuntimeScan::scan();
+    let RuntimeScan { mut items, seen, modules, types, impls, fns } = RuntimeScan::scan();
     items.retain(|n, _| seen.get(n) == Some(&1));
-    take_glob_mods(&mut items, &seen, glob_mods);
+    take_modules(&mut items, &seen, modules);
+    take_complementary_cfg_functions(&mut items, &seen);
     // Every name the runtime or the v0 prelude defines, at any depth: what
     // a body may reach only as a takeable item. The prelude rides in the
     // runtime crate's source (`emit_runtime_crate`).
@@ -75,22 +77,28 @@ fn build_runtime_index() -> RuntimeIndex {
     take_types(&mut idx, &seen, types, &impls);
     take_runtime_traits(&mut idx, &seen, &impls);
     take_fs_host_module(&mut idx);
+    // The same std-only kernel module the ordinary native runtime embeds.
+    // Keep its target-feature implementations and cfg twins together.
+    idx.items.insert("almide_kernel", RtItem {
+        text: almide_codegen::generated::rust_runtime::ALMIDE_KERNEL_INLINE,
+    });
     idx
 }
 
-/// Each glob-imported module defined once travels whole, taken by its name
-/// or any name it defines that is not an item of its own.
-fn take_glob_mods(
+/// An unconditional module travels whole, keeping all nested cfg branches.
+/// Only a glob-imported module exposes its members as unqualified items.
+fn take_modules(
     items: &mut HashMap<&'static str, RtItem>,
     seen: &BTreeMap<&'static str, usize>,
-    glob_mods: Vec<(&'static str, &'static str)>,
+    modules: Vec<(&'static str, &'static str, bool)>,
 ) {
-    for (name, whole) in glob_mods {
+    for (name, whole, glob) in modules {
         if seen.get(name) != Some(&1) {
             continue;
         }
         let body = &whole[whole.find('{').unwrap_or(0) + 1..whole.rfind("} //").or_else(|| whole.rfind('}')).unwrap_or(whole.len())];
         items.insert(name, RtItem { text: whole });
+        if !glob { continue; }
         for inner in defined_names(body) {
             if !items.contains_key(inner) && !seen.contains_key(inner) {
                 items.insert(inner, RtItem { text: whole });
@@ -300,4 +308,34 @@ fn trait_method_names(src: &str) -> BTreeSet<&str> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod scoped_module_tests {
+    use super::*;
+
+    #[test]
+    fn private_module_members_do_not_become_global_runtime_items() {
+        const SRC: &str = "mod scoped { #[cfg(unix)] pub fn inside() {} #[cfg(not(unix))] pub fn inside() {} }";
+        let mut scan = RuntimeScan::default();
+        for item in top_level_items(SRC) { scan.add(SRC, item); }
+        take_modules(&mut scan.items, &scan.seen, scan.modules);
+        assert_eq!(scan.items.len(), 1);
+        let text = scan.items["scoped"].text;
+        assert!(text.contains("#[cfg(unix)]") && text.contains("#[cfg(not(unix))]"));
+        let rt = RuntimeIndex { items: scan.items, defined: defined_names(SRC),
+            trait_methods: BTreeSet::new(), fns: BTreeSet::new(), fs_built: BTreeSet::new() };
+        assert_eq!(references_in(&rt, text).unwrap(), ["scoped"]);
+    }
+
+    #[test]
+    fn a_scoped_module_does_not_hide_an_unresolved_parent_call() {
+        let rt = RuntimeIndex { items: HashMap::new(), defined: ["outside"].into_iter().collect(),
+            trait_methods: BTreeSet::new(), fns: ["outside"].into_iter().collect(), fs_built: BTreeSet::new() };
+        assert_eq!(references_in(&rt, "mod scoped { pub fn inside() { super::outside(); } }"), Err("outside".into()));
+        let mut scan = RuntimeScan::default();
+        const SRC: &str = "#[cfg(unix)] mod only_unix { pub fn inside() {} }";
+        for item in top_level_items(SRC) { scan.add(SRC, item); }
+        assert!(scan.modules.is_empty(), "a conditional outer module must remain refused");
+    }
 }

@@ -246,6 +246,14 @@ impl LowerCtx {
         let repr = repr_of(result_ty).ok()?;
         match &expr.kind {
             IrExprKind::ResultOk { expr: inner } => {
+                // A native join can already own the pair. Retain that carrier
+                // through the same recursive wrapper used by a literal pair.
+                if crate::lower::owned_tco_slots()
+                    && matches!(&inner.kind, IrExprKind::Var { .. })
+                {
+                    let piece = self.lower_result_str_piece(inner)?;
+                    return Some(self.materialize_result_aggregate(piece, repr, false, drop_fn));
+                }
                 let IrExprKind::Tuple { elements } = &inner.kind else { return None };
                 if elements.len() != 2 {
                     return None;

@@ -257,9 +257,9 @@ impl LowerCtx {
         // `mir == ir` double-count gate is untouched), unlike synthesizing a `string.len` call arg.
         let name = if module == "string" && func == "slice" && args.len() == 2 {
             "string.slice2".to_string()
-        } else if let Some(krec) = self.krec_call_name(module, func, &arg_tys, result_ty) {
-            // A String-field-record key/element (C-015) — the generated `__krec_*` twin.
-            krec
+        } else if let Some(name) = crate::lower::registry_sig::declared_collection_route(module, func, &arg_tys, result_ty)
+            .or_else(|| self.krec_call_name(module, func, &arg_tys, result_ty)) {
+            name
         } else {
             list_heap_call_name(module, func, &arg_tys, result_ty, self.router_hints(&arg_tys, result_ty))
         };
@@ -433,9 +433,8 @@ impl LowerCtx {
             self.ops.push(Op::Prim { kind: crate::PrimKind::ProcExit, dst: None, args: vec![code] });
             return Ok(());
         }
-        // An IN-PLACE `&mut` BYTES mutator (set_*/write_*/fill/clear/copy_within/
-        // copy_from — the self-host bodies store through args[0]'s block), or the
-        // in-place `list.pop` (the same &mut protocol over a list receiver). The
+        if self.try_cell_bytes_mutation(module, func, args, result_ty)? { return Ok(()); }
+        // An in-place mutator (Bytes writers or list.pop). The
         // native oracle's semantics (RcCow + borrow inference) split by receiver:
         //   - a LOCAL var: `make_mut` COWs a SHARED block at the mutation — so
         //     `var b = a; bytes.put_u8(b, …)` must not write through `a` (#794;
@@ -696,6 +695,7 @@ impl LowerCtx {
     }
 }
 
+include!("calls_cell_mutation.rs");
 /// The IN-PLACE `&mut` mutator surface: the bytes writers (set_*/write_*/fill/clear/
 /// copy_within/copy_from — their self-host bodies store through args[0]'s block) and
 /// the in-place `list.pop` (the same &mut protocol over a list receiver), and

@@ -1,0 +1,7 @@
+fold inline int: err fs.fold_lines("xt_3148_never_created/absent.txt"): No such file or directory (os error 2)
+fold inline string: err fs.fold_lines("xt_3148_never_created/absent.txt"): No such file or directory (os error 2)
+fold inline map: err fs.fold_lines("xt_3148_never_created/absent.txt"): No such file or directory (os error 2)
+fold closure int: err fs.fold_lines("xt_3148_never_created/absent.txt"): No such file or directory (os error 2)
+fold closure string: err fs.fold_lines("xt_3148_never_created/absent.txt"): No such file or directory (os error 2)
+each inline: err fs.for_each_line("xt_3148_never_created/absent.txt"): No such file or directory (os error 2)
+each closure: err fs.for_each_line("xt_3148_never_created/absent.txt"): No such file or directory (os error 2)

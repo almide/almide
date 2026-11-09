@@ -102,7 +102,7 @@ fn parent_slot_kind(i: u16, slot: Option<usize>) -> Option<NTy> {
         return carrier::slot_kind(i, k);
     }
     rec::rec_field(i, k).or_else(|| {
-        let ks: Vec<NTy> = rec::enum_slot_kinds(i, k).into_iter().filter(|t| matches!(t, NTy::Rec(_))).collect();
+        let ks = rec::enum_slot_kinds(i, k);
         (ks.len() == 1).then(|| ks[0])
     })
 }
@@ -170,6 +170,7 @@ pub(super) fn type_blocks(
     tb.seed_params();
     // DynList blocks (and their declared length), the joins, the copies.
     tb.scan_ops();
+    tb.seed_list_declarations();
     let blocks = tb.blocks.clone();
     loop {
         let before = (tb.alloc_rec.len(), tb.str_lists.len(), tb.scalar_blocks.len(), tb.known.len());
@@ -207,6 +208,23 @@ struct BlockTyping<'a, 'f> {
 }
 
 impl BlockTyping<'_, '_> {
+    fn seed_list_declarations(&mut self) {
+        // A checked List[String] also types a computed, populated list.
+        // Its elements may come from tag-guarded Result reads, whose kind
+        // deliberately remains unknown to the flow-insensitive prepass.
+        for (v, key) in &self.func.aggregate_blocks {
+            if rec::declared_kind(key) == Some(NTy::VecStr) {
+                self.known.insert(*v, NTy::VecStr);
+                self.str_lists.insert(*v);
+            }
+        }
+        if let (Some(v), Some((_, Some(NativeSigKind::ListStr)))) =
+            (self.func.ret, self.sigs.get(self.func.name.as_str())) {
+            self.known.insert(v, NTy::VecStr);
+            self.str_lists.insert(v);
+        }
+    }
+
     fn seed_params(&mut self) {
         let func = self.func;
         if let Some((ps, _)) = self.sigs.get(func.name.as_str()).filter(|(ps, _)| ps.len() == func.params.len()) {
@@ -318,11 +336,16 @@ impl BlockTyping<'_, '_> {
     fn down(&mut self) {
         let (func, f) = (self.func, self.f);
         let empty = super::empty_list_blocks(func);
+        let cases = enum_built_whole(func, self.alloc_rec, f.base_of, f.consts);
         for op in &func.ops {
             let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op else { continue };
             let (Some(&(r, off)), Some(&vsrc)) = (f.base_of.get(&args[0]), f.handle_of.get(&args[1])) else { continue };
             let Some(&i) = self.alloc_rec.get(&r) else { continue };
-            match parent_slot_kind(i, slot_of(off)) {
+            let kind = cases.get(&r).and_then(|(tag, _)| {
+                let slot = slot_of(off)?.checked_sub(1)?;
+                rec::enum_cases(i)?.into_iter().find(|(t, _)| t == tag)?.1.get(slot).copied()
+            }).or_else(|| parent_slot_kind(i, slot_of(off)));
+            match kind {
                 Some(NTy::Rec(j)) => { self.alloc_rec.entry(vsrc).or_insert(j); }
                 // An empty literal has no element store to establish String.
                 // Preserve the parent's declared list type at allocation;

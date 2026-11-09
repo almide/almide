@@ -26,7 +26,8 @@ fn callback_layout(dps: &[DTy], arity: usize) -> Option<Vec<(DTy, String)>> {
 }
 
 fn bind_callback_shape(env: &mut Env, d: &DTy, got: NTy) -> Option<()> {
-    if !has_runtime_tuple(d) {
+    if !matches!(d, DTy::Tuple(_) | DTy::List(_) | DTy::Opt(_) | DTy::Result(_, _)) {
+        if has_runtime_tuple(d) { return None; }
         let runtime = kind_of(env, d);
         if got == NTy::I64 && runtime == Some(NTy::F64) { return Some(()); }
         // Generic containers retain MIR's Float bits, while a checked lambda
@@ -71,7 +72,8 @@ fn runtime_type(env: &Env, d: &DTy) -> Option<String> {
 /// `into_native` selects the direction. Every expression is evaluated once,
 /// and owned fields move through the adapter instead of escaping as references.
 fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_native: bool) -> Option<String> {
-    if !has_runtime_tuple(d) {
+    if !matches!(d, DTy::Tuple(_) | DTy::List(_) | DTy::Opt(_) | DTy::Result(_, _)) {
+        if has_runtime_tuple(d) { return None; }
         return match d {
             DTy::Bool if native == NTy::I64 => Some(if into_native {
                 format!("({code}) as i64")
@@ -123,8 +125,8 @@ fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_nati
 }
 
 fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, dps: &[DTy], dret: &DTy,
-    ps: &[NativeSigKind], ret: NativeSigKind) -> Option<String> {
-    if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) { return None; }
+    ps: &[NativeSigKind], ret: Option<NativeSigKind>) -> Option<String> {
+    if ps.iter().chain(ret.iter()).any(|k| matches!(k, NativeSigKind::Narrow { .. })) { return None; }
     let mut params = Vec::new();
     let mut setup = Vec::new();
     let mut args = Vec::new();
@@ -140,8 +142,12 @@ fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, dps: 
     }
     let call = format!("{}{})", callback_head(lambda, captured, ps, ret),
         args.iter().map(|a| format!(", {a}")).collect::<String>());
-    let call = if ret == NativeSigKind::F64 { format!("AlmdLaneF64::lane_f64({call})") } else { call };
-    let result = convert_callback_value(env, dret, clo::owned_nty(ret), &call, false)?;
+    let call = if ret == Some(NativeSigKind::F64) { format!("AlmdLaneF64::lane_f64({call})") } else { call };
+    let result = match ret {
+        Some(ret) => convert_callback_value(env, dret, clo::owned_nty(ret), &call, false)?,
+        None if *dret == DTy::Unit => call,
+        None => return None,
+    };
     Some(format!("|{}| -> {} {{ {} {result} }}", params.join(", "), runtime_type(env, dret)?, setup.join(" ")))
 }
 

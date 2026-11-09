@@ -145,7 +145,7 @@ impl<'a> ItemScan<'a> {
                 j += 1;
             }
         }
-        while toks.get(j).is_some_and(|t| matches!(t.text, "const" | "unsafe" | "extern" | "async") && toks.get(j + 1).is_some_and(|n| matches!(n.text, "fn" | "unsafe" | "extern" | "\"C\""))) {
+        while toks.get(j).is_some_and(|t| matches!(t.text, "const" | "unsafe" | "extern" | "async") && toks.get(j + 1).is_some_and(|n| matches!(n.text, "fn" | "impl" | "unsafe" | "extern" | "\"C\""))) {
             j += 1;
         }
         j
@@ -220,6 +220,7 @@ fn impl_self_type<'a>(toks: &[Tok<'a>]) -> Option<&'a str> {
 }
 
 fn impl_parts<'a>(toks: &[Tok<'a>]) -> Option<(Option<&'a str>, &'a str)> {
+    let toks = if toks.first()?.text == "unsafe" { &toks[1..] } else { toks };
     let base = toks.first()?.depth;
     let mut k = 1;
     // Skip the impl's own generics.
@@ -294,7 +295,19 @@ fn item_end(toks: &[Tok], from: usize) -> usize {
 fn rust_signature(text: &str) -> Option<(Vec<String>, String)> {
     let toks = lex(text);
     let fn_at = toks.iter().position(|t| t.text == "fn")?;
-    let open = toks[fn_at..].iter().position(|t| t.text == "(")? + fn_at;
+    // A generic bound may itself contain `Fn(A) -> B`. Its parentheses
+    // are not the function's parameter list, and the arrow is not a `>`
+    // closing the generic parameter group.
+    let mut generic_depth = 0i32;
+    let open = (fn_at + 2..toks.len()).find(|&i| {
+        match toks[i].text {
+            "<" => generic_depth += 1,
+            ">" if toks.get(i.wrapping_sub(1)).is_none_or(|t| t.text != "-") => generic_depth -= 1,
+            "(" if generic_depth == 0 => return true,
+            _ => {}
+        }
+        false
+    })?;
     // The `)` matching the param list's `(` (a param type may hold parens:
     // `Vec<(K, V)>`).
     let close = {
@@ -312,9 +325,10 @@ fn rust_signature(text: &str) -> Option<(Vec<String>, String)> {
     let mut params = Vec::new();
     let mut depth = 0i32;
     let mut cur = String::new();
-    for c in inner.chars() {
+    for (i, c) in inner.char_indices() {
         match c {
             '<' | '(' | '[' => depth += 1,
+            '>' if i > 0 && inner.as_bytes()[i - 1] == b'-' => {}
             '>' | ')' | ']' => depth -= 1,
             _ => {}
         }
@@ -338,7 +352,20 @@ fn rust_signature(text: &str) -> Option<(Vec<String>, String)> {
 }
 
 fn references_in(rt: &RuntimeIndex, text: &str) -> Result<Vec<String>, String> {
-    references_seeded(rt, text, &BTreeSet::new())
+    references_with_supplied(rt, text, &BTreeSet::new())
+}
+
+fn references_with_supplied(rt: &RuntimeIndex, text: &str, supplied: &BTreeSet<&str>) -> Result<Vec<String>, String> {
+    // A carried module owns its nested names, including cfg siblings. A
+    // parent/sibling reference is still resolved against the outer index.
+    let mut own = supplied.clone();
+    for (kind, name, item, _) in top_level_items(text) {
+        if kind == ItemKind::Other && lex(item).iter().take_while(|t| t.text != name).any(|t| t.text == "mod") {
+            own.extend(defined_names(item));
+            own.extend(thread_local_names(item));
+        }
+    }
+    references_seeded(rt, text, &own)
 }
 
 fn references_seeded<'t>(rt: &RuntimeIndex, text: &'t str, own: &BTreeSet<&'t str>) -> Result<Vec<String>, String> {

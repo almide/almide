@@ -42,6 +42,11 @@ fn static_twin(symbol: &str, text: &str) -> Option<(String, String)> {
 // parameter that still demands an Rc<dyn Fn + 'static>. Keep original items
 // for other callers and derive every forwarded name from the runtime body.
 fn static_runtime_closure(symbol: &str, mut items: Vec<&'static str>) -> Option<(String, Vec<&'static str>)> {
+    if let Some(body) = crate::native_floor::native_host_callback_body(symbol) {
+        let (twin, root) = static_twin(symbol, body)?;
+        items.push(Box::leak(root.into_boxed_str()));
+        return Some((twin, items));
+    }
     let (twin, root) = static_twin(symbol, items.first()?)?;
     let candidates: BTreeMap<String, (String, String)> = items.iter().skip(1).filter_map(|text| {
         let name = crate::native_floor::runtime_fn_name(text)?;
@@ -86,5 +91,55 @@ mod static_callback_tests {
         assert!(text.contains("fn root_static(f: impl Fn(i64) -> i64) -> i64 { helper_static(f) }"));
         assert!(text.contains("fn helper_static(f: impl Fn(i64) -> i64)"));
         assert!(text.contains("\"helper(f)\""));
+    }
+}
+
+#[cfg(test)]
+mod native_host_callback_tests {
+    use super::*;
+
+    #[test]
+    fn host_callbacks_keep_typed_arguments_and_void_return_abi() {
+        for name in ["fs_fold_lines_i", "fs_fold_lines_s", "fs_fallible_fold_lines_i",
+            "fs_fallible_fold_lines_msi", "fs_for_each_line", "fs_fallible_for_each_line"] {
+            let hof = derive_explained(name).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(crate::host_ops::is_native_fs_host_call(&hof.symbol));
+            assert!(hof.items.iter().any(|t| t.contains(&format!("fn {}", hof.twin))));
+        }
+        assert!(derive_explained("io.read_line").is_err(), "effect calls outside this boundary stay refused");
+        let env = Env::new();
+        for lambda in [Some("visit"), None] {
+            let code = tuple_callback_adapter(&env, lambda, "captured", &[DTy::Str],
+                &DTy::Unit, &[NativeSigKind::Str], None).unwrap();
+            assert!(code.contains("-> ()"), "{code}");
+            assert!(!code.contains("0_i64"), "void return must not fabricate a value: {code}");
+        }
+        assert!(tuple_callback_adapter(&env, Some("visit"), "captured", &[DTy::Str],
+            &DTy::Int, &[NativeSigKind::Str], None).is_none());
+    }
+
+    #[test]
+    fn selected_host_sites_keep_their_own_and_callback_capabilities() {
+        let mut main = MirFunction { name: "main".into(), ops: vec![
+            Op::FuncRef { dst: ValueId(0), name: "visit".into() },
+            Op::CallFn { name: "linked_walker".into(), dst: None, args: vec![], result: None },
+        ], ..Default::default() };
+        let callback = MirFunction { name: "visit".into(), ops: vec![
+            Op::CallFn { name: "fs.write_text".into(), dst: None, args: vec![], result: None },
+        ], ..Default::default() };
+        reset(Default::default(), Default::default());
+        STATE.with(|s| s.borrow_mut().sites.insert(("main".into(), 1), "almide_rt_fs_for_each_line".into()));
+        let sites = sites();
+        let witness = crate::certificate::native_calls_witness_with(&[main.clone()], &sites);
+        let id = crate::host_ops::native_fs_host_id("almide_rt_fs_for_each_line").unwrap();
+        assert_eq!(witness.lines().next().unwrap().split('|').nth(3), Some(id.to_string().as_str()));
+        let graph = capability_program(vec![main.clone(), callback.clone()]);
+        let caps: BTreeSet<_> = crate::certificate::reachable_caps("main", &graph, &mut BTreeSet::new()).into_iter().collect();
+        assert_eq!(caps, [crate::Capability::FsRead, crate::Capability::FsWrite].into_iter().collect());
+        // The same spelling at a different op is no selected host call.
+        main.ops.remove(0);
+        let graph = capability_program(vec![main, callback]);
+        assert!(crate::certificate::reachable_caps("main", &graph, &mut BTreeSet::new()).is_empty());
+        reset(Default::default(), Default::default());
     }
 }

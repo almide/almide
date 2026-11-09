@@ -2,7 +2,7 @@
 pub(crate) fn has_default(t: NTy) -> bool {
     fn check(t: NTy, decls: &[RecDecl], visiting: &mut Vec<u16>) -> bool {
         match t {
-            NTy::Res | NTy::ResStr => false,
+            NTy::Never | NTy::Res | NTy::ResStr => false,
             NTy::Rec(i) | NTy::RecRef(i) => {
                 let Some(d) = decls.get(i as usize) else {
                     return false;

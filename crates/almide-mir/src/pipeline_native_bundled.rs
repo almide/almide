@@ -12,14 +12,13 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 fn body_needed(module: &str, func: &str) -> bool {
     let call = format!("{module}.{}", almide_ir::mono_base_or_self(func));
     !super::served_natively(&call)
-        && !super::registry_served_names().contains(call.as_str())
         && almide_ir::mut_args::stdlib_fn_has_almide_body(module, func)
 }
 
 #[derive(Default)]
 struct Demands(BTreeMap<String, HashSet<String>>, BTreeMap<String, Option<almide_ir::Span>>);
 
-fn defaults(types: &mut [almide_ir::IrTypeDecl], mut visit: impl FnMut(&mut IrExpr)) {
+pub(super) fn defaults(types: &mut [almide_ir::IrTypeDecl], mut visit: impl FnMut(&mut IrExpr)) {
     use almide_ir::{IrTypeDeclKind, IrVariantKind};
     for ty in types {
         let fields: Vec<_> = match &mut ty.kind {
@@ -217,11 +216,38 @@ fn refresh_declared_reprs(ir: &mut IrProgram, checker: &Checker) {
 /// leave the existing move-mode return/write-back and MIR ownership checks
 /// to account for it. The move-parameter pass may transfer ownership instead
 /// when every call site can prove that transfer.
+/// The same explicit write-back convention serves user and linked bodies.
+/// Call sites and signatures change together before MIR ownership lowering.
+pub(super) fn prepare_mutable_values(ir: &mut IrProgram) {
+    almide_ir::mut_param::lower_mut_params_move_mode(ir);
+    crate::native_propagation::expand(ir);
+    own_written_params(ir);
+    snapshot_mut_reads(ir);
+}
+
 pub(super) fn own_written_params(ir: &mut IrProgram) {
     use almide_ir::{IrStmt, IrStmtKind, Mutability, VarId};
-    struct Writes(HashSet<VarId>);
+    struct Writes(HashSet<VarId>, HashSet<VarId>, HashSet<VarId>, HashSet<almide_lang::intern::Sym>);
     impl IrVisitor for Writes {
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            match &s.kind {
+                IrStmtKind::Assign { var, .. } => { self.1.insert(*var); }
+                IrStmtKind::IndexAssign { target, .. }
+                | IrStmtKind::FieldAssign { target, .. }
+                | IrStmtKind::MapInsert { target, .. } => { self.1.insert(*target); }
+                _ => {}
+            }
+            almide_ir::walk_stmt(self, s);
+        }
+
         fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind {
+                self.3.insert(*name);
+            }
+            if let IrExprKind::Lambda { params, body, .. } = &e.kind {
+                let bound = params.iter().map(|(v, _)| *v).collect();
+                self.2.extend(almide_ir::free_vars::free_vars(body, &bound));
+            }
             if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind {
                 for k in almide_ir::mut_args::stdlib_mut_positions(module.as_str(), func.as_str()).into_iter().flatten() {
                     if let Some(v) = args.get(k).and_then(almide_ir::mut_args::place_root) { self.0.insert(v); }
@@ -231,11 +257,17 @@ pub(super) fn own_written_params(ir: &mut IrProgram) {
         }
     }
     for f in &mut ir.functions {
-        let mut writes = Writes(HashSet::new());
+        let mut writes = Writes(HashSet::new(), HashSet::new(), HashSet::new(), HashSet::new());
         writes.visit_expr(&f.body);
         let mut bindings = Vec::new();
         for p in &mut f.params {
-            if !writes.0.contains(&p.var) || !crate::lower::is_heap_ty(&p.ty) { continue; }
+            // The self-tail-call rewrite already creates owned carry slots.
+            // Renaming its reassigned parameter first hides that recurrence.
+            let assigned_local = writes.1.contains(&p.var) && !writes.3.contains(&f.name);
+            let runtime_mutated_heap = (writes.0.contains(&p.var) || assigned_local)
+                && crate::lower::is_heap_ty(&p.ty);
+            let shared_capture = writes.1.contains(&p.var) && writes.2.contains(&p.var);
+            if !runtime_mutated_heap && !shared_capture { continue; }
             let local = p.var;
             ir.var_table.entries[local.0 as usize].mutability = Mutability::Var;
             p.var = ir.var_table.alloc(p.name, p.ty.clone(), Mutability::Let, None);
@@ -291,10 +323,15 @@ pub(super) fn snapshot_mut_reads(ir: &mut IrProgram) {
     for f in &mut ir.functions { visitor.visit_expr_mut(&mut f.body); }
     for t in &mut ir.top_lets { visitor.visit_expr_mut(&mut t.value); }
     defaults(&mut ir.type_decls, |e| visitor.visit_expr_mut(e));
+    snapshot_loop_iterables(ir);
+    snapshot_call_operands(ir);
 }
+
+include!("pipeline_native_loop_snapshots.rs");
 
 struct Resolve<'a> {
     bodies: &'a HashMap<String, HashSet<String>>,
+    declarations: &'a HashMap<String, HashSet<String>>,
     owner: Option<&'a str>,
 }
 
@@ -322,6 +359,11 @@ impl IrMutVisitor for Resolve<'_> {
                     _ => None,
                 };
                 if let Some(name) = resolved { *target = CallTarget::Named { name: sym(&name) }; }
+                else if let (Some(owner), CallTarget::Named { name }) = (self.owner, &*target) {
+                    if self.declarations.get(owner).is_some_and(|names| names.contains(name.as_str())) {
+                        *target = CallTarget::Module { module: sym(owner), func: *name, def_id: None };
+                    }
+                }
             }
             IrExprKind::FnRef { name } | IrExprKind::ClosureCreate { func_name: name, .. } => {
                 if let Some(n) = self.reference(name.as_str()) { *name = sym(&n); }
@@ -351,16 +393,29 @@ impl IrVisitor for References {
 pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
     if ir.modules.is_empty() { return Ok(ir); }
     let bodies: HashMap<String, HashSet<String>> = ir.modules.iter().map(|m| {
-        let names = super::linkable_module_fns(m).into_iter()
+        // These primary bodies were loaded and checked for this native leg.
+        // The shared registry filter is for the self-host representation:
+        // applying it here drops bodies while retaining their nominal type
+        // declarations (e.g. Path's tuple steps versus self-host String steps).
+        let names = m.functions.iter().filter(|f| super::is_pure_almide_fn(f))
+            .map(|f| f.name.to_string())
             .filter(|f| {
                 let call = format!("{}.{}", m.name, almide_ir::mono_base_or_self(f));
-                !super::served_natively(&call) && !super::registry_served_names().contains(call.as_str())
+                !super::served_natively(&call)
             })
             .collect();
         (m.name.to_string(), names)
     }).collect();
+    let declarations = ir.modules.iter().map(|m| {
+        let names = almide_lang::stdlib_info::bundled_source(m.name.as_str())
+            .and_then(almide_lang::parse_cached).map(|p| p.decls.iter().filter_map(|d| match d {
+                Decl::Fn { name, .. } => Some(name.to_string()),
+                _ => None,
+            }).collect()).unwrap_or_default();
+        (m.name.to_string(), names)
+    }).collect();
     let roots: HashSet<String> = ir.functions.iter().map(|f| f.name.to_string()).collect();
-    let mut resolve = Resolve { bodies: &bodies, owner: None };
+    let mut resolve = Resolve { bodies: &bodies, declarations: &declarations, owner: None };
     for f in &mut ir.functions { resolve.visit_expr_mut(&mut f.body); }
     for t in &mut ir.top_lets { resolve.visit_expr_mut(&mut t.value); }
     defaults(&mut ir.type_decls, |e| resolve.visit_expr_mut(e));
@@ -396,4 +451,30 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
     }
     ir.functions.retain(|f| refs.0.contains(f.name.as_str()));
     Ok(ir)
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+
+    #[test]
+    fn unlinked_library_calls_keep_their_scope_without_capturing_user_namesakes() {
+        let bodies = HashMap::new();
+        let declarations = HashMap::from([("env".into(), HashSet::from(["__set".into()]))]);
+        for (owner, name, module) in [(Some("env"), "__set", Some("env")),
+            (None, "__set", None), (Some("user"), "__set", None), (Some("env"), "other", None)] {
+            let mut expr = IrExpr { kind: IrExprKind::Call {
+                target: CallTarget::Named { name: sym(name) }, args: vec![], type_args: vec![],
+            }, ty: almide_lang::types::Ty::Unit, span: None, def_id: None };
+            Resolve { bodies: &bodies, declarations: &declarations, owner }.visit_expr_mut(&mut expr);
+            let IrExprKind::Call { target, .. } = expr.kind else { panic!("call lost") };
+            match (target, module) {
+                (CallTarget::Module { module, func, .. }, Some(expected)) => {
+                    assert_eq!(module.as_str(), expected); assert_eq!(func.as_str(), name);
+                }
+                (CallTarget::Named { name: actual }, None) => assert_eq!(actual.as_str(), name),
+                other => panic!("unexpected scope: {other:?}"),
+            }
+        }
+    }
 }

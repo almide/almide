@@ -589,9 +589,18 @@ fn tco_ir(kind: IrExprKind, ty: Ty) -> IrExpr {
 fn tco_empty_for(ty: &Ty) -> Option<IrExpr> {
     use almide_lang::types::constructor::TypeConstructorId;
     match ty {
+        Ty::Bytes if crate::lower::owned_tco_slots() => Some(tco_ir(IrExprKind::Call {
+            target: CallTarget::Module { module: sym("bytes"), func: sym("zeros"), def_id: None },
+            args: vec![tco_ir(IrExprKind::LitInt { value: 0 }, Ty::Int)], type_args: vec![],
+        }, Ty::Bytes)),
         Ty::String => Some(tco_ir(IrExprKind::LitStr { value: String::new() }, Ty::String)),
         Ty::Applied(TypeConstructorId::List, _) => {
             Some(tco_ir(IrExprKind::List { elements: vec![] }, ty.clone()))
+        }
+        // Native owned slots use the declared Option carrier. None owns no
+        // payload and is replaced by a base case before the result is read.
+        Ty::Applied(TypeConstructorId::Option, _) if crate::lower::owned_tco_slots() => {
+            Some(tco_ir(IrExprKind::OptionNone, ty.clone()))
         }
         // brick 1: scalar accumulators empty to their zero value (no ownership).
         Ty::Int => Some(tco_ir(IrExprKind::LitInt { value: 0 }, Ty::Int)),

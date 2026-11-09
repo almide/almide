@@ -14,37 +14,18 @@ fn has_runtime_tuple(d: &DTy) -> bool {
 /// Evaluate the runtime expression exactly once, transferring each payload
 /// into its declared native field. No layout casts or positional byte reads.
 fn runtime_result(env: &Env, d: &DTy, code: &str) -> Option<String> {
-    if *d == DTy::Unit {
-        return Some(format!("{{ {code}; 0_i64 }}"));
+    convert_callback_value(env, d, kind_of(env, d)?, code, true)
+}
+
+/// Explicit runtime payloads differ from MIR lanes even without a tuple.
+/// Generic type variables remain bound to their native value representation.
+fn has_value_conversion(d: &DTy) -> bool {
+    match d {
+        DTy::Tuple(_) | DTy::Float | DTy::Bool | DTy::Unit => true,
+        DTy::List(e) | DTy::Opt(e) => has_value_conversion(e),
+        DTy::Result(a, b) => has_value_conversion(a) || has_value_conversion(b),
+        _ => has_runtime_tuple(d),
     }
-    if !has_runtime_tuple(d) {
-        return Some(if *d == DTy::Bool { format!("({code}) as i64") } else { code.to_string() });
-    }
-    Some(match d {
-        DTy::Tuple(es) => {
-            let NTy::Rec(i) = kind_of(env, d)? else { return None };
-            let names: Vec<String> = (0..es.len()).map(|i| format!("__tuple_{i}")).collect();
-            let fields = es.iter().zip(&names).enumerate().map(|(k, (e, name))| {
-                let value = runtime_result(env, e, name)?;
-                let value = if kind_of(env, e)? == NTy::F64 {
-                    format!("({value}).to_bits() as i64")
-                } else { value };
-                Some(format!("f{k}: {value}"))
-            }).collect::<Option<Vec<_>>>()?;
-            let names = if names.is_empty() { String::new() } else { format!("{},", names.join(", ")) };
-            format!("{{ let ({names}) = {code}; {} {{ {} }} }}", rec::struct_name(i), fields.join(", "))
-        }
-        DTy::List(e) => {
-            let body = runtime_result(env, e, "__item")?;
-            format!("({code}).into_iter().map(|__item| {body}).collect::<Vec<{}>>()", rec::owned_ty(kind_of(env, e)?))
-        }
-        DTy::Opt(e) => format!("({code}).map(|__some| {})", runtime_result(env, e, "__some")?),
-        DTy::Result(ok, err) => format!("({code}).map(|__ok| {}).map_err(|__err| {})",
-            runtime_result(env, ok, "__ok")?, runtime_result(env, err, "__err")?),
-        // Collections whose ordering/hash/equality would cross a tuple ABI
-        // need a separate adapter. Refuse those shapes instead of guessing.
-        _ => return None,
-    })
 }
 
 #[cfg(test)]
@@ -86,7 +67,7 @@ mod tuple_result_tests {
         let pair = DTy::Tuple(vec![DTy::Str, DTy::Var("V".into())]);
         assert_eq!(kind_of(&env, &pair), Some(NTy::Rec(0)));
         let code = runtime_result(&env, &pair, "read_map()").unwrap();
-        assert!(code.contains("(__tuple_1).to_bits() as i64"));
+        assert!(code.contains("to_bits() as i64"));
         assert_eq!(code.matches("read_map()").count(), 1);
     }
 }

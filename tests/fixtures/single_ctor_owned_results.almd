@@ -1,0 +1,15 @@
+type Holder = | Hold(String)
+fn closure(h: Holder) -> (Int) -> String = match h {
+  Hold(prefix) => (n) => "${prefix}/${n}",
+}
+fn pair(h: Holder) -> (String, List[String]) = match h {
+  Hold(prefix) => (prefix, [prefix, prefix + "!"]),
+}
+fn main() -> Unit = {
+  let source = Hold("x")
+  let f = closure(source)
+  let p = pair(source)
+  println(f(2))
+  println("${p.0} ${p.1}")
+  println(f(3))
+}

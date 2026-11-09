@@ -27,6 +27,7 @@ pub mod request_flow;
 
 /// The one implementation of integer-literal decoding.
 mod literals;
+pub use literals::{int_value as decode_int_literal, negated_int_value as decode_negated_int_literal};
 
 /// TypeEnv — the mutable type-checking environment.
 mod type_env;

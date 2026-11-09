@@ -170,27 +170,26 @@ fn render_if_then(
 
 /// `Op::Else` — close the `then` arm, patch the if-as-value join decl in (its
 /// type is known now), open the `else` arm.
-fn render_else(
-    val: &Option<ValueId>,
+/// Infer a join from its first surviving arm and assign only on that path.
+fn render_first_join_value(
+    v: ValueId, marker: &str, d: &ValueId,
+    known: &std::collections::BTreeSet<ValueId>,
     borrows: &std::collections::BTreeSet<ValueId>,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: &mut usize,
-    if_stack: &mut [Option<IfJoin>],
+    tys: &mut BTreeMap<ValueId, NTy>, out: &mut String, indent: usize,
 ) -> Result<(), LowerError> {
     macro_rules! line {
         ($($arg:tt)*) => {{
-            for _ in 0..*indent { out.push_str("    "); }
+            for _ in 0..indent { out.push_str("    "); }
             writeln!(out, $($arg)*).unwrap();
         }};
     }
-    if let Some(Some((marker, d, known))) = if_stack.last_mut() {
-        let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
         let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
         let arm_own = !known.contains(&v);
         // Every heap join is declared unset (#4006, no-perf-loss): both arms
         // assign it, so a default built and dropped per evaluation buys nothing.
         let (decl, join_t, rhs) = match t {
+            NTy::Never => return Err(wall("native: an uninhabited value cannot choose a join type")),
+            NTy::F32 => (format!("let mut {}: f32;", var(*d)), t, var(v)),
             // #3532: a borrow join holds the arm's shared reference.
             NTy::VecRef | NTy::StrRef if borrows.contains(d) => (
                 format!("let {}: {};", var(*d), if t == NTy::VecRef { "&[i64]" } else { "&str" }),
@@ -260,9 +259,33 @@ fn render_else(
                 format!("{}.clone()", var(v)),
             ),
         };
-        *out = out.replacen(marker.as_str(), &decl, 1);
+        *out = out.replacen(marker, &decl, 1);
         tys.insert(*d, join_t);
         line!("{} = {};", var(*d), join_rhs(v, t, arm_own, rhs));
+    Ok(())
+}
+
+fn render_else(
+    val: &Option<ValueId>,
+    aborts: bool,
+    borrows: &std::collections::BTreeSet<ValueId>,
+    tys: &mut BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    indent: &mut usize,
+    if_stack: &mut [Option<IfJoin>],
+) -> Result<(), LowerError> {
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..*indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    if let Some(Some((marker, d, known))) = if_stack.last_mut() {
+        if let Some(v) = *val {
+            render_first_join_value(v, marker, d, known, borrows, tys, out, *indent)?;
+        } else if !aborts {
+            return Err(wall("native: if-value arm without a yield or proven abort"));
+        }
         // the else arm's own values are the ones defined after this point
         *known = tys.keys().copied().collect();
     }
@@ -275,8 +298,9 @@ fn render_else(
 /// `Op::EndIf` — close the `else` arm, converging the if-as-value join (if any).
 fn render_end_if(
     val: &Option<ValueId>,
+    aborts: bool,
     borrows: &std::collections::BTreeSet<ValueId>,
-    tys: &BTreeMap<ValueId, NTy>,
+    tys: &mut BTreeMap<ValueId, NTy>,
     out: &mut String,
     indent: &mut usize,
     if_stack: &mut Vec<Option<IfJoin>>,
@@ -288,8 +312,19 @@ fn render_end_if(
         }};
     }
     let top = if_stack.pop().ok_or_else(|| wall("native: EndIf without IfThen"))?;
-    if let Some((_, d, known)) = top {
+    if let Some((marker, d, known)) = top {
+        if val.is_none() && aborts && tys.contains_key(&d) {
+            *indent -= 1;
+            line!("}}");
+            return Ok(());
+        }
         let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
+        if !tys.contains_key(&d) {
+            render_first_join_value(v, &marker, &d, &known, borrows, tys, out, *indent)?;
+            *indent -= 1;
+            line!("}}");
+            return Ok(());
+        }
         let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
         let join_t = *tys.get(&d).ok_or_else(|| wall("native: if-value join untyped"))?;
         if borrows.contains(&d) && matches!(join_t, NTy::VecRef | NTy::StrRef | NTy::RecRef(_)) {
@@ -330,7 +365,8 @@ fn render_end_if(
 /// [`join_rhs`] keeps when the value outlives the arm).
 fn end_if_copy_rhs(v: ValueId, t: NTy) -> String {
     match t {
-        NTy::I64 | NTy::F64 => var(v),
+        NTy::Never => format!("match {} {{}}", var(v)),
+        NTy::I64 | NTy::F32 | NTy::F64 => var(v),
         NTy::Str => format!("{}.clone()", var(v)),
         NTy::StrRef => format!("AlmideString::from({})", var(v)),
         NTy::Vec => format!("{}.clone()", var(v)),

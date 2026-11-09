@@ -128,6 +128,10 @@ pub enum PrimKind {
     /// to the lane (sign-extended when `signed`, zero-extended otherwise) —
     /// exactly the value the re-wrap produces. No ownership event.
     NativeNarrowBin { op: IntOp, bits: u8, signed: bool },
+    /// Native integer exponentiation by squaring at the declared base width.
+    /// The exponent stays i64; negative exponents abort exactly as int.pow.
+    /// Inserted only for an int.pow result whose sole reader re-wraps it.
+    NativeNarrowPow { bits: u8, signed: bool },
     /// `process.exit(code)` — the WASI `proc_exit` host call with a USER exit
     /// code (`args = [code]`, i64 wrapped to i32; no message line, unlike
     /// [`PrimKind::Die`]'s fixed exit-1 + stderr). Never returns; carries no
@@ -445,7 +449,7 @@ impl PrimKind {
     /// `Result` local. The ownership mirror and the certificate both count
     /// it alloc-class (`i`), balanced by the carrier's kept release (#4349).
     pub fn births_native_carrier(&self) -> bool {
-        matches!(self, PrimKind::ResMakeOk | PrimKind::ResMakeErrStr | PrimKind::ResCopy)
+        matches!(self, PrimKind::ResMakeOk | PrimKind::ResMakeErrStr | PrimKind::ResStrMake | PrimKind::ResCopy)
     }
 
     /// The native Result carrier prims that READ a carrier (`args[0]`): the
@@ -455,7 +459,7 @@ impl PrimKind {
     pub fn reads_native_carrier(&self) -> bool {
         matches!(
             self,
-            PrimKind::ResTag | PrimKind::ResOkScalar | PrimKind::ResErrStr | PrimKind::ResCopy
+            PrimKind::ResTag | PrimKind::ResOkScalar | PrimKind::ResErrStr | PrimKind::ResCopy | PrimKind::ResStrSetTag
         )
     }
 }

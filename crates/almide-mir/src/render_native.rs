@@ -29,7 +29,11 @@ use std::fmt::Write as _;
 /// The native type a MIR value renders to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum NTy {
+    /// Uninhabited payload; functions returning it have a diverging ABI.
+    Never,
     I64,
+    /// A real f32 only at a typed collection runtime boundary.
+    F32,
     /// An OWNED `String` local (fresh from a literal alloc, a heap-returning
     /// call, or a clone).
     Str,
@@ -85,6 +89,7 @@ impl NTy {
 /// List, and only the declaration disambiguates). Rung 4: scalar lists join strings.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NativeSigKind {
+    Never,
     I64,
     Str,
     ListI64,
@@ -172,7 +177,7 @@ pub(crate) fn as_str_arg(code: &str, t: NTy) -> String {
         NTy::Str => format!("&{code}"),
         NTy::StrRef => code.to_string(),
         NTy::Vec | NTy::VecRef => unreachable!("as_str_arg on vec"),
-        NTy::I64 | NTy::F64 => unreachable!("as_str_arg on scalar"),
+        NTy::Never | NTy::I64 | NTy::F32 | NTy::F64 => unreachable!("as_str_arg on scalar"),
         NTy::Res => unreachable!("as_str_arg on a Result carrier"),
         NTy::VecStr | NTy::VecStrRef => unreachable!("as_str_arg on a string list"),
         NTy::Rec(_) | NTy::RecRef(_) => unreachable!("as_str_arg on a record"),
@@ -207,11 +212,9 @@ use crate::render_native_shims::{
 
 /// The Perceus balance is machine-checked on the SAME ops this render erases
 /// Drops from — the certificate that scope-end drop realizes it. A violation is
-/// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
+/// a wall. `ALMIDE_DUMP_VERIFY` dumps every verify-stage op list, including
+/// functions whose ownership passes but whose later rendering may refuse.
 fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
-    let Err(violations) = crate::verify_ownership(func) else {
-        return Ok(());
-    };
     if almide_base::env::flag("ALMIDE_DUMP_VERIFY") {
         use std::io::Write as _;
         let mut err = std::io::stderr();
@@ -220,6 +223,9 @@ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
             let _ = writeln!(err, "  [{i}] {op:?}");
         }
     }
+    let Err(violations) = crate::verify_ownership(func) else {
+        return Ok(());
+    };
     Err(wall(format!(
         "native: ownership verification failed for `{}`: {violations:?}",
         func.name
@@ -380,7 +386,10 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         // after them, the runtime's included: one crate, as before.
         out.push_str(&crate::render_native_str::almide_string_alias());
         for s in runtime {
-            out.push_str(s);
+            // Fan glue owns these sinks, including raw bytes, for every arm.
+            out.push_str(if fan_rendered() && s == crate::native_floor::FLOOR_HEADER {
+                s.strip_suffix(crate::native_floor::FLOOR_IO_HEADER).expect("floor IO suffix")
+            } else { s });
             out.push_str("\n\n");
         }
         out.push_str(&crate::render_native_rec::runtime_default_impls());
@@ -480,6 +489,7 @@ fn seed_param_ntys(
     let mut tys: BTreeMap<ValueId, NTy> = BTreeMap::new();
     for (i, p) in func.params.iter().enumerate() {
         let nty = match own_sig.and_then(|(ps, _)| ps.get(i)) {
+            Some(NativeSigKind::Never) => NTy::Never,
             Some(NativeSigKind::ListI64) => NTy::VecRef,
             Some(NativeSigKind::ListStr) => NTy::VecStrRef,
             Some(NativeSigKind::Rec(i)) => NTy::RecRef(*i),

@@ -95,6 +95,12 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
                         _ => var(src.base),
                     };
                     writeln!(out, "{}.put({k}, __AlmdCapture::{variant}({value}));", var(ad.base)).unwrap();
+                } else if k >= 2 && ty(tys, rhs) == Some(NTy::Opt) {
+                    // Scalar-Option rewriting replaces Store(Handle(option))
+                    // with Store(option): the native carrier owns no block.
+                    // It still occupies a typed capture, never an i64 word.
+                    let variant = rec::capture_variant(NTy::Opt);
+                    writeln!(out, "{}.put({k}, __AlmdCapture::{variant}({}));", var(ad.base), var(*rhs)).unwrap();
                 } else {
                     writeln!(out, "{}.words[{k}] = {};", var(ad.base), word(*rhs, tys)?).unwrap();
                 }
@@ -109,6 +115,6 @@ pub(super) fn word(v: ValueId, tys: &BTreeMap<ValueId, NTy>) -> Result<String, L
     match ty(tys, &v) {
         Some(NTy::I64) => Ok(var(v)),
         Some(NTy::F64) => Ok(format!("{}.to_bits() as i64", var(v))),
-        _ => Err(wall("native: a closure scalar slot contains a heap value")),
+        kind => Err(wall(format!("native: closure scalar slot {v:?} has non-scalar kind {kind:?}"))),
     }
 }

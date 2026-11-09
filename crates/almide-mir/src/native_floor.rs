@@ -155,6 +155,12 @@ pub(crate) enum FloorRet {
     /// `Result[String?, String]` — the generated carrier of an
     /// `Option<AlmideString>`.
     ResOptStr,
+    /// `Result[Bytes?, String]` owns the optional raw byte buffer.
+    ResOptBytes,
+    /// An optional owned list of strings returned by a host read.
+    ResOptListStr,
+    /// The fs module's checked four-field metadata record.
+    ResFileStat,
     /// `Int? | Bool? | Float?` — a runtime `Option` of the scalar, carried as
     /// the native `Option<i64>` (`NTy::Opt`; a Float as its bits).
     Opt(Scalar),
@@ -324,7 +330,7 @@ fn declared_kinds(t: &TypeExpr, ctor: &str) -> Option<Vec<NTy>> {
 fn set_list_agrees(params: &[FloorParam], args: &[(String, NTy)], e: NTy) -> bool {
     params.iter().zip(args).all(|(p, (_, got))| match p {
         FloorParam::List(ListElem::Any) => match e {
-            NTy::I64 => matches!(got, NTy::Vec | NTy::VecRef),
+            NTy::I64 | NTy::F32 => matches!(got, NTy::Vec | NTy::VecRef),
             NTy::Str => matches!(got, NTy::VecStr | NTy::VecStrRef),
             e => matches!(got, NTy::Rec(i) | NTy::RecRef(i) if crate::render_native_rec::list_elem(*i).is_some_and(|got| crate::native_value_repr::same_owned(got, e))),
         },
@@ -627,6 +633,9 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         .or_else(|| set_a.as_ref().and_then(|a| set_ret(ret, a)))
         .or_else(|| floor_ret(ret, &type_params))
         .ok_or_else(|| format!("return type {ret:?} outside the per-type map"))?;
+    if fret == FloorRet::ResFileStat && (module != "fs" || !file_stat_decl_agrees(&program.decls)) {
+        return Err("runtime FileStat layout disagrees with its bundled declaration".into());
+    }
     // An effect fn's error reaches its caller through its declared Result,
     // the carrier the call site's `!` reads; any other effect return walls.
     // A HOST OP is the other admitted effect: its effect is a capability, not
@@ -637,7 +646,7 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
     let counted_host_op = crate::host_ops::host_op(module, func)
         .is_some_and(|o| o.intrinsic_fn == func && o.symbol == symbol && !o.caps.is_empty());
     if is_effect
-        && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResListValue | FloorRet::ResStrValuePairs | FloorRet::ResBytes | FloorRet::ResOptStr)
+        && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResListValue | FloorRet::ResStrValuePairs | FloorRet::ResBytes | FloorRet::ResOptStr | FloorRet::ResOptBytes | FloorRet::ResOptListStr | FloorRet::ResFileStat)
         && !counted_host_op
     {
         return Err("an effect fn whose return is not a Result carrier".into());
@@ -762,6 +771,7 @@ fn floor_ret_result(ok: &TypeExpr, err: &TypeExpr) -> Option<FloorRet> {
     match simple(ok)? {
         "Unit" => Some(FloorRet::Res(None)),
         "Bytes" => Some(FloorRet::ResBytes),
+        "FileStat" => Some(FloorRet::ResFileStat),
         "String" => Some(FloorRet::ResStr),
         n if n == VALUE_TYPE => Some(FloorRet::ResValue),
         ok => scalar_of(ok).map(|k| FloorRet::Res(Some(k))),
@@ -782,3 +792,4 @@ include!("native_floor_generated.rs");
 include!("native_floor_tail.rs");
 include!("native_floor_ret.rs");
 include!("native_floor_kinds.rs");
+include!("native_floor_parallel.rs");

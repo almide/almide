@@ -234,3 +234,25 @@ mod tests {
         );
     }
 }
+
+/// A value-less arm of a value join, immediately after a process-ending prim.
+/// Type annotations and ordinary calls are not termination evidence. This
+/// exact seam is shared by the renderer, local scan and certificate producer.
+/// Unit-only branches keep their existing fully balanced accounting.
+pub(crate) fn aborts_before_arm_end(ops: &[Op], at: usize) -> bool {
+    if !matches!(ops.get(at), Some(Op::Prim {
+        kind: crate::PrimKind::Die | crate::PrimKind::ProcExit, dst: None, ..
+    })) || !matches!(ops.get(at + 1), Some(Op::Else { val: None } | Op::EndIf { val: None })) {
+        return false;
+    }
+    let mut depth = 0;
+    for op in ops[..at].iter().rev() {
+        match op {
+            Op::EndIf { .. } => depth += 1,
+            Op::IfThen { dst, .. } if depth == 0 => return dst.is_some(),
+            Op::IfThen { .. } => depth -= 1,
+            _ => {}
+        }
+    }
+    false
+}

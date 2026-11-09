@@ -182,6 +182,7 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             render_result_str_and_slot_op(op, s)
         }
         K::NativeNarrowBin { .. } => render_narrow_bin_op(op, s),
+        K::NativeNarrowPow { .. } => render_narrow_pow_op(op, s),
         K::OptMakeSome | K::OptMakeNone | K::OptCopy | K::OptTag | K::OptPayload => render_option_carrier_op(op, s),
         _ => Ok(false),
     }
@@ -697,6 +698,15 @@ pub(crate) fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
             dst: Some(d),
             args,
         } if args.len() == 1 => render_float_un(op, d, args, tys, out, indent)?,
+        Op::Prim { kind: crate::PrimKind::FloatToInt, dst: Some(d), args } if args.len() == 1 => {
+            let value = match tys.get(&args[0]) {
+                Some(NTy::F64) => var(args[0]),
+                Some(NTy::I64) => format!("f64::from_bits({} as u64)", var(args[0])),
+                _ => return Err(wall("native: float-to-int conversion requires a float value or its bits")),
+            };
+            tys.insert(*d, NTy::I64);
+            line!("let mut {}: i64 = ({value}) as i64;", var(*d));
+        }
         Op::Prim {
             kind: crate::PrimKind::FloatCmp(op),
             dst: Some(d),
@@ -730,4 +740,26 @@ fn opt_operand(tys: &std::collections::BTreeMap<crate::ValueId, NTy>, v: crate::
         Some(NTy::Opt) => Ok(var(v)),
         other => Err(wall(format!("native: Option read over a non-Option value ({other:?})"))),
     }
+}
+
+/// Native exponentiation keeps the full exponent, the source abort, and a
+/// concrete wrapping accumulator type. It never delegates a narrow multiply
+/// to an i64 shim and never truncates the exponent to u32.
+fn render_narrow_pow_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    let Op::Prim { kind: crate::PrimKind::NativeNarrowPow { bits, signed }, dst: Some(dst), args } = op
+        else { return Ok(false) };
+    if args.len() != 2 || args.iter().any(|v| s.tys.get(v) != Some(&NTy::I64)) {
+        return Err(wall("native: narrow power requires two integer operands"));
+    }
+    if !matches!(bits, 8 | 16 | 32) { return Err(wall("native: unsupported narrow power width")); }
+    let ty = format!("{}{bits}", if *signed { "i" } else { "u" });
+    let (a, b) = (var(args[0]), var(args[1]));
+    s.tys.insert(*dst, NTy::I64);
+    for _ in 0..s.indent { s.out.push_str("    "); }
+    writeln!(s.out, "let mut {}: i64 = {{ let mut __base = {a} as {ty}; let __exp = {b}; \
+        if __exp < 0 {{ eprintln!(\"Error: negative exponent\"); std::process::exit(1); }} \
+        let mut __n = __exp as u64; let mut __r: {ty} = 1; \
+        while __n > 0 {{ if __n & 1 == 1 {{ __r = __r.wrapping_mul(__base); }} \
+        __n >>= 1; if __n > 0 {{ __base = __base.wrapping_mul(__base); }} }} __r as i64 }};", var(*dst)).unwrap();
+    Ok(true)
 }

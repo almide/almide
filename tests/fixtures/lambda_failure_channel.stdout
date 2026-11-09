@@ -1,0 +1,18 @@
+braced ok 3
+braced err Neg(-2)
+branch ok 3
+branch err Neg(-4)
+mid ok 26
+mid err Neg(-1)
+slot ok 9
+slot err Neg(-7)
+neg err [Neg(-2)] len 7
+bad err [Bad("q\"u\n\\ t\t")] len 19
+at err [At(Pt { x: 1, y: 2.5 })] len 23
+wrap err [Wrap(Named { code: 7, why: "why" })] len 35
+opt err [Opt(some(2))] len 12
+none err [Opt(none)] len 9
+gone err [Gone] len 4
+disagree ok [1, 2]
+disagree err [Neg(-3)]
+disagree err [invalid digit found in string]

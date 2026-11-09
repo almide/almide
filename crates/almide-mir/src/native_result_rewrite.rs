@@ -39,6 +39,16 @@
 use crate::{Init, MirFunction, Op, PrimKind, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Source host calls use their typed registry return layout. In particular,
+/// routed fold_lines_i returns Result[Int, String] with tag +4, while a
+/// Unit-returning walker uses +16. A host name alone cannot choose the family.
+/// Unregistered direct host rows retain their existing host ABI.
+pub(crate) fn host_uses_cap_tag(name: &str) -> bool {
+    crate::host_ops::host_op_for_call_name(name).is_some_and(|o| o.returns_result)
+        && crate::lower::registry_sig::registry_signature(name).is_none_or(|sig|
+            crate::lower::result_family(&sig.ret) == crate::lower::ResultFamily::HeapOk)
+}
+
 /// Rewrite every recognized Result window in `f`. `result_fns` names the
 /// functions whose (declared) return is a native-carrier Result — their
 /// `CallFn` dsts seed the consumer-side value tracking.
@@ -52,13 +62,27 @@ pub fn rewrite_result_ops(
     res_params: &[ValueId],
     carriers: &BTreeSet<ValueId>,
 ) {
+    rewrite_result_ops_with_host_values(f, result_fns, res_params, carriers, &BTreeSet::new());
+}
+
+/// Values recorded at source host call sites before self-host linking renames
+/// their callees. Only tracked scalar Result consumers consult this layout.
+pub(crate) fn rewrite_result_ops_with_host_values(
+    f: &mut MirFunction, result_fns: &BTreeSet<String>, res_params: &[ValueId],
+    carriers: &BTreeSet<ValueId>, host_values: &BTreeSet<ValueId>,
+) {
     let ops = std::mem::take(&mut f.ops);
     let stored: BTreeSet<_> = ops.iter().filter_map(|op| match op {
         Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.len() == 2 => Some(args[1]),
         _ => None,
     }).collect();
+    let transferred: BTreeSet<_> = ops.iter().filter_map(|op| match op {
+        Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if stored.contains(d) && args.len() == 1 => Some(args[0]),
+        _ => None,
+    }).collect();
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = ResultWindowTracker::default();
+    t.cap_tag.extend(host_values.iter().copied());
     // A param declared as a carrier Result (#4006 family C) is one.
     t.res_vals.extend(res_params.iter().copied());
 
@@ -85,7 +109,7 @@ pub fn rewrite_result_ops(
                 t.res_vals.insert(dst);
                 t.minted.insert(dst);
             }
-            Op::Alloc { dst, init: Init::ResErrStr { piece }, .. } => {
+            Op::Alloc { dst, init: Init::ResErrStr { piece }, .. } if !carriers.contains(dst) => {
                 let (dst, piece) = (*dst, *piece);
                 out.push(Op::Prim {
                     kind: PrimKind::ResMakeErrStr,
@@ -118,14 +142,14 @@ pub fn rewrite_result_ops(
             } if args.len() == 1 && t.res_addrs.contains_key(&args[0]) => {
                 t.track_res_load(op, &mut out);
             }
-            // A Consume of a CALL-result carrier: dropped, as before. A MINTED
-            // carrier's Consume stays — it is the move-out that balances its
-            // alloc-class birth (#4349).
-            Op::Consume { v } if t.res_vals.contains(v) && !t.minted.contains(v) => {}
+            // A call-result carrier stored into another object transfers its
+            // owned credit at this Consume. Other call-result consumes remain
+            // covered by the existing rewritten consumer/branch accounting.
+            Op::Consume { v } if t.res_vals.contains(v) && !t.minted.contains(v) && !transferred.contains(v) => {}
             Op::CallFn {
                 dst: Some(d), name, ..
             } if result_fns.contains(name) || crate::native_floor::declared_result_carrier(name) == Some(false) => {
-                if crate::host_ops::host_op_for_call_name(name).is_some_and(|o| o.returns_result) {
+                if host_uses_cap_tag(name) {
                     t.cap_tag.insert(*d);
                 }
                 t.res_vals.insert(*d);
@@ -403,6 +427,41 @@ fn collect_reads(op: &Op, used: &mut BTreeSet<ValueId>) {
         Op::LoopStart | Op::LoopEnd | Op::Charge { .. } => {}
         Op::ChargeDyn { src, .. } => {
             used.insert(*src);
+        }
+    }
+}
+
+#[cfg(test)]
+mod host_result_layout_tests {
+    use super::*;
+
+    #[test]
+    fn host_tag_layout_follows_the_typed_twin_through_renaming() {
+        for (source, expected_tag) in [("fs.fold_lines_i", 4),
+            ("fs.__fallible_fold_lines_i", 4), ("fs.for_each_line", 16),
+            ("fs.__fallible_for_each_line", 16), ("fs.write_text", 16)] {
+            assert_eq!(host_uses_cap_tag(source), expected_tag == 16, "{source}");
+            for offset in [4, 16] {
+                let mut f = MirFunction { name: "test".into(), ops: vec![
+                    Op::CallFn { dst: Some(ValueId(0)), name: "renamed".into(), args: vec![],
+                        result: Some(crate::Repr::Ptr { layout: crate::LayoutId(0) }) },
+                    Op::Prim { kind: PrimKind::Handle, dst: Some(ValueId(1)), args: vec![ValueId(0)] },
+                    Op::ConstInt { dst: ValueId(2), value: offset },
+                    Op::IntBinOp { dst: ValueId(3), op: crate::IntOp::Add, a: ValueId(1), b: ValueId(2) },
+                    Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(ValueId(4)), args: vec![ValueId(3)] },
+                ], ret: Some(ValueId(4)), ..Default::default() };
+                let cap = if host_uses_cap_tag(source) { [ValueId(0)].into_iter().collect() } else { BTreeSet::new() };
+                rewrite_result_ops_with_host_values(&mut f, &["renamed".into()].into_iter().collect(),
+                    &[], &BTreeSet::new(), &cap);
+                let tag = f.ops.iter().any(|op| matches!(op,
+                    Op::Prim { kind: PrimKind::ResTag, dst: Some(ValueId(4)), .. }));
+                assert_eq!(tag, offset == expected_tag, "{source}, offset {offset}");
+                if !tag {
+                    assert!(f.ops.iter().any(|op| matches!(op,
+                        Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(ValueId(4)), .. })),
+                        "an unrecognized load must remain refused");
+                }
+            }
         }
     }
 }

@@ -6,6 +6,7 @@ struct FnArgOut {
     prelude: Vec<String>,
     shims: Vec<&'static str>,
     reads: Vec<crate::render_native_bounds::Slot>,
+    share: Vec<String>,
 }
 
 /// What rendering the function-typed argument needs to see.
@@ -23,6 +24,23 @@ struct FnArgCx<'a> {
 /// type `(dps) -> dret`, binding the type params it fixes; the env array's
 /// binding and any shim it needs go to `side`.
 fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): (&CallArg, NTy), side: &mut FnArgOut) -> Option<String> {
+    for values in [false, true] {
+        if values && dps.iter().chain([dret]).any(|d| mentions_comparison_bound(d, cx.bounds)) { continue; }
+        let mut trial = env.clone();
+        let mut extra = FnArgOut::default();
+        if let Some(code) = fn_arg_with_values(cx, &mut trial, (dps, dret), (a, t), &mut extra, values) {
+            *env = trial;
+            side.prelude.extend(extra.prelude);
+            side.shims.extend(extra.shims);
+            side.reads.extend(extra.reads);
+            side.share.extend(extra.share);
+            return Some(code);
+        }
+    }
+    None
+}
+
+fn fn_arg_with_values(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): (&CallArg, NTy), side: &mut FnArgOut, values: bool) -> Option<String> {
     let (CallArg::Handle(blk) | CallArg::Scalar(blk)) = a else { return None };
     let origin = cx.origins.get(blk);
     let lambda = origin.map(|(name, _)| name.as_str());
@@ -35,7 +53,10 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
     };
     let (ps, ret) = if let Some(lambda) = lambda { clo::lambda_sig(cx.sigs, lambda)? }
         else { let (ps, ret) = declared?; (ps.into_iter().map(clo::arg_kind).collect(), ret.map(clo::arg_kind)) };
-    let ret = ret?;
+    if ret.is_none() && *dret != DTy::Unit { return None; }
+    if let Some(function) = current_fn() {
+        crate::trace::trace_for("ALMIDE_DBG_LOWER_FN", &function, || format!("callback {lambda:?} values={values} params={ps:?} ret={ret:?} env={env:?} dps={dps:?} dret={dret:?}"));
+    }
     if !matches!(t, NTy::Vec | NTy::VecRef) && !rec::is_closure(t) { return None; }
     let layout = callback_layout(dps, ps.len())?;
     if !cx.bounds.is_empty() {
@@ -44,10 +65,10 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
         if ptys.len() != layout.len() || !layout.iter().zip(&ptys).all(|((d, _), t)| bounded_type_agrees(cx.bounds, d, t))
             || !bounded_type_agrees(cx.bounds, dret, &rty) { return None; }
     }
-    let tuples = dps.iter().any(has_runtime_tuple) || has_runtime_tuple(dret);
+    let tuples = values || dps.iter().any(has_value_conversion) || has_value_conversion(dret);
     let bits: Vec<Lane> = if tuples {
         for ((d, _), k) in layout.iter().zip(&ps) { bind_callback_shape(env, d, clo::owned_nty(*k))?; }
-        bind_callback_shape(env, dret, clo::owned_nty(ret))?;
+        if let Some(ret) = ret { bind_callback_shape(env, dret, clo::owned_nty(ret))?; }
         Vec::new()
     } else { dps
         .iter()
@@ -65,7 +86,7 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
     };
     if !tuples && ret_lane == Lane::F64 {
         side.shims.push(LANE_F64);
-    } else if !tuples && bind_lambda(env, dret, ret) != Some(false) {
+    } else if !tuples && bind_lambda(env, dret, ret?) != Some(false) {
         return None;
     }
     // The env: a copy of the block's slots, every one a scalar.
@@ -78,14 +99,15 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
         })
         .collect::<Option<_>>();
     let name = format!("__env_{}_{}", cx.at, side.prelude.len());
-    if tuples && ret == NativeSigKind::F64 { side.shims.push(LANE_F64); }
+    if tuples && ret == Some(NativeSigKind::F64) { side.shims.push(LANE_F64); }
     let closure = if tuples { tuple_callback_adapter(env, lambda, &name, dps, dret, &ps, ret)? }
-        else { adapter(lambda, &name, &ps, &bits, ret, ret_lane)? };
+        else { adapter(lambda, &name, &ps, &bits, ret?, ret_lane)? };
     if matches!(t, NTy::Vec | NTy::VecRef) {
         let slots = slots?;
         side.prelude.push(format!("let {name}: [i64; {}] = [{}];", slots.len(), slots.join(", ")));
     } else {
         side.prelude.push(format!("let {name} = &{};", var(*blk)));
+        side.share.push(format!("almide_str_block::almide_str_mark_reachable({name});"));
         if lambda.is_none() {
             side.prelude.push(format!("if {name}.len() == 0 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}"));
             side.prelude.push(format!("let {name}_index: i64 = {name}.words()[0];"));
@@ -98,8 +120,8 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
 
 /// One call expression prefix; the dynamic index is read and checked once
 /// in the call's prelude, before the runtime invokes the callback.
-fn callback_head(lambda: Option<&str>, env: &str, ps: &[NativeSigKind], ret: NativeSigKind) -> String {
+fn callback_head(lambda: Option<&str>, env: &str, ps: &[NativeSigKind], ret: Option<NativeSigKind>) -> String {
     if let Some(lambda) = lambda { return format!("{}(&{env}", crate::render_native::mangle(lambda)); }
-    let key = clo::sig_key(ps, Some(ret)).unwrap_or_else(|| ps.len().to_string());
+    let key = clo::sig_key(ps, ret).unwrap_or_else(|| ps.len().to_string());
     format!("__almd_ci_{key}({env}_index, &{env}")
 }

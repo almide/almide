@@ -27,10 +27,10 @@ fn flat_concat_ok(t: &str, e: &str) -> bool {
     if seg_net(e) != 0 {
         return false;
     }
-    if t.contains('x') {
+    if t.contains(['x', 't']) {
         return false;
     }
-    !e.contains('x')
+    !e.contains(['x', 't'])
 }
 
 /// Either arm still carries a structural delimiter — the poisoned-flush
@@ -129,7 +129,7 @@ impl Streams {
         for o in fr.order {
             let t = fr.then_ev.get(&o).cloned().unwrap_or_default();
             let e = fr.else_ev.get(&o).cloned().unwrap_or_default();
-            // An arm carrying the divergence marker `x` NEVER flattens (even at
+            // An arm carrying a divergence marker `x` or `t` NEVER flattens (even at
             // net 0): the bracket is what tells the checker WHICH side exited
             // the frame, so the flat concat would erase the exit obligation.
             let seg = if flat_concat_ok(&t, &e) {
@@ -215,8 +215,9 @@ fn heap_objs_step(
     heap_objs: &mut BTreeSet<ValueId>,
     if_stack: &mut Vec<(Option<ValueId>, bool)>,
 ) {
-    // A call with a heap result introduces a heap object, like Alloc.
-    if let Some(d) = heap_call_dst(op) {
+    // Calls and allocator-class prims introduce owned heap objects, like
+    // Alloc. Native carrier rewrites must retain the same branch-merge credit.
+    if let Some(d) = heap_call_dst(op).or_else(|| alloc_class_prim_dst(op)) {
         heap_objs.insert(d);
         return;
     }

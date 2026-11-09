@@ -47,9 +47,13 @@ fn native_struct_tuples(
     variant_layouts: &crate::lower::VariantLayouts,
 ) -> Vec<almide_lang::types::Ty> {
     let mut ts = Vec::new();
+    let abi = almide_ir::effect_abi::effect_abi_facts(ir);
     for f in &ir.functions {
         f.params.iter().for_each(|p| crate::render_native_rec::collect_tuples(&p.ty, &mut ts));
         crate::render_native_rec::collect_tuples(&f.ret_ty, &mut ts);
+        if abi.auto_wrap.contains(f.name.as_str()) {
+            crate::render_native_rec::collect_tuples(&almide_lang::types::Ty::result(f.ret_ty.clone(), almide_lang::types::Ty::String), &mut ts);
+        }
     }
     for (_, fs) in record_layouts.values() {
         fs.iter().for_each(|(_, t)| crate::render_native_rec::collect_tuples(t, &mut ts));
@@ -176,6 +180,7 @@ fn rewrite_native_linked_mir(
     ir: &almide_ir::IrProgram,
     linked: &[LinkedSelfHost],
     functions: &mut [crate::MirFunction],
+    host_results: &NativeHostResults,
 ) -> Result<(), LowerError> {
     if let Some(f) = functions.iter().find(|f| recurses_on_a_heap_arg(f)) {
         return Err(LowerError::Unsupported(format!(
@@ -186,8 +191,9 @@ fn rewrite_native_linked_mir(
     rewrite_native_result_windows_over(
         ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())),
         functions,
+        host_results,
     );
-    rewrite_native_result_str_windows(ir, functions);
+    rewrite_native_result_str_windows_over(ir.functions.iter().chain(linked.iter().flat_map(|l| l.ir.functions.iter())), functions);
     rewrite_native_option_windows(ir, linked, functions);
     crate::native_slot_rewrite::rewrite_slot_ops(functions, crate::lower::mutable_global_slot_count());
     // Narrow-width arithmetic computes in its declared integer type (#4006).
@@ -205,14 +211,14 @@ fn rewrite_native_linked_mir(
 
 /// The storage slots holding a heap value whose declared type has a native
 /// kind (`native_slot_rewrite::heap_slot`), with a default to leave behind
-/// when one is taken. None in a program with a `fan`: its arms run on
-/// threads of their own.
+/// when one is taken. A threaded fan may coexist with these slots only
+/// when its transitive callees and closure references cannot reach them.
 fn native_heap_slots(
     functions: &[crate::MirFunction],
     record_layouts: &crate::lower::RecordLayouts,
     variant_layouts: &crate::lower::VariantLayouts,
 ) -> std::collections::BTreeMap<u32, crate::render_native::NTy> {
-    if functions.iter().any(|f| f.name.starts_with("__fan_arm_")) {
+    if crate::fan_native::reaches_global_slots(functions) {
         return Default::default();
     }
     crate::lower::mutable_global_slot_types()
@@ -372,11 +378,12 @@ pub fn try_render_rust_program(source: &str, program: almide_lang::ast::Program)
 }
 
 fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgram, LowerError>) -> Result<NativeRenderParts, LowerError> {
+    let _error_displays = crate::native_display::ErrorDisplayScope::enter();
     crate::charge_probe::reset_budget_used();
     crate::lambda_sigs::clear();
     crate::option_blocks::clear();
     let _strict = crate::lower::StrictValuesGuard::set(true);
-    let _declared_routes = crate::lower::registry_sig::DeclaredRouteGuard::set(|name| crate::native_floor::declared(name).is_some() || crate::native_hof::declared_call(name));
+    let _declared_routes = crate::lower::registry_sig::DeclaredRouteGuard::set(|name| crate::native_floor::declared(name).is_some() || crate::native_hof::declared_call(name) || crate::native_parallel_maps::declared_call(name));
     // The native render loop-converts a self tail call over any heap carry
     // (#4006 class A, #3550): `lower::owned_tco_slots`.
     let _owned_tco = crate::lower::OwnedTcoSlotsGuard::set(true);
@@ -391,6 +398,9 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     // #4006 C2: a discovered region window runs in the arena on this render
     // too — the `__rgn_` twins and a window fn the MIR brackets below.
     let mut ir = ir;
+    crate::native_never::expand(&mut ir);
+    crate::native_defaults::expand(&mut ir);
+    crate::native_mutation_places::expand(&mut ir);
     almide_codegen::pass_region_window_native::native_region_windows(&mut ir);
     let windows = crate::native_region_window::window_fns(&ir);
     let mut ir = crate::fan_native::lift_fan_arms(ir)?;
@@ -400,7 +410,10 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
     let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
     crate::native_display::expand(&mut ir, &record_layouts, &variant_layouts);
+    crate::native_patterns::expand(&mut ir, &variant_layouts);
+    crate::native_map_eq::expand(&mut ir);
     // #4006 A5: the generated record structs, derived from the declared layouts.
+    let _order = crate::render_native_rec::install_declared_order(&ir.type_decls);
     let _records = crate::render_native_rec::install_derived(
         &record_layouts,
         &variant_layouts,
@@ -417,13 +430,13 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     let mut functions = lower_native_functions(&ir, &record_layouts, &variant_layouts)?;
     let own: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
     // #4006: the registry bodies the program calls, linked as certified MIR.
-    let (linked, runtime) = link_native_self_host(&mut functions, &ir)?;
+    let (linked, runtime, host_results) = link_native_self_host(&mut functions, &ir)?;
     let linked_names: std::collections::BTreeSet<String> =
         functions.iter().filter(|f| !own.contains(&f.name)).map(|f| f.name.clone()).collect();
     crate::native_slot_rewrite::set_heap_slots(native_heap_slots(&functions, &record_layouts, &variant_layouts));
     // No function is known to leave the heap slots alone until this program's are read.
     crate::native_slot_takes::set_quiet(&[]);
-    rewrite_native_linked_mir(&ir, &linked, &mut functions)?;
+    rewrite_native_linked_mir(&ir, &linked, &mut functions, &host_results)?;
     let mut sigs = native_sigs_with_linked(&ir, &functions, &linked, &record_layouts, &variant_layouts)?;
     insert_native_probe_charges(&ir, &mut functions, &mut sigs);
     // #824: see the wasm leg's call above — `Op::MakeUnique` already renders to
@@ -435,6 +448,7 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     // and every call hands the argument over at the call.
     crate::native_move_params::rewrite(&mut functions);
     crate::native_region_window::bracket_windows(&mut functions, &windows)?;
+    crate::native_slot_takes::delay_publications(&mut functions)?;
     crate::native_slot_takes::set_quiet(&functions);
     let mut program = MirProgram {
         functions,

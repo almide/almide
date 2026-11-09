@@ -253,9 +253,10 @@ impl LowerCtx {
         let lifted_mark = self.lifted.len();
         let value_of_snapshot = self.value_of.clone();
         self.precopy_borrowed_reassign_slots(body);
+        self.precopy_native_while_condition(cond);
 
         self.ops.push(Op::LoopStart);
-        let cond_v = match self.lower_scalar_value(cond) {
+        let cond_v = match self.lower_while_condition(cond) {
             Some(v) => v,
             None => {
                 self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
@@ -267,7 +268,12 @@ impl LowerCtx {
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
         self.scalar_loop_depth += 1;
-        let ok = self.lower_while_body_stmts(body).is_ok();
+        let result = self.lower_while_body_stmts(body);
+        if let Err(error) = &result {
+            crate::trace::trace_for("ALMIDE_DBG_LOWER_FN", &self.fn_name,
+                || format!("WHILE body declined in {}: {error:?}", self.fn_name));
+        }
+        let ok = result.is_ok();
         self.scalar_loop_depth -= 1;
         self.in_frame -= 1;
 

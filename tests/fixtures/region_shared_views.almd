@@ -1,0 +1,27 @@
+import ffi
+
+effect fn detached() -> Region = {
+ let parent = ffi.alloc(6)!
+ ffi.write(parent, 0, bytes.from_list([1, 2, 3, 4, 5, 6]))!
+ ffi.slice(ffi.slice(parent, 1, 4)!, 1, 2)!
+}
+
+effect fn main() -> Unit = {
+ var parent = ffi.alloc(4)!
+ let aliases = [parent]
+ let view = ffi.slice(parent, 1, 2)!
+ parent = ffi.alloc(4)!
+ ffi.write(aliases[0], 0, bytes.from_list([10, 20, 30, 40]))!
+ println("${bytes.to_list(ffi.to_bytes(view)!)}")
+ println("${bytes.to_list(ffi.to_bytes(parent)!)}")
+ let held = detached()!
+ var i = 0
+ while i < 100 {
+  let garbage = ffi.alloc(6)!
+  ffi.write(garbage, 0, bytes.from_list([99, 99, 99, 99, 99, 99]))!
+  i = i + 1
+ }
+ println("${bytes.to_list(ffi.to_bytes(held)!)}")
+ println("${result.is_err(ffi.write(view, 0, bytes.from_list([7])))}")
+ println("${bytes.to_list(ffi.to_bytes(aliases[0])!)}")
+}

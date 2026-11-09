@@ -45,7 +45,7 @@ impl LowerCtx {
             if matches!(p.ty, Ty::Fn { .. }) {
                 self.closure_values.insert(v);
             }
-            let repr = repr_of(&p.ty)?; // Ptr (heap) / Scalar; Unsupported if Unknown or non-value
+            let repr = param_repr_of(&p.ty)?; // Ptr (heap) / Scalar; Unsupported if Unknown or non-value
             if repr.is_heap() {
                 self.param_values.insert(v);
                 // A heap variant param (`Option[T]` / `Result[T, String]`) is passed by the caller
@@ -691,7 +691,8 @@ impl LowerCtx {
             // leak). `is_err` picks the @16 tag; `value.ty`'s Result repr is the
             // 1-slot DynListStr block materialize_result_str builds.
             IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
-                self.lower_scalar_loop_result_delivery(value, expr)
+                self.speculate(|ctx| ctx.lower_scalar_loop_result_delivery(value, expr))
+                    .or_else(|| self.lower_owned_binding(value))
             }
             // CLOSURE-CALL accumulator: `acc = f(acc, x)` where `f` is a
             // first-class lifted combinator (the self-host `list_reduce_str` /
@@ -721,8 +722,7 @@ impl LowerCtx {
     /// Extracted from [`Self::lower_stmt_assign_scalar_loop`] (codopsy r2, #852): the
     /// `ResultOk`/`ResultErr` arm's repr dispatch — decides which Result-block builder
     /// (cap-tag str vs len-as-tag Ok/Err) materializes the delivered base value.
-    /// Verbatim move of the arm body; `value` is the whole reassigned expression
-    /// (its kind picks `is_err`, its ty picks the repr), `expr` its payload.
+    /// `value` is the reassigned constructor; `expr` is its payload.
     ///
     /// Repr dispatch: a HEAP-Ok Result (`Result[String,_]` — base64
     /// decode_chunks) is the cap-tag block `materialize_result_str`

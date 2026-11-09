@@ -368,6 +368,11 @@ impl LowerCtx {
         rest_tail: &Option<Box<IrExpr>>,
         result_ty: &Ty,
     ) -> IrExpr {
+        // A diverging arm cannot bind a value or enter the continuation.
+        if almide_ir::diverge::diverges(arm_value) {
+            return IrExpr { kind: IrExprKind::Block { stmts: vec![], expr: Some(Box::new(arm_value.clone())) },
+                ty: result_ty.clone(), span: arm_value.span, def_id: None };
+        }
         let mut stmts: Vec<IrStmt> = Vec::with_capacity(rest_stmts.len() + 1);
         stmts.push(IrStmt {
             kind: IrStmtKind::Bind {

@@ -15,6 +15,14 @@
 
 /// `true` for a heap-typed `??` — the shape the operand routes decline.
 fn is_heap_qq(e: &IrExpr) -> bool {
+    // Mutable-call expansion wraps the operand in statements that publish
+    // the updated arguments. Bind that entire operand, preserving its scope
+    // and ordering, before comparing the selected payload.
+    if crate::lower::owned_tco_slots() {
+        if let IrExprKind::Block { expr: Some(tail), .. } = &e.kind {
+            return is_heap_qq(tail);
+        }
+    }
     matches!(e.kind, IrExprKind::UnwrapOr { .. }) && crate::lower::is_heap_ty(&e.ty)
 }
 
@@ -36,7 +44,10 @@ pub(crate) fn desugar_heap_qq_operands(body: &IrExpr) -> Option<IrExpr> {
     }
 
     fn bind_operand(a: &mut IrExpr, binds: &mut Vec<IrStmt>, next: &mut u32) {
-        if is_atom(a) {
+        // Native operands may publish a mutable argument. An earlier Var
+        // must be read before that publication, even though reading it has
+        // no effects of its own.
+        if is_atom(a) && !(crate::lower::owned_tco_slots() && matches!(a.kind, IrExprKind::Var { .. })) {
             return;
         }
         let tmp = VarId(*next);

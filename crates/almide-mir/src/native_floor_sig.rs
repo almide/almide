@@ -156,6 +156,11 @@ fn result_ret_agrees(r: FloorRet, t: &str) -> bool {
             ok.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(string) && string(err)
         }),
         FloorRet::ResBytes => result_parts(t).is_some_and(|(ok, err)| ok == "Vec<u8>" && string(err)),
+        FloorRet::ResFileStat => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideFileStat" && string(err)),
+        FloorRet::ResOptListStr => result_parts(t).is_some_and(|(ok, err)|
+            ok.strip_prefix("Option<Vec<").and_then(|x| x.strip_suffix(">>"))
+                .is_some_and(string) && string(err)),
+        FloorRet::ResOptBytes => result_parts(t).is_some_and(|(ok, err)| ok == "Option<Vec<u8>>" && string(err)),
         FloorRet::ResOptStr => result_parts(t).is_some_and(|(ok, err)| {
             ok.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(string) && string(err)
         }),
@@ -183,7 +188,7 @@ fn res_ok_agrees(k: Option<Scalar>, ok: &str) -> bool {
     }
 }
 
-/// A Result's `List[String]` / `Option[String]` ok type.
+/// A Result's supported list / optional heap ok type.
 fn floor_ret_result_str_container(ok: &TypeExpr) -> Option<FloorRet> {
     match ok {
         TypeExpr::Generic { name, args: a } if name.as_str() == "List" && a.len() == 1 && simple(&a[0]) == Some("String") => {
@@ -194,9 +199,63 @@ fn floor_ret_result_str_container(ok: &TypeExpr) -> Option<FloorRet> {
         }
         TypeExpr::Generic { name, args: a } if name.as_str() == "List" && a.len() == 1
             && matches!(&a[0], TypeExpr::Tuple { elements } if elements.iter().map(simple).collect::<Vec<_>>() == [Some("String"), Some(VALUE_TYPE)]) => Some(FloorRet::ResStrValuePairs),
+        TypeExpr::Generic { name, args: a } if is_option_name(name.as_str()) && a.len() == 1
+            && matches!(&a[0], TypeExpr::Generic { name, args } if name.as_str() == "List" && args.len() == 1 && simple(&args[0]) == Some("String")) => Some(FloorRet::ResOptListStr),
+        TypeExpr::Generic { name, args: a } if is_option_name(name.as_str()) && a.len() == 1 && simple(&a[0]) == Some("Bytes") => {
+            Some(FloorRet::ResOptBytes)
+        }
         TypeExpr::Generic { name, args: a } if is_option_name(name.as_str()) && a.len() == 1 && simple(&a[0]) == Some("String") => {
             Some(FloorRet::ResOptStr)
         }
         _ => None,
     }
+}
+
+#[cfg(test)]
+mod optional_bytes_tests {
+    use super::*;
+
+    #[test]
+    fn optional_lines_and_metadata_require_their_exact_runtime_abi() {
+        assert!(ret_agrees(FloorRet::ResOptListStr, "Result<Option<Vec<AlmideString>>, AlmideString>"));
+        assert!(ret_agrees(FloorRet::ResFileStat, "Result<AlmideFileStat, AlmideString>"));
+        for wrong in ["Result<Option<Vec<u8>>,AlmideString>", "Result<Vec<AlmideString>,AlmideString>",
+            "Result<Option<Vec<AlmideString>>,i64>"] {
+            assert!(!ret_agrees(FloorRet::ResOptListStr, wrong));
+        }
+        assert!(!ret_agrees(FloorRet::ResFileStat, "Result<FileStat,AlmideString>"));
+        assert!(!ret_agrees(FloorRet::ResFileStat, "Result<AlmideFileStat,i64>"));
+        let good = "type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }";
+        assert!(file_stat_decl_agrees(&almide_lang::parse_cached(good).unwrap().decls));
+        for wrong in [good.replace("size: Int", "size: Bool"),
+            good.replace("is_dir: Bool, is_file: Bool", "is_file: Bool, is_dir: Bool"),
+            good.replace("modified: Int", "mtime: Int"),
+            good.replace("FileStat", "UserRecord")] {
+            assert!(!file_stat_decl_agrees(&almide_lang::parse_cached(Box::leak(wrong.into_boxed_str())).unwrap().decls));
+        }
+    }
+
+    #[test]
+    fn optional_bytes_requires_exact_payload_and_error_types() {
+        assert!(result_ret_agrees(FloorRet::ResOptBytes, "Result<Option<Vec<u8>>,AlmideString>"));
+        for wrong in ["Result<Option<Vec<i64>>,AlmideString>",
+            "Result<Option<String>,AlmideString>", "Result<Vec<u8>,AlmideString>",
+            "Result<Option<Vec<u8>>,i64>"] {
+            assert!(!result_ret_agrees(FloorRet::ResOptBytes, wrong), "{wrong}");
+        }
+    }
+}
+
+/// Keep the runtime record conversion tied to the bundled field labels,
+/// types and order. A user record with the same spelling never defines this ABI.
+fn file_stat_decl_agrees(decls: &[Decl]) -> bool {
+    let mut found = decls.iter().filter_map(|d| match d {
+        Decl::Type { name, ty, .. } if name.as_str() == "FileStat" => Some(ty),
+        _ => None,
+    });
+    let Some(TypeExpr::Record { fields }) = found.next() else { return false };
+    found.next().is_none() && fields.iter().map(|f| (f.name.as_str(), simple(&f.ty))).eq([
+        ("size", Some("Int")), ("is_dir", Some("Bool")),
+        ("is_file", Some("Bool")), ("modified", Some("Int")),
+    ])
 }

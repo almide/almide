@@ -7,7 +7,7 @@ pub(crate) fn almide_string_alias() -> String {
     format!(
         "// ADR-0013: the shared string buffer.\n\
          #[allow(dead_code, unused_imports)]\npub mod almide_str_block {{\n{}\n}}\n\
-         pub use almide_str_block::AlmideStr;\npub type AlmideString = AlmideStr;\n\n",
+         pub use almide_str_block::AlmideStr;\npub use almide_str_block::almide_str_mark_reachable;\npub type AlmideString = AlmideStr;\n\n",
         almide_str::SOURCE
     )
 }
