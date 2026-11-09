@@ -662,3 +662,5 @@ pub enum Op {
 
 include!("lib_b.rs");
 include!("lib_c.rs");
+
+mod native_fs_scope;

@@ -9,16 +9,21 @@ fn write(root: &Path, path: &str, source: &str) {
 }
 
 fn render_checked(entry: &Path) -> String {
+    render_checked_with_scope(entry, None)
+}
+
+fn render_checked_with_scope(entry: &Path, roots: Option<Vec<String>>) -> String {
     let (mut pending, _, _) = try_compile_pending(
         entry.to_str().unwrap(), false, &codegen::CodegenOptions::default(),
     ).expect("entry and imported modules check");
     let (ir, checker) = pending.native_input.take().expect("checked frontend input");
     // The native handoff must consume the checked input, not read or parse
     // the entry again. The retained source is only for optional debug output.
+    let original_input = std::fs::read(entry).unwrap();
     std::fs::remove_file(entry).unwrap();
     let (rust, certs) = std::thread::Builder::new().stack_size(512 << 20)
-        .spawn(move || almide_mir::pipeline::try_render_rust_checked_certified(
-            &pending.source, ir, checker,
+        .spawn(move || almide_mir::pipeline::try_render_rust_checked_scoped_certified(
+            &pending.source, ir, checker, roots,
         )).unwrap().join().unwrap().expect("direct v1 render, without fallback");
     assert!(!certs.is_empty(), "the checked-input route must produce witnesses");
     let verifier = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap()
@@ -26,6 +31,7 @@ fn render_checked(entry: &Path) -> String {
     if verifier.is_file() {
         let evidence = tempfile::Builder::new().prefix("almide-native-module-proof-")
             .tempdir().unwrap().keep();
+        std::fs::write(evidence.join(entry.file_name().unwrap()), &original_input).unwrap();
         let artifact = evidence.join("render.rs");
         std::fs::write(&artifact, &rust).unwrap();
         let bundle = evidence.join("render.bundle");
@@ -126,7 +132,7 @@ fn checked_native_input_keeps_an_unreferenced_module_c_export_visible() {
     let (mut pending, _, _) = try_compile_pending(dir.path().join("src/main.almd").to_str().unwrap(),
         false, &codegen::CodegenOptions::default()).expect("valid module export");
     let (ir, checker) = pending.native_input.take().unwrap();
-    let error = almide_mir::pipeline::try_render_rust_checked_certified(&pending.source, ir, checker)
+    let error = almide_mir::pipeline::try_render_rust_checked_scoped_certified(&pending.source, ir, checker, None)
         .expect_err("the current v1 renderer must not silently drop a required C symbol");
     assert!(error.to_string().contains("is @export(c)"), "{error}");
 }
@@ -162,13 +168,16 @@ fn export_checked_native_paths(mut paths: Vec<std::path::PathBuf>) {
     paths.sort();
     let mut rows = Vec::new();
     let mut errors = Vec::new();
+    let fs_roots: Option<Vec<String>> = std::env::var("NATIVE_FRONTEND_FS_ROOTS_JSON").ok()
+        .map(|s| serde_json::from_str(&s).expect("explicit filesystem roots JSON"));
     for path in &paths {
         let input = path.clone();
+        let roots = fs_roots.clone();
         let result = std::thread::Builder::new().stack_size(512 << 20).spawn(move || {
             let (mut pending, _, _) = try_compile_pending(input.to_str().unwrap(), false,
                 &codegen::CodegenOptions::default())?;
             let (ir, checker) = pending.native_input.take().ok_or("no checked input")?;
-            almide_mir::pipeline::try_render_rust_checked_certified(&pending.source, ir, checker)
+            almide_mir::pipeline::try_render_rust_checked_scoped_certified(&pending.source, ir, checker, roots)
                 .map_err(|e| e.to_string())
         }).unwrap().join();
         match result {
@@ -186,10 +195,59 @@ fn export_checked_native_paths(mut paths: Vec<std::path::PathBuf>) {
             Err(_) => errors.push(serde_json::json!({"path": path, "error": "frontend/render panic"})),
         }
         std::fs::write(evidence.join("results.json"), serde_json::to_vec_pretty(
-            &serde_json::json!({"total": paths.len(), "rows": rows, "errors": errors})
+            &serde_json::json!({"total": paths.len(), "rows": rows, "errors": errors, "fs_roots": fs_roots})
         ).unwrap()).unwrap();
     }
     assert!(errors.is_empty(), "{} refused programs; evidence: {}", errors.len(), evidence.display());
     // Success means every artifact was exported, not that it has been
     // independently checked or that its execution is equivalent.
+}
+
+#[test]
+fn checked_native_scope_bounds_reads_writes_and_predicates_before_artifact_binding() {
+    let dir = tempfile::tempdir().unwrap();
+    let allowed = dir.path().join("allowed");
+    let outside = dir.path().join("outside");
+    std::fs::create_dir_all(&allowed).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(allowed.join("read.txt"), "inside").unwrap();
+    std::fs::write(outside.join("secret.txt"), "secret").unwrap();
+    let source = format!(r#"import fs
+effect fn main() -> Unit = {{
+  println(fs.read_text({read:?}) ?? "blocked")
+  println(fs.read_text({secret:?}) ?? "blocked")
+  println("${{result.is_ok(fs.write_text({write:?}, "new"))}}")
+  println("${{result.is_ok(fs.write_text({escape:?}, "forbidden"))}}")
+  println("${{fs.exists({secret:?})}}")
+}}
+"#, read=allowed.join("read.txt").to_str().unwrap(), secret=outside.join("secret.txt").to_str().unwrap(),
+        write=allowed.join("written.txt").to_str().unwrap(), escape=outside.join("escape.txt").to_str().unwrap());
+    let entry = dir.path().join("main.almd");
+    write(dir.path(), "main.almd", &source);
+    let rust = render_checked_with_scope(&entry, Some(vec![allowed.to_str().unwrap().into()]));
+    assert!(rust.starts_with(almide_codegen::fs_scope::SCOPE_MARKER));
+    run_rust(dir.path(), &rust, "inside\nblocked\ntrue\nfalse\nfalse\n");
+    assert_eq!(std::fs::read_to_string(allowed.join("written.txt")).unwrap(), "new");
+    assert!(!outside.join("escape.txt").exists());
+}
+
+#[test]
+fn checked_native_empty_fs_scope_denies_write_only_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("forbidden.txt");
+    write(dir.path(), "main.almd", &format!(
+        "import fs\neffect fn main() -> Unit = println(\"${{result.is_ok(fs.write_text({:?}, \"x\"))}}\")\n",
+        target.to_str().unwrap()));
+    let rust = render_checked_with_scope(&dir.path().join("main.almd"), Some(vec![]));
+    run_rust(dir.path(), &rust, "false\n");
+    assert!(!target.exists());
+}
+
+#[test]
+fn checked_native_scope_preserves_host_callback_scheduling() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "main.almd", include_str!("../tests/fixtures/fs_chunked_closure_parameter.almd"));
+    let roots = vec![std::env::temp_dir().to_str().unwrap().to_string()];
+    let rust = render_checked_with_scope(&dir.path().join("main.almd"), Some(roots));
+    run_rust(dir.path(), &rust, "a\nbb\nccc\n[13, 8]\n");
 }

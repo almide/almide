@@ -655,6 +655,12 @@ uses this sequential implementation when it cannot establish an effect-free
 callback, preserving the accepted closure-value route's observable order.
 The twin's signature and dependency closure are checked separately; its host
 semantics remain trusted like those of the original runtime implementation.
+Under `[permissions] fs`, both native generators use the same source-derived
+scoped twin and path guards (`almide-codegen::fs_scope`). The certified render
+includes their runtime dependencies before binding the generated artifact.
+The named host identity and ownership witness are unchanged; descriptor-relative
+path traversal and access refusals remain trusted host behavior, checked by
+`tests/fs_scope_test.rs` and the runtime's deterministic symlink-race tests.
 `tests/native_fs_host_calls_test.rs` holds this list, `host_ops::NATIVE_FS_HOST_CALLS`,
 `NativeCalls.native_fs_host_calls` and almide-verify's copy to one list.
 TRUSTED: the runtime fs code itself (tested on both legs by the cross-target
