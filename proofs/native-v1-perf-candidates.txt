@@ -184,6 +184,7 @@ spec/wasm_cross/nested_scalar_record_append.almd
 spec/wasm_cross/nested_tuple_pattern.almd
 spec/wasm_cross/nested_unwrap_or_share.almd
 spec/wasm_cross/never_fn_value_positions.almd
+spec/wasm_cross/never_tail_of_result_effect_fn.almd
 spec/wasm_cross/optional_chain_heap_field.almd
 spec/wasm_cross/ord_record_variant.almd
 spec/wasm_cross/ord_recursive.almd
