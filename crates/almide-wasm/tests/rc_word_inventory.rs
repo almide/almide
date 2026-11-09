@@ -71,6 +71,8 @@ const INVENTORY: &[(&str, Kind, usize, &str, &str)] = &[
     ("crates/almide-wasm/src/runtime_large.rs", Kind::Rc, 1, "unseen", "$ltake's birth store on a node it just took"),
     ("crates/almide-wasm/src/runtime_large.rs", Kind::Word0, 2, "unseen", "large free-list node words of free blocks"),
     ("crates/almide-wasm/src/alloc_inline.rs", Kind::Rc, 1, "unseen", "inlined $alloc's birth store"),
+    ("crates/almide-wasm/src/carve.rs", Kind::Rc, 1, "unseen", "prim.carve's birth store: it WRITES the interior word of a block it just carved, before the family is published"),
+    ("crates/almide-wasm/src/carve.rs", Kind::Word0, 1, "unseen", "the carve's countdown zero-fill of payload words, not a header"),
     ("crates/almide-wasm/src/alloc_inline.rs", Kind::Word0, 1, "unseen", "the inlined $alloc's free-list slot test"),
     ("crates/almide-wasm/src/func.rs", Kind::Rc, 2, "unseen",
      "pool statics' headers (rc = 1, below the line end: the floor guard skips them before any rc read)"),
