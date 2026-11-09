@@ -1,0 +1,24 @@
+// @armty: String
+// p06c: the control of p06b. The arms are blocks, not direct calls, so the
+// certified native render declines the lift and the standard codegen builds
+// the fan, where pass_fan_lowering applies @ordered. Sequential reading:
+// "wrote new".
+import env
+import fs
+
+effect fn write_late(path: String) -> Result[String, String] = {
+  env.sleep_ms(50)
+  fs.write_text(path, "new")!
+  ok("wrote")
+}
+
+effect fn read_early(path: String) -> Result[String, String] = ok(fs.read_text(path)!)
+
+effect fn main() -> Unit = {
+  fs.write_text("f.txt", "old")!
+  let (w, r) = fan {
+    { write_late("f.txt")! }
+    { read_early("f.txt")! }
+  }
+  println("${w} ${r}")
+}

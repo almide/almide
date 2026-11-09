@@ -1,4 +1,5 @@
-// p16b: process.exit in arm 0 while later arms print at once. Sequential
+// p16b: process.exit (as a statement; a Never tail of a
+// Result fn does not compile natively, run 42607209362) in arm 0 while later arms print at once. Sequential
 // reading: arm 0's line, exit 4; nothing of arms 1 and 2.
 import process
 
@@ -21,7 +22,8 @@ effect fn slow(id: Int) -> Result[Int, String] = {
 
 effect fn quit(id: Int, code: Int) -> Result[Int, String] = {
   println("arm ${id} exiting")
-  process.exit(code)
+  if code > 0 then process.exit(code) else ()
+  ok(id)
 }
 
 effect fn fast(id: Int) -> Result[Int, String] = {

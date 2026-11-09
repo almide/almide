@@ -1,0 +1,33 @@
+// p02b: the minimal repro of p02. io.eprint writes stderr directly, not into
+// the arm's timeline. Sequential reading of stderr: "a\nb\n". A threaded run
+// prints "b\na\n" because arm 1 finishes first.
+import io
+
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn slow() -> Result[Int, String] = {
+  let s = burn(3000000)
+  io.eprint("a\n")
+  ok(s)
+}
+
+effect fn fast() -> Result[Int, String] = {
+  io.eprint("b\n")
+  ok(0)
+}
+
+effect fn main() -> Unit = {
+  let __seq_r1: Result[Int, String] = slow()
+  let __seq_r2: Result[Int, String] = fast()
+  let x = __seq_r1!
+  let y = __seq_r2!
+  println("${x + y}")
+}

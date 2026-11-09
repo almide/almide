@@ -1,0 +1,26 @@
+// p05c: a fan.map heavy enough that the cost model goes parallel (p05a/b ran
+// as fast threaded as sequential, so their maps likely stayed on one thread).
+// Pure callback, no printing; every element's value is kept, and elements 7
+// and 1500 fail: "Error: fail 7" after the two sums.
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn main() -> Unit = {
+  let n = string.len("") + 100000
+  let xs = list.range(0, 1600)
+  let ys = fan.map(xs, (x) => ok((burn(n + x) + x) % 1000003))!
+  println("map ${list.fold(ys, 0, (a, y) => (a * 31 + y) % 1000003)}")
+  let zs = fan {
+    list.map(xs, (x) => (burn(n + 2 * x) + x) % 1000003)
+  }
+  println("list.map ${list.fold(zs, 0, (a, y) => (a * 31 + y) % 1000003)}")
+  let ws = fan.map(xs, (x) => if x == 7 or x == 1500 then err("fail ${x}") else ok(burn(n - x)))!
+  println("unreachable ${list.len(ws)}")
+}

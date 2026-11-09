@@ -15,6 +15,7 @@ PROBES = {
     # name: dict(runs, timeout, stdin, cases=[(case-name, env, ulimit_kb)], timing)
     "p05a_map_large": dict(runs=100),
     "p05b_map_trap": dict(runs=100),
+    "p05c_map_parallel": dict(runs=50),
     "p10_sockets": dict(runs=20, timeout=8),
     "p11_timing": dict(runs=30, timing=True),
     "p08_stdin": dict(stdin=b"l1\nl2\nl3\nl4\n"),

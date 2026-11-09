@@ -1,0 +1,24 @@
+// @armty: String
+// p06b: minimal repro of p06. fs.write_text is @ordered (ADR-0024 D3), so the
+// fan must run in arm order: the reader sees "new". Each arm is a direct call
+// of a user fn with literal arguments, the shape the certified native render
+// lifts onto threads (crates/almide-mir/src/fan_native.rs).
+import env
+import fs
+
+effect fn write_late(path: String) -> Result[String, String] = {
+  env.sleep_ms(50)
+  fs.write_text(path, "new")!
+  ok("wrote")
+}
+
+effect fn read_early(path: String) -> Result[String, String] = ok(fs.read_text(path)!)
+
+effect fn main() -> Unit = {
+  fs.write_text("f.txt", "old")!
+  let __seq_r1: Result[String, String] = write_late("f.txt")
+  let __seq_r2: Result[String, String] = read_early("f.txt")
+  let w = __seq_r1!
+  let r = __seq_r2!
+  println("${w} ${r}")
+}

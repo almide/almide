@@ -1,0 +1,41 @@
+// p05c: a fan.map heavy enough that the cost model goes parallel (p05a/b ran
+// as fast threaded as sequential, so their maps likely stayed on one thread).
+// Pure callback, no printing; every element's value is kept, and elements 7
+// and 1500 fail: "Error: fail 7" after the two sums.
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+// The sequential reading of fan.map: every element runs in list order, the
+// lowest-index Err is the result.
+fn seq_map(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[List[Int], String] = {
+  let rs = list.map(xs, f)
+  let errs = list.filter_map(rs, (r) => match r {
+    ok(_) => none,
+    err(e) => some(e),
+  })
+  match list.first(errs) {
+    some(e) => err(e),
+    none => ok(list.filter_map(rs, (r) => match r {
+      ok(v) => some(v),
+      err(_) => none,
+    })),
+  }
+}
+
+effect fn main() -> Unit = {
+  let n = string.len("") + 100000
+  let xs = list.range(0, 1600)
+  let ys = seq_map(xs, (x) => ok((burn(n + x) + x) % 1000003))!
+  println("map ${list.fold(ys, 0, (a, y) => (a * 31 + y) % 1000003)}")
+  let zs = list.map(xs, (x) => (burn(n + 2 * x) + x) % 1000003)
+  println("list.map ${list.fold(zs, 0, (a, y) => (a * 31 + y) % 1000003)}")
+  let ws = seq_map(xs, (x) => if x == 7 or x == 1500 then err("fail ${x}") else ok(burn(n - x)))!
+  println("unreachable ${list.len(ws)}")
+}
