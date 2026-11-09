@@ -184,20 +184,6 @@ while IFS= read -r f; do
     exit 1
   fi
   printf '%s  %s\n' "$sum" "$f" >> "$HASHES.tmp"
-  # #4011 (d): every located bounds / init event is its instruction.
-  arc=0
-  "$ANCHORCHECK" "$OUT/$N.wasm" "$OUT/$N.bundle" "$OUT/$N.anchors" > "$OUT/$N.anchor" 2>&1 || arc=$?
-  if [ "$arc" -ne 0 ] && [ "$MODE" = tests ]; then
-    # The stdlib-test leg names each artifact whose events are not its
-    # instructions (judged against the exception ledger's `anchors` rows
-    # below) and judges the rest; its totals leave this artifact out.
-    printf '%s\t%s\n' "$f" "$(grep -m1 'REJECT' "$OUT/$N.anchor" | cut -c1-200)" >> "$OUT/anchor-rejects"
-    mv "$OUT/$N.anchor" "$OUT/$N.anchor-rejected"
-  elif [ "$arc" -ne 0 ]; then
-    echo "STRUCTURAL WALL FAIL: $f: a witness event is not the instruction the shipped bytes hold:" >&2
-    sed 's/^/  /' "$OUT/$N.anchor" >&2
-    exit 1
-  fi
   # #4005 A4: the module's self-host prim accesses. The prover is untrusted;
   # what it certifies must be the translation of the shipped functions
   # (--lin-verify) and is judged as a bounds witness below. What it leaves
@@ -217,28 +203,59 @@ while IFS= read -r f; do
     "$VERIFY" bounds "$OUT/$N.lcert" > "$OUT/$N.lverify" 2>&1 || rc=$?
     echo "$rc" > "$OUT/$N.lverify.rc"
   fi
-  # STRUCTURAL_WALL_CENSUS=1: the row-4 census (#4005) of each artifact, the
-  # prim sites its verified linear certificate covers counted located. A
-  # measurement, not a verdict; summed after the loop.
-  if [ "${STRUCTURAL_WALL_CENSUS:-0}" = 1 ] && [ -f "$OUT/$N.anchor" ]; then
-    lin=(); [ -s "$OUT/$N.lcert" ] && lin=(--lin "$OUT/$N.lcert")
-    "$ANCHORCHECK" --census "${lin[@]}" "$OUT/$N.wasm" "$OUT/$N.bundle" "$OUT/$N.anchors" 2>&1 | grep '^CENSUS' >> "$OUT/census" || true
+  # #4005 A4: the runtime routines the anchor file's `routines` line names.
+  # The same untrusted prover writes their certificate and its site
+  # selection (the accesses it proves; the rest stay counted); the
+  # selection's events must be the translation of the shipped routines
+  # (--lin-verify-routines), and the certificate is judged as a bounds
+  # witness below by all three verdicts.
+  if grep -q '^routines .' "$OUT/$N.anchors"; then
+    if ! "$LINPROVE" --routines "$OUT/$N.wasm" "$OUT/$N.anchors" "$OUT/$N.rsel" > "$OUT/$N.rcert" 2> "$OUT/$N.rprove"; then
+      echo "STRUCTURAL WALL FAIL: $f: the routine prover failed:" >&2
+      sed 's/^/  /' "$OUT/$N.rprove" >&2
+      exit 1
+    fi
+    if ! "$ANCHORCHECK" --lin-verify-routines "$OUT/$N.wasm" "$OUT/$N.anchors" "$OUT/$N.rcert" "$OUT/$N.rsel" > "$OUT/$N.rlin" 2>&1; then
+      echo "STRUCTURAL WALL FAIL: $f: the routine certificate is not the translation of the shipped routines:" >&2
+      sed 's/^/  /' "$OUT/$N.rlin" >&2
+      exit 1
+    fi
+    rc=0
+    "$VERIFY" bounds "$OUT/$N.rcert" > "$OUT/$N.rverify" 2>&1 || rc=$?
+    echo "$rc" > "$OUT/$N.rverify.rc"
+  fi
+  # #4011 (d): every located bounds / init event is its instruction. With it,
+  # the row-4 census (#4005) per function, the accesses the verified linear
+  # and routine certificates cover counted located — read by the heap-access
+  # ledger after the loop (proofs/lib/heap_ledger.py).
+  census=(--census --census-fns)
+  if [ -s "$OUT/$N.lcert" ]; then census+=(--lin "$OUT/$N.lcert"); fi
+  if [ -f "$OUT/$N.rsel" ]; then census+=(--rlin "$OUT/$N.rcert" "$OUT/$N.rsel"); fi
+  arc=0
+  "$ANCHORCHECK" "${census[@]}" "$OUT/$N.wasm" "$OUT/$N.bundle" "$OUT/$N.anchors" > "$OUT/$N.anchor" 2>&1 || arc=$?
+  if [ "$arc" -ne 0 ] && [ "$MODE" = tests ]; then
+    # The stdlib-test leg names each artifact whose events are not its
+    # instructions (judged against the exception ledger's `anchors` rows
+    # below) and judges the rest; its totals leave this artifact out.
+    printf '%s\t%s\n' "$f" "$(grep -m1 'REJECT' "$OUT/$N.anchor" | cut -c1-200)" >> "$OUT/anchor-rejects"
+    mv "$OUT/$N.anchor" "$OUT/$N.anchor-rejected"
+  elif [ "$arc" -ne 0 ]; then
+    echo "STRUCTURAL WALL FAIL: $f: a witness event is not the instruction the shipped bytes hold:" >&2
+    sed 's/^/  /' "$OUT/$N.anchor" >&2
+    exit 1
   fi
 done < "$OUT/selected"
-if [ "${STRUCTURAL_WALL_CENSUS:-0}" = 1 ]; then
-  python3 - "$OUT/census" <<'PY'
-import re, sys
-tot = [0] * 10
-rows = 0
-for line in open(sys.argv[1]):
-    n = [int(x) for x in re.findall(r"\d+", line)]
-    if len(n) == 10:
-        rows += 1
-        tot = [a + b for a, b in zip(tot, n)]
-print(f"  [census] {rows} artifact(s): frames {tot[0]} access(es), {tot[1]} located ({tot[2]} by the linear certificate), {tot[3]} header word(s), {tot[4]} bulk; "
-      f"routines {tot[5]} access(es), {tot[6]} located ({tot[7]} by the linear certificate), {tot[8]} header word(s), {tot[9]} bulk")
-PY
-fi
+# #4005 row 4: every heap access no certificate covers, per runtime routine,
+# per self-host body and per fixture's own code, held to the shrink-only
+# ledger (a count above its row fails; on a full run, so does a row above
+# what it measures — lower it). STRUCTURAL_WALL_LEDGER_OUT=<file> also
+# writes what this run measured, in the ledger's own format.
+LEDGER="$ROOT/proofs/heap-access-ledger.tsv"
+[ "$MODE" = tests ] && LEDGER="$ROOT/proofs/heap-access-ledger-tests.tsv"
+python3 "$ROOT/proofs/lib/heap_ledger.py" measure "$OUT" > "$OUT/heap.measured" || { echo "STRUCTURAL WALL FAIL: the row-4 census is unreadable" >&2; exit 1; }
+if [ -n "${STRUCTURAL_WALL_LEDGER_OUT:-}" ]; then cp "$OUT/heap.measured" "$STRUCTURAL_WALL_LEDGER_OUT"; fi
+full=1; if ci_slice_active; then full=0; fi
+python3 "$ROOT/proofs/lib/heap_ledger.py" check "$LEDGER" "$OUT/heap.measured" "$full" || exit 1
 [ "$N" -gt 0 ] || { echo "STRUCTURAL WALL FAIL: no certified fixture listed in $FIXTURES" >&2; exit 1; }
 [ "$SEEN" -eq "$(wc -l < "$OUT/selected" | tr -d ' ')" ] || { echo "STRUCTURAL WALL FAIL: read $SEEN of the selected fixtures — the scan went blind" >&2; exit 1; }
 mv "$HASHES.tmp" "$HASHES"
@@ -512,6 +529,33 @@ for row in open(os.path.join(out, "index")):
         accepts["bounds"].append(w)
     else:
         fail.append(f"{fx}: the linear certificate: extracted checker exit {rc}, almide-verify {'ACCEPT' if vok else 'REJECT'}")
+# #4005 A4: each module's ROUTINE certificate (the runtime routines the
+# `routines` line names) is one more bounds witness, judged the same way.
+rout = [0, 0, 0, 0]  # procedures, certified accesses, counted accesses, routines left out
+for row in open(os.path.join(out, "index")):
+    k, fx = row.rstrip("\n").split("\t")
+    cpath = os.path.join(out, k + ".rcert")
+    if not os.path.exists(cpath):
+        continue
+    for l in open(os.path.join(out, k + ".rprove")).read().splitlines():
+        parts = l.split("\t")
+        if parts[0] == "routine" and len(parts) == 5:
+            rout[0] += 1
+            rout[1] += int(parts[3])
+            rout[2] += int(parts[4])
+        elif parts[0] == "unrouted":
+            rout[3] += 1
+    w = open(cpath).read().rstrip("\n")
+    rc = subprocess.run([checker, "bounds", cpath], capture_output=True).returncode
+    vok = open(os.path.join(out, k + ".rverify.rc")).read().strip() == "0"
+    stats["bounds"][1] += 1
+    if rc == 0 and vok:
+        stats["bounds"][0] += 1
+        accepts["bounds"].append(w)
+    else:
+        fail.append(f"{fx}: the routine certificate: extracted checker exit {rc}, almide-verify {'ACCEPT' if vok else 'REJECT'}")
+print(f"  [bounds/routines] {rout[0]} runtime routine procedure(s) certified over the artifacts, {rout[1]} access(es) their "
+      f"selections prove, {rout[2]} left counted; {rout[3]} routine(s) left out of their table")
 print(f"  [bounds/linear] {lin['certified'][0]} self-host body(ies) certified ({lin['certified'][1]} prim site(s)), "
       f"{lin['uncertified'][0]} left in the counted class ({lin['uncertified'][1]} prim site(s)); "
       f"search budget {'/'.join(sorted(effort[2])) or '-'} pivot(s) per module, {effort[0]} taken, at most {effort[1]} by one module")
