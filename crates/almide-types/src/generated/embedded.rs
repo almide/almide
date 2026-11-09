@@ -13702,7 +13702,27 @@ fn value_get_object(v: Value, key: String) -> List[(String, Value)]? = match val
   err(_) => none,
 }
 "#;
-pub const SRC_JSON_PARSE: &str = r#"
+pub const SRC_JSON_PARSE: &str = r#################################"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -13752,47 +13772,97 @@ fn __json_max_depth() -> Int = 1000
 
 fn __json_depth_error() -> String = "json: nesting deeper than 1000"
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@family_producer
 fn json_parse(text: String) -> Result[Value, String] = {
-  let h = prim.handle(text)
-  let blen = prim.load32(h + 4)
-  let cell = prim.alloc_bytes(8)
-  let v = __jp_value(h + 12, blen, 0, 0, prim.handle(cell) + 12)
-  let p = prim.load64(prim.handle(cell) + 12)
-  if p < 0 then err(__jp_message(h + 12, blen, 0 - 1 - p))
+  let tl = prim.load32(prim.handle(text) + 4)
+  if tl > 99999999 then prim.die(prim.handle("Error: json parse: text too long\n")) else ()
+  let base = tl * 6 + 96
+  let sc = prim.alloc_bytes(tl * 9 + 160)
+  __jp_set_word(sc, 0, 0)
+  __jp_set_word(sc, 8, 64)
+  __jp_set_word(sc, 16, base)
+  __jp_set_word(sc, 24, base)
+  __jp_set_word(sc, 32, base)
+  let r = __jp_v1(text, tl, 0, 0, sc)
+  let q = if r < 0 then r
+  else __jp_trail(text, tl, r)
+  if q < 0 then err(__jp_message(text, tl, 0 - 1 - q))
   else {
-    let q = __jp_ws(h + 12, blen, p)
-    if q < blen then err(__jp_at("json: trailing data", h + 12, q)) else ok(v)
+    let total = __jp_word(sc, 0)
+    if total < 0 then prim.die(prim.handle("Error: json parse: the passes disagree\n")) else ()
+    if total > 2147483647 then prim.die(prim.handle("Error: json parse: the document is too large\n"))
+    else ()
+    let fam = prim.family(total)
+    __jp_build(text, tl, fam, sc)
+
+    prim.family_seal(fam)
+    if __jp_word(sc, 24) != base + 4 then __jp_disagree() else ()
+    ok(__jp_top(sc, base))
   }
 }
 
 
 
+fn __jp_top(sc: Bytes, at: Int) -> Value = {
+  let n = prim.load32(prim.handle(sc) + 4)
+  if at < 0 then {
+    prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+    value.null()
+  } else if at > n - 4 then {
+    prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+    value.null()
+  } else {
+    let top: Value = prim.load_handle(prim.handle(sc) + 12 + at)
+    top
+  }
+}
 
-fn __jp_pos(c: Int) -> Int = prim.load64(c)
+fn __jp_disagree() -> Unit = prim.die(prim.handle("Error: json parse: the passes disagree\n"))
 
-fn __jp_seek(c: Int, p: Int) -> Unit = prim.store64(c, p)
+
+fn __jp_trail(t: String, tl: Int, p: Int) -> Int = {
+  let q = __jp_ws(t, p)
+  if q < tl then __jp_code(q, 19) else q
+}
 
 
 
 fn __jp_code(p: Int, kind: Int) -> Int = 0 - 1 - (p * 32 + kind)
 
 
-fn __jp_refuse(c: Int, p: Int, kind: Int) -> Value = {
-  __jp_seek(c, __jp_code(p, kind))
-  value.null()
-}
+fn __jp_code_pos(r: Int) -> Int = (0 - 1 - r) / 32
 
 
-fn __jp_message(base: Int, len: Int, code: Int) -> String = {
+fn __jp_message(t: String, tl: Int, code: Int) -> String = {
   let p = code / 32
   let kind = code % 32
   if kind == 6 then "unexpected end of input"
-  else if kind == 14 then __jp_number_error(base, len, p)
+  else if kind == 14 then __jp_number_error(t, tl, p)
   else if kind == 15 then "expected bool"
   else if kind == 16 then "expected null"
   else if kind == 17 then __json_depth_error()
-  else if kind == 18 then "unexpected char '" + string.__err_text(string.from_codepoint(__jp_cp(base, p)) ?? "") + "' at pos " + int.to_string(__jp_charpos(base, p, 0, 0))
-  else __jp_at(__jp_what(kind), base, p)
+  else if kind == 18 then "unexpected char '" + string.__err_text(string.from_codepoint(__jp_cp(t, p)) ?? "") + "' at pos " + int.to_string(__jp_charpos(t, p))
+  else __jp_at(__jp_what(kind), t, p)
 }
 
 
@@ -13809,15 +13879,17 @@ fn __jp_what(kind: Int) -> String = match kind {
   10 => "json: unquoted key",
   11 => "json: duplicate key",
   12 => "json: expected ':'",
+  19 => "json: trailing data",
   _ => "json: invalid number",
 }
 
 
 
-fn __jp_number_error(base: Int, len: Int, p: Int) -> String = {
-  let s = __jp_substr(base, p, __jp_numrun(base, len, p))
-  let lead = if prim.load8(base + p) == 45 then p + 1 else p
-  if __jp_digits(base, len, lead) < __jp_numrun(base, len, p) then match float.parse(s) {
+fn __jp_number_error(t: String, tl: Int, p: Int) -> String = {
+  let end = __jp_numrun(t, p)
+  let s = __jp_substr(t, tl, p, end)
+  let lead = if __jp_byte(t, p) == 45 then p + 1 else p
+  if __jp_digits(t, lead) < end then match float.parse(s) {
     ok(_) => "",
     err(m) => m,
   } else match int.parse(s) {
@@ -13828,71 +13900,240 @@ fn __jp_number_error(base: Int, len: Int, p: Int) -> String = {
 
 
 
-fn __jp_cp(base: Int, p: Int) -> Int = {
-  let b0 = prim.load8(base + p)
+fn __jp_byte(t: String, p: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  if p < 0 then 0 - 1
+  else if p >= n then 0 - 1
+  else prim.load8(prim.handle(t) + 12 + p)
+}
+
+
+
+fn __jp_ws(t: String, p: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  var q = if p < 0 then n else p
+  var go = true
+  while go {
+    if q >= n then {
+      go = false
+    } else if q < 0 then {
+      go = false
+    } else {
+      let b = prim.load8(prim.handle(t) + 12 + q)
+      if b == 32 or b == 9 or b == 10 or b == 13 then {
+        q = q + 1
+      } else {
+        go = false
+      }
+    }
+  }
+  q
+}
+
+
+
+
+fn __jp_str_run(t: String, p: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  var q = if p < 0 then n else p
+  var go = true
+  while go {
+    if q >= n then {
+      go = false
+    } else if q < 0 then {
+      go = false
+    } else {
+      let b = prim.load8(prim.handle(t) + 12 + q)
+      if b == 34 or b == 92 or b < 32 or b >= 239 then {
+        go = false
+      } else {
+        q = q + 1
+      }
+    }
+  }
+  q
+}
+
+
+fn __jp_digits(t: String, p: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  var q = if p < 0 then n else p
+  var go = true
+  while go {
+    if q >= n then {
+      go = false
+    } else if q < 0 then {
+      go = false
+    } else {
+      let b = prim.load8(prim.handle(t) + 12 + q)
+      if b >= 48 and b <= 57 then {
+        q = q + 1
+      } else {
+        go = false
+      }
+    }
+  }
+  q
+}
+
+
+fn __jp_numrun(t: String, p: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  var q = if p < 0 then n else p
+  var go = true
+  while go {
+    if q >= n then {
+      go = false
+    } else if q < 0 then {
+      go = false
+    } else {
+      let b = prim.load8(prim.handle(t) + 12 + q)
+      if (b >= 48 and b <= 57) or b == 43 or b == 45 or b == 46 or b == 101 or b == 69 then {
+        q = q + 1
+      } else {
+        go = false
+      }
+    }
+  }
+  q
+}
+
+
+fn __jp_mantissa(t: String, p: Int, stop: Int, m: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  var q = p
+  var acc = m
+  var go = true
+  while go {
+    if q >= stop then {
+      go = false
+    } else if q >= n then {
+      go = false
+    } else if q < 0 then {
+      go = false
+    } else {
+      acc = acc * 10 + (prim.load8(prim.handle(t) + 12 + q) - 48)
+      q = q + 1
+    }
+  }
+  acc
+}
+
+
+fn __jp_same_bytes(t: String, a: Int, b: Int, k: Int) -> Bool = {
+  let n = prim.load32(prim.handle(t) + 4)
+  if a < 0 then false
+  else if b < 0 then false
+  else if a > n then false
+  else if b > n then false
+  else {
+    var i = 0
+    var same = true
+    var go = true
+    while go {
+      if i >= k then {
+        go = false
+      } else if i < 0 then {
+        go = false
+      } else if i >= n - a then {
+        go = false
+      } else if i >= n - b then {
+        go = false
+      } else if prim.load8(prim.handle(t) + 12 + a + i) != prim.load8(prim.handle(t) + 12 + b + i) then {
+        same = false
+        go = false
+      } else {
+        i = i + 1
+      }
+    }
+    same and i >= k
+  }
+}
+
+
+fn __jp_cp(t: String, p: Int) -> Int = {
+  let b0 = __jp_byte(t, p)
   if b0 < 128 then b0
-  else if b0 < 224 then (b0 - 192) * 64 + (prim.load8(base + p + 1) - 128)
-  else if b0 < 240 then (b0 - 224) * 4096 + (prim.load8(base + p + 1) - 128) * 64 + (prim.load8(base + p + 2) - 128) else (b0 - 240) * 262144 + (prim.load8(base + p + 1) - 128) * 4096 + (prim.load8(base + p + 2) - 128) * 64 + (prim.load8(base + p + 3) - 128)
+  else if b0 < 224 then (b0 - 192) * 64 + (__jp_byte(t, p + 1) - 128)
+  else if b0 < 240 then (b0 - 224) * 4096 + (__jp_byte(t, p + 1) - 128) * 64 + (__jp_byte(t, p + 2) - 128)
+  else (b0 - 240) * 262144 + (__jp_byte(t, p + 1) - 128) * 4096 + (__jp_byte(t, p + 2) - 128) * 64 + (__jp_byte(
+    t,
+    p + 3,
+  ) - 128)
 }
 
 
 
-fn __jp_charpos(base: Int, p: Int, i: Int, acc: Int) -> Int = if i >= p then acc
+fn __jp_charpos(t: String, p: Int) -> Int = __jp_charpos_from(t, p, 0, 0)
+
+fn __jp_charpos_from(t: String, p: Int, i: Int, acc: Int) -> Int = if i >= p then acc
 else {
-  let b = prim.load8(base + i)
-  let is_cont = b >= 128 and b < 192
-  __jp_charpos(base, p, i + 1, if is_cont then acc else acc + 1)
+  let b = __jp_byte(t, i)
+  __jp_charpos_from(t, p, i + 1, if b >= 128 and b < 192 then acc else acc + 1)
 }
 
 
-fn __jp_copy(src: Int, dst: Int, n: Int, i: Int) -> Int = if i + 8 <= n then {
-  prim.store64(dst + i, prim.load64(src + i))
-  __jp_copy(src, dst, n, i + 8)
-} else if i < n then {
-  prim.store8(dst + i, prim.load8(src + i))
-  __jp_copy(src, dst, n, i + 1)
-} else 0
 
-
-fn __jp_substr(base: Int, from: Int, to: Int) -> String = {
-  let n = if to > from then to - from else 0
-  let s = prim.alloc_str(n)
-  let _c = __jp_copy(base + from, prim.handle(s) + 12, n, 0)
+fn __jp_substr(t: String, tl: Int, from: Int, to: Int) -> String = {
+  let a = if from < 0 then 0 else from
+  let b = if to > tl then tl else to
+  let k = if b > a then b - a else 0
+  if k < 0 then prim.die(prim.handle("Error: json parse: span size\n")) else ()
+  if k > 2147483647 then prim.die(prim.handle("Error: json parse: span size\n")) else ()
+  let s = prim.alloc_str(k)
+  __jp_copy_ts(t, a, s, k)
   s
 }
 
 
-fn __jp_at(what: String, base: Int, p: Int) -> String = what + " at pos " + int.to_string(__jp_charpos(base, p, 0, 0))
-
-
-fn __jp_ws(base: Int, len: Int, p: Int) -> Int = if p >= len then p
-else {
-  let b = prim.load8(base + p)
-  if b == 32 or b == 9 or b == 10 or b == 13 then __jp_ws(base, len, p + 1)
-  else p
+fn __jp_copy_ts(t: String, a: Int, d: String, k: Int) -> Unit = {
+  let n = prim.load32(prim.handle(t) + 4)
+  let dn = prim.load32(prim.handle(d) + 4)
+  if a < 0 then ()
+  else if k < 0 then ()
+  else if k > n then ()
+  else if a > n - k then ()
+  else if k > dn then ()
+  else {
+    var i = 0
+    while i < k {
+      if i < 0 then {
+        i = k
+      } else {
+        prim.store8(prim.handle(d) + 12 + i, prim.load8(prim.handle(t) + 12 + a + i))
+        i = i + 1
+      }
+    }
+  }
 }
+
+
+fn __jp_at(what: String, t: String, p: Int) -> String = what + " at pos " + int.to_string(__jp_charpos(t, p))
 
 
 fn __jp_nonchar(cp: Int) -> Bool = (cp >= 64976 and cp <= 65007) or cp % 65536 >= 65534
 
 
+fn __jp_u8len(cp: Int) -> Int = if cp < 128 then 1
+else if cp < 2048 then 2
+else if cp < 65536 then 3 else 4
 
 
-fn __jp_value(base: Int, len: Int, p: Int, depth: Int, c: Int) -> Value = if p < 0 then value.null()
-else {
-  let q = __jp_ws(base, len, p)
-  if q >= len then __jp_refuse(c, q, 6)
-  else {
-    let b = prim.load8(base + q)
-    if b == 34 then value.string(__jp_string(base, len, q, c))
-    else if (b == 123 or b == 91) and depth >= __json_max_depth() then __jp_refuse(c, q, 17)
-    else if b == 123 then __jp_object(base, len, __jp_ws(base, len, q + 1), depth + 1, c)
-    else if b == 91 then __jp_array(base, len, __jp_ws(base, len, q + 1), depth + 1, c)
-    else if b == 116 or b == 102 then __jp_bool(base, len, q, c)
-    else if b == 110 then __jp_null(base, len, q, c)
-    else if b == 45 or (b >= 48 and b <= 57) then __jp_number(base, len, q, c)
-    else __jp_refuse(c, q, 18)
-  }
+fn __jp_cap(n: Int) -> Int = if n <= 4 then 4 else (n + 3) / 4 * 4
+
+
+fn __jp_word(sc: Bytes, off: Int) -> Int = {
+  let n = prim.load32(prim.handle(sc) + 4)
+  if off < 0 then 0
+  else if off > n - 8 then 0
+  else prim.load64(prim.handle(sc) + 12 + off)
+}
+
+fn __jp_set_word(sc: Bytes, off: Int, v: Int) -> Unit = {
+  let n = prim.load32(prim.handle(sc) + 4)
+  if off < 0 then __jp_disagree()
+  else if off > n - 8 then __jp_disagree()
+  else prim.store64(prim.handle(sc) + 12 + off, v)
 }
 
 
@@ -13906,136 +14147,387 @@ else {
 
 
 
-fn __jp_string(base: Int, len: Int, p: Int, c: Int) -> String = {
-  let r = __jp_str_scan(base, len, p + 1, p, 0)
-  if r < 0 then {
-    __jp_seek(c, r)
-    ""
-  } else {
-    let e = r / 2
-    let n = e - p - 1
-    let buf = prim.alloc_str(n)
-    let dh = prim.handle(buf) + 12
-    let _w = if r % 2 == 0 then __jp_copy(base + p + 1, dh, n, 0)
+
+fn __jp_tape(sc: Bytes, w: Int, x: Int) -> Unit = {
+  let sn = prim.load32(prim.handle(sc) + 4)
+  if sn < 64 then __jp_disagree()
+  else {
+    let at = prim.load64(prim.handle(sc) + 20)
+    let lim = prim.load64(prim.handle(sc) + 44)
+    if lim < 64 then prim.store64(prim.handle(sc) + 12, prim.load64(prim.handle(sc) + 12) + x)
+    else if at < 64 then __jp_disagree()
+    else if lim > sn then __jp_disagree()
+    else if at > lim - 8 then __jp_disagree()
     else {
-      prim.store32(prim.handle(buf) + 4, __jp_str_fill(base, p + 1, e, dh, 0))
-      0
+      prim.store64(prim.handle(sc) + 12 + at, w)
+      prim.store64(prim.handle(sc) + 20, at + 8)
+      prim.store64(prim.handle(sc) + 12, prim.load64(prim.handle(sc) + 12) + x)
     }
-    __jp_seek(c, e + 1)
-    buf
   }
 }
 
 
 
-fn __jp_str_scan(base: Int, len: Int, p: Int, open: Int, esc: Int) -> Int =
-  if p >= len then __jp_code(open, 0)
+
+fn __jp_tok(t: String, p: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  if p < 0 then 0
+  else if p >= n then p * 512
   else {
-    let b = prim.load8(base + p)
-    if b == 34 then p * 2 + esc
-    else if b < 32 then __jp_code(p, 1)
-    else if b == 92 then {
-      if p + 1 >= len then __jp_code(open, 0)
-      else {
-        let x = prim.load8(base + p + 1)
-        if x == 34 or x == 92 or x == 47 or x == 98 or x == 102 or x == 110 or x == 114 or x == 116 then __jp_str_scan(
-          base,
-          len,
-          p + 2,
-          open,
-          1,
-        )
-        else if x == 117 then __jp_str_scan_u(base, len, p, open)
-        else __jp_code(p, 2)
+    let c0 = prim.load8(prim.handle(t) + 12 + p)
+    if c0 != 32 and c0 != 9 and c0 != 10 and c0 != 13 then p * 512 + c0 + 1
+    else {
+      var q = p + 1
+      var r = n * 512
+      while q < n {
+        let c = if q < 0 then 0 else prim.load8(prim.handle(t) + 12 + q)
+        if c == 32 or c == 9 or c == 10 or c == 13 then {
+          q = q + 1
+        } else {
+          r = q * 512 + c + 1
+          q = n
+        }
       }
-    } else if b >= 239 then {
-      if __jp_nonchar(__jp_cp(base, p)) then __jp_code(p, 5)
-      else __jp_str_scan(base, len, p + (if b < 240 then 3 else 4), open, esc)
-    } else __jp_str_scan(base, len, p + 1, open, esc)
+      r
+    }
   }
+}
 
 
-fn __jp_str_scan_u(base: Int, len: Int, p: Int, open: Int) -> Int = {
-  let unit = __jp_hex4(base, len, p + 2)
+
+
+
+
+
+fn __jp_strend(t: String, sc: Bytes, q: Int, add: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  if q < 0 then __jp_code(0, 6)
+  else if q >= n then __jp_code(q, 6)
+  else if prim.load8(prim.handle(t) + 12 + q) != 34 then __jp_code(q, 10)
+  else {
+    var e = q + 1
+    var at = n
+    while e < n {
+      if e < 0 then {
+        e = n
+      } else {
+        let c = prim.load8(prim.handle(t) + 12 + e)
+        if prim.load8(prim.handle("################################--#---------------------------------------------------------#--------------------------------------------------------------------------------------------------------------------------------------------------#################") + 12 + c) == 35 then {
+          at = e
+          e = n
+        } else {
+          e = e + 1
+        }
+      }
+    }
+    let stop = if at < 0 then 0 - 1
+    else if at < n then prim.load8(prim.handle(t) + 12 + at) else 0 - 1
+    let r = if stop == 34 then at * 4294967296 + (at - q - 1) * 2
+    else __jp_str_scan(t, at, q, 0, at - q - 1)
+    if r >= 0 then {
+      if add >= 0 then {
+        let k = prim.band(prim.bshr(r, 1), 2147483647)
+        __jp_tape(sc, 1 + prim.band(r, 1) * 16 + k * 32 + q * 4294967296, add + 12 + __jp_cap(k))
+      } else ()
+    } else ()
+    r
+  }
+}
+
+
+
+
+fn __jp_int_fast(t: String, sc: Bytes, q: Int, add: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  if q < 0 then 0 - 1
+  else if q >= n then 0 - 1
+  else {
+    let lead = if prim.load8(prim.handle(t) + 12 + q) == 45 then q + 1 else q
+    if lead < 0 then 0 - 1
+    else if lead >= n then 0 - 1
+    else {
+      let d0 = prim.load8(prim.handle(t) + 12 + lead)
+      var e = lead
+      var at = n
+      while e < n {
+        let c = if e < 0 then 0 else prim.load8(prim.handle(t) + 12 + e)
+        if c < 48 then {
+          at = e
+          e = n
+        } else if c > 57 then {
+          at = e
+          e = n
+        } else {
+          e = e + 1
+        }
+      }
+      let d = at - lead
+      let stop = if at < 0 then 0
+      else if at < n then prim.load8(prim.handle(t) + 12 + at) else 0
+      if d < 1 then 0 - 1
+      else if d > 18 then 0 - 1
+      else if d > 1 and d0 == 48 then 0 - 1
+      else if stop == 43 or stop == 45 or stop == 46 or stop == 101 or stop == 69 then 0 - 1
+      else {
+        if add >= 0 then __jp_tape(
+          sc,
+          (if lead > q then 4 else 3) + d * 16 + lead * 4294967296,
+          add,
+        )
+        else ()
+        at
+      }
+    }
+  }
+}
+
+
+
+fn __jp_lit(t: String, sc: Bytes, q: Int, b: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  let kind = if b == 110 then 16 else 15
+  if q < 0 then __jp_code(q, kind)
+  else if q > n - 4 then __jp_code(q, kind)
+  else if b == 102 then {
+    if q > n - 5 then __jp_code(q, kind)
+    else if prim.load8(prim.handle(t) + 12 + q) == 102 and prim.load8(prim.handle(t) + 13 + q) == 97 and prim.load8(prim.handle(t) + 14 + q) == 108 and prim.load8(prim.handle(t) + 15 + q) == 115 and prim.load8(prim.handle(t) + 16 + q) == 101 then {
+      __jp_tape(sc, 7, 28)
+      q + 5
+    } else __jp_code(q, kind)
+  } else if b == 116 then {
+    if prim.load8(prim.handle(t) + 12 + q) == 116 and prim.load8(prim.handle(t) + 13 + q) == 114 and prim.load8(prim.handle(t) + 14 + q) == 117 and prim.load8(prim.handle(t) + 15 + q) == 101 then {
+      __jp_tape(sc, 6, 28)
+      q + 4
+    } else __jp_code(q, kind)
+  } else if prim.load8(prim.handle(t) + 12 + q) == 110 and prim.load8(prim.handle(t) + 13 + q) == 117 and prim.load8(prim.handle(t) + 14 + q) == 108 and prim.load8(prim.handle(t) + 15 + q) == 108 then {
+    __jp_tape(sc, 8, 28)
+    q + 4
+  } else __jp_code(q, kind)
+}
+
+
+
+
+fn __jp_after(t: String, tl: Int, np: Int, close: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  let c = if np < 0 then 0 - 1
+  else if np < n then prim.load8(prim.handle(t) + 12 + np) else 0 - 1
+  if c == close then tl + 2 + np
+  else if c == 44 then {
+    let d = if np < 0 then 0 - 1
+    else if np < n - 1 then prim.load8(prim.handle(t) + 13 + np) else 0 - 1
+    if d == close then __jp_code(np, 7)
+    else if d == 34 or d == 123 or d == 91 or d == 45 or (d >= 48 and d <= 57) or d == 116 or d == 102 or d == 110 then np + 1
+    else __jp_after_ws(t, tl, np, close)
+  } else __jp_after_ws(t, tl, np, close)
+}
+
+
+
+fn __jp_after_ws(t: String, tl: Int, np: Int, close: Int) -> Int = {
+  let f = __jp_tok(t, np)
+  let q = prim.bshr(f, 9)
+  let b = prim.band(f, 511) - 1
+  if b < 0 then __jp_code(q, 6)
+  else if b == close then tl + 2 + q
+  else if b == 44 then {
+    let g = __jp_tok(t, q + 1)
+    if prim.band(g, 511) - 1 == close then __jp_code(q, 7) else prim.bshr(g, 9)
+  } else __jp_code(q, if close == 93 then 8 else 9)
+}
+
+
+fn __jp_v1(t: String, tl: Int, p: Int, depth: Int, sc: Bytes) -> Int = {
+  let f = __jp_tok(t, p)
+  let q = prim.bshr(f, 9)
+  let b = (prim.band(f, 511) - 1)
+  if b < 0 then __jp_code(q, 6)
+  else if b == 34 then {
+    let r = __jp_strend(t, sc, q, 28)
+    if r < 0 then r else __jp_scan_end(r) + 1
+  } else if b == 123 or b == 91 then {
+    if depth >= __json_max_depth() then __jp_code(q, 17)
+    else if b == 123 then __jp_object1(t, tl, q + 1, depth + 1, sc)
+    else __jp_array1(t, tl, q + 1, depth + 1, sc)
+  } else if b == 116 or b == 102 or b == 110 then {
+    __jp_lit(t, sc, q, b)
+  } else if b == 45 or (b >= 48 and b <= 57) then {
+    let e = __jp_int_fast(t, sc, q, 28)
+    if e >= 0 then e
+    else __jp_number1(t, tl, q, sc)
+  } else __jp_code(q, 18)
+}
+
+
+
+fn __jp_array1(t: String, tl: Int, p: Int, depth: Int, sc: Bytes) -> Int = {
+  let f = __jp_tok(t, p)
+  var k = 0
+  var q = if (prim.band(f, 511) - 1) == 93 then tl + 2 + prim.bshr(f, 9) else prim.bshr(f, 9)
+  while q >= 0 and q <= tl {
+    let v = __jp_v1(t, tl, q, depth, sc)
+    k = k + 1
+    q = if v < 0 then v
+    else __jp_after(t, tl, v, 93)
+  }
+  if q < 0 then q
+  else {
+    __jp_tape(sc, 9 + k * 16, 40 + __jp_cap(k * 4))
+    q - tl - 1
+  }
+}
+
+
+
+
+
+fn __jp_key1(t: String, sc: Bytes, from: Int, open: Int, r: Int, k: Int) -> Bool = {
+  let sn = prim.load32(prim.handle(sc) + 4)
+  let e = prim.bshr(r, 32)
+  let esc = prim.band(r, 1)
+  let nb = prim.band(prim.bshr(r, 1), 2147483647)
+  if sn < 64 then {
+    __jp_disagree()
+    false
+  } else {
+    let top = prim.load64(prim.handle(sc) + 28)
+    if top < 32 then {
+      __jp_disagree()
+      false
+    } else if top > sn - 8 then {
+      __jp_disagree()
+      false
+    } else {
+      prim.store32(prim.handle(sc) + 12 + top, open * 2 + esc)
+      prim.store32(prim.handle(sc) + 16 + top, e)
+      prim.store64(prim.handle(sc) + 28, top + 8)
+      __jp_tape(sc, 2 + esc * 16 + nb * 32 + open * 4294967296, 12 + __jp_cap(nb))
+      if k >= 16 then false
+      else {
+        var u = if from < 32 then top else from
+        var dup = false
+        while u < top {
+          if u < 32 then {
+            u = top
+          } else if u > sn - 8 then {
+            u = top
+          } else {
+            let w = prim.load32(prim.handle(sc) + 12 + u)
+            let ue = prim.load32(prim.handle(sc) + 16 + u)
+            let a = prim.bshr(w, 1) + 1
+            if prim.band(w, 1) == 0 and esc == 0 then {
+              if ue - a == nb and __jp_same_bytes(t, a, open + 1, nb) then {
+                dup = true
+                u = top
+              } else {
+                u = u + 8
+              }
+            } else if __jp_key_cmp(t, a, ue, open + 1, e) == 0 then {
+              dup = true
+              u = top
+            } else {
+              u = u + 8
+            }
+          }
+        }
+        dup
+      }
+    }
+  }
+}
+
+
+
+
+
+
+
+fn __jp_object1(t: String, tl: Int, p: Int, depth: Int, sc: Bytes) -> Int = {
+  let from = __jp_word(sc, 16)
+  let f = __jp_tok(t, p)
+  var k = 0
+  var q = if (prim.band(f, 511) - 1) == 125 then tl + 2 + prim.bshr(f, 9) else prim.bshr(f, 9)
+  while q >= 0 and q <= tl {
+    let r = __jp_strend(t, sc, q, 0 - 1)
+    if r < 0 then {
+      q = r
+    } else if __jp_key1(t, sc, from, q, r, k) then {
+      q = __jp_code(q, 11)
+    } else {
+      let c = __jp_tok(t, __jp_scan_end(r) + 1)
+      let cb = (prim.band(c, 511) - 1)
+      let v = if cb < 0 then __jp_code(prim.bshr(c, 9), 6)
+      else if cb != 58 then __jp_code(prim.bshr(c, 9), 12)
+      else __jp_v1(t, tl, prim.bshr(c, 9) + 1, depth, sc)
+      k = k + 1
+      q = if v < 0 then v
+      else __jp_after(t, tl, v, 125)
+    }
+  }
+  let d = if k > 16 then __jp_dups(t, sc, from, __jp_word(sc, 16))
+  else 0 - 1
+  __jp_set_word(sc, 16, from)
+  if d >= 0 and (q >= 0 or d < __jp_code_pos(q)) then __jp_code(d, 11)
+  else if q < 0 then q
+  else {
+    __jp_tape(sc, 10 + k * 16, 40 + __jp_cap(k * 4) + k * 20)
+    q - tl - 1
+  }
+}
+
+
+
+
+
+
+fn __jp_str_scan(t: String, p: Int, open: Int, esc: Int, n: Int) -> Int = {
+  let q = __jp_str_run(t, p)
+  let k = n + (q - p)
+  let b = __jp_byte(t, q)
+  if b < 0 then __jp_code(open, 0)
+  else if b == 34 then q * 4294967296 + k * 2 + esc
+  else if b < 32 then __jp_code(q, 1)
+  else if b == 92 then {
+    let x = __jp_byte(t, q + 1)
+    if x < 0 then __jp_code(open, 0)
+    else if x == 34 or x == 92 or x == 47 or x == 98 or x == 102 or x == 110 or x == 114 or x == 116 then __jp_str_scan(
+      t,
+      q + 2,
+      open,
+      1,
+      k + 1,
+    )
+    else if x == 117 then __jp_str_scan_u(t, q, open, k)
+    else __jp_code(q, 2)
+  } else if __jp_nonchar(__jp_cp(t, q)) then __jp_code(q, 5)
+  else {
+    let w = if b < 240 then 3 else 4
+    __jp_str_scan(t, q + w, open, esc, k + w)
+  }
+}
+
+
+fn __jp_str_scan_u(t: String, p: Int, open: Int, n: Int) -> Int = {
+  let unit = __jp_hex4(t, p + 2)
   if unit < 0 then __jp_code(p, 3)
   else if unit >= 55296 and unit <= 56319 then {
-    let lo = if p + 7 < len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then __jp_hex4(
-      base,
-      len,
-      p + 8,
-    )
-    else 0 - 1
+    let lo = if __jp_byte(t, p + 6) == 92 and __jp_byte(t, p + 7) == 117 then __jp_hex4(t, p + 8) else 0 - 1
     if lo >= 56320 and lo <= 57343 then {
       let cp = 65536 + (unit - 55296) * 1024 + (lo - 56320)
       if __jp_nonchar(cp) then __jp_code(p, 5)
-      else __jp_str_scan(base, len, p + 12, open, 1)
+      else __jp_str_scan(t, p + 12, open, 1, n + 4)
     } else __jp_code(p, 4)
   } else if unit >= 56320 and unit <= 57343 then __jp_code(p, 4)
   else if __jp_nonchar(unit) then __jp_code(p, 5)
-  else __jp_str_scan(base, len, p + 6, open, 1)
+  else __jp_str_scan(t, p + 6, open, 1, n + __jp_u8len(unit))
 }
 
 
+fn __jp_scan_end(r: Int) -> Int = prim.bshr(r, 32)
 
-fn __jp_str_fill(base: Int, p: Int, e: Int, dh: Int, o: Int) -> Int = if p >= e then o
-else {
-  let b = prim.load8(base + p)
-  if b == 92 then {
-    let x = prim.load8(base + p + 1)
-    if x == 117 then __jp_str_u(base, p, e, dh, o)
-    else {
-      prim.store8(dh + o, __jp_simple_escape(x))
-      __jp_str_fill(base, p + 2, e, dh, o + 1)
-    }
-  } else {
-    prim.store8(dh + o, b)
-    __jp_str_fill(base, p + 1, e, dh, o + 1)
-  }
-}
+fn __jp_scan_n(r: Int) -> Int = prim.band(prim.bshr(r, 1), 2147483647)
 
-
-fn __jp_simple_escape(e: Int) -> Int = match e {
-  110 => 10,
-  116 => 9,
-  114 => 13,
-  98 => 8,
-  102 => 12,
-  _ => e,
-}
-
-
-
-fn __jp_str_u(base: Int, p: Int, e: Int, dh: Int, o: Int) -> Int = {
-  let unit = __jp_hex4(base, e, p + 2)
-  if unit >= 55296 and unit <= 56319 then {
-    let w = __jp_utf8_write(dh, o, 65536 + (unit - 55296) * 1024 + (__jp_hex4(base, e, p + 8) - 56320))
-    __jp_str_fill(base, p + 12, e, dh, o + w)
-  } else {
-    let w = __jp_utf8_write(dh, o, unit)
-    __jp_str_fill(base, p + 6, e, dh, o + w)
-  }
-}
-
-
-fn __jp_utf8_write(dh: Int, o: Int, cp: Int) -> Int = if cp < 128 then {
-  prim.store8(dh + o, cp)
-  1
-} else if cp < 2048 then {
-  prim.store8(dh + o, 192 + cp / 64)
-  prim.store8(dh + o + 1, 128 + cp % 64)
-  2
-} else if cp < 65536 then {
-  prim.store8(dh + o, 224 + cp / 4096)
-  prim.store8(dh + o + 1, 128 + (cp / 64) % 64)
-  prim.store8(dh + o + 2, 128 + cp % 64)
-  3
-} else {
-  prim.store8(dh + o, 240 + cp / 262144)
-  prim.store8(dh + o + 1, 128 + (cp / 4096) % 64)
-  prim.store8(dh + o + 2, 128 + (cp / 64) % 64)
-  prim.store8(dh + o + 3, 128 + cp % 64)
-  4
-}
+fn __jp_scan_esc(r: Int) -> Int = prim.band(r, 1)
 
 
 
@@ -14043,59 +14535,32 @@ fn __jp_hex_digit(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
 else if b >= 97 and b <= 102 then b - 87
 else if b >= 65 and b <= 70 then b - 55 else 0 - 1
 
-
-
-
-
-
-fn __jp_hex4(base: Int, len: Int, p: Int) -> Int = if p > len - 4 then 0 - 1
-else {
-  let a = __jp_hex_digit(prim.load8(base + p))
-  let b = __jp_hex_digit(prim.load8(base + p + 1))
-  let c = __jp_hex_digit(prim.load8(base + p + 2))
-  let d = __jp_hex_digit(prim.load8(base + p + 3))
+fn __jp_hex4(t: String, p: Int) -> Int = {
+  let a = __jp_hex_digit(__jp_byte(t, p))
+  let b = __jp_hex_digit(__jp_byte(t, p + 1))
+  let c = __jp_hex_digit(__jp_byte(t, p + 2))
+  let d = __jp_hex_digit(__jp_byte(t, p + 3))
   if a < 0 or b < 0 or c < 0 or d < 0 then 0 - 1 else ((a * 16 + b) * 16 + c) * 16 + d
 }
 
 
-fn __jp_digits(base: Int, len: Int, p: Int) -> Int =
-  if p < len and prim.load8(base + p) >= 48 and prim.load8(base + p) <= 57 then __jp_digits(
-    base,
-    len,
-    p + 1,
-  )
-  else p
 
 
-fn __jp_numrun(base: Int, len: Int, p: Int) -> Int = if p >= len then p
-else {
-  let b = prim.load8(base + p)
-  if (b >= 48 and b <= 57) or b == 43 or b == 45 or b == 46 or b == 101 or b == 69 then __jp_numrun(
-    base,
-    len,
-    p + 1,
-  )
-  else p
-}
-
-
-
-fn __jp_num_end(base: Int, end: Int, p: Int) -> Int = {
-  let p1 = if prim.load8(base + p) == 45 then p + 1 else p
-  let p2 = __jp_digits(base, end, p1)
-  if p2 == p1 then 0 - 1
-  else if prim.load8(base + p1) == 48 and p2 > p1 + 1 then 0 - 1
+fn __jp_num_end(t: String, end: Int, p: Int) -> Int = {
+  let p1 = if __jp_byte(t, p) == 45 then p + 1 else p
+  let p2 = __jp_digits(t, p1)
+  if p2 == p1 or p2 > end then 0 - 1
+  else if __jp_byte(t, p1) == 48 and p2 > p1 + 1 then 0 - 1
   else {
-    let has_frac = p2 < end and prim.load8(base + p2) == 46
-    let p3 = if has_frac then __jp_digits(base, end, p2 + 1)
-    else p2
+    let has_frac = p2 < end and __jp_byte(t, p2) == 46
+    let p3 = if has_frac then __jp_digits(t, p2 + 1) else p2
     if has_frac and p3 == p2 + 1 then 0 - 1
     else {
-      let eb = if p3 < end then prim.load8(base + p3) else 0
+      let eb = if p3 < end then __jp_byte(t, p3) else 0
       if eb == 101 or eb == 69 then {
-        let sb = if p3 + 1 < end then prim.load8(base + p3 + 1) else 0
+        let sb = if p3 + 1 < end then __jp_byte(t, p3 + 1) else 0
         let ps = if sb == 43 or sb == 45 then p3 + 2 else p3 + 1
-        let p4 = __jp_digits(base, end, ps)
+        let p4 = __jp_digits(t, ps)
         if p4 == ps then 0 - 1 else p4
       } else p3
     }
@@ -14103,182 +14568,612 @@ fn __jp_num_end(base: Int, end: Int, p: Int) -> Int = {
 }
 
 
-fn __jp_mantissa(base: Int, p: Int, stop: Int, m: Int) -> Int = if p >= stop then m
-else __jp_mantissa(base, p + 1, stop, m * 10 + (prim.load8(base + p) - 48))
+
+fn __jp_int_fits(t: String, lead: Int, d: Int, neg: Bool) -> Bool = if d <= 18 then true
+else if d > 19 then false
+else {
+  let m = __jp_mantissa(t, lead, lead + 18, 0)
+  let last = __jp_byte(t, lead + 18) - 48
+  m < 922337203685477580 or (m == 922337203685477580 and last <= (if neg then 8 else 7))
+}
+
+
+fn __jp_zeros(t: String, p: Int, stop: Int) -> Int = {
+  let q = __jp_digits_of(t, p, stop, 48)
+  q - p
+}
+
+
+fn __jp_digits_of(t: String, p: Int, stop: Int, b: Int) -> Int =
+  if p < stop and __jp_byte(t, p) == b then __jp_digits_of(t, p + 1, stop, b)
+  else p
 
 
 
 
 
-fn __jp_number(base: Int, len: Int, p: Int, c: Int) -> Value = {
-  let end = __jp_numrun(base, len, p)
-  if __jp_num_end(base, end, p) != end then __jp_refuse(c, p, 13)
+fn __jp_float_fits(t: String, tl: Int, p: Int, end: Int) -> Bool = {
+  let p0 = if __jp_byte(t, p) == 45 then p + 1 else p
+  let i_end = __jp_digits(t, p0)
+  let has_dot = __jp_byte(t, i_end) == 46
+  let f_start = if has_dot then i_end + 1 else i_end
+  let f_end = if has_dot then __jp_digits(t, f_start) else f_start
+  let zi = __jp_zeros(t, p0, i_end)
+  let z = if zi == i_end - p0 then zi + __jp_zeros(t, f_start, f_end)
+  else zi
+  if z == (i_end - p0) + (f_end - f_start) then true
   else {
-    __jp_seek(c, end)
-    let lead = if prim.load8(base + p) == 45 then p + 1 else p
-    if __jp_digits(base, end, lead) < end then match float.parse(__jp_substr(base, p, end)) {
-      ok(f) => value.float(f),
-      err(_) => __jp_refuse(c, p, 14),
-    } else if end - lead <= 18 then {
-      let m = __jp_mantissa(base, lead, end, 0)
-      value.int(if lead > p then 0 - m else m)
-    } else match int.parse(__jp_substr(base, p, end)) {
-      ok(n) => value.int(n),
-      err(_) => __jp_refuse(c, p, 14),
+    let eb = if f_end < end then __jp_byte(t, f_end) else 0
+    let has_e = eb == 101 or eb == 69
+    let sb = if f_end + 1 < end then __jp_byte(t, f_end + 1) else 0
+    let e_neg = has_e and sb == 45
+    let e_start = if has_e and (sb == 45 or sb == 43) then f_end + 2 else f_end + 1
+    let e_end = if has_e then __jp_digits(t, e_start) else e_start
+    let e_mag = if not has_e then 0
+    else if e_end - e_start > 8 then 999999999
+    else __jp_mantissa(t, e_start, e_end, 0)
+    let dp = (i_end - p0) - z + (if e_neg then 0 - e_mag else e_mag)
+    if dp <= 308 then true
+    else if dp >= 310 then false
+    else match float.parse(__jp_substr(t, tl, p, end)) {
+      ok(_) => true,
+      err(_) => false,
+    }
+  }
+}
+
+fn __jp_number1(t: String, tl: Int, p: Int, sc: Bytes) -> Int = {
+  let end = __jp_numrun(t, p)
+  if __jp_num_end(t, end, p) != end then __jp_code(p, 13)
+  else {
+    let neg = __jp_byte(t, p) == 45
+    let lead = if neg then p + 1 else p
+    let fits = if __jp_digits(t, lead) < end then __jp_float_fits(t, tl, p, end)
+    else __jp_int_fits(t, lead, end - lead, neg)
+    if fits then {
+      __jp_tape(
+        sc,
+        (if __jp_digits(t, lead) < end then 5 else 11) + (end - p) * 16 + p * 4294967296,
+        28,
+      )
+      end
+    } else __jp_code(p, 14)
+  }
+}
+
+fn __jp_span_word(sc: Bytes, k: Int) -> Int = {
+  let n = prim.load32(prim.handle(sc) + 4)
+  if k < 32 then 0
+  else if k > n - 4 then 0
+  else prim.load32(prim.handle(sc) + 12 + k)
+}
+
+fn __jp_span_open(sc: Bytes, k: Int) -> Int = __jp_span_word(sc, k) / 2
+
+fn __jp_span_esc(sc: Bytes, k: Int) -> Int = __jp_span_word(sc, k) % 2
+
+fn __jp_span_end(sc: Bytes, k: Int) -> Int = __jp_span_word(sc, k + 4)
+
+
+
+fn __jp_next_cp(t: String, p: Int) -> Int = {
+  let b = __jp_byte(t, p)
+  if b == 92 then {
+    let x = __jp_byte(t, p + 1)
+    if x == 117 then {
+      let unit = __jp_hex4(t, p + 2)
+      if unit >= 55296 and unit <= 56319 then (65536 + (unit - 55296) * 1024 + (__jp_hex4(t, p + 8) - 56320)) * 16 + 12
+      else unit * 16 + 6
+    } else __jp_simple_escape(x) * 16 + 2
+  } else if b < 128 then b * 16 + 1
+  else if b < 224 then __jp_cp(t, p) * 16 + 2
+  else if b < 240 then __jp_cp(t, p) * 16 + 3
+  else __jp_cp(t, p) * 16 + 4
+}
+
+
+fn __jp_simple_escape(e: Int) -> Int = if e == 110 then 10
+else if e == 116 then 9
+else if e == 114 then 13
+else if e == 98 then 8
+else if e == 102 then 12 else e
+
+
+
+fn __jp_key_cmp(t: String, a: Int, ae: Int, b: Int, be: Int) -> Int =
+  if a >= ae or b >= be then (if a < ae then 1
+  else if b < be then 0 - 1 else 0)
+  else {
+    let x = __jp_next_cp(t, a)
+    let y = __jp_next_cp(t, b)
+    if x / 16 != y / 16 then x / 16 - y / 16
+    else __jp_key_cmp(t, a + x % 16, ae, b + y % 16, be)
+  }
+
+
+fn __jp_key_eq(t: String, sc: Bytes, k: Int, u: Int) -> Bool = {
+  let a = __jp_span_open(sc, k) + 1
+  let ae = __jp_span_end(sc, k)
+  let b = __jp_span_open(sc, u) + 1
+  let be = __jp_span_end(sc, u)
+  if __jp_span_esc(sc, k) == 0 and __jp_span_esc(sc, u) == 0 then ae - a == be - b and __jp_same_bytes(
+    t,
+    a,
+    b,
+    ae - a,
+  )
+  else __jp_key_cmp(t, a, ae, b, be) == 0
+}
+
+
+
+
+
+
+
+
+fn __jp_dups(t: String, sc: Bytes, from: Int, to: Int) -> Int = {
+  let n = (to - from) / 8
+  let m = __jp_pow2(n * 2, 32)
+  let tn = m * 4 + n * 8
+  if tn < 0 then prim.die(prim.handle("Error: json parse: key index size\n")) else ()
+  if tn > 2147483647 then prim.die(prim.handle("Error: json parse: key index size\n")) else ()
+  let tb = prim.alloc_bytes(tn)
+  __jp_zero(tb)
+  let d = __jp_hash_all(t, sc, tb, m, from, to)
+  if d != 0 - 2 then d
+  else __jp_sort_dups(t, sc, tb, m * 4, n, from)
+}
+
+fn __jp_pow2(want: Int, m: Int) -> Int = if m >= want or m > 1073741824 then m else __jp_pow2(
+  want,
+  m * 2,
+)
+
+fn __jp_zero(tb: Bytes) -> Unit = {
+  let n = prim.load32(prim.handle(tb) + 4)
+  var i = 0
+  while i <= n - 4 {
+    if i < 0 then {
+      i = n
+    } else {
+      prim.store32(prim.handle(tb) + 12 + i, 0)
+      i = i + 4
     }
   }
 }
 
 
-fn __jp_lit_at(base: Int, len: Int, p: Int, b0: Int, b1: Int, b2: Int, b3: Int) -> Bool = p + 4 <= len and prim.load8(base + p) == b0 and prim.load8(base + p + 1) == b1 and prim.load8(base + p + 2) == b2 and prim.load8(base + p + 3) == b3
-
-fn __jp_bool(base: Int, len: Int, p: Int, c: Int) -> Value = if __jp_lit_at(base, len, p, 116, 114, 117, 101) then {
-  __jp_seek(c, p + 4)
-  value.bool(true)
-} else if __jp_lit_at(base, len, p, 102, 97, 108, 115) and p + 5 <= len and prim.load8(base + p + 4) == 101 then {
-  __jp_seek(c, p + 5)
-  value.bool(false)
-} else __jp_refuse(c, p, 15)
-
-fn __jp_null(base: Int, len: Int, p: Int, c: Int) -> Value = if __jp_lit_at(base, len, p, 110, 117, 108, 108) then {
-  __jp_seek(c, p + 4)
-  value.null()
-} else __jp_refuse(c, p, 16)
+fn __jp_hash(t: String, a: Int, ae: Int, hv: Int) -> Int = if a >= ae then hv
+else {
+  let x = __jp_next_cp(t, a)
+  __jp_hash(t, a + x % 16, ae, prim.band(prim.bxor(hv, x / 16) * 16777619, 4294967295))
+}
 
 
 
-
-
-
-fn __jp_after(base: Int, len: Int, c: Int, close: Int) -> Int = {
-  let np = __jp_pos(c)
-  if np < 0 then 0 - 1
+fn __jp_hash_all(t: String, sc: Bytes, tb: Bytes, m: Int, k: Int, to: Int) -> Int =
+  if k >= to then 0 - 1
   else {
-    let q = __jp_ws(base, len, np)
-    if q >= len then __jp_stop(c, q, 6)
+    let hv = __jp_hash(t, __jp_span_open(sc, k) + 1, __jp_span_end(sc, k), 2166136261)
+    let r = __jp_probe(t, sc, tb, m, k, prim.band(hv, m - 1), 0)
+    if r != 0 - 1 then r
+    else __jp_hash_all(t, sc, tb, m, k + 8, to)
+  }
+
+
+
+fn __jp_probe(t: String, sc: Bytes, tb: Bytes, m: Int, k: Int, i: Int, c: Int) -> Int =
+  if c > 8 then 0 - 2
+  else {
+    let u = __jp_tword(tb, i * 4)
+    if u == 0 then {
+      __jp_set_tword(tb, i * 4, k)
+      0 - 1
+    } else if __jp_key_eq(t, sc, u, k) then __jp_span_open(sc, k)
+    else __jp_probe(t, sc, tb, m, k, prim.band(i + 1, m - 1), c + 1)
+  }
+
+fn __jp_tword(tb: Bytes, at: Int) -> Int = {
+  let n = prim.load32(prim.handle(tb) + 4)
+  if at < 0 then 0
+  else if at > n - 4 then 0
+  else prim.load32(prim.handle(tb) + 12 + at)
+}
+
+fn __jp_set_tword(tb: Bytes, at: Int, v: Int) -> Unit = {
+  let n = prim.load32(prim.handle(tb) + 4)
+  if at < 0 then __jp_disagree()
+  else if at > n - 4 then __jp_disagree()
+  else prim.store32(prim.handle(tb) + 12 + at, v)
+}
+
+
+
+
+
+fn __jp_sort_dups(t: String, sc: Bytes, tb: Bytes, w: Int, n: Int, from: Int) -> Int = {
+  __jp_fill_idx(tb, w, n, from, 0)
+  let a = __jp_msort(t, sc, tb, w, w + n * 4, n * 4, 4)
+  __jp_runs(t, sc, tb, a, n * 4, 4, 0 - 1)
+}
+
+fn __jp_fill_idx(tb: Bytes, w: Int, n: Int, from: Int, i: Int) -> Unit = if i >= n then ()
+else {
+  __jp_set_tword(tb, w + i * 4, from + i * 8)
+  __jp_fill_idx(tb, w, n, from, i + 1)
+}
+
+
+fn __jp_slot_lt(t: String, sc: Bytes, k: Int, u: Int) -> Bool = {
+  let c = __jp_key_cmp(
+    t,
+    __jp_span_open(sc, k) + 1,
+    __jp_span_end(sc, k),
+    __jp_span_open(sc, u) + 1,
+    __jp_span_end(sc, u),
+  )
+  c < 0 or (c == 0 and k < u)
+}
+
+
+
+fn __jp_msort(t: String, sc: Bytes, tb: Bytes, a: Int, b: Int, an: Int, wd: Int) -> Int =
+  if wd >= an or wd <= 0 then a
+  else {
+    let _m = __jp_merge_pass(t, sc, tb, a, b, an, wd, 0)
+    __jp_msort(t, sc, tb, b, a, an, wd * 2)
+  }
+
+fn __jp_merge_pass(t: String, sc: Bytes, tb: Bytes, a: Int, b: Int, an: Int, wd: Int, lo: Int) -> Int =
+  if lo >= an then 0
+  else {
+    let mid = if lo + wd < an then lo + wd else an
+    let hi = if lo + wd * 2 < an then lo + wd * 2 else an
+    let _m = __jp_merge(t, sc, tb, a, b, lo, mid, mid, hi, lo)
+    __jp_merge_pass(t, sc, tb, a, b, an, wd, hi)
+  }
+
+fn __jp_merge(t: String, sc: Bytes, tb: Bytes, a: Int, b: Int, i: Int, ie: Int, j: Int, je: Int, o: Int) -> Int =
+  if i < ie and (j >= je or not __jp_slot_lt(t, sc, __jp_tword(tb, a + j), __jp_tword(tb, a + i))) then {
+    __jp_set_tword(tb, b + o, __jp_tword(tb, a + i))
+    __jp_merge(t, sc, tb, a, b, i + 4, ie, j, je, o + 4)
+  } else if j < je then {
+    __jp_set_tword(tb, b + o, __jp_tword(tb, a + j))
+    __jp_merge(t, sc, tb, a, b, i, ie, j + 4, je, o + 4)
+  } else 0
+
+
+
+fn __jp_runs(t: String, sc: Bytes, tb: Bytes, a: Int, an: Int, i: Int, d: Int) -> Int =
+  if i >= an then d
+  else {
+    let k = __jp_tword(tb, a + i - 4)
+    let u = __jp_tword(tb, a + i)
+    let o = __jp_span_open(sc, u)
+    let d2 = if __jp_key_eq(t, sc, k, u) and (d < 0 or o < d) then o else d
+    __jp_runs(t, sc, tb, a, an, i + 4, d2)
+  }
+
+
+
+
+
+
+
+
+
+
+fn __jp_push_at(sc: Bytes, x: Int) -> Unit = {
+  let sn = prim.load32(prim.handle(sc) + 4)
+  if sn < 64 then __jp_disagree()
+  else {
+    let top = prim.load64(prim.handle(sc) + 36)
+    if top < 32 then __jp_disagree()
+    else if top > sn - 4 then __jp_disagree()
     else {
-      let b = prim.load8(base + q)
-      if b == close then {
-        __jp_seek(c, q + 1)
-        0 - 1
-      } else if b == 44 then {
-        let n = __jp_ws(base, len, q + 1)
-        if n < len and prim.load8(base + n) == close then __jp_stop(c, q, 7) else n
-      } else __jp_stop(c, q, if close == 93 then 8 else 9)
+      prim.store32(prim.handle(sc) + 12 + top, x)
+      prim.store64(prim.handle(sc) + 36, top + 4)
     }
   }
 }
 
 
-fn __jp_stop(c: Int, p: Int, kind: Int) -> Int = {
-  __jp_seek(c, __jp_code(p, kind))
-  0 - 1
+
+fn __jp_str2(t: String, fam: Bytes, sc: Bytes, w: Int) -> Int = {
+  let n = prim.band(prim.bshr(w, 5), 134217727)
+  let q = prim.bshr(w, 32)
+  let b = prim.carve(fam, n)
+  let o = b - prim.handle(fam)
+  if prim.band(w, 16) == 0 then __jp_copy_tf(t, q + 1, fam, o, n)
+  else if __jp_str_fill(t, q + 1, fam, o, o + n) != o + n then __jp_disagree()
+  else ()
+  b
+}
+
+
+fn __jp_box(fam: Bytes, sc: Bytes, tag: Int, x: Int) -> Unit = {
+  let b = prim.carve(fam, 16)
+  __jp_box_fill(fam, b - prim.handle(fam), tag, x)
+  __jp_push_at(sc, b)
 }
 
 
 
-
-
-
-
-
-
-
-
-fn __jp_array(base: Int, len: Int, p0: Int, depth: Int, c: Int) -> Value = {
-  var items: List[Value] = []
-  var p = if p0 < len and prim.load8(base + p0) == 93 then {
-    __jp_seek(c, p0 + 1)
-    0 - 1
-  } else p0
-  while p >= 0 {
-    list.push(items, __jp_value(base, len, p, depth, c))
-    p = __jp_after(base, len, c, 93)
-  }
-  value.array(items)
-}
-
-
-fn __jp_key(base: Int, len: Int, p: Int, c: Int) -> String =
-  if p >= len then {
-    __jp_seek(c, __jp_code(p, 6))
-    ""
-  } else if prim.load8(base + p) != 34 then {
-    __jp_seek(c, __jp_code(p, 10))
-    ""
-  } else __jp_string(base, len, p, c)
-
-
-
-fn __jp_colon(base: Int, len: Int, c: Int) -> Int = {
-  let kp = __jp_pos(c)
-  if kp < 0 then 0 - 1
+fn __jp_box_fill(fam: Bytes, o: Int, tag: Int, x: Int) -> Unit = {
+  let fl = prim.load32(prim.handle(fam) + 4)
+  if o < 0 then __jp_disagree()
+  else if o > fl - 16 then __jp_disagree()
   else {
-    let q = __jp_ws(base, len, kp)
-    if q >= len then __jp_stop(c, q, 6)
-    else if prim.load8(base + q) != 58 then __jp_stop(c, q, 12)
-    else q + 1
+    prim.store32(prim.handle(fam) + 12 + o, tag)
+    prim.store64(prim.handle(fam) + 20 + o, x)
   }
 }
 
 
 
 
-fn __jp_repeats(pairs: List[(String, Value)], k: String) -> Bool = {
-  var seen = false
-  for (s, _) in pairs {
-    if __jp_same(s, k) then {
-      seen = true
-    } else ()
-  }
-  seen
-}
-
-fn __jp_same(a: String, b: String) -> Bool = {
-  let ha = prim.handle(a)
-  let hb = prim.handle(b)
-  prim.load32(ha + 4) == prim.load32(hb + 4) and __jp_same_bytes(ha + 12, hb + 12, prim.load32(ha + 4), 0)
-}
-
-fn __jp_same_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool = if i >= n then true
-else if prim.load8(pa + i) != prim.load8(pb + i) then false
-else __jp_same_bytes(pa, pb, n, i + 1)
-
-
-fn __jp_unique(c: Int, p: Int, repeated: Bool) -> Unit =
-  if repeated and __jp_pos(c) >= 0 then __jp_seek(c, __jp_code(p, 11)) else ()
-
-
-
-
-
-
-
-fn __jp_object(base: Int, len: Int, p0: Int, depth: Int, c: Int) -> Value = {
-  var pairs: List[(String, Value)] = []
-  var p = if p0 < len and prim.load8(base + p0) == 125 then {
-    __jp_seek(c, p0 + 1)
-    0 - 1
-  } else p0
-  while p >= 0 and list.len(pairs) < 16 {
-    let k = __jp_key(base, len, p, c)
-    __jp_unique(c, p, __jp_repeats(pairs, k))
-    list.push(pairs, (k, __jp_value(base, len, __jp_colon(base, len, c), depth, c)))
-    p = __jp_after(base, len, c, 125)
-  }
-  if p >= 0 then {
-    var index = pairs |> list.map(((s, _)) => (s, 0)) |> map.from_list
-    while p >= 0 {
-      let k = __jp_key(base, len, p, c)
-      __jp_unique(c, p, map.contains(index, k))
-      index = map.set(index, k, 0)
-      list.push(pairs, (k, __jp_value(base, len, __jp_colon(base, len, c), depth, c)))
-      p = __jp_after(base, len, c, 125)
+fn __jp_pairs(fam: Bytes, sc: Bytes, k: Int) -> Unit = {
+  let fl = prim.load32(prim.handle(fam) + 4)
+  let sn = prim.load32(prim.handle(sc) + 4)
+  if sn < 64 then __jp_disagree()
+  else if k < 0 then __jp_disagree()
+  else if k > sn then __jp_disagree()
+  else {
+    let top = prim.load64(prim.handle(sc) + 36)
+    let from = top - k * 8
+    if from < 32 then __jp_disagree()
+    else if top > sn then __jp_disagree()
+    else {
+      var i = 0
+      while i < k {
+        let a = from + i * 8
+        let d = from + i * 4
+        let o = prim.carve(fam, 8) - prim.handle(fam)
+        if i < 0 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else if a < 32 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else if a > sn - 8 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else if d < 32 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else if d > sn - 4 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else if o < 0 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else if o > fl - 8 then {
+          prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+          i = k
+        } else {
+          prim.store32(prim.handle(fam) + 12 + o, prim.load32(prim.handle(sc) + 12 + a))
+          prim.store32(prim.handle(fam) + 16 + o, prim.load32(prim.handle(sc) + 16 + a))
+          prim.store32(prim.handle(sc) + 12 + d, prim.handle(fam) + o)
+          i = i + 1
+        }
+      }
+      prim.store64(prim.handle(sc) + 36, from + k * 4)
+      __jp_list(fam, sc, k, 6)
     }
-  } else ()
-  value.object(pairs)
+  }
 }
-"#;
+
+
+fn __jp_build(t: String, tl: Int, fam: Bytes, sc: Bytes) -> Unit = {
+  let sn = prim.load32(prim.handle(sc) + 4)
+  if sn < 64 then __jp_disagree()
+  else {
+    let end = prim.load64(prim.handle(sc) + 20)
+    var at = 64
+    while at < end {
+      if at < 64 then {
+        prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+        at = end
+      } else if at > sn - 8 then {
+        prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+        at = end
+      } else {
+        let w = prim.load64(prim.handle(sc) + 12 + at)
+        let kind = prim.band(w, 15)
+        if kind == 2 then __jp_push_at(sc, __jp_str2(t, fam, sc, w))
+        else if kind == 9 then __jp_list(fam, sc, prim.bshr(w, 4), 5)
+        else if kind == 10 then __jp_pairs(fam, sc, prim.bshr(w, 4))
+        else __jp_scalar(t, tl, fam, sc, w, kind)
+        at = at + 8
+      }
+    }
+  }
+}
+
+
+
+fn __jp_scalar(t: String, tl: Int, fam: Bytes, sc: Bytes, w: Int, kind: Int) -> Unit = {
+  let x = if kind == 1 then __jp_str2(t, fam, sc, w)
+  else if kind == 3 then __jp_mantissa(
+    t,
+    prim.bshr(w, 32),
+    prim.bshr(w, 32) + prim.band(prim.bshr(w, 4), 31),
+    0,
+  )
+  else if kind == 4 then 0 - __jp_mantissa(
+    t,
+    prim.bshr(w, 32),
+    prim.bshr(w, 32) + prim.band(prim.bshr(w, 4), 31),
+    0,
+  )
+  else if kind == 6 then 1
+  else if kind == 7 then 0
+  else if kind == 8 then 0
+  else __jp_number2(t, tl, w)
+  let tag = if kind == 1 then 4
+  else if kind < 5 then 2
+  else if kind == 5 then 3
+  else if kind == 8 then 0
+  else if kind < 9 then 1 else 2
+  __jp_box(fam, sc, tag, x)
+}
+
+
+fn __jp_number2(t: String, tl: Int, w: Int) -> Int = {
+  let q = prim.bshr(w, 32)
+  let end = q + prim.band(prim.bshr(w, 4), 268435455)
+  if prim.band(w, 15) == 5 then match float.parse(__jp_substr(t, tl, q, end)) {
+    ok(x) => prim.fbits(x),
+    err(_) => {
+      __jp_disagree()
+      0
+    },
+  } else {
+    let neg = __jp_byte(t, q) == 45
+    let lead = if neg then q + 1 else q
+    let d = end - lead
+    let m = __jp_mantissa(t, lead, if d > 18 then lead + 18 else end, 0)
+    let last = if d > 18 then __jp_byte(t, lead + 18) - 48 else 0
+    if d > 18 then (if neg then (0 - m) * 10 - last else m * 10 + last)
+    else if neg then 0 - m else m
+  }
+}
+
+
+
+fn __jp_list(fam: Bytes, sc: Bytes, k: Int, tag: Int) -> Unit = {
+  let sn = prim.load32(prim.handle(sc) + 4)
+  if sn < 64 then __jp_disagree()
+  else if k < 0 then __jp_disagree()
+  else {
+    let top = prim.load64(prim.handle(sc) + 36)
+    let b = prim.carve(fam, k * 4)
+    __jp_copy_sf(sc, top - k * 4, fam, b - prim.handle(fam), k * 4)
+    prim.store64(prim.handle(sc) + 36, top - k * 4)
+    __jp_box(fam, sc, tag, b)
+  }
+}
+
+
+
+fn __jp_copy_sf(sc: Bytes, a: Int, fam: Bytes, d: Int, k: Int) -> Unit = {
+  let n = prim.load32(prim.handle(sc) + 4)
+  let fl = prim.load32(prim.handle(fam) + 4)
+  if a < 32 then __jp_disagree()
+  else if k < 0 then __jp_disagree()
+  else if k > n then __jp_disagree()
+  else if a > n - k then __jp_disagree()
+  else if d < 0 then __jp_disagree()
+  else if k > fl then __jp_disagree()
+  else if d > fl - k then __jp_disagree()
+  else {
+    var i = 0
+    while i <= k - 8 {
+      if i < 0 then {
+        i = k
+      } else {
+        prim.store64(prim.handle(fam) + 12 + d + i, prim.load64(prim.handle(sc) + 12 + a + i))
+        i = i + 8
+      }
+    }
+    while i <= k - 4 {
+      if i < 0 then {
+        i = k
+      } else {
+        prim.store32(prim.handle(fam) + 12 + d + i, prim.load32(prim.handle(sc) + 12 + a + i))
+        i = i + 4
+      }
+    }
+  }
+}
+
+
+fn __jp_copy_tf(t: String, a: Int, fam: Bytes, d: Int, k: Int) -> Unit = {
+  let n = prim.load32(prim.handle(t) + 4)
+  let fl = prim.load32(prim.handle(fam) + 4)
+  if a < 0 then __jp_disagree()
+  else if k < 0 then __jp_disagree()
+  else if k > n then __jp_disagree()
+  else if a > n - k then __jp_disagree()
+  else if d < 0 then __jp_disagree()
+  else if k > fl then __jp_disagree()
+  else if d > fl - k then __jp_disagree()
+  else {
+    var i = 0
+    while i <= k - 8 {
+      if i < 0 then {
+        i = k
+      } else {
+        prim.store64(prim.handle(fam) + 12 + d + i, prim.load64(prim.handle(t) + 12 + a + i))
+        i = i + 8
+      }
+    }
+    while i <= k - 4 {
+      if i < 0 then {
+        i = k
+      } else {
+        prim.store32(prim.handle(fam) + 12 + d + i, prim.load32(prim.handle(t) + 12 + a + i))
+        i = i + 4
+      }
+    }
+    while i < k {
+      if i < 0 then {
+        i = k
+      } else {
+        prim.store8(prim.handle(fam) + 12 + d + i, prim.load8(prim.handle(t) + 12 + a + i))
+        i = i + 1
+      }
+    }
+  }
+}
+
+
+
+
+fn __jp_str_fill(t: String, p: Int, fam: Bytes, o: Int, oe: Int) -> Int = if o >= oe then o
+else {
+  let stop = __jp_str_run(t, p)
+  if stop > p then {
+    if o > oe - (stop - p) then __jp_disagree() else ()
+    __jp_copy_tf(t, p, fam, o, stop - p)
+    __jp_str_fill(t, stop, fam, o + (stop - p), oe)
+  } else {
+    let x = __jp_next_cp(t, p)
+    __jp_str_fill(t, p + x % 16, fam, o + __jp_utf8_write(fam, oe, o, x / 16), oe)
+  }
+}
+
+
+fn __jp_put8(fam: Bytes, oe: Int, o: Int, v: Int) -> Unit = {
+  let fl = prim.load32(prim.handle(fam) + 4)
+  if o < 0 then __jp_disagree()
+  else if o >= oe then __jp_disagree()
+  else if o >= fl then __jp_disagree()
+  else prim.store8(prim.handle(fam) + 12 + o, v)
+}
+
+
+fn __jp_utf8_write(fam: Bytes, oe: Int, o: Int, cp: Int) -> Int = if cp < 128 then {
+  __jp_put8(fam, oe, o, cp)
+  1
+} else if cp < 2048 then {
+  __jp_put8(fam, oe, o, 192 + cp / 64)
+  __jp_put8(fam, oe, o + 1, 128 + cp % 64)
+  2
+} else if cp < 65536 then {
+  __jp_put8(fam, oe, o, 224 + cp / 4096)
+  __jp_put8(fam, oe, o + 1, 128 + (cp / 64) % 64)
+  __jp_put8(fam, oe, o + 2, 128 + cp % 64)
+  3
+} else {
+  __jp_put8(fam, oe, o, 240 + cp / 262144)
+  __jp_put8(fam, oe, o + 1, 128 + (cp / 4096) % 64)
+  __jp_put8(fam, oe, o + 2, 128 + (cp / 64) % 64)
+  __jp_put8(fam, oe, o + 3, 128 + cp % 64)
+  4
+}
+"#################################;
 pub const SRC_JSON_PATH: &str = r#"
 
 

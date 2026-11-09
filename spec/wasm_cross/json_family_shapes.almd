@@ -26,11 +26,42 @@ fn dup_at(n: Int, dup: Int, at: Int) -> String = {
   obj(list.take(ks, at) + ["\"k${dup}\":-1"] + list.drop(ks, at))
 }
 
-fn colliding() -> List[String] = ["c34", "c78", "c96", "c126", "c184", "c207", "c272", "c355", "c399", "c434", "c478", "c496", "c522", "c557", "c720", "c759", "c795", "c856", "c975", "c1073"]
+fn colliding() -> List[String] = [
+  "c34",
+  "c78",
+  "c96",
+  "c126",
+  "c184",
+  "c207",
+  "c272",
+  "c355",
+  "c399",
+  "c434",
+  "c478",
+  "c496",
+  "c522",
+  "c557",
+  "c720",
+  "c759",
+  "c795",
+  "c856",
+  "c975",
+  "c1073"
+]
 
 effect fn main() -> Unit = {
   // Empty and nested-empty containers.
-  for t in ["[]", "{}", "[[]]", "[{}]", "{\"\":{}}", "{\"a\":[]}", "[[],{},\"\",[[]]]", " [ ] ", "\"\""] {
+  for t in [
+    "[]",
+    "{}",
+    "[[]]",
+    "[{}]",
+    "{\"\":{}}",
+    "{\"a\":[]}",
+    "[[],{},\"\",[[]]]",
+    " [ ] ",
+    "\"\""
+  ] {
     println(s(t))
   }
   // Deep: 1000 containers parse, 1001 do not.

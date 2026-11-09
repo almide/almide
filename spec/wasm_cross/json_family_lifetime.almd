@@ -64,7 +64,11 @@ effect fn main() -> Unit = {
   let built = {
     let d = parse("[{\"a\":[1,2]},\"b\"]")
     let first = list.get(value.as_array(d) ?? [], 0) ?? value.null()
-    value.object([("x", first), ("y", first), ("z", value.get(first, "a") ?? value.null())])
+    value.object([
+      ("x", first),
+      ("y", first),
+      ("z", value.get(first, "a") ?? value.null())
+    ])
   }
   println(json.stringify(built))
   // A document parsed, its top level rebuilt from the parts, many times
