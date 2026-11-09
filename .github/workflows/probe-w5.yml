@@ -207,3 +207,42 @@ jobs:
           name: ledgers
           path: /tmp/led
           retention-days: 7
+
+  fsizes:
+    if: contains(github.event.head_commit.message, '[fsizes]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Per-function sizes of the float-parsing fixtures on every ref
+        shell: bash {0}
+        run: |
+          cp -r .github/probe-w5 /tmp/pw
+          mkdir -p /tmp/fs
+          while read -r tag sha; do
+            [ -z "$tag" ] && continue
+            git worktree add -f /tmp/f-$tag "$sha" >/dev/null 2>&1
+            (cd /tmp/f-$tag && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide 2>&1 | tail -1)
+            cp target/release/almide /tmp/fs/almide-$tag
+            for f in float_parse json_parse_fast_paths json_parse_depth_bound float_parse_special; do
+              /tmp/fs/almide-$tag build /tmp/f-$tag/spec/wasm_cross/$f.almd --target wasm -o /tmp/fs/$f-$tag.wasm > /dev/null 2>&1 || echo "build failed $f $tag"
+              python3 /tmp/pw/fsizes.py /tmp/fs/$f-$tag.wasm > /tmp/fs/$f-$tag.txt
+              echo "$tag $f: $(head -1 /tmp/fs/$f-$tag.txt)"
+            done
+          done < /tmp/pw/refs.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: fsizes
+          path: /tmp/fs/*.txt
+          retention-days: 7
