@@ -2,6 +2,97 @@ use super::*;
 use std::path::Path;
 use std::process::Command;
 
+#[test]
+fn checked_native_test_harness_keeps_failures_isolated_and_names_selectable() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("tests.almd");
+    write(dir.path(), "tests.almd", r#"
+import testing
+var state = 0
+effect fn main() -> Unit = println("USER MAIN MUST NOT RUN")
+fn fail_helper(message: String) -> Never = panic(message)
+fn fail_message() -> String = panic("MESSAGE MUST NOT RUN")
+test "a pass" { state = state + 1; assert_eq(state, 1) }
+test "b fail" { assert_eq(1, 2) }
+test "c pass" { state = state + 1; assert_eq(state, 1) }
+test "d helper panic" { fail_helper("helper failure") }
+test "e closure panic" { let f = () => panic("closure failure"); f() }
+test "f value panic" { let x = if state == 0 then fail_helper("value failure") else 1; assert_eq(x, 1) }
+test "g abort child" { testing.assert_aborts("PANIC: child failure", () => fail_helper("child failure")) }
+test "h lazy message" { assert(true, fail_message()) }
+test "日本語の名前" { assert(true) }
+"#);
+    let (mut pending, _, _) = try_compile_pending(entry.to_str().unwrap(), false,
+        &codegen::CodegenOptions::default()).unwrap();
+    let (ir, checker) = pending.native_input.take().unwrap();
+    let source = pending.source.clone();
+    let oracle = pending.generate();
+    let (rust, certs) = std::thread::Builder::new().stack_size(512 << 20).spawn(move || {
+        almide_mir::pipeline::try_render_rust_checked_tests_certified(&source, ir, checker, None)
+    }).unwrap().join().unwrap().expect("native test bodies must render without v0");
+    let evidence = tempfile::Builder::new().prefix("almide-native-test-proof-").tempdir().unwrap().keep();
+    let artifact = evidence.join("tests.rs");
+    let binary = evidence.join("tests");
+    std::fs::write(&artifact, &rust).unwrap();
+    let bundle = evidence.join("tests.bundle");
+    std::fs::write(&bundle, certificate_bundle(&entry, &artifact, &rust, &certs)).unwrap();
+    std::fs::copy(&entry, evidence.join("tests.almd")).unwrap();
+    println!("NATIVE_TEST_EVIDENCE={}", evidence.display());
+    let verifier = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("almide-verify");
+    if verifier.is_file() {
+        assert!(Command::new(verifier).arg("bundle").arg(&bundle).status().unwrap().success());
+    } else {
+        assert_ne!(std::env::var("ALMIDE_EXPECT_TOOLS").as_deref(), Ok("1"));
+    }
+    let built = Command::new(crate::find_rustc()).args(["--edition=2021", "--test", "-Awarnings"])
+        .arg(&artifact).arg("-o").arg(&binary).output().unwrap();
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let oracle_source = evidence.join("oracle.rs");
+    let oracle_binary = evidence.join("oracle");
+    std::fs::write(&oracle_source, oracle).unwrap();
+    let built = Command::new(crate::find_rustc()).args(["--edition=2021", "--test", "-Awarnings"])
+        .arg(&oracle_source).arg("-o").arg(&oracle_binary).output().unwrap();
+    assert!(built.status.success(), "v0 oracle: {}", String::from_utf8_lossy(&built.stderr));
+    let oracle_ledger = evidence.join("oracle-completed.txt");
+    let oracle_ran = Command::new(&oracle_binary).arg("--test-threads=1").env("ALMIDE_TEST_LEDGER", &oracle_ledger).output().unwrap();
+    std::fs::write(evidence.join("oracle-stdout"), &oracle_ran.stdout).unwrap();
+    std::fs::write(evidence.join("oracle-stderr"), &oracle_ran.stderr).unwrap();
+    let ledger = evidence.join("completed.txt");
+    let ran = Command::new(&binary).arg("--test-threads=1").env("ALMIDE_TEST_LEDGER", &ledger).output().unwrap();
+    std::fs::write(evidence.join("stdout"), &ran.stdout).unwrap();
+    std::fs::write(evidence.join("stderr"), &ran.stderr).unwrap();
+    assert_eq!(ran.status.code(), Some(101), "{}", String::from_utf8_lossy(&ran.stderr));
+    let output = String::from_utf8(ran.stdout).unwrap();
+    let oracle_output = String::from_utf8(oracle_ran.stdout).unwrap();
+    let verdicts = |text: &str| text.lines().filter(|l| l.starts_with("test tests::")).map(str::to_owned).collect::<Vec<_>>();
+    assert_eq!(ran.status.code(), oracle_ran.status.code());
+    assert_eq!(verdicts(&output), verdicts(&oracle_output), "v1:\n{output}\nv0:\n{oracle_output}");
+    assert!(output.contains("5 passed; 4 failed; 1 ignored"), "{output}");
+    for message in ["helper failure", "closure failure", "value failure"] {
+        assert!(output.contains(message), "{output}");
+    }
+    assert!(!output.contains("USER MAIN MUST NOT RUN"), "{output}");
+    assert!(!output.contains("MESSAGE MUST NOT RUN"), "{output}");
+    for diagnostic in ["at line 8", "expected: 2", "found: 1"] {
+        assert!(output.contains(diagnostic), "{output}");
+        assert!(oracle_output.contains(diagnostic), "{oracle_output}");
+    }
+    assert_eq!(std::fs::read_to_string(&ledger).unwrap().lines().count(), 5);
+    assert_eq!(std::fs::read_to_string(&ledger).unwrap(), std::fs::read_to_string(&oracle_ledger).unwrap());
+    let selected = Command::new(&binary).arg("c_pass").output().unwrap();
+    assert!(selected.status.success());
+    assert!(String::from_utf8_lossy(&selected.stdout).contains("1 passed; 0 failed"));
+    let probe = Command::new(&binary).args(["--ignored", "--exact", "tests::__almd_abort_site_entry", "--nocapture"])
+        .env("ALMIDE_ABORT_SITE", "0").env("ALMIDE_TEST_ABORT_PROBE", "1").output().unwrap();
+    assert_eq!(probe.status.code(), Some(1));
+    assert_eq!(probe.stderr, b"PANIC: child failure");
+    let oracle_probe = Command::new(&oracle_binary).args(["--ignored", "--exact", "tests::__almd_abort_site_entry", "--nocapture"])
+        .env("ALMIDE_ABORT_SITE", "0").env("ALMIDE_TEST_ABORT_PROBE", "1").output().unwrap();
+    assert_eq!(probe.status.code(), oracle_probe.status.code());
+    assert_eq!(probe.stdout, oracle_probe.stdout);
+    assert_eq!(probe.stderr, oracle_probe.stderr);
+}
+
 fn write(root: &Path, path: &str, source: &str) {
     let path = root.join(path);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();

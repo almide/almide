@@ -127,16 +127,10 @@ impl LowerCtx {
         // regrouped `err($q)` INNER match over a borrowed variant payload — the
         // `compute` class) via the tag@slot0 dispatcher, which accepts a heap result
         // over a BORROWED subject (the recursive-to_string precedent).
-        let obj = match self.try_lower_variant_value_match(subject, arms, result_ty) {
-            Some(v) => v,
-            // An `Option[<heap>]` inner subject (the fold-step nested match over
-            // `list.last(stack)`) — the merge-based Option twin, then the custom
-            // tag@slot0 dispatcher.
-            _ => match self.try_lower_option_match_value(subject, arms, result_ty) {
-                Some(v) => v,
-                _ => self.try_lower_custom_variant_match(subject, arms, result_ty)?,
-            },
-        };
+        let obj = self.try_lower_variant_value_match(subject, arms, result_ty)
+            .or_else(|| self.try_lower_result_match_value(subject, arms, result_ty))
+            .or_else(|| self.try_lower_option_match_value(subject, arms, result_ty))
+            .or_else(|| self.try_lower_custom_variant_match(subject, arms, result_ty))?;
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);
         Some(obj)

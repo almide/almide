@@ -57,7 +57,7 @@ pub fn build_variant_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> VariantLay
 /// Extracted from `build_variant_layouts` (codopsy8 complexity sweep, per-decl phase):
 /// a plain RECORD's field defaults ride the same map, keyed by the record TYPE name
 /// (`AllDefault()` — the paren-empty ctor fills them in `try_lower_record_construct`; a
-/// variant record-ctor keys by CTOR name in [`build_variant_layouts_variant_decl`]).
+/// variant record-ctor keys by owner and CTOR name in [`build_variant_layouts_variant_decl`]).
 /// Verbatim.
 fn build_variant_layouts_for_decl(decl: &almide_ir::IrTypeDecl, out: &mut VariantLayouts) {
     use almide_ir::IrTypeDeclKind;
@@ -93,7 +93,7 @@ fn build_variant_layouts_variant_decl(
     let mut case_layouts = Vec::with_capacity(cases.len());
     let mut max_arity = 0usize;
     for (tag, case) in cases.iter().enumerate() {
-        let fields = build_variant_layouts_case_fields(case, out);
+        let fields = build_variant_layouts_case_fields(&type_name, case, out);
         max_arity = max_arity.max(fields.len());
         out.ctor_to_type.insert(case.name.as_str().to_string(), type_name.clone());
         case_layouts.push(VariantCaseLayout { ctor: case.name, tag: tag as u32, fields });
@@ -112,9 +112,10 @@ fn build_variant_layouts_variant_decl(
 
 /// Extracted from `build_variant_layouts_variant_decl` (codopsy8 complexity sweep): one
 /// constructor CASE's field list, by ctor kind. A `Record` case ALSO registers its field
-/// defaults (keyed by CTOR name, unlike the plain-record arm above which keys by TYPE
+/// defaults (keyed by owner + CTOR name, unlike the plain-record arm above which keys by TYPE
 /// name). Verbatim.
 fn build_variant_layouts_case_fields(
+    owner: &str,
     case: &almide_ir::IrVariantDecl,
     out: &mut VariantLayouts,
 ) -> Vec<(almide_lang::intern::Sym, Ty)> {
@@ -132,7 +133,7 @@ fn build_variant_layouts_case_fields(
             for f in fields {
                 if let Some(d) = &f.default {
                     out.ctor_field_defaults
-                        .entry(case.name.as_str().to_string())
+                        .entry(format!("{owner}::{}", case.name))
                         .or_default()
                         .insert(f.name.as_str().to_string(), d.clone());
                 }

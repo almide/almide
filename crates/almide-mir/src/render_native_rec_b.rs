@@ -31,6 +31,7 @@ struct Derive<'a> {
     maps: std::collections::BTreeSet<String>,
     sets: std::collections::BTreeSet<String>,
     closures: std::collections::BTreeMap<String, almide_lang::types::Ty>,
+    runtime_types: std::collections::BTreeMap<String, crate::native_runtime_types::RuntimeType>,
     order_names: std::collections::BTreeSet<String>,
     uses_bytes: bool,
     uses_matrix: bool,
@@ -57,6 +58,7 @@ pub(crate) fn derive_records(
         maps: BTreeSet::new(),
         sets: BTreeSet::new(),
         closures: Default::default(),
+        runtime_types: Default::default(),
         order_names: ORDER_NAMES.with(|n| n.borrow().clone()),
         uses_bytes: false,
         uses_matrix: false,
@@ -66,7 +68,7 @@ pub(crate) fn derive_records(
     // A tuple type the program declares in a signature is an anonymous record:
     // the same uniform slots, keyed by its spelled type.
     d.uses_bytes = tuples.iter().any(|t| matches!(t, Ty::Bytes));
-    d.uses_matrix = tuples.iter().any(|t| matches!(t, Ty::Matrix));
+    d.uses_matrix = tuples.iter().any(is_matrix_ty);
     // Anonymous records: always a generated struct, even all-scalar (a
     // by-value Rust struct, not the `Vec<i64>` slot block a heap list needs).
     d.uses_value = tuples.iter().any(crate::lower::is_value_ty);
@@ -89,11 +91,11 @@ pub(crate) fn derive_records(
         *si.borrow_mut() = d.decls.keys().filter(|n| n.starts_with("Named(") && d.scalar(n)).cloned().collect();
     });
     set = d.prune(set);
-    // By-value edges: a struct holds its record fields inline; an enum boxes all.
-    let edges = d.by_value_edges(&set);
+    // Recursive record and enum edges are boxed by the same field predicate.
+    // Keep only types with a finite construction; Option/list/map defaults
+    // terminate a recursive value, while an uninhabited cycle still declines.
     let rank = d.finite_ranks(&set);
-    let cyclic: BTreeSet<String> = set.iter().filter(|n| reaches_self(&edges, n) || !rank.contains_key(*n)).cloned().collect();
-    set.retain(|n| !cyclic.contains(n));
+    set.retain(|n| rank.contains_key(n));
     set = d.prune(set);
     let mut names: Vec<String> = set.iter().cloned().collect();
     if d.uses_bytes {
@@ -106,21 +108,6 @@ pub(crate) fn derive_records(
         names.push(MATRIX_KEY.to_string());
     }
     names.iter().map(|n| d.decl_of(n, &names, &set, &rank)).collect()
-}
-
-/// Whether `start` reaches itself along the by-value `edges`.
-fn reaches_self(edges: &std::collections::BTreeMap<String, Vec<String>>, start: &str) -> bool {
-    let mut stack = edges[start].clone();
-    let mut seen = std::collections::BTreeSet::new();
-    while let Some(n) = stack.pop() {
-        if n.as_str() == start {
-            return true;
-        }
-        if seen.insert(n.clone()) {
-            stack.extend(edges.get(&n).cloned().unwrap_or_default());
-        }
-    }
-    false
 }
 
 impl Derive<'_> {
@@ -153,6 +140,14 @@ impl Derive<'_> {
     fn note_structural(&mut self, t: &almide_lang::types::Ty) {
         use almide_lang::types::constructor::TypeConstructorId;
         use almide_lang::types::Ty;
+        if let Ty::Named(n, args) = t {
+            if args.is_empty() && !self.layouts.contains_key(n.as_str()) && !self.variants.by_type.contains_key(n.as_str()) {
+                if let Some(rt) = crate::native_runtime_types::RuntimeType::of(n.as_str()) {
+                    self.decls.entry(n.to_string()).or_insert((false, vec![(0, vec![])]));
+                    self.runtime_types.insert(n.to_string(), rt);
+                }
+            }
+        }
         if let Ty::Fn { params, ret, .. } = t {
             let fields = params.iter().chain([ret.as_ref()])
                 .filter(|t| !matches!(t, Ty::Unit)).cloned().collect();
@@ -245,7 +240,8 @@ impl Derive<'_> {
     /// An all-scalar aggregate keeps the `Vec<i64>` slot convention.
     /// (A generated carrier or map is never a slot block, whatever its payloads.)
     fn scalar(&self, n: &str) -> bool {
-        !self.closures.contains_key(n)
+        !self.runtime_types.contains_key(n)
+            && !self.closures.contains_key(n)
             && !self.anons.contains(n)
             && !self.options.contains(n)
             && !self.results.contains(n)
@@ -298,7 +294,7 @@ impl Derive<'_> {
                 Some(Err(tuple_key(t)))
             }
             Ty::Bytes if self.uses_bytes => Some(Err(BYTES_KEY.to_string())),
-            Ty::Matrix if self.uses_matrix => Some(Err(MATRIX_KEY.to_string())),
+            t if self.uses_matrix && is_matrix_ty(t) => Some(Err(MATRIX_KEY.to_string())),
             t if self.uses_value && crate::lower::is_value_ty(t) => Some(Err(VALUE_KEY.to_string())),
             Ty::Named(_, args) if !args.is_empty() && set.contains(&tuple_key(t)) => Some(Err(tuple_key(t))),
             Ty::Named(_, args) if !args.is_empty() && self.scalar(&tuple_key(t)) => Some(Ok(NTy::Vec)),
@@ -340,19 +336,6 @@ impl Derive<'_> {
             }
         }
         set
-    }
-
-    fn by_value_edges(&self, set: &std::collections::BTreeSet<String>) -> std::collections::BTreeMap<String, Vec<String>> {
-        set.iter()
-            .map(|n| {
-                let e = if self.closures.contains_key(n) || self.decls[n].0 || self.lists.contains(n) || self.maps.contains(n) || self.sets.contains(n) {
-                    Vec::new()
-                } else {
-                    self.fields_of(n).iter().filter_map(|t| self.kind(t, set)?.err()).collect()
-                };
-                (n.clone(), e)
-            })
-            .collect()
     }
 
     /// Every aggregate field of case `fs` ranked strictly below `below`.
@@ -439,6 +422,9 @@ impl Derive<'_> {
         rank: &std::collections::BTreeMap<String, usize>,
     ) -> RecDecl {
         let spell = |t: &almide_lang::types::Ty| self.spell(t, set, names);
+        if let Some(t) = self.runtime_types.get(n) {
+            return RecDecl { name: n.to_string(), alias: Some(t.rust()), ..RecDecl::default() };
+        }
         if let Some(almide_lang::types::Ty::Fn { params, ret, .. }) = self.closures.get(n) {
             let scalar_or_heap = |t: &almide_lang::types::Ty| {
                 if is_f64_scalar(t) { NTy::F64 } else if matches!(t, almide_lang::types::Ty::Unit) { NTy::I64 } else { spell(t) }

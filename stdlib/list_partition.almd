@@ -45,6 +45,7 @@ fn __lpart_fill_rc(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, 
     }
   }
 
+@specializes("list.partition")
 fn list_partition_rc(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) = {
   let n = list.len(xs)
   let yes = prim.alloc_list(n)

@@ -239,3 +239,18 @@ fn a_binder_used_inside_a_nested_loop_is_not_judged_fresh() {
     let (ok, err) = certify("nested-fresh", OUTER_BOUND_USED_IN_INNER_LOOP);
     assert!(ok, "an outer-loop binder used in an inner loop must NOT be reported: its clone is load-bearing\n{err}");
 }
+
+#[test]
+fn selected_native_extern_checks_its_wrapper_not_the_unemitted_fallback() {
+    let source = r#"
+@extern(rust, "std::string::String", "from")
+fn copy(s: String) -> String = s
+effect fn main() -> Unit = {
+  let s = "retained"
+  println(copy(s))
+  println(s)
+}
+"#;
+    let (ok, err) = certify("extern-fallback", source);
+    assert!(ok, "the native wrapper borrows and returns a fresh String: {err}");
+}

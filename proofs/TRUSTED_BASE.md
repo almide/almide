@@ -450,6 +450,51 @@ ownership certificate and trusted Rust realization; it adds no proof rule.
 Unit tests refuse borrowed shapes, and source tests compare stdlib-owned
 and shadowing user types through independent certificates and four routes.
 
+Native HTTP request, response and call values retain their declared runtime
+types, including the response's raw byte buffer and the call's shared
+cancellation owner. Intrinsic argument/return signatures are checked against
+those nominal types; a wasm string-list representation is not used on native.
+Runtime type impls, including retained native-only TLS impls, travel through
+the generated dependency index. Runtime behavior, Rust Clone/Drop and scoped
+thread Send/Sync checking remain trusted. Guarded payload reads may move into
+the common branch containing all their uses before ownership verification;
+the renderer still checks the carrier tag at the read. This supplies no
+fabricated default handle and introduces no new certificate rule. HTTP raw
+byte/alias tests and the call lifecycle tests require the native v1 route.
+
+Native foreign calls retain their selected Rust/C target and declared effect
+class in MIR. Arguments use the existing borrowed-import ownership rule;
+returned heap values are copied into a fresh native owned representation.
+The adapters use checked types and the shared C ABI table, rather than
+assuming wasm pointer layouts. FOREIGN (8) records the trusted boundary;
+effect-declared calls also reach FOREIGN_EFFECT (11), propagated to callers.
+These are the structural wasm leg's registry ids and the existing capability
+subset rule. Host code, declared purity, ABI conversions and Rust realization
+remain trusted; this does not prove a foreign library's memory safety.
+Unsupported mutable/nominal/closure/address adapters still refuse the v1
+route. Target-priority tests use deliberately different fallback bodies so
+an inliner cannot silently substitute them for the selected foreign call.
+
+**Native test harness.** Checked test bodies and their reachable helpers enter
+the ordinary native MIR pipeline, with separate internal function identities
+and libtest display names. The certificate bundle binds the whole generated
+Rust artifact, including its libtest wrappers, but the witnesses prove only
+their modeled MIR properties. The wrappers, test selection, completion ledger,
+per-file process isolation, global initialization and libtest's unwinding are
+trusted, not proved by the ownership checker. Test assertion helpers retain
+the frontend's diagnostic and source line. Raw `panic` messages pass through
+a compiler-created typed identity helper; the original caller still contains
+the checked Die operation. The renderer uses that provenance to unwind an
+ordinary test and to preserve controlled termination in an abort-probe child.
+It never chooses this behavior from a user's message prefix. Ordinary
+controlled aborts and explicit process exits retain their termination behavior.
+`compile_driver_native_tests` checks independent artifact-bound certificates
+and compares native v1/v0 test verdicts, diagnostics, completion records and
+abort-child stderr. The CLI harness suites cover filtering, merged compilation,
+file isolation and refusal to count a premature exit as completed tests.
+These tests do not establish full language coverage or a proof of Rust's
+panic/unwind implementation; those remain separate acceptance obligations.
+
 **Fan arms on threads (#4006 family H).** A `fan { … }` block of two or more
 arms renders on the certified native path as the standard codegen renders it:
 each arm on a scoped thread of the shipped fan runtime

@@ -13,6 +13,19 @@
 // printed blanks on wasm). Identical on both targets.
 type P = { name: String, n: Int }
 
+fn count_items(xs: List[Int]) -> Int = list.len(xs)
+
+fn scalar_temp(take: Bool) -> Int? =
+  if take then some(count_items(bytes.to_list(bytes.from_list([1, 2, 3])))) else none
+
+fn join_items(xs: List[String]) -> String = list.join(xs, ",")
+
+fn heap_temp(take: Bool) -> String? =
+  if take then some(join_items(["a", "b"])) else none
+
+fn nested_tuple(take: Bool, p: (Int, String)) -> (Int, (Int, String), (Int, String))? =
+  if take then some((7, p, (9, "tail"))) else none
+
 effect fn main() -> Unit = {
   let s = some(5)
   let n: Int? = none
@@ -38,4 +51,28 @@ effect fn main() -> Unit = {
   let miss = list.get(ys, 0) ?? { name: "d", n: -1 }
   println(miss.name)
   println(int.to_string(miss.n))
+  // A constructor arm releases its payload call's temporary heap arguments.
+  // Both scalar and heap payloads must keep the returned value alive.
+  println(int.to_string(scalar_temp(true) ?? -1))
+  println(int.to_string(scalar_temp(false) ?? -1))
+  println(heap_temp(true) ?? "missing")
+  println(heap_temp(false) ?? "missing")
+  let source = (3, "keep")
+  let nested = nested_tuple(true, source) ?? (0, (0, ""), (0, ""))
+  println("${nested.0}:${(nested.1).1}:${(nested.2).1}/${source.1}")
+  println(if option.is_none(nested_tuple(false, source)) then "none" else "wrong")
+  // Heap.pop constructs nested tuple Options and calls a specialized
+  // module-local forwarding helper. Retain an alias across the mutations.
+  var queue: Heap[(Int, String)] = heap.new_by((entry) => entry.0)
+  heap.push(queue, (2, "two"))
+  heap.push(queue, (1, "first"))
+  heap.push(queue, (1, "second"))
+  let saved = queue
+  for _ in 0..<3 {
+    let entry = heap.pop(queue) ?? (0, "missing")
+    println(entry.1)
+  }
+  let first = heap.peek(saved) ?? (0, "missing")
+  println(first.1)
+  println(if option.is_none(heap.pop(queue)) then "empty" else "wrong")
 }

@@ -47,6 +47,18 @@ fn desugar_effect_unwrap_inner(
 ) -> Option<IrExpr> {
     
     use almide_lang::types::Ty;
+    // Late rewrites (notably a nested fan join) can create a constructor
+    // around a statement block after program-level normalization. Expose
+    // those statements before propagating !, preserving the constructor
+    // only on the successful continuation.
+    if matches!(&body.kind, IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } if matches!(expr.kind, IrExprKind::Block { .. })) {
+        let mut normalized = body.clone();
+        if absorb_constructor_block(&mut normalized) {
+            return desugar_effect_unwrap_inner(&normalized, next_var, unit_main, ret_is_result)
+                .or(Some(normalized));
+        }
+    }
     // A `!` in a FOR-IN ITERABLE HEAD (`for row in list.get(XS, 0)! { … }` — #1168):
     // hoist it FIRST into `let $t = <head>!; for row in $t { … }` (exactly the manual
     // workaround, automated), so the stmt scan below sees an ordinary bind-`!` and the
@@ -68,7 +80,7 @@ fn desugar_effect_unwrap_inner(
         // `!`-bearing loop, or the `match` an earlier let-`!` rewrite left as the whole body
         // (its Ok arm holding a `!`-bearing loop) — `desugar_tail_effect_unwrap` reaches
         // each arm's block / loop.
-        if unit_main || matches!(&body.kind, IrExprKind::Unwrap { .. }) {
+        if unit_main || matches!(&body.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. } | IrExprKind::If { .. } | IrExprKind::Match { .. }) {
             return desugar_tail_effect_unwrap(body, next_var, unit_main, ret_is_result);
         }
         return None;

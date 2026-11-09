@@ -390,6 +390,9 @@ impl LowerCtx {
         if let Some(selected) = self.arm_some_aggregate(expr, result_ty) {
             return selected;
         }
+        // Payload evaluation can borrow fresh heap arguments. Their lifetimes
+        // end in this arm, after the payload has moved into its Option.
+        let arm_mark = self.live_heap_handles.len();
         if is_heap_ty(&expr.ty) {
             let repr = repr_of(result_ty).ok()?;
             // The owned String payload: a let-bound Var (its handle), or a direct user-call
@@ -398,6 +401,7 @@ impl LowerCtx {
             let piece = self.arm_some_heap_piece(expr)?;
             let obj = self.materialize_opt_str_some(piece, repr);
             self.ops.push(Op::Consume { v: obj });
+            self.drop_arm_locals(arm_mark);
             return Some(obj);
         }
         let payload = self.lower_scalar_value(expr)?;
@@ -405,6 +409,7 @@ impl LowerCtx {
         let obj = self.fresh_value();
         self.ops.push(Op::Alloc { dst: obj, repr, init: Init::OptSome { payload } });
         self.ops.push(Op::Consume { v: obj });
+        self.drop_arm_locals(arm_mark);
         Some(obj)
     }
 
@@ -414,6 +419,18 @@ impl LowerCtx {
     /// selected"; `Some(None)` means an arm selected and declined (see
     /// [`Self::lower_heap_result_arm_some`]). Arms are in their original order.
     fn arm_some_aggregate(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<Option<ValueId>> {
+        // Native represents a recursively owned tuple as its checked Rust
+        // struct. Reuse the bind-position constructor and wrapper ownership
+        // events for an arm; the payload's temporary owners end here.
+        if crate::lower::owned_tco_slots() && crate::lower::is_anon_tuple_list_elem(&expr.ty) {
+            let mark = self.live_heap_handles.len();
+            let obj = self.try_opt_nested_tuple_payload(expr, result_ty);
+            return Some(obj.map(|obj| {
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(mark);
+                obj
+            }));
+        }
         Some(match &expr.kind {
             // ANY record literal with a known layout — mirroring the bind
             // position's guard (binds_p4_b.rs `try_opt_record_aggregate_payload`).
@@ -687,9 +704,12 @@ impl LowerCtx {
             // `some("hi " + s)` — a String concat payload: the `__str_concat` chain's fresh
             // owned String moves into the Option (sole owner, no Dup); its operand temps free
             // WITHIN the arm (the untaken-arm garbage rc_dec trap, as for the list concat below).
-            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } | IrExprKind::StringInterp { .. } => {
                 let arm_mark = self.live_heap_handles.len();
-                let p = self.try_lower_concat_str(expr)?;
+                let p = match &expr.kind {
+                    IrExprKind::StringInterp { parts } => self.try_lower_string_interp(parts)?,
+                    _ => self.try_lower_concat_str(expr)?,
+                };
                 self.live_heap_handles.retain(|h| *h != p);
                 self.drop_arm_locals(arm_mark);
                 p

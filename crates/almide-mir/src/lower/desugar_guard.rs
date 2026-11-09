@@ -529,6 +529,21 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
     }
 }
 
+/// Evaluate a constructor payload block before wrapping its successful value.
+fn absorb_constructor_block(e: &mut IrExpr) -> bool {
+    let payload = match &mut e.kind {
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } => expr,
+        _ => return false,
+    };
+    let IrExprKind::Block { stmts, expr: Some(tail) } = &mut payload.kind else { return false };
+    let stmts = std::mem::take(stmts);
+    **payload = (**tail).clone();
+    let constructor = e.clone();
+    e.kind = IrExprKind::Block { stmts, expr: Some(Box::new(constructor)) };
+    true
+}
+
 /// ARG-POSITION BLOCK HOIST (a pre-lowering program pass, shared chain like the
 /// guard passes above): a BLOCK expression as a call argument
 /// (`int.abs({ let a = -5; let b = -3; a + b })` — scope_test's "block expression
@@ -564,7 +579,8 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
     impl IrMutVisitor for H<'_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
-            if absorb_unwrap_or_block_operand(e)
+            if absorb_constructor_block(e)
+                || absorb_unwrap_or_block_operand(e)
                 || absorb_interp_block_parts(e, self.vt)
                 || absorb_block_scrutinee(e)
             {

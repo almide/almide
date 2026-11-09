@@ -1,3 +1,5 @@
+// Signal shutdown probes the same stdout handle without blocking on a borrow.
+thread_local! { static ALMIDE_STDOUT_BUF: std::cell::RefCell<std::io::Stdout> = std::cell::RefCell::new(std::io::stdout()); }
 // The native floor shares std's line-buffered stdout with its println shims.
 // A threaded fan substitutes its timeline sink for these three functions.
 fn almide_stdout_flush() {

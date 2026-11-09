@@ -169,6 +169,13 @@ fn is_param_expr(e: &TypeExpr, type_params: &BTreeSet<String>) -> bool {
 
 /// The return kind of an Option of `arg`.
 fn floor_ret_option(arg: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorRet> {
+    if let TypeExpr::Generic { name, args } = arg {
+        if name.as_str() == "Result" && args.len() == 2 {
+            if let Some(FloorRet::RuntimeResult(t, false)) = floor_ret_result(&args[0], &args[1]) {
+                return Some(FloorRet::RuntimeResult(t, true));
+            }
+        }
+    }
     if is_param_expr(arg, type_params) {
         return Some(FloorRet::Elem(ElemRet::Opt));
     }
@@ -192,6 +199,7 @@ fn floor_ret_simple(name: &str) -> Option<FloorRet> {
         "Bytes" => Some(FloorRet::Bytes),
         "Matrix" => Some(FloorRet::Matrix),
         n if n == VALUE_TYPE => Some(FloorRet::Value),
+        n if RuntimeType::of(n).is_some() => Some(FloorRet::Runtime(RuntimeType::of(n)?)),
         _ => None,
     }
 }
@@ -204,9 +212,9 @@ pub(crate) fn generated_list_of(p: FloorParam) -> Option<u16> {
     use crate::render_native::NTy;
     use crate::render_native_rec as rec;
     let elem = match p {
-        FloorParam::List(ListElem::Value) => NTy::Rec(rec::value_index()),
-        FloorParam::List(ListElem::Matrix) => NTy::Rec(rec::matrix_index()),
-        FloorParam::List(ListElem::StrValuePairs) => NTy::Rec(rec::slots_type_of(&[NTy::Str, NTy::Rec(rec::value_index())])),
+        FloorParam::List(ListElem::Value) | FloorParam::ListOwned(ListElem::Value) => NTy::Rec(rec::value_index()),
+        FloorParam::List(ListElem::Matrix) | FloorParam::ListOwned(ListElem::Matrix) => NTy::Rec(rec::matrix_index()),
+        FloorParam::List(ListElem::StrValuePairs) | FloorParam::ListOwned(ListElem::StrValuePairs) => NTy::Rec(rec::slots_type_of(&[NTy::Str, NTy::Rec(rec::value_index())])),
         _ => return None,
     };
     Some(rec::list_type_of(elem))
@@ -217,9 +225,14 @@ pub(crate) fn generated_list_of(p: FloorParam) -> Option<u16> {
 /// its return type, and the items it reaches. `None` when the runtime has no
 /// takeable item of that name or it reaches one the header cannot carry.
 pub(crate) fn runtime_body(symbol: &str) -> Option<(Vec<String>, String, Vec<&'static str>)> {
+    runtime_body_explained(symbol).ok()
+}
+
+pub(crate) fn runtime_body_explained(symbol: &str) -> Result<(Vec<String>, String, Vec<&'static str>), String> {
     let rt = runtime_index();
-    let (params, ret) = rust_signature(signature_text(rt, symbol)?)?;
-    Some((params.iter().map(|p| squash(p)).collect(), squash(&ret), closure(symbol, rt).ok()?))
+    let text = signature_text(rt, symbol).ok_or_else(|| format!("`{symbol}` is not a takeable runtime item"))?;
+    let (params, ret) = rust_signature(text).ok_or_else(|| format!("`{symbol}` has no readable runtime signature"))?;
+    Ok((params.iter().map(|p| squash(p)).collect(), squash(&ret), closure(symbol, rt)?))
 }
 
 /// The runtime item `symbol` names and every item it reaches, taken whole

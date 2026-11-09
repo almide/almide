@@ -430,6 +430,7 @@ else {
 // compare. Two elements are equal iff their tags match and (both None, or the
 // payloads match). Scalar-payload only: a Float payload's i64 is f64 BITS, so a
 // bit compare would diverge from `==` on -0.0/NaN — Floats stay outside.
+@specializes("list.__eq_any")
 fn list_eq_value(a: List[Value], b: List[Value]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)

@@ -52,7 +52,7 @@ pub(crate) fn source_comparison_agrees(t: &almide_lang::types::Ty, cap: almide_l
         Ty::Unit | Ty::String | Ty::Bytes | Ty::Int | Ty::Bool => true,
         t if is_lane_scalar(t) => cap == Cap::Eq,
         Ty::Applied(C::List | C::Option | C::Result, args) => args.iter().all(|t| source_comparison_agrees(t, cap, false)),
-        Ty::Tuple(_) | Ty::Named(_, _) if cap == Cap::Ord => rec_index(&block_key(t)).is_some_and(native_order_safe),
+        Ty::Tuple(_) | Ty::Record { .. } | Ty::Named(_, _) if cap == Cap::Ord => rec_index(&block_key(t)).is_some_and(native_order_safe),
         Ty::Tuple(_) | Ty::Record { .. } | Ty::Named(_, _) => cap == Cap::Eq && RECS.with(|r| {
             r.borrow().iter().any(|d| d.name == block_key(t) && d.eq_safe)
         }),

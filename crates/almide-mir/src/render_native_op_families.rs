@@ -216,7 +216,7 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> 
             };
             tys.insert(*d, NTy::Res);
             line!(
-                "let {}: Result<i64, AlmideString> = Ok({});",
+                "let mut {}: Result<i64, AlmideString> = Ok({});",
                 var(*d),
                 payload
             );
@@ -236,7 +236,7 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> 
                 }
             };
             tys.insert(*d, NTy::Res);
-            line!("let {}: Result<i64, AlmideString> = Err({});", var(*d), src);
+            line!("let mut {}: Result<i64, AlmideString> = Err({});", var(*d), src);
         }
         Op::Prim {
             kind: crate::PrimKind::ResCopy,
@@ -250,7 +250,7 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> 
             };
             let spelled = if t == NTy::ResStr { "Result<AlmideString, AlmideString>" } else { "Result<i64, AlmideString>" };
             tys.insert(*d, t);
-            line!("let {}: {} = {}.clone();", var(*d), spelled, var(args[0]));
+            line!("let mut {}: {} = {}.clone();", var(*d), spelled, var(args[0]));
         }
         Op::Prim {
             kind: crate::PrimKind::ResTag,
@@ -568,6 +568,10 @@ pub(crate) fn render_native_termination_op(op: &Op, s: OpSink<'_>) -> Result<boo
             dst: None,
             args,
         } if matches!(tys.get(&args[0]), Some(NTy::Str | NTy::StrRef)) => {
+            // The Die ABI carries panic's raw "PANIC: " message. Like the
+            // embedded host's die trap, contain that abort during a request.
+            // ProcExit remains the program's explicit, unconditional exit.
+            line!("if {}.starts_with(\"PANIC: \") {{ almide_contained_unwind(|| {}.to_string()); }}", var(args[0]), var(args[0]));
             line!("eprint!(\"{{}}\", {});", var(args[0]));
             line!("std::process::exit(1);");
         }
@@ -772,7 +776,7 @@ fn render_narrow_pow_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
     s.tys.insert(*dst, NTy::I64);
     for _ in 0..s.indent { s.out.push_str("    "); }
     writeln!(s.out, "let mut {}: i64 = {{ let mut __base = {a} as {ty}; let __exp = {b}; \
-        if __exp < 0 {{ eprintln!(\"Error: negative exponent\"); std::process::exit(1); }} \
+        if __exp < 0 {{ almide_abort(\"negative exponent\"); }} \
         let mut __n = __exp as u64; let mut __r: {ty} = 1; \
         while __n > 0 {{ if __n & 1 == 1 {{ __r = __r.wrapping_mul(__base); }} \
         __n >>= 1; if __n > 0 {{ __base = __base.wrapping_mul(__base); }} }} __r as i64 }};", var(*dst)).unwrap();

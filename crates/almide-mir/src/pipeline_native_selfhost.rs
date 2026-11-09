@@ -159,7 +159,7 @@ impl SelfHostLinker<'_> {
         if let Some(&i) = self.linked_srcs.get(src) {
             return Ok(i);
         }
-        let mut ir = self_host_source_to_ir(src, self.entries_of[src])?;
+        let mut ir = native_bundled::lower_list_patterns(self_host_source_to_ir(src, self.entries_of[src])?);
         crate::native_defaults::expand(&mut ir);
         prepare_self_host_mutable_values(&mut ir, self.entries_of[src])?;
         let occupied = self.user_names.iter().cloned()

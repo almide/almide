@@ -43,7 +43,7 @@ effect fn main() -> Unit = {
   // A handle from main answers the same in an arm.
   let (seen, again) = fan {
     port_in_arm(l)
-    port_in_arm(l)
+    net.tcp_local_port(l)
   }
   println("arm sees main's listener: ${seen == port and again == port}")
   // Listeners an arm opens stay live in main, each its own socket.

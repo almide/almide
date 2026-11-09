@@ -11,6 +11,9 @@
 //! `RefCell` holding the value: the borrow reads a copy of it, the take moves
 //! it out (its type's default left behind, which nothing reads: the store
 //! follows), and the store moves the new value in.
+//! Types without Default instead use Option storage: None marks the interval
+//! before initialization or between a take and the following store. A read
+//! must find the initialized value; no Result or closure value is fabricated.
 //!
 //! A slot that some read only borrows (#4562, `native_slot_takes::
 //! snapshot_slot`) holds its value in an `Rc` instead: such a read is a
@@ -52,6 +55,15 @@ fn store_text(snap: bool, rhs: &str) -> String {
     }
 }
 
+/// Non-default carriers use an explicit vacant slot, never a fabricated value.
+fn vacant_take_text(snap: bool) -> &'static str {
+    if snap {
+        "std::rc::Rc::unwrap_or_clone(s.borrow_mut().take().expect(\"initialized global slot\"))"
+    } else {
+        "s.borrow_mut().take().expect(\"initialized global slot\")"
+    }
+}
+
 /// Render `op` when it reads, takes or stores a heap slot. `None` = not one.
 pub(super) fn render_heap_slot_op(
     op: &Op,
@@ -66,6 +78,7 @@ pub(super) fn render_heap_slot_op(
         Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } if args.len() == 1 => {
             let (slot, t) = slot_of(st, &args[0])?;
             let snap = crate::native_slot_takes::snapshot_slot(slot);
+            let vacant = !crate::render_native_rec::has_default(t);
             let take = st.slot_reads.takes.contains(d) && crate::render_native_rec::has_default(t);
             if snap && !take && st.slot_reads.borrows.contains(d) {
                 // A slot held for snapshots: every read of it that its own
@@ -74,9 +87,10 @@ pub(super) fn render_heap_slot_op(
                     return Some(Err(wall("native: a snapshot slot without a borrowed representation")));
                 };
                 tys.insert(*d, rt);
+                let source = if vacant { "s.borrow().as_ref().expect(\"initialized global slot\")" } else { "&*s.borrow()" };
                 let _ = writeln!(
                     out,
-                    "{pad}let {v}_rc: std::rc::Rc<{ty}> = ALMD_HSLOT_{slot}.with(|s| std::rc::Rc::clone(&*s.borrow())); let mut {v}: {spelled} = &(*{v}_rc){whole};",
+                    "{pad}let {v}_rc: std::rc::Rc<{ty}> = ALMD_HSLOT_{slot}.with(|s| std::rc::Rc::clone({source})); let mut {v}: {spelled} = &(*{v}_rc){whole};",
                     v = var(*d),
                     ty = crate::render_native_rec::owned_ty(t)
                 );
@@ -86,7 +100,10 @@ pub(super) fn render_heap_slot_op(
             // The slot's own take follows, and nothing in between sees it.
             // An owned read of an Rc-backed slot copies the contained value,
             // not the Rc. Its later mutations cannot change an older snapshot.
-            let read = if take { take_text(snap) } else if snap { "(**s.borrow()).clone()" } else { "s.borrow().clone()" };
+            let read = if vacant {
+                if snap { "(**s.borrow().as_ref().expect(\"initialized global slot\")).clone()" }
+                else { "s.borrow().as_ref().expect(\"initialized global slot\").clone()" }
+            } else if take { take_text(snap) } else if snap { "(**s.borrow()).clone()" } else { "s.borrow().clone()" };
             let _ = writeln!(
                 out,
                 "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| {read});",
@@ -100,16 +117,15 @@ pub(super) fn render_heap_slot_op(
                 return Some(Err(wall("native: a slot take whose address is not one scalar")));
             };
             let (slot, t) = slot_of(st, a)?;
-            if !crate::render_native_rec::has_default(t) {
-                return Some(Err(wall("native: a heap slot whose type has no default to leave behind")));
-            }
+            let snap = crate::native_slot_takes::snapshot_slot(slot);
+            let take = if crate::render_native_rec::has_default(t) { take_text(snap) } else { vacant_take_text(snap) };
             tys.insert(*d, t);
             let _ = writeln!(
                 out,
                 "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| {});",
                 var(*d),
                 crate::render_native_rec::owned_ty(t),
-                take_text(crate::native_slot_takes::snapshot_slot(slot))
+                take
             );
             Some(Ok(true))
         }
@@ -127,7 +143,11 @@ pub(super) fn render_heap_slot_op(
             } else {
                 return Some(Err(wall(format!("native: a {got:?} value stored into a {t:?} heap slot"))));
             };
-            let _ = writeln!(out, "{pad}ALMD_HSLOT_{slot}.with(|s| {});", store_text(crate::native_slot_takes::snapshot_slot(slot), &rhs));
+            let snap = crate::native_slot_takes::snapshot_slot(slot);
+            let store = if crate::render_native_rec::has_default(t) { store_text(snap, &rhs) }
+                else if snap { format!("*s.borrow_mut() = Some(std::rc::Rc::new({rhs}))") }
+                else { format!("*s.borrow_mut() = Some({rhs})") };
+            let _ = writeln!(out, "{pad}ALMD_HSLOT_{slot}.with(|s| {store});");
             Some(Ok(true))
         }
         _ => None,

@@ -30,6 +30,9 @@ pub(crate) fn same_owned(a: NTy, b: NTy) -> bool {
         let (NTy::Rec(i), NTy::Rec(j)) = (a, b) else {
             return false;
         };
+        if let Some(t) = rec::runtime_type_of(i) {
+            return rec::runtime_type_of(j) == Some(t);
+        }
         if seen.contains(&(i, j)) {
             return false;
         }
@@ -89,14 +92,14 @@ pub(crate) fn tuple_copy(code: &str, from: NTy, to: NTy) -> Option<String> {
         let result = if let (Some(a), Some(b)) = (rec::tuple_fields(i), rec::tuple_fields(j)) {
             if a.len() != b.len() { return None; }
             let fields = a.iter().zip(&b).enumerate().map(|(k, (a, b))| {
-                copy(&format!("__tuple.f{k}"), *a, *b, seen).map(|v| format!("f{k}: {v}"))
+                copy_field(i, k, *a, j, k, *b, seen)
             }).collect::<Option<Vec<_>>>()?.join(", ");
             Some(format!("{{ let __tuple = &({code}); {} {{ {fields} }} }}", rec::struct_name(j)))
         } else if let (Some((sa, a)), Some((sb, b))) = (rec::record_fields(i), rec::record_fields(j)) {
             if (!sa && !sb) || a.len() != b.len() { return None; }
             let fields = b.iter().enumerate().map(|(dst, (label, to))| {
                 let (src, (_, from)) = a.iter().enumerate().find(|(_, (n, _))| n == label)?;
-                copy(&format!("__tuple.f{src}"), *from, *to, seen).map(|v| format!("f{dst}: {v}"))
+                copy_field(i, src, *from, j, dst, *to, seen)
             }).collect::<Option<Vec<_>>>()?.join(", ");
             Some(format!("{{ let __tuple = &({code}); {} {{ {fields} }} }}", rec::struct_name(j)))
         } else if let (Some(a), Some(b)) = (rec::list_elem(i), rec::list_elem(j)) {
@@ -109,9 +112,23 @@ pub(crate) fn tuple_copy(code: &str, from: NTy, to: NTy) -> Option<String> {
             let ok = copy("*__item", a, b, seen)?;
             let err = copy("*__item", e, f, seen)?;
             Some(format!("({code}).as_ref().map(|__item| {ok}).map_err(|__item| {err})"))
+        } else if let (Some((ak, av)), Some((bk, bv))) = (rec::map_kinds(i), rec::map_kinds(j)) {
+            let key = copy("*__key", ak, bk, seen)?;
+            let value = copy("*__value", av, bv, seen)?;
+            // AlmideMap's iterator and FromIterator preserve insertion order.
+            // Structural values are rebuilt under the same field-label checks
+            // as a direct argument; neither source map nor aliases are moved.
+            Some(format!("({code}).iter().map(|(__key, __value)| ({key}, {value})).collect::<{}>()", rec::struct_name(j)))
         } else { None };
         seen.pop();
         result
+    }
+    fn copy_field(i: u16, src: usize, from: NTy, j: u16, dst: usize, to: NTy,
+        seen: &mut Vec<(u16, u16)>) -> Option<String> {
+        let place = if rec::enum_field_boxed(i, from) { format!("(*__tuple.f{src})") } else { format!("__tuple.f{src}") };
+        let value = copy(&place, from, to, seen)?;
+        let value = if rec::enum_field_boxed(j, to) { format!("Box::new({value})") } else { value };
+        Some(format!("f{dst}: {value}"))
     }
     // Identical values use the caller's existing move/borrow rule. This
     // adapter rebuilds checked structural aggregates and their owning containers.

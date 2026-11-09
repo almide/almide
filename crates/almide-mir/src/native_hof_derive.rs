@@ -23,13 +23,6 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
             _ => None,
         })
         .ok_or("no @intrinsic")?;
-    // Effectful adapters are confined to the explicit native fs host boundary.
-    // Their runtime symbol and capability row must match the declaration.
-    if effect.unwrap_or(false) && !crate::host_ops::host_op(module, func).is_some_and(|o|
-        o.module == "fs" && o.symbol == symbol && o.intrinsic_fn == func
-        && !o.caps.is_empty() && crate::host_ops::is_native_fs_host_call(&symbol)) {
-        return Err("effect declaration outside the named native host boundary".into());
-    }
     let bounds = almide_lang::capability_bounds::of(module, func).map(|b| {
         generics.as_ref().and_then(|gs| gs.get(b.generic))
             .map(|g| (g.name.as_str().to_string(), b.cap)).ok_or("runtime bound has no declared generic")
@@ -39,11 +32,20 @@ fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
     let needs_float_comparison = !bounds.is_empty() && target != call
         && crate::native_floor::specialized_list_elem_holds_float(&call);
     let tps: BTreeSet<String> = generics.iter().flatten().map(|g| g.name.as_str().to_string()).collect();
-    let dparams: Vec<DTy> = params.iter().map(|p| dty_of(&p.ty, &tps)).collect::<Option<_>>().ok_or("a param type outside the map")?;
-    let mut dret = dty_of(ret, &tps).ok_or("a return type outside the map")?;
+    let dparams: Vec<DTy> = params.iter().map(|p| declared_dty(&p.ty, &tps, &program.decls)).collect::<Option<_>>().ok_or("a param type outside the map")?;
+    let mut dret = declared_dty(ret, &tps, &program.decls).ok_or("a return type outside the map")?;
+    // Effectful callbacks require the same named host declaration and
+    // capability row as ordinary native host calls. Plain effect calls
+    // continue through their existing floor, rather than this adapter.
+    if effect.unwrap_or(false) && !crate::host_ops::host_op(module, func).is_some_and(|o|
+        o.symbol == symbol && o.intrinsic_fn == func && !o.caps.is_empty()
+        && (crate::host_ops::is_native_fs_host_call(&symbol)
+            || dparams.iter().any(|d| matches!(d, DTy::Fn(..))))) {
+        return Err("effect declaration outside the declared native host boundary".into());
+    }
     let (rust_params, rust_ret, items) = if almide_codegen::generated::runtime_fn_modes::crosses_threads(&symbol) {
         crate::native_floor::parallel_runtime_body(&symbol)?
-    } else { crate::native_floor::runtime_body(&symbol).ok_or_else(|| format!("`{symbol}` is no takeable runtime body"))? };
+    } else { crate::native_floor::runtime_body_explained(&symbol)? };
     let matrix_ref_lists = dparams.iter().zip(&rust_params)
         .map(|(d, r)| matrix_ref_list(d, r, &symbol, &items))
         .collect::<Option<Vec<_>>>().ok_or("matrix-list runtime representation disagrees")?;

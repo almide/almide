@@ -112,6 +112,17 @@ impl AddrState {
         // that consume them, in one fixpoint (render_native_slots.rs).
         let (moves, moves_last, moves_first, moves_partial) = slots::movable_loads(func, &base_of);
         let str_lists = slots::type_blocks(func, sigs, &mut alloc_rec, &slots::Facts { handle_of: &handle_of, base_of: &base_of, consts: &consts });
+        // Tag exclusions need the declared enum of borrowed parameters too.
+        // The allocation table below deliberately drops non-allocation values.
+        let mut enum_sources = alloc_rec.clone();
+        if let Some((params, _)) = sigs.get(&func.name) {
+            for (param, kind) in func.params.iter().zip(params) {
+                if let crate::render_native::NativeSigKind::Rec(i) = kind {
+                    enum_sources.insert(param.value, *i);
+                }
+            }
+        }
+        let guarded_enum_reads = crate::native_borrowed_tco::guarded_reads(func, &enum_sources);
         let alloc_rec = func
             .ops
             .iter()
@@ -171,7 +182,7 @@ impl AddrState {
         let null_init = value::null_initializers(func, &alloc_rec);
         let option_tags = option_tags::sites(func, &alloc_rec, &base_of, &consts);
         AddrState {
-            guarded_enum_reads: crate::native_borrowed_tco::guarded_reads(func),
+            guarded_enum_reads,
             option_tags,
             known_none: option_tags::known_none(func),
             declared_values: func.aggregate_blocks.iter().filter_map(|(v, key)|

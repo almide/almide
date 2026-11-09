@@ -78,7 +78,9 @@ impl LowerCtx {
         // makes of the same chain. A body the fused loop cannot lower is retried
         // over the materialized list, as before.
         if fuse.index.is_none() && fuse.second.is_none() {
-            if let Some(inner) = self.defunc_inner_map(xs).filter(|m| !m.3 || func != "filter") {
+            if let Some(inner) = self.defunc_inner_map(xs).filter(|m| (!m.3 || func != "filter")
+                && crate::native_fusion::mergeable(&m.2, lambda.body, acc.init,
+                    matches!(func, "find" | "any" | "all" | "take" | "find_map" | "find_index"))) {
                 let marks = (self.ops.len(), self.live_heap_handles.len(), self.lifted.len(), self.value_of.clone());
                 let acc2 = DefuncAcc { init: acc.init, result_elem: acc.result_elem.clone() };
                 let lambda2 = DefuncLambda { params: lambda.params, body: lambda.body };
@@ -395,6 +397,11 @@ impl LowerCtx {
         let scalar_list = matches!(result_elem.as_ref(),
             Some(Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b))
                 if b.len() == 1 && !is_heap_ty(&b[0]));
+        // Option[scalar] owns only its tag/payload block. Dropping each
+        // element's block is exact, just like List[scalar] above.
+        let scalar_option = matches!(result_elem.as_ref(),
+            Some(Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, b))
+                if b.len() == 1 && !is_heap_ty(&b[0]));
         // A `Matrix` result element (`heads |> list.map((h) => matrix.scale(h, s))`
         // — the nn per-head shape) or its structural `List[List[scalar]]` spelling: each
         // element is a TWO-LEVEL block (row handles inside), so the result list's scope-end
@@ -414,6 +421,7 @@ impl LowerCtx {
                 && !str_str_tuple
                 && !value
                 && !scalar_list
+                && !scalar_option
                 && !matrix
                 && !scalar_record
                 && record_drop.is_none()

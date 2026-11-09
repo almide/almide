@@ -37,9 +37,9 @@ fn two_unguarded_arms(arms: &[IrMatchArm]) -> bool {
     arms.len() == 2 && arms.iter().all(|a| a.guard.is_none())
 }
 
-/// Both arm bodies are `Unit` — the statement-position (unit-if) requirement.
+/// A statement arm either yields Unit or never returns (e.g. process.exit).
 fn both_unit(a: &IrExpr, b: &IrExpr) -> bool {
-    matches!(a.ty, Ty::Unit) && matches!(b.ty, Ty::Unit)
+    matches!(a.ty, Ty::Unit | Ty::Never) && matches!(b.ty, Ty::Unit | Ty::Never)
 }
 
 /// Fill a one-shot slot; `None` (decline) if it was already filled — the

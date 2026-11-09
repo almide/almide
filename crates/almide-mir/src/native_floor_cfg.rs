@@ -15,11 +15,29 @@ fn take_complementary_cfg_functions(
         }
     }
     for (name, bodies) in families {
-        if seen.get(name) != Some(&2) || items.contains_key(name) { continue; }
+        if items.contains_key(name) { continue; }
+        // This floor emits only native Rust. A unique function gated solely
+        // off wasm32 is available on every supported native target. Preserve
+        // the attribute; never select a host OS/CPU-specific implementation.
+        if seen.get(name) == Some(&1) && bodies.len() == 1 && native_only_cfg_function(bodies[0]) {
+            items.insert(name, RtItem { text: bodies[0] });
+            continue;
+        }
+        if seen.get(name) != Some(&2) { continue; }
         if let Some(text) = complementary_cfg_pair(&bodies) {
             items.insert(name, RtItem { text: Box::leak(text.into_boxed_str()) });
         }
     }
+}
+
+fn native_only_cfg_function(text: &str) -> bool {
+    cfg_function_head(text).is_some_and(|(predicate, _)|
+        predicate.chars().filter(|c| !c.is_whitespace()).collect::<String>() == "not(target_arch=\"wasm32\")")
+}
+
+fn native_only_cfg_impl(text: &str) -> bool {
+    cfg_item_head(text, "impl").is_some_and(|(predicate, _)|
+        predicate.chars().filter(|c| !c.is_whitespace()).collect::<String>() == "not(target_arch=\"wasm32\")")
 }
 
 fn complementary_cfg_pair(bodies: &[&str]) -> Option<String> {
@@ -40,6 +58,10 @@ fn complementary_cfg_pair(bodies: &[&str]) -> Option<String> {
 /// skips strings but its offsets let us retain their exact bytes: predicates
 /// containing different string values must never compare equal.
 fn cfg_function_head(text: &str) -> Option<(&str, &str)> {
+    cfg_item_head(text, "fn")
+}
+
+fn cfg_item_head<'a>(text: &'a str, kind: &str) -> Option<(&'a str, &'a str)> {
     let toks = lex(text);
     if toks.iter().take(4).map(|t| t.text).collect::<Vec<_>>() != ["#", "[", "cfg", "("] {
         return None;
@@ -57,13 +79,24 @@ fn cfg_function_head(text: &str) -> Option<(&str, &str)> {
     if toks.get(end + 1)?.text != "]" { return None; }
     let start = end + 2;
     let fn_at = if toks.get(start)?.text == "pub" { start + 1 } else { start };
-    if toks.get(fn_at)?.text != "fn" { return None; }
+    if toks.get(fn_at)?.text != kind { return None; }
     let open = toks.iter().skip(fn_at + 1).find(|t| t.text == "{")?;
     Some((text[toks[3].off + 1..toks[end].off].trim(), text[toks[start].off..open.off].trim()))
 }
 
 #[cfg(test)]
 mod complementary_cfg_tests {
+    #[test]
+    fn native_only_cfg_keeps_its_gate_and_refuses_other_conditions() {
+        use super::native_only_cfg_function as admit;
+        assert!(admit("#[cfg(not(target_arch = \"wasm32\"))] pub fn tls() {}"));
+        for bad in ["#[cfg(unix)] fn tls() {}", "#[cfg(not(target_os = \"linux\"))] fn tls() {}",
+            "#[cfg(target_arch = \"wasm32\")] fn tls() {}", "#[cfg(not(target_arch = \"wasm32\"))] #[inline] fn tls() {}"] {
+            assert!(!admit(bad));
+        }
+        assert!(super::native_only_cfg_impl("#[cfg(not(target_arch = \"wasm32\"))] impl Sock for T {}"));
+        assert!(!super::native_only_cfg_impl("#[cfg(unix)] impl Sock for T {}"));
+    }
     use super::*;
 
     #[test]

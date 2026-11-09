@@ -207,7 +207,12 @@ pub(crate) fn thread_crossable(ty: &Ty, decls: &[almide_ir::IrTypeDecl], depth: 
         Ty::Applied(TC::List | TC::Option | TC::Result | TC::Map | TC::Set, args) => args.iter().all(ok),
         Ty::Tuple(elems) => elems.iter().all(ok),
         Ty::Record { fields } => fields.iter().all(|(_, t)| ok(t)),
-        Ty::Named(name, args) if args.is_empty() => decls.iter().find(|d| d.name == *name).is_some_and(|d| match &d.kind {
+        Ty::Named(name, args) if args.is_empty() => decls.iter().find(|d| d.name == *name).map_or_else(
+            // Runtime-backed values retain their actual Rust representation.
+            // The generated scoped spawn checks Send/Sync on that type;
+            // unlike a closure environment there is no erased dispatch state.
+            || crate::native_runtime_types::RuntimeType::of(name.as_str()).is_some(),
+            |d| match &d.kind {
             almide_ir::IrTypeDeclKind::Record { fields } => fields.iter().all(|f| ok(&f.ty)),
             almide_ir::IrTypeDeclKind::Alias { target } => ok(target),
             almide_ir::IrTypeDeclKind::Variant { cases, .. } => cases.iter().all(|c| match &c.kind {
@@ -270,12 +275,14 @@ impl Lift<'_> {
             }
             _ => None,
         };
-        // An effect fn declared `-> T` with T not a Result carries its Err in
-        // the effect ABI only: the threaded take hands back that ABI's Result
-        // while the arm's binding is typed T, and the render has no step that
-        // unwraps it and propagates the lowest-index Err (C-199). Such an arm
-        // keeps the honest decline; the standard codegen builds it.
-        if calls_implicit_result_effect_fn(x, self.user) {
+        // A direct implicit-effect call already has the checked Result ABI
+        // at this call site. Make that carrier explicit on the lifted function
+        // too, so fan settling observes Err only after all arms have run.
+        // Composite expressions still need an explicit Result scope; a raw
+        // value binding must never receive a carrier from the thread's take.
+        let direct_carrier = direct.as_ref().is_some_and(|(_, ret, effect)|
+            *effect && !ret.is_result() && x.ty == Ty::result(ret.clone(), Ty::String));
+        if calls_implicit_result_effect_fn(x, self.user) && !direct_carrier {
             return Err("an arm calling an effect fn whose declared result is not a Result".to_string());
         }
         let lifted = arm_name(at.group, at.index);
@@ -284,6 +291,7 @@ impl Lift<'_> {
             // its body the call (typed as `f` declares it, so the lift's
             // effect ABI is `f`'s).
             Some((_, ret, is_effect)) => {
+                let ret = if direct_carrier { x.ty.clone() } else { ret };
                 let mut body = x.clone();
                 body.ty = ret.clone();
                 (body, ret, is_effect)
@@ -397,6 +405,10 @@ fn is_arm_expr(e: &IrExpr) -> bool {
     match &e.kind {
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. } => true,
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => elements.iter().all(is_arm_expr),
+        IrExprKind::StringInterp { parts } => parts.iter().all(|part| match part {
+            almide_ir::IrStringPart::Expr { expr } => is_arm_expr(expr),
+            _ => true,
+        }),
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } | IrExprKind::OptionSome { expr } => is_arm_expr(expr),
         IrExprKind::OptionNone | IrExprKind::Lambda { .. } => true,
         IrExprKind::BinOp { left, right, .. } => is_arm_expr(left) && is_arm_expr(right),
@@ -408,7 +420,9 @@ fn is_arm_expr(e: &IrExpr) -> bool {
                 if params.is_empty() && body.ty == e.ty && e.ty.is_result()),
         IrExprKind::UnwrapOr { expr, fallback } => is_arm_expr(expr) && is_arm_expr(fallback),
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =>
-            crate::purity::is_pure(module.as_str(), func.as_str()) && args.iter().all(is_arm_expr),
+            (crate::purity::is_pure(module.as_str(), func.as_str())
+                || crate::host_ops::host_op(module.as_str(), func.as_str()).is_some())
+                && args.iter().all(is_arm_expr),
         _ => false,
     }
 }
@@ -442,6 +456,9 @@ fn calls_effect_fn(e: &IrExpr, user: &BTreeMap<String, (Vec<Ty>, Ty, bool)>) -> 
                 if self.0.get(name.as_str()).is_some_and(|(_, _, eff)| *eff) {
                     self.1 = true;
                 }
+            }
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } = &e.kind {
+                self.1 |= crate::host_ops::host_op(module.as_str(), func.as_str()).is_some();
             }
             walk_expr(self, e);
         }
@@ -488,7 +505,7 @@ mod tests {
         assert!(reaches_slot_range(&functions, vec!["arm"], 1), "closure reaches slot");
         functions[0].ops = vec![Op::CallIndirect { dst: None, table_idx: ValueId(0), args: vec![], result: None }];
         assert!(reaches_slot_range(&functions, vec!["arm"], 1), "unknown closure");
-        functions[0].ops = vec![Op::CallImport { dst: None, module: "host".into(), name: "f".into(),
+        functions[0].ops = vec![Op::CallImport { target: crate::ImportTarget::Wasm, dst: None, module: "host".into(), name: "f".into(),
             args: vec![], abi: vec![], result: None, result_abi: None }];
         assert!(reaches_slot_range(&functions, vec!["arm"], 1), "unknown import");
         functions[0].ops = vec![call("leaf")];
@@ -513,6 +530,23 @@ mod tests {
         assert!(ir.functions.iter().any(|f| f.name.as_str() == "__fan_arm_0_0"));
         assert_eq!(arm("__fan_arm_0_1"), Some(Arm { group: 0, index: 1, count: 2 }));
         assert_eq!(groups().get(&0).map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn implicit_effect_arms_keep_their_checked_result_carrier() {
+        for (ret, ok) in [("Int", "n"), ("String", "int.to_string(n)"), ("Unit", "()") ] {
+            let src = format!(
+                "effect fn f(n: Int) -> {ret} = if n < 0 then err(\"negative\") else ok({ok})\n\
+                 effect fn main() -> Unit = {{ let (a, b) = fan {{ f(1), f(-1) }}; println(\"settled\") }}\n"
+            );
+            let ir = lift(&src).expect("implicit effect arms lift");
+            let arms: Vec<_> = ir.functions.iter().filter(|f| arm(f.name.as_str()).is_some()).collect();
+            assert_eq!(arms.len(), 2, "{ret}: must exercise the threaded path");
+            for f in arms {
+                assert!(f.ret_ty.is_result(), "{ret}: thread returns the full carrier");
+                assert_eq!(f.ret_ty, f.body.ty, "{ret}: call and lifted function agree");
+            }
+        }
     }
 
     // The gate (TRUSTED_BASE "fan arms on threads"): an arm that captures a

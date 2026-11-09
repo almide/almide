@@ -72,6 +72,11 @@ pub(crate) fn is_f64_scalar(t: &almide_lang::types::Ty) -> bool {
     matches!(t, almide_lang::types::Ty::Float | almide_lang::types::Ty::Float64)
 }
 
+/// Matrix's dtype annotation and bare handle share the runtime's tagged value.
+pub(crate) fn is_matrix_ty(t: &almide_lang::types::Ty) -> bool {
+    matches!(t, almide_lang::types::Ty::Matrix | almide_lang::types::Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Matrix, _))
+}
+
 /// The `Option`/`Result` types a generated carrier stands for: everything the
 /// scalar carriers (`Option<i64>`, `Result<i64, String>`, `Result<String,
 /// String>`) do not cover, read off the declared type.
@@ -163,6 +168,21 @@ pub(crate) fn bytes_index() -> u16 {
     intern(&|d| d.name == BYTES_KEY, RecDecl { name: BYTES_KEY.into(), alias: Some("Vec<u8>"), ..RecDecl::default() })
 }
 
+pub(crate) fn runtime_type_index(t: crate::native_runtime_types::RuntimeType) -> u16 {
+    intern(&|d| d.alias == Some(t.rust()), RecDecl {
+        name: t.0.into(), alias: Some(t.rust()), ..RecDecl::default()
+    })
+}
+
+pub(crate) fn runtime_type_of(i: u16) -> Option<crate::native_runtime_types::RuntimeType> {
+    RECS.with(|r| {
+        let r = r.borrow();
+        let d = r.get(i as usize)?;
+        let t = crate::native_runtime_types::RuntimeType::of(&d.name)?;
+        (d.alias == Some(t.rust())).then_some(t)
+    })
+}
+
 /// The table key of the stdlib's dynamic `Value` type.
 pub(crate) const VALUE_KEY: &str = "Ty::Value";
 
@@ -202,13 +222,13 @@ thread_local! {
         const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
 }
 
-/// The generated map type each value of the function being rendered is
+/// The generated carrier/map/set type each value of the function being rendered is
 /// declared as (its signature's, its callees', through joins and rebinds).
 pub(crate) fn set_declared(m: std::collections::BTreeMap<crate::ValueId, u16>) {
     DECLARED_MAPS.with(|d| *d.borrow_mut() = m);
 }
 
-/// The declared generated map type of `v` (`map.new()`'s result).
+/// The declared carrier/map/set type of `v`, including a host call result.
 pub(crate) fn declared_map(v: crate::ValueId) -> Option<u16> {
     DECLARED_MAPS.with(|d| d.borrow().get(&v).copied())
 }
@@ -368,7 +388,7 @@ pub(crate) fn enum_slot_kinds(i: u16, k: usize) -> Vec<NTy> {
     out
 }
 
-/// A record field of enum `i` is boxed only where the field's type holds `i`
+/// A field of record or enum `i` is boxed only where its type holds `i`
 /// again inline (through struct, enum, Option and Result payloads; a list or
 /// map already holds its elements behind a pointer): a recursive variant then
 /// has a size, and a non-recursive one keeps its payload in place, as v0's
@@ -471,7 +491,7 @@ fn enum_tag_fns(i: u16, cases: &[(u32, Vec<NTy>)]) -> String {
             out.push_str(&format!("            {t} => Self::C{t}({defs}),\n"));
         }
     }
-    out.push_str("            _ => { eprintln!(\"Error: variant tag out of range\"); std::process::exit(1) }\n        }\n    }\n");
+    out.push_str("            _ => { almide_abort(\"variant tag out of range\") }\n        }\n    }\n");
     out.push_str("    fn tag(&self) -> i64 {\n        match self {\n");
     for (t, fs) in cases {
         let pat = if fs.is_empty() { String::new() } else { "(..)".into() };
@@ -612,6 +632,7 @@ pub(crate) fn tuple_key(t: &almide_lang::types::Ty) -> String {
 pub(crate) fn block_key(t: &almide_lang::types::Ty) -> String {
     match t {
         t if crate::lower::is_value_ty(t) => VALUE_KEY.to_string(),
+        t if is_matrix_ty(t) => MATRIX_KEY.to_string(),
         almide_lang::types::Ty::Named(n, args) if args.is_empty() => n.as_str().to_string(),
         t => tuple_key(t),
     }
@@ -677,6 +698,7 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
             push_new(out, t);
             a.iter().for_each(|e| collect_tuples(e, out));
         }
+        t if is_matrix_ty(t) => push_new(out, &Ty::Matrix),
         Ty::Applied(_, a) => a.iter().for_each(|e| collect_tuples(e, out)),
         Ty::Fn { params, ret, .. } => {
             push_new(out, t);
@@ -687,6 +709,7 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
         t if crate::lower::is_value_ty(t) => {
             push_new(out, t);
         }
+        Ty::Named(n, args) if args.is_empty() && crate::native_runtime_types::RuntimeType::of(n.as_str()).is_some() => push_new(out, t),
         // An instantiated generic record or variant: its own generated type.
         Ty::Named(_, args) if !args.is_empty() => {
             push_new(out, t);

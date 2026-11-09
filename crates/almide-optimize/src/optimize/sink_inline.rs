@@ -38,7 +38,9 @@ pub fn inline_list_sinks(program: &mut IrProgram) {
 
 fn sink(f: &IrFunction) -> Option<(VarId, IrExpr)> {
     let [p] = f.params.as_slice() else { return None };
-    if f.is_effect || f.is_test || p.is_mut || f.name.as_str() == "main"
+    // Target selection owns extern calls; the fallback body is not the
+    // callee's meaning on every target, even when it looks like a list sink.
+    if f.is_effect || !f.extern_attrs.is_empty() || f.is_test || p.is_mut || f.name.as_str() == "main"
         || f.generics.as_ref().is_some_and(|g| !g.is_empty())
     {
         return None;

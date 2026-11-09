@@ -62,27 +62,27 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     // so this one row serves both, as `math.pow`'s did.
     ("int.pow", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "fn rt_int_pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
+            "fn rt_int_pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { almide_abort(\"negative exponent\"); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
     ("string.cmp", // Byte-wise lexicographic, -1/0/1 (C-019: rt_string_extra cmp = native oracle).
             &[NTy::Str, NTy::Str],
             Some(NTy::I64),
             "fn rt_string_cmp(a: &str, b: &str) -> i64 {\n    match a.cmp(b) { std::cmp::Ordering::Less => -1, std::cmp::Ordering::Equal => 0, std::cmp::Ordering::Greater => 1 }\n}"),
     ("__chk_div", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "#[inline(always)]\nfn rt_chk_div(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a / b\n}"),
+            "#[inline(always)]\nfn rt_chk_div(a: i64, b: i64) -> i64 {\n    if b == 0 { almide_abort(\"division by zero\"); }\n    if a == i64::MIN && b == -1 { almide_abort(\"integer overflow\"); }\n    a / b\n}"),
     ("__chk_mod", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
             // v0's `almide_mod` macro prints "division by zero" for a zero rhs (mod and
             // div share the message — the C-002 oracle text); keep byte parity.
-            "#[inline(always)]\nfn rt_chk_mod(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a % b\n}"),
+            "#[inline(always)]\nfn rt_chk_mod(a: i64, b: i64) -> i64 {\n    if b == 0 { almide_abort(\"division by zero\"); }\n    if a == i64::MIN && b == -1 { almide_abort(\"integer overflow\"); }\n    a % b\n}"),
     // The unsigned 64-bit lane (#872): the i64 slot carries the u64 bit
     // pattern. Same divide-by-zero message bytes; no MIN÷-1 case unsigned.
     ("__chk_div_u", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "#[inline(always)]\nfn rt_chk_div_u(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    ((a as u64) / (b as u64)) as i64\n}"),
+            "#[inline(always)]\nfn rt_chk_div_u(a: i64, b: i64) -> i64 {\n    if b == 0 { almide_abort(\"division by zero\"); }\n    ((a as u64) / (b as u64)) as i64\n}"),
     ("__chk_mod_u", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "#[inline(always)]\nfn rt_chk_mod_u(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    ((a as u64) % (b as u64)) as i64\n}"),
+            "#[inline(always)]\nfn rt_chk_mod_u(a: i64, b: i64) -> i64 {\n    if b == 0 { almide_abort(\"division by zero\"); }\n    ((a as u64) % (b as u64)) as i64\n}"),
 ];
 
 /// C-418's escaper (#4126, #4262), the one shim whose source is not a

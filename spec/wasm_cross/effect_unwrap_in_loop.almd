@@ -29,7 +29,66 @@ effect fn sum_positive(xs: List[String]) -> Result[Int, String] = {
   ok(total)
 }
 
+// Heap-returning calls through a function value, nested in a call operand.
+effect fn word(x: String) -> String = {
+  println("visit:${x}")
+  guard x != "stop" else err("stopped")
+  x + "!"
+}
+
+effect fn words(xs: List[String], f: effect (String) -> String) -> Unit = {
+  for x in xs {
+    println(string.to_upper(f(x)!))
+  }
+  println("words:done")
+}
+
+effect fn words_while(xs: List[String], f: effect (String) -> String) -> Unit = {
+  var i = 0
+  while i < list.len(xs) {
+    println(string.to_upper(f(xs[i])!))
+    i = i + 1
+  }
+  println("while:done")
+}
+
+// Every earlier operand runs before the fallible one; later operands and
+// iterations run only after success. Covers nested calls, arithmetic operands,
+// tuple/list elements and interpolation through the same ANF transform.
+fn seen(label: String) -> String = {
+  println(label)
+  label
+}
+
+fn join3(a: String, b: String, c: String) -> String = a + b + c
+
+effect fn ordered_words(xs: List[String], kind: Int) -> Unit = {
+  for x in xs {
+    match kind {
+      0 => println(join3(seen("before:" + x), word(x)!, seen("after:" + x))),
+      1 => println(seen("left:" + x) + word(x)! + seen("right:" + x)),
+      2 => {
+        let pair = (seen("tuple:" + x), word(x)!, seen("tuple-after:" + x))
+        println(pair.0 + pair.1 + pair.2)
+      },
+      3 => println(list.join([seen("list:" + x), word(x)!, seen("list-after:" + x)], "/")),
+      _ => println("${seen("interp:" + x)}:${word(x)!}:${seen("interp-after:" + x)}"),
+    }
+  }
+  println("ordered:done")
+}
+
 effect fn main() -> Unit = {
+  for kind in 0..<5 {
+    let ordered_good: Result[Unit, String] = ordered_words(["ok"], kind)
+    let ordered_bad: Result[Unit, String] = ordered_words(["stop", "unreached"], kind)
+    println("order:${kind} ${ordered_good == ok(())} ${ordered_bad == err("stopped")}")
+  }
+  let good: Result[Unit, String] = words(["a", "b"], word)
+  let bad: Result[Unit, String] = words(["a", "stop", "unreached"], word)
+  let good_while: Result[Unit, String] = words_while(["c", "d"], word)
+  let bad_while: Result[Unit, String] = words_while(["c", "stop", "unreached"], word)
+  println("words:${good == ok(())} ${bad == err(\"stopped\")} ${good_while == ok(())} ${bad_while == err(\"stopped\")}")
   // all-ok: the loop completes, sum is returned.
   match sum_parse(["1", "2", "3"]) {
     ok(t) => println("sum=" + int.to_string(t)),

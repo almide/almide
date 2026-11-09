@@ -458,6 +458,11 @@ impl LowerCtx {
     /// of the materialized block, and the rollback when the inner call does not lower.
     fn lower_scalar_ok_payload_unwrap(&mut self, expr: &IrExpr) -> Option<ValueId> {
         match &expr.kind {
+            IrExprKind::Unwrap { expr: inner }
+                if !is_heap_ty(&expr.ty) && inner.ty.is_option() =>
+            {
+                self.lower_scalar_option_abort_unwrap(inner)
+            }
             // A scalar `e!` (Unwrap) in a VALUE/OPERAND position (`acc + int.parse(s)!`) over a
             // `Result[scalar, String]` call. The auto-`?` left the operand as `Unwrap{Call(Result)}`
             // (the let-bind position got it type-stripped to a bare scalar Call; the BinOp operand
@@ -468,7 +473,9 @@ impl LowerCtx {
             // recursive `acc + parse!` accumulator silently summed 0). Scalar Ok only — a heap-Ok
             // `Result[String,String]!` value operand stays walled (the recursive-ownership frontier).
             IrExprKind::Unwrap { expr: inner }
-                if !is_heap_ty(&expr.ty) && is_result_ty(&inner.ty) =>
+                if !is_heap_ty(&expr.ty) && matches!(&inner.ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                        if a.len() == 2 && a[1] == Ty::String) =>
             {
                 let ops_mark = self.ops.len();
                 let lhh_mark = self.live_heap_handles.len();
@@ -502,8 +509,8 @@ impl LowerCtx {
                     self.ops.push(Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off });
                     self.ops.push(Op::IfThen { cond: tag, dst: None });
                     let msgh = self.fresh_value();
-                    self.ops.push(Op::Prim { kind: crate::PrimKind::Load { width: 8 }, dst: Some(msgh), args: vec![addr] });
-                    self.ops.push(Op::Prim { kind: crate::PrimKind::Die, dst: None, args: vec![msgh] });
+                    self.ops.push(Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(msgh), args: vec![addr] });
+                    self.emit_error_abort(msgh);
                     self.ops.push(Op::Else { val: None });
                     self.ops.push(Op::EndIf { val: None });
                     let payload = self.fresh_value();

@@ -39,7 +39,8 @@ pub(crate) fn struct_defs() -> String {
             let default = if has_default(NTy::Rec(i as u16)) { ", Default" } else { "" };
             out.push_str(&format!("/// record `{}`\n#[derive(Clone{default}{eq})]\nstruct {} {{\n", d.name, struct_name(i as u16)));
             for (k, f) in d.fields.iter().enumerate() {
-                out.push_str(&format!("    f{k}: {},\n", owned_ty(*f)));
+                let ty = if enum_field_boxed(i as u16, *f) { format!("Box<{}>", owned_ty(*f)) } else { owned_ty(*f) };
+                out.push_str(&format!("    f{k}: {ty},\n"));
             }
             out.push_str("}\n\n");
         }

@@ -207,14 +207,49 @@ pub const HOST_OPS: &[HostOp] = &[
     // their flat-header leaf ──
     op("http", "get", "almide_http_get", NET).result(),
     wrapper("http", "request", "__request", "almide_http_request", NET).result(),
+    op("http", "__request", "almide_http_request", NET).result(),
     op("http", "get_response", "almide_http_get_response", NET).result(),
     wrapper("http", "send", "__request_response", "almide_http_request_response", NET).result(),
+    op("http", "__request_response", "almide_http_request_response", NET).result(),
     // The call handle (#2631): start and the four verbs over it.
     wrapper("http", "start", "__call_start", "almide_rt_http___call_start", NET).result(),
+    op("http", "__call_start", "almide_rt_http___call_start", NET).result(),
     op("http", "poll", "almide_http_call_poll", NET),
     op("http", "read_new", "almide_http_call_read_new", NET),
     op("http", "wait", "almide_http_call_wait", NET).result(),
     op("http", "cancel", "almide_http_call_cancel", NET),
+    // The listener invokes an effect-typed callback; its own return is Unit.
+    op("http", "serve", "almide_rt_http_serve", NET).by_value(&[1]),
+    // ── process and sockets: borrowed inputs, freshly owned results ──
+    op("process", "exec", "almide_rt_process_exec", PROCESS).result(),
+    op("process", "kill", "almide_rt_process_kill", PROCESS).result(),
+    op("process", "__os_output", "almide_rt_process___os_output", PROCESS).result(),
+    op("process", "__os_run", "almide_rt_process___os_run", PROCESS).result(),
+    op("process", "__os_start", "almide_rt_process___os_start", PROCESS).result(),
+    op("process", "__os_poll", "almide_rt_process___os_poll", PROCESS).result(),
+    op("process", "__os_wait", "almide_rt_process___os_wait", PROCESS).result(),
+    op("process", "__os_stop", "almide_rt_process___os_stop", PROCESS).result(),
+    op("process", "__os_read_new", "almide_rt_process___os_read_new", PROCESS),
+    op("process", "__os_child_pid", "almide_rt_process___os_child_pid", PROCESS),
+    op("process", "pid", "almide_rt_process_pid", ENV),
+    op("net", "__os_tcp_connect", "almide_rt_net___os_tcp_connect", NET).result(),
+    op("net", "__os_tcp_read", "almide_rt_net___os_tcp_read", NET).result(),
+    op("net", "__os_tcp_write", "almide_rt_net___os_tcp_write", NET).result(),
+    op("net", "__os_tcp_close", "almide_rt_net___os_tcp_close", NET).result(),
+    op("net", "__os_tcp_is_open", "almide_rt_net___os_tcp_is_open", NET),
+    op("net", "__os_tcp_read_timeout", "almide_rt_net___os_tcp_read_timeout", NET).result(),
+    op("net", "__os_tcp_set_timeout", "almide_rt_net___os_tcp_set_timeout", NET).result(),
+    op("net", "__os_tcp_available", "almide_rt_net___os_tcp_available", NET).result(),
+    op("net", "__os_tcp_listen", "almide_rt_net___os_tcp_listen", NET).result(),
+    op("net", "__os_tcp_local_port", "almide_rt_net___os_tcp_local_port", NET).result(),
+    op("net", "__os_tcp_accept", "almide_rt_net___os_tcp_accept", NET).result(),
+    op("net", "__os_tcp_close_listener", "almide_rt_net___os_tcp_close_listener", NET).result(),
+    op("net", "__os_udp_bind", "almide_rt_net___os_udp_bind", NET).result(),
+    op("net", "__os_udp_local_port", "almide_rt_net___os_udp_local_port", NET).result(),
+    op("net", "__os_udp_send_to", "almide_rt_net___os_udp_send_to", NET).result(),
+    op("net", "__os_udp_recv_from", "almide_rt_net___os_udp_recv_from", NET).result(),
+    op("net", "__os_udp_close", "almide_rt_net___os_udp_close", NET).result(),
+    op("net", "__os_lookup_host", "almide_rt_net___os_lookup_host", NET).result(),
     // ── testing: assert_aborts's site pair (ADR-0029, #3792), test builds only ──
     // The child run starts a child — a re-exec of the native test binary, a
     // fresh instance on the embedded host (op 117) — so it counts Process. The
@@ -295,13 +330,8 @@ pub const CAP_MODULES: &[&str] =
 /// are refused by the lowering outright, so they never reach a certificate.
 /// `"*"` covers the rest of a module (a row or a pure admission still wins).
 pub const WALLED: &[(&str, &str, &str)] = &[
-    ("net", "*", "sockets, unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
     ("unix", "*", "unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
-    ("process", "*", "child processes, signals and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim"),
-    ("http", "serve", "the listener: native-only, and its handler is a closure the host invokes"),
-    ("http", "__call_start", "reached only through its wrapper row `http.start`"),
-    ("http", "__request", "reached only through its wrapper row `http.request`"),
-    ("http", "__request_response", "reached only through its wrapper row `http.send`"),
+    ("process", "exit", "exit lowers as the ProcExit prim, not an ordinary returning call"),
 ];
 
 /// The typed-twin suffixes a ROUTED row's call name can carry
@@ -427,7 +457,8 @@ mod tests {
     #[test]
     fn an_uncounted_host_call_is_reported() {
         // A walled or unknown capability-module call, emitted anyway, is uncounted.
-        assert!(is_uncounted_host_call("process.exec"));
+        assert!(is_uncounted_host_call("process.unregistered_host"));
+        assert!(!is_uncounted_host_call("process.exec"));
         assert!(is_uncounted_host_call("net.tcp_connect"));
         assert!(is_uncounted_host_call("env.some_future_reader"));
         // Host ops, pure fns and non-capability modules are accounted for.

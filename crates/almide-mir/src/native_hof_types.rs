@@ -71,6 +71,7 @@ fn bind_param(env: &mut Env, d: &DTy, t: NTy) -> Option<()> {
         DTy::Matrix => rec::is_matrix(t).then_some(()),
         DTy::Value => rec::is_value(t).then_some(()),
         DTy::Bytes => rec::is_bytes(t).then_some(()),
+        DTy::Runtime(runtime) => runtime.accepts(t).then_some(()),
         DTy::Set(e) => {
             let inner = rec::set_elem(t.rec()?)?;
             // Preserve the recursively declared element representation.
@@ -110,6 +111,7 @@ fn kind_of(env: &Env, d: &DTy) -> Option<NTy> {
         DTy::Matrix => NTy::Rec(rec::matrix_index()),
         DTy::Value => NTy::Rec(rec::value_index()),
         DTy::Bytes => NTy::Rec(rec::bytes_index()),
+        DTy::Runtime(runtime) => runtime.kind(),
         DTy::Set(e) => {
             let inner = kind_of(env, e)?;
             rec::native_set_element_kind(inner).then_some(())?;

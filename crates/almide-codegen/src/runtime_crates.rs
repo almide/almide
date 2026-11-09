@@ -29,17 +29,28 @@ pub const RUNTIME_MODULE_CRATES: &[(&str, &[(&str, &str)])] = &[
 /// The crates.io dependencies (name, Cargo spec) generated Rust `rs_code`
 /// needs for its inlined runtime modules, each crate once, in table order.
 ///
-/// A module is in use when an IDENTIFIER spells one of its symbols
+/// A module is in use when an IDENTIFIER spells one of its symbols, or a
+/// path in the selected runtime bodies names one of its external crates.
+/// The native floor can carry an internal helper without its public wrapper.
 /// ([`crate::rust_idents`]): a user string literal `"almide_rt_zlib_"` is
 /// emitted verbatim and must not add flate2 to the manifest (#3486).
 pub fn runtime_crate_deps(rs_code: &str) -> Vec<(&'static str, &'static str)> {
-    let reserved: Vec<&str> = crate::rust_idents::identifiers(rs_code)
-        .filter(|id| id.starts_with("almide_rt_"))
-        .collect();
+    let mut reserved = Vec::new();
+    let mut paths = std::collections::HashSet::new();
+    let mut previous = ["", ""];
+    for token in crate::rust_idents::tokens(rs_code) {
+        if token.starts_with("almide_rt_") { reserved.push(token); }
+        if token == ":" && previous[1] == ":" { paths.insert(previous[0]); }
+        previous = [previous[1], token];
+    }
     let mut out: Vec<(&'static str, &'static str)> = Vec::new();
     for (module, crates) in RUNTIME_MODULE_CRATES {
         let prefix = format!("almide_rt_{module}_");
-        if !reserved.iter().any(|id| id.starts_with(&prefix)) {
+        let external_path = crates.iter().any(|(name, _)| {
+            let ident = name.replace('-', "_");
+            paths.contains(ident.as_str())
+        });
+        if !reserved.iter().any(|id| id.starts_with(&prefix)) && !external_path {
             continue;
         }
         for &(name, spec) in crates.iter() {

@@ -303,10 +303,7 @@ fn render_program_functions(ctx: &RenderContext, program: &IrProgram, parts: &mu
 
 /// `mod <name> { use super::*; <body> }`, framed by the lines that let the
 /// native build move it into a file of its own (#4441).
-fn module_file_group(name: &str, body: &str) -> String {
-    use almide_base::names::{MODULE_FILE_BEGIN, MODULE_FILE_END};
-    format!("{MODULE_FILE_BEGIN}{name}\nmod {name} {{\nuse super::*;\n\n{body}\n}}\n{MODULE_FILE_END}{name}")
-}
+use crate::test_harness::module_file_group;
 
 /// A rendered fn that is a plain `pub fn` item (after its attributes and doc
 /// comments): one a module can hold and the root re-export unchanged.
@@ -326,20 +323,9 @@ fn render_program_test_fns(ctx: &RenderContext, program: &IrProgram, parts: &mut
     }
     // A test-run program's tests (#4441) group by their file's module, as
     // its fns do; a file's own tests (no module) stay at the top of `tests`.
-    let mut test_parts: Vec<String> = Vec::new();
-    let mut grouped: Vec<(String, Vec<String>)> = Vec::new();
-    let mut push = |origin: Option<&str>, rendered: String| match origin {
-        Some(origin) => {
-            let name = almide_base::names::tests_module(origin);
-            match grouped.iter_mut().find(|(n, _)| *n == name) {
-                Some((_, tests)) => tests.push(rendered),
-                None => grouped.push((name, vec![rendered])),
-            }
-        }
-        None => test_parts.push(rendered),
-    };
+    let mut items = Vec::new();
     for f in &test_fns {
-        push(f.module_origin.as_deref(), render_function(ctx, f));
+        items.push((f.module_origin.clone(), render_function(ctx, f)));
     }
     // `testing.assert_aborts` (ADR-0029): the hidden child entry, when the
     // lowering synthesized the abort-site dispatcher. The native test run's
@@ -358,18 +344,11 @@ fn render_program_test_fns(ctx: &RenderContext, program: &IrProgram, parts: &mut
         };
         let prefix = symbol.strip_suffix(almide_ir::ABORT_DISPATCH_FN).unwrap_or_default();
         let entry_name = format!("{prefix}__almd_abort_site_entry");
-        if let Some(entry) = ctx.templates.render_with("abort_site_entry", None, &[], &[("dispatch", symbol.as_str()), ("entry", entry_name.as_str())]) {
-            push(origin, entry);
+        if let Some(entry) = crate::test_harness::abort_entry(ctx.templates, &symbol, &entry_name) {
+            items.push((origin.map(str::to_owned), entry));
         }
     }
-    for (name, tests) in grouped {
-        test_parts.push(module_file_group(&name, &tests.join("\n\n")));
-    }
-    let tests_s = test_parts.join("\n\n");
-    let indented_tests = indent_lines(&tests_s, 4);
-    let wrapped = ctx.templates.render_with("test_module", None, &[], &[("tests", indented_tests.as_str())])
-        .unwrap_or_else(|| test_parts.join("\n\n"));
-    parts.push(wrapped);
+    parts.push(crate::test_harness::render_module(ctx.templates, items));
 }
 
 pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {

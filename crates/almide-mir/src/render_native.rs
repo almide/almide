@@ -166,7 +166,7 @@ const STACK_GUARD_GLUE_SHIM: &str = "#[inline(never)]\nfn almide_stack_guard_ins
 /// `almide_abort`. Written at each check, the message's formatting made every
 /// indexing function large enough that a caller's inlining declined it (a
 /// decode loop called per symbol paid a call frame per symbol).
-pub(crate) const OOB_SHIM: &str = "#[cold]\n#[inline(never)]\nfn almide_oob() -> ! {\n    eprintln!(\"Error: index out of bounds\");\n    std::process::exit(1)\n}";
+pub(crate) const OOB_SHIM: &str = "#[cold]\n#[inline(never)]\nfn almide_oob() -> ! {\n    almide_abort(\"index out of bounds\")\n}";
 const IDX_GET_SHIM: &str = "fn almide_idx_get(v: &[i64], i: i64) -> i64 {\n        if i < 0 || i as usize >= v.len() { almide_oob() }\n        v[i as usize]\n}";
 const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut Vec<i64>, i: i64, x: i64) {\n        if i < 0 || i as usize >= v.len() { almide_oob() }\n        v[i as usize] = x;\n}";
 
@@ -254,6 +254,9 @@ fn push_closure_dispatch_tables(
     sigs: &NativeSigs,
 ) {
     let mut arities: BTreeMap<usize, Vec<(usize, &str)>> = BTreeMap::new();
+    for arity in crate::render_native_closure::demanded_scalar_arities() {
+        arities.entry(arity).or_default();
+    }
     let lambda_names = user_fns
         .keys()
         .copied()
@@ -270,7 +273,8 @@ fn push_closure_dispatch_tables(
         arities.entry(arity).or_default().push((idx, name));
     }
     for (arity, fns) in arities {
-        let env_ty = crate::render_native_closure::dispatch_env(sigs, fns[0].1);
+        let env_ty = fns.first().map(|(_, name)| crate::render_native_closure::dispatch_env(sigs, name))
+            .unwrap_or("&__AlmdClosure");
         let params: String = (0..arity).map(|i| format!(", a{i}: i64")).collect();
         out.push_str(&format!(
             "fn __almd_ci_{arity}(idx: i64, env: {env_ty}{params}) -> i64 {{\n    match idx {{\n"
@@ -293,8 +297,7 @@ fn push_closure_dispatch_tables(
             }
         }
         out.push_str(
-            "        _ => { eprintln!(\"Error: closure index out of range\"); \
-             std::process::exit(1) }\n    }\n}\n\n",
+            "        _ => { almide_abort(\"closure index out of range\") }\n    }\n}\n\n",
         );
     }
 }
@@ -317,7 +320,7 @@ pub fn try_render_native_program(
         .iter()
         .map(|f| (f.name.as_str(), f))
         .collect();
-    if !user_fns.contains_key("main") {
+    if !user_fns.contains_key("main") && !crate::native_test_harness::active() {
         return Err(wall("native: no main in the MIR program"));
     }
     render_items(prog, sigs, true)
@@ -354,13 +357,14 @@ pub(crate) fn refused_native_bodies(
 }
 
 fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> Result<String, LowerError> {
+    let _dispatch = crate::render_native_closure::DispatchScope::enter();
     crate::render_native_rec::reset_capture_kinds();
     let user_fns: BTreeMap<&str, &MirFunction> = prog
         .functions
         .iter()
         .map(|f| (f.name.as_str(), f))
         .collect();
-    let mut used_shims: Vec<&'static str> = Vec::new();
+    let mut used_shims: Vec<&'static str> = vec![crate::native_floor::floor_header()];
     let mut bodies = String::new();
     fan_rendered_reset();
     crate::render_native_bounds::reset();
@@ -378,6 +382,12 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         texts.insert(func.name.clone(), rendered);
     }
     bodies.push_str(&crate::native_hof::array_twins(&texts)?);
+    // Libtest supplies the entry point, so a test-only fan program has no
+    // rendered main to bring in the worker stack-guard dependencies.
+    if fan_rendered() && !user_fns.contains_key("main") {
+        used_shims.push(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
+        used_shims.push(STACK_GUARD_GLUE_SHIM);
+    }
     used_shims.extend(crate::native_slot_rewrite::heap_slot_statics());
     // Every element check exits through it (never inlined, dropped by the
     // linker when no check is written).
@@ -405,7 +415,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         out.push_str(&crate::render_native_str::almide_string_alias());
         for s in runtime {
             // Fan glue owns these sinks, including raw bytes, for every arm.
-            out.push_str(if fan_rendered() && s == crate::native_floor::FLOOR_HEADER {
+            out.push_str(if fan_rendered() && s == crate::native_floor::floor_header() {
                 s.strip_suffix(crate::native_floor::FLOOR_IO_HEADER).expect("floor IO suffix")
             } else { s });
             out.push_str("\n\n");
@@ -466,6 +476,8 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         let at = out.find("\n\n").map_or(0, |i| i + 2);
         out.insert_str(at, &fan_glue());
         out = route_exits(&out);
+    } else if runtime_module {
+        out = crate::native_floor::route_process_exits(&out, "almide_host_exit");
     }
     Ok(out)
 }

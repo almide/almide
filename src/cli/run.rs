@@ -53,20 +53,12 @@ fn generate_native_source(file: &str, no_check: bool, test_mode: bool, native_ve
     let (pending, metered, _) = crate::try_compile_pending(file, no_check, &opts)
         .map_err(|_| "compile failed".to_string())?;
     t.lap("frontend");
-    let rs_code = if native_verified && !test_mode {
+    let rs_code = if test_mode {
+        pending.generate_tests()?
+    } else if native_verified {
         super::render_v1_native_or_fallback(pending, metered, &opts)
     } else {
-        let rs_code = pending.generate();
-        // The NATIVE TEST harness rides the standard codegen: link the
-        // v1-rendered regions in, exactly as the run path does when the whole
-        // program walls (#3669), or meter them in the codegen (#3673).
-        match metered {
-            Some(ir) if test_mode => {
-                let source_text = almide::source_overlay::read_to_string(file).unwrap_or_default();
-                super::link_metered_regions(&source_text, rs_code, "the native test harness rides the standard codegen", ir, &opts)
-            }
-            _ => rs_code,
-        }
+        pending.generate()
     };
     t.lap("v1-native-render");
     // ALMIDE_ALLOC_COUNT (#2228): the counting allocator, when armed.

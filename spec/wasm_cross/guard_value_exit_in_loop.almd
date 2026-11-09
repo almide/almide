@@ -87,6 +87,35 @@ effect fn effect_int_nested(xs: List[Int]) -> Int = {
   n
 }
 
+fn bound_branch(words: List[String]) -> String! = {
+  var joined = ""
+  for word in words {
+    let part = if word != "" then {
+      guard word != "stop" else err("stopped")
+      println("bound:${word}")
+      word
+    } else "empty"
+    joined = joined + part
+  }
+  println("bound:done")
+  ok(joined)
+}
+
+fn bound_match(xs: List[Int]) -> Int = {
+  var total = 0
+  for x in xs {
+    let part = match x {
+      0 => 10,
+      _ => {
+        guard x > 0 else 999
+        x
+      },
+    }
+    total = total + part
+  }
+  total
+}
+
 effect fn main() -> Unit = {
   pure_unit_for([1, 2, -3, 4])
   pure_unit_for([5])
@@ -100,4 +129,9 @@ effect fn main() -> Unit = {
   println(effect_str_for(["a", "b", "stop", "c"])!)
   println(effect_str_for(["x", "y"])!)
   println("${effect_int_nested([1, 2, 4])!} ${effect_int_nested([2, 12, 4])!}")
+  let bound_ok: Result[String, String] = bound_branch(["a", "", "b"])
+  let bound_err: Result[String, String] = bound_branch(["a", "stop", "unreached"])
+  println(if bound_ok == ok("aemptyb") then "bound-ok" else "wrong")
+  println(if bound_err == err("stopped") then "bound-err" else "wrong")
+  println("${bound_match([1, 0, 2])} ${bound_match([1, -1, 2])}")
 }

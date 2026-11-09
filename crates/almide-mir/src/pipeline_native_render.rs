@@ -105,6 +105,18 @@ fn collect_expr_native_types(expr: &almide_ir::IrExpr, ts: &mut Vec<almide_lang:
     impl IrVisitor for Types<'_> {
         fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
             crate::render_native_rec::collect_tuples(&expr.ty, self.0);
+            // Map literals lower to from_list over checked (key, value)
+            // pairs. Register those introduced container types before MIR
+            // lowering, so an empty Option element cannot erase the list's
+            // identity when the renderer sees only its uniform slots.
+            if matches!(expr.kind, almide_ir::IrExprKind::MapLiteral { .. }) {
+                if let almide_lang::types::Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Map, args) = &expr.ty {
+                    if args.len() == 2 {
+                        crate::render_native_rec::collect_tuples(
+                            &almide_lang::types::Ty::list(almide_lang::types::Ty::Tuple(args.clone())), self.0);
+                    }
+                }
+            }
             almide_ir::walk_expr(self, expr);
         }
     }
@@ -137,10 +149,21 @@ fn prepare_native_top_lets(ir: &mut almide_ir::IrProgram) {
             }
         }
     }
-    let top_vars: std::collections::HashSet<_> = ir.top_lets.iter().map(|tl| tl.var).collect();
+    // An immutable alias of a stateful/eager global is a snapshot, not a
+    // constant expression to re-evaluate at every read. Close the safe set
+    // over dependencies before assigning storage to any declaration.
+    let mut top_vars: std::collections::HashSet<_> = ir.top_lets.iter()
+        .filter(|tl| !tl.mutable).map(|tl| tl.var).collect();
+    loop {
+        let remove: Vec<_> = ir.top_lets.iter()
+            .filter(|tl| top_vars.contains(&tl.var) && !total_const_init(&tl.value, &top_vars))
+            .map(|tl| tl.var).collect();
+        if remove.is_empty() { break; }
+        for id in remove { top_vars.remove(&id); }
+    }
     let mut eager = false;
     for tl in ir.top_lets.iter_mut() {
-        if !tl.mutable && !total_const_init(&tl.value, &top_vars) {
+        if !tl.mutable && !top_vars.contains(&tl.var) {
             tl.mutable = true;
             eager = true;
         }
@@ -148,6 +171,10 @@ fn prepare_native_top_lets(ir: &mut almide_ir::IrProgram) {
     if eager {
         crate::lower::install_effect_abi_facts(ir);
     }
+    let order = almide_ir::top_let_storage::dependency_init_order(ir, &std::collections::HashMap::new());
+    let positions: std::collections::HashMap<_, _> = order.into_iter().enumerate()
+        .map(|(i, id)| (id, i)).collect();
+    ir.top_lets.sort_by_key(|tl| positions.get(&tl.var).copied().unwrap_or(usize::MAX));
     if let Some(init) = synthesize_slot_init(ir) {
         ir.functions.push(init);
     }
@@ -195,6 +222,7 @@ fn rewrite_native_linked_mir(
     linked: &[LinkedSelfHost],
     functions: &mut [crate::MirFunction],
     host_results: &NativeHostResults,
+    test_harness: bool,
 ) -> Result<(), LowerError> {
     if let Some(f) = functions.iter().find(|f| recurses_on_a_heap_arg(f)) {
         return Err(LowerError::Unsupported(format!(
@@ -218,9 +246,10 @@ fn rewrite_native_linked_mir(
     // Narrow-width arithmetic computes in its declared integer type (#4006).
     for f in functions.iter_mut() {
         crate::native_narrow_rewrite::rewrite_narrow_ops(f)?;
+        crate::render_native_addr::sink_guarded_payload_reads(f);
     }
     call_slot_init_from_main(functions);
-    if !functions.iter().any(|f| f.name == "main") {
+    if !test_harness && !functions.iter().any(|f| f.name == "main") {
         return Err(LowerError::Unsupported(
             "native: main is outside the MIR-lowering subset".into(),
         ));
@@ -229,8 +258,8 @@ fn rewrite_native_linked_mir(
 }
 
 /// The storage slots holding a heap value whose declared type has a native
-/// kind (`native_slot_rewrite::heap_slot`), with a default to leave behind
-/// when one is taken. A threaded fan may coexist with these slots only
+/// kind (`native_slot_rewrite::heap_slot`). Non-default carriers use vacant
+/// cells until initialized or republished. A threaded fan may coexist only
 /// when its transitive callees and closure references cannot reach them.
 fn native_heap_slots(
     functions: &[crate::MirFunction],
@@ -246,7 +275,7 @@ fn native_heap_slots(
         .filter_map(|(slot, t)| {
             let k = native_sig_kind(&t, record_layouts, variant_layouts)?;
             let nty = crate::render_native_closure::owned_nty(k);
-            crate::render_native_rec::has_default(nty).then_some((slot, nty))
+            Some((slot, nty))
         })
         .collect()
 }
@@ -423,6 +452,33 @@ pub fn try_render_rust_checked_scoped_certified(
 }
 
 fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgram, LowerError>) -> Result<NativeRenderParts, LowerError> {
+    render_native_parts_for(prepare, false)
+}
+
+/// Native test-body preparation, with libtest framing bound into the returned
+/// artifact. The CLI switches to this route only after its full harness gates.
+pub fn try_render_rust_checked_tests_certified(
+    source: &str,
+    mut ir: almide_ir::IrProgram,
+    checker: Checker,
+    fs_roots: Option<Vec<String>>,
+) -> Result<(String, Vec<NativeCert>), LowerError> {
+    dump_native_mir_if_requested(source);
+    let plan = crate::native_test_harness::Plan::prepare(&mut ir);
+    let _entries = plan.enter();
+    let _assertions = crate::native_test_assert::Scope::enter();
+    let _scope = crate::native_fs_scope::ScopeGuard::enter(fs_roots);
+    let (mut rust, certs, functions) = render_native_parts_for(|| {
+        let mut ir = prepare_checked_ir(ir, checker, true)?;
+        plan.promote(&mut ir)?;
+        Ok(ir)
+    }, true)?;
+    rust.push_str(&plan.render(&functions)?);
+    Ok((rust, certs))
+}
+
+fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram, LowerError>, test_harness: bool) -> Result<NativeRenderParts, LowerError> {
+    let _foreign_originals = crate::native_foreign::OriginalScope::enter();
     let _error_displays = crate::native_display::ErrorDisplayScope::enter();
     crate::charge_probe::reset_budget_used();
     crate::lambda_sigs::clear();
@@ -442,8 +498,12 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     wall_native_c_exports(&ir)?;
     // #4006 C2: a discovered region window runs in the arena on this render
     // too — the `__rgn_` twins and a window fn the MIR brackets below.
-    let mut ir = ir;
+    let mut ir = native_bundled::lower_list_patterns(ir);
     crate::native_never::expand(&mut ir);
+    if test_harness {
+        crate::native_test_panic::outline(&mut ir);
+        crate::native_test_assert::outline(&mut ir);
+    }
     crate::native_defaults::expand(&mut ir);
     crate::native_mutation_places::expand(&mut ir);
     almide_codegen::pass_region_window_native::native_region_windows(&mut ir);
@@ -477,7 +537,9 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
         ));
     }
     let mut ir = ir;
+    let _foreign = crate::native_foreign::Scope::enter(&ir);
     prepare_native_top_lets(&mut ir);
+    let _fusion = crate::native_fusion::Scope::enter(&ir);
     let mut functions = lower_native_functions(&ir, &record_layouts, &variant_layouts)?;
     let own: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
     // #4006: the registry bodies the program calls, linked as certified MIR.
@@ -487,7 +549,7 @@ fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgra
     crate::native_slot_rewrite::set_heap_slots(native_heap_slots(&functions, &record_layouts, &variant_layouts));
     // No function is known to leave the heap slots alone until this program's are read.
     crate::native_slot_takes::set_quiet(&[]);
-    rewrite_native_linked_mir(&ir, &linked, &mut functions, &host_results)?;
+    rewrite_native_linked_mir(&ir, &linked, &mut functions, &host_results, test_harness)?;
     let mut sigs = native_sigs_with_linked(&ir, &functions, &linked, &record_layouts, &variant_layouts)?;
     insert_native_probe_charges(&ir, &mut functions, &mut sigs);
     // #824: see the wasm leg's call above — `Op::MakeUnique` already renders to

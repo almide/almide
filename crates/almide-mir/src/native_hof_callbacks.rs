@@ -140,7 +140,7 @@ fn bind_env(side: &mut FnArgOut, name: &str, (blk, t): (ValueId, NTy), slots: Op
         side.prelude.push(format!("let {name} = &{};", var(blk)));
         side.share.push(format!("almide_str_block::almide_str_mark_reachable({name});"));
         if unnamed {
-            side.prelude.push(format!("if {name}.len() == 0 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}"));
+            side.prelude.push(format!("if {name}.len() == 0 {{ almide_abort(\"index out of bounds\"); }}"));
             side.prelude.push(format!("let {name}_index: i64 = {name}.words()[0];"));
             side.reads.push(crate::render_native_bounds::Slot { base: blk, idx: None, k: 0 });
         }

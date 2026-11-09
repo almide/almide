@@ -8,7 +8,26 @@
 // nested-Option `get` wrapper has no verified drop class yet).
 // The value shapes cover the fuzz specimens: a bound var, an inline ctor, `none`,
 // and an if-result — each held by both an inline literal and a bound one.
+type MapNode = { v: Int, kids: Map[String, MapNode], opts: List[MapNode?] }
+
+fn map_node_sum(n: MapNode) -> Int = {
+  var sum = n.v
+  for (name, child) in n.kids { sum = sum + string.len(name) + map_node_sum(child) }
+  for child in n.opts {
+    sum = sum + match child { some(c) => map_node_sum(c), none => 0 }
+  }
+  sum
+}
+
 fn main() -> Unit = {
+  let node: MapNode = {
+    v: 1,
+    kids: map.set(map.new(), "ab", { v: 2, kids: map.new(), opts: [] }),
+    opts: [some({ v: 5, kids: map.new(), opts: [] }), none],
+  }
+  let alias = node
+  println("recursive-map=${map_node_sum(node)} alias=${map_node_sum(alias)}")
+  println("recursive-keys=${map.keys(node.kids)}")
   let v: Int? = some(41)
   let w: Int? = none
   // pairs lists: inline ctor elements and var elements
@@ -41,4 +60,8 @@ fn main() -> Unit = {
   let mf = ["x": some(1.5), "y": none]
   println("${(map.get(mf, "x") ?? none) ?? -0.5}")
   println("${(map.get(mf, "y") ?? none) ?? -0.5}")
+  let strings: Map[String, String?] = ["hit": some("z"), "empty": none]
+  println((map.get(strings, "hit") ?? none) ?? "missing")
+  println((map.get(strings, "empty") ?? some("wrong")) ?? "empty")
+  println((map.get(strings, "absent") ?? some("fallback")) ?? "wrong")
 }

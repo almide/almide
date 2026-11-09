@@ -76,6 +76,7 @@ fn render_fn(
         // codegen's `main` (the shared text, already 4-space indented).
         out.push_str(almide_codegen::main_sigpipe_prelude_text());
         line!("almide_stack_guard_install();");
+        line!("let _almide_host_exit = AlmideHostExitGuard;");
     }
     if is_main && crate::charge_probe::probe_enabled() {
         used_shims.push(COUNTER_SHIM);
@@ -207,6 +208,22 @@ fn render_fn_step<'a>(
 ) -> Result<bool, LowerError> {
     crate::render_native_bounds::at(i);
     crate::native_hof::at(st.func, i);
+    if crate::native_foreign::render(st.func, op, st.sigs, &mut st.tys, &mut st.out, st.indent)? {
+        return Ok(false);
+    }
+    if let Op::Prim { kind: crate::PrimKind::Die, dst: None, args } = op {
+        if let [message] = args.as_slice() {
+            if let Some(call) = crate::native_test_assert::failure(st.func, *message) {
+                let _ = writeln!(st.out, "{}{call};", "    ".repeat(st.indent));
+                return Ok(true);
+            }
+            if crate::native_test_panic::is_message(st.func, *message) && matches!(st.tys.get(message), Some(NTy::Str | NTy::StrRef)) {
+                let call = format!("__almd_native_test_panic({})", var(*message));
+                let _ = writeln!(st.out, "{}{call};", "    ".repeat(st.indent));
+                return Ok(true);
+            }
+        }
+    }
     if st.borrowed_tails.contains(&i) {
         crate::native_borrowed_tco::render(st.func, op, &mut st.tys, &mut st.out, st.indent)?;
         return Ok(false);
@@ -552,7 +569,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                 && crate::render_native_move::last_use(func, i, args[0], NTy::Str, &st.borrows.arms) =>
         {
             st.tys.insert(*d, NTy::Res);
-            line!("let {}: Result<i64, AlmideString> = Err({});", var(*d), crate::render_native_move::take_expr(&var(args[0])));
+            line!("let mut {}: Result<i64, AlmideString> = Err({});", var(*d), crate::render_native_move::take_expr(&var(args[0])));
         }
         Op::SetLocal { local, src }
             if st.tys.get(src).is_some_and(|t| {

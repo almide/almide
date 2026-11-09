@@ -64,7 +64,8 @@ pub(crate) fn is_carrier(i: u16) -> bool {
 }
 
 /// The declared kind of a carrier's slot 0, when it is one kind: an Option's
-/// payload; a Result's when both sides agree or only one is a generated type.
+/// payload, or a Result whose two sides agree. Being the only generated
+/// record is insufficient: the other side may own a String or scalar list.
 pub(crate) fn slot_kind(i: u16, k: usize) -> Option<NTy> {
     if k != 0 {
         return None;
@@ -73,13 +74,7 @@ pub(crate) fn slot_kind(i: u16, k: usize) -> Option<NTy> {
         return Some(p);
     }
     let (o, e) = result_payloads(i)?;
-    match (o, e) {
-        _ if o == e => Some(o),
-        (NTy::Rec(_), NTy::Rec(_)) => None,
-        (NTy::Rec(_), _) => Some(o),
-        (_, NTy::Rec(_)) => Some(e),
-        _ => None,
-    }
+    (o == e).then_some(o)
 }
 
 fn set_carrier(ty: &mut BTreeMap<ValueId, u16>, v: ValueId, i: Option<u16>) {
@@ -188,125 +183,24 @@ fn tag_comparison(
     op: crate::IntOp, a: ValueId, b: ValueId,
     consts: &BTreeMap<ValueId, i64>, tags: &BTreeMap<ValueId, (ValueId, bool)>,
 ) -> Option<(ValueId, bool)> {
-    if !matches!(op, crate::IntOp::Eq | crate::IntOp::Ne) { return None; }
-    [(a, b), (b, a)].into_iter().find_map(|(tag, constant)| {
+    let compare = |x, y| Some(match op {
+        crate::IntOp::Eq => x == y, crate::IntOp::Ne => x != y,
+        crate::IntOp::Lt => x < y, crate::IntOp::Le => x <= y,
+        crate::IntOp::Gt => x > y, crate::IntOp::Ge => x >= y,
+        _ => return None,
+    });
+    [(a, b, false), (b, a, true)].into_iter().find_map(|(tag, constant, reversed)| {
         let &(root, side) = tags.get(&tag)?;
         let &n = consts.get(&constant)?;
         if !matches!(n, 0 | 1) { return None; }
-        let positive = (op == crate::IntOp::Eq) == (n == 1);
+        let at = |v| if reversed { compare(n, v) } else { compare(v, n) };
+        let positive = at(1)?;
+        if at(0)? == positive { return None; } // Does not select one tag side.
         Some((root, if positive { side } else { !side }))
     })
 }
 
-/// The side each hoisted payload read `op` reads is used under (`None` once
-/// two uses disagree).
-fn note_hoisted_uses(
-    op: &Op,
-    reads: &BTreeMap<ValueId, ValueId>,
-    arms: &[(Option<ValueId>, bool)],
-    sides: &mut BTreeMap<ValueId, Option<bool>>,
-) {
-    let mut used = Vec::new();
-    crate::mir_ops::op_reads(op, &mut used);
-    for v in used {
-        let Some(root) = reads.get(&v) else { continue };
-        let side = arms.iter().rev().find(|(r, _)| *r == Some(*root)).map(|(_, then)| *then);
-        let e = sides.entry(v).or_insert(side);
-        if *e != side {
-            *e = None;
-        }
-    }
-}
-
-/// A payload read the match lowering hoists above its tag test (both arms'
-/// binders are read before the `if`) → the side its uses select: `true` =
-/// the then-arm (tag 1, Err). Read off where the value is used: every use
-/// inside one arm of an `if` that tests the same block's tag word.
-pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
-    let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
-    let mut at: BTreeMap<ValueId, (ValueId, i64)> = BTreeMap::new();
-    let mut tags: BTreeMap<ValueId, (ValueId, bool)> = BTreeMap::new();
-    let mut reads: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-    let mut sides: BTreeMap<ValueId, Option<bool>> = BTreeMap::new();
-    let mut arms: Vec<(Option<ValueId>, bool)> = Vec::new();
-    let mutable: std::collections::BTreeSet<_> = func.ops.iter().filter_map(|op|
-        if let Op::SetLocal { local, .. } = op { Some(*local) } else { None }).collect();
-    for op in &func.ops {
-        // Uses first: a read used under a tag test of its own block.
-        note_hoisted_uses(op, &reads, &arms, &mut sides);
-        let changed = match op {
-            Op::SetLocal { local, .. } => Some(*local),
-            Op::Prim { kind: PrimKind::Store { .. }, args, .. } => args.first().and_then(|a| at.get(a)).map(|(root, _)| *root),
-            _ => None,
-        };
-        if let Some(root) = changed {
-            for (read, base) in &reads { if *base == root { sides.insert(*read, None); } }
-            tags.retain(|key, (base, _)| *key != root && *base != root);
-            for (base, _) in &mut arms { if *base == Some(root) { *base = None; } }
-        }
-        note_hoist_facts(op, &mutable, &mut consts, &mut at, &mut tags, &mut reads, &mut arms);
-    }
-    sides.into_iter().filter_map(|(v, s)| s.map(|s| (v, s))).collect()
-}
-
-/// [`hoisted_sides`]' facts from one op: the constants, the addresses off a
-/// block's handle, the tag words and payload reads loaded through them, and
-/// the open tag tests.
-fn note_hoist_facts(
-    op: &Op,
-    mutable: &std::collections::BTreeSet<ValueId>,
-    consts: &mut BTreeMap<ValueId, i64>,
-    at: &mut BTreeMap<ValueId, (ValueId, i64)>,
-    tags: &mut BTreeMap<ValueId, (ValueId, bool)>,
-    reads: &mut BTreeMap<ValueId, ValueId>,
-    arms: &mut Vec<(Option<ValueId>, bool)>,
-) {
-        match op {
-            Op::ConstInt { dst, value } => {
-                if !mutable.contains(dst) { consts.insert(*dst, *value); }
-            }
-            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
-                at.insert(*d, (args[0], 0));
-            }
-            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
-                if let (Some(&(r, o)), Some(c)) = (at.get(a), consts.get(b)) {
-                    at.insert(*dst, (r, o + c));
-                }
-            }
-            Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(d), args } if args.len() == 1 => {
-                // The tag word of either Result layout (an Option's length
-                // word lands here too; only a Result's payload read asks).
-                if let Some(&(r, o)) = at.get(&args[0]) {
-                    if o == RESULT_TAG_OFFSET || o == i64::from(BLOCK_LEN_OFFSET) {
-                        if !mutable.contains(d) { tags.insert(*d, (r, true)); }
-                    }
-                }
-            }
-            Op::Prim { kind: PrimKind::LoadHandle | PrimKind::Load { width: 8 }, dst: Some(d), args } if args.len() == 1 => {
-                if let Some(&(r, o)) = at.get(&args[0]) {
-                    if o == i64::from(BLOCK_HEADER) {
-                        reads.insert(*d, r);
-                    }
-                }
-            }
-            Op::IntBinOp { dst, op: cmp @ (crate::IntOp::Eq | crate::IntOp::Ne), a, b } => {
-                if !mutable.contains(dst) {
-                    if let Some(tag) = tag_comparison(*cmp, *a, *b, &consts, &tags) { tags.insert(*dst, tag); }
-                }
-            }
-            Op::IfThen { cond, .. } => arms.push(tags.get(cond).copied()
-                .map(|(r, s)| (Some(r), s)).unwrap_or((None, true))),
-            Op::Else { .. } => {
-                if let Some(a) = arms.last_mut() {
-                    a.1 = !a.1;
-                }
-            }
-            Op::EndIf { .. } => {
-                arms.pop();
-            }
-            _ => {}
-        }
-}
+include!("render_native_carrier_guards.rs");
 
 #[cfg(test)]
 #[path = "render_native_carrier_guard_test.rs"]
@@ -346,7 +240,7 @@ fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy)
         Some(g) if field_accepts(k, g) => owned_from(&var(sv.base), g).ok_or_else(|| wall("native: an unowned carrier payload")),
         Some(g) if crate::native_value_repr::tuple_copy(&var(sv.base), g, k).is_some() =>
             Ok(crate::native_value_repr::tuple_copy(&var(sv.base), g, k).unwrap()),
-        g => Err(wall(format!("native: a {g:?} value as a {k:?} carrier payload"))),
+        g => Err(wall(format!("native: a {g:?} value as a {k:?} carrier payload (source {:?})", sv.base))),
     }
 }
 
@@ -361,7 +255,7 @@ pub(super) fn render_carrier_op(
 ) -> Option<Result<bool, LowerError>> {
     let mut cx = CarrierCx { st, tys, out, indent };
     match op {
-        Op::IntBinOp { dst, op: cmp @ (crate::IntOp::Eq | crate::IntOp::Ne), a, b } => {
+        Op::IntBinOp { dst, op: cmp, a, b } => {
             if ![dst, a, b].iter().any(|v| cx.st.set_locals.contains(v)) {
                 if let Some(tag) = tag_comparison(*cmp, *a, *b, &cx.st.consts, &cx.st.res_tags) {
                     cx.st.res_tags.insert(*dst, tag);
@@ -519,8 +413,9 @@ impl CarrierCx<'_> {
     /// Result's tag as `is_err`, recorded as that Result's tag.
     fn tag_read(&mut self, d: ValueId, b: &str, base: ValueId, err: bool) -> Result<bool, LowerError> {
         self.tys.insert(d, NTy::I64);
+        // Both carriers expose a true tag: Err for Result, Some for Option.
+        if !self.st.set_locals.contains(&d) { self.st.res_tags.insert(d, (base, true)); }
         if err {
-            if !self.st.set_locals.contains(&d) { self.st.res_tags.insert(d, (base, true)); }
             self.emit(&format!("let mut {}: i64 = {b}.is_err() as i64;", var(d)));
         } else {
             self.emit(&format!("let mut {}: i64 = {b}.is_some() as i64;", var(d)));
@@ -561,7 +456,9 @@ impl CarrierCx<'_> {
         }
         let b = var(ad.base);
         let read = if let Some(p) = option_payload(i) {
-            let absent = if has_default(p) { "Default::default()".to_string() }
+            let guarded_some = self.st.arms.iter().rev().find(|(r, _)| *r == Some(ad.base)).is_some_and(|(_, side)| *side);
+            let absent = if guarded_some { "unreachable!()".to_string() }
+                else if has_default(p) { "Default::default()".to_string() }
                 else if self.st.hoisted.get(&d) == Some(&true) {
                     // Every use is under this unchanged Option's Some tag.
                     // A nested Result has no Default; its absent-side value

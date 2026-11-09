@@ -367,12 +367,19 @@ pub fn desugar_map_literal(body: &IrExpr) -> Option<IrExpr> {
                 Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 => (a[0].clone(), a[1].clone()),
                 _ => return,
             };
-            let tuple_ty = Ty::Tuple(vec![k_ty, v_ty].into());
+            let tuple_ty = Ty::Tuple(vec![k_ty, v_ty.clone()].into());
             let elements: Vec<IrExpr> = entries
                 .iter()
                 .map(|(k, v)| IrExpr {
                     kind: IrExprKind::Tuple {
-                        elements: vec![k.clone(), v.clone()],
+                        // A carrier constructor does not determine its absent
+                        // channel (none, an Ok's error, or an Err's success).
+                        // The checked map supplies the complete declaration.
+                        elements: vec![k.clone(), if matches!(v.kind,
+                            IrExprKind::OptionNone | IrExprKind::OptionSome { .. }
+                            | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }) {
+                            IrExpr { ty: v_ty.clone(), ..v.clone() }
+                        } else { v.clone() }],
                     },
                     ty: tuple_ty.clone(),
                     span: e.span.clone(),

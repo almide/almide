@@ -150,7 +150,7 @@ pub(crate) fn render_call(
         .params
         .iter()
         .zip(args)
-        .find(|(p, _)| matches!(p, FloorParam::List(ListElem::Any)))
+        .find(|(p, _)| matches!(p, FloorParam::List(ListElem::Any) | FloorParam::ListOwned(ListElem::Any)))
         .and_then(|(_, (_, got))| match got {
             NTy::Vec | NTy::VecRef => Some(NTy::I64),
             NTy::VecStr | NTy::VecStrRef => Some(NTy::Str),
@@ -161,9 +161,9 @@ pub(crate) fn render_call(
     if f.str_only && elem_str != Some(true) {
         return Err(wall(format!("native: floor call `{name}` bounds its element by equality or ordering, served for a String list only")));
     }
-    // A generated struct or enum (a declared record or variant, a tuple) has
-    // no `Ord`: an ordering-bound element of that kind is v0's to render.
-    if f.ordered && elem_kind.and_then(NTy::rec).is_some_and(|i| crate::render_native_rec::field_count(i) > 0 || crate::render_native_rec::enum_cases(i).is_some()) {
+    // The source declaration and native representation must establish the
+    // same order; erased Float/unsigned lanes do not establish it.
+    if f.ordered && elem_kind.and_then(NTy::rec).is_some_and(|i| !crate::render_native_rec::native_order_safe(i)) {
         return Err(wall(format!("native: floor call `{name}` orders a declared record or variant, whose generated type derives no ordering")));
     }
     let cx = CallCx { mismatch: &mismatch, map_kv, elem_str, elem_kind, set_e, name, params: &f.params, args };
@@ -237,11 +237,26 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
         FloorParam::List(ListElem::Any) if cx.set_e.is_some() =>
             set_source_list_arg(cx.set_e.unwrap(), code, *got).ok_or_else(mismatch)?,
         FloorParam::List(elem) => list_arg(*elem, code, *got).ok_or_else(mismatch)?,
+        FloorParam::ListOwned(elem) => {
+            let borrowed = if *elem == ListElem::Any && cx.set_e.is_some() {
+                set_source_list_arg(cx.set_e.unwrap(), code, *got)
+            } else { list_arg(*elem, code, *got) }.ok_or_else(mismatch)?;
+            if dying_here && borrowed == format!("&{code}")
+                && matches!(got, NTy::Vec | NTy::VecStr | NTy::Rec(_)) {
+                crate::render_native_move::take_expr(code)
+            } else { format!("({borrowed}).to_vec()") }
+        }
         FloorParam::Elem(by_ref) => elem_arg(cx, *by_ref, code, got)?,
         FloorParam::Map(by_ref) => map_arg(cx, *by_ref, code, got, dying_here)?,
         FloorParam::MapKey(by_ref) | FloorParam::MapVal(by_ref) => map_entry_arg(cx, p, *by_ref, code, got, dying_here)?,
         FloorParam::MapPairs => map_pairs_arg(cx, code, got)?,
         FloorParam::Value(by_ref) => value_arg(cx, *by_ref, code, got, dying_here)?,
+        FloorParam::Runtime(t, by_ref) => {
+            if !t.accepts(*got) { return Err(mismatch()); }
+            if *by_ref {
+                if matches!(got, NTy::RecRef(_)) { code.to_string() } else { format!("&{code}") }
+            } else { format!("({code}).clone()") }
+        }
         FloorParam::Set(_) | FloorParam::SetElem(_) | FloorParam::Matrix(_) | FloorParam::BytesMut => runtime_arg(cx, p, code, got, dying_here)?,
         FloorParam::Bytes => match got {
             NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&{code}"),
@@ -375,7 +390,11 @@ fn map_entry_arg(cx: &CallCx, p: &FloorParam, by_ref: bool, code: &str, got: &NT
 
 /// A `List[(K, V)]` param's argument.
 fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerError> {
-    let mismatch = cx.mismatch;
+    let mismatch = || wall(format!(
+        "native: map pairs argument {got:?} (element {:?}, pair kinds {:?}) cannot serve {:?} in `{}`",
+        got.rec().and_then(crate::render_native_rec::list_elem),
+        got.rec().and_then(pair_kinds), cx.map_kv, cx.name
+    ));
     let (NTy::Rec(i) | NTy::RecRef(i)) = got else { return Err(mismatch()) };
     let pair = crate::render_native_rec::list_elem(*i).ok_or_else(mismatch)?;
     let (a, b) = match pair {
@@ -388,7 +407,9 @@ fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerErro
     let (got_k, got_v) = pair_kinds(*i).ok_or_else(mismatch)?;
     let (want_k, want_v) = cx.map_kv.ok_or_else(mismatch)?;
     let a = if crate::native_value_repr::same_owned(want_k, got_k) { a } else { owned_arg(want_k, &a, got_k).ok_or_else(mismatch)? };
-    let b = if crate::native_value_repr::same_owned(want_v, got_v) { b } else { owned_arg(want_v, &b, got_v).ok_or_else(mismatch)? };
+    let b = if crate::native_value_repr::same_owned(want_v, got_v) { b } else { owned_arg(want_v, &b, got_v).ok_or_else(|| wall(format!(
+        "native: map pair value cannot convert {got_v:?} to {want_v:?} in `{}`", cx.name
+    )))? };
     Ok(format!("{code}.iter().map(|t| ({a}, {b})).collect::<Vec<_>>()"))
 }
 

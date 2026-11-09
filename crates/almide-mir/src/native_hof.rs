@@ -63,6 +63,7 @@ enum DTy {
     Matrix,
     Value,
     Bytes,
+    Runtime(crate::native_runtime_types::RuntimeType),
     List(Box<DTy>),
     Tuple(Vec<DTy>),
     Opt(Box<DTy>),
@@ -99,45 +100,7 @@ pub(crate) struct Hof {
     owned: Option<(usize, String)>,
 }
 
-fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
-    Some(match t {
-        TypeExpr::Simple { name } => simple_dty(name.as_str(), tps)?,
-        TypeExpr::Tuple { elements } => DTy::Tuple(elements.iter().map(|e| dty_of(e, tps)).collect::<Option<_>>()?),
-        TypeExpr::Generic { name, args } => generic_dty(name.as_str(), args, tps)?,
-        TypeExpr::Fn { params, ret, is_effect: false } => {
-            DTy::Fn(params.iter().map(|p| dty_of(p, tps)).collect::<Option<_>>()?, Box::new(dty_of(ret, tps)?))
-        }
-        _ => return None,
-    })
-}
-
-/// [`dty_of`] for a bare type name: a primitive or a declared type parameter.
-fn simple_dty(name: &str, tps: &BTreeSet<String>) -> Option<DTy> {
-    Some(match name {
-        "Unit" => DTy::Unit,
-        "Int" => DTy::Int,
-        "Bool" => DTy::Bool,
-        "Float" => DTy::Float,
-        "String" => DTy::Str,
-        "Matrix" => DTy::Matrix,
-        "Value" => DTy::Value,
-        "Bytes" => DTy::Bytes,
-        a if tps.contains(a) => DTy::Var(a.to_string()),
-        _ => return None,
-    })
-}
-
-/// [`dty_of`] for an applied generic: the one- and two-argument containers.
-fn generic_dty(name: &str, args: &[TypeExpr], tps: &BTreeSet<String>) -> Option<DTy> {
-    Some(match (name, args.len()) {
-        ("List", 1) => DTy::List(Box::new(dty_of(&args[0], tps)?)),
-        ("Set", 1) => DTy::Set(Box::new(dty_of(&args[0], tps)?)),
-        ("?" | "Option", 1) => DTy::Opt(Box::new(dty_of(&args[0], tps)?)),
-        ("Map", 2) => DTy::Map(Box::new(dty_of(&args[0], tps)?), Box::new(dty_of(&args[1], tps)?)),
-        ("Result", 2) => DTy::Result(Box::new(dty_of(&args[0], tps)?), Box::new(dty_of(&args[1], tps)?)),
-        _ => return None,
-    })
-}
+include!("native_hof_decl_types.rs");
 
 /// The runtime's Rust spelling of a declared type agrees with it (squashed);
 /// `Some(by_ref)` when it does.
@@ -159,6 +122,7 @@ fn scalar_agrees(d: &DTy, r: &str, by_ref: bool) -> Option<bool> {
         DTy::Matrix => r == "AlmideMatrix",
         DTy::Value => r == "AlmideValue",
         DTy::Bytes => r == "Vec<u8>" || (by_ref && r == "[u8]"),
+        DTy::Runtime(runtime) => r == runtime.rust(),
         DTy::Var(_) => r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !by_ref,
         _ => return None,
     })
@@ -226,7 +190,7 @@ pub(crate) fn of(impl_fn: &str) -> Option<&'static Hof> {
 pub(crate) fn declared_call(call: &str) -> bool {
     crate::mir_ops::self_host_runtime().iter().any(|(_, pairs)| {
         pairs.iter().any(|(implementation, source)| *source == call && of(implementation).is_some())
-    })
+    }) || (crate::host_ops::host_op_for_call_name(call).is_some() && of(call).is_some())
 }
 
 // ── per-render state ──
@@ -496,7 +460,7 @@ pub(crate) fn try_render(
         crate::render_native_bounds::access(slot);
     }
     if almide_codegen::generated::runtime_fn_modes::crosses_threads(&hof.symbol) { crate::render_native::require_fan_runtime(); }
-    used_shims.push(crate::native_floor::FLOOR_HEADER);
+    used_shims.push(crate::native_floor::floor_header());
     used_shims.extend(hof.items.iter().copied());
     used_shims.extend(shims);
     let pad = "    ".repeat(indent);
@@ -609,13 +573,13 @@ fn plan(
         let ret = sigs.get(call.name)?.1?;
         bind_param(&mut env, &hof.ret, clo::owned_nty(ret))?;
     }
-    let ret = kind_of(&env, &hof.ret)?;
+    let ret = declared_return.or_else(|| kind_of(&env, &hof.ret))?;
     if almide_codegen::generated::runtime_fn_modes::crosses_threads(&hof.symbol) { side.prelude.append(&mut side.share); }
     if hof.symbol == "almide_rt_list_flat_map" && twin == hof.twin {
         twin = flat_map_array_route(call, (&origins, user_fns), &mut rendered, &mut side).unwrap_or(twin);
     }
     let expr = format!("{}({})", twin, rendered.join(", "));
-    let expr = runtime_result(&env, &hof.ret, &expr)?;
+    let expr = runtime_result_as(&env, &hof.ret, &expr, ret)?;
     Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims, side.reads)))
 }
 

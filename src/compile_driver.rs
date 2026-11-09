@@ -830,16 +830,8 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile], re
         return Err(BatchFailure { message: format!("errors in {} module(s)", failing.len()), culprits });
     }
     let permissions_project = project::permissions_project_for(&first).or_else(|| plan.project.clone());
+    let native_input = (ir_program.clone().ok_or_else(|| unattributed("the test run did not lower".into()))?, checker);
     optimize_verify_and_link(&mut ir_program, &permissions_project, (&first, "")).map_err(unattributed)?;
-    let ir = ir_program.as_mut().ok_or_else(|| unattributed("the test run did not lower".into()))?;
-    // A metered program (`fan.bounded` & co.) links v1-rendered regions
-    // against its entry file's source: that stays a per-file build.
-    if almide::ir::runtime_use::uses_metered_prims(ir) {
-        return Err(unattributed("a test file uses the deterministic meter".into()));
-    }
-    let rs_code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, &codegen::CodegenOptions::default()) {
-        codegen::CodegenOutput::Source(s) => s,
-        codegen::CodegenOutput::Binary(_) => unreachable!(),
-    };
+    let rs_code = render_native_tests("", native_input).map_err(unattributed)?;
     Ok(TestRunProgram { rs_code, test_prefixes })
 }

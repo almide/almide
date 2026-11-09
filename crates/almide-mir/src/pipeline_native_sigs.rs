@@ -163,7 +163,7 @@ fn native_rec_sig_kind(t: &almide_lang::types::Ty) -> Option<crate::render_nativ
         Ty::Named(_, _) if crate::render_native_rec::is_scalar_instance(t) => Some(NativeSigKind::ListI64),
         Ty::Named(_, _) => crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec),
         Ty::Bytes => Some(NativeSigKind::Rec(crate::render_native_rec::bytes_index())),
-        Ty::Matrix => Some(NativeSigKind::Rec(crate::render_native_rec::matrix_index())),
+        t if crate::render_native_rec::is_matrix_ty(t) => Some(NativeSigKind::Rec(crate::render_native_rec::matrix_index())),
         // #4006: a heap Option / a Result outside the scalar carriers rides its
         // generated `Option<T>` / `Result<T, E>`.
         Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _) => heap_carrier_of(t).map(NativeSigKind::Rec),
@@ -331,8 +331,8 @@ fn scalar_lambda_native_sig(f: &crate::MirFunction) -> Result<NativeSig, LowerEr
             }
             _ => {
                 return Err(LowerError::Unsupported(format!(
-                    "native: lambda `{}` heap param — outside the closures slab",
-                    f.name
+                    "native: lambda `{}` heap param — outside the closures slab (declared {:?})",
+                    f.name, crate::lambda_sigs::get(&f.name)
                 )))
             }
         }

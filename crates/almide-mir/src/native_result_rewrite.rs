@@ -39,14 +39,18 @@
 use crate::{Init, MirFunction, Op, PrimKind, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Source host calls use their typed registry return layout. In particular,
-/// routed fold_lines_i returns Result[Int, String] with tag +4, while a
-/// Unit-returning walker uses +16. A host name alone cannot choose the family.
-/// Unregistered direct host rows retain their existing host ABI.
+/// Read a host result's layout from its typed implementation or its checked
+/// intrinsic declaration. Private OS primitives need not have a self-hosted
+/// registry body; their scalar Results still use the length-word tag.
 pub(crate) fn host_uses_cap_tag(name: &str) -> bool {
-    crate::host_ops::host_op_for_call_name(name).is_some_and(|o| o.returns_result)
-        && crate::lower::registry_sig::registry_signature(name).is_none_or(|sig|
-            crate::lower::result_family(&sig.ret) == crate::lower::ResultFamily::HeapOk)
+    if !crate::host_ops::host_op_for_call_name(name).is_some_and(|o| o.returns_result) {
+        return false;
+    }
+    if let Some(sig) = crate::lower::registry_sig::registry_signature(name) {
+        return crate::lower::result_family(&sig.ret) == crate::lower::ResultFamily::HeapOk;
+    }
+    !matches!(crate::native_floor::declared(name).map(|f| f.ret),
+        Some(crate::native_floor::FloorRet::Res(Some(_))))
 }
 
 /// Rewrite every recognized Result window in `f`. `result_fns` names the
@@ -83,6 +87,12 @@ pub(crate) fn rewrite_result_ops_with_host_values(
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = ResultWindowTracker::default();
     t.cap_tag.extend(host_values.iter().copied());
+    // Unit Results use the shared heap-family tag offset even though native
+    // represents their Ok payload as the scalar zero. This also covers a
+    // branch join, which is not a host-call result.
+    let unit_result = almide_lang::types::Ty::result(almide_lang::types::Ty::Unit, almide_lang::types::Ty::String);
+    let unit_key = crate::render_native_rec::block_key(&unit_result);
+    t.unit_results.extend(f.aggregate_blocks.iter().filter_map(|(v, key)| (key == &unit_key).then_some(*v)));
     // A param declared as a carrier Result (#4006 family C) is one.
     t.res_vals.extend(res_params.iter().copied());
 
@@ -186,6 +196,9 @@ struct ResultWindowTracker {
     /// Results of a host op (`host_ops::HostOp::returns_result`): the host's
     /// cap-as-tag block, whose tag the match lowering reads at +16.
     cap_tag: BTreeSet<ValueId>,
+    /// Unit constructors use scalar tags; typed joins may use HeapOk tags.
+    /// Both consumers denote the discriminant after conversion to a Rust Result.
+    unit_results: BTreeSet<ValueId>,
 }
 
 impl ResultWindowTracker {
@@ -249,7 +262,8 @@ impl ResultWindowTracker {
         // every other one the scalar carrier (tag @+4).
         let tag_at = if self.cap_tag.contains(&r) { 16 } else { 4 };
         let res_kind = match (kind, off) {
-            (PrimKind::Load { width: 4 }, o) if o == tag_at => Some(PrimKind::ResTag),
+            (PrimKind::Load { width: 4 }, o)
+                if o == tag_at || (self.unit_results.contains(&r) && matches!(o, 4 | 16)) => Some(PrimKind::ResTag),
             (PrimKind::Load { width: 8 }, 12) => Some(PrimKind::ResOkScalar),
             (PrimKind::LoadHandle, 12) => Some(PrimKind::ResErrStr),
             _ => None,
@@ -314,7 +328,8 @@ fn sweep_dead_window_material(out: &mut Vec<Op>, ret: Option<ValueId>) {
         let before = out.len();
         out.retain(|op| match op {
             Op::ConstInt { dst, .. } => used.contains(dst),
-            Op::IntBinOp { dst, .. } => used.contains(dst),
+            Op::IntBinOp { dst, op, .. } => used.contains(dst)
+                || matches!(op, crate::IntOp::Div | crate::IntOp::Mod | crate::IntOp::DivU | crate::IntOp::ModU),
             Op::Prim {
                 kind: PrimKind::Handle,
                 dst: Some(d),
@@ -436,10 +451,27 @@ mod host_result_layout_tests {
     use super::*;
 
     #[test]
+    fn discarded_division_and_remainder_keep_their_traps() {
+        for op in [crate::IntOp::Div, crate::IntOp::Mod, crate::IntOp::DivU, crate::IntOp::ModU] {
+            let mut ops = vec![
+                Op::ConstInt { dst: ValueId(0), value: 1 },
+                Op::ConstInt { dst: ValueId(1), value: 0 },
+                Op::IntBinOp { dst: ValueId(2), op, a: ValueId(0), b: ValueId(1) },
+                Op::IntBinOp { dst: ValueId(3), op: crate::IntOp::Add, a: ValueId(0), b: ValueId(1) },
+            ];
+            sweep_dead_window_material(&mut ops, None);
+            assert_eq!(ops.len(), 3);
+            assert!(matches!(ops[2], Op::IntBinOp { dst: ValueId(2), .. }));
+        }
+    }
+
+    #[test]
     fn host_tag_layout_follows_the_typed_twin_through_renaming() {
         for (source, expected_tag) in [("fs.fold_lines_i", 4),
             ("fs.__fallible_fold_lines_i", 4), ("fs.for_each_line", 16),
-            ("fs.__fallible_for_each_line", 16), ("fs.write_text", 16)] {
+            ("fs.__fallible_for_each_line", 16), ("fs.write_text", 16),
+            ("process.__os_poll", 4), ("process.__os_start", 4),
+            ("net.__os_tcp_listen", 4), ("net.__os_tcp_write", 16)] {
             assert_eq!(host_uses_cap_tag(source), expected_tag == 16, "{source}");
             for offset in [4, 16] {
                 let mut f = MirFunction { name: "test".into(), ops: vec![

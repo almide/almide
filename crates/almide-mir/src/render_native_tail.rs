@@ -37,7 +37,14 @@ fn finish_native_fn(
         && matches!(sigs.get(func.name.as_str()), Some((_, Some(NativeSigKind::F64))))
         && matches!(func.ret.and_then(|v| tys.get(&v)), Some(NTy::I64));
     let never_return = sigs.get(func.name.as_str()).is_some_and(|(_, r)| *r == Some(NativeSigKind::Never));
-    let ret_override = if never_return { Some(NTy::Never) } else if lifted_wrap { Some(NTy::Res) } else if float_wrap { Some(NTy::F64) } else { None };
+    // A body that always terminates has no MIR return value, but its declared
+    // API may still return String (or another inhabited type). Keep that
+    // declaration: callers must not see a spurious `()` result. Rust also
+    // checks that no path falls through this value-returning body.
+    let declared_without_value = (!is_main && func.ret.is_none())
+        .then(|| sigs.get(func.name.as_str()).and_then(|(_, r)| *r))
+        .flatten().map(crate::render_native_closure::owned_nty);
+    let ret_override = if never_return { Some(NTy::Never) } else if lifted_wrap { Some(NTy::Res) } else if float_wrap { Some(NTy::F64) } else { declared_without_value };
     // Signature: the return type is known only after the body typed `func.ret`.
     let mut sig = render_native_fn_sig(func, tys, is_main, ret_override)?;
     sig.push_str(" {\n");

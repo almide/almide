@@ -396,9 +396,9 @@ impl LowerCtx {
                 if self.variant_layouts.is_ctor_for(ctor.as_str(), &value.ty) =>
             {
                 let ctor_s = ctor.as_str().to_string();
-                let case_fields = {
-                    let (_, _, case) = self.variant_layouts.lookup_ctor_for(&ctor_s, &value.ty)?;
-                    case.fields.clone()
+                let (case_fields, defaults_key) = {
+                    let (owner, _, case) = self.variant_layouts.lookup_ctor_for(&ctor_s, &value.ty)?;
+                    (case.fields.clone(), format!("{owner}::{}", case.ctor))
                 };
                 let mut ordered = Vec::with_capacity(case_fields.len());
                 for (fname, _) in &case_fields {
@@ -413,7 +413,7 @@ impl LowerCtx {
                             let d = self
                                 .variant_layouts
                                 .ctor_field_defaults
-                                .get(&ctor_s)
+                                .get(&defaults_key)
                                 .and_then(|m| m.get(fname.as_str()))?;
                             if crate::lower::expr_contains_call(d) {
                                 return Option::None;
@@ -473,7 +473,11 @@ impl LowerCtx {
             let obj = self.lower_owned_heap_field(arg)?;
             return Some((obj, true));
         }
-        if matches!(&arg.ty, Ty::Named(..) | Ty::Record { .. })
+        // Native tuple fields have declared Rust aggregate types: their owned
+        // payloads are released recursively by the same scope-end drop as a
+        // record field, including when the variant uses a masked block drop.
+        if (matches!(&arg.ty, Ty::Named(..) | Ty::Record { .. })
+            || (crate::lower::owned_tco_slots() && matches!(&arg.ty, Ty::Tuple(..))))
             && self.aggregate_field_tys(&arg.ty).is_some()
         {
             // A RECORD-type ctor field (`Wrap(Color)`, `Box(Inner)`): materialize the record (a

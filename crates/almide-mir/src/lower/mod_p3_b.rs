@@ -549,7 +549,10 @@ impl LowerCtx {
                         None => self.lower_effect_call(expr),
                     }
                 }
-                _ => self.lower_effect_call(expr),
+                _ => match self.lower_discarded_value(expr) {
+                    Some(result) => result,
+                    None => self.lower_effect_call(expr),
+                },
         }
     }
 
@@ -641,6 +644,7 @@ impl LowerCtx {
                 }
             }
             _ => {
+                if let Some(result) = self.lower_discarded_value(t) { return result; }
                 // NO THIRD STATE (#810): a call-bearing tail this dispatcher
                 // cannot execute must WALL under strict mode — eliding it
                 // drops its effects entirely (the #1571 class). An
@@ -658,6 +662,18 @@ impl LowerCtx {
                 Ok(())
             }
         }
+    }
+
+    /// Discarding a value does not discard its evaluation: an integer
+    /// division, index, or call can still fail or have effects. Use the IR's
+    /// shared speculation predicate and the ordinary typed binding path,
+    /// including ownership accounting for any temporary heap result.
+    fn lower_discarded_value(&mut self, expr: &IrExpr) -> Option<Result<(), LowerError>> {
+        if matches!(expr.ty, Ty::Unit | Ty::Never) || almide_ir::speculation::is_speculation_safe(expr) {
+            return None;
+        }
+        let discard = self.fresh_synth_var();
+        Some(self.lower_bind(discard, &expr.ty, expr))
     }
 }
 

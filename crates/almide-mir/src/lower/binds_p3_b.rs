@@ -57,6 +57,19 @@ impl LowerCtx {
                 return Some(ListElemDrop::CtorFlat);
             }
         }
+        // Native runtime values are opaque owned Rust values, not wasm blocks.
+        // The list retains its exact element type in aggregate_blocks below;
+        // native DropVariant therefore releases the typed container recursively.
+        // Never admit this route on wasm, where a real block drop is required.
+        if crate::lower::owned_tco_slots() {
+            if let Ty::Named(name, args) = elem_ty {
+                if args.is_empty() {
+                    if let Some(runtime) = crate::native_runtime_types::RuntimeType::of(name.as_str()) {
+                        return Some(ListElemDrop::Record(runtime.0.to_owned()));
+                    }
+                }
+            }
+        }
         None
     }
 
@@ -421,6 +434,7 @@ impl LowerCtx {
         // class (owned handle slots — the generated `$__drop_list_lenlist`). Anything else →
         // `None` (the caller keeps the scalar / wall path).
         let Some(kind) = self.classify_list_elem_drop(&elem_ty) else {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[record-list] no drop class: {elem_ty:?}"));
             return None;
         };
         // Lower each element to an OWNED handle BEFORE the alloc (a field expr that allocates

@@ -23,7 +23,23 @@ let ITEMS = [10, 20, 30]
 
 let FIRST = list.len(ITEMS)
 
+fn make_action(n: Int) -> Result[(Int) -> Int, String] = ok((x) => x + n)
+
+let ACTION = make_action(7)
+var changing_action = make_action(10)
+
+fn apply_action(a: Result[(Int) -> Int, String], n: Int) -> Int = match a {
+  ok(f) => f(n),
+  err(_) => -1,
+}
+
 fn main() -> Unit = {
+  println("action=${apply_action(ACTION, 3)}")
+  let prior = changing_action
+  changing_action = make_action(20)
+  println("saved=${apply_action(prior, 1)} current=${apply_action(changing_action, 1)}")
+  changing_action = err("no action")
+  println("empty=${apply_action(changing_action, 1)} saved=${apply_action(prior, 2)}")
   println(BANNER)
   println(APP_NAME)
   println("first-of=${int.to_string(FIRST)}")

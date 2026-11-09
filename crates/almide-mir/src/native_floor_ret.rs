@@ -5,6 +5,17 @@
 /// The call's result expression and the NTy it binds as.
 fn render_ret(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> Result<(String, Option<NTy>), LowerError> {
     match r {
+        FloorRet::Runtime(t) => Ok((call, Some(t.kind()))),
+        FloorRet::RuntimeResult(t, optional) => {
+            let result = crate::render_native_rec::result_type_of(t.kind(), NTy::Str);
+            if optional {
+                let kind = crate::render_native_rec::option_type_of(NTy::Rec(result));
+                Ok((format!("({call}).map(|r| r.map_err(AlmideString::from))"), Some(NTy::Rec(kind))))
+            } else {
+                Ok((format!("({call}).map_err(AlmideString::from)"), Some(NTy::Rec(result))))
+            }
+        }
+        FloorRet::ResProcessStatus | FloorRet::ResBytesStrInt => aggregate_host_ret(r, call, dst_map),
         FloorRet::Map | FloorRet::MapOptVal | FloorRet::MapKeys | FloorRet::MapVals | FloorRet::MapEntries => map_ret_of(r, call, cx, dst_map),
         FloorRet::Elem(shape) => elem_ret_of(shape, cx.name, call, cx),
         FloorRet::Matrix | FloorRet::Set | FloorRet::SetElems | FloorRet::OptMatrix | FloorRet::ListMatrix | FloorRet::FloatRows => {
@@ -257,4 +268,38 @@ fn elem_ret_of(shape: ElemRet, name: &str, call: String, cx: &CallCx) -> Result<
         (Some(true), ElemRet::Opt) => (call, Some(NTy::Rec(crate::render_native_rec::option_type_of(NTy::Str)))),
         _ => return Err(wall(format!("native: floor call `{name}` element-typed result outside the native carriers"))),
     })
+}
+
+/// Convert a host aggregate using its checked field order and the program's
+/// declared record/tuple identity. The runtime owns each returned field.
+fn aggregate_host_ret(r: FloorRet, call: String, declared: Option<u16>) -> Result<(String, Option<NTy>), LowerError> {
+    use almide_lang::types::Ty;
+    use almide_base::intern::sym;
+    use crate::render_native_rec as rec;
+    let (ty, fields, values) = match r {
+        FloorRet::ResProcessStatus => (
+            Ty::Record { fields: vec![(sym("code"), Ty::Int), (sym("stdout"), Ty::String), (sym("stderr"), Ty::String)] },
+            [NTy::I64, NTy::Str, NTy::Str], ["s.code", "s.stdout", "s.stderr"],
+        ),
+        FloorRet::ResBytesStrInt => (
+            Ty::Tuple(vec![Ty::Bytes, Ty::String, Ty::Int].into()),
+            [NTy::Rec(rec::bytes_index()), NTy::Str, NTy::I64], ["s.0", "s.1", "s.2"],
+        ),
+        _ => unreachable!("only aggregate host results"),
+    };
+    let record = declared.and_then(rec::result_payloads)
+        .and_then(|(ok, err)| if err == NTy::Str { ok.rec() } else { None })
+        .or_else(|| rec::rec_index(&rec::block_key(&ty)))
+        .ok_or_else(|| wall(format!("native: host result has no declared aggregate {ty:?}")))?;
+    if rec::field_count(record) != fields.len()
+        || fields.iter().enumerate().any(|(i, k)| rec::rec_field(record, i) != Some(*k)) {
+        return Err(wall("native: host result aggregate fields disagree with runtime ABI"));
+    }
+    if r == FloorRet::ResProcessStatus && !rec::record_fields(record).is_some_and(|(_, fields)|
+        fields.iter().map(|(name, _)| name.as_str()).eq(["code", "stdout", "stderr"])) {
+        return Err(wall("native: host status field labels disagree with its bundled declaration"));
+    }
+    let result = rec::result_type_of(NTy::Rec(record), NTy::Str);
+    let name = rec::struct_name(record);
+    Ok((format!("({call}).map(|s| {name} {{ f0: {}, f1: {}, f2: {} }}).map_err(AlmideString::from)", values[0], values[1], values[2]), Some(NTy::Rec(result))))
 }

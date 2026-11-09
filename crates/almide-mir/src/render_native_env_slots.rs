@@ -42,7 +42,7 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
             crate::render_native_bounds::check(slot);
             crate::render_native_bounds::access(slot);
             tys.insert(*dst, NTy::I64);
-            writeln!(out, "if {} as usize >= {}.len() {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}", var(*idx), var(*list)).expect("writing to a String cannot fail");
+            writeln!(out, "if {} as usize >= {}.len() {{ almide_abort(\"index out of bounds\"); }}", var(*idx), var(*list)).expect("writing to a String cannot fail");
             writeln!(out, "let mut {}: i64 = {}.words()[{} as usize];", var(*dst), var(*list), var(*idx)).expect("writing to a String cannot fail");
             return Some(Ok(()));
         }
@@ -72,7 +72,7 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
                 let t = *fields.get(k).filter(|t| **t != NTy::I64).ok_or_else(|| wall("native: a heap closure read of a scalar or absent capture"))?;
                 let variant = rec::capture_variant(t);
                 crate::render_native_bounds::access(slot);
-                let place = format!("match {}.heap({k}) {{ Some(__AlmdCapture::{variant}(x)) => x, _ => {{ eprintln!(\"Error: closure capture kind mismatch\"); std::process::exit(1) }} }}", var(ad.base));
+                let place = format!("match {}.heap({k}) {{ Some(__AlmdCapture::{variant}(x)) => x, _ => {{ almide_abort(\"closure capture kind mismatch\") }} }}", var(ad.base));
                 if let Some((borrowed, spelled, suffix)) = borrowed_kind(t) {
                     tys.insert(*d, borrowed);
                     writeln!(out, "let mut {}: {spelled} = &(*({place})){suffix};", var(*d)).expect("writing to a String cannot fail");

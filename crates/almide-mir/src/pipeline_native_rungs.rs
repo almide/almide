@@ -155,22 +155,8 @@ fn native_sig_subset_check(
 /// A self call whose result is used further (non-tail recursion) is not
 /// refused: no leg turns that into a loop.
 fn recurses_on_a_heap_arg(f: &crate::MirFunction) -> bool {
-    use crate::{CallArg, Op};
     let borrowed_loops = crate::native_borrowed_tco::sites(f);
-    f.ops.iter().enumerate().any(|(i, op)| {
-        let Op::CallFn { name, args, dst: Some(d), .. } = op else { return false };
-        if borrowed_loops.contains(&i) || *name != f.name || !args.iter().any(|a| matches!(a, CallArg::Handle(_))) {
-            return false;
-        }
-        // Every release that erases to scope end (a typed list or carrier
-        // drop as much as a plain one) still runs after the call.
-        let rest = f.ops[i + 1..].iter().find(|o| !matches!(o, Op::Consume { .. }) && !crate::render_native_move::bookkeeping(o));
-        match rest {
-            None => f.ret == Some(*d),
-            Some(Op::Else { val } | Op::EndIf { val }) => *val == Some(*d),
-            Some(_) => false,
-        }
-    })
+    crate::native_borrowed_tco::tail_calls(f).iter().any(|i| !borrowed_loops.contains(i))
 }
 
 /// T1-3: rewrite the stereotyped Result block windows onto the native
@@ -306,7 +292,15 @@ fn heap_carrier_values_in<'a>(
 ) -> std::collections::BTreeSet<crate::ValueId> {
     let sig = |name: &str| -> Option<crate::render_native_addr::CarrierSig> {
         if let Some(d) = decl(name) {
-            return Some((d.params.iter().map(|p| heap_carrier_of(&p.ty)).collect(), heap_carrier_of(&d.ret_ty)));
+            // Read the same effect ABI facts installed for lowering. A can-err
+            // effect returning a heap value has Result[T, String] on every
+            // exit; its Err must not be rewritten as a scalar Result.
+            let ret = if crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(d.name.as_str())) {
+                almide_lang::types::Ty::result(d.ret_ty.clone(), almide_lang::types::Ty::String)
+            } else {
+                d.ret_ty.clone()
+            };
+            return Some((d.params.iter().map(|p| heap_carrier_of(&p.ty)).collect(), heap_carrier_of(&ret)));
         }
         // Lifted callbacks carry their checked signature in lambda_sigs,
         // including heap Result payloads. Their leading env is no carrier.

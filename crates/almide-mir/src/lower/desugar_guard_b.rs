@@ -55,15 +55,74 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
     }
     fn unit_block(stmts: Vec<IrStmt>) -> IrExpr {
         IrExpr {
-            kind: IrExprKind::Block { stmts, expr: Some(Box::new(IrExpr {
-                kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
-            })) },
+            kind: IrExprKind::Block { stmts, expr: None },
             ty: Ty::Unit, span: None, def_id: None,
         }
     }
 
     fn flag(set: almide_ir::VarId) -> IrExpr {
         IrExpr { kind: IrExprKind::Var { id: set }, ty: Ty::Bool, span: None, def_id: None }
+    }
+
+    /// Guards in a value-producing branch still return from this function.
+    /// Lambda bodies have their own return boundary.
+    fn has_scope_guard(value: &IrExpr) -> bool {
+        struct Find(bool);
+        impl almide_ir::IrVisitor for Find {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if !matches!(e.kind, IrExprKind::Lambda { .. }) {
+                    almide_ir::walk_expr(self, e);
+                }
+            }
+            fn visit_stmt(&mut self, s: &IrStmt) {
+                self.0 |= matches!(s.kind, IrStmtKind::Guard { .. });
+                almide_ir::walk_stmt(self, s);
+            }
+        }
+        let mut find = Find(false);
+        almide_ir::IrVisitor::visit_expr(&mut find, value);
+        find.0
+    }
+
+    /// Move a binding and its continuation into each value-producing leaf.
+    /// The initializer's block statements stay before the binding, exposing
+    /// their guards to the ordinary statement-scope early-return rewrite.
+    /// No placeholder value is bound on a path that returns early.
+    fn bind_continuation(value: &IrExpr, binding: &IrStmt, rest: &[IrStmt]) -> Option<IrExpr> {
+        let mut out = value.clone();
+        match &mut out.kind {
+            IrExprKind::If { then, else_, .. } => {
+                **then = bind_continuation(then, binding, rest)?;
+                **else_ = bind_continuation(else_, binding, rest)?;
+            }
+            IrExprKind::Match { arms, .. } => {
+                for arm in arms { arm.body = bind_continuation(&arm.body, binding, rest)?; }
+            }
+            IrExprKind::Block { stmts, expr } => {
+                let tail = expr.as_deref().cloned().unwrap_or(IrExpr {
+                    kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
+                });
+                stmts.push(IrStmt { span: tail.span, kind: IrStmtKind::Expr {
+                    expr: bind_continuation(&tail, binding, rest)?,
+                } });
+                *expr = None;
+            }
+            _ => {
+                // A guard hidden in a call operand needs its own evaluation-
+                // order transform; do not leave it as a value-shaped exit.
+                if has_scope_guard(value) { return None; }
+                if almide_ir::diverge::diverges(value) {
+                    return Some(unit_block(vec![IrStmt { span: value.span,
+                        kind: IrStmtKind::Expr { expr: value.clone() } }]));
+                }
+                let mut bound = binding.clone();
+                let IrStmtKind::Bind { value: initializer, .. } = &mut bound.kind else { return None };
+                *initializer = value.clone();
+                return Some(unit_block(std::iter::once(bound).chain(rest.iter().cloned()).collect()));
+            }
+        }
+        out.ty = Ty::Unit;
+        Some(out)
     }
 
     /// Walk statement scopes, never closure bodies. Once any nested scope
@@ -73,6 +132,15 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
         let mut rest = Vec::new();
         let mut changed = false;
         for mut stmt in std::mem::take(body).into_iter().rev() {
+            if let IrStmtKind::Bind { value, .. } = &stmt.kind {
+                if has_scope_guard(value) {
+                    let mut continuation = bind_continuation(value, &stmt, &rest)?;
+                    if !rewrite_statement_scope(&mut continuation, ret_ty, set, val)? { return None; }
+                    rest = vec![IrStmt { span: stmt.span, kind: IrStmtKind::Expr { expr: continuation } }];
+                    changed = true;
+                    continue;
+                }
+            }
             if let IrStmtKind::Guard { cond, else_ } = stmt.kind {
                 if else_.ty != *ret_ty || contains_call(&else_) { return None; }
                 let exits = vec![

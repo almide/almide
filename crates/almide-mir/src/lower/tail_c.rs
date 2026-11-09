@@ -122,7 +122,15 @@ impl LowerCtx {
             | IrExprKind::Range { .. } => self.lower_tail_scalar_deferred_const(tail),
             // A TAIL `e!` (Unwrap — effect-fn error propagation): `f() = g()!` propagates g's
             // Result unchanged, i.e. it IS `f() = g()`. Strip the `!` and lower `e` as the tail.
-            IrExprKind::Unwrap { expr } => self.lower_tail(Some(expr)),
+            IrExprKind::Unwrap { expr } => {
+                if self.decl_ret_is_result || self.ret_is_result_abi {
+                    self.lower_tail(Some(expr))
+                } else {
+                    // A total test callback returns the extracted value,
+                    // never the Option/Result carrier of its operand.
+                    self.lower_tail_scalar_value_or_deferred(tail)
+                }
+            }
             // A SCALAR tail `??` (`fn parse_or_zero(s) = int.parse(s) ?? 0`, the canonical
             // form) EXECUTES the unwrap (tag read + payload-or-fallback) — it was a deferred
             // `Const` 0 here (a silent wrong value, neither payload nor fallback). Outside the

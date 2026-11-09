@@ -515,11 +515,11 @@ impl LowerCtx {
         result_ty: &Ty,
     ) -> Option<()> {
         let (then_body, else_body) = bodies;
-        let lower_arm = |s: &mut Self, body: &IrExpr| -> Option<ValueId> {
+        let lower_arm = |s: &mut Self, body: &IrExpr| -> Option<Option<ValueId>> {
             if heap_res {
-                s.lower_heap_result_arm(body, result_ty)
+                s.lower_heap_result_branch(body, result_ty)
             } else {
-                s.lower_scalar_arm(body)
+                s.lower_scalar_arm(body).map(Some)
             }
         };
         let pv_snapshot = self.param_values.clone();
@@ -533,12 +533,13 @@ impl LowerCtx {
             .filter(|h| !self.live_heap_handles.contains(h))
             .collect();
         let else_marker_at = self.ops.len();
-        self.ops.push(Op::Else { val: Some(then_val) });
+        self.ops.push(Op::Else { val: then_val });
         self.param_values = pv_snapshot;
         self.live_heap_handles = lhh_snapshot.clone();
         self.materialized_aggregates = ma_snapshot;
         // ELSE (tag == 0): the None branch / the scalar Ok payload.
         let else_val = lower_arm(self, else_body)?;
+        if then_val.is_none() && else_val.is_none() { return None; }
         let consumed_by_else: Vec<ValueId> = lhh_snapshot
             .iter()
             .copied()
@@ -557,7 +558,7 @@ impl LowerCtx {
                 self.ops.insert(else_marker_at, op); // the THEN arm releases what ELSE moved out
             }
         }
-        self.ops.push(Op::EndIf { val: Some(else_val) });
+        self.ops.push(Op::EndIf { val: else_val });
         Some(())
     }
 

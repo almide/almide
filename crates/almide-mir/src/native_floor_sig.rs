@@ -9,6 +9,28 @@ fn squash(s: &str) -> String {
     s.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
+#[cfg(test)]
+mod runtime_type_agreement_tests {
+    use super::*;
+
+    #[test]
+    fn opaque_runtime_types_require_nominal_and_carrier_agreement() {
+        let response = RuntimeType::of("http.HttpResponse").unwrap();
+        assert_eq!(RuntimeType::of("HttpResponse"), Some(response));
+        assert_eq!(RuntimeType::of("other.HttpResponse"), None);
+        assert!(param_agrees(FloorParam::Runtime(response, true), "&AlmideHttpResponse"));
+        for wrong in ["&mut AlmideHttpResponse", "&AlmideHttpRequest", "Vec<AlmideString>"] {
+            assert!(!param_agrees(FloorParam::Runtime(response, true), wrong), "{wrong}");
+        }
+        let poll = FloorRet::RuntimeResult(response, true);
+        assert!(ret_agrees(poll, "Option<Result<AlmideHttpResponse, String>>"));
+        for wrong in ["Result<Option<AlmideHttpResponse>, String>",
+            "Option<Result<AlmideHttpCall, String>>", "Option<Result<AlmideHttpResponse, i64>>"] {
+            assert!(!ret_agrees(poll, wrong), "{wrong}");
+        }
+    }
+}
+
 fn param_agrees(p: FloorParam, rust: &str) -> bool {
     let r = squash(rust);
     match p {
@@ -26,6 +48,7 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
             .is_some_and(|(a, b)| is_type_param(a) && is_type_param(b)),
         FloorParam::Elem(_) => is_type_param(&r) || r.strip_prefix('&').is_some_and(is_type_param),
         FloorParam::List(elem) => list_param_agrees(elem, &r),
+        FloorParam::ListOwned(elem) => r.starts_with("Vec<") && list_param_agrees(elem, &r),
         _ => runtime_param_agrees(p, &r),
     }
 }
@@ -38,6 +61,7 @@ fn runtime_param_agrees(p: FloorParam, r: &str) -> bool {
         FloorParam::Bytes => r == "&Vec<u8>" || r == "&[u8]",
         FloorParam::BytesMut => r == "&mutVec<u8>" || r == "&mut Vec<u8>",
         FloorParam::Value(_) => bare == "AlmideValue",
+        FloorParam::Runtime(t, _) => bare == t.rust(),
         FloorParam::Matrix(_) => bare == "AlmideMatrix",
         FloorParam::Set(_) => is_generic_set(bare),
         FloorParam::SetElem(_) => is_type_param(bare),
@@ -50,7 +74,8 @@ fn list_param_agrees(elem: ListElem, r: &str) -> bool {
     let inner = r
         .strip_prefix("&[")
         .and_then(|x| x.strip_suffix(']'))
-        .or_else(|| r.strip_prefix("&Vec<").and_then(|x| x.strip_suffix('>')));
+        .or_else(|| r.strip_prefix("&Vec<").and_then(|x| x.strip_suffix('>')))
+        .or_else(|| r.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')));
     match (elem, inner) {
         (ListElem::Int, Some(i)) => i == "i64" || is_type_param(i),
         (ListElem::Str, Some(i)) => i == "AlmideString" || is_type_param(i),
@@ -99,6 +124,11 @@ fn ret_agrees(r: FloorRet, rust: &str) -> bool {
         FloorRet::Opt(Scalar::Float) => t == "Option<f64>",
         FloorRet::Bytes => t == "Vec<u8>",
         FloorRet::Value => t == "AlmideValue",
+        FloorRet::Runtime(rt) => t == rt.rust(),
+        FloorRet::RuntimeResult(rt, optional) => {
+            let carrier = if optional { t.strip_prefix("Option<").and_then(|s| s.strip_suffix('>')) } else { Some(t.as_str()) };
+            carrier.and_then(result_parts).is_some_and(|(ok, err)| ok == rt.rust() && is_rust_string(err))
+        }
         FloorRet::Map => is_generic_map(&t),
         FloorRet::Matrix | FloorRet::OptMatrix | FloorRet::ListMatrix | FloorRet::FloatRows | FloorRet::Set | FloorRet::SetElems => {
             runtime_ret_agrees(r, &t)
@@ -156,6 +186,8 @@ fn result_ret_agrees(r: FloorRet, t: &str) -> bool {
             ok.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(string) && string(err)
         }),
         FloorRet::ResBytes => result_parts(t).is_some_and(|(ok, err)| ok == "Vec<u8>" && string(err)),
+        FloorRet::ResProcessStatus => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideProcessStatus" && string(err)),
+        FloorRet::ResBytesStrInt => result_parts(t).is_some_and(|(ok, err)| ok == "(Vec<u8>,AlmideString,i64)" && string(err)),
         FloorRet::ResFileStat => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideFileStat" && string(err)),
         FloorRet::ResOptListStr => result_parts(t).is_some_and(|(ok, err)|
             ok.strip_prefix("Option<Vec<").and_then(|x| x.strip_suffix(">>"))
@@ -191,6 +223,7 @@ fn res_ok_agrees(k: Option<Scalar>, ok: &str) -> bool {
 /// A Result's supported list / optional heap ok type.
 fn floor_ret_result_str_container(ok: &TypeExpr) -> Option<FloorRet> {
     match ok {
+        TypeExpr::Tuple { elements } if elements.iter().map(simple).eq([Some("Bytes"), Some("String"), Some("Int")]) => Some(FloorRet::ResBytesStrInt),
         TypeExpr::Generic { name, args: a } if name.as_str() == "List" && a.len() == 1 && simple(&a[0]) == Some("String") => {
             Some(FloorRet::ResListStr)
         }
@@ -323,4 +356,38 @@ fn with_by_ref_twin(mut f: FloorFn, rust_params: &[String], rust_ret: &str, rt: 
     let by_ref = FloorFn { symbol: twin, params, ret: f.ret, items, twin: None, str_only: f.str_only, ordered: f.ordered, borrow_twin: None, by_ref: None };
     f.by_ref = Some(Box::new(by_ref));
     f
+}
+
+/// Match every field, in ABI order; a same-named record in another module
+/// cannot stand in for the bundled runtime record.
+fn process_status_decl_agrees(decls: &[Decl]) -> bool {
+    let mut found = decls.iter().filter_map(|d| match d {
+        Decl::Type { name, ty, .. } if name.as_str() == "ProcessStatus" => Some(ty),
+        _ => None,
+    });
+    let Some(TypeExpr::Record { fields }) = found.next() else { return false };
+    found.next().is_none() && fields.iter().map(|f| (f.name.as_str(), simple(&f.ty))).eq([
+        ("code", Some("Int")), ("stdout", Some("String")), ("stderr", Some("String")),
+    ])
+}
+
+#[cfg(test)]
+mod aggregate_host_abi_tests {
+    use super::*;
+    #[test]
+    fn record_and_tuple_results_require_exact_payloads_and_fields() {
+        assert!(ret_agrees(FloorRet::ResProcessStatus, "Result<AlmideProcessStatus, AlmideString>"));
+        assert!(ret_agrees(FloorRet::ResBytesStrInt, "Result<(Vec<u8>,AlmideString,i64), AlmideString>"));
+        for bad in ["Result<ProcessStatus,AlmideString>", "Result<AlmideProcessStatus,i64>"] {
+            assert!(!ret_agrees(FloorRet::ResProcessStatus, bad));
+        }
+        for bad in ["Result<(Vec<i64>,AlmideString,i64),AlmideString>", "Result<(Vec<u8>,i64,AlmideString),AlmideString>"] {
+            assert!(!ret_agrees(FloorRet::ResBytesStrInt, bad));
+        }
+        let good = "type ProcessStatus = { code: Int, stdout: String, stderr: String }";
+        assert!(process_status_decl_agrees(&almide_lang::parse_cached(good).unwrap().decls));
+        for bad in [good.replace("code: Int", "code: Bool"), good.replace("stdout: String, stderr: String", "stderr: String, stdout: String")] {
+            assert!(!process_status_decl_agrees(&almide_lang::parse_cached(Box::leak(bad.into_boxed_str())).unwrap().decls));
+        }
+    }
 }

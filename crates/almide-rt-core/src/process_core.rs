@@ -280,6 +280,9 @@ pub fn almide_proc_kill(pid: i64, signal: i64, send: AlmideProcSignal) -> Result
     send(target, signal as i32).map_err(|errno| fail(&almide_proc_signal_errno_text(errno)))
 }
 
+// Keep target-specific signal state and its operations in one module. Both
+// native emitters carry the module whole; no host cfg arm is selected at emit.
+mod almide_proc_signal_state {
 /// The Windows `send` (no kill(2) there): signal 0 asks `tasklist`, any other
 /// signal ends the process with `taskkill /F`. Both by their absolute
 /// System32 path, never a PATH lookup. A missing process answers ESRCH.
@@ -327,7 +330,7 @@ fn almide_proc_mark_killed(pid: u32) {
 
 /// Whether this runtime ended `pid` (and forget it): always false off Windows,
 /// where the exit status itself says a signal ended the child.
-fn almide_proc_take_killed(pid: u32) -> bool {
+pub fn almide_proc_take_killed(pid: u32) -> bool {
     #[cfg(windows)]
     {
         let mut k = ALMIDE_PROC_KILLED.lock().unwrap_or_else(|p| p.into_inner());
@@ -339,6 +342,9 @@ fn almide_proc_take_killed(pid: u32) -> bool {
     let _ = pid;
     false
 }
+
+}
+pub use almide_proc_signal_state::*;
 
 /// A captured child's exit code: -1 when a signal (on Windows: this runtime's
 /// kill) ended it, or no status was read.

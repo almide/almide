@@ -39,11 +39,9 @@ fn closure_contents_using(
         if header_items().contains(key) || !taken.insert(key) || !texts.insert(item.text) {
             continue;
         }
-        // A runtime module that needs a crate (`almide_codegen::runtime_crate_deps`)
-        // cannot ride the native program, which links no dependency.
-        if let Some((dep, _)) = almide_codegen::runtime_crate_deps(item.text).first() {
-            return Err(format!("`{key}` needs the `{dep}` crate, which a native program does not link"));
-        }
+        // Dependency-bearing runtime bodies take the product's Cargo route.
+        // Its manifest derives from these exact bodies, including a split
+        // runtime crate; the floor compile gate checks the complete closure.
         out.push(item.text);
         for r in refs(item.text).map_err(|n| format!("`{key}` reaches `{n}`, which the native header cannot carry"))? {
             if !taken.contains(r.as_str()) {
@@ -91,7 +89,7 @@ fn references(text: &str) -> Result<Vec<String>, String> {
 /// own crate with the runtime's profile (owner ruling 2026-11-02).
 pub(crate) fn is_runtime_text(text: &str) -> bool {
     static TEXTS: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
-    text == FLOOR_HEADER || TEXTS.get_or_init(|| runtime_index().items.values().map(|i| i.text).collect()).contains(text)
+    text == floor_header() || TEXTS.get_or_init(|| runtime_index().items.values().map(|i| i.text).collect()).contains(text)
 }
 
 /// A runtime implementation of a named host operation. The generated

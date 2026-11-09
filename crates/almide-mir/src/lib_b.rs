@@ -642,6 +642,10 @@ pub enum Capability {
     /// `testing.assert_aborts`'s child run (ADR-0029). Its id is 10, the projection's, so
     /// both legs speak one registry.
     Process,
+    /// Foreign code is reachable; its declared purity is trusted (shared wasm id 8).
+    Foreign,
+    /// An effect-declared foreign function (shared wasm id 11).
+    ForeignEffect,
 }
 
 impl Capability {
@@ -649,8 +653,8 @@ impl Capability {
     /// proofs/CapabilityBound.v's checker is GENERIC over `list nat` (a `subset_check`,
     /// no per-capability enumeration), so it needs no edit to admit a new id — only
     /// this mapping must stay injective + stable (Stdout = 0, Entropy = 1, CliArgs = 2,
-    /// FsRead = 3, FsWrite = 4, Clock = 5, Stdin = 6, Net = 7, Process = 10; 8 and 9 are
-    /// the wasm projection's FOREIGN and SENTINEL).
+    /// FsRead = 3, FsWrite = 4, Clock = 5, Stdin = 6, Net = 7, Foreign = 8,
+    /// Process = 10, ForeignEffect = 11; 9 is the wasm projection's SENTINEL).
     pub const fn id(self) -> u32 {
         match self {
             Capability::Stdout => 0,
@@ -662,8 +666,18 @@ impl Capability {
             Capability::Stdin => 6,
             Capability::Net => 7,
             Capability::Process => 10,
+            Capability::Foreign => 8,
+            Capability::ForeignEffect => 11,
         }
     }
+}
+
+/// The target selected from a foreign declaration. Ownership at an import
+/// remains borrowed arguments and a fresh owned result on every target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportTarget {
+    Wasm,
+    Native { kind: almide_lang::types::extern_abi::NativeExtern, is_effect: bool },
 }
 
 /// A wasm IMPORT-signature value type — the host-facing valtype an

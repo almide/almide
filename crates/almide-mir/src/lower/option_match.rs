@@ -94,7 +94,10 @@ impl LowerCtx {
             crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[option-match] payload declined, drop {:?}", self.value_drops.get(&subj)));
             return false;
         };
-        if !matches!(some_body.ty, Ty::Unit) || !matches!(none_body.ty, Ty::Unit) {
+        // A diverging arm produces no value either. Lower its actual body
+        // below so the terminator is checked, rather than rejecting a typed
+        // `panic`/abort branch before its Die can reach MIR.
+        if !matches!(some_body.ty, Ty::Unit | Ty::Never) || !matches!(none_body.ty, Ty::Unit | Ty::Never) {
             return false;
         }
         // Emit: tag = load32(handle(subj) + 4); if tag != 0 then Some-arm else None-arm.

@@ -30,7 +30,7 @@ fn seed_selfhost_newtype_reps(
     }
     // HttpResponse — the self-host rep is `[status, body, k1, v1, …]`
     // (stdlib/http_response.almd, the same List[String] discipline).
-    if !declared.contains("HttpResponse") {
+    if !crate::lower::owned_tco_slots() && !declared.contains("HttpResponse") {
         map.insert(
             "HttpResponse".to_string(),
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String].into()),
@@ -38,7 +38,7 @@ fn seed_selfhost_newtype_reps(
     }
     // HttpRequest — the self-host rep is `[method, target, body, nh, k1, v1,
     // …, p1, v1, …]` (stdlib/http_request.almd, #2588).
-    if !declared.contains("HttpRequest") {
+    if !crate::lower::owned_tco_slots() && !declared.contains("HttpRequest") {
         map.insert(
             "HttpRequest".to_string(),
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String].into()),
@@ -365,9 +365,13 @@ fn erase_newtypes_in_program_body(
     program: &mut almide_ir::IrProgram,
 ) {
     use almide_ir::visit_mut::IrMutVisitor;
+    // Captures are lifted from these declarations after erasure. Keep their
+    // types equal to the erased expressions and function signatures.
+    for info in &mut program.var_table.entries { info.ty = subst(&info.ty, map); }
     rewrite_newtype_erased_fns(v, map, &mut program.functions);
     let mut modules = std::mem::take(&mut program.modules);
     for m in modules.iter_mut() {
+        for info in &mut m.var_table.entries { info.ty = subst(&info.ty, map); }
         rewrite_newtype_erased_fns(v, map, &mut m.functions);
         for tl in m.top_lets.iter_mut() {
             tl.ty = subst(&tl.ty, map);

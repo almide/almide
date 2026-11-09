@@ -28,6 +28,7 @@
 use almide_lang::ast::{AttrValue, Decl, TypeExpr};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Mutex, OnceLock};
+use crate::native_runtime_types::RuntimeType;
 
 include!("native_floor_header.rs");
 
@@ -46,6 +47,8 @@ pub(crate) enum FloorParam {
     Str,
     /// `List[E]` — the runtime borrows a slice (`&[T]` / `&Vec<T>`).
     List(ListElem),
+    /// `List[E]` passed to an owned runtime `Vec<T>` parameter.
+    ListOwned(ListElem),
     /// `Bytes` — the runtime borrows its `Vec<u8>` (`&Vec<u8>` / `&[u8]`).
     Bytes,
     /// `mut b: Bytes` — the runtime writes the caller's own `Vec<u8>` in
@@ -55,6 +58,8 @@ pub(crate) enum FloorParam {
     /// The stdlib `Value` — v0's runtime `AlmideValue`, borrowed (`true`)
     /// or by value (`false`).
     Value(bool),
+    /// An opaque stdlib value, borrowing or cloning the runtime's own type.
+    Runtime(RuntimeType, bool),
     /// A bare type parameter `A` that is the element of a `List[A]` param:
     /// the runtime takes the element by value (`T`, false) or by reference
     /// (`&T`, true), and the call site's list decides its kind.
@@ -123,6 +128,9 @@ pub(crate) enum FloorRet {
     Bytes,
     /// The stdlib `Value` — the runtime's own `AlmideValue`.
     Value,
+    Runtime(RuntimeType),
+    /// Result<T, String>, optionally enclosed in Option (HTTP poll).
+    RuntimeResult(RuntimeType, bool),
     /// `Result[Value, String]` — the generated `Result<AlmideValue,
     /// AlmideString>` carrier.
     ResValue,
@@ -161,6 +169,10 @@ pub(crate) enum FloorRet {
     ResOptListStr,
     /// The fs module's checked four-field metadata record.
     ResFileStat,
+    /// The process module's checked status record.
+    ResProcessStatus,
+    /// A socket datagram: owned bytes, sender text, sender port.
+    ResBytesStrInt,
     /// `Int? | Bool? | Float?` — a runtime `Option` of the scalar, carried as
     /// the native `Option<i64>` (`NTy::Opt`; a Float as its bits).
     Opt(Scalar),
@@ -348,7 +360,7 @@ fn declared_kinds(t: &TypeExpr, ctor: &str) -> Option<Vec<NTy>> {
 /// A set built from a list arg holds that list's elements.
 fn set_list_agrees(params: &[FloorParam], args: &[(String, NTy)], e: NTy) -> bool {
     params.iter().zip(args).all(|(p, (_, got))| match p {
-        FloorParam::List(ListElem::Any) => match e {
+        FloorParam::List(ListElem::Any) | FloorParam::ListOwned(ListElem::Any) => match e {
             NTy::I64 | NTy::F32 => matches!(got, NTy::Vec | NTy::VecRef),
             NTy::Str => matches!(got, NTy::VecStr | NTy::VecStrRef),
             e => matches!(got, NTy::Rec(i) | NTy::RecRef(i) if crate::render_native_rec::list_elem(*i).is_some_and(|got| crate::native_value_repr::same_owned(got, e))),
@@ -379,7 +391,7 @@ pub(crate) fn elem_option_is_scalar(call: &str) -> bool {
 /// a caller that reads its argument again would copy it whole for the call.
 pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
     declared(call).is_some_and(|f| {
-        matches!(f.params.get(k), Some(FloorParam::Map(false) | FloorParam::Set(false) | FloorParam::Value(false) | FloorParam::Matrix(false)))
+        matches!(f.params.get(k), Some(FloorParam::Map(false) | FloorParam::Set(false) | FloorParam::Value(false) | FloorParam::Matrix(false) | FloorParam::ListOwned(_)))
             || f.twin.as_ref().is_some_and(|t| {
                 t.0 == k
                     && matches!(
@@ -456,7 +468,7 @@ pub fn declared_floor_source() -> String {
     }
     let mut out = String::from("#![allow(dead_code, unused_imports, unused_variables, unused_mut, unused_parens)]\n");
     out.push_str(&crate::render_native_str::almide_string_alias());
-    out.push_str(FLOOR_HEADER);
+    out.push_str(floor_header());
     out.push('\n');
     for it in items {
         out.push_str(it);
@@ -634,6 +646,7 @@ fn floor_param(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorPara
             "Bytes" => Some(FloorParam::Bytes),
             "Matrix" => Some(FloorParam::Matrix(false)),
             n if n == VALUE_TYPE => Some(FloorParam::Value(false)),
+            n if RuntimeType::of(n).is_some() => Some(FloorParam::Runtime(RuntimeType::of(n)?, false)),
             // Whether it is a list's element is checked against the params,
             // and its by-value/by-reference mode against the runtime, below.
             a if type_params.contains(a) => Some(FloorParam::Elem(false)),
@@ -683,8 +696,10 @@ fn floor_ret_result(ok: &TypeExpr, err: &TypeExpr) -> Option<FloorRet> {
         "Unit" => Some(FloorRet::Res(None)),
         "Bytes" => Some(FloorRet::ResBytes),
         "FileStat" => Some(FloorRet::ResFileStat),
+        "ProcessStatus" => Some(FloorRet::ResProcessStatus),
         "String" => Some(FloorRet::ResStr),
         n if n == VALUE_TYPE => Some(FloorRet::ResValue),
+        n if RuntimeType::of(n).is_some() => Some(FloorRet::RuntimeResult(RuntimeType::of(n)?, false)),
         ok => scalar_of(ok).map(|k| FloorRet::Res(Some(k))),
     }
 }

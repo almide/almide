@@ -9,6 +9,18 @@ use almide_ir::{CallTarget, IrExpr, IrExprKind, IrProgram, IrVisitor, IrMutVisit
 use almide_lang::{ast::{Decl, Program}, intern::sym};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+#[path = "native_global_aliases.rs"]
+mod global_aliases;
+
+/// Use the shared, typed list-pattern expansion before MIR ownership lowering.
+/// User functions and linked stdlib bodies must see the same length guards,
+/// element bindings and rest slices, including heap element types.
+pub(super) fn lower_list_patterns(ir: IrProgram) -> IrProgram {
+    use almide_codegen::pass::NanoPass;
+    almide_codegen::pass_list_pattern::ListPatternLoweringPass
+        .run(ir, almide_codegen::pass::Target::Rust).program
+}
+
 fn body_needed(module: &str, func: &str) -> bool {
     let call = format!("{module}.{}", almide_ir::mono_base_or_self(func));
     !super::served_natively(&call)
@@ -219,6 +231,7 @@ fn refresh_declared_reprs(ir: &mut IrProgram, checker: &Checker) {
 /// The same explicit write-back convention serves user and linked bodies.
 /// Call sites and signatures change together before MIR ownership lowering.
 pub(super) fn prepare_mutable_values(ir: &mut IrProgram) {
+    crate::native_foreign::prepare_mutable(ir);
     almide_ir::mut_param::lower_mut_params_move_mode(ir);
     crate::native_propagation::expand(ir);
     own_written_params(ir);
@@ -333,22 +346,40 @@ struct Resolve<'a> {
     bodies: &'a HashMap<String, HashSet<String>>,
     declarations: &'a HashMap<String, HashSet<String>>,
     identities: &'a HashMap<String, String>,
+    root_functions: &'a HashSet<String>,
     owner: Option<&'a str>,
 }
 
 impl Resolve<'_> {
     fn qualified(&self, m: &str, f: &str) -> Option<String> {
-        self.bodies.get(m)?.contains(f).then(|| {
-            let identity = self.identities.get(m).map(String::as_str).unwrap_or(m);
-            super::user_module_fn_name(identity, f)
-        })
+        let names = self.bodies.get(m)?;
+        // Generated conventions use the canonical qualified type name even
+        // inside their owning module (reprlib.Pt.repr); explicit methods use
+        // the local spelling. Preserve the actual definition when mangling.
+        let canonical = format!("{m}.{f}");
+        let defined = if names.contains(f) { f }
+            else if names.contains(&canonical) { canonical.as_str() }
+            else { return None };
+        let identity = self.identities.get(m).map(String::as_str).unwrap_or(m);
+        Some(super::user_module_fn_name(identity, defined))
     }
     fn reference(&self, name: &str) -> Option<String> {
         if let Some(m) = self.owner {
             if let Some(n) = self.qualified(m, name) { return Some(n); }
         }
-        let (m, f) = name.rsplit_once('.')?;
-        self.qualified(m, f)
+        if let Some((m, f)) = name.rsplit_once('.') {
+            if let Some(n) = self.qualified(m, f) { return Some(n); }
+        }
+        // Monomorphization may spell an imported convention as Type.method.
+        // Keep the existing user-module resolution rule: a root definition
+        // wins; otherwise exactly one user owner must define that full name.
+        if self.root_functions.contains(name) { return None; }
+        let mut owners = self.bodies.iter().filter(|(m, names)|
+            !almide_lang::stdlib_info::is_any_stdlib(m)
+                && (names.contains(name) || names.contains(&format!("{m}.{name}"))));
+        let (owner, _) = owners.next()?;
+        if owners.next().is_some() { return None; }
+        self.qualified(owner, name)
     }
 }
 
@@ -364,8 +395,13 @@ impl IrMutVisitor for Resolve<'_> {
                 };
                 if let Some(name) = resolved { *target = CallTarget::Named { name: sym(&name) }; }
                 else if let (Some(owner), CallTarget::Named { name }) = (self.owner, &*target) {
-                    if self.declarations.get(owner).is_some_and(|names| names.contains(name.as_str())) {
-                        *target = CallTarget::Module { module: sym(owner), func: *name, def_id: None };
+                    // A generic forwarding helper can be served by the native
+                    // floor and have its specialized body removed above. Its
+                    // call must use the source declaration, just as the body
+                    // selection did, rather than an undefined mono symbol.
+                    let base = almide_ir::mono_base_or_self(name.as_str());
+                    if self.declarations.get(owner).is_some_and(|names| names.contains(base)) {
+                        *target = CallTarget::Module { module: sym(owner), func: sym(base), def_id: None };
                     }
                 }
             }
@@ -422,7 +458,7 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
         m.name.to_string(), m.versioned_name.unwrap_or(m.name).to_string(),
     )).collect();
     let roots: HashSet<String> = ir.functions.iter().map(|f| f.name.to_string()).collect();
-    let mut resolve = Resolve { bodies: &bodies, declarations: &declarations, identities: &identities, owner: None };
+    let mut resolve = Resolve { bodies: &bodies, declarations: &declarations, identities: &identities, root_functions: &roots, owner: None };
     for f in &mut ir.functions { resolve.visit_expr_mut(&mut f.body); }
     for t in &mut ir.top_lets { resolve.visit_expr_mut(&mut t.value); }
     defaults(&mut ir.type_decls, |e| resolve.visit_expr_mut(e));
@@ -436,6 +472,37 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
     use almide_codegen::pass::{NanoPass, Target};
     ir = almide_codegen::pass_unify_var_tables::UnifyVarTablesPass.run(ir, Target::Rust).program;
     almide_frontend::ir_link::ir_link_flatten(&mut ir);
+    global_aliases::resolve(&mut ir);
+    // Lowering already resolves unambiguous imported record references via
+    // this registry. Carry the same identity into lambda signatures and
+    // nested container types before deriving native representations.
+    let layouts = crate::lower::build_record_layouts(&ir.type_decls);
+    let mut type_aliases = std::collections::HashMap::new();
+    for name in layouts.keys() {
+        let Some((_, bare)) = name.rsplit_once('.') else { continue };
+        // A root alias or variant also owns its bare name, even though the
+        // record registry alone would not contain that declaration.
+        if ir.type_decls.iter().any(|d| d.name.as_str() == bare) { continue; }
+        if let Some(canonical) = crate::lower::canonical_record_key(&layouts, bare) {
+            if canonical != bare {
+                type_aliases.insert(bare.to_string(), almide_lang::intern::sym(canonical));
+            }
+        }
+    }
+    // Imported variants can also retain bare references in checked match
+    // binders. Preserve their declaration identity in payload metadata, not
+    // just in the subject's layout. Never choose between homonymous types.
+    let variants = crate::lower::build_variant_layouts(&ir.type_decls);
+    for name in variants.by_type.keys() {
+        let Some((_, bare)) = name.rsplit_once('.') else { continue };
+        if ir.type_decls.iter().any(|d| d.name.as_str() == bare) { continue; }
+        let suffix = format!(".{bare}");
+        if ir.type_decls.iter().filter(|d| d.name.as_str().ends_with(&suffix)).count() == 1 {
+            type_aliases.insert(bare.to_string(), almide_lang::intern::sym(name));
+        }
+    }
+    almide_codegen::pass_ir_link_flatten::rename_declared_type_references(&mut ir, &type_aliases);
+    almide_codegen::pass_ir_link_flatten::canonicalize_structural_twins(&mut ir);
     let mut names = HashSet::new();
     for f in &ir.functions {
         if !names.insert(f.name) {
@@ -443,6 +510,8 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
         }
     }
     let mut refs = References(roots);
+    refs.0.extend(ir.functions.iter().filter(|f| crate::native_test_harness::is_entry(f.name.as_str()))
+        .map(|f| f.name.to_string()));
     for t in &ir.top_lets { refs.visit_expr(&t.value); }
     defaults(&mut ir.type_decls, |e| refs.visit_expr(e));
     let mut visited = HashSet::new();
@@ -465,6 +534,32 @@ mod scope_tests {
     use super::*;
 
     #[test]
+    fn imported_conventions_require_a_unique_owner_and_preserve_root_shadowing() {
+        let mut bodies = HashMap::from([("geometry".into(), HashSet::from(["Point.repr".into()]))]);
+        let declarations = HashMap::new();
+        let identities = HashMap::from([("geometry".into(), "geometry_v2".into())]);
+        let mut roots = HashSet::new();
+        let resolve = |bodies: &HashMap<String, HashSet<String>>, roots: &HashSet<String>| {
+            Resolve { bodies, declarations: &declarations, identities: &identities,
+                root_functions: roots, owner: None }.reference("Point.repr")
+        };
+        assert_eq!(resolve(&bodies, &roots), Some(super::super::user_module_fn_name("geometry_v2", "Point.repr")));
+        roots.insert("Point.repr".into());
+        assert_eq!(resolve(&bodies, &roots), None);
+        roots.clear();
+        bodies.insert("other".into(), HashSet::from(["Point.repr".into()]));
+        assert_eq!(resolve(&bodies, &roots), None);
+        bodies.remove("other");
+        bodies.insert("geometry".into(), HashSet::from(["geometry.Point.repr".into()]));
+        assert_eq!(resolve(&bodies, &roots), Some(super::super::user_module_fn_name("geometry_v2", "geometry.Point.repr")));
+        let resolver = Resolve { bodies: &bodies, declarations: &declarations, identities: &identities,
+            root_functions: &roots, owner: None };
+        assert_eq!(resolver.qualified("geometry", "Point.repr"), resolve(&bodies, &roots));
+        bodies.insert("other".into(), HashSet::from(["other.Point.repr".into()]));
+        assert_eq!(resolve(&bodies, &roots), None);
+    }
+
+    #[test]
     fn unlinked_library_calls_keep_their_scope_without_capturing_user_namesakes() {
         let bodies = HashMap::new();
         let declarations = HashMap::from([("env".into(), HashSet::from(["__set".into()]))]);
@@ -473,7 +568,7 @@ mod scope_tests {
             let mut expr = IrExpr { kind: IrExprKind::Call {
                 target: CallTarget::Named { name: sym(name) }, args: vec![], type_args: vec![],
             }, ty: almide_lang::types::Ty::Unit, span: None, def_id: None };
-            Resolve { bodies: &bodies, declarations: &declarations, identities: &HashMap::new(), owner }.visit_expr_mut(&mut expr);
+            Resolve { bodies: &bodies, declarations: &declarations, identities: &HashMap::new(), root_functions: &HashSet::new(), owner }.visit_expr_mut(&mut expr);
             let IrExprKind::Call { target, .. } = expr.kind else { panic!("call lost") };
             match (target, module) {
                 (CallTarget::Module { module, func, .. }, Some(expected)) => {

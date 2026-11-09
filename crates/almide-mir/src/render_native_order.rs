@@ -15,12 +15,23 @@ pub(crate) fn install_declared_order(types: &[almide_ir::IrTypeDecl]) -> OrderGu
 impl Derive<'_> {
     fn exact_order_decl(&self, n: &str, visiting: &mut std::collections::BTreeSet<String>) -> bool {
         if REGION_NAMES.with(|r| r.borrow().contains(n)) { return false; }
-        if !n.starts_with("Tuple(") && !self.order_names.contains(n) { return false; }
+        if !n.starts_with("Tuple(") && !self.order_names.contains(n) && !self.structural_order_decl(n) { return false; }
         let Some((_, cases)) = self.decls.get(n) else { return false };
         if !visiting.insert(n.to_string()) { return true; }
         let yes = cases.iter().all(|(_, fs)| fs.iter().all(|t| self.exact_order_type(t, visiting)));
         visiting.remove(n);
         yes
+    }
+
+    // A checked structural literal can inhabit a declared Ord record.
+    // Rust's derived order is valid only when labels, slot order and all
+    // field types agree with that declaration, not merely field count.
+    fn structural_order_decl(&self, n: &str) -> bool {
+        let Some((true, labels)) = self.record_labels.get(n) else { return false };
+        self.order_names.iter().any(|name| {
+            self.record_labels.get(name).is_some_and(|(anonymous, other)| !anonymous && other == labels)
+                && self.decls.get(n) == self.decls.get(name)
+        })
     }
     /// This order matches the native runtime without interpreting erased lanes.
     /// Unsigned/narrow integer and floating orders need their own adapters.
@@ -29,6 +40,7 @@ impl Derive<'_> {
         match t {
             Ty::Int | Ty::Bool | Ty::String | Ty::Bytes | Ty::Unit => true,
             Ty::Tuple(es) => es.iter().all(|t| self.exact_order_type(t, visiting)),
+            Ty::Record { .. } => self.exact_order_decl(&block_key(t), visiting),
             Ty::Applied(C::List | C::Option | C::Result, es) => es.iter().all(|t| self.exact_order_type(t, visiting)),
             Ty::Named(_, _) => self.exact_order_decl(&block_key(t), visiting),
             _ => false,
@@ -65,6 +77,24 @@ pub(crate) fn native_order_safe(i: u16) -> bool {
 mod order_tests {
     use super::*;
     use almide_lang::{intern::sym, types::Ty};
+    #[test]
+    fn structural_order_requires_an_exact_declared_record() {
+        let names = ["Ordered".to_string()].into_iter().collect();
+        let _order = OrderGuard(ORDER_NAMES.with(|n| std::mem::replace(&mut *n.borrow_mut(), names)));
+        let fields = vec![(sym("key"), Ty::Int), (sym("name"), Ty::String)];
+        let shapes = vec![
+            Ty::Record { fields: fields.clone() },
+            Ty::Record { fields: vec![(sym("name"), Ty::String), (sym("key"), Ty::Int)] },
+            Ty::Record { fields: vec![(sym("other"), Ty::Int), (sym("name"), Ty::String)] },
+            Ty::Record { fields: vec![(sym("key"), Ty::Float), (sym("name"), Ty::String)] },
+        ];
+        let layouts = crate::lower::RecordLayouts::from([("Ordered".into(), (vec![], fields))]);
+        let _records = install(derive_records(&layouts, &Default::default(), &shapes));
+        for (i, ty) in shapes.iter().enumerate() {
+            assert_eq!(source_comparison_agrees(ty, almide_lang::capability_bounds::Cap::Ord, false), i == 0);
+        }
+    }
+
     #[test]
     fn nominal_order_requires_derivation_and_source_field_order() {
         let names = ["Good", "BadFloat", "BadUnsigned"].map(String::from).into_iter().collect();

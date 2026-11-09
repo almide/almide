@@ -581,7 +581,7 @@ fn render_declared_floor_call(
         ),
         None => (expr, ret),
     };
-    used_shims.push(crate::native_floor::FLOOR_HEADER);
+    used_shims.push(crate::native_floor::floor_header());
     match (&floor.twin, by_ref) {
         (_, Some((_, items))) => used_shims.extend(items.iter().copied()),
         (Some((_, twin, items)), None) if expr.contains(&format!("{twin}(")) => used_shims.extend(items.iter().copied()),

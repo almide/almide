@@ -13,8 +13,11 @@ fn has_runtime_tuple(d: &DTy) -> bool {
 
 /// Evaluate the runtime expression exactly once, transferring each payload
 /// into its declared native field. No layout casts or positional byte reads.
-fn runtime_result(env: &Env, d: &DTy, code: &str) -> Option<String> {
-    convert_callback_value(env, d, kind_of(env, d)?, code, true)
+fn runtime_result_as(env: &Env, d: &DTy, code: &str, native: NTy) -> Option<String> {
+    // A concrete call already has a checked tuple/container identity. A
+    // structural runtime tuple must rebuild that exact type, so a subsequent
+    // callback sees the same type it was checked against.
+    convert_callback_value(env, d, native, code, true)
 }
 
 /// Explicit runtime payloads differ from MIR lanes even without a tuple.
@@ -31,6 +34,10 @@ fn has_value_conversion(d: &DTy) -> bool {
 #[cfg(test)]
 mod tuple_result_tests {
     use super::*;
+
+    fn runtime_result(env: &Env, d: &DTy, code: &str) -> Option<String> {
+        runtime_result_as(env, d, code, kind_of(env, d)?)
+    }
 
     #[test]
     fn tuple_returning_declarations_can_route_native_representation_refusals() {

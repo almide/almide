@@ -17,11 +17,13 @@ fn __rc_rand(min: Int, max: Int) -> Int = {
   if span <= 0 then min else min + (rpos % span)
 }
 
+@specializes("random.choice")
 fn random_choice(xs: List[Int]) -> Int? = {
   let n = list.len(xs)
   if n == 0 then none else list.get(xs, __rc_rand(0, n - 1))
 }
 
+@specializes("random.choice")
 fn random_choice_str(xs: List[String]) -> String? = {
   let n = list.len(xs)
   if n == 0 then none else list.get(xs, __rc_rand(0, n - 1))
@@ -37,6 +39,7 @@ fn __rc_pair_some(h: Int, i: Int) -> (String, String)? = {
   some(v)
 }
 
+@specializes("random.choice")
 fn random_choice_pair(xs: List[(String, String)]) -> (String, String)? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)

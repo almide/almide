@@ -6,7 +6,22 @@
 // catches a frame-protocol drift between the splice and the host).
 import http
 
+fn optional_body(resp: HttpResponse?) -> String = match resp {
+  some(r) => "${http.status(r)}:${http.body(r)}",
+  none => "absent",
+}
+
 effect fn main() -> Unit = {
+  let response = http.response(201, "kept")
+  println("optional:${optional_body(some(response))}:${optional_body(none)}")
+  println("original:${http.status(response)}:${http.body(response)}")
+  let responses = [response, http.set_status(response, 202)]
+  for r in responses { println("list:${http.status(r)}:${http.body(r)}") }
+  println("after-list:${http.status(response)}:${http.body(response)}")
+  let request = http.new_request("POST", "/kept", "payload", [])
+  let requests = [request, http.set_body(request, "changed")]
+  for r in requests { println("requests:${http.method(r)}:${http.body(r)}") }
+  println("after-requests:${http.body(request)}")
   match http.request("POST", "http://127.0.0.1:1/x", "body", [("K", "v")]) {
     ok(_) => println("request:unexpected-ok"),
     err(e) => println("request:${e}"),

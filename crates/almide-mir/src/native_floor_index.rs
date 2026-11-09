@@ -220,7 +220,10 @@ fn impl_self_type<'a>(toks: &[Tok<'a>]) -> Option<&'a str> {
 }
 
 fn impl_parts<'a>(toks: &[Tok<'a>]) -> Option<(Option<&'a str>, &'a str)> {
-    let toks = if toks.first()?.text == "unsafe" { &toks[1..] } else { toks };
+    // Item text may retain a cfg attribute; its gate must travel with the
+    // implementation even though it is outside the impl head itself.
+    let start = toks.iter().position(|t| t.text == "impl" && t.depth == 0)?;
+    let toks = &toks[start..];
     let base = toks.first()?.depth;
     let mut k = 1;
     // Skip the impl's own generics.
@@ -365,7 +368,13 @@ fn references_with_supplied(rt: &RuntimeIndex, text: &str, supplied: &BTreeSet<&
             own.extend(thread_local_names(item));
         }
     }
-    references_seeded(rt, text, &own)
+    references_seeded(rt, text, &own).map(|mut refs| {
+        // An explicitly supplied header definition takes precedence over a
+        // same-named indexed prelude helper. Pulling both would duplicate the
+        // item and incorrectly demand the helper's ambient dependencies.
+        refs.retain(|name| !supplied.contains(name.as_str()));
+        refs
+    })
 }
 
 fn references_seeded<'t>(rt: &RuntimeIndex, text: &'t str, own: &BTreeSet<&'t str>) -> Result<Vec<String>, String> {
@@ -504,6 +513,14 @@ pub(crate) fn pub_items(text: &str) -> String {
             i += 1;
             continue;
         }
+        if t.text == "}" {
+            // The closing brace itself is at its parent's depth. It ends an
+            // item; it must not consume the next item's visibility slot.
+            nested = false;
+            expect_item = true;
+            i += 1;
+            continue;
+        }
         if nested {
             // Back at depth 0 after an item's braces: the next item.
             nested = false;
@@ -579,5 +596,42 @@ mod thread_local_item_tests {
             "thread_local! { #[cfg(unix)] static A: Cell<i64> = Cell::new(0); static B: i64 = 0; }",
         ] { assert!(top_level_items(gated).iter().all(|(_, _, _, cfg)| *cfg)); }
         assert_eq!(top_level_items("other_macro! { static A: i64 = 0; }").len(), 0);
+    }
+}
+
+/// Rewrite actual call paths only. A user's printed string or a comment
+/// containing Rust source must not change when termination gains teardown.
+pub(crate) fn route_process_exits(text: &str, target: &str) -> String {
+    let toks = lex(text);
+    let mut out = text.to_string();
+    for w in toks.windows(6).rev() {
+        if w.iter().map(|t| t.text).eq(["std", "::", "process", "::", "exit", "("]) {
+            out.replace_range(w[0].off..w[4].off + w[4].text.len(), target);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod exit_routing_tests {
+    use super::*;
+    #[test]
+    fn exit_calls_route_without_rewriting_user_bytes_or_comments() {
+        let src = r##"fn f() { println!("std::process::exit(1)"); let raw = r#"std::process::exit(2)"#; /* std::process::exit(3) */ std :: process :: exit (4); }"##;
+        assert_eq!(route_process_exits(src, "routed"), src.replace("std :: process :: exit (4)", "routed (4)"));
+    }
+}
+
+#[cfg(test)]
+mod runtime_visibility_tests {
+    use super::*;
+    #[test]
+    fn consecutive_items_after_empty_or_nested_bodies_are_exported() {
+        let input = "fn a() {} fn b() { if true { let _ = 1; } } pub(crate) struct C; impl Drop for C { fn drop(&mut self) {} } fn d() {}";
+        let output = pub_items(input);
+        for name in ["a", "b", "d"] { assert!(output.contains(&format!("pub fn {name}")), "{output}"); }
+        assert!(output.contains("pub struct C"));
+        assert!(!output.contains("pub impl"));
+        assert!(!output.contains("pub fn drop"));
     }
 }

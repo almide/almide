@@ -84,21 +84,17 @@ fn extern_wasm_target(func: &IrFunction) -> Option<(String, String)> {
     })
 }
 
-/// Lower a body-less `@extern(wasm, module, name)` function to a thin wasm-IMPORT
-/// call body (the browser dom/fetch/timer/console host stubs). The function becomes
-/// a `(call $__import_module_name <params>)` that returns the host's result —
-/// FAITHFUL: its behavior IS the host's, so it calls the host, it does NOT fabricate
-/// a value (an `Opaque`/`0` would be a silent miscompile). The wasm module is valid;
-/// a browser host satisfies the import (it does not instantiate under wasmtime, which
-/// is expected — these fns are 🟡 lower, not byte-matchable on the wasmtime oracle).
-///
-/// Returns `Ok(Some(MirFunction))` when this is a wasm-extern fn whose param + return
-/// types all map to flat valtypes; `Ok(None)` when it is NOT a wasm-extern (the caller
-/// lowers it normally); `Err(Unsupported)` when a param/return type has no flat-valtype
-/// ABI (WALL — never guess a signature). SOUNDNESS: a `rust`/`rs` extern is NOT a wasm
-/// import (no wasm host) → `extern_wasm_target` is `None` → it keeps walling.
+/// Lower the selected extern declaration to a borrowed import body. Native
+/// mode prefers its Rust/C target; the wasm leg uses only the wasm attribute.
+/// Unsupported declared ABI types are refused before emitting an import.
 fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, LowerError> {
-    let Some((module, name)) = extern_wasm_target(func) else {
+    let native = crate::lower::owned_tco_slots().then(|| crate::native_foreign::selected(func)).flatten();
+    let (target, module, name) = if let Some((kind, attr)) = native {
+        crate::native_foreign::check_decl(func, kind)?;
+        (crate::ImportTarget::Native { kind, is_effect: func.is_effect }, attr.module.to_string(), attr.function.to_string())
+    } else if let Some((module, name)) = extern_wasm_target(func) {
+        (crate::ImportTarget::Wasm, module, name)
+    } else {
         return Ok(None);
     };
     // Bind params to fresh MIR values (the borrow-by-default convention) — a heap param
@@ -114,7 +110,12 @@ fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, Lower
     let mut args: Vec<crate::CallArg> = Vec::new();
     let mut abi: Vec<crate::WasmAbi> = Vec::new();
     for (p, ip) in params.iter().zip(func.params.iter()) {
-        let a = extern_wasm_abi(&ip.ty).ok_or_else(|| {
+        let value_abi = if matches!(target, crate::ImportTarget::Native { .. }) && ip.ty == Ty::Unit {
+            // Native carries Unit in a scalar MIR slot; the typed adapter
+            // reconstructs (). Wasm's external ABI remains unchanged.
+            Some(crate::WasmAbi::I64)
+        } else { extern_wasm_abi(&ip.ty) };
+        let a = value_abi.ok_or_else(|| {
             LowerError::Unsupported(format!(
                 "@extern(wasm) param type {:?} has no flat wasm valtype (not lowered to an import)",
                 ip.ty
@@ -144,6 +145,7 @@ fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, Lower
         (Some(d), Some(repr), Some(rabi), Some(d))
     };
     ctx.ops.push(Op::CallImport {
+        target,
         dst,
         module,
         name,
@@ -161,7 +163,7 @@ fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, Lower
         // declares no MODELED cap here; the `CallImport` reaches no modeled WASI cap either,
         // so `used ⊆ declared` holds vacuously — honest (it is not claimed to reach a WASI cap).
         ret,
-        declared_caps: Vec::new(),
+        declared_caps: crate::native_foreign::import_caps(target),
         heap_slot_masks: Default::default(),
         owned_params: Default::default(),
         call_moves: Default::default(),

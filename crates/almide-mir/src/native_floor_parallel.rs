@@ -42,7 +42,7 @@ mod parallel_runtime_tests {
         let mut src = String::from("#![allow(dead_code, unused_imports, unused_mut, unused_variables)]\n");
         src.push_str(&crate::render_native::fan_glue());
         src.push_str(&crate::render_native_str::almide_string_alias());
-        src.push_str(FLOOR_HEADER.strip_suffix(FLOOR_IO_HEADER).unwrap());
+        src.push_str(floor_header().strip_suffix(FLOOR_IO_HEADER).unwrap());
         src.push_str(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
         src.push_str("#[cfg(any(target_os = \"linux\", target_os = \"macos\"))] fn almide_stack_guard_stdout() {}\n");
         for item in items { src.push_str(item); src.push('\n'); }

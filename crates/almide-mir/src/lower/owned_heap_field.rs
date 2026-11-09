@@ -138,7 +138,11 @@ impl LowerCtx {
             // no double-free). Gated to a String element: flat, so the aggregate's masked
             // rc_dec frees the co-owned ref exactly; a NESTED element (List[List[..]][i])
             // stays deferred — a flat slot drop could leak its payload at last-ref.
-            IrExprKind::IndexAccess { .. } if matches!(expr.ty, Ty::String) => {
+            // Native aggregates retain each checked field type and recursively
+            // drop it, so an indexed Option/record/container follows the same
+            // borrow-and-acquire contract as String.
+            IrExprKind::IndexAccess { .. } if matches!(expr.ty, Ty::String)
+                || (crate::lower::owned_tco_slots() && is_heap_ty(&expr.ty)) => {
                 let b = self.try_lower_heap_field_borrow(expr)?;
                 let dup = self.fresh_value();
                 self.ops.push(Op::Dup { dst: dup, src: b });
@@ -205,6 +209,18 @@ impl LowerCtx {
             // `live_heap_handles` so the caller's `Consume` (move-in) + `retain` balances it.
             IrExprKind::List { elements } => {
                 return self.lower_list_literal_heap_field(expr, elements);
+            }
+            // Native's generated tuple type owns its nested fields recursively.
+            // Keep the recursive drop identity when this tuple becomes another
+            // aggregate's payload; a flat slot mask cannot describe that drop.
+            IrExprKind::Tuple { elements }
+                if crate::lower::owned_tco_slots() && crate::lower::is_anon_tuple_list_elem(&expr.ty) =>
+            {
+                let obj = self.try_lower_tuple_construct(elements)?;
+                self.record_masks.remove(&obj);
+                self.value_drops.entry(obj).or_default().named_route =
+                    Some(crate::lower::anon_tuple_drop_name(&expr.ty));
+                self.track_owned_field(obj)
             }
             // A `(<flat heap>, <flat heap>)` TUPLE element of a list literal (`[(k, v), …]` —
             // the map.to_list / str_str shape, `[Color{r,g,b}: "red"]`'s pairs): a fresh

@@ -2,22 +2,13 @@
 // listener; it serves on the embedded lane only, #2650 / #2659), so this file
 // is compiled+run on the native target only.
 //
-// effect_intrinsic_tail_test — #434: a tail call to an `@intrinsic effect fn`
-// (http.serve, whose runtime fn returns `Result<T, String>`) inside an effect fn
-// used to be double-`Ok`-wrapped by the Result-propagation tail-wrap (E0308),
-// because intrinsic effect calls are `RuntimeCall`s not in the user-`lifted` set.
-// They are now recognized and left un-wrapped. http.serve blocks forever, so it
-// is never started here — `_serve_demo` exists only to keep that codegen path
-// compiling (it is emitted, not eliminated).
-//
-// The counterpart (#758): a tail call to a BARE-VALUE @intrinsic effect fn
-// (`io.print -> Unit`, `io.read_line -> String?`) must NOT be exempted — its
-// runtime returns a plain value, not a Result, so the tail still needs an
-// `Ok(...)`. Exempting it (the exemption set formerly held every intrinsic
-// effect fn regardless of runtime return type) emitted a bare `()`/value tail
-// in a `-> Result<_, String>` fn — invalid Rust (E0308). These two fns pin
-// both sides of the exemption decision. All three are emitted, not eliminated;
-// none is run (http.serve blocks forever, io.read_line would read stdin).
+// Intrinsic effect tails must follow the runtime's actual return ABI.
+// http.serve now returns Unit in both the declaration and runtime; normal
+// effect tail wrapping applies, just as for io.print and io.read_line.
+// The listener's callback still returns Result[HttpResponse, String].
+// These functions are compiled even though the test does not invoke the
+// blocking listener or stdin reader. Live server behavior is covered by
+// http_serve_cross_test and http_serve_handler_abort_test.
 import http
 import io
 

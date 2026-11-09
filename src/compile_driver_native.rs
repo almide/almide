@@ -21,6 +21,13 @@ pub(crate) struct PendingRust {
 }
 
 impl PendingRust {
+    /// The native test harness uses the same checked input as build/run.
+    /// An unsupported body is a compilation failure, never an implicit v0 run.
+    pub(crate) fn generate_tests(mut self) -> Result<String, String> {
+        let input = self.native_input.take().ok_or_else(|| "native tests require checked IR".to_string())?;
+        render_native_tests(&self.source, input)
+    }
+
     /// The standard codegen's Rust (Codegen v3: Nanopass + Templates).
     pub(crate) fn generate(mut self) -> String {
         let t = cli::PhaseTimer::start();
@@ -31,6 +38,16 @@ impl PendingRust {
         t.lap("codegen");
         code
     }
+}
+
+pub(crate) fn render_native_tests(source: &str, (ir, checker): NativeInput) -> Result<String, String> {
+    let (rust, _) = almide_mir::pipeline::try_render_rust_checked_tests_certified(
+        source, ir, checker, almide_wasm_run::fs_scope(),
+    ).map_err(|error| format!("native v1 test render: {error:?}"))?;
+    if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
+        eprintln!("native: v1 trust-spine render (test harness)");
+    }
+    Ok(rust)
 }
 
 /// [`try_compile_reporting`] up to, not including, the codegen.

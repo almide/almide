@@ -403,11 +403,11 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
 /// plain partial move where the block is rebound next (nothing names it whole
 /// before then, and Rust re-initializes it at the rebind), else a take that
 /// leaves the field's `Default` behind.
-fn field_move(st: &AddrState, d: ValueId, base: ValueId, k: usize) -> String {
+fn field_move(st: &AddrState, d: ValueId, place: &str) -> String {
     if st.moves_partial.contains(&d) {
-        format!("{}.f{k}", var(base))
+        place.to_owned()
     } else {
-        format!("std::mem::take(&mut {}.f{k})", var(base))
+        format!("std::mem::take(&mut {place})")
     }
 }
 
@@ -426,7 +426,13 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
     // value. It must not pin a later rebuild to borrowing that field forever
     // (e.g. an alias made before a list-push loop). A previous borrowed read
     // still blocks this early move, including deferred interpolation reads.
-    let no_prior_borrow = reads_of_place(&format!("{}.f{k}", var(ad.base))).is_empty();
+    let field = format!("{}.f{k}", var(ad.base));
+    let boxed = match ty(tys, &ad.base) {
+        Some(NTy::Rec(i) | NTy::RecRef(i)) => crate::render_native_rec::enum_field_boxed(i, f),
+        _ => false,
+    };
+    let place = if boxed { format!("(*{field})") } else { field };
+    let no_prior_borrow = reads_of_place(&place).is_empty();
     if (st.moves_first.contains(d) || (st.moves.contains(d) && no_prior_borrow))
         && !st.moves_last.contains(d)
         && matches!(ty(tys, &ad.base), Some(NTy::Rec(_)))
@@ -434,7 +440,7 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
         && !crate::render_native_move::drill_no_moves()
     {
         tys.insert(*d, f);
-        line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, ad.base, k));
+        line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, &place));
         return Ok(true);
     }
     // A borrow-only read (crate::render_native_borrow_read): a
@@ -442,23 +448,22 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
     // would copy it (a string's bytes, a list's elements).
     if let (true, Some((t, spelled, whole))) = (st.borrow_reads.contains(d), borrowed_kind(f)) {
         tys.insert(*d, t);
-        note_field(*d, ad.base, format!("{}.f{k}", var(ad.base)));
-        line!("let mut {}: {spelled} = &{}.f{k}{whole};", var(*d), var(ad.base));
+        note_field(*d, ad.base, place.clone());
+        line!("let mut {}: {spelled} = &{place}{whole};", var(*d));
         return Ok(true);
     }
     tys.insert(*d, f);
     // The last read of the slot of an owned record moves the value out
     // (a kind with a `Default` to leave in the slot).
     if st.moves.contains(d) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) && crate::render_native_rec::has_default(f) {
-        line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, ad.base, k));
+        line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, &place));
         return Ok(true);
     }
     crate::render_native_addr::note_field_copy(*d);
     line!(
-        "let mut {}: {} = {}.f{k}.clone();",
+        "let mut {}: {} = {place}.clone();",
         var(*d),
-        crate::render_native_rec::owned_ty(f),
-        var(ad.base)
+        crate::render_native_rec::owned_ty(f)
     );
     Ok(true)
 }
@@ -571,12 +576,17 @@ fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
         line!("let mut {b}_f{k}: {} = {rhs};", crate::render_native_rec::owned_ty(field));
         done[k] = true;
         if done.iter().all(|d| *d) {
-            let fields = (0..done.len()).map(|f| format!("f{f}: {b}_f{f}")).collect::<Vec<_>>().join(", ");
+            let fields = (0..done.len()).map(|f| {
+                let boxed = crate::render_native_rec::rec_field(i, f)
+                    .is_some_and(|ty| crate::render_native_rec::enum_field_boxed(i, ty));
+                if boxed { format!("f{f}: Box::new({b}_f{f})") } else { format!("f{f}: {b}_f{f}") }
+            }).collect::<Vec<_>>().join(", ");
             line!("{b} = {} {{ {fields} }};", crate::render_native_rec::struct_name(i));
             st.building.remove(&ad.base);
         }
         return Ok(true);
     }
+    let rhs = if crate::render_native_rec::enum_field_boxed(i, field) { format!("Box::new({rhs})") } else { rhs };
     line!("{}.f{k} = {rhs};", var(ad.base));
     Ok(true)
 }

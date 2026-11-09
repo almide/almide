@@ -250,6 +250,9 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
     // lost — these were never an exhaustive `match Op { .. }` to begin with).
     let mut used: Vec<Capability> = Vec::new();
     for op in &func.ops {
+        if let Op::CallImport { target, .. } = op {
+            used.extend(crate::native_foreign::import_caps(*target));
+        }
         cap_witness_op_call(op, &mut used);
         cap_witness_op_host_call(op, &mut used);
         cap_witness_op_prim_floor(op, &mut used);
@@ -519,7 +522,13 @@ pub fn manifest_caps(allow: &[String]) -> Vec<Capability> {
 /// `effect fn` declared every modeled capability, so `used ⊆ declared` could
 /// never REJECT it — the manifest makes the sandbox promise non-vacuous.
 pub fn apply_manifest_caps(func: &mut MirFunction, allow: &[String]) {
-    if !func.declared_caps.is_empty() {
+    if func.declared_caps.contains(&Capability::Foreign) {
+        // Like the structural wasm projection, FOREIGN records a trusted
+        // boundary, not a host effect. Preserve it without widening a pure
+        // declaration; FOREIGN_EFFECT still requires manifest authority.
+        let granted = manifest_caps(allow);
+        func.declared_caps.retain(|cap| *cap == Capability::Foreign || granted.contains(cap));
+    } else if !func.declared_caps.is_empty() {
         func.declared_caps = manifest_caps(allow);
     }
 }

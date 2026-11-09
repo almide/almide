@@ -71,3 +71,21 @@ test "a generic alias annotates a lambda parameter" {
   let add = (p: Pair[Int]) => p.0 + p.1
   assert_eq(add((1, 2)), 3)
 }
+
+type TextShape =
+  | TextSeg(Pair[String])
+  | TextDot
+
+fn text_pair(s: TextShape) -> String = match s {
+  TextSeg(p) => p.0 + p.1,
+  TextDot => "",
+}
+
+test "a variant retains both owned fields of a tuple alias" {
+  let p: Pair[String] = ("left", "right")
+  let s = TextSeg(p)
+  assert_eq(text_pair(s), "leftright")
+  assert_eq(p.0, "left")
+  assert_eq(text_pair(s), "leftright")
+  assert_eq(text_pair(TextDot), "")
+}

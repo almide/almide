@@ -13,6 +13,12 @@ fn effect_unwrap_admitted(
     layouts: &crate::lower::VariantLayouts,
 ) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
+    // Option unwraps use the same existing continuation match, with None
+    // mapped to the enclosing String error channel. Their payload needs the
+    // same drop proof as a Result Ok payload.
+    if let Ty::Applied(TypeConstructorId::Option, a) = result_ty {
+        return a.len() == 1 && ok_payload_drop_proven(&a[0], layouts);
+    }
     let Ty::Applied(TypeConstructorId::Result, a) = result_ty else {
         return false;
     };
@@ -87,7 +93,7 @@ fn collect_arm_unwrap_admit(
     layouts: &crate::lower::VariantLayouts,
 ) {
     match &e.kind {
-        IrExprKind::Unwrap { expr } => {
+        IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
             *has = true;
             if !effect_unwrap_admitted(&expr.ty, layouts) {
                 *all_admitted = false;

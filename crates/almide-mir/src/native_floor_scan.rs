@@ -9,7 +9,8 @@ fn header_items() -> &'static BTreeSet<&'static str> {
     static H: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
     H.get_or_init(|| {
         let alias: &'static str = Box::leak(crate::render_native_str::almide_string_alias().into_boxed_str());
-        let mut out = defined_names(FLOOR_HEADER);
+        let mut out = defined_names(floor_header());
+        out.extend(thread_local_names(floor_header()));
         // The alias line defines the string's two names; its spliced module body
         // is the string's own, never a runtime item.
         out.extend(lex(alias).windows(2).filter(|w| w[0].text == "type" || w[0].text == "mod").map(|w| w[1].text));
