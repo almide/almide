@@ -46,6 +46,10 @@ pub const VALUE_SELFHOST_HELPERS: &[(&str, &str)] = &[
     ("value.merge", "__vu_merge_pairs"),
     ("value.pick", "__vu_pick_pairs"),
     ("value.omit", "__vu_omit_pairs"),
+    // ADR-0033 phase 1: the compact JSON writer is self-hosted (its prim
+    // sites certified like every self-host body), not the hand-built `$vjson`.
+    ("json.stringify", "__jw_stringify"),
+    ("value.__stringify", "__jw_stringify"),
 ];
 
 /// The surfaces this emitter resolves ON ITS OWN, by a literal key no IR call
@@ -346,39 +350,20 @@ impl Emitter<'_> {
         }
     }
 
-    /// `[value]` -> `[String]`: run the JSON serializer helpers over the
-    /// line buffer and capture the region as a real block.
-    pub(crate) fn emit_value_stringify(&mut self) -> Result<(), EmitError> {
-        let Some(fi) = self.resolve_qualified("float.to_string") else {
-            return Err(EmitError::Unsupported("stringify:float-unlinked".into()));
-        };
-        let info = &self.table.infos[fi];
-        if info.refuse.is_some() || info.ret != Some(STR) {
-            return Err(EmitError::Unsupported("stringify:float-impl".into()));
+    /// `json.stringify(v)` / `value.__stringify(v)`: the self-host writer
+    /// `__jw_stringify` (stdlib/value_utils.almd, ADR-0033 phase 1) — a size
+    /// pass, one String at that size, a room-checked fill. `v` is lent; a
+    /// writer that owns its parameter is handed a fresh credit.
+    pub(crate) fn lower_json_stringify(&mut self, v: &IrExpr) -> Result<(), EmitError> {
+        let (writer, owned) = self.pairs_helper(value_helper("json.stringify"), 1)?;
+        self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
+        if owned[0] {
+            let h = self.hold_i32()?;
+            self.f.instructions().local_tee(h).local_get(h).call(F_INC);
+            self.arm_share_stored();
+            self.release_i32();
         }
-        let float_idx = info.wasm_index;
-        self.calls.insert(fi);
-        let frags = self.json_frags();
-        let ctrl = self.json_ctrl_frags();
-        let _ = self.work.helper(Helper::JsonQuote { frags, ctrl });
-        let vj = self.work.helper(Helper::JsonValue { float_to_string: float_idx, frags });
-        let hv = self.hold_i32()?;
-        let start = self.hold_i32()?;
-        self.f.instructions().local_set(hv);
-        self.f.instructions().global_get(G_LINE_CURSOR).local_set(start);
-        self.f
-            .instructions()
-            .local_get(start)
-            .local_get(hv)
-            .call(vj)
-            .local_set(self.tmp_i32_local);
-        self.f
-            .instructions()
-            .local_get(start)
-            .local_get(self.tmp_i32_local)
-            .call(F_BUF_TO_BLOCK);
-        self.release_i32();
-        self.release_i32();
+        self.f.instructions().call(writer);
         Ok(())
     }
 
@@ -710,8 +695,7 @@ impl Emitter<'_> {
                 Some(Lowered::owned(self.lower_value_set_path_steps(v, steps, x)?))
             }
             ("__stringify", [v]) => {
-                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
-                self.emit_value_stringify()?;
+                self.lower_json_stringify(v)?;
                 Some(Lowered::owned(STR))
             }
             _ => return Ok(None),
