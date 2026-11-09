@@ -562,13 +562,9 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
     let by_value = |e: NTy| crate::native_value_repr::same_owned(e, NTy::Opt)
         && ty(tys, &v) == Some(NTy::Opt) && !st.addrs.contains_key(&v);
     if let (Some(NTy::Rec(_)), Some(e)) = (ty(tys, &ad.base), list_of(ty(tys, &ad.base)).filter(|e| st.addrs.contains_key(&v) || by_value(*e))) {
-        // A map entry left unbuilt goes into its entry list, unbuilt too
-        // (crate::native_map_entries::leave_unbuilt), as a pair.
-        let pair = crate::native_map_entries::pair_of(v);
-        let rhs = match (pair.clone(), st.addrs.get(&v).copied()) {
-            (Some(p), _) => p,
-            (None, None) => var(v),
-            (None, Some(sv)) => {
+        let rhs = match st.addrs.get(&v).copied() {
+            None => var(v),
+            Some(sv) => {
                 let g = ty(tys, &sv.base).filter(|g| sv.off == 0 && sv.idx.is_none() && field_accepts(e, *g));
                 g.and_then(|g| {
                     if st.borrowed_list_slots.contains(&(ad.base, v)) && matches!(g, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_))
@@ -581,20 +577,18 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
                 })?
             }
         };
+        let pair = crate::native_map_entries::pair_of(v); // a map entry's pair, left unbuilt
+        let rhs = pair.clone().unwrap_or(rhs);
         if let Some((n, k)) = st.literal.get(&ad.base).copied() {
             let b = var(ad.base);
-            if pair.is_some() {
-                line!("let {b}_e{k} = {rhs};");
-            } else {
-                line!("let {b}_e{k}: {} = {rhs};", crate::render_native_rec::owned_ty(e));
-            }
+            list_literal::elem_local(out, indent, (&b, k), &crate::render_native_rec::owned_ty(e), &rhs, pair.is_some());
             st.literal.insert(ad.base, (n, k + 1));
             if let Some(stored) = st.single_rec.get_mut(&ad.base) {
                 // Its one element waits for the append that pushes it.
                 *stored = true;
                 return Ok(true);
             }
-            if k + 1 == n && !crate::native_map_entries::unbuilt(ad.base) {
+            if list_literal::complete(ad.base, (n, k)) {
                 let es: Vec<String> = (0..n).map(|j| format!("{b}_e{j}")).collect();
                 line!("let mut {b}: {} = vec![{}];", owned_ty_of(ty(tys, &ad.base)), es.join(", "));
             }
@@ -616,12 +610,8 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
         (Some(NTy::VecStr), Some(sv)) if sv.off == 0 && sv.idx.is_none() => {
             // Move consumed handles; preserve the source of a borrow-view.
             let rhs = match ty(tys, &sv.base) {
-                // A borrowed slot whose string is read again: a copy no
-                // program the perf gates time takes, so it builds on the
-                // standard codegen.
-                Some(NTy::Str) if st.borrowed_list_slots.contains(&(ad.base, v)) && !crate::render_native_keyed::dies_at_store(sv.base, v, NTy::Str) => {
-                    return Err(wall("native: a string list slot borrowing a string read again"));
-                }
+                // A borrowed slot whose string is read again: an untimed copy, so the standard codegen.
+                Some(NTy::Str) if list_literal::copies(st, ad.base, (sv.base, v), NTy::Str) => return Err(wall("native: a string list slot borrowing a string read again")),
                 Some(NTy::Str) => crate::render_native_move::take_expr(&var(sv.base)),
                 Some(NTy::StrRef) => format!("AlmideString::from({})", var(sv.base)),
                 other => return Err(wall(format!("native: a {other:?} handle stored into a List[String] slot"))),
@@ -631,17 +621,8 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
                 *done = true;
                 return Ok(true);
             }
-            if let Some((n, k)) = st.literal.get(&ad.base).copied() {
-                let b = var(ad.base);
-                line!("let {b}_e{k}: AlmideString = {rhs};");
-                st.literal.insert(ad.base, (n, k + 1));
-                if k + 1 == n && !crate::native_map_entries::is_deferred(ad.base) {
-                    line!("let mut {b}: Vec<AlmideString> = vec![{}];", elem_locals(&b, n));
-                }
-                return Ok(true);
-            }
             if st.pushed.contains(&ad.base) {
-                line!("{}.push({rhs});", var(ad.base));
+                list_literal::pushed_str(st, out, indent, ad.base, &rhs);
                 return Ok(true);
             }
             let (guard, slot) = bounds_guard(st, &ad, ix);
@@ -813,9 +794,4 @@ fn rec_scalar_set(s: AddrSink<'_>, list: &ValueId, idx: &ValueId, val: &ValueId)
     }
     line!("{}.f{k} = {};", var(*list), var(*val));
     Ok(true)
-}
-
-/// The element locals `b_e0, …` of a list of `n` built whole.
-fn elem_locals(b: &str, n: usize) -> String {
-    (0..n).map(|j| format!("{b}_e{j}")).collect::<Vec<_>>().join(", ")
 }
