@@ -5222,23 +5222,21 @@ effect fn remove(name: String) -> Result[Unit, String] = match __set_refusal(nam
 
 /// Every environment variable of this process, keyed and ordered by name.
 /// Holds secrets as plain values: read a credential by name with `env.secret` instead.
-effect fn vars() -> Map[String, String] = {
-  let merged = __environ() |> list.fold(map.new(), (m, entry) => __vars_step(m, entry))
-  merged |> map.to_list |> list.sort_by(((name, _)) => name) |> map.from_list
-}
+effect fn vars() -> Map[String, String] =
+  __environ()
+    |> list.filter_map((entry) => __vars_step(entry))
+    |> list.sort_by(((name, _)) => name)
+    |> map.from_list
+    |> map.filter(((_, value)) => value != "\u{0}")
 
 
 
 
 
-local fn __vars_step(m: Map[String, String], entry: String) -> Map[String, String] = match string.split_once(
-  entry,
-  "=",
-) {
-  some((name, value)) => if value == "\u{0}" then map.remove(m, name)
-  else map.set(m, name, value),
-  none => m,
-}
+
+
+
+local fn __vars_step(entry: String) -> Option[(String, String)] = string.split_once(entry, "=")
 
 
 @intrinsic("almide_rt_env___environ")
