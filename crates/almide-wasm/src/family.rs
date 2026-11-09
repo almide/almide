@@ -84,7 +84,7 @@ pub(crate) fn emit_retarget(i: &mut InstructionSink<'_>, block: u32) {
     i.local_get(block).i32_load(rc_word()).i32_const(0).i32_lt_s().if_(BlockType::Empty);
     i.local_get(block);
     i.local_get(block).i32_load(rc_word()).i32_const(DISTANCE_MASK).i32_and();
-    i.i32_sub().local_set(block);
+    i.i32_sub().i32_const(4).i32_sub().local_set(block);
     i.end();
 }
 
