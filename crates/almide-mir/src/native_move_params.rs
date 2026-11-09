@@ -334,7 +334,18 @@ fn own_params(
     for i in at.into_iter().rev() {
         f.ops.remove(i);
     }
-    crate::verify_ownership(&f).is_ok().then_some(f)
+    (crate::verify_ownership(&f).is_ok() && !newly_poisoned(func, &f)).then_some(f)
+}
+
+/// The rewrite leaves a certificate the kernel-proven checker cannot accept
+/// where the lowered body's could be: a taken-over param released in one arm
+/// of a region and given away in an arm nested inside the other carries
+/// grouped events in a nested arm, which the flat arm body cannot hold, so the
+/// certificate scan emits its always-rejecting poison. The mirror accepts that
+/// body; the certificate the native wall judges does not.
+fn newly_poisoned(before: &MirFunction, after: &MirFunction) -> bool {
+    crate::certificate::ownership_certificate_with_poison(after).1
+        && !crate::certificate::ownership_certificate_with_poison(before).1
 }
 
 /// Whether the caller can move `v` into the call at `call` without a copy:
@@ -738,7 +749,11 @@ fn solve_modes<'t>(
             // The join releases sunk into the arms first, so an arm's call takes
             // the slot over; the plain body if the mirror refuses that.
             let sunk = move_at_sites(&sink_join_releases(f, &owned), &owned);
-            let moved = if no_new_violations(before, &sunk) { sunk } else { move_at_sites(f, &owned) };
+            let moved = if no_new_violations(before, &sunk) && !newly_poisoned(before, &sunk) {
+                sunk
+            } else {
+                move_at_sites(f, &owned)
+            };
             if !no_new_violations(before, &moved) {
                 return None;
             }
