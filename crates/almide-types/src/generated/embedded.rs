@@ -5222,12 +5222,16 @@ effect fn remove(name: String) -> Result[Unit, String] = match __set_refusal(nam
 
 /// Every environment variable of this process, keyed and ordered by name.
 /// Holds secrets as plain values: read a credential by name with `env.secret` instead.
-effect fn vars() -> Map[String, String] =
-  __environ()
-    |> list.filter_map((entry) => __vars_step(entry))
-    |> list.sort_by(((name, _)) => name)
+effect fn vars() -> Map[String, String] = __vars_of(__environ())
+
+
+local fn __vars_of(entries: List[String]) -> Map[String, String] =
+  entries
+    |> list.filter((entry) => string.contains(entry, "="))
+    |> list.map(__vars_step)
+    |> list.sort_by(__vars_name)
     |> map.from_list
-    |> map.filter(((_, value)) => value != "\u{0}")
+    |> map.filter(__vars_kept)
 
 
 
@@ -5236,7 +5240,15 @@ effect fn vars() -> Map[String, String] =
 
 
 
-local fn __vars_step(entry: String) -> Option[(String, String)] = string.split_once(entry, "=")
+
+local fn __vars_step(entry: String) -> (String, String) = match string.split_once(entry, "=") {
+  some(pair) => pair,
+  none => (entry, ""),
+}
+
+local fn __vars_name(entry: (String, String)) -> String = entry.0
+
+local fn __vars_kept(entry: (String, String)) -> Bool = entry.1 != "\u{0}"
 
 
 @intrinsic("almide_rt_env___environ")

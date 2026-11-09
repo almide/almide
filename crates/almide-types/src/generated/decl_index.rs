@@ -27,7 +27,7 @@ pub const DECL_INDEX: &[DeclRow] = &[
     ("datetime_format", &["__iso_pad", "__iso_digits", "datetime_to_iso", "__dt_pad", "__dt_year", "datetime_format"], &[], false),
     ("datetime_parse_iso", &["__dpi_field", "__dpi_nums", "__dpi_sign_at", "__dpi_offset", "__dpi_build", "datetime_parse_iso"], &[], false),
     ("deque", &["new", "from_list", "to_list", "len", "is_empty", "push", "push_front", "pop", "pop_front", "first", "last", "get", "contains", "clear", "map", "filter", "fold", "any", "all", "count", "find", "reverse", "take", "drop", "take_end", "drop_end", "slice", "set", "insert", "remove_at", "enumerate", "zip", "zip_with", "filter_map", "find_map", "reduce", "scan", "partition", "group_by", "sort", "sort_by", "sort_with", "min", "max", "min_by", "max_by", "min_with", "max_with", "find_index", "take_while", "drop_while", "chunk", "window", "split_at", "dedup", "intersperse", "unique", "unique_by", "sum", "product"], &[(18, 19)], false),
-    ("env", &["args", "get", "secret", "set", "__set_refusal", "__set", "remove", "vars", "__vars_step", "__environ", "cwd", "sleep_ms", "os"], &[], false),
+    ("env", &["args", "get", "secret", "set", "__set_refusal", "__set", "remove", "vars", "__vars_of", "__vars_step", "__vars_name", "__vars_kept", "__environ", "cwd", "sleep_ms", "os"], &[], false),
     ("env_args", &["env_args"], &[], false),
     ("env_cwd", &["env_cwd"], &[], false),
     ("env_get", &["env_get"], &[], false),
