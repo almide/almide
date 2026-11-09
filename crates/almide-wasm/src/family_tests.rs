@@ -251,6 +251,9 @@ fn cow_elems_takes_the_copy_credits_before_it_releases_the_family() {
     assert_eq!(rt.word(c + PAYLOAD), s, "the copy's element is the interior String");
     assert_eq!(rt.word(root), 1, "the copy's element credit keeps the family alive");
     assert_eq!(rt.word(c + RC), 1);
+    // Never freed meanwhile: a same-class request must not be handed the root
+    // (a release before the credits would have filed it on the free list).
+    assert_ne!(rt.call1("alloc", 64), root, "the family was freed while the copy still holds its element");
     // Releasing the copy releases its element, which frees the family.
     rt.run("drop_list", c);
     assert_eq!(rt.word(root), 0, "the family freed at the last release");
