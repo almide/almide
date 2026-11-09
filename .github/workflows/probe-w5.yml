@@ -250,3 +250,31 @@ jobs:
             /tmp/fs/*.txt
             /tmp/fs/*.wat
           retention-days: 7
+
+  jr:
+    if: contains(github.event.head_commit.message, '[jr]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: jsonround ratchet (fuel, allocs) per ref
+        shell: bash {0}
+        run: |
+          cp -r .github/probe-w5 /tmp/pw
+          while read -r tag sha; do
+            [ -z "$tag" ] && continue
+            git worktree add -f /tmp/j-$tag "$sha" >/dev/null 2>&1
+            cd /tmp/j-$tag && echo "=== $tag $(git log --oneline -1)"
+            CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test json_ratchet -- --nocapture 2>&1 | grep -E "RATCHET|RETENTION|panicked|test result|  [a-z]+ (fuel|allocs|frees)"
+            cd "$GITHUB_WORKSPACE"
+          done < /tmp/pw/jr-refs.txt
