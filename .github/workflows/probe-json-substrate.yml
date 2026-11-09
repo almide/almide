@@ -402,3 +402,26 @@ jobs:
           name: fp
           path: /tmp/fp/*.txt
           retention-days: 7
+
+  ratchet:
+    if: contains(github.event.head_commit.message, '[ratchet]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: JSON ratchet in CHECK mode on the ref under measurement (negative controls)
+        run: |
+          ref="$(cat .github/probe/head-ref.txt)"
+          git checkout -q --detach "$ref" && git log --oneline -1
+          cargo test --release -p almide-wasm --test json_ratchet -- --nocapture 2>&1 | grep -E "RATCHET|RETENTION|JSON ratchet|panicked|test result|  [a-z]+ (fuel|allocs|frees)" | tee /tmp/ratchet.txt
+          grep -q "test result: ok" /tmp/ratchet.txt && echo "VERDICT: ratchet PASSES on $ref" || echo "VERDICT: ratchet FAILS on $ref"
