@@ -14,9 +14,12 @@
 //!   `[profile.release]` make it: no debug assertions, no overflow checks, no
 //!   debug info. It depends only on the render, so it is cached by content and
 //!   a rebuild of the same program shape only compiles the program.
-//! - the program as `[profile.dev]` (opt-level 1, debug assertions on,
-//!   overflow checks off) or the release profile (opt-level 3, fat LTO, one
-//!   codegen unit, the release codegen flags and the backtrace split).
+//! - the program as the standard codegen's rlib fast path compiles its
+//!   program (owner ruling 2026-11-09): opt-level 1 without debug assertions,
+//!   overflow checks off, or the release profile (opt-level 3, fat LTO, one
+//!   codegen unit, the release codegen flags and the backtrace split). The
+//!   runtime generics the program crate instantiates are compiled there, so
+//!   debug assertions on it put std's checks back into every runtime loop.
 //!
 //! Neither crate carries debug info: the split render already turned it off for
 //! both (#3829), and a render without a runtime part is the shape v0's rustc
@@ -37,7 +40,9 @@ pub(super) const RECORD: &str = "almide-rustc.json";
 /// The flags every rustc call here passes, besides the input and output.
 const COMMON_ARGS: [&str; 6] = ["--edition", "2021", "-C", "overflow-checks=off", "-A", "warnings"];
 
-/// The program crate's profile flags (`[profile.dev]` / `[profile.release]`).
+/// The program crate's profile flags: the standard codegen's normal native
+/// build's (`cargo_build::rlib_fast_program_profile_args`), effective setting
+/// for effective setting — never fewer checks than it.
 fn program_profile_args(rs_code: &str, release: bool) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     if release {
@@ -48,9 +53,9 @@ fn program_profile_args(rs_code: &str, release: bool) -> Vec<String> {
             args.extend(split.rustc_args());
         }
     } else {
-        // rustc turns debug assertions off above opt-level 0; cargo's dev
-        // profile keeps them on for the program's own code.
-        args.extend(["-C".into(), "opt-level=1".into(), "-C".into(), "debug-assertions=on".into()]);
+        // Pinned to what rustc's default gives the standard build above
+        // opt-level 0 (owner ruling 2026-11-09).
+        args.extend(["-C".into(), "opt-level=1".into(), "-C".into(), "debug-assertions=off".into()]);
     }
     args
 }
@@ -156,15 +161,71 @@ pub(super) fn try_build(rs_code: &str, project_dir: &Path, release: bool) -> Opt
 
 #[cfg(test)]
 mod tests {
-    use super::{program_profile_args, runtime_profile_args};
+    use super::{program_profile_args, runtime_profile_args, COMMON_ARGS};
+    use super::super::cargo_build::rlib_fast_program_profile_args;
 
-    /// The dev profile keeps debug assertions on for the program and off for
-    /// the runtime, as the generated manifest does (owner ruling 2026-11-02).
+    /// `(opt-level, debug-assertions, overflow-checks)` as rustc resolves
+    /// them from `args`: the last `-C` of each wins, `-O` is opt-level 2,
+    /// debug assertions default to on only at opt-level 0, and overflow
+    /// checks default to the debug-assertions setting.
+    fn effective(args: &[String]) -> (String, bool, bool) {
+        let flag = |v: &str| match v {
+            "on" | "yes" | "y" | "true" => true,
+            "off" | "no" | "n" | "false" => false,
+            other => panic!("unknown flag value `{other}` in {args:?}"),
+        };
+        let (mut opt, mut da, mut oc) = ("0".to_string(), None, None);
+        let mut it = args.iter();
+        while let Some(a) = it.next() {
+            let c = if a == "-C" { it.next().map(String::as_str) } else { a.strip_prefix("-C") };
+            if a == "-O" {
+                opt = "2".into();
+            }
+            if let Some(c) = c {
+                if let Some(v) = c.strip_prefix("opt-level=") {
+                    opt = v.into();
+                } else if let Some(v) = c.strip_prefix("debug-assertions=") {
+                    da = Some(flag(v));
+                } else if let Some(v) = c.strip_prefix("overflow-checks=") {
+                    oc = Some(flag(v));
+                } else if c == "debug-assertions" {
+                    da = Some(true);
+                } else if c == "overflow-checks" {
+                    oc = Some(true);
+                }
+            }
+        }
+        let da = da.unwrap_or(opt == "0");
+        (opt, da, oc.unwrap_or(da))
+    }
+
+    /// Owner ruling 2026-11-09: the v1 program crate compiles with the
+    /// standard codegen's normal native build's settings — the same
+    /// opt-level, debug assertions and overflow checks, effective value for
+    /// effective value, in the dev and the release profile.
+    #[test]
+    fn the_program_crate_profile_is_the_standard_builds() {
+        for release in [false, true] {
+            let mut v1: Vec<String> = COMMON_ARGS.iter().map(|s| s.to_string()).collect();
+            v1.extend(program_profile_args("fn main() {}", release));
+            let v0 = rlib_fast_program_profile_args("fn main() {}", release);
+            assert_eq!(effective(&v1), effective(&v0), "release={release}\nv1: {v1:?}\nv0: {v0:?}");
+        }
+        // The resolver itself: the standard dev build is opt-level 1 with
+        // both checks off by default, and an explicit flag overrides that.
+        let s = |v: &[&str]| v.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        assert_eq!(effective(&s(&["-C", "opt-level=1"])), ("1".into(), false, false));
+        assert_eq!(effective(&s(&["-C", "opt-level=0"])), ("0".into(), true, true));
+        assert_eq!(effective(&s(&["-C", "opt-level=1", "-C", "debug-assertions=on"])), ("1".into(), true, true));
+        assert_eq!(effective(&s(&["-C", "overflow-checks=off", "-C", "debug-assertions=on"])), ("0".into(), true, false));
+    }
+
+    /// The dev profile: the runtime without debug assertions (owner ruling
+    /// 2026-11-02), the program at opt-level 1.
     #[test]
     fn dev_profiles_match_the_generated_manifest() {
         let p = program_profile_args("fn main() {}", false);
         assert!(p.windows(2).any(|w| w == ["-C", "opt-level=1"]));
-        assert!(p.windows(2).any(|w| w == ["-C", "debug-assertions=on"]));
         let r = runtime_profile_args("fn main() {}", false);
         assert!(r.windows(2).any(|w| w == ["-C", "opt-level=1"]));
         assert!(r.windows(2).any(|w| w == ["-C", "debug-assertions=off"]));

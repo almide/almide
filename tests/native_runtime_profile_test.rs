@@ -1,24 +1,26 @@
-//! The v1 native build's runtime crate profile (#4006, owner ruling
-//! 2026-11-02).
+//! The v1 native build's crate profiles (#4006, owner rulings 2026-11-02 and
+//! 2026-11-09).
 //!
 //! A program the v1 trust spine renders carries its runtime part — the shared
 //! string buffer and the runtime bodies it takes along — in one module, which
 //! the build compiles as a crate of its own: without debug assertions, as v0
 //! compiles its runtime rlib, and with overflow checks pinned off. The
-//! program's own code keeps `[profile.dev]` as it was, its debug assertions
-//! included.
+//! program crate compiles as v0's normal native build compiles its program:
+//! opt-level 1, which in rustc's defaults means no debug assertions, with
+//! overflow checks off (`v1_rustc_build`'s unit test holds the two profiles
+//! equal flag for flag).
 //!
 //! The build compiles the two crates with bare rustc (no cargo), and records
 //! the two commands in `<project>/almide-rustc.json`. What this test holds, on
 //! a real build:
 //! - the program builds as two crates with the runtime's two settings pinned
-//!   and the program's dev profile (opt-level 1, debug assertions) kept;
+//!   and the program's dev profile (opt-level 1, no debug assertions,
+//!   overflow checks off) pinned;
 //! - overflow wraps on the native leg, in the program's code and through the
 //!   runtime (`int.abs` of the minimum), as before the split;
 //! - replaying the recorded commands, a `debug_assert!` placed in the PROGRAM
-//!   crate still fires (the negative control: the ruling must not switch off
-//!   the program's checks);
-//! - the same `debug_assert!` placed in the RUNTIME crate does not.
+//!   crate does not fire, as in v0's build of the same program;
+//! - the same `debug_assert!` placed in the RUNTIME crate does not either.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -95,7 +97,7 @@ fn plant(file: &Path, header: &str, stmt: &str) {
 }
 
 #[test]
-fn the_runtime_crate_builds_without_debug_assertions_and_the_program_keeps_them() {
+fn both_crates_build_without_debug_assertions_as_the_standard_build() {
     let work = scratch("build");
     let tmp = work.join("tmp");
     std::fs::create_dir_all(&tmp).expect("tmp");
@@ -114,8 +116,7 @@ fn the_runtime_crate_builds_without_debug_assertions_and_the_program_keeps_them(
     let ran = Command::new(&bin).output().expect("run");
     assert_eq!(String::from_utf8_lossy(&ran.stdout), WRAPPED, "overflow must wrap on the native leg");
 
-    // The build: two rustc commands, no cargo; the runtime's profile pinned,
-    // the program's dev profile kept.
+    // The build: two rustc commands, no cargo; both crates' profiles pinned.
     let run = run_dir(&tmp);
     // (`target/` is the build cache's binary store on every route; a manifest
     // is written only by the cargo route.)
@@ -127,14 +128,14 @@ fn the_runtime_crate_builds_without_debug_assertions_and_the_program_keeps_them(
     assert!(has_pair(&rt_argv, "-C", "debug-assertions=off"), "runtime keeps debug assertions: {rt_argv:?}");
     assert!(has_pair(&rt_argv, "-C", "overflow-checks=off"), "runtime overflow checks not pinned: {rt_argv:?}");
     assert!(has_pair(&prog_argv, "-C", "opt-level=1"), "program profile changed: {prog_argv:?}");
-    assert!(has_pair(&prog_argv, "-C", "debug-assertions=on"), "program lost its debug assertions: {prog_argv:?}");
+    assert!(has_pair(&prog_argv, "-C", "debug-assertions=off"), "program debug assertions not pinned off: {prog_argv:?}");
     assert!(has_pair(&prog_argv, "-C", "overflow-checks=off"), "program overflow checks not pinned: {prog_argv:?}");
 
     let main_rs = run.join("src/main.rs");
     let rt_dir = after(&rt_argv, "--out-dir");
     let prog_out = after(&prog_argv, "-o");
 
-    // Negative control: a debug_assert! in the PROGRAM crate fires.
+    // A debug_assert! in the PROGRAM crate does not fire, as in v0's build.
     let user = work.join("user");
     copy_tree(&run.join("src"), &user.join("src"));
     plant(&user.join("src/main.rs"), "fn main()", "debug_assert!(false, \"program-check\");");
@@ -144,11 +145,11 @@ fn the_runtime_crate_builds_without_debug_assertions_and_the_program_keeps_them(
         &[(main_rs.to_str().unwrap(), user.join("src/main.rs").to_str().unwrap()), (&prog_out, user_bin.to_str().unwrap())],
     );
     let o = Command::new(&user_bin).output().expect("run");
-    assert!(!o.status.success(), "a debug_assert! in the program crate did not fire");
-    assert!(String::from_utf8_lossy(&o.stderr).contains("program-check"), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(o.status.success(), "a debug_assert! in the program crate fired:\n{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(String::from_utf8_lossy(&o.stdout), WRAPPED);
 
-    // The same assertion in the RUNTIME crate (the integer printer every line
-    // goes through) does not.
+    // Nor does the same assertion in the RUNTIME crate (the integer printer
+    // every line goes through).
     let rt = work.join("rt");
     std::fs::create_dir_all(&rt).expect("mkdir");
     std::fs::copy(Path::new(&rt_dir).join("lib.rs"), rt.join("lib.rs")).expect("copy runtime");
