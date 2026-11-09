@@ -122,7 +122,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-084 | Codec/value decode error messages are byte-identical across targets | 0.27.6 | active | fixture | 3 |
 | C-085 | Float decode widens an integral JSON number to f64 | 0.27.6 | active | fixture | 1 |
 | C-086 | Pass-through stdlib combinators give their result its own reference | 0.27.6 | active | fixture | 1 |
-| C-087 | JSON number and \\u string decoding are byte-identical across targets | 0.27.6 | active | fixture | 4 |
+| C-087 | JSON number and \\u string decoding are byte-identical across targets | 0.27.6 | active | fixture | 5 |
 | C-088 | A Rust-keyword function name compiles on both targets | 0.27.6 | active | fixture | 2 |
 | C-089 | A default parameter referencing an earlier parameter is filled with its argument | 0.27.6 | active | fixture | 1 |
 | C-090 | bytes.from_list on a List[Int] parameter compiles on both targets | 0.27.6 | active | fixture | 1 |
@@ -435,8 +435,8 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-397 | fs.create_temp_file and fs.create_temp_dir create a new entry exclusively under an entropy name, private to its owner | 0.69.0 | active | fixture | 0 |
 | C-398 | path.join_within admits only a child that stays inside the base it is joined to, and refuses any other child | 0.69.0 | active | fixture | 1 |
 | C-399 | io.write and io.write_bytes emit exactly their bytes on every target and host | 0.68.0 | active | fixture | 1 |
-| C-400 | json.parse refuses a lone surrogate, an unknown or short escape, a raw control character, a noncharacter and an unterminated string, never deleting input | 0.69.0 | active | fixture | 2 |
-| C-401 | json.parse accepts exactly one RFC 8259 value: a duplicate key, trailing data, an unquoted key, a trailing comma, a missing separator, non-JSON whitespace and a malformed number are errs | 0.69.0 | active | fixture | 3 |
+| C-400 | json.parse refuses a lone surrogate, an unknown or short escape, a raw control character, a noncharacter and an unterminated string, never deleting input | 0.69.0 | active | fixture | 3 |
+| C-401 | json.parse accepts exactly one RFC 8259 value: a duplicate key, trailing data, an unquoted key, a trailing comma, a missing separator, non-JSON whitespace and a malformed number are errs | 0.69.0 | active | fixture | 4 |
 | C-402 | url.parse cleans the input as WHATWG does, validates the scheme at the start, refuses a backslash, a control character, a % in the host and a non-canonical numeric host, and removes dot segments, %2e included | 0.69.0 | active | fixture | 2 |
 | C-403 | url.resolve cleans the reference by url.parse's rules and runs every path through the one dot-segment rule, %2e included | 0.69.0 | active | fixture | 1 |
 | C-404 | http.query_params is url.parse_query of the target after its first ?, one decoder on every leg, every pair kept in order and a bad escape an err | 0.69.0 | active | fixture | 1 |

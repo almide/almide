@@ -1305,6 +1305,7 @@ evidence  = [
   { path = "spec/wasm_cross/json_string_span.almd", class = "fixture" },
   { path = "spec/wasm_cross/json_parse_lenient_edges.almd", class = "fixture" },
   { path = "spec/wasm_cross/json_many_keys.almd", class = "fixture" },
+  { path = "spec/wasm_cross/json_parse_fast_paths.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-088"
@@ -5344,6 +5345,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/json_parse_strict_strings.almd", class = "fixture" },
   { path = "spec/wasm_cross/json_string_span.almd", class = "fixture" },
+  { path = "spec/wasm_cross/json_parse_fast_paths.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -5357,6 +5359,7 @@ evidence  = [
   { path = "spec/wasm_cross/json_parse_strict_structure.almd", class = "fixture" },
   { path = "spec/wasm_cross/json_parse_lenient_edges.almd", class = "fixture" },
   { path = "spec/wasm_cross/value_object_unique_keys.almd", class = "fixture" },
+  { path = "spec/wasm_cross/json_parse_fast_paths.almd", class = "fixture" },
 ]
 
 [[contract]]
