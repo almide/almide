@@ -2,11 +2,11 @@
 //! `Value`, stringified, parsed back, summed) split into its four phases, with
 //! two DETERMINISTIC counts per phase pinned in golden/json-ratchet.txt:
 //!
-//!   * `fuel`   — wasmtime fuel (one unit per operator) the phase consumes in
-//!                the library build of the probe (the phase's probe minus the
-//!                probe of the phases before it);
-//!   * `allocs` — `$alloc` calls the phase makes in the armed program build
-//!                (`alloc_count`), and `frees` beside it.
+//! - `fuel`: the wasmtime fuel (one unit per operator) the phase consumes in
+//!   the library build of the probe (the phase's probe minus the probe of the
+//!   phases before it);
+//! - `allocs`: the `$alloc` calls the phase makes in the armed program build
+//!   (`alloc_count`), and `frees` beside it.
 //!
 //! Both are exact for a given compiler: the module bytes fix them. The rows
 //! only move DOWN. A change that lowers a row re-records it in its own commit

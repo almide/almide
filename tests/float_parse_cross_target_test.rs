@@ -13,6 +13,7 @@
 //!     the round-half-even, sticky-truncation and 800-digit-cap rows;
 //!   * the fixed boundaries (5e-324, 2.2250738585072014e-308,
 //!     1.7976931348623157e308 and their neighbours).
+//!
 //! Each line is the parse's bits (`float.to_bits`) or its Err text.
 //!
 //! Skips cleanly when the `almide` binary or wasmtime is unavailable.
