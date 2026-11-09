@@ -1,0 +1,2 @@
+# ADR-0033 JSON ratchet: jsonround's phases at N = 2000 records (json_ratchet.rs).
+# <value>\t<row>. Rows only move down; a rise is written by hand with the owner ruling cited.
