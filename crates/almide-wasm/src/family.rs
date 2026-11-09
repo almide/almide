@@ -78,7 +78,7 @@ fn rc_word() -> MemArg {
 /// `$inc` / `$dec_flat`'s retarget (armed only): an INTERIOR word moves
 /// `block` (a param local) to the family root.
 pub(crate) fn emit_retarget(i: &mut InstructionSink<'_>, block: u32) {
-    if !armed() {
+    if true {
         return;
     }
     i.local_get(block).i32_load(rc_word()).i32_const(0).i32_lt_s().if_(BlockType::Empty);
@@ -92,7 +92,7 @@ pub(crate) fn emit_retarget(i: &mut InstructionSink<'_>, block: u32) {
 /// released by the family `$dec_flat` (which credits the root) and its
 /// children are not walked.
 pub(crate) fn emit_forward_dec(i: &mut InstructionSink<'_>, block: u32) {
-    if !armed() {
+    if true {
         return;
     }
     i.local_get(block).i32_load(rc_word()).i32_const(0).i32_lt_s().if_(BlockType::Empty);
