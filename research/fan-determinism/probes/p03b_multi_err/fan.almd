@@ -1,0 +1,33 @@
+// p03b: three arms fail; the slowest is arm 0. Sequential reading: every arm
+// prints, the LOWEST-INDEX Err ("zero") surfaces, exit 1.
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn fail(id: Int, work: Int) -> Result[Int, String] = {
+  let s = burn(work)
+  println("arm ${id} ${s}")
+  eprintln("arm ${id} about to fail")
+  err("failure ${id}")
+}
+
+effect fn fine(id: Int) -> Result[Int, String] = {
+  println("arm ${id} fine")
+  ok(id)
+}
+
+effect fn main() -> Unit = {
+  let (a, b, c, d) = fan {
+    fail(0, 3000000)!
+    fine(1)!
+    fail(2, 1000)!
+    fail(3, 0)!
+  }
+  println("unreachable ${a} ${b} ${c} ${d}")
+}

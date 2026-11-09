@@ -1,0 +1,30 @@
+// p14: deep non-tail recursion in arms. DEPTH (env) sets the depth; MODE=map
+// runs it inside a parallel fan.map instead of a fan block. Sequential
+// reading: the same answer whenever the sequential run has the stack for it.
+import env
+
+fn deep(n: Int) -> Int = if n <= 0 then 1 else {
+  let r = deep(n - 1)
+  (r * 31 + n) % 1000003
+}
+
+effect fn arm(id: Int, n: Int) -> Result[Int, String] = {
+  let v = deep(n)
+  println("arm ${id} ${v}")
+  ok(v)
+}
+
+effect fn main() -> Unit = {
+  let n = int.parse(env.get("DEPTH") ?? "1000") ?? 1000
+  let mode = env.get("MODE") ?? "block"
+  if mode == "map" then {
+    let ys = fan.map(list.range(0, 4), (i) => ok(deep(n + i)))!
+    println("map ${list.join(list.map(ys, (y) => int.to_string(y)), ",")}")
+  } else {
+    let (a, b) = fan {
+      arm(0, n)!
+      arm(1, n)!
+    }
+    println("block ${a} ${b}")
+  }
+}

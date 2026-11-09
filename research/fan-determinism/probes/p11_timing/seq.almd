@@ -1,0 +1,19 @@
+// p11: long-running arms. The bytes match the sequential reading; WHEN each
+// line appears does not. Sequential: a1@0 a2@600 b1@600 b2@900, exit @900.
+import env
+
+effect fn talk(id: String, ms: Int) -> Result[Int, String] = {
+  println("${id}1")
+  eprintln("${id}1 err")
+  env.sleep_ms(ms)
+  println("${id}2")
+  ok(ms)
+}
+
+effect fn main() -> Unit = {
+  let __seq_r1: Result[Int, String] = talk("a", 600)
+  let __seq_r2: Result[Int, String] = talk("b", 300)
+  let a = __seq_r1!
+  let b = __seq_r2!
+  println("end ${a + b}")
+}

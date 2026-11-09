@@ -1,0 +1,40 @@
+// p16a: process.exit in the middle arm. Sequential reading: arm 0's lines,
+// arm 1's line, exit 3; nothing of arm 2.
+import process
+
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn slow(id: Int) -> Result[Int, String] = {
+  let s = burn(3000000)
+  println("arm ${id} ${s}")
+  eprintln("arm ${id} err")
+  ok(s)
+}
+
+effect fn quit(id: Int, code: Int) -> Result[Int, String] = {
+  println("arm ${id} exiting")
+  process.exit(code)
+}
+
+effect fn fast(id: Int) -> Result[Int, String] = {
+  println("arm ${id}")
+  eprintln("arm ${id} err")
+  ok(id)
+}
+
+effect fn main() -> Unit = {
+  let (a, b, c) = fan {
+    slow(0)!
+    quit(1, 3)!
+    fast(2)!
+  }
+  println("unreachable ${a} ${b} ${c}")
+}

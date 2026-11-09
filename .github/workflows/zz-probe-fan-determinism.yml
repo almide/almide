@@ -1,0 +1,94 @@
+name: probe-fan-determinism (throwaway)
+# Red-team of the fan determinism claim (ADR-0024 D1; C-004 / C-199 / C-200 /
+# C-386). Builds the compiler once, then runs every probe under
+# research/fan-determinism/probes many times per substrate and compares each
+# run's stdout / stderr / exit code / files with the sequential twin.
+on:
+  push:
+    branches: ['probe/fan-determinism']
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: runs per config (probes with their own count keep it)
+        default: "200"
+      only:
+        description: comma-separated probe names (empty = all)
+        default: ""
+permissions:
+  contents: read
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - run: cargo build --release --bin almide
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: almide-linux
+          path: target/release/almide
+          retention-days: 3
+      - id: list
+        run: |
+          only="${{ github.event.inputs.only }}"
+          if [ -n "$only" ]; then
+            names=$(echo "$only" | tr ',' '\n')
+          else
+            names=$(cd research/fan-determinism/probes && ls -d p*/ | tr -d '/')
+          fi
+          echo "probes=$(printf '%s\n' $names | python3 -c 'import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')" >> "$GITHUB_OUTPUT"
+    outputs:
+      probes: ${{ steps.list.outputs.probes }}
+
+  probe:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        probe: ${{ fromJson(needs.build.outputs.probes) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+      - name: Install wasmtime
+        run: |
+          chmod +x /tmp/almide-bin/almide
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "/tmp/$TARBALL"
+          tar -xf "/tmp/$TARBALL" -C /tmp
+          sudo mv /tmp/wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+          nproc; free -m; ulimit -a
+      - name: drive ${{ matrix.probe }}
+        run: |
+          python3 research/fan-determinism/tools/drive.py \
+            research/fan-determinism/probes/${{ matrix.probe }} /tmp/fanout \
+            --almide /tmp/almide-bin/almide --runs "${{ github.event.inputs.runs || '200' }}"
+          rm -rf /tmp/fanout/*/bin
+          cat /tmp/fanout/${{ matrix.probe }}/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: fanout-${{ matrix.probe }}
+          path: /tmp/fanout
+          retention-days: 7

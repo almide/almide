@@ -1,0 +1,39 @@
+// p13: one large String and one List[String] shared by eight arms, each arm
+// slicing, concatenating and dropping copies in a loop (reference counts
+// under threads, ADR-0013). Sequential reading: the same digests every run.
+fn digest(s: String) -> Int = list.fold(string.to_list(string.slice(s, 0, 64)), string.len(s), (a, c) => (a * 131 + string.len(c)) % 1000003)
+
+effect fn churn(s: String, parts: List[String], id: Int, rounds: Int) -> Result[Int, String] = {
+  var acc = id
+  var k = 0
+  while k < rounds {
+    let t = s + "${id}:${k}"
+    let u = string.slice(t, k % 100, string.len(t) - k % 50)
+    let joined = list.join(list.take(parts, k % 50 + 1), "|")
+    let v = u + joined
+    acc = (acc * 31 + digest(v) + list.len(list.map(parts, (p) => p + t))) % 1000003
+    k = k + 1
+  }
+  println("arm ${id} ${acc}")
+  ok(acc)
+}
+
+effect fn main() -> Unit = {
+  let s = string.repeat("abcdefghij", 20000)
+  let parts = list.range(0, 200) |> list.map((i) => "part-${i}-" + string.repeat("x", i))
+  var round = 0
+  while round < 5 {
+    let (a, b, c, d, e, f, g, h) = fan {
+      churn(s, parts, 0, 60)!
+      churn(s, parts, 1, 60)!
+      churn(s, parts, 2, 60)!
+      churn(s, parts, 3, 60)!
+      churn(s, parts, 4, 60)!
+      churn(s, parts, 5, 60)!
+      churn(s, parts, 6, 60)!
+      churn(s, parts, 7, 60)!
+    }
+    println("round ${round} ${(a + b + c + d + e + f + g + h) % 1000003} ${string.len(s)} ${list.len(parts)}")
+    round = round + 1
+  }
+}

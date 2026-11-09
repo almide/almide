@@ -1,0 +1,28 @@
+// @armty: String
+// p07c: env.set is @ordered (ADR-0024 D3): the fans below must run in arm
+// order. Sequential reading: "1 set:v | get:v" and "2 get:v | set:w".
+import env
+
+effect fn set_after(k: String, v: String, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  env.set(k, v)!
+  ok("set:${v}")
+}
+
+effect fn get_after(k: String, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  ok("get:${env.get(k) ?? "unset"}")
+}
+
+effect fn main() -> Unit = {
+  let (s1, g1) = fan {
+    set_after("FAN_PROBE_K", "v", 80)!
+    get_after("FAN_PROBE_K", 10)!
+  }
+  println("1 ${s1} | ${g1}")
+  let (g2, s2) = fan {
+    get_after("FAN_PROBE_K", 80)!
+    set_after("FAN_PROBE_K", "w", 0)!
+  }
+  println("2 ${g2} | ${s2}")
+}

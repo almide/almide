@@ -1,0 +1,43 @@
+// p04a: a fan of fans, every leaf printing on both streams, finishing in
+// reverse order. Sequential reading: outer 0 (its leaves in order), outer 1, ...
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn leaf(o: Int, i: Int, work: Int) -> Result[Int, String] = {
+  var k = 0
+  var acc = 0
+  while k < 10 {
+    acc = (acc + burn(work)) % 1000003
+    println("leaf ${o}.${i} ${k}")
+    if k % 4 == 0 then eprintln("leaf ${o}.${i} e${k}") else ()
+    k = k + 1
+  }
+  ok(acc)
+}
+
+effect fn outer(o: Int, work: Int) -> Result[Int, String] = {
+  println("outer ${o} start")
+  let (a, b, c) = fan {
+    leaf(o, 0, work)!
+    leaf(o, 1, 20000)!
+    leaf(o, 2, 0)!
+  }
+  println("outer ${o} end")
+  ok((a + b + c) % 1000003)
+}
+
+effect fn main() -> Unit = {
+  let (x, y, z) = fan {
+    outer(0, 200000)!
+    outer(1, 50000)!
+    outer(2, 0)!
+  }
+  println("total ${x} ${y} ${z}")
+}

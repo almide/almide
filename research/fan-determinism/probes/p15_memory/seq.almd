@@ -1,0 +1,24 @@
+// p15: memory pressure. Four arms each build a list of N Ints (N from env)
+// and fold it. The driver runs this under an address-space limit that one
+// arm at a time fits in. Sequential reading: the four sums.
+import env
+
+effect fn hog(id: Int, n: Int) -> Result[Int, String] = {
+  let xs = list.range(0, n) |> list.map((x) => x * 2 + id)
+  let s = list.fold(xs, 0, (a, x) => (a + x) % 1000003)
+  println("arm ${id} ${s}")
+  ok(s)
+}
+
+effect fn main() -> Unit = {
+  let n = int.parse(env.get("N") ?? "1000") ?? 1000
+  let __seq_r1: Result[Int, String] = hog(0, n)
+  let __seq_r2: Result[Int, String] = hog(1, n)
+  let __seq_r3: Result[Int, String] = hog(2, n)
+  let __seq_r4: Result[Int, String] = hog(3, n)
+  let a = __seq_r1!
+  let b = __seq_r2!
+  let c = __seq_r3!
+  let d = __seq_r4!
+  println("sum ${(a + b + c + d) % 1000003}")
+}

@@ -1,0 +1,21 @@
+// @armty: String
+// p07b: unseeded random in four arms (#4122). Sequential reading: one stream
+// drawn in order, so the four arms' draws differ: "distinct 4".
+import random
+
+effect fn draw(id: Int) -> Result[String, String] = {
+  let xs = list.range(0, 8) |> list.map((_) => random.int(0, 1000000000))
+  ok(xs |> list.map((x) => int.to_string(x)) |> list.join(","))
+}
+
+effect fn main() -> Unit = {
+  let (a, b, c, d) = fan {
+    draw(0)!
+    draw(1)!
+    draw(2)!
+    draw(3)!
+  }
+  let distinct = list.len(list.unique([a, b, c, d]))
+  println("distinct ${distinct}")
+  println("a==b ${a == b} b==c ${b == c} c==d ${c == d}")
+}

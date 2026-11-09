@@ -1,0 +1,31 @@
+// p07a: the clock. env.sleep_ms and datetime.* are not @ordered, so the arms
+// stay threaded. Sequential reading: arm 1 starts after arm 0 ends, so every
+// line prints "true".
+import env
+
+effect fn sleeper(ms: Int) -> Result[Int, String] = {
+  env.sleep_ms(ms)
+  ok(datetime.monotonic_ns())
+}
+
+effect fn stamp() -> Result[Int, String] = ok(datetime.monotonic_ns())
+
+effect fn wall_sleeper(ms: Int) -> Result[Int, String] = {
+  env.sleep_ms(ms)
+  ok(datetime.now_ms())
+}
+
+effect fn wall_stamp() -> Result[Int, String] = ok(datetime.now_ms())
+
+effect fn main() -> Unit = {
+  let __seq_r1: Result[Int, String] = sleeper(150)
+  let __seq_r2: Result[Int, String] = stamp()
+  let end0 = __seq_r1!
+  let start1 = __seq_r2!
+  println("monotonic: arm 1 started after arm 0 ended: ${start1 >= end0}")
+  let __seq_r3: Result[Int, String] = wall_sleeper(150)
+  let __seq_r4: Result[Int, String] = wall_stamp()
+  let wend0 = __seq_r3!
+  let wstart1 = __seq_r4!
+  println("wall: arm 1 started after arm 0 ended: ${wstart1 >= wend0}")
+}

@@ -1,0 +1,104 @@
+// @armty: String
+// p06: arms touching the same files. Every writer (write/append/copy/rename/
+// mkdir) is @ordered (ADR-0024 D3), so each fan below should run its arms in
+// arm order on every target. Sleeps are placed so a concurrent run would see
+// a different state. Files left in the cwd are compared byte-for-byte too.
+import env
+import fs
+
+effect fn write_after(path: String, text: String, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  fs.write_text(path, text)!
+  ok("wrote ${text}")
+}
+
+effect fn read_after(path: String, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  ok("read ${fs.read_text(path) ?? "missing"}")
+}
+
+effect fn exists_after(path: String, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  ok("exists ${path} ${fs.exists(path)}")
+}
+
+effect fn append_lines(path: String, tag: String, n: Int) -> Result[String, String] = {
+  var k = 0
+  while k < n {
+    fs.append_text(path, "${tag} ${k}\n")!
+    if k % 10 == 0 then env.sleep_ms(1) else ()
+    k = k + 1
+  }
+  ok("appended ${tag}")
+}
+
+effect fn big_write(path: String, ch: String, n: Int, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  fs.write_text(path, string.repeat(ch, n))!
+  ok("big ${ch}")
+}
+
+effect fn rename_after(a: String, b: String, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  fs.rename(a, b)!
+  ok("renamed")
+}
+
+effect fn copy_after(a: String, b: String, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  fs.copy(a, b)!
+  ok("copied")
+}
+
+effect fn mkdir_after(d: String, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  fs.mkdir_p(d)!
+  ok("mkdir")
+}
+
+effect fn main() -> Unit = {
+  fs.write_text("shared.txt", "init")!
+  // 1. the writer is arm 0 and sleeps longer than the reader: sequentially the
+  //    reader sees "written"; concurrently it would see "init".
+  let (w1, r1) = fan {
+    write_after("shared.txt", "written", 80)!
+    read_after("shared.txt", 10)!
+  }
+  println("1 ${w1} | ${r1}")
+  // 2. reader first, writer second (the D3 fixture's order).
+  let (r2, w2) = fan {
+    read_after("shared.txt", 80)!
+    write_after("shared.txt", "second", 0)!
+  }
+  println("2 ${r2} | ${w2}")
+  // 3. two writers of one file: the last in arm order wins sequentially.
+  let (b1, b2) = fan {
+    big_write("big.txt", "A", 300000, 0)!
+    big_write("big.txt", "B", 200000, 0)!
+  }
+  let big = fs.read_text("big.txt")!
+  println("3 ${b1} ${b2} ${string.len(big)} ${string.slice(big, 0, 1)}")
+  // 4. two appenders interleave only when concurrent.
+  let (a1, a2) = fan {
+    append_lines("log.txt", "x", 200)!
+    append_lines("log.txt", "y", 200)!
+  }
+  println("4 ${a1} ${a2}")
+  // 5. rename vs exists, copy vs read, mkdir vs exists.
+  fs.write_text("a.txt", "payload")!
+  let (n1, e1) = fan {
+    rename_after("a.txt", "b.txt", 60)!
+    exists_after("b.txt", 10)!
+  }
+  println("5 ${n1} ${e1}")
+  let (c1, c2) = fan {
+    copy_after("b.txt", "c.txt", 60)!
+    read_after("c.txt", 10)!
+  }
+  println("6 ${c1} ${c2}")
+  let (m1, m2) = fan {
+    mkdir_after("d/e", 60)!
+    exists_after("d/e", 10)!
+  }
+  println("7 ${m1} ${m2}")
+}

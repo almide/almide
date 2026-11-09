@@ -1,0 +1,57 @@
+// p05a: fan.map and fan { list.map } over 200k elements with a pure callback
+// that prints every ~1000th element (println is allowed in a pure fn,
+// ADR-0022): the chunked work-stealing path. Then fan.settle, then a fan.map
+// whose elements 3 and 150001 fail: the LOWEST-INDEX Err surfaces.
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+fn heavy(x: Int) -> Int = (burn(x % 50 + 100) + x) % 1000003
+
+// The sequential reading of fan.map: every element runs in list order, the
+// lowest-index Err is the result.
+fn seq_map(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[List[Int], String] = {
+  let rs = list.map(xs, f)
+  let errs = list.filter_map(rs, (r) => match r {
+    ok(_) => none,
+    err(e) => some(e),
+  })
+  match list.first(errs) {
+    some(e) => err(e),
+    none => ok(list.filter_map(rs, (r) => match r {
+      ok(v) => some(v),
+      err(_) => none,
+    })),
+  }
+}
+
+effect fn main() -> Unit = {
+  let xs = list.range(0, 200000)
+  let ys = seq_map(xs, (x) => {
+    if x % 997 == 0 then println("map ${x}") else ()
+    ok(heavy(x))
+  })!
+  println("map sum ${list.fold(ys, 0, (a, y) => (a + y) % 1000003)}")
+  let zs = list.map(xs, (x) => {
+    if x % 1009 == 0 then eprintln("lm ${x}") else ()
+    heavy(x + 1)
+  })
+  println("list.map sum ${list.fold(zs, 0, (a, y) => (a + y) % 1000003)}")
+  let rs = list.map(list.range(0, 50000), (x) => if x % 7777 == 5 then err("bad ${x}") else ok(heavy(x)))
+  let bad = list.filter_map(rs, (r) => match r {
+    ok(_) => none,
+    err(e) => some(e),
+  })
+  println("settle bad ${list.join(bad, ",")}")
+  let ws = seq_map(xs, (x) => {
+    if x % 20011 == 0 then println("last ${x}") else ()
+    if x == 3 or x == 150001 then err("fail ${x}") else ok(heavy(x))
+  })!
+  println("unreachable ${list.len(ws)}")
+}
