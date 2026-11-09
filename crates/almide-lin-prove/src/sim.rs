@@ -25,7 +25,13 @@ pub(crate) struct Contract {
 pub(crate) fn writes_rebinds(items: &[It], w: &mut BTreeSet<Slot>, r: &mut BTreeSet<Slot>) {
     for it in items {
         match it {
-            It::Handle { h, .. } | It::Len { n: h, .. } | It::Set(h) | It::SetR { x: h, .. } | It::Asn { x: h, .. } => {
+            It::Handle { h, .. }
+            | It::Len { n: h, .. }
+            | It::Cap { n: h, .. }
+            | It::Set(h)
+            | It::SetR { x: h, .. }
+            | It::Asn { x: h, .. }
+            | It::AsnU { x: h, .. } => {
                 w.insert(*h);
             }
             It::Alloc { h, r: g, .. } => {
@@ -57,6 +63,12 @@ pub(crate) struct Sim<'a> {
     pub(crate) conts: Vec<Vec<Vec<L>>>,
     pub(crate) probe: usize,
     pub(crate) err: Option<String>,
+    /// A runtime routine's selection pass (#4005 A4): an access no region
+    /// holds is recorded here instead of failing the body — it leaves the
+    /// selection, and the body is proven again without it (an access is
+    /// no fact, so the rest proves the same).
+    pub(crate) skip: bool,
+    pub(crate) dropped: Vec<usize>,
 }
 
 pub(crate) fn region_vars(f: &[L]) -> BTreeSet<Slot> {
@@ -155,6 +167,11 @@ impl Sim<'_> {
                 g.extend(kill(f, &V::S(*n)));
                 return Some(g);
             }
+            It::Cap { n, r } => {
+                let mut g = eqs(&V::S(*n), &v1(V::C(*r)));
+                g.extend(kill(f, &V::S(*n)));
+                return Some(g);
+            }
             It::Wf(r) => {
                 let (vb, vc) = (v1(V::B(*r)), v1(V::C(*r)));
                 vec![lneg(&vb), lneg(&vc), ladd(&ladd(&vb, &vc), &kz(12 - ADDR + 1))]
@@ -179,7 +196,7 @@ impl Sim<'_> {
     }
 
     /// An access: some region holds it, by three proofs.
-    fn access(&mut self, f: &[L], addr: &lin::Lin, off: u64, w: u32, store: bool) -> Option<()> {
+    fn access(&mut self, f: &[L], addr: &lin::Lin, off: u64, w: u32, store: bool, site: usize) -> Option<()> {
         let addr = from_lin(addr);
         let (off, w) = (i128::from(off), i128::from(w));
         let held = region_vars(f).into_iter().find_map(|r| {
@@ -190,6 +207,13 @@ impl Sim<'_> {
             Some([r.to_string(), p0?, p1?, p2?])
         });
         let Some(fills) = held else {
+            if self.skip {
+                if self.probe == 0 && !self.dropped.contains(&site) {
+                    self.dropped.push(site);
+                }
+                self.fills.extend(["0".to_string(), "()1".to_string(), "()1".to_string(), "()1".to_string()]);
+                return Some(());
+            }
             return self.fail(format!("{} of {w} at {}+{off} not in any region", if store { "store" } else { "load" }, addr.text()));
         };
         self.fills.extend(fills);
@@ -222,18 +246,25 @@ impl Sim<'_> {
         };
         self.fill(lo);
         self.fill(hi);
-        match coef(&l.t, &vx) {
-            0 => {
-                let mut g = eqs(&vx, &l);
-                g.extend(kill(&f, &vx));
-                g
-            }
-            1 => {
-                let d = lsub(&v1(vx.clone()), &L { t: dropv(&vx, &l.t), c: l.c });
-                f.iter().map(|g| subst(&vx, &d, g)).collect()
-            }
-            _ => kill(&f, &vx),
+        asn_core(&f, &vx, &l)
+    }
+
+    /// RoutineLin's `asnu_facts`: an i32 result proven in [0, 2^32) is
+    /// LAsn's (the same two proofs show it does not wrap), else only its
+    /// range.
+    fn assign_u(&mut self, f: Vec<L>, x: Slot, l: &lin::Lin) -> Vec<L> {
+        let l = from_lin(l);
+        let vx = V::S(x);
+        if let (Some(lo), Some(hi)) = (prove(&f, &lneg(&l)), prove(&f, &lsub(&l, &kz(ADDR - 1)))) {
+            self.fill(lo);
+            self.fill(hi);
+            return asn_core(&f, &vx, &l);
         }
+        self.fill("()1".into());
+        self.fill("()1".into());
+        let mut g = vec![lsub(&kz(0), &v1(vx.clone())), lsub(&v1(vx.clone()), &kz(ADDR - 1))];
+        g.extend(kill(&f, &vx));
+        g
     }
 
     /// A test's facts on its two sides, its six proof holes filled.
@@ -393,9 +424,10 @@ impl Sim<'_> {
             return Some(Flow::Go(g));
         }
         match it {
-            It::Acc { w, off, addr, store, .. } => self.access(&f, addr, *off, *w, *store).map(|()| Flow::Go(f)),
+            It::Acc { w, off, addr, store, site } => self.access(&f, addr, *off, *w, *store, *site).map(|()| Flow::Go(f)),
             It::Alloc { h, r, sz } => self.alloc(&f, *h, *r, sz).map(Flow::Go),
             It::Asn { x, l } => Some(Flow::Go(self.assign(f, *x, l))),
+            It::AsnU { x, l } => Some(Flow::Go(self.assign_u(f, *x, l))),
             It::Test { .. } | It::Branch { .. } => self.branch(inv, post, f, it, rest),
             It::Loop { body } => self.lloop(post, &f, body, rest),
             It::Cont => self.back_edge(inv, f),
@@ -420,6 +452,23 @@ impl Sim<'_> {
             }
         }
         finish(joins, Some(f), None)
+    }
+}
+
+/// LAsn's facts once `l` is shown not to wrap: `x = l`, or the invertible
+/// step `x := x + d` substituted through, else nothing on x.
+fn asn_core(f: &[L], vx: &V, l: &L) -> Vec<L> {
+    match coef(&l.t, vx) {
+        0 => {
+            let mut g = eqs(vx, l);
+            g.extend(kill(f, vx));
+            g
+        }
+        1 => {
+            let d = lsub(&v1(vx.clone()), &L { t: dropv(vx, &l.t), c: l.c });
+            f.iter().map(|g| subst(vx, &d, g)).collect()
+        }
+        _ => kill(f, vx),
     }
 }
 

@@ -22,14 +22,20 @@
 //!   unsigned shift right, a compare);
 //! - an i64 add, subtract or multiply by a constant is the exact linear
 //!   value wrapped to 64 bits; an i32 address is that value mod 2^32, plus
-//!   the memarg offset;
+//!   the memarg offset; an i32 add, subtract or multiply by a constant set
+//!   into a local is that value mod 2^32 (`U`, RoutineLin's `LAsnU`);
 //! - each prim load or store the anchor file's `prims` line locates is an
 //!   `A` / `W` event of its width at its address; no other instruction is
 //!   an event (non-prim accesses are other witnesses' business);
-//! - a heap-typed parameter (the `selfhost` line) holds a block's base:
-//!   `h p r` at entry; a load of its len word at +4 is a count of that
-//!   block at the parameter's stride (`n`, the header invariant) when the
-//!   line names a stride;
+//! - a heap-typed parameter (the `selfhost` line, or a runtime routine's
+//!   declared one on the `routines` line) holds a block's base: `h p r` at
+//!   entry; a load of its len word at +4 is a count of that block at the
+//!   parameter's stride (`n`, the header invariant) when the line names a
+//!   stride; a load of the cap word at +8 of such a COUNTED block's base
+//!   (or, in a runtime routine, of a block it allocated) is that block's
+//!   capacity (`K`, the layout: a counted block's extent is PAYLOAD + its
+//!   cap word, written only by the allocator — a Value or scratch block
+//!   reuses its word at +8, so no other block's is read as one);
 //! - `call $alloc` returns a fresh block of at least the size passed;
 //! - an `i32.const` that is the base of a block in the static block chain
 //!   of an active data segment (headers `[1][len][cap]`, `len == cap`,
@@ -123,12 +129,14 @@ pub enum It {
     Acc { store: bool, w: u32, off: u64, addr: Lin, site: usize },
     Handle { h: Slot, r: Slot },
     Len { n: Slot, r: Slot, s: i128 },
+    Cap { n: Slot, r: Slot },
     Alloc { h: Slot, r: Slot, sz: Lin },
     Wf(Slot),
     Static { r: Slot, b0: i128, c0: i128 },
     Set(Slot),
     SetR { x: Slot, lo: i128, hi: i128 },
     Asn { x: Slot, l: Lin },
+    AsnU { x: Slot, l: Lin },
     Test { a: Lin, b: Lin, sgn: bool, thn: Vec<It>, els: Vec<It> },
     Branch { thn: Vec<It>, els: Vec<It> },
     Loop { body: Vec<It> },
@@ -413,6 +421,11 @@ struct Tr<'m, 'a> {
     base_of: HashMap<Slot, Slot>,
     /// Region -> the len stride of its block (heap params only).
     stride: HashMap<Slot, i128>,
+    /// Regions whose cap word is their capacity: the counted heap params
+    /// and, in a runtime routine, the blocks it allocates.
+    capped: BTreeSet<Slot>,
+    /// A runtime routine (the `routines` line) rather than a self-host body.
+    routine: bool,
     regions: Vec<Slot>,
     next_region: Slot,
     labels: Vec<Label>,
@@ -457,7 +470,10 @@ impl<'m, 'a> Tr<'m, 'a> {
                 }
             }
             (_, Av::Cmp(_)) => out.push(It::SetR { x, lo: 0, hi: 1 }),
-            (ValType::I32, Av::I32(_, false)) => out.push(It::SetR { x, lo: 0, hi: (1 << 32) - 1 }),
+            // An i32 result mod 2^32 (#4005 A4: the runtime routines' i32
+            // arithmetic): `x = l` once the certificate proves l in
+            // [0, 2^32), else only x's range (RoutineLin `LAsnU`).
+            (ValType::I32, Av::I32(l, false)) => out.push(It::AsnU { x, l }),
             _ => out.push(It::Set(x)),
         }
         self.written(x);
@@ -776,6 +792,19 @@ impl<'m, 'a> Tr<'m, 'a> {
             out.push(It::Acc { store, w, off, addr: addr.clone(), site: k });
             self.covered.push(k);
         }
+        // The cap word read off a known block's base: its capacity.
+        if !store && w == 4 {
+            let at = addr.add(&Lin::konst(off as i128));
+            let h = at.as_ref().and_then(|at| match at.terms.as_slice() {
+                [(V::S(h), 1)] if at.cst == 8 => Some(*h),
+                _ => None,
+            });
+            if let Some(r) = h.and_then(|h| self.base_of.get(&h).copied()).filter(|r| self.capped.contains(r)) {
+                let n = self.fresh(ValType::I32);
+                out.push(It::Cap { n, r });
+                return Ok(Av::I32(Lin::slot(n), true));
+            }
+        }
         // A len word read off a counted heap parameter's base.
         if !store && w == 4 {
             let at = addr.add(&Lin::konst(off as i128));
@@ -822,6 +851,9 @@ impl<'m, 'a> Tr<'m, 'a> {
             out.push(It::Alloc { h, r, sz });
             out.push(It::Wf(r));
             self.base_of.insert(h, r);
+            if self.routine {
+                self.capped.insert(r);
+            }
             stack.push(Av::I32(Lin::slot(h), true));
         } else if let Some(p) = pos.filter(|p| self.table.contains(p)) {
             let mut lins = Vec::new();
@@ -931,6 +963,18 @@ impl<'m, 'a> Tr<'m, 'a> {
             Op::GlobalSet { .. } => {
                 self.pop(stack)?;
             }
+            // A bulk copy or fill: no event (the census counts it bulk) and
+            // no local changes; memory.grow: an unknown i32.
+            Op::MemoryCopy { .. } | Op::MemoryFill { .. } => {
+                for _ in 0..3 {
+                    self.pop(stack)?;
+                }
+            }
+            Op::MemoryGrow { .. } => {
+                self.pop(stack)?;
+                let v = self.unknown(out, ValType::I32);
+                stack.push(v);
+            }
             Op::I64Const { value } => stack.push(Av::I64(Lin::konst(i128::from(*value)))),
             Op::I32Const { value } => {
                 let u = *value as u32;
@@ -1011,7 +1055,13 @@ impl<'m, 'a> Tr<'m, 'a> {
                 let a = self.pop(stack)?;
                 stack.push(match a {
                     Av::I32(l, true) => Av::I64(l),
-                    Av::I32(_, false) | Av::Cmp(_) => self.bind_range(out, ValType::I64, 0, (1 << 32) - 1),
+                    // The i32 bound to a slot of its own (`U`): its value is
+                    // the unsigned extension.
+                    Av::I32(l, false) => match self.bind(out, Av::I32(l, false), ValType::I32) {
+                        Av::I32(t, _) => Av::I64(t),
+                        other => other,
+                    },
+                    Av::Cmp(_) => self.bind_range(out, ValType::I64, 0, (1 << 32) - 1),
                     _ => self.unknown(out, ValType::I64),
                 });
             }
@@ -1179,6 +1229,34 @@ pub fn translate(
     table: &BTreeSet<usize>,
     alloc: u32,
 ) -> Result<Skel, String> {
+    translate_inner(m, pos, TrIn { sites, heap, table, alloc }, false)
+}
+
+/// [`translate`] for a runtime routine (the `routines` line, #4005 A4): a
+/// block it allocates is a counted one too (its cap word is read as its
+/// capacity).
+pub fn translate_routine(
+    m: &Module<'_>,
+    pos: usize,
+    sites: &BTreeSet<usize>,
+    heap: &BTreeMap<u32, Option<i128>>,
+    table: &BTreeSet<usize>,
+    alloc: u32,
+) -> Result<Skel, String> {
+    translate_inner(m, pos, TrIn { sites, heap, table, alloc }, true)
+}
+
+/// What a translation reads beside the module: the events, the heap
+/// parameters, the certified table, the allocator.
+struct TrIn<'x> {
+    sites: &'x BTreeSet<usize>,
+    heap: &'x BTreeMap<u32, Option<i128>>,
+    table: &'x BTreeSet<usize>,
+    alloc: u32,
+}
+
+fn translate_inner(m: &Module<'_>, pos: usize, i: TrIn<'_>, routine: bool) -> Result<Skel, String> {
+    let TrIn { sites, heap, table, alloc } = i;
     let body = m.bodies.get(pos).ok_or("no such function")?;
     let (params, results) = m.ftype(m.imports + pos as u32).cloned().ok_or("no type")?;
     let mut tys = params.clone();
@@ -1193,6 +1271,8 @@ pub fn translate(
         tys,
         base_of: HashMap::new(),
         stride: HashMap::new(),
+        capped: BTreeSet::new(),
+        routine,
         regions: Vec::new(),
         next_region: REGION0,
         labels: vec![Label::Func],
@@ -1215,6 +1295,7 @@ pub fn translate(
         t.base_of.insert(p, r);
         if let Some(s) = s {
             t.stride.insert(r, s);
+            t.capped.insert(r);
         }
     }
     let mut stack = Vec::new();
@@ -1283,6 +1364,7 @@ fn items_template(items: &[It], out: &mut Vec<Tok>) {
             }
             It::Handle { h, r } => lit(out, &format!(" h{h},{r}")),
             It::Len { n, r, s } => lit(out, &format!(" n{n},{r},{s}")),
+            It::Cap { n, r } => lit(out, &format!(" K{n},{r}")),
             It::Alloc { h, r, sz } => {
                 lit(out, &format!(" a{h},{r} {} ", sz.text()));
                 hole(out, Hole::Pf);
@@ -1295,6 +1377,12 @@ fn items_template(items: &[It], out: &mut Vec<Tok>) {
             It::SetR { x, lo, hi } => lit(out, &format!(" r{x},{lo},{hi}")),
             It::Asn { x, l } => {
                 lit(out, &format!(" ={x} {} ", l.text()));
+                hole(out, Hole::Pf);
+                lit(out, " ");
+                hole(out, Hole::Pf);
+            }
+            It::AsnU { x, l } => {
+                lit(out, &format!(" U{x} {} ", l.text()));
                 hole(out, Hole::Pf);
                 lit(out, " ");
                 hole(out, Hole::Pf);
@@ -1381,7 +1469,7 @@ fn z_len(s: &[u8]) -> Option<usize> {
     (d > 0).then_some(neg + d)
 }
 
-fn nat_len(s: &[u8]) -> Option<usize> {
+pub(crate) fn nat_len(s: &[u8]) -> Option<usize> {
     let d = s.iter().take_while(|b| b.is_ascii_digit()).count();
     (d > 0).then_some(d)
 }
@@ -1561,11 +1649,48 @@ pub fn verify(wasm: &[u8], anchors: &str, cert: &str) -> Result<LinReport, Strin
             nonempty_pre.insert(id);
         }
     }
-    // Linkage: a procedure with a precondition is called only from the
-    // table's bodies (each such call is an LCall there, its precondition
-    // proven), never exported, never in an element segment.
+    check_linkage(wasm, &m, &table, &nonempty_pre)?;
+    let total: usize = sites.values().map(BTreeSet::len).sum();
+    Ok(LinReport { procs: stretches.len(), sites: prims, counted: total - prims, located })
+}
+
+/// Every load and store the translation reads as an access in body `pos`:
+/// a runtime routine's candidate events (#4005 A4). `memory.copy` and
+/// `memory.fill` are not among them (the census counts them bulk).
+pub fn access_sites(m: &Module<'_>, pos: usize) -> BTreeSet<usize> {
+    let Some(b) = m.bodies.get(pos) else { return BTreeSet::new() };
+    b.ops
+        .iter()
+        .enumerate()
+        .filter(|(_, op)| {
+            matches!(
+                op,
+                Op::I32Load8U { .. }
+                    | Op::I64Load8U { .. }
+                    | Op::I32Load16U { .. }
+                    | Op::I64Load16U { .. }
+                    | Op::I64Load32U { .. }
+                    | Op::I32Load { .. }
+                    | Op::I32Load8S { .. }
+                    | Op::I64Load8S { .. }
+                    | Op::I32Load16S { .. }
+                    | Op::I64Load16S { .. }
+                    | Op::I64Load32S { .. }
+                    | Op::I64Load { .. }
+                    | Op::F64Load { .. }
+                    | Op::F32Load { .. }
+            ) || crate::store_width(op).is_some()
+        })
+        .map(|(k, _)| k)
+        .collect()
+}
+
+/// Linkage: a procedure with a precondition is called only from the
+/// table's bodies (each such call is an LCall there, its precondition
+/// proven), never exported, never in an element segment.
+pub(crate) fn check_linkage(wasm: &[u8], m: &Module<'_>, table: &BTreeSet<usize>, nonempty_pre: &BTreeSet<usize>) -> Result<(), String> {
     let exported = exported_or_tabled(wasm, m.imports)?;
-    for &f in &nonempty_pre {
+    for &f in nonempty_pre {
         if exported.contains(&f) {
             return Err(format!("linear certificate: procedure {f} has a precondition but is exported or in a table"));
         }
@@ -1580,8 +1705,7 @@ pub fn verify(wasm: &[u8], anchors: &str, cert: &str) -> Result<LinReport, Strin
             }
         }
     }
-    let total: usize = sites.values().map(BTreeSet::len).sum();
-    Ok(LinReport { procs: stretches.len(), sites: prims, counted: total - prims, located })
+    Ok(())
 }
 
 /// Defined function positions an export or an element segment names.
