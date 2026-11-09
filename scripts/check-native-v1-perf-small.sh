@@ -148,7 +148,7 @@ while read -r f; do
   else
     rows+=("ok $f work v0=$w0 v1=$w1 ratio=$r")
   fi
-done < <(grep -E '^spec/' proofs/native-verified-floor.txt; ls research/benchmark/perf/v1-shapes/*.almd)
+done < <(source scripts/lib/native-v1-perf-corpus.sh; native_v1_perf_programs)
 
 for r in "${rows[@]}"; do echo "$r"; done
 # Most of the floor is small; fewer than 20 gated means the scan broke.

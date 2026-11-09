@@ -40,6 +40,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$(cd .. && pwd)"
 FLOOR="$ROOT/proofs/native-verified-floor.txt"
+CANDIDATES="$ROOT/proofs/native-v1-perf-candidates.txt"
 COQC="${COQC:-$(command -v coqc || true)}"
 [ -n "$COQC" ] || { echo "NATIVE WALL FAIL: coqc is not on PATH (the kernel verdict needs it)" >&2; exit 1; }
 
@@ -53,14 +54,18 @@ VERIFY="$TD/almide-verify"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
-echo "== render every floor fixture and produce its bundle =="
+echo "== render every floor and migration fixture and produce its bundle =="
+# Judge migration candidates before promoting the floor. The same programs
+# enter the perf and shapes gates, so a floor promotion can wait for all
+# verdicts without leaving their certificates outside the kernel check.
+{ cat "$FLOOR"; cat "$CANDIDATES"; } | sed '/^#/d; /^$/d' | sort -u > "$OUT/corpus"
 N=0
 : > "$OUT/index"
 while IFS= read -r fx; do
   case "$fx" in ''|'#'*) continue ;; esac
   N=$((N + 1))
   if ! (cd "$ROOT" && "$PRODUCER" "$fx" "$OUT/$N.rs") > "$OUT/$N.bundle" 2> "$OUT/$N.err"; then
-    echo "NATIVE WALL FAIL: $fx is on the native floor but the producer refused it:" >&2
+    echo "NATIVE WALL FAIL: $fx is in the checked native corpus but the producer refused it:" >&2
     sed 's/^/  /' "$OUT/$N.err" >&2
     exit 1
   fi
@@ -69,7 +74,7 @@ while IFS= read -r fx; do
   echo $? > "$OUT/$N.verify.rc"
   set -e
   printf '%s\t%s\n' "$N" "$fx" >> "$OUT/index"
-done < "$FLOOR"
+done < "$OUT/corpus"
 [ "$N" -gt 0 ] || { echo "NATIVE WALL FAIL: proofs/native-verified-floor.txt lists no fixture" >&2; exit 1; }
 echo "  $N fixture bundle(s)"
 
