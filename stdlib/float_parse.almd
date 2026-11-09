@@ -119,20 +119,25 @@ fn __hpd_strip(hb: Int) -> Unit = {
 
 // ×2^k (leftShift), at most 26 bits per pass: 2^26 < 10^8, so a pass adds at
 // most 8 leading digits. The low-to-high walk writes digit r to slot r+8
-// (slots up to 807 fit the buffer) and runs on through r = -8 with zero
-// digits, so the carry fills slots 7..0 (leading zeros included); the run is
-// then stripped down to slot 0 and capped at 800 digits.
-fn __hpd_lshk_loop(hb: Int, r: Int, k: Int, carry: Int) -> Unit = if r >= 0 - 8 then {
-  let dv = if r >= 0 then __hpd_d(hb, r) else 0
-  let v = prim.bshl(dv, k) + carry
+// (slots up to 807 fit the buffer), the final carry fills slots 7..0
+// (leading zeros included), then the run is stripped down to slot 0 and
+// capped at 800 digits.
+fn __hpd_lshk_loop(hb: Int, r: Int, k: Int, carry: Int) -> Int = if r < 0 then carry
+else {
+  let v = prim.bshl(__hpd_d(hb, r), k) + carry
   __hpd_sd(hb, r + 8, v % 10)
   __hpd_lshk_loop(hb, r - 1, k, v / 10)
+}
+
+fn __hpd_lshk_head(hb: Int, w: Int, carry: Int) -> Unit = if w >= 0 then {
+  __hpd_sd(hb, w, carry % 10)
+  __hpd_lshk_head(hb, w - 1, carry / 10)
 } else ()
 
 fn __hpd_lsh(hb: Int, k: Int) -> Unit = if k > 0 then {
   let s = if k > 26 then 26 else k
   let n = __hpd_n(hb)
-  __hpd_lshk_loop(hb, n - 1, s, 0)
+  __hpd_lshk_head(hb, 7, __hpd_lshk_loop(hb, n - 1, s, 0))
   __hpd_sn(hb, n + 8)
   __hpd_sdp(hb, __hpd_dp(hb) + 8)
   __hpd_strip(hb)

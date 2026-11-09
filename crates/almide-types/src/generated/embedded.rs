@@ -6761,17 +6761,22 @@ fn __hpd_strip(hb: Int) -> Unit = {
 
 
 
-fn __hpd_lshk_loop(hb: Int, r: Int, k: Int, carry: Int) -> Unit = if r >= 0 - 8 then {
-  let dv = if r >= 0 then __hpd_d(hb, r) else 0
-  let v = prim.bshl(dv, k) + carry
+fn __hpd_lshk_loop(hb: Int, r: Int, k: Int, carry: Int) -> Int = if r < 0 then carry
+else {
+  let v = prim.bshl(__hpd_d(hb, r), k) + carry
   __hpd_sd(hb, r + 8, v % 10)
   __hpd_lshk_loop(hb, r - 1, k, v / 10)
+}
+
+fn __hpd_lshk_head(hb: Int, w: Int, carry: Int) -> Unit = if w >= 0 then {
+  __hpd_sd(hb, w, carry % 10)
+  __hpd_lshk_head(hb, w - 1, carry / 10)
 } else ()
 
 fn __hpd_lsh(hb: Int, k: Int) -> Unit = if k > 0 then {
   let s = if k > 26 then 26 else k
   let n = __hpd_n(hb)
-  __hpd_lshk_loop(hb, n - 1, s, 0)
+  __hpd_lshk_head(hb, 7, __hpd_lshk_loop(hb, n - 1, s, 0))
   __hpd_sn(hb, n + 8)
   __hpd_sdp(hb, __hpd_dp(hb) + 8)
   __hpd_strip(hb)
