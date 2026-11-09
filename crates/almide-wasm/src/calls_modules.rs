@@ -200,7 +200,8 @@ impl Emitter<'_> {
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "json" && func.as_str() == "stringify" && args.len() == 1 =>
             {
-                self.lower_json_stringify(&args[0])?;
+                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
+                self.emit_value_stringify()?;
                 Ok(Some(Lowered::owned(STR)))
             }
             CallTarget::Module { module, func, .. }

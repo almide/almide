@@ -1,2 +1,14 @@
 # ADR-0033 JSON ratchet: jsonround's phases at N = 2000 records (json_ratchet.rs).
 # <value>\t<row>. Rows only move down; a rise is written by hand with the owner ruling cited.
+12269792	build fuel
+42004	build allocs
+42004	build frees
+14435725	stringify fuel
+2	stringify allocs
+2	stringify frees
+28287947	parse fuel
+60014	parse allocs
+60014	parse frees
+3396242	sum fuel
+12001	sum allocs
+12001	sum frees
