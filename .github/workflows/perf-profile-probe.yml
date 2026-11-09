@@ -28,7 +28,7 @@ jobs:
       - name: Install valgrind
         run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
       - name: Build
-        run: cargo build --release --bin almide --example probe_native -p almide-mir && cargo build --release --bin almide
+        run: cargo build --release --bin almide && cargo build --release -p almide-mir --example probe_native
       - name: Profile
         env:
           PROGRAMS: spec/wasm_cross/closure_captured_map_records.almd spec/wasm_cross/map_set_in_place.almd spec/wasm_cross/map_set_index_threshold.almd spec/wasm_cross/mut_param_call_chain.almd spec/wasm_cross/sort_by_compound_key.almd spec/wasm_cross/to_option_owned_carrier_release.almd spec/wasm_cross/url_whatwg_probes.almd spec/wasm_cross/uuid_v7_monotonic.almd spec/wasm_cross/list_pop_map_insert_on_record_field.almd spec/wasm_cross/list_push_field_in_place.almd spec/wasm_cross/closure_captured_record_field_mutation.almd spec/wasm_cross/closure_mut_arg_in_nested_match.almd spec/wasm_cross/fallible_hof_recursive_callee.almd spec/wasm_cross/mut_param_closure_field_path_write.almd spec/wasm_cross/mutable_global_field_mut_arg.almd spec/wasm_cross/recursive_payload_nested_pattern.almd spec/wasm_cross/result_filter_heap_ok.almd spec/wasm_cross/set_from_list_every_equatable_element.almd spec/wasm_cross/sql_highlight_tokens.almd spec/wasm_cross/string_rle.almd spec/wasm_cross/url_authority_edges.almd spec/wasm_cross/leak_free_map_walk_exit.almd
