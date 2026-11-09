@@ -119,7 +119,7 @@ fn slot_free(e: &IrExpr) -> bool {
         fn visit_expr(&mut self, e: &IrExpr) {
             use IrExprKind as K;
             if !matches!(e.kind, K::LitInt { .. } | K::LitFloat { .. } | K::LitStr { .. } | K::LitBool { .. }
-                | K::Unit | K::Var { .. } | K::BinOp { .. } | K::UnOp { .. } | K::List { .. } | K::Record { .. }
+                | K::Unit | K::Var { .. } | K::Range { .. } | K::BinOp { .. } | K::UnOp { .. } | K::List { .. } | K::Record { .. }
                 | K::SpreadRecord { .. } | K::Tuple { .. } | K::Member { .. } | K::TupleIndex { .. }
                 | K::StringInterp { .. } | K::OptionSome { .. } | K::OptionNone | K::ResultOk { .. } | K::ResultErr { .. }) {
                 self.0 = false;
@@ -321,8 +321,99 @@ impl Split<'_> {
     }
 }
 
+impl Split<'_> {
+    /// The mutable global a statement writes through a field place, when it
+    /// is a mutator call or a field write whose operands cannot reach a slot.
+    fn global_write(&self, s: &IrStmt) -> Option<VarId> {
+        let (root, operands): (VarId, Vec<&IrExpr>) = match &s.kind {
+            IrStmtKind::Expr { expr } => {
+                let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &expr.kind else { return None };
+                let name = format!("{module}.{func}");
+                let mut slots = (0..args.len()).filter(|k| crate::native_hof::mutable_argument(&name, *k));
+                let at = slots.next()?;
+                if slots.next().is_some() || !matches!(args[at].kind, IrExprKind::Member { .. }) { return None; }
+                (path_of(&args[at])?.0, args.iter().enumerate().filter(|(k, _)| *k != at).map(|(_, a)| a).collect())
+            }
+            IrStmtKind::FieldAssign { target, value, .. } => (*target, vec![value]),
+            _ => return None,
+        };
+        (self.mutable_globals.contains(&root) && operands.into_iter().all(slot_free)).then_some(root)
+    }
+
+    /// A run of such writes takes each global it touches out of its slot
+    /// once (`var t = g` before, `g = t` after) and writes the locals: one
+    /// take and one store per global instead of per write. Nothing in the run
+    /// can observe a slot while its value is out.
+    fn take_globals(&mut self, run: &[IrStmt]) -> Vec<IrStmt> {
+        let mut roots: Vec<VarId> = vec![];
+        for s in run {
+            let g = self.global_write(s).expect("a run of global writes");
+            if !roots.contains(&g) { roots.push(g); }
+        }
+        let mut binds = vec![];
+        let mut backs = vec![];
+        let mut body: Vec<IrStmt> = run.to_vec();
+        for g in roots {
+            let ty = self.vars.get(g).ty.clone();
+            let t = self.vars.alloc_fresh("global_level", ty.clone(), Mutability::Var, None);
+            let read = IrExpr { kind: IrExprKind::Var { id: g }, ty: ty.clone(), span: None, def_id: None };
+            let tv = IrExpr { kind: IrExprKind::Var { id: t }, ty: ty.clone(), span: None, def_id: None };
+            binds.push(IrStmt { span: None, kind: IrStmtKind::Bind { var: t, mutability: Mutability::Var, ty, value: read } });
+            backs.push(IrStmt { span: None, kind: IrStmtKind::Assign { var: g, value: tv.clone() } });
+            body = body.iter().map(|s| almide_ir::substitute::substitute_var_in_stmt(s, g, &tv)).collect();
+        }
+        binds.into_iter().chain(body).chain(backs).collect()
+    }
+
+    /// Group the runs of two or more global field writes in a statement list.
+    fn group_global_writes(&mut self, stmts: &mut Vec<IrStmt>) {
+        let mut out = Vec::with_capacity(stmts.len());
+        let mut k = 0;
+        while k < stmts.len() {
+            let n = stmts[k..].iter().take_while(|s| self.global_write(s).is_some()).count();
+            if n >= 2 {
+                let run = self.take_globals(&stmts[k..k + n]);
+                out.push(IrStmt { span: stmts[k].span, kind: IrStmtKind::Expr { expr: IrExpr {
+                    kind: IrExprKind::Block { stmts: run, expr: None },
+                    ty: almide_lang::types::Ty::Unit, span: stmts[k].span, def_id: None } } });
+                k += n;
+            } else {
+                out.push(stmts[k].clone());
+                k += 1;
+            }
+        }
+        *stmts = out;
+    }
+
+    /// A loop whose whole body is global field writes, over a range or
+    /// condition that cannot reach a slot, takes the globals once around it.
+    fn hoist_global_loop(&mut self, e: &IrExpr) -> Option<IrExpr> {
+        let (head, body) = match &e.kind {
+            IrExprKind::ForIn { iterable, body, .. } => (&**iterable, body),
+            IrExprKind::While { cond, body } => (&**cond, body),
+            _ => return None,
+        };
+        if body.is_empty() || !slot_free(head) || !body.iter().all(|s| self.global_write(s).is_some()) { return None; }
+        let taken = self.take_globals(body);
+        let globals = taken.iter().filter(|s| matches!(s.kind, IrStmtKind::Bind { .. })).count();
+        let (binds, rest) = taken.split_at(globals);
+        let (inner, backs) = rest.split_at(rest.len() - globals);
+        let mut looped = e.clone();
+        match &mut looped.kind {
+            IrExprKind::ForIn { body, .. } | IrExprKind::While { body, .. } => *body = inner.to_vec(),
+            _ => unreachable!(),
+        }
+        let stmts = binds.iter().cloned()
+            .chain(std::iter::once(IrStmt { span: e.span, kind: IrStmtKind::Expr { expr: looped } }))
+            .chain(backs.iter().cloned()).collect();
+        Some(IrExpr { kind: IrExprKind::Block { stmts, expr: None }, ty: e.ty.clone(), span: e.span, def_id: e.def_id })
+    }
+}
+
 impl IrMutVisitor for Split<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+        if let Some(hoisted) = self.hoist_global_loop(e) { *e = hoisted; }
+        if let IrExprKind::Block { stmts, .. } = &mut e.kind { self.group_global_writes(stmts); }
         almide_ir::walk_expr_mut(self, e);
         if let IrExprKind::Block { stmts, .. } = &mut e.kind { self.retarget_place_write(stmts); }
         if let Some(block) = self.split_call(e) { *e = block; }
