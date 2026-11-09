@@ -82,7 +82,7 @@ pub(crate) fn emit_cow() -> (Function, crate::helper_sig::HelperSig) {
     i.end();
     sig.arm();
     sig.join();
-    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_le_u().if_(BlockType::Empty);
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_le_s().if_(BlockType::Empty);
     sig.branch();
     i.local_get(block).return_();
     sig.op(b, 'm');
