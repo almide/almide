@@ -1,0 +1,42 @@
+name: probe-wall-bisect (throwaway)
+on:
+  push:
+    branches: ['probe/blockers-1109-bisect']
+  workflow_dispatch:
+    inputs:
+      commits:
+        description: JSON list of commits
+        default: ""
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+jobs:
+  wall:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        commit: ${{ fromJson(github.event.inputs.commits || '["cf28f24dc","45af5fc5a","f29a7741a","c3f8e4d50","4b353578c","5bf353a2d","6a633ef11","560c132d4","a71e577ae","a307b1e49","ac44de362","f11c45baa","e6e6d99af","2c4d94830","1b2357886"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: git checkout -q ${{ matrix.commit }} && git log --oneline -1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-1.97.0
+          save-if: false
+      - name: classify
+        run: |
+          cargo build -q -p almide-mir --example classify_corpus 2>/dev/null || cargo build -p almide-mir --example classify_corpus
+          mkdir -p /tmp/out
+          WALL_NAMES=1 cargo run -q -p almide-mir --example classify_corpus -- --out /tmp/out spec 2> /tmp/report.txt || true
+          grep '^WALLED REAL' /tmp/report.txt | sed "s|$PWD/||" | sort | tee /tmp/walled.txt
+          echo "### ${{ matrix.commit }}" >> "$GITHUB_STEP_SUMMARY"
+          sed 's/^/    /' /tmp/walled.txt >> "$GITHUB_STEP_SUMMARY"
