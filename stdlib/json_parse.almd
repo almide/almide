@@ -516,6 +516,29 @@ fn __jp_colon(base: Int, len: Int, c: Int) -> Int = {
   }
 }
 
+// Is `k` one of the keys read so far? Bytes are compared, not handles: inside
+// the stdlib a fresh String is the block its bytes were written into, and two
+// equal keys are two blocks.
+fn __jp_repeats(pairs: List[(String, Value)], k: String) -> Bool = {
+  var seen = false
+  for (s, _) in pairs {
+    if __jp_same(s, k) then {
+      seen = true
+    } else ()
+  }
+  seen
+}
+
+fn __jp_same(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  prim.load32(ha + 4) == prim.load32(hb + 4) and __jp_same_bytes(ha + 12, hb + 12, prim.load32(ha + 4), 0)
+}
+
+fn __jp_same_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool = if i >= n then true
+else if prim.load8(pa + i) != prim.load8(pb + i) then false
+else __jp_same_bytes(pa, pb, n, i + 1)
+
 // A repeated key is refused at its opening quote (I-JSON §2.3).
 fn __jp_unique(c: Int, p: Int, repeated: Bool) -> Unit =
   if repeated and __jp_pos(c) >= 0 then __jp_seek(c, __jp_code(p, 11)) else ()
@@ -534,7 +557,7 @@ fn __jp_object(base: Int, len: Int, p0: Int, depth: Int, c: Int) -> Value = {
   } else p0
   while p >= 0 and list.len(pairs) < 16 {
     let k = __jp_key(base, len, p, c)
-    __jp_unique(c, p, list.any(pairs, ((s, _)) => s == k))
+    __jp_unique(c, p, __jp_repeats(pairs, k))
     list.push(pairs, (k, __jp_value(base, len, __jp_colon(base, len, c), depth, c)))
     p = __jp_after(base, len, c, 125)
   }
