@@ -199,6 +199,9 @@ fn emit_program_pass(
             .collect(),
         None => program_fns,
     };
+    // ADR-0033 D1: the rc redirect ships only when this pass links a
+    // `@family_producer` fn; a module linking none keeps today's bytes.
+    let _family = crate::family::FamilyGuard::set(crate::family::producer_linked(program_fns.iter().map(|f| f.0.attrs.as_slice())));
     let types = TypeTable::build(ir);
     // Deterministic-meter plan (ALS-DT2): who charges, whose entry is exempt.
     let meter = fuel::meter_plan(ir, registry_impl_names());
