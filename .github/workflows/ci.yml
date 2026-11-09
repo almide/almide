@@ -31,6 +31,7 @@ on:
   # first queued PR stalls forever. Only this workflow and
   # acceptance-ring.yml produce required contexts; the rest deliberately
   # skip merge_group to keep the queue validation lean.
+  workflow_dispatch:
   merge_group:
 
 # Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
