@@ -298,3 +298,45 @@ Allocations per run (50k records): yyjson 32, simdjson 37–38, sonic-rs 600k, s
 - The self-hosted compact writer (a size pass, one exact String, a room-checked fill; 9198cc27a, then SWAR clean runs in d7235dce0) printed byte-identical output on jsonround.
 - It cost **+27% stringify fuel** (7,218 → 9,198 per record) and **+9.4% jsonround wall time** on wasm (probe run 42598565892), so it was reverted (4c0589585).
 - Its per-value cost is the size pass's second tree walk and a call per leaf. It returns in phase 4 with the families' clean flag (a clean string is one bulk copy and needs no size scan) and the two-digit table.
+
+### Phase 2 — the substrate landed; the family parse is held (2026-11-10)
+
+**Landed on `json-substrate`** (verified at efbbe9863):
+
+- **The interior rc redirect** (W1, `crates/almide-wasm/src/family.rs`):
+  - `$inc` / `$dec_flat` retarget an interior word to its root; every typed drop forwards to `$dec_flat`.
+  - `$cow_elems` takes the copy's credits before it releases an interior source.
+  - All of it is emitted only when a linked fn carries `@family_producer`. Non-family modules are byte-identical: 1053 / 1053 fixtures.
+  - The rc-word inventory is pinned by `tests/rc_word_inventory.rs`.
+- **The proofs** (W2):
+  - `proofs/FamilyRc.v` (`family_rc_gives_temporal`, `interior_never_counted`, and the kernel negative controls).
+  - The family `$inc` / `$dec_flat` transcribed in `StructuralRuntime.v` and grounded byte for byte.
+  - Carve windows in `InitCert.v`.
+  - The `family` drills in `witness-reinject.sh`.
+- **The carve witness** (W4):
+  - `prim.family` / `prim.carve` / `prim.family_seal`, lowered by `crates/almide-wasm/src/carve.rs`.
+  - Init records for every carve, held by `almide-anchor-check` (`CARVES OK`), with the run lemma `room_run_tiles` and `sealed_family_window`; 180 / 180 audits.
+  - Drills: room loosened, store misplaced, store lost, pass 2 over-carving, pass 2 under-carving.
+- **float.parse** (W5): the high-precision decimal shifts many bits per pass.
+  - canada on wasm: 1934 → 209 ms (world bench run 42662387150).
+  - Every size row goes down.
+  - It is held bit-exact by a 9,600-text differential test plus halfway and boundary corpora.
+
+**Held on `json-substrate-w3-routed`** (faef4ec67): the two-pass family parse through the carve ops. It needs an owner ruling.
+
+| measure (jsonround, wasm) | json-reborn | family parse | yyjson |
+|---|---:|---:|---:|
+| parse allocations | 30 per record | **3 per document** | 2 per document |
+| build allocations | 21 per record | 21 per record | 29 per run |
+| total time (world bench run 42662495406, AOT) | 155.8 ms | 151.4 ms (−2.8%) | 59.1 ms |
+| parse phase | 68.4 ms | 56.8 ms (−17%) | 16.5 ms |
+| sum phase (reads the parsed doc) | 8.0 ms | 18.9 ms (+136%) | 0.6 ms |
+| parse fuel per record (json_ratchet) | 14,144 | 17,559 (+24%) | — |
+| sum fuel per record | 1,698 | 2,016 (+19%) | — |
+
+- **ADR falsifier 1 is not met.** The parse instructions rise instead of falling by ≥ 25%. The causes:
+  - the carve op's payload zeroing (about 0.4M instructions at n = 200);
+  - about 5 wasm instructions per certified prim address, plus one guard per access.
+- The sum phase's slowdown, reading from a family, is not explained yet. It is the first thing to profile when phase 2 resumes.
+- Other movements: +10.4 KB per JSON-linked module (61 rows, +465 KB in total); +1.42 MB of allocated bytes, mostly a scratch of about 9 × the text length; +248 native-verified-floor rows.
+- Per the falsifier the parse does not land. The ratchet pins are not raised.
