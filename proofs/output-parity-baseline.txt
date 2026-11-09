@@ -194,6 +194,7 @@ spec/wasm_cross/bytes_set_on_record_field.almd
 spec/wasm_cross/bytes_set_value_semantics.almd
 spec/wasm_cross/bytes_temp_receiver.almd
 spec/wasm_cross/bytes_to_string_err_release.almd
+spec/wasm_cross/bytes_walk_reduction_fused.almd
 spec/wasm_cross/bytes_writer_family.almd
 spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 spec/wasm_cross/call_arg_eval_order_with_drops.almd
@@ -500,6 +501,8 @@ spec/wasm_cross/int_div_by_zero_inlined_arg.almd
 spec/wasm_cross/int_div_by_zero_literal.almd
 spec/wasm_cross/int_div_mod_ok.almd
 spec/wasm_cross/int_div_overflow.almd
+spec/wasm_cross/int_div_pow2_nonneg_induction.almd
+spec/wasm_cross/int_div_pow2_signed_induction.almd
 spec/wasm_cross/int_float_ops.almd
 spec/wasm_cross/int_from_hex.almd
 spec/wasm_cross/int_mod_by_zero.almd
@@ -932,6 +935,7 @@ spec/wasm_cross/sort_by_call_count.almd
 spec/wasm_cross/sort_by_compound_key.almd
 spec/wasm_cross/sort_by_str_key_heap.almd
 spec/wasm_cross/split_empty_sep.almd
+spec/wasm_cross/split_one_byte_separator.almd
 spec/wasm_cross/spread_record_share.almd
 spec/wasm_cross/sql_highlight_tokens.almd
 spec/wasm_cross/stdlib_body_call_vs_user_namesake.almd
