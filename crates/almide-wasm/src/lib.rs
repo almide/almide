@@ -569,13 +569,12 @@ impl SliceTy {
     /// is `len / slot`), so the stride is 1: the translation reads the word
     /// itself as the count, and a list's slot size there would claim
     /// `slot * len <= cap`, which a list of more than one slot breaks.
-    /// Unit and closures are left out: no self-host body addresses them.
+    /// An Option is no block (`none` IS NULL_ADDR); Unit and closures none.
     fn heap_param(self, _types: &TypeTable) -> Option<Option<u32>> {
         match self {
             SliceTy::Scalar(Scalar::Str | Scalar::Bytes) | SliceTy::List(_) => Some(Some(1)),
-            SliceTy::Scalar(_) | SliceTy::Fn(_) | SliceTy::Unit => None,
-            SliceTy::Option(_)
-            | SliceTy::Result(..)
+            SliceTy::Scalar(_) | SliceTy::Fn(_) | SliceTy::Unit | SliceTy::Option(_) => None,
+            SliceTy::Result(..)
             | SliceTy::Map(..)
             | SliceTy::Set(_)
             | SliceTy::Tuple(_)

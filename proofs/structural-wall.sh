@@ -615,26 +615,25 @@ for prop, w in rejects:
 kernel_parts.write(kgen[:-2], HEADER, goals, PART)
 with open(kgen[:-2] + ".count", "w") as g:
     g.write("%d\n" % (sum(len(ws) for ws in accepts.values()) + len(rejects)))
-small = sorted((len(w), prop, w) for prop, ws in accepts.items() for w in ws if w.strip())[:3]
+small = sorted((len(w), prop, w) for prop, ws in accepts.items() for w in ws if w.strip())[:64]
 one_path = kgen[:-2] + ".one"
-if len(small) == 3:
-    goal1 = lambda prop, w: ("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], lit(w)), 1, 1)
-    honest = [goal1(prop, w) for _, prop, w in small[:2]]
-    _, prop, w = small[2]
-    bad = None
-    for cand in (w + " @", "@" + w, w[: len(w) // 2]):
+goal1 = lambda prop, w: ("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], lit(w)), 1, 1)
+bad = None
+for _, prop, w in small[2:]:
+    for cand in (w + " @", "@" + w, w[: len(w) // 2], w + ";" + w[::-1]):
         with open(one_path, "w") as f:
             f.write(cand)
         if subprocess.run([checker, prop, one_path], capture_output=True).returncode == 1:
-            bad = cand
+            bad = (prop, cand)
             break
-    if bad is None:
-        fail.append("kernel drill: no corruption of the third witness is rejected by the extracted checker")
-    else:
-        kernel_parts.write(kgen[:-2] + "_dh", HEADER, honest, 1)
-        kernel_parts.write(kgen[:-2] + "_dc", HEADER, honest + [goal1(prop, bad)], 1)
+    if bad:
+        break
+if len(small) < 3 or bad is None:
+    fail.append("kernel drill: no small accepted witness has a corruption the extracted checker rejects")
 else:
-    fail.append("kernel drill: fewer than three non-empty accepted witnesses")
+    honest = [goal1(prop, w) for _, prop, w in small[:2]]
+    kernel_parts.write(kgen[:-2] + "_dh", HEADER, honest, 1)
+    kernel_parts.write(kgen[:-2] + "_dc", HEADER, honest + [goal1(*bad)], 1)
 
 for p, (a, t) in stats.items():
     print(f"  [{p}] {a}/{t} witness(es) accepted by the extracted checker and almide-verify")
