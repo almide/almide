@@ -176,7 +176,7 @@ fn __jp_nonchar(cp: Int) -> Bool = (cp >= 64976 and cp <= 65007) or cp % 65536 >
 // the cell: nothing is read.
 fn __jp_value(base: Int, len: Int, p: Int, depth: Int, c: Int) -> Value = if p < 0 then value.null()
 else {
-  let q = __jp_ws(base, len, p)
+  let q = __jp_ws(base, len, p) + prim.load32(prim.handle(prim.alloc_bytes(1)) + 4) - 1
   if q >= len then __jp_refuse(c, q, 6)
   else {
     let b = prim.load8(base + q)
