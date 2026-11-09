@@ -1,7 +1,7 @@
 name: probe-json-w3 (throwaway)
 on:
   push:
-    branches: [probe/json-w3]
+    branches: [probe/json-w3i]
   workflow_dispatch:
 permissions:
   contents: read
@@ -9,7 +9,7 @@ env:
   RUST_TOOLCHAIN: "1.97.0"
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
-  HEAD_REF: origin/json-substrate-w3-routed
+  HEAD_REF: origin/json-substrate-w3-interp
   BASE_REF: c9ad9ea2f
   ROUNDS: "13"
 jobs:
@@ -49,26 +49,23 @@ jobs:
           mkdir -p /tmp/quick
           cd /tmp/src-head && git status --short && git diff > /tmp/quick/generated.diff; wc -l /tmp/quick/generated.diff
       - name: Behaviour of the json/value fixtures and tests
+        if: always()
         run: bash /tmp/probe/quick.sh /tmp/bins/almide-head /tmp/src-head /tmp/quick
-      - name: Stdlib inspection ledger (which stamps the change voids)
+      - name: Interp crate tests
+        if: always()
         run: |
-          cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test stdlib_inspection_test -- --nocapture 2>&1 | tail -40 | tee /tmp/quick/inspection.txt || true
+          cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-interp --no-fail-fast 2>&1 | tee /tmp/quick/interp-crate.txt | grep -E "^test result|FAILED|panicked|error" | head -60 || true
       - name: Interp oracle and json tests (third vote)
+        if: always()
         run: |
-          cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --no-fail-fast --test wasm_runtime_interp_oracle --test json_depth_limit_test --test wasm_runtime_cross_target 2>&1 | tee /tmp/quick/oracle.txt | grep -E "^test result|FAILED|panicked|json|abstain" | head -120 || true
-      - name: jsonround allocations and instruction counts
+          cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --no-fail-fast --test wasm_runtime_interp_oracle --test json_depth_limit_test --test wasm_runtime_cross_target 2>&1 | tee /tmp/quick/oracle.txt | grep -E "^test result|FAILED|panicked|json|abstain|BOTH" | head -120 || true
+      - name: Interp ledgers (check, then regenerate and diff)
+        if: always()
         run: |
-          set -uo pipefail
-          mkdir -p /tmp/perf && cd /tmp/perf
-          bash /tmp/probe/bench/make.sh /tmp/perf
-          for p in full build str; do
-            echo "== $p"; ALMIDE_WASM_ALLOC_COUNT=1 /tmp/bins/almide-head run jr_$p.almd --target wasm
-            /tmp/bins/almide-head build jr_${p}_small.almd --target wasm -o jr_${p}_small.wasm && echo "size $p $(stat -c %s jr_${p}_small.wasm)"
-            timeout 1200 python3 /tmp/probe/wi.py jr_${p}_small.wasm --top 30 > wi-$p.txt 2>&1; head -12 wi-$p.txt
-          done
-          /tmp/bins/almide-head build jr_long_small.almd --target wasm -o jr_long_small.wasm && echo "size long $(stat -c %s jr_long_small.wasm)"
-          timeout 1200 python3 /tmp/probe/wi.py jr_long_small.wasm --top 10 > wi-long.txt 2>&1; head -4 wi-long.txt
-          sudo apt-get install -y -qq binaryen >/dev/null 2>&1 && wasm-dis --enable-tail-call jr_full_small.wasm -o jr_full_small.wat || true
+          cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --no-fail-fast --test wasm_runtime_interp_ledger 2>&1 | tee /tmp/quick/ledger-check.txt | grep -E "^test result|FAILED|panicked|LEDGER|DRIFT|UNLEDGERED|STALE|    - " | head -80 || true
+          cd /tmp/src-head && ALMIDE_UPDATE_INTERP_LEDGER=1 CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --no-fail-fast --test wasm_runtime_interp_ledger 2>&1 | tail -20 | tee /tmp/quick/ledger-regen.txt || true
+          cd /tmp/src-head && git diff -- crates/almide-interp/*.txt | tee /tmp/quick/ledger.diff | head -80
+          cp crates/almide-interp/*.txt /tmp/quick/ 2>/dev/null || cp /tmp/src-head/crates/almide-interp/*.txt /tmp/quick/
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
