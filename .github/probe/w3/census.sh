@@ -5,7 +5,8 @@ set -uo pipefail
 T=$1; O=$2; tag=${3:-head}; mkdir -p "$O"
 cd "$T"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$T/target}"
-cargo build -q --release --bin almide -p almide-lin-prove -p almide-anchor-check -p almide-verify 2>&1 | tail -3
+cargo build -q --release --bin almide 2>&1 | tail -3
+cargo build -q --release -p almide-lin-prove -p almide-anchor-check -p almide-verify 2>&1 | tail -3
 cargo build -q --release -p almide-wasm --example emit_structural_bundle 2>&1 | tail -3
 R=$CARGO_TARGET_DIR/release
 A=$R/almide; P=$R/examples/emit_structural_bundle; LP=$R/almide-lin-prove; AC=$R/almide-anchor-check
