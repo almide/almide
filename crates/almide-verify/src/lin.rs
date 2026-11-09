@@ -198,6 +198,73 @@ fn pf3(s: &[u8], i: usize) -> Option<([Pf; 3], usize)> {
     Some(([a, b, c], i))
 }
 
+/// One straight-line item (no nested program) after its tag `c`, read
+/// from `r`; `None` for a tag that is not one.
+fn leaf_at(s: &[u8], c: u8, r: usize) -> Option<(Item, usize)> {
+    Some(match c {
+        b'A' | b'W' => {
+            let (rg, k) = nat_at(s, r)?;
+            let (w, k) = z_at(s, k)?;
+            let (off, k) = z_at(s, k)?;
+            let (addr, k) = lin_at(s, k)?;
+            let (p, k) = pf3(s, k)?;
+            (if c == b'A' { Item::Acc { r: rg, w, off, addr, p } } else { Item::Sto { r: rg, w, off, addr, p } }, k)
+        }
+        b'h' => {
+            let (h, k) = nat_at(s, r)?;
+            let (rg, k) = nat_at(s, k)?;
+            (Item::Handle(h, rg), k)
+        }
+        b'n' => {
+            let (n, k) = nat_at(s, r)?;
+            let (rg, k) = nat_at(s, k)?;
+            let (st, k) = z_at(s, k)?;
+            (Item::Len(n, rg, st), k)
+        }
+        b'K' => {
+            let (n, k) = nat_at(s, r)?;
+            let (rg, k) = nat_at(s, k)?;
+            (Item::Cap(n, rg), k)
+        }
+        b'a' => {
+            let (h, k) = nat_at(s, r)?;
+            let (rg, k) = nat_at(s, k)?;
+            let (sz, k) = lin_at(s, k)?;
+            let (lo, k) = pf_at(s, k)?;
+            let (hi, k) = pf_at(s, k)?;
+            (Item::Alloc { h, r: rg, sz, lo, hi }, k)
+        }
+        b'f' => {
+            let (rg, k) = nat_at(s, r)?;
+            (Item::Wf(rg), k)
+        }
+        b'g' => {
+            let (rg, k) = nat_at(s, r)?;
+            let (b0, k) = z_at(s, k)?;
+            let (c0, k) = z_at(s, k)?;
+            (Item::Static(rg, b0, c0), k)
+        }
+        b's' => {
+            let (x, k) = nat_at(s, r)?;
+            (Item::Set(x), k)
+        }
+        b'r' => {
+            let (x, k) = nat_at(s, r)?;
+            let (lo, k) = z_at(s, k)?;
+            let (hi, k) = z_at(s, k)?;
+            (Item::SetR(x, lo, hi), k)
+        }
+        b'=' | b'U' => {
+            let (x, k) = nat_at(s, r)?;
+            let (l, k) = lin_at(s, k)?;
+            let (lo, k) = pf_at(s, k)?;
+            let (hi, k) = pf_at(s, k)?;
+            (if c == b'=' { Item::Asn { x, l, lo, hi } } else { Item::AsnU { x, l, lo, hi } }, k)
+        }
+        _ => return None,
+    })
+}
+
 /// `lprog_at`: the items from `i` to the first stop (not consumed past the
 /// skipped separators); a terminal item must end its sequence.
 fn lprog_at(s: &[u8], mut i: usize) -> Option<(Vec<Item>, usize)> {
@@ -210,65 +277,6 @@ fn lprog_at(s: &[u8], mut i: usize) -> Option<(Vec<Item>, usize)> {
         let c = s[j];
         let r = j + 1;
         let (it, k) = match c {
-            b'A' | b'W' => {
-                let (rg, k) = nat_at(s, r)?;
-                let (w, k) = z_at(s, k)?;
-                let (off, k) = z_at(s, k)?;
-                let (addr, k) = lin_at(s, k)?;
-                let (p, k) = pf3(s, k)?;
-                (if c == b'A' { Item::Acc { r: rg, w, off, addr, p } } else { Item::Sto { r: rg, w, off, addr, p } }, k)
-            }
-            b'h' => {
-                let (h, k) = nat_at(s, r)?;
-                let (rg, k) = nat_at(s, k)?;
-                (Item::Handle(h, rg), k)
-            }
-            b'n' => {
-                let (n, k) = nat_at(s, r)?;
-                let (rg, k) = nat_at(s, k)?;
-                let (st, k) = z_at(s, k)?;
-                (Item::Len(n, rg, st), k)
-            }
-            b'K' => {
-                let (n, k) = nat_at(s, r)?;
-                let (rg, k) = nat_at(s, k)?;
-                (Item::Cap(n, rg), k)
-            }
-            b'a' => {
-                let (h, k) = nat_at(s, r)?;
-                let (rg, k) = nat_at(s, k)?;
-                let (sz, k) = lin_at(s, k)?;
-                let (lo, k) = pf_at(s, k)?;
-                let (hi, k) = pf_at(s, k)?;
-                (Item::Alloc { h, r: rg, sz, lo, hi }, k)
-            }
-            b'f' => {
-                let (rg, k) = nat_at(s, r)?;
-                (Item::Wf(rg), k)
-            }
-            b'g' => {
-                let (rg, k) = nat_at(s, r)?;
-                let (b0, k) = z_at(s, k)?;
-                let (c0, k) = z_at(s, k)?;
-                (Item::Static(rg, b0, c0), k)
-            }
-            b's' => {
-                let (x, k) = nat_at(s, r)?;
-                (Item::Set(x), k)
-            }
-            b'r' => {
-                let (x, k) = nat_at(s, r)?;
-                let (lo, k) = z_at(s, k)?;
-                let (hi, k) = z_at(s, k)?;
-                (Item::SetR(x, lo, hi), k)
-            }
-            b'=' | b'U' => {
-                let (x, k) = nat_at(s, r)?;
-                let (l, k) = lin_at(s, k)?;
-                let (lo, k) = pf_at(s, k)?;
-                let (hi, k) = pf_at(s, k)?;
-                (if c == b'=' { Item::Asn { x, l, lo, hi } } else { Item::AsnU { x, l, lo, hi } }, k)
-            }
             b'T' => {
                 let g = sk(s, r);
                 let sg = *s.get(g)?;
@@ -328,7 +336,7 @@ fn lprog_at(s: &[u8], mut i: usize) -> Option<(Vec<Item>, usize)> {
                 let k = tok(s, k, b'}')?;
                 (Item::Call { f, args, reps, outs, res, pfs }, k)
             }
-            _ => return None,
+            _ => leaf_at(s, c, r)?,
         };
         let terminal = matches!(it, Item::Cont(_) | Item::Ret(_) | Item::Brk | Item::Trap);
         items.push(it);
@@ -662,6 +670,70 @@ fn asnu_facts(f: &[Lin], x: &Nat, l: &Lin, lo: &Pf, hi: &Pf) -> Facts {
 /// (loop invariant inside a loop, postcondition)
 type Ctx<'a> = (Option<&'a Facts>, &'a Facts);
 
+/// A straight-line item's facts after it, from `f`; `None` when it does
+/// not hold (and for an item with a nested program or a jump, which
+/// `lcheck` handles itself).
+fn step(p: &Table, f: Facts, it: &Item) -> Option<Facts> {
+    Some(match it {
+        Item::Acc { r, w, off, addr, p: ps } | Item::Sto { r, w, off, addr, p: ps } => {
+            if !acc_ok(&f, r, w, off, addr, ps) {
+                return None;
+            }
+            f
+        }
+        Item::Handle(h, r) => {
+            let mut g = eqs(&Var::S(h.clone()), &v1(Var::B(r.clone())));
+            g.extend(kill(&f, &Var::S(h.clone())));
+            g
+        }
+        Item::Len(n, r, st) => {
+            let vn = v1(Var::S(n.clone()));
+            let mut g = vec![lneg(&vn), lsub(&lmul(st, &vn), &v1(Var::C(r.clone())))];
+            g.extend(kill(&f, &Var::S(n.clone())));
+            g
+        }
+        Item::Alloc { h, r, sz, lo, hi } => {
+            if !(entails(&f, lo, &lneg(sz))
+                && entails(&f, hi, &lsub(sz, &kz(Z::pow2(32).sub(&one()))))
+                && !mentions(&Var::S(h.clone()), sz)
+                && !mentions(&Var::B(r.clone()), sz)
+                && !mentions(&Var::C(r.clone()), sz))
+            {
+                return None;
+            }
+            let mut g = eqs(&Var::S(h.clone()), &v1(Var::B(r.clone())));
+            g.push(lsub(sz, &v1(Var::C(r.clone()))));
+            g.extend(kill_region(&kill(&f, &Var::S(h.clone())), r));
+            g
+        }
+        Item::Wf(r) => {
+            let (vb, vc) = (v1(Var::B(r.clone())), v1(Var::C(r.clone())));
+            let k = Z::from_i64(12).sub(&Z::pow2(32)).add(&one());
+            let mut g = vec![lneg(&vb), lneg(&vc), ladd(&ladd(&vb, &vc), &kz(k))];
+            g.extend(f);
+            g
+        }
+        Item::Static(r, b0, c0) => {
+            let mut g = eqs(&Var::B(r.clone()), &kz(b0.clone()));
+            g.extend(eqs(&Var::C(r.clone()), &kz(c0.clone())));
+            g.extend(kill_region(&f, r));
+            g
+        }
+        Item::Set(x) => kill(&f, &Var::S(x.clone())),
+        Item::SetR(x, lo, hi) => {
+            let vx = v1(Var::S(x.clone()));
+            let mut g = vec![lsub(&kz(lo.clone()), &vx), lsub(&vx, &kz(hi.clone()))];
+            g.extend(kill(&f, &Var::S(x.clone())));
+            g
+        }
+        Item::Asn { x, l, lo, hi } => asn_facts(&f, x, l, lo, hi),
+        Item::Cap(n, r) => cap_facts(&f, n, r),
+        Item::AsnU { x, l, lo, hi } => asnu_facts(&f, x, l, lo, hi),
+        Item::Call { .. } => call_facts(p, &f, it)?,
+        _ => return None,
+    })
+}
+
 /// `lcheck`: (fall-through state, break state), or `None` when refused.
 fn lcheck(p: &Table, c: Ctx, mut f: Facts, items: &[Item]) -> Option<(St, St)> {
     // The breaks of the arms already passed, outermost first: the result's
@@ -672,59 +744,6 @@ fn lcheck(p: &Table, c: Ctx, mut f: Facts, items: &[Item]) -> Option<(St, St)> {
     };
     for it in items {
         match it {
-            Item::Acc { r, w, off, addr, p: ps } | Item::Sto { r, w, off, addr, p: ps } => {
-                if !acc_ok(&f, r, w, off, addr, ps) {
-                    return None;
-                }
-            }
-            Item::Handle(h, r) => {
-                let mut g = eqs(&Var::S(h.clone()), &v1(Var::B(r.clone())));
-                g.extend(kill(&f, &Var::S(h.clone())));
-                f = g;
-            }
-            Item::Len(n, r, st) => {
-                let vn = v1(Var::S(n.clone()));
-                let mut g = vec![lneg(&vn), lsub(&lmul(st, &vn), &v1(Var::C(r.clone())))];
-                g.extend(kill(&f, &Var::S(n.clone())));
-                f = g;
-            }
-            Item::Alloc { h, r, sz, lo, hi } => {
-                if !(entails(&f, lo, &lneg(sz))
-                    && entails(&f, hi, &lsub(sz, &kz(Z::pow2(32).sub(&one()))))
-                    && !mentions(&Var::S(h.clone()), sz)
-                    && !mentions(&Var::B(r.clone()), sz)
-                    && !mentions(&Var::C(r.clone()), sz))
-                {
-                    return None;
-                }
-                let mut g = eqs(&Var::S(h.clone()), &v1(Var::B(r.clone())));
-                g.push(lsub(sz, &v1(Var::C(r.clone()))));
-                g.extend(kill_region(&kill(&f, &Var::S(h.clone())), r));
-                f = g;
-            }
-            Item::Wf(r) => {
-                let (vb, vc) = (v1(Var::B(r.clone())), v1(Var::C(r.clone())));
-                let k = Z::from_i64(12).sub(&Z::pow2(32)).add(&one());
-                let mut g = vec![lneg(&vb), lneg(&vc), ladd(&ladd(&vb, &vc), &kz(k))];
-                g.extend(f);
-                f = g;
-            }
-            Item::Static(r, b0, c0) => {
-                let mut g = eqs(&Var::B(r.clone()), &kz(b0.clone()));
-                g.extend(eqs(&Var::C(r.clone()), &kz(c0.clone())));
-                g.extend(kill_region(&f, r));
-                f = g;
-            }
-            Item::Set(x) => f = kill(&f, &Var::S(x.clone())),
-            Item::SetR(x, lo, hi) => {
-                let vx = v1(Var::S(x.clone()));
-                let mut g = vec![lsub(&kz(lo.clone()), &vx), lsub(&vx, &kz(hi.clone()))];
-                g.extend(kill(&f, &Var::S(x.clone())));
-                f = g;
-            }
-            Item::Asn { x, l, lo, hi } => f = asn_facts(&f, x, l, lo, hi),
-            Item::Cap(n, r) => f = cap_facts(&f, n, r),
-            Item::AsnU { x, l, lo, hi } => f = asnu_facts(&f, x, l, lo, hi),
             Item::Test { thn, els, .. } | Item::Branch(thn, els) => {
                 let (ft, fe) = match it {
                     Item::Test { a, b, sgn, pa, pb, nn, .. } => {
@@ -775,7 +794,7 @@ fn lcheck(p: &Table, c: Ctx, mut f: Facts, items: &[Item]) -> Option<(St, St)> {
             Item::Ret(pfs) => {
                 return if proves(&f, c.1, pfs) { finish(joins, None, None) } else { None };
             }
-            Item::Call { .. } => f = call_facts(p, &f, it)?,
+            _ => f = step(p, f, it)?,
         }
     }
     finish(joins, Some(f), None)
