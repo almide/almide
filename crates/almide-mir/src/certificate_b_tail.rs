@@ -193,6 +193,7 @@ pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, 
         moved_slots,
         merge_credit: Vec::new(),
         unfolded: BTreeSet::new(),
+        loop_streams: Vec::new(),
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.call_move = func.call_moves.contains(&i);
