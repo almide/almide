@@ -26,26 +26,33 @@
 //!
 //! Out of scope, by one rule — a function whose callers are not all its
 //! direct named call sites keeps borrowing: `main`, a function taken as a
-//! value (`FuncRef`, so a closure call may reach it), and the render-linked
-//! runtime names (dotted or `__`-prefixed). A dotted name the program itself
-//! defines (a type's `T.decode`, its derived workers, a lifted `__almd_lift_N`)
-//! is called by name only.
+//! value (`FuncRef`, so a closure call may reach it), a linked stdlib entry
+//! (a dotted name, whose call the render may serve through its runtime
+//! body), and a function an op reaches other than by a named call (a
+//! generated drop, a fan arm the render spawns on a thread, a linked body
+//! a declared runtime route may serve instead). A linked
+//! private helper (`__r2o_arr`) is called by name like any other function, as
+//! is a dotted name the program itself defines (a type's `T.decode`, its
+//! derived workers, a lifted `__almd_lift_N`).
 
 use crate::{MirFunction, Op, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// A declared floor or runtime-served call that takes its argument `k` by
+/// value: handed there at its last use, the argument moves in.
+fn by_value(name: &str, k: usize) -> bool {
+    // A call the floor declares renders through the floor body, whose own
+    // modes decide; only a call it does not reaches the runtime route.
+    match crate::native_floor::declared(name) {
+        Some(_) => crate::native_floor::takes_by_value(name, k),
+        None => crate::native_hof::takes_by_value(name, k),
+    }
+}
 
 fn values(op: &Op) -> Vec<ValueId> {
     let mut out = Vec::new();
     crate::mir_ops::op_values(op, &mut out);
     out
-}
-
-/// The ownership mirror accepts nested control flow that the portable
-/// certificate format may not represent. An optional move optimization must
-/// preserve both obligations; an unrepresentable branch keeps borrowing.
-fn ownership_representable(f: &MirFunction) -> bool {
-    crate::verify_ownership(f).is_ok()
-        && !crate::certificate::ownership_certificate_with_poison(f).1
 }
 
 pub(crate) fn is_release(op: &Op, v: ValueId) -> bool {
@@ -131,7 +138,7 @@ fn consumed_params(
             if (((crate::native_list_ops::is_list_concat(name) || name == "__str_concat")
                 && matches!(args.first(), Some(crate::CallArg::Handle(v)) if *v == p.value))
                 || args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value))
-                    .is_some_and(|k| crate::native_floor::takes_by_value(name, k)
+                    .is_some_and(|k| by_value(name, k)
                         // Or a program function whose own param there is a
                         // move param: the body hands the param on (`poke(mut
                         // b) = bytes.put_u8(b, 0, v)` over a linked body).
@@ -156,7 +163,7 @@ fn consumed_params(
             Op::CallFn { name, args, .. } => {
                 values(&func.ops[i]).iter().filter(|x| **x == p.value).count() == 1
                     && args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value)).is_some_and(|k| {
-                        crate::native_floor::takes_by_value(name, k)
+                        by_value(name, k)
                             || owned.moves(&func.ops[i], k)
                             // The list or string a concatenation grows in place.
                             || (k == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"))
@@ -175,6 +182,14 @@ fn consumed_params(
         let given: Vec<usize> = named.iter().copied().filter(|&i| gives(i) && !crate::mir_liveness::live_after(func, i, p.value)).collect();
         if !given.is_empty() && func.ret != Some(p.value) && crate::mir_liveness::last_use_on_every_path(func, p.value, &given) {
             out.extend(given.iter().map(|&i| (k, i)));
+            continue;
+        }
+        // Or given away on some arms and never read again on the others
+        // (`some(..) => runs + [..], none => [(c, 1)]`): taken over, it is
+        // released where it dies unread, at the start of each such arm (the
+        // release lands after the op before that start).
+        if let Some(releases) = dead_arm_releases(func, p.value, &given) {
+            out.extend(releases.into_iter().map(|i| (k, i)));
             continue;
         }
         // Or given away in one arm of a top-level `if` and only read in the
@@ -198,7 +213,10 @@ fn consumed_params(
         // convention does; one whose release follows the call hands it over.
         let exits_before = |end: usize| func.ops[..end].iter().any(|op| matches!(op, Op::Return { .. }));
         if at_top && plain && func.ret != Some(p.value) {
-            if let Some(end) = field_given(func, p.value, owned).filter(|&end| depth[end] == 0 && !exits_before(end)) {
+            if let Some(end) = field_given(func, p.value, owned)
+                .and_then(|end| branch_close(func, &depth, end, k))
+                .filter(|&end| !exits_before(end))
+            {
                 out.push((k, end));
             }
         }
@@ -289,7 +307,7 @@ fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>) -> Option<usiz
                 if vs.iter().filter(|v| derived.contains(v)).count() != 1 {
                     return None;
                 }
-                let by_value = crate::native_floor::takes_by_value(name, at)
+                let by_value = by_value(name, at)
                     || owned.moves(op, at)
                     // The list or string a concatenation grows in place.
                     || (at == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"));
@@ -342,7 +360,18 @@ fn own_params(
     for i in at.into_iter().rev() {
         f.ops.remove(i);
     }
-    ownership_representable(&f).then_some(f)
+    (crate::verify_ownership(&f).is_ok() && !newly_poisoned(func, &f)).then_some(f)
+}
+
+/// The rewrite leaves a certificate the kernel-proven checker cannot accept
+/// where the lowered body's could be: a taken-over param released in one arm
+/// of a region and given away in an arm nested inside the other carries
+/// grouped events in a nested arm, which the flat arm body cannot hold, so the
+/// certificate scan emits its always-rejecting poison. The mirror accepts that
+/// body; the certificate the native wall judges does not.
+fn newly_poisoned(before: &MirFunction, after: &MirFunction) -> bool {
+    crate::certificate::ownership_certificate_with_poison(after).1
+        && !crate::certificate::ownership_certificate_with_poison(before).1
 }
 
 /// Whether the caller can move `v` into the call at `call` without a copy:
@@ -600,48 +629,14 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sig
     if crate::render_native_move::drill_no_moves() {
         return;
     }
-    let taken: BTreeSet<String> = functions
-        .iter()
-        .flat_map(|f| f.ops.iter())
-        .filter_map(|op| match op {
-            Op::FuncRef { name, .. } => Some(name.clone()),
-            _ => None,
-        })
-        .collect();
+    let taken = taken_functions(functions);
+    DYING_SITES.with(|d| *d.borrow_mut() = dying_sites(functions));
+    NATIVE_RESULTS.with(|d| *d.borrow_mut() = native_result_params(sigs));
+    let reached_otherwise = reached_otherwise(functions);
     // The closure table: every taken function in the program, by param shape.
-    let table: Vec<(String, Vec<bool>)> = functions
-        .iter()
-        .filter(|f| taken.contains(&f.name))
-        .map(|f| (f.name.clone(), f.params.iter().map(|p| p.repr.is_heap()).collect()))
-        .collect();
-    // (callee, position) pairs some call site fills with something other than
-    // a heap handle: that position cannot take a handed-over reference.
-    let mut not_handle: BTreeSet<(String, usize)> = BTreeSet::new();
-    for op in functions.iter().flat_map(|f| f.ops.iter()) {
-        if let Op::CallFn { name, args, .. } = op {
-            for (k, a) in args.iter().enumerate() {
-                if !matches!(a, crate::CallArg::Handle(_)) {
-                    not_handle.insert((name.clone(), k));
-                }
-            }
-        }
-    }
-    // (callee, position) pairs some call site fills with a value it does not
-    // release right after the call (it reads it again): that site would copy.
-    let mut kept: BTreeSet<(String, usize)> = BTreeSet::new();
-    for f in functions.iter() {
-        let depth = depths(f);
-        for (i, op) in f.ops.iter().enumerate() {
-            let Op::CallFn { name, args, .. } = op else { continue };
-            for (k, a) in args.iter().enumerate() {
-                if let crate::CallArg::Handle(v) = a {
-                    if release_after(f, i, *v, &depth).is_none() {
-                        kept.insert((name.clone(), k));
-                    }
-                }
-            }
-        }
-    }
+    let table = closure_table(functions, &taken);
+    let not_handle = not_handle_positions(functions, &table);
+    let kept = kept_positions(functions);
     let hands_at = |f: &MirFunction, k: usize| !taken.contains(&f.name) && !kept.contains(&(f.name.clone(), k));
     let representation_pinned = crate::native_hof::representation_adapters_needed(functions, sigs);
     let mut pinned: BTreeSet<String> = BTreeSet::new();
@@ -655,11 +650,15 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sig
                 // Per-call moves would split the group's consecutive launches.
                 && crate::fan_native::arm(&f.name).is_none()
                 && (!f.name.contains('.') || own.contains(&f.name))
-                && (closure(f)
-                    || (!taken.contains(&f.name) && (!f.name.starts_with("__") || own.contains(&f.name))))
+                && (closure(f) || (!taken.contains(&f.name) && !reached_otherwise.contains(&f.name)))
+                // A linked body a declared runtime route may serve instead:
+                // that call lends, whatever the body's modes.
+                && crate::native_hof::of(&f.name).is_none()
         };
+        // A native `Result` param is the callee's own already (there is no
+        // borrowed Result kind): taking it over changes nothing.
         let takes_at = |f: &MirFunction, k: usize| {
-            !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0)
+            !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0) && !native_result(&f.name, k)
         };
         let Some((best, owned)) = solve_modes(functions, &table, &eligible, &takes_at, &hands_at) else {
             // A closure call the mirror refuses to hand over at leaves every
@@ -754,7 +753,11 @@ fn solve_modes<'t>(
             // The join releases sunk into the arms first, so an arm's call takes
             // the slot over; the plain body if the mirror refuses that.
             let sunk = move_at_sites(&sink_join_releases(f, &owned), &owned);
-            let moved = if no_new_violations(before, &sunk) { sunk } else { move_at_sites(f, &owned) };
+            let moved = if no_new_violations(before, &sunk) && !newly_poisoned(before, &sunk) {
+                sunk
+            } else {
+                move_at_sites(f, &owned)
+            };
             if !no_new_violations(before, &moved) {
                 return None;
             }
@@ -774,3 +777,5 @@ fn solve_modes<'t>(
         _ => up,
     })
 }
+
+include!("native_move_params_sites.rs");

@@ -390,6 +390,10 @@ fn map_entry_arg(cx: &CallCx, p: &FloorParam, by_ref: bool, code: &str, got: &NT
 
 /// A `List[(K, V)]` param's argument.
 fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerError> {
+    // A literal's entries left unbuilt (crate::native_map_entries): its pairs.
+    if let Some(pairs) = crate::native_map_entries::array_of(code) {
+        return Ok(pairs);
+    }
     let mismatch = || wall(format!(
         "native: map pairs argument {got:?} (element {:?}, pair kinds {:?}) cannot serve {:?} in `{}`",
         got.rec().and_then(crate::render_native_rec::list_elem),

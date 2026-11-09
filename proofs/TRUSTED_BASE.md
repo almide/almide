@@ -522,6 +522,18 @@ heap value an arm receives is marked thread-shared before the spawn
 changes only atomically. Also trusted: the fan runtime text itself and the
 glue that routes this render's output and exits through it
 (`crates/almide-mir/src/render_native_fan.rs`).
+The fan runtime text includes the shared offer pool's gate
+(`runtime/rs/src/list.rs`, `almide_fan_deal` .. `almide_fan_steal`), whose
+`unsafe` is checked, not proven: Miri samples its schedules
+(`scripts/miri-fan-gate.sh`) and loom enumerates its protocol's interleavings
+within stated bounds (`scripts/loom-fan-gate.sh`). Until #4452 a helper held
+the gate through a reference parameter, which the aliasing model keeps live
+until the call returns, so a caller freeing the gate right after the last
+helper's leaving decrement was undefined behaviour (Miri run 41854359018);
+the helper now holds a raw pointer and leaves through the counter alone, and
+loom models a reference parameter to the gate as read at its function's
+return. Still trusted: aliasing-model rules other than that protector, which
+loom does not model, and schedules neither sampled nor enumerated.
 
 Element-wise fan calls whose callbacks the shared product parallel selector
 keeps ordered are lowered through the ordinary certified self-hosted traversal.

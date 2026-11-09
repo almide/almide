@@ -11,8 +11,10 @@
 # runtime/rs/src/list.rs from `fn almide_fan_deal` to the end of
 # `fn almide_fan_steal` and points it at loom's primitives) over every
 # interleaving of a caller and helper threads, and refuses any execution in
-# which a helper touches an offer's frame without that access
-# happening-before the frame's teardown, or a block is not run exactly once.
+# which a helper touches an offer's frame — or still holds a reference
+# parameter to it, which Rust's aliasing model treats as live until the
+# function returns (#4452) — without that happening-before the frame's
+# teardown, or a block is not run exactly once.
 #
 # The models: a flat offer and one helper; a nested offer (an offer inside a
 # block, the caller stealing same-tree offers while it waits) and one helper;
@@ -33,6 +35,12 @@
 #   noreaders  withdrawing an offer does not wait for the threads reading
 #              its slot, so a helper can enter a gate whose caller already
 #              stopped counting entrants
+#   refparam   the helper's body runs under a reference parameter to the
+#              gate again (#4452): that borrow is protected until the helper
+#              returns, so it spans the leaving decrement after which the
+#              caller frees the gate — the undefined behaviour Miri reported
+#              in run 41854359018. build.rs models every reference parameter
+#              to the gate as touched at its function's return.
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -44,7 +52,7 @@ run() { # <control or empty> <log>
   LOOM_FAN_CONTROL="$1" cargo test --release --locked --manifest-path "$MANIFEST" -- --test-threads=3 >"$2" 2>&1
 }
 
-for control in nowait noreaders; do
+for control in nowait noreaders refparam; do
   start=$(date +%s)
   run "$control" "$LOG/$control.log"
   rc=$?

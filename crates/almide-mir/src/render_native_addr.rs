@@ -42,6 +42,8 @@ mod env_slots;
 mod cell_slots;
 #[path = "render_native_option_tags.rs"]
 mod option_tags;
+#[path = "render_native_list_literal.rs"]
+mod list_literal;
 pub(crate) use carrier::{carrier_values, is_carrier, sink_guarded_payload_reads, CarrierSig};
 pub(crate) use slots::flag_exits;
 

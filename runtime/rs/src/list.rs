@@ -921,24 +921,40 @@ impl Drop for AlmideFanRunning {
 
 /// A pool thread inside `gate` (counted in `inside`): take blocks, leave its
 /// panic if it had one, and leave — waking the caller when it is the last.
-fn almide_fan_help(gate: &AlmideFanGate) {
+///
+/// `gate` is a raw pointer, not `&AlmideFanGate` (#4452): a reference
+/// PARAMETER is protected for the whole call — the gate must stay valid
+/// until this function returns — but the caller may free its frame as soon
+/// as the decrement below makes `inside` 0, while this call is still on the
+/// helper's stack. Miri reported exactly that (the caller's drop of the gate
+/// against the helper's protected argument, run 41854359018). So the borrow
+/// of the whole gate is last used before the decrement, and the decrement
+/// goes through a reference to the counter alone — all `UnsafeCell`, which a
+/// concurrent free may outlive, as the last strong count of an `Arc` does.
+fn almide_fan_help(gate: *const AlmideFanGate) {
     use std::sync::atomic::Ordering;
-    // SAFETY: this helper is inside the gate, so the offer has not returned
-    // and the closure is alive; it was written before the gate was published.
-    let take = unsafe { &*(*gate.take.get()).expect("set before the gate is published") };
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take));
-    // a helper that took a block leaves no element's sink or output behind
-    if !matches!(outcome, Ok(false)) {
-        almide_fan_adopt(None);
-        almide_stdout_flush();
-    }
-    if let Err(panic) = outcome {
-        gate.panics.lock().unwrap_or_else(|e| e.into_inner()).push(Err(panic));
-    }
-    // after the decrement the caller may return and free the gate: wake it
-    // through a handle cloned before
-    let caller = gate.parking.load(Ordering::SeqCst).then(|| gate.caller.clone());
-    if gate.inside.fetch_sub(1, Ordering::SeqCst) == 1 {
+    let (caller, inside) = {
+        // SAFETY: this helper is inside the gate (it entered through
+        // `almide_fan_steal`), so the offer has not returned and the gate is
+        // alive until the decrement below; this borrow is not used after it.
+        let gate = unsafe { &*gate };
+        // SAFETY: inside the gate, the closure is alive; it was written
+        // before the gate was published.
+        let take = unsafe { &*(*gate.take.get()).expect("set before the gate is published") };
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take));
+        // a helper that took a block leaves no element's sink or output behind
+        if !matches!(outcome, Ok(false)) {
+            almide_fan_adopt(None);
+            almide_stdout_flush();
+        }
+        if let Err(panic) = outcome {
+            gate.panics.lock().unwrap_or_else(|e| e.into_inner()).push(Err(panic));
+        }
+        // after the decrement the caller may return and free the gate: wake
+        // it through a handle cloned before
+        (gate.parking.load(Ordering::SeqCst).then(|| gate.caller.clone()), &gate.inside)
+    };
+    if inside.fetch_sub(1, Ordering::SeqCst) == 1 {
         if let Some(caller) = caller {
             caller.unpark();
         }
@@ -987,8 +1003,10 @@ fn almide_fan_withdraw(i: usize) {
 }
 
 /// Enter the oldest-slotted published offer that has a block left and that
-/// `which` accepts.
-fn almide_fan_steal(which: impl Fn(&AlmideFanGate) -> bool) -> Option<&'static AlmideFanGate> {
+/// `which` accepts. The gate comes back as a raw pointer: it is valid only
+/// until this thread leaves it, which no lifetime can say (see
+/// `almide_fan_help`).
+fn almide_fan_steal(which: impl Fn(&AlmideFanGate) -> bool) -> Option<*const AlmideFanGate> {
     use std::sync::atomic::Ordering;
     if ALMIDE_FAN_OPEN_BLOCKS.load(Ordering::Relaxed) == 0 {
         return None;
@@ -1010,9 +1028,9 @@ fn almide_fan_steal(which: impl Fn(&AlmideFanGate) -> bool) -> Option<&'static A
         });
         slot.readers.fetch_sub(1, Ordering::SeqCst);
         if let Some(g) = entered {
-            // SAFETY: see above — valid until this thread leaves the gate,
-            // which `almide_fan_help` does last.
-            return Some(unsafe { &*(g as *const AlmideFanGate) });
+            // valid until this thread leaves the gate, which
+            // `almide_fan_help` does last
+            return Some(g as *const AlmideFanGate);
         }
     }
     None

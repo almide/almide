@@ -574,6 +574,10 @@ impl CarrierCx<'_> {
         let by_ref = match k {
             NTy::Rec(j) => Some((NTy::RecRef(j), format!("&{}", struct_name(j)), if then { "v" } else { ok_v })),
             NTy::Str => Some((NTy::StrRef, "&str".to_string(), "&v[..]")),
+            // A list payload read only through its slots: a view of it, where
+            // the owned read copied every element (a callback's list result
+            // that a flat_map walks, a fallible HOF's Ok list measured).
+            NTy::Vec => Some((NTy::VecRef, "&[i64]".to_string(), "&v[..]")),
             NTy::VecStr => Some((NTy::VecStrRef, "&[AlmideString]".to_string(), "&v[..]")),
             _ => None,
         };

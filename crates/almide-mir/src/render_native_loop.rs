@@ -91,6 +91,8 @@ fn render_fn(
     crate::render_native_addr::clear_str_fields();
     crate::render_native_move::set_rebound(func);
     crate::render_native_borrow_read::set_borrowed_results(func);
+    crate::render_native_keyed::begin_fn(func, &borrows.arms);
+    crate::native_map_entries::begin(func);
     // Interpolation chains built in one buffer (crate::render_native_interp).
     let chains = crate::render_native_interp::chains(func);
     crate::render_native_move::set_stack_lits(func, &user_fns.keys().copied().collect());
@@ -158,7 +160,15 @@ fn render_fn(
             }
         }
         prev_start = st.out.len();
-        if render_fn_step(&mut st, i, op, &mut ops)? && flag_exits.contains(&i) {
+        let stepped = render_fn_step(&mut st, i, op, &mut ops)?;
+        // A shared cell's in-place borrow ends with its last read.
+        for g in crate::render_native_keyed::guards_through(i) {
+            for _ in 0..st.indent {
+                st.out.push_str("    ");
+            }
+            let _ = writeln!(st.out, "drop({g});");
+        }
+        if stepped && flag_exits.contains(&i) {
             for _ in 0..st.indent {
                 st.out.push_str("    ");
             }
@@ -471,6 +481,16 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         _ if crate::native_slot_takes::released(op).is_some_and(|v| st.addrs.slot_alias(&v)) => {
             line!("// drop: a heap slot's snapshot, scope-end");
         }
+        // A copy of a borrow-only read whose own uses only borrow
+        // (render_native_borrow_read::ref_dups): the same reference.
+        Op::Dup { dst, src }
+            if crate::render_native_borrow_read::ref_dup(*dst)
+                && matches!(st.tys.get(src), Some(NTy::RecRef(_) | NTy::VecRef | NTy::VecStrRef | NTy::StrRef)) =>
+        {
+            let t = st.tys[src];
+            st.tys.insert(*dst, t);
+            line!("let mut {} = {};", var(*dst), var(*src));
+        }
         Op::Dup { dst, src } if st.addrs.slot_alias(dst) => {
             let t = st.tys[src];
             st.tys.insert(*dst, t);
@@ -561,6 +581,16 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             let t = st.tys[src];
             st.tys.insert(*dst, t);
             line!("let mut {} = {};", var(*dst), crate::render_native_move::take_expr(&var(*src)));
+        }
+        // A copy of a Result carrier nothing reads again is the carrier itself
+        // (a fallible callee's `Ok(x)` built, copied out and released).
+        Op::Prim { kind: crate::PrimKind::ResCopy, dst: Some(d), args }
+            if args.len() == 1
+                && st.tys.get(&args[0]).is_some_and(|t| crate::render_native_move::last_use(func, i, args[0], *t, &st.borrows.arms)) =>
+        {
+            let t = st.tys[&args[0]];
+            st.tys.insert(*d, t);
+            line!("let mut {} = {};", var(*d), crate::render_native_move::take_expr(&var(args[0])));
         }
         // An error carrier over an owned string nothing reads again takes it.
         Op::Prim { kind: crate::PrimKind::ResMakeErrStr, dst: Some(d), args }

@@ -41,8 +41,10 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
         FloorParam::Str => r == "&str",
         FloorParam::Map(_) => is_generic_map(r.strip_prefix('&').unwrap_or(&r)),
         FloorParam::MapKey(_) | FloorParam::MapVal(_) => is_type_param(r.strip_prefix('&').unwrap_or(&r)),
+        // A `Vec` of the pairs, or any iterable of them (an array literal's).
         FloorParam::MapPairs => r
             .strip_prefix("Vec<(")
+            .or_else(|| r.strip_prefix("implIntoIterator<Item=("))
             .and_then(|x| x.strip_suffix(")>"))
             .and_then(|x| x.split_once(','))
             .is_some_and(|(a, b)| is_type_param(a) && is_type_param(b)),

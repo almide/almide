@@ -298,6 +298,8 @@ fn slot_load_handle(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bo
             // reference into the list's element.
             if st.borrow_reads.contains(d) {
                 tys.insert(*d, NTy::StrRef);
+                // A copy of it shares the element's handle (render_dup).
+                note_field(*d, ad.base, format!("{}[{ix}]", var(ad.base)));
                 line!("let mut {}: &str = &{}[{ix}][..];", var(*d), var(ad.base));
                 return Ok(true);
             }
@@ -610,7 +612,9 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
             Some(sv) => {
                 let g = ty(tys, &sv.base).filter(|g| sv.off == 0 && sv.idx.is_none() && field_accepts(e, *g));
                 g.and_then(|g| {
-                    if st.borrowed_list_slots.contains(&(ad.base, v)) && matches!(g, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) {
+                    if st.borrowed_list_slots.contains(&(ad.base, v)) && matches!(g, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_))
+                        && !crate::render_native_keyed::dies_at_store(sv.base, v, g)
+                    {
                         Some(format!("{}.clone()", var(sv.base)))
                     } else { owned_from(&var(sv.base), g) }
                 }).or_else(|| (sv.off == 0 && sv.idx.is_none()).then(||
@@ -619,16 +623,18 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
                 })?
             }
         };
+        let pair = crate::native_map_entries::pair_of(v); // a map entry's pair, left unbuilt
+        let rhs = pair.clone().unwrap_or(rhs);
         if let Some((n, k)) = st.literal.get(&ad.base).copied() {
             let b = var(ad.base);
-            line!("let {b}_e{k}: {} = {rhs};", crate::render_native_rec::owned_ty(e));
+            list_literal::elem_local(out, indent, (&b, k), &crate::render_native_rec::owned_ty(e), &rhs, pair.is_some());
             st.literal.insert(ad.base, (n, k + 1));
             if let Some(stored) = st.single_rec.get_mut(&ad.base) {
                 // Its one element waits for the append that pushes it.
                 *stored = true;
                 return Ok(true);
             }
-            if k + 1 == n {
+            if list_literal::complete(ad.base, (n, k)) {
                 let es: Vec<String> = (0..n).map(|j| format!("{b}_e{j}")).collect();
                 line!("let mut {b}: {} = vec![{}];", owned_ty_of(ty(tys, &ad.base)), es.join(", "));
             }
@@ -650,7 +656,8 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
         (Some(NTy::VecStr), Some(sv)) if sv.off == 0 && sv.idx.is_none() => {
             // Move consumed handles; preserve the source of a borrow-view.
             let rhs = match ty(tys, &sv.base) {
-                Some(NTy::Str) if st.borrowed_list_slots.contains(&(ad.base, v)) => format!("{}.clone()", var(sv.base)),
+                // A borrowed slot whose string is read again: an untimed copy, so the standard codegen.
+                Some(NTy::Str) if list_literal::copies(st, ad.base, (sv.base, v), NTy::Str) => return Err(wall("native: a string list slot borrowing a string read again")),
                 Some(NTy::Str) => crate::render_native_move::take_expr(&var(sv.base)),
                 Some(NTy::StrRef) => format!("AlmideString::from({})", var(sv.base)),
                 other => return Err(wall(format!("native: a {other:?} handle stored into a List[String] slot"))),
@@ -661,7 +668,7 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
                 return Ok(true);
             }
             if st.pushed.contains(&ad.base) {
-                line!("{}.push({rhs});", var(ad.base));
+                list_literal::pushed_str(st, out, indent, ad.base, &rhs);
                 return Ok(true);
             }
             let (guard, slot) = bounds_guard(st, &ad, ix);

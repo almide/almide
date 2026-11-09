@@ -227,7 +227,8 @@ fn render_user_fn_call(
             None => arg,
         });
     }
-    let mut rendered = format!("{}({})", mangle(name), rendered_args.join(", "));
+    let head = crate::render_native_keyed::call_head(name, call.args, callee).unwrap_or_else(|| mangle(name));
+    let mut rendered = format!("{head}({})", rendered_args.join(", "));
     if callee_sig.and_then(|(_, r)| *r).is_some_and(|k| k.narrow_rust().is_some()) {
         rendered = format!("({rendered} as i64)");
     }
@@ -483,15 +484,20 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
     // right one). The right list's last use, when its elements own heap
     // (a `List[String]`, a list of lists — #4503's prepend `[x] + xss`):
     // move its elements over instead of cloning each one.
+    // Or the left list is a borrowed field or payload read whose carrier
+    // dies at the concatenation (`sc = { ...sc, funs: sc.funs + [..] }`,
+    // `set_moving_args`' taken args) and the right one an owned list of its
+    // own: grow that field's list itself, moved out of the carrier.
     if let [CallArg::Handle(l), CallArg::Handle(r)] = args.as_slice() {
-        if l != r && owned_list(at) && owned_list(bt) {
+        let taken = crate::render_native_move::taken_arg(*l);
+        if l != r && (owned_list(at) || taken.is_some()) && owned_list(bt) {
             let left = crate::render_native_move::moving_arg(*l);
             let right = crate::render_native_move::moving_arg(*r) && bt != NTy::Vec;
             if left || right {
-                let head = if left {
-                    format!("let mut r: {ty} = {}", crate::render_native_move::take_expr(&a))
-                } else {
-                    format!("let mut r: {ty} = Vec::with_capacity({sa}.len() + {b}.len()); r.extend_from_slice({sa})")
+                let head = match (left, taken) {
+                    (true, _) => format!("let mut r: {ty} = {}", crate::render_native_move::take_expr(&a)),
+                    (false, Some(take)) => format!("let mut r: {ty} = {take}"),
+                    (false, None) => format!("let mut r: {ty} = Vec::with_capacity({sa}.len() + {b}.len()); r.extend_from_slice({sa})"),
                 };
                 let tail = if right {
                     format!("r.extend({})", crate::render_native_move::take_expr(&b))
