@@ -355,6 +355,10 @@ struct CertScan {
     /// Straight-line slots whose pending rebind is a bare credit (no `(`
     /// opened): their `SetLocal` closes nothing.
     unfolded: BTreeSet<ValueId>,
+    /// The streams the top-level loop opened `(` on (#4631): the loop closes
+    /// exactly these, even when a slot is rebound to another object inside
+    /// the body.
+    loop_streams: Vec<ValueId>,
 }
 
 impl CertScan {
@@ -622,14 +626,6 @@ impl CertScan {
         }
     }
 
-    /// Emit one loop delimiter on every slot stream.
-    fn slot_delimiters(&mut self, ev: char) {
-        for slot in &self.slots {
-            let so = self.s.object_of(*slot);
-            self.s.event(so, ev);
-        }
-    }
-
     /// ALIAS acquire (+1): a new handle on an existing shared object.
     /// `a` (not `i`) records the share-vs-move ground fact (format v1).
     /// A Dup that FEEDS a loop-carried slot (`cur = merged` swap-carry:
@@ -735,16 +731,25 @@ impl CertScan {
     /// Top-level loop entry: open `(` on every slot stream (option C).
     fn enter_loop(&mut self) {
         if self.depth == 0 {
-            self.slot_delimiters('(');
+            self.loop_streams = self.slots.iter().map(|slot| self.s.object_of(*slot)).collect();
+            for so in self.loop_streams.clone() {
+                self.s.event(so, '(');
+            }
         }
         self.depth += 1;
     }
 
-    /// Top-level loop exit: close `)` on every slot stream.
+    /// Top-level loop exit: close `)` on the streams the entry opened. A slot
+    /// rebound inside the body now names another object; closing that one
+    /// instead left `(` unclosed on the first and a stray `)` on the second
+    /// (#4631: `read_in_later_pass`, `rebound_in_loop`), which the lenient
+    /// parser used to repair.
     fn exit_loop(&mut self) {
         self.depth = self.depth.saturating_sub(1);
         if self.depth == 0 {
-            self.slot_delimiters(')');
+            for so in std::mem::take(&mut self.loop_streams) {
+                self.s.event(so, ')');
+            }
         }
     }
 }
