@@ -7,11 +7,12 @@ out = sys.argv[1]
 for leg in ("fx", "st"):
     per = collections.defaultdict(lambda: [0, 0, 0, 0, 0, 0, 0])  # artifacts, max acc, max unloc, sum unloc, max hdr, max bulk, max linear
     tot = collections.Counter()
-    for c in glob.glob(os.path.join(out, leg, "*.census")):
+    for c in glob.glob(os.path.join(out, leg, "*.anchor")):
         for line in open(c, errors="replace"):
             if not line.startswith("CENSUSFN "):
                 continue
-            _, func, cls, label, acc, loc, lin, hdr, bulk = line.split()
+            _, func, cls, src, label, acc, loc, lin, hdr, bulk = line.split()
+            cls = src
             acc, loc, lin, hdr, bulk = map(int, (acc, loc, lin, hdr, bulk))
             key = (cls, label if label != "-" else "<user>")
             p = per[key]
@@ -29,12 +30,29 @@ for leg in ("fx", "st"):
             tot[cls + ".bulk"] += bulk
             tot[cls + ".lin"] += lin
     print(f"== {leg}: totals {dict(tot)}")
-    for cls in ("routine", "frame"):
+    for cls in ("routine", "selfhost", "code"):
         rows = sorted(((k[1], v) for k, v in per.items() if k[0] == cls), key=lambda r: -r[1][2])
         print(f"-- {leg} {cls}: {len(rows)} label(s); sum over labels of max unlocated = {sum(v[2] for _, v in rows)}")
         print("   label artifacts max_acc max_unloc sum_unloc max_hdr max_bulk max_lin")
         for name, v in rows[:400]:
             print(f"   {name} {v[0]} {v[1]} {v[2]} {v[3]} {v[4]} {v[5]} {v[6]}")
+    # routine prover
+    rcert, rcount, unrouted, rtime = collections.Counter(), collections.Counter(), collections.Counter(), []
+    for p in glob.glob(os.path.join(out, leg, "*.rprove")):
+        for line in open(p, errors="replace"):
+            parts = line.rstrip("\n").split("\t")
+            if parts[0] == "routine" and len(parts) == 5:
+                rcert[parts[2]] = max(rcert[parts[2]], int(parts[3]))
+                rcount[parts[2]] = max(rcount[parts[2]], int(parts[4]))
+            elif parts[0] == "unrouted" and len(parts) >= 4:
+                unrouted[(parts[2], re.sub(r"\d+", "N", parts[3])[:100])] += 1
+            elif line.startswith("rtime "):
+                rtime.append(int(line.split()[1]))
+    print(f"-- {leg} routines: {len(rcert)} labels with a procedure; prove time ms total {sum(rtime)} max {max(rtime) if rtime else 0}")
+    for name in sorted(rcert, key=lambda n: -rcert[n]):
+        print(f"   routine {name} certified {rcert[name]} counted {rcount[name]}")
+    for (name, why), k in unrouted.most_common(60):
+        print(f"   unrouted {k} {name} {why}")
     # linear prover refusals
     why = collections.Counter()
     bodies = {}
