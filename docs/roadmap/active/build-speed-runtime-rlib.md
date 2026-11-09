@@ -32,8 +32,17 @@ own, and the manifest pins its profile under
   `-C debug-assertions`);
 - `overflow-checks = false`, pinned explicitly.
 
-The program's own code keeps `[profile.dev]` unchanged, its debug assertions
-included.
+On the cargo route the program's own code keeps `[profile.dev]` unchanged,
+its debug assertions included, as v0's cargo route does.
+
+On the bare-rustc route (`v1_rustc_build`, the one a dependency-free render
+takes) the program crate compiles as v0's rlib fast path compiles its program
+(owner ruling 2026-11-09): opt-level 1, no debug assertions (rustc's default
+above opt-level 0, which v0 relies on), overflow checks off. The runtime
+generics the program crate instantiates are compiled there, so debug
+assertions on it cost `map_index_order` 1.069x the standard build; with them
+off it read 1.020x (probe run 42500091710). A unit test resolves both routes'
+flags to their effective settings and holds them equal.
 
 Why: through cargo's dev profile the spliced runtime ran std's `ub_checks`
 inside every runtime loop. A per-codepoint string scan read 1.29x the standard
@@ -50,8 +59,9 @@ What still holds:
 
 - both profile lines are present, and overflow wraps in the program and
   through the runtime;
-- a `debug_assert!` planted in the program crate fires (the negative control);
-- the same assertion planted in the runtime crate does not.
+- a `debug_assert!` planted in the program crate does not fire, as in v0's
+  build;
+- nor does the same assertion planted in the runtime crate.
 
 ## Earlier implementation and inlining proposal
 

@@ -192,6 +192,24 @@ pub(super) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path
 /// name their frames) and every message the program prints are unchanged.
 pub(super) const FAST_PATH_RELEASE_ARGS: [&str; 6] = ["-C", "lto=fat", "-C", "codegen-units=1", "-C", "strip=debuginfo"];
 
+/// The profile flags the rlib fast path compiles the PROGRAM crate with —
+/// the standard codegen's normal native build. Nothing pins debug assertions
+/// or overflow checks, so rustc's defaults decide both: off above opt-level 0.
+/// The v1 program crate is held to these effective settings
+/// (`v1_rustc_build`'s `the_program_crate_profile_is_the_standard_builds`).
+pub(super) fn rlib_fast_program_profile_args(rs_code: &str, release: bool) -> Vec<String> {
+    let opt_level = if release { "3" } else { "1" };
+    let mut args: Vec<String> = vec!["-C".into(), format!("opt-level={opt_level}")];
+    if release {
+        args.extend(FAST_PATH_RELEASE_ARGS.iter().map(|s| s.to_string()));
+        args.extend(super::native_target::release_codegen_rustc_args());
+        if let Some(split) = release_split_for(rs_code) {
+            args.extend(split.rustc_args());
+        }
+    }
+    args
+}
+
 fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<Result<std::path::PathBuf, String>> {
     let opt_level = if release { "3" } else { "1" };
     // The runtime is built for the same CPU as the main crate: fat LTO does
@@ -215,17 +233,10 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
     cmd.arg(&rs_path)
         .arg("-o").arg(&bin_path)
         .arg("--edition").arg("2021")
-        .arg("-C").arg(format!("opt-level={opt_level}"))
+        .args(rlib_fast_program_profile_args(rs_code, release))
         .arg("--extern").arg(format!("almide_rt={}", rlib.display()))
         .arg("-L").arg(rlib_dir)
         .arg("-A").arg("warnings");
-    if release {
-        cmd.args(FAST_PATH_RELEASE_ARGS);
-        cmd.args(super::native_target::release_codegen_rustc_args());
-        if let Some(split) = release_split_for(rs_code) {
-            cmd.args(split.rustc_args());
-        }
-    }
     let output = cmd.output().ok()?;
     if output.status.success() {
         Some(source_still_ours(&rs_path, &slim).map(|()| bin_path))
