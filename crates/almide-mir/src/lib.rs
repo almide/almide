@@ -88,6 +88,7 @@ mod native_list_finish;
 mod native_value_repr;
 mod native_defaults;
 mod native_mutation_places;
+mod native_nested_places;
 mod native_display;
 mod native_patterns;
 mod native_map_eq;
