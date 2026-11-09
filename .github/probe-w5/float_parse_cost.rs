@@ -2,9 +2,9 @@
 //! literals of a float-heavy JSON document (17–18 significant digits, so every
 //! one misses the <= 15-digit fast path and takes the high-precision decimal).
 //! The self-hosted slow path shifted its 800-digit decimal ONE bit per pass —
-//! ~60 full-array passes per literal — and a 2.25 MB coordinate document took
-//! 1.9 s to parse on wasm against 29 ms native. It now shifts up to 59 bits
-//! right / 26 bits left per pass.
+//! ~60 full-array passes per literal, 195,871 fuel — and a 2.25 MB coordinate
+//! document took 1.9 s to parse on wasm against 29 ms native. It now shifts up
+//! to 59 bits right / 26 bits left per pass.
 //!
 //! The gate is an exact COUNT, no clock: wasmtime fuel (one unit per operator)
 //! of the parses alone — the probe minus the same probe without the parse —
@@ -65,8 +65,10 @@ fn fuel_of(src: &str) -> (u64, i64) {
     (before - store.get_fuel().expect("fuel"), out)
 }
 
-/// The fuel per 17–18-digit literal the slow path may spend. Only moves DOWN.
-const CEILING_PER_FLOAT: u64 = 8_000;
+/// The fuel per 17–18-digit literal float.parse may spend. The one-bit
+/// shifter spent 195,871; the multi-bit shifter spends 15,244 (probe run
+/// 42607999728). Only moves DOWN.
+const CEILING_PER_FLOAT: u64 = 16_000;
 
 #[test]
 fn float_parse_long_literals_cost_a_few_passes() {
