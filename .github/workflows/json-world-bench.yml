@@ -1,0 +1,119 @@
+name: JSON world reference bench (probe)
+
+# research/benchmark/json-world: the jsonround workload (50,000 records ->
+# stringify -> parse -> sum) in Almide (post-rc1-fixes head and json-reborn),
+# serde_json, sonic-rs, simd-json, yyjson and simdjson, native and
+# wasm32-wasip1 on wasmtime 50.0.1 (AOT and normal). Every table runs on the
+# one `bench` runner. A probe: it lives on probe/json-world only, so the push
+# trigger is what starts it (a workflow_dispatch workflow must exist on the
+# default branch to be dispatched).
+
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: "Alternating rounds per table"
+        default: "15"
+  push:
+    branches: [probe/json-world]
+    paths:
+      - "research/benchmark/json-world/**"
+      - ".github/workflows/json-world-bench.yml"
+
+concurrency:
+  group: json-world-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  almide:
+    name: Build almide (${{ matrix.tag }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tag: head
+            ref: post-rc1-fixes
+          - tag: reborn
+            ref: json-reborn
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Build the compiler
+        run: |
+          git log -1 --format='%H %s' | tee almide-commit.txt
+          cargo build --release --bin almide
+          mkdir -p dist && cp target/release/almide dist/almide && cp almide-commit.txt dist/
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: almide-${{ matrix.tag }}
+          path: dist/
+          retention-days: 7
+
+  bench:
+    name: Build and time every implementation
+    needs: almide
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-wasip1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: almide-bin
+      - name: Install wasmtime 50.0.1
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+      - name: Fetch yyjson, simdjson, wasi-sdk
+        run: JW_DEPS="$PWD/jw-deps" bash research/benchmark/json-world/setup.sh
+      - name: Build
+        run: |
+          chmod +x almide-bin/*/almide
+          cat almide-bin/*/almide-commit.txt
+          export ALMIDE_HEAD="$PWD/almide-bin/almide-head/almide" ALMIDE_REBORN="$PWD/almide-bin/almide-reborn/almide"
+          JW_DEPS="$PWD/jw-deps" OUT="$PWD/jw-out" bash research/benchmark/json-world/build.sh
+      - name: Time
+        run: |
+          export ALMIDE_HEAD="$PWD/almide-bin/almide-head/almide" ALMIDE_REBORN="$PWD/almide-bin/almide-reborn/almide"
+          {
+            echo "almide head commit: $(cat almide-bin/almide-head/almide-commit.txt 2>/dev/null)"
+            echo "almide reborn commit: $(cat almide-bin/almide-reborn/almide-commit.txt 2>/dev/null)"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          JW_ROUNDS="${{ github.event.inputs.rounds || '15' }}" JW_DEPS="$PWD/jw-deps" OUT="$PWD/jw-out" \
+            python3 research/benchmark/json-world/run.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: json-world-results
+          path: |
+            jw-out/results.md
+            jw-out/results.json
+            jw-out/log/*.log
+            jw-out/build-failed.txt
+          retention-days: 14

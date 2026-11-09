@@ -1,0 +1,22 @@
+[package]
+name = "jw"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Its own workspace root: the repository's Cargo workspace does not include it.
+[workspace]
+
+[features]
+# A counting global allocator; the timed builds leave it off.
+count = []
+
+[dependencies]
+serde_json = "=1.0.145"
+sonic-rs = "=0.5.10"
+simd-json = "=0.18.1"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
