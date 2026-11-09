@@ -74,6 +74,14 @@ impl Emitter<'_> {
                 self.f.instructions().i32_wrap_i64().i32_load(raw(()));
                 crate::witness::bounds::prim(self.f);
                 self.rc_inc_top();
+                // The +1 is the result's credit (the consumer's line is born
+                // `i`); the slot is a view no frame variable holds, so its
+                // own line takes the share-out (#4278 `s`).
+                if let Some(w) = self.witness.as_mut()
+                    && !w.arm_share_out(None)
+                {
+                    w.poison();
+                }
                 Ok(Some(Lowered::owned(ty)))
             }
             // handle: any BLOCK value's base address as Int.

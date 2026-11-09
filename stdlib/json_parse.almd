@@ -309,6 +309,8 @@ fn __jp_same_bytes(t: String, a: Int, b: Int, k: Int) -> Bool = {
   let n = prim.load32(prim.handle(t) + 4)
   if a < 0 then false
   else if b < 0 then false
+  else if a > n then false
+  else if b > n then false
   else {
     var i = 0
     var same = true
