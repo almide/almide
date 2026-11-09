@@ -1,0 +1,156 @@
+name: probe-json-substrate-w5 (throwaway, float.parse)
+on:
+  push:
+    branches: [probe/json-substrate-w5]
+permissions:
+  contents: read
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  ROUNDS: "13"
+jobs:
+  cost:
+    if: contains(github.event.head_commit.message, '[cost]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Fuel per long literal on every ref
+        run: |
+          set -uo pipefail
+          cp -r .github/probe-w5 /tmp/pw
+          while read -r tag sha; do
+            [ -z "$tag" ] && continue
+            git worktree add -f /tmp/src-$tag "$sha" >/dev/null 2>&1
+            cp /tmp/pw/float_parse_cost.rs /tmp/src-$tag/crates/almide-wasm/tests/float_parse_cost.rs
+            (cd /tmp/src-$tag && echo "=== $tag $(git log --oneline -1)" && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test float_parse_cost -- --nocapture 2>&1 | grep -E "RATCHET|panicked|test result|differ|answered" ) || true
+          done < /tmp/pw/refs.txt
+
+  diff:
+    if: contains(github.event.head_commit.message, '[diff]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - name: Differential corpus, fixtures, ledgers on every diff ref
+        run: |
+          set -uo pipefail
+          cp -r .github/probe-w5 /tmp/pw
+          mkdir -p /tmp/out
+          while read -r tag sha; do
+            [ -z "$tag" ] && continue
+            git worktree add -f /tmp/d-$tag "$sha" >/dev/null 2>&1
+            cd /tmp/d-$tag
+            echo "=================== $tag $(git log --oneline -1)"
+            CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide 2>&1 | tail -1
+            A="$GITHUB_WORKSPACE/target/release/almide"
+            echo "--- generated files the build rewrote"; git status --short
+            git diff > /tmp/out/$tag-generated.diff
+            echo "--- fmt"; cp stdlib/float_parse.almd /tmp/fp-before.almd; "$A" fmt --no-import-edit stdlib/float_parse.almd; diff /tmp/fp-before.almd stdlib/float_parse.almd > /tmp/out/$tag-fmt.diff && echo "fmt: clean" || { echo "fmt: DRIFT"; cat /tmp/out/$tag-fmt.diff; }
+            cp /tmp/fp-before.almd stdlib/float_parse.almd
+            echo "--- differential test"
+            cp /tmp/pw/float_parse_cross_target_test.rs tests/float_parse_cross_target_test.rs
+            ALMIDE_BIN="$A" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test float_parse_cross_target_test > /tmp/out/$tag-difftest.txt 2>&1
+            grep -E "^test |panicked|float.parse\(|test result|mismatch|failed" /tmp/out/$tag-difftest.txt | cut -c1-600
+            echo "VERDICT-DIFF $tag: $(grep -E '^test result' /tmp/out/$tag-difftest.txt | tail -1)"
+            echo "--- wasm_cross fixtures touching float/json parse: native vs wasm"
+            fail=0; n=0
+            for f in $(grep -l -E "float\.parse|json\.parse|float\.from_string" spec/wasm_cross/*.almd); do
+              n=$((n+1))
+              a=$("$A" run "$f" 2>/dev/null); ra=$?
+              b=$("$A" run "$f" --target wasm 2>/dev/null); rb=$?
+              if [ "$a" != "$b" ] || [ $ra != $rb ]; then echo "DIVERGE $f ($ra/$rb)"; fail=$((fail+1)); fi
+            done
+            echo "VERDICT-FIXTURES $tag: $fail of $n diverge"
+            if [ "$tag" = "w5" ] || [ "${DIFF_LEDGERS:-}" = 1 ]; then
+              echo "--- size ratchet"; CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test size_ratchet -- --nocapture > /tmp/out/$tag-size.txt 2>&1; grep -E "REGRESSION|NEW fixture|moved|B, pinned|test result|improv|shrank|smaller|larger" /tmp/out/$tag-size.txt | head -150
+              echo "--- alloc ledger"; CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test alloc_ledger -- --nocapture > /tmp/out/$tag-alloc.txt 2>&1; grep -E "REGRESSION|moved|test result|float_parse|json" /tmp/out/$tag-alloc.txt | head -60
+              echo "--- stdlib inspection"; CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test stdlib_inspection_test -- --nocapture > /tmp/out/$tag-inspection.txt 2>&1; grep -E 're-inspect|ceiling|uninspected|test result|float_parse|stale|FAIL' /tmp/out/$tag-inspection.txt | head -60
+            fi
+            git checkout -q -- . ; git clean -fdq tests
+            cd "$GITHUB_WORKSPACE"
+          done < /tmp/pw/diff-refs.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: diff
+          path: /tmp/out
+          retention-days: 7
+
+  timing:
+    if: contains(github.event.head_commit.message, '[timing]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - name: Fetch the corpus
+        run: |
+          mkdir -p /tmp/corpus
+          for f in twitter citm_catalog canada; do
+            bash scripts/fetch-pinned.sh "https://raw.githubusercontent.com/miloyip/nativejson-benchmark/478d5727c2a4048e835a29c65adecc7d795360d5/data/$f.json" /tmp/corpus/$f.json
+          done
+      - name: Build every ref's compiler and the corpus program
+        run: |
+          set -uo pipefail
+          cp -r .github/probe-w5 /tmp/pw
+          mkdir -p /tmp/t/bin
+          tags=""
+          while read -r tag sha; do
+            [ -z "$tag" ] && continue
+            git worktree add -f /tmp/src-$tag "$sha" >/dev/null 2>&1
+            (cd /tmp/src-$tag && git log --oneline -1 && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide 2>&1 | tail -1)
+            cp target/release/almide /tmp/t/bin/almide-$tag
+            /tmp/t/bin/almide-$tag build research/benchmark/perf/json-world/corpus/corpus.almd -o /tmp/t/bin/c-$tag --release > /tmp/t/build-$tag.log 2>&1 || echo "BUILD-FAILED native $tag"
+            /tmp/t/bin/almide-$tag build research/benchmark/perf/json-world/corpus/corpus.almd --target wasm -o /tmp/t/bin/c-$tag.wasm > /tmp/t/build-$tag-wasm.log 2>&1 || echo "BUILD-FAILED wasm $tag"
+            echo "size corpus wasm $tag $(stat -c %s /tmp/t/bin/c-$tag.wasm)"
+            wasmtime compile /tmp/t/bin/c-$tag.wasm -o /tmp/t/bin/c-$tag.cwasm
+            tags="$tags $tag"
+          done < /tmp/pw/refs.txt
+          echo "$tags" > /tmp/t/tags.txt
+      - name: Time (alternating)
+        run: python3 /tmp/pw/timing.py /tmp/t /tmp/corpus "$ROUNDS" $(cat /tmp/t/tags.txt)
