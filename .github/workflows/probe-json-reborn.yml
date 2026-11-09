@@ -10,7 +10,7 @@ env:
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
   HEAD_REF: ${{ github.ref_name == 'probe/json-negctl' && 'origin/json-reborn-negctl' || 'origin/json-reborn' }}
-  BASE_REF: 5bf353a2ddb0571e79d5398c687eb626b38f70df
+  BASE_REF: 6a633ef11a6fd62695e92c8118bf7cba0f558bff
   ROUNDS: "15"
 jobs:
   quick:
@@ -352,4 +352,38 @@ jobs:
         with:
           name: fuzz
           path: /tmp/fz
+          retention-days: 7
+
+  fp:
+    if: contains(github.event.head_commit.message, '[fp]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Fingerprint every ledger row on base and head
+        run: |
+          set -eux
+          mkdir -p /tmp/fp
+          for v in base head; do
+            ref=$BASE_REF; [ $v = head ] && ref=$HEAD_REF
+            git worktree add /tmp/fp-$v "$ref"
+            cp .github/probe/zz_fp_dump.rs /tmp/fp-$v/tests/
+            (cd /tmp/fp-$v && FP_OUT=/tmp/fp/$v.txt CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test zz_fp_dump zz_dump_fingerprints 2>&1 | tail -3)
+          done
+          diff /tmp/fp/base.txt /tmp/fp/head.txt | tee /tmp/fp/diff.txt || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: fp
+          path: /tmp/fp/*.txt
           retention-days: 7
