@@ -360,7 +360,14 @@ impl Split<'_> {
             let tv = IrExpr { kind: IrExprKind::Var { id: t }, ty: ty.clone(), span: None, def_id: None };
             binds.push(IrStmt { span: None, kind: IrStmtKind::Bind { var: t, mutability: Mutability::Var, ty, value: read } });
             backs.push(IrStmt { span: None, kind: IrStmtKind::Assign { var: g, value: tv.clone() } });
-            body = body.iter().map(|s| almide_ir::substitute::substitute_var_in_stmt(s, g, &tv)).collect();
+            body = body.iter().map(|s| {
+                let mut s = almide_ir::substitute::substitute_var_in_stmt(s, g, &tv);
+                // A field write's target is a var, not an expression.
+                if let IrStmtKind::FieldAssign { target, .. } = &mut s.kind {
+                    if *target == g { *target = t; }
+                }
+                s
+            }).collect();
         }
         binds.into_iter().chain(body).chain(backs).collect()
     }
