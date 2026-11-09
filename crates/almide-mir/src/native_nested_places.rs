@@ -112,7 +112,9 @@ fn rebuild(local: VarId, rest: &[Sym], e: &IrExpr) -> IrExpr {
 }
 
 /// An operand a mutable global's write may evaluate while the global is taken
-/// out of its slot: no call, closure or early exit can observe the slot.
+/// out of its slot: no call, closure or early exit can observe the slot. A
+/// stdlib call is one: the stdlib cannot name a program's globals, and its
+/// arguments here carry no callback that could.
 fn slot_free(e: &IrExpr) -> bool {
     struct P(bool);
     impl almide_ir::visit::IrVisitor for P {
@@ -121,7 +123,9 @@ fn slot_free(e: &IrExpr) -> bool {
             if !matches!(e.kind, K::LitInt { .. } | K::LitFloat { .. } | K::LitStr { .. } | K::LitBool { .. }
                 | K::Unit | K::Var { .. } | K::Range { .. } | K::BinOp { .. } | K::UnOp { .. } | K::List { .. } | K::Record { .. }
                 | K::SpreadRecord { .. } | K::Tuple { .. } | K::Member { .. } | K::TupleIndex { .. }
-                | K::StringInterp { .. } | K::OptionSome { .. } | K::OptionNone | K::ResultOk { .. } | K::ResultErr { .. }) {
+                | K::StringInterp { .. } | K::OptionSome { .. } | K::OptionNone | K::ResultOk { .. } | K::ResultErr { .. })
+                && !matches!(&e.kind, K::Call { target: CallTarget::Module { module, .. }, .. }
+                    if almide_lang::stdlib_info::is_stdlib_module(module.as_str())) {
                 self.0 = false;
             }
             almide_ir::visit::walk_expr(self, e);
