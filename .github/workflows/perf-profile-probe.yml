@@ -1,0 +1,55 @@
+name: Perf profile probe
+
+on:
+  push:
+    branches: ['probe/map-4585-prof']
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.97.0"
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install valgrind
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
+      - name: Build
+        run: cargo build --release --bin almide && cargo build --release -p almide-mir --example probe_native
+      - name: Profile
+        env:
+          PROGRAMS: spec/wasm_cross/map_set_in_place.almd spec/wasm_cross/map_set_index_threshold.almd spec/wasm_cross/closure_captured_map_records.almd spec/wasm_cross/list_pop_map_insert_on_record_field.almd
+        run: |
+          mkdir -p prof
+          for f in $PROGRAMS; do
+            n=$(basename "$f" .almd)
+            target/release/almide build "$f" -o prof/$n.v1 >/dev/null 2>&1 || echo "v1 build failed $f"
+            ALMIDE_NO_VERIFIED_OK=1 target/release/almide build "$f" --no-verified -o prof/$n.v0 >/dev/null 2>&1 || echo "v0 build failed $f"
+            target/release/examples/probe_native "$f" > prof/$n.v1.rs 2>&1 || true
+            for v in v1 v0; do
+              valgrind --tool=callgrind --fair-sched=yes --callgrind-out-file=prof/$n.$v.cg prof/$n.$v </dev/null >/dev/null 2>&1
+              echo "===== $n $v"
+              callgrind_annotate --inclusive=no --threshold=99 prof/$n.$v.cg 2>/dev/null | head -45
+              echo "----- tree $n $v"
+              callgrind_annotate --tree=caller --threshold=99 prof/$n.$v.cg 2>/dev/null | grep -E -B1 -A12 "\* .*(memset|drop_glue|deallocate|memcpy|almide_out::main|__almide_main|insert)" | head -220
+            done
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: prof
+          path: |
+            prof/*.rs
+            prof/*.cg
