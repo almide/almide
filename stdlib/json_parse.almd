@@ -82,7 +82,7 @@ fn __json_depth_error() -> String = "json: nesting deeper than 1000"
 fn json_parse(text: String) -> Result[Value, String] = {
   let tl = prim.load32(prim.handle(text) + 4)
   if tl > 1000000000 then prim.die(prim.handle("Error: json parse: text too long\n")) else ()
-  let sn = 64 + 3 * tl
+  let sn = 64 + tl * 3
   let sc = prim.alloc_bytes(sn)
   let s = prim.handle(sc) + 12
   prim.store64(s, 0)
@@ -457,7 +457,7 @@ fn __jp_array1(t: String, tl: Int, p0: Int, depth: Int, sc: Bytes, sn: Int) -> I
   }
   if p < 0 then p
   else {
-    __jp_count_value(sc, sn, 12 + __jp_cap(4 * k))
+    __jp_count_value(sc, sn, 12 + __jp_cap(k * 4))
     p - tl - 1
   }
 }
@@ -575,7 +575,7 @@ fn __jp_object1(t: String, tl: Int, p0: Int, depth: Int, sc: Bytes, sn: Int) -> 
   if d >= 0 and (p >= 0 or d < __jp_code_pos(p)) then __jp_code(d, 11)
   else if p < 0 then p
   else {
-    __jp_set_word(sc, sn, 0, __jp_word(sc, sn, 0) + 28 + 12 + __jp_cap(4 * k) + 20 * k)
+    __jp_set_word(sc, sn, 0, __jp_word(sc, sn, 0) + 28 + 12 + __jp_cap(k * 4) + k * 20)
     __jp_set_word(sc, sn, 8, __jp_word(sc, sn, 8) + 1 + k)
     p - tl - 1
   }
@@ -593,13 +593,13 @@ fn __jp_dups(t: String, tl: Int, sc: Bytes, sn: Int, from: Int, to: Int) -> Int 
   if n < 0 or n > 268435456 then 0 - 1
   else {
     let m = __jp_pow2(n * 2, 32)
-    let tn = 4 * m + 8 * n
+    let tn = m * 4 + n * 8
     if tn < 0 or tn > 2147483647 then prim.die(prim.handle("Error: json parse: key index too large\n")) else ()
     let tb = prim.alloc_bytes(tn)
     let _z = __jp_zero(tb, tn, 0)
     let d = __jp_hash_all(t, tl, sc, sn, tb, tn, m, from, to)
     if d != 0 - 2 then d
-    else __jp_sort_dups(t, tl, sc, sn, tb, tn, 4 * m, n, from)
+    else __jp_sort_dups(t, tl, sc, sn, tb, tn, m * 4, n, from)
   }
 }
 
@@ -629,11 +629,11 @@ else {
 
 // Probe for slot k's key from table index i (c steps taken): -1 once it is
 // inserted, its offset when an equal key is there, -2 past the chain bound.
-fn __jp_probe(t: String, tl: Int, sc: Bytes, sn: Int, tb: Bytes, tn: Int, m: Int, k: Int, i: Int, c: Int) -> Int = if c > 8 or i < 0 or 4 * i + 4 > tn then 0 - 2
+fn __jp_probe(t: String, tl: Int, sc: Bytes, sn: Int, tb: Bytes, tn: Int, m: Int, k: Int, i: Int, c: Int) -> Int = if c > 8 or i < 0 or i * 4 + 4 > tn then 0 - 2
 else {
-  let u = prim.load32(prim.handle(tb) + 12 + 4 * i)
+  let u = prim.load32(prim.handle(tb) + 12 + i * 4)
   if u == 0 then {
-    prim.store32(prim.handle(tb) + 12 + 4 * i, k)
+    prim.store32(prim.handle(tb) + 12 + i * 4, k)
     0 - 1
   } else if __jp_key_eq(t, tl, sc, sn, u, k) then __jp_span_open(sc, sn, k)
   else __jp_probe(t, tl, sc, sn, tb, tn, m, k, prim.band(i + 1, m - 1), c + 1)
@@ -645,12 +645,12 @@ else {
 // key after the first is a repeat, and the earliest such is the answer.
 fn __jp_sort_dups(t: String, tl: Int, sc: Bytes, sn: Int, tb: Bytes, tn: Int, w: Int, n: Int, from: Int) -> Int = {
   let _f = __jp_fill_idx(tb, tn, w, n, from, 0)
-  let a = __jp_msort(t, tl, sc, sn, tb, tn, w, w + 4 * n, 4 * n, 4)
-  __jp_runs(t, tl, sc, sn, tb, tn, a, 4 * n, 4, 0 - 1)
+  let a = __jp_msort(t, tl, sc, sn, tb, tn, w, w + n * 4, n * 4, 4)
+  __jp_runs(t, tl, sc, sn, tb, tn, a, n * 4, 4, 0 - 1)
 }
 
-fn __jp_fill_idx(tb: Bytes, tn: Int, w: Int, n: Int, from: Int, i: Int) -> Int = if i >= 0 and i < n and w >= 0 and w + 4 * i + 4 <= tn then {
-  prim.store32(prim.handle(tb) + 12 + w + 4 * i, from + 8 * i)
+fn __jp_fill_idx(tb: Bytes, tn: Int, w: Int, n: Int, from: Int, i: Int) -> Int = if i >= 0 and i < n and w >= 0 and w + i * 4 + 4 <= tn then {
+  prim.store32(prim.handle(tb) + 12 + w + i * 4, from + i * 8)
   __jp_fill_idx(tb, tn, w, n, from, i + 1)
 } else 0
 
@@ -675,7 +675,7 @@ else {
 fn __jp_merge_pass(t: String, tl: Int, sc: Bytes, sn: Int, tb: Bytes, tn: Int, a: Int, b: Int, an: Int, wd: Int, lo: Int) -> Int = if lo >= an then 0
 else {
   let mid = if lo + wd < an then lo + wd else an
-  let hi = if lo + 2 * wd < an then lo + 2 * wd else an
+  let hi = if lo + wd * 2 < an then lo + wd * 2 else an
   let _m = __jp_merge(t, tl, sc, sn, tb, tn, a, b, lo, mid, mid, hi, lo)
   __jp_merge_pass(t, tl, sc, sn, tb, tn, a, b, an, wd, hi)
 }
@@ -766,16 +766,16 @@ fn __jp_pair(fam: Bytes, fl: Int, sc: Bytes, sn: Int, kh: Int, vh: Int) -> Int =
 // A list block of the top `k` handles (popped), in stack order.
 fn __jp_list(fam: Bytes, fl: Int, sc: Bytes, sn: Int, k: Int) -> Int = {
   let cur = __jp_word(sc, sn, 0)
-  let size = 12 + __jp_cap(4 * k)
+  let size = 12 + __jp_cap(k * 4)
   let top = __jp_word(sc, sn, 8)
-  if k >= 0 and cur >= 0 and cur + size <= fl and top - 4 * k >= 32 and top <= sn then {
+  if k >= 0 and cur >= 0 and cur + size <= fl and top - k * 4 >= 32 and top <= sn then {
     let b = prim.handle(fam) + 12 + cur
     prim.store32(b, 2147483660 + cur)
-    prim.store32(b + 4, 4 * k)
+    prim.store32(b + 4, k * 4)
     prim.store32(b + 8, size - 12)
-    let _c = __jp_copy_sf(sc, sn, top - 4 * k, fam, fl, cur + 12, 4 * k, 0)
+    let _c = __jp_copy_sf(sc, sn, top - k * 4, fam, fl, cur + 12, k * 4, 0)
     __jp_set_word(sc, sn, 0, cur + size)
-    __jp_set_word(sc, sn, 8, top - 4 * k)
+    __jp_set_word(sc, sn, 8, top - k * 4)
     b
   } else {
     __jp_full()

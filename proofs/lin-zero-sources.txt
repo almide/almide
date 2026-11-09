@@ -1,0 +1,8 @@
+# Self-host sources whose bodies carry NO counted prim site (#4005 A4 route A,
+# ADR-0033 D7): wherever a body of a listed file is linked into a wall
+# artifact, almide-lin-prove certifies it — every `prim.load*` / `prim.store*`
+# of the file is in the linear-certified class. proofs/structural-wall.sh
+# fails on any `uncertified` body of a listed file, and when no wall
+# artifact links a listed file at all (the gate would hold vacuously).
+# GROW-ONLY: a file enters once its counted sites reach 0 and never leaves.
+stdlib/json_parse.almd

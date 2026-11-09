@@ -35,17 +35,17 @@ effect fn main() -> Unit = {
   }
   // Deep: 1000 containers parse, 1001 do not.
   let deep = string.repeat("[", 1000) + string.repeat("]", 1000)
-  println(string.len(json.stringify(json.parse(deep) ?? value.null())))
+  println("${string.len(json.stringify(json.parse(deep) ?? value.null()))}")
   println(s(string.repeat("[", 1001) + string.repeat("]", 1001)))
   let deep_obj = string.repeat("{\"a\":", 500) + "1" + string.repeat("}", 500)
-  println(string.len(json.stringify(json.parse(deep_obj) ?? value.null())))
+  println("${string.len(json.stringify(json.parse(deep_obj) ?? value.null()))}")
   // Wide: a long array, a wide object, a wide object of wide arrays.
   let long = "[" + (list.range(0, 5000) |> list.map((i) => int.to_string(i)) |> list.join(",")) + "]"
-  println(string.len(json.stringify(json.parse(long) ?? value.null())))
+  println("${string.len(json.stringify(json.parse(long) ?? value.null()))}")
   let wide = obj(keys(300))
-  println(string.len(json.stringify(json.parse(wide) ?? value.null())))
+  println("${string.len(json.stringify(json.parse(wide) ?? value.null()))}")
   let grid = obj(list.range(0, 40) |> list.map((i) => "\"r${i}\":" + "[" + (list.range(0, 40) |> list.map((j) => int.to_string(i * j)) |> list.join(",")) + "]"))
-  println(string.len(json.stringify(json.parse(grid) ?? value.null())))
+  println("${string.len(json.stringify(json.parse(grid) ?? value.null()))}")
   // Escapes in strings and keys, at every UTF-8 width.
   println(s(q("a\\nb\\t\\\"\\\\\\/\\b\\f\\r")))
   println(s("{" + q("k\\u00e9\\u65e5\\ud83d\\ude00") + ":" + q("\\u0041\\u0000z") + "}"))

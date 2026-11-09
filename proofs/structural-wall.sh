@@ -318,6 +318,44 @@ print(f"  [anchors] FIELDS OK on every artifact: {ftot['f_sites']} site(s) / {ft
       f"({ftot['f_guarded']} variant case field(s) held to their tag test), {ftot['f_tags']} tag read(s); unlocated (dead bodies): {ftot['f_unlocated']}")
 PYEOF
 
+# #4005 A4 / ADR-0033 D7: the sources proofs/lin-zero-sources.txt lists
+# (grow-only) carry no counted prim site — every body of theirs a wall
+# artifact links is in the linear certificate. A body is named by the fns its
+# source defines (`fn <name>`), read from the source itself.
+echo "== zero counted prim sites in the sources proofs/lin-zero-sources.txt lists =="
+python3 - "$OUT" "$ROOT" "$(ci_slice_active && echo slice || echo full)" <<'PYEOF'
+import os, re, sys
+out, root, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+srcs = [l.strip() for l in open(os.path.join(root, "proofs/lin-zero-sources.txt")) if l.strip() and not l.startswith("#")]
+fails = []
+for src in srcs:
+    names = set(re.findall(r"^fn ([A-Za-z0-9_]+)", open(os.path.join(root, src)).read(), re.M))
+    cert = unc = 0
+    for f in sorted(os.listdir(out)):
+        if not f.endswith(".lprove"):
+            continue
+        for line in open(os.path.join(out, f)):
+            row = line.rstrip("\n").split("\t")
+            if len(row) < 4 or row[0] not in ("certified", "uncertified"):
+                continue
+            base = re.sub(r"^__selfhost_\d+\.", "", row[2])
+            if base not in names:
+                continue
+            if row[0] == "certified":
+                cert += 1
+            else:
+                unc += 1
+                fails.append(f"{src}: {base} ({row[3]} site(s)) uncertified in artifact {f[:-7]}: {row[4] if len(row) > 4 else ''}")
+    print(f"  {src}: {cert} certified body link(s), {unc} uncertified")
+    if cert == 0 and mode == "full":
+        fails.append(f"{src}: no wall artifact links a body of it — the zero-counted gate would hold vacuously")
+if fails:
+    print("STRUCTURAL WALL FAIL: a body of a zero-counted source is not in the linear certificate:", file=sys.stderr)
+    for x in fails[:40]:
+        print("  " + x, file=sys.stderr)
+    sys.exit(1)
+PYEOF
+
 echo "== drill: one byte of a shipped artifact changed — the verifier must reject =="
 mkdir -p "$OUT/tamper"
 sed 's|^artifact sha256 \([0-9a-f]*\) .*|artifact sha256 \1 app.wasm|' "$OUT/1.bundle" > "$OUT/tamper/1.bundle"
