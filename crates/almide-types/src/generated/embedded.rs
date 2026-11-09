@@ -6653,6 +6653,7 @@ pub const SRC_FLOAT_PARSE: &str = r#"
 
 
 
+
 fn __fp_isdigit(b: Int) -> Bool = b >= 48 and b <= 57
 
 
@@ -6702,6 +6703,61 @@ fn __fp_pow10_acc(k: Int, acc: Float) -> Float = if k <= 0 then acc else __fp_po
 fn __fp_pow10(k: Int) -> Float = {
   let kk = if k > 400 then 400 else k
   __fp_pow10_acc(kk, 1.0)
+}
+
+
+
+
+
+
+
+
+fn __fp_pow5(n: Int, acc: Int) -> Int = if n <= 0 then acc else __fp_pow5(n - 1, acc * 5)
+
+
+fn __fp_lg(x: Int) -> Int = prim.bshr_u(prim.fbits(prim.i2f(x)), 52) - 1023
+
+
+
+
+fn __fp_ldiv(q: Int, r: Int, d: Int, s: Int, k: Int) -> Int = if s <= 0 then {
+  let sticky = if r != 0 then 1 else 0
+  q * 2 + sticky
+} else {
+  let t = if s < k then s else k
+  let num = prim.bshl(r, t)
+  __fp_ldiv(prim.bshl(q, t) + num / d, num % d, d, s - t, k)
+}
+
+
+fn __fp_bl(x: Int, b: Int) -> Int = if prim.bshr_u(x, b) == 0 then b else __fp_bl(x, b + 1)
+
+fn __fp_div(w: Int, n: Int, neg: Bool) -> Float = if w == 0 then (if neg then -1.0 * 0.0 else 0.0)
+else {
+  let d = __fp_pow5(n, 1)
+  let ed = __fp_lg(d)
+
+  let s = 58 - (__fp_lg(w) - ed)
+  let qs = if s >= 0 then __fp_ldiv(w / d, w % d, d, s, 61 - ed)
+  else {
+    let q0 = w / d
+    let lost = prim.band(q0, prim.bshl(1, 0 - s) - 1)
+    let sticky = if w % d != 0 or lost != 0 then 1 else 0
+    prim.bshr_u(q0, 0 - s) * 2 + sticky
+  }
+  let q = prim.bshr_u(qs, 1)
+  let sh = __fp_bl(q, 54) - 54
+  let m54 = prim.bshr_u(q, sh)
+  let st = prim.band(qs, 1) == 1 or prim.band(q, prim.bshl(1, sh) - 1) != 0
+  let m = prim.bshr_u(m54, 1)
+  let up = prim.band(m54, 1) == 1 and (st or prim.band(m, 1) == 1)
+  let m1 = if up then m + 1 else m
+
+  let carry = if m1 == 9007199254740992 then 1 else 0
+  let m2 = if m1 == 9007199254740992 then 4503599627370496 else m1
+  let e = sh + 1 - s - n + carry
+  let v = prim.ffrombits(m2 - 4503599627370496 + prim.bshl(e + 1075, 52))
+  if neg then -1.0 * v else v
 }
 
 
@@ -7009,6 +7065,9 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
 
       let v = if neg then -1.0 * scaled else scaled
       ok(v)
+    } else if icnt + fcnt <= 18 and net <= 0 and net >= 0 - 22 then {
+
+      ok(__fp_div(__fp_acc(f_start, f_end, __fp_acc(p0, i_end, 0)), 0 - net, neg))
     } else {
 
       let v = __fp_slow(p0, i_end, f_start, f_end, exp, neg)

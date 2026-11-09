@@ -4,6 +4,7 @@
 // v0 is `s.trim().parse::<f64>()`. FULL IEEE-754 correctly-rounded strtod, two-tier like Rust:
 //  - FAST PATH: <= 15 digits and |net-exp| <= 22 — the mantissa is exact in f64 and 10^k is an
 //    exact f64, so one multiply/divide is correctly rounded (Clinger's safe region).
+//  - EXACT DIVISION PATH: <= 18 digits over 10^0..10^22 — integer long division (__fp_div).
 //  - SLOW PATH: everything else goes through an 800-digit HIGH-PRECISION DECIMAL (the
 //    Simple Decimal Conversion of go's strconv / Nigel Tao): the digit array is shifted by
 //    up to 59 bits right / 26 bits left per pass into [0.5, 1) × 2^e, denormals clamp the
@@ -63,6 +64,61 @@ fn __fp_pow10_acc(k: Int, acc: Float) -> Float = if k <= 0 then acc else __fp_po
 fn __fp_pow10(k: Int) -> Float = {
   let kk = if k > 400 then 400 else k
   __fp_pow10_acc(kk, 1.0)
+}
+
+// ── Exact division path ─────────────────────────────────────────────────────
+// w / 10^n for 0 < w < 10^18 and 0 <= n <= 22, correctly rounded with integer
+// arithmetic only: w / 10^n = (w / 5^n) * 2^-n, 5^n < 2^52 is exact, and the
+// quotient w * 2^s / 5^n is long-divided k bits per step to 55..61 significant
+// bits plus a sticky remainder bit, then rounded half-even to 53. No table and
+// no ambiguous case: every result is exact. The value lies in [10^-22, 10^18],
+// far from the denormal and overflow ranges.
+fn __fp_pow5(n: Int, acc: Int) -> Int = if n <= 0 then acc else __fp_pow5(n - 1, acc * 5)
+
+// floor(log2 x) for x > 0 as its f64 conversion reads it (the rounding may add one).
+fn __fp_lg(x: Int) -> Int = prim.bshr_u(prim.fbits(prim.i2f(x)), 52) - 1023
+
+// Long division: shifts s more quotient bits of (q * d + r) * 2^s / d into q, k per
+// step (r < d < 2^(62-k) keeps r * 2^k in range); returns q * 2 + 1 when the
+// final remainder is nonzero, q * 2 when it is zero.
+fn __fp_ldiv(q: Int, r: Int, d: Int, s: Int, k: Int) -> Int = if s <= 0 then {
+  let sticky = if r != 0 then 1 else 0
+  q * 2 + sticky
+} else {
+  let t = if s < k then s else k
+  let num = prim.bshl(r, t)
+  __fp_ldiv(prim.bshl(q, t) + num / d, num % d, d, s - t, k)
+}
+
+// The bit length of x, searching upward from b (x >= 2^(b-1)).
+fn __fp_bl(x: Int, b: Int) -> Int = if prim.bshr_u(x, b) == 0 then b else __fp_bl(x, b + 1)
+
+fn __fp_div(w: Int, n: Int, neg: Bool) -> Float = if w == 0 then (if neg then -1.0 * 0.0 else 0.0)
+else {
+  let d = __fp_pow5(n, 1)
+  let ed = __fp_lg(d)
+  // s puts floor(log2(w * 2^s / d)) in 56..60.
+  let s = 58 - (__fp_lg(w) - ed)
+  let qs = if s >= 0 then __fp_ldiv(w / d, w % d, d, s, 61 - ed)
+  else {
+    let q0 = w / d
+    let lost = prim.band(q0, prim.bshl(1, 0 - s) - 1)
+    let sticky = if w % d != 0 or lost != 0 then 1 else 0
+    prim.bshr_u(q0, 0 - s) * 2 + sticky
+  }
+  let q = prim.bshr_u(qs, 1)
+  let sh = __fp_bl(q, 54) - 54
+  let m54 = prim.bshr_u(q, sh)
+  let st = prim.band(qs, 1) == 1 or prim.band(q, prim.bshl(1, sh) - 1) != 0
+  let m = prim.bshr_u(m54, 1)
+  let up = prim.band(m54, 1) == 1 and (st or prim.band(m, 1) == 1)
+  let m1 = if up then m + 1 else m
+  // a carry to 2^53 is 2^52 one binade up
+  let carry = if m1 == 9007199254740992 then 1 else 0
+  let m2 = if m1 == 9007199254740992 then 4503599627370496 else m1
+  let e = sh + 1 - s - n + carry
+  let v = prim.ffrombits(m2 - 4503599627370496 + prim.bshl(e + 1075, 52))
+  if neg then -1.0 * v else v
 }
 
 // ── HPD: high-precision decimal (slow path) ─────────────────────────────────
@@ -370,6 +426,9 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
       // ("-0.0" parsed sign-less, #663). Multiply by -1.0 instead: -1.0 * 0.0 = -0.0.
       let v = if neg then -1.0 * scaled else scaled
       ok(v)
+    } else if icnt + fcnt <= 18 and net <= 0 and net >= 0 - 22 then {
+      // EXACT DIVISION PATH: up to 18 digits over 10^0..10^22 (the coordinate shape).
+      ok(__fp_div(__fp_acc(f_start, f_end, __fp_acc(p0, i_end, 0)), 0 - net, neg))
     } else {
       // Only the slow path can overflow (the fast path tops out near 1e37).
       let v = __fp_slow(p0, i_end, f_start, f_end, exp, neg)
