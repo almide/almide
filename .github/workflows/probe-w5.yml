@@ -75,6 +75,7 @@ jobs:
           tar -xf /tmp/wasmtime.tar.xz -C /tmp
           sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
       - name: Differential corpus, fixtures, ledgers on every diff ref
+        shell: bash {0}
         run: |
           set -uo pipefail
           cp -r .github/probe-w5 /tmp/pw
@@ -92,7 +93,7 @@ jobs:
             cp /tmp/fp-before.almd stdlib/float_parse.almd
             echo "--- differential test"
             cp /tmp/pw/float_parse_cross_target_test.rs tests/float_parse_cross_target_test.rs
-            ALMIDE_BIN="$A" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test float_parse_cross_target_test > /tmp/out/$tag-difftest.txt 2>&1
+            ALMIDE_BIN="$A" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test float_parse_cross_target_test > /tmp/out/$tag-difftest.txt 2>&1 || true
             grep -E "^test |panicked|float.parse\(|test result|mismatch|failed" /tmp/out/$tag-difftest.txt | cut -c1-600
             echo "VERDICT-DIFF $tag: $(grep -E '^test result' /tmp/out/$tag-difftest.txt | tail -1)"
             echo "--- wasm_cross fixtures touching float/json parse: native vs wasm"
@@ -105,9 +106,9 @@ jobs:
             done
             echo "VERDICT-FIXTURES $tag: $fail of $n diverge"
             if [ "$tag" = "w5" ] || [ "$tag" = "fast" ]; then
-              echo "--- size ratchet"; CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test size_ratchet -- --nocapture > /tmp/out/$tag-size.txt 2>&1; grep -E "REGRESSION|NEW fixture|moved|B, pinned|test result|improv|shrank|smaller|larger" /tmp/out/$tag-size.txt | head -150
-              echo "--- alloc ledger"; CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test alloc_ledger -- --nocapture > /tmp/out/$tag-alloc.txt 2>&1; grep -E "REGRESSION|moved|test result|float_parse|json" /tmp/out/$tag-alloc.txt | head -60
-              echo "--- stdlib inspection"; CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test stdlib_inspection_test -- --nocapture > /tmp/out/$tag-inspection.txt 2>&1; grep -E 're-inspect|ceiling|uninspected|test result|float_parse|stale|FAIL' /tmp/out/$tag-inspection.txt | head -60
+              echo "--- size ratchet"; CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test size_ratchet -- --nocapture > /tmp/out/$tag-size.txt 2>&1 || true; grep -E "REGRESSION|NEW fixture|moved|B, pinned|test result|improv|shrank|smaller|larger" /tmp/out/$tag-size.txt | head -150
+              echo "--- alloc ledger"; CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test alloc_ledger -- --nocapture > /tmp/out/$tag-alloc.txt 2>&1 || true; grep -E "REGRESSION|moved|test result|float_parse|json" /tmp/out/$tag-alloc.txt | head -60
+              echo "--- stdlib inspection"; CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test stdlib_inspection_test -- --nocapture > /tmp/out/$tag-inspection.txt 2>&1 || true; grep -E 're-inspect|ceiling|uninspected|test result|float_parse|stale|FAIL' /tmp/out/$tag-inspection.txt | head -60
             fi
             git checkout -q -- . ; git clean -fdq tests
             cd "$GITHUB_WORKSPACE"
@@ -168,3 +169,41 @@ jobs:
           echo "$tags" > /tmp/t/tags.txt
       - name: Time (alternating)
         run: python3 /tmp/pw/timing.py /tmp/t /tmp/corpus "$ROUNDS" $(cat /tmp/t/tags.txt)
+
+  ledgers:
+    if: contains(github.event.head_commit.message, '[ledgers]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Regenerate the size and alloc ledgers on every ref (throwaway)
+        shell: bash {0}
+        run: |
+          cp -r .github/probe-w5 /tmp/pw
+          while read -r tag sha; do
+            [ -z "$tag" ] && continue
+            git worktree add -f /tmp/l-$tag "$sha" >/dev/null 2>&1
+            cd /tmp/l-$tag && echo "=== $tag $(git log --oneline -1)"
+            mkdir -p /tmp/led/$tag
+            ALMIDE_UPDATE_SIZES=1 CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -3
+            ALMIDE_UPDATE_ALLOC=1 CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test alloc_ledger 2>&1 | tail -3
+            cp crates/almide-wasm/tests/golden/size-baseline*.txt crates/almide-wasm/tests/golden/alloc-*baseline.txt crates/almide-wasm/tests/golden/live-at-exit-baseline.txt /tmp/led/$tag/ 2>/dev/null
+            git diff --stat | tail -3
+            cd "$GITHUB_WORKSPACE"
+          done < /tmp/pw/refs.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ledgers
+          path: /tmp/led
+          retention-days: 7
