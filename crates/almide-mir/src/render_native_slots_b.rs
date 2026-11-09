@@ -66,6 +66,9 @@ pub(super) fn movable_loads(
             _ => None,
         })
         .collect();
+    // The ops whose text the render writes later than their place: a chain's
+    // steps (at its final) and a printed scalar's definition (at its print).
+    let deferred = deferred_ops(func);
     // The open loops' starts, and where each value is defined.
     let mut loops: Vec<usize> = Vec::new();
     let mut def_at: BTreeMap<ValueId, usize> = BTreeMap::new();
@@ -155,7 +158,7 @@ pub(super) fn movable_loads(
             if !other_slot && !rebound {
                 last.insert(*d);
             }
-            if first_read {
+            if first_live(first_read, func, &deferred, i, &earlier) {
                 first.insert(*d);
             }
         }
@@ -167,6 +170,46 @@ pub(super) fn movable_loads(
 /// own block (not inside a nested `if` or loop, before the block ends), with
 /// no exit from the loop or the fn on the way: every path from `at` passes
 /// it before anything after it runs.
+/// #4621: the earlier reads of a slot are over by the read at `i` — nothing
+/// at or after `i` reads them or anything that can borrow from them (an
+/// address, a value loaded through one, a copy), and no op reading them is
+/// written later than its place. The read at `i` is then the first live one:
+/// a borrow made before it (`list.len(r.f)` in an `if` condition) no longer
+/// pins the slot, and the read can move the value out.
+fn deferred_ops(func: &MirFunction) -> BTreeSet<usize> {
+    let chains = crate::render_native_interp::chains(func);
+    let (scalar_defs, _) = crate::render_native_interp::printed_scalars(func);
+    chains.skip.iter().chain(chains.finals.keys()).chain(scalar_defs.iter()).copied().collect()
+}
+
+/// The read at `i` is the first live read of its slot: the first since the
+/// block was bound, or one whose earlier reads are over.
+fn first_live(first_read: bool, func: &MirFunction, deferred: &BTreeSet<usize>, i: usize, earlier: &[ValueId]) -> bool {
+    first_read || earlier_reads_dead(func, deferred, i, earlier)
+}
+
+fn earlier_reads_dead(func: &MirFunction, deferred: &BTreeSet<usize>, i: usize, earlier: &[ValueId]) -> bool {
+    let mut derived: BTreeSet<ValueId> = earlier.iter().copied().collect();
+    let mut vs = Vec::new();
+    for (j, op) in func.ops.iter().enumerate() {
+        if crate::render_native_move::bookkeeping(op) {
+            continue;
+        }
+        vs.clear();
+        crate::mir_ops::op_values(op, &mut vs);
+        if !vs.iter().any(|v| derived.contains(v)) {
+            continue;
+        }
+        if j >= i || deferred.contains(&j) {
+            return false;
+        }
+        if matches!(op, Op::Prim { .. } | Op::IntBinOp { .. } | Op::Dup { .. } | Op::SetLocal { .. }) {
+            derived.extend(vs.iter().copied());
+        }
+    }
+    true
+}
+
 pub(super) fn rebound_in_block(func: &MirFunction, at: usize, b: ValueId) -> Option<usize> {
     let mut depth = 0usize;
     for (k, op) in func.ops.iter().enumerate().skip(at + 1) {
