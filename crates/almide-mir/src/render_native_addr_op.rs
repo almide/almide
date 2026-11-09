@@ -588,7 +588,7 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
                 *stored = true;
                 return Ok(true);
             }
-            if k + 1 == n && !crate::native_map_entries::unbuilt(ad.base) {
+            if list_literal::complete(ad.base, (n, k)) {
                 let es: Vec<String> = (0..n).map(|j| format!("{b}_e{j}")).collect();
                 line!("let mut {b}: {} = vec![{}];", owned_ty_of(ty(tys, &ad.base)), es.join(", "));
             }
@@ -621,9 +621,8 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
                 *done = true;
                 return Ok(true);
             }
-            if list_literal::str_elem(st, out, indent, ad.base, &rhs) { return Ok(true); }
             if st.pushed.contains(&ad.base) {
-                line!("{}.push({rhs});", var(ad.base));
+                list_literal::pushed_str(st, out, indent, ad.base, &rhs);
                 return Ok(true);
             }
             let (guard, slot) = bounds_guard(st, &ad, ix);

@@ -19,6 +19,12 @@ pub(super) fn elem_local(out: &mut String, indent: usize, (b, k): (&str, usize),
     put(out, indent, &format!("let {b}_e{k}{ann} = {rhs};"));
 }
 
+/// Slot `k` is the last of the `n` of the generated list `base`, and the
+/// list is built (not a map literal's entries left unbuilt).
+pub(super) fn complete(base: ValueId, (n, k): (usize, usize)) -> bool {
+    k + 1 == n && !crate::native_map_entries::unbuilt(base)
+}
+
 /// After slot `k` of the `n` of the string list `base`: the whole list once
 /// its last element is stored, unless it is a map entry's pair left unbuilt.
 fn built_whole(out: &mut String, indent: usize, base: ValueId, (n, k): (usize, usize), ty: &str) {
@@ -29,14 +35,15 @@ fn built_whole(out: &mut String, indent: usize, base: ValueId, (n, k): (usize, u
     }
 }
 
-/// A string `rhs` stored into the string list `base` built whole; `false`
-/// when `base` is not built whole.
-pub(super) fn str_elem(st: &mut AddrState, out: &mut String, indent: usize, base: ValueId, rhs: &str) -> bool {
-    let Some((n, k)) = st.literal.get(&base).copied() else { return false };
+/// A string `rhs` stored into the string list `base` filled by pushes: into
+/// its element local when it is built whole, else pushed onto it.
+pub(super) fn pushed_str(st: &mut AddrState, out: &mut String, indent: usize, base: ValueId, rhs: &str) {
+    let Some((n, k)) = st.literal.get(&base).copied() else {
+        return put(out, indent, &format!("{}.push({rhs});", var(base)));
+    };
     elem_local(out, indent, (&var(base), k), "AlmideString", rhs, false);
     st.literal.insert(base, (n, k + 1));
     built_whole(out, indent, base, (n, k), "Vec<AlmideString>");
-    true
 }
 
 /// Whether the borrowed slot store of `v` (from `src`) into `base` copies:
