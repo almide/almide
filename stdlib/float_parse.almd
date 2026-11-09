@@ -111,7 +111,7 @@ else {
   let m54 = prim.bshr_u(q, sh)
   let st = prim.band(qs, 1) == 1 or prim.band(q, prim.bshl(1, sh) - 1) != 0
   let m = prim.bshr_u(m54, 1)
-  let up = prim.band(m54, 1) == 1 and (st or prim.band(m, 1) == 1)
+  let up = prim.band(m54, 1) == 1
   let m1 = if up then m + 1 else m
   // a carry to 2^53 is 2^52 one binade up
   let carry = if m1 == 9007199254740992 then 1 else 0
