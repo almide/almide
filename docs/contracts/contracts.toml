@@ -336,6 +336,7 @@ evidence  = [
   { path = "spec/wasm_cross/string_bidi_controls_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_codepoint.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_ops.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_slice_concat_short_unaligned.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-017"
