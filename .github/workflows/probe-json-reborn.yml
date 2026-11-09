@@ -1,0 +1,178 @@
+name: probe-json-reborn (throwaway)
+on:
+  push:
+    branches: [probe/json-reborn]
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  HEAD_REF: origin/json-reborn
+  BASE_REF: 5bf353a2ddb0571e79d5398c687eb626b38f70df
+  ROUNDS: "15"
+jobs:
+  wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-wasip1
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime and binaryen
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+          sudo apt-get install -y -qq binaryen >/dev/null 2>&1 || echo "no binaryen"
+      - name: Build base and head compilers
+        run: |
+          set -euxo pipefail
+          cp -r .github/probe /tmp/probe
+          mkdir -p /tmp/bins
+          for v in base head; do
+            ref=$BASE_REF; [ $v = head ] && ref=$HEAD_REF
+            git worktree add /tmp/src-$v "$ref"
+            (cd /tmp/src-$v && git log --oneline -1 && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
+            cp target/release/almide /tmp/bins/almide-$v
+          done
+      - name: Build Rust indicative
+        run: |
+          set -eux
+          cd /tmp/probe/jsonround_rs && cargo build --release --target wasm32-wasip1 2>&1 | tail -3
+          cp target/wasm32-wasip1/release/jsonround.wasm /tmp/rust-jr.wasm
+      - name: Build programs, sizes, alloc counts
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/perf && cd /tmp/perf
+          bash /tmp/probe/bench/make.sh /tmp/perf
+          for v in base head; do
+            for p in full build str full_small build_small str_small; do
+              /tmp/bins/almide-$v build jr_$p.almd --target wasm -o jr_$p-$v.wasm || echo "BUILD FAIL $p $v"
+              echo "size jr_$p $v $(stat -c %s jr_$p-$v.wasm)"
+            done
+            for p in full build str; do
+              echo "== $v $p"; ALMIDE_WASM_ALLOC_COUNT=1 /tmp/bins/almide-$v run jr_$p.almd --target wasm
+            done
+            wasmtime compile jr_full-$v.wasm -o jr_full-$v.cwasm
+          done
+          wasmtime compile /tmp/rust-jr.wasm -o rust.cwasm
+          wasm-dis --enable-tail-call jr_full_small-head.wasm -o jr_full_small-head.wat 2>/dev/null || true
+          wasm-dis --enable-tail-call jr_full_small-base.wasm -o jr_full_small-base.wat 2>/dev/null || true
+      - name: Instruction counts (profiling interpreter, n=200)
+        run: |
+          set -uo pipefail
+          cd /tmp/perf
+          for v in base head; do
+            for p in build str full; do
+              echo "== wi $v $p"
+              timeout 1200 python3 /tmp/probe/wi.py jr_${p}_small-$v.wasm --top 40 > wi-$p-$v.txt 2>&1 || echo "wi exit $?"
+              head -60 wi-$p-$v.txt
+            done
+          done
+      - name: AOT timing (base vs head vs rust, alternating)
+        run: |
+          set -euo pipefail
+          cd /tmp/perf
+          python3 - <<'EOF'
+          import subprocess, time, statistics, os
+          R = int(os.environ["ROUNDS"])
+          progs = {"base": ["wasmtime","run","--allow-precompiled","jr_full-base.cwasm"],
+                   "head": ["wasmtime","run","--allow-precompiled","jr_full-head.cwasm"],
+                   "rust": ["wasmtime","run","--allow-precompiled","rust.cwasm"]}
+          outs, times = {}, {k: [] for k in progs}
+          for r in range(R + 2):
+              order = list(progs) if r % 2 == 0 else list(reversed(list(progs)))
+              for v in order:
+                  t0 = time.perf_counter()
+                  p = subprocess.run(progs[v], capture_output=True)
+                  dt = (time.perf_counter() - t0) * 1000
+                  assert p.returncode == 0, (v, p.stderr)
+                  outs.setdefault(v, p.stdout); assert outs[v] == p.stdout
+                  if r >= 2: times[v].append(dt)
+          print("outputs:", {k: v.decode().strip() for k, v in outs.items()})
+          print("almide outputs equal:", outs["base"] == outs["head"])
+          for v in times:
+              print(v, "n=%d median %.2f ms" % (len(times[v]), statistics.median(times[v])), sorted("%.1f" % t for t in times[v]))
+          b, h, rs = (statistics.median(times[k]) for k in ("base", "head", "rust"))
+          print("ratio head/base = %.4f   head/rust (indicative) = %.4f   base/rust = %.4f" % (h / b, h / rs, b / rs))
+          EOF
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: perf-wasm
+          path: |
+            /tmp/perf/*.wasm
+            /tmp/perf/*.wat
+            /tmp/perf/wi-*.txt
+            /tmp/perf/*.almd
+          retention-days: 7
+
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Build base and head compilers
+        run: |
+          set -euxo pipefail
+          cp -r .github/probe /tmp/probe
+          mkdir -p /tmp/bins
+          for v in base head; do
+            ref=$BASE_REF; [ $v = head ] && ref=$HEAD_REF
+            git worktree add /tmp/src-$v "$ref"
+            (cd /tmp/src-$v && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
+            cp target/release/almide /tmp/bins/almide-$v
+          done
+      - name: Native builds, route, alloc counts, timing
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/nat && cd /tmp/nat
+          bash /tmp/probe/bench/make.sh /tmp/nat
+          for v in base head; do
+            ALMIDE_VERIFIED_DEBUG=1 /tmp/bins/almide-$v build --release jr_full.almd -o jr-$v 2>&1 | grep -E "native:|walled|reason" | head -5
+            f=$(find "${TMPDIR:-/tmp}" -name almide_gen_main.rs -newer jr_full.almd 2>/dev/null | head -1); [ -n "$f" ] && cp "$f" gen-$v.rs
+            ALMIDE_ALLOC_COUNT=1 /tmp/bins/almide-$v build --release jr_full.almd -o jrc-$v >/dev/null 2>&1
+            echo "== $v alloc"; ./jrc-$v
+          done
+          python3 - <<'EOF'
+          import subprocess, time, statistics, os
+          R = int(os.environ["ROUNDS"])
+          outs, times = {}, {"base": [], "head": []}
+          for r in range(R + 2):
+              for v in (["base", "head"] if r % 2 == 0 else ["head", "base"]):
+                  t0 = time.perf_counter(); p = subprocess.run(["./jr-" + v], capture_output=True); dt = (time.perf_counter() - t0) * 1000
+                  assert p.returncode == 0; outs.setdefault(v, p.stdout); assert outs[v] == p.stdout
+                  if r >= 2: times[v].append(dt)
+          print("outputs equal:", outs["base"] == outs["head"], outs["head"])
+          for v in times: print(v, "median %.2f ms" % statistics.median(times[v]))
+          print("ratio head/base = %.4f" % (statistics.median(times["head"]) / statistics.median(times["base"])))
+          EOF
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: native-gen
+          path: /tmp/nat/gen-*.rs
+          retention-days: 7
