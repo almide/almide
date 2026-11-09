@@ -1209,7 +1209,6 @@ fn __jp_pairs(fam: Bytes, sc: Bytes, k: Int) -> Unit = {
 // PASS 2's walk: one tape entry at a time, in document post-order.
 fn __jp_build(t: String, tl: Int, fam: Bytes, sc: Bytes) -> Unit = {
   let sn = prim.load32(prim.handle(sc) + 4)
-  let fl = prim.load32(prim.handle(fam) + 4)
   if sn < 64 then __jp_disagree()
   else {
     let end = prim.load64(prim.handle(sc) + 20)
@@ -1227,43 +1226,25 @@ fn __jp_build(t: String, tl: Int, fam: Bytes, sc: Bytes) -> Unit = {
         if kind == 2 then __jp_push_at(sc, __jp_str2(t, fam, sc, w))
         else if kind == 9 then __jp_list(fam, sc, prim.bshr(w, 4), 5)
         else if kind == 10 then __jp_pairs(fam, sc, prim.bshr(w, 4))
-        else {
-          // A scalar: its payload first (a string carves its String), then
-          // its Value box, carved and pushed here.
-          let x = if kind == 1 then __jp_str2(t, fam, sc, w)
-          else if kind == 3 then __jp_mantissa(t, prim.bshr(w, 32), prim.bshr(w, 32) + prim.band(prim.bshr(w, 4), 31), 0)
-          else if kind == 4 then 0 - __jp_mantissa(t, prim.bshr(w, 32), prim.bshr(w, 32) + prim.band(prim.bshr(w, 4), 31), 0)
-          else if kind == 6 then 1
-          else if kind == 7 then 0
-          else if kind == 8 then 0
-          else __jp_number2(t, tl, w)
-          let tag = if kind == 1 then 4 else if kind < 5 then 2 else if kind == 5 then 3 else if kind == 8 then 0 else if kind < 9 then 1 else 2
-          let b = prim.carve(fam, 16)
-          let o = b - prim.handle(fam)
-          let top = prim.load64(prim.handle(sc) + 36)
-          if o < 0 then {
-            prim.die(prim.handle("Error: json parse: the passes disagree\n"))
-            at = end
-          } else if o > fl - 16 then {
-            prim.die(prim.handle("Error: json parse: the passes disagree\n"))
-            at = end
-          } else if top < 32 then {
-            prim.die(prim.handle("Error: json parse: the passes disagree\n"))
-            at = end
-          } else if top > sn - 4 then {
-            prim.die(prim.handle("Error: json parse: the passes disagree\n"))
-            at = end
-          } else {
-            prim.store32(prim.handle(fam) + 12 + o, tag)
-            prim.store64(prim.handle(fam) + 20 + o, x)
-            prim.store32(prim.handle(sc) + 12 + top, b)
-            prim.store64(prim.handle(sc) + 36, top + 4)
-          }
-        }
+        else __jp_scalar(t, tl, fam, sc, w, kind)
         at = at + 8
       }
     }
   }
+}
+
+// A scalar's tape entry: its payload (a string carves its String first),
+// then its Value box, carved and pushed.
+fn __jp_scalar(t: String, tl: Int, fam: Bytes, sc: Bytes, w: Int, kind: Int) -> Unit = {
+  let x = if kind == 1 then __jp_str2(t, fam, sc, w)
+  else if kind == 3 then __jp_mantissa(t, prim.bshr(w, 32), prim.bshr(w, 32) + prim.band(prim.bshr(w, 4), 31), 0)
+  else if kind == 4 then 0 - __jp_mantissa(t, prim.bshr(w, 32), prim.bshr(w, 32) + prim.band(prim.bshr(w, 4), 31), 0)
+  else if kind == 6 then 1
+  else if kind == 7 then 0
+  else if kind == 8 then 0
+  else __jp_number2(t, tl, w)
+  let tag = if kind == 1 then 4 else if kind < 5 then 2 else if kind == 5 then 3 else if kind == 8 then 0 else if kind < 9 then 1 else 2
+  __jp_box(fam, sc, tag, x)
 }
 
 // A Float's bits, or an Int past 18 digits, from its tape entry.
