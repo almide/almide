@@ -1,7 +1,7 @@
 name: probe-json-reborn (throwaway)
 on:
   push:
-    branches: [probe/json-reborn]
+    branches: [probe/json-reborn, probe/json-negctl]
   workflow_dispatch:
 permissions:
   contents: read
@@ -9,7 +9,7 @@ env:
   RUST_TOOLCHAIN: "1.97.0"
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
-  HEAD_REF: origin/json-reborn
+  HEAD_REF: ${{ github.ref_name == 'probe/json-negctl' && 'origin/json-reborn-negctl' || 'origin/json-reborn' }}
   BASE_REF: 5bf353a2ddb0571e79d5398c687eb626b38f70df
   ROUNDS: "15"
 jobs:
