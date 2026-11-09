@@ -75,20 +75,11 @@ fn value_omit(v: Value, keys: List[String]) -> Value =
 // the list this returns, so a pair list that repeats a key becomes one entry
 // per key — its first position, its last value — exactly as native's
 // almide_rt_object_upsert and value_core's value_object fold it.
-fn __vu_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool =
-  if i >= n then false
-  else if j >= n then __vu_dup_small(pairs, i + 1, i + 2, n)
-  else if __vu_key_at(pairs, i) == __vu_key_at(pairs, j) then true
-  else __vu_dup_small(pairs, i, j + 1, n)
-
-fn __vu_key_at(pairs: List[(String, Value)], i: Int) -> String = match list.get(pairs, i) {
-  some((k, _)) => k,
-  none => "",
-}
-
 fn __vu_has_dup(pairs: List[(String, Value)]) -> Bool = {
-  let n = list.len(pairs)
-  if n < 16 then __vu_dup_small(pairs, 0, 1, n)
+  // A short list asks of each key whether it occurs twice: the pair list is
+  // only read, so the check costs no allocation (it used to box an Option per
+  // `list.get` probe, two per compared pair, #4613).
+  if list.len(pairs) < 16 then pairs |> list.any(((k, _)) => list.count(pairs, ((j, _)) => j == k) > 1)
   else {
     var seen: Map[String, Int] = map.new()
     var dup = false
