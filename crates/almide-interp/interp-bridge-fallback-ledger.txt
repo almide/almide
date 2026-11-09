@@ -37,15 +37,16 @@ int.bshr  random_bytes  floor: consumed inside a self-hosted body
 int.bxor  bytes_is_equal_constant_time  floor: consumed inside a self-hosted body
 int.parse  datetime_from_parts_strict  floor: consumed inside a self-hosted body
 int.to_string  availability_pure_batch  floor: consumed inside a self-hosted body
+json.parse  bytes_f16_offset_overflow  prim.load_handle of a slot that does not hold a block address
 math.__fpow  matrix_pow_libm  floor: consumed inside a self-hosted body
 math.log  math_log_gamma  floor: consumed inside a self-hosted body
 math.sin  math_log_gamma_negative  floor: consumed inside a self-hosted body
 string.contains  fs_glob_segments  floor: consumed inside a self-hosted body
 string.drop  json_path_edges  floor: consumed inside a self-hosted body
-string.drop_end  json_number_unicode  floor: consumed inside a self-hosted body
+string.drop_end  json_family_shapes  floor: consumed inside a self-hosted body
 string.ends_with  codec_int_float_boundaries  floor: consumed inside a self-hosted body
 string.index_of  datetime_parse_iso_strict  floor: consumed inside a self-hosted body
-string.len  bytes_f16_offset_overflow  floor: consumed inside a self-hosted body
+string.len  codec_decode_error_surface  floor: consumed inside a self-hosted body
 string.lines  fs_composition_family  floor: consumed inside a self-hosted body
 string.repeat  bytes_f16_offset_overflow  floor: consumed inside a self-hosted body
 string.replace  bytes_f16_offset_overflow  floor: consumed inside a self-hosted body

@@ -556,6 +556,7 @@ include!("dispatch_sync.rs");
 include!("dispatch_heap.rs");
 include!("dispatch_body.rs");
 include!("dispatch_vfs.rs");
+include!("dispatch_json.rs");
 
 // ── mut-parameter lvalues (#1022, #3092) ─────────────────────────
 
