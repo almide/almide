@@ -2,14 +2,13 @@
 source: tests/ide_outline_snapshot_test.rs
 expression: "run_outline(&[\"@stdlib/list\"])"
 ---
+fn list.__eq_any[A](a: List[A], b: List[A]) -> Bool
 fn list.__eq_bool(a: List[Bool], b: List[Bool]) -> Bool
 fn list.__eq_float(a: List[Float], b: List[Float]) -> Bool
 fn list.__eq_int(a: List[Int], b: List[Int]) -> Bool
 fn list.__eq_list_float(a: List[List[Float]], b: List[List[Float]]) -> Bool
 fn list.__eq_list_int(a: List[List[Int]], b: List[List[Int]]) -> Bool
-fn list.__eq_list_str(a: List[List[String]], b: List[List[String]]) -> Bool
 fn list.__eq_opt_int(a: List[Option[Int]], b: List[Option[Int]]) -> Bool
-fn list.__eq_opt_str(a: List[Option[String]], b: List[Option[String]]) -> Bool
 fn list.__eq_res_int(a: List[Result[Int, String]], b: List[Result[Int, String]]) -> Bool
 fn list.__eq_str(a: List[String], b: List[String]) -> Bool
 fn list.__fallible_all[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]

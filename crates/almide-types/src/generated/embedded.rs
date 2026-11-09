@@ -14509,20 +14509,22 @@ fn __eq_str(a: List[String], b: List[String]) -> Bool = _
 
 
 
+
+
+
+@intrinsic("almide_rt_list_eq_any")
+fn __eq_any[A](a: List[A], b: List[A]) -> Bool = _
+
+
+
 @intrinsic("almide_rt_list_eq_list_int")
 fn __eq_list_int(a: List[List[Int]], b: List[List[Int]]) -> Bool = _
 
 @intrinsic("almide_rt_list_eq_list_float")
 fn __eq_list_float(a: List[List[Float]], b: List[List[Float]]) -> Bool = _
 
-@intrinsic("almide_rt_list_eq_list_str")
-fn __eq_list_str(a: List[List[String]], b: List[List[String]]) -> Bool = _
-
 @intrinsic("almide_rt_list_eq_opt_int")
 fn __eq_opt_int(a: List[Int?], b: List[Int?]) -> Bool = _
-
-@intrinsic("almide_rt_list_eq_opt_str")
-fn __eq_opt_str(a: List[String?], b: List[String?]) -> Bool = _
 
 @intrinsic("almide_rt_list_eq_res_int")
 fn __eq_res_int(a: List[Result[Int, String]], b: List[Result[Int, String]]) -> Bool = _
@@ -42195,8 +42197,7 @@ else {
   else false
 }
 
-@implements("list.__eq_opt_str")
-@specializes("list.__eq_opt_str")
+@specializes("list.__eq_any")
 fn list_eq_opt_str(a: List[String?], b: List[String?]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -42280,8 +42281,7 @@ else {
   else false
 }
 
-@implements("list.__eq_list_str")
-@specializes("list.__eq_list_str")
+@specializes("list.__eq_any")
 fn list_eq_list_str(a: List[List[String]], b: List[List[String]]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
