@@ -11,7 +11,7 @@ env:
   CARGO_INCREMENTAL: "0"
   HEAD_REF: origin/json-substrate-w3-parser
   BASE_REF: c9ad9ea2f
-  ROUNDS: "15"
+  ROUNDS: "13"
 jobs:
   quick:
     if: contains(github.event.head_commit.message, '[quick]')
@@ -143,9 +143,11 @@ jobs:
           set -euxo pipefail
           cp -r .github/probe /tmp/probe
           mkdir -p /tmp/bins
-          for v in base head; do
-            ref=$BASE_REF; [ $v = head ] && ref=$HEAD_REF
-            git worktree add /tmp/src-$v "$ref"
+          for v in base head sp; do
+            ref=$BASE_REF; [ $v != base ] && ref=$HEAD_REF
+            git worktree add --detach /tmp/src-$v "$ref"
+            if [ $v = sp ]; then cp /tmp/probe/w3/json_parse_single.almd /tmp/src-sp/stdlib/json_parse.almd; fi
+            if [ $v != base ] && [ -f /tmp/probe/w3/pre-w1 ]; then (cd /tmp/src-$v && sed -i 's/2147483660 + cur/1073741824/' stdlib/json_parse.almd && sed -i -E 's/^(    let fam = prim.alloc_bytes\((total|est)\))$/\1\n    prim.store32(prim.handle(fam), 1073741824)/' stdlib/json_parse.almd && git diff --stat); fi
             (cd /tmp/src-$v && git log --oneline -1 && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
             cp target/release/almide /tmp/bins/almide-$v
           done
@@ -159,7 +161,8 @@ jobs:
           set -uo pipefail
           mkdir -p /tmp/perf && cd /tmp/perf
           bash /tmp/probe/bench/make.sh /tmp/perf
-          for v in base head; do
+          echo "yyjson per-phase allocations (run 42587113062): build 29, stringify 1, parse 2"
+          for v in base head sp; do
             for p in full build str full_small build_small str_small; do
               /tmp/bins/almide-$v build jr_$p.almd --target wasm -o jr_$p-$v.wasm || echo "BUILD FAIL $p $v"
               echo "size jr_$p $v $(stat -c %s jr_$p-$v.wasm)"
@@ -176,8 +179,8 @@ jobs:
         run: |
           set -uo pipefail
           cd /tmp/perf
-          for v in base head; do
-            for p in build str full; do
+          for v in base head sp; do
+            for p in str full; do
               echo "== wi $v $p"
               timeout 1200 python3 /tmp/probe/wi.py jr_${p}_small-$v.wasm --top 40 > wi-$p-$v.txt 2>&1 || echo "wi exit $?"
               head -60 wi-$p-$v.txt
@@ -192,6 +195,7 @@ jobs:
           R = int(os.environ["ROUNDS"])
           progs = {"base": ["wasmtime","run","--allow-precompiled","jr_full-base.cwasm"],
                    "head": ["wasmtime","run","--allow-precompiled","jr_full-head.cwasm"],
+                   "sp": ["wasmtime","run","--allow-precompiled","jr_full-sp.cwasm"],
                    "rust": ["wasmtime","run","--allow-precompiled","rust.cwasm"]}
           outs, times = {}, {k: [] for k in progs}
           for r in range(R + 2):
@@ -204,11 +208,11 @@ jobs:
                   outs.setdefault(v, p.stdout); assert outs[v] == p.stdout
                   if r >= 2: times[v].append(dt)
           print("outputs:", {k: v.decode().strip() for k, v in outs.items()})
-          print("almide outputs equal:", outs["base"] == outs["head"])
+          print("almide outputs equal:", outs["base"] == outs["head"] == outs["sp"])
           for v in times:
               print(v, "n=%d median %.2f ms" % (len(times[v]), statistics.median(times[v])), sorted("%.1f" % t for t in times[v]))
-          b, h, rs = (statistics.median(times[k]) for k in ("base", "head", "rust"))
-          print("ratio head/base = %.4f   head/rust (indicative) = %.4f   base/rust = %.4f" % (h / b, h / rs, b / rs))
+          b, h, sp, rs = (statistics.median(times[k]) for k in ("base", "head", "sp", "rust"))
+          print("ratio head/base = %.4f   sp/base = %.4f   head/rust (indicative) = %.4f   sp/rust = %.4f   base/rust = %.4f" % (h / b, sp / b, h / rs, sp / rs, b / rs))
           EOF
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
