@@ -55,7 +55,7 @@ fn program_profile_args(rs_code: &str, release: bool) -> Vec<String> {
     } else {
         // Pinned to what rustc's default gives the standard build above
         // opt-level 0 (owner ruling 2026-11-09).
-        args.extend(["-C".into(), "opt-level=1".into(), "-C".into(), "debug-assertions=off".into()]);
+        args.extend(["-C".into(), "opt-level=1".into(), "-C".into(), "debug-assertions=on".into()]);
     }
     args
 }
