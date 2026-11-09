@@ -29,7 +29,8 @@ fn dump_native_mir_if_requested(source: &str) {
 /// through the standard codegen, which renders the C wrapper from the C ABI
 /// table — never a binary that silently lacks the C symbol.
 fn wall_native_c_exports(ir: &almide_ir::IrProgram) -> Result<(), LowerError> {
-    if let Some(f) = ir.functions.iter().find(|f| f.export_attrs.iter().any(|a| a.target.as_str() == "c")) {
+    if let Some(f) = ir.functions.iter().chain(ir.modules.iter().flat_map(|m| &m.functions))
+        .find(|f| f.export_attrs.iter().any(|a| a.target.as_str() == "c")) {
         return Err(LowerError::at(
             f.body.span,
             format!("native: fn `{}` is @export(c) — its C wrapper is outside the native rungs", f.name),
@@ -68,7 +69,20 @@ fn native_struct_tuples(
 /// Local containers use their checked type even when no function signature
 /// mentions it. This includes empty lists and nested Option/Result values.
 fn collect_local_native_types(ir: &almide_ir::IrProgram, ts: &mut Vec<almide_lang::types::Ty>) {
-    for info in &ir.var_table.entries {
+    // The shared frontend's table also contains locals of library functions
+    // removed by linking. Those dead entries must not pull closure/container
+    // representations into a program that never uses them. Keep declaration
+    // types for all retained locals, including empty carriers without stores.
+    let empty = std::collections::HashSet::new();
+    let mut live: std::collections::HashSet<_> = ir.functions.iter()
+        .flat_map(|f| f.params.iter().map(|p| p.var))
+        .chain(ir.top_lets.iter().map(|t| t.var)).collect();
+    for body in ir.functions.iter().map(|f| &f.body).chain(ir.top_lets.iter().map(|t| &t.value)) {
+        live.extend(almide_ir::free_vars::bound_vars(body));
+        live.extend(almide_ir::free_vars::free_vars(body, &empty));
+    }
+    for (id, info) in ir.var_table.entries.iter().enumerate() {
+        if !live.contains(&almide_ir::VarId(id as u32)) { continue; }
         let mut found = Vec::new();
         crate::render_native_rec::collect_tuples(&info.ty, &mut found);
         for t in found {
@@ -380,6 +394,20 @@ fn render_native_parts(source: &str) -> Result<NativeRenderParts, LowerError> {
 pub fn try_render_rust_program(source: &str, program: almide_lang::ast::Program) -> Result<String, LowerError> {
     dump_native_mir_if_requested(source);
     render_native_parts_with(|| program_to_ir_mode(program, &[], true)).map(|(rust, _, _)| rust)
+}
+
+/// Render the CLI's checked, unoptimized IR. The caller must have rejected
+/// entry/module diagnostics and enforced its project gates before calling.
+/// This consumes the same frontend environment that produced the IR: module
+/// identities, convention methods and inferred types must not be reconstructed.
+pub fn try_render_rust_checked_certified(
+    source: &str,
+    ir: almide_ir::IrProgram,
+    checker: Checker,
+) -> Result<(String, Vec<NativeCert>), LowerError> {
+    dump_native_mir_if_requested(source);
+    render_native_parts_with(|| prepare_checked_ir(ir, checker, true))
+        .map(|(rust, certs, _)| (rust, certs))
 }
 
 fn render_native_parts_with(prepare: impl FnOnce() -> Result<almide_ir::IrProgram, LowerError>) -> Result<NativeRenderParts, LowerError> {

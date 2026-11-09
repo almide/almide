@@ -332,12 +332,16 @@ include!("pipeline_native_loop_snapshots.rs");
 struct Resolve<'a> {
     bodies: &'a HashMap<String, HashSet<String>>,
     declarations: &'a HashMap<String, HashSet<String>>,
+    identities: &'a HashMap<String, String>,
     owner: Option<&'a str>,
 }
 
 impl Resolve<'_> {
     fn qualified(&self, m: &str, f: &str) -> Option<String> {
-        self.bodies.get(m)?.contains(f).then(|| super::user_module_fn_name(m, f))
+        self.bodies.get(m)?.contains(f).then(|| {
+            let identity = self.identities.get(m).map(String::as_str).unwrap_or(m);
+            super::user_module_fn_name(identity, f)
+        })
     }
     fn reference(&self, name: &str) -> Option<String> {
         if let Some(m) = self.owner {
@@ -414,8 +418,11 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
             }).collect()).unwrap_or_default();
         (m.name.to_string(), names)
     }).collect();
+    let identities = ir.modules.iter().map(|m| (
+        m.name.to_string(), m.versioned_name.unwrap_or(m.name).to_string(),
+    )).collect();
     let roots: HashSet<String> = ir.functions.iter().map(|f| f.name.to_string()).collect();
-    let mut resolve = Resolve { bodies: &bodies, declarations: &declarations, owner: None };
+    let mut resolve = Resolve { bodies: &bodies, declarations: &declarations, identities: &identities, owner: None };
     for f in &mut ir.functions { resolve.visit_expr_mut(&mut f.body); }
     for t in &mut ir.top_lets { resolve.visit_expr_mut(&mut t.value); }
     defaults(&mut ir.type_decls, |e| resolve.visit_expr_mut(e));
@@ -466,7 +473,7 @@ mod scope_tests {
             let mut expr = IrExpr { kind: IrExprKind::Call {
                 target: CallTarget::Named { name: sym(name) }, args: vec![], type_args: vec![],
             }, ty: almide_lang::types::Ty::Unit, span: None, def_id: None };
-            Resolve { bodies: &bodies, declarations: &declarations, owner }.visit_expr_mut(&mut expr);
+            Resolve { bodies: &bodies, declarations: &declarations, identities: &HashMap::new(), owner }.visit_expr_mut(&mut expr);
             let IrExprKind::Call { target, .. } = expr.kind else { panic!("call lost") };
             match (target, module) {
                 (CallTarget::Module { module, func, .. }, Some(expected)) => {

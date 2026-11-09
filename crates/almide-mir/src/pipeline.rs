@@ -494,7 +494,21 @@ fn program_to_ir_mode(
         ir.modules.push(mod_ir);
     }
 
+    prepare_checked_ir(ir, checker, native_bodies)
+}
+
+/// Shared preparation after checking and lowering, before optimization/linking.
+/// The CLI can hand over its existing IR and checker, including resolved user
+/// modules and package identities, instead of rebuilding a second frontend.
+fn prepare_checked_ir(
+    mut ir: almide_ir::IrProgram,
+    mut checker: Checker,
+    native_bodies: bool,
+) -> Result<almide_ir::IrProgram, LowerError> {
     if native_bodies {
+        // A module's C export can be unreferenced by Almide but still be
+        // required by an external caller. Check before reachability pruning.
+        wall_native_c_exports(&ir)?;
         native_bundled::link(&mut ir, &mut checker)?;
     } else {
         resolve_user_module_calls(&mut ir);
