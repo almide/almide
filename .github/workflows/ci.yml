@@ -23,9 +23,9 @@ name: CI
 # wrong costs a gate. The trade is not close.
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, json-substrate-ci]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, json-substrate-ci]
   # The develop merge queue (#1732 follow-on): the queue's temporary
   # gh-readonly-queue/* branch must receive every REQUIRED check, or the
   # first queued PR stalls forever. Only this workflow and
