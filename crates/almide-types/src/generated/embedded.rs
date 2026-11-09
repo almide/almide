@@ -6955,8 +6955,7 @@ fn __fp_exact(hb: Int, neg: Bool) -> Float = {
 }
 
 fn __fp_slow(p0: Int, i_end: Int, f_start: Int, f_end: Int, ex: Int, neg: Bool) -> Float = {
-
-  let buf = prim.alloc_str(824)
+  let buf = string.repeat("0", 824)
   let hb = prim.handle(buf) + 12
   __hpd_init(hb, p0, i_end, f_start, f_end, ex)
   __fp_exact(hb, neg)
