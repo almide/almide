@@ -122,15 +122,13 @@ fn __jp_number_error(base: Int, len: Int, p: Int) -> String = {
 }
 
 // ── low-level helpers (byte floor) ──
-// The UTF-8 codepoint whose lead byte is at base+p, and its byte length.
+// The UTF-8 codepoint whose lead byte is at base+p.
 fn __jp_cp(base: Int, p: Int) -> Int = {
   let b0 = prim.load8(base + p)
   if b0 < 128 then b0
   else if b0 < 224 then (b0 - 192) * 64 + (prim.load8(base + p + 1) - 128)
   else if b0 < 240 then (b0 - 224) * 4096 + (prim.load8(base + p + 1) - 128) * 64 + (prim.load8(base + p + 2) - 128) else (b0 - 240) * 262144 + (prim.load8(base + p + 1) - 128) * 4096 + (prim.load8(base + p + 2) - 128) * 64 + (prim.load8(base + p + 3) - 128)
 }
-
-fn __jp_cp_len(b0: Int) -> Int = if b0 < 128 then 1 else if b0 < 224 then 2 else if b0 < 240 then 3 else 4
 
 // The CHAR index of byte offset `p` (count non-continuation bytes) — only for
 // the oracle's `at pos N` error message, linear once per error.
@@ -247,7 +245,7 @@ fn __jp_str_scan(base: Int, len: Int, p: Int, open: Int, esc: Int) -> Int =
       }
     } else if b >= 239 then {
       if __jp_nonchar(__jp_cp(base, p)) then __jp_code(p, 5)
-      else __jp_str_scan(base, len, p + __jp_cp_len(b), open, esc)
+      else __jp_str_scan(base, len, p + (if b < 240 then 3 else 4), open, esc)
     } else __jp_str_scan(base, len, p + 1, open, esc)
   }
 
