@@ -315,7 +315,9 @@ jobs:
           git log --oneline -1
           cargo build --release --bin almide
           mkdir -p /tmp/out
-          target/release/almide fmt spec/wasm_cross/json_parse_fast_paths.almd
+          target/release/almide fmt --no-import-edit stdlib/json_parse.almd
+          target/release/almide fmt spec/wasm_cross/json_family_lifetime.almd spec/wasm_cross/json_family_shapes.almd
+          git diff --stat
           git status --short
       - name: Size ratchet before regeneration
         run: cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tee /tmp/out/size-ratchet-before.txt | grep -E "B, pinned|REGRESSION|NEW fixture|row\(s\) moved|test result" | head -100 || true
