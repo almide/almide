@@ -1,0 +1,9 @@
+// ADR-0033 D7 drill: a literal carve's payload words are stored one word
+// late (the first never, the last past the block) while each is still
+// recorded at its slot — the init checker accepts, the byte check rejects.
+import json
+
+effect fn main() -> Unit = {
+  let v = json.parse("[true, \"ab\", {\"k\": 1}]")!
+  println(json.stringify(v))
+}

@@ -1,0 +1,10 @@
+// ADR-0033 D7 drill (run time): pass 1 sizes the family for a different
+// number of nodes than pass 2 carves. The parse must take a defined abort —
+// a room test before the first store past the root, or the seal — never
+// write past the family or publish it partly carved.
+import json
+
+effect fn main() -> Unit = {
+  let v = json.parse("[true, \"ab\", {\"k\": 1}]")!
+  println(json.stringify(v))
+}
