@@ -312,6 +312,7 @@ impl Sim<'_> {
     /// Houdini: the entry facts, minus what a back edge loses, to a fixpoint.
     fn invariant(&mut self, post: &[L], f: &[L], body: &[It]) -> Option<Vec<L>> {
         let mut cand = f.to_vec();
+        cand.extend(loop_candidates(f, body));
         let (fm, sm) = (self.fills.len(), self.sites.len());
         loop {
             self.probe += 1;
@@ -333,7 +334,16 @@ impl Sim<'_> {
     fn lloop(&mut self, post: &[L], f: &[L], body: &[It], rest: &[It]) -> Option<Flow> {
         let cand = self.invariant(post, f, body)?;
         self.fill(cand.iter().map(L::text).collect::<Vec<_>>().join(" "));
-        self.fill(vec!["()1".to_string(); cand.len()].join(" "));
+        // An entry fact is present verbatim; a loop candidate is proven.
+        let mut pin = Vec::with_capacity(cand.len());
+        for g in &cand {
+            if f.contains(g) {
+                pin.push("()1".to_string());
+            } else {
+                pin.push(prove(f, g)?);
+            }
+        }
+        self.fill(pin.join(" "));
         self.conts.push(Vec::new());
         let r = self.lcheck(Some(&cand), post, cand.clone(), body);
         self.conts.pop();
@@ -453,6 +463,78 @@ impl Sim<'_> {
         }
         finish(joins, Some(f), None)
     }
+}
+
+/// Candidate loop invariants beyond the entry's own facts (#4005 A4): each
+/// test in the body, its operands written back through the exact values
+/// the body binds its fresh slots to, as `a <= b` and `b <= a`, with and
+/// without the constant — kept when the entry facts prove them. Houdini
+/// (`invariant`) drops every one a back edge does not re-establish, so a
+/// candidate is only ever a guess; the checker proves what survives.
+fn loop_candidates(f: &[L], body: &[It]) -> Vec<L> {
+    fn walk(items: &[It], defs: &mut BTreeMap<Slot, Option<L>>, tests: &mut Vec<(L, L)>) {
+        for it in items {
+            match it {
+                It::Asn { x, l } | It::AsnU { x, l } => {
+                    let l = from_lin(l);
+                    let fresh = !mentions(&V::S(*x), &l);
+                    let e = defs.entry(*x).or_insert_with(|| fresh.then(|| l.clone()));
+                    if !fresh || e.as_ref() != Some(&l) {
+                        *e = None;
+                    }
+                }
+                It::Test { a, b, thn, els, .. } => {
+                    tests.push((from_lin(a), from_lin(b)));
+                    walk(thn, defs, tests);
+                    walk(els, defs, tests);
+                }
+                It::Branch { thn, els } => {
+                    walk(thn, defs, tests);
+                    walk(els, defs, tests);
+                }
+                It::Loop { body } => walk(body, defs, tests),
+                _ => {}
+            }
+        }
+    }
+    let (mut defs, mut tests) = (BTreeMap::new(), Vec::new());
+    walk(body, &mut defs, &mut tests);
+    let defs: BTreeMap<Slot, L> = defs.into_iter().filter_map(|(x, l)| l.map(|l| (x, l))).collect();
+    let unfold = |l: &L| -> L {
+        let mut l = l.clone();
+        for _ in 0..3 {
+            for (x, d) in &defs {
+                if mentions(&V::S(*x), &l) {
+                    l = subst(&V::S(*x), d, &l);
+                }
+            }
+        }
+        canon(&l)
+    };
+    let mut out: Vec<L> = Vec::new();
+    for (a, b) in tests {
+        let (a, b) = (unfold(&a), unfold(&b));
+        if defs.keys().any(|x| mentions(&V::S(*x), &a) || mentions(&V::S(*x), &b)) {
+            continue;
+        }
+        for d in [lsub(&a, &b), lsub(&b, &a)] {
+            let d = canon(&d);
+            for c in [d.clone(), L { t: d.t.clone(), c: 0 }] {
+                if c.t.is_empty() || f.contains(&c) || out.contains(&c) || out.len() >= 16 {
+                    continue;
+                }
+                if prove(f, &c).is_some() {
+                    out.push(c);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A linear form with one term per variable, in variable order.
+fn canon(l: &L) -> L {
+    L { t: coefs(l).into_iter().collect(), c: l.c }
 }
 
 /// LAsn's facts once `l` is shown not to wrap: `x = l`, or the invertible
