@@ -53,35 +53,11 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
             }
             Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), .. } if payload != NTy::I64 => {
                 crate::render_native_bounds::access(slot);
-                // A read the cell's own take follows with nothing between
-                // that can look at the cell (native_cell_window): the payload
-                // itself, not a copy of it.
-                let takes = rec::has_default(payload) && crate::render_native_keyed::cell_read_takes(*d, (ad.base, payload), tys);
-                // A read whose every use only borrows, with nothing up to its
-                // last use that can look at the cell: a reference into the
-                // cell, its guard released after that use.
-                if let (false, true, Some((t, spelled, whole))) = (takes, st.borrow_reads.contains(d), borrowed_kind(payload)) {
-                    let g = format!("{}_g", var(*d));
-                    if crate::render_native_keyed::cell_read_borrows(*d, (ad.base, payload), tys, g.clone()) {
-                        tys.insert(*d, t);
-                        writeln!(out, "let {g} = {base}.borrow(); let mut {}: {spelled} = &(*{g}.as_ref().expect(\"initialized shared cell\")){whole};", var(*d)).expect("writing to a String cannot fail");
-                        return Ok(());
-                    }
-                }
-                let read = if takes { "borrow_mut().take()" } else { "borrow().as_ref()" };
-                let copy = if read.ends_with("as_ref()") { ".clone()" } else { "" };
-                tys.insert(*d, payload);
-                writeln!(out, "let mut {}: {} = {base}.{read}.expect(\"initialized shared cell\"){copy};", var(*d), rec::owned_ty(payload)).expect("writing to a String cannot fail");
+                heap_read(st, tys, out, *d, (ad.base, payload));
             }
             Op::CallFn { dst: Some(d), name, .. } if name == "__mg_take" => {
                 crate::render_native_bounds::access(slot); tys.insert(*d, payload);
-                // The read before it took the payload: nothing is left, and the
-                // take's result is only released (native_cell_window::take_window).
-                if crate::render_native_keyed::cell_emptied(*d) {
-                    writeln!(out, "// {}: the payload the read before took", var(*d)).expect("writing to a String cannot fail");
-                } else {
-                    writeln!(out, "let mut {}: {} = {base}.borrow_mut().take().expect(\"initialized shared cell\");", var(*d), rec::owned_ty(payload)).expect("writing to a String cannot fail");
-                }
+                take(out, *d, &base, payload);
             }
             Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 => {
                 let rhs = args[1];
@@ -111,4 +87,38 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
         }
         Ok(())
     })())
+}
+
+/// The read `d` of the heap payload (kind `payload`) of the cell `cell`.
+fn heap_read(st: &AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mut String, d: ValueId, (cell, payload): (ValueId, NTy)) {
+    let base = var(cell);
+    // A read the cell's own take follows with nothing between that can look
+    // at the cell (native_cell_window): the payload itself, not a copy of it.
+    let takes = rec::has_default(payload) && crate::render_native_keyed::cell_read_takes(d, (cell, payload), tys);
+    // A read whose every use only borrows, with nothing up to its last use
+    // that can look at the cell: a reference into the cell, its guard
+    // released after that use.
+    if let (false, true, Some((t, spelled, whole))) = (takes, st.borrow_reads.contains(&d), borrowed_kind(payload)) {
+        let g = format!("{}_g", var(d));
+        if crate::render_native_keyed::cell_read_borrows(d, (cell, payload), tys, g.clone()) {
+            tys.insert(d, t);
+            writeln!(out, "let {g} = {base}.borrow(); let mut {}: {spelled} = &(*{g}.as_ref().expect(\"initialized shared cell\")){whole};", var(d)).expect("writing to a String cannot fail");
+            return;
+        }
+    }
+    let read = if takes { "borrow_mut().take()" } else { "borrow().as_ref()" };
+    let copy = if read.ends_with("as_ref()") { ".clone()" } else { "" };
+    tys.insert(d, payload);
+    writeln!(out, "let mut {}: {} = {base}.{read}.expect(\"initialized shared cell\"){copy};", var(d), rec::owned_ty(payload)).expect("writing to a String cannot fail");
+}
+
+/// The `__mg_take` result `d` of the cell spelled `base`. After a read that
+/// took the payload nothing is left, and the result is only released
+/// (native_cell_window::take_window): it stays unbound.
+fn take(out: &mut String, d: ValueId, base: &str, payload: NTy) {
+    if crate::render_native_keyed::cell_emptied(d) {
+        writeln!(out, "// {}: the payload the read before took", var(d)).expect("writing to a String cannot fail");
+    } else {
+        writeln!(out, "let mut {}: {} = {base}.borrow_mut().take().expect(\"initialized shared cell\");", var(d), rec::owned_ty(payload)).expect("writing to a String cannot fail");
+    }
 }
