@@ -52,7 +52,8 @@ fn json_parse(text: String) -> Result[Value, String] = {
   let h = prim.handle(text)
   let blen = prim.load32(h + 4)
   let cell = prim.alloc_bytes(8)
-  let v = __jp_value(h + 12, blen, 0, 0, prim.handle(cell) + 12)
+  let none: List[(String, Value)] = []
+  let v = __jp_value(h + 12, blen, 0, 0, prim.handle(cell) + 12, none, none)
   let p = prim.load64(prim.handle(cell) + 12)
   if p < 0 then err(__jp_message(h + 12, blen, 0 - 1 - p))
   else {
@@ -174,7 +175,10 @@ fn __jp_nonchar(cp: Int) -> Bool = (cp >= 64976 and cp <= 65007) or cp % 65536 >
 // ── the value grammar ──
 // The value at p (whitespace first). A negative p is a refusal already in
 // the cell: nothing is read.
-fn __jp_value(base: Int, len: Int, p: Int, depth: Int, c: Int) -> Value = if p < 0 then value.null()
+// `like` is the previous sibling's pairs when this value sits where an object
+// sat before (an element of an array of objects, or a member of one), else
+// `none`, the parse's one empty list.
+fn __jp_value(base: Int, len: Int, p: Int, depth: Int, c: Int, like: List[(String, Value)], none: List[(String, Value)]) -> Value = if p < 0 then value.null()
 else {
   let q = __jp_ws(base, len, p)
   if q >= len then __jp_refuse(c, q, 6)
@@ -182,8 +186,8 @@ else {
     let b = prim.load8(base + q)
     if b == 34 then value.string(__jp_string(base, len, q, c))
     else if (b == 123 or b == 91) and depth >= __json_max_depth() then __jp_refuse(c, q, 17)
-    else if b == 123 then __jp_object(base, len, __jp_ws(base, len, q + 1), depth + 1, c)
-    else if b == 91 then __jp_array(base, len, __jp_ws(base, len, q + 1), depth + 1, c)
+    else if b == 123 then __jp_object(base, len, __jp_ws(base, len, q + 1), depth + 1, c, like, none)
+    else if b == 91 then __jp_array(base, len, __jp_ws(base, len, q + 1), depth + 1, c, none)
     else if b == 116 or b == 102 then __jp_bool(base, len, q, c)
     else if b == 110 then __jp_null(base, len, q, c)
     else if b == 45 or (b >= 48 and b <= 57) then __jp_number(base, len, q, c)
@@ -202,9 +206,10 @@ else {
 // The bound must come from the string's own span, NOT from the rest of the
 // document: sizing by the document remainder makes parsing cost
 // O(strings x document length), which timed out on real glTF (#939).
-fn __jp_string(base: Int, len: Int, p: Int, c: Int) -> String = {
-  let r = __jp_str_scan(base, len, p + 1, p, 0)
-  if r < 0 then {
+fn __jp_string(base: Int, len: Int, p: Int, c: Int) -> String = __jp_build(base, p, __jp_str_scan(base, len, p + 1, p, 0), c)
+
+// The String __jp_str_scan's answer `r` describes (p at the opening quote).
+fn __jp_build(base: Int, p: Int, r: Int, c: Int) -> String = if r < 0 then {
     __jp_seek(c, r)
     ""
   } else {
@@ -220,7 +225,6 @@ fn __jp_string(base: Int, len: Int, p: Int, c: Int) -> String = {
     __jp_seek(c, e + 1)
     buf
   }
-}
 
 // From p inside the string opened at `open`: the closing quote's offset
 // times two, plus one when an escape was met (`esc`), or a refusal code.
@@ -481,28 +485,85 @@ fn __jp_stop(c: Int, p: Int, kind: Int) -> Int = {
 //   2. One real call frame per element, so ~8k elements overflow the wasm
 //      call stack — a trap, after the quadratic slowdown.
 // The loop is O(1) amortized per element and O(depth) stack (nesting only).
-fn __jp_array(base: Int, len: Int, p0: Int, depth: Int, c: Int) -> Value = {
+//
+// Records repeat their keys: an element that is an object hands its pairs on
+// as the next element's `like`, whose keys it shares instead of copying
+// (__jp_key). Only an element that opens with `{` asks, so an array of
+// scalars pays nothing for it.
+fn __jp_array(base: Int, len: Int, p0: Int, depth: Int, c: Int, none: List[(String, Value)]) -> Value = {
   var items: List[Value] = []
+  var like = none
   var p = if p0 < len and prim.load8(base + p0) == 93 then {
     __jp_seek(c, p0 + 1)
     0 - 1
   } else p0
   while p >= 0 {
-    list.push(items, __jp_value(base, len, p, depth, c))
+    let v = __jp_value(base, len, p, depth, c, like, none)
+    if prim.load8(base + p) == 123 then {
+      like = __jp_pairs(v, none)
+    } else ()
+    list.push(items, v)
     p = __jp_after(base, len, c, 93)
   }
   value.array(items)
 }
 
-// The key at p (a member's start, post-ws): a string, or `unquoted key`.
-fn __jp_key(base: Int, len: Int, p: Int, c: Int) -> String =
+// An object's pairs (a share of them), or `none`.
+fn __jp_pairs(v: Value, none: List[(String, Value)]) -> List[(String, Value)] = match value.as_object(v) {
+  ok(ps) => ps,
+  err(_) => none,
+}
+
+// The key at p (a member's start, post-ws): a string, or `unquoted key`. A
+// key with no escape whose bytes equal one of `like`'s keys is that String,
+// shared: the keys of a record repeat in every sibling, and reading one is
+// then a byte compare with no allocation and no copy. A sibling with more
+// than 16 keys is not searched, so a key costs O(1) compares on any shape.
+fn __jp_key(base: Int, len: Int, p: Int, c: Int, like: List[(String, Value)]) -> String =
   if p >= len then {
     __jp_seek(c, __jp_code(p, 6))
     ""
   } else if prim.load8(base + p) != 34 then {
     __jp_seek(c, __jp_code(p, 10))
     ""
-  } else __jp_string(base, len, p, c)
+  } else {
+    let r = __jp_str_scan(base, len, p + 1, p, 0)
+    let known = if r >= 0 and r % 2 == 0 and list.len(like) <= 16 then __jp_known(like, base + p + 1, r / 2 - p - 1) else ""
+    if string.len(known) > 0 then {
+      __jp_seek(c, r / 2 + 1)
+      known
+    } else __jp_build(base, p, r, c)
+  }
+
+// The key of `like` whose bytes are the n at src, or "" (a key that long is
+// never empty).
+fn __jp_known(like: List[(String, Value)], src: Int, n: Int) -> String = {
+  var found = ""
+  for (s, _) in like {
+    if __jp_same_at(s, src, n) then {
+      found = s
+    } else ()
+  }
+  found
+}
+
+// The pairs of `like`'s value under key `k` when the value at q opens an
+// object (the same member of the previous sibling), else `none`.
+fn __jp_member_like(base: Int, len: Int, q: Int, k: String, like: List[(String, Value)], none: List[(String, Value)]) -> List[(String, Value)] =
+  if q < 0 or list.len(like) == 0 or list.len(like) > 16 then none
+  else {
+    let b = __jp_ws(base, len, q)
+    if b >= len or prim.load8(base + b) != 123 then none
+    else {
+      var found = none
+      for (s, x) in like {
+        if __jp_same(s, k) then {
+          found = __jp_pairs(x, none)
+        } else ()
+      }
+      found
+    }
+  }
 
 // The `:` after a key the cell is past: the offset after it, or a refusal
 // (-1).
@@ -531,9 +592,14 @@ fn __jp_repeats(pairs: List[(String, Value)], k: String) -> Bool = {
 }
 
 fn __jp_same(a: String, b: String) -> Bool = {
-  let ha = prim.handle(a)
   let hb = prim.handle(b)
-  prim.load32(ha + 4) == prim.load32(hb + 4) and __jp_same_bytes(ha + 12, hb + 12, prim.load32(ha + 4), 0)
+  __jp_same_at(a, hb + 12, prim.load32(hb + 4))
+}
+
+// String `a` is the n bytes at src.
+fn __jp_same_at(a: String, src: Int, n: Int) -> Bool = {
+  let ha = prim.handle(a)
+  prim.load32(ha + 4) == n and __jp_same_bytes(ha + 12, src, n, 0)
 }
 
 fn __jp_same_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool = if i >= n then true
@@ -550,25 +616,27 @@ fn __jp_unique(c: Int, p: Int, repeated: Bool) -> Unit =
 // through a key index once it holds 16 (#4297) — so the check is O(1) per
 // key on wide objects. The same loop shape as `__jp_array`, for the same two
 // reasons (#939).
-fn __jp_object(base: Int, len: Int, p0: Int, depth: Int, c: Int) -> Value = {
+fn __jp_object(base: Int, len: Int, p0: Int, depth: Int, c: Int, like: List[(String, Value)], none: List[(String, Value)]) -> Value = {
   var pairs: List[(String, Value)] = []
   var p = if p0 < len and prim.load8(base + p0) == 125 then {
     __jp_seek(c, p0 + 1)
     0 - 1
   } else p0
   while p >= 0 and list.len(pairs) < 16 {
-    let k = __jp_key(base, len, p, c)
+    let k = __jp_key(base, len, p, c, like)
     __jp_unique(c, p, __jp_repeats(pairs, k))
-    list.push(pairs, (k, __jp_value(base, len, __jp_colon(base, len, c), depth, c)))
+    let q = __jp_colon(base, len, c)
+    list.push(pairs, (k, __jp_value(base, len, q, depth, c, __jp_member_like(base, len, q, k, like, none), none)))
     p = __jp_after(base, len, c, 125)
   }
   if p >= 0 then {
     var index = pairs |> list.map(((s, _)) => (s, 0)) |> map.from_list
     while p >= 0 {
-      let k = __jp_key(base, len, p, c)
+      let k = __jp_key(base, len, p, c, like)
       __jp_unique(c, p, map.contains(index, k))
       index = map.set(index, k, 0)
-      list.push(pairs, (k, __jp_value(base, len, __jp_colon(base, len, c), depth, c)))
+      let q = __jp_colon(base, len, c)
+      list.push(pairs, (k, __jp_value(base, len, q, depth, c, __jp_member_like(base, len, q, k, like, none), none)))
       p = __jp_after(base, len, c, 125)
     }
   } else ()
