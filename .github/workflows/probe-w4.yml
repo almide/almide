@@ -1,0 +1,99 @@
+name: probe-w4-carve (throwaway)
+on:
+  push:
+    branches: ['probe/w4-*']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+jobs:
+  json:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp && sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - name: build
+        run: cargo build --release --bin almide --bin almide-anchor-check
+      - name: json fixtures, native vs wasm
+        run: |
+          set -uo pipefail
+          bad=0; n=0
+          for f in $(grep -l 'json\.parse' spec/wasm_cross/*.almd); do
+            n=$((n+1))
+            a=$(./target/release/almide run "$f" 2>&1; echo "exit=$?")
+            b=$(./target/release/almide run "$f" --target wasm 2>&1; echo "exit=$?")
+            if [ "$a" != "$b" ]; then bad=$((bad+1)); echo "DIFFERS: $f"; diff <(echo "$a") <(echo "$b") | head -8; fi
+          done
+          echo "json fixtures: $n, differing: $bad"
+          test "$bad" = 0
+      - name: stdlib json tests (wasm)
+        if: always()
+        run: ./target/release/almide test spec/stdlib/json_test.almd --target wasm 2>&1 | tail -15
+  famwall:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      OPAM_CACHE_VERSION: v1
+      OCAML_VERSION: "5.4.1"
+      ROCQ_CORE_VERSION: "9.3.0"
+      OPAM_REPO_SHA: a04b045f1534714416da6b4f8e8e67d2defbb750
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Restore opam root (OCaml + Rocq)
+        id: opam-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
+      - name: Install opam + wabt + wasmtime
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends opam wabt
+          bash scripts/fetch-pinned.sh https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp && sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - name: Build opam switch + Rocq (cache miss only)
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        run: |
+          opam init --bare --disable-sandboxing -y default "git+https://github.com/ocaml/opam-repository.git#${OPAM_REPO_SHA}"
+          opam switch create "${OCAML_VERSION}" -y
+          eval "$(opam env)"
+          opam install -y "rocq-prover>=9.0.0" "rocq-core=${ROCQ_CORE_VERSION}"
+      - name: coqc / coqchk on PATH
+        run: |
+          eval "$(opam env)"
+          BIN="$HOME/.local/bin"; mkdir -p "$BIN"
+          command -v coqc >/dev/null 2>&1 || { printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; }
+          command -v coqchk >/dev/null 2>&1 || { printf '#!/bin/sh\nexec rocq check "$@"\n' > "$BIN/coqchk"; chmod +x "$BIN/coqchk"; }
+          echo "$BIN" >> "$GITHUB_PATH"
+      - name: structural wall (carving family modules through the anchor check + kernel)
+        run: |
+          eval "$(opam env)"
+          bash proofs/structural-wall.sh 2>&1 | tee /tmp/wall.log | tail -80
+      - name: carve verdicts on json fixtures
+        if: always()
+        run: |
+          grep -n -E 'CARVES|carve|family' /tmp/wall.log | head -40 || true
+          d=$(ls -d /tmp/*structural* 2>/dev/null | head -1); echo "out: $d"
