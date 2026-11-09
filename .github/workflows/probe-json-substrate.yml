@@ -1,0 +1,404 @@
+name: probe-json-substrate (throwaway)
+on:
+  push:
+    branches: [probe/json-substrate, "probe/json-substrate-*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  # The ref under measurement is named in .github/probe/head-ref.txt (one line);
+  # the base is json-reborn, the ADR-0033 base (c9ad9ea2f).
+  BASE_REF: c9ad9ea2f3b1dc65cecd619165be27020b479217
+  ROUNDS: "15"
+jobs:
+  quick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - name: Build head compiler
+        run: |
+          set -euxo pipefail
+          cp -r .github/probe /tmp/probe
+          git worktree add /tmp/src-head "$(cat $GITHUB_WORKSPACE/.github/probe/head-ref.txt)"
+          (cd /tmp/src-head && git log --oneline -1 && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
+          mkdir -p /tmp/bins && cp target/release/almide /tmp/bins/almide-head
+      - name: Generated files the build rewrote
+        run: |
+          mkdir -p /tmp/quick
+          cd /tmp/src-head && git status --short && git diff > /tmp/quick/generated.diff; wc -l /tmp/quick/generated.diff
+      - name: Behaviour of the json/value fixtures and tests
+        run: bash /tmp/probe/quick.sh /tmp/bins/almide-head /tmp/src-head /tmp/quick
+      - name: JSON ratchet and retention probe (ADR-0033 phase 0)
+        run: |
+          cd /tmp/src-head
+          ALMIDE_UPDATE_JSON_RATCHET=1 CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test json_ratchet -- --nocapture 2>&1 | grep -E "RATCHET|RETENTION|panicked|test result|refuses" | tee /tmp/quick/json-ratchet.txt || true
+          cp crates/almide-wasm/tests/golden/json-ratchet.txt /tmp/quick/json-ratchet-golden.txt || true
+      - name: Stdlib inspection ledger (which stamps the change voids)
+        run: |
+          cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test stdlib_inspection_test -- --nocapture 2>&1 | tail -40 | tee /tmp/quick/inspection.txt || true
+      - name: jsonround allocations and instruction counts
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/perf && cd /tmp/perf
+          bash /tmp/probe/bench/make.sh /tmp/perf
+          for p in full build str; do
+            echo "== $p"; ALMIDE_WASM_ALLOC_COUNT=1 /tmp/bins/almide-head run jr_$p.almd --target wasm
+            /tmp/bins/almide-head build jr_${p}_small.almd --target wasm -o jr_${p}_small.wasm && echo "size $p $(stat -c %s jr_${p}_small.wasm)"
+            timeout 1200 python3 /tmp/probe/wi.py jr_${p}_small.wasm --top 30 > wi-$p.txt 2>&1; head -12 wi-$p.txt
+          done
+          /tmp/bins/almide-head build jr_long_small.almd --target wasm -o jr_long_small.wasm && echo "size long $(stat -c %s jr_long_small.wasm)"
+          timeout 1200 python3 /tmp/probe/wi.py jr_long_small.wasm --top 10 > wi-long.txt 2>&1; head -4 wi-long.txt
+          sudo apt-get install -y -qq binaryen >/dev/null 2>&1 && wasm-dis --enable-tail-call jr_full_small.wasm -o jr_full_small.wat || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: quick
+          path: |
+            /tmp/quick
+            /tmp/perf/*.wasm
+            /tmp/perf/wi-*.txt
+            /tmp/perf/*.wat
+          retention-days: 7
+
+  wasm:
+    if: contains(github.event.head_commit.message, '[timing]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-wasip1
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime and binaryen
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+          sudo apt-get install -y -qq binaryen >/dev/null 2>&1 || echo "no binaryen"
+      - name: Build base and head compilers
+        run: |
+          set -euxo pipefail
+          cp -r .github/probe /tmp/probe
+          mkdir -p /tmp/bins
+          for v in base head; do
+            ref=$BASE_REF; [ $v = head ] && ref=$(cat $GITHUB_WORKSPACE/.github/probe/head-ref.txt)
+            git worktree add /tmp/src-$v "$ref"
+            (cd /tmp/src-$v && git log --oneline -1 && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
+            cp target/release/almide /tmp/bins/almide-$v
+          done
+      - name: Build Rust indicative
+        run: |
+          set -eux
+          cd /tmp/probe/jsonround_rs && cargo build --release --target wasm32-wasip1 2>&1 | tail -3
+          cp target/wasm32-wasip1/release/jsonround.wasm /tmp/rust-jr.wasm
+      - name: Build programs, sizes, alloc counts
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/perf && cd /tmp/perf
+          bash /tmp/probe/bench/make.sh /tmp/perf
+          for v in base head; do
+            for p in full build str full_small build_small str_small; do
+              /tmp/bins/almide-$v build jr_$p.almd --target wasm -o jr_$p-$v.wasm || echo "BUILD FAIL $p $v"
+              echo "size jr_$p $v $(stat -c %s jr_$p-$v.wasm)"
+            done
+            for p in full build str; do
+              echo "== $v $p"; ALMIDE_WASM_ALLOC_COUNT=1 /tmp/bins/almide-$v run jr_$p.almd --target wasm
+            done
+            wasmtime compile jr_full-$v.wasm -o jr_full-$v.cwasm
+          done
+          wasmtime compile /tmp/rust-jr.wasm -o rust.cwasm
+          wasm-dis --enable-tail-call jr_full_small-head.wasm -o jr_full_small-head.wat 2>/dev/null || true
+          wasm-dis --enable-tail-call jr_full_small-base.wasm -o jr_full_small-base.wat 2>/dev/null || true
+      - name: Instruction counts (profiling interpreter, n=200)
+        run: |
+          set -uo pipefail
+          cd /tmp/perf
+          for v in base head; do
+            for p in build str full; do
+              echo "== wi $v $p"
+              timeout 1200 python3 /tmp/probe/wi.py jr_${p}_small-$v.wasm --top 40 > wi-$p-$v.txt 2>&1 || echo "wi exit $?"
+              head -60 wi-$p-$v.txt
+            done
+          done
+      - name: AOT timing (base vs head vs rust, alternating)
+        run: |
+          set -euo pipefail
+          cd /tmp/perf
+          python3 - <<'EOF'
+          import subprocess, time, statistics, os
+          R = int(os.environ["ROUNDS"])
+          progs = {"base": ["wasmtime","run","--allow-precompiled","jr_full-base.cwasm"],
+                   "head": ["wasmtime","run","--allow-precompiled","jr_full-head.cwasm"],
+                   "rust": ["wasmtime","run","--allow-precompiled","rust.cwasm"]}
+          outs, times = {}, {k: [] for k in progs}
+          for r in range(R + 2):
+              order = list(progs) if r % 2 == 0 else list(reversed(list(progs)))
+              for v in order:
+                  t0 = time.perf_counter()
+                  p = subprocess.run(progs[v], capture_output=True)
+                  dt = (time.perf_counter() - t0) * 1000
+                  assert p.returncode == 0, (v, p.stderr)
+                  outs.setdefault(v, p.stdout); assert outs[v] == p.stdout
+                  if r >= 2: times[v].append(dt)
+          print("outputs:", {k: v.decode().strip() for k, v in outs.items()})
+          print("almide outputs equal:", outs["base"] == outs["head"])
+          for v in times:
+              print(v, "n=%d median %.2f ms" % (len(times[v]), statistics.median(times[v])), sorted("%.1f" % t for t in times[v]))
+          b, h, rs = (statistics.median(times[k]) for k in ("base", "head", "rust"))
+          print("ratio head/base = %.4f   head/rust (indicative) = %.4f   base/rust = %.4f" % (h / b, h / rs, b / rs))
+          EOF
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: perf-wasm
+          path: |
+            /tmp/perf/*.wasm
+            /tmp/perf/*.wat
+            /tmp/perf/wi-*.txt
+            /tmp/perf/*.almd
+          retention-days: 7
+
+  native:
+    if: contains(github.event.head_commit.message, '[timing]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Build base and head compilers
+        run: |
+          set -euxo pipefail
+          cp -r .github/probe /tmp/probe
+          mkdir -p /tmp/bins
+          for v in base head; do
+            ref=$BASE_REF; [ $v = head ] && ref=$(cat $GITHUB_WORKSPACE/.github/probe/head-ref.txt)
+            git worktree add /tmp/src-$v "$ref"
+            (cd /tmp/src-$v && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
+            cp target/release/almide /tmp/bins/almide-$v
+          done
+      - name: Native builds, route, alloc counts, timing
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/nat && cd /tmp/nat
+          bash /tmp/probe/bench/make.sh /tmp/nat
+          for v in base head; do
+            ALMIDE_VERIFIED_DEBUG=1 /tmp/bins/almide-$v build --release jr_full.almd -o jr-$v 2>&1 | grep -E "native:|walled|reason" | head -5
+            f=$(find "${TMPDIR:-/tmp}" -name almide_gen_main.rs -newer jr_full.almd 2>/dev/null | head -1); [ -n "$f" ] && cp "$f" gen-$v.rs
+            ALMIDE_ALLOC_COUNT=1 /tmp/bins/almide-$v build --release jr_full.almd -o jrc-$v >/dev/null 2>&1
+            echo "== $v alloc"; ./jrc-$v
+          done
+          (cd /tmp/probe/jsonround_rs && cargo build --release 2>&1 | tail -1 && cp target/release/jsonround /tmp/nat/jr-rust)
+          python3 - <<'EOF'
+          import subprocess, time, statistics, os
+          R = int(os.environ["ROUNDS"])
+          outs, times = {}, {"base": [], "head": [], "rust": []}
+          for r in range(R + 2):
+              for v in (["base", "head", "rust"] if r % 2 == 0 else ["rust", "head", "base"]):
+                  t0 = time.perf_counter(); p = subprocess.run(["./jr-" + v], capture_output=True); dt = (time.perf_counter() - t0) * 1000
+                  assert p.returncode == 0; outs.setdefault(v, p.stdout); assert outs[v] == p.stdout
+                  if r >= 2: times[v].append(dt)
+          print("outputs:", {k: v.decode().strip() for k, v in outs.items()})
+          for v in times: print(v, "median %.2f ms" % statistics.median(times[v]))
+          b, h, rs = (statistics.median(times[k]) for k in ("base", "head", "rust"))
+          print("ratio head/base = %.4f   head/rust (indicative) = %.4f" % (h / b, h / rs))
+          EOF
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: native-gen
+          path: /tmp/nat/gen-*.rs
+          retention-days: 7
+
+  regen:
+    if: contains(github.event.head_commit.message, '[regen]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - name: Build head
+        run: |
+          set -eux
+          git checkout -q --detach "$(cat $GITHUB_WORKSPACE/.github/probe/head-ref.txt)"
+          git log --oneline -1
+          cargo build --release --bin almide
+          mkdir -p /tmp/out
+          target/release/almide fmt spec/wasm_cross/json_parse_fast_paths.almd
+          git status --short
+      - name: Size ratchet before regeneration
+        run: cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tee /tmp/out/size-ratchet-before.txt | grep -E "B, pinned|REGRESSION|NEW fixture|row\(s\) moved|test result" | head -100 || true
+      - name: Regenerate ledgers
+        env:
+          ALMIDE_MANIFEST_TREE_CHECK: "off"
+        run: |
+          set -x
+          ORACLE=target/release/almide bash scripts/gen-run-manifest.sh || true
+          ORACLE=target/release/almide bash scripts/gen-check-manifest.sh || true
+          ORACLE=target/release/almide bash scripts/gen-ast-manifest.sh || true
+          ALMIDE_UPDATE_ALLOC=1 cargo test --release -p almide-wasm --test alloc_ledger 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_SIZES=1 cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_SIZE_LADDER=1 cargo test --release -p almide-wasm --test size_ladder 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_DUMPS=1 cargo test --release -p almide-wasm --test section_dump 2>&1 | tail -5 || true
+          ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --release --test native_verified_floor_test 2>&1 | tail -5 || true
+          git status --short
+          git diff > /tmp/out/ledgers.diff || true
+          git diff --stat
+      - name: Ledger gates after regeneration
+        run: |
+          cargo test --release -p almide-wasm --no-fail-fast 2>&1 | tee /tmp/out/wasm-suite.txt | grep -E "^test result|FAILED|panicked|failures:" | head -80
+          cargo test --release --test native_verified_floor_test 2>&1 | tail -5
+          bash scripts/check-contracts.sh 2>&1 | tail -5
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ledgers
+          path: /tmp/out
+          retention-days: 7
+
+  fuzz:
+    if: contains(github.event.head_commit.message, '[fuzz]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - name: Build head and the fuzzer
+        run: |
+          set -eux
+          git checkout -q --detach "$(cat $GITHUB_WORKSPACE/.github/probe/head-ref.txt)"
+          git log --oneline -1
+          cargo build --release --bin almide
+          (cd tools/xtarget-fuzz && cargo build --release 2>&1 | tail -2)
+      - name: Build the base compiler too
+        run: |
+          set -eux
+          git worktree add /tmp/fz-base "$BASE_REF"
+          (cd /tmp/fz-base && CARGO_TARGET_DIR=/tmp/fz-target cargo build --release --bin almide 2>&1 | tail -1)
+          mkdir -p /tmp/fz && cp /tmp/fz-target/release/almide /tmp/fz/almide-base && cp target/release/almide /tmp/fz/almide-head
+      - name: Focused campaigns on base and head, same seeds
+        run: |
+          set +e
+          XF=tools/xtarget-fuzz/target/release/xtarget-fuzz
+          for v in base head; do
+            for fs in json.parse:1794205202 json.stringify:1794205405 value.object:1794205778 value.array:1794205945 value.string:1794206107; do
+              fn=${fs%%:*}; seed=${fs##*:}
+              $XF run --family synthesis --focus "$fn" --count 200 --seed "$seed" --jobs 4 --almide /tmp/fz/almide-$v --out /tmp/fz/$v/$fn > /tmp/fz/$v-$fn.log 2>&1
+              echo "$v $fn: $(grep -E 'unique findings' /tmp/fz/$v-$fn.log | tail -1)"
+            done
+            $XF run --minutes 15 --jobs 4 --repo "$PWD" --almide /tmp/fz/almide-$v --seed 4613 --out /tmp/fz/$v/campaign > /tmp/fz/$v-campaign.log 2>&1
+            echo "$v campaign: $(grep -E 'findings=' /tmp/fz/$v-campaign.log | tail -1)"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: fuzz
+          path: /tmp/fz
+          retention-days: 7
+
+  fp:
+    if: contains(github.event.head_commit.message, '[fp]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Fingerprint every ledger row on base and head
+        run: |
+          set -eux
+          mkdir -p /tmp/fp
+          for v in base head; do
+            ref=$BASE_REF; [ $v = head ] && ref=$(cat $GITHUB_WORKSPACE/.github/probe/head-ref.txt)
+            git worktree add /tmp/fp-$v "$ref"
+            cp .github/probe/zz_fp_dump.rs /tmp/fp-$v/tests/
+            sed -e 's#^//!#//#' -e 's/^#!\[/\/\/ #![/' /tmp/fp-$v/tests/stdlib_inspection_test.rs > /tmp/fp-$v/tests/zz_src.rs
+            (cd /tmp/fp-$v && FP_OUT=/tmp/fp/$v.txt CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test zz_fp_dump zz_dump_fingerprints 2>&1 | tail -3)
+          done
+          diff /tmp/fp/base.txt /tmp/fp/head.txt | tee /tmp/fp/diff.txt || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: fp
+          path: /tmp/fp/*.txt
+          retention-days: 7
