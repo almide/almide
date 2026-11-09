@@ -39,7 +39,7 @@
 // tuple per string. A refusal is written into the same cell as a negative
 // code (position and kind, __jp_code) and the readers after it do nothing,
 // so the first refusal is the one reported; its text is spelled once, at
-// the top (__jp_message). A number is read in place, a string without an
+// the top (__jp_message). An Int is read in place, a string without an
 // escape is copied once, and a repeated key is found by comparing the keys
 // already read (an index takes over from 16 keys on, as native's does).
 fn __json_max_depth() -> Int = 1000
@@ -397,60 +397,30 @@ fn __jp_num_end(base: Int, end: Int, p: Int) -> Int = {
   }
 }
 
-// The decimal digits in [p, stop) accumulated onto m, skipping one `.`.
+// The decimal digits in [p, stop) accumulated onto m.
 fn __jp_mantissa(base: Int, p: Int, stop: Int, m: Int) -> Int = if p >= stop then m
-else {
-  let b = prim.load8(base + p)
-  if b == 46 then __jp_mantissa(base, p + 1, stop, m)
-  else __jp_mantissa(base, p + 1, stop, m * 10 + (b - 48))
-}
-
-// 10.0^k for 0 <= k <= 22, exact (each step of the product is exact there).
-fn __jp_pow10(k: Int, acc: Float) -> Float = if k <= 0 then acc else __jp_pow10(k - 1, acc * 10.0)
+else __jp_mantissa(base, p + 1, stop, m * 10 + (prim.load8(base + p) - 48))
 
 // A whole number token, read where it lies. An Int of at most 18 digits
-// cannot overflow and is accumulated in place; a Float whose digits and
-// exponent sit in the exact range (at most 15 digits, a net power of ten of
-// at most 22) is one correctly rounded multiply or divide — float.parse's
-// own fast path, so the same bits. Anything else is handed to int.parse /
-// float.parse on a copy of the token, as before.
+// cannot overflow and is accumulated in place, with no copy of the token; a
+// longer Int and every Float go to int.parse / float.parse on a copy of the
+// token, whose texts an out-of-range token keeps.
 fn __jp_number(base: Int, len: Int, p: Int, c: Int) -> Value = {
   let end = __jp_numrun(base, len, p)
   if __jp_num_end(base, end, p) != end then __jp_refuse(c, p, 13)
   else {
     __jp_seek(c, end)
-    let neg = prim.load8(base + p) == 45
-    let lead = if neg then p + 1 else p
-    let int_end = __jp_digits(base, end, lead)
-    if int_end == end then {
-      if end - lead <= 18 then {
-        let m = __jp_mantissa(base, lead, end, 0)
-        value.int(if neg then 0 - m else m)
-      } else match int.parse(__jp_substr(base, p, end)) {
-        ok(n) => value.int(n),
-        err(_) => __jp_refuse(c, p, 14),
-      }
-    } else __jp_float(base, p, lead, int_end, end, neg, c)
-  }
-}
-
-fn __jp_float(base: Int, p: Int, lead: Int, int_end: Int, end: Int, neg: Bool, c: Int) -> Value = {
-  let has_frac = prim.load8(base + int_end) == 46
-  let frac_end = if has_frac then __jp_digits(base, end, int_end + 1) else int_end
-  let frac = if has_frac then frac_end - int_end - 1 else 0
-  let digits = int_end - lead + frac
-  let e_neg = frac_end + 1 < end and prim.load8(base + frac_end + 1) == 45
-  let e_start = if frac_end + 1 < end and (prim.load8(base + frac_end + 1) == 45 or prim.load8(base + frac_end + 1) == 43) then frac_end + 2 else frac_end + 1
-  let e_mag = if frac_end < end and end - e_start <= 3 then __jp_mantissa(base, e_start, end, 0) else 0
-  let net = (if e_neg then 0 - e_mag else e_mag) - frac
-  let fast = digits <= 15 and (frac_end == end or end - e_start <= 3) and net <= 22 and net >= 0 - 22
-  if fast then {
-    let mag = prim.i2f(__jp_mantissa(base, lead, frac_end, 0))
-    let scaled = if net >= 0 then mag * __jp_pow10(net, 1.0) else mag / __jp_pow10(0 - net, 1.0)
-    value.float(if neg then -1.0 * scaled else scaled)
-  } else match float.parse(__jp_substr(base, p, end)) {
-    ok(f) => value.float(f),
-    err(_) => __jp_refuse(c, p, 14),
+    let lead = if prim.load8(base + p) == 45 then p + 1 else p
+    if __jp_digits(base, end, lead) < end then match float.parse(__jp_substr(base, p, end)) {
+      ok(f) => value.float(f),
+      err(_) => __jp_refuse(c, p, 14),
+    } else if end - lead <= 18 then {
+      let m = __jp_mantissa(base, lead, end, 0)
+      value.int(if lead > p then 0 - m else m)
+    } else match int.parse(__jp_substr(base, p, end)) {
+      ok(n) => value.int(n),
+      err(_) => __jp_refuse(c, p, 14),
+    }
   }
 }
 

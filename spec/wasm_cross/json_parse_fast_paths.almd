@@ -1,8 +1,8 @@
 // @contract: C-087, C-400, C-401
 // json.parse reads each value where it lies (#4613): a string with no escape
 // is copied in one pass (eight bytes at a time, then the tail), an Int of at
-// most 18 digits and a Float in the exact range are read in place, a longer
-// number goes to int.parse / float.parse, a key is checked against the keys
+// most 18 digits is read in place, a longer Int and every Float go to
+// int.parse / float.parse, a key is checked against the keys
 // read so far and against an index from 16 keys on, and the first refusal is
 // the one reported. Each line below sits on one side of one of those edges,
 // and every leg prints the same bytes.
@@ -53,7 +53,7 @@ effect fn main() -> Unit = {
   println(s("9223372036854775808"))
   println(s("-9223372036854775809"))
   println(s("[1,99999999999999999999]"))
-  // Floats: 15 digits and a power of ten up to 22 are exact in place.
+  // Floats: in and around float.parse's exact range, and past f64.
   println(s("[0.1,0.5,123456789012345.0,1.23456789012345,-0.0,0e0,0E+0]"))
   println(s("[1e22,1e-22,1e23,1e-23,123456789012345e-22,1.5e300,5e-324]"))
   println(s("[1234567890123456.0,0.30000000000000004,2.2250738585072014e-308]"))
