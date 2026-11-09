@@ -15,7 +15,7 @@ for f in $(ls spec/wasm_cross/ | grep -E '^(json|codec|value|http_decode_json)' 
   [ "$w" != "$n" ] || [ "$wrc" != "$nrc" ] && st=DIVERGE
   [ -n "$want" ] && [ "$want" != "$got" ] && st="$st MANIFEST($want vs $got)"
   [ -z "$want" ] && st="$st NEW"
-  echo "$st $f"
+  echo "$st $f"; [ "$st" != OK ] && { grep -m2 -E "error|panicked|unreachable|trap" "$O/err.txt" | cut -c1-240; printf '%s\n' "$w" | diff - <(printf '%s\n' "$n") | head -6; }
   if [ "$st" != OK ]; then
     fails=$((fails+1))
     { echo "=== $f"; echo "--- native rc=$nrc"; printf '%s\n' "$n" | head -c 20000; cat "$O/nerr.txt" | head -20; echo "--- wasm rc=$wrc"; printf '%s\n' "$w" | head -c 20000; cat "$O/err.txt" | head -20; } >> "$O/diverge.txt"
