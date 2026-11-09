@@ -1,0 +1,45 @@
+name: probe-w4-carve (throwaway)
+on:
+  push:
+    branches: ['probe/w4-*']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+jobs:
+  units:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: anchor-check (carve shapes + every existing test)
+        run: cargo test -p almide-anchor-check
+      - name: almide-verify init mirror
+        if: always()
+        run: cargo test -p almide-verify --lib init
+      - name: almide-wasm witness_init / family / prim
+        if: always()
+        run: cargo test -p almide-wasm --lib -- witness_init family prim
+      - name: clippy (touched crates)
+        if: always()
+        run: cargo clippy -p almide-wasm -p almide-anchor-check -p almide-verify --all-targets 2>&1 | grep -E -A8 '^(warning|error)' | grep -E -B3 -A8 'carve\.rs|witness_init|init\.rs' || echo "no clippy findings in touched files"
+      - name: build almide
+        if: always()
+        run: cargo build --release --bin almide
+      - name: impl-count + utf8 producers
+        if: always()
+        run: |
+          python3 scripts/check-utf8-producers.py || true
+          ./target/release/almide run tools/almide-gates/src/main.almd -- impl-count . || true
