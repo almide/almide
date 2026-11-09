@@ -1,2 +1,1 @@
-json-substrate-nc-p0-alloc2
-json-substrate-nc-p0-revert2
+json-substrate
