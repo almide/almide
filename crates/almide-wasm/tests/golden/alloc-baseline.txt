@@ -217,6 +217,7 @@
 66048	spec/wasm_cross/fan_any_allfail.almd
 66432	spec/wasm_cross/fan_any_early_winner.almd
 66432	spec/wasm_cross/fan_arm_heap_capture.almd
+65872	spec/wasm_cross/fan_arm_stderr_timeline.almd
 66144	spec/wasm_cross/fan_arm_unwrap_or.almd
 65888	spec/wasm_cross/fan_block_err_list_order.almd
 66720	spec/wasm_cross/fan_block_rc_closure_capture.almd
@@ -233,6 +234,7 @@
 71600	spec/wasm_cross/fan_map_parallel_scalar.almd
 66000	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 ~	spec/wasm_cross/fan_ordered_arms.almd
+~	spec/wasm_cross/fan_ordered_direct_call_arms.almd
 ~	spec/wasm_cross/fan_prefetch_fs.almd
 66208	spec/wasm_cross/fan_pure_thunks.almd
 66224	spec/wasm_cross/fan_race_mapper.almd
