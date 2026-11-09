@@ -1,0 +1,122 @@
+name: probe-w1-runtime (throwaway)
+on:
+  push:
+    branches: ['probe/w1-*']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  BASE_REF: origin/json-substrate
+jobs:
+  family-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: family runtime unit tests (wasmtime over hand-built memory)
+        run: cargo test -p almide-wasm --lib family -- --nocapture
+      - name: proof transcription pin (plain hash + family splice)
+        if: always()
+        run: cargo test -p almide-wasm --lib runtime_trees_match_the_proof_transcription
+      - name: helper signatures / cow / runtime_alloc unit tests
+        if: always()
+        run: cargo test -p almide-wasm --lib -- helper_sig runtime_alloc cow
+      - name: dump (plain and family trees)
+        if: always()
+        run: cargo test -q -p almide-wasm --lib dump_runtime_bytes -- --ignored --nocapture 2>/dev/null | grep -E '^(inc|dec_flat|free|alloc)(_family)?:'
+      - name: structural bytes grounding
+        if: always()
+        run: bash proofs/check-structural-bytes.sh
+      - name: attribute vocabulary
+        if: always()
+        run: cargo test -p almide-frontend --lib attr_vocab
+      - name: link switch + rc-word inventory
+        if: always()
+        run: cargo test --release -p almide-wasm --test family_link --test rc_word_inventory -- --nocapture
+      - name: clippy (touched crates)
+        if: always()
+        run: cargo clippy -p almide-wasm -p almide-frontend --all-targets 2>&1 | grep -E -A6 '^(warning|error)' | grep -E -B2 -A6 'family|deep_walk|runtime_alloc|attr_vocab|emit\.rs|rc_word_inventory' || echo "no clippy finding in the touched files"
+  byte-identity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Install wasmtime
+        run: |
+          bash scripts/fetch-pinned.sh \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz \
+            /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp
+          sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - name: build base, head, and head with json_parse declared a producer
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/bins
+          git worktree add /tmp/src-base "$BASE_REF"
+          git worktree add /tmp/src-fam HEAD
+          sed -i 's/^fn json_parse(/@family_producer\nfn json_parse(/' /tmp/src-fam/stdlib/json_parse.almd
+          grep -n -B1 '^fn json_parse(' /tmp/src-fam/stdlib/json_parse.almd
+          for t in base fam; do
+            (cd /tmp/src-$t && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
+            cp target/release/almide /tmp/bins/almide-$t
+          done
+          cargo build --release --bin almide && cp target/release/almide /tmp/bins/almide-head
+      - name: every spec/wasm_cross module, base vs head (bytes) and head vs family (size)
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/out/{base,head,fam}
+          same=0; diff=0; fail=0; : > /tmp/out/diffs.txt; : > /tmp/out/fam.txt
+          for f in spec/wasm_cross/*.almd; do
+            n=$(basename "$f" .almd)
+            ok=1
+            for t in base head fam; do
+              /tmp/bins/almide-$t build "$f" --target wasm -o /tmp/out/$t/$n.wasm >/dev/null 2>&1 || ok=0
+            done
+            if [ $ok = 0 ]; then fail=$((fail+1)); continue; fi
+            if cmp -s /tmp/out/base/$n.wasm /tmp/out/head/$n.wasm; then same=$((same+1)); else diff=$((diff+1)); echo "$n" >> /tmp/out/diffs.txt; fi
+            hb=$(stat -c %s /tmp/out/head/$n.wasm); fb=$(stat -c %s /tmp/out/fam/$n.wasm)
+            if [ "$hb" != "$fb" ]; then echo "$n $hb $fb $((fb-hb))" >> /tmp/out/fam.txt; fi
+          done
+          echo "base vs head: identical=$same differing=$diff not-built=$fail"
+          echo "--- differing:"; cat /tmp/out/diffs.txt
+          echo "--- modules whose size moves when json_parse is a producer (name head fam delta):"; cat /tmp/out/fam.txt
+          echo "count: $(wc -l < /tmp/out/fam.txt)"
+          awk '{s+=$4} END {print "total delta:", s}' /tmp/out/fam.txt
+          test "$diff" = 0
+      - name: family modules run the same (json fixtures, wasm, head vs family)
+        if: always()
+        run: |
+          set -uo pipefail
+          bad=0; n=0
+          for f in $(grep -l 'json\.parse' spec/wasm_cross/*.almd); do
+            n=$((n+1))
+            a=$(/tmp/bins/almide-head run "$f" --target wasm 2>&1; echo "exit=$?")
+            b=$(/tmp/bins/almide-fam run "$f" --target wasm 2>&1; echo "exit=$?")
+            if [ "$a" != "$b" ]; then bad=$((bad+1)); echo "DIFFERS: $f"; fi
+          done
+          echo "json fixtures: $n, differing: $bad"
+          test "$bad" = 0
