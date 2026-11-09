@@ -263,7 +263,7 @@ fn __jp_v1(t: String, tl: Int, p: Int, depth: Int, sc: Bytes, sn: Int) -> Int = 
 }
 
 // A literal of `n` bytes at p that matched (`ok`), or refused with `kind`.
-fn __jp_lit1(p: Int, n: Int, ok: Bool, kind: Int, sc: Bytes, sn: Int) -> Int = if ok then {
+fn __jp_lit1(p: Int, n: Int, hit: Bool, kind: Int, sc: Bytes, sn: Int) -> Int = if hit then {
   __jp_count_value(sc, sn, 0)
   p + n
 } else __jp_code(p, kind)
