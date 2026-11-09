@@ -76,6 +76,15 @@ Definition CAP_OFFSET : Z := 8.
 Definition PAYLOAD : Z := 12.
 Definition CLASSES : Z := 13.
 
+(* ADR-0033 D1 — the INTERIOR rc word. An interior block of an allocation
+   family carries `0x8000_0000 | d` in its rc word, d = the byte distance
+   back to its family root (d < 2^31; with d < 2^31 the OR is the sum).
+   Memory cells hold the word's unsigned value; `signed32` is the i32
+   reading `i32.lt_s` compares, and `LOWMASK` is `0x7fff_ffff`. *)
+Definition INTERIOR : Z := 2147483648.
+Definition LOWMASK : Z := 2147483647.
+Definition signed32 (z : Z) : Z := if z <? INTERIOR then z else z - 4294967296.
+
 (* count-leading-zeros of a positive i32, spelled through log2. *)
 Definition clz32 (z : Z) : Z := 31 - Z.log2 z.
 
@@ -233,6 +242,7 @@ Inductive expr : Type :=
   | EClz (a : expr)
   | ELtU (a b : expr)
   | EGeU (a b : expr)
+  | ELtS (a b : expr) (* i32.lt_s — the family retarget's sign test (ADR-0033) *)
   | EEqz (a : expr)
   | EEq (a b : expr)  (* i32.eq ($dec_flat's double-free sentinel, #4023) *)
   | ELoad (a : expr).
@@ -254,6 +264,7 @@ Fixpoint ev (e : expr) (c : C) : Z :=
   | EClz a => clz32 (ev a c)
   | ELtU a b => if Z.ltb (ev a c) (ev b c) then 1 else 0
   | EGeU a b => if Z.geb (ev a c) (ev b c) then 1 else 0
+  | ELtS a b => if Z.ltb (signed32 (ev a c)) (signed32 (ev b c)) then 1 else 0
   | EEqz a => if Z.eqb (ev a c) 0 then 1 else 0
   | EEq a b => if Z.eqb (ev a c) (ev b c) then 1 else 0
   | ELoad a => cm c (ev a c)
@@ -268,6 +279,11 @@ Inductive stmt : Type :=
   | SRet
   | SCallFree
   | STrap           (* unreachable: the double-free trap (#4023) *)
+  | SRetarget (e : expr)
+      (* `local.set $block` — the family variants' redirect to the root
+         (ADR-0033). It rebinds the block PARAMETER, so only the family
+         runner `frun` below gives it meaning; no plain tree contains it,
+         and under `sstep` it is inert. *)
   | SLRun (ss : list LargeTree.lstmt).
       (* an inlined loop tree (the large-list release, LargeTree.lfree_tree),
          then return *)
@@ -286,6 +302,7 @@ Fixpoint sstep (fsem : C -> C) (s : stmt) (c : C) : bool * C :=
   | SRet => (true, c)
   | SCallFree => (false, fsem c)
   | STrap => (true, c)
+  | SRetarget _ => (false, c)
   | SLRun ss => (true, mkC (ctot c) (ccls c) (ctmp c)
                             (LargeTree.lfree_mem_of ss blk (ctot c) (ccls c) (cm c)))
   end.
@@ -535,3 +552,315 @@ Proof.
 Qed.
 
 End Trees.
+
+(* ══ THE FAMILY VARIANTS (ADR-0033 D1) ════════════════════════════════
+
+   A module that links a family producer emits `$inc` / `$dec_flat` with
+   ONE extra statement after the heap-floor guard:
+
+     if (load(block) <s 0) block = block - (load(block) & 0x7fff_ffff);
+
+   i.e. an INTERIOR word (bit 31 set) retargets the block parameter to its
+   family root, and the rest of the body is today's body, unchanged, run on
+   the root. (Modules that link no producer emit the plain trees above,
+   byte for byte.) The retarget rebinds the parameter, which the section's
+   runner keeps fixed, so the family runner `frun` below threads the block
+   through the list: an `SIf e (SRetarget e')` statement moves the block,
+   every other statement is `sstep` on the current block.
+
+   PROVEN: on an ordinary block (word < 2^31) each family tree IS the
+   plain tree (`*_family_ordinary`); on an interior block with distance d
+   it IS the plain tree on `block - d` (`*_family_interior`). So every
+   realization theorem above — `inc_realizes_rt_inc`,
+   `dec_shared_realizes_rt_dec`, `dec_unique_files_take_class`, and the
+   double-free trap `dec_freed_block_traps` — holds for the family trees
+   with the ROOT in the block's place (`inc_family_interior_credits_root`,
+   `dec_family_interior_shared_root`, `dec_family_interior_frees_root`,
+   `dec_family_interior_freed_root_traps`), and the interior word itself
+   is never written. proofs/FamilyRc.v lifts
+   this to the heap-trace definition (TEMPORAL). *)
+
+Fixpoint frun (fsem : Z -> C -> C) (blk floor : Z) (ss : list stmt) (c : C) : C :=
+  match ss with
+  | [] => c
+  | SIf e (SRetarget e') :: rest =>
+      if Z.eqb (ev blk floor e c) 0 then frun fsem blk floor rest c
+      else frun fsem (ev blk floor e' c) floor rest c
+  | s :: rest =>
+      let '(r, c') := sstep blk floor (fsem blk) s c in
+      if (r : bool) then c' else frun fsem blk floor rest c'
+  end.
+
+(* No retarget anywhere in a list: `frun` is `srun`. *)
+Definition no_retarget_stmt (s : stmt) : Prop :=
+  match s with
+  | SRetarget _ => False
+  | SIf _ (SRetarget _) => False
+  | _ => True
+  end.
+
+Lemma frun_srun : forall fsem blk floor ss c,
+  Forall no_retarget_stmt ss ->
+  frun fsem blk floor ss c = srun blk floor (fsem blk) ss c.
+Proof.
+  intros fsem blk floor ss. induction ss as [| s ss IH]; intros c H; [reflexivity |].
+  inversion H as [| s0 ss0 Hs Hss]; subst.
+  assert (E : frun fsem blk floor (s :: ss) c
+              = let '(r, c') := sstep blk floor (fsem blk) s c in
+                if (r : bool) then c' else frun fsem blk floor ss c').
+  { destruct s; try reflexivity.
+    match goal with |- context [SIf _ ?b] => destruct b end;
+      try reflexivity; simpl in Hs; contradiction. }
+  rewrite E. simpl. destruct (sstep blk floor (fsem blk) s c) as [r c'].
+  destruct r; simpl; [reflexivity | apply IH; exact Hss].
+Qed.
+
+(* The three moves a family tree makes before its plain tail. *)
+Lemma frun_guard_pass : forall fsem blk floor rest c,
+  floor <= blk ->
+  frun fsem blk floor (SIf (ELtU EBlk EFloor) SRet :: rest) c
+  = frun fsem blk floor rest c.
+Proof.
+  intros fsem blk floor rest c H. cbn.
+  destruct (Z.ltb_spec blk floor); [lia | reflexivity].
+Qed.
+
+Lemma srun_guard_pass : forall blk floor fsem rest c,
+  floor <= blk ->
+  srun blk floor fsem (SIf (ELtU EBlk EFloor) SRet :: rest) c
+  = srun blk floor fsem rest c.
+Proof.
+  intros blk floor fsem rest c H. cbn.
+  destruct (Z.ltb_spec blk floor); [lia | reflexivity].
+Qed.
+
+Lemma frun_retarget_skip : forall fsem blk floor e e' rest c,
+  ev blk floor e c = 0 ->
+  frun fsem blk floor (SIf e (SRetarget e') :: rest) c
+  = frun fsem blk floor rest c.
+Proof.
+  intros fsem blk floor e e' rest c H. cbn. rewrite H. reflexivity.
+Qed.
+
+Lemma frun_retarget_take : forall fsem blk floor e e' rest c,
+  ev blk floor e c <> 0 ->
+  frun fsem blk floor (SIf e (SRetarget e') :: rest) c
+  = frun fsem (ev blk floor e' c) floor rest c.
+Proof.
+  intros fsem blk floor e e' rest c H. cbn.
+  destruct (Z.eqb_spec (ev blk floor e c) 0); [contradiction | reflexivity].
+Qed.
+
+(* The retarget's two expressions. *)
+Definition sign_test : expr := ELtS (ELoad EBlk) (EC 0).
+Definition root_of_word : expr := ESub EBlk (ELand (ELoad EBlk) (EC LOWMASK)).
+
+Lemma land_low : forall d,
+  0 <= d < 2147483648 -> Z.land (2147483648 + d) 2147483647 = d.
+Proof.
+  intros d Hd.
+  change 2147483647 with (Z.ones 31).
+  rewrite Z.land_ones by lia.
+  change (2 ^ 31) with 2147483648.
+  replace (2147483648 + d) with (d + 1 * 2147483648) by lia.
+  rewrite Z_mod_plus_full. apply Z.mod_small. lia.
+Qed.
+
+Lemma signed32_ordinary : forall z, 0 <= z < INTERIOR -> signed32 z = z.
+Proof.
+  intros z Hz. unfold signed32. destruct (Z.ltb_spec z INTERIOR); lia.
+Qed.
+
+Lemma signed32_interior : forall d,
+  0 <= d < INTERIOR -> signed32 (INTERIOR + d) = INTERIOR + d - 4294967296.
+Proof.
+  intros d Hd. unfold signed32.
+  destruct (Z.ltb_spec (INTERIOR + d) INTERIOR); [lia | reflexivity].
+Qed.
+
+Lemma signed32_zero : signed32 0 = 0.
+Proof. reflexivity. Qed.
+
+Lemma sign_test_ordinary : forall blk floor c,
+  0 <= cm c blk < INTERIOR -> ev blk floor sign_test c = 0.
+Proof.
+  intros blk floor c H. unfold sign_test. cbn [ev].
+  rewrite (signed32_ordinary (cm c blk) H), signed32_zero.
+  destruct (Z.ltb_spec (cm c blk) 0); lia.
+Qed.
+
+Lemma sign_test_interior : forall blk floor c d,
+  0 <= d < INTERIOR -> cm c blk = INTERIOR + d -> ev blk floor sign_test c <> 0.
+Proof.
+  intros blk floor c d Hd Hw. unfold sign_test. cbn [ev].
+  rewrite Hw, (signed32_interior d Hd), signed32_zero.
+  destruct (Z.ltb_spec (INTERIOR + d - 4294967296) 0);
+    [discriminate | unfold INTERIOR in *; lia].
+Qed.
+
+Lemma root_of_word_interior : forall blk floor c d,
+  0 <= d < INTERIOR -> cm c blk = INTERIOR + d -> ev blk floor root_of_word c = blk - d.
+Proof.
+  intros blk floor c d Hd Hw. unfold root_of_word. cbn [ev]. rewrite Hw.
+  unfold INTERIOR, LOWMASK in *. rewrite land_low by lia. reflexivity.
+Qed.
+
+(* ── `$inc`, family variant: guard; retarget; rc(block) += 1. ── *)
+Definition inc_family_body : list stmt :=
+  [ SIf (ELtU EBlk EFloor) SRet;
+    SIf sign_test (SRetarget root_of_word);
+    SStore EBlk (EAdd (ELoad EBlk) (EC 1)) ].
+
+(* ── `$dec_flat`, family variant: guard; retarget; today's body. ── *)
+Definition dec_family_body : list stmt :=
+  [ SIf (ELtU EBlk EFloor) SRet;
+    SIf sign_test (SRetarget root_of_word);
+    SSetTmp (ESub (ELoad EBlk) (EC 1));
+    SIf (EEq ETmp (EC (-1))) STrap;
+    SStore EBlk ETmp;
+    SIf (EEqz ETmp) SCallFree ].
+
+Definition run_inc_family (blk floor : Z) (c : C) : C :=
+  frun (fun _ => nofree) blk floor inc_family_body c.
+Definition run_dec_family (blk floor fbase : Z) (c : C) : C :=
+  frun (fun b => run_free b floor fbase) blk floor dec_family_body c.
+
+Lemma inc_tail_no_retarget :
+  Forall no_retarget_stmt [SStore EBlk (EAdd (ELoad EBlk) (EC 1))].
+Proof. repeat constructor. Qed.
+
+Lemma dec_tail_no_retarget :
+  Forall no_retarget_stmt
+    [ SSetTmp (ESub (ELoad EBlk) (EC 1));
+      SIf (EEq ETmp (EC (-1))) STrap;
+      SStore EBlk ETmp;
+      SIf (EEqz ETmp) SCallFree ].
+Proof. repeat constructor. Qed.
+
+Theorem below_floor_family_noop : forall blk floor fbase c,
+  blk < floor ->
+  run_inc_family blk floor c = c /\ run_dec_family blk floor fbase c = c.
+Proof.
+  intros blk floor fbase c H. unfold run_inc_family, run_dec_family. cbn.
+  destruct (Z.ltb_spec blk floor); [split; reflexivity | lia].
+Qed.
+
+(* ORDINARY block: the family tree is the plain tree. *)
+Theorem inc_family_ordinary : forall blk floor c,
+  floor <= blk -> 0 <= cm c blk < INTERIOR ->
+  run_inc_family blk floor c = run_inc blk floor c.
+Proof.
+  intros blk floor c Hf Hw. unfold run_inc_family, inc_family_body, run_inc, inc_body.
+  rewrite frun_guard_pass by exact Hf.
+  rewrite frun_retarget_skip by (apply sign_test_ordinary; exact Hw).
+  rewrite frun_srun by exact inc_tail_no_retarget.
+  rewrite srun_guard_pass by exact Hf. reflexivity.
+Qed.
+Print Assumptions inc_family_ordinary.
+
+Theorem dec_family_ordinary : forall blk floor fbase c,
+  floor <= blk -> 0 <= cm c blk < INTERIOR ->
+  run_dec_family blk floor fbase c = run_dec blk floor fbase c.
+Proof.
+  intros blk floor fbase c Hf Hw.
+  unfold run_dec_family, dec_family_body, run_dec, dec_body.
+  rewrite frun_guard_pass by exact Hf.
+  rewrite frun_retarget_skip by (apply sign_test_ordinary; exact Hw).
+  rewrite frun_srun by exact dec_tail_no_retarget.
+  rewrite srun_guard_pass by exact Hf. reflexivity.
+Qed.
+Print Assumptions dec_family_ordinary.
+
+(* INTERIOR block at distance d: the family tree is the plain tree on the
+   ROOT `blk - d` — the count credited to the family root. *)
+Theorem inc_family_interior : forall blk floor c d,
+  floor <= blk -> 0 <= d < INTERIOR -> cm c blk = INTERIOR + d ->
+  floor <= blk - d ->
+  run_inc_family blk floor c = run_inc (blk - d) floor c.
+Proof.
+  intros blk floor c d Hf Hd Hw Hr.
+  unfold run_inc_family, inc_family_body, run_inc, inc_body.
+  rewrite frun_guard_pass by exact Hf.
+  rewrite frun_retarget_take by (apply (sign_test_interior blk floor c d Hd Hw)).
+  rewrite (root_of_word_interior blk floor c d Hd Hw).
+  rewrite frun_srun by exact inc_tail_no_retarget.
+  rewrite srun_guard_pass by exact Hr. reflexivity.
+Qed.
+Print Assumptions inc_family_interior.
+
+Theorem dec_family_interior : forall blk floor fbase c d,
+  floor <= blk -> 0 <= d < INTERIOR -> cm c blk = INTERIOR + d ->
+  floor <= blk - d ->
+  run_dec_family blk floor fbase c = run_dec (blk - d) floor fbase c.
+Proof.
+  intros blk floor fbase c d Hf Hd Hw Hr.
+  unfold run_dec_family, dec_family_body, run_dec, dec_body.
+  rewrite frun_guard_pass by exact Hf.
+  rewrite frun_retarget_take by (apply (sign_test_interior blk floor c d Hd Hw)).
+  rewrite (root_of_word_interior blk floor c d Hd Hw).
+  rewrite frun_srun by exact dec_tail_no_retarget.
+  rewrite srun_guard_pass by exact Hr. reflexivity.
+Qed.
+Print Assumptions dec_family_interior.
+
+(* The composed consequences, stated on the ROOT r = blk - d. *)
+
+(* An interior `$inc` is the root's `rt_inc`, and the interior word is
+   not written. *)
+Theorem inc_family_interior_credits_root : forall blk floor c d,
+  floor <= blk - d -> 0 < d < INTERIOR -> cm c blk = INTERIOR + d ->
+  cm (run_inc_family blk floor c) = rt_inc (cm c) (blk - d)
+  /\ cm (run_inc_family blk floor c) blk = cm c blk.
+Proof.
+  intros blk floor c d Hr Hd Hw.
+  rewrite (inc_family_interior blk floor c d) by lia.
+  rewrite (inc_realizes_rt_inc (blk - d) floor c Hr).
+  split; [reflexivity |].
+  unfold rt_inc, RC_OFFSET. rewrite Z.add_0_r. apply upd_neq. lia.
+Qed.
+Print Assumptions inc_family_interior_credits_root.
+
+(* An interior `$dec_flat` on a SHARED root (rc >= 2) is the root's
+   `rt_dec`; the interior word is not written and nothing is freed. *)
+Theorem dec_family_interior_shared_root : forall blk floor fbase c d,
+  floor <= blk - d -> 0 < d < INTERIOR -> cm c blk = INTERIOR + d ->
+  2 <= cm c (blk - d) ->
+  rt_dec (cm c) (blk - d) = Some (cm (run_dec_family blk floor fbase c))
+  /\ cm (run_dec_family blk floor fbase c) blk = cm c blk.
+Proof.
+  intros blk floor fbase c d Hr Hd Hw H2.
+  rewrite (dec_family_interior blk floor fbase c d) by lia.
+  destruct (dec_shared_realizes_rt_dec (blk - d) floor fbase c Hr H2) as [Hs Hm].
+  split; [exact Hs |]. rewrite Hm. apply upd_neq. lia.
+Qed.
+Print Assumptions dec_family_interior_shared_root.
+
+(* An interior `$dec_flat` whose root is uniquely held frees the WHOLE
+   family as the root block: the root is filed into its take class. *)
+Theorem dec_family_interior_frees_root : forall blk floor fbase c d cl,
+  floor <= blk - d -> 0 < d < INTERIOR -> cm c blk = INTERIOR + d ->
+  cm c (blk - d) = 1 -> 0 <= cl -> cl < 13 ->
+  cm c (blk - d + 8) = 16 * 2 ^ cl - 12 ->
+  cm (run_dec_family blk floor fbase c)
+  = (let m0 := upd (cm c) (blk - d) 0 in
+     let slot := fbase + 4 * cl in
+     upd (upd m0 (blk - d + 12) (m0 slot)) slot (blk - d)).
+Proof.
+  intros blk floor fbase c d cl Hr Hd Hw H1 Hcl Hclc Hcap.
+  rewrite (dec_family_interior blk floor fbase c d) by lia.
+  exact (dec_unique_files_take_class (blk - d) floor fbase c cl Hr H1 Hcl Hclc Hcap).
+Qed.
+Print Assumptions dec_family_interior_frees_root.
+
+(* The double-free trap is kept: an interior `$dec_flat` whose root is
+   already freed (rc 0) stops with memory untouched. *)
+Theorem dec_family_interior_freed_root_traps : forall blk floor fbase c d,
+  floor <= blk - d -> 0 < d < INTERIOR -> cm c blk = INTERIOR + d ->
+  cm c (blk - d) = 0 ->
+  cm (run_dec_family blk floor fbase c) = cm c.
+Proof.
+  intros blk floor fbase c d Hr Hd Hw H0.
+  rewrite (dec_family_interior blk floor fbase c d) by lia.
+  exact (dec_freed_block_traps (blk - d) floor fbase c Hr H0).
+Qed.
+Print Assumptions dec_family_interior_freed_root_traps.

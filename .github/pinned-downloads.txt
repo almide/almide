@@ -12,6 +12,13 @@
 d737e077416d78fbfb0a008229ec27d6a0fd5a4924874b8c38b293c850cf4094  https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-aarch64-linux.tar.xz
 960e5216c7ebd7e9b45e6561d15821b8b801b7d54aee28c7b91921aeb30c65c8  https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-aarch64-macos.tar.xz
 c3646ee2de8cfcefe532e75852e1fd2728d78c3fcc43251794803a698d1c30ca  https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-windows.zip
+34e0f62a2bc11ab20d601e8ca1cc2b2079503aa45119a19133d89d19b94a0fae  https://github.com/ibireme/yyjson/archive/refs/tags/0.13.0.tar.gz
+869e8a4ff285cec36bc79d4a671a433158391a4f1898bb1c3b1f6e654b9547ae  https://raw.githubusercontent.com/simdjson/simdjson/v5.0.5/singleheader/simdjson.h
+97d622441079fae86c7c342508880168bd7bf9e3342b1f4c565077da0155ca79  https://raw.githubusercontent.com/simdjson/simdjson/v5.0.5/singleheader/simdjson.cpp
+b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4  https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-linux.tar.gz
+a08b769f32b95f426cbc3abafcec65c1a19d3eb544d4ddf320eae142c99efc5d  https://raw.githubusercontent.com/miloyip/nativejson-benchmark/478d5727c2a4048e835a29c65adecc7d795360d5/data/twitter.json
+a73e7a883f6ea8de113dff59702975e60119b4b58d451d518a929f31c92e2059  https://raw.githubusercontent.com/miloyip/nativejson-benchmark/478d5727c2a4048e835a29c65adecc7d795360d5/data/citm_catalog.json
+f83b3b354030d5dd58740c68ac4fecef64cb730a0d12a90362a7f23077f50d78  https://raw.githubusercontent.com/miloyip/nativejson-benchmark/478d5727c2a4048e835a29c65adecc7d795360d5/data/canada.json
 c539d91ccab2591a7e975bcf82c82e1911b03335c80aa83d67ad25ed2ad06539  https://github.com/rustwasm/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz
 32aa82416099eb12fffae9cf1a279ad201fecbd3f74826c613e32e9006b29867  https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.145/cargo-nextest-0.9.145-x86_64-unknown-linux-gnu.tar.gz
 42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63  https://github.com/leanprover/elan/releases/download/v4.2.4/elan-x86_64-unknown-linux-gnu.tar.gz

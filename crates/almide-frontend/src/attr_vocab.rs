@@ -36,6 +36,10 @@ pub const KNOWN_ATTRS: &[&str] = &[
     "borrow_ref",
     // May take over a dying source's storage (crates/almide-types: `reuse`)
     "reuse",
+    // A fn whose result may hold INTERIOR blocks of an allocation family
+    // (ADR-0033 D1): a wasm module linking one emits the rc redirect
+    // (crates/almide-wasm family.rs)
+    "family_producer",
     // A self-hosted body names the stdlib fn it implements (crates/almide-types: `implements`)
     "implements",
     // A representation-specialized self-hosted body (`map.set_skv`) names the

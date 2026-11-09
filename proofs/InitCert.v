@@ -755,3 +755,346 @@ Example fill_bytes :
   check_init_cert "h12 w8 v4 r0 f4 t8 s0" = false /\
   check_init_cert "h12 w8 v4 r0 f4" = false.
 Proof. repeat split; reflexivity. Qed.
+
+(* ══ CARVE SITES: interior blocks of an allocation family (ADR-0033 D7) ══
+
+   A family (proofs/FamilyRc.v) is ONE allocation of n bytes — the root,
+   representation k — whose payload holds interior blocks, carved back to
+   back by json.parse's pass 2 before the family is published. On the heap
+   trace a member's header and slot stores are stores INTO THE ROOT at the
+   member's offset (`FamilyRc.credit`), so `site_window` generalizes from a
+   whole block to a SUB-EXTENT: a CARVE is a site placed at byte `base` of
+   a live block.
+
+     carve_window   an accepted site carved at base, inside a live block of
+                    representation k with room (base + size <= n): its
+                    stores are MemorySafe, touch no other block, keep the
+                    block's size / representation / count, and initialize
+                    exactly [base, base + size) on top of what was there.
+     tiles          the carve list's checker: the carves are accepted
+                    sites, start right after the root's 12-byte header,
+                    each begins where the last ended, and the last ends AT
+                    n. (Each carve's `cursor + size <= end` is implied —
+                    `tiles_room` — and a carve list sized past n, the
+                    pass-2-counts-more-than-pass-1 shape, is rejected.)
+     family_window  allocation + the root header store + accepted carves:
+                    MemorySafe, other blocks untouched, and the root live
+                    and initialized over ALL n bytes — so every in-bounds
+                    load of any member reads initialized bytes.
+     fsited_init    the INITIALIZATION clause for traces whose allocations
+                    are sites OR families (sited_init, extended).
+
+   HONEST SCOPE. This is the proof side. A carve is held to the same
+   recorded-events trust as a site: that the witness's carve records are the
+   stores the bytes contain is the anchor check's job, and the emitter does
+   not record carves yet (crates/almide-wasm/src/witness_init.rs records
+   list literals and ranges). Until it does, the parse's carve stores sit
+   where every other `prim.alloc_*` site sits today (the INIT gap-table row):
+   uncertified, not newly trusted. The TYPE clause is per BLOCK in
+   MemorySafe.v, so a member's own representation is not expressible on the
+   credited trace (its stores are typed as the root's k); that a member is
+   read as the type it was carved as stays with the layout trust row. *)
+
+Definition carve_store (r : Blk) (base : Z) (s : Site) (k : Repr) (i : nat) : Ev :=
+  EStore r (base + slot_off s i) (Z.of_nat (Ws s)) k.
+
+Definition carve_events (r : Blk) (base : Z) (s : Site) (k : Repr) : list Ev :=
+  EStore r base (Z.of_nat (HDRs s)) k :: map (carve_store r base s k) (STORES s).
+
+Definition same_shape (x y : Block) : Prop :=
+  size y = size x /\ repr y = repr x /\ rc y = rc x.
+
+Lemma carve_stores_window : forall s r base k l h x,
+  site_ok s = true -> (forall i, In i l -> (i < COUNT s)%nat) ->
+  h r = Some x -> 0 < rc x -> repr x = k -> 0 <= base -> base + site_size s <= size x ->
+  holds safe_ev h (map (carve_store r base s k) l) /\
+  exists y, after h (map (carve_store r base s k) l) r = Some y /\ same_shape x y /\
+    (forall j, init x j = true -> init y j = true) /\
+    (forall i, In i l -> all_init (init y) (base + slot_off s i) (Z.of_nat (Ws s))).
+Proof.
+  intros s r base k l. induction l as [| i l IH]; intros h x Ok Hl Hx Rc Rp B0 Bs.
+  - split; [exact I |]. exists x. split; [exact Hx |].
+    split; [split; [reflexivity | split; reflexivity] |].
+    split; [auto | intros i Hi; destruct Hi].
+  - assert (Hi : (i < COUNT s)%nat) by (apply Hl; left; reflexivity).
+    set (x1 := mkBlock (size x) (repr x) (rc x)
+                 (mark (init x) (base + slot_off s i) (Z.of_nat (Ws s)))).
+    assert (E1 : step h (carve_store r base s k i) = set h r x1)
+      by (unfold carve_store; simpl; rewrite Hx; reflexivity).
+    assert (Hx1 : set h r x1 r = Some x1) by (unfold set; rewrite Nat.eqb_refl; reflexivity).
+    destruct (IH (set h r x1) x1 Ok (fun j Hj => Hl j (or_intror Hj)) Hx1 Rc Rp B0 Bs)
+      as [Hs [y [Hy [Shy [Keep Cov]]]]].
+    split.
+    + cbn [map holds]. split.
+      * destruct (site_ok_spec s Ok) as [Hh [Hw _]].
+        assert (Z.of_nat i + 1 <= Z.of_nat (COUNT s)) by lia.
+        unfold safe_ev, carve_store, live. simpl.
+        split; [exists x; split; [exact Hx |] |].
+        { unfold in_bounds, slot_off, site_size in *. split; [nia |]. split; [lia | nia]. }
+        split; [exists x; split; [exact Hx | exact Rc] |].
+        split; [exact I | exists x; split; [exact Hx | exact Rp]].
+      * rewrite E1. exact Hs.
+    + exists y. unfold after. cbn [map fold_left]. rewrite E1.
+      fold (after (set h r x1) (map (carve_store r base s k) l)).
+      split; [exact Hy |]. split; [exact Shy |]. split.
+      * intros j Hj. apply Keep. simpl. apply mark_keeps. exact Hj.
+      * intros m [Hm | Hm].
+        -- subst m. intros j Hj. apply Keep. simpl. apply mark_covers. exact Hj.
+        -- exact (Cov m Hm).
+Qed.
+
+Theorem carve_window : forall s r base k h x,
+  site_ok s = true -> h r = Some x -> 0 < rc x -> repr x = k ->
+  0 <= base -> base + site_size s <= size x ->
+  holds safe_ev h (carve_events r base s k) /\
+  (forall c, c <> r -> after h (carve_events r base s k) c = h c) /\
+  exists y, after h (carve_events r base s k) r = Some y /\ same_shape x y /\
+    (forall j, init x j = true -> init y j = true) /\
+    (forall j, base <= j < base + site_size s -> init y j = true).
+Proof.
+  intros s r base k h x Ok Hx Rc Rp B0 Bs.
+  destruct (site_ok_spec s Ok) as [Hh [Hw [Cov Rng]]].
+  assert (Ss : Z.of_nat (HDRs s) <= site_size s) by (unfold site_size; nia).
+  set (x1 := mkBlock (size x) (repr x) (rc x) (mark (init x) base (Z.of_nat (HDRs s)))).
+  assert (E1 : step h (EStore r base (Z.of_nat (HDRs s)) k) = set h r x1)
+    by (simpl; rewrite Hx; reflexivity).
+  assert (Hx1 : set h r x1 r = Some x1) by (unfold set; rewrite Nat.eqb_refl; reflexivity).
+  destruct (carve_stores_window s r base k (STORES s) (set h r x1) x1 Ok Rng Hx1 Rc Rp B0 Bs)
+    as [Hs [y [Hy [Shy [Keep Slots]]]]].
+  assert (Ev : after h (carve_events r base s k)
+               = after (set h r x1) (map (carve_store r base s k) (STORES s))).
+  { unfold after, carve_events. cbn [fold_left]. rewrite E1. reflexivity. }
+  split; [| split].
+  - unfold carve_events. cbn [holds]. split.
+    + unfold safe_ev, live. simpl.
+      split; [exists x; split; [exact Hx | unfold in_bounds; lia] |].
+      split; [exists x; split; [exact Hx | exact Rc] |].
+      split; [exact I | exists x; split; [exact Hx | exact Rp]].
+    + rewrite E1. exact Hs.
+  - intros c Hc. rewrite Ev. rewrite after_other.
+    + unfold set. apply Nat.eqb_neq in Hc. rewrite Hc. reflexivity.
+    + apply Forall_forall. intros e He. apply in_map_iff in He. destruct He as [i [<- _]].
+      unfold carve_store. simpl. auto.
+  - exists y. split; [rewrite Ev; exact Hy |]. split; [exact Shy |]. split.
+    + intros j Hj. apply Keep. simpl. apply mark_keeps. exact Hj.
+    + intros j Hj.
+      destruct (extent_covered s (j - base) Ok ltac:(lia)) as [Hd | [i [Hi Hin]]].
+      * apply Keep. simpl. apply mark_covers. lia.
+      * apply (Slots i (Cov i Hi) j). lia.
+Qed.
+Print Assumptions carve_window.
+
+(* ── The carve-list checker ── *)
+
+Fixpoint tiles (pos : Z) (cs : list (Z * Site)) (n : Z) : bool :=
+  match cs with
+  | [] => pos =? n
+  | (b, s) :: cs' => (b =? pos) && site_ok s && tiles (pos + site_size s) cs' n
+  end.
+
+Lemma site_size_pos : forall s, site_ok s = true -> 0 < site_size s.
+Proof.
+  intros s Ok. destruct (site_ok_spec s Ok) as [Hh _]. unfold site_size. nia.
+Qed.
+
+(* Every accepted carve list ends at n, so each carve's room test holds. *)
+Lemma tiles_room : forall cs pos n, tiles pos cs n = true -> pos <= n.
+Proof.
+  intro cs. induction cs as [| [b s] cs IH]; intros pos n H; cbn [tiles] in H.
+  - apply Z.eqb_eq in H. lia.
+  - apply andb_true_iff in H. destruct H as [H Ht]. apply andb_true_iff in H.
+    destruct H as [_ Ok]. pose proof (site_size_pos s Ok). specialize (IH _ _ Ht). lia.
+Qed.
+
+Definition carves_events (r : Blk) (k : Repr) (cs : list (Z * Site)) : list Ev :=
+  flat_map (fun bs => carve_events r (fst bs) (snd bs) k) cs.
+
+Lemma after_app : forall h t1 t2, after h (t1 ++ t2) = after (after h t1) t2.
+Proof. intros. unfold after. apply fold_left_app. Qed.
+
+Lemma carves_window : forall r k cs pos h x,
+  h r = Some x -> 0 < rc x -> repr x = k -> 0 <= pos ->
+  (forall j, 0 <= j < pos -> init x j = true) ->
+  tiles pos cs (size x) = true ->
+  holds safe_ev h (carves_events r k cs) /\
+  (forall c, c <> r -> after h (carves_events r k cs) c = h c) /\
+  exists y, after h (carves_events r k cs) r = Some y /\ same_shape x y /\
+    forall j, 0 <= j < size x -> init y j = true.
+Proof.
+  intros r k cs. induction cs as [| [b s] cs IH]; intros pos h x Hx Rc Rp P0 Pre T.
+  - cbn [tiles] in T. apply Z.eqb_eq in T. split; [exact I |]. split; [intros; reflexivity |].
+    exists x. split; [exact Hx |]. split; [split; [reflexivity | split; reflexivity] |].
+    intros j Hj. apply Pre. lia.
+  - cbn [tiles] in T. apply andb_true_iff in T. destruct T as [T Tr]. apply andb_true_iff in T.
+    destruct T as [Hb Ok]. apply Z.eqb_eq in Hb. subst b.
+    pose proof (tiles_room cs _ _ Tr) as Room.
+    destruct (carve_window s r pos k h x Ok Hx Rc Rp P0 Room)
+      as [Hs [Oth [y1 [Hy1 [[Sz1 [Rp1 Rc1]] [Keep1 Cov1]]]]]].
+    assert (Tr' : tiles (pos + site_size s) cs (size y1) = true) by (rewrite Sz1; exact Tr).
+    assert (Pre1 : forall j, 0 <= j < pos + site_size s -> init y1 j = true).
+    { intros j Hj. destruct (Z_lt_le_dec j pos) as [Lt | Ge].
+      - apply Keep1. apply Pre. lia.
+      - apply Cov1. lia. }
+    pose proof (site_size_pos s Ok) as Sp.
+    destruct (IH (pos + site_size s) (after h (carve_events r pos s k)) y1 Hy1
+                 ltac:(lia) ltac:(rewrite Rp1; exact Rp) ltac:(lia) Pre1 Tr')
+      as [Hs2 [Oth2 [y [Hy [[Sz [Rpy Rcy]] Full]]]]].
+    assert (Split : carves_events r k ((pos, s) :: cs)
+                    = carve_events r pos s k ++ carves_events r k cs) by reflexivity.
+    rewrite Split. split; [| split].
+    + apply holds_app'. split; [exact Hs | exact Hs2].
+    + intros c Hc. rewrite after_app. rewrite (Oth2 c Hc). exact (Oth c Hc).
+    + exists y. rewrite after_app. split; [exact Hy |].
+      split; [split; [lia | split; congruence] |].
+      intros j Hj. apply Full. lia.
+Qed.
+
+(* The root's own header: rc / len / cap, PAYLOAD = 12 bytes. *)
+Definition family_events (r : Blk) (n : Z) (k : Repr) (cs : list (Z * Site)) : list Ev :=
+  EAlloc r n k :: EStore r 0 12 k :: carves_events r k cs.
+
+Definition family_ok (n : Z) (cs : list (Z * Site)) : bool := tiles 12 cs n.
+
+Theorem family_window : forall r n k cs h,
+  family_ok n cs = true -> ~ live h r ->
+  holds safe_ev h (family_events r n k cs) /\
+  (forall c, c <> r -> after h (family_events r n k cs) c = h c) /\
+  exists y, after h (family_events r n k cs) r = Some y /\
+    size y = n /\ repr y = k /\ rc y = 1 /\
+    forall j, 0 <= j < n -> init y j = true.
+Proof.
+  intros r n k cs h Ok NL. unfold family_ok in Ok.
+  pose proof (tiles_room cs 12 n Ok) as Hn.
+  set (x0 := mkBlock n k 1 (fun _ => false)).
+  set (h0 := set h r x0).
+  assert (H0r : h0 r = Some x0) by (unfold h0, set; rewrite Nat.eqb_refl; reflexivity).
+  set (x1 := mkBlock n k 1 (mark (fun _ => false) 0 12)).
+  set (h1 := set h0 r x1).
+  assert (E0 : step h (EAlloc r n k) = h0) by reflexivity.
+  assert (E1 : step h0 (EStore r 0 12 k) = h1) by (simpl; rewrite H0r; reflexivity).
+  assert (H1r : h1 r = Some x1) by (unfold h1, set; rewrite Nat.eqb_refl; reflexivity).
+  assert (Pre : forall j, 0 <= j < 12 -> init x1 j = true)
+    by (intros j Hj; unfold x1; simpl; apply mark_covers; lia).
+  destruct (carves_window r k cs 12 h1 x1 H1r ltac:(unfold x1; simpl; lia)
+              eq_refl ltac:(lia) Pre Ok)
+    as [Hs [Oth [y [Hy [[Sz [Rp Rc]] Full]]]]].
+  assert (Ev : after h (family_events r n k cs) = after h1 (carves_events r k cs)).
+  { unfold after, family_events. cbn [fold_left]. rewrite E0, E1. reflexivity. }
+  split; [| split].
+  - unfold family_events. cbn [holds]. rewrite E0, E1. split; [| split].
+    + unfold safe_ev. simpl. tauto.
+    + unfold safe_ev, live. simpl.
+      split; [exists x0; split; [exact H0r | unfold in_bounds; simpl; lia] |].
+      split; [exists x0; split; [exact H0r | simpl; lia] |].
+      split; [exact I | exists x0; split; [exact H0r | reflexivity]].
+    + exact Hs.
+  - intros c Hc. rewrite Ev, (Oth c Hc). unfold h1, h0, set.
+    apply Nat.eqb_neq in Hc. rewrite Hc. reflexivity.
+  - exists y. rewrite Ev. split; [exact Hy |].
+    split; [exact Sz |]. split; [exact Rp |]. split; [exact Rc |].
+    intros j Hj. apply Full. exact Hj.
+Qed.
+Print Assumptions family_window.
+
+(* ── Traces whose allocations are sites or families ── *)
+
+Inductive fsited : list Ev -> Prop :=
+  | FNil : fsited []
+  | FSite : forall b s t, site_ok s = true -> fsited t -> fsited (site_events b s ++ t)
+  | FFamily : forall r n k cs t, family_ok n cs = true -> fsited t ->
+      fsited (family_events r n k cs ++ t)
+  | FOther : forall e t, (forall b n r, e <> EAlloc b n r) -> fsited t -> fsited (e :: t).
+
+Lemma carve_no_load : forall r b s k h, holds init_ev h (carve_events r b s k).
+Proof.
+  intros r b s k.
+  assert (G : forall l h, holds init_ev h (map (carve_store r b s k) l)).
+  { intro l. induction l as [| i l IH]; intro h; cbn [map holds]; [exact I |].
+    split; [exact I | apply IH]. }
+  intro h. unfold carve_events. cbn [holds]. split; [exact I | apply G].
+Qed.
+
+Lemma family_no_load : forall r n k cs h, holds init_ev h (family_events r n k cs).
+Proof.
+  intros r n k cs.
+  assert (G : forall cs0 h, holds init_ev h (carves_events r k cs0)).
+  { intro cs0. induction cs0 as [| [b s] cs0 IH]; intro h; [exact I |].
+    change (carves_events r k ((b, s) :: cs0))
+      with (carve_events r b s k ++ carves_events r k cs0).
+    apply holds_app'. split; [apply carve_no_load | apply IH]. }
+  intro h. unfold family_events. cbn [holds]. split; [exact I |]. split; [exact I | apply G].
+Qed.
+
+Theorem fsited_init : forall t h,
+  fsited t -> full_init h -> holds temporal_ev h t -> holds spatial_ev h t ->
+  holds init_ev h t.
+Proof.
+  intros t h S. revert h.
+  induction S as [| b s t Ok S IH | r n k cs t Ok S IH | e t NA S IH]; intros h F T Sp.
+  - exact I.
+  - apply holds_app'. apply holds_app' in T. apply holds_app' in Sp.
+    destruct T as [Tw Tt]. destruct Sp as [_ St].
+    assert (NL : ~ live h b) by (simpl in Tw; tauto).
+    destruct (site_window s b h Ok NL) as [_ [Oth [x [Hx [_ Full]]]]].
+    split; [apply window_no_load |].
+    apply IH; [| exact Tt | exact St].
+    intros c y Hy i Hi. destruct (Nat.eq_dec c b) as [-> | Ne].
+    + rewrite Hx in Hy. injection Hy as <-. exact (Full i Hi).
+    + rewrite (Oth c Ne) in Hy. exact (F c y Hy i Hi).
+  - apply holds_app'. apply holds_app' in T. apply holds_app' in Sp.
+    destruct T as [Tw Tt]. destruct Sp as [_ St].
+    assert (NL : ~ live h r) by (simpl in Tw; tauto).
+    destruct (family_window r n k cs h Ok NL) as [_ [Oth [x [Hx [Sz [_ [_ Full]]]]]]].
+    split; [apply family_no_load |].
+    apply IH; [| exact Tt | exact St].
+    intros c y Hy i Hi. destruct (Nat.eq_dec c r) as [-> | Ne].
+    + rewrite Hx in Hy. injection Hy as <-. apply Full. rewrite <- Sz. exact Hi.
+    + rewrite (Oth c Ne) in Hy. exact (F c y Hy i Hi).
+  - destruct T as [_ T]. destruct Sp as [Spe Sp]. simpl. split.
+    + destruct e as [b n r | b o w r | b o w r | b | b]; simpl; try exact I.
+      destruct Spe as [x [Hx [Ho [_ Hend]]]]. exists x. split; [exact Hx |].
+      intros i Hi. apply (F b x Hx). lia.
+    + apply IH; [| exact T | exact Sp]. apply step_full_init; [exact F | exact NA].
+Qed.
+Print Assumptions fsited_init.
+
+(* ── Negative controls: the carve drills ── *)
+
+(* A Value box member: 12-byte header, one 16-byte payload slot — 28 bytes;
+   a family of one member is 12 + 28 = 40 bytes. *)
+Definition box : Site := (mkSite 12 16 1 0 [0])%nat.
+
+Example family_of_one_box_accepted : family_ok 40 [(12, box)] = true.
+Proof. reflexivity. Qed.
+
+(* `pass2-count-disagrees`: pass 2 carves one member more than pass 1
+   sized the family for. The list runs past n and is rejected. *)
+Example pass2_extra_node_rejected : family_ok 40 [(12, box); (40, box)] = false.
+Proof. reflexivity. Qed.
+
+(* `carve-room-loosened-by-one`: a room test of `cursor + size <= end + 1`
+   lets a member end one byte past the family. The list is rejected, and the
+   trace it would write is not MemorySafe (its last slot store is one byte
+   out of bounds). *)
+Example room_loosened_rejected : family_ok 39 [(12, box)] = false.
+Proof. reflexivity. Qed.
+
+Example room_loosened_trace_unsafe :
+  check_trace (family_events 0%nat 39 0%nat [(12, box)]) = false.
+Proof. reflexivity. Qed.
+
+Example accepted_family_trace_safe :
+  check_trace (family_events 0%nat 40 0%nat [(12, box)]) = true.
+Proof. reflexivity. Qed.
+
+(* `carve-store-misplaced`: a member whose slot store is recorded at the
+   wrong slot (slot 1 of a one-slot member) leaves its payload unwritten;
+   the site is rejected, so the family is. *)
+Example carve_store_misplaced_rejected :
+  family_ok 40 [(12, (mkSite 12 16 1 0 [1])%nat)] = false.
+Proof. reflexivity. Qed.
+
+(* A member carved at the wrong base (a gap or an overlap) is rejected. *)
+Example carve_base_misplaced_rejected :
+  family_ok 40 [(16, box)] = false /\ family_ok 44 [(16, box)] = false.
+Proof. split; reflexivity. Qed.
