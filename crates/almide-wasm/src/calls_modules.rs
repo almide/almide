@@ -442,7 +442,7 @@ impl Emitter<'_> {
                 self.lower_set_call(func.as_str(), args, ret_hint)
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "prim" => {
-                self.lower_prim_call(func.as_str(), args)
+                self.lower_prim_call(func.as_str(), args, ret_hint)
             }
             CallTarget::Module { module, func, .. } => {
                 // The option/result intrinsic combinator matrix first —
