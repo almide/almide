@@ -9,7 +9,7 @@ env:
   RUST_TOOLCHAIN: "1.97.0"
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
-  BASE_REF: origin/json-substrate
+  BASE_REF: e8a3546e7cf76e25f2012df438e337a2fd791a5f
 jobs:
   family-tests:
     runs-on: ubuntu-latest
@@ -121,3 +121,55 @@ jobs:
           done
           echo "json fixtures: $n, differing: $bad"
           test "$bad" = 0
+  famwall:
+    if: github.ref_name == 'probe/w1-famwall'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      OPAM_CACHE_VERSION: v1
+      OCAML_VERSION: "5.4.1"
+      ROCQ_CORE_VERSION: "9.3.0"
+      OPAM_REPO_SHA: a04b045f1534714416da6b4f8e8e67d2defbb750
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: Restore opam root (OCaml + Rocq)
+        id: opam-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
+      - name: Install opam + wabt + wasmtime
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends opam wabt
+          bash scripts/fetch-pinned.sh https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz /tmp/wasmtime.tar.xz
+          tar -xf /tmp/wasmtime.tar.xz -C /tmp && sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
+      - name: Build opam switch + Rocq (cache miss only)
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        run: |
+          opam init --bare --disable-sandboxing -y default "git+https://github.com/ocaml/opam-repository.git#${OPAM_REPO_SHA}"
+          opam switch create "${OCAML_VERSION}" -y
+          eval "$(opam env)"
+          opam install -y "rocq-prover>=9.0.0" "rocq-core=${ROCQ_CORE_VERSION}"
+      - name: coqc / coqchk on PATH
+        run: |
+          eval "$(opam env)"
+          BIN="$HOME/.local/bin"; mkdir -p "$BIN"
+          command -v coqc >/dev/null 2>&1 || { printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; }
+          command -v coqchk >/dev/null 2>&1 || { printf '#!/bin/sh\nexec rocq check "$@"\n' > "$BIN/coqchk"; chmod +x "$BIN/coqchk"; }
+          echo "$BIN" >> "$GITHUB_PATH"
+      - name: structural wall with json_parse a family producer (anchor check + kernel over family modules)
+        run: |
+          eval "$(opam env)"
+          bash proofs/structural-wall.sh 2>&1 | tee /tmp/wall.log | tail -80
+      - name: what the wall said about json-linking fixtures
+        if: always()
+        run: grep -n -i -E 'json|value_|codec' /tmp/wall.log | grep -i -E 'reject|fail|declin|exception' | head -60 || true
