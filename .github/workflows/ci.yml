@@ -32,6 +32,7 @@ on:
   # acceptance-ring.yml produce required contexts; the rest deliberately
   # skip merge_group to keep the queue validation lean.
   merge_group:
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
 # concurrent runs that all re-download tools and trip the per-IP rate limit.
