@@ -28,7 +28,7 @@ jobs:
           bash scripts/fetch-pinned.sh https://github.com/bytecodealliance/wasmtime/releases/download/v50.0.1/wasmtime-v50.0.1-x86_64-linux.tar.xz /tmp/wasmtime.tar.xz
           tar -xf /tmp/wasmtime.tar.xz -C /tmp && sudo mv /tmp/wasmtime-v50.0.1-x86_64-linux/wasmtime /usr/local/bin/
       - name: build
-        run: cargo build --release --bin almide --bin almide-anchor-check
+        run: cargo build --release --bin almide
       - name: json fixtures, native vs wasm
         run: |
           set -uo pipefail
@@ -90,6 +90,7 @@ jobs:
           echo "$BIN" >> "$GITHUB_PATH"
       - name: structural wall (carving family modules through the anchor check + kernel)
         run: |
+          set -o pipefail
           eval "$(opam env)"
           bash proofs/structural-wall.sh 2>&1 | tee /tmp/wall.log | tail -80
       - name: carve verdicts on json fixtures
