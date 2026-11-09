@@ -136,13 +136,14 @@ impl<'a> Ctx<'_, 'a> {
     fn run(
         &self,
         b: &Body<'a>,
-        func: usize,
-        start: usize,
+        at: At,
         pat: &[(P, bool)],
         anchors: &[At],
-        bind: &mut Bind,
         what: &str,
-    ) -> Result<(), String> {
+    ) -> Result<Bind, String> {
+        let (func, start) = (at.func, at.op);
+        let mut bind = Bind::default();
+        let bind = &mut bind;
         let mut next = 0;
         for (k, &(p, marked)) in pat.iter().enumerate() {
             let j = start + k;
@@ -161,7 +162,7 @@ impl<'a> Ctx<'_, 'a> {
         if next != anchors.len() {
             return Err(format!("{what}: {} anchors for {next} marked instructions", anchors.len()));
         }
-        Ok(())
+        Ok(std::mem::take(bind))
     }
 
     /// `k F`, anchored at the root's `local.set` and the cursor store.
@@ -172,7 +173,6 @@ impl<'a> Ctx<'_, 'a> {
         let b = self.body(a0)?;
         let alloc = self.alloc;
         let start = a0.op.checked_sub(4).ok_or("family: no room for its allocation")?;
-        let mut bind = Bind::default();
         let pat: Vec<(P, bool)> = vec![
             (P::Is(|o| matches!(o, Op::I32WrapI64)), false),
             (P::I32(4), false),
@@ -185,7 +185,7 @@ impl<'a> Ctx<'_, 'a> {
             (P::Get('R'), false),
             (P::Set('F'), false),
         ];
-        self.run(b, a0.func, start, &pat, anchors, &mut bind, "family")?;
+        let bind = self.run(b, At { func: a0.func, op: start }, &pat, anchors, "family")?;
         if !matches!(b.ops[start + 3], Op::Call { function_index } if function_index == alloc) {
             return Err(format!("family: instruction {} is not call $alloc", start + 3));
         }
@@ -199,7 +199,6 @@ impl<'a> Ctx<'_, 'a> {
         let a0 = *anchors.first().ok_or("seal: no anchors")?;
         let b = self.body(a0)?;
         let start = a0.op.checked_sub(3).ok_or("seal: no room")?;
-        let mut bind = Bind::default();
         let mut pat: Vec<(P, bool)> = vec![
             (P::Get('F'), false),
             (P::Set('R'), false),
@@ -212,7 +211,7 @@ impl<'a> Ctx<'_, 'a> {
             (P::Is(|o| matches!(o, Op::I32Ne)), false),
         ];
         pat.extend(ABORT);
-        self.run(b, a0.func, start, &pat, anchors, &mut bind, "seal")?;
+        let bind = self.run(b, At { func: a0.func, op: start }, &pat, anchors, "seal")?;
         Ok((At { func: a0.func, op: start }, bind.local('F').ok_or("seal: unbound")?))
     }
 
@@ -290,8 +289,7 @@ impl<'a> Ctx<'_, 'a> {
             pat.extend([(P::Get('B'), false), (P::I32(0), false), (P::St(12 + 4 * i), true)]);
         }
         pat.push((P::Get('B'), false));
-        let mut bind = Bind::default();
-        self.run(b, a0.func, start, &pat, anchors, &mut bind, "carve")?;
+        let bind = self.run(b, At { func: a0.func, op: start }, &pat, anchors, "carve")?;
         let len = bind.konst('L').ok_or("carve: no len")?;
         if len < 0 || i64::from(len) > 4 * n as i64 {
             return Err(format!("carve: len {len} outside its cap {}", 4 * n));
@@ -380,8 +378,7 @@ impl<'a> Ctx<'_, 'a> {
             (P::Is(|o| matches!(o, Op::End)), false),
             (P::Get('B'), true),
         ]);
-        let mut bind = Bind::default();
-        self.run(b, a0.func, start, &pat, anchors, &mut bind, "carve")?;
+        let bind = self.run(b, At { func: a0.func, op: start }, &pat, anchors, "carve")?;
         if bind.local('K') != Some(k) {
             return Err(format!("carve: the record names count local {k}, the loop counts {:?}", bind.local('K')));
         }
