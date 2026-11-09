@@ -427,6 +427,50 @@ separator's split reads its lead byte after handing the string to
 `$str_len_chars`, which the count rule refuses) and 120 `prim.load8` in the 24
 self-hosted `stdlib/string_*.almd` bodies.
 
+**Runtime routines by the routine certificate (#4005 A4).** Beside the
+recorded events, the runtime's own routines are certified by the LINEAR
+certificates (`proofs/RoutineLin.v`, `lin_accepts_spatial`; byte format
+`proofs/RoutineLinCert.v`): each artifact carries a second table, every
+function the anchor file's `routines` line names (witness_routines.rs), each
+load and store of its body a candidate event. The untrusted
+`almide-lin-prove --routines` keeps the accesses it proves (the site
+selection) and leaves the rest counted; `almide-anchor-check
+--lin-verify-routines` holds each procedure to the translation of the shipped
+body with exactly the selected events, and the certificate is a bounds
+witness judged by the extracted checker, the Rocq kernel and almide-verify.
+Two items joined the language, proven in `lrun_sound` and pinned by kernel
+Examples: `LCap` (`n :=` a block's capacity) and `LAsnU` (`x := l mod 2^32`,
+`x = l` only once `0 <= l < 2^32` is proven). TRUSTED, as the translation's
+reading of the bytes: (1) a fixed helper's declared parameter
+(`STATIC_HEAP`, assembly.rs) is a COUNTED block — a String, Bytes or List
+every caller hands in; (2) a counted block's cap word is its capacity and
+only the allocator writes it (a Value or scratch block reuses its word at +8,
+so only declared counted parameters and a routine's own allocations are read
+as `LCap`); (3) an i32 add, subtract or multiply by a constant is its linear
+value mod 2^32. The `selfhost` line's stride for a List parameter was its slot
+size, which claimed `slot * len <= cap` of a len word that counts BYTES; it
+is 1 now (none of the four bodies with a stride above 1 was certified).
+Coverage on the 1048-fixture corpus: the runtime routines ship 120,796 heap
+accesses summed over the artifacts, 10,207 covered (9,876 by the routine
+certificate, 331 by the recorded byte loops); 26 of the 83 routine kinds have
+an access certified, 79 of their 745 distinct accesses. Not covered, and so
+trusted: the rest — the allocator core (`$alloc`, `$free`, `$inc`, which
+take a handle below the heap floor too, and whose freelist words are no
+block), the map and set index family (raw entry walks with a symbolic
+stride), the typed drop, copy, equality and display bodies (no declared
+parameters: their blocks are of other representations), every `memory.copy`
+and `memory.fill` — and, outside the routines, user code's accesses no
+witness records and the self-host prim sites the self-host table leaves out.
+All of it is COUNTED by the shrink-only heap-access ledger
+(`proofs/heap-access-ledger.tsv` and `-tests.tsv`, `proofs/lib/heap_ledger.py`):
+per runtime routine and per self-host body the most any artifact ships
+uncovered, per fixture its own code's sum; `proofs/structural-wall.sh` fails
+a rise, and on a full run a row above its measure. 207,425 accesses are
+uncovered on the corpus (79,616 header words, 6,704 bulk). Negative controls:
+`scripts/witness-reinject.sh routines` (`$str_eq` without its length test,
+`__bytecmp` with its bound loosened by one: the covered count falls and the
+control's certificate on the new bytes is LIN REJECT, pinned).
+
 **The native leg (#4006).** For the programs the verified native renderer
 renders (`proofs/native-verified-floor.txt`, 106 of 958 `spec/wasm_cross`
 programs, grow-only), `proofs/native-wall.sh` judges per build the ownership

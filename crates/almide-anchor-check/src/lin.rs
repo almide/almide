@@ -261,6 +261,29 @@ pub fn routine_names(anchors: &str) -> BTreeMap<usize, String> {
     names_of(anchors, "routines")
 }
 
+/// The anchor file's `code` line (#4005 A4): every other body the producer
+/// lowered — user code, a self-host body with no prim access — with its
+/// type-declared heap parameters, in the `selfhost` line's syntax.
+pub fn code_params(anchors: &str) -> BTreeMap<usize, BTreeMap<u32, Option<i128>>> {
+    heap_params_of(anchors, "code")
+}
+
+/// The routine certificate's table (#4005 A4): the `routines` line's
+/// functions and the `code` line's, a position on the `selfhost` line
+/// (the linear certificate's) or on both left out.
+pub fn table_params(anchors: &str) -> BTreeMap<usize, BTreeMap<u32, Option<i128>>> {
+    let (routines, selfhost) = (routine_params(anchors), selfhost_params(anchors));
+    let code = code_params(anchors).into_iter().filter(|(p, _)| !selfhost.contains_key(p) && !routines.contains_key(p));
+    routines.into_iter().filter(|(p, _)| !selfhost.contains_key(p)).chain(code).collect()
+}
+
+/// The table's report names: a routine's label, a `code` body's name.
+pub fn table_names(anchors: &str) -> BTreeMap<usize, String> {
+    let mut n = names_of(anchors, "code");
+    n.extend(routine_names(anchors));
+    n
+}
+
 fn line_of<'t>(anchors: &'t str, key: &str) -> &'t str {
     anchors
         .lines()
@@ -422,10 +445,12 @@ struct Tr<'m, 'a> {
     /// Region -> the len stride of its block (heap params only).
     stride: HashMap<Slot, i128>,
     /// Regions whose cap word is their capacity: the counted heap params
-    /// and, in a runtime routine, the blocks it allocates.
+    /// and, in a runtime routine (`cap_allocs`), the blocks it allocates.
     capped: BTreeSet<Slot>,
-    /// A runtime routine (the `routines` line) rather than a self-host body.
+    /// The routine certificate's table rather than a self-host body.
     routine: bool,
+    /// A runtime routine: the blocks it allocates are counted (`capped`).
+    cap_allocs: bool,
     regions: Vec<Slot>,
     next_region: Slot,
     labels: Vec<Label>,
@@ -859,7 +884,7 @@ impl<'m, 'a> Tr<'m, 'a> {
             out.push(It::Alloc { h, r, sz });
             out.push(It::Wf(r));
             self.base_of.insert(h, r);
-            if self.routine {
+            if self.cap_allocs {
                 self.capped.insert(r);
             }
             stack.push(Av::I32(Lin::slot(h), true));
@@ -1237,12 +1262,14 @@ pub fn translate(
     table: &BTreeSet<usize>,
     alloc: u32,
 ) -> Result<Skel, String> {
-    translate_inner(m, pos, TrIn { sites, heap, table, alloc }, false)
+    translate_inner(m, pos, TrIn { sites, heap, table, alloc }, Mode { routine: false, capped: false })
 }
 
-/// [`translate`] for a runtime routine (the `routines` line, #4005 A4): a
-/// block it allocates is a counted one too (its cap word is read as its
-/// capacity).
+/// [`translate`] for the routine certificate's table (#4005 A4): an
+/// allocation's size is bound to an i32 slot of its own (`U`), and for a
+/// runtime routine (`capped`, the `routines` line) a block it allocates is
+/// a counted one too (its cap word is read as its capacity) — not for a
+/// `code` body, whose blocks' cap words the program may reuse.
 pub fn translate_routine(
     m: &Module<'_>,
     pos: usize,
@@ -1250,8 +1277,17 @@ pub fn translate_routine(
     heap: &BTreeMap<u32, Option<i128>>,
     table: &BTreeSet<usize>,
     alloc: u32,
+    capped: bool,
 ) -> Result<Skel, String> {
-    translate_inner(m, pos, TrIn { sites, heap, table, alloc }, true)
+    translate_inner(m, pos, TrIn { sites, heap, table, alloc }, Mode { routine: true, capped })
+}
+
+/// How a translation treats allocations: `routine` binds the size to a `U`
+/// slot, `capped` reads the new block's cap word as its capacity.
+#[derive(Clone, Copy)]
+struct Mode {
+    routine: bool,
+    capped: bool,
 }
 
 /// What a translation reads beside the module: the events, the heap
@@ -1263,7 +1299,7 @@ struct TrIn<'x> {
     alloc: u32,
 }
 
-fn translate_inner(m: &Module<'_>, pos: usize, i: TrIn<'_>, routine: bool) -> Result<Skel, String> {
+fn translate_inner(m: &Module<'_>, pos: usize, i: TrIn<'_>, mode: Mode) -> Result<Skel, String> {
     let TrIn { sites, heap, table, alloc } = i;
     let body = m.bodies.get(pos).ok_or("no such function")?;
     let (params, results) = m.ftype(m.imports + pos as u32).cloned().ok_or("no type")?;
@@ -1280,7 +1316,8 @@ fn translate_inner(m: &Module<'_>, pos: usize, i: TrIn<'_>, routine: bool) -> Re
         base_of: HashMap::new(),
         stride: HashMap::new(),
         capped: BTreeSet::new(),
-        routine,
+        routine: mode.routine,
+        cap_allocs: mode.capped,
         regions: Vec::new(),
         next_region: REGION0,
         labels: vec![Label::Func],

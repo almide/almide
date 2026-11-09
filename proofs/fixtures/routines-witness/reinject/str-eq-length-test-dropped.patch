@@ -1,0 +1,14 @@
+--- a/crates/almide-wasm/src/runtime.rs
++++ b/crates/almide-wasm/src/runtime.rs
+@@ -498,9 +498,8 @@
+     i.i32_const(1).return_();
+     i.end();
+     i.local_get(a).i32_load(len_memarg()).local_set(la);
+-    i.local_get(la).local_get(b).i32_load(len_memarg()).i32_ne().if_(BlockType::Empty);
+-    i.i32_const(0).return_();
+-    i.end();
++    // RE-INJECTED (#4005 A4 drill): the length test is gone — b is read up
++    // to a's length.
+     i.i32_const(0).local_set(idx);
+     // Eight bytes at a time while a whole word is left (wasm loads need no
+     // alignment), then the tail byte by byte. A byte loop cost about ten

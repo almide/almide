@@ -1,0 +1,10 @@
+// #4005 A4 drill: the self-hosted byte comparison (`__bytecmp`, behind
+// `bytes.compare`) has its second bound loosened by one, so it may read one
+// byte past the shorter block. Its prim loads lose their linear certificate
+// (the heap-access ledger rises), and the control's certificate no longer
+// matches the bytes.
+effect fn main() -> Unit = {
+  let a = bytes.from_list([1, 2, 3])
+  let b = bytes.from_list([1, 2, 4, 5])
+  println("${bytes.compare(a, b)}")
+}

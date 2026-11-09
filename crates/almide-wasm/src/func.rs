@@ -156,16 +156,14 @@ pub(crate) struct FnPlan {
     pub(crate) param_owned: Option<Vec<bool>>,
 }
 
-/// #4005 A4: a body that emitted prim accesses names its heap-typed
-/// parameters (by wasm local, with the len stride) for the anchor file's
-/// `selfhost` line.
+/// #4005 A4: every body names its heap-typed parameters (by wasm local,
+/// with the len stride) — one that emitted prim accesses for the anchor
+/// file's `selfhost` line, any other for its `code` line.
 fn record_heap_params(serial: u64, prims_before: usize, params: &[(VarId, SliceTy)], types: &TypeTable, shift: u32, name: &str) {
-    if crate::witness::bounds::prim_count() <= prims_before {
-        return;
-    }
+    let prims = crate::witness::bounds::prim_count() > prims_before;
     let heap: Vec<(u32, Option<u32>)> =
         params.iter().enumerate().filter_map(|(i, (_, ty))| ty.heap_param(types).map(|s| (i as u32 + shift, s))).collect();
-    crate::witness::bounds::heap_params(serial, &heap, name);
+    crate::witness::bounds::heap_params(serial, &heap, name, prims);
 }
 
 pub(crate) fn lower_fn(

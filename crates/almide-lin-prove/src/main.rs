@@ -24,7 +24,7 @@ fn read_inputs(wasm: &str, anchors: &str) -> (Vec<u8>, String) {
 
 fn routines(wasm: &str, anchors: &str, sel_out: &str) {
     let (w, a) = read_inputs(wasm, anchors);
-    let names = almide_anchor_check::lin::routine_names(&a);
+    let names = almide_anchor_check::lin::table_names(&a);
     let name = |p: usize| names.get(&p).cloned().unwrap_or_else(|| "?".into());
     match almide_lin_prove::certify_routines(&w, &a) {
         Ok((cert, sel, refused, counts)) => {

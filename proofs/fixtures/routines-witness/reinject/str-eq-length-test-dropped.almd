@@ -1,0 +1,10 @@
+// #4005 A4 drill: the runtime's string equality helper (`$str_eq`) loses its
+// length test, so its reads of the second string run to the first one's
+// length. The routine certificate can no longer prove them: they fall back
+// to the counted class (the heap-access ledger rises), and the control's
+// certificate no longer matches the bytes.
+effect fn main() -> Unit = {
+  let a = "abc" + int.to_string(12345)
+  let b = "abc" + int.to_string(123456)
+  println(if a == b then "same" else "different")
+}

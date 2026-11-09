@@ -470,7 +470,7 @@ pub fn certify_table(wasm: &[u8], anchors: &str) -> Result<Certified, String> {
     let (alloc, ..) = almide_anchor_check::parse_anchors(anchors)?;
     let mut table: BTreeSet<usize> = sites0.keys().copied().collect();
     loop {
-        let input = Input { m: &m, sites: &sites0, heap: &heap, alloc, routine: false };
+        let input = Input { m: &m, sites: &sites0, heap: &heap, alloc, routine: false, capped: &BTreeMap::new() };
         let Some(skels) = translate_table(&input, &mut table, &mut refused) else { continue };
         let entry = entry_points(&m, &exported, &table);
         let (results, _) = infer_contracts(&skels, &table, &entry, false);
@@ -496,6 +496,8 @@ struct Input<'a> {
     heap: &'a BTreeMap<usize, BTreeMap<u32, Option<i128>>>,
     alloc: u32,
     routine: bool,
+    /// The runtime routines (their allocations counted), in a routine table.
+    capped: &'a BTreeMap<usize, BTreeMap<u32, Option<i128>>>,
 }
 
 /// Every table function's translation; `None` when one is refused (it
@@ -508,7 +510,7 @@ fn translate_table(input: &Input<'_>, table: &mut BTreeSet<usize>, refused: &mut
         let hp = input.heap.get(&pos).cloned().unwrap_or_default();
         let s = input.sites.get(&pos).unwrap_or(&none);
         let tr = if input.routine {
-            lin::translate_routine(input.m, pos, s, &hp, table, input.alloc)
+            lin::translate_routine(input.m, pos, s, &hp, table, input.alloc, input.capped.contains_key(&pos))
         } else {
             lin::translate(input.m, pos, s, &hp, table, input.alloc)
         };
@@ -624,7 +626,8 @@ pub fn certify_routines(wasm: &[u8], anchors: &str) -> Result<RoutinesCertified,
     lp::reset_pivots();
     let m = lin::Module::read(wasm)?;
     let exported = lin::exported_or_tabled(wasm, m.imports)?;
-    let heap = lin::routine_params(anchors);
+    let heap = lin::table_params(anchors);
+    let capped = lin::routine_params(anchors);
     let (alloc, ..) = almide_anchor_check::parse_anchors(anchors)?;
     let all: BTreeMap<usize, BTreeSet<usize>> = heap.keys().map(|&p| (p, lin::access_sites(&m, p))).collect();
     let mut sel = all.clone();
@@ -632,7 +635,7 @@ pub fn certify_routines(wasm: &[u8], anchors: &str) -> Result<RoutinesCertified,
     // A routine with no access is nothing to certify.
     let mut table: BTreeSet<usize> = all.iter().filter(|(_, s)| !s.is_empty()).map(|(p, _)| *p).collect();
     for _ in 0..64 {
-        let input = Input { m: &m, sites: &sel, heap: &heap, alloc, routine: true };
+        let input = Input { m: &m, sites: &sel, heap: &heap, alloc, routine: true, capped: &capped };
         let Some(skels) = translate_table(&input, &mut table, &mut refused) else { continue };
         let entry = entry_points(&m, &exported, &table);
         let (results, dropped) = infer_contracts(&skels, &table, &entry, true);
