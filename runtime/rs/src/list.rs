@@ -1152,7 +1152,8 @@ fn almide_fan_pool_wake(helpers: usize) {
             return;
         }
         pool.polling.fetch_add(1, Ordering::SeqCst);
-        let spawned = std::thread::Builder::new().spawn(move || almide_fan_hand_loop(&almide_fan_pool().hands[i]));
+        // #4617: the main thread's stack, as a fan arm gets (almide_worker_thread).
+        let spawned = almide_worker_thread().spawn(move || almide_fan_hand_loop(&almide_fan_pool().hands[i]));
         let Ok(handle) = spawned else {
             pool.polling.fetch_sub(1, Ordering::SeqCst);
             return;

@@ -136,7 +136,7 @@ VIS fn almide_fan_spawn<'s, 'e, T: Send + 's, F: FnOnce() -> T + Send + 's>(s: &
     let slot = AlmideFanArmSlot;
     let cell = std::sync::Arc::new(std::sync::Mutex::new(Some(f)));
     let theirs = cell.clone();
-    let spawned = std::thread::Builder::new().spawn_scoped(s, move || {
+    let spawned = almide_worker_thread().spawn_scoped(s, move || {
         let _slot = slot;
         let f = theirs.lock().unwrap_or_else(|e| e.into_inner()).take();
         match f { Some(f) => f(), None => unreachable!("a fan arm runs once") }
@@ -148,6 +148,22 @@ VIS fn almide_fan_spawn<'s, 'e, T: Send + 's, F: FnOnce() -> T + Send + 's>(s: &
             match f { Some(f) => AlmideFanArm::Ran(f()), None => unreachable!("a fan arm runs once") }
         }
     }
+}
+// #4617: a worker thread (a fan arm, a line-fold worker, a list.par pool
+// thread) gets the main thread's stack, so a recursion depth the sequential
+// evaluation reaches is reached on a worker too, whatever the core count.
+// std's own knob keeps its meaning: with RUST_MIN_STACK set, every spawned
+// thread asks for that size, as it would without this.
+VIS fn almide_worker_thread() -> std::thread::Builder {
+    static STD_MIN_STACK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let b = std::thread::Builder::new();
+    if *STD_MIN_STACK.get_or_init(|| std::env::var_os("RUST_MIN_STACK").is_some()) { return b; }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let main = almide_stack_guard::main_stack_size();
+        if main > 0 { return b.stack_size(main.min(ALMIDE_WORKER_STACK_MAX)); }
+    }
+    b
 }
 VIS fn almide_fan_take<T>(arm: AlmideFanArm<'_, T>) -> T { match arm { AlmideFanArm::Spawned(h) => almide_fan_join(h), AlmideFanArm::Ran(v) => v } }
 "#;
@@ -164,9 +180,16 @@ VIS fn almide_fan_take<T>(arm: AlmideFanArm<'_, T>) -> T { match arm { AlmideFan
 /// against this bound.
 const ALMIDE_FAN_ARM_THREADS_PER_CPU: usize = 1;
 
+/// The largest stack a worker thread takes (#4617): the main thread's size,
+/// at most this. A main thread under `ulimit -s unlimited` reports its whole
+/// reserved region; a worker reserves its stack up front, one per CPU.
+const ALMIDE_WORKER_STACK_MAX: usize = 1 << 30;
+
 /// The fan timeline prelude as emitted into a program (`vis` is `pub ` for
 /// the `almide_rt` rlib, empty for an inline main).
 pub(crate) fn fan_timeline_prelude(vis: &str) -> String {
-    let per_cpu = format!("const ALMIDE_FAN_ARM_THREADS_PER_CPU: usize = {ALMIDE_FAN_ARM_THREADS_PER_CPU};\n");
+    let per_cpu = format!(
+        "const ALMIDE_FAN_ARM_THREADS_PER_CPU: usize = {ALMIDE_FAN_ARM_THREADS_PER_CPU};\nconst ALMIDE_WORKER_STACK_MAX: usize = {ALMIDE_WORKER_STACK_MAX};\n"
+    );
     per_cpu + &FAN_PRELUDE.replace("VIS ", vis)
 }
