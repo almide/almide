@@ -1,6 +1,6 @@
 # ADR-0033: A parsed JSON document is one allocation family — its interior blocks keep the layout every reader already reads, the family carries the reference count, and parser, scanner and writer stay self-hosted and certified
 
-- **Status**: Proposed (2026-11-09). Twelve [owner decisions](#owner-decisions-) are open.
+- **Status**: Accepted (2026-11-09). The owner answered all thirteen [owner decisions](#owner-decisions-) ○ the same day; Q5 carries four safeguards and Q13 was added.
 - **Date**: 2026-11-09
 - **Scope**:
   - the representation of `Value` documents on both legs;
@@ -363,7 +363,33 @@ After a parity gate, `runtime/rs/src/json.rs` and the `prim` parser are deleted.
 
 ## Owner decisions (○×)
 
-One decision per question, each with a recommendation.
+One decision per question, each with a recommendation and the owner's answer.
+
+**Answers of 2026-11-09.** Every question was answered ○.
+
+| Q | Answer | Condition the owner attached |
+|---|---|---|
+| 1 | ○ | — |
+| 2 | ○ | Behind the retention probe. |
+| 3 | ○ | Per-step bounds in pass 2. Add to the roadmap: after phase 2, re-measure shape reuse (DuckDB-style). |
+| 4 | ○ | Reopen inline small strings only if strchurn on wasm trails Rust by more than 1.3× after phase 5. |
+| 5 | ○ | Four safeguards: the SWAR fallback is kept; a build option disables simd128; CI runs the suite with simd128 disabled; the release note states the requirement. |
+| 6 | ○ (conditional) | Only if phase 6's SWAR trails yyjson by more than 1.3×. Runtime detection, never `target-cpu`; the `unsafe` lines go on the allowlist under Miri and ASan. |
+| 7 | ○ | Delete `runtime/rs` `json.rs` and the `prim` parser after the parity gate (phase 7). |
+| 8 | ○ | — |
+| 9 | ○ | — |
+| 10 | ○ | — |
+| 11 | ○ | Deterministic hash index from 16 keys on, sort fallback, no random seed. |
+| 12 | ○ | Native phases start after the other session's `render_native_*` / `runtime/rs` work lands. |
+| 13 | ○ | (Added 2026-11-09.) json-reborn does not land alone. It is carried into phase 2; its size and allocation movements and the stdlib re-inspection are ruled once, after phase 2. |
+
+**Reprioritization from the world bench (run 42587113062).** The leaders' advantage is arenas and layout, not SIMD:
+
+- simdjson without SIMD parses jsonround in 22 ms on wasm, and forcing westmere costs it 0.7 ms natively;
+- yyjson builds 250k values with 29 allocations, where json-reborn makes 1.05M (27 per record);
+- Almide's stringify makes 2 allocations but takes 21.8 ms natively against yyjson's 5.7 ms, which is per-byte cost (number formatting, escaping, buffer growth).
+
+So families (phase 2) and fused construction (D4, phase 4) come before SIMD (phase 3). The roadmap orders them so.
 
 1. **Adopt allocation families with block-compatible interior blocks (rc top bit + root distance) as the substrate for parsed documents (D1).**
    Recommendation: ○. It is the only option measured to keep every reader unchanged while removing the per-node floor.
@@ -389,6 +415,8 @@ One decision per question, each with a recommendation.
     Recommendation: ○. It keeps determinism and closes hash flooding on untrusted input.
 12. **Order the work wasm first (phases 1–5) and native after (phases 6–7), started once the other session's `render_native_*` / `runtime/rs` work has landed.**
     Recommendation: ○. The wasm phases touch neither area, so the two sessions do not collide.
+13. **Do not land json-reborn on its own. Carry it into phase 2, and rule its size and allocation rows and the stdlib re-inspection once, after phase 2.**
+    Answer: ○ (2026-11-09). One ruling on the net movement replaces two rulings on intermediate states.
 
 ## References
 

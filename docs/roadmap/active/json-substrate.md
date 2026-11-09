@@ -1,7 +1,7 @@
 <!-- description: ADR-0033 implementation plan: JSON documents as certified allocation families, two-pass parse, SWAR/simd128 scanning, fused constructors, exact-size writer, then native and one shared source, with gates, negative controls and targets per phase -->
 # JSON substrate (ADR-0033) — phased plan
 
-**Decision:** [ADR-0033](../../adr/0033-json-documents-are-allocation-families.md) (Proposed 2026-11-09; twelve ○× questions open).
+**Decision:** [ADR-0033](../../adr/0033-json-documents-are-allocation-families.md) (Accepted 2026-11-09; all thirteen owner questions answered ○).
 **Base:** branch `json-reborn`. It cuts allocations per jsonround record from 141 to 54 (probe run 42578965891):
 
 | Phase of the program | Allocations per record |
@@ -11,6 +11,10 @@
 | parse | 27 |
 
 **Reference bench:** `research/benchmark/json-world/` (branch `probe/json-world`). It runs jsonround in Almide, serde_json, sonic-rs, simd-json, yyjson and simdjson, native and wasm, timed on CI.
+
+**Order.** The world bench (run 42587113062) shows that the leaders win by arenas and layout, not by SIMD: simdjson without SIMD parses jsonround in 22 ms on wasm, forcing westmere costs it 0.7 ms natively, and yyjson builds 250k values with 29 allocations. So the phases run **0 → 1 → 2 (families) → 4 (fused construction and the exact writer) → 3 (scanning) → 5**, then 6 → 7 on native. The phase numbers are kept as names.
+
+**json-reborn (owner Q13).** It does not land alone. Its size and allocation rows are re-measured after phase 2, and the owner rules once on the net movement and the stdlib re-inspection.
 
 **Rule for every phase:** it lands on its own, every gate stays green, and its ratchet protects it.
 
@@ -86,6 +90,7 @@
 - **Risks.**
   - **Other rc-word readers.** The rc word is read in more places than the three judges, for example the in-place append windows and `@reuse`. Audit every load of `RC.offset` and pin it with a unit test that lists them.
   - **The JS host and the component realloc** must never see an interior block. A Region export must copy out.
+- **After the gate (owner Q3).** Re-measure DuckDB-style shape reuse (objects of one shape sharing their key blocks) on top of families. The json-reborn sibling-key trial (17166b602) lost +31% instructions because it read keys through calls; inside a family the shared keys are plain interior blocks, so the trade may flip. It lands only on a measured instruction win with no size raise.
 - **Touches `render_native_*` / `runtime/rs`?** No. It touches `crates/almide-wasm` runtime routines and `proofs/`.
 
 ## Phase 3 — scanning (wasm)
@@ -104,6 +109,11 @@
   - twitter / citm parse: −30 to −50%, from long strings.
   - jsonround: −5 to −10% (its strings are short).
   - Size: + a few hundred bytes, only in modules that link the op. It is ledgered.
+- **Owner Q5 safeguards (all four are part of the gate).**
+  - The SWAR body stays as the fallback; simd128 is never the only route.
+  - A build option disables simd128 (the module then links the SWAR body).
+  - CI runs the wasm suite a second time with simd128 disabled, byte-identical output.
+  - The release note states the simd128 requirement and the option.
 - **Risks.**
   - Embedded or old hosts without simd128. Mitigation: the build refuses `--target wasm` on a host profile that declares no simd128 and falls back to the SWAR body.
   - The ratchet for the size growth.
@@ -193,18 +203,33 @@
 
 Ratios are Almide ÷ reference on the same VM and the same input (lower is better). Throughput targets are fractions of the reference's GB/s.
 
-- The **"now"** cells come from `probe/json-world`. They are placeholders until its CI run lands, and are filled in from its results, never estimated.
+- The **"now"** cells come from `probe/json-world`, run 42587113062 (GitHub-hosted runner, wasmtime 50.0.1 AOT, rustc 1.97.0, yyjson 0.13.0, simdjson 5.0.5, wasi-sdk 34; median total process time of 15 rounds). "reborn" is json-reborn, "head" is its base.
 - The phase columns are targets; each phase gate measures its own.
 
 ### jsonround (time, lower is better)
 
 | Leg | Reference | Now | Phase 2 | Phase 4 | End (phase 5 wasm, phase 7 native) |
 |---|---|---:|---:|---:|---:|
-| wasm | serde_json (wasm32-wasip1) | 1.65× (#4613) / ⟨json-world⟩ | ≤ 1.15× | ≤ 0.85× | **≤ 0.75×** |
-| wasm | yyjson (wasi-sdk, simd128) | ⟨json-world⟩ | — | ≤ 1.3× | **≤ 1.0×** |
-| native | serde_json | ⟨json-world⟩ | — | — | **≤ 0.8×** |
-| native | sonic-rs | ⟨json-world⟩ | — | — | **≤ 1.25×** |
-| native | yyjson | ⟨json-world⟩ | — | — | **≤ 1.25×** (≤ 1.1× if owner question 6 admits SIMD) |
+| wasm | serde_json (wasm32-wasip1) | reborn 175.7 ÷ 151.0 = **1.16×** (head 278.7 ms = 1.85×) | ≤ 1.15× | ≤ 0.85× | **≤ 0.75×** |
+| wasm | yyjson (wasi-sdk, simd128) | 175.7 ÷ 64.5 = **2.72×** | — | ≤ 1.3× | **≤ 1.0×** |
+| native | serde_json | 148.3 ÷ 160.1 = **0.93×** | — | — | **≤ 0.8×** |
+| native | sonic-rs | 148.3 ÷ 139.3 = **1.06×** | — | — | **≤ 1.25×** |
+| native | yyjson | 148.3 ÷ 34.3 = **4.32×** | — | — | **≤ 1.25×** (≤ 1.1× if owner question 6 admits SIMD) |
+
+The run's reference rows (ms, total process time; wasm is AOT):
+
+| Implementation | wasm | native |
+|---|---:|---:|
+| simdjson On-Demand (no SIMD on wasm) | 38.2 | 24.4 |
+| simdjson DOM | 50.0 | 32.0 |
+| yyjson | 64.5 | 34.3 |
+| simd-json (borrowed) | 113.1 | 101.4 |
+| sonic-rs | 175.5 | 139.3 |
+| serde_json | 151.0 | 160.1 |
+| Almide json-reborn | 175.7 | 148.3 |
+| Almide head (json-reborn's base) | 278.7 | 148.2 |
+
+Allocations per run (50k records): yyjson 32, simdjson 37–38, sonic-rs 600k, serde_json 1.35M, Almide native 900k, Almide reborn wasm 2.85M (build 1.05M, parse + sum 1.80M), Almide head wasm 7.05M.
 
 ### Parse throughput (twitter / citm_catalog / canada)
 
