@@ -30,6 +30,7 @@ StructuralAlloc.v
 StructuralDecode.v
 StructuralRun.v
 MemorySafe.v
+FamilyRc.v
 SpatialCert.v
 BoundsCert.v
 CoreSafe.v

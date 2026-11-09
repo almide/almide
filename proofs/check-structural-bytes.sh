@@ -5,7 +5,8 @@
 # written in the .v source. Those theorems mean something only if the
 # lists are the bytes the emitter actually produces. This gate closes
 # that with ZERO hand-copied constants: it dumps the emitter's real
-# `$inc`/`$dec_flat`/`$free`/`$alloc` code-section bodies (the same
+# `$inc`/`$dec_flat`/`$free`/`$alloc` code-section bodies (and the
+# family-module `$inc`/`$dec_flat`, ADR-0033) (the same
 # `dump_runtime_bytes` helper that produced the lists), strips the
 # code-section wrapper and locals vector, parses the lists OUT of
 # StructuralDecode.v, and diffs.
@@ -32,7 +33,7 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 
 # 1. The emitter's real bytes, through its own dump helper.
 ( cd "$ROOT" && cargo test -q -p almide-wasm --lib dump_runtime_bytes -- --ignored --nocapture 2>/dev/null ) \
-  | grep -E "^(inc|dec_flat|free|alloc): " > "$tmp/dump.txt" \
+  | grep -E "^(inc|dec_flat|free|alloc|inc_family|dec_flat_family): " > "$tmp/dump.txt" \
   || { echo "FAIL: the byte dump produced nothing"; exit 1; }
 
 # 2. Strip wrappers, parse the .v lists, diff.
@@ -67,20 +68,27 @@ emitted = {}
 for line in open(dump_path):
     name, rest = line.split(":", 1)
     raw = [int(x) for x in re.findall(r"\d+", rest)]
-    key = {"inc": "inc", "dec_flat": "dec", "free": "free", "alloc": "alloc"}[name]
+    key = {"inc": "inc", "dec_flat": "dec", "free": "free", "alloc": "alloc",
+           # ADR-0033 D1: the family-module variants (StructuralRuntime.v
+           # `inc_family_body` / `dec_family_body`).
+           "inc_family": "inc_family", "dec_flat_family": "dec_family"}[name]
     emitted[key] = strip_wrapper(raw)
 
 v = open(v_path).read()
 proven = {}
-for name in ("inc", "dec", "free", "alloc"):
+NAMES = ("inc", "dec", "free", "alloc", "inc_family", "dec_family")
+for name in NAMES:
     m = re.search(rf"Definition {name}_bytes : list Z :=\s*\[([^]]*)\]", v)
     if not m:
         sys.exit(f"FAIL: {name}_bytes not found in StructuralDecode.v")
     proven[name] = [int(x) for x in re.findall(r"\d+", m.group(1))]
 
 fail = 0
-for name in ("inc", "dec", "free", "alloc"):
-    if emitted[name] == proven[name]:
+for name in NAMES:
+    if name not in emitted:
+        print(f"FAIL {name}: the emitter's dump has no {name} body")
+        fail = 1
+    elif emitted[name] == proven[name]:
         print(f"ok   {name}: {len(proven[name])} bytes — emitter == StructuralDecode.v")
     else:
         print(f"FAIL {name}: emitter {emitted[name]} != proven {proven[name]}")

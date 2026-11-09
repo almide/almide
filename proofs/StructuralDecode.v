@@ -176,6 +176,25 @@ Fixpoint ldecode_go (fuel : nat) (bs : list Z) (stk : list L.lexpr) (acc : list 
   end.
 
 
+(* Full SLEB128 for i32.const (at most 5 bytes for an i32). A single byte
+   b < 128 decodes to `sleb1 b`, so every pre-family list decodes as
+   before. *)
+Fixpoint sleb_go (n : nat) (shift acc : Z) (bs : list Z) : option (Z * list Z) :=
+  match n with
+  | O => None
+  | S n' =>
+      match bs with
+      | [] => None
+      | b :: r =>
+          if b <? 128
+          then Some ((if b <? 64 then acc + Z.shiftl b shift
+                      else acc + Z.shiftl (b - 128) shift), r)
+          else sleb_go n' (shift + 7) (acc + Z.shiftl (b - 128) shift) r
+      end
+  end.
+
+Definition sleb5 (bs : list Z) : option (Z * list Z) := sleb_go 5 0 0 bs.
+
 (* Fold a memarg offset the way the transcription spells addresses:
    offset 0 is the bare base, a positive offset is `base + off`. *)
 Definition fold_off (a : expr) (off : Z) : expr :=
@@ -223,8 +242,12 @@ Fixpoint decode_go (fuel : nat) (nm : naming) (bs : list Z)
               decode_go f nm r stk' (SStore (fold_off a off) v :: acc)
           | _ => None
           end
-      | 65 :: b :: r => (* i32.const, single-byte SLEB *)
-          decode_go f nm r (EC (sleb1 b) :: stk) acc
+      | 65 :: r => (* i32.const, SLEB128 up to 5 bytes (the family
+                       retarget's 0x7fff_ffff mask is 5) *)
+          match sleb5 r with
+          | Some (z, r') => decode_go f nm r' (EC z :: stk) acc
+          | None => None
+          end
       | 69 :: r => (* i32.eqz *)
           match stk with
           | a :: stk' => decode_go f nm r (EEqz a :: stk') acc
@@ -237,6 +260,11 @@ Fixpoint decode_go (fuel : nat) (nm : naming) (bs : list Z)
           end
       | 0 :: r => (* unreachable — the double-free trap (#4023) *)
           decode_go f nm r stk (STrap :: acc)
+      | 72 :: r => (* i32.lt_s — the family retarget's sign test (ADR-0033) *)
+          match stk with
+          | b :: a :: stk' => decode_go f nm r (ELtS a b :: stk') acc
+          | _ => None
+          end
       | 73 :: r => (* i32.lt_u *)
           match stk with
           | b :: a :: stk' => decode_go f nm r (ELtU a b :: stk') acc
@@ -368,6 +396,51 @@ Proof. reflexivity. Qed.
 
 Theorem free_bytes_decode_to_the_tree :
   decode free_naming free_bytes = Some (free_body 48).
+Proof. reflexivity. Qed.
+
+(* ══ THE FAMILY VARIANTS (ADR-0033 D1) ════════════════════════════════
+
+   The family `$inc` / `$dec_flat` (emitted only in modules that link a
+   family producer) add the retarget `if (load(block) <s 0) block = block
+   - (load(block) & 0x7fff_ffff)` after the floor guard. `local.set 0`
+   (the block parameter) decodes to `SRetarget`; the mask constant is the
+   5-byte SLEB [255;255;255;255;7]. Dumped as `inc_family:` /
+   `dec_flat_family:` by `dump_runtime_bytes`; check-structural-bytes.sh
+   diffs them like the plain lists. *)
+
+Definition inc_family_naming : naming :=
+  mkNaming (fun i => if i =? 0 then Some EBlk else None)
+           (fun i => if i =? 0 then Some SRetarget else None).
+
+Definition dec_family_naming : naming :=
+  mkNaming (fun i => if i =? 0 then Some EBlk
+                     else if i =? 1 then Some ETmp else None)
+           (fun i => if i =? 0 then Some SRetarget
+                     else if i =? 1 then Some SSetTmp else None).
+
+Definition inc_family_bytes : list Z :=
+  [32;0;35;3;73;4;64;15;11;
+   32;0;40;2;0;65;0;72;4;64;
+   32;0;32;0;40;2;0;65;255;255;255;255;7;113;107;33;0;11;
+   32;0;32;0;40;2;0;65;1;106;54;2;0;
+   11].
+
+Definition dec_family_bytes : list Z :=
+  [32;0;35;3;73;4;64;15;11;
+   32;0;40;2;0;65;0;72;4;64;
+   32;0;32;0;40;2;0;65;255;255;255;255;7;113;107;33;0;11;
+   32;0;40;2;0;65;1;107;33;1;
+   32;1;65;127;70;4;64;0;11;
+   32;0;32;1;54;2;0;
+   32;1;69;4;64;32;0;16;33;11;
+   11].
+
+Theorem inc_family_bytes_decode_to_the_tree :
+  decode inc_family_naming inc_family_bytes = Some inc_family_body.
+Proof. reflexivity. Qed.
+
+Theorem dec_family_bytes_decode_to_the_tree :
+  decode dec_family_naming dec_family_bytes = Some dec_family_body.
 Proof. reflexivity. Qed.
 
 (* ══════════════════════════════════════════════════════════════════════
