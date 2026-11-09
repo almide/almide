@@ -9,8 +9,11 @@
 //! - `c H w W n N s0 .. s(N-1)` (a literal carve) and `c H w W v K f K t W`
 //!   (a computed one): the cursor load [a] and the root's len load [a]; the
 //!   ROOM TEST `cur + size >u 12 + len` in i64 (so nothing wraps), opening
-//!   an `if` with no `else` whose body ends in `unreachable` [a, at its
-//!   `end`]; then — after it, so the test dominates every store — the
+//!   an ABORT [a, at its `end`] — an `if` with no `else` whose body holds
+//!   only constants, local reads, drops and calls and ends in `unreachable`
+//!   (no branch, no return: it cannot fall through; its length is the
+//!   bytes', since `to_wasi` lowers the exit call to more than one call);
+//!   then — after it, so the test dominates every store — the
 //!   cursor store `cur + size` [a], `base = root + cur` [a], the three
 //!   header stores through `local.get base` at 0 / 4 / 8 [a ×3] (the rc
 //!   word is `0x8000_0000 | cur`, the interior word), and the payload: N
@@ -26,7 +29,8 @@
 //!   i32.load offset=4` [a], `i32.const H; i32.add; i32.ne`, then the
 //!   aborting `if` [a, at its `end`]. Every family is followed, in the same
 //!   function, at its control depth with nothing leaving it in between, by
-//!   a seal of the local its root was stored to.
+//!   a seal of a local whose last write before it stored the family's
+//!   result.
 //!
 //! The root, cursor, size, base, count and fill-cursor locals are distinct.
 //! A record anchored `-` throughout is counted, not checked.
@@ -52,6 +56,12 @@ enum P {
     Ld(u64),
     St(u64),
     Is(fn(&Op<'_>) -> bool),
+    /// The aborting `if`: `if` (no result), a body of constants, local
+    /// reads, drops and calls only, `unreachable`, `end` — no `else`, no
+    /// branch, no return, so the body cannot fall through. Its length is the
+    /// bytes': the host transform may lower one exit call to more than one
+    /// (`to_wasi`). Marked, it is anchored at its `end`.
+    Abort,
 }
 
 /// The bindings a match produced.
@@ -82,34 +92,29 @@ impl Bind {
     }
 }
 
-fn is_if_empty(o: &Op<'_>) -> bool {
-    matches!(o, Op::If { blockty: BlockType::Empty })
+const ABORT: [(P, bool); 1] = [(P::Abort, true)];
+
+/// The `end` of the aborting `if` at `j`, when it is one (see [`P::Abort`]).
+fn abort_end(b: &Body<'_>, j: usize) -> Option<usize> {
+    if !matches!(b.ops.get(j)?, Op::If { blockty: BlockType::Empty }) {
+        return None;
+    }
+    let mut k = j + 1;
+    while matches!(
+        b.ops.get(k)?,
+        Op::I32Const { .. } | Op::I64Const { .. } | Op::Call { .. } | Op::LocalGet { .. } | Op::Drop
+    ) {
+        k += 1;
+    }
+    (matches!(b.ops.get(k)?, Op::Unreachable) && matches!(b.ops.get(k + 1)?, Op::End)).then_some(k + 1)
 }
 
-/// The aborting `if` the ops emit after a condition: `if; i32.const;
-/// call; i32.const; call; unreachable; end` — no `else`, and the body
-/// cannot fall through. The `end` is the anchor.
-const ABORT: [(P, bool); 7] = [
-    (P::Is(is_if_empty), false),
-    (P::Is(is_i32_const), false),
-    (P::Is(is_call), false),
-    (P::Is(is_i32_const), false),
-    (P::Is(is_call), false),
-    (P::Is(is_unreachable), false),
-    (P::Is(is_end), true),
-];
-
-fn is_i32_const(o: &Op<'_>) -> bool {
-    matches!(o, Op::I32Const { .. })
-}
-fn is_call(o: &Op<'_>) -> bool {
-    matches!(o, Op::Call { .. })
-}
-fn is_unreachable(o: &Op<'_>) -> bool {
-    matches!(o, Op::Unreachable)
-}
-fn is_end(o: &Op<'_>) -> bool {
-    matches!(o, Op::End)
+/// The `if` of the aborting `if` whose `end` is at `end`: the body holds no
+/// block, so it is the nearest instruction back at the `if`'s own depth.
+fn abort_start(b: &Body<'_>, end: usize) -> Option<usize> {
+    let d = b.depth.get(end)?.checked_sub(1)?;
+    let i = (0..end).rev().find(|&k| b.depth[k] <= d)?;
+    (abort_end(b, i) == Some(end)).then_some(i)
 }
 
 fn op_is(p: P, o: &Op<'_>, bind: &mut Bind) -> bool {
@@ -136,19 +141,26 @@ impl<'a> Ctx<'_, 'a> {
     fn run(
         &self,
         b: &Body<'a>,
-        func: usize,
-        start: usize,
+        at: At,
         pat: &[(P, bool)],
         anchors: &[At],
-        bind: &mut Bind,
         what: &str,
-    ) -> Result<(), String> {
+    ) -> Result<Bind, String> {
+        let (func, start) = (at.func, at.op);
+        let mut bind = Bind::default();
+        let bind = &mut bind;
         let mut next = 0;
+        let mut j = start;
         for (k, &(p, marked)) in pat.iter().enumerate() {
-            let j = start + k;
             let op = b.ops.get(j).ok_or_else(|| format!("{what}: the body ends at instruction {j}"))?;
-            if !op_is(p, op, bind) {
-                return Err(format!("{what}: instruction {j} is {op:?}"));
+            if let P::Abort = p {
+                match abort_end(b, j) {
+                    Some(e) => j = e,
+                    None => return Err(format!("{what}: instruction {j} (step {k} of the shape) opens no abort that cannot fall through")),
+                }
+            } else if !op_is(p, op, bind) {
+                let window: Vec<String> = b.ops[start..(j + 2).min(b.ops.len())].iter().map(|o| format!("{o:?}")).collect();
+                return Err(format!("{what}: instruction {j} (step {k} of the shape) is {op:?}; from {start}: {}", window.join("; ")));
             }
             if marked {
                 let a = anchors.get(next).ok_or_else(|| format!("{what}: fewer anchors than the shape marks"))?;
@@ -157,22 +169,21 @@ impl<'a> Ctx<'_, 'a> {
                 }
                 next += 1;
             }
+            j += 1;
         }
         if next != anchors.len() {
             return Err(format!("{what}: {} anchors for {next} marked instructions", anchors.len()));
         }
-        Ok(())
+        Ok(std::mem::take(bind))
     }
 
     /// `k F`, anchored at the root's `local.set` and the cursor store.
-    /// Answers the local the root's handle is stored to after the op (the
-    /// one its seal must read) and where.
-    pub(crate) fn family(&self, first: i32, anchors: &[At]) -> Result<(At, u32), String> {
+    /// Answers where the op pushes its result (the root's handle).
+    pub(crate) fn family(&self, first: i32, anchors: &[At]) -> Result<At, String> {
         let a0 = *anchors.first().ok_or("family: no anchors")?;
         let b = self.body(a0)?;
         let alloc = self.alloc;
         let start = a0.op.checked_sub(4).ok_or("family: no room for its allocation")?;
-        let mut bind = Bind::default();
         let pat: Vec<(P, bool)> = vec![
             (P::Is(|o| matches!(o, Op::I32WrapI64)), false),
             (P::I32(4), false),
@@ -183,14 +194,12 @@ impl<'a> Ctx<'_, 'a> {
             (P::I32(first), false),
             (P::St(12), true),
             (P::Get('R'), false),
-            (P::Set('F'), false),
         ];
-        self.run(b, a0.func, start, &pat, anchors, &mut bind, "family")?;
+        self.run(b, At { func: a0.func, op: start }, &pat, anchors, "family")?;
         if !matches!(b.ops[start + 3], Op::Call { function_index } if function_index == alloc) {
             return Err(format!("family: instruction {} is not call $alloc", start + 3));
         }
-        let f = bind.local('F').ok_or("family: unbound")?;
-        Ok((At { func: a0.func, op: start + 9 }, f))
+        Ok(At { func: a0.func, op: start + 8 })
     }
 
     /// `e H`, anchored at the two loads and the abort's `end`. Answers
@@ -199,7 +208,6 @@ impl<'a> Ctx<'_, 'a> {
         let a0 = *anchors.first().ok_or("seal: no anchors")?;
         let b = self.body(a0)?;
         let start = a0.op.checked_sub(3).ok_or("seal: no room")?;
-        let mut bind = Bind::default();
         let mut pat: Vec<(P, bool)> = vec![
             (P::Get('F'), false),
             (P::Set('R'), false),
@@ -212,29 +220,29 @@ impl<'a> Ctx<'_, 'a> {
             (P::Is(|o| matches!(o, Op::I32Ne)), false),
         ];
         pat.extend(ABORT);
-        self.run(b, a0.func, start, &pat, anchors, &mut bind, "seal")?;
+        let bind = self.run(b, At { func: a0.func, op: start }, &pat, anchors, "seal")?;
         Ok((At { func: a0.func, op: start }, bind.local('F').ok_or("seal: unbound")?))
     }
 
     /// A family's seal: in the family's function, after it, at its control
-    /// depth with nothing in between leaving it, reading the local the
-    /// root was stored to, unwritten in between.
-    pub(crate) fn sealed(&self, fam: (At, u32), seals: &[(At, u32)]) -> Result<(), String> {
-        let (at, l) = fam;
-        let b = self.body(at)?;
-        let d0 = b.depth[at.op];
-        let ok = seals.iter().any(|&(s, sl)| {
-            s.func == at.func
-                && s.op > at.op
-                && sl == l
+    /// depth with nothing in between leaving it, reading a local whose last
+    /// write before the seal stored the family's result (the operand
+    /// provenance of decode.rs: the write pops the value the op pushed).
+    pub(crate) fn sealed(&self, fam: At, seals: &[(At, u32)]) -> Result<(), String> {
+        let b = self.body(fam)?;
+        let d0 = b.depth[fam.op];
+        let ok = seals.iter().any(|&(s, l)| {
+            let last = (fam.op + 1..s.op).rev().find(|&k| Self::writes(&b.ops[k], l));
+            s.func == fam.func
+                && s.op > fam.op
                 && b.depth[s.op] == d0
-                && self.stays(b, at.op, s.op, d0, "family").is_ok()
-                && !(at.op + 1..s.op).any(|k| Self::writes(&b.ops[k], l))
+                && self.stays(b, fam.op, s.op, d0, "family").is_ok()
+                && last.is_some_and(|k| b.args[k].first().copied().flatten() == Some(fam.op))
         });
         if ok {
             Ok(())
         } else {
-            Err(format!("family at {}:{}: no seal of local {l} after it in its block", at.func, at.op))
+            Err(format!("family at {}:{}: no seal of the local its root is stored to, after it in its block", fam.func, fam.op))
         }
     }
 
@@ -290,8 +298,7 @@ impl<'a> Ctx<'_, 'a> {
             pat.extend([(P::Get('B'), false), (P::I32(0), false), (P::St(12 + 4 * i), true)]);
         }
         pat.push((P::Get('B'), false));
-        let mut bind = Bind::default();
-        self.run(b, a0.func, start, &pat, anchors, &mut bind, "carve")?;
+        let bind = self.run(b, At { func: a0.func, op: start }, &pat, anchors, "carve")?;
         let len = bind.konst('L').ok_or("carve: no len")?;
         if len < 0 || i64::from(len) > 4 * n as i64 {
             return Err(format!("carve: len {len} outside its cap {}", 4 * n));
@@ -309,7 +316,7 @@ impl<'a> Ctx<'_, 'a> {
         let a0 = *anchors.first().ok_or("carve: no anchors")?;
         let b = self.body(a0)?;
         // The guard: `local.tee T; i64.const MAX; i64.gt_u` then the abort.
-        let start = a0.op.checked_sub(9).ok_or("carve: no room")?;
+        let start = abort_start(b, a0.op).and_then(|i| i.checked_sub(3)).ok_or("carve: the length guard's anchor is not the end of an abort")?;
         let mut pat: Vec<(P, bool)> = vec![
             (P::Tee('T'), false),
             (P::I64(0x7FFF_0000), false),
@@ -380,8 +387,7 @@ impl<'a> Ctx<'_, 'a> {
             (P::Is(|o| matches!(o, Op::End)), false),
             (P::Get('B'), true),
         ]);
-        let mut bind = Bind::default();
-        self.run(b, a0.func, start, &pat, anchors, &mut bind, "carve")?;
+        let bind = self.run(b, At { func: a0.func, op: start }, &pat, anchors, "carve")?;
         if bind.local('K') != Some(k) {
             return Err(format!("carve: the record names count local {k}, the loop counts {:?}", bind.local('K')));
         }

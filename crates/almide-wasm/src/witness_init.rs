@@ -27,8 +27,15 @@
 //! the checker rejects (scripts/witness-reinject.sh init re-injects such a
 //! bug and requires the rejection).
 //!
-//! COVERAGE: list literals (`[a, b, c]`, emitter.rs) and range lists
-//! (`a..b`, ranges.rs — a loop fill). Every other allocation
+//! FAMILIES (ADR-0033 D7, carve.rs): `k F` a family root whose carve cursor
+//! starts at F; `c H w W n N s0 ..` a carve of a literal length and
+//! `c H w W v K f K t W` one of a computed length — a site placed inside the
+//! root, every payload word zeroed by the op itself — and `e H` the seal.
+//! Each is recorded once its whole shape is emitted, with an anchor per
+//! instruction almide-anchor-check holds (anchor-check carve.rs).
+//!
+//! COVERAGE: list literals (`[a, b, c]`, emitter.rs), range lists
+//! (`a..b`, ranges.rs — a loop fill) and family carves. Every other allocation
 //! site — records, variants, strings, the runtime's routines — records
 //! nothing yet, so INITIALIZATION is certified for list-literal blocks only;
 //! the corpus count of recorded sites is reported by proofs/structural-wall.sh.
@@ -165,15 +172,16 @@ pub(crate) fn family(first: u32, anchors: &[String]) {
 
 /// `prim.carve` of a literal length: an interior block of an `hdr`-byte
 /// header and `n` zeroed `w`-byte payload words, every store emitted:
-/// `c H w W n N s0 .. s(N-1)`, anchored at the cursor load, the root len
-/// load, the room test's `if`, the cursor store, the base's `local.set`,
-/// the three header stores and each payload store.
-pub(crate) fn carve_fixed(hdr: u32, w: u32, n: usize, anchors: &[String]) {
-    record(carve_fixed_tokens(hdr, w, n), anchors);
+/// `c H w W n N s0 .. s(N-1)` (each `s i` taken as its store was emitted),
+/// anchored at the cursor load, the root len load, the room test's `if`,
+/// the cursor store, the base's `local.set`, the three header stores and
+/// each payload store.
+pub(crate) fn carve_fixed(hdr: u32, w: u32, n: usize, stores: &[usize], anchors: &[String]) {
+    record(carve_fixed_tokens(hdr, w, n, stores), anchors);
 }
 
-fn carve_fixed_tokens(hdr: u32, w: u32, n: usize) -> String {
-    let stores: String = (0..n).map(|i| format!(" s{i}")).collect();
+fn carve_fixed_tokens(hdr: u32, w: u32, n: usize, stores: &[usize]) -> String {
+    let stores: String = stores.iter().map(|i| format!(" s{i}")).collect();
     format!("c{hdr} w{w} n{n}{stores}")
 }
 
@@ -231,7 +239,9 @@ mod tests {
 
     #[test]
     fn a_literal_carve_lists_every_payload_word() {
-        assert_eq!(carve_fixed_tokens(12, 4, 2), "c12 w4 n2 s0 s1");
-        assert_eq!(carve_fixed_tokens(12, 4, 1), "c12 w4 n1 s0");
+        assert_eq!(carve_fixed_tokens(12, 4, 2, &[0, 1]), "c12 w4 n2 s0 s1");
+        assert_eq!(carve_fixed_tokens(12, 4, 1, &[0]), "c12 w4 n1 s0");
+        // A store the emitter lost is a slot the record lacks.
+        assert_eq!(carve_fixed_tokens(12, 4, 3, &[0, 2]), "c12 w4 n3 s0 s2");
     }
 }

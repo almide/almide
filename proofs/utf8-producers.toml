@@ -3020,21 +3020,6 @@ how = "none"
 why = "no String block: a scalar, a reference count, a read"
 
 [[prim]]
-id = "carve"
-how = "obligation"
-why = "carves a block of len zeroed payload bytes inside a family root (ADR-0033 D7); zero bytes are valid UTF-8, and a caller that fills it and publishes it as a String writes those bytes with store8 / store32 / store64, whose [[mint]] row carries the evidence"
-
-[[prim]]
-id = "family"
-how = "none"
-why = "a Bytes block: a family root, its first payload word the carve cursor"
-
-[[prim]]
-id = "family_seal"
-how = "none"
-why = "no String block: reads the cursor and the root's len, aborts on a mismatch"
-
-[[prim]]
 id = "alloc_list_f64"
 how = "none"
 why = "no String block: a scalar, a reference count, a read"

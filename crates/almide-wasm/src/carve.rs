@@ -49,8 +49,11 @@ fn word(offset: u64) -> MemArg {
     MemArg { offset, align: 2, memory_index: 0 }
 }
 
-/// The abort every carve check takes (a defined abort, exit 1).
+/// The aborts the carve checks take (defined aborts, exit 1): a carve past
+/// the root's end (a room test or the length guard), and a seal that finds
+/// the root not carved to its end.
 pub(crate) const FULL_TEXT: &str = "Error: allocation family out of room";
+pub(crate) const SEAL_TEXT: &str = "Error: allocation family not carved to its end";
 
 impl Emitter<'_> {
     pub(crate) fn lower_carve_op(&mut self, func: &str, args: &[IrExpr]) -> Option<ArmResult> {
@@ -84,9 +87,9 @@ impl Emitter<'_> {
         }
     }
 
-    /// `if <i32 cond on the stack> { "out of room"; exit 1 }`.
-    fn carve_abort_if(&mut self) {
-        let msg = self.pool.intern(FULL_TEXT);
+    /// `if <i32 cond on the stack> { eprintln(text); exit 1 }`.
+    fn carve_abort_if(&mut self, text: &str) {
+        let msg = self.pool.intern(text);
         let mut i = self.f.instructions();
         i.if_(BlockType::Empty);
         i.i32_const(msg as i32).call(F_EPRINTLN_BLOCK);
@@ -119,7 +122,7 @@ impl Emitter<'_> {
         self.f.instructions().local_get(root).i32_load(len_memarg());
         anchors.push(self.anchor_here());
         self.f.instructions().i32_const(almide_layout::PAYLOAD as i32).i32_add().i32_ne();
-        self.carve_abort_if();
+        self.carve_abort_if(SEAL_TEXT);
         anchors.push(self.anchor_here());
         crate::witness::init::seal(almide_layout::PAYLOAD, &anchors);
         self.release_i32();
@@ -148,19 +151,24 @@ impl Emitter<'_> {
                 let mut i = self.f.instructions();
                 i.local_get(base).i32_const((4 * words) as i32).i32_store(word(almide_layout::CAP.offset.into()));
                 anchors.push(self.anchor_here());
+                // Each payload word's record is taken where its store is
+                // emitted: a lost store is a lost `s i`, which the proven
+                // checker rejects.
+                let mut stores = Vec::new();
                 for k in 0..words {
                     self.f.instructions().local_get(base).i32_const(0).i32_store(word(12 + 4 * k as u64));
                     anchors.push(self.anchor_here());
+                    stores.push(k as usize);
                 }
                 self.f.instructions().local_get(base);
-                crate::witness::init::carve_fixed(almide_layout::PAYLOAD, 4, words as usize, &anchors);
+                crate::witness::init::carve_fixed(almide_layout::PAYLOAD, 4, words as usize, &stores, &anchors);
             }
             None => {
                 let (n, k, s, p) = (self.hold_i32()?, self.hold_i32()?, self.hold_i32()?, self.hold_i32()?);
                 self.lower_arg(len, Some(INT), ArgMode::Raw)?;
                 let t = self.hold_i64()?;
                 self.f.instructions().local_tee(t).i64_const(MAX_LEN).i64_gt_u();
-                self.carve_abort_if();
+                self.carve_abort_if(FULL_TEXT);
                 anchors.push(self.anchor_here());
                 let mut i = self.f.instructions();
                 i.local_get(t).i32_wrap_i64().local_set(n);
@@ -218,7 +226,7 @@ impl Emitter<'_> {
         i.i64_add().local_get(root).i32_load(len_memarg());
         anchors.push(self.anchor_here());
         self.f.instructions().i64_extend_i32_u().i64_const(almide_layout::PAYLOAD as i64).i64_add().i64_gt_u();
-        self.carve_abort_if();
+        self.carve_abort_if(FULL_TEXT);
         anchors.push(self.anchor_here());
         let mut i = self.f.instructions();
         i.local_get(root).local_get(cur);

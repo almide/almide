@@ -316,6 +316,21 @@ print(f"  [anchors] ANCHORS OK on every artifact: {tot['init_sites']} site(s) / 
       f"{tot['init_unlocated']} site(s), {tot['bounds_unlocated']} bounds event(s)")
 print(f"  [anchors] FIELDS OK on every artifact: {ftot['f_sites']} site(s) / {ftot['f_stores']} store(s), {ftot['f_accesses']} field access(es) "
       f"({ftot['f_guarded']} variant case field(s) held to their tag test), {ftot['f_tags']} tag read(s); unlocated (dead bodies): {ftot['f_unlocated']}")
+# ADR-0033 D7: the family records held to the bytes (anchor-check carve.rs).
+cpat = re.compile(r"CARVES OK: (\d+) family root\(s\), (\d+) literal carve\(s\), (\d+) computed carve\(s\), (\d+) seal\(s\)")
+ck = ["families", "carves", "fills", "seals"]
+ctot = dict.fromkeys(ck, 0)
+cart = 0
+for f in os.listdir(out):
+    if f.endswith(".anchor"):
+        m = cpat.search(open(os.path.join(out, f)).read())
+        if not m:
+            sys.exit(f"STRUCTURAL WALL FAIL: {f}: no CARVES verdict — the family records were not held to the bytes")
+        for k, v in zip(ck, m.groups()):
+            ctot[k] += int(v)
+        cart += 1 if int(m.group(1)) else 0
+print(f"  [anchors] CARVES OK on every artifact: {ctot['families']} family root(s) in {cart} artifact(s), "
+      f"{ctot['carves']} literal and {ctot['fills']} computed carve site(s), {ctot['seals']} seal(s)")
 PYEOF
 
 echo "== drill: one byte of a shipped artifact changed — the verifier must reject =="
