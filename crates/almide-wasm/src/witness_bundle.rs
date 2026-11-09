@@ -126,6 +126,7 @@ fn records_inner(
         None => String::new(),
         Some(fmap) => {
     let locate = Locator::new(emitted, shipped, seals, remaps, fmap)?;
+    let heaps = pick(heap_params);
     format!(
         "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\nfields {}\njudges {}\nholds {}\n",
         {
@@ -146,7 +147,10 @@ fn records_inner(
         + &format!("prims {}\n", locate.text(&pick(prim_anchors))?)
         // #4005 A4: each self-host body's heap-typed parameters, by its
         // shipped position (a body that did not ship is left out).
-        + &format!("selfhost {}\n", locate.heaps(&pick(heap_params)))
+        + &format!("selfhost {}\n", locate.heaps(&heaps))
+        // Every other body's (`c`-marked: user code, a self-host body with
+        // no prim access) — the routine certificate's table takes them too.
+        + &format!("code {}\n", locate.heaps(&heaps.split_whitespace().filter_map(|t| t.strip_prefix('c')).collect::<Vec<_>>().join(" ")))
         // #4005 A4: each shipped runtime routine, labelled, with the heap
         // parameters its builder declares (witness_routines.rs).
         + &routines_line(emitted, fmap, &routine_labels)?

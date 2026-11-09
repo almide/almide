@@ -1,14 +1,15 @@
 //! The ROUTINE certificate's translation check (#4005 A4): the runtime
-//! routines the anchor file's `routines` line names, each translated by
-//! lin.rs as a routine (its declared heap parameters bound, the blocks it
-//! allocates counted), with the events a site selection names — loads and
-//! stores of its own body. A routine's events need not be all of its
+//! routines the anchor file's `routines` line names and the bodies its
+//! `code` line names, each translated by lin.rs as a routine (its declared
+//! heap parameters bound; the blocks a runtime routine allocates counted),
+//! with the events a site selection names — loads and stores of its own
+//! body. A routine's events need not be all of its
 //! accesses: what the selection leaves out stays counted (the census), and
 //! what it names is held to the proven checker like a self-host body's.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::lin::{access_sites, check_linkage, matches_at, nat_len, routine_params, template, translate_routine, LinReport, Module, Tok};
+use crate::lin::{access_sites, check_linkage, matches_at, nat_len, routine_params, table_params, template, translate_routine, LinReport, Module, Tok};
 
 /// A routine certificate's site selection (`almide-lin-prove --routines`):
 /// per line `<position> <op> <op> ...`, the accesses each procedure's
@@ -38,7 +39,8 @@ pub fn parse_selection(sel: &str) -> Result<BTreeMap<usize, BTreeSet<usize>>, St
 pub fn verify_routines(wasm: &[u8], anchors: &str, cert: &str, sel: &str) -> Result<LinReport, String> {
     let m = Module::read(wasm)?;
     let (alloc, ..) = crate::parse_anchors(anchors)?;
-    let heap = routine_params(anchors);
+    let heap = table_params(anchors);
+    let routines = routine_params(anchors);
     let sel = parse_selection(sel)?;
     let stretches: Vec<&str> = if cert.trim().is_empty() { Vec::new() } else { cert.split(" ; ").collect() };
     let mut table = BTreeSet::new();
@@ -50,7 +52,7 @@ pub fn verify_routines(wasm: &[u8], anchors: &str, cert: &str, sel: &str) -> Res
         let n = nat_len(&b[1..]).ok_or("routine certificate: a procedure with no id")?;
         let id: usize = st[1..1 + n].parse().map_err(|_| "routine certificate: bad id")?;
         if !heap.contains_key(&id) {
-            return Err(format!("routine certificate: procedure {id} is not a runtime routine the anchor file names"));
+            return Err(format!("routine certificate: procedure {id} is not a routine or code body the anchor file names"));
         }
         if !table.insert(id) {
             return Err(format!("routine certificate: procedure {id} twice"));
@@ -70,7 +72,7 @@ pub fn verify_routines(wasm: &[u8], anchors: &str, cert: &str, sel: &str) -> Res
             return Err(format!("routine certificate: procedure {id} selects op {k}, which is no load or store of its body"));
         }
         let hp = heap.get(&id).cloned().unwrap_or_default();
-        let skel = translate_routine(&m, id, s, &hp, &table, alloc).map_err(|e| format!("routine certificate: function {id}: {e}"))?;
+        let skel = translate_routine(&m, id, s, &hp, &table, alloc, routines.contains_key(&id)).map_err(|e| format!("routine certificate: function {id}: {e}"))?;
         let tpl = template(id, &skel);
         match matches_at(&tpl, st.as_bytes(), 0) {
             Ok(n) if n == st.len() => {}

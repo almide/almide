@@ -380,11 +380,12 @@ pub(crate) fn prim_count() -> usize {
     state().lock().expect("bounds sink").as_ref().map_or(0, |s| s.prim_count)
 }
 
-/// A self-host body holding prim accesses was lowered (func.rs): its anchor
-/// serial, its heap-typed wasm parameter positions, each with the stride
-/// its block's len word counts in when it has one (`p=s`), and its name
-/// (for reports only; nothing checks it).
-pub(crate) fn heap_params(serial: u64, params: &[(u32, Option<u32>)], name: &str) {
+/// A body was lowered (func.rs): its anchor serial, its heap-typed wasm
+/// parameter positions, each with the stride its block's len word counts
+/// in when it has one (`p=s`), and its name (for reports only; nothing
+/// checks it). A body without prim accesses (`!prims`) is marked `c`: it
+/// goes on the anchor file's `code` line, not the `selfhost` one.
+pub(crate) fn heap_params(serial: u64, params: &[(u32, Option<u32>)], name: &str, prims: bool) {
     let list = if params.is_empty() {
         "-".to_string()
     } else {
@@ -399,7 +400,7 @@ pub(crate) fn heap_params(serial: u64, params: &[(u32, Option<u32>)], name: &str
     };
     with(|s| {
         let name: String = name.chars().map(|c| if c.is_whitespace() || c == ':' { '_' } else { c }).collect();
-        s.heaps.push_str(&format!("{serial}:{list}:{name} "));
+        s.heaps.push_str(&format!("{}{serial}:{list}:{name} ", if prims { "" } else { "c" }));
     });
 }
 
