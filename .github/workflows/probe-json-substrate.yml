@@ -419,9 +419,12 @@ jobs:
         with:
           shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
           save-if: false
-      - name: JSON ratchet in CHECK mode on the ref under measurement (negative controls)
+      - name: JSON ratchet in CHECK mode on each listed ref (control first, then negative controls)
         run: |
-          ref="$(cat .github/probe/head-ref.txt)"
-          git checkout -q --detach "$ref" && git log --oneline -1
-          cargo test --release -p almide-wasm --test json_ratchet -- --nocapture 2>&1 | grep -E "RATCHET|RETENTION|JSON ratchet|panicked|test result|  [a-z]+ (fuel|allocs|frees)" | tee /tmp/ratchet.txt
-          grep -q "test result: ok" /tmp/ratchet.txt && echo "VERDICT: ratchet PASSES on $ref" || echo "VERDICT: ratchet FAILS on $ref"
+          cp .github/probe/ratchet-refs.txt /tmp/refs.txt
+          for ref in $(cat /tmp/refs.txt); do
+            git checkout -q --detach "origin/$ref" && echo "=== $ref $(git log --oneline -1)"
+            cargo test --release -p almide-wasm --test json_ratchet -- --nocapture > /tmp/ratchet.txt 2>&1
+            grep -E "RATCHET|RETENTION|panicked|test result|  [a-z]+ (fuel|allocs|frees)" /tmp/ratchet.txt
+            grep -q "test result: ok" /tmp/ratchet.txt && echo "VERDICT $ref: ratchet PASSES" || echo "VERDICT $ref: ratchet FAILS"
+          done
