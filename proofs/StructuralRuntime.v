@@ -574,8 +574,10 @@ End Trees.
    realization theorem above — `inc_realizes_rt_inc`,
    `dec_shared_realizes_rt_dec`, `dec_unique_files_take_class`, and the
    double-free trap `dec_freed_block_traps` — holds for the family trees
-   with the ROOT in the block's place, and the interior word itself is
-   never written (`*_family_interior_word_kept`). proofs/FamilyRc.v lifts
+   with the ROOT in the block's place (`inc_family_interior_credits_root`,
+   `dec_family_interior_shared_root`, `dec_family_interior_frees_root`,
+   `dec_family_interior_freed_root_traps`), and the interior word itself
+   is never written. proofs/FamilyRc.v lifts
    this to the heap-trace definition (TEMPORAL). *)
 
 Fixpoint frun (fsem : Z -> C -> C) (blk floor : Z) (ss : list stmt) (c : C) : C :=
@@ -610,7 +612,7 @@ Proof.
     match goal with |- context [SIf _ ?b] => destruct b end;
       try reflexivity; simpl in Hs; contradiction. }
   rewrite E. simpl. destruct (sstep blk floor (fsem blk) s c) as [r c'].
-  destruct r; [reflexivity | apply IH; exact Hss].
+  destruct r; simpl; [reflexivity | apply IH; exact Hss].
 Qed.
 
 (* The three moves a family tree makes before its plain tail. *)

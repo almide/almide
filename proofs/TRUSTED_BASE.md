@@ -222,6 +222,26 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `check_trace_complete` | MemorySafe.v | Closed under the global context |
 | `rc_check_gives_temporal` | MemorySafe.v | Closed under the global context |
 | `unguarded_rc_check_misses_resurrection` | MemorySafe.v | Closed under the global context |
+| `credit_proj` | FamilyRc.v | Closed under the global context |
+| `family_rc_gives_temporal` | FamilyRc.v | Closed under the global context |
+| `interior_never_counted` | FamilyRc.v | Closed under the global context |
+| `member_dead_with_root` | FamilyRc.v | Closed under the global context |
+| `redirect_interior` | FamilyRc.v | Closed under the global context |
+| `fam_of_wf` | FamilyRc.v | Closed under the global context |
+| `family_inc_is_credited` | FamilyRc.v | Closed under the global context |
+| `family_dec_is_credited` | FamilyRc.v | Closed under the global context |
+| `redirect_dropped_not_temporal` | FamilyRc.v | Closed under the global context |
+| `root_off_by_4_not_temporal` | FamilyRc.v | Closed under the global context |
+| `unsigned_judges_read_interior_shared` | FamilyRc.v | Closed under the global context |
+| `signed_cow_judge_reads_interior_unique` | FamilyRc.v | Closed under the global context |
+| `inc_family_ordinary` | StructuralRuntime.v | Closed under the global context |
+| `dec_family_ordinary` | StructuralRuntime.v | Closed under the global context |
+| `inc_family_interior` | StructuralRuntime.v | Closed under the global context |
+| `dec_family_interior` | StructuralRuntime.v | Closed under the global context |
+| `inc_family_interior_credits_root` | StructuralRuntime.v | Closed under the global context |
+| `dec_family_interior_shared_root` | StructuralRuntime.v | Closed under the global context |
+| `dec_family_interior_frees_root` | StructuralRuntime.v | Closed under the global context |
+| `dec_family_interior_freed_root_traps` | StructuralRuntime.v | Closed under the global context |
 | `unsigned_ge_excludes` | SpatialCert.v | Closed under the global context |
 | `run_sound` | SpatialCert.v | Closed under the global context |
 | `accepts_spatial` | SpatialCert.v | Closed under the global context |
@@ -243,6 +263,9 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `reorder_memory_safe` | InitCert.v | Closed under the global context |
 | `check_init_cert_sound` | InitCert.v | Closed under the global context |
 | `fill_window` | InitCert.v | Closed under the global context |
+| `carve_window` | InitCert.v | Closed under the global context |
+| `family_window` | InitCert.v | Closed under the global context |
+| `fsited_init` | InitCert.v | Closed under the global context |
 | `rsite_window` | FieldCert.v | Closed under the global context |
 | `ftrace_safe` | FieldCert.v | Closed under the global context |
 | `fields_memory_safe` | FieldCert.v | Closed under the global context |
@@ -736,7 +759,7 @@ The earlier progression described its scope as follows:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (152 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (175 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
