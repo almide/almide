@@ -1,0 +1,10 @@
+import json
+
+// 200 strings of 400 plain bytes each, parsed and stringified once.
+fn main() -> Unit = {
+  let one = string.repeat("lorem ipsum dolor sit amet, ", 14) + "consectetur"
+  let doc = value.array(list.range(0, 200) |> list.map((i) => value.string("${i} ${one}")))
+  let text = json.stringify(doc)
+  let back = json.parse(text) ?? value.null()
+  println("${string.len(text)} ${string.len(json.stringify(back))}")
+}

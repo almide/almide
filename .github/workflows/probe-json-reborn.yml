@@ -1,7 +1,7 @@
 name: probe-json-reborn (throwaway)
 on:
   push:
-    branches: [probe/json-reborn, probe/json-negctl]
+    branches: [probe/json-reborn, probe/json-negctl, probe/json-swar]
   workflow_dispatch:
 permissions:
   contents: read
@@ -9,7 +9,7 @@ env:
   RUST_TOOLCHAIN: "1.97.0"
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
-  HEAD_REF: ${{ github.ref_name == 'probe/json-negctl' && 'origin/json-reborn-negctl' || 'origin/json-reborn' }}
+  HEAD_REF: ${{ github.ref_name == 'probe/json-negctl' && 'origin/json-reborn-negctl' || github.ref_name == 'probe/json-swar' && 'origin/json-reborn-swar' || 'origin/json-reborn' }}
   BASE_REF: 6a633ef11a6fd62695e92c8118bf7cba0f558bff
   ROUNDS: "15"
 jobs:
@@ -61,6 +61,8 @@ jobs:
             /tmp/bins/almide-head build jr_${p}_small.almd --target wasm -o jr_${p}_small.wasm && echo "size $p $(stat -c %s jr_${p}_small.wasm)"
             timeout 1200 python3 /tmp/probe/wi.py jr_${p}_small.wasm --top 30 > wi-$p.txt 2>&1; head -12 wi-$p.txt
           done
+          /tmp/bins/almide-head build jr_long_small.almd --target wasm -o jr_long_small.wasm && echo "size long $(stat -c %s jr_long_small.wasm)"
+          timeout 1200 python3 /tmp/probe/wi.py jr_long_small.wasm --top 10 > wi-long.txt 2>&1; head -4 wi-long.txt
           sudo apt-get install -y -qq binaryen >/dev/null 2>&1 && wasm-dis --enable-tail-call jr_full_small.wasm -o jr_full_small.wat || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
