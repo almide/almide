@@ -96,6 +96,7 @@ fn json_parse(text: String) -> Result[Value, String] = {
   prim.store64(s + 24, prim.handle(fam))
   prim.store64(s + 32, est)
   prim.store64(s + 40, 0)
+  prim.store64(s + 48, 0)
   let r = __jp_s1(text, tl, 0, 0, sc)
   let q = if r < 0 then r else __jp_trail(text, tl, r)
   if q < 0 then err(__jp_message(text, tl, 0 - 1 - q))
@@ -305,6 +306,8 @@ fn __jp_same_bytes(t: String, a: Int, b: Int, k: Int) -> Bool = {
   let n = prim.load32(prim.handle(t) + 4)
   if a < 0 then false
   else if b < 0 then false
+  else if a > n then false
+  else if b > n then false
   else {
     var i = 0
     var same = true
@@ -410,48 +413,281 @@ fn __jp_set_word(sc: Bytes, off: Int, v: Int) -> Unit = {
   else prim.store64(prim.handle(sc) + 12 + off, v)
 }
 
-fn __jp_add_word(sc: Bytes, off: Int, v: Int) -> Unit = __jp_set_word(sc, off, __jp_word(sc, off) + v)
-
 // ══ PASS 1: validate and count ══
 // Each reader takes its start position and answers the position after what
 // it read, or a refusal code (negative). Counts go to the scratch words.
 
-// One value of the family: its 28-byte box plus `extra` bytes, and one
-// stacked handle.
-fn __jp_count_value(sc: Bytes, extra: Int) -> Unit = {
-  __jp_add_word(sc, 0, 28 + extra)
-  __jp_add_word(sc, 8, 1)
+// Add `x` bytes to the family's count (scratch word [0]).
+fn __jp_count(sc: Bytes, x: Int) -> Unit = {
+  let sn = prim.load32(prim.handle(sc) + 4)
+  if sn < 8 then __jp_disagree()
+  else prim.store64(prim.handle(sc) + 12, prim.load64(prim.handle(sc) + 12) + x)
 }
 
-// The value at p (whitespace first).
+// The first non-whitespace byte from p (space, tab, LF, CR; RFC 8259 §2)
+// and its offset, packed as `offset * 512 + byte + 1`; byte + 1 is 0 at the
+// end of the text.
+fn __jp_tok(t: String, p: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  if p < 0 then 0
+  else if p >= n then p * 512
+  else {
+    var q = p
+    var r = n * 512
+    while q < n {
+      let c = prim.load8(prim.handle(t) + 12 + q)
+      if c == 32 or c == 9 or c == 10 or c == 13 then {
+        q = q + 1
+      } else {
+        r = q * 512 + c + 1
+        q = n
+      }
+    }
+    r
+  }
+}
+
+fn __jp_tok_at(k: Int) -> Int = k / 512
+
+fn __jp_tok_byte(k: Int) -> Int = k % 512 - 1
+
+// The string whose opening quote should be at q: the scan answer
+// (__jp_str_scan's packing) or a refusal — the end of the text, a key that
+// is not a string (`json: unquoted key`), or one of the string's own. A run
+// of plain bytes is read here in one loop; an escape or a lead byte of
+// U+F000 and up goes to __jp_str_scan.
+fn __jp_strend(t: String, q: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  if q < 0 then __jp_code(0, 6)
+  else if q >= n then __jp_code(q, 6)
+  else if prim.load8(prim.handle(t) + 12 + q) != 34 then __jp_code(q, 10)
+  else {
+    var e = q + 1
+    var at = n
+    var stop = 0 - 1
+    while e < n {
+      let c = prim.load8(prim.handle(t) + 12 + e)
+      if c == 34 or c == 92 or c < 32 or c >= 239 then {
+        stop = c
+        at = e
+        e = n
+      } else {
+        e = e + 1
+      }
+    }
+    if stop == 34 then at * 4294967296 + (at - q - 1) * 2
+    else __jp_str_scan(t, at, q, 0, at - q - 1)
+  }
+}
+
+// The end of the Int token at q when it is plain — an optional `-`, 1 to 18
+// digits with no leading zero, and no `+ - . e E` after them — else -1 (the
+// full number grammar decides, __jp_number1).
+fn __jp_int_fast(t: String, q: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  if q < 0 then 0 - 1
+  else if q >= n then 0 - 1
+  else {
+    let lead = if prim.load8(prim.handle(t) + 12 + q) == 45 then q + 1 else q
+    if lead < 0 then 0 - 1
+    else {
+      var e = lead
+      var at = n
+      while e < n {
+        let c = prim.load8(prim.handle(t) + 12 + e)
+        if c < 48 then {
+          at = e
+          e = n
+        } else if c > 57 then {
+          at = e
+          e = n
+        } else {
+          e = e + 1
+        }
+      }
+      let d = at - lead
+      if d < 1 then 0 - 1
+      else if d > 18 then 0 - 1
+      else if d > 1 and __jp_byte(t, lead) == 48 then 0 - 1
+      else if at >= n then at
+      else if at < 0 then 0 - 1
+      else {
+        let c = prim.load8(prim.handle(t) + 12 + at)
+        if c == 43 or c == 45 or c == 46 or c == 101 or c == 69 then 0 - 1 else at
+      }
+    }
+  }
+}
+
+// `true`, `false` or `null` at q (b is its first byte): the offset after
+// it, or the refusal its kind names.
+fn __jp_lit(t: String, q: Int, b: Int) -> Int = {
+  let n = prim.load32(prim.handle(t) + 4)
+  let w = if b == 102 then 5 else 4
+  let kind = if b == 110 then 16 else 15
+  if q < 0 then __jp_code(q, kind)
+  else if q > n - w then __jp_code(q, kind)
+  else {
+    let h = prim.handle(t) + 12 + q
+    let ok4 = if b == 116 then prim.load8(h) == 116 and prim.load8(h + 1) == 114 and prim.load8(h + 2) == 117 and prim.load8(h + 3) == 101
+    else if b == 110 then prim.load8(h) == 110 and prim.load8(h + 1) == 117 and prim.load8(h + 2) == 108 and prim.load8(h + 3) == 108
+    else prim.load8(h) == 102 and prim.load8(h + 1) == 97 and prim.load8(h + 2) == 108 and prim.load8(h + 3) == 115 and prim.load8(h + 4) == 101
+    if ok4 then q + w else __jp_code(q, kind)
+  }
+}
+
+// After a member that ended at `np`: the next member's offset (whitespace
+// skipped), `tl + 2 + q` for the close at q (past every member offset, so
+// one Int tells the three answers apart), or a refusal code.
+fn __jp_after(t: String, tl: Int, np: Int, close: Int) -> Int = {
+  let f = __jp_tok(t, np)
+  let q = __jp_tok_at(f)
+  let b = __jp_tok_byte(f)
+  if b < 0 then __jp_code(q, 6)
+  else if b == close then tl + 2 + q
+  else if b == 44 then {
+    let g = __jp_tok(t, q + 1)
+    if __jp_tok_byte(g) == close then __jp_code(q, 7) else __jp_tok_at(g)
+  } else __jp_code(q, if close == 93 then 8 else 9)
+}
+
+// The value at p (whitespace first): the offset after it, or a refusal.
 fn __jp_v1(t: String, tl: Int, p: Int, depth: Int, sc: Bytes) -> Int = {
-  let q = __jp_ws(t, p)
-  let b = __jp_byte(t, q)
+  let f = __jp_tok(t, p)
+  let q = __jp_tok_at(f)
+  let b = __jp_tok_byte(f)
   if b < 0 then __jp_code(q, 6)
   else if b == 34 then {
-    let r = __jp_str_scan(t, q + 1, q, 0, 0)
+    let r = __jp_strend(t, q)
     if r < 0 then r
     else {
-      __jp_count_value(sc, 12 + __jp_cap(__jp_scan_n(r)))
+      __jp_count(sc, 40 + __jp_cap(__jp_scan_n(r)))
       __jp_scan_end(r) + 1
     }
-  } else if (b == 123 or b == 91) and depth >= __json_max_depth() then __jp_code(q, 17)
-  else if b == 123 then __jp_object1(t, tl, __jp_ws(t, q + 1), depth + 1, sc)
-  else if b == 91 then __jp_array1(t, tl, __jp_ws(t, q + 1), depth + 1, sc)
-  else if b == 116 then __jp_lit1(q, 4, __jp_lit_at(t, q, 116, 114, 117, 101), 15, sc)
-  else if b == 102 then __jp_lit1(q, 5, __jp_lit_at(t, q, 102, 97, 108, 115) and __jp_byte(t, q + 4) == 101, 15, sc)
-  else if b == 110 then __jp_lit1(q, 4, __jp_lit_at(t, q, 110, 117, 108, 108), 16, sc)
-  else if b == 45 or (b >= 48 and b <= 57) then __jp_number1(t, tl, q, sc)
-  else __jp_code(q, 18)
+  } else if b == 123 or b == 91 then {
+    if depth >= __json_max_depth() then __jp_code(q, 17)
+    else if b == 123 then __jp_object1(t, tl, q + 1, depth + 1, sc)
+    else __jp_array1(t, tl, q + 1, depth + 1, sc)
+  } else if b == 116 or b == 102 or b == 110 then {
+    let e = __jp_lit(t, q, b)
+    if e >= 0 then __jp_count(sc, 28) else ()
+    e
+  } else if b == 45 or (b >= 48 and b <= 57) then {
+    let e = __jp_int_fast(t, q)
+    if e >= 0 then {
+      __jp_count(sc, 28)
+      e
+    } else __jp_number1(t, tl, q, sc)
+  } else __jp_code(q, 18)
 }
 
-// A literal of `n` bytes at p that matched (`hit`), or refused with `kind`.
-fn __jp_lit1(p: Int, n: Int, hit: Bool, kind: Int, sc: Bytes) -> Int = if hit then {
-  __jp_count_value(sc, 0)
-  p + n
-} else __jp_code(p, kind)
+// p is just past `[`. An empty array closes at its first token. A loop,
+// never one frame per element (#939).
+fn __jp_array1(t: String, tl: Int, p: Int, depth: Int, sc: Bytes) -> Int = {
+  let f = __jp_tok(t, p)
+  var k = 0
+  var q = if __jp_tok_byte(f) == 93 then tl + 2 + __jp_tok_at(f) else __jp_tok_at(f)
+  while q >= 0 and q <= tl {
+    let v = __jp_v1(t, tl, q, depth, sc)
+    k = k + 1
+    q = if v < 0 then v else __jp_after(t, tl, v, 93)
+  }
+  if q < 0 then q
+  else {
+    __jp_count(sc, 40 + __jp_cap(k * 4))
+    q - tl - 1
+  }
+}
 
-fn __jp_lit_at(t: String, p: Int, b0: Int, b1: Int, b2: Int, b3: Int) -> Bool = __jp_byte(t, p) == b0 and __jp_byte(t, p + 1) == b1 and __jp_byte(t, p + 2) == b2 and __jp_byte(t, p + 3) == b3
+// One key read at `open` (scan answer r), the k-th of the object whose
+// span slots start at `from`: its span pushed, its String counted, and —
+// while the object has fewer than 16 keys — whether it repeats one of the
+// keys before it (raw bytes when neither has an escape, decoded otherwise).
+fn __jp_key1(t: String, sc: Bytes, from: Int, open: Int, r: Int, k: Int) -> Bool = {
+  let sn = prim.load32(prim.handle(sc) + 4)
+  let e = __jp_scan_end(r)
+  let esc = __jp_scan_esc(r)
+  let top = __jp_word(sc, 16)
+  if top < 32 then {
+    __jp_disagree()
+    false
+  } else if top > sn - 8 then {
+    __jp_disagree()
+    false
+  } else {
+    prim.store32(prim.handle(sc) + 12 + top, open * 2 + esc)
+    prim.store32(prim.handle(sc) + 16 + top, e)
+    __jp_set_word(sc, 16, top + 8)
+    __jp_count(sc, 12 + __jp_cap(__jp_scan_n(r)))
+    if k >= 16 then false
+    else {
+      var u = if from < 32 then top else from
+      var dup = false
+      while u < top {
+        if u < 32 then {
+          u = top
+        } else if u > sn - 8 then {
+          u = top
+        } else {
+          let w = prim.load32(prim.handle(sc) + 12 + u)
+          let ue = prim.load32(prim.handle(sc) + 16 + u)
+          let a = w / 2 + 1
+          if w % 2 == 0 and esc == 0 then {
+            if ue - a == e - open - 1 and __jp_same_bytes(t, a, open + 1, e - open - 1) then {
+              dup = true
+              u = top
+            } else {
+              u = u + 8
+            }
+          } else if __jp_key_cmp(t, a, ue, open + 1, e) == 0 then {
+            dup = true
+            u = top
+          } else {
+            u = u + 8
+          }
+        }
+      }
+      dup
+    }
+  }
+}
+
+// p is just past `{`. An empty object closes at its first token. The first
+// 16 keys are each checked against the keys before them as they are read;
+// from the 17th on the check is deferred to one index over the whole object
+// (__jp_dups), run when the object closes and when a refusal leaves it — the
+// earlier of the two is reported — so the first refusal in document order
+// still wins. The same loop shape as `__jp_array1` (#939).
+fn __jp_object1(t: String, tl: Int, p: Int, depth: Int, sc: Bytes) -> Int = {
+  let from = __jp_word(sc, 16)
+  let f = __jp_tok(t, p)
+  var k = 0
+  var q = if __jp_tok_byte(f) == 125 then tl + 2 + __jp_tok_at(f) else __jp_tok_at(f)
+  while q >= 0 and q <= tl {
+    let r = __jp_strend(t, q)
+    if r < 0 then {
+      q = r
+    } else if __jp_key1(t, sc, from, q, r, k) then {
+      q = __jp_code(q, 11)
+    } else {
+      let c = __jp_tok(t, __jp_scan_end(r) + 1)
+      let cb = __jp_tok_byte(c)
+      let v = if cb < 0 then __jp_code(__jp_tok_at(c), 6)
+      else if cb != 58 then __jp_code(__jp_tok_at(c), 12)
+      else __jp_v1(t, tl, __jp_tok_at(c) + 1, depth, sc)
+      k = k + 1
+      q = if v < 0 then v else __jp_after(t, tl, v, 125)
+    }
+  }
+  let d = if k > 16 then __jp_dups(t, sc, from, __jp_word(sc, 16)) else 0 - 1
+  __jp_set_word(sc, 16, from)
+  if d >= 0 and (q >= 0 or d < __jp_code_pos(q)) then __jp_code(d, 11)
+  else if q < 0 then q
+  else {
+    __jp_count(sc, 40 + __jp_cap(k * 4) + k * 20)
+    q - tl - 1
+  }
+}
 
 // ── strings ──
 // From p inside the string opened at `open`, `n` decoded bytes so far: the
@@ -598,56 +834,9 @@ fn __jp_number1(t: String, tl: Int, p: Int, sc: Bytes) -> Int = {
     let fits = if __jp_digits(t, lead) < end then __jp_float_fits(t, tl, p, end)
     else __jp_int_fits(t, lead, end - lead, neg)
     if fits then {
-      __jp_count_value(sc, 0)
+      __jp_count(sc, 28)
       end
     } else __jp_code(p, 14)
-  }
-}
-
-// ── collections (pass 1) ──
-// After a member that ended at `np`: the next member's offset (whitespace
-// skipped), `tl + 2 + q` for the close at q (past every member offset, so
-// one Int tells the three answers apart), or a refusal code.
-fn __jp_after1(t: String, tl: Int, np: Int, close: Int) -> Int = {
-  let q = __jp_ws(t, np)
-  let b = __jp_byte(t, q)
-  if b < 0 then __jp_code(q, 6)
-  else if b == close then tl + 2 + q
-  else if b == 44 then {
-    let n = __jp_ws(t, q + 1)
-    if __jp_byte(t, n) == close then __jp_code(q, 7) else n
-  } else __jp_code(q, if close == 93 then 8 else 9)
-}
-
-// p0 is at the first element (post-`[`, post-ws). An empty array closes
-// here. A loop, never one frame per element (#939).
-fn __jp_array1(t: String, tl: Int, p0: Int, depth: Int, sc: Bytes) -> Int = {
-  var k = 0
-  var p = if __jp_byte(t, p0) == 93 then tl + 2 + p0 else p0
-  while p >= 0 and p <= tl {
-    let v = __jp_v1(t, tl, p, depth, sc)
-    k = k + 1
-    p = if v < 0 then v else __jp_after1(t, tl, v, 93)
-  }
-  if p < 0 then p
-  else {
-    __jp_count_value(sc, 12 + __jp_cap(k * 4))
-    p - tl - 1
-  }
-}
-
-// ── keys (pass 1) ──
-// The key-span stack: per key read in an open object, its opening quote's
-// offset times two plus its escape flag, and its closing quote's offset.
-fn __jp_span_push(sc: Bytes, open: Int, esc: Int, e: Int) -> Unit = {
-  let n = prim.load32(prim.handle(sc) + 4)
-  let k = __jp_word(sc, 16)
-  if k < 32 then __jp_disagree()
-  else if k > n - 8 then __jp_disagree()
-  else {
-    prim.store32(prim.handle(sc) + 12 + k, open * 2 + esc)
-    prim.store32(prim.handle(sc) + 16 + k, e)
-    __jp_set_word(sc, 16, k + 8)
   }
 }
 
@@ -706,56 +895,6 @@ fn __jp_key_eq(t: String, sc: Bytes, k: Int, u: Int) -> Bool = {
   let be = __jp_span_end(sc, u)
   if __jp_span_esc(sc, k) == 0 and __jp_span_esc(sc, u) == 0 then ae - a == be - b and __jp_same_bytes(t, a, b, ae - a)
   else __jp_key_cmp(t, a, ae, b, be) == 0
-}
-
-// Does the key at slot `k` repeat one of the slots [from, k)?
-fn __jp_repeats(t: String, sc: Bytes, from: Int, k: Int) -> Bool = if from >= k then false
-else if __jp_key_eq(t, sc, from, k) then true
-else __jp_repeats(t, sc, from + 8, k)
-
-// p0 is at the first key (post-`{`, post-ws). An empty object closes here.
-// The first 16 keys are each checked against the keys before them as they
-// are read; from the 17th on the check is deferred to one index over the
-// whole object (__jp_dups), run when the object closes and when a refusal
-// leaves it — the earlier of the two is reported — so the first refusal in
-// document order still wins. The same loop shape as `__jp_array1` (#939).
-fn __jp_object1(t: String, tl: Int, p0: Int, depth: Int, sc: Bytes) -> Int = {
-  let from = __jp_word(sc, 16)
-  var k = 0
-  var p = if __jp_byte(t, p0) == 125 then tl + 2 + p0 else p0
-  while p >= 0 and p <= tl {
-    let b = __jp_byte(t, p)
-    let r = if b < 0 then __jp_code(p, 6)
-    else if b != 34 then __jp_code(p, 10)
-    else __jp_str_scan(t, p + 1, p, 0, 0)
-    if r < 0 then {
-      p = r
-    } else {
-      let e = __jp_scan_end(r)
-      __jp_span_push(sc, p, __jp_scan_esc(r), e)
-      __jp_add_word(sc, 0, 12 + __jp_cap(__jp_scan_n(r)))
-      if k < 16 and __jp_repeats(t, sc, from, __jp_word(sc, 16) - 8) then {
-        p = __jp_code(p, 11)
-      } else {
-        let c = __jp_ws(t, e + 1)
-        let cb = __jp_byte(t, c)
-        let v = if cb < 0 then __jp_code(c, 6)
-        else if cb != 58 then __jp_code(c, 12)
-        else __jp_v1(t, tl, c + 1, depth, sc)
-        k = k + 1
-        p = if v < 0 then v else __jp_after1(t, tl, v, 125)
-      }
-    }
-  }
-  let d = if k > 16 then __jp_dups(t, sc, from, __jp_word(sc, 16)) else 0 - 1
-  __jp_set_word(sc, 16, from)
-  if d >= 0 and (p >= 0 or d < __jp_code_pos(p)) then __jp_code(d, 11)
-  else if p < 0 then p
-  else {
-    __jp_add_word(sc, 0, 28 + 12 + __jp_cap(k * 4) + k * 20)
-    __jp_add_word(sc, 8, 1 + k)
-    p - tl - 1
-  }
 }
 
 // ── the wide-object key index (owner Q11) ──
@@ -902,6 +1041,70 @@ else {
 // `base = fam + 12 + cursor` — rc `0x8000_0000 | (base - fam)`, len, cap —
 // and the payload at base + 12, all inside [cursor, cursor + size).
 
+// Push handle x on the scratch stack (word [8] is its top, a byte offset).
+fn __jp_push_at(sc: Bytes, x: Int) -> Unit = {
+  let sn = prim.load32(prim.handle(sc) + 4)
+  let top = __jp_word(sc, 8)
+  if top < 32 then __jp_disagree()
+  else if top > sn - 4 then __jp_disagree()
+  else {
+    prim.store32(prim.handle(sc) + 12 + top, x)
+    __jp_set_word(sc, 8, top + 4)
+  }
+}
+
+// The string whose opening quote is at q, carved — its String block, and
+// when `boxed` its Value box right after it, pushed. Answers the offset
+// after the closing quote times 2^32 plus the String's handle (a key) or
+// the box's (a value).
+fn __jp_str2(t: String, fam: Bytes, sc: Bytes, q: Int, boxed: Bool) -> Int = {
+  let r = __jp_strend(t, q)
+  if r < 0 then __jp_disagree() else ()
+  let fl = prim.load32(prim.handle(fam) + 4)
+  let n = __jp_scan_n(r)
+  let cap = __jp_cap(n)
+  let cur = __jp_word(sc, 0)
+  if cur < 0 then {
+    __jp_disagree()
+    0
+  } else if cap < 4 then {
+    __jp_disagree()
+    0
+  } else if cap > fl then {
+    __jp_disagree()
+    0
+  } else if cur > fl - 12 - cap then {
+    __jp_disagree()
+    0
+  } else {
+    let b = prim.handle(fam) + 12 + cur
+    prim.store32(b, cur + 2147483660)
+    prim.store32(b + 4, n)
+    prim.store32(b + 8, cap)
+    if __jp_scan_esc(r) == 0 then __jp_copy_tf(t, q + 1, fam, cur + 12, n)
+    else if __jp_str_fill(t, q + 1, __jp_scan_end(r), fam, cur + 12, cur + 12 + n) != cur + 12 + n then __jp_disagree()
+    else ()
+    let end = (__jp_scan_end(r) + 1) * 4294967296
+    if boxed then {
+      let c = cur + 12 + cap
+      if c > fl - 28 then prim.die(prim.handle("Error: json parse: the family is full\n")) else ()
+      let x = prim.handle(fam) + 12 + c
+      prim.store32(x, c + 2147483660)
+      prim.store32(x + 4, 16)
+      prim.store32(x + 8, 16)
+      prim.store32(x + 12, 4)
+      prim.store32(x + 16, 0)
+      prim.store64(x + 20, b)
+      __jp_set_word(sc, 0, c + 28)
+      __jp_push_at(sc, x)
+      end + x
+    } else {
+      __jp_set_word(sc, 0, cur + 12 + cap)
+      end + b
+    }
+  }
+}
+
 // A Value box with `tag` and the 8-byte payload `x`, carved and pushed.
 fn __jp_box(fam: Bytes, sc: Bytes, tag: Int, x: Int) -> Unit = {
   let fl = prim.load32(prim.handle(fam) + 4)
@@ -917,91 +1120,142 @@ fn __jp_box(fam: Bytes, sc: Bytes, tag: Int, x: Int) -> Unit = {
     prim.store32(b + 16, 0)
     prim.store64(b + 20, x)
     __jp_set_word(sc, 0, cur + 28)
-    __jp_push(sc, b)
+    __jp_push_at(sc, b)
   }
 }
 
-// Push a handle on the scratch stack.
-fn __jp_push(sc: Bytes, x: Int) -> Unit = {
-  let n = prim.load32(prim.handle(sc) + 4)
-  let k = __jp_word(sc, 8)
-  if k < 32 then __jp_disagree()
-  else if k > n - 4 then __jp_disagree()
-  else {
-    prim.store32(prim.handle(sc) + 12 + k, x)
-    __jp_set_word(sc, 8, k + 4)
-  }
-}
-
-// Pop the top handle.
-fn __jp_pop(sc: Bytes) -> Int = {
-  let n = prim.load32(prim.handle(sc) + 4)
-  let k = __jp_word(sc, 8)
-  if k < 36 then {
-    __jp_disagree()
-    0
-  } else if k > n then {
-    __jp_disagree()
-    0
+// A checked literal or number at q (b its first byte), boxed and pushed:
+// the offset after it. An Int is read in place (19 digits included — pass 1
+// kept only what fits), a Float goes through float.parse.
+fn __jp_scalar2(t: String, tl: Int, fam: Bytes, sc: Bytes, q: Int, b: Int) -> Int =
+  if b == 116 then {
+    __jp_box(fam, sc, 1, 1)
+    q + 4
+  } else if b == 102 then {
+    __jp_box(fam, sc, 1, 0)
+    q + 5
+  } else if b == 110 then {
+    __jp_box(fam, sc, 0, 0)
+    q + 4
   } else {
-    __jp_set_word(sc, 8, k - 4)
-    prim.load32(prim.handle(sc) + 8 + k)
+    let fast = __jp_int_fast(t, q)
+    let neg = b == 45
+    let lead = if neg then q + 1 else q
+    if fast >= 0 then {
+      let m = __jp_mantissa(t, lead, fast, 0)
+      __jp_box(fam, sc, 2, if neg then 0 - m else m)
+      fast
+    } else {
+      let end = __jp_numrun(t, q)
+      if __jp_digits(t, lead) < end then {
+        match float.parse(__jp_substr(t, tl, q, end)) {
+          ok(x) => __jp_box(fam, sc, 3, prim.fbits(x)),
+          err(_) => __jp_disagree(),
+        }
+        end
+      } else {
+        let d = end - lead
+        let m = __jp_mantissa(t, lead, if d > 18 then lead + 18 else end, 0)
+        let last = if d > 18 then __jp_byte(t, lead + 18) - 48 else 0
+        let x = if d > 18 then (if neg then (0 - m) * 10 - last else m * 10 + last) else if neg then 0 - m else m
+        __jp_box(fam, sc, 2, x)
+        end
+      }
+    }
   }
-}
 
-// A (key, value) pair block, carved; answers its handle.
-fn __jp_pair(fam: Bytes, sc: Bytes, kh: Int, vh: Int) -> Int = {
+// The (key, value) pair of the String `kh` and the stack's top value, carved;
+// the value popped and the pair pushed in its place.
+fn __jp_pair(fam: Bytes, sc: Bytes, kh: Int) -> Unit = {
   let fl = prim.load32(prim.handle(fam) + 4)
+  let sn = prim.load32(prim.handle(sc) + 4)
   let cur = __jp_word(sc, 0)
-  if cur < 0 then {
-    __jp_disagree()
-    0
-  } else if cur > fl - 20 then {
-    __jp_disagree()
-    0
-  } else {
+  let top = __jp_word(sc, 8)
+  if cur < 0 then __jp_disagree()
+  else if cur > fl - 20 then __jp_disagree()
+  else if top < 36 then __jp_disagree()
+  else if top > sn then __jp_disagree()
+  else {
     let b = prim.handle(fam) + 12 + cur
     prim.store32(b, cur + 2147483660)
     prim.store32(b + 4, 8)
     prim.store32(b + 8, 8)
     prim.store32(b + 12, kh)
-    prim.store32(b + 16, vh)
+    prim.store32(b + 16, prim.load32(prim.handle(sc) + 8 + top))
+    prim.store32(prim.handle(sc) + 8 + top, b)
     __jp_set_word(sc, 0, cur + 20)
-    b
   }
 }
 
-// A list block of the top `k` handles (popped), in stack order.
-fn __jp_list(fam: Bytes, sc: Bytes, k: Int) -> Int = {
+// The list block of the stack's top k handles (popped, in stack order) and
+// the Value box (`tag`) holding it, carved; the box pushed.
+fn __jp_list(fam: Bytes, sc: Bytes, k: Int, tag: Int) -> Unit = {
   let fl = prim.load32(prim.handle(fam) + 4)
   let cur = __jp_word(sc, 0)
   let cap = __jp_cap(k * 4)
-  if cur < 0 then {
-    __jp_disagree()
-    0
-  } else if cap < 4 then {
-    __jp_disagree()
-    0
-  } else if cap > fl then {
-    __jp_disagree()
-    0
-  } else if cur > fl - 12 - cap then {
-    __jp_disagree()
-    0
-  } else if cap < k * 4 then {
-    __jp_disagree()
-    0
-  } else {
+  let top = __jp_word(sc, 8)
+  if k < 0 then __jp_disagree()
+  else if cur < 0 then __jp_disagree()
+  else if cap < 4 then __jp_disagree()
+  else if cap > fl then __jp_disagree()
+  else if cur > fl - 40 - cap then __jp_disagree()
+  else {
     let b = prim.handle(fam) + 12 + cur
     prim.store32(b, cur + 2147483660)
     prim.store32(b + 4, k * 4)
     prim.store32(b + 8, cap)
-    __jp_set_word(sc, 0, cur + 12 + cap)
-    let top = __jp_word(sc, 8)
     __jp_copy_sf(sc, top - k * 4, fam, cur + 12, k * 4)
     __jp_set_word(sc, 8, top - k * 4)
-    b
+    __jp_set_word(sc, 0, cur + 12 + cap)
+    __jp_box(fam, sc, tag, b)
   }
+}
+
+// The value at p, carved and its box pushed; answers the offset after it.
+// The text was checked by pass 1, so a byte it does not expect dies.
+fn __jp_v2(t: String, tl: Int, p: Int, fam: Bytes, sc: Bytes) -> Int = {
+  let f = __jp_tok(t, p)
+  let q = __jp_tok_at(f)
+  let b = __jp_tok_byte(f)
+  if b == 34 then __jp_scan_end(__jp_str2(t, fam, sc, q, true))
+  else if b == 123 then __jp_object2(t, tl, q + 1, fam, sc)
+  else if b == 91 then __jp_array2(t, tl, q + 1, fam, sc)
+  else if b == 116 or b == 102 or b == 110 or b == 45 or (b >= 48 and b <= 57) then __jp_scalar2(t, tl, fam, sc, q, b)
+  else {
+    __jp_disagree()
+    tl
+  }
+}
+
+fn __jp_array2(t: String, tl: Int, p: Int, fam: Bytes, sc: Bytes) -> Int = {
+  let f = __jp_tok(t, p)
+  var k = 0
+  var q = if __jp_tok_byte(f) == 93 then tl + 2 + __jp_tok_at(f) else __jp_tok_at(f)
+  while q >= 0 and q <= tl {
+    let v = __jp_v2(t, tl, q, fam, sc)
+    k = k + 1
+    q = __jp_after(t, tl, v, 93)
+  }
+  if q < 0 then __jp_disagree() else ()
+  __jp_list(fam, sc, k, 5)
+  q - tl - 1
+}
+
+fn __jp_object2(t: String, tl: Int, p: Int, fam: Bytes, sc: Bytes) -> Int = {
+  let f = __jp_tok(t, p)
+  var k = 0
+  var q = if __jp_tok_byte(f) == 125 then tl + 2 + __jp_tok_at(f) else __jp_tok_at(f)
+  while q >= 0 and q <= tl {
+    let kr = __jp_str2(t, fam, sc, q, false)
+    let c = __jp_tok(t, __jp_scan_end(kr))
+    let v = __jp_v2(t, tl, __jp_tok_at(c) + 1, fam, sc)
+    __jp_pair(fam, sc, prim.band(kr, 4294967295))
+    k = k + 1
+    q = __jp_after(t, tl, v, 125)
+  }
+  if q < 0 then __jp_disagree() else ()
+  __jp_list(fam, sc, k, 6)
+  q - tl - 1
 }
 
 // Copy scratch bytes [a, a + k) to family offset d (a stack slice into a
@@ -1069,38 +1323,6 @@ fn __jp_copy_tf(t: String, a: Int, fam: Bytes, d: Int, k: Int) -> Unit = {
   }
 }
 
-// The String block of the checked string opened at p (scan answer r),
-// carved; answers its handle.
-fn __jp_str2(t: String, p: Int, r: Int, fam: Bytes, sc: Bytes) -> Int = {
-  let fl = prim.load32(prim.handle(fam) + 4)
-  let n = __jp_scan_n(r)
-  let cap = __jp_cap(n)
-  let cur = __jp_word(sc, 0)
-  if cur < 0 then {
-    __jp_disagree()
-    0
-  } else if cap < 4 then {
-    __jp_disagree()
-    0
-  } else if cap > fl then {
-    __jp_disagree()
-    0
-  } else if cur > fl - 12 - cap then {
-    __jp_disagree()
-    0
-  } else {
-    let b = prim.handle(fam) + 12 + cur
-    prim.store32(b, cur + 2147483660)
-    prim.store32(b + 4, n)
-    prim.store32(b + 8, cap)
-    __jp_set_word(sc, 0, cur + 12 + cap)
-    if __jp_scan_esc(r) == 0 then __jp_copy_tf(t, p + 1, fam, cur + 12, n)
-    else if __jp_str_fill(t, p + 1, __jp_scan_end(r), fam, cur + 12, cur + 12 + n) != cur + 12 + n then __jp_disagree()
-    else ()
-    b
-  }
-}
-
 // Decode text [p, e) of a checked string into family offsets from o, below
 // oe; answers the offset after the last byte written.
 fn __jp_str_fill(t: String, p: Int, e: Int, fam: Bytes, o: Int, oe: Int) -> Int = if p >= e then o
@@ -1146,118 +1368,27 @@ fn __jp_utf8_write(fam: Bytes, oe: Int, o: Int, cp: Int) -> Int = if cp < 128 th
   4
 }
 
-// The value at p, carved and its box pushed; answers the position after it.
-// The text was checked by pass 1, so a byte it does not expect dies.
-fn __jp_v2(t: String, tl: Int, p: Int, fam: Bytes, sc: Bytes) -> Int = {
-  let q = __jp_ws(t, p)
-  let b = __jp_byte(t, q)
-  if b == 34 then {
-    let r = __jp_str_scan(t, q + 1, q, 0, 0)
-    if r < 0 then __jp_disagree() else ()
-    __jp_box(fam, sc, 4, __jp_str2(t, q, r, fam, sc))
-    __jp_scan_end(r) + 1
-  } else if b == 123 then __jp_object2(t, tl, __jp_ws(t, q + 1), fam, sc)
-  else if b == 91 then __jp_array2(t, tl, __jp_ws(t, q + 1), fam, sc)
-  else if b == 116 then {
-    __jp_box(fam, sc, 1, 1)
-    q + 4
-  } else if b == 102 then {
-    __jp_box(fam, sc, 1, 0)
-    q + 5
-  } else if b == 110 then {
-    __jp_box(fam, sc, 0, 0)
-    q + 4
-  } else if b == 45 or (b >= 48 and b <= 57) then __jp_number2(t, tl, q, fam, sc)
-  else {
-    __jp_disagree()
-    tl
-  }
-}
-
-// A checked number: an Int read in place (19 digits included — pass 1 kept
-// only what fits), a Float through float.parse.
-fn __jp_number2(t: String, tl: Int, p: Int, fam: Bytes, sc: Bytes) -> Int = {
-  let end = __jp_numrun(t, p)
-  let neg = __jp_byte(t, p) == 45
-  let lead = if neg then p + 1 else p
-  if __jp_digits(t, lead) < end then {
-    match float.parse(__jp_substr(t, tl, p, end)) {
-      ok(x) => __jp_box(fam, sc, 3, prim.fbits(x)),
-      err(_) => __jp_disagree(),
-    }
-    end
-  } else {
-    let d = end - lead
-    let m = __jp_mantissa(t, lead, if d > 18 then lead + 18 else end, 0)
-    let last = if d > 18 then __jp_byte(t, lead + 18) - 48 else 0
-    let x = if d > 18 then (if neg then (0 - m) * 10 - last else m * 10 + last) else if neg then 0 - m else m
-    __jp_box(fam, sc, 2, x)
-    end
-  }
-}
-
-// After a member that ended at np: the next member's offset, or `tl + 2 + q`
-// for the close at q (checked text: a `,` or the close follows).
-fn __jp_after2(t: String, tl: Int, np: Int, close: Int) -> Int = {
-  let q = __jp_ws(t, np)
-  let b = __jp_byte(t, q)
-  if b == close then tl + 2 + q
-  else if b == 44 then __jp_ws(t, q + 1)
-  else {
-    __jp_disagree()
-    0 - 1
-  }
-}
-
-fn __jp_array2(t: String, tl: Int, p0: Int, fam: Bytes, sc: Bytes) -> Int = {
-  var k = 0
-  var p = if __jp_byte(t, p0) == 93 then tl + 2 + p0 else p0
-  while p >= 0 and p <= tl {
-    let v = __jp_v2(t, tl, p, fam, sc)
-    k = k + 1
-    p = __jp_after2(t, tl, v, 93)
-  }
-  __jp_box(fam, sc, 5, __jp_list(fam, sc, k))
-  p - tl - 1
-}
-
-fn __jp_object2(t: String, tl: Int, p0: Int, fam: Bytes, sc: Bytes) -> Int = {
-  var k = 0
-  var p = if __jp_byte(t, p0) == 125 then tl + 2 + p0 else p0
-  while p >= 0 and p <= tl {
-    let r = __jp_str_scan(t, p + 1, p, 0, 0)
-    if r < 0 then __jp_disagree() else ()
-    let kh = __jp_str2(t, p, r, fam, sc)
-    let c = __jp_ws(t, __jp_scan_end(r) + 1)
-    let v = __jp_v2(t, tl, c + 1, fam, sc)
-    __jp_push(sc, __jp_pair(fam, sc, kh, __jp_pop(sc)))
-    k = k + 1
-    p = __jp_after2(t, tl, v, 125)
-  }
-  __jp_box(fam, sc, 6, __jp_list(fam, sc, k))
-  p - tl - 1
-}
-
 // ══ SINGLE-PASS VARIANT (measurement only, ADR-0033 Q3 re-ruling input) ══
-// One pass validates and carves at once into a family sized by an estimate
-// from the text length (8 bytes a text byte); when a carve finds no room, a
-// new chunk of at least the estimate is allocated and carving continues
-// there. Chunks are never moved, so interior back-distances stay valid; a
-// document that needed more than one chunk pins every chunk (a leak this
-// variant accepts: it is not shipped). Scratch words: [0] cursor, [8] handle
-// stack top, [16] key-span stack top, [24] chunk base address, [32] chunk
-// payload size, [40] chunks grown; spans from 64, handles from
-// `__jp_s_hbase`.
+// One pass validates and carves at once, post-order, into a family sized by
+// an estimate from the text length (8 bytes a text byte); when a carve finds
+// no room, a new chunk of at least the estimate is allocated and carving
+// continues there. Chunks never move, so interior back-distances stay
+// valid; a document that needed more than one chunk pins every chunk (a
+// leak this variant accepts: it is not shipped, and it is not certified —
+// its carves use raw addresses). Scratch words: [0] a count sink (the
+// shared key reader counts into it), [8] handle stack top, [16] key-span
+// stack top, [24] chunk base address, [32] chunk payload size, [40] chunks
+// grown, [48] carve cursor; spans from 64, handles from `__jp_s_hbase`.
 fn __jp_s_hbase(tl: Int) -> Int = 64 + 2 * tl + 16
 
 fn __jp_s_carve(sc: Bytes, size: Int, n: Int) -> Int = {
-  if __jp_word(sc, 0) + size > __jp_word(sc, 32) then __jp_s_grow(sc, size) else ()
-  let cur = __jp_word(sc, 0)
+  if __jp_word(sc, 48) + size > __jp_word(sc, 32) then __jp_s_grow(sc, size) else ()
+  let cur = __jp_word(sc, 48)
   let b = __jp_word(sc, 24) + 12 + cur
   prim.store32(b, 2147483660 + cur)
   prim.store32(b + 4, n)
   prim.store32(b + 8, size - 12)
-  __jp_set_word(sc, 0, cur + size)
+  __jp_set_word(sc, 48, cur + size)
   b
 }
 
@@ -1269,7 +1400,7 @@ fn __jp_s_grow(sc: Bytes, size: Int) -> Unit = {
   prim.store32(prim.handle(nc), 1073741824)
   __jp_set_word(sc, 24, prim.handle(nc))
   __jp_set_word(sc, 32, nsz)
-  __jp_set_word(sc, 0, 0)
+  __jp_set_word(sc, 48, 0)
   __jp_set_word(sc, 40, __jp_word(sc, 40) + 1)
 }
 
@@ -1278,21 +1409,14 @@ fn __jp_s_box(sc: Bytes, tag: Int, x: Int) -> Unit = {
   prim.store32(b + 12, tag)
   prim.store32(b + 16, 0)
   prim.store64(b + 20, x)
-  __jp_push(sc, b)
+  __jp_push_at(sc, b)
 }
 
-fn __jp_s_pair(sc: Bytes, kh: Int, vh: Int) -> Int = {
-  let b = __jp_s_carve(sc, 20, 8)
-  prim.store32(b + 12, kh)
-  prim.store32(b + 16, vh)
-  b
-}
-
-fn __jp_s_list(sc: Bytes, k: Int) -> Int = {
-  let b = __jp_s_carve(sc, 12 + __jp_cap(4 * k), 4 * k)
-  let top = __jp_word(sc, 8)
-  let _c = __jp_rcopy(prim.handle(sc) + 12 + top - 4 * k, b + 12, 4 * k, 0)
-  __jp_set_word(sc, 8, top - 4 * k)
+fn __jp_s_str(t: String, q: Int, r: Int, sc: Bytes) -> Int = {
+  let n = __jp_scan_n(r)
+  let b = __jp_s_carve(sc, 12 + __jp_cap(n), n)
+  let _w = if __jp_scan_esc(r) == 0 then __jp_rcopy(prim.handle(t) + 13 + q, b + 12, n, 0)
+  else __jp_s_fill(t, q + 1, __jp_scan_end(r), b + 12, 0)
   b
 }
 
@@ -1304,23 +1428,15 @@ fn __jp_rcopy(src: Int, dst: Int, n: Int, i: Int) -> Int = if i + 8 <= n then {
   __jp_rcopy(src, dst, n, i + 1)
 } else 0
 
-fn __jp_s_str(t: String, tl: Int, p: Int, r: Int, sc: Bytes) -> Int = {
-  let n = __jp_scan_n(r)
-  let b = __jp_s_carve(sc, 12 + __jp_cap(n), n)
-  let _w = if __jp_scan_esc(r) == 0 then __jp_rcopy(prim.handle(t) + 13 + p, b + 12, n, 0)
-  else __jp_s_fill(t, tl, p + 1, __jp_scan_end(r), b + 12, 0)
-  b
-}
-
-fn __jp_s_fill(t: String, tl: Int, p: Int, e: Int, dh: Int, o: Int) -> Int = if p >= e then o
+fn __jp_s_fill(t: String, p: Int, e: Int, dh: Int, o: Int) -> Int = if p >= e then o
 else {
   let b = __jp_byte(t, p)
   if b != 92 then {
     prim.store8(dh + o, b)
-    __jp_s_fill(t, tl, p + 1, e, dh, o + 1)
+    __jp_s_fill(t, p + 1, e, dh, o + 1)
   } else {
     let x = __jp_next_cp(t, p)
-    __jp_s_fill(t, tl, p + x % 16, e, dh, o + __jp_s_utf8(dh, o, x / 16))
+    __jp_s_fill(t, p + x % 16, e, dh, o + __jp_s_utf8(dh, o, x / 16))
   }
 }
 
@@ -1344,39 +1460,56 @@ fn __jp_s_utf8(dh: Int, o: Int, cp: Int) -> Int = if cp < 128 then {
   4
 }
 
+fn __jp_s_pop(sc: Bytes) -> Int = {
+  let top = __jp_word(sc, 8)
+  __jp_set_word(sc, 8, top - 4)
+  prim.load32(prim.handle(sc) + 8 + top)
+}
+
+fn __jp_s_list(sc: Bytes, k: Int, tag: Int) -> Unit = {
+  let b = __jp_s_carve(sc, 12 + __jp_cap(k * 4), k * 4)
+  let top = __jp_word(sc, 8)
+  let _c = __jp_rcopy(prim.handle(sc) + 12 + top - k * 4, b + 12, k * 4, 0)
+  __jp_set_word(sc, 8, top - k * 4)
+  __jp_s_box(sc, tag, b)
+}
+
 fn __jp_s1(t: String, tl: Int, p: Int, depth: Int, sc: Bytes) -> Int = {
-  let q = __jp_ws(t, p)
-  let b = __jp_byte(t, q)
+  let f = __jp_tok(t, p)
+  let q = __jp_tok_at(f)
+  let b = __jp_tok_byte(f)
   if b < 0 then __jp_code(q, 6)
   else if b == 34 then {
-    let r = __jp_str_scan(t, q + 1, q, 0, 0)
+    let r = __jp_strend(t, q)
     if r < 0 then r
     else {
-      __jp_s_box(sc, 4, __jp_s_str(t, tl, q, r, sc))
+      __jp_s_box(sc, 4, __jp_s_str(t, q, r, sc))
       __jp_scan_end(r) + 1
     }
-  } else if (b == 123 or b == 91) and depth >= __json_max_depth() then __jp_code(q, 17)
-  else if b == 123 then __jp_s_object(t, tl, __jp_ws(t, q + 1), depth + 1, sc)
-  else if b == 91 then __jp_s_array(t, tl, __jp_ws(t, q + 1), depth + 1, sc)
-  else if b == 116 then __jp_s_lit(q, 4, __jp_lit_at(t, q, 116, 114, 117, 101), 15, 1, 1, sc)
-  else if b == 102 then __jp_s_lit(q, 5, __jp_lit_at(t, q, 102, 97, 108, 115) and __jp_byte(t, q + 4) == 101, 15, 1, 0, sc)
-  else if b == 110 then __jp_s_lit(q, 4, __jp_lit_at(t, q, 110, 117, 108, 108), 16, 0, 0, sc)
-  else if b == 45 or (b >= 48 and b <= 57) then __jp_s_number(t, tl, q, sc)
+  } else if b == 123 or b == 91 then {
+    if depth >= __json_max_depth() then __jp_code(q, 17)
+    else if b == 123 then __jp_s_object(t, tl, q + 1, depth + 1, sc)
+    else __jp_s_array(t, tl, q + 1, depth + 1, sc)
+  } else if b == 116 or b == 102 or b == 110 then {
+    let e = __jp_lit(t, q, b)
+    if e >= 0 then __jp_s_box(sc, if b == 110 then 0 else 1, if b == 116 then 1 else 0) else ()
+    e
+  } else if b == 45 or (b >= 48 and b <= 57) then __jp_s_number(t, tl, q, sc)
   else __jp_code(q, 18)
 }
 
-fn __jp_s_lit(p: Int, n: Int, hit: Bool, kind: Int, tag: Int, x: Int, sc: Bytes) -> Int = if hit then {
-  __jp_s_box(sc, tag, x)
-  p + n
-} else __jp_code(p, kind)
-
 fn __jp_s_number(t: String, tl: Int, p: Int, sc: Bytes) -> Int = {
-  let end = __jp_numrun(t, p)
-  if __jp_num_end(t, end, p) != end then __jp_code(p, 13)
-  else {
-    let neg = __jp_byte(t, p) == 45
-    let lead = if neg then p + 1 else p
-    if __jp_digits(t, lead) < end then match float.parse(__jp_substr(t, tl, p, end)) {
+  let fast = __jp_int_fast(t, p)
+  let neg = __jp_byte(t, p) == 45
+  let lead = if neg then p + 1 else p
+  if fast >= 0 then {
+    let m = __jp_mantissa(t, lead, fast, 0)
+    __jp_s_box(sc, 2, if neg then 0 - m else m)
+    fast
+  } else {
+    let end = __jp_numrun(t, p)
+    if __jp_num_end(t, end, p) != end then __jp_code(p, 13)
+    else if __jp_digits(t, lead) < end then match float.parse(__jp_substr(t, tl, p, end)) {
       ok(x) => {
         __jp_s_box(sc, 3, prim.fbits(x))
         end
@@ -1394,60 +1527,58 @@ fn __jp_s_number(t: String, tl: Int, p: Int, sc: Bytes) -> Int = {
   }
 }
 
-fn __jp_s_array(t: String, tl: Int, p0: Int, depth: Int, sc: Bytes) -> Int = {
+fn __jp_s_array(t: String, tl: Int, p: Int, depth: Int, sc: Bytes) -> Int = {
+  let f = __jp_tok(t, p)
   var k = 0
-  var p = if __jp_byte(t, p0) == 93 then tl + 2 + p0 else p0
-  while p >= 0 and p <= tl {
-    let v = __jp_s1(t, tl, p, depth, sc)
+  var q = if __jp_tok_byte(f) == 93 then tl + 2 + __jp_tok_at(f) else __jp_tok_at(f)
+  while q >= 0 and q <= tl {
+    let v = __jp_s1(t, tl, q, depth, sc)
     k = k + 1
-    p = if v < 0 then v else __jp_after1(t, tl, v, 93)
+    q = if v < 0 then v else __jp_after(t, tl, v, 93)
   }
-  if p < 0 then p
+  if q < 0 then q
   else {
-    __jp_s_box(sc, 5, __jp_s_list(sc, k))
-    p - tl - 1
+    __jp_s_list(sc, k, 5)
+    q - tl - 1
   }
 }
 
-fn __jp_s_object(t: String, tl: Int, p0: Int, depth: Int, sc: Bytes) -> Int = {
+fn __jp_s_object(t: String, tl: Int, p: Int, depth: Int, sc: Bytes) -> Int = {
   let from = __jp_word(sc, 16)
+  let f = __jp_tok(t, p)
   var k = 0
-  var p = if __jp_byte(t, p0) == 125 then tl + 2 + p0 else p0
-  while p >= 0 and p <= tl {
-    let b = __jp_byte(t, p)
-    let r = if b < 0 then __jp_code(p, 6)
-    else if b != 34 then __jp_code(p, 10)
-    else __jp_str_scan(t, p + 1, p, 0, 0)
+  var q = if __jp_tok_byte(f) == 125 then tl + 2 + __jp_tok_at(f) else __jp_tok_at(f)
+  while q >= 0 and q <= tl {
+    let r = __jp_strend(t, q)
     if r < 0 then {
-      p = r
+      q = r
+    } else if __jp_key1(t, sc, from, q, r, k) then {
+      q = __jp_code(q, 11)
     } else {
-      let e = __jp_scan_end(r)
-      __jp_span_push(sc, p, __jp_scan_esc(r), e)
-      if k < 16 and __jp_repeats(t, sc, from, __jp_word(sc, 16) - 8) then {
-        p = __jp_code(p, 11)
+      let kh = __jp_s_str(t, q, r, sc)
+      let c = __jp_tok(t, __jp_scan_end(r) + 1)
+      let cb = __jp_tok_byte(c)
+      let v = if cb < 0 then __jp_code(__jp_tok_at(c), 6)
+      else if cb != 58 then __jp_code(__jp_tok_at(c), 12)
+      else __jp_s1(t, tl, __jp_tok_at(c) + 1, depth, sc)
+      k = k + 1
+      if v < 0 then {
+        q = v
       } else {
-        let kh = __jp_s_str(t, tl, p, r, sc)
-        let c = __jp_ws(t, e + 1)
-        let cb = __jp_byte(t, c)
-        let v = if cb < 0 then __jp_code(c, 6)
-        else if cb != 58 then __jp_code(c, 12)
-        else __jp_s1(t, tl, c + 1, depth, sc)
-        k = k + 1
-        if v < 0 then {
-          p = v
-        } else {
-          __jp_push(sc, __jp_s_pair(sc, kh, __jp_pop(sc)))
-          p = __jp_after1(t, tl, v, 125)
-        }
+        let pb = __jp_s_carve(sc, 20, 8)
+        prim.store32(pb + 12, kh)
+        prim.store32(pb + 16, __jp_s_pop(sc))
+        __jp_push_at(sc, pb)
+        q = __jp_after(t, tl, v, 125)
       }
     }
   }
   let d = if k > 16 then __jp_dups(t, sc, from, __jp_word(sc, 16)) else 0 - 1
   __jp_set_word(sc, 16, from)
-  if d >= 0 and (p >= 0 or d < __jp_code_pos(p)) then __jp_code(d, 11)
-  else if p < 0 then p
+  if d >= 0 and (q >= 0 or d < __jp_code_pos(q)) then __jp_code(d, 11)
+  else if q < 0 then q
   else {
-    __jp_s_box(sc, 6, __jp_s_list(sc, k))
-    p - tl - 1
+    __jp_s_list(sc, k, 6)
+    q - tl - 1
   }
 }
