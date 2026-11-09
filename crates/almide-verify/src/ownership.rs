@@ -218,16 +218,10 @@ struct LineState {
 }
 
 impl LineState {
-    /// `finish_line_x` / `finish_line_c`: flush, defensively closing ONE open
-    /// region — an open branch wins over an open conditional loop, which wins
-    /// over an open loop (the others are dropped, as in the proof).
+    /// `finish_line_x`: flush; a region still open poisons the line (#4631).
     fn finish(mut self) -> Vec<Item> {
-        if let Some(brx) = self.branch {
-            self.items.push(brx.close());
-        } else if let Some(cond) = self.cond {
-            self.items.push(Item::CondLoop(cond.then_ops, cond.else_ops));
-        } else if let Some(body) = self.loop_body {
-            self.items.push(Item::Loop(body));
+        if self.branch.is_some() || self.cond.is_some() || self.loop_body.is_some() {
+            self.items.push(Item::Poison);
         }
         self.items
     }
@@ -259,13 +253,18 @@ impl LineState {
         match b {
             b'{' => self.branch = Some(Brx::default()),
             b'[' => self.cond = Some(Cond::default()),
-            // `(` starts a FRESH body, discarding an unclosed one.
-            b'(' => self.loop_body = Some(Vec::new()),
-            b')' => {
-                if let Some(body) = self.loop_body.take() {
-                    self.items.push(Item::Loop(body));
+            // `(` starts a fresh body; inside an open loop it poisons (#4631).
+            b'(' => {
+                if self.loop_body.replace(Vec::new()).is_some() {
+                    self.items.push(Item::Poison);
                 }
             }
+            b')' => match self.loop_body.take() {
+                Some(body) => self.items.push(Item::Loop(body)),
+                None => self.items.push(Item::Poison),
+            },
+            // A separator or a closer outside its region poisons (#4631).
+            b'|' | b'}' | b']' => self.items.push(Item::Poison),
             _ => {
                 if let Some(op) = parse_byte(b) {
                     match self.loop_body.as_mut() {
@@ -436,12 +435,27 @@ mod tests {
     }
 
     #[test]
-    fn a_second_open_paren_restarts_the_body() {
-        assert_eq!(parse(b"(i(d)"), vec![vec![Item::Loop(vec![Op::Dec])]]);
+    fn a_second_open_paren_inside_a_loop_poisons() {
+        assert_eq!(parse(b"(i(d)"), vec![vec![Item::Poison, Item::Loop(vec![Op::Dec])]]);
     }
 
     #[test]
-    fn end_of_line_closes_the_branch_and_drops_the_open_loop() {
-        assert_eq!(parse(b"(i{d"), vec![vec![Item::Branch(vec![Op::Dec], vec![])]]);
+    fn a_region_open_at_the_end_of_the_line_poisons() {
+        // #4631: a dropped closing byte must not read as if it were there.
+        assert_eq!(parse(b"(i{d"), vec![vec![Item::Poison]]);
+        for w in [&b"{|id"[..], b"(id", b"[id|", b"{|id\nid"] {
+            assert!(!check_xc(w), "{}", String::from_utf8_lossy(w));
+        }
+    }
+
+    #[test]
+    fn a_separator_or_closer_outside_its_region_poisons() {
+        for w in [&b"i|d"[..], b"id}", b"id]", b"id)", b"|"] {
+            assert!(!check_xc(w), "{}", String::from_utf8_lossy(w));
+        }
+        // the closed forms still accept
+        for w in [&b"{|id}"[..], b"(id)", b"[id|]", b"i{i|i}dd"] {
+            assert!(check_xc(w), "{}", String::from_utf8_lossy(w));
+        }
     }
 }
