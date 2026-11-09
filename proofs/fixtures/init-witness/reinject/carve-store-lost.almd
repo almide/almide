@@ -1,0 +1,9 @@
+// ADR-0033 D7 drill: a literal carve never stores its second payload word.
+// The init witness then lists the carve without slot 1, which the checker
+// rejects.
+import json
+
+effect fn main() -> Unit = {
+  let v = json.parse("[true, \"ab\", {\"k\": 1}]")!
+  println(json.stringify(v))
+}

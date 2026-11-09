@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/carve.rs b/crates/almide-wasm/src/carve.rs
+index 928d1cc76..8528899d2 100644
+--- a/crates/almide-wasm/src/carve.rs
++++ b/crates/almide-wasm/src/carve.rs
+@@ -156,7 +156,7 @@ impl Emitter<'_> {
+                 // checker rejects.
+                 let mut stores = Vec::new();
+                 for k in 0..words {
+-                    self.f.instructions().local_get(base).i32_const(0).i32_store(word(12 + 4 * k as u64));
++                    self.f.instructions().local_get(base).i32_const(0).i32_store(word(16 + 4 * k as u64));
+                     anchors.push(self.anchor_here());
+                     stores.push(k as usize);
+                 }

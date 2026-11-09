@@ -31,6 +31,12 @@
 #   emitter's dumped trees to the byte lists StructuralDecode.v decodes into
 #   the trees StructuralRuntime.v / FamilyRc.v prove, must reject (its FAIL
 #   lines are pinned as <name>.reject). The verdict needs no program.
+#   carve-run (ADR-0033 D7, run time) — pass 1 sizes an allocation family
+#   for another number of nodes than pass 2 carves (the stdlib parser
+#   patched): the reproduction, built and run on the wasm leg, must take the
+#   carve ops' defined abort (a room test before any store past the root, or
+#   the seal) — exit 1 with the `Error: allocation family` line, pinned as
+#   <name>.reject — where the unpatched run exits 0.
 # Each proofs/fixtures/<property>-witness/reinject/<name>.patch puts one such
 # bug into the emitter; <name>.almd is its reproduction. In a throwaway
 # worktree, for each:
@@ -63,7 +69,7 @@
 # anchors drill's subject: the event stays, the instruction changes, and the
 # byte-level check (#4011 (d)) is what rejects.
 #
-#   scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc|family> [name ...]   (default: every patch)
+#   scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc|family|carve-run> [name ...]   (default: every patch)
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -79,7 +85,8 @@ case "$PROP" in
   anchors) ISSUE=4011 ;;
   rc) ISSUE=4277 ;;
   family) ISSUE=adr0033 ;;
-  *) echo "usage: scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc|family> [name ...]" >&2; exit 2 ;;
+  carve-run) ISSUE=adr0033 ;;
+  *) echo "usage: scripts/witness-reinject.sh <bounds|init|fields|native|native-calls|native-bounds|anchors|rc|family|carve-run> [name ...]" >&2; exit 2 ;;
 esac
 shift
 DIR="$ROOT/proofs/fixtures/$PROP-witness/reinject"
@@ -94,7 +101,9 @@ wt=$(mktemp -d)
 trap 'git -C "$ROOT" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"' EXIT
 git -C "$ROOT" worktree add --detach -q "$wt" HEAD || exit 2
 
-if [ "$PROP" = family ]; then
+if [ "$PROP" = carve-run ]; then
+  build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q --bin almide); }
+elif [ "$PROP" = family ]; then
   # The verdict builds what it needs (the byte dump's test binary).
   build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo test -q -p almide-wasm --lib --no-run 2>/dev/null); }
 elif [ "$PROP" = native ] || [ "$PROP" = native-calls ] || [ "$PROP" = native-bounds ]; then
@@ -127,6 +136,17 @@ while i < len(b):
 }
 # verdict <name>: almide-verify's exit on the reproduction's $PROP witness.
 verdict() {
+  if [ "$PROP" = carve-run ]; then
+    # 0: the run exits 0; 1: it took the family's defined abort (its line
+    # is the witness); anything else names what happened instead.
+    (cd "$wt" && "$TARGET/debug/almide" run "$DIR/$1.almd" --target wasm) > "$wt/run.out" 2> "$wt/run.err"
+    local rc=$?
+    grep -E '^Error: allocation family' "$wt/run.err" > "$wt/witness.w"
+    if [ "$rc" = 0 ]; then echo 0
+    elif [ "$rc" = 1 ] && [ -s "$wt/witness.w" ]; then echo 1
+    else cp "$wt/run.err" "$wt/witness.w"; echo "exit-$rc"; fi
+    return
+  fi
   if [ "$PROP" = family ]; then
     # The byte-grounding gate on the worktree's emitter: exit 0 when the
     # dumped family trees are StructuralDecode.v's lists, 1 when they drift.
@@ -259,6 +279,7 @@ print("ok" if d == want else "moved " + " ".join(f"{k}{v:+d}" for k, v in d.item
   [ "$PROP" = anchors ] && pinned="$ROOT/proofs/fixtures/anchors-witness/reinject/$name.reject"
   [ "$PROP" = rc ] && pinned="$ROOT/proofs/fixtures/rc-witness/reinject/$name.reject"
   [ "$PROP" = family ] && pinned="$ROOT/proofs/fixtures/family-witness/reinject/$name.reject"
+  [ "$PROP" = carve-run ] && pinned="$ROOT/proofs/fixtures/carve-run-witness/reinject/$name.reject"
   if [ "$v" = 1 ] && [ "${REINJECT_UPDATE:-0}" = 1 ]; then cp "$wt/witness.w" "$pinned"; fi
   if [ "$v" = 1 ] && ! cmp -s "$wt/witness.w" "$pinned"; then
     echo "FAIL $name: rejected, but the witness is not the pinned poisoned certificate ${pinned#"$ROOT"/} (REINJECT_UPDATE=1 rewrites it): $(head -c 200 "$wt/witness.w")"

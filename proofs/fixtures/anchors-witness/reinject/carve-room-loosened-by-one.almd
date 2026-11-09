@@ -1,0 +1,9 @@
+// ADR-0033 D7 drill: a carve's room test compares against the root's end
+// plus one while the init witness still records the carve — the init
+// checker accepts, the bytes could carve one byte past the family.
+import json
+
+effect fn main() -> Unit = {
+  let v = json.parse("[true, \"ab\", {\"k\": 1}]")!
+  println(json.stringify(v))
+}
