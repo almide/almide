@@ -210,11 +210,11 @@ impl LowerCtx {
             IrExprKind::List { elements } => {
                 return self.lower_list_literal_heap_field(expr, elements);
             }
-            // Native's generated tuple type owns its nested fields recursively.
-            // Keep the recursive drop identity when this tuple becomes another
-            // aggregate's payload; a flat slot mask cannot describe that drop.
+            // A tuple that owns nested heap fields keeps its recursive drop
+            // identity (`anontup_<hash>`) when it becomes another aggregate's
+            // payload; a flat slot mask cannot describe that drop.
             IrExprKind::Tuple { elements }
-                if crate::lower::owned_tco_slots() && crate::lower::is_anon_tuple_list_elem(&expr.ty) =>
+                if crate::lower::is_anon_tuple_list_elem(&expr.ty) =>
             {
                 let obj = self.try_lower_tuple_construct(elements)?;
                 self.record_masks.remove(&obj);

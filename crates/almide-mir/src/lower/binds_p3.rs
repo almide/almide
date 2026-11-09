@@ -473,11 +473,12 @@ impl LowerCtx {
             let obj = self.lower_owned_heap_field(arg)?;
             return Some((obj, true));
         }
-        // Native tuple fields have declared Rust aggregate types: their owned
-        // payloads are released recursively by the same scope-end drop as a
-        // record field, including when the variant uses a masked block drop.
+        // A tuple field (`TextSeg(Pair[String])`, ADT brick 5) is an aggregate
+        // like a record field: its owned payloads are released recursively by
+        // the same scope-end drop, including when the variant uses a masked
+        // block drop.
         if (matches!(&arg.ty, Ty::Named(..) | Ty::Record { .. })
-            || (crate::lower::owned_tco_slots() && matches!(&arg.ty, Ty::Tuple(..))))
+            || matches!(&arg.ty, Ty::Tuple(..)))
             && self.aggregate_field_tys(&arg.ty).is_some()
         {
             // A RECORD-type ctor field (`Wrap(Color)`, `Box(Inner)`): materialize the record (a
