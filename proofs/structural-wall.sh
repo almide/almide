@@ -203,36 +203,52 @@ while IFS= read -r f; do
     "$VERIFY" bounds "$OUT/$N.lcert" > "$OUT/$N.lverify" 2>&1 || rc=$?
     echo "$rc" > "$OUT/$N.lverify.rc"
   fi
-  # #4005 A4: the runtime routines the anchor file's `routines` line names.
-  # The same untrusted prover writes their certificate and its site
-  # selection (the accesses it proves; the rest stay counted); the
-  # selection's events must be the translation of the shipped routines
-  # (--lin-verify-routines), and the certificate is judged as a bounds
-  # witness below by all three verdicts.
+done < "$OUT/selected"
+# #4005 A4: the runtime routines the anchor file's `routines` line names,
+# then the anchor check, per artifact in parallel (each stage reads only its
+# own artifact's files; the verdicts are read back in index order below).
+# The same untrusted prover writes the routine certificate and its site
+# selection (the accesses it proves; the rest stay counted); the
+# selection's events must be the translation of the shipped routines
+# (--lin-verify-routines), and the certificate is judged as a bounds
+# witness below by all three verdicts. #4011 (d): every located bounds /
+# init event is its instruction. With it, the row-4 census (#4005) per
+# function, the accesses the verified linear and routine certificates
+# cover counted located — read by the heap-access ledger after this stage
+# (proofs/lib/heap_ledger.py).
+stage2() {
+  local N="$1"
   if grep -q '^routines .' "$OUT/$N.anchors"; then
     if ! "$LINPROVE" --routines "$OUT/$N.wasm" "$OUT/$N.anchors" "$OUT/$N.rsel" > "$OUT/$N.rcert" 2> "$OUT/$N.rprove"; then
-      echo "STRUCTURAL WALL FAIL: $f: the routine prover failed:" >&2
-      sed 's/^/  /' "$OUT/$N.rprove" >&2
-      exit 1
+      echo "the routine prover failed:" > "$OUT/$N.s2fail"; cat "$OUT/$N.rprove" >> "$OUT/$N.s2fail"; return
     fi
     if ! "$ANCHORCHECK" --lin-verify-routines "$OUT/$N.wasm" "$OUT/$N.anchors" "$OUT/$N.rcert" "$OUT/$N.rsel" > "$OUT/$N.rlin" 2>&1; then
-      echo "STRUCTURAL WALL FAIL: $f: the routine certificate is not the translation of the shipped routines:" >&2
-      sed 's/^/  /' "$OUT/$N.rlin" >&2
-      exit 1
+      echo "the routine certificate is not the translation of the shipped routines:" > "$OUT/$N.s2fail"; cat "$OUT/$N.rlin" >> "$OUT/$N.s2fail"; return
     fi
-    rc=0
+    local rc=0
     "$VERIFY" bounds "$OUT/$N.rcert" > "$OUT/$N.rverify" 2>&1 || rc=$?
     echo "$rc" > "$OUT/$N.rverify.rc"
   fi
-  # #4011 (d): every located bounds / init event is its instruction. With it,
-  # the row-4 census (#4005) per function, the accesses the verified linear
-  # and routine certificates cover counted located — read by the heap-access
-  # ledger after the loop (proofs/lib/heap_ledger.py).
-  census=(--census --census-fns)
+  local census=(--census --census-fns)
   if [ -s "$OUT/$N.lcert" ]; then census+=(--lin "$OUT/$N.lcert"); fi
   if [ -f "$OUT/$N.rsel" ]; then census+=(--rlin "$OUT/$N.rcert" "$OUT/$N.rsel"); fi
-  arc=0
+  local arc=0
   "$ANCHORCHECK" "${census[@]}" "$OUT/$N.wasm" "$OUT/$N.bundle" "$OUT/$N.anchors" > "$OUT/$N.anchor" 2>&1 || arc=$?
+  echo "$arc" > "$OUT/$N.arc"
+}
+export -f stage2
+export OUT LINPROVE ANCHORCHECK VERIFY
+: >> "$OUT/index"
+JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+cut -f1 "$OUT/index" | xargs -P "$JOBS" -I{} bash -c 'stage2 "$1"' _ {}
+while IFS="$(printf '\t')" read -r N f; do
+  if [ -f "$OUT/$N.s2fail" ]; then
+    echo "STRUCTURAL WALL FAIL: $f: $(head -1 "$OUT/$N.s2fail")" >&2
+    tail -n +2 "$OUT/$N.s2fail" | sed 's/^/  /' >&2
+    exit 1
+  fi
+  [ -f "$OUT/$N.arc" ] || { echo "STRUCTURAL WALL FAIL: $f: the anchor check did not run" >&2; exit 1; }
+  arc="$(cat "$OUT/$N.arc")"
   if [ "$arc" -ne 0 ] && [ "$MODE" = tests ]; then
     # The stdlib-test leg names each artifact whose events are not its
     # instructions (judged against the exception ledger's `anchors` rows
@@ -244,7 +260,7 @@ while IFS= read -r f; do
     sed 's/^/  /' "$OUT/$N.anchor" >&2
     exit 1
   fi
-done < "$OUT/selected"
+done < "$OUT/index"
 # #4005 row 4: every heap access no certificate covers, per runtime routine,
 # per self-host body and per fixture's own code, held to the shrink-only
 # ledger (a count above its row fails; on a full run, so does a row above
@@ -570,22 +586,43 @@ for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
 
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
+# The kernel file is split into parts of at most PART literal bytes, each
+# its own coqc run: the kernel keeps every goal's statement, so one file of
+# every witness grows its memory with the corpus. Every goal is still
+# written; `kgen` lists the parts.
+LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
+PART = 4000000  # literal bytes per kernel file
+goals, part, parts, psize = [], [], [], 0
+for prop, ws in accepts.items():
+    chunk, size = [], 0
+    for w in ws + [None]:
+        if w is None or (chunk and size + len(w) > LIMIT):
+            if chunk:
+                goals.append(("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], ";".join(lit(x) for x in chunk)), size))
+            chunk, size = [], 0
+        if w is not None:
+            chunk.append(w)
+            size += len(w)
+for prop, w in rejects:
+    goals.append(("Goal %s %s = false.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], lit(w)), len(w)))
+for text, size in goals:
+    if part and psize + size > PART:
+        parts.append(part)
+        part, psize = [], 0
+    part.append(text)
+    psize += size
+if part or not parts:
+    parts.append(part)
+names = []
+for i, ps in enumerate(parts):
+    path = kgen[:-2] + "_p%d.v" % i
+    names.append(path)
+    with open(path, "w") as g:
+        g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes HelperSig BoundsCert InitCert FieldCert RoutineBoundsCert RoutineProcsCert RoutineLinCert.\n")
+        g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
+        g.write("".join(ps))
 with open(kgen, "w") as g:
-    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes HelperSig BoundsCert InitCert FieldCert RoutineBoundsCert RoutineProcsCert RoutineLinCert.\n")
-    g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
-    LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
-    for prop, ws in accepts.items():
-        chunk, size = [], 0
-        for w in ws + [None]:
-            if w is None or (chunk and size + len(w) > LIMIT):
-                if chunk:
-                    g.write("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], ";".join(lit(x) for x in chunk)))
-                chunk, size = [], 0
-            if w is not None:
-                chunk.append(w)
-                size += len(w)
-    for prop, w in rejects:
-        g.write("Goal %s %s = false.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], lit(w)))
+    g.write("\n".join(names) + "\n")
 
 for p, (a, t) in stats.items():
     print(f"  [{p}] {a}/{t} witness(es) accepted by the extracted checker and almide-verify")
@@ -631,11 +668,17 @@ fi
 
 echo "== KERNEL ORACLE: the Rocq kernel re-derives every verdict above =="
 KSTART=$(date +%s)
-if (cd "$ROOT/proofs" && "$COQC" -Q . AlmideTrust "$KGEN" >/dev/null 2>&1); then
-  echo "  KERNEL OK: every structural witness verdict certified by the Rocq kernel in $(( $(date +%s) - KSTART ))s (vm_compute)"
-  rm -f "$KGEN" "${KGEN%.v}.vo" "${KGEN%.v}.vos" "${KGEN%.v}.vok" "${KGEN%.v}.glob"
+# One coqc per part ($KGEN lists them), in parallel; every part must pass.
+KJOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+KPARTS="$(wc -l < "$KGEN" | tr -d ' ')"
+export COQC
+if (cd "$ROOT/proofs" && xargs -P "$KJOBS" -I{} sh -c '"$COQC" -Q . AlmideTrust "$1" >/dev/null 2>&1 || exit 255' _ {} < "$KGEN"); then
+  echo "  KERNEL OK: every structural witness verdict certified by the Rocq kernel in $(( $(date +%s) - KSTART ))s (vm_compute, $KPARTS part(s))"
+  while IFS= read -r k; do rm -f "$k" "${k%.v}.vo" "${k%.v}.vos" "${k%.v}.vok" "${k%.v}.glob"; done < "$KGEN"
+  rm -f "$KGEN"
 else
   echo "STRUCTURAL WALL FAIL: the KERNEL disagrees with the extracted checker on a structural witness (extraction divergence)." >&2
+  while IFS= read -r k; do rm -f "$k"; done < "$KGEN"
   rm -f "$KGEN"
   exit 1
 fi
