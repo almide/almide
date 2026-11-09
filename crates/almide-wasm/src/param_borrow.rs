@@ -61,11 +61,13 @@ pub(crate) fn infer(
     let mut owned: Vec<Vec<bool>> = (0..n)
         .map(|i| vec![false; table.infos[i].params.len()])
         .collect();
-    // Frames that keep every param owned: a prim body (raw-address rule),
-    // a refused body (never lowered), and a registry implementation — the
-    // display / matrix / string-scan emitters call those directly by
-    // index with their own argument convention (callee-owned), outside
-    // lower_call_at where the table is read.
+    // Frames that keep every param owned: a prim body that steps a count
+    // or reaches the host (`rc_owns_params`: the raw-address floor alone
+    // leaves its params to the scan below), a refused body (never lowered),
+    // and a registry implementation — the display / matrix / string-scan
+    // emitters call those directly by index with their own argument
+    // convention (callee-owned), outside lower_call_at where the table is
+    // read.
     let registry: std::collections::HashSet<usize> = table.impl_index.values().copied().collect();
     let all_owned: Vec<bool> = program_fns
         .iter()
@@ -73,7 +75,7 @@ pub(crate) fn infer(
         .map(|(i, (f, _, _))| {
             table.infos[i].refuse.is_some()
                 || registry.contains(&i)
-                || crate::rc_ownership::body_uses_prim(&f.body)
+                || crate::rc_ownership::prim_body_owns_params(&f.body)
         })
         .collect();
     for (i, (f, _, _)) in program_fns.iter().enumerate() {
@@ -371,9 +373,25 @@ enum Resolved {
     Unknown,
 }
 
+/// `prim.handle(p) + k` with `k` a literal past the rc word (k >= 4): a
+/// raw address into `p`'s len, cap or payload. It reads no count, so the
+/// body cannot judge `p` unique through it (Lean's rule: a borrowed value is
+/// never unique) and it moves no credit — a READ of `p`. Any other
+/// `prim.handle(p)` (bare, `+ 0`, bound to a local) may reach the rc word
+/// and keeps `p` owned.
+fn past_rc_word(left: &IrExpr, right: &IrExpr) -> bool {
+    let handle = matches!(&left.kind, IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+        if module.as_str() == "prim" && func.as_str() == "handle"
+            && matches!(args.as_slice(), [a] if matches!(a.kind, IrExprKind::Var { .. })));
+    handle && matches!(right.kind, IrExprKind::LitInt { value } if value >= 4)
+}
+
 impl IrVisitor for Scan<'_> {
     fn visit_expr(&mut self, e: &IrExpr) {
         match &e.kind {
+            IrExprKind::BinOp { op: almide_ir::BinOp::AddInt, left, right } if past_rc_word(left, right) => {
+                return;
+            }
             IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
                 self.call_args(target, args);
             }

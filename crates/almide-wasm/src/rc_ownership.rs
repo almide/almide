@@ -468,3 +468,48 @@ pub(crate) fn body_uses_prim(body: &almide_ir::IrExpr) -> bool {
     almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
     s.hit
 }
+
+/// The raw-address floor: the prim ops that read and write bytes, allocate,
+/// compute and abort, and move no reference count. A body that calls only
+/// these (the structural leg lowers every one of them, prim.rs) owns no
+/// param by virtue of being a prim body — param_borrow's scan decides each
+/// param as for any body, with `prim.handle(p) + k` past the rc word read
+/// as a read (param_borrow.rs `past_rc_word`).
+const RAW_FLOOR: &[&str] = &[
+    "handle", "load8", "load32", "load64", "store8", "store32", "store64", "int_to_ptr", "ptr_to_int",
+    "alloc_bytes", "alloc_str", "alloc_list", "alloc_list_f64", "band", "bor", "bxor", "bshl", "bshr",
+    "bshr_u", "f2f32", "f32_2f", "i2f32", "f32bits", "bits_to_f32", "i2f", "f2i", "fbits", "ffrombits",
+    "fadd", "fsub", "fmul", "fdiv", "fceil", "ffloor", "fneg", "fabs", "fsqrt", "fcopysign", "feq", "fne",
+    "flt", "fle", "fgt", "fge", "die", "load_handle",
+];
+
+/// True when the body calls a prim op outside [`RAW_FLOOR`] — a count step
+/// (`rc_inc` / `rc_dec`), an owned store, a host call — so every droppable
+/// param of the frame stays callee-owned (the raw-address rule).
+pub(crate) fn prim_body_owns_params(body: &almide_ir::IrExpr) -> bool {
+    struct Scan {
+        hit: bool,
+    }
+    impl almide_ir::visit::IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if self.hit {
+                return;
+            }
+            if let almide_ir::IrExprKind::Call { target, .. }
+            | almide_ir::IrExprKind::TailCall { target, .. } = &e.kind
+            {
+                if let almide_ir::CallTarget::Module { module, func, .. } = target
+                    && module.as_str() == "prim"
+                    && !RAW_FLOOR.contains(&func.as_str())
+                {
+                    self.hit = true;
+                    return;
+                }
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut s = Scan { hit: false };
+    almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
+    s.hit
+}
