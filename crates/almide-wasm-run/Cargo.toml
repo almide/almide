@@ -27,8 +27,8 @@ anyhow = "1"
 # and SIGINT (Ctrl-C / Ctrl-Break on Windows) start the drain. The crate's
 # handler thread keeps the host free of `unsafe` (the workspace forbids it).
 ctrlc = { version = "3.5", features = ["termination"] }
-wasmparser = "0.262"
-wasm-encoder = "0.262"
+wasmparser = "0.263"
+wasm-encoder = "0.263"
 # wasmtime's defaults minus `cache`: the on-disk compilation cache is never
 # configured here, and the feature pulls zstd (RUSTSEC-2026-0391/0395/0398/0403/0410).
 wasmtime = { version = "50.0.1", default-features = false, features = ["anyhow", "async", "backtrace", "gc", "gc-copying", "gc-drc", "gc-null", "wat", "profiling", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "component-model-async", "threads", "stack-switching", "std", "debug", "compile-time-builtins", "wit-parser"] }
@@ -44,8 +44,8 @@ tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-t
 http = "1"
 http-body-util = "0.1"
 bytes = "1"
-wit-component = "0.262"
-wit-parser = "0.262"
+wit-component = "0.263"
+wit-parser = "0.263"
 # op 32 (`prim.random_get`, #4122): the OS CSPRNG without `unsafe` (the
 # workspace forbids it). Already in the tree via tempfile/rand.
 getrandom = "0.4"

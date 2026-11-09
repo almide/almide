@@ -63,7 +63,7 @@ wat = "1"
 # Structural validation of the assembled v1 module: `wat` assembles without full stack-shape
 # validation, so the test harness validates before accepting a v1 module (invalid → the test
 # harness falls back to native execution; there is no v0 wasm emitter anymore).
-wasmparser = "0.262"
+wasmparser = "0.263"
 # `almide verify` pins the SHA-256 of the file it certifies (#4011); almide-verify
 # recomputes it with its own implementation.
 sha2 = "0.11"
@@ -78,7 +78,7 @@ lsp-server = "0.10"
 # channel type (#1470) — same crate lsp-server itself uses.
 crossbeam-channel = "0.5"
 lsp-types = "0.97"
-wit-component = "0.262"
+wit-component = "0.263"
 wasi-preview1-component-adapter-provider = "50.0.1"
 
 [features]
