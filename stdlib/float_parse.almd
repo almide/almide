@@ -5,8 +5,8 @@
 //  - FAST PATH: <= 15 digits and |net-exp| <= 22 — the mantissa is exact in f64 and 10^k is an
 //    exact f64, so one multiply/divide is correctly rounded (Clinger's safe region).
 //  - SLOW PATH: everything else goes through an 800-digit HIGH-PRECISION DECIMAL (the
-//    Simple Decimal Conversion of go's strconv / Nigel Tao): the digit array is repeatedly
-//    halved/doubled (×2 / ÷2 decimal-digit shifts) into [0.5, 1) × 2^e, denormals clamp the
+//    Simple Decimal Conversion of go's strconv / Nigel Tao): the digit array is shifted by
+//    up to 59 bits right / 26 bits left per pass into [0.5, 1) × 2^e, denormals clamp the
 //    exponent to -1022 first, 53 more doublings expose the integer mantissa, round-half-even
 //    (with a truncation-sticky bit past 800 digits), and the f64 is assembled bit-exactly via
 //    prim.ffrombits. Denormal min (5e-324), f64 max (1.7976931348623157e308), and 19+-digit
@@ -117,84 +117,87 @@ fn __hpd_strip(hb: Int) -> Unit = {
   } else ()
 }
 
-// ×2 (leftShift(1)): low-to-high digit walk writing to i+1; the final carry
-// (0/1) lands at digit 0. A digit pushed past slot 799 is dropped — sticky
-// trunc if nonzero.
-fn __hpd_lsh1_loop(hb: Int, r: Int, carry: Int) -> Int = if r < 0 then carry
-else {
-  let v = __hpd_d(hb, r) * 2 + carry
-  if r + 1 < 800 then __hpd_sd(hb, r + 1, v % 10)
-  else (if v % 10 != 0 then __hpd_str8(hb, 1) else ())
-  __hpd_lsh1_loop(hb, r - 1, v / 10)
-}
+// ×2^k (leftShift), at most 26 bits per pass: 2^26 < 10^8, so a pass adds at
+// most 8 leading digits. The low-to-high walk writes digit r to slot r+8
+// (slots up to 807 fit the buffer) and runs on through r = -8 with zero
+// digits, so the carry fills slots 7..0 (leading zeros included); the run is
+// then stripped down to slot 0 and capped at 800 digits.
+fn __hpd_lshk_loop(hb: Int, r: Int, k: Int, carry: Int) -> Unit = if r >= 0 - 8 then {
+  let dv = if r >= 0 then __hpd_d(hb, r) else 0
+  let v = prim.bshl(dv, k) + carry
+  __hpd_sd(hb, r + 8, v % 10)
+  __hpd_lshk_loop(hb, r - 1, k, v / 10)
+} else ()
 
-fn __hpd_lsh1(hb: Int) -> Unit = {
+fn __hpd_lsh(hb: Int, k: Int) -> Unit = if k > 0 then {
+  let s = if k > 26 then 26 else k
   let n = __hpd_n(hb)
-  let c = __hpd_lsh1_loop(hb, n - 1, 0)
-  __hpd_sd(hb, 0, c)
-  __hpd_sn(hb, (if n + 1 > 800 then 800 else n + 1))
-  __hpd_sdp(hb, __hpd_dp(hb) + 1)
+  __hpd_lshk_loop(hb, n - 1, s, 0)
+  __hpd_sn(hb, n + 8)
+  __hpd_sdp(hb, __hpd_dp(hb) + 8)
   __hpd_strip(hb)
-  __hpd_sn(hb, __hpd_trim(hb, __hpd_n(hb)))
-}
+  // cap at 800 digits: the ones past slot 799 are dropped — sticky if nonzero
+  let m = __hpd_n(hb)
+  let c = if m > 800 then {
+    if __hpd_nz_after(hb, 800, m) then __hpd_str8(hb, 1) else ()
+    800
+  } else m
+  __hpd_sn(hb, __hpd_trim(hb, c))
+  __hpd_lsh(hb, k - s)
+} else ()
 
-// ÷2 (rightShift(1)): prime the accumulator until it reaches 2 (packing
-// r*100+acc into one Int — acc < 20 by construction), then the divide walk.
-fn __hpd_rsh1_prime(hb: Int, r: Int, acc: Int, n: Int) -> Int =
-  if acc < 2 and r < n then __hpd_rsh1_prime(
+// ÷2^k (rightShift), at most 59 bits per pass: read digits (zeros past n)
+// until the accumulator reaches 2^k, then the divide walk emits acc >> k and
+// carries (acc mod 2^k) * 10 + next — always below 10 * 2^59 < 2^63. The
+// first digit emitted is nonzero, so no leading zero needs stripping.
+fn __hpd_rshk_prime(hb: Int, r: Int, acc: Int, p: Int, n: Int) -> Int =
+  if acc < p then __hpd_rshk_prime(
     hb,
     r + 1,
-    acc * 10 + __hpd_d(hb, r),
+    acc * 10 + (if r < n then __hpd_d(hb, r) else 0),
+    p,
     n,
   )
-  else r * 100 + acc
+  else r
 
-fn __hpd_rsh1_main(hb: Int, r: Int, acc: Int, w: Int, n: Int) -> Int = if r < n or acc > 0 then {
-  let out = acc / 2
-  let nx = (acc % 2) * 10 + (if r < n then __hpd_d(hb, r) else 0)
-  if w < 800 then __hpd_sd(hb, w, out)
-  else (if out != 0 then __hpd_str8(hb, 1) else ())
-  __hpd_rsh1_main(hb, r + 1, nx, (if w < 800 then w + 1 else w), n)
-} else w
+fn __hpd_rshk_main(hb: Int, r: Int, acc: Int, w: Int, n: Int, k: Int) -> Int =
+  if r < n or acc > 0 then {
+    let out = prim.bshr(acc, k)
+    let nx = (acc - prim.bshl(out, k)) * 10 + (if r < n then __hpd_d(hb, r) else 0)
+    if w < 800 then __hpd_sd(hb, w, out)
+    else (if out != 0 then __hpd_str8(hb, 1) else ())
+    __hpd_rshk_main(hb, r + 1, nx, (if w < 800 then w + 1 else w), n, k)
+  } else w
 
-fn __hpd_rsh1(hb: Int) -> Unit = {
+fn __hpd_rsh(hb: Int, k: Int) -> Unit = if k > 0 then {
+  let s = if k > 59 then 59 else k
   let n = __hpd_n(hb)
-  let pk = __hpd_rsh1_prime(hb, 0, 0, n)
-  __hpd_sdp(hb, __hpd_dp(hb) - (pk / 100 - 1))
-  let w = __hpd_rsh1_main(hb, pk / 100, pk % 100, 0, n)
-  __hpd_sn(hb, __hpd_trim(hb, w))
-  __hpd_strip(hb)
-}
+  let r = __hpd_rshk_prime(hb, 0, 0, prim.bshl(1, s), n)
+  __hpd_sdp(hb, __hpd_dp(hb) - (r - 1))
+  __hpd_sn(hb, __hpd_trim(hb, __hpd_rshk_main(hb, r, __hpd_ri(hb, 0, r, n, 0), 0, n, s)))
+  __hpd_rsh(hb, k - s)
+} else ()
 
-// Normalize into [0.5, 1): halve while >= 0.5, then double while < 0.5
-// (go strconv's two loops); each shift is a factor of 2 tracked in e2.
-fn __hpd_to_half(hb: Int, e2: Int) -> Int =
-  if __hpd_dp(hb) > 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(
-    hb,
-    0,
-  ) >= 5) then {
-    __hpd_rsh1(hb)
-    __hpd_to_half(hb, e2 + 1)
-  } else e2
+// Bits to shift for a decimal exponent i >= 1: floor(i * log2(10)), so
+// 2^bits <= 10^i (capped at the 59-bit right-shift width).
+fn __hpd_bits(i: Int) -> Int = if i > 17 then 59 else i * 33219 / 10000
+
+// Normalize into [0.5, 1) (go strconv decimalToFloatBits): while dp > 0 halve
+// by 2^bits(dp), which leaves the value below 1; then double while below 0.5
+// — by 2^bits(-dp) while dp < 0 (the value < 10^dp never passes 1), by 2 at
+// dp == 0. Each shift is tracked in the binary exponent e2.
+fn __hpd_to_half(hb: Int, e2: Int) -> Int = if __hpd_dp(hb) > 0 then {
+  let k = __hpd_bits(__hpd_dp(hb))
+  __hpd_rsh(hb, k)
+  __hpd_to_half(hb, e2 + k)
+} else e2
 
 fn __hpd_from_half(hb: Int, e2: Int) -> Int =
-  if __hpd_dp(hb) < 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(
-    hb,
-    0,
-  ) < 5) then {
-    __hpd_lsh1(hb)
-    __hpd_from_half(hb, e2 - 1)
+  if __hpd_dp(hb) < 0 or (__hpd_dp(hb) == 0 and __hpd_d(hb, 0) < 5) then {
+    let k = if __hpd_dp(hb) < 0 then __hpd_bits(0 - __hpd_dp(hb)) else 1
+    __hpd_lsh(hb, k)
+    __hpd_from_half(hb, e2 - k)
   } else e2
-
-fn __hpd_rshn(hb: Int, k: Int) -> Unit = if k > 0 then {
-  __hpd_rsh1(hb)
-  __hpd_rshn(hb, k - 1)
-} else ()
-
-fn __hpd_lshn(hb: Int, k: Int) -> Unit = if k > 0 then {
-  __hpd_lsh1(hb)
-  __hpd_lshn(hb, k - 1)
-} else ()
 
 // digits[0..dp) as an integer (dp <= 17 at the call site — fits i64 exactly).
 fn __hpd_ri(hb: Int, i: Int, dp: Int, n: Int, acc: Int) -> Int = if i < dp then __hpd_ri(
@@ -267,11 +270,11 @@ fn __fp_exact(hb: Int, neg: Bool) -> Float = {
     let e2 = eb - 1
     // denormal clamp: below 2^-1022 shrink the mantissa instead of the exponent
     let e3 = if e2 < 0 - 1022 then 0 - 1022 else e2
-    __hpd_rshn(hb, (if e2 < 0 - 1022 then (0 - 1022) - e2 else 0))
+    __hpd_rsh(hb, (if e2 < 0 - 1022 then (0 - 1022) - e2 else 0))
     if e3 > 1023 then (if neg then 0.0 - inf else inf)
     else {
       // expose the 53-bit integer mantissa and round half-even
-      __hpd_lshn(hb, 53)
+      __hpd_lsh(hb, 53)
       let m0 = __hpd_ri(hb, 0, __hpd_dp(hb), __hpd_n(hb), 0)
       let m1 = if __hpd_round_up(hb) then m0 + 1 else m0
       // rounding overflow 2^53 → mantissa 2^52, exponent + 1
@@ -291,7 +294,8 @@ fn __fp_exact(hb: Int, neg: Bool) -> Float = {
 }
 
 fn __fp_slow(p0: Int, i_end: Int, f_start: Int, f_end: Int, ex: Int, neg: Bool) -> Float = {
-  let buf = string.repeat("0", 824)
+  // Every slot is written before it is read (header in init, digits below n).
+  let buf = prim.alloc_str(824)
   let hb = prim.handle(buf) + 12
   __hpd_init(hb, p0, i_end, f_start, f_end, ex)
   __fp_exact(hb, neg)

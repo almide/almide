@@ -6759,81 +6759,84 @@ fn __hpd_strip(hb: Int) -> Unit = {
 
 
 
-fn __hpd_lsh1_loop(hb: Int, r: Int, carry: Int) -> Int = if r < 0 then carry
-else {
-  let v = __hpd_d(hb, r) * 2 + carry
-  if r + 1 < 800 then __hpd_sd(hb, r + 1, v % 10)
-  else (if v % 10 != 0 then __hpd_str8(hb, 1) else ())
-  __hpd_lsh1_loop(hb, r - 1, v / 10)
-}
 
-fn __hpd_lsh1(hb: Int) -> Unit = {
+
+fn __hpd_lshk_loop(hb: Int, r: Int, k: Int, carry: Int) -> Unit = if r >= 0 - 8 then {
+  let dv = if r >= 0 then __hpd_d(hb, r) else 0
+  let v = prim.bshl(dv, k) + carry
+  __hpd_sd(hb, r + 8, v % 10)
+  __hpd_lshk_loop(hb, r - 1, k, v / 10)
+} else ()
+
+fn __hpd_lsh(hb: Int, k: Int) -> Unit = if k > 0 then {
+  let s = if k > 26 then 26 else k
   let n = __hpd_n(hb)
-  let c = __hpd_lsh1_loop(hb, n - 1, 0)
-  __hpd_sd(hb, 0, c)
-  __hpd_sn(hb, (if n + 1 > 800 then 800 else n + 1))
-  __hpd_sdp(hb, __hpd_dp(hb) + 1)
+  __hpd_lshk_loop(hb, n - 1, s, 0)
+  __hpd_sn(hb, n + 8)
+  __hpd_sdp(hb, __hpd_dp(hb) + 8)
   __hpd_strip(hb)
-  __hpd_sn(hb, __hpd_trim(hb, __hpd_n(hb)))
-}
+
+  let m = __hpd_n(hb)
+  let c = if m > 800 then {
+    if __hpd_nz_after(hb, 800, m) then __hpd_str8(hb, 1) else ()
+    800
+  } else m
+  __hpd_sn(hb, __hpd_trim(hb, c))
+  __hpd_lsh(hb, k - s)
+} else ()
 
 
 
-fn __hpd_rsh1_prime(hb: Int, r: Int, acc: Int, n: Int) -> Int =
-  if acc < 2 and r < n then __hpd_rsh1_prime(
+
+
+fn __hpd_rshk_prime(hb: Int, r: Int, acc: Int, p: Int, n: Int) -> Int =
+  if acc < p then __hpd_rshk_prime(
     hb,
     r + 1,
-    acc * 10 + __hpd_d(hb, r),
+    acc * 10 + (if r < n then __hpd_d(hb, r) else 0),
+    p,
     n,
   )
-  else r * 100 + acc
+  else r
 
-fn __hpd_rsh1_main(hb: Int, r: Int, acc: Int, w: Int, n: Int) -> Int = if r < n or acc > 0 then {
-  let out = acc / 2
-  let nx = (acc % 2) * 10 + (if r < n then __hpd_d(hb, r) else 0)
-  if w < 800 then __hpd_sd(hb, w, out)
-  else (if out != 0 then __hpd_str8(hb, 1) else ())
-  __hpd_rsh1_main(hb, r + 1, nx, (if w < 800 then w + 1 else w), n)
-} else w
+fn __hpd_rshk_main(hb: Int, r: Int, acc: Int, w: Int, n: Int, k: Int) -> Int =
+  if r < n or acc > 0 then {
+    let out = prim.bshr(acc, k)
+    let nx = (acc - prim.bshl(out, k)) * 10 + (if r < n then __hpd_d(hb, r) else 0)
+    if w < 800 then __hpd_sd(hb, w, out)
+    else (if out != 0 then __hpd_str8(hb, 1) else ())
+    __hpd_rshk_main(hb, r + 1, nx, (if w < 800 then w + 1 else w), n, k)
+  } else w
 
-fn __hpd_rsh1(hb: Int) -> Unit = {
+fn __hpd_rsh(hb: Int, k: Int) -> Unit = if k > 0 then {
+  let s = if k > 59 then 59 else k
   let n = __hpd_n(hb)
-  let pk = __hpd_rsh1_prime(hb, 0, 0, n)
-  __hpd_sdp(hb, __hpd_dp(hb) - (pk / 100 - 1))
-  let w = __hpd_rsh1_main(hb, pk / 100, pk % 100, 0, n)
-  __hpd_sn(hb, __hpd_trim(hb, w))
-  __hpd_strip(hb)
-}
+  let r = __hpd_rshk_prime(hb, 0, 0, prim.bshl(1, s), n)
+  __hpd_sdp(hb, __hpd_dp(hb) - (r - 1))
+  __hpd_sn(hb, __hpd_trim(hb, __hpd_rshk_main(hb, r, __hpd_ri(hb, 0, r, n, 0), 0, n, s)))
+  __hpd_rsh(hb, k - s)
+} else ()
 
 
 
-fn __hpd_to_half(hb: Int, e2: Int) -> Int =
-  if __hpd_dp(hb) > 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(
-    hb,
-    0,
-  ) >= 5) then {
-    __hpd_rsh1(hb)
-    __hpd_to_half(hb, e2 + 1)
-  } else e2
+fn __hpd_bits(i: Int) -> Int = if i > 17 then 59 else i * 33219 / 10000
+
+
+
+
+
+fn __hpd_to_half(hb: Int, e2: Int) -> Int = if __hpd_dp(hb) > 0 then {
+  let k = __hpd_bits(__hpd_dp(hb))
+  __hpd_rsh(hb, k)
+  __hpd_to_half(hb, e2 + k)
+} else e2
 
 fn __hpd_from_half(hb: Int, e2: Int) -> Int =
-  if __hpd_dp(hb) < 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(
-    hb,
-    0,
-  ) < 5) then {
-    __hpd_lsh1(hb)
-    __hpd_from_half(hb, e2 - 1)
+  if __hpd_dp(hb) < 0 or (__hpd_dp(hb) == 0 and __hpd_d(hb, 0) < 5) then {
+    let k = if __hpd_dp(hb) < 0 then __hpd_bits(0 - __hpd_dp(hb)) else 1
+    __hpd_lsh(hb, k)
+    __hpd_from_half(hb, e2 - k)
   } else e2
-
-fn __hpd_rshn(hb: Int, k: Int) -> Unit = if k > 0 then {
-  __hpd_rsh1(hb)
-  __hpd_rshn(hb, k - 1)
-} else ()
-
-fn __hpd_lshn(hb: Int, k: Int) -> Unit = if k > 0 then {
-  __hpd_lsh1(hb)
-  __hpd_lshn(hb, k - 1)
-} else ()
 
 
 fn __hpd_ri(hb: Int, i: Int, dp: Int, n: Int, acc: Int) -> Int = if i < dp then __hpd_ri(
@@ -6906,11 +6909,11 @@ fn __fp_exact(hb: Int, neg: Bool) -> Float = {
     let e2 = eb - 1
 
     let e3 = if e2 < 0 - 1022 then 0 - 1022 else e2
-    __hpd_rshn(hb, (if e2 < 0 - 1022 then (0 - 1022) - e2 else 0))
+    __hpd_rsh(hb, (if e2 < 0 - 1022 then (0 - 1022) - e2 else 0))
     if e3 > 1023 then (if neg then 0.0 - inf else inf)
     else {
 
-      __hpd_lshn(hb, 53)
+      __hpd_lsh(hb, 53)
       let m0 = __hpd_ri(hb, 0, __hpd_dp(hb), __hpd_n(hb), 0)
       let m1 = if __hpd_round_up(hb) then m0 + 1 else m0
 
@@ -6930,7 +6933,8 @@ fn __fp_exact(hb: Int, neg: Bool) -> Float = {
 }
 
 fn __fp_slow(p0: Int, i_end: Int, f_start: Int, f_end: Int, ex: Int, neg: Bool) -> Float = {
-  let buf = string.repeat("0", 824)
+
+  let buf = prim.alloc_str(824)
   let hb = prim.handle(buf) + 12
   __hpd_init(hb, p0, i_end, f_start, f_end, ex)
   __fp_exact(hb, neg)
