@@ -331,7 +331,9 @@ fn elem_arg(cx: &CallCx, by_ref: bool, code: &str, got: &NTy) -> Result<String, 
         (Some(NTy::I64), NTy::I64) => code.to_string(),
         (Some(NTy::Str), NTy::Str) => format!("{code}.clone()"),
         (Some(NTy::Str), NTy::StrRef) => format!("AlmideString::from({code})"),
-        (Some(want @ (NTy::Rec(_) | NTy::Vec | NTy::VecStr)), _) => owned_arg(want, code, *got).ok_or_else(cx.mismatch)?,
+        // Generic list operations take the element representation carried by
+        // the list, including Float's stored bits and Option/Result values.
+        (Some(want), _) => owned_arg(want, code, *got).ok_or_else(cx.mismatch)?,
         _ => return Err((cx.mismatch)()),
     };
     Ok(if by_ref { format!("&{v}") } else { v })
@@ -390,16 +392,27 @@ fn map_entry_arg(cx: &CallCx, p: &FloorParam, by_ref: bool, code: &str, got: &NT
 
 /// A `List[(K, V)]` param's argument.
 fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerError> {
-    // A literal's entries left unbuilt (crate::native_map_entries): its pairs.
-    if let Some(pairs) = crate::native_map_entries::array_of(code) {
-        return Ok(pairs);
-    }
     let mismatch = || wall(format!(
         "native: map pairs argument {got:?} (element {:?}, pair kinds {:?}) cannot serve {:?} in `{}`",
         got.rec().and_then(crate::render_native_rec::list_elem),
         got.rec().and_then(pair_kinds), cx.map_kv, cx.name
     ));
     let (NTy::Rec(i) | NTy::RecRef(i)) = got else { return Err(mismatch()) };
+    let (got_k, got_v) = pair_kinds(*i).ok_or_else(mismatch)?;
+    let (want_k, want_v) = cx.map_kv.ok_or_else(mismatch)?;
+    // The allocation-free literal path must obey the same declared key/value
+    // representations as the ordinary list path. Structural records and
+    // Float32 lanes can differ even though their pair slots have equal width.
+    if let Some(pairs) = crate::native_map_entries::array_of(code) {
+        let convert = |name: &str, got, want| {
+            if crate::native_value_repr::same_owned(want, got) { Some(name.to_string()) }
+            else { owned_arg(want, name, got) }
+        };
+        let key = convert("__key", got_k, want_k).ok_or_else(mismatch)?;
+        let value = convert("__value", got_v, want_v).ok_or_else(mismatch)?;
+        return Ok(if key == "__key" && value == "__value" { pairs }
+            else { format!("({pairs}).map(|(__key, __value)| ({key}, {value}))") });
+    }
     let pair = crate::render_native_rec::list_elem(*i).ok_or_else(mismatch)?;
     let (a, b) = match pair {
         NTy::Vec | NTy::VecRef => ("t[0]".to_string(), "t[1]".to_string()),
@@ -408,8 +421,6 @@ fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerErro
         NTy::Rec(j) if crate::render_native_rec::field_count(j) == 2 => ("t.f0.clone()".to_string(), "t.f1.clone()".to_string()),
         _ => return Err(mismatch()),
     };
-    let (got_k, got_v) = pair_kinds(*i).ok_or_else(mismatch)?;
-    let (want_k, want_v) = cx.map_kv.ok_or_else(mismatch)?;
     let a = if crate::native_value_repr::same_owned(want_k, got_k) { a } else { owned_arg(want_k, &a, got_k).ok_or_else(mismatch)? };
     let b = if crate::native_value_repr::same_owned(want_v, got_v) { b } else { owned_arg(want_v, &b, got_v).ok_or_else(|| wall(format!(
         "native: map pair value cannot convert {got_v:?} to {want_v:?} in `{}`", cx.name

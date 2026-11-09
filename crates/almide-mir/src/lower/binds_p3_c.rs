@@ -11,6 +11,15 @@ impl LowerCtx {
     /// half outgrows a readable branch ladder; the ORDER across the two halves
     /// is unchanged (this one runs only after every branch above declined).
     fn lower_variant_ctor_field_tail(&mut self, arg: &IrExpr) -> Option<(ValueId, bool)> {
+        if crate::lower::owned_tco_slots()
+            && matches!(&arg.ty, Ty::Named(name, args) if args.is_empty()
+                && crate::native_runtime_types::RuntimeType::of(name.as_str()).is_some())
+        {
+            // Native runtime values keep their declared Rust type inside
+            // variants. Acquire the field through the normal ownership path;
+            // the enclosing typed aggregate recursively drops that value.
+            return self.lower_owned_heap_field(arg).map(|v| (v, true));
+        }
         if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) = &arg.ty {
             if a.len() == 1 && self.option_payload_drop_exact(&a[0]) {
                 // An Option ctor field whose payload the generated `$__drop_<T>` frees

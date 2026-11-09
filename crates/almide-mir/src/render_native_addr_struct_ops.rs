@@ -91,11 +91,15 @@ fn enum_slot_lit(s: AddrSink<'_>, dst: &ValueId, elems: &[ValueId]) -> Result<bo
     // A constant tag naming a payload-free case is that case: `from_slots` builds `with_tag(t)` and sets
     // no field of it, through a slot list and a tag match (4% on nested_variant_tag_box).
     let cases = crate::render_native_rec::enum_cases(i).unwrap_or_default();
-    let nullary = elems.first().filter(|t| !st.set_locals.contains(t)).and_then(|t| st.consts.get(t)).copied();
-    let nullary = nullary.filter(|&t| cases.iter().any(|(c, fs)| i64::from(*c) == t && fs.is_empty()));
+    let tag = elems.first().filter(|t| !st.set_locals.contains(t)).and_then(|t| st.consts.get(t)).copied();
+    let nullary = tag.filter(|&t| cases.iter().any(|(c, fs)| i64::from(*c) == t && fs.is_empty()));
     if let Some(t) = nullary {
         line!("let mut {}: {n} = {n}::C{t};", var(*dst));
         return Ok(true);
+    }
+    if cases.iter().filter(|(t, _)| tag.is_none_or(|v| v == i64::from(*t)))
+        .any(|(_, fs)| fs.iter().any(|f| !crate::render_native_rec::has_default(*f))) {
+        return Err(wall("native: scalar enum slots require defaultable payloads"));
     }
     // MIR's scalar slots carry Float bits, just as scalar_struct_lit does.
     // Preserve NaN payloads and signed zero; numeric `as i64` would lose both.

@@ -451,7 +451,9 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     // Default is a case with no generated-type field, so a recursive enum's
     // default terminates (derive_records keeps only enums that have one).
     let leaf = d.default_tag.unwrap_or(cases[0].0);
-    out.push_str(&format!("impl Default for {n} {{\n    fn default() -> Self {{ Self::with_tag({leaf}) }}\n}}\n"));
+    if has_default(NTy::Rec(i)) {
+        out.push_str(&format!("impl Default for {n} {{\n    fn default() -> Self {{ Self::with_tag({leaf}) }}\n}}\n"));
+    }
     out.push_str(&format!("#[allow(unused_variables, unreachable_patterns)]\nimpl {n} {{\n"));
     out.push_str(&enum_tag_fns(i, cases));
     let width = cases.iter().map(|(_, fs)| fs.len()).max().unwrap_or(0);
@@ -480,6 +482,10 @@ fn enum_tag_fns(i: u16, cases: &[(u32, Vec<NTy>)]) -> String {
     let region = is_region(i);
     out.push_str("    fn with_tag(t: i64) -> Self {\n        match t {\n");
     for (t, fs) in cases {
+        // Opaque runtime values cannot be fabricated as vacant payloads.
+        // Such cases are constructed with all fields in one expression;
+        // tag-only construction is rejected by the address renderer.
+        if !fs.iter().all(|f| has_default(*f)) { continue; }
         if fs.is_empty() {
             out.push_str(&format!("            {t} => Self::C{t},\n"));
         } else {
@@ -529,7 +535,9 @@ fn enum_slot_fns(i: u16, k: usize, kind: NTy, cases: &[(u32, Vec<NTy>)]) -> Stri
         set.push_str(&format!("            {pat} => {wr},\n"));
     }
     // A slot past the case's payload reads the block's zero padding.
-    get.push_str("            _ => Default::default(),\n        }\n    }\n");
+    let absent = if has_default(kind) { "Default::default()" }
+        else { "almide_abort(\"variant payload outside its case\")" };
+    get.push_str(&format!("            _ => {absent},\n        }}\n    }}\n"));
     set.push_str("            _ => {}\n        }\n    }\n");
     out.push_str(&get);
     out.push_str(&set);

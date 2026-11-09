@@ -510,6 +510,12 @@ fn store_enum_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
         if st.addrs.contains_key(&v) || ty(tys, &v) != Some(NTy::I64) {
             return Err(wall("native: a non-scalar enum tag"));
         }
+        let tag = st.consts.get(&v).filter(|_| !st.set_locals.contains(&v)).copied();
+        let cases = crate::render_native_rec::enum_cases(i).unwrap_or_default();
+        if cases.iter().filter(|(t, _)| tag.is_none_or(|v| v == i64::from(*t)))
+            .any(|(_, fs)| fs.iter().any(|f| !crate::render_native_rec::has_default(*f))) {
+            return Err(wall("native: a tag-only construction requires defaultable enum payloads"));
+        }
         line!("{b} = {}::with_tag({});", struct_name(i), var(v));
         return Ok(true);
     }
