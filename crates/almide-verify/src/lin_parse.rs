@@ -1,7 +1,7 @@
 //! The byte format of a linear certificate (proofs/RoutineLinCert.v),
 //! parsed into lin.rs's items — split out of lin.rs to hold its file cap.
 
-use super::{one, Arg, Item, Lin, Pf, Proc, Var};
+use super::{Arg, Item, Lin, Pf, Proc, Var};
 use crate::nat::Nat;
 use crate::zint::Z;
 
