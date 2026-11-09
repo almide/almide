@@ -19,6 +19,19 @@ fn physical(t: &Ty) -> Ty {
 }
 fn has_address(t: &Ty) -> bool { t.any_node(&mut |t| *t == Ty::RawPtr) }
 
+enum RegionOp { Address, Load, Store }
+
+// The gate and the rewrite share one dispatch table. An operation is inside
+// the closed domain exactly when this pass can translate that call's shape.
+fn region_operation(name: &str, arity: usize) -> Option<RegionOp> {
+    match (name, arity) {
+        ("__address", 1) => Some(RegionOp::Address),
+        ("__load", 3) => Some(RegionOp::Load),
+        ("__store", 3) => Some(RegionOp::Store),
+        _ => None,
+    }
+}
+
 pub(crate) fn expand(ir: &mut IrProgram) -> Result<(), LowerError> {
     let mut gate = Gate::default();
     for f in &ir.functions { gate.visit_expr(&f.body); }
@@ -64,14 +77,15 @@ impl IrVisitor for Gate {
     fn visit_expr(&mut self, e: &IrExpr) {
         match &e.kind {
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
-                let raw = module.as_str() == "ffi" && matches!(func.as_str(), "__address" | "__load" | "__store");
-                self.mint |= raw && func.as_str() == "__address";
-                if raw && func.as_str() == "__address" && self.address_span.is_none() {
+                let operation = (module.as_str() == "ffi").then(|| region_operation(func.as_str(), args.len())).flatten();
+                let mint = matches!(operation, Some(RegionOp::Address));
+                self.mint |= mint;
+                if mint && self.address_span.is_none() {
                     self.address_span = e.span;
                 }
                 // A host call that consumes or creates any address-bearing
                 // value cannot use the private cell representation.
-                self.foreign |= !raw && (has_address(&e.ty) || args.iter().any(|a| has_address(&a.ty)));
+                self.foreign |= operation.is_none() && (has_address(&e.ty) || args.iter().any(|a| has_address(&a.ty)));
             }
             IrExprKind::RuntimeCall { .. } | IrExprKind::InlineRust { .. }
             | IrExprKind::RenderedCall { .. } => self.foreign = true,
@@ -142,11 +156,11 @@ impl IrMutVisitor for Storage<'_> {
         }
         let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind else { return; };
         if module.as_str() != "ffi" { return; }
-        let replacement = match (func.as_str(), args.as_slice()) {
-            ("__address", [b]) => self.address(b.clone()),
-            ("__load", [_, _, _]) => self.access(args, false),
-            ("__store", [_, _, _]) => self.access(args, true),
-            _ => return,
+        let replacement = match region_operation(func.as_str(), args.len()) {
+            Some(RegionOp::Address) => self.address(args[0].clone()),
+            Some(RegionOp::Load) => self.access(args, false),
+            Some(RegionOp::Store) => self.access(args, true),
+            None => return,
         };
         *e = IrExpr { span: e.span, ..replacement };
     }

@@ -1257,3 +1257,9 @@ id = "crates/almide-verify/src/native_calls.rs::NATIVE_FS_HOST_CALLS::table"
 class = "justified"
 names = 29
 why = "The independent checker's copy of the trusted-base named set (NativeCalls.native_fs_host_calls): almide-verify shares no code with the producer, so it holds its own list; tests/native_fs_host_calls_test.rs holds the copies to one list in one order."
+
+[[site]]
+id = "crates/almide-mir/src/native_floor_sig.rs::file_stat_decl_agrees::table"
+class = "justified"
+names = 2
+why = "These are the field labels of the FileStat record crossing the native runtime boundary, not properties of the fs.is_dir or fs.is_file functions. The gate compares the bundled record's complete field names, types and order with the runtime conversion ABI; renaming a field must refuse that conversion rather than silently remap its slots. Function attributes cannot declare this record layout."
