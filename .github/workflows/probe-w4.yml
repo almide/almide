@@ -10,6 +10,30 @@ env:
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
 jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: build the producer and the checkers
+        run: cargo build -q -p almide-wasm --example emit_structural_bundle && cargo build -q -p almide-verify -p almide-anchor-check
+      - name: the reproduction's init witness and anchor verdict
+        run: |
+          set -x
+          f=proofs/fixtures/init-witness/reinject/carve-store-lost.almd
+          ./target/debug/examples/emit_structural_bundle $f --only init '(program)' > /tmp/init.w || true
+          tr ';' '\n' < /tmp/init.w | grep -n -E '^ *[kce][0-9]' | head -40
+          tr ';' '\n' < /tmp/init.w | wc -l
+          ./target/debug/examples/emit_structural_bundle $f --anchors /tmp/a.anchors > /tmp/a.bundle || true
+          ./target/debug/almide-anchor-check /tmp/a.anchors.wasm /tmp/a.bundle /tmp/a.anchors || true
   drills:
     runs-on: ubuntu-latest
     timeout-minutes: 180
