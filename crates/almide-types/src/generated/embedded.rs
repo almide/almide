@@ -18394,6 +18394,7 @@ fn __lpart_fill_rc(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, 
     }
   }
 
+@specializes("list.partition")
 fn list_partition_rc(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) = {
   let n = list.len(xs)
   let yes = prim.alloc_list(n)
@@ -31210,11 +31211,13 @@ fn __rc_rand(min: Int, max: Int) -> Int = {
   if span <= 0 then min else min + (rpos % span)
 }
 
+@specializes("random.choice")
 fn random_choice(xs: List[Int]) -> Int? = {
   let n = list.len(xs)
   if n == 0 then none else list.get(xs, __rc_rand(0, n - 1))
 }
 
+@specializes("random.choice")
 fn random_choice_str(xs: List[String]) -> String? = {
   let n = list.len(xs)
   if n == 0 then none else list.get(xs, __rc_rand(0, n - 1))
@@ -31230,6 +31233,7 @@ fn __rc_pair_some(h: Int, i: Int) -> (String, String)? = {
   some(v)
 }
 
+@specializes("random.choice")
 fn random_choice_pair(xs: List[(String, String)]) -> (String, String)? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -31305,6 +31309,7 @@ fn __rs_rand(min: Int, max: Int) -> Int = {
   if span <= 0 then min else min + (rpos % span)
 }
 
+@specializes("random.shuffle")
 fn random_shuffle(xs: List[Int]) -> List[Int] = {
   var ys = xs
   var i = list.len(ys) - 1
@@ -31319,6 +31324,7 @@ fn random_shuffle(xs: List[Int]) -> List[Int] = {
   ys
 }
 
+@specializes("random.shuffle")
 fn random_shuffle_str(xs: List[String]) -> List[String] = {
   var ys = xs
   var i = list.len(ys) - 1
@@ -31338,6 +31344,7 @@ fn random_shuffle_str(xs: List[String]) -> List[String] = {
 
 
 
+@specializes("random.shuffle")
 fn random_shuffle_pair(xs: List[(String, String)]) -> List[(String, String)] = {
   var ys = xs
   var i = list.len(ys) - 1
@@ -42200,6 +42207,7 @@ else {
 
 
 
+@specializes("list.__eq_any")
 fn list_eq_value(a: List[Value], b: List[Value]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
