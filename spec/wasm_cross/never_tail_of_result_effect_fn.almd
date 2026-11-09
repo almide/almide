@@ -1,0 +1,13 @@
+// @contract: C-219
+// #4619: an `effect fn` declared to return a Result whose whole body is a
+// Never-typed `process.exit(c)` exits with `c`. The native build refused it
+// (rustc E0308: expected Result, found `()`) while wasm ran it and exited 3.
+import process
+
+effect fn quit(code: Int) -> Result[Int, String] = process.exit(code)
+
+effect fn main() -> Unit = {
+  println("before")
+  let x = quit(3)!
+  println("${x}")
+}

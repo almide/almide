@@ -1,0 +1,38 @@
+// @contract: C-004
+// #4616: `io.eprint` and `io.write(io.stderr(), …)` inside `fan` arms join the
+// arm's output timeline, as `eprintln` and stdout already did: the sequential
+// reading prints arm 0's stderr before arm 1's. The slow arm writes first in
+// arm order and last in time; the runtime wrote both straight to stderr, so
+// native printed the fast arm's lines first.
+import io
+
+fn burn(n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn slow() -> Result[Int, String] = {
+  let s = burn(3000000)
+  io.eprint("a1\n")
+  io.write(io.stderr(), bytes.from_string("a2\n"))!
+  ok(s)
+}
+
+effect fn fast() -> Result[Int, String] = {
+  io.eprint("b1\n")
+  io.write(io.stderr(), bytes.from_string("b2\n"))!
+  ok(0)
+}
+
+effect fn main() -> Unit = {
+  let (x, y) = fan {
+    slow()!
+    fast()!
+  }
+  println("${x + y}")
+}

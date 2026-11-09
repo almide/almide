@@ -1,0 +1,52 @@
+name: probe-regen (throwaway)
+on:
+  push:
+    branches: ['probe/blockers-1109-regen']
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: never
+jobs:
+  negctl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [fixed, neg4615, neg4616, old]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: mkdir -p /tmp/fx && cp spec/wasm_cross/fan_ordered_direct_call_arms.almd spec/wasm_cross/fan_arm_stderr_timeline.almd spec/wasm_cross/never_tail_of_result_effect_fn.almd /tmp/fx/ && cp -r .github/rg /tmp/rg && python3 /tmp/rg/variant.py ${{ matrix.variant }} && git status --short | head
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - run: cargo build --release --bin almide
+      - run: bash /tmp/rg/run-fixtures.sh
+  regen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - name: Install wasmtime
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "/tmp/$TARBALL"
+          tar -xf "/tmp/$TARBALL" -C /tmp && sudo mv /tmp/wasmtime-*/wasmtime /usr/local/bin/
+      - run: cargo build --release --bin almide
+      - run: ORACLE=target/release/almide bash scripts/gen-run-manifest.sh
+      - run: ORACLE=target/release/almide bash scripts/gen-check-manifest.sh
+      - run: ORACLE=target/release/almide bash scripts/gen-ast-manifest.sh
+      - run: ALMIDE_UPDATE_ALLOC=1 cargo test --release -p almide-wasm --test alloc_ledger 2>&1 | tail -5
+      - run: ALMIDE_UPDATE_SIZES=1 cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -5
+      - run: git diff --stat; git diff > /tmp/regen.patch
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: regen
+          path: /tmp/regen.patch
