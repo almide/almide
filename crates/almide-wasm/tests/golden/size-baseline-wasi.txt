@@ -199,7 +199,7 @@
 6191	spec/wasm_cross/env_set_overlay.almd
 6776	spec/wasm_cross/env_set_refusal.almd
 1991	spec/wasm_cross/env_sleep_pause.almd
-15622	spec/wasm_cross/env_vars_remove.almd
+15929	spec/wasm_cross/env_vars_remove.almd
 26193	spec/wasm_cross/equality_ops_every_equatable_element.almd
 3934	spec/wasm_cross/err_arm_takes_let_match_type.almd
 34481	spec/wasm_cross/err_text_operand_escape_families.almd
