@@ -30,30 +30,3 @@ jobs:
           echo "== walled now, not in baseline:"; comm -23 /tmp/actual.txt /tmp/expected.txt
           echo "== in baseline, not walled now:"; comm -13 /tmp/actual.txt /tmp/expected.txt
           grep -A3 "walled real (lowering)" /tmp/report.txt | head -3
-  irdump:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        commit: ["a71e577ae^", "a71e577ae"]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - run: cp -r .github/wf /tmp/wf && git checkout -q "${{ matrix.commit }}" && python3 /tmp/wf/irdump.py
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: "1.97.0"
-      - name: dump
-        run: |
-          cargo build -q -p almide-mir --example classify_corpus
-          for f in spec/lang/generic_type_alias_test.almd spec/wasm_cross/option_result_ctors.almd; do
-            d=$(mktemp -d); cp "$f" "$d/"; mkdir -p /tmp/out
-            IRDUMP=1 WALL_NAMES=1 cargo run -q -p almide-mir --example classify_corpus -- --out /tmp/out "$d" > /dev/null 2> /tmp/dump-$(basename $f).txt || true
-          done
-          mkdir -p /tmp/up && cp /tmp/dump-*.txt /tmp/up/
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: irdump-${{ strategy.job-index }}
-          path: /tmp/up

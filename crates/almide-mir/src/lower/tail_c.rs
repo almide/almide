@@ -505,14 +505,17 @@ impl LowerCtx {
         // Any heap payload: a tuple or record, and also a `??` fallback or a
         // call (#3780's `ok(env.get(k) ?? "unset")`). The bind below refuses
         // whatever it can only defer, so widening the shape stays honest.
-        // The payload THIS retry bound has already tried the direct
-        // constructor route: rebinding it cannot make progress and recursed
-        // indefinitely. A var the program bound is a payload like any other —
-        // binding it to an owned temporary is what lets the arm lower (#3144's
-        // `pick`, whose arms walled when every var payload was refused).
-        if !is_heap_ty(&payload.ty)
-            || matches!(payload.kind, IrExprKind::Var { id } if BOUND_PAYLOADS.with(|b| b.borrow().contains(&id)))
-        {
+        // A var payload that is a PARAM's value, or the temporary THIS retry
+        // bound, has already tried the direct constructor route: rebinding it
+        // cannot make progress and recursed indefinitely. A local the body
+        // bound is a payload like any other — binding it to an owned temporary
+        // is what lets the arm lower (#3144's `pick` walled when every var
+        // payload was refused).
+        let retried = |id: &VarId| {
+            BOUND_PAYLOADS.with(|b| b.borrow().contains(id))
+                || self.value_of.get(id).is_some_and(|v| self.param_values.contains(v))
+        };
+        if !is_heap_ty(&payload.ty) || matches!(&payload.kind, IrExprKind::Var { id } if retried(id)) {
             return None;
         }
         let mark = self.ops.len();
