@@ -217,6 +217,19 @@ pub(crate) fn carrier_dies_after(
     src: ValueId,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
+    carrier_dies_after_reading(func, at, src, borrow_arms, false)
+}
+
+/// [`carrier_dies_after`], where `slots` also leaves out a record's scalar
+/// slot reads through an offset address (`sc.n` beside the list field the
+/// concatenation takes, `set_moving_args`).
+pub(crate) fn carrier_dies_after_reading(
+    func: &MirFunction,
+    at: usize,
+    src: ValueId,
+    borrow_arms: &std::collections::BTreeSet<ValueId>,
+    slots: bool,
+) -> bool {
     let unread = |d: ValueId| {
         !func.ops.iter().any(|op| {
             let mut reads = Vec::new();
@@ -224,7 +237,7 @@ pub(crate) fn carrier_dies_after(
             reads.contains(&d)
         })
     };
-    let scalar_reads: std::collections::BTreeSet<usize> = func.ops[at + 1..]
+    let mut scalar_reads: std::collections::BTreeSet<usize> = func.ops[at + 1..]
         .iter()
         .enumerate()
         .filter(|(_, op)| match op {
@@ -234,6 +247,34 @@ pub(crate) fn carrier_dies_after(
         })
         .map(|(j, _)| at + 1 + j)
         .collect();
+    // The address of one of its scalar slots (`sc.n` beside `sc.funs`): the
+    // handle, the offsets added to it, and the scalar loads through them.
+    let scalar_slot = |j: usize, d: ValueId| -> Vec<usize> {
+        let mut addrs = vec![d];
+        let mut ops = vec![j];
+        let mut other = false;
+        for (k, op) in func.ops.iter().enumerate() {
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(op, &mut reads);
+            if reads.iter().any(|r| addrs.contains(r)) {
+                ops.push(k);
+                addrs.extend(match op {
+                    Op::IntBinOp { dst, op: crate::IntOp::Add, .. } => Some(*dst),
+                    _ => None,
+                });
+                other |= !matches!(op, Op::IntBinOp { op: crate::IntOp::Add, .. } | Op::Prim { kind: crate::PrimKind::Load { .. }, .. });
+            }
+        }
+        // Any other read of the address leaves the handle a read of the record.
+        ops.into_iter().filter(|_| !other).collect()
+    };
+    for (j, op) in func.ops.iter().enumerate().skip(at + 1).filter(|_| slots) {
+        if let Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } = op {
+            if args.as_slice() == [src] {
+                scalar_reads.extend(scalar_slot(j, *d));
+            }
+        }
+    }
     SKIP_READS.with(|m| *m.borrow_mut() = scalar_reads);
     CARRIER_SCAN.with(|m| m.set(true));
     let dies = dying_after(func, at, src, borrow_arms);
@@ -606,7 +647,7 @@ pub(crate) fn set_moving_args(
                     }
                 };
                 let ok = payload_carrier(tys.get(&base).copied())
-                    && carrier_dies_after(func, at, base, borrow_arms)
+                    && carrier_dies_after_reading(func, at, base, borrow_arms, true)
                     && reads.iter().all(|r| dying_after(func, at, *r, borrow_arms));
                 ok.then_some((v, take))
             })
