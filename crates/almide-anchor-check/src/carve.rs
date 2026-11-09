@@ -26,7 +26,8 @@
 //!   i32.load offset=4` [a], `i32.const H; i32.add; i32.ne`, then the
 //!   aborting `if` [a, at its `end`]. Every family is followed, in the same
 //!   function, at its control depth with nothing leaving it in between, by
-//!   a seal of the local its root was stored to.
+//!   a seal of a local whose last write before it stored the family's
+//!   result.
 //!
 //! The root, cursor, size, base, count and fill-cursor locals are distinct.
 //! A record anchored `-` throughout is counted, not checked.
@@ -136,13 +137,14 @@ impl<'a> Ctx<'_, 'a> {
     fn run(
         &self,
         b: &Body<'a>,
-        func: usize,
-        start: usize,
+        at: At,
         pat: &[(P, bool)],
         anchors: &[At],
-        bind: &mut Bind,
         what: &str,
-    ) -> Result<(), String> {
+    ) -> Result<Bind, String> {
+        let (func, start) = (at.func, at.op);
+        let mut bind = Bind::default();
+        let bind = &mut bind;
         let mut next = 0;
         for (k, &(p, marked)) in pat.iter().enumerate() {
             let j = start + k;
@@ -161,18 +163,16 @@ impl<'a> Ctx<'_, 'a> {
         if next != anchors.len() {
             return Err(format!("{what}: {} anchors for {next} marked instructions", anchors.len()));
         }
-        Ok(())
+        Ok(std::mem::take(bind))
     }
 
     /// `k F`, anchored at the root's `local.set` and the cursor store.
-    /// Answers the local the root's handle is stored to after the op (the
-    /// one its seal must read) and where.
-    pub(crate) fn family(&self, first: i32, anchors: &[At]) -> Result<(At, u32), String> {
+    /// Answers where the op pushes its result (the root's handle).
+    pub(crate) fn family(&self, first: i32, anchors: &[At]) -> Result<At, String> {
         let a0 = *anchors.first().ok_or("family: no anchors")?;
         let b = self.body(a0)?;
         let alloc = self.alloc;
         let start = a0.op.checked_sub(4).ok_or("family: no room for its allocation")?;
-        let mut bind = Bind::default();
         let pat: Vec<(P, bool)> = vec![
             (P::Is(|o| matches!(o, Op::I32WrapI64)), false),
             (P::I32(4), false),
@@ -183,14 +183,12 @@ impl<'a> Ctx<'_, 'a> {
             (P::I32(first), false),
             (P::St(12), true),
             (P::Get('R'), false),
-            (P::Set('F'), false),
         ];
-        self.run(b, a0.func, start, &pat, anchors, &mut bind, "family")?;
+        self.run(b, At { func: a0.func, op: start }, &pat, anchors, "family")?;
         if !matches!(b.ops[start + 3], Op::Call { function_index } if function_index == alloc) {
             return Err(format!("family: instruction {} is not call $alloc", start + 3));
         }
-        let f = bind.local('F').ok_or("family: unbound")?;
-        Ok((At { func: a0.func, op: start + 9 }, f))
+        Ok(At { func: a0.func, op: start + 8 })
     }
 
     /// `e H`, anchored at the two loads and the abort's `end`. Answers
@@ -199,7 +197,6 @@ impl<'a> Ctx<'_, 'a> {
         let a0 = *anchors.first().ok_or("seal: no anchors")?;
         let b = self.body(a0)?;
         let start = a0.op.checked_sub(3).ok_or("seal: no room")?;
-        let mut bind = Bind::default();
         let mut pat: Vec<(P, bool)> = vec![
             (P::Get('F'), false),
             (P::Set('R'), false),
@@ -212,29 +209,29 @@ impl<'a> Ctx<'_, 'a> {
             (P::Is(|o| matches!(o, Op::I32Ne)), false),
         ];
         pat.extend(ABORT);
-        self.run(b, a0.func, start, &pat, anchors, &mut bind, "seal")?;
+        let bind = self.run(b, At { func: a0.func, op: start }, &pat, anchors, "seal")?;
         Ok((At { func: a0.func, op: start }, bind.local('F').ok_or("seal: unbound")?))
     }
 
     /// A family's seal: in the family's function, after it, at its control
-    /// depth with nothing in between leaving it, reading the local the
-    /// root was stored to, unwritten in between.
-    pub(crate) fn sealed(&self, fam: (At, u32), seals: &[(At, u32)]) -> Result<(), String> {
-        let (at, l) = fam;
-        let b = self.body(at)?;
-        let d0 = b.depth[at.op];
-        let ok = seals.iter().any(|&(s, sl)| {
-            s.func == at.func
-                && s.op > at.op
-                && sl == l
+    /// depth with nothing in between leaving it, reading a local whose last
+    /// write before the seal stored the family's result (the operand
+    /// provenance of decode.rs: the write pops the value the op pushed).
+    pub(crate) fn sealed(&self, fam: At, seals: &[(At, u32)]) -> Result<(), String> {
+        let b = self.body(fam)?;
+        let d0 = b.depth[fam.op];
+        let ok = seals.iter().any(|&(s, l)| {
+            let last = (fam.op + 1..s.op).rev().find(|&k| Self::writes(&b.ops[k], l));
+            s.func == fam.func
+                && s.op > fam.op
                 && b.depth[s.op] == d0
-                && self.stays(b, at.op, s.op, d0, "family").is_ok()
-                && !(at.op + 1..s.op).any(|k| Self::writes(&b.ops[k], l))
+                && self.stays(b, fam.op, s.op, d0, "family").is_ok()
+                && last.is_some_and(|k| b.args[k].first().copied().flatten() == Some(fam.op))
         });
         if ok {
             Ok(())
         } else {
-            Err(format!("family at {}:{}: no seal of local {l} after it in its block", at.func, at.op))
+            Err(format!("family at {}:{}: no seal of the local its root is stored to, after it in its block", fam.func, fam.op))
         }
     }
 
@@ -290,8 +287,7 @@ impl<'a> Ctx<'_, 'a> {
             pat.extend([(P::Get('B'), false), (P::I32(0), false), (P::St(12 + 4 * i), true)]);
         }
         pat.push((P::Get('B'), false));
-        let mut bind = Bind::default();
-        self.run(b, a0.func, start, &pat, anchors, &mut bind, "carve")?;
+        let bind = self.run(b, At { func: a0.func, op: start }, &pat, anchors, "carve")?;
         let len = bind.konst('L').ok_or("carve: no len")?;
         if len < 0 || i64::from(len) > 4 * n as i64 {
             return Err(format!("carve: len {len} outside its cap {}", 4 * n));
@@ -380,8 +376,7 @@ impl<'a> Ctx<'_, 'a> {
             (P::Is(|o| matches!(o, Op::End)), false),
             (P::Get('B'), true),
         ]);
-        let mut bind = Bind::default();
-        self.run(b, a0.func, start, &pat, anchors, &mut bind, "carve")?;
+        let bind = self.run(b, At { func: a0.func, op: start }, &pat, anchors, "carve")?;
         if bind.local('K') != Some(k) {
             return Err(format!("carve: the record names count local {k}, the loop counts {:?}", bind.local('K')));
         }
