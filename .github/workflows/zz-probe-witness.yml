@@ -1,0 +1,61 @@
+name: probe-witness (throwaway)
+on:
+  push:
+    branches: ['probe/blockers-1109-witness']
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: never
+jobs:
+  linear:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [fixed, negctl]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - if: matrix.variant == 'negctl'
+        run: python3 .github/wp/negctl.py && git diff --stat
+      - run: cargo test --release -p almide-wasm --test witness_paths_linear -- --nocapture 2>&1 | tail -30
+        shell: bash
+      - name: wall time of the issue's 1600-row wasm build
+        run: |
+          cargo build -q --release --bin almide
+          python3 - > /tmp/m.almd <<'PY'
+          n=1600
+          o=["type Row = { id: String, kind: String, pattern: String, ja: String, note: String }","","let ROWS: List[Row] = ["]
+          for i in range(n):
+              o.append(f'  Row {{ id: "R-{i}", kind: "k{i%7}", pattern: "pkg.*.op{i}", ja: "label {i}", note: "" }},')
+          o+=["]","","fn find(id: String) -> String = {",'  var out = ""',"  for r in ROWS {","    if r.id == id then {","      out = r.ja","    } else ()","  }","  out","}","","effect fn main() -> Unit = {",'  println(find("R-1"))',"}"]
+          print("\n".join(o))
+          PY
+          cd /tmp && for i in 1 2; do /usr/bin/time -f "%e s" $GITHUB_WORKSPACE/target/release/almide build m.almd --target wasm -o m$i.wasm; done
+  identity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [base, head]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: cp -r .github/wp /tmp/wp
+      - if: matrix.side == 'base'
+        run: git checkout -q 1b2357886
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - run: bash /tmp/wp/bundles.sh /tmp/out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundles-${{ matrix.side }}
+          path: /tmp/out
