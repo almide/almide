@@ -249,7 +249,7 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
         FloorParam::Elem(by_ref) => elem_arg(cx, *by_ref, code, got)?,
         FloorParam::Map(by_ref) => map_arg(cx, *by_ref, code, got, dying_here)?,
         FloorParam::MapKey(by_ref) | FloorParam::MapVal(by_ref) => map_entry_arg(cx, p, *by_ref, code, got, dying_here)?,
-        FloorParam::MapPairs => map_pairs_arg(cx, code, got)?,
+        FloorParam::MapPairs => map_pairs_arg(cx, code, got, dying_here)?,
         FloorParam::Value(by_ref) => value_arg(cx, *by_ref, code, got, dying_here)?,
         FloorParam::Runtime(t, by_ref) => {
             if !t.accepts(*got) { return Err(mismatch()); }
@@ -390,8 +390,10 @@ fn map_entry_arg(cx: &CallCx, p: &FloorParam, by_ref: bool, code: &str, got: &NT
     })
 }
 
-/// A `List[(K, V)]` param's argument.
-fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerError> {
+/// A `List[(K, V)]` param's argument. A list of generated pairs the caller
+/// does not read again (`dying`) gives its pairs up whole (#4623: env.vars'
+/// sorted entries into `map.from_list`) instead of copying each.
+fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy, dying: bool) -> Result<String, LowerError> {
     let mismatch = || wall(format!(
         "native: map pairs argument {got:?} (element {:?}, pair kinds {:?}) cannot serve {:?} in `{}`",
         got.rec().and_then(crate::render_native_rec::list_elem),
@@ -414,7 +416,10 @@ fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerErro
             else { format!("({pairs}).map(|(__key, __value)| ({key}, {value}))") });
     }
     let pair = crate::render_native_rec::list_elem(*i).ok_or_else(mismatch)?;
+    let moved = dying && matches!(got, NTy::Rec(_))
+        && matches!(pair, NTy::Rec(j) if crate::render_native_rec::field_count(j) == 2);
     let (a, b) = match pair {
+        NTy::Rec(_) if moved => ("t.f0".to_string(), "t.f1".to_string()),
         NTy::Vec | NTy::VecRef => ("t[0]".to_string(), "t[1]".to_string()),
         // A pair of Strings the slot typing read as a String list.
         NTy::VecStr | NTy::VecStrRef => ("t[0].clone()".to_string(), "t[1].clone()".to_string()),
@@ -425,7 +430,11 @@ fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerErro
     let b = if crate::native_value_repr::same_owned(want_v, got_v) { b } else { owned_arg(want_v, &b, got_v).ok_or_else(|| wall(format!(
         "native: map pair value cannot convert {got_v:?} to {want_v:?} in `{}`", cx.name
     )))? };
-    Ok(format!("{code}.iter().map(|t| ({a}, {b})).collect::<Vec<_>>()"))
+    Ok(if moved {
+        format!("{}.into_iter().map(|t| ({a}, {b})).collect::<Vec<_>>()", crate::render_native_move::take_expr(code))
+    } else {
+        format!("{code}.iter().map(|t| ({a}, {b})).collect::<Vec<_>>()")
+    })
 }
 
 /// A `Value` param's argument.
