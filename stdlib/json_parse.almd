@@ -91,7 +91,7 @@ fn __json_depth_error() -> String = "json: nesting deeper than 1000"
 @family_producer
 fn json_parse(text: String) -> Result[Value, String] = {
   let tl = prim.load32(prim.handle(text) + 4)
-  if tl > 100000000 then prim.die(prim.handle("Error: json parse: text too long\n")) else ()
+  if tl > 99999999 then prim.die(prim.handle("Error: json parse: text too long\n")) else ()
   let base = tl * 6 + 96
   let sc = prim.alloc_bytes(tl * 9 + 160)
   __jp_set_word(sc, 0, 0)
@@ -486,7 +486,8 @@ fn __jp_tok(t: String, p: Int) -> Int = {
 // The string whose opening quote should be at q: the scan answer
 // (__jp_str_scan's packing) or a refusal — the end of the text, a key that
 // is not a string (`json: unquoted key`), or one of the string's own. A run
-// of plain bytes is read here in one loop; an escape or a lead byte of
+// of plain bytes is read here in one loop (a 256-byte class table, `#` for a
+// byte that ends the run); an escape or a lead byte of
 // U+F000 and up goes to __jp_str_scan.
 fn __jp_strend(t: String, sc: Bytes, q: Int, add: Int) -> Int = {
   let n = prim.load32(prim.handle(t) + 4)
@@ -501,7 +502,7 @@ fn __jp_strend(t: String, sc: Bytes, q: Int, add: Int) -> Int = {
         e = n
       } else {
         let c = prim.load8(prim.handle(t) + 12 + e)
-        if prim.load8(prim.handle("1111111111111111111111111111111100100000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000011111111111111111") + 12 + c) == 49 then {
+        if prim.load8(prim.handle("################################--#---------------------------------------------------------#--------------------------------------------------------------------------------------------------------------------------------------------------#################") + 12 + c) == 35 then {
           at = e
           e = n
         } else {
