@@ -463,6 +463,7 @@ jobs:
       - name: Controls accepted, poisons rejected (almide-verify bounds)
         run: |
           set -uo pipefail
+          set +e
           cp -r .github/probe /tmp/probe
           git worktree add /tmp/src "$HEAD_REF"
           (cd /tmp/src && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build -q --release -p almide-verify)
