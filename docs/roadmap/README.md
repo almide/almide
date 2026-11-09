@@ -7,7 +7,7 @@
 
 ## Active
 
-99 items
+100 items
 
 | Item | Description |
 |------|-------------|
@@ -52,6 +52,7 @@
 | [StringInterp is NOT special syntax — desugar it to `concat + to_string(part)`](active/interp-is-desugar-to-tostring.md) | Historical interpolation desugaring decision and its scoped correctness rationale |
 | [Open-issue inventory, 2026-09-21 — 78 issues under one header](active/issue-inventory-2026-09-21.md) |  |
 | [Issue Ledger Burn-down — 完全性キャンペーンの残量計](active/issue-ledger-burndown.md) | The issue-ledger burn-down gauge: keeping the open-issue count an honest measure of remaining work |
+| [JSON substrate (ADR-0033) — phased plan](active/json-substrate.md) | ADR-0033 implementation plan: JSON documents as certified allocation families, two-pass parse, SWAR/simd128 scanning, fused constructors, exact-size writer, then native and one shared source, with gates, negative controls and targets per phase |
 | [#1437: the lifted carrier's ABI — declaration-driven, one readable layout](active/lifted-carrier-abi.md) | #1437: one declaration-driven carrier layout instead of producer drift |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [Logical-Time Async — the async grammar design](active/logical-time-async.md) | The async grammar: fuel as the logical clock, deterministic race, oracle tier |
