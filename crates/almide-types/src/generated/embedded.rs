@@ -6739,13 +6739,7 @@ else {
   let ed = __fp_lg(d)
 
   let s = 58 - (__fp_lg(w) - ed)
-  let qs = if s >= 0 then __fp_ldiv(w / d, w % d, d, s, 61 - ed)
-  else {
-    let q0 = w / d
-    let lost = prim.band(q0, prim.bshl(1, 0 - s) - 1)
-    let sticky = if w % d != 0 or lost != 0 then 1 else 0
-    prim.bshr_u(q0, 0 - s) * 2 + sticky
-  }
+  let qs = __fp_ldiv(w / d, w % d, d, s, 61 - ed)
   let q = prim.bshr_u(qs, 1)
   let sh = __fp_bl(q, 54) - 54
   let m54 = prim.bshr_u(q, sh)
@@ -7077,7 +7071,7 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
 
       let v = if neg then -1.0 * scaled else scaled
       ok(v)
-    } else if icnt + fcnt <= 18 and net <= 0 and net >= 0 - 22 then {
+    } else if icnt + fcnt <= 18 and net < 0 and net >= 0 - 22 then {
 
       ok(__fp_div(__fp_acc(f_start, f_end, __fp_acc(p0, i_end, 0)), 0 - net, neg))
     } else {

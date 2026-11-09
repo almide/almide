@@ -4,7 +4,7 @@
 // v0 is `s.trim().parse::<f64>()`. FULL IEEE-754 correctly-rounded strtod, two-tier like Rust:
 //  - FAST PATH: <= 15 digits and |net-exp| <= 22 — the mantissa is exact in f64 and 10^k is an
 //    exact f64, so one multiply/divide is correctly rounded (Clinger's safe region).
-//  - EXACT DIVISION PATH: <= 18 digits over 10^0..10^22 — integer long division (__fp_div).
+//  - EXACT DIVISION PATH: <= 18 digits over 10^1..10^22 — integer long division (__fp_div).
 //  - SLOW PATH: everything else goes through an 800-digit HIGH-PRECISION DECIMAL (the
 //    Simple Decimal Conversion of go's strconv / Nigel Tao): the digit array is shifted by
 //    up to 59 bits right / 26 bits left per pass into [0.1, 1) × 2^e, the 0..3 doublings into
@@ -68,7 +68,7 @@ fn __fp_pow10(k: Int) -> Float = {
 }
 
 // ── Exact division path ─────────────────────────────────────────────────────
-// w / 10^n for 0 < w < 10^18 and 0 <= n <= 22, correctly rounded with integer
+// w / 10^n for 0 < w < 10^18 and 1 <= n <= 22, correctly rounded with integer
 // arithmetic only: w / 10^n = (w / 5^n) * 2^-n, 5^n < 2^52 is exact, and the
 // quotient w * 2^s / 5^n is long-divided k bits per step to 55..61 significant
 // bits plus a sticky remainder bit, then rounded half-even to 53. No table and
@@ -98,15 +98,9 @@ fn __fp_div(w: Int, n: Int, neg: Bool) -> Float = if w == 0 then (if neg then -1
 else {
   let d = __fp_pow5(n, 1)
   let ed = __fp_lg(d)
-  // s puts floor(log2(w * 2^s / d)) in 56..60.
+  // s puts floor(log2(w * 2^s / d)) in 56..60; s >= 1 as w < 2^60 and d >= 5.
   let s = 58 - (__fp_lg(w) - ed)
-  let qs = if s >= 0 then __fp_ldiv(w / d, w % d, d, s, 61 - ed)
-  else {
-    let q0 = w / d
-    let lost = prim.band(q0, prim.bshl(1, 0 - s) - 1)
-    let sticky = if w % d != 0 or lost != 0 then 1 else 0
-    prim.bshr_u(q0, 0 - s) * 2 + sticky
-  }
+  let qs = __fp_ldiv(w / d, w % d, d, s, 61 - ed)
   let q = prim.bshr_u(qs, 1)
   let sh = __fp_bl(q, 54) - 54
   let m54 = prim.bshr_u(q, sh)
@@ -438,8 +432,8 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
       // ("-0.0" parsed sign-less, #663). Multiply by -1.0 instead: -1.0 * 0.0 = -0.0.
       let v = if neg then -1.0 * scaled else scaled
       ok(v)
-    } else if icnt + fcnt <= 18 and net <= 0 and net >= 0 - 22 then {
-      // EXACT DIVISION PATH: up to 18 digits over 10^0..10^22 (the coordinate shape).
+    } else if icnt + fcnt <= 18 and net < 0 and net >= 0 - 22 then {
+      // EXACT DIVISION PATH: up to 18 digits over 10^1..10^22 (the coordinate shape).
       ok(__fp_div(__fp_acc(f_start, f_end, __fp_acc(p0, i_end, 0)), 0 - net, neg))
     } else {
       // Only the slow path can overflow (the fast path tops out near 1e37).
