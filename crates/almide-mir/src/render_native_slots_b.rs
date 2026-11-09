@@ -172,8 +172,10 @@ pub(super) fn movable_loads(
 /// it before anything after it runs.
 /// #4621: the earlier reads of a slot are over by the read at `i` — nothing
 /// at or after `i` reads them or anything that can borrow from them (an
-/// address, a value loaded through one, a copy), and no op reading them is
-/// written later than its place. The read at `i` is then the first live one:
+/// address, a value loaded through one, a copy), nor the op that writes the
+/// text of one reading them later than its place (a chain step's final, a
+/// printed scalar's print: each reads its result). The read at `i` is then
+/// the first live one:
 /// a borrow made before it (`list.len(r.f)` in an `if` condition) no longer
 /// pins the slot, and the read can move the value out.
 fn deferred_ops(func: &MirFunction) -> BTreeSet<usize> {
@@ -200,10 +202,13 @@ fn earlier_reads_dead(func: &MirFunction, deferred: &BTreeSet<usize>, i: usize, 
         if !vs.iter().any(|v| derived.contains(v)) {
             continue;
         }
-        if j >= i || deferred.contains(&j) {
+        if j >= i {
             return false;
         }
-        if matches!(op, Op::Prim { .. } | Op::IntBinOp { .. } | Op::Dup { .. } | Op::SetLocal { .. }) {
+        // A deferred op's text is written at an op that reads its result (a
+        // chain step at its final or print, a printed scalar at its print):
+        // following its result checks that op's place too.
+        if deferred.contains(&j) || matches!(op, Op::Prim { .. } | Op::IntBinOp { .. } | Op::Dup { .. } | Op::SetLocal { .. }) {
             derived.extend(vs.iter().copied());
         }
     }
