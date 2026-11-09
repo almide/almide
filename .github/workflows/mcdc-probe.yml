@@ -1,84 +1,135 @@
-# ONE-SHOT MC/DC measurement on a PRE-REMOVAL nightly (als #51, almide #566).
-# rustc's MC/DC instrumentation was removed upstream in Aug 2025
-# (rust-lang/rust#144999); nightlies before that still carry
-# `-Z coverage-options=mcdc`, and their llvm-cov reports MC/DC columns. This
-# workflow is workflow_dispatch-only and gates NOTHING: it exists to
-# CALIBRATE the per-decision vector ledger (proofs/mcdc-ledger.toml) against
-# a real MC/DC measurement — a `vectors` site the old instrumentation calls
-# uncovered is a ledger bug — and to seed the acceptance test for the
-# GNATcoverage / GNATPro-for-Rust evaluation (als #51). Not evidence to pin:
-# the flag is dead upstream and its implementation was called incomplete.
+# PROBE BRANCH ONLY (#4005 A4 witness mutation lab): replaces the mcdc probe
+# on probe/a4-mut so a dispatch runs it. Gates nothing.
 name: mcdc-probe
 on:
   workflow_dispatch:
-    inputs:
-      toolchain:
-        description: "pre-removal dated nightly"
-        required: false
-        default: "nightly-2025-06-01"
-      ref:
-        description: "tree to measure — must predate the wasmtime-47 embed (21b9ede16 raised the workspace MSRV to 1.94, past the last MC/DC rustc)"
-        required: false
-        default: "7877b03a6b3767f033527c76f6ed927e25e11c67"
-# #4094: the same read-only token the repository default gives, stated here so a
-# settings change cannot widen it. A job that needs more declares it itself.
 permissions: read-all
+env:
+  # The CI slice (owner decision 2026-10-25; scripts/lib/ci-slice.sh,
+  # crates/almide-corpus/src/ci_slice.rs): a PR or merge group whose base is
+  # not main judges a commit-rotated 1-in-8 slice of every corpus gate plus
+  # the fixtures the change touches; everything else — pushes to develop and
+  # main, tags, schedules, manual runs, PRs into main — runs the full corpus.
+  # Whole-corpus staleness / completeness checks run only on a full run, and a
+  # slice never rewrites a ledger. Job names do not change with it.
+  ALMIDE_CI_SLICE: ${{ ((github.event_name == 'pull_request' && github.base_ref != 'main') || (github.event_name == 'merge_group' && github.event.merge_group.base_ref != 'refs/heads/main')) && '8' || '1' }}
+  ALMIDE_CI_SEED: ${{ github.sha }}
+  ALMIDE_CI_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
+  # Bump this suffix to force a clean rebuild of the opam (Rocq) cache.
+  OPAM_CACHE_VERSION: v1
+  OCAML_VERSION: "5.4.1"
+  # The rocq-core release CI proves on. It is in the cache key, so moving it
+  # rebuilds the toolchain instead of restoring an older one.
+  ROCQ_CORE_VERSION: "9.3.0"
+  # The opam-repository commit every package (OCaml, Rocq and their
+  # dependencies) resolves from. Its opam files carry each source archive's
+  # checksum, so pinning the commit pins every digest opam checks; the
+  # repository's moving head did not (security row 16). In the cache key.
+  OPAM_REPO_SHA: a04b045f1534714416da6b4f8e8e67d2defbb750
 
 jobs:
-  mcdc-probe:
-    name: MC/DC one-shot on ${{ inputs.toolchain || 'nightly-2025-06-01' }}
+  mutlab:
+    name: A4 kernel probe
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.ref || '7877b03a6b3767f033527c76f6ed927e25e11c67' }}
       - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      # ── Rust toolchain + cargo cache (almide-mir pulls in the frontend) ──
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: ${{ inputs.toolchain || 'nightly-2025-06-01' }}
-          components: llvm-tools-preview
-      - name: Probe — this pin accepts -Z coverage-options=mcdc
-        run: |
-          set -euo pipefail
-          d="$(mktemp -d)"
-          printf 'fn d(a: bool, b: bool, c: bool) -> bool { (a && b) || c }\nfn main() { let v: Vec<bool> = std::env::args().skip(1).map(|s| s == "1").collect(); println!("{}", d(*v.get(0).unwrap_or(&false), *v.get(1).unwrap_or(&false), *v.get(2).unwrap_or(&false))); }\n' > "$d/m.rs"
-          rustc -C instrument-coverage -Z coverage-options=mcdc "$d/m.rs" -o "$d/m"
-          LLVM_PROFILE_FILE="$d/a.profraw" "$d/m" 1 1 0 > /dev/null
-          LLVM_PROFILE_FILE="$d/b.profraw" "$d/m" 0 1 0 > /dev/null
-          LB="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin"
-          "$LB/llvm-profdata" merge -sparse "$d"/*.profraw -o "$d/all.profdata"
-          "$LB/llvm-cov" report "$d/m" -instr-profile="$d/all.profdata" --show-mcdc-summary
-          echo "mcdc instrumentation OK on $(rustc --version)"
-      - name: Instrumented build and test run (almide-mir + almide-codegen)
-        run: |
-          set -euo pipefail
-          export RUSTFLAGS="-C instrument-coverage -Z coverage-options=mcdc"
-          COV="$PWD/target/mcdc"
-          mkdir -p "$COV/build"
-          LLVM_PROFILE_FILE="$COV/build/b-%m-%p.profraw" cargo test -p almide-mir -p almide-codegen --release --no-run --target-dir "$COV/t" 2>&1 | tail -2
-          TESTBINS="$(find "$COV/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.so' | grep -E '/(almide_mir|almide_codegen|integration|lower|render|mcdc)[^/]*$')"
-          i=0
-          for tb in $TESTBINS; do i=$((i+1)); LLVM_PROFILE_FILE="$COV/run-$i-%m.profraw" "$tb" >/dev/null 2>&1 || true; done
-          echo "test binaries run: $i"
-      - name: MC/DC report for the safety set
-        run: |
-          set -euo pipefail
-          COV="$PWD/target/mcdc"
-          LB="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin"
-          "$LB/llvm-profdata" merge -sparse "$COV"/run-*.profraw -o "$COV/all.profdata"
-          OBJS=""
-          for tb in $(find "$COV/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.so' | grep -E '/(almide_mir|almide_codegen|integration|lower|render|mcdc)[^/]*$'); do OBJS="$OBJS -object $tb"; done
-          "$LB/llvm-cov" report $OBJS -instr-profile="$COV/all.profdata" --show-mcdc-summary \
-            -ignore-filename-regex='(\.cargo|rustc|/tests?/|tests_part|examples/)' > mcdc-report.txt
-          echo "== safety-set rows (…, MC/DC columns at the tail) =="
-          { head -2 mcdc-report.txt; grep -E 'perceus_verified|mir/src/certificate|check/calls\.rs|infer_calls_closures|pass_effect_inference|^TOTAL' mcdc-report.txt; } | tee mcdc-safety.txt
-          "$LB/llvm-cov" show $OBJS -instr-profile="$COV/all.profdata" --show-mcdc \
-            crates/almide-codegen/src/perceus_verified.rs > mcdc-perceus-detail.txt || true
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          toolchain: "1.97.0"  # the workspace lock needs >= 1.97 (wasmtime 50)
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          name: mcdc-probe-report
-          path: |
-            mcdc-report.txt
-            mcdc-safety.txt
-            mcdc-perceus-detail.txt
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          workspaces: "."
+          # Key the cache to this job so it doesn't collide with the main CI.
+          prefix-key: "trust-spine"
+
+      # ── opam root (OCaml + Rocq) cache — built ONCE, restored thereafter ──
+      # Self-managed opam (not ocaml/setup-ocaml) so a single actions/cache owns
+      # ~/.opam end-to-end with a stable key.
+      # Restore now; SAVE only at the end on success (below) so a half-built or
+      # broken opam root is never cached.
+      - name: Restore opam root (OCaml + Rocq)
+        id: opam-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
+
+      - name: Install opam + wabt (wat2wasm for the A2 byte-binding grounding)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends opam wabt
+
+      # check-wasm-exec.sh — the run_g ↔ real-engine differential TRUSTED_BASE
+      # cites as closing a residual — needs a real wasm engine. It skip-exit-0'd
+      # when wasmtime was absent, and this workflow never installed it, so the
+      # check had NEVER run in CI (#921); both wasm gate scripts now hard-fail
+      # under CI=true when their tool is missing, and this step is what makes
+      # that requirement satisfiable. Pinned + cached + retried exactly like
+      # ci.yml's install (the 429-storm lesson).
+      - name: Cache wasmtime tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Build opam switch + Rocq (cache miss only)
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        run: |
+          opam init --bare --disable-sandboxing -y default "git+https://github.com/ocaml/opam-repository.git#${OPAM_REPO_SHA}"
+          opam switch create "${OCAML_VERSION}" -y
+          eval "$(opam env)"
+          # opam's published rocq-prover has no 9.1.1 (the local trusted base is a
+          # source build); CI re-derives on the pinned ROCQ_CORE_VERSION. It is
+          # pinned because 9.x minors can break the spine: 9.3 reserved `is`, and
+          # an unpinned cold cache picked it up mid-release (#3368). The canonical
+          # trusted base stays 9.1.1 (TRUSTED_BASE.md).
+          opam install -y "rocq-prover>=9.0.0" "rocq-core=${ROCQ_CORE_VERSION}"
+
+      # coqc/coqchk are what proofs/*.sh invoke. Rocq 9 may expose the prover as
+      # `rocq compile` / `rocq check`; install guarded shims iff the classic
+      # binaries are absent, so the scripts work either way.
+      - name: Ensure coqc / coqchk on PATH
+        run: |
+          eval "$(opam env)"
+          BIN="$HOME/.local/bin"; mkdir -p "$BIN"
+          if ! command -v coqc >/dev/null 2>&1; then
+            printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"
+            echo "installed coqc shim → rocq compile"
+          fi
+          if ! command -v coqchk >/dev/null 2>&1; then
+            printf '#!/bin/sh\nexec rocq check "$@"\n' > "$BIN/coqchk"; chmod +x "$BIN/coqchk"
+            echo "installed coqchk shim → rocq check"
+          fi
+          echo "$BIN" >> "$GITHUB_PATH"
+
+      - name: Toolchain diagnostic
+        run: |
+          eval "$(opam env)"
+          echo "rocq:     $(command -v rocq || echo MISSING)"
+          echo "coqc:     $(command -v coqc || echo MISSING)"
+          echo "coqchk:   $(command -v coqchk || echo MISSING)"
+          echo "ocamlopt: $(command -v ocamlopt || echo MISSING)"
+          coqc --version || true
+          coqchk --version || true
+          ocamlopt --version || true
+          cargo --version
+
+      - name: kernel probe
+        run: |
+          eval "$(opam env)"
+          cargo build -q --bin almide && cargo build -q -p almide-wasm --example emit_structural_bundle && cargo build -q --release -p almide-lin-prove
+          (cd proofs && ./build-checker.sh > /dev/null)
+          python3 scripts/kprobe.py
