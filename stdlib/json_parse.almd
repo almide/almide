@@ -78,7 +78,7 @@ fn __json_depth_error() -> String = "json: nesting deeper than 1000"
 // from the parser's plain fns, which the certificate does not cover.
 //
 // ── the scratch block ──
-// [0] i64 family bytes (pass 1) / carve cursor (pass 2)
+// [0] i64 family bytes (pass 1)
 // [8] i64 the tape's end, a byte offset
 // [16] i64 key-span stack top, a byte offset (pass 1)
 // [24] i64 handle stack top, a byte offset (pass 2)
@@ -106,11 +106,10 @@ fn json_parse(text: String) -> Result[Value, String] = {
     let total = __jp_word(sc, 0)
     if total < 0 then prim.die(prim.handle("Error: json parse: the passes disagree\n")) else ()
     if total > 2147483647 then prim.die(prim.handle("Error: json parse: the document is too large\n")) else ()
-    let fam = prim.alloc_bytes(total)
-    __jp_set_word(sc, 0, 0)
+    let fam = prim.family(total)
     __jp_build(text, tl, fam, sc)
     // The passes must agree: every byte carved, one handle left.
-    if __jp_word(sc, 0) != total then __jp_disagree() else ()
+    prim.family_seal(fam)
     if __jp_word(sc, 24) != base + 4 then __jp_disagree() else ()
     ok(__jp_top(sc, base))
   }
@@ -1098,12 +1097,13 @@ else {
 }
 
 // ══ PASS 2: carve the family ══
-// The family root is the flat block `fam`; scratch word [0] is the carve
-// cursor, [24] the handle stack top. Every carve has one shape: the room
-// test `cursor + size <= len(fam)` (a defined abort when it fails — pass 2
-// never trusts pass 1's arithmetic), then the interior header at
-// `base = fam + 12 + cursor` — rc `0x8000_0000 | (base - fam)`, len, cap —
-// and the payload at base + 12, all inside [cursor, cursor + size).
+// The family root comes from `prim.family(total)` and every block of it from
+// `prim.carve(fam, len)` — the emitter's one carve shape (room test, interior
+// rc word, len, cap, zeroed payload; ADR-0033 D7), answering the block's
+// base address. These fns fill payloads only, at family offsets
+// `o = block - root` (the payload starts at root + 12 + o), and
+// `prim.family_seal(fam)` dies unless pass 2 carved exactly what pass 1
+// counted. Scratch word [24] is the handle stack top.
 
 // Push handle x on the scratch stack (word [24] is its top, a byte offset).
 fn __jp_push_at(sc: Bytes, x: Int) -> Unit = {
@@ -1123,66 +1123,32 @@ fn __jp_push_at(sc: Bytes, x: Int) -> Unit = {
 // The String of tape entry `w` (a string or a key: its opening quote, its
 // decoded length, whether it has an escape), carved; answers its handle.
 fn __jp_str2(t: String, fam: Bytes, sc: Bytes, w: Int) -> Int = {
-  let fl = prim.load32(prim.handle(fam) + 4)
-  let sn = prim.load32(prim.handle(sc) + 4)
   let n = prim.band(prim.bshr(w, 5), 134217727)
   let q = prim.bshr(w, 32)
-  let cap = __jp_cap(n)
-  if sn < 64 then {
-    __jp_disagree()
-    0
-  } else {
-    let cur = prim.load64(prim.handle(sc) + 12)
-    if cur < 0 then {
-      __jp_disagree()
-      0
-    } else if cap < 4 then {
-      __jp_disagree()
-      0
-    } else if cap > fl then {
-      __jp_disagree()
-      0
-    } else if cur > fl - 12 - cap then {
-      __jp_disagree()
-      0
-    } else {
-      let b = prim.handle(fam) + 12 + cur
-      prim.store32(b, cur + 2147483660)
-      prim.store32(b + 4, n)
-      prim.store32(b + 8, cap)
-      if prim.band(w, 16) == 0 then __jp_copy_tf(t, q + 1, fam, cur + 12, n)
-      else if __jp_str_fill(t, q + 1, fam, cur + 12, cur + 12 + n) != cur + 12 + n then __jp_disagree()
-      else ()
-      prim.store64(prim.handle(sc) + 12, cur + 12 + cap)
-      b
-    }
-  }
+  let b = prim.carve(fam, n)
+  let o = b - prim.handle(fam)
+  if prim.band(w, 16) == 0 then __jp_copy_tf(t, q + 1, fam, o, n)
+  else if __jp_str_fill(t, q + 1, fam, o, o + n) != o + n then __jp_disagree()
+  else ()
+  b
 }
 
 // A Value box with `tag` and the 8-byte payload `x`, carved and pushed.
 fn __jp_box(fam: Bytes, sc: Bytes, tag: Int, x: Int) -> Unit = {
+  let b = prim.carve(fam, 16)
+  __jp_box_fill(fam, b - prim.handle(fam), tag, x)
+  __jp_push_at(sc, b)
+}
+
+// A carved Value box's payload at family offset o: `tag` and the 8-byte
+// payload `x` (the key word the carve zeroed stays 0).
+fn __jp_box_fill(fam: Bytes, o: Int, tag: Int, x: Int) -> Unit = {
   let fl = prim.load32(prim.handle(fam) + 4)
-  let sn = prim.load32(prim.handle(sc) + 4)
-  if sn < 64 then __jp_disagree()
+  if o < 0 then __jp_disagree()
+  else if o > fl - 16 then __jp_disagree()
   else {
-    let cur = prim.load64(prim.handle(sc) + 12)
-    let top = prim.load64(prim.handle(sc) + 36)
-    if cur < 0 then __jp_disagree()
-    else if cur > fl - 28 then __jp_disagree()
-    else if top < 32 then __jp_disagree()
-    else if top > sn - 4 then __jp_disagree()
-    else {
-      let b = prim.handle(fam) + 12 + cur
-      prim.store32(b, cur + 2147483660)
-      prim.store32(b + 4, 16)
-      prim.store32(b + 8, 16)
-      prim.store32(b + 12, tag)
-      prim.store32(b + 16, 0)
-      prim.store64(b + 20, x)
-      prim.store64(prim.handle(sc) + 12, cur + 28)
-      prim.store32(prim.handle(sc) + 12 + top, b)
-      prim.store64(prim.handle(sc) + 36, top + 4)
-    }
+    prim.store32(prim.handle(fam) + 12 + o, tag)
+    prim.store64(prim.handle(fam) + 20 + o, x)
   }
 }
 
@@ -1205,7 +1171,7 @@ fn __jp_pairs(fam: Bytes, sc: Bytes, k: Int) -> Unit = {
       while i < k {
         let a = from + i * 8
         let d = from + i * 4
-        let cur = prim.load64(prim.handle(sc) + 12)
+        let o = prim.carve(fam, 8) - prim.handle(fam)
         if i < 0 then {
           prim.die(prim.handle("Error: json parse: the passes disagree\n"))
           i = k
@@ -1221,21 +1187,16 @@ fn __jp_pairs(fam: Bytes, sc: Bytes, k: Int) -> Unit = {
         } else if d > sn - 4 then {
           prim.die(prim.handle("Error: json parse: the passes disagree\n"))
           i = k
-        } else if cur < 0 then {
+        } else if o < 0 then {
           prim.die(prim.handle("Error: json parse: the passes disagree\n"))
           i = k
-        } else if cur > fl - 20 then {
+        } else if o > fl - 8 then {
           prim.die(prim.handle("Error: json parse: the passes disagree\n"))
           i = k
         } else {
-          let b = prim.handle(fam) + 12 + cur
-          prim.store32(b, cur + 2147483660)
-          prim.store32(b + 4, 8)
-          prim.store32(b + 8, 8)
-          prim.store32(b + 12, prim.load32(prim.handle(sc) + 12 + a))
-          prim.store32(b + 16, prim.load32(prim.handle(sc) + 16 + a))
-          prim.store32(prim.handle(sc) + 12 + d, b)
-          prim.store64(prim.handle(sc) + 12, cur + 20)
+          prim.store32(prim.handle(fam) + 12 + o, prim.load32(prim.handle(sc) + 12 + a))
+          prim.store32(prim.handle(fam) + 16 + o, prim.load32(prim.handle(sc) + 16 + a))
+          prim.store32(prim.handle(sc) + 12 + d, prim.handle(fam) + o)
           i = i + 1
         }
       }
@@ -1309,28 +1270,15 @@ fn __jp_number2(t: String, tl: Int, w: Int) -> Int = {
 // The list block of the stack's top k handles (popped, in stack order) and
 // the Value box (`tag`) holding it, carved; the box pushed.
 fn __jp_list(fam: Bytes, sc: Bytes, k: Int, tag: Int) -> Unit = {
-  let fl = prim.load32(prim.handle(fam) + 4)
   let sn = prim.load32(prim.handle(sc) + 4)
-  let cap = __jp_cap(k * 4)
   if sn < 64 then __jp_disagree()
+  else if k < 0 then __jp_disagree()
   else {
-    let cur = prim.load64(prim.handle(sc) + 12)
     let top = prim.load64(prim.handle(sc) + 36)
-    if k < 0 then __jp_disagree()
-    else if cur < 0 then __jp_disagree()
-    else if cap < 4 then __jp_disagree()
-    else if cap > fl then __jp_disagree()
-    else if cur > fl - 40 - cap then __jp_disagree()
-    else {
-      let b = prim.handle(fam) + 12 + cur
-      prim.store32(b, cur + 2147483660)
-      prim.store32(b + 4, k * 4)
-      prim.store32(b + 8, cap)
-      __jp_copy_sf(sc, top - k * 4, fam, cur + 12, k * 4)
-      prim.store64(prim.handle(sc) + 36, top - k * 4)
-      prim.store64(prim.handle(sc) + 12, cur + 12 + cap)
-      __jp_box(fam, sc, tag, b)
-    }
+    let b = prim.carve(fam, k * 4)
+    __jp_copy_sf(sc, top - k * 4, fam, b - prim.handle(fam), k * 4)
+    prim.store64(prim.handle(sc) + 36, top - k * 4)
+    __jp_box(fam, sc, tag, b)
   }
 }
 
