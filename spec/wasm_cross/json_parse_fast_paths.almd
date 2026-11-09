@@ -80,6 +80,7 @@ effect fn main() -> Unit = {
     println(s(t))
   }
   // Nesting mixes arrays and objects down to the bound.
-  println(string.len(s(string.repeat('{"a":[', 500) + "1" + string.repeat("]}", 500))))
+  let deepest = s(string.repeat('{"a":[', 500) + "1" + string.repeat("]}", 500))
+  println("${string.len(deepest)} ${string.take(deepest, 12)}")
   println(s(string.repeat('{"a":[', 501) + "1" + string.repeat("]}", 501)))
 }
