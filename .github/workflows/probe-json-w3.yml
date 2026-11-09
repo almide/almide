@@ -9,7 +9,7 @@ env:
   RUST_TOOLCHAIN: "1.97.0"
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
-  HEAD_REF: origin/json-substrate-w3-parser
+  HEAD_REF: origin/json-substrate-w3-routed
   BASE_REF: c9ad9ea2f
   ROUNDS: "13"
 jobs:
@@ -53,6 +53,11 @@ jobs:
       - name: Stdlib inspection ledger (which stamps the change voids)
         run: |
           cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test stdlib_inspection_test -- --nocapture 2>&1 | tail -40 | tee /tmp/quick/inspection.txt || true
+      - name: JSON ratchet (fuel and allocations per phase)
+        run: |
+          cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test json_ratchet 2>&1 | tail -25 || true
+          cd /tmp/src-head && ALMIDE_UPDATE_JSON_RATCHET=1 CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release -p almide-wasm --test json_ratchet 2>&1 | tail -3 || true
+          cd /tmp/src-head && git diff crates/almide-wasm/tests/golden/json-ratchet.txt | tee /tmp/quick/json-ratchet.diff || true
       - name: Interp oracle and json tests (third vote)
         run: |
           cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --no-fail-fast --test wasm_runtime_interp_oracle --test json_depth_limit_test --test wasm_runtime_cross_target 2>&1 | tee /tmp/quick/oracle.txt | grep -E "^test result|FAILED|panicked|json|abstain" | head -120 || true
