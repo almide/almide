@@ -120,6 +120,19 @@ impl<'a> Interpreter<'a> {
     /// [`Self::bridge_fallback`] that hands `why` back (`Err`) when the
     /// bridge does not serve the name, so a later tier can still answer.
     fn try_bridge(&mut self, module: Sym, func: Sym, args: &[Value], why: String) -> Result<Flow, String> {
+        // `json.parse` needs the block heap to answer (its document is
+        // materialized there), which the static table below cannot reach:
+        // the interp's own parser, `dispatch_json.rs`, recorded the same way.
+        if module.as_str() == "json" && func.as_str() == "parse" {
+            return match self.json_parse_answer(args) {
+                Some(Flow::Unsupported(w)) => Err(w),
+                Some(answered) => {
+                    self.bridge_fallbacks.borrow_mut().push(("json.parse".to_string(), why));
+                    Ok(answered)
+                }
+                None => Err(why),
+            };
+        }
         match crate::bridge::dispatch(module.as_str(), func.as_str(), args) {
             Some(result) => {
                 // The `prim.*` scalar floor is the spec's own vocabulary (the

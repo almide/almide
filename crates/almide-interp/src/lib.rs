@@ -26,6 +26,7 @@ mod eval;
 mod f32_display;
 mod hofs;
 mod inplace;
+mod json_text;
 mod stdlib_pool;
 mod surface;
 mod surface_regex;
