@@ -78,7 +78,7 @@ effect fn main() -> Unit = {
   // Siblings share their keys: the same keys, reordered, escaped, missing,
   // extra, nested, and a repeat that a shared key must not hide.
   println(s('[{"id":1,"m":{"s":1,"t":2}},{"id":2,"m":{"s":3,"t":4}},{"m":{"t":5,"s":6},"id":3}]'))
-  println(s('[{"a":1,"b":2},{"\u0061":3,"b":4},{"b":5},{"a":6,"b":7,"c":8},[],{"a":9}]'))
+  println(s('[{"a":1,"b":2},{"\\u0061":3,"b":4},{"b":5},{"a":6,"b":7,"c":8},[],{"a":9}]'))
   println(s('[{"k":{"x":1}},{"k":[1]},{"k":{"x":2,"y":{"z":3}}},{"k":{"x":4,"y":{"z":5}}}]'))
   println(s('[{"a":1},{"a":1,"a":2}]'))
   println(s('[{"a":{"b":1}},{"a":{"b":1,"b":2}}]'))
