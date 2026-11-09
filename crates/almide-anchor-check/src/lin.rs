@@ -238,10 +238,30 @@ impl<'a> Module<'a> {
 /// The anchor file's `selfhost` line: position -> heap params (param ->
 /// optional stride).
 pub fn selfhost_params(anchors: &str) -> BTreeMap<usize, BTreeMap<u32, Option<i128>>> {
-    let line = anchors
+    heap_params_of(anchors, "selfhost")
+}
+
+/// The anchor file's `routines` line (#4005 A4, the producer's
+/// witness_routines.rs): each shipped runtime routine's declared heap
+/// parameters, per position, in the `selfhost` line's syntax.
+pub fn routine_params(anchors: &str) -> BTreeMap<usize, BTreeMap<u32, Option<i128>>> {
+    heap_params_of(anchors, "routines")
+}
+
+/// The anchor file's `routines` labels, per position (reports only).
+pub fn routine_names(anchors: &str) -> BTreeMap<usize, String> {
+    names_of(anchors, "routines")
+}
+
+fn line_of<'t>(anchors: &'t str, key: &str) -> &'t str {
+    anchors
         .lines()
-        .find_map(|l| if l == "selfhost" { Some("") } else { l.strip_prefix("selfhost ") })
-        .unwrap_or("");
+        .find_map(|l| if l == key { Some("") } else { l.strip_prefix(key).and_then(|r| r.strip_prefix(' ')) })
+        .unwrap_or("")
+}
+
+fn heap_params_of(anchors: &str, key: &str) -> BTreeMap<usize, BTreeMap<u32, Option<i128>>> {
+    let line = line_of(anchors, key);
     let mut out = BTreeMap::new();
     for t in line.split_whitespace() {
         let Some((p, rest)) = t.split_once(':') else { continue };
@@ -272,8 +292,12 @@ pub fn selfhost_params(anchors: &str) -> BTreeMap<usize, BTreeMap<u32, Option<i1
 
 /// The anchor file's `selfhost` names, per position (reports only).
 pub fn selfhost_names(anchors: &str) -> BTreeMap<usize, String> {
-    let line = anchors.lines().find_map(|l| l.strip_prefix("selfhost ")).unwrap_or("");
-    line.split_whitespace()
+    names_of(anchors, "selfhost")
+}
+
+fn names_of(anchors: &str, key: &str) -> BTreeMap<usize, String> {
+    line_of(anchors, key)
+        .split_whitespace()
         .filter_map(|t| {
             let mut it = t.splitn(3, ':');
             let pos = it.next()?.parse().ok()?;

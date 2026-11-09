@@ -119,6 +119,7 @@ pub(crate) fn resolve_extras(
         let ti = work.itype(params, ret);
         let (f, sig) = helper_body(h, work, helper_snapshot.as_slice(), hpos);
         sig.iter().for_each(|s| crate::witness::rc::helper(extra_base + extra_fns.len() as u32, s));
+        crate::witness::routines::label(extra_base + extra_fns.len() as u32, h.kind(), &[]);
         extra_fns.push((ti, f));
     }
     let mut entry_fn_indices: Vec<u32> = Vec::new();
@@ -132,6 +133,7 @@ pub(crate) fn resolve_extras(
                 ps.extend(info.params.iter().map(|t| t.val_type()));
                 let ti = work.itype(ps, info.ret.map(SliceTy::val_type));
                 let idx = extra_base + extra_fns.len() as u32;
+                crate::witness::routines::label(idx, "env_shim", &[]);
                 extra_fns.push((
                     ti,
                     emit_env_shim(F_FN_BASE + i as u32, &info.params, info.ret, false),
@@ -144,6 +146,7 @@ pub(crate) fn resolve_extras(
                 ps.extend(info.params.iter().map(|t| t.val_type()));
                 let ti = work.itype(ps, Some(ValType::I32));
                 let idx = extra_base + extra_fns.len() as u32;
+                crate::witness::routines::label(idx, "adapter_shim", &[]);
                 let _ = raw;
                 extra_fns.push((
                     ti,

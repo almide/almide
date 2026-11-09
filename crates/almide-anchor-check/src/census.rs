@@ -97,12 +97,39 @@ pub fn census(bodies: &[Body<'_>], anchors: &str) -> Result<Census, String> {
 
 /// [`census`] with the accesses a verified linear certificate covers.
 pub fn census_with(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<At>) -> Result<Census, String> {
+    let mut c = Census::default();
+    for f in census_fns(bodies, anchors, linear)? {
+        let t = if f.frame { &mut c.frames } else { &mut c.routines };
+        t.accesses += f.tally.accesses;
+        t.located += f.tally.located;
+        t.header += f.tally.header;
+        t.bulk += f.tally.bulk;
+        t.linear += f.tally.linear;
+    }
+    Ok(c)
+}
+
+/// One defined function's census: its position, its class (a certified
+/// frame or a runtime routine), its label — the anchor file's `routines`
+/// label, else its `selfhost` name, else `-` — and its counts.
+#[derive(Debug, Clone)]
+pub struct FnCensus {
+    pub func: usize,
+    pub frame: bool,
+    pub label: String,
+    pub tally: Tally,
+}
+
+/// [`census_with`], per defined function (#4005: the row-4 inventory by
+/// routine and by self-host body).
+pub fn census_fns(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<At>) -> Result<Vec<FnCensus>, String> {
     let at = located(anchors)?;
     let (_, _, _, _, _, rc) = parse_anchors_held(anchors)?;
     let frames: HashSet<usize> = rc.map(|(_, _, f, _, _, _)| f.into_iter().map(|(p, _)| p).collect()).unwrap_or_default();
-    let mut c = Census::default();
+    let (routines, selfhost) = (crate::lin::routine_names(anchors), crate::lin::selfhost_names(anchors));
+    let mut out = Vec::with_capacity(bodies.len());
     for (func, b) in bodies.iter().enumerate() {
-        let t = if frames.contains(&func) { &mut c.frames } else { &mut c.routines };
+        let mut t = Tally::default();
         for (k, op) in b.ops.iter().enumerate() {
             let bulk = matches!(op, Op::MemoryCopy { .. } | Op::MemoryFill { .. });
             let Some(off) = offset(op).or(bulk.then_some(0)) else { continue };
@@ -120,6 +147,8 @@ pub fn census_with(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<At>) -> 
                 t.header += 1;
             }
         }
+        let label = routines.get(&func).or_else(|| selfhost.get(&func)).cloned().unwrap_or_else(|| "-".to_string());
+        out.push(FnCensus { func, frame: frames.contains(&func), label, tally: t });
     }
-    Ok(c)
+    Ok(out)
 }

@@ -116,6 +116,48 @@ fn static_helpers(lit: &HelperLits, counters: Option<u32>, ships: Option<&std::c
     ]
 }
 
+/// The fixed-slot helpers' labels, in F_* slot order (#4005 A4: the row-4
+/// inventory names each routine; witness_routines.rs).
+const STATIC_LABELS: [&str; 37] = [
+    "println_block",
+    "eprintln_block",
+    "append_copy",
+    "itoa",
+    "append_i64",
+    "append_bool",
+    "alloc",
+    "int_to_string",
+    "concat",
+    "str_eq",
+    "list_get_8",
+    "list_get_4",
+    "list_push_8",
+    "list_push_4",
+    "list_join",
+    "block_copy",
+    "buf_to_block",
+    "str_len_chars",
+    "scan_w64",
+    "scan_w32",
+    "scan_str",
+    "f16_to_f64",
+    "cp_off",
+    "str_slice",
+    "str_repeat",
+    "str_cmp",
+    "str_replace",
+    "copy",
+    "free",
+    "inc",
+    "dec_flat",
+    "cow",
+    "str_append",
+    "bytes_push",
+    "line_grow",
+    "line_println",
+    "line_eprintln",
+];
+
 /// The pool as ONE active segment that skips its zero head and tail (#3114):
 /// linear memory starts zeroed, so the null guard + itoa scratch the pool
 /// reserves at address 0 (112 bytes in every module) need no initializer.
@@ -478,9 +520,11 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         static_helpers.iter().enumerate().all(|(i, (idx, _, _))| *idx == F_PRINTLN_BLOCK + i as u32),
         "static helper list must mirror the F_* slot order exactly"
     );
-    for (idx, f, sig) in &static_helpers {
+    debug_assert_eq!(static_helpers.len(), STATIC_LABELS.len(), "one label per fixed-slot helper");
+    for (k, (idx, f, sig)) in static_helpers.iter().enumerate() {
         if used.contains(idx) {
             code.function(f);
+            crate::witness::routines::label(*idx, STATIC_LABELS[k], &[]);
             if let Some(sig) = sig {
                 crate::witness::rc::helper(*idx, sig);
             }

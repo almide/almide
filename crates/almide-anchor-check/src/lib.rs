@@ -69,7 +69,7 @@ mod operands;
 pub mod rc;
 pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, prims_anchors, Anchors, AnchorsHeld, RcLines};
 pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
-pub use census::{census, census_with, Census, Tally};
+pub use census::{census, census_fns, census_with, Census, FnCensus, Tally};
 pub use rc::{check_rc, RcFns, RcReport};
 use anchors::helper_sigs;
 use decode::branch_target;

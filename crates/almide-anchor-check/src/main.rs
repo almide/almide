@@ -14,6 +14,9 @@ fn main() {
     }
     // #4005: also print the row-4 census (census.rs) after an accepted check.
     let census = args.iter().position(|a| a == "--census").map(|at| args.remove(at)).is_some();
+    // `--census-fns` (with `--census`): the census per defined function, one
+    // `CENSUSFN` line each (the row-4 inventory by routine and body).
+    let census_fns = args.iter().position(|a| a == "--census-fns").map(|at| args.remove(at)).is_some();
     // `--lin <cert>` (with `--census`): the module's linear certificate; the
     // prim sites it covers count as located once lin.rs verifies it.
     let lin_cert = args.iter().position(|a| a == "--lin").map(|at| {
@@ -81,7 +84,12 @@ fn main() {
             Some(p) => almide_anchor_check::lin::verify(&w, &a, String::from_utf8_lossy(&read(p)).trim_end())
                 .map(|r| r.located.into_iter().map(|(func, op)| almide_anchor_check::At { func, op }).collect()),
         };
-        linear.and_then(|l| almide_anchor_check::decode(&w).and_then(|bodies| almide_anchor_check::census_with(&bodies, &a, &l)))
+        linear.and_then(|l| {
+            almide_anchor_check::decode(&w).and_then(|bodies| {
+                let fns = if census_fns { almide_anchor_check::census_fns(&bodies, &a, &l)? } else { Vec::new() };
+                almide_anchor_check::census_with(&bodies, &a, &l).map(|c| (c, fns))
+            })
+        })
     });
     match almide_anchor_check::check_within(w, b, a, limit) {
         Ok(r) => {
@@ -94,10 +102,26 @@ fn main() {
                 r.field_sites, r.field_stores, r.field_accesses, r.field_guarded, r.field_tags, r.field_unlocated
             );
             match &counted {
-                Some(Ok(c)) => println!(
-                    "CENSUS: frames {} access(es), {} located ({} by the linear certificate), {} header word(s), {} bulk; routines {} access(es), {} located ({} by the linear certificate), {} header word(s), {} bulk",
-                    c.frames.accesses, c.frames.located, c.frames.linear, c.frames.header, c.frames.bulk, c.routines.accesses, c.routines.located, c.routines.linear, c.routines.header, c.routines.bulk
-                ),
+                Some(Ok((c, fns))) => {
+                    for f in fns.iter().filter(|f| f.tally.accesses > 0) {
+                        let t = &f.tally;
+                        println!(
+                            "CENSUSFN {} {} {} {} {} {} {} {}",
+                            f.func,
+                            if f.frame { "frame" } else { "routine" },
+                            f.label,
+                            t.accesses,
+                            t.located,
+                            t.linear,
+                            t.header,
+                            t.bulk
+                        );
+                    }
+                    println!(
+                        "CENSUS: frames {} access(es), {} located ({} by the linear certificate), {} header word(s), {} bulk; routines {} access(es), {} located ({} by the linear certificate), {} header word(s), {} bulk",
+                        c.frames.accesses, c.frames.located, c.frames.linear, c.frames.header, c.frames.bulk, c.routines.accesses, c.routines.located, c.routines.linear, c.routines.header, c.routines.bulk
+                    );
+                }
                 Some(Err(e)) => println!("CENSUS: unreadable: {e}"),
                 None => {}
             }

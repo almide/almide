@@ -92,6 +92,7 @@ fn records_inner(
     let prim_anchors = super::bounds::take_prims();
     let heap_params = super::bounds::take_heaps();
     let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids, rc_helpers) = super::rc::take(pass);
+    let routine_labels = super::routines::take(pass);
     let init_anchors = super::init::take_anchors();
     let (seals, remaps) = super::anchor::take_all();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
@@ -146,6 +147,9 @@ fn records_inner(
         // #4005 A4: each self-host body's heap-typed parameters, by its
         // shipped position (a body that did not ship is left out).
         + &format!("selfhost {}\n", locate.heaps(&pick(heap_params)))
+        // #4005 A4: each shipped runtime routine, labelled, with the heap
+        // parameters its builder declares (witness_routines.rs).
+        + &routines_line(emitted, fmap, &routine_labels)?
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -175,6 +179,22 @@ fn records_inner(
     }
     records.push(Record { property: "caps-transitive", function: "(program)".into(), bytes: graph });
     Ok(((records, uncertified), anchor_file))
+}
+
+/// `routines <position>:<heap params>:<label> ...` — the shipped runtime
+/// routines (#4005 A4, witness_routines.rs); a routine that did not ship is
+/// left out.
+fn routines_line(emitted: &[u8], fmap: &[Option<u32>], labels: &[(u32, String, String)]) -> Result<String, String> {
+    use crate::cert_project as cp;
+    let ei = cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?;
+    let toks: Vec<String> = labels
+        .iter()
+        .filter_map(|(f, heap, label)| {
+            let j = f.checked_sub(ei).and_then(|d| fmap.get(d as usize).copied().flatten())?;
+            Some(format!("{j}:{heap}:{label}"))
+        })
+        .collect();
+    Ok(format!("routines {}\n", toks.join(" ")))
 }
 
 /// The rc sink's frames that the shipped pass certified.

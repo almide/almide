@@ -591,6 +591,7 @@ pub fn start_collecting() {
     crate::witness::fields::start();
     crate::witness::anchor::start();
     crate::witness::rc::start();
+    crate::witness::routines::start();
     crate::witness::decls::start();
 }
 
@@ -629,6 +630,11 @@ pub(crate) mod fields;
 /// Where the ownership witness's RC events are (#4277, witness_rc.rs).
 #[path = "witness_rc.rs"]
 pub mod rc;
+
+/// The runtime routines a module ships, labelled (#4005 A4,
+/// witness_routines.rs).
+#[path = "witness_routines.rs"]
+pub mod routines;
 
 /// Where in the bytes each bounds / init event is (#4011 (d),
 /// witness_anchor.rs).
