@@ -332,3 +332,8 @@ spec/stdlib/http_router_test.almd :: __test_almd_0018_a parameter that decodes t
 # C-432: v1 refuses a user variant carrying a runtime-backed payload; the structural leg renders it.
 # Found under #4230 (closed by the integration merge); #4189 owns the MIR rung walls that batch added.
 spec/wasm_cross/runtime_backed_variant_repr.almd :: main  # #4189
+spec/wasm_cross/never_fn_value_positions.almd :: pick
+spec/wasm_host_js/effect_export_scalar.almd :: put
+spec/wasm_host_js/region_export_address.almd :: in_alloc
+spec/wasm_host_js/region_export_lease.almd :: in_alloc
+spec/wasm_host_js/region_export_push.almd :: inbox_open
