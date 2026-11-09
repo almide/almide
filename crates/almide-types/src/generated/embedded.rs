@@ -13785,30 +13785,31 @@ fn __jp_refuse(c: Int, p: Int, kind: Int) -> Value = {
 
 fn __jp_message(base: Int, len: Int, code: Int) -> String = {
   let p = code / 32
-  match code % 32 {
-    0 => __jp_at("json: unterminated string", base, p),
-    1 => __jp_at("json: control character in string", base, p),
-    2 => __jp_at("json: unknown escape", base, p),
-    3 => __jp_at("json: invalid unicode escape", base, p),
-    4 => __jp_at("json: lone surrogate", base, p),
-    5 => __jp_at("json: noncharacter", base, p),
-    6 => "unexpected end of input",
-    7 => __jp_at("json: trailing comma", base, p),
-    8 => __jp_at("json: expected ',' or ']'", base, p),
-    9 => __jp_at("json: expected ',' or '}'", base, p),
-    10 => __jp_at("json: unquoted key", base, p),
-    11 => __jp_at("json: duplicate key", base, p),
-    12 => __jp_at("json: expected ':'", base, p),
-    13 => __jp_at("json: invalid number", base, p),
-    14 => __jp_number_error(base, len, p),
-    15 => "expected bool",
-    16 => "expected null",
-    17 => __json_depth_error(),
-    _ => {
-      let cp = __jp_cp(base, p)
-      "unexpected char '" + string.__err_text(string.from_codepoint(cp) ?? "") + "' at pos " + int.to_string(__jp_charpos(base, p, 0, 0))
-    },
-  }
+  let kind = code % 32
+  if kind == 6 then "unexpected end of input"
+  else if kind == 14 then __jp_number_error(base, len, p)
+  else if kind == 15 then "expected bool"
+  else if kind == 16 then "expected null"
+  else if kind == 17 then __json_depth_error()
+  else if kind == 18 then "unexpected char '" + string.__err_text(string.from_codepoint(__jp_cp(base, p)) ?? "") + "' at pos " + int.to_string(__jp_charpos(base, p, 0, 0))
+  else __jp_at(__jp_what(kind), base, p)
+}
+
+
+fn __jp_what(kind: Int) -> String = match kind {
+  0 => "json: unterminated string",
+  1 => "json: control character in string",
+  2 => "json: unknown escape",
+  3 => "json: invalid unicode escape",
+  4 => "json: lone surrogate",
+  5 => "json: noncharacter",
+  7 => "json: trailing comma",
+  8 => "json: expected ',' or ']'",
+  9 => "json: expected ',' or '}'",
+  10 => "json: unquoted key",
+  11 => "json: duplicate key",
+  12 => "json: expected ':'",
+  _ => "json: invalid number",
 }
 
 
@@ -14103,16 +14104,7 @@ fn __jp_num_end(base: Int, end: Int, p: Int) -> Int = {
 
 
 fn __jp_mantissa(base: Int, p: Int, stop: Int, m: Int) -> Int = if p >= stop then m
-else {
-  let b = prim.load8(base + p)
-  if b == 46 then __jp_mantissa(base, p + 1, stop, m)
-  else __jp_mantissa(base, p + 1, stop, m * 10 + (b - 48))
-}
-
-
-fn __jp_pow10(k: Int, acc: Float) -> Float = if k <= 0 then acc else __jp_pow10(k - 1, acc * 10.0)
-
-
+else __jp_mantissa(base, p + 1, stop, m * 10 + (prim.load8(base + p) - 48))
 
 
 
@@ -14123,38 +14115,17 @@ fn __jp_number(base: Int, len: Int, p: Int, c: Int) -> Value = {
   if __jp_num_end(base, end, p) != end then __jp_refuse(c, p, 13)
   else {
     __jp_seek(c, end)
-    let neg = prim.load8(base + p) == 45
-    let lead = if neg then p + 1 else p
-    let int_end = __jp_digits(base, end, lead)
-    if int_end == end then {
-      if end - lead <= 18 then {
-        let m = __jp_mantissa(base, lead, end, 0)
-        value.int(if neg then 0 - m else m)
-      } else match int.parse(__jp_substr(base, p, end)) {
-        ok(n) => value.int(n),
-        err(_) => __jp_refuse(c, p, 14),
-      }
-    } else __jp_float(base, p, lead, int_end, end, neg, c)
-  }
-}
-
-fn __jp_float(base: Int, p: Int, lead: Int, int_end: Int, end: Int, neg: Bool, c: Int) -> Value = {
-  let has_frac = prim.load8(base + int_end) == 46
-  let frac_end = if has_frac then __jp_digits(base, end, int_end + 1) else int_end
-  let frac = if has_frac then frac_end - int_end - 1 else 0
-  let digits = int_end - lead + frac
-  let e_neg = frac_end + 1 < end and prim.load8(base + frac_end + 1) == 45
-  let e_start = if frac_end + 1 < end and (prim.load8(base + frac_end + 1) == 45 or prim.load8(base + frac_end + 1) == 43) then frac_end + 2 else frac_end + 1
-  let e_mag = if frac_end < end and end - e_start <= 3 then __jp_mantissa(base, e_start, end, 0) else 0
-  let net = (if e_neg then 0 - e_mag else e_mag) - frac
-  let fast = digits <= 15 and (frac_end == end or end - e_start <= 3) and net <= 22 and net >= 0 - 22
-  if fast then {
-    let mag = prim.i2f(__jp_mantissa(base, lead, frac_end, 0))
-    let scaled = if net >= 0 then mag * __jp_pow10(net, 1.0) else mag / __jp_pow10(0 - net, 1.0)
-    value.float(if neg then -1.0 * scaled else scaled)
-  } else match float.parse(__jp_substr(base, p, end)) {
-    ok(f) => value.float(f),
-    err(_) => __jp_refuse(c, p, 14),
+    let lead = if prim.load8(base + p) == 45 then p + 1 else p
+    if __jp_digits(base, end, lead) < end then match float.parse(__jp_substr(base, p, end)) {
+      ok(f) => value.float(f),
+      err(_) => __jp_refuse(c, p, 14),
+    } else if end - lead <= 18 then {
+      let m = __jp_mantissa(base, lead, end, 0)
+      value.int(if lead > p then 0 - m else m)
+    } else match int.parse(__jp_substr(base, p, end)) {
+      ok(n) => value.int(n),
+      err(_) => __jp_refuse(c, p, 14),
+    }
   }
 }
 
@@ -14251,6 +14222,29 @@ fn __jp_colon(base: Int, len: Int, c: Int) -> Int = {
 }
 
 
+
+
+fn __jp_repeats(pairs: List[(String, Value)], k: String) -> Bool = {
+  var seen = false
+  for (s, _) in pairs {
+    if __jp_same(s, k) then {
+      seen = true
+    } else ()
+  }
+  seen
+}
+
+fn __jp_same(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  prim.load32(ha + 4) == prim.load32(hb + 4) and __jp_same_bytes(ha + 12, hb + 12, prim.load32(ha + 4), 0)
+}
+
+fn __jp_same_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool = if i >= n then true
+else if prim.load8(pa + i) != prim.load8(pb + i) then false
+else __jp_same_bytes(pa, pb, n, i + 1)
+
+
 fn __jp_unique(c: Int, p: Int, repeated: Bool) -> Unit =
   if repeated and __jp_pos(c) >= 0 then __jp_seek(c, __jp_code(p, 11)) else ()
 
@@ -14268,7 +14262,7 @@ fn __jp_object(base: Int, len: Int, p0: Int, depth: Int, c: Int) -> Value = {
   } else p0
   while p >= 0 and list.len(pairs) < 16 {
     let k = __jp_key(base, len, p, c)
-    __jp_unique(c, p, list.any(pairs, ((s, _)) => s == k))
+    __jp_unique(c, p, __jp_repeats(pairs, k))
     list.push(pairs, (k, __jp_value(base, len, __jp_colon(base, len, c), depth, c)))
     p = __jp_after(base, len, c, 125)
   }
