@@ -36,6 +36,19 @@ impl Drop for Live {
     }
 }
 
+/// A reference parameter's protector (#4452; build.rs inserts one as the
+/// first local of every function taking `&T` of a shared gate type): the
+/// referent must stay valid until the function returns, so the witness is
+/// read when the protector drops, at the return — after the function's last
+/// statement, its leaving decrement included.
+pub struct Protector<'a>(pub &'a Live);
+
+impl Drop for Protector<'_> {
+    fn drop(&mut self) {
+        self.0.touch();
+    }
+}
+
 #[inline]
 fn sc<R>(o: O, f: impl FnOnce() -> R) -> R {
     if o == O::SeqCst {
