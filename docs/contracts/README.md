@@ -59,7 +59,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-021 | Whitespace trim / is_whitespace use the full Unicode White_Space property | 0.24.0 | active | fixture | 2 |
 | C-022 | bytes.to_string_lossy is UTF-8-lossy decode (inverse of bytes.from_string) | 0.24.0 | active | fixture | 1 |
 | C-023 | float.to_string is shortest round-tripping decimal, byte-equal to Rust Display | 0.24.0 | active | fuzz(100000) | 2 |
-| C-024 | float.parse is correctly-rounded round-to-nearest-even (Clinger AlgorithmM) | 0.24.0 | active | fixture | 1 |
+| C-024 | float.parse is correctly-rounded round-to-nearest-even (Clinger AlgorithmM) | 0.24.0 | active | fuzz(9600) | 1 |
 | C-025 | float.to_fixed is round-half-to-even on the exact binary value | 0.24.0 | active | fuzz(1000) | 1 |
 | C-026 | Vendored-libm trig / exp / log / pow are byte-identical cross-target | 0.24.0 | active | fuzz(4000) | 3 |
 | C-027 | base64 encode/decode (standard + URL-safe) is byte-identical incl. errors | 0.24.0 | active | fixture | 1 |

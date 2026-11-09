@@ -6654,7 +6654,6 @@ pub const SRC_FLOAT_PARSE: &str = r#"
 
 
 
-
 fn __fp_isdigit(b: Int) -> Bool = b >= 48 and b <= 57
 
 
@@ -6727,7 +6726,8 @@ fn __fp_ldiv(q: Int, r: Int, d: Int, s: Int, k: Int) -> Int = if s <= 0 then {
 } else {
   let t = if s < k then s else k
   let num = prim.bshl(r, t)
-  __fp_ldiv(prim.bshl(q, t) + num / d, num % d, d, s - t, k)
+  let qd = num / d
+  __fp_ldiv(prim.bshl(q, t) + qd, num - qd * d, d, s - t, k)
 }
 
 
@@ -6739,7 +6739,8 @@ else {
   let ed = __fp_lg(d)
 
   let s = 58 - (__fp_lg(w) - ed)
-  let qs = __fp_ldiv(w / d, w % d, d, s, 61 - ed)
+  let q0 = w / d
+  let qs = __fp_ldiv(q0, w - q0 * d, d, s, 61 - ed)
   let q = prim.bshr_u(qs, 1)
   let sh = __fp_bl(q, 54) - 54
   let m54 = prim.bshr_u(q, sh)
@@ -6748,10 +6749,7 @@ else {
   let up = prim.band(m54, 1) == 1
   let m1 = if up then m + 1 else m
 
-  let carry = if m1 == 9007199254740992 then 1 else 0
-  let m2 = if m1 == 9007199254740992 then 4503599627370496 else m1
-  let e = sh + 1 - s - n + carry
-  let v = prim.ffrombits(m2 - 4503599627370496 + prim.bshl(e + 1075, 52))
+  let v = prim.ffrombits(m1 - 4503599627370496 + prim.bshl(sh + 1 - s - n + 1075, 52))
   if neg then -1.0 * v else v
 }
 
@@ -6896,25 +6894,20 @@ fn __hpd_bits(i: Int) -> Int = if i > 17 then 59 else i * 33219 / 10000
 
 
 fn __hpd_to_half(hb: Int, e2: Int) -> Int = if __hpd_dp(hb) > 0 then {
-  let k = if __hpd_dp(hb) > 17 then 59 else __hpd_bits(__hpd_dp(hb)) + 1
+  let k = __hpd_bits(__hpd_dp(hb))
   __hpd_rsh(hb, k)
   __hpd_to_half(hb, e2 + k)
 } else e2
 
-fn __hpd_from_tenth(hb: Int, e2: Int) -> Int = if __hpd_dp(hb) < 0 then {
-  let k = __hpd_bits(0 - __hpd_dp(hb))
-  __hpd_lsh(hb, k)
-  __hpd_from_tenth(hb, e2 - k)
-} else e2
-
-
-
-fn __hpd_doublings(hb: Int) -> Int = {
-  let m3 = __hpd_ri(hb, 0, 3, __hpd_n(hb), 0)
-  if m3 >= 500 then 0
-  else if m3 >= 250 then 1
-  else if m3 >= 125 then 2 else 3
-}
+fn __hpd_from_half(hb: Int, e2: Int) -> Int =
+  if __hpd_dp(hb) < 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(
+    hb,
+    0,
+  ) < 5) then {
+    let k = if __hpd_dp(hb) < 0 then __hpd_bits(0 - __hpd_dp(hb)) else 1
+    __hpd_lsh(hb, k)
+    __hpd_from_half(hb, e2 - k)
+  } else e2
 
 
 fn __hpd_ri(hb: Int, i: Int, dp: Int, n: Int, acc: Int) -> Int = if i < dp then __hpd_ri(
@@ -6983,19 +6976,15 @@ fn __fp_exact(hb: Int, neg: Bool) -> Float = {
   else if __hpd_dp(hb) > 310 then (if neg then 0.0 - inf else inf)
   else {
 
-
-    let e0 = __hpd_from_tenth(hb, __hpd_to_half(hb, 0))
-    let t = __hpd_doublings(hb)
-    let e2 = e0 - t - 1
+    let eb = __hpd_from_half(hb, __hpd_to_half(hb, 0))
+    let e2 = eb - 1
 
     let e3 = if e2 < 0 - 1022 then 0 - 1022 else e2
-    let den = if e2 < 0 - 1022 then (0 - 1022) - e2 else 0
+    __hpd_rsh(hb, (if e2 < 0 - 1022 then (0 - 1022) - e2 else 0))
     if e3 > 1023 then (if neg then 0.0 - inf else inf)
     else {
 
-
-      let net = t + 53 - den
-      if net >= 0 then __hpd_lsh(hb, net) else __hpd_rsh(hb, 0 - net)
+      __hpd_lsh(hb, 53)
       let m0 = __hpd_ri(hb, 0, __hpd_dp(hb), __hpd_n(hb), 0)
       let m1 = if __hpd_round_up(hb) then m0 + 1 else m0
 
