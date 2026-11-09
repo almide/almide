@@ -348,6 +348,10 @@ fn map_entry_arg(cx: &CallCx, p: &FloorParam, by_ref: bool, code: &str, got: &NT
 
 /// A `List[(K, V)]` param's argument.
 fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy) -> Result<String, LowerError> {
+    // A literal's entries left unbuilt (crate::native_map_entries): its pairs.
+    if let Some(pairs) = crate::native_map_entries::array_of(code) {
+        return Ok(pairs);
+    }
     let mismatch = cx.mismatch;
     let (NTy::Rec(i) | NTy::RecRef(i)) = got else { return Err(mismatch()) };
     let pair = crate::render_native_rec::list_elem(*i).ok_or_else(mismatch)?;

@@ -212,7 +212,8 @@ fn render_user_fn_call(
             None => arg,
         });
     }
-    let mut rendered = format!("{}({})", mangle(name), rendered_args.join(", "));
+    let head = crate::render_native_keyed::call_head(name, call.args, callee).unwrap_or_else(|| mangle(name));
+    let mut rendered = format!("{head}({})", rendered_args.join(", "));
     if callee_sig.and_then(|(_, r)| *r).is_some_and(|k| k.narrow_rust().is_some()) {
         rendered = format!("({rendered} as i64)");
     }

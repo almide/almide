@@ -155,7 +155,7 @@ pub(crate) fn push_typed_dispatch_tables(out: &mut String, user_fns: &BTreeMap<&
             })
             .collect();
         let ret_s = ret.map(|r| format!(" -> {}", crate::render_native_rec::owned_ty(owned_nty(r)))).unwrap_or_default();
-        let _ = write!(out, "fn __almd_ci_{key}(idx: i64, env: {env_ty}{params}){ret_s} {{\n    match idx {{\n");
+        let _ = write!(out, "#[inline]\nfn __almd_ci_{key}(idx: i64, env: {env_ty}{params}){ret_s} {{\n    match idx {{\n");
         for (idx, name) in fns {
             let takes = lambda_moves(user_fns[name]);
             let args: String = ps

@@ -267,7 +267,7 @@ fn push_closure_dispatch_tables(
         let env_ty = crate::render_native_closure::dispatch_env(sigs, fns[0].1);
         let params: String = (0..arity).map(|i| format!(", a{i}: i64")).collect();
         out.push_str(&format!(
-            "fn __almd_ci_{arity}(idx: i64, env: {env_ty}{params}) -> i64 {{\n    match idx {{\n"
+            "#[inline]\nfn __almd_ci_{arity}(idx: i64, env: {env_ty}{params}) -> i64 {{\n    match idx {{\n"
         ));
         for (idx, name) in fns {
             // This table serves the MIR scalar ABI: every argument/result
@@ -337,6 +337,7 @@ pub(crate) fn refused_native_bodies(
     linked: &std::collections::BTreeSet<String>,
 ) -> Result<BTreeMap<String, LowerError>, LowerError> {
     let user_fns = prog.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    crate::render_native_keyed::set_program(&user_fns, sigs);
     let mut refused = BTreeMap::new();
     for func in prog.functions.iter().filter(|f| linked.contains(&f.name)) {
         match render_fn(func, &user_fns, sigs, &mut Vec::new()) {
@@ -357,6 +358,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     let mut used_shims: Vec<&'static str> = Vec::new();
     let mut bodies = String::new();
     fan_rendered_reset();
+    crate::render_native_keyed::set_program(&user_fns, sigs);
     crate::render_native_bounds::reset();
     let mut fn_rets: BTreeMap<String, Option<NTy>> = BTreeMap::new();
     let mut texts: BTreeMap<String, String> = BTreeMap::new();
@@ -366,6 +368,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
             .map_err(|e| e.with_fn_context(&func.name))?;
         let rendered = crate::render_native_narrow::narrow_locals(func, sigs, rendered);
         let rendered = narrow_abi_wrapper(func, sigs, rendered)?;
+        let rendered = crate::render_native_keyed::specialize(func, rendered)?;
         fn_rets.insert(func.name.clone(), ret_nty);
         bodies.push_str(&rendered);
         bodies.push('\n');
