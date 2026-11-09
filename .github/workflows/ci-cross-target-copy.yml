@@ -1,0 +1,259 @@
+name: Cross-Target copy
+
+# Runs spec/ on both Rust and WASM targets, reports mismatches.
+#
+# No `paths-ignore`: a workflow filtered out by a path filter leaves its checks
+# in the Expected state forever on a PR that touches only the ignored paths
+# (see the `changes` job in ci.yml for the GitHub-docs citation), and the two
+# `proofs/` steps below are gates that must produce a verdict on every ref.
+# `pull_request` so a fix to this very workflow is visible green before it
+# merges; `merge_group` so the queue runs the same gates before develop moves.
+
+on:
+  push:
+    branches: ['probe/blockers-1109-cihead']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # The CI slice (owner decision 2026-10-25; scripts/lib/ci-slice.sh,
+  # crates/almide-corpus/src/ci_slice.rs): a PR or merge group whose base is
+  # not main judges a commit-rotated 1-in-8 slice of every corpus gate plus
+  # the fixtures the change touches; everything else — pushes to develop and
+  # main, tags, schedules, manual runs, PRs into main — runs the full corpus.
+  # Whole-corpus staleness / completeness checks run only on a full run, and a
+  # slice never rewrites a ledger. Job names do not change with it.
+  ALMIDE_CI_SLICE: ${{ ((github.event_name == 'pull_request' && github.base_ref != 'main') || (github.event_name == 'merge_group' && github.event.merge_group.base_ref != 'refs/heads/main')) && '8' || '1' }}
+  ALMIDE_CI_SEED: ${{ github.sha }}
+  ALMIDE_CI_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
+  RUST_TOOLCHAIN: "1.97.0"  # runner-class MSRV: the almide binary embeds wasmtime 50 (commissioned host); compiler crates keep the 1.89 claim per-crate
+  # Cold runners gain nothing from the workspace's release-incremental
+  # profile (#1006) — it only bloats the caches. Opt out.
+  CARGO_INCREMENTAL: "0"
+
+# #4094: the same read-only token the repository default gives, stated here so a
+# settings change cannot widen it. A job that needs more declares it itself.
+permissions: read-all
+
+jobs:
+  prose-changes:
+    # Missing/invalid classification always selects the original full lane.
+    runs-on: ubuntu-latest
+    outputs:
+      prose_only: ${{ steps.classify.outputs.prose_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: classify
+        continue-on-error: true
+        run: |
+          # Classify with code from the compared base, not a PR-edited helper.
+          # -I prevents repository modules/PYTHONPATH from shadowing stdlib imports.
+          base=$(python3 -I -c 'import json,os; e=json.load(open(os.environ["GITHUB_EVENT_PATH"])); n=os.environ.get("GITHUB_EVENT_NAME"); print(e.get("pull_request",{}).get("base",{}).get("sha","") if n=="pull_request" else e.get("merge_group",{}).get("base_sha","") if n=="merge_group" else e.get("before","") if n=="push" else "")')
+          if [[ "$base" =~ ^[0-9a-f]{40}$ ]] && git merge-base --is-ancestor "$base" HEAD && git cat-file -e "$base:scripts/ci_prose.py"; then
+            classifier=$(mktemp "$RUNNER_TEMP/prose-classify.XXXXXX.py")
+            trap 'rm -f "$classifier"' EXIT
+            git show "$base:scripts/ci_prose.py" > "$classifier"
+            python3 -I "$classifier" classify
+          else
+            echo "prose_only=false" >> "$GITHUB_OUTPUT"
+            echo "base_sha=" >> "$GITHUB_OUTPUT"
+            echo "trusted base classifier unavailable; full lane"
+          fi
+
+  cross-target:
+    needs: prose-changes
+    if: ${{ always() && !cancelled() && needs.prose-changes.outputs.prose_only != 'true' }}
+    name: Cross-Target (Rust vs WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - name: CI slice — the change's own files (a full run does nothing)
+        run: bash scripts/ci-slice-prepare.sh
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      # Dependencies only (see ci.yml `build`): rust-cache prunes the
+      # workspace's own artifacts on save; develop writes, PRs read.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: cross-target-${{ env.RUST_TOOLCHAIN }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Cache wasmtime tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          # Pinned + cached + retried. On a cache hit the tarball is already here,
+          # so the per-IP-rate-limited release download runs at most once per key.
+          # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
+          # "not a tar archive". Bump VERSION and the cache key together.
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Cross-target spec (Rust vs WASM)
+        run: |
+          # Per file, the two lanes must reach the SAME EXIT CODE — not merely the
+          # same pass/fail bit. `almide test` has three verdicts (0 pass, 1 fail,
+          # 5 nothing to run — docs/specs/cli.md), and a 5/5 on a generated stub
+          # with no test block is agreement, not a "Rust FAIL (WASM OK)" (#2204:
+          # the boolean form read exactly that split as a mismatch on 22 runs).
+          ALMIDE=./target/release/almide
+          rust_pass=0; wasm_pass=0; rust_fail=0; wasm_fail=0; agree=0; both_pass=0; empty=0; errors=""
+
+          # The CI slice (scripts/lib/ci-slice.sh): on a PR into develop the
+          # commit-rotated 1-in-8 slice of the test files plus the ones the
+          # change touches; every other run, all of them.
+          . scripts/lib/ci-slice.sh
+          . scripts/lib/wasm-skip.sh
+          find spec/ -name '*_test.almd' -type f | sed 's#^spec//#spec/#' | sort | ci_slice_filter cross-target-spec > /tmp/xt-selected.txt
+          selected=0
+          for f in $(cat /tmp/xt-selected.txt); do
+            # Skip files that declare `// wasm:skip` (scripts/lib/wasm-skip.sh:
+            # the harness's own reading of the marker), naming the reason.
+            if reason=$(wasm_skip_reason "$f"); then echo "SKIP $f (declared // wasm:skip: $reason)"; continue; fi
+            selected=$((selected + 1))
+
+            # `|| code=$?`, not `; code=$?`: the step shell is `bash -e`, and a
+            # bare non-zero command (the first exit 5) would end the whole loop.
+            rust_code=0; $ALMIDE test "$f" > /dev/null 2>&1 || rust_code=$?
+            wasm_code=0; $ALMIDE test "$f" --target wasm > /dev/null 2>&1 || wasm_code=$?
+
+            if [ "$rust_code" -eq 0 ]; then rust_pass=$((rust_pass + 1)); else rust_fail=$((rust_fail + 1)); fi
+            if [ "$wasm_code" -eq 0 ]; then wasm_pass=$((wasm_pass + 1)); else wasm_fail=$((wasm_fail + 1)); fi
+
+            if [ "$rust_code" -ne "$wasm_code" ]; then
+              errors="$errors\n  Rust exit $rust_code / WASM exit $wasm_code: $f"
+            else
+              agree=$((agree + 1))
+              if [ "$rust_code" -eq 0 ]; then both_pass=$((both_pass + 1)); fi
+              if [ "$rust_code" -eq 5 ]; then empty=$((empty + 1)); fi
+            fi
+          done
+
+          total=$(wc -l < /tmp/xt-selected.txt | tr -d ' ')
+          judged=$((agree + $(printf '%b' "$errors" | grep -c . || true)))
+          if [ "$selected" -eq 0 ] || [ "$judged" -ne "$selected" ]; then
+            echo "::error::Cross-target: judged $judged of $selected selected test file(s) — a vacuous or partial sweep is not a pass"
+            exit 1
+          fi
+          echo ""
+          echo "=== Cross-Target Results ==="
+          echo "Rust:  $rust_pass pass / $rust_fail fail"
+          echo "WASM:  $wasm_pass pass / $wasm_fail fail"
+          echo "Agree: $agree / $total (both pass $both_pass, both empty $empty)"
+
+          if [ -n "$errors" ]; then
+            echo -e "\nMismatches (exit codes differ):$errors"
+            echo "::error::Cross-target mismatches found — see above"
+            exit 1
+          fi
+
+          echo "::notice::Cross-target: Rust $rust_pass, WASM $wasm_pass, agree $agree / $total (both pass $both_pass, both empty $empty)"
+
+      - name: Structural wasm differential fuzz (native == structural build)
+        run: |
+          # PER-PR generative byte-match of the STRUCTURAL wasm leg (`ALMIDE_WASM_SKIP_STOCK_AUDIT=1
+          # almide build --target wasm` -> wasmtime, #2753 — it drove the incumbent's
+          # render_program before). The
+          # cross-target step above compares the two `almide test` lanes' VERDICTS per file, not
+          # the bytes either lane produced, and the
+          # nightly xtarget-fuzz emits only `let`-bound expressions — so the imperative
+          # `var v = w; … v = …` shape had NO per-PR gate, which is how the scalar-aliasing miscompile
+          # shipped. This synthesizes that class (var reassignment, loops, accumulators, the sha1
+          # rotation) PLUS the COMPARISON matrix (==/!=/</<=/>/>= over Int/String/Bool/Float + lists,
+          # in if-condition AND value position — the class that shipped the handle-compare / both-arms
+          # silent miscompiles) and byte-diffs native vs wasm. N is high enough that every
+          # template (now 11) is exercised each run. Any divergence, structural wall or program
+          # that does not run natively fails the build.
+          bash proofs/diff-fuzz.sh 150
+
+      - name: Structural wasm output parity (fixtures, ratcheting baseline + wall ledger)
+        run: |
+          # FIXTURE byte-match of native `almide run` against the STRUCTURAL wasm leg
+          # (`ALMIDE_WASM_SKIP_STOCK_AUDIT=1 almide build --target wasm` -> wasmtime, #2793 — it drove
+          # the incumbent's render_program before) over spec/ (recursive), gated against a
+          # ratcheting baseline (proofs/output-parity-baseline.txt) that can only GROW and an
+          # equality-pinned wall ledger (proofs/output-parity-walled-baseline.txt, empty today).
+          # The generative fuzz above catches NEW shapes; this catches a REGRESSION in any shape a
+          # committed fixture pins — including the spec/lang, spec/programs, spec/integration,
+          # spec/stdlib and spec/wasm_cross_pkg rows no other structural gate compares. Under CI
+          # a missing tool is a hard failure (#978: the PATH-lookup skip made this gate a no-op on
+          # every run it ever had); the oracle resolves to ./target/release/almide built above.
+          bash proofs/output-parity.sh
+
+  # #4023: the native region arena's stale-handle trap (ALMIDE_REGION_TRAP_STALE)
+  # ships OFF — measured +30% on binarytrees and +52% on treealloc, the rows the
+  # region window exists for — so this job is where it runs: all of spec/ on
+  # both legs and a fixed-seed differential fuzz (proofs/diff-fuzz.sh plus one
+  # xtarget-fuzz campaign) with it armed. A wrong region-pure verdict reads a
+  # rewound arena slot; armed, that read panics (exit 101), so it fails the PR
+  # instead of shipping silent. The wasm leg's double-free trap needs no
+  # switch: it is in every build since #4023. The re-injection controls that
+  # show each trap fires are nightly (memory-traps-nightly.yml).
+  memory-traps:
+    needs: prose-changes
+    if: ${{ always() && !cancelled() && needs.prose-changes.outputs.prose_only != 'true' }}
+    name: Memory traps armed (spec/ + differential fuzz)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - name: CI slice — the change's own files (a full run does nothing)
+        run: bash scripts/ci-slice-prepare.sh
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: cross-target-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+          cache-on-failure: true
+          workspaces: |
+            .
+            tools/xtarget-fuzz
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Cache wasmtime tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: spec/ on both legs, region trap armed
+        run: bash scripts/check-memory-traps.sh spec
+
+      - name: Differential fuzz, region trap armed
+        run: bash scripts/check-memory-traps.sh fuzz
