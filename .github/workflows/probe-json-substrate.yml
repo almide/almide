@@ -424,7 +424,7 @@ jobs:
           cp .github/probe/ratchet-refs.txt /tmp/refs.txt
           for ref in $(cat /tmp/refs.txt); do
             git checkout -q --detach "origin/$ref" && echo "=== $ref $(git log --oneline -1)"
-            cargo test --release -p almide-wasm --test json_ratchet -- --nocapture > /tmp/ratchet.txt 2>&1
-            grep -E "RATCHET|RETENTION|panicked|test result|  [a-z]+ (fuel|allocs|frees)" /tmp/ratchet.txt
+            cargo test --release -p almide-wasm --test json_ratchet -- --nocapture > /tmp/ratchet.txt 2>&1 || true
+            grep -E "RATCHET|RETENTION|panicked|test result|  [a-z]+ (fuel|allocs|frees)" /tmp/ratchet.txt || true
             grep -q "test result: ok" /tmp/ratchet.txt && echo "VERDICT $ref: ratchet PASSES" || echo "VERDICT $ref: ratchet FAILS"
           done
