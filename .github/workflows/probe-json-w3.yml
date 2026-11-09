@@ -41,6 +41,7 @@ jobs:
           set -euxo pipefail
           cp -r .github/probe /tmp/probe
           git worktree add /tmp/src-head "$HEAD_REF"
+          if [ -f /tmp/probe/w3/pre-w1 ]; then (cd /tmp/src-head && sed -i 's/2147483660 + cur/1073741824/' stdlib/json_parse.almd && sed -i 's/^    let fam = prim.alloc_bytes(total)$/&\n    prim.store32(prim.handle(fam), 1073741824)/' stdlib/json_parse.almd && git diff | head -60); fi
           (cd /tmp/src-head && git log --oneline -1 && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --release --bin almide)
           mkdir -p /tmp/bins && cp target/release/almide /tmp/bins/almide-head
       - name: Generated files the build rewrote
