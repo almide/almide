@@ -56,7 +56,7 @@ jobs:
           cp crates/almide-wasm/tests/golden/json-ratchet.txt /tmp/quick/json-ratchet-golden.txt || true
       - name: Stdlib inspection ledger (which stamps the change voids)
         run: |
-          cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test stdlib_inspection_test -- --nocapture 2>&1 | tail -40 | tee /tmp/quick/inspection.txt || true
+          cd /tmp/src-head && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo test --release --test stdlib_inspection_test -- --nocapture > /tmp/quick/inspection.txt 2>&1 || true; grep -E 're-inspect|ceiling|uninspected|test result' /tmp/quick/inspection.txt | head -80
       - name: jsonround allocations and instruction counts
         run: |
           set -uo pipefail
