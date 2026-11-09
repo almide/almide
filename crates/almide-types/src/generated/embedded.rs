@@ -13741,6 +13741,11 @@ pub const SRC_JSON_PARSE: &str = r#"
 
 
 
+
+
+
+
+
 fn __json_max_depth() -> Int = 1000
 
 
@@ -13750,24 +13755,83 @@ fn __json_depth_error() -> String = "json: nesting deeper than 1000"
 fn json_parse(text: String) -> Result[Value, String] = {
   let h = prim.handle(text)
   let blen = prim.load32(h + 4)
-  match __jp_value(h + 12, blen, 0, 0) {
-    ok(r) => {
-      let (v, p) = r
-      let q = __jp_ws(h + 12, blen, p)
-      if q < blen then err(__jp_at("json: trailing data", h + 12, q))
-      else ok(v)
-    },
-    err(e) => err(e),
+  let cell = prim.alloc_bytes(8)
+  let v = __jp_value(h + 12, blen, 0, 0, prim.handle(cell) + 12)
+  let p = prim.load64(prim.handle(cell) + 12)
+  if p < 0 then err(__jp_message(h + 12, blen, 0 - 1 - p))
+  else {
+    let q = __jp_ws(h + 12, blen, p)
+    if q < blen then err(__jp_at("json: trailing data", h + 12, q)) else ok(v)
   }
 }
 
 
 
-fn __jp_cp(base: Int, p: Int) -> (Int, Int) = {
+
+fn __jp_pos(c: Int) -> Int = prim.load64(c)
+
+fn __jp_seek(c: Int, p: Int) -> Unit = prim.store64(c, p)
+
+
+
+fn __jp_code(p: Int, kind: Int) -> Int = 0 - 1 - (p * 32 + kind)
+
+
+fn __jp_refuse(c: Int, p: Int, kind: Int) -> Value = {
+  __jp_seek(c, __jp_code(p, kind))
+  value.null()
+}
+
+
+fn __jp_message(base: Int, len: Int, code: Int) -> String = {
+  let p = code / 32
+  match code % 32 {
+    0 => __jp_at("json: unterminated string", base, p),
+    1 => __jp_at("json: control character in string", base, p),
+    2 => __jp_at("json: unknown escape", base, p),
+    3 => __jp_at("json: invalid unicode escape", base, p),
+    4 => __jp_at("json: lone surrogate", base, p),
+    5 => __jp_at("json: noncharacter", base, p),
+    6 => "unexpected end of input",
+    7 => __jp_at("json: trailing comma", base, p),
+    8 => __jp_at("json: expected ',' or ']'", base, p),
+    9 => __jp_at("json: expected ',' or '}'", base, p),
+    10 => __jp_at("json: unquoted key", base, p),
+    11 => __jp_at("json: duplicate key", base, p),
+    12 => __jp_at("json: expected ':'", base, p),
+    13 => __jp_at("json: invalid number", base, p),
+    14 => __jp_number_error(base, len, p),
+    15 => "expected bool",
+    16 => "expected null",
+    17 => __json_depth_error(),
+    _ => {
+      let cp = __jp_cp(base, p)
+      "unexpected char '" + string.__err_text(string.from_codepoint(cp) ?? "") + "' at pos " + int.to_string(__jp_charpos(base, p, 0, 0))
+    },
+  }
+}
+
+
+
+fn __jp_number_error(base: Int, len: Int, p: Int) -> String = {
+  let s = __jp_substr(base, p, __jp_numrun(base, len, p))
+  let lead = if prim.load8(base + p) == 45 then p + 1 else p
+  if __jp_digits(base, len, lead) < __jp_numrun(base, len, p) then match float.parse(s) {
+    ok(_) => "",
+    err(m) => m,
+  } else match int.parse(s) {
+    ok(_) => "",
+    err(m) => m,
+  }
+}
+
+
+
+fn __jp_cp(base: Int, p: Int) -> Int = {
   let b0 = prim.load8(base + p)
-  if b0 < 128 then (b0, 1)
-  else if b0 < 224 then ((b0 - 192) * 64 + (prim.load8(base + p + 1) - 128), 2)
-  else if b0 < 240 then ((b0 - 224) * 4096 + (prim.load8(base + p + 1) - 128) * 64 + (prim.load8(base + p + 2) - 128), 3) else ((b0 - 240) * 262144 + (prim.load8(base + p + 1) - 128) * 4096 + (prim.load8(base + p + 2) - 128) * 64 + (prim.load8(base + p + 3) - 128), 4)
+  if b0 < 128 then b0
+  else if b0 < 224 then (b0 - 192) * 64 + (prim.load8(base + p + 1) - 128)
+  else if b0 < 240 then (b0 - 224) * 4096 + (prim.load8(base + p + 1) - 128) * 64 + (prim.load8(base + p + 2) - 128) else (b0 - 240) * 262144 + (prim.load8(base + p + 1) - 128) * 4096 + (prim.load8(base + p + 2) - 128) * 64 + (prim.load8(base + p + 3) - 128)
 }
 
 
@@ -13780,16 +13844,19 @@ else {
 }
 
 
-fn __jp_copy_bytes(src: Int, dst: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
+fn __jp_copy(src: Int, dst: Int, n: Int, i: Int) -> Int = if i + 8 <= n then {
+  prim.store64(dst + i, prim.load64(src + i))
+  __jp_copy(src, dst, n, i + 8)
+} else if i < n then {
   prim.store8(dst + i, prim.load8(src + i))
-  __jp_copy_bytes(src, dst, n, i + 1)
-}
+  __jp_copy(src, dst, n, i + 1)
+} else 0
+
 
 fn __jp_substr(base: Int, from: Int, to: Int) -> String = {
   let n = if to > from then to - from else 0
   let s = prim.alloc_str(n)
-  let _c = __jp_copy_bytes(base + from, prim.handle(s) + 12, n, 0)
+  let _c = __jp_copy(base + from, prim.handle(s) + 12, n, 0)
   s
 }
 
@@ -13808,44 +13875,22 @@ else {
 fn __jp_nonchar(cp: Int) -> Bool = (cp >= 64976 and cp <= 65007) or cp % 65536 >= 65534
 
 
-fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), String] = {
+
+
+fn __jp_value(base: Int, len: Int, p: Int, depth: Int, c: Int) -> Value = if p < 0 then value.null()
+else {
   let q = __jp_ws(base, len, p)
-  if q >= len then err("unexpected end of input")
+  if q >= len then __jp_refuse(c, q, 6)
   else {
     let b = prim.load8(base + q)
-    if b == 34 then match __jp_string(base, len, q) {
-      ok(r) => {
-        let (s, np) = r
-        ok((value.string(s), np))
-      },
-      err(e) => err(e),
-    } else if (b == 123 or b == 91) and depth >= __json_max_depth() then err(__json_depth_error())
-    else if b == 123 then {
-      let q2 = __jp_ws(base, len, q + 1)
-      if q2 < len and prim.load8(base + q2) == 125 then {
-        let empty: List[(String, Value)] = []
-        ok((value.object(empty), q2 + 1))
-      } else {
-        let acc0: List[(String, Value)] = []
-        __jp_object(base, len, q2, acc0, depth + 1)
-      }
-    } else if b == 91 then {
-      let q2 = __jp_ws(base, len, q + 1)
-      if q2 < len and prim.load8(base + q2) == 93 then {
-        let empty: List[Value] = []
-        ok((value.array(empty), q2 + 1))
-      } else {
-        let acc0: List[Value] = []
-        __jp_array(base, len, q2, acc0, depth + 1)
-      }
-    } else if b == 116 or b == 102 then __jp_bool(base, len, q)
-    else if b == 110 then __jp_null(base, len, q)
-    else if b == 45 or (b >= 48 and b <= 57) then __jp_number(base, len, q)
-    else {
-      let (cp, _l) = __jp_cp(base, q)
-      let cpos = __jp_charpos(base, q, 0, 0)
-      err("unexpected char '" + string.__err_text(string.from_codepoint(cp) ?? "") + "' at pos " + int.to_string(cpos))
-    }
+    if b == 34 then value.string(__jp_string(base, len, q, c))
+    else if (b == 123 or b == 91) and depth >= __json_max_depth() then __jp_refuse(c, q, 17)
+    else if b == 123 then __jp_object(base, len, __jp_ws(base, len, q + 1), depth + 1, c)
+    else if b == 91 then __jp_array(base, len, __jp_ws(base, len, q + 1), depth + 1, c)
+    else if b == 116 or b == 102 then __jp_bool(base, len, q, c)
+    else if b == 110 then __jp_null(base, len, q, c)
+    else if b == 45 or (b >= 48 and b <= 57) then __jp_number(base, len, q, c)
+    else __jp_refuse(c, q, 18)
   }
 }
 
@@ -13860,70 +13905,58 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
 
 
 
-
-fn __jp_string(base: Int, len: Int, p: Int) -> Result[(String, Int), String] = {
-  let span = __jp_str_check(base, len, p + 1, 0, p)
-  if span < 0 then err(__jp_str_err(base, 0 - 1 - span))
-  else {
-    let buf = prim.alloc_str(span)
+fn __jp_string(base: Int, len: Int, p: Int, c: Int) -> String = {
+  let r = __jp_str_scan(base, len, p + 1, p, 0)
+  if r < 0 then {
+    __jp_seek(c, r)
+    ""
+  } else {
+    let e = r / 2
+    let n = e - p - 1
+    let buf = prim.alloc_str(n)
     let dh = prim.handle(buf) + 12
-    let (np, outn) = __jp_str_fill(base, len, p + 1, dh, 0)
-    prim.store32(prim.handle(buf) + 4, outn)
-    ok((buf, np))
+    let _w = if r % 2 == 0 then __jp_copy(base + p + 1, dh, n, 0)
+    else {
+      prim.store32(prim.handle(buf) + 4, __jp_str_fill(base, p + 1, e, dh, 0))
+      0
+    }
+    __jp_seek(c, e + 1)
+    buf
   }
 }
 
 
-fn __jp_str_fail(pos: Int, kind: Int) -> Int = 0 - 1 - (pos * 8 + kind)
 
-fn __jp_str_err(base: Int, code: Int) -> String = {
-  let kind = code % 8
-  let what = match kind {
-    0 => "json: unterminated string",
-    1 => "json: control character in string",
-    2 => "json: unknown escape",
-    3 => "json: invalid unicode escape",
-    4 => "json: lone surrogate",
-    _ => "json: noncharacter",
-  }
-  __jp_at(what, base, code / 8)
-}
-
-
-
-
-
-fn __jp_str_check(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int =
-  if p >= len then __jp_str_fail(open, 0)
+fn __jp_str_scan(base: Int, len: Int, p: Int, open: Int, esc: Int) -> Int =
+  if p >= len then __jp_code(open, 0)
   else {
     let b = prim.load8(base + p)
-    if b == 34 then n
-    else if b < 32 then __jp_str_fail(p, 1)
+    if b == 34 then p * 2 + esc
+    else if b < 32 then __jp_code(p, 1)
     else if b == 92 then {
-      if p + 1 >= len then __jp_str_fail(open, 0)
+      if p + 1 >= len then __jp_code(open, 0)
       else {
-        let e = prim.load8(base + p + 1)
-        if e == 34 or e == 92 or e == 47 or e == 98 or e == 102 or e == 110 or e == 114 or e == 116 then __jp_str_check(
+        let x = prim.load8(base + p + 1)
+        if x == 34 or x == 92 or x == 47 or x == 98 or x == 102 or x == 110 or x == 114 or x == 116 then __jp_str_scan(
           base,
           len,
           p + 2,
-          n + 1,
           open,
+          1,
         )
-        else if e == 117 then __jp_str_check_u(base, len, p, n, open)
-        else __jp_str_fail(p, 2)
+        else if x == 117 then __jp_str_scan_u(base, len, p, open)
+        else __jp_code(p, 2)
       }
     } else if b >= 239 then {
-      let (cp, l) = __jp_cp(base, p)
-      if __jp_nonchar(cp) then __jp_str_fail(p, 5)
-      else __jp_str_check(base, len, p + l, n + l, open)
-    } else __jp_str_check(base, len, p + 1, n + 1, open)
+      if __jp_nonchar(__jp_cp(base, p)) then __jp_code(p, 5)
+      else __jp_str_scan(base, len, p + (if b < 240 then 3 else 4), open, esc)
+    } else __jp_str_scan(base, len, p + 1, open, esc)
   }
 
 
-fn __jp_str_check_u(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int = {
+fn __jp_str_scan_u(base: Int, len: Int, p: Int, open: Int) -> Int = {
   let unit = __jp_hex4(base, len, p + 2)
-  if unit < 0 then __jp_str_fail(p, 3)
+  if unit < 0 then __jp_code(p, 3)
   else if unit >= 55296 and unit <= 56319 then {
     let lo = if p + 7 < len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then __jp_hex4(
       base,
@@ -13933,33 +13966,31 @@ fn __jp_str_check_u(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int = {
     else 0 - 1
     if lo >= 56320 and lo <= 57343 then {
       let cp = 65536 + (unit - 55296) * 1024 + (lo - 56320)
-      if __jp_nonchar(cp) then __jp_str_fail(p, 5)
-      else __jp_str_check(base, len, p + 12, n + 4, open)
-    } else __jp_str_fail(p, 4)
-  } else if unit >= 56320 and unit <= 57343 then __jp_str_fail(p, 4)
-  else if __jp_nonchar(unit) then __jp_str_fail(p, 5)
-  else __jp_str_check(base, len, p + 6, n + 3, open)
+      if __jp_nonchar(cp) then __jp_code(p, 5)
+      else __jp_str_scan(base, len, p + 12, open, 1)
+    } else __jp_code(p, 4)
+  } else if unit >= 56320 and unit <= 57343 then __jp_code(p, 4)
+  else if __jp_nonchar(unit) then __jp_code(p, 5)
+  else __jp_str_scan(base, len, p + 6, open, 1)
 }
 
 
 
-fn __jp_str_fill(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) =
-  if p >= len then (p, o)
-  else {
-    let b = prim.load8(base + p)
-    if b == 34 then (p + 1, o)
-    else if b == 92 then {
-      let e = prim.load8(base + p + 1)
-      if e == 117 then __jp_str_u(base, len, p, dh, o)
-      else {
-        prim.store8(dh + o, __jp_simple_escape(e))
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      }
-    } else {
-      prim.store8(dh + o, b)
-      __jp_str_fill(base, len, p + 1, dh, o + 1)
+fn __jp_str_fill(base: Int, p: Int, e: Int, dh: Int, o: Int) -> Int = if p >= e then o
+else {
+  let b = prim.load8(base + p)
+  if b == 92 then {
+    let x = prim.load8(base + p + 1)
+    if x == 117 then __jp_str_u(base, p, e, dh, o)
+    else {
+      prim.store8(dh + o, __jp_simple_escape(x))
+      __jp_str_fill(base, p + 2, e, dh, o + 1)
     }
+  } else {
+    prim.store8(dh + o, b)
+    __jp_str_fill(base, p + 1, e, dh, o + 1)
   }
+}
 
 
 fn __jp_simple_escape(e: Int) -> Int = match e {
@@ -13973,15 +14004,14 @@ fn __jp_simple_escape(e: Int) -> Int = match e {
 
 
 
-fn __jp_str_u(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) = {
-  let unit = __jp_hex4(base, len, p + 2)
+fn __jp_str_u(base: Int, p: Int, e: Int, dh: Int, o: Int) -> Int = {
+  let unit = __jp_hex4(base, e, p + 2)
   if unit >= 55296 and unit <= 56319 then {
-    let lo = __jp_hex4(base, len, p + 8)
-    let w = __jp_utf8_write(dh, o, 65536 + (unit - 55296) * 1024 + (lo - 56320))
-    __jp_str_fill(base, len, p + 12, dh, o + w)
+    let w = __jp_utf8_write(dh, o, 65536 + (unit - 55296) * 1024 + (__jp_hex4(base, e, p + 8) - 56320))
+    __jp_str_fill(base, p + 12, e, dh, o + w)
   } else {
     let w = __jp_utf8_write(dh, o, unit)
-    __jp_str_fill(base, len, p + 6, dh, o + w)
+    __jp_str_fill(base, p + 6, e, dh, o + w)
   }
 }
 
@@ -14071,99 +14101,107 @@ fn __jp_num_end(base: Int, end: Int, p: Int) -> Int = {
   }
 }
 
-fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
+
+fn __jp_mantissa(base: Int, p: Int, stop: Int, m: Int) -> Int = if p >= stop then m
+else {
+  let b = prim.load8(base + p)
+  if b == 46 then __jp_mantissa(base, p + 1, stop, m)
+  else __jp_mantissa(base, p + 1, stop, m * 10 + (b - 48))
+}
+
+
+fn __jp_pow10(k: Int, acc: Float) -> Float = if k <= 0 then acc else __jp_pow10(k - 1, acc * 10.0)
+
+
+
+
+
+
+
+fn __jp_number(base: Int, len: Int, p: Int, c: Int) -> Value = {
   let end = __jp_numrun(base, len, p)
-  let q = __jp_num_end(base, end, p)
-  if q != end then err(__jp_at("json: invalid number", base, p))
+  if __jp_num_end(base, end, p) != end then __jp_refuse(c, p, 13)
   else {
-    let s = __jp_substr(base, p, end)
+    __jp_seek(c, end)
+    let neg = prim.load8(base + p) == 45
+    let lead = if neg then p + 1 else p
+    let int_end = __jp_digits(base, end, lead)
+    if int_end == end then {
+      if end - lead <= 18 then {
+        let m = __jp_mantissa(base, lead, end, 0)
+        value.int(if neg then 0 - m else m)
+      } else match int.parse(__jp_substr(base, p, end)) {
+        ok(n) => value.int(n),
+        err(_) => __jp_refuse(c, p, 14),
+      }
+    } else __jp_float(base, p, lead, int_end, end, neg, c)
+  }
+}
 
-
-    let lead = if prim.load8(base + p) == 45 then p + 1 else p
-    let is_float = __jp_digits(base, end, lead) < end
-    if is_float then match float.parse(s) {
-      ok(f) => ok((value.float(f), end)),
-      err(m) => err(m),
-    } else match int.parse(s) {
-      ok(n) => ok((value.int(n), end)),
-      err(m) => err(m),
-    }
+fn __jp_float(base: Int, p: Int, lead: Int, int_end: Int, end: Int, neg: Bool, c: Int) -> Value = {
+  let has_frac = prim.load8(base + int_end) == 46
+  let frac_end = if has_frac then __jp_digits(base, end, int_end + 1) else int_end
+  let frac = if has_frac then frac_end - int_end - 1 else 0
+  let digits = int_end - lead + frac
+  let e_neg = frac_end + 1 < end and prim.load8(base + frac_end + 1) == 45
+  let e_start = if frac_end + 1 < end and (prim.load8(base + frac_end + 1) == 45 or prim.load8(base + frac_end + 1) == 43) then frac_end + 2 else frac_end + 1
+  let e_mag = if frac_end < end and end - e_start <= 3 then __jp_mantissa(base, e_start, end, 0) else 0
+  let net = (if e_neg then 0 - e_mag else e_mag) - frac
+  let fast = digits <= 15 and (frac_end == end or end - e_start <= 3) and net <= 22 and net >= 0 - 22
+  if fast then {
+    let mag = prim.i2f(__jp_mantissa(base, lead, frac_end, 0))
+    let scaled = if net >= 0 then mag * __jp_pow10(net, 1.0) else mag / __jp_pow10(0 - net, 1.0)
+    value.float(if neg then -1.0 * scaled else scaled)
+  } else match float.parse(__jp_substr(base, p, end)) {
+    ok(f) => value.float(f),
+    err(_) => __jp_refuse(c, p, 14),
   }
 }
 
 
 fn __jp_lit_at(base: Int, len: Int, p: Int, b0: Int, b1: Int, b2: Int, b3: Int) -> Bool = p + 4 <= len and prim.load8(base + p) == b0 and prim.load8(base + p + 1) == b1 and prim.load8(base + p + 2) == b2 and prim.load8(base + p + 3) == b3
 
-fn __jp_bool(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] =
-  if __jp_lit_at(
-    base,
-    len,
-    p,
-    116,
-    114,
-    117,
-    101,
-  ) then ok((value.bool(true), p + 4))
-  else if __jp_lit_at(base, len, p, 102, 97, 108, 115) and p + 5 <= len and prim.load8(base + p + 4) == 101 then ok((value.bool(false), p + 5)) else err("expected bool")
+fn __jp_bool(base: Int, len: Int, p: Int, c: Int) -> Value = if __jp_lit_at(base, len, p, 116, 114, 117, 101) then {
+  __jp_seek(c, p + 4)
+  value.bool(true)
+} else if __jp_lit_at(base, len, p, 102, 97, 108, 115) and p + 5 <= len and prim.load8(base + p + 4) == 101 then {
+  __jp_seek(c, p + 5)
+  value.bool(false)
+} else __jp_refuse(c, p, 15)
 
-fn __jp_null(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] =
-  if __jp_lit_at(
-    base,
-    len,
-    p,
-    110,
-    117,
-    108,
-    108,
-  ) then ok((value.null(), p + 4)) else err("expected null")
+fn __jp_null(base: Int, len: Int, p: Int, c: Int) -> Value = if __jp_lit_at(base, len, p, 110, 117, 108, 108) then {
+  __jp_seek(c, p + 4)
+  value.null()
+} else __jp_refuse(c, p, 16)
 
 
 
 
 
 
-
-
-
-
-
-
-
-fn __jp_array(base: Int, len: Int, p0: Int, acc0: List[Value], depth: Int) -> Result[(Value, Int), String] = {
-  var p = p0
-  var acc = acc0
-  var endp = 0 - 1
-  var error = ""
-  while endp < 0 and string.len(error) == 0 {
-    match __jp_value(base, len, p, depth) {
-      ok(r) => {
-        let (v, np) = r
-        list.push(acc, v)
-        let q = __jp_ws(base, len, np)
-        if q >= len then {
-          error = "unexpected end of input"
-        } else {
-          let b = prim.load8(base + q)
-          if b == 93 then {
-            endp = q + 1
-          } else if b == 44 then {
-            let n = __jp_ws(base, len, q + 1)
-            if n < len and prim.load8(base + n) == 93 then {
-              error = __jp_at("json: trailing comma", base, q)
-            } else {
-              p = n
-            }
-          } else {
-            error = __jp_at("json: expected ',' or ']'", base, q)
-          }
-        }
-      },
-      err(e) => {
-        error = e
-      },
+fn __jp_after(base: Int, len: Int, c: Int, close: Int) -> Int = {
+  let np = __jp_pos(c)
+  if np < 0 then 0 - 1
+  else {
+    let q = __jp_ws(base, len, np)
+    if q >= len then __jp_stop(c, q, 6)
+    else {
+      let b = prim.load8(base + q)
+      if b == close then {
+        __jp_seek(c, q + 1)
+        0 - 1
+      } else if b == 44 then {
+        let n = __jp_ws(base, len, q + 1)
+        if n < len and prim.load8(base + n) == close then __jp_stop(c, q, 7) else n
+      } else __jp_stop(c, q, if close == 93 then 8 else 9)
     }
   }
-  if string.len(error) > 0 then err(error) else ok((value.array(acc), endp))
+}
+
+
+fn __jp_stop(c: Int, p: Int, kind: Int) -> Int = {
+  __jp_seek(c, __jp_code(p, kind))
+  0 - 1
 }
 
 
@@ -14171,68 +14209,80 @@ fn __jp_array(base: Int, len: Int, p0: Int, acc0: List[Value], depth: Int) -> Re
 
 
 
-fn __jp_object(base: Int, len: Int, p0: Int, acc0: List[(String, Value)], depth: Int) -> Result[(Value, Int), String] = {
-  var p = p0
-  var acc = acc0
-  var seen: Map[String, Int] = map.new()
-  var endp = 0 - 1
-  var error = ""
-  while endp < 0 and string.len(error) == 0 {
-    if p >= len then {
-      error = "unexpected end of input"
-    } else if prim.load8(base + p) != 34 then {
-      error = __jp_at("json: unquoted key", base, p)
-    } else {
-      match __jp_string(base, len, p) {
-        err(e) => {
-          error = e
-        },
-        ok(kr) => {
-          let (k, kp) = kr
-          if map.contains(seen, k) then {
-            error = __jp_at("json: duplicate key", base, p)
-          } else {
-            seen = map.set(seen, k, 0)
-            let c = __jp_ws(base, len, kp)
-            if c >= len then {
-              error = "unexpected end of input"
-            } else if prim.load8(base + c) != 58 then {
-              error = __jp_at("json: expected ':'", base, c)
-            } else {
-              match __jp_value(base, len, c + 1, depth) {
-                ok(r) => {
-                  let (v, np) = r
-                  list.push(acc, (k, v))
-                  let q = __jp_ws(base, len, np)
-                  if q >= len then {
-                    error = "unexpected end of input"
-                  } else {
-                    let b = prim.load8(base + q)
-                    if b == 125 then {
-                      endp = q + 1
-                    } else if b == 44 then {
-                      let n = __jp_ws(base, len, q + 1)
-                      if n < len and prim.load8(base + n) == 125 then {
-                        error = __jp_at("json: trailing comma", base, q)
-                      } else {
-                        p = n
-                      }
-                    } else {
-                      error = __jp_at("json: expected ',' or '}'", base, q)
-                    }
-                  }
-                },
-                err(e) => {
-                  error = e
-                },
-              }
-            }
-          }
-        },
-      }
-    }
+
+
+
+
+
+fn __jp_array(base: Int, len: Int, p0: Int, depth: Int, c: Int) -> Value = {
+  var items: List[Value] = []
+  var p = if p0 < len and prim.load8(base + p0) == 93 then {
+    __jp_seek(c, p0 + 1)
+    0 - 1
+  } else p0
+  while p >= 0 {
+    list.push(items, __jp_value(base, len, p, depth, c))
+    p = __jp_after(base, len, c, 93)
   }
-  if string.len(error) > 0 then err(error) else ok((value.object(acc), endp))
+  value.array(items)
+}
+
+
+fn __jp_key(base: Int, len: Int, p: Int, c: Int) -> String =
+  if p >= len then {
+    __jp_seek(c, __jp_code(p, 6))
+    ""
+  } else if prim.load8(base + p) != 34 then {
+    __jp_seek(c, __jp_code(p, 10))
+    ""
+  } else __jp_string(base, len, p, c)
+
+
+
+fn __jp_colon(base: Int, len: Int, c: Int) -> Int = {
+  let kp = __jp_pos(c)
+  if kp < 0 then 0 - 1
+  else {
+    let q = __jp_ws(base, len, kp)
+    if q >= len then __jp_stop(c, q, 6)
+    else if prim.load8(base + q) != 58 then __jp_stop(c, q, 12)
+    else q + 1
+  }
+}
+
+
+fn __jp_unique(c: Int, p: Int, repeated: Bool) -> Unit =
+  if repeated and __jp_pos(c) >= 0 then __jp_seek(c, __jp_code(p, 11)) else ()
+
+
+
+
+
+
+
+fn __jp_object(base: Int, len: Int, p0: Int, depth: Int, c: Int) -> Value = {
+  var pairs: List[(String, Value)] = []
+  var p = if p0 < len and prim.load8(base + p0) == 125 then {
+    __jp_seek(c, p0 + 1)
+    0 - 1
+  } else p0
+  while p >= 0 and list.len(pairs) < 16 {
+    let k = __jp_key(base, len, p, c)
+    __jp_unique(c, p, list.any(pairs, ((s, _)) => s == k))
+    list.push(pairs, (k, __jp_value(base, len, __jp_colon(base, len, c), depth, c)))
+    p = __jp_after(base, len, c, 125)
+  }
+  if p >= 0 then {
+    var index = pairs |> list.map(((s, _)) => (s, 0)) |> map.from_list
+    while p >= 0 {
+      let k = __jp_key(base, len, p, c)
+      __jp_unique(c, p, map.contains(index, k))
+      index = map.set(index, k, 0)
+      list.push(pairs, (k, __jp_value(base, len, __jp_colon(base, len, c), depth, c)))
+      p = __jp_after(base, len, c, 125)
+    }
+  } else ()
+  value.object(pairs)
 }
 "#;
 pub const SRC_JSON_PATH: &str = r#"
@@ -43463,20 +43513,11 @@ fn value_omit(v: Value, keys: List[String]) -> Value =
 
 
 
-fn __vu_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool =
-  if i >= n then false
-  else if j >= n then __vu_dup_small(pairs, i + 1, i + 2, n)
-  else if __vu_key_at(pairs, i) == __vu_key_at(pairs, j) then true
-  else __vu_dup_small(pairs, i, j + 1, n)
-
-fn __vu_key_at(pairs: List[(String, Value)], i: Int) -> String = match list.get(pairs, i) {
-  some((k, _)) => k,
-  none => "",
-}
-
 fn __vu_has_dup(pairs: List[(String, Value)]) -> Bool = {
-  let n = list.len(pairs)
-  if n < 16 then __vu_dup_small(pairs, 0, 1, n)
+
+
+
+  if list.len(pairs) < 16 then pairs |> list.any(((k, _)) => list.count(pairs, ((j, _)) => j == k) > 1)
   else {
     var seen: Map[String, Int] = map.new()
     var dup = false
