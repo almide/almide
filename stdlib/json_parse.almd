@@ -86,29 +86,39 @@ fn __json_depth_error() -> String = "json: nesting deeper than 1000"
 fn json_parse(text: String) -> Result[Value, String] = {
   let tl = prim.load32(prim.handle(text) + 4)
   if tl > 1000000000 then prim.die(prim.handle("Error: json parse: text too long\n")) else ()
-  let sn = tl * 3 + 64
-  let sc = prim.alloc_bytes(sn)
-  let s = prim.handle(sc) + 12
-  prim.store64(s, 0)
-  prim.store64(s + 8, 0)
-  prim.store64(s + 16, 32)
-  prim.store64(s + 24, 0)
+  let sc = prim.alloc_bytes(tl * 3 + 64)
+  __jp_set_word(sc, 0, 0)
+  __jp_set_word(sc, 8, 0)
+  __jp_set_word(sc, 16, 32)
+  __jp_set_word(sc, 24, 0)
   let r = __jp_v1(text, tl, 0, 0, sc)
   let q = if r < 0 then r else __jp_trail(text, tl, r)
   if q < 0 then err(__jp_message(text, tl, 0 - 1 - q))
   else {
-    let total = prim.load64(s)
+    let total = __jp_word(sc, 0)
     if total < 0 then prim.die(prim.handle("Error: json parse: the passes disagree\n")) else ()
     if total > 2147483647 then prim.die(prim.handle("Error: json parse: the document is too large\n")) else ()
     let fam = prim.alloc_bytes(total)
-    prim.store64(s, 0)
-    prim.store64(s + 8, 32)
+    __jp_set_word(sc, 0, 0)
+    __jp_set_word(sc, 8, 32)
     let _e = __jp_v2(text, tl, 0, fam, sc)
     // The passes must agree: every byte carved, one handle left.
-    if prim.load64(s) != total then __jp_disagree() else ()
-    if prim.load64(s + 8) != 36 then __jp_disagree() else ()
-    let top: Value = prim.load_handle(s + 32)
-    ok(top)
+    if __jp_word(sc, 0) != total then __jp_disagree() else ()
+    if __jp_word(sc, 8) != 36 then __jp_disagree() else ()
+    ok(__jp_top(sc))
+  }
+}
+
+// The document's top Value: the one handle left on the scratch stack, read
+// as a share of the family (prim.load_handle).
+fn __jp_top(sc: Bytes) -> Value = {
+  let n = prim.load32(prim.handle(sc) + 4)
+  if n < 36 then {
+    prim.die(prim.handle("Error: json parse: the passes disagree\n"))
+    value.null()
+  } else {
+    let top: Value = prim.load_handle(prim.handle(sc) + 44)
+    top
   }
 }
 
@@ -308,9 +318,9 @@ fn __jp_same_bytes(t: String, a: Int, b: Int, k: Int) -> Bool = {
         go = false
       } else if i < 0 then {
         go = false
-      } else if a + i >= n then {
+      } else if i >= n - a then {
         go = false
-      } else if b + i >= n then {
+      } else if i >= n - b then {
         go = false
       } else if prim.load8(prim.handle(t) + 12 + a + i) != prim.load8(prim.handle(t) + 12 + b + i) then {
         same = false
@@ -360,7 +370,9 @@ fn __jp_copy_ts(t: String, a: Int, d: String, k: Int) -> Unit = {
   let n = prim.load32(prim.handle(t) + 4)
   let dn = prim.load32(prim.handle(d) + 4)
   if a < 0 then ()
-  else if a + k > n then ()
+  else if k < 0 then ()
+  else if k > n then ()
+  else if a > n - k then ()
   else if k > dn then ()
   else {
     var i = 0
@@ -391,14 +403,14 @@ fn __jp_cap(n: Int) -> Int = if n <= 4 then 4 else (n + 3) / 4 * 4
 fn __jp_word(sc: Bytes, off: Int) -> Int = {
   let n = prim.load32(prim.handle(sc) + 4)
   if off < 0 then 0
-  else if off + 8 > n then 0
+  else if off > n - 8 then 0
   else prim.load64(prim.handle(sc) + 12 + off)
 }
 
 fn __jp_set_word(sc: Bytes, off: Int, v: Int) -> Unit = {
   let n = prim.load32(prim.handle(sc) + 4)
   if off < 0 then __jp_disagree()
-  else if off + 8 > n then __jp_disagree()
+  else if off > n - 8 then __jp_disagree()
   else prim.store64(prim.handle(sc) + 12 + off, v)
 }
 
@@ -635,7 +647,7 @@ fn __jp_span_push(sc: Bytes, open: Int, esc: Int, e: Int) -> Unit = {
   let n = prim.load32(prim.handle(sc) + 4)
   let k = __jp_word(sc, 16)
   if k < 32 then __jp_disagree()
-  else if k + 8 > n then __jp_disagree()
+  else if k > n - 8 then __jp_disagree()
   else {
     prim.store32(prim.handle(sc) + 12 + k, open * 2 + esc)
     prim.store32(prim.handle(sc) + 16 + k, e)
@@ -646,7 +658,7 @@ fn __jp_span_push(sc: Bytes, open: Int, esc: Int, e: Int) -> Unit = {
 fn __jp_span_word(sc: Bytes, k: Int) -> Int = {
   let n = prim.load32(prim.handle(sc) + 4)
   if k < 32 then 0
-  else if k + 4 > n then 0
+  else if k > n - 4 then 0
   else prim.load32(prim.handle(sc) + 12 + k)
 }
 
@@ -775,7 +787,7 @@ fn __jp_pow2(want: Int, m: Int) -> Int = if m >= want or m > 1073741824 then m e
 fn __jp_zero(tb: Bytes) -> Unit = {
   let n = prim.load32(prim.handle(tb) + 4)
   var i = 0
-  while i + 4 <= n {
+  while i <= n - 4 {
     if i < 0 then {
       i = n
     } else {
@@ -817,14 +829,14 @@ else {
 fn __jp_tword(tb: Bytes, at: Int) -> Int = {
   let n = prim.load32(prim.handle(tb) + 4)
   if at < 0 then 0
-  else if at + 4 > n then 0
+  else if at > n - 4 then 0
   else prim.load32(prim.handle(tb) + 12 + at)
 }
 
 fn __jp_set_tword(tb: Bytes, at: Int, v: Int) -> Unit = {
   let n = prim.load32(prim.handle(tb) + 4)
   if at < 0 then __jp_disagree()
-  else if at + 4 > n then __jp_disagree()
+  else if at > n - 4 then __jp_disagree()
   else prim.store32(prim.handle(tb) + 12 + at, v)
 }
 
@@ -899,7 +911,7 @@ fn __jp_box(fam: Bytes, sc: Bytes, tag: Int, x: Int) -> Unit = {
   let fl = prim.load32(prim.handle(fam) + 4)
   let cur = __jp_word(sc, 0)
   if cur < 0 then __jp_disagree()
-  else if cur + 28 > fl then __jp_disagree()
+  else if cur > fl - 28 then __jp_disagree()
   else {
     let b = prim.handle(fam) + 12 + cur
     prim.store32(b, cur + 2147483660)
@@ -918,7 +930,7 @@ fn __jp_push(sc: Bytes, x: Int) -> Unit = {
   let n = prim.load32(prim.handle(sc) + 4)
   let k = __jp_word(sc, 8)
   if k < 32 then __jp_disagree()
-  else if k + 4 > n then __jp_disagree()
+  else if k > n - 4 then __jp_disagree()
   else {
     prim.store32(prim.handle(sc) + 12 + k, x)
     __jp_set_word(sc, 8, k + 4)
@@ -948,7 +960,7 @@ fn __jp_pair(fam: Bytes, sc: Bytes, kh: Int, vh: Int) -> Int = {
   if cur < 0 then {
     __jp_disagree()
     0
-  } else if cur + 20 > fl then {
+  } else if cur > fl - 20 then {
     __jp_disagree()
     0
   } else {
@@ -971,7 +983,13 @@ fn __jp_list(fam: Bytes, sc: Bytes, k: Int) -> Int = {
   if cur < 0 then {
     __jp_disagree()
     0
-  } else if cur + 12 + cap > fl then {
+  } else if cap < 4 then {
+    __jp_disagree()
+    0
+  } else if cap > fl then {
+    __jp_disagree()
+    0
+  } else if cur > fl - 12 - cap then {
     __jp_disagree()
     0
   } else if cap < k * 4 then {
@@ -996,12 +1014,15 @@ fn __jp_copy_sf(sc: Bytes, a: Int, fam: Bytes, d: Int, k: Int) -> Unit = {
   let n = prim.load32(prim.handle(sc) + 4)
   let fl = prim.load32(prim.handle(fam) + 4)
   if a < 32 then __jp_disagree()
-  else if a + k > n then __jp_disagree()
+  else if k < 0 then __jp_disagree()
+  else if k > n then __jp_disagree()
+  else if a > n - k then __jp_disagree()
   else if d < 0 then __jp_disagree()
-  else if d + k > fl then __jp_disagree()
+  else if k > fl then __jp_disagree()
+  else if d > fl - k then __jp_disagree()
   else {
     var i = 0
-    while i + 8 <= k {
+    while i <= k - 8 {
       if i < 0 then {
         i = k
       } else {
@@ -1009,7 +1030,7 @@ fn __jp_copy_sf(sc: Bytes, a: Int, fam: Bytes, d: Int, k: Int) -> Unit = {
         i = i + 8
       }
     }
-    while i + 4 <= k {
+    while i <= k - 4 {
       if i < 0 then {
         i = k
       } else {
@@ -1025,12 +1046,15 @@ fn __jp_copy_tf(t: String, a: Int, fam: Bytes, d: Int, k: Int) -> Unit = {
   let n = prim.load32(prim.handle(t) + 4)
   let fl = prim.load32(prim.handle(fam) + 4)
   if a < 0 then __jp_disagree()
-  else if a + k > n then __jp_disagree()
+  else if k < 0 then __jp_disagree()
+  else if k > n then __jp_disagree()
+  else if a > n - k then __jp_disagree()
   else if d < 0 then __jp_disagree()
-  else if d + k > fl then __jp_disagree()
+  else if k > fl then __jp_disagree()
+  else if d > fl - k then __jp_disagree()
   else {
     var i = 0
-    while i + 8 <= k {
+    while i <= k - 8 {
       if i < 0 then {
         i = k
       } else {
@@ -1059,7 +1083,13 @@ fn __jp_str2(t: String, p: Int, r: Int, fam: Bytes, sc: Bytes) -> Int = {
   if cur < 0 then {
     __jp_disagree()
     0
-  } else if cur + 12 + cap > fl then {
+  } else if cap < 4 then {
+    __jp_disagree()
+    0
+  } else if cap > fl then {
+    __jp_disagree()
+    0
+  } else if cur > fl - 12 - cap then {
     __jp_disagree()
     0
   } else {
