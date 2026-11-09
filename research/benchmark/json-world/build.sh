@@ -28,11 +28,11 @@ for tag in head reborn; do
   [ -x "$almide" ] || { echo "no almide for $tag"; FAILED+=("almide-$tag"); continue; }
   "$almide" --version || true
   # Native --release defaults to -C target-cpu=x86-64-v3 (AVX2) on x86-64.
-  step "almide-$tag__v3"       "$almide" build "$A/jsonround_phased.almd" -o "$OUT/native/almide-$tag__v3" --release
-  step "almide-$tag__portable" "$almide" build "$A/jsonround_phased.almd" -o "$OUT/native/almide-$tag__portable" --release --target-cpu portable
-  step "almide-$tag__native"   "$almide" build "$A/jsonround_phased.almd" -o "$OUT/native/almide-$tag__native" --release --target-cpu native
+  step "almide-${tag}__v3"       "$almide" build "$A/jsonround_phased.almd" -o "$OUT/native/almide-${tag}__v3" --release
+  step "almide-${tag}__portable" "$almide" build "$A/jsonround_phased.almd" -o "$OUT/native/almide-${tag}__portable" --release --target-cpu portable
+  step "almide-${tag}__native"   "$almide" build "$A/jsonround_phased.almd" -o "$OUT/native/almide-${tag}__native" --release --target-cpu native
   step "almide-$tag-exact__v3" "$almide" build "$A/jsonround.almd" -o "$OUT/native/almide-$tag-exact__v3" --release
-  step "almide-$tag__wasm"     "$almide" build "$A/jsonround_phased.almd" --target wasm -o "$OUT/wasm/almide-$tag__plain.wasm"
+  step "almide-${tag}__wasm"     "$almide" build "$A/jsonround_phased.almd" --target wasm -o "$OUT/wasm/almide-${tag}__plain.wasm"
   for p in jsonround_phased jr_build jr_stringify; do
     step "count-almide-$tag-$p" env ALMIDE_ALLOC_COUNT=1 "$almide" build "$A/$p.almd" -o "$OUT/count/native/almide-$tag-$p" --release
   done
