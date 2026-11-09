@@ -57,8 +57,25 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
+        ret: Option<SliceTy>,
     ) -> ArmResult {
         match (func, args) {
+            // load_handle[A](addr): the 4-byte handle slot at `addr`, typed by
+            // the call's own type (ADR-0033 D2: how a family producer hands
+            // out a block it carved). The slot keeps its holder, so the read
+            // takes a share at once and the result is owned — the frame
+            // releases it or moves it on like any owned call result.
+            ("load_handle", [a]) => {
+                let ty = match ret {
+                    Some(t) if t.val_type() == ValType::I32 && self.rc_droppable(t) => t,
+                    other => return unsup(&format!("prim-load-handle-of:{other:?}")),
+                };
+                self.lower_arg(a, Some(INT), ArgMode::Raw)?;
+                self.f.instructions().i32_wrap_i64().i32_load(raw(()));
+                crate::witness::bounds::prim(self.f);
+                self.rc_inc_top();
+                Ok(Some(Lowered::owned(ty)))
+            }
             // handle: any BLOCK value's base address as Int.
             ("handle", [x]) => {
                 match self.lower_arg(x, None, ArgMode::Raw)? {

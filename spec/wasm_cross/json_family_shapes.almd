@@ -1,0 +1,148 @@
+// @contract: C-087, C-400, C-401
+// json.parse in two passes (ADR-0033 D2): the first checks the whole text and
+// counts, the second carves every value into one family. These are the
+// shapes where the two passes must agree — deep, wide and empty containers,
+// escapes in strings and keys — and the duplicate-key check on both sides of
+// its 16-key edge: pairwise below it, one index over the object above it
+// (a hash, and a sort when the hash degrades), reported at the repeat's
+// opening quote even when a later refusal comes first in reading order.
+// Every leg prints the same bytes.
+import json
+
+fn s(text: String) -> String = match json.parse(text) {
+  ok(v) => "ok " + json.stringify(v),
+  err(e) => "err " + e,
+}
+
+fn q(body: String) -> String = "\"" + body + "\""
+
+fn keys(n: Int) -> List[String] = list.range(0, n) |> list.map((i) => "\"k${i}\":${i}")
+
+fn obj(members: List[String]) -> String = "{" + (members |> list.join(",")) + "}"
+
+// n keys, with key k<dup> written again at position `at`.
+fn dup_at(n: Int, dup: Int, at: Int) -> String = {
+  let ks = keys(n)
+  obj(list.take(ks, at) + ["\"k${dup}\":-1"] + list.drop(ks, at))
+}
+
+fn colliding() -> List[String] = ["c34", "c78", "c96", "c126", "c184", "c207", "c272", "c355", "c399", "c434", "c478", "c496", "c522", "c557", "c720", "c759", "c795", "c856", "c975", "c1073"]
+
+effect fn main() -> Unit = {
+  // Empty and nested-empty containers.
+  for t in ["[]", "{}", "[[]]", "[{}]", "{\"\":{}}", "{\"a\":[]}", "[[],{},\"\",[[]]]", " [ ] ", "\"\""] {
+    println(s(t))
+  }
+  // Deep: 1000 containers parse, 1001 do not.
+  let deep = string.repeat("[", 1000) + string.repeat("]", 1000)
+  println("${string.len(json.stringify(json.parse(deep) ?? value.null()))}")
+  println(s(string.repeat("[", 1001) + string.repeat("]", 1001)))
+  let deep_obj = string.repeat("{\"a\":", 500) + "1" + string.repeat("}", 500)
+  println("${string.len(json.stringify(json.parse(deep_obj) ?? value.null()))}")
+  // Wide: a long array, a wide object, a wide object of wide arrays.
+  let long = "[" + (list.range(0, 5000) |> list.map((i) => int.to_string(i)) |> list.join(",")) + "]"
+  println("${string.len(json.stringify(json.parse(long) ?? value.null()))}")
+  let wide = obj(keys(300))
+  println("${string.len(json.stringify(json.parse(wide) ?? value.null()))}")
+  let grid = obj(list.range(0, 40) |> list.map((i) => "\"r${i}\":" + "[" + (list.range(0, 40) |> list.map((j) => int.to_string(i * j)) |> list.join(",")) + "]"))
+  println("${string.len(json.stringify(json.parse(grid) ?? value.null()))}")
+  // Escapes in strings and keys, at every UTF-8 width.
+  println(s(q("a\\nb\\t\\\"\\\\\\/\\b\\f\\r")))
+  println(s("{" + q("k\\u00e9\\u65e5\\ud83d\\ude00") + ":" + q("\\u0041\\u0000z") + "}"))
+  println(s("[" + q("é日😀") + "," + q("\\u00e9\\u65e5\\ud83d\\ude00") + "]"))
+  // A key repeated through an escape is a repeat.
+  for t in [
+    "{\"a\":1,\"\\u0061\":2}",
+    "{\"\\u0061\":1,\"a\":2}",
+    "{\"é\":1,\"\\u00e9\":2}",
+    "{\"😀\":1,\"\\ud83d\\ude00\":2}",
+    "{\"a\\nb\":1,\"a\\u000ab\":2}",
+    "{\"a/\":1,\"a\\/\":2}",
+    "{\"ab\":1,\"a\":2,\"b\":3}"
+  ] {
+    println(s(t))
+  }
+  // Around the 16-key edge, a repeat at several positions.
+  for n in [15, 16, 17, 18, 40] {
+    println(s(dup_at(n, 0, n)))
+    println(s(dup_at(n, n - 1, n)))
+    println(s(dup_at(n, 3, 16)))
+    println(s(dup_at(n, 3, 17)))
+  }
+  println(s(dup_at(40, 39, 30)))
+  println(s(obj(keys(20) + ["\"\\u006b5\":0"])))
+  // The earlier refusal wins: a repeat at key 20, then a missing ':'.
+  println(s(obj(keys(20) + ["\"k3\":0", "\"x\" 1"])))
+  // A missing ':' before the repeat.
+  println(s(obj(keys(20) + ["\"x\" 1", "\"k3\":0"])))
+  // A bad value inside a wide object, then a repeat after it.
+  println(s(obj(keys(20) + ["\"x\":tru", "\"k3\":0"])))
+  // Nested wide objects: the inner repeat comes first in reading order.
+  let inner = obj(keys(20) + ["\"k9\":0"])
+  println(s(obj(keys(18) + ["\"in\":" + inner, "\"k1\":0"])))
+  // ...and the outer repeat comes first.
+  println(s(obj(keys(18) + ["\"k1\":0", "\"in\":" + inner])))
+  // Unterminated inside a wide object after a repeat.
+  println(s("{" + (keys(20) |> list.join(",")) + ",\"k2\":0,\"open"))
+  // Keys whose hashes all collide: the index falls back to sorting.
+  let cs = colliding()
+  println(s(obj(cs |> list.map((k) => "\"${k}\":1"))))
+  println(s(obj((cs |> list.map((k) => "\"${k}\":1")) + ["\"c96\":2"])))
+  println(s(obj((list.take(cs, 12) |> list.map((k) => "\"${k}\":1")) + ["\"c207\":2"] + (list.drop(cs, 12) |> list.map((k) => "\"${k}\":1")))))
+  // Numbers at the edges of each range.
+  for t in [
+    "9223372036854775807",
+    "-9223372036854775808",
+    "9223372036854775808",
+    "-9223372036854775809",
+    "92233720368547758070",
+    "123456789012345678",
+    "-0",
+    "1.7976931348623157e308",
+    "1.7976931348623158e308",
+    "1.7976931348623159e308",
+    "1e308",
+    "1e309",
+    "10e308",
+    "0.1e310",
+    "0.17976931348623157e309",
+    "0.17976931348623159e309",
+    "0.0000e99999999999",
+    "1e99999999999",
+    "1e-400",
+    "[1e400]",
+    "{\"a\":[0.5,1e309]}"
+  ] {
+    println(s(t))
+  }
+  // Every refusal at its position.
+  for t in [
+    "",
+    "  ",
+    "[1,]",
+    "[1 2]",
+    "{\"a\" 1}",
+    "{\"a\":1 \"b\":2}",
+    "{a:1}",
+    "{\"a\":1,}",
+    "\"abc",
+    "\"a\u{1}b\"",
+    "\"\\x\"",
+    "\"\\u12g4\"",
+    "\"\\ud800\"",
+    "\"\\udc00x\"",
+    "\"\\ufdd0\"",
+    "tru",
+    "nul",
+    "-",
+    "01",
+    "1.",
+    "1e",
+    "@",
+    "[1] x",
+    "{\"a\":1}}",
+    "[\"é\", @]"
+  ] {
+    println(s(t))
+  }
+}
