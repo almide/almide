@@ -196,7 +196,7 @@ impl LowerCtx {
         index: &IrExpr,
         value: &IrExpr,
     ) -> Result<(), LowerError> {
-        let wall = |what: &str| LowerError::Unsupported(format!("index-assign to shared-cell var {target:?} {what}"));
+        let wall = |what: &str| LowerError::at(value.span, format!("index-assign to shared-cell var {target:?} {what}"));
         if self.in_frame > 0 && self.unit_arm_depth == 0 && self.scalar_loop_depth == 0 {
             return Err(wall("inside a modeled (non-executable) frame"));
         }
