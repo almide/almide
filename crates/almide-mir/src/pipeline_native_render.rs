@@ -508,6 +508,7 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     crate::native_defaults::expand(&mut ir);
     crate::native_nested_places::expand(&mut ir);
     crate::native_mutation_places::expand(&mut ir);
+    crate::native_map_upsert::expand(&mut ir);
     almide_codegen::pass_region_window_native::native_region_windows(&mut ir);
     let windows = crate::native_region_window::window_fns(&ir);
     let mut ir = crate::fan_native::lift_fan_arms(ir)?;
