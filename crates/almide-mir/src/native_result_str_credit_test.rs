@@ -16,7 +16,7 @@ fn a_string_result_keeps_its_credit_for_borrowed_payload_calls() {
         ..Default::default()
     };
     assert!(crate::verify_ownership(&f).is_ok());
-    let drop = f.ops.pop().unwrap();
+    let drop = f.ops.pop().expect("the lowered fn ends in an op");
     assert!(crate::verify_ownership(&f).is_err(), "missing carrier release");
     f.ops.insert(4, drop);
     assert!(crate::verify_ownership(&f).is_err(), "payload outlives carrier");

@@ -36,13 +36,13 @@ mod parallel_runtime_tests {
         assert!(parallel_runtime_body("almide_rt_string_len").is_err());
         // The normal floor must not assume output/thread hooks are ambient.
         assert!(runtime_body("almide_rt_fan_map_par").is_none());
-        let (params, ret, items) = parallel_runtime_body("almide_rt_fan_map_par").unwrap();
+        let (params, ret, items) = parallel_runtime_body("almide_rt_fan_map_par").expect("the runtime source defines almide_rt_fan_map_par");
         assert_eq!(params, ["Vec<A>", "F"]);
         assert_eq!(ret, "Result<Vec<B>,AlmideString>");
         let mut src = String::from("#![allow(dead_code, unused_imports, unused_mut, unused_variables)]\n");
         src.push_str(&crate::render_native::fan_glue());
         src.push_str(&crate::render_native_str::almide_string_alias());
-        src.push_str(floor_header().strip_suffix(FLOOR_IO_HEADER).unwrap());
+        src.push_str(floor_header().strip_suffix(FLOOR_IO_HEADER).expect("the floor header ends with its IO header"));
         src.push_str(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
         src.push_str("#[cfg(any(target_os = \"linux\", target_os = \"macos\"))] fn almide_stack_guard_stdout() {}\n");
         for item in items { src.push_str(item); src.push('\n'); }
@@ -90,27 +90,27 @@ fn main() {
 "#);
         let src = crate::render_native::route_exits(&src);
         let dir = std::env::temp_dir().join(format!("almide-native-parallel-runtime-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).expect("create the scratch dir");
         let file = dir.join("runtime.rs");
         let bin = dir.join("runtime");
-        std::fs::write(&file, src).unwrap();
+        std::fs::write(&file, src).expect("write the runtime source");
         let build = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
-            .args(["--edition=2021", "-Awarnings"]).arg(&file).arg("-o").arg(&bin).output().unwrap();
+            .args(["--edition=2021", "-Awarnings"]).arg(&file).arg("-o").arg(&bin).output().expect("spawn rustc");
         assert!(build.status.success(), "{}\nsource: {}", String::from_utf8_lossy(&build.stderr), file.display());
         let mut expected = (0..64).map(|i| format!("element {i}\n")).collect::<String>();
         expected.push_str("all elements settled; lowest error; values in input order\n");
         for sequential in ["0", "1"] {
             let run = Command::new(&bin).env("ALMIDE_FAN_SEQUENTIAL", sequential)
-                .env("ALMIDE_FAN_COST_OFF", "1").env("ALMIDE_FAN_THREADS", "4").output().unwrap();
+                .env("ALMIDE_FAN_COST_OFF", "1").env("ALMIDE_FAN_THREADS", "4").output().expect("run the built runtime");
             assert!(run.status.success(), "schedule {sequential}: {}", String::from_utf8_lossy(&run.stderr));
             assert_eq!(run.stdout, expected.as_bytes(), "schedule {sequential}");
             assert!(run.stderr.is_empty());
             let trap = Command::new(&bin).arg("trap").env("ALMIDE_FAN_SEQUENTIAL", sequential)
-                .env("ALMIDE_FAN_COST_OFF", "1").env("ALMIDE_FAN_THREADS", "4").output().unwrap();
+                .env("ALMIDE_FAN_COST_OFF", "1").env("ALMIDE_FAN_THREADS", "4").output().expect("run the built runtime's trap case");
             assert_eq!(trap.status.code(), Some(1));
             assert_eq!(trap.stdout, b"element 0\nelement 1\nelement 2\nelement 3\n");
             assert_eq!(trap.stderr, b"Error: trap 3\n");
         }
-        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(dir).expect("remove the scratch dir");
     }
 }

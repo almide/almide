@@ -15,7 +15,7 @@ mod runtime_type_agreement_tests {
 
     #[test]
     fn opaque_runtime_types_require_nominal_and_carrier_agreement() {
-        let response = RuntimeType::of("http.HttpResponse").unwrap();
+        let response = RuntimeType::of("http.HttpResponse").expect("http.HttpResponse is a runtime type");
         assert_eq!(RuntimeType::of("HttpResponse"), Some(response));
         assert_eq!(RuntimeType::of("other.HttpResponse"), None);
         assert!(param_agrees(FloorParam::Runtime(response, true), "&AlmideHttpResponse"));

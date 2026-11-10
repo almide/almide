@@ -779,6 +779,6 @@ fn render_narrow_pow_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
         if __exp < 0 {{ almide_abort(\"negative exponent\"); }} \
         let mut __n = __exp as u64; let mut __r: {ty} = 1; \
         while __n > 0 {{ if __n & 1 == 1 {{ __r = __r.wrapping_mul(__base); }} \
-        __n >>= 1; if __n > 0 {{ __base = __base.wrapping_mul(__base); }} }} __r as i64 }};", var(*dst)).unwrap();
+        __n >>= 1; if __n > 0 {{ __base = __base.wrapping_mul(__base); }} }} __r as i64 }};", var(*dst)).expect("writing to a String cannot fail");
     Ok(true)
 }

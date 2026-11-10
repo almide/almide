@@ -100,7 +100,7 @@ mod equality_tests {
         let _guard = install(decls);
         for ty in [good, pair] {
             assert!(is_native_set(&Ty::set_of(ty.clone())));
-            let i = rec_index(&block_key(&ty)).unwrap();
+            let i = rec_index(&block_key(&ty)).expect("the block's record is registered");
             assert!(native_set_element_kind(NTy::Rec(i)));
         }
         assert!(!is_native_set(&Ty::set_of(bad)));

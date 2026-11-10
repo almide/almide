@@ -97,7 +97,7 @@ mod static_callback_tests {
     #[test]
     fn static_callback_can_be_lent_to_a_runtime_worker() {
         let source = "fn route(callback: std::rc::Rc<dyn Fn(i64) -> i64>) -> i64 { worker(&*callback) }";
-        let (_, body) = static_twin("route", source).unwrap();
+        let (_, body) = static_twin("route", source).expect("route has a static twin");
         assert!(body.contains("callback: impl Fn(i64) -> i64"));
         assert!(body.contains("let callback = &callback;"));
         assert!(body.contains("worker(&*callback)"));
@@ -132,7 +132,7 @@ mod native_host_callback_tests {
         let env = Env::new();
         for lambda in [Some("visit"), None] {
             let code = tuple_callback_adapter(&env, lambda, "captured", (&[DTy::Str], &DTy::Unit),
-                (&[NativeSigKind::Str], &[]), None).unwrap();
+                (&[NativeSigKind::Str], &[]), None).expect("the tuple callback adapts");
             assert!(code.contains("-> ()"), "{code}");
             assert!(!code.contains("0_i64"), "void return must not fabricate a value: {code}");
         }
@@ -153,7 +153,7 @@ mod native_host_callback_tests {
         STATE.with(|s| s.borrow_mut().sites.insert(("main".into(), 1), "almide_rt_fs_for_each_line".into()));
         let sites = sites();
         let witness = crate::certificate::native_calls_witness_with(&[main.clone()], &sites);
-        let id = crate::host_ops::native_fs_host_id("almide_rt_fs_for_each_line").unwrap();
+        let id = crate::host_ops::native_fs_host_id("almide_rt_fs_for_each_line").expect("for_each_line is a native fs host op");
         assert_eq!(witness.lines().next().unwrap().split('|').nth(3), Some(id.to_string().as_str()));
         let graph = capability_program(vec![main.clone(), callback.clone()]);
         let caps: BTreeSet<_> = crate::certificate::reachable_caps("main", &graph, &mut BTreeSet::new()).into_iter().collect();

@@ -224,90 +224,141 @@ mod tests {
 /// Equality between two tag reads carries the selected tag to both inputs.
 pub(crate) fn guarded_reads(f: &MirFunction, records: &BTreeMap<ValueId, u16>) -> BTreeMap<ValueId, u32> {
     if sites(f).is_empty() { return BTreeMap::new(); }
-    let mut addresses: BTreeMap<_, _> = f.params.iter().map(|p| (p.value, (p.value, 0i64))).collect();
-    let mut constants = BTreeMap::new();
-    let mut tags = BTreeMap::new();
-    let mut comparisons = BTreeMap::new();
-    let mut equalities = Vec::new();
-    let mut inequalities = Vec::new();
-    let mut scopes = Vec::new();
-    let mut reads = BTreeMap::new();
+    let mut facts = TagFacts {
+        addresses: f.params.iter().map(|p| (p.value, (p.value, 0i64))).collect(),
+        ..TagFacts::default()
+    };
     for op in &f.ops {
+        facts.step(op, records);
+    }
+    facts.reads
+}
+
+/// What one forward walk of a frame knows at the current op.
+#[derive(Default)]
+struct TagFacts {
+    /// A value as (base block, byte offset).
+    addresses: BTreeMap<ValueId, (ValueId, i64)>,
+    constants: BTreeMap<ValueId, i64>,
+    /// A block's tag read.
+    tags: BTreeMap<ValueId, ValueId>,
+    /// An equality test's two operands, by its result.
+    comparisons: BTreeMap<ValueId, (ValueId, ValueId)>,
+    /// The tests that hold, and those that failed, in the open scopes.
+    equalities: Vec<(ValueId, ValueId)>,
+    inequalities: Vec<(ValueId, ValueId)>,
+    /// Per open `if`: both lists' lengths at entry, and its own test.
+    scopes: Vec<(usize, usize, Option<(ValueId, ValueId)>)>,
+    /// A payload borrow and the one tag its block holds there.
+    reads: BTreeMap<ValueId, u32>,
+}
+
+impl TagFacts {
+    fn step(&mut self, op: &Op, records: &BTreeMap<ValueId, u16>) {
         match op {
-            Op::ConstInt { dst, value } => { constants.insert(*dst, *value); }
-            Op::IntBinOp { dst, op: crate::IntOp::Eq, a, b } => { comparisons.insert(*dst, (*a, *b)); }
-            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
-                if let (Some((base, offset)), Some(k)) = (addresses.get(a), constants.get(b)) {
-                    if let Some(offset) = offset.checked_add(*k) { addresses.insert(*dst, (*base, offset)); }
+            Op::ConstInt { dst, value } => { self.constants.insert(*dst, *value); }
+            Op::IntBinOp { dst, op: crate::IntOp::Eq, a, b } => { self.comparisons.insert(*dst, (*a, *b)); }
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => self.add(*dst, *a, *b),
+            Op::Prim { kind, dst: Some(dst), args } if args.len() == 1 => self.prim(kind, *dst, args[0], records),
+            Op::ListGetScalar { dst, list, idx } if self.constants.get(idx) == Some(&0) => {
+                self.tags.insert(*list, *dst);
+            }
+            Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => self.scope(op),
+            _ => {}
+        }
+    }
+
+    fn add(&mut self, dst: ValueId, a: ValueId, b: ValueId) {
+        let (Some(&(base, offset)), Some(&k)) = (self.addresses.get(&a), self.constants.get(&b)) else { return };
+        if let Some(offset) = offset.checked_add(k) { self.addresses.insert(dst, (base, offset)); }
+    }
+
+    fn prim(&mut self, kind: &PrimKind, dst: ValueId, arg: ValueId, records: &BTreeMap<ValueId, u16>) {
+        match kind {
+            PrimKind::Handle => {
+                let address = self.addresses.get(&arg).copied().unwrap_or((arg, 0));
+                self.addresses.insert(dst, address);
+            }
+            PrimKind::Load { width: 8 } => {
+                if let Some(&(base, offset)) = self.addresses.get(&arg) {
+                    if offset == i64::from(crate::lower::layout::BLOCK_HEADER) { self.tags.insert(base, dst); }
                 }
             }
-            Op::Prim { kind: PrimKind::Handle, dst: Some(dst), args } if args.len() == 1 => {
-                let address = addresses.get(&args[0]).copied().unwrap_or((args[0], 0));
-                addresses.insert(*dst, address);
-            }
-            Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(dst), args } if args.len() == 1 => {
-                if let Some((base, offset)) = addresses.get(&args[0]) {
-                    if *offset == i64::from(crate::lower::layout::BLOCK_HEADER) { tags.insert(*base, *dst); }
-                }
-            }
-            Op::ListGetScalar { dst, list, idx } if constants.get(idx) == Some(&0) => {
-                tags.insert(*list, *dst);
-            }
-            Op::IfThen { cond, .. } => {
-                let eq = comparisons.get(cond).copied();
-                scopes.push((equalities.len(), inequalities.len(), eq));
-                if let Some(eq) = eq { equalities.push(eq); }
-            }
-            Op::Else { .. } => {
-                if let Some((yes, no, eq)) = scopes.last() {
-                    equalities.truncate(*yes);
-                    inequalities.truncate(*no);
-                    if let Some(eq) = eq { inequalities.push(*eq); }
-                }
-            }
-            Op::EndIf { .. } => {
-                if let Some((yes, no, _)) = scopes.pop() {
-                    equalities.truncate(yes);
-                    inequalities.truncate(no);
-                }
-            }
-            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(dst), args } if args.len() == 1 => {
-                if let Some((base, _)) = addresses.get(&args[0]) {
-                    if let Some(tag) = tags.get(base) {
-                        let mut connected = BTreeSet::from([*tag]);
-                        loop {
-                            let before = connected.len();
-                            for (a, b) in &equalities {
-                                if connected.contains(a) || connected.contains(b) { connected.insert(*a); connected.insert(*b); }
-                            }
-                            if connected.len() == before { break; }
-                        }
-                        let mut values: BTreeSet<_> = connected.iter().filter_map(|v| constants.get(v)).copied().collect();
-                        // A final default arm has no equality test. Its tag
-                        // follows only when the declared enum's entire set,
-                        // minus the preceding failed tests, leaves one case.
-                        if values.is_empty() {
-                            if let Some(cases) = records.get(base).and_then(|i| crate::render_native_rec::enum_cases(*i)) {
-                                values.extend(cases.into_iter().map(|(tag, _)| i64::from(tag)));
-                                for (a, b) in &inequalities {
-                                    if connected.contains(a) {
-                                        if let Some(k) = constants.get(b) { values.remove(k); }
-                                    }
-                                    if connected.contains(b) {
-                                        if let Some(k) = constants.get(a) { values.remove(k); }
-                                    }
-                                }
-                            }
-                        }
-                        if values.len() == 1 {
-                            if let Ok(tag) = u32::try_from(*values.first().unwrap()) { reads.insert(*dst, tag); }
-                        }
-                    }
-                }
-                addresses.insert(*dst, (*dst, 0));
+            PrimKind::LoadHandle => {
+                if let Some(tag) = self.proven_tag(arg, records) { self.reads.insert(dst, tag); }
+                self.addresses.insert(dst, (dst, 0));
             }
             _ => {}
         }
     }
-    reads
+
+    fn scope(&mut self, op: &Op) {
+        match op {
+            Op::IfThen { cond, .. } => {
+                let eq = self.comparisons.get(cond).copied();
+                self.scopes.push((self.equalities.len(), self.inequalities.len(), eq));
+                if let Some(eq) = eq { self.equalities.push(eq); }
+            }
+            Op::Else { .. } => {
+                if let Some(&(yes, no, eq)) = self.scopes.last() {
+                    self.equalities.truncate(yes);
+                    self.inequalities.truncate(no);
+                    if let Some(eq) = eq { self.inequalities.push(eq); }
+                }
+            }
+            Op::EndIf { .. } => {
+                if let Some((yes, no, _)) = self.scopes.pop() {
+                    self.equalities.truncate(yes);
+                    self.inequalities.truncate(no);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The one tag the block read through `address` holds here, when proven.
+    fn proven_tag(&self, address: ValueId, records: &BTreeMap<ValueId, u16>) -> Option<u32> {
+        let (base, _) = self.addresses.get(&address)?;
+        let connected = self.connected(*self.tags.get(base)?);
+        let mut values: BTreeSet<i64> = connected.iter().filter_map(|v| self.constants.get(v)).copied().collect();
+        // A final default arm has no equality test. Its tag
+        // follows only when the declared enum's entire set,
+        // minus the preceding failed tests, leaves one case.
+        if values.is_empty() {
+            values = self.remaining_cases(*base, &connected, records);
+        }
+        let mut values = values.into_iter();
+        match (values.next(), values.next()) {
+            (Some(only), None) => u32::try_from(only).ok(),
+            _ => None,
+        }
+    }
+
+    /// Every value the holding tests equate with `tag`.
+    fn connected(&self, tag: ValueId) -> BTreeSet<ValueId> {
+        let mut connected = BTreeSet::from([tag]);
+        loop {
+            let before = connected.len();
+            for (a, b) in &self.equalities {
+                if connected.contains(a) || connected.contains(b) { connected.insert(*a); connected.insert(*b); }
+            }
+            if connected.len() == before { return connected; }
+        }
+    }
+
+    /// The declared enum's tags minus the ones a failed test ruled out.
+    fn remaining_cases(&self, base: ValueId, connected: &BTreeSet<ValueId>, records: &BTreeMap<ValueId, u16>) -> BTreeSet<i64> {
+        let Some(cases) = records.get(&base).and_then(|i| crate::render_native_rec::enum_cases(*i)) else {
+            return BTreeSet::new();
+        };
+        let mut values: BTreeSet<i64> = cases.into_iter().map(|(tag, _)| i64::from(tag)).collect();
+        for (a, b) in &self.inequalities {
+            for (seen, other) in [(a, b), (b, a)] {
+                if connected.contains(seen) {
+                    if let Some(k) = self.constants.get(other) { values.remove(k); }
+                }
+            }
+        }
+        values
+    }
 }

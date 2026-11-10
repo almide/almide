@@ -685,7 +685,7 @@ mod native_capture_tests {
         assert!(ctx.partition_capture_drop_classes(captured()).is_none());
         {
             let _on = crate::lower::OwnedTcoSlotsGuard::set(true);
-            let layout = ctx.partition_capture_drop_classes(captured()).unwrap();
+            let layout = ctx.partition_capture_drop_classes(captured()).expect("the slot guard is on, so the captures partition");
             assert_eq!(layout.handle_slots(), 1);
             let unknown = Ty::Named(almide_lang::intern::sym("UndeclaredCapture"), Default::default());
             assert!(ctx.partition_capture_drop_classes(vec![(VarId(0), unknown)]).is_none());

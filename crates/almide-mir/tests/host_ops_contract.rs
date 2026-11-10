@@ -396,7 +396,7 @@ fn process_and_socket_calls_count_the_existing_capabilities() {
         let src = format!("import process\nimport net\neffect fn main() -> Unit = {{ let _ = {call}; println(\"ok\") }}");
         let w = almide_mir::pipeline::program_witnesses(&src, &[], None).expect("host caller lowers");
         let main = w.functions.iter().find(|f| f.name == "main").expect("main certified");
-        let used = main.caps.split_once('|').unwrap().1;
+        let used = main.caps.split_once('|').expect("the caps line has a `|` separator").1;
         assert!(used.split_whitespace().any(|id| id == expected), "{call}: {}", main.caps);
     }
 }

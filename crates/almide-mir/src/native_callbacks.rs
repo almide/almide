@@ -114,7 +114,7 @@ pub(crate) fn render(ir: &IrProgram, sigs: &NativeSigs) -> Result<String, LowerE
             "native: fn `{}` is called from native code with a signature that has no single host spelling",
             f.name
         )))?;
-        write!(out, "{item}").unwrap();
+        write!(out, "{item}").expect("writing to a String cannot fail");
     }
     Ok(out)
 }

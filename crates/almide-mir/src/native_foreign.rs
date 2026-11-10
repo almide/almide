@@ -136,82 +136,110 @@ pub(crate) fn render(
         return Err(wall("native: foreign call disagrees with its checked declaration"));
     }
     check_decl(decl, *kind)?;
-    let mut prelude = String::new();
-    let mut actuals = Vec::new();
-    let mut c_params = Vec::new();
+    let mut lowered = ForeignArgs::default();
     for (j, (a, p)) in args.iter().zip(&decl.params).enumerate() {
         let v = match a {
             crate::CallArg::Scalar(v) | crate::CallArg::Handle(v) => *v,
             _ => return Err(wall("native: foreign argument must be a checked parameter value")),
         };
         let k = tys.get(&v).copied().map(owned_nty).ok_or_else(|| wall("native: untyped foreign argument"))?;
-        if *kind == NativeExtern::Rust {
-            if let Ty::Fn { params, ret, is_effect } = &p.ty {
-                if p.is_mut { return Err(wall("native: mutable foreign callback slot needs an owned callback adapter")); }
-                let callback = callback(&var(v), params, ret, *is_effect, k)?;
-                actuals.push(format!("&({callback})"));
-                continue;
-            }
+        if *kind == NativeExtern::Rust { lowered.push_rust(j, v, k, p)?; } else { lowered.push_c(j, v, k, p)?; }
+    }
+    let call = lowered.call(*kind, module, name, &decl.ret_ty)?;
+    let prelude = lowered.prelude;
+    let pad = "    ".repeat(indent);
+    for line in prelude.lines() { writeln!(out, "{pad}{line}").expect("writing to a String cannot fail"); }
+    let Some(dst) = dst else {
+        if decl.ret_ty != Ty::Unit { return Err(wall("native: foreign return value was discarded")); }
+        writeln!(out, "{pad}{call};").expect("writing to a String cannot fail");
+        return Ok(true);
+    };
+    let k = sigs.get(&f.name).and_then(|(_, r)| *r).map(crate::render_native_closure::owned_nty)
+        .ok_or_else(|| wall("native: missing foreign return kind"))?;
+    writeln!(out, "{pad}let __foreign_result = {call};").expect("writing to a String cannot fail");
+    let (host_result, result_ty) = foreign_result(&declaration, out, &pad);
+    let result = convert(&host_result, result_ty, k, false, 0)?;
+    writeln!(out, "{pad}let mut {}: {} = {result};", var(*dst), crate::render_native_rec::owned_ty(k)).expect("writing to a String cannot fail");
+    tys.insert(*dst, k);
+    Ok(true)
+}
+
+/// The host value the call's result converts from, and its checked type:
+/// the plain result, or the write-back tuple of the result and every `mut`
+/// argument (bound here).
+fn foreign_result<'d>(declaration: &'d Declaration, out: &mut String, pad: &str) -> (String, &'d Ty) {
+    let decl = &declaration.host;
+    let mut returned: Vec<String> = decl.params.iter().enumerate()
+        .filter_map(|(i, p)| p.is_mut.then(|| format!("__foreign_arg{i}"))).collect();
+    if returned.is_empty() {
+        return ("&__foreign_result".to_string(), &decl.ret_ty);
+    }
+    if decl.ret_ty != Ty::Unit { returned.insert(0, "__foreign_result".into()); }
+    let value = if returned.len() == 1 { returned.remove(0) }
+        else { format!("({},)", returned.join(", ")) };
+    writeln!(out, "{pad}let __foreign_writeback = {value};").expect("writing to a String cannot fail");
+    ("&__foreign_writeback".to_string(), &declaration.lowered_return)
+}
+
+/// A foreign call's lowered arguments: the statements that run before it,
+/// the actual expressions, and a C target's declared parameters.
+#[derive(Default)]
+struct ForeignArgs {
+    prelude: String,
+    actuals: Vec<String>,
+    c_params: Vec<String>,
+}
+
+impl ForeignArgs {
+    /// Argument `j` (value `v` of kind `k`) of a Rust target.
+    fn push_rust(&mut self, j: usize, v: ValueId, k: NTy, p: &almide_ir::IrParam) -> Result<(), LowerError> {
+        if let Ty::Fn { params, ret, is_effect } = &p.ty {
+            if p.is_mut { return Err(wall("native: mutable foreign callback slot needs an owned callback adapter")); }
+            let callback = callback(&var(v), params, ret, *is_effect, k)?;
+            self.actuals.push(format!("&({callback})"));
+            return Ok(());
         }
         let value = convert(&format!("&{}", var(v)), &p.ty, k, true, 0)?;
-        if *kind == NativeExtern::Rust {
-            let borrowed = matches!(&p.ty, Ty::String | Ty::Bytes | Ty::Applied(C::List | C::Set | C::Map, _)) || crate::render_native_rec::is_matrix_ty(&p.ty);
-            if p.is_mut {
-                writeln!(prelude, "let mut __foreign_arg{j} = {value};").unwrap();
-                actuals.push(format!("&mut __foreign_arg{j}"));
-            } else {
-                actuals.push(if borrowed { format!("&({value})") } else { value });
-            }
+        let borrowed = matches!(&p.ty, Ty::String | Ty::Bytes | Ty::Applied(C::List | C::Set | C::Map, _)) || crate::render_native_rec::is_matrix_ty(&p.ty);
+        if p.is_mut {
+            writeln!(self.prelude, "let mut __foreign_arg{j} = {value};").expect("writing to a String cannot fail");
+            self.actuals.push(format!("&mut __foreign_arg{j}"));
         } else {
-            let abi = c_param_abi(&p.ty).ok_or_else(|| wall("native: missing C parameter ABI"))?;
-            c_params.push(format!("a{j}: {}", abi.c_ty));
-            actuals.push(match abi.conv {
-                CConv::CString => {
-                    writeln!(prelude, "let __foreign_arg{j} = std::ffi::CString::new(({}).split('\\0').next().unwrap_or_default()).unwrap_or_default();", var(v)).unwrap();
-                    format!("__foreign_arg{j}.as_ptr() as *const u8")
-                }
-                CConv::BoolAsI32 => format!("({value}) as i32"),
-                CConv::Same => value,
-                CConv::Region => return Err(wall("native: missing foreign Region adapter")),
-            });
+            self.actuals.push(if borrowed { format!("&({value})") } else { value });
         }
+        Ok(())
     }
-    let call = if *kind == NativeExtern::Rust {
-        format!("{module}::{name}({})", actuals.join(", "))
-    } else {
-        let abi = c_return_abi(&decl.ret_ty).ok_or_else(|| wall("native: missing C return ABI"))?;
-        let link = if matches!(module.as_str(), "c" | "m") {
+
+    /// Argument `j` (value `v` of kind `k`) of a C target.
+    fn push_c(&mut self, j: usize, v: ValueId, k: NTy, p: &almide_ir::IrParam) -> Result<(), LowerError> {
+        let value = convert(&format!("&{}", var(v)), &p.ty, k, true, 0)?;
+        let abi = c_param_abi(&p.ty).ok_or_else(|| wall("native: missing C parameter ABI"))?;
+        self.c_params.push(format!("a{j}: {}", abi.c_ty));
+        self.actuals.push(match abi.conv {
+            CConv::CString => {
+                writeln!(self.prelude, "let __foreign_arg{j} = std::ffi::CString::new(({}).split('\\0').next().unwrap_or_default()).unwrap_or_default();", var(v)).expect("writing to a String cannot fail");
+                format!("__foreign_arg{j}.as_ptr() as *const u8")
+            }
+            CConv::BoolAsI32 => format!("({value}) as i32"),
+            CConv::Same => value,
+            CConv::Region => return Err(wall("native: missing foreign Region adapter")),
+        });
+        Ok(())
+    }
+
+    /// The call expression; a C target's declaration joins the prelude.
+    fn call(&mut self, kind: NativeExtern, module: &str, name: &str, ret_ty: &Ty) -> Result<String, LowerError> {
+        if kind == NativeExtern::Rust {
+            return Ok(format!("{module}::{name}({})", self.actuals.join(", ")));
+        }
+        let abi = c_return_abi(ret_ty).ok_or_else(|| wall("native: missing C return ABI"))?;
+        let link = if matches!(module, "c" | "m") {
             format!("#[cfg_attr(not(windows), link(name = {module:?}))]")
         } else { format!("#[link(name = {module:?})]") };
-        writeln!(prelude, "{link} unsafe extern \"C\" {{ #[link_name = {name:?}] fn __foreign_call({}) -> {}; }}", c_params.join(", "), abi.c_ty).unwrap();
-        let call = format!("unsafe {{ __foreign_call({}) }}", actuals.join(", "));
-        if abi.conv == CConv::BoolAsI32 { format!("({call}) != 0") } else { call }
-    };
-    let pad = "    ".repeat(indent);
-    for line in prelude.lines() { writeln!(out, "{pad}{line}").unwrap(); }
-    if let Some(dst) = dst {
-        let k = sigs.get(&f.name).and_then(|(_, r)| *r).map(crate::render_native_closure::owned_nty)
-            .ok_or_else(|| wall("native: missing foreign return kind"))?;
-        writeln!(out, "{pad}let __foreign_result = {call};").unwrap();
-        let mut returned: Vec<String> = decl.params.iter().enumerate()
-            .filter_map(|(i, p)| p.is_mut.then(|| format!("__foreign_arg{i}"))).collect();
-        let (host_result, result_ty) = if returned.is_empty() {
-            ("&__foreign_result".to_string(), &decl.ret_ty)
-        } else {
-            if decl.ret_ty != Ty::Unit { returned.insert(0, "__foreign_result".into()); }
-            let value = if returned.len() == 1 { returned.remove(0) }
-                else { format!("({},)", returned.join(", ")) };
-            writeln!(out, "{pad}let __foreign_writeback = {value};").unwrap();
-            ("&__foreign_writeback".to_string(), &declaration.lowered_return)
-        };
-        let result = convert(&host_result, result_ty, k, false, 0)?;
-        writeln!(out, "{pad}let mut {}: {} = {result};", var(*dst), crate::render_native_rec::owned_ty(k)).unwrap();
-        tys.insert(*dst, k);
-    } else {
-        if decl.ret_ty != Ty::Unit { return Err(wall("native: foreign return value was discarded")); }
-        writeln!(out, "{pad}{call};").unwrap();
+        writeln!(self.prelude, "{link} unsafe extern \"C\" {{ #[link_name = {name:?}] fn __foreign_call({}) -> {}; }}", self.c_params.join(", "), abi.c_ty).expect("writing to a String cannot fail");
+        let call = format!("unsafe {{ __foreign_call({}) }}", self.actuals.join(", "));
+        Ok(if abi.conv == CConv::BoolAsI32 { format!("({call}) != 0") } else { call })
     }
-    Ok(true)
 }
 
 include!("native_foreign_values.rs");

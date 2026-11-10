@@ -565,7 +565,7 @@ fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
             Some(g) if field_accepts(f, g) => owned_from(&var(sv.base), g)
                 .ok_or_else(|| wall("native: a record field write of an unowned kind"))?,
             Some(g) if crate::native_value_repr::tuple_copy(&var(sv.base), g, f).is_some() =>
-                crate::native_value_repr::tuple_copy(&var(sv.base), g, f).unwrap(),
+                crate::native_value_repr::tuple_copy(&var(sv.base), g, f).expect("the arm's guard saw this tuple copy succeed"),
             // `[]` into a field of another list type: that type's empty list.
             Some(NTy::Vec)
                 if st.empty_lists.contains(&sv.base)

@@ -311,11 +311,11 @@ mod native_self_host_preparation_tests {
     #[test]
     fn registry_mutable_entries_cannot_silently_change_the_callers_abi() {
         let src = "fn append(mut xs: List[Int]) -> Unit = list.push(xs, 7)";
-        let mut ir = self_host_source_to_ir(src, &[]).unwrap();
+        let mut ir = self_host_source_to_ir(src, &[]).expect("the self-host source lowers");
         let err = prepare_self_host_mutable_values(&mut ir, &[("append", "example.append")]).unwrap_err();
         assert!(format!("{err:?}").contains("requires caller ABI preparation"));
-        let mut ir = self_host_source_to_ir(src, &[]).unwrap();
-        prepare_self_host_mutable_values(&mut ir, &[]).unwrap();
+        let mut ir = self_host_source_to_ir(src, &[]).expect("the self-host source lowers");
+        prepare_self_host_mutable_values(&mut ir, &[]).expect("the mutable values prepare");
         assert!(ir.functions[0].mutated_params.is_empty());
         assert!(ir.functions[0].ret_ty != almide_lang::types::Ty::Unit);
     }
@@ -324,7 +324,7 @@ mod native_self_host_preparation_tests {
     fn self_host_names_are_scoped_in_calls_references_and_recursion() {
         use almide_ir::{IrExpr, IrExprKind, IrVisitor, CallTarget};
         let src = "fn helper(n: Int) -> Int = if n > 0 then helper(n - 1) else 7\nfn entry() -> Int = { let f = helper; helper(f(2)) }";
-        let mut ir = self_host_source_to_ir(src, &[]).unwrap();
+        let mut ir = self_host_source_to_ir(src, &[]).expect("the self-host source lowers");
         let occupied = ["helper".to_string(), "__almide_self_host_0_0_helper".to_string()].into_iter().collect();
         let map = namespace_self_host_conflicts(&mut ir, &occupied, 0);
         let alias = &map["helper"];

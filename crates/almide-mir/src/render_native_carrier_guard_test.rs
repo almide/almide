@@ -79,7 +79,7 @@ fn guarded_payload_load_moves_under_its_tag_without_changing_other_ops() {
     let old = f.ops.clone();
     sink_guarded_payload_reads(&mut f);
     let load = |op: &Op| matches!(op, Op::Prim { kind: PrimKind::LoadHandle, dst: Some(ValueId(7)), .. });
-    let at = f.ops.iter().position(load).unwrap();
+    let at = f.ops.iter().position(load).expect("the fn has the load op");
     assert!(matches!(f.ops[at - 1], Op::Else { .. }));
     assert_eq!(f.ops.len(), old.len());
     assert_eq!(format!("{:?}", f.ops.iter().filter(|o| !load(o)).collect::<Vec<_>>()),

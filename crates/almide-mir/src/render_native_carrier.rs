@@ -239,7 +239,7 @@ fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy)
     match g {
         Some(g) if field_accepts(k, g) => owned_from(&var(sv.base), g).ok_or_else(|| wall("native: an unowned carrier payload")),
         Some(g) if crate::native_value_repr::tuple_copy(&var(sv.base), g, k).is_some() =>
-            Ok(crate::native_value_repr::tuple_copy(&var(sv.base), g, k).unwrap()),
+            Ok(crate::native_value_repr::tuple_copy(&var(sv.base), g, k).expect("the arm's guard saw this tuple copy succeed")),
         g => Err(wall(format!("native: a {g:?} value as a {k:?} carrier payload (source {:?})", sv.base))),
     }
 }
@@ -353,7 +353,7 @@ impl CarrierCx<'_> {
         match init {
             Init::ResErrStr { piece } if self.st.alloc_rec.get(&dst).is_some_and(|i| result_payloads(*i).is_some()) => {
                 let i = self.st.alloc_rec[&dst];
-                let (_, expected) = result_payloads(i).unwrap();
+                let (_, expected) = result_payloads(i).expect("the arm's guard saw this Result's payloads");
                 let rhs = self.tys.get(piece).copied().and_then(|got| {
                     if field_accepts(expected, got) { owned_from(&var(*piece), got) }
                     else { crate::native_value_repr::tuple_copy(&var(*piece), got, expected) }
@@ -639,7 +639,7 @@ impl CarrierCx<'_> {
         }
         if scalar_ok(i) {
             // A one-slot block of this Result is its Err (length word 1).
-            let (_, err) = result_payloads(i).unwrap();
+            let (_, err) = result_payloads(i).expect("scalar_ok holds only for a Result with payloads");
             let rhs = if err == NTy::I64 { scalar_rhs(self.tys, v) }
                 else { payload_rhs(self.st, self.tys, v, err) };
             return rhs.map(|rhs| {

@@ -57,7 +57,7 @@ fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId, nv: &mut u32) -> Option<
             }).collect();
             let lifted = ordered_unwrap_children(&mut children, tmp, nv)?;
             let mut changed = children.into_iter();
-            for p in parts { if let almide_ir::IrStringPart::Expr { expr } = p { *expr = changed.next().unwrap(); } }
+            for p in parts { if let almide_ir::IrStringPart::Expr { expr } = p { *expr = changed.next().expect("one rewritten child per Expr part, in order"); } }
             lifted
         }
         IrExprKind::BinOp { op, left, right } => {

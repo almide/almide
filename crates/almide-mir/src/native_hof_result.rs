@@ -73,7 +73,7 @@ mod tuple_result_tests {
         let env = Env::from([("V".into(), NTy::F64)]);
         let pair = DTy::Tuple(vec![DTy::Str, DTy::Var("V".into())]);
         assert_eq!(kind_of(&env, &pair), Some(NTy::Rec(0)));
-        let code = runtime_result(&env, &pair, "read_map()").unwrap();
+        let code = runtime_result(&env, &pair, "read_map()").expect("a (String, V) pair has a runtime result");
         assert!(code.contains("to_bits() as i64"));
         assert_eq!(code.matches("read_map()").count(), 1);
     }

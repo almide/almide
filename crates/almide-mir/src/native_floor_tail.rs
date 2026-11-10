@@ -234,18 +234,8 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
         FloorParam::Str => matches!(got, NTy::Str | NTy::StrRef)
             .then(|| as_str_arg(code, *got))
             .ok_or_else(mismatch)?,
-        FloorParam::List(ListElem::Any) if cx.set_e.is_some() =>
-            set_source_list_arg(cx.set_e.unwrap(), code, *got).ok_or_else(mismatch)?,
-        FloorParam::List(elem) => list_arg(*elem, code, *got).ok_or_else(mismatch)?,
-        FloorParam::ListOwned(elem) => {
-            let borrowed = if *elem == ListElem::Any && cx.set_e.is_some() {
-                set_source_list_arg(cx.set_e.unwrap(), code, *got)
-            } else { list_arg(*elem, code, *got) }.ok_or_else(mismatch)?;
-            if dying_here && borrowed == format!("&{code}")
-                && matches!(got, NTy::Vec | NTy::VecStr | NTy::Rec(_)) {
-                crate::render_native_move::take_expr(code)
-            } else { format!("({borrowed}).to_vec()") }
-        }
+        FloorParam::List(elem) => borrowed_list_arg(cx, *elem, code, *got).ok_or_else(mismatch)?,
+        FloorParam::ListOwned(elem) => owned_list_arg(cx, *elem, code, got, dying_here)?,
         FloorParam::Elem(by_ref) => elem_arg(cx, *by_ref, code, got)?,
         FloorParam::Map(by_ref) => map_arg(cx, *by_ref, code, got, dying_here)?,
         FloorParam::MapKey(by_ref) | FloorParam::MapVal(by_ref) => map_entry_arg(cx, p, *by_ref, code, got, dying_here)?,
@@ -253,17 +243,49 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
         FloorParam::Value(by_ref) => value_arg(cx, *by_ref, code, got, dying_here)?,
         FloorParam::Runtime(t, by_ref) => {
             if !t.accepts(*got) { return Err(mismatch()); }
-            if *by_ref {
-                if matches!(got, NTy::RecRef(_)) { code.to_string() } else { format!("&{code}") }
-            } else { format!("({code}).clone()") }
+            runtime_type_arg(*by_ref, code, got)
         }
         FloorParam::Set(_) | FloorParam::SetElem(_) | FloorParam::Matrix(_) | FloorParam::BytesMut => runtime_arg(cx, p, code, got, dying_here)?,
-        FloorParam::Bytes => match got {
-            NTy::Rec(_) if crate::render_native_rec::is_bytes(*got) => format!("&{code}"),
-            NTy::RecRef(_) if crate::render_native_rec::is_bytes(*got) => code.to_string(),
-            _ => return Err(mismatch()),
-        },
+        FloorParam::Bytes => bytes_arg(code, got).ok_or_else(mismatch)?,
     })
+}
+
+/// A list param's borrowed argument: a Set's source list where the call
+/// names its element kind and the param takes any element.
+fn borrowed_list_arg(cx: &CallCx, elem: ListElem, code: &str, got: NTy) -> Option<String> {
+    match cx.set_e {
+        Some(want) if elem == ListElem::Any => set_source_list_arg(want, code, got),
+        _ => list_arg(elem, code, got),
+    }
+}
+
+/// An owned list param's argument: the caller's own list moves when it dies
+/// here, anything else is copied.
+fn owned_list_arg(cx: &CallCx, elem: ListElem, code: &str, got: &NTy, dying_here: bool) -> Result<String, LowerError> {
+    let borrowed = borrowed_list_arg(cx, elem, code, *got).ok_or_else(cx.mismatch)?;
+    let moves = dying_here && borrowed == format!("&{code}") && matches!(got, NTy::Vec | NTy::VecStr | NTy::Rec(_));
+    Ok(if moves { crate::render_native_move::take_expr(code) } else { format!("({borrowed}).to_vec()") })
+}
+
+/// An accepted runtime-typed value, borrowed or cloned as the param asks.
+fn runtime_type_arg(by_ref: bool, code: &str, got: &NTy) -> String {
+    match (by_ref, got) {
+        (true, NTy::RecRef(_)) => code.to_string(),
+        (true, _) => format!("&{code}"),
+        (false, _) => format!("({code}).clone()"),
+    }
+}
+
+/// A readonly Bytes param's argument.
+fn bytes_arg(code: &str, got: &NTy) -> Option<String> {
+    if !crate::render_native_rec::is_bytes(*got) {
+        return None;
+    }
+    match got {
+        NTy::Rec(_) => Some(format!("&{code}")),
+        NTy::RecRef(_) => Some(code.to_string()),
+        _ => None,
+    }
 }
 
 /// A runtime Set, Set element, Matrix or writable Bytes param's argument.

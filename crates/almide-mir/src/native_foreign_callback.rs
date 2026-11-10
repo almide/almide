@@ -13,7 +13,7 @@ fn callback(value: &str, params: &[Ty], ret: &Ty, effect: bool, kind: NTy) -> Re
     for (j, (ty, kind)) in params.iter().zip(kinds).enumerate() {
         host_params.push(format!("__host_p{j}: {}", host_type(ty)?));
         let native = convert_value(&format!("&__host_p{j}"), ty, kind, false, 0, true)?;
-        write!(bindings, "let __native_p{j}: {} = {native}; ", crate::render_native_rec::owned_ty(kind)).unwrap();
+        write!(bindings, "let __native_p{j}: {} = {native}; ", crate::render_native_rec::owned_ty(kind)).expect("writing to a String cannot fail");
         let borrowed = matches!(kind, NTy::Str | NTy::StrRef | NTy::Vec | NTy::VecRef | NTy::VecStr | NTy::VecStrRef | NTy::Rec(_) | NTy::RecRef(_));
         args.push(format!("{}__native_p{j}", if borrowed { "&" } else { "" }));
     }

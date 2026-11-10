@@ -56,7 +56,7 @@ mod specialized_float_tests {
     #[test]
     fn float_sort_keys_keep_the_declared_callback_type() {
         for name in ["list_sort_by_float", "list_sort_by_float_rc"] {
-            let h = derive_explained(name).unwrap();
+            let h = derive_explained(name).expect("the named HOF derives");
             assert_eq!(h.symbol, "almide_rt_list_sort_by_float");
             assert!(matches!(&h.params[1].0, DTy::Fn(_, r) if **r == DTy::Float));
             assert!(matches!(&h.params[0].0, DTy::List(e) if matches!(**e, DTy::Var(_))));
@@ -65,7 +65,7 @@ mod specialized_float_tests {
     #[test]
     fn float_specializations_use_value_equality_and_reject_conflicting_bindings() {
         for name in ["list_contains_float", "list_index_of_float", "list_unique_float", "list_dedup_float"] {
-            let h = derive_explained(name).unwrap();
+            let h = derive_explained(name).expect("the named HOF derives");
             assert_eq!(h.params[0].0, DTy::List(Box::new(DTy::Float)), "{name}");
         }
         let var = DTy::Var("A".into());

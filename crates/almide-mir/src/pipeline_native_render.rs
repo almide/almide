@@ -639,12 +639,12 @@ effect fn main() -> Unit = {
   println("path 500 + 500 deep: " + show(value.set_path(doc, path_of(500), nest(500))))
 }
 "#;
-            let (_, _, functions) = super::render_native_parts(source).unwrap();
+            let (_, _, functions) = super::render_native_parts(source).expect("the source renders");
             for name in ["__lambda_path_of_0", "__lambda_nest_0"] {
-                let f = functions.iter().find(|f| f.name == name).unwrap();
+                let f = functions.iter().find(|f| f.name == name).expect("the named fn is rendered");
                 assert!(!f.owned_params.contains(&f.params[0].value), "the environment stays borrowed");
                 assert!(f.owned_params.contains(&f.params[1].value), "{name} must take the growing accumulator");
             }
-        }).unwrap().join().unwrap();
+        }).expect("spawn the big-stack thread").join().expect("the big-stack thread did not panic");
     }
 }

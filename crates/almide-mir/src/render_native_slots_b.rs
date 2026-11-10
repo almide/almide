@@ -44,7 +44,6 @@ pub(super) fn movable_loads(
     func: &MirFunction,
     base_of: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
 ) -> (BTreeSet<ValueId>, BTreeSet<ValueId>, BTreeSet<ValueId>, BTreeSet<ValueId>) {
-    let rooted = |v: &ValueId, b: ValueId| base_of.get(v).is_some_and(|(r, _)| *r == b);
     let mut out = BTreeSet::new();
     let mut last = BTreeSet::new();
     // The movable reads that are the first read of their slot since the
@@ -102,68 +101,98 @@ pub(super) fn movable_loads(
         // edge rebinds (`b = { ...b, f: g(b.f) }`): the next iteration reads
         // the new block, never this one's slot (#4006, no-perf-loss).
         // The scan then stops at that rebind: what follows reads the new block.
-        let mut rebound = false;
-        let mut end = func.ops.len();
-        if let Some(&ls) = loops.last() {
-            let fresh = def_at.get(&b).is_some_and(|d| *d > ls)
-                && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if *local == b));
-            if !fresh {
-                let Some(at) = rebound_in_block(func, i, b) else { continue };
-                rebound = true;
-                end = at;
-            }
-        }
+        let read = SlotRead { func, base_of, consts: &consts, b, k };
+        let Some((rebound, end)) = read.scan_end(i, loops.last().copied(), &def_at) else { continue };
         // A scan that runs to the end of the fn: the fn's result is read whole
         // after its last op (a `mut` param's write-back included), so no slot
         // of it may be taken.
         if !rebound && func.ret == Some(b) {
             continue;
         }
-        let mut movable = true;
+        let Some(other_slot) = read.scan((i, end), &earlier) else { continue };
+        if rebound || rebound_in_block(func, i, b).is_some() {
+            partial.insert(*d);
+        }
+        out.insert(*d);
+        if !other_slot && !rebound {
+            last.insert(*d);
+        }
+        if first_live(first_read, func, &deferred, i, &earlier) {
+            first.insert(*d);
+        }
+    }
+    (out, last, first, partial)
+}
+
+/// One heap slot read under test: slot `k` of the owned block `b`.
+struct SlotRead<'a> {
+    func: &'a MirFunction,
+    base_of: &'a BTreeMap<ValueId, (ValueId, Option<i64>)>,
+    consts: &'a BTreeMap<ValueId, i64>,
+    b: ValueId,
+    k: usize,
+}
+
+impl SlotRead<'_> {
+    fn rooted(&self, v: &ValueId) -> bool {
+        self.base_of.get(v).is_some_and(|(r, _)| *r == self.b)
+    }
+
+    /// Where the scan after the read at `i` ends, and whether that is the
+    /// block's rebind. `None`: a later iteration reads this block again.
+    fn scan_end(&self, i: usize, innermost_loop: Option<usize>, def_at: &BTreeMap<ValueId, usize>) -> Option<(bool, usize)> {
+        let (func, b) = (self.func, self.b);
+        let whole = (false, func.ops.len());
+        let Some(ls) = innermost_loop else { return Some(whole) };
+        let fresh = def_at.get(&b).is_some_and(|d| *d > ls)
+            && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local, .. } if *local == b));
+        if fresh {
+            return Some(whole);
+        }
+        rebound_in_block(func, i, b).map(|at| (true, at))
+    }
+
+    /// `later` leaves the read's slot alone: it drops or addresses the
+    /// block, or reads another of its slots.
+    fn spares_slot(&self, later: &Op) -> bool {
+        let (b, k) = (self.b, self.k);
+        match later {
+            Op::Drop { v } | Op::DropListStr { v } | Op::DropVariant { v, .. } | Op::DropWrapperRec { v, .. } => *v == b,
+            // The ownership marks render nothing; an op that hands the
+            // block on reads it itself.
+            Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. } => true,
+            // A scalar read of another slot, by its constant index.
+            Op::ListGetScalar { list, idx, .. } => {
+                *list == b && self.consts.get(idx).is_some_and(|x| usize::try_from(*x).is_ok_and(|x| x != k))
+            }
+            Op::Prim { kind: PrimKind::Handle, args, .. } => args.first() == Some(&b),
+            Op::IntBinOp { op: crate::IntOp::Add, a, b: y, .. } => self.rooted(a) || self.rooted(y),
+            Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, args, .. } => args.first().is_some_and(|a| {
+                self.base_of.get(a).is_some_and(|(r, o)| *r == b && o.is_some() && slot_of(*o).is_some_and(|s| s != k))
+            }),
+            _ => false,
+        }
+    }
+
+    /// The ops after the read at `i`, up to `end`: `None` when one of them
+    /// reads the block whole, this slot, or an earlier read of it; else
+    /// whether another slot of the block is read on the way.
+    fn scan(&self, (i, end): (usize, usize), earlier: &[ValueId]) -> Option<bool> {
         let mut other_slot = false;
-        for later in &func.ops[i + 1..end] {
-            let fine = match later {
-                Op::Drop { v } | Op::DropListStr { v } | Op::DropVariant { v, .. } | Op::DropWrapperRec { v, .. } => *v == b,
-                // The ownership marks render nothing; an op that hands the
-                // block on reads it itself.
-                Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. } => true,
-                // A scalar read of another slot, by its constant index.
-                Op::ListGetScalar { list, idx, .. } => {
-                    *list == b && consts.get(idx).is_some_and(|x| usize::try_from(*x).is_ok_and(|x| x != k))
-                }
-                Op::Prim { kind: PrimKind::Handle, args, .. } => args.first() == Some(&b),
-                Op::IntBinOp { op: crate::IntOp::Add, a, b: y, .. } => rooted(a, b) || rooted(y, b),
-                Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, args, .. } => args.first().is_some_and(|a| {
-                    base_of.get(a).is_some_and(|(r, o)| *r == b && o.is_some() && slot_of(*o).is_some_and(|s| s != k))
-                }),
-                _ => false,
-            };
-            if fine {
+        for later in &self.func.ops[i + 1..end] {
+            if self.spares_slot(later) {
                 other_slot |= matches!(later, Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, .. });
                 continue;
             }
             let mut reads = Vec::new();
             crate::mir_ops::op_reads(later, &mut reads);
             let earlier_live = !crate::render_native_move::bookkeeping(later) && reads.iter().any(|v| earlier.contains(v));
-            if earlier_live || reads.iter().any(|v| *v == b || rooted(v, b)) {
-                movable = false;
-                break;
+            if earlier_live || reads.iter().any(|v| *v == self.b || self.rooted(v)) {
+                return None;
             }
         }
-        if movable {
-            if rebound || rebound_in_block(func, i, b).is_some() {
-                partial.insert(*d);
-            }
-            out.insert(*d);
-            if !other_slot && !rebound {
-                last.insert(*d);
-            }
-            if first_live(first_read, func, &deferred, i, &earlier) {
-                first.insert(*d);
-            }
-        }
+        Some(other_slot)
     }
-    (out, last, first, partial)
 }
 
 /// The rebind of `b` from another value that follows the op at `at` in its

@@ -339,7 +339,7 @@ mod scoped_module_tests {
     #[test]
     fn runtime_display_types_carry_the_prelude_leaf_implementations() {
         let idx = runtime_index();
-        let text = closure("AlmideHttpResponse", idx).unwrap().join("\n");
+        let text = closure("AlmideHttpResponse", idx).expect("the runtime index holds AlmideHttpResponse").join("\n");
         assert!(text.contains("impl AlmideRepr for i64"), "response display needs its status's repr");
         assert!(text.contains("impl AlmideRepr for std::string::String"), "response display needs its body's repr");
     }

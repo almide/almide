@@ -570,36 +570,8 @@ fn plan(
     }
     let got = call_args(call, &at.0, tys)?;
     crate::trace::trace_for("ALMIDE_DBG_LOWER_FN", &at.0, || format!("HOF {}:{} {} got={got:?} result={:?} params={:?}", at.0, at.1, call.name, declared_result(call, user_fns), hof.params));
-    let mut env = Env::new();
-    // Containers establish their element representation before a standalone
-    // generic value: a Float list stores bits while its scalar argument is f64.
-    for vars in [false, true] {
-      for ((d, _), (_, t)) in hof.params.iter().zip(&got) {
-        if !matches!(d, DTy::Fn(..)) && matches!(d, DTy::Var(_)) == vars {
-            if generic_scalar_lane(&env, d, *t, &hof.bounds).is_some() { continue; }
-            if has_value_conversion(d) { bind_callback_shape(&mut env, d, *t)?; }
-            else { bind_param(&mut env, d, *t)?; }
-        }
-      }
-    }
-    // The checked result constrains callback-only generics before choosing
-    // an adapter. Map Float values use an i64 bit carrier: without the
-    // result constraint a callback's f64 lane selects the wrong conversion.
     let declared_return = declared_result(call, user_fns);
-    if let Some(want) = declared_return {
-        if has_value_conversion(&hof.ret) { bind_callback_shape(&mut env, &hof.ret, want)?; }
-        else { bind_param(&mut env, &hof.ret, want)?; }
-    }
-    // Tuple slots erase scalar source types to lanes. A runtime comparison
-    // bound must not silently compare Float bits as Int keys. Until source
-    // key types accompany this adapter, only String-bound keys are admitted.
-    let tuple_input = hof.params.iter().any(|(d, _)| !matches!(d, DTy::Fn(..)) && has_runtime_tuple(d));
-    if tuple_input && hof.bounds.iter().any(|(v, _)| env.get(v) != Some(&NTy::Str)) { return None; }
-    // Admit ordering only when both the source declaration and generated
-    // representation preserve it, including recursively declared variants.
-    if hof.bounds.iter().any(|(v, cap)| *cap == almide_lang::capability_bounds::Cap::Ord && env.get(v).and_then(|k| k.rec()).is_some_and(|i| !rec::native_order_safe(i))) {
-        return None;
-    }
+    let mut env = plan_env(hof, &got, declared_return)?;
     // An element Option held as the lent element, handed to a combinator
     // whose callback only takes its payload.
     let lent = call.args.iter().enumerate().find_map(|(k, a)| match a {
@@ -632,22 +604,7 @@ fn plan(
             rendered.push(if *by_ref { format!("&({value})") } else { value });
             continue;
         }
-        rendered.push(match d {
-            DTy::Fn(dps, dret) => fn_arg(&cx, &mut env, (dps, dret), (a, *t), &mut side)?,
-            DTy::Unit => "()".to_string(),
-            // The render carries a Bool in its i64 lane; the runtime takes `bool`.
-            DTy::Bool => format!("({code} != 0)"),
-            d if has_value_conversion(d) => {
-                let owned = runtime_arg(code, *t, false, false);
-                let value = convert_callback_value(&env, d, crate::render_native::owned_nty(*t), &owned, false)?;
-                if *by_ref {
-                    let snapshot = format!("__tuple_arg_{}_{}", at.1, k);
-                    side.prelude.push(format!("let {snapshot} = {value};"));
-                    format!("&{snapshot}")
-                } else { value }
-            }
-            _ => value_arg(hof, (at.1, k), (a, code.as_str(), *t), &mut side),
-        });
+        rendered.push(declared_arg(&cx, &mut env, &mut side, (hof, k), (d, *by_ref), (a, code.as_str(), *t))?);
     }
     // The callback takes the payload by reference: the Option is handed as
     // it is held (`Option<&A>`), not as the owned copy `code` spells.
@@ -668,6 +625,7 @@ fn plan(
     Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims, side.reads)))
 }
 
+include!("native_hof_plan.rs");
 include!("native_hof_owned.rs");
 
 /// [`plan`]'s rendering of the plain value argument `k` of the call at op

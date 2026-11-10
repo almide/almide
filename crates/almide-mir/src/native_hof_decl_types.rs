@@ -80,10 +80,10 @@ mod declared_callback_tests {
     use super::*;
     #[test]
     fn module_aliases_keep_effect_carriers_and_runtime_identity() {
-        let program = almide_lang::parse_cached(almide_lang::stdlib_info::bundled_source("http").unwrap()).unwrap();
+        let program = almide_lang::parse_cached(almide_lang::stdlib_info::bundled_source("http").expect("the bundled http module exists")).expect("the bundled http module parses");
         let ty = TypeExpr::Simple { name: almide_lang::intern::sym("HttpHandler") };
-        let request = crate::native_runtime_types::RuntimeType::of("HttpRequest").unwrap();
-        let response = crate::native_runtime_types::RuntimeType::of("HttpResponse").unwrap();
+        let request = crate::native_runtime_types::RuntimeType::of("HttpRequest").expect("HttpRequest is a runtime type");
+        let response = crate::native_runtime_types::RuntimeType::of("HttpResponse").expect("HttpResponse is a runtime type");
         let want = DTy::Fn(vec![DTy::Runtime(request)], Box::new(DTy::Result(Box::new(DTy::Runtime(response)), Box::new(DTy::Str))));
         assert_eq!(declared_dty(&ty, &BTreeSet::new(), &program.decls), Some(want));
         assert_eq!(rust_agrees(&DTy::Runtime(request), "&AlmideHttpRequest"), Some(true));
@@ -91,12 +91,12 @@ mod declared_callback_tests {
         assert_eq!(rust_agrees(&DTy::Runtime(request), "&mutAlmideHttpRequest"), None);
         let ret = DTy::Result(Box::new(DTy::Int), Box::new(DTy::Str));
         assert_eq!(effect_return(ret.clone(), true), ret);
-        let cyclic = almide_lang::parse_cached("type A = B\ntype B = A\n").unwrap();
+        let cyclic = almide_lang::parse_cached("type A = B\ntype B = A\n").expect("the cyclic alias source parses");
         assert_eq!(declared_dty(&TypeExpr::Simple { name: almide_lang::intern::sym("A") }, &BTreeSet::new(), &cyclic.decls), None);
     }
     #[test]
     fn listener_runtime_has_the_declared_unit_abi() {
-        let hof = derive_explained("http.serve").unwrap();
+        let hof = derive_explained("http.serve").expect("http.serve derives");
         assert_eq!(hof.ret, DTy::Unit);
         assert!(hof.items.iter().any(|s| s.contains("mod almide_http_signals")));
         assert!(declared_call("http.serve"));

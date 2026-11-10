@@ -114,7 +114,7 @@ fn unit_fields_keep_the_zero_lane_without_changing_void_returns() {
     let mut roots = Vec::new();
     collect_tuples(&result, &mut roots);
     let decls = derive_records(&Default::default(), &Default::default(), &roots);
-    let i = decls.iter().position(|d| d.name == tuple_key(&tuple)).unwrap();
+    let i = decls.iter().position(|d| d.name == tuple_key(&tuple)).expect("the tuple's decl is registered");
     assert_eq!(decls[i].fields, vec![NTy::I64, NTy::Str]);
     assert_eq!(decls.iter().find(|d| d.name == tuple_key(&result)).unwrap().result_of,
         Some((NTy::Rec(i as u16), NTy::Str)));
