@@ -92,6 +92,10 @@ fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, Lower
     let (target, module, name) = if let Some((kind, attr)) = native {
         crate::native_foreign::check_decl(func, kind)?;
         (crate::ImportTarget::Native { kind, is_effect: func.is_effect }, attr.module.to_string(), attr.function.to_string())
+    } else if crate::native_test_harness::active() {
+        // A native test build has no wasm host (#4640): the declaration is
+        // the typed hole its body is, an abort only a call that runs reaches.
+        return Ok(None);
     } else if let Some((module, name)) = extern_wasm_target(func) {
         (crate::ImportTarget::Wasm, module, name)
     } else {
