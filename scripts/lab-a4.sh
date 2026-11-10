@@ -28,7 +28,7 @@ one() {
   fi
   if grep -q '^routines .' "$d/$n.anchors"; then
     local t0; t0=$(date +%s%N)
-    timeout 900 "$LINPROVE" --routines "$d/$n.wasm" "$d/$n.anchors" "$d/$n.rsel" > "$d/$n.rcert" 2> "$d/$n.rprove" || echo "RPROVE rc=$?" >> "$d/$n.rprove"
+    ALMIDE_LIN_WHY=1 timeout 900 "$LINPROVE" --routines "$d/$n.wasm" "$d/$n.anchors" "$d/$n.rsel" > "$d/$n.rcert" 2> "$d/$n.rprove" || echo "RPROVE rc=$?" >> "$d/$n.rprove"
     echo "rtime $(( ($(date +%s%N) - t0) / 1000000 ))" >> "$d/$n.rprove"
     "$ANCHORCHECK" --lin-verify-routines "$d/$n.wasm" "$d/$n.anchors" "$d/$n.rcert" "$d/$n.rsel" > "$d/$n.rlin" 2>&1 || echo "RLINVERIFY FAILED" >> "$d/$n.rlin"
     "$VERIFY" bounds "$d/$n.rcert" > "$d/$n.rverify" 2>&1 || echo "VERIFY rc=$?" >> "$d/$n.rverify"
@@ -51,3 +51,4 @@ done
 echo "== failures"
 grep -l 'FAILED\|rc=' "$OUT"/*/*.lin "$OUT"/*/*.rlin "$OUT"/*/*.lverify "$OUT"/*/*.rverify "$OUT"/*/*.lprove "$OUT"/*/*.rprove 2>/dev/null | head -50
 python3 scripts/lab-a4-summary.py "$OUT" | tee "$OUT/summary.txt"
+python3 scripts/lab-a4-why.py "$OUT" | tee "$OUT/why.txt"

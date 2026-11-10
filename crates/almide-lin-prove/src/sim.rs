@@ -210,6 +210,14 @@ impl Sim<'_> {
             if self.skip {
                 if self.probe == 0 && !self.dropped.contains(&site) {
                     self.dropped.push(site);
+                    if almide_base::env::flag("ALMIDE_LIN_WHY") {
+                        eprintln!(
+                            "why\t{site}\t{}\t{w}\t{}+{off}\t{}",
+                            if store { "store" } else { "load" },
+                            addr.text(),
+                            f.iter().map(L::text).collect::<Vec<_>>().join(" ")
+                        );
+                    }
                 }
                 self.fills.extend(["0".to_string(), "()1".to_string(), "()1".to_string(), "()1".to_string()]);
                 return Some(());

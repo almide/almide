@@ -426,6 +426,9 @@ fn prove_proc(skels: &BTreeMap<usize, Skel>, contracts: &BTreeMap<usize, Contrac
     };
     sim.fills.push(pre.iter().map(L::text).collect::<Vec<_>>().join(" "));
     sim.fills.push(post.iter().map(L::text).collect::<Vec<_>>().join(" "));
+    if almide_base::env::flag("ALMIDE_LIN_WHY") {
+        eprintln!("whyproc\t{pos}");
+    }
     let r = sim.lcheck(None, &post, pre, &sk.body);
     let _ = sim.skels;
     let stretch = match r {
