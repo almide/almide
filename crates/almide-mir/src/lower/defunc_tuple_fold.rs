@@ -155,6 +155,11 @@ impl LowerCtx {
             _ => body,
         };
         match &inner.kind {
+            // A constructor of the accumulator's own variant type is spelled
+            // as a Named call but is no function: decline, and the general
+            // fold body builds it as the constructor it is.
+            IrExprKind::Call { target: CallTarget::Named { .. }, .. }
+                if self.variant_ctor_of(inner).is_some() => None,
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
                 let lowered = self.lower_call_args(args).ok()?;
                 let repr = repr_of(&inner.ty).ok()?;
