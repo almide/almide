@@ -321,7 +321,7 @@ pub fn almide_proc_signal_windows(pid: i32, sig: i32) -> Result<(), i32> {
 static ALMIDE_PROC_KILLED: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
 
 #[cfg(windows)]
-fn almide_proc_mark_killed(pid: u32) {
+pub fn almide_proc_mark_killed(pid: u32) {
     let mut k = ALMIDE_PROC_KILLED.lock().unwrap_or_else(|p| p.into_inner());
     if !k.contains(&pid) {
         k.push(pid);
