@@ -26,6 +26,14 @@ impl PendingRust {
     /// The native test harness uses the same checked input as build/run.
     /// An unsupported body is a compilation failure, never an implicit v0 run.
     pub(crate) fn generate_tests(mut self) -> Result<String, String> {
+        // `ALMIDE_IR_FAULT` names a pass of the standard codegen, which this
+        // route never runs. A fault that cannot be injected must not read as
+        // a clean compile (it used to: the file was reported as passed), so
+        // the route fails the way the injected violation would — a compiler
+        // panic the harness counts (tests/test_harness_compiler_panic_test.rs).
+        if let Some(pass) = almide_base::env::var("ALMIDE_IR_FAULT") {
+            panic!("ALMIDE_IR_FAULT={pass}: the native test render runs no standard-codegen pass to fault");
+        }
         let input = self.native_input.take().ok_or_else(|| "native tests require checked IR".to_string())?;
         render_native_tests(&self.source, std::mem::take(&mut self.native_text), input)
     }
