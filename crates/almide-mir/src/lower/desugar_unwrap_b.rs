@@ -103,7 +103,10 @@ fn collect_arm_unwrap_admit(
         IrExprKind::Block { stmts, expr } => {
             for s in stmts {
                 match &s.kind {
-                    IrStmtKind::Bind { value, .. } => collect_arm_unwrap_admit(value, has, all_admitted, layouts),
+                    // A destructuring bind holds its `!` exactly as a plain bind does.
+                    IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
+                        collect_arm_unwrap_admit(value, has, all_admitted, layouts)
+                    }
                     IrStmtKind::Expr { expr } => collect_arm_unwrap_admit(expr, has, all_admitted, layouts),
                     IrStmtKind::Assign { value, .. } => collect_arm_unwrap_admit(value, has, all_admitted, layouts),
                     _ => {}
