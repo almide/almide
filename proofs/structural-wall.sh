@@ -591,13 +591,17 @@ def lit(s):
 # goal's statement, so one file of every witness grows its memory with the
 # corpus. The manifest's counts are checked before the run (no goal or
 # witness dropped), and a drill set is written beside it: two honest
-# witnesses, each its own part, and the same with a corrupted third in a
+# witnesses, each its own part, and the same with a poisoned third in a
 # later part — the run must accept the first and refuse the second, and
 # refuse the first once a part file is gone.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(checker)), "lib"))
 import kernel_parts
 LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
-PART = 4000000  # literal bytes per kernel file
+# literal bytes per kernel file. Measured (probe 42722356352, routine
+# certificates): coqc's peak grows ~3.4 KiB per literal byte (0.25 MB: 1.2
+# GiB; 1 MB: 3.2 GiB; 4 MB: 12.7 GiB) at ~95 s per MB, so a part stays near
+# 2.5 GiB and four run side by side on a 16 GiB runner.
+PART = 750000
 HEADER = "From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes HelperSig BoundsCert InitCert FieldCert RoutineBoundsCert RoutineProcsCert RoutineLinCert.\n" + "From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n"
 goals = []
 for prop, ws in accepts.items():
@@ -615,26 +619,18 @@ for prop, w in rejects:
 kernel_parts.write(kgen[:-2], HEADER, goals, PART)
 with open(kgen[:-2] + ".count", "w") as g:
     g.write("%d\n" % (sum(len(ws) for ws in accepts.values()) + len(rejects)))
-small = sorted((len(w), prop, w) for prop, ws in accepts.items() for w in ws if w.strip())[:3]
-one_path = kgen[:-2] + ".one"
-if len(small) == 3:
-    goal1 = lambda prop, w: ("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], lit(w)), 1, 1)
-    honest = [goal1(prop, w) for _, prop, w in small[:2]]
-    _, prop, w = small[2]
-    bad = None
-    for cand in (w + " @", "@" + w, w[: len(w) // 2]):
-        with open(one_path, "w") as f:
-            f.write(cand)
-        if subprocess.run([checker, prop, one_path], capture_output=True).returncode == 1:
-            bad = cand
-            break
-    if bad is None:
-        fail.append("kernel drill: no corruption of the third witness is rejected by the extracted checker")
-    else:
-        kernel_parts.write(kgen[:-2] + "_dh", HEADER, honest, 1)
-        kernel_parts.write(kgen[:-2] + "_dc", HEADER, honest + [goal1(prop, bad)], 1)
+# The drill's refused goal: a structural poisoned certificate (the poison
+# leg below requires every verdict to reject it) claimed accepted.
+import glob
+small = sorted((len(w), prop, w) for prop, ws in accepts.items() for w in ws if w.strip())[:2]
+poison = sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(checker)), "poisoned-certs", "*structural*.cert")))
+goal1 = lambda prop, w: ("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], lit(w)), 1, 1)
+if len(small) < 2 or not poison:
+    fail.append("kernel drill: fewer than two accepted witnesses, or no structural poisoned certificate")
 else:
-    fail.append("kernel drill: fewer than three non-empty accepted witnesses")
+    honest = [goal1(prop, w) for _, prop, w in small]
+    kernel_parts.write(kgen[:-2] + "_dh", HEADER, honest, 1)
+    kernel_parts.write(kgen[:-2] + "_dc", HEADER, honest + [goal1("ownership", open(poison[0]).read())], 1)
 
 for p, (a, t) in stats.items():
     print(f"  [{p}] {a}/{t} witness(es) accepted by the extracted checker and almide-verify")
@@ -688,7 +684,7 @@ KBASE="${KGEN%.v}"
 kernel_jobs() {
   local n mem per
   n="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)"
-  per="${KERNEL_PART_MB:-3000}"
+  per="${KERNEL_PART_MB:-3500}"
   mem="$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || true)"
   if [ -n "$mem" ] && [ "$((mem / per))" -lt "$n" ]; then n="$((mem / per))"; fi
   [ "$n" -ge 1 ] || n=1
@@ -718,19 +714,19 @@ else
   exit 1
 fi
 # The split's own drill: two honest witnesses, each its own part, pass; a
-# corrupted third in a later part fails the run; so does a missing part.
+# poisoned third in a later part fails the run; so does a missing part.
 if ! kernel_run "$KBASE"_dh.lst 2; then
   echo "STRUCTURAL WALL FAIL: kernel drill: the two honest drill parts were not accepted" >&2; exit 1
 fi
 if kernel_run "$KBASE"_dc.lst 3 2>/dev/null; then
-  echo "STRUCTURAL WALL FAIL: kernel drill: a corrupted witness in part 3 of 3 was accepted" >&2; exit 1
+  echo "STRUCTURAL WALL FAIL: kernel drill: a poisoned certificate in part 3 of 3 was accepted" >&2; exit 1
 fi
 rm -f "$KBASE"_dh_p1.v
 if kernel_run "$KBASE"_dh.lst 2 2>/dev/null; then
   echo "STRUCTURAL WALL FAIL: kernel drill: a run with a part file gone was accepted" >&2; exit 1
 fi
-echo "  KERNEL OK: the split drill — honest parts accepted, a corrupted witness in a later part and a missing part refused"
-kernel_clean "$KBASE"_dh.lst; kernel_clean "$KBASE"_dc.lst; rm -f "$KBASE.count" "$KBASE.one"
+echo "  KERNEL OK: the split drill — honest parts accepted, a poisoned certificate in a later part and a missing part refused"
+kernel_clean "$KBASE"_dh.lst; kernel_clean "$KBASE"_dc.lst; rm -f "$KBASE.count"
 
 if [ "$MODE" = tests ]; then
   echo
