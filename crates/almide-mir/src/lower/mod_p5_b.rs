@@ -193,7 +193,7 @@ pub(crate) fn try_tco_rewrite(
     let idx_var = lit.as_ref().map(|(_, iv, _)| *iv);
 
     // FIRST collection — detect the self-calls + carried params (on the pre-substitution body).
-    let Some((calls0, bases0)) = collect_tco_shape(work_body, fn_name, n) else {
+    let Some((calls0, bases0)) = collect_tco_shape(work_body, fn_name, params) else {
         tco_trace!("bail: collect0");
         return None;
     };
@@ -231,7 +231,7 @@ pub(crate) fn try_tco_rewrite(
     let params2: &[almide_ir::IrParam] = &params_v;
 
     // SECOND collection — on the substituted body, with the slot params.
-    let Some((calls, bases)) = collect_tco_shape(work_ref, fn_name, n) else {
+    let Some((calls, bases)) = collect_tco_shape(work_ref, fn_name, params2) else {
         tco_trace!("bail: collect1");
         return None;
     };
@@ -357,7 +357,7 @@ fn has_tuple_destructure(e: &IrExpr) -> bool {
 fn collect_tco_shape<'a>(
     body: &'a IrExpr,
     fn_name: &str,
-    n: usize,
+    params: &[almide_ir::IrParam],
 ) -> Option<(Vec<&'a [IrExpr]>, Vec<&'a IrExpr>)> {
     let mut calls: Vec<&[IrExpr]> = Vec::new();
     let mut bases: Vec<&IrExpr> = Vec::new();
@@ -365,7 +365,17 @@ fn collect_tco_shape<'a>(
     if calls.is_empty() || bases.is_empty() {
         return None;
     }
-    if calls.iter().any(|c| c.len() != n) {
+    if calls.iter().any(|c| c.len() != params.len()) {
+        return None;
+    }
+    // A base that itself recurses (`s + f(n - v, xs)` beside a tail `f(n,
+    // list.drop(xs, 1))`, #3550) stays a real call — no leg loops a non-tail
+    // call — while the tail calls round it become the loop. Only where the
+    // native render would otherwise refuse the function: its owned slots are
+    // on and a tail call hands a heap parameter on. Everywhere else such a
+    // function keeps its real-recursion lowering.
+    let mixed_ok = crate::lower::owned_tco_slots() && params.iter().any(|p| is_heap_ty(&p.ty));
+    if !mixed_ok && bases.iter().any(|b| tco_contains_self(b, fn_name)) {
         return None;
     }
     Some((calls, bases))
