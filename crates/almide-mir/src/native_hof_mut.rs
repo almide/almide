@@ -75,7 +75,7 @@ mod mutable_route_tests {
         assert_eq!(runtime_arg("o", NTy::Rec(0), true, false), "&o");
         assert_eq!(runtime_arg("o", NTy::RecRef(0), true, false), "o");
         for name in ["option_is_some", "option_is_none"] {
-            assert_eq!(derive_explained(name).unwrap().params[0].1, true);
+            assert!(derive_explained(name).unwrap().params[0].1);
         }
     }
 

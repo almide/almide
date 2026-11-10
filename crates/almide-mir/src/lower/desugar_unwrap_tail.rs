@@ -70,12 +70,12 @@ fn desugar_tail_effect_unwrap(
                         expr: Box::new(IrExpr {
                             kind: IrExprKind::LitStr { value: "none".into() },
                             ty: Ty::String,
-                            span: tail.span.clone(),
+                            span: tail.span,
                             def_id: None,
                         }),
                     },
                     ty: result_ty.clone(),
-                    span: tail.span.clone(),
+                    span: tail.span,
                     def_id: None,
                 },
             };
@@ -89,12 +89,12 @@ fn desugar_tail_effect_unwrap(
                         expr: Box::new(IrExpr {
                             kind: IrExprKind::Var { id: v },
                             ty: payload_ty,
-                            span: tail.span.clone(),
+                            span: tail.span,
                             def_id: None,
                         }),
                     },
                     ty: result_ty.clone(),
-                    span: tail.span.clone(),
+                    span: tail.span,
                     def_id: None,
                 },
             };
@@ -104,7 +104,7 @@ fn desugar_tail_effect_unwrap(
                     arms: vec![none_arm, some_arm],
                 },
                 ty: result_ty,
-                span: tail.span.clone(),
+                span: tail.span,
                 def_id: tail.def_id,
             })
         }
@@ -125,7 +125,7 @@ fn desugar_tail_effect_unwrap(
                     else_: Box::new(ne.unwrap_or_else(|| (**else_).clone())),
                 },
                 ty: tail.ty.clone(),
-                span: tail.span.clone(),
+                span: tail.span,
                 def_id: tail.def_id,
             })
         }
@@ -151,7 +151,7 @@ fn desugar_tail_effect_unwrap(
             Some(IrExpr {
                 kind: IrExprKind::Match { subject: subject.clone(), arms: new_arms },
                 ty: tail.ty.clone(),
-                span: tail.span.clone(),
+                span: tail.span,
                 def_id: tail.def_id,
             })
         }

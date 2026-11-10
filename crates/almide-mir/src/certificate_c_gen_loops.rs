@@ -90,7 +90,7 @@ fn allocator_prim_feeders_credit_the_loop_slot() {
                 ops.push(Op::ConstInt { dst: v(dst + 10), value: 7 });
                 vec![v(dst + 10)]
             };
-            ops.push(Op::Prim { kind: kind.clone(), dst: Some(v(dst)), args });
+            ops.push(Op::Prim { kind: kind, dst: Some(v(dst)), args });
             if kind == PrimKind::ResStrMake { ops.push(Op::Consume { v: v(dst + 10) }); }
             ops
         };

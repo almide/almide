@@ -18,7 +18,7 @@ impl IrMutVisitor for MapEquality<'_> {
         let IrExprKind::BinOp { op, left, right } = &e.kind else { return; };
         if !matches!(op, BinOp::Eq | BinOp::Neq) || left.ty != right.ty { return; }
         let Ty::Applied(TC::Map, args) = &left.ty else { return; };
-        if args.len() != 2 || !(crate::lower::is_value_ty(&args[1]) || args.iter().any(|t| *t == Ty::Float32)) { return; }
+        if args.len() != 2 || !(crate::lower::is_value_ty(&args[1]) || args.contains(&Ty::Float32)) { return; }
         let mut result = self.compare(left, right, &args[0], &args[1]);
         if *op == BinOp::Neq { result = eq(result, boolean(false)); }
         result.span = e.span;

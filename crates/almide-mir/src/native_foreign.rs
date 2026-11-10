@@ -78,11 +78,10 @@ pub(crate) fn extend_bound(caps: &mut Vec<Capability>, effect: bool) {
 pub(crate) fn check_decl(f: &IrFunction, kind: NativeExtern) -> Result<(), LowerError> {
     let original = ORIGINALS.with(|d| d.borrow().get(f.name.as_str()).cloned());
     let f = original.as_ref().unwrap_or(f);
-    if f.params.iter().any(|p| p.is_mut) {
-        if original.is_none() || f.is_effect || f.ret_ty.result_ok_ty().is_some() {
+    if f.params.iter().any(|p| p.is_mut)
+        && (original.is_none() || f.is_effect || f.ret_ty.result_ok_ty().is_some()) {
             return Err(wall("native: fallible foreign write-back needs both return channels"));
         }
-    }
     for (ty, param) in f.params.iter().map(|p| (&p.ty, true)).chain(std::iter::once((&f.ret_ty, false))) {
         if kind == NativeExtern::C {
             let abi = if param { c_param_abi(ty) } else { c_return_abi(ty) }
@@ -136,7 +135,7 @@ pub(crate) fn render(
         || decl.is_effect != *is_effect || args.len() != decl.params.len() {
         return Err(wall("native: foreign call disagrees with its checked declaration"));
     }
-    check_decl(&decl, *kind)?;
+    check_decl(decl, *kind)?;
     let mut prelude = String::new();
     let mut actuals = Vec::new();
     let mut c_params = Vec::new();

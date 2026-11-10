@@ -28,7 +28,7 @@ fn desugar_nested_branch_block_arm(
                                 ty: ty.clone(),
                                 value: nv,
                             },
-                            span: s.span.clone(),
+                            span: s.span,
                         }
                     }
                     None => s.clone(),
@@ -64,7 +64,7 @@ fn desugar_nested_branch_block_arm(
             expr: nt.map(Box::new).or_else(|| tail.clone()),
         },
         ty: body.ty.clone(),
-        span: body.span.clone(),
+        span: body.span,
         def_id: body.def_id,
     })
 }

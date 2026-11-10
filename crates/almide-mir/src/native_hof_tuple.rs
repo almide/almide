@@ -166,7 +166,7 @@ mod tuple_callback_tests {
         let acc = DTy::Var("A".into());
         let layout = callback_layout(&[acc.clone(), pair.clone()], 3).expect("a two-parameter callback with a tuple splits into three slots");
         assert_eq!(layout, vec![(acc, "__p0".into()), (DTy::Str, "__p1.0".into()), (DTy::Int, "__p1.1".into())]);
-        assert_eq!(callback_layout(&[pair.clone()], 1), Some(vec![(pair.clone(), "__p0".into())]));
+        assert_eq!(callback_layout(std::slice::from_ref(&pair), 1), Some(vec![(pair.clone(), "__p0".into())]));
         assert!(callback_layout(&[pair], 3).is_none());
         for call in ["map.filter", "map.filter_skv", "map.find", "map.find_skv", "map.fold",
             "map.fold_skv", "map.fold_str_msi", "map.fold_skv_msi", "map.fold_str_sacc", "map.fold_skv_hacc"] {

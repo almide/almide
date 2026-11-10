@@ -153,9 +153,8 @@ fn note_hoist_facts(
                 // The tag word of either Result layout (an Option's length
                 // word lands here too; only a Result's payload read asks).
                 if let Some(&(r, o)) = at.get(&args[0]) {
-                    if o == RESULT_TAG_OFFSET || o == i64::from(BLOCK_LEN_OFFSET) {
-                        if !mutable.contains(d) { tags.insert(*d, (r, true)); }
-                    }
+                    if (o == RESULT_TAG_OFFSET || o == i64::from(BLOCK_LEN_OFFSET))
+                        && !mutable.contains(d) { tags.insert(*d, (r, true)); }
                 }
             }
             Op::Prim { kind: PrimKind::LoadHandle | PrimKind::Load { width: 8 }, dst: Some(d), args } if args.len() == 1 => {
@@ -173,7 +172,7 @@ fn note_hoist_facts(
             }
             Op::IntBinOp { dst, op: cmp, a, b } => {
                 if !mutable.contains(dst) {
-                    if let Some(tag) = tag_comparison(*cmp, *a, *b, &consts, &tags) { tags.insert(*dst, tag); }
+                    if let Some(tag) = tag_comparison(*cmp, *a, *b, consts, tags) { tags.insert(*dst, tag); }
                 }
             }
             Op::IfThen { cond, .. } => arms.push((true, predicate_facts(cond, tags, groups))),

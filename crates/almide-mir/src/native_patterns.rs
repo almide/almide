@@ -160,7 +160,7 @@ impl IrMutVisitor for Patterns<'_> {
         let mark = self.vars.entries.len();
         if let Some(mut result) = self.option_rows(subject, arms)
             .or_else(|| self.rows(subject, arms)) {
-            result.span = e.span.clone(); *e = result;
+            result.span = e.span; *e = result;
         } else { self.vars.entries.truncate(mark); }
     }
 }

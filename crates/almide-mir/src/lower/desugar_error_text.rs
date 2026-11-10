@@ -4,7 +4,7 @@
 fn erased_err_text(err: IrExpr) -> IrExpr {
     if let Some(formatted) = crate::native_display::erased_error(&err) { return formatted; }
     IrExpr {
-        span: err.span.clone(),
+        span: err.span,
         kind: IrExprKind::StringInterp { parts: vec![almide_ir::IrStringPart::Expr { expr: err }] },
         ty: Ty::String,
         def_id: None,

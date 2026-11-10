@@ -11,7 +11,7 @@ fn matrix_ref_list(d: &DTy, rust: &str, symbol: &str, items: &[&str]) -> Option<
     let prefix = format!("fn {symbol}<");
     let header = items.iter().find_map(|item| {
         let start = item.find(&prefix)?;
-        Some(item[start..].split('{').next()?)
+        item[start..].split('{').next()
     })?;
     let compact: String = header.chars().filter(|c| !c.is_whitespace()).collect();
     let bound = format!("{param}:std::ops::Deref<Target=AlmideMatrix>");
