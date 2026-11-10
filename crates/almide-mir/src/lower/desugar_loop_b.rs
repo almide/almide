@@ -657,7 +657,9 @@ pub(crate) fn desugar_unit_main_loop(
         cur = n;
         changed = true;
     }
-    if let Some(r) = desugar_effect_unwrap_inner(&cur, next_var, true, ret_is_result) {
+    // The body's own `!` statements, and those under its branch statements
+    // (desugar_unit_main_stmt.rs).
+    if let Some(r) = unit_main_branch_stmt_bangs(&cur, next_var, ret_is_result) {
         cur = r;
         changed = true;
     }
@@ -700,3 +702,5 @@ fn desugar_unit_main_block_loops(
     }
     None
 }
+
+include!("desugar_unit_main_stmt.rs");
