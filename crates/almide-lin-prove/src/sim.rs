@@ -210,7 +210,7 @@ impl Sim<'_> {
             if self.skip {
                 if self.probe == 0 && !self.dropped.contains(&site) {
                     self.dropped.push(site);
-                    if almide_base::env::flag("ALMIDE_LIN_WHY") {
+                    if std::env::var_os("ALMIDE_LIN_WHY").is_some() {
                         eprintln!(
                             "why\t{site}\t{}\t{w}\t{}+{off}\t{}",
                             if store { "store" } else { "load" },

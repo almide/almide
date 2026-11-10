@@ -426,7 +426,7 @@ fn prove_proc(skels: &BTreeMap<usize, Skel>, contracts: &BTreeMap<usize, Contrac
     };
     sim.fills.push(pre.iter().map(L::text).collect::<Vec<_>>().join(" "));
     sim.fills.push(post.iter().map(L::text).collect::<Vec<_>>().join(" "));
-    if almide_base::env::flag("ALMIDE_LIN_WHY") {
+    if std::env::var_os("ALMIDE_LIN_WHY").is_some() {
         eprintln!("whyproc\t{pos}");
     }
     let r = sim.lcheck(None, &post, pre, &sk.body);
