@@ -5225,13 +5225,7 @@ effect fn remove(name: String) -> Result[Unit, String] = match __set_refusal(nam
 effect fn vars() -> Map[String, String] = __vars_of(__environ())
 
 
-local fn __vars_of(entries: List[String]) -> Map[String, String] =
-  entries
-    |> list.filter((entry) => string.contains(entry, "="))
-    |> list.map(__vars_step)
-    |> list.sort_by(__vars_name)
-    |> map.from_list
-    |> map.filter(__vars_kept)
+local fn __vars_of(entries: List[String]) -> Map[String, String] = entries |> list.filter((entry) => string.contains(entry, "=")) |> list.map(__vars_step) |> list.sort_by(__vars_name) |> map.from_list |> map.filter(__vars_kept)
 
 
 
