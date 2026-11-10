@@ -168,7 +168,7 @@ fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use
     // through the install so the library copied out is this build's.
     let _ = std::fs::create_dir_all(&project_dir);
     let _flock = super::build_dir::BuildDirLock::acquire(&project_dir)
-        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&e); std::process::exit(1); });
     // Same stale-incremental-session recovery as the bin path (#2500), under
     // the lock just taken.
     let built = super::cargo_ice::build_recovering_from_ice(&project_dir, || {
@@ -200,7 +200,7 @@ fn cmd_build_native(rs_code: &str, output: &str, use_release: bool, native_deps:
     let project_dir = super::build_dir::shared_run_project_dir();
     let _ = std::fs::create_dir_all(&project_dir);
     let flock = super::build_dir::BuildDirLock::acquire(&project_dir)
-        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&e); std::process::exit(1); });
     match super::run::build_native_cached_locked(rs_code, use_release, native_deps, source_root, &flock) {
         Ok(bin_path) => {
             if let Err(e) = install_artifact(&bin_path, std::path::Path::new(output)) {
