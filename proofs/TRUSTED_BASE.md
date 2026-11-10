@@ -451,9 +451,9 @@ value mod 2^32. The `selfhost` line's stride for a List parameter was its slot
 size, which claimed `slot * len <= cap` of a len word that counts BYTES; it
 is 1 now (none of the four bodies with a stride above 1 was certified).
 Coverage on the 1048-fixture corpus: the runtime routines ship 120,796 heap
-accesses summed over the artifacts, 10,207 covered (9,876 by the routine
+accesses summed over the artifacts, 11,627 covered (11,296 by the routine
 certificate, 331 by the recorded byte loops); 26 of the 83 routine kinds have
-an access certified, 79 of their 745 distinct accesses. Not covered, and so
+an access certified, 82 of their 745 distinct accesses. Not covered, and so
 trusted: the rest — the allocator core (`$alloc`, `$free`, `$inc`, which
 take a handle below the heap floor too, and whose freelist words are no
 block), the map and set index family (raw entry walks with a symbolic
