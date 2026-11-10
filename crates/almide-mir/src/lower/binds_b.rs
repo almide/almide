@@ -301,7 +301,10 @@ impl LowerCtx {
             // A `${...}` interpolation element (`["", "[[${emit_path(...)}]]"]` — the toml
             // emit_sections shape): a fresh owned String, moved into the slot exactly like a concat.
             IrExprKind::StringInterp { .. } => elem_str,
-            IrExprKind::Var { id } => self.value_of.contains_key(id),
+            // A bound var, or (native owned slots) an immutable module-level global,
+            // whose copy the build materializes as any other reference to it does.
+            IrExprKind::Var { id } => self.value_of.contains_key(id)
+                || (crate::lower::owned_tco_slots() && self.globals.contains_key(id) && !crate::lower::is_mutable_global(*id)),
             // An inner scalar-list LITERAL (`[1.0, 2.0]` in a List[List[Float]]) —
             // buildable iff every inner element is a lowerable scalar (the flat
             // builder itself re-checks; a non-scalar inner defers there).
@@ -438,7 +441,7 @@ impl LowerCtx {
             // A Var element: acquire a fresh owned reference (Dup) the list will own; the original
             // binding keeps its own reference. The dup is then Consume'd (moved) into the slot.
             IrExprKind::Var { id } => {
-                let src = *self.value_of.get(id)?;
+                let src = self.value_of.get(id).copied().or_else(|| self.value_or_global(*id).ok())?;
                 let dup = self.fresh_value();
                 self.ops.push(Op::Dup { dst: dup, src });
                 dup
