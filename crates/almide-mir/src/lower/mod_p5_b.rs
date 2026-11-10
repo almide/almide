@@ -681,6 +681,7 @@ fn tco_result_acc_mode(work_ref: &IrExpr, base_exprs: &[IrExpr], ret_ty: &Ty) ->
                 if oa.len() == 1 && is_heap_ty(&oa[0]) && !matches!(&oa[0], Ty::String)));
     if (base_reads_loop_local || tuple_with_value)
         && (non_heap_ok_result || option_nested_ok_result)
+        && !crate::lower::owned_tco_slots()
     {
         return None;
     }
