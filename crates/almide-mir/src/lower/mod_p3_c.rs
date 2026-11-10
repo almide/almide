@@ -476,7 +476,11 @@ impl LowerCtx {
         if !is_pure_literal_list(init) {
             return None;
         }
-        let dst = self.try_lower_str_list_literal(init)?;
+        // Native owned slots: a literal list of Float or Bool elements builds as
+        // the same literal bound to a local does (one `ListLit`, no call).
+        let dst = self.try_lower_str_list_literal(init).or_else(|| {
+            crate::lower::owned_tco_slots().then(|| self.try_lower_scalar_list_construct(init)).flatten()
+        })?;
         self.live_heap_handles.push(dst);
         self.memo_global(var, dst);
         Some(dst)
