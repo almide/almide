@@ -24,21 +24,6 @@ fn dump_native_mir_if_requested(source: &str) {
     }
 }
 
-/// #4447: the native rungs render no `@export(c)` wrapper (the program's
-/// `exports` are empty), so a program declaring one walls here and builds
-/// through the standard codegen, which renders the C wrapper from the C ABI
-/// table — never a binary that silently lacks the C symbol.
-fn wall_native_c_exports(ir: &almide_ir::IrProgram) -> Result<(), LowerError> {
-    if let Some(f) = ir.functions.iter().chain(ir.modules.iter().flat_map(|m| &m.functions))
-        .find(|f| f.export_attrs.iter().any(|a| a.target.as_str() == "c")) {
-        return Err(LowerError::at(
-            f.body.span,
-            format!("native: fn `{}` is @export(c) — its C wrapper is outside the native rungs", f.name),
-        ));
-    }
-    Ok(())
-}
-
 /// #4006 A5: the tuples the generated record structs are derived for — every
 /// tuple a signature, a record field or a variant payload names, then the
 /// all-scalar tuples locals hold.
@@ -493,9 +478,9 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
         prepare()?
     };
     crate::charge_probe::note_program_regions(almide_ir::meter_plan::program_has_regions(&ir));
-    // #4447: the native rungs render no `@export(c)` wrapper — the wall
-    // comes before the fan lift.
-    wall_native_c_exports(&ir)?;
+    // #4447: an `@export(c)` signature outside the scalar rows the native
+    // rungs adapt walls — before the fan lift.
+    crate::native_foreign::check_exports(&ir)?;
     // #4006 C2: a discovered region window runs in the arena on this render
     // too — the `__rgn_` twins and a window fn the MIR brackets below.
     let mut ir = native_bundled::lower_list_patterns(ir);
@@ -600,6 +585,7 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
         rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names, &routed)?;
     }
     rust.push_str(&crate::native_callbacks::render(&ir, &sigs)?);
+    rust.push_str(&crate::native_foreign::render_exports(&ir, &sigs)?);
     let mut certs = native_ownership_certs(&program.functions, &crate::native_hof::sites());
     // Row 4: each function's bounds witness, recorded as the render wrote its
     // element accesses (render_native_bounds).

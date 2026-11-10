@@ -508,7 +508,7 @@ fn prepare_checked_ir(
     if native_bodies {
         // A module's C export can be unreferenced by Almide but still be
         // required by an external caller. Check before reachability pruning.
-        wall_native_c_exports(&ir)?;
+        crate::native_foreign::check_exports(&ir)?;
         native_bundled::link(&mut ir, &mut checker)?;
     } else {
         resolve_user_module_calls(&mut ir);
