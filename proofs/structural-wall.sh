@@ -584,55 +584,69 @@ ran = {row.rstrip("\n").split("\t")[1] for row in open(os.path.join(out, "index"
 for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
     fail.append("STALE exception (no witness of that name rejects — remove the row): " + "\t".join(key))
 
-def lit(s):
-    return '"' + s.replace('"', '""') + '"'
-# The kernel file is split into parts of at most PART literal bytes, each
-# its own coqc run (proofs/lib/kernel_parts.py): the kernel keeps every
-# goal's statement, so one file of every witness grows its memory with the
-# corpus. The manifest's counts are checked before the run (no goal or
-# witness dropped), and a drill set is written beside it: two honest
+# The kernel judges each distinct (checker, verdict, text) once, in parts of
+# at most PART literal bytes, each its own coqc run
+# (proofs/lib/kernel_parts.py): the kernel keeps every goal's statement, so
+# one file of every witness grows its memory with the corpus, and a text
+# two artifacts share is one fact. The manifest's counts and the parts'
+# stated texts are checked before the run (no witness dropped, none skipped
+# as another's duplicate), and drill sets are written beside it: two honest
 # witnesses, each its own part, and the same with a poisoned third in a
 # later part — the run must accept the first and refuse the second, and
-# refuse the first once a part file is gone.
+# refuse the first once a part file is gone; and a witness fed twice beside
+# its one-byte mutant the extracted checker rejects — the parts must hold
+# two texts, and the kernel must refuse the run.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(checker)), "lib"))
 import kernel_parts
 LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
-# literal bytes per kernel file. Measured (probe 42722356352, routine
-# certificates): coqc's peak grows ~3.4 KiB per literal byte (0.25 MB: 1.2
-# GiB; 1 MB: 3.2 GiB; 4 MB: 12.7 GiB) at ~95 s per MB. On the whole wall
-# (run 42726796161) the largest part peaked at 5.4 GiB on the fixtures leg
-# (60 parts, 1319 s) and 5.8 GiB on the stdlib-test leg (25 parts, 556 s),
-# four at once on the hosted runner.
+# literal bytes per kernel file, counted as the parts spell them (a chunk
+# once per part). Measured (probe 42762704984, routine certificates, one
+# coqc): the kernel's time and peak follow the literals it reads, the
+# largest one most — 80 certificates of 1.28 MB as whole literals 121 s and
+# 4.5 GiB, spelled over 0.31 MB of chunks 33 s and 0.9 GiB; the largest
+# certificate (0.82 MB) as one literal 97 s and 5.4 GiB, over its chunks
+# 42 s and 1.3 GiB; the three largest (2.43 MB over 0.82 MB of chunks) 70 s
+# and 1.5 GiB. Computing once at Qed instead of also in the tactic took a
+# fifth off the whole-literal runs.
 PART = 750000
 HEADER = "From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes HelperSig BoundsCert InitCert FieldCert RoutineBoundsCert RoutineProcsCert RoutineLinCert.\n" + "From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n"
-goals = []
-for prop, ws in accepts.items():
-    chunk, size = [], 0
-    for w in ws + [None]:
-        if w is None or (chunk and size + len(w) > LIMIT):
-            if chunk:
-                goals.append(("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], ";".join(lit(x) for x in chunk)), size, len(chunk)))
-            chunk, size = [], 0
-        if w is not None:
-            chunk.append(w)
-            size += len(w)
-for prop, w in rejects:
-    goals.append(("Goal %s %s = false.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], lit(w)), len(w), 1))
-kernel_parts.write(kgen[:-2], HEADER, goals, PART)
+with open(kgen[:-2] + ".hdr", "w") as g:
+    g.write(HEADER)
+fed = [(FN[prop], True, w) for prop, ws in accepts.items() for w in ws] + [(FN[prop], False, w) for prop, w in rejects]
+kernel_parts.write(kgen[:-2], HEADER, fed, PART, LIMIT)
 with open(kgen[:-2] + ".count", "w") as g:
     g.write("%d\n" % (sum(len(ws) for ws in accepts.values()) + len(rejects)))
-# The drill's refused goal: a structural poisoned certificate (the poison
-# leg below requires every verdict to reject it) claimed accepted.
+print(f"  [kernel] {len(fed)} witness verdict(s), {len(set(fed))} distinct text(s) for the kernel to judge "
+      f"({sum(len(w) for _, _, w in fed)} bytes fed, {sum(len(w) for _, _, w in set(fed))} distinct)")
+# The drills' refused goals: a structural poisoned certificate (the poison
+# leg below requires every verdict to reject it) claimed accepted, and the
+# first one-byte mutant of a small accepted witness that the extracted
+# checker rejects, claimed accepted beside the witness it was made from.
 import glob
-small = sorted((len(w), prop, w) for prop, ws in accepts.items() for w in ws if w.strip())[:2]
+small = sorted((len(w), prop, w) for prop, ws in accepts.items() for w in set(ws) if w.strip())[:2]
 poison = sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(checker)), "poisoned-certs", "*structural*.cert")))
-goal1 = lambda prop, w: ("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], lit(w)), 1, 1)
-if len(small) < 2 or not poison:
-    fail.append("kernel drill: fewer than two accepted witnesses, or no structural poisoned certificate")
+def mutant():
+    for _, prop, w in small:
+        for i in range(len(w)):
+            for c in "DI0123456789;|":
+                m = w[:i] + c + w[i + 1:]
+                if c == w[i]:
+                    continue
+                with open(one, "w") as f:
+                    f.write(m)
+                if subprocess.run([checker, prop, one], capture_output=True).returncode == 1:
+                    return prop, w, m
+    return None
+mut = mutant() if len(small) == 2 else None
+if len(small) < 2 or not poison or not mut:
+    fail.append("kernel drill: fewer than two accepted witnesses, no structural poisoned certificate, or no one-byte mutant the extracted checker rejects")
 else:
-    honest = [goal1(prop, w) for _, prop, w in small]
-    kernel_parts.write(kgen[:-2] + "_dh", HEADER, honest, 1)
-    kernel_parts.write(kgen[:-2] + "_dc", HEADER, honest + [goal1("ownership", open(poison[0]).read())], 1)
+    honest = [(FN[prop], True, w) for _, prop, w in small]
+    kernel_parts.write(kgen[:-2] + "_dh", HEADER, honest, 0, 0)
+    kernel_parts.write(kgen[:-2] + "_dc", HEADER, honest + [(FN["ownership"], True, open(poison[0]).read())], 0, 0)
+    prop, w, m = mut
+    kernel_parts.write(kgen[:-2] + "_dk", HEADER, [(FN[prop], True, w)] * 2, 0, 0)
+    kernel_parts.write(kgen[:-2] + "_dd", HEADER, [(FN[prop], True, w)] * 2 + [(FN[prop], True, m)], 0, 0)
 
 for p, (a, t) in stats.items():
     print(f"  [{p}] {a}/{t} witness(es) accepted by the extracted checker and almide-verify")
@@ -693,22 +707,23 @@ kernel_jobs() {
   echo "$n"
 }
 kernel_run() { # <manifest> <witnesses>: 0 only when the counts hold and every part passes
-  python3 "$ROOT/proofs/lib/kernel_parts.py" check "$1" "$2" || return 1
+  python3 "$ROOT/proofs/lib/kernel_parts.py" check "$1" "$2" "$KBASE.hdr" || return 1
   KTIME=0; if /usr/bin/time -f %M -o /dev/null true 2>/dev/null; then KTIME=1; fi
   export COQC KTIME
-  tail -n +3 "$1" | cut -f1 | (cd "$ROOT/proofs" && xargs -P "$(kernel_jobs)" -I{} sh -c '
+  tail -n +4 "$1" | cut -f1 | (cd "$ROOT/proofs" && xargs -P "$(kernel_jobs)" -I{} sh -c '
     if [ "$KTIME" = 1 ]; then /usr/bin/time -f %M -o "$1.rss" "$COQC" -Q . AlmideTrust "$1" >/dev/null 2>&1 || exit 255
     else "$COQC" -Q . AlmideTrust "$1" >/dev/null 2>&1 || exit 255; fi' _ {})
 }
 kernel_clean() { # <manifest>
   [ -f "$1" ] || return 0
-  tail -n +3 "$1" | cut -f1 | while IFS= read -r k; do rm -f "$k" "$k.rss" "${k%.v}.vo" "${k%.v}.vos" "${k%.v}.vok" "${k%.v}.glob"; done
-  rm -f "$1"
+  tail -n +4 "$1" | cut -f1 | while IFS= read -r k; do rm -f "$k" "$k.rss" "${k%.v}.vo" "${k%.v}.vos" "${k%.v}.vok" "${k%.v}.glob"; done
+  rm -f "$1" "${1%.lst}.fed"
 }
 if kernel_run "$KBASE.lst" "$(cat "$KBASE.count")"; then
-  KPARTS="$(($(wc -l < "$KBASE.lst") - 2))"
+  KPARTS="$(($(wc -l < "$KBASE.lst") - 3))"
+  KDISTINCT="$(sed -n 's/^distinct //p' "$KBASE.lst")"
   KRSS="$(cat "$KBASE"_p*.v.rss 2>/dev/null | sort -n | tail -1)"
-  echo "  KERNEL OK: every structural witness verdict certified by the Rocq kernel in $(( $(date +%s) - KSTART ))s (vm_compute, $KPARTS part(s), $(kernel_jobs) at once, peak ${KRSS:-?} KiB per part)"
+  echo "  KERNEL OK: every structural witness verdict certified by the Rocq kernel in $(( $(date +%s) - KSTART ))s (vm_compute, ${KDISTINCT:-?} distinct text(s) of $(cat "$KBASE.count") witness(es), $KPARTS part(s), $(kernel_jobs) at once, peak ${KRSS:-?} KiB per part)"
   kernel_clean "$KBASE.lst"
 else
   echo "STRUCTURAL WALL FAIL: the KERNEL disagrees with the extracted checker on a structural witness (extraction divergence), or a kernel part is missing or short (above)." >&2
@@ -716,11 +731,17 @@ else
   exit 1
 fi
 # The split's own drill: two honest witnesses, each its own part, pass; a
-# poisoned third in a later part fails the run; so does a missing part.
+# poisoned third in a later part fails the run; so does a missing part. A
+# refusal counts only when the manifest's own check passes — it is the
+# kernel that must say no.
+kernel_refuses() { # <manifest> <witnesses>
+  python3 "$ROOT/proofs/lib/kernel_parts.py" check "$1" "$2" "$KBASE.hdr" || return 1
+  if kernel_run "$1" "$2" 2>/dev/null; then return 1; fi
+}
 if ! kernel_run "$KBASE"_dh.lst 2; then
   echo "STRUCTURAL WALL FAIL: kernel drill: the two honest drill parts were not accepted" >&2; exit 1
 fi
-if kernel_run "$KBASE"_dc.lst 3 2>/dev/null; then
+if ! kernel_refuses "$KBASE"_dc.lst 3; then
   echo "STRUCTURAL WALL FAIL: kernel drill: a poisoned certificate in part 3 of 3 was accepted" >&2; exit 1
 fi
 rm -f "$KBASE"_dh_p1.v
@@ -728,7 +749,25 @@ if kernel_run "$KBASE"_dh.lst 2 2>/dev/null; then
   echo "STRUCTURAL WALL FAIL: kernel drill: a run with a part file gone was accepted" >&2; exit 1
 fi
 echo "  KERNEL OK: the split drill — honest parts accepted, a poisoned certificate in a later part and a missing part refused"
-kernel_clean "$KBASE"_dh.lst; kernel_clean "$KBASE"_dc.lst; rm -f "$KBASE.count"
+# The dedupe's drill: a witness fed twice is one text and passes; fed twice
+# beside its one-byte mutant, the parts hold two texts and the kernel
+# refuses the mutant's; and the parts a dedupe that took the mutant for its
+# original would have written (the original's goal alone, under the three
+# witnesses fed) do not pass the manifest check.
+if [ "$(sed -n 3p "$KBASE"_dk.lst)" != "distinct 1" ] || ! kernel_run "$KBASE"_dk.lst 2; then
+  echo "STRUCTURAL WALL FAIL: kernel drill: a witness fed twice was not judged once and accepted" >&2; exit 1
+fi
+if [ "$(sed -n 3p "$KBASE"_dd.lst)" != "distinct 2" ] || ! kernel_refuses "$KBASE"_dd.lst 3; then
+  echo "STRUCTURAL WALL FAIL: kernel drill: a one-byte mutant beside its original was not judged on its own, or was accepted" >&2; exit 1
+fi
+{ printf 'goals 1\nwitnesses 3\ndistinct 1\n'; sed -n 4p "$KBASE"_dk.lst; } > "$KBASE"_ds.lst
+cp "$KBASE"_dd.fed "$KBASE"_ds.fed
+if python3 "$ROOT/proofs/lib/kernel_parts.py" check "$KBASE"_ds.lst 3 "$KBASE.hdr" 2>/dev/null; then
+  echo "STRUCTURAL WALL FAIL: kernel drill: parts that leave a fed witness unstated passed the manifest check" >&2; exit 1
+fi
+rm -f "$KBASE"_ds.lst "$KBASE"_ds.fed
+echo "  KERNEL OK: the dedupe drill — a repeated witness judged once, its one-byte mutant judged on its own and refused, a skipped witness caught by the manifest check"
+kernel_clean "$KBASE"_dh.lst; kernel_clean "$KBASE"_dc.lst; kernel_clean "$KBASE"_dk.lst; kernel_clean "$KBASE"_dd.lst; rm -f "$KBASE.count" "$KBASE.hdr"
 
 if [ "$MODE" = tests ]; then
   echo
