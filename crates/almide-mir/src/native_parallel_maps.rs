@@ -156,7 +156,7 @@ impl Lift<'_> {
             name, params, ret_ty: e.ty.clone(), body, is_effect: false, is_test: false,
             generics: None, extern_attrs: Vec::new(), export_attrs: Vec::new(), attrs: Vec::new(),
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0, def_id: None,
-            mutated_params: Vec::new(), module_origin: None,
+            mutated_params: Vec::new(), module_origin: None, // fresh-fn: a lifted map site whose params are all fresh `let` binds (a `var` capture is refused above)
         });
         let base = declared.as_ref().map(|(module, func, _)| format!("{module}.{func}")).unwrap_or_else(|| "fan.map".into());
         self.sites.insert(name.to_string(), MapSite { source: call, base, floats, declared });
