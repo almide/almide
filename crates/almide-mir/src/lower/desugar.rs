@@ -25,7 +25,7 @@
 /// rewritten by the recursive call on the constructed then-block).
 pub fn desugar_guard(body: &IrExpr) -> Option<IrExpr> {
     let mut changed = false;
-    let rewritten = desugar_guard_rec(body.clone(), &mut changed);
+    let rewritten = desugar_guard_rec(body.clone(), VALUE_POS, &mut changed);
     changed.then_some(rewritten)
 }
 
@@ -616,12 +616,12 @@ fn loop_exit_else(e: almide_ir::IrExpr) -> Option<almide_ir::IrExpr> {
     }
 }
 
-fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
+fn desugar_guard_rec(e: IrExpr, at: GuardPos, changed: &mut bool) -> IrExpr {
     use almide_ir::{IrExprKind, IrStmtKind};
     // Bottom-up: rewrite every child expression first (arm bodies, bind values — all
     // reachable through `map_children`), so a guard nested inside a sub-expression is
     // handled before this node's own restructuring.
-    let e = e.map_children(&mut |c| desugar_guard_rec(c, changed));
+    let e = map_guard_positions(e, at, &mut |c, at| desugar_guard_rec(c, at, changed));
     // A LOOP BODY is a `Vec<IrStmt>` (NOT a `Block` expr — `map_children` maps each
     // statement's sub-exprs but never restructures the list), so a `guard … else continue`
     // inside `for`/`while` needs its OWN statement-list rewrite: `[pre…, Guard, rest…]` →
@@ -653,6 +653,12 @@ fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
     else {
         return e;
     };
+    // In a STATEMENT only an else that ends its own path is rewritten: a value
+    // else there stays a `Guard`, which the statement lowering walls by name
+    // (`map_guard_positions`).
+    if matches!(&stmts[i].kind, IrStmtKind::Guard { else_, .. } if !at.restructures(else_)) {
+        return e;
+    }
     *changed = true;
     let ty = e.ty.clone();
     let span = e.span.clone();
@@ -673,6 +679,7 @@ fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
             span,
             def_id,
         },
+        at,
         changed,
     );
     // The ELSE branch (`cond` false) is `E` VERBATIM, `continue` included (#4386). This
@@ -763,3 +770,5 @@ pub fn desugar_flatten_let_block(body: &IrExpr) -> Option<IrExpr> {
         def_id: body.def_id,
     })
 }
+
+include!("desugar_guard_tail.rs");
