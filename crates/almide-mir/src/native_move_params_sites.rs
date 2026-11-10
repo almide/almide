@@ -201,18 +201,83 @@ fn dead_arm_releases(func: &MirFunction, p: ValueId, given: &[usize]) -> Option<
     covered.then(|| given.iter().copied().chain(dead.iter().map(|&s| s - 1)).collect())
 }
 
+/// What [`field_given`] saw of a param's heap fields: the ops that load one
+/// (`loads`), the ops that give one away at its last use (`at`), and those
+/// of them that keep the field whatever the modes turn out to be (`stored`:
+/// a copy into a new block, a by-value runtime position, a concatenation's
+/// left side). A give to a program function's move param is not one: that
+/// callee may only read the field, its mode resting on this very takeover.
+#[derive(Default)]
+struct FieldGives {
+    loads: Vec<usize>,
+    at: Vec<usize>,
+    stored: Vec<usize>,
+}
+
+/// Whether every path through `lo..hi`, a run of ops at depth `d`, passes a
+/// give: one sits in the run itself, or both arms of a branch in it do. A
+/// loop body may run no times and an exit leaves before the rest, so neither
+/// counts and an exit refuses the run.
+fn every_path_gives(func: &MirFunction, depth: &[i32], lo: usize, hi: usize, d: i32, gives: &[usize]) -> bool {
+    let close = |from: usize| (from + 1..hi).find(|&j| depth[j] == d && matches!(func.ops[j], Op::EndIf { .. } | Op::LoopEnd));
+    let mut i = lo;
+    while i < hi {
+        match &func.ops[i] {
+            Op::Return { .. } | Op::LoopBreakUnless { .. } => return false,
+            _ if gives.contains(&i) => return true,
+            Op::IfThen { .. } => {
+                let Some(end) = close(i) else { return false };
+                let els = (i + 1..end).find(|&j| depth[j] == d && matches!(func.ops[j], Op::Else { .. }));
+                if els.is_some_and(|els| {
+                    every_path_gives(func, depth, i + 1, els, d + 1, gives)
+                        && every_path_gives(func, depth, els + 1, end, d + 1, gives)
+                }) {
+                    return true;
+                }
+                i = end;
+            }
+            Op::LoopStart => {
+                let Some(end) = close(i) else { return false };
+                i = end;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
+/// A param's heap fields are loaded in one arm, and every path through the
+/// rest of that arm stores one (`Node(l, v, r) => if c then Node(f(l), v,
+/// r) else Node(l, v, f(r))`). A caller that keeps its argument then copies
+/// the record once for the call, where the borrowing body copied the field
+/// it stores on each such path: the takeover adds no copy on a path that
+/// reads the fields, and moves the field wherever the caller's value dies.
+fn gives_wherever_loaded(func: &MirFunction, depth: &[i32], gives: &FieldGives) -> bool {
+    let Some(&first) = gives.loads.first() else { return false };
+    let d = depth[first];
+    let hi = (first + 1..func.ops.len()).find(|&j| depth[j] < d).unwrap_or(func.ops.len());
+    gives.loads.iter().all(|&l| l < hi) && every_path_gives(func, depth, first, hi, d, &gives.stored)
+}
+
 /// Where a record param whose field is given at `end` is released: right
 /// there at the top level, or after the close of the top-level branch the
 /// give sits in (`match r { ok(xs) => some(xs), err(_) => none }`), nothing
 /// reading the record after it. Inside a branch the field moves on one path
 /// only, so the takeover must cost no caller a copy: every site of param `k`
-/// hands a value that dies at the call.
-fn branch_close(func: &MirFunction, depth: &[i32], end: usize, k: usize) -> Option<usize> {
-    if depth[end] == 0 {
+/// hands a value that dies at the call, or the body gives a field on every
+/// path that loads one ([`gives_wherever_loaded`]). A param read inside a
+/// branch (`at_top` false: a variant's payload read in its arm) is held to
+/// the same.
+fn branch_close(func: &MirFunction, depth: &[i32], end: usize, k: usize, at_top: bool, gives: &FieldGives) -> Option<usize> {
+    if depth[end] == 0 && at_top {
         return Some(end);
     }
-    if !dying_at_every_site(&func.name, k) {
+    if !dying_at_every_site(&func.name, k) && !gives_wherever_loaded(func, depth, gives) {
         return None;
+    }
+    if depth[end] == 0 {
+        return Some(end);
     }
     (end + 1..func.ops.len())
         .find(|&j| depth[j] == 0 && !matches!(func.ops[j], Op::Else { .. }))
