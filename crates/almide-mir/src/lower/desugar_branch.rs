@@ -420,6 +420,9 @@ const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     // Lower a match over a TUPLE subject into element index-tests + an if-chain (also handles the
     // tuple sub-match a multi-field variant regroup produces).
     (RowTrigger::TupleMatch, |src, _, _| desugar_tuple_match(src)),
+    // A destructuring bind of a propagating branch becomes a plain bind of the branch, before
+    // the rows below that lift a `!` out of a plain bound branch.
+    (RowTrigger::Always, |src, next_var, _| desugar_destructure_branch_unwrap(src, next_var)),
     (RowTrigger::Always, |src, _, _| if crate::lower::bang_return_probe() { None } else { desugar_if_arm_unwrap(src) }),
     (RowTrigger::Always, |src, _, _| desugar_flatten_let_block(src)),
     (RowTrigger::Always, |src, _, _| desugar_inline_tail_accumulator(src)),
