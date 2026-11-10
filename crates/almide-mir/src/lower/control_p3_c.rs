@@ -486,7 +486,7 @@ impl LowerCtx {
             for (j, fty) in ftys.iter().enumerate() {
                 let foff = crate::lower::layout::slot_offset(1 + j) as i64;
                 let (l1, r1) = if is_heap_ty(fty) {
-                    (self.load_payload_addr(hl, foff), self.load_payload_addr(hr, foff))
+                    (self.load_declared_payload_addr(hl, foff, fty), self.load_declared_payload_addr(hr, foff, fty))
                 } else {
                     (
                         self.load_at_offset(hl, foff, crate::PrimKind::Load { width: 8 }),
@@ -603,6 +603,15 @@ impl LowerCtx {
     /// `render_arg_wasm`'s Handle wrap, so normalizing is uniformly safe.
     pub(crate) fn load_payload_addr(&mut self, h: ValueId, off: i64) -> ValueId {
         let raw = self.load_at_offset(h, off, crate::PrimKind::LoadHandle);
+        self.handle_of(raw)
+    }
+
+    /// [`Self::load_payload_addr`] of a constructor's payload, with its declared
+    /// type on the render-only side table: a slot several constructors hold
+    /// different heap kinds in reads as this constructor's.
+    fn load_declared_payload_addr(&mut self, h: ValueId, off: i64, ty: &Ty) -> ValueId {
+        let raw = self.load_at_offset(h, off, crate::PrimKind::LoadHandle);
+        self.aggregate_blocks.insert(raw, crate::render_native_rec::block_key(ty));
         self.handle_of(raw)
     }
 
