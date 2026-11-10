@@ -234,6 +234,9 @@ pub(crate) fn guarded_reads(f: &MirFunction, records: &BTreeMap<ValueId, u16>) -
     facts.reads
 }
 
+/// An equality test's two operands.
+type TagTest = (ValueId, ValueId);
+
 /// What one forward walk of a frame knows at the current op.
 #[derive(Default)]
 struct TagFacts {
@@ -243,12 +246,12 @@ struct TagFacts {
     /// A block's tag read.
     tags: BTreeMap<ValueId, ValueId>,
     /// An equality test's two operands, by its result.
-    comparisons: BTreeMap<ValueId, (ValueId, ValueId)>,
+    comparisons: BTreeMap<ValueId, TagTest>,
     /// The tests that hold, and those that failed, in the open scopes.
-    equalities: Vec<(ValueId, ValueId)>,
-    inequalities: Vec<(ValueId, ValueId)>,
+    equalities: Vec<TagTest>,
+    inequalities: Vec<TagTest>,
     /// Per open `if`: both lists' lengths at entry, and its own test.
-    scopes: Vec<(usize, usize, Option<(ValueId, ValueId)>)>,
+    scopes: Vec<(usize, usize, Option<TagTest>)>,
     /// A payload borrow and the one tag its block holds there.
     reads: BTreeMap<ValueId, u32>,
 }
