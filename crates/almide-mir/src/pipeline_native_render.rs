@@ -527,6 +527,7 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     }
     let mut ir = ir;
     let _foreign = crate::native_foreign::Scope::enter(&ir);
+    let _callback_types = crate::native_callbacks::HostTypes::enter(&ir);
     prepare_native_top_lets(&mut ir);
     let _fusion = crate::native_fusion::Scope::enter(&ir);
     let mut functions = lower_native_functions(&ir, &record_layouts, &variant_layouts)?;
@@ -584,7 +585,8 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
         routed.extend(linked_names.iter().filter(|n| !retained.contains(*n)).cloned());
         rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names, &routed)?;
     }
-    rust.push_str(&crate::native_callbacks::render(&ir, &sigs)?);
+    let callbacks = crate::native_callbacks::render(&ir, &sigs, &rust)?;
+    rust.push_str(&callbacks);
     rust.push_str(&crate::native_foreign::render_exports(&ir, &sigs)?);
     let mut certs = native_ownership_certs(&program.functions, &crate::native_hof::sites());
     // Row 4: each function's bounds witness, recorded as the render wrote its
@@ -594,6 +596,10 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     }
     Ok((rust, certs, program.functions))
 }
+
+#[cfg(test)]
+#[path = "native_callback_host_test.rs"]
+mod callback_adapter_tests;
 
 #[cfg(test)]
 mod reachable_callback_modes_tests {

@@ -35,7 +35,16 @@ impl PendingRust {
             panic!("ALMIDE_IR_FAULT={pass}: the native test render runs no standard-codegen pass to fault");
         }
         let input = self.native_input.take().ok_or_else(|| "native tests require checked IR".to_string())?;
-        render_native_tests(&self.source, std::mem::take(&mut self.native_text), input)
+        let host = self.host_source();
+        render_native_tests(&self.source, std::mem::take(&mut self.native_text), host, input)
+    }
+
+    /// The standard codegen's Rust for this program, made when the native
+    /// render asks for it: the adapter of a module fn that `native/*.rs`
+    /// calls back with a non-scalar signature is declared with the signature
+    /// this text holds for it (#4640).
+    pub(crate) fn host_source(&self) -> HostSource {
+        host_source(&self.ir, &self.opts, &self.native_text)
     }
 
     /// The standard codegen's Rust (Codegen v3: Nanopass + Templates).
@@ -50,8 +59,23 @@ impl PendingRust {
     }
 }
 
-pub(crate) fn render_native_tests(source: &str, native_text: String, (ir, checker): NativeInput) -> Result<String, String> {
-    let _callbacks = almide_mir::native_callbacks::Scope::enter(native_text);
+pub(crate) type HostSource = Box<dyn FnOnce() -> String>;
+
+/// [`PendingRust::host_source`] over a linked program. Native code that names
+/// no linked fn calls nothing back, and its program is not kept.
+pub(crate) fn host_source(ir: &almide::ir::IrProgram, opts: &codegen::CodegenOptions, native_text: &str) -> HostSource {
+    if !native_text.contains("almide_rt_") {
+        return Box::new(String::new);
+    }
+    let (mut ir, opts) = (ir.clone(), opts.clone());
+    Box::new(move || match codegen::codegen_with(&mut ir, codegen::pass::Target::Rust, &opts) {
+        codegen::CodegenOutput::Source(s) => s,
+        codegen::CodegenOutput::Binary(_) => String::new(),
+    })
+}
+
+pub(crate) fn render_native_tests(source: &str, native_text: String, host: HostSource, (ir, checker): NativeInput) -> Result<String, String> {
+    let _callbacks = almide_mir::native_callbacks::Scope::enter(native_text).with_host_source(host);
     let (rust, _) = almide_mir::pipeline::try_render_rust_checked_tests_certified(
         source, ir, checker, almide_wasm_run::fs_scope(),
     ).map_err(|error| format!("native v1 test render: {error:?}"))?;
