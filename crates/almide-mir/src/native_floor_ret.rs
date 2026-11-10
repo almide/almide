@@ -310,23 +310,22 @@ fn aggregate_host_ret(r: FloorRet, call: String, declared: Option<u16>) -> Resul
 /// reads consume.
 fn file_stat_ret(call: String, declared: Option<u16>) -> (String, Option<NTy>) {
     use crate::render_native_rec as rec;
-    const ABI: [(&str, &str); 4] =
-        [("size", "s.size"), ("is_dir", "s.is_dir as i64"), ("is_file", "s.is_file as i64"), ("modified", "s.modified")];
+    let abi = file_stat_slots();
     let record = declared
         .and_then(rec::result_payloads)
         .and_then(|(ok, err)| if err == NTy::Str { ok.rec() } else { None })
         .or_else(|| rec::rec_index("FileStat"))
         .filter(|&i| rec::record_fields(i).is_some_and(|(_, fields)| {
-            fields.iter().map(|(name, kind)| (name.as_str(), *kind)).eq(ABI.iter().map(|(label, _)| (*label, NTy::I64)))
+            fields.iter().map(|(name, kind)| (name.as_str(), *kind)).eq(abi.iter().map(|(label, _)| (*label, NTy::I64)))
         }));
     let Some(record) = record else {
-        let values = ABI.map(|(_, v)| v).join(", ");
+        let values = abi.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(", ");
         return (
             format!("({call}).map(|s| vec![{values}]).map_err(AlmideString::from)"),
             Some(NTy::Rec(rec::result_type_of(NTy::Vec, NTy::Str))),
         );
     };
-    let fields: Vec<String> = ABI.iter().enumerate().map(|(i, (_, v))| format!("f{i}: {v}")).collect();
+    let fields: Vec<String> = abi.iter().enumerate().map(|(i, (_, v))| format!("f{i}: {v}")).collect();
     (
         format!("({call}).map(|s| {} {{ {} }}).map_err(AlmideString::from)", rec::struct_name(record), fields.join(", ")),
         Some(NTy::Rec(rec::result_type_of(NTy::Rec(record), NTy::Str))),

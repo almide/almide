@@ -284,15 +284,34 @@ mod optional_bytes_tests {
 /// Keep the runtime record conversion tied to the bundled field labels,
 /// types and order. A user record with the same spelling never defines this ABI.
 fn file_stat_decl_agrees(decls: &[Decl]) -> bool {
+    file_stat_fields(decls).is_some_and(|fields| fields == [
+        ("size", Some("Int")), ("is_dir", Some("Bool")),
+        ("is_file", Some("Bool")), ("modified", Some("Int")),
+    ])
+}
+
+/// The one `FileStat` record `decls` declare: each field's label and simple
+/// type, in declaration order.
+fn file_stat_fields(decls: &[Decl]) -> Option<Vec<(&str, Option<&str>)>> {
     let mut found = decls.iter().filter_map(|d| match d {
         Decl::Type { name, ty, .. } if name.as_str() == "FileStat" => Some(ty),
         _ => None,
     });
-    let Some(TypeExpr::Record { fields }) = found.next() else { return false };
-    found.next().is_none() && fields.iter().map(|f| (f.name.as_str(), simple(&f.ty))).eq([
-        ("size", Some("Int")), ("is_dir", Some("Bool")),
-        ("is_file", Some("Bool")), ("modified", Some("Int")),
-    ])
+    let Some(TypeExpr::Record { fields }) = found.next() else { return None };
+    found.next().is_none().then(|| fields.iter().map(|f| (f.name.as_str(), simple(&f.ty))).collect())
+}
+
+/// The runtime stat struct read off a binding `s`, as the bundled `fs`
+/// declaration lays it out: each field's label and the i64 slot that reads
+/// it (a `Bool` field widens). The floor admits `fs.stat` only when that
+/// declaration is the runtime struct's ([`file_stat_decl_agrees`]), so the
+/// labels here are the struct's own.
+fn file_stat_slots() -> Vec<(&'static str, String)> {
+    let decls = almide_lang::stdlib_info::bundled_source("fs").and_then(almide_lang::parse_cached).map(|p| p.decls.as_slice());
+    decls.and_then(file_stat_fields).unwrap_or_default().into_iter().map(|(label, ty)| {
+        let widen = if ty == Some("Bool") { " as i64" } else { "" };
+        (label, format!("s.{label}{widen}"))
+    }).collect()
 }
 
 /// A Rust type with its lifetime parameters left out (`&'a T` -> `& T`).
