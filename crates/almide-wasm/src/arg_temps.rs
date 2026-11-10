@@ -449,10 +449,15 @@ fn is_born_here(e: &IrExpr) -> bool {
 /// record, a `some` / `ok` / `err` box. A reader (`match (1, (4, 5), 3)`,
 /// `(1, 2) == (1, 2)`, `(2, 7).0`) consumes nothing, so like a call result
 /// the fresh block has no owner unless it is named first.
+///
+/// A `fan { }` block builds the tuple of its arms' results the same way:
+/// `(fan { a(), b() }).0` read one position and left the tuple and its
+/// other elements live at exit.
 fn is_constructed_here(e: &IrExpr) -> bool {
     matches!(
         &e.kind,
         IrExprKind::Tuple { .. }
+            | IrExprKind::Fan { .. }
             | IrExprKind::Record { .. }
             | IrExprKind::SpreadRecord { .. }
             | IrExprKind::OptionSome { .. }
