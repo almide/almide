@@ -1,0 +1,19 @@
+map 3 some(2) false
+persistent some(2) some(9) 2
+keys 3 values [2, 3, 4]
+entry true 2
+entry false 3
+entry false 4
+pair true 2
+pair false 3
+pair false 4
+values some(-0) none
+retained some(0) some(-0)
+set 3 true true false
+remove 2 3
+union 4
+member true
+member false
+member false
+map eq true false
+set eq true false

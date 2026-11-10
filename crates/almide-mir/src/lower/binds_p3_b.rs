@@ -57,6 +57,19 @@ impl LowerCtx {
                 return Some(ListElemDrop::CtorFlat);
             }
         }
+        // Native runtime values are opaque owned Rust values, not wasm blocks.
+        // The list retains its exact element type in aggregate_blocks below;
+        // native DropVariant therefore releases the typed container recursively.
+        // Never admit this route on wasm, where a real block drop is required.
+        if crate::lower::owned_tco_slots() {
+            if let Ty::Named(name, args) = elem_ty {
+                if args.is_empty() {
+                    if let Some(runtime) = crate::native_runtime_types::RuntimeType::of(name.as_str()) {
+                        return Some(ListElemDrop::Record(runtime.0.to_owned()));
+                    }
+                }
+            }
+        }
         None
     }
 
@@ -421,6 +434,7 @@ impl LowerCtx {
         // class (owned handle slots — the generated `$__drop_list_lenlist`). Anything else →
         // `None` (the caller keeps the scalar / wall path).
         let Some(kind) = self.classify_list_elem_drop(&elem_ty) else {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[record-list] no drop class: {elem_ty:?}"));
             return None;
         };
         // Lower each element to an OWNED handle BEFORE the alloc (a field expr that allocates
@@ -527,7 +541,7 @@ impl LowerCtx {
         let resolved = match &base.kind {
             IrExprKind::Var { id } if is_heap_ty(&base.ty) => {
                 let src = self.value_or_global(*id).ok()?;
-                if !self.materialized_aggregates.contains(&src) {
+                if !self.materialized_aggregates.contains(&src) && !self.param_values.contains(&src) {
                     crate::trace::trace("ALMIDE_DBG_ELEM", || {
                         format!("[spread] base Var {id:?} not a materialized aggregate")
                     });
@@ -741,4 +755,31 @@ fn is_msb_pair_value(v: &Ty) -> bool {
             if e.len() == 2 && matches!(e[1], Ty::String)
                 && (!is_heap_ty(&e[0]) || matches!(e[0], Ty::String)))
         || matches!(v, Ty::Tuple(ts) if !ts.is_empty() && ts.iter().all(|t| matches!(t, Ty::String)))
+}
+
+impl LowerCtx {
+    /// Native concatenation uses the same element ownership classification
+    /// as list construction. A supported literal element must not lose its
+    /// recursive drop merely because a list is assembled in several steps.
+    pub(super) fn try_lower_owned_list_concat(&mut self, value: &IrExpr, left: &IrExpr,
+        right: &IrExpr, elem: &Ty) -> Option<ValueId> {
+        if !crate::lower::owned_tco_slots() { return None; }
+        let kind = self.classify_list_elem_drop(elem)?;
+        self.speculate_bindings(|ctx| {
+            let mut args = Vec::new();
+            for source in [left, right] {
+                // Snapshot the left value before evaluating a right operand
+                // that may replace the same source slot.
+                let handle = ctx.lower_owned_binding(source)?;
+                args.push(CallArg::Handle(handle));
+            }
+            let dst = ctx.fresh_value();
+            ctx.ops.push(Op::CallFn { dst: Some(dst), name: crate::lower::LIST_CONCAT_RC.into(),
+                args, result: Some(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }) });
+            ctx.register_list_drop_kind(dst, kind);
+            ctx.materialized_lists.insert(dst);
+            ctx.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(&value.ty));
+            Some(dst)
+        })
+    }
 }

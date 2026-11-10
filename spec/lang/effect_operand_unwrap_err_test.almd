@@ -8,3 +8,23 @@ test "a can-err call operand propagates its err" {
   assert_eq(parse_sum("5")!, 6)
   assert(result.is_err(parse_sum("x")), "parse failure propagates out of the operand")
 }
+
+effect fn negate_parsed(s: String) -> Int = -int.parse(s)!
+
+effect fn invert_parsed(s: String) -> Bool = not (int.parse(s)! == 0)
+
+test "unary operands preserve success and propagate failure" {
+  assert_eq(negate_parsed("7")!, -7)
+  assert_eq(invert_parsed("0")!, false)
+  assert_eq(invert_parsed("7")!, true)
+  assert(result.is_err(negate_parsed("x")))
+  assert(result.is_err(invert_parsed("x")))
+}
+
+// The message's unwrap belongs to the failure arm, even for a statement
+// followed by another assertion. Eager lifting would abort this passing test.
+test "assert messages keep nested unwraps lazy" {
+  assert(true, "unreachable: " + int.to_string(int.parse("bad")!))
+  assert(true, "unreachable float: " + float.to_string(list.get([1.0], 9)!))
+  assert_eq(2 + 3, 5)
+}

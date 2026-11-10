@@ -79,6 +79,15 @@ pub const NATIVE_FS_HOST_CALLS: &[&str] = &[
     "almide_rt_fs___root_remove",
     "almide_rt_fs_create_temp_dir",
     "almide_rt_fs_create_temp_file",
+    "almide_rt_fs_read_bytes_if_exists",
+    "almide_rt_fs_read_lines_if_exists",
+    "almide_rt_fs_stat",
+    "almide_rt_fs_fold_lines",
+    "almide_rt_fs_for_each_line",
+    "almide_rt_fs_fold_lines_effect",
+    "almide_rt_fs_for_each_line_effect",
+    "almide_rt_fs_fold_lines_range",
+    "almide_rt_fs_fold_lines_chunked",
 ];
 
 /// `hosts_ok`: every host id names a function of the set.
@@ -142,6 +151,9 @@ mod tests {
         assert!(!c(b"|1 1|0\niM\nid#1||\ndam"));
         assert!(!c(b"|5 0|\nid"));
         assert!(c(b"||| 0\nid"));
-        assert!(!c(b"||| 29\nid"));
+        assert!(c(b"||| 29\nid"));
+        assert!(c(b"||| 30 31\nid"));
+        assert!(c(b"||| 32 33 34 35 36 37\nid"));
+        assert!(!c(b"||| 38\nid"));
     }
 }

@@ -30,6 +30,9 @@ pub(crate) fn same_owned(a: NTy, b: NTy) -> bool {
         let (NTy::Rec(i), NTy::Rec(j)) = (a, b) else {
             return false;
         };
+        if let Some(t) = rec::runtime_type_of(i) {
+            return rec::runtime_type_of(j) == Some(t);
+        }
         if seen.contains(&(i, j)) {
             return false;
         }
@@ -66,6 +69,8 @@ pub(crate) fn same_owned(a: NTy, b: NTy) -> bool {
 /// scalar at a join. These are bit casts, never numeric conversions.
 pub(crate) fn scalar_recode(code: &str, from: NTy, to: NTy) -> Option<String> {
     match (from, to) {
+        (NTy::I64, NTy::F32) => Some(format!("f32::from_bits({code} as u32)")),
+        (NTy::F32, NTy::I64) => Some(format!("({code}).to_bits() as i64")),
         (NTy::I64, NTy::F64) => Some(format!("f64::from_bits({code} as u64)")),
         (NTy::F64, NTy::I64) => Some(format!("{code}.to_bits() as i64")),
         _ => None,
@@ -75,16 +80,60 @@ pub(crate) fn scalar_recode(code: &str, from: NTy, to: NTy) -> Option<String> {
 /// Runtime tuples choose a structural identity from their native field kinds.
 /// Several checked tuples can share those kinds (Float and Int use i64 lanes)
 /// while still having distinct Rust structs. Rebuild the requested struct;
-/// never declare those structs interchangeable or reinterpret a nominal type.
+/// never declare those structs interchangeable. Checked structural records
+/// also rebuild by field name, including conversion to or from a named record;
+/// two distinct nominal records are never implicitly converted.
 pub(crate) fn tuple_copy(code: &str, from: NTy, to: NTy) -> Option<String> {
-    let (NTy::Rec(i), NTy::Rec(j)) = (owned_nty(from), owned_nty(to)) else { return None };
-    let (a, b) = (rec::tuple_fields(i)?, rec::tuple_fields(j)?);
-    if a.len() != b.len() || !a.iter().zip(&b).all(|(a, b)| same_owned(*a, *b)) {
-        return None;
+    fn copy(code: &str, from: NTy, to: NTy, seen: &mut Vec<(u16, u16)>) -> Option<String> {
+        if same_owned(from, to) { return Some(format!("({code}).clone()")); }
+        let (NTy::Rec(i), NTy::Rec(j)) = (owned_nty(from), owned_nty(to)) else { return None };
+        if seen.contains(&(i, j)) { return None; }
+        seen.push((i, j));
+        let result = if let (Some(a), Some(b)) = (rec::tuple_fields(i), rec::tuple_fields(j)) {
+            if a.len() != b.len() { return None; }
+            let fields = a.iter().zip(&b).enumerate().map(|(k, (a, b))| {
+                copy_field(i, k, *a, j, k, *b, seen)
+            }).collect::<Option<Vec<_>>>()?.join(", ");
+            Some(format!("{{ let __tuple = &({code}); {} {{ {fields} }} }}", rec::struct_name(j)))
+        } else if let (Some((sa, a)), Some((sb, b))) = (rec::record_fields(i), rec::record_fields(j)) {
+            if (!sa && !sb) || a.len() != b.len() { return None; }
+            let fields = b.iter().enumerate().map(|(dst, (label, to))| {
+                let (src, (_, from)) = a.iter().enumerate().find(|(_, (n, _))| n == label)?;
+                copy_field(i, src, *from, j, dst, *to, seen)
+            }).collect::<Option<Vec<_>>>()?.join(", ");
+            Some(format!("{{ let __tuple = &({code}); {} {{ {fields} }} }}", rec::struct_name(j)))
+        } else if let (Some(a), Some(b)) = (rec::list_elem(i), rec::list_elem(j)) {
+            let value = copy("*__item", a, b, seen)?;
+            Some(format!("({code}).iter().map(|__item| {value}).collect::<{}>()", rec::struct_name(j)))
+        } else if let (Some(a), Some(b)) = (rec::option_payload(i), rec::option_payload(j)) {
+            let value = copy("*__item", a, b, seen)?;
+            Some(format!("({code}).as_ref().map(|__item| {value})"))
+        } else if let (Some((a, e)), Some((b, f))) = (rec::result_payloads(i), rec::result_payloads(j)) {
+            let ok = copy("*__item", a, b, seen)?;
+            let err = copy("*__item", e, f, seen)?;
+            Some(format!("({code}).as_ref().map(|__item| {ok}).map_err(|__item| {err})"))
+        } else if let (Some((ak, av)), Some((bk, bv))) = (rec::map_kinds(i), rec::map_kinds(j)) {
+            let key = copy("*__key", ak, bk, seen)?;
+            let value = copy("*__value", av, bv, seen)?;
+            // AlmideMap's iterator and FromIterator preserve insertion order.
+            // Structural values are rebuilt under the same field-label checks
+            // as a direct argument; neither source map nor aliases are moved.
+            Some(format!("({code}).iter().map(|(__key, __value)| ({key}, {value})).collect::<{}>()", rec::struct_name(j)))
+        } else { None };
+        seen.pop();
+        result
     }
-    let fields = a.iter().enumerate().map(|(k, _)|
-        format!("f{k}: __tuple.f{k}.clone()")).collect::<Vec<_>>().join(", ");
-    Some(format!("{{ let __tuple = &({code}); {} {{ {fields} }} }}", rec::struct_name(j)))
+    fn copy_field(i: u16, src: usize, from: NTy, j: u16, dst: usize, to: NTy,
+        seen: &mut Vec<(u16, u16)>) -> Option<String> {
+        let place = if rec::enum_field_boxed(i, from) { format!("(*__tuple.f{src})") } else { format!("__tuple.f{src}") };
+        let value = copy(&place, from, to, seen)?;
+        let value = if rec::enum_field_boxed(j, to) { format!("Box::new({value})") } else { value };
+        Some(format!("f{dst}: {value}"))
+    }
+    // Identical values use the caller's existing move/borrow rule. This
+    // adapter rebuilds checked structural aggregates and their owning containers.
+    if same_owned(from, to) { return None; }
+    copy(code, from, to, &mut Vec::new())
 }
 
 /// A value used ONLY on the unobserved side of a hoisted carrier read.
@@ -115,6 +164,49 @@ pub(crate) fn unused_payload(t: NTy) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn structural_record_conversion_uses_labels_and_preserves_nominal_identity() {
+        let decl = |name: &str, anonymous, fields, labels: &[&str]| rec::RecDecl {
+            name: name.into(), fields,
+            record_labels: Some((anonymous, labels.iter().map(|s| (*s).into()).collect())),
+            ..Default::default()
+        };
+        let _guard = rec::install(vec![
+            decl("named", false, vec![NTy::I64, NTy::Str], &["id", "name"]),
+            decl("structural", true, vec![NTy::Str, NTy::I64], &["name", "id"]),
+            decl("other-named", false, vec![NTy::I64, NTy::Str], &["id", "name"]),
+            decl("other-label", true, vec![NTy::I64, NTy::Str], &["id", "title"]),
+            decl("other-type", true, vec![NTy::Str, NTy::Str], &["id", "name"]),
+        ]);
+        let code = tuple_copy("value", NTy::Rec(0), NTy::Rec(1)).unwrap();
+        assert!(code.contains("f0: (__tuple.f1).clone()"));
+        assert!(code.contains("f1: (__tuple.f0).clone()"));
+        assert!(tuple_copy("value", NTy::Rec(1), NTy::Rec(0)).is_some());
+        for target in [2, 3, 4] {
+            assert!(tuple_copy("value", NTy::Rec(0), NTy::Rec(target)).is_none());
+        }
+        assert!(!same_owned(NTy::Rec(0), NTy::Rec(1)));
+        // Assignment uses the same checked structural adapter. Distinct
+        // nominal records, missing labels/types and borrowed destinations
+        // remain errors; a local's representation never changes at the join.
+        for (target, source, accepted) in [
+            (NTy::Rec(0), NTy::Rec(1), true),
+            (NTy::Rec(1), NTy::Rec(0), true),
+            (NTy::Rec(0), NTy::Rec(2), false),
+            (NTy::Rec(0), NTy::Rec(3), false),
+            (NTy::Rec(0), NTy::Rec(4), false),
+            (NTy::RecRef(0), NTy::Rec(1), false),
+        ] {
+            let local = crate::ValueId(0);
+            let src = crate::ValueId(1);
+            let mut tys = std::collections::BTreeMap::from([(local, target), (src, source)]);
+            let mut out = String::new();
+            let result = crate::render_native::render_set_local(&local, &src, &mut tys, &mut out, 0);
+            assert_eq!(result.is_ok(), accepted, "{target:?} <- {source:?}");
+            assert_eq!(tys[&local], target);
+            if accepted { assert!(out.contains("f0: (__tuple.f1).clone()")); }
+        }
+    }
     #[test]
     fn nested_aliases_agree_but_nominal_records_and_different_payloads_do_not() {
         let _guard = rec::install(vec![

@@ -27,7 +27,6 @@ fn note_carrier_recs(func: &MirFunction, sigs: &crate::render_native::NativeSigs
     crate::render_native_rec::set_declared(
         declared
             .iter()
-            .filter(|(_, i)| crate::render_native_rec::map_kinds(**i).is_some() || crate::render_native_rec::set_elem(**i).is_some())
             .map(|(v, i)| (*v, *i))
             .collect(),
     );

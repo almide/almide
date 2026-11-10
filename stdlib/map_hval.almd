@@ -97,12 +97,19 @@ else {
 }
 
 fn map_eq_hval(a: Map[String, List[Int]], b: Map[String, List[Int]]) -> Bool = {
-  let ah = prim.handle(a)
-  let bh = prim.handle(b)
-  let an = prim.load32(ah + 4)
-  let bn = prim.load32(bh + 4)
-  if an != bn then false
-  else __hvl_eq_at(ah, an, bh, bn, 0)
+  if map.len(a) != map.len(b) then false
+  else {
+    var same = true
+    for (k, v) in a {
+      if same then {
+        same = match map.get(b, k) {
+          some(other) => v == other,
+          none => false,
+        }
+      } else ()
+    }
+    same
+  }
 }
 
 fn __hvl_drop_slots(h: Int, m: Int, i: Int) -> Unit = if i >= m then ()

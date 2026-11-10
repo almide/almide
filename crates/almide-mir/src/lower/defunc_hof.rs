@@ -67,6 +67,9 @@ impl LowerCtx {
         args: &[IrExpr],
         result_ty: &Ty,
     ) -> Option<ValueId> {
+        // A registered native parallel site must reach its runtime adapter.
+        // Inlining it as an ordinary loop would erase the selected schedule.
+        if crate::lower::owned_tco_slots() && crate::native_parallel_maps::is_wrapper(&self.fn_name) { return None; }
         let (_, _, _, lambda_body) = self.defunc_call_shape(func, args)?;
         // A callback that rebinds a captured borrowed `mut` param (the C-132
         // write-back `g = __mp_buf`) runs that rebind in the inlined loop: the
@@ -391,8 +394,13 @@ fn defunc_filter_map_heap_result(func: &str, result_ty: &Ty) -> bool {
 /// back to the wall.
 fn defunc_result_gate(func: &str, result_ty: &Ty) -> Option<DefuncGate> {
     let heap_elem = defunc_heap_elem_result(func, result_ty);
-    let str_acc = defunc_str_acc_result(func, result_ty);
-    let filter_map_heap = defunc_filter_map_heap_result(func, result_ty);
+    // Native Options are tagged Rust values, not zero/one-element lists.
+    // Use the keep/skip builder (or the typed callback fallback) instead of
+    // concatenating an Option's physical wasm carrier into the output list.
+    let native_option = crate::lower::owned_tco_slots() && func == "filter_map"
+        && matches!(list_elem_ty(result_ty), Some(Ty::String));
+    let str_acc = defunc_str_acc_result(func, result_ty) && !native_option;
+    let filter_map_heap = defunc_filter_map_heap_result(func, result_ty) || native_option;
     let scalar_list_result = list_elem_ty(result_ty).is_some_and(|e| !is_heap_ty(e));
     let result_ok = match func {
         "map" | "filter" => heap_elem || scalar_list_result,

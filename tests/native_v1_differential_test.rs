@@ -58,6 +58,27 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // The native matrix route now supports transpose, including its value
+    // representation when the result is converted back to nested lists.
+    ("matrix_transpose", "fn main() -> Unit = {
+  let m = matrix.from_lists([[1.0, 2.0]])
+  println(\"${matrix.to_lists(matrix.transpose(m))}\")
+}
+"),
+    // Multiple reads retain snapshots while rebuilding the global record.
+    ("heap_global_record_rebuild", "type C = { n: Int, tag: String }
+
+var G: C = C { n: 0, tag: \"start\" }
+
+fn bump() -> Unit = {
+  G = C { n: G.n + 1, tag: G.tag + \"!\" }
+}
+
+fn main() -> Unit = {
+  bump()
+  println(int.to_string(G.n) + \" \" + G.tag)
+}
+"),
     // A typed Float lambda also needs the scalar MIR dispatch table when
     // its caller carries the result as bits. Integer closures share arity.
     ("float_closure_scalar_abi", r#"
@@ -356,39 +377,12 @@ fn v0_mutual_tail_recursion_survives_opt_level_0() {
 #[test]
 fn out_of_subset_walls_honestly() {
     let walls = [
-        // `list.len` over a scalar list joined the floor with `list.range`
-        // (#1869); a combinator over the list is still outside it.
-        // list_param moved to the POSITIVE corpus — rung 4 renders scalar-list
-        // params/literals/indexing natively (`vec![…]` + the bounds shims).
-        // #4006 family I and C1 class D: a heap-typed var or eager let now
-        // lives in its thread-local cell (the positive corpus above), but a
-        // write that reads the cell twice before storing back (a record
-        // rebuilt from two of its own fields) copies the cell's value per
-        // read and keeps the wall; a matrix transpose is still outside the
-        // subset.
-        ("heap_global_record_rebuild", "type C = { n: Int, tag: String }
-
-var G: C = C { n: 0, tag: \"start\" }
-
-fn bump() -> Unit = {
-  G = C { n: G.n + 1, tag: G.tag + \"!\" }
-}
-
-fn main() -> Unit = {
-  bump()
-  println(int.to_string(G.n) + \" \" + G.tag)
-}
-"),
-        ("matrix_transpose", "fn main() -> Unit = {
-  let m = matrix.from_lists([[1.0, 2.0]])
-  println(\"${matrix.to_lists(matrix.transpose(m))}\")
-}
-"),
+        // C export wrappers still require their separately checked ABI path.
+        ("c_export", "@export(c, \"answer\")\nfn answer() -> Int = 42\nfn main() -> Unit = println(\"${answer()}\")\n"),
     ];
     for (name, src) in walls {
-        assert!(
-            almide_mir::pipeline::try_render_rust_source(src).is_err(),
-            "`{name}` should WALL (outside rung 1) but rendered"
-        );
+        let refusal = almide_mir::pipeline::try_render_rust_source(src)
+            .expect_err(&format!("`{name}` should refuse the unsupported export wrapper"));
+        assert!(refusal.to_string().contains("is @export(c)"), "{name}: {refusal}");
     }
 }

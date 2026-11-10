@@ -632,17 +632,17 @@ impl LowerCtx {
             self.value_of.insert(var, payload);
         }
         let outer: Vec<ValueId> = self.live_heap_handles.clone();
-        let some_obj = match self.lower_heap_result_arm(some_body, result_ty) {
+        let some_obj = match self.lower_heap_result_branch(some_body, result_ty) {
             Some(v) => v,
             _ => return self.rollback_match(ops_mark, lifted_mark, lhh_mark),
         };
         let consumed_by_some: Vec<ValueId> =
             outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
         let else_marker_at = self.ops.len();
-        self.ops.push(Op::Else { val: Some(some_obj) });
+        self.ops.push(Op::Else { val: some_obj });
         // ELSE (tag == 0 = None).
         let live_after_some: Vec<ValueId> = self.live_heap_handles.clone();
-        let none_obj = match self.lower_heap_result_arm(none_body, result_ty) {
+        let none_obj = match self.lower_heap_result_branch(none_body, result_ty) {
             Some(v) => v,
             _ => return self.rollback_match(ops_mark, lifted_mark, lhh_mark),
         };
@@ -651,8 +651,11 @@ impl LowerCtx {
             .copied()
             .filter(|x| !self.live_heap_handles.contains(x))
             .collect();
+        if some_obj.is_none() && none_obj.is_none() {
+            return self.rollback_match(ops_mark, lifted_mark, lhh_mark);
+        }
         self.equalize_arm_releases(&consumed_by_some, &consumed_by_none, else_marker_at);
-        self.ops.push(Op::EndIf { val: Some(none_obj) });
+        self.ops.push(Op::EndIf { val: none_obj });
         Some(dst)
     }
 }

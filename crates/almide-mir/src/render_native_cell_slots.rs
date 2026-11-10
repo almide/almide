@@ -70,6 +70,7 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
                     let empty = st.empty_lists.contains(&src.base) && (matches!(payload, NTy::Vec | NTy::VecStr)
                         || matches!(payload, NTy::Rec(i) if rec::is_empty_collection(i) || rec::is_bytes(payload)));
                     if empty { format!("<{}>::default()", rec::owned_ty(payload)) }
+                    else if let Some(value) = crate::native_value_repr::tuple_copy(&var(src.base), got, payload) { value }
                     else { if !crate::native_value_repr::same_owned(got, payload) {
                         return Err(wall(format!("native: shared-cell payload {got:?} disagrees with its declared type {payload:?}")));
                     }

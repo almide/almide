@@ -16,6 +16,14 @@ impl LowerCtx {
     /// `_` arm): a suffix split cannot change which arm commits.
     fn lower_heap_result_arm_ctrl(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         match &arm.kind {
+            IrExprKind::IndexAccess { .. } if crate::lower::owned_tco_slots() => {
+                let mark = self.live_heap_handles.len();
+                let obj = self.lower_owned_heap_field(arm)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.live_heap_handles.retain(|v| *v != obj);
+                self.drop_arm_locals(mark);
+                Some(obj)
+            }
             IrExprKind::Lambda { params, body, .. } if matches!(result_ty, Ty::Fn { .. }) => {
                 let mark = self.live_heap_handles.len();
                 let obj = self.lift_lambda(params, body, result_ty)?;
@@ -119,16 +127,10 @@ impl LowerCtx {
         // regrouped `err($q)` INNER match over a borrowed variant payload — the
         // `compute` class) via the tag@slot0 dispatcher, which accepts a heap result
         // over a BORROWED subject (the recursive-to_string precedent).
-        let obj = match self.try_lower_variant_value_match(subject, arms, result_ty) {
-            Some(v) => v,
-            // An `Option[<heap>]` inner subject (the fold-step nested match over
-            // `list.last(stack)`) — the merge-based Option twin, then the custom
-            // tag@slot0 dispatcher.
-            _ => match self.try_lower_option_match_value(subject, arms, result_ty) {
-                Some(v) => v,
-                _ => self.try_lower_custom_variant_match(subject, arms, result_ty)?,
-            },
-        };
+        let obj = self.try_lower_variant_value_match(subject, arms, result_ty)
+            .or_else(|| self.try_lower_result_match_value(subject, arms, result_ty))
+            .or_else(|| self.try_lower_option_match_value(subject, arms, result_ty))
+            .or_else(|| self.try_lower_custom_variant_match(subject, arms, result_ty))?;
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);
         Some(obj)
@@ -335,6 +337,8 @@ impl LowerCtx {
         let arm_mark = self.live_heap_handles.len();
         let obj = self
             .lower_pure_module_value_call(module.as_str(), func.as_str(), args, result_ty)
+            .inspect_err(|e| crate::trace::trace("ALMIDE_DBG_ELEM", ||
+                format!("[heap-if-arm] {module}.{func} declined: {e:?}")))
             .ok()?;
         self.ops.push(Op::Consume { v: obj });
         self.drop_arm_locals(arm_mark);

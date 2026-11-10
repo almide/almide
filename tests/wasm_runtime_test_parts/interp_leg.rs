@@ -77,7 +77,9 @@ fn lower_for_interp(source: &str) -> Result<almide_ir::IrProgram, String> {
         //          pure Almide over a `{ neg, limbs }` record, and `from[S:
         //          Numeric]` wants the per-type mono only a module lowering
         //          gives, so the registry pool has no body for any of it.
-        const INTERP_BUNDLED_MODULES: &[&str] = &["args", "bigint", "env", "hash", "html", "http", "path", "secret", "url"];
+        //   uuid — C-441: v7's bundled body uses the existing clock, entropy
+        //          and per-run stamp floors; loading it supplies the third vote.
+        const INTERP_BUNDLED_MODULES: &[&str] = &["args", "bigint", "env", "hash", "html", "http", "path", "secret", "url", "uuid"];
         let mut bundled: Vec<(String, almide_lang::ast::Program)> = Vec::new();
         for imp in &prog.imports {
             let almide_lang::ast::Decl::Import { path, .. } = imp else { continue };

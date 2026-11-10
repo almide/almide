@@ -231,8 +231,11 @@ fn prepare(dir: &std::path::Path, name: &str, src: &str, leg: Leg) -> Prepared {
     match leg {
         Leg::Native => {
             let app = dir.join(name);
-            let built = Command::new(almide()).arg("build").arg(&source).arg("-o").arg(&app).output().unwrap();
+            let built = Command::new(almide()).arg("build").arg(&source).arg("-o").arg(&app)
+                .env("ALMIDE_VERIFIED_DEBUG", "1").output().unwrap();
             assert!(built.status.success(), "build {name}:\n{}", String::from_utf8_lossy(&built.stderr));
+            assert!(String::from_utf8_lossy(&built.stderr).contains("native: v1 trust-spine render"),
+                "handle lifecycle must exercise v1: {}", String::from_utf8_lossy(&built.stderr));
             Prepared { leg, path: app }
         }
         Leg::Wasm => Prepared { leg, path: source },

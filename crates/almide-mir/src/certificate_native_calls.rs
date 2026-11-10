@@ -96,6 +96,10 @@ pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTr
                         let key = (runtime[&(f.name.clone(), at)].clone(), borrow_modes(args).len());
                         let idx = names.len() + runtime_blocks.iter().position(|b| *b == key).unwrap_or(runtime_blocks.len());
                         sites.push(site_row(idx, &borrow_modes(args)));
+                        if crate::host_ops::HOST_OPS.iter().any(|o| o.module == "fs" && o.symbol == key.0) {
+                            hosts.push(crate::host_ops::native_fs_host_id(&key.0)
+                                .unwrap_or(crate::host_ops::NATIVE_FS_HOST_CALLS.len()).to_string());
+                        }
                     }
                     Op::CallFn { name: callee, args, .. } => {
                         if let Some(id) = native_fs_host_site(callee) {

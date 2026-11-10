@@ -20,8 +20,9 @@
 //! `@specializes`), its type params are bound from the call's argument kinds,
 //! and its function-typed params from the lambda the call passes.
 //!
-//! This route is ONLY the fallback of a call the linked body refuses, so every
-//! program the linked bodies already render keeps its render.
+//! Declaration-backed routes are fallbacks of calls the linked body refuses.
+//! Registered parallel fan.map sites instead require their selected runtime
+//! before any sequential rendering (native_hof_parallel).
 //!
 //! The runtime body takes its closure as `Rc<dyn Fn>`; the render calls its
 //! static-dispatch twin (`static_twin`: the same body text with that param
@@ -62,6 +63,7 @@ enum DTy {
     Matrix,
     Value,
     Bytes,
+    Runtime(crate::native_runtime_types::RuntimeType),
     List(Box<DTy>),
     Tuple(Vec<DTy>),
     Opt(Box<DTy>),
@@ -73,7 +75,7 @@ enum DTy {
 }
 
 /// The runtime route of one declared combinator.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Hof {
     /// The runtime body the declaration names.
     pub symbol: String,
@@ -82,6 +84,8 @@ pub(crate) struct Hof {
     /// Mutable loans come from the source declaration and must agree with
     /// the runtime's `&mut` signature. They never pass a copied receiver.
     mutable: Vec<bool>,
+    /// Runtime slices whose elements dereference to the declared Matrix.
+    matrix_ref_lists: Vec<bool>,
     ret: DTy,
     /// The runtime body's static-dispatch twin (`static_twin`) and every
     /// other runtime item the body reaches.
@@ -96,45 +100,7 @@ pub(crate) struct Hof {
     owned: Option<(usize, String)>,
 }
 
-fn dty_of(t: &TypeExpr, tps: &BTreeSet<String>) -> Option<DTy> {
-    Some(match t {
-        TypeExpr::Simple { name } => simple_dty(name.as_str(), tps)?,
-        TypeExpr::Tuple { elements } => DTy::Tuple(elements.iter().map(|e| dty_of(e, tps)).collect::<Option<_>>()?),
-        TypeExpr::Generic { name, args } => generic_dty(name.as_str(), args, tps)?,
-        TypeExpr::Fn { params, ret, is_effect: false } => {
-            DTy::Fn(params.iter().map(|p| dty_of(p, tps)).collect::<Option<_>>()?, Box::new(dty_of(ret, tps)?))
-        }
-        _ => return None,
-    })
-}
-
-/// [`dty_of`] for a bare type name: a primitive or a declared type parameter.
-fn simple_dty(name: &str, tps: &BTreeSet<String>) -> Option<DTy> {
-    Some(match name {
-        "Unit" => DTy::Unit,
-        "Int" => DTy::Int,
-        "Bool" => DTy::Bool,
-        "Float" => DTy::Float,
-        "String" => DTy::Str,
-        "Matrix" => DTy::Matrix,
-        "Value" => DTy::Value,
-        "Bytes" => DTy::Bytes,
-        a if tps.contains(a) => DTy::Var(a.to_string()),
-        _ => return None,
-    })
-}
-
-/// [`dty_of`] for an applied generic: the one- and two-argument containers.
-fn generic_dty(name: &str, args: &[TypeExpr], tps: &BTreeSet<String>) -> Option<DTy> {
-    Some(match (name, args.len()) {
-        ("List", 1) => DTy::List(Box::new(dty_of(&args[0], tps)?)),
-        ("Set", 1) => DTy::Set(Box::new(dty_of(&args[0], tps)?)),
-        ("?" | "Option", 1) => DTy::Opt(Box::new(dty_of(&args[0], tps)?)),
-        ("Map", 2) => DTy::Map(Box::new(dty_of(&args[0], tps)?), Box::new(dty_of(&args[1], tps)?)),
-        ("Result", 2) => DTy::Result(Box::new(dty_of(&args[0], tps)?), Box::new(dty_of(&args[1], tps)?)),
-        _ => return None,
-    })
-}
+include!("native_hof_decl_types.rs");
 
 /// The runtime's Rust spelling of a declared type agrees with it (squashed);
 /// `Some(by_ref)` when it does.
@@ -156,6 +122,7 @@ fn scalar_agrees(d: &DTy, r: &str, by_ref: bool) -> Option<bool> {
         DTy::Matrix => r == "AlmideMatrix",
         DTy::Value => r == "AlmideValue",
         DTy::Bytes => r == "Vec<u8>" || (by_ref && r == "[u8]"),
+        DTy::Runtime(runtime) => r == runtime.rust(),
         DTy::Var(_) => r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !by_ref,
         _ => return None,
     })
@@ -173,7 +140,7 @@ fn composite_agrees(d: &DTy, r: &str, by_ref: bool) -> bool {
             let bare_param = inner.is_some_and(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_uppercase()));
             (r.starts_with("Vec<") || (by_ref && r.starts_with('['))) && !(bare_param && !matches!(**e, DTy::Var(_)))
         }
-        DTy::Opt(_) => r.starts_with("Option<") && !by_ref,
+        DTy::Opt(_) => r.starts_with("Option<"),
         DTy::Map(..) => r.starts_with("AlmideMap<"),
         DTy::Set(_) => r.starts_with("AlmideSet<"),
         DTy::Result(..) => r.starts_with("Result<"),
@@ -183,113 +150,26 @@ fn composite_agrees(d: &DTy, r: &str, by_ref: bool) -> bool {
 }
 
 /// The registry call a linked impl fn serves.
-fn registry_call(impl_fn: &str) -> Option<&'static str> {
+fn registry_call(impl_fn: &str) -> Option<String> {
     crate::mir_ops::self_host_runtime()
         .iter()
-        .find_map(|(_, pairs)| pairs.iter().find(|(i, _)| *i == impl_fn).map(|(_, c)| *c))
+        .find_map(|(_, pairs)| pairs.iter().find(|(i, _)| *i == impl_fn).map(|(_, c)| c.to_string()))
+        .or_else(|| crate::host_ops::host_op_for_call_name(impl_fn)
+            .map(|h| format!("{}.{}", h.module, h.func)))
 }
 
 fn derive(impl_fn: &str) -> Option<Hof> {
     derive_explained(impl_fn).ok()
 }
 
-/// [`derive`], with the step that refused.
-fn derive_explained(impl_fn: &str) -> Result<Hof, String> {
-    let call = registry_call(impl_fn).ok_or("no registry call")?;
-    let target = crate::native_floor::specializes(call).unwrap_or_else(|| call.to_string());
-    let (module, func) = target.split_once('.').ok_or("not a module.fn")?;
-    let program = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached).ok_or("no module source")?;
-    let mut decls = program.decls.iter().filter_map(|d| match d {
-        Decl::Fn { name, effect, attrs, generics, params, return_type, .. } if name.as_str() == func => {
-            Some((effect, attrs, generics, params, return_type))
-        }
-        _ => None,
-    });
-    let (effect, attrs, generics, params, ret) = decls.next().ok_or_else(|| format!("no declaration of `{target}`"))?;
-    if decls.next().is_some() || effect.unwrap_or(false) {
-        return Err("declared twice, or an effect fn".into());
-    }
-    let symbol = attrs
-        .iter()
-        .find(|a| a.name.as_str() == "intrinsic")
-        .and_then(|a| a.args.first())
-        .and_then(|a| match &a.value {
-            AttrValue::String { value } => Some(value.to_string()),
-            _ => None,
-        })
-        .ok_or("no @intrinsic")?;
-    let bounds = almide_lang::capability_bounds::of(module, func).map(|b| {
-        generics.as_ref().and_then(|gs| gs.get(b.generic))
-            .map(|g| (g.name.as_str().to_string(), b.cap)).ok_or("runtime bound has no declared generic")
-    }).collect::<Result<Vec<_>, _>>()?;
-    // A Float list's cells are its bits on the native render: a Float
-    // specialization served by a runtime generic that compares its elements
-    // would compare the bits (`-0.0` against `0.0`, NaN against itself),
-    // at any depth of the element (`List[List[Float]]`, `List[Float?]`).
-    if !bounds.is_empty() && target != call && crate::native_floor::specialized_list_elem_holds_float(call) {
-        return Err(format!("a Float specialization of `{target}`, whose runtime generic compares the list's bits"));
-    }
-    let tps: BTreeSet<String> = generics.iter().flatten().map(|g| g.name.as_str().to_string()).collect();
-    let dparams: Vec<DTy> = params.iter().map(|p| dty_of(&p.ty, &tps)).collect::<Option<_>>().ok_or("a param type outside the map")?;
-    let dret = dty_of(ret, &tps).ok_or("a return type outside the map")?;
-    let (rust_params, rust_ret, items) = crate::native_floor::runtime_body(&symbol).ok_or_else(|| format!("`{symbol}` is no takeable runtime body"))?;
-    if rust_params.len() != dparams.len() || rust_agrees(&dret, &rust_ret) != Some(false) {
-        return Err(format!("runtime signature {rust_params:?} -> {rust_ret} disagrees"));
-    }
-    let mutable: Vec<bool> = params.iter().map(|p| p.is_mut).collect();
-    if dparams.iter().zip(&mutable).any(|(d, m)| *m && has_runtime_tuple(d)) {
-        return Err("mutable tuple arguments need a write-back adapter".into());
-    }
-    let params: Vec<(DTy, bool)> = dparams
-        .into_iter()
-        .zip(&rust_params)
-        .zip(&mutable)
-        .map(|((d, r), m)| declared_param_mode(&d, *m, r).map(|b| (d, b)))
-        .collect::<Option<_>>()
-        .ok_or_else(|| format!("runtime params {rust_params:?} disagree"))?;
-    // A combinator takes its closure statically (`static_twin`); a call with
-    // no function-typed param calls the runtime body as it is.
-    if !params.iter().any(|(d, _)| matches!(d, DTy::Fn(..))) {
-        return Ok(Hof { twin: symbol.clone(), symbol, params, mutable, ret: dret, items, bounds, owned: None });
-    }
-    let (twin, mut items) = static_runtime_closure(&symbol, items).ok_or("the runtime body has no static callback route")?;
-    let owned = reuse_route(&symbol, &params, &dret, &mut items);
-    Ok(Hof { symbol, params, mutable, ret: dret, items, twin, bounds, owned })
-}
-
-/// The static route of `symbol`'s `@reuse` owned twin: the reused param and
-/// the twin's static name, adding the twin's items when the borrowing body
-/// does not already forward to it. Only an update that returns the same
-/// container it borrows qualifies, as on the declared floor
-/// (`native_floor::takes_by_value`).
-fn reuse_route(symbol: &str, params: &[(DTy, bool)], ret: &DTy, items: &mut Vec<&'static str>) -> Option<(usize, String)> {
-    let r = almide_lang::reuse::of_intrinsic(symbol)?;
-    let t = r.owned_twin?;
-    let (d, by_ref) = params.get(r.param)?;
-    if !*by_ref || d != ret || !matches!(d, DTy::List(_) | DTy::Set(_) | DTy::Map(..) | DTy::Bytes) {
-        return None;
-    }
-    let (tparams, _, titems) = crate::native_floor::runtime_body(t)?;
-    if tparams.len() != params.len() || tparams.get(r.param)?.trim_start().starts_with('&') {
-        return None;
-    }
-    let name = format!("{t}_static");
-    let carried = |items: &[&str]| items.iter().any(|i| crate::native_floor::runtime_fn_name(i).as_deref() == Some(name.as_str()));
-    if !carried(items.as_slice()) {
-        let (tw, more) = static_runtime_closure(t, titems)?;
-        if tw != name {
-            return None;
-        }
-        for i in more {
-            if !items.contains(&i) {
-                items.push(i);
-            }
-        }
-    }
-    carried(items.as_slice()).then_some((r.param, name))
-}
+// [`derive`], with the step that refused.
+include!("native_hof_derive.rs");
 
 include!("native_hof_static.rs");
+include!("native_hof_generic.rs");
+include!("native_hof_parallel.rs");
+include!("native_hof_specialize.rs");
+include!("native_hof_matrix.rs");
 
 /// The runtime route of the linked impl fn `impl_fn`, when the declaration
 /// of the stdlib fn it implements gives one.
@@ -334,7 +214,7 @@ pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
 pub(crate) fn declared_call(call: &str) -> bool {
     crate::mir_ops::self_host_runtime().iter().any(|(_, pairs)| {
         pairs.iter().any(|(implementation, source)| *source == call && of(implementation).is_some())
-    })
+    }) || (crate::host_ops::host_op_for_call_name(call).is_some() && of(call).is_some())
 }
 
 // ── per-render state ──
@@ -367,6 +247,21 @@ thread_local! {
 /// render no longer carries).
 pub(crate) fn reset(pruned: BTreeSet<String>, elided: BTreeSet<(String, ValueId)>) {
     STATE.with(|s| *s.borrow_mut() = State { pruned, elided, ..State::default() });
+}
+
+/// Capability graph projection of the exact selected runtime sites. Host
+/// calls use their declared capability row even after their linked body is
+/// pruned. FuncRef edges are unchanged, so callback effects remain reachable.
+pub(crate) fn capability_program(functions: Vec<MirFunction>) -> BTreeMap<String, MirFunction> {
+    let sites = sites();
+    functions.into_iter().map(|mut f| {
+        for (at, op) in f.ops.iter_mut().enumerate() {
+            let Some(symbol) = sites.get(&(f.name.clone(), at)) else { continue };
+            let Some(host) = crate::host_ops::HOST_OPS.iter().find(|o| o.symbol == symbol) else { continue };
+            if let Op::CallFn { name, .. } = op { *name = format!("{}.{}", host.module, host.func); }
+        }
+        (f.name.clone(), f)
+    }).collect()
 }
 
 /// `op` of `func` builds a closure block the final render does not build.
@@ -501,7 +396,11 @@ const LANE_F64: &str = "trait AlmdLaneF64 { fn lane_f64(self) -> f64; }\nimpl Al
 /// param crosses into the lambda's lane ([`Lane`]). `ret_lane`: a declared
 /// `Float` result is read through [`LANE_F64`], a declared `Bool` one is
 /// tested `!= 0`; else the lambda's result kind `ret` is the runtime's.
-fn adapter(lambda: Option<&str>, env: &str, (ps, moved): (&[NativeSigKind], &[bool]), bits: &[Lane], (ret, ret_lane): (NativeSigKind, Lane)) -> Option<String> {
+///
+/// `lent[i]`: the runtime hands that param a reference (the payload of a
+/// lent `Option` receiver, [`lent_var`]); the lambda borrows it as it is, or
+/// takes the one copy it asks for.
+fn adapter(lambda: Option<&str>, env: &str, (ps, moved, lent): (&[NativeSigKind], &[bool], &[bool]), bits: &[Lane], (ret, ret_lane): (NativeSigKind, Lane)) -> Option<String> {
     if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) {
         return None;
     }
@@ -510,7 +409,9 @@ fn adapter(lambda: Option<&str>, env: &str, (ps, moved): (&[NativeSigKind], &[bo
         Lane::Bool => "bool".to_string(),
         Lane::Same => rec::owned_ty(clo::owned_nty(k)),
     };
-    let params: Vec<String> = ps.iter().zip(bits).enumerate().map(|(i, (k, b))| format!("__p{i}: {}", spell(*k, *b))).collect();
+    let is_lent = |i: usize| lent.get(i).copied().unwrap_or(false);
+    let params: Vec<String> = ps.iter().zip(bits).enumerate()
+        .map(|(i, (k, b))| format!("__p{i}: {}{}", if is_lent(i) { "&" } else { "" }, spell(*k, *b))).collect();
     let args: String = ps
         .iter()
         .zip(bits)
@@ -518,12 +419,14 @@ fn adapter(lambda: Option<&str>, env: &str, (ps, moved): (&[NativeSigKind], &[bo
         .map(|(i, (k, b))| match (k, b) {
             (_, Lane::F64) => format!(", __p{i}.to_bits() as i64"),
             (_, Lane::Bool) => format!(", __p{i} as i64"),
+            _ if is_lent(i) && moved.get(i).copied().unwrap_or(false) => format!(", (*__p{i}).clone()"),
+            _ if is_lent(i) => format!(", __p{i}"),
             (NativeSigKind::Str | NativeSigKind::ListI64 | NativeSigKind::ListStr | NativeSigKind::Rec(_), _)
                 if !moved.get(i).copied().unwrap_or(false) => format!(", &__p{i}"),
             _ => format!(", __p{i}"),
         })
         .collect();
-    let call = format!("{}{args})", callback_head(lambda, env, ps, ret));
+    let call = format!("{}{args})", callback_head(lambda, env, ps, Some(ret)));
     let (call, ret_ty) = match ret_lane {
         Lane::F64 => (format!("AlmdLaneF64::lane_f64({call})"), "f64".to_string()),
         Lane::Bool => (format!("({call}) != 0"), "bool".to_string()),
@@ -542,12 +445,50 @@ enum Lane {
     Bool,
 }
 
+/// The type param `A` of the `Option[A]` receiver `k` of `h`, when a call
+/// may hand that receiver lent (`Option<&A>`): the runtime takes it by
+/// value, `A` is unbounded and reaches nothing but the params of the one
+/// callback — never the result, another argument, or what the callback
+/// returns — so no owned `A` is ever asked of the call.
+fn lent_var(h: &Hof, k: usize) -> Option<&str> {
+    let (DTy::Opt(e), false) = h.params.get(k)? else { return None };
+    let DTy::Var(t) = &**e else { return None };
+    let callbacks = h.params.iter().filter(|(d, _)| matches!(d, DTy::Fn(..))).count();
+    let free = callbacks == 1
+        && h.owned.is_none()
+        && !h.mutable.contains(&true)
+        && !mentions_var(&h.ret, t)
+        && !h.bounds.iter().any(|(v, _)| v == t)
+        && h.params.iter().enumerate().all(|(j, (d, _))| j == k || match d {
+            DTy::Fn(ps, r) => !mentions_var(r, t) && ps.iter().all(|p| matches!(p, DTy::Var(v) if v == t) || !mentions_var(p, t)),
+            d => !mentions_var(d, t),
+        });
+    free.then_some(t.as_str())
+}
+
+fn mentions_var(d: &DTy, t: &str) -> bool {
+    match d {
+        DTy::Var(v) => v == t,
+        DTy::List(e) | DTy::Opt(e) | DTy::Set(e) => mentions_var(e, t),
+        DTy::Map(a, b) | DTy::Result(a, b) => mentions_var(a, t) || mentions_var(b, t),
+        DTy::Tuple(es) => es.iter().any(|e| mentions_var(e, t)),
+        DTy::Fn(ps, r) => ps.iter().any(|e| mentions_var(e, t)) || mentions_var(r, t),
+        _ => false,
+    }
+}
+
+/// The stdlib combinator `name` may be handed its `Option` argument `k`
+/// lent ([`lent_var`]).
+pub(crate) fn lends_receiver(name: &str, k: usize) -> bool {
+    !parallel_selected(name) && of(name).is_some_and(|h| lent_var(h, k).is_some())
+}
+
 /// One non-function argument in the runtime's mode: borrowed as is, or owned
 /// — moved when the call is its last reader, else copied.
 fn runtime_arg(code: &str, got: NTy, by_ref: bool, dying: bool) -> String {
     let owned = matches!(got, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) | NTy::Res | NTy::ResStr);
     match (by_ref, got) {
-        (true, _) if owned => format!("&{code}"),
+        (true, _) if owned || matches!(got, NTy::I64 | NTy::F64 | NTy::Opt) => format!("&{code}"),
         (true, _) => code.to_string(),
         (false, NTy::I64 | NTy::F64 | NTy::Opt) => code.to_string(),
         (false, _) if owned && dying => crate::render_native_move::take_expr(code),
@@ -588,7 +529,8 @@ pub(crate) fn try_render(
         crate::render_native_bounds::check(slot);
         crate::render_native_bounds::access(slot);
     }
-    used_shims.push(crate::native_floor::FLOOR_HEADER);
+    if almide_codegen::generated::runtime_fn_modes::crosses_threads(&hof.symbol) { crate::render_native::require_fan_runtime(); }
+    used_shims.push(crate::native_floor::floor_header());
     used_shims.extend(hof.items.iter().copied());
     used_shims.extend(shims);
     let pad = "    ".repeat(indent);
@@ -617,37 +559,39 @@ fn plan(
     sigs: &NativeSigs,
     tys: &BTreeMap<ValueId, NTy>,
 ) -> Option<(&'static Hof, (String, usize), Served)> {
-    let hof = of(call.name)?;
+    let hof = if parallel_selected(call.name) { parallel_hof()? } else { of(call.name)? };
     let (at, origins) = STATE.with(|st| {
         let st = st.borrow();
         st.at.clone().filter(|a| !a.2).map(|a| (a, st.origins.clone()))
     })?;
+    let hof = host_callback_route(hof, call.args, &origins, user_fns)?;
     if call.args.len() != hof.params.len() {
         return None;
     }
     let got = call_args(call, &at.0, tys)?;
-    let mut env = Env::new();
-    for ((d, _), (_, t)) in hof.params.iter().zip(&got) {
-        if !matches!(d, DTy::Fn(..)) {
-            if has_runtime_tuple(d) { bind_callback_shape(&mut env, d, *t)?; }
-            else { bind_param(&mut env, d, *t)?; }
-        }
-    }
-    // Tuple slots erase scalar source types to lanes. A runtime comparison
-    // bound must not silently compare Float bits as Int keys. Until source
-    // key types accompany this adapter, only String-bound keys are admitted.
-    let tuple_input = hof.params.iter().any(|(d, _)| !matches!(d, DTy::Fn(..)) && has_runtime_tuple(d));
-    if tuple_input && hof.bounds.iter().any(|(v, _)| env.get(v) != Some(&NTy::Str)) { return None; }
-    // A generated struct or enum (a declared record or variant, a tuple)
-    // derives no ordering: an ordering-bound generic bound to one is v0's.
-    if hof.bounds.iter().any(|(v, cap)| *cap == almide_lang::capability_bounds::Cap::Ord && env.get(v).and_then(|k| k.rec()).is_some_and(|i| rec::field_count(i) > 0 || rec::enum_cases(i).is_some())) {
-        return None;
-    }
-    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds };
+    crate::trace::trace_for("ALMIDE_DBG_LOWER_FN", &at.0, || format!("HOF {}:{} {} got={got:?} result={:?} params={:?}", at.0, at.1, call.name, declared_result(call, user_fns), hof.params));
+    let declared_return = declared_result(call, user_fns);
+    let mut env = plan_env(hof, &got, declared_return)?;
+    // An element Option held as the lent element, handed to a combinator
+    // whose callback only takes its payload.
+    let lent = call.args.iter().enumerate().find_map(|(k, a)| match a {
+        CallArg::Handle(v) if crate::render_native_borrow_read::borrowed_option(*v) => Some((k, *v, lent_var(hof, k)?)),
+        _ => None,
+    });
+    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds, lent: lent.map(|l| l.2) };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
     let mut twin = hof.twin.as_str();
     for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {
+        if hof.matrix_ref_lists[k] {
+            rendered.push(format!("&{code}.iter().collect::<Vec<_>>()"));
+            continue;
+        }
+        if lent.is_some_and(|l| l.0 == k) {
+            rendered.push(code.clone());
+            continue;
+        }
         if hof.mutable[k] {
+            if has_value_conversion(d) || generic_scalar_lane(&env, d, *t, &hof.bounds).is_some() { return None; }
             rendered.push(mutable_place_arg(a, code, *t, tys)?);
             continue;
         }
@@ -655,124 +599,34 @@ fn plan(
             twin = owned;
             rendered.push(runtime_arg(code, *t, false, true));
             continue;
+        } else if let Some(want) = generic_scalar_lane(&env, d, *t, &hof.bounds) {
+            let value = crate::native_value_repr::scalar_recode(code, *t, want)?;
+            rendered.push(if *by_ref { format!("&({value})") } else { value });
+            continue;
         }
-        rendered.push(match d {
-            DTy::Fn(dps, dret) => fn_arg(&cx, &mut env, (dps, dret), (a, *t), &mut side)?,
-            DTy::Unit => "()".to_string(),
-            // The render carries a Bool in its i64 lane; the runtime takes `bool`.
-            DTy::Bool => format!("({code} != 0)"),
-            d if has_runtime_tuple(d) => {
-                let owned = runtime_arg(code, *t, false, false);
-                let value = convert_callback_value(&env, d, crate::render_native::owned_nty(*t), &owned, false)?;
-                if *by_ref {
-                    let snapshot = format!("__tuple_arg_{}_{}", at.1, k);
-                    side.prelude.push(format!("let {snapshot} = {value};"));
-                    format!("&{snapshot}")
-                } else { value }
-            }
-            _ => value_arg(hof, (at.1, k), (a, code.as_str(), *t), &mut side),
-        });
+        rendered.push(declared_arg(&cx, &mut env, &mut side, (hof, k), (d, *by_ref), (a, code.as_str(), *t))?);
     }
-    // Constructors without a value argument cannot bind their result-only
-    // type parameters from arguments. The linked declaration's concrete
-    // signature supplies those bindings; never guess a scalar default.
-    if kind_of(&env, &hof.ret).is_none() {
+    // The callback takes the payload by reference: the Option is handed as
+    // it is held (`Option<&A>`), not as the owned copy `code` spells.
+    if let (Some((k, v, _)), true) = (lent, side.lent) {
+        rendered[k] = var(v);
+    }
+    if declared_return.is_none() && kind_of(&env, &hof.ret).is_none() {
         let ret = sigs.get(call.name)?.1?;
         bind_param(&mut env, &hof.ret, clo::owned_nty(ret))?;
     }
-    let ret = kind_of(&env, &hof.ret)?;
+    let ret = declared_return.or_else(|| kind_of(&env, &hof.ret))?;
+    if almide_codegen::generated::runtime_fn_modes::crosses_threads(&hof.symbol) { side.prelude.append(&mut side.share); }
     if hof.symbol == "almide_rt_list_flat_map" && twin == hof.twin {
         twin = flat_map_array_route(call, (&origins, user_fns), &mut rendered, &mut side).unwrap_or(twin);
     }
     let expr = format!("{}({})", twin, rendered.join(", "));
-    let expr = runtime_result(&env, &hof.ret, &expr)?;
+    let expr = runtime_result_as(&env, &hof.ret, &expr, ret)?;
     Some((hof, (at.0, at.1), (expr, ret, side.prelude, side.shims, side.reads)))
 }
 
-/// The owned twin's name when argument `k` (`a`, of kind `t`) is the
-/// `@reuse` param, the call is its last reader, and the render holds it
-/// owned: the twin takes it over instead of the borrowing body copying it.
-fn handed_over<'h>(hof: &'h Hof, k: usize, a: &CallArg, t: NTy) -> Option<&'h str> {
-    let (param, name) = hof.owned.as_ref().filter(|(p, _)| *p == k)?;
-    let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
-    let owned = matches!(t, NTy::Vec | NTy::VecStr | NTy::Rec(_)) && crate::render_native::owned_nty(t) == t;
-    (dying && owned && !hof.mutable.iter().any(|m| *m) && hof.params[*param].1).then_some(name.as_str())
-}
-
-/// Each closure value's lambda name and captured values (`closure_origins`).
-type ClosureOrigins = BTreeMap<ValueId, (String, Vec<ValueId>)>;
-
-/// A `list.flat_map` whose callback is a lambda ending in a list literal of
-/// at most eight elements runs as the runtime's array twin
-/// (`almide_rt_list_flat_map_arr`, #1337), calling the lambda's array twin
-/// (`array_twins`): the result is sized once and no element builds a Vec of
-/// its own, where the Vec route allocated and freed one per element. The
-/// standard codegen takes the same route (`lower_flat_map_arrays`).
-fn flat_map_array_route(
-    call: &crate::render_native::NativeCall<'_>,
-    (origins, user_fns): (&ClosureOrigins, &BTreeMap<&str, &MirFunction>),
-    rendered: &mut [String],
-    side: &mut FnArgOut,
-) -> Option<&'static str> {
-    const ARR: &str = "almide_rt_list_flat_map_arr";
-    let (lambda, n, lit) = call.args.iter().find_map(|a| fixed_literal_callback(a, origins, user_fns))?;
-    let items = crate::native_floor::runtime_items(ARR)?;
-    let head = format!("{}(", crate::render_native::mangle(&lambda));
-    let k = rendered.iter().position(|r| r.contains(&head) && r.contains("-> Vec<i64>"))?;
-    rendered[k] = rendered[k]
-        .replacen(&head, &format!("{}__arr(", crate::render_native::mangle(&lambda)), 1)
-        .replacen("-> Vec<i64>", &format!("-> [i64; {n}]"), 1);
-    side.shims.extend(items);
-    STATE.with(|s| s.borrow_mut().array_twins.insert(lambda, (n, lit)));
-    Some(ARR)
-}
-
-/// A callback argument naming a lambda whose result is one list literal of
-/// at most eight elements that nothing else reads: the lambda, the arity and
-/// the literal.
-fn fixed_literal_callback(
-    a: &CallArg,
-    origins: &BTreeMap<ValueId, (String, Vec<ValueId>)>,
-    user_fns: &BTreeMap<&str, &MirFunction>,
-) -> Option<(String, usize, ValueId)> {
-    let (CallArg::Handle(v) | CallArg::Scalar(v)) = a else { return None };
-    let (name, _) = origins.get(v)?;
-    let l = user_fns.get(name.as_str())?;
-    let ret = l.ret?;
-    let n = l.ops.iter().find_map(|op| match op {
-        Op::ListLit { dst, elems } if *dst == ret && (1..=8).contains(&elems.len()) => Some(elems.len()),
-        _ => None,
-    })?;
-    let mut reads = Vec::new();
-    for op in &l.ops {
-        crate::mir_ops::op_reads(op, &mut reads);
-    }
-    (!reads.contains(&ret)).then(|| (name.clone(), n, ret))
-}
-
-/// The array twins [`flat_map_array_route`] called, rendered from each
-/// lambda's own text (`texts`, by fn name): the same body returning
-/// `[i64; N]`, its literal an array. Taken once per render.
-pub(crate) fn array_twins(texts: &BTreeMap<String, String>) -> Result<String, LowerError> {
-    let twins = STATE.with(|s| std::mem::take(&mut s.borrow_mut().array_twins));
-    let mut out = String::new();
-    for (lambda, (n, lit)) in twins {
-        let mangled = crate::render_native::mangle(&lambda);
-        let text = texts.get(&lambda).ok_or_else(|| wall(format!("native: no rendered body for the array twin of `{lambda}`")))?;
-        let lit_line = format!("let mut {}: Vec<i64> = vec![", var(lit));
-        let (head, ret) = (format!("fn {mangled}("), ") -> Vec<i64> {");
-        if !(text.contains(&head) && text.contains(ret) && text.contains(&lit_line)) {
-            return Err(wall(format!("native: `{lambda}` does not render as its array twin expects")));
-        }
-        let twin = text
-            .replacen(&head, &format!("fn {mangled}__arr("), 1)
-            .replacen(ret, &format!(") -> [i64; {n}] {{"), 1)
-            .replacen(&lit_line, &format!("let mut {}: [i64; {n}] = [", var(lit)), 1);
-        out.push_str(&twin);
-        out.push('\n');
-    }
-    Ok(out)
-}
+include!("native_hof_plan.rs");
+include!("native_hof_owned.rs");
 
 /// [`plan`]'s rendering of the plain value argument `k` of the call at op
 /// `at` (`a`, rendered as `code`, of kind `t`).
@@ -875,6 +729,7 @@ mod tests {
             ("list_map_str", "almide_rt_list_map"),
             ("list_map", "almide_rt_list_map"),
             ("list_flat_map_str", "almide_rt_list_flat_map"),
+            ("list_flat_map_h", "almide_rt_list_flat_map"),
             ("option_map", "almide_rt_option_map"),
             ("matrix_map", "almide_rt_matrix_map"),
             ("set_filter", "almide_rt_set_filter"),
@@ -906,3 +761,22 @@ include!("native_hof_result.rs");
 
 include!("native_hof_bounds.rs");
 include!("native_hof_tuple.rs");
+
+fn declared_result(call: &crate::render_native::NativeCall<'_>, user_fns: &BTreeMap<&str, &MirFunction>) -> Option<NTy> {
+    let fname = STATE.with(|s| s.borrow().at.as_ref().map(|a| a.0.clone()))?;
+    let key = user_fns.get(fname.as_str())?.aggregate_blocks.get(&(*call.dst)?)?;
+    rec::declared_kind(key)
+}
+
+/// Refuse a representation-specialized library body whose declared result
+/// disagrees with the source call. Its declaration-backed runtime adapter
+/// can then instantiate the real result type, including empty constructors.
+pub(crate) fn check_result(call: &crate::render_native::NativeCall<'_>, user_fns: &BTreeMap<&str, &MirFunction>, sigs: &NativeSigs) -> Result<(), LowerError> {
+    if of(call.name).is_none() { return Ok(()); }
+    if let (Some(want), Some((_, Some(got)))) = (declared_result(call, user_fns), sigs.get(call.name)) {
+        if !crate::native_value_repr::same_owned(want, clo::owned_nty(*got)) {
+            return Err(wall(format!("native: linked result of `{}` differs from its checked call type", call.name)));
+        }
+    }
+    Ok(())
+}

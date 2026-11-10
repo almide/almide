@@ -6,6 +6,11 @@ pub fn almide_rt_list_is_empty<T>(xs: &[T]) -> bool { xs.is_empty() }
 pub fn almide_rt_list_first<A: Clone>(xs: &[A]) -> Option<A> { xs.first().cloned() }
 pub fn almide_rt_list_last<A: Clone>(xs: &[A]) -> Option<A> { xs.last().cloned() }
 pub fn almide_rt_list_get<T: Clone>(xs: &[T], i: i64) -> Option<T> { xs.get(i as usize).cloned() }
+// Borrowing twins: the element lent from the list, where the reader only
+// inspects it (a head read of a wide record must not copy the record).
+pub fn almide_rt_list_first_ref<A: Clone>(xs: &[A]) -> Option<&A> { xs.first() }
+pub fn almide_rt_list_last_ref<A: Clone>(xs: &[A]) -> Option<&A> { xs.last() }
+pub fn almide_rt_list_get_ref<T: Clone>(xs: &[T], i: i64) -> Option<&T> { xs.get(i as usize) }
 pub fn almide_rt_list_contains<T: PartialEq>(xs: &[T], x: T) -> bool { xs.contains(&x) }
 pub fn almide_rt_list_index_of<T: PartialEq>(xs: &[T], x: T) -> Option<i64> { xs.iter().position(|v| *v == x).map(|i| i as i64) }
 #[inline]
@@ -41,9 +46,12 @@ pub fn almide_rt_list_sort_float(xs: &[f64]) -> Vec<f64> { let mut v = xs.to_vec
 pub fn almide_rt_list_min_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().min_by(almide_float_order) }
 pub fn almide_rt_list_max_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().max_by(almide_float_order) }
 pub fn almide_rt_list_sort_by_float<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> f64>) -> Vec<A> {
-    let f = move |a| f(a);
     let mut v = xs;
-    v.sort_by(|a, b| almide_float_order(&f(a.clone()), &f(b.clone())));
+    // C-055: extract each key once, including when the callback mutates a
+    // captured value. Integer order keys preserve the canonical NaN order.
+    // Rust's cached sort skips key extraction for a singleton.
+    if v.len() == 1 { let _ = f(v[0].clone()); }
+    v.sort_by_cached_key(|a| almide_float_order_key(f(a.clone())));
     v
 }
 // `list.sum`/`list.product` follow the language's integer-overflow law:
@@ -229,7 +237,12 @@ pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
 }
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }
-pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<A> { let f = move |a| f(a); xs.sort_by_cached_key(|x| f(x.clone())); xs }  // #560: cached_key calls the key fn ONCE PER ELEMENT (n), matching the wasm precomputed-key array + the key-extraction intent; sort_by_key called it per COMPARISON (n log n), an observable native!=wasm divergence for side-effectful keys.
+pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<A> {
+    // C-055: sort_by_cached_key evaluates every key once except a singleton.
+    if xs.len() == 1 { let _ = f(xs[0].clone()); }
+    xs.sort_by_cached_key(|x| f(x.clone()));
+    xs
+}
 pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, AlmideString>>) -> Result<B, AlmideString> { let __almide_r: Result<B, String> = (|| { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, AlmideString> = (|| { let f = move |a| f(a); xs.into_iter().map(f).collect() })(); __almide_r.map_err(Into::into) }
 
@@ -913,24 +926,40 @@ impl Drop for AlmideFanRunning {
 
 /// A pool thread inside `gate` (counted in `inside`): take blocks, leave its
 /// panic if it had one, and leave — waking the caller when it is the last.
-fn almide_fan_help(gate: &AlmideFanGate) {
+///
+/// `gate` is a raw pointer, not `&AlmideFanGate` (#4452): a reference
+/// PARAMETER is protected for the whole call — the gate must stay valid
+/// until this function returns — but the caller may free its frame as soon
+/// as the decrement below makes `inside` 0, while this call is still on the
+/// helper's stack. Miri reported exactly that (the caller's drop of the gate
+/// against the helper's protected argument, run 41854359018). So the borrow
+/// of the whole gate is last used before the decrement, and the decrement
+/// goes through a reference to the counter alone — all `UnsafeCell`, which a
+/// concurrent free may outlive, as the last strong count of an `Arc` does.
+fn almide_fan_help(gate: *const AlmideFanGate) {
     use std::sync::atomic::Ordering;
-    // SAFETY: this helper is inside the gate, so the offer has not returned
-    // and the closure is alive; it was written before the gate was published.
-    let take = unsafe { &*(*gate.take.get()).expect("set before the gate is published") };
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take));
-    // a helper that took a block leaves no element's sink or output behind
-    if !matches!(outcome, Ok(false)) {
-        almide_fan_adopt(None);
-        almide_stdout_flush();
-    }
-    if let Err(panic) = outcome {
-        gate.panics.lock().unwrap_or_else(|e| e.into_inner()).push(Err(panic));
-    }
-    // after the decrement the caller may return and free the gate: wake it
-    // through a handle cloned before
-    let caller = gate.parking.load(Ordering::SeqCst).then(|| gate.caller.clone());
-    if gate.inside.fetch_sub(1, Ordering::SeqCst) == 1 {
+    let (caller, inside) = {
+        // SAFETY: this helper is inside the gate (it entered through
+        // `almide_fan_steal`), so the offer has not returned and the gate is
+        // alive until the decrement below; this borrow is not used after it.
+        let gate = unsafe { &*gate };
+        // SAFETY: inside the gate, the closure is alive; it was written
+        // before the gate was published.
+        let take = unsafe { &*(*gate.take.get()).expect("set before the gate is published") };
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take));
+        // a helper that took a block leaves no element's sink or output behind
+        if !matches!(outcome, Ok(false)) {
+            almide_fan_adopt(None);
+            almide_stdout_flush();
+        }
+        if let Err(panic) = outcome {
+            gate.panics.lock().unwrap_or_else(|e| e.into_inner()).push(Err(panic));
+        }
+        // after the decrement the caller may return and free the gate: wake
+        // it through a handle cloned before
+        (gate.parking.load(Ordering::SeqCst).then(|| gate.caller.clone()), &gate.inside)
+    };
+    if inside.fetch_sub(1, Ordering::SeqCst) == 1 {
         if let Some(caller) = caller {
             caller.unpark();
         }
@@ -979,8 +1008,10 @@ fn almide_fan_withdraw(i: usize) {
 }
 
 /// Enter the oldest-slotted published offer that has a block left and that
-/// `which` accepts.
-fn almide_fan_steal(which: impl Fn(&AlmideFanGate) -> bool) -> Option<&'static AlmideFanGate> {
+/// `which` accepts. The gate comes back as a raw pointer: it is valid only
+/// until this thread leaves it, which no lifetime can say (see
+/// `almide_fan_help`).
+fn almide_fan_steal(which: impl Fn(&AlmideFanGate) -> bool) -> Option<*const AlmideFanGate> {
     use std::sync::atomic::Ordering;
     if ALMIDE_FAN_OPEN_BLOCKS.load(Ordering::Relaxed) == 0 {
         return None;
@@ -1002,9 +1033,9 @@ fn almide_fan_steal(which: impl Fn(&AlmideFanGate) -> bool) -> Option<&'static A
         });
         slot.readers.fetch_sub(1, Ordering::SeqCst);
         if let Some(g) = entered {
-            // SAFETY: see above — valid until this thread leaves the gate,
-            // which `almide_fan_help` does last.
-            return Some(unsafe { &*(g as *const AlmideFanGate) });
+            // valid until this thread leaves the gate, which
+            // `almide_fan_help` does last
+            return Some(g as *const AlmideFanGate);
         }
     }
     None
@@ -1126,7 +1157,8 @@ fn almide_fan_pool_wake(helpers: usize) {
             return;
         }
         pool.polling.fetch_add(1, Ordering::SeqCst);
-        let spawned = std::thread::Builder::new().spawn(move || almide_fan_hand_loop(&almide_fan_pool().hands[i]));
+        // #4617: the main thread's stack, as a fan arm gets (almide_worker_thread).
+        let spawned = almide_worker_thread().spawn(move || almide_fan_hand_loop(&almide_fan_pool().hands[i]));
         let Ok(handle) = spawned else {
             pool.polling.fetch_sub(1, Ordering::SeqCst);
             return;

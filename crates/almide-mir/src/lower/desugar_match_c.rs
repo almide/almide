@@ -326,19 +326,15 @@ fn list_pattern_match_impl(body: &IrExpr, scalar_elems: bool) -> Option<IrExpr> 
             _ => None,
         }
     }
-    /// A `List[String]` subject some arm of which tests an element against a string
-    /// LITERAL (`match xs { ["a"] | ["a", _] => …, _ => … }` — #2473): the same
-    /// length-grouped chain, the element temps being the list's String elements (an
-    /// owned `xs[i]` read under its length test) and each literal an `==` cond. Gated
-    /// to the literal-bearing form so a `List[String]` match that lowers through
-    /// another route keeps it.
+    /// Nonempty fixed-length String patterns use owned indexed reads beneath
+    /// the length test, for binders as well as literals. Plain empty/rest
+    /// matches retain their existing direct route.
     fn str_list_with_literal_elem(subject_ty: &Ty, arms: &[almide_ir::IrMatchArm]) -> Option<Ty> {
         let is_str_list = matches!(subject_ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String));
-        let has_literal = arms.iter().any(|a| matches!(&a.pattern,
-            IrPattern::List { elements, .. }
-                if elements.iter().any(|p| matches!(p, IrPattern::Literal { .. }))));
-        (is_str_list && has_literal).then_some(Ty::String)
+        let fixed_elements = arms.iter().any(|a| matches!(&a.pattern,
+            IrPattern::List { elements, rest: None } if !elements.is_empty()));
+        (is_str_list && fixed_elements).then_some(Ty::String)
     }
     /// Extracted verbatim from `desugar_list_pattern_match`'s `visit_expr_mut`
     /// (codopsy r2, #852): decides ARM admission and groups the non-terminal arms

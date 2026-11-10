@@ -158,7 +158,7 @@ impl<'a> Interpreter<'a> {
             //   - WASM `emit_wasm/expressions.rs::Fan` builds a tuple (`>1`) or
             //     emits the single value bare (`==1`).
             // Every arm is evaluated, in order, and an `Err` does not stop the
-            // later arms. After the last arm the LOWEST-INDEX `Err` aborts the
+            // later arms. After the last arm the LOWEST-INDEX `Err` propagates out of the
             // fan (`eval_fan`), which is the backends' rule (ADR-0024 D1, C-199).
             IrExprKind::Fan { exprs } => self.eval_fan(exprs, scope),
             // ── Loops ──
@@ -199,7 +199,7 @@ impl<'a> Interpreter<'a> {
     /// 3-way oracle rather than an honest skip. C-199's fixture caught it.
     fn eval_fan(&mut self, exprs: &[IrExpr], scope: &Scope) -> Flow {
         let mut out = Vec::with_capacity(exprs.len());
-        let mut first_err: Option<String> = None;
+        let mut first_err: Option<Box<Value>> = None;
         for e in exprs {
             // An arm whose marker is its own top-level `!` is a Result arm: its
             // Err ends the ARM, not the fn, so every later arm still runs and
@@ -209,22 +209,32 @@ impl<'a> Interpreter<'a> {
                 IrExprKind::Unwrap { expr } if expr.ty.is_result() => &**expr,
                 _ => e,
             };
-            let v = val!(self.eval_expr(e, scope));
+            // The backends lift each arm into a fn of its own, so a `!` inside
+            // an arm (a nested fan's Err included) returns from the ARM: it is
+            // that arm's Err, not an early return of the enclosing fn.
+            let v = match self.eval_expr(e, scope) {
+                Flow::Value(v) => v,
+                Flow::Return(err @ Value::Result(Err(_))) => err,
+                other => return other,
+            };
             match v {
                 Value::Result(Ok(payload)) => out.push(*payload),
                 Value::Result(Err(payload)) => {
                     if first_err.is_none() {
-                        first_err = Some(payload.display_bare());
+                        first_err = Some(payload);
                     }
                     // Keep the arity right for the tuple below; the value is
-                    // unreachable because `first_err` aborts before it is read.
+                    // unreachable because `first_err` returns before it is read.
                     out.push(Value::Unit);
                 }
                 other => out.push(other),
             }
         }
-        if let Some(msg) = first_err {
-            return Flow::Abort(msg);
+        // The lowest-index Err propagates out of the enclosing fn, as `!` does
+        // (the backends' join step): a caller that binds the fn's Result sees
+        // it, and only `main` turns it into `Error: <msg>`, exit 1.
+        if let Some(payload) = first_err {
+            return Flow::Return(Value::Result(Err(payload)));
         }
         // A single-expr fan is the bare value (no 1-tuple), matching both
         // backends; `into_iter` is destructured rather than unwrapped so the

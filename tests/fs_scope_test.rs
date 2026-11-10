@@ -67,10 +67,17 @@ fn run(dir: &Path, args: &[&str]) -> String {
         .arg("run")
         .arg("main.almd")
         .args(args)
+        .env("ALMIDE_VERIFIED_DEBUG", "1")
+        .env("ALMIDE_NO_VERIFIED_OK", "1")
         .current_dir(dir)
         .output()
         .expect("spawn");
     assert!(o.status.success(), "{args:?}: {}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    if args.is_empty() {
+        assert!(String::from_utf8_lossy(&o.stderr).contains("native: v1 trust-spine render"),
+            "filesystem permissions must use v1, without implicit fallback: {}",
+            String::from_utf8_lossy(&o.stderr));
+    }
     String::from_utf8(o.stdout).expect("utf8")
 }
 
@@ -357,5 +364,19 @@ fn a_directory_flipped_to_a_symlink_under_permissions_fs_never_leaks_on_either_t
         assert!(out.lines().any(|l| l == "scoped leaks: 0"), "{args:?}: a scoped read followed the flipped symlink:\n{out}");
         let n = |k: &str| out.lines().find_map(|l| l.strip_prefix(k)).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
         assert!(n("scoped reads: ") > 0 && n("scoped refused: ") > 0, "{args:?}: the flips did not land on both sides of the calls:\n{out}");
+    }
+}
+
+#[test]
+fn scoped_calls_do_not_rewrite_host_names_inside_user_strings() {
+    let (_t, proj) = tree(Some("[package]\nname = \"scoped\"\n\n[permissions]\nfs = [\"./data\"]\n"));
+    std::fs::write(proj.join("main.almd"), r#"import fs
+effect fn main() -> Unit = {
+  println("almide_rt_fs_write(x)")
+  println(string.trim(fs.read_text("data/sub/a.txt")!))
+}
+"#).unwrap();
+    for args in [&[][..], &["--no-verified"][..], &["--target", "wasm"][..]] {
+        assert_eq!(run(&proj, args), "almide_rt_fs_write(x)\nhello\n");
     }
 }

@@ -32,6 +32,23 @@ struct FnLoop<'a> {
     scalar_prints: BTreeMap<usize, (ValueId, bool)>,
     /// The owned values released right after each op (`early_releases`).
     early: BTreeMap<usize, Vec<ValueId>>,
+    /// The slot snapshots released right after each op (`snapshot_releases`).
+    snapshots: BTreeMap<usize, Vec<ValueId>>,
+    borrowed_tails: std::collections::BTreeSet<usize>,
+}
+
+/// The slot snapshots whose last reader was the op before `i` release their
+/// `Rc` now (`snapshot_releases`).
+fn release_snapshots(st: &mut FnLoop<'_>, i: usize) {
+    for v in st.snapshots.get(&i).cloned().into_iter().flatten() {
+        let rc = format!("{}_rc", var(v));
+        if st.out.contains(&format!("let {rc}:")) {
+            for _ in 0..st.indent {
+                st.out.push_str("    ");
+            }
+            let _ = writeln!(st.out, "drop({rc});");
+        }
+    }
 }
 
 fn render_fn(
@@ -46,6 +63,8 @@ fn render_fn(
     let is_main = func.name == "main";
     let mut out = String::new();
     let indent = 1usize;
+    let borrowed_tails = crate::native_borrowed_tco::sites(func);
+    if !borrowed_tails.is_empty() { crate::native_borrowed_tco::begin(func, &tys, &mut out)?; }
     // Each open if-as-value join: (marker, dst) — the decl is patched in once the
     // first arm yield reveals the join type.
     let if_stack: Vec<Option<IfJoin>> = Vec::new();
@@ -64,7 +83,9 @@ fn render_fn(
     // subset honest: a USED Handle still walls below.
     let used = native_used_values(func);
     // #3532: the if-as-value joins realized as a borrow of the selected value.
-    let borrows = crate::borrow_join::borrow_joins(func);
+    // The element Options held as the lent element (`Option<&A>`).
+    let lent_options = crate::render_native_borrow_read::borrowed_options(func, &tys, &|name| user_fns.contains_key(name));
+    let borrows = crate::borrow_join::borrow_joins(func, &lent_options);
     let addrs = crate::render_native_addr::AddrState::new(func, sigs);
     if is_main {
         used_shims.push(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
@@ -73,6 +94,7 @@ fn render_fn(
         // codegen's `main` (the shared text, already 4-space indented).
         out.push_str(almide_codegen::main_sigpipe_prelude_text());
         line!("almide_stack_guard_install();");
+        line!("let _almide_host_exit = AlmideHostExitGuard;");
     }
     if is_main && crate::charge_probe::probe_enabled() {
         used_shims.push(COUNTER_SHIM);
@@ -86,7 +108,7 @@ fn render_fn(
     crate::render_native_move::set_static_strs(func);
     crate::render_native_addr::clear_str_fields();
     crate::render_native_move::set_rebound(func);
-    crate::render_native_borrow_read::set_borrowed_results(func);
+    crate::render_native_borrow_read::set_borrowed_results(func, lent_options);
     crate::render_native_keyed::begin_fn(func, &borrows.arms);
     crate::native_map_entries::begin(func);
     // Interpolation chains built in one buffer (crate::render_native_interp).
@@ -96,6 +118,7 @@ fn render_fn(
     let printed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     let (scalar_defs, scalar_prints) = crate::render_native_interp::printed_scalars(func);
     let early = early_releases(func, &chains);
+    let snapshots = snapshot_releases(func, &chains);
     let mut st = FnLoop {
         func,
         user_fns,
@@ -113,6 +136,8 @@ fn render_fn(
         scalar_defs,
         scalar_prints,
         early,
+        snapshots,
+        borrowed_tails,
     };
     // The op iterator runs over the loop state's own view of the function, so
     // a phase that consumes ops ahead (`ops.nth(..)`) shares its lifetime.
@@ -127,6 +152,7 @@ fn render_fn(
         // otherwise hold every dead buffer to its end. A plain move, so any
         // later use the render made of it would be a compile error, never a
         // silent read of an emptied value.
+        release_snapshots(&mut st, i);
         for v in st.early.get(&i).cloned().into_iter().flatten() {
             let v = &v;
             let owned = match st.tys.get(v) {
@@ -213,6 +239,26 @@ fn render_fn_step<'a>(
 ) -> Result<bool, LowerError> {
     crate::render_native_bounds::at(i);
     crate::native_hof::at(st.func, i);
+    if crate::native_foreign::render(st.func, op, st.sigs, &mut st.tys, &mut st.out, st.indent)? {
+        return Ok(false);
+    }
+    if let Op::Prim { kind: crate::PrimKind::Die, dst: None, args } = op {
+        if let [message] = args.as_slice() {
+            if let Some(call) = crate::native_test_assert::failure(st.func, *message) {
+                let _ = writeln!(st.out, "{}{call};", "    ".repeat(st.indent));
+                return Ok(true);
+            }
+            if crate::native_test_panic::is_message(st.func, *message) && matches!(st.tys.get(message), Some(NTy::Str | NTy::StrRef)) {
+                let call = format!("__almd_native_test_panic({})", var(*message));
+                let _ = writeln!(st.out, "{}{call};", "    ".repeat(st.indent));
+                return Ok(true);
+            }
+        }
+    }
+    if st.borrowed_tails.contains(&i) {
+        crate::native_borrowed_tco::render(st.func, op, &mut st.tys, &mut st.out, st.indent)?;
+        return Ok(false);
+    }
     if let (true, Op::ListLit { dst, .. }) = (crate::native_hof::elided(st.func, op), op) {
         // Typed as the block it stands for; only its releases name it, and
         // they render nothing.
@@ -423,7 +469,7 @@ fn render_fn_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<(), LowerError
                 used_shims: &mut *st.used_shims,
             },
         )?,
-        other => render_fn_tier_op(st, other)?,
+        other => render_fn_tier_op(st, i, other)?,
     }
     Ok(())
 }
@@ -574,7 +620,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                 && crate::render_native_move::last_use(func, i, args[0], NTy::Str, &st.borrows.arms) =>
         {
             st.tys.insert(*d, NTy::Res);
-            line!("let {}: Result<i64, AlmideString> = Err({});", var(*d), crate::render_native_move::take_expr(&var(args[0])));
+            line!("let mut {}: Result<i64, AlmideString> = Err({});", var(*d), crate::render_native_move::take_expr(&var(args[0])));
         }
         Op::SetLocal { local, src }
             if st.tys.get(src).is_some_and(|t| {
@@ -597,7 +643,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
 
 /// Every op tier in turn — call-shaped, meter, Result carrier, termination,
 /// scalar, control flow; an op none of them takes is outside the rung subset.
-fn render_fn_tier_op(st: &mut FnLoop<'_>, other: &Op) -> Result<(), LowerError> {
+fn render_fn_tier_op(st: &mut FnLoop<'_>, i: usize, other: &Op) -> Result<(), LowerError> {
     let handled = render_native_call_op(
         other,
         OpSink {
@@ -640,6 +686,7 @@ fn render_fn_tier_op(st: &mut FnLoop<'_>, other: &Op) -> Result<(), LowerError> 
         },
     )? || render_native_flow_op(
         other,
+        i > 0 && crate::mir_wellformed::aborts_before_arm_end(&st.func.ops, i - 1),
         &st.borrows.joins,
         &mut st.tys,
         &mut st.out,

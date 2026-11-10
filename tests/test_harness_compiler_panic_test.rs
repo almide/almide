@@ -4,9 +4,12 @@
 //! printed "All 1 test file(s) passed" / "0 tests in 1 file" and exited 5
 //! (the no-tests verdict) instead of reporting a failure.
 //!
-//! `ALMIDE_IR_FAULT=<pass>` injects a postcondition violation after the named
-//! nanopass (the release binary's negative control), which is a real compiler
-//! panic on the native leg without depending on a live compiler bug.
+//! `ALMIDE_IR_FAULT=<pass>` is the release binary's negative control: a real
+//! compiler panic on the native leg without depending on a live compiler bug.
+//! The native test harness renders on the v1 trust spine and never runs the
+//! standard codegen's passes, so it cannot inject the violation after the
+//! named pass; it panics on the switch instead of ignoring it (ignoring it
+//! reported the file as passed, and this test with it as vacuous).
 
 use std::process::Command;
 

@@ -2,7 +2,7 @@
 pub(crate) fn has_default(t: NTy) -> bool {
     fn check(t: NTy, decls: &[RecDecl], visiting: &mut Vec<u16>) -> bool {
         match t {
-            NTy::Res | NTy::ResStr => false,
+            NTy::Never | NTy::Res | NTy::ResStr => false,
             NTy::Rec(i) | NTy::RecRef(i) => {
                 let Some(d) = decls.get(i as usize) else {
                     return false;
@@ -10,6 +10,11 @@ pub(crate) fn has_default(t: NTy) -> bool {
                 if d.result_of.is_some() {
                     return false;
                 }
+                // A vacant HTTP response/call is not a runtime value. In
+                // particular fabricating a default call would lose ownership
+                // of its cancellation handle; use explicit vacant storage.
+                if crate::native_runtime_types::RuntimeType::of(&d.name)
+                    .is_some_and(|t| d.alias == Some(t.rust())) { return false; }
                 // Empty containers do not need their elements to be Default.
                 if d.cell_of.is_some() || d.alias.is_some()
                     || d.list_of.is_some()

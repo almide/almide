@@ -52,6 +52,15 @@ else {
   even_step(d, n - 1)
 }
 
+// A non-tail recursive call whose tuple write-back is inside a value branch.
+// Both the untouched and rebound paths must return the caller's final map.
+fn fill_bound(mut m: Map[Int, Int], n: Int) -> Int = if n == 0 then map.len(m)
+else {
+  m = map.set(m, n, n * 10)
+  let result = fill_bound(m, n - 1)
+  result
+}
+
 effect fn main() -> Unit = {
   var seen: List[Int] = []
   push_down(seen, 4)!
@@ -59,6 +68,11 @@ effect fn main() -> Unit = {
   var m: Map[Int, Int] = [:]
   fill_down(m, 4)!
   println("map len=${map.len(m)} at2=${map.get(m, 2) ?? 0} at4=${map.get(m, 4) ?? 0}")
+  var bound: Map[Int, Int] = [:]
+  let before = bound
+  let inside = fill_bound(bound, 4)
+  let unchanged = fill_bound(bound, 0)
+  println("bound inside=${inside} len=${map.len(bound)} at2=${map.get(bound, 2) ?? 0} unchanged=${unchanged} alias=${map.len(before)}")
   var d = 0
   bump_down(d, 4)!
   println("scalar d=${d}")

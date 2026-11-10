@@ -40,9 +40,8 @@ impl LowerCtx {
     /// see docs/roadmap/active/code-health-codopsy.md.
     fn module_eq_call_name(ty: &Ty) -> Option<&'static str> {
         use almide_lang::types::constructor::TypeConstructorId as TC;
-        if matches!(ty, Ty::String) {
-            return Some("string.eq");
-        }
+        if matches!(ty, Ty::String) { return Some("string.eq"); }
+        if crate::lower::owned_tco_slots() && matches!(ty, Ty::Bytes) { return Some("bytes.eq"); }
         if crate::lower::is_value_ty(ty) {
             return Some("value.eq");
         }
@@ -70,7 +69,8 @@ impl LowerCtx {
     /// Extracted from `list_elem_eq_call_name` (codopsy8 complexity sweep, phase 1 of 2):
     /// the flat-scalar element classes. Verbatim.
     fn list_elem_eq_call_name_scalar(elem_ty: &Ty) -> Option<&'static str> {
-        if matches!(elem_ty, Ty::Int) {
+        if matches!(elem_ty, Ty::Int) || (crate::lower::owned_tco_slots()
+            && Self::int_eq_operand_ty(elem_ty) && !matches!(elem_ty, Ty::Bool)) {
             return Some("list.eq_int");
         }
         if matches!(elem_ty, Ty::String) {
@@ -173,10 +173,19 @@ impl LowerCtx {
         if depth > MAX_EQ_DEPTH {
             return None;
         }
+        if crate::lower::owned_tco_slots() && crate::render_native_rec::is_native_set(ty) {
+            return self.native_set_content_eq(lv, rv);
+        }
         // The three tiers fall through IN ORDER (scalar/module call, then the
         // custom-variant routes, then the container recursion); an OUTER `Some`
         // is that tier's final verdict — `Some(None)` is an honest wall, not a
         // fall-through.
+        // Native tuples have generated field types, not the wasm list layout.
+        // Reuse the typed per-field helper even for homogeneous scalar tuples.
+        if crate::lower::owned_tco_slots()
+            && matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, es)
+                if matches!(&es[..], [Ty::Tuple(_)]))
+        { return self.list_element_eq_helper(lv, rv, ty).flatten(); }
         if let Some(r) = self.scalar_or_module_slot_eq(lv, rv, ty) {
             return r;
         }
@@ -247,7 +256,7 @@ impl LowerCtx {
                     {
                         let (elem_key, elem_inst) =
                             instantiate_variant_layout(&elem_name, &elem_layout, &es[0]);
-                        if self.ensure_list_eq_helper(&elem_key, &elem_inst) {
+                        if self.ensure_list_eq_helper(&elem_key, &elem_inst, &es[0]) {
                             let name = self.list_eq_helper_name(&elem_key);
                             return Some(Some(self.emit_eq_helper_call(name, lv, rv)));
                         }
@@ -268,7 +277,7 @@ impl LowerCtx {
                 // substituted, so `Leaf(T)` compares as `Leaf(Int)`.
                 let (key, layout) = instantiate_variant_layout(&tyname, &layout, ty);
                 if self.synth_eq_types.contains(&key) || self.variant_needs_eq_helper(&tyname) {
-                    if self.ensure_variant_eq_helper(&key, &layout) {
+                    if self.ensure_variant_eq_helper(&key, &layout, ty) {
                         let name = self.eq_helper_name(&key);
                         return Some(Some(self.emit_eq_helper_call(name, lv, rv)));
                     }
@@ -353,7 +362,7 @@ impl LowerCtx {
             if args.is_empty() {
                 if let Some((_names, ftys)) = self.aggregate_field_tys(elem) {
                     let key = n.as_str().to_string();
-                    if !self.ensure_list_record_eq_helper(&key, &ftys) {
+                    if !self.ensure_list_record_eq_helper(&key, &ftys, elem) {
                         return Some(None);
                     }
                     let name = self.list_record_eq_helper_name(&key);
@@ -375,7 +384,7 @@ impl LowerCtx {
                     .collect::<Vec<_>>()
                     .join("_")
             );
-            if !self.ensure_list_record_eq_helper(&key, tys) {
+            if !self.ensure_list_record_eq_helper(&key, tys, elem) {
                 return Some(None);
             }
             let name = self.list_record_eq_helper_name(&key);
@@ -391,7 +400,7 @@ impl LowerCtx {
         }
         let (_names, ftys) = self.aggregate_field_tys(&oa[0])?;
         let key = n.as_str().to_string();
-        if !self.ensure_list_opt_record_eq_helper(&key, &ftys) {
+        if !self.ensure_list_opt_record_eq_helper(&key, &ftys, &oa[0]) {
             return Some(None);
         }
         let name = self.list_opt_record_eq_helper_name(&key);
@@ -550,8 +559,7 @@ impl LowerCtx {
         let both_err = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: both_err, op: IntOp::And, a: tag_l, b: tag_r });
         // Gated Ok compare.
-        let ok_gate = self.fresh_value();
-        self.ops.push(Op::IfThen { cond: both_ok, dst: Some(ok_gate) });
+        let ok_gate = self.begin_tag_pair_gate(both_ok, ok_l, ok_r);
         let (pl, pr) = if is_heap_ty(ok_ty) {
             (self.load_payload_addr(hl, 12), self.load_payload_addr(hr, 12))
         } else {
@@ -561,13 +569,9 @@ impl LowerCtx {
             )
         };
         let ok_eq = self.typed_slot_eq(pl, pr, ok_ty, depth + 1)?;
-        self.ops.push(Op::Else { val: Some(ok_eq) });
-        let f1 = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: f1, value: 0 });
-        self.ops.push(Op::EndIf { val: Some(f1) });
+        self.end_tag_pair_gate(ok_gate, ok_eq);
         // Gated Err compare.
-        let err_gate = self.fresh_value();
-        self.ops.push(Op::IfThen { cond: both_err, dst: Some(err_gate) });
+        let err_gate = self.begin_tag_pair_gate(both_err, tag_l, tag_r);
         let (el, er) = if is_heap_ty(err_ty) {
             (self.load_payload_addr(hl, 12), self.load_payload_addr(hr, 12))
         } else {
@@ -577,12 +581,9 @@ impl LowerCtx {
             )
         };
         let err_eq = self.typed_slot_eq(el, er, err_ty, depth + 1)?;
-        self.ops.push(Op::Else { val: Some(err_eq) });
-        let f2 = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: f2, value: 0 });
-        self.ops.push(Op::EndIf { val: Some(f2) });
+        self.end_tag_pair_gate(err_gate, err_eq);
         let dst = self.fresh_value();
-        self.ops.push(Op::IntBinOp { dst, op: IntOp::Or, a: ok_gate, b: err_gate });
+        self.ops.push(Op::IntBinOp { dst, op: IntOp::Or, a: ok_gate.0, b: err_gate.0 });
         Some(dst)
     }
 
@@ -735,14 +736,14 @@ impl LowerCtx {
         // rebind made in the then arm (a `mut` param's copy-on-write clone)
         // names a value the else path never defines.
         let bindings = self.value_of.clone();
-        let then_obj = self.lower_heap_result_arm(then, result_ty)?;
+        let then_obj = self.lower_heap_result_branch(then, result_ty)?;
         let then_bindings = std::mem::replace(&mut self.value_of, bindings.clone());
         let consumed_by_then: Vec<ValueId> =
             outer.iter().copied().filter(|h| !self.live_heap_handles.contains(h)).collect();
         let else_marker_at = self.ops.len();
-        self.ops.push(Op::Else { val: Some(then_obj) });
+        self.ops.push(Op::Else { val: then_obj });
         let live_after_then: Vec<ValueId> = self.live_heap_handles.clone();
-        let else_obj = self.lower_heap_result_arm(else_, result_ty)?;
+        let else_obj = self.lower_heap_result_branch(else_, result_ty)?;
         let consumed_by_else: Vec<ValueId> = live_after_then
             .iter()
             .copied()
@@ -760,7 +761,8 @@ impl LowerCtx {
                 self.ops.insert(else_marker_at, op); // the THEN arm releases what ELSE moved out
             }
         }
-        self.ops.push(Op::EndIf { val: Some(else_obj) });
+        if then_obj.is_none() && else_obj.is_none() { return None; }
+        self.ops.push(Op::EndIf { val: else_obj });
         self.join_arm_bindings(bindings, &then_bindings);
         Some(dst)
     }
@@ -780,3 +782,6 @@ impl LowerCtx {
         });
     }
 }
+
+include!("native_set_eq.rs");
+include!("native_tag_pair_gate.rs");

@@ -408,6 +408,17 @@ pub fn repr_of(ty: &Ty) -> Result<Repr, LowerError> {
     Ok(Repr::Scalar { width: w })
 }
 
+/// A Unit parameter still occupies one argument position. Its only value is
+/// the zero i64 lane used by Unit aggregate payloads. Unit returns remain void;
+/// keeping this separate from `repr_of` prevents inventing a call result lane.
+pub(crate) fn param_repr_of(ty: &Ty) -> Result<Repr, LowerError> {
+    if *ty == Ty::Unit {
+        Ok(Repr::Scalar { width: crate::ScalarWidth::Double })
+    } else {
+        repr_of(ty)
+    }
+}
+
 /// The declared width and signedness of a NARROW integer type — the width the
 /// lowering re-wraps its arithmetic to (`wrap_to_declared_width`), and the one
 /// place that table lives (the native render reads its narrow ABI off it).

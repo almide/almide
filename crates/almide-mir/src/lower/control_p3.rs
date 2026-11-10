@@ -293,6 +293,7 @@ impl LowerCtx {
         // produces) EXECUTES recursively via the scalar-if machinery; otherwise the
         // tail is a scalar value or a scalar call.
         let val = tail.and_then(|t| match &t.kind {
+            IrExprKind::Block { .. } => self.lower_scalar_arm(t),
             IrExprKind::Call { .. } if matches!(t.ty, Ty::Never) => {
                 self.lower_abort_scalar_arm(t)
             }

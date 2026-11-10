@@ -6,6 +6,22 @@
 // level is the one splice Rust allows (an impl-item position rejects it).
 
 impl LowerCtx {
+    /// L9's total callback has no propagation channel. Reuse the ordinary
+    /// Option match with a real abort on its none arm; the some arm owns
+    /// the same scalar extraction and carrier release as `??`.
+    fn lower_scalar_option_abort_unwrap(&mut self, inner: &IrExpr) -> Option<ValueId> {
+        let message = mk_at(inner, IrExprKind::LitStr { value: "Error: none\n".into() }, Ty::String);
+        let handle = mk_at(inner, IrExprKind::Call {
+            target: CallTarget::Module { module: sym("prim"), func: sym("handle"), def_id: None },
+            args: vec![message], type_args: Vec::new(),
+        }, Ty::Int);
+        let abort = mk_at(inner, IrExprKind::Call {
+            target: CallTarget::Module { module: sym("prim"), func: sym("die"), def_id: None },
+            args: vec![handle], type_args: Vec::new(),
+        }, Ty::Never);
+        self.try_lower_option_unwrap_or(inner, &abort, false)
+    }
+
     /// Extracted from `Self::lower_scalar_binop_shortcircuit_or_int` (eighth-round split,
     /// cog reduction): the final eager `IntBinOp` fallback (with the narrow
     /// signed-division-overflow guard), verbatim (only reached when the operator is NOT
@@ -233,3 +249,27 @@ impl LowerCtx {
 
 }
 
+
+impl LowerCtx {
+    /// The plain unwrap's Err arm uses the same diagnostic line as the
+    /// effect-return and main wrappers. The payload is a borrowed String;
+    /// all formatting temporaries belong to this terminating branch.
+    fn emit_error_abort(&mut self, payload: ValueId) {
+        use crate::{CallArg, PrimKind};
+        let repr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
+        let pre = self.fresh_value();
+        let nl = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: pre, repr, init: crate::Init::Str("Error: ".into()) });
+        self.ops.push(Op::Alloc { dst: nl, repr, init: crate::Init::Str("\n".into()) });
+        let first = self.fresh_value();
+        self.ops.push(Op::CallFn { dst: Some(first), name: "__str_concat".into(),
+            args: vec![CallArg::Handle(pre), CallArg::Handle(payload)], result: Some(repr) });
+        let line = self.fresh_value();
+        self.ops.push(Op::CallFn { dst: Some(line), name: "__str_concat".into(),
+            args: vec![CallArg::Handle(first), CallArg::Handle(nl)], result: Some(repr) });
+        let handle = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![line] });
+        self.ops.push(Op::Prim { kind: PrimKind::Die, dst: None, args: vec![handle] });
+        for v in [line, first, nl, pre] { self.ops.push(Op::Drop { v }); }
+    }
+}

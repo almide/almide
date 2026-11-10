@@ -12,6 +12,15 @@ impl LowerCtx {
         subj: ValueId,
         arms: &'a [IrMatchArm],
     ) -> Option<((&'a IrExpr, Option<(VarId, bool, Ty)>), &'a IrExpr)> {
+    // After an explicit None arm, the final wildcard denotes Some without
+    // reading its payload. This is also the lowered testing.assert_none
+    // shape. Classify by order: a leading wildcard is not a None pattern.
+    if let [none, rest] = arms {
+        if matches!(none.pattern, IrPattern::None) && matches!(rest.pattern, IrPattern::Wildcard) {
+            return Some(((&rest.body, None), &none.body));
+        }
+        if matches!(none.pattern, IrPattern::Wildcard) { return None; }
+    }
     // The Some-bind carries an is_heap flag. A SCALAR payload is a value COPY (load64). A HEAP
     // payload (Option[String]) is bound as a BORROW of the Option's element (LoadHandle =
     // i32, recorded in param_values), gated to a subject that is a nested-ownership list (so
@@ -38,7 +47,8 @@ impl LowerCtx {
                                     .value_drops
                                     .get(&subj)
                                     .and_then(|d| d.named_route.as_ref())
-                                    .is_some_and(|d| d.starts_with("optrec:"))) =>
+                                    .is_some_and(|d| d.starts_with("optrec:")
+                                        || (crate::lower::owned_tco_slots() && matches!(d.as_str(), "list_int_str" | "list_lenlist")))) =>
                     {
                         Some((*var, true, ty.clone()))
                     }
@@ -81,9 +91,13 @@ impl LowerCtx {
             return false;
         }
         let Some(((some_body, some_bind), none_body)) = self.classify_option_match_arms(subj, arms) else {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[option-match] payload declined, drop {:?}", self.value_drops.get(&subj)));
             return false;
         };
-        if !matches!(some_body.ty, Ty::Unit) || !matches!(none_body.ty, Ty::Unit) {
+        // A diverging arm produces no value either. Lower its actual body
+        // below so the terminator is checked, rather than rejecting a typed
+        // `panic`/abort branch before its Die can reach MIR.
+        if !matches!(some_body.ty, Ty::Unit | Ty::Never) || !matches!(none_body.ty, Ty::Unit | Ty::Never) {
             return false;
         }
         // Emit: tag = load32(handle(subj) + 4); if tag != 0 then Some-arm else None-arm.
@@ -113,7 +127,9 @@ impl LowerCtx {
         // reassignment inside an arm mutates the stable local IN PLACE — scalar via
         // SetLocal, heap via the drop-old + SetLocal rebind — see `unit_arm_depth`.
         self.unit_arm_depth += 1;
-        let some_ok = self.lower_branch_arm(None, some_body).is_ok();
+        let some_result = self.lower_branch_arm(None, some_body);
+        crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[option-match] some arm: {some_result:?}"));
+        let some_ok = some_result.is_ok();
         if !some_ok {
             self.unit_arm_depth -= 1;
             self.ops.truncate(ops_mark);
@@ -121,7 +137,9 @@ impl LowerCtx {
             return false;
         }
         self.ops.push(Op::Else { val: None });
-        let none_ok = self.lower_branch_arm(None, none_body).is_ok();
+        let none_result = self.lower_branch_arm(None, none_body);
+        crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[option-match] none arm: {none_result:?}"));
+        let none_ok = none_result.is_ok();
         self.unit_arm_depth -= 1;
         if !none_ok {
             self.ops.truncate(ops_mark);

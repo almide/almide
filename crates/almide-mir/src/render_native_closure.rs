@@ -21,6 +21,7 @@ use std::fmt::Write as _;
 
 fn kind_code(k: NativeSigKind) -> String {
     match k {
+        NativeSigKind::Never => "n".into(),
         NativeSigKind::I64 | NativeSigKind::Narrow { .. } => "i".into(),
         NativeSigKind::F64 => "f".into(),
         NativeSigKind::Str => "s".into(),
@@ -36,6 +37,7 @@ fn kind_code(k: NativeSigKind) -> String {
 /// The borrowed spelling of a param of kind `k`.
 fn param_spelling(k: NativeSigKind) -> String {
     match k {
+        NativeSigKind::Never => "std::convert::Infallible".into(),
         NativeSigKind::I64 | NativeSigKind::Narrow { .. } => "i64".into(),
         NativeSigKind::F64 => "f64".into(),
         NativeSigKind::Str => "&str".into(),
@@ -51,6 +53,7 @@ fn param_spelling(k: NativeSigKind) -> String {
 /// The owned value kind a result of kind `k` binds as.
 pub(crate) fn owned_nty(k: NativeSigKind) -> NTy {
     match k {
+        NativeSigKind::Never => NTy::Never,
         NativeSigKind::I64 | NativeSigKind::Narrow { .. } => NTy::I64,
         NativeSigKind::F64 => NTy::F64,
         NativeSigKind::Str => NTy::Str,
@@ -66,7 +69,8 @@ pub(crate) fn owned_nty(k: NativeSigKind) -> NTy {
 /// The kind a value of `t` passes as.
 pub(crate) fn arg_kind(t: NTy) -> NativeSigKind {
     match t {
-        NTy::I64 => NativeSigKind::I64,
+        NTy::Never => NativeSigKind::Never,
+        NTy::I64 | NTy::F32 => NativeSigKind::I64,
         NTy::F64 => NativeSigKind::F64,
         NTy::Str | NTy::StrRef => NativeSigKind::Str,
         NTy::Vec | NTy::VecRef => NativeSigKind::ListI64,
@@ -98,6 +102,17 @@ pub(crate) fn sig_key(ps: &[NativeSigKind], moved: &[bool], ret: Option<NativeSi
     Some(k)
 }
 
+/// A typed host adapter lends the callback's arguments through the same
+/// dispatch tables as an ordinary MIR indirect call.
+pub(crate) fn demand_borrowed_dispatch(params: &[NTy], ret: Option<NTy>) -> String {
+    let ps: Vec<_> = params.iter().copied().map(arg_kind).collect();
+    let ret = ret.map(arg_kind);
+    let modes = vec![false; ps.len()];
+    let key = sig_key(&ps, &modes, ret).unwrap_or_else(|| ps.len().to_string());
+    DEMANDED.with(|d| d.borrow_mut().insert(key.clone(), (ps, modes, ret)));
+    key
+}
+
 /// Which of a lifted lambda's user params (the env param dropped) are move
 /// params.
 pub(crate) fn lambda_moves(f: &MirFunction) -> Vec<bool> {
@@ -123,6 +138,23 @@ pub(crate) fn lambda_sig(sigs: &NativeSigs, name: &str) -> Option<(Vec<NativeSig
 /// and the (table index, name) of every lambda of that signature.
 type DispatchTables<'a> = BTreeMap<String, (Vec<NativeSigKind>, Vec<bool>, Option<NativeSigKind>, Vec<(usize, &'a str)>)>;
 
+type DispatchSignature = (Vec<NativeSigKind>, Vec<bool>, Option<NativeSigKind>);
+thread_local! {
+    static DEMANDED: std::cell::RefCell<BTreeMap<String, DispatchSignature>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+pub(crate) struct DispatchScope(BTreeMap<String, DispatchSignature>);
+impl DispatchScope {
+    pub(crate) fn enter() -> Self { Self(DEMANDED.with(|d| d.replace(BTreeMap::new()))) }
+}
+impl Drop for DispatchScope {
+    fn drop(&mut self) { DEMANDED.with(|d| d.replace(std::mem::take(&mut self.0))); }
+}
+pub(crate) fn demanded_scalar_arities() -> Vec<usize> {
+    DEMANDED.with(|d| d.borrow().values()
+        .filter(|(ps, modes, ret)| sig_key(ps, modes, *ret).is_none())
+        .map(|(ps, _, _)| ps.len()).collect())
+}
+
 /// The typed dispatch tables: one per signature that some lambda has. A
 /// lambda declared `-> Float` whose body returns the MIR's i64 bit lane (a
 /// literal, a passed-through Float slot, #4606) already returns the f64 its
@@ -130,6 +162,14 @@ type DispatchTables<'a> = BTreeMap<String, (Vec<NativeSigKind>, Vec<bool>, Optio
 /// arm is the plain call.
 pub(crate) fn push_typed_dispatch_tables(out: &mut String, user_fns: &BTreeMap<&str, &MirFunction>, sigs: &NativeSigs) {
     let mut tables: DispatchTables<'_> = BTreeMap::new();
+    // A retained higher-order function can have no constructed callback of
+    // its signature. Its indirect calls still need a defined table. The
+    // ordinary invalid-index arm remains the only arm until a lambda exists.
+    DEMANDED.with(|d| for (key, (ps, modes, ret)) in d.borrow().iter() {
+        if sig_key(ps, modes, *ret).is_some() {
+            tables.insert(key.clone(), (ps.clone(), modes.clone(), *ret, Vec::new()));
+        }
+    });
     let lambdas = user_fns.keys().copied().filter(|n| n.starts_with("__lambda_"));
     for (idx, name) in lambdas.enumerate() {
         let Some((ps, ret)) = lambda_sig(sigs, name) else { continue };
@@ -144,7 +184,7 @@ pub(crate) fn push_typed_dispatch_tables(out: &mut String, user_fns: &BTreeMap<&
         }
     }
     for (key, (ps, handed, ret, fns)) in tables {
-        let env_ty = dispatch_env(sigs, fns[0].1);
+        let env_ty = fns.first().map(|(_, name)| dispatch_env(sigs, name)).unwrap_or("&__AlmdClosure");
         let params: String = ps
             .iter()
             .zip(&handed)
@@ -169,7 +209,7 @@ pub(crate) fn push_typed_dispatch_tables(out: &mut String, user_fns: &BTreeMap<&
                 .collect();
             let _ = writeln!(out, "        {idx} => {}(env{args}),", crate::render_native::mangle(name));
         }
-        out.push_str("        _ => { eprintln!(\"Error: closure index out of range\"); std::process::exit(1) }\n    }\n}\n\n");
+        out.push_str("        _ => { almide_abort(\"closure index out of range\") }\n    }\n}\n\n");
     }
 }
 
@@ -247,6 +287,7 @@ pub(crate) fn render_typed_call_indirect(
     }
     let ret = ret.map(arg_kind);
     let key = sig_key(&kinds, &moved, ret).unwrap_or_else(|| kinds.len().to_string());
+    DEMANDED.with(|d| d.borrow_mut().insert(key.clone(), (kinds.clone(), moved, ret)));
     let env_code = indirect_env(env, tys)?;
     let call = format!(
         "__almd_ci_{key}({}, {env_code}{})",

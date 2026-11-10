@@ -123,7 +123,7 @@ impl LowerCtx {
     /// flat one (re-routing it through `record_masks` here imbalanced the
     /// ownership cert — the callee's fills are opaque to the caller's witness;
     /// the Named arm's mask rides a different accounting).
-    fn seed_faithful_read_shape(&mut self, dst: ValueId, ty: &Ty) {
+    pub(crate) fn seed_faithful_read_shape(&mut self, dst: ValueId, ty: &Ty) {
         use almide_lang::types::constructor::TypeConstructorId;
         let list_shape = is_scalar_elem_list_ty(ty)
             || matches!(ty, Ty::Applied(TypeConstructorId::List, a)
@@ -552,7 +552,7 @@ impl LowerCtx {
         // fallible-HOF `??` bind rewrite, #1134 Shape 2): the tail position runs the
         // SAME routers with no result-type gate, and the merge is the one owned rc=1
         // block either way — only the variant read-shape seeding is variant-only.
-        if is_variant_ty(ty) || is_variant_ty(&subject.ty) {
+        if is_variant_ty(ty) || is_variant_ty(&subject.ty) || (owned_tco_slots() && self.custom_variant_type_name(&subject.ty).is_some()) {
             let mark = self.ops.len();
             let lhh_mark = self.live_heap_handles.len();
             let mut dst = self.try_lower_custom_variant_match(subject, arms, ty);

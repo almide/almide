@@ -82,6 +82,7 @@ impl LowerCtx {
         &mut self,
         tyname: &str,
         layout: &crate::lower::VariantLayout,
+        ty: &Ty,
     ) -> bool {
         let name = self.eq_helper_name(tyname);
         if self.synth_eq_fns.iter().any(|f| f.name == name)
@@ -128,7 +129,7 @@ impl LowerCtx {
                     heap_slot_masks: Default::default(),
                     owned_params: Default::default(),
                     call_moves: Default::default(),
-                    aggregate_blocks: Default::default(),
+                    aggregate_blocks: eq_param_types(ty),
                 });
                 true
             }
@@ -148,16 +149,17 @@ impl LowerCtx {
         &mut self,
         elem_tyname: &str,
         elem_layout: &crate::lower::VariantLayout,
+        elem_ty: &Ty,
     ) -> bool {
         let name = self.list_eq_helper_name(elem_tyname);
         if self.synth_eq_fns.iter().any(|f| f.name == name) {
             return true;
         }
-        if !self.ensure_variant_eq_helper(elem_tyname, elem_layout) {
+        if !self.ensure_variant_eq_helper(elem_tyname, elem_layout, elem_ty) {
             return false;
         }
         let elem_call = self.eq_helper_name(elem_tyname);
-        let f = synth_list_eq_loop_fn(name, elem_call);
+        let f = synth_list_eq_loop_fn(name, elem_call, &Ty::list(elem_ty.clone()));
         self.synth_eq_fns.push(f);
         true
     }
@@ -178,7 +180,7 @@ impl LowerCtx {
     /// A record that reaches itself (through a `List[Self]` field) terminates the
     /// same way the variant family does: the key joins `synth_eq_types` BEFORE the
     /// body lowers, so the inner site emits the helper CALL instead of regenerating.
-    pub(crate) fn ensure_record_eq_helper(&mut self, key: &str, ftys: &[Ty]) -> bool {
+    pub(crate) fn ensure_record_eq_helper(&mut self, key: &str, ftys: &[Ty], ty: &Ty) -> bool {
         let name = self.record_eq_helper_name(key);
         let guard = format!("rec:{key}");
         if self.synth_eq_fns.iter().any(|f| f.name == name) || self.synth_eq_types.contains(&guard)
@@ -222,7 +224,7 @@ impl LowerCtx {
                     heap_slot_masks: Default::default(),
                     owned_params: Default::default(),
                     call_moves: Default::default(),
-                    aggregate_blocks: Default::default(),
+                    aggregate_blocks: eq_param_types(ty),
                 });
                 true
             }
@@ -250,13 +252,13 @@ impl LowerCtx {
     /// the record compare GUARDED to both-Some (a None side's @12 is never
     /// dereferenced), both-None equal. The `List[Option[record]]` loop helper
     /// below calls this per element (#1134, the codec `lc: List[Inner?]` eq).
-    fn ensure_opt_record_eq_helper(&mut self, key: &str, ftys: &[Ty]) -> bool {
+    fn ensure_opt_record_eq_helper(&mut self, key: &str, ftys: &[Ty], ty: &Ty) -> bool {
         use crate::{IntOp, PrimKind};
         let name = self.opt_record_eq_helper_name(key);
         if self.synth_eq_fns.iter().any(|f| f.name == name) {
             return true;
         }
-        if !self.ensure_record_eq_helper(key, ftys) {
+        if !self.ensure_record_eq_helper(key, ftys, ty) {
             return false;
         }
         let rec_call = self.record_eq_helper_name(key);
@@ -289,23 +291,23 @@ impl LowerCtx {
             heap_slot_masks: Default::default(),
             owned_params: Default::default(),
             call_moves: Default::default(),
-            aggregate_blocks: Default::default(),
+            aggregate_blocks: eq_param_types(&Ty::option(ty.clone())),
         });
         true
     }
 
     /// Generate (once per parent fn) the `List[Option[<record>]]` eq helper —
     /// the shared branchless loop over the option-element helper above.
-    pub(crate) fn ensure_list_opt_record_eq_helper(&mut self, key: &str, ftys: &[Ty]) -> bool {
+    pub(crate) fn ensure_list_opt_record_eq_helper(&mut self, key: &str, ftys: &[Ty], ty: &Ty) -> bool {
         let name = self.list_opt_record_eq_helper_name(key);
         if self.synth_eq_fns.iter().any(|f| f.name == name) {
             return true;
         }
-        if !self.ensure_opt_record_eq_helper(key, ftys) {
+        if !self.ensure_opt_record_eq_helper(key, ftys, ty) {
             return false;
         }
         let elem_call = self.opt_record_eq_helper_name(key);
-        let f = synth_list_eq_loop_fn(name, elem_call);
+        let f = synth_list_eq_loop_fn(name, elem_call, &Ty::list(Ty::option(ty.clone())));
         self.synth_eq_fns.push(f);
         true
     }
@@ -313,16 +315,16 @@ impl LowerCtx {
     /// Generate (once per parent fn) the `List[<record>]` eq helper — the record
     /// twin of [`Self::ensure_list_eq_helper`]: the identical branchless
     /// length+fold loop, its per-element call routed to the record helper.
-    pub(crate) fn ensure_list_record_eq_helper(&mut self, key: &str, ftys: &[Ty]) -> bool {
+    pub(crate) fn ensure_list_record_eq_helper(&mut self, key: &str, ftys: &[Ty], ty: &Ty) -> bool {
         let name = self.list_record_eq_helper_name(key);
         if self.synth_eq_fns.iter().any(|f| f.name == name) {
             return true;
         }
-        if !self.ensure_record_eq_helper(key, ftys) {
+        if !self.ensure_record_eq_helper(key, ftys, ty) {
             return false;
         }
         let elem_call = self.record_eq_helper_name(key);
-        let f = synth_list_eq_loop_fn(name, elem_call);
+        let f = synth_list_eq_loop_fn(name, elem_call, &Ty::list(ty.clone()));
         self.synth_eq_fns.push(f);
         true
     }
@@ -333,7 +335,7 @@ impl LowerCtx {
 /// per-element eq callee (the variant helper or the record helper). Extracted
 /// verbatim from [`LowerCtx::ensure_list_eq_helper`] so the record twin cannot
 /// drift from the proven variant loop.
-fn synth_list_eq_loop_fn(name: String, elem_call: String) -> MirFunction {
+fn synth_list_eq_loop_fn(name: String, elem_call: String, ty: &Ty) -> MirFunction {
     {
         let mut sub = LowerCtx { next_value: 2, ..Default::default() };
         let ha = sub.handle_of(ValueId(0));
@@ -401,7 +403,7 @@ fn synth_list_eq_loop_fn(name: String, elem_call: String) -> MirFunction {
             heap_slot_masks: Default::default(),
             owned_params: Default::default(),
             call_moves: Default::default(),
-            aggregate_blocks: Default::default(),
+            aggregate_blocks: eq_param_types(ty),
         }
     }
 }
@@ -653,4 +655,12 @@ pub fn scalar_core_eq_module(ty: &Ty) -> Option<&'static str> {
         Ty::Applied(TC::Set, es) if es.len() == 1 && int_class(&es[0]) => Some("set"),
         _ => None,
     }
+}
+
+/// A synthesized comparison has the same borrowed operand type as its
+/// checked equality expression. Preserve it on both MIR parameters, including
+/// recursive helpers that have no source-level function declaration.
+fn eq_param_types(ty: &Ty) -> std::collections::BTreeMap<ValueId, String> {
+    let key = crate::render_native_rec::block_key(ty);
+    [(ValueId(0), key.clone()), (ValueId(1), key)].into_iter().collect()
 }

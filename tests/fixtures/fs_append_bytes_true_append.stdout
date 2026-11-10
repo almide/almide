@@ -1,0 +1,13 @@
+create=OK
+after_create=[1, 2, 3]
+high_bytes=OK
+empty=OK
+after_high=[1, 2, 3, 255, 0, 128, 192]
+after_text=OK
+after_append_text=OK
+mixed=abcdefXY-
+
+size=10
+onto_dir=ERR[fs.append_bytes("<TMP>/sub"): Is a directory (os error 21)]
+missing_parent=ERR[fs.append_bytes("<TMP>/no/such/f.bin"): No such file or directory (os error 2)]
+parent_created=false

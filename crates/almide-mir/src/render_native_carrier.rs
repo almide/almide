@@ -41,6 +41,10 @@ fn len_tagged(i: u16) -> bool {
     result_payloads(i).is_some_and(|(o, e)| o == NTy::I64 && e == NTy::I64)
 }
 
+fn scalar_ok(i: u16) -> bool {
+    result_payloads(i).is_some_and(|(o, _)| o == NTy::I64)
+}
+
 /// The i64 a scalar payload slot holds for value `v`.
 fn scalar_rhs(tys: &BTreeMap<ValueId, NTy>, v: ValueId) -> Result<String, LowerError> {
     match tys.get(&v) {
@@ -60,7 +64,8 @@ pub(crate) fn is_carrier(i: u16) -> bool {
 }
 
 /// The declared kind of a carrier's slot 0, when it is one kind: an Option's
-/// payload; a Result's when both sides agree or only one is a generated type.
+/// payload, or a Result whose two sides agree. Being the only generated
+/// record is insufficient: the other side may own a String or scalar list.
 pub(crate) fn slot_kind(i: u16, k: usize) -> Option<NTy> {
     if k != 0 {
         return None;
@@ -69,13 +74,7 @@ pub(crate) fn slot_kind(i: u16, k: usize) -> Option<NTy> {
         return Some(p);
     }
     let (o, e) = result_payloads(i)?;
-    match (o, e) {
-        _ if o == e => Some(o),
-        (NTy::Rec(_), NTy::Rec(_)) => None,
-        (NTy::Rec(_), _) => Some(o),
-        (_, NTy::Rec(_)) => Some(e),
-        _ => None,
-    }
+    (o == e).then_some(o)
 }
 
 fn set_carrier(ty: &mut BTreeMap<ValueId, u16>, v: ValueId, i: Option<u16>) {
@@ -178,106 +177,30 @@ fn close_over_edges(ty: &mut BTreeMap<ValueId, u16>, edges: &[(ValueId, ValueId)
     }
 }
 
-/// The side each hoisted payload read `op` reads is used under (`None` once
-/// two uses disagree).
-fn note_hoisted_uses(
-    op: &Op,
-    reads: &BTreeMap<ValueId, ValueId>,
-    arms: &[(Option<ValueId>, bool)],
-    sides: &mut BTreeMap<ValueId, Option<bool>>,
-) {
-    let mut used = Vec::new();
-    crate::mir_ops::op_reads(op, &mut used);
-    for v in used {
-        let Some(root) = reads.get(&v) else { continue };
-        let side = arms.iter().rev().find(|(r, _)| *r == Some(*root)).map(|(_, then)| *then);
-        let e = sides.entry(v).or_insert(side);
-        if *e != side {
-            *e = None;
-        }
-    }
+/// Compare a proven binary tag (possibly inverted) against 0 or 1. The
+/// boolean records which original tag side a true predicate selects.
+fn tag_comparison(
+    op: crate::IntOp, a: ValueId, b: ValueId,
+    consts: &BTreeMap<ValueId, i64>, tags: &BTreeMap<ValueId, (ValueId, bool)>,
+) -> Option<(ValueId, bool)> {
+    let compare = |x, y| Some(match op {
+        crate::IntOp::Eq => x == y, crate::IntOp::Ne => x != y,
+        crate::IntOp::Lt => x < y, crate::IntOp::Le => x <= y,
+        crate::IntOp::Gt => x > y, crate::IntOp::Ge => x >= y,
+        _ => return None,
+    });
+    [(a, b, false), (b, a, true)].into_iter().find_map(|(tag, constant, reversed)| {
+        let &(root, side) = tags.get(&tag)?;
+        let &n = consts.get(&constant)?;
+        if !matches!(n, 0 | 1) { return None; }
+        let at = |v| if reversed { compare(n, v) } else { compare(v, n) };
+        let positive = at(1)?;
+        if at(0)? == positive { return None; } // Does not select one tag side.
+        Some((root, if positive { side } else { !side }))
+    })
 }
 
-/// A payload read the match lowering hoists above its tag test (both arms'
-/// binders are read before the `if`) → the side its uses select: `true` =
-/// the then-arm (tag 1, Err). Read off where the value is used: every use
-/// inside one arm of an `if` that tests the same block's tag word.
-pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
-    let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
-    let mut at: BTreeMap<ValueId, (ValueId, i64)> = BTreeMap::new();
-    let mut tags: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-    let mut reads: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-    let mut sides: BTreeMap<ValueId, Option<bool>> = BTreeMap::new();
-    let mut arms: Vec<(Option<ValueId>, bool)> = Vec::new();
-    for op in &func.ops {
-        // Uses first: a read used under a tag test of its own block.
-        note_hoisted_uses(op, &reads, &arms, &mut sides);
-        let changed = match op {
-            Op::SetLocal { local, .. } => Some(*local),
-            Op::Prim { kind: PrimKind::Store { .. }, args, .. } => args.first().and_then(|a| at.get(a)).map(|(root, _)| *root),
-            _ => None,
-        };
-        if let Some(root) = changed {
-            for (read, base) in &reads { if *base == root { sides.insert(*read, None); } }
-            tags.retain(|_, base| *base != root);
-            for (base, _) in &mut arms { if *base == Some(root) { *base = None; } }
-        }
-        note_hoist_facts(op, &mut consts, &mut at, &mut tags, &mut reads, &mut arms);
-    }
-    sides.into_iter().filter_map(|(v, s)| s.map(|s| (v, s))).collect()
-}
-
-/// [`hoisted_sides`]' facts from one op: the constants, the addresses off a
-/// block's handle, the tag words and payload reads loaded through them, and
-/// the open tag tests.
-fn note_hoist_facts(
-    op: &Op,
-    consts: &mut BTreeMap<ValueId, i64>,
-    at: &mut BTreeMap<ValueId, (ValueId, i64)>,
-    tags: &mut BTreeMap<ValueId, ValueId>,
-    reads: &mut BTreeMap<ValueId, ValueId>,
-    arms: &mut Vec<(Option<ValueId>, bool)>,
-) {
-    match op {
-        Op::ConstInt { dst, value } => {
-            consts.insert(*dst, *value);
-        }
-        Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 => {
-            at.insert(*d, (args[0], 0));
-        }
-        Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
-            if let (Some(&(r, o)), Some(c)) = (at.get(a), consts.get(b)) {
-                at.insert(*dst, (r, o + c));
-            }
-        }
-        Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(d), args } if args.len() == 1 => {
-            // The tag word of either Result layout (an Option's length
-            // word lands here too; only a Result's payload read asks).
-            if let Some(&(r, o)) = at.get(&args[0]) {
-                if o == RESULT_TAG_OFFSET || o == i64::from(BLOCK_LEN_OFFSET) {
-                    tags.insert(*d, r);
-                }
-            }
-        }
-        Op::Prim { kind: PrimKind::LoadHandle | PrimKind::Load { width: 8 }, dst: Some(d), args } if args.len() == 1 => {
-            if let Some(&(r, o)) = at.get(&args[0]) {
-                if o == i64::from(BLOCK_HEADER) {
-                    reads.insert(*d, r);
-                }
-            }
-        }
-        Op::IfThen { cond, .. } => arms.push((tags.get(cond).copied(), true)),
-        Op::Else { .. } => {
-            if let Some(a) = arms.last_mut() {
-                a.1 = false;
-            }
-        }
-        Op::EndIf { .. } => {
-            arms.pop();
-        }
-        _ => {}
-    }
-}
+include!("render_native_carrier_guards.rs");
 
 #[cfg(test)]
 #[path = "render_native_carrier_guard_test.rs"]
@@ -297,6 +220,9 @@ fn emit(out: &mut String, indent: usize, s: &str) {
 
 /// The owned copy of `v` as a slot of kind `k` (a carrier payload write).
 fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy) -> Result<String, LowerError> {
+    if st.known_none.contains(&v) && k.rec().is_some_and(|i| option_payload(i).is_some()) {
+        return Ok("None".into());
+    }
     // A scalar Option is Copy and already materialized by the Option
     // rewrite. It is a typed payload, not an address into an allocation.
     if crate::native_value_repr::same_owned(k, NTy::Opt) && tys.get(&v) == Some(&NTy::Opt) && !st.addrs.contains_key(&v) {
@@ -306,9 +232,15 @@ fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy)
         return Err(wall(format!("native: a {:?} carrier payload that is not a heap handle", tys.get(&v))));
     };
     let g = tys.get(&sv.base).copied();
+    if st.empty_lists.contains(&sv.base) && (matches!(k, NTy::Vec | NTy::VecStr)
+        || k.rec().is_some_and(|i| crate::render_native_rec::list_elem(i).is_some())) {
+        return Ok("Vec::new()".into());
+    }
     match g {
         Some(g) if field_accepts(k, g) => owned_from(&var(sv.base), g).ok_or_else(|| wall("native: an unowned carrier payload")),
-        g => Err(wall(format!("native: a {g:?} value as a {k:?} carrier payload"))),
+        Some(g) if crate::native_value_repr::tuple_copy(&var(sv.base), g, k).is_some() =>
+            Ok(crate::native_value_repr::tuple_copy(&var(sv.base), g, k).expect("the arm's guard saw this tuple copy succeed")),
+        g => Err(wall(format!("native: a {g:?} value as a {k:?} carrier payload (source {:?})", sv.base))),
     }
 }
 
@@ -323,6 +255,14 @@ pub(super) fn render_carrier_op(
 ) -> Option<Result<bool, LowerError>> {
     let mut cx = CarrierCx { st, tys, out, indent };
     match op {
+        Op::IntBinOp { dst, op: cmp, a, b } => {
+            if ![dst, a, b].iter().any(|v| cx.st.set_locals.contains(v)) {
+                if let Some(tag) = tag_comparison(*cmp, *a, *b, &cx.st.consts, &cx.st.res_tags) {
+                    cx.st.res_tags.insert(*dst, tag);
+                }
+            }
+            None
+        }
         Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => {
             cx.track_arms(op);
             None
@@ -349,6 +289,9 @@ pub(super) fn render_carrier_op(
         }
         Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args } if args.len() == 2 => {
             let (ad, i) = cx.base_of(&args[0])?;
+            if option_payload(i).is_some() {
+                return Some(cx.store_option_tag(ad, args));
+            }
             let (o, e) = result_payloads(i)?;
             Some(cx.store_tag(ad, args, o, e))
         }
@@ -365,6 +308,19 @@ struct CarrierCx<'a> {
 }
 
 impl CarrierCx<'_> {
+    fn store_option_tag(&mut self, ad: Addr, args: &[ValueId]) -> Result<bool, LowerError> {
+        let tag = self.st.option_tags.remove(&args[0])
+            .ok_or_else(|| wall("native: an Option tag write outside its checked constructor"))?;
+        if ad.off != i64::from(BLOCK_LEN_OFFSET) || ad.idx.is_some()
+            || self.st.consts.get(&args[1]) != Some(&i64::from(tag)) {
+            return Err(wall("native: an Option constructor's tag changed"));
+        }
+        // The fresh allocation is None; a committed payload store already
+        // assigned Some. No arbitrary length mutation is erased here.
+        if !tag { self.emit(&format!("{} = None;", var(ad.base))); }
+        Ok(true)
+    }
+
     fn emit(&mut self, s: &str) {
         emit(self.out, self.indent, s);
     }
@@ -378,12 +334,13 @@ impl CarrierCx<'_> {
     fn track_arms(&mut self, op: &Op) {
         match op {
             Op::IfThen { cond, .. } => {
-                let res = self.st.res_tags.get(cond).copied();
-                self.st.arms.push((res, true));
+                let (res, side) = self.st.res_tags.get(cond).copied()
+                    .map(|(r, s)| (Some(r), s)).unwrap_or((None, true));
+                self.st.arms.push((res, side));
             }
             Op::Else { .. } => {
                 if let Some(a) = self.st.arms.last_mut() {
-                    a.1 = false;
+                    a.1 = !a.1;
                 }
             }
             _ => {
@@ -394,7 +351,20 @@ impl CarrierCx<'_> {
 
     fn alloc(&mut self, op: &Op, dst: ValueId, init: &Init) -> Option<Result<bool, LowerError>> {
         match init {
-            Init::ResOkScalar { payload } if self.st.alloc_rec.get(&dst).is_some_and(|i| len_tagged(*i)) => {
+            Init::ResErrStr { piece } if self.st.alloc_rec.get(&dst).is_some_and(|i| result_payloads(*i).is_some()) => {
+                let i = self.st.alloc_rec[&dst];
+                let (_, expected) = result_payloads(i).expect("the arm's guard saw this Result's payloads");
+                let rhs = self.tys.get(piece).copied().and_then(|got| {
+                    if field_accepts(expected, got) { owned_from(&var(*piece), got) }
+                    else { crate::native_value_repr::tuple_copy(&var(*piece), got, expected) }
+                }).ok_or_else(|| wall("native: semantic Err payload disagrees with its declared carrier"));
+                Some(rhs.map(|rhs| {
+                    self.tys.insert(dst, NTy::Rec(i));
+                    self.emit(&format!("let mut {}: {} = Err({rhs});", var(dst), struct_name(i)));
+                    true
+                }))
+            }
+            Init::ResOkScalar { payload } if self.st.alloc_rec.get(&dst).is_some_and(|i| scalar_ok(*i)) => {
                 let i = self.st.alloc_rec[&dst];
                 self.tys.insert(dst, NTy::Rec(i));
                 Some(scalar_rhs(self.tys, *payload).map(|rhs| {
@@ -443,8 +413,9 @@ impl CarrierCx<'_> {
     /// Result's tag as `is_err`, recorded as that Result's tag.
     fn tag_read(&mut self, d: ValueId, b: &str, base: ValueId, err: bool) -> Result<bool, LowerError> {
         self.tys.insert(d, NTy::I64);
+        // Both carriers expose a true tag: Err for Result, Some for Option.
+        if !self.st.set_locals.contains(&d) { self.st.res_tags.insert(d, (base, true)); }
         if err {
-            self.st.res_tags.insert(d, base);
             self.emit(&format!("let mut {}: i64 = {b}.is_err() as i64;", var(d)));
         } else {
             self.emit(&format!("let mut {}: i64 = {b}.is_some() as i64;", var(d)));
@@ -458,15 +429,16 @@ impl CarrierCx<'_> {
         if len_word && option_payload(i).is_some() {
             return self.tag_read(d, &b, ad.base, false);
         }
-        if len_word && len_tagged(i) {
+        if len_word && scalar_ok(i) {
             return self.tag_read(d, &b, ad.base, true);
         }
-        if width == 8 && len_tagged(i) && rec_slot(&ad) == Some(0) {
+        if width == 8 && scalar_ok(i) && rec_slot(&ad) == Some(0) {
             let arm = self.st.arms.iter().rev().find(|(r, _)| *r == Some(ad.base)).map(|(_, then)| *then);
             let read = match arm.or_else(|| self.st.hoisted.get(&d).copied()) {
-                Some(true) => format!("match &{b} {{ Err(v) => *v, Ok(_) => 0 }}"),
+                Some(true) if len_tagged(i) => format!("match &{b} {{ Err(v) => *v, Ok(_) => 0 }}"),
                 Some(false) => format!("match &{b} {{ Ok(v) => *v, Err(_) => 0 }}"),
-                None => format!("match &{b} {{ Ok(v) | Err(v) => *v }}"),
+                None if len_tagged(i) => format!("match &{b} {{ Ok(v) | Err(v) => *v }}"),
+                _ => return Err(wall("native: a scalar Result payload read outside its Ok guard")),
             };
             self.tys.insert(d, NTy::I64);
             self.emit(&format!("let mut {}: i64 = {read};", var(d)));
@@ -484,7 +456,13 @@ impl CarrierCx<'_> {
         }
         let b = var(ad.base);
         let read = if let Some(p) = option_payload(i) {
-            let absent = if has_default(p) { "Default::default()".to_string() }
+            let guarded_some = self.st.arms.iter().rev().find(|(r, _)| *r == Some(ad.base)).is_some_and(|(_, side)| *side);
+            let lent = crate::render_native_borrow_read::borrowed_option(ad.base);
+            if lent && self.lent_option_read(d, &b, p, guarded_some) {
+                return Some(Ok(true));
+            }
+            let absent = if guarded_some { "unreachable!()".to_string() }
+                else if has_default(p) { "Default::default()".to_string() }
                 else if self.st.hoisted.get(&d) == Some(&true) {
                     // Every use is under this unchanged Option's Some tag.
                     // A nested Result has no Default; its absent-side value
@@ -501,7 +479,10 @@ impl CarrierCx<'_> {
             // A by-value match, not `.take()`: `take` writes `None` back
             // through `mem::replace`, whose pointer checks the program's
             // debug-assertion profile keeps (string_index_loop, 1.037x v0).
-            if self.st.moves_last.contains(&d) && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_))) {
+            if lent {
+                // The lent element, needed owned: the one copy the program asks for.
+                (p, format!("match {b} {{ Some(v) => v.clone(), None => {absent} }}"))
+            } else if self.st.moves_last.contains(&d) && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_))) {
                 (p, format!("match {b} {{ Some(v) => v, None => {absent} }}"))
             } else {
                 (p, format!("match &{b} {{ Some(v) => v.clone(), None => {absent} }}"))
@@ -518,6 +499,31 @@ impl CarrierCx<'_> {
         self.tys.insert(d, read.0);
         self.emit(&format!("let mut {}: {} = {};", var(d), owned_ty(read.0), read.1));
         Some(Ok(true))
+    }
+
+    /// The payload read of an element Option held through the borrowing twin
+    /// (`Option<&A>`, render_native_borrow_read::borrowed_options) whose
+    /// every use only borrows: the lent element itself, no copy. `false`
+    /// when the read needs an owned value, or an absent side it cannot name.
+    fn lent_option_read(&mut self, d: ValueId, b: &str, p: NTy, guarded_some: bool) -> bool {
+        if !self.st.borrow_reads.contains(&d) {
+            return false;
+        }
+        let dv = var(d);
+        let (t, ty, val, absent) = match p {
+            NTy::Rec(j) if guarded_some => (NTy::RecRef(j), format!("&{}", struct_name(j)), "v", "unreachable!()".to_string()),
+            NTy::Rec(j) if has_default(p) => {
+                self.emit(&format!("let {dv}_absent: {} = Default::default();", struct_name(j)));
+                (NTy::RecRef(j), format!("&{}", struct_name(j)), "v", format!("&{dv}_absent"))
+            }
+            NTy::Str => (NTy::StrRef, "&str".to_string(), "&v[..]", "\"\"".to_string()),
+            NTy::Vec => (NTy::VecRef, "&[i64]".to_string(), "&v[..]", "&[]".to_string()),
+            NTy::VecStr => (NTy::VecStrRef, "&[AlmideString]".to_string(), "&v[..]", "&[]".to_string()),
+            _ => return false,
+        };
+        self.tys.insert(d, t);
+        self.emit(&format!("let mut {dv}: {ty} = match {b} {{ Some(v) => {val}, None => {absent} }};"));
+        true
     }
 
     /// A Result payload read (see [`PayloadRead`]).
@@ -631,9 +637,12 @@ impl CarrierCx<'_> {
                 true
             });
         }
-        if len_tagged(i) {
+        if scalar_ok(i) {
             // A one-slot block of this Result is its Err (length word 1).
-            return scalar_rhs(self.tys, v).map(|rhs| {
+            let (_, err) = result_payloads(i).expect("scalar_ok holds only for a Result with payloads");
+            let rhs = if err == NTy::I64 { scalar_rhs(self.tys, v) }
+                else { payload_rhs(self.st, self.tys, v, err) };
+            return rhs.map(|rhs| {
                 self.emit(&format!("{} = Err({rhs});", var(ad.base)));
                 true
             });

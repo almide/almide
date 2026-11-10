@@ -154,9 +154,9 @@ pub fn desugar_scalar_tuple_literal_match(body: &IrExpr) -> Option<IrExpr> {
 }
 
 
-/// Rewrite a SCALAR-subject match whose arms are guarded BINDS (`match Package.weight(p) {
+/// Rewrite a match whose arms are guarded BINDS (`match Package.weight(p) {
 /// w if w <= 1 => "envelope", w if w <= 10 => "box", _ => "freight" }`) into a hoisted
-/// scalar temp + an `if` chain — the guard-match twin of `desugar_scalar_tuple_literal_match`.
+/// temp + an `if` chain — the guard-match twin of `desugar_scalar_tuple_literal_match`.
 /// The subject evaluates ONCE into a fresh temp; every arm's bind var aliases that temp at
 /// the block TOP (a scalar copy, no ownership — guards must see their var before the chain),
 /// each guard becomes an `if` condition in arm order, and the single UNGUARDED catch-all
@@ -164,6 +164,9 @@ pub fn desugar_scalar_tuple_literal_match(body: &IrExpr) -> Option<IrExpr> {
 /// through the proven heap-result-`if` machinery (previously: an honest wall).
 /// Call-count-invariant: the subject and every guard/body appear EXACTLY ONCE
 /// (desugar-before-both keeps `mir == ir`).
+/// Heap subjects arise after nested list-pattern expansion. Their arm binders
+/// are substituted with the single subject temp, preserving the alias without
+/// acquiring every arm's heap handle before any guard has run.
 pub fn desugar_scalar_guard_match(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     use almide_ir::IrPattern;
@@ -175,7 +178,7 @@ pub fn desugar_scalar_guard_match(body: &IrExpr) -> Option<IrExpr> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
             let IrExprKind::Match { subject, arms } = &e.kind else { return };
-            if is_heap_ty(&subject.ty) || arms.len() < 2 {
+            if arms.len() < 2 {
                 return;
             }
             // Every arm but the last must be a GUARDED Bind/Wildcard; the last an UNGUARDED
@@ -208,7 +211,8 @@ pub fn desugar_scalar_guard_match(body: &IrExpr) -> Option<IrExpr> {
                 span: span.clone(),
                 def_id: None,
             };
-            for arm in arms {
+            let heap_subject = is_heap_ty(&subject.ty);
+            for arm in arms.iter().filter(|_| !heap_subject) {
                 if let IrPattern::Bind { var, ty } = &arm.pattern {
                     stmts.push(IrStmt {
                         kind: IrStmtKind::Bind {
@@ -221,13 +225,20 @@ pub fn desugar_scalar_guard_match(body: &IrExpr) -> Option<IrExpr> {
                     });
                 }
             }
+            let arm_expr = |arm: &almide_ir::IrMatchArm, expr: &IrExpr| {
+                if let (true, IrPattern::Bind { var, .. }) = (heap_subject, &arm.pattern) {
+                    almide_ir::substitute_var_in_expr(expr, *var, &temp_ref)
+                } else {
+                    expr.clone()
+                }
+            };
             // Right-fold the guarded arms over the catch-all body.
-            let mut chain = last.body.clone();
+            let mut chain = arm_expr(last, &last.body);
             for arm in init.iter().rev() {
                 chain = IrExpr {
                     kind: IrExprKind::If {
-                        cond: Box::new(arm.guard.clone().expect("every `init` arm has a guard: the early-return above already rejected any init arm with guard.is_none()")),
-                        then: Box::new(arm.body.clone()),
+                        cond: Box::new(arm_expr(arm, arm.guard.as_ref().expect("every `init` arm has a guard: the early-return above already rejected any init arm with guard.is_none()"))),
+                        then: Box::new(arm_expr(arm, &arm.body)),
                         else_: Box::new(chain),
                     },
                     ty: e.ty.clone(),

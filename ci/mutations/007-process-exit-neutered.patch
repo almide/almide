@@ -1,13 +1,13 @@
 diff --git a/crates/almide-wasm/src/calls_modules.rs b/crates/almide-wasm/src/calls_modules.rs
-index 2a2625bee..8afbff63a 100644
+index a6152a33a..95cdffcec 100644
 --- a/crates/almide-wasm/src/calls_modules.rs
 +++ b/crates/almide-wasm/src/calls_modules.rs
-@@ -94,7 +94,7 @@ impl Emitter<'_> {
-                 let mut i = self.f.instructions();
-                 i.i32_const(crate::fs_meta::OP_EXIT_MARK).i32_const(0).i32_const(0).i32_const(0).i32_const(0);
-                 i.call(F_FS_CALL).drop();
--                i.call(F_EXIT_IMPORT).unreachable();
-+                i.drop();
+@@ -136,7 +136,7 @@ impl Emitter<'_> {
+                 // unreachable value arms must not invent a returned credit.
+                 let plan = self.exit_plan(crate::exit_plan::Continuation::Abort);
+                 self.emit_exit(&plan);
+-                self.f.instructions().call(F_EXIT_IMPORT).unreachable();
++                self.f.instructions().drop();
                  Ok(None)
              }
              CallTarget::Module { module, func, .. }

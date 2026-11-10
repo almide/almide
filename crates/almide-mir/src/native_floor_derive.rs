@@ -62,6 +62,9 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
             _ => None,
         })
         .ok_or("no @intrinsic (an Almide body)")?;
+    if crate::host_ops::is_uncounted_host_call(call) {
+        return Err("capability-bearing intrinsic has no admitted host operation".into());
+    }
     let type_params: BTreeSet<String> = generics
         .iter()
         .flatten()
@@ -90,6 +93,19 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         .or_else(|| set_a.as_ref().and_then(|a| set_ret(ret, a)))
         .or_else(|| floor_ret(ret, &type_params))
         .ok_or_else(|| format!("return type {ret:?} outside the per-type map"))?;
+    // A pair-list return alone does not bind its two generics from two
+    // independent lists. That signature belongs to the general typed runtime
+    // adapter; this floor's map conversion needs an actual map/pairs source.
+    if fret == FloorRet::MapEntries
+        && !fparams.iter().any(|p| matches!(p, FloorParam::Map(_) | FloorParam::MapPairs)) {
+        return Err("pair-list return has no map or pair-list parameter to bind its types".into());
+    }
+    if fret == FloorRet::ResFileStat && (module != "fs" || !file_stat_decl_agrees(&program.decls)) {
+        return Err("runtime FileStat layout disagrees with its bundled declaration".into());
+    }
+    if fret == FloorRet::ResProcessStatus && (module != "process" || !process_status_decl_agrees(&program.decls)) {
+        return Err("runtime ProcessStatus layout disagrees with its bundled declaration".into());
+    }
     // An effect fn's error reaches its caller through its declared Result,
     // the carrier the call site's `!` reads; any other effect return walls.
     // A HOST OP is the other admitted effect: its effect is a capability, not
@@ -100,7 +116,8 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
     let counted_host_op = crate::host_ops::host_op(module, func)
         .is_some_and(|o| o.intrinsic_fn == func && o.symbol == symbol && !o.caps.is_empty());
     if is_effect
-        && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResListValue | FloorRet::ResStrValuePairs | FloorRet::ResBytes | FloorRet::ResOptStr)
+        && !matches!(fret, FloorRet::RuntimeResult(..))
+        && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResListValue | FloorRet::ResStrValuePairs | FloorRet::ResBytes | FloorRet::ResOptStr | FloorRet::ResOptBytes | FloorRet::ResOptListStr | FloorRet::ResFileStat | FloorRet::ResProcessStatus | FloorRet::ResBytesStrInt)
         && !counted_host_op
     {
         return Err("an effect fn whose return is not a Result carrier".into());
@@ -142,7 +159,7 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
     });
     let str_only = elem_typed && almide_lang::capability_bounds::of(module, func).next().is_some();
     let ordered = list_elem_ordered((module, func), generics.iter().flatten().map(|g| g.name.as_str()).collect(), params);
-    let borrow_twin = borrow_twin_of(fret, &symbol, &rust_params, rt);
+    let borrow_twin = borrow_twin_of(fret, &symbol, &rust_params, &rust_ret, rt);
     Ok(with_by_ref_twin(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only, ordered, borrow_twin, by_ref: None }, &rust_params, &rust_ret, rt))
 }
 
@@ -150,8 +167,10 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
 /// (`&…` = by reference), for the kinds whose mode the runtime decides.
 fn with_runtime_mode(p: FloorParam, r: &str) -> FloorParam {
     match p {
+        FloorParam::List(elem) if squash(r).starts_with("Vec<") => FloorParam::ListOwned(elem),
         FloorParam::Elem(_) => FloorParam::Elem(squash(r).starts_with('&')),
         FloorParam::Value(_) => FloorParam::Value(squash(r).starts_with('&')),
+        FloorParam::Runtime(t, _) => FloorParam::Runtime(t, squash(r).starts_with('&')),
         FloorParam::Matrix(_) => FloorParam::Matrix(squash(r).starts_with('&')),
         FloorParam::Set(_) => FloorParam::Set(squash(r).starts_with('&')),
         FloorParam::SetElem(_) => FloorParam::SetElem(squash(r).starts_with('&')),

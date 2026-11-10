@@ -53,20 +53,12 @@ fn generate_native_source(file: &str, no_check: bool, test_mode: bool, native_ve
     let (pending, metered, _) = crate::try_compile_pending(file, no_check, &opts)
         .map_err(|_| "compile failed".to_string())?;
     t.lap("frontend");
-    let rs_code = if native_verified && !test_mode {
+    let rs_code = if test_mode {
+        pending.generate_tests()?
+    } else if native_verified {
         super::render_v1_native_or_fallback(pending, metered, &opts)
     } else {
-        let rs_code = pending.generate();
-        // The NATIVE TEST harness rides the standard codegen: link the
-        // v1-rendered regions in, exactly as the run path does when the whole
-        // program walls (#3669), or meter them in the codegen (#3673).
-        match metered {
-            Some(ir) if test_mode => {
-                let source_text = almide::source_overlay::read_to_string(file).unwrap_or_default();
-                super::link_metered_regions(&source_text, rs_code, "the native test harness rides the standard codegen", ir, &opts)
-            }
-            _ => rs_code,
-        }
+        pending.generate()
     };
     t.lap("v1-native-render");
     // ALMIDE_ALLOC_COUNT (#2228): the counting allocator, when armed.
@@ -125,6 +117,34 @@ pub(crate) fn build_native_cached(
     project_dir_override: Option<&std::path::Path>,
     native_deps: &[crate::project::NativeDep],
     source_root: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, String> {
+    build_native_cached_in(rs_code, use_test_harness, release, project_dir_override, native_deps, source_root, None)
+}
+
+/// [`build_native_cached`] in the shared dir whose [`BuildDirLock`] the caller
+/// already holds (#4269): `almide build` takes it before the cache check and
+/// keeps it through the copy to `-o`, so the whole write-source → cargo →
+/// copy window is one critical section. A concurrent build or `almide run`
+/// in the same dir waits for it, and none can evict or rebuild the binary
+/// between this build and its install.
+pub(crate) fn build_native_cached_locked(
+    rs_code: &str,
+    release: bool,
+    native_deps: &[crate::project::NativeDep],
+    source_root: Option<&std::path::Path>,
+    held: &BuildDirLock,
+) -> Result<std::path::PathBuf, String> {
+    build_native_cached_in(rs_code, false, release, None, native_deps, source_root, Some(held))
+}
+
+fn build_native_cached_in(
+    rs_code: &str,
+    use_test_harness: bool,
+    release: bool,
+    project_dir_override: Option<&std::path::Path>,
+    native_deps: &[crate::project::NativeDep],
+    source_root: Option<&std::path::Path>,
+    held: Option<&BuildDirLock>,
 ) -> Result<std::path::PathBuf, String> {
     // Scratch dir. A per-call `project_dir_override` (one dir per test file)
     // gives each parallel worker its own `src/main.rs`, so cold rustc builds
@@ -195,7 +215,11 @@ pub(crate) fn build_native_cached(
     let _guard = project_dir_override
         .is_none()
         .then(|| BUILD_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
-    let _flock = BuildDirLock::acquire(&project_dir)?;
+    // A second flock on the same file from this process would wait on itself.
+    let _flock = match held {
+        Some(_) => None,
+        None => Some(BuildDirLock::acquire(&project_dir)?),
+    };
 
     // Re-check the cache under the lock: another process/thread may have built
     // this exact binary while we waited, making a rebuild redundant. A binary

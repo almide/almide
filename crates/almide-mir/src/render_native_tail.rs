@@ -36,14 +36,24 @@ fn finish_native_fn(
     let float_wrap = !is_main
         && matches!(sigs.get(func.name.as_str()), Some((_, Some(NativeSigKind::F64))))
         && matches!(func.ret.and_then(|v| tys.get(&v)), Some(NTy::I64));
-    let ret_override = if lifted_wrap { Some(NTy::Res) } else if float_wrap { Some(NTy::F64) } else { None };
+    let never_return = sigs.get(func.name.as_str()).is_some_and(|(_, r)| *r == Some(NativeSigKind::Never));
+    // A body that always terminates has no MIR return value, but its declared
+    // API may still return String (or another inhabited type). Keep that
+    // declaration: callers must not see a spurious `()` result. Rust also
+    // checks that no path falls through this value-returning body.
+    let declared_without_value = (!is_main && func.ret.is_none())
+        .then(|| sigs.get(func.name.as_str()).and_then(|(_, r)| *r))
+        .flatten().map(crate::render_native_closure::owned_nty);
+    let ret_override = if never_return { Some(NTy::Never) } else if lifted_wrap { Some(NTy::Res) } else if float_wrap { Some(NTy::F64) } else { declared_without_value };
     // Signature: the return type is known only after the body typed `func.ret`.
     let mut sig = render_native_fn_sig(func, tys, is_main, ret_override)?;
     sig.push_str(" {\n");
 
+    let borrowed_loop = !crate::native_borrowed_tco::sites(func).is_empty();
     // The trailing return expression (moved out — fresh owned for heap).
     if let Some(v) = func.ret {
         out.push_str("    ");
+        if borrowed_loop { out.push_str("return "); }
         if is_main {
             // Match the codegen entry wrapper: consume the Result, ignore an
             // Ok payload, and report a String error with exit status 1.
@@ -55,8 +65,10 @@ fn finish_native_fn(
         } else {
             out.push_str(&native_ret_expr(v, tys[&v]));
         }
+        if borrowed_loop { out.push(';'); }
         out.push('\n');
     }
+    if borrowed_loop { out.push_str("    }\n"); }
     out.push_str("}\n");
     let mut out = crate::render_native_or_else::option_or_else(crate::render_native_loops::iterator_loops(drop_unread_static_strs(out)));
     let ret_nty = if is_main { None } else { ret_override.or_else(|| func.ret.map(|v| tys[&v])) };
@@ -64,9 +76,10 @@ fn finish_native_fn(
     // (never observed — the region verdict is Err by the time a cut fires).
     if out.contains(CUT_RET_MARKER) {
         let cut_ret = match ret_nty {
+            Some(NTy::Never) => return Err(wall("native: a strict budget cut cannot fabricate a Never return")),
             None => "return;",
             Some(NTy::I64) => "return 0;",
-            Some(NTy::F64) => "return 0.0;",
+            Some(NTy::F64 | NTy::F32) => "return 0.0;",
             Some(NTy::Str | NTy::StrRef) => "return AlmideString::new();",
             Some(NTy::Vec | NTy::VecRef) => "return Vec::new();",
             Some(NTy::Res) => "return Ok(0);",
@@ -126,7 +139,8 @@ fn narrow_abi_wrapper(func: &MirFunction, sigs: &NativeSigs, rendered: String) -
 /// owned value; everything else returns the local directly.
 fn native_ret_expr(v: ValueId, t: NTy) -> String {
     match t {
-        NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res | NTy::VecStr | NTy::Rec(_) | NTy::Opt | NTy::ResStr => var(v),
+        NTy::Never => format!("match {} {{}}", var(v)),
+        NTy::I64 | NTy::F32 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res | NTy::VecStr | NTy::Rec(_) | NTy::Opt | NTy::ResStr => var(v),
         NTy::RecRef(_) => format!("{}.clone()", var(v)),
         NTy::StrRef => format!("AlmideString::from({})", var(v)),
         NTy::VecRef | NTy::VecStrRef => format!("{}.to_vec()", var(v)),
@@ -185,6 +199,7 @@ fn render_native_fn_sig(
             // A MOVE param (#4006 class P) takes the caller's value itself.
             let owned = func.owned_params.contains(&p.value);
             let spelled = match t {
+                NTy::Never => crate::render_native_rec::owned_ty(t),
                 t if crate::render_native_rec::is_closure(t) && func.name.starts_with("__lambda_")
                     && func.params.first().is_some_and(|first| first.value == p.value) => "&impl __AlmdEnv".to_string(),
                 NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) if owned => crate::render_native_rec::owned_ty(t),
@@ -203,14 +218,7 @@ fn render_native_fn_sig(
             format!("{mut_prefix}{}: {}", var(p.value), spelled)
         })
         .collect();
-    let ret = match func.ret {
-        None => String::new(),
-        // The result is owned whatever kind the returned value has.
-        Some(v) => match ret_override.as_ref().or_else(|| tys.get(&v)) {
-            Some(t) => format!(" -> {}", crate::render_native_rec::owned_ty(*t)),
-            None => return Err(wall("native: return value untyped")),
-        },
-    };
+    let ret = native_return_spelling(func, tys, ret_override)?;
     Ok(format!(
         "fn {}({}){}",
         mangle(&func.name),
@@ -233,28 +241,14 @@ fn native_used_values(func: &MirFunction) -> std::collections::BTreeSet<ValueId>
     u
 }
 
-/// The values ONE op reads, for [`native_used_values`]. Deliberately partial —
-/// ops absent here (Drop*, Alloc, markers) keep their operands OUT of the
-/// read-set, which is what lets a drop-only Handle count as dead.
+/// All executable reads use the MIR's exhaustive operand walk. Ownership-only
+/// events erase on native and therefore do not keep a dead address alive.
 fn native_op_reads(op: &Op) -> Vec<ValueId> {
-    match op {
-        Op::IntBinOp { a, b, .. } => vec![*a, *b],
-        Op::Prim { args, .. } => args.clone(),
-        Op::Call { args, .. } | Op::CallFn { args, .. } => args
-            .iter()
-            .filter_map(|a| match a {
-                CallArg::Handle(v) | CallArg::Scalar(v) => Some(*v),
-                _ => None,
-            })
-            .collect(),
-        Op::ListGetScalar { list, idx, .. } => vec![*list, *idx],
-        Op::ListSetScalar { list, idx, val } => vec![*list, *idx, *val],
-        Op::SetLocal { src, .. } => vec![*src],
-        Op::Dup { src, .. } => vec![*src],
-        Op::IfThen { cond, .. } => vec![*cond],
-        Op::Else { val } | Op::EndIf { val } => val.iter().copied().collect(),
-        _ => vec![],
+    let mut reads = Vec::new();
+    if !crate::render_native_move::bookkeeping(op) {
+        crate::mir_ops::op_reads(op, &mut reads);
     }
+    reads
 }
 
 /// The CALL-shaped ops that render through an [`OpSink`]: the rung-4
@@ -281,6 +275,7 @@ fn render_native_call_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
 /// [`render_fn`] op match.
 fn render_native_flow_op(
     op: &Op,
+    aborts: bool,
     borrows: &std::collections::BTreeSet<ValueId>,
     tys: &mut BTreeMap<ValueId, NTy>,
     out: &mut String,
@@ -317,8 +312,8 @@ fn render_native_flow_op(
         // Pure ownership bookkeeping — no native code.
         Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. } => {}
         Op::IfThen { cond, dst } => render_if_then(cond, dst, tys, out, indent, if_stack),
-        Op::Else { val } => render_else(val, borrows, tys, out, indent, if_stack)?,
-        Op::EndIf { val } => render_end_if(val, borrows, tys, out, indent, if_stack)?,
+        Op::Else { val } => render_else(val, aborts, borrows, tys, out, indent, if_stack)?,
+        Op::EndIf { val } => render_end_if(val, aborts, borrows, tys, out, indent, if_stack)?,
         Op::LoopStart => {
             line!("loop {{");
             *indent += 1;
@@ -399,6 +394,50 @@ fn op_depths(func: &MirFunction) -> Vec<i32> {
 
 /// The op after which `v` (defined at `d`) is read no more, when every use
 /// of it is a top-level call reading it as a handle and its one release.
+/// #4621: a snapshot of a heap slot read at the top level (a borrow-only
+/// read, `native_slot_takes::SlotReads::borrows`) held its `Rc` to the end
+/// of the function, so a later take or store of the slot found it shared and
+/// copied the whole value, where v0's read is a temporary of its statement.
+/// Its `Rc` is released right after the top-level op holding the last op
+/// that reads it or any value that can borrow from it (a field's address,
+/// an element, a local holding one): later ops cannot reach the reference.
+fn snapshot_releases(func: &MirFunction, chains: &crate::render_native_interp::Chains) -> BTreeMap<usize, Vec<ValueId>> {
+    let snaps = crate::native_slot_takes::slot_reads(func).borrows;
+    let at_depth = op_depths(func);
+    let mut out: BTreeMap<usize, Vec<ValueId>> = BTreeMap::new();
+    for (d, def) in func.ops.iter().enumerate() {
+        let Some(v) = crate::mir_ops::defined_value(def) else { continue };
+        if at_depth[d] != 0 || !snaps.contains(&v) {
+            continue;
+        }
+        let mut derived: std::collections::BTreeSet<ValueId> = std::iter::once(v).collect();
+        let mut last = Some(d);
+        for (j, op) in func.ops.iter().enumerate().skip(d + 1) {
+            let mut vs = Vec::new();
+            crate::mir_ops::op_values(op, &mut vs);
+            // A release renders as the end of a borrow, not a read.
+            if vs.iter().any(|x| derived.contains(x)) && !vs.iter().any(|x| releases(op, *x)) {
+                // A piece of an interpolation chain is read where the render
+                // writes the chain, at its final reader.
+                last = last.zip(chain_end(func, chains, j)).map(|(l, r)| l.max(r));
+                // What can hold a reference into it: an address, a value
+                // loaded through one, a copy or a local of one. A call's
+                // result is its own value.
+                if matches!(op, Op::Prim { .. } | Op::IntBinOp { .. } | Op::Dup { .. } | Op::SetLocal { .. }) {
+                    derived.extend(vs);
+                }
+            }
+        }
+        if func.ret.is_some_and(|r| derived.contains(&r)) {
+            continue;
+        }
+        if let Some(end) = last.and_then(|l| top_level_end(func, &at_depth, l)) {
+            out.entry(end + 1).or_default().push(v);
+        }
+    }
+    out
+}
+
 fn last_top_level_read(
     func: &MirFunction,
     chains: &crate::render_native_interp::Chains,
@@ -546,9 +585,8 @@ fn chain_end(func: &MirFunction, chains: &crate::render_native_interp::Chains, j
 }
 
 /// The drop-family ops. All three erase to a scope-end comment when the value
-/// shape is admitted; a shape violation is a wall. `Ok(false)` = a
-/// NON-closure `DropVariant` — the caller walls with the generic
-/// outside-the-rung-subset message, exactly as the former inline match did.
+/// shape is admitted; a borrowed or unknown nominal release is a wall.
+/// `Ok(false)` means the operation is outside this drop family.
 fn render_native_drop_op(
     op: &Op,
     borrows: &std::collections::BTreeSet<ValueId>,
@@ -586,10 +624,16 @@ fn render_native_drop_op(
                 )))
             }
         },
+        // Runtime-backed nominal values may use a list/carrier representation
+        // instead of a generated record. Its checked OWNED Rust type still
+        // performs the recursive release; borrowed values remain rejected.
+        Op::DropVariant { v, .. } | Op::DropWrapperRec { v, .. }
+            if matches!(tys.get(v), Some(NTy::Vec | NTy::VecStr | NTy::Res | NTy::ResStr | NTy::Opt)) =>
+            render_drop_list_str_block(v, tys, out, indent)?,
         // Drop is ERASED: Rust frees at scope end (or at reassignment for a
         // loop-carried handle). `verify_ownership` above certified balance.
         // A borrow join (#3532) holds a reference: its borrow simply ends.
-        Op::Drop { v } | Op::DropListStr { v }
+        Op::Drop { v } | Op::DropListStr { v } | Op::DropVariant { v, .. }
             if borrows.contains(v) && matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) =>
         {
             line!("// drop: borrowed join, scope-end");
@@ -632,6 +676,9 @@ fn render_native_drop_op(
         // empty, the free is the block itself → scope-end, same as `Drop`.
         // Anything non-Vec here would carry heap slots → wall.
         Op::DropListStr { v } => render_drop_list_str_block(v, tys, out, indent)?,
+        Op::DropVariant { v, ty } => {
+            return Err(wall(format!("native: {}({ty}) of {v:?} with {:?} — outside the owned release shapes", op_name(op), tys.get(v))));
+        }
         _ => return Ok(false),
     }
     Ok(true)
@@ -698,6 +745,7 @@ pub(crate) fn render_dup(
         .get(src)
         .ok_or_else(|| wall("native: Dup of untyped value"))?;
     match t {
+        NTy::Never | NTy::F32 => return Err(wall("native: no inhabited scalar value for this metadata kind")),
         // A scalar lane copies itself.
         NTy::I64 | NTy::F64 | NTy::Opt => {
             tys.insert(*dst, t);
@@ -733,3 +781,27 @@ pub(crate) fn render_dup(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "render_native_reads_test.rs"]
+mod native_reads_tests;
+
+#[cfg(test)]
+mod typed_release_tests {
+    use super::*;
+    #[test]
+    fn nominal_release_uses_owned_native_shape_and_rejects_borrowed_shapes() {
+        let v = ValueId(0);
+        let op = Op::DropVariant { v, ty: "runtime_backed_nominal".into() };
+        let render = |op: &Op, t| render_native_drop_op(op, &Default::default(), &BTreeMap::from([(v, t)]), &mut String::new(), 0);
+        for t in [NTy::Vec, NTy::VecStr, NTy::Res, NTy::ResStr, NTy::Opt, NTy::Rec(0)] {
+            assert_eq!(render(&op, t).unwrap(), true, "{t:?}");
+        }
+        for t in [NTy::StrRef, NTy::VecRef, NTy::VecStrRef, NTy::RecRef(0), NTy::I64, NTy::F64] {
+            assert!(render(&op, t).is_err(), "{t:?}");
+        }
+        assert!(render(&Op::DropVariant { v, ty: "closure".into() }, NTy::VecStr).is_err());
+    }
+}
+
+include!("render_native_return.rs");

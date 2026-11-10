@@ -76,10 +76,10 @@ pub fn hoist_assert_call_subjects(program: &mut almide_ir::IrProgram) {
             let var = VarId(*next);
             *next += 1;
             let ty = arg.ty.clone();
-            let span = arg.span.clone();
+            let span = arg.span;
             let value = std::mem::replace(
                 arg,
-                IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span: span.clone(), def_id: None },
+                IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span: span, def_id: None },
             );
             binds.push(IrStmt {
                 kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value },

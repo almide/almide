@@ -661,6 +661,12 @@ pub use frames::{
     CHECKED_PASS,
 };
 
+/// The ownership-path walk's work so far, process-wide (#4614): one per
+/// node a path is stepped through, one per loop activation queued.
+pub fn path_walk_steps() -> u64 {
+    paths::steps()
+}
+
 pub(crate) fn collecting() -> bool {
     sink().lock().expect("witness sink").is_some()
 }

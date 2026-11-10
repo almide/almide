@@ -1,13 +1,13 @@
 diff --git a/crates/almide-wasm/src/calls_modules.rs b/crates/almide-wasm/src/calls_modules.rs
-index bd5aafdce..1ac2b792b 100644
+index a6152a33a..477c7f304 100644
 --- a/crates/almide-wasm/src/calls_modules.rs
 +++ b/crates/almide-wasm/src/calls_modules.rs
-@@ -208,7 +208,7 @@ impl Emitter<'_> {
+@@ -263,7 +263,7 @@ impl Emitter<'_> {
                      i.local_set(hdef);
                      i.local_get(hrecv);
                      if is_option {
 -                        i.i32_eqz();
 +                        i.i32_eqz().i32_eqz();
                      } else {
-                         i.i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_const(0).i32_ne();
-                     }
+                         i.i32_load(slot_memarg(almide_layout::SUM_TAG))
+                             .i32_const(0)

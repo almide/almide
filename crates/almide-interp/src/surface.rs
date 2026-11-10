@@ -80,7 +80,7 @@ impl<'a> Interpreter<'a> {
             "datetime" => surface_datetime(f, args),
             "list" => self.surface_list(f, args),
             "deque" => surface_deque(f, args),
-            "io" => surface_io(f, args),
+            "io" => self.surface_io(f, args),
             "bytes" => surface_bytes(f, args),
             "regex" => self.surface_regex(f, args),
             _ => None,
@@ -628,17 +628,56 @@ fn surface_datetime(f: &str, args: &[Value]) -> Option<Flow> {
 
 /// `io.stdin()` / `io.stdout()` / `io.stderr()`: `Stdin(0)` / `Stdout(1)` /
 /// `Stderr(2)`, `mod type`s over Int that both backends erase to the Int.
-fn surface_io(f: &str, args: &[Value]) -> Option<Flow> {
-    if !args.is_empty() {
-        return None;
+impl<'a> Interpreter<'a> {
+    /// `io.stdin` / `stdout` / `stderr` mint the handle (its `mod type` is an
+    /// Int newtype); `io.print` / `io.eprint` are the text shortcuts, written
+    /// to the run's captured stream exactly as the `print` / `eprint`
+    /// builtins write it (`dispatch.rs::eval_builtin_print`) — the captured
+    /// buffers are interpreter state, never the process's own streams.
+    fn surface_io(&mut self, f: &str, args: &[Value]) -> Option<Flow> {
+        if let ("print" | "eprint", [Value::Str(s)]) = (f, args) {
+            let stream = if f == "print" { &mut self.stdout } else { &mut self.stderr };
+            stream.push_str(s);
+            return Some(Flow::val(Value::Unit));
+        }
+        if !args.is_empty() {
+            return None;
+        }
+        let fd = match f {
+            "stdin" => 0,
+            "stdout" => 1,
+            "stderr" => 2,
+            _ => return None,
+        };
+        Some(Flow::val(Value::Int(fd)))
     }
-    let fd = match f {
-        "stdin" => 0,
-        "stdout" => 1,
-        "stderr" => 2,
-        _ => return None,
-    };
-    Some(Flow::val(Value::Int(fd)))
+
+    /// `io.write(h, data)` on a standard stream: `write[H: Write]` is
+    /// `h.__self_write(data)`, and `Stdout` / `Stderr` answer it with
+    /// `io.__write_stdout` / `io.__write_stderr` and `ok(())`
+    /// (stdlib/io.almd). The handle is told by its STATIC type — every `Write`
+    /// handle is an Int newtype, so the value cannot say which stream it is.
+    /// `None` = not this call; a handle of another module keeps its abstain.
+    /// The captured streams are text, so bytes that are not UTF-8 abstain by
+    /// name instead of voting a lossy rendering.
+    pub(crate) fn eval_io_stream_write(&mut self, module: Sym, func: Sym, args: &[IrExpr], evaled: &[Value]) -> Option<Flow> {
+        if module.as_str() != "io" || func.as_str() != "write" {
+            return None;
+        }
+        let ([handle, _], [_, data]) = (args, evaled) else { return None };
+        let Ty::Named(name, _) = &handle.ty else { return None };
+        let to_stdout = match name.as_str() {
+            "Stdout" | "io.Stdout" => true,
+            "Stderr" | "io.Stderr" => false,
+            _ => return None,
+        };
+        let Ok(text) = String::from_utf8(octets(data)?) else {
+            return Some(Flow::Unsupported("io.write: bytes that are not UTF-8 on a captured text stream".to_string()));
+        };
+        let stream = if to_stdout { &mut self.stdout } else { &mut self.stderr };
+        stream.push_str(&text);
+        Some(Flow::val(Value::Result(Ok(Box::new(Value::Unit)))))
+    }
 }
 
 /// `type Deque[A] = { front: List[A], back: List[A] }` and the readers that

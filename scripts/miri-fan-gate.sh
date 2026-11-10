@@ -129,12 +129,17 @@ EOF
   fi
   echo "min_bounded ($form): refused, \"$(grep -m1 -o '[^:]*can only be used inside an effect fn' "$WORK/min_bounded_$form/check.log")\" — fan.min / fan.bounded start no thread"
 done
+# The fold program only READS its input; the harness writes fold.txt into each
+# crate's directory before any run (#4452). -Zmiri-many-seeds runs the seeds
+# in PARALLEL, as instances in one process sharing the working directory, so
+# a program that wrote the file itself had one seed's write (truncate, then
+# write) land under another seed's read: that seed folded an empty file and
+# printed `parts=0 total=0` — red on 11-03, 11-05, 11-06 and 11-08 with no
+# fault in the line-fold workers.
 cat > "$WORK/fold/main.almd" <<'EOF'
 import fs
 
 effect fn main() -> Unit = {
-  let text = list.range(0, 40) |> list.map((i) => "line " + int.to_string(i)) |> list.join("\n")
-  fs.write_text("fold.txt", text + "\n")!
   let parts = fs.fold_lines_chunked("fold.txt", 4, 0, (acc, line) => acc + string.len(line))!
   println("parts=" + int.to_string(list.len(parts)) + " total=" + int.to_string(list.fold(parts, 0, (a, b) => a + b)))
 }
@@ -181,16 +186,22 @@ for shape in $SHAPES; do
   # No prebuilt runtime rlib: the runtime's source is in the crate Miri interprets.
   (cd "$WORK/$shape" && ALMIDE_NO_RTLIB=1 ALMIDE_RUN_PROJECT_DIR="$d" "$ALMIDE_BIN" build main.almd -o "$d/bin") >"$WORK/$shape/build.log" 2>&1 \
     || { echo "::error::miri-fan-gate: the $shape program does not build"; cat "$WORK/$shape/build.log"; exit 1; }
+  # the fold program's input: 40 lines, "line 0" .. "line 39", each ended by a newline
+  [ "$shape" = fold ] && for i in $(seq 0 39); do echo "line $i"; done > "$d/fold.txt"
   IFS='|' read -r -a syms <<<"${NEEDS[$shape]}"
   for sym in "${syms[@]}"; do
     grep -qF "$sym" "$d/src/main.rs" || { echo "::error::miri-fan-gate: the $shape crate has no \`$sym\` — the program no longer reaches the path this shape judges"; exit 1; }
   done
   expected="$(cd "$d" && ALMIDE_FAN_COST_OFF=1 ./bin | sort -u)"
+  # an empty native run would make any Miri run that also printed nothing
+  # compare equal
+  [ -n "$expected" ] || { echo "::error::miri-fan-gate: the native $shape run printed nothing"; exit 1; }
 
   c="$WORK/$shape/control"
   mkdir -p "$c"
   cp -R "$d/Cargo.toml" "$d/src" "$c/"
   [ -f "$d/Cargo.lock" ] && cp "$d/Cargo.lock" "$c/"
+  [ -f "$d/fold.txt" ] && cp "$d/fold.txt" "$c/"
   break_crate "$c/src/main.rs" "${CONTROL[$shape]}" \
     || { echo "::error::miri-fan-gate: the $shape control's anchor (${CONTROL[$shape]}) is gone from the generated crate — update the control"; exit 1; }
   miri "$c" 0.01

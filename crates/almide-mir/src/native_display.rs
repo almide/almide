@@ -7,6 +7,7 @@ use crate::lower::{RecordLayouts, VariantLayouts};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) fn expand(ir: &mut IrProgram, records: &RecordLayouts, variants: &VariantLayouts) {
+    let errors = error_types(ir);
     let shapes = almide_ir::record_shape::RecordShapeIndex::build(ir, |d| d.declared_name().to_owned());
     let mut record_cases = HashSet::new();
     for d in &ir.type_decls {
@@ -22,8 +23,10 @@ pub(crate) fn expand(ir: &mut IrProgram, records: &RecordLayouts, variants: &Var
         used: ir.functions.iter().map(|f| f.name).collect(),
         helpers: Vec::new(), keys: Vec::new(),
     };
+    pass.prepare_errors(errors);
     for f in &mut ir.functions { pass.visit_expr_mut(&mut f.body); }
     for t in &mut ir.top_lets { pass.visit_expr_mut(&mut t.value); }
+    ERROR_DISPLAYS.with(|s| { if let Some(table) = s.borrow_mut().as_mut() { *table = pass.keys.clone(); } });
     ir.functions.extend(pass.helpers);
 }
 
@@ -42,7 +45,12 @@ fn structural(t: &Ty) -> bool {
     match t {
         Ty::Named(..) | Ty::Record { .. } | Ty::Tuple(_) => true,
         Ty::Applied(TC::Option | TC::Result | TC::Map | TC::Set, _) => true,
-        Ty::Applied(TC::List, args) => args.iter().any(|t| structural(t) || matches!(t, Ty::Applied(..))),
+        // Sized numbers need their declared formatter: treating Float32 as
+        // Float or UInt64 as Int changes observable text. Keep the existing
+        // primitive list fast paths; synthesize typed iteration for these.
+        Ty::Applied(TC::List, args) => args.iter().any(|t| structural(t) || matches!(t,
+            Ty::Applied(..) | Ty::Bytes | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 |
+            Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 | Ty::Float64)),
         _ => false,
     }
 }
@@ -62,6 +70,8 @@ impl IrMutVisitor for Display<'_> {
             if let Some(value) = self.format(expr.clone()) {
                 *expr = value;
             } else {
+                crate::trace::trace("ALMIDE_DBG_ELEM", ||
+                    format!("[native-display] unsupported source type {:?}", expr.ty));
                 self.vars.entries.truncate(vars);
                 self.keys.truncate(keys);
                 self.helpers.truncate(helpers);
@@ -300,3 +310,5 @@ fn named(name: Sym, value: IrExpr) -> IrExpr {
 fn concat(parts: Vec<IrExpr>) -> IrExpr {
     parts.into_iter().fold(text(""), |a, b| node(IrExprKind::BinOp { op: BinOp::ConcatStr, left: Box::new(a), right: Box::new(b) }, Ty::String))
 }
+
+include!("native_display_errors.rs");

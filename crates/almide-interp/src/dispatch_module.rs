@@ -56,6 +56,10 @@ impl<'a> Interpreter<'a> {
         if let Some(flow) = self.eval_numeric_carrier(module, func, args, &evaled) {
             return flow;
         }
+        // `io.write` on a standard stream: the handle is its static type.
+        if let Some(flow) = self.eval_io_stream_write(module, func, args, &evaled) {
+            return flow;
+        }
         // `value.__set_path_steps` is the native runtime's in-place walk; its
         // registry body (stdlib/json_path.almd) only forwards to the bundled
         // pure walk `value.__set_path_pure`, which the pool does not lower —
@@ -95,7 +99,20 @@ impl<'a> Interpreter<'a> {
             self.handle_arg_ty = args.first().map(|a| a.ty.clone());
         }
         self.container_arg_tys = Some(args.iter().map(|a| a.ty.clone()).collect());
-        self.dispatch_module_resolved(module, func, evaled)
+        self.bundled_mut_gated = None;
+        let flow = self.dispatch_module_resolved(module, func, evaled);
+        // An auto-imported bundled body with a `mut` parameter
+        // (`heap.push(mut h, x)`) that no tier answered: the value-only
+        // dispatch has no caller lvalue to copy out to (#1022) and abstained,
+        // leaving the body and its evaluated operands. The argument EXPRS are
+        // still in hand here, so the call takes the copy-out a program fn
+        // with a `mut` parameter takes.
+        match self.bundled_mut_gated.take() {
+            Some((m, def, evaled)) if m == module && def.name == func && matches!(flow, Flow::Unsupported(_)) => {
+                self.finish_lowered_fn_call(def, args, evaled, scope)
+            }
+            _ => flow,
+        }
     }
 
     /// `fan.any`, first-Ok short-circuit — see the dispatch comment above for

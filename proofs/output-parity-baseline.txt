@@ -337,6 +337,7 @@ spec/wasm_cross/fallible_tuple_value_tail.almd
 spec/wasm_cross/fan_any_allfail.almd
 spec/wasm_cross/fan_any_early_winner.almd
 spec/wasm_cross/fan_arm_heap_capture.almd
+spec/wasm_cross/fan_arm_stderr_timeline.almd
 spec/wasm_cross/fan_arm_unwrap_or.almd
 spec/wasm_cross/fan_block_err_list_order.almd
 spec/wasm_cross/fan_block_rc_closure_capture.almd
@@ -774,6 +775,7 @@ spec/wasm_cross/nested_variant_match_bind.almd
 spec/wasm_cross/nested_variant_tag_box.almd
 spec/wasm_cross/nested_variant_tree.almd
 spec/wasm_cross/never_fn_value_positions.almd
+spec/wasm_cross/never_tail_of_result_effect_fn.almd
 spec/wasm_cross/newtype_string_form.almd
 spec/wasm_cross/num_edge_to_string.almd
 spec/wasm_cross/number_parse_ascii_trim.almd
@@ -970,6 +972,7 @@ spec/wasm_cross/string_predicates.almd
 spec/wasm_cross/string_repeat_empty.almd
 spec/wasm_cross/string_reuse_pipeline.almd
 spec/wasm_cross/string_rle.almd
+spec/wasm_cross/string_slice_concat_short_unaligned.almd
 spec/wasm_cross/string_split_rle_codepoint.almd
 spec/wasm_cross/string_to_upper.almd
 spec/wasm_cross/string_upper_inplace_aliases.almd

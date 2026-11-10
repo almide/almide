@@ -67,9 +67,13 @@ best_time() { # min wall seconds of one run of $1, over the caller's loop
 
 # NATIVE_V1_PERF_ONLY_SHAPES=1: the shape benches alone (the negative control's run).
 programs() {
-  [ -n "${NATIVE_V1_PERF_ONLY_SHAPES:-}" ] || grep -E '^spec/' proofs/native-verified-floor.txt
-  ls research/benchmark/perf/v1-shapes/*.almd
+  if [ -n "${NATIVE_V1_PERF_ONLY_SHAPES:-}" ]; then
+    native_v1_perf_programs --shapes-only
+  else
+    native_v1_perf_programs
+  fi
 }
+source scripts/lib/native-v1-perf-corpus.sh
 
 fail=0; gated=0; warns=(); rows=()
 declare -A listed

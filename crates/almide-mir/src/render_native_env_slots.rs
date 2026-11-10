@@ -43,7 +43,7 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
             crate::render_native_bounds::check(slot);
             crate::render_native_bounds::access(slot);
             tys.insert(*dst, NTy::I64);
-            writeln!(out, "if {} as usize >= {}.len() {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}", var(*idx), var(*list)).expect("writing to a String cannot fail");
+            writeln!(out, "if {} as usize >= {}.len() {{ almide_abort(\"index out of bounds\"); }}", var(*idx), var(*list)).expect("writing to a String cannot fail");
             match crate::render_native_keyed::read_key(*dst) {
                 // A dispatch index the caller may know (render_native_keyed).
                 Some(k) => writeln!(out, "let mut {}: i64 = if K{k} >= 0 {{ K{k} }} else {{ {}.words()[{} as usize] }};", var(*dst), var(*list), var(*idx)).expect("writing to a String cannot fail"),
@@ -77,7 +77,7 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
                 let t = *fields.get(k).filter(|t| **t != NTy::I64).ok_or_else(|| wall("native: a heap closure read of a scalar or absent capture"))?;
                 let variant = rec::capture_variant(t);
                 crate::render_native_bounds::access(slot);
-                let place = format!("match {}.heap({k}) {{ Some(__AlmdCapture::{variant}(x)) => x, _ => {{ eprintln!(\"Error: closure capture kind mismatch\"); std::process::exit(1) }} }}", var(ad.base));
+                let place = format!("match {}.heap({k}) {{ Some(__AlmdCapture::{variant}(x)) => x, _ => {{ almide_abort(\"closure capture kind mismatch\") }} }}", var(ad.base));
                 if let Some((borrowed, spelled, suffix)) = borrowed_kind(t) {
                     tys.insert(*d, borrowed);
                     writeln!(out, "let mut {}: {spelled} = &(*({place})){suffix};", var(*d)).expect("writing to a String cannot fail");
@@ -100,6 +100,12 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
                         _ => var(src.base),
                     };
                     writeln!(out, "{}.put({k}, __AlmdCapture::{variant}({value}));", var(ad.base)).expect("writing to a String cannot fail");
+                } else if k >= 2 && ty(tys, rhs) == Some(NTy::Opt) {
+                    // Scalar-Option rewriting replaces Store(Handle(option))
+                    // with Store(option): the native carrier owns no block.
+                    // It still occupies a typed capture, never an i64 word.
+                    let variant = rec::capture_variant(NTy::Opt);
+                    writeln!(out, "{}.put({k}, __AlmdCapture::{variant}({}));", var(ad.base), var(*rhs)).expect("writing to a String cannot fail");
                 } else {
                     writeln!(out, "{}.words[{k}] = {};", var(ad.base), word(*rhs, tys)?).expect("writing to a String cannot fail");
                 }
@@ -114,6 +120,6 @@ pub(super) fn word(v: ValueId, tys: &BTreeMap<ValueId, NTy>) -> Result<String, L
     match ty(tys, &v) {
         Some(NTy::I64) => Ok(var(v)),
         Some(NTy::F64) => Ok(format!("{}.to_bits() as i64", var(v))),
-        _ => Err(wall("native: a closure scalar slot contains a heap value")),
+        kind => Err(wall(format!("native: closure scalar slot {v:?} has non-scalar kind {kind:?}"))),
     }
 }

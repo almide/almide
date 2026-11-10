@@ -143,9 +143,14 @@ fn observe(mut c: Command) -> (String, String, Option<i32>) {
 }
 
 fn native(file: &Path) -> (String, String, Option<i32>) {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_almide"));
-    c.arg("run").arg(file);
-    observe(c)
+    let binary = file.with_extension("native");
+    let built = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .arg("build").arg(file).arg("-o").arg(&binary)
+        .env("ALMIDE_VERIFIED_DEBUG", "1").output().expect("build native response probe");
+    assert!(built.status.success(), "native build: {}", String::from_utf8_lossy(&built.stderr));
+    assert!(String::from_utf8_lossy(&built.stderr).contains("native: v1 trust-spine render"),
+        "response bytes must exercise v1: {}", String::from_utf8_lossy(&built.stderr));
+    observe(Command::new(binary))
 }
 
 /// Build `file` as a WASI 0.3 component and run it on stock wasmtime.

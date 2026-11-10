@@ -26,7 +26,8 @@ fn callback_layout(dps: &[DTy], arity: usize) -> Option<Vec<(DTy, String)>> {
 }
 
 fn bind_callback_shape(env: &mut Env, d: &DTy, got: NTy) -> Option<()> {
-    if !has_runtime_tuple(d) {
+    if !matches!(d, DTy::Tuple(_) | DTy::List(_) | DTy::Opt(_) | DTy::Result(_, _)) {
+        if has_runtime_tuple(d) { return None; }
         let runtime = kind_of(env, d);
         if got == NTy::I64 && runtime == Some(NTy::F64) { return Some(()); }
         // Generic containers retain MIR's Float bits, while a checked lambda
@@ -71,7 +72,8 @@ fn runtime_type(env: &Env, d: &DTy) -> Option<String> {
 /// `into_native` selects the direction. Every expression is evaluated once,
 /// and owned fields move through the adapter instead of escaping as references.
 fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_native: bool) -> Option<String> {
-    if !has_runtime_tuple(d) {
+    if !matches!(d, DTy::Tuple(_) | DTy::List(_) | DTy::Opt(_) | DTy::Result(_, _)) {
+        if has_runtime_tuple(d) { return None; }
         return match d {
             DTy::Bool if native == NTy::I64 => Some(if into_native {
                 format!("({code}) as i64")
@@ -107,7 +109,11 @@ fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_nati
         }
         DTy::List(e) => {
             let value = convert_callback_value(env, e, list_elem(native)?, "__item", into_native)?;
-            format!("({code}).into_iter().map(|__item| {value}).collect::<Vec<_>>()")
+            // The copy is a list as long as its source: it reserves the way
+            // every list this render builds does (C-197's abort), never
+            // through a sized `collect`'s capacity panic.
+            let reserved = crate::render_native_addr::reserved_vec("(__list.len() as i64)");
+            format!("{{ let __list = {code}; let mut __copy = {reserved}; __copy.extend(__list.into_iter().map(|__item| {value})); __copy }}")
         }
         DTy::Opt(e) => format!("({code}).map(|__item| {})",
             convert_callback_value(env, e, opt_payload(native)?, "__item", into_native)?),
@@ -123,8 +129,8 @@ fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_nati
 }
 
 fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, (dps, dret): (&[DTy], &DTy),
-    (ps, moved): (&[NativeSigKind], &[bool]), ret: NativeSigKind) -> Option<String> {
-    if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) { return None; }
+    (ps, moved): (&[NativeSigKind], &[bool]), ret: Option<NativeSigKind>) -> Option<String> {
+    if ps.iter().chain(ret.iter()).any(|k| matches!(k, NativeSigKind::Narrow { .. })) { return None; }
     let mut params = Vec::new();
     let mut setup = Vec::new();
     let mut args = Vec::new();
@@ -141,8 +147,12 @@ fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, (dps,
     }
     let call = format!("{}{})", callback_head(lambda, captured, ps, ret),
         args.iter().map(|a| format!(", {a}")).collect::<String>());
-    let call = if ret == NativeSigKind::F64 { format!("AlmdLaneF64::lane_f64({call})") } else { call };
-    let result = convert_callback_value(env, dret, clo::owned_nty(ret), &call, false)?;
+    let call = if ret == Some(NativeSigKind::F64) { format!("AlmdLaneF64::lane_f64({call})") } else { call };
+    let result = match ret {
+        Some(ret) => convert_callback_value(env, dret, clo::owned_nty(ret), &call, false)?,
+        None if *dret == DTy::Unit => call,
+        None => return None,
+    };
     Some(format!("|{}| -> {} {{ {} {result} }}", params.join(", "), runtime_type(env, dret)?, setup.join(" ")))
 }
 
@@ -156,7 +166,7 @@ mod tuple_callback_tests {
         let acc = DTy::Var("A".into());
         let layout = callback_layout(&[acc.clone(), pair.clone()], 3).expect("a two-parameter callback with a tuple splits into three slots");
         assert_eq!(layout, vec![(acc, "__p0".into()), (DTy::Str, "__p1.0".into()), (DTy::Int, "__p1.1".into())]);
-        assert_eq!(callback_layout(&[pair.clone()], 1), Some(vec![(pair.clone(), "__p0".into())]));
+        assert_eq!(callback_layout(std::slice::from_ref(&pair), 1), Some(vec![(pair.clone(), "__p0".into())]));
         assert!(callback_layout(&[pair], 3).is_none());
         for call in ["map.filter", "map.filter_skv", "map.find", "map.find_skv", "map.fold",
             "map.fold_skv", "map.fold_str_msi", "map.fold_skv_msi", "map.fold_str_sacc", "map.fold_skv_hacc"] {

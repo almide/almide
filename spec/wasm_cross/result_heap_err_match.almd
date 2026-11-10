@@ -5,6 +5,27 @@
 // String before re-wrapping, and the subject drops AFTER the arms (DropListStr frees slot-0 once). v0==v1.
 fn classify(cp: Int) -> Result[Int, String] = if cp >= 65 then ok(cp - 65) else err("bad")
 
+type ListError: Eq = | Missing(Int) | Invalid(String)
+
+fn typed_list(take: Bool) -> List[Int]!ListError =
+  if take then ok([1, 0, 2])
+  else err(Invalid("bad"))
+
+type Message: Eq = { text: String }
+
+fn optional_message(take: Bool) -> Message?! =
+  if take then ok(some(Message { text: "present" }))
+  else ok(none)
+
+fn message_reader(prefix: String, take: Bool) -> Result[(String) -> String, String] =
+  if take then ok((text) => prefix + text)
+  else err("no reader")
+
+fn read_message(take: Bool) -> String! = {
+  let read = message_reader("hello ", take)!
+  ok(read("world"))
+}
+
 effect fn run(a: Int) -> Result[Int, String] = {
   let x = classify(a)!
   ok(x + 1)
@@ -19,4 +40,16 @@ effect fn main() -> Unit = {
     ok(n) => println("ok:" + int.to_string(n)),
     err(e) => println("err:" + e),
   }
+  let good: Result[List[Int], ListError] = typed_list(true)
+  let bad: Result[List[Int], ListError] = typed_list(false)
+  println(if good == ok([1, 0, 2]) then "list-ok" else "wrong")
+  println(if bad == err(Invalid("bad")) then "list-err" else "wrong")
+  let present: Result[Message?, String] = optional_message(true)
+  let missing: Result[Message?, String] = optional_message(false)
+  println(if present == ok(some(Message { text: "present" })) then "present" else "wrong")
+  println(if missing == ok(none) then "missing" else "wrong")
+  let read_ok: Result[String, String] = read_message(true)
+  let read_err: Result[String, String] = read_message(false)
+  println(if read_ok == ok("hello world") then "read-ok" else "wrong")
+  println(if read_err == err("no reader") then "read-err" else "wrong")
 }

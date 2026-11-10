@@ -1,0 +1,9 @@
+read_bytes(file)=OK(3)
+read_bytes(missing)=ERR[fs.read_bytes("<TMP>/nope"): No such file or directory (os error 2)]
+read_bytes(dir)=ERR[fs.read_bytes("<TMP>/sub"): Is a directory (os error 21)]
+read_bytes_if_exists(file)=SOME(3)
+read_bytes_if_exists(missing)=NONE
+read_bytes_if_exists(dir)=ERR[fs.read_bytes_if_exists("<TMP>/sub"): Is a directory (os error 21)]
+write_bytes(file)=OK
+write_bytes(missing parent)=ERR[fs.write_bytes("<TMP>/no/w.bin"): No such file or directory (os error 2)]
+write_bytes(dir)=ERR[fs.write_bytes("<TMP>/sub"): Is a directory (os error 21)]

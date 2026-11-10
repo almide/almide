@@ -133,6 +133,30 @@ pub fn route_fan_parallel(program: &mut IrProgram) -> bool {
     changed.get()
 }
 
+/// Source declarations associated with the existing parallel runtime pairs.
+/// Rows are (module, function, sequential symbol, parallel symbol).
+pub fn parallel_declarations() -> &'static [(&'static str, String, String, &'static str)] {
+    use almide_lang::ast::{Decl, AttrValue};
+    static ROWS: std::sync::OnceLock<Vec<(&'static str, String, String, &'static str)>> = std::sync::OnceLock::new();
+    ROWS.get_or_init(|| {
+        let mut rows = Vec::new();
+        for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let Some(program) = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached) else { continue };
+            for decl in &program.decls {
+                let Decl::Fn { name, attrs, .. } = decl else { continue };
+                let symbol = attrs.iter().find(|a| a.name.as_str() == "intrinsic")
+                    .and_then(|a| a.args.first()).and_then(|a| match &a.value {
+                        AttrValue::String { value } => Some(value.as_str()), _ => None,
+                    });
+                if let Some((symbol, parallel)) = symbol.and_then(|s| parallel_name(s).map(|p| (s, p))) {
+                    rows.push((module, name.to_string(), symbol.to_string(), parallel));
+                }
+            }
+        }
+        rows
+    })
+}
+
 /// Everything the rewrite consults, threaded by reference through the walk.
 struct ParCtx<'a> {
     purity: &'a super::pass_stream_fusion::Purity,
@@ -503,6 +527,20 @@ fn rewrite_expr(expr: IrExpr, ctx: &ParCtx, in_fan: bool) -> IrExpr {
                 kind: IrExprKind::Call { target: CallTarget::Module { module, func, def_id }, args, type_args },
                 ty, span, def_id: None,
             }
+        }
+        // The native MIR leg invokes this shared selector before stdlib
+        // lowering. Resolve the same declared intrinsic, without a second
+        // purity/Send classifier or a second list of source function names.
+        IrExprKind::Call { target: CallTarget::Module { module, func, def_id }, args, type_args }
+            if in_fan && parallel_declarations().iter().any(|(m, f, _, _)| *m == module.as_str() && f == func.as_str()) =>
+        {
+            let (_, _, sequential, _) = parallel_declarations().iter()
+                .find(|(m, f, _, _)| *m == module.as_str() && f == func.as_str()).unwrap();
+            let (symbol, args) = rewrite_list_op(sym(sequential), args, ctx);
+            let kind = if symbol.as_str() == sequential {
+                IrExprKind::Call { target: CallTarget::Module { module, func, def_id }, args, type_args }
+            } else { IrExprKind::RuntimeCall { symbol, args } };
+            IrExpr { kind, ty, span, def_id: None }
         }
         // `list.map/filter/any/all` under a fan block, in either spelling.
         IrExprKind::RuntimeCall { symbol, args } if in_fan && parallel_name(&symbol).is_some() => {

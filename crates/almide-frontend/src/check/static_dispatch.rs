@@ -317,7 +317,6 @@ impl Checker {
                     }
                 }
                 let result_elem = self.fresh_var();
-                let callback_ret = Ty::result(result_elem.clone(), Ty::String);
                 // #1350: the mapper slot is declared `is_effect: TRUE`. It was
                 // `false` from the landing and that was a DECLARATION bug, not a
                 // permission: unification is effect-agnostic on purpose (#1055), so
@@ -337,9 +336,9 @@ impl Checker {
                 // block heads. `is_effect: true` also picks up `effect_slot_accepts`
                 // (#1055), which admits the pure spelling — the pure mapper stays legal.
                 self.constrain(arg_tys[1].clone(),
-                    Ty::Fn { is_effect: true, params: vec![elem_ty], ret: Box::new(callback_ret) },
+                    almide_lang::types::fan::map_callback(elem_ty, result_elem.clone()),
                     "fan.map callback");
-                Some(Ty::result(Ty::list(resolve_ty(&result_elem, &self.uf)), Ty::String))
+                Some(almide_lang::types::fan::map_result(resolve_ty(&result_elem, &self.uf)))
             }
             "race" => {
                 // `fan.race` is gone twice over. 0.42.0 removed the thunk-list

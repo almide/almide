@@ -2,6 +2,16 @@
 /// The call's type-param bindings, as owned native kinds.
 type Env = BTreeMap<String, NTy>;
 
+/// An unconstrained generic value may cross a scalar representation boundary.
+/// An Eq/Ord-bound value may not: comparing Float bits as Int changes meaning.
+fn generic_scalar_lane(env: &Env, d: &DTy, got: NTy,
+    bounds: &[(String, almide_lang::capability_bounds::Cap)]) -> Option<NTy> {
+    let DTy::Var(v) = d else { return None };
+    if bounds.iter().any(|(name, _)| name == v) { return None; }
+    let want = *env.get(v)?;
+    matches!((got, want), (NTy::F64, NTy::I64) | (NTy::I64, NTy::F64)).then_some(want)
+}
+
 fn bind(env: &mut Env, v: &str, t: NTy) -> Option<()> {
     match env.get(v) {
         Some(b) if !crate::native_value_repr::same_owned(*b, t) => None,
@@ -61,6 +71,7 @@ fn bind_param(env: &mut Env, d: &DTy, t: NTy) -> Option<()> {
         DTy::Matrix => rec::is_matrix(t).then_some(()),
         DTy::Value => rec::is_value(t).then_some(()),
         DTy::Bytes => rec::is_bytes(t).then_some(()),
+        DTy::Runtime(runtime) => runtime.accepts(t).then_some(()),
         DTy::Set(e) => {
             let inner = rec::set_elem(t.rec()?)?;
             // Preserve the recursively declared element representation.
@@ -100,40 +111,32 @@ fn kind_of(env: &Env, d: &DTy) -> Option<NTy> {
         DTy::Matrix => NTy::Rec(rec::matrix_index()),
         DTy::Value => NTy::Rec(rec::value_index()),
         DTy::Bytes => NTy::Rec(rec::bytes_index()),
+        DTy::Runtime(runtime) => runtime.kind(),
         DTy::Set(e) => {
             let inner = kind_of(env, e)?;
             rec::native_set_element_kind(inner).then_some(())?;
             NTy::Rec(rec::set_type_of(inner))
         }
-        DTy::List(_) | DTy::Opt(_) | DTy::Result(..) => return wrapped_kind(env, d),
-        DTy::Map(k, v) => NTy::Rec(rec::map_type_of(kind_of(env, k)?, kind_of(env, v)?)),
-        DTy::Fn(..) => return None,
-    })
-}
-
-/// [`kind_of`] for a list, an Option or a Result.
-fn wrapped_kind(env: &Env, d: &DTy) -> Option<NTy> {
-    Some(match d {
-        // A list or Option of Float bits would leave the render's lanes
-        // (`Vec<i64>`, `Option<i64>`) for the runtime's `f64`: refused.
+        // Containers keep MIR scalar lanes; the runtime adapter converts
+        // explicit Float payloads at the boundary.
         DTy::List(e) => match kind_of(env, e)? {
             NTy::I64 => NTy::Vec,
             NTy::Str => NTy::VecStr,
-            NTy::F64 => return None,
+            NTy::F64 => NTy::Vec,
             k => NTy::Rec(rec::list_type_of(k)),
         },
         DTy::Opt(e) => match kind_of(env, e)? {
             NTy::I64 => NTy::Opt,
-            NTy::F64 => return None,
+            NTy::F64 => NTy::Opt,
             k => NTy::Rec(rec::option_type_of(k)),
         },
-        DTy::Result(o, e) => match (kind_of(env, o)?, kind_of(env, e)?) {
+        DTy::Result(o, e) => match (slot_kind(kind_of(env, o)?), slot_kind(kind_of(env, e)?)) {
             (NTy::I64, NTy::Str) => NTy::Res,
             (NTy::Str, NTy::Str) => NTy::ResStr,
-            (NTy::F64, _) | (_, NTy::F64) => return None,
             (ok, err) => NTy::Rec(rec::result_type_of(ok, err)),
         },
-        _ => return None,
+        DTy::Map(k, v) => NTy::Rec(rec::map_type_of(kind_of(env, k)?, kind_of(env, v)?)),
+        DTy::Fn(..) => return None,
     })
 }
 
@@ -158,6 +161,17 @@ fn bind_lambda(env: &mut Env, d: &DTy, k: NativeSigKind) -> Option<bool> {
 #[cfg(test)]
 mod type_tests {
     use super::*;
+    #[test]
+    fn scalar_generic_recode_never_changes_a_comparison_bound() {
+        let env = Env::from([("A".into(), NTy::I64)]);
+        let a = DTy::Var("A".into());
+        assert_eq!(generic_scalar_lane(&env, &a, NTy::F64, &[]), Some(NTy::I64));
+        assert_eq!(generic_scalar_lane(&env, &a, NTy::I64, &[]), None);
+        assert_eq!(generic_scalar_lane(&env, &a, NTy::Str, &[]), None);
+        assert_eq!(generic_scalar_lane(&env, &DTy::Int, NTy::F64, &[]), None);
+        assert_eq!(generic_scalar_lane(&env, &a, NTy::F64,
+            &[("A".into(), almide_lang::capability_bounds::Cap::Eq)]), None);
+    }
     #[test]
     fn runtime_values_and_sets_bind_only_their_declared_representations() {
         let _guard = rec::install(vec![]);
@@ -236,6 +250,8 @@ mod type_tests {
         assert_eq!(bind(&mut env, "L", NTy::Vec), Some(()));
         assert_eq!(bind(&mut env, "L", NTy::Rec(0)), Some(()));
         let result_float = DTy::Result(Box::new(DTy::Float), Box::new(DTy::Str));
-        assert_eq!(kind_of(&env, &result_float), None);
+        assert_eq!(kind_of(&env, &result_float), Some(NTy::Res));
     }
 }
+
+fn slot_kind(t: NTy) -> NTy { if t == NTy::F64 { NTy::I64 } else { t } }

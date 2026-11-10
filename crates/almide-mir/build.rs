@@ -15,8 +15,8 @@ include!("src/native_floor_host.rs");
 
 fn main() {
     // Cargo also tracks the codegen build dependency and its embedded runtime.
-    for file in ["build.rs", "src/render_native_str.rs", "src/native_floor_header.rs",
-        "src/native_floor_index.rs", "src/native_floor_build.rs", "src/native_floor_scan.rs", "src/native_floor_host.rs"] {
+    for file in ["build.rs", "src/render_native_str.rs", "src/native_floor_header.rs", "src/native_io_header.rs",
+        "src/native_floor_index.rs", "src/native_floor_build.rs", "src/native_floor_scan.rs", "src/native_floor_host.rs", "src/native_floor_cfg.rs"] {
         println!("cargo:rerun-if-changed={file}");
     }
     let index = build_runtime_index();

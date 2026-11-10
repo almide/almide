@@ -254,7 +254,28 @@ impl Facts {
                 _ => {}
             }
         }
-        updates == 1
+        if unconditional { updates == 1 } else { Self::max_updates(&ops[start + 1..end], value) == Some(1) }
+    }
+
+    /// Alternative filter arms may each increment the write cursor. Count
+    /// along execution paths: mutually exclusive arms take their maximum,
+    /// while successive conditions add. More than one increment still refuses.
+    fn max_updates(ops: &[Op], value: ValueId) -> Option<usize> {
+        let mut current = 0;
+        let mut stack = Vec::new();
+        for op in ops {
+            match op {
+                Op::IfThen { .. } => { stack.push((current, None)); current = 0; }
+                Op::Else { .. } => { stack.last_mut()?.1 = Some(current); current = 0; }
+                Op::EndIf { .. } => {
+                    let (before, then) = stack.pop()?;
+                    current = before + current.max(then.unwrap_or(0));
+                }
+                Op::SetLocal { local, .. } if *local == value => current += 1,
+                _ => {}
+            }
+        }
+        stack.is_empty().then_some(current)
     }
 }
 

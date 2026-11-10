@@ -298,6 +298,88 @@ effect fn main() -> Unit = {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #4642: a block that is the operand of a box or a literal — `ok(fan { })`
+/// (what a fan nested as a fan arm is), `some(…)`, a tuple or a list element
+/// — returns its first Err before the enclosing value exists. The box used
+/// to be allocated first and was left behind by that return. The wasm leg
+/// runs on the embedded host, so this needs no external tool.
+#[test]
+fn a_failing_block_inside_a_box_leaves_no_block_behind() {
+    let src = "\
+effect fn ok_n(n: Int) -> Result[Int, String] = ok(n)
+
+effect fn fail_n(m: String) -> Result[Int, String] = err(m)
+
+effect fn nested() -> Result[Int, String] = {
+  let (a, (b, c)) = fan {
+    ok_n(1)!
+    fan {
+      ok_n(2)!
+      fail_n(\"inner\")!
+    }
+  }
+  ok(a + b + c)
+}
+
+effect fn boxed() -> Result[(Int, Int), String] = ok(fan {
+  ok_n(2)!
+  fail_n(\"boxed\")!
+})
+
+effect fn optioned() -> Result[Option[(Int, Int)], String] = {
+  let o = some(fan {
+    ok_n(2)!
+    fail_n(\"optioned\")!
+  })
+  ok(o)
+}
+
+effect fn tupled() -> Result[Int, String] = {
+  let t = (\"k\", fan {
+    ok_n(2)!
+    fail_n(\"tupled\")!
+  })
+  let (_, (b, c)) = t
+  ok(b + c)
+}
+
+effect fn listed() -> Result[Int, String] = {
+  let xs = [(1, 2), fan {
+    ok_n(2)!
+    fail_n(\"listed\")!
+  }]
+  ok(list.len(xs))
+}
+
+effect fn main() -> Unit = {
+  for i in 0..<3 {
+    let a: Result[Int, String] = nested()
+    let b: Result[(Int, Int), String] = boxed()
+    let c: Result[Option[(Int, Int)], String] = optioned()
+    let d: Result[Int, String] = tupled()
+    let e: Result[Int, String] = listed()
+    println(\"${i} ${a == err(\"inner\")} ${b == err(\"boxed\")} ${c == err(\"optioned\")} ${d == err(\"tupled\")} ${e == err(\"listed\")}\")
+  }
+}
+";
+    let dir = scratch("boxed");
+    let almd = dir.join("main.almd");
+    std::fs::write(&almd, src).expect("write source");
+    let out = Command::new(almide_bin())
+        .arg("run")
+        .arg(&almd)
+        .args(["--target", "wasm"])
+        .env("ALMIDE_WASM_ALLOC_COUNT", "1")
+        .output()
+        .expect("spawn almide run");
+    let all = "true true true true true\n";
+    assert_eq!(String::from_utf8_lossy(&out.stdout), format!("0 {all}1 {all}2 {all}"), "wasm leg");
+    let err = String::from_utf8_lossy(&out.stderr);
+    let line = err.lines().find(|l| l.starts_with("__ALMD_WASM_ALLOC")).unwrap_or_else(|| panic!("no counter line:\n{err}"));
+    assert!(line.contains(" live=0 "), "a block outlived the run: {line}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// An arm's top-level `!` — the writer's, or the one auto-try puts on a
 /// Result call arm of a TAIL or `let`-bound fan — is the arm's own marker:
 /// every arm still runs, and the lowest-index Err is the block's. Before,

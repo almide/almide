@@ -6,6 +6,9 @@ struct FnArgOut {
     prelude: Vec<String>,
     shims: Vec<&'static str>,
     reads: Vec<crate::render_native_bounds::Slot>,
+    share: Vec<String>,
+    /// The callback takes the lent receiver's payload by reference.
+    lent: bool,
 }
 
 /// What rendering the function-typed argument needs to see.
@@ -17,12 +20,32 @@ struct FnArgCx<'a> {
     /// The op index, which names the env array.
     at: usize,
     bounds: &'a [(String, almide_lang::capability_bounds::Cap)],
+    /// The type param of a lent `Option` receiver ([`lent_var`]).
+    lent: Option<&'a str>,
 }
 
 /// The adapter for the function-typed argument `a` (kind `t`) of declared
 /// type `(dps) -> dret`, binding the type params it fixes; the env array's
 /// binding and any shim it needs go to `side`.
 fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): (&CallArg, NTy), side: &mut FnArgOut) -> Option<String> {
+    for values in [false, true] {
+        if values && dps.iter().chain([dret]).any(|d| mentions_comparison_bound(d, cx.bounds)) { continue; }
+        let mut trial = env.clone();
+        let mut extra = FnArgOut::default();
+        if let Some(code) = fn_arg_with_values(cx, &mut trial, (dps, dret), (a, t), &mut extra, values) {
+            *env = trial;
+            side.prelude.extend(extra.prelude);
+            side.shims.extend(extra.shims);
+            side.reads.extend(extra.reads);
+            side.share.extend(extra.share);
+            side.lent |= extra.lent;
+            return Some(code);
+        }
+    }
+    None
+}
+
+fn fn_arg_with_values(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): (&CallArg, NTy), side: &mut FnArgOut, values: bool) -> Option<String> {
     let (CallArg::Handle(blk) | CallArg::Scalar(blk)) = a else { return None };
     let origin = cx.origins.get(blk);
     let lambda = origin.map(|(name, _)| name.as_str());
@@ -42,14 +65,17 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
     };
     let (ps, ret) = if let Some(lambda) = lambda { clo::lambda_sig(cx.sigs, lambda)? }
         else { let (ps, ret) = declared?; (ps.into_iter().map(clo::arg_kind).collect(), ret.map(clo::arg_kind)) };
-    let ret = ret?;
+    if ret.is_none() && *dret != DTy::Unit { return None; }
+    if let Some(function) = current_fn() {
+        crate::trace::trace_for("ALMIDE_DBG_LOWER_FN", &function, || format!("callback {lambda:?} values={values} params={ps:?} ret={ret:?} env={env:?} dps={dps:?} dret={dret:?}"));
+    }
     if !matches!(t, NTy::Vec | NTy::VecRef) && !rec::is_closure(t) { return None; }
     let layout = callback_layout(dps, ps.len())?;
     callback_bounds_hold(cx, lambda, t, &layout, dret)?;
-    let tuples = dps.iter().any(has_runtime_tuple) || has_runtime_tuple(dret);
+    let tuples = values || dps.iter().any(has_value_conversion) || has_value_conversion(dret);
     let bits: Vec<Lane> = if tuples {
         for ((d, _), k) in layout.iter().zip(&ps) { bind_callback_shape(env, d, clo::owned_nty(*k))?; }
-        bind_callback_shape(env, dret, clo::owned_nty(ret))?;
+        if let Some(ret) = ret { bind_callback_shape(env, dret, clo::owned_nty(ret))?; }
         Vec::new()
     } else { dps
         .iter()
@@ -63,14 +89,17 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
     let ret_lane = ret_lane_of(dret);
     if !tuples && ret_lane == Lane::F64 {
         side.shims.push(LANE_F64);
-    } else if !tuples && bind_lambda(env, dret, ret) != Some(false) {
+    } else if !tuples && bind_lambda(env, dret, ret?) != Some(false) {
         return None;
     }
     let slots = env_slots(cx, origin);
     let name = format!("__env_{}_{}", cx.at, side.prelude.len());
-    if tuples && ret == NativeSigKind::F64 { side.shims.push(LANE_F64); }
+    if tuples && ret == Some(NativeSigKind::F64) { side.shims.push(LANE_F64); }
+    // The params that take a lent receiver's payload: by reference.
+    let lent: Vec<bool> = dps.iter().map(|d| !tuples && cx.lent.is_some_and(|t| matches!(d, DTy::Var(v) if v == t))).collect();
+    side.lent = lent.contains(&true);
     let closure = if tuples { tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), ret)? }
-        else { adapter(lambda, &name, (&ps, &moved), &bits, (ret, ret_lane))? };
+        else { adapter(lambda, &name, (&ps, &moved, &lent), &bits, (ret?, ret_lane))? };
     bind_env(side, &name, (*blk, t), slots, lambda.is_none())?;
     Some(closure)
 }
@@ -117,8 +146,9 @@ fn bind_env(side: &mut FnArgOut, name: &str, (blk, t): (ValueId, NTy), slots: Op
         side.prelude.push(format!("let {name}: [i64; {}] = [{}];", slots.len(), slots.join(", ")));
     } else {
         side.prelude.push(format!("let {name} = &{};", var(blk)));
+        side.share.push(format!("almide_str_block::almide_str_mark_reachable({name});"));
         if unnamed {
-            side.prelude.push(format!("if {name}.len() == 0 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }}"));
+            side.prelude.push(format!("if {name}.len() == 0 {{ almide_abort(\"index out of bounds\"); }}"));
             side.prelude.push(format!("let {name}_index: i64 = {name}.words()[0];"));
             side.reads.push(crate::render_native_bounds::Slot { base: blk, idx: None, k: 0 });
         }
@@ -129,8 +159,8 @@ fn bind_env(side: &mut FnArgOut, name: &str, (blk, t): (ValueId, NTy), slots: Op
 
 /// One call expression prefix; the dynamic index is read and checked once
 /// in the call's prelude, before the runtime invokes the callback.
-fn callback_head(lambda: Option<&str>, env: &str, ps: &[NativeSigKind], ret: NativeSigKind) -> String {
+fn callback_head(lambda: Option<&str>, env: &str, ps: &[NativeSigKind], ret: Option<NativeSigKind>) -> String {
     if let Some(lambda) = lambda { return format!("{}(&{env}", crate::render_native::mangle(lambda)); }
-    let key = clo::sig_key(ps, &[], Some(ret)).unwrap_or_else(|| ps.len().to_string());
+    let key = clo::sig_key(ps, &[], ret).unwrap_or_else(|| ps.len().to_string());
     format!("__almd_ci_{key}({env}_index, &{env}")
 }

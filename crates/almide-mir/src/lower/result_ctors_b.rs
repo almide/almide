@@ -321,7 +321,10 @@ impl LowerCtx {
                     let tup = self.try_lower_tuple_construct(elements)?;
                     self.materialize_result_str(tup, repr, false, false)
                 }
-                _ => return None,
+                _ => {
+                    let tup = self.lower_owned_heap_field(inner)?;
+                    self.materialize_result_str(tup, repr, false, false)
+                }
             },
             IrExprKind::ResultErr { expr: inner } => {
                 let piece = self.lower_result_str_piece(inner)?;
@@ -356,7 +359,10 @@ impl LowerCtx {
                     let tup = self.try_lower_tuple_construct(elements)?;
                     self.materialize_result_str(tup, repr, false, false)
                 }
-                _ => return None,
+                _ => {
+                    let tup = self.lower_owned_heap_field(inner)?;
+                    self.materialize_result_str(tup, repr, false, false)
+                }
             },
             IrExprKind::ResultErr { expr: inner } => {
                 let piece = self.lower_result_str_piece(inner)?;
@@ -388,7 +394,10 @@ impl LowerCtx {
                     let tup = self.try_lower_tuple_construct(elements)?;
                     self.materialize_result_str(tup, repr, false, false)
                 }
-                _ => return None,
+                _ => {
+                    let tup = self.lower_owned_heap_field(inner)?;
+                    self.materialize_result_str(tup, repr, false, false)
+                }
             },
             IrExprKind::ResultErr { expr: inner } => {
                 let piece = self.lower_result_str_piece(inner)?;
@@ -421,7 +430,10 @@ impl LowerCtx {
                     let tup = self.try_lower_tuple_construct(elements)?;
                     self.materialize_result_str(tup, repr, false, false)
                 }
-                _ => return None,
+                _ => {
+                    let tup = self.lower_owned_heap_field(inner)?;
+                    self.materialize_result_str(tup, repr, false, false)
+                }
             },
             IrExprKind::ResultErr { expr: inner } => {
                 let piece = self.lower_result_str_piece(inner)?;

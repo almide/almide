@@ -414,17 +414,13 @@ fn operator_credit(
         // that would falsely caps-verify a fn. Both concat runtimes are pure (no Stdout).
         n += 1;
     }
-    // The `**` OPERATOR (BinOp::PowFloat / PowInt) lowers to ONE synthetic CallFn —
-    // `math.__fpow` (the bit-exact libm pow) for Float, `math.__pow` (int squaring) for Int.
-    // Count the operator NODE as one ir_call so that synthetic call has a matching ir_call
-    // and `mir_calls <= ir_calls` holds BY CONSTRUCTION (a `**` not yet lowered in some
-    // position just leaves mir < ir — honest caps taint, never the mir > ir over-count that
-    // would falsely caps-verify a fn). Both callees are PURE (math/math_fpow modules reach
-    // no Stdout), so the synthetic call adds no real capability.
+    // PowInt, PowFloat and ModFloat each lower to one pure library call:
+    // int.pow, math.__fpow and float.fmod. Credit that operator node once;
+    // Float32 promote/demote operations add no calls or capabilities.
     if matches!(
         &e.kind,
         almide_ir::IrExprKind::BinOp {
-            op: almide_ir::BinOp::PowFloat | almide_ir::BinOp::PowInt,
+            op: almide_ir::BinOp::PowFloat | almide_ir::BinOp::PowInt | almide_ir::BinOp::ModFloat,
             ..
         }
     ) {

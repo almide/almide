@@ -1,4 +1,25 @@
 impl LowerCtx {
+    pub(crate) fn precopy_native_while_condition(&mut self, cond: &IrExpr) {
+        if crate::lower::owned_tco_slots() {
+            self.precopy_borrowed_reassign_slots(&[IrStmt {
+                kind: IrStmtKind::Expr { expr: cond.clone() }, span: cond.span,
+            }]);
+        }
+    }
+
+    pub(crate) fn lower_while_condition(&mut self, cond: &IrExpr) -> Option<ValueId> {
+        if !crate::lower::owned_tco_slots() { return self.lower_scalar_value(cond); }
+        // The condition runs on every back edge, including its write-backs.
+        // Use the same owned slots as the body, and release condition-local
+        // temporaries before either taking the body or leaving the loop.
+        let mark = self.live_heap_handles.len();
+        self.scalar_loop_depth += 1;
+        let value = self.lower_scalar_value(cond);
+        self.scalar_loop_depth -= 1;
+        if value.is_some() { self.drop_arm_locals(mark); }
+        value
+    }
+
     pub(crate) fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), LowerError> {
         // First try to EXECUTE it as a real scalar-state loop; on any out-of-subset
         // feature this rolls back cleanly and we reach the model-one-iteration form below.

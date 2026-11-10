@@ -79,6 +79,11 @@ fn call_result(name: &str, sigs: &NativeSigs) -> Option<NTy> {
     }
     use crate::native_floor::FloorRet;
     match crate::native_floor::declared(name)?.ret {
+        FloorRet::Runtime(t) => Some(t.kind()),
+        FloorRet::RuntimeResult(t, optional) => {
+            let result = NTy::Rec(rec::result_type_of(t.kind(), NTy::Str));
+            Some(if optional { NTy::Rec(rec::option_type_of(result)) } else { result })
+        }
         FloorRet::Str => Some(NTy::Str),
         FloorRet::ListInt => Some(NTy::Vec),
         FloorRet::ListStr => Some(NTy::VecStr),
@@ -102,7 +107,7 @@ fn parent_slot_kind(i: u16, slot: Option<usize>) -> Option<NTy> {
         return carrier::slot_kind(i, k);
     }
     rec::rec_field(i, k).or_else(|| {
-        let ks: Vec<NTy> = rec::enum_slot_kinds(i, k).into_iter().filter(|t| matches!(t, NTy::Rec(_))).collect();
+        let ks = rec::enum_slot_kinds(i, k);
         (ks.len() == 1).then(|| ks[0])
     })
 }
@@ -120,6 +125,30 @@ fn slot_read_kind(i: u16, slot: Option<usize>) -> Option<NTy> {
         return (heap.len() == 1).then(|| heap[0]);
     }
     parent_slot_kind(i, slot).filter(|t| *t != NTy::I64)
+}
+
+/// A Result payload's declared kind comes from the tag stored immediately
+/// after it, before any control-flow boundary or other effect. The shared
+/// slot alone cannot distinguish two different heap payload types.
+fn result_store_kind(later: &[Op], root: ValueId, i: u16, f: &Facts<'_>) -> Option<NTy> {
+    let (ok, err) = rec::result_payloads(i)?;
+    // Scalar-Ok carriers construct their heap Err using a length-tagged block.
+    if ok == NTy::I64 { return Some(err); }
+    for op in later {
+        match op {
+            Op::Prim { kind: PrimKind::Store { width: 4 }, args, .. } => {
+                let [address, value] = args.as_slice() else { return None };
+                if f.base_of.get(address) != Some(&(root, Some(i64::from(BLOCK_HEADER) + 4))) {
+                    return None;
+                }
+                return match f.consts.get(value) { Some(0) => Some(ok), Some(1) => Some(err), _ => None };
+            }
+            Op::ConstInt { .. } | Op::IntBinOp { .. } | Op::Consume { .. }
+            | Op::Prim { kind: PrimKind::Handle, .. } => {}
+            _ => return None,
+        }
+    }
+    None
 }
 
 /// Seed declarations before call-site inference. A linked self-host body may
@@ -164,6 +193,7 @@ pub(super) fn type_blocks(
     tb.seed_params();
     // DynList blocks (and their declared length), the joins, the copies.
     tb.scan_ops();
+    tb.seed_list_declarations();
     let blocks = tb.blocks.clone();
     loop {
         let before = (tb.alloc_rec.len(), tb.str_lists.len(), tb.scalar_blocks.len(), tb.known.len());
@@ -201,6 +231,23 @@ struct BlockTyping<'a, 'f> {
 }
 
 impl BlockTyping<'_, '_> {
+    fn seed_list_declarations(&mut self) {
+        // A checked List[String] also types a computed, populated list.
+        // Its elements may come from tag-guarded Result reads, whose kind
+        // deliberately remains unknown to the flow-insensitive prepass.
+        for (v, key) in &self.func.aggregate_blocks {
+            if rec::declared_kind(key) == Some(NTy::VecStr) {
+                self.known.insert(*v, NTy::VecStr);
+                self.str_lists.insert(*v);
+            }
+        }
+        if let (Some(v), Some((_, Some(NativeSigKind::ListStr)))) =
+            (self.func.ret, self.sigs.get(self.func.name.as_str())) {
+            self.known.insert(v, NTy::VecStr);
+            self.str_lists.insert(v);
+        }
+    }
+
     fn seed_params(&mut self) {
         let func = self.func;
         if let Some((ps, _)) = self.sigs.get(func.name.as_str()).filter(|(ps, _)| ps.len() == func.params.len()) {
@@ -306,11 +353,18 @@ impl BlockTyping<'_, '_> {
     fn down(&mut self) {
         let (func, f) = (self.func, self.f);
         let empty = super::empty_list_blocks(func);
-        for op in &func.ops {
+        let cases = enum_built_whole(func, self.alloc_rec, f.base_of, f.consts);
+        for (at, op) in func.ops.iter().enumerate() {
             let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op else { continue };
             let (Some(&(r, off)), Some(&vsrc)) = (f.base_of.get(&args[0]), f.handle_of.get(&args[1])) else { continue };
             let Some(&i) = self.alloc_rec.get(&r) else { continue };
-            match parent_slot_kind(i, slot_of(off)) {
+            let kind = cases.get(&r).and_then(|(tag, _)| {
+                let slot = slot_of(off)?.checked_sub(1)?;
+                rec::enum_cases(i)?.into_iter().find(|(t, _)| t == tag)?.1.get(slot).copied()
+            }).or_else(|| parent_slot_kind(i, slot_of(off)))
+                .or_else(|| (slot_of(off) == Some(0)).then(||
+                    result_store_kind(&func.ops[at + 1..], r, i, f)).flatten());
+            match kind {
                 Some(NTy::Rec(j)) => { self.alloc_rec.entry(vsrc).or_insert(j); }
                 // An empty literal has no element store to establish String.
                 // Preserve the parent's declared list type at allocation;
@@ -580,5 +634,29 @@ mod store_ownership_tests {
         let handles = BTreeMap::from([(ValueId(20), ValueId(1)), (ValueId(21), ValueId(1)), (ValueId(22), ValueId(2))]);
         let bases = BTreeMap::from([(ValueId(10), (ValueId(3), Some(12))), (ValueId(11), (ValueId(3), Some(20))), (ValueId(12), (ValueId(3), Some(28)))]);
         assert_eq!(borrowed_stores(&f, &handles, &bases), BTreeSet::from([(ValueId(3), ValueId(20)), (ValueId(3), ValueId(22))]));
+    }
+}
+
+#[cfg(test)]
+mod result_store_tests {
+    use super::*;
+
+    #[test]
+    fn payload_type_requires_the_same_carriers_immediate_tag() {
+        let _guard = rec::install(vec![rec::RecDecl {
+            name: "Result".into(), result_of: Some((NTy::Vec, NTy::Rec(1))), ..Default::default()
+        }, rec::RecDecl { name: "Error".into(), fields: vec![NTy::Str], ..Default::default() }]);
+        let v = ValueId;
+        let handles = BTreeMap::new();
+        let bases = BTreeMap::from([(v(2), (v(0), Some(i64::from(BLOCK_HEADER) + 4)))]);
+        let consts = BTreeMap::from([(v(3), 0), (v(4), 1), (v(5), 2)]);
+        let facts = Facts { handle_of: &handles, base_of: &bases, consts: &consts };
+        let store = |tag| Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![v(2), v(tag)] };
+        assert_eq!(result_store_kind(&[store(3)], v(0), 0, &facts), Some(NTy::Vec));
+        assert_eq!(result_store_kind(&[store(4)], v(0), 0, &facts), Some(NTy::Rec(1)));
+        assert_eq!(result_store_kind(&[store(5)], v(0), 0, &facts), None);
+        assert_eq!(result_store_kind(&[store(3)], v(9), 0, &facts), None);
+        assert_eq!(result_store_kind(&[Op::Else { val: None }, store(3)], v(0), 0, &facts), None);
+        assert_eq!(result_store_kind(&[], v(0), 0, &facts), None);
     }
 }

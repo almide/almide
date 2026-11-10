@@ -47,6 +47,18 @@ fn desugar_effect_unwrap_inner(
 ) -> Option<IrExpr> {
     
     use almide_lang::types::Ty;
+    // Late rewrites (notably a nested fan join) can create a constructor
+    // around a statement block after program-level normalization. Expose
+    // those statements before propagating !, preserving the constructor
+    // only on the successful continuation.
+    if matches!(&body.kind, IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } if matches!(expr.kind, IrExprKind::Block { .. })) {
+        let mut normalized = body.clone();
+        if absorb_constructor_block(&mut normalized) {
+            return desugar_effect_unwrap_inner(&normalized, next_var, unit_main, ret_is_result)
+                .or(Some(normalized));
+        }
+    }
     // A `!` in a FOR-IN ITERABLE HEAD (`for row in list.get(XS, 0)! { … }` — #1168):
     // hoist it FIRST into `let $t = <head>!; for row in $t { … }` (exactly the manual
     // workaround, automated), so the stmt scan below sees an ordinary bind-`!` and the
@@ -68,7 +80,7 @@ fn desugar_effect_unwrap_inner(
         // `!`-bearing loop, or the `match` an earlier let-`!` rewrite left as the whole body
         // (its Ok arm holding a `!`-bearing loop) — `desugar_tail_effect_unwrap` reaches
         // each arm's block / loop.
-        if unit_main || matches!(&body.kind, IrExprKind::Unwrap { .. }) {
+        if unit_main || matches!(&body.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. } | IrExprKind::If { .. } | IrExprKind::Match { .. }) {
             return desugar_tail_effect_unwrap(body, next_var, unit_main, ret_is_result);
         }
         return None;
@@ -118,10 +130,17 @@ fn desugar_effect_unwrap_inner(
         }
         // The continuation = the rest of the block `{ stmts[i+1..]; tail }`, typed as the whole body
         // (it produces the fn's return). RECURSE so a LATER `!` in the continuation also desugars.
+        // A pattern binder is a borrowed payload, not the mutable slot of
+        // `var x = f()!`. Retain that slot as an explicit binding in the Ok
+        // continuation so later assignments preserve existing aliases.
+        let mut rest = stmts[i + 1..].to_vec();
+        let ok_pat = if matches!(&s.kind, IrStmtKind::Bind { mutability: almide_ir::Mutability::Var, .. }) {
+            mutable_unwrap_binding(ok_pat, &mut rest, next_var, s.span)
+        } else { ok_pat };
         let cont = IrExpr {
-            kind: IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
+            kind: IrExprKind::Block { stmts: rest, expr: tail.clone() },
             ty: body.ty.clone(),
-            span: body.span.clone(),
+            span: body.span,
             def_id: body.def_id,
         };
         let cont =
@@ -135,7 +154,7 @@ fn desugar_effect_unwrap_inner(
         return Some(IrExpr {
             kind: IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(m)) },
             ty: body.ty.clone(),
-            span: body.span.clone(),
+            span: body.span,
             def_id: body.def_id,
         });
     }
@@ -155,7 +174,7 @@ fn desugar_effect_unwrap_inner(
             return Some(IrExpr {
                 kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
                 ty: body.ty.clone(),
-                span: body.span.clone(),
+                span: body.span,
                 def_id: body.def_id,
             });
         }
@@ -184,12 +203,12 @@ fn hoist_for_in_head_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
             kind: IrExprKind::Block {
                 stmts: vec![IrStmt {
                     kind: IrStmtKind::Expr { expr: body.clone() },
-                    span: body.span.clone(),
+                    span: body.span,
                 }],
                 expr: None,
             },
             ty: body.ty.clone(),
-            span: body.span.clone(),
+            span: body.span,
             def_id: body.def_id,
         };
         return hoist_for_in_head_unwrap(&as_block, next_var);
@@ -215,12 +234,12 @@ fn hoist_for_in_head_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
             let mut new_stmts = stmts.clone();
             new_stmts.push(IrStmt {
                 kind: IrStmtKind::Expr { expr: t_expr.clone() },
-                span: t_expr.span.clone(),
+                span: t_expr.span,
             });
             let as_stmts = IrExpr {
                 kind: IrExprKind::Block { stmts: new_stmts, expr: None },
                 ty: body.ty.clone(),
-                span: body.span.clone(),
+                span: body.span,
                 def_id: body.def_id,
             };
             return hoist_for_in_head_unwrap(&as_stmts, next_var);
@@ -240,7 +259,7 @@ fn hoist_for_in_head_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
             ty: iterable.ty.clone(),
             value: (**iterable).clone(),
         },
-        span: stmts[idx].span.clone(),
+        span: stmts[idx].span,
     };
     let new_for = IrStmt {
         kind: IrStmtKind::Expr {
@@ -251,17 +270,17 @@ fn hoist_for_in_head_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
                     iterable: Box::new(IrExpr {
                         kind: IrExprKind::Var { id: t },
                         ty: iterable.ty.clone(),
-                        span: iterable.span.clone(),
+                        span: iterable.span,
                         def_id: None,
                     }),
                     body: loop_body.clone(),
                 },
                 ty: for_expr.ty.clone(),
-                span: for_expr.span.clone(),
+                span: for_expr.span,
                 def_id: for_expr.def_id,
             },
         },
-        span: stmts[idx].span.clone(),
+        span: stmts[idx].span,
     };
     let mut new_stmts = stmts[..idx].to_vec();
     new_stmts.push(bind);
@@ -270,9 +289,30 @@ fn hoist_for_in_head_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr>
     Some(IrExpr {
         kind: IrExprKind::Block { stmts: new_stmts, expr: tail.clone() },
         ty: body.ty.clone(),
-        span: body.span.clone(),
+        span: body.span,
         def_id: body.def_id,
     })
+}
+
+fn mutable_unwrap_binding(
+    pattern: almide_ir::IrPattern,
+    rest: &mut Vec<IrStmt>,
+    next_var: &mut u32,
+    span: Option<almide_base::Span>,
+) -> almide_ir::IrPattern {
+    use almide_ir::IrPattern;
+    let IrPattern::Ok { inner } = &pattern else { return pattern };
+    let IrPattern::Bind { var, ty } = inner.as_ref() else { return pattern };
+    let payload = VarId(*next_var);
+    *next_var += 1;
+    rest.insert(0, IrStmt {
+        kind: IrStmtKind::Bind {
+            var: *var, mutability: almide_ir::Mutability::Var, ty: ty.clone(),
+            value: IrExpr { kind: IrExprKind::Var { id: payload }, ty: ty.clone(), span, def_id: None },
+        },
+        span,
+    });
+    IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: payload, ty: ty.clone() }) }
 }
 
 fn stmt_effect_unwrap_target(s: &IrStmt) -> Option<(IrExpr, almide_ir::IrPattern)> {
@@ -357,20 +397,20 @@ fn build_main_die_line(payload: IrExpr, at: &IrExpr, next_var: &mut u32) -> IrEx
     let lit = |v: &str| IrExpr {
         kind: IrExprKind::LitStr { value: v.into() },
         ty: Ty::String,
-        span: at.span.clone(),
+        span: at.span,
         def_id: None,
     };
     let concat = |a: IrExpr, b: IrExpr| IrExpr {
         kind: IrExprKind::BinOp { op: BinOp::ConcatStr, left: Box::new(a), right: Box::new(b) },
         ty: Ty::String,
-        span: at.span.clone(),
+        span: at.span,
         def_id: None,
     };
     let line = concat(concat(lit("Error: "), payload), lit("\n"));
     let m_ref = IrExpr {
         kind: IrExprKind::Var { id: m_var },
         ty: Ty::String,
-        span: at.span.clone(),
+        span: at.span,
         def_id: None,
     };
     // SPLIT form (`let $h = prim.handle($m); prim.die($h)`): a NESTED `prim.handle(<Var>)`
@@ -389,11 +429,11 @@ fn build_main_die_line(payload: IrExpr, at: &IrExpr, next_var: &mut u32) -> IrEx
             type_args: Vec::new(),
         },
         ty: Ty::Int,
-        span: at.span.clone(),
+        span: at.span,
         def_id: None,
     };
     let h_ref =
-        IrExpr { kind: IrExprKind::Var { id: h_var }, ty: Ty::Int, span: at.span.clone(), def_id: None };
+        IrExpr { kind: IrExprKind::Var { id: h_var }, ty: Ty::Int, span: at.span, def_id: None };
     let die_call = IrExpr {
         kind: IrExprKind::Call {
             target: CallTarget::Module {
@@ -405,7 +445,7 @@ fn build_main_die_line(payload: IrExpr, at: &IrExpr, next_var: &mut u32) -> IrEx
             type_args: Vec::new(),
         },
         ty: Ty::Unit,
-        span: at.span.clone(),
+        span: at.span,
         def_id: None,
     };
     IrExpr {
@@ -418,7 +458,7 @@ fn build_main_die_line(payload: IrExpr, at: &IrExpr, next_var: &mut u32) -> IrEx
                         value: line,
                         mutability: almide_ir::Mutability::Let,
                     },
-                    span: at.span.clone(),
+                    span: at.span,
                 },
                 IrStmt {
                     kind: IrStmtKind::Bind {
@@ -427,13 +467,13 @@ fn build_main_die_line(payload: IrExpr, at: &IrExpr, next_var: &mut u32) -> IrEx
                         value: handle_call,
                         mutability: almide_ir::Mutability::Let,
                     },
-                    span: at.span.clone(),
+                    span: at.span,
                 },
             ],
             expr: Some(Box::new(die_call)),
         },
         ty: Ty::Unit,
-        span: at.span.clone(),
+        span: at.span,
         def_id: at.def_id,
     }
 }
@@ -486,7 +526,7 @@ fn build_main_die(msg: IrExpr, body: &IrExpr) -> IrExpr {
             type_args: Vec::new(),
         },
         ty: Ty::Int,
-        span: body.span.clone(),
+        span: body.span,
         def_id: None,
     };
     IrExpr {
@@ -496,7 +536,7 @@ fn build_main_die(msg: IrExpr, body: &IrExpr) -> IrExpr {
             type_args: Vec::new(),
         },
         ty: Ty::Unit,
-        span: body.span.clone(),
+        span: body.span,
         def_id: None,
     }
 }
@@ -525,7 +565,7 @@ fn build_option_unwrap_match(
                 IrExpr {
                     kind: IrExprKind::LitStr { value: "Error: none\n".into() },
                     ty: Ty::String,
-                    span: body.span.clone(),
+                    span: body.span,
                     def_id: None,
                 },
                 body,
@@ -539,7 +579,7 @@ fn build_option_unwrap_match(
             IrExpr {
                 kind: IrExprKind::OptionNone,
                 ty: body.ty.clone(),
-                span: body.span.clone(),
+                span: body.span,
                 def_id: body.def_id,
             }
         } else {
@@ -548,12 +588,12 @@ fn build_option_unwrap_match(
                     expr: Box::new(IrExpr {
                         kind: IrExprKind::LitStr { value: "none".into() },
                         ty: Ty::String,
-                        span: body.span.clone(),
+                        span: body.span,
                         def_id: None,
                     }),
                 },
                 ty: body.ty.clone(),
-                span: body.span.clone(),
+                span: body.span,
                 def_id: body.def_id,
             }
         };
@@ -566,7 +606,7 @@ fn build_option_unwrap_match(
     IrExpr {
         kind: IrExprKind::Match { subject: Box::new(inner), arms: vec![none_arm, some_arm] },
         ty: body.ty.clone(),
-        span: body.span.clone(),
+        span: body.span,
         def_id: body.def_id,
     }
 }
@@ -608,7 +648,7 @@ fn build_unwrap_match(
     let e_ref = IrExpr {
         kind: IrExprKind::Var { id: e_var },
         ty: inner_err_ty.clone(),
-        span: body.span.clone(),
+        span: body.span,
         def_id: None,
     };
     let payload = if inner_err_ty == fn_err_ty {
@@ -629,14 +669,14 @@ fn build_unwrap_match(
                     IrExpr {
                         kind: IrExprKind::LitStr { value: ", ".into() },
                         ty: Ty::String,
-                        span: body.span.clone(),
+                        span: body.span,
                         def_id: None,
                     },
                 ],
                 type_args: vec![],
             },
             ty: Ty::String,
-            span: body.span.clone(),
+            span: body.span,
             def_id: None,
         }
     } else if matches!(fn_err_ty, Ty::String) {
@@ -653,7 +693,7 @@ fn build_unwrap_match(
         IrExpr {
             kind: IrExprKind::ResultErr { expr: Box::new(payload) },
             ty: body.ty.clone(),
-            span: body.span.clone(),
+            span: body.span,
             def_id: body.def_id,
         }
     };
@@ -668,7 +708,7 @@ fn build_unwrap_match(
     Some(IrExpr {
         kind: IrExprKind::Match { subject: Box::new(inner), arms: vec![err_arm, ok_arm] },
         ty: body.ty.clone(),
-        span: body.span.clone(),
+        span: body.span,
         def_id: body.def_id,
     })
 }

@@ -30,6 +30,7 @@ use std::process::Command;
 
 use almide::types::{Ty, TypeConstructorId};
 
+#[derive(Clone)]
 struct Row {
     /// Row id: the extern fn is `f_<id>`, the host fn `host::f_<id>`.
     id: &'static str,
@@ -267,6 +268,7 @@ fn run_package(tag: &str, almd: &str, host: &str, args: &[&str]) -> (bool, Strin
     let out = Command::new(env!("CARGO_BIN_EXE_almide"))
         .current_dir(&dir)
         .env("ALMIDE_RUN_PROJECT_DIR", dir.join(".run"))
+        .env("ALMIDE_VERIFIED_DEBUG", "1")
         .args(args)
         .arg(Path::new("src/main.almd"))
         .output()
@@ -293,6 +295,70 @@ fn assert_rust_target(target: &str) {
 #[test]
 fn every_rust_row_compiles_against_its_documented_host_signature_and_runs() {
     assert_rust_target("rust");
+}
+
+/// The growing v1 boundary must execute the host implementation, without
+/// silently passing this matrix through the reference renderer. The complete
+/// ABI matrix above remains required while the remaining adapters are added.
+#[test]
+fn native_v1_foreign_value_adapters_execute_the_documented_rust_abi() {
+    let ids = ["int", "int8", "int16", "int32", "int64", "uint8", "uint16",
+        "uint32", "uint64", "float", "float32", "float64", "bool", "unit",
+        "string", "bytes", "list", "list_str", "option", "result", "tuple",
+        "two", "ret_bytes", "ret_string", "ret_list_str", "ret_opt_str",
+        "map", "set", "matrix", "ret_matrix",
+        "mut_list", "mut_bytes", "mut_str", "mut_list_str", "fn"];
+    let rows: Vec<Row> = ids.iter().map(|id| ROWS.iter().find(|r| r.id == *id).unwrap().clone()).collect();
+    for target in ["rust", "rs"] {
+        let (almd, host) = rust_program(&rows, target);
+        let (ok, stdout, stderr) = run_package(&format!("v1_{target}"), &almd, &host, &["run"]);
+        assert!(ok, "{target}: {stderr}");
+        assert!(stderr.contains("native: v1 trust-spine render"), "foreign values fell back: {stderr}");
+        let expected: String = rows.iter().map(|r| format!("{}\n", r.expected)).collect();
+        assert_eq!(stdout, expected, "{target}: {stderr}");
+    }
+}
+
+/// A callback uses the program's value types, rather than the structural
+/// std::String conversion used by a direct foreign argument. Exercise both
+/// carrier values passed by value and heap values lent to native dispatch.
+#[test]
+fn native_v1_foreign_callbacks_preserve_value_types() {
+    let rows = [
+        Row { id: "cb_string", almide_params: "f: (String) -> String", almide_ret: "String",
+            host_params: "f: &dyn Fn(AlmideString) -> AlmideString", host_ret: "String",
+            host_body: "format!(\"{}:{}\", f(AlmideString::from(\"a\")), f(AlmideString::from(\"b\")))",
+            call: "let suffix = \"!\"\n  println(f_cb_string((s) => s + suffix))\n  println(suffix)", expected: "a!:b!\n!" },
+        Row { id: "cb_option", almide_params: "f: (Int?) -> Int?", almide_ret: "Int",
+            host_params: "f: &dyn Fn(Option<i64>) -> Option<i64>", host_ret: "i64",
+            host_body: "f(Some(5)).unwrap() + f(None).unwrap_or(7)",
+            call: "println(int.to_string(f_cb_option((x) => x)))", expected: "12" },
+        Row { id: "cb_result", almide_params: "f: (Result[Int, String]) -> Result[Int, String]", almide_ret: "Int",
+            host_params: "f: &dyn Fn(Result<i64, AlmideString>) -> Result<i64, AlmideString>", host_ret: "i64",
+            host_body: "f(Ok(5)).unwrap() + f(Err(AlmideString::from(\"bad\"))).unwrap_err().len() as i64",
+            call: "println(int.to_string(f_cb_result((x) => x)))", expected: "8" },
+        Row { id: "cb_list", almide_params: "f: (List[String]) -> List[String]", almide_ret: "Int",
+            host_params: "f: &dyn Fn(Vec<AlmideString>) -> Vec<AlmideString>", host_ret: "i64",
+            host_body: "f(vec![AlmideString::from(\"abc\")]).iter().map(|s| s.len() as i64).sum()",
+            call: "println(int.to_string(f_cb_list((x) => x)))", expected: "3" },
+        Row { id: "cb_bytes", almide_params: "f: (Bytes) -> Bytes", almide_ret: "Int",
+            host_params: "f: &dyn Fn(AlmideRcCow<Vec<u8>>) -> AlmideRcCow<Vec<u8>>", host_ret: "i64",
+            host_body: "f(vec![2u8, 3u8].into()).iter().map(|b| *b as i64).sum()",
+            call: "println(int.to_string(f_cb_bytes((x) => x)))", expected: "5" },
+        Row { id: "cb_matrix", almide_params: "f: (Matrix) -> Matrix", almide_ret: "Int",
+            host_params: "f: &dyn Fn(AlmideRcCow<AlmideMatrix>) -> AlmideRcCow<AlmideMatrix>", host_ret: "i64",
+            host_body: "f(AlmideMatrix { rows: 2, cols: 1, data: vec![0.0; 2] }.into()).rows as i64",
+            call: "println(int.to_string(f_cb_matrix((x) => x)))", expected: "2" },
+    ];
+    let mut failures = Vec::new();
+    for row in &rows {
+        let (almd, host) = rust_program(std::slice::from_ref(row), "rust");
+        let (ok, stdout, stderr) = run_package(row.id, &almd, &host, &["run"]);
+        if !ok || stdout != format!("{}\n", row.expected) || !stderr.contains("native: v1 trust-spine render") {
+            failures.push(format!("{}: success={ok}, stdout={stdout:?}\n{stderr}", row.id));
+        }
+    }
+    assert!(failures.is_empty(), "{} callback ABI rows failed:\n{}", failures.len(), failures.join("\n"));
 }
 
 /// `rs` is the older spelling of `rust`: the same wrapper, the same ABI.
@@ -528,4 +594,67 @@ fn a_region_param_of_a_dual_wasm_and_rust_binding_is_base_and_length_on_both() {
     assert_eq!(stdout, "2 hi\n4 añb\n", "--- program ---\n{almd}");
     let (ok, stdout, stderr) = run_package("dual_region_wasm", almd, host, &["check", "--target", "wasm"]);
     assert!(ok, "check --target wasm refused the dual Region binding\n{stdout}{stderr}");
+}
+
+#[test]
+fn native_v1_foreign_target_overrides_the_body_and_preserves_effect_results() {
+    let almd = r#"
+@extern(rust, "std::cmp", "min")
+fn selected(a: Int, b: Int) -> Int = if a > b then a else b
+
+@extern(rust, "crate::host", "answer")
+effect fn answer(okay: Bool) -> Result[String, String] = err("fallback")
+
+effect fn main() -> Unit = {
+  println(int.to_string(selected(2, 9)))
+  println(match answer(true) { ok(s) => s, err(e) => e })
+  println(match answer(false) { ok(s) => s, err(e) => e })
+}
+"#;
+    let host = r#"pub fn answer(okay: bool) -> Result<String, String> {
+        if okay { Ok("host-ok".into()) } else { Err("host-err".into()) }
+    }"#;
+    let (ok, stdout, stderr) = run_package("v1_priority_effect", almd, host, &["run"]);
+    assert!(ok, "{stderr}");
+    assert!(stderr.contains("native: v1 trust-spine render"), "{stderr}");
+    assert_eq!(stdout, "2\nhost-ok\nhost-err\n");
+}
+
+#[test]
+fn native_v1_foreign_list_sink_is_not_replaced_by_its_fallback() {
+    let almd = r#"
+@extern(rust, "crate::host", "count")
+fn count(xs: List[Int]) -> Int = list.len(xs)
+effect fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  println(int.to_string(count(list.map(xs, (x) => x + 1))))
+  println(int.to_string(list.len(xs)))
+}
+"#;
+    let host = "pub fn count(xs: &[i64]) -> i64 { xs.iter().sum::<i64>() + 100 }";
+    let (ok, stdout, stderr) = run_package("v1_sink", almd, host, &["run"]);
+    assert!(ok, "{stderr}");
+    assert!(stderr.contains("native: v1 trust-spine render"), "{stderr}");
+    assert_eq!(stdout, "109\n3\n");
+}
+
+/// Audit every documented host signature separately so one unsupported type
+/// cannot hide the remaining v1 migration work behind a whole-package fallback.
+#[test]
+#[ignore = "the v1 render lacks the foreign record, variant, RawPtr and Region representations: five rows fall back to the standard codegen (#4641)"]
+fn native_v1_all_documented_rust_rows() {
+    let mut failures = Vec::new();
+    for row in ROWS {
+        let mut rows = vec![row.clone()];
+        if matches!(row.id, "rawptr" | "ret_rawptr") {
+            rows.push(ROWS.iter().find(|r| r.id != row.id && matches!(r.id, "rawptr" | "ret_rawptr")).unwrap().clone());
+        }
+        let (almd, host) = rust_program(&rows, "rust");
+        let (ok, stdout, stderr) = run_package(&format!("v1_all_{}", row.id), &almd, &host, &["run"]);
+        let expected: String = rows.iter().map(|r| format!("{}\n", r.expected)).collect();
+        if !ok || stdout != expected || !stderr.contains("native: v1 trust-spine render") {
+            failures.push(format!("{}: success={ok}, correct={}\n{stderr}", row.id, stdout == expected));
+        }
+    }
+    assert!(failures.is_empty(), "{} documented ABI rows still fail v1:\n{}", failures.len(), failures.join("\n"));
 }

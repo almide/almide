@@ -13,6 +13,12 @@ fn effect_unwrap_admitted(
     layouts: &crate::lower::VariantLayouts,
 ) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
+    // Option unwraps use the same existing continuation match, with None
+    // mapped to the enclosing String error channel. Their payload needs the
+    // same drop proof as a Result Ok payload.
+    if let Ty::Applied(TypeConstructorId::Option, a) = result_ty {
+        return a.len() == 1 && ok_payload_drop_proven(&a[0], layouts);
+    }
     let Ty::Applied(TypeConstructorId::Result, a) = result_ty else {
         return false;
     };
@@ -87,7 +93,7 @@ fn collect_arm_unwrap_admit(
     layouts: &crate::lower::VariantLayouts,
 ) {
     match &e.kind {
-        IrExprKind::Unwrap { expr } => {
+        IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
             *has = true;
             if !effect_unwrap_admitted(&expr.ty, layouts) {
                 *all_admitted = false;
@@ -303,7 +309,7 @@ pub fn desugar_unwrap_rewrap_identity(body: &IrExpr) -> Option<IrExpr> {
 /// Which binding form a `let … = e!` statement uses — both early-return the
 /// `Err(E)` and bind/destructure the `Ok(T)`.
 enum LetUnwrapTarget {
-    Single { var: VarId, ty: Ty },
+    Single { var: VarId, ty: Ty, mutability: almide_ir::Mutability },
     Destructure { pattern: almide_ir::IrPattern },
 }
 
@@ -319,9 +325,9 @@ enum LetUnwrapTarget {
 /// Result-destructured-as-a-tuple.
 fn find_let_unwrap_target(stmts: &[IrStmt]) -> Option<(usize, LetUnwrapTarget, IrExpr)> {
     stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
-        IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
+        IrStmtKind::Bind { var, ty, value, mutability } => match &value.kind {
             IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
-                Some((i, LetUnwrapTarget::Single { var: *var, ty: ty.clone() }, (**expr).clone()))
+                Some((i, LetUnwrapTarget::Single { var: *var, ty: ty.clone(), mutability: *mutability }, (**expr).clone()))
             }
             _ => None,
         },
@@ -418,13 +424,22 @@ fn let_unwrap_ok_binding(
     ok_ty: &Ty,
 ) -> (almide_ir::IrPattern, Vec<IrStmt>) {
     match target {
-        LetUnwrapTarget::Single { var, ty }
+        LetUnwrapTarget::Single { var, ty, .. }
             if matches!(ty, Ty::Unit) && var_unread_after(var, rest, tail) =>
         {
             (almide_ir::IrPattern::Wildcard, rest.to_vec())
         }
-        LetUnwrapTarget::Single { var, ty } => {
-            (almide_ir::IrPattern::Bind { var, ty }, rest.to_vec())
+        LetUnwrapTarget::Single { var, ty, mutability } => {
+            let pat = almide_ir::IrPattern::Bind { var, ty };
+            let mut rest = rest.to_vec();
+            if mutability == almide_ir::Mutability::Var {
+                let wrapped = almide_ir::IrPattern::Ok { inner: Box::new(pat) };
+                let mut next_var = crate::lower::desugar_var_seed();
+                let almide_ir::IrPattern::Ok { inner } = mutable_unwrap_binding(
+                    wrapped, &mut rest, &mut next_var, body.span,
+                ) else { unreachable!() };
+                (*inner, rest)
+            } else { (pat, rest) }
         }
         LetUnwrapTarget::Destructure { pattern } => {
             let p2 = VarId(crate::lower::desugar_var_seed());
@@ -520,17 +535,7 @@ fn never_err_short_circuit(
     ))
 }
 
-/// A typed error falling into a `String` channel (ADR-0021 D2, #2725): the text
-/// `"${e}"` shows — its repr — as a one-part interpolation, so the lowering's own
-/// Display desugar (and the corpus call counter, which reads the same node) renders it.
-fn erased_err_text(err: IrExpr) -> IrExpr {
-    IrExpr {
-        span: err.span.clone(),
-        kind: IrExprKind::StringInterp { parts: vec![almide_ir::IrStringPart::Expr { expr: err }] },
-        ty: Ty::String,
-        def_id: None,
-    }
-}
+include!("desugar_error_text.rs");
 
 /// The `err($x) => err(<payload>)` arm's payload — the propagated error IS the
 /// function result.

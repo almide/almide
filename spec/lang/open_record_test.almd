@@ -56,6 +56,12 @@ test "open record chain calling" {
   assert_eq(chain_a(dog), "Rex")
 }
 
+test "open record chain keeps each concrete caller shape" {
+  assert_eq(chain_a({ name: "Mia", breed: "Lab", age: 7 }), "Mia")
+  assert_eq(chain_b(Person { name: "Ben", age: 42, email: "b@example.com" }), "Ben")
+  assert_eq(chain_a(Dog { name: "Sam", breed: "Collie" }), "Sam")
+}
+
 // Shape alias
 type Named = { name: String, .. }
 

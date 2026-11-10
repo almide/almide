@@ -282,7 +282,7 @@ fn write_generated_cargo_project(
         let rt_src = project_dir.join(super::cargo_toml::RT_CRATE).join("src");
         std::fs::create_dir_all(&rt_src).map_err(|e| format!("failed to create {}: {}", rt_src.display(), e))?;
         std::fs::write(rt_src.join("lib.rs"), &runtime).map_err(|e| format!("failed to write the runtime crate: {e}"))?;
-        std::fs::write(rt_src.parent().expect("crate dir").join("Cargo.toml"), super::cargo_toml::runtime_crate_manifest())
+        std::fs::write(rt_src.parent().expect("crate dir").join("Cargo.toml"), super::cargo_toml::runtime_crate_manifest(&runtime))
             .map_err(|e| format!("failed to write the runtime crate manifest: {e}"))?;
         cargo_toml.push_str(&super::cargo_toml::runtime_crate_manifest_lines());
         final_code = program;

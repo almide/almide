@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 790  implementations = 1757
+# holes = 794  implementations = 1761
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -2601,6 +2601,34 @@ native   = 1
 emitter  = 1
 selfhost = 7
 total    = 9
+[[hole]]
+module   = "list"
+name     = "__sort_by_float"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "list"
+name     = "__sort_float"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "list"
+name     = "__min_float"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "list"
+name     = "__max_float"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
 [[hole]]
 module   = "list"
 name     = "take_while"

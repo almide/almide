@@ -189,3 +189,66 @@ fn todo_keeps_its_own_message_and_survives_quotes_in_it() {
     );
     assert_eq!(code, Some(101), "todo() panics (rust panic exit code):\n{out}");
 }
+
+/// `(stdout + stderr, exit code)` of a native `almide test` of one file.
+fn native_test(source: &str) -> (String, Option<i32>) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write(dir.path(), "almide.toml", "[package]\nname = \"z\"\nversion = \"0.1.0\"\n");
+    write(dir.path(), "hole_test.almd", source);
+    let out = Command::new(almide())
+        .args(["test", "hole_test.almd", "--target", "rust"])
+        .current_dir(dir.path())
+        .output()
+        .expect("run almide test");
+    (
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ),
+        out.status.code(),
+    )
+}
+
+/// The three typed holes a test file can hold: `todo(..)`, a written `_`, and
+/// the bodyless declaration of a host the native target does not have.
+const HOLES: &str = "@extern(wasm, \"obsid\", \"set_state\")\nfn set_state(s: String) -> Unit\n\n\
+fn later(n: Int) -> Int = todo(\"later\")\n\nfn blank(n: Int) -> String = _\n\n";
+
+#[test]
+fn an_unreached_typed_hole_does_not_stop_a_native_test_file() {
+    // #4640: the native test render is the only one, so a hole it refused was
+    // a compile failure for every test in the file — reached or not.
+    let (out, code) = native_test(&format!(
+        "{HOLES}fn pick(n: Int) -> Int = if n > 5 then later(n) else n\n\n\
+         fn show(n: Int) -> String = if n > 5 then blank(n) else \"small\"\n\n\
+         fn tell(n: Int) -> Unit = if n > 5 then set_state(\"x\") else ()\n\n\
+         test \"no hole is reached\" {{\n  tell(1)\n  assert_eq(pick(1), 1)\n  assert_eq(show(1), \"small\")\n}}\n"
+    ));
+    assert_eq!(code, Some(0), "the file builds and its test passes:\n{out}");
+    assert!(out.contains("1 test in 1 file"), "{out}");
+}
+
+#[test]
+fn a_reached_typed_hole_fails_its_native_test_with_its_own_text() {
+    // The control: the hole is an abort, not a value. Each test that reaches
+    // one fails with the hole's text; the test beside them still passes.
+    let (out, code) = native_test(&format!(
+        "{HOLES}test \"reaches the todo\" {{\n  assert_eq(later(1), 0)\n}}\n\n\
+         test \"reaches the host\" {{\n  set_state(\"x\")\n  assert_eq(1, 1)\n}}\n\n\
+         test \"reaches the blank\" {{\n  assert_eq(blank(1), \"\")\n}}\n\n\
+         test \"reaches none\" {{\n  assert_eq(1, 1)\n}}\n"
+    ));
+    assert_eq!(code, Some(1), "a reached hole is a failed test:\n{out}");
+    assert!(!out.contains("Compile error"), "the file itself builds:\n{out}");
+    for (test, text) in [
+        ("reaches the todo", "not yet implemented: later"),
+        ("reaches the host", "not yet implemented: hole at line 2"),
+        ("reaches the blank", "not yet implemented: hole at line 6"),
+    ] {
+        assert!(out.contains(&format!("test: {test}")), "`{test}` is reported as failed:\n{out}");
+        assert!(out.contains(&format!("error: {text}")), "`{test}` fails with the hole's text:\n{out}");
+    }
+    assert!(!out.contains("test: reaches none"), "the test that reaches no hole passes:\n{out}");
+    assert!(out.contains("4 tests in 1 file"), "{out}");
+}

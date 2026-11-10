@@ -241,3 +241,49 @@ fn the_string_key_probe_reads_no_variable_length_tail_and_no_side_array() {
     // literal reads as an environment switch to scripts/check-env-switches.sh.
     assert!(find.contains("s & ALMIDE_MAP_SLOT_TAG == tag"), "a probe no longer rejects a slot on its tag:\n{find}");
 }
+
+/// The verified native render fuses the same update into one `map.upsert`
+/// (`native_map_upsert`), whose `init` runs on every call. What the program
+/// prints is the two-step form's answer for the fused shapes — wrapping Int
+/// arithmetic, Float arithmetic, a present key kept in place — and for the
+/// ones the rule refuses: an Int `/` whose default would divide by zero does
+/// not abort while the key is present.
+#[test]
+fn a_fused_update_prints_what_the_two_steps_print() {
+    let src = "fn show(m: Map[String, Int]) -> String =\n\
+        \x20 map.to_list(m) |> list.map(((k, v)) => \"${k}=${v}\") |> list.join(\",\")\n\n\
+        effect fn main() -> Unit = {\n\
+        \x20 let step = 2\n\
+        \x20 var a: Map[String, Int] = [:]\n\
+        \x20 var b: Map[String, Int] = [:]\n\
+        \x20 var c: Map[String, Int] = [:]\n\
+        \x20 var h: Map[String, Int] = [\"b\": 9223372036854775807]\n\
+        \x20 var f: Map[Int, Float] = [:]\n\
+        \x20 for w in [\"b\", \"a\", \"b\", \"c\", \"a\", \"b\"] {\n\
+        \x20   a[w] = (map.get(a, w) ?? 0) + 1\n\
+        \x20   b[w] = step * (map.get(b, w) ?? 1) - 1\n\
+        \x20   c[w] = 100 / ((map.get(c, w) ?? 4) + 1)\n\
+        \x20   h[w] = (map.get(h, w) ?? 0) + 1\n\
+        \x20 }\n\
+        \x20 for n in [3, 1, 3, 2, 3] {\n\
+        \x20   f[n] = -(map.get(f, n) ?? 1.5) * 2.0 / 4.0\n\
+        \x20 }\n\
+        \x20 println(show(a))\n\
+        \x20 println(show(b))\n\
+        \x20 println(show(c))\n\
+        \x20 println(show(h))\n\
+        \x20 println(map.to_list(f) |> list.map(((k, v)) => \"${k}=${v}\") |> list.join(\",\"))\n\
+        \x20 var z: Map[String, Int] = [\"k\": 4]\n\
+        \x20 let k = \"k\"\n\
+        \x20 z[k] = 8 / (map.get(z, k) ?? 0)\n\
+        \x20 println(show(z))\n\
+        }\n";
+    let (_dir, path) = write("fused.almd", src);
+    let out = Command::new(almide()).arg("run").arg(&path).output().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "b=3,a=2,c=1\nb=1,a=1,c=1\nb=20,a=4,c=20\nb=-9223372036854775806,a=2,c=1\n3=-0.1875,1=-0.75,2=-0.75\nk=2\n",
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

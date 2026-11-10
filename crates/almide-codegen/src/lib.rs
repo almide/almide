@@ -24,6 +24,9 @@
 
 pub mod annotations;
 pub mod generated;
+
+/// Shared native host lifecycle state, also used by the certified renderer.
+pub const HOST_LIFECYCLE_PRELUDE: &str = include_str!("prelude_host_lifecycle.rs");
 pub mod strip_test_blocks;
 pub mod pass;
 pub mod verify_names;
@@ -394,8 +397,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // Every native exit route runs it: main's return and main's effect error
     // (the `fn main` wrapper's `almide_stdout_finish`, below) and
     // `process.exit` (runtime/rs/src/process.rs).
-    s.push_str(&format!("{vis}static ALMIDE_AT_EXIT: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();\n"));
-    s.push_str(&format!("{vis}fn almide_at_exit_run() {{ if let Some(f) = ALMIDE_AT_EXIT.get() {{ f() }} }}\n"));
+    s.push_str(&HOST_LIFECYCLE_PRELUDE.replace("pub(crate) ", vis));
     // The exit-time counterpart: the module teardown above, then flush, then
     // give back the two allocations the
     // buffer and the panic hook hold — the 64 KiB buffer (swapped for a
@@ -421,8 +423,6 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // it and answers that one request with the fixed 500. `resume_unwind` skips
     // the panic hook, so no Rust banner is printed. Off the flag (everywhere
     // else, and in a `fan` arm's own thread) the abort is unchanged.
-    s.push_str(&format!("{vis}struct AlmideContained(pub String);\n"));
-    s.push_str(&format!("thread_local! {{ {vis}static ALMIDE_CONTAIN: std::cell::Cell<bool> = const {{ std::cell::Cell::new(false) }}; }}\n"));
     // The runtime tables a handler can open handles in (the process-wide net
     // tables, #4199) register a hook here once per process (#4203). The serve
     // loop calls every hook on its own thread with 0 before a handler, 1
@@ -430,10 +430,6 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // handler opened and left open, since a table entry is not a value the
     // unwind drops. What a handler opened is recorded per thread (the shared
     // cores' request logs), so another thread's handles are never closed.
-    s.push_str(&format!("{vis}static ALMIDE_REQUEST_HOOKS: std::sync::Mutex<Vec<fn(u8)>> = std::sync::Mutex::new(Vec::new());\n"));
-    s.push_str(&format!("{vis}fn almide_request_hook(f: fn(u8)) {{ ALMIDE_REQUEST_HOOKS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(f) }}\n"));
-    s.push_str(&format!("{vis}fn almide_request_hooks(stage: u8) {{ let hs: Vec<fn(u8)> = ALMIDE_REQUEST_HOOKS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone(); for f in hs {{ f(stage) }} }}\n"));
-    s.push_str(&format!("{vis}fn almide_contained_unwind(text: impl FnOnce() -> String) {{ if ALMIDE_CONTAIN.with(|c| c.get()) {{ std::panic::resume_unwind(Box::new(AlmideContained(text()))) }} }}\n"));
     // Out of memory is never contained (row 1 of the security table): an
     // allocation that failed part-way through a handler leaves the data it was
     // building half made, and a server that answered 500 and kept serving
@@ -456,6 +452,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str(&format!("{macro_attr}macro_rules! almide_panic {{ ($($arg:tt)*) => {{ if cfg!(test) && std::env::var_os(\"ALMIDE_TEST_ABORT_PROBE\").is_none() {{ panic!($($arg)*) }} else {{ $crate::almide_panic_abort(format_args!($($arg)*)) }} }}; }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ if almide_fan_active() {{ return almide_fan_write_fmt(false, args, newline); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if newline || almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ if almide_fan_active() {{ return almide_out_write(false, bytes); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if bytes.contains(&b'\\n') || almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stderr_write_bytes(bytes: &[u8]) {{ almide_stdout_flush(); almide_out_write(true, bytes); }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_println {{ ($($arg:tt)*) => {{ $crate::almide_stdout_write_fmt(format_args!($($arg)*), true) }}; }}\n"));
     // `eprintln` (ADR-0024 D5): unbuffered on stderr as before, except inside a
     // `fan` element, where it joins the element's one stdout+stderr timeline.
@@ -794,6 +791,8 @@ pub use runtime_crates::{runtime_crate_deps, RUNTIME_MODULE_CRATES};
 mod runtime_namespace;
 pub use runtime_namespace::RUNTIME_MODULE;
 pub mod rust_idents;
+pub mod fs_scope;
+pub mod test_harness;
 
 /// Emit the full `almide_rt` runtime crate source: the prelude (pub items +
 /// exported macros) plus every std-only runtime module. Built once into an

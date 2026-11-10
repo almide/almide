@@ -245,7 +245,16 @@ pub fn almide_http_req_with_path(mut req: AlmideHttpRequest, target: &str) -> Al
 
 // ADR-0013 stage 2: the request and response keep their own `String`s and
 // cross the runtime boundary unchanged.
-almide_into_str_leaf!(AlmideHttpResponse, AlmideHttpRequest);
+// Ordinary impl items keep these runtime identities visible to the native
+// dependency index as well as to the full runtime prelude.
+impl AlmideIntoStr for AlmideHttpResponse {
+    type Out = Self;
+    fn into_almide(self) -> Self { self }
+}
+impl AlmideIntoStr for AlmideHttpRequest {
+    type Out = Self;
+    fn into_almide(self) -> Self { self }
+}
 
 impl AlmideRepr for AlmideHttpRequest {
     fn almide_repr(&self) -> String {
@@ -437,7 +446,7 @@ pub fn almide_http_call_cancel(c: &AlmideHttpCall) {
 // serve ops, so C-367's byte-identity holds by shared code.
 include!("../../../crates/almide-rt-core/src/http_server_core.rs");
 
-pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, AlmideString>>) -> Result<(), String> {
+pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, AlmideString>>) {
     // `http.serve` is typed never-err (`-> Unit`), so a caller's `!` is a
     // no-op (#1049) and a returned Err only surfaced when the call happened
     // to be a fn's tail — elsewhere the server silently never started. A
@@ -451,8 +460,8 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     };
     // Shutdown (ADR-0020 §5.6, #2692): a signal ends the loop below; the
     // request in flight is answered first.
-    let signals = almide_http_signals_arm();
-    let watch = http_server_watch(&listener, Box::new(almide_http_force_from_watcher));
+    let signals = almide_http_signals::almide_http_signals_arm();
+    let watch = http_server_watch(&listener, Box::new(almide_http_signals::almide_http_force_from_watcher));
     // Connections are accepted, read and written by the pool's workers (64 in
     // flight, a 10 s request-head deadline, #4021), so a slow client holds one
     // worker and never this thread. The handler runs HERE, one request at a
@@ -469,9 +478,9 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
         let id = http_server_request_id(&method, &path, &body);
         let req = AlmideHttpRequest { method, path, body, headers, params: Vec::new() };
         almide_request_hooks(0);
-        ALMIDE_CONTAIN.with(|c| c.set(true));
+        almide_containment(true);
         let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req)));
-        ALMIDE_CONTAIN.with(|c| c.set(false));
+        almide_containment(false);
         // #4203: an abort closes the handles the handler opened and left open.
         almide_request_hooks(if ran.is_err() { 2 } else { 1 });
         let resp = match ran {
@@ -497,7 +506,7 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     // (the listener closed when the accept thread stopped).
     drop(pool);
     drop(watch);
-    almide_http_signals_disarm(signals);
+    almide_http_signals::almide_http_signals_disarm(signals);
     // A second signal that raced the last response: the forced stop.
     if http_server_forced() {
         almide_stdout_flush();
@@ -507,7 +516,6 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     // returns, so main's statements after it run and main's code is the
     // exit code.
     almide_stdout_flush();
-    Ok(())
 }
 
 // ── Shutdown signals (native; the shared part is in http_server_core) ──
@@ -529,6 +537,9 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
 // from the watcher WITHOUT flushing, since no other thread can reach the
 // serving thread's buffer — until §5.5's shared buffer.
 
+// Keep all platform branches together; consumers carry this module whole.
+mod almide_http_signals {
+    use super::*;
 // The C calls (signal / pthread_self / pthread_kill / _exit, and
 // SetConsoleCtrlHandler on Windows) are sys.rs's `almide_rt_sys_ffi`.
 
@@ -572,7 +583,7 @@ fn almide_http_force_here() {
 }
 
 #[cfg(unix)]
-fn almide_http_force_from_watcher() {
+pub fn almide_http_force_from_watcher() {
     let serving = ALMIDE_HTTP_SERVE_THREAD.load(std::sync::atomic::Ordering::SeqCst);
     almide_rt_sys_ffi::thread_kill(serving, almide_rt_sys_ffi::SIGTERM);
 }
@@ -581,7 +592,7 @@ fn almide_http_force_from_watcher() {
 /// restore. A signal the process was started with IGNORED (SIGINT under a
 /// non-interactive shell's `&`, a `nohup`) stays ignored.
 #[cfg(unix)]
-fn almide_http_signals_arm() -> [(i32, almide_rt_sys_ffi::Disposition); 2] {
+pub fn almide_http_signals_arm() -> [(i32, almide_rt_sys_ffi::Disposition); 2] {
     use almide_rt_sys_ffi as ffi;
     // Touch the buffer here, so the handler never runs its lazy init.
     ALMIDE_STDOUT_BUF.with(|_| ());
@@ -602,7 +613,7 @@ fn almide_http_signals_arm() -> [(i32, almide_rt_sys_ffi::Disposition); 2] {
 /// ends and the handler passes signals to it: there the signals do again
 /// what they did before `serve`.
 #[cfg(unix)]
-fn almide_http_signals_disarm(prev: [(i32, almide_rt_sys_ffi::Disposition); 2]) {
+pub fn almide_http_signals_disarm(prev: [(i32, almide_rt_sys_ffi::Disposition); 2]) {
     if std::thread::current().name() == Some("main") {
         return;
     }
@@ -624,41 +635,37 @@ extern "system" fn almide_http_on_ctrl(event: u32) -> i32 {
 }
 
 #[cfg(windows)]
-fn almide_http_force_from_watcher() {
+pub fn almide_http_force_from_watcher() {
     std::process::exit(1);
 }
 
 #[cfg(windows)]
-fn almide_http_signals_arm() {
+pub fn almide_http_signals_arm() {
     almide_rt_sys_ffi::set_console_ctrl_handler(almide_http_on_ctrl, true);
 }
 
 #[cfg(windows)]
-fn almide_http_signals_disarm(_: ()) {
+pub fn almide_http_signals_disarm(_: ()) {
     almide_rt_sys_ffi::set_console_ctrl_handler(almide_http_on_ctrl, false);
 }
 
 #[cfg(not(any(unix, windows)))]
-fn almide_http_force_from_watcher() {}
+pub fn almide_http_force_from_watcher() {}
 
 #[cfg(not(any(unix, windows)))]
-fn almide_http_signals_arm() {}
+pub fn almide_http_signals_arm() {}
 
 #[cfg(not(any(unix, windows)))]
-fn almide_http_signals_disarm(_: ()) {}
+pub fn almide_http_signals_disarm(_: ()) {}
 
-// Handler-as-closure wrapper for `@intrinsic` migration of `http.serve`.
-// The Almide side passes a `(Request) -> Response` closure; this wrapper
-// composes it with `Ok(...)` so the inner `almide_http_serve` keeps its
-// `Result<Response, String>` contract (future error-in-handler support).
+}
+
+// The listener has the declaration's Unit return: bind failures abort and
+// a drained shutdown returns normally. The handler retains its Result carrier;
+// its Err is reported as a 500 by the common listener loop.
 pub fn almide_rt_http_serve(
     port: i64,
     handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, AlmideString>>,
-) -> Result<(), AlmideString> {
-    let __almide_r: Result<(), String> = (|| {
-        // #1055: the handler slot is effect-typed, so the checker already hands
-        // us the carrier shape — a handler `Err` becomes the listener loop's 500.
-        almide_http_serve(port, handler)
-    })();
-    __almide_r.map_err(Into::into)
+) {
+    almide_http_serve(port, handler)
 }

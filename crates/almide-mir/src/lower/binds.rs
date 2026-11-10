@@ -53,7 +53,7 @@ impl LowerCtx {
         // owns its return ABI, just as a named function's declaration does.
         let mut typed_body;
         let body = if let Ty::Fn { ret, is_effect: false, .. } = fn_ty {
-            if **ret != body.ty {
+            if **ret != body.ty && !(body.ty.is_result() && !ret.is_result()) {
                 typed_body = body.clone();
                 typed_body.ty = (**ret).clone();
                 &typed_body
@@ -199,13 +199,8 @@ impl LowerCtx {
         //                       then NESTED-heap captures (freed by the type-specific
         //                       recursive $__drop_list_str — a List[String] element),
         //                       then scalar captures (untouched).
-        // Flat heap captures are ONE-LEVEL-EXACT kinds (String, List[Int], List[Float] — a
-        // single rc_dec frees them completely). `List[String]` is NESTED (each element is
-        // itself owned heap — a flat rc_dec of just the list block would leak every String,
-        // the exact class of bug this session's `_str`-dispatch fix + the map.find near-miss
-        // both found) — freed via the generic `__drop_list_str` (B33) instead. A `Value` /
-        // variant / heap-field-record capture (or a `Float`, f64↔i64 reinterpret not in the
-        // prim vocabulary) still defers — honest wall, recorded in the goal file.
+        // Wasm captures use exact flat/nested/rich sweeps; native typed
+        // environments also own recursively dropped capture values.
         use almide_lang::types::constructor::TypeConstructorId;
         // `is_flat_scalar_block_ty` IS this predicate — the crate's canonical name for
         // "every slot is a raw i64, so one rc_dec is the full free", which is exactly
@@ -255,7 +250,7 @@ impl LowerCtx {
             // the cell — a flat/nested dec would leak every key String).
             if self.cell_of.contains_key(&v) {
                 match self.cell_class_of_ctx(&ty) {
-                    Some(CellClass::Scalar) => heap_caps.push((v, ty)),
+                    Some(CellClass::Scalar | CellClass::NativeOwned) => heap_caps.push((v, ty)),
                     Some(CellClass::FlatHeap) => nested_heap_caps.push((v, ty)),
                     Some(CellClass::LenOwnedSlots) => cellmap_caps.push((v, ty)),
                     // A ROUTED cell (`Map[String, <record/variant>]`, #1143):
@@ -309,13 +304,16 @@ impl LowerCtx {
                 rich_caps.push((v, ty));
                 continue;
             }
+            // Native keeps the checked owned type and recursive Rust drop.
+            if crate::lower::owned_tco_slots() && is_heap_ty(&ty)
+                && crate::render_native_rec::checked_kind(&ty).is_some() {
+                heap_caps.push((v, ty));
+                continue;
+            }
             // `!is_heap_ty` IS this bucket's promise — the crate's canonical name for
             // "one raw i64 slot, no refcount", which is exactly what the scalar region
             // of the env stores and what `ListGetScalar` reads back. This used to
-            // restate a SUBSET of it (`Int | Bool`), so every other scalar was refused
-            // for no physical reason: a `Float` capture in particular, on the belief
-            // that its slot needed an f64↔i64 reinterpret the prim vocabulary lacked.
-            // It does not — a MIR float local ALREADY holds its bits in an i64 and
+            // restate only `Int | Bool`. A MIR float local holds its bits in an i64 and
             // every float op reinterprets around itself, so the bits round-trip through
             // the slot untouched. `(s) => d` over `let d: Float` walled on that
             // misreading (#954, surfaced by the nightly fuzz), and so did captures of
@@ -485,7 +483,7 @@ impl LowerCtx {
             if matches!(ty, Ty::Fn { .. }) {
                 sub.closure_values.insert(pv);
             }
-            let repr = repr_of(ty).ok()?;
+            let repr = param_repr_of(ty).ok()?;
             if repr.is_heap() {
                 sub.param_values.insert(pv);
                 // SEED the param's variant/aggregate read-shape — IDENTICAL to `bind_params`.

@@ -30,7 +30,8 @@ fn native_width(bits: u32) -> Option<u8> {
 
 /// Fuse every ring op that is re-wrapped to a narrow width in `f`.
 ///
-/// WALLS a call into a legacy runtime shim whose result is re-wrapped to a
+/// Fuses int.pow at a declared narrow width, including its domain abort.
+/// WALLS any remaining legacy runtime shim whose result is re-wrapped to a
 /// narrow width: the shim table's bodies compute in the i64 lane (their
 /// declared params and return are `i64`), so the narrow value would pay the
 /// lane arithmetic where the standard codegen computes in the narrow type —
@@ -38,6 +39,7 @@ fn native_width(bits: u32) -> Option<u8> {
 /// table's declarations and the re-wrap after the call, not off a name.
 pub fn rewrite_narrow_ops(f: &mut MirFunction) -> Result<(), crate::lower::LowerError> {
     let idx = UseIndex::build(f);
+    fuse_narrow_powers(f, &idx);
     wall_lane_shim_rewraps(f, &idx)?;
     let fuse = collect_fusions(f, &idx);
     apply_fusions(f, fuse);
@@ -163,5 +165,56 @@ fn apply_fusions(f: &mut MirFunction, fuse: Vec<Fusion>) {
                 f.ops[w] = Op::IntBinOp { dst, op: IntOp::Or, a: t, b: t };
             }
         }
+    }
+}
+
+/// Exponentiation has the same ring reduction property as multiplication.
+/// Preserve the complete exponent and its negative-domain abort; only the
+/// base and accumulator arithmetic become narrow. No u32 exponent cast.
+fn fuse_narrow_powers(f: &mut MirFunction, idx: &UseIndex) {
+    for i in 0..f.ops.len() {
+        let Op::CallFn { dst: Some(dst), name, args, .. } = &f.ops[i] else { continue };
+        if name != "int.pow" { continue; }
+        let [crate::CallArg::Scalar(a), crate::CallArg::Scalar(b)] = &args[..] else { continue };
+        let Some(j) = idx.only_use(*dst) else { continue };
+        let Some((_, wraps, bits, signed)) = fusion_at(f, idx, i, *dst, j) else { continue };
+        let (dst, a, b) = (*dst, *a, *b);
+        f.ops[i] = Op::Prim { kind: PrimKind::NativeNarrowPow { bits, signed }, dst: Some(dst), args: vec![a, b] };
+        for w in wraps {
+            if let Op::IntBinOp { dst: d, .. } = f.ops[w] {
+                f.ops[w] = Op::IntBinOp { dst: d, op: IntOp::Or, a: dst, b: dst };
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn narrow_power_requires_exact_call_and_a_single_rewrap_use() {
+        let f = MirFunction {
+            name: "power".into(), params: vec![], ret: Some(ValueId(4)),
+            ops: vec![
+                Op::CallFn { dst: Some(ValueId(2)), name: "int.pow".into(),
+                    args: vec![crate::CallArg::Scalar(ValueId(0)), crate::CallArg::Scalar(ValueId(1))],
+                    result: Some(crate::Repr::Scalar { width: crate::ScalarWidth::Double }) },
+                Op::ConstInt { dst: ValueId(3), value: 255 },
+                Op::IntBinOp { dst: ValueId(4), op: IntOp::And, a: ValueId(2), b: ValueId(3) },
+            ],
+            declared_caps: vec![], heap_slot_masks: Default::default(), owned_params: Default::default(),
+            call_moves: Default::default(), aggregate_blocks: Default::default(),
+        };
+        let mut fused = f.clone();
+        rewrite_narrow_ops(&mut fused).unwrap();
+        assert!(matches!(fused.ops[0], Op::Prim { kind: PrimKind::NativeNarrowPow { bits: 8, signed: false }, .. }));
+        let mut shared = f.clone();
+        shared.ret = Some(ValueId(2));
+        rewrite_narrow_ops(&mut shared).unwrap();
+        assert!(matches!(shared.ops[0], Op::CallFn { .. }));
+        let mut namesake = f;
+        if let Op::CallFn { name, .. } = &mut namesake.ops[0] { *name = "user.pow".into(); }
+        rewrite_narrow_ops(&mut namesake).unwrap();
+        assert!(matches!(namesake.ops[0], Op::CallFn { .. }));
     }
 }

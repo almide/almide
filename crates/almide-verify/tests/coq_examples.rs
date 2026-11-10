@@ -304,6 +304,11 @@ fn native_calls_examples() {
             ("|1 1|0\niM\nid#1||\n", false),
             ("|1 1|0\niM\nid#1||\ndam", false),
             ("|5 0|\nid", false),
+            ("||| 0\nid", true),
+            ("||| 29\nid", true),
+            ("||| 30 31\nid", true),
+            ("||| 32 33 34 35 36 37\nid", true),
+            ("||| 38\nid", false),
         ],
     );
 }

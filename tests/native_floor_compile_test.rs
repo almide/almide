@@ -24,13 +24,25 @@ fn the_declared_native_floor_compiles() {
     std::fs::create_dir_all(&dir).expect("temp dir");
     let file = dir.join("floor.rs");
     std::fs::write(&file, &src).expect("write the floor source");
-    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
-    let out = Command::new(rustc)
-        .args(["--edition", "2021", "--crate-type", "bin", "-o"])
-        .arg(dir.join("floor"))
-        .arg(&file)
+    // The admitted floor includes dependency-bearing host operations (TLS).
+    // Use the same dependency declaration table as every product build route,
+    // compiling the complete emitted floor, including its unreachable bodies.
+    let mut manifest = String::from("[package]\nname = \"native-floor-check\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[workspace]\n[[bin]]\nname = \"floor\"\npath = \"floor.rs\"\n[dependencies]\n");
+    for (name, spec) in almide_codegen::runtime_crate_deps(&src) {
+        if spec.starts_with('{') {
+            manifest.push_str(&format!("{name} = {spec}\n"));
+        } else {
+            manifest.push_str(&format!("{name} = {spec:?}\n"));
+        }
+    }
+    std::fs::write(dir.join("Cargo.toml"), manifest).expect("write floor manifest");
+    let out = Command::new(env!("CARGO"))
+        .args(["build", "--manifest-path"])
+        .arg(dir.join("Cargo.toml"))
+        .arg("--target-dir")
+        .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/native-floor-check"))
         .output()
-        .expect("run rustc");
+        .expect("compile the floor with its runtime dependencies");
     let _ = std::fs::remove_dir_all(&dir);
     assert!(
         out.status.success(),

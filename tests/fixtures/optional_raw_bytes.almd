@@ -1,0 +1,20 @@
+import fs
+fn show(r: Result[Bytes?, String]) -> String = match r {
+  ok(some(b)) => "some ${bytes.to_list(b)}",
+  ok(none) => "none",
+  err(_) => "error",
+}
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("optional-bytes")!
+  let f = d + "/data"
+  println(show(fs.read_bytes_if_exists(f)))
+  fs.write_bytes(f, bytes.from_list([]))!
+  println(show(fs.read_bytes_if_exists(f)))
+  fs.write_bytes(f, bytes.from_list([0, 255, 128, 13, 10]))!
+  let held: Result[Bytes?, String] = fs.read_bytes_if_exists(f)
+  fs.write_bytes(f, bytes.from_list([1]))!
+  println(show(held))
+  println(show(fs.read_bytes_if_exists(f)))
+  println(show(fs.read_bytes_if_exists(d)))
+  fs.remove_all(d)!
+}

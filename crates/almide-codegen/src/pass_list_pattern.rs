@@ -174,10 +174,10 @@ fn rewrite_stmts(stmts: Vec<IrStmt>, vt: &mut Cx<'_>, changed: &mut bool) -> Vec
 }
 
 /// Lower a match with list patterns to an if/else chain.
-/// Uses the subject expression directly (no temp variable) to avoid
-/// type mismatches when borrow passes later change the parameter type.
+/// Evaluate a computed subject once before the length tests and projections.
 fn lower_list_match(subject: IrExpr, arms: Vec<IrMatchArm>, result_ty: &Ty, _vt: &mut Cx<'_>) -> IrExprKind {
-    build_list_if_chain(&subject, &arms, result_ty, _vt, 0, usize::MAX).kind
+    super::pass_list_pattern_nested::with_subject(subject, _vt,
+        |s, vt| build_list_if_chain(&s, &arms, result_ty, vt, 0, usize::MAX)).kind
 }
 
 /// `IrPattern::List` case of `build_list_if_chain`, extracted verbatim
@@ -823,12 +823,22 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
 /// any non-`Unit` match (rustc E0308 on an exhaustive program); an abort is
 /// the honest value of a branch no input takes.
 pub(crate) fn fell_through_every_arm(result_ty: &Ty) -> IrExpr {
-    let kind = if matches!(result_ty, Ty::Unit) {
-        IrExprKind::Unit
-    } else {
-        IrExprKind::Todo { message: "internal: a list match fell through every arm".into() }
+    if matches!(result_ty, Ty::Unit) {
+        return IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
+    }
+    // This is an impossible branch of an exhaustive match, not a source
+    // `todo`. The typed panic builtin is lowered by both native backends;
+    // the proof pipeline turns it into the existing terminating Die rule.
+    let message = IrExpr {
+        kind: IrExprKind::LitStr { value: "internal: a list match fell through every arm".into() },
+        ty: Ty::String, span: None, def_id: None,
     };
-    IrExpr { kind, ty: result_ty.clone(), span: None, def_id: None }
+    IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Named { name: sym("panic") },
+            args: vec![message], type_args: Vec::new(),
+        }, ty: Ty::Never, span: None, def_id: None,
+    }
 }
 
 /// An element sub-pattern that can never fail: a bind, a wildcard, or a

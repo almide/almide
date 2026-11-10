@@ -98,13 +98,15 @@ pub(super) fn render_map_op(
                 _ => return Some(Err(wall("native: a map read at a computed position"))),
             };
             let scalar = matches!(kind, PrimKind::Load { width: 8 });
-            if scalar != (kind_of == NTy::I64) {
+            if scalar != matches!(kind_of, NTy::I64 | NTy::F32) {
                 return Some(Err(wall("native: a map read of the wrong width for its kind")));
             }
-            tys.insert(*d, kind_of);
+            let output_kind = if kind_of == NTy::F32 { NTy::I64 } else { kind_of };
+            tys.insert(*d, output_kind);
             let read = format!("{m}.entry_at({} as usize).{part}", var(i));
-            let rhs = if scalar { format!("*{read}") } else { format!("{read}.clone()") };
-            emit(out, indent, &format!("let mut {}: {} = {rhs};", var(*d), owned_ty(kind_of)));
+            let rhs = if kind_of == NTy::F32 { format!("({read}).to_bits() as i64") }
+                else if scalar { format!("*{read}") } else { format!("{read}.clone()") };
+            emit(out, indent, &format!("let mut {}: {} = {rhs};", var(*d), owned_ty(output_kind)));
             Some(Ok(true))
         }
         _ => None,

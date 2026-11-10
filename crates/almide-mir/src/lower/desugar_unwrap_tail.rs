@@ -20,6 +20,19 @@ fn desugar_tail_effect_unwrap(
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
     match &tail.kind {
+        // A void entry has no Result return for its caller to inspect. Its
+        // explicit tail propagation must execute the same checked Err branch
+        // as statement propagation; stripping `!` would silently discard Err.
+        IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }
+            if unit_main && matches!(tail.ty, Ty::Unit)
+                && matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, a)
+                    if a.len() == 2 && matches!(a[0], Ty::Unit)) =>
+        {
+            let cont = mk_at(tail, IrExprKind::Unit, Ty::Unit);
+            build_unwrap_match((**expr).clone(),
+                IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) },
+                cont, tail, next_var, true)
+        }
         // A nested block — its own stmts/tail may carry a stmt-`!`.
         IrExprKind::Block { .. } => {
             desugar_effect_unwrap_inner(tail, next_var, unit_main, ret_is_result)
@@ -57,12 +70,12 @@ fn desugar_tail_effect_unwrap(
                         expr: Box::new(IrExpr {
                             kind: IrExprKind::LitStr { value: "none".into() },
                             ty: Ty::String,
-                            span: tail.span.clone(),
+                            span: tail.span,
                             def_id: None,
                         }),
                     },
                     ty: result_ty.clone(),
-                    span: tail.span.clone(),
+                    span: tail.span,
                     def_id: None,
                 },
             };
@@ -76,12 +89,12 @@ fn desugar_tail_effect_unwrap(
                         expr: Box::new(IrExpr {
                             kind: IrExprKind::Var { id: v },
                             ty: payload_ty,
-                            span: tail.span.clone(),
+                            span: tail.span,
                             def_id: None,
                         }),
                     },
                     ty: result_ty.clone(),
-                    span: tail.span.clone(),
+                    span: tail.span,
                     def_id: None,
                 },
             };
@@ -91,7 +104,7 @@ fn desugar_tail_effect_unwrap(
                     arms: vec![none_arm, some_arm],
                 },
                 ty: result_ty,
-                span: tail.span.clone(),
+                span: tail.span,
                 def_id: tail.def_id,
             })
         }
@@ -112,7 +125,7 @@ fn desugar_tail_effect_unwrap(
                     else_: Box::new(ne.unwrap_or_else(|| (**else_).clone())),
                 },
                 ty: tail.ty.clone(),
-                span: tail.span.clone(),
+                span: tail.span,
                 def_id: tail.def_id,
             })
         }
@@ -138,7 +151,7 @@ fn desugar_tail_effect_unwrap(
             Some(IrExpr {
                 kind: IrExprKind::Match { subject: subject.clone(), arms: new_arms },
                 ty: tail.ty.clone(),
-                span: tail.span.clone(),
+                span: tail.span,
                 def_id: tail.def_id,
             })
         }

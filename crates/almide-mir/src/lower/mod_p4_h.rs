@@ -189,6 +189,7 @@ pub struct RouterHints {
 
 pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], result_ty: &Ty, hints: RouterHints) -> String {
     let func = base_stdlib_fn_name(func);
+    if let Some(name) = crate::lower::registry_sig::declared_collection_route(module, func, arg_tys, result_ty) { return name; }
     let routed = routers_call_name(module, func, arg_tys, result_ty, hints);
     // #2184: the routers' verdict is not the last word. A router that declined
     // used to fall through to the PLAIN scalar impl whatever the call's types

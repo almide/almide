@@ -1,0 +1,23 @@
+type R = { text: String }
+fn fallback(mut seen: List[Int], n: Int) -> R = {
+ list.push(seen, n)
+ R { text: "fallback" }
+}
+fn change(mut text: String) -> R? = {
+ text = "after"
+ some(R { text: "selected" })
+}
+fn change_record(mut r: R) -> R? = {
+ r = R { text: "after" }
+ some(R { text: "before" })
+}
+fn main() -> Unit = {
+ var seen: List[Int] = []
+ var text = "before"
+ let absent: R? = none
+ let selected = R { text: "selected" }
+ println("${text} ${(change(text) ?? fallback(seen, 1)) == selected} ${text} ${(absent ?? fallback(seen, 2)) != selected} ${seen}")
+ println("${seen} ${(absent ?? fallback(seen, 3)) == R { text: "fallback" }} ${seen}")
+ var r = R { text: "before" }
+ println("${r == (change_record(r) ?? R { text: "unused" })} ${r.text}")
+}

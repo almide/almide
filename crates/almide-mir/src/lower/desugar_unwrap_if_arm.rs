@@ -32,7 +32,7 @@ pub fn desugar_if_arm_unwrap(body: &IrExpr) -> Option<IrExpr> {
     let mk = |kind: IrExprKind, ty: Ty| IrExpr {
         kind,
         ty,
-        span: body.span.clone(),
+        span: body.span,
         def_id: body.def_id,
     };
     // strip `!` from an unwrap arm (already Result[T,E]); wrap a plain arm in `ok(..)`.

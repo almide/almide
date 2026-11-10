@@ -163,6 +163,26 @@ fn is_produced_by_call(e: &IrExpr, extraction: bool) -> bool {
     }
 }
 
+/// True when evaluating `e` can propagate out of THIS frame: a `!` / `?`
+/// outside any lambda. A callback's own `!` leaves the callback's frame, at
+/// the callback's call — not while the HOF's arguments are being pushed.
+fn leaves_this_frame(e: &IrExpr) -> bool {
+    struct Scan(bool);
+    impl almide_ir::visit::IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match e.kind {
+                _ if self.0 => {}
+                IrExprKind::Lambda { .. } => {}
+                IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } => self.0 = true,
+                _ => almide_ir::visit::walk_expr(self, e),
+            }
+        }
+    }
+    let mut s = Scan(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut s, e);
+    s.0
+}
+
 /// A literal operand: evaluating it has no effect, so it may stay in place
 /// while the operands around it are named.
 fn is_literal(e: &IrExpr) -> bool {
@@ -266,8 +286,8 @@ impl Binder<'_> {
         *stmts = out;
     }
 
-    /// #2988 — a list / tuple / record literal whose operand can PROPAGATE
-    /// (`[1, chk(s)!]`, `(1, chk(s)!)`, `P { a: 1, b: chk(s)! }`). The
+    /// #2988 — a list / tuple / record / map literal whose operand can PROPAGATE
+    /// (`[1, chk(s)!]`, `(1, chk(s)!)`, `P { a: 1, b: chk(s)! }`, `[k(): chk(s)!]`). The
     /// emitter allocates the container first and lowers the operands into
     /// it, so a `!` that returns from the middle of the build leaves the
     /// half-built block held only by the operand stack: never released,
@@ -286,9 +306,11 @@ impl Binder<'_> {
             IrExprKind::SpreadRecord { base, fields } => {
                 std::iter::once(base.as_mut()).chain(fields.iter_mut().map(|(_, v)| v)).collect()
             }
+            // A map literal's keys and values, in entry order.
+            IrExprKind::MapLiteral { entries } => entries.iter_mut().flat_map(|(k, v)| [k, v]).collect(),
             _ => return false,
         };
-        if !operands.iter().any(|a| crate::fs_meta::expr_propagates(a)) {
+        if !operands.iter().any(|a| crate::fs_meta::expr_leaves_frame(a)) {
             return false;
         }
         let mut binds = Vec::new();
@@ -306,6 +328,66 @@ impl Binder<'_> {
         let (ty, span) = (e.ty.clone(), e.span);
         let lit = std::mem::take(e);
         *e = IrExpr { kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(lit)) }, ty, span, def_id: None };
+        true
+    }
+
+    /// A call whose LATER argument can propagate (`join(seen(x), word(x)!)`,
+    /// `join(a, word(x)!)`). The emitter lowers the arguments onto the
+    /// operand stack in order, each with the credit its parameter's mode
+    /// takes (a produced block's own, or the `+1` an owning parameter is
+    /// handed for a variable, rc_ownership.rs `rc_arg_guard`), so a `!` that
+    /// returns from the middle of the sequence leaves every credit already
+    /// pushed held by the stack alone: never released. Every argument up to
+    /// the last propagating one is bound first, in order —
+    /// `{ let t = seen(x); let w = word(x)!; join(t, w) }` — so each `!`
+    /// exits while the earlier values are frame locals its exit plan
+    /// releases, and nothing can leave between the first push and the call.
+    /// This is the literal rule above, for a call. A plain read, a literal
+    /// or a function value stays in place (no effect to reorder, and no
+    /// propagation after it once the rest is bound); a call with nothing
+    /// droppable before its propagating argument keeps its tree.
+    fn hoist_args_before_propagation(&mut self, e: &mut IrExpr) -> bool {
+        let operands: Vec<&mut IrExpr> = match &mut e.kind {
+            IrExprKind::Call { target, args, .. } => {
+                let head = match target {
+                    CallTarget::Method { object, .. } => Some(object.as_mut()),
+                    _ => None,
+                };
+                head.into_iter().chain(args.iter_mut()).collect()
+            }
+            IrExprKind::RuntimeCall { args, .. } => args.iter_mut().collect(),
+            _ => return false,
+        };
+        let Some(last) = operands.iter().rposition(|a| leaves_this_frame(a)) else { return false };
+        let stays = |a: &IrExpr| {
+            is_plain_read(a)
+                || matches!(
+                    a.kind,
+                    IrExprKind::OptionNone
+                        | IrExprKind::EmptyMap
+                        | IrExprKind::FnRef { .. }
+                        | IrExprKind::Lambda { .. }
+                        | IrExprKind::ClosureCreate { .. }
+                )
+        };
+        if !operands[..last].iter().any(|a| bindable_ty(&a.ty)) {
+            return false;
+        }
+        let mut binds = Vec::new();
+        for a in operands.into_iter().take(last + 1) {
+            if stays(a) {
+                continue;
+            }
+            let (ty, span) = (a.ty.clone(), a.span);
+            let id = self.vars.alloc(sym("__arg_tmp"), ty.clone(), Mutability::Let, span);
+            let value =
+                std::mem::replace(a, IrExpr { kind: IrExprKind::Var { id }, ty: ty.clone(), span, def_id: None });
+            binds.push(IrStmt { kind: IrStmtKind::Bind { var: id, mutability: Mutability::Let, ty, value }, span });
+        }
+        *self.changed = true;
+        let (ty, span) = (e.ty.clone(), e.span);
+        let call = std::mem::take(e);
+        *e = IrExpr { kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(call)) }, ty, span, def_id: None };
         true
     }
 
@@ -367,10 +449,15 @@ fn is_born_here(e: &IrExpr) -> bool {
 /// record, a `some` / `ok` / `err` box. A reader (`match (1, (4, 5), 3)`,
 /// `(1, 2) == (1, 2)`, `(2, 7).0`) consumes nothing, so like a call result
 /// the fresh block has no owner unless it is named first.
+///
+/// A `fan { }` block builds the tuple of its arms' results the same way:
+/// `(fan { a(), b() }).0` read one position and left the tuple and its
+/// other elements live at exit.
 fn is_constructed_here(e: &IrExpr) -> bool {
     matches!(
         &e.kind,
         IrExprKind::Tuple { .. }
+            | IrExprKind::Fan { .. }
             | IrExprKind::Record { .. }
             | IrExprKind::SpreadRecord { .. }
             | IrExprKind::OptionSome { .. }
@@ -468,6 +555,9 @@ impl IrMutVisitor for Binder<'_> {
             return;
         }
         if self.hoist_propagating_elements(e) {
+            return;
+        }
+        if self.hoist_args_before_propagation(e) {
             return;
         }
         match &mut e.kind {

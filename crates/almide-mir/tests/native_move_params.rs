@@ -94,3 +94,32 @@ fn a_rebound_mut_param_moves_and_every_call_hands_it_over() {
     let (_, _, build) = certs.iter().find(|(p, n, _)| p == "ownership" && n == "build").expect("build's witness");
     assert!(build.contains('s') && !build.contains("Ma"), "{build}");
 }
+
+const TREE: &str = "type Tree = | Leaf | Node(Tree, Int, Tree)\n\
+     fn insert(t: Tree, x: Int) -> Tree =\n  match t {\n    Leaf => Node(Leaf, x, Leaf),\n    \
+     Node(l, v, r) => if x < v then Node(insert(l, x), v, r) else Node(l, v, insert(r, x)),\n  }\n\
+     fn depth(t: Tree) -> Int =\n  match t { Leaf => 0, Node(l, _, r) => 1 + (if depth(l) > depth(r) then depth(l) else depth(r)) }\n\
+     fn go(t: Tree, i: Int) -> Tree = if i >= 9 then t else go(insert(t, (i * 5) % 9), i + 1)\n\
+     fn main() -> Unit = println(int.to_string(depth(go(Leaf, 0))))\n";
+
+#[test]
+fn a_variant_param_whose_arm_stores_a_payload_on_every_path_is_taken_over() {
+    // `insert` rebuilds the node around one payload and recurses into the
+    // other on both paths of the arm that reads them: taken over, the stored
+    // sibling moves out of the dying node where the borrowing body copied the
+    // whole subtree at every level.
+    let (rust, _) = certified(TREE);
+    assert!(rust.contains("fn almd_insert(mut v0: AlmdRec0, v1: i64)"), "insert does not take its tree:\n{rust}");
+    assert!(!body(&rust, "insert").contains(".clone()"), "insert copies a subtree:\n{rust}");
+    assert!(!body(&rust, "go").contains("almd_insert(&"), "go lends the tree it hands on:\n{rust}");
+}
+
+#[test]
+fn a_variant_param_whose_payloads_only_reach_reading_calls_keeps_borrowing() {
+    // `depth` hands its payloads to itself alone: nothing stores them, so a
+    // takeover would rest on its own assumption and copy a subtree for every
+    // call that is not the payload's last.
+    let (rust, _) = certified(TREE);
+    assert!(rust.contains("fn almd_depth(v0: &AlmdRec0)"), "depth takes a tree it only reads:\n{rust}");
+    assert!(!body(&rust, "depth").contains(".clone()"), "depth copies a subtree:\n{rust}");
+}

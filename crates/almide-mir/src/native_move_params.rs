@@ -212,9 +212,9 @@ fn consumed_params(
         // copies the record for the call, as the standard codegen's by-value
         // convention does; one whose release follows the call hands it over.
         let exits_before = |end: usize| func.ops[..end].iter().any(|op| matches!(op, Op::Return { .. }));
-        if at_top && plain && func.ret != Some(p.value) {
+        if plain && func.ret != Some(p.value) {
             if let Some(end) = field_given(func, p.value, owned)
-                .and_then(|end| branch_close(func, &depth, end, k))
+                .and_then(|(end, gives)| branch_close(func, &depth, end, k, at_top, &gives))
                 .filter(|&end| !exits_before(end))
             {
                 out.push((k, end));
@@ -271,11 +271,11 @@ fn arm_release(func: &MirFunction, p: ValueId, given: &[usize], depth: &[i32]) -
 /// The last op that reads `p` or anything loaded from it, when `p` is only
 /// read (its fields, its scalar slots) and a field loaded from it is handed
 /// to a by-value position at that field's last use.
-fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>) -> Option<usize> {
+fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>) -> Option<(usize, FieldGives)> {
     let mut derived: BTreeSet<ValueId> = [p].into_iter().collect();
     let mut children: BTreeSet<ValueId> = BTreeSet::new();
     let mut end = None;
-    let mut given = false;
+    let mut gives = FieldGives::default();
     for (i, op) in func.ops.iter().enumerate() {
         let vs = values(op);
         if !vs.iter().any(|v| derived.contains(v)) {
@@ -292,12 +292,16 @@ fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>) -> Option<usiz
             Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(c), .. } => {
                 derived.insert(*c);
                 children.insert(*c);
+                gives.loads.push(i);
             }
             Op::Prim { kind: crate::PrimKind::Load { .. }, .. } | Op::ListGetScalar { .. } => {}
             // A field copied at its own last use (a spread's other fields):
             // out of a record that dies, the copy is the field itself.
             Op::Dup { src, .. } if children.contains(src) => {
-                given |= !crate::mir_liveness::live_after(func, i, *src);
+                if !crate::mir_liveness::live_after(func, i, *src) {
+                    gives.at.push(i);
+                    gives.stored.push(i);
+                }
             }
             Op::CallFn { name, args, .. } => {
                 // A loaded field reaches a call once: given at a by-value
@@ -307,16 +311,20 @@ fn field_given(func: &MirFunction, p: ValueId, owned: &Modes<'_>) -> Option<usiz
                 if vs.iter().filter(|v| derived.contains(v)).count() != 1 {
                     return None;
                 }
-                let by_value = by_value(name, at)
-                    || owned.moves(op, at)
+                let keeps = by_value(name, at)
                     // The list or string a concatenation grows in place.
                     || (at == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"));
-                given |= by_value && !crate::mir_liveness::live_after(func, i, c);
+                if (keeps || owned.moves(op, at)) && !crate::mir_liveness::live_after(func, i, c) {
+                    gives.at.push(i);
+                    if keeps {
+                        gives.stored.push(i);
+                    }
+                }
             }
             _ => return None,
         }
     }
-    given.then_some(end).flatten()
+    (!gives.at.is_empty()).then_some(end).flatten().map(|end| (end, gives))
 }
 
 /// Make the movable parameters of `func` move parameters, if the ownership
@@ -638,13 +646,17 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sig
     let not_handle = not_handle_positions(functions, &table);
     let kept = kept_positions(functions);
     let hands_at = |f: &MirFunction, k: usize| !taken.contains(&f.name) && !kept.contains(&(f.name.clone(), k));
+    let representation_pinned = crate::native_hof::representation_adapters_needed(functions, sigs);
     let mut pinned: BTreeSet<String> = BTreeSet::new();
     loop {
         let closure = |f: &MirFunction| {
             taken.contains(&f.name) && crate::lambda_sigs::get(&f.name).is_some() && !pinned.contains(&f.name)
         };
         let eligible = |f: &MirFunction| {
-            f.name != "main"
+            f.name != "main" && !representation_pinned.contains(&f.name)
+                // A fan group borrows its captures for the scoped threads.
+                // Per-call moves would split the group's consecutive launches.
+                && crate::fan_native::arm(&f.name).is_none()
                 && (!f.name.contains('.') || own.contains(&f.name))
                 && (closure(f) || (!taken.contains(&f.name) && !reached_otherwise.contains(&f.name)))
                 // A linked body a declared runtime route may serve instead:
@@ -684,6 +696,10 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sig
 /// use of an unknown value both before and after its call sites hand an
 /// argument over, and the moves add no violation of their own.
 fn no_new_violations(before: &MirFunction, after: &MirFunction) -> bool {
+    // Preserve the portable certificate's representability as well as the
+    // mirror's modeled obligations. Later stages still verify the full body.
+    if crate::certificate::ownership_certificate_with_poison(after).1
+        && !crate::certificate::ownership_certificate_with_poison(before).1 { return false; }
     let Err(found) = crate::verify_ownership(after) else { return true };
     if before.ops == after.ops && before.owned_params == after.owned_params {
         return true;

@@ -194,7 +194,16 @@ Definition native_fs_host_calls : list string :=
    "almide_rt_fs_remove";
    "almide_rt_fs___root_remove";
    "almide_rt_fs_create_temp_dir";
-   "almide_rt_fs_create_temp_file"].
+   "almide_rt_fs_create_temp_file";
+   "almide_rt_fs_read_bytes_if_exists";
+   "almide_rt_fs_read_lines_if_exists";
+   "almide_rt_fs_stat";
+   "almide_rt_fs_fold_lines";
+   "almide_rt_fs_for_each_line";
+   "almide_rt_fs_fold_lines_effect";
+   "almide_rt_fs_for_each_line_effect";
+   "almide_rt_fs_fold_lines_range";
+   "almide_rt_fs_fold_lines_chunked"].
 
 Definition hosts_ok (b : block) : bool :=
   forallb (fun h => Nat.ltb h (List.length native_fs_host_calls)) (b_hosts b).
@@ -400,10 +409,26 @@ Example nc_host_call_accepts :
 id" = true.
 Proof. reflexivity. Qed.
 
-(* A host call to a runtime function OUTSIDE the named set (the out-of-range
-   id the producer writes for it: the set's length, 29) — REJECTED. *)
-Example nc_host_outside_set_rejects :
+(* Optional raw-byte reads use their own named host operation. *)
+Example nc_host_optional_bytes_accepts :
   check_native_calls_cert "||| 29
+id" = true.
+Proof. reflexivity. Qed.
+
+Example nc_host_optional_lines_and_stat_accept :
+  check_native_calls_cert "||| 30 31
+id" = true.
+Proof. reflexivity. Qed.
+
+Example nc_host_stream_callbacks_accept :
+  check_native_calls_cert "||| 32 33 34 35 36 37
+id" = true.
+Proof. reflexivity. Qed.
+
+(* A host call to a runtime function OUTSIDE the named set (the out-of-range
+   id the producer writes for it: the set's length, 38) — REJECTED. *)
+Example nc_host_outside_set_rejects :
+  check_native_calls_cert "||| 38
 id" = false.
 Proof. reflexivity. Qed.
 

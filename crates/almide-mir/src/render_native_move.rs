@@ -86,7 +86,7 @@ pub(crate) fn last_use(
     t: NTy,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
-    if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) | NTy::Res | NTy::ResStr) {
+    if drill_no_moves() || aliases::read_after(func, at, src) || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) | NTy::Res | NTy::ResStr) {
         return false;
     }
     // A Result param is the callee's own (there is no borrowed Result kind:
@@ -150,7 +150,7 @@ pub(crate) fn dying_after(
     src: ValueId,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
-    if drill_no_moves() {
+    if drill_no_moves() || aliases::read_after(func, at, src) {
         return false;
     }
     // A borrowed param is the caller's; a MOVE param (#4006 class P) is ours.
@@ -741,3 +741,6 @@ pub(crate) fn take_expr(code: &str) -> String {
         format!("std::mem::take(&mut {code})")
     }
 }
+
+#[path = "render_native_move_alias.rs"]
+mod aliases;

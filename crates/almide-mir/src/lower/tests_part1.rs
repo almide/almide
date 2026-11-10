@@ -355,25 +355,14 @@
 
     #[test]
     fn effectful_module_call_is_walled() {
-        // var x = fs.stat(p)  → walled. `fs` is effectful; `fs.stat` is NOT one of the
-        // ADMITTED self-hosted effectful calls (random.int / env.args / fs.read_text /
-        // fs.read_bytes — those charge a real capability into the transitive witness via
-        // their prim floor), so its capability cannot be charged here and admitting it
-        // would be accept-but-unsafe. (`fs.read_bytes` is deliberately admitted now, like
-        // read_text — see `effectful_read_text_is_admitted`.)
-        // A HEAP result so the value-call purity gate is the path that walls it.
+        // Unix FFI is still outside the admitted host-op matrix. A heap
+        // Result exercises the value-call purity gate; admitting it without
+        // a declared capability would leave the transitive witness incomplete.
+        let ty = Ty::result(Ty::Int, Ty::String);
         let b = body(vec![
             bind(0, Ty::String, ir_expr(IrExprKind::LitStr { value: "p".into() }, Ty::String)),
-            bind(
-                1,
-                Ty::list(Ty::Int),
-                module_call(
-                    "http",
-                    "serve",
-                    vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
-                    Ty::list(Ty::Int),
-                ),
-            ),
+            bind(1, ty.clone(), module_call("unix", "__os_connect",
+                vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)], ty)),
         ]);
         match lower_body(&b, "main") {
             Err(LowerError::Unsupported(m)) => assert!(m.contains("effectful/impure"), "got: {m}"),

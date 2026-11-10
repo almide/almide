@@ -37,9 +37,9 @@ fn two_unguarded_arms(arms: &[IrMatchArm]) -> bool {
     arms.len() == 2 && arms.iter().all(|a| a.guard.is_none())
 }
 
-/// Both arm bodies are `Unit` — the statement-position (unit-if) requirement.
+/// A statement arm either yields Unit or never returns (e.g. process.exit).
 fn both_unit(a: &IrExpr, b: &IrExpr) -> bool {
-    matches!(a.ty, Ty::Unit) && matches!(b.ty, Ty::Unit)
+    matches!(a.ty, Ty::Unit | Ty::Never) && matches!(b.ty, Ty::Unit | Ty::Never)
 }
 
 /// Fill a one-shot slot; `None` (decline) if it was already filled — the
@@ -110,7 +110,14 @@ fn classify_variant_arm(
 /// slot). A raw tuple VAR/param destructure alone walls (no `param_values` entry), so the rewrite to
 /// the @12-handle bind is required, not a plain var destructure. `$p` ids start above subject+arms.
 /// `None` = no tuple payload anywhere (the caller keeps the original arms).
-fn desugar_tuple_payload_arms(_subject: &IrExpr, arms: &[IrMatchArm]) -> Option<Vec<IrMatchArm>> {
+fn desugar_tuple_payload_arms(subject: &IrExpr, arms: &[IrMatchArm]) -> Option<Vec<IrMatchArm>> {
+    if crate::lower::owned_tco_slots() {
+        if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, args) = &subject.ty {
+            if args.len() == 2 {
+                return desugar_tuple_payload_arms_with(arms, Some((&args[0], &args[1])));
+            }
+        }
+    }
     desugar_tuple_payload_arms_with(arms, None)
 }
 

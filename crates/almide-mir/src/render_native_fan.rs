@@ -23,6 +23,10 @@ pub(crate) fn fan_rendered() -> bool {
     FAN_RENDERED.with(|c| c.get())
 }
 
+pub(crate) fn require_fan_runtime() {
+    FAN_RENDERED.with(|c| c.set(true));
+}
+
 pub(crate) fn fan_rendered_reset() {
     FAN_RENDERED.with(|c| c.set(false));
 }
@@ -119,6 +123,8 @@ pub(crate) fn fan_glue() -> String {
          use std::process::exit as almide_process_exit;\n\
          thread_local! { static ALMIDE_STDOUT_BUF: std::cell::RefCell<std::io::Stdout> = std::cell::RefCell::new(std::io::stdout()); }\n\
          fn almide_stdout_flush() { let _ = std::io::Write::flush(&mut std::io::stdout()); }\n\
+         fn almide_stdout_write_bytes(bytes: &[u8]) { almide_out_write(false, bytes); }\n\
+         fn almide_stderr_write_bytes(bytes: &[u8]) { almide_stdout_flush(); almide_out_write(true, bytes); }\n\
          fn almide_stdout_is_terminal() -> bool { std::io::IsTerminal::is_terminal(&std::io::stdout()) }\n\
          fn almide_stack_guard_register() {\n    #[cfg(all(any(target_os = \"linux\", target_os = \"macos\"), not(miri)))]\n    almide_stack_guard::register();\n}\n\
          fn almide_v1_out(err: bool, args: std::fmt::Arguments<'_>, newline: bool) {\n\
@@ -130,7 +136,7 @@ pub(crate) fn fan_glue() -> String {
          macro_rules! print { ($($a:tt)*) => { almide_v1_out(false, format_args!($($a)*), false) }; }\n\
          macro_rules! eprintln { () => { almide_v1_out(true, format_args!(\"\"), true) }; ($($a:tt)*) => { almide_v1_out(true, format_args!($($a)*), true) }; }\n\
          macro_rules! eprint { ($($a:tt)*) => { almide_v1_out(true, format_args!($($a)*), false) }; }\n\
-         fn almide_v1_exit(code: i32) -> ! { almide_fan_trap_wait(); almide_stdout_flush(); almide_process_exit(code) }\n",
+         fn almide_v1_exit(code: i32) -> ! { almide_fan_trap_wait(); almide_at_exit_run(); almide_stdout_flush(); almide_process_exit(code) }\n",
     );
     s.push_str(&almide_codegen::fan_timeline_prelude_text());
     s.push('\n');
@@ -141,7 +147,7 @@ pub(crate) fn fan_glue() -> String {
 /// which first waits for the arms below the trapping one (ADR-0024 D5).
 pub(crate) fn route_exits(program: &str) -> String {
     // A printed line joins the arm timelines through the routed `print!`.
-    program.replace("std::process::exit(", "almide_v1_exit(").replace(
+    crate::native_floor::route_process_exits(program, "almide_v1_exit").replace(
         "if std::io::Write::write_all(&mut std::io::stdout().lock(), line).is_err() { print!(\"{}\", String::from_utf8_lossy(line)) }",
         "print!(\"{}\", String::from_utf8_lossy(line))",
     )

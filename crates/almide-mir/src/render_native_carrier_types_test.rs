@@ -92,3 +92,32 @@ fn result_fields_do_not_give_records_a_default() {
     assert!(has_default(NTy::Rec(2)));
     assert!(has_default(NTy::Rec(3)));
 }
+
+#[test]
+fn tuples_with_result_fields_are_constructible_without_default() {
+    for payload in [Ty::Int, Ty::String] {
+        let result = applied(C::Result, vec![payload, Ty::String]);
+        let tuple = Ty::Tuple(vec![result, Ty::String].into());
+        let mut roots = Vec::new();
+        collect_tuples(&tuple, &mut roots);
+        let decls = derive_records(&Default::default(), &Default::default(), &roots);
+        let i = decls.iter().position(|d| d.name == tuple_key(&tuple)).expect("tuple was pruned");
+        let _guard = install(decls);
+        assert!(!has_default(NTy::Rec(i as u16)));
+    }
+}
+
+#[test]
+fn unit_fields_keep_the_zero_lane_without_changing_void_returns() {
+    let tuple = Ty::Tuple(vec![Ty::Unit, Ty::String].into());
+    let result = applied(C::Result, vec![tuple.clone(), Ty::String]);
+    let mut roots = Vec::new();
+    collect_tuples(&result, &mut roots);
+    let decls = derive_records(&Default::default(), &Default::default(), &roots);
+    let i = decls.iter().position(|d| d.name == tuple_key(&tuple)).expect("the tuple's decl is registered");
+    assert_eq!(decls[i].fields, vec![NTy::I64, NTy::Str]);
+    assert_eq!(decls.iter().find(|d| d.name == tuple_key(&result)).unwrap().result_of,
+        Some((NTy::Rec(i as u16), NTy::Str)));
+    assert!(!is_lane_scalar(&Ty::Unit));
+    assert!(!is_lane_scalar(&Ty::Never));
+}

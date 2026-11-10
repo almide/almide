@@ -132,7 +132,10 @@ fn reduce_expr(
 /// returns nothing — the reduction happens per call site (each site's args form
 /// the env), but the STRUCTURAL admission is site-independent and cached.
 fn is_inlinable_shape(f: &almide_ir::IrFunction) -> bool {
+    // An extern's body is only a fallback for targets without that binding.
+    // Substituting it here would bypass target selection and its capability.
     if f.is_effect
+        || !f.extern_attrs.is_empty()
         || f.is_test
         || f.generics.as_ref().is_some_and(|g| !g.is_empty())
         || f.name.as_str() == "main"

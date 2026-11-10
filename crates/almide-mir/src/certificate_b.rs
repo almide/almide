@@ -27,10 +27,10 @@ fn flat_concat_ok(t: &str, e: &str) -> bool {
     if seg_net(e) != 0 {
         return false;
     }
-    if t.contains('x') {
+    if t.contains(['x', 't']) {
         return false;
     }
-    !e.contains('x')
+    !e.contains(['x', 't'])
 }
 
 /// Either arm still carries a structural delimiter — the poisoned-flush
@@ -129,7 +129,7 @@ impl Streams {
         for o in fr.order {
             let t = fr.then_ev.get(&o).cloned().unwrap_or_default();
             let e = fr.else_ev.get(&o).cloned().unwrap_or_default();
-            // An arm carrying the divergence marker `x` NEVER flattens (even at
+            // An arm carrying a divergence marker `x` or `t` NEVER flattens (even at
             // net 0): the bracket is what tells the checker WHICH side exited
             // the frame, so the flat concat would erase the exit obligation.
             let seg = if flat_concat_ok(&t, &e) {
@@ -150,12 +150,10 @@ impl Streams {
     fn balance(&self, o: ValueId) -> i64 {
         let mut b = self.stream.get(&o).map(|line| seg_net(line)).unwrap_or(0);
         for fr in &self.frames {
-            if let Some(t) = fr.then_ev.get(&o) {
-                b += seg_net(t);
-            }
-            if let Some(e) = fr.else_ev.get(&o) {
-                b += seg_net(e);
-            }
+            // Only the active arm has executed. Counting the completed then
+            // arm here hides the else arm's still-owned merge reference.
+            let active = if fr.in_else { &fr.else_ev } else { &fr.then_ev };
+            if let Some(events) = active.get(&o) { b += seg_net(events); }
         }
         b
     }
@@ -215,8 +213,9 @@ fn heap_objs_step(
     heap_objs: &mut BTreeSet<ValueId>,
     if_stack: &mut Vec<(Option<ValueId>, bool)>,
 ) {
-    // A call with a heap result introduces a heap object, like Alloc.
-    if let Some(d) = heap_call_dst(op) {
+    // Calls and allocator-class prims introduce owned heap objects, like
+    // Alloc. Native carrier rewrites must retain the same branch-merge credit.
+    if let Some(d) = heap_call_dst(op).or_else(|| alloc_class_prim_dst(op)) {
         heap_objs.insert(d);
         return;
     }
@@ -378,11 +377,10 @@ impl CertScan {
             self.s.event(o, 'd');
             return;
         }
-        // An allocator-class prim result is a +1, like `Alloc` — a fresh owned value on its
-        // OWN stream (`i`), balanced by the caller's scope-end drop or a heap-return move-out.
+        // Allocator-class prims own a fresh reference, just like Alloc. Route
+        // a loop feeder's credit to its slot before the old value is dropped.
         if let Some(d) = alloc_class_prim_dst(op) {
-            self.s.of.insert(d, d);
-            self.s.event(d, 'i');
+            self.feed_or_own(d, 'i');
             return;
         }
         // A call that returns a FRESH OWNED heap value (the callee allocated

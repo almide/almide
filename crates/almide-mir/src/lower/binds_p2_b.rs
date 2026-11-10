@@ -203,7 +203,7 @@ impl LowerCtx {
                     IrExprKind::Call { .. }
                         | IrExprKind::Tuple { .. }
                         | IrExprKind::If { .. }
-                        | IrExprKind::Match { .. }
+                        | IrExprKind::Match { .. } | IrExprKind::UnwrapOr { .. }
                         // BLOCK payloads (#1734: `ok({ …; println(html) })` — the
                         // guard restructure's continuation as the Unit-Ok payload):
                         // the ANF bind's Block arm runs the statements in the

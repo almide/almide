@@ -342,7 +342,7 @@ impl LowerCtx {
 
     /// Extracted from `Self::lower_bind_heap` (third-round split, cog reduction): the
     /// Var-alias arm body, verbatim, re-narrowed via `let-else`.
-    fn lower_bind_heap_var_alias(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+    pub(super) fn lower_bind_heap_var_alias(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         let IrExprKind::Var { id } = &value.kind else { unreachable!() };
         let src = self.value_or_global(*id)?;
         let dst = self.fresh_value();
@@ -359,11 +359,18 @@ impl LowerCtx {
         // follow the alias so the dup'd reference frees its block by the same
         // recursive route when it happens to be the last one (a flat rc_dec
         // of a heap-element list's final ref leaks the elements).
-        if self.materialized_aggregates.contains(&src) {
+        if self.materialized_aggregates.contains(&src)
+            || (self.param_values.contains(&src) && self.aggregate_field_tys(ty).is_some())
+        {
             self.materialized_aggregates.insert(dst);
         }
         if self.materialized_lists.contains(&src) {
             self.materialized_lists.insert(dst);
+        }
+        // A copied closure keeps its dispatch identity and recursive drop
+        // route. It is an owned snapshot, not the mutable source binding.
+        if self.closure_values.contains(&src) {
+            self.closure_values.insert(dst);
         }
         // The variant READ shape too (`let a = o` — the in-test assert's operand
         // bind of `o?` over an Option, #4262): the alias reads the same tag.
@@ -377,6 +384,12 @@ impl LowerCtx {
         // new owned reference; only the read-shape knowledge is added here.
         if self.param_values.contains(&src) && is_scalar_elem_list_ty(ty) {
             self.materialized_lists.insert(dst);
+        }
+        // A native snapshot of a borrowed parameter still denotes its real
+        // block, including heap-element lists and tagged aggregate payloads.
+        if crate::lower::owned_tco_slots() && self.param_values.contains(&src) {
+            self.seed_faithful_read_shape(dst, ty);
+            self.seed_variant_read_shape(dst, ty);
         }
         if self.value_drops.get(&src).is_some_and(|d| d.flat_elems) {
             self.value_drops.entry(dst).or_default().flat_elems = true;
@@ -454,6 +467,10 @@ impl LowerCtx {
         // the direct operand (`try_lower_heap_field_borrow`), so read its tag.
         if self.param_values.contains(&dst) {
             self.seed_variant_read_shape(dst, ty);
+            if crate::lower::owned_tco_slots() {
+                self.seed_faithful_read_shape(dst, ty);
+                self.seed_call_named_heap_drop_route(dst, ty);
+            }
         }
         // A precise heap-field BORROW (a `LoadHandle` of a slot in a still-owning
         // container) is in `param_values` — it is NOT a second owner, so it must NOT

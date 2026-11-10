@@ -49,7 +49,7 @@ fn float32_primitives_preserve_bits_rounding_and_comparisons() {
         ("ne", P::F32Cmp(C::Ne), vec![S::I64; 2], S::I64),
     ];
     let program = MirProgram {
-        functions: cases.iter().map(|(name, kind, ps, _)| primitive(name, kind.clone(), ps.len())).collect(),
+        functions: cases.iter().map(|(name, kind, ps, _)| primitive(name, *kind, ps.len())).collect(),
         ..Default::default()
     };
     let sigs: NativeSigs = cases.into_iter().map(|(n, _, ps, r)| (n.into(), (ps, Some(r)))).collect();

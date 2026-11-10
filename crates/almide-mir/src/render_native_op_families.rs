@@ -182,6 +182,7 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             render_result_str_and_slot_op(op, s)
         }
         K::NativeNarrowBin { .. } => render_narrow_bin_op(op, s),
+        K::NativeNarrowPow { .. } => render_narrow_pow_op(op, s),
         K::OptMakeSome | K::OptMakeNone | K::OptCopy | K::OptTag | K::OptPayload => render_option_carrier_op(op, s),
         _ => Ok(false),
     }
@@ -215,7 +216,7 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> 
             };
             tys.insert(*d, NTy::Res);
             line!(
-                "let {}: Result<i64, AlmideString> = Ok({});",
+                "let mut {}: Result<i64, AlmideString> = Ok({});",
                 var(*d),
                 payload
             );
@@ -235,7 +236,7 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> 
                 }
             };
             tys.insert(*d, NTy::Res);
-            line!("let {}: Result<i64, AlmideString> = Err({});", var(*d), src);
+            line!("let mut {}: Result<i64, AlmideString> = Err({});", var(*d), src);
         }
         Op::Prim {
             kind: crate::PrimKind::ResCopy,
@@ -249,7 +250,7 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> 
             };
             let spelled = if t == NTy::ResStr { "Result<AlmideString, AlmideString>" } else { "Result<i64, AlmideString>" };
             tys.insert(*d, t);
-            line!("let {}: {} = {}.clone();", var(*d), spelled, var(args[0]));
+            line!("let mut {}: {} = {}.clone();", var(*d), spelled, var(args[0]));
         }
         Op::Prim {
             kind: crate::PrimKind::ResTag,
@@ -567,6 +568,10 @@ pub(crate) fn render_native_termination_op(op: &Op, s: OpSink<'_>) -> Result<boo
             dst: None,
             args,
         } if matches!(tys.get(&args[0]), Some(NTy::Str | NTy::StrRef)) => {
+            // The Die ABI carries panic's raw "PANIC: " message. Like the
+            // embedded host's die trap, contain that abort during a request.
+            // ProcExit remains the program's explicit, unconditional exit.
+            line!("if {}.starts_with(\"PANIC: \") {{ almide_contained_unwind(|| {}.to_string()); }}", var(args[0]), var(args[0]));
             line!("eprint!(\"{{}}\", {});", var(args[0]));
             line!("std::process::exit(1);");
         }
@@ -718,11 +723,31 @@ pub(crate) fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
             dst: Some(d),
             args,
         } if args.len() == 1 => render_float_un(op, d, args, tys, out, indent)?,
+        Op::Prim { kind: crate::PrimKind::FloatToInt, dst: Some(d), args } if args.len() == 1 => {
+            let value = match tys.get(&args[0]) {
+                Some(NTy::F64) => var(args[0]),
+                Some(NTy::I64) => format!("f64::from_bits({} as u64)", var(args[0])),
+                _ => return Err(wall("native: float-to-int conversion requires a float value or its bits")),
+            };
+            tys.insert(*d, NTy::I64);
+            line!("let mut {}: i64 = ({value}) as i64;", var(*d));
+        }
         Op::Prim {
             kind: crate::PrimKind::FloatCmp(op),
             dst: Some(d),
             args,
         } if args.len() == 2 => render_float_cmp(op, d, args, tys, out, indent)?,
+        // Exercised by float32_arithmetic_rounds -> float_fmod. Preserve
+        // the bits of an f64 local; an i64 operand already holds those bits.
+        Op::Prim { kind: crate::PrimKind::FloatBits, dst: Some(d), args } if args.len() == 1 => {
+            let bits = match tys.get(&args[0]) {
+                Some(NTy::I64) => var(args[0]),
+                Some(NTy::F64) => format!("{}.to_bits() as i64", var(args[0])),
+                other => return Err(wall(format!("native: float bits of a non-scalar value ({other:?})"))),
+            };
+            tys.insert(*d, NTy::I64);
+            line!("let mut {}: i64 = {bits};", var(*d));
+        }
         _ => return crate::render_native_float32::render(op, OpSink { tys, out, indent, used_shims: s.used_shims }),
     }
     Ok(true)
@@ -734,4 +759,26 @@ fn opt_operand(tys: &std::collections::BTreeMap<crate::ValueId, NTy>, v: crate::
         Some(NTy::Opt) => Ok(var(v)),
         other => Err(wall(format!("native: Option read over a non-Option value ({other:?})"))),
     }
+}
+
+/// Native exponentiation keeps the full exponent, the source abort, and a
+/// concrete wrapping accumulator type. It never delegates a narrow multiply
+/// to an i64 shim and never truncates the exponent to u32.
+fn render_narrow_pow_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    let Op::Prim { kind: crate::PrimKind::NativeNarrowPow { bits, signed }, dst: Some(dst), args } = op
+        else { return Ok(false) };
+    if args.len() != 2 || args.iter().any(|v| s.tys.get(v) != Some(&NTy::I64)) {
+        return Err(wall("native: narrow power requires two integer operands"));
+    }
+    if !matches!(bits, 8 | 16 | 32) { return Err(wall("native: unsupported narrow power width")); }
+    let ty = format!("{}{bits}", if *signed { "i" } else { "u" });
+    let (a, b) = (var(args[0]), var(args[1]));
+    s.tys.insert(*dst, NTy::I64);
+    for _ in 0..s.indent { s.out.push_str("    "); }
+    writeln!(s.out, "let mut {}: i64 = {{ let mut __base = {a} as {ty}; let __exp = {b}; \
+        if __exp < 0 {{ almide_abort(\"negative exponent\"); }} \
+        let mut __n = __exp as u64; let mut __r: {ty} = 1; \
+        while __n > 0 {{ if __n & 1 == 1 {{ __r = __r.wrapping_mul(__base); }} \
+        __n >>= 1; if __n > 0 {{ __base = __base.wrapping_mul(__base); }} }} __r as i64 }};", var(*dst)).expect("writing to a String cannot fail");
+    Ok(true)
 }

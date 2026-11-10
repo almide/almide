@@ -7,6 +7,26 @@ fn runtime_index() -> &'static RuntimeIndex {
 /// The runtime body of `symbol` and every item it reaches, or `None` when it
 /// reaches something the native header cannot carry.
 fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>, String> {
+    closure_using(symbol, rt, references)
+}
+
+fn closure_using(
+    symbol: &str,
+    rt: &'static RuntimeIndex,
+    refs: impl Fn(&str) -> Result<Vec<String>, String>,
+) -> Result<Vec<&'static str>, String> {
+    let out = closure_contents_using(symbol, rt, refs)?;
+    fs_host_gate(symbol, &out)?;
+    Ok(out)
+}
+
+/// Runtime dependency closure, also used for the support of an already
+/// admitted scoped fs host call. Public floor admission still uses the gate.
+fn closure_contents_using(
+    symbol: &str,
+    rt: &'static RuntimeIndex,
+    refs: impl Fn(&str) -> Result<Vec<String>, String>,
+) -> Result<Vec<&'static str>, String> {
     let mut taken: BTreeSet<&'static str> = BTreeSet::new();
     let mut texts: BTreeSet<&'static str> = BTreeSet::new();
     let mut todo: Vec<String> = vec![symbol.to_string()];
@@ -19,19 +39,16 @@ fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>,
         if header_items().contains(key) || !taken.insert(key) || !texts.insert(item.text) {
             continue;
         }
-        // A runtime module that needs a crate (`almide_codegen::runtime_crate_deps`)
-        // cannot ride the native program, which links no dependency.
-        if let Some((dep, _)) = almide_codegen::runtime_crate_deps(item.text).first() {
-            return Err(format!("`{key}` needs the `{dep}` crate, which a native program does not link"));
-        }
+        // Dependency-bearing runtime bodies take the product's Cargo route.
+        // Its manifest derives from these exact bodies, including a split
+        // runtime crate; the floor compile gate checks the complete closure.
         out.push(item.text);
-        for r in references(item.text).map_err(|n| format!("`{key}` reaches `{n}`, which the native header cannot carry"))? {
+        for r in refs(item.text).map_err(|n| format!("`{key}` reaches `{n}`, which the native header cannot carry"))? {
             if !taken.contains(r.as_str()) {
                 todo.push(r);
             }
         }
     }
-    fs_host_gate(symbol, &out)?;
     Ok(out)
 }
 
@@ -53,6 +70,12 @@ pub(crate) fn runtime_items_named_by(text: &str) -> Result<Vec<&'static str>, St
 /// is not an item we can take along (a type, a macro, a module, a prelude
 /// fn, a `#[cfg]` twin). A name neither of them defines is Rust's own.
 fn references(text: &str) -> Result<Vec<String>, String> {
+    if text == almide_codegen::generated::rust_runtime::ALMIDE_KERNEL_INLINE {
+        // Internal helpers and cfg twins are defined inside this whole module.
+        static OWN: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
+        let own = OWN.get_or_init(|| defined_names(almide_codegen::generated::rust_runtime::ALMIDE_KERNEL_INLINE));
+        return references_seeded(runtime_index(), text, own);
+    }
     if is_fs_host_text(text) {
         // The fs host module's own names, at any depth, are its own.
         return references_seeded(runtime_index(), text, fs_host_own_names());
@@ -66,13 +89,22 @@ fn references(text: &str) -> Result<Vec<String>, String> {
 /// own crate with the runtime's profile (owner ruling 2026-11-02).
 pub(crate) fn is_runtime_text(text: &str) -> bool {
     static TEXTS: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
-    text == FLOOR_HEADER || TEXTS.get_or_init(|| runtime_index().items.values().map(|i| i.text).collect()).contains(text)
+    text == floor_header() || TEXTS.get_or_init(|| runtime_index().items.values().map(|i| i.text).collect()).contains(text)
 }
 
-/// `Err` when the closure of `symbol` carries the fs host module and
-/// `symbol` is not one of the named native fs host calls.
+/// A runtime implementation of a named host operation. The generated
+/// Send-free twin has the same operation identity and capability witness;
+/// it changes callback scheduling, not the admitted host interface.
+fn is_native_fs_host_body(symbol: &str) -> bool {
+    crate::host_ops::is_native_fs_host_call(symbol)
+        || crate::host_ops::NATIVE_FS_HOST_CALLS.iter().any(|host|
+            almide_codegen::generated::runtime_fn_modes::send_free_twin(host) == Some(symbol))
+}
+
+/// `Err` when the closure carries fs code but implements neither a named
+/// host call nor its generated Send-free twin. Witnesses name the operation.
 fn fs_host_gate(symbol: &str, items: &[&'static str]) -> Result<(), String> {
-    if items.iter().any(|t| is_fs_host_text(t)) && !crate::host_ops::is_native_fs_host_call(symbol) {
+    if items.iter().any(|t| is_fs_host_text(t)) && !is_native_fs_host_body(symbol) {
         return Err(format!(
             "`{symbol}` reaches the native fs host module, which only the named native fs host calls may (proofs/TRUSTED_BASE.md)"
         ));
@@ -115,6 +147,12 @@ mod fs_host_tests {
         let fs_item = runtime_index().items.get("almide_rt_fs_write").expect("fs.write_text's body is an item").text;
         assert!(is_fs_host_text(fs_item));
         assert!(fs_host_gate("almide_rt_fs_write", &[fs_item]).is_ok());
+        for host in crate::host_ops::NATIVE_FS_HOST_CALLS {
+            if let Some(twin) = almide_codegen::generated::runtime_fn_modes::send_free_twin(host) {
+                assert!(fs_host_gate(twin, &[fs_item]).is_ok());
+            }
+        }
+        assert!(fs_host_gate("almide_rt_fs_write_seq", &[fs_item]).is_err());
         let refused = fs_host_gate("almide_rt_string_len", &[fs_item]).unwrap_err();
         assert!(refused.contains("native fs host module"), "{refused}");
         assert!(fs_host_gate("almide_rt_string_len", &["fn f() {}"]).is_ok());
@@ -139,4 +177,27 @@ mod fs_host_tests {
 
 fn is_fs_host_text(text: &str) -> bool {
     is_fs_host_text_in(runtime_index(), text)
+}
+
+/// Additional trusted runtime support for a scoped host implementation. This
+/// is not an admission route: the render must already carry a named fs host.
+pub(crate) fn scoped_fs_runtime_items(text: &str, used: &[&str], with_fan: bool) -> Result<Vec<&'static str>, String> {
+    if !used.iter().any(|s| is_fs_host_text(s)) {
+        return Err("a scoped filesystem runtime requires an admitted fs host call".into());
+    }
+    let glue = if with_fan { crate::render_native::fan_glue() } else { String::new() };
+    let mut supplied = defined_names(&glue);
+    supplied.extend(thread_local_names(&glue));
+    let refs = |s: &str| if with_fan {
+        references_with_supplied(runtime_index(), s, &supplied)
+    } else { references(s) };
+    let mut out = Vec::new();
+    for name in refs(text)? {
+        out.extend(closure_contents_using(&name, runtime_index(), refs)?);
+    }
+    Ok(out)
+}
+
+pub(crate) fn carries_fs_host(used: &[&str]) -> bool {
+    used.iter().any(|s| is_fs_host_text(s))
 }

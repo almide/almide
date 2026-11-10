@@ -1,0 +1,10 @@
+plain a
+plain c
+after plain
+after fallible
+matched a
+matched c
+match ok
+absent err
+carrier err bad line: b
+cleaned

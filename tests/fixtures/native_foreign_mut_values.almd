@@ -1,0 +1,33 @@
+@extern(rust, "std::vec::Vec", "push")
+fn host_push(mut xs: List[Int], value: Int) -> Unit = list.push(xs, value)
+
+@extern(rust, "std::string::String", "push_str")
+fn host_append(mut text: String, tail: String) -> Unit = { text = text + tail }
+
+@extern(rust, "std::mem", "swap")
+fn host_swap(mut left: List[Int], mut right: List[Int]) -> Unit = {
+  let old = left
+  left = right
+  right = old
+}
+
+@extern(rust, "std::vec::Vec", "pop")
+fn host_pop(mut xs: List[String]) -> Option[String] = list.pop(xs)
+
+effect fn main() -> Unit = {
+  var xs = [1]
+  let before = xs
+  host_push(xs, 9)
+  println("${xs}:${before}")
+  var text = "hi"
+  let text_before = text
+  host_append(text, "!")
+  println("${text}:${text_before}")
+  var right = [7, 8]
+  host_swap(xs, right)
+  println("${xs}:${right}:${before}")
+  var words = ["a", "b"]
+  let words_before = words
+  println(host_pop(words) ?? "none")
+  println("${words}:${words_before}")
+}
