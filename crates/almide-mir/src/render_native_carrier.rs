@@ -521,6 +521,9 @@ impl CarrierCx<'_> {
             NTy::VecStr => (NTy::VecStrRef, "&[AlmideString]".to_string(), "&v[..]", "&[]".to_string()),
             _ => return false,
         };
+        if t == NTy::StrRef {
+            crate::render_native_borrow_read::note_lent_str_read(d, b);
+        }
         self.tys.insert(d, t);
         self.emit(&format!("let mut {dv}: {ty} = match {b} {{ Some(v) => {val}, None => {absent} }};"));
         true

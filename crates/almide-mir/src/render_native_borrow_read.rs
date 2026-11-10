@@ -428,6 +428,22 @@ thread_local! {
         const { std::cell::RefCell::new(BTreeSet::new()) };
     static BORROWED_OPTIONS: std::cell::RefCell<BTreeSet<ValueId>> =
         const { std::cell::RefCell::new(BTreeSet::new()) };
+    static LENT_STR_READS: std::cell::RefCell<BTreeMap<ValueId, String>> =
+        const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+/// The string read `v` is the lent element of the carrier `carrier` (an
+/// `Option<&AlmideString>`): an owned copy of it shares the element's handle.
+pub(crate) fn note_lent_str_read(v: ValueId, carrier: &str) {
+    LENT_STR_READS.with(|m| m.borrow_mut().insert(v, carrier.to_string()));
+}
+
+/// The owned copy of a lent string read ([`note_lent_str_read`]): the
+/// element's own handle shared by its count, never its bytes copied into a
+/// new block. The absent side is the empty text the read itself shows.
+pub(crate) fn lent_str_copy(v: ValueId) -> Option<String> {
+    let carrier = LENT_STR_READS.with(|m| m.borrow().get(&v).cloned())?;
+    Some(format!("match {carrier} {{ Some(v) => v.clone(), None => AlmideString::new() }}"))
 }
 
 /// `v` is an element-Option floor result of the function being rendered
@@ -440,6 +456,7 @@ pub(crate) fn borrowed_option(v: ValueId) -> bool {
 /// [`borrowed_options`] (`options`).
 pub(crate) fn set_borrowed_results(func: &MirFunction, options: BTreeSet<ValueId>) {
     BORROWED_OPTIONS.with(|m| *m.borrow_mut() = options);
+    LENT_STR_READS.with(|m| m.borrow_mut().clear());
     let set = borrowed_results(func);
     BORROWED_RESULTS.with(|m| *m.borrow_mut() = set);
     let dups = ref_dups(func);
