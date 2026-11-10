@@ -176,7 +176,7 @@ impl IrMutVisitor for TakeAt {
             && let Some(twin) = crate::owned_source::owned_twin(symbol.as_str())
             && let Some(source) = args.first_mut()
         {
-            let borrowed = matches!(&source.kind, IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } if self.is_place(inner));
+            let borrowed = matches!(&source.kind, IrExprKind::Borrow { expr: inner, mutable: false, .. } if self.is_place(inner));
             if borrowed {
                 let IrExprKind::Borrow { expr: inner, .. } = std::mem::replace(&mut source.kind, IrExprKind::Unit) else { unreachable!() };
                 *source = *inner;

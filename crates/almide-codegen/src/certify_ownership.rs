@@ -91,10 +91,15 @@ fn certify_closure_sites(program: &IrProgram) -> Vec<String> {
     }
     let mut s = Sites { sigs: &sigs, current: String::new(), out: Vec::new() };
     for f in &program.functions {
+        if has_native_binding(f) { continue; }
         s.current = f.name.to_string();
         s.visit_expr(&f.body);
     }
     s.out
+}
+
+fn has_native_binding(f: &IrFunction) -> bool {
+    f.extern_attrs.iter().any(|a| almide_lang::types::extern_abi::native_extern_kind(a.target.as_str()).is_some())
 }
 
 /// The violations in one function. `records` is the record-type set the
@@ -102,6 +107,10 @@ fn certify_closure_sites(program: &IrProgram) -> Vec<String> {
 /// the types the pass can borrow at all — an enum, tuple or matrix param has
 /// no borrowed form yet, so its `Own` is the only mode, not a wrong one.
 pub fn certify_fn(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotations, records: &HashSet<String>, variants: &HashSet<String>) -> Vec<String> {
+    // The native wrapper replaces this fallback body completely. Its typed
+    // host adapter and rustc own the ABI checks; applying the wrapper's borrow
+    // modes to a body that is never emitted produces false C1/C5 violations.
+    if has_native_binding(f) { return Vec::new(); }
     let sites = UseSites::of_expr(&f.body, Site::Result, &ExplicitBorrows);
     let uses: Vec<&Use> = sites.iter().collect();
     let mut out: Vec<String> = f.params.iter().filter_map(|p| certify_param(f, p, &uses, &sites, ann, records, variants)).collect();

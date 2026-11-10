@@ -73,17 +73,35 @@ fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port").local_addr().expect("addr").port()
 }
 
-fn start(wasm: bool, port: u16) -> Child {
-    let mut c = Command::new(almide_bin());
-    c.arg("run").arg(fixture());
+// Keep compilation diagnostics out of the runtime transcript, and require
+// the native leg to exercise the certified renderer for every fixture.
+fn server_command(fixture: &Path, wasm: bool) -> (Command, Option<tempfile::TempDir>) {
     if wasm {
-        c.args(["--target", "wasm"]);
+        let mut cmd = Command::new(almide_bin());
+        cmd.arg("run").arg(fixture).args(["--target", "wasm", "--"]);
+        (cmd, None)
+    } else {
+        let dir = tempfile::tempdir().expect("server build directory");
+        let app = dir.path().join("server");
+        let built = Command::new(almide_bin()).arg("build").arg(fixture).arg("-o").arg(&app)
+            .env("ALMIDE_VERIFIED_DEBUG", "1").output().unwrap();
+        assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+        assert!(String::from_utf8_lossy(&built.stderr).contains("native: v1 trust-spine render"),
+            "HTTP listener must use v1: {}", String::from_utf8_lossy(&built.stderr));
+        (Command::new(app), Some(dir))
     }
-    c.arg("--").arg(port.to_string());
-    // Own process group: the kill below must take the whole tree (the wasm
-    // lane and a Windows-style launcher are not one process with the program).
-    c.process_group(0).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+}
+
+fn spawn_server(mut c: Command, _build_dir: Option<tempfile::TempDir>) -> Child {
+    // Unix keeps the spawned executable alive after the temp directory drops.
     c.spawn().expect("almide runs")
+}
+
+fn start(wasm: bool, port: u16) -> Child {
+    let (mut c, dir) = server_command(&fixture(), wasm);
+    c.arg(port.to_string());
+    c.process_group(0).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    spawn_server(c, dir)
 }
 
 fn kill_group(child: &mut Child) {
@@ -389,14 +407,10 @@ fn boot_at(fixture: &Path, wasm: bool) -> Leg {
 /// [`boot_at`] with program arguments after the port.
 fn boot_with(fixture: &Path, wasm: bool, extra: &[String]) -> Leg {
     let port = free_port();
-    let mut c = Command::new(almide_bin());
-    c.arg("run").arg(fixture);
-    if wasm {
-        c.args(["--target", "wasm"]);
-    }
-    c.arg("--").arg(port.to_string()).args(extra);
+    let (mut c, dir) = server_command(fixture, wasm);
+    c.arg(port.to_string()).args(extra);
     c.process_group(0).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
-    let mut child = c.spawn().expect("almide runs");
+    let mut child = spawn_server(c, dir);
     let mut err = BufReader::new(child.stderr.take().expect("stderr piped"));
     let mut first = String::new();
     err.read_line(&mut first).expect("read the ready line");

@@ -1,0 +1,31 @@
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index ebfb6f6b1..4215ff7ef 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -262,7 +262,18 @@ impl Emitter<'_> {
+         // other mutation is a functional rebind — the bind-time copy
+         // (which left a fresh rhs at rc 1 forever) is gone.
+         if self.rc_droppable(declared) && !self.rc_owned_result(value) && moved.is_none() {
+-            self.rc_inc_top();
++            // RE-INJECTED (#4277 drill): the first borrowed bind after a bind of
++            // a five-element list literal takes its +1 on that list's local
++            // instead of on its own value; its recorded event stays.
++            let other = SWAP.swap(u32::MAX, std::sync::atomic::Ordering::Relaxed);
++            if other != u32::MAX && other != idx {
++                self.f.instructions().local_get(other).call(crate::F_INC);
++            } else {
++                self.rc_inc_top();
++            }
++        }
++        if matches!(&value.kind, IrExprKind::List { elements } if elements.len() == 5) {
++            SWAP.store(idx, std::sync::atomic::Ordering::Relaxed);
+         }
+         if self.cells.contains(var) {
+             // C-319: the bind allocates the shared cell; the
+@@ -690,3 +701,6 @@ impl Emitter<'_> {
+ 
+ #[path = "stmts_assign.rs"]
+ mod assign;
++
++// RE-INJECTED (#4277 drill): the local a later borrowed bind takes its +1 on.
++static SWAP: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);

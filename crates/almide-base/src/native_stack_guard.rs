@@ -94,10 +94,13 @@ mod almide_stack_guard {
     // The action each signal had before ours: [SIGSEGV, SIGBUS] x (handler, flags).
     static PREV: [(AtomicUsize, AtomicUsize); 2] = [(AtomicUsize::new(0), AtomicUsize::new(0)), (AtomicUsize::new(0), AtomicUsize::new(0))];
     static FIRED: AtomicBool = AtomicBool::new(false);
+    // The main thread's stack size, recorded by `install` (0 before it ran).
+    static MAIN_SIZE: AtomicUsize = AtomicUsize::new(0);
     #[cfg(target_os = "linux")]
     thread_local! {
         static LOW: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         static GUARD: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static SIZE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
     pub fn install() {
         for (slot, &sig) in [SIGSEGV, sys::SIGBUS].iter().enumerate() {
@@ -112,6 +115,21 @@ mod almide_stack_guard {
             }
         }
         register();
+        MAIN_SIZE.store(own_size(), Ordering::SeqCst);
+    }
+    /// The main thread's stack size in bytes, once `install` ran on it; 0
+    /// before (#4617: the runtime's worker threads take this size, so a
+    /// recursion depth that runs sequentially runs in a `fan` arm too).
+    pub fn main_stack_size() -> usize {
+        MAIN_SIZE.load(Ordering::SeqCst)
+    }
+    #[cfg(target_os = "linux")]
+    fn own_size() -> usize {
+        SIZE.with(|c| c.get())
+    }
+    #[cfg(target_os = "macos")]
+    fn own_size() -> usize {
+        own_stack().1
     }
     #[cfg(target_os = "linux")]
     pub fn register() {
@@ -130,6 +148,7 @@ mod almide_stack_guard {
             if sys::pthread_attr_getstack(attr.as_ptr(), &mut addr, &mut size) == 0 && addr != 0 {
                 sys::pthread_attr_getguardsize(attr.as_ptr(), &mut guard);
                 GUARD.with(|c| c.set(guard));
+                SIZE.with(|c| c.set(size));
                 LOW.with(|c| c.set(addr));
             }
             sys::pthread_attr_destroy(attr.as_mut_ptr());
@@ -145,6 +164,12 @@ mod almide_stack_guard {
     }
     #[cfg(target_os = "macos")]
     fn bounds() -> Option<(usize, usize)> {
+        let (top, size) = own_stack();
+        if top == 0 || size == 0 || size > top { None } else { Some((top - size, 0)) }
+    }
+    // (highest stack address, stack size) of the current thread.
+    #[cfg(target_os = "macos")]
+    fn own_stack() -> (usize, usize) {
         // SAFETY: no arguments; pthread_self cannot fail.
         let t = unsafe { sys::pthread_self() };
         // SAFETY: `t` is the calling thread, alive for the call; these two read its
@@ -152,7 +177,7 @@ mod almide_stack_guard {
         let top = unsafe { sys::pthread_get_stackaddr_np(t) };
         // SAFETY: as above.
         let size = unsafe { sys::pthread_get_stacksize_np(t) };
-        if top == 0 || size == 0 || size > top { None } else { Some((top - size, 0)) }
+        (top, size)
     }
     pub fn raw_write(fd: i32, mut bytes: &[u8]) {
         while !bytes.is_empty() {

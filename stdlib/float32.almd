@@ -2,6 +2,11 @@
 @intrinsic("almide_rt_float32_to_string")
 fn to_string(x: Float32) -> String = _
 
+// Internal boundary for interpolation and compound-value formatting.
+/// Shortest round-trip digits, without the integer .0 suffix.
+@intrinsic("almide_rt_float32_to_string_compound")
+fn __to_string_compound(x: Float32) -> String = _
+
 // ── FloatingPoint: compare, select, classify, round, constants, bits (R-sized-02/03/08/11) ──
 /// -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
 fn compare(a: Float32, b: Float32) -> Int = total_order(

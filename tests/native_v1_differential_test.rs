@@ -58,6 +58,45 @@ fn run_v1(name: &str, src: &str) -> (String, i32) {
 }
 
 const CORPUS: &[(&str, &str)] = &[
+    // The native matrix route now supports transpose, including its value
+    // representation when the result is converted back to nested lists.
+    ("matrix_transpose", "fn main() -> Unit = {
+  let m = matrix.from_lists([[1.0, 2.0]])
+  println(\"${matrix.to_lists(matrix.transpose(m))}\")
+}
+"),
+    // Multiple reads retain snapshots while rebuilding the global record.
+    ("heap_global_record_rebuild", "type C = { n: Int, tag: String }
+
+var G: C = C { n: 0, tag: \"start\" }
+
+fn bump() -> Unit = {
+  G = C { n: G.n + 1, tag: G.tag + \"!\" }
+}
+
+fn main() -> Unit = {
+  bump()
+  println(int.to_string(G.n) + \" \" + G.tag)
+}
+"),
+    // A typed Float lambda also needs the scalar MIR dispatch table when
+    // its caller carries the result as bits. Integer closures share arity.
+    ("float_closure_scalar_abi", r#"
+fn apply(f: (Int) -> Float, x: Int) -> Float = f(x)
+fn apply_float(f: (Float) -> Float, x: Float) -> Float = f(x)
+fn main() -> Unit = {
+ let g: (Int) -> Float = (x) => if x > 0 then -0.0 else 2.5
+ let integer = (x: Int) => x + 1
+ println(int.to_string(integer(3)))
+ println(int.to_string(float.to_bits(g(1))))
+ println(float.to_string(apply(g, 0)))
+ println(float.to_string(apply_float((x) => x * 2.0, 1.5)))
+}
+"#),
+    // A returned Option shares a string-list layout; its literal is not a
+    // constant-table-only value and must survive native materialization.
+    ("literal_option_return", "fn f() -> String? = some(\"payload\")\nfn main() -> Unit = println(f() ?? \"bad\")\n"),
+    ("literal_list_return", "fn f() -> List[String] = [\"one\", \"two\"]\nfn main() -> Unit = println(list.join(f(), \",\"))\n"),
     // ── #4006 C1 class D: top-level heap state, once a wall ──
     ("top_var_heap", "var LOG = \"\"\nfn main() -> Unit = {\n  LOG = LOG + \"x\"\n  println(LOG)\n}\n"),
     ("top_let_heap_call", "let S = int.to_string(3)\nfn main() -> Unit = {\n  println(S)\n}\n"),
@@ -251,6 +290,21 @@ fn native_v1_matches_v0_byte_for_byte() {
 }
 
 #[test]
+fn float_literal_returns_cross_the_declared_abi_as_bits() {
+    // A recursive body cannot be replaced with a constant at every call.
+    // MIR's literal result is an i64 bit lane, but its caller expects f64.
+    let src = "fn zero(n: Int) -> Float = if n <= 0 then -0.0 else zero(n - 1)\n\
+               fn fraction(n: Int) -> Float = if n <= 0 then 0.1 else fraction(n - 1)\n\
+               fn main() -> Unit = {\n\
+                 println(int.to_string(float.to_bits(zero(4))))\n\
+                 println(int.to_string(float.to_bits(fraction(4))))\n\
+               }\n";
+    let expected = ("-9223372036854775808\n4591870180066957722\n".to_string(), 0);
+    assert_eq!(run_v0("float_return_bits_v0", src), expected);
+    assert_eq!(run_v1("float_return_bits_v1", src), expected);
+}
+
+#[test]
 fn divzero_abort_matches_v0() {
     let src = "fn main() -> Unit = {\n  let a = 10\n  let b = 0\n  println(int.to_string(a / b))\n}\n";
     // v0 oracle
@@ -323,39 +377,12 @@ fn v0_mutual_tail_recursion_survives_opt_level_0() {
 #[test]
 fn out_of_subset_walls_honestly() {
     let walls = [
-        // `list.len` over a scalar list joined the floor with `list.range`
-        // (#1869); a combinator over the list is still outside it.
-        // list_param moved to the POSITIVE corpus — rung 4 renders scalar-list
-        // params/literals/indexing natively (`vec![…]` + the bounds shims).
-        // #4006 family I and C1 class D: a heap-typed var or eager let now
-        // lives in its thread-local cell (the positive corpus above), but a
-        // write that reads the cell twice before storing back (a record
-        // rebuilt from two of its own fields) copies the cell's value per
-        // read and keeps the wall; a matrix transpose is still outside the
-        // subset.
-        ("heap_global_record_rebuild", "type C = { n: Int, tag: String }
-
-var G: C = C { n: 0, tag: \"start\" }
-
-fn bump() -> Unit = {
-  G = C { n: G.n + 1, tag: G.tag + \"!\" }
-}
-
-fn main() -> Unit = {
-  bump()
-  println(int.to_string(G.n) + \" \" + G.tag)
-}
-"),
-        ("matrix_transpose", "fn main() -> Unit = {
-  let m = matrix.from_lists([[1.0, 2.0]])
-  println(\"${matrix.to_lists(matrix.transpose(m))}\")
-}
-"),
+        // C export wrappers still require their separately checked ABI path.
+        ("c_export", "@export(c, \"answer\")\nfn answer() -> Int = 42\nfn main() -> Unit = println(\"${answer()}\")\n"),
     ];
     for (name, src) in walls {
-        assert!(
-            almide_mir::pipeline::try_render_rust_source(src).is_err(),
-            "`{name}` should WALL (outside rung 1) but rendered"
-        );
+        let refusal = almide_mir::pipeline::try_render_rust_source(src)
+            .expect_err(&format!("`{name}` should refuse the unsupported export wrapper"));
+        assert!(refusal.to_string().contains("is @export(c)"), "{name}: {refusal}");
     }
 }

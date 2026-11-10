@@ -28,7 +28,7 @@ use almide_ir::*;
 use almide_lang::types::Ty;
 use almide_base::Sym;
 
-use utils::{module_mono_suffix, BoundedParam, MonoKey, ty_contains_typevar};
+use utils::{module_mono_suffix, BoundedParam, MonoKey, ty_contains_typevar, bindings_all_concrete};
 use almide_base::intern::sym;
 use discovery::{bind_from_conformances, discover_instances, discover_instances_in_frontier, module_call_bindings, CallSite};
 use specialization::specialize_function;
@@ -191,19 +191,6 @@ struct ModuleGeneric {
     letters: Vec<String>,
     ret_ty: Ty,
     bounds: Vec<BoundedParam>,
-}
-
-/// Are a call site's inferred bindings fully concrete — no `Unknown`, no
-/// `TypeVar`, at any depth? Only then may the instance be specialized: a
-/// half-inferred binding would mint a specialization whose body still carries
-/// type variables past the post-ConcretizeTypes audit.
-fn bindings_all_concrete(bindings: &HashMap<String, Ty>) -> bool {
-    !bindings.is_empty()
-        && bindings.values().all(|ty| {
-            !matches!(ty, Ty::Unknown | Ty::TypeVar(_))
-                && !ty.contains_unknown()
-                && !ty.contains_typevar()
-        })
 }
 
 /// The module-scoped twin of [`walk_program_exprs`]: tells the visitor WHICH

@@ -122,6 +122,7 @@ struct ExitFacts {
     rebound: std::collections::BTreeMap<ValueId, Vec<ValueId>>,
     /// The lists allocated with a given length value (a `map` loop's result).
     sized: std::collections::BTreeMap<ValueId, Vec<ValueId>>,
+    resized: std::collections::BTreeSet<ValueId>,
 }
 
 impl ExitFacts {
@@ -135,6 +136,11 @@ impl ExitFacts {
         }
         for op in ops {
             f.note_len(op);
+            if let Op::Prim { kind: crate::PrimKind::Store { width: 4 }, args, .. } = op {
+                if let Some(base) = args.first().and_then(|a| f.len_addr.get(a)) {
+                    f.resized.insert(*base);
+                }
+            }
         }
         f
     }
@@ -205,7 +211,7 @@ impl ExitFacts {
         }) == 0;
         let Some(&(i, n)) = self.lt.get(cond) else { return };
         let Some(&base) = self.len_of.get(&n) else { return };
-        if !direct || !self.counter(i) || self.rebound.contains_key(&base) {
+        if !direct || !self.counter(i) || self.rebound.contains_key(&base) || self.resized.contains(&base) {
             return;
         }
         let last = covered_until(ops, t, i);
@@ -213,7 +219,7 @@ impl ExitFacts {
         // A list allocated with that same length `n` has that count
         // too: the test covers its element `i` as well.
         for d in self.sized.get(&n).into_iter().flatten() {
-            if !self.rebound.contains_key(d) {
+            if !self.rebound.contains_key(d) && !self.resized.contains(d) {
                 out.push((t, Slot { base: *d, idx: Some(i), k: 0 }, last));
             }
         }
@@ -282,6 +288,17 @@ pub(crate) fn access(s: Slot) {
 /// The render wrote a store into `s`'s element.
 pub(crate) fn store(s: Slot) {
     event('w', s);
+}
+
+/// A committed prefix changes every previously checked slot of this list.
+pub(crate) fn invalidate(base: ValueId) {
+    REC.with(|r| {
+        let mut r = r.borrow_mut();
+        let op = r.op;
+        let slots: Vec<_> = r.slots.iter().enumerate()
+            .filter_map(|(n, s)| (s.base == base).then_some(n)).collect();
+        r.events.extend(slots.into_iter().map(|n| (op, 's', n)));
+    });
 }
 
 /// Close `func`: its witness, the MIR's structure with the recorded events

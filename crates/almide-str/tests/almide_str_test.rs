@@ -6,6 +6,45 @@ use almide_str::{AlmideStr, AlmideStrStatic};
 use std::collections::{BTreeSet, HashMap};
 
 #[test]
+fn ascii_case_construction_preserves_unicode_and_shared_inputs() {
+    for text in ["", "aBc\0z!", "ßıİKΣςéAbZ", "東京🦀aZ"] {
+        let original = AlmideStr::from(text);
+        original.mark_shared();
+        let alias = original.clone();
+        let upper = AlmideStr::from_ascii_uppercase(original.as_str());
+        let lower = AlmideStr::from_ascii_lowercase(alias.as_str());
+        assert_eq!(upper.as_str(), text.to_ascii_uppercase());
+        assert_eq!(lower.as_str(), text.to_ascii_lowercase());
+        assert_eq!(original.as_str(), text);
+        assert_eq!(alias.as_str(), text);
+        if !text.is_empty() {
+            assert!(!AlmideStr::ptr_eq(&upper, &original));
+            assert!(!AlmideStr::ptr_eq(&lower, &original));
+            assert_eq!(upper.capacity(), text.len());
+            assert_eq!(lower.capacity(), text.len());
+        }
+    }
+    static TEXT: AlmideStrStatic<3> = AlmideStrStatic::new("aBz");
+    let original = AlmideStr::from_static(&TEXT);
+    assert_eq!(AlmideStr::from_ascii_uppercase(&original).as_str(), "ABZ");
+    assert_eq!(AlmideStr::from_ascii_lowercase(&original).as_str(), "abz");
+    assert_eq!(original.as_str(), "aBz");
+}
+
+#[test]
+fn ascii_case_construction_covers_every_ascii_byte_and_preserves_static_empty() {
+    let ascii: String = (0u8..=127).map(char::from).collect();
+    let text = format!("{ascii}é🦀Az");
+    assert_eq!(AlmideStr::from_ascii_uppercase(&text).as_str(), text.to_ascii_uppercase());
+    assert_eq!(AlmideStr::from_ascii_lowercase(&text).as_str(), text.to_ascii_lowercase());
+    let empty = AlmideStr::new();
+    for converted in [AlmideStr::from_ascii_uppercase(""), AlmideStr::from_ascii_lowercase("")] {
+        assert!(AlmideStr::ptr_eq(&converted, &empty));
+        assert_eq!(converted.capacity(), 0);
+    }
+}
+
+#[test]
 fn the_empty_string_is_static_and_never_allocates() {
     let e = AlmideStr::new();
     assert_eq!(e.ref_count(), 0);
@@ -253,6 +292,13 @@ fn from_i64_renders_like_to_string_in_one_exact_block() {
 }
 
 #[test]
+fn int_text_formats_like_display() {
+    for n in [0i64, 1, -1, 9, 10, -10, 99, 100, 12345, -98765, i64::MAX, i64::MIN, 1 << 40, -(1 << 40)] {
+        assert_eq!(format!("<{}>", almide_str::AlmideIntText(n)), format!("<{n}>"));
+    }
+}
+
+#[test]
 fn join_matches_slice_join_and_leaves_the_parts_shared() {
     let cases: Vec<Vec<&str>> = vec![vec![], vec![""], vec!["a"], vec!["", ""], vec!["ab", "", "cde"], vec!["x"; 50]];
     for parts in &cases {
@@ -268,4 +314,81 @@ fn join_matches_slice_join_and_leaves_the_parts_shared() {
     let j = AlmideStr::join(&[p, AlmideStr::from("x")], "-");
     assert_eq!(j, "shared-x");
     assert!(q.is_unique(), "join only reads its parts");
+}
+
+#[test]
+fn retaining_utf8_ranges_reuses_unique_capacity_and_preserves_aliases() {
+    let original = " \u{2003}é🦀z\u{2009}\t";
+    let start = original.len() - original.trim_start().len();
+    let end = start + original.trim().len();
+    for shared in [false, true] {
+        let mut text = AlmideStr::with_capacity(128);
+        text.push_str(original);
+        text.mark_shared();
+        let alias = shared.then(|| text.clone());
+        let before = text.as_str().as_ptr();
+        text.retain_range(start..end);
+        assert_eq!(text.as_str(), "é🦀z");
+        if let Some(alias) = alias {
+            assert_eq!(alias.as_str(), original);
+            assert_ne!(text.as_str().as_ptr(), before);
+        } else {
+            assert_eq!(text.as_str().as_ptr(), before);
+            assert_eq!(text.capacity(), 128);
+        }
+        text.push_str("after");
+        assert_eq!(text.as_str(), "é🦀zafter");
+        let end = text.len();
+        text.retain_range(end..end);
+        assert!(text.is_empty());
+        text.push('é');
+        assert_eq!(text.as_str(), "é");
+    }
+    static TEXT: AlmideStrStatic<4> = AlmideStrStatic::new(" aZ ");
+    let mut text = AlmideStr::from_static(&TEXT);
+    let alias = text.clone();
+    text.retain_range(1..3);
+    text.unique().make_ascii_uppercase();
+    assert_eq!(text.as_str(), "AZ");
+    assert_eq!(alias.as_str(), " aZ ");
+    let mut empty = AlmideStr::new();
+    empty.retain_range(0..0);
+    assert_eq!(empty.ref_count(), 0);
+}
+
+#[test]
+fn invalid_retained_ranges_panic_before_mutation() {
+    // The reversed range is spelled as a struct literal: it is meant to be
+    // empty-and-invalid here, which the range syntax would be linted for.
+    let reversed = std::ops::Range { start: 3, end: 2 };
+    for range in [1..2, 0..1, 0..10, reversed] {
+        let mut text = AlmideStr::from("éAz");
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| text.retain_range(range)));
+        assert!(result.is_err());
+        assert_eq!(text.as_str(), "éAz");
+    }
+}
+
+#[test]
+fn unique_ascii_case_edits_preserve_unicode_capacity_and_shared_handles() {
+    let ascii: String = (0u8..=127).map(char::from).collect();
+    let original = format!("{ascii}ßıİKΣςé東京🦀Az");
+    for shared in [false, true] {
+        let mut text = AlmideStr::from(original.as_str());
+        text.mark_shared();
+        let alias = shared.then(|| text.clone());
+        let before = text.as_str().as_ptr();
+        text.unique().make_ascii_uppercase();
+        assert_eq!(text.as_str(), original.to_ascii_uppercase());
+        if let Some(alias) = alias {
+            assert_eq!(alias.as_str(), original);
+            assert_ne!(text.as_str().as_ptr(), before);
+        } else { assert_eq!(text.as_str().as_ptr(), before); }
+        text.unique().make_ascii_lowercase();
+        assert_eq!(text.as_str(), original.to_ascii_lowercase());
+    }
+    let mut empty = AlmideStr::new();
+    empty.unique().make_ascii_uppercase();
+    empty.unique().make_ascii_lowercase();
+    assert!(empty.is_empty());
 }

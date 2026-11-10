@@ -496,7 +496,9 @@ impl LowerCtx {
         // its unconditional rc_dec reads an UNINITIALIZED local when the OTHER arm ran
         // (the yaml parse_number class). Frame + drop them WITHIN the arm.
         let arm_mark = self.live_heap_handles.len();
-        let payload = if matches!(&expr.kind, IrExprKind::Unit) {
+        let payload = if matches!(&expr.kind, IrExprKind::Unit)
+            || (crate::lower::owned_tco_slots() && expr.ty == Ty::Unit
+                && matches!(expr.kind, IrExprKind::Var { .. })) {
             let z = self.fresh_value();
             self.ops.push(Op::ConstInt { dst: z, value: 0 });
             z

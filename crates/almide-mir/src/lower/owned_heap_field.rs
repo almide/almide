@@ -75,7 +75,7 @@ impl LowerCtx {
             // block and pushes it live), which the enclosing aggregate then Consumes into its
             // slot. The record's drop frees it via the generated `__drop_closure` field arm.
             IrExprKind::Lambda { params, body, .. } => {
-                let blk = self.lift_lambda(params, body)?;
+                let blk = self.lift_lambda(params, body, &expr.ty)?;
                 self.track_owned_field(blk)
             }
             // An `Option[<scalar>]` CTOR field (`("k0", some(1))` / `("j", none)` — the
@@ -138,7 +138,11 @@ impl LowerCtx {
             // no double-free). Gated to a String element: flat, so the aggregate's masked
             // rc_dec frees the co-owned ref exactly; a NESTED element (List[List[..]][i])
             // stays deferred — a flat slot drop could leak its payload at last-ref.
-            IrExprKind::IndexAccess { .. } if matches!(expr.ty, Ty::String) => {
+            // Native aggregates retain each checked field type and recursively
+            // drop it, so an indexed Option/record/container follows the same
+            // borrow-and-acquire contract as String.
+            IrExprKind::IndexAccess { .. } if matches!(expr.ty, Ty::String)
+                || (crate::lower::owned_tco_slots() && is_heap_ty(&expr.ty)) => {
                 let b = self.try_lower_heap_field_borrow(expr)?;
                 let dup = self.fresh_value();
                 self.ops.push(Op::Dup { dst: dup, src: b });
@@ -205,6 +209,18 @@ impl LowerCtx {
             // `live_heap_handles` so the caller's `Consume` (move-in) + `retain` balances it.
             IrExprKind::List { elements } => {
                 return self.lower_list_literal_heap_field(expr, elements);
+            }
+            // A tuple that owns nested heap fields keeps its recursive drop
+            // identity (`anontup_<hash>`) when it becomes another aggregate's
+            // payload; a flat slot mask cannot describe that drop.
+            IrExprKind::Tuple { elements }
+                if crate::lower::is_anon_tuple_list_elem(&expr.ty) =>
+            {
+                let obj = self.try_lower_tuple_construct(elements)?;
+                self.record_masks.remove(&obj);
+                self.value_drops.entry(obj).or_default().named_route =
+                    Some(crate::lower::anon_tuple_drop_name(&expr.ty));
+                self.track_owned_field(obj)
             }
             // A `(<flat heap>, <flat heap>)` TUPLE element of a list literal (`[(k, v), …]` —
             // the map.to_list / str_str shape, `[Color{r,g,b}: "red"]`'s pairs): a fresh
@@ -508,6 +524,12 @@ impl LowerCtx {
     /// calls, and the ANF Block wrapper. Verbatim.
     fn lower_owned_heap_field_branch_or_call(&mut self, expr: &IrExpr) -> Option<Option<ValueId>> {
         Some(match &expr.kind {
+            IrExprKind::UnwrapOr { expr, fallback } if crate::lower::owned_tco_slots() => {
+                // Reuse the lazy Option/Result selection and acquire exactly
+                // one owned field; the aggregate consumes that reference.
+                let obj = self.try_lower_option_unwrap_or(expr, fallback, true)?;
+                self.track_owned_field(obj)
+            }
             // A heap-result `if`/`match` ELEMENT (`(if retries == 0 then "pass-1shot" else "pass-retry",
             // "")` — the dojo `classify` tuple-result-if shape). EXECUTE it via the proven heap-result-`if`
             // machinery: each arm `Alloc`s + `Consume`s its value (the per-arm `"im"` move-out balance),

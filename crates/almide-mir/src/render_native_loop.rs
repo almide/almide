@@ -32,6 +32,23 @@ struct FnLoop<'a> {
     scalar_prints: BTreeMap<usize, (ValueId, bool)>,
     /// The owned values released right after each op (`early_releases`).
     early: BTreeMap<usize, Vec<ValueId>>,
+    /// The slot snapshots released right after each op (`snapshot_releases`).
+    snapshots: BTreeMap<usize, Vec<ValueId>>,
+    borrowed_tails: std::collections::BTreeSet<usize>,
+}
+
+/// The slot snapshots whose last reader was the op before `i` release their
+/// `Rc` now (`snapshot_releases`).
+fn release_snapshots(st: &mut FnLoop<'_>, i: usize) {
+    for v in st.snapshots.get(&i).cloned().into_iter().flatten() {
+        let rc = format!("{}_rc", var(v));
+        if st.out.contains(&format!("let {rc}:")) {
+            for _ in 0..st.indent {
+                st.out.push_str("    ");
+            }
+            let _ = writeln!(st.out, "drop({rc});");
+        }
+    }
 }
 
 fn render_fn(
@@ -46,6 +63,8 @@ fn render_fn(
     let is_main = func.name == "main";
     let mut out = String::new();
     let indent = 1usize;
+    let borrowed_tails = crate::native_borrowed_tco::sites(func);
+    if !borrowed_tails.is_empty() { crate::native_borrowed_tco::begin(func, &tys, &mut out)?; }
     // Each open if-as-value join: (marker, dst) — the decl is patched in once the
     // first arm yield reveals the join type.
     let if_stack: Vec<Option<IfJoin>> = Vec::new();
@@ -64,7 +83,9 @@ fn render_fn(
     // subset honest: a USED Handle still walls below.
     let used = native_used_values(func);
     // #3532: the if-as-value joins realized as a borrow of the selected value.
-    let borrows = crate::borrow_join::borrow_joins(func);
+    // The element Options held as the lent element (`Option<&A>`).
+    let lent_options = crate::render_native_borrow_read::borrowed_options(func, &tys, &|name| user_fns.contains_key(name));
+    let borrows = crate::borrow_join::borrow_joins(func, &lent_options);
     let addrs = crate::render_native_addr::AddrState::new(func, sigs);
     if is_main {
         used_shims.push(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
@@ -73,6 +94,7 @@ fn render_fn(
         // codegen's `main` (the shared text, already 4-space indented).
         out.push_str(almide_codegen::main_sigpipe_prelude_text());
         line!("almide_stack_guard_install();");
+        line!("let _almide_host_exit = AlmideHostExitGuard;");
     }
     if is_main && crate::charge_probe::probe_enabled() {
         used_shims.push(COUNTER_SHIM);
@@ -86,6 +108,9 @@ fn render_fn(
     crate::render_native_move::set_static_strs(func);
     crate::render_native_addr::clear_str_fields();
     crate::render_native_move::set_rebound(func);
+    crate::render_native_borrow_read::set_borrowed_results(func, lent_options);
+    crate::render_native_keyed::begin_fn(func, &borrows.arms);
+    crate::native_map_entries::begin(func);
     // Interpolation chains built in one buffer (crate::render_native_interp).
     let chains = crate::render_native_interp::chains(func);
     crate::render_native_move::set_stack_lits(func, &user_fns.keys().copied().collect());
@@ -93,6 +118,7 @@ fn render_fn(
     let printed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     let (scalar_defs, scalar_prints) = crate::render_native_interp::printed_scalars(func);
     let early = early_releases(func, &chains);
+    let snapshots = snapshot_releases(func, &chains);
     let mut st = FnLoop {
         func,
         user_fns,
@@ -110,6 +136,8 @@ fn render_fn(
         scalar_defs,
         scalar_prints,
         early,
+        snapshots,
+        borrowed_tails,
     };
     // The op iterator runs over the loop state's own view of the function, so
     // a phase that consumes ops ahead (`ops.nth(..)`) shares its lifetime.
@@ -124,9 +152,17 @@ fn render_fn(
         // otherwise hold every dead buffer to its end. A plain move, so any
         // later use the render made of it would be a compile error, never a
         // silent read of an emptied value.
+        release_snapshots(&mut st, i);
         for v in st.early.get(&i).cloned().into_iter().flatten() {
             let v = &v;
-            let owned = matches!(st.tys.get(v), Some(NTy::Str | NTy::VecStr | NTy::Vec | NTy::Rec(_)));
+            let owned = match st.tys.get(v) {
+                // Read through its block: a list only (an element is never
+                // moved out of one; a record field or a carrier payload may be).
+                Some(NTy::VecStr | NTy::Vec) => true,
+                Some(NTy::Rec(r)) if block_read_release(*v) => crate::render_native_rec::list_elem(*r).is_some(),
+                Some(NTy::Str | NTy::Rec(_)) => !block_read_release(*v),
+                _ => false,
+            };
             // (A value its last call moved in is gone already.)
             let named = matches!(&func.ops[i - 1], Op::CallFn { args, .. } if args.iter().any(|a| matches!(a, crate::CallArg::Handle(x) if x == v)));
             // A call the floor renders with the value only borrowed (`f(&v)`)
@@ -145,7 +181,15 @@ fn render_fn(
             }
         }
         prev_start = st.out.len();
-        if render_fn_step(&mut st, i, op, &mut ops)? && flag_exits.contains(&i) {
+        let stepped = render_fn_step(&mut st, i, op, &mut ops)?;
+        // A shared cell's in-place borrow ends with its last read.
+        for g in crate::render_native_keyed::guards_through(i) {
+            for _ in 0..st.indent {
+                st.out.push_str("    ");
+            }
+            let _ = writeln!(st.out, "drop({g});");
+        }
+        if stepped && flag_exits.contains(&i) {
             for _ in 0..st.indent {
                 st.out.push_str("    ");
             }
@@ -195,6 +239,26 @@ fn render_fn_step<'a>(
 ) -> Result<bool, LowerError> {
     crate::render_native_bounds::at(i);
     crate::native_hof::at(st.func, i);
+    if crate::native_foreign::render(st.func, op, st.sigs, &mut st.tys, &mut st.out, st.indent)? {
+        return Ok(false);
+    }
+    if let Op::Prim { kind: crate::PrimKind::Die, dst: None, args } = op {
+        if let [message] = args.as_slice() {
+            if let Some(call) = crate::native_test_assert::failure(st.func, *message) {
+                let _ = writeln!(st.out, "{}{call};", "    ".repeat(st.indent));
+                return Ok(true);
+            }
+            if crate::native_test_panic::is_message(st.func, *message) && matches!(st.tys.get(message), Some(NTy::Str | NTy::StrRef)) {
+                let call = format!("__almd_native_test_panic({})", var(*message));
+                let _ = writeln!(st.out, "{}{call};", "    ".repeat(st.indent));
+                return Ok(true);
+            }
+        }
+    }
+    if st.borrowed_tails.contains(&i) {
+        crate::native_borrowed_tco::render(st.func, op, &mut st.tys, &mut st.out, st.indent)?;
+        return Ok(false);
+    }
     if let (true, Op::ListLit { dst, .. }) = (crate::native_hof::elided(st.func, op), op) {
         // Typed as the block it stands for; only its releases name it, and
         // they render nothing.
@@ -228,7 +292,7 @@ fn render_fn_step<'a>(
         return Ok(false);
     }
     // #4006 family G: a closure call with a heap arg or result.
-    if crate::render_native_closure::render_typed_call_indirect(op, st.sigs, &mut st.tys, &mut st.out, st.indent)? {
+    if crate::render_native_closure::render_typed_call_indirect(op, &crate::render_native_closure::handed_after(st.func, i), &mut st.tys, &mut st.out, st.indent)? {
         return Ok(false);
     }
     render_fn_op(st, i, op)?;
@@ -252,8 +316,9 @@ fn render_printed_scalar(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerErr
     if is_bool {
         line!("rt_println_fmt(format_args!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }}));", var(n));
     } else {
-        // By value: a reference would pin the local to memory.
-        line!("rt_println_fmt(format_args!(\"{{}}\", {{ {} }}));", var(n));
+        // By value: a reference would pin the local to memory. Through
+        // `AlmideIntText`, the runtime's digit writer (render_native_interp).
+        line!("rt_println_fmt(format_args!(\"{{}}\", crate::almide_str_block::AlmideIntText({})));", var(n));
     }
     Ok(true)
 }
@@ -286,8 +351,14 @@ fn render_chain_final(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerError>
     // A chain whose head string dies here grows that string's own
     // buffer, as v0's `AlmideConcat` consumes its owned left side.
     if let Some(crate::render_native_interp::Piece::Str(head)) = pieces.first() {
+        // Released right after the chain, or rebound to the chain's own result
+        // by the next op (`s = "${s}ab"` in a loop): nothing reads it again.
+        let rebound = func.ops[i + 1..]
+            .iter()
+            .find(|o| !crate::render_native_move::bookkeeping(o))
+            .is_some_and(|o| matches!(o, Op::SetLocal { local, src } if local == head && *src == dst));
         let dies = !pieces[1..].contains(&crate::render_native_interp::Piece::Str(*head))
-            && chain_end(func, &st.chains, i).and_then(|e| st.early.get(&(e + 1))).is_some_and(|vs| vs.contains(head))
+            && (rebound || chain_end(func, &st.chains, i).and_then(|e| st.early.get(&(e + 1))).is_some_and(|vs| vs.contains(head)))
             && st.tys.get(head) == Some(&NTy::Str)
             && st.out.contains(&format!("let mut {}:", var(*head)));
         if let Some(rest) = dies.then(|| crate::render_native_interp::push_pieces(&pieces[1..], &st.tys)).flatten() {
@@ -398,7 +469,7 @@ fn render_fn_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<(), LowerError
                 used_shims: &mut *st.used_shims,
             },
         )?,
-        other => render_fn_tier_op(st, other)?,
+        other => render_fn_tier_op(st, i, other)?,
     }
     Ok(())
 }
@@ -431,32 +502,95 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         _ if crate::native_slot_takes::released(op).is_some_and(|v| st.addrs.slot_alias(&v)) => {
             line!("// drop: a heap slot's snapshot, scope-end");
         }
+        // A copy of a borrow-only read whose own uses only borrow
+        // (render_native_borrow_read::ref_dups): the same reference.
+        Op::Dup { dst, src }
+            if crate::render_native_borrow_read::ref_dup(*dst)
+                && matches!(st.tys.get(src), Some(NTy::RecRef(_) | NTy::VecRef | NTy::VecStrRef | NTy::StrRef)) =>
+        {
+            let t = st.tys[src];
+            st.tys.insert(*dst, t);
+            line!("let mut {} = {};", var(*dst), var(*src));
+        }
         Op::Dup { dst, src } if st.addrs.slot_alias(dst) => {
             let t = st.tys[src];
             st.tys.insert(*dst, t);
             line!("let mut {} = {};", var(*dst), var(*src));
         }
+        // A copy no op reads, only releases (`let snap = b.m` read through
+        // the field it was taken from): the copy and its release cancel, and
+        // the releases erase to scope end, so nothing is made at all.
+        Op::Dup { dst, src }
+            if !crate::render_native_move::drill_no_moves()
+                && matches!(st.tys.get(src), Some(NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)))
+                && unread_copy(func, i, *dst) =>
+        {
+            let t = st.tys[src];
+            st.tys.insert(*dst, t);
+            line!("// {}: a copy nothing reads, elided", var(*dst));
+        }
         // A copy of a borrowed field read off an owned record that dies
         // here moves the field out (#4006, no-perf-loss): nothing reads
         // the record again, so its field is the copy.
         Op::Dup { dst, src }
-            if matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef))
+            if matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef | NTy::RecRef(_)))
                 && crate::render_native_addr::field_of(*src).is_some_and(|(base, place)| {
                     matches!(st.tys.get(&base), Some(NTy::Rec(_)))
-                        && crate::render_native_move::dying_after(func, i, base, &st.borrows.arms)
+                        && crate::render_native_move::carrier_dies_after(func, i, base, &st.borrows.arms)
                         && crate::render_native_addr::reads_of_place(&place)
                             .iter()
                             .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))
                 }) =>
         {
-            let (_, place) = crate::render_native_addr::field_of(*src).expect("a field read");
-            let owned = match st.tys[src] {
-                NTy::StrRef => NTy::Str,
-                NTy::VecRef => NTy::Vec,
-                _ => NTy::VecStr,
-            };
+            let (base, place) = crate::render_native_addr::field_of(*src).expect("a field read");
+            let owned = owned_of_ref(st.tys[src]);
             st.tys.insert(*dst, owned);
-            line!("let mut {} = std::mem::take(&mut {place});", var(*dst));
+            // A record rebound next leaves by a plain partial move: no
+            // `Default` written into a block about to be dropped.
+            if crate::render_native_addr::rebound_next(func, i, base) {
+                line!("let mut {} = {place};", var(*dst));
+            } else {
+                line!("let mut {} = std::mem::take(&mut {place});", var(*dst));
+            }
+        }
+        // The same move for a borrowed payload read with no place of its own
+        // (an enum case's slot, a Result side): the carrier dies at the copy,
+        // so its payload is the copy, moved out by the noted expression.
+        Op::Dup { dst, src }
+            if matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef | NTy::RecRef(_)))
+                && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
+                    crate::render_native_move::payload_carrier(st.tys.get(&base).copied())
+                        && crate::render_native_move::carrier_dies_after(func, i, base, &st.borrows.arms)
+                        && crate::render_native_addr::reads_of_take(&take)
+                            .iter()
+                            .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))
+                }) =>
+        {
+            let (_, take) = crate::render_native_addr::payload_take_of(*src).expect("a payload read");
+            let owned = owned_of_ref(st.tys[src]);
+            st.tys.insert(*dst, owned);
+            line!("let mut {} = {take};", var(*dst));
+        }
+        // The same move out of a String-Ok Result param (the callee's own,
+        // never rebound) that no path reads after the copy: it goes by value,
+        // the param needing no `mut`.
+        Op::Dup { dst, src }
+            if st.tys.get(src) == Some(&NTy::StrRef)
+                && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
+                    matches!(st.tys.get(&base), Some(NTy::ResStr | NTy::Res))
+                        && crate::render_native_move::result_param_dies(func, i, base)
+                        && crate::render_native_addr::reads_of_take(&take)
+                            .iter()
+                            .all(|r| !crate::mir_liveness::live_after(func, i, *r))
+                }) =>
+        {
+            let (base, _) = crate::render_native_addr::payload_take_of(*src).expect("a payload read");
+            st.tys.insert(*dst, NTy::Str);
+            if st.tys.get(&base) == Some(&NTy::ResStr) {
+                line!("let mut {} = match {} {{ Ok(s) | Err(s) => s }};", var(*dst), var(base));
+            } else {
+                line!("let mut {} = match {} {{ Err(e) => e, Ok(_) => AlmideString::new() }};", var(*dst), var(base));
+            }
         }
         // A copy of a value nothing reads again moves it (no clone).
         Op::Dup { dst, src }
@@ -469,6 +603,16 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             st.tys.insert(*dst, t);
             line!("let mut {} = {};", var(*dst), crate::render_native_move::take_expr(&var(*src)));
         }
+        // A copy of a Result carrier nothing reads again is the carrier itself
+        // (a fallible callee's `Ok(x)` built, copied out and released).
+        Op::Prim { kind: crate::PrimKind::ResCopy, dst: Some(d), args }
+            if args.len() == 1
+                && st.tys.get(&args[0]).is_some_and(|t| crate::render_native_move::last_use(func, i, args[0], *t, &st.borrows.arms)) =>
+        {
+            let t = st.tys[&args[0]];
+            st.tys.insert(*d, t);
+            line!("let mut {} = {};", var(*d), crate::render_native_move::take_expr(&var(args[0])));
+        }
         // An error carrier over an owned string nothing reads again takes it.
         Op::Prim { kind: crate::PrimKind::ResMakeErrStr, dst: Some(d), args }
             if args.len() == 1
@@ -476,7 +620,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                 && crate::render_native_move::last_use(func, i, args[0], NTy::Str, &st.borrows.arms) =>
         {
             st.tys.insert(*d, NTy::Res);
-            line!("let {}: Result<i64, AlmideString> = Err({});", var(*d), crate::render_native_move::take_expr(&var(args[0])));
+            line!("let mut {}: Result<i64, AlmideString> = Err({});", var(*d), crate::render_native_move::take_expr(&var(args[0])));
         }
         Op::SetLocal { local, src }
             if st.tys.get(src).is_some_and(|t| {
@@ -499,7 +643,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
 
 /// Every op tier in turn — call-shaped, meter, Result carrier, termination,
 /// scalar, control flow; an op none of them takes is outside the rung subset.
-fn render_fn_tier_op(st: &mut FnLoop<'_>, other: &Op) -> Result<(), LowerError> {
+fn render_fn_tier_op(st: &mut FnLoop<'_>, i: usize, other: &Op) -> Result<(), LowerError> {
     let handled = render_native_call_op(
         other,
         OpSink {
@@ -542,6 +686,7 @@ fn render_fn_tier_op(st: &mut FnLoop<'_>, other: &Op) -> Result<(), LowerError> 
         },
     )? || render_native_flow_op(
         other,
+        i > 0 && crate::mir_wellformed::aborts_before_arm_end(&st.func.ops, i - 1),
         &st.borrows.joins,
         &mut st.tys,
         &mut st.out,
@@ -549,8 +694,9 @@ fn render_fn_tier_op(st: &mut FnLoop<'_>, other: &Op) -> Result<(), LowerError> 
         &mut st.if_stack,
     )?;
     if !handled {
-        let detail = if let Op::Prim { kind, .. } = other {
-            format!("Prim {kind:?}")
+        let detail = if let Op::Prim { kind, args, .. } = other {
+            let kinds: Vec<_> = args.iter().map(|v| st.tys.get(v)).collect();
+            format!("Prim {kind:?} with {kinds:?}")
         } else {
             op_name(other)
         };
@@ -560,4 +706,29 @@ fn render_fn_tier_op(st: &mut FnLoop<'_>, other: &Op) -> Result<(), LowerError> 
         )));
     }
     Ok(())
+}
+
+/// The owned kind a borrowed read's copy holds.
+fn owned_of_ref(t: NTy) -> NTy {
+    match t {
+        NTy::StrRef => NTy::Str,
+        NTy::VecRef => NTy::Vec,
+        NTy::RecRef(j) => NTy::Rec(j),
+        _ => NTy::VecStr,
+    }
+}
+
+/// The copy `dst` made at `ops[at]` is never read: every other op naming it
+/// releases exactly it, and it is not the function's result.
+fn unread_copy(func: &MirFunction, at: usize, dst: ValueId) -> bool {
+    let mut vs = Vec::new();
+    func.ret != Some(dst)
+        && func.ops.iter().enumerate().all(|(j, op)| {
+            if j == at {
+                return true;
+            }
+            vs.clear();
+            crate::mir_ops::op_values(op, &mut vs);
+            !vs.contains(&dst) || crate::native_move_params::is_release(op, dst)
+        })
 }

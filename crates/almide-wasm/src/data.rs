@@ -43,7 +43,7 @@ impl Emitter<'_> {
                     other => return self.lower_err_raise(e, is_ok, other),
                 };
                 let side = self.types.el(if is_ok { o } else { er });
-                if crate::fs_meta::expr_propagates(expr) {
+                if crate::fs_meta::expr_leaves_frame(expr) {
                     let tag = i32::from(!is_ok);
                     self.lower_payload_then_box(expr, side, 16, Some(tag), almide_layout::SUM_FIELD)?;
                     return Ok(hty);
@@ -581,7 +581,7 @@ impl Emitter<'_> {
                 // when the types forbid nested sums — the differential
                 // fuzzer falsified the old shared-tmp argument on day one
                 // (seed 79: the outer `some` returned the inner block).
-                if crate::fs_meta::expr_propagates(expr) {
+                if crate::fs_meta::expr_leaves_frame(expr) {
                     self.lower_payload_then_box(expr, s, s.slot_size() as i32, None, almide_layout::OPTION_FIELD)?;
                     return Ok(hty);
                 }

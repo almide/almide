@@ -12,6 +12,15 @@ pub(super) struct BoundedParam {
     pub(super) type_var: String,
 }
 
+/// An open row is a constraint, not a concrete record layout. Specializing
+/// a callee on an open caller parameter before that caller is instantiated
+/// freezes the call to a partial record and prevents transitive discovery.
+pub(super) fn bindings_all_concrete(bindings: &HashMap<String, Ty>) -> bool {
+    !bindings.is_empty() && bindings.values().all(|ty| {
+        !ty.any_child_recursive(&|t| matches!(t, Ty::Unknown | Ty::TypeVar(_) | Ty::OpenRecord { .. }))
+    })
+}
+
 /// Generate a mangled suffix from type variable bindings.
 pub(super) fn mangle_suffix(bindings: &HashMap<String, Ty>) -> String {
     let mut entries: Vec<(&String, &Ty)> = bindings.iter().collect();
@@ -111,6 +120,16 @@ mod tests {
 
     fn result_of(payload: Ty) -> Ty {
         Ty::Applied(TypeConstructorId::Result, vec![payload, Ty::String].into())
+    }
+
+    #[test]
+    fn open_rows_wait_for_the_callers_concrete_shape() {
+        let row = Ty::OpenRecord { fields: vec![("name".into(), Ty::String)] };
+        assert!(!bindings_all_concrete(&bind(&[("__open_0", row.clone())])));
+        assert!(!bindings_all_concrete(&bind(&[("T", Ty::list(row))])));
+        let record = Ty::Record { fields: vec![("name".into(), Ty::String)] };
+        assert!(bindings_all_concrete(&bind(&[("__open_0", record)])));
+        assert!(!bindings_all_concrete(&bind(&[("T", result_of(Ty::Unknown))])));
     }
 
     /// The two `result.filter` call sites from #905. They differ ONLY in the

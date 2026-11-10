@@ -119,7 +119,7 @@ use almide_ir::fusion::{stdlib_module_is_pure, TOTAL_MODULES};
 
 /// Purity uses a greatest fixpoint; recursion alone is not an effect.
 /// Totality uses a least fixpoint: a recursive cycle is not a termination proof.
-pub(super) struct Purity {
+pub struct Purity {
     pure: HashSet<Sym>,
     total: HashSet<Sym>,
     /// The fan view (`for_fan`): an `effect fn` is a candidate too, and a
@@ -129,7 +129,7 @@ pub(super) struct Purity {
 }
 
 impl Purity {
-    pub(super) fn of(program: &IrProgram) -> Purity {
+    pub fn of(program: &IrProgram) -> Purity {
         Self::analyze(program, false)
     }
 
@@ -186,8 +186,8 @@ impl Purity {
         Purity { pure: fixpoint(false), total: if local_state { HashSet::new() } else { fixpoint(true) }, fan: local_state }
     }
 
-    pub(super) fn pure(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.pure, total: false, fan: self.fan }) }
-    fn total(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.total, total: true, fan: false }) }
+    pub fn pure(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.pure, total: false, fan: self.fan }) }
+    pub fn total(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.total, total: true, fan: false }) }
     /// The function `name` (any spelling a call site carries) is proven.
     pub(super) fn proves(&self, name: Sym) -> bool { self.pure.contains(&name) }
 }

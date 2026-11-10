@@ -383,14 +383,16 @@ impl LowerCtx {
         // sequential `.or_else()` over sub-matches run in the same order reproduces that
         // exactly). Pure text move, no logic change — verified via classify_corpus cert
         // byte-identity over the full spec corpus.
-        self.try_lower_opt_tuple_and_variant_payloads(value, ty)
+        let dst = self.try_lower_opt_tuple_and_variant_payloads(value, ty)
             .or_else(|| self.try_lower_opt_heap_general(value, ty))
             .or_else(|| self.try_lower_opt_fallback_and_none(value, ty))
             .or_else(|| self.try_lower_result_ok_heap(value, ty))
             .or_else(|| self.try_lower_result_ok_variant_ctor(value, ty))
             .or_else(|| self.try_lower_result_small_arms(value, ty))
             .or_else(|| self.try_lower_result_err_heap_ok_result(value, ty))
-            .or_else(|| self.try_lower_result_err_heap_fallback(value, ty))
+            .or_else(|| self.try_lower_result_err_heap_fallback(value, ty))?;
+        self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(ty));
+        Some(dst)
     }
 
 }

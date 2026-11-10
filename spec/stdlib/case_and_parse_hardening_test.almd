@@ -68,3 +68,18 @@ test "int.parse_radix keeps its whitespace handling" {
   assert_eq(int.parse_radix("\u{A0}ff", 16), ok(255))
   assert_eq(int.parse_radix(" ff ", 16), ok(255))
 }
+
+test "to_upper preserves shared values and converts fresh ASCII" {
+  let source = "abc${7}xy"
+  let alias = source
+  assert_eq(string.to_upper(source), "ABC7XY")
+  assert_eq(source, "abc7xy")
+  assert_eq(alias, "abc7xy")
+  assert_eq(string.to_upper("abc${9}xy"), "ABC9XY")
+  assert_eq(string.to_upper(string.trim("   ")), "")
+}
+
+test "to_upper maps Unicode after a fresh ASCII prefix" {
+  assert_eq(string.to_upper("abc${7}éßΣ😀"), "ABC7ÉßΣ😀")
+  assert_eq(string.to_upper("${7}a\u{301}é"), "7A\u{301}É")
+}

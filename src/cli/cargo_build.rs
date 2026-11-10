@@ -190,7 +190,25 @@ pub(super) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path
 /// ~2.0 MB while one the cargo path built (no runtime use) shipped at 0.37 MB.
 /// Only `.debug_*` sections go: the code, the symbol table (backtraces still
 /// name their frames) and every message the program prints are unchanged.
-const FAST_PATH_RELEASE_ARGS: [&str; 6] = ["-C", "lto=fat", "-C", "codegen-units=1", "-C", "strip=debuginfo"];
+pub(super) const FAST_PATH_RELEASE_ARGS: [&str; 6] = ["-C", "lto=fat", "-C", "codegen-units=1", "-C", "strip=debuginfo"];
+
+/// The profile flags the rlib fast path compiles the PROGRAM crate with —
+/// the standard codegen's normal native build. Nothing pins debug assertions
+/// or overflow checks, so rustc's defaults decide both: off above opt-level 0.
+/// The v1 program crate is held to these effective settings
+/// (`v1_rustc_build`'s `the_program_crate_profile_is_the_standard_builds`).
+pub(super) fn rlib_fast_program_profile_args(rs_code: &str, release: bool) -> Vec<String> {
+    let opt_level = if release { "3" } else { "1" };
+    let mut args: Vec<String> = vec!["-C".into(), format!("opt-level={opt_level}")];
+    if release {
+        args.extend(FAST_PATH_RELEASE_ARGS.iter().map(|s| s.to_string()));
+        args.extend(super::native_target::release_codegen_rustc_args());
+        if let Some(split) = release_split_for(rs_code) {
+            args.extend(split.rustc_args());
+        }
+    }
+    args
+}
 
 fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<Result<std::path::PathBuf, String>> {
     let opt_level = if release { "3" } else { "1" };
@@ -200,8 +218,10 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
     // The release LLVM options reach the runtime too: a loop it vectorized
     // before LTO stays vectorized through it.
     let llvm: &[&str] = if release { super::native_target::RELEASE_LLVM_ARGS } else { &[] };
-    let rlib = ensure_runtime_rlib(opt_level, cpu.as_deref(), llvm).ok()?;
+    // Slim first: a source without the runtime boundary (a v1 render) has no
+    // use for the v0 runtime rlib, so it must not pay for building one.
     let mut slim = crate::codegen::slim_main_with_external_runtime(rs_code)?;
+    let rlib = ensure_runtime_rlib(opt_level, cpu.as_deref(), llvm).ok()?;
     if !defines_entry_point(&slim) {
         slim.push_str("\nfn main() {}\n");
     }
@@ -213,17 +233,10 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
     cmd.arg(&rs_path)
         .arg("-o").arg(&bin_path)
         .arg("--edition").arg("2021")
-        .arg("-C").arg(format!("opt-level={opt_level}"))
+        .args(rlib_fast_program_profile_args(rs_code, release))
         .arg("--extern").arg(format!("almide_rt={}", rlib.display()))
         .arg("-L").arg(rlib_dir)
         .arg("-A").arg("warnings");
-    if release {
-        cmd.args(FAST_PATH_RELEASE_ARGS);
-        cmd.args(super::native_target::release_codegen_rustc_args());
-        if let Some(split) = release_split_for(rs_code) {
-            cmd.args(split.rustc_args());
-        }
-    }
     let output = cmd.output().ok()?;
     if output.status.success() {
         Some(source_still_ours(&rs_path, &slim).map(|()| bin_path))
@@ -269,7 +282,7 @@ fn write_generated_cargo_project(
         let rt_src = project_dir.join(super::cargo_toml::RT_CRATE).join("src");
         std::fs::create_dir_all(&rt_src).map_err(|e| format!("failed to create {}: {}", rt_src.display(), e))?;
         std::fs::write(rt_src.join("lib.rs"), &runtime).map_err(|e| format!("failed to write the runtime crate: {e}"))?;
-        std::fs::write(rt_src.parent().expect("crate dir").join("Cargo.toml"), super::cargo_toml::runtime_crate_manifest())
+        std::fs::write(rt_src.parent().expect("crate dir").join("Cargo.toml"), super::cargo_toml::runtime_crate_manifest(&runtime))
             .map_err(|e| format!("failed to write the runtime crate manifest: {e}"))?;
         cargo_toml.push_str(&super::cargo_toml::runtime_crate_manifest_lines());
         final_code = program;
@@ -378,6 +391,13 @@ pub(super) fn cargo_build_generated_with_native(
         if let Some(built) = try_rlib_fast_build(rs_code, project_dir, release) {
             return built;
         }
+        // No runtime boundary to slim at (a v1 render): the crate still
+        // depends on nothing but std, so rustc builds it without cargo.
+        if inputs.is_empty() {
+            if let Some(built) = super::v1_rustc_build::try_build(rs_code, project_dir, release) {
+                return built;
+            }
+        }
     }
 
     let src_dir = write_generated_cargo_project(rs_code, project_dir, native_deps, inputs)?;
@@ -461,7 +481,7 @@ fn append_release_rustflags(cmd: &mut std::process::Command, split: Option<&supe
 /// precompiled printer allocates through its own copy of the default
 /// allocator, which is the program's allocator only when the program has
 /// not replaced it.
-fn release_split_for(rs_code: &str) -> Option<&'static super::std_split::StdSplit> {
+pub(super) fn release_split_for(rs_code: &str) -> Option<&'static super::std_split::StdSplit> {
     if rs_code.contains("global_allocator") {
         return None;
     }

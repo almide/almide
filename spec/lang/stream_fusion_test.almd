@@ -254,3 +254,28 @@ test "fallible map stops at the first err" {
   assert_eq(fallible_msg(["1", "2", "-3", "4"]), "not positive: -3")
   assert_eq(fallible_msg(["1", "2"]), "ok 3")
 }
+
+// Sum uses the same sequential reducer as fold on the wasm leg, including
+// a counted range head and numeric results after heap-valued map stages.
+test "sum streams range map filter without changing numeric order" {
+  assert_eq(
+    list.range(0, 1000) |> list.map((x) => x * 3) |> list.filter((x) => x % 2 == 0) |> list.sum,
+    748500,
+  )
+  assert_eq(list.range(5, 2) |> list.map((x) => x + 1) |> list.sum, 0)
+  assert_eq([9223372036854775807, 1] |> list.map((x) => x) |> list.sum, -9223372036854775808)
+  assert_eq([10000000000000000.0, 1.0, -10000000000000000.0] |> list.map((x) => x) |> list.sum, 0.0)
+}
+
+test "sum releases owned map values and preserves its borrowed source" {
+  let xs = ["ab", "drop", "c"]
+  let n = xs |> list.map((s) => s + "!") |> list.filter((s) => s != "drop!") |> list.map((s) => string.len(s)) |> list.sum
+  assert_eq(n, 5)
+  assert_eq(xs, ["ab", "drop", "c"])
+}
+
+test "sum composes with the enumerate adapter" {
+  let xs = [1.5, 2.5, 3.5]
+  assert_eq(list.enumerate(xs) |> list.map((p) => float.from(p.0) + p.1) |> list.sum, 10.5)
+  assert_eq(xs, [1.5, 2.5, 3.5])
+}

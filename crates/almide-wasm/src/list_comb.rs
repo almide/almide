@@ -151,6 +151,9 @@ impl Emitter<'_> {
     /// Sequential sum (native: Int wrapping fold from 0; Float
     /// `iter().sum()` — the same left fold from 0.0).
     pub(crate) fn lower_list_sum(&mut self, xs: &IrExpr) -> ArmResult {
+        if let Some(fused) = self.lower_list_sum_fused(xs)? {
+            return Ok(fused);
+        }
         let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-sum-of:{other:?}")),

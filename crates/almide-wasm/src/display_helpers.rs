@@ -157,6 +157,7 @@ pub(crate) fn build_helper_body(
     let anchor_serial = crate::witness::anchor::begin_fn();
     let mut calls = std::collections::HashSet::new();
     let empty_locals = std::collections::HashMap::new();
+    let empty_constants = std::collections::HashMap::new();
     let empty_globals = std::collections::HashMap::new();
     let empty_ranges = std::collections::HashMap::new();
     let empty_cells = std::collections::HashSet::new();
@@ -171,6 +172,8 @@ pub(crate) fn build_helper_body(
             rc_frame_params: Vec::new(),
             tail_consumed: Default::default(),
             loop_back_releasable: Default::default(),
+            loop_carried: Default::default(),
+            loop_carried_raw: Default::default(),
             self_index: None,
             rc_owned: std::collections::BTreeSet::new(),
             owned_ty: std::collections::HashMap::new(),
@@ -193,6 +196,7 @@ pub(crate) fn build_helper_body(
             build_depth: 0,
             work,
             globals: &empty_globals,
+            global_constants: &empty_constants,
             deferred_ranges: &empty_ranges,
             metered: false,
             cells: &empty_cells,
@@ -207,6 +211,8 @@ pub(crate) fn build_helper_body(
             cow_prejudged: HashSet::new(),
             bounds_facts: None,
             payload_ptrs: HashMap::new(),
+            int_ranges: HashMap::new(),
+            loop_entry_ranges: None,
             in_tail: false,
             try_see_through: false,
             branch_depth: 0,

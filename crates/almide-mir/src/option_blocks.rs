@@ -27,3 +27,11 @@ pub(crate) fn of(fn_name: &str) -> BTreeSet<ValueId> {
 pub(crate) fn clear() {
     BLOCKS.with(|b| b.borrow_mut().clear());
 }
+
+pub(crate) fn snapshot() -> BTreeMap<String, BTreeSet<ValueId>> {
+    BLOCKS.with(|b| b.borrow().clone())
+}
+
+pub(crate) fn restore(saved: BTreeMap<String, BTreeSet<ValueId>>) {
+    BLOCKS.with(|b| *b.borrow_mut() = saved);
+}

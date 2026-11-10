@@ -63,12 +63,27 @@ fn wait_up(port: u16) {
 
 #[test]
 fn an_abort_in_the_handler_fails_only_its_request() {
+    check_abort("xs[i]", "val=20", "index out of bounds");
+}
+
+#[test]
+fn a_native_arithmetic_abort_fails_only_its_request() {
+    check_abort("10 / (i - 5)", "val=-2", "division by zero");
+}
+
+fn check_abort(expression: &str, served: &str, message: &str) {
     let dir = tempfile::tempdir().unwrap();
     let port = free_port();
-    std::fs::write(dir.path().join("s.almd"), SERVER.replace("PORT", &port.to_string())).unwrap();
+    std::fs::write(dir.path().join("s.almd"), SERVER.replace("PORT", &port.to_string()).replace("xs[i]", expression)).unwrap();
     let stderr_path = dir.path().join("stderr.txt");
-    let child = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .args(["run", "s.almd"])
+    let app = dir.path().join("server");
+    let built = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .args(["build", "s.almd", "-o"]).arg(&app).current_dir(dir.path())
+        .env("ALMIDE_VERIFIED_DEBUG", "1").output().unwrap();
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    assert!(String::from_utf8_lossy(&built.stderr).contains("native: v1 trust-spine render"),
+        "handler containment must use v1: {}", String::from_utf8_lossy(&built.stderr));
+    let child = Command::new(&app)
         .current_dir(dir.path())
         .stdout(Stdio::null())
         .stderr(std::fs::File::create(&stderr_path).unwrap())
@@ -79,7 +94,7 @@ fn an_abort_in_the_handler_fails_only_its_request() {
 
     // Control: an in-bounds request is served.
     let ok = request(port, "X").expect("served request");
-    assert!(ok.starts_with("HTTP/1.1 200") && ok.ends_with("val=20"), "{ok}");
+    assert!(ok.starts_with("HTTP/1.1 200") && ok.ends_with(served), "{ok}");
 
     // The out-of-bounds request: the fixed 500, not an empty reply.
     let bad = request(port, "XXXXX").expect("the aborting request is answered");
@@ -89,13 +104,13 @@ fn an_abort_in_the_handler_fails_only_its_request() {
 
     // The server is still up and serving.
     let after = request(port, "X").expect("the server survives the abort");
-    assert!(after.starts_with("HTTP/1.1 200") && after.ends_with("val=20"), "{after}");
+    assert!(after.starts_with("HTTP/1.1 200") && after.ends_with(served), "{after}");
     assert!(server.0.try_wait().unwrap().is_none(), "the server process is still running");
 
     drop(server);
     let stderr = std::fs::read_to_string(&stderr_path).unwrap();
     assert!(
-        stderr.lines().any(|l| l.starts_with("http.serve: request ") && l.ends_with("handler aborted: \"index out of bounds\"")),
+        stderr.lines().any(|l| l.starts_with("http.serve: request ") && l.ends_with(&format!("handler aborted: {message:?}"))),
         "one stderr line names the request and the abort:\n{stderr}"
     );
     assert!(!stderr.contains("panicked"), "no Rust panic banner:\n{stderr}");

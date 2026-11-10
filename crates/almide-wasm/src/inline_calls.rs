@@ -54,6 +54,12 @@
 //!     `x.__to_float()`, which mono makes `int.__to_float(x)` for an Int),
 //!     so the wrapper stops costing a call at every conversion site.
 //!
+//! A scalar-returning body with a List param that forwards EVERY argument
+//! once, in order, to one module call admits a List-producing call argument.
+//! No parameter is bound or copied: the callee sees the original expressions
+//! in the same order. Bare List variables keep their ordinary call and RC
+//! witness; there is no producer chain to expose at such a site.
+//!
 //! ARGUMENTS keep call semantics: each is evaluated once, in order, into a
 //! fresh `let` — except where the shared speculation rule
 //! ([`almide_ir::speculation::is_speculation_safe`], #2958) says moving it is
@@ -244,6 +250,9 @@ struct Callee {
     /// The body names nothing of its own var space (no `Named` call, no
     /// `let`): it may inline at a `module.fn(..)` site of any space.
     portable: bool,
+    /// One module call passing every param once, in declaration order.
+    /// Argument expressions can be substituted without moving any work.
+    ordered_forwarder: bool,
 }
 
 /// A module call with scalar arguments that reads no byte view: admitted only
@@ -276,6 +285,22 @@ fn is_forwarder(body: &IrExpr, params: &[VarId]) -> bool {
         IrExprKind::Var { id } => params.contains(id),
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitBool { .. } => true,
         _ => false,
+    })
+}
+
+/// A transparent forwarding body: f(a, b) = module.g(a, b), with no
+/// omitted, duplicated or reordered parameter and no other computation.
+/// Unlike general inlining this admits collection arguments: evaluating
+/// g's arguments still evaluates exactly the original argument expressions,
+/// once and in order. Exposing the original collection expression lets its
+/// consumer fuse a chain (e.g. Numeric's sum wrappers), without a name list.
+fn is_ordered_forwarder(body: &IrExpr, params: impl ExactSizeIterator<Item = VarId>) -> bool {
+    let (IrExprKind::Call { target: CallTarget::Module { .. }, args, .. }
+    | IrExprKind::TailCall { target: CallTarget::Module { .. }, args }) = &body.kind else {
+        return false;
+    };
+    args.len() == params.len() && args.iter().zip(params).all(|(a, p)| {
+        matches!(&a.kind, IrExprKind::Var { id } if *id == p)
     })
 }
 
@@ -356,7 +381,7 @@ fn inline_parts(c: &Callee, args: &[IrExpr], span: Option<almide_ir::Span>, vt: 
             a.kind,
             IrExprKind::Var { .. } | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitBool { .. }
         );
-        if trivial || (almide_ir::speculation::is_speculation_safe(a) && reads_of(&c.body, *pv) <= 1) {
+        if c.ordered_forwarder || trivial || (almide_ir::speculation::is_speculation_safe(a) && reads_of(&c.body, *pv) <= 1) {
             env.insert(*pv, a.clone());
         } else {
             let info = c.infos[k].clone();
@@ -434,6 +459,15 @@ impl Rewriter<'_> {
     fn args_fit(&self, c: &Callee, args: &[IrExpr]) -> bool {
         if args.len() != c.params.len() {
             return false;
+        }
+        if c.ordered_forwarder {
+            // Only expose a producer expression. A captured/bare list has
+            // no chain to fuse; retaining its ordinary call also retains
+            // the existing capture's RC events and certificate coverage.
+            return args.iter().any(|a| {
+                matches!(&a.ty, Ty::Applied(almide_types::types::constructor::TypeConstructorId::List, _))
+                    && matches!(&a.kind, IrExprKind::Call { .. })
+            }) && c.params.iter().zip(args).all(|((_, ty), a)| *ty == a.ty);
         }
         // A byte-buffer param takes a bare variable only: it is substituted,
         // so the inlined reads see the caller's block (inline_parts binds
@@ -514,12 +548,26 @@ fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>, vt: &VarTable, mod
             || count[name] != 1
             || shadowed.contains(name)
             || !is_scalar(&f.ret_ty)
-            || !f.params.iter().all(|p| (is_scalar(&p.ty) || is_byte_view(&p.ty)) && !p.is_mut)
+        {
+            continue;
+        }
+        // Only collection forwarding needs to expose an argument tree for
+        // fusion. Keep scalar/byte-view inlining's existing substitution
+        // policy, and avoid allocating a param-id vector for rejected fns.
+        let ordered_forwarder = f.params.iter().any(|p| {
+            matches!(&p.ty, Ty::Applied(almide_types::types::constructor::TypeConstructorId::List, _))
+        }) && is_ordered_forwarder(&f.body, f.params.iter().map(|p| p.var));
+        if !f.params.iter().all(|p| (ordered_forwarder || is_scalar(&p.ty) || is_byte_view(&p.ty)) && !p.is_mut)
             || calls_itself(&f.body, name)
         {
             continue;
         }
-        let Some(size) = admissible_size(&f.body, &names) else { continue };
+        let size = if ordered_forwarder {
+            1 + f.params.len()
+        } else {
+            let Some(size) = admissible_size(&f.body, &names) else { continue };
+            size
+        };
         if size > MAX_SIZE {
             continue;
         }
@@ -533,7 +581,7 @@ fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>, vt: &VarTable, mod
         let params = f.params.iter().map(|p| (p.var, p.ty.clone())).collect();
         let infos = f.params.iter().map(|p| vt.get(p.var).clone()).collect();
         let portable = module.is_some_and(|m| is_portable(&f.body, &format!("{m}.{name}"), &pvars));
-        out.insert(name.to_string(), Callee { params, infos, body: f.body.clone(), portable });
+        out.insert(name.to_string(), Callee { params, infos, body: f.body.clone(), portable, ordered_forwarder });
     }
     out
 }

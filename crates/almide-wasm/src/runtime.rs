@@ -493,13 +493,13 @@ pub(crate) fn emit_str_eq() -> Function {
     let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
-    i.local_get(a).i32_load(len_memarg()).local_set(la);
-    i.local_get(la).local_get(b).i32_load(len_memarg()).i32_ne().if_(BlockType::Empty);
-    i.i32_const(0).return_();
-    i.end();
     // The same block is equal to itself.
     i.local_get(a).local_get(b).i32_eq().if_(BlockType::Empty);
     i.i32_const(1).return_();
+    i.end();
+    i.local_get(a).i32_load(len_memarg()).local_set(la);
+    i.local_get(la).local_get(b).i32_load(len_memarg()).i32_ne().if_(BlockType::Empty);
+    i.i32_const(0).return_();
     i.end();
     i.i32_const(0).local_set(idx);
     // Eight bytes at a time while a whole word is left (wasm loads need no
@@ -637,9 +637,12 @@ pub(crate) fn emit_list_join() -> Function {
     f
 }
 
-/// `$copy(dst, src, len)`: len < 16 walks bytes — wasmtime lowers
+/// `$copy(dst, src, len)`: len < 16 copies inline — wasmtime lowers
 /// memory.copy to an out-of-line libcall whose fixed cost dwarfs a
 /// small move (stage 54: ~20ns per tiny concat) — else one memory.copy.
+/// The inline path is exact for disjoint blocks and for an overlapping move
+/// toward lower addresses (dst <= src); like the byte walk before it, it
+/// does not support an overlapping move toward higher addresses.
 pub(crate) fn emit_copy() -> Function {
     let (dst, src, len, endp) = (0u32, 1u32, 2u32, 3u32);
     let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
@@ -647,6 +650,22 @@ pub(crate) fn emit_copy() -> Function {
     let mut i = f.instructions();
     i.local_get(len).i32_const(16).i32_lt_u().if_(BlockType::Empty);
     i.local_get(src).local_get(len).i32_add().local_set(endp);
+    // #4612: under 16 bytes, one 8-byte word and one 4-byte word go whole
+    // (each loaded before it is stored, so a forward overlapping move stays
+    // exact), and only the last 0..=3 bytes walk.
+    let word = MemArg { offset: 0, align: 0, memory_index: 0 };
+    for (w, wide) in [(8, true), (4, false)] {
+        i.local_get(endp).local_get(src).i32_sub().i32_const(w).i32_ge_u().if_(BlockType::Empty);
+        i.local_get(dst).local_get(src);
+        if wide {
+            i.i64_load(word).i64_store(word);
+        } else {
+            i.i32_load(word).i32_store(word);
+        }
+        i.local_get(dst).i32_const(w).i32_add().local_set(dst);
+        i.local_get(src).i32_const(w).i32_add().local_set(src);
+        i.end();
+    }
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(src).local_get(endp).i32_ge_u().br_if(1);
     i.local_get(dst).local_get(src).i32_load8_u(byte).i32_store8(byte);

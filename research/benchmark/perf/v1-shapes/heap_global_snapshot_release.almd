@@ -1,0 +1,24 @@
+// v1-vs-v0 shape bench: module-level `var`s read borrow-only at the top level
+// of a function (#4621). The snapshot of the cell is released after its last
+// read, so the write that follows takes the value out instead of copying it;
+// a snapshot whose read is the function's result, or a piece of a printed
+// interpolation, keeps it to the end of the function.
+type Log = { name: String, lines: List[String], n: Int }
+
+var journal: Log = { name: "log", lines: [], n: 0 }
+
+fn head() -> String = journal.name
+
+fn record(i: Int) -> Unit = {
+  let seen = list.len(journal.lines)
+  let line = "line ${i} after ${seen}"
+  list.push(journal.lines, line)
+}
+
+fn main() -> Unit = {
+  for i in 0..<3000 {
+    record(i)
+  }
+  println("${journal.name} has ${list.len(journal.lines)}")
+  println(head())
+}

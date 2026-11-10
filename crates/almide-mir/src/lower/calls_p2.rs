@@ -247,7 +247,7 @@ impl LowerCtx {
         };
         let shape = self.classify_concat_list_elem(&elem_ty);
         if shape.matches_no_admitted_family() {
-            return None;
+            return self.try_lower_owned_list_concat(value, left, right, &elem_ty);
         }
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
@@ -677,6 +677,9 @@ impl LowerCtx {
         self.in_interp += 1;
         let out = self.try_lower_concat_str(&tree);
         self.in_interp -= 1;
+        if out.is_none() {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[interp] lowering declined: {parts:?}"));
+        }
         out
     }
 

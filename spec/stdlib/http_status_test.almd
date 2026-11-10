@@ -61,6 +61,33 @@ effect fn answer_once(server: net.TcpListener, reply: String) -> Result[Unit, St
   ok(())
 }
 
+effect fn answer_bytes(server: net.TcpListener) -> Result[Unit, String] = {
+  let body = bytes.from_list([255, 65, 254, 66])
+  let peer = net.tcp_accept(server)!
+  let _ = io.read(peer, 4096)!
+  io.write(peer, bytes.from_string("HTTP/1.1 200 OK\r\nContent-Length: ${bytes.len(body)}\r\n\r\n"))!
+  io.write(peer, body)!
+  io.close(peer)!
+  io.close(server)!
+  ok(())
+}
+
+test "a response keeps raw bytes through aliases and status updates" {
+  let raw = bytes.from_list([255, 65, 254, 66])
+  let server = net.tcp_listen("127.0.0.1", 0)!
+  let port = net.tcp_local_port(server)!
+  let (_, resp) = fan {
+    answer_bytes(server)
+    http.get_response("http://127.0.0.1:${port}/binary")
+  }
+  let changed = http.set_status(resp, 201)
+  assert_eq(http.status(resp), 200)
+  assert_eq(http.status(changed), 201)
+  assert_eq(bytes.to_list(http.body_bytes(resp)), [255, 65, 254, 66])
+  assert_eq(bytes.to_list(http.body_bytes(changed)), [255, 65, 254, 66])
+  assert_eq(http.body(resp), bytes.to_string_lossy(raw))
+}
+
 test "send keeps status, every header and the body of a 3xx" {
   let reply = "HTTP/1.1 302 Found\r\nLocation: /next\r\nSet-Cookie: a=1; HttpOnly\r\nSet-Cookie: b=2; Secure\r\nX-Frame-Options: DENY\r\nContent-Length: 5\r\n\r\nmoved"
   let server = net.tcp_listen("127.0.0.1", 0)!

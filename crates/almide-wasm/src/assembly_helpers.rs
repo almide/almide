@@ -57,6 +57,7 @@ pub(crate) fn helper_body_unsigned(h: &Helper, work: &FnWork, helper_snapshot: &
     ),
     Helper::ValueKeys => value_helpers::emit_value_keys_helper(),
     Helper::StringSplit => value_helpers::emit_string_split_helper(),
+    Helper::StringSplitByte => value_helpers::emit_string_split_byte_helper(),
     Helper::ScanF64 => runtime::emit_scan_f64(),
     Helper::MapReserve => runtime_alloc::emit_map_reserve(),
     Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {

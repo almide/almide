@@ -74,3 +74,29 @@ fn an_untrusted_remote_spec_is_refused_before_any_fetch() {
     assert!(text(&o).contains("its owner is not trusted"), "{}", text(&o));
     assert!(!td.path().join("home/.almide/cache").exists(), "nothing was fetched");
 }
+
+#[test]
+fn native_install_uses_checked_v1_modules_and_filesystem_scope() {
+    let td = tempfile::tempdir().unwrap();
+    let p = project(td.path(), "scoped-native", false);
+    std::fs::write(p.join("almide.toml"), concat!(
+        "[package]\nname = \"tool\"\nversion = \"0.1.0\"\n",
+        "[permissions]\nfs = [\"./data\"]\n")).unwrap();
+    std::fs::create_dir_all(p.join("data")).unwrap();
+    std::fs::write(p.join("data/answer.txt"), "42").unwrap();
+    std::fs::write(p.join("src/helper.almd"),
+        "import fs\neffect fn answer() -> String = fs.read_text(\"data/answer.txt\")!\n").unwrap();
+    std::fs::write(p.join("src/main.almd"),
+        "import self.helper\neffect fn main() -> Unit = println(helper.answer()!)\n").unwrap();
+    let bin = td.path().join("bin");
+    let installed = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .args(["tool", "install"]).arg(&p).arg("--bin-dir").arg(&bin)
+        .env("ALMIDE_VERIFIED_DEBUG", "1").output().unwrap();
+    assert!(installed.status.success(), "{}", text(&installed));
+    assert!(String::from_utf8_lossy(&installed.stderr).contains("native: v1 trust-spine render"),
+        "install must not silently select v0: {}", text(&installed));
+    let output = Command::new(bin.join("tool")).current_dir(&p).output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stdout, b"42\n");
+    assert!(output.stderr.is_empty(), "{}", text(&output));
+}

@@ -103,14 +103,15 @@ impl LowerCtx {
         root_ty: &Ty,
         path: &[almide_lang::intern::Sym],
         field: almide_lang::intern::Sym,
-    ) -> Option<Vec<(Vec<Ty>, usize)>> {
+    ) -> Option<Vec<(Vec<Ty>, usize, Ty)>> {
         let mut levels = Vec::with_capacity(path.len() + 1);
         let mut ty = root_ty.clone();
         for f in path.iter().chain(std::iter::once(&field)) {
             let (names, tys) = self.aggregate_field_tys(&ty)?;
             let idx = names.iter().position(|n| n.as_str() == f.as_str())?;
-            ty = tys[idx].clone();
-            levels.push((tys, idx));
+            let child_ty = tys[idx].clone();
+            levels.push((tys, idx, ty));
+            ty = child_ty;
         }
         is_heap_ty(&ty).then_some(levels)
     }
@@ -119,9 +120,9 @@ impl LowerCtx {
     /// fresh block per level, each scalar slot value-copied, each heap slot `Dup`'d
     /// and moved in — except the slot the path continues through, which receives the
     /// next level's copy (moved in). Returns the root copy and its handle.
-    fn copy_record_path(&mut self, src: ValueId, levels: &[(Vec<Ty>, usize)]) -> (ValueId, ValueId) {
+    fn copy_record_path(&mut self, src: ValueId, levels: &[(Vec<Ty>, usize, Ty)]) -> (ValueId, ValueId) {
         use crate::{Init, PrimKind};
-        let (tys, fidx) = &levels[0];
+        let (tys, fidx, record_ty) = &levels[0];
         let len = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: len, value: tys.len() as i64 });
         let new = self.fresh_value();
@@ -130,6 +131,9 @@ impl LowerCtx {
             repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
             init: Init::DynList { len },
         });
+        // A copied record retains its declared layout, including intermediate
+        // records reached through fields. Slot count alone is not its type.
+        self.aggregate_blocks.insert(new, crate::render_native_rec::block_key(record_ty));
         let old_h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(old_h), args: vec![src] });
         let new_h = self.fresh_value();
@@ -158,10 +162,10 @@ impl LowerCtx {
 
     /// Level 2 at the end of the path: borrow down from the root copy's handle
     /// through each intermediate record slot, then make the last field unique.
-    fn path_field_unique(&mut self, root_h: ValueId, levels: &[(Vec<Ty>, usize)]) {
+    fn path_field_unique(&mut self, root_h: ValueId, levels: &[(Vec<Ty>, usize, Ty)]) {
         let (last, inner) = levels.split_last().expect("a path has a field level");
         let mut h = root_h;
-        for (_, idx) in inner {
+        for (_, idx, _) in inner {
             let addr = self.addr_at(h, crate::lower::layout::slot_offset(*idx) as i64);
             let child = self.load_handle(addr);
             h = self.fresh_value();

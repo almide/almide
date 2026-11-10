@@ -175,3 +175,76 @@ pub fn refuse_unless_fits(module: &str, func: &str, name: String, arg_tys: &[Ty]
         }
     }
 }
+
+// A caller may offer a declaration-backed route for a representation refusal.
+// The shared lowerer knows no runtime symbols: the native pipeline supplies
+// its checked declaration resolver, and wasm keeps the registry refusal.
+type DeclaredRouteResolver = fn(&str) -> bool;
+thread_local! {
+    static DECLARED_ROUTE: std::cell::Cell<Option<DeclaredRouteResolver>> = const { std::cell::Cell::new(None) };
+}
+pub(crate) struct DeclaredRouteGuard(Option<DeclaredRouteResolver>);
+impl DeclaredRouteGuard {
+    pub(crate) fn set(resolve: DeclaredRouteResolver) -> Self {
+        Self(DECLARED_ROUTE.with(|r| r.replace(Some(resolve))))
+    }
+}
+impl Drop for DeclaredRouteGuard {
+    fn drop(&mut self) { DECLARED_ROUTE.with(|r| r.set(self.0)); }
+}
+pub(super) fn declared_route_or(module: &str, func: &str, routed: String) -> String {
+    // Some typed routers name a not-yet-registered implementation instead
+    // of the canonical refusal twin. Registry absence is the refusal fact;
+    // the target must still validate its declared route at each call site.
+    if routed != refusal_twin(module, func) && registry_entry(&routed).is_some() { return routed; }
+    declared_refusal_or(module, func, routed)
+}
+/// A router explicitly classified this shape as unsupported on its ABI.
+/// A target can offer a checked declaration route without changing wasm's
+/// refusal spelling or guessing refusal status from a function name.
+pub(super) fn declared_refusal_or(module: &str, func: &str, routed: String) -> String {
+    let base = format!("{module}.{func}");
+    if DECLARED_ROUTE.with(|r| r.get().is_some_and(|resolve| resolve(&base))) { base } else { routed }
+}
+
+/// Retain checked native collection types before wasm key normalization.
+/// The installed table already checked every key/member's source equality;
+/// the target resolver still requires a declared runtime implementation.
+pub(super) fn declared_collection_route(module: &str, func: &str, args: &[Ty], result: &Ty) -> Option<String> {
+    if !crate::lower::owned_tco_slots() { return None; }
+    let base = format!("{module}.{func}");
+    let known = match module {
+        "list" => crate::native_hof::declared_comparisons_agree(&base, args, result),
+        "map" => args.first().into_iter().chain([result]).any(|ty| {
+            crate::render_native_rec::rec_index(&crate::render_native_rec::block_key(ty))
+                .is_some_and(|i| crate::render_native_rec::map_kinds(i).is_some())
+        }),
+        "set" => args.first().into_iter().chain([result]).any(|ty| {
+            crate::render_native_rec::rec_index(&crate::render_native_rec::block_key(ty))
+                .is_some_and(|i| crate::render_native_rec::set_elem(i).is_some())
+        }),
+        _ => false,
+    };
+    (known && DECLARED_ROUTE.with(|r| r.get().is_some_and(|resolve| resolve(&base)))).then_some(base)
+}
+
+#[cfg(test)]
+mod declared_route_tests {
+    use super::*;
+    #[test]
+    fn declaration_routes_are_scoped_and_preserve_other_registered_names() {
+        let wall = "set.contains_x".to_string();
+        assert_eq!(declared_route_or("set", "contains", wall.clone()), wall);
+        {
+            let _guard = DeclaredRouteGuard::set(|name| name == "set.contains");
+            assert_eq!(declared_route_or("set", "contains", wall.clone()), "set.contains");
+            assert_eq!(declared_route_or("set", "contains", "set.contains_str".into()), "set.contains_str");
+            assert_eq!(declared_route_or("set", "contains", "set.contains_unregistered".into()), "set.contains");
+            assert_eq!(declared_route_or("user", "contains", "user.contains_x".into()), "user.contains_x");
+            { let _nested = DeclaredRouteGuard::set(|_| false);
+              assert_eq!(declared_route_or("set", "contains", wall.clone()), wall); }
+            assert_eq!(declared_route_or("set", "contains", wall.clone()), "set.contains");
+        }
+        assert_eq!(declared_route_or("set", "contains", wall.clone()), wall);
+    }
+}

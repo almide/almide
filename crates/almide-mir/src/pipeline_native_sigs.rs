@@ -9,7 +9,7 @@
 /// params before this table is read). The arms are tried in their original
 /// order across three groups: lane scalars and carriers, slot-block kinds,
 /// then the generated-type kinds (the last group's verdict is final).
-fn native_sig_kind(
+pub(crate) fn native_sig_kind(
     t: &almide_lang::types::Ty,
     record_layouts: &crate::lower::RecordLayouts,
     variant_layouts: &crate::lower::VariantLayouts,
@@ -30,6 +30,7 @@ fn native_lane_sig_kind(t: &almide_lang::types::Ty) -> Option<crate::render_nati
     use crate::render_native::NativeSigKind;
 
     match t {
+        Ty::Never => Some(NativeSigKind::Never),
         // The 64-bit floats are real `f64`s; every other lane scalar (the
         // sized integers, a Float32's f32 bits) rides the i64 lane as is.
         t if crate::render_native_rec::is_f64_scalar(t) => Some(NativeSigKind::F64),
@@ -40,6 +41,9 @@ fn native_lane_sig_kind(t: &almide_lang::types::Ty) -> Option<crate::render_nati
             Some(NativeSigKind::Narrow { bits: bits as u8, signed })
         }
         t if crate::render_native_rec::is_lane_scalar(t) => Some(NativeSigKind::I64),
+        // Unit arguments retain their position; return signatures handle Unit
+        // as void before consulting this table.
+        Ty::Unit => Some(NativeSigKind::I64),
         Ty::String => Some(NativeSigKind::Str),
         // T1-3: the native Result carrier (return position only — the
         // param gate rejects Result params before this table is read).
@@ -58,7 +62,7 @@ fn native_list_sig_kind(t: &almide_lang::types::Ty) -> Option<crate::render_nati
 
     match t {
         Ty::Applied(TypeConstructorId::List, a)
-            if a.len() == 1 && crate::render_native_rec::is_lane_scalar(&a[0]) =>
+            if a.len() == 1 && (crate::render_native_rec::is_lane_scalar(&a[0]) || a[0] == Ty::Unit) =>
         {
             Some(NativeSigKind::ListI64)
         }
@@ -138,27 +142,11 @@ fn native_closure_sig_kind(
     record_layouts: &crate::lower::RecordLayouts,
     variant_layouts: &crate::lower::VariantLayouts,
 ) -> Option<crate::render_native::NativeSigKind> {
-    use almide_lang::types::Ty;
-    use crate::render_native::NativeSigKind;
-
-    match t {
-        // A scalar closure travels as its env block (rung-5 closures slab).
-        Ty::Fn { is_effect: _, params, ret }
-            if params.iter().all(|p| matches!(p, Ty::Int | Ty::Bool))
-                && matches!(**ret, Ty::Int | Ty::Bool) =>
-        {
-            Some(NativeSigKind::ListI64)
-        }
-        // #4006 family G: a closure of typed params and result rides the same
-        // env block; its call dispatches by signature.
-        Ty::Fn { is_effect: false, params, ret }
-            if params.iter().all(|p| native_sig_kind(p, record_layouts, variant_layouts).is_some())
-                && (matches!(**ret, Ty::Unit) || native_sig_kind(ret, record_layouts, variant_layouts).is_some()) =>
-        {
-            Some(NativeSigKind::ListI64)
-        }
-        _ => None,
-    }
+    let _ = (record_layouts, variant_layouts);
+    if !matches!(t, almide_lang::types::Ty::Fn { .. }) { return None; }
+    crate::render_native_rec::rec_index(&crate::render_native_rec::block_key(t))
+        .filter(|i| crate::render_native_rec::closure_sig(*i).is_some())
+        .map(crate::render_native::NativeSigKind::Rec)
 }
 
 /// [`native_sig_kind`]'s last group: the generated-type kinds (`Value`,
@@ -175,7 +163,7 @@ fn native_rec_sig_kind(t: &almide_lang::types::Ty) -> Option<crate::render_nativ
         Ty::Named(_, _) if crate::render_native_rec::is_scalar_instance(t) => Some(NativeSigKind::ListI64),
         Ty::Named(_, _) => crate::render_native_rec::rec_index(&crate::render_native_rec::tuple_key(t)).map(NativeSigKind::Rec),
         Ty::Bytes => Some(NativeSigKind::Rec(crate::render_native_rec::bytes_index())),
-        Ty::Matrix => Some(NativeSigKind::Rec(crate::render_native_rec::matrix_index())),
+        t if crate::render_native_rec::is_matrix_ty(t) => Some(NativeSigKind::Rec(crate::render_native_rec::matrix_index())),
         // #4006: a heap Option / a Result outside the scalar carriers rides its
         // generated `Option<T>` / `Result<T, E>`.
         Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _) => heap_carrier_of(t).map(NativeSigKind::Rec),
@@ -215,6 +203,7 @@ fn build_native_sig_table(
     declare_native_ir_sigs(ir, record_layouts, variant_layouts, &mut sigs, keep);
     widen_native_sigs_to_lane(functions, &mut sigs);
     declare_native_lambda_sigs(functions, record_layouts, variant_layouts, &mut sigs)?;
+    declare_native_eq_sigs(functions, record_layouts, variant_layouts, &mut sigs)?;
     Ok(sigs)
 }
 
@@ -229,6 +218,7 @@ fn declare_native_ir_sigs(
 ) {
     use almide_lang::types::Ty;
     use crate::render_native::NativeSigKind;
+    let abi = almide_ir::effect_abi::effect_abi_facts(ir);
     for func in &ir.functions {
         if func.is_test || !keep(func.name.as_str()) {
             continue;
@@ -239,6 +229,8 @@ fn declare_native_ir_sigs(
             // (the same widening `result_fns` applies above): its declared
             // scalar would type the call dst I64 while the value is Res.
             Some(Some(NativeSigKind::Res))
+        } else if abi.auto_wrap.contains(func.name.as_str()) {
+            native_sig_kind(&Ty::result(func.ret_ty.clone(), Ty::String), record_layouts, variant_layouts).map(Some)
         } else if matches!(func.ret_ty, Ty::Unit) {
             Some(None)
         } else {
@@ -299,7 +291,7 @@ fn declare_native_lambda_sigs(
     Ok(())
 }
 
-/// #4006 family G: a lambda with a heap param or a heap result is typed
+/// A lambda with a heap or Float parameter/result is typed
 /// from its declared signature (recorded at the lift). `None` = not such a
 /// lambda, or a kind with no native spelling: it falls through to the scalar
 /// slab, which walls a heap param as before.
@@ -310,11 +302,6 @@ fn heap_lambda_native_sig(
 ) -> Option<NativeSig> {
     use crate::render_native::NativeSigKind;
     let (ptys, rty) = crate::lambda_sigs::get(&f.name)?;
-    let heap = f.params[1..].iter().any(|p| !matches!(p.repr, crate::Repr::Scalar { .. }))
-        || crate::lower::is_heap_ty(&rty);
-    if !heap {
-        return None;
-    }
     if ptys.len() + 1 != f.params.len() {
         return None;
     }
@@ -327,7 +314,8 @@ fn heap_lambda_native_sig(
         native_sig_kind(&rty, record_layouts, variant_layouts).map(Some)
     };
     let (Some(ps), Some(ret)) = (ps, ret) else { return None };
-    let mut all = vec![crate::render_native::NativeSigKind::ListI64];
+    let closure_ty = almide_lang::types::Ty::Fn { params: ptys, ret: Box::new(rty), is_effect: false };
+    let mut all = vec![native_sig_kind(&closure_ty, record_layouts, variant_layouts)?];
     all.extend(ps.into_iter().map(NativeSigKind::lane));
     Some((all, ret.map(NativeSigKind::lane)))
 }
@@ -343,11 +331,37 @@ fn scalar_lambda_native_sig(f: &crate::MirFunction) -> Result<NativeSig, LowerEr
             }
             _ => {
                 return Err(LowerError::Unsupported(format!(
-                    "native: lambda `{}` heap param — outside the closures slab",
-                    f.name
+                    "native: lambda `{}` heap param — outside the closures slab (declared {:?})",
+                    f.name, crate::lambda_sigs::get(&f.name)
                 )))
             }
         }
     }
     Ok((ps, Some(crate::render_native::NativeSigKind::I64)))
+}
+
+/// Equality helpers are generated after source IR checking. Their MIR
+/// parameter declarations retain the exact checked operand type.
+fn declare_native_eq_sigs(
+    functions: &[crate::MirFunction],
+    records: &crate::lower::RecordLayouts,
+    variants: &crate::lower::VariantLayouts,
+    sigs: &mut crate::render_native::NativeSigs,
+) -> Result<(), LowerError> {
+    use crate::render_native::NativeSigKind;
+    for f in functions {
+        if !f.name.starts_with("__eq_") || sigs.contains_key(&f.name) { continue; }
+        let params: Option<Vec<_>> = f.params.iter().map(|p| {
+            let key = f.aggregate_blocks.get(&p.value)?;
+            crate::render_native_rec::declared_kind(key)
+                .map(crate::render_native_closure::arg_kind)
+                .or_else(|| native_sig_kind(
+                    &almide_lang::types::Ty::Named(key.as_str().into(), vec![].into()), records, variants))
+        }).collect();
+        // Synthesized MIR helpers have no source node to supply a span.
+        let params = params.ok_or_else(|| LowerError::at(None, format!(
+            "native: equality helper `{}` has an unsupported declared operand type", f.name)))?;
+        sigs.insert(f.name.clone(), (params, Some(NativeSigKind::I64)));
+    }
+    Ok(())
 }

@@ -1,0 +1,17 @@
+// v1-vs-v0 shape bench: a list grown by appending a one-element list to
+// itself (`data = data + [x]`), the listbuild_append shape (#1337): the
+// render pushes onto the list in place.
+fn main() -> Unit = {
+  let n = 4096
+  var data: List[Float] = []
+  for i in 0..<n {
+    let x = float.from(i) / float.from(n)
+    data = data + [x]
+    data = data + [x * 2.0]
+  }
+  var acc = 0.0
+  for i in 0..<(2 * n) {
+    acc = acc + data[i]
+  }
+  println("len: ${list.len(data)} checksum: ${float.to_fixed(acc, 6)}")
+}

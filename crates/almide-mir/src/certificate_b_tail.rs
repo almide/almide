@@ -197,6 +197,11 @@ pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, 
     for (i, op) in func.ops.iter().enumerate() {
         scan.call_move = func.call_moves.contains(&i);
         scan.step(op);
+        if crate::mir_wellformed::aborts_before_arm_end(&func.ops, i) {
+            let mut objects: BTreeSet<_> = scan.s.of.values().copied().collect();
+            objects.extend(scan.paths.retired.iter().copied());
+            for object in objects { scan.s.event(object, 't'); }
+        }
     }
 
     // Defensive: a dangling IfThen (no EndIf — malformed MIR) still flushes, so
@@ -496,7 +501,11 @@ impl CertScan {
         let base = self.paths.view_src.get(&from).copied().unwrap_or(from);
         self.paths.view_src.insert(v, base);
         self.paths.rebound.remove(&v);
-        if self.paths.rebound.contains(&from) {
+        // A raw child's retained reference can survive its parent's rebind.
+        // Its derived addresses keep pointing to that child: probe the child
+        // chain, which also rejects access after the retained reference dies.
+        // Only an ended address/carrier propagates unconditional invalidity.
+        if self.paths.rebound.contains(&from) && !self.is_raw_child(from) {
             self.paths.rebound.insert(v);
         }
     }

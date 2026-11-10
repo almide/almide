@@ -6,9 +6,15 @@ pub fn almide_rt_list_is_empty<T>(xs: &[T]) -> bool { xs.is_empty() }
 pub fn almide_rt_list_first<A: Clone>(xs: &[A]) -> Option<A> { xs.first().cloned() }
 pub fn almide_rt_list_last<A: Clone>(xs: &[A]) -> Option<A> { xs.last().cloned() }
 pub fn almide_rt_list_get<T: Clone>(xs: &[T], i: i64) -> Option<T> { xs.get(i as usize).cloned() }
+// Borrowing twins: the element lent from the list, where the reader only
+// inspects it (a head read of a wide record must not copy the record).
+pub fn almide_rt_list_first_ref<A: Clone>(xs: &[A]) -> Option<&A> { xs.first() }
+pub fn almide_rt_list_last_ref<A: Clone>(xs: &[A]) -> Option<&A> { xs.last() }
+pub fn almide_rt_list_get_ref<T: Clone>(xs: &[T], i: i64) -> Option<&T> { xs.get(i as usize) }
 pub fn almide_rt_list_contains<T: PartialEq>(xs: &[T], x: T) -> bool { xs.contains(&x) }
 pub fn almide_rt_list_index_of<T: PartialEq>(xs: &[T], x: T) -> Option<i64> { xs.iter().position(|v| *v == x).map(|i| i as i64) }
-pub fn almide_rt_list_join(xs: &[AlmideString], sep: &str) -> AlmideString { let __almide_out: String = xs.join(sep); __almide_out.into() }
+#[inline]
+pub fn almide_rt_list_join(xs: &[AlmideString], sep: &str) -> AlmideString { AlmideString::join(xs, sep) }
 pub fn almide_rt_list_reverse<A: Clone>(xs: &[A]) -> Vec<A> { xs.iter().rev().cloned().collect() }
 pub fn almide_rt_list_sort<A: Ord + Clone>(xs: &[A]) -> Vec<A> { let mut v = xs.to_vec(); v.sort(); v }
 // Float ordering uses IEEE-754 totalOrder (`f64::total_cmp`): NaN takes its
@@ -40,9 +46,12 @@ pub fn almide_rt_list_sort_float(xs: &[f64]) -> Vec<f64> { let mut v = xs.to_vec
 pub fn almide_rt_list_min_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().min_by(almide_float_order) }
 pub fn almide_rt_list_max_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().max_by(almide_float_order) }
 pub fn almide_rt_list_sort_by_float<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> f64>) -> Vec<A> {
-    let f = move |a| f(a);
     let mut v = xs;
-    v.sort_by(|a, b| almide_float_order(&f(a.clone()), &f(b.clone())));
+    // C-055: extract each key once, including when the callback mutates a
+    // captured value. Integer order keys preserve the canonical NaN order.
+    // Rust's cached sort skips key extraction for a singleton.
+    if v.len() == 1 { let _ = f(v[0].clone()); }
+    v.sort_by_cached_key(|a| almide_float_order_key(f(a.clone())));
     v
 }
 // `list.sum`/`list.product` follow the language's integer-overflow law:
@@ -101,7 +110,25 @@ pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C>(a: Vec<A>, b: Vec<B>, f: s
 // (differential fuzz). A slice parameter takes a borrow like every other
 // read-only list fn, and an owned `Vec` still deref-coerces into it.
 pub fn almide_rt_list_flatten<T: Clone>(xs: &[Vec<T>]) -> Vec<T> { xs.iter().flatten().cloned().collect() }
-pub fn almide_rt_list_flat_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Vec<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().flat_map(f).collect() }
+// One loop, not `flat_map().collect()`: `FlatMap`'s size hint has a lower
+// bound of 0, so the collect grew its result by doubling, and its adapter
+// cost more per element than the callback's own list. The first sublist's
+// length times the source's sizes the result once (a hint: a failed
+// reservation leaves the appends to grow it), and each sublist's elements
+// move over without a per-element copy.
+pub fn almide_rt_list_flat_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Vec<B>>) -> Vec<B> {
+    let f = move |a| f(a);
+    let n = xs.len();
+    let mut out: Vec<B> = Vec::new();
+    for a in xs {
+        let mut part = f(a);
+        if out.capacity() == 0 {
+            let _ = out.try_reserve(n.saturating_mul(part.len()));
+        }
+        out.append(&mut part);
+    }
+    out
+}
 // FIXED-ARITY twin of `almide_rt_list_flat_map`, for the `|x| … [a, b]` shape
 // the CHEATSHEET's recommended build idiom produces
 // (`list.range |> list.flat_map`). `RustLoweringPass::lower_flat_map_arrays`
@@ -182,6 +209,10 @@ pub fn almide_rt_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> { let 
 // `size_of::<T>()`, so the limit is the same number on both legs whatever the
 // native element happens to be.
 pub const ALMIDE_LIST_REPEAT_MAX_ELEMS: i64 = (1 << 31) / 8;
+// Out of line: inlined at a call whose count is a literal, the fill loop's
+// unroll is picked to divide that count (5 for 2^28) instead of the one the
+// out-of-line body runs for every count — 1.16x the instructions per element.
+#[inline(never)]
 pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> {
     if n > ALMIDE_LIST_REPEAT_MAX_ELEMS {
         almide_abort("repeat result too large");
@@ -206,7 +237,12 @@ pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
 }
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }
-pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<A> { let f = move |a| f(a); xs.sort_by_cached_key(|x| f(x.clone())); xs }  // #560: cached_key calls the key fn ONCE PER ELEMENT (n), matching the wasm precomputed-key array + the key-extraction intent; sort_by_key called it per COMPARISON (n log n), an observable native!=wasm divergence for side-effectful keys.
+pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<A> {
+    // C-055: sort_by_cached_key evaluates every key once except a singleton.
+    if xs.len() == 1 { let _ = f(xs[0].clone()); }
+    xs.sort_by_cached_key(|x| f(x.clone()));
+    xs
+}
 pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, AlmideString>>) -> Result<B, AlmideString> { let __almide_r: Result<B, String> = (|| { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, AlmideString> = (|| { let f = move |a| f(a); xs.into_iter().map(f).collect() })(); __almide_r.map_err(Into::into) }
 
@@ -890,24 +926,40 @@ impl Drop for AlmideFanRunning {
 
 /// A pool thread inside `gate` (counted in `inside`): take blocks, leave its
 /// panic if it had one, and leave — waking the caller when it is the last.
-fn almide_fan_help(gate: &AlmideFanGate) {
+///
+/// `gate` is a raw pointer, not `&AlmideFanGate` (#4452): a reference
+/// PARAMETER is protected for the whole call — the gate must stay valid
+/// until this function returns — but the caller may free its frame as soon
+/// as the decrement below makes `inside` 0, while this call is still on the
+/// helper's stack. Miri reported exactly that (the caller's drop of the gate
+/// against the helper's protected argument, run 41854359018). So the borrow
+/// of the whole gate is last used before the decrement, and the decrement
+/// goes through a reference to the counter alone — all `UnsafeCell`, which a
+/// concurrent free may outlive, as the last strong count of an `Arc` does.
+fn almide_fan_help(gate: *const AlmideFanGate) {
     use std::sync::atomic::Ordering;
-    // SAFETY: this helper is inside the gate, so the offer has not returned
-    // and the closure is alive; it was written before the gate was published.
-    let take = unsafe { &*(*gate.take.get()).expect("set before the gate is published") };
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take));
-    // a helper that took a block leaves no element's sink or output behind
-    if !matches!(outcome, Ok(false)) {
-        almide_fan_adopt(None);
-        almide_stdout_flush();
-    }
-    if let Err(panic) = outcome {
-        gate.panics.lock().unwrap_or_else(|e| e.into_inner()).push(Err(panic));
-    }
-    // after the decrement the caller may return and free the gate: wake it
-    // through a handle cloned before
-    let caller = gate.parking.load(Ordering::SeqCst).then(|| gate.caller.clone());
-    if gate.inside.fetch_sub(1, Ordering::SeqCst) == 1 {
+    let (caller, inside) = {
+        // SAFETY: this helper is inside the gate (it entered through
+        // `almide_fan_steal`), so the offer has not returned and the gate is
+        // alive until the decrement below; this borrow is not used after it.
+        let gate = unsafe { &*gate };
+        // SAFETY: inside the gate, the closure is alive; it was written
+        // before the gate was published.
+        let take = unsafe { &*(*gate.take.get()).expect("set before the gate is published") };
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take));
+        // a helper that took a block leaves no element's sink or output behind
+        if !matches!(outcome, Ok(false)) {
+            almide_fan_adopt(None);
+            almide_stdout_flush();
+        }
+        if let Err(panic) = outcome {
+            gate.panics.lock().unwrap_or_else(|e| e.into_inner()).push(Err(panic));
+        }
+        // after the decrement the caller may return and free the gate: wake
+        // it through a handle cloned before
+        (gate.parking.load(Ordering::SeqCst).then(|| gate.caller.clone()), &gate.inside)
+    };
+    if inside.fetch_sub(1, Ordering::SeqCst) == 1 {
         if let Some(caller) = caller {
             caller.unpark();
         }
@@ -956,8 +1008,10 @@ fn almide_fan_withdraw(i: usize) {
 }
 
 /// Enter the oldest-slotted published offer that has a block left and that
-/// `which` accepts.
-fn almide_fan_steal(which: impl Fn(&AlmideFanGate) -> bool) -> Option<&'static AlmideFanGate> {
+/// `which` accepts. The gate comes back as a raw pointer: it is valid only
+/// until this thread leaves it, which no lifetime can say (see
+/// `almide_fan_help`).
+fn almide_fan_steal(which: impl Fn(&AlmideFanGate) -> bool) -> Option<*const AlmideFanGate> {
     use std::sync::atomic::Ordering;
     if ALMIDE_FAN_OPEN_BLOCKS.load(Ordering::Relaxed) == 0 {
         return None;
@@ -979,9 +1033,9 @@ fn almide_fan_steal(which: impl Fn(&AlmideFanGate) -> bool) -> Option<&'static A
         });
         slot.readers.fetch_sub(1, Ordering::SeqCst);
         if let Some(g) = entered {
-            // SAFETY: see above — valid until this thread leaves the gate,
-            // which `almide_fan_help` does last.
-            return Some(unsafe { &*(g as *const AlmideFanGate) });
+            // valid until this thread leaves the gate, which
+            // `almide_fan_help` does last
+            return Some(g as *const AlmideFanGate);
         }
     }
     None
@@ -1103,7 +1157,8 @@ fn almide_fan_pool_wake(helpers: usize) {
             return;
         }
         pool.polling.fetch_add(1, Ordering::SeqCst);
-        let spawned = std::thread::Builder::new().spawn(move || almide_fan_hand_loop(&almide_fan_pool().hands[i]));
+        // #4617: the main thread's stack, as a fan arm gets (almide_worker_thread).
+        let spawned = almide_worker_thread().spawn(move || almide_fan_hand_loop(&almide_fan_pool().hands[i]));
         let Ok(handle) = spawned else {
             pool.polling.fetch_sub(1, Ordering::SeqCst);
             return;
@@ -1275,7 +1330,7 @@ pub fn almide_rt_list_clear<A>(xs: &mut Vec<A>) { xs.clear(); }
 // ── `${xs}` reprs (the compound `[a, b]` of the standard codegen's AlmideRepr) ──
 // Each element as AlmideRepr renders it inside a container: a number or Bool
 // through `format!("{}", …)`, a String double-quoted with `\ " \n \r \t` escaped.
-pub fn almide_rt_list_to_string_int(xs: &[i64]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push_str(&format!("{}", e)); } o.push(']'); o.into() }
+pub fn almide_rt_list_to_string_int(xs: &[i64]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } let _ = std::fmt::Write::write_fmt(&mut o, format_args!("{}", e)); } o.push(']'); o.into() }
 pub fn almide_rt_list_to_string_float(xs: &[f64]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push_str(&format!("{}", e)); } o.push(']'); o.into() }
 pub fn almide_rt_list_to_string_bool(xs: &[bool]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push_str(&format!("{}", e)); } o.push(']'); o.into() }
 // ── `==` of two lists of one scalar element type (the standard codegen's `==`
@@ -1284,6 +1339,11 @@ pub fn almide_rt_list_eq_int(a: &[i64], b: &[i64]) -> bool { a == b }
 pub fn almide_rt_list_eq_float(a: &[f64], b: &[f64]) -> bool { a == b }
 pub fn almide_rt_list_eq_bool(a: &[bool], b: &[bool]) -> bool { a == b }
 pub fn almide_rt_list_eq_str(a: &[AlmideString], b: &[AlmideString]) -> bool { a == b }
+pub fn almide_rt_list_eq_list_int(a: &[Vec<i64>], b: &[Vec<i64>]) -> bool { a == b }
+pub fn almide_rt_list_eq_list_float(a: &[Vec<f64>], b: &[Vec<f64>]) -> bool { a == b }
+pub fn almide_rt_list_eq_opt_int(a: &[Option<i64>], b: &[Option<i64>]) -> bool { a == b }
+pub fn almide_rt_list_eq_any<A: PartialEq>(a: &[A], b: &[A]) -> bool { a == b }
+pub fn almide_rt_list_eq_res_int(a: &[Result<i64, AlmideString>], b: &[Result<i64, AlmideString>]) -> bool { a == b }
 pub fn almide_rt_list_to_string_str(xs: &[AlmideString]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push('"'); o.push_str(&e.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t")); o.push('"'); } o.push(']'); o.into() }
 
 // ── Algorithmic primitives (Phase 3 stdlib expansion) ──

@@ -102,6 +102,8 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 mod bytes;
 mod bytes_append;
 mod kmp;
+/// #4610: a remainder by a power of two compared against zero.
+mod rem_test;
 /// #4278 B1: a runtime helper's declared RC signature and its body's log.
 pub(crate) mod helper_sig;
 mod runtime_push;
@@ -139,6 +141,8 @@ mod unroll;
 mod collect;
 mod collections;
 mod collections_hof;
+mod group_count;
+mod global_constants;
 mod collections_set;
 mod map_inplace;
 mod map_holes;
@@ -186,6 +190,7 @@ mod list_order;
 mod list_sort;
 mod string_scan;
 mod len_hoist;
+mod int_range;
 mod cow_hoist;
 mod stmts;
 mod stmts_index;
@@ -653,6 +658,8 @@ pub(crate) struct Ctx<'a> {
     /// (global index, slice type). Functions read them across function
     /// boundaries — the class main-local top-lets could never serve.
     pub(crate) globals: &'a HashMap<GVar, (u32, SliceTy)>,
+    /// Hints only: a runtime equality guard is required before specialization.
+    pub(crate) global_constants: &'a HashMap<crate::GVar, i64>,
     /// Source name of a variable, by (var space, VarId) — for the E083
     /// diagnostic (`value: local \`x\``). None for synthetic vars.
     pub(crate) var_name: &'a dyn Fn(u32, VarId) -> Option<String>,
@@ -751,3 +758,12 @@ pub(crate) struct InitLet {
     pub(crate) module: Option<String>,
     pub(crate) tl: IrTopLet,
 }
+
+#[cfg(test)]
+mod copy_helper_tests;
+
+#[cfg(test)]
+mod key_helper_tests;
+
+#[cfg(test)]
+mod pool_string_capacity_tests;

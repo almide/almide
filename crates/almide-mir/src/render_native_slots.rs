@@ -49,6 +49,9 @@ fn heap_of_sig(k: NativeSigKind) -> Option<NTy> {
         NativeSigKind::ListI64 => NTy::Vec,
         NativeSigKind::ListStr => NTy::VecStr,
         NativeSigKind::Rec(i) => NTy::Rec(i),
+        NativeSigKind::Opt => NTy::Opt,
+        NativeSigKind::Res => NTy::Res,
+        NativeSigKind::ResStr => NTy::ResStr,
         _ => return None,
     })
 }
@@ -76,12 +79,20 @@ fn call_result(name: &str, sigs: &NativeSigs) -> Option<NTy> {
     }
     use crate::native_floor::FloorRet;
     match crate::native_floor::declared(name)?.ret {
+        FloorRet::Runtime(t) => Some(t.kind()),
+        FloorRet::RuntimeResult(t, optional) => {
+            let result = NTy::Rec(rec::result_type_of(t.kind(), NTy::Str));
+            Some(if optional { NTy::Rec(rec::option_type_of(result)) } else { result })
+        }
         FloorRet::Str => Some(NTy::Str),
         FloorRet::ListInt => Some(NTy::Vec),
         FloorRet::ListStr => Some(NTy::VecStr),
         FloorRet::Bytes => Some(NTy::Rec(rec::bytes_index())),
         FloorRet::Value => Some(NTy::Rec(rec::value_index())),
         FloorRet::Matrix => Some(NTy::Rec(rec::matrix_index())),
+        FloorRet::Res(_) => Some(NTy::Res),
+        FloorRet::ResStr => Some(NTy::ResStr),
+        FloorRet::Opt(_) => Some(NTy::Opt),
         _ => None,
     }
 }
@@ -96,7 +107,7 @@ fn parent_slot_kind(i: u16, slot: Option<usize>) -> Option<NTy> {
         return carrier::slot_kind(i, k);
     }
     rec::rec_field(i, k).or_else(|| {
-        let ks: Vec<NTy> = rec::enum_slot_kinds(i, k).into_iter().filter(|t| matches!(t, NTy::Rec(_))).collect();
+        let ks = rec::enum_slot_kinds(i, k);
         (ks.len() == 1).then(|| ks[0])
     })
 }
@@ -104,11 +115,57 @@ fn parent_slot_kind(i: u16, slot: Option<usize>) -> Option<NTy> {
 /// The heap kind a read of a typed parent's slot binds as: the declared kind,
 /// or an enum slot's one heap kind.
 fn slot_read_kind(i: u16, slot: Option<usize>) -> Option<NTy> {
+    // A shared Result slot has two possible heap types. Without the tag,
+    // neither is a fact about this read; the render chooses under the arm.
+    if rec::result_payloads(i).is_some_and(|(a, b)| a != b) {
+        return None;
+    }
     if rec::enum_cases(i).is_some() {
         let heap: Vec<NTy> = rec::enum_slot_kinds(i, slot?).into_iter().filter(|t| *t != NTy::I64).collect();
         return (heap.len() == 1).then(|| heap[0]);
     }
     parent_slot_kind(i, slot).filter(|t| *t != NTy::I64)
+}
+
+/// A Result payload's declared kind comes from the tag stored immediately
+/// after it, before any control-flow boundary or other effect. The shared
+/// slot alone cannot distinguish two different heap payload types.
+fn result_store_kind(later: &[Op], root: ValueId, i: u16, f: &Facts<'_>) -> Option<NTy> {
+    let (ok, err) = rec::result_payloads(i)?;
+    // Scalar-Ok carriers construct their heap Err using a length-tagged block.
+    if ok == NTy::I64 { return Some(err); }
+    for op in later {
+        match op {
+            Op::Prim { kind: PrimKind::Store { width: 4 }, args, .. } => {
+                let [address, value] = args.as_slice() else { return None };
+                if f.base_of.get(address) != Some(&(root, Some(i64::from(BLOCK_HEADER) + 4))) {
+                    return None;
+                }
+                return match f.consts.get(value) { Some(0) => Some(ok), Some(1) => Some(err), _ => None };
+            }
+            Op::ConstInt { .. } | Op::IntBinOp { .. } | Op::Consume { .. }
+            | Op::Prim { kind: PrimKind::Handle, .. } => {}
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Seed declarations before call-site inference. A linked self-host body may
+/// spell a heap-generic payload as String; that signature must not overwrite
+/// the actual caller's List/Option/Result representation before routing.
+pub(super) fn declared_blocks(func: &MirFunction) -> BTreeMap<ValueId, u16> {
+    let mut alloc_rec = BTreeMap::new();
+    // A block the lowering built as a typed aggregate or inlined Value
+    // takes its declared type's native representation.
+    for (v, key) in &func.aggregate_blocks {
+        if key == rec::VALUE_KEY {
+            alloc_rec.entry(*v).or_insert_with(rec::value_index);
+        } else if let Some(i) = rec::rec_index(key) {
+            alloc_rec.entry(*v).or_insert(i);
+        }
+    }
+    alloc_rec
 }
 
 /// Type the untyped slot blocks of `func` into `alloc_rec` (block → generated
@@ -119,19 +176,6 @@ pub(super) fn type_blocks(
     alloc_rec: &mut BTreeMap<ValueId, u16>,
     f: &Facts<'_>,
 ) -> BTreeSet<ValueId> {
-    // A block the lowering built as an all-scalar tuple, record or variant
-    // takes its declared type's by-value struct or enum.
-    for (v, key) in &func.aggregate_blocks {
-        if let Some(i) = rec::rec_index(key).filter(|i| rec::all_scalar_struct(*i) || rec::enum_cases(*i).is_some()) {
-            alloc_rec.entry(*v).or_insert(i);
-        } else if let Some(n) = anon_scalar_record_len(func, *v, key) {
-            // An anonymous all-scalar record (`list.map((i) => { x: i, y: i })`)
-            // has no declaration to name, so it takes the by-value struct of its
-            // slots, as a declared one does — not a `Vec<i64>` per record, which
-            // cost such a list 28x against the standard codegen.
-            alloc_rec.entry(*v).or_insert(rec::slots_type_of(&vec![NTy::I64; n]));
-        }
-    }
     let mut tb = BlockTyping {
         func,
         sigs,
@@ -149,6 +193,7 @@ pub(super) fn type_blocks(
     tb.seed_params();
     // DynList blocks (and their declared length), the joins, the copies.
     tb.scan_ops();
+    tb.seed_list_declarations();
     let blocks = tb.blocks.clone();
     loop {
         let before = (tb.alloc_rec.len(), tb.str_lists.len(), tb.scalar_blocks.len(), tb.known.len());
@@ -186,6 +231,23 @@ struct BlockTyping<'a, 'f> {
 }
 
 impl BlockTyping<'_, '_> {
+    fn seed_list_declarations(&mut self) {
+        // A checked List[String] also types a computed, populated list.
+        // Its elements may come from tag-guarded Result reads, whose kind
+        // deliberately remains unknown to the flow-insensitive prepass.
+        for (v, key) in &self.func.aggregate_blocks {
+            if rec::declared_kind(key) == Some(NTy::VecStr) {
+                self.known.insert(*v, NTy::VecStr);
+                self.str_lists.insert(*v);
+            }
+        }
+        if let (Some(v), Some((_, Some(NativeSigKind::ListStr)))) =
+            (self.func.ret, self.sigs.get(self.func.name.as_str())) {
+            self.known.insert(v, NTy::VecStr);
+            self.str_lists.insert(v);
+        }
+    }
+
     fn seed_params(&mut self) {
         let func = self.func;
         if let Some((ps, _)) = self.sigs.get(func.name.as_str()).filter(|(ps, _)| ps.len() == func.params.len()) {
@@ -213,6 +275,13 @@ impl BlockTyping<'_, '_> {
             Op::Prim { kind: PrimKind::OptMakeSome | PrimKind::OptMakeNone | PrimKind::OptCopy, dst: Some(d), .. } => {
                 self.known.insert(*d, NTy::Opt);
             }
+            Op::Prim { kind: PrimKind::ResMakeOk | PrimKind::ResMakeErrStr, dst: Some(d), .. } => {
+                self.known.insert(*d, NTy::Res);
+            }
+            Op::Prim { kind: PrimKind::ResStrMake, dst: Some(d), .. } => {
+                self.known.insert(*d, NTy::ResStr);
+            }
+            Op::Prim { kind: PrimKind::ResCopy, dst: Some(d), args } if args.len() == 1 => self.dups.push((*d, args[0])),
             Op::Alloc { dst, init: Init::IntList(_), .. } | Op::ListLit { dst, .. } if !self.alloc_rec.contains_key(dst) => {
                 self.known.insert(*dst, NTy::Vec);
             }
@@ -229,14 +298,8 @@ impl BlockTyping<'_, '_> {
                     self.concats.push((*d, *a, *b));
                 }
             }
-            Op::Dup { dst, src } => self.dups.push((*dst, *src)),
+            Op::Dup { dst, src } | Op::SetLocal { local: dst, src } => self.dups.push((*dst, *src)),
             Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => self.scan_join(op, open),
-            // A typed drop that names a list of a generated type `T`.
-            Op::DropVariant { v, ty } if !self.alloc_rec.contains_key(v) => {
-                if let Some(j) = ty.strip_prefix("list_").and_then(rec::rec_index) {
-                    self.alloc_rec.insert(*v, rec::list_type_of(NTy::Rec(j)));
-                }
-            }
             _ => {}
         }
     }
@@ -289,12 +352,27 @@ impl BlockTyping<'_, '_> {
     /// Down: a block stored into a typed parent's slot.
     fn down(&mut self) {
         let (func, f) = (self.func, self.f);
-        for op in &func.ops {
+        let empty = super::empty_list_blocks(func);
+        let cases = enum_built_whole(func, self.alloc_rec, f.base_of, f.consts);
+        for (at, op) in func.ops.iter().enumerate() {
             let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op else { continue };
             let (Some(&(r, off)), Some(&vsrc)) = (f.base_of.get(&args[0]), f.handle_of.get(&args[1])) else { continue };
             let Some(&i) = self.alloc_rec.get(&r) else { continue };
-            if let Some(NTy::Rec(j)) = parent_slot_kind(i, slot_of(off)) {
-                self.alloc_rec.entry(vsrc).or_insert(j);
+            let kind = cases.get(&r).and_then(|(tag, _)| {
+                let slot = slot_of(off)?.checked_sub(1)?;
+                rec::enum_cases(i)?.into_iter().find(|(t, _)| t == tag)?.1.get(slot).copied()
+            }).or_else(|| parent_slot_kind(i, slot_of(off)))
+                .or_else(|| (slot_of(off) == Some(0)).then(||
+                    result_store_kind(&func.ops[at + 1..], r, i, f)).flatten());
+            match kind {
+                Some(NTy::Rec(j)) => { self.alloc_rec.entry(vsrc).or_insert(j); }
+                // An empty literal has no element store to establish String.
+                // Preserve the parent's declared list type at allocation;
+                // never discard or reinterpret an already populated list.
+                Some(NTy::VecStr) if empty.contains(&vsrc) => {
+                    self.alloc_rec.entry(vsrc).or_insert_with(|| rec::list_type_of(NTy::Str));
+                }
+                _ => {}
             }
         }
     }
@@ -302,6 +380,10 @@ impl BlockTyping<'_, '_> {
     /// A declared block type crosses a copy or a join, in either direction:
     /// both arms of an `if` and its result are one value's type.
     fn across(&mut self) {
+        // Preserve nominal types before inferring anonymous slot structs.
+        for (v, t) in &self.known {
+            if let NTy::Rec(i) = t { self.alloc_rec.entry(*v).or_insert(*i); }
+        }
         for (d, s) in &self.dups {
             for (x, y) in [(d, s), (s, d)] {
                 if let Some(&i) = self.alloc_rec.get(x) {
@@ -317,6 +399,21 @@ impl BlockTyping<'_, '_> {
             }
         }
         self.across_concats();
+        self.empty_string_lists();
+    }
+
+    fn empty_string_lists(&mut self) {
+        let empty = super::empty_list_blocks(self.func);
+        let edges = self.dups.iter().copied().chain(self.joins.iter().flat_map(|(d, a, b)| [(*d, *a), (*d, *b), (*a, *b)]));
+        let mut pending = Vec::new();
+        for (a, b) in edges {
+            for (src, dst) in [(a, b), (b, a)] {
+                if self.kind_of(&src) == Some(NTy::VecStr) && empty.contains(&dst) && !self.alloc_rec.contains_key(&dst) {
+                    pending.push(dst);
+                }
+            }
+        }
+        for v in pending { self.scalar_blocks.remove(&v); self.str_lists.insert(v); self.known.insert(v, NTy::VecStr); }
     }
 
     /// A list concatenation's operands and result are one list type: a
@@ -326,23 +423,33 @@ impl BlockTyping<'_, '_> {
     /// way keeps its kind, so a real disagreement still walls at the render.
     fn across_concats(&mut self) {
         let concats = self.concats.clone();
+        let empty = super::empty_list_blocks(self.func);
         for (d, a, b) in concats {
-            let Some(i) = [d, a, b]
-                .iter()
-                .find_map(|v| self.alloc_rec.get(v).copied())
-                .filter(|i| rec::list_elem(*i).is_some())
-            else {
-                continue;
-            };
-            for v in [a, b] {
-                if self.alloc_rec.contains_key(&v) || self.str_lists.contains(&v) || self.known.contains_key(&v) {
-                    continue;
+            let Some(t) = [d, a, b].iter().find_map(|v| match self.kind_of(v) {
+                Some(NTy::VecStr | NTy::VecStrRef) => Some(NTy::VecStr),
+                Some(NTy::Rec(i) | NTy::RecRef(i)) if rec::list_elem(i).is_some() => {
+                    Some(if rec::list_elem(i) == Some(NTy::Str) { NTy::VecStr } else { NTy::Rec(i) })
                 }
-                if self.blocks.iter().any(|(r, _)| *r == v) && self.block_stores(v).is_some_and(|s| s.is_empty()) {
+                _ => None,
+            }) else { continue };
+            for v in [a, b] {
+                if self.alloc_rec.contains_key(&v) { continue; }
+                if (empty.contains(&v) || self.blocks.iter().any(|(r, _)| *r == v))
+                    && self.block_stores(v).is_some_and(|s| s.is_empty()) {
                     self.scalar_blocks.remove(&v);
-                    self.alloc_rec.insert(v, i);
+                    if let NTy::Rec(i) = t {
+                        self.str_lists.remove(&v);
+                        self.alloc_rec.insert(v, i);
+                    } else {
+                        self.str_lists.insert(v);
+                        self.known.insert(v, t);
+                    }
                 }
             }
+            // Keep the existing scalar/string-list representation. Generated
+            // lists carry their element declaration through later concats too.
+            if let NTy::Rec(i) = t { self.alloc_rec.entry(d).or_insert(i); }
+            else { self.known.entry(d).or_insert(t); }
         }
     }
 
@@ -476,15 +583,80 @@ fn slot_kinds(stores: &[(Option<usize>, NTy)], len: Option<i64>, mask: Option<&V
 
 include!("render_native_slots_b.rs");
 
-/// The slot count of block `v` when the lowering built it as an anonymous
-/// record of scalars: a `ListLit` of its field values whose recorded type is a
-/// structural record (`block_key` of a `Ty::Record`).
-fn anon_scalar_record_len(func: &MirFunction, v: ValueId, key: &str) -> Option<usize> {
-    if !key.starts_with("Record {") {
-        return None;
-    }
-    func.ops.iter().find_map(|op| match op {
-        Op::ListLit { dst, elems } if *dst == v && !elems.is_empty() => Some(elems.len()),
-        _ => None,
+/// A borrow-view stores existing handles without consuming them. Native Vec
+/// elements own their values, so those stores copy; an owned constructor's
+/// Store/Consume pair can still move. Any less direct ownership shape copies.
+pub(super) fn borrowed_stores(
+    func: &MirFunction,
+    handles: &BTreeMap<ValueId, ValueId>,
+    bases: &BTreeMap<ValueId, (ValueId, Option<i64>)>,
+) -> BTreeSet<(ValueId, ValueId)> {
+    func.ops.iter().enumerate().filter_map(|(at, op)| {
+        let Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } = op else { return None };
+        let [address, value] = args.as_slice() else { return None };
+        let src = handles.get(value)?;
+        let (base, _) = bases.get(address)?;
+        let consumed = matches!(func.ops.get(at + 1), Some(Op::Consume { v }) if v == src) || handed_to_store(func, at, *src, *value);
+        (!consumed).then_some((*base, *value))
+    }).collect()
+}
+
+/// The value `src` was handed over (`Consume`) before the store at `ops[at]`
+/// and nothing but the store's own handle names it from that hand-over on: a
+/// call result consumed where it is bound (a `map` callback's value) and then
+/// stored. The store is the consumer, so the element takes the value itself.
+fn handed_to_store(func: &MirFunction, at: usize, src: ValueId, handle: ValueId) -> bool {
+    let Some(c) = func.ops[..at].iter().rposition(|op| matches!(op, Op::Consume { v } if *v == src)) else { return false };
+    let mut vs = Vec::new();
+    func.ops.iter().enumerate().skip(c + 1).all(|(j, op)| {
+        if j == at {
+            return true;
+        }
+        vs.clear();
+        crate::mir_ops::op_values(op, &mut vs);
+        let handle_def = matches!(op, Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if *d == handle && args.as_slice() == [src]);
+        handle_def || (!vs.contains(&src) && (j > at || !vs.contains(&handle)))
     })
+}
+
+#[cfg(test)]
+mod store_ownership_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_borrowed_elements_copy_and_explicit_handoffs_move() {
+        let store = |address, value| Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None,
+            args: vec![ValueId(address), ValueId(value)] };
+        let f = MirFunction { ops: vec![
+            store(10, 20), store(11, 21), Op::Consume { v: ValueId(1) },
+            store(12, 22), Op::Consume { v: ValueId(9) },
+        ], ..Default::default() };
+        let handles = BTreeMap::from([(ValueId(20), ValueId(1)), (ValueId(21), ValueId(1)), (ValueId(22), ValueId(2))]);
+        let bases = BTreeMap::from([(ValueId(10), (ValueId(3), Some(12))), (ValueId(11), (ValueId(3), Some(20))), (ValueId(12), (ValueId(3), Some(28)))]);
+        assert_eq!(borrowed_stores(&f, &handles, &bases), BTreeSet::from([(ValueId(3), ValueId(20)), (ValueId(3), ValueId(22))]));
+    }
+}
+
+#[cfg(test)]
+mod result_store_tests {
+    use super::*;
+
+    #[test]
+    fn payload_type_requires_the_same_carriers_immediate_tag() {
+        let _guard = rec::install(vec![rec::RecDecl {
+            name: "Result".into(), result_of: Some((NTy::Vec, NTy::Rec(1))), ..Default::default()
+        }, rec::RecDecl { name: "Error".into(), fields: vec![NTy::Str], ..Default::default() }]);
+        let v = ValueId;
+        let handles = BTreeMap::new();
+        let bases = BTreeMap::from([(v(2), (v(0), Some(i64::from(BLOCK_HEADER) + 4)))]);
+        let consts = BTreeMap::from([(v(3), 0), (v(4), 1), (v(5), 2)]);
+        let facts = Facts { handle_of: &handles, base_of: &bases, consts: &consts };
+        let store = |tag| Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![v(2), v(tag)] };
+        assert_eq!(result_store_kind(&[store(3)], v(0), 0, &facts), Some(NTy::Vec));
+        assert_eq!(result_store_kind(&[store(4)], v(0), 0, &facts), Some(NTy::Rec(1)));
+        assert_eq!(result_store_kind(&[store(5)], v(0), 0, &facts), None);
+        assert_eq!(result_store_kind(&[store(3)], v(9), 0, &facts), None);
+        assert_eq!(result_store_kind(&[Op::Else { val: None }, store(3)], v(0), 0, &facts), None);
+        assert_eq!(result_store_kind(&[], v(0), 0, &facts), None);
+    }
 }

@@ -69,7 +69,10 @@ impl crate::emitter::Emitter<'_> {
     /// of the slot a later store overwrites. Its instructions are one
     /// window the witness's `r` event is held to (witness.rs
     /// `slot_replaced`).
-    pub(crate) fn slot_release(&mut self, emit: impl FnOnce(&mut Self) -> Result<(), crate::EmitError>) -> Result<(), crate::EmitError> {
+    pub(crate) fn slot_release(
+        &mut self,
+        emit: impl FnOnce(&mut Self) -> Result<(), crate::EmitError>,
+    ) -> Result<(), crate::EmitError> {
         let id = crate::witness::rc::site_id();
         let from = self.f.byte_len();
         emit(self)?;
@@ -186,7 +189,9 @@ impl Emitter<'_> {
     /// The frame's droppable PARAM this expression is, when it is a plain
     /// read of one (`b` in `__arr(b, …)`): its local index.
     pub(crate) fn frame_param_var(&self, e: &almide_ir::IrExpr) -> Option<u32> {
-        let almide_ir::IrExprKind::Var { id } = &e.kind else { return None };
+        let almide_ir::IrExprKind::Var { id } = &e.kind else {
+            return None;
+        };
         let &(idx, _) = self.locals.get(id)?;
         self.rc_frame_params.contains(&idx).then_some(idx)
     }
@@ -197,7 +202,10 @@ impl Emitter<'_> {
         }
         // `{ let t = …; op(t) }` (arg_temps.rs) and any block: the value
         // is the tail's.
-        if let almide_ir::IrExprKind::Block { expr: Some(tail), .. } = &e.kind {
+        if let almide_ir::IrExprKind::Block {
+            expr: Some(tail), ..
+        } = &e.kind
+        {
             return self.rc_owned_result(tail);
         }
         // A conditional is owned when EVERY arm's value is: the return
@@ -314,8 +322,17 @@ impl Emitter<'_> {
     /// is judged again after it is lowered, and a borrowed arm takes its
     /// `+1` inside, so the join still hands back exactly one credit.
     fn rc_predict_owned(&self, e: &almide_ir::IrExpr) -> bool {
+        // A Never arm cannot supply a borrowed value at the join. Normalize
+        // its live sibling inside that arm, where the witness can attribute
+        // the share to its source, instead of sharing a conditional temporary
+        // after the join. The dead arm's settling instructions never execute.
+        if e.ty == almide_types::types::Ty::Never {
+            return true;
+        }
         match &e.kind {
-            IrExprKind::If { then, else_, .. } => self.rc_predict_owned(then) || self.rc_predict_owned(else_),
+            IrExprKind::If { then, else_, .. } => {
+                self.rc_predict_owned(then) || self.rc_predict_owned(else_)
+            }
             IrExprKind::Block { expr: Some(t), .. } => self.rc_predict_owned(t),
             // A module call's ownership is its arm's DECLARATION, known only
             // once it is lowered (arm.rs) — and nearly every droppable arm
@@ -324,7 +341,10 @@ impl Emitter<'_> {
             // was and gives a borrowed one its +1. Predicting borrowed left
             // `if c then name else list.join(xs, ".")` (path.stem) with a
             // borrowed join over an owned arm — its block leaked (#2977).
-            IrExprKind::Call { target: almide_ir::CallTarget::Module { .. }, .. }
+            IrExprKind::Call {
+                target: almide_ir::CallTarget::Module { .. },
+                ..
+            }
             | IrExprKind::Try { .. }
             | IrExprKind::Unwrap { .. }
             | IrExprKind::ToOption { .. }
@@ -354,14 +374,19 @@ impl Emitter<'_> {
         ty: SliceTy,
         tail: bool,
     ) -> Result<(), EmitError> {
-        let IrExprKind::If { then, else_, .. } = &e.kind else { return unsup("if-arms") };
-        let normalize = self.rc_droppable(ty) && (self.rc_predict_owned(then) || self.rc_predict_owned(else_));
+        let IrExprKind::If { then, else_, .. } = &e.kind else {
+            return unsup("if-arms");
+        };
+        let normalize =
+            self.rc_droppable(ty) && (self.rc_predict_owned(then) || self.rc_predict_owned(else_));
         // #4277: the site is anchored to this `if` and its `else`, so the RC
         // check reads the recorder's first arm as the shipped then-arm.
         let site = crate::witness::rc::site_id();
         self.if_sites.insert(e as *const _, site);
         let if_at = self.f.byte_len();
-        self.f.instructions().if_(wasm_encoder::BlockType::Result(ty.val_type()));
+        self.f
+            .instructions()
+            .if_(wasm_encoder::BlockType::Result(ty.val_type()));
         self.branch_depth += 1;
         // The witness (#2756) sees each arm and the credit it hands the join.
         self.witness_branch_open_at(site);

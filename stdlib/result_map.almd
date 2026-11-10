@@ -189,6 +189,7 @@ fn __rmh_map_ok(x: String, f: (String) -> String) -> Result[String, String] = {
   ok(y)
 }
 
+@specializes("result.map")
 fn result_map_h(r: Result[String, String], f: (String) -> String) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -207,6 +208,7 @@ fn __rmh_maperr_err(e: String, f: (String) -> String) -> Result[String, String] 
   err(y)
 }
 
+@specializes("result.map_err")
 fn result_map_err_h(r: Result[String, String], f: (String) -> String) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -225,6 +227,7 @@ fn __rmh_flatmap_ok(x: String, f: (String) -> Result[String, String]) -> Result[
   r2
 }
 
+@specializes("result.flat_map")
 fn result_flat_map_h(r: Result[String, String], f: (String) -> Result[String, String]) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -243,6 +246,7 @@ fn __rmh_uoe_err(e: String, f: (String) -> String) -> String = {
   y
 }
 
+@specializes("result.unwrap_or_else")
 fn result_unwrap_or_else_h(r: Result[String, String], f: (String) -> String) -> String = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -279,6 +283,7 @@ fn result_filter_h(r: Result[String, String], pred: (String) -> Bool, err_val: S
 }
 
 // result.to_option_h: ok(x) → some(x shared), err(_) → none
+@specializes("result.to_option")
 fn result_to_option_h(r: Result[String, String]) -> String? = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -289,6 +294,7 @@ fn result_to_option_h(r: Result[String, String]) -> String? = {
 }
 
 // result.to_err_option_h: ok(_) → none, err(e) → some(e shared)
+@specializes("result.to_err_option")
 fn result_to_err_option_h(r: Result[String, String]) -> String? = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -308,6 +314,7 @@ fn __res_map_s2h_ok(x: Int, f: (Int) -> Value) -> Result[Value, String] = {
   ok(y)
 }
 
+@specializes("result.map")
 fn result_map_s2h(r: Result[Int, String], f: (Int) -> Value) -> Result[Value, String] = {
   let h = prim.handle(r)
   let len = prim.load32(h + 4)

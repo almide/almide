@@ -30,19 +30,26 @@
 /// both: the caps `mir == ir` count sees the lifted tree on BOTH sides).
 ///
 /// Conservative guards (skip rather than mis-lift): only the fn-body TOP
-/// block is split (no enclosing loop to `break` out of); the continuation
+/// block or a tail branch arm is split (no enclosing loop to `break` out of); the continuation
 /// must not assign to a variable bound before it (params are copies);
 /// generic fns are skipped; `!` and loops inside lambda literals neither
 /// trigger nor count.
 pub fn lift_poisoning_continuations(program: &mut almide_ir::IrProgram) {
     let mut counter: u32 = 0;
+    let mut records = build_record_layouts(&program.type_decls);
+    let mut variants = build_variant_layouts(&program.type_decls);
+    for m in &program.modules {
+        records.extend(build_record_layouts(&m.type_decls));
+        variants.extend(build_variant_layouts(&m.type_decls));
+    }
+    let layouts = ClLayouts { records: &records, variants: &variants };
     {
         let almide_ir::IrProgram { functions, top_lets, var_table, .. } = &mut *program;
         let globals_ty: std::collections::HashMap<almide_ir::VarId, Ty> =
             top_lets.iter().map(|tl| (tl.var, tl.ty.clone())).collect();
         let global_vars: std::collections::HashSet<almide_ir::VarId> =
             top_lets.iter().map(|tl| tl.var).collect();
-        cl_lift_in_fns(functions, var_table, &globals_ty, &global_vars, &mut counter);
+        cl_lift_in_fns(functions, var_table, &globals_ty, &global_vars, &mut counter, &layouts);
     }
     for module in program.modules.iter_mut() {
         let almide_ir::IrModule { functions, top_lets, var_table, .. } = &mut *module;
@@ -50,9 +57,11 @@ pub fn lift_poisoning_continuations(program: &mut almide_ir::IrProgram) {
             top_lets.iter().map(|tl| (tl.var, tl.ty.clone())).collect();
         let global_vars: std::collections::HashSet<almide_ir::VarId> =
             top_lets.iter().map(|tl| tl.var).collect();
-        cl_lift_in_fns(functions, var_table, &globals_ty, &global_vars, &mut counter);
+        cl_lift_in_fns(functions, var_table, &globals_ty, &global_vars, &mut counter, &layouts);
     }
 }
+
+struct ClLayouts<'a> { records: &'a RecordLayouts, variants: &'a VariantLayouts }
 
 fn cl_lift_in_fns(
     functions: &mut Vec<almide_ir::IrFunction>,
@@ -60,6 +69,7 @@ fn cl_lift_in_fns(
     globals_ty: &std::collections::HashMap<almide_ir::VarId, Ty>,
     global_vars: &std::collections::HashSet<almide_ir::VarId>,
     counter: &mut u32,
+    layouts: &ClLayouts<'_>,
 ) {
     // TRANSACTIONAL per fn: the lift may only IMPROVE the fn's standing. The
     // original poisons but lowers (the executable verifier covers it); if any
@@ -69,7 +79,8 @@ fn cl_lift_in_fns(
     // clean cert, and roll back to the untouched original otherwise.
     let n = functions.len();
     for i in 0..n {
-        if !cl_prefilter(&functions[i]) || !cl_oracle_says_poisoned(&functions[i], globals_ty) {
+        if (!cl_prefilter(&functions[i]) && !cl_loop_arm_candidate(&functions[i]))
+            || !cl_oracle_says_poisoned(&functions[i], globals_ty, layouts) {
             continue;
         }
         let original = functions[i].clone();
@@ -82,6 +93,9 @@ fn cl_lift_in_fns(
             let ret_ty = functions[i].ret_ty.clone();
             let mut body = std::mem::take(&mut functions[i].body);
             chain.extend(cl_lift_top_block(&mut body, &ret_ty, vt, global_vars, counter));
+            if chain.is_empty() && matches!(ret_ty, Ty::Unit) {
+                cl_lift_loop_arms(&mut body, &ret_ty, vt, global_vars, counter, &mut chain);
+            }
             functions[i].body = body;
         }
         let mut j = 0;
@@ -110,9 +124,9 @@ fn cl_lift_in_fns(
         // Validate: every piece must lower AND certify without poison.
         let dbg = almide_base::env::flag("ALMIDE_DBG_CONTLIFT");
         let all_clean = std::iter::once(&functions[i]).chain(chain.iter()).all(|f| {
-            match lower_function(f, globals_ty) {
-                Ok(mir) => {
-                    let poisoned = crate::certificate::ownership_certificate_with_poison(&mir).1;
+            match lower_function_all_with_layouts(f, globals_ty, layouts.records, layouts.variants) {
+                Ok(mirs) => {
+                    let poisoned = mirs.iter().any(|mir| crate::certificate::ownership_certificate_with_poison(mir).1);
                     if dbg && poisoned {
                         eprintln!("[contlift] piece {} still POISONS", f.name.as_str());
                     }
@@ -153,9 +167,10 @@ fn cl_prefilter(func: &almide_ir::IrFunction) -> bool {
 fn cl_oracle_says_poisoned(
     func: &almide_ir::IrFunction,
     globals_ty: &std::collections::HashMap<almide_ir::VarId, Ty>,
+    layouts: &ClLayouts<'_>,
 ) -> bool {
-    match lower_function(func, globals_ty) {
-        Ok(mir) => crate::certificate::ownership_certificate_with_poison(&mir).1,
+    match lower_function_all_with_layouts(func, globals_ty, layouts.records, layouts.variants) {
+        Ok(mirs) => mirs.iter().any(|mir| crate::certificate::ownership_certificate_with_poison(mir).1),
         Err(_) => false,
     }
 }
@@ -170,9 +185,7 @@ fn cl_lift_top_block(
     global_vars: &std::collections::HashSet<almide_ir::VarId>,
     counter: &mut u32,
 ) -> Vec<almide_ir::IrFunction> {
-    use almide_ir::{
-        CallTarget, IrExpr, IrExprKind, IrFunction, IrParam, IrStmt, IrVisibility, ParamBorrow,
-    };
+    use almide_ir::{IrExpr, IrExprKind, IrStmt};
     let IrExprKind::Block { stmts, expr: tail } = &mut body.kind else {
         return Vec::new();
     };
@@ -190,6 +203,23 @@ fn cl_lift_top_block(
         def_id: None,
     };
 
+    let (call, helper) = cl_outline_continuation(cont_body, ret_ty, vt, global_vars, counter);
+    let IrExprKind::Block { stmts: call_stmts, expr: call_tail } = call.kind else { unreachable!() };
+    stmts.extend(call_stmts);
+    *tail = call_tail;
+    vec![helper]
+}
+
+/// The same checked continuation ABI is used for an entire loop-bearing arm.
+fn cl_outline_continuation(
+    cont_body: almide_ir::IrExpr,
+    ret_ty: &Ty,
+    vt: &mut almide_ir::VarTable,
+    global_vars: &std::collections::HashSet<almide_ir::VarId>,
+    counter: &mut u32,
+) -> (almide_ir::IrExpr, almide_ir::IrFunction) {
+    use almide_ir::{CallTarget, IrExpr, IrExprKind, IrFunction, IrParam, IrStmt, IrVisibility, ParamBorrow};
+    let span = cont_body.span;
     let bound: std::collections::HashSet<almide_ir::VarId> = std::collections::HashSet::new();
     let params: Vec<almide_ir::VarId> = almide_ir::free_vars::free_vars(&cont_body, &bound)
         .into_iter()
@@ -228,6 +258,9 @@ fn cl_lift_top_block(
         })
         .collect();
 
+    let mut stmts = Vec::new();
+    let tail;
+
     // The call-site ty is the effect CARRIER (`Result[T, String]`) — the
     // frontend's convention for a named effect call under `!`; the Unwrap
     // above it carries the unwrapped T. A plain-T call ty made the unwrap
@@ -258,7 +291,7 @@ fn cl_lift_top_block(
     };
     if matches!(ret_ty, Ty::Unit) {
         stmts.push(IrStmt { kind: almide_ir::IrStmtKind::Expr { expr: unwrapped }, span });
-        *tail = None;
+        tail = None;
     } else {
         let ret_var = vt.alloc(sym("__cl_ret"), ret_ty.clone(), almide_ir::Mutability::Let, span);
         stmts.push(IrStmt {
@@ -270,7 +303,7 @@ fn cl_lift_top_block(
             },
             span,
         });
-        *tail = Some(Box::new(IrExpr {
+        tail = Some(Box::new(IrExpr {
             kind: IrExprKind::Var { id: ret_var },
             ty: ret_ty.clone(),
             span,
@@ -278,7 +311,7 @@ fn cl_lift_top_block(
         }));
     }
 
-    vec![IrFunction {
+    let helper = IrFunction {
         name: func_name,
         params: func_params,
         ret_ty: ret_ty.clone(),
@@ -295,7 +328,53 @@ fn cl_lift_top_block(
         def_id: None,
         mutated_params: vec![], // fresh-fn: continuation over live-var captures; the caller never reads them after the call
         module_origin: None,
-    }]
+    };
+    (IrExpr { kind: IrExprKind::Block { stmts, expr: tail }, ty: ret_ty.clone(), span, def_id: None }, helper)
+}
+
+/// A loop carrying an effect error slot may poison inside a tail match even
+/// without a preceding `!` statement. Outlining its whole arm puts that loop
+/// at function level, where the existing flat witness can represent it.
+fn cl_loop_arm_candidate(f: &almide_ir::IrFunction) -> bool {
+    fn tail(e: &almide_ir::IrExpr) -> bool {
+        use almide_ir::IrExprKind;
+        match &e.kind {
+            IrExprKind::Block { expr: Some(e), .. } => tail(e),
+            IrExprKind::Match { arms, .. } => arms.iter().any(|a| cl_expr_has_loop(&a.body)),
+            IrExprKind::If { then, else_, .. } => cl_expr_has_loop(then) || cl_expr_has_loop(else_),
+            _ => false,
+        }
+    }
+    f.is_effect && f.generics.is_none() && matches!(f.ret_ty, Ty::Unit) && tail(&f.body)
+}
+
+fn cl_expr_has_loop(e: &almide_ir::IrExpr) -> bool {
+    cl_continuation_has_loop(&[], &Some(Box::new(e.clone())))
+}
+
+fn cl_lift_loop_arms(
+    e: &mut almide_ir::IrExpr,
+    ret_ty: &Ty,
+    vt: &mut almide_ir::VarTable,
+    globals: &std::collections::HashSet<almide_ir::VarId>,
+    counter: &mut u32,
+    chain: &mut Vec<almide_ir::IrFunction>,
+) {
+    use almide_ir::{IrExprKind, IrStmt, IrStmtKind};
+    let mut arm = |e: &mut almide_ir::IrExpr| {
+        if e.ty != *ret_ty || !cl_expr_has_loop(e) { return; }
+        let stmt = IrStmt { kind: IrStmtKind::Expr { expr: e.clone() }, span: e.span };
+        if cl_continuation_writes_outer(&[stmt]) { return; }
+        let (call, helper) = cl_outline_continuation(e.clone(), ret_ty, vt, globals, counter);
+        *e = call;
+        chain.push(helper);
+    };
+    match &mut e.kind {
+        IrExprKind::Block { expr: Some(e), .. } => cl_lift_loop_arms(e, ret_ty, vt, globals, counter, chain),
+        IrExprKind::Match { arms, .. } => { for a in arms { arm(&mut a.body); } }
+        IrExprKind::If { then, else_, .. } => { arm(then); arm(else_); }
+        _ => {}
+    }
 }
 
 /// The first index k where `stmts[k]` carries a statement-level effect `!`

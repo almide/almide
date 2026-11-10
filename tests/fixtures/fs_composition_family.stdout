@@ -1,0 +1,18 @@
+wb=Hi!,
+wr=ABC
+walk=a.txt,inner,b.txt n=3
+rm_nonempty=err
+gone=false
+inner_gone=false
+rm_missing=err
+renamed=true old_gone=false body=content
+badrename=err
+sym_file=false sym_dir=false sym_miss=false
+present=hello
+absent=none
+lines=2 first=l1
+albs=none
+bytes=5 b0=108
+abbs=none
+raw=5 r0=108
+arbs=none

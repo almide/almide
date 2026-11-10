@@ -1,0 +1,14 @@
+// #4277 drill: the +1 a borrowed bind takes is moved onto another local in
+// the emitter while its recorded event stays — the ownership witness is
+// unchanged and accepted; only the shipped call's operand shows the +1 is
+// not on the value the event names.
+fn total() -> Int = {
+  let a = [1, 2, 3]
+  let c = [9, 9, 9, 9, 9]
+  let alias = a
+  list.len(alias) + list.len(a) + list.len(c)
+}
+
+effect fn main() -> Unit = {
+  println("${total()}")
+}

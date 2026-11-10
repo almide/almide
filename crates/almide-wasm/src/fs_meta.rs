@@ -553,3 +553,35 @@ pub(crate) fn expr_propagates(body: &IrExpr) -> bool {
     almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
     s.0
 }
+
+/// Can evaluating `e` LEAVE THE FRAME before its value exists? A `!` / `?`
+/// can, and so can a `fan { }` block with a Result arm: in a propagating
+/// frame its first-err site returns the failing arm's carrier
+/// (fan_block.rs), and the arms' own `!` markers are stripped before the
+/// emitter sees them (front_desugar.rs rule 4), so `expr_propagates` alone
+/// does not see that exit. A site that allocates a block and then lowers
+/// its operand into it asks THIS: the block would be left on the operand
+/// stack, never released (#4642).
+pub(crate) fn expr_leaves_frame(e: &IrExpr) -> bool {
+    struct Scan(bool);
+    impl almide_ir::visit::IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.0 {
+                return;
+            }
+            let exits = match &e.kind {
+                IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } => true,
+                IrExprKind::Fan { exprs } => exprs.iter().any(|arm| arm.ty.is_result()),
+                _ => false,
+            };
+            if exits {
+                self.0 = true;
+                return;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut s = Scan(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut s, e);
+    s.0
+}

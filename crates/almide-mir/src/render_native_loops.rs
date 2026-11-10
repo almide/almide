@@ -102,6 +102,30 @@ fn assigned_var(l: &str) -> Option<&str> {
     is_var(v).then_some(v)
 }
 
+/// [`rewrite_at`]'s checks outside the loop at `s..=e`: before it,
+/// `let mut vI: i64 = 0i64;` (at the loop's indentation `ind`) and
+/// `let mut vONE: i64 = 1i64;`, with nothing writing either in between;
+/// after it, no read of `vI`. The counter's declaration line.
+fn counter_outside(lines: &[String], (s, e): (usize, usize), ind: usize, i: &str, one: &str) -> Option<usize> {
+    let init = (0..s).rev().find(|&k| let_parts(&lines[k]).is_some_and(|(v, _, _)| v == i))?;
+    if let_parts(&lines[init]) != Some((i, "i64", "0i64")) || indent_of(&lines[init]) != ind {
+        return None;
+    }
+    let one_def = (0..s).rev().find(|&k| let_parts(&lines[k]).is_some_and(|(v, _, _)| v == one))?;
+    if let_parts(&lines[one_def]).map(|p| p.2) != Some("1i64") {
+        return None;
+    }
+    let between = &lines[init + 1..s];
+    if between.iter().filter(|l| !is_note(l)).any(|l| assigned_var(l) == Some(i) || assigned_var(l) == Some(one) || l.contains(&format!("&mut {i}"))) {
+        return None;
+    }
+    let fn_end = (e + 1..lines.len()).find(|&k| lines[k] == "}").unwrap_or(lines.len());
+    if lines[e + 1..fn_end].iter().any(|l| !is_note(l) && mentions(l, i)) {
+        return None;
+    }
+    Some(init)
+}
+
 fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
     let ind = indent_of(&lines[s]);
     let pad = " ".repeat(ind);
@@ -137,24 +161,7 @@ fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
     {
         return None;
     }
-    // Before the loop: `let mut vI: i64 = 0i64;` and `let mut vONE: i64 = 1i64;`,
-    // with nothing writing either in between; after it, no read of `vI`.
-    let init = (0..s).rev().find(|&k| let_parts(&lines[k]).is_some_and(|(v, _, _)| v == i))?;
-    if let_parts(&lines[init]) != Some((i, "i64", "0i64")) || indent_of(&lines[init]) != ind {
-        return None;
-    }
-    let one_def = (0..s).rev().find(|&k| let_parts(&lines[k]).is_some_and(|(v, _, _)| v == one))?;
-    if let_parts(&lines[one_def]).map(|p| p.2) != Some("1i64") {
-        return None;
-    }
-    let between = &lines[init + 1..s];
-    if between.iter().filter(|l| !is_note(l)).any(|l| assigned_var(l) == Some(i) || assigned_var(l) == Some(one) || l.contains(&format!("&mut {i}"))) {
-        return None;
-    }
-    let fn_end = (e + 1..lines.len()).find(|&k| lines[k] == "}").unwrap_or(lines.len());
-    if lines[e + 1..fn_end].iter().any(|l| !is_note(l) && mentions(l, i)) {
-        return None;
-    }
+    let init = counter_outside(lines, (s, e), ind, i, one)?;
     // The iterator source: `let mut vLEN: i64 = vS.len() as i64;` and the body
     // reading `vS` only as `vS[vI]`.
     let source = iter_source(lines, s, len, i, &body);

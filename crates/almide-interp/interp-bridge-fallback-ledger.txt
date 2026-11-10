@@ -17,10 +17,9 @@
 
 bytes.len  bytes_is_equal_constant_time  floor: consumed inside a self-hosted body
 bytes.zeros  zlib_call_vs_user_namesake  floor: consumed inside a self-hosted body
-env.remove  env_vars_remove  typed hole `_` (native panics with exit 101; no panic model here) — or an intrinsic-stub body that escaped dispatch's filter
-env.set  env_secret  typed hole `_` (native panics with exit 101; no panic model here) — or an intrinsic-stub body that escaped dispatch's filter
+env.__environ  env_vars_remove  env.__environ: no lowered body
+env.__set  env_secret  env.__set: no lowered body
 env.sleep_ms  env_sleep_pause  env.sleep_ms: no lowered body
-env.vars  env_vars_remove  typed hole `_` (native panics with exit 101; no panic model here) — or an intrinsic-stub body that escaped dispatch's filter
 float.is_infinite  codec_int_float_boundaries  floor: consumed inside a self-hosted body
 float.is_nan  codec_int_float_boundaries  floor: consumed inside a self-hosted body
 float.to_string  codec_int_float_boundaries  floor: consumed inside a self-hosted body

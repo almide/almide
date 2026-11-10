@@ -299,6 +299,7 @@ impl<'a> Interpreter<'a> {
             "map" => self.hof_map_map(evaled),
             "filter" => self.hof_map_filter(evaled),
             "find" => self.hof_map_find(evaled),
+            "any" | "all" | "count" => self.hof_map_predicate(f, evaled),
             "update" => self.hof_map_update(evaled),
             "upsert" => self.hof_map_upsert(evaled),
             _ => self.eval_hof_fallible_matrix("map", f, evaled),
@@ -404,6 +405,24 @@ impl<'a> Interpreter<'a> {
             }
         }
         Flow::val(Value::Map(std::rc::Rc::new(out)))
+    }
+
+    /// Sequential entry predicates, matching runtime/rs/src/map.rs:
+    /// any/all stop at the first decisive entry; count visits every entry.
+    fn hof_map_predicate(&mut self, op: &str, args: &[Value]) -> Flow {
+        let entries = match Self::recv_entries(args) { Ok(e) => e, Err(f) => return f };
+        let clo = match Self::recv_closure(args, 1) { Ok(c) => c, Err(f) => return f };
+        let mut count = 0;
+        for (k, v) in entries.iter() {
+            let hit = val!(self.apply_closure(&clo, entry_args(&clo, vec![], k, v)));
+            let Value::Bool(hit) = hit else {
+                return Flow::Abort("internal: map predicate did not return Bool".into());
+            };
+            if op == "any" && hit { return Flow::val(Value::Bool(true)); }
+            if op == "all" && !hit { return Flow::val(Value::Bool(false)); }
+            count += i64::from(hit);
+        }
+        Flow::val(match op { "count" => Value::Int(count), "all" => Value::Bool(true), _ => Value::Bool(false) })
     }
 
     /// `map.find(m, ((k, v)) -> Bool)` — first entry (insertion order) the

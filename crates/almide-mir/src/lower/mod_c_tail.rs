@@ -68,15 +68,11 @@ fn new_lower_ctx(
             {
                 if !crate::lower::is_heap_ty(t) {
                     Some(crate::lower::ResultFamily::Scalar)
-                } else if crate::lower::bang_return_probe() {
-                    // #1437 L1: UNDER THE PROBE the lift wraps every return
-                    // position (auto_wrap_abi_body's probe arm below), so a
-                    // heap T's carrier blocks are all @16-readable by
-                    // construction — err via the ResErrStr superset, ok via
-                    // the cap-as-tag materialize_result_str — and the family
-                    // may finally be read off the synthetic type. PROBE-OFF
-                    // the #841 hybrid (raw ok tails) still exists and the
-                    // containment stays None.
+                } else if crate::lower::bang_return_probe() || crate::lower::owned_tco_slots() {
+                    // Native and the return-op probe materialize the heap
+                    // Result ABI before lowering: Err uses the ResErrStr
+                    // superset and Ok the cap-as-tag wrapper. Other paths
+                    // retain their existing family gate.
                     Some(crate::lower::result_family(&Ty::result((*t).clone(), Ty::String)))
                 } else {
                     None
@@ -135,11 +131,13 @@ pub fn auto_wrap_abi_body(func: &IrFunction) -> Option<IrExpr> {
         // body would keep its raw ok tails — the #841 hybrid the R2 rule can
         // neither read nor return. Wrap those unconditionally there; SCALAR
         // members keep their proven downstream path (their raw tails lower
-        // through the scalar tail machinery probe-on today), and probe-off is
-        // byte-identical.
-        let wrap_under_probe =
-            crate::lower::bang_return_probe() && crate::lower::is_heap_ty(&func.ret_ty);
-        if opt_ret || !has_propagation_site(&body) || wrap_under_probe {
+        // through the scalar tail machinery probe-on today).
+        // Native heap carriers also need every branch typed as the ABI
+        // Result before a nested propagation is desugared. Otherwise a
+        // match arm can stamp its returned Err block as the raw Ok payload.
+        let wrap_heap = (crate::lower::bang_return_probe() || crate::lower::owned_tco_slots())
+            && crate::lower::is_heap_ty(&func.ret_ty);
+        if opt_ret || !has_propagation_site(&body) || wrap_heap {
             // The wrap keys on each return position answering the DECLARED type, but the
             // root retype above has already stamped the carrier on the root node. When the
             // body is a single expression that node IS the return value
@@ -243,6 +241,10 @@ fn wrap_return_positions_in_ok(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty) 
 }
 
 fn wrap_return_positions_go(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty, in_branch: bool) -> bool {
+    // Native represents a heap Result with one typed Rust carrier on both
+    // arms. Wrap raw value-producing calls even inside a branch, before its
+    // local propagation rewrites can stamp the branch as the payload type.
+    let defer_branch = in_branch && !(crate::lower::owned_tco_slots() && crate::lower::is_heap_ty(decl_ty));
     match &mut expr.kind {
         IrExprKind::Block { expr: tail, .. } => {
             let wrapped = tail
@@ -297,7 +299,7 @@ fn wrap_return_positions_go(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty, in_
         // falls through to the value wrap below; a Result-typed one
         // (fs.read_text) fails ty == decl_ty there and stays untouched.
         IrExprKind::Call { target: CallTarget::Module { .. }, .. }
-            if in_branch || matches!(expr.ty, Ty::Unit) =>
+            if defer_branch || matches!(expr.ty, Ty::Unit) =>
         {
             false
         }
@@ -319,7 +321,7 @@ fn wrap_return_positions_go(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty, in_
         // statement + `ok(())`, and wrapping the call itself walled every test
         // fn ending in an assert (lambda_effect_symmetry, the fs_* tests).
         IrExprKind::Call { target: CallTarget::Named { name }, .. }
-            if in_branch
+            if defer_branch
                 || matches!(expr.ty, Ty::Unit)
                 || crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str())) =>
         {
@@ -466,7 +468,7 @@ fn lower_function_all_impl(
     // reach them on this rung (#2739: `env.sleep_ms`, the http client) — the structural leg's
     // `EFFECT_BOUND` (almide-wasm cert_project.rs) already declares both for an effect fn.
     // Process joins with testing.assert_aborts's child run (#3792); EFFECT_BOUND holds PROC.
-    let declared_caps = if func.is_effect {
+    let mut declared_caps = if func.is_effect {
         vec![
             crate::Capability::Stdout,
             crate::Capability::Entropy,
@@ -481,6 +483,7 @@ fn lower_function_all_impl(
     } else {
         Vec::new()
     };
+    crate::native_foreign::extend_bound(&mut declared_caps, func.is_effect);
     let lifted = std::mem::take(&mut ctx.lifted);
     let heap_slot_masks = ctx.record_masks.iter().map(|(v, m)| (*v, m.clone())).collect();
     let main = MirFunction {

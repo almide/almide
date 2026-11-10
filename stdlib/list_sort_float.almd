@@ -57,7 +57,7 @@ else {
   __sortf_copy(srch, dsth, n, i + 1)
 }
 
-@specializes("list.sort")
+@specializes("list.__sort_float")
 fn list_sort_float(xs: List[Float]) -> List[Float] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)

@@ -1,0 +1,7 @@
+ok_n=3 ok_trace=a;bb;ccc;
+err_path=err boom at bad
+err_trace=a;bb;bad;
+empty_n=0 empty_trace=''
+missing=err
+missing_trace=''
+first_line=err boom at bad

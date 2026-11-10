@@ -1,0 +1,17 @@
+type Box = { label: String, n: Int }
+var current: Box? = some(Box { label: "first", n: 1 })
+fn show() -> Unit = match current {
+ some(b) => println("${b.label} ${b.n}"),
+ none => println("none"),
+}
+fn clear() -> Unit = { current = none }
+fn main() -> Unit = {
+ show()
+ match current {
+  some(b) => { clear(); println("held ${b.label} ${b.n}") },
+  none => println("wrong"),
+ }
+ show()
+ current = some(Box { label: "last", n: 2 })
+ show()
+}

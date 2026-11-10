@@ -500,6 +500,12 @@ fn assert_abort(
     let mut stmts: Vec<IrStmt> = Vec::new();
     let mut operands: Vec<IrExpr> = Vec::new();
     for (i, a) in args.into_iter().enumerate() {
+        // The message belongs to the failure arm. Binding it here would
+        // evaluate its effects (and `!`) even when the assertion succeeds.
+        if name == "assert" && i == 1 {
+            operands.push(a);
+            continue;
+        }
         let ty = a.ty.clone();
         let v = vars.alloc(sym(&format!("__assert_{i}")), ty.clone(), Mutability::Let, span);
         stmts.push(IrStmt {

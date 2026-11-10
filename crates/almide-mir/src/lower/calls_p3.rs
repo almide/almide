@@ -127,6 +127,15 @@ impl LowerCtx {
         }
         let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
         match &callee.kind {
+            IrExprKind::UnwrapOr { .. } | IrExprKind::If { .. } | IrExprKind::Match { .. }
+            | IrExprKind::Block { .. } | IrExprKind::Lambda { .. } if owned_tco_slots() => {
+                // A selected or freshly built callee is a value evaluated
+                // before its arguments. Its binding owns the selected closure
+                // until the enclosing frame releases it after invocation.
+                let v = self.lower_owned_binding(callee)?;
+                self.closure_values.insert(v);
+                Some(v)
+            }
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
                 let lowered = self.lower_call_args(args).ok()?;
                 let dst = self.fresh_value();
@@ -262,7 +271,8 @@ impl LowerCtx {
                         });
                         Some(dst)
                     }
-                    Err(_) => {
+                    Err(e) => {
+                        crate::trace::trace("ALMIDE_DBG_ANF", || format!("[scalar-call] {name} arguments declined: {e:?}"));
                         self.ops.truncate(ops_mark);
                         self.live_heap_handles.truncate(lhh_mark);
                         None
@@ -326,12 +336,13 @@ impl LowerCtx {
         args: &[IrExpr],
         ty: &Ty,
     ) -> Option<ValueId> {
-        // The callee must be a Var statically bound to a recorded inline lambda.
-        let callee_var = match &callee.kind {
-            IrExprKind::Var { id } => *id,
+        // A literal lambda in a chained pipe has the same checked unique
+        // parameter identities as a let-bound lambda; no closure lookup is needed.
+        let (params, body) = match &callee.kind {
+            IrExprKind::Var { id } => self.lambda_bindings.get(id)?.clone(),
+            IrExprKind::Lambda { params, body, .. } => (params.clone(), (**body).clone()),
             _ => return None,
         };
-        let (params, body) = self.lambda_bindings.get(&callee_var)?.clone();
         if params.len() != args.len() {
             return None;
         }
@@ -603,59 +614,6 @@ impl LowerCtx {
         Some(layout::slot_offset(index))
     }
 
-    /// Resolve an aggregate CONTAINER expression to the i64 BYTE-ADDRESS of its block (the base
-    /// for a `base + slot_offset` field load). A `Var` bound to a tracked heap aggregate (or a
-    /// param-bound aggregate) is `Prim::Handle`'d directly. A NESTED aggregate field (`o.p` in
-    /// `o.p.x`) is borrowed via `try_lower_heap_field_borrow` (the loaded inner-block handle) then
-    /// `Prim::Handle`'d — so field access composes to arbitrary depth over materialized blocks.
-    /// `None` for a non-resolvable container (`f().x`, a non-materialized var) → the caller defers.
-    pub(crate) fn resolve_aggregate_container_handle(&mut self, container: &IrExpr) -> Option<ValueId> {
-        use crate::PrimKind;
-        let block = self.resolve_aggregate_container_block(container)?;
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![block] });
-        Some(h)
-    }
-
-    /// The container's BLOCK value (pre-`Handle`) — the form the target-neutral
-    /// list/record ops take (`Op::ListGetScalar` resolves its own address).
-    pub(crate) fn resolve_aggregate_container_block(&mut self, container: &IrExpr) -> Option<ValueId> {
-        let block = match &container.kind {
-            IrExprKind::Var { id } if is_heap_ty(&container.ty) => self.value_or_global(*id).ok()?,
-            // A nested aggregate field — borrow its loaded inner-block handle. Gated on the
-            // OUTER container being materialized (inside `try_lower_heap_field_borrow`), so a
-            // garbage slot is never dereferenced.
-            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
-                if is_heap_ty(&container.ty) =>
-            {
-                self.try_lower_heap_field_borrow(container)?
-            }
-            // A list-ELEMENT aggregate (`line.items[ii].idx` — the chained scalar read off
-            // an indexed record): borrow the element block via the same bounds-checked
-            // `$elem_addr` LoadHandle the for-in element borrow uses (gated on a tracked/
-            // field-borrowable list container at each level).
-            IrExprKind::IndexAccess { .. } if is_heap_ty(&container.ty) => {
-                self.try_lower_heap_field_borrow(container)?
-            }
-            // A CALL-result container (`mk_paren().name` — the paren-ctor scalar field read):
-            // ANF-materialize the call to a synthetic temp via the SAME `lower_bind` path a
-            // `let tmp = mk_paren()` takes (tracked, recursive scope-end drop, read shapes
-            // seeded), then resolve the temp — the exact mirror of `lower_heap_extraction`'s
-            // Call arm on the scalar-field side.
-            // A RECORD-literal container (`{ blob: …, tag: "t" }.tag` — what a reference
-            // to a pure call-initialized global becomes once `inline_pure_call_globals`
-            // substitutes its init, #2739) takes the same ANF temp: the literal is built
-            // once, read, and dropped at scope end.
-            IrExprKind::Call { .. } | IrExprKind::Record { .. } if is_heap_ty(&container.ty) => {
-                let tmp = self.fresh_synth_var();
-                self.lower_bind(tmp, &container.ty, container).ok()?;
-                self.value_for(tmp).ok()?
-            }
-            _ => return None,
-        };
-        Some(block)
-    }
-
     pub(crate) fn lower_scalar_field_access(&mut self, expr: &IrExpr) -> Option<ValueId> {
         
         // Scalar result only (the caller's contract; a heap field defers to the
@@ -764,56 +722,7 @@ impl LowerCtx {
         self.ops.push(Op::ListGetScalar { dst, list, idx });
         Some(dst)
     }
-
-    /// Lower a SCALAR (Int/Bool/Float) value expression to a `ValueId` holding its REAL
-    /// value, or `None` (the caller then DEFERS to `Const`). SELF-ROLLBACK contract: on a
-    /// `None` return this restores BOTH `self.ops` AND `self.live_heap_handles` to their
-    /// entry length, so the function leaves NO net side effect when it fails — a caller may
-    /// roll back with an `ops`-only truncate (the historic discipline) and still be correct
-    /// even though a sub-lowering (a scalar CALL OPERAND, `5 + string.len("abc")`) may
-    /// MATERIALIZE a fresh heap argument temp (an `Alloc` registered for a scope-end drop).
-    /// On SUCCESS, any such temp stays tracked (it is a genuine value to free at scope end),
-    /// exactly as a direct `let _ = string.len("abc")` bind tracks it. The actual lowering
-    /// is [`Self::lower_scalar_value_inner`].
-    pub(crate) fn lower_scalar_value(&mut self, expr: &IrExpr) -> Option<ValueId> {
-        let ops_mark = self.ops.len();
-        let lhh_mark = self.live_heap_handles.len();
-        match self.lower_scalar_value_inner(expr) {
-            Some(v) => Some(v),
-            None => {
-                self.ops.truncate(ops_mark);
-                self.live_heap_handles.truncate(lhh_mark);
-                None
-            }
-        }
-    }
-
-    /// Lower a scalar operand of an EAGER `UnOp` (`not e`) or logical `And`/`Or`, FREEING any
-    /// transient heap temp the operand materializes WITHIN a local frame. The canonical case is
-    /// `c == "'"` (→ `string.eq(c, "'")`): the `"'"` literal is a fresh owned String that is dead
-    /// the instant the `Bool` is computed, so it is `Alloc`'d (cert `i`) and `Drop`'d (cert `d`)
-    /// LOCALLY here — the operand is internally balanced and registers NO temp in the enclosing
-    /// frame. This is SOUND precisely because `and`/`or`/`not` are EAGER in v0 (both operands /
-    /// the operand always evaluate, NO short-circuit), so the `Drop` always runs on the same path
-    /// as the `Alloc`; the scalar `Bool` result survives the frame teardown (it is not a heap
-    /// handle). Returns `None` (fully rolled back) if the operand is not scalar-lowerable. (Before,
-    /// a heap-materializing operand was GATED OUT to `None` → the caller fell back to a silent
-    /// `Const 0` / a `WALL` — the `not (c == "'" or c == "\"")` miscompile.)
-    fn lower_scalar_operand(&mut self, expr: &IrExpr) -> Option<ValueId> {
-        let ops_mark = self.ops.len();
-        let frame = self.live_heap_handles.len();
-        match self.lower_scalar_value_inner(expr) {
-            Some(v) => {
-                // Free any transient temp the operand allocated (e.g. a string-eq literal),
-                // keeping the operand internally `i…d`-balanced — the scalar `v` is not among them.
-                self.drop_arm_locals(frame);
-                Some(v)
-            }
-            None => {
-                self.ops.truncate(ops_mark);
-                self.live_heap_handles.truncate(frame);
-                None
-            }
-        }
-    }
 }
+
+include!("calls_container.rs");
+include!("calls_p3_scalar.rs");

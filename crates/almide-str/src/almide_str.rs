@@ -152,6 +152,31 @@ impl AlmideStr {
         if cap == 0 { AlmideStr::new() } else { AlmideStr { ptr: almide_str_alloc(cap, 0) } }
     }
 
+    /// Copy a slice into one block, uppercasing only its ASCII bytes.
+    #[inline]
+    pub fn from_ascii_uppercase(s: &str) -> Self {
+        let out = AlmideStr::from(s);
+        if !s.is_empty() {
+            // SAFETY: `from` copied this nonempty slice into a fresh, uniquely
+            // owned block of `s.len()` initialized bytes. ASCII case mapping
+            // preserves length and UTF-8 validity; no reference has escaped.
+            unsafe { &mut *std::ptr::slice_from_raw_parts_mut(out.data(), s.len()) }.make_ascii_uppercase();
+        }
+        out
+    }
+
+    /// Copy a slice into one block, lowercasing only its ASCII bytes.
+    #[inline]
+    pub fn from_ascii_lowercase(s: &str) -> Self {
+        let out = AlmideStr::from(s);
+        if !s.is_empty() {
+            // SAFETY: as above. Empty strings skip the write and keep their
+            // immortal static block; non-ASCII bytes are unchanged.
+            unsafe { &mut *std::ptr::slice_from_raw_parts_mut(out.data(), s.len()) }.make_ascii_lowercase();
+        }
+        out
+    }
+
     #[inline]
     fn rc_cell(&self) -> &AtomicU32 {
         // SAFETY: `ptr` always points at a live header, heap or static; only the count is borrowed.
@@ -242,6 +267,25 @@ impl AlmideStr {
         self.unique_with(0)
     }
 
+    /// Keep a UTF-8 byte range, reusing a unique block and copying only the
+    /// retained bytes of a shared/static block. Invalid boundaries panic
+    /// before changing the string.
+    pub fn retain_range(&mut self, range: std::ops::Range<usize>) {
+        let kept = &self.as_str()[range.clone()];
+        if range.start == 0 && range.end == self.len() { return; }
+        if !self.is_unique() {
+            *self = AlmideStr::from(kept);
+            return;
+        }
+        let mut u = self.unique();
+        let len = range.end - range.start;
+        // SAFETY: slicing above checked bounds and both UTF-8 boundaries.
+        // The unique view owns the initialized source and destination, which
+        // may overlap. The kept bytes form a complete UTF-8 string.
+        unsafe { std::ptr::copy(u.data.add(range.start), u.data, len) };
+        u.len = len;
+    }
+
     #[inline]
     pub fn push_str(&mut self, t: &str) {
         let (len, n) = (self.len(), t.len());
@@ -289,35 +333,8 @@ impl AlmideStr {
     /// The decimal rendering of `n`, written straight into one exact-size block.
     /// Building a `String` and converting it would allocate, copy and free a second time.
     pub fn from_i64(n: i64) -> AlmideStr {
-        // Two digits per division, as `core::fmt` renders integers.
-        const PAIRS: &[u8; 200] = b"0001020304050607080910111213141516171819\
-            2021222324252627282930313233343536373839\
-            4041424344454647484950515253545556575859\
-            6061626364656667686970717273747576777879\
-            8081828384858687888990919293949596979899";
         let mut buf = [0u8; 20];
-        let mut i = buf.len();
-        let mut u = n.unsigned_abs();
-        while u >= 100 {
-            let d = (u % 100) as usize * 2;
-            u /= 100;
-            i -= 2;
-            buf[i] = PAIRS[d];
-            buf[i + 1] = PAIRS[d + 1];
-        }
-        if u >= 10 {
-            let d = u as usize * 2;
-            i -= 2;
-            buf[i] = PAIRS[d];
-            buf[i + 1] = PAIRS[d + 1];
-        } else {
-            i -= 1;
-            buf[i] = b'0' + u as u8;
-        }
-        if n < 0 {
-            i -= 1;
-            buf[i] = b'-';
-        }
+        let i = almide_i64_digits(n, &mut buf);
         let len = buf.len() - i;
         let out = AlmideStr { ptr: almide_str_alloc(len, len) };
         // SAFETY: a fresh block with room for exactly `len` bytes, which the ASCII digits fill.
@@ -529,6 +546,20 @@ pub struct AlmideUniqueStr<'a> {
 }
 
 impl AlmideUniqueStr<'_> {
+    /// Change only ASCII bytes; UTF-8 length and non-ASCII scalars stay intact.
+    #[inline]
+    pub fn make_ascii_uppercase(&mut self) {
+        // SAFETY: this unique heap view owns `len` initialized bytes. ASCII
+        // case mapping preserves byte length and UTF-8 validity.
+        unsafe { &mut *std::ptr::slice_from_raw_parts_mut(self.data, self.len) }.make_ascii_uppercase();
+    }
+
+    #[inline]
+    pub fn make_ascii_lowercase(&mut self) {
+        // SAFETY: the same unique-view and UTF-8 invariants as uppercase.
+        unsafe { &mut *std::ptr::slice_from_raw_parts_mut(self.data, self.len) }.make_ascii_lowercase();
+    }
+
     #[inline]
     pub fn push_str(&mut self, t: &str) {
         let n = t.len();
@@ -756,6 +787,91 @@ impl Hash for AlmideStr {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.as_str().hash(state)
     }
+}
+
+/// `n`'s decimal digits, written right-aligned into `buf`; returns where they
+/// start. Two digits per division, as `core::fmt` renders integers. Inlined
+/// into each writer, as `from_i64` had it before the writers shared it.
+#[inline(always)]
+fn almide_i64_digits(n: i64, buf: &mut [u8; 20]) -> usize {
+    const PAIRS: &[u8; 200] = b"0001020304050607080910111213141516171819\
+        2021222324252627282930313233343536373839\
+        4041424344454647484950515253545556575859\
+        6061626364656667686970717273747576777879\
+        8081828384858687888990919293949596979899";
+    let mut i = buf.len();
+    let mut u = n.unsigned_abs();
+    while u >= 100 {
+        let d = (u % 100) as usize * 2;
+        u /= 100;
+        i -= 2;
+        buf[i] = PAIRS[d];
+        buf[i + 1] = PAIRS[d + 1];
+    }
+    if u >= 10 {
+        let d = u as usize * 2;
+        i -= 2;
+        buf[i] = PAIRS[d];
+        buf[i + 1] = PAIRS[d + 1];
+    } else {
+        i -= 1;
+        buf[i] = b'0' + u as u8;
+    }
+    if n < 0 {
+        i -= 1;
+        buf[i] = b'-';
+    }
+    i
+}
+
+/// An integer as a format hole (`{}`): the digits [`AlmideStr::from_i64`]
+/// writes, handed to the formatter in one `write_str`. `i64`'s own `Display`
+/// goes through `pad_integral`'s width, fill and sign handling, which no
+/// interpolation hole uses — the same text for more work.
+pub struct AlmideIntText(pub i64);
+
+impl fmt::Display for AlmideIntText {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut buf = [0u8; 20];
+        let i = almide_i64_digits(self.0, &mut buf);
+        // SAFETY: `buf[i..]` holds only ASCII digits and an optional `-`.
+        f.write_str(unsafe { std::str::from_utf8_unchecked(&buf[i..]) })
+    }
+}
+
+/// A runtime call's string list as `Vec<AlmideStr>`: the list itself when it
+/// already is one (every runtime list of strings today), element by element
+/// otherwise. A rendered call converted every result element by element,
+/// a full pass and a fresh vector for a list it already had.
+pub trait AlmideIntoStrList {
+    fn into_str_list(self) -> Vec<AlmideStr>;
+}
+
+impl AlmideIntoStrList for Vec<AlmideStr> {
+    #[inline(always)]
+    fn into_str_list(self) -> Vec<AlmideStr> {
+        self
+    }
+}
+
+impl AlmideIntoStrList for Vec<String> {
+    fn into_str_list(self) -> Vec<AlmideStr> {
+        self.into_iter().map(AlmideStr::from).collect()
+    }
+}
+
+impl AlmideIntoStrList for Vec<&str> {
+    fn into_str_list(self) -> Vec<AlmideStr> {
+        self.into_iter().map(AlmideStr::from).collect()
+    }
+}
+
+/// [`AlmideIntoStrList::into_str_list`] as a function, so a call site needs no
+/// trait in scope.
+#[inline(always)]
+pub fn almide_str_list<L: AlmideIntoStrList>(l: L) -> Vec<AlmideStr> {
+    l.into_str_list()
 }
 
 impl fmt::Display for AlmideStr {

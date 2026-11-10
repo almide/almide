@@ -50,22 +50,15 @@ fn generate_native_source(file: &str, no_check: bool, test_mode: bool, native_ve
     let opts = crate::codegen::CodegenOptions::default();
     // `metered`: from the IR, not the text — a user literal spelled like a
     // prim is emitted into `rs_code` verbatim (#3486).
-    let (rs_code, metered) = crate::try_compile_with_ir(file, no_check, &opts)
+    let (pending, metered, _) = crate::try_compile_pending(file, no_check, &opts)
         .map_err(|_| "compile failed".to_string())?;
-    t.lap("frontend+emit");
-    let rs_code = if native_verified && !test_mode {
-        super::render_v1_native_or_fallback(file, rs_code, metered, &opts)
+    t.lap("frontend");
+    let rs_code = if test_mode {
+        pending.generate_tests()?
+    } else if native_verified {
+        super::render_v1_native_or_fallback(pending, metered, &opts)
     } else {
-        // The NATIVE TEST harness rides the standard codegen: link the
-        // v1-rendered regions in, exactly as the run path does when the whole
-        // program walls (#3669), or meter them in the codegen (#3673).
-        match metered {
-            Some(ir) if test_mode => {
-                let source_text = almide::source_overlay::read_to_string(file).unwrap_or_default();
-                super::link_metered_regions(&source_text, rs_code, "the native test harness rides the standard codegen", ir, &opts)
-            }
-            _ => rs_code,
-        }
+        pending.generate()
     };
     t.lap("v1-native-render");
     // ALMIDE_ALLOC_COUNT (#2228): the counting allocator, when armed.
@@ -124,6 +117,34 @@ pub(crate) fn build_native_cached(
     project_dir_override: Option<&std::path::Path>,
     native_deps: &[crate::project::NativeDep],
     source_root: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, String> {
+    build_native_cached_in(rs_code, use_test_harness, release, project_dir_override, native_deps, source_root, None)
+}
+
+/// [`build_native_cached`] in the shared dir whose [`BuildDirLock`] the caller
+/// already holds (#4269): `almide build` takes it before the cache check and
+/// keeps it through the copy to `-o`, so the whole write-source → cargo →
+/// copy window is one critical section. A concurrent build or `almide run`
+/// in the same dir waits for it, and none can evict or rebuild the binary
+/// between this build and its install.
+pub(crate) fn build_native_cached_locked(
+    rs_code: &str,
+    release: bool,
+    native_deps: &[crate::project::NativeDep],
+    source_root: Option<&std::path::Path>,
+    held: &BuildDirLock,
+) -> Result<std::path::PathBuf, String> {
+    build_native_cached_in(rs_code, false, release, None, native_deps, source_root, Some(held))
+}
+
+fn build_native_cached_in(
+    rs_code: &str,
+    use_test_harness: bool,
+    release: bool,
+    project_dir_override: Option<&std::path::Path>,
+    native_deps: &[crate::project::NativeDep],
+    source_root: Option<&std::path::Path>,
+    held: Option<&BuildDirLock>,
 ) -> Result<std::path::PathBuf, String> {
     // Scratch dir. A per-call `project_dir_override` (one dir per test file)
     // gives each parallel worker its own `src/main.rs`, so cold rustc builds
@@ -194,7 +215,11 @@ pub(crate) fn build_native_cached(
     let _guard = project_dir_override
         .is_none()
         .then(|| BUILD_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
-    let _flock = BuildDirLock::acquire(&project_dir)?;
+    // A second flock on the same file from this process would wait on itself.
+    let _flock = match held {
+        Some(_) => None,
+        None => Some(BuildDirLock::acquire(&project_dir)?),
+    };
 
     // Re-check the cache under the lock: another process/thread may have built
     // this exact binary while we waited, making a rebuild redundant. A binary
@@ -267,9 +292,16 @@ pub(super) fn binary_digest_path(bin: &std::path::Path) -> std::path::PathBuf {
 
 /// The lowercase hex SHA-256 of the file at `path`.
 fn file_sha256(path: &std::path::Path) -> Option<String> {
-    use sha2::{Digest, Sha256};
     let bytes = std::fs::read(path).ok()?;
-    Some(Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect())
+    #[cfg(any(unix, windows))]
+    let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
+    #[cfg(not(any(unix, windows)))]
+    let digest = {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(&bytes)
+    };
+    let digest: &[u8] = digest.as_ref();
+    Some(digest.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Is the cached binary at `bin` the one this compiler built there: present,

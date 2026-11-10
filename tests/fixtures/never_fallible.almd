@@ -1,0 +1,2 @@
+effect fn fail() -> Never = { let x: Result[Unit, String] = err("stopped"); x!; panic("unreachable") }
+effect fn main() -> Unit = { println("before"); fail()! }

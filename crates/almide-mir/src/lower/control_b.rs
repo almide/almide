@@ -368,6 +368,15 @@ impl LowerCtx {
         rest_tail: &Option<Box<IrExpr>>,
         result_ty: &Ty,
     ) -> IrExpr {
+        // A diverging arm cannot bind a value or enter the continuation. Only
+        // the native lowering takes a heap-result arm that ends the process
+        // (`lower_heap_result_branch`, its `owned_tco_slots` gate); elsewhere
+        // the bound continuation is the shape the heap-result tail lowers
+        // (a module-var `x = f()!` then `x` in a Region export).
+        if crate::lower::owned_tco_slots() && almide_ir::diverge::diverges(arm_value) {
+            return IrExpr { kind: IrExprKind::Block { stmts: vec![], expr: Some(Box::new(arm_value.clone())) },
+                ty: result_ty.clone(), span: arm_value.span, def_id: None };
+        }
         let mut stmts: Vec<IrStmt> = Vec::with_capacity(rest_stmts.len() + 1);
         stmts.push(IrStmt {
             kind: IrStmtKind::Bind {

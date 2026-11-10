@@ -1,0 +1,39 @@
+// @contract: C-226
+// A copy whose source no path reads again: the source is rebound from the
+// copy (a `mut` parameter's write-back, in a loop and in straight-line code)
+// or never used after it. The copy may be the source itself; the results are
+// the same either way.
+fn bump(mut xs: List[Int], v: Int) -> Unit = list.push(xs, v)
+
+effect fn fill(mut seen: List[Int], n: Int) -> Unit = if n == 0 then ()
+else {
+  list.push(seen, n)
+  fill(seen, n - 1)!
+}
+
+fn rebound_in_loop(n: Int) -> Int = {
+  var acc: List[Int] = []
+  var i = 0
+  while i < n {
+    var c = acc
+    bump(c, i)
+    acc = c
+    i = i + 1
+  }
+  list.len(acc) + list.sum(acc)
+}
+
+fn unused_after() -> Int = {
+  let a: List[Int] = [4, 5]
+  var b = a
+  bump(b, 6)
+  list.sum(b)
+}
+
+effect fn main() -> Unit = {
+  var seen: List[Int] = []
+  fill(seen, 50)!
+  println("${list.len(seen)} ${list.sum(seen)}")
+  println(int.to_string(rebound_in_loop(100)))
+  println(int.to_string(unused_after()))
+}

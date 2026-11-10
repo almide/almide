@@ -84,6 +84,16 @@ fn cached_binaries(base: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// A new hashing implementation must keep the on-disk SHA-256 format: caches
+/// recorded by the prior compiler remain readable, with the same integrity check.
+fn assert_recorded_sha256(bin: &Path) {
+    use sha2::{Digest, Sha256};
+    let expected = Sha256::digest(std::fs::read(bin).unwrap());
+    let expected: String = expected.iter().map(|b| format!("{b:02x}")).collect();
+    let recorded = bin.with_file_name(format!("{}.sha256", bin.file_name().unwrap().to_string_lossy()));
+    assert_eq!(std::fs::read_to_string(recorded).unwrap().trim(), expected);
+}
+
 #[test]
 fn a_base_others_can_write_is_refused_and_nothing_in_it_runs() {
     let (td, program) = setup();
@@ -128,6 +138,7 @@ fn a_cached_binary_that_no_longer_matches_its_digest_is_rebuilt_not_run() {
     assert_eq!(meta.permissions().mode() & 0o077, 0, "the base is created private");
     let bins = cached_binaries(&base);
     assert_eq!(bins.len(), 1, "one cached binary under the base: {bins:?}");
+    assert_recorded_sha256(&bins[0]);
 
     // Control: an untouched cache is a hit and prints the program's output.
     let o = run(td.path(), &program);
@@ -140,4 +151,5 @@ fn a_cached_binary_that_no_longer_matches_its_digest_is_rebuilt_not_run() {
     let out = text(&o);
     assert!(out.contains("hello from the source"), "the program is rebuilt from source:\n{out}");
     assert!(!out.contains("PLANTED") && !marker.exists(), "a binary that fails its digest must not run:\n{out}");
+    assert_recorded_sha256(&bins[0]);
 }

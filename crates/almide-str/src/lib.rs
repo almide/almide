@@ -14,7 +14,7 @@
 
 mod almide_str;
 
-pub use almide_str::{almide_str_mark_reachable, AlmideStr, AlmideStrHeader, AlmideStrStatic, AlmideUniqueStr};
+pub use almide_str::{almide_str_mark_reachable, AlmideStr, AlmideStrHeader, AlmideStrStatic, AlmideUniqueStr, AlmideIntText, AlmideIntoStrList, almide_str_list};
 
 /// The source text of `almide_str.rs`, which every generated native program
 /// splices in as its Almide String.

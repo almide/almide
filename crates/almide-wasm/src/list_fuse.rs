@@ -1,4 +1,4 @@
-//! map/filter → fold FUSION (deforestation): one pass over the source,
+//! map/filter → fold/sum FUSION (deforestation): one pass over the source,
 //! zero intermediate lists. SOUND only when the stages may run element by
 //! element — the unfused oracle runs all maps, then all filters, then the
 //! fold, so a printing callback would interleave differently and a second
@@ -77,6 +77,7 @@ fn judge_stage(e: &IrExpr) -> almide_ir::fusion::Stage {
             if matches!(
                 s.kind,
                 IrStmtKind::Assign { .. } | IrStmtKind::IndexAssign { .. } | IrStmtKind::FieldAssign { .. }
+                    | IrStmtKind::MapInsert { .. }
             ) {
                 self.pure = false;
             }
@@ -125,7 +126,30 @@ impl Emitter<'_> {
         init: &IrExpr,
         cb: &IrExpr,
     ) -> Result<Option<Option<Lowered>>, EmitError> {
-        // Walk the chain source-side: fold(filter(map(src))).
+        self.lower_list_reduction_fused(xs, init, Some(cb))
+    }
+
+    /// Sum has no callback: its built-in step is total, wrapping for Int
+    /// and a sequential left addition for Float. Share the chain judgment,
+    /// element lifetimes and witness with fold; never synthesize VarIds.
+    pub(crate) fn lower_list_sum_fused(&mut self, xs: &IrExpr) -> Result<Option<Option<Lowered>>, EmitError> {
+        let Some(SliceTy::List(h)) = slice_ty_of(&xs.ty, self.types) else { return Ok(None) };
+        let (kind, ty) = match self.types.el(h) {
+            INT => (IrExprKind::LitInt { value: 0 }, almide_types::types::Ty::Int),
+            FLOAT => (IrExprKind::LitFloat { value: 0.0 }, almide_types::types::Ty::Float),
+            _ => return Ok(None),
+        };
+        let zero = IrExpr { kind, ty, span: None, def_id: None };
+        self.lower_list_reduction_fused(xs, &zero, None)
+    }
+
+    fn lower_list_reduction_fused(
+        &mut self,
+        xs: &IrExpr,
+        init: &IrExpr,
+        cb: Option<&IrExpr>,
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
+        // Walk the chain source-side: reduce(filter(map(src))).
         let mut stages_rev: Vec<Stage> = Vec::new();
         let mut cur = xs;
         while let IrExprKind::Call {
@@ -147,13 +171,21 @@ impl Emitter<'_> {
                 _ => break,
             }
         }
-        if stages_rev.is_empty() {
+        // A source that is itself a producer the reduction can walk in place
+        // (#4612: a widened byte block) is the chain's FIRST stage: fused
+        // even with no map or filter after it, under the same judgment.
+        let walk = crate::bytes::widened_byte_walk(cur);
+        if stages_rev.is_empty() && walk.is_none() {
             return Ok(None);
         }
         // Every callback a literal lambda, and the stages — in source order,
-        // the fold's (its init included) last — mergeable under the shared
-        // rule (#2953): all pure, at most one that can abort.
+        // the producer's first and the fold's (its init included) last —
+        // mergeable under the shared rule (#2953): all pure, at most one that
+        // can abort.
         let mut verdicts = Vec::new();
+        if walk.is_some() {
+            verdicts.extend(crate::bytes::byte_form(cur).map(|f| f.stage()));
+        }
         for st in stages_rev.iter().rev() {
             let f = match st {
                 Stage::Map(f) | Stage::Filter(f) => *f,
@@ -163,7 +195,7 @@ impl Emitter<'_> {
             };
             verdicts.push(judge_stage(body));
         }
-        {
+        if let Some(cb) = cb {
             let IrExprKind::Lambda { body, .. } = &cb.kind else {
                 return Ok(None);
             };
@@ -180,20 +212,31 @@ impl Emitter<'_> {
         // get one private pair slot refilled per element, exactly as the
         // scalar enumerate/fold does. The stages are pure, so nothing can
         // write the source while it is walked and no snapshot is taken.
-        let enumerated = self.enumerate_adapter(cur, stages[0]);
+        let enumerated = stages.first().and_then(|first| self.enumerate_adapter(cur, first));
 
-        let (fold_params, fold_body) = self.hof_lambda(cb, 2)?;
         let Some(acc_ty) = slice_ty_of(&init.ty, self.types) else {
             return unsup(&format!("list-fold-acc:{}", ty_name(&init.ty)));
         };
+        let fold = cb.map(|cb| self.hof_lambda(cb, 2)).transpose()?;
+        let (acc, item) = match &fold {
+            Some((params, _)) => (params[0], params[1]),
+            None => (self.hold_val(acc_ty)?, self.hold_val(acc_ty)?),
+        };
         // The source first, then the init — argument order, as native
         // evaluates them; a `list.range` head is counted, not built (#2045).
-        let src = match enumerated {
-            Some(inner) => self.loop_src_open_block(inner, init)?,
-            None => self.loop_src_open(cur, init)?,
+        let src = match (enumerated, &walk) {
+            (Some(inner), _) => self.loop_src_open_block(inner, init)?,
+            (None, Some((block, consumed))) => {
+                // The producers are consumed here, never lowered as values.
+                for node in consumed {
+                    self.witness_inline_arg(node);
+                }
+                self.loop_src_open_bytes(block, init)?
+            }
+            (None, None) => self.loop_src_open(cur, init)?,
         };
         self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
-        self.f.instructions().local_set(fold_params[0]);
+        self.f.instructions().local_set(acc);
 
         let elem0 = src.elem();
         let pair = match (enumerated, src) {
@@ -211,7 +254,7 @@ impl Emitter<'_> {
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.loop_src_exit(src);
         // #2755: one activation per element covers every stage.
-        self.witness_fused_open(xs, cb, fold_params[0], acc_ty);
+        self.witness_fused_open(xs, cb, acc, acc_ty);
         // The skip-block opens BEFORE the element value exists — a wasm
         // block cannot receive operands from outside (the validator
         // caught the push-then-open draft immediately). Filter's br_if
@@ -273,25 +316,33 @@ impl Emitter<'_> {
             }
         }
         // fold update: acc = f(acc, cur)
-        self.f.instructions().local_set(fold_params[1]);
-        self.witness_stage_param(fold_params[1], cur_ty, pending.is_some());
-        owners.extend(pending.take().map(|t| (fold_params[1], t)));
-        self.lower_fold_body(cb, fold_body, acc_ty)?;
-        // The accumulator OWNS one credit on every step, exactly as the
-        // staged `lower_list_fold` has since 10fed0494: a borrowed body
-        // result — the element itself (`(n, y) => y`), a captured var —
-        // takes its share, and the previous accumulator is released
-        // before the rebind. This fused copy was written before that
-        // rule and never received it, so `fold(filter(xs), …)` returned
-        // an element the list's own release then freed: a wrong byte on
-        // wasm, no trap, only through a chain that fuses (#2397). A
-        // fresh body result already carries its credit and takes no +1.
-        self.rc_share_guard(fold_body, acc_ty);
-        if let Some(dec) = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty)) {
-            self.f.instructions().local_get(fold_params[0]).call(dec);
+        self.f.instructions().local_set(item);
+        self.witness_stage_param(item, cur_ty, pending.is_some());
+        owners.extend(pending.take().map(|t| (item, t)));
+        if let (Some(cb), Some((_, fold_body))) = (cb, fold) {
+            self.lower_fold_body(cb, fold_body, acc_ty)?;
+            // The accumulator OWNS one credit on every step, exactly as the
+            // staged `lower_list_fold` has since 10fed0494: a borrowed body
+            // result — the element itself (`(n, y) => y`), a captured var —
+            // takes its share, and the previous accumulator is released
+            // before the rebind. This fused copy was written before that
+            // rule and never received it, so `fold(filter(xs), …)` returned
+            // an element the list's own release then freed: a wrong byte on
+            // wasm, no trap, only through a chain that fuses (#2397). A
+            // fresh body result already carries its credit and takes no +1.
+            self.rc_share_guard(fold_body, acc_ty);
+            if let Some(dec) = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty)) {
+                self.f.instructions().local_get(acc).call(dec);
+            }
+            self.witness_fold_step(fold_body, acc, acc_ty);
+        } else {
+            // Do not reassociate Float or swap the operands (NaNs and
+            // signed zero included): exactly acc + element, from +0.0.
+            let mut i = self.f.instructions();
+            i.local_get(acc).local_get(item);
+            if acc_ty == INT { i.i64_add(); } else { i.f64_add(); }
         }
-        self.witness_fold_step(fold_body, fold_params[0], acc_ty);
-        self.f.instructions().local_set(fold_params[0]);
+        self.f.instructions().local_set(acc);
         // The owners' releases are the iteration-end `d`s the recorder
         // writes for every owner local bound in it (witness_paths.rs).
         self.release_fused_owners(&owners);
@@ -302,9 +353,13 @@ impl Emitter<'_> {
             self.f.instructions().local_get(p).call(F_DEC_FLAT);
             self.release_i32();
         }
-        self.f.instructions().local_get(fold_params[0]);
+        self.f.instructions().local_get(acc);
         let _ = cur_ty;
         self.loop_src_close(src);
+        if cb.is_none() {
+            self.release_val(acc_ty);
+            self.release_val(acc_ty);
+        }
         Ok(Some(Some(Lowered::owned(acc_ty))))
     }
 }

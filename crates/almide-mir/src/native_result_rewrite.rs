@@ -39,6 +39,20 @@
 use crate::{Init, MirFunction, Op, PrimKind, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Read a host result's layout from its typed implementation or its checked
+/// intrinsic declaration. Private OS primitives need not have a self-hosted
+/// registry body; their scalar Results still use the length-word tag.
+pub(crate) fn host_uses_cap_tag(name: &str) -> bool {
+    if !crate::host_ops::host_op_for_call_name(name).is_some_and(|o| o.returns_result) {
+        return false;
+    }
+    if let Some(sig) = crate::lower::registry_sig::registry_signature(name) {
+        return crate::lower::result_family(&sig.ret) == crate::lower::ResultFamily::HeapOk;
+    }
+    !matches!(crate::native_floor::declared(name).map(|f| f.ret),
+        Some(crate::native_floor::FloorRet::Res(Some(_))))
+}
+
 /// Rewrite every recognized Result window in `f`. `result_fns` names the
 /// functions whose (declared) return is a native-carrier Result — their
 /// `CallFn` dsts seed the consumer-side value tracking.
@@ -52,9 +66,33 @@ pub fn rewrite_result_ops(
     res_params: &[ValueId],
     carriers: &BTreeSet<ValueId>,
 ) {
+    rewrite_result_ops_with_host_values(f, result_fns, res_params, carriers, &BTreeSet::new());
+}
+
+/// Values recorded at source host call sites before self-host linking renames
+/// their callees. Only tracked scalar Result consumers consult this layout.
+pub(crate) fn rewrite_result_ops_with_host_values(
+    f: &mut MirFunction, result_fns: &BTreeSet<String>, res_params: &[ValueId],
+    carriers: &BTreeSet<ValueId>, host_values: &BTreeSet<ValueId>,
+) {
     let ops = std::mem::take(&mut f.ops);
+    let stored: BTreeSet<_> = ops.iter().filter_map(|op| match op {
+        Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.len() == 2 => Some(args[1]),
+        _ => None,
+    }).collect();
+    let transferred: BTreeSet<_> = ops.iter().filter_map(|op| match op {
+        Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if stored.contains(d) && args.len() == 1 => Some(args[0]),
+        _ => None,
+    }).collect();
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = ResultWindowTracker::default();
+    t.cap_tag.extend(host_values.iter().copied());
+    // Unit Results use the shared heap-family tag offset even though native
+    // represents their Ok payload as the scalar zero. This also covers a
+    // branch join, which is not a host-call result.
+    let unit_result = almide_lang::types::Ty::result(almide_lang::types::Ty::Unit, almide_lang::types::Ty::String);
+    let unit_key = crate::render_native_rec::block_key(&unit_result);
+    t.unit_results.extend(f.aggregate_blocks.iter().filter_map(|(v, key)| (key == &unit_key).then_some(*v)));
     // A param declared as a carrier Result (#4006 family C) is one.
     t.res_vals.extend(res_params.iter().copied());
 
@@ -81,7 +119,7 @@ pub fn rewrite_result_ops(
                 t.res_vals.insert(dst);
                 t.minted.insert(dst);
             }
-            Op::Alloc { dst, init: Init::ResErrStr { piece }, .. } => {
+            Op::Alloc { dst, init: Init::ResErrStr { piece }, .. } if !carriers.contains(dst) => {
                 let (dst, piece) = (*dst, *piece);
                 out.push(Op::Prim {
                     kind: PrimKind::ResMakeErrStr,
@@ -94,9 +132,13 @@ pub fn rewrite_result_ops(
             Op::Dup { src: v, .. } if t.minted.contains(v) => t.track_minted_copy(op, &mut out),
             Op::Prim {
                 kind: PrimKind::Handle,
-                dst: Some(_),
+                dst: Some(d),
                 args,
             } if args.len() == 1 => {
+                // A Result stored inside another typed value still needs
+                // its symbolic handle; only the Result's own access windows
+                // disappear in this rewrite.
+                if stored.contains(d) && t.res_vals.contains(&args[0]) { out.push(op.clone()); }
                 t.track_handle(op, &mut out);
             }
             Op::IntBinOp {
@@ -110,14 +152,14 @@ pub fn rewrite_result_ops(
             } if args.len() == 1 && t.res_addrs.contains_key(&args[0]) => {
                 t.track_res_load(op, &mut out);
             }
-            // A Consume of a CALL-result carrier: dropped, as before. A MINTED
-            // carrier's Consume stays — it is the move-out that balances its
-            // alloc-class birth (#4349).
-            Op::Consume { v } if t.res_vals.contains(v) && !t.minted.contains(v) => {}
+            // A call-result carrier stored into another object transfers its
+            // owned credit at this Consume. Other call-result consumes remain
+            // covered by the existing rewritten consumer/branch accounting.
+            Op::Consume { v } if t.res_vals.contains(v) && !t.minted.contains(v) && !transferred.contains(v) => {}
             Op::CallFn {
                 dst: Some(d), name, ..
             } if result_fns.contains(name) || crate::native_floor::declared_result_carrier(name) == Some(false) => {
-                if crate::host_ops::host_op_for_call_name(name).is_some_and(|o| o.returns_result) {
+                if host_uses_cap_tag(name) {
                     t.cap_tag.insert(*d);
                 }
                 t.res_vals.insert(*d);
@@ -154,6 +196,9 @@ struct ResultWindowTracker {
     /// Results of a host op (`host_ops::HostOp::returns_result`): the host's
     /// cap-as-tag block, whose tag the match lowering reads at +16.
     cap_tag: BTreeSet<ValueId>,
+    /// Unit constructors use scalar tags; typed joins may use HeapOk tags.
+    /// Both consumers denote the discriminant after conversion to a Rust Result.
+    unit_results: BTreeSet<ValueId>,
 }
 
 impl ResultWindowTracker {
@@ -217,7 +262,8 @@ impl ResultWindowTracker {
         // every other one the scalar carrier (tag @+4).
         let tag_at = if self.cap_tag.contains(&r) { 16 } else { 4 };
         let res_kind = match (kind, off) {
-            (PrimKind::Load { width: 4 }, o) if o == tag_at => Some(PrimKind::ResTag),
+            (PrimKind::Load { width: 4 }, o)
+                if o == tag_at || (self.unit_results.contains(&r) && matches!(o, 4 | 16)) => Some(PrimKind::ResTag),
             (PrimKind::Load { width: 8 }, 12) => Some(PrimKind::ResOkScalar),
             (PrimKind::LoadHandle, 12) => Some(PrimKind::ResErrStr),
             _ => None,
@@ -282,7 +328,8 @@ fn sweep_dead_window_material(out: &mut Vec<Op>, ret: Option<ValueId>) {
         let before = out.len();
         out.retain(|op| match op {
             Op::ConstInt { dst, .. } => used.contains(dst),
-            Op::IntBinOp { dst, .. } => used.contains(dst),
+            Op::IntBinOp { dst, op, .. } => used.contains(dst)
+                || matches!(op, crate::IntOp::Div | crate::IntOp::Mod | crate::IntOp::DivU | crate::IntOp::ModU),
             Op::Prim {
                 kind: PrimKind::Handle,
                 dst: Some(d),
@@ -395,6 +442,58 @@ fn collect_reads(op: &Op, used: &mut BTreeSet<ValueId>) {
         Op::LoopStart | Op::LoopEnd | Op::Charge { .. } => {}
         Op::ChargeDyn { src, .. } => {
             used.insert(*src);
+        }
+    }
+}
+
+#[cfg(test)]
+mod host_result_layout_tests {
+    use super::*;
+
+    #[test]
+    fn discarded_division_and_remainder_keep_their_traps() {
+        for op in [crate::IntOp::Div, crate::IntOp::Mod, crate::IntOp::DivU, crate::IntOp::ModU] {
+            let mut ops = vec![
+                Op::ConstInt { dst: ValueId(0), value: 1 },
+                Op::ConstInt { dst: ValueId(1), value: 0 },
+                Op::IntBinOp { dst: ValueId(2), op, a: ValueId(0), b: ValueId(1) },
+                Op::IntBinOp { dst: ValueId(3), op: crate::IntOp::Add, a: ValueId(0), b: ValueId(1) },
+            ];
+            sweep_dead_window_material(&mut ops, None);
+            assert_eq!(ops.len(), 3);
+            assert!(matches!(ops[2], Op::IntBinOp { dst: ValueId(2), .. }));
+        }
+    }
+
+    #[test]
+    fn host_tag_layout_follows_the_typed_twin_through_renaming() {
+        for (source, expected_tag) in [("fs.fold_lines_i", 4),
+            ("fs.__fallible_fold_lines_i", 4), ("fs.for_each_line", 16),
+            ("fs.__fallible_for_each_line", 16), ("fs.write_text", 16),
+            ("process.__os_poll", 4), ("process.__os_start", 4),
+            ("net.__os_tcp_listen", 4), ("net.__os_tcp_write", 16)] {
+            assert_eq!(host_uses_cap_tag(source), expected_tag == 16, "{source}");
+            for offset in [4, 16] {
+                let mut f = MirFunction { name: "test".into(), ops: vec![
+                    Op::CallFn { dst: Some(ValueId(0)), name: "renamed".into(), args: vec![],
+                        result: Some(crate::Repr::Ptr { layout: crate::LayoutId(0) }) },
+                    Op::Prim { kind: PrimKind::Handle, dst: Some(ValueId(1)), args: vec![ValueId(0)] },
+                    Op::ConstInt { dst: ValueId(2), value: offset },
+                    Op::IntBinOp { dst: ValueId(3), op: crate::IntOp::Add, a: ValueId(1), b: ValueId(2) },
+                    Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(ValueId(4)), args: vec![ValueId(3)] },
+                ], ret: Some(ValueId(4)), ..Default::default() };
+                let cap = if host_uses_cap_tag(source) { [ValueId(0)].into_iter().collect() } else { BTreeSet::new() };
+                rewrite_result_ops_with_host_values(&mut f, &["renamed".into()].into_iter().collect(),
+                    &[], &BTreeSet::new(), &cap);
+                let tag = f.ops.iter().any(|op| matches!(op,
+                    Op::Prim { kind: PrimKind::ResTag, dst: Some(ValueId(4)), .. }));
+                assert_eq!(tag, offset == expected_tag, "{source}, offset {offset}");
+                if !tag {
+                    assert!(f.ops.iter().any(|op| matches!(op,
+                        Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(ValueId(4)), .. })),
+                        "an unrecognized load must remain refused");
+                }
+            }
         }
     }
 }

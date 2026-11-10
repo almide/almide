@@ -11,6 +11,10 @@
 //! `RefCell` holding the value: the borrow reads a copy of it, the take moves
 //! it out (its type's default left behind, which nothing reads: the store
 //! follows), and the store moves the new value in.
+//! Types without Default instead use Option storage: None marks the interval
+//! before initialization (such a slot is never taken out: its take only drops
+//! the old value, which the store's assignment drops in the cell). A read
+//! must find the initialized value; no Result or closure value is fabricated.
 //!
 //! A slot that some read only borrows (#4562, `native_slot_takes::
 //! snapshot_slot`) holds its value in an `Rc` instead: such a read is a
@@ -22,8 +26,10 @@
 //! keeps the value it had at its read, as the copy did.
 //!
 //! The MIR and its certificates are the ones the wasm leg runs; only their
-//! storage is spelled differently. A program with a `fan` keeps the wall: its
-//! arms run on threads of their own, and a thread-local cell is per thread.
+//! storage is spelled differently. A `fan` that can reach a program slot
+//! keeps the wall: its arms run on threads of their own, and a thread-local
+//! cell is per thread. Unrelated fan arms may coexist with these slots;
+//! `fan_native::reaches_global_slots` checks their transitive reach first.
 
 use super::{AddrState, NTy};
 use crate::lower::LowerError;
@@ -50,6 +56,30 @@ fn store_text(snap: bool, rhs: &str) -> String {
     }
 }
 
+/// The take `d` of slot `slot` (type `t`). One whose old value the store
+/// that follows drops (`native_slot_takes::dropped_by_store`) renders nothing.
+/// A take whose value is read is an element write's (`g[i] = v`, a list, so
+/// a kind with a `Default`); the lowering takes a slot without one only to
+/// drop it before its store, so any other take walls.
+fn render_slot_take(dropped: bool, d: ValueId, slot: u32, t: NTy, out: &mut String, pad: &str) -> Result<(), LowerError> {
+    if dropped {
+        let _ = writeln!(out, "{pad}// {}: the old value, dropped by the store that follows", var(d));
+        return Ok(());
+    }
+    if !crate::render_native_rec::has_default(t) {
+        return Err(wall("native: a read take of a slot whose type has no default"));
+    }
+    let snap = crate::native_slot_takes::snapshot_slot(slot);
+    let _ = writeln!(
+        out,
+        "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| {});",
+        var(d),
+        crate::render_native_rec::owned_ty(t),
+        take_text(snap)
+    );
+    Ok(())
+}
+
 /// Render `op` when it reads, takes or stores a heap slot. `None` = not one.
 pub(super) fn render_heap_slot_op(
     op: &Op,
@@ -63,21 +93,20 @@ pub(super) fn render_heap_slot_op(
     match op {
         Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } if args.len() == 1 => {
             let (slot, t) = slot_of(st, &args[0])?;
-            if st.slot_reads.rebuilds.contains(d) {
-                return Some(Err(wall("native: a heap slot read again before its write-back (each read copies the cell's value)")));
-            }
             let snap = crate::native_slot_takes::snapshot_slot(slot);
+            let vacant = !crate::render_native_rec::has_default(t);
             let take = st.slot_reads.takes.contains(d) && crate::render_native_rec::has_default(t);
-            if snap && !take {
+            if snap && !take && st.slot_reads.borrows.contains(d) {
                 // A slot held for snapshots: every read of it that its own
                 // take does not follow is one (native_slot_takes::slot_reads).
-                let (true, Some((rt, spelled, whole))) = (st.slot_reads.borrows.contains(d), super::borrowed_kind(t)) else {
-                    return Some(Err(wall("native: a heap slot held for snapshots read as a value of its own")));
+                let Some((rt, spelled, whole)) = super::borrowed_kind(t) else {
+                    return Some(Err(wall("native: a snapshot slot without a borrowed representation")));
                 };
                 tys.insert(*d, rt);
+                let source = if vacant { "s.borrow().as_ref().expect(\"initialized global slot\")" } else { "&*s.borrow()" };
                 let _ = writeln!(
                     out,
-                    "{pad}let {v}_rc: std::rc::Rc<{ty}> = ALMD_HSLOT_{slot}.with(|s| std::rc::Rc::clone(&*s.borrow())); let mut {v}: {spelled} = &(*{v}_rc){whole};",
+                    "{pad}let {v}_rc: std::rc::Rc<{ty}> = ALMD_HSLOT_{slot}.with(|s| std::rc::Rc::clone({source})); let mut {v}: {spelled} = &(*{v}_rc){whole};",
                     v = var(*d),
                     ty = crate::render_native_rec::owned_ty(t)
                 );
@@ -85,7 +114,12 @@ pub(super) fn render_heap_slot_op(
             }
             tys.insert(*d, t);
             // The slot's own take follows, and nothing in between sees it.
-            let read = if take { take_text(snap) } else { "s.borrow().clone()" };
+            // An owned read of an Rc-backed slot copies the contained value,
+            // not the Rc. Its later mutations cannot change an older snapshot.
+            let read = if vacant {
+                if snap { "(**s.borrow().as_ref().expect(\"initialized global slot\")).clone()" }
+                else { "s.borrow().as_ref().expect(\"initialized global slot\").clone()" }
+            } else if take { take_text(snap) } else if snap { "(**s.borrow()).clone()" } else { "s.borrow().clone()" };
             let _ = writeln!(
                 out,
                 "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| {read});",
@@ -99,18 +133,8 @@ pub(super) fn render_heap_slot_op(
                 return Some(Err(wall("native: a slot take whose address is not one scalar")));
             };
             let (slot, t) = slot_of(st, a)?;
-            if !crate::render_native_rec::has_default(t) {
-                return Some(Err(wall("native: a heap slot whose type has no default to leave behind")));
-            }
             tys.insert(*d, t);
-            let _ = writeln!(
-                out,
-                "{pad}let mut {}: {} = ALMD_HSLOT_{slot}.with(|s| {});",
-                var(*d),
-                crate::render_native_rec::owned_ty(t),
-                take_text(crate::native_slot_takes::snapshot_slot(slot))
-            );
-            Some(Ok(true))
+            Some(render_slot_take(st.slot_reads.dropped_takes.contains(d), *d, slot, t, out, &pad).map(|()| true))
         }
         Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 => {
             let (slot, t) = slot_of(st, &args[0])?;
@@ -126,7 +150,11 @@ pub(super) fn render_heap_slot_op(
             } else {
                 return Some(Err(wall(format!("native: a {got:?} value stored into a {t:?} heap slot"))));
             };
-            let _ = writeln!(out, "{pad}ALMD_HSLOT_{slot}.with(|s| {});", store_text(crate::native_slot_takes::snapshot_slot(slot), &rhs));
+            let snap = crate::native_slot_takes::snapshot_slot(slot);
+            let store = if crate::render_native_rec::has_default(t) { store_text(snap, &rhs) }
+                else if snap { format!("*s.borrow_mut() = Some(std::rc::Rc::new({rhs}))") }
+                else { format!("*s.borrow_mut() = Some({rhs})") };
+            let _ = writeln!(out, "{pad}ALMD_HSLOT_{slot}.with(|s| {store});");
             Some(Ok(true))
         }
         _ => None,

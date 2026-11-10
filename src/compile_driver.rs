@@ -330,11 +330,11 @@ fn parse_and_resolve_for_compile(file: &str) -> Result<(ast::Program, String, Ve
     let (program, source_text, parse_errors) = parse_file(file);
     let has_parse_errors = !parse_errors.is_empty();
 
-    let parsed_project = if std::path::Path::new("almide.toml").exists() {
+    // An absolute entry path can belong to a different project from the
+    // caller's cwd. Resolve dependencies and permissions from the same owner.
+    let parsed_project = project::permissions_project_for(file).or_else(|| {
         project::parse_toml(std::path::Path::new("almide.toml")).ok()
-    } else {
-        None
-    };
+    });
 
     if let Some(ref proj) = parsed_project {
         project::check_compiler_version(proj)
@@ -382,7 +382,7 @@ fn typecheck_and_lower_for_compile(
     resolved: &mut resolve::ResolvedModules,
     self_versioned: &resolve::SelfVersionedNames,
     module_irs: &mut std::collections::HashMap<String, almide::ir::IrProgram>,
-) -> Result<(Option<almide::ir::IrProgram>, Vec<String>), String> {
+) -> Result<(Option<almide::ir::IrProgram>, Vec<String>, check::Checker), String> {
     let canon = canonicalize::canonicalize_program(
         program,
         resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
@@ -414,7 +414,7 @@ fn typecheck_and_lower_for_compile(
     // a program that cannot be checked cannot be trusted to build (#862).
     report_module_diagnostics(&module_diags)?;
     // #4008: the entry and every user module are checked by now.
-    Ok((ir_program, std::mem::take(&mut checker.outside_guarantee)))
+    Ok((ir_program, std::mem::take(&mut checker.outside_guarantee), checker))
 }
 
 /// `try_compile_with_ir`'s post-typecheck IR pipeline: optimize, verify
@@ -442,18 +442,10 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
 /// memory-safety guarantee (#4008), which `almide build` names on its
 /// `Built` line. Empty under `--no-check`, which checks nothing.
 pub(crate) fn try_compile_reporting(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>, Vec<String>), String> {
-    let t = cli::PhaseTimer::start();
-    let (mut ir_program, outside_guarantee) = compile_to_linked_ir(file, no_check, &t)?;
-    let metered = ir_program.as_ref().filter(|ir| almide::ir::runtime_use::uses_metered_prims(ir)).cloned();
-    // Codegen v3: three-layer pipeline (Nanopass + Templates)
-    let ir = ir_program.as_mut().expect("IR required for codegen");
-    let code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, codegen_opts) {
-        codegen::CodegenOutput::Source(s) => s,
-        codegen::CodegenOutput::Binary(_) => unreachable!(),
-    };
-    t.lap("codegen");
-    Ok((code, metered, outside_guarantee))
+    try_compile_pending(file, no_check, codegen_opts).map(|(pending, metered, outside)| (pending.generate(), metered, outside))
 }
+
+include!("compile_driver_native.rs");
 
 /// Everything [`try_compile_reporting`] does before codegen — every step that
 /// prints a diagnostic or refuses the program (type errors, warnings, E109,
@@ -465,15 +457,22 @@ pub(crate) fn check_through_link(file: &str) -> Result<(), String> {
 }
 
 fn compile_to_linked_ir(file: &str, no_check: bool, t: &cli::PhaseTimer) -> Result<(Option<almide::ir::IrProgram>, Vec<String>), String> {
+    compile_to_linked_ir_with_source(file, no_check, t).map(|(ir, outside, _, _)| (ir, outside))
+}
+
+fn compile_to_linked_ir_with_source(file: &str, no_check: bool, t: &cli::PhaseTimer) -> Result<(Option<almide::ir::IrProgram>, Vec<String>, Option<NativeInput>, String), String> {
     let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, parsed_project, self_versioned) = parse_and_resolve_for_compile(file)?;
     t.lap("parse+resolve");
+    let mut native_input = None;
 
     let mut ir_program: Option<almide::ir::IrProgram> = None;
     let mut module_irs = std::collections::HashMap::new();
     let mut outside_guarantee = Vec::new();
     if !no_check {
         let parsed = ParsedSource { file, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
-        (ir_program, outside_guarantee) = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
+        let (ir, outside, checker) = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
+        native_input = ir.as_ref().map(|ir| (ir.clone(), checker));
+        (ir_program, outside_guarantee) = (ir, outside);
     }
     t.lap("check+lower");
 
@@ -482,7 +481,7 @@ fn compile_to_linked_ir(file: &str, no_check: bool, t: &cli::PhaseTimer) -> Resu
     let permissions_project = project::permissions_project_for(file).or(parsed_project);
     optimize_verify_and_link(&mut ir_program, &permissions_project, (file, &source_text))?;
     t.lap("optimize+link");
-    Ok((ir_program, outside_guarantee))
+    Ok((ir_program, outside_guarantee, native_input, source_text))
 }
 
 /// Each dependency package's capability set (#4093, `almide deps`): the
@@ -501,7 +500,7 @@ pub(crate) fn dependency_capabilities(entry: &str) -> Result<std::collections::H
         .collect();
     let parsed = ParsedSource { file: entry, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
     let mut module_irs = std::collections::HashMap::new();
-    let (ir, _) = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
+    let (ir, _, _) = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
     let ir = ir.ok_or("the dependencies did not parse")?;
     let ir = almide::codegen::pass_effect_inference::EffectInferencePass.run(ir, codegen::pass::Target::Rust).program;
     let mut caps: std::collections::HashMap<String, std::collections::BTreeSet<String>> = std::collections::HashMap::new();
@@ -831,16 +830,8 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile], re
         return Err(BatchFailure { message: format!("errors in {} module(s)", failing.len()), culprits });
     }
     let permissions_project = project::permissions_project_for(&first).or_else(|| plan.project.clone());
+    let native_input = (ir_program.clone().ok_or_else(|| unattributed("the test run did not lower".into()))?, checker);
     optimize_verify_and_link(&mut ir_program, &permissions_project, (&first, "")).map_err(unattributed)?;
-    let ir = ir_program.as_mut().ok_or_else(|| unattributed("the test run did not lower".into()))?;
-    // A metered program (`fan.bounded` & co.) links v1-rendered regions
-    // against its entry file's source: that stays a per-file build.
-    if almide::ir::runtime_use::uses_metered_prims(ir) {
-        return Err(unattributed("a test file uses the deterministic meter".into()));
-    }
-    let rs_code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, &codegen::CodegenOptions::default()) {
-        codegen::CodegenOutput::Source(s) => s,
-        codegen::CodegenOutput::Binary(_) => unreachable!(),
-    };
+    let rs_code = render_native_tests("", cli::native_rust_text(&first), native_input).map_err(unattributed)?;
     Ok(TestRunProgram { rs_code, test_prefixes })
 }

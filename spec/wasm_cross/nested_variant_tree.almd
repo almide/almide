@@ -4,6 +4,22 @@
 // whole by shadowing.
 type Tree = | Leaf(Int) | Branch(List[Tree])
 
+type Binary = | Empty | Fork(Binary, Int, Binary) | Hop(Binary)
+
+// A recursive call at an inner arm's end still has the outer addition to
+// perform. Keep the caller's tree live across several such borrowed reads.
+fn branch_depth(t: Binary) -> Int = match t {
+  Empty => 0,
+  Hop(next) => branch_depth(next),
+  Fork(l, _, r) => 1 + (if branch_depth(l) > branch_depth(r) then branch_depth(l) else branch_depth(r)),
+}
+
+fn regrow(t: Binary) -> Binary = match t {
+  Empty => Empty,
+  Hop(next) => next,
+  Fork(l, v, _) => Fork(l, v + branch_depth(l), Empty),
+}
+
 fn sum(t: Tree) -> Int = match t {
   Leaf(n) => n,
   Branch(kids) => list.fold(kids, 0, (a, k) => a + sum(k)),
@@ -38,4 +54,8 @@ fn main() -> Unit = {
   var held = t
   held = Leaf(0)
   println(int.to_string(sum(held)))
+  let binary = Fork(Fork(Empty, 5, Empty), 7, Fork(Empty, 9, Empty))
+  println("${branch_depth(binary)} ${branch_depth(regrow(binary))} ${branch_depth(binary)}")
+  println("${regrow(binary) == Fork(Fork(Empty, 5, Empty), 8, Empty)}")
+  println("${branch_depth(Hop(Hop(binary)))} ${branch_depth(binary)}")
 }

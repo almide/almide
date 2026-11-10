@@ -879,3 +879,29 @@ fn fix_inside_the_package_still_removes_an_unused_self_import() {
     let check = Command::new(almide()).args(["check", "src/main.almd"]).current_dir(&app).output().unwrap();
     assert!(check.status.success(), "fixed file does not check:\n{}\n{after}", String::from_utf8_lossy(&check.stderr));
 }
+
+/// #4608: the E060 fix-it deletes each unused import's whole line, newline
+/// included, so the fixed file is what `almide fmt` writes. Two adjacent
+/// unused imports used to leave two empty lines behind, and `fmt --check`
+/// failed straight after `fix`. The negative half: a kept import's blank
+/// line, the author's, survives the fix.
+#[test]
+fn fix_deletes_the_lines_of_adjacent_unused_imports() {
+    let td = tempfile::TempDir::new().expect("tempdir");
+    let path = td.path().join("main.almd");
+    let program = "import json\nimport regex\nimport url\n\nfn main() -> Unit = println(json.stringify(value.int(1)))\n";
+    std::fs::write(&path, program).unwrap();
+    let fix = Command::new(almide()).args(["fix", "main.almd"]).current_dir(td.path()).output().unwrap();
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(fix.status.success(), "fix failed:\n{}\n{after}", String::from_utf8_lossy(&fix.stderr));
+    assert_eq!(after, "import json\n\nfn main() -> Unit = println(json.stringify(value.int(1)))\n");
+    let fmt = Command::new(almide()).args(["fmt", "--check", "main.almd"]).current_dir(td.path()).output().unwrap();
+    assert!(fmt.status.success(), "fmt --check fails after fix:\n{}{}\n{after}", String::from_utf8_lossy(&fmt.stdout), String::from_utf8_lossy(&fmt.stderr));
+
+    let kept = "import json\n\nimport regex\nfn main() -> Unit = println(json.stringify(value.int(1)))\n";
+    std::fs::write(&path, kept).unwrap();
+    let fix = Command::new(almide()).args(["fix", "main.almd"]).current_dir(td.path()).output().unwrap();
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(fix.status.success(), "fix failed:\n{}\n{after}", String::from_utf8_lossy(&fix.stderr));
+    assert_eq!(after, "import json\n\nfn main() -> Unit = println(json.stringify(value.int(1)))\n", "the kept import's blank line went");
+}

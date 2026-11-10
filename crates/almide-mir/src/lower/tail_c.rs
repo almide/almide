@@ -122,7 +122,15 @@ impl LowerCtx {
             | IrExprKind::Range { .. } => self.lower_tail_scalar_deferred_const(tail),
             // A TAIL `e!` (Unwrap — effect-fn error propagation): `f() = g()!` propagates g's
             // Result unchanged, i.e. it IS `f() = g()`. Strip the `!` and lower `e` as the tail.
-            IrExprKind::Unwrap { expr } => self.lower_tail(Some(expr)),
+            IrExprKind::Unwrap { expr } => {
+                if self.decl_ret_is_result || self.ret_is_result_abi {
+                    self.lower_tail(Some(expr))
+                } else {
+                    // A total test callback returns the extracted value,
+                    // never the Option/Result carrier of its operand.
+                    self.lower_tail_scalar_value_or_deferred(tail)
+                }
+            }
             // A SCALAR tail `??` (`fn parse_or_zero(s) = int.parse(s) ?? 0`, the canonical
             // form) EXECUTES the unwrap (tag read + payload-or-fallback) — it was a deferred
             // `Const` 0 here (a silent wrong value, neither payload nor fallback). Outside the
@@ -497,7 +505,17 @@ impl LowerCtx {
         // Any heap payload: a tuple or record, and also a `??` fallback or a
         // call (#3780's `ok(env.get(k) ?? "unset")`). The bind below refuses
         // whatever it can only defer, so widening the shape stays honest.
-        if !is_heap_ty(&payload.ty) {
+        // A var payload that is a PARAM's value, or the temporary THIS retry
+        // bound, has already tried the direct constructor route: rebinding it
+        // cannot make progress and recursed indefinitely. A local the body
+        // bound is a payload like any other — binding it to an owned temporary
+        // is what lets the arm lower (#3144's `pick` walled when every var
+        // payload was refused).
+        let retried = |id: &VarId| {
+            BOUND_PAYLOADS.with(|b| b.borrow().contains(id))
+                || self.value_of.get(id).is_some_and(|v| self.param_values.contains(v))
+        };
+        if !is_heap_ty(&payload.ty) || matches!(&payload.kind, IrExprKind::Var { id } if retried(id)) {
             return None;
         }
         let mark = self.ops.len();
@@ -525,7 +543,10 @@ impl LowerCtx {
                 _ => IrExprKind::ResultErr { expr: Box::new(var) },
             };
             let rebuilt = IrExpr { kind, ..ctor.clone() };
-            self.lower_heap_result_arm(&rebuilt, result_ty)
+            BOUND_PAYLOADS.with(|b| b.borrow_mut().insert(tmp));
+            let arm = self.lower_heap_result_arm(&rebuilt, result_ty);
+            BOUND_PAYLOADS.with(|b| b.borrow_mut().remove(&tmp));
+            arm
         });
         if lowered.is_none() {
             self.ops.truncate(mark);
@@ -536,4 +557,29 @@ impl LowerCtx {
     }
 }
 
+thread_local! {
+    /// The temporaries [`LowerCtx::lower_result_ctor_bound_payload`] bound and
+    /// is retrying the constructor over, while it does.
+    static BOUND_PAYLOADS: std::cell::RefCell<std::collections::HashSet<VarId>> = std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
 include!("closure_variant_capture.rs");
+
+#[cfg(test)]
+mod result_payload_retry_tests {
+    use super::*;
+    #[test]
+    fn bound_result_payload_does_not_retry_an_identical_constructor() {
+        use almide_lang::types::constructor::TypeConstructorId as C;
+        let mut ctx = LowerCtx::default();
+        let ty = Ty::Tuple(vec![Ty::String, Ty::Int].into());
+        let payload = IrExpr { kind: IrExprKind::Var { id: VarId(0) }, ty: ty.clone(), span: None, def_id: None };
+        let ctor = IrExpr { kind: IrExprKind::ResultOk { expr: Box::new(payload) },
+            ty: Ty::Applied(C::Result, vec![ty, Ty::String].into()), span: None, def_id: None };
+        ctx.value_of.insert(VarId(0), ValueId(0));
+        ctx.param_values.insert(ValueId(0));
+        ctx.materialized_aggregates.insert(ValueId(0));
+        assert!(ctx.lower_result_ctor_bound_payload(&ctor, &ctor.ty).is_none());
+        assert!(ctx.ops.is_empty(), "a declined retry must leave the original binding intact");
+    }
+}

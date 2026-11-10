@@ -464,14 +464,17 @@ impl Emitter<'_> {
     /// Var's object is shared and moves out (`am`); a non-Var borrowed
     /// tail (a native arm's View) declines; anything else is poison.
     pub(crate) fn witness_tail_var(&mut self, tail: &almide_ir::IrExpr) {
-        let src = self.witness_tail_src(tail);
-        let view = crate::witness_unwrap::is_extraction_view(tail);
-        let Some(w) = self.witness.as_mut() else { return };
-        // After a `return_call` (a tail `f(x)!` seen through, C-069) the
-        // wrap the emitter still writes is dead: nothing to record.
-        if w.dead() {
+        // After a return_call the epilogue is dead, including any derived
+        // select. Otherwise its ret-inc shares whichever borrowed arm won.
+        if self.witness.as_ref().is_none_or(|w| w.dead()) {
             return;
         }
+        let src = self.witness_tail_src(tail);
+        let view = crate::witness_unwrap::is_extraction_view(tail);
+        if src.is_none() && !view && self.witness_share_select(tail) {
+            return;
+        }
+        let Some(w) = self.witness.as_mut() else { return };
         match src {
             Some(l) if w.ret_move(l) => {}
             None if view => w.view_share_move(),

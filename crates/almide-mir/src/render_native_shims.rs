@@ -21,7 +21,7 @@ use super::render_native::NTy;
 /// write prints the line again through `print!`, which fails the same way
 /// and panics with std's own message. Under the fan runtime the line goes
 /// through its `print!` (render_native_fan::FAN_LINE).
-pub(crate) const PRINT_SHIMS: &str = "fn almide_v1_line(line: &[u8]) {\n    if std::io::Write::write_all(&mut std::io::stdout().lock(), line).is_err() { print!(\"{}\", String::from_utf8_lossy(line)) }\n}\nfn rt_println_fmt(args: std::fmt::Arguments<'_>) {\n    struct Line { buf: [u8; 256], n: usize, spill: Vec<u8> }\n    impl std::fmt::Write for Line {\n        fn write_str(&mut self, s: &str) -> std::fmt::Result {\n            if self.spill.is_empty() && self.n + s.len() < self.buf.len() {\n                self.buf[self.n..self.n + s.len()].copy_from_slice(s.as_bytes());\n                self.n += s.len();\n            } else {\n                if self.spill.is_empty() { self.spill.extend_from_slice(&self.buf[..self.n]); }\n                self.spill.extend_from_slice(s.as_bytes());\n            }\n            Ok(())\n        }\n    }\n    let mut l = Line { buf: [0; 256], n: 0, spill: Vec::new() };\n    let _ = std::fmt::Write::write_fmt(&mut l, args);\n    if l.spill.is_empty() { l.buf[l.n] = b'\\n'; almide_v1_line(&l.buf[..=l.n]) } else { l.spill.push(b'\\n'); almide_v1_line(&l.spill) }\n}\nfn rt_print_str(s: &str) { rt_println_fmt(format_args!(\"{}\", s)) }";
+pub(crate) const PRINT_SHIMS: &str = "fn almide_v1_line(line: &[u8]) {\n    if std::io::Write::write_all(&mut std::io::stdout().lock(), line).is_err() { print!(\"{}\", String::from_utf8_lossy(line)) }\n}\nfn rt_println_fmt(args: std::fmt::Arguments<'_>) {\n    struct Line { buf: [u8; 256], n: usize, spill: Vec<u8> }\n    impl std::fmt::Write for Line {\n        fn write_str(&mut self, s: &str) -> std::fmt::Result {\n            if self.spill.is_empty() && self.n + s.len() < self.buf.len() {\n                self.buf[self.n..self.n + s.len()].copy_from_slice(s.as_bytes());\n                self.n += s.len();\n            } else {\n                if self.spill.is_empty() { self.spill.extend_from_slice(&self.buf[..self.n]); }\n                self.spill.extend_from_slice(s.as_bytes());\n            }\n            Ok(())\n        }\n    }\n    let mut l = Line { buf: [0; 256], n: 0, spill: Vec::new() };\n    let _ = std::fmt::Write::write_fmt(&mut l, args);\n    if l.spill.is_empty() { l.buf[l.n] = b'\\n'; almide_v1_line(&l.buf[..=l.n]) } else { l.spill.push(b'\\n'); almide_v1_line(&l.spill) }\n}\nfn rt_print_str(s: &str) {\n    // The line as is: no formatter pass over one string.\n    if s.len() < 256 {\n        let mut buf = [0u8; 256];\n        buf[..s.len()].copy_from_slice(s.as_bytes());\n        buf[s.len()] = b'\\n';\n        almide_v1_line(&buf[..=s.len()])\n    } else {\n        let mut line = Vec::with_capacity(s.len() + 1);\n        line.extend_from_slice(s.as_bytes());\n        line.push(b'\\n');\n        almide_v1_line(&line)\n    }\n}";
 
 const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("int.to_string", &[NTy::I64],
@@ -62,27 +62,27 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     // so this one row serves both, as `math.pow`'s did.
     ("int.pow", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "fn rt_int_pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
+            "fn rt_int_pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { almide_abort(\"negative exponent\"); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
     ("string.cmp", // Byte-wise lexicographic, -1/0/1 (C-019: rt_string_extra cmp = native oracle).
             &[NTy::Str, NTy::Str],
             Some(NTy::I64),
             "fn rt_string_cmp(a: &str, b: &str) -> i64 {\n    match a.cmp(b) { std::cmp::Ordering::Less => -1, std::cmp::Ordering::Equal => 0, std::cmp::Ordering::Greater => 1 }\n}"),
     ("__chk_div", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "#[inline(always)]\nfn rt_chk_div(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a / b\n}"),
+            "#[inline(always)]\nfn rt_chk_div(a: i64, b: i64) -> i64 {\n    if b == 0 { almide_abort(\"division by zero\"); }\n    if a == i64::MIN && b == -1 { almide_abort(\"integer overflow\"); }\n    a / b\n}"),
     ("__chk_mod", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
             // v0's `almide_mod` macro prints "division by zero" for a zero rhs (mod and
             // div share the message — the C-002 oracle text); keep byte parity.
-            "#[inline(always)]\nfn rt_chk_mod(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a % b\n}"),
+            "#[inline(always)]\nfn rt_chk_mod(a: i64, b: i64) -> i64 {\n    if b == 0 { almide_abort(\"division by zero\"); }\n    if a == i64::MIN && b == -1 { almide_abort(\"integer overflow\"); }\n    a % b\n}"),
     // The unsigned 64-bit lane (#872): the i64 slot carries the u64 bit
     // pattern. Same divide-by-zero message bytes; no MIN÷-1 case unsigned.
     ("__chk_div_u", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "#[inline(always)]\nfn rt_chk_div_u(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    ((a as u64) / (b as u64)) as i64\n}"),
+            "#[inline(always)]\nfn rt_chk_div_u(a: i64, b: i64) -> i64 {\n    if b == 0 { almide_abort(\"division by zero\"); }\n    ((a as u64) / (b as u64)) as i64\n}"),
     ("__chk_mod_u", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "#[inline(always)]\nfn rt_chk_mod_u(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    ((a as u64) % (b as u64)) as i64\n}"),
+            "#[inline(always)]\nfn rt_chk_mod_u(a: i64, b: i64) -> i64 {\n    if b == 0 { almide_abort(\"division by zero\"); }\n    ((a as u64) % (b as u64)) as i64\n}"),
 ];
 
 /// C-418's escaper (#4126, #4262), the one shim whose source is not a

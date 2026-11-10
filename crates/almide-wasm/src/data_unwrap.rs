@@ -187,13 +187,10 @@ impl Emitter<'_> {
                             self.emit_exit(&plan);
                             self.f.instructions().local_get(self.tmp_i32_local).return_();
                             self.witness_unwrap_exit(wc, Leaves::Fresh);
-                        } else if self.in_main {
+                        } else {
                             let none_msg = self.pool.intern("none");
                             self.f.instructions().i32_const(none_msg as i32);
                             self.abort_frame();
-                        } else {
-                            self.witness_unwrap_decline("trap");
-                            self.f.instructions().unreachable();
                         }
                         self.f.instructions().end().local_get(self.scr_i32_local);
                         self.witness_unwrap_close();
@@ -244,9 +241,11 @@ impl Emitter<'_> {
                             self.emit_exit(&plan);
                             self.f.instructions().local_get(self.scr_i32_local).return_();
                             self.witness_unwrap_exit(wc, Leaves::Carrier);
-                        } else if self.in_main {
+                        } else {
                             // #3470: any error type aborts with the message
                             // native's `fn main` wrapper renders from it.
+                            // A total test callback has no error channel to
+                            // propagate into; it uses the same abort terminal.
                             let err_ir = crate::display::ir_arg(Some(&expr.ty), 1).cloned();
                             let scr = self.scr_i32_local;
                             let fresh = self.emit_abort_message(ert, err_ir.as_ref(), |s| {
@@ -255,9 +254,6 @@ impl Emitter<'_> {
                             })?;
                             self.witness_abort_built(fresh);
                             self.abort_frame();
-                        } else {
-                            self.witness_unwrap_decline("trap");
-                            self.f.instructions().unreachable();
                         }
                         self.f.instructions().end().local_get(self.scr_i32_local);
                         self.witness_unwrap_close();

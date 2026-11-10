@@ -70,6 +70,11 @@ use super::lines::{flat_exits, hoist, net, record};
 mod carry;
 use carry::carry;
 
+/// The nodes a walk can skip (#4614), split for the file budget.
+#[path = "witness_paths_skip.rs"]
+mod skip;
+use skip::{Index, LoopRef, SeqIndex};
+
 /// The `Carry` depth of an OUTER holder the whole frame borrows (#2755 /
 /// #2758, witness_carry.rs `frame_carry`).
 pub(crate) const FRAME_HELD: u32 = u32::MAX;
@@ -316,6 +321,20 @@ struct Path {
 /// The cap on enumerated paths per object: beyond it the frame declines.
 const PATH_CAP: usize = 64;
 
+/// The walk's work: one per node a path is stepped through, one per loop
+/// activation queued (#4614: tests/witness_paths_linear.rs reads it to pin
+/// the build's growth with the number of objects in one frame).
+static STEPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn bump() {
+    STEPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The walk's work so far, process-wide.
+pub(crate) fn steps() -> u64 {
+    STEPS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Where a walk runs: the frame, or one loop iteration.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Scope<'t> {
@@ -328,9 +347,9 @@ enum Scope<'t> {
     Iteration { carried: &'t [u32], held: &'t [u32], lifted: bool },
 }
 
-impl Scope<'_> {
-    fn held(&self) -> &[u32] {
-        match self {
+impl<'t> Scope<'t> {
+    fn held(&self) -> &'t [u32] {
+        match *self {
             Scope::Frame(held) | Scope::Iteration { held, .. } => held,
         }
     }
@@ -341,8 +360,9 @@ impl Scope<'_> {
 }
 
 /// The loops a walk passed, with the locals each carries and the object's
-/// state at each entry.
-type LoopEntries<'t> = Vec<(&'t [Node], &'t [u32], Path)>;
+/// state at each entry — `None` for an entry the walk skipped (#4614,
+/// witness_paths_skip.rs): nothing in its body touches the object.
+type LoopEntries<'t> = Vec<(&'t [Node], &'t [u32], Option<Path>)>;
 
 fn step(ev: &Ev, o: u32, p: &mut Path) {
     match ev {
@@ -416,68 +436,33 @@ enum Exits {
     Fold,
 }
 
-/// Extend each live path through `seq`, for object `o`.
-fn walk<'t>(
-    seq: &'t [Node],
+/// Where one object's walk is: the object, the scope it runs in, and how a
+/// branch with an exiting arm renders.
+#[derive(Clone, Copy)]
+struct At<'t> {
     o: u32,
     scope: Scope<'t>,
     exits: Exits,
-    paths: Vec<Path>,
-    loops: &mut LoopEntries<'t>,
-) -> Result<Vec<Path>, String> {
+}
+
+/// What a walk shares with the walks it starts: the loop queue it appends
+/// to, and the index of the nodes that can touch an object (#4614).
+struct Cx<'t, 'l> {
+    loops: LoopEntries<'t>,
+    ix: &'l Index<'t>,
+}
+
+/// Extend each live path through `seq`, for object `at.o`.
+fn walk<'t>(seq: &'t [Node], at: At<'t>, paths: Vec<Path>, cx: &mut Cx<'t, '_>) -> Result<Vec<Path>, String> {
     let mut paths = paths;
-    for node in seq {
+    let ix = cx.ix;
+    let Some(si) = ix.get(seq) else { return Ok(paths) };
+    let mut from = 0;
+    while let Some(i) = next_touch(si, seq.len(), from, at.o, &paths, &mut cx.loops) {
+        from = i + 1;
         let mut next = Vec::with_capacity(paths.len());
-        for mut p in paths {
-            if p.ended {
-                next.push(p);
-                continue;
-            }
-            match node {
-                Node::Ev(Ev::Jump) => match scope {
-                    Scope::Iteration { carried, .. } => end_iteration(&mut p, carried),
-                    Scope::Frame(_) => return Err("loop-jump-outside-loop".into()),
-                },
-                // #2758: inside a loop body the exit ends the activation with
-                // no hand-on — every frame credit is released by the exit
-                // plan itself (exit_plan.rs `released`).
-                Node::Ev(Ev::Exit) => {
-                    hand_back(&mut p, scope.held());
-                    step(&Ev::Exit, o, &mut p);
-                    p.exited = matches!(scope, Scope::Iteration { .. });
-                }
-                Node::Ev(ev) => step(ev, o, &mut p),
-                Node::Branch(arms) if exits == Exits::Fold => {
-                    next.extend(fold_branch(arms, o, scope, p, loops)?);
-                    continue;
-                }
-                Node::Branch(arms) => {
-                    for arm in arms {
-                        next.extend(walk(arm, o, scope, exits, vec![p.clone()], loops)?);
-                    }
-                    continue;
-                }
-                // A loop is its own activation: skipped here, walked later
-                // from the state it was entered with. #2758: an exit from
-                // its body, for an object this scope holds at the loop, is
-                // one more path of this scope (an item, when exits fold).
-                Node::Loop(body, carried) => {
-                    loops.push((body.as_slice(), carried.as_slice(), p.clone()));
-                    if p.born && !scope.lifted() {
-                        let out = loop_exits(body, carried, o, scope.held(), &p)?;
-                        match exits {
-                            Exits::Paths => next.extend(
-                                out.into_iter().map(|r| Path { events: format!("{}{}", p.events, r.events), ..r }),
-                            ),
-                            Exits::Fold => {
-                                let items: BTreeSet<String> = out.iter().map(|r| format!("{{{}x|}}", r.events)).collect();
-                                p.events.extend(items);
-                            }
-                        }
-                    }
-                }
-            }
-            next.push(p);
+        for p in paths {
+            step_node(&seq[i], at, p, cx, &mut next)?;
         }
         next.sort();
         next.dedup();
@@ -489,12 +474,98 @@ fn walk<'t>(
     Ok(paths)
 }
 
+/// #4614: the next node at or after `from` that can change a live path of
+/// object `o`. The nodes before it change none, and queue their loops as
+/// untouched activations, once per live path. `None` once no path is live or
+/// no later node touches one.
+fn next_touch<'t>(si: &SeqIndex<'t>, len: usize, from: usize, o: u32, paths: &[Path], loops: &mut LoopEntries<'t>) -> Option<usize> {
+    let live = paths.iter().filter(|p| !p.ended).count();
+    if live == 0 {
+        return None;
+    }
+    let held: BTreeSet<u32> = paths.iter().filter(|p| !p.ended).flat_map(|p| p.holders.keys().copied()).collect();
+    let at = si.next(from, o, &held);
+    let refs: Vec<LoopRef<'t>> = si.loops_between(from, at.unwrap_or(len)).copied().collect();
+    for _ in 0..live {
+        for &(body, carried) in &refs {
+            bump();
+            loops.push((body, carried, None));
+        }
+    }
+    at
+}
+
+/// Step one path through one node, pushing what it becomes onto `next`.
+fn step_node<'t>(node: &'t Node, at: At<'t>, mut p: Path, cx: &mut Cx<'t, '_>, next: &mut Vec<Path>) -> Result<(), String> {
+    if p.ended {
+        next.push(p);
+        return Ok(());
+    }
+    bump();
+    match node {
+        Node::Ev(Ev::Jump) => match at.scope {
+            Scope::Iteration { carried, .. } => end_iteration(&mut p, carried),
+            Scope::Frame(_) => return Err("loop-jump-outside-loop".into()),
+        },
+        // #2758: inside a loop body the exit ends the activation with
+        // no hand-on — every frame credit is released by the exit
+        // plan itself (exit_plan.rs `released`).
+        Node::Ev(Ev::Exit) => {
+            hand_back(&mut p, at.scope.held());
+            step(&Ev::Exit, at.o, &mut p);
+            p.exited = matches!(at.scope, Scope::Iteration { .. });
+        }
+        Node::Ev(ev) => step(ev, at.o, &mut p),
+        Node::Branch(arms) if at.exits == Exits::Fold => {
+            next.extend(fold_branch(arms, at, p, cx)?);
+            return Ok(());
+        }
+        Node::Branch(arms) => {
+            for arm in arms {
+                next.extend(walk(arm, at, vec![p.clone()], cx)?);
+            }
+            return Ok(());
+        }
+        Node::Loop(body, carried) => enter_loop(body, carried, at, &mut p, cx, next)?,
+    }
+    next.push(p);
+    Ok(())
+}
+
+/// A loop is its own activation: queued here, walked later from the state it
+/// was entered with. #2758: an exit from its body, for an object this scope
+/// holds at the loop, is one more path of this scope (an item, when exits
+/// fold).
+fn enter_loop<'t>(
+    body: &'t [Node],
+    carried: &'t [u32],
+    at: At<'t>,
+    p: &mut Path,
+    cx: &mut Cx<'t, '_>,
+    next: &mut Vec<Path>,
+) -> Result<(), String> {
+    bump();
+    cx.loops.push((body, carried, Some(p.clone())));
+    if !p.born || at.scope.lifted() {
+        return Ok(());
+    }
+    let out = loop_exits(body, carried, at, p, cx.ix)?;
+    match at.exits {
+        Exits::Paths => next.extend(out.into_iter().map(|r| Path { events: format!("{}{}", p.events, r.events), ..r })),
+        Exits::Fold => {
+            let items: BTreeSet<String> = out.iter().map(|r| format!("{{{}x|}}", r.events)).collect();
+            p.events.extend(items);
+        }
+    }
+    Ok(())
+}
+
 /// #2758: the paths of ONE iteration of `body` that EXIT, for an object
 /// alive at the loop in state `p` — each the object's whole account from the
 /// iteration's start to the exit, flat, ended. Walked from `p` (the holders
 /// it had, none fresh) as the iteration that exits; an exit from a nested
 /// loop arrives the same way, lifted one level per loop.
-fn loop_exits(body: &[Node], carried: &[u32], o: u32, held: &[u32], p: &Path) -> Result<Vec<Path>, String> {
+fn loop_exits<'t>(body: &'t [Node], carried: &'t [u32], at: At<'t>, p: &Path, ix: &Index<'t>) -> Result<Vec<Path>, String> {
     let start = Path {
         events: String::new(),
         holders: p.holders.iter().map(|(&l, h)| (l, Holder { fresh: false, ..*h })).collect(),
@@ -503,9 +574,10 @@ fn loop_exits(body: &[Node], carried: &[u32], o: u32, held: &[u32], p: &Path) ->
         exited: false,
         ..p.clone()
     };
-    let scope = Scope::Iteration { carried, held, lifted: false };
-    let mut scratch: LoopEntries = Vec::new();
-    Ok(walk(body, o, scope, Exits::Paths, vec![start], &mut scratch)?.into_iter().filter(|r| r.exited).collect())
+    let scope = Scope::Iteration { carried, held: at.scope.held(), lifted: false };
+    let mut scratch = Cx { loops: Vec::new(), ix };
+    let iteration = At { o: at.o, scope, exits: Exits::Paths };
+    Ok(walk(body, iteration, vec![start], &mut scratch)?.into_iter().filter(|r| r.exited).collect())
 }
 
 /// One branch in [`Exits::Fold`] mode: each arm is walked from the entry
@@ -513,13 +585,7 @@ fn loop_exits(body: &[Node], carried: &[u32], o: u32, held: &[u32], p: &Path) ->
 /// items prefixed to every surviving path. A branch whose every arm exits
 /// leaves the enclosing arm too: its paths stay ended, for the enclosing
 /// branch (or the frame) to take.
-fn fold_branch<'t>(
-    arms: &'t [Vec<Node>],
-    o: u32,
-    scope: Scope<'t>,
-    p: Path,
-    loops: &mut LoopEntries<'t>,
-) -> Result<Vec<Path>, String> {
+fn fold_branch<'t>(arms: &'t [Vec<Node>], at: At<'t>, p: Path, cx: &mut Cx<'t, '_>) -> Result<Vec<Path>, String> {
     // (events, aborted): an aborting arm folds as `{<arm>t|}` — checked
     // fault-free from the count at the branch, its remainder discharged.
     let mut exited: BTreeSet<(String, bool)> = BTreeSet::new();
@@ -527,7 +593,7 @@ fn fold_branch<'t>(
     let mut survivors: Vec<Path> = Vec::new();
     for arm in arms {
         let start = Path { events: String::new(), ..p.clone() };
-        for r in walk(arm, o, scope, Exits::Fold, vec![start], loops)? {
+        for r in walk(arm, At { exits: Exits::Fold, ..at }, vec![start], cx)? {
             if !r.ended {
                 survivors.push(r);
                 continue;
@@ -538,7 +604,7 @@ fn fold_branch<'t>(
             // flat item, checked from the same count.
             // #2758: an exit lifted to the enclosing holder's line is not
             // this line's item (`loop_exits`).
-            if !(r.exited && scope.lifted()) && (r.born || !r.events.is_empty()) {
+            if !(r.exited && at.scope.lifted()) && (r.born || !r.events.is_empty()) {
                 for (flat, aborted) in flat_exits(&r.events, r.aborted) {
                     exited.insert((flat, aborted));
                 }
@@ -632,9 +698,9 @@ fn line(paths: &[Path], exits: Exits) -> Result<String, String> {
 
 /// One object's lines: the frame line, then one line per loop activation
 /// that touches it.
-fn render_object(tree: &[Node], o: u32, exits: Exits, held: &[u32], out: &mut String) -> Result<(), String> {
-    let mut loops: LoopEntries = Vec::new();
-    let mut frame = walk(tree, o, Scope::Frame(held), exits, vec![Path::default()], &mut loops)?;
+fn render_object<'t>(tree: &'t [Node], o: u32, exits: Exits, held: &'t [u32], out: &mut String, ix: &Index<'t>) -> Result<(), String> {
+    let mut cx = Cx { loops: Vec::new(), ix };
+    let mut frame = walk(tree, At { o, scope: Scope::Frame(held), exits }, vec![Path::default()], &mut cx)?;
     frame.iter_mut().filter(|p| !p.ended).for_each(|p| hand_back(p, held));
     out.push_str(&line(&frame, exits)?);
     out.push('\n');
@@ -642,9 +708,29 @@ fn render_object(tree: &[Node], o: u32, exits: Exits, held: &[u32], out: &mut St
     // body are reached by that body's walk (appended as it runs).
     let mut k = 0;
     let mut by_loop: Vec<(&[Node], Vec<Path>)> = Vec::new();
-    while k < loops.len() {
-        let (body, carried, entry) = loops[k].clone();
+    while k < cx.loops.len() {
+        let (body, carried, entry) = cx.loops[k].clone();
         k += 1;
+        let Some(entry) = entry else {
+            // #4614: an activation nothing in the body touches — its one
+            // path records nothing, and it queues the body's loops as the
+            // body's walk would.
+            if let Some(si) = ix.get(body) {
+                for &(b, c) in si.loops_between(0, body.len()) {
+                    bump();
+                    cx.loops.push((b, c, None));
+                }
+            }
+            let untouched = Path { ended: true, ..Path::default() };
+            match by_loop.iter_mut().find(|(b, _)| std::ptr::eq(*b, body)) {
+                Some((_, ps)) => ps.push(untouched),
+                None => by_loop.push((body, vec![untouched])),
+            }
+            if cx.loops.len() > PATH_CAP {
+                return Err("branch-paths:cap".into());
+            }
+            continue;
+        };
         let start = Path {
             events: String::new(),
             born: entry.born,
@@ -656,7 +742,7 @@ fn render_object(tree: &[Node], o: u32, exits: Exits, held: &[u32], out: &mut St
         };
         let lifted = entry.born;
         let scope = Scope::Iteration { carried, held, lifted };
-        let mut iter = walk(body, o, scope, exits, vec![start], &mut loops)?;
+        let mut iter = walk(body, At { o, scope, exits }, vec![start], &mut cx)?;
         // #2758: an exit of an object the loop was entered with is on the
         // enclosing line (`loop_exits`); this line keeps the other paths.
         iter.retain(|p| !(lifted && p.exited));
@@ -665,7 +751,7 @@ fn render_object(tree: &[Node], o: u32, exits: Exits, held: &[u32], out: &mut St
             Some((_, ps)) => ps.extend(iter),
             None => by_loop.push((body, iter)),
         }
-        if loops.len() > PATH_CAP {
+        if cx.loops.len() > PATH_CAP {
             return Err("branch-paths:cap".into());
         }
     }
@@ -687,18 +773,19 @@ pub(crate) fn render(log: &[Ev], objects: u32) -> Result<String, String> {
     let mut objects = objects;
     carry(&mut tree, 0, &mut objects);
     let held = carry::frame_carry(&mut tree, &mut objects);
+    let ix = Index::new(&tree);
     let mut s = String::new();
     for o in 0..objects {
         // The whole-path form first (every certificate before #2758 keeps
         // its bytes); an object whose paths it cannot carry — a frame with
         // several exits — is rendered again with its exits folded.
         let mut line = String::new();
-        if let Err(e) = render_object(&tree, o, Exits::Paths, &held, &mut line) {
+        if let Err(e) = render_object(&tree, o, Exits::Paths, &held, &mut line, &ix) {
             if !e.starts_with("branch-paths") {
                 return Err(e);
             }
             line.clear();
-            render_object(&tree, o, Exits::Fold, &held, &mut line)?;
+            render_object(&tree, o, Exits::Fold, &held, &mut line, &ix)?;
         }
         s.push_str(&line);
     }

@@ -170,27 +170,26 @@ fn render_if_then(
 
 /// `Op::Else` — close the `then` arm, patch the if-as-value join decl in (its
 /// type is known now), open the `else` arm.
-fn render_else(
-    val: &Option<ValueId>,
+/// Infer a join from its first surviving arm and assign only on that path.
+fn render_first_join_value(
+    v: ValueId, marker: &str, d: &ValueId,
+    known: &std::collections::BTreeSet<ValueId>,
     borrows: &std::collections::BTreeSet<ValueId>,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: &mut usize,
-    if_stack: &mut [Option<IfJoin>],
+    tys: &mut BTreeMap<ValueId, NTy>, out: &mut String, indent: usize,
 ) -> Result<(), LowerError> {
     macro_rules! line {
         ($($arg:tt)*) => {{
-            for _ in 0..*indent { out.push_str("    "); }
+            for _ in 0..indent { out.push_str("    "); }
             writeln!(out, $($arg)*).unwrap();
         }};
     }
-    if let Some(Some((marker, d, known))) = if_stack.last_mut() {
-        let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
         let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
         let arm_own = !known.contains(&v);
         // Every heap join is declared unset (#4006, no-perf-loss): both arms
         // assign it, so a default built and dropped per evaluation buys nothing.
         let (decl, join_t, rhs) = match t {
+            NTy::Never => return Err(wall("native: an uninhabited value cannot choose a join type")),
+            NTy::F32 => (format!("let mut {}: f32;", var(*d)), t, var(v)),
             // #3532: a borrow join holds the arm's shared reference.
             NTy::VecRef | NTy::StrRef if borrows.contains(d) => (
                 format!("let {}: {};", var(*d), if t == NTy::VecRef { "&[i64]" } else { "&str" }),
@@ -242,8 +241,8 @@ fn render_else(
                 NTy::VecStr,
                 if t == NTy::VecStr { format!("{}.clone()", var(v)) } else { format!("{}.to_vec()", var(v)) },
             ),
-            // Declared unset: both arms assign it (a `Default` placeholder
-            // would be built and dropped on every pass through the join).
+            // Declared unset: both arms assign it (a placeholder would be
+            // built and dropped on every pass through the join).
             NTy::Rec(i) | NTy::RecRef(i) => (
                 format!("let mut {}: {};", var(*d), crate::render_native_rec::struct_name(i)),
                 NTy::Rec(i),
@@ -255,14 +254,38 @@ fn render_else(
                 var(v),
             ),
             NTy::ResStr => (
-                format!("let mut {}: Result<AlmideString, AlmideString> = Ok(AlmideString::new());", var(*d)),
+                format!("let mut {}: Result<AlmideString, AlmideString>;", var(*d)),
                 NTy::ResStr,
                 format!("{}.clone()", var(v)),
             ),
         };
-        *out = out.replacen(marker.as_str(), &decl, 1);
+        *out = out.replacen(marker, &decl, 1);
         tys.insert(*d, join_t);
         line!("{} = {};", var(*d), join_rhs(v, t, arm_own, rhs));
+    Ok(())
+}
+
+fn render_else(
+    val: &Option<ValueId>,
+    aborts: bool,
+    borrows: &std::collections::BTreeSet<ValueId>,
+    tys: &mut BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    indent: &mut usize,
+    if_stack: &mut [Option<IfJoin>],
+) -> Result<(), LowerError> {
+    macro_rules! line {
+        ($($arg:tt)*) => {{
+            for _ in 0..*indent { out.push_str("    "); }
+            writeln!(out, $($arg)*).unwrap();
+        }};
+    }
+    if let Some(Some((marker, d, known))) = if_stack.last_mut() {
+        if let Some(v) = *val {
+            render_first_join_value(v, marker, d, known, borrows, tys, out, *indent)?;
+        } else if !aborts {
+            return Err(wall("native: if-value arm without a yield or proven abort"));
+        }
         // the else arm's own values are the ones defined after this point
         *known = tys.keys().copied().collect();
     }
@@ -275,8 +298,9 @@ fn render_else(
 /// `Op::EndIf` — close the `else` arm, converging the if-as-value join (if any).
 fn render_end_if(
     val: &Option<ValueId>,
+    aborts: bool,
     borrows: &std::collections::BTreeSet<ValueId>,
-    tys: &BTreeMap<ValueId, NTy>,
+    tys: &mut BTreeMap<ValueId, NTy>,
     out: &mut String,
     indent: &mut usize,
     if_stack: &mut Vec<Option<IfJoin>>,
@@ -288,8 +312,19 @@ fn render_end_if(
         }};
     }
     let top = if_stack.pop().ok_or_else(|| wall("native: EndIf without IfThen"))?;
-    if let Some((_, d, known)) = top {
+    if let Some((marker, d, known)) = top {
+        if val.is_none() && aborts && tys.contains_key(&d) {
+            *indent -= 1;
+            line!("}}");
+            return Ok(());
+        }
         let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
+        if !tys.contains_key(&d) {
+            render_first_join_value(v, &marker, &d, &known, borrows, tys, out, *indent)?;
+            *indent -= 1;
+            line!("}}");
+            return Ok(());
+        }
         let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
         let join_t = *tys.get(&d).ok_or_else(|| wall("native: if-value join untyped"))?;
         if borrows.contains(&d) && matches!(join_t, NTy::VecRef | NTy::StrRef | NTy::RecRef(_)) {
@@ -302,15 +337,16 @@ fn render_end_if(
             return Ok(());
         }
         let rhs = end_if_copy_rhs(v, t);
-        let arm_t = match t {
-            NTy::StrRef => NTy::Str,
-            NTy::VecRef => NTy::Vec,
-            NTy::VecStrRef => NTy::VecStr,
-            NTy::RecRef(i) => NTy::Rec(i),
-            other => other,
-        };
-        if arm_t != join_t {
-            return Err(wall("native: if-value arms disagree on type"));
+        if let Some(recode) = crate::native_value_repr::scalar_recode(&var(v), t, join_t) {
+            line!("{} = {};", var(d), recode);
+            *indent -= 1;
+            line!("}}");
+            return Ok(());
+        }
+        let arm_t = crate::render_native::owned_nty(t);
+        if arm_t != join_t && !(crate::render_native::owned_nty(join_t) == join_t
+            && crate::native_value_repr::same_owned(arm_t, join_t)) {
+            return Err(wall(format!("native: if-value arms disagree on type ({join_t:?} vs {arm_t:?})")));
         }
         line!("{} = {};", var(d), join_rhs(v, t, !known.contains(&v), rhs));
     }
@@ -319,11 +355,13 @@ fn render_end_if(
     Ok(())
 }
 
-/// The `else` arm's yield copied into the join, by its NTy (the copy
-/// [`join_rhs`] keeps when the value outlives the arm).
+/// The owned copy of `v`, by its NTy: an if-value arm's yield copied into the
+/// join (the copy [`join_rhs`] keeps when the value outlives the arm), or a
+/// `SetLocal`'s source.
 fn end_if_copy_rhs(v: ValueId, t: NTy) -> String {
     match t {
-        NTy::I64 | NTy::F64 => var(v),
+        NTy::Never => format!("match {} {{}}", var(v)),
+        NTy::I64 | NTy::F32 | NTy::F64 => var(v),
         NTy::Str => format!("{}.clone()", var(v)),
         NTy::StrRef => format!("AlmideString::from({})", var(v)),
         NTy::Vec => format!("{}.clone()", var(v)),
@@ -359,6 +397,11 @@ pub(crate) fn call_arg(a: &CallArg, tys: &BTreeMap<ValueId, NTy>) -> Result<(Str
     match a {
         CallArg::Handle(v) | CallArg::Scalar(v) => {
             let t = *tys.get(v).ok_or_else(|| wall("native: call arg untyped"))?;
+            // A lent element Option (`Option<&A>`) handed to a call: the owned
+            // Option the call's param is typed as (the one copy it asks for).
+            if crate::render_native_borrow_read::borrowed_option(*v) {
+                return Ok((format!("{}.cloned()", var(*v)), t));
+            }
             Ok((var(*v), t))
         }
         CallArg::Imm(n) => Ok((format!("{n}i64"), NTy::I64)),
@@ -366,13 +409,24 @@ pub(crate) fn call_arg(a: &CallArg, tys: &BTreeMap<ValueId, NTy>) -> Result<(Str
     }
 }
 
+/// MIR scalar slots and integer operations carry IEEE bits for Float values.
+/// Numeric float arithmetic uses FloatBin; this conversion never casts a value.
+pub(crate) fn scalar_bits(v: ValueId, tys: &BTreeMap<ValueId, NTy>) -> Result<String, LowerError> {
+    match tys.get(&v) {
+        Some(NTy::I64) => Ok(var(v)),
+        Some(NTy::F64) => Ok(format!("({}.to_bits() as i64)", var(v))),
+        other => Err(wall(format!("native: scalar bits of {other:?}"))),
+    }
+}
+
 pub(crate) fn render_int_binop(
     op: &IntOp,
     a: ValueId,
     b: ValueId,
+    tys: &BTreeMap<ValueId, NTy>,
     used_shims: &mut Vec<&'static str>,
 ) -> Result<String, LowerError> {
-    let (l, r) = (var(a), var(b));
+    let (l, r) = (scalar_bits(a, tys)?, scalar_bits(b, tys)?);
     Ok(match op {
         IntOp::Add => format!("{l}.wrapping_add({r})"),
         IntOp::Sub => format!("{l}.wrapping_sub({r})"),
@@ -457,4 +511,45 @@ fn op_name(op: &Op) -> String {
     // old hand table answered "unknown" for anything it lagged behind.
     let d = format!("{op:?}");
     d.split([' ', '{', '(']).next().unwrap_or("Op").to_string()
+}
+
+/// [`render_declared_floor_call`]'s moved payloads: a borrowed read whose
+/// carrier dies at the call is taken, moved out, where the floor fn's param
+/// (or its `@reuse` twin's) is by value and no other arg reads that carrier.
+fn take_dying_payloads(
+    args: &[CallArg],
+    floor: &crate::native_floor::FloorFn,
+    rendered: &mut [(String, NTy)],
+    dying: &mut [bool],
+) {
+    for (k, a) in args.iter().enumerate() {
+        let CallArg::Handle(v) = a else { continue };
+        let Some(take) = crate::render_native_move::taken_arg(*v) else { continue };
+        let by_value = matches!(
+            floor.params.get(k),
+            Some(
+                crate::native_floor::FloorParam::Map(false)
+                    | crate::native_floor::FloorParam::Set(false)
+                    | crate::native_floor::FloorParam::Value(false)
+                    | crate::native_floor::FloorParam::Matrix(false)
+            )
+        ) || floor.twin.as_ref().is_some_and(|t| t.0 == k);
+        // No other arg may read the same carrier while it is edited.
+        let base_of = |x: &ValueId| {
+            crate::render_native_addr::payload_take_of(*x)
+                .map(|p| p.0)
+                .or_else(|| crate::render_native_addr::field_of(*x).map(|p| p.0))
+        };
+        let base = base_of(v);
+        let shared = args.iter().enumerate().any(|(j, b)| {
+            j != k && matches!(b, CallArg::Handle(x) if Some(*x) == base || (base.is_some() && base_of(x) == base))
+        });
+        // Only a borrowed read has a payload to take.
+        let owned = crate::render_native::owned_nty(rendered[k].1);
+        if !by_value || shared || owned == rendered[k].1 {
+            continue;
+        }
+        rendered[k] = (format!("{{ {take} }}"), owned);
+        dying[k] = true;
+    }
 }

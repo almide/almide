@@ -116,7 +116,7 @@ impl LowerCtx {
             return None;
         };
         let else_marker_at = self.ops.len();
-        self.ops.push(Op::Else { val: Some(err_obj) });
+        self.ops.push(Op::Else { val: err_obj });
         // ELSE (tag == 0 = Ok): a scalar payload copies; a HEAP payload (cap-as-tag
         // subject) binds the @12 handle as a BORROW — the subject temp still owns it
         // (freed by the epilogue), an arm that returns it acquires its own ref (Dup).
@@ -127,7 +127,11 @@ impl LowerCtx {
             return None;
         };
         self.emit_arm_release_parity(&consumed_by_err, &consumed_by_ok, else_marker_at);
-        self.ops.push(Op::EndIf { val: Some(ok_obj) });
+        if err_obj.is_none() && ok_obj.is_none() {
+            self.rollback_match_attempt(ops_mark, lifted_mark, lhh_mark);
+            return None;
+        }
+        self.ops.push(Op::EndIf { val: ok_obj });
         Some(dst)
     }
 
@@ -221,6 +225,12 @@ impl LowerCtx {
     /// declines — a non-handle call arg, or a deferred Opaque bind (whose block is not
     /// real yet, so the tag read would be garbage). The caller owns the rollback.
     fn materialize_owned_match_subject(&mut self, subject: &IrExpr) -> Option<ValueId> {
+        // A value-producing match needs the same real effect-result object
+        // as a statement match. Its existing materializer checks the admitted
+        // payload/drop route and records the call's capabilities.
+        if self.is_effect_result_subject(subject) {
+            return self.try_materialize_effect_result_subject(subject);
+        }
         let subj = match self
             .lower_call_args(std::slice::from_ref(subject))
             .ok()
@@ -251,6 +261,13 @@ impl LowerCtx {
                 self.load_at_offset(h, 12, PrimKind::Load { width: 8 })
             };
             self.value_of.insert(var, payload);
+            if is_heap_ty(pay_ty) {
+                self.aggregate_blocks.insert(payload, crate::render_native_rec::block_key(pay_ty));
+                self.seed_variant_param(payload, pay_ty);
+                if matches!(pay_ty, Ty::Fn { .. }) {
+                    self.closure_values.insert(payload);
+                }
+            }
         }
     }
 
@@ -263,9 +280,9 @@ impl LowerCtx {
         &mut self,
         body: &IrExpr,
         result_ty: &Ty,
-    ) -> Option<(ValueId, Vec<ValueId>)> {
+    ) -> Option<(Option<ValueId>, Vec<ValueId>)> {
         let outer: Vec<ValueId> = self.live_heap_handles.clone();
-        let obj = self.lower_heap_result_arm(body, result_ty)?;
+        let obj = self.lower_heap_result_branch(body, result_ty)?;
         let consumed: Vec<ValueId> =
             outer.iter().copied().filter(|x| !self.live_heap_handles.contains(x)).collect();
         Some((obj, consumed))

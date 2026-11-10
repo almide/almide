@@ -8,7 +8,7 @@
 use crate::lower::LowerError;
 use crate::render_native::{
     render_dup, render_float_bin, render_float_cmp, render_float_un, render_int_binop,
-    render_set_local, OpSink,
+    render_set_local, scalar_bits, OpSink,
 };
 use crate::render_native::{var, wall, NTy};
 use crate::render_native_shims::{
@@ -182,6 +182,7 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             render_result_str_and_slot_op(op, s)
         }
         K::NativeNarrowBin { .. } => render_narrow_bin_op(op, s),
+        K::NativeNarrowPow { .. } => render_narrow_pow_op(op, s),
         K::OptMakeSome | K::OptMakeNone | K::OptCopy | K::OptTag | K::OptPayload => render_option_carrier_op(op, s),
         _ => Ok(false),
     }
@@ -215,7 +216,7 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> 
             };
             tys.insert(*d, NTy::Res);
             line!(
-                "let {}: Result<i64, AlmideString> = Ok({});",
+                "let mut {}: Result<i64, AlmideString> = Ok({});",
                 var(*d),
                 payload
             );
@@ -235,7 +236,7 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> 
                 }
             };
             tys.insert(*d, NTy::Res);
-            line!("let {}: Result<i64, AlmideString> = Err({});", var(*d), src);
+            line!("let mut {}: Result<i64, AlmideString> = Err({});", var(*d), src);
         }
         Op::Prim {
             kind: crate::PrimKind::ResCopy,
@@ -249,7 +250,7 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> 
             };
             let spelled = if t == NTy::ResStr { "Result<AlmideString, AlmideString>" } else { "Result<i64, AlmideString>" };
             tys.insert(*d, t);
-            line!("let {}: {} = {}.clone();", var(*d), spelled, var(args[0]));
+            line!("let mut {}: {} = {}.clone();", var(*d), spelled, var(args[0]));
         }
         Op::Prim {
             kind: crate::PrimKind::ResTag,
@@ -288,11 +289,27 @@ fn render_result_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> 
                     var(*d),
                     var(args[0])
                 );
+                // A copy of this read where the carrier dies moves the string
+                // out of its one slot (render_native_loop's payload move),
+                // whichever side the tag dispatch read it under.
+                crate::render_native_addr::note_payload_take(
+                    *d,
+                    args[0],
+                    format!("match &mut {} {{ Ok(s) | Err(s) => std::mem::take(s) }}", var(args[0])),
+                );
             } else {
                 line!(
                     "let {}: &str = match &{} {{ Err(e) => e.as_str(), Ok(_) => \"\" }};",
                     var(*d),
                     var(args[0])
+                );
+                // Noted for the by-value move out of a dying Result param
+                // (render_native_loop); a local of this kind is not a payload
+                // carrier (`render_native_move::payload_carrier`).
+                crate::render_native_addr::note_payload_take(
+                    *d,
+                    args[0],
+                    format!("match &mut {} {{ Err(e) => std::mem::take(e), Ok(_) => AlmideString::new() }}", var(args[0])),
                 );
             }
         }
@@ -430,7 +447,7 @@ fn render_narrow_bin_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
 }
 
 /// The scalar-Option carrier arms of [`render_native_result_op`].
-fn render_option_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+pub(crate) fn render_option_carrier_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
     let OpSink {
         tys,
         out,
@@ -551,6 +568,10 @@ pub(crate) fn render_native_termination_op(op: &Op, s: OpSink<'_>) -> Result<boo
             dst: None,
             args,
         } if matches!(tys.get(&args[0]), Some(NTy::Str | NTy::StrRef)) => {
+            // The Die ABI carries panic's raw "PANIC: " message. Like the
+            // embedded host's die trap, contain that abort during a request.
+            // ProcExit remains the program's explicit, unconditional exit.
+            line!("if {}.starts_with(\"PANIC: \") {{ almide_contained_unwind(|| {}.to_string()); }}", var(args[0]), var(args[0]));
             line!("eprint!(\"{{}}\", {});", var(args[0]));
             line!("std::process::exit(1);");
         }
@@ -602,7 +623,12 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             Init::IntList(vs) => {
                 tys.insert(*dst, NTy::Vec);
                 let items = vs.iter().map(|v| format!("{v}i64")).collect::<Vec<_>>().join(", ");
-                line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+                if crate::render_native_move::is_stack_lit(*dst) {
+                    // Borrowed only (crate::render_native_move::set_stack_lits).
+                    line!("let mut {}: [i64; {}] = [{items}];", var(*dst), vs.len());
+                } else {
+                    line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+                }
             }
             other => {
                 return Err(wall(format!(
@@ -636,11 +662,12 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
         }
         Op::SetLocal { local, src } => render_set_local(local, src, tys, out, indent)?,
         Op::IntBinOp { dst, op, a, b } => {
-            tys.insert(*dst, NTy::I64);
-            match crate::render_native::cmp_int_expr(op, &var(*a), &var(*b)) {
+            let (l, r) = (scalar_bits(*a, tys)?, scalar_bits(*b, tys)?);
+            match crate::render_native::cmp_int_expr(op, &l, &r) {
                 Some(e) => line!("{}", crate::render_native_cond::bind(*dst, &e)),
-                None => line!("let mut {}: i64 = {};", var(*dst), render_int_binop(op, *a, *b, used_shims)?),
+                None => line!("let mut {}: i64 = {};", var(*dst), render_int_binop(op, *a, *b, tys, used_shims)?),
             }
+            tys.insert(*dst, NTy::I64);
         }
         _ => {
             return render_native_float_op(
@@ -679,12 +706,15 @@ pub(crate) fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
             dst: Some(d),
             args,
         } if args.len() == 2 => render_float_bin(op, d, args, tys, out, indent)?,
-        // `float.__from_int` — int (i64) to f64, carried per the float floor.
+        // Both integer-to-f64 primitives use the same representation boundary.
         Op::Prim {
-            kind: crate::PrimKind::F64FromInt,
+            kind: crate::PrimKind::F64FromInt | crate::PrimKind::IntToFloat,
             dst: Some(d),
             args,
         } if args.len() == 1 => {
+            if tys.get(&args[0]) != Some(&NTy::I64) {
+                return Err(wall("native: integer-to-float conversion requires an i64 operand"));
+            }
             tys.insert(*d, NTy::F64);
             line!("let mut {}: f64 = ({} as f64);", var(*d), var(args[0]));
         }
@@ -693,12 +723,32 @@ pub(crate) fn render_native_float_op(op: &Op, s: OpSink<'_>) -> Result<bool, Low
             dst: Some(d),
             args,
         } if args.len() == 1 => render_float_un(op, d, args, tys, out, indent)?,
+        Op::Prim { kind: crate::PrimKind::FloatToInt, dst: Some(d), args } if args.len() == 1 => {
+            let value = match tys.get(&args[0]) {
+                Some(NTy::F64) => var(args[0]),
+                Some(NTy::I64) => format!("f64::from_bits({} as u64)", var(args[0])),
+                _ => return Err(wall("native: float-to-int conversion requires a float value or its bits")),
+            };
+            tys.insert(*d, NTy::I64);
+            line!("let mut {}: i64 = ({value}) as i64;", var(*d));
+        }
         Op::Prim {
             kind: crate::PrimKind::FloatCmp(op),
             dst: Some(d),
             args,
         } if args.len() == 2 => render_float_cmp(op, d, args, tys, out, indent)?,
-        _ => return Ok(false),
+        // Exercised by float32_arithmetic_rounds -> float_fmod. Preserve
+        // the bits of an f64 local; an i64 operand already holds those bits.
+        Op::Prim { kind: crate::PrimKind::FloatBits, dst: Some(d), args } if args.len() == 1 => {
+            let bits = match tys.get(&args[0]) {
+                Some(NTy::I64) => var(args[0]),
+                Some(NTy::F64) => format!("{}.to_bits() as i64", var(args[0])),
+                other => return Err(wall(format!("native: float bits of a non-scalar value ({other:?})"))),
+            };
+            tys.insert(*d, NTy::I64);
+            line!("let mut {}: i64 = {bits};", var(*d));
+        }
+        _ => return crate::render_native_float32::render(op, OpSink { tys, out, indent, used_shims: s.used_shims }),
     }
     Ok(true)
 }
@@ -709,4 +759,26 @@ fn opt_operand(tys: &std::collections::BTreeMap<crate::ValueId, NTy>, v: crate::
         Some(NTy::Opt) => Ok(var(v)),
         other => Err(wall(format!("native: Option read over a non-Option value ({other:?})"))),
     }
+}
+
+/// Native exponentiation keeps the full exponent, the source abort, and a
+/// concrete wrapping accumulator type. It never delegates a narrow multiply
+/// to an i64 shim and never truncates the exponent to u32.
+fn render_narrow_pow_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
+    let Op::Prim { kind: crate::PrimKind::NativeNarrowPow { bits, signed }, dst: Some(dst), args } = op
+        else { return Ok(false) };
+    if args.len() != 2 || args.iter().any(|v| s.tys.get(v) != Some(&NTy::I64)) {
+        return Err(wall("native: narrow power requires two integer operands"));
+    }
+    if !matches!(bits, 8 | 16 | 32) { return Err(wall("native: unsupported narrow power width")); }
+    let ty = format!("{}{bits}", if *signed { "i" } else { "u" });
+    let (a, b) = (var(args[0]), var(args[1]));
+    s.tys.insert(*dst, NTy::I64);
+    for _ in 0..s.indent { s.out.push_str("    "); }
+    writeln!(s.out, "let mut {}: i64 = {{ let mut __base = {a} as {ty}; let __exp = {b}; \
+        if __exp < 0 {{ almide_abort(\"negative exponent\"); }} \
+        let mut __n = __exp as u64; let mut __r: {ty} = 1; \
+        while __n > 0 {{ if __n & 1 == 1 {{ __r = __r.wrapping_mul(__base); }} \
+        __n >>= 1; if __n > 0 {{ __base = __base.wrapping_mul(__base); }} }} __r as i64 }};", var(*dst)).expect("writing to a String cannot fail");
+    Ok(true)
 }

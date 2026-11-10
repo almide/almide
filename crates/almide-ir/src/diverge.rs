@@ -128,7 +128,7 @@ impl Cut {
 /// Control never comes back from `e`: it is typed `Never` (a diverging call,
 /// an `if` whose every arm diverges), or it is a block whose tail diverges —
 /// the shape this pass leaves behind.
-fn diverges(e: &IrExpr) -> bool {
+pub fn diverges(e: &IrExpr) -> bool {
     match &e.kind {
         _ if e.ty == Ty::Never => true,
         IrExprKind::Block { expr: Some(tail), .. } => diverges(tail),

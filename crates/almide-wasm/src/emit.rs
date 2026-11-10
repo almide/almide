@@ -270,6 +270,7 @@ fn emit_program_pass(
     let mut pool = Pool::new();
 
     let (global_map, global_decls, init_lets) = build_globals(ir, &types);
+    let global_constants = crate::global_constants::literal_divisors(ir);
 
     // Function-VALUE work shared by every lowering below (funcref table,
     // call_indirect types, lifted lambdas).
@@ -277,6 +278,11 @@ fn emit_program_pass(
     let work = FnWork { region_pure: std::cell::RefCell::new(region_pure), global_reach: reach.into(), ..FnWork::default() };
     work.deep_global_base.set(crate::deep_walk::global_base(global_decls.len()));
     work.bounded_lines.set(bounded_lines);
+    work.split_search_linked.set(crate::string_ext::needs_split_search(
+        std::iter::once(main_body)
+            .chain(program_fns.iter().map(|f| &f.0.body))
+            .chain(ir.top_lets.iter().map(|t| &t.value)),
+    ));
     // Calls made from display-helper bodies (BFS roots).
     let mut display_helper_calls: std::collections::HashSet<usize> = HashSet::new();
     work.itype_base.set(T_FN_BASE + table.infos.len() as u32);
@@ -326,7 +332,7 @@ fn emit_program_pass(
             }
             let params: Vec<(VarId, SliceTy)> =
                 f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
-            let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
+            let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, global_constants: &global_constants, var_name: &var_name };
             let cur_module = fn_module(qual.as_deref(), f);
             let effect_raw = if f.is_effect {
                 match slice_ty_of(&f.ret_ty, &types) {
@@ -414,7 +420,7 @@ fn emit_program_pass(
 
     // `main`: top-lets as the eager prelude, then the body. Failure here is
     // fatal — main is always reachable.
-    let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
+    let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, global_constants: &global_constants, var_name: &var_name };
     let main_plan = FnPlan {
         ret: None,
         cur_module: None,

@@ -428,8 +428,8 @@ separator's split reads its lead byte after handing the string to
 self-hosted `stdlib/string_*.almd` bodies.
 
 **The native leg (#4006).** For the programs the verified native renderer
-renders (`proofs/native-verified-floor.txt`, 106 of 958 `spec/wasm_cross`
-programs, grow-only), `proofs/native-wall.sh` judges per build the ownership
+renders (the grow-only `proofs/native-verified-floor.txt` subset of
+`spec/wasm_cross`), `proofs/native-wall.sh` judges per build the ownership
 certificate of every rendered function — taken from the exact MIR the
 renderer rendered (`try_render_rust_source_certified`), so the probe charges,
 the result-window rewrite and the make-unique elision are inside what is
@@ -439,6 +439,65 @@ witness of a render that lost a release with its Rust-mirror check bypassed
 (`scripts/witness-reinject.sh native`). TRUSTED: that rustc compiles the
 rendered source into a binary keeping that balance, and every program off the
 floor, which ships from the standard codegen with no certificate.
+
+Native nominal releases use the checked concrete native representation.
+A runtime-backed value may be an owned Vec or Option/Result carrier rather
+than a generated record, even when MIR names a synthesized nominal drop
+routine. Rust releases that owned value recursively at scope end, as for
+other typed drops. Borrowed/scalar/unknown shapes remain rejected, and the
+closure drop retains its separate shape check. This reuses the existing
+ownership certificate and trusted Rust realization; it adds no proof rule.
+Unit tests refuse borrowed shapes, and source tests compare stdlib-owned
+and shadowing user types through independent certificates and four routes.
+
+Native HTTP request, response and call values retain their declared runtime
+types, including the response's raw byte buffer and the call's shared
+cancellation owner. Intrinsic argument/return signatures are checked against
+those nominal types; a wasm string-list representation is not used on native.
+Runtime type impls, including retained native-only TLS impls, travel through
+the generated dependency index. Runtime behavior, Rust Clone/Drop and scoped
+thread Send/Sync checking remain trusted. Guarded payload reads may move into
+the common branch containing all their uses before ownership verification;
+the renderer still checks the carrier tag at the read. This supplies no
+fabricated default handle and introduces no new certificate rule. HTTP raw
+byte/alias tests and the call lifecycle tests require the native v1 route.
+
+Native foreign calls retain their selected Rust/C target and declared effect
+class in MIR. Arguments use the existing borrowed-import ownership rule;
+returned heap values are copied into a fresh native owned representation.
+The adapters use checked types and the shared C ABI table, rather than
+assuming wasm pointer layouts. FOREIGN (8) records the trusted boundary;
+effect-declared calls also reach FOREIGN_EFFECT (11), propagated to callers.
+These are the structural wasm leg's registry ids and the existing capability
+subset rule. Host code, declared purity, ABI conversions and Rust realization
+remain trusted; this does not prove a foreign library's memory safety.
+Pure mutable foreign parameters use typed copies with the shared IR
+write-back transformation. Borrowed callbacks use native typed dispatch;
+their host signatures retain the program's value types, including shared
+strings and Bytes/Matrix handles. Neither proves properties of host code.
+Fallible mutable, nominal and foreign-address adapters still refuse the v1
+route. Target-priority tests use deliberately different fallback bodies so
+an inliner cannot silently substitute them for the selected foreign call.
+
+**Native test harness.** Checked test bodies and their reachable helpers enter
+the ordinary native MIR pipeline, with separate internal function identities
+and libtest display names. The certificate bundle binds the whole generated
+Rust artifact, including its libtest wrappers, but the witnesses prove only
+their modeled MIR properties. The wrappers, test selection, completion ledger,
+per-file process isolation, global initialization and libtest's unwinding are
+trusted, not proved by the ownership checker. Test assertion helpers retain
+the frontend's diagnostic and source line. Raw `panic` messages pass through
+a compiler-created typed identity helper; the original caller still contains
+the checked Die operation. The renderer uses that provenance to unwind an
+ordinary test and to preserve controlled termination in an abort-probe child.
+It never chooses this behavior from a user's message prefix. Ordinary
+controlled aborts and explicit process exits retain their termination behavior.
+`compile_driver_native_tests` checks independent artifact-bound certificates
+and compares native v1/v0 test verdicts, diagnostics, completion records and
+abort-child stderr. The CLI harness suites cover filtering, merged compilation,
+file isolation and refusal to count a premature exit as completed tests.
+These tests do not establish full language coverage or a proof of Rust's
+panic/unwind implementation; those remain separate acceptance obligations.
 
 **Fan arms on threads (#4006 family H).** A `fan { … }` block of two or more
 arms renders on the certified native path as the standard codegen renders it:
@@ -452,19 +511,191 @@ TRUSTED: that running the arms of one block concurrently is observation-equal
 to that sequential order, which is what the certificate judges. Its
 preconditions, each checked by the lift (a program that fails one keeps the
 standard codegen; `fan_native::tests` refuse each): every arm is a direct
-call of a user function, or an expression of literals, operators, `if` and
-direct calls (an inlined call), over immutable locals (no `var` reaches an
-arm, and no top-level value) that become the lifted function's parameters;
+call of a user function, or an expression of literals, operators, `if`,
+`??`, pure module calls and direct calls, or a zero-argument scope returning
+an explicit Result. Free immutable locals (no `var` reaches a threaded arm,
+and no top-level value) become the lifted function's parameters;
 every argument and result is of
 a type that may cross a thread (scalars, `String`, and lists, options,
 results, tuples and records of them; no function value); the program has no
-metered region; and no arm holds a higher-order call. Native values DO carry
+metered region. Callback literals created inside an arm remain local to that
+arm; captured free values still pass the same threadability checks. Native values DO carry
 counts: a `String` is an `AlmideStr` block with a reference count, so every
 heap value an arm receives is marked thread-shared before the spawn
 (`almide_str_mark_reachable`, ADR-0013 design point 3), after which its count
 changes only atomically. Also trusted: the fan runtime text itself and the
 glue that routes this render's output and exits through it
 (`crates/almide-mir/src/render_native_fan.rs`).
+The fan runtime text includes the shared offer pool's gate
+(`runtime/rs/src/list.rs`, `almide_fan_deal` .. `almide_fan_steal`), whose
+`unsafe` is checked, not proven: Miri samples its schedules
+(`scripts/miri-fan-gate.sh`) and loom enumerates its protocol's interleavings
+within stated bounds (`scripts/loom-fan-gate.sh`). Until #4452 a helper held
+the gate through a reference parameter, which the aliasing model keeps live
+until the call returns, so a caller freeing the gate right after the last
+helper's leaving decrement was undefined behaviour (Miri run 41854359018);
+the helper now holds a raw pointer and leaves through the counter alone, and
+loom models a reference parameter to the gate as read at its function's
+return. Still trusted: aliasing-model rules other than that protector, which
+loom does not model, and schedules neither sampled nor enumerated.
+
+Element-wise fan calls whose callbacks the shared product parallel selector
+keeps ordered are lowered through the ordinary certified self-hosted traversal.
+That traversal runs every element and preserves the lowest-index error. Selected
+parallel map sites keep a fresh registered wrapper and their literal callback;
+the input is evaluated at the original call site before captured values. The
+wrapper and the linked registry call identify the runtime site independently of
+source spans or user-spelled prefixes. Its mandatory runtime adapter uses the
+compiler builtin callback/result schema shared with frontend constraints for
+fan.map, or the actual bundled declaration for list callbacks, and checks it
+against the actual parallel runtime ABI. The shared product selector accepts
+early module calls through their declared intrinsic and its existing runtime
+pair table. Registered wrappers bypass sequential loop defunctionalization;
+the native declaration fallback may retain the checked base registry call. The adapter records the
+actual runtime symbol in the native-calls witness, marks typed closure captures'
+reachable strings before the call, and emits the fan output/trap glue. Rust
+rechecks Send/Sync at this boundary. A refused adapter cannot silently take the
+sequential self-host body. Metered regions and mutable/global captures retain
+walls; mutable-global reachability includes these wrappers. Higher-order list
+calls inside fan blocks retain selected runtime sites, including a single arm.
+Tests require each declared parallel list family member to appear exactly once
+in the native runtime call records, distinguish ordered
+callbacks from selected parallel sites, check registry reset/name collisions,
+and compare captures, all-elements-on-error, first-error ordering and aborts on
+four routes. Schedule equivalence and the runtime remain trusted as above.
+
+The native runtime index carries a conditional function family only when it
+has exactly two definitions with identical complete function heads and exactly
+complementary `cfg(P)` / `cfg(not(P))` guards. Both guarded definitions travel
+together; the compiler host never chooses the emitted target's branch. Runtime
+scanning preserves existing `unsafe impl` qualifiers and distinguishes callback
+bounds from the actual function parameter list. The native string header exports
+the same reachable-string sharing hook the runtime's blanket `AlmideShare` impl
+uses. A separate parallel-runtime harness closes dependencies under the actual
+fan header, compiles them, and tests ordered output, every-element/first-error,
+shared strings and trap prefixes in threaded and forced-sequential modes. This
+isolated harness complements source-level certificates and execution comparisons;
+it does not itself establish source coverage. Lifted callbacks' declared heap
+Result signatures are included in carrier discovery, so a returned record is
+kept as its typed Result rather than mistaken for a String-Ok allocation window.
+
+Lazy fallback expressions inside Option/Result constructors are materialized
+once through the normal binding path before wrapping their value. Nested Result
+values delivered to an owned loop slot likewise use a fresh owned binding,
+then the existing drop-old/SetLocal discipline. Native concatenation of the
+remaining admitted heap-element families takes its recursive drop from the same
+classification used by list construction. Both operands are owned snapshots,
+evaluated left to right before the concatenation; a right-side slot replacement
+cannot change the saved left operand. These reuse the existing ownership witness
+rules and do not add a writable-borrow theorem. Execution comparisons exercise
+lazy fallback effects, Result[(List[Value], Int), String] payloads, nested Map lists,
+and aliases retained before loop updates.
+
+Program heap slots are thread-local cells. They may coexist with threaded
+arms only when a MIR reachability check, before slot rewriting, proves no
+arm reaches a slot address. It follows named calls and function references
+transitively and rejects unknown indirect/imported calls. This check is a
+trusted rendering precondition, not a new certificate theorem. The negative
+controls cover direct, transitive, closure and unknown accesses; a program
+whose slots are used only outside its arms exercises the admitted case.
+
+Native host I/O uses std's line-buffered stdout alongside the rendered
+print shims. Raw stdout and stderr writes retain their bytes, including
+invalid UTF-8; stdin reads and explicit prints retain their flush points.
+In threaded fans both byte sinks join the same per-arm timelines as
+formatted output. These sinks and the OS I/O implementations remain
+trusted; the existing host-op capability accounting and ordinary call
+witnesses cover their call sites. `tests/native_io_routes_test.rs` checks
+raw bytes, text decoding, output ordering and traps against the ordinary
+native and structural wasm routes.
+
+Fan blocks classified for inline execution by the shared
+`pass_fan_lowering::mark_inline_fans` decision retain that decision here.
+Their ordinary MIR lowering settles all arms in source order before
+propagating the first error; they do not use the threaded-arm lift. The
+shared classification and the preservation of that evaluation order remain
+trusted lowering steps, covered by the fan output/error regressions.
+
+**Typed native cells.** Shared captured variables use the existing owned
+cell operations: read an owned snapshot, take and release an old occupant,
+then transfer the new occupant into the cell. The native representation is
+`Rc<RefCell<Option<T>>>`, with `T` derived from the checked binding type.
+Native-only `CellClass::NativeOwned` admits recursive occupants whose
+release Rust performs by type; it does not admit a writable borrow across
+a call or change the wasm cell layout classes. Ownership and bounds
+certificates cover the MIR operations. The Rust representation and its
+recursive destructors remain trusted, checked by execution comparisons.
+
+**Native typed library bodies and aggregate values.** When no native floor
+serves a call, a reached primary Almide library body takes precedence over
+a representation-specific self-host implementation. It is checked,
+monomorphized, namespaced and lowered through the same MIR path as user
+code. Intrinsic calls retain their declaration checks and native-call
+witnesses. This selection is a trusted lowering decision, not an additional
+semantic theorem. Typed Result fields are constructed without fabricated
+Default values; native moves retain a copy when a surviving symbolic
+address still reads the source. Captured mutable parameters are copied into
+owned local storage before the existing shared-cell lowering, while the
+existing move-mode return carries changes back to the caller.
+
+Native static global/member receivers of declared plain mutators are
+copied into an owned temporary and published back immediately after that
+call. Other arguments evaluate before reading the current receiver, as in
+the ordinary runtime's cell borrow. Read-only global projections stay in
+their operand scope, so sibling mutations are visible in source order.
+Indexed mutation places and callback-bearing mutators keep their separate
+admission checks. This uses existing copies, field updates and witnesses;
+it adds no writable-borrow proof rule. Regression comparisons cover aliases,
+consecutive pops, sibling reads, nested calls, branches and loops.
+
+Literal defaults on admitted runtime declarations are materialized with
+their declared type before native lowering. Integer tokens use the same
+decoder as the frontend, preserving large literals exactly. Unsupported
+default expressions retain the existing refusal. Float enum slots and
+unconstrained generic scalar arguments preserve IEEE bits across the
+native scalar/slot boundary. Generic comparison bounds cannot use that
+conversion to compare Float bits as integers. These conversions remain
+trusted rendering; the tests cover signed zero, NaN and finite payloads.
+
+Nested native sequence patterns are normalized into typed length/tag tests
+and guarded payload reads before MIR lowering. The subject is evaluated
+once, then each arm's guard runs only after its shape matches. This
+normalization is trusted semantic lowering; the ordinary MIR witnesses
+still cover its operations. Differential tests include subject and guard
+side effects and heap values retained after the match.
+Boolean tuple refinements may omit a final wildcard only when bounded
+enumeration covers every Boolean combination; other fields stay abstract,
+and guarded rows cannot establish coverage. Disjoint Option tags can be
+selected first, retaining payload-row order and guards. Tuple payloads in
+native Option constructors retain their declared field types and recursive
+Rust drop. These transformations add no independent semantic proof rule.
+
+Bundled native modules retain their checked primary function bodies with
+their nominal type declarations. The legacy self-host registry filter is
+not applied to those bodies: mixing its String-based Path implementation
+with the primary tuple-based Path declaration would violate the ABI.
+Native floor calls still require their existing site checks and witnesses;
+retained Almide bodies pass ordinary MIR verification. Differential tests
+exercise path construction through folds, lookup, removal and retained
+aliases; the linking and representation choice remain trusted lowering.
+
+The declared native floor can carry the same embedded `almide_kernel`
+module as the ordinary runtime. Its target-feature dispatch and cfg twins
+travel intact, with no external kernel dependency or replacement scalar
+implementation. Native-call certificates cover the declared matrix calls,
+not SIMD machine-code semantics; the Rust kernels, their dispatch, and
+rustc remain trusted. Matrix execution comparisons check observable
+results, including the existing no-FMA and signed-zero cases.
+
+Unconditional named runtime modules can also travel as whole scoped items,
+with their nested cfg alternatives intact. Only a glob re-export makes
+their members available as unqualified runtime names; unresolved parent
+dependencies still refuse. This carries the existing OS entropy wrappers
+from `random.rs` and `sys.rs` for `random.bytes`. The foreign implementation
+and OS entropy quality remain trusted, with the existing `Entropy` host-op
+accounting retained. Tests cover zero length, the 256-byte chunk boundary,
+negative-length aborts and UUID v7's fixed observable properties, without
+substituting deterministic bytes for the OS source.
 
 **Native fs host calls (#4006 class E).** A program on the certified native
 render calls the runtime's own fs functions as trusted host calls, as the wasm
@@ -475,14 +706,50 @@ filesystem. The render carries those functions' code from the runtime's `fs`
 module (`runtime/rs/src/fs.rs` with the rt-core files it includes), the text
 the standard build compiles, each `#[cfg]` twin under its own gate
 (`crates/almide-mir/src/native_floor_host.rs`). The named set, in witness-id
-order: `almide_rt_fs_read_text`, `almide_rt_fs_read_bytes`, `almide_rt_fs_read_lines`, `almide_rt_fs_read_text_if_exists`, `almide_rt_fs_list_dir`, `almide_rt_fs_exists`, `almide_rt_fs_is_dir`, `almide_rt_fs_is_file`, `almide_rt_fs_is_symlink`, `almide_rt_fs_walk`, `almide_rt_fs_glob`, `almide_rt_fs___root_read_text`, `almide_rt_fs___root_read_bytes`, `almide_rt_fs___root_list_dir`, `almide_rt_fs___root_exists`, `almide_rt_fs_temp_dir`, `almide_rt_fs_write`, `almide_rt_fs_write_bytes`, `almide_rt_fs_mkdir_p`, `almide_rt_fs_remove_all`, `almide_rt_fs___root_write_text`, `almide_rt_fs_rename`, `almide_rt_fs_copy`, `almide_rt_fs_append`, `almide_rt_fs_append_bytes`, `almide_rt_fs_remove`, `almide_rt_fs___root_remove`, `almide_rt_fs_create_temp_dir`, `almide_rt_fs_create_temp_file`. Every call to one is recorded as a host call in the program's
+order: `almide_rt_fs_read_text`, `almide_rt_fs_read_bytes`, `almide_rt_fs_read_lines`, `almide_rt_fs_read_text_if_exists`, `almide_rt_fs_list_dir`, `almide_rt_fs_exists`, `almide_rt_fs_is_dir`, `almide_rt_fs_is_file`, `almide_rt_fs_is_symlink`, `almide_rt_fs_walk`, `almide_rt_fs_glob`, `almide_rt_fs___root_read_text`, `almide_rt_fs___root_read_bytes`, `almide_rt_fs___root_list_dir`, `almide_rt_fs___root_exists`, `almide_rt_fs_temp_dir`, `almide_rt_fs_write`, `almide_rt_fs_write_bytes`, `almide_rt_fs_mkdir_p`, `almide_rt_fs_remove_all`, `almide_rt_fs___root_write_text`, `almide_rt_fs_rename`, `almide_rt_fs_copy`, `almide_rt_fs_append`, `almide_rt_fs_append_bytes`, `almide_rt_fs_remove`, `almide_rt_fs___root_remove`, `almide_rt_fs_create_temp_dir`, `almide_rt_fs_create_temp_file`, `almide_rt_fs_read_bytes_if_exists`, `almide_rt_fs_read_lines_if_exists`, `almide_rt_fs_stat`, `almide_rt_fs_fold_lines`, `almide_rt_fs_for_each_line`, `almide_rt_fs_fold_lines_effect`, `almide_rt_fs_for_each_line_effect`, `almide_rt_fs_fold_lines_range`, `almide_rt_fs_fold_lines_chunked`. Every call to one is recorded as a host call in the program's
 `native-calls` witness, and `NativeCalls.hosts_ok` (the extracted checker,
 the Rocq kernel and almide-verify) refuses a host call outside the set; a
 floor body outside the set that would carry fs code is refused by the render.
+The runtime's generated Send-free twin is another implementation of its named
+operation, with the same host witness id and capabilities. The native adapter
+uses this sequential implementation when it cannot establish an effect-free
+callback, preserving the accepted closure-value route's observable order.
+The twin's signature and dependency closure are checked separately; its host
+semantics remain trusted like those of the original runtime implementation.
+Under `[permissions] fs`, both native generators use the same source-derived
+scoped twin and path guards (`almide-codegen::fs_scope`). The certified render
+includes their runtime dependencies before binding the generated artifact.
+The named host identity and ownership witness are unchanged; descriptor-relative
+path traversal and access refusals remain trusted host behavior, checked by
+`tests/fs_scope_test.rs` and the runtime's deterministic symlink-race tests.
 `tests/native_fs_host_calls_test.rs` holds this list, `host_ops::NATIVE_FS_HOST_CALLS`,
 `NativeCalls.native_fs_host_calls` and almide-verify's copy to one list.
 TRUSTED: the runtime fs code itself (tested on both legs by the cross-target
-corpus, not proven). A program built under `[permissions] fs` takes the
+corpus, not proven). The optional raw-byte read extends this named set using the same host-call
+contract as the optional text read: one borrowed path, a fresh owned
+`Result<Option<Bytes>, String>`, and `FsRead`. Its runtime keeps NotFound as
+None, raw bytes unchanged, and other errors labelled with the actual API.
+The filesystem operation and those host error semantics remain trusted;
+this does not claim a proof of the native filesystem implementation.
+The optional line reader and metadata query extend that same named host
+boundary: borrowed path, fresh owned Result, and FsRead. Optional lines keep
+absence distinct from an empty file and other errors, using the bounded UTF-8
+reader and its line semantics. Metadata maps the runtime record to the checked
+four scalar slots (size, is_dir, is_file, modified), with booleans encoded as
+0/1 and modified in Unix seconds. Field labels, types, order and the runtime
+return type must agree. Filesystem behavior remains trusted in both additions.
+The four streaming callback entries use the existing declared runtime adapter
+contract: the path and captured environment are borrowed; a runtime-owned
+accumulator and each fresh line are lent to the checked callback, which
+returns an owned result. The host does not retain the environment or borrowed
+arguments after returning. Its selected runtime symbol is recorded in the
+native-calls host set, and capability reach includes FsRead and the retained
+callback's transitive effects. Only the callback definition gets a static
+adapter; the fs module and its platform gates remain intact. The runtime
+keeps incremental reads, line-ending semantics and first-error termination.
+Host IO and callback scheduling are trusted, not proved by the ownership
+checker; callback bodies and call adapters still undergo their existing checks.
+A program built under `[permissions] fs` takes the
 standard build, whose fs calls the scope wraps.
 
 
@@ -947,6 +1214,44 @@ paths) is recorded in flight-evidence-gaps F2. The structural fix direction is c
 consumer of an untracked/unknown shape must wall, never guess) — which is now
 enforced at the match-linearization and Map-repr routing sites.
 
+### Native argument and iteration snapshots
+
+Native tail-loop conversion stages changed arguments in source order as owned
+MIR bindings before replacing carried slots. This includes cyclic heap carries;
+Bytes result slots begin with a genuine empty Bytes value. A for-in source whose
+place may be written by its body is similarly captured once, using the shared
+call-write analysis for direct assignments, globals and closure captures. These
+copies and releases remain ordinary MIR ownership events. The native map view
+uses an entry count and separate key/value windows; wasm retains the physical
+map layout selected for each key/value pair. The native renderer and this view
+mapping remain trusted code, not a new source-to-Rust equivalence theorem.
+
+Library-local calls retain their declaring module even when the chosen runtime
+route excludes the library body. Generic runtime constructors bind result-only
+types from the checked source call; empty string lists keep that type through
+joins. Float32 library arithmetic explicitly promotes its binary32 operands and
+demotes its result once. Targeted certificates and execution comparisons cover
+these changes; full-corpus acceptance is still required before raising coverage.
+
+
+Synthesized equality functions retain their checked operand type on both MIR
+parameters. Native list-of-tuple comparisons call the typed field comparison
+helper rather than interpreting tuples as wasm list storage. A generic runtime
+call specialized consistently to Float by its registered declaration converts
+MIR Float bits to runtime f64 values; comparisons therefore preserve signed-zero
+and NaN semantics. These declaration and representation mappings remain trusted
+renderer logic. Independent ownership certificates and differential execution
+checks do not establish a general semantic-preservation theorem for the mapping.
+
+
+Native narrow exponentiation fuses a sole-use `int.pow` result and its declared
+width rewrap into a scalar operation. Multiplication stays at that width; the
+exponent and the negative-exponent abort are preserved. This is trusted numeric
+lowering, with no ownership events and no new ownership rule. Native fan arm
+capture checks recurse into maps, sets and variant fields as well as records;
+function values remain excluded from threaded captures. Eligible arms retain
+the scoped-thread runtime, with reachable strings marked before spawning.
+
 ## Use-relativized completeness
 
 Completeness is declared per model and use, not absolutely. The historical
@@ -956,3 +1261,129 @@ runtime refinement and per-artifact certificate checks have distinct
 hypotheses and coverage. None is a proof of full source-to-artifact semantics
 or of `MemorySafe` for every shipped program. The receipt names the claims
 and remaining trusted assumptions for its certified artifacts.
+
+The native call-operand snapshot uses that same write analysis to bind an
+affected argument prefix in source order before a later operand can change
+it. Block arguments use ordinary MIR bindings, including scalar copies and
+owned heap shares. Structural-to-named aggregate conversion also applies to
+owned parameters; it rebuilds the declared representation without admitting
+borrowed arguments to move parameters or equating distinct nominal records.
+
+Loop guard return normalization preserves one result and an exit flag through
+nested statement blocks, branches and loops. A set flag suppresses following
+statements and further while-condition evaluation. This normalization remains
+trusted semantic lowering; independent ownership certificates check the MIR
+it produces, not the correctness of the source transformation. The regression
+checks compare native, v0, structural wasm and interpreter observations,
+including guard exits before later effects and argument rebinding order.
+
+Unit fields and list elements retain the MIR zero-valued lane; a Unit function
+return remains void. Native runtime Map arguments copy matching Option/Result
+carriers and do not require a fabricated Default for aggregate keys or values.
+Map equality helpers now use typed entry iteration, lookup and value equality;
+Set helpers use cardinality and subset operations. Native nested Set equality
+uses these same declared runtime operations, restricted to recursively admitted
+Int/String/Bytes/List/Set representations and aggregates whose declared fields
+have the same equality. The runtime equality contracts and
+semantic lowering remain trusted; independent certificates cover the resulting
+MIR ownership and call boundaries, not full source equivalence.
+
+Native collection routing retains checked key and member types before wasm
+storage normalization. Structural-to-named keys and Set inputs are rebuilt by
+their checked field mapping; distinct nominal records remain distinct. Tuple
+ordering is admitted only for source fields whose order agrees with the native
+representation. Named records and variants additionally require an explicit
+`Ord` derivation, including every named node in a recursive comparison. Region
+handles, floating bit lanes and unsigned order remain excluded from this generic
+route. Float sort/min/max instead name their typed runtime declarations, and
+Float sort keys use the canonical total-order transform. Both sort-by runtimes
+evaluate a key once per element, including a singleton. These are trusted
+representation and runtime semantics, tested against the other execution routes.
+
+A scalar Option join is ownership-neutral only when both incoming arms were
+rewritten to value-only Option constructors. Its copies then use `OptCopy`,
+and no heap release is emitted for the value-only join. An arm with a call's
+ownership credit prevents that classification. The ordinary ownership checker
+and independent certificate rules are unchanged.
+
+Result payload binding retains the checked tuple/list read shape and recognizes
+its existing recursive drop descriptor when borrowing the Err payload. The four
+heap-and-Int tuple Result families accept an already-owned payload copy as well
+as a literal. Wrapping consumes that copy and preserves the original binding;
+its recursive drop descriptor stays attached to the Result. Constructor retries
+must change the expression shape: a variable payload is never rebound into
+another identical retry. These are lowerer fixes, not additional proof rules.
+
+Native typed display expansion includes sized integer/Float lists and Bytes
+lists, keeping UInt64 unsigned digits and Float32's declared rounding. Sized
+integer Set members use canonical integer lanes with bit-exact equality; this
+does not admit floating-point Set/Map keys through integer equality. Nested
+integer-list and Bytes comparisons use their existing declared equality bodies.
+Result comparison emits an explicit guard for each operand before reading either
+payload. The resulting MIR goes through the unchanged ownership and call checks;
+formatter equivalence and the source-level comparison transformation remain
+trusted and are tested across the four execution routes.
+
+Only minted scalar Options lose their Consume during the native value rewrite.
+Call-returned Options retain their transfer credit, and a declared heap Option
+keeps its handle even when this frame only stores/passes it. Checked String-list
+allocations retain that type when payload reads inside a Result arm cannot be
+inferred by the flow-insensitive slot prepass. Optional-chain heap fields take
+an owned snapshot within the selected arm before wrapping it in Some; the arm
+frees its other temporaries and transfers that snapshot through the existing
+ownership rules. No new proof rule or fallback exemption is introduced.
+
+Native value-producing branches can terminate the process instead of yielding a
+value. The producer emits the existing format-v6 `t` event only when a MIR
+`Die` or `ProcExit` primitive immediately precedes a valueless `Else` or
+`EndIf` belonging to a value-producing join. A type annotation or ordinary
+function call is not evidence of termination. The surviving branch must still
+balance its ownership, and invalid accesses before termination remain rejected.
+The native renderer takes the join type and value only from a surviving arm.
+This uses the existing abort checker rule; it adds no ownership rule. The
+compiler's association of this event with process termination and the generated
+Rust's semantics remain trusted, rather than proved by the trace checker.
+
+The range and chunked line folds use the runtime's existing generic `Fn`
+parameter directly after checking its full argument and result signature.
+The original runtime generic constraints, including chunked Clone/Send/Sync,
+remain in the generated Rust. Range ownership of lines, byte partitioning,
+worker scheduling and IO behavior remain trusted runtime semantics. The
+selected original host symbol is retained in the native-calls witness.
+
+Native borrowed tail calls may be rendered as parameter rebinding and a loop
+when the MIR frame has no owned parameters, moves, allocations, or reference-count
+changes, and the self-call's result flows through every enclosing join to
+the actual return. Arguments are staged before any parameter is changed and
+must keep their exact borrowed native types. The MIR and its call witnesses
+remain unchanged. A branch-local variant tag fact, including equality between
+two input tags, permits borrowing the actual payload without a temporary
+Default value. Facts are scoped to the selected arm and the declared variant
+case must contain the requested slot/type. No writable-borrow rule is added.
+These native transformations and their correspondence to the checked MIR are
+trusted code generation; the trace checker does not prove Rust semantics or
+constant stack usage. A certified source regression exercises recursive
+comparison, NaN, signed zero and retained inputs; a generated-code harness
+checks 100000 levels at opt-level 0 on a 128KiB stack, isolating destruction.
+
+Typed errors coerced to a String failure channel use ordinary typed display
+helpers prepared before MIR lowering. A compilation-scoped table connects the
+later propagation desugar to those helpers, including recursive variant and
+scalar-carrier payload types. The helpers are lowered, ownership checked and
+witnessed like other functions. This is not a proof exemption for formatting;
+observable text is checked against v0 and the other supported execution legs.
+
+Native Float32 Map keys/values and Set members use Rust `f32` at the runtime
+container boundary, with bit-preserving conversion from and back to MIR's
+binary32 lane. Lookup and insertion therefore preserve signed-zero equality
+and NaN non-reflexivity; iteration keeps insertion order and returns lane bits.
+This admission is for direct Float32 elements, not arbitrary nested float
+fields whose Rust representation remains integer lanes. Float32 map equality
+expands into ordinary typed lookup/iteration IR, preserving operand order.
+The existing MIR witnesses remain checked; these boundary bit casts and the
+runtime container implementation are trusted code generation/runtime, not a
+new theorem about Rust floating-point semantics. The certified regression
+covers zero, NaN, retained values, updates, removals, iteration and equality.
+Its native/v0/WASI observations agree. The extra regression's interpreter
+route explicitly refuses a Float collection scalar core, so that route is an
+abstention rather than an equality result; the fixed corpus is unchanged.

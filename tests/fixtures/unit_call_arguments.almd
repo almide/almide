@@ -1,0 +1,34 @@
+var seen = ""
+fn tick(label: String) -> Unit = { seen = seen + label }
+fn named(u: Unit) -> String = "named"
+fn forward(u: Unit) -> String = named(u)
+fn invoke(f: (Unit) -> String, u: Unit) -> String = f(u)
+fn combine(a: Unit, b: String, c: Unit) -> String = b
+fn mark() -> String = { seen = seen + "B"; "middle" }
+type Marker = { token: Unit }
+fn capture(u: Unit) -> (Unit) -> String = (_) => forward(u)
+fn invoke_void(f: (Unit) -> Unit, u: Unit) -> Unit = f(u)
+fn main() -> Unit = {
+ println(forward(()))
+ println(combine(tick("A"), mark(), { tick("C"); () }))
+ println(seen)
+ let prefix = "closure:"
+ let f = (u: Unit) => prefix + forward(u)
+ println(invoke(f, tick("D")))
+ let yes: Result[Unit, String] = ok(())
+ let no: Result[Unit, String] = err("kept")
+ let mapped_yes = yes |> result.map((u) => { tick("Y"); forward(u) })
+ println("${mapped_yes}")
+ let mapped_no = no |> result.map((u) => { tick("N"); forward(u) })
+ println("${mapped_no}")
+ let zero = () => "zero"
+ println(zero())
+ println(invoke((_) => "one", if true then tick("T") else tick("F")))
+ println(seen)
+ let marker = Marker { token: tick("R") }
+ let held = capture(marker.token)
+ println(invoke(held, [()][0]))
+ println(named(((), 7).0))
+ println(named(invoke_void((_) => tick("V"), ())))
+ println(seen)
+}

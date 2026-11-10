@@ -117,8 +117,9 @@ fn desugar_assert_calls(body: &IrExpr) -> Option<IrExpr> {
         }
         let mut binds: Vec<IrStmt> = Vec::new();
         let mut new_args: Vec<IrExpr> = Vec::with_capacity(args.len());
-        for a in args {
-            if is_atom(a) {
+        for (i, a) in args.iter().enumerate() {
+            // A diagnostic is lazy: keep its unwraps inside the failure arm.
+            if is_atom(a) || (name == "assert" && i == 1) {
                 new_args.push(a.clone());
                 continue;
             }
@@ -343,7 +344,10 @@ fn panic_die_expr(name: &str, args: &[IrExpr]) -> Option<IrExpr> {
             else {
                 return;
             };
-            if let Some(text) = panic_die_expr(name.as_str(), args) {
+            if let Some(mut text) = panic_die_expr(name.as_str(), args) {
+                // Keep the checked Never type when the abort is a value arm
+                // (including the fallback of `??`). It does not yield Unit.
+                text.ty = e.ty.clone();
                 *e = text;
                 self.changed = true;
                 return;

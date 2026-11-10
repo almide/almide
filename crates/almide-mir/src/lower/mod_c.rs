@@ -427,7 +427,9 @@ fn unit_tail_result_abi_ty(func: &IrFunction, body: &IrExpr) -> Option<Ty> {
         match &e.kind {
             IrExprKind::Block { expr: Some(t), .. } => tail_is_unit(t),
             IrExprKind::Block { expr: None, .. } => true,
-            _ => matches!(e.ty, Ty::Unit),
+            // A diverging success tail still needs a Result-typed enclosing
+            // body: an earlier ! can return Err before reaching that tail.
+            _ => matches!(e.ty, Ty::Unit | Ty::Never),
         }
     }
     let result_ty = match &func.ret_ty {
@@ -483,10 +485,33 @@ pub fn abi_effective_body(func: &IrFunction) -> Option<IrExpr> {
 /// Result block its ABI classification promises. Only the TOP-level Block is flattened; a
 /// non-Block unit body becomes the single statement.
 fn wrap_unit_body_in_ok(body: &IrExpr, result_ty: Ty) -> IrExpr {
+    // Preserve return-position control flow: placing an if/match in statement
+    // position hides an arm's `!` from the continuation-based propagation pass.
+    let mut branch = body.clone();
+    match &mut branch.kind {
+        IrExprKind::If { then, else_, .. } => {
+            **then = wrap_unit_body_in_ok(then, result_ty.clone());
+            **else_ = wrap_unit_body_in_ok(else_, result_ty.clone());
+        }
+        IrExprKind::Match { arms, .. } => for arm in arms {
+            arm.body = wrap_unit_body_in_ok(&arm.body, result_ty.clone());
+        },
+        _ => return wrap_unit_block_in_ok(body, result_ty),
+    }
+    branch.ty = result_ty;
+    branch
+}
+
+fn wrap_unit_block_in_ok(body: &IrExpr, result_ty: Ty) -> IrExpr {
     let (mut stmts, old_tail) = match &body.kind {
         IrExprKind::Block { stmts, expr } => (stmts.clone(), expr.as_deref().cloned()),
         _ => (Vec::new(), Some(body.clone())),
     };
+    if let Some(t) = old_tail.as_ref().filter(|t| matches!(t.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })) {
+        return IrExpr { kind: IrExprKind::Block { stmts,
+            expr: Some(Box::new(wrap_unit_body_in_ok(t, result_ty.clone()))) },
+            ty: result_ty, span: body.span, def_id: body.def_id };
+    }
     if let Some(t) = old_tail {
         stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: t }, span: None });
     }

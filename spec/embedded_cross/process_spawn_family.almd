@@ -50,8 +50,16 @@ effect fn main() -> Unit = {
     ok(code) => println("run_in code=${code}"),
     err(e) => println("run_in err ${e}"),
   }
-  // The `start` handle (poll / wait / stop) is native-only (E081 on the wasm
-  // legs); its tests are spec/stdlib/process_start_test.almd.
+  // The handle family uses the same core on native and the embedded host.
+  // Compare only stable outcomes, never the actual pid or scheduler timing.
+  let child = process.start(process.ProcessCommand { cmd: "sh", args: ["-c", "printf child; printf err >&2; exit 4"] })!
+  println("child pid positive=${process.child_pid(child)! > 0}")
+  let status = process.wait(child)!
+  println("wait ${show_status(ok(status))}")
+  println("poll after wait equal=${process.poll(child)! == some(ok(status))}")
+  println("read stdout=[${process.read_new_stdout(child)!}] next=[${process.read_new_stdout(child)!}]")
+  println("read stderr=[${process.read_new_stderr(child)!}] next=[${process.read_new_stderr(child)!}]")
+  println("stop after wait ${show_status(process.stop(child, 0))}")
   println("self pid positive=${process.pid() > 0}")
   println("home set=${env.get("HOME") != none} unset=${env.get("ALMIDE_NONEXISTENT_VAR_2589") == none}")
 }

@@ -69,6 +69,11 @@ impl Checker {
         if self.current_module_prefix.as_deref() == Some(owner.as_str()) {
             return None;
         }
+        // The bundled module checked on its own AS the entry program
+        // (`canonicalize_program_in`): the entry IS the owning module.
+        if self.current_module_prefix.is_none() && self.env.entry_bundled_module == Some(owner) {
+            return None;
+        }
         Some((bare, owner))
     }
 

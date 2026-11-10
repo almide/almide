@@ -101,4 +101,16 @@ effect fn main() -> Unit = {
   println("empty=${list.len(none_of_them |> list.sort)}")
   println("empty_min=${list.min(none_of_them)}")
   println("one=${list.len([Dot] |> list.sort)}")
+  // A checked structural literal matching Inner carries the same Ord.
+  let structural = [
+    { n: 2, s: "x" },
+    { n: 1, s: "z" },
+    { n: 1, s: "a" }
+  ]
+  let smallest = list.min(structural) ?? { n: 0, s: "" }
+  let largest = list.max(structural) ?? { n: 0, s: "" }
+  println("structural=${smallest.n}:${smallest.s}/${largest.n}:${largest.s}")
+  for item in list.sort(structural) {
+    println("structural_sort=${item.n}:${item.s}")
+  }
 }

@@ -1,0 +1,16 @@
+// @contract: C-226
+// A copy of a list a closure made before the copy still reads: the closure
+// sees the original's contents, never the copy's, whatever the copy does.
+fn bump(mut xs: List[Int], v: Int) -> Unit = list.push(xs, v)
+
+fn read_by_closure() -> String = {
+  var s: List[Int] = [7, 8]
+  let count = () => list.len(s)
+  var t = s
+  bump(t, 9)
+  "${count()} ${list.len(t)}"
+}
+
+fn main() -> Unit = {
+  println(read_by_closure())
+}

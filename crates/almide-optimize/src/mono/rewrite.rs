@@ -128,10 +128,7 @@ impl<'a> RewriteVisitor<'a> {
         // Infer from return type
         self.infer_from_return_type(method.as_str(), expr_ty, &mut bindings);
 
-        let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
-            !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
-            && !matches!(ty, Ty::TypeVar(_)) && !ty.contains_typevar()
-        );
+        let all_concrete = super::utils::bindings_all_concrete(&bindings);
         if all_concrete {
             let suffix = mangle_suffix(&bindings);
             if self.instances.contains_key(&(method.to_string(), suffix.clone())) {

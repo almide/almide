@@ -14,6 +14,7 @@ fn __fold_ols_loop(h: Int, f: (List[String]?, String) -> List[String]?, n: Int, 
     __fold_ols_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_ols(xs: List[String], init: List[String]?, f: (List[String]?, String) -> List[String]?) -> List[String]? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -38,6 +39,7 @@ fn __fold_str_hacc_loop(h: Int, f: (Value, String) -> Value, n: Int, i: Int, acc
     __fold_str_hacc_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_str_hacc(xs: List[String], init: Value, f: (Value, String) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -47,6 +49,7 @@ fn list_fold_str_hacc(xs: List[String], init: Value, f: (Value, String) -> Value
 // `Set[String]` shares the walk above under its own name: the registry maps one
 // impl fn to one call name, so the alias needs a definition rather than a second
 // row over `list_fold_str_hacc`.
+@specializes("set.fold")
 fn set_fold_str_hacc(xs: Set[String], init: Value, f: (Value, String) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)

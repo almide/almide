@@ -1,0 +1,27 @@
+fn main() -> Unit = {
+ let z = float32.from(0.0)
+ let nz = float32.from(-0.0)
+ let nan = z / z
+ let m: Map[Float32, Int] = map.from_list([(z, 1), (nz, 2), (nan, 3), (nan, 4)])
+ println("map ${map.len(m)} ${map.get(m, nz)} ${map.contains(m, nan)}")
+ let newer = map.set(m, nz, 9)
+ println("persistent ${map.get(m, z)} ${map.get(newer, z)} ${map.len(map.remove(m, nz))}")
+ println("keys ${list.len(map.keys(m))} values ${map.values(m)}")
+ for (k, v) in m { println("entry ${k == k} ${v}") }
+ for (k, v) in map.to_list(m) { println("pair ${k == k} ${v}") }
+ let mv: Map[String, Float32] = map.from_list([("zero", nz), ("nan", nan)])
+ println("values ${map.get(mv, "zero")} ${map.get(mv, "missing")}")
+ println("retained ${map.get(map.set(mv, "zero", z), "zero")} ${map.get(mv, "zero")}")
+ let s: Set[Float32] = set.from_list([z, nz, nan, nan])
+ println("set ${set.len(s)} ${set.contains(s, z)} ${set.contains(s, nz)} ${set.contains(s, nan)}")
+ println("remove ${set.len(set.remove(s, nz))} ${set.len(s)}")
+ let one: Set[Float32] = set.from_list([float32.from(1.0)])
+ println("union ${set.len(set.union(s, one))}")
+ for x in set.to_list(s) { println("member ${x == x}") }
+ let ma: Map[Float32, Int] = map.from_list([(z, 1)])
+ let mb: Map[Float32, Int] = map.from_list([(nz, 1)])
+ println("map eq ${ma == mb} ${m == m}")
+ let sa: Set[Float32] = set.from_list([z])
+ let sb: Set[Float32] = set.from_list([nz])
+ println("set eq ${sa == sb} ${s == s}")
+}

@@ -307,7 +307,7 @@ verdict = "NOT_SUM_READ"
 why = "ElemAddr-based bounds-checked List[heap] element borrow, gated on tracked/materialized list vars."
 
 [[arm]]
-file = "tail.rs"
+file = "tail_aggregate.rs"
 fn = "try_lower_heap_field_borrow"
 loads = 1
 verdict = "NOT_SUM_READ"

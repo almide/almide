@@ -178,6 +178,7 @@ __selfhost_.__ipio2_table
 __selfhost_.__is_alnum_scan
 __selfhost_.__is_alpha_scan
 __selfhost_.__is_case_scan
+__selfhost_.__is_null
 __selfhost_.__itos_neg
 __selfhost_.__itos_pos
 __selfhost_.__jp_array
@@ -232,6 +233,7 @@ __selfhost_.__matrix_to_bytes_f16_le
 __selfhost_.__matrix_zip_row
 __selfhost_.__matrix_zip_rows
 __selfhost_.__matrix_zip_with
+__selfhost_.__mx_gather_one
 __selfhost_.__mx_get_none
 __selfhost_.__mx_get_some
 __selfhost_.__mx_load_none
@@ -942,6 +944,8 @@ bigint.is_odd
 bigint.limb
 bigint.long_divide
 bigint.make
+bigint.max
+bigint.min
 bigint.modulo
 bigint.mul
 bigint.mul_mag
@@ -970,6 +974,7 @@ bigint.sub
 bigint.sub_from
 bigint.sub_mag
 bigint.text_limit_error
+bigint.to_string_radix
 bigint.top_bits
 bigint.top_nonzero
 bigint.trim
@@ -1102,6 +1107,8 @@ bytes.window
 deque.__almd_mono_from_list__Int
 deque.__almd_mono_to_list__Int
 env.__set_refusal
+env.__vars_name
+env.__vars_of
 env.__vars_step
 env.remove
 env.secret
@@ -1168,6 +1175,13 @@ hash.is_valid_hmac_sha256
 hash.is_valid_hmac_sha512
 hash.sha512
 hash.sha512_hex
+heap.__almd_mono___before__Tup_lInt_cString_r
+heap.__almd_mono___natural__Int
+heap.__almd_mono___swap__Tup_lInt_cString_r
+heap.__almd_mono_new_by__Tup_lInt_cString_r_cInt
+heap.__almd_mono_peek__Tup_lInt_cString_r
+heap.__almd_mono_pop__Tup_lInt_cString_r
+heap.__almd_mono_push__Tup_lInt_cString_r
 html.__almd_lift_0
 html.__html_active_attr_name
 html.__html_ascii
@@ -1319,6 +1333,7 @@ int8.parse
 int8.parse_radix
 int8.to_string
 io.__almd_mono_read___nStdin
+io.__almd_mono_write___nStderr
 io.__almd_mono_write___nStdout
 io.__stderr_write
 io.__stdin_read

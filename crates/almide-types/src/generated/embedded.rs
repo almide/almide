@@ -983,6 +983,10 @@ fn clear(mut b: Bytes) -> Unit = _
 @intrinsic("almide_rt_bytes_cmp")
 fn compare(a: Bytes, b: Bytes) -> Int = _
 
+
+@intrinsic("almide_rt_bytes_eq")
+fn __eq(a: Bytes, b: Bytes) -> Bool = _
+
 /// New Bytes holding a then b.
 @intrinsic("almide_rt_bytes_concat")
 fn __concat(a: Bytes, b: Bytes) -> Bytes = _
@@ -2632,6 +2636,8 @@ fn bytes_cmp(a: Bytes, b: Bytes) -> Int = {
 }
 
 
+@implements("bytes.__eq")
+@specializes("bytes.__eq")
 fn bytes_eq(a: Bytes, b: Bytes) -> Bool = {
   let na = prim.load32(prim.handle(a) + 4)
   let nb = prim.load32(prim.handle(b) + 4)
@@ -4187,7 +4193,7 @@ pub const SRC_CODEC_DECODE: &str = r#"
 
 
 
-fn __is_null(v: Value) -> Bool = prim.load32(prim.handle(v) + 4) == 0
+fn __is_null(v: Value) -> Bool = v == value.null()
 
 
 fn __dl_int(items: List[Value], n: Int, i: Int, acc: List[Int]) -> Result[List[Int], String] =
@@ -4237,6 +4243,7 @@ fn __err_scan(e: String, n: Int, i: Int) -> Int = if i + 5 > n then 0 - 1
 else if string.slice(e, i, i + 5) == ", at " then i
 else __err_scan(e, n, i + 1)
 
+@specializes("value.__err_at")
 fn __err_at(e: String, seg: String) -> String = {
   let n = string.len(e)
   let i = __err_scan(e, n, 0)
@@ -4249,6 +4256,7 @@ fn __err_at(e: String, seg: String) -> String = {
 }
 
 
+@specializes("value.__err_at_index")
 fn __err_at_index(e: String, i: Int) -> String = __err_at(e, "[" + int.to_string(i) + "]")
 
 fn __dl_string(items: List[Value], n: Int, i: Int, acc: List[String]) -> Result[List[String], String] =
@@ -4258,6 +4266,7 @@ fn __dl_string(items: List[Value], n: Int, i: Int, acc: List[String]) -> Result[
     err(e) => err(__err_at_index(e, i)),
   }
 
+@specializes("value.__decode_list_string")
 fn __decode_list_string(v: Value) -> Result[List[String], String] = match value.as_array(v) {
   ok(items) => __dl_string(items, list.len(items), 0, []),
   err(e) => err(e),
@@ -5213,23 +5222,27 @@ effect fn remove(name: String) -> Result[Unit, String] = match __set_refusal(nam
 
 /// Every environment variable of this process, keyed and ordered by name.
 /// Holds secrets as plain values: read a credential by name with `env.secret` instead.
-effect fn vars() -> Map[String, String] = {
-  let merged = __environ() |> list.fold(map.new(), (m, entry) => __vars_step(m, entry))
-  merged |> map.to_list |> list.sort_by(((name, _)) => name) |> map.from_list
+effect fn vars() -> Map[String, String] = __vars_of(__environ())
+
+
+local fn __vars_of(entries: List[String]) -> Map[String, String] = entries |> list.filter((entry) => string.contains(entry, "=")) |> list.map(__vars_step) |> list.sort_by(__vars_name) |> map.from_list |> map.filter(__vars_kept)
+
+
+
+
+
+
+
+
+
+local fn __vars_step(entry: String) -> (String, String) = match string.split_once(entry, "=") {
+  some(pair) => pair,
+  none => (entry, ""),
 }
 
+local fn __vars_name(entry: (String, String)) -> String = entry.0
 
-
-
-
-local fn __vars_step(m: Map[String, String], entry: String) -> Map[String, String] = match string.split_once(
-  entry,
-  "=",
-) {
-  some((name, value)) => if value == "\u{0}" then map.remove(m, name)
-  else map.set(m, name, value),
-  none => m,
-}
+local fn __vars_kept(entry: (String, String)) -> Bool = entry.1 != "\u{0}"
 
 
 @intrinsic("almide_rt_env___environ")
@@ -5839,6 +5852,12 @@ pub const SRC_FLOAT: &str = r#"
 @intrinsic("almide_rt_float_to_string")
 fn to_string(x: Float) -> String = _
 
+
+/// Shortest round-trip digits, without the integer .0 suffix.
+@intrinsic("almide_rt_float_to_string_compound")
+@scalar_text
+fn __to_string_compound(x: Float) -> String = _
+
 /// Truncates toward 0, saturating; NaN gives 0.
 @intrinsic("almide_rt_float_to_int")
 fn __to_int(n: Float) -> Int = _
@@ -6064,6 +6083,11 @@ local fn pad9(s: String) -> String = if string.len(s) >= 9 then s else pad9("0" 
 pub const SRC_FLOAT32: &str = r#"/// Shortest f32 round-trip digits, no exponent; 0.1 stays 0.1, 2.0 keeps .0.
 @intrinsic("almide_rt_float32_to_string")
 fn to_string(x: Float32) -> String = _
+
+
+/// Shortest round-trip digits, without the integer .0 suffix.
+@intrinsic("almide_rt_float32_to_string_compound")
+fn __to_string_compound(x: Float32) -> String = _
 
 
 /// -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
@@ -7367,6 +7391,7 @@ fn float_to_string(x: Float) -> String = __sf_main(x, true)
 
 
 
+@specializes("float.__to_string_compound")
 fn float_to_string_compound(x: Float) -> String = __sf_main(x, false)
 
 
@@ -7397,6 +7422,7 @@ fn __sf32_main(x: Float32, dot0: Bool) -> String = {
 fn float32_to_string(x: Float32) -> String = __sf32_main(x, true)
 
 
+@specializes("float32.__to_string_compound")
 fn float32_to_string_compound(x: Float32) -> String = __sf32_main(x, false)
 
 
@@ -8034,6 +8060,7 @@ fn __ffl_walk_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (Map[S
     __ffl_walk_msi(sh, slen, e + 1, nacc, f)
   }
 
+@specializes("fs.fold_lines")
 effect fn fs_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[Map[String, Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
@@ -8069,6 +8096,7 @@ fn __ffl_walk_eff_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (M
     }
   }
 
+@specializes("fs.__fallible_fold_lines")
 effect fn fs_fallible_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String, Int], String) -> Result[Map[String, Int], String]) -> Result[Map[String, Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
@@ -8122,6 +8150,7 @@ fn __ffl_chunks_msi(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, ini
     __ffl_chunks_msi(sh, slen, lh, n, chunk, i + 1, init, f)
   }
 
+@specializes("fs.fold_lines_chunked")
 effect fn fs_fold_lines_chunked_msi(path: String, workers: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[List[Map[String, Int]], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
   let rh = prim.handle(r)
@@ -8167,6 +8196,7 @@ fn __ffl_chunks_i(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init:
     __ffl_chunks_i(sh, slen, lh, n, chunk, i + 1, init, f)
   }
 
+@specializes("fs.fold_lines_chunked")
 effect fn fs_fold_lines_chunked_i(path: String, workers: Int, init: Int, f: (Int, String) -> Int) -> Result[List[Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
   let rh = prim.handle(r)
@@ -8217,6 +8247,7 @@ fn __ffl_chunks_ls(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init
     __ffl_chunks_ls(sh, slen, lh, n, chunk, i + 1, init, f)
   }
 
+@specializes("fs.fold_lines_chunked")
 effect fn fs_fold_lines_chunked_ls(path: String, workers: Int, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[List[String]], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
   let rh = prim.handle(r)
@@ -8237,6 +8268,7 @@ effect fn fs_fold_lines_chunked_ls(path: String, workers: Int, init: List[String
   }
 }
 
+@specializes("fs.fold_lines_range")
 effect fn fs_fold_lines_range_ls(path: String, start: Int, endp: Int, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[String], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
   let rh = prim.handle(r)
@@ -8265,6 +8297,7 @@ fn __ffl_walk_s(sh: Int, slen: Int, pos: Int, acc: String, f: (String, String) -
     __ffl_walk_s(sh, slen, e + 1, nacc, f)
   }
 
+@specializes("fs.fold_lines")
 effect fn fs_fold_lines_s(path: String, init: String, f: (String, String) -> String) -> Result[String, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
@@ -8290,6 +8323,7 @@ fn __ffl_walk_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> Int)
     __ffl_walk_i(sh, slen, e + 1, nacc, f)
   }
 
+@specializes("fs.fold_lines")
 effect fn fs_fold_lines_i(path: String, init: Int, f: (Int, String) -> Int) -> Result[Int, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
@@ -8315,6 +8349,7 @@ fn __ffl_walk_ls(sh: Int, slen: Int, pos: Int, acc: List[String], f: (List[Strin
     __ffl_walk_ls(sh, slen, e + 1, nacc, f)
   }
 
+@specializes("fs.fold_lines")
 effect fn fs_fold_lines_ls(path: String, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[String], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
@@ -8370,6 +8405,7 @@ fn __ffl_walk_eff_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> 
     }
   }
 
+@specializes("fs.__fallible_fold_lines")
 effect fn fs_fallible_fold_lines_i(path: String, init: Int, f: (Int, String) -> Result[Int, String]) -> Result[Int, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
@@ -8411,6 +8447,7 @@ effect fn fs_fallible_for_each_line(path: String, f: (String) -> Result[Unit, St
 
 
 
+@specializes("fs.fold_lines_range")
 effect fn fs_fold_lines_range_i(path: String, start: Int, endp: Int, init: Int, f: (Int, String) -> Int) -> Result[Int, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
   let rh = prim.handle(r)
@@ -8437,6 +8474,7 @@ fn __ffl_range_walk_s(sh: Int, slen: Int, pos: Int, endp: Int, acc: String, f: (
     __ffl_range_walk_s(sh, slen, e + 1, endp, nacc, f)
   }
 
+@specializes("fs.fold_lines_range")
 effect fn fs_fold_lines_range_s(path: String, start: Int, endp: Int, init: String, f: (String, String) -> String) -> Result[String, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
   let rh = prim.handle(r)
@@ -8454,6 +8492,7 @@ effect fn fs_fold_lines_range_s(path: String, start: Int, endp: Int, init: Strin
 
 
 
+@specializes("fs.fold_lines_range")
 effect fn fs_fold_lines_range_msi(path: String, start: Int, endp: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[Map[String, Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
   let rh = prim.handle(r)
@@ -8485,6 +8524,7 @@ fn __ffl_chunks_s(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init:
     __ffl_chunks_s(sh, slen, lh, n, chunk, i + 1, init, f)
   }
 
+@specializes("fs.fold_lines_chunked")
 effect fn fs_fold_lines_chunked_s(path: String, workers: Int, init: String, f: (String, String) -> String) -> Result[List[String], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
   let rh = prim.handle(r)
@@ -14485,6 +14525,28 @@ fn __eq_bool(a: List[Bool], b: List[Bool]) -> Bool = _
 @intrinsic("almide_rt_list_eq_str")
 fn __eq_str(a: List[String], b: List[String]) -> Bool = _
 
+
+
+
+
+
+@intrinsic("almide_rt_list_eq_any")
+fn __eq_any[A](a: List[A], b: List[A]) -> Bool = _
+
+
+
+@intrinsic("almide_rt_list_eq_list_int")
+fn __eq_list_int(a: List[List[Int]], b: List[List[Int]]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_list_float")
+fn __eq_list_float(a: List[List[Float]], b: List[List[Float]]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_opt_int")
+fn __eq_opt_int(a: List[Int?], b: List[Int?]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_res_int")
+fn __eq_res_int(a: List[Result[Int, String]], b: List[Result[Int, String]]) -> Bool = _
+
 /// Head element, or none when empty.
 @intrinsic("almide_rt_list_first")
 fn first[A](xs: List[A]) -> A? = _
@@ -14560,6 +14622,21 @@ fn fold[A, B](xs: List[A], init: B, f: (B, A) -> B) -> B = _
 @consume(xs)
 fn sort_by[A, B](xs: List[A], f: (A) -> B) -> List[A] = _
 
+
+
+@intrinsic("almide_rt_list_sort_by_float")
+@consume(xs)
+fn __sort_by_float[A](xs: List[A], f: (A) -> Float) -> List[A] = _
+
+@intrinsic("almide_rt_list_sort_float")
+fn __sort_float(xs: List[Float]) -> List[Float] = _
+
+@intrinsic("almide_rt_list_min_float")
+fn __min_float(xs: List[Float]) -> Float? = _
+
+@intrinsic("almide_rt_list_max_float")
+fn __max_float(xs: List[Float]) -> Float? = _
+
 /// Longest prefix where f holds.
 @intrinsic("almide_rt_list_take_while")
 @reuse(xs)
@@ -14584,6 +14661,13 @@ fn reduce[A](xs: List[A], f: (A, A) -> A) -> A? = _
 @intrinsic("almide_rt_list_group_by")
 @consume(xs)
 fn group_by[A, B](xs: List[A], f: (A) -> B) -> Map[B, List[A]] = _
+
+
+
+
+@intrinsic("almide_rt_list_group_count")
+@consume(xs)
+fn __group_count[A, B](xs: List[A], f: (A) -> B) -> Map[B, Int] = _
 
 /// Index of the first x where f holds, or none.
 @intrinsic("almide_rt_list_find_index")
@@ -15499,19 +15583,23 @@ fn __pick_with_fallible[A, E](xs: List[A], cmp: (A, A) -> Result[Int, E], want: 
   var stop = false
   for x in xs {
     if stop then ()
-    else match best {
-      some(b) => match cmp(x, b) {
-        ok(c) => if c * want > 0 then {
-          best = some(x)
-        } else (),
-        err(e) => {
-          failed = some(e)
-          stop = true
+    else {
+
+
+      let take = match best {
+        some(b) => match cmp(x, b) {
+          ok(c) => c * want > 0,
+          err(e) => {
+            failed = some(e)
+            stop = true
+            false
+          },
         },
-      },
-      none => {
+        none => true,
+      }
+      if take then {
         best = some(x)
-      },
+      } else ()
     }
   }
   match failed {
@@ -16070,6 +16158,7 @@ fn __filterrc_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) 
     } else __filterrc_fill(dh, sh, f, n, i + 1, di)
   }
 
+@specializes("list.filter")
 fn list_filter_rc(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
@@ -16367,6 +16456,7 @@ fn __flmh_fill(dh: Int, sh: Int, f: (String) -> List[String], n: Int, i: Int, di
     __flmh_fill(dh, sh, f, n, i + 1, ndi)
   }
 
+@specializes("list.flat_map")
 fn list_flat_map_h(xs: List[String], f: (String) -> List[String]) -> List[String] = {
   let n = list.len(xs)
   let total = __flmh_total(prim.handle(xs), f, n, 0, 0)
@@ -16435,6 +16525,7 @@ else {
   __flat_fill_rc(dh, oh, n, i + 1, off1)
 }
 
+@specializes("list.flatten")
 fn list_flatten_rc(xss: List[Int]) -> List[Int] = {
   let oh = prim.handle(xss)
   let n = prim.load32(oh + 4)
@@ -16545,14 +16636,14 @@ fn __lminf_at(h: Int, len: Int) -> Float? = {
   some(prim.ffrombits(m))
 }
 
-@specializes("list.max")
+@specializes("list.__max_float")
 fn list_max_float(xs: List[Float]) -> Float? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if len <= 0 then __lmmf_none() else __lmaxf_at(h, len)
 }
 
-@specializes("list.min")
+@specializes("list.__min_float")
 fn list_min_float(xs: List[Float]) -> Float? = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -16578,6 +16669,7 @@ fn __fold_hrec_loop(h: Int, f: (Value, Value) -> Value, n: Int, i: Int, acc: Val
     __fold_hrec_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_hrec(xs: List[Value], init: Value, f: (Value, Value) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16602,6 +16694,7 @@ fn __fold_hsca_loop(h: Int, f: (Value, Int) -> Value, n: Int, i: Int, acc: Value
     __fold_hsca_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_hsca(xs: List[Int], init: Value, f: (Value, Int) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16624,6 +16717,7 @@ fn __fold_ols_loop(h: Int, f: (List[String]?, String) -> List[String]?, n: Int, 
     __fold_ols_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_ols(xs: List[String], init: List[String]?, f: (List[String]?, String) -> List[String]?) -> List[String]? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16648,6 +16742,7 @@ fn __fold_str_hacc_loop(h: Int, f: (Value, String) -> Value, n: Int, i: Int, acc
     __fold_str_hacc_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_str_hacc(xs: List[String], init: Value, f: (Value, String) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16657,6 +16752,7 @@ fn list_fold_str_hacc(xs: List[String], init: Value, f: (Value, String) -> Value
 
 
 
+@specializes("set.fold")
 fn set_fold_str_hacc(xs: Set[String], init: Value, f: (Value, String) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -16843,6 +16939,7 @@ fn __lshu_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) ->
     __lshu_fill(sh, bh, n, i, f, j + 1)
   }
 
+@specializes("list.update")
 fn list_update_heapelem(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -17322,6 +17419,7 @@ else {
   __maps2h_fill(dh, sh, f, n, i + 1)
 }
 
+@specializes("list.map")
 fn list_map_s2h(xs: List[Int], f: (Int) -> String) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
@@ -17542,6 +17640,7 @@ fn __lsuv_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) ->
     __lsuv_fill(sh, bh, n, i, f, j + 1)
   }
 
+@specializes("list.update")
 fn list_update_value(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -18310,6 +18409,7 @@ fn __lpart_fill_rc(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, 
     }
   }
 
+@specializes("list.partition")
 fn list_partition_rc(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) = {
   let n = list.len(xs)
   let yes = prim.alloc_list(n)
@@ -18905,6 +19005,7 @@ fn __sbs_msort(bvh: Int, bkh: Int, tvh: Int, tkh: Int, n: Int) -> Int = {
   }
 }
 
+@specializes("list.sort_by")
 fn list_sort_by_str_key(xs: List[Int], f: (Int) -> String) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
@@ -18936,6 +19037,7 @@ fn __sbsr_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) ->
     __sbsr_init(bh, sh, kh, f, n, i + 1)
   }
 
+@specializes("list.sort_by")
 fn list_sort_by_str_key_rc(xs: List[Int], f: (Int) -> String) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
@@ -19006,7 +19108,7 @@ else {
   __sortf_copy(srch, dsth, n, i + 1)
 }
 
-@specializes("list.sort")
+@specializes("list.__sort_float")
 fn list_sort_float(xs: List[Float]) -> List[Float] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -19229,6 +19331,7 @@ else {
   __sbr_init(bh, sh, kh, f, n, i + 1)
 }
 
+@specializes("list.sort_by")
 fn list_sort_by_rc(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
@@ -19320,6 +19423,7 @@ fn __sbf_msort(bvh: Int, bkh: Int, tvh: Int, tkh: Int, n: Int) -> Int = {
   }
 }
 
+@specializes("list.__sort_by_float")
 fn list_sort_by_float(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
@@ -19347,6 +19451,7 @@ else {
   __sbfr_init(bh, sh, kh, f, n, i + 1)
 }
 
+@specializes("list.__sort_by_float")
 fn list_sort_by_float_rc(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
@@ -21072,12 +21177,19 @@ fn __map_eqm_at(ah: Int, an: Int, bh: Int, bn: Int, bcap: Int, i: Int) -> Bool =
   }
 
 fn map_eq(a: Map[Int, Int], b: Map[Int, Int]) -> Bool = {
-  let ah = prim.handle(a)
-  let bh = prim.handle(b)
-  let an = prim.load32(ah + 4)
-  let bn = prim.load32(bh + 4)
-  if an != bn then false
-  else __map_eqm_at(ah, an, bh, bn, prim.load32(bh + 8), 0)
+  if map.len(a) != map.len(b) then false
+  else {
+    var same = true
+    for (k, v) in a {
+      if same then {
+        same = match map.get(b, k) {
+          some(other) => v == other,
+          none => false,
+        }
+      } else ()
+    }
+    same
+  }
 }
 
 
@@ -21474,6 +21586,7 @@ fn __mfh_str_loop(sh: Int, f: (Map[String, Int], String, String) -> Map[String, 
     __mfh_str_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_str_msi(m: Map[String, String], init: Map[String, Int], f: (Map[String, Int], String, String) -> Map[String, Int]) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -21489,6 +21602,7 @@ fn __mfh_skv_loop(sh: Int, f: (Map[String, Int], String, Int) -> Map[String, Int
     __mfh_skv_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_skv_msi(m: Map[String, Int], init: Map[String, Int], f: (Map[String, Int], String, Int) -> Map[String, Int]) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -21508,6 +21622,7 @@ fn __mfh_str_sacc_loop(sh: Int, f: (String, String, String) -> String, entries: 
     __mfh_str_sacc_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_str_sacc(m: Map[String, String], init: String, f: (String, String, String) -> String) -> String = {
   let sh = prim.handle(m)
   let n = prim.load32(sh + 4)
@@ -21526,6 +21641,7 @@ fn __fold_smsi_loop(h: Int, f: (Map[String, Int], String) -> Map[String, Int], n
     __fold_smsi_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_str_msi(xs: List[String], init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Map[String, Int] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -21551,6 +21667,7 @@ fn __mfh_skv_hacc_loop(sh: Int, f: (String, String, Int) -> String, entries: Int
     __mfh_skv_hacc_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_skv_hacc(m: Map[String, Int], init: String, f: (String, String, Int) -> String) -> String = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -21789,12 +21906,19 @@ else {
 }
 
 fn map_eq_hval(a: Map[String, List[Int]], b: Map[String, List[Int]]) -> Bool = {
-  let ah = prim.handle(a)
-  let bh = prim.handle(b)
-  let an = prim.load32(ah + 4)
-  let bn = prim.load32(bh + 4)
-  if an != bn then false
-  else __hvl_eq_at(ah, an, bh, bn, 0)
+  if map.len(a) != map.len(b) then false
+  else {
+    var same = true
+    for (k, v) in a {
+      if same then {
+        same = match map.get(b, k) {
+          some(other) => v == other,
+          none => false,
+        }
+      } else ()
+    }
+    same
+  }
 }
 
 fn __hvl_drop_slots(h: Int, m: Int, i: Int) -> Unit = if i >= m then ()
@@ -21823,6 +21947,7 @@ fn __hvf_at(pairs: List[(String, List[Int])], i: Int, m: Map[String, List[Int]])
     none => m,
   }
 
+@specializes("map.from_list")
 fn map_from_list_hval(pairs: List[(String, List[Int])]) -> Map[String, List[Int]] = __hvf_at(
   pairs,
   0,
@@ -22103,12 +22228,19 @@ else {
 }
 
 fn map_eq_ivh(a: Map[Int, String], b: Map[Int, String]) -> Bool = {
-  let ah = prim.handle(a)
-  let bh = prim.handle(b)
-  let an = prim.load32(ah + 4)
-  let bn = prim.load32(bh + 4)
-  if an != bn then false
-  else __ivh_eq_at(ah, an, bh, bn, 0)
+  if map.len(a) != map.len(b) then false
+  else {
+    var same = true
+    for (k, v) in a {
+      if same then {
+        same = match map.get(b, k) {
+          some(other) => v == other,
+          none => false,
+        }
+      } else ()
+    }
+    same
+  }
 }
 
 fn __ivh_drop_vals(h: Int, n: Int, i: Int) -> Unit = if i >= n then ()
@@ -22288,6 +22420,7 @@ fn __mlo_from_at(ph: Int, n: Int, i: Int, m: Map[String, List[Int?]]) -> Map[Str
     __mlo_from_at(ph, n, i + 1, nm)
   }
 
+@specializes("map.from_list")
 fn map_from_list_mlo(pairs: List[(String, List[Int?])]) -> Map[String, List[Int?]] = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)
@@ -22480,6 +22613,7 @@ fn __msv_from_at(ph: Int, n: Int, i: Int, m: Map[String, Map[String, String]]) -
     __msv_from_at(ph, n, i + 1, nm)
   }
 
+@specializes("map.from_list")
 fn map_from_list_msv(pairs: List[(String, Map[String, String])]) -> Map[String, Map[String, String]] = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)
@@ -22889,6 +23023,7 @@ else {
   __skv_compact_values(rh, from, to, w, j + 1)
 }
 
+@specializes("map.filter")
 fn map_filter_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let sentries = prim.load32(sh + 4)
@@ -22912,6 +23047,7 @@ fn __skv_count_hits(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int, acc
     else __skv_count_hits(sh, entries, f, i + 1, acc)
   }
 
+@specializes("map.all")
 fn map_all_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -22919,6 +23055,7 @@ fn map_all_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   hits >= entries
 }
 
+@specializes("map.any")
 fn map_any_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -22926,6 +23063,7 @@ fn map_any_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   hits > 0
 }
 
+@specializes("map.count")
 fn map_count_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Int = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -22958,6 +23096,7 @@ fn __skv_find_loop(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int) -> (
   if i >= entries then __skv_find_none()
   else __skv_find_at(sh, entries, f, i)
 
+@specializes("map.find")
 fn map_find_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> (String, Int)? = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -22976,6 +23115,7 @@ fn __skv_fold_loop(sh: Int, f: (Int, String, Int) -> Int, entries: Int, i: Int, 
     __skv_fold_loop(sh, f, entries, i + 1, nacc)
   }
 
+@specializes("map.fold")
 fn map_fold_skv(m: Map[String, Int], init: Int, f: (Int, String, Int) -> Int) -> Int = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -23000,12 +23140,19 @@ else {
 }
 
 fn map_eq_skv(a: Map[String, Int], b: Map[String, Int]) -> Bool = {
-  let ah = prim.handle(a)
-  let bh = prim.handle(b)
-  let an = prim.load32(ah + 4)
-  let bn = prim.load32(bh + 4)
-  if an != bn then false
-  else __skv_eqm_at(ah, an, bh, bn, 0)
+  if map.len(a) != map.len(b) then false
+  else {
+    var same = true
+    for (k, v) in a {
+      if same then {
+        same = match map.get(b, k) {
+          some(other) => v == other,
+          none => false,
+        }
+      } else ()
+    }
+    same
+  }
 }
 
 
@@ -23120,6 +23267,7 @@ fn __skv_update_copy(sh: Int, rh: Int, entries: Int, k: String, f: (Int) -> Int,
 
 
 
+@specializes("map.upsert")
 fn map_upsert_skv(m: Map[String, Int], k: String, init: Int, f: (Int) -> Int) -> Map[String, Int] = {
   let h = prim.handle(m)
   let entries = prim.load32(h + 4)
@@ -23128,6 +23276,7 @@ fn map_upsert_skv(m: Map[String, Int], k: String, init: Int, f: (Int) -> Int) ->
   map_set_skv(m, k, v)
 }
 
+@specializes("map.update")
 fn map_update_skv(m: Map[String, Int], k: String, f: (Int) -> Int) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -23149,6 +23298,7 @@ fn __skv_map_copy(sh: Int, rh: Int, entries: Int, f: (Int) -> Int, i: Int) -> In
     __skv_map_copy(sh, rh, entries, f, i + 1)
   }
 
+@specializes("map.map")
 fn map_map_skv(m: Map[String, Int], f: (Int) -> Int) -> Map[String, Int] = {
   let sh = prim.handle(m)
   let entries = prim.load32(sh + 4)
@@ -28792,6 +28942,7 @@ fn option_map_h(o: String?, f: (String) -> String) -> String? = {
 
 fn __opt_unwrap_else_h(f: () -> String) -> String = f()
 
+@specializes("option.unwrap_or_else")
 fn option_unwrap_or_else_h(o: String?, f: () -> String) -> String = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -28842,6 +28993,7 @@ fn __opt_filterh_some(x: String, pred: (String) -> Bool) -> String? = {
   if p then some(x) else none
 }
 
+@specializes("option.filter")
 fn option_filter_h(o: String?, pred: (String) -> Bool) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -28861,6 +29013,7 @@ fn __opt_orelse_none_h(f: () -> String?) -> String? = {
   r
 }
 
+@specializes("option.or_else")
 fn option_or_else_h(o: String?, f: () -> String?) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -28872,6 +29025,7 @@ fn option_or_else_h(o: String?, f: () -> String?) -> String? = {
 
 
 
+@specializes("option.flatten")
 fn option_flatten_h(o: (String?)?) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -28891,12 +29045,14 @@ pub const SRC_OPTION_PRED: &str = r#"
 
 
 
+@specializes("option.is_some")
 fn option_is_some(o: Int?) -> Bool = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
   len == 1
 }
 
+@specializes("option.is_none")
 fn option_is_none(o: Int?) -> Bool = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -29802,80 +29958,8 @@ fn option_to_string_oi(o: (Int?)?) -> String = match o {
 }
 "#;
 pub const SRC_OPTION_TO_STRING_S: &str = r#"
-
-
-
-
-
-
-
-fn __ots_is_escaped(b: Int) -> Bool = if b == 92 then true
-else if b == 34 then true
-else if b == 10 then true
-else if b == 13 then true
-else if b == 9 then true else false
-
-
-fn __ots_esc_len(src: Int, slen: Int, i: Int, acc: Int) -> Int = if i >= slen then acc
-else {
-  let b = prim.load8(src + i)
-  let w = if __ots_is_escaped(b) then 2 else 1
-  __ots_esc_len(src, slen, i + 1, acc + w)
-}
-
-
-fn __ots_esc_char(b: Int) -> Int = if b == 10 then 110
-else if b == 13 then 114
-else if b == 9 then 116 else b
-
-
-fn __ots_fill_esc(src: Int, slen: Int, i: Int, pos: Int) -> Int = if i >= slen then pos
-else {
-  let b = prim.load8(src + i)
-  let pos1 = if __ots_is_escaped(b) then {
-    prim.store8(pos, 92)
-
-    prim.store8(pos + 1, __ots_esc_char(b))
-    pos + 2
-  } else {
-    prim.store8(pos, b)
-    pos + 1
-  }
-  __ots_fill_esc(src, slen, i + 1, pos1)
-}
-
-
-fn __ots_some(v: String) -> String = {
-  let h = prim.handle(v)
-  let slen = prim.load32(h + 4)
-  let src = h + 12
-  let body = __ots_esc_len(src, slen, 0, 0)
-  let total = 8 + body
-
-  let buf = prim.alloc_str(total)
-  let base = prim.handle(buf) + 12
-  prim.store8(base, 115)
-
-  prim.store8(base + 1, 111)
-
-  prim.store8(base + 2, 109)
-
-  prim.store8(base + 3, 101)
-
-  prim.store8(base + 4, 40)
-
-  prim.store8(base + 5, 34)
-
-  let mid = __ots_fill_esc(src, slen, 0, base + 6)
-  prim.store8(mid, 34)
-
-  prim.store8(mid + 1, 41)
-
-  buf
-}
-
 fn option_to_string_s(o: String?) -> String = match o {
-  some(v) => __ots_some(v),
+  some(v) => "some(" + string.__quote(v) + ")",
   none => "none",
 }
 "#;
@@ -31142,11 +31226,13 @@ fn __rc_rand(min: Int, max: Int) -> Int = {
   if span <= 0 then min else min + (rpos % span)
 }
 
+@specializes("random.choice")
 fn random_choice(xs: List[Int]) -> Int? = {
   let n = list.len(xs)
   if n == 0 then none else list.get(xs, __rc_rand(0, n - 1))
 }
 
+@specializes("random.choice")
 fn random_choice_str(xs: List[String]) -> String? = {
   let n = list.len(xs)
   if n == 0 then none else list.get(xs, __rc_rand(0, n - 1))
@@ -31162,6 +31248,7 @@ fn __rc_pair_some(h: Int, i: Int) -> (String, String)? = {
   some(v)
 }
 
+@specializes("random.choice")
 fn random_choice_pair(xs: List[(String, String)]) -> (String, String)? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -31237,6 +31324,7 @@ fn __rs_rand(min: Int, max: Int) -> Int = {
   if span <= 0 then min else min + (rpos % span)
 }
 
+@specializes("random.shuffle")
 fn random_shuffle(xs: List[Int]) -> List[Int] = {
   var ys = xs
   var i = list.len(ys) - 1
@@ -31251,6 +31339,7 @@ fn random_shuffle(xs: List[Int]) -> List[Int] = {
   ys
 }
 
+@specializes("random.shuffle")
 fn random_shuffle_str(xs: List[String]) -> List[String] = {
   var ys = xs
   var i = list.len(ys) - 1
@@ -31270,6 +31359,7 @@ fn random_shuffle_str(xs: List[String]) -> List[String] = {
 
 
 
+@specializes("random.shuffle")
 fn random_shuffle_pair(xs: List[(String, String)]) -> List[(String, String)] = {
   var ys = xs
   var i = list.len(ys) - 1
@@ -34135,11 +34225,13 @@ fn result_zip(a: Result[Int, String], b: Result[Int, String]) -> Result[(Int, In
 
 
 
+@specializes("result.is_ok")
 fn result_is_ok_h(r: Result[String, String]) -> Bool = {
   let tag = prim.load32(prim.handle(r) + 16)
   tag == 0
 }
 
+@specializes("result.is_err")
 fn result_is_err_h(r: Result[String, String]) -> Bool = {
   let tag = prim.load32(prim.handle(r) + 16)
   tag >= 1
@@ -34336,6 +34428,7 @@ fn __rmh_map_ok(x: String, f: (String) -> String) -> Result[String, String] = {
   ok(y)
 }
 
+@specializes("result.map")
 fn result_map_h(r: Result[String, String], f: (String) -> String) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -34354,6 +34447,7 @@ fn __rmh_maperr_err(e: String, f: (String) -> String) -> Result[String, String] 
   err(y)
 }
 
+@specializes("result.map_err")
 fn result_map_err_h(r: Result[String, String], f: (String) -> String) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -34372,6 +34466,7 @@ fn __rmh_flatmap_ok(x: String, f: (String) -> Result[String, String]) -> Result[
   r2
 }
 
+@specializes("result.flat_map")
 fn result_flat_map_h(r: Result[String, String], f: (String) -> Result[String, String]) -> Result[String, String] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -34390,6 +34485,7 @@ fn __rmh_uoe_err(e: String, f: (String) -> String) -> String = {
   y
 }
 
+@specializes("result.unwrap_or_else")
 fn result_unwrap_or_else_h(r: Result[String, String], f: (String) -> String) -> String = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -34426,6 +34522,7 @@ fn result_filter_h(r: Result[String, String], pred: (String) -> Bool, err_val: S
 }
 
 
+@specializes("result.to_option")
 fn result_to_option_h(r: Result[String, String]) -> String? = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -34436,6 +34533,7 @@ fn result_to_option_h(r: Result[String, String]) -> String? = {
 }
 
 
+@specializes("result.to_err_option")
 fn result_to_err_option_h(r: Result[String, String]) -> String? = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -34455,6 +34553,7 @@ fn __res_map_s2h_ok(x: Int, f: (Int) -> Value) -> Result[Value, String] = {
   ok(y)
 }
 
+@specializes("result.map")
 fn result_map_s2h(r: Result[Int, String], f: (Int) -> Value) -> Result[Value, String] = {
   let h = prim.handle(r)
   let len = prim.load32(h + 4)
@@ -34555,56 +34654,10 @@ else {
 }
 
 
-fn __rts_err(e: String) -> String = {
-  let h = prim.handle(e)
-  let slen = prim.load32(h + 4)
-  let src = h + 12
-  let body = __rts_esc_len(src, slen, 0, 0)
-  let buf = prim.alloc_str(7 + body)
-
-  let base = prim.handle(buf) + 12
-  prim.store8(base, 101)
-
-  prim.store8(base + 1, 114)
-
-  prim.store8(base + 2, 114)
-
-  prim.store8(base + 3, 40)
-
-  prim.store8(base + 4, 34)
-
-  let mid = __rts_fill_esc(src, slen, 0, base + 5)
-  prim.store8(mid, 34)
-
-  prim.store8(mid + 1, 41)
-
-  buf
-}
+fn __rts_err(e: String) -> String = "err(" + string.__quote(e) + ")"
 
 
-fn __rts_ok_s(v: String) -> String = {
-  let h = prim.handle(v)
-  let slen = prim.load32(h + 4)
-  let src = h + 12
-  let body = __rts_esc_len(src, slen, 0, 0)
-  let buf = prim.alloc_str(6 + body)
-
-  let base = prim.handle(buf) + 12
-  prim.store8(base, 111)
-
-  prim.store8(base + 1, 107)
-
-  prim.store8(base + 2, 40)
-
-  prim.store8(base + 3, 34)
-
-  let mid = __rts_fill_esc(src, slen, 0, base + 4)
-  prim.store8(mid, 34)
-
-  prim.store8(mid + 1, 41)
-
-  buf
-}
+fn __rts_ok_s(v: String) -> String = "ok(" + string.__quote(v) + ")"
 
 
 
@@ -34764,21 +34817,7 @@ fn result_to_string_ls(r: Result[List[String], String]) -> String = match r {
 
 
 
-fn __rts_quote(s: String) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let src = h + 12
-  let body = __rts_esc_len(src, slen, 0, 0)
-  let buf = prim.alloc_str(2 + body)
-
-  let base = prim.handle(buf) + 12
-  prim.store8(base, 34)
-
-  let mid = __rts_fill_esc(src, slen, 0, base + 1)
-  prim.store8(mid, 34)
-
-  buf
-}
+fn __rts_quote(s: String) -> String = string.__quote(s)
 
 
 
@@ -35884,9 +35923,7 @@ fn set_is_disjoint(a: Set[Int], b: Set[Int]) -> Bool = {
 
 
 fn set_eq(a: Set[Int], b: Set[Int]) -> Bool = {
-  let la = prim.load32(prim.handle(a) + 4)
-  let lb = prim.load32(prim.handle(b) + 4)
-  if la != lb then false else set_is_subset(a, b)
+  if set.len(a) != set.len(b) then false else set.is_subset(a, b)
 }
 
 
@@ -36462,9 +36499,7 @@ fn set_fold_str(s: Set[String], init: Int, f: (Int, String) -> Int) -> Int = {
 
 
 fn set_eq_str(a: Set[String], b: Set[String]) -> Bool = {
-  let la = prim.load32(prim.handle(a) + 4)
-  let lb = prim.load32(prim.handle(b) + 4)
-  if la != lb then false else set.is_subset(a, b)
+  if set.len(a) != set.len(b) then false else set.is_subset(a, b)
 }
 "#;
 pub const SRC_SET_TO_STRING: &str = r#"
@@ -36720,6 +36755,7 @@ pub const SRC_STRING: &str = r#"
 
 /// s without leading/trailing whitespace.
 @intrinsic("almide_rt_string_trim")
+@reuse(s)
 fn trim(s: String) -> String = _
 
 /// Pieces around sep; empty pieces kept.
@@ -36779,10 +36815,12 @@ fn capitalize(s: String) -> String = _
 
 /// Unicode uppercase; never folds non-ASCII into ASCII; not for identity.
 @intrinsic("almide_rt_string_to_upper")
+@reuse(s)
 fn to_upper(s: String) -> String = _
 
 /// Unicode lowercase; never folds non-ASCII into ASCII; not for identity.
 @intrinsic("almide_rt_string_to_lower")
+@reuse(s)
 fn to_lower(s: String) -> String = _
 
 /// Every from replaced by to.
@@ -36852,10 +36890,12 @@ fn pad_end(s: String, n: Int, fill: String) -> String = _
 
 /// s without leading whitespace.
 @intrinsic("almide_rt_string_trim_start")
+@reuse(s)
 fn trim_start(s: String) -> String = _
 
 /// s without trailing whitespace.
 @intrinsic("almide_rt_string_trim_end")
+@reuse(s)
 fn trim_end(s: String) -> String = _
 
 /// Non-overlapping needle count; len+1 if needle empty.
@@ -37209,6 +37249,11 @@ fn __err_text(s: String) -> String = _
 fn __string_media_type(s: String) -> String = "text/plain; charset=utf-8"
 
 fn __string_to_text(s: String) -> String = s
+
+
+/// Quote a String and escape backslash, quote, newline, carriage return and tab.
+@intrinsic("almide_rt_string_quote")
+fn __quote(s: String) -> String = _
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
@@ -38179,6 +38224,7 @@ else {
   __sq_fill_esc(src, slen, i + 1, pos1)
 }
 
+@specializes("string.__quote")
 fn string_quote(s: String) -> String = {
   let sh = prim.handle(s)
   let slen = prim.load32(sh + 4)
@@ -39329,18 +39375,40 @@ fn string_to_upper(s: String) -> String = {
   let sp = "0003990003080003010003A50003080003010005350005520000000003A50003130000000003A50003130003000003A50003130003010003A5000313000342001F08000399000000001F09000399000000001F0A000399000000001F0B000399000000001F0C000399000000001F0D000399000000001F0E000399000000001F0F000399000000001F08000399000000001F09000399000000001F0A000399000000001F0B000399000000001F0C000399000000001F0D000399000000001F0E000399000000001F0F000399000000001F28000399000000001F29000399000000001F2A000399000000001F2B000399000000001F2C000399000000001F2D000399000000001F2E000399000000001F2F000399000000001F28000399000000001F29000399000000001F2A000399000000001F2B000399000000001F2C000399000000001F2D000399000000001F2E000399000000001F2F000399000000001F68000399000000001F69000399000000001F6A000399000000001F6B000399000000001F6C000399000000001F6D000399000000001F6E000399000000001F6F000399000000001F68000399000000001F69000399000000001F6A000399000000001F6B000399000000001F6C000399000000001F6D000399000000001F6E000399000000001F6F000399000000001FBA000399000000000391000399000000000386000399000000000391000342000000000391000342000399000391000399000000001FCA0003990000000003970003990000000003890003990000000003970003420000000003970003420003990003970003990000000003990003080003000003990003080003010003990003420000000003990003080003420003A50003080003000003A50003080003010003A10003130000000003A50003420000000003A5000308000342001FFA0003990000000003A900039900000000038F0003990000000003A90003420000000003A90003420003990003A900039900000000054400054600000000054400053500000000054400053B00000000054E00054600000000054400053D000000"
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
-  let buf = prim.alloc_str(blen * 3 + 8)
-  let outn = __to_upper_walk(
-    h + 12,
-    h + 12 + blen,
-    prim.handle(tbl) + 12,
-    285,
-    prim.handle(sp) + 12,
-    prim.handle(buf) + 12,
-    0,
-  )
-  prim.store32(prim.handle(buf) + 4, outn)
-  buf
+
+
+
+
+
+
+
+
+  let unique = prim.load32(h) == 1 and prim.load32(h + 8) > blen
+  var ascii_end = 0
+  if unique then {
+    while ascii_end < blen {
+      let b = prim.load8(h + 12 + ascii_end)
+      if b >= 128 then break
+      else ()
+      prim.store8(h + 12 + ascii_end, if b >= 97 and b <= 122 then b - 32 else b)
+      ascii_end = ascii_end + 1
+    }
+  } else ()
+  if unique and ascii_end == blen then s
+  else {
+    let buf = prim.alloc_str(blen * 3 + 8)
+    let outn = __to_upper_walk(
+      h + 12,
+      h + 12 + blen,
+      prim.handle(tbl) + 12,
+      285,
+      prim.handle(sp) + 12,
+      prim.handle(buf) + 12,
+      0,
+    )
+    prim.store32(prim.handle(buf) + 4, outn)
+    buf
+  }
 }
 "#;
 pub const SRC_STRING_TRIM: &str = r#"
@@ -41459,6 +41527,13 @@ fn float(f: Float) -> Value = _
 @intrinsic("almide_rt_value_int")
 fn int(n: Int) -> Value = _
 
+
+
+/// Structural equality; arrays and object entries compare in order.
+@intrinsic("almide_rt_value_eq")
+@consume(a, b)
+fn __eq(a: Value, b: Value) -> Bool = _
+
 /// Shallow merge, b's keys win; b if not both objects.
 @intrinsic("almide_rt_value_merge")
 fn merge(a: Value, b: Value) -> Value = _
@@ -41500,6 +41575,20 @@ fn __field(v: Value, key: String) -> Result[Value, String] = _
 /// Object keys in order; [] for non-objects.
 @intrinsic("almide_rt_value_keys")
 fn __keys(v: Value) -> List[String] = _
+
+
+
+/// The decode error e with the path segment seg spliced in.
+@intrinsic("almide_rt_value_err_at")
+fn __err_at(e: String, seg: String) -> String = _
+
+/// The decode error e with the list index segment `[i]` spliced in.
+@intrinsic("almide_rt_value_err_at_index")
+fn __err_at_index(e: String, i: Int) -> String = _
+
+/// The strings of the Array v, read in place; err if v or an element is another kind.
+@intrinsic("almide_rt___decode_list_string")
+fn __decode_list_string(v: Value) -> Result[List[String], String] = _
 
 /// Object pairs in order; err if v is another kind.
 @intrinsic("almide_rt_value_as_object")
@@ -42133,6 +42222,7 @@ else {
 
 
 
+@specializes("list.__eq_any")
 fn list_eq_value(a: List[Value], b: List[Value]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -42157,6 +42247,8 @@ else {
 
 
 
+@implements("list.__eq_opt_int")
+@specializes("list.__eq_opt_int")
 fn list_eq_opt_int(a: List[Int?], b: List[Int?]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -42189,6 +42281,7 @@ else {
   else false
 }
 
+@specializes("list.__eq_any")
 fn list_eq_opt_str(a: List[String?], b: List[String?]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -42221,6 +42314,8 @@ else {
   else false
 }
 
+@implements("list.__eq_res_int")
+@specializes("list.__eq_res_int")
 fn list_eq_res_int(a: List[Result[Int, String]], b: List[Result[Int, String]]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -42236,6 +42331,8 @@ else {
   else false
 }
 
+@implements("list.__eq_list_int")
+@specializes("list.__eq_list_int")
 fn list_eq_list_int(a: List[List[Int]], b: List[List[Int]]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -42251,6 +42348,8 @@ else {
   else false
 }
 
+@implements("list.__eq_list_float")
+@specializes("list.__eq_list_float")
 fn list_eq_list_float(a: List[List[Float]], b: List[List[Float]]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -42266,6 +42365,7 @@ else {
   else false
 }
 
+@specializes("list.__eq_any")
 fn list_eq_list_str(a: List[List[String]], b: List[List[String]]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -42279,6 +42379,7 @@ fn list_eq_list_str(a: List[List[String]], b: List[List[String]]) -> Bool = {
 
 
 
+@specializes("value.__eq")
 fn value_eq(a: Value, b: Value) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -42711,6 +42812,7 @@ fn result_str_unwrap_or(r: Result[String, String], d: String) -> String = match 
 
 
 
+@specializes("option.unwrap_or")
 fn option_value_unwrap_or(o: Value?, d: Value) -> Value = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
@@ -42726,6 +42828,7 @@ fn option_value_unwrap_or(o: Value?, d: Value) -> Value = {
 
 
 
+@specializes("option.unwrap_or")
 fn option_listint_unwrap_or(o: List[Int]?, d: List[Int]) -> List[Int] = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
@@ -42739,6 +42842,7 @@ fn option_listint_unwrap_or(o: List[Int]?, d: List[Int]) -> List[Int] = {
 
 
 
+@specializes("result.unwrap_or")
 fn result_flat_unwrap_or(r: Result[List[Int], String], d: List[Int]) -> List[Int] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -42753,6 +42857,7 @@ fn result_flat_unwrap_or(r: Result[List[Int], String], d: List[Int]) -> List[Int
 
 
 
+@specializes("option.unwrap_or")
 fn option_liststr_unwrap_or(o: List[String]?, d: List[String]) -> List[String] = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
@@ -42767,6 +42872,7 @@ fn option_liststr_unwrap_or(o: List[String]?, d: List[String]) -> List[String] =
 
 
 
+@specializes("option.unwrap_or")
 fn option_listvalue_unwrap_or(o: List[Value]?, d: List[Value]) -> List[Value] = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
@@ -43292,6 +43398,7 @@ fn option_unwrap_or_hx(o: Value?, d: Value) -> Value = {
   }
 }
 
+@specializes("result.unwrap_or")
 fn result_unwrap_or_hx(r: Result[Value, String], d: Value) -> Value = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)

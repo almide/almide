@@ -79,8 +79,11 @@ pub(super) fn runtime_crate_manifest_lines() -> String {
 }
 
 /// The runtime crate's own manifest.
-pub(super) fn runtime_crate_manifest() -> String {
-    format!("[package]\nname = \"{RT_CRATE}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n")
+pub(super) fn runtime_crate_manifest(runtime: &str) -> String {
+    let base = format!("[package]\nname = \"{RT_CRATE}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n");
+    // Dependencies belong to the crate containing their uses. Declaring TLS
+    // only on the program does not make it visible inside the split runtime.
+    build_cargo_toml(&base, &generated_crate_deps(runtime, &[]))
 }
 
 /// Split a render's runtime module out: `(program, runtime crate root)`, or
@@ -228,6 +231,19 @@ pub(super) fn build_cargo_toml(base_toml: &str, native_deps: &[crate::project::N
 mod tests {
     use super::{build_cargo_toml, generated_crate_deps, insert_cargo_dep, GENERATED_CARGO_TOML};
     use crate::project::NativeDep;
+
+    #[test]
+    fn split_runtime_declares_its_own_external_dependencies() {
+        for (module, expected) in almide_codegen::RUNTIME_MODULE_CRATES {
+            let runtime = format!("fn almide_rt_{module}_probe() {{}}");
+            let manifest: toml::Table = toml::from_str(&super::runtime_crate_manifest(&runtime)).unwrap();
+            let deps = manifest["dependencies"].as_table().unwrap();
+            assert_eq!(deps.len(), expected.len());
+            for (name, _) in *expected { assert!(deps.contains_key(*name)); }
+        }
+        let manifest: toml::Table = toml::from_str(&super::runtime_crate_manifest("fn plain() {}" )).unwrap();
+        assert!(manifest.get("dependencies").is_none());
+    }
 
     fn dep(name: &str, spec: &str, target: Option<&str>) -> NativeDep {
         NativeDep { name: name.into(), spec: spec.into(), target: target.map(str::to_string) }

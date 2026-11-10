@@ -59,7 +59,12 @@ const FUSED: &[&str] = &["find", "find_index", "any", "all"];
 /// result holds them all, or folds over them all) or reuse the buffer.
 const MAY_CONSUME: &[&str] = &[
     "map", "filter", "filter_map", "flat_map", "fold", "reduce", "scan", "partition", "group_by",
-    "sort_by", "unique_by", "enumerate", "zip", "zip_with", "intersperse", "shuffle",
+    // `group_count` is the native render's one-pass spelling of `group_by`
+    // followed by each group's length: it hands every element to the key fn.
+    "group_count",
+    // `sort_by_float` is `sort_by`'s Float-key native declaration: it sorts the
+    // buffer it is handed in place, keying every element once.
+    "sort_by", "sort_by_float", "unique_by", "enumerate", "zip", "zip_with", "intersperse", "shuffle",
     "insert", "remove_at", "update",
 ];
 

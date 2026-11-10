@@ -19,6 +19,15 @@
 //! - a top-level `static` becomes a `loom::lazy_static!` (loom resets those
 //!   per execution; a plain static would carry one execution's objects into
 //!   the next).
+//! - a reference PARAMETER to a type the span shares across threads (one
+//!   with an `unsafe impl Sync`), `&self` of its methods included, is
+//!   protected (#4452): Rust's aliasing model requires the referent to stay
+//!   valid until the function RETURNS, not only until the parameter's last
+//!   use. The type gets a `Live` witness field and each such function a
+//!   `crate::shim::Protector` over it as its first local, which touches the
+//!   witness when the function returns; so a caller that frees the frame
+//!   while a helper's protected borrow of it is still on the helper's stack
+//!   (the defect Miri reported, run 41854359018) is a causality violation.
 //!
 //! `LOOM_FAN_CONTROL` breaks the protocol on purpose (the negative controls
 //! of scripts/loom-fan-gate.sh); each control's anchor must occur exactly
@@ -33,10 +42,18 @@ const LAST: &str = "fn almide_fan_steal(";
 
 /// (control, anchor, replacement). `nowait`: the caller returns without
 /// waiting for the helpers inside its gate. `noreaders`: withdrawing an offer
-/// does not wait for the threads that are reading its slot.
+/// does not wait for the threads that are reading its slot. `refparam`: the
+/// helper's body runs under a reference parameter to the gate again (the
+/// shape before #4452), so that protected borrow spans the helper's leaving
+/// decrement.
 const CONTROLS: &[(&str, &str, &str)] = &[
     ("nowait", "if gate.inside.load(Ordering::SeqCst) == 0 {", "if true {"),
     ("noreaders", "while slot.readers.load(Ordering::SeqCst) > 0 {", "while false {"),
+    (
+        "refparam",
+        "fn almide_fan_help(gate: *const AlmideFanGate) {",
+        "fn almide_fan_help(gate: *const AlmideFanGate) {\n    almide_fan_help_ref(unsafe { &*gate })\n}\n\nfn almide_fan_help_ref(gate: &AlmideFanGate) {",
+    ),
 ];
 
 fn main() {
@@ -105,6 +122,7 @@ fn main() {
         assert_eq!(n, 1, "control {control}: its anchor `{anchor}` occurs {n} times in the gate source — update the control");
         out = out.replacen(anchor, with, 1);
     }
+    let out = protect_reference_params(&out);
 
     let dest = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("gate.rs");
     fs::write(dest, out).unwrap();
@@ -118,4 +136,65 @@ fn rewrite_paths(s: &str) -> String {
         .replace("std::thread::", "crate::shim::thread::")
         .replace("std::time::Instant", "crate::shim::Instant")
         .replace("std::hint::spin_loop", "loom::hint::spin_loop")
+}
+
+/// The protector rewrite (see the module doc): for every type the span
+/// declares `unsafe impl Sync for T {}`, a `Live` witness field on `T`, its
+/// initialiser in each `= T {` literal, and a `Protector` as the first local
+/// of every `fn` with a `NAME: &T` parameter, or `&self` inside `impl T`.
+/// By syntax: the shared type is whatever the `unsafe impl Sync` names.
+fn protect_reference_params(src: &str) -> String {
+    let shared: Vec<String> = src
+        .lines()
+        .filter_map(|l| l.strip_prefix("unsafe impl Sync for ").and_then(|r| r.strip_suffix(" {}")))
+        .map(str::to_string)
+        .collect();
+    assert!(!shared.is_empty(), "no `unsafe impl Sync for T {{}}` in the gate source: the protector rewrite has nothing to protect");
+    let mut out = String::new();
+    let mut in_impl: Option<&str> = None;
+    let mut protected = 0;
+    for line in src.lines() {
+        out.push_str(line);
+        out.push('\n');
+        let trimmed = line.trim_start();
+        for t in &shared {
+            if line == format!("struct {t} {{") {
+                out.push_str("    __protector: crate::shim::Live,\n");
+            } else if line.trim_end().ends_with(&format!("= {t} {{")) {
+                out.push_str("        __protector: crate::shim::Live::new(),\n");
+            } else if line == format!("impl {t} {{") {
+                in_impl = Some(t.as_str());
+            }
+        }
+        if line == "}" {
+            in_impl = None;
+        }
+        if !(trimmed.starts_with("fn ") && line.trim_end().ends_with('{')) {
+            continue;
+        }
+        let params = &trimmed[trimmed.find('(').unwrap() + 1..];
+        let mut names: Vec<&str> = Vec::new();
+        if params.starts_with("&self") && in_impl.is_some() {
+            names.push("self");
+        }
+        for t in &shared {
+            let pat = format!(": &{t}");
+            let mut rest = params;
+            while let Some(at) = rest.find(&pat) {
+                let after = rest[at + pat.len()..].chars().next();
+                if matches!(after, Some(',') | Some(')')) {
+                    let head = &rest[..at];
+                    let name = head.rsplit(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap();
+                    names.push(name);
+                }
+                rest = &rest[at + pat.len()..];
+            }
+        }
+        for name in names {
+            out.push_str(&format!("    let _protector = crate::shim::Protector(&{name}.__protector);\n"));
+            protected += 1;
+        }
+    }
+    assert!(protected > 0, "the protector rewrite found no reference parameter to a shared type");
+    out
 }

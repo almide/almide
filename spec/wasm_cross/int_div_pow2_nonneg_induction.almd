@@ -1,0 +1,57 @@
+// @contract: C-170
+// #4611: a signed `/` or `%` by a power of two whose dividend the structural
+// wasm leg proves non-negative lowers to one unsigned shift or mask. The
+// proofs come from loop induction variables: `i` and `j` start at 0, grow by
+// one, and are bounded by a list access every iteration completes before the
+// increment (`v[j]`, `out[i] = sum`), or by a literal loop condition — so
+// `(i + j) * (i + j + 1)` cannot wrap and stays >= 0. Every value printed is
+// the signed result both targets must agree on.
+fn mul_av(v: List[Float], n: Int) -> List[Float] = {
+  var out = list.repeat(0.0, n)
+  var i = 0
+  while i < n {
+    var sum = 0.0
+    var j = 0
+    while j < n {
+      let ij = i + j
+      sum = sum + 1.0 / float.from(ij * (ij + 1) / 2 + i + 1) * v[j]
+      j = j + 1
+    }
+    out[i] = sum
+    i = i + 1
+  }
+  out
+}
+
+fn buckets(xs: List[Int], n: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = acc + xs[i] * 31 + (i * 7 + 3) % 8 + (i * 5) / 4
+    i = i + 1
+  }
+  acc
+}
+
+fn literal_bound() -> Int = {
+  var acc = 0
+  var k = 0
+  while k < 1000 {
+    acc = acc + k * k / 4 + (k + 1) % 16
+    k = k + 2
+  }
+  acc
+}
+
+fn main() -> Unit = {
+  let n = 9
+  let u = list.repeat(1.0, n)
+  let w = mul_av(u, n)
+  let a = w[0]
+  let b = w[4]
+  let c = w[8]
+  println("${a} ${b} ${c}")
+  let xs = list.repeat(3, 12)
+  println("${buckets(xs, 12)}")
+  println("${literal_bound()}")
+}

@@ -46,12 +46,28 @@ impl LowerCtx {
         &mut self,
         params: &[(VarId, Ty)],
         body: &IrExpr,
+        fn_ty: &Ty,
     ) -> Option<ValueId> {
+        // Contextual numeric checking stamps the leaves but can leave the
+        // enclosing if/block's type widened. The checked callable declaration
+        // owns its return ABI, just as a named function's declaration does.
+        let mut typed_body;
+        let body = if let Ty::Fn { ret, is_effect: false, .. } = fn_ty {
+            if **ret != body.ty && !(body.ty.is_result() && !ret.is_result()) {
+                typed_body = body.clone();
+                typed_body.ty = (**ret).clone();
+                &typed_body
+            } else { body }
+        } else { body };
         let captured = self.collect_lambda_captures(params, body)?;
         let layout = self.partition_capture_drop_classes(captured)?;
         let cap_vals = self.resolve_capture_values(&layout)?;
         let name = self.lower_lifted_lambda_body(params, body, &layout)?;
-        Some(self.materialize_closure_block(name, &layout, cap_vals))
+        let ty = Ty::Fn { params: params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(body.ty.clone()), is_effect: false };
+        crate::trace::trace("ALMIDE_DBG_ANF", || format!("[lift] {name} type {ty:?}"));
+        let block = self.materialize_closure_block(name, &layout, cap_vals);
+        self.aggregate_blocks.insert(block, crate::render_native_rec::block_key(&ty));
+        Some(block)
     }
 
     /// Phase 1 of [`Self::lift_lambda`]: the lambda's CAPTURES, with their types, in
@@ -100,6 +116,13 @@ impl LowerCtx {
         }
         let mut cc = CapCollect { free: &free, out: Vec::new() };
         almide_ir::visit::IrVisitor::visit_expr(&mut cc, body);
+        // A write-only capture has no Var expression to supply its type.
+        // The checked binding still declares it (MapInsert/FieldAssign).
+        for v in &free {
+            if !cc.out.iter().any(|(id, _)| id == v) {
+                cc.out.push((*v, self.var_decl_tys.get(v)?.clone()));
+            }
+        }
         // HONEST-WALL GATE — a MUTATED capture without a SHARED CELL: env slots are
         // VALUE COPIES / co-owns, so writing the copy silently LOSES the mutation
         // (sort_by_call_count printed calls=0; the closure-mutation wasm_runtime
@@ -176,13 +199,8 @@ impl LowerCtx {
         //                       then NESTED-heap captures (freed by the type-specific
         //                       recursive $__drop_list_str — a List[String] element),
         //                       then scalar captures (untouched).
-        // Flat heap captures are ONE-LEVEL-EXACT kinds (String, List[Int], List[Float] — a
-        // single rc_dec frees them completely). `List[String]` is NESTED (each element is
-        // itself owned heap — a flat rc_dec of just the list block would leak every String,
-        // the exact class of bug this session's `_str`-dispatch fix + the map.find near-miss
-        // both found) — freed via the generic `__drop_list_str` (B33) instead. A `Value` /
-        // variant / heap-field-record capture (or a `Float`, f64↔i64 reinterpret not in the
-        // prim vocabulary) still defers — honest wall, recorded in the goal file.
+        // Wasm captures use exact flat/nested/rich sweeps; native typed
+        // environments also own recursively dropped capture values.
         use almide_lang::types::constructor::TypeConstructorId;
         // `is_flat_scalar_block_ty` IS this predicate — the crate's canonical name for
         // "every slot is a raw i64, so one rc_dec is the full free", which is exactly
@@ -232,7 +250,7 @@ impl LowerCtx {
             // the cell — a flat/nested dec would leak every key String).
             if self.cell_of.contains_key(&v) {
                 match self.cell_class_of_ctx(&ty) {
-                    Some(CellClass::Scalar) => heap_caps.push((v, ty)),
+                    Some(CellClass::Scalar | CellClass::NativeOwned) => heap_caps.push((v, ty)),
                     Some(CellClass::FlatHeap) => nested_heap_caps.push((v, ty)),
                     Some(CellClass::LenOwnedSlots) => cellmap_caps.push((v, ty)),
                     // A ROUTED cell (`Map[String, <record/variant>]`, #1143):
@@ -252,11 +270,16 @@ impl LowerCtx {
                 closure_caps.push((v, ty));
                 continue;
             }
-            if one_level_exact(&ty) {
+            if one_level_exact(&ty) || matches!(ty, Ty::Bytes) {
                 heap_caps.push((v, ty));
                 continue;
             }
-            if is_nested_list_str(&ty) || is_nested_result_str(&ty) {
+            // A String-keyed scalar map owns exactly len key handles. Its
+            // value region contains raw lanes, so the existing nested capture
+            // sweep releases all owned children without touching those lanes.
+            let scalar_map = matches!(&ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2 && a[0] == Ty::String && !is_heap_ty(&a[1]));
+            if is_nested_list_str(&ty) || is_nested_result_str(&ty) || scalar_map {
                 nested_heap_caps.push((v, ty));
                 continue;
             }
@@ -281,13 +304,16 @@ impl LowerCtx {
                 rich_caps.push((v, ty));
                 continue;
             }
+            // Native keeps the checked owned type and recursive Rust drop.
+            if crate::lower::owned_tco_slots() && is_heap_ty(&ty)
+                && crate::render_native_rec::checked_kind(&ty).is_some() {
+                heap_caps.push((v, ty));
+                continue;
+            }
             // `!is_heap_ty` IS this bucket's promise — the crate's canonical name for
             // "one raw i64 slot, no refcount", which is exactly what the scalar region
             // of the env stores and what `ListGetScalar` reads back. This used to
-            // restate a SUBSET of it (`Int | Bool`), so every other scalar was refused
-            // for no physical reason: a `Float` capture in particular, on the belief
-            // that its slot needed an f64↔i64 reinterpret the prim vocabulary lacked.
-            // It does not — a MIR float local ALREADY holds its bits in an i64 and
+            // restate only `Int | Bool`. A MIR float local holds its bits in an i64 and
             // every float op reinterprets around itself, so the bits round-trip through
             // the slot untouched. `(s) => d` over `let d: Float` walled on that
             // misreading (#954, surfaced by the nightly fuzz), and so did captures of
@@ -361,27 +387,6 @@ impl LowerCtx {
             return Some(vn);
         }
         self.record_drop_type_name(elem)
-    }
-
-    /// Phase 3 of [`Self::lift_lambda`]: resolve every capture to a lowered local value
-    /// (a cell capture to its CELL BLOCK). Verbatim.
-    fn resolve_capture_values(&self, layout: &CaptureLayout) -> Option<Vec<ValueId>> {
-        // Every capture must resolve to a lowered local value HERE (a capture of a
-        // deferred/opaque binding has no readable value). A captured Fn var must be a
-        // KNOWN closure block (closure_values), or its slot would hold a non-block.
-        let mut cap_vals: Vec<ValueId> = Vec::new();
-        for (i, (v, _)) in layout.captures.iter().enumerate() {
-            // A cell capture resolves to its CELL BLOCK (shared storage), not a value.
-            let cv = match self.cell_of.get(v) {
-                Some(&c) => c,
-                None => *self.value_of.get(v)?,
-            };
-            if i < layout.n_closure && !self.closure_values.contains(&cv) {
-                return None;
-            }
-            cap_vals.push(cv);
-        }
-        Some(cap_vals)
     }
 
     /// Phase 4 of [`Self::lift_lambda`]: lower the body in a FRESH sub-context (its own
@@ -473,19 +478,12 @@ impl LowerCtx {
         for (v, ty) in params {
             let pv = sub.fresh_value();
             sub.value_of.insert(*v, pv);
-            // A FUNCTION-typed PARAM (`list.map(fns, (f) => f(10))` — `f`'s own type is
-            // `(Int)->Int`, NOT a capture): mirrors `bind_params`'s IDENTICAL Fn-param arm
-            // exactly — the caller passes a closure block, and `f(x)` inside the lifted
-            // body must lower to `Op::CallIndirect` through it. `lift_lambda`'s param loop
-            // never had this (only a CAPTURED closure got `closure_values.insert`, at the
-            // prologue loop below) — a lifted lambda whose OWN parameter is itself callable
-            // (the `list.map` over a `List[Closure]` shape) fell to `lower_body_into`
-            // declining `f(10)` as a call through an unknown target, so `lift_lambda`
-            // returned `None` and the whole HOF call walled.
+            // A callable lambda parameter uses the same indirect dispatch as
+            // a captured function value.
             if matches!(ty, Ty::Fn { .. }) {
                 sub.closure_values.insert(pv);
             }
-            let repr = repr_of(ty).ok()?;
+            let repr = param_repr_of(ty).ok()?;
             if repr.is_heap() {
                 sub.param_values.insert(pv);
                 // SEED the param's variant/aggregate read-shape — IDENTICAL to `bind_params`.
@@ -601,6 +599,9 @@ impl LowerCtx {
             aggregate_blocks: std::mem::take(&mut sub.aggregate_blocks),
         };
         crate::lambda_sigs::record(&name, params.iter().map(|(_, t)| t.clone()).collect(), body.ty.clone());
+        crate::lambda_sigs::record_captures(&name, layout.captures.iter().enumerate().map(|(i, (v, ty))| {
+            crate::lambda_sigs::Capture { ty: ty.clone(), rich: layout.is_rich(i), cell: self.cell_of.contains_key(v) }
+        }).collect());
         self.lifted.push(lifted_fn);
         self.lifted.append(&mut nested);
         Some(name)
@@ -675,6 +676,11 @@ impl LowerCtx {
                 repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
                 init: Init::DynList { len: two },
             });
+            if self.cell_of.contains_key(cap_var) {
+                self.aggregate_blocks.insert(w, crate::lambda_sigs::cell_wrapper_key(cap_ty));
+            } else {
+                self.aggregate_blocks.insert(w, crate::render_native_rec::block_key(&Ty::Tuple(vec![Ty::Int, cap_ty.clone()].into())));
+            }
             let wh = self.fresh_value();
             self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(wh), args: vec![w] });
             let tv = self.fresh_value();

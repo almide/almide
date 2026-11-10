@@ -304,7 +304,8 @@ impl LowerCtx {
         // Const 0, and `if b` / `match b { true=>.. }` always takes the false arm).
         if let IrExprKind::LitInt { .. }
         | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitBool { .. } = &value.kind
+        | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit = &value.kind
         {
             if let Some(dst) = self.lower_scalar_value(value) {
                 self.value_of.insert(var, dst);

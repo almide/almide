@@ -5,7 +5,7 @@
 //!
 //! A fake `rustc` first on PATH (a compiled stub, so it is `rustc.exe` on
 //! Windows — the platform CVE-2024-24576 is about; CI's Windows leg runs this
-//! test) answers `--version` with a chosen version and hands every other
+//! test) answers `--version` / `-vV` with a chosen version and hands every other
 //! invocation to the real rustc. Reporting 1.77.1 (and one
 //! patch below the floor) the build is refused before anything compiles;
 //! reporting the floor itself the build runs to a working binary. The
@@ -48,7 +48,7 @@ fn the_floor_includes_the_cve_fix_and_the_docs_and_ci_agree_with_it() {
 }
 
 /// The real rustc (the toolchain's own binary, not the rustup proxy), which
-/// the stub hands every non-`--version` invocation to.
+/// the stub hands every non-version invocation to.
 fn real_rustc() -> PathBuf {
     let o = Command::new("rustc").args(["--print", "sysroot"]).output().expect("no rustc on PATH");
     let sysroot = String::from_utf8(o.stdout).unwrap();
@@ -57,7 +57,7 @@ fn real_rustc() -> PathBuf {
     p
 }
 
-/// A `rustc` executable (`rustc.exe` on Windows) that answers `--version`
+/// A `rustc` executable (`rustc.exe` on Windows) that answers `--version` / `-vV`
 /// with $ALMIDE_FAKE_RUSTC_VERSION and runs $ALMIDE_REAL_RUSTC for anything
 /// else. It is compiled from Rust so the same test runs on Windows, where the
 /// CVE this floor exists for lives: a shell script is no `rustc.exe`.
@@ -67,8 +67,18 @@ fn fake_rustc(dir: &Path) {
         &src,
         r#"fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.len() == 1 && args[0] == "--version" {
+    if args.len() == 1 && (args[0] == "--version" || args[0] == "-vV") {
+        use std::io::Write;
+        let path = std::env::var("ALMIDE_VERSION_PROBES").unwrap();
+        writeln!(std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap(), "probe").unwrap();
         println!("rustc {} (0000000 2020-01-01)", std::env::var("ALMIDE_FAKE_RUSTC_VERSION").unwrap());
+        if args[0] == "-vV" {
+            let real = std::env::var("ALMIDE_REAL_RUSTC").unwrap();
+            let out = std::process::Command::new(real).arg("-vV").output().unwrap();
+            for line in String::from_utf8_lossy(&out.stdout).lines().skip(1) {
+                println!("{line}");
+            }
+        }
         return;
     }
     let real = std::env::var("ALMIDE_REAL_RUSTC").unwrap();
@@ -97,10 +107,13 @@ fn build_with(bin: &Path, version: &str) -> (bool, String, PathBuf, tempfile::Te
         .env("PATH", std::env::join_paths(dirs).unwrap())
         .env("ALMIDE_FAKE_RUSTC_VERSION", version)
         .env("ALMIDE_REAL_RUSTC", real_rustc())
+        .env("ALMIDE_VERSION_PROBES", tmp.path().join("version-probes"))
         .env_remove("RUSTC")
         .current_dir(tmp.path())
         .output()
         .unwrap();
+    let probes = std::fs::read_to_string(tmp.path().join("version-probes")).unwrap();
+    assert_eq!(probes.lines().count(), 1, "discovery, the floor and the build-cache identity must share one version probe");
     (o.status.success(), String::from_utf8_lossy(&o.stderr).into_owned(), out, tmp)
 }
 

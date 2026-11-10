@@ -16,6 +16,7 @@ fn __fold_hsca_loop(h: Int, f: (Value, Int) -> Value, n: Int, i: Int, acc: Value
     __fold_hsca_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_hsca(xs: List[Int], init: Value, f: (Value, Int) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)

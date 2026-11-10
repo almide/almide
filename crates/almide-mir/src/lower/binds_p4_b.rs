@@ -50,6 +50,9 @@ impl LowerCtx {
             _ if Self::is_str_int_tuple(&expr.ty) => {
                 self.try_opt_str_int_tuple_payload(expr, ty)
             }
+            _ if crate::lower::owned_tco_slots() && crate::lower::is_anon_tuple_list_elem(&expr.ty) => {
+                self.try_opt_nested_tuple_payload(expr, ty)
+            }
             _ if Self::is_value_or_liststr(&expr.ty) => self.try_opt_value_or_liststr_payload(expr, ty),
             IrExprKind::Record { .. } if self.record_or_anon_drop_type_name(&expr.ty).is_some() => {
                 self.try_opt_record_drop_payload(expr, ty)
@@ -63,6 +66,12 @@ impl LowerCtx {
 
     fn is_int_str_tuple(ty: &Ty) -> bool {
         matches!(ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String))
+    }
+
+    pub(super) fn try_opt_nested_tuple_payload(&mut self, expr: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        let repr = repr_of(ty).ok()?;
+        let piece = self.lower_owned_heap_field(expr)?;
+        Some(self.materialize_opt_aggregate_some(piece, repr, crate::lower::anon_tuple_drop_name(&expr.ty)))
     }
 
     fn is_variant_ctor_call(&self, e: &IrExpr) -> bool {
@@ -274,6 +283,12 @@ impl LowerCtx {
     /// unchanged bit-for-bit.
     fn opt_heap_general_piece(&mut self, expr: &IrExpr) -> Option<ValueId> {
         let piece = match &expr.kind {
+            // Native owns the declared tuple value and its recursive Rust
+            // drop. Preserve its field types through the Option constructor;
+            // the flat wasm drop routes remain with the specific cases above.
+            IrExprKind::Tuple { elements } if crate::lower::owned_tco_slots() => {
+                self.try_lower_tuple_construct(elements)?
+            }
             IrExprKind::Var { id } if self.is_live_heap_var(*id) => {
                 self.piece_from_live_heap_var(*id)?
             }

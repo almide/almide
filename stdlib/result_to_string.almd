@@ -36,56 +36,10 @@ else {
 }
 
 // Build `err("<escaped e>")`.
-fn __rts_err(e: String) -> String = {
-  let h = prim.handle(e)
-  let slen = prim.load32(h + 4)
-  let src = h + 12
-  let body = __rts_esc_len(src, slen, 0, 0)
-  let buf = prim.alloc_str(7 + body)
-  // "err(" (4) + '"' + body + '"' + ')'
-  let base = prim.handle(buf) + 12
-  prim.store8(base, 101)
-  // 'e'
-  prim.store8(base + 1, 114)
-  // 'r'
-  prim.store8(base + 2, 114)
-  // 'r'
-  prim.store8(base + 3, 40)
-  // '('
-  prim.store8(base + 4, 34)
-  // '"'
-  let mid = __rts_fill_esc(src, slen, 0, base + 5)
-  prim.store8(mid, 34)
-  // '"'
-  prim.store8(mid + 1, 41)
-  // ')'
-  buf
-}
+fn __rts_err(e: String) -> String = "err(" + string.__quote(e) + ")"
 
 // Build `ok("<escaped v>")`.
-fn __rts_ok_s(v: String) -> String = {
-  let h = prim.handle(v)
-  let slen = prim.load32(h + 4)
-  let src = h + 12
-  let body = __rts_esc_len(src, slen, 0, 0)
-  let buf = prim.alloc_str(6 + body)
-  // "ok(" (3) + '"' + body + '"' + ')'
-  let base = prim.handle(buf) + 12
-  prim.store8(base, 111)
-  // 'o'
-  prim.store8(base + 1, 107)
-  // 'k'
-  prim.store8(base + 2, 40)
-  // '('
-  prim.store8(base + 3, 34)
-  // '"'
-  let mid = __rts_fill_esc(src, slen, 0, base + 4)
-  prim.store8(mid, 34)
-  // '"'
-  prim.store8(mid + 1, 41)
-  // ')'
-  buf
-}
+fn __rts_ok_s(v: String) -> String = "ok(" + string.__quote(v) + ")"
 
 // `ok([1, 2, 3])` over a List[Int] Ok payload — the inner list renders like `${list}` (signed
 // decimals, `, ` joined), wrapped in `ok(` … `)`. The int/list helpers mirror `list_to_string`.
@@ -245,21 +199,7 @@ fn result_to_string_ls(r: Result[List[String], String]) -> String = match r {
 
 // A BARE quoted+escaped string `"<escaped>"` (no ok/err wrapper) — for composing nested reprs by
 // concatenation (`"ok(some(" + __rts_quote(w) + "))"`).
-fn __rts_quote(s: String) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let src = h + 12
-  let body = __rts_esc_len(src, slen, 0, 0)
-  let buf = prim.alloc_str(2 + body)
-  // '"' + body + '"'
-  let base = prim.handle(buf) + 12
-  prim.store8(base, 34)
-  // '"'
-  let mid = __rts_fill_esc(src, slen, 0, base + 1)
-  prim.store8(mid, 34)
-  // '"'
-  buf
-}
+fn __rts_quote(s: String) -> String = string.__quote(s)
 
 // `ok(true)` / `ok(false)` over a Bool Ok payload (no allocation for the payload — the two forms are
 // static words).

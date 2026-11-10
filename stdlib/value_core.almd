@@ -430,6 +430,7 @@ else {
 // compare. Two elements are equal iff their tags match and (both None, or the
 // payloads match). Scalar-payload only: a Float payload's i64 is f64 BITS, so a
 // bit compare would diverge from `==` on -0.0/NaN — Floats stay outside.
+@specializes("list.__eq_any")
 fn list_eq_value(a: List[Value], b: List[Value]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -454,6 +455,8 @@ else {
 // list.eq over NESTED lists — List[List[Int/Float/String]]: same length + element-wise
 // recursion into the flat list eq. Elements are handle slots (the inner list blocks),
 // BORROWED for the read-only compare — no ownership event, same discipline as eq_str.
+@implements("list.__eq_opt_int")
+@specializes("list.__eq_opt_int")
 fn list_eq_opt_int(a: List[Int?], b: List[Int?]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -486,6 +489,7 @@ else {
   else false
 }
 
+@specializes("list.__eq_any")
 fn list_eq_opt_str(a: List[String?], b: List[String?]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -518,6 +522,8 @@ else {
   else false
 }
 
+@implements("list.__eq_res_int")
+@specializes("list.__eq_res_int")
 fn list_eq_res_int(a: List[Result[Int, String]], b: List[Result[Int, String]]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -533,6 +539,8 @@ else {
   else false
 }
 
+@implements("list.__eq_list_int")
+@specializes("list.__eq_list_int")
 fn list_eq_list_int(a: List[List[Int]], b: List[List[Int]]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -548,6 +556,8 @@ else {
   else false
 }
 
+@implements("list.__eq_list_float")
+@specializes("list.__eq_list_float")
 fn list_eq_list_float(a: List[List[Float]], b: List[List[Float]]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -563,6 +573,7 @@ else {
   else false
 }
 
+@specializes("list.__eq_any")
 fn list_eq_list_str(a: List[List[String]], b: List[List[String]]) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -576,6 +587,7 @@ fn list_eq_list_str(a: List[List[String]], b: List[List[String]]) -> Bool = {
 // Object/Array element's block while LEAKING its nested children (the very reason this lives in
 // value_core, where __drop_value is in scope, not in list_modify). The result is a List[Value] so it
 // drops via the recursive DropListValue. v0 indexes `i as usize`, so negative/>=len silently no-ops.
+@specializes("value.__eq")
 fn value_eq(a: Value, b: Value) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
@@ -1008,6 +1020,7 @@ fn result_str_unwrap_or(r: Result[String, String], d: String) -> String = match 
 // SAME len-as-tag prim shape as option_liststr_unwrap_or, with a FLAT scalar-element list payload —
 // the Some arm loads the @12 inner-list handle and the bare-Var tail auto-acquires (Dup, freed by
 // the flat rc_dec — scalar elements own nothing), the None arm returns the fallback.
+@specializes("option.unwrap_or")
 fn option_value_unwrap_or(o: Value?, d: Value) -> Value = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
@@ -1023,6 +1036,7 @@ fn option_value_unwrap_or(o: Value?, d: Value) -> Value = {
 // Result is the CAP-AS-TAG 1-slot block (tag @16: 0 = Ok, 1 = Err; payload handle @12) —
 // the Ok arm loads the @12 inner block and the bare-Var tail auto-acquires (Dup, freed by
 // the flat rc_dec — scalar slots own nothing), the Err arm returns the fallback.
+@specializes("option.unwrap_or")
 fn option_listint_unwrap_or(o: List[Int]?, d: List[Int]) -> List[Int] = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
@@ -1036,6 +1050,7 @@ fn option_listint_unwrap_or(o: List[Int]?, d: List[Int]) -> List[Int] = {
 // `?? d` over an Option[List[String]] (`list.get_liststr(rows, i) ?? []`): the SAME len-as-tag prim
 // shape as option_value_unwrap_or, with a List[String] payload — the Some arm loads the @12 inner-list
 // handle and the bare-Var tail auto-acquires (Dup), the None arm returns the fallback.
+@specializes("result.unwrap_or")
 fn result_flat_unwrap_or(r: Result[List[Int], String], d: List[Int]) -> List[Int] = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
@@ -1050,6 +1065,7 @@ fn result_flat_unwrap_or(r: Result[List[Int], String], d: List[Int]) -> List[Int
 // option_liststr_unwrap_or, with a List[Value] payload — the Some arm loads the @12 inner-list handle
 // and the bare-Var tail auto-acquires (Dup, freed recursively by DropListValue), the None arm returns
 // the fallback. Mirrors result_list_value_unwrap_or's List[Value] Ok-acquire; the root of get_arr.
+@specializes("option.unwrap_or")
 fn option_liststr_unwrap_or(o: List[String]?, d: List[String]) -> List[String] = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
@@ -1064,6 +1080,7 @@ fn option_liststr_unwrap_or(o: List[String]?, d: List[String]) -> List[String] =
 // the element as a String (`string.repeat`), which corrupts a dynamic Value (an Object copied as a
 // string is empty). The Value accessor instead SHARES the element: `Some(@i)` Dup's the Value handle
 // (rc_inc, shallow — the list keeps owning the original; the Option co-owns), exactly value.get's Ok.
+@specializes("option.unwrap_or")
 fn option_listvalue_unwrap_or(o: List[Value]?, d: List[Value]) -> List[Value] = {
   let h = prim.handle(o)
   let tag = prim.load32(h + 4)
@@ -1589,6 +1606,7 @@ fn option_unwrap_or_hx(o: Value?, d: Value) -> Value = {
   }
 }
 
+@specializes("result.unwrap_or")
 fn result_unwrap_or_hx(r: Result[Value, String], d: Value) -> Value = {
   let h = prim.handle(r)
   let tag = prim.load32(h + 16)
