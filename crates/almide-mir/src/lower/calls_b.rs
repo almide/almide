@@ -377,6 +377,11 @@ impl LowerCtx {
         // wrapper and lower the inner call. (A value-position `Unwrap` is still walled —
         // there the unwrapped value is load-bearing; here it is thrown away.)
         if let IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } = &call.kind {
+            // …unless the callee hands back a real carrier: running it for effect
+            // only would receive the err and drop it.
+            if crate::lower::owned_tco_slots() && (expr.ty.is_result() || expr.ty.is_option()) {
+                return self.lower_discarded_unwrap(expr);
+            }
             return self.lower_effect_call(expr);
         }
         // A primitive-floor STATEMENT (`prim.store32(...)` / a discarded `prim.*`):

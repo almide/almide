@@ -457,6 +457,11 @@ impl LowerCtx {
     /// #852): whether an `e!` operand is a scalar-Ok `Result` whose payload can be read out
     /// of the materialized block, and the rollback when the inner call does not lower.
     fn lower_scalar_ok_payload_unwrap(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        // Both arms below die on the failing side; where the err belongs to a caller the
+        // operand declines, and the strict render refuses its statement.
+        if matches!(&expr.kind, IrExprKind::Unwrap { .. }) && self.unrewritten_bang_wall("operand").is_some() {
+            return None;
+        }
         match &expr.kind {
             IrExprKind::Unwrap { expr: inner }
                 if !is_heap_ty(&expr.ty) && inner.ty.is_option() =>

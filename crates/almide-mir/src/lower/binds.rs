@@ -467,6 +467,16 @@ impl LowerCtx {
                 ) if a.len() == 2 => Some(a[1].clone()),
                 _ => None,
             },
+            // A channel-less lambda keeps its enclosing fn's reading of a bare `!`.
+            bang_dies: self.bang_dies
+                && !matches!(
+                    &body.ty,
+                    Ty::Applied(
+                        almide_lang::types::constructor::TypeConstructorId::Result
+                            | almide_lang::types::constructor::TypeConstructorId::Option,
+                        _
+                    )
+                ),
             ..Default::default()
         };
         // The leading ENV param: the closure block itself, BORROWED (the caller owns it
@@ -575,7 +585,10 @@ impl LowerCtx {
             }
             sub.value_of.insert(*v, val);
         }
-        let ret = match sub.lower_body_into(body) {
+        let ret = sub.lower_body_into(body);
+        // A `!` the lambda body refused is the enclosing fn's refusal too.
+        self.bang_refused = self.bang_refused.or(sub.bang_refused);
+        let ret = match ret {
             Ok(r) => r,
             Err(e) => {
                 crate::trace::trace("ALMIDE_DBG_ANF", || format!("[lift] body lower failed for {name}: {e:?}"));

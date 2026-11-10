@@ -406,6 +406,16 @@ pub(crate) struct LowerCtx {
     /// components match — v0 coerces a mismatch with `.map_err(...)` at the `?` site, so the
     /// unchecked pass-through type-punned the err payload (the collect_map! class, 2026-07-17).
     decl_fn_err: Option<Ty>,
+    /// An err that leaves this fn ends the process with the `Error: <msg>` line: the void
+    /// `main`, a native test entry, an abort-site body, or a channel-less lambda lifted out
+    /// of one. Only here may a `!` that no rewrite gave a continuation die where it stands;
+    /// in any other fn the err belongs to a caller, so the native render refuses the fn
+    /// rather than end the process or drop the err (see [`Self::unrewritten_bang_wall`]).
+    bang_dies: bool,
+    /// Set when [`Self::unrewritten_bang_wall`] refused a `!` in this fn. The refusal is
+    /// raised inside attempts that roll back and try another route, and no later route
+    /// gives that `!` its propagation, so the fn is refused once its body is lowered.
+    bang_refused: Option<&'static str>,
 }
 
 /// Type NAME → (generic param names, declaration-ordered fields) — the VALUE-MODEL

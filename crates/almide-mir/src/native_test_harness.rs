@@ -18,6 +18,15 @@ pub(crate) fn is_entry(name: &str) -> bool {
 
 pub(crate) fn active() -> bool { ACTIVE.with(Cell::get) }
 
+/// A body lifted from an `assert_aborts` closure (`almide_ir::abort_site_fn_name`,
+/// under any module prefix). It runs only in the abort-site child, below the
+/// dispatcher entry, where an err ends the process with the `Error:` line.
+pub(crate) fn is_abort_site(name: &str) -> bool {
+    let first = almide_ir::abort_site_fn_name(0);
+    let stem = first.trim_end_matches('0');
+    active() && name.rsplit_once(stem).is_some_and(|(_, k)| !k.is_empty() && k.bytes().all(|b| b.is_ascii_digit()))
+}
+
 pub(crate) struct EntryScope(BTreeSet<String>, Option<String>, bool);
 impl Drop for EntryScope {
     fn drop(&mut self) {
