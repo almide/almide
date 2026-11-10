@@ -265,6 +265,41 @@ effect fn main() -> Unit = {
 
 const USER_SLOT_STDOUT: &str = "err none\nerr \nerr e0\nok 0\nok 2\nok 1\nerr e2\nok 2\nerr e3\nok 3\n";
 
+/// Scalar arguments only, 300000 deep: the fns recursed frame by frame on this render and overflowed
+/// where wasm loops. And `let d = f(..)!; ok(d)`, on both exits.
+const DEEP: &str = r##"fn count(n: Int, k: Int) -> Result[Int, String] = {
+  let cur = (k * 31 + n) % 1009
+  if n <= 0 then ok(cur) else count(n - 1, cur)
+}
+
+fn parity(n: Int, k: Int) -> Result[Bool, String] = {
+  let cur = (k * 31 + n) % 1009
+  if n <= 0 then ok(cur % 2 == 0)
+  else if cur == 1008 and n < 0 then err("never ${cur}")
+  else parity(n - 1, cur)
+}
+
+effect fn step(k: Int) -> Result[Int, String] = if k < 0 then err("neg") else ok(k % 5)
+
+effect fn chain(k: Int, acc: Int) -> Result[Int, String] = {
+  let s = step(k)!
+  if k >= 20000 then ok(acc + s)
+  else {
+    let deeper = chain(k + 1, acc + s)!
+    ok(deeper)
+  }
+}
+
+effect fn main() -> Unit = {
+  println(match count(300000, 1) { ok(v) => "ok ${v}", err(e) => "err " + e })
+  println(match parity(300000, 1) { ok(v) => (if v then "ok T" else "ok F"), err(e) => "err " + e })
+  println(match chain(0, 0) { ok(v) => "ok ${v}", err(e) => "err " + e })
+  println(match chain(0 - 3, 0) { ok(v) => "ok ${v}", err(e) => "err " + e })
+}
+"##;
+
+const DEEP_STDOUT: &str = "ok 162\nok T\nok 40000\nerr neg\n";
+
 #[test]
 fn a_tuple_of_a_variant_result_loops_from_the_shallowest_constructor() {
     renders_and_agrees("offset", OFFSET, OFFSET_STDOUT);
@@ -298,4 +333,9 @@ fn a_unit_ok_result_accumulator_runs_every_exit() {
 #[test]
 fn a_user_written_scalar_ok_result_slot_is_rebound_in_a_loop() {
     renders_and_agrees("user_slot", USER_SLOT, USER_SLOT_STDOUT);
+}
+
+#[test]
+fn a_scalar_ok_result_tail_call_with_scalar_arguments_runs_in_constant_stack() {
+    renders_and_agrees("deep", DEEP, DEEP_STDOUT);
 }
