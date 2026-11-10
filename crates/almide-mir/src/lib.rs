@@ -52,6 +52,7 @@ mod render_native_bounds;
 mod render_native_loops;
 mod native_borrowed_tco;
 mod native_never;
+mod native_fn_aliases;
 mod native_region;
 mod render_native_or_else;
 mod render_native_closure;

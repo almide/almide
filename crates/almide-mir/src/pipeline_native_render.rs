@@ -499,6 +499,7 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     // #4006 C2: a discovered region window runs in the arena on this render
     // too — the `__rgn_` twins and a window fn the MIR brackets below.
     let mut ir = native_bundled::lower_list_patterns(ir);
+    crate::native_fn_aliases::expand(&mut ir);
     crate::native_never::expand(&mut ir);
     if test_harness {
         crate::native_test_panic::outline(&mut ir);
