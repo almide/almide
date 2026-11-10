@@ -1,0 +1,189 @@
+# STRUCTURE LEDGER — written by `almide-gates structure --update`.
+# What only shows across files, re-derived by scripts/lib/structure-enumerate.py:
+#   pub-unused   per crate, `pub` items named nowhere outside the crate's src/
+#   split-file   per crate, files whose stem ends in a letter, number or part marker
+#   orphan-file  a .rs file no `mod`, `#[path]` or `include!` reaches (value = lines)
+#   orphan-fn    a function nothing names (value = lines)
+# Gated by tools/almide-gates structure: a count may not grow and a named row
+# may not be added. A shrink passes; take it up with --update.
+# pub-unused 756, split-file 95, orphan-file 3 (1318 lines), orphan-fn 12 (242 lines)
+[[row]]
+kind  = "orphan-file"
+key   = "crates/almide-codegen/src/generated/matrix_desugar_gen.rs"
+value = 28
+[[row]]
+kind  = "orphan-file"
+key   = "crates/almide-codegen/src/generated/perceus_belt_lean.rs"
+value = 797
+[[row]]
+kind  = "orphan-file"
+key   = "crates/almide-codegen/src/pass_lambda_type_lookup.rs"
+value = 493
+[[row]]
+kind  = "orphan-fn"
+key   = "crates/almide-codegen/src/template.rs::rust_templates_inline"
+value = 113
+[[row]]
+kind  = "orphan-fn"
+key   = "crates/almide-frontend/src/stdlib.rs::builtin_effect_fns"
+value = 3
+[[row]]
+kind  = "orphan-fn"
+key   = "crates/almide-frontend/src/stdlib.rs::resolve_ufcs_by_type"
+value = 24
+[[row]]
+kind  = "orphan-fn"
+key   = "crates/almide-frontend/src/type_env.rs::ctor_candidate_types"
+value = 3
+[[row]]
+kind  = "orphan-fn"
+key   = "crates/almide-ir/src/effect.rs::is_callback_dependent"
+value = 3
+[[row]]
+kind  = "orphan-fn"
+key   = "crates/almide-ir/src/unknown.rs::collect_unknown_warnings"
+value = 41
+[[row]]
+kind  = "orphan-fn"
+key   = "crates/almide-kernel/src/simd_wasm.rs::store_f64x2"
+value = 4
+[[row]]
+kind  = "orphan-fn"
+key   = "crates/almide-mir/src/pipeline_native_render.rs::try_render_rust_program"
+value = 4
+[[row]]
+kind  = "orphan-fn"
+key   = "crates/almide-tools/src/almdi.rs::read_almdi"
+value = 22
+[[row]]
+kind  = "orphan-fn"
+key   = "crates/almide-tools/src/almdi.rs::read_interface_only"
+value = 15
+[[row]]
+kind  = "orphan-fn"
+key   = "crates/almide-types/src/types/mod.rs::all_children_recursive"
+value = 7
+[[row]]
+kind  = "orphan-fn"
+key   = "crates/almide-wasm/tests/fuzz_differential.rs::gen_program_for_probe"
+value = 3
+[[row]]
+kind  = "pub-unused"
+key   = "almide-anchor-check"
+value = 14
+[[row]]
+kind  = "pub-unused"
+key   = "almide-base"
+value = 23
+[[row]]
+kind  = "pub-unused"
+key   = "almide-codegen"
+value = 131
+[[row]]
+kind  = "pub-unused"
+key   = "almide-corpus"
+value = 12
+[[row]]
+kind  = "pub-unused"
+key   = "almide-dialect"
+value = 13
+[[row]]
+kind  = "pub-unused"
+key   = "almide-driver"
+value = 3
+[[row]]
+kind  = "pub-unused"
+key   = "almide-egg-lab"
+value = 1
+[[row]]
+kind  = "pub-unused"
+key   = "almide-frontend"
+value = 161
+[[row]]
+kind  = "pub-unused"
+key   = "almide-gpu-run"
+value = 5
+[[row]]
+kind  = "pub-unused"
+key   = "almide-interp"
+value = 10
+[[row]]
+kind  = "pub-unused"
+key   = "almide-ir"
+value = 37
+[[row]]
+kind  = "pub-unused"
+key   = "almide-layout"
+value = 2
+[[row]]
+kind  = "pub-unused"
+key   = "almide-lin-prove"
+value = 4
+[[row]]
+kind  = "pub-unused"
+key   = "almide-mir"
+value = 148
+[[row]]
+kind  = "pub-unused"
+key   = "almide-optimize"
+value = 5
+[[row]]
+kind  = "pub-unused"
+key   = "almide-spine"
+value = 14
+[[row]]
+kind  = "pub-unused"
+key   = "almide-str"
+value = 2
+[[row]]
+kind  = "pub-unused"
+key   = "almide-syntax"
+value = 31
+[[row]]
+kind  = "pub-unused"
+key   = "almide-tools"
+value = 13
+[[row]]
+kind  = "pub-unused"
+key   = "almide-types"
+value = 8
+[[row]]
+kind  = "pub-unused"
+key   = "almide-verify"
+value = 7
+[[row]]
+kind  = "pub-unused"
+key   = "almide-wasi"
+value = 11
+[[row]]
+kind  = "pub-unused"
+key   = "almide-wasm"
+value = 76
+[[row]]
+kind  = "pub-unused"
+key   = "almide-wasm-run"
+value = 11
+[[row]]
+kind  = "pub-unused"
+key   = "almide-wasm-vm"
+value = 14
+[[row]]
+kind  = "split-file"
+key   = "almide-codegen"
+value = 1
+[[row]]
+kind  = "split-file"
+key   = "almide-frontend"
+value = 2
+[[row]]
+kind  = "split-file"
+key   = "almide-mir"
+value = 87
+[[row]]
+kind  = "split-file"
+key   = "almide-wasm"
+value = 3
+[[row]]
+kind  = "split-file"
+key   = "almide-wasm-run"
+value = 2

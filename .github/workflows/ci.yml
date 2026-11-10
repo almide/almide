@@ -1160,6 +1160,15 @@ jobs:
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE run tools/almide-gates/src/main.almd -- impl-count .
 
+      # What codopsy's per-file grades cannot see: a crate's exports nobody imports,
+      # files cut by size (`desugar_b.rs`), files no `mod` reaches, functions nothing
+      # names. Pinned in proofs/structure-ledger.toml; only growth fails, a shrink is
+      # taken up with `--update` whenever convenient.
+      - name: Structure across files (unused exports, size-cut and orphan files, orphan fns)
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          $ALMIDE run tools/almide-gates/src/main.almd -- structure .
+
       # The certified fixtures that still leak through a trusted native arm or runtime
       # helper (#2755): the join of the witness and live-at-exit goldens, pinned in
       # proofs/certified-leaks.txt. Shrink-only, and a row stands only while its owning
