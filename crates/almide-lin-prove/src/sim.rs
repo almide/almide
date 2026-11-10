@@ -529,6 +529,7 @@ fn loop_candidates(f: &[L], body: &[It]) -> Vec<L> {
             }
         }
     }
+    cand::entry_candidates(f, body, &mut out);
     out
 }
 
