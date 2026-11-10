@@ -350,7 +350,7 @@
 2	0	40	2	spec/wasm_cross/guard_chain_cons_list.almd
 28	20	266	28	spec/wasm_cross/guard_err_in_call_arg_block.almd
 50	38	482	50	spec/wasm_cross/guard_jump_in_value_fn.almd
-81	70	915	81	spec/wasm_cross/guard_let_early_exit_from_branch_arm.almd
+54	45	572	54	spec/wasm_cross/guard_let_early_exit_from_branch_arm.almd
 26	19	343	26	spec/wasm_cross/guard_let_forms.almd
 51	43	708	51	spec/wasm_cross/guard_let_forms_typed_err.almd
 5	1	66	5	spec/wasm_cross/guard_let_statement.almd
