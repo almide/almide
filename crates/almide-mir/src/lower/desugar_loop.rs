@@ -264,6 +264,27 @@ fn loop_uw_unwrap_stmt(s: &IrStmt, err_ty: &Ty) -> Option<(almide_ir::IrPattern,
     }
 }
 
+/// `let (a, b) = e!` as `let $t = e!; let (a, b) = $t` (a fresh `$t` from `nv`):
+/// the propagating bind [`loop_uw_unwrap_stmt`] reads, then the destructure of
+/// the payload it bound. `None` for any other statement.
+fn loop_uw_split_destructure(s: &IrStmt, nv: &mut u32) -> Option<[IrStmt; 2]> {
+    let IrStmtKind::BindDestructure { pattern, value } = &s.kind else { return None };
+    if !matches!(value.kind, IrExprKind::Unwrap { .. }) {
+        return None;
+    }
+    let tmp = VarId(*nv);
+    *nv += 1;
+    let bind = IrStmtKind::Bind {
+        var: tmp,
+        mutability: almide_ir::Mutability::Let,
+        ty: value.ty.clone(),
+        value: value.clone(),
+    };
+    let payload = loop_uw_node(IrExprKind::Var { id: tmp }, value.ty.clone());
+    let destructure = IrStmtKind::BindDestructure { pattern: pattern.clone(), value: payload };
+    Some([bind, destructure].map(|kind| IrStmt { kind, span: s.span }))
+}
+
 /// Does `e` contain a VALUE early-exit — an `If` whose else-arm is typed at the enclosing
 /// fn's Result return (`guard c else ok(n)`'s loop-body desugar form)? Only meaningful when
 /// the value-exit pair is enabled; drives `loop_uw_rewrite`'s pass-through fast path.
@@ -563,6 +584,12 @@ fn loop_uw_direct_unwrap(
     nv: &mut u32,
 ) -> UwStep {
     for (i, s) in stmts.iter().enumerate() {
+        // A propagating destructure: bind the payload whole, destructure it
+        // as the next statement, and read the block again.
+        if let Some(split) = loop_uw_split_destructure(s, nv) {
+            let stmts = [&stmts[..i], &split[..], &stmts[i + 1..]].concat();
+            return loop_uw_direct_unwrap(&stmts, tail, env, nv);
+        }
         let Some((ok_pat, inner)) = loop_uw_unwrap_stmt(s, env.err_ty) else { continue };
         if stmts[..i].iter().any(stmt_has_unwrap) {
             return UwStep::Decline;
