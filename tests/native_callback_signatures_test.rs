@@ -205,39 +205,34 @@ fn the_packages_tests_build_and_pass_on_the_native_lane() {
 
 const REFUSED_MODULE: &str = r#"pub fn greet(name: String) -> String = "hello ${name}"
 pub fn apply(f: (Int) -> Int, n: Int) -> Int = f(n) + 1
-pub fn push_one(mut xs: List[Int], n: Int) -> Int = {
-  xs = xs + [n]
-  list.len(xs)
-}
 "#;
 
-/// Written against the previous release's signatures:
-/// `apply(f: &dyn Fn(i64) -> i64, n: i64) -> i64` and
-/// `push_one(xs: &mut Vec<i64>, n: i64) -> i64`.
+/// Written against the previous release's signature:
+/// `apply(f: &dyn Fn(i64) -> i64, n: i64) -> i64`.
 const REFUSED_HOST_RS: &str = r#"use crate::*;
 pub fn run_all() -> String {
-    let mut xs = vec![1i64, 2];
-    let n = almide_rt_cb_0v0_push_one(&mut xs, 9);
-    format!("{}|{n}{:?}", almide_rt_cb_0v0_apply(&|x| x * 2, 5), xs)
+    format!("{}", almide_rt_cb_0v0_apply(&|x| x * 2, 5))
 }
 "#;
 
-/// The kinds that still have no adapter: a function value or a `mut`
-/// parameter in a callback's signature. (A record or a variant is adapted:
-/// `tests/native_callback_types_test.rs`.) The previous release built and ran
-/// this package, tests included, and printed the line below. The native
-/// render refuses the callback by name: `run` keeps the standard codegen's
-/// build and that output; the package's tests, which have no such route, do
-/// not build. This row moves when those kinds are adapted.
+/// The kind that still has no adapter: a function value in a callback's
+/// signature. (A record or a variant is adapted:
+/// `tests/native_callback_types_test.rs`; a `mut` parameter, a generic type
+/// and a structural record: `tests/native_callback_shapes_test.rs`.) The
+/// previous release built and ran this package, tests included, and printed
+/// the line below. The native render refuses the callback by name: `run`
+/// keeps the standard codegen's build and that output; the package's tests,
+/// which have no such route, do not build. This row moves when that kind is
+/// adapted.
 #[test]
-fn a_function_or_mut_parameter_callback_is_refused_by_name_and_still_runs_on_the_standard_codegen() {
+fn a_function_parameter_callback_is_refused_by_name_and_still_runs_on_the_standard_codegen() {
     if !available() {
         return;
     }
     let root = package("refused", REFUSED_MODULE, REFUSED_HOST_RS);
     let (ok, out, err) = almide(&root, &["run", "src/main.almd"]);
     assert!(ok, "the package did not build and run:\n{err}");
-    assert_eq!(out, "11|3[1, 2, 9]\nhello main\n");
+    assert_eq!(out, "11\nhello main\n");
     assert!(err.contains("walled") && err.contains("(fn(Int) -> Int) has no host adapter"), "the refusal is not named:\n{err}");
     let (ok, out, err) = almide(&root, &["test", "src/cb_test.almd", "--target", "rust"]);
     assert!(!ok, "a package the native render refuses built its tests:\n{out}{err}");
