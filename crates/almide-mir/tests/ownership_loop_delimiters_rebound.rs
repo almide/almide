@@ -13,7 +13,7 @@ fn delimited(line: &str) -> bool {
             ')' => depth -= 1,
             _ => {}
         }
-        if depth < 0 || depth > 1 {
+        if !(0..=1).contains(&depth) {
             return false;
         }
     }
