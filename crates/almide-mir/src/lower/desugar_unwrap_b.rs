@@ -79,8 +79,9 @@ fn result_recursive_drop_proven(result_ty: &Ty) -> bool {
         || is_list_value_int_result_ty(result_ty)
 }
 
-/// Does `e` carry a STATEMENT/let-position effect-`!` (an `Unwrap` bound to a `let` or run as an
-/// `Expr` stmt, or a tail/return-position `!`) anywhere a branch reaches, AND is EVERY such `!`'s Ok
+/// Does `e` carry an effect-`!` anywhere a branch reaches — on the statement spine (bound to a
+/// `let`, run as an `Expr` stmt, a tail) or inside a value (a call argument, an operand, a list
+/// element, a condition) — outside lambda and loop bodies, AND is EVERY such `!`'s Ok
 /// payload HOLE-1-admitted (`effect_unwrap_admitted`)? Returns `(has_unwrap, all_admitted)`. Used by
 /// the statement-control continuation-lift to fire ONLY when a branch genuinely needs the lift (some
 /// `!` is present) and the lift's downstream tail effect-unwrap will lower soundly (no unproven-drop
@@ -92,43 +93,34 @@ fn collect_arm_unwrap_admit(
     all_admitted: &mut bool,
     layouts: &crate::lower::VariantLayouts,
 ) {
-    match &e.kind {
-        IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
-            *has = true;
-            if !effect_unwrap_admitted(&expr.ty, layouts) {
-                *all_admitted = false;
-            }
-            collect_arm_unwrap_admit(expr, has, all_admitted, layouts);
-        }
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts {
-                match &s.kind {
-                    // A destructuring bind holds its `!` exactly as a plain bind does.
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
-                        collect_arm_unwrap_admit(value, has, all_admitted, layouts)
-                    }
-                    IrStmtKind::Expr { expr } => collect_arm_unwrap_admit(expr, has, all_admitted, layouts),
-                    IrStmtKind::Assign { value, .. } => collect_arm_unwrap_admit(value, has, all_admitted, layouts),
-                    _ => {}
-                }
-            }
-            if let Some(t) = expr {
-                collect_arm_unwrap_admit(t, has, all_admitted, layouts);
-            }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            collect_arm_unwrap_admit(cond, has, all_admitted, layouts);
-            collect_arm_unwrap_admit(then, has, all_admitted, layouts);
-            collect_arm_unwrap_admit(else_, has, all_admitted, layouts);
-        }
-        IrExprKind::Match { subject, arms } => {
-            collect_arm_unwrap_admit(subject, has, all_admitted, layouts);
-            for a in arms {
-                collect_arm_unwrap_admit(&a.body, has, all_admitted, layouts);
-            }
-        }
-        _ => {}
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Admit<'a> {
+        has: bool,
+        all_admitted: bool,
+        layouts: &'a crate::lower::VariantLayouts,
     }
+    impl IrVisitor for Admit<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                // A lambda's `!` leaves the lambda only, and a loop's is read by
+                // the loop form (`branch_arm_holds_propagating_loop`).
+                IrExprKind::Lambda { .. } | IrExprKind::ForIn { .. } | IrExprKind::While { .. } => return,
+                // Wherever it sits — a bind, a destructuring bind, an assignment,
+                // a call argument, a list element, a condition: the lifted arm is
+                // a Result-typed block, where the operand hoists bring every `!`
+                // to the statement spine as they do in a function body.
+                IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
+                    self.has = true;
+                    self.all_admitted &= effect_unwrap_admitted(&expr.ty, self.layouts);
+                }
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut v = Admit { has: *has, all_admitted: *all_admitted, layouts };
+    v.visit_expr(e);
+    (*has, *all_admitted) = (v.has, v.all_admitted);
 }
 
 /// Push the continuation `{ after_stmts; tail }` into a single branch ARM, FLATTENING the arm's own
@@ -196,7 +188,9 @@ fn desugar_stmt_control_unwrap(
         let IrStmtKind::Expr { expr: s_expr } = &s.kind else {
             continue;
         };
-        if !matches!(&s_expr.kind, IrExprKind::If { .. } | IrExprKind::Match { .. }) {
+        // A bare block statement is the one-armed case: its statements run before the
+        // continuation exactly as an arm's do.
+        if !matches!(&s_expr.kind, IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. }) {
             continue;
         }
         if !matches!(s_expr.ty, Ty::Unit) {
@@ -247,7 +241,7 @@ fn desugar_stmt_control_unwrap(
                     def_id: s_expr.def_id,
                 }
             }
-            _ => unreachable!(),
+            _ => append_arm_continuation(s_expr, after_stmts, tail, &body.ty),
         };
         return Some(IrExpr {
             kind: IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(new_s)) },
