@@ -23,7 +23,7 @@ impl LowerCtx {
         };
         match &expr.kind {
             _ if Self::is_int_str_tuple(&expr.ty) => self.try_opt_int_str_tuple_payload(expr, ty),
-            _ if self.is_variant_ctor_call(expr) => self.try_opt_variant_ctor_payload(expr, ty),
+            _ if self.variant_ctor_of(expr).is_some() => self.try_opt_variant_ctor_payload(expr, ty),
             IrExprKind::Record { .. } if self.aggregate_field_tys(&expr.ty).is_some() => {
                 self.try_opt_record_aggregate_payload(expr, ty)
             }
@@ -74,10 +74,16 @@ impl LowerCtx {
         Some(self.materialize_opt_aggregate_some(piece, repr, crate::lower::anon_tuple_drop_name(&expr.ty)))
     }
 
-    fn is_variant_ctor_call(&self, e: &IrExpr) -> bool {
-        matches!(&e.kind,
-            IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                if self.variant_layouts.is_ctor_for(name.as_str(), &e.ty))
+    /// The constructor `e` names when it constructs a case of its own variant
+    /// type, in either spelling: a positional call (`IntV(p)`) or a record
+    /// literal (`Data { payload: p }`).
+    pub(crate) fn variant_ctor_of<'e>(&self, e: &'e IrExpr) -> Option<&'e str> {
+        let name = match &e.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, .. } => name.as_str(),
+            IrExprKind::Record { name: Some(ctor), .. } => ctor.as_str(),
+            _ => return None,
+        };
+        self.variant_layouts.is_ctor_for(name, &e.ty).then_some(name)
     }
 
     fn is_all_scalar_tuple(ty: &Ty) -> bool {
@@ -111,16 +117,10 @@ impl LowerCtx {
 
     fn try_opt_variant_ctor_payload(&mut self, expr: &IrExpr, ty: &Ty) -> Option<ValueId> {
         let repr = repr_of(ty).ok()?;
-        let IrExprKind::Call {
-            target: CallTarget::Named { name },
-            ..
-        } = &expr.kind
-        else {
-            return None;
-        };
+        let name = self.variant_ctor_of(expr)?;
         let type_name = self
             .variant_layouts
-            .lookup_ctor_for(name.as_str(), &expr.ty)?
+            .lookup_ctor_for(name, &expr.ty)?
             .0
             .to_string();
         let needs_rec = self
