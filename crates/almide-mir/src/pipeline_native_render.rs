@@ -612,7 +612,33 @@ mod reachable_callback_modes_tests {
     #[test]
     fn a_runtime_fold_takes_its_accumulator_after_unreachable_callers_are_pruned() {
         std::thread::Builder::new().stack_size(512 << 20).spawn(|| {
-            let source = include_str!("../../../spec/wasm_cross/json_set_path_depth_bound.almd");
+            // The two folds of spec/wasm_cross/json_set_path_depth_bound.almd,
+            // spelled here: a shipped source reads nothing outside its
+            // package (#3361).
+            let source = r#"import json
+
+fn path_of(d: Int) -> value.Path = list.range(0, d) |> list.fold(
+  value.root(),
+  (acc, _i) => value.key(acc, "k"),
+)
+
+fn nest(d: Int) -> Value = list.range(0, d) |> list.fold(
+  value.int(1),
+  (acc, _i) => value.array([acc]),
+)
+
+fn show(r: Result[Value, String]) -> String = match r {
+  ok(v) => "ok ${string.len(json.stringify(v))} ${json.parse(json.stringify(v)) |> result.is_ok}",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let doc = json.parse("{\"a\": [1, 2]}")!
+  println("path 1000: " + show(value.set_path(doc, path_of(1000), value.int(1))))
+  println("root + 1000 deep: " + show(value.set_path(doc, value.root(), nest(1000))))
+  println("path 500 + 500 deep: " + show(value.set_path(doc, path_of(500), nest(500))))
+}
+"#;
             let (_, _, functions) = super::render_native_parts(source).unwrap();
             for name in ["__lambda_path_of_0", "__lambda_nest_0"] {
                 let f = functions.iter().find(|f| f.name == name).unwrap();
