@@ -144,12 +144,16 @@ fn list.__fallible_update[A, E](xs: List[A], i: Int, f: fn(A) -> Result[A, E]) -
 fn list.__fallible_zip_with[A, B, C, E](xs: List[A], ys: List[B], f: fn(A, B) -> Result[C, E]) -> Result[List[C], E]
 fn list.__join_string(xs: List[String], sep: String) -> String
 fn list.__key_order[K](a: K, b: K) -> Int
+fn list.__max_float(xs: List[Float]) -> Option[Float]
 fn list.__merge_with[A](a: List[A], b: List[A], cmp: fn(A, A) -> Int) -> List[A]
 fn list.__merge_with_fallible[A, E](a: List[A], b: List[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[List[A], E]
+fn list.__min_float(xs: List[Float]) -> Option[Float]
 fn list.__pick_by_keys[A, K](xs: List[A], keys: List[K], want: Int) -> Option[A]
 fn list.__pick_with_fallible[A, E](xs: List[A], cmp: fn(A, A) -> Result[Int, E], want: Int) -> Result[Option[A], E]
 fn list.__product_int(xs: List[Int]) -> Int
 fn list.__search_fallible[A, E](xs: List[A], order: fn(A) -> Result[Int, E]) -> Result[Option[Int], E]
+fn list.__sort_by_float[A](xs: List[A], f: fn(A) -> Float) -> List[A]
+fn list.__sort_float(xs: List[Float]) -> List[Float]
 fn list.__sum_int(xs: List[Int]) -> Int
 fn list.__to_string_bool(xs: List[Bool]) -> String
 fn list.__to_string_float(xs: List[Float]) -> String
