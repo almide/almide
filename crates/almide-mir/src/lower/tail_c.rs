@@ -497,8 +497,12 @@ impl LowerCtx {
     /// tracked for the caller to release. Refuses a payload the permissive bind
     /// could only defer (an `Init::Opaque` block), and rolls back on any decline.
     fn lower_result_ctor_bound_payload(&mut self, ctor: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
-        let (IrExprKind::ResultOk { expr: payload } | IrExprKind::ResultErr { expr: payload }) =
-            &ctor.kind
+        // `some(<heap payload>)` takes the same route: an Option of a pair
+        // holding a record has no in-place producer either, and the bound
+        // spelling `{ let t = (s, r); some(t) }` already lowers.
+        let (IrExprKind::ResultOk { expr: payload }
+        | IrExprKind::ResultErr { expr: payload }
+        | IrExprKind::OptionSome { expr: payload }) = &ctor.kind
         else {
             return None;
         };
@@ -540,6 +544,7 @@ impl LowerCtx {
             };
             let kind = match &ctor.kind {
                 IrExprKind::ResultOk { .. } => IrExprKind::ResultOk { expr: Box::new(var) },
+                IrExprKind::OptionSome { .. } => IrExprKind::OptionSome { expr: Box::new(var) },
                 _ => IrExprKind::ResultErr { expr: Box::new(var) },
             };
             let rebuilt = IrExpr { kind, ..ctor.clone() };
