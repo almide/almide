@@ -203,41 +203,44 @@ fn the_packages_tests_build_and_pass_on_the_native_lane() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-const RECORD_MODULE: &str = r#"type Point = { x: Int, label: String }
-type Shape = | Circle(Int) | Square(Int, Int) | Dot
-pub fn greet(name: String) -> String = "hello ${name}"
-pub fn mk(x: Int, label: String) -> Point = { x: x, label: label }
-pub fn px(p: Point) -> Int = p.x
-pub fn area(s: Shape) -> Int = match s { Circle(r) => 3 * r * r, Square(w, h) => w * h, Dot => 0 }
-pub fn unit_sq(n: Int) -> Shape = if n == 0 then Dot else Square(n, n)
-"#;
-
-const RECORD_HOST_RS: &str = r#"use crate::*;
-pub fn run_all() -> String {
-    let p = almide_rt_cb_0v0_mk(3, AlmideString::from("a"));
-    let dot = matches!(almide_rt_cb_0v0_unit_sq(0), almide_rt_cb_Shape::Dot);
-    format!("{}{}|{}|{}|{}", p.x, p.label, almide_rt_cb_0v0_px(&p), almide_rt_cb_0v0_area(&almide_rt_cb_Shape::Square(2, 5)), dot)
+const REFUSED_MODULE: &str = r#"pub fn greet(name: String) -> String = "hello ${name}"
+pub fn apply(f: (Int) -> Int, n: Int) -> Int = f(n) + 1
+pub fn push_one(mut xs: List[Int], n: Int) -> Int = {
+  xs = xs + [n]
+  list.len(xs)
 }
 "#;
 
-/// The kinds that still have no adapter: a record or a variant in a
-/// callback's signature. The standard codegen declares the host struct or
-/// enum the native code names; the native render does not, and refuses the
-/// callback by name. `run` keeps the standard codegen's build (the previous
-/// release's output); the package's tests, which have no such route, do not
-/// build. This row moves when those kinds are adapted.
+/// Written against the previous release's signatures:
+/// `apply(f: &dyn Fn(i64) -> i64, n: i64) -> i64` and
+/// `push_one(xs: &mut Vec<i64>, n: i64) -> i64`.
+const REFUSED_HOST_RS: &str = r#"use crate::*;
+pub fn run_all() -> String {
+    let mut xs = vec![1i64, 2];
+    let n = almide_rt_cb_0v0_push_one(&mut xs, 9);
+    format!("{}|{n}{:?}", almide_rt_cb_0v0_apply(&|x| x * 2, 5), xs)
+}
+"#;
+
+/// The kinds that still have no adapter: a function value or a `mut`
+/// parameter in a callback's signature. (A record or a variant is adapted:
+/// `tests/native_callback_types_test.rs`.) The previous release built and ran
+/// this package, tests included, and printed the line below. The native
+/// render refuses the callback by name: `run` keeps the standard codegen's
+/// build and that output; the package's tests, which have no such route, do
+/// not build. This row moves when those kinds are adapted.
 #[test]
-fn a_record_or_variant_callback_is_refused_by_name_and_still_runs_on_the_standard_codegen() {
+fn a_function_or_mut_parameter_callback_is_refused_by_name_and_still_runs_on_the_standard_codegen() {
     if !available() {
         return;
     }
-    let root = package("record", RECORD_MODULE, RECORD_HOST_RS);
+    let root = package("refused", REFUSED_MODULE, REFUSED_HOST_RS);
     let (ok, out, err) = almide(&root, &["run", "src/main.almd"]);
     assert!(ok, "the package did not build and run:\n{err}");
-    assert_eq!(out, "3a|3|10|true\nhello main\n");
-    assert!(err.contains("walled") && err.contains("(cb.Point) has no host adapter"), "the refusal is not named:\n{err}");
+    assert_eq!(out, "11|3[1, 2, 9]\nhello main\n");
+    assert!(err.contains("walled") && err.contains("(fn(Int) -> Int) has no host adapter"), "the refusal is not named:\n{err}");
     let (ok, out, err) = almide(&root, &["test", "src/cb_test.almd", "--target", "rust"]);
     assert!(!ok, "a package the native render refuses built its tests:\n{out}{err}");
-    assert!(format!("{out}{err}").contains("(cb.Point) has no host adapter"), "the refusal is not named:\n{out}{err}");
+    assert!(format!("{out}{err}").contains("(fn(Int) -> Int) has no host adapter"), "the refusal is not named:\n{out}{err}");
     let _ = std::fs::remove_dir_all(&root);
 }
