@@ -186,6 +186,38 @@ fn group_by_then_len_counts_without_building_the_groups() {
     assert!(main_body(&rust).contains("almide_rt_list_group_by("), "a non-counting map.map lost its groups");
 }
 
+/// The verified native render counts the same chain in one pass
+/// (`native_group_count`). What the program prints is the two-step form's
+/// answer: keys in first-seen order, a String and an Int key, an empty list,
+/// a source list read again afterwards, and — refused by the rule — a
+/// callback that is more than the group's length.
+#[test]
+fn a_counted_group_by_prints_what_the_two_steps_print() {
+    let src = "fn show[K](m: Map[K, Int]) -> String =\n\
+        \x20 map.to_list(m) |> list.map(((k, v)) => \"${k}=${v}\") |> list.join(\",\")\n\n\
+        fn tally(xs: List[String]) -> Int = {\n\
+        \x20 let c = list.group_by(xs, (w) => w) |> map.map((g) => list.len(g))\n\
+        \x20 map.len(c) * 100 + list.len(xs)\n\
+        }\n\n\
+        effect fn main() -> Unit = {\n\
+        \x20 let ws = [\"b\", \"a\", \"b\", \"c\", \"a\", \"b\"]\n\
+        \x20 let nothing: List[String] = []\n\
+        \x20 println(show(list.group_by(ws, (w) => w) |> map.map((g) => list.len(g))))\n\
+        \x20 println(show(list.group_by([\"aa\", \"b\", \"cc\", \"d\", \"e\"], (w) => string.len(w)) |> map.map((g) => list.len(g))))\n\
+        \x20 println(show(list.group_by(ws, (w) => w) |> map.map((g) => list.len(g) * 10)))\n\
+        \x20 println(show(list.group_by(nothing, (w) => w) |> map.map((g) => list.len(g))))\n\
+        \x20 println(int.to_string(tally(ws) + list.len(ws)))\n\
+        }\n";
+    let (_dir, path) = write("counted.almd", src);
+    let out = Command::new(almide()).arg("run").arg(&path).output().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "b=3,a=2,c=1\n2=2,1=3\nb=30,a=20,c=10\n\n312\n",
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 /// `a` is read once (moved), `b` twice (borrowed, then moved), `c` twice.
 const MAP_OWNED: &str = "effect fn main() -> Unit = {\n  let a = [\"x\": 1, \"y\": 2]\n  let b = map.map(a, (v) => v * 10)\n  let c = map.map(b, (v) => v + 1)\n  println(\"${map.values(b)} ${map.values(c)} ${map.keys(c)}\")\n}\n";
 

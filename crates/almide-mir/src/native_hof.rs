@@ -156,6 +156,20 @@ fn registry_call(impl_fn: &str) -> Option<String> {
         .find_map(|(_, pairs)| pairs.iter().find(|(i, _)| *i == impl_fn).map(|(_, c)| c.to_string()))
         .or_else(|| crate::host_ops::host_op_for_call_name(impl_fn)
             .map(|h| format!("{}.{}", h.module, h.func)))
+        .or_else(|| unlinked(impl_fn).then(|| impl_fn.to_string()))
+}
+
+/// A bundled `module.fn` the registry links no body for: the call names its
+/// own declaration.
+fn unlinked(call: &str) -> bool {
+    call.split_once('.').is_some_and(|(module, _)| almide_lang::stdlib_info::bundled_source(module).is_some())
+        && !crate::mir_ops::self_host_runtime().iter().any(|(_, pairs)| pairs.iter().any(|(_, source)| *source == call))
+}
+
+/// A combinator only its declaration serves: no linked body, and a runtime
+/// body that takes a callback (a plain call keeps the declared floor).
+pub(crate) fn declared_only(call: &str) -> bool {
+    unlinked(call) && of(call).is_some_and(|h| h.params.iter().any(|(d, _)| matches!(d, DTy::Fn(..))))
 }
 
 fn derive(impl_fn: &str) -> Option<Hof> {
@@ -214,7 +228,7 @@ pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
 pub(crate) fn declared_call(call: &str) -> bool {
     crate::mir_ops::self_host_runtime().iter().any(|(_, pairs)| {
         pairs.iter().any(|(implementation, source)| *source == call && of(implementation).is_some())
-    }) || (crate::host_ops::host_op_for_call_name(call).is_some() && of(call).is_some())
+    }) || (crate::host_ops::host_op_for_call_name(call).is_some() && of(call).is_some()) || declared_only(call)
 }
 
 // ── per-render state ──

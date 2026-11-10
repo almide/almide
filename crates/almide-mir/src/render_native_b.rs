@@ -183,6 +183,11 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
         render_list_concat(call, OpSink { tys, out, indent, used_shims })
     } else if let Some(floor) = protocol_instance_floor(&call, tys) {
         render_declared_floor_call(call, floor, OpSink { tys, out, indent, used_shims })
+    } else if crate::native_hof::declared_only(name) {
+        // A combinator with no linked body and no floor entry: the runtime
+        // body its declaration names serves it, as it does a refused link.
+        crate::native_hof::serve_or(wall(format!("native: the declared runtime body of `{name}` refused the call")),
+            call, user_fns, sigs, OpSink { tys, out, indent, used_shims })
     } else {
         Err(wall(format!(
             "native: call to `{name}` — not a lowered user fn and not in the \
