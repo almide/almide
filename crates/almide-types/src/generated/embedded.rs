@@ -15582,19 +15582,23 @@ fn __pick_with_fallible[A, E](xs: List[A], cmp: (A, A) -> Result[Int, E], want: 
   var stop = false
   for x in xs {
     if stop then ()
-    else match best {
-      some(b) => match cmp(x, b) {
-        ok(c) => if c * want > 0 then {
-          best = some(x)
-        } else (),
-        err(e) => {
-          failed = some(e)
-          stop = true
+    else {
+
+
+      let take = match best {
+        some(b) => match cmp(x, b) {
+          ok(c) => c * want > 0,
+          err(e) => {
+            failed = some(e)
+            stop = true
+            false
+          },
         },
-      },
-      none => {
+        none => true,
+      }
+      if take then {
         best = some(x)
-      },
+      } else ()
     }
   }
   match failed {
