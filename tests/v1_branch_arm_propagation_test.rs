@@ -1,0 +1,247 @@
+//! A propagation in the arm of a branch STATEMENT of a Result fn, with more of
+//! the function after the branch.
+//!
+//! Two things went wrong there. A loop in such an arm whose body holds a `!`
+//! was refused: the loop's propagation rewrite reads a loop that is a statement
+//! of a Result-typed block, and a unit arm is not one. And a `!` bound in such
+//! an arm that the continuation lift did not take (a destructuring bind, or a
+//! payload the lift does not admit) was rewritten where it stood into a match
+//! whose err arm is the arm block's value, which a statement discards: the
+//! error was dropped and the statements after the branch ran.
+//!
+//! The lift now also takes a branch whose arm holds a propagating loop and
+//! reads a destructuring bind as it reads a plain one, and an arm that
+//! propagates is no longer normalized in place.
+use std::process::Command;
+
+/// A `while` holding a destructuring unwrap and a plain one, inside the then
+/// arm of a unit `if`, on the ok path, each err path and in a hot loop.
+const LOOP_IN_ARM: &str = r##"fn is_sym(ts: List[String], p: Int, s: String) -> Bool = (list.get(ts, p) ?? "") == s
+
+fn expect(ts: List[String], p: Int, s: String) -> Result[Int, String] =
+  if is_sym(ts, p, s) then ok(p + 1) else err("expected " + s)
+
+fn ident(ts: List[String], p: Int) -> Result[(String, Int), String] =
+  match list.get(ts, p) {
+    some(t) => if t == "(" or t == ")" or t == "," then err("expected a name") else ok((t, p + 1)),
+    none => err("eof"),
+  }
+
+fn show(r: Result[(List[String], Int), String]) -> String =
+  match r {
+    ok((xs, p)) => "${list.join(xs, "+")} ${int.to_string(p)}",
+    err(e) => e,
+  }
+
+fn spec(ts: List[String], p: Int) -> Result[(List[String], Int), String] = {
+  var names: List[String] = []
+  var q = p
+  if is_sym(ts, q, "(") then {
+    q = q + 1
+    var going = not is_sym(ts, q, ")")
+    if not going then {
+      q = q + 1
+    } else ()
+    while going {
+      let (x, q1) = ident(ts, q)!
+      list.push(names, x)
+      q = q1
+      if is_sym(ts, q, ",") then {
+        q = q + 1
+      } else {
+        q = expect(ts, q, ")")!
+        going = false
+      }
+    }
+  } else ()
+  ok((names, q))
+}
+
+fn main() -> Unit = {
+  println(show(spec(["(", "a", ",", "b", ")"], 0)))
+  println(show(spec(["(", ")"], 0)))
+  println(show(spec(["x"], 0)))
+  println(show(spec(["(", "a", "b"], 0)))
+  println(show(spec(["(", "a", ",", ")"], 0)))
+  var total = 0
+  let us = ["(", "a", ",", "b", ",", "c", ")", "d"]
+  for i in 0..<100000 {
+    total = total + (match spec(us, (i % 2) * 7) {
+      ok((xs, p)) => list.len(xs) + p,
+      err(_) => 1,
+    })
+  }
+  println(int.to_string(total))
+}
+"##;
+
+const LOOP_IN_ARM_STDOUT: &str = "a+b 5\n 2\n 0\nexpected )\nexpected a name\n850000\n";
+
+/// `let (x, q) = f()!` as the first statement of a unit `if` arm.
+const DESTRUCTURE_IN_ARM: &str = r##"fn is_sym(ts: List[String], p: Int, s: String) -> Bool = (list.get(ts, p) ?? "") == s
+
+fn expect(ts: List[String], p: Int, s: String) -> Result[Int, String] =
+  if is_sym(ts, p, s) then ok(p + 1) else err("expected " + s)
+
+fn ident(ts: List[String], p: Int) -> Result[(String, Int), String] =
+  match list.get(ts, p) {
+    some(t) => if t == "(" or t == ")" or t == "," then err("expected a name") else ok((t, p + 1)),
+    none => err("eof"),
+  }
+
+fn show(r: Result[(List[String], Int), String]) -> String =
+  match r {
+    ok((xs, p)) => "${list.join(xs, "+")} ${int.to_string(p)}",
+    err(e) => e,
+  }
+
+fn spec(ts: List[String], p: Int) -> Result[(List[String], Int), String] = {
+  var names: List[String] = []
+  var q = p
+  if is_sym(ts, q, "(") then {
+    let (x, q1) = ident(ts, q + 1)!
+    list.push(names, x)
+    q = q1
+  } else ()
+  ok((names, q))
+}
+
+fn main() -> Unit = {
+  println(show(spec(["(", "a", ",", "b", ")"], 0)))
+  println(show(spec(["(", ")"], 0)))
+  println(show(spec(["x"], 0)))
+  println(show(spec(["(", "a", "b"], 0)))
+  println(show(spec(["(", "a", ",", ")"], 0)))
+}
+"##;
+
+const DESTRUCTURE_IN_ARM_STDOUT: &str = "a 2\nexpected a name\n 0\na 2\na 2\n";
+
+/// A plain bound `!` in the arm whose ok payload (a list of lists) the lift
+/// does not admit: the render may refuse the function, never drop the error.
+const UNADMITTED_IN_ARM: &str = r##"fn is_sym(ts: List[String], p: Int, s: String) -> Bool = (list.get(ts, p) ?? "") == s
+
+fn expect(ts: List[String], p: Int, s: String) -> Result[Int, String] =
+  if is_sym(ts, p, s) then ok(p + 1) else err("expected " + s)
+
+fn ident(ts: List[String], p: Int) -> Result[(String, Int), String] =
+  match list.get(ts, p) {
+    some(t) => if t == "(" or t == ")" or t == "," then err("expected a name") else ok((t, p + 1)),
+    none => err("eof"),
+  }
+
+fn show(r: Result[(List[String], Int), String]) -> String =
+  match r {
+    ok((xs, p)) => "${list.join(xs, "+")} ${int.to_string(p)}",
+    err(e) => e,
+  }
+
+fn rows(ts: List[String], p: Int) -> Result[List[List[Int]], String] =
+  if is_sym(ts, p, "a") then ok([[p, p + 1]]) else err("expected rows")
+
+fn spec(ts: List[String], p: Int) -> Result[(List[String], Int), String] = {
+  var names: List[String] = []
+  var q = p
+  if is_sym(ts, q, "(") then {
+    let ns = rows(ts, q + 1)!
+    list.push(names, int.to_string(list.len(ns)))
+    q = q + 2
+  } else ()
+  ok((names, q))
+}
+
+fn main() -> Unit = {
+  println(show(spec(["(", "a", ",", "b", ")"], 0)))
+  println(show(spec(["(", ")"], 0)))
+  println(show(spec(["x"], 0)))
+  println(show(spec(["(", "a", "b"], 0)))
+  println(show(spec(["(", "a", ",", ")"], 0)))
+}
+"##;
+
+const UNADMITTED_IN_ARM_STDOUT: &str = "1 2\nexpected rows\n 0\n1 2\n1 2\n";
+
+/// What already ran: a plain bound `!` of a scalar in the arm, and the same
+/// loop as a statement of the function body.
+const CONTROL: &str = r##"fn is_sym(ts: List[String], p: Int, s: String) -> Bool = (list.get(ts, p) ?? "") == s
+
+fn expect(ts: List[String], p: Int, s: String) -> Result[Int, String] =
+  if is_sym(ts, p, s) then ok(p + 1) else err("expected " + s)
+
+fn ident(ts: List[String], p: Int) -> Result[(String, Int), String] =
+  match list.get(ts, p) {
+    some(t) => if t == "(" or t == ")" or t == "," then err("expected a name") else ok((t, p + 1)),
+    none => err("eof"),
+  }
+
+fn show(r: Result[(List[String], Int), String]) -> String =
+  match r {
+    ok((xs, p)) => "${list.join(xs, "+")} ${int.to_string(p)}",
+    err(e) => e,
+  }
+
+fn spec(ts: List[String], p: Int) -> Result[(List[String], Int), String] = {
+  var names: List[String] = []
+  var q = p
+  if is_sym(ts, q, "(") then {
+    let q1 = expect(ts, q + 1, "a")!
+    list.push(names, "a")
+    q = q1
+  } else ()
+  var going = is_sym(ts, q, ",")
+  while going {
+    let (x, q1) = ident(ts, q + 1)!
+    list.push(names, x)
+    q = q1
+    going = is_sym(ts, q, ",")
+  }
+  ok((names, q))
+}
+
+fn main() -> Unit = {
+  println(show(spec(["(", "a", ",", "b", ")"], 0)))
+  println(show(spec(["(", ")"], 0)))
+  println(show(spec(["x"], 0)))
+  println(show(spec(["(", "a", "b"], 0)))
+  println(show(spec(["(", "a", ",", ")"], 0)))
+}
+"##;
+
+const CONTROL_STDOUT: &str = "a+b 4\nexpected a\n 0\na 2\nexpected a name\n";
+
+/// Run on the native leg under the ownership certificate and on the wasm leg;
+/// both print `stdout`. `unwalled` also requires the certified native render.
+fn runs(name: &str, src: &str, stdout: &str, unwalled: bool) {
+    let dir = tempfile::tempdir().expect("scratch");
+    let file = dir.path().join(format!("{name}.almd"));
+    std::fs::write(&file, src).expect("source");
+    for extra in [&[][..], &["--target", "wasm"][..]] {
+        let run = Command::new(env!("CARGO_BIN_EXE_almide")).arg("run").arg(&file).args(extra)
+            .env("ALMIDE_CERTIFY_OWNERSHIP", "fail").env("ALMIDE_VERBOSE", "1")
+            .current_dir(dir.path()).output().expect("almide run");
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(run.status.success(), "{name} {extra:?}: {stderr}");
+        assert!(!unwalled || !stderr.contains("walled"), "{name} {extra:?} fell back: {stderr}");
+        assert_eq!(String::from_utf8_lossy(&run.stdout), stdout, "{name} {extra:?}");
+    }
+}
+
+#[test]
+fn a_loop_that_propagates_inside_a_branch_arm_renders_and_propagates() {
+    runs("loop_in_arm", LOOP_IN_ARM, LOOP_IN_ARM_STDOUT, true);
+}
+
+#[test]
+fn a_destructuring_unwrap_in_a_branch_arm_propagates_its_error() {
+    runs("destructure_in_arm", DESTRUCTURE_IN_ARM, DESTRUCTURE_IN_ARM_STDOUT, true);
+}
+
+#[test]
+fn an_unadmitted_unwrap_in_a_branch_arm_never_drops_its_error() {
+    runs("unadmitted_in_arm", UNADMITTED_IN_ARM, UNADMITTED_IN_ARM_STDOUT, false);
+}
+
+#[test]
+fn a_scalar_unwrap_in_an_arm_and_a_loop_in_the_body_run_as_before() {
+    runs("arm_propagation_control", CONTROL, CONTROL_STDOUT, true);
+}
