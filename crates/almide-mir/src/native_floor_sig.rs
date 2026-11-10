@@ -369,6 +369,11 @@ fn with_by_ref_twin(mut f: FloorFn, rust_params: &[String], rust_ret: &str, rt: 
     f
 }
 
+/// The runtime's process status struct, in ABI order: each field's label and
+/// the type the bundled record declares for it. The declaration check and the
+/// host-result conversion both read this one copy.
+const PROCESS_STATUS_ABI: [(&str, &str); 3] = [("code", "Int"), ("stdout", "String"), ("stderr", "String")];
+
 /// Match every field, in ABI order; a same-named record in another module
 /// cannot stand in for the bundled runtime record.
 fn process_status_decl_agrees(decls: &[Decl]) -> bool {
@@ -377,9 +382,8 @@ fn process_status_decl_agrees(decls: &[Decl]) -> bool {
         _ => None,
     });
     let Some(TypeExpr::Record { fields }) = found.next() else { return false };
-    found.next().is_none() && fields.iter().map(|f| (f.name.as_str(), simple(&f.ty))).eq([
-        ("code", Some("Int")), ("stdout", Some("String")), ("stderr", Some("String")),
-    ])
+    found.next().is_none() && fields.iter().map(|f| (f.name.as_str(), simple(&f.ty)))
+        .eq(PROCESS_STATUS_ABI.iter().map(|(label, ty)| (*label, Some(*ty))))
 }
 
 #[cfg(test)]

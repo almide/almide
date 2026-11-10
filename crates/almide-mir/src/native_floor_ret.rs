@@ -278,7 +278,8 @@ fn aggregate_host_ret(r: FloorRet, call: String, declared: Option<u16>) -> Resul
     use crate::render_native_rec as rec;
     let (ty, fields, values) = match r {
         FloorRet::ResProcessStatus => (
-            Ty::Record { fields: vec![(sym("code"), Ty::Int), (sym("stdout"), Ty::String), (sym("stderr"), Ty::String)] },
+            Ty::Record { fields: PROCESS_STATUS_ABI.iter().zip([Ty::Int, Ty::String, Ty::String])
+                .map(|((label, _), ty)| (sym(label), ty)).collect() },
             [NTy::I64, NTy::Str, NTy::Str], ["s.code", "s.stdout", "s.stderr"],
         ),
         FloorRet::ResBytesStrInt => (
@@ -296,7 +297,7 @@ fn aggregate_host_ret(r: FloorRet, call: String, declared: Option<u16>) -> Resul
         return Err(wall("native: host result aggregate fields disagree with runtime ABI"));
     }
     if r == FloorRet::ResProcessStatus && !rec::record_fields(record).is_some_and(|(_, fields)|
-        fields.iter().map(|(name, _)| name.as_str()).eq(["code", "stdout", "stderr"])) {
+        fields.iter().map(|(name, _)| name.as_str()).eq(PROCESS_STATUS_ABI.iter().map(|(label, _)| *label))) {
         return Err(wall("native: host status field labels disagree with its bundled declaration"));
     }
     let result = rec::result_type_of(NTy::Rec(record), NTy::Str);

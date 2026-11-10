@@ -76,11 +76,12 @@ impl LowerCtx {
         // scalar element runs `f` inside this loop, per element of `src`, and no
         // intermediate list is built — what the standard codegen's StreamFusion
         // makes of the same chain. A body the fused loop cannot lower is retried
-        // over the materialized list, as before.
+        // over the materialized list, as before. No stage short-circuits: this
+        // loop runs the whole-list ops only (`defunc_call_shape` admits no
+        // other, and `find` took its own early-exit route before this one).
         if fuse.index.is_none() && fuse.second.is_none() {
             if let Some(inner) = self.defunc_inner_map(xs).filter(|m| (!m.3 || func != "filter")
-                && crate::native_fusion::mergeable(&m.2, lambda.body, acc.init,
-                    matches!(func, "find" | "any" | "all" | "take" | "find_map" | "find_index"))) {
+                && crate::native_fusion::mergeable(&m.2, lambda.body, acc.init, false)) {
                 let marks = (self.ops.len(), self.live_heap_handles.len(), self.lifted.len(), self.value_of.clone());
                 let acc2 = DefuncAcc { init: acc.init, result_elem: acc.result_elem.clone() };
                 let lambda2 = DefuncLambda { params: lambda.params, body: lambda.body };
