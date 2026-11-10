@@ -169,6 +169,11 @@ pub struct Interpreter<'a> {
     /// threaded, like `handle_arg_ty`: every caller of `eval_container_op`
     /// sets it immediately before the call, and the op takes it first.
     pub(crate) container_arg_tys: Option<Vec<Ty>>,
+    /// The auto-imported bundled body the value-only module dispatch just
+    /// abstained on for its `mut` parameter, with its module and evaluated
+    /// operands: `eval_module_call` clears it before the dispatch and takes
+    /// it after, where the argument exprs can still name the caller's place.
+    pub(crate) bundled_mut_gated: Option<(Sym, &'a IrFunction, Vec<Value>)>,
     /// The STATIC result type of the module call about to dispatch, stashed by
     /// `eval_expr_call` and taken by the in-place mutator path. It says whether
     /// the move-mode rewrite reached this call site: a rewritten site types the
@@ -612,6 +617,7 @@ impl<'a> Interpreter<'a> {
             handle_arg_ty: None,
             call_result_ty: None,
             container_arg_tys: None,
+            bundled_mut_gated: None,
             record_decls,
             named_records,
             variant_ctors,

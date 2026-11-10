@@ -307,6 +307,34 @@ impl<'a> Interpreter<'a> {
             slots[i] = Some(val!(self.eval_expr(a, scope)));
         }
         let evaled: Vec<Value> = slots.into_iter().map(|v| v.expect("every operand evaluated")).collect();
+        self.run_lowered_fn_call(func, writebacks, evaled, scope)
+    }
+
+    /// [`Self::eval_lowered_fn_call`] for operands already evaluated in
+    /// source order by the value-only module dispatch: the `mut` places are
+    /// resolved from the argument exprs, then the body runs and copies out.
+    fn finish_lowered_fn_call(
+        &mut self,
+        func: &'a almide_ir::IrFunction,
+        args: &[IrExpr],
+        evaled: Vec<Value>,
+        scope: &Scope,
+    ) -> Flow {
+        match self.mut_param_lvalues(func, args) {
+            Ok(writebacks) => self.run_lowered_fn_call(func, writebacks, evaled, scope),
+            Err(flow) => flow,
+        }
+    }
+
+    /// The body of a lowered fn call over its evaluated operands, with the
+    /// `mut` parameters' copy-out to the caller's places.
+    fn run_lowered_fn_call(
+        &mut self,
+        func: &'a almide_ir::IrFunction,
+        writebacks: Vec<(usize, MutLvalue)>,
+        evaled: Vec<Value>,
+        scope: &Scope,
+    ) -> Flow {
         let root = self.root_scope();
         let is_pool = crate::stdlib_pool::is_pool_body(func);
         // Depth is owned by `run_callable`'s per-hop bump — see
