@@ -37,6 +37,7 @@
 # twin node's release may wait for the rewind is the region-pure verdict,
 # interim trust (docs/contracts/proven-vs-trusted.md).
 set -euo pipefail
+export LC_ALL=C
 cd "$(dirname "$0")"
 ROOT="$(cd .. && pwd)"
 FLOOR="$ROOT/proofs/native-verified-floor.txt"

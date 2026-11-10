@@ -9,5 +9,5 @@ native_v1_perf_programs() {
       grep -E '^spec/' proofs/native-v1-perf-candidates.txt
     fi
     ls research/benchmark/perf/v1-shapes/*.almd
-  } | sort -u
+  } | LC_ALL=C sort -u
 }
