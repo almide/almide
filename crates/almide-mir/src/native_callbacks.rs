@@ -61,26 +61,27 @@ impl Drop for Scope {
 /// The host types the non-scalar callbacks of the program being rendered
 /// name, for the render made while this guard lives: a host type this
 /// render's own bodies do not use (`Bytes` is a `Vec<u8>` here, a shared
-/// handle on the host) still needs its definition beside the adapter.
-pub(crate) struct HostTypes(String);
+/// handle on the host) still needs its definition beside the adapter. The
+/// records and variants among them are carried for as long (`_carried`).
+pub(crate) struct HostTypes { outer: String, _carried: crate::native_callback_types::Guard }
 impl HostTypes {
     pub(crate) fn enter(ir: &IrProgram) -> Self {
-        let mut types = String::new();
-        for f in ir.functions.iter().filter(|f| is_root(f.name.as_str())) {
-            let named = f.params.iter().map(|p| &p.ty).chain(std::iter::once(&f.ret_ty));
-            for ty in named.filter(|ty| host_scalar(ty).is_none()) {
-                if let Ok(host) = crate::native_foreign::host_type(ty) {
-                    types.push_str(&host);
-                    types.push('\n');
-                }
+        let signature = || ir.functions.iter().filter(|f| is_root(f.name.as_str()))
+            .flat_map(|f| f.params.iter().map(|p| &p.ty).chain(std::iter::once(&f.ret_ty)));
+        let carried = crate::native_callback_types::install(&ir.type_decls, signature(), host_source);
+        let mut types = crate::native_callback_types::named_runtime();
+        for ty in signature().filter(|ty| host_scalar(ty).is_none()) {
+            if let Ok(host) = crate::native_foreign::host_type(ty) {
+                types.push_str(&host);
+                types.push('\n');
             }
         }
-        Self(HOST_TYPES.with(|t| t.replace(types)))
+        Self { outer: HOST_TYPES.with(|t| t.replace(types)), _carried: carried }
     }
 }
 impl Drop for HostTypes {
     fn drop(&mut self) {
-        HOST_TYPES.with(|t| t.replace(std::mem::take(&mut self.0)));
+        HOST_TYPES.with(|t| t.replace(std::mem::take(&mut self.outer)));
     }
 }
 
@@ -185,6 +186,7 @@ pub(crate) fn render(ir: &IrProgram, sigs: &NativeSigs, rendered: &str) -> Resul
         };
         write!(out, "{item}").expect("writing to a String cannot fail");
     }
+    out.push_str(&crate::native_callback_types::render()?);
     Ok(out)
 }
 
