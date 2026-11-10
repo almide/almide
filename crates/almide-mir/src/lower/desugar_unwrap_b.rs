@@ -212,6 +212,10 @@ fn desugar_stmt_control_unwrap(
         // effect-unwrap — refuse so the raw `!` walls cleanly).
         let (mut has, mut all_admitted) = (false, true);
         collect_arm_unwrap_admit(s_expr, &mut has, &mut all_admitted, layouts);
+        // A loop in an arm whose body propagates needs the same lift: with the rest of
+        // the block in each arm, the loop is a statement of a Result-typed block, where
+        // the loop flag form reads it.
+        has |= branch_arm_holds_propagating_loop(s_expr, &body.ty);
         if !has || !all_admitted {
             continue;
         }

@@ -113,3 +113,39 @@ pub fn desugar_destructure_branch_unwrap(body: &IrExpr, next_var: &mut u32) -> O
     let stmts = [&stmts[..i], &split[..], &stmts[i + 1..]].concat();
     Some(IrExpr { kind: IrExprKind::Block { stmts, expr: tail.clone() }, ty: body.ty.clone(), span: body.span, def_id: body.def_id })
 }
+
+/// `if c then { …; while g { q = f(q)! }; … } else ()` followed by more of a
+/// `Result[T, String]` block — a branch statement whose arm holds a loop that
+/// propagates. The loop flag form ([`desugar_loop_unwrap`]) reads a loop that is
+/// a statement of a Result-typed block, and its post-loop dispatch is that
+/// block's tail; a loop in a unit arm has neither, so its `!` reached the
+/// lowering and the function was refused. The continuation lift reads this
+/// beside the direct `!`s of the arms: once the rest of the block is in each
+/// arm, the arm is the Result-typed block the loop form needs. Only a `String`
+/// error qualifies — the one error type the loop form carries.
+fn branch_arm_holds_propagating_loop(branch: &IrExpr, result_ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let string_err = matches!(
+        result_ty,
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(a[1], Ty::String)
+    );
+    string_err && arm_spine_holds_unwrap_loop(branch)
+}
+
+/// A loop with a propagating body on the statement spine of a branch's arms:
+/// through arm blocks and the branch statements nested in them, never into a
+/// bound value or a loop body (the lift moves statements, not values).
+fn arm_spine_holds_unwrap_loop(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::ForIn { body, .. } | IrExprKind::While { body, .. } => body.iter().any(stmt_has_unwrap),
+        IrExprKind::Block { stmts, expr } => {
+            stmts.iter().any(|s| matches!(&s.kind, IrStmtKind::Expr { expr } if arm_spine_holds_unwrap_loop(expr)))
+                || expr.as_deref().is_some_and(arm_spine_holds_unwrap_loop)
+        }
+        IrExprKind::If { then, else_, .. } => {
+            arm_spine_holds_unwrap_loop(then) || arm_spine_holds_unwrap_loop(else_)
+        }
+        IrExprKind::Match { arms, .. } => arms.iter().any(|a| arm_spine_holds_unwrap_loop(&a.body)),
+        _ => false,
+    }
+}
