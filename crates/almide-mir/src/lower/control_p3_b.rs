@@ -8,7 +8,14 @@ impl LowerCtx {
         // `mark`, in which case nothing new is live and this is a no-op (a bare `split_off(mark)`
         // would panic). Semantically "drop everything from mark onward, nothing if none".
         let mark = mark.min(self.live_heap_handles.len());
-        for v in self.live_heap_handles.split_off(mark).into_iter().rev() {
+        let dropped = self.live_heap_handles.split_off(mark);
+        // A module-level global materialized inside this frame was memoized under its
+        // name; the block dies here, so a later reader must build its own.
+        if !dropped.is_empty() && !self.globals.is_empty() {
+            let globals = &self.globals;
+            self.value_of.retain(|var, v| !(globals.contains_key(var) && dropped.contains(v)));
+        }
+        for v in dropped.into_iter().rev() {
             let op = self.drop_op_for(v);
             self.ops.push(op);
         }
