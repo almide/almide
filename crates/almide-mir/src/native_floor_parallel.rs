@@ -57,14 +57,14 @@ fn main() {
         panic!("the trap did not run");
     }
     let caller = std::thread::current().id();
-    let count = std::sync::atomic::AtomicUsize::new(0);
+    let count = std::sync::atomic::AtomicUsize::new(0); // text of a test program rustc builds, never on the playground compile path
     let worker = std::sync::atomic::AtomicBool::new(false);
     let parallel = !almide_rt_list_par_sequential() && almide_rt_list_par_workers(64) > 1;
     let first_pair = std::sync::Barrier::new(2);
     let result: Result<Vec<i64>, AlmideString> = almide_rt_fan_map_par((0..64).collect(), |i| {
         // Otherwise the caller can drain this tiny queue before a worker
         // is scheduled, making the thread-observation assertion flaky.
-        let ordinal = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let ordinal = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst); // the same test program text, off the playground compile path
         if parallel && ordinal < 2 { first_pair.wait(); }
         if std::thread::current().id() != caller { worker.store(true, std::sync::atomic::Ordering::SeqCst); }
         println!("element {i}");

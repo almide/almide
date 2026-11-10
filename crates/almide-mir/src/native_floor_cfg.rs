@@ -122,7 +122,7 @@ mod complementary_cfg_tests {
         assert_eq!(clock.matches("fn almide_fan_cpu_ns()").count(), 2);
         assert!(clock.contains("#[cfg(not(all("));
         assert!(clock.contains("thread_cpu_ns()"));
-        assert!(clock.contains("std::time::Instant"));
+        assert!(clock.contains("std::time::Instant")); // the native runtime's clock fallback read as text; nothing here runs on the playground
         assert!(items.iter().any(|s| s.contains("mod almide_rt_sys_ffi")));
     }
 }
