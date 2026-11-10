@@ -375,3 +375,41 @@ impl LowerCtx {
         Some(out)
     }
 }
+
+impl LowerCtx {
+    /// A list-literal element the desugar left as `{ let $t = <component>;
+    /// ("key", $t) }` — a component it could only bind in place (a `??`
+    /// fallback inside a tuple element of a multi-element literal). Admitted
+    /// on the render whose literal build is speculative, where a decline of
+    /// the binds or of the tail rolls the whole literal back.
+    fn list_literal_elem_is_bound_block(e: &IrExpr) -> bool {
+        crate::lower::owned_tco_slots()
+            && matches!(&e.kind, IrExprKind::Block { stmts, expr: Some(_) }
+                if stmts.iter().all(|s| matches!(s.kind, almide_ir::IrStmtKind::Bind { .. })))
+    }
+
+    /// Lower one list-literal element; a bound-block element lowers its binds
+    /// where the element stands (so the elements before it are already built
+    /// and evaluation order is the written one), then its tail as the element.
+    /// A bind the lowering could only defer to an empty block is refused.
+    fn lower_list_literal_elem_or_bound_block(
+        &mut self,
+        elem: &IrExpr,
+        class: &StrListLiteralClass,
+    ) -> Option<ValueId> {
+        let IrExprKind::Block { stmts, expr: Some(tail) } = &elem.kind else {
+            return self.lower_str_list_literal_elem(elem, class);
+        };
+        let mark = self.ops.len();
+        for s in stmts {
+            self.lower_stmt(s).ok()?;
+        }
+        let deferred = self.ops[mark..]
+            .iter()
+            .any(|op| matches!(op, Op::Alloc { init: Init::Opaque, .. }));
+        if deferred || !self.str_list_literal_elem_lowerable(tail, class) {
+            return None;
+        }
+        self.lower_str_list_literal_elem(tail, class)
+    }
+}
