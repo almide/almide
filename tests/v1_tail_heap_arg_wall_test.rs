@@ -103,21 +103,15 @@ fn main() -> Unit = {
 const RECORD_RESULT_STDOUT: &str = "2 done 2 t [1, 2] 1.5 true\n5 xxxxx\n4 [\"4\", \"3\", \"2\", \"1\"]\n-4 neg []\n4 zero [3, 2, 1, 0]\n";
 
 /// A heap tail call the loop conversion still declines: the base reads a
-/// binding of the loop body and the result (a variant) has no empty value
+/// binding of the loop body and the result (a map) has no empty value
 /// for the in-loop result slot.
-const VARIANT_RESULT: &str = r#"type Shape = Dot | Circle(Int) | Tagged { label: String }
-
-fn pick(n: Int, xs: List[Int]) -> Shape = {
+const MAP_RESULT: &str = r#"fn pick(n: Int, xs: List[Int]) -> Map[String, Int] = {
   let k = list.len(xs)
-  if n == 0 then Circle(k) else pick(n - 1, [n, k])
+  if n == 0 then ["k": k] else pick(n - 1, [n, k])
 }
 
 fn main() -> Unit = {
-  match pick(5, []) {
-    Circle(r) => println("circle ${r}"),
-    Dot => println("dot"),
-    Tagged { label } => println(label),
-  }
+  println(int.to_string(map.get(pick(5, []), "k") ?? -1))
 }
 "#;
 
@@ -185,6 +179,6 @@ fn a_record_result_whose_base_reads_a_loop_binding_loops_from_a_fieldwise_empty_
 
 #[test]
 fn a_heap_tail_call_the_loop_declines_is_still_refused() {
-    let err = almide_mir::pipeline::try_render_rust_source(VARIANT_RESULT).expect_err("no loop conversion for this shape");
+    let err = almide_mir::pipeline::try_render_rust_source(MAP_RESULT).expect_err("no loop conversion for this shape");
     assert!(format!("{err:?}").contains("passes a heap value to its own tail call"), "{err:?}");
 }
