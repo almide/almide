@@ -283,7 +283,7 @@
 8777	spec/wasm_cross/fs_error_path_escape.almd
 19681	spec/wasm_cross/fs_fallible_stream_callback.almd
 17474	spec/wasm_cross/fs_fallible_walker_call_head.almd
-16976	spec/wasm_cross/fs_glob_segments.almd
+16998	spec/wasm_cross/fs_glob_segments.almd
 14228	spec/wasm_cross/fs_list_dir_multipass.almd
 17115	spec/wasm_cross/fs_metadata_family.almd
 9849	spec/wasm_cross/fs_preopen_resolve.almd
