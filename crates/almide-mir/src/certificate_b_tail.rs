@@ -43,26 +43,19 @@ fn ownership_certificate_released_merge_dsts(
             Op::IfThen { dst: Some(d), .. } => {
                 merge_dsts.insert(*d);
             }
-            Op::Consume { v }
-            | Op::Drop { v }
-            | Op::DropListStr { v }
-            // A RECORD/VARIANT-typed merge dst releases through the TYPED
-            // recursive drop (the #1287 record-merge seeding emits DropVariant,
-            // not Drop) — without this arm the dst never enters the released
-            // set, its IfThen `i` credit is skipped, and the DropVariant certs
-            // as a bare `d` the kernel checker rejects (unowned Dec).
-            | Op::DropVariant { v, .. } => {
-                if merge_dsts.contains(v) {
-                    released_merge_dsts.insert(*v);
-                }
-            }
             // An INNER merge flowing out as an OUTER arm value (`Else/EndIf { val }`
             // — the effect-TCO nested-if chain) is released the same way: the val-move
             // rule below emits its `m`.
             Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } if merge_dsts.contains(v) => {
                 released_merge_dsts.insert(*v);
             }
-            _ => {}
+            // A merge dst releases through a `Consume` or through the drop of
+            // its TYPE (a record/variant merge emits DropVariant, not Drop —
+            // the #1287 record-merge seeding; a Result of a Value emits
+            // DropResultValue). Without the release here the dst never enters
+            // the released set, its IfThen `i` credit is skipped, and its drop
+            // certs as a bare `d` the kernel checker rejects (unowned Dec).
+            _ => released_merge_dsts.extend(merge_release_value(op).filter(|v| merge_dsts.contains(v))),
         }
     }
     if let Some(r) = func.ret {
