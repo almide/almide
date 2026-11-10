@@ -166,7 +166,8 @@ fn consumed_propagating_fan_map_callback(e: &IrExpr) -> Option<&IrExpr> {
 /// callback) ride the self-host `fan.map` route with the callback's own Result
 /// channel intact and stay lowered. The structural leg (the default route) runs
 /// the shape byte-identically to native; the incumbent retires under #1696
-/// rather than growing a lowering. Span: the callback itself.
+/// rather than growing a lowering. Span: the callback itself. The native
+/// render does not ask (`lower_function_all_impl`): it lowers the shape.
 pub(crate) fn wall_fan_map_propagating_callbacks(body: &IrExpr) -> Result<(), LowerError> {
     use almide_ir::visit::{walk_expr, IrVisitor};
     struct Find {
