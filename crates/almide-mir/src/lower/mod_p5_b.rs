@@ -131,6 +131,7 @@ pub(crate) fn try_tco_rewrite(
     fn_name: &str,
     params: &[almide_ir::IrParam],
     body: &IrExpr,
+    fields_of: TcoFieldsOf<'_>,
 ) -> Option<IrExpr> {
     // Not on the native render (owned TCO slots): there a destructuring loop
     // body renders as a Rust `let (a, b) = …` re-run every iteration, and
@@ -193,7 +194,7 @@ pub(crate) fn try_tco_rewrite(
     let idx_var = lit.as_ref().map(|(_, iv, _)| *iv);
 
     // FIRST collection — detect the self-calls + carried params (on the pre-substitution body).
-    let Some((calls0, bases0)) = collect_tco_shape(work_body, fn_name, n) else {
+    let Some((calls0, bases0)) = collect_tco_shape(work_body, fn_name, params) else {
         tco_trace!("bail: collect0");
         return None;
     };
@@ -231,7 +232,7 @@ pub(crate) fn try_tco_rewrite(
     let params2: &[almide_ir::IrParam] = &params_v;
 
     // SECOND collection — on the substituted body, with the slot params.
-    let Some((calls, bases)) = collect_tco_shape(work_ref, fn_name, n) else {
+    let Some((calls, bases)) = collect_tco_shape(work_ref, fn_name, params2) else {
         tco_trace!("bail: collect1");
         return None;
     };
@@ -258,14 +259,15 @@ pub(crate) fn try_tco_rewrite(
     let ret_ty = body.ty.clone();
 
     let use_result_acc = tco_result_acc_mode(work_ref, &base_exprs, &ret_ty)?;
-    let result_var: Option<VarId> = if use_result_acc {
-        tco_empty_for(&ret_ty)?;
+    let result_slot: Option<(VarId, IrExpr)> = if use_result_acc {
+        let empty = tco_slot_empty(&ret_ty, fields_of, TCO_SLOT_EMPTY_DEPTH)?;
         let rv = VarId(slot_next);
         slot_next += 1;
-        Some(rv)
+        Some((rv, empty))
     } else {
         None
     };
+    let result_var: Option<VarId> = result_slot.as_ref().map(|(rv, _)| *rv);
 
     let mut next_kind = 1i64;
     // `slot_next` is the next free VarId (after rk / list-iter idx / append slots / result) — tco_rewrite
@@ -293,7 +295,7 @@ pub(crate) fn try_tco_rewrite(
     // `{ [let slot = acc + [];]* [var idx = 0;] var rk = 0; while (rk == 0) { <loop_body> }; <post> }`
     // The append-accumulator slot inits (owned copies of the borrowed `acc` params) come FIRST.
     let mut inits: Vec<IrStmt> = upfront;
-    inits.extend(tco_state_inits(idx_var, result_var, rk, &ret_ty));
+    inits.extend(tco_state_inits(idx_var, result_slot, rk, &ret_ty));
     let while_stmt = IrStmt {
         kind: IrStmtKind::Expr {
             expr: tco_ir(
@@ -357,7 +359,7 @@ fn has_tuple_destructure(e: &IrExpr) -> bool {
 fn collect_tco_shape<'a>(
     body: &'a IrExpr,
     fn_name: &str,
-    n: usize,
+    params: &[almide_ir::IrParam],
 ) -> Option<(Vec<&'a [IrExpr]>, Vec<&'a IrExpr>)> {
     let mut calls: Vec<&[IrExpr]> = Vec::new();
     let mut bases: Vec<&IrExpr> = Vec::new();
@@ -365,7 +367,17 @@ fn collect_tco_shape<'a>(
     if calls.is_empty() || bases.is_empty() {
         return None;
     }
-    if calls.iter().any(|c| c.len() != n) {
+    if calls.iter().any(|c| c.len() != params.len()) {
+        return None;
+    }
+    // A base that itself recurses (`s + f(n - v, xs)` beside a tail `f(n,
+    // list.drop(xs, 1))`, #3550) stays a real call — no leg loops a non-tail
+    // call — while the tail calls round it become the loop. Only where the
+    // native render would otherwise refuse the function: its owned slots are
+    // on and a tail call hands a heap parameter on. Everywhere else such a
+    // function keeps its real-recursion lowering.
+    let mixed_ok = crate::lower::owned_tco_slots() && params.iter().any(|p| is_heap_ty(&p.ty));
+    if !mixed_ok && bases.iter().any(|b| tco_contains_self(b, fn_name)) {
         return None;
     }
     Some((calls, bases))
@@ -483,6 +495,22 @@ fn is_accumulator_carry(calls: &[&[IrExpr]], params: &[almide_ir::IrParam], i: u
     })
 }
 
+/// Does a carried heap param's slot start as a `var` bound to the param,
+/// rather than as the `acc + <empty>` copy? A String or a list copies. A
+/// map or set the accumulator carries admit keeps its `acc + []` share. Any
+/// other type (a variant, a record, a tuple) has no `+` to copy through — a
+/// carry such as `list.fold(xs, acc, ..)` at a variant type reaches here as
+/// an accumulator carry — so on the render with owned slots it binds the
+/// param too, exactly as an owned-only carry of that type does.
+fn slot_binds_param(owned_only: bool, ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ty {
+        Ty::String | Ty::Applied(TC::List, _) => false,
+        Ty::Applied(TC::Map | TC::Set, _) => owned_only,
+        _ => owned_only || crate::lower::owned_tco_slots(),
+    }
+}
+
 /// Substitute every append accumulator with an OWNED loop-carried slot: an
 /// upfront `let slot = acc + <empty>` bind (a fresh OWNED copy of the borrowed
 /// accumulator param — the concat always allocates, so the slot never aliases
@@ -511,7 +539,7 @@ fn build_append_slot_subst(
         // An owned TCO slot (`crate::lower::owned_tco_slots`) that is neither
         // a list nor a String (a tree, a variant, a tuple) starts as a `var`
         // bound to the borrowed param — the lowering's owned copy.
-        if owned_only.contains(&ai) && !matches!(list_ty, Ty::String) && !matches!(list_ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, _)) {
+        if slot_binds_param(owned_only.contains(&ai), &list_ty) {
             upfront.push(IrStmt {
                 kind: IrStmtKind::Bind {
                     var: slot,

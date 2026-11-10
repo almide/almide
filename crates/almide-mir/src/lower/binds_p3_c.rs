@@ -20,6 +20,17 @@ impl LowerCtx {
             // the enclosing typed aggregate recursively drops that value.
             return self.lower_owned_heap_field(arg).map(|v| (v, true));
         }
+        if crate::lower::owned_tco_slots()
+            && matches!(&arg.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                if a.len() == 1 && self.aggregate_field_tys(&a[0]).is_some())
+        {
+            // A list of tuples or records (`Record(String, List[(String, T)])`,
+            // `Match(T, List[Arm])`): on the certified native render the
+            // variant is a typed value that releases its fields recursively,
+            // so the list is acquired like any owned field and freed by the
+            // type that holds it.
+            return self.lower_owned_heap_field(arg).map(|v| (v, true));
+        }
         if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) = &arg.ty {
             if a.len() == 1 && self.option_payload_drop_exact(&a[0]) {
                 // An Option ctor field whose payload the generated `$__drop_<T>` frees

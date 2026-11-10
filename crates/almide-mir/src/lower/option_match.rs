@@ -2,7 +2,45 @@
 // materialized-Option subject branches on the real tag instead of taking
 // the both-arms linearization. include!-spliced from control_b.rs.
 
+/// A tuple pattern of binds and wildcards only: it matches every value of
+/// its type and reads each component once, the `let (a, _) = p` a payload
+/// bound whole is destructured by. A nested or refutable component is not.
+fn tuple_pattern_is_total(p: &IrPattern) -> bool {
+    matches!(p, IrPattern::Tuple { elements }
+        if elements.iter().all(|e| matches!(e, IrPattern::Bind { .. } | IrPattern::Wildcard)))
+}
+
 impl LowerCtx {
+    /// `arms` with each `some(<total tuple pattern>)` arm read as the payload
+    /// bound whole and destructured first in the body: `some((k, v)) => body`
+    /// is `some(p) => { let (k, v) = p; body }`, the form the tracked-Option
+    /// match executes. `None` when no arm has that shape. A guarded arm keeps
+    /// its pattern (the guard reads the names before the body binds them).
+    pub(crate) fn some_tuple_arms_as_binds(&mut self, subject_ty: &Ty, arms: &[IrMatchArm]) -> Option<Vec<IrMatchArm>> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::Option, payload) = subject_ty else { return None };
+        let payload_ty = payload.first()?;
+        let destructures = |arm: &IrMatchArm| arm.guard.is_none()
+            && matches!(&arm.pattern, IrPattern::Some { inner } if tuple_pattern_is_total(inner));
+        if !arms.iter().any(destructures) {
+            return None;
+        }
+        Some(arms.iter().map(|arm| match &arm.pattern {
+            IrPattern::Some { inner } if destructures(arm) => {
+                let var = self.fresh_synth_var();
+                let span = arm.body.span;
+                let whole = IrExpr { kind: IrExprKind::Var { id: var }, ty: payload_ty.clone(), span, def_id: None };
+                let bind = IrStmt { kind: IrStmtKind::BindDestructure { pattern: (**inner).clone(), value: whole }, span };
+                let body = IrExpr {
+                    kind: IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(arm.body.clone())) },
+                    ty: arm.body.ty.clone(), span, def_id: None,
+                };
+                IrMatchArm { pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var, ty: payload_ty.clone() }) }, guard: None, body }
+            }
+            _ => arm.clone(),
+        }).collect())
+    }
+
     /// The arm-classification gate of [`Self::try_lower_variant_match`]:
     /// exactly a `[Some(bind?), None]` pair, the Some-bind either a scalar
     /// COPY or (for a nested-ownership subject) a heap BORROW. `None` = the

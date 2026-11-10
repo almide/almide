@@ -242,4 +242,51 @@ effect fn main() -> Unit = {
         crate::pipeline::try_render_rust_source_certified("effect fn main() -> Unit = println(\"plain\")").unwrap();
         assert!(wrappers.iter().all(|name| !is_wrapper(name)), "registry resets between renders");
     }
+    /// A `fan.map` pairing outside the scalar self-host matrix that the
+    /// product selector keeps sequential (an effect callback): the builtin's
+    /// sequential runtime body serves it, with the closure taken statically.
+    #[test]
+    fn unselected_heap_pairings_ride_the_sequential_runtime_body() {
+        let render = |callback: &str, shown: &str| crate::pipeline::try_render_rust_source_certified(&format!(r#"
+fn noisy(x: Int) -> Result[List[Int], String] = {{ println(int.to_string(x)); ok([x, x]) }}
+fn loud(x: Int) -> Result[Int, String] = {{ println(int.to_string(x)); ok(x) }}
+effect fn main() -> Unit = {{
+  let rows = fan.map([1, 2, 3], (x) => {callback}(x))!
+  println("${{{shown}}}")
+}}
+"#));
+        let (rust, certs) = render("noisy", "list.len(rows)").expect("the heap pairing renders");
+        let sites = crate::native_hof::sites();
+        assert_eq!(sites.values().filter(|s| s.as_str() == "almide_rt_fan_map").count(), 1);
+        assert!(sites.values().all(|s| s != "almide_rt_fan_map_par"), "an effect callback is never threaded");
+        assert!(rust.contains("almide_rt_fan_map_static("), "the closure is monomorphized, not boxed");
+        assert!(certs.iter().any(|(property, _, _)| property == "native-calls"));
+        // Negative control: a pairing inside the matrix keeps its linked body.
+        render("loud", "rows").expect("the scalar pairing renders");
+        assert!(crate::native_hof::sites().values().all(|s| !s.starts_with("almide_rt_fan_map")));
+        assert!(crate::native_hof::sequential_map_call("fan.map_x"));
+        for other in ["fan.map", "fan.map_is", "fan.any_map_x", "list.map_x"] {
+            assert!(!crate::native_hof::sequential_map_call(other), "{other}");
+        }
+    }
+    /// A threaded site offers the builtin's linked scalar body to every
+    /// pairing of the render: the sites it refuses ride the sequential
+    /// runtime body, each at its own element kinds.
+    #[test]
+    fn pairings_a_threaded_render_hands_to_the_scalar_link_stay_served() {
+        let source = r#"
+fn noisy(x: Float) -> Result[List[Float], String] = { println(float.to_string(x)); ok([x, x * 2.0]) }
+fn pairs(x: String) -> Result[(Int, String), String] = { println(x); ok((string.len(x), x + "!")) }
+effect fn main() -> Unit = {
+  let rows = fan.map([1.5, 2.5], (x) => noisy(x))!
+  let pure = fan.map([1, 2, 3], (x) => ok([x, x + 1]))!
+  let ps = fan.map(["a", "bb"], (x) => pairs(x))!
+  println("${rows} ${pure} ${ps}")
+}
+"#;
+        crate::pipeline::try_render_rust_source_certified(source).expect("every pairing renders");
+        let sites = crate::native_hof::sites();
+        let served = |symbol: &str| sites.values().filter(|s| s.as_str() == symbol).count();
+        assert_eq!((served("almide_rt_fan_map_par"), served("almide_rt_fan_map")), (1, 2));
+    }
 }

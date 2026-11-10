@@ -377,12 +377,13 @@ fn v0_mutual_tail_recursion_survives_opt_level_0() {
 #[test]
 fn out_of_subset_walls_honestly() {
     let walls = [
-        // C export wrappers still require their separately checked ABI path.
-        ("c_export", "@export(c, \"answer\")\nfn answer() -> Int = 42\nfn main() -> Unit = println(\"${answer()}\")\n"),
+        // A C export outside the scalar rows still requires the standard
+        // codegen's wrapper (the scalar rows render: tests/export_c_abi_test.rs).
+        ("c_export", "@export(c, \"keep\")\nfn keep(h: Handle) -> Handle = h\nfn main() -> Unit = println(\"x\")\n"),
     ];
     for (name, src) in walls {
         let refusal = almide_mir::pipeline::try_render_rust_source(src)
             .expect_err(&format!("`{name}` should refuse the unsupported export wrapper"));
-        assert!(refusal.to_string().contains("is @export(c)"), "{name}: {refusal}");
+        assert!(refusal.to_string().contains("is outside the scalar C rows"), "{name}: {refusal}");
     }
 }

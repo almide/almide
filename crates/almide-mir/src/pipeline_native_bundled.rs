@@ -521,6 +521,8 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
     // outside the Almide call graph.
     refs.0.extend(ir.functions.iter().filter(|f| crate::native_callbacks::is_root(f.name.as_str()))
         .map(|f| f.name.to_string()));
+    // So is a function a C caller links by its exported symbol.
+    refs.0.extend(ir.functions.iter().filter(|f| crate::native_foreign::is_c_export(f)).map(|f| f.name.to_string()));
     for t in &ir.top_lets { refs.visit_expr(&t.value); }
     defaults(&mut ir.type_decls, |e| refs.visit_expr(e));
     let mut visited = HashSet::new();

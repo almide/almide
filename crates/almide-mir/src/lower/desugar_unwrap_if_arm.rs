@@ -79,3 +79,73 @@ pub fn desugar_if_arm_unwrap(body: &IrExpr) -> Option<IrExpr> {
     new_stmts.extend_from_slice(&stmts[i + 1..]);
     Some(mk(IrExprKind::Block { stmts: new_stmts, expr: tail.clone() }, body.ty.clone()))
 }
+
+/// `let (a, b) = if c then { let h = f(x)!; (h, q) } else (d, p)` — a
+/// destructuring bind of a branch that holds a propagation. Every lift of a
+/// `!` out of a bound branch ([`desugar_if_arm_unwrap`], the let-unwrap and the
+/// tail duplication of a let-bound branch) reads a plain `let v = <branch>`, so
+/// the destructuring spelling reached the lowering with its `!` still inside an
+/// arm and the function was refused. Bind the branch whole and destructure it
+/// as the next statement: `let $t = <branch>; let (a, b) = $t`.
+pub fn desugar_destructure_branch_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        return None;
+    };
+    let (i, pattern, value) = stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
+        IrStmtKind::BindDestructure { pattern, value }
+            if matches!(value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. }) && expr_has_unwrap(value) =>
+        {
+            Some((i, pattern, value))
+        }
+        _ => None,
+    })?;
+    let tmp = VarId(*next_var);
+    *next_var += 1;
+    let whole = IrStmtKind::Bind {
+        var: tmp,
+        ty: value.ty.clone(),
+        value: value.clone(),
+        mutability: almide_ir::Mutability::Let,
+    };
+    let payload = IrExpr { kind: IrExprKind::Var { id: tmp }, ty: value.ty.clone(), span: value.span, def_id: None };
+    let destructure = IrStmtKind::BindDestructure { pattern: pattern.clone(), value: payload };
+    let split = [whole, destructure].map(|kind| IrStmt { kind, span: stmts[i].span });
+    let stmts = [&stmts[..i], &split[..], &stmts[i + 1..]].concat();
+    Some(IrExpr { kind: IrExprKind::Block { stmts, expr: tail.clone() }, ty: body.ty.clone(), span: body.span, def_id: body.def_id })
+}
+
+/// `if c then { …; while g { q = f(q)! }; … } else ()` followed by more of a
+/// `Result[T, String]` block — a branch statement whose arm holds a loop that
+/// propagates. The loop flag form ([`desugar_loop_unwrap`]) reads a loop that is
+/// a statement of a Result-typed block, and its post-loop dispatch is that
+/// block's tail; a loop in a unit arm has neither, so its `!` reached the
+/// lowering and the function was refused. The continuation lift reads this
+/// beside the direct `!`s of the arms: once the rest of the block is in each
+/// arm, the arm is the Result-typed block the loop form needs. Only a `String`
+/// error qualifies — the one error type the loop form carries.
+fn branch_arm_holds_propagating_loop(branch: &IrExpr, result_ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let string_err = matches!(
+        result_ty,
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(a[1], Ty::String)
+    );
+    string_err && arm_spine_holds_unwrap_loop(branch)
+}
+
+/// A loop with a propagating body on the statement spine of a branch's arms:
+/// through arm blocks and the branch statements nested in them, never into a
+/// bound value or a loop body (the lift moves statements, not values).
+fn arm_spine_holds_unwrap_loop(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::ForIn { body, .. } | IrExprKind::While { body, .. } => body.iter().any(stmt_has_unwrap),
+        IrExprKind::Block { stmts, expr } => {
+            stmts.iter().any(|s| matches!(&s.kind, IrStmtKind::Expr { expr } if arm_spine_holds_unwrap_loop(expr)))
+                || expr.as_deref().is_some_and(arm_spine_holds_unwrap_loop)
+        }
+        IrExprKind::If { then, else_, .. } => {
+            arm_spine_holds_unwrap_loop(then) || arm_spine_holds_unwrap_loop(else_)
+        }
+        IrExprKind::Match { arms, .. } => arms.iter().any(|a| arm_spine_holds_unwrap_loop(&a.body)),
+        _ => false,
+    }
+}

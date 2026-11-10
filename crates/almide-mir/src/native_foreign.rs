@@ -2,10 +2,10 @@
 //! and effect class; ownership is the existing borrowed-import contract.
 //! Host code and the author's purity declaration remain trusted.
 use almide_ir::{IrFunction, IrProgram};
-use almide_lang::{ast::ExternAttr, types::{Ty, TypeConstructorId as C, extern_abi::{NativeExtern, native_extern_kind, c_param_abi, c_return_abi, CConv}}};
+use almide_lang::{ast::ExternAttr, types::{Ty, TypeConstructorId as C, extern_abi::{NativeExtern, native_extern_kind, c_param_abi, c_return_abi, c_export_param_abi, c_export_return_abi, CAbi, CConv}}};
 use crate::{Capability, ImportTarget, MirFunction, Op, ValueId};
 use crate::lower::LowerError;
-use crate::render_native::{var, wall, NativeSigs, NTy, owned_nty};
+use crate::render_native::{var, wall, NativeSigKind, NativeSigs, NTy, owned_nty};
 use std::{cell::RefCell, collections::BTreeMap, fmt::Write as _};
 
 thread_local! {
@@ -244,6 +244,7 @@ impl ForeignArgs {
 
 include!("native_foreign_values.rs");
 include!("native_foreign_callback.rs");
+include!("native_foreign_exports.rs");
 
 /// A foreign callback can mention a runtime value handle that the native
 /// body's own representation does not use (Bytes is a Vec there). Carry

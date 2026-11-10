@@ -392,7 +392,12 @@ fn lower_function_all_impl(
     // #1865: a `!`-consumed `fan.map` whose inline callback propagates is refused
     // BEFORE any desugar touches the body — the unwrap ladder would otherwise
     // wall the same fn first, spanless, under a reason naming the wrong construct.
-    wall_fan_map_propagating_callbacks(&func.body)?;
+    // Not on the native render: there the unwrap ladder's hoisted `match` over
+    // the call lowers, the callback keeps its own Result channel, and the
+    // builtin's sequential body runs every element (C-004).
+    if !crate::lower::owned_tco_slots() {
+        wall_fan_map_propagating_callbacks(&func.body)?;
+    }
     let mut ctx = new_lower_ctx(func, globals, global_inits, record_layouts, variant_layouts);
     let params = ctx.bind_params(&func.params)?;
     // TCO: a tail-self-recursive heap-result function is rewritten to a scalar loop + post-loop
@@ -438,7 +443,7 @@ fn lower_function_all_impl(
     crate::lower::dump_desugared_ir(func.name.as_str(), func_body, variant_layouts, record_layouts);
     let pre_tco = desugar_heap_branches(func_body, variant_layouts);
     let body_ref: &IrExpr = pre_tco.as_ref().unwrap_or(func_body);
-    let tco_body = try_tco_rewrite(&ctx.fn_name, &func.params, body_ref);
+    let tco_body = try_tco_rewrite(&ctx.fn_name, &func.params, body_ref, &|t| ctx.aggregate_field_tys(t));
     let final_body = tco_body.as_ref().unwrap_or(body_ref);
     // SHARED-CELL pre-scan (closures Rung 6, cells.rs): over the FINAL lowered tree,
     // so bind/read/write/capture all classify the same vars as cells. A pure scan —

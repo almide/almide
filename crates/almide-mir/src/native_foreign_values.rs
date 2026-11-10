@@ -7,7 +7,7 @@ fn convert(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: usize) -> Result<S
 // Callback signatures retain Almide's value types (including shared strings
 // and Bytes/Matrix handles); only a direct foreign value boundary translates
 // structural strings into std::String.
-fn convert_value(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: usize, host_uses_almide_types: bool) -> Result<String, LowerError> {
+pub(crate) fn convert_value(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: usize, host_uses_almide_types: bool) -> Result<String, LowerError> {
     let kind = owned_nty(kind);
     if let Some(host) = scalar_host_type(ty) {
         return Ok(match (ty, kind, to_host) {
@@ -94,6 +94,7 @@ fn convert_value(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: usize, host_
                 else if let NTy::Rec(i) = kind { format!("{} {{ {} }}", crate::render_native_rec::struct_name(i), parts.join(", ")) }
                 else { format!("vec![{}]", parts.join(", ")) })
         }
+        Ty::Named(..) | Ty::Record { .. } if host_uses_almide_types =>crate::native_callback_types::convert(e, ty, kind, to_host),
         _ => Err(wall(format!("native: no foreign value adapter for {ty:?} / {kind:?}"))),
     }
 }

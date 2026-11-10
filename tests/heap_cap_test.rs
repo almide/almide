@@ -174,16 +174,17 @@ fn map_literal_intermediates_do_not_leak_under_the_cap() {
 /// `list.len` joined the native floor (#1869), then a constant top-level
 /// let, until rung 1 admitted those, and then a String eager let, until heap
 /// slots got native cells (#4006), and then that record written back from two
-/// reads of itself, until the v1 render served it. What walls now is the
-/// `@export(c)` fn: its C wrapper is outside the native rungs (#4447) — so
-/// `main` renders through v3 — where,
+/// reads of itself, until the v1 render served it, and then a scalar
+/// `@export(c)` fn, until the native rungs adapted the scalar C rows (#4447).
+/// What walls now is an `@export(c)` fn over a `Handle`, a row outside the
+/// ones the native rungs adapt — so `main` renders through v3 — where,
 /// before the fix, `big` was materialized as a 1 GiB `Vec<i64>` (the nightly
 /// fuzzer's seed 539646620663 index 1415 carried 16 GiB: 33.6 s native vs
 /// 0.7 s wasm, byte-identical). Under a 4 MiB ceiling that materialization is
 /// the deterministic OOM; the head-only deferral (`RangeCountingVarsPass`)
 /// is what makes this a green run.
-const WALLED_RANGE_PROBE: &str = r#"@export(c, "walled_range_probe_add")
-fn probe_add(a: Int, b: Int) -> Int = a + b
+const WALLED_RANGE_PROBE: &str = r#"@export(c, "walled_range_probe_keep")
+fn probe_keep(h: Handle) -> Handle = h
 
 type Tag = { s: String, n: Int }
 
@@ -232,13 +233,14 @@ fn walled_head_only_range_allocates_nothing_natively() {
     );
     let build_note = String::from_utf8_lossy(&build.stderr);
     // The probe is only a witness while it actually walls v1: if the native
-    // render ever renders an `@export(c)` wrapper, this program stops
+    // render ever adapts a `Handle` across `@export(c)`, this program stops
     // exercising the v3 fallback and the gate must move to a shape that
-    // still does (it moved five times already: when `list.range` /
+    // still does (it moved six times already: when `list.range` /
     // `list.len` joined the floor — #1869 — when constant top-level lets
     // did, when scalar eager lets got native storage slots, when heap slots
-    // got native cells — #4006 — and when a heap slot written back from two
-    // reads of itself was served).
+    // got native cells — #4006 — when a heap slot written back from two
+    // reads of itself was served, and when the scalar `@export(c)` rows got
+    // their native adapter — #4447).
     assert!(
         build_note.contains("verified native render walled"),
         "the walled-range probe no longer walls the v1 native render — pick a shape that does: {build_note}"

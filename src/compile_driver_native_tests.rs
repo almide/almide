@@ -223,9 +223,23 @@ fn checked_native_input_keeps_an_unreferenced_module_c_export_visible() {
     let (mut pending, _, _) = try_compile_pending(dir.path().join("src/main.almd").to_str().unwrap(),
         false, &codegen::CodegenOptions::default()).expect("valid module export");
     let (ir, checker) = pending.native_input.take().unwrap();
+    let (rust, _) = almide_mir::pipeline::try_render_rust_checked_scoped_certified(&pending.source, ir, checker, None)
+        .expect("a scalar module export renders with its C adapter");
+    assert!(rust.contains("#[export_name = \"answer\"]\npub extern \"C\" fn "), "the v1 render dropped a required C symbol:\n{rust}");
+}
+
+#[test]
+fn checked_native_input_walls_an_unreferenced_module_c_export_outside_the_scalar_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "almide.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n");
+    write(dir.path(), "src/helper.almd", "@export(c, \"keep\")\nfn keep(h: Handle) -> Handle = h\nfn used() -> Int = 7\n");
+    write(dir.path(), "src/main.almd", "import self.helper\neffect fn main() -> Unit = println(\"${helper.used()}\")\n");
+    let (mut pending, _, _) = try_compile_pending(dir.path().join("src/main.almd").to_str().unwrap(),
+        false, &codegen::CodegenOptions::default()).expect("valid module export");
+    let (ir, checker) = pending.native_input.take().unwrap();
     let error = almide_mir::pipeline::try_render_rust_checked_scoped_certified(&pending.source, ir, checker, None)
-        .expect_err("the current v1 renderer must not silently drop a required C symbol");
-    assert!(error.to_string().contains("is @export(c)"), "{error}");
+        .expect_err("the v1 renderer must not silently drop a C symbol it has no adapter for");
+    assert!(error.to_string().contains("parameter `h: Handle` is outside the scalar C rows"), "{error}");
 }
 
 /// Export the actual CLI frontend's witnesses for the independent verifier.

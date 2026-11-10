@@ -264,6 +264,27 @@ fn loop_uw_unwrap_stmt(s: &IrStmt, err_ty: &Ty) -> Option<(almide_ir::IrPattern,
     }
 }
 
+/// `let (a, b) = e!` as `let $t = e!; let (a, b) = $t` (a fresh `$t` from `nv`):
+/// the propagating bind [`loop_uw_unwrap_stmt`] reads, then the destructure of
+/// the payload it bound. `None` for any other statement.
+fn loop_uw_split_destructure(s: &IrStmt, nv: &mut u32) -> Option<[IrStmt; 2]> {
+    let IrStmtKind::BindDestructure { pattern, value } = &s.kind else { return None };
+    if !matches!(value.kind, IrExprKind::Unwrap { .. }) {
+        return None;
+    }
+    let tmp = VarId(*nv);
+    *nv += 1;
+    let bind = IrStmtKind::Bind {
+        var: tmp,
+        mutability: almide_ir::Mutability::Let,
+        ty: value.ty.clone(),
+        value: value.clone(),
+    };
+    let payload = loop_uw_node(IrExprKind::Var { id: tmp }, value.ty.clone());
+    let destructure = IrStmtKind::BindDestructure { pattern: pattern.clone(), value: payload };
+    Some([bind, destructure].map(|kind| IrStmt { kind, span: s.span }))
+}
+
 /// Does `e` contain a VALUE early-exit — an `If` whose else-arm is typed at the enclosing
 /// fn's Result return (`guard c else ok(n)`'s loop-body desugar form)? Only meaningful when
 /// the value-exit pair is enabled; drives `loop_uw_rewrite`'s pass-through fast path.
@@ -413,6 +434,11 @@ fn loop_uw_rewrite_block(
         UwStep::Decline => return None,
         UwStep::NotHere => {}
     }
+    match loop_uw_branch_stmt_then_rest(stmts, tail, env, nv) {
+        UwStep::Rewritten(out) => return Some(out),
+        UwStep::Decline => return None,
+        UwStep::NotHere => {}
+    }
     // No direct `!` stmt: the `!` is nested in a TERMINAL `if`/`match` (the tail, or the
     // last stmt) — recurse into it. Everything else must be `!`-free.
     if let Some(t) = tail {
@@ -437,6 +463,46 @@ fn loop_uw_rewrite_block(
         return Some(loop_uw_node(IrExprKind::Block { stmts: ns, expr: None }, Ty::Unit));
     }
     None
+}
+
+/// The first `!`-bearing statement is a BRANCH statement (`Expr(if/match)`) that
+/// more of the block follows: rewrite the branch where it stands, then run the
+/// rest of the block only while no exit has fired —
+/// `{ <before>; <branch'>; if <not-exited> then { <rest'> } else () }`.
+/// The flag test is the branch's continuation: an arm that set the error flag
+/// skips everything after it in this iteration, exactly as the `!` would have.
+/// A branch that is the block's last element keeps the terminal-position rule.
+fn loop_uw_branch_stmt_then_rest(
+    stmts: &[IrStmt],
+    tail: &Option<Box<IrExpr>>,
+    env: UwEnv<'_>,
+    nv: &mut u32,
+) -> UwStep {
+    let Some(i) = stmts.iter().position(stmt_has_unwrap) else { return UwStep::NotHere };
+    if i + 1 == stmts.len() && tail.is_none() {
+        return UwStep::NotHere;
+    }
+    let IrStmtKind::Expr { expr } = &stmts[i].kind else { return UwStep::NotHere };
+    let Some(branch) = loop_uw_rewrite(expr, env, nv) else { return UwStep::Decline };
+    let rest = loop_uw_node(
+        IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
+        Ty::Unit,
+    );
+    let Some(rest2) = loop_uw_rewrite(&rest, env, nv) else { return UwStep::Decline };
+    let guarded = loop_uw_node(
+        IrExprKind::If {
+            cond: Box::new(not_exited_cond(env.ef, env.vx.map(|(vf, _, _)| vf))),
+            then: Box::new(rest2),
+            else_: Box::new(loop_uw_node(IrExprKind::Unit, Ty::Unit)),
+        },
+        Ty::Unit,
+    );
+    let mut ns = stmts[..i].to_vec();
+    ns.push(IrStmt { kind: IrStmtKind::Expr { expr: branch }, span: stmts[i].span.clone() });
+    UwStep::Rewritten(loop_uw_node(
+        IrExprKind::Block { stmts: ns, expr: Some(Box::new(guarded)) },
+        Ty::Unit,
+    ))
 }
 
 /// The `{ __vres = <payload>; __vf = true }` VALUE-exit delivery block.
@@ -518,6 +584,12 @@ fn loop_uw_direct_unwrap(
     nv: &mut u32,
 ) -> UwStep {
     for (i, s) in stmts.iter().enumerate() {
+        // A propagating destructure: bind the payload whole, destructure it
+        // as the next statement, and read the block again.
+        if let Some(split) = loop_uw_split_destructure(s, nv) {
+            let stmts = [&stmts[..i], &split[..], &stmts[i + 1..]].concat();
+            return loop_uw_direct_unwrap(&stmts, tail, env, nv);
+        }
         let Some((ok_pat, inner)) = loop_uw_unwrap_stmt(s, env.err_ty) else { continue };
         if stmts[..i].iter().any(stmt_has_unwrap) {
             return UwStep::Decline;
