@@ -44,7 +44,10 @@
 //!   held as the lent element (`Option<&A>`,
 //!   `render_native_borrow_read::borrowed_options`) yields the payload read
 //!   it makes under the carrier's own tag test: that read is a reference
-//!   into a list param the function borrows, alive for the whole function.
+//!   into a list param the function borrows, alive for the whole function;
+//! * the other arm of a join whose first arm is one of the above may yield a
+//!   string literal it builds itself: a literal is immortal text, so the join
+//!   holds it as a `&'static str` and there is no source to write.
 
 use crate::lower::LowerError;
 use crate::mir_ops::{defined_value, op_values};
@@ -146,10 +149,13 @@ impl Facts {
         let Op::Else { val: Some(a) } = func.ops[else_at] else { return None };
         let Op::EndIf { val: Some(b) } = func.ops[end_at] else { return None };
         let src_a = self.selected_source(func, a, i, (i, else_at)).or_else(|| self.lent_source(func, a, i, else_at))?;
-        let src_b = self.selected_source(func, b, i, (else_at, end_at))?;
+        let src_b = self.selected_source(func, b, i, (else_at, end_at));
+        if src_b.is_none() {
+            self.literal_arm(func, b, (else_at, end_at))?;
+        }
         let last = self.last_read_of_join(func, d, i, end_at)?;
         let written = |s: ValueId| func.ops[i..=last].iter().any(|op| writes(op, s) || self.stores_into(op, s));
-        if written(src_a) || written(src_b) {
+        if written(src_a) || src_b.is_some_and(written) {
             return None;
         }
         Some([a, b])
@@ -171,6 +177,18 @@ impl Facts {
             k == at || k == hi || matches!(func.ops[k], Op::Consume { v } if v == y)
         });
         only_consumed.then_some(src)
+    }
+
+    /// Condition 1 for an arm that yields a string literal: `y` is the literal
+    /// built inside `(lo, hi)`, touched only by its def, its `Consume` and the
+    /// yield at `hi`. A literal is immortal text with no source to write.
+    fn literal_arm(&self, func: &MirFunction, y: ValueId, (lo, hi): (usize, usize)) -> Option<()> {
+        let at = *self.def_at.get(&y)?;
+        let only_consumed = self.touches(y).iter().all(|&k| {
+            k == at || k == hi || matches!(func.ops[k], Op::Consume { v } if v == y)
+        });
+        let literal = matches!(func.ops[at], Op::Alloc { init: crate::Init::Str(_), .. });
+        (literal && lo < at && at < hi && only_consumed && func.ret != Some(y)).then_some(())
     }
 
     /// Condition 1 for the present arm of an element Option's `?? fallback`
@@ -340,6 +358,14 @@ pub(crate) fn render_arm(
     out.push_str(&"    ".repeat(indent));
     let _ = writeln!(out, "let {}: {ty_name} = {amp}{};", var(*dst), var(*src));
     Ok(())
+}
+
+/// The native spelling of an arm's string literal that feeds a borrow join:
+/// the immortal text itself.
+pub(crate) fn render_literal_arm(dst: &ValueId, text: &str, tys: &mut BTreeMap<ValueId, NTy>, out: &mut String, indent: usize) {
+    tys.insert(*dst, NTy::StrRef);
+    out.push_str(&"    ".repeat(indent));
+    let _ = writeln!(out, "let {}: &str = \"{}\";", var(*dst), almide_base::rust_lit::escape_rust_str(text));
 }
 
 #[cfg(test)]
