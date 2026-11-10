@@ -597,7 +597,11 @@ def lit(s):
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(checker)), "lib"))
 import kernel_parts
 LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
-PART = 4000000  # literal bytes per kernel file
+# literal bytes per kernel file. Measured (probe 42722356352, routine
+# certificates): coqc's peak grows ~3.4 KiB per literal byte (0.25 MB: 1.2
+# GiB; 1 MB: 3.2 GiB; 4 MB: 12.7 GiB) at ~95 s per MB, so a part stays near
+# 2.5 GiB and four run side by side on a 16 GiB runner.
+PART = 750000
 HEADER = "From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes HelperSig BoundsCert InitCert FieldCert RoutineBoundsCert RoutineProcsCert RoutineLinCert.\n" + "From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n"
 goals = []
 for prop, ws in accepts.items():
@@ -680,7 +684,7 @@ KBASE="${KGEN%.v}"
 kernel_jobs() {
   local n mem per
   n="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)"
-  per="${KERNEL_PART_MB:-3000}"
+  per="${KERNEL_PART_MB:-3500}"
   mem="$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || true)"
   if [ -n "$mem" ] && [ "$((mem / per))" -lt "$n" ]; then n="$((mem / per))"; fi
   [ "$n" -ge 1 ] || n=1
