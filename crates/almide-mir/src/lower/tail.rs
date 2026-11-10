@@ -635,6 +635,16 @@ impl LowerCtx {
     /// Unwrap arm body, verbatim, re-narrowed via `let-else`.
     fn lower_tail_heap_unwrap(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
         let IrExprKind::Unwrap { expr } = &tail.kind else { unreachable!() };
+        // Where a `!` dies (a test block's lambda, `(x) => f(x)!` over a heap payload)
+        // the fn's value is the PAYLOAD: handing back the callee's Result as it is
+        // would put a Result where the caller reads the payload.
+        if crate::lower::owned_tco_slots() && self.bang_dies {
+            return Err(LowerError::at(
+                tail.span,
+                "tail `!` over a heap payload in a fn whose `!` ends the process: its value \
+                 is the payload, and the Result cannot be handed back in its place",
+            ));
+        }
         if self.unwrap_tail_err_mismatch(expr) {
             return Err(LowerError::Unsupported(
                 "tail `!` propagates a Result whose err type differs from the fn's \

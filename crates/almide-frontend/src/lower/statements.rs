@@ -162,6 +162,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
             unreachable!("guard let is desugared by the enclosing block, not lower_stmt")
         }
         ast::Stmt::Expr { expr, .. } => {
+            ctx.stmt_pos = true;
             let ir_expr = lower_expr(ctx, expr);
             IrStmtKind::Expr { expr: ir_expr }
         }

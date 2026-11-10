@@ -73,6 +73,13 @@ pub struct LowerCtx<'a> {
     /// the ALS-T18 abort form OUTSIDE tests only — test blocks keep the
     /// harness assertion forms (cargo / the wasm test runner report them).
     pub in_test: bool,
+    /// The expression about to be lowered is a STATEMENT: its value is dropped
+    /// and the enclosing fn carries on after it. `lower_stmt` sets it for an
+    /// expression statement, `lower_expr` consumes it, and an `if` / `match` /
+    /// `if let` / block hands it on to its branches — so a `guard let` in a
+    /// branch arm knows its else cannot leave the fn as the arm's value
+    /// (#4655, `lower_block_body_in`).
+    stmt_pos: bool,
     /// Vars whose binding carried an EXPLICIT `Result[..]` annotation
     /// (`let r: Result[Int, String] = step()`). auto_try keeps these as
     /// Result instead of inserting `?`. Only the annotation distinguishes
@@ -118,6 +125,7 @@ impl<'a> LowerCtx<'a> {
             current_module: None,
             test_file: false,
             in_test: false,
+            stmt_pos: false,
             annotated_result_vars: std::collections::HashSet::new(),
             synthesized_fns: Vec::new(),
             declared_repr_pending: Vec::new(),

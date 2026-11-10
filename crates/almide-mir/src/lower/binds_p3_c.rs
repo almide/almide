@@ -22,10 +22,13 @@ impl LowerCtx {
         }
         if crate::lower::owned_tco_slots()
             && matches!(&arg.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                if a.len() == 1 && self.aggregate_field_tys(&a[0]).is_some())
+                if a.len() == 1
+                    && (self.aggregate_field_tys(&a[0]).is_some() || self.variant_layouts.field_is_variant(&a[0])))
         {
             // A list of tuples or records (`Record(String, List[(String, T)])`,
-            // `Match(T, List[Arm])`): on the certified native render the
+            // `Match(T, List[Arm])`), or of a variant the first half's drop
+            // classes do not take (`Seq(List[Node])` beside a tuple-list
+            // constructor): on the certified native render the
             // variant is a typed value that releases its fields recursively,
             // so the list is acquired like any owned field and freed by the
             // type that holds it.

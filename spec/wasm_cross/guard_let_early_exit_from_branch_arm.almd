@@ -1,0 +1,72 @@
+// @contract: C-266
+// A failing `guard let` leaves the FUNCTION with its else, whatever the
+// else's shape and wherever the guard stands (#4653, #4655). At the tail of
+// a Unit `effect fn` an `err(e)` — bare, or ending a block that logs first —
+// reaches the caller instead of being dropped; inside a branch arm that ends
+// a Unit fn the code after the guard does not run. The values built before
+// the failing guard and the bound payload are heap values, so the early exit
+// also has to release them: the run ends with no block live on wasm.
+//
+// The same exits from a branch arm with code after the branch, from a match
+// arm and from a loop body are held on wasm, the standard native codegen and
+// the interpreter by tests/guard_let_else_leaves_fn_test.rs.
+fn parse_name(s: String) -> Result[String, String] =
+  if string.len(s) > 0 then ok("<" + s + ">") else err("empty name")
+
+fn pick(n: Int) -> Int? = if n > 0 then some(n) else none
+
+effect fn unit_tail(s: String) -> Unit = {
+  let pre = "checking [" + s + "]"
+  println(pre)
+  guard let name = parse_name(s) else err("unit effect: no name")
+  println("got " + name)
+}
+
+effect fn unit_tail_block(s: String) -> Unit = {
+  let pre = "tail [" + s + "]"
+  guard let name = parse_name(s) else {
+    println(pre + " leaving")
+    err("unit effect block: no name")
+  }
+  println(pre + " got " + name)
+}
+
+effect fn unit_last_arm_block(c: Bool, s: String) -> Unit = {
+  let pre = "arm [" + s + "]"
+  println(pre)
+  if c then {
+    guard let name = parse_name(s) else {
+      println(pre + " leaving")
+      err("unit effect arm block: no name")
+    }
+    println(pre + " got " + name)
+  } else ()
+}
+
+fn unit_else_last_arm(c: Bool, n: Int) -> Unit = {
+  let label = "u" + int.to_string(n)
+  println(label)
+  if c then {
+    guard let v = pick(n) else { println(label + " nothing") }
+    println(label + " has " + int.to_string(v))
+  } else ()
+}
+
+fn show_unit(r: Result[Unit, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err " + e,
+}
+
+effect fn main() -> Unit = {
+  println(show_unit(unit_tail("bo")))
+  println(show_unit(unit_tail("")))
+  println(show_unit(unit_tail_block("mo")))
+  println(show_unit(unit_tail_block("")))
+  println(show_unit(unit_last_arm_block(false, "")))
+  println(show_unit(unit_last_arm_block(true, "ny")))
+  println(show_unit(unit_last_arm_block(true, "")))
+  unit_else_last_arm(false, 0)
+  unit_else_last_arm(true, 6)
+  unit_else_last_arm(true, 0)
+  println("end")
+}

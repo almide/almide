@@ -91,6 +91,9 @@ fn new_lower_ctx(
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _) => None,
             _ => Some(Ty::String),
         },
+        bang_dies: (func.name.as_str() == "main" && matches!(&func.ret_ty, Ty::Unit))
+            || crate::native_test_harness::is_entry(func.name.as_str())
+            || crate::native_test_harness::is_abort_site(func.name.as_str()),
         ..Default::default()
     }
 }
@@ -455,7 +458,9 @@ fn lower_function_all_impl(
     // sound only when the bind doing so is that variable's LAST reader. A pure
     // scan; the counted tree is untouched.
     ctx.var_read_counts = collect_var_read_counts(final_body);
-    let ret = ctx.lower_body_into(final_body)?;
+    let ret = ctx.lower_body_into(final_body);
+    ctx.refused_bang()?;
+    let ret = ret?;
     // The function's EFFECT SIGNATURE → its declared capability bound. The v1 model
     // has one capability (Stdout); an `effect fn` declares it may reach the host, so
     // it admits the only modeled cap. A pure `fn` declares ∅ — so if it reached

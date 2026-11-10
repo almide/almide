@@ -124,6 +124,80 @@ effect fn main() -> Unit = {
 
 const CONTROL_STDOUT: &str = "[x, [y]] 3\nneg\nbig\n";
 
+/// A constructor holding a list of its own variant where another constructor
+/// of the type holds a list of pairs (a config tree: scalar, sequence, table):
+/// built from a call result in a tuple arm, shared between two values, built
+/// before and after the list grows, nested, and in a hot loop.
+const VARIANT_LIST: &str = r##"type Y =
+  | Sc(String)
+  | Sq(List[Y])
+  | Tb(List[(String, Y)])
+
+fn inl(r: String) -> List[Y] = [Sc(r), Sc(r + "!")]
+
+fn inlt(r: String) -> List[(String, Y)] = [(r, Sc(r))]
+
+fn value_of(i: Int, rest: String) -> (Y, Int) =
+  if rest == "" then (Sc("empty"), i)
+  else if string.starts_with(rest, "[") then (Sq(inl(rest)), i + 1)
+  else if string.starts_with(rest, "{") then (Tb(inlt(rest)), i + 1)
+  else (Sc(string.trim(rest)), i + 1)
+
+fn show(y: Y) -> String =
+  match y {
+    Sc(s) => "sc:" + s,
+    Sq(xs) => "sq[" + list.join(list.map(xs, (x) => show(x)), ",") + "]",
+    Tb(es) => "tb{" + list.join(list.map(es, (e) => e.0 + "=" + show(e.1)), ",") + "}",
+  }
+
+fn depth(y: Y) -> Int =
+  match y {
+    Sc(_) => 0,
+    Sq(xs) => 1 + list.fold(xs, 0, (m, x) => int.max(m, depth(x))),
+    Tb(es) => 1 + list.fold(es, 0, (m, e) => int.max(m, depth(e.1))),
+  }
+
+fn wrap(n: Int, y: Y) -> Y =
+  if n == 0 then y else wrap(n - 1, Sq([y, Sc(int.to_string(n))]))
+
+fn shared(r: String) -> (Y, Y) = {
+  let xs = inl(r)
+  let a = Sq(xs)
+  let b = Sq(xs + [Sc("more")])
+  (a, b)
+}
+
+fn grow(r: String) -> Y = {
+  var xs = inl(r)
+  let before = Sq(xs)
+  list.push(xs, Sc("pushed"))
+  let after = Sq(xs)
+  Sq([before, after])
+}
+
+fn main() -> Unit = {
+  for r in ["", "[a", "{b", " c "] {
+    let (y, j) = value_of(3, r)
+    println(show(y) + " " + int.to_string(j))
+  }
+  let (a, b) = shared("s")
+  println(show(a) + " | " + show(b))
+  println(show(grow("g")))
+  let w = wrap(4, Sq(inl("w")))
+  println(show(w) + " depth " + int.to_string(depth(w)))
+  var total = 0
+  for i in 0..<200000 {
+    let (y, j) = value_of(i, if i % 3 == 0 then "[x" else if i % 3 == 1 then "{y" else "z")
+    total = total + depth(y) + j % 7
+    let s = Sq(inl("k"))
+    total = total + depth(Sq([s, y]))
+  }
+  println(int.to_string(total))
+}
+"##;
+
+const VARIANT_LIST_STDOUT: &str = "sc:empty 3\nsq[sc:[a,sc:[a!] 4\ntb{{b=sc:{b} 4\nsc:c 4\nsq[sc:s,sc:s!] | sq[sc:s,sc:s!,sc:more]\nsq[sq[sc:g,sc:g!],sq[sc:g,sc:g!,sc:pushed]]\nsq[sq[sq[sq[sq[sc:w,sc:w!],sc:4],sc:3],sc:2],sc:1] depth 5\n1133331\n";
+
 fn runs_unwalled(name: &str, src: &str, stdout: &str) {
     let dir = tempfile::tempdir().expect("scratch");
     let file = dir.path().join(format!("{name}.almd"));
@@ -147,4 +221,9 @@ fn a_constructor_holding_a_list_of_pairs_or_records_builds_in_a_branch_arm() {
 #[test]
 fn a_constructor_holding_a_list_of_itself_runs_as_before() {
     runs_unwalled("ctor_aggregate_list_field_control", CONTROL, CONTROL_STDOUT);
+}
+
+#[test]
+fn a_constructor_holding_a_list_of_its_variant_beside_a_pair_list_builds_in_a_tuple_arm() {
+    runs_unwalled("ctor_variant_list_field", VARIANT_LIST, VARIANT_LIST_STDOUT);
 }

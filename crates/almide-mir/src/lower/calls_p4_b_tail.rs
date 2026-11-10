@@ -6,6 +6,50 @@
 // level is the one splice Rust allows (an impl-item position rejects it).
 
 impl LowerCtx {
+    /// The refusal for a `!` no rewrite gave a continuation, in a fn whose err belongs
+    /// to a caller (`bang_dies` off): on the native render the two paths left for it
+    /// would end the process or drop the err. `None` = the path may run (the other
+    /// render, or a fn where the err ends the process anyway).
+    fn unrewritten_bang_wall(&mut self, position: &'static str, at: &IrExpr) -> Option<LowerError> {
+        if !crate::lower::owned_tco_slots() || self.bang_dies {
+            return None;
+        }
+        self.bang_refused = Some((position, at.span));
+        Some(Self::bang_wall(position, at.span))
+    }
+
+    fn bang_wall(position: &str, span: Option<almide_ir::Span>) -> LowerError {
+        LowerError::at(span, format!(
+            "a `!` in {position} position that no rewrite gave a continuation, in a fn \
+             that returns its err to a caller (lowering it here would lose the err)"
+        ))
+    }
+
+    /// The fn-level verdict of [`Self::unrewritten_bang_wall`], read once the body is lowered.
+    pub(crate) fn refused_bang(&self) -> Result<(), LowerError> {
+        self.bang_refused.map_or(Ok(()), |(position, span)| Err(Self::bang_wall(position, span)))
+    }
+
+    /// A discarded `inner!` whose callee returns a real carrier, in statement position.
+    /// Where an err ends the process it is the die match the statement rewrite builds
+    /// for the void `main` (`match inner { err(e) => <die>, ok(_) => () }`); anywhere
+    /// else it is refused.
+    fn lower_discarded_unwrap(&mut self, inner: &IrExpr) -> Result<(), LowerError> {
+        if let Some(wall) = self.unrewritten_bang_wall("statement", inner) {
+            return Err(wall);
+        }
+        let unit = mk_at(inner, IrExprKind::Block { stmts: Vec::new(), expr: None }, Ty::Unit);
+        let ok = almide_ir::IrPattern::Ok { inner: Box::new(almide_ir::IrPattern::Wildcard) };
+        let mut next_var = crate::lower::desugar_var_seed();
+        match build_unwrap_match(inner.clone(), ok, unit.clone(), &unit, &mut next_var, true) {
+            Some(dies) => self.lower_stmt_expr(&dies),
+            None => Err(LowerError::at(
+                inner.span,
+                "a discarded `!` whose err has no text form cannot end the process with its message",
+            )),
+        }
+    }
+
     /// L9's total callback has no propagation channel. Reuse the ordinary
     /// Option match with a real abort on its none arm; the some arm owns
     /// the same scalar extraction and carrier release as `??`.

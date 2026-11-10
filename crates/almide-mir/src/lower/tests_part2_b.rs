@@ -520,6 +520,40 @@
     }
 
     #[test]
+    fn a_value_else_in_a_statement_arm_stays_a_guard() {
+        // #4655: `if c then { guard g else -1; … } else (); <more>` — the arm is
+        // a statement, so `if g then { … } else -1` there would drop the `-1`
+        // and run on. The desugar must leave the Guard (the statement lowering
+        // walls it by name); the same guard in the arm of the LAST statement is
+        // on the fn's tail chain and is restructured.
+        let unit = || ir_expr(IrExprKind::Unit, Ty::Unit);
+        let arm = || {
+            body(vec![
+                stmt(IrStmtKind::Guard {
+                    cond: ir_expr(IrExprKind::Var { id: VarId(7) }, Ty::Bool),
+                    else_: ir_expr(IrExprKind::LitInt { value: -1 }, Ty::Int),
+                }),
+                stmt(IrStmtKind::Expr { expr: unit() }),
+            ])
+        };
+        let branch = || {
+            stmt(IrStmtKind::Expr {
+                expr: ir_expr(
+                    IrExprKind::If {
+                        cond: Box::new(ir_expr(IrExprKind::LitBool { value: true }, Ty::Bool)),
+                        then: Box::new(arm()),
+                        else_: Box::new(unit()),
+                    },
+                    Ty::Unit,
+                ),
+            })
+        };
+        let followed = body(vec![branch(), stmt(IrStmtKind::Expr { expr: unit() })]);
+        assert!(crate::lower::desugar_guard(&followed).is_none(), "a statement arm's value else must stay a Guard");
+        assert!(crate::lower::desugar_guard(&body(vec![branch()])).is_some(), "the last statement's arm is the fn's tail");
+    }
+
+    #[test]
     fn nested_block_guard_continue_keeps_the_continue() {
         // #4386: `if c then { guard g else continue; … } else ()` inside a loop. The
         // nested block is not the loop body, so `continue` → `()` would fall through

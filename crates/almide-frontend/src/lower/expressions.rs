@@ -32,11 +32,14 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 fn lower_expr_dispatch(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
     let ty = ctx.expr_ty(expr);
     let span = expr.span;
+    // Consumed here, so it never reaches an operand: only the branches of a
+    // control-flow form inherit the statement position.
+    let stmt_pos = std::mem::take(&mut ctx.stmt_pos);
 
     if let Some(e) = lower_expr_literal(ctx, expr, ty.clone(), span) { return e; }
     if let Some(e) = lower_expr_collection(ctx, expr, ty.clone(), span) { return e; }
     if let Some(e) = lower_expr_operator(ctx, expr, ty.clone(), span) { return e; }
-    if let Some(e) = lower_expr_control(ctx, expr, ty.clone(), span) { return e; }
+    if let Some(e) = lower_expr_control(ctx, expr, ty.clone(), span, stmt_pos) { return e; }
     if let Some(e) = lower_expr_call(ctx, expr, ty.clone(), span) { return e; }
     if let Some(e) = lower_expr_lambda(ctx, expr, ty.clone(), span) { return e; }
     if let Some(e) = lower_expr_access(ctx, expr, ty.clone(), span) { return e; }
@@ -139,20 +142,21 @@ fn lower_expr_operator(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Optio
 /// reads types from the checker's `TypeMap` and never re-infers, so a split here
 /// cannot change inference — but a DROPPED arm would silently lower an expression
 /// to nothing, which is why the router aborts loudly instead of falling through.
-fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> Option<IrExpr> {
+fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>, stmt_pos: bool) -> Option<IrExpr> {
     Some(match &expr.kind {
         // ── Control flow ──
         ast::ExprKind::If { cond, then, else_, .. } => {
             let c = lower_expr(ctx, cond);
-            let t = lower_expr(ctx, then);
-            let e = lower_expr(ctx, else_);
+            let t = lower_branch(ctx, then, stmt_pos);
+            let e = lower_branch(ctx, else_, stmt_pos);
             ctx.mk(IrExprKind::If { cond: Box::new(c), then: Box::new(t), else_: Box::new(e) }, ty, span)
         }
-        ast::ExprKind::Match { subject: _, arms: _, .. } => lower_expr_match_arm(ctx, expr, ty, span),
-        ast::ExprKind::IfLet { name: _, scrutinee: _, then: _, else_: _ } => lower_expr_if_let(ctx, expr, ty, span),
+        ast::ExprKind::Match { subject: _, arms: _, .. } => lower_expr_match_arm(ctx, expr, ty, span, stmt_pos),
+        ast::ExprKind::IfLet { name: _, scrutinee: _, then: _, else_: _ } => lower_expr_if_let(ctx, expr, ty, span, stmt_pos),
         ast::ExprKind::Block { stmts, expr, .. } => {
             ctx.push_scope();
-            let body = lower_block_body(ctx, stmts, expr.as_deref(), &ty, span);
+            let pos = if stmt_pos { BlockPos::Stmt } else { BlockPos::Value };
+            let body = lower_block_body_in(ctx, stmts, expr.as_deref(), &ty, span, pos);
             ctx.pop_scope();
             body
         }

@@ -3558,6 +3558,7 @@ evidence  = [
   { path = "spec/wasm_cross/guard_let_statement.almd", class = "fixture" },
   { path = "spec/wasm_cross/guard_let_forms.almd", class = "fixture" },
   { path = "spec/wasm_cross/guard_let_forms_typed_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_let_early_exit_from_branch_arm.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-267"
