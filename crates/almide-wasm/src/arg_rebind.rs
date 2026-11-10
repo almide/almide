@@ -28,7 +28,8 @@
 
 use almide_base::intern::sym;
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
-use almide_ir::{CallTarget, IrExpr, IrExprKind, IrProgram, IrStmt, IrStmtKind, IrStringPart, Mutability, VarId, VarTable};
+use almide_ir::{CallTarget, IrExpr, IrExprKind, IrPattern, IrProgram, IrStmt, IrStmtKind, IrStringPart, Mutability, VarId, VarTable};
+use almide_types::types::Ty;
 use almide_ir::call_writes::CallWrites;
 use std::collections::HashSet;
 
@@ -87,6 +88,24 @@ fn plain_read_root(e: &IrExpr) -> Option<VarId> {
         IrExprKind::Var { id } => Some(*id),
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => plain_read_root(object),
         _ => None,
+    }
+}
+
+/// True when the pattern binds a name whose value is a view into the
+/// subject's block (anything but an Int / Float / Bool / Unit copy).
+fn binds_a_view(p: &IrPattern) -> bool {
+    let copied = |ty: &Ty| matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit);
+    match p {
+        IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => false,
+        IrPattern::Bind { ty, .. } => !copied(ty),
+        IrPattern::As { ty, inner, .. } => !copied(ty) || binds_a_view(inner),
+        IrPattern::Constructor { args: ps, .. } | IrPattern::Tuple { elements: ps } => ps.iter().any(binds_a_view),
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => binds_a_view(inner),
+        // A shorthand field binds the field under its own name.
+        IrPattern::RecordPattern { fields, .. } => fields.iter().any(|f| f.pattern.as_ref().is_none_or(binds_a_view)),
+        IrPattern::List { elements, rest } => {
+            elements.iter().any(binds_a_view) || rest.as_deref().is_some_and(binds_a_view)
+        }
     }
 }
 
@@ -159,8 +178,13 @@ impl Orderer<'_, '_> {
         let IrExprKind::Match { subject, arms } = &mut e.kind else { return None; };
         let root = plain_read_root(subject)?;
         if !crate::arg_temps::bindable_ty(&subject.ty) { return None; }
+        // A guard that replaces the root is followed by the next arm's test
+        // of the same subject; a body that replaces it is followed only by
+        // its own reads of the pattern's binders, and a scalar binder is a
+        // copy taken at the arm's entry — nothing of the old block is read
+        // again, so the block is released at the assignment as before.
         let rebound = arms.iter().any(|arm|
-            self.writes.assigned_by(&arm.body).contains(&root.0)
+            (binds_a_view(&arm.pattern) && self.writes.assigned_by(&arm.body).contains(&root.0))
                 || arm.guard.as_ref().is_some_and(|g| self.writes.assigned_by(g).contains(&root.0)));
         if !rebound { return None; }
         // Pattern binders borrow this subject throughout the selected arm.
