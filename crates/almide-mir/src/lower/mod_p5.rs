@@ -721,7 +721,8 @@ fn order_heap_accs_by_read_dep(
 }
 
 /// Walk tail-position leaves: a self-call pushes its args to `calls`; any other tail leaf is a
-/// base (pushed to `bases`). `None` if a self-call sits in a NON-tail position (not TCO-able).
+/// base (pushed to `bases`), including one that recurses in a non-tail position. `None` if a
+/// `match` subject recurses.
 fn tco_collect<'a>(
     body: &'a IrExpr,
     fn_name: &str,
@@ -766,10 +767,9 @@ fn tco_collect<'a>(
             calls.push(args);
             Some(())
         }
+        // A leaf holding a self-call in a non-tail position is a base like any
+        // other here; `collect_tco_shape` decides whether the render admits it.
         _ => {
-            if tco_contains_self(body, fn_name) {
-                return None; // a self-call buried in a non-tail leaf — not TCO-able here
-            }
             bases.push(body);
             Some(())
         }
