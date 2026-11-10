@@ -315,7 +315,7 @@ fn runtime_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: b
                 (true, false, _) if matches!(got, NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) => code.to_string(),
                 (true, false, _) if *got == NTy::I64 => format!("&{code}"),
                 (true, false, _) => format!("&{owned}"),
-                (false, true, true) if crate::render_native_rec::has_default(*got) => crate::render_native_move::take_expr(code),
+                (false, true, true) if crate::render_native_rec::has_default(*got) => format!("std::mem::take(&mut {code})"),
                 (false, _, _) => owned,
             }
         }
@@ -385,7 +385,7 @@ fn map_arg(cx: &CallCx, by_ref: bool, code: &str, got: &NTy, dying_here: bool) -
         (NTy::Rec(_), true, _) => format!("&{code}"),
         (NTy::RecRef(_), true, _) => code.to_string(),
         // The caller's map, not read again: v0's move.
-        (NTy::Rec(_), false, true) => crate::render_native_move::take_expr(code),
+        (NTy::Rec(_), false, true) => format!("std::mem::take(&mut {code})"),
         _ => format!("{code}.clone()"),
     })
 }
@@ -407,7 +407,7 @@ fn map_entry_arg(cx: &CallCx, p: &FloorParam, by_ref: bool, code: &str, got: &NT
         (true, false, _) if *got == NTy::I64 => format!("&{code}"),
         (true, false, _) => format!("&{owned}"),
         // The caller's value, not read again: moved in.
-        (false, true, true) if crate::render_native_rec::has_default(*got) => crate::render_native_move::take_expr(code),
+        (false, true, true) if crate::render_native_rec::has_default(*got) => format!("std::mem::take(&mut {code})"),
         (false, _, _) => owned,
     })
 }
