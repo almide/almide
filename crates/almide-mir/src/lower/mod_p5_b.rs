@@ -131,7 +131,7 @@ pub(crate) fn try_tco_rewrite(
     fn_name: &str,
     params: &[almide_ir::IrParam],
     body: &IrExpr,
-    fields_of: TcoFieldsOf<'_>,
+    decls: TcoDecls<'_>,
 ) -> Option<IrExpr> {
     // Not on the native render (owned TCO slots): there a destructuring loop
     // body renders as a Rust `let (a, b) = …` re-run every iteration, and
@@ -260,7 +260,7 @@ pub(crate) fn try_tco_rewrite(
 
     let use_result_acc = tco_result_acc_mode(work_ref, &base_exprs, &ret_ty)?;
     let result_slot: Option<(VarId, IrExpr)> = if use_result_acc {
-        let empty = tco_slot_empty(&ret_ty, fields_of, TCO_SLOT_EMPTY_DEPTH)?;
+        let empty = tco_slot_empty(&ret_ty, decls, TCO_SLOT_EMPTY_DEPTH)?;
         let rv = VarId(slot_next);
         slot_next += 1;
         Some((rv, empty))

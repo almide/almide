@@ -531,6 +531,19 @@ impl LowerCtx {
         self.variant_layouts.by_type.contains_key(&name).then_some(name)
     }
 
+    /// A declared variant's constructors in declaration order, each with its
+    /// payload types at `ty`'s instantiation.
+    pub(crate) fn variant_case_tys(&self, ty: &Ty) -> Option<Vec<(almide_lang::intern::Sym, Vec<Ty>)>> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let name = self.custom_variant_type_name(ty)?;
+        let args: &[Ty] = match ty {
+            Ty::Named(_, args) | Ty::Applied(TypeConstructorId::UserDefined(_), args) => args,
+            _ => &[],
+        };
+        let cases = self.variant_layouts.instantiated_cases(&name, args)?;
+        Some(cases.into_iter().map(|c| (c.ctor, c.fields.into_iter().map(|(_, t)| t).collect())).collect())
+    }
+
     /// EXECUTE a `match v { Ctor(binds…) => arm, … }` over a CUSTOM variant (ADT brick 3) —
     /// read the tag from slot 0 and dispatch to the matching arm; only the taken arm runs. The
     /// N-constructor generalization of [`Self::try_lower_variant_value_match`] (the 2-variant
