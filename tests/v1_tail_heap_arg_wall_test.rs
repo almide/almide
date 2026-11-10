@@ -55,10 +55,71 @@ const MIXED_TESTS: &str = "\ntest \"deep\" {\n  assert_eq(go([1, 2, 3], 1000000)
 /// render never refused it, and it keeps its plain recursion.
 const MIXED_SCALAR: &str = "fn f(n: Int, a: Int) -> Int = if n <= 0 then a else if n % 2 == 0 then 1 + f(n - 1, a) else f(n - 1, a + 1)\n\nfn main() -> Unit = println(int.to_string(f(1000, 0)))\n";
 
+/// A base that reads a binding of the loop body, with a RECORD result: the
+/// in-loop result slot starts at a record built fieldwise from the declaration
+/// (nested, generic and anonymous records; one base or two), a million deep.
+const RECORD_RESULT: &str = r#"type Inner = { tag: String, xs: List[Int] }
+type R = { a: Int, s: String, inner: Inner, f: Float, ok: Bool }
+type Box[T] = { v: T, n: Int }
+type Shape = Dot | Circle(Int) | Named { label: String }
+
+fn go(n: Int, xs: List[Int]) -> R = {
+  let k = list.len(xs)
+  if n == 0 then R { a: k, s: "done ${k}", inner: Inner { tag: "t", xs: xs }, f: 1.5, ok: true }
+  else go(n - 1, [n, k])
+}
+
+fn anon(n: Int, acc: String) -> { len: Int, text: String } = {
+  let l = string.len(acc)
+  if n == 0 then { len: l, text: acc } else anon(n - 1, acc + "x")
+}
+
+fn boxed(n: Int, xs: List[String]) -> Box[List[String]] = {
+  let k = list.len(xs)
+  if n == 0 then Box { v: xs, n: k } else boxed(n - 1, xs + ["${n}"])
+}
+
+fn two(n: Int, xs: List[Int]) -> R = {
+  let k = list.len(xs)
+  if n < 0 then R { a: 0 - k, s: "neg", inner: Inner { tag: "n", xs: [] }, f: 0.0, ok: false }
+  else if n == 0 then R { a: k, s: "zero", inner: Inner { tag: "z", xs: xs }, f: 2.5, ok: true }
+  else two(n - 2, [k] + xs)
+}
+
+fn main() -> Unit = {
+  let r = go(1000000, [])
+  println("${r.a} ${r.s} ${r.inner.tag} ${r.inner.xs} ${r.f} ${r.ok}")
+  let a = anon(5, "")
+  println("${a.len} ${a.text}")
+  let b = boxed(4, [])
+  println("${b.n} ${b.v}")
+  let t = two(7, [])
+  println("${t.a} ${t.s} ${t.inner.xs}")
+  let u = two(8, [])
+  println("${u.a} ${u.s} ${u.inner.xs}")
+}
+"#;
+
+const RECORD_RESULT_STDOUT: &str = "2 done 2 t [1, 2] 1.5 true\n5 xxxxx\n4 [\"4\", \"3\", \"2\", \"1\"]\n-4 neg []\n4 zero [3, 2, 1, 0]\n";
+
 /// A heap tail call the loop conversion still declines: the base reads a
-/// binding of the loop body and the result (a record) has no empty value
+/// binding of the loop body and the result (a variant) has no empty value
 /// for the in-loop result slot.
-const RECORD_RESULT: &str = "type R = { a: Int, s: String }\n\nfn go(n: Int, xs: List[Int]) -> R = {\n  let k = list.len(xs)\n  if n == 0 then R { a: k, s: \"\" } else go(n - 1, [n, k])\n}\n\nfn main() -> Unit = println(int.to_string(go(5, []).a))\n";
+const VARIANT_RESULT: &str = r#"type Shape = Dot | Circle(Int) | Tagged { label: String }
+
+fn pick(n: Int, xs: List[Int]) -> Shape = {
+  let k = list.len(xs)
+  if n == 0 then Circle(k) else pick(n - 1, [n, k])
+}
+
+fn main() -> Unit = {
+  match pick(5, []) {
+    Circle(r) => println("circle ${r}"),
+    Dot => println("dot"),
+    Tagged { label } => println(label),
+  }
+}
+"#;
 
 /// The rendered body of the fn whose header names `name`, and its mangled name.
 fn rendered_fn(out: &str, name: &str) -> (String, String) {
@@ -106,7 +167,24 @@ fn a_scalar_only_mix_keeps_its_plain_recursion() {
 }
 
 #[test]
+fn a_record_result_whose_base_reads_a_loop_binding_loops_from_a_fieldwise_empty_slot() {
+    let out = almide_mir::pipeline::try_render_rust_source(RECORD_RESULT)
+        .unwrap_or_else(|e| panic!("the record result walls: {e:?}"));
+    for name in ["go", "anon", "boxed", "two"] {
+        let (mangled, body) = rendered_fn(&out, name);
+        assert!(body.contains("loop {"), "{name} is a loop:\n{body}");
+        assert_eq!(body.matches(&format!("{mangled}(")).count(), 0, "{name} keeps no self call:\n{body}");
+    }
+    assert_eq!(run_native("record_result", RECORD_RESULT), RECORD_RESULT_STDOUT);
+    let dir = tempfile::tempdir().expect("scratch");
+    let file = dir.path().join("record_result.almd");
+    std::fs::write(&file, RECORD_RESULT).expect("source");
+    let wasm = Command::new(env!("CARGO_BIN_EXE_almide")).arg("run").arg(&file).args(["--target", "wasm"]).output().expect("wasm run");
+    assert_eq!(String::from_utf8_lossy(&wasm.stdout), RECORD_RESULT_STDOUT, "wasm");
+}
+
+#[test]
 fn a_heap_tail_call_the_loop_declines_is_still_refused() {
-    let err = almide_mir::pipeline::try_render_rust_source(RECORD_RESULT).expect_err("no loop conversion for this shape");
+    let err = almide_mir::pipeline::try_render_rust_source(VARIANT_RESULT).expect_err("no loop conversion for this shape");
     assert!(format!("{err:?}").contains("passes a heap value to its own tail call"), "{err:?}");
 }

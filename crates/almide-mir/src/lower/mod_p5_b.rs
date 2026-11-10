@@ -131,6 +131,7 @@ pub(crate) fn try_tco_rewrite(
     fn_name: &str,
     params: &[almide_ir::IrParam],
     body: &IrExpr,
+    fields_of: TcoFieldsOf<'_>,
 ) -> Option<IrExpr> {
     // Not on the native render (owned TCO slots): there a destructuring loop
     // body renders as a Rust `let (a, b) = …` re-run every iteration, and
@@ -258,14 +259,15 @@ pub(crate) fn try_tco_rewrite(
     let ret_ty = body.ty.clone();
 
     let use_result_acc = tco_result_acc_mode(work_ref, &base_exprs, &ret_ty)?;
-    let result_var: Option<VarId> = if use_result_acc {
-        tco_empty_for(&ret_ty)?;
+    let result_slot: Option<(VarId, IrExpr)> = if use_result_acc {
+        let empty = tco_slot_empty(&ret_ty, fields_of, TCO_SLOT_EMPTY_DEPTH)?;
         let rv = VarId(slot_next);
         slot_next += 1;
-        Some(rv)
+        Some((rv, empty))
     } else {
         None
     };
+    let result_var: Option<VarId> = result_slot.as_ref().map(|(rv, _)| *rv);
 
     let mut next_kind = 1i64;
     // `slot_next` is the next free VarId (after rk / list-iter idx / append slots / result) — tco_rewrite
@@ -293,7 +295,7 @@ pub(crate) fn try_tco_rewrite(
     // `{ [let slot = acc + [];]* [var idx = 0;] var rk = 0; while (rk == 0) { <loop_body> }; <post> }`
     // The append-accumulator slot inits (owned copies of the borrowed `acc` params) come FIRST.
     let mut inits: Vec<IrStmt> = upfront;
-    inits.extend(tco_state_inits(idx_var, result_var, rk, &ret_ty));
+    inits.extend(tco_state_inits(idx_var, result_slot, rk, &ret_ty));
     let while_stmt = IrStmt {
         kind: IrStmtKind::Expr {
             expr: tco_ir(
