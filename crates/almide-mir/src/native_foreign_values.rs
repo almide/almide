@@ -94,7 +94,7 @@ pub(crate) fn convert_value(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: u
                 else if let NTy::Rec(i) = kind { format!("{} {{ {} }}", crate::render_native_rec::struct_name(i), parts.join(", ")) }
                 else { format!("vec![{}]", parts.join(", ")) })
         }
-        Ty::Named(..) if host_uses_almide_types => crate::native_callback_types::convert(e, ty, kind, to_host),
+        Ty::Named(..) | Ty::Record { .. } if host_uses_almide_types =>crate::native_callback_types::convert(e, ty, kind, to_host),
         _ => Err(wall(format!("native: no foreign value adapter for {ty:?} / {kind:?}"))),
     }
 }

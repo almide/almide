@@ -16,6 +16,10 @@
 //! spelling of the declared type, boxed or not as the definition says. One
 //! that disagrees is not carried, and its callbacks are refused by name.
 //!
+//! A generic type has one definition (`pub struct Pair<A>`), admitted with
+//! each parameter spelled as itself, and one conversion per instance the
+//! signatures name (`Pair<i64>`), over the fields that instance has.
+//!
 //! Every conversion reads its source through a shared borrow and builds a
 //! fresh value: nothing the certified side owns is aliased, and a value the
 //! native code lent is never consumed.
@@ -49,7 +53,11 @@ struct Case {
 #[derive(Clone)]
 struct Shape {
     host: String,
+    /// The generic parameters, in declared order.
+    params: Vec<String>,
     record: bool,
+    /// A structural record's definition: its fields are sorted by label.
+    structural: bool,
     cases: Vec<Case>,
 }
 
@@ -58,6 +66,9 @@ struct Table {
     shapes: BTreeMap<String, Shape>,
     /// The standard codegen's definitions, as it emitted them.
     defs: String,
+    /// The parameters of the generic definition being admitted: each is its
+    /// own host spelling there.
+    scope: Vec<String>,
     /// The conversions the adapters call: type, this render's kind, direction.
     wanted: Vec<(Ty, NTy, bool)>,
 }
@@ -87,39 +98,98 @@ pub(crate) fn install<'a>(
     decls: &[IrTypeDecl], signature: impl Iterator<Item = &'a Ty>, host: impl FnOnce() -> Option<std::rc::Rc<str>>,
 ) -> Guard {
     let guard = Guard(TABLE.with(|t| t.take()));
-    let mut names = Vec::new();
+    let mut reached = Vec::new();
     for ty in signature {
-        reach(ty, decls, &mut names);
+        reach(ty, decls, &mut reached);
     }
-    if names.is_empty() { return guard; }
-    let carried = host().and_then(|text| read(&names, decls, &text)).and_then(admit);
+    if reached.is_empty() { return guard; }
+    let carried = host().and_then(|text| read(reached, &text)).and_then(admit);
     if carried.is_none() {
         TABLE.with(|t| t.take());
     }
     guard
 }
 
-/// The declared types `ty` names, and the ones their fields name.
-fn reach(ty: &Ty, decls: &[IrTypeDecl], out: &mut Vec<String>) {
+/// One type a signature reaches: the name the host declares it under, its
+/// generic parameters, and its cases (`None` where it has no definition).
+struct Reached {
+    name: String,
+    host: String,
+    params: Vec<String>,
+    structural: bool,
+    shape: Option<(bool, Declared)>,
+}
+
+/// The types `ty` names, and the ones their fields name.
+fn reach(ty: &Ty, decls: &[IrTypeDecl], out: &mut Vec<Reached>) {
     match ty {
         Ty::Named(name, args) => {
             args.iter().for_each(|a| reach(a, decls, out));
             let Some(decl) = decls.iter().find(|d| d.name == *name) else { return };
-            if out.iter().any(|o| o == name.as_str()) { return; }
-            out.push(name.to_string());
-            for (_, fields) in declared(decl).unwrap_or_default().1 {
-                fields.iter().for_each(|(_, t)| reach(t, decls, out));
-            }
+            if out.iter().any(|o| o.name == name.as_str()) { return; }
+            let (params, shape) = (params(decl), declared(decl));
+            let fields: Vec<Ty> = shape.iter().flat_map(|(_, cases)| cases).flat_map(|(_, fields)| fields)
+                .map(|(_, t)| bound(t, &params, args)).collect();
+            out.push(Reached { name: name.to_string(), host: host_name(name.as_str()), params, structural: false, shape });
+            fields.iter().for_each(|t| reach(t, decls, out));
+        }
+        Ty::Record { fields } => {
+            fields.iter().for_each(|(_, t)| reach(t, decls, out));
+            let Some(Ty::Named(name, _)) = nominal(ty) else { return };
+            if out.iter().all(|o| o.name != name.as_str()) { out.push(structural(name.as_str(), fields)); }
         }
         Ty::Applied(_, args) | Ty::Tuple(args) => args.iter().for_each(|a| reach(a, decls, out)),
         _ => {}
     }
 }
 
-/// Whether `decl` is a record, and its cases. A generic type or an alias has
-/// no single definition to carry.
+/// The labels of a structural record in the order the standard codegen
+/// declares them — sorted — each with its type.
+fn sorted(fields: &[(almide_lang::intern::Sym, Ty)]) -> Vec<(String, &Ty)> {
+    let mut fields: Vec<(String, &Ty)> = fields.iter().map(|(label, ty)| (label.to_string(), ty)).collect();
+    fields.sort_by(|a, b| a.0.cmp(&b.0));
+    fields
+}
+
+fn parameter(name: &str) -> Ty {
+    Ty::Named(almide_base::intern::sym(name), Vec::new().into())
+}
+
+/// A structural record as the standard codegen types it: an instance of the
+/// one definition it declares for those labels (`AlmdRec_x_y<T0, T1>`),
+/// generic in every field.
+pub(crate) fn nominal(ty: &Ty) -> Option<Ty> {
+    let Ty::Record { fields } = ty else { return None };
+    let fields = sorted(fields);
+    let labels: Vec<&str> = fields.iter().map(|(label, _)| label.as_str()).collect();
+    let name = format!("AlmdRec_{}", labels.join("_"));
+    (!fields.is_empty()).then(|| Ty::Named(almide_base::intern::sym(&name), fields.iter().map(|(_, t)| (*t).clone()).collect::<Vec<_>>().into()))
+}
+
+/// The definition `nominal` names an instance of.
+fn structural(name: &str, fields: &[(almide_lang::intern::Sym, Ty)]) -> Reached {
+    let params: Vec<String> = (0..fields.len()).map(|j| format!("T{j}")).collect();
+    let fields = sorted(fields).into_iter().zip(&params).map(|((label, _), p)| (label, parameter(p))).collect();
+    Reached { name: name.to_string(), host: name.to_string(), params, structural: true, shape: Some((true, vec![(String::new(), fields)])) }
+}
+
+/// The generic parameters of `decl`, in declared order.
+fn params(decl: &IrTypeDecl) -> Vec<String> {
+    decl.generics.iter().flatten().map(|g| g.name.to_string()).collect()
+}
+
+/// `ty`, a field type of a definition with `params`, at the instance `args`.
+/// An instance of another arity binds nothing, and is refused where it is
+/// spelled (`host_named`).
+fn bound(ty: &Ty, params: &[String], args: &[Ty]) -> Ty {
+    if params.is_empty() || params.len() != args.len() { return ty.clone(); }
+    let subst = params.iter().map(|p| almide_base::intern::sym(p)).zip(args.iter().cloned()).collect();
+    crate::lower::substitute_display_type(ty, &subst)
+}
+
+/// Whether `decl` is a record, and its cases, a generic parameter left as the
+/// declaration names it. An alias has no definition to carry.
 fn declared(decl: &IrTypeDecl) -> Option<(bool, Declared)> {
-    if decl.generics.as_ref().is_some_and(|g| !g.is_empty()) { return None; }
     let labelled = |fields: &[IrFieldDecl]| fields.iter().map(|f| (f.name.to_string(), f.ty.clone())).collect();
     match &decl.kind {
         IrTypeDeclKind::Record { fields } => Some((true, vec![(String::new(), labelled(fields))])),
@@ -195,6 +265,7 @@ fn closing(text: &str) -> Option<usize> {
 /// the cases it spells.
 fn definition<'a>(text: &'a str, host: &str, record: bool) -> Option<(&'a str, Spelled)> {
     let head = format!("\npub {} {host} {{", if record { "struct" } else { "enum" });
+    // The body opens at the head's last byte, the brace.
     let at = text.find(&head)?;
     let open = at + head.len() - 1;
     let close = open + closing(&text[open..])?;
@@ -208,16 +279,16 @@ fn definition<'a>(text: &'a str, host: &str, record: bool) -> Option<(&'a str, S
 
 /// Every reached type's host name and definition, with the cases each side
 /// spells; `None` when one of them has no definition in `text`.
-fn read(names: &[String], decls: &[IrTypeDecl], text: &str) -> Option<Vec<(String, Declared, Spelled)>> {
+fn read(reached: Vec<Reached>, text: &str) -> Option<Vec<(String, Declared, Spelled)>> {
     let mut table = Table::default();
     let mut both = Vec::new();
-    for name in names {
-        let (record, ours) = declared(decls.iter().find(|d| d.name.as_str() == name)?)?;
-        let host = host_name(name);
-        let (item, theirs) = definition(text, &host, record)?;
+    for Reached { name, host, params, structural, shape } in reached {
+        let (record, ours) = shape?;
+        let generic = if params.is_empty() { host.clone() } else { format!("{host}<{}>", params.join(", ")) };
+        let (item, theirs) = definition(text, &generic, record)?;
         writeln!(table.defs, "#[allow(non_camel_case_types)]\n{item}\n").expect("writing to a String cannot fail");
-        table.shapes.insert(name.clone(), Shape { host, record, cases: Vec::new() });
-        both.push((name.clone(), ours, theirs));
+        table.shapes.insert(name.clone(), Shape { host, params, record, structural, cases: Vec::new() });
+        both.push((name, ours, theirs));
     }
     TABLE.with(|t| t.replace(table));
     Some(both)
@@ -227,26 +298,39 @@ fn read(names: &[String], decls: &[IrTypeDecl], text: &str) -> Option<Vec<(Strin
 fn admit(both: Vec<(String, Declared, Spelled)>) -> Option<()> {
     for (name, ours, theirs) in both {
         if ours.len() != theirs.len() { return None; }
-        let cases = ours.iter().zip(&theirs).map(agreed).collect::<Option<Vec<_>>>()?;
+        // A generic definition spells its parameters as themselves.
+        let scope = TABLE.with(|t| t.borrow().shapes.get(&name).map(|s| s.params.clone()))?;
+        TABLE.with(|t| t.borrow_mut().scope.clone_from(&scope));
+        let cases = ours.iter().zip(&theirs).map(|both| agreed(both, &scope)).collect::<Option<Vec<_>>>();
+        TABLE.with(|t| t.borrow_mut().scope.clear());
+        let cases = cases?;
         TABLE.with(|t| t.borrow_mut().shapes.get_mut(&name).map(|s| s.cases = cases))?;
     }
     Some(())
 }
 
-fn agreed(((ctor, fields), (their_ctor, their_fields)): (&DeclaredCase, &SpelledCase)) -> Option<Case> {
+fn agreed(((ctor, fields), (their_ctor, their_fields)): (&DeclaredCase, &SpelledCase), scope: &[String]) -> Option<Case> {
     if ctor != their_ctor || fields.len() != their_fields.len() { return None; }
+    let own: Vec<Ty> = scope.iter().map(|p| parameter(p)).collect();
     let fields = fields.iter().zip(their_fields).map(|((label, ty), (their_label, spelled))| {
-        let (owned, spelled) = (canon(&host_type(ty).ok()?), canon(spelled));
+        let (owned, spelled) = (canon(&host_type(&bound(ty, scope, &own)).ok()?), canon(spelled));
         let boxed = spelled == format!("AlmideBox<{owned}>");
         (label == their_label && (boxed || spelled == owned)).then(|| Slot { label: label.clone(), ty: ty.clone(), boxed })
     }).collect::<Option<Vec<_>>>()?;
     Some(Case { ctor: ctor.clone(), fields })
 }
 
-/// The host spelling of the named type `name`, where its definition is carried.
+/// The host spelling of the named type `name` at `args`, where its
+/// definition is carried.
 pub(crate) fn host_named(name: &str, args: &[Ty]) -> Result<String, LowerError> {
-    TABLE.with(|t| t.borrow().shapes.get(name).filter(|_| args.is_empty()).map(|s| s.host.clone()))
-        .ok_or_else(|| wall(format!("native: callback type `{name}` has no host definition to carry")))
+    let found = TABLE.with(|t| {
+        let t = t.borrow();
+        if args.is_empty() && t.scope.iter().any(|p| p == name) { return Some(name.to_string()); }
+        t.shapes.get(name).filter(|s| s.params.len() == args.len()).map(|s| s.host.clone())
+    });
+    let host = found.ok_or_else(|| wall(format!("native: callback type `{name}` has no host definition to carry")))?;
+    if args.is_empty() { return Ok(host); }
+    Ok(format!("{host}<{}>", args.iter().map(host_type).collect::<Result<Vec<_>, _>>()?.join(", ")))
 }
 
 /// The carried definitions as the runtime index reads them: the runtime types
@@ -282,7 +366,8 @@ impl<T: std::fmt::Debug> std::fmt::Debug for AlmideBox<T> {
 
 /// `e`, a borrow of a named value on one side, as an owned value of the other.
 pub(crate) fn convert(e: &str, ty: &Ty, kind: NTy, to_host: bool) -> Result<String, LowerError> {
-    let Ty::Named(name, args) = ty else { return Err(wall("native: callback conversion of a type with no name")) };
+    let ty = nominal(ty).unwrap_or_else(|| ty.clone());
+    let Ty::Named(name, args) = &ty else { return Err(wall("native: callback conversion of a type with no name")) };
     host_named(name.as_str(), args)?;
     let key = (ty.clone(), kind, to_host);
     let id = TABLE.with(|t| {
@@ -315,14 +400,18 @@ pub(crate) fn render() -> Result<String, LowerError> {
 }
 
 fn conversion(id: usize, ty: &Ty, kind: NTy, to_host: bool) -> Result<String, LowerError> {
-    let shape = match ty {
-        Ty::Named(name, _) => TABLE.with(|t| t.borrow().shapes.get(name.as_str()).cloned()),
+    let (mut shape, args) = match ty {
+        Ty::Named(name, args) => TABLE.with(|t| t.borrow().shapes.get(name.as_str()).cloned()).map(|s| (s, args)),
         _ => None,
     }.ok_or_else(|| wall("native: callback conversion of a type with no carried definition"))?;
-    let own = rec::owned_ty(kind);
+    // The fields of this instance: each parameter is the argument it names.
+    for slot in shape.cases.iter_mut().flat_map(|c| c.fields.iter_mut()) {
+        slot.ty = bound(&slot.ty, &shape.params, args);
+    }
+    let (own, host) = (rec::owned_ty(kind), host_type(ty)?);
     let body = if shape.record { record(&shape, kind, to_host) } else { variant(&shape, kind, to_host) }
-        .map_err(|e| wall(format!("native: callback type `{}` ({}) has no host adapter: {e:?}", shape.host, ty.display())))?;
-    let (from, to) = if to_host { (own.as_str(), shape.host.as_str()) } else { (shape.host.as_str(), own.as_str()) };
+        .map_err(|e| wall(format!("native: callback type `{host}` ({}) has no host adapter: {e:?}", ty.display())))?;
+    let (from, to) = if to_host { (own.as_str(), host.as_str()) } else { (host.as_str(), own.as_str()) };
     Ok(format!("fn {}(v: &{from}) -> {to} {{\n    {body}\n}}\n", function(id)))
 }
 
@@ -349,11 +438,31 @@ fn crossed(place: &str, slot: &Slot, (kind, own_boxed): (NTy, bool), to_host: bo
     })
 }
 
+/// Where this render holds each of a record's host fields: under the same
+/// label where it keeps the labels, at the same position in a slot block,
+/// which is in declared order. A structural record's host fields are sorted,
+/// so it crosses by label only.
+fn positions(shape: &Shape, kind: NTy) -> Result<Vec<usize>, LowerError> {
+    let fields = &shape.cases[0].fields;
+    let labels = match kind {
+        NTy::Rec(i) => rec::record_fields(i),
+        _ => None,
+    };
+    let Some((_, labels)) = labels else {
+        return if shape.structural { Err(wall(format!("this render holds it as {kind:?}, with no field labels"))) }
+            else { Ok((0..fields.len()).collect()) };
+    };
+    fields.iter().map(|slot| labels.iter().position(|(label, _)| *label == slot.label)
+        .ok_or_else(|| wall(format!("this render holds no field `{}` for it", slot.label)))).collect()
+}
+
 fn record(shape: &Shape, kind: NTy, to_host: bool) -> Result<String, LowerError> {
     let fields = &shape.cases[0].fields;
     let slots = kind == NTy::Vec;
+    let own = own_fields(kind, None, fields.len())?;
     let mut parts = Vec::new();
-    for (j, (slot, own)) in fields.iter().zip(own_fields(kind, None, fields.len())?).enumerate() {
+    for (slot, j) in fields.iter().zip(positions(shape, kind)?) {
+        let own = own[j];
         let place = if !to_host { format!("&v.{}", slot.label) } else if slots { format!("&v[{j}]") } else { format!("&v.f{j}") };
         let value = crossed(&place, slot, own, to_host)?;
         parts.push(if to_host { format!("{}: {value}", slot.label) } else if slots { value } else { format!("f{j}: {value}") });
