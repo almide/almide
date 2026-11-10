@@ -137,6 +137,10 @@ pub fn desugar_callarg_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExp
             IrStmtKind::Expr { expr } => Some(expr),
             IrStmtKind::Bind { value, .. } => Some(value),
             IrStmtKind::Assign { value, .. } => Some(value),
+            // A destructuring bind's value holds its operands as a plain bind's
+            // does (`let (a, b) = f(x, g(y)!)`); the certified native render
+            // reads it too.
+            IrStmtKind::BindDestructure { value, .. } if crate::lower::owned_tco_slots() => Some(value),
             _ => None,
         };
         let Some(v) = value else { continue };
@@ -152,6 +156,7 @@ pub fn desugar_callarg_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExp
                 IrStmtKind::Expr { .. } => IrStmtKind::Expr { expr: new_v },
                 IrStmtKind::Bind { var, mutability, ty, .. } => IrStmtKind::Bind { var: *var, mutability: *mutability, ty: ty.clone(), value: new_v },
                 IrStmtKind::Assign { var, .. } => IrStmtKind::Assign { var: *var, value: new_v },
+                IrStmtKind::BindDestructure { pattern, .. } => IrStmtKind::BindDestructure { pattern: pattern.clone(), value: new_v },
                 other => other.clone(),
             },
             span: s.span,
