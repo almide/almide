@@ -396,7 +396,11 @@ const LANE_F64: &str = "trait AlmdLaneF64 { fn lane_f64(self) -> f64; }\nimpl Al
 /// param crosses into the lambda's lane ([`Lane`]). `ret_lane`: a declared
 /// `Float` result is read through [`LANE_F64`], a declared `Bool` one is
 /// tested `!= 0`; else the lambda's result kind `ret` is the runtime's.
-fn adapter(lambda: Option<&str>, env: &str, (ps, moved): (&[NativeSigKind], &[bool]), bits: &[Lane], (ret, ret_lane): (NativeSigKind, Lane)) -> Option<String> {
+///
+/// `lent[i]`: the runtime hands that param a reference (the payload of a
+/// lent `Option` receiver, [`lent_var`]); the lambda borrows it as it is, or
+/// takes the one copy it asks for.
+fn adapter(lambda: Option<&str>, env: &str, (ps, moved, lent): (&[NativeSigKind], &[bool], &[bool]), bits: &[Lane], (ret, ret_lane): (NativeSigKind, Lane)) -> Option<String> {
     if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) {
         return None;
     }
@@ -405,7 +409,9 @@ fn adapter(lambda: Option<&str>, env: &str, (ps, moved): (&[NativeSigKind], &[bo
         Lane::Bool => "bool".to_string(),
         Lane::Same => rec::owned_ty(clo::owned_nty(k)),
     };
-    let params: Vec<String> = ps.iter().zip(bits).enumerate().map(|(i, (k, b))| format!("__p{i}: {}", spell(*k, *b))).collect();
+    let is_lent = |i: usize| lent.get(i).copied().unwrap_or(false);
+    let params: Vec<String> = ps.iter().zip(bits).enumerate()
+        .map(|(i, (k, b))| format!("__p{i}: {}{}", if is_lent(i) { "&" } else { "" }, spell(*k, *b))).collect();
     let args: String = ps
         .iter()
         .zip(bits)
@@ -413,6 +419,8 @@ fn adapter(lambda: Option<&str>, env: &str, (ps, moved): (&[NativeSigKind], &[bo
         .map(|(i, (k, b))| match (k, b) {
             (_, Lane::F64) => format!(", __p{i}.to_bits() as i64"),
             (_, Lane::Bool) => format!(", __p{i} as i64"),
+            _ if is_lent(i) && moved.get(i).copied().unwrap_or(false) => format!(", (*__p{i}).clone()"),
+            _ if is_lent(i) => format!(", __p{i}"),
             (NativeSigKind::Str | NativeSigKind::ListI64 | NativeSigKind::ListStr | NativeSigKind::Rec(_), _)
                 if !moved.get(i).copied().unwrap_or(false) => format!(", &__p{i}"),
             _ => format!(", __p{i}"),
@@ -435,6 +443,44 @@ enum Lane {
     Same,
     F64,
     Bool,
+}
+
+/// The type param `A` of the `Option[A]` receiver `k` of `h`, when a call
+/// may hand that receiver lent (`Option<&A>`): the runtime takes it by
+/// value, `A` is unbounded and reaches nothing but the params of the one
+/// callback — never the result, another argument, or what the callback
+/// returns — so no owned `A` is ever asked of the call.
+fn lent_var(h: &Hof, k: usize) -> Option<&str> {
+    let (DTy::Opt(e), false) = h.params.get(k)? else { return None };
+    let DTy::Var(t) = &**e else { return None };
+    let callbacks = h.params.iter().filter(|(d, _)| matches!(d, DTy::Fn(..))).count();
+    let free = callbacks == 1
+        && h.owned.is_none()
+        && !h.mutable.contains(&true)
+        && !mentions_var(&h.ret, t)
+        && !h.bounds.iter().any(|(v, _)| v == t)
+        && h.params.iter().enumerate().all(|(j, (d, _))| j == k || match d {
+            DTy::Fn(ps, r) => !mentions_var(r, t) && ps.iter().all(|p| matches!(p, DTy::Var(v) if v == t) || !mentions_var(p, t)),
+            d => !mentions_var(d, t),
+        });
+    free.then_some(t.as_str())
+}
+
+fn mentions_var(d: &DTy, t: &str) -> bool {
+    match d {
+        DTy::Var(v) => v == t,
+        DTy::List(e) | DTy::Opt(e) | DTy::Set(e) => mentions_var(e, t),
+        DTy::Map(a, b) | DTy::Result(a, b) => mentions_var(a, t) || mentions_var(b, t),
+        DTy::Tuple(es) => es.iter().any(|e| mentions_var(e, t)),
+        DTy::Fn(ps, r) => ps.iter().any(|e| mentions_var(e, t)) || mentions_var(r, t),
+        _ => false,
+    }
+}
+
+/// The stdlib combinator `name` may be handed its `Option` argument `k`
+/// lent ([`lent_var`]).
+pub(crate) fn lends_receiver(name: &str, k: usize) -> bool {
+    !parallel_selected(name) && of(name).is_some_and(|h| lent_var(h, k).is_some())
 }
 
 /// One non-function argument in the runtime's mode: borrowed as is, or owned
@@ -554,12 +600,22 @@ fn plan(
     if hof.bounds.iter().any(|(v, cap)| *cap == almide_lang::capability_bounds::Cap::Ord && env.get(v).and_then(|k| k.rec()).is_some_and(|i| !rec::native_order_safe(i))) {
         return None;
     }
-    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds };
+    // An element Option held as the lent element, handed to a combinator
+    // whose callback only takes its payload.
+    let lent = call.args.iter().enumerate().find_map(|(k, a)| match a {
+        CallArg::Handle(v) if crate::render_native_borrow_read::borrowed_option(*v) => Some((k, *v, lent_var(hof, k)?)),
+        _ => None,
+    });
+    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds, lent: lent.map(|l| l.2) };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
     let mut twin = hof.twin.as_str();
     for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {
         if hof.matrix_ref_lists[k] {
             rendered.push(format!("&{code}.iter().collect::<Vec<_>>()"));
+            continue;
+        }
+        if lent.is_some_and(|l| l.0 == k) {
+            rendered.push(code.clone());
             continue;
         }
         if hof.mutable[k] {
@@ -592,6 +648,11 @@ fn plan(
             }
             _ => value_arg(hof, (at.1, k), (a, code.as_str(), *t), &mut side),
         });
+    }
+    // The callback takes the payload by reference: the Option is handed as
+    // it is held (`Option<&A>`), not as the owned copy `code` spells.
+    if let (Some((k, v, _)), true) = (lent, side.lent) {
+        rendered[k] = var(v);
     }
     if declared_return.is_none() && kind_of(&env, &hof.ret).is_none() {
         let ret = sigs.get(call.name)?.1?;

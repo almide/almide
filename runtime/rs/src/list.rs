@@ -6,6 +6,11 @@ pub fn almide_rt_list_is_empty<T>(xs: &[T]) -> bool { xs.is_empty() }
 pub fn almide_rt_list_first<A: Clone>(xs: &[A]) -> Option<A> { xs.first().cloned() }
 pub fn almide_rt_list_last<A: Clone>(xs: &[A]) -> Option<A> { xs.last().cloned() }
 pub fn almide_rt_list_get<T: Clone>(xs: &[T], i: i64) -> Option<T> { xs.get(i as usize).cloned() }
+// Borrowing twins: the element lent from the list, where the reader only
+// inspects it (a head read of a wide record must not copy the record).
+pub fn almide_rt_list_first_ref<A: Clone>(xs: &[A]) -> Option<&A> { xs.first() }
+pub fn almide_rt_list_last_ref<A: Clone>(xs: &[A]) -> Option<&A> { xs.last() }
+pub fn almide_rt_list_get_ref<T: Clone>(xs: &[T], i: i64) -> Option<&T> { xs.get(i as usize) }
 pub fn almide_rt_list_contains<T: PartialEq>(xs: &[T], x: T) -> bool { xs.contains(&x) }
 pub fn almide_rt_list_index_of<T: PartialEq>(xs: &[T], x: T) -> Option<i64> { xs.iter().position(|v| *v == x).map(|i| i as i64) }
 #[inline]

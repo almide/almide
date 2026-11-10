@@ -397,6 +397,11 @@ pub(crate) fn call_arg(a: &CallArg, tys: &BTreeMap<ValueId, NTy>) -> Result<(Str
     match a {
         CallArg::Handle(v) | CallArg::Scalar(v) => {
             let t = *tys.get(v).ok_or_else(|| wall("native: call arg untyped"))?;
+            // A lent element Option (`Option<&A>`) handed to a call: the owned
+            // Option the call's param is typed as (the one copy it asks for).
+            if crate::render_native_borrow_read::borrowed_option(*v) {
+                return Ok((format!("{}.cloned()", var(*v)), t));
+            }
             Ok((var(*v), t))
         }
         CallArg::Imm(n) => Ok((format!("{n}i64"), NTy::I64)),

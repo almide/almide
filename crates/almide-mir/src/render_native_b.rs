@@ -532,6 +532,13 @@ fn protocol_instance_floor(call: &NativeCall<'_>, tys: &BTreeMap<ValueId, NTy>) 
     crate::native_floor::declared(&crate::native_floor::protocol_instance(call.name, &kinds)?)
 }
 
+/// The payload kind of the generated Option a floor call binds, when the
+/// borrowing twin can lend it (a kind with a reference form).
+fn lent_payload(ret: Option<NTy>) -> Option<NTy> {
+    let p = crate::render_native_rec::option_payload(ret?.rec()?)?;
+    matches!(p, NTy::Rec(_) | NTy::Str | NTy::Vec | NTy::VecStr).then_some(p)
+}
+
 fn render_declared_floor_call(
     call: NativeCall<'_>,
     floor: &'static crate::native_floor::FloorFn,
@@ -574,6 +581,11 @@ fn render_declared_floor_call(
         (Some(d), Some((twin, items))) if crate::render_native_borrow_read::borrowed_result(*d) && edited.is_none() => {
             Some((twin.as_str(), items))
         }
+        // An element Option whose list the function borrows: the element
+        // lent (`Option<&A>`), no copy of it (render_native_borrow_read).
+        (Some(d), Some((twin, items))) if crate::render_native_borrow_read::borrowed_option(*d) && lent_payload(ret).is_some() => {
+            Some((twin.as_str(), items))
+        }
         _ => None,
     };
     let expr = match by_ref {
@@ -600,6 +612,9 @@ fn render_declared_floor_call(
         (Some(d), Some(t)) => {
             tys.insert(*d, t);
             let ty_name = match by_ref {
+                Some(_) if crate::render_native_borrow_read::borrowed_option(*d) => {
+                    format!("Option<&{}>", crate::render_native_rec::owned_ty(lent_payload(ret).expect("checked with the twin")))
+                }
                 Some(_) => format!(
                     "Result<&{}, AlmideString>",
                     crate::render_native_rec::owned_ty(NTy::Rec(crate::render_native_rec::value_index()))

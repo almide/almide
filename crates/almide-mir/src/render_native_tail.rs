@@ -633,7 +633,7 @@ fn render_native_drop_op(
         // Drop is ERASED: Rust frees at scope end (or at reassignment for a
         // loop-carried handle). `verify_ownership` above certified balance.
         // A borrow join (#3532) holds a reference: its borrow simply ends.
-        Op::Drop { v } | Op::DropListStr { v }
+        Op::Drop { v } | Op::DropListStr { v } | Op::DropVariant { v, .. }
             if borrows.contains(v) && matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_))) =>
         {
             line!("// drop: borrowed join, scope-end");

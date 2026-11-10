@@ -315,14 +315,23 @@ fn without_lifetimes(t: &str) -> String {
 /// runtime fn `<symbol>_ref`, paired from the signatures — the same params,
 /// the Ok side `&AlmideValue` borrowed from them. `None` when the runtime
 /// carries no such fn or its signature differs in anything else.
-fn borrow_twin_of(ret: FloorRet, symbol: &str, rust_params: &[String], rt: &'static RuntimeIndex) -> Option<(String, Vec<&'static str>)> {
-    if ret != FloorRet::ResValue {
+fn borrow_twin_of(ret: FloorRet, symbol: &str, rust_params: &[String], rust_ret: &str, rt: &'static RuntimeIndex) -> Option<(String, Vec<&'static str>)> {
+    if !matches!(ret, FloorRet::ResValue | FloorRet::Elem(ElemRet::Opt)) {
         return None;
     }
     let twin = format!("{symbol}_ref");
     let (tp, tr) = rust_signature(signature_text(rt, &twin)?)?;
     let same = tp.len() == rust_params.len()
         && tp.iter().zip(rust_params).all(|(a, b)| squash(&without_lifetimes(a)) == squash(&without_lifetimes(b)));
+    // An element Option (`A?` of the `List[A]` param): the twin lends the
+    // element, `Option<&A>` where the body returns `Option<A>`, from the
+    // slice the call holds by reference.
+    if ret == FloorRet::Elem(ElemRet::Opt) {
+        let elem = squash(rust_ret).strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).map(str::to_string)?;
+        let lent = squash(&without_lifetimes(&tr)) == format!("Option<&{elem}>");
+        let from_slice = rust_params.iter().any(|p| squash(&without_lifetimes(p)) == format!("&[{elem}]"));
+        return (same && lent && from_slice && is_type_param(&elem)).then(|| Some((twin.clone(), closure(&twin, rt).ok()?)))?;
+    }
     let borrowed = result_parts(&squash(&without_lifetimes(&tr))).is_some_and(|(ok, err)| ok == "&AlmideValue" && err == "AlmideString");
     // The twin borrows from a param the call holds by reference.
     let from_ref = rust_params.iter().any(|p| squash(&without_lifetimes(p)) == "&AlmideValue");

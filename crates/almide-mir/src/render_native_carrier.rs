@@ -457,6 +457,10 @@ impl CarrierCx<'_> {
         let b = var(ad.base);
         let read = if let Some(p) = option_payload(i) {
             let guarded_some = self.st.arms.iter().rev().find(|(r, _)| *r == Some(ad.base)).is_some_and(|(_, side)| *side);
+            let lent = crate::render_native_borrow_read::borrowed_option(ad.base);
+            if lent && self.lent_option_read(d, &b, p, guarded_some) {
+                return Some(Ok(true));
+            }
             let absent = if guarded_some { "unreachable!()".to_string() }
                 else if has_default(p) { "Default::default()".to_string() }
                 else if self.st.hoisted.get(&d) == Some(&true) {
@@ -475,7 +479,10 @@ impl CarrierCx<'_> {
             // A by-value match, not `.take()`: `take` writes `None` back
             // through `mem::replace`, whose pointer checks the program's
             // debug-assertion profile keeps (string_index_loop, 1.037x v0).
-            if self.st.moves_last.contains(&d) && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_))) {
+            if lent {
+                // The lent element, needed owned: the one copy the program asks for.
+                (p, format!("match {b} {{ Some(v) => v.clone(), None => {absent} }}"))
+            } else if self.st.moves_last.contains(&d) && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_))) {
                 (p, format!("match {b} {{ Some(v) => v, None => {absent} }}"))
             } else {
                 (p, format!("match &{b} {{ Some(v) => v.clone(), None => {absent} }}"))
@@ -492,6 +499,31 @@ impl CarrierCx<'_> {
         self.tys.insert(d, read.0);
         self.emit(&format!("let mut {}: {} = {};", var(d), owned_ty(read.0), read.1));
         Some(Ok(true))
+    }
+
+    /// The payload read of an element Option held through the borrowing twin
+    /// (`Option<&A>`, render_native_borrow_read::borrowed_options) whose
+    /// every use only borrows: the lent element itself, no copy. `false`
+    /// when the read needs an owned value, or an absent side it cannot name.
+    fn lent_option_read(&mut self, d: ValueId, b: &str, p: NTy, guarded_some: bool) -> bool {
+        if !self.st.borrow_reads.contains(&d) {
+            return false;
+        }
+        let dv = var(d);
+        let (t, ty, val, absent) = match p {
+            NTy::Rec(j) if guarded_some => (NTy::RecRef(j), format!("&{}", struct_name(j)), "v", "unreachable!()".to_string()),
+            NTy::Rec(j) if has_default(p) => {
+                self.emit(&format!("let {dv}_absent: {} = Default::default();", struct_name(j)));
+                (NTy::RecRef(j), format!("&{}", struct_name(j)), "v", format!("&{dv}_absent"))
+            }
+            NTy::Str => (NTy::StrRef, "&str".to_string(), "&v[..]", "\"\"".to_string()),
+            NTy::Vec => (NTy::VecRef, "&[i64]".to_string(), "&v[..]", "&[]".to_string()),
+            NTy::VecStr => (NTy::VecStrRef, "&[AlmideString]".to_string(), "&v[..]", "&[]".to_string()),
+            _ => return false,
+        };
+        self.tys.insert(d, t);
+        self.emit(&format!("let mut {dv}: {ty} = match {b} {{ Some(v) => {val}, None => {absent} }};"));
+        true
     }
 
     /// A Result payload read (see [`PayloadRead`]).

@@ -7,6 +7,8 @@ struct FnArgOut {
     shims: Vec<&'static str>,
     reads: Vec<crate::render_native_bounds::Slot>,
     share: Vec<String>,
+    /// The callback takes the lent receiver's payload by reference.
+    lent: bool,
 }
 
 /// What rendering the function-typed argument needs to see.
@@ -18,6 +20,8 @@ struct FnArgCx<'a> {
     /// The op index, which names the env array.
     at: usize,
     bounds: &'a [(String, almide_lang::capability_bounds::Cap)],
+    /// The type param of a lent `Option` receiver ([`lent_var`]).
+    lent: Option<&'a str>,
 }
 
 /// The adapter for the function-typed argument `a` (kind `t`) of declared
@@ -34,6 +38,7 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
             side.shims.extend(extra.shims);
             side.reads.extend(extra.reads);
             side.share.extend(extra.share);
+            side.lent |= extra.lent;
             return Some(code);
         }
     }
@@ -90,8 +95,11 @@ fn fn_arg_with_values(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DT
     let slots = env_slots(cx, origin);
     let name = format!("__env_{}_{}", cx.at, side.prelude.len());
     if tuples && ret == Some(NativeSigKind::F64) { side.shims.push(LANE_F64); }
+    // The params that take a lent receiver's payload: by reference.
+    let lent: Vec<bool> = dps.iter().map(|d| !tuples && cx.lent.is_some_and(|t| matches!(d, DTy::Var(v) if v == t))).collect();
+    side.lent = lent.contains(&true);
     let closure = if tuples { tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), ret)? }
-        else { adapter(lambda, &name, (&ps, &moved), &bits, (ret?, ret_lane))? };
+        else { adapter(lambda, &name, (&ps, &moved, &lent), &bits, (ret?, ret_lane))? };
     bind_env(side, &name, (*blk, t), slots, lambda.is_none())?;
     Some(closure)
 }

@@ -83,7 +83,9 @@ fn render_fn(
     // subset honest: a USED Handle still walls below.
     let used = native_used_values(func);
     // #3532: the if-as-value joins realized as a borrow of the selected value.
-    let borrows = crate::borrow_join::borrow_joins(func);
+    // The element Options held as the lent element (`Option<&A>`).
+    let lent_options = crate::render_native_borrow_read::borrowed_options(func, &tys, &|name| user_fns.contains_key(name));
+    let borrows = crate::borrow_join::borrow_joins(func, &lent_options);
     let addrs = crate::render_native_addr::AddrState::new(func, sigs);
     if is_main {
         used_shims.push(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
@@ -106,7 +108,7 @@ fn render_fn(
     crate::render_native_move::set_static_strs(func);
     crate::render_native_addr::clear_str_fields();
     crate::render_native_move::set_rebound(func);
-    crate::render_native_borrow_read::set_borrowed_results(func);
+    crate::render_native_borrow_read::set_borrowed_results(func, lent_options);
     crate::render_native_keyed::begin_fn(func, &borrows.arms);
     crate::native_map_entries::begin(func);
     // Interpolation chains built in one buffer (crate::render_native_interp).

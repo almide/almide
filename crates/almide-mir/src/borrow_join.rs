@@ -34,11 +34,22 @@
 //!    self-append window the read opens, which renders as an in-place
 //!    `push_str`) rebinds, writes, consumes, returns or makes unique an arm's
 //!    source.
+//!
+//! Two shapes extend these (#3453 on this render):
+//! * a join read through its own slots — a record's fields (`(a ?? b).f`) —
+//!   is still only read: the address of the join feeds loads and nothing
+//!   else, and the join stays borrowable to the last read of what those
+//!   loads lend in turn;
+//! * the present arm of an element Option's `?? fallback` whose carrier is
+//!   held as the lent element (`Option<&A>`,
+//!   `render_native_borrow_read::borrowed_options`) yields the payload read
+//!   it makes under the carrier's own tag test: that read is a reference
+//!   into a list param the function borrows, alive for the whole function.
 
 use crate::lower::LowerError;
 use crate::mir_ops::{defined_value, op_values};
 use crate::render_native::{render_dup, var, NTy};
-use crate::{CallArg, MirFunction, Op, ValueId};
+use crate::{CallArg, MirFunction, Op, PrimKind, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
@@ -53,8 +64,8 @@ pub(crate) struct BorrowJoins {
 }
 
 /// Every borrow join in `func` (see the module docs for the conditions).
-pub(crate) fn borrow_joins(func: &MirFunction) -> BorrowJoins {
-    let facts = Facts::of(func);
+pub(crate) fn borrow_joins(func: &MirFunction, lent: &BTreeSet<ValueId>) -> BorrowJoins {
+    let facts = Facts::of(func, lent);
     let mut out = BorrowJoins::default();
     for (i, op) in func.ops.iter().enumerate() {
         let Op::IfThen { dst: Some(d), .. } = op else { continue };
@@ -74,10 +85,15 @@ struct Facts {
     touched_at: BTreeMap<ValueId, Vec<usize>>,
     /// `(LoopStart, LoopEnd)` index pairs.
     loops: Vec<(usize, usize)>,
+    /// address value → the block it points into.
+    root: BTreeMap<ValueId, ValueId>,
+    /// The payload reads of the lent element Options (`lent`) that render as
+    /// the lent reference: read → its carrier.
+    lent_reads: BTreeMap<ValueId, ValueId>,
 }
 
 impl Facts {
-    fn of(func: &MirFunction) -> Self {
+    fn of(func: &MirFunction, lent: &BTreeSet<ValueId>) -> Self {
         let mut def_at = BTreeMap::new();
         let mut touched_at: BTreeMap<ValueId, Vec<usize>> = BTreeMap::new();
         let mut loops = Vec::new();
@@ -105,7 +121,19 @@ impl Facts {
                 _ => {}
             }
         }
-        Facts { def_at, touched_at, loops }
+        let root = crate::render_native_borrow_read::roots(func);
+        let mut lent_reads = BTreeMap::new();
+        if !lent.is_empty() {
+            let reads = crate::render_native_borrow_read::borrow_reads(func);
+            for op in &func.ops {
+                let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(p), args } = op else { continue };
+                match args.first().and_then(|a| root.get(a)) {
+                    Some(c) if lent.contains(c) && reads.contains(p) => lent_reads.insert(*p, *c),
+                    _ => None,
+                };
+            }
+        }
+        Facts { def_at, touched_at, loops, root, lent_reads }
     }
 
     fn touches(&self, v: ValueId) -> &[usize] {
@@ -117,10 +145,10 @@ impl Facts {
         let (else_at, end_at) = arm_bounds(&func.ops, i)?;
         let Op::Else { val: Some(a) } = func.ops[else_at] else { return None };
         let Op::EndIf { val: Some(b) } = func.ops[end_at] else { return None };
-        let src_a = self.selected_source(func, a, i, (i, else_at))?;
+        let src_a = self.selected_source(func, a, i, (i, else_at)).or_else(|| self.lent_source(func, a, i, else_at))?;
         let src_b = self.selected_source(func, b, i, (else_at, end_at))?;
         let last = self.last_read_of_join(func, d, i, end_at)?;
-        let written = |s: ValueId| func.ops[i..=last].iter().any(|op| writes(op, s));
+        let written = |s: ValueId| func.ops[i..=last].iter().any(|op| writes(op, s) || self.stores_into(op, s));
         if written(src_a) || written(src_b) {
             return None;
         }
@@ -145,6 +173,48 @@ impl Facts {
         only_consumed.then_some(src)
     }
 
+    /// Condition 1 for the present arm of an element Option's `?? fallback`
+    /// whose carrier is held as the lent element (`Option<&A>`,
+    /// render_native_borrow_read::borrowed_options): `y` is a `Dup` of the
+    /// payload read the arm makes under the carrier's own tag test. That read
+    /// renders as the lent reference, which the list param keeps alive for
+    /// the whole function, so the join may hold it. Returns the read.
+    fn lent_source(&self, func: &MirFunction, y: ValueId, if_at: usize, else_at: usize) -> Option<ValueId> {
+        let at = *self.def_at.get(&y)?;
+        let Op::Dup { src, .. } = func.ops[at] else { return None };
+        let Op::IfThen { cond, .. } = func.ops[if_at] else { return None };
+        let carrier = self.lent_reads.get(&src)?;
+        let read_at = *self.def_at.get(&src)?;
+        // The arm is the Some side: the `if` tests this carrier's tag word.
+        let tag_of = match &func.ops[*self.def_at.get(&cond)?] {
+            Op::Prim { kind: PrimKind::Load { width: 4 }, args, .. } => args.first().and_then(|a| self.root.get(a)),
+            _ => None,
+        };
+        let only_consumed = self.touches(y).iter().all(|&k| {
+            k == at || k == else_at || matches!(func.ops[k], Op::Consume { v } if v == y)
+        });
+        let placed = if_at < read_at && read_at < at && at < else_at && func.ret != Some(y);
+        (placed && tag_of == Some(carrier) && only_consumed).then_some(src)
+    }
+
+    /// `op` writes a slot of the block `s` through an address into it.
+    fn stores_into(&self, op: &Op, s: ValueId) -> bool {
+        matches!(op, Op::Prim { kind: PrimKind::Store { .. }, args, .. } if args.first().is_some_and(|a| self.root.get(a) == Some(&s)))
+    }
+
+    /// Every read through an address into the join `d` only loads: a field
+    /// or element of a borrowed value reads through the reference.
+    fn only_loads_through(&self, func: &MirFunction, d: ValueId, end_at: usize) -> bool {
+        let mut vs = Vec::new();
+        func.ops[end_at + 1..].iter().all(|op| {
+            vs.clear();
+            crate::mir_ops::op_reads(op, &mut vs);
+            !vs.iter().any(|v| self.root.get(v) == Some(&d))
+                || matches!(op, Op::IntBinOp { op: crate::IntOp::Add, .. }
+                    | Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle | PrimKind::ElemAddr, .. })
+        })
+    }
+
     /// Condition 2: every use of the join `d` after its `EndIf` is a by-reference
     /// read. Returns the index the join must stay borrowable to — its last
     /// read, stretched to the end of every later loop that reads it.
@@ -153,6 +223,8 @@ impl Facts {
             return None;
         }
         let mut last = end_at;
+        // The join is read through its own slots (a record's fields).
+        let mut through = false;
         for &k in self.touches(d) {
             if k == if_at {
                 continue;
@@ -163,6 +235,7 @@ impl Facts {
             if !is_drop(&func.ops[k]) {
                 last = last.max(k);
             }
+            through |= matches!(func.ops[k], Op::Prim { .. });
             // The self-append window renders a read here as `s.push_str(d)`,
             // which writes `s` at the read itself: count the join live through
             // the window's `SetLocal` of `s`.
@@ -170,11 +243,19 @@ impl Facts {
                 last = last.max(k + 2);
             }
         }
+        if through {
+            if !self.only_loads_through(func, d, end_at) {
+                return None;
+            }
+            // What is read through the join borrows from it in turn.
+            last = last.max(crate::render_native_borrow_read::borrow_span(func, end_at, d).0);
+        }
         // A read inside a loop that opens after the join runs again on the next
         // iteration, after every op later in that loop body.
         let mut stretched = last;
         for &(s, e) in &self.loops {
-            let read_inside = self.touches(d).iter().any(|&k| s < k && k < e && !is_drop(&func.ops[k]));
+            let read_inside = self.touches(d).iter().any(|&k| s < k && k < e && !is_drop(&func.ops[k]))
+                || (through && s < last && last < e);
             if s > end_at && read_inside {
                 stretched = stretched.max(e);
             }
@@ -200,14 +281,17 @@ fn arm_bounds(ops: &[Op], i: usize) -> Option<(usize, usize)> {
 }
 
 fn is_drop(op: &Op) -> bool {
-    matches!(op, Op::Drop { .. } | Op::DropListStr { .. })
+    matches!(op, Op::Drop { .. } | Op::DropListStr { .. } | Op::DropVariant { .. })
 }
 
 /// Condition 2 for one op: `op` reads `d` only where the native render passes
 /// it by reference.
 fn reads_by_reference(op: &Op, d: ValueId) -> bool {
     match op {
-        Op::Drop { .. } | Op::DropListStr { .. } | Op::Borrow { .. } => true,
+        Op::Drop { .. } | Op::DropListStr { .. } | Op::DropVariant { .. } | Op::Borrow { .. } => true,
+        // The join's own address: its slots are read through it
+        // (`Facts::only_loads_through`).
+        Op::Prim { kind: PrimKind::Handle, args, .. } => args.as_slice() == [d],
         Op::ListGetScalar { list, idx, dst } => *list == d && *idx != d && *dst != d,
         Op::CallFn { dst, args, .. } | Op::Call { dst, args, .. } => {
             *dst != Some(d)
@@ -292,7 +376,7 @@ mod tests {
 
     #[test]
     fn a_read_only_selection_of_live_values_is_a_borrow_join() {
-        let bj = borrow_joins(&select(vec![]));
+        let bj = borrow_joins(&select(vec![]), &BTreeSet::new());
         assert_eq!(bj.joins, BTreeSet::from([v(3)]));
         assert_eq!(bj.arms, BTreeSet::from([v(4), v(5)]));
     }
@@ -300,12 +384,12 @@ mod tests {
     #[test]
     fn a_join_that_is_moved_on_is_not_a_borrow_join() {
         let mut f = select(vec![Op::SetLocal { local: v(9), src: v(3) }]);
-        assert!(borrow_joins(&f).joins.is_empty(), "stored");
+        assert!(borrow_joins(&f, &BTreeSet::new()).joins.is_empty(), "stored");
         f = select(vec![]);
         f.ret = Some(v(3));
-        assert!(borrow_joins(&f).joins.is_empty(), "returned");
+        assert!(borrow_joins(&f, &BTreeSet::new()).joins.is_empty(), "returned");
         f = select(vec![Op::Dup { dst: v(9), src: v(3) }]);
-        assert!(borrow_joins(&f).joins.is_empty(), "shared again");
+        assert!(borrow_joins(&f, &BTreeSet::new()).joins.is_empty(), "shared again");
     }
 
     #[test]
@@ -314,13 +398,13 @@ mod tests {
         let mut f = select(vec![]);
         let read = f.ops.len() - 1;
         f.ops.insert(read - 1, Op::ListSetScalar { list: v(0), idx: v(2), val: v(2) });
-        assert!(borrow_joins(&f).joins.is_empty());
+        assert!(borrow_joins(&f, &BTreeSet::new()).joins.is_empty());
     }
 
     #[test]
     fn a_source_written_after_the_last_read_keeps_the_borrow_join() {
         let f = select(vec![Op::ListSetScalar { list: v(0), idx: v(2), val: v(2) }]);
-        assert_eq!(borrow_joins(&f).joins, BTreeSet::from([v(3)]));
+        assert_eq!(borrow_joins(&f, &BTreeSet::new()).joins, BTreeSet::from([v(3)]));
     }
 
     #[test]
@@ -332,7 +416,7 @@ mod tests {
             Op::Drop { v: v(0) },
             Op::SetLocal { local: v(0), src: v(9) },
         ]);
-        assert!(borrow_joins(&f).joins.is_empty());
+        assert!(borrow_joins(&f, &BTreeSet::new()).joins.is_empty());
     }
 
     #[test]
@@ -343,13 +427,66 @@ mod tests {
             Op::ListSetScalar { list: v(1), idx: v(2), val: v(2) },
             Op::LoopEnd,
         ]);
-        assert!(borrow_joins(&f).joins.is_empty());
+        assert!(borrow_joins(&f, &BTreeSet::new()).joins.is_empty());
+    }
+
+    /// `d = list.first(p0) ?? p1`, then `d.field` read: the carrier `v2`,
+    /// its tag `v6`, the payload read `v9` in the present arm.
+    fn fallback(lent: bool, write: bool) -> (MirFunction, BTreeSet<ValueId>) {
+        use crate::{IntOp, PrimKind};
+        let add = |dst: u32, a: u32, b: u32| Op::IntBinOp { dst: v(dst), op: IntOp::Add, a: v(a), b: v(b) };
+        let prim = |kind: PrimKind, dst: u32, args: Vec<u32>| Op::Prim { kind, dst: Some(v(dst)), args: args.into_iter().map(v).collect() };
+        let mut ops = vec![
+            Op::CallFn { dst: Some(v(2)), name: "head".into(), args: vec![CallArg::Handle(v(0))], result: None },
+            prim(PrimKind::Handle, 3, vec![2]),
+            Op::ConstInt { dst: v(4), value: 4 },
+            add(5, 3, 4),
+            prim(PrimKind::Load { width: 4 }, 6, vec![5]),
+            Op::ConstInt { dst: v(7), value: 12 },
+            add(8, 3, 7),
+            Op::IfThen { cond: v(6), dst: Some(v(10)) },
+            prim(PrimKind::LoadHandle, 9, vec![8]),
+            Op::Dup { dst: v(11), src: v(9) },
+            Op::Consume { v: v(11) },
+            Op::Else { val: Some(v(11)) },
+            Op::Dup { dst: v(12), src: v(1) },
+            Op::Consume { v: v(12) },
+            Op::EndIf { val: Some(v(12)) },
+            prim(PrimKind::Handle, 13, vec![10]),
+            add(14, 13, 7),
+            prim(PrimKind::LoadHandle, 15, vec![14]),
+            Op::CallFn { dst: Some(v(16)), name: "list.len".into(), args: vec![CallArg::Handle(v(15))], result: None },
+        ];
+        if write {
+            ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![v(14), v(16)] });
+        }
+        ops.push(Op::DropVariant { v: v(10), ty: "R".into() });
+        let f = MirFunction { name: "f".into(), params: vec![list_param(0), list_param(1)], ops, ..Default::default() };
+        (f, if lent { BTreeSet::from([v(2)]) } else { BTreeSet::new() })
+    }
+
+    #[test]
+    fn a_fallback_over_a_lent_element_read_through_its_fields_is_a_borrow_join() {
+        let (f, lent) = fallback(true, false);
+        let bj = borrow_joins(&f, &lent);
+        assert_eq!(bj.joins, BTreeSet::from([v(10)]));
+        assert_eq!(bj.arms, BTreeSet::from([v(11), v(12)]));
+    }
+
+    #[test]
+    fn a_fallback_over_an_owned_carrier_or_a_written_join_stays_owned() {
+        // The payload read of an owned carrier is local to its arm.
+        let (f, lent) = fallback(false, false);
+        assert!(borrow_joins(&f, &lent).joins.is_empty(), "owned carrier");
+        // A slot of the join written through its address.
+        let (f, lent) = fallback(true, true);
+        assert!(borrow_joins(&f, &lent).joins.is_empty(), "written join");
     }
 
     #[test]
     fn an_arm_that_allocates_is_not_a_borrow_join() {
         let mut f = select(vec![]);
         f.ops[2] = Op::ConstInt { dst: v(4), value: 0 };
-        assert!(borrow_joins(&f).joins.is_empty());
+        assert!(borrow_joins(&f, &BTreeSet::new()).joins.is_empty());
     }
 }

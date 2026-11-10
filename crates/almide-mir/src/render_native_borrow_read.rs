@@ -279,7 +279,8 @@ pub(crate) fn borrowed_results(func: &MirFunction) -> BTreeSet<ValueId> {
     for (i, op) in func.ops.iter().enumerate() {
         let Op::CallFn { dst: Some(d), name, args, .. } = op else { continue };
         let Some(floor) = crate::native_floor::declared(name) else { continue };
-        if floor.borrow_twin.is_none() || func.ret == Some(*d) || args.len() != floor.params.len() {
+        let value_twin = floor.borrow_twin.is_some() && floor.ret == crate::native_floor::FloorRet::ResValue;
+        if !value_twin || func.ret == Some(*d) || args.len() != floor.params.len() {
             continue;
         }
         let sources_borrowed = floor.params.iter().zip(args).all(|(p, a)| match (p, a) {
@@ -321,13 +322,124 @@ fn only_borrowed_reads(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMa
     true
 }
 
+/// The element-Option floor results of `func` (`list.get(xs, i)`,
+/// `list.first(xs)`: the `A?` of a `List[A]` param) that render through the
+/// runtime's borrowing twin — `Option<&A>`, the element lent from the list,
+/// where the owned body copies it whole (a head read of a wide record cost
+/// the record's size per read; v0 lends it, #3453). A result qualifies when:
+/// * the list it reads is a param the function borrows and never rebinds (a
+///   `&` binding, so the element outlives every use in the function), whose
+///   element kind has a reference form (`param_tys`: the params' kinds);
+/// * it is not the function's result, and its every use is its tag word, an
+///   address into it, a payload read, or a combinator call that lends it on
+///   — nothing copies, moves or stores the carrier itself.
+///
+/// A payload read of such a carrier is a reference when its own uses only
+/// borrow ([`borrow_reads`]), and a copy of the one element otherwise.
+pub(crate) fn borrowed_options(
+    func: &MirFunction,
+    param_tys: &BTreeMap<ValueId, crate::render_native::NTy>,
+    linked: &dyn Fn(&str) -> bool,
+) -> BTreeSet<ValueId> {
+    use crate::native_floor::{ElemRet, FloorParam, FloorRet, ListElem};
+    use crate::render_native::NTy;
+    let root = roots(func);
+    let rebound: BTreeSet<ValueId> =
+        func.ops.iter().filter_map(|op| if let Op::SetLocal { local, .. } = op { Some(*local) } else { None }).collect();
+    let lent_elem = |v: ValueId| {
+        let borrowed = func.params.iter().any(|p| p.value == v) && !func.owned_params.contains(&v) && !rebound.contains(&v);
+        let elem = match param_tys.get(&v) {
+            Some(NTy::VecStrRef) => Some(NTy::Str),
+            Some(NTy::RecRef(i)) => crate::render_native_rec::list_elem(*i),
+            _ => None,
+        };
+        borrowed && matches!(elem, Some(NTy::Rec(_) | NTy::Str | NTy::Vec | NTy::VecStr))
+    };
+    let mut out = BTreeSet::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        let Op::CallFn { dst: Some(d), name, args, .. } = op else { continue };
+        let Some(floor) = crate::native_floor::declared(name) else { continue };
+        if floor.borrow_twin.is_none() || floor.ret != FloorRet::Elem(ElemRet::Opt) || func.ret == Some(*d) || args.len() != floor.params.len() {
+            continue;
+        }
+        let mut lists = 0;
+        let sources_lent = floor.params.iter().zip(args).all(|(p, a)| match (p, a) {
+            (FloorParam::List(ListElem::Any), CallArg::Handle(v)) => {
+                lists += 1;
+                lent_elem(*v)
+            }
+            (FloorParam::Int, _) => true,
+            _ => false,
+        });
+        if sources_lent && lists == 1 && only_word_and_payload_reads(func, i, *d, &root, linked) {
+            out.insert(*d);
+        }
+    }
+    out
+}
+
+/// Every use of the Option carrier `d` after `ops[at]` reads its tag word or
+/// its payload through an address into it ([`borrowed_options`]).
+///
+/// Or it is handed to a stdlib combinator whose callback alone takes the
+/// payload (`option.map(list.get(xs, i), f)`), served by the runtime body
+/// (`linked`: the name is a linked body's instead): the Option goes lent.
+fn only_word_and_payload_reads(
+    func: &MirFunction,
+    at: usize,
+    d: ValueId,
+    root: &BTreeMap<ValueId, ValueId>,
+    linked: &dyn Fn(&str) -> bool,
+) -> bool {
+    let mut vs = Vec::new();
+    for op in &func.ops[at + 1..] {
+        vs.clear();
+        crate::mir_ops::op_reads(op, &mut vs);
+        let names_root = vs.iter().any(|v| root.get(v) == Some(&d));
+        if !vs.contains(&d) && !names_root {
+            continue;
+        }
+        let ok = crate::render_native_move::bookkeeping(op)
+            || match op {
+                Op::Prim { kind: PrimKind::Handle, args, .. } => args.as_slice() == [d],
+                Op::IntBinOp { op: IntOp::Add, a, b, .. } => names_root && *a != d && *b != d,
+                Op::Prim { kind: PrimKind::Load { width: 4 } | PrimKind::LoadHandle, args, .. } => {
+                    args.len() == 1 && root.get(&args[0]) == Some(&d)
+                }
+                Op::CallFn { name, args, .. } => {
+                    !linked(name)
+                        && args.iter().enumerate().all(|(k, a)| match a {
+                            CallArg::Handle(v) if *v == d => crate::native_hof::lends_receiver(name, k),
+                            CallArg::Scalar(v) => *v != d,
+                            _ => true,
+                        })
+                }
+                _ => false,
+            };
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
 thread_local! {
     static BORROWED_RESULTS: std::cell::RefCell<BTreeSet<ValueId>> =
         const { std::cell::RefCell::new(BTreeSet::new()) };
+    static BORROWED_OPTIONS: std::cell::RefCell<BTreeSet<ValueId>> =
+        const { std::cell::RefCell::new(BTreeSet::new()) };
 }
 
-/// Record the [`borrowed_results`] of the function about to render.
-pub(crate) fn set_borrowed_results(func: &MirFunction) {
+/// `v` is an element-Option floor result of the function being rendered
+/// held through the borrowing twin ([`borrowed_options`]): an `Option<&A>`.
+pub(crate) fn borrowed_option(v: ValueId) -> bool {
+    BORROWED_OPTIONS.with(|m| m.borrow().contains(&v))
+}
+
+/// Record the [`borrowed_results`] of the function about to render, and its
+/// [`borrowed_options`] (`options`).
+pub(crate) fn set_borrowed_results(func: &MirFunction, options: BTreeSet<ValueId>) {
+    BORROWED_OPTIONS.with(|m| *m.borrow_mut() = options);
     let set = borrowed_results(func);
     BORROWED_RESULTS.with(|m| *m.borrow_mut() = set);
     let dups = ref_dups(func);
