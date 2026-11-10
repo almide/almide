@@ -256,7 +256,7 @@ fn lower_expr_for_in(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             ctx.mk(IrExprKind::ForIn { var: var_id, var_tuple: tuple_vars, iterable: Box::new(ir_iter), body: ir_body }, ty, span)
 }
 
-fn lower_expr_if_let(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {
+fn lower_expr_if_let(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>, stmt_pos: bool) -> IrExpr {
     let ast::ExprKind::IfLet { name, scrutinee, then, else_ } = &expr.kind else { unreachable!("lower_expr_if_let called on the wrong ExprKind") };
             // Swift-style implicit-unwrap if-let desugars to a 2-arm match on the
             // scrutinee's Option/Result: `name` binds the inner value in the Some/Ok
@@ -283,18 +283,18 @@ fn lower_expr_if_let(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             };
             ctx.push_scope();
             let pat1 = lower_pattern(ctx, &bind_pat, &subject_ty);
-            let body1 = lower_expr(ctx, then);
+            let body1 = super::expressions::lower_branch(ctx, then, stmt_pos);
             ctx.pop_scope();
             let arm1 = IrMatchArm { pattern: pat1, guard: None, body: body1 };
             ctx.push_scope();
             let pat2 = lower_pattern(ctx, &ast::Pattern::Wildcard, &subject_ty);
-            let body2 = lower_expr(ctx, else_);
+            let body2 = super::expressions::lower_branch(ctx, else_, stmt_pos);
             ctx.pop_scope();
             let arm2 = IrMatchArm { pattern: pat2, guard: None, body: body2 };
             ctx.mk(IrExprKind::Match { subject: Box::new(s), arms: vec![arm1, arm2] }, ty, span)
 }
 
-fn lower_expr_match_arm(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {
+fn lower_expr_match_arm(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>, stmt_pos: bool) -> IrExpr {
     let ast::ExprKind::Match { subject, arms, .. } = &expr.kind else { unreachable!("lower_expr_match_arm called on the wrong ExprKind") };
             let s = lower_expr(ctx, subject);
             // Resolve subject type: if the expression type disagrees with VarTable
@@ -327,7 +327,7 @@ fn lower_expr_match_arm(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Opti
                     ctx.push_scope();
                     let pat = lower_pattern(ctx, alt, &subject_ty);
                     let guard = arm.guard.as_ref().map(|g| lower_expr(ctx, g));
-                    let body = lower_expr(ctx, &arm.body);
+                    let body = super::expressions::lower_branch(ctx, &arm.body, stmt_pos);
                     ctx.pop_scope();
                     IrMatchArm { pattern: pat, guard, body }
                 }).collect::<Vec<_>>()
