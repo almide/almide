@@ -198,8 +198,8 @@ fn routines_line(emitted: &[u8], fmap: &[Option<u32>], labels: &[(u32, String, S
 }
 
 /// The rc sink's frames that the shipped pass certified.
-fn frames_certified(frames: &[(u64, String, String)], names: &std::collections::HashSet<String>) -> Vec<(u64, String)> {
-    frames.iter().filter(|(_, n, _)| names.contains(n)).map(|(k, _, e)| (*k, e.clone())).collect()
+fn frames_certified(frames: &[(u64, String, String)], names: &std::collections::HashSet<String>) -> Vec<(u64, String, String)> {
+    frames.iter().filter(|(_, n, _)| names.contains(n)).cloned().collect()
 }
 
 /// #4277 (witness_rc.rs): the
@@ -235,7 +235,7 @@ fn rc_lines(
     emitted: &[u8],
     shipped: &[u8],
     fmap: &[Option<u32>],
-    frames: &[(u64, String)],
+    frames: &[(u64, String, String)],
     releases: &std::collections::BTreeSet<u32>,
     records: RcRecords<'_>,
 ) -> Result<String, String> {
@@ -248,9 +248,10 @@ fn rc_lines(
     let ship = |f: u32| f.checked_sub(ei).and_then(|d| fmap.get(d as usize).copied().flatten()).map(|j| j + si);
     let inc = ship(crate::F_INC).map_or("-".to_string(), |i| i.to_string());
     let decs: Vec<String> = releases.iter().filter_map(|&f| ship(f)).map(|i| i.to_string()).collect();
+    let mut names: Vec<String> = Vec::new();
     let mut rc: Vec<String> = frames
         .iter()
-        .filter_map(|(k, ev)| {
+        .filter_map(|(k, name, ev)| {
             let ev: Vec<String> = ev
                 .split_whitespace()
                 .map(|t| locate.shipped_holder(t))
@@ -279,7 +280,11 @@ fn rc_lines(
             if locate.rewritten(*k) {
                 return None;
             }
-            locate.position(*k).map(|j| format!("{j}|{}", ev.join(" ")))
+            let j = locate.position(*k)?;
+            // #4631 (b1'): the frame's name, so the ownership witness of that
+            // name is held to these events' per-kind bounds.
+            names.push(format!("{j}:{}", name.chars().map(|c| if c.is_whitespace() { '_' } else { c }).collect::<String>()));
+            Some(format!("{j}|{}", ev.join(" ")))
         })
         .collect();
     let mut signed: Vec<String> = Vec::new();
@@ -297,12 +302,13 @@ fn rc_lines(
             .join(" ")
     };
     Ok(format!(
-        "rcfns {inc} {}\nrc {}\nrcarms {}\nrcroutines {}\nrchelpers {}\n",
+        "rcfns {inc} {}\nrc {}\nrcarms {}\nrcroutines {}\nrchelpers {}\nrcnames {}\n",
         decs.join(" "),
         rc.join(";"),
         windows(arms),
         windows(routines),
-        signed.join(" ")
+        signed.join(" "),
+        names.join(" ")
     ))
 }
 
