@@ -154,7 +154,15 @@ fn native_random_bytes_reads_only_the_os_csprng() {
             "random.bytes draws from `{other}`:\n{body}"
         );
     }
-    let sources = fn_bodies(&rt, "almide_os_entropy");
+    // Both cfg siblings sit one indent level in, inside the runtime's
+    // `mod almide_random_entropy` (a render carries the pair or neither).
+    assert!(
+        fn_bodies(&rt, "almide_os_entropy").len() == 1
+            && rt.contains("mod almide_random_entropy {\n")
+            && rt.contains("\npub use almide_random_entropy::*;\n"),
+        "almide_os_entropy is no longer the one `mod almide_random_entropy` pair"
+    );
+    let sources = fn_bodies_in_mod(&rt, "almide_os_entropy");
     assert_eq!(
         sources.len(),
         2,
