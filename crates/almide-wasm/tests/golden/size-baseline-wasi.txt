@@ -208,8 +208,8 @@
 340	spec/wasm_cross/expr_stmt_comment.almd
 7846	spec/wasm_cross/fallible_hof_effect_callback_family.almd
 8210	spec/wasm_cross/fallible_hof_large_input.almd
-65534	spec/wasm_cross/fallible_hof_matrix_containers.almd
-29957	spec/wasm_cross/fallible_hof_matrix_list.almd
+65507	spec/wasm_cross/fallible_hof_matrix_containers.almd
+29948	spec/wasm_cross/fallible_hof_matrix_list.almd
 14818	spec/wasm_cross/fallible_hof_option_effect_callback.almd
 10679	spec/wasm_cross/fallible_hof_recursive_callee.almd
 12409	spec/wasm_cross/fallible_hof_release_matrix.almd
